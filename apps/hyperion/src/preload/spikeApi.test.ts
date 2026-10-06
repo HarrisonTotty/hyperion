@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { smallReport } from "../main/fixtures/spikeReport";
 import { SPIKE_CHANNELS } from "../main/spike";
-import { SPIKE_CHANNEL_NAMES, spikeApi, spikeMember } from "./spikeApi";
+import { SPIKE_CHANNEL_NAMES, spikeApi, type SpikeApiDeps, spikeMember } from "./spikeApi";
 import { DEFAULT_SPIKE_SEED, type SpikeLaunch, spikeSwitch } from "./spikeLaunch";
 
 const LAUNCH: SpikeLaunch = {
@@ -17,6 +18,11 @@ const LAUNCH: SpikeLaunch = {
   capture: null,
   traceProfile: "off",
 };
+
+/** A main process that answers every call with `answer`. */
+function answering(answer: unknown): SpikeApiDeps {
+  return { invoke: () => Promise.resolve(answer), privateKib: () => Promise.resolve(0) };
+}
 
 describe("the preload's spike functions", () => {
   it("are absent on an ordinary launch, and present on a spike launch", () => {
@@ -65,6 +71,28 @@ describe("the preload's spike functions", () => {
     });
     await expect(api.writeCapture({ json: "{}", bin: new Uint8Array() })).rejects.toThrow(
       /capture/,
+    );
+  });
+
+  it("takes a smoke's checked trace, and a full run's file, as the answer each expects", async () => {
+    const checked = { kind: "smoke checked", failure: "trace window 2 of 3: it lost data" };
+    const written = { kind: "written", paths: { json: "a.json", markdown: "a.md" } };
+    const smoke = { ...LAUNCH, smoke: true };
+    const run = { ...LAUNCH, smoke: false };
+    await expect(spikeApi(smoke, answering(checked)).writeResults(smallReport())).resolves.toEqual(
+      checked,
+    );
+    await expect(spikeApi(run, answering(written)).writeResults(smallReport())).resolves.toEqual(
+      written,
+    );
+    await expect(spikeApi(smoke, answering(written)).writeResults(smallReport())).rejects.toThrow(
+      "the main process did not check the smoke's trace",
+    );
+    await expect(spikeApi(run, answering(checked)).writeResults(smallReport())).rejects.toThrow(
+      "the main process wrote no results file",
+    );
+    await expect(spikeApi(run, answering(null)).writeResults(smallReport())).rejects.toThrow(
+      "the main process wrote no results file",
     );
   });
 });

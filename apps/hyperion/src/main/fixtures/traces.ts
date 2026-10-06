@@ -3,9 +3,12 @@ import { type DurationSummary, recordedGpuSlices, type TraceFigures } from "../r
 import { type Measured, measured } from "../measured";
 import type { TraceRecording, TraceSettings, TraceWindowFile } from "../traceWindows";
 
-/** An unprofiled run's settings, as T14.g's default trace records them: no `gpu`, no profiler. */
+/**
+ * An unprofiled run's settings, as the spike's default trace records them (T14.g, T14.i): a
+ * protobuf stream, no `gpu`, no profiler, a 768 MiB buffer.
+ */
 export const UNPROFILED: TraceSettings = {
-  format: "json",
+  format: "perfetto-proto",
   profiled: false,
   categories: [
     "devtools.timeline",
@@ -18,11 +21,12 @@ export const UNPROFILED: TraceSettings = {
   bufferKb: 786_432,
 };
 
-/** A profiled run's: the same, with `gpu` and V8's CPU profiler. */
+/** A profiled run's: the same, with `gpu` and V8's CPU profiler, and a 1.5 GiB buffer. */
 export const PROFILED: TraceSettings = {
   ...UNPROFILED,
   profiled: true,
   categories: [...UNPROFILED.categories, "gpu", "disabled-by-default-v8.cpu_profiler"],
+  bufferKb: 1_572_864,
 };
 
 /** The renderer's frames a window's `spike.frame` spans are made from: a report's. */
@@ -156,9 +160,9 @@ export function windowTrace(options: WindowTraceOptions): TraceFigures {
   };
 }
 
-/** A window's file holding `trace`, of 1 MB with a tenth of its buffer used. */
+/** A window's file holding `trace`, of 1 MB with a tenth of its buffer used and no data lost. */
 export function windowFile(trace: TraceFigures): TraceWindowFile {
-  return { trace: measured(trace), bytes: 1_000_000, bufferPercent: 10 };
+  return { trace: measured(trace), bytes: 1_000_000, bufferPercent: 10, lostData: false };
 }
 
 /** A recording of `windows`, unprofiled unless `settings` says otherwise. */

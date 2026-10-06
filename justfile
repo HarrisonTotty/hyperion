@@ -109,11 +109,14 @@ descent-demand *args: gen-surface
 # `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`, `--vertex-path`, `--normals`,
 # `--ridged on|off`, `--dawn-safety on|off`, `--capture <dir>`, `--trace-profile on|off`) and the
 # recipe's own: `--companion-load <threads>` (Design note 20), `--cold-cache` (an empty GPU shader
-# cache) and `--hidden` (the window never shown). The trace is taken in windows of script time
-# (R05.T14.e), with V8's CPU profiler only under `--trace-profile on`, a diagnostic run that is
-# never judged. `--smoke` runs 10 s hidden, its trace in three windows, and exits with a status. A
-# run's profile, where its trace windows wait, is under `target/descent-spike/`, on disk. A run
-# writes its results under `docs/measurements/descent-spike/`. Not part of `ci`.
+# cache) and `--hidden` (the window never shown). The trace is a Perfetto protobuf stream over CDP
+# on the spike window's own debugger, taken in windows of script time (R05.T14.e, T14.i), with V8's
+# CPU profiler and `gpu` only under `--trace-profile on`, a diagnostic run that is never judged.
+# `--smoke` runs 10 s hidden, its trace in three windows, each decoded and checked frame by frame
+# against the renderer's own series, writes no results and exits with a status. A run's profile,
+# where its trace windows wait, and Electron's `TMPDIR`, where Chromium spools each window's
+# stream, are under `target/descent-spike/`, on disk. A run writes its results under
+# `docs/measurements/descent-spike/`. Not part of `ci`.
 # Run the descent spike, e.g. `just descent-spike --setting low` or `just descent-spike --smoke`.
 [positional-arguments]
 descent-spike *args:

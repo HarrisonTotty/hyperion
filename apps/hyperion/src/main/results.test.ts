@@ -42,6 +42,7 @@ import {
 } from "./results";
 import {
   EMPTY_TRACE_REASON,
+  LOST_DATA_REASON,
   NO_CLOCK_OFFSET_REASON,
   PROFILER_OFF_REASON,
   type TraceRecording,
@@ -684,17 +685,19 @@ describe("a results file of a windowed trace", () => {
         trace: missing("its file could not be read: ENOENT"),
         bytes: null,
         bufferPercent: null,
+        lostData: false,
       }),
       "its file could not be read: ENOENT",
     ],
     [
       "a file that is not a trace",
       () => ({
-        trace: missing("the trace could not be reduced: spike-trace-1.json is not a trace"),
+        trace: missing("the trace could not be reduced: spike-trace-1.pftrace is not a trace"),
         bytes: 12,
         bufferPercent: null,
+        lostData: false,
       }),
-      "the trace could not be reduced: spike-trace-1.json is not a trace",
+      "the trace could not be reduced: spike-trace-1.pftrace is not a trace",
     ],
     [
       "an empty file",
@@ -720,6 +723,7 @@ describe("a results file of a windowed trace", () => {
       (second) => ({ ...windowFile(second), bufferPercent: 99 }),
       "it filled its buffer: 99 % of it was used",
     ],
+    ["lost data", (second) => ({ ...windowFile(second), lostData: true }), LOST_DATA_REASON],
     [
       "frame spans that disagree with the renderer's frames",
       (second) =>
@@ -768,7 +772,10 @@ describe("a results file of a windowed trace", () => {
   });
 
   it("records the trace's format", () => {
-    expect(twoWindowResults().run.trace.value?.format).toBe("json");
+    expect(twoWindowResults().run.trace.value?.format).toBe("perfetto-proto");
+    expect(
+      twoWindowResults(undefined, { ...UNPROFILED, format: "json" }).run.trace.value?.format,
+    ).toBe("json");
   });
 
   it("leaves the engine's figures out of an unprofiled run, and refuses them there", () => {
@@ -819,7 +826,7 @@ describe("a results file of a windowed trace", () => {
   it("summarises the windows, their boundaries and the frames left out", () => {
     const summary = summaryMarkdown(twoWindowResults());
     expect(summary).toContain(
-      "- **Trace:** 2 json windows, 18.5 s traced after the warm-up, unprofiled; 1 boundary left out 30 frames (largest stall 500.00 ms); largest file 1 MiB, buffer use up to 10 %",
+      "- **Trace:** 2 perfetto-proto windows, 18.5 s traced after the warm-up, unprofiled; 1 boundary left out 30 frames (largest stall 500.00 ms); largest file 1 MiB, buffer use up to 10 %",
     );
     expect(summary).toContain("Frames left out at the trace's window boundaries: 30.");
   });

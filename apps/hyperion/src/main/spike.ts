@@ -1,5 +1,5 @@
 /**
- * The descent spike's main-process side (plan R05, T14.b, T13.c and T14.e): its measurement
+ * The descent spike's main-process side (plan R05, T14.b, T13.c, T14.e and T14.i): its measurement
  * switches, its trace in windows and its IPC handlers.
  *
  * @remarks
@@ -10,9 +10,9 @@
  * merges each list switch into the value already on the command line.
  */
 
-import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
+import type { IpcMainInvokeEvent, TraceConfig } from "electron";
 
-import type { DescentSpikeReport, SpikeEnd, SpikeResultsPaths } from "../preload/api";
+import type { DescentSpikeReport, SpikeEnd, SpikeResultsAnswer } from "../preload/api";
 
 import {
   type ChromiumSwitch,
@@ -143,17 +143,26 @@ export const SPIKE_GPU_CATEGORY = "gpu";
 export const SPIKE_PROFILER_CATEGORY = "disabled-by-default-v8.cpu_profiler";
 
 /**
- * Each trace window's buffer ceiling, KiB: 768 MiB, with `record-until-full`.
+ * Each trace window's buffer ceiling in a timed run, KiB: 768 MiB, with `record-until-full`, on
+ * every machine (decision-r05-trace-windows-2.md, ruling 6).
  *
  * @remarks
- * A ceiling, not a reservation (decision-r05-trace-windows.md). The tracing service crashed at the
- * stop of a whole descent's trace (1.35–1.71 GB), since Chromium builds a JSON export whole in
- * memory, 4.3–5.7 times the buffer's bytes (decision-r05-trace-windows-2.md, from T14.f's
- * measurements); each window's buffer holds a fraction of a descent's trace. The buffer stops recording
- * when full rather than dropping the start, so a window that filled shows as a span short of its
- * recorded time.
+ * A ceiling, committed only as written, not a reservation (decision-r05-trace-windows.md). The
+ * tracing service crashed at the stop of a whole descent's JSON trace (1.35–1.71 GB), since
+ * Chromium builds a JSON export whole in memory, 4.3–5.7 times the buffer's bytes; the protobuf
+ * stream does not grow the service at the stop (T14.f's measurements). Each window's buffer holds
+ * a fraction of a descent's trace: the last, the largest, is estimated at under half of it. The
+ * buffer stops recording when full rather than dropping the start, so a window that filled shows
+ * as a span short of its recorded time, or as lost data.
  */
 export const SPIKE_TRACE_BUFFER_KB = 768 * 1024;
+
+/**
+ * Each trace window's buffer ceiling in a profiled run, KiB: 1.5 GiB, since `gpu` and the CPU
+ * profiler about double the trace's rate; profiled runs are made on the RTX 3080 only
+ * (decision-r05-trace-windows-2.md, ruling 6).
+ */
+export const SPIKE_PROFILED_TRACE_BUFFER_KB = 1536 * 1024;
 
 /** What the trace's configuration depends on. */
 export interface SpikeTraceOptions {
@@ -165,16 +174,18 @@ export interface SpikeTraceOptions {
 }
 
 /**
- * The format {@link SpikeTrace} writes each window in: JSON, the only one Electron's
- * `contentTracing` writes (R05.T14.i moves the trace to a Perfetto protobuf stream over CDP).
+ * The format {@link SpikeTrace} writes each window in: a Perfetto protobuf stream over CDP
+ * (`cdpTracing.ts`), decoded by the spike's own decoder (`traceProto.ts`).
  */
-export const SPIKE_TRACE_FORMAT: TraceFormat = "json";
+export const SPIKE_TRACE_FORMAT: TraceFormat = "perfetto-proto";
 
 /** The tracing configuration of every window of a spike run. */
 export function spikeTraceConfig(options: SpikeTraceOptions = { profiled: false }): TraceConfig {
   return {
     recording_mode: "record-until-full",
-    trace_buffer_size_in_kb: SPIKE_TRACE_BUFFER_KB,
+    trace_buffer_size_in_kb: options.profiled
+      ? SPIKE_PROFILED_TRACE_BUFFER_KB
+      : SPIKE_TRACE_BUFFER_KB,
     included_categories: [
       ...SPIKE_TRACE_CATEGORIES,
       ...(options.profiled ? [SPIKE_GPU_CATEGORY, SPIKE_PROFILER_CATEGORY] : []),
@@ -199,23 +210,42 @@ export function traceSettingsOf(config: TraceConfig, format: TraceFormat): Trace
   };
 }
 
-/** The part of Electron's `contentTracing` the spike's trace uses. */
-export type SpikeTracing = Pick<
-  ContentTracing,
-  "startRecording" | "stopRecording" | "getTraceBufferUsage"
->;
+/** What a window's stop tells besides its file. */
+export interface TraceWindowStop {
+  /** Whether Chromium lost some of the window's data (`Tracing.tracingComplete`'s flag). */
+  readonly lostData: boolean;
+  /**
+   * The fullest buffer's last reported use before the stop, % (CDP's
+   * `Tracing.bufferUsage.percentFull`, a fraction, × 100), or `null` when none was reported.
+   */
+  readonly bufferPercent: number | null;
+}
+
+/** The transport the spike's trace records its windows through: `CdpTracing`. */
+export interface SpikeTracing {
+  /** Starts a window's recording with `config`; the first start opens the transport. */
+  start(config: TraceConfig): Promise<void>;
+  /** Ends the window's recording and writes its trace to `path`. */
+  stop(path: string): Promise<TraceWindowStop>;
+  /** Ends the transport after the last stop; every later start is refused. */
+  close(): void;
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /** Where the trace is: stopped, recording, or between the two in a start, stop or cycle. */
 export type SpikeTraceState = "idle" | "recording" | "busy";
 
 /**
- * The spike's trace over the descent, in windows, through Electron's `contentTracing`.
+ * The spike's trace over the descent, in windows, through a {@link SpikeTracing} transport.
  *
  * @remarks
  * One recording at a time, and one operation at a time: a start while recording, a stop or cycle
  * with none running, and any call while another is in flight are refused, since Chromium keeps one
- * tracing session for the whole browser and resolves a second start at once without starting it.
- * Every window is recorded with the same configuration, {@link SpikeTrace.settings}.
+ * tracing session for the whole browser. Every window is recorded with the same configuration,
+ * {@link SpikeTrace.settings}.
  */
 export class SpikeTrace {
   readonly #tracing: SpikeTracing;
@@ -255,18 +285,16 @@ export class SpikeTrace {
   /**
    * Stops recording and writes the window's trace.
    *
-   * @param path - Where Chromium writes the trace, as JSON with one event a line.
-   * @returns The path written.
+   * @param path - Where the window's trace is written, a Perfetto protobuf stream.
+   * @returns What the stop tells besides the file.
    * @throws Error if no recording is running or an operation is in flight; or, with the trace
-   * stopped, if Chromium's stop fails.
+   * stopped, if the transport's stop fails, its message given.
    */
-  async stop(path: string): Promise<string> {
+  async stop(path: string): Promise<TraceWindowStop> {
     this.#refuseUnless("recording");
     this.#state = "busy";
     try {
-      return await this.#tracing.stopRecording(path);
-    } catch (error: unknown) {
-      throw new Error("the spike's trace did not stop", { cause: error });
+      return await this.#stopRecording(path);
     } finally {
       this.#state = "idle";
     }
@@ -275,52 +303,44 @@ export class SpikeTrace {
   /**
    * Ends one window and begins the next: stops to `path`, then starts again.
    *
-   * @returns The path written.
+   * @param stopped - Called with the stop's outcome once the window is written, before the start,
+   * so that a window whose next start fails is still known.
    * @throws Error if no recording is running or an operation is in flight; or, with the trace
-   * stopped, if the stop or the start fails.
+   * stopped, if the stop or the start fails, its message given.
    */
-  async cycle(path: string): Promise<string> {
+  async cycle(path: string, stopped: (stop: TraceWindowStop) => void): Promise<void> {
     this.#refuseUnless("recording");
     this.#state = "busy";
-    let written: string;
     try {
-      written = await this.#tracing.stopRecording(path);
+      stopped(await this.#stopRecording(path));
     } catch (error: unknown) {
       this.#state = "idle";
-      throw new Error("the spike's trace did not stop", { cause: error });
+      throw error;
     }
     await this.#startRecording();
-    return written;
   }
 
-  /**
-   * The fullest process's share of its trace buffer, %, read before a stop; `null` when nothing
-   * is recording or Electron reports nothing.
-   *
-   * @remarks
-   * Electron's `percentage` is Chromium's `percent_full`, a fraction from 0 to 1 (CDP's
-   * `Tracing.bufferUsage.percentFull`), so it is scaled to a percentage here.
-   */
-  async bufferUsage(): Promise<number | null> {
-    if (this.#state !== "recording") {
-      return null;
-    }
+  /** Ends the transport after the last stop (`SpikeTracing.close`). */
+  close(): void {
+    this.#tracing.close();
+  }
+
+  /** Stops the transport's recording to `path`. */
+  async #stopRecording(path: string): Promise<TraceWindowStop> {
     try {
-      const { percentage } = await this.#tracing.getTraceBufferUsage();
-      return Number.isFinite(percentage) && percentage >= 0 ? percentage * 100 : null;
-    } catch {
-      // A reading is optional: a window without one is still checked by its span.
-      return null;
+      return await this.#tracing.stop(path);
+    } catch (error: unknown) {
+      throw new Error(`the spike's trace did not stop: ${messageOf(error)}`, { cause: error });
     }
   }
 
-  /** Starts Chromium's recording from the busy state, leaving it recording or idle. */
+  /** Starts the transport's recording from the busy state, leaving it recording or idle. */
   async #startRecording(): Promise<void> {
     try {
-      await this.#tracing.startRecording(this.#config);
+      await this.#tracing.start(this.#config);
     } catch (error: unknown) {
       this.#state = "idle";
-      throw new Error("the spike's trace did not start", { cause: error });
+      throw new Error(`the spike's trace did not start: ${messageOf(error)}`, { cause: error });
     }
     this.#state = "recording";
   }
@@ -370,8 +390,11 @@ export interface SpikeHandlerDeps<E = IpcMainInvokeEvent> {
   readonly cycleTrace: () => Promise<void>;
   /** Keeps the renderer's private bytes for the sampler's next sample. */
   readonly rendererMemory: (bytes: number) => void;
-  /** Builds and writes the results file from a checked report. */
-  readonly writeResults: (report: DescentSpikeReport) => Promise<SpikeResultsPaths>;
+  /**
+   * Builds and writes the results file from a checked report, or, for a smoke, checks the trace's
+   * windows against it and writes nothing.
+   */
+  readonly writeResults: (report: DescentSpikeReport) => Promise<SpikeResultsAnswer>;
   /** Writes a checked capture, returning its directory. */
   readonly writeCapture: (capture: SpikeCaptureFiles) => Promise<string>;
   /** Ends the run with an exit status, and a reason for a failure. */

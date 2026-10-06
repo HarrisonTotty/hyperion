@@ -69,13 +69,21 @@ How the figures are read:
   is short of its span because its buffer filled, or its frame spans disagree with the renderer's.
   The frames left out at boundaries are at most 5% of the descent and of any segment, and none
   from 10 s before the approach. A profiled run (`--trace-profile on`) adds V8's CPU profiler and
-  `gpu`: it is a diagnostic, its memory includes the profiler's samples, and it is not judged.
+  `gpu`: it is a diagnostic, its memory includes the profiler's samples, and it is not judged. The
+  trace is recorded on the spike window's own debugger, which sends only `Tracing` and `IO`
+  commands and is attached before the first window and detached after the last. Each window's
+  buffer is 768 MiB, or 1.5 GiB in a profiled run. The recipe gives Electron a `TMPDIR` under
+  `target/descent-spike/`, on disk, where Chromium spools each window's stream before the client
+  reads it.
 
 ## Making a run
 
 `just descent-spike` builds the client, starts a local server with `--num-workers 2` and runs the
 client with `--descent-spike` and the options given (R05.T13.c). `--out <dir>` sets where the files
-go (this directory by default). The runs that count are visible, on a quiet machine:
+go (this directory by default). `just descent-spike --smoke` runs 10 s hidden and writes no file:
+it checks its trace's three windows as a run's are, each decoded and its frame spans matched to the
+renderer's frames, and exits 1 with the first failed window's reason (R05.T14.i). The runs that
+count are visible, on a quiet machine:
 
 - **The development machine's low-setting run** (R05.T14.c, by hand for the owner): with the
   projector in its 1080p 59.94 Hz mode, nothing else running and the load average under 1:

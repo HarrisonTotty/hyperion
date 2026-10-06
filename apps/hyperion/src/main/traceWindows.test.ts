@@ -11,8 +11,10 @@ import {
 import { measured, missing } from "./measured";
 import type { TraceFigures } from "./reduceTrace";
 import {
+  checkFrameSpans,
   EMPTY_TRACE_REASON,
   frameSpanFailure,
+  LOST_DATA_REASON,
   mergeTraceWindows,
   NO_CLOCK_OFFSET_REASON,
   type PooledTraceFigures,
@@ -134,6 +136,24 @@ describe("the trace's windows, merged", () => {
       measured({ spanMs: 10_100, bytes: 1_000_000, bufferPercent: 10 }),
       measured({ spanMs: 9500, bytes: 1_000_000, bufferPercent: 10 }),
     ]);
+  });
+
+  it("counts the frames each window's span check checked, for the run's log", () => {
+    const merged = mergeTraceWindows(recordingOf(twoWindows().map(windowFile)), report());
+    // Callbacks at 1.5, 1.75, …, 10.25 s in the first window's interior [1.4, 10.5] s, and at
+    // 12, 12.25, …, 20.25 s in the second's [12, 20.5] s.
+    expect(merged.checkedFrames).toEqual([36, 34]);
+  });
+
+  it("fails a window that lost data, giving it no count", () => {
+    const [first, second] = twoWindows().map(windowFile);
+    if (first === undefined || second === undefined) {
+      throw new Error("no two windows");
+    }
+    const merged = mergeTraceWindows(recordingOf([first, { ...second, lostData: true }]), report());
+    expect(merged.figures.reason).toBe(`trace window 2 of 2: ${LOST_DATA_REASON}`);
+    expect(merged.run.value?.windows[1]?.figures.reason).toBe(LOST_DATA_REASON);
+    expect(merged.checkedFrames).toEqual([36, null]);
   });
 
   it("form presentation intervals within a window, never across its gap", () => {
@@ -258,7 +278,12 @@ describe("the trace's windows, merged", () => {
     const trace = windowTrace({ offsetUs: 7e9, fromMs: at(-0.1), toMs: at(10) });
     const merged = mergeTraceWindows(recordingOf([windowFile(trace)]), report());
     const reason = "the renderer reported 2 trace windows, and the main process wrote 1";
-    expect(merged).toEqual({ run: missing(reason), exclusions: [], figures: missing(reason) });
+    expect(merged).toEqual({
+      run: missing(reason),
+      checkedFrames: [],
+      exclusions: [],
+      figures: missing(reason),
+    });
   });
 
   it("has no trace when the renderer reports no window", () => {
@@ -268,12 +293,18 @@ describe("the trace's windows, merged", () => {
         ...report(),
         traceWindows: [],
       }),
-    ).toEqual({ run: missing(reason), exclusions: [], figures: missing(reason) });
+    ).toEqual({
+      run: missing(reason),
+      checkedFrames: [],
+      exclusions: [],
+      figures: missing(reason),
+    });
   });
 
   it("passes on why there is no trace at all", () => {
     expect(mergeTraceWindows(missing("the trace was not recorded"), report())).toEqual({
       run: missing("the trace was not recorded"),
+      checkedFrames: [],
       exclusions: [],
       figures: missing("the trace was not recorded"),
     });
@@ -541,6 +572,28 @@ describe("the frame-span check, by identity", () => {
     ).toBeNull();
   });
 
+  it("counts the frames it checked, those that disagree and the spans that match none", () => {
+    const [first] = twoWindows();
+    const time = report().traceWindows[0];
+    if (first === undefined || time === undefined) {
+      throw new Error("no first window");
+    }
+    expect(checkFrameSpans(first, time, report())).toEqual({
+      checked: 36,
+      disagreeing: 0,
+      strays: 0,
+    });
+    const stray = withSpans(first, (spans) => [
+      ...spans.filter((_, k) => k !== AT_5_S),
+      spanAt(at(5) + 7),
+    ]);
+    expect(checkFrameSpans(stray, time, report())).toEqual({
+      checked: 36,
+      disagreeing: 1,
+      strays: 1,
+    });
+  });
+
   it("is checked against a window's own times", () => {
     const [first] = twoWindows();
     const time = report().traceWindows[0];
@@ -556,7 +609,7 @@ describe("the frame-span check, by identity", () => {
 });
 
 describe("a window's file alone", () => {
-  it("fails without a trace, an event, a clock offset or a size, or with a full buffer", () => {
+  it("fails without a trace, an event, a clock offset or a size, or with a full buffer or lost data", () => {
     const trace = windowTrace({ offsetUs: 7e9, fromMs: at(0), toMs: at(3) });
     const good = windowFile(trace);
     expect(windowFileFailure(good)).toBeNull();
@@ -571,5 +624,6 @@ describe("a window's file alone", () => {
     expect(windowFileFailure({ ...good, bufferPercent: 99 })).toBe(
       "it filled its buffer: 99 % of it was used",
     );
+    expect(windowFileFailure({ ...good, lostData: true })).toBe(LOST_DATA_REASON);
   });
 });

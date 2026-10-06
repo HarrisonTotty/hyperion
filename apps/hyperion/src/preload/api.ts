@@ -70,6 +70,15 @@ export interface SpikeResultsPaths {
   readonly markdown: string;
 }
 
+/**
+ * What the main process did with a spike run's report (T14.c, T14.i): a full run's results file
+ * written, or a smoke's trace checked against it with no file written.
+ */
+export type SpikeResultsAnswer =
+  | { readonly kind: "written"; readonly paths: SpikeResultsPaths }
+  /** `failure` is the first failed trace window's reason ("trace window k of n: …"), or `null`. */
+  | { readonly kind: "smoke checked"; readonly failure: string | null };
+
 /** How a spike run ends: the app exits with 0 for `pass` and 1 for `fail`. */
 export type SpikeEnd =
   { readonly status: "pass" } | { readonly status: "fail"; readonly reason: string };
@@ -92,8 +101,11 @@ export interface SpikeApi {
   stopTrace(): Promise<void>;
   /** Hands the main process's sampler the renderer's own memory (`getProcessMemoryInfo`). */
   sampleMemory(): Promise<void>;
-  /** Writes the results file of T14.c from the renderer's report. */
-  writeResults(report: DescentSpikeReport): Promise<SpikeResultsPaths>;
+  /**
+   * Writes the results file of T14.c from the renderer's report. A smoke run writes none: the main
+   * process checks its trace's windows against the report and answers whether one failed (T14.i).
+   */
+  writeResults(report: DescentSpikeReport): Promise<SpikeResultsAnswer>;
   /** Writes a GPU capture (T15.a) as `capture.json` and `capture.bin` into `--capture`'s directory. */
   writeCapture(capture: { readonly json: string; readonly bin: Uint8Array }): Promise<string>;
   /** Ends the run, and the app with it. */

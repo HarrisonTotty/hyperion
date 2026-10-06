@@ -2358,6 +2358,11 @@ version 4`.
 - `descentSpike.sh` gives Electron a `TMPDIR` on disk (`target/descent-spike/tmp`), removed after
   the run, so that any spool of the stream stays out of a RAM-backed `/tmp`.
 - `contentTracing` is no longer used by the spike.
+- The smoke checks its trace (addendum A). It hands the main process its report through the same
+  results call a run makes. For a smoke, the session merges the windows with the report, frame-span
+  check included, and logs each window's line. It fails the smoke if any window failed, with that
+  window's reason, and builds and writes no results file. Files beyond the list:
+  `view/spike/spikeController.ts` and its test.
 - **Files:**
   - `apps/hyperion/src/main/cdpTracing.ts`, `main/spike.ts`, `main/spikeSession.ts`,
     `main/traceWindows.ts` (data loss), `main/index.ts`, their tests;
@@ -2371,7 +2376,9 @@ version 4`.
   - `dataLossOccurred` fails the window;
   - `percentFull` 0.095 gives 9.5 %;
   - a detach mid-run ends the trace with its reason, and the run goes on;
-  - a start while recording is still refused.
+  - a start while recording is still refused;
+  - a smoke whose window fails the frame-span check exits 1 with that reason; a smoke writes no
+    results file.
 - **Acceptance:**
   - `pnpm --filter hyperion exec vitest run src/main/cdpTracing src/main/spike
 src/main/spikeSession src/main/traceWindows`;
@@ -3873,6 +3880,102 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     Its three considers are applied too: the lost-packet failure, a test pinning the decoder's
     copy of the reducer's names to `GPU_PROCESS_SLICES`, and a hand-made trace read a byte at a
     time.
+
+- **Deviations in T14.i, as built** (2026-10-06, the trace over CDP; `decision-r05-trace-windows-2.md`,
+  rulings 1, 5 and 6, and addendum A item 4).
+  - _Where things are._ `main/cdpTracing.ts` holds `CdpTracing`; `TraceDebugger`, the part of
+    Electron's `Debugger` it uses, which Electron's satisfies; `CDP_TRACE_COMMANDS`, the allowlist,
+    which `#send` takes as a type (`CdpTraceCommand`); `cdpStartParams(config)`;
+    `CDP_PROTOCOL_VERSION` ("1.3"); `CDP_READ_BYTES` (8 MiB); and `CDP_BUFFER_REPORT_MS` (1000).
+    `main/spike.ts`'s `SpikeTracing` is now the spike's own interface (`start(config)`,
+    `stop(path)` returning `TraceWindowStop { lostData, bufferPercent }`, and `close()`), not a
+    `Pick` of `contentTracing`. `spike.ts` also has `SPIKE_PROFILED_TRACE_BUFFER_KB` (1,572,864) and
+    `SPIKE_TRACE_FORMAT` (`"perfetto-proto"`, the ruling's and version 4's name; the brief's
+    "proto"). `main/traceWindows.ts` adds `TraceWindowFile.lostData`, `LOST_DATA_REASON`,
+    `checkFrameSpans` (the counts `frameSpanFailure` now reads) and `MergedTrace.checkedFrames`,
+    which is for the log and not the results. The tests share a fake debugger,
+    `main/fixtures/debugger.ts`.
+  - _The buffer's reading._ `SpikeTrace.bufferUsage()` is gone. Each stop returns the window's
+    last `percentFull` × 100. It is reset at each start, so a window with no report has `null`,
+    never the previous window's reading.
+  - _A cycle's stop._ `SpikeTrace.cycle(path, stopped)` hands the stop's outcome to `stopped`
+    before it starts again. A window whose next start fails is then still known to be whole. A
+    callback that throws leaves the trace idle.
+  - _Reasons._ `SpikeTrace`'s errors carry their cause's message ("the spike's trace did not stop:
+    the trace's debugger session detached: …"), since IPC gives the renderer the message alone. A
+    window whose stop failed fails with that reason, and its file is not read, since it may be
+    partial. T14.e read it and failed the window on ENOENT. The session holds each window's stop as
+    `pending`, `stopped` or `failed`.
+  - _Data loss_ is checked after the span and the buffer, so that a buffer that filled says so,
+    and before the frame spans. Its reason is "it lost data (Chromium's dataLossOccurred)".
+  - _The detach._ Electron's own `detach()` emits `detach` too, so the session is marked closed
+    first. An unexpected detach is logged ("descent spike: the trace's debugger session detached:
+    <reason>"), and it fails a stop that is waiting for `tracingComplete`. Every later command and
+    start is refused with its reason, so the next cycle fails and the renderer ends the trace. An
+    attach that fails because another debugger holds the page fails the first start. That ends the
+    run, as any refused start does.
+  - _Closing._ The session closes the transport in `#stop`'s `finally`, after the last stop or after
+    a failed cycle has ended the trace. A session therefore measures once: a second start is
+    refused, and nothing asks for one. Closing fails a stop still waiting for the trace's end.
+    A failed `IO.close` is logged and does not fail the window. A failed read does fail it, with
+    the file and the stream closed, and the read's error is kept over the file's.
+  - _The smoke's results call._ `SpikeApi.writeResults` now answers a union
+    (`SpikeResultsAnswer`): `{ kind: "written", paths }` for a run, and
+    `{ kind: "smoke checked", failure }` for a smoke. The preload accepts each only on its own kind
+    of launch. The controller ends a smoke with the answer's failure first, then with the trace's
+    early end, then with the baked check. An answer, not a refused call, keeps Electron's "Error
+    invoking remote method …" prefix out of the FAIL line (typescript-reviewer). A smoke's
+    `stopTrace` no longer fails on a window, as T14.e's did; the merge checks it. Files beyond the
+    list: `preload/api.ts`, `preload/spikeApi.ts` and its test, `view/spike/SpikeApp.test.tsx`,
+    `main/results.test.ts`, and `main/fixtures/traces.ts`, whose settings are now protobuf with the
+    profiled 1.5 GiB.
+  - _The log._ Each stop logs "trace window k stopped: complete after X ms, B B read in Y ms",
+    with ", data lost" when Chromium lost data. Each window logs its line as it is reduced, as
+    before. A smoke, whose log is its only record, also logs each window's "the spans of m frames
+    match the renderer's" and each boundary's "X ms from the stop to the next start".
+  - _The spool._ `descentSpike.sh` gives Electron a per-run `TMPDIR`,
+    `target/descent-spike/tmp.XXXXXX`, rather than the fixed `tmp`. Two runs of one checkout then
+    cannot remove each other's. Chromium opens its spool of each window's stream there with
+    `DELETE_ON_CLOSE`, which on POSIX unlinks the file at once, so the directory looks empty. The
+    browser's open files show it instead. In the final smoke the browser held one
+    `.org.chromium.Chromium.XXXXXX (deleted)` under the run's `TMPDIR` for each window, and none
+    elsewhere. Only Linux's `/tmp` may be RAM-backed: the temporary directories of macOS and
+    Windows are on disk, and Chromium reads `TMP` and `TEMP` on Windows.
+  - _The hidden smoke_ (`just descent-spike --smoke`, 2026-10-06; the high setting, RTX 3080, port
+    7893, an 8 GB scope with a no-relaunch guard, not locked, under other lanes' load of 18–91).
+    It passed three times. Each run had three protobuf windows, each decoded, matched frame by
+    frame, and deleted, with no new coredump (40 before and after).
+
+    | Smoke                      | Exit, time | Window bytes (buffer %)                              | Stops: complete / read (ms) | Frames checked | Gaps (ms)  |
+    | -------------------------- | ---------- | ---------------------------------------------------- | --------------------------- | -------------- | ---------- |
+    | 1 (load 34–38)             | 0, 33 s    | 2,509,601 (0.11), 2,512,004 (0.13), 1,783,845 (0.13) | 110/44, 101/47, 237/48      | 86, 97, 61     | not logged |
+    | 2 (load 34–91)             | 0, 52 s    | 2,222,318 (0.09), 2,087,971 (0.14), 2,536,603 (0.15) | 109/71, 129/43, 107/38      | 74, 72, 109    | not logged |
+    | 3, final tree (load 18–23) | 0, 23 s    | 2,369,136 (0.22), 2,952,750 (0.19), 3,648,353 (0.27) | 88/53, 84/42, 61/41         | 61, 111, 172   | 156, 140   |
+
+    The windows are about a quarter of T14.g's JSON windows (8–11 MB). The guard tripped once, in
+    smoke 2, on its own fd sampler's last `sleep`, which outlived the run; nothing ran on the spike's
+    profile, and the sampler now waits for it.
+
+  - _Review._ typescript-reviewer found no must-fix. Its four should-fix are applied: the smoke's
+    answer as a result union; the fake trace refusing a start after `close()`, as the transport
+    does; the window's stop as a union; and a reason above an `oxlint-disable`. Its three
+    considers are applied too: `close()` fails a pending stop, a throwing `stopped` leaves the trace
+    idle, and the buffer's fraction is named a fraction. So is its note that a read's error should
+    survive a failing file close. A stream named by a `tracingComplete` whose `Tracing.end` then
+    fails is left open. The detach at the end and the removed `TMPDIR` make that harmless.
+  - _Orchestrator rulings on T14.h's open questions_ (2026-10-06):
+    1. T14.h's fixture cuts stand: a timed cut from the middle of the window, a profiled prefix,
+       and `trimProtoTrace`'s optional start. So do its reworded tests: the start within 0.25 ms
+       inside a `RunTask`, `sampledMs` against the sampled span, and the cross-sequence check on
+       the spans at least 100 ms before the end.
+    2. The decoder's `PipelineReporter` durations may differ from `trace_processor`'s by 1–11 µs,
+       since it pairs ends in write order, as the ruling's per-track stack prescribes. That is
+       accepted: microseconds against 16–33 ms frames. The ruling's "must equal" is read as equal
+       counts and summed durations within 0.1%. T14.h's sums differ by 2.52 ms of 102.88 s
+       (0.0024%) timed and 2.46 ms of 109.46 s (0.0022%) profiled.
+    3. A packet marked as following lost packets fails its window, as `dataLossOccurred` does.
+       T14.h built it so: the decoder fails the file ("the trace lost packets of sequence N before
+       this one").
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

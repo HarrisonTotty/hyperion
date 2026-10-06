@@ -30,7 +30,7 @@ function fakeSpike(ends: SpikeEnd[]): SpikeApi {
     cycleTrace: () => Promise.resolve(),
     stopTrace: () => Promise.resolve(),
     sampleMemory: () => Promise.resolve(),
-    writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeResults: () => Promise.resolve({ kind: "smoke checked", failure: null }),
     writeCapture: () => Promise.resolve("c"),
     end: (outcome) => {
       ends.push(outcome);
