@@ -45,6 +45,10 @@ export default defineConfig({
     // `vitest run --sequence.shuffle` passes. The shared setup clears what would otherwise carry
     // from one file to the next.
     isolate: false,
+    // A stylesheet imported for its effect is empty in a test, as Vitest makes every CSS file, so
+    // that jsdom applies no layout rules; one imported as text (`?raw`) keeps its text, so that a
+    // test can read a rule the guide requires, such as a plate's `--surface-0` (R07.T16.a).
+    css: { include: [/\.css\?raw$/u] },
     projects: [
       {
         extends: true,

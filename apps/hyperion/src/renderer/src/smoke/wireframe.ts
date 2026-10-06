@@ -8,9 +8,10 @@
  * WGSL at 64 luminances equals its TypeScript twin within 10⁻⁵; a face at the near plane reads depth
  * near 1 in the upper half of the view (no half-Z conversion, no Y flip); a hull face shows its
  * own edge and hides one 4 × 10⁻⁵ of the distance behind it, at 1 m and at 10⁸ m (Design note 5); a
- * sphere occluder's depth is pushed by its slope's magnitude where the slope is diagonal; and a
+ * sphere occluder's depth is pushed by its slope's magnitude where the slope is diagonal; a
  * star sprite peaks in its own pixel, lights nothing outside its quad and sums to the tone curve
- * of its PSF-weighted colour (both added in RM1 validation, m2 and m3).
+ * of its PSF-weighted colour (both added in RM1 validation, m2 and m3); and a hull edge cased as
+ * the photorealistic overlay draws it stays whole over its own receding face (R07.T16.a).
  */
 
 import "../styles.css";
@@ -25,16 +26,19 @@ import { controlEv100, DEFAULT_EXPOSURE } from "../view/photometry/exposure";
 import { erf, PSF_QUAD_PX, PSF_SIGMA_PX } from "../view/photometry/magnitude";
 import { type Rgb, spriteToneCurve, toneCurve } from "../view/photometry/toneCurve";
 import toneCurveWgsl from "../view/shaders/toneCurve.wgsl?raw";
+import { overlayDrawList } from "../view/photoreal/overlay";
 import {
   buildWireframeDrawList,
   type DrawCamera,
   HULL_OCCLUDER_BIAS,
   type LineBatch,
+  type OccluderMesh,
   type StarSprite,
+  STROKE_PX,
   type WireframeDrawList,
 } from "../view/wireframe/drawList";
 import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
-import { readTokens } from "../spatial/paint";
+import { type ColourTokens, readTokens } from "../spatial/paint";
 import { runPose, SCENE_OPTIONS, startRun } from "../displays/view/viewRun";
 import { type Checks, halfTexels, show, texel } from "./harness";
 
@@ -344,8 +348,107 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
   }
 
   await checkSphereSlope(engine, renderer, checks);
+  await checkCasedHullEdge(engine, renderer, tokens, checks);
   await checkStarSprite(engine, renderer, checks);
   renderer.dispose();
+}
+
+/**
+ * The cased hull edge's check (R07.T16.a): where its edge falls on the view, px down from the top,
+ * a little above a row's centre so that the casing's last partial texel lies 2.15 px below it
+ * (the cased 3.5 px stroke's coverage reaches 2.25 px), past the 2 px the hull faces' old slope
+ * scale covered; and the face's near edge, px, at half the distance.
+ */
+const CASED_EDGE = { edgeYPx: 24.35, nearYPx: 40, farM: 1, nearM: 0.5 } as const;
+
+/**
+ * R07.T16.a: a hull edge cased by the photorealistic overlay (`overlayDrawList`), on the far edge
+ * of its own face as the face recedes towards it, draws every texel it draws with no face, its
+ * casing's outer texel included: the hull faces' slope bias, 3 px, covers the cased edge's
+ * 2.25 px of coverage where the depth's slope runs along the screen's axes, as here (Design note
+ * 5's w ÷ 2 + 1, the UX decisions, item 12). The face's depth changes only down the view, so one
+ * column reads for all.
+ */
+async function checkCasedHullEdge(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  tokens: ColourTokens,
+  checks: Checks,
+): Promise<void> {
+  const { edgeYPx, nearYPx, farM, nearM } = CASED_EDGE;
+  // The height over the distance of a point `yPx` down from the top of the square view.
+  const heightOverDistance = (yPx: number): number => 1 - (2 * yPx) / SIDE_PX;
+  const farYM = heightOverDistance(edgeYPx) * farM;
+  const nearYM = heightOverDistance(nearYPx) * nearM;
+  const farHalfM = 0.25 * farM;
+  const nearHalfM = 0.25 * nearM;
+  // Two triangles of the face, from its far edge, the hull's edge, to its near edge.
+  const triangles = new Float32Array([
+    -farHalfM,
+    farYM,
+    -farM,
+    farHalfM,
+    farYM,
+    -farM,
+    nearHalfM,
+    nearYM,
+    -nearM,
+    -farHalfM,
+    farYM,
+    -farM,
+    nearHalfM,
+    nearYM,
+    -nearM,
+    -nearHalfM,
+    nearYM,
+    -nearM,
+  ]);
+  const edgeHalfM = 0.2 * farM;
+  // A hull's edge as the wireframe's list has it, uncased at the heavy stroke, cased by the
+  // overlay; its casing here in `--accent`, not `--surface-0`, so that its faint outer texel reads.
+  const edge = {
+    ...batch(
+      "cased hull edge",
+      [-edgeHalfM, farYM, -farM, edgeHalfM, farYM, -farM],
+      tokens.text,
+      STROKE_PX.heavy,
+    ),
+    casingColour: tokens.accent,
+  };
+  const recedingFace: OccluderMesh = {
+    id: "receding face",
+    originF32: new Float32Array(3),
+    triangles,
+    depthBiasAway: HULL_OCCLUDER_BIAS,
+    twoSided: true,
+  };
+  const onFace = await drawSquare(
+    engine,
+    renderer,
+    "R07 cased hull edge",
+    overlayDrawList({ ...NOTHING, occluderMeshes: [recedingFace], lines: [edge] }),
+  );
+  const bare = await drawSquare(
+    engine,
+    renderer,
+    "R07 bare cased hull edge",
+    overlayDrawList({ ...NOTHING, lines: [edge] }),
+  );
+  // The column through the edge's middle, from 4 px above the edge to 4 px below its casing.
+  const rows = Array.from({ length: 10 }, (_, i) => 20 + i);
+  // A texel that could not be read differs, so that a short readback fails the check.
+  const differs = rows.filter((row) => {
+    const seen = texel(onFace.colour, SIDE_PX, 32, row);
+    const want = texel(bare.colour, SIDE_PX, 32, row);
+    return [0, 1, 2].some((c) => !(Math.abs((seen[c] ?? Number.NaN) - (want[c] ?? 0)) <= 2e-3));
+  });
+  // The control: the casing's outer texel, 2.15 px below the edge, is drawn with no face.
+  const outer = texel(bare.colour, SIDE_PX, 32, 26);
+  checks.check(
+    "R07.T16.a a cased hull edge on its own receding face draws every texel it draws with no face",
+    differs.length === 0 && outer[1] > 0.02,
+    `rows that differ ${differs.length === 0 ? "none" : differs.join(", ")}; the casing's outer texel with the face ${show(texel(onFace.colour, SIDE_PX, 32, 26))}, with none ${show(outer)}`,
+  );
 }
 
 /** The sphere occluder's slope check: its centre straight ahead, m, and its radius, m. */

@@ -53,8 +53,16 @@ export const LOW_SETTING_MAX_SPRITES = 2_000;
 /**
  * The depth bias of a hull's occluder faces, pushing them away from the camera (Design note 5):
  * positive meaning away, mapped once by R01's adapter.
+ *
+ * @remarks
+ * The slope term covers half the widest stroke on a hull's edge and its one-pixel antialiasing
+ * fringe, w_max ÷ 2 + 1 px. Over a photorealistic image the 1.5 px edge is cased 1 px each side
+ * (R07.T16.a), so w_max is 3.5 px and the term 2.75 px, rounded up to 3, the sphere occluder's
+ * `SLOPE_SCALE` (R07's UX decisions, item 12; it was 2, for the wireframe's uncased edge). One bias
+ * serves both styles. WebGPU scales the depth slope's larger screen component, so where the slope
+ * runs diagonally the term covers 3 ÷ √2 = 2.12 px of a cased edge's 2.25 px of coverage.
  */
-export const HULL_OCCLUDER_BIAS = { constant: 128, slopeScale: 2 } as const;
+export const HULL_OCCLUDER_BIAS = { constant: 128, slopeScale: 3 } as const;
 
 /**
  * How far outside the view a mark may fall and still be anchored (labelled and pickable), rem: 2,
@@ -450,8 +458,8 @@ export function buildWireframeDrawList(
         STROKE_PX.heavy,
         null,
         originF32,
-        // Uncased: a casing would widen the stroke past the 2 px the hull occluder's slope bias
-        // covers (Design note 5), and the hull's own faces hide the stars behind it.
+        // Uncased in the wireframe: the hull's own faces hide the stars behind it. Over the
+        // photorealistic image the overlay cases it (R07.T16.a), within the faces' slope bias.
         0,
       ),
     );

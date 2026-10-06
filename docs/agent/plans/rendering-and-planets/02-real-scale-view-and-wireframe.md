@@ -372,7 +372,8 @@ the call sites here change.
    through it, which at hull sizes reaches only the face's own edges. The slope term covers a
    stroke's half-width and its one-pixel antialiasing fringe. Bias is valid only on triangle
    topologies and is never set on a line pass. The adapter carries it as
-   `depthBiasAway { constant: 128, slopeScale: 2 }`, positive meaning away, in one place, because
+   `depthBiasAway { constant: 128, slopeScale: 2 }` (raised to 3 by R07.T16.a), positive meaning
+   away, in one place, because
    Babylon's `zOffset` and `zOffsetUnits` are already negated under `useReverseDepthBuffer` and a
    double negation is the likely bug. The occluder is drawn two-sided, so that a winding flip
    between our right-handed matrix and a left-handed engine cannot unhide every hidden line. The
@@ -1025,8 +1026,8 @@ camera-relative. It reads colours through plan 05's `readTokens` names, never li
 with the depth state of Design note 4 (`greater-equal`, no write).
 
 **R02.T14.b Occluders and sprites.** `occluder.wgsl` (depth-only, colour writes off, two-sided; the
-hull variant with `depthBiasAway { constant: 128, slopeScale: 2 }` of Design note 5, never on a line
-pass) and `starSprite.wgsl` (PSF weights and `agx`, additive in linear light through the sRGB view
+hull variant with `depthBiasAway { constant: 128, slopeScale: 2 }` of Design note 5 (raised to 3 by
+R07.T16.a), never on a line pass) and `starSprite.wgsl` (PSF weights and `agx`, additive in linear light through the sRGB view
 R01 provides, depth-tested, no write).
 
 **R02.T14.c Smoke on SwiftShader.** In R01's headless harness, render the first frame of each kept
@@ -1553,7 +1554,8 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   `exposureScale(ev100)` × `starColour`, per unit of point-spread weight) and `illuminanceLx`;
   sprites are sorted by flux (ties by ID), culled half a quad outside the view and capped at 2,000
   at the low setting; `preExpose` is not used, the wireframe having no half-float target.
-  `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts`. Bodies are culled by `sphereInFrustum` on
+  `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts` (raised to (128, 3) by R07.T16.a, which
+  cases hull edges over the photorealistic image). Bodies are culled by `sphereInFrustum` on
   their radius, orbits on a(1 + e) about their focus, craft on their hull's length. A ring counts as
   selected when its planet is (`ViewRing` has no identity of its own).
 - **R02.T13's follow-up, target marks (decided 2026-09-30, delegated decision 11).** Other craft's

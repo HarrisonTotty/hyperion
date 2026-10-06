@@ -143,7 +143,7 @@ describe("the wireframe's materials", () => {
     ).toEqual({
       lines: [false, true, "premultiplied", "none", null],
       occluderSphere: [true, false, "none", "none", null],
-      occluderHull: [true, false, "none", "none", { constant: 128, slopeScale: 2 }],
+      occluderHull: [true, false, "none", "none", { constant: 128, slopeScale: 3 }],
       starSprite: [false, true, "additive", "none", null],
     });
   });
@@ -215,7 +215,7 @@ describe("packWireframe", () => {
       id: `hull${String(n)}`,
       originF32: new Float32Array([0, 0, -n]),
       triangles: new Float32Array(9 * n).fill(n),
-      depthBiasAway: { constant: 128, slopeScale: 2 } as const,
+      depthBiasAway: { constant: 128, slopeScale: 3 } as const,
       twoSided: true as const,
     })),
     lines: [

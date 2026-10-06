@@ -28,7 +28,7 @@ import {
   sliceSceneSystem,
 } from "../../test/sceneFixture";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { FULL_VIEW_PX, stubViewLayout } from "../../test/viewDisplayHarness";
+import { FULL_VIEW_PX, renderViewDisplay, stubViewLayout } from "../../test/viewDisplayHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { rotate } from "../../view/camera/quaternion";
@@ -44,7 +44,9 @@ import {
 } from "../../view/engine/status";
 import type { FrameSubmission } from "../../view/engine/types";
 import { precisionScene } from "../../view/scenes/precision";
-import { buildWireframeDrawList } from "../../view/wireframe/drawList";
+import STYLES from "../../styles.css?raw";
+import { buildWireframeDrawList, CASING_PX } from "../../view/wireframe/drawList";
+import { linearColour } from "../../view/wireframe/submit";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
@@ -1012,6 +1014,128 @@ describe("the VIEW display's style (R07.T8.a)", () => {
     await settle();
     advance(300);
     expect(labelBlock().includes("LIGHTING: NOT RECEIVED")).toBe(true);
+  });
+});
+
+/** The widths of the line draws of a frame that stroke a hull's edges, at its non-zero origin. */
+function hullLineWidths(frame: FrameSubmission | undefined): ReadonlyArray<number> {
+  return (frame?.draws ?? [])
+    .filter(
+      (draw) =>
+        draw.material.name === "wireframe:lines" &&
+        Array.from(draw.offsetFromCameraM).some((value) => value !== 0),
+    )
+    .map((draw) => draw.uniforms["widthPx"]?.[0] ?? Number.NaN);
+}
+
+/**
+ * Whether a frame's line draws come in pairs, each a `--surface-0` casing two casings wider than
+ * the stroke drawn after it: every batch cased, its casing beneath it.
+ */
+function casedInPairs(frame: FrameSubmission | undefined): boolean {
+  const lines = (frame?.draws ?? []).filter((draw) => draw.material.name === "wireframe:lines");
+  const casing = [...linearColour(readTokens(document.documentElement).surface0)];
+  const width = (index: number): number => lines[index]?.uniforms["widthPx"]?.[0] ?? Number.NaN;
+  return (
+    lines.length > 0 &&
+    lines.length % 2 === 0 &&
+    lines.every((draw, index) =>
+      index % 2 === 1
+        ? width(index - 1) - width(index) === 2 * CASING_PX
+        : [...(draw.uniforms["colour"] ?? [])].every((value, c) => value === casing[c]),
+    )
+  );
+}
+
+/** The classes of the `--surface-0` plates that DOM text over a view's image sits on. */
+const PLATE_CLASSES = ["view-label", "view-marks__label"] as const;
+
+/** The declarations of `.<name> { … }`, the stylesheet's rule for exactly that class. */
+function ruleOf(css: string, name: string): string {
+  return new RegExp(`(?:^|\\n)\\.${name} \\{([^}]*)\\}`, "u").exec(css)?.[1] ?? "";
+}
+
+/** Switches the default `PRECISION TEST` to the photorealistic style and lets it draw. */
+async function drawPrecisionPhotoreal(view: Setup): Promise<void> {
+  await settle();
+  view.advance(100);
+  await view.user.keyboard("4");
+  // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
+  view.advance(100);
+  await settle();
+  view.advance(300);
+}
+
+describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
+  it("cases every mark over the photorealistic image, the hull's edges too, as the wireframe does not", async () => {
+    const view = setup({ store: await nominalStore() });
+    await settle();
+    view.advance(300);
+    const wireframe = [hullLineWidths(view.lastFrame()), casedInPairs(view.lastFrame())];
+    await drawPrecisionPhotoreal(view);
+    expect([
+      wireframe,
+      view.lastFrame()?.label,
+      hullLineWidths(view.lastFrame()),
+      casedInPairs(view.lastFrame()),
+    ]).toEqual([[[1.5], false], "symbology", [3.5, 1.5], true]);
+  });
+
+  it("sets every text over the photorealistic image on a --surface-0 plate, beside an instrument", async () => {
+    // On the harness's 1280 × 720 stage, where a slot has room, with INSTRUMENT 1 open over the
+    // primary's image: a panel of its own, its label block on it, not text on the image.
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+    });
+    await settle();
+    view.advance(100);
+    await view.user.click(
+      within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
+        name: "OPEN",
+      }),
+    );
+    view.advance(300);
+    await view.user.keyboard("4");
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    const overlay =
+      screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC, PRIMARY/ })
+        .nextElementSibling ?? document.createElement("div");
+    const walker = document.createTreeWalker(overlay, NodeFilter.SHOW_TEXT);
+    const unplated: string[] = [];
+    const plated = new Set<string>();
+    let inSlot = 0;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const text = node.textContent?.trim() ?? "";
+      const plate = PLATE_CLASSES.find((name) => node.parentElement?.closest(`.${name}`) !== null);
+      if (text.length === 0) {
+        continue;
+      }
+      if (node.parentElement?.closest(".view-instrument.panel") !== null) {
+        inSlot += 1;
+      } else if (plate === undefined) {
+        unplated.push(text);
+      } else {
+        plated.add(plate);
+      }
+    }
+    expect({
+      unplated,
+      plated: [...plated].toSorted(),
+      slotText: inSlot > 0,
+      paints: PLATE_CLASSES.map((name) =>
+        ruleOf(STYLES, name).includes("background: var(--surface-0)"),
+      ),
+    }).toEqual({
+      unplated: [],
+      plated: [...PLATE_CLASSES].toSorted(),
+      slotText: true,
+      paints: [true, true],
+    });
   });
 });
 

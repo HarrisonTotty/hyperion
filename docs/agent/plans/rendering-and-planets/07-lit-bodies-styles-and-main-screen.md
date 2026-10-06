@@ -573,7 +573,8 @@ meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, p
   `agxSprite` in `toneCurve.wgsl`; there is no client `BodyFixedRotation` type: a body's rotation is
   `CameraOrigins.bodyFixedRotation(body): Rotation3 | null` (`view/coords/position.ts`), `null`
   today since plan 14 sends no rotation; the sphere occluder's `SLOPE_SCALE` is 3 (a WGSL constant
-  in `occluderSphere.wgsl`) while the hull faces' `occluder.wgsl` bias keeps `slopeScale: 2`.
+  in `occluderSphere.wgsl`) while the hull faces' `occluder.wgsl` bias keeps `slopeScale: 2`
+  (raised to 3 by T16.a).
 - **R03:** `useScene` and `sceneAt` (`SceneFrame`, with each body's `geometricM`, `apparentM`,
   `emitted` and `hillRadiusM`), bodies as plan 14's `BodySummaryDto` inside R03's
   `SceneBodyDto` and `SceneSystemDto`, each with its granted `level`, `SceneClockDto`,
@@ -1615,11 +1616,14 @@ src/renderer/src/view/wireframe src/renderer/src/displays/view`, `just test-rend
   part of T16's text from "`AutoExposure` keeps why it has no metered value" to "stays held back
   under the operator's own": the cause (`no-image`, `nothing-weighed`, `acquiring`); R02's
   `InhibitReason` `"nothing_weighed"` with the meter in force, read as `INHIBITED · NO LIT SIDE`
-  and its twins; the statuses `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, with their
-  remedy clauses on the meter's control, in `ENABLE`'s reason and in `AUTO NOT AVAILABLE: …`, in
-  the panel and under the compact layout's row; the `acquiring` window, with no status and
-  `ENABLE` held back with `NOT AVAILABLE: not yet metered`; the `MAN` field never held back; and
-  `INHIBIT`'s consequence under each new system inhibit. Tests: T16's three (`NO LIT SIDE` after
+  and its twins; the statuses `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, each with its
+  remedy clause on the meter's control and bare in `ENABLE`'s reason and in
+  `AUTO NOT AVAILABLE: …`, in the panel and under the compact layout's row
+  (decision-r07-t8a-meter: the remedy is the meter control's); the `acquiring` window, with no
+  status and `ENABLE` held back with `NOT AVAILABLE: not yet metered`; the `MAN` field never held
+  back; and `INHIBIT`'s consequence under each new system inhibit. It also settles T8.a's consider,
+  focus on a meter button lost when the panel unmounts on a style change, or records why not.
+  Tests: T16's three (`NO LIT SIDE` after
   0.5 s and not before, never `NO IMAGE TO METER`; a meter change clearing it at once; `AUTO`
   resuming when a lit body is metered); `NO DARK SIDE` under `DARK` and `STAR DISC ONLY` under
   `AVG`; `ENABLE` and the `MAN` field in the window; the inhibit's reading and `INHIBIT`'s note at
@@ -1634,12 +1638,15 @@ src/renderer/src/view/post src/renderer/src/view/photometry src/renderer/src/dis
   sentence and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row; the `NO IMAGE TO METER`
   row's added sentence; the new Status row of the three statuses with their remedy clauses), and
   a pointer to that row from the `METER` row (decision-r07-t19b-exposure-fit, item 4), each
-  tagged as T16's draft, ending in "the owner signs off". Nothing else is new: `PHOTOREALISTIC`
-  and `BODY PHOTOMETRY: NOT YET MODELLED` are signed off (T19.d), the several views' refusal adds
-  no entry (decision-r07-t18, item 6), and the "Outlines for symbology" bullet already cases every
-  mark over the image. Tests: each status the draft adds is a string in the code, in the words
-  T16.b built. Acceptance: `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the
-  console-ux skill's scripts.
+  tagged as T16's draft, ending in "the owner signs off". It also takes the two points left for
+  the guide: the meter's `SELECT` legend, left "for T16's draft" by T13 after review (a `Label`
+  row, or the reason a group's legend needs none), and the data-state bullet's "offers `MAN`
+  only", which reads against E5 (T19.d's open points, for the owner's next guide edit). Nothing
+  else is new: `PHOTOREALISTIC` and `BODY PHOTOMETRY: NOT YET MODELLED` are signed off (T19.d),
+  the several views' refusal adds no entry (decision-r07-t18, item 6), and the "Outlines for
+  symbology" bullet already cases every mark over the image. Tests: each status the draft adds is
+  a string in the code, in the words T16.b built. Acceptance: `pnpm exec prettier --check
+docs/frontend/ux-guidelines.md`, the console-ux skill's scripts.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -2143,7 +2150,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   over the photorealistic image and raise the occluder's slope scale to 3 so that the casing is
   covered (R02's Risks, T13 as built). As built at `ce7aeb3` the sphere occluder's `SLOPE_SCALE`
   is already 3 (RM1 validation, for graticule strokes); the one to raise is the hull faces'
-  `occluder.wgsl` depth bias, `slopeScale` 2.
+  `occluder.wgsl` depth bias, `slopeScale` 2. _Built by T16.a (2026-10-06): cased over the image,
+  `slopeScale` 3 in both styles; see "Deviations in T16.a, as built"._
 - **The camera's local state, decided 2026-09-30 by a delegated decision** (the UX decisions,
   item 14). R02's `CameraState` keeps `free` (`FreeFlight`) and `move` (`EasedMove`), a local
   view's integration state. This plan moves them into a local wrapper, so that the server-held
@@ -3543,6 +3551,85 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     are fixed: the hidden run's skipped resize is now `resizeDue`, with tests, and `closeRelease`
     reads `releasedBy` exhaustively. Its consider is taken: the hold removes its `pagehide`
     listener.
+- **Deviations in T16.a, as built** (2026-10-06; the views lane, T16 split as ruled under T16).
+  - **Files.** `photoreal/overlay.ts` exports `overlayDrawList(list)` (every batch cased to at
+    least `CASING_PX` in its own `casingColour`, `--surface-0` from `buildWireframeDrawList`; no
+    sprites; the occluders and anchors kept as they are) and
+    `overlaySubmission(renderer, list, camera, viewport)` (R02's `WireframeRenderer.frame` of it,
+    labelled `symbology`, `colourLoad: "load"`, which `PhotorealRenderer` also still sets on any
+    overlay, a harmless twin). `viewFrameDrawer.ts` takes its overlay from the latter at the
+    canvas's viewport, not the scene target's internal one. `occluder.wgsl` changes only its
+    header comment: the bias is `HULL_OCCLUDER_BIAS` in `drawList.ts`, which `submit.ts`'s hull
+    material carries; R02's Design note 5, T14.b and T14's as-built note keep (128, 2) as R02
+    built it, each with a pointer here. Beyond the subtask's list: `vitest.config.mts` (below),
+    `test/viewFixtures.ts` (`OFF_PLANET_CAMERA`, `FIXTURE_MOON_ORBIT`, `poseOffPlanet`,
+    `aMarkedViewScene`, moved out of R02's `drawList.test.ts`, which now imports them, so that the
+    overlay's test shares its scene), `ViewDisplay.test.tsx`, and the README's line of what awaits
+    the owner.
+  - **The bias.** `HULL_OCCLUDER_BIAS` is `{ constant: 128, slopeScale: 3 }` in both styles:
+    R02 Design note 5's w_max ÷ 2 + 1 for the cased edge's 3.5 px is 2.75 px, rounded up to the
+    sphere occluder's `SLOPE_SCALE`. The constant is unchanged, so what shows through a face-on
+    face is unchanged; behind a slanted face the slope term now lets a line within 3 px of the
+    face's depth slope show through, where 2 px did, in both styles. R02.T14.c's show-through
+    check draws a face-on square and does not exercise this. **Stated limit:** WebGPU scales the
+    depth slope's larger screen component (the sphere occluder takes its magnitude in its own
+    shader), so where a hull face's slope runs diagonally on the screen the term covers
+    3 ÷ √2 = 2.12 px of the cased edge's 2.25 px of coverage, and the face may hide up to 0.13 of
+    the casing's outer texel there. **For the orchestrator:** keep 3, as ruled (the UX decisions,
+    item 12), or raise it to about 3.2 (2.25 × √2 = 3.18), which keeps the coverage in front on
+    every slope and widens the show-through behind a slanted face by the same factor.
+  - **Plates, as built.** Nothing changes: the label block and the marks' labels stand on their
+    `--surface-0` plates (R02.T15). An instrument's slot over the primary's image is a `.panel` on
+    `--surface-1`, opaque chrome with its label block on it (the guide's Views bullet: "each a
+    panel"), not text on the image; the UX review agrees, and its look waits on the owner's look at
+    the slots.
+  - **A stylesheet in a test.** Vitest makes every CSS file empty, so a test cannot read the rule
+    that paints a plate. `vitest.config.mts` sets `css.include` to `?raw` imports alone: an import
+    for its effect stays empty, so jsdom still applies no rule, and `styles.css?raw` is its text.
+  - **Tests.** `overlay.test.ts`: in `aMarkedViewScene` with a ring, every batch of the overlay
+    (`body`, `hull`, `mark`, `orbit`, `predicted`, `ring`) is cased by `CASING_PX` in
+    `--surface-0`, it has no sprite and keeps the occluders and anchors, and the wireframe's list
+    keeps its hull edges uncased; the pass is `symbology`, loading, each batch's `--surface-0`
+    casing two casings wider and before its stroke. `ViewDisplay.test.tsx`, through the drawer: on
+    `PRECISION TEST` the hull's line draws are `[1.5]` in the wireframe and `[3.5, 1.5]` under
+    `symbology`, where every line draw is a `--surface-0` casing followed by its stroke, as the
+    wireframe's are not; with
+    `INSTRUMENT 1` open over a photorealistic primary, every text over the image is on a
+    `.view-label` or `.view-marks__label` plate, both are present, the slot holds text, and each
+    plate's rule in `styles.css` paints `var(--surface-0)`. `drawList.test.ts` and
+    `submit.test.ts` take the bias.
+  - **The smoke check** (`smoke/wireframe.ts`, `checkCasedHullEdge`): a face receding from
+    0.5 m to its far edge at 1 m, 24.35 px down the 64 px view; that edge as the wireframe's list
+    has a hull's, uncased at `STROKE_PX.heavy`, cased through `overlayDrawList` (in `--text`,
+    its casing in `--accent`, so that the casing's faint outer texel reads), against the same
+    draw with no face, at 2 × 10⁻³ a channel in rows 20 to 29 of the middle column (the face's
+    depth changes only down the view, so one column reads for all), and the casing's outer
+    texel, 2.15 px below the edge, drawn. It tests the slope along an axis only; the diagonal is
+    the stated limit above. `just test-render` passes it on both variants (that texel 0.0722 in
+    green both ways). By hand, not committed: at `slopeScale` 2 it fails, row 26 covered.
+  - **Open, for the orchestrator (the UX review's considers, not built).**
+    - Stroke and casing widths are device pixels (`STROKE_PX`, `CASING_PX`, over a viewport
+      scaled by `devicePixelRatio`), so at a ratio of 2, as on a Retina Mac, every stroke and
+      casing is half a CSS pixel. It is R02's; the casing over the image now depends on it, and
+      the slope bias is reasoned in device pixels too. Scale them by the ratio, or record device
+      pixels as the unit.
+    - The image has no hull in it, so the sky and its stars show inside a craft's cased outline,
+      where the wireframe's faces hide them. Design note 17 keeps craft as outlines until R11;
+      occluding the image under the hull's faces until lit craft exist would be a ruling.
+  - **Gate.** No `just ci` (the Day 2 protocol). The acceptance's vitest (32 files, 420 tests),
+    the app's vitest (324 files, 5,433 tests), `just check lint` from a clean typecheck cache,
+    Prettier, `just test-render` (both variants, 232 checks each, 0 uncaptured GPU errors) and the
+    console-ux skill's lint (its two errors, `smoke/wireframe.ts`'s literal colours of R02.T14.c,
+    predate this), contrast and glyph scripts.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, with no must-fix. Fixed:
+    the smoke check's lengths named in metres, its texel comparison failing on a texel it cannot
+    read, its widths from `STROKE_PX` and the casing from `overlayDrawList`; the shared scene moved
+    to `test/viewFixtures.ts`; the plate test run with an instrument open; every line draw of the
+    drawer's `symbology` pass checked as a casing and its stroke; the bias's show-through behind a
+    slanted face stated; R02's two other `slopeScale: 2` lines and the README given pointers; and
+    in the split, T16.b's bare statuses beside `ENABLE` and under `AUTO NOT AVAILABLE`, T8.a's
+    focus consider given to T16.b, and `SELECT` and the "offers `MAN` only" wording given to
+    T16.c.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

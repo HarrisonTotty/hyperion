@@ -24,7 +24,7 @@ import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import { controlEv100, type ExposureControl, exposureScale } from "../../view/photometry/exposure";
 import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
-import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
+import { overlaySubmission } from "../../view/photoreal/overlay";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
 import type { Histogram } from "../../view/post/histogram";
 import type { MeterMode } from "../../view/post/meter";
@@ -255,10 +255,8 @@ export class ViewFrameDrawer {
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
           previousRegimes: this.#regimes,
           meter: inputs.meter,
-          overlay: {
-            ...this.#wireframe.frame({ ...list, sprites: [] }, camera, viewport),
-            label: PHOTOREAL_PASS_LABELS.symbology,
-          },
+          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a).
+          overlay: overlaySubmission(this.#wireframe, list, camera, viewport),
         }),
       );
       if (plan === null) {

@@ -1,7 +1,8 @@
 // The hulls' depth-only occluder faces (plan R02, Design note 5): two-sided, colour writes off,
 // depth written and pushed away from the camera by the pass's depth bias, which the material
-// carries as `depthBiasAway { constant: 128, slopeScale: 2 }` and never sets on a line pass.
-// Composed after frame.wgsl.
+// carries as `depthBiasAway { constant: 128, slopeScale: 3 }` and never sets on a line pass: the
+// slope term covers a cased edge's half-width and its fringe over a photorealistic image
+// (R07.T16.a). Composed after frame.wgsl.
 
 struct Draw {
   // The craft's reference point from the camera, m (Design notes 2 and 22).

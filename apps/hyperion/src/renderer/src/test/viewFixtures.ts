@@ -8,19 +8,22 @@
  */
 import { type BodyIdHex, galacticPositionFromLy, type SystemIdHex } from "@hyperion/protocol";
 
-import { type Vec3, vec3 } from "../geometry/vec3";
+import { add, normalise, type Vec3, vec3 } from "../geometry/vec3";
 import type { CameraPose, Quaternion } from "../view/camera/pose";
 import type { CameraScene, OwnShip } from "../view/camera/state";
 import type { ViewPosition } from "../view/coords/position";
 import { TEST_HULL } from "../view/scene/hull";
 import {
   bodyKindSymbol,
+  type CraftPose,
   staticRetarded,
   type ViewBody,
   type ViewCraft,
+  type ViewOrbit,
   type ViewScene,
   type ViewStar,
 } from "../view/scene/model";
+import type { DrawCamera } from "../view/wireframe/drawList";
 
 /** The fixtures' system. */
 export const FIXTURE_SYSTEM: SystemIdHex = "0200080020000000";
@@ -204,4 +207,72 @@ export function aViewScene(overrides: Partial<ViewScene> = {}): ViewScene {
     defaultPose: aCameraPose(),
     ...overrides,
   };
+}
+
+/** A free camera 3 × 10⁷ m from the planet along +z, looking at it down −z. */
+export const OFF_PLANET_CAMERA: DrawCamera = {
+  pose: {
+    frame: { kind: "system", system: FIXTURE_SYSTEM },
+    positionM: add(FIXTURE_PLANET_CENTRE_M, vec3(0, 0, 3e7)),
+    orientation: NO_TURN,
+  },
+  fovXRad: Math.PI / 3,
+};
+
+/** The moon's orbit about the planet, a Moon-like Kepler orbit, for a view that draws it. */
+export const FIXTURE_MOON_ORBIT: ViewOrbit = {
+  body: FIXTURE_MOON,
+  parent: FIXTURE_PLANET,
+  orbit: {
+    semiMajorAxisM: 3.844e8,
+    eccentricity: 0.0549,
+    inclinationRad: 0.09,
+    ascendingNodeRad: 1,
+    argumentOfPeriapsisRad: 0.3,
+    meanAnomalyAtEpochRad: 0,
+    periodS: 2.36e6,
+  },
+};
+
+/**
+ * A craft's pose 10⁶ m off the planet's centre and `dzM` m towards {@link OFF_PLANET_CAMERA}, in
+ * the system frame.
+ */
+export function poseOffPlanet(dzM: number): CraftPose {
+  return {
+    position: {
+      kind: "system",
+      system: FIXTURE_SYSTEM,
+      m: add(FIXTURE_PLANET_CENTRE_M, vec3(1e6, 0, dzM)),
+    },
+    attitude: NO_TURN,
+  };
+}
+
+/**
+ * The fixture scene with marks of every kind a view strokes from {@link OFF_PLANET_CAMERA}: the
+ * moon's orbit drawn, the own ship moving, another craft (`other`, its hull in view) on a
+ * predicted path, and a sky of 40 stars ahead.
+ */
+export function aMarkedViewScene(overrides: Partial<ViewScene> = {}): ViewScene {
+  return aViewScene({
+    orbits: [FIXTURE_MOON_ORBIT],
+    craft: [
+      aViewCraft({ velocityMPerS: vec3(10, 0, -100) }),
+      aViewCraft({
+        id: "other",
+        designation: "OTHER",
+        pose: poseOffPlanet(1e7),
+        predictedPath: [poseOffPlanet(1e7), poseOffPlanet(9e6), poseOffPlanet(8e6)],
+      }),
+    ],
+    stars: Array.from({ length: 40 }, (_, i) =>
+      aViewStar({
+        id: `02000800200000${(i + 16).toString(16)}`,
+        direction: normalise(vec3(Math.sin(i) * 0.3, Math.cos(i * 1.7) * 0.2, -1)),
+        absoluteV: -2 + i * 0.2,
+      }),
+    ),
+    ...overrides,
+  });
 }

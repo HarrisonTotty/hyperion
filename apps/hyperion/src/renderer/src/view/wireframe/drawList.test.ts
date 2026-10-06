@@ -1,24 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { add, norm, normalise, vec3 } from "../../geometry/vec3";
+import { norm, normalise, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import {
-  aViewCraft,
-  aViewScene,
+  aMarkedViewScene,
   aViewStar,
   FIXTURE_MOON,
   FIXTURE_PLANET,
-  FIXTURE_PLANET_CENTRE_M,
   FIXTURE_SYSTEM,
-  NO_TURN,
+  OFF_PLANET_CAMERA,
 } from "../../test/viewFixtures";
-import type { CameraPose } from "../camera/pose";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
 import { occluderRadius } from "../depth/depth";
-import { type CraftPose, sceneOrigins, type ViewScene } from "../scene/model";
+import { sceneOrigins, type ViewScene } from "../scene/model";
 import {
   buildWireframeDrawList,
   type DrawCamera,
@@ -48,14 +45,7 @@ const OPTIONS: DrawOptions = {
 };
 
 /** A free camera 3 × 10⁷ m from the planet along +z, looking at it. */
-const CAMERA: DrawCamera = {
-  pose: {
-    frame: { kind: "system", system: FIXTURE_SYSTEM },
-    positionM: add(FIXTURE_PLANET_CENTRE_M, vec3(0, 0, 3e7)),
-    orientation: NO_TURN,
-  } satisfies CameraPose,
-  fovXRad: Math.PI / 3,
-};
+const CAMERA: DrawCamera = OFF_PLANET_CAMERA;
 
 /** The labels of the body marks of a list, `null` for a body drawn larger than its symbol. */
 function bodyLabels(list: WireframeDrawList): unknown[] {
@@ -67,55 +57,9 @@ function centre(body: string): ViewPosition {
   return { kind: "body", body, m: vec3(0, 0, 0) };
 }
 
-/** A point of the other craft's path, 10⁶ m off the planet's centre and `dz` m towards the camera. */
-function pathPoint(dz: number): CraftPose {
-  return {
-    position: {
-      kind: "system",
-      system: FIXTURE_SYSTEM,
-      m: add(FIXTURE_PLANET_CENTRE_M, vec3(1e6, 0, dz)),
-    },
-    attitude: NO_TURN,
-  };
-}
-
 /** The fixture scene with the moon's orbit drawn, a craft on a predicted path, and a sky. */
 function scene(): ViewScene {
-  const base = aViewScene();
-  return {
-    ...base,
-    orbits: [
-      {
-        body: FIXTURE_MOON,
-        parent: FIXTURE_PLANET,
-        orbit: {
-          semiMajorAxisM: 3.844e8,
-          eccentricity: 0.0549,
-          inclinationRad: 0.09,
-          ascendingNodeRad: 1,
-          argumentOfPeriapsisRad: 0.3,
-          meanAnomalyAtEpochRad: 0,
-          periodS: 2.36e6,
-        },
-      },
-    ],
-    craft: [
-      aViewCraft({ velocityMPerS: vec3(10, 0, -100) }),
-      aViewCraft({
-        id: "other",
-        designation: "OTHER",
-        pose: pathPoint(1e7),
-        predictedPath: [pathPoint(1e7), pathPoint(9e6), pathPoint(8e6)],
-      }),
-    ],
-    stars: Array.from({ length: 40 }, (_, i) =>
-      aViewStar({
-        id: `02000800200000${(i + 16).toString(16)}`,
-        direction: normalise(vec3(Math.sin(i) * 0.3, Math.cos(i * 1.7) * 0.2, -1)),
-        absoluteV: -2 + i * 0.2,
-      }),
-    ),
-  };
+  return aMarkedViewScene();
 }
 
 function build(options: Partial<DrawOptions> = {}, input: ViewScene = scene()): WireframeDrawList {
@@ -146,8 +90,8 @@ describe("buildWireframeDrawList", () => {
 
   it("cases every mark in --surface-0, so that one over a star sprite reads", () => {
     const list = build({ selection: { kind: "body", body: FIXTURE_PLANET } });
-    // Hull edges excepted: their own faces hide the stars behind them, and a casing would widen
-    // them past what the occluder's slope bias covers.
+    // Hull edges excepted: their own faces hide the stars behind them. The photorealistic
+    // style's overlay cases them too (R07.T16.a).
     const uncased = list.lines.filter(
       (line) =>
         !line.id.startsWith("hull:") &&
@@ -260,13 +204,13 @@ describe("buildWireframeDrawList", () => {
     expect(dashed.map((line) => line.id)).toEqual(["predicted:other"]);
   });
 
-  it("draws hull edges uncased", () => {
+  it("draws hull edges uncased in the wireframe", () => {
     expect(build().lines.find((line) => line.id === "hull:other")?.casingWidthPx).toBe(0);
   });
 
   it("draws a hull over two-sided occluder faces pushed away by the bias", () => {
     const mesh = build().occluderMeshes.find((m) => m.id === "other");
-    expect([mesh?.twoSided, mesh?.depthBiasAway]).toEqual([true, { constant: 128, slopeScale: 2 }]);
+    expect([mesh?.twoSided, mesh?.depthBiasAway]).toEqual([true, { constant: 128, slopeScale: 3 }]);
   });
 
   it("draws occluders, then lines, then sprites", () => {
