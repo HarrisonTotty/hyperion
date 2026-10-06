@@ -1,0 +1,96 @@
+#!/usr/bin/env perl
+# GNU coreutils' timeout(1) in the forms the justfile and its scripts use,
+# `timeout [-k <duration> | --kill-after=<duration>] <duration> <command> [args...]`, for systems
+# without it (stock macOS, where Homebrew's coreutils names it `gtimeout`). The justfile appends
+# this directory to PATH, so a system timeout(1) always comes first and Linux runs coreutils'.
+#
+# As GNU's does, it puts itself in a process group of its own (a session leader, as under
+# `setsid timeout ...`, leads one already) and runs the command there. After <duration> it sends
+# TERM to the command and to the group, then, with a kill-after, KILL that long later; INT, QUIT,
+# HUP and TERM sent to it are passed on the same way. A <duration> is seconds, fractional or with
+# a suffix s, m, h or d; 0 runs with no limit. The exit status is the command's (128 + the signal
+# when one ended it), 124 when the duration ran out, 137 when KILL was needed, 125 for a usage error,
+# 126 when the command cannot run and 127 when it is not found.
+use strict;
+use warnings;
+use Time::HiRes qw(alarm);
+
+sub usage {
+    print STDERR "timeout: $_[0]\n",
+        "usage: timeout [-k <duration> | --kill-after=<duration>] <duration> <command> [args...]\n";
+    exit 125;
+}
+
+sub seconds {
+    my ($text) = @_;
+    usage('a duration is missing') if !defined $text;
+    my %unit = ('' => 1, s => 1, m => 60, h => 3600, d => 86400);
+    $text =~ /\A([0-9]+(?:\.[0-9]*)?|\.[0-9]+)([smhd]?)\z/ or usage("invalid time interval '$text'");
+    return $1 * $unit{$2};
+}
+
+my $kill_after = 0;
+while (@ARGV && $ARGV[0] =~ /\A-/) {
+    my $option = shift @ARGV;
+    if ($option eq '--') { last }
+    elsif ($option =~ /\A--kill-after=(.*)\z/s) { $kill_after = seconds($1) }
+    elsif ($option eq '-k' || $option eq '--kill-after') { $kill_after = seconds(shift @ARGV) }
+    elsif ($option =~ /\A-k(.+)\z/s) { $kill_after = seconds($1) }
+    else { usage("unsupported option '$option'") }
+}
+my $duration = seconds(shift @ARGV);
+usage('a command is missing') if !@ARGV;
+
+setpgrp(0, 0);
+my $own_group = getpgrp() == $$;
+# Not stopped by reading or writing the terminal from a background group; the command inherits it.
+$SIG{TTIN} = $SIG{TTOU} = 'IGNORE';
+
+my $child = fork() // do { print STDERR "timeout: fork: $!\n"; exit 125 };
+if ($child == 0) {
+    { exec { $ARGV[0] } @ARGV }
+    print STDERR "timeout: failed to run command '$ARGV[0]': $!\n";
+    exit($!{ENOENT} ? 127 : 126);
+}
+
+my $timed_out = 0;
+my $killing = 0;
+
+# Send a signal to the command and to the group, ignoring it here first so as not to receive it
+# back. KILL cannot be ignored, so a KILL to the group ends this process too, as GNU's does (137).
+sub send_all {
+    my ($signal) = @_;
+    kill $signal, $child;
+    if ($own_group) {
+        $SIG{$signal} = 'IGNORE' if $signal ne 'KILL';
+        kill $signal, -$$;
+    }
+}
+
+sub stop {
+    my ($signal) = @_;
+    if ($killing) {
+        send_all('KILL');
+        return;
+    }
+    if ($kill_after > 0) {
+        $killing = 1;
+        alarm($kill_after);
+    }
+    send_all($signal);
+    send_all('CONT') if $signal ne 'CONT';
+}
+
+$SIG{ALRM} = sub {
+    $timed_out = 1 if !$killing;
+    stop('TERM');
+};
+$SIG{$_} = sub { stop($_[0]) } for qw(INT QUIT HUP TERM);
+alarm($duration) if $duration > 0;
+
+my $waited;
+do { $waited = waitpid($child, 0) } while ($waited == -1 && $!{EINTR});
+my $status = $?;
+exit 124 if $timed_out;
+exit 128 + ($status & 127) if $status & 127;
+exit $status >> 8;

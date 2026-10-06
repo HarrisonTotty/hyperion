@@ -1,7 +1,21 @@
 # HYPERION task runner — `just` lists recipes, `just ci` is the gate before a commit and
 # `just ci-slow` adds the slow statistical tests.
+#
+# The recipes and their scripts run on Linux and on stock macOS, and on Windows from WSL or Git
+# Bash. macOS's bash is 3.2 and its tools are BSD's, so they use neither bash 4 (`exec {fd}<`,
+# `declare -A`, `mapfile`, `${x,,}`) nor GNU-only options (`cp --reflink`, `realpath -e`, `sed -i`
+# with no suffix, `date +%N`, `stat -c`), and an array that may be empty is expanded as
+# `${a[@]+"${a[@]}"}`, since bash before 4.4 calls `"${a[@]}"` of an empty array unbound under
+# `set -u`. The util-linux and coreutils tools that macOS lacks are in `tools/portable`.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
+
+# Last on PATH, so that a system's own tools come first and Linux runs util-linux's and
+# coreutils': stand-ins for `flock`, `setsid` and `timeout`, which stock macOS lacks, in Perl,
+# which it ships. Trimmed before it is appended, so that a recipe that runs `just` adds it once.
+portable := justfile_directory() / "tools" / "portable"
+path_separator := if os_family() == "windows" { ";" } else { ":" }
+export PATH := trim_end_match(env("PATH"), path_separator + portable) + path_separator + portable
 
 _default:
     @just --list
@@ -12,18 +26,21 @@ install:
 
 # A new worktree starts with no `target/`, and its first `just ci` builds every dependency for
 # every profile and target. This gives it another worktree's build directory as a copy-on-write
-# clone (`cp --reflink=always`, which btrfs and XFS support): instant, and taking no space until
-# either copy changes. Dependencies from the registry are then fresh; the workspace's own crates
-# are rebuilt, since their paths differ. It refuses when `target/` exists, and when the filesystem
-# cannot clone it says so and copies nothing, since a plain copy would be tens of gigabytes. It
-# holds each of the source's cargo build-directory locks while copying, so that no build of the
-# source is caught half-written; a build there waits for the copy, and the copy for a build.
+# clone: instant, and taking no space until either copy changes. On Linux it clones with
+# `cp --reflink=always`, which btrfs and XFS support; on macOS with clonefile(2), which APFS
+# supports, called through Python's ctypes (the Command Line Tools ship Python 3), since macOS's
+# `cp -c` makes a full copy where it cannot clone. Dependencies from the registry are then fresh;
+# the workspace's own crates are rebuilt, since their paths differ. It refuses when `target/`
+# exists, and when the filesystem cannot clone it says so and copies nothing, since a plain copy
+# would be tens of gigabytes. It holds each of the source's cargo build-directory locks while
+# copying, so that no build of the source is caught half-written; a build there waits for the copy,
+# and the copy for a build.
 # Seed this worktree's `target/` from another worktree's, e.g. `just seed-target ../agent-x`.
 seed-target source:
     #!/usr/bin/env bash
     set -euo pipefail
     here="{{ justfile_directory() }}"
-    src="$(realpath -e "{{ source }}")/target"
+    src="$(CDPATH='' cd -- "{{ source }}" && pwd -P)/target"
     if [[ -e "$here/target" ]]; then
         echo "error: $here/target exists; seed-target only seeds a worktree that has none" >&2
         exit 1
@@ -36,22 +53,43 @@ seed-target source:
         echo "error: the source is this worktree" >&2
         exit 1
     fi
+    if [[ "$(uname -s)" == Darwin ]]; then
+        # clonefile(2) clones a directory's whole tree, timestamps included, or fails.
+        clone=(python3 -c '
+    import ctypes, os, sys
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.clonefile(os.fsencode(sys.argv[1]), os.fsencode(sys.argv[2]), 0) != 0:
+        sys.exit("clonefile {} {}: {}".format(sys.argv[1], sys.argv[2], os.strerror(ctypes.get_errno())))
+    ')
+        how="clonefile(2)"
+    else
+        clone=(cp -r --reflink=always --preserve=timestamps)
+        how="cp --reflink=always"
+    fi
     probe="$here/.seed-target-probe"
     trap 'rm -rf "$probe" "$here/target.seeding"' EXIT
-    if ! cp --reflink=always "$(realpath -e "$here/justfile")" "$probe" 2>/dev/null; then
-        echo "error: this filesystem cannot clone files (cp --reflink=always failed), so nothing was copied;" >&2
+    if ! "${clone[@]}" "$here/justfile" "$probe" 2>/dev/null; then
+        echo "error: this filesystem cannot clone files ($how failed), so nothing was copied;" >&2
         echo "a plain copy would take as much space again: build from scratch with \`just ci\` instead" >&2
         exit 1
     fi
+    locks=()
     while IFS= read -r -d '' lock; do
-        exec {fd}<"$lock"
+        locks+=("$lock")
+    done < <(find "$src" -maxdepth 3 -name .cargo-lock -print0)
+    # Each lock on a descriptor of its own, numbered from 20, since bash 3.2 cannot allocate one
+    # (`exec {fd}<`).
+    fd=20
+    for lock in ${locks[@]+"${locks[@]}"}; do
+        eval "exec $fd<\"\$lock\""
         if ! flock -n "$fd"; then
             echo "waiting for a build in the source to finish ($lock)..." >&2
             flock "$fd"
         fi
-    done < <(find "$src" -maxdepth 3 -name .cargo-lock -print0)
+        fd=$((fd + 1))
+    done
     start=$SECONDS
-    cp -r --reflink=always --preserve=timestamps "$src" "$here/target.seeding"
+    "${clone[@]}" "$src" "$here/target.seeding"
     mv "$here/target.seeding" "$here/target"
     echo "seeded $here/target from $src in $((SECONDS - start)) s" >&2
 
@@ -81,7 +119,7 @@ client *args: gen-surface
     if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
         x11=(--ozone-platform=x11)
     fi
-    pnpm --filter hyperion exec electron-vite dev -- "${x11[@]}" {{ args }}
+    pnpm --filter hyperion exec electron-vite dev -- ${x11[@]+"${x11[@]}"} {{ args }}
 
 # A client of a running server, like the bridge: it sends R03's `scene_ship`, since no console
 # does until sessions exist, and the server starts the ship at the galactic centre, in no system,
@@ -211,6 +249,76 @@ lint: gen-surface _clippy _oxlint
 _clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# The platforms that `cross-clippy` checks, less the one it runs on: Linux, macOS on Apple silicon
+# and Windows, each on the architecture its developers use. `rust-toolchain.toml` lists them too,
+# so that rustup installs their standard libraries.
+cross_targets := "x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc"
+
+# `_clippy` and `gpu-replay-check`'s Clippy for the other platforms (macOS and Windows, from
+# Linux): code gated to one platform (`cfg(unix)`, `target_os = "linux"`) can leave an import or a
+# helper unused on another, which only that platform's Clippy sees. Clippy never links, so the
+# dependencies that compile C for their target (alloca, under the dev-dependency criterion, and
+# gpu-replay's wayland-backend) get a stand-in compiler and archiver that write empty files, and no
+# SDK is needed: only the rustup targets. The host keeps its own compiler for the build scripts. It
+# builds in `target/cross` and `target/tools-cross`, beside the other builds, so `ci` runs it with
+# the checks beside them: about a second when nothing changed, a minute or more from cold.
+# Clippy for the other platforms (macOS and Windows from Linux), with no SDK.
+cross-clippy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{ justfile_directory() }}"
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    targets=()
+    for target in {{ cross_targets }}; do
+        if [[ "$target" != "$host" ]]; then targets+=("$target"); fi
+    done
+    installed="$(rustup target list --installed)"
+    for target in "${targets[@]}"; do
+        grep -qx "$target" <<<"$installed" || {
+            echo "error: the rustup target $target is missing: run \`rustup target add ${targets[*]}\`" >&2
+            exit 1
+        }
+    done
+    mkdir -p "$root/target/cross"
+    stub="$root/target/cross/stub-cc"
+    # cc-rs probes the compiler with `-E` (answered as clang) and `-?` (refused, so not cl), then
+    # compiles to `-o`/`-Fo` and archives with `ar <mode> <archive>` or `-out:<archive>`. Written
+    # beside and renamed into place, so that a build running the old one never reads half of it.
+    cat >"$stub.new" <<'EOF'
+    #!/usr/bin/env bash
+    # cross-clippy's stand-in C compiler and archiver: an empty file at the output path.
+    set -euo pipefail
+    out=""
+    if [[ $# -ge 2 && "$1" =~ ^[A-Za-z]+$ ]]; then out="$2"; fi
+    prev=""
+    for arg in "$@"; do
+        case "$arg" in
+            -E) echo '#pragma message "clang"'; exit 0 ;;
+            '-?' | '/?') exit 1 ;;
+            --version) echo stub-cc; exit 0 ;;
+        esac
+        if [[ "$prev" == -o ]]; then out="$arg"; fi
+        case "$arg" in
+            -out:*) out="${arg#-out:}" ;;
+            -o?*) out="${arg#-o}" ;;
+            -Fo?* | /Fo?*) out="${arg#?Fo}" ;;
+        esac
+        prev="$arg"
+    done
+    if [[ -z "$out" ]]; then echo "stub-cc: no output path in: $*" >&2; exit 1; fi
+    : >"$out"
+    EOF
+    chmod +x "$stub.new"
+    mv -f "$stub.new" "$stub"
+    flags=()
+    for target in "${targets[@]}"; do
+        export "CC_${target//-/_}=$stub" "AR_${target//-/_}=$stub"
+        flags+=(--target "$target")
+    done
+    cargo clippy --workspace --all-targets "${flags[@]}" --target-dir "$root/target/cross" -- -D warnings
+    cargo clippy --locked --manifest-path "$root/tools/gpu-replay/Cargo.toml" --all-targets "${flags[@]}" \
+        --target-dir "$root/target/tools-cross" -- -D warnings
+
 # oxlint, type-aware; it reads the surface module's `.d.ts`, so `gen-surface` must have run.
 _oxlint:
     pnpm lint
@@ -231,7 +339,10 @@ fmt-check:
 # tests (`ws`, `outbound`) and time budgets for no fault of the code. Builds happen before the lock.
 heavy_lock := `git rev-parse --path-format=absolute --git-common-dir` / "hyperion-heavy-tests.lock"
 
-# Run a command under the heavy-test lock, waiting for its turn (a crashed holder releases it).
+# Run a command under the heavy-test lock, waiting for its turn (a crashed holder releases it). The
+# lock is flock(2) on the lock file, held by this shell's descriptor 9 and the copies its children
+# inherit, and so released when they all end, whatever ends them. `flock` is util-linux's, or on
+# stock macOS `tools/portable/flock`, which takes the same lock, so the two exclude each other.
 [positional-arguments]
 _locked +cmd:
     #!/usr/bin/env bash
@@ -249,11 +360,11 @@ _locked +cmd:
     # stopped (by the cap, or by systemd-oomd watching the user manager) instead of freezing the
     # machine or taking the login session with it, as happened on 2026-10-03. `HEAVY_MEMORY_MAX`
     # overrides the cap, and `HEAVY_SLICE` names a user slice to run it in (such as one that bounds
-    # all of a session's agent work together).
+    # all of a session's agent work together). With no systemd (macOS) it runs uncapped.
     if command -v systemd-run >/dev/null && systemd-run --user --scope --quiet true 2>/dev/null; then
         slice=()
         if [ -n "${HEAVY_SLICE:-}" ]; then slice=(--slice="$HEAVY_SLICE"); fi
-        systemd-run --user --scope --quiet "${slice[@]}" -p MemoryMax="${HEAVY_MEMORY_MAX:-22G}" -p MemorySwapMax=2G "$@" || status=$?
+        systemd-run --user --scope --quiet ${slice[@]+"${slice[@]}"} -p MemoryMax="${HEAVY_MEMORY_MAX:-22G}" -p MemorySwapMax=2G "$@" || status=$?
     else
         "$@" || status=$?
     fi
@@ -382,7 +493,9 @@ _wasip1 +args:
     set -euo pipefail
     dirs="--dir={{ justfile_directory() }}"
     if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
-        dirs+=" --dir=$(realpath -m "$CARGO_TARGET_DIR")"
+        # Its absolute path, symbolic links resolved; cargo would create it.
+        mkdir -p "$CARGO_TARGET_DIR"
+        dirs+=" --dir=$(CDPATH='' cd -- "$CARGO_TARGET_DIR" && pwd -P)"
     fi
     export CARGO_TARGET_WASM32_WASIP1_RUNNER="${WASMTIME:-wasmtime} $dirs"
     cargo "$@"
@@ -484,7 +597,7 @@ test-wasm: test-wasm-fast test-wasm-slow
 browser_crates := "hyperion-base hyperion-surface hyperion-testkit"
 
 # How long one test binary may run on the browser target, in seconds: wasm-bindgen-test's Node mode
-# has no timeout of its own.
+# has no timeout of its own. The runner's `timeout` is coreutils', or `tools/portable/timeout`.
 browser_timeout := "600"
 
 # Run the browser target's suites (`--lib --tests`, at the slow-test profile, since debug wasm is
@@ -624,14 +737,15 @@ build: gen-surface
     cargo build --workspace --release
     pnpm build
 
-# `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, in
-# three phases. First, beside the builds, the checks that need no cargo build directory of the
-# worktree (formatting, `tsc`, oxlint, and the relaxed-SIMD refusal and `gpu-replay-check`, which
-# have target directories of their own), their output held until they finish. Second, the cargo steps one after another, since
-# they share the build directory's lock: Clippy, which compiles every target as `cargo check` would,
-# so `check`'s `cargo check` is not repeated; the bindings' check, before any test can rewrite the
-# bindings it compares; the fitted tables' check; then every test build. Third, one hold of the
-# heavy-test lock for all the suites, rather than three turns in the queue behind other worktrees.
+# `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, and
+# `cross-clippy`, in three phases. First, beside the builds, the checks that need no cargo build
+# directory of the worktree (formatting, `tsc`, oxlint, and the relaxed-SIMD refusal,
+# `gpu-replay-check` and `cross-clippy`, which have target directories of their own), their output
+# held until they finish. Second, the cargo steps one after another, since they share the build
+# directory's lock: Clippy, which compiles every target as `cargo check` would, so `check`'s
+# `cargo check` is not repeated; the bindings' check, before any test can rewrite the bindings it
+# compares; the fitted tables' check; then every test build. Third, one hold of the heavy-test lock
+# for all the suites, rather than three turns in the queue behind other worktrees.
 # The gate before a commit: everything but the slow tests, with the fast suites on WebAssembly.
 ci: gen-surface (_wasm-preflight "wasip1" "browser")
     #!/usr/bin/env bash
@@ -639,7 +753,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     cd "{{ justfile_directory() }}"
     side_log="$(mktemp)"
     trap 'rm -f "$side_log"' EXIT
-    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check >"$side_log" 2>&1 &
+    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check cross-clippy >"$side_log" 2>&1 &
     side=$!
     status=0
     just _clippy _browser-clippy gen-protocol-check fit-check _test-build _wasm-fast-build || status=$?
@@ -647,7 +761,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     wait "$side" || side_status=$?
     cat "$side_log"
     if [[ "$status" -ne 0 || "$side_status" -ne 0 ]]; then
-        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal and gpu-replay: exit $side_status)" >&2
+        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay and cross-clippy: exit $side_status)" >&2
         exit 1
     fi
     just _locked just _test-run _wasm-fast-run

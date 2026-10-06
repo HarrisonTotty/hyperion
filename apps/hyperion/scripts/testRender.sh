@@ -15,7 +15,9 @@
 #
 # Each run gets a fresh `--user-data-dir`, removed afterwards, so that a run killed part-way leaves
 # no profile, lock or cache for the next; Electron runs in a process group of its own under a
-# `timeout`, and that whole group is killed when the script ends for any reason.
+# `timeout`, and that whole group is killed when the script ends for any reason. `setsid` and
+# `timeout` are util-linux's and coreutils', or on macOS the justfile's `tools/portable` stand-ins.
+# It runs on bash 3.2 (macOS's): an array that may be empty is expanded as `${a[@]+"${a[@]}"}`.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,6 +42,16 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 
+# Milliseconds since the epoch: GNU date's `%3N`, or Perl's clock where date has no `%N` (macOS).
+now_ms() {
+    local now
+    now="$(date +%s%3N 2>/dev/null || true)"
+    if [[ -z "$now" || "$now" == *[!0-9]* ]]; then
+        now="$(perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000')"
+    fi
+    echo "$now"
+}
+
 profile=""
 group=""
 cleanup() {
@@ -55,18 +67,19 @@ trap cleanup EXIT INT TERM
 for variant in "${variants[@]}"; do
     echo "== smoke run: variant $variant, fixture $fixture"
     profile="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke.XXXXXX")"
-    start=$(date +%s%3N)
+    start=$(now_ms)
     status=0
     env -u DISPLAY -u WAYLAND_DISPLAY setsid timeout --kill-after=10 300 "$electron" \
-        "${adapter_switches[@]}" "${headless_switches[@]}" "--user-data-dir=$profile" \
-        "$here/out/main/smoke.js" --smoke-variant="$variant" --smoke-fixture="$fixture" "${captures[@]}" &
+        ${adapter_switches[@]+"${adapter_switches[@]}"} "${headless_switches[@]}" \
+        "--user-data-dir=$profile" "$here/out/main/smoke.js" --smoke-variant="$variant" \
+        --smoke-fixture="$fixture" ${captures[@]+"${captures[@]}"} &
     group=$!
     wait "$group" || status=$?
     kill -KILL -- "-$group" 2>/dev/null || true
     group=""
     rm -rf -- "$profile"
     profile=""
-    echo "== exit $status after $(( $(date +%s%3N) - start )) ms"
+    echo "== exit $status after $(( $(now_ms) - start )) ms"
     if [[ $status -ne 0 ]]; then
         exit "$status"
     fi

@@ -89,6 +89,22 @@ just client    # run the Electron client with hot reload (`just client --help` f
 
 Options to `just client` reach the client: `just client --address 10.0.0.5 --port 9100`.
 
+### Platforms
+
+HYPERION builds and runs on Linux, macOS and Windows. The recipes are bash scripts.
+
+- **Linux** is the reference: the checks and every recorded measurement run there. Where
+  `systemd-run --user` works, the heavy test runs are capped in memory.
+- **macOS** needs the Xcode Command Line Tools (`xcode-select --install`, for clang, git and
+  Python 3) and the prerequisites above, all of which Homebrew has. The recipes run on macOS's own
+  bash 3.2 and BSD tools. Where macOS lacks a util-linux or coreutils tool that a recipe uses
+  (`flock`, `setsid`, `timeout`), the justfile puts a stand-in from `tools/portable/`, written in
+  the system Perl, last on `PATH`. The heavy-test lock works as on Linux, but with no systemd the
+  runs are not capped in memory. `just seed-target` clones with APFS's clonefile(2).
+- **Windows**: run the recipes from WSL 2, a Linux system where they run as on Linux, or from Git
+  Bash. PowerShell and `cmd.exe` cannot run them. `just cross-clippy`, and so `just ci`, needs WSL,
+  since its stand-in C compiler is a bash script. Neither has been tried on Windows yet.
+
 ### Seeing a generated system in `VIEW`
 
 Until sessions exist, the ship is a stand-in that the server starts at the galactic centre, in no
@@ -172,10 +188,19 @@ somewhere else, and the `LINK` display shows the endpoint in use.
 | `just test`  | `cargo test`              | `vitest`                      |
 
 `just ci` is the gate before a commit: the four checks above, a check that the fitted tables are
-fresh, a check that the generated protocol bindings are up to date, and `just test-wasm-fast`, the
-fast suites on WebAssembly. Without the WebAssembly suites it took about three minutes on a quiet
-machine; they add about two more (measured under shared load, to be re-timed quiet).
+fresh, a check that the generated protocol bindings are up to date, `just cross-clippy`, and
+`just test-wasm-fast`, the fast suites on WebAssembly. Without the WebAssembly suites it took about
+three minutes on a quiet machine; they add about two more (measured under shared load, to be
+re-timed quiet).
 
+- `just cross-clippy`, part of `just ci`, runs Clippy over every target of the workspace and of
+  `tools/gpu-replay` for the other two platforms, of Linux (x86-64), macOS (Apple silicon) and
+  Windows (x86-64, MSVC): macOS and Windows from Linux, Windows and Linux from a Mac. Code gated
+  to one platform (`cfg(unix)`, `target_os = "linux"`) can leave an import or a helper unused on
+  another, which only that platform's Clippy sees. Clippy never links, so it needs no SDK: only the
+  platforms' standard libraries, which rustup installs from `rust-toolchain.toml`, and a stand-in
+  C compiler that it writes under `target/cross/`. It builds in `target/cross` and
+  `target/tools-cross` and runs beside the other builds; on a warm tree it takes about a second.
 - `just ci-slow` is `just ci` plus `just test-slow` and `just test-wasm-slow`. The slow tests take
   far longer than the rest, so run it before a push that changes the sim, and after a
   `GENERATOR_VERSION` bump.

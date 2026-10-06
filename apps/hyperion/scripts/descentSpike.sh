@@ -23,7 +23,9 @@
 # protobuf stream to a temporary file before the client reads it over CDP (R05.T14.i). The server,
 # the companion load and Electron run in process groups of their own under `timeout`, each group
 # killed when the script ends for any reason. The exit status is the client's: 0 pass, 1 fail, 3
-# the watchdog.
+# the watchdog. `setsid` and `timeout` are util-linux's and coreutils', or on macOS the justfile's
+# `tools/portable` stand-ins. It runs on bash 3.2 (macOS's): an array that may be empty is expanded
+# as `${a[@]+"${a[@]}"}`.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -51,7 +53,7 @@ if ! [[ "$companion" =~ ^[0-9]+$ ]]; then
     exit 2
 fi
 smoke=0
-for arg in "${spike_args[@]}"; do
+for arg in ${spike_args[@]+"${spike_args[@]}"}; do
     if [[ "$arg" == --smoke ]]; then
         smoke=1
     fi
@@ -61,7 +63,7 @@ profile=""
 spool=""
 groups=()
 cleanup() {
-    for group in "${groups[@]}"; do
+    for group in ${groups[@]+"${groups[@]}"}; do
         kill -KILL -- "-$group" 2>/dev/null || true
     done
     if [[ -n "$profile" ]]; then
@@ -110,8 +112,9 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
 fi
 status=0
 start=$(date +%s)
-env "${env_run[@]}" setsid timeout --kill-after=10 "$limit" "$electron" "${x11[@]}" \
-    "$here/out/main/index.js" --descent-spike --port "$port" "${spike_args[@]}" \
+env ${env_run[@]+"${env_run[@]}"} setsid timeout --kill-after=10 "$limit" "$electron" \
+    ${x11[@]+"${x11[@]}"} "$here/out/main/index.js" --descent-spike --port "$port" \
+    ${spike_args[@]+"${spike_args[@]}"} \
     "--user-data-dir=$profile" &
 client=$!
 groups+=("$client")
