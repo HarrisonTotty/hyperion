@@ -4141,11 +4141,109 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
       the descent arc the rAF p95 is 66.7 and 83.3 ms; from the approach on it is 16.8 ms.
     - The canvas was 1,398 × 793 px, hidden. Whether the timer stops because the GPU falls behind
       the read-backs is not separated here. It is open for the orchestrator, ahead of T17's
-      visible high runs.
+      visible high runs. (Diagnosed in the next record, "R05.T14, the high run's pass timer and
+      atmosphere, diagnosed".)
   - _Other deviations._ The full runs wrote their files straight into this directory, as the
     owner's runs will. The A/B runs wrote theirs under `target/laneD/t14f2/` (`--out`). The
     README's T16 and T17 commands use the seeds 7, 0 and 1, which the clearance ruling checked by
     hand; the plan names no seeds.
+
+- **R05.T14, the high run's pass timer and atmosphere, diagnosed** (2026-10-06, after T14.f).
+  Lane D reproduced the first 150 s of T14.f's high run three times. Each was hidden, seed 7, on
+  the RTX 3080, under `just _locked` in an 8 G scope, with load ≤ 5 at the start. The build
+  carried temporary instruments, none committed (`target/laneD/t14diag/`): the renderer's console
+  in the log, the timer's number against the spike's count every frame, the three "atmosphere
+  view" dispatches labelled apart, the ray march's size, and `nvidia-smi` at 100 ms.
+  - **The timer stopped because the spike miscounted, and that is fixed.** R07.T19 (7e80d5d, after
+    T14.c's low run) made `PassTimer.resolve` number a resolve it drops when all 135 read-back
+    pairs are in flight. Such a resolve never calls `resolveQuerySet`. The spike's
+    `ResolveCounter` counted those calls, so after the first drop its numbers fell behind the
+    timer's. Every later report then carried a number past every recorded frame and was thrown
+    away.
+    - Evidence (d1, the committed counter): the timer's one warning ("135 resolves' pass times
+      are still being read; dropping some") came at 9.25 s. By 13.2 s the timer was 179 ahead of
+      the count, and from then on every report (300 a second) was unmatched. Of 7,182 frames, 556
+      were timed.
+    - The ring ran out because a hidden window renders offscreen. Its rAF keeps 60 Hz whatever
+      the GPU does, so in a 70 ms plateau (below) the GPU fell more than 27 frames behind (135
+      pairs at 5 resolves a frame). The low runs never did, so their two counts agreed.
+    - Ruled out: the query set (5–7 timed passes a frame of its 64); a `mapAsync` that never
+      settles (the lag went back to 5 resolves after every backlog); a device error (none
+      logged); the untimed fallback (`untimedPasses` counts only passes beyond 64, and was 0); and
+      a resolution controller (the spike runs none, and the march's size stayed 1,398 × 793 at
+      scale 1 with 32 samples).
+    - **Fix (lane D):** `ResolveCounter` now follows the engine's own count,
+      `RenderEngine.passTimesFrame` (`follow`, called in `spikeGpu`'s `load`), which counts
+      dropped resolves too. `deviceMade()` carries the run's highest number across a rebuild, since
+      `ResilientEngine` releases the lost engine before it asks for a device. Four tests: the
+      engine's count with a dropped number, a rebuild through the real `ResilientEngine`, a frame
+      after a dropped resolve getting its times, and `load` following the engine. The first three
+      fail on the old counter, and the last fails without `follow`.
+    - Run with the fix (d2): 6,403 of 6,937 frames were timed, to the end.
+      - 402 (6.2%) were dropped whole during GPU backlogs, and so are the slow frames. A hidden run
+        whose GPU falls behind therefore understates its GPU rows.
+      - 110 frames (1.7%) are partial, which moves no figure (atmosphere p95 70.41 against 70.40 ms
+        without them).
+      - Options for later: count the dropped numbers in the report (results v5) and flag a row; or
+        leave out of the sums any frame missing one of its resolves, as VIEW's
+        `PrimaryFrameTimes` does. A shown window's presentation keeps the backlog to a few frames,
+        so visible runs should rarely drop.
+  - **The atmosphere's cost is real GPU work, and it comes from how the ray march's shader reads
+    its medium.**
+    - Of the three dispatches, the per-pixel ray march is the cost: p50 6.12 ms, p95 69.88 ms.
+      The sky view takes 0.18 ms at p95 and the aerial perspective 0.38 ms. The per-planet tables
+      are baked once, at frame 0 (90.6 ms), never again.
+    - From 400 km every pixel whose ray meets the shell marches 32 samples. The camera's attitude
+      is steady, so the work a frame is steady too.
+    - Yet the march runs in a cycle of 9.0–11.4 s: 0.62–0.65 s at a median 24.6 ms, then
+      1.63–1.68 s at about 6.1 ms, then 0.93–1.08 s at a median 70.0 ms, then 5.7–8.0 s at about
+      6.1 ms. The cycle is not fixed in script time: d1's phase differed and stopped at 127 s.
+    - The GPU stayed at P0 (1,965–1,980 MHz, memory 9,501 MHz) throughout. In the 70 ms plateaus
+      it ran at 100% utilization and 276 W (p50), against 46% and 197 W between them: more work,
+      not waiting.
+    - The cause is `common.wgsl`'s and `view.wgsl`'s helpers. `sourceAt`, `mediumAt` and
+      `phasedScatteringAt` take the 416 B `Medium` by value and index its `terms` with a loop
+      variable, three loops a sample. A dynamically indexed array held by value goes into a
+      per-invocation variable (Tint's handling), which is the likely mechanism.
+    - Experiment (d3, temporary, `instrument3.py`): the march's helpers read the module-scope
+      `medium` uniform in place, with the same arithmetic.
+      - The march fell to p50 2.20, p95 2.84 and at most 10.5 ms, with no plateau.
+      - rAF p95 / p99 / max fell to 16.7 / 16.8 / 33.4 ms, with no interval above 40 ms. All 8,976
+        frames were timed.
+    - At that load the driver ran the GPU at 900–1,320 MHz (P3/P5, SM about 27%). The march's time
+      scaled with the clock: 2.22 ms at about 1,100 MHz and 1.31 ms in the 150 frames at P0.
+    - So high's atmosphere would be about 1.6 ms at full clock, and 2.7–3.5 ms at the clocks the
+      driver picks. That is still over the 1 ms row.
+    - The 1 ms row is the brainstorm's estimate, "0.5–1 ms: sky-view and aerial-perspective
+      tables, and a ray march from orbit", which the brainstorm calls "an estimate, not a
+      measurement" for this plan to replace (T18).
+    - T15's offscreen replay of low (wgpu's compiler, naga, gave 0.165 ms against the client's
+      3.57 ms) is consistent with this, though not proven by it.
+  - **The hitches are the march's plateaus.** Once the backlog fills the renderer, rAF falls to
+    the GPU's 70 ms frames, 66.7–83.3 ms (4–5 vsyncs), for about 3 s of each cycle: about 45 long
+    intervals every 10 s through the coast and the arc.
+    - Inside the atmosphere the march skips the sky (`needed` in `rayMarch.wgsl`), consistent with
+      T14.f's 16.8 ms p95 from the approach on.
+    - Ruled out: a table bake (once only), the main thread (our code's p50 2.1 ms), and the GPU's
+      clocks (P0 throughout).
+  - **Options, for lane C (the shader is R05.T12's):**
+    1. Read the medium in place, in every kernel that passes `Medium` by value, not only the
+       march. Check it with the atmosphere's render tests.
+    2. Toward 1 ms at full clock: evaluate the terms' densities once a sample, not three times;
+       march fewer samples; or march at half resolution with low's depth-aware upsample.
+    3. Have T18 re-rule the row from measured figures.
+
+    The low setting runs the same shader, at 3.57–3.73 ms against its 4 ms limit here, so the fix
+    bears on T16 (the UHD 620) too.
+
+  - **A measurement caveat for T17 and T18:** a GPU row is read at the clocks the driver picks. At
+    the spike's light load, this GPU runs a compute-bound pass at about 1.7 times its time at full
+    clock. Options: record the clocks beside the rows (the memory sampler already reads
+    `nvidia-smi`), or rule that a row measures the pass at the clocks it ran at.
+  - **T17:** with the fix merged, the timer no longer stops. On the committed shader, though,
+    high's atmosphere misses its row by 6 times between plateaus and 70 times at p95, and the
+    frame rows fail in the coast and the arc. Lane D's view is that T17's high runs wait for
+    option 1; until then they would measure a known failure.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

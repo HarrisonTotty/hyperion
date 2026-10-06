@@ -5,10 +5,11 @@
  *
  * @remarks
  * The engine is reached only through the spike's `ViewEngineSource` (R01 leaves no other way):
- * its `GPU` is wrapped (`wrapGpu`) so that the device it gives carries T14.a's pipeline tally, a
- * count of the timer's resolves, and T15.a's capture when `--capture` is given, and the same
- * wrapped `GPU` is the engine's `LoadEngineOptions.gpu`, so a rebuild after a device loss is
- * measured too.
+ * its `GPU` is wrapped (`wrapGpu`) so that the device it gives carries T14.a's pipeline tally and
+ * T15.a's capture when `--capture` is given, and the wrapper tells the resolve numbering of each
+ * new device, whose timer numbers from 1 again; the same wrapped `GPU` is the engine's
+ * `LoadEngineOptions.gpu`, so a rebuild after a device loss is measured too. The engine it loads
+ * numbers the resolves (`RenderEngine.passTimesFrame`).
  */
 
 import type { DescentSpikeReport, SpikeLatePipeline, SpikePassRow } from "../../../../preload/api";
@@ -16,7 +17,7 @@ import type { ViewEngineSource } from "../../displays/view/useViewEngine";
 import { loadRenderEngine } from "../engine/loadEngine";
 import type { AllocationEvent } from "../engine/memory";
 import { requestAdapterOutcome } from "../engine/platform";
-import type { PassTimes } from "../engine/types";
+import type { PassTimes, RenderEngine } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { levelBoundM, type PlanetGeometry } from "../terrain/planet";
 import { type SelectionInput, selectPatches } from "../terrain/select";
@@ -58,46 +59,66 @@ export const SPIKE_PASS_ROWS: Readonly<Record<string, SpikePassRow>> = {
 };
 
 /**
- * Counts R01's timer resolves on a device: each `resolveQuerySet` an encoder makes is one, so the
- * count is the engine's timing frame number (`PassTimes.frame`) as it is made, which its
- * asynchronous times are matched against.
+ * The run's numbering of R01's timer resolves, the engine's timing frame numbers
+ * (`PassTimes.frame`) that its asynchronous times are matched against, carried across the device
+ * rebuilds of a run.
+ *
+ * @remarks
+ * The count is the engine's own, `RenderEngine.passTimesFrame`, which a resolve dropped while every
+ * read-back buffer is still in flight takes too (R07.T19). A count of the `resolveQuerySet` calls
+ * on the device, as this once was, misses each dropped resolve, so after the first drop every
+ * later report was numbered ahead of every frame and matched none: R05.T14.f's high run lost its
+ * pass times for good after 9.75 s.
  */
 export class ResolveCounter {
-  #count = 0;
-  /** The count when the latest device was wrapped: its timer numbers its frames from 1 again. */
+  #engine: Pick<RenderEngine, "passTimesFrame"> | null = null;
+  /** The run's numbers taken by the timers of devices before the latest. */
   #base = 0;
+  /** The highest number of the latest device's timer seen so far, by a frame or a report. */
+  #latest = 0;
 
-  /** The resolves so far, over every device: the run's last timing frame number. */
+  /**
+   * Follows `engine`'s numbering, once the engine is made: the one `loadRenderEngine` returns,
+   * whose count starts again from 0 at a restore.
+   */
+  follow(engine: Pick<RenderEngine, "passTimesFrame">): void {
+    this.#engine = engine;
+  }
+
+  /**
+   * The run's last timing frame number now: the latest device's, after every earlier one's. Each
+   * read records the number, so that a rebuilt device's numbers follow every number handed out.
+   */
   get value(): number {
-    return this.#count;
+    this.#latest = Math.max(this.#latest, this.#engine?.passTimesFrame ?? 0);
+    return this.#base + this.#latest;
   }
 
   /**
    * A `PassTimes.frame` of the latest device's timer as the run's frame number: a rebuild after a
-   * device loss makes a new timer, which counts from 1 again (`ResilientEngine`).
+   * device loss makes a new timer, which counts from 1 again (`ResilientEngine`). The number is
+   * recorded, as {@link ResolveCounter.value}'s is.
    */
   runFrame(timerFrame: number): number {
+    this.#latest = Math.max(this.#latest, timerFrame);
     return this.#base + timerFrame;
   }
 
-  /** `device`, its `createCommandEncoder` replaced on the instance to count each encoder's resolves. */
-  wrap(device: GPUDevice): GPUDevice {
-    this.#base = this.#count;
-    const create = device.createCommandEncoder.bind(device);
-    device.createCommandEncoder = (descriptor?: GPUCommandEncoderDescriptor) => {
-      const encoder = create(descriptor);
-      const resolve = encoder.resolveQuerySet.bind(encoder);
-      encoder.resolveQuerySet = (...args: Parameters<GPUCommandEncoder["resolveQuerySet"]>) => {
-        this.#count += 1;
-        resolve(...args);
-      };
-      return encoder;
-    };
-    return device;
+  /**
+   * A new device is made: its engine's timer numbers from 1 again, after every number the run has
+   * seen. The lost engine is released before its successor's device is requested, so its count is
+   * no longer readable here; the highest seen stands for it.
+   */
+  deviceMade(): void {
+    this.#base = this.value;
+    this.#latest = 0;
   }
 }
 
-/** The spike's measured GPU: its engine source and what the device wrapper feeds. */
+/**
+ * The spike's measured GPU: its engine source, the pipeline tally its devices feed, and the
+ * resolve numbering its engine feeds.
+ */
 export interface SpikeGpu {
   readonly source: ViewEngineSource;
   readonly tally: PipelineTally;
@@ -106,7 +127,8 @@ export interface SpikeGpu {
 
 /**
  * The spike's engine source over `gpu` (the browser's `navigator.gpu`): every device it gives is
- * shimmed for the pipeline tally and the resolve count, then the capture where one is given.
+ * shimmed for the pipeline tally, then wrapped for the capture where one is given, and told to the
+ * resolve numbering, which follows the engine it loads.
  *
  * @param scriptTimeS - The descent's script time now, s, which each pipeline creation is stamped
  *   with.
@@ -122,7 +144,8 @@ export function spikeGpu(
     gpu === undefined
       ? undefined
       : wrapGpu(gpu, (device) => {
-          const shimmed = resolves.wrap(shimPipelines(device, tally));
+          resolves.deviceMade();
+          const shimmed = shimPipelines(device, tally);
           return capture === null ? shimmed : capture.wrapDevice(shimmed);
         });
   return {
@@ -130,8 +153,15 @@ export function spikeGpu(
     resolves,
     source: {
       requestAdapter: () => requestAdapterOutcome(wrapped),
-      load: (outcome, status) =>
-        loadRenderEngine(outcome, status, wrapped === undefined ? {} : { gpu: wrapped }),
+      load: async (outcome, status) => {
+        const engine = await loadRenderEngine(
+          outcome,
+          status,
+          wrapped === undefined ? {} : { gpu: wrapped },
+        );
+        resolves.follow(engine);
+        return engine;
+      },
     },
   };
 }

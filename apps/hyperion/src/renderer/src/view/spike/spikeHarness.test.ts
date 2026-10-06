@@ -1,13 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
+import { fakeEngineModule, type FakeRenderEngine } from "../../test/fakeRenderEngine";
 import { goldenLevelTable } from "../../test/terrainFixtures";
+import { loadRenderEngine } from "../engine/loadEngine";
+import { requestAdapterOutcome } from "../engine/platform";
+import { GraphicsStatusStore, initialGraphicsStatus } from "../engine/status";
 import { planetGeometry } from "../terrain/planet";
 import type { SelectionInput } from "../terrain/select";
 import { selectionTolerancePx } from "../terrain/selectionTolerance";
 import { boundedPlanet, type DemandView, levelRatio } from "./demand";
 import { recordProfile, SETTING_VIEWS } from "./demandRecord";
-import { PipelineTally } from "./pipelineShim";
+import { PipelineTally, wrapGpu } from "./pipelineShim";
 import {
   meanDemand,
   ResolveCounter,
@@ -75,39 +79,74 @@ function resolveOn(dev: GPUDevice): void {
     );
 }
 
+/** The `index`th engine `module` made. */
+function madeEngine(module: ReturnType<typeof fakeEngineModule>, index: number): FakeRenderEngine {
+  const engine = module.engines.at(index);
+  if (engine === undefined) {
+    throw new Error(`no engine ${index} was made`);
+  }
+  return engine;
+}
+
 describe("the resolve counter", () => {
-  it("counts each resolve an encoder makes and passes it through", async () => {
+  it("takes the engine's count, a dropped resolve's number included", async () => {
     const counter = new ResolveCounter();
     const gpu = new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] })]);
-    const dev = counter.wrap(await device(gpu));
-    const querySet = dev.createQuerySet({ type: "timestamp", count: 2 });
-    const buffer = dev.createBuffer({ size: 16, usage: 0 });
-    const encoder = dev.createCommandEncoder();
-    encoder.resolveQuerySet(querySet, 0, 2, buffer, 0);
-    dev.createCommandEncoder().resolveQuerySet(querySet, 0, 2, buffer, 0);
-    expect(counter.value).toBe(2);
+    counter.deviceMade();
+    const dev = await device(gpu);
+    const engine = { passTimesFrame: 0 };
+    counter.follow(engine);
+    // Two resolves reach the device; the engine's timer numbered three, the second dropped.
+    resolveOn(dev);
+    resolveOn(dev);
+    engine.passTimesFrame = 3;
+    expect(counter.value).toBe(3);
+    expect(counter.runFrame(3)).toBe(3);
   });
 
-  it("numbers a rebuilt device's timer frames after the lost one's", async () => {
+  it("numbers a rebuilt engine's resolves after the lost one's", async () => {
     const counter = new ResolveCounter();
-    const gpu = new FakeGpu([
-      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
-      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
-    ]);
-    const first = counter.wrap(await device(gpu));
-    resolveOn(first);
-    resolveOn(first);
-    expect(counter.runFrame(2)).toBe(2);
-    // The rebuilt engine's new timer numbers its first frame 1 again: the run's third.
-    const second = counter.wrap(await device(gpu));
-    resolveOn(second);
+    const gpu = wrapGpu(
+      new FakeGpu([
+        new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
+        new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] }),
+      ]),
+      (dev) => {
+        counter.deviceMade();
+        return dev;
+      },
+    );
+    const outcome = await requestAdapterOutcome(gpu);
+    if (outcome.kind !== "adapter") {
+      throw new Error(`no adapter: ${outcome.kind}`);
+    }
+    const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+    status.dispatch({ kind: "adapter-outcome", outcome });
+    const module = fakeEngineModule();
+    const engine = await loadRenderEngine(outcome, status, {
+      importEngine: () => Promise.resolve(module),
+      gpu,
+    });
+    counter.follow(engine);
+    const restored = vi.fn<() => void>();
+    engine.onRestored(restored);
+    madeEngine(module, 0).passTimesFrame = 2;
+    // A frame's read, which records the lost engine's count before the loss releases it.
+    expect(counter.value).toBe(2);
+    madeEngine(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(restored).toHaveBeenCalledOnce();
+    });
+    // The restored engine counts from 0 again, so its first resolve is the run's third.
+    expect(counter.value).toBe(2);
+    madeEngine(module, 1).passTimesFrame = 1;
     expect(counter.value).toBe(3);
     expect(counter.runFrame(1)).toBe(3);
   });
 });
 
 describe("the spike's engine source", () => {
-  it("shims the device it gives for the pipeline tally and the resolve count", async () => {
+  it("shims the device it gives for the pipeline tally", async () => {
     const fake = new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] })]);
     const measured = spikeGpu(fake, null, () => 12);
     const outcome = await measured.source.requestAdapter();
@@ -124,16 +163,39 @@ describe("the spike's engine source", () => {
     expect(measured.tally.late().map(({ label, scriptTimeS }) => [label, scriptTimeS])).toEqual([
       ["late", 12],
     ]);
-    dev
-      .createCommandEncoder()
-      .resolveQuerySet(
-        dev.createQuerySet({ type: "timestamp", count: 2 }),
-        0,
-        2,
-        dev.createBuffer({ size: 16, usage: 0 }),
-        0,
-      );
-    expect(measured.resolves.value).toBe(1);
+  });
+
+  it("numbers the resolves by the engine it loads", async () => {
+    const fake = new FakeGpu([
+      new FakeAdapter({ info: INTEL_UHD_620_INFO, features: ["timestamp-query"] }),
+    ]);
+    const measured = spikeGpu(fake, null, () => 0);
+    const outcome = await measured.source.requestAdapter();
+    if (outcome.kind !== "adapter") {
+      throw new Error(`no adapter: ${outcome.kind}`);
+    }
+    const engine = await measured.source.load(
+      outcome,
+      new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+    );
+    engine
+      .createRenderTarget({
+        name: "timed",
+        size: { widthPx: 4, heightPx: 4 },
+        format: "rgba16float",
+        mips: 1,
+        depth: false,
+        category: "render-targets",
+      })
+      .render({
+        label: "timed",
+        viewRotation: new Float32Array(16),
+        projection: new Float32Array(16),
+        draws: [],
+        postProcesses: [],
+      });
+    expect([engine.passTimesFrame, measured.resolves.value]).toEqual([1, 1]);
+    engine.dispose();
   });
 });
 
@@ -175,6 +237,39 @@ describe("the spike's recorder", () => {
         .segmentSpans()
         .map(({ name }) => name),
     );
+  });
+
+  it("gives the frames after a dropped resolve their own pass times", async () => {
+    const resolves = new ResolveCounter();
+    resolves.deviceMade();
+    const dev = await device(
+      new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] })]),
+    );
+    const engine = { passTimesFrame: 0 };
+    resolves.follow(engine);
+    const recorder = new SpikeRecorder(descent, "low", {
+      resolves,
+      tally: new PipelineTally(() => 0),
+    });
+    resolveOn(dev);
+    engine.passTimesFrame = 1;
+    recorder.frame(frame(0));
+    // Every read-back buffer is in flight: the timer drops resolve 2, which reaches no device.
+    engine.passTimesFrame = 2;
+    recorder.frame(frame(0.016));
+    resolveOn(dev);
+    engine.passTimesFrame = 3;
+    recorder.frame(frame(0.033));
+    for (const n of [1, 3]) {
+      recorder.passTimes({
+        frame: n,
+        timer: "full",
+        passes: [{ label: "terrain", ns: n * 1e6, bracketed: false }],
+      });
+    }
+    expect(recorder.report({ widthPx: 1280, heightPx: 720 }).frames.passes).toEqual([
+      { label: "terrain", row: "terrain", gpuMs: [1, null, 3] },
+    ]);
   });
 
   /** The high setting's report, and its view at the terrain pass's τ_sel. */
