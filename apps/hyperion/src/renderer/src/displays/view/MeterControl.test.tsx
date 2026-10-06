@@ -4,17 +4,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import { viewId } from "../../view/camera/state";
 import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/exposure";
-import type { ExposureReading } from "../../view/post/autoExposure";
+import type { Metering } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
 import { MeterControl } from "./MeterControl";
 
-const READING: ExposureReading = {
-  ev100: 9.6,
-  triple: { aperture: 1.4, shutterS: 1 / 30, iso: 7.4 },
-  control: { kind: "auto", ev100: 9.6 },
-  meter: "average",
-  source: viewId("view"),
-};
+const AUTO: ExposureControl = { kind: "auto", ev100: 9.6 };
+
+/** The primary view, the exposure's source. */
+const SOURCE = viewId("view");
+
+/** A meter holding EV100 9.6, or 9.64 where its own value is shown. */
+const METERED: Metering = { kind: "metered", ev100: 9.6 };
+
+/** A meter whose image is not arriving. */
+const NO_IMAGE: Metering = { kind: "no-image" };
 
 /** The meter's reading, an `output` set in parts (`readingParts`), by its whole text. */
 function readingOutput(text: string): HTMLElement {
@@ -23,13 +26,19 @@ function readingOutput(text: string): HTMLElement {
   );
 }
 
+/** The meter's reason, by its whole text. */
+function reasonOf(text: string): HTMLElement {
+  return screen.getByText((_, element) => element?.tagName === "P" && element.textContent === text);
+}
+
 describe("MeterControl", () => {
   it("shows the exposure with its level, the meter and the view it meters, by its name", () => {
     render(
       <MeterControl
         meter="average"
-        reading={READING}
-        meteredEv100={9.6}
+        exposure={AUTO}
+        source={SOURCE}
+        metering={METERED}
         onMeter={() => undefined}
       />,
     );
@@ -42,7 +51,15 @@ describe("MeterControl", () => {
   it("selects each meter from the keyboard", async () => {
     const user = userEvent.setup();
     const onMeter = vi.fn<(mode: MeterMode) => void>();
-    render(<MeterControl meter="average" reading={READING} meteredEv100={9.6} onMeter={onMeter} />);
+    render(
+      <MeterControl
+        meter="average"
+        exposure={AUTO}
+        source={SOURCE}
+        metering={METERED}
+        onMeter={onMeter}
+      />,
+    );
     await user.tab();
     expect(screen.getByRole("button", { name: "AVG" })).toHaveFocus();
     await user.keyboard("{Enter}");
@@ -61,7 +78,15 @@ describe("MeterControl", () => {
   it("keeps the meters choosable while nothing is metered, saying why", async () => {
     const user = userEvent.setup();
     const onMeter = vi.fn<(mode: MeterMode) => void>();
-    render(<MeterControl meter="lit" reading={null} meteredEv100={null} onMeter={onMeter} />);
+    render(
+      <MeterControl
+        meter="lit"
+        exposure={AUTO}
+        source={SOURCE}
+        metering={NO_IMAGE}
+        onMeter={onMeter}
+      />,
+    );
     expect(screen.getByText("NO IMAGE TO METER")).toBeInTheDocument();
     const lit = screen.getByRole("button", { name: "LIT" });
     expect(lit).not.toHaveAttribute("aria-disabled");
@@ -75,7 +100,13 @@ describe("MeterControl", () => {
 
   it("describes only the chosen meter with the reason while nothing is metered", () => {
     render(
-      <MeterControl meter="lit" reading={null} meteredEv100={null} onMeter={() => undefined} />,
+      <MeterControl
+        meter="lit"
+        exposure={AUTO}
+        source={SOURCE}
+        metering={NO_IMAGE}
+        onMeter={() => undefined}
+      />,
     );
     expect(
       ["AVG", "LIT", "DARK"].map(
@@ -92,8 +123,9 @@ describe("MeterControl", () => {
       render(
         <MeterControl
           meter="average"
-          reading={{ ...READING, control, ev100: -1 }}
-          meteredEv100={9.64}
+          exposure={control}
+          source={SOURCE}
+          metering={{ kind: "metered", ev100: 9.64 }}
           onMeter={() => undefined}
         />,
       ).unmount;
@@ -115,8 +147,9 @@ describe("MeterControl", () => {
       const { unmount } = render(
         <MeterControl
           meter="average"
-          reading={{ ...READING, control, ev100: -1 }}
-          meteredEv100={9.64}
+          exposure={control}
+          source={SOURCE}
+          metering={{ kind: "metered", ev100: 9.64 }}
           onMeter={() => undefined}
         />,
       );
@@ -129,8 +162,9 @@ describe("MeterControl", () => {
     render(
       <MeterControl
         meter="average"
-        reading={{ ...READING, control: { kind: "inhibited", ev100: 9.6, reason: "operator" } }}
-        meteredEv100={9.6}
+        exposure={{ kind: "inhibited", ev100: 9.6, reason: "operator" }}
+        source={SOURCE}
+        metering={METERED}
         onMeter={() => undefined}
       />,
     );
@@ -140,14 +174,151 @@ describe("MeterControl", () => {
     ).toEqual(["EV100 9.6 INHIBITED", "OPERATOR"]);
   });
 
-  it("shows NO IMAGE TO METER, not a reading, while nothing is metered", () => {
+  it("shows NO IMAGE TO METER, not a reading, while no image arrives", () => {
     render(
-      <MeterControl meter="average" reading={null} meteredEv100={null} onMeter={() => undefined} />,
+      <MeterControl
+        meter="average"
+        exposure={AUTO}
+        source={SOURCE}
+        metering={NO_IMAGE}
+        onMeter={() => undefined}
+      />,
     );
     expect([
-      screen.getByText("NO IMAGE TO METER").tagName,
+      reasonOf("NO IMAGE TO METER").tagName,
       screen.queryByText(/^EV100/u),
       document.querySelector(".view-label__part"),
     ]).toEqual(["P", null, null]);
+  });
+});
+
+describe("MeterControl's own statuses (R07.T16.b)", () => {
+  const INHIBITED: ExposureControl = {
+    kind: "inhibited",
+    ev100: 9.6,
+    reason: "nothing_weighed",
+    meter: "lit",
+  };
+
+  it.each([
+    ["lit", "LIT", "NO LIT SIDE: choose AVG, or bring a sunlit body into view"],
+    ["dark", "DARK", "NO DARK SIDE: choose AVG, or bring a night side into view"],
+    ["average", "AVG", "STAR DISC ONLY: widen the view or turn from the star"],
+  ] as const)(
+    "says under %s that it weighs nothing, with what to do, in the reading's place",
+    (meter, label, words) => {
+      render(
+        <MeterControl
+          meter={meter}
+          exposure={INHIBITED}
+          source={SOURCE}
+          metering={{ kind: "nothing-weighed", meter }}
+          onMeter={() => undefined}
+        />,
+      );
+      expect([
+        reasonOf(words).tagName,
+        screen.queryByText(/^EV100/u),
+        screen.queryByText(/NO IMAGE TO METER/u),
+      ]).toEqual(["P", null, null]);
+      expect(screen.getByRole("button", { name: label })).toHaveAccessibleDescription(words);
+    },
+  );
+
+  it("describes only the chosen meter with its status, and keeps every meter choosable", async () => {
+    const user = userEvent.setup();
+    const onMeter = vi.fn<(mode: MeterMode) => void>();
+    render(
+      <MeterControl
+        meter="lit"
+        exposure={INHIBITED}
+        source={SOURCE}
+        metering={{ kind: "nothing-weighed", meter: "lit" }}
+        onMeter={onMeter}
+      />,
+    );
+    expect(
+      ["AVG", "LIT", "DARK"].map(
+        (name) => screen.getByRole("button", { name }).getAttribute("aria-describedby") !== null,
+      ),
+    ).toEqual([false, true, false]);
+    await user.click(screen.getByRole("button", { name: "AVG" }));
+    expect(onMeter).toHaveBeenLastCalledWith("average");
+  });
+
+  it("holds its status phrase unbroken", () => {
+    render(
+      <MeterControl
+        meter="average"
+        exposure={INHIBITED}
+        source={SOURCE}
+        metering={{ kind: "nothing-weighed", meter: "average" }}
+        onMeter={() => undefined}
+      />,
+    );
+    const reason = reasonOf("STAR DISC ONLY: widen the view or turn from the star");
+    expect([...reason.querySelectorAll(".view-label__run")].map((run) => run.textContent)).toEqual([
+      "STAR DISC ONLY",
+    ]);
+  });
+
+  it("shows its reading as it stands, with no status, before the first histogram", () => {
+    render(
+      <MeterControl
+        meter="lit"
+        exposure={INHIBITED}
+        source={SOURCE}
+        metering={{ kind: "acquiring" }}
+        onMeter={() => undefined}
+      />,
+    );
+    expect([
+      readingOutput("EV100 9.6 INHIBITED · NO LIT SIDE").tagName,
+      screen.getByRole("status", { name: "SOURCE" }).textContent,
+      screen.queryByRole("status", { name: "METERED" }),
+      screen.queryByText(/choose AVG|turn from the star|NO IMAGE TO METER/u),
+      screen.getByRole("button", { name: "LIT" }).getAttribute("aria-describedby"),
+    ]).toEqual(["OUTPUT", "PRIMARY", null, null, null]);
+  });
+
+  it("shows METERED missing before the first histogram, where the exposure does not follow it", () => {
+    for (const exposure of [
+      DEFAULT_EXPOSURE,
+      { kind: "inhibited", ev100: 9.6, reason: "operator" } as const,
+    ]) {
+      const { unmount } = render(
+        <MeterControl
+          meter="average"
+          exposure={exposure}
+          source={SOURCE}
+          metering={{ kind: "acquiring" }}
+          onMeter={() => undefined}
+        />,
+      );
+      const metered = screen.getByRole("status", { name: "METERED" });
+      expect([
+        metered.textContent,
+        metered.querySelector(".readout__missing")?.textContent,
+      ]).toEqual(["—", "—"]);
+      unmount();
+    }
+  });
+
+  it("sets its status in a live region, since it comes by itself", () => {
+    render(
+      <MeterControl
+        meter="lit"
+        exposure={INHIBITED}
+        source={SOURCE}
+        metering={{ kind: "nothing-weighed", meter: "lit" }}
+        onMeter={() => undefined}
+      />,
+    );
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((status) => status.textContent)
+        .includes("NO LIT SIDE: choose AVG, or bring a sunlit body into view"),
+    ).toBe(true);
   });
 });

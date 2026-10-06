@@ -1,9 +1,11 @@
 import { useId } from "react";
 
 import { formatNumber } from "../../lib/format";
+import type { ViewId } from "../../view/camera/state";
 import type { ExposureControl } from "../../view/photometry/exposure";
-import type { ExposureReading } from "../../view/post/autoExposure";
+import { type Metering, meterStatus } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
+import { exposureNote } from "./ExposurePanel";
 import { readingParts } from "./ViewLabelBlock";
 import { viewDisplayName } from "./viewNames";
 import { exposureReading } from "./viewRun";
@@ -21,13 +23,15 @@ export interface MeterControlProps {
   readonly designator?: string | undefined;
   /** The operator's meter, which stands whether or not an image is metered now. */
   readonly meter: MeterMode;
-  /** The metered exposure, or `null` while no photorealistic view meters an image. */
-  readonly reading: ExposureReading | null;
+  /** The exposure as the display holds it, the `Exposure` panel's, metered or not. */
+  readonly exposure: ExposureControl;
+  /** The photorealistic view whose image is metered. */
+  readonly source: ViewId;
   /**
-   * The meter's own value, EV100, which `ENABLE` takes, or `null` while nothing is metered
-   * (R07.T13.d).
+   * The meter as it stands: its own value, EV100, which `ENABLE` takes (R07.T13.d), or why it has
+   * none (R07.T16.b).
    */
-  readonly meteredEv100: number | null;
+  readonly metering: Metering;
   /** Called with the operator's choice of meter; a display control, so it acts at once. */
   readonly onMeter: (mode: MeterMode) => void;
 }
@@ -55,6 +59,28 @@ export function meterLabel(mode: MeterMode): string {
 }
 
 /**
+ * What the operator can do where a meter weighs nothing in the drawn image, which follows its
+ * status on this control alone (decision-r07-t8a-meter, item 1).
+ */
+const REMEDIES: Readonly<Record<MeterMode, string>> = {
+  average: "widen the view or turn from the star",
+  lit: "choose AVG, or bring a sunlit body into view",
+  dark: "choose AVG, or bring a night side into view",
+};
+
+/**
+ * The meter's status on this control while it has no value, or `null` where it has none to say:
+ * `NO IMAGE TO METER`, or a meter's own status followed by what to do,
+ * `NO LIT SIDE: choose AVG, or bring a sunlit body into view` (decision-r07-t8a-meter, item 1).
+ */
+export function meterStatusLine(metering: Metering): string | null {
+  const status = meterStatus(metering);
+  return status !== null && metering.kind === "nothing-weighed"
+    ? `${status}: ${REMEDIES[metering.meter]}`
+    : status;
+}
+
+/**
  * The exposure meter beside R02's `ExposurePanel` (plan R07, T13.b; Design notes 10–11): the
  * applied EV100 with its automation level, the meter's own value while the exposure does not follow
  * it (`METERED`, R07.T13.d), the meter, the photorealistic view it meters, and the choice of `AVG`,
@@ -62,17 +88,20 @@ export function meterLabel(mode: MeterMode): string {
  *
  * @remarks
  * `METERED` stands under `MAN` and `INHIBITED · OPERATOR`: it is the value `ENABLE` would take, and
- * one the operator may enter in the `MAN` field.
+ * one the operator may enter in the `MAN` field; before the first histogram it is missing, `—`.
  * `AVG` meters everything but a star's disc, `LIT` only bodies' sunlit sides and `DARK` only their
  * night sides. The meter is the view's own, not the ship's: a display control that acts at once.
- * While nothing is metered the meter still shows with the reason, which describes the chosen
- * meter's button only, and its buttons still act, so that a meter with nothing to weigh can be
- * left by choosing another (mounted by R07.T8.a beside a drawn image only).
+ * Without a value its status stands in the reading's place (`NO LIT SIDE: choose AVG, or bring a
+ * sunlit body into view`), describing the chosen meter's button only, and its buttons still act,
+ * so that a meter with nothing to weigh can be left by choosing another (mounted by R07.T8.a beside
+ * a drawn image only). In the window before the first histogram (`acquiring`) it shows its reading
+ * as it stands, with no status (R07.T16.b). The status is a live region, since it comes by itself.
  */
 export function MeterControl({
   meter,
-  reading,
-  meteredEv100,
+  exposure,
+  source,
+  metering,
   onMeter,
   designator,
   id,
@@ -83,9 +112,9 @@ export function MeterControl({
   const meterId = useId();
   const sourceId = useId();
   const reasonId = useId();
-  const held = reading === null;
-  const unfollowedEv100 =
-    reading !== null && meterNotFollowed(reading.control) ? meteredEv100 : null;
+  const status = meterStatusLine(metering);
+  // The meter's own value while the exposure does not follow it, missing until the first histogram.
+  const unfollowed = meterNotFollowed(exposure) ? metering : null;
   return (
     <section className="panel view-meter" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
@@ -97,22 +126,22 @@ export function MeterControl({
           </>
         )}
       </h2>
-      {reading === null ? (
-        <p className="view-meter__reason" id={reasonId}>
-          NO IMAGE TO METER
-        </p>
-      ) : (
+      {status === null ? (
         <>
           <p className="view-meter__reading">
-            <output>{readingParts(exposureReading(reading.control))}</output>
+            <output>{readingParts(exposureReading(exposure))}</output>
           </p>
-          {unfollowedEv100 === null ? null : (
+          {unfollowed === null ? null : (
             <p className="field">
               <span className="field__label" id={meteredId}>
                 METERED
               </span>{" "}
               <output className="view-meter__value view-meter__metered" aria-labelledby={meteredId}>
-                EV100 {formatNumber(unfollowedEv100, 1)}
+                {unfollowed.kind === "metered" ? (
+                  `EV100 ${formatNumber(unfollowed.ev100, 1)}`
+                ) : (
+                  <span className="readout__missing">—</span>
+                )}
               </output>
             </p>
           )}
@@ -121,10 +150,14 @@ export function MeterControl({
               SOURCE
             </span>{" "}
             <output className="view-meter__value" aria-labelledby={sourceId}>
-              {viewDisplayName(reading.source)}
+              {viewDisplayName(source)}
             </output>
           </p>
         </>
+      ) : (
+        <p className="view-meter__reason" id={reasonId}>
+          <output>{exposureNote(status)}</output>
+        </p>
       )}
       <p className="field">
         <span className="field__label" id={meterId}>
@@ -143,9 +176,9 @@ export function MeterControl({
             className="control"
             aria-pressed={meter === mode}
             // Never held back: the control stands only beside a drawn image, and a meter with
-            // nothing to weigh (LIT with no lit body) must be left by choosing another. The reason
+            // nothing to weigh (LIT with no lit body) must be left by choosing another. The status
             // describes the chosen meter only: choosing another is the remedy, not refused.
-            aria-describedby={held && meter === mode ? reasonId : undefined}
+            aria-describedby={status !== null && meter === mode ? reasonId : undefined}
             onClick={() => {
               onMeter(mode);
             }}

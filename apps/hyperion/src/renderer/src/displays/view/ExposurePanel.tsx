@@ -11,10 +11,13 @@ import {
   inhibit,
   MAN_EV100_MAX,
   MAN_EV100_MIN,
+  NO_IMAGE_TO_METER,
+  NOTHING_WEIGHED_STATUS,
   setManualEv100,
   shownTriple,
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
+import { type Metering, meterStatus } from "../../view/post/autoExposure";
 import { readingParts, unbrokenRuns } from "./ViewLabelBlock";
 import { exposureReading } from "./viewRun";
 
@@ -31,10 +34,10 @@ export interface ExposurePanelProps {
   readonly designator?: string | undefined;
   readonly exposure: ExposureControl;
   /**
-   * The metering source's value, EV100, or `null` where there is none: always `null` for a
-   * wireframe view until R07's photorealistic view accompanies it.
+   * The meter as it stands: its value, EV100, which `ENABLE` takes, or why it has none (R07.T16.b);
+   * always without one for a wireframe view.
    */
-  readonly meteredEv100: number | null;
+  readonly metering: Metering;
   /** Called with the control after an accepted command. */
   readonly onChange: (exposure: ExposureControl) => void;
 }
@@ -48,19 +51,25 @@ const MAN_SPAN = [MAN_EV100_MIN, MAN_EV100_MAX]
   .join(" to ");
 
 /**
- * The status while there is no image to meter; it stands under the compact layout's row while this
- * panel is folded (R07.T19.b).
+ * The status that `AUTO` is not available while the meter has no value, with its cause bare,
+ * `AUTO NOT AVAILABLE: NO IMAGE TO METER` or `AUTO NOT AVAILABLE: NO LIT SIDE`, or `null` while it
+ * meters and while it is acquiring, which gets no word (decision-r07-t8a-meter, item 1). It stands
+ * in the panel, and under the compact layout's row while the panel is folded (R07.T19.b).
  */
-export const AUTO_NOT_AVAILABLE = "AUTO NOT AVAILABLE: NO IMAGE TO METER";
+export function autoNotAvailable(metering: Metering): string | null {
+  const status = meterStatus(metering);
+  return status === null ? null : `AUTO NOT AVAILABLE: ${status}`;
+}
+
+/** A refusal's reason. */
+type RefusalReason = Extract<ExposureCommandResult, { kind: "refused" }>["reason"];
 
 /**
  * Why a command is held back or an entry refused, in the guide's `STATUS: clause` form; a command
- * whose effect already holds names the level as the reading shows it.
+ * whose effect already holds names the level as the reading shows it. `not_metered` is worded by
+ * the meter's cause ({@link notMeteredWords}).
  */
-const REFUSAL_WORDS: Readonly<
-  Record<Extract<ExposureCommandResult, { kind: "refused" }>["reason"], string>
-> = {
-  no_image_to_meter: "NO IMAGE TO METER",
+const REFUSAL_WORDS: Readonly<Record<Exclude<RefusalReason, "not_metered">, string>> = {
   not_automatic: "NOT AVAILABLE: the exposure is MAN",
   already_auto: "NOT AVAILABLE: the exposure is AUTO",
   already_inhibited: "NOT AVAILABLE: the exposure is INHIBITED · OPERATOR",
@@ -68,18 +77,40 @@ const REFUSAL_WORDS: Readonly<
   invalid_ev100: `EV100 INVALID: enter ${MAN_SPAN}`,
 };
 
+/** Why `ENABLE` is held back in the window before the first histogram (decision-r07-t8a-meter). */
+const NOT_YET_METERED = "NOT AVAILABLE: not yet metered";
+
+/**
+ * Why `ENABLE` is held back while the meter has no value: its status, bare, `NO IMAGE TO METER` or
+ * the meter's own (`NO LIT SIDE`), or, in the window before the first histogram,
+ * `NOT AVAILABLE: not yet metered`; the remedy is the meter control's (decision-r07-t8a-meter).
+ */
+function notMeteredWords(metering: Metering): string {
+  return meterStatus(metering) ?? NOT_YET_METERED;
+}
+
+/** A refusal's words; `not_metered` by the meter's cause. */
+function refusalWords(reason: RefusalReason, metering: Metering): string {
+  return reason === "not_metered" ? notMeteredWords(metering) : REFUSAL_WORDS[reason];
+}
+
 /**
  * The exposure's status phrases, which a note never breaks inside (decision-r07-owner-ux-signoff,
- * item 1): the operator's inhibit, as the reading shows it, and the cause that holds `ENABLE` back.
+ * item 1): the operator's inhibit, as the reading shows it, and the causes that hold `ENABLE`
+ * back, `NO IMAGE TO METER` and the meters' own statuses (R07.T16.b).
  */
-const STATUS_PHRASES = /INHIBITED · OPERATOR|NO IMAGE TO METER/gu;
+const STATUS_PHRASES = new RegExp(
+  ["INHIBITED · OPERATOR", NO_IMAGE_TO_METER, ...Object.values(NOTHING_WEIGHED_STATUS)].join("|"),
+  "gu",
+);
 
 /**
  * A note of the exposure's, its status phrases each set unbroken, so that a narrow column breaks
  * it before a phrase and never inside one, at the middle dot least of all:
  * `NOT AVAILABLE: the exposure is` | `INHIBITED · OPERATOR`, and `AUTO NOT AVAILABLE:` |
  * `NO IMAGE TO METER` (decision-r07-owner-ux-signoff, item 1, as decision-r07-t19-layout item 2
- * marks a reading's runs). Its text is the note's, unchanged.
+ * marks a reading's runs), or `NO LIT SIDE` and its twins (R07.T16.b). Its text is the note's,
+ * unchanged.
  */
 export function exposureNote(note: string): ReactNode {
   return unbrokenRuns(note, STATUS_PHRASES);
@@ -136,6 +167,8 @@ const INHIBIT_CONSEQUENCE = `Then ${ENABLE_ONLY}`;
 interface ExposureCommandProps {
   readonly label: string;
   readonly result: ExposureCommandResult;
+  /** The meter as it stands, which words a refusal for want of a metered value. */
+  readonly metering: Metering;
   /**
    * The consequence the command states beside its button while it is accepted, in a held-back
    * reason's place, or none.
@@ -148,10 +181,10 @@ interface ExposureCommandProps {
  * A command button, held back with its reason where the command would be refused, or offered with
  * its consequence, if it has one, in the reason's place; either describes the button.
  */
-function ExposureCommand({ label, result, consequence, onChange }: ExposureCommandProps) {
+function ExposureCommand({ label, result, metering, consequence, onChange }: ExposureCommandProps) {
   const noteId = useId();
   const refused = result.kind === "refused";
-  const note = refused ? REFUSAL_WORDS[result.reason] : consequence;
+  const note = refused ? refusalWords(result.reason, metering) : consequence;
   return (
     <div className="view-exposure__command">
       <button
@@ -276,7 +309,8 @@ interface ManualEntryProps {
  * stands, so entering the value filled in changes the image by at most its rounding. While the
  * exposure is not `MAN` the field states the consequence. A value that is not a number or lies
  * outside the span is refused, saying what is valid, and the exposure is unchanged. It is never
- * held back: a view with nothing to meter offers `MAN`.
+ * held back, before the first histogram (`acquiring`) included: a view with nothing to meter offers
+ * `MAN`.
  *
  * Its way out, every entry field's (decision-r07-t13d), enters nothing. `Escape` drops what was
  * typed and any refusal and takes the fill again, selected. Empty text is no entry and is never
@@ -439,32 +473,35 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
  * unit and automation level, `EV100 -1.0 MAN`, the camera's setting at every level (`APERTURE`,
  * `SHUTTER`, `ND`, `ISO`; R07.T13.c), the `MAN` field that enters the operator's value (R07.T13.d),
  * and the congruent pair `ENABLE` and `INHIBIT`, in the guide's order, each held back with its
- * reason where its effect already holds or it cannot act: `ENABLE` under `AUTO` and with nothing to
- * meter, `INHIBIT` under `MAN` and under `INHIBITED · OPERATOR` (decision-r07-owner-ux-signoff,
+ * reason where its effect already holds or it cannot act: `ENABLE` under `AUTO` and with nothing
+ * metered, `INHIBIT` under `MAN` and under `INHIBITED · OPERATOR` (decision-r07-owner-ux-signoff,
  * item 1). There is no button named `AUTO` nor one named `MAN` (the guide's "Controls and
- * commanding"); while there is no image to meter, `AUTO NOT AVAILABLE` stands with
- * `NO IMAGE TO METER`.
+ * commanding"); while the meter has no value, `AUTO NOT AVAILABLE` stands with its cause,
+ * `NO IMAGE TO METER` or the meter's own status (`NO LIT SIDE`), bare.
  *
  * @remarks
  * Display controls: the exposure is the view's own, not the ship's, so a command acts at once. The
  * setting is `MAN`'s triple, else the view camera's program at the shown EV100, so it changes only
- * with the published control. Under `AUTO` and a system inhibit `INHIBIT` states its consequence,
- * `Then AUTO resumes only on ENABLE`, beside the button (R07.T13.d's follow-up).
+ * with the published control. Under `AUTO` and every system inhibit `INHIBIT` states its
+ * consequence, `Then AUTO resumes only on ENABLE`, beside the button (R07.T13.d's follow-up). In
+ * the window before the first histogram (`acquiring`) no status stands, and `ENABLE` is held back
+ * with `NOT AVAILABLE: not yet metered`; the `MAN` field is never held back (R07.T16.b).
  */
 export function ExposurePanel({
   exposure,
-  meteredEv100,
+  metering,
   onChange,
   designator,
   id,
   hidden,
 }: ExposurePanelProps) {
   const titleId = useId();
-  // `INHIBIT` shuts the automation down under `AUTO` and takes a system inhibit over, so it states
-  // its consequence there (decision-r07-t13d); under the operator's own inhibit it is held back
-  // (decision-r07-owner-ux-signoff).
+  // `INHIBIT` shuts the automation down under `AUTO` and takes a system inhibit over, whatever its
+  // cause, so it states its consequence there (decision-r07-t13d); under the operator's own
+  // inhibit it is held back (decision-r07-owner-ux-signoff).
   const inhibitStates =
     exposure.kind === "auto" || (exposure.kind === "inhibited" && exposure.reason !== "operator");
+  const standing = autoNotAvailable(metering);
   return (
     <section className="panel view-exposure" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
@@ -481,18 +518,23 @@ export function ExposurePanel({
       </p>
       <CameraSetting triple={shownTriple(exposure)} />
       <ManualEntry exposure={exposure} onChange={onChange} />
-      {meteredEv100 === null ? (
-        <p className="view-exposure__reason">{exposureNote(AUTO_NOT_AVAILABLE)}</p>
-      ) : null}
+      {standing === null ? null : (
+        // A live region: the status comes, and goes, by itself.
+        <p className="view-exposure__reason">
+          <output>{exposureNote(standing)}</output>
+        </p>
+      )}
       <div className="view-exposure__commands">
         <ExposureCommand
           label="ENABLE"
-          result={enable(exposure, meteredEv100)}
+          result={enable(exposure, metering.kind === "metered" ? metering.ev100 : null)}
+          metering={metering}
           onChange={onChange}
         />
         <ExposureCommand
           label="INHIBIT"
           result={inhibit(exposure)}
+          metering={metering}
           consequence={inhibitStates ? INHIBIT_CONSEQUENCE : undefined}
           onChange={onChange}
         />

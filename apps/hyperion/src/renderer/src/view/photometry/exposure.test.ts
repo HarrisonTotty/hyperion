@@ -16,6 +16,7 @@ import {
   MAN_EV100_MAX,
   MAN_EV100_MIN,
   METER_CALIBRATION_K,
+  NO_IMAGE_INHIBIT,
   onMetering,
   programTriple,
   setAuto,
@@ -183,8 +184,8 @@ describe("the exposure's automation levels", () => {
     expect(exposureLevelReading(DEFAULT_EXPOSURE)).toBe("MAN");
   });
 
-  it("refuses AUTO with no image to meter", () => {
-    expect(setAuto(null)).toEqual({ kind: "refused", reason: "no_image_to_meter" });
+  it("refuses AUTO with nothing metered", () => {
+    expect(setAuto(null)).toEqual({ kind: "refused", reason: "not_metered" });
   });
 
   it("takes AUTO with a metering source", () => {
@@ -224,7 +225,7 @@ describe("the exposure's automation levels", () => {
   });
 
   it("takes over a system inhibit as the operator's on INHIBIT, which then does not resume", () => {
-    const taken = accepted(inhibit(onMetering(AUTO, null)));
+    const taken = accepted(inhibit(onMetering(AUTO, NO_IMAGE_INHIBIT)));
     expect(onMetering(taken, 5)).toEqual({ kind: "inhibited", ev100: 3, reason: "operator" });
   });
 
@@ -233,13 +234,13 @@ describe("the exposure's automation levels", () => {
     expect(accepted(enable(held, 4))).toEqual({ kind: "auto", ev100: 4 });
   });
 
-  it("refuses ENABLE with no image to meter", () => {
+  it("refuses ENABLE with nothing metered", () => {
     const held = accepted(inhibit(AUTO));
-    expect(enable(held, null)).toEqual({ kind: "refused", reason: "no_image_to_meter" });
+    expect(enable(held, null)).toEqual({ kind: "refused", reason: "not_metered" });
   });
 
   it("inhibits AUTO on the loss of its source, saying so", () => {
-    const lost = onMetering(AUTO, null);
+    const lost = onMetering(AUTO, NO_IMAGE_INHIBIT);
     expect([lost, exposureLevelReading(lost)]).toEqual([
       { kind: "inhibited", ev100: 3, reason: "no_image_to_meter" },
       "INHIBITED · NO IMAGE TO METER",
@@ -247,7 +248,7 @@ describe("the exposure's automation levels", () => {
   });
 
   it("resumes AUTO by itself when the source returns after a system inhibit", () => {
-    expect(onMetering(onMetering(AUTO, null), 5)).toEqual({ kind: "auto", ev100: 5 });
+    expect(onMetering(onMetering(AUTO, NO_IMAGE_INHIBIT), 5)).toEqual({ kind: "auto", ev100: 5 });
   });
 
   it("does not resume AUTO when the source reports after an operator's inhibit", () => {
@@ -280,17 +281,14 @@ describe("the exposure's automation levels", () => {
     expect(enable(AUTO, 3)).toEqual({ kind: "refused", reason: "already_auto" });
   });
 
-  it("hands MAN to AUTO at the metered value on ENABLE, and only with an image to meter (R07.T8.a)", () => {
+  it("hands MAN to AUTO at the metered value on ENABLE, and only with a metered value (R07.T8.a)", () => {
     expect(accepted(enable(DEFAULT_EXPOSURE, 6))).toEqual({ kind: "auto", ev100: 6 });
-    expect(enable(DEFAULT_EXPOSURE, null)).toEqual({
-      kind: "refused",
-      reason: "no_image_to_meter",
-    });
+    expect(enable(DEFAULT_EXPOSURE, null)).toEqual({ kind: "refused", reason: "not_metered" });
   });
 
   it("keeps a system inhibit while the source stays lost", () => {
-    const lost = onMetering(AUTO, null);
-    expect(onMetering(lost, null)).toBe(lost);
+    const lost = onMetering(AUTO, NO_IMAGE_INHIBIT);
+    expect(onMetering(lost, NO_IMAGE_INHIBIT)).toBe(lost);
   });
 
   it("reads a MAN control's EV100 from its triple and the others' at their held value", () => {
@@ -305,6 +303,69 @@ describe("the exposure's automation levels", () => {
     expect([onMetering(AUTO, 7), onMetering(DEFAULT_EXPOSURE, 7)]).toEqual([
       { kind: "auto", ev100: 7 },
       DEFAULT_EXPOSURE,
+    ]);
+  });
+});
+
+describe("the system inhibit of a meter that weighs nothing (R07.T16.b)", () => {
+  it("inhibits AUTO with the meter that found nothing, read as that meter's own status", () => {
+    const held = [
+      onMetering(AUTO, { reason: "nothing_weighed", meter: "lit" }),
+      onMetering(AUTO, { reason: "nothing_weighed", meter: "dark" }),
+      onMetering(AUTO, { reason: "nothing_weighed", meter: "average" }),
+    ];
+    expect([held[0], held.map(exposureLevelReading)]).toEqual([
+      { kind: "inhibited", ev100: 3, reason: "nothing_weighed", meter: "lit" },
+      ["INHIBITED · NO LIT SIDE", "INHIBITED · NO DARK SIDE", "INHIBITED · STAR DISC ONLY"],
+    ]);
+  });
+
+  it("resumes AUTO by itself when the meter weighs something again", () => {
+    const held = onMetering(AUTO, { reason: "nothing_weighed", meter: "lit" });
+    expect(onMetering(held, 5)).toEqual({ kind: "auto", ev100: 5 });
+  });
+
+  it("takes each new cause, so that it says why it holds, and keeps itself while it stands", () => {
+    const lit = onMetering(AUTO, { reason: "nothing_weighed", meter: "lit" });
+    const dark = onMetering(lit, { reason: "nothing_weighed", meter: "dark" });
+    expect([
+      onMetering(lit, { reason: "nothing_weighed", meter: "lit" }) === lit,
+      exposureLevelReading(dark),
+      exposureLevelReading(onMetering(dark, NO_IMAGE_INHIBIT)),
+      exposureLevelReading(
+        onMetering(onMetering(AUTO, NO_IMAGE_INHIBIT), {
+          reason: "nothing_weighed",
+          meter: "average",
+        }),
+      ),
+    ]).toEqual([
+      true,
+      "INHIBITED · NO DARK SIDE",
+      "INHIBITED · NO IMAGE TO METER",
+      "INHIBITED · STAR DISC ONLY",
+    ]);
+  });
+
+  it("is taken over by the operator's INHIBIT and left to ENABLE, as any system inhibit", () => {
+    const held = onMetering(AUTO, { reason: "nothing_weighed", meter: "lit" });
+    const taken = accepted(inhibit(held));
+    expect([
+      taken,
+      onMetering(taken, { reason: "nothing_weighed", meter: "dark" }),
+      accepted(enable(held, 4)),
+    ]).toEqual([
+      { kind: "inhibited", ev100: 3, reason: "operator" },
+      taken,
+      { kind: "auto", ev100: 4 },
+    ]);
+  });
+
+  it("leaves MAN and the operator's inhibit alone", () => {
+    const operator = accepted(inhibit(AUTO));
+    const cause = { reason: "nothing_weighed", meter: "lit" } as const;
+    expect([onMetering(DEFAULT_EXPOSURE, cause), onMetering(operator, cause)]).toEqual([
+      DEFAULT_EXPOSURE,
+      operator,
     ]);
   });
 });

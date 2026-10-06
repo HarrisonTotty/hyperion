@@ -1422,7 +1422,10 @@ reducedMotion, scene)` returns `{ state, change }`: it integrates whole ticks of
   commands are functions returning `ExposureCommandResult` (`setManual`, refused with
   `invalid_triple`; `setAuto`, refused with `no_image_to_meter`; `inhibit`, refused under `MAN`
   with `not_automatic`; `enable`, refused outside `INHIBITED`), and `onMetering(control, ev100 |
-null)` applies a source's report. An operator's `INHIBIT` also takes over a system inhibit, which
+null)` applies a source's report (_R07.T16.b changes these: a second system inhibit,
+  `nothing_weighed` with its meter, `setAuto`'s refusal `not_metered`, and `onMetering` taking
+  `number | SystemInhibitCause`; see R07's "Deviations in T16.b, as built"_). An operator's
+  `INHIBIT` also takes over a system inhibit, which
   then no longer resumes by itself (Design note 11 does not cover the case; the lean is the
   operator's intent). Decided 2026-09-30 (delegated decision): as built, now in Design note 11 and
   the guide. `controlEv100` and `exposureLevelReading` go with them. `ExposureTriple` keeps the

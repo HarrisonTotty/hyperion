@@ -567,7 +567,10 @@ meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, p
   `view/wireframe/bodies.ts`; `ExposureControl` is `manual { triple }` | `auto { ev100 }` |
   `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`, driven by `setManual`, `setAuto`
   (refused with `no_image_to_meter` until a photorealistic view meters), `inhibit`, `enable` and
-  `onMetering(control, ev100 | null)`, which this plan's meter feeds; the panel is `ExposurePanel`;
+  `onMetering(control, ev100 | null)`, which this plan's meter feeds (_R07.T16.b: `inhibited` also
+  takes `nothing_weighed` with its meter, `setAuto` refuses with `not_metered`, and `onMetering`
+  takes `number | SystemInhibitCause`; see "Deviations in T16.b, as built"_); the panel is
+  `ExposurePanel`;
   `buildWireframeDrawList(scene, camera: DrawCamera, viewport, tokens, options: DrawOptions)` with
   `CASING_PX` = 1, lines `premultiplied`, screen symbology at depth 1; `agx`, `agxSigmoid` and
   `agxSprite` in `toneCurve.wgsl`; there is no client `BodyFixedRotation` type: a body's rotation is
@@ -2408,7 +2411,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   treated as no histogram: `AUTO` holds until
   `METER_TIMEOUT_S`, then reads `INHIBITED · NO IMAGE TO METER`, which goes beyond the guide's
   definition of that status. T16 replaces it with the meter's own status, `NO LIT SIDE` and its
-  twins (decision-r07-t8a-meter). Under `AUTO` `onMetering` receives the smoothed, applied EV100,
+  twins (decision-r07-t8a-meter; built by T16.b, see "Deviations in T16.b, as built"). Under
+  `AUTO` `onMetering` receives the smoothed, applied EV100,
   so R02's `auto.ev100` is the applied value and `meteredEv100` the metered one; a system inhibit
   resumes and smooths in the same step; the operator's `setAuto` and `enable` take
   `meteredEv100` and set the exposure there at once, unsmoothed (R02's commands as built).
@@ -3635,6 +3639,162 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     in the split, T16.b's bare statuses beside `ENABLE` and under `AUTO NOT AVAILABLE`, T8.a's
     focus consider given to T16.b, and `SELECT` and the "offers `MAN` only" wording given to
     T16.c.
+- **Deviations in T16.b, as built** (2026-10-06; the views lane).
+  - **Files.** The five the subtask lists. Beyond them: `styles.css` (the run class's comment);
+    `test/fakeViewEngine.ts`, whose histogram read-back now weighs a `FakeMeteredImage` by the
+    meter weights its dispatch carried (by default 1,000 `other` pixels in the middle bin, so that
+    `AVG` meters it and `LIT` and `DARK` weigh nothing; a test may add a lit body); and
+    `ViewDisplay.test.tsx` and `ViewDisplayLayout.test.tsx`. The guide is untouched (T16.c).
+  - **The cause.** `AutoExposure.metering` is a `Metering`, `{ kind: "metered", ev100 }` or a
+    `MeterCause` (`no-image`, `nothing-weighed` with its `meter`, `acquiring`); `meterStatus` gives
+    the bare status, or `null` while metered or acquiring. `meteredEv100` is kept: R02's `setAuto`
+    and `enable` take it. Two timers run: since the last histogram that weighed a pixel, and since
+    the last of any kind. Once the first passes `METER_TIMEOUT_S` the value goes, as `no-image` if
+    no histogram came in that time and `nothing-weighed` otherwise.
+    - **`noteImage(drawn)`** (new). The loop calls it after each draw with the style drawn, so that
+      the cause is true of the frame the readout shows: told at the step, before the draw, the
+      controller would see the last frame's style and could stand `NO IMAGE TO METER` beside a
+      newly drawn image for a readout. The controller, not the loop, now drops the histograms of an
+      image no longer drawn.
+    - **Beyond the text.** With no value held, `no-image` stands at once while no image is drawn
+      (the wireframe), as `NO IMAGE TO METER` did before. The window opens whenever the image comes
+      to be drawn with no value held, not only the first time, so that an image back from the
+      wireframe is never met with `NO IMAGE TO METER`. A meter change restarts the window in both
+      cases: with a value held it keeps that value for `METER_TIMEOUT_S` again (the old meter's
+      histograms still in flight, one to three frames, may refresh it).
+    - **`METER_STEP_MAX_S`** (0.1 s, after the UX review). The timers count at most that much of a
+      step, so that a stall of the page, in which no read-back can be delivered, cannot time the
+      meter out beside a drawn image. The first captures caught one: after a probe's synchronous
+      measuring, the reading stood at `INHIBITED · NO IMAGE TO METER` beside `NO LIT SIDE` for a
+      readout. The smoothing still takes the whole step.
+  - **R02's `exposure.ts`.** `SystemInhibitCause` (`{ reason: "no_image_to_meter" }` or
+    `{ reason: "nothing_weighed", meter }`), `NO_IMAGE_INHIBIT`, `NO_IMAGE_TO_METER` and
+    `NOTHING_WEIGHED_STATUS` are new. `InhibitReason` gains `"nothing_weighed"`, and the
+    `inhibited` variant is `{ kind, ev100 } & ({ reason: "operator" } | SystemInhibitCause)`.
+    `onMetering(control, number | SystemInhibitCause)` replaces `ev100 | null`: a system inhibit
+    takes each new cause, so that it always says why it holds, and returns itself where the cause
+    is unchanged. The refusal `no_image_to_meter` is renamed `not_metered`, since one refusal now
+    has three wordings, which `ExposurePanel` chooses by the cause. R07's Consumes, T13.a (1442),
+    T13's as-built note and R02's T2.f note still name the old forms; Consumes and R02's note point
+    here.
+  - **The panels.** `ExposurePanel` and `MeterControl` take `metering: Metering` in place of
+    `meteredEv100`. `AUTO_NOT_AVAILABLE` becomes `autoNotAvailable(metering)`, in the panel and
+    under the compact layout's row. `MeterControl` takes the display's `exposure` and its `source`
+    in place of the loop's `reading`, so that its reading is always the `Exposure` panel's, and
+    `meterStatusLine(metering)` adds the remedy. Its status stands in the reading's place, as
+    T8.a's `NO IMAGE TO METER` did, and `SOURCE` goes with it: the UX review's consider to keep it
+    would add a row, about 20 px, to E10 and E11 below, which would then pass E3 and raise the least
+    height by about 0.5 rem. In the window its reading stands as it is, with
+    `METERED —`, the guide's missing value, under `MAN` and the operator's inhibit (UX review).
+    `exposureNote` keeps the three statuses unbroken. The statuses, the meter's and
+    `AUTO NOT AVAILABLE: …` in the panel and under the row, are now set in an `output`, a live
+    region, since they come by themselves (UX review).
+  - **One snapshot** (the UX review's must-fix). The metering went through the throttled
+    `published`, and the exposure through the display's state, so a reading and its status could
+    disagree for up to a readout. The loop now sets the metering in a state of its own in the frame
+    it gives the exposure, not throttled again. `meteringFor(metering, meter)` shows a meter's own
+    status as `acquiring` once another meter is chosen, so that the status clears in the choice's
+    own render, before the controller takes it. `exposureShownChanged` compares the level
+    readings, so that a new cause reaches the display.
+  - **A standing system inhibit through the window: for a ruling.** The controller leaves the
+    control as it stands while acquiring, so the reading keeps the standing inhibit's cause until
+    the window ends, then reads the new meter's status or resumes `AUTO`: for up to 0.5 s
+    `INHIBITED · NO LIT SIDE` under `METER DARK` after a change, and `INHIBITED · NO IMAGE TO METER`
+    beside an image back from the wireframe. This follows decision-r07-t8a-meter's "shows its
+    reading as it stands" and "The words follow the meter that found nothing", and the guide's
+    "who inhibited it and why"; its "neither panel shows a meter status or `NO IMAGE TO METER`"
+    reads against it. The UX review leans to keeping it, as the only honest reading; the
+    plan-conformance review asks for a ruling. Other choices would be a bare `INHIBITED` in the
+    window, or the new meter's status taken early; the guide has neither. T16.c's row must say
+    what is ruled.
+  - **T8.a's consider, not settled: for a ruling.** In the compact layout the focus already goes to
+    `CAMERA`'s disclosure (decision-r07-t19-layout). In the full layout, a meter button holding the
+    focus when key `4`, a fault or the wireframe stand-in while the pipelines recompile unmounts
+    the panel leaves the focus on the page's body; a press on the Style panel takes the focus there
+    first. The full layout's target is a UX choice no ruling covers: (a) the Style panel's pressed
+    button; (b) `CAMERA`, as in compact; (c) the Exposure panel's last control, `INHIBIT`, the
+    meter's predecessor in column B (the UX review's lean); (d) leave it.
+  - **For T16.c.** `NO IMAGE TO METER` can still stand beside a drawn image after a histogram
+    timeout with the image drawn (a read-back fault), the plan's `no-image`. The ruling's sentence
+    for the guide, "Never shown beside a drawn image", needs that exception.
+  - **Tests.**
+    - `autoExposure.test.ts`: under `LIT` with no lit body, acquiring until 0.45 s and
+      `NO LIT SIDE` by 0.65 s, never `no-image`, and the inhibit raised with the status;
+      `NO DARK SIDE` under `DARK`; `STAR DISC ONLY` under `AVG` over a field filled by a disc; a
+      meter change acquiring at once, the window restarted and the reading kept until it ends; the
+      control held while acquiring; `AUTO` resuming on a lit body; `no-image` while no image is
+      drawn and acquiring when one comes; `NO IMAGE TO METER` when histograms stop beside a drawn
+      image, and at once when the image goes; acquiring again when it comes back; `MAN` and the
+      operator's inhibit left alone; one stalled frame not timing the meter out; `meteringFor`.
+    - `exposure.test.ts`: the new inhibit's readings for each meter, `AUTO` resuming, each new cause
+      taken, `INHIBIT` taking it over and `ENABLE` setting `AUTO` from it, `MAN` and the operator's
+      inhibit left alone; `not_metered`.
+    - `ExposurePanel.test.tsx`: each status bare beside `ENABLE` and in `AUTO NOT AVAILABLE`, the
+      reading in its parts, never `NO IMAGE TO METER` nor the remedy, `INHIBIT`'s consequence under
+      each new inhibit and its take-over, the statuses unbroken; in the window `ENABLE` held back
+      with `NOT AVAILABLE: not yet metered`, no status, the reading as it stands, the `MAN` field
+      taking an entry.
+    - `MeterControl.test.tsx`: each status with its remedy in the reading's place, describing the
+      chosen meter only, every meter choosable, unbroken, in a live region; the reading, `SOURCE`
+      and `METERED —` in the window.
+    - `ViewDisplay.test.tsx`, through the fake engine: `NO LIT SIDE` under `LIT` not by 0.3 s and by
+      1 s, never `NO IMAGE TO METER`; a change to `DARK` clearing the status beside `ENABLE`, under
+      `AUTO NOT AVAILABLE` and on the meter in the click's own render, then `NO DARK SIDE` after its
+      window; `AUTO` resuming when a lit body is metered. `ViewDisplayLayout.test.tsx`: the folded
+      exposure's `AUTO NOT AVAILABLE: NO LIT SIDE` under the row after the window, unbroken.
+  - **By hand, measured** (hidden, never shown; 2026-10-06, the RTX 3080; the harness is
+    `.git/rm23-scratch/r07-views/shots-t16b/`, from T19.d's, with `table16b.py`).
+    - **The states.** After E7 (E8 in full), `PHASE TEST` drawn photorealistic at 10°, `ENABLE`
+      under `AVG`, then `LIT` and `]` to the star, whose image holds no lit side: E9
+      `INHIBITED · NO LIT SIDE`, E10 the same with `99` refused, E11 the operator's `INHIBIT` over
+      it with `99` refused, E12 `MAN` with `99` refused, and E13 `INHIBITED · NO DARK SIDE` under
+      `DARK`. The own-ship runs take them in `PRECISION TEST`, whose bodies are black. In compact
+      each is captured with `EXPOSURE` open and with `EXPOSURE METER` open. `STAR DISC ONLY`, which
+      needs a field filled by a star's disc, and the window's words, which last 0.5 s, are set in
+      place in E9–E11 and measured with checks 1–3 and the probe, then put back.
+    - **The runs:** `full`, `max1080` (856 px box), `atfull` (732 px), `belowfull` (731 px,
+      compact), `compact720` (562 px), `zoom150` (565 px), `zoom125` (708 px), `ownship720` and
+      `ownship150`. All 198 states pass every check of decision-r07-t19b-exposure-fit item 1, the
+      0.5 rem probe included, and so does every variant set in place; no relaunch, GPU-process
+      restart or failure was logged, and every page and box was exact. A second batch, after the
+      reviews' fixes, measured the same to the 0.5 px.
+    - **Compact, the panel, `Targets` and the spare**, in px:
+
+      | State, the panel open | 1280 × 720 | 150% | 125% | Own ship, 720p | Own ship, 150% |
+      | --- | --- | --- | --- | --- | --- |
+      | E9 `INHIBITED · NO LIT SIDE`, `EXPOSURE` | 269.5 / 193 / 60 | 268.8 / 197 / 65 | 269.1 / 340.2 / 207 | 269.5 / 214.5 / 101 | 268.8 / 218.5 / 106 |
+      | E10 E9 with `99` refused | 291 / 171.5 / 38 | 290.3 / 175.5 / 43 | 290.6 / 318.7 / 186 | 291 / 193 / 80 | 290.3 / 197 / 85 |
+      | E11 the operator's inhibit over E9, refused | 294 / 168.5 / 35 | 293.3 / 172.5 / 40 | 293.6 / 315.7 / 183 | 294 / 190 / 77 | 293.3 / 194 / 82 |
+      | E12 `MAN` beside `NO LIT SIDE`, refused | 269.5 / 193 / 60 | 268.8 / 197 / 65 | 269.1 / 340.2 / 207 | 269.5 / 214.5 / 101 | 268.8 / 218.5 / 106 |
+      | E13 `INHIBITED · NO DARK SIDE` | 269.5 / 193 / 60 | 268.8 / 197 / 65 | 269.1 / 340.2 / 207 | 269.5 / 214.5 / 101 | 268.8 / 218.5 / 106 |
+      | E9–E12, `EXPOSURE METER` | 160 / 281 / 148 | 141.8 / 302.5 / 170 | 142.1 / 445.7 / 313 | 160 / 302.5 / 189 | 141.8 / 324 / 212 |
+      | E13, `EXPOSURE METER` | 160 / 281 / 148 | 159.3 / 285 / 153 | 159.6 / 428.2 / 295 | 160 / 302.5 / 189 | 159.3 / 306.5 / 194 |
+
+      The tallest new state is E11, the operator's inhibit over `NO LIT SIDE` with a refused entry,
+      at 35 px spare (720p) and 40 px (150%). With a five-character EV100, as the own-ship runs'
+      `EV100 -14.0`, the reading `INHIBITED · STAR DISC ONLY` takes two lines, 20 px more (the
+      own-ship E10 variant: 60 px spare against 80), so the arithmetic worst of the new states is
+      E10 at that reading, 18 px at 720p, as T19.d's E6. The meter's panel is 160 px with its
+      two-line status and keeps at least 148 px.
+    - **Full, column B:** 652.5, 674, 674, 615 and 652.5 px in E9–E13, the meter 168 px with its
+      two-line status in place of 150.5 px with `NO IMAGE TO METER`, while the exposure's
+      `AUTO NOT AVAILABLE: NO LIT SIDE` takes one line where `… NO IMAGE TO METER` took two. With
+      the 43 px refusal this machine cannot raise, at most 717 px, under E3's 731.5 px, so
+      `FULL_MIN_HEIGHT_REM` stays 45.75 rem. At the least height (`atfull`) column B keeps 58 px in
+      E10 and E11 and `Camera` 41 px; at the 53.5 rem box (`max1080`), 182 px and 165 px.
+  - **Gate.** No `just ci` (the Day 2 protocol). The acceptance's vitest (32 files, 488 tests), the
+    app's vitest (324 files, 5,476 tests; 325 files, 5,526 tests after merging
+    `rendering-and-planets` with T10.c), `just check lint` from a clean typecheck cache, before and
+    after that merge, Prettier, and the console-ux skill's lint (0 errors, the 11 old checks),
+    contrast and glyph scripts. No `just test-render`: no shader, `view/engine/` or `src/smoke/`
+    file changed.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers. The UX review's must-fix,
+    the two paths, is fixed (one snapshot, above). The plan-conformance review's must-fix, the
+    reading through the window, waits on the ruling above, as does the focus. Fixed besides: a test
+    of the folded row's own status, tests that query by what the operator sees, the loop's
+    comment, the stall (`METER_STEP_MAX_S`), the live regions and `METERED —`. Not taken:
+    removing `meteredEv100` and `InhibitReason` (R02's commands take the one, and the plan names
+    the other), and `SOURCE` under a status (above).
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the
@@ -3897,6 +4057,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `STAR DISC ONLY`, the `acquiring` window and `ENABLE`'s `NOT AVAILABLE: not yet metered` in
     it all need `AutoExposure`'s cause, which T16 builds with its guide edit. Until then `ENABLE`
     is held back with `NO IMAGE TO METER` before the first histogram, and both panels show it.
+    _Built by T16.b (2026-10-06); see "Deviations in T16.b, as built"._
   - **Tests.** `MeterControl.test.tsx`: with nothing metered, only the pressed button is described.
     `ExposurePanel.test.tsx` (new): under `AUTO`, `ENABLE` is held back and described as
     `NOT AVAILABLE: the exposure is AUTO`; under `MAN`, `INHIBIT` as

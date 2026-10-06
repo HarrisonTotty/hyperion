@@ -8,6 +8,8 @@
  * (SIGGRAPH 2014).
  */
 
+import type { MeterMode } from "../post/meter";
+
 /**
  * A camera's aperture, shutter, sensitivity and neutral-density filter: the view camera's setting
  * at an exposure, or the triple a `MAN` exposure is set from (R06's `cameraLimitV` takes it).
@@ -210,8 +212,36 @@ export function exposureScale(ev100: number): number {
   return 1 / ((SATURATION_CONSTANT / (LENS_ATTENUATION_Q * 100)) * 2 ** ev100);
 }
 
+/**
+ * The status of an exposure with no rendered image to meter: a wireframe view, or a photorealistic
+ * view that has closed or faulted.
+ */
+export const NO_IMAGE_TO_METER = "NO IMAGE TO METER";
+
+/**
+ * Each meter's own status where a drawn image holds nothing it weighs (plan R07, R07.T16.b;
+ * decision-r07-t8a-meter, item 1): `NO LIT SIDE` under `LIT`, `NO DARK SIDE` under `DARK`, and
+ * `STAR DISC ONLY` under `AVG`, which weighs everything but a star's disc.
+ */
+export const NOTHING_WEIGHED_STATUS: Readonly<Record<MeterMode, string>> = {
+  average: "STAR DISC ONLY",
+  lit: "NO LIT SIDE",
+  dark: "NO DARK SIDE",
+};
+
+/**
+ * Why the system inhibits `AUTO`: its source has no image to meter, or the meter in force weighs
+ * nothing in the drawn image, `meter` being that meter (R07.T16.b; decision-r07-t8a-meter, item 1).
+ */
+export type SystemInhibitCause =
+  | { readonly reason: "no_image_to_meter" }
+  | { readonly reason: "nothing_weighed"; readonly meter: MeterMode };
+
+/** A system inhibit for want of an image to meter. */
+export const NO_IMAGE_INHIBIT: SystemInhibitCause = { reason: "no_image_to_meter" };
+
 /** Who inhibited automatic exposure, and so why. */
-export type InhibitReason = "operator" | "no_image_to_meter";
+export type InhibitReason = "operator" | SystemInhibitCause["reason"];
 
 /**
  * The exposure's automation level and value (Design note 11).
@@ -221,13 +251,16 @@ export type InhibitReason = "operator" | "no_image_to_meter";
  * ({@link setManualEv100}), or from a triple ({@link setManual}). `auto` follows the photorealistic
  * view the view accompanies (R07), holding its last metered value. `inhibited` means the automatic
  * function is prevented from acting: the exposure is held at its last metered value, with who
- * inhibited it and why. A system inhibit (the source closed or faulted) returns to `auto` by itself
- * when the source returns; an operator's does not.
+ * inhibited it and why. A system inhibit (the source closed or faulted, or its meter weighing
+ * nothing, with the meter that found nothing) returns to `auto` by itself when the meter reads
+ * again; an operator's does not.
  */
 export type ExposureControl =
   | { readonly kind: "manual"; readonly triple: ExposureTriple }
   | { readonly kind: "auto"; readonly ev100: number }
-  | { readonly kind: "inhibited"; readonly ev100: number; readonly reason: InhibitReason };
+  | ({ readonly kind: "inhibited"; readonly ev100: number } & (
+      { readonly reason: "operator" } | SystemInhibitCause
+    ));
 
 /** A new view's exposure: `MAN` at the default triple. */
 export const DEFAULT_EXPOSURE: ExposureControl = { kind: "manual", triple: DEFAULT_MAN_TRIPLE };
@@ -238,7 +271,7 @@ export type ExposureCommandResult =
   | {
       readonly kind: "refused";
       readonly reason:
-        | "no_image_to_meter"
+        | "not_metered"
         | "not_automatic"
         | "already_auto"
         | "already_inhibited"
@@ -308,14 +341,15 @@ export function setManualEv100(ev100: number): ExposureCommandResult {
 }
 
 /**
- * `AUTO`, by the operator, only with a metering source: a wireframe view has no image to meter, so
- * until R07's photorealistic view accompanies it this is refused with `NO IMAGE TO METER`.
+ * `AUTO`, by the operator, only at a metered value: refused with `not_metered` while the source has
+ * none, which the exposure panel words by the meter's cause (`NO IMAGE TO METER` for a wireframe
+ * view, a meter's own status, or `NOT AVAILABLE: not yet metered`; R07.T16.b).
  *
- * @param meteredEv100 - The source's current metered value, or `null` where there is no source.
+ * @param meteredEv100 - The source's current metered value, or `null` where it has none.
  */
 export function setAuto(meteredEv100: number | null): ExposureCommandResult {
   if (meteredEv100 === null) {
-    return { kind: "refused", reason: "no_image_to_meter" };
+    return { kind: "refused", reason: "not_metered" };
   }
   return { kind: "accepted", control: { kind: "auto", ev100: meteredEv100 } };
 }
@@ -342,9 +376,9 @@ export function inhibit(control: ExposureControl): ExposureCommandResult {
 /**
  * The operator's `ENABLE`: sets the exposure to `AUTO` at the metered value, from `MAN` or from an
  * inhibit of either origin (the guide's `ENABLE` rows; R07.T8.a, decision-r07-t8a-meter);
- * refused with `NO IMAGE TO METER` while there is no source, and under `AUTO`.
+ * refused with `not_metered` while the source has no metered value, and under `AUTO`.
  *
- * @param meteredEv100 - The source's current metered value, or `null` where there is no source.
+ * @param meteredEv100 - The source's current metered value, or `null` where it has none.
  */
 export function enable(
   control: ExposureControl,
@@ -357,15 +391,21 @@ export function enable(
 }
 
 /**
- * The control after its metering source reports: a new metered value, or `null` when the source
- * closed or faulted.
+ * The control after its metering source reports: a new metered value, or the cause of a system
+ * inhibit, no image to meter or nothing that the meter in force weighs (R07.T16.b).
  *
  * @remarks
- * `AUTO` follows the value, and on the loss of the source becomes a system inhibit
- * (`INHIBITED · NO IMAGE TO METER`) held at the last value; a system inhibit resumes `AUTO` when the
- * source returns; an operator's inhibit and `MAN` are not touched.
+ * `AUTO` follows the value, and without one becomes a system inhibit held at the last value
+ * (`INHIBITED · NO IMAGE TO METER`, `INHIBITED · NO LIT SIDE`); a system inhibit takes each new
+ * cause, so that it always says why it holds, and resumes `AUTO` when the meter reads again; an
+ * operator's inhibit and `MAN` are not touched.
+ *
+ * @returns `control` itself where nothing changes.
  */
-export function onMetering(control: ExposureControl, meteredEv100: number | null): ExposureControl {
+export function onMetering(
+  control: ExposureControl,
+  metered: number | SystemInhibitCause,
+): ExposureControl {
   let next: ExposureControl;
   switch (control.kind) {
     case "manual":
@@ -373,21 +413,54 @@ export function onMetering(control: ExposureControl, meteredEv100: number | null
       break;
     case "auto":
       next =
-        meteredEv100 === null
-          ? { kind: "inhibited", ev100: control.ev100, reason: "no_image_to_meter" }
-          : { kind: "auto", ev100: meteredEv100 };
+        typeof metered === "number"
+          ? { kind: "auto", ev100: metered }
+          : { kind: "inhibited", ev100: control.ev100, ...metered };
       break;
     case "inhibited":
-      next =
-        control.reason === "no_image_to_meter" && meteredEv100 !== null
-          ? { kind: "auto", ev100: meteredEv100 }
-          : control;
+      if (control.reason === "operator") {
+        next = control;
+      } else if (typeof metered === "number") {
+        next = { kind: "auto", ev100: metered };
+      } else {
+        next = sameCause(control, metered)
+          ? control
+          : { kind: "inhibited", ev100: control.ev100, ...metered };
+      }
       break;
   }
   return next;
 }
 
-/** The automation level's reading: `MAN`, `AUTO`, or `INHIBITED` with who inhibited it. */
+/** Whether a system inhibit already holds for `cause`: the same reason, and the same meter. */
+function sameCause(held: SystemInhibitCause, cause: SystemInhibitCause): boolean {
+  return held.reason === "nothing_weighed" && cause.reason === "nothing_weighed"
+    ? held.meter === cause.meter
+    : held.reason === cause.reason;
+}
+
+/** Who inhibited the exposure, or why, as its reading names it after the middle dot. */
+function inhibitWords(control: Extract<ExposureControl, { kind: "inhibited" }>): string {
+  let words: string;
+  switch (control.reason) {
+    case "operator":
+      words = "OPERATOR";
+      break;
+    case "no_image_to_meter":
+      words = NO_IMAGE_TO_METER;
+      break;
+    case "nothing_weighed":
+      words = NOTHING_WEIGHED_STATUS[control.meter];
+      break;
+  }
+  return words;
+}
+
+/**
+ * The automation level's reading: `MAN`, `AUTO`, or `INHIBITED` with who inhibited it or why:
+ * `INHIBITED · OPERATOR`, `INHIBITED · NO IMAGE TO METER`, or a meter's own status
+ * (`INHIBITED · NO LIT SIDE`).
+ */
 export function exposureLevelReading(control: ExposureControl): string {
   let reading: string;
   switch (control.kind) {
@@ -398,8 +471,7 @@ export function exposureLevelReading(control: ExposureControl): string {
       reading = "AUTO";
       break;
     case "inhibited":
-      reading =
-        control.reason === "operator" ? "INHIBITED · OPERATOR" : "INHIBITED · NO IMAGE TO METER";
+      reading = `INHIBITED · ${inhibitWords(control)}`;
       break;
   }
   return reading;

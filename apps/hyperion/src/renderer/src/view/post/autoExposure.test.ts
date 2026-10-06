@@ -4,6 +4,7 @@ import { viewId } from "../camera/state";
 import {
   ev100FromAverageLuminance,
   ev100FromTriple,
+  exposureLevelReading as exposureLevel,
   exposureScale,
   inhibit,
   MAN_EV100_MIN,
@@ -20,6 +21,10 @@ import {
   EMPTY_FRAME_CD_M2,
   meteredAverage,
   meteredLuminance,
+  type Metering,
+  meteringFor,
+  meterStatus,
+  METER_STEP_MAX_S,
   METER_TIMEOUT_S,
   smoothEv,
 } from "./autoExposure";
@@ -27,6 +32,7 @@ import { METER_CLASS, type MeterMode } from "./meter";
 
 const SOURCE = viewId("main");
 const AUTO: ExposureControl = { kind: "auto", ev100: 0 };
+const DEFAULT_MAN: ExposureControl = { kind: "manual", triple: programTriple(VIEW_CAMERA, -1) };
 
 /** A histogram of `counts` at bins, pre-exposed by `preExposure`. */
 function histogram(counts: ReadonlyArray<readonly [number, number]>, preExposure = 1): Histogram {
@@ -75,8 +81,11 @@ function rangeFloorAt(ev100: number): number {
   return 2 ** -14 / exposureScale(ev100);
 }
 
+/** A controller beside a drawn photorealistic image. */
 function controller(control: ExposureControl = AUTO, meter: MeterMode = "average"): AutoExposure {
-  return new AutoExposure({ source: SOURCE, program: VIEW_CAMERA, control, meter });
+  const exposure = new AutoExposure({ source: SOURCE, program: VIEW_CAMERA, control, meter });
+  exposure.noteImage(true);
+  return exposure;
 }
 
 describe("meteredLuminance", () => {
@@ -359,8 +368,9 @@ describe("the exposure", () => {
     for (let t = 0; t <= METER_TIMEOUT_S; t += 1 / 60) {
       exposure.step(empty, 1 / 60);
     }
+    // `AVG` weighs everything but a star's disc: a frame of which it weighs nothing is a disc's.
     expect(exposure.control).toEqual(
-      expect.objectContaining({ kind: "inhibited", reason: "no_image_to_meter" }),
+      expect.objectContaining({ kind: "inhibited", reason: "nothing_weighed", meter: "average" }),
     );
   });
 
@@ -370,6 +380,231 @@ describe("the exposure", () => {
     exposure.step(histogram([[120, 10]]), 1 / 60);
     expect(exposure.apply(setAuto(exposure.meteredEv100))).toBe(true);
     expect(exposure.control.kind).toBe("auto");
+  });
+});
+
+/** A frame of `texels` of one meter class each, as `mode`'s kernel weighs it. */
+function frameOf(meterClass: number, mode: MeterMode, count = 64): Histogram {
+  return frameHistogram(
+    Array.from({ length: count }, (): readonly [number, number] => [
+      binCentreLuminance(140),
+      meterClass,
+    ]),
+    mode,
+  );
+}
+
+/** Steps a controller for `seconds` at 60 Hz with `h`, giving the metering after each frame. */
+function meteringOver(
+  exposure: AutoExposure,
+  h: Histogram | undefined,
+  seconds: number,
+): Metering[] {
+  const seen: Metering[] = [];
+  for (let frame = 0; frame < Math.round(seconds * 60); frame += 1) {
+    exposure.step(h, 1 / 60);
+    seen.push(exposure.metering);
+  }
+  return seen;
+}
+
+/** The kinds of a run of meterings, each run of the same kind given once, in order. */
+function kindsOf(seen: ReadonlyArray<Metering>): string[] {
+  const kinds: string[] = [];
+  for (const metering of seen) {
+    if (kinds.at(-1) !== metering.kind) {
+      kinds.push(metering.kind);
+    }
+  }
+  return kinds;
+}
+
+describe("the meter's causes (R07.T16.b)", () => {
+  // A drawn image with no lit body: a star field and a body drawn black, both `other`.
+  const noLitBody = frameOf(METER_CLASS.other, "lit");
+
+  it("reads NO LIT SIDE under LIT with no lit body after 0.5 s and not before, never NO IMAGE TO METER", () => {
+    const exposure = controller(AUTO, "lit");
+    const before = meteringOver(exposure, noLitBody, METER_TIMEOUT_S - 0.05);
+    const after = meteringOver(exposure, noLitBody, 0.2);
+    expect([kindsOf(before), kindsOf(after), meterStatus(exposure.metering)]).toEqual([
+      ["acquiring"],
+      ["acquiring", "nothing-weighed"],
+      "NO LIT SIDE",
+    ]);
+    expect(exposure.control).toEqual({
+      kind: "inhibited",
+      ev100: 0,
+      reason: "nothing_weighed",
+      meter: "lit",
+    });
+  });
+
+  it("raises the status with the inhibit, after the timeout, and gives the window no word", () => {
+    const exposure = controller(AUTO, "lit");
+    const states: Array<[string, string]> = [];
+    for (let frame = 0; frame < 60; frame += 1) {
+      exposure.step(noLitBody, 1 / 60);
+      states.push([exposure.metering.kind, exposure.control.kind]);
+    }
+    expect([...new Set(states.map((state) => state.join(" ")))]).toEqual([
+      "acquiring auto",
+      "nothing-weighed inhibited",
+    ]);
+  });
+
+  it("reads NO DARK SIDE under DARK and STAR DISC ONLY under AVG", () => {
+    const dark = controller(AUTO, "dark");
+    meteringOver(dark, frameOf(METER_CLASS.litBody, "dark"), 1);
+    const average = controller(AUTO, "average");
+    // A field filled by a star's disc, which no meter weighs.
+    meteringOver(average, frameOf(METER_CLASS.hostDisc, "average"), 1);
+    expect([dark.metering, average.metering].map(meterStatus)).toEqual([
+      "NO DARK SIDE",
+      "STAR DISC ONLY",
+    ]);
+  });
+
+  it("clears the old meter's status at once on a meter change, and restarts the window", () => {
+    const exposure = controller(AUTO, "lit");
+    meteringOver(exposure, noLitBody, 1);
+    const held = exposure.control;
+    exposure.setMeter("dark");
+    const changed = exposure.metering;
+    // DARK finds nothing either: its own status, after a whole window.
+    const window = meteringOver(exposure, frameOf(METER_CLASS.other, "dark"), 0.45);
+    const then = meteringOver(exposure, frameOf(METER_CLASS.other, "dark"), 0.1);
+    expect([changed, kindsOf(window), kindsOf(then), meterStatus(exposure.metering)]).toEqual([
+      { kind: "acquiring" },
+      ["acquiring"],
+      ["acquiring", "nothing-weighed"],
+      "NO DARK SIDE",
+    ]);
+    // The inhibit's words follow the meter that found nothing until the new one has.
+    expect([exposureLevel(held), exposureLevel(exposure.control)]).toEqual([
+      "INHIBITED · NO LIT SIDE",
+      "INHIBITED · NO DARK SIDE",
+    ]);
+  });
+
+  it("holds the control as it stands while acquiring after a meter change", () => {
+    const exposure = controller(AUTO, "lit");
+    meteringOver(exposure, noLitBody, 1);
+    const held = exposure.control;
+    exposure.setMeter("average");
+    exposure.step(noLitBody, 1 / 60);
+    expect([exposure.metering.kind, exposure.control]).toEqual(["acquiring", held]);
+  });
+
+  it("resumes AUTO when a lit body is metered", () => {
+    const exposure = controller(AUTO, "lit");
+    meteringOver(exposure, noLitBody, 1);
+    exposure.step(frameOf(METER_CLASS.litBody, "lit"), 1 / 60);
+    expect([exposure.metering.kind, exposure.control.kind]).toEqual(["metered", "auto"]);
+  });
+
+  it("has no image to meter while none is drawn, and acquires when one comes to be drawn", () => {
+    const exposure = new AutoExposure({
+      source: SOURCE,
+      program: VIEW_CAMERA,
+      control: AUTO,
+      meter: "average",
+    });
+    // A histogram of an image no longer drawn is not metered.
+    const undrawn = meteringOver(exposure, histogram([[120, 10]]), 0.1);
+    exposure.noteImage(true);
+    const drawn = exposure.metering;
+    exposure.step(histogram([[120, 10]]), 1 / 60);
+    expect([kindsOf(undrawn), drawn, exposure.metering.kind]).toEqual([
+      ["no-image"],
+      { kind: "acquiring" },
+      "metered",
+    ]);
+  });
+
+  it("reads NO IMAGE TO METER when histograms stop beside a drawn image, after the timeout", () => {
+    const exposure = controller(AUTO, "lit");
+    meteringOver(exposure, noLitBody, 1);
+    const stopped = meteringOver(exposure, undefined, 0.6);
+    expect([kindsOf(stopped), exposureLevel(exposure.control)]).toEqual([
+      ["nothing-weighed", "no-image"],
+      "INHIBITED · NO IMAGE TO METER",
+    ]);
+  });
+
+  it("has no image to meter at once when the image goes with nothing metered", () => {
+    const exposure = controller(AUTO, "lit");
+    meteringOver(exposure, noLitBody, 1);
+    exposure.noteImage(false);
+    const gone = exposure.metering;
+    exposure.step(undefined, 1 / 60);
+    expect([gone, exposureLevel(exposure.control)]).toEqual([
+      { kind: "no-image" },
+      "INHIBITED · NO IMAGE TO METER",
+    ]);
+  });
+
+  it("acquires again when the image comes back with nothing metered", () => {
+    const exposure = controller(AUTO, "lit");
+    meteringOver(exposure, noLitBody, 1);
+    exposure.noteImage(false);
+    exposure.step(undefined, 1 / 60);
+    exposure.noteImage(true);
+    const back = meteringOver(exposure, noLitBody, 0.4);
+    // The reading stands as it is until the window ends: the inhibit is the system's, and its
+    // cause is then the meter's again.
+    expect([kindsOf(back), exposureLevel(exposure.control)]).toEqual([
+      ["acquiring"],
+      "INHIBITED · NO IMAGE TO METER",
+    ]);
+    meteringOver(exposure, noLitBody, 0.2);
+    expect(exposureLevel(exposure.control)).toBe("INHIBITED · NO LIT SIDE");
+  });
+
+  it("does not time the meter out over one stalled frame, but does over frames without a histogram", () => {
+    const exposure = controller(AUTO, "average");
+    run(exposure, histogram([[120, 10]]), 60, 1);
+    // A stall of the page, longer than the timeout, in which no read-back could be delivered: it
+    // counts as METER_STEP_MAX_S.
+    exposure.step(undefined, METER_TIMEOUT_S + 10 * METER_STEP_MAX_S);
+    const stalled = exposure.metering.kind;
+    const after = meteringOver(exposure, undefined, METER_TIMEOUT_S + 0.1);
+    expect([stalled, kindsOf(after)]).toEqual(["metered", ["metered", "no-image"]]);
+  });
+
+  it("leaves MAN and the operator's inhibit alone while it says why it has no value", () => {
+    const manual = controller(DEFAULT_MAN, "lit");
+    meteringOver(manual, noLitBody, 1);
+    const operator = controller(AUTO, "lit");
+    run(operator, frameOf(METER_CLASS.litBody, "lit"), 60, 1);
+    expect(operator.apply(inhibit(operator.control))).toBe(true);
+    const held = operator.control;
+    meteringOver(operator, noLitBody, 1);
+    expect([
+      manual.control,
+      manual.metering.kind,
+      operator.control,
+      operator.metering.kind,
+    ]).toEqual([DEFAULT_MAN, "nothing-weighed", held, "nothing-weighed"]);
+  });
+});
+
+describe("meteringFor (R07.T16.b)", () => {
+  it("clears a meter's own status at once when another meter is chosen", () => {
+    const lit: Metering = { kind: "nothing-weighed", meter: "lit" };
+    expect([meteringFor(lit, "dark"), meteringFor(lit, "lit")]).toEqual([
+      { kind: "acquiring" },
+      lit,
+    ]);
+  });
+
+  it("leaves a value, the want of an image and the window as they are", () => {
+    const kept: Metering[] = [
+      { kind: "metered", ev100: 3 },
+      { kind: "no-image" },
+      { kind: "acquiring" },
+    ];
+    expect(kept.map((metering) => meteringFor(metering, "dark"))).toEqual(kept);
   });
 });
 

@@ -14,6 +14,9 @@ import {
   ev100FromAverageLuminance,
   MAN_EV100_MIN,
   METER_CALIBRATION_K,
+  NO_IMAGE_INHIBIT,
+  NO_IMAGE_TO_METER,
+  NOTHING_WEIGHED_STATUS,
   onMetering,
   programTriple,
   type ExposureCommandResult,
@@ -135,10 +138,72 @@ export const SMOOTHING_SPEED_EV_PER_S = { brighten: 3, darken: 1 } as const;
 export const SMOOTHING_BAND_EV = 1.5;
 
 /**
- * How long without a histogram before `AUTO` reports no image to meter, s: well above the reader's
- * one to three frames, so a dropped frame does not inhibit it.
+ * How long the meter holds its value without a histogram that weighs a pixel before it reports
+ * why it has none, s: well above the reader's one to three frames, so a dropped frame does not
+ * inhibit `AUTO`. It is also the `acquiring` window (R07.T16.b).
  */
 export const METER_TIMEOUT_S = 0.5;
+
+/**
+ * The most of one step that the meter's timers count, s: a tenth of a second, three frames at the
+ * slowest rate a view is paced at (30 Hz). A stall of the page, in which no read-back can be
+ * delivered, then cannot time the meter out by itself and say there is no image beside a drawn one
+ * (decision-r07-t8a-meter, reason 1); a source that stops while frames run still does.
+ */
+export const METER_STEP_MAX_S = 0.1;
+
+/**
+ * Why a controller holds no metered value (plan R07, R07.T16.b; decision-r07-t8a-meter, item 1).
+ *
+ * @remarks
+ * - `no-image`: no photorealistic image is drawn, or no histogram has arrived for
+ *   {@link METER_TIMEOUT_S} (`NO IMAGE TO METER`).
+ * - `nothing-weighed`: for that long the histograms of a drawn image weighed no pixel under
+ *   `meter`, the meter in force (`NO LIT SIDE`, `NO DARK SIDE`, `STAR DISC ONLY`).
+ * - `acquiring`: under that long since the image came to be drawn, or since the meter changed,
+ *   with no value held: the transient before the first histogram, which gets no word.
+ */
+export type MeterCause =
+  | { readonly kind: "no-image" }
+  | { readonly kind: "nothing-weighed"; readonly meter: MeterMode }
+  | { readonly kind: "acquiring" };
+
+/** The meter as it stands: its value, EV100, which `ENABLE` takes, or why it has none. */
+export type Metering = { readonly kind: "metered"; readonly ev100: number } | MeterCause;
+
+const NO_IMAGE: MeterCause = { kind: "no-image" };
+const ACQUIRING: MeterCause = { kind: "acquiring" };
+
+/**
+ * The metering as the panels show it beside the operator's chosen `meter`: a meter's own status is
+ * cleared at once when another is chosen, which is `acquiring` until the controller's own window
+ * ends (decision-r07-t8a-meter, item 1), so that the status never describes a meter no longer
+ * chosen while the controller has yet to take the change.
+ */
+export function meteringFor(metering: Metering, meter: MeterMode): Metering {
+  return metering.kind === "nothing-weighed" && metering.meter !== meter ? ACQUIRING : metering;
+}
+
+/**
+ * The meter's status while it has no value, bare, or `null` where it has none to say: while it
+ * meters, and while it is `acquiring` (decision-r07-t8a-meter, item 1).
+ */
+export function meterStatus(metering: Metering): string | null {
+  let status: string | null;
+  switch (metering.kind) {
+    case "metered":
+    case "acquiring":
+      status = null;
+      break;
+    case "no-image":
+      status = NO_IMAGE_TO_METER;
+      break;
+    case "nothing-weighed":
+      status = NOTHING_WEIGHED_STATUS[metering.meter];
+      break;
+  }
+  return status;
+}
 
 /**
  * One step of the applied EV toward the metered one, frame-rate independent: linear at the
@@ -202,6 +267,14 @@ export interface AutoExposureOptions {
  * Under `MAN` and `INHIBITED` the applied value does not move; the meter still reads, so that
  * `setAuto` and `enable` can take its value. Exposure adaptation is not motion, so
  * `prefers-reduced-motion` leaves it alone. No dark adaptation of the eye is modelled.
+ *
+ * Each frame the owner calls {@link AutoExposure.step} with the histogram that arrived, then draws
+ * at the reading's control, then tells the controller whether that frame drew the photorealistic
+ * image ({@link AutoExposure.noteImage}), so that what it says of the meter ({@link
+ * AutoExposure.metering}) is true of the frame just drawn. Without a value the meter says why
+ * (R07.T16.b): the status and the system inhibit are raised together, only after
+ * {@link METER_TIMEOUT_S} with nothing weighed, and the window before it, `acquiring`, leaves the
+ * control as it stands.
  */
 export class AutoExposure {
   readonly #source: ViewId;
@@ -210,7 +283,14 @@ export class AutoExposure {
   #control: ExposureControl;
   #meter: MeterMode;
   #targetEv: number | null = null;
+  // Since the last histogram that weighed a pixel, or since the acquiring window opened, s.
+  #unweighedS = 0;
+  // Since the last histogram of any kind, or since the acquiring window opened, s.
   #sinceHistogramS = 0;
+  #imageDrawn = false;
+  // Whether the window since the image came to be drawn, or the meter changed, with no value held
+  // is still open.
+  #acquiring = false;
 
   constructor(options: AutoExposureOptions) {
     this.#source = options.source;
@@ -238,9 +318,46 @@ export class AutoExposure {
     return this.#targetEv;
   }
 
-  /** Selects the operator's meter; the next histogram taken uses its weights. */
+  /** The meter as it stands: its value, or why it has none (R07.T16.b). */
+  get metering(): Metering {
+    let metering: Metering;
+    if (this.#targetEv !== null) {
+      metering = { kind: "metered", ev100: this.#targetEv };
+    } else if (!this.#imageDrawn) {
+      metering = NO_IMAGE;
+    } else if (this.#acquiring) {
+      metering = ACQUIRING;
+    } else if (this.#sinceHistogramS > METER_TIMEOUT_S) {
+      metering = NO_IMAGE;
+    } else {
+      metering = { kind: "nothing-weighed", meter: this.#meter };
+    }
+    return metering;
+  }
+
+  /**
+   * Selects the operator's meter; the next histogram taken uses its weights. A change clears the
+   * old meter's status at once and restarts the window (decision-r07-t8a-meter, item 1): with no
+   * value held the meter is `acquiring` again, and a value held is kept for as long again.
+   */
   setMeter(mode: MeterMode): void {
+    if (mode === this.#meter) {
+      return;
+    }
     this.#meter = mode;
+    this.#openWindow();
+  }
+
+  /**
+   * Notes whether the frame just drawn drew the photorealistic image this controller meters: its
+   * coming to be drawn with no value held opens the `acquiring` window, and while it is not drawn
+   * the meter has no image to meter and takes no histogram.
+   */
+  noteImage(drawn: boolean): void {
+    if (drawn && !this.#imageDrawn) {
+      this.#openWindow();
+    }
+    this.#imageDrawn = drawn;
   }
 
   /**
@@ -260,44 +377,60 @@ export class AutoExposure {
   /**
    * Advances one frame.
    *
-   * @param h - The histogram that arrived since the last step, if one did.
+   * @param h - The histogram that arrived since the last step, if one did; one taken of an image
+   *   no longer drawn is not metered.
    * @param dtS - The frame's duration, s.
    */
   step(h: Histogram | undefined, dtS: number): ExposureReading {
-    const average = h === undefined ? null : meteredAverage(h, this.#window);
+    const histogram = this.#imageDrawn ? h : undefined;
+    const average = histogram === undefined ? null : meteredAverage(histogram, this.#window);
     if (average === null) {
       // No histogram, or one with no pixel of a class the meter weighs (`LIT` with no lit body):
-      // the meter holds its value until the timeout, then reports nothing to meter.
-      this.#sinceHistogramS += dtS;
-      if (this.#sinceHistogramS > METER_TIMEOUT_S) {
+      // the meter holds its value until the timeout, then says why it has none.
+      const countedS = Math.min(dtS, METER_STEP_MAX_S);
+      this.#unweighedS += countedS;
+      this.#sinceHistogramS = histogram === undefined ? this.#sinceHistogramS + countedS : 0;
+      if (this.#unweighedS > METER_TIMEOUT_S) {
         this.#targetEv = null;
+        this.#acquiring = false;
       }
     } else {
+      this.#unweighedS = 0;
       this.#sinceHistogramS = 0;
+      this.#acquiring = false;
       this.#targetEv = ev100FromAverageLuminance(average);
     }
-    const target = this.#targetEv;
+    const metering = this.metering;
     const control = this.#control;
-    switch (control.kind) {
-      case "auto":
-        // A lost source inhibits `AUTO` at its last value (R02's system inhibit).
-        this.#control = onMetering(
-          control,
-          target === null ? null : smoothEv(control.ev100, target, dtS),
-        );
-        break;
-      case "inhibited":
-        // A system inhibit resumes `AUTO` from where it was held, and smooths from there; an
-        // operator's is untouched.
-        this.#control = onMetering(
-          control,
-          target === null ? null : smoothEv(control.ev100, target, dtS),
-        );
-        break;
-      case "manual":
-        break;
+    if (control.kind !== "manual") {
+      // `AUTO` follows the value, and a system inhibit resumes from where it was held and smooths
+      // from there, or takes the new cause; an operator's inhibit is untouched (R02's
+      // `onMetering`). While acquiring, the control stands as it is.
+      switch (metering.kind) {
+        case "metered":
+          this.#control = onMetering(control, smoothEv(control.ev100, metering.ev100, dtS));
+          break;
+        case "acquiring":
+          break;
+        case "no-image":
+          this.#control = onMetering(control, NO_IMAGE_INHIBIT);
+          break;
+        case "nothing-weighed":
+          this.#control = onMetering(control, {
+            reason: "nothing_weighed",
+            meter: metering.meter,
+          });
+          break;
+      }
     }
     return this.reading();
+  }
+
+  /** Opens the window in which the meter, with no value held, is `acquiring`. */
+  #openWindow(): void {
+    this.#unweighedS = 0;
+    this.#sinceHistogramS = 0;
+    this.#acquiring = this.#targetEv === null;
   }
 
   /** The reading as it stands, without advancing. */

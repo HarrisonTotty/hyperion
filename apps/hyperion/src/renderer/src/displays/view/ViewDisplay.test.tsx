@@ -32,7 +32,7 @@ import { FULL_VIEW_PX, renderViewDisplay, stubViewLayout } from "../../test/view
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { rotate } from "../../view/camera/quaternion";
-import { fakeViewEngineSource } from "../../test/fakeViewEngine";
+import { type FakeMeteredImage, fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
 import { requestAdapterOutcome } from "../../view/engine/platform";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
@@ -43,6 +43,7 @@ import {
   initialGraphicsStatus,
 } from "../../view/engine/status";
 import type { FrameSubmission } from "../../view/engine/types";
+import { METER_CLASS } from "../../view/post/meter";
 import { precisionScene } from "../../view/scenes/precision";
 import STYLES from "../../styles.css?raw";
 import { buildWireframeDrawList, CASING_PX } from "../../view/wireframe/drawList";
@@ -71,6 +72,8 @@ interface Setup {
   readonly views: () => FakeView[];
   readonly lastFrame: () => FrameSubmission | undefined;
   readonly engines: ReturnType<typeof fakeViewEngineSource>["engines"];
+  /** What the fake engines' photorealistic image holds, as the meter weighs it. */
+  readonly image: FakeMeteredImage;
   readonly socket: FakeWebSocket;
   readonly rerender: (mode: "visible" | "hidden") => void;
   readonly unmount: () => void;
@@ -120,6 +123,7 @@ function setup(
     views,
     lastFrame: () => views().at(-1)?.frames.at(-1),
     engines: fake.engines,
+    image: fake.image,
     socket,
     rerender: (mode) => {
       view.rerender(tree(mode));
@@ -1179,11 +1183,12 @@ describe("the VIEW display's exposure meter (R07.T8.a)", () => {
     advance(100);
     await settle();
     advance(300);
-    expect(
-      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByText(
-        "NO IMAGE TO METER",
-      ).tagName,
-    ).toBe("P");
+    // Beside a drawn image the meter never says there is no image: it reads the exposure.
+    const meter = within(screen.getByRole("region", { name: "Exposure meter PRIMARY" }));
+    expect([
+      meter.queryByText(/NO IMAGE TO METER/u),
+      meter.getByRole("status", { name: "SOURCE" }).textContent,
+    ]).toEqual([null, "PRIMARY"]);
   });
 });
 
@@ -1216,6 +1221,129 @@ describe("the VIEW display's AUTO exposure (R07.T8.a)", () => {
     await settle();
     advance(1000);
     expect(exposureReadout()).toMatch(/INHIBITED · OPERATOR$/);
+  });
+});
+
+/** The exposure meter's panel. */
+function meterPanel(): ReturnType<typeof within> {
+  return within(screen.getByRole("region", { name: "Exposure meter PRIMARY" }));
+}
+
+/** The exposure meter's status with what to do, by its whole text, or `null` where none stands. */
+function meterStatusShown(): string | null {
+  const line = within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).queryByText(
+    (_, element) =>
+      element?.tagName === "P" && /: (?:choose AVG|widen the view)/u.test(element.textContent),
+  );
+  return line?.textContent ?? null;
+}
+
+/** The statuses of a meter, or of the want of an image, that any text on the display names. */
+function statusesShown(): string[] {
+  return ["NO IMAGE TO METER", "NO LIT SIDE", "NO DARK SIDE", "STAR DISC ONLY"].filter(
+    (status) => screen.queryAllByText(new RegExp(status, "u")).length > 0,
+  );
+}
+
+/**
+ * Advances the frames by `ms` in steps of 50 ms, letting the histograms' reads settle after each,
+ * as they would between real frames.
+ */
+async function advanceReading(view: Setup, ms: number): Promise<void> {
+  for (let elapsed = 0; elapsed < ms; elapsed += 50) {
+    view.advance(50);
+    // Each step's reads settle before the next step's frames.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+}
+
+describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
+  /** PHASE TEST drawn photorealistic, its image metered under AVG and the exposure at AUTO. */
+  async function meteredAuto(): Promise<Setup> {
+    const view = setup({ store: await nominalStore() });
+    await settle();
+    view.advance(100);
+    await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    view.advance(100);
+    await view.user.keyboard("4");
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    await settle();
+    view.advance(300);
+    await view.user.click(screen.getByRole("button", { name: "ENABLE" }));
+    view.advance(600);
+    return view;
+  }
+
+  const NO_LIT_SIDE = "NO LIT SIDE: choose AVG, or bring a sunlit body into view";
+
+  it("reads NO LIT SIDE under LIT with no lit body after 0.5 s and not before, never NO IMAGE TO METER", async () => {
+    const view = await meteredAuto();
+    const auto = exposureReadout();
+    await view.user.click(meterPanel().getByRole("button", { name: "LIT" }));
+    await advanceReading(view, 300);
+    const before = [statusesShown(), exposureReadout()];
+    await advanceReading(view, 700);
+    expect([auto, before, statusesShown()]).toEqual([
+      expect.stringMatching(/AUTO$/u),
+      [[], expect.stringMatching(/AUTO$/u)],
+      ["NO LIT SIDE"],
+    ]);
+    expect(meterPanel().getByRole("button", { name: "LIT" })).toHaveAccessibleDescription(
+      NO_LIT_SIDE,
+    );
+    expect(exposureReadout()).toMatch(/INHIBITED · NO LIT SIDE$/u);
+    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+      "NO LIT SIDE",
+    );
+  });
+
+  it("clears the status at once on a change of meter, and gives the new meter its own after its window", async () => {
+    const view = await meteredAuto();
+    await view.user.click(meterPanel().getByRole("button", { name: "LIT" }));
+    await advanceReading(view, 1000);
+    await view.user.click(meterPanel().getByRole("button", { name: "DARK" }));
+    // In the click's own render, with no frame since: the status goes with the meter that found
+    // nothing, beside ENABLE and under AUTO NOT AVAILABLE too, and the reading stands as it is.
+    const atOnce = [
+      meterStatusShown(),
+      screen.queryByText(/^AUTO NOT AVAILABLE/u),
+      exposureReadout(),
+    ];
+    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+      "NOT AVAILABLE: not yet metered",
+    );
+    await advanceReading(view, 300);
+    const changed = [meterStatusShown(), exposureReadout()];
+    await advanceReading(view, 700);
+    expect([atOnce, changed, meterStatusShown()]).toEqual([
+      [null, null, expect.stringMatching(/INHIBITED · NO LIT SIDE$/u)],
+      [null, expect.stringMatching(/INHIBITED · NO LIT SIDE$/u)],
+      "NO DARK SIDE: choose AVG, or bring a night side into view",
+    ]);
+    expect(meterPanel().getByRole("button", { name: "DARK" })).toHaveAccessibleDescription(
+      "NO DARK SIDE: choose AVG, or bring a night side into view",
+    );
+    expect(exposureReadout()).toMatch(/INHIBITED · NO DARK SIDE$/u);
+  });
+
+  it("resumes AUTO by itself when a lit body is metered", async () => {
+    const view = await meteredAuto();
+    await view.user.click(meterPanel().getByRole("button", { name: "LIT" }));
+    await advanceReading(view, 1000);
+    const inhibited = exposureReadout();
+    view.image.pixels = [
+      ...view.image.pixels,
+      { meterClass: METER_CLASS.litBody, bin: 150, count: 200 },
+    ];
+    await advanceReading(view, 600);
+    expect([inhibited, exposureReadout(), statusesShown()]).toEqual([
+      expect.stringMatching(/INHIBITED · NO LIT SIDE$/u),
+      expect.stringMatching(/^EV100 -?\d+\.\d AUTO$/u),
+      [],
+    ]);
   });
 });
 

@@ -125,6 +125,19 @@ async function chooseScene(view: ViewDisplayHarness, name: string): Promise<void
   view.advance(100);
 }
 
+/**
+ * Advances the frames by `ms` in steps of 50 ms, letting the histograms' reads settle after each,
+ * as they would between real frames.
+ */
+async function advanceReading(view: ViewDisplayHarness, ms: number): Promise<void> {
+  for (let elapsed = 0; elapsed < ms; elapsed += 50) {
+    view.advance(50);
+    // Each step's reads settle before the next step's frames.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+}
+
 /** Presses the key `4` off a canvas and lets the photorealistic pipelines be made. */
 async function toggleStyle(view: ViewDisplayHarness): Promise<void> {
   await view.user.keyboard("4");
@@ -373,6 +386,33 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     expect([...line.querySelectorAll(".view-label__run")].map((run) => run.textContent)).toEqual([
       "NO IMAGE TO METER",
     ]);
+  });
+
+  it("stands the meter's own status under the row while the exposure is folded, after its window (R07.T16.b)", async () => {
+    const view = await compact(await nominalStore());
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("EXPOSURE METER"));
+    // The fake image holds no body's lit side: LIT weighs nothing in it.
+    await view.user.click(
+      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole("button", {
+        name: "LIT",
+      }),
+    );
+    const folded = "AUTO NOT AVAILABLE: NO LIT SIDE";
+    await advanceReading(view, 300);
+    const before = onShow(folded);
+    await advanceReading(view, 700);
+    const line = screen.getByText(
+      (_, element) =>
+        element?.classList.contains("view-folds__standing") === true &&
+        element.textContent === folded,
+    );
+    expect([
+      before,
+      onShow(folded),
+      [...line.querySelectorAll(".view-label__run")].map((run) => run.textContent),
+    ]).toEqual([0, 1, ["NO LIT SIDE"]]);
   });
 
   it("moves no scroll position of its column or the work area as Tab passes every control", async () => {

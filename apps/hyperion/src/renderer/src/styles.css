@@ -3736,8 +3736,8 @@ body {
 /*
  * A run of a reading that never breaks: a quantity with its sign, unit, band or prefix, a star
  * limit with its kind, `UT` with its first group, a clock reading (decision-r07-t19-layout, 2);
- * and in an exposure note, a status phrase, `INHIBITED · OPERATOR` or `NO IMAGE TO METER`
- * (decision-r07-owner-ux-signoff, item 1).
+ * and in an exposure note, a status phrase, `INHIBITED · OPERATOR`, `NO IMAGE TO METER` or a
+ * meter's own, `NO LIT SIDE` and its twins (decision-r07-owner-ux-signoff, item 1; R07.T16.b).
  */
 .view-label__run {
   white-space: nowrap;

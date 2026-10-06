@@ -9,11 +9,18 @@ import {
   programTriple,
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
+import type { Metering } from "../../view/post/autoExposure";
 import { ExposurePanel } from "./ExposurePanel";
+
+/** A meter holding EV100 3. */
+const METERED: Metering = { kind: "metered", ev100: 3 };
+
+/** A meter with no image to meter: a wireframe view. */
+const NO_IMAGE: Metering = { kind: "no-image" };
 
 /** Renders the panel at a control, with a metered value. */
 function renderAt(exposure: ExposureControl): void {
-  render(<ExposurePanel exposure={exposure} meteredEv100={3} onChange={() => undefined} />);
+  render(<ExposurePanel exposure={exposure} metering={METERED} onChange={() => undefined} />);
 }
 
 /** The camera setting's value under its label, `APERTURE`, `SHUTTER`, `ND` or `ISO`. */
@@ -127,7 +134,7 @@ describe("ExposurePanel", () => {
     render(
       <ExposurePanel
         exposure={{ kind: "auto", ev100: 3 }}
-        meteredEv100={3}
+        metering={METERED}
         onChange={() => undefined}
       />,
     );
@@ -138,7 +145,7 @@ describe("ExposurePanel", () => {
 
   it("holds INHIBIT back under MAN, saying the exposure is MAN", () => {
     render(
-      <ExposurePanel exposure={DEFAULT_EXPOSURE} meteredEv100={3} onChange={() => undefined} />,
+      <ExposurePanel exposure={DEFAULT_EXPOSURE} metering={METERED} onChange={() => undefined} />,
     );
     const inhibit = screen.getByRole("button", { name: "INHIBIT" });
     expect(inhibit).toHaveAttribute("aria-disabled", "true");
@@ -152,17 +159,17 @@ const REFUSAL = "EV100 INVALID: enter -14.0 to 42.0";
 
 interface HarnessProps {
   readonly initial: ExposureControl;
-  readonly meteredEv100: number | null;
+  readonly metering: Metering;
   readonly onChange: (exposure: ExposureControl) => void;
 }
 
 /** The panel over a display's exposure state, as `ViewDisplay` holds it. */
-function Harness({ initial, meteredEv100, onChange }: HarnessProps) {
+function Harness({ initial, metering, onChange }: HarnessProps) {
   const [exposure, setExposure] = useState(initial);
   return (
     <ExposurePanel
       exposure={exposure}
-      meteredEv100={meteredEv100}
+      metering={metering}
       onChange={(next) => {
         onChange(next);
         setExposure(next);
@@ -172,10 +179,10 @@ function Harness({ initial, meteredEv100, onChange }: HarnessProps) {
 }
 
 /** Renders the panel over its own state at a control, with the commands it accepts recorded. */
-function renderEntry(initial: ExposureControl, meteredEv100: number | null = 3) {
+function renderEntry(initial: ExposureControl, metering: Metering = METERED) {
   const user = userEvent.setup();
   const onChange = vi.fn<(exposure: ExposureControl) => void>();
-  render(<Harness initial={initial} meteredEv100={meteredEv100} onChange={onChange} />);
+  render(<Harness initial={initial} metering={metering} onChange={onChange} />);
   const field = screen.getByRole("textbox", { name: "MAN" });
   if (!(field instanceof HTMLInputElement)) {
     throw new TypeError("the MAN field is not an input");
@@ -304,7 +311,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
   it("sets MAN with nothing to meter, where ENABLE stays held back", async () => {
     const { user, field } = renderEntry(
       { kind: "inhibited", ev100: 4, reason: "no_image_to_meter" },
-      null,
+      NO_IMAGE,
     );
     expect(field).not.toHaveAttribute("aria-disabled");
     await user.click(field);
@@ -362,7 +369,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
   it("stands after the camera's setting, before AUTO NOT AVAILABLE and the commands", () => {
     const { field } = renderEntry(
       { kind: "inhibited", ev100: 4, reason: "no_image_to_meter" },
-      null,
+      NO_IMAGE,
     );
     const iso = screen.getAllByRole("term").at(-1);
     const notAvailable = noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER");
@@ -494,10 +501,8 @@ describe("ExposurePanel's MAN field, its way out (R07.T13.d's follow-up)", () =>
 const INHIBIT_CONSEQUENCE = "Then AUTO resumes only on ENABLE";
 
 /** Renders the panel at a control and returns its `INHIBIT` button. */
-function inhibitAt(exposure: ExposureControl, meteredEv100: number | null = 3): HTMLElement {
-  render(
-    <ExposurePanel exposure={exposure} meteredEv100={meteredEv100} onChange={() => undefined} />,
-  );
+function inhibitAt(exposure: ExposureControl, metering: Metering = METERED): HTMLElement {
+  render(<ExposurePanel exposure={exposure} metering={metering} onChange={() => undefined} />);
   return screen.getByRole("button", { name: "INHIBIT" });
 }
 
@@ -510,7 +515,10 @@ describe("ExposurePanel's INHIBIT consequence (R07.T13.d's follow-up)", () => {
   });
 
   it("states it under a system inhibit, which INHIBIT takes over", () => {
-    const inhibit = inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, null);
+    const inhibit = inhibitAt(
+      { kind: "inhibited", ev100: 4, reason: "no_image_to_meter" },
+      NO_IMAGE,
+    );
     expect(inhibit).toHaveAccessibleDescription(INHIBIT_CONSEQUENCE);
     expect(screen.getByText(INHIBIT_CONSEQUENCE)).toBeVisible();
   });
@@ -558,7 +566,7 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
   });
 
   it("holds ENABLE back there by NO IMAGE TO METER while nothing is metered", () => {
-    inhibitAt(OPERATOR, null);
+    inhibitAt(OPERATOR, NO_IMAGE);
     const enable = screen.getByRole("button", { name: "ENABLE" });
     expect(enable).toHaveAttribute("aria-disabled", "true");
     expect(enable).toHaveAccessibleDescription("NO IMAGE TO METER");
@@ -570,12 +578,119 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
   });
 
   it("holds NO IMAGE TO METER unbroken in AUTO NOT AVAILABLE and beside ENABLE", () => {
-    inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, null);
+    inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, NO_IMAGE);
     // ENABLE's row: the button and the reason beside it.
     const enableRow = screen.getByRole("button", { name: "ENABLE" }).parentElement;
     expect([
       runsOf(noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER")),
       enableRow === null ? null : runsOf(enableRow),
     ]).toEqual([["NO IMAGE TO METER"], ["NO IMAGE TO METER"]]);
+  });
+});
+
+/** A meter that weighs nothing in the drawn image under `meter`. */
+function nothingWeighed(meter: "average" | "lit" | "dark"): Metering {
+  return { kind: "nothing-weighed", meter };
+}
+
+/** The system inhibit of a meter that weighs nothing. */
+function weighedNothing(meter: "average" | "lit" | "dark"): ExposureControl {
+  return { kind: "inhibited", ev100: 11.7, reason: "nothing_weighed", meter };
+}
+
+/** The `AUTO NOT AVAILABLE` line's text, or `null` where none stands. */
+function standingLine(): string | null {
+  const standing = screen.queryByText(
+    (_, element) =>
+      element?.tagName === "P" && element.textContent.startsWith("AUTO NOT AVAILABLE"),
+  );
+  return standing?.textContent ?? null;
+}
+
+/** The `ENABLE` button. */
+function enableButton(): HTMLElement {
+  return screen.getByRole("button", { name: "ENABLE" });
+}
+
+describe("ExposurePanel with a meter that weighs nothing (R07.T16.b)", () => {
+  it.each([
+    ["lit", "NO LIT SIDE"],
+    ["dark", "NO DARK SIDE"],
+    ["average", "STAR DISC ONLY"],
+  ] as const)(
+    "reads INHIBITED · %s's status, and holds ENABLE back by it, bare, beside AUTO NOT AVAILABLE",
+    (meter, status) => {
+      inhibitAt(weighedNothing(meter), nothingWeighed(meter));
+      expect([reading(), readingPartsShown(), standingLine()]).toEqual([
+        `EV100 11.7 INHIBITED · ${status}`,
+        ["EV100 11.7 INHIBITED", status],
+        `AUTO NOT AVAILABLE: ${status}`,
+      ]);
+      expect(enableButton()).toHaveAttribute("aria-disabled", "true");
+      expect(enableButton()).toHaveAccessibleDescription(status);
+    },
+  );
+
+  it("never says NO IMAGE TO METER, nor the meter control's remedy, beside a drawn image", () => {
+    inhibitAt(weighedNothing("lit"), nothingWeighed("lit"));
+    expect([screen.queryByText(/NO IMAGE TO METER/u), screen.queryByText(/choose AVG/u)]).toEqual([
+      null,
+      null,
+    ]);
+  });
+
+  it.each(["lit", "dark", "average"] as const)(
+    "states INHIBIT's consequence under the system inhibit of %s, which it takes over",
+    (meter) => {
+      const inhibit = inhibitAt(weighedNothing(meter), nothingWeighed(meter));
+      expect(inhibit).not.toHaveAttribute("aria-disabled");
+      expect(inhibit).toHaveAccessibleDescription(INHIBIT_CONSEQUENCE);
+    },
+  );
+
+  it("takes the inhibit over on INHIBIT, as the operator's", async () => {
+    const { user, onChange } = renderEntry(weighedNothing("lit"), nothingWeighed("lit"));
+    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    expect([onChange.mock.calls.at(-1)?.[0], reading()]).toEqual([
+      { kind: "inhibited", ev100: 11.7, reason: "operator" },
+      "EV100 11.7 INHIBITED · OPERATOR",
+    ]);
+  });
+
+  it("holds each meter's status unbroken in AUTO NOT AVAILABLE and beside ENABLE", () => {
+    inhibitAt(weighedNothing("average"), nothingWeighed("average"));
+    const enableRow = screen.getByRole("button", { name: "ENABLE" }).parentElement;
+    expect([
+      runsOf(noteOf("AUTO NOT AVAILABLE: STAR DISC ONLY")),
+      enableRow === null ? null : runsOf(enableRow),
+    ]).toEqual([["STAR DISC ONLY"], ["STAR DISC ONLY"]]);
+  });
+});
+
+describe("ExposurePanel before the first histogram (R07.T16.b)", () => {
+  const ACQUIRING: Metering = { kind: "acquiring" };
+
+  it("holds ENABLE back with NOT AVAILABLE: not yet metered, and shows no status", () => {
+    inhibitAt(DEFAULT_EXPOSURE, ACQUIRING);
+    expect([
+      enableButton().getAttribute("aria-disabled"),
+      standingLine(),
+      screen.queryByText(/NO IMAGE TO METER/u),
+    ]).toEqual(["true", null, null]);
+    expect(enableButton()).toHaveAccessibleDescription("NOT AVAILABLE: not yet metered");
+  });
+
+  it("keeps a system inhibit's reading as it stands, with no status beside it", () => {
+    inhibitAt(weighedNothing("lit"), ACQUIRING);
+    expect([reading(), standingLine()]).toEqual(["EV100 11.7 INHIBITED · NO LIT SIDE", null]);
+    expect(enableButton()).toHaveAccessibleDescription("NOT AVAILABLE: not yet metered");
+  });
+
+  it("never holds the MAN field back", async () => {
+    const { user, field } = renderEntry(weighedNothing("lit"), ACQUIRING);
+    expect(field).not.toHaveAttribute("aria-disabled");
+    await user.click(field);
+    await user.keyboard("2{Enter}");
+    expect(reading()).toBe("EV100 2.0 MAN");
   });
 });

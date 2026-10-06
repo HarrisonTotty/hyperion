@@ -59,6 +59,7 @@ import {
   controlEv100,
   DEFAULT_EXPOSURE,
   type ExposureControl,
+  exposureLevelReading,
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
 import {
@@ -71,7 +72,7 @@ import type { DrawAnchor } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
-import { AutoExposure, type ExposureReading } from "../../view/post/autoExposure";
+import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
 import { litLabelsOf } from "./photorealFrame";
@@ -88,7 +89,7 @@ import { InstrumentsPanel } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
 import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
 import { PRIMARY_NAME, PRIMARY_VIEW_ID, PRIMARY_VIEW_NAME } from "./viewNames";
-import { AUTO_NOT_AVAILABLE, ExposurePanel, exposureNote } from "./ExposurePanel";
+import { autoNotAvailable, ExposurePanel, exposureNote } from "./ExposurePanel";
 import { MeterControl, meterLabel } from "./MeterControl";
 import {
   cameraAnnunciation,
@@ -369,20 +370,19 @@ interface Published {
   readonly drawnStyle: RenderStyle;
   /** The photorealistic view's standing (`PhotorealRenderer.status`). */
   readonly photoreal: PhotorealStatus;
-  /** The applied exposure's reading, or `null` while no image is metered (R07.T13). */
-  readonly reading: ExposureReading | null;
-  /** The meter's own value, EV100, which `ENABLE` takes, or `null` while nothing is metered. */
-  readonly meteredEv100: number | null;
 }
 
+/** What the meter holds before the loop's first readout: no image is drawn yet. */
+const NOT_YET_DRAWN: Metering = { kind: "no-image" };
+
 /**
- * Whether the exposure's readout would change from `shown` to `next`: its automation level, or its
- * EV100 at the readout's one decimal (R02's `exposureReading`); the control's identity changes at
- * every step under `AUTO`.
+ * Whether the exposure's readout would change from `shown` to `next`: its automation level with who
+ * inhibited it or why, or its EV100 at the readout's one decimal (R02's `exposureReading`); the
+ * control's identity changes at every step under `AUTO`.
  */
 function exposureShownChanged(shown: ExposureControl, next: ExposureControl): boolean {
   return (
-    shown.kind !== next.kind ||
+    exposureLevelReading(shown) !== exposureLevelReading(next) ||
     (shown.kind === "manual" && next.kind === "manual" && shown.triple !== next.triple) ||
     Math.round(controlEv100(shown) * 10) !== Math.round(controlEv100(next) * 10)
   );
@@ -479,10 +479,12 @@ function ViewStage({
     anchors: [],
     drawnStyle: initial.camera.style,
     photoreal: "idle",
-    reading: null,
-    meteredEv100: null,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
+  // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
+  // controller moved to, and not throttled again (the loop reads out at the readout rate), so that
+  // the exposure's reading and the meter's status stand as one snapshot.
+  const [metering, setMetering] = useState<Metering>(NOT_YET_DRAWN);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
@@ -736,10 +738,9 @@ function ViewStage({
       if (inputs.meter !== auto.meter) {
         auto.setMeter(inputs.meter);
       }
-      // Last frame's histogram, if one arrived, under the exposure it was taken with; none while
-      // the view draws its wireframe, which then times the meter out.
-      const histogram = drawer?.takeHistogram();
-      const reading = auto.step(drawnStyle === "photorealistic" ? histogram : undefined, dtS);
+      // Last frame's histogram, if one arrived, under the exposure it was taken with; the
+      // controller meters none while the view draws its wireframe, which then times the meter out.
+      const reading = auto.step(drawer?.takeHistogram(), dtS);
       if (run.source.kind === "server" && current !== null) {
         current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
       }
@@ -771,6 +772,9 @@ function ViewStage({
           placeMarkLabels(labelsRef.current, anchors, inputs.size.devicePixelRatio);
         }
       }
+      // What the meter says is true of the frame just drawn: an image coming to be drawn opens
+      // the window before its first histogram, and one gone has nothing to meter (R07.T16.b).
+      auto.noteImage(drawnStyle === "photorealistic");
       // The readouts change at 4 Hz, every view's in the same frame, so React renders them once.
       const publish = nowMs - publishedMs >= READOUT_INTERVAL_MS;
       // The instruments in the primary's frame, so that their passes count in it.
@@ -788,18 +792,18 @@ function ViewStage({
       if (publish) {
         publishedMs = nowMs;
         // The control the controller moved to reaches the display's state at the readout rate,
-        // when its readout would change: its kind, or its EV100 to the readout's 0.1.
+        // when its readout would change: its automation level with who inhibited it or why, or
+        // its EV100 to the readout's 0.1.
         if (exposureShownChanged(givenExposure, auto.control)) {
           givenExposure = auto.control;
           inputs.onExposureChange(auto.control);
         }
+        setMetering(auto.metering);
         setPublished({
           run,
           anchors,
           drawnStyle,
           photoreal: drawer?.photorealStatus ?? "idle",
-          reading: auto.meteredEv100 === null ? null : auto.reading(),
-          meteredEv100: auto.meteredEv100,
         });
       }
       frame = requestAnimationFrame(tick);
@@ -976,6 +980,9 @@ function ViewStage({
   // The meter's control stands beside a drawn photorealistic image only, and the primary's block
   // states the meter while it does (decision-r07-t19-layout, item 1b).
   const meterStands = shown.drawnStyle === "photorealistic";
+  // The meter as the panels show it: a meter's own status goes at once with the meter that found
+  // nothing, in the render of the operator's choice (R07.T16.b).
+  const meterShown = meteringFor(metering, meter);
   const primaryPhotoreal = photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels);
   const primaryStatements = [
     ...labelStatements(shown.run),
@@ -1077,6 +1084,8 @@ function ViewStage({
   // The first style's refusal, as the style control shows it.
   const styleReason = controlledRefusals.wireframe ?? controlledRefusals.photorealistic;
   const noOwnShip = offeredPresets(cameraSceneOf(controlledRun.scene)).length < PRESET_COUNT;
+  // The exposure's status, `AUTO NOT AVAILABLE: …`, which stands under the row while it is folded.
+  const exposureStanding = autoNotAvailable(meterShown);
   // The compact layout's row of disclosure buttons, and under it the faults and statuses of the
   // panels folded (decision-r07-t19-layout, item 1b); the limit reasons fold with their controls.
   const foldRow = compact ? (
@@ -1107,9 +1116,9 @@ function ViewStage({
           {styleReason}
         </p>
       ) : null}
-      {folded("exposure") && shown.meteredEv100 === null ? (
+      {folded("exposure") && exposureStanding !== null ? (
         <p className="view-exposure__reason view-folds__standing">
-          {exposureNote(AUTO_NOT_AVAILABLE)}
+          <output>{exposureNote(exposureStanding)}</output>
         </p>
       ) : null}
     </>
@@ -1308,7 +1317,7 @@ function ViewStage({
           />
           <ExposurePanel
             exposure={exposure}
-            meteredEv100={shown.meteredEv100}
+            metering={meterShown}
             onChange={onExposureChange}
             designator={PRIMARY_NAME}
             id={foldIds.exposure}
@@ -1317,8 +1326,9 @@ function ViewStage({
           {meterStands ? (
             <MeterControl
               meter={meter}
-              reading={shown.reading}
-              meteredEv100={shown.meteredEv100}
+              exposure={exposure}
+              source={VIEW_ID}
+              metering={meterShown}
               onMeter={onMeterChange}
               designator={PRIMARY_NAME}
               id={foldIds.meter}
