@@ -6,11 +6,15 @@ import type { TextureHandle } from "../engine/types";
 import { SETTINGS } from "../quality/qualitySetting";
 import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
 import {
+  AERIAL_PERSPECTIVE_KERNEL,
   atmosphereInputs,
   type AtmosphereCamera,
   type AtmosphereScene,
+  COMPOSITE_MATERIAL,
   geodeticOf,
   HillaireAtmosphere,
+  RAY_MARCH_KERNEL,
+  SKY_VIEW_KERNEL,
   type SpheroidFigure,
   type SunState,
   TABLE_SIZES,
@@ -18,6 +22,7 @@ import {
 } from "./hillaire";
 import { densityAt, extinction } from "./medium";
 import { opticalDepth } from "./opticalDepth";
+import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "./tables";
 
 /** WGS 84 (NIMA TR8350.2): a = 6,378,137 m, f = 1 ÷ 298.257223563. */
 const WGS84: SpheroidFigure = {
@@ -226,5 +231,22 @@ describe("HillaireAtmosphere", () => {
   it("is the quality settings' atmosphere field", () => {
     expect(SETTINGS.high.atmosphere).toBe(TABLE_SIZES.high);
     expect(SETTINGS.low.atmosphere).toBe(TABLE_SIZES.low);
+  });
+});
+
+describe("the atmosphere's WGSL", () => {
+  it.each([
+    ["the transmittance kernel", TRANSMITTANCE_KERNEL.reference],
+    ["the multiple-scattering kernel", MULTI_SCATTERING_KERNEL.reference],
+    ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
+    ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
+    ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
+  ])("%s holds no Medium by value", (_name, source) => {
+    // A Medium held by value and indexed by a loop variable is copied whole into each invocation,
+    // and the ray march did so three times a sample (plan R05's Risks, "R05.T14, the high run's
+    // pass timer and atmosphere, diagnosed"): no helper takes one, and no local copies the uniform.
+    expect(source).not.toMatch(/\bfn\s+\w+\s*\([^)]*:\s*Medium\b/);
+    expect(source).not.toMatch(/=\s*medium(\.terms)?\s*;/);
   });
 });

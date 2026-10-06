@@ -1,6 +1,6 @@
 // The sky-view table (plan R05, Design note 16; Hillaire 2020, section 5.2): the sky's luminance
 // per unit sun illuminance around the camera, by view zenith and azimuth from the sun, rebuilt
-// every frame. Follows `common.wgsl` and `view.wgsl`.
+// every frame. Follows `common.wgsl`, `medium.wgsl`, `view.wgsl` and `source.wgsl`.
 //
 // Ported from Bevy 0.19.1's sky_view_lut.wgsl (MIT; the notice is in common.wgsl), with sebh's
 // SkyViewLutCS parameterisation and sample counts (MIT; the notice is in multiScattering.wgsl):
@@ -40,7 +40,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let cosTheta = dot(dir, sun);
 
   let origin = vec3f(0.0, 0.0, r);
-  let tMax = maxDistance(medium, r, viewZenithCos);
+  let tMax = maxDistance(r, viewZenithCos);
   let samples = max(u32(view.output.w), 1u);
   let dt = tMax / f32(samples);
   var luminance = vec3f(0.0);
@@ -50,11 +50,10 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let rP = length(p);
     let sampleHeightM = rP - bottom;
     let muSun = dot(sun, p / rP);
-    let local = mediumAt(medium, rP);
+    let local = mediumAt(rP);
     let extinction = max(local.extinction, vec3f(1e-12));
     let stepTransmittance = exp(-local.extinction * dt);
     let source = sourceAt(
-      medium,
       transmittance,
       multiScattering,
       view.tables.x,

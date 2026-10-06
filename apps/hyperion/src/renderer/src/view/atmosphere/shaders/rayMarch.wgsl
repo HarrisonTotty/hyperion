@@ -3,7 +3,7 @@
 // where the tables do not serve: the sky seen from above the atmosphere, and surfaces beyond the
 // aerial-perspective volume's reach. Elsewhere it writes nothing the composite reads. At
 // `view.output.z` of the output's resolution (1 high, 0.5 low, with the composite's depth-aware
-// upsample). Follows `common.wgsl` and `view.wgsl`.
+// upsample). Follows `common.wgsl`, `medium.wgsl`, `view.wgsl` and `source.wgsl`.
 //
 // Ported from Bevy 0.19.1's `raymarch_atmosphere` (functions.wgsl, MIT; the notice is in
 // common.wgsl). Changes (Design note 16): the ray is clipped against the datum spheroid's shells,
@@ -98,10 +98,10 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let p = origin + (tStart + (f32(i) + 0.5) * dt) * dir;
     let heightM = heightAbove(p, a, c);
     let muSun = dot(view.sun.xyz, normalAt(p, a, c));
-    let local = mediumAt(medium, medium.bottomRadiusM + heightM);
+    let local = mediumAt(medium.bottomRadiusM + heightM);
     let extinction = max(local.extinction, vec3f(1e-12));
     let stepTransmittance = exp(-local.extinction * dt);
-    let source = sourceAt(medium, transmittance, multiScattering, view.tables.x, heightM, muSun, cosTheta);
+    let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, cosTheta);
     luminance += throughput * (source - source * stepTransmittance) / extinction;
     throughput *= stepTransmittance;
   }
@@ -109,7 +109,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     let p = origin + ground.x * dir;
     let muSun = dot(view.sun.xyz, normalAt(p, a, c));
-    let toSun = tableTransmittance(transmittance, medium, view.tables.x, 0.0, muSun);
+    let toSun = tableTransmittance(transmittance, view.tables.x, 0.0, muSun);
     // Sunlight on the grey ground keeps the sun's spectrum: the sun's factors, not the sky's.
     luminance += throughput * toSun * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW
       * view.sunOverSky.rgb;

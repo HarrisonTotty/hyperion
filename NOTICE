@@ -88,6 +88,8 @@ Ported from crates/bevy_pbr/src/atmosphere (transmittance_lut.wgsl, multiscatter
 functions.wgsl, bruneton_functions.wgsl), tag v0.19.1, fetched 2026-10-02, into:
 
   apps/hyperion/src/renderer/src/view/atmosphere/shaders/common.wgsl
+  apps/hyperion/src/renderer/src/view/atmosphere/shaders/medium.wgsl
+  apps/hyperion/src/renderer/src/view/atmosphere/shaders/source.wgsl
   apps/hyperion/src/renderer/src/view/atmosphere/shaders/transmittance.wgsl
   apps/hyperion/src/renderer/src/view/atmosphere/shaders/multiScattering.wgsl
 
@@ -130,6 +132,7 @@ The transmittance table's parameterisation and the shell intersections, through 
 (atmosphere/functions.glsl), in:
 
   apps/hyperion/src/renderer/src/view/atmosphere/shaders/common.wgsl
+  apps/hyperion/src/renderer/src/view/atmosphere/shaders/medium.wgsl
   apps/hyperion/src/renderer/src/view/atmosphere/opticalDepth.ts
 
 The method of the spectral-radiance-to-luminance factors (atmosphere/model.cc,
@@ -163,7 +166,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 The multiple-scattering kernel's structure (Resources/RenderSkyRayMarching.hlsl, NewMultiScattCS
 and IntegrateScatteredLuminance) in
 apps/hyperion/src/renderer/src/view/atmosphere/shaders/multiScattering.wgsl, its table mapping in
-shaders/common.wgsl, and the Earth constants of Application/SkyAtmosphereCommon.cpp
+shaders/common.wgsl and shaders/medium.wgsl, and the Earth constants of Application/SkyAtmosphereCommon.cpp
 (SetupEarthAtmosphere) as HILLAIRE_REFERENCE in
 apps/hyperion/src/renderer/src/view/atmosphere/earth.ts. Master branch, fetched 2026-10-02.
 

@@ -3,9 +3,10 @@
 // from the sky-view table (or the ray march above the atmosphere) with the sun's disc where depth
 // is at the far plane; the surface through the aerial-perspective volume within its reach and the
 // ray march beyond it. Its output is pre-exposed luminance, the sun's disc clamped to rgba16float's
-// largest value after pre-exposure. Follows `common.wgsl` (for `Medium`'s helpers) and
-// `view.wgsl`; drawn with no depth test, as a full-screen draw into another target (the terrain
-// target's depth may not be sampled by a draw into itself).
+// largest value after pre-exposure. Follows `common.wgsl` (for the shell's geometry and
+// `bilinear`) and `view.wgsl`, without the medium's chunks (`medium.wgsl`, `source.wgsl`), since it
+// declares no medium; drawn with no depth test, as a full-screen draw into another target (the
+// terrain target's depth may not be sampled by a draw into itself).
 //
 // Ported from Bevy 0.19.1's render_sky.wgsl (MIT; the notice is in common.wgsl). Changes: the
 // transmittance over the aerial-perspective volume is its stored mean, sebh's, rather than Bevy's

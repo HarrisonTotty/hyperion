@@ -1,6 +1,8 @@
 // The atmosphere's shared WGSL (plan R05, Design note 16): the medium as a list of terms, the
-// spherical shell's geometry and the transmittance table's (r, mu) parameterisation. Prepended to
-// each kernel by `tables.ts`.
+// spherical shell's geometry and the tables' parameterisations on a shell of given radii. Prepended
+// to every kernel and to the composite (`tables.ts`, `hillaire.ts`). The helpers that read a
+// kernel's `medium` uniform are in `medium.wgsl` and `source.wgsl`, which the composite does not
+// take.
 //
 // Ported from Bevy 0.19.1's atmosphere (crates/bevy_pbr/src/atmosphere/functions.wgsl and
 // bruneton_functions.wgsl, https://github.com/bevyengine/bevy, tag v0.19.1, fetched 2026-10-02),
@@ -51,10 +53,10 @@
 //
 // Changes: Bevy's medium density and scattering tables are replaced by the terms themselves,
 // evaluated per sample from `Medium` (each term's profile, scattering and absorption); the
-// functions take the shell's radii from `Medium`; names follow the project's WGSL style. The
-// multiple-scattering table's mapping (GROUND_OFFSET_M, the sub-texel remap) follows sebh's
-// UnrealEngineSkyAtmosphere (MIT, Copyright (c) 2020 Epic Games, Inc.; the full notice is in
-// multiScattering.wgsl).
+// functions take the shell's radii from `Medium`, read from the kernel's uniform in place
+// (`medium.wgsl`); names follow the project's WGSL style. The multiple-scattering table's mapping
+// (GROUND_OFFSET_M, the sub-texel remap) follows sebh's UnrealEngineSkyAtmosphere (MIT, Copyright
+// (c) 2020 Epic Games, Inc.; the full notice is in multiScattering.wgsl).
 
 // The most terms a medium may have; `tables.ts` holds the same number.
 const MAX_TERMS: u32 = 8u;
@@ -93,71 +95,14 @@ fn densityOf(profile : vec4f, heightM : f32) -> f32 {
   return max(min(rising, falling), 0.0);
 }
 
-fn mediumAt(m : Medium, r : f32) -> MediumSample {
-  let h = r - m.bottomRadiusM;
-  var scattering = vec3f(0.0);
-  var extinction = vec3f(0.0);
-  let count = min(u32(m.termCount), MAX_TERMS);
-  for (var i = 0u; i < count; i++) {
-    let term = m.terms[i];
-    let d = densityOf(term.profile, h);
-    scattering += term.scattering.rgb * d;
-    extinction += (term.scattering.rgb + term.absorption.rgb) * d;
-  }
-  return MediumSample(scattering, extinction);
-}
-
 // The radius at distance t along a ray from radius r at zenith cosine mu.
 fn localR(r : f32, mu : f32, t : f32) -> f32 {
   return sqrt(max(t * t + 2.0 * r * mu * t + r * r, 0.0));
 }
 
-fn distanceToTop(m : Medium, r : f32, mu : f32) -> f32 {
-  let discriminant = max(r * r * (mu * mu - 1.0) + m.topRadiusM * m.topRadiusM, 0.0);
-  return max(-r * mu + sqrt(discriminant), 0.0);
-}
-
-fn distanceToBottom(m : Medium, r : f32, mu : f32) -> f32 {
-  let discriminant = max(r * r * (mu * mu - 1.0) + m.bottomRadiusM * m.bottomRadiusM, 0.0);
-  return max(-r * mu - sqrt(discriminant), 0.0);
-}
-
-fn intersectsGround(m : Medium, r : f32, mu : f32) -> bool {
-  return shellIntersectsGround(m.bottomRadiusM, r, mu);
-}
-
 // Whether a ray from radius r at zenith cosine mu meets a sphere of radius `bottom`.
 fn shellIntersectsGround(bottom : f32, r : f32, mu : f32) -> bool {
   return mu < 0.0 && r * r * (mu * mu - 1.0) + bottom * bottom >= 0.0;
-}
-
-// The ray's length inside the atmosphere, to the ground or to the top.
-fn maxDistance(m : Medium, r : f32, mu : f32) -> f32 {
-  if (intersectsGround(m, r, mu)) {
-    return distanceToBottom(m, r, mu);
-  }
-  return distanceToTop(m, r, mu);
-}
-
-// Bruneton and Neyret 2008, section 4: (u, v) in [0, 1]^2 to (r, mu); u spans the distance to the
-// top between its least (straight up) and its greatest (to the horizon), v the distance to the
-// horizon.
-fn transmittanceUvToRMu(m : Medium, uv : vec2f) -> vec2f {
-  let bigH = sqrt(m.topRadiusM * m.topRadiusM - m.bottomRadiusM * m.bottomRadiusM);
-  let rho = bigH * uv.y;
-  let r = sqrt(rho * rho + m.bottomRadiusM * m.bottomRadiusM);
-  let dMin = m.topRadiusM - r;
-  let dMax = rho + bigH;
-  let d = dMin + uv.x * (dMax - dMin);
-  var mu = 1.0;
-  if (d != 0.0) {
-    mu = (bigH * bigH - rho * rho - d * d) / (2.0 * r * d);
-  }
-  return vec2f(r, clamp(mu, -1.0, 1.0));
-}
-
-fn transmittanceRMuToUv(m : Medium, r : f32, mu : f32) -> vec2f {
-  return shellRMuToUv(m.bottomRadiusM, m.topRadiusM, r, mu);
 }
 
 // The transmittance table's (u, v) for (r, mu) on a shell of the given radii.
@@ -183,17 +128,6 @@ fn subUvsToUnit(uv : vec2f, size : vec2f) -> vec2f {
 
 fn unitToSubUvs(unit : vec2f, size : vec2f) -> vec2f {
   return (unit + 0.5 / size) * (size / (size + 1.0));
-}
-
-// The multiple-scattering table's (u, v) to (r, mu_sun): u the sun's zenith cosine, v the height.
-fn multiScatteringUvToRMu(m : Medium, uv : vec2f, size : vec2f) -> vec2f {
-  let unit = clamp(subUvsToUnit(uv, size), vec2f(0.0), vec2f(1.0));
-  let r = m.bottomRadiusM + GROUND_OFFSET_M + unit.y * (m.topRadiusM - m.bottomRadiusM - GROUND_OFFSET_M);
-  return vec2f(r, unit.x * 2.0 - 1.0);
-}
-
-fn multiScatteringRMuToUv(m : Medium, r : f32, muSun : f32, size : vec2f) -> vec2f {
-  return shellMultiScatteringRMuToUv(m.bottomRadiusM, m.topRadiusM, r, muSun, size);
 }
 
 // The multiple-scattering table's (u, v) for (r, mu_sun) on a shell of the given radii.

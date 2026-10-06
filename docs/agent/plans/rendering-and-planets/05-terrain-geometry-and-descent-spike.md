@@ -3305,6 +3305,8 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     the Gaussian radius at some latitude) is T12.c's to settle and record.
   - _The multiple-scattering table's mapping_ is sebh's (sub-texel remap, the sun's μ across, the
     height up from 10 m above the ground). `multiScatteringRMuToUv` is in `common.wgsl` for T12.c.
+    (In `medium.wgsl` since 2026-10-06: "Deviations in T12.b and T12.c, as built: the medium read
+    in place".)
   - _The engine seam._ `RenderEngine.readTexture` gained an optional fourth parameter,
     `access: "cpu" | "tolerance"`, mirroring `readBuffer`'s, so that the smoke page can read the
     `presentation-only` tables (in `types.ts`, `webgpu/engine.ts` and `resilientEngine.ts`;
@@ -4420,6 +4422,11 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     The low setting runs the same shader, at 3.57–3.73 ms against its 4 ms limit here, so the fix
     bears on T16 (the UHD 620) too.
 
+    **Option 1 landed (2026-10-06, R05.T12, lane C):** every kernel reads the medium in place, and
+    every read-back is bit-identical. The march has no plateau now, and high's row is about
+    1.6 ms at P0, still over 1 ms. Figures and the options left are in "Deviations in T12.b and
+    T12.c, as built: the medium read in place".
+
   - **A measurement caveat for T17 and T18:** a GPU row is read at the clocks the driver picks. At
     the spike's light load, this GPU runs a compute-bound pass at about 1.7 times its time at full
     clock. _Ruled_ (2026-10-06, addendum B): a row measures the pass at the clocks the driver chose,
@@ -4793,6 +4800,8 @@ medium, sizes, figure)`.
       since a Node test has no GPU; T12.b's smoke check holds the table to the oracle to 1%.
     - `shaders/view.wgsl` (not in the task's file list) holds the shared `AtmosphereView`, the
       source term and the sky view's mapping, prepended to the three kernels and the composite.
+      (The source term is in `source.wgsl` since 2026-10-06: "Deviations in T12.b and T12.c, as
+      built: the medium read in place".)
     - From above the atmosphere, a sky pixel whose ray meets the ground stores no transmittance
       to space, so the sun's disc is never drawn through the planet.
     - `geodeticOf` is the classical fixed-point iteration on φ and h. On WGS 84 it converges to
@@ -4881,6 +4890,128 @@ medium, sizes, figure)`.
 
   - _Aerial-perspective scope_ lives in `TableSizes` for now; R08.T9.a's `AERIAL_PERSPECTIVE_SCOPE`
     takes it over or reads it.
+- **Deviations in T12.b and T12.c, as built: the medium read in place** (2026-10-06, lane C;
+  option 1 of "R05.T14, the high run's pass timer and atmosphere, diagnosed").
+  - _The change._ No WGSL helper takes a `Medium` by value any more. Each reads the `medium`
+    uniform that every kernel declares at `@group(0) @binding(0)`. The arithmetic is the old
+    one token for token; one line is split, which parses to the same sum.
+    - The helpers are `mediumAt`, `distanceToTop`, `distanceToBottom`, `intersectsGround`,
+      `maxDistance`, `transmittanceUvToRMu`, `transmittanceRMuToUv`, `multiScatteringUvToRMu`
+      and `multiScatteringRMuToUv` (from `common.wgsl`), and `phasedScatteringAt`,
+      `tableTransmittance`, `tableMultiScattering` and `sourceAt` (from `view.wgsl`).
+    - The kernels' calls only lose their `medium` argument. The densities are still evaluated
+      three times a sample (option 2's first item is not taken).
+  - _Two chunks not in T12.b's and T12.c's Files lists._
+    - `shaders/medium.wgsl` holds the nine helpers from `common.wgsl`.
+    - `shaders/source.wgsl` holds `phaseOf` and the four source helpers from `view.wgsl`.
+    - Two files are needed because the composite takes `common.wgsl` and `view.wgsl` but
+      declares no medium, and WGSL resolves every name in a module, called or not.
+  - _The order_ in which each module is joined:
+    - transmittance and multiple scattering: `common`, `medium`, then the kernel (`tables.ts`);
+    - sky view, aerial perspective and ray march: `common`, `medium`, `view`, `source`, then the
+      kernel (`hillaire.ts`);
+    - the composite: `common`, `view`, then `composite`, as before.
+  - _Supersedes:_
+    - T12.b's "`multiScatteringRMuToUv` is in `common.wgsl`": it is now in `medium.wgsl`;
+      `shellMultiScatteringRMuToUv` stays in `common.wgsl`.
+    - T12.c's "`shaders/view.wgsl` … holds the shared `AtmosphereView`, the source term and the
+      sky view's mapping": the source term is now in `source.wgsl`. `view.wgsl` keeps the view's
+      uniform, the camera's rays and the sky view's mapping, and reads no medium.
+  - _Notices._ The new chunks point to the notices, as the other kernels do: Bevy's MIT and
+    Bruneton's BSD-3 notices are in `common.wgsl`, which starts every module, and sebh's is in
+    `multiScattering.wgsl`. `NOTICE` names `medium.wgsl` in its Bevy, Bruneton and sebh entries
+    and `source.wgsl` in Bevy's.
+  - _Test._ `hillaire.test.ts` checks each of the six assembled modules for a `: Medium`
+    parameter and for a local copy of the uniform or its terms. It fails on the old shaders.
+  - _Bit identity._ A temporary instrument, not committed, hashed raw read-backs in the smoke
+    page. Per run it covered 72 buffers:
+    - both per-planet tables, for Earth's medium and for Hillaire's;
+    - the sky view, the aerial volume, the ray march and the composite of the 14 check frames (7
+      cases on each setting) and of the 3 comparison captures.
+
+    Before and after, all 72 hashes are identical on SwiftShader (both smoke variants) and on the
+    RTX 3080 (a hidden smoke run on `:0`). All 84 capture PNGs of `just test-render --captures`
+    are byte-identical, and the smoke's PASS lines are the same, 498 of them. naga 30.0.1
+    (gpu-replay's version and settings) validates the six assembled modules. The composite drops
+    from 32 functions to 18.
+
+  - _Timing, high._ Lane D's harness, copied: `target/laneD/t14diag/go.sh` with
+    `instrument.py 150` and `instrument2.py`'s dispatch labels. Hidden, seed 7, the first 150 s,
+    under `just _locked` in an 8 G scope, `nvidia-smi` at 100 ms. The run (m1, 16:42) started at
+    load 4.47, at most 8.51. Figures are after the 10 s warm-up, 8,378 frames, every one timed.
+    - The driver held P3 (70% of samples) and P5 (27%): graphics 1,125 MHz p50 (855–1,245 p5–p95),
+      memory 5,001 MHz, utilization 26%, 80 W.
+    - Lane D's two runs are the comparison:
+      - d2, the committed shader. Its load at start was 1.83, and it ran at P0 throughout, at
+        1,965 MHz and 99%, since the slow march kept the GPU busy.
+      - d3, the march's helpers alone read in place. It ran at P3/P5, the same clocks as m1.
+
+    | ms, p50 / p95      | Before (d2, P0) | March only (d3, P3/P5) | All kernels (m1, P3/P5) |
+    | ------------------ | --------------- | ---------------------- | ----------------------- |
+    | sky view           | 0.17 / 0.18     | 0.30 / 0.40            | 0.11 / 0.17             |
+    | aerial perspective | 0.17 / 0.38     | 0.29 / 0.39            | 0.18 / 0.24             |
+    | ray march          | 6.12 / 69.88    | 2.20 / 2.84            | 2.27 / 3.02             |
+    | composite          | 0.03 / 0.03     | 0.06 / 0.40            | 0.06 / 0.40             |
+    | atmosphere row     | 6.54 / 70.41    | 2.85 / 4.03            | 2.63 / 3.82             |
+    - At P0, m1's 220 frames at P0 (in the warm-up, from the same orbit view, after its first
+      second): march 1.40 ms p50, row 1.62 ms p50. Their p95s (2.53, 3.39 ms) carry the
+      warm-up's clock changes. d3's 150 frames at P0 gave a march of 1.31 ms.
+    - rAF after the warm-up: p50 16.70, p95 16.80, p99 16.80 and max 83.4 ms. There is no plateau.
+      - Four intervals exceed 40 ms (50–83 ms): two at 101.5 s, one at 137.4 s and one at 142.4 s.
+        Each falls within 0.15 s of a P-state change (memory 810 ↔ 5,001 MHz). Their frames' GPU
+        times are ordinary (march 2.3–2.8 ms), and our code took under 9 ms. They are the driver's
+        power management, not the march.
+      - The orbit coast has none. After the warm-up, d3 had none and d2 had 564.
+    - The per-planet tables' bake, at frame 0, fell from 90.6 ms (d2) to 1.38 ms. Its two kernels
+      took `Medium` by value too, so a medium change no longer costs a 90 ms hitch.
+    - The results file's rows (m1): atmosphere 3.82 ms at p95, failing its 1 ms limit; GPU pass
+      sum 4.93 ms at p95, within 0.8 T at 60 Hz (13.3 ms); terrain 1.05 ms, passing.
+
+  - _Low, not re-run._ The same harness's low run waited 100 minutes for a quiet window, found
+    none, and was stopped. It was `go.sh <name> 5 <minutes> 600 --setting low --hidden`, lane D's
+    T14.f invocation. The pending re-run's scripts and build are in
+    `.git/rm23-scratch/laneC/t14diag/`.
+    - The like-for-like before is the first 150 s of lane D's T14.f full low run: the committed
+      shader, load 0.36 at the start, clocks not sampled.
+      - "atmosphere view": 2.88 / 3.48 ms p50 / p95. That covered the sky view, the aerial
+        perspective and the march, which were then one label, so which one dominated is not known.
+      - The composite was 0.11 / 0.15 ms, and the row 3.00 / 3.60 ms against low's 4 ms.
+      - The tables' bake was 92.9 ms.
+    - Low runs the same kernels on a quarter of the pixels and half the steps.
+  - _High is still over its 1 ms row._ The row is 2.63 / 3.82 ms p50 / p95 at the driver's
+    light-load clocks and about 1.6 ms p50 at P0 (lane D's estimate was 1.6 ms). The march is
+    85% of it. As the task's brief directs, nothing more is optimised here. The options, with
+    estimates against the march's 1.4 ms and the row's 1.6 ms at P0 (none measured):
+    1. _Each term's density once a sample, not three times._ This drops `sourceAt`'s second
+       `mediumAt` and `phasedScatteringAt`'s densities.
+       - By an operation count it saves about a quarter of the march's transcendental and
+         reciprocal work (12 of about 44 operations a sample), and none of its 8 texel reads.
+       - Estimate: 0.3–0.4 ms. The row would be about 1.2–1.3 ms, not enough alone.
+       - It is not bit-identical. `mediumAt` takes the density at (R_b + h) − R_b, which rounds h
+         to f32's 0.5 m spacing at Earth's radius, while `phasedScatteringAt` takes it at h. A
+         shared density moves the output by at most about 2 × 10⁻⁴ (0.25 m against the aerosol's
+         1.2 km scale height), well within the tests' tolerances.
+    2. _Fewer samples._ Past a small per-pixel setup, the march's cost is linear in its 32 steps.
+       - 16 steps would save about 45% (0.6 ms), bringing the row to about 0.95 ms.
+       - Quality: the rays from orbit along the limb are the long ones (up to about 2,300 km
+         inside the shell). The 60 km haze check and the orbit capture would need re-checking.
+       - T12.c's sizes already leave the step counts to T18.
+    3. _Half resolution, as low does._ A quarter of the pixels.
+       - Estimate: the march falls to about 0.35 ms, plus the composite's depth-aware upsample
+         (low's composite is 0.11 ms p50). The row would be about 0.6–0.7 ms.
+       - Quality: it softens the limb and the terminator seen from orbit, which high's
+         full-resolution march exists to keep.
+    4. _T18 re-rules the row from these figures._
+       - The 1 ms is the brainstorm's estimate ("an estimate, not a measurement"). The brainstorm
+         cites Hillaire's 0.5 ms on a GTX 1080 at 720p for his tables with the per-pixel march.
+       - This canvas has 1.2 times 720p's pixels, and the march takes 32 steps.
+       - The frame's GPU pass sum is 4.93 ms at p95, inside its 0.8 T row.
+       - The caveat about the driver's clocks (above) applies to whichever row T18 sets.
+  - _T17:_ the plateaus are gone, so its high runs no longer measure a known failure of the
+    frame rows. The atmosphere row still fails at 1 ms, unless T18 re-rules it or an option of
+    the list above lands first.
+  - R08.T6.b, which moves the terms into a storage buffer, edits these two chunks as well as the
+    kernels it names.
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's

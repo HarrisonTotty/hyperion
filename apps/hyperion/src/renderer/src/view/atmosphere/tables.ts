@@ -16,6 +16,7 @@ import type { KernelPair } from "../engine/kernels";
 import type { ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
 import type { AtmosphereMedium, DensityProfile, PhaseFunction } from "./medium";
 import commonWgsl from "./shaders/common.wgsl?raw";
+import mediumWgsl from "./shaders/medium.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
 
@@ -50,18 +51,18 @@ export const TRANSMITTANCE_SAMPLES = 256;
 /** Midpoint steps along each of the 64 multiple-scattering rays: 32 (sebh's reference takes 20). */
 export const MULTI_SCATTERING_SAMPLES = 32;
 
-/** The transmittance kernel: `common.wgsl` then `transmittance.wgsl`. */
+/** The transmittance kernel: `common.wgsl`, `medium.wgsl`, then `transmittance.wgsl`. */
 export const TRANSMITTANCE_KERNEL: KernelPair = {
   name: "atmosphere transmittance",
-  reference: `${commonWgsl}\n${transmittanceWgsl}`,
+  reference: `${commonWgsl}\n${mediumWgsl}\n${transmittanceWgsl}`,
   subgroup: null,
   readback: "presentation-only",
 };
 
-/** The multiple-scattering kernel: `common.wgsl` then `multiScattering.wgsl`. */
+/** The multiple-scattering kernel: `common.wgsl`, `medium.wgsl`, then `multiScattering.wgsl`. */
 export const MULTI_SCATTERING_KERNEL: KernelPair = {
   name: "atmosphere multiple scattering",
-  reference: `${commonWgsl}\n${multiScatteringWgsl}`,
+  reference: `${commonWgsl}\n${mediumWgsl}\n${multiScatteringWgsl}`,
   subgroup: null,
   readback: "presentation-only",
 };
@@ -70,7 +71,7 @@ export const MULTI_SCATTERING_KERNEL: KernelPair = {
 const MEDIUM_FLOATS = 4 + 4 + MAX_TERMS * 12;
 
 /**
- * A phase function as `view.wgsl`'s `phaseOf` reads it, in `Term.scattering.w` and
+ * A phase function as `source.wgsl`'s `phaseOf` reads it, in `Term.scattering.w` and
  * `Term.absorption.w`: 0 none, 1 Rayleigh, 2 Cornette–Shanks with its g.
  */
 function phaseOf(phase: PhaseFunction): readonly [number, number] {

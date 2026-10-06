@@ -2,7 +2,7 @@
 // froxel of the camera's frustum, the light scattered into the ray between the camera and the
 // froxel's far face per unit sun illuminance (rgb) and the ray's mean transmittance (a), in
 // `view.tables.z` slices of equal depth out to `view.tables.y` (32 km, Hillaire 2020's reach),
-// rebuilt every frame. Follows `common.wgsl` and `view.wgsl`.
+// rebuilt every frame. Follows `common.wgsl`, `medium.wgsl`, `view.wgsl` and `source.wgsl`.
 //
 // Ported from Bevy 0.19.1's aerial_view_lut.wgsl (MIT; the notice is in common.wgsl), marching once
 // through the slices and storing each slice's running integral. Changes: the integral is stored
@@ -38,11 +38,10 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let rP = length(p);
       let up = p / rP;
       let heightM = rP - bottom;
-      let local = mediumAt(medium, rP);
+      let local = mediumAt(rP);
       let extinction = max(local.extinction, vec3f(1e-12));
       let stepTransmittance = exp(-local.extinction * dt);
       let source = sourceAt(
-        medium,
         transmittance,
         multiScattering,
         view.tables.x,

@@ -34,8 +34,10 @@ import type { AtmosphereMedium } from "./medium";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
+import mediumWgsl from "./shaders/medium.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
+import sourceWgsl from "./shaders/source.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   SKY_SPECTRAL_TO_LUMINANCE,
@@ -244,11 +246,14 @@ export function tableRadiusM(figure: SpheroidFigure): number {
   return (2 * figure.equatorialRadiusM + figure.polarRadiusM) / 3;
 }
 
-/** The per-frame kernels: `common.wgsl`, `view.wgsl`, then each kernel. */
+/**
+ * The per-frame kernels: `common.wgsl`, `medium.wgsl`, `view.wgsl`, `source.wgsl`, then each
+ * kernel, which declares the `medium` uniform that `medium.wgsl` and `source.wgsl` read in place.
+ */
 function kernel(name: string, wgsl: string): KernelPair {
   return {
     name,
-    reference: `${commonWgsl}\n${viewWgsl}\n${wgsl}`,
+    reference: `${commonWgsl}\n${mediumWgsl}\n${viewWgsl}\n${sourceWgsl}\n${wgsl}`,
     subgroup: null,
     readback: "presentation-only",
   };

@@ -1,7 +1,7 @@
 // The multiple-scattering table (plan R05, Design note 16; Hillaire 2020, section 5.5, equations
 // 5 to 10): for each height and sun zenith cosine, the luminance that every order of scattering
 // past the first adds, per unit illuminance, under an isotropic phase function. Follows
-// `common.wgsl`; reads the transmittance table.
+// `common.wgsl` and `medium.wgsl`; reads the transmittance table.
 //
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/multiscattering_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl) and checked against sebh's NewMultiScattCS and
@@ -45,7 +45,7 @@ var<workgroup> secondOrder : array<vec3f, DIRECTIONS>;
 var<workgroup> transfer : array<vec3f, DIRECTIONS>;
 
 fn transmittanceToSun(r : f32, muSun : f32) -> vec3f {
-  return bilinear(transmittance, transmittanceRMuToUv(medium, r, muSun)).rgb;
+  return bilinear(transmittance, transmittanceRMuToUv(r, muSun)).rgb;
 }
 
 struct Integrated {
@@ -59,8 +59,8 @@ struct Integrated {
 fn integrate(r : f32, dir : vec3f, sun : vec3f) -> Integrated {
   let origin = vec3f(0.0, 0.0, r);
   let mu = dir.z;
-  let hitsGround = intersectsGround(medium, r, mu);
-  let tMax = maxDistance(medium, r, mu);
+  let hitsGround = intersectsGround(r, mu);
+  let tMax = maxDistance(r, mu);
   let samples = max(u32(medium.samples), 1u);
   let dt = tMax / f32(samples);
   var luminance = vec3f(0.0);
@@ -70,10 +70,10 @@ fn integrate(r : f32, dir : vec3f, sun : vec3f) -> Integrated {
     let p = origin + ((f32(i) + 0.5) * dt) * dir;
     let rP = length(p);
     let muSun = dot(sun, p / rP);
-    let local = mediumAt(medium, rP);
+    let local = mediumAt(rP);
     let extinction = max(local.extinction, vec3f(1e-12));
     let stepTransmittance = exp(-local.extinction * dt);
-    let lit = select(1.0, 0.0, intersectsGround(medium, rP, muSun));
+    let lit = select(1.0, 0.0, intersectsGround(rP, muSun));
     let source = lit * transmittanceToSun(rP, muSun) * local.scattering / (4.0 * PI);
     luminance += throughput * (source - source * stepTransmittance) / extinction;
     transferSum += throughput * (local.scattering - local.scattering * stepTransmittance) / extinction;
@@ -96,7 +96,7 @@ fn main(
 ) {
   let size = vec2f(textureDimensions(multiScatteringOut));
   let uv = (vec2f(id.xy) + 0.5) / size;
-  let rMu = multiScatteringUvToRMu(medium, uv, size);
+  let rMu = multiScatteringUvToRMu(uv, size);
   let muSun = rMu.y;
   let sun = vec3f(0.0, sqrt(max(1.0 - muSun * muSun, 0.0)), muSun);
 
