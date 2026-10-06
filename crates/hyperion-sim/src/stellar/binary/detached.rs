@@ -96,7 +96,8 @@ pub(super) struct Snapshot {
 /// Why a detached run stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Stop {
-    /// The pair reached its age.
+    /// The pair reached or passed its age: the step that took it there is the last, and what it
+    /// landed on lies beyond the timeline.
     Until,
     /// A member reached the end of a phase (not its death).
     Boundary,
@@ -117,19 +118,25 @@ pub(super) enum Stop {
 /// The limits on one step: its length from the rates, and the events it may land on, of which
 /// the earliest wins where it is no longer than the length (to rounding), so that a step that
 /// reaches a boundary always stops there.
+///
+/// The age the pair is run to is not among them: a step is the same whatever the age, and the
+/// one that reaches or passes it is the last (`Engine::integrate`). So the knots up to any age
+/// are those of a run to any later one, and a timeline's past does not depend on how far it was
+/// run (P11's build-age dependence, 2026-10-05: a last step cut at the age was joined to its
+/// knot linearly, where a later run's whole step was, and the states between differed).
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StepLimit {
     dt: f64,
-    event: (f64, Stop),
+    event: Option<(f64, Stop)>,
 }
 
 impl StepLimit {
-    /// A step that may run to `until`, where the pair stops.
+    /// A step with no limit yet.
     #[must_use]
-    pub(super) const fn new(until: f64) -> Self {
+    pub(super) const fn new() -> Self {
         Self {
             dt: f64::INFINITY,
-            event: (until, Stop::Until),
+            event: None,
         }
     }
 
@@ -142,22 +149,30 @@ impl StepLimit {
 
     /// An event `stop` in `dt`.
     pub(super) fn event(&mut self, dt: f64, stop: Stop) {
-        if dt < self.event.0 {
-            self.event = (dt, stop);
+        if self.event.is_none_or(|(at, _)| dt < at) {
+            self.event = Some((dt, stop));
         }
     }
 
     /// The step's length and the event it lands on, if any.
     #[must_use]
     pub(super) fn resolve(self) -> (f64, Option<Stop>) {
-        let (at, stop) = self.event;
-        if at <= self.dt * (1.0 + 1e-6) {
-            (at.max(0.0), Some(stop))
-        } else {
-            (self.dt, None)
+        match self.event {
+            Some((at, stop)) if at <= self.dt * (1.0 + 1e-6) => (at.max(0.0), Some(stop)),
+            Some(_) | None => (self.dt, None),
         }
     }
 }
+
+/// The longest step, years, detached or in stable transfer: 10⁹ years, a tenth of the oldest
+/// stars' 13 Gyr.
+///
+/// The age the pair is run to once cut every step and must not ([`StepLimit`]), so a step its
+/// rates would leave long is held here: two white dwarfs 1 au apart, whose orbit's 2% limit allows
+/// 10¹⁷ years; a twentieth of a slow main sequence; a remnant left alone by a merger. The last
+/// step then reads its stars' laws at most that far past the timeline, at a cost of a step a
+/// gigayear.
+pub(super) const LONGEST_STEP_YEARS: f64 = 1.0e9;
 
 /// The rates at one snapshot.
 #[derive(Debug, Clone, Copy)]
@@ -248,9 +263,16 @@ impl Engine {
                     other => (next, other),
                 };
                 self.accept(&at);
-                return event;
+                return if self.age >= self.until {
+                    Stop::Until
+                } else {
+                    event
+                };
             }
             self.accept(&next);
+            if self.age >= self.until {
+                return Stop::Until;
+            }
             // A star the binary carries whose core has grown into its whole mass has lost its
             // envelope: it is stripped before any other stop on the same step (a death, the pin
             // or a phase boundary), as BSE's `hrdiag` makes such a star a helium star or a white
@@ -695,7 +717,8 @@ impl Engine {
         structures: &[Option<Structure>; 2],
         rates: &Rates,
     ) -> (f64, Option<Stop>) {
-        let mut limits = StepLimit::new(self.until - s.age);
+        let mut limits = StepLimit::new();
+        limits.length(LONGEST_STEP_YEARS);
         if let Some(pin) = &self.pin {
             let at = pin.death.age().value();
             if at > s.age {
@@ -782,10 +805,9 @@ impl Engine {
             }
         }
         let floor = (1e-9 * s.age).max(1e-3);
-        limits.length(f64::INFINITY);
         let (dt, stop) = limits.resolve();
         if dt < floor && stop.is_none() {
-            (floor.min(self.until - s.age), None)
+            (floor, None)
         } else {
             (dt.max(0.0), stop)
         }
@@ -1050,7 +1072,7 @@ mod tests {
             );
             engine.accept(&next);
             steps += 1;
-            if matches!(stop, Some(Stop::Death(_) | Stop::Until)) {
+            if matches!(stop, Some(Stop::Death(_))) {
                 break;
             }
         }

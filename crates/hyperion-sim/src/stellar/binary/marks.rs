@@ -28,7 +28,7 @@ use crate::units::{SolarMassesPerYear, SolarRadii, Years};
 
 use super::params::BinaryParams;
 use super::star::{Member, Path};
-use super::timeline::{BinaryTimeline, Context, OrbitPath, Segment, SegmentKind};
+use super::timeline::{BinaryTimeline, Context, FixedOrbit, OrbitPath, Segment, SegmentKind};
 
 /// The phase a pair is in at its marked age: its kind, the ages it runs between, each star's
 /// state and the orbit then, and during stable transfer the donor's rate.
@@ -224,7 +224,7 @@ fn fixed_orbit(orbit: KeplerElements) -> OrbitPath {
         mean_anomaly: orbit.mean_anomaly_at_epoch(),
         axis: Path::starting(0.0, orbit.semi_major_axis().value() / SOLAR_RADIUS_M),
         eccentricity: Path::starting(0.0, orbit.eccentricity().value()),
-        fixed: Some(orbit),
+        fixed: Some(FixedOrbit::always(orbit)),
     }
 }
 

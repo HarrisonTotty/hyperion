@@ -29,8 +29,8 @@ use crate::units::{Metres, Radians, SolarMasses, Years};
 
 use super::star::{Member, Path, positive, zams_spin};
 use super::timeline::{
-    BinaryInput, BinaryTimeline, Context, OrbitPath, PooledIaEvent, Segment, SegmentKind,
-    SupernovaRecord,
+    BinaryInput, BinaryTimeline, Context, FixedOrbit, OrbitPath, PooledIaEvent, Segment,
+    SegmentKind, SupernovaRecord,
 };
 
 /// The most segments a timeline holds (P11.T4.f): reaching it is a broken invariant, counted in
@@ -44,11 +44,12 @@ const MAX_EVENTS: u32 = 4_096;
 /// The most steps one phase takes, past which the engine stops as it does at [`MAX_SEGMENTS`].
 pub(super) const MAX_STEPS: u32 = 200_000;
 
-/// Whether a pair can interact by `until_age`, the cheap pre-test (plan 11, design note 7): the
-/// periastron of its orbit is inside the Roche-filling separation of either star's largest radius
-/// up to then, r ≥ `r_L(q)` a (1 − e) with Eggleton's lobe (1983) and each star's
-/// [`Track::max_radius_until`]. A star below 0.1 M☉ takes the largest radius of P06.T13's
-/// cooling fits, their first. Everything else is two single stars on an orbit.
+/// Whether a pair can interact by `until_age`, the cheap pre-test (plan 11, design note 7): both
+/// stars have arrived on the main sequence by then, and the periastron of its orbit is inside the
+/// Roche-filling separation of either star's largest radius up to then, r ≥ `r_L(q)` a (1 − e)
+/// with Eggleton's lobe (1983) and each star's [`Track::max_radius_until`]. A star below 0.1 M☉
+/// takes the largest radius of P06.T13's cooling fits, their first. Everything else is two single
+/// stars on an orbit.
 ///
 /// # Examples
 ///
@@ -179,7 +180,6 @@ pub(crate) fn evolve_with_tracks(
     let pin = pinned_death(input, full_primary);
     let primary_track = pin.as_ref().map(|p| Arc::clone(&p.track)).or(own_primary);
     let members = own_members_with(input, until, [primary_track, own_secondary]);
-    let orbit = LiveOrbit::of(input);
     if !interacts(input, &members, until) {
         let segment = Segment::new(
             SegmentKind::Detached,
@@ -187,29 +187,51 @@ pub(crate) fn evolve_with_tracks(
             until,
             members,
             Some(OrbitPath {
-                fixed: Some(*input.orbit()),
-                ..orbit.path()
+                fixed: Some(FixedOrbit::always(*input.orbit())),
+                ..LiveOrbit::of(input, Years::ZERO).path()
             }),
             None,
         );
         return BinaryTimeline::new(vec![segment], None, Vec::new(), until, ctx, false);
     }
+    // Before the start the stars are their own and the orbit the drawn one (`arrival`): the paths
+    // the engine carries begin there, so that nothing before it depends on the steps after it.
     let start = arrival(&members, until);
+    let members = members.map(|member| member.restarted(start));
+    let orbit = LiveOrbit::of(input, Years::new(start));
     let mut engine = Engine::new(ctx, start, until, members, orbit, pin.map(|p| p.pin));
     engine.run();
     engine.finish()
 }
 
 /// Where the engine starts stepping for a pair of `members` run to `until`: where both stars have
-/// arrived on the main sequence (P06.T15.b), as the binary codes it follows start at the zero-age
-/// main sequence (Hurley, Tout and Pols 2002). Before, each is its own protostar or contraction,
-/// detached, in the timeline's first segment.
+/// arrived on the main sequence (P06.T15.b), and no later than `until`.
+///
+/// A convention, as in the codes plan 11 follows: binary population codes evolve both stars from
+/// the zero-age main sequence (Hurley, Tout and Pols 2002, section 2.8), and the orbits plan 11
+/// draws are those observed about main-sequence primaries, a zero-age population (Raghavan et al.
+/// 2010; Duchêne and Kraus 2013; Sana et al. 2012; Moe and Di Stefano 2017). What the pre-main
+/// sequence does to a pair is already in them: close pairs form wider and are brought in then
+/// (Bate, Bonnell and Bromm 2002; Moe and Kratter 2018), and the pairs that merge while embedded
+/// (Stahler 2010; Tokovinin and Moe 2020) are counted as single stars. Merging the drawn pairs
+/// whose contracting stars overfill their orbits would count those mergers twice. So no star
+/// interacts before the arrival: each is its own protostar or contraction on the drawn orbit,
+/// detached, in the timeline's first segment, and a pair whose contracting stars would overfill
+/// that orbit waits, as two stars, until it can interact on the main sequence. Shown before then,
+/// such stars overlap their orbit, and the drawn orbit holds their final masses while they
+/// accrete.
+///
+/// Each arrival is [`Track::main_sequence_arrival`], which does not depend on how far the track is
+/// built, so neither does the start: a pair run to an age before a star's arrival is the same pair,
+/// to that age, as one run past it (P11's protostar mergers, 2026-10-05: read from the built
+/// segments alone, a star built short of its main sequence had no arrival, and the pair was
+/// stepped from zero age as protostars, which merged at once into a 0.01 M☉ cooling star).
 #[must_use]
 pub(super) fn arrival(members: &[Member; 2], until: f64) -> f64 {
     members
         .iter()
         .filter_map(|member| match member {
-            Member::Track { track, .. } => track.main_sequence_start(),
+            Member::Track { track, .. } => track.main_sequence_arrival().map(Years::value),
             Member::Shaped { .. }
             | Member::MainSequence { .. }
             | Member::Cooling { .. }
@@ -244,16 +266,37 @@ fn own_members_with(
                 mass: Path::starting(0.0, m.value()),
             };
         }
-        let track = tracks[i].take().unwrap_or_else(|| {
+        let build = |reach: f64| {
             Arc::new(Track::to_age(
                 track_mass(m),
                 input.composition(),
                 &input.draws()[i],
-                Years::new(until),
+                Years::new(reach),
             ))
-        });
+        };
+        let track = tracks[i].take().unwrap_or_else(|| build(until));
+        // A build that ends within the margin past `until` is built on (`reach_margin_years`).
+        let margin = reach_margin_years(until);
+        let track = if track.built_until().value() > until + margin {
+            track
+        } else {
+            build(until + margin)
+        };
         Member::Track { track, offset: 0.0 }
     })
+}
+
+/// How far past the pair's age `until` (years) the engine builds the tracks it reads, years:
+/// 16 ε `until`, past the resolution of [`phase_ahead`]'s look-ahead there (4 ε of the age).
+///
+/// A step that starts within that resolution below a track's last boundary looks for the next
+/// segment, which a track built just short of it does not have: it would stop on the boundary
+/// again and again, to its cap. The age the pair is run to once cut that step and must not
+/// (`detached::StepLimit`), so every track is built past it by this margin, which changes no
+/// state, since a track's segments are the same however far it is built.
+#[must_use]
+pub(super) fn reach_margin_years(until: f64) -> f64 {
+    16.0 * f64::EPSILON * until.abs().max(1.0)
 }
 
 /// The initial mass a track is built for: the star's own, held to the formulae's 150 M☉ as plan
@@ -267,9 +310,14 @@ pub(super) fn track_mass(m: SolarMasses) -> SolarMasses {
     }
 }
 
-/// Whether the pair can interact by `until` on its members' own tracks ([`can_interact`]).
+/// Whether the pair can interact by `until` on its members' own tracks ([`can_interact`]): never
+/// before both stars have arrived on the main sequence (`arrival`), where a star's largest radius
+/// is its contracting one.
 #[must_use]
 fn interacts(input: &BinaryInput, members: &[Member; 2], until: f64) -> bool {
+    if arrival(members, until) >= until {
+        return false;
+    }
     let [m1, m2] = input.masses().map(SolarMasses::value);
     let periastron = input.orbit().periapsis();
     (0..2).any(|i| {
@@ -347,12 +395,14 @@ pub(super) struct LiveOrbit {
     pub(super) mean_anomaly: Radians,
     pub(super) axis: Path,
     pub(super) ecc: Path,
+    /// The drawn orbit up to the engine's start, in the first segment only (`arrival`).
+    drawn: Option<FixedOrbit>,
 }
 
 impl LiveOrbit {
-    /// The input's orbit at zero age.
+    /// The input's orbit, drawn, up to the engine's start at `start`, where its paths begin.
     #[must_use]
-    fn of(input: &BinaryInput) -> Self {
+    fn of(input: &BinaryInput, start: Years) -> Self {
         let k = input.orbit();
         let a = k.semi_major_axis().value() / SOLAR_RADIUS_M;
         let e = k.eccentricity().value();
@@ -361,8 +411,12 @@ impl LiveOrbit {
             e,
             orientation: *k.orientation(),
             mean_anomaly: k.mean_anomaly_at_epoch(),
-            axis: Path::starting(0.0, a),
-            ecc: Path::starting(0.0, e),
+            axis: Path::starting(start.value(), a),
+            ecc: Path::starting(start.value(), e),
+            drawn: Some(FixedOrbit {
+                elements: *k,
+                until: start,
+            }),
         }
     }
 
@@ -382,6 +436,7 @@ impl LiveOrbit {
             mean_anomaly,
             axis: Path::starting(age, a),
             ecc: Path::starting(age, e),
+            drawn: None,
         }
     }
 
@@ -401,7 +456,7 @@ impl LiveOrbit {
             mean_anomaly: self.mean_anomaly,
             axis: self.axis.clone(),
             eccentricity: self.ecc.clone(),
-            fixed: None,
+            fixed: self.drawn,
         }
     }
 
@@ -656,6 +711,13 @@ impl Engine {
         roche_lobe(m[i], m[1 - i], orbit.a)
     }
 
+    /// The span, years, from the engine's age `age` to past the pair's age by
+    /// [`reach_margin_years`], which a track the engine builds at `age` must hold.
+    #[must_use]
+    pub(super) fn reach_span_years(&self, age: f64) -> f64 {
+        (self.until - age).max(0.0) + reach_margin_years(self.until)
+    }
+
     /// Records a pooled Type Ia candidate if it is the first.
     pub(super) fn pool(&mut self, event: PooledIaEvent) {
         if self.pooled.is_none() {
@@ -679,6 +741,44 @@ pub(super) fn phase_ahead(track: &Track, offset: f64, age: f64) -> (f64, f64, f6
     }
     (start, end, track_age)
 }
+
+/// A track for a star the engine places on it now at `at(track)`, a track age, built far enough to
+/// hold the star `span_years` on, past the pair's age ([`Engine::reach_span_years`]); and that
+/// age, if found.
+///
+/// `build` builds the track to a track age, and `guess_years` is where the caller expects the
+/// star to be placed. A track is built to the segment that holds its reach, and a guess short of
+/// the placement (the closed-form main-sequence lifetime against the track's own, short by up to
+/// 0.15% at 3–8 M☉) left the pair's age past the track's end, or the phase sought not built at
+/// all. The engine then stopped on the track's last boundary again and again, to its cap, and the
+/// star froze in a pair run to that age but not in one run past the next segment (P11's build-age
+/// dependence, 2026-10-05). So the track is built again: past its end while the placement is not
+/// in it, then from the placement. A track's segments are the same however far it is built, so a
+/// placement found stays the same.
+#[must_use]
+pub(super) fn track_reaching(
+    guess_years: f64,
+    span_years: f64,
+    build: impl Fn(f64) -> Track,
+    at: impl Fn(&Track) -> Option<f64>,
+) -> (Track, Option<f64>) {
+    let mut track = build(guess_years + span_years);
+    for _ in 0..REBUILDS {
+        let end = track.built_until().value();
+        match at(&track) {
+            Some(placed) if end > placed + span_years => return (track, Some(placed)),
+            Some(placed) => track = build(placed + span_years),
+            None if end.is_finite() => track = build(end + span_years),
+            None => return (track, None),
+        }
+    }
+    let placed = at(&track);
+    (track, placed)
+}
+
+/// The most rebuilds [`track_reaching`] makes: one to find the phase, one to reach past the
+/// placement, and two to spare.
+const REBUILDS: u32 = 4;
 
 /// The offset that puts a track's age `at` at the engine's age `age`, rounded so that the track's
 /// age there, age − offset, is never below `at` (a phase starting at `at` holds it).

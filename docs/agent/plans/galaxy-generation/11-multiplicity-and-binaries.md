@@ -2608,3 +2608,172 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       123.5's marked-stripped 1,408 of 1,753 (80.3%) and merged 294 (16.8%).
     - `binary_carve` passes, and so do the 10³-pair invariants.
     - The R06 census passes in 197 s.
+- **P11's protostar mergers and build-age dependence, fixed** (Phase J lane, 2026-10-05; rendering
+  plan R06's tables, `decision-r06-tables.md`, "For plan 11"). Built for version 21, committed with
+  its goldens re-blessed at version 20 and held out of integration until the 20 → 21 bump lands
+  with it, P11.T4.h and P14.T47.e.
+  - _The protostar mergers._ `evolve.rs`'s `arrival`, where the engine starts stepping, read each
+    star's main-sequence start from its track's built segments only. A pair run to an age before a
+    star's arrival had none for that star and was stepped from age zero, where the protostars
+    (about 10⁻³ M☉ each at the onset) overfill a close orbit: it merged them at once into a
+    0.01 M☉ star on the cooling fits (their floor), M_V 17.53, beside a `NoRemnant`. Run to a later
+    age, the same pair read back as two protostars.
+    - The fix keeps the convention (no star interacts before both have arrived) and makes the
+      arrival independent of the build: `Track::main_sequence_arrival` (`sse/track.rs`) is
+      `main_sequence_start` where the main sequence is built, and otherwise the same age from the
+      build's own law (`phases::main_sequence_start_age`), bit for bit
+      (`a_track_built_short_of_its_main_sequence_knows_its_arrival`).
+    - The pre-test (`can_interact`) is now false before both stars have arrived, where a star's
+      largest radius is its contracting one, so such a pair is not run at all.
+    - _Physics._ A convention, as in the codes plan 11 follows. BSE starts both stars on the
+      zero-age main sequence (Hurley, Tout and Pols 2002, §2.8), as COMPAS does, and the drawn
+      orbits are those observed about main-sequence primaries, a zero-age population (Raghavan et
+      al. 2010; Duchêne and Kraus 2013; Sana et al. 2012; Moe and Di Stefano 2017, §2). What the
+      pre-main sequence does to a pair is already in them: close pairs form wider and are brought
+      in then (Bate, Bonnell and Bromm 2002; Moe and Kratter 2018), and those that merge while
+      embedded (Stahler 2010; Tokovinin and Moe 2020) are counted as single stars, so merging the
+      drawn pairs whose contracting stars overfill their orbits would count those mergers twice.
+      Before the arrival the stars are shown on the drawn orbit, overlapping it where they
+      overfill it, and the drawn orbit holds their final masses while they accrete.
+    - _Rates_ ([Fe/H] −0.5, the fit's sampler, 2,000 systems a bin; systems holding a 0.010 M☉
+      star): before, C bins 0–8: 6, 15, 25, 23, 14, 9, 3, 8, 4; D bins 0–6: 13, 29, 43, 28, 7, 3,
+      2; E bins 0, 2, 4: 0, 6, 2. After: none. The repro systems (D cell 80, [Fe/H] 0:
+      0x621459680000005c, …90, …91) are protostars, each its own model's.
+  - _The build-age dependence._ `evolve(input, u₁)` and `evolve(input, u₂ > u₁)` now agree bit
+    for bit at every age to u₁ for every pair the pre-test passes at u₁. Four causes, all fixed:
+    1. The arrival above. It also made whole histories differ for massive primaries whose
+       companion's main sequence was built in one run and not the other.
+    2. The last step was cut at the run-to age and joined to its knot linearly, where a later
+       run's whole step was. Now no step depends on the run-to age (`StepLimit::new` takes none):
+       the step that reaches or passes it is the last, and what it lands on lies beyond the
+       timeline (`integrate`, `transfer_phase`); the contact phase's knots run to its
+       coalescence. Every step is held to `LONGEST_STEP_YEARS`, 10⁹ yr, which the run-to age
+       once bounded (two white dwarfs 1 au apart would otherwise step 10¹⁷ yr).
+    3. The orbit before the engine's start lay on a path from age zero to the first step, and a
+       star below 0.1 M☉'s mass path likewise. Now the drawn orbit stands to the start
+       (`OrbitPath::fixed_until`) and the engine's paths begin there.
+    4. A track the engine rebuilds (`after_boundary`'s gap, `main_sequence_star`) was built to a
+       reach guessed from `main_sequence_start` + `main_sequence_lifetime`, which at 3–8 M☉ falls
+       short of the track's own gap by 1.6 × 10⁴–1.8 × 10⁵ yr (0.15% of the main sequence; a
+       finding for plan 06). A run whose age fell in that shortfall either stopped on the track's
+       last boundary 4,096 times, to its cap, its stars frozen, or, where the gap was not built at
+       all, placed the star at its track's age zero, a protostar beside its companion's remnant
+       (the determinism audit's sweep: 42 of 2,317 runs to just past an event, in 8 of 60 pairs).
+       A later run went on. Now `track_reaching` builds again, past the track's end while the
+       phase sought is not in it, then from the placement.
+    5. A track built to end within the look-ahead resolution of `phase_ahead` (4 ε of the age)
+       past the run-to age had no next segment for a step starting there, and would stall to the
+       cap at a handful of representable ages, which the cut at the run-to age had masked. Every
+       track the engine reads is now built 16 ε of the age past it (`reach_margin_years`,
+       `Engine::reach_span_years`), which moves no state.
+    - _Measured after events_ (`a_hundred_timelines_run_to_just_past_their_events_are_the_same`):
+      100 pinned-sample pairs, each run to 10⁻³, 1, 10², 10⁴ and 10⁶ yr past every segment start
+      of its run to 1.5 × 10¹⁰ yr: all 3,461 runs the pre-test passes agree with it bit for bit.
+    - _Measured_ (4,000 sampled close pairs, each run to an age log-uniform in 10⁵–1.6 × 10¹⁰
+      yr and to up to four times it): before, 1,335 pairs had stars that differed before the
+      earlier age and 1,461 differed among those the pre-test passes there; after, none of the
+      latter. 15 with differing stars and 259 with differing orbits remain, all passed over by
+      the pre-test at the earlier age (below).
+    - _At the system level_ (the R06 probe, `probe_v20.rs::causality`: a fit system rebuilt
+      with its bin's upper age and read back; [Fe/H] −0.5, 400 systems a bin): before, C bin 4
+      3, C bin 19 0, C bin 10 0, D bin 3 3, D bin 16 5, E bin 10 30; after 0, 0, 0, 0, 4, 14.
+      What remains is not build-age dependence: a record rebuilt with another age at the epoch
+      is another system. Its carve (design note 8) is judged at its epoch age, so it may take
+      another attempt and other companions (E bin 10: 11), and a supernova places its stars on
+      their orbit through the epoch age (BSE appendix A1; D bin 16: 4, E bin 10: 1). Two in E
+      bin 10 are the pre-test's blind spot. Further bins: C 15, 22, 24: 0, 1, 0; D 10, 20, 23:
+      0, 6, 5; E 6, 12, 14: 0, 24, 45, all carve or supernova phase.
+  - _What remains, open for the orchestrator:_
+    - **The pre-test's blind spot** (design note 7). `can_interact` reads the drawn orbit, so a
+      pair whose orbit magnetic braking (BSE eq. 50), tides or gravitational radiation shrink into
+      contact before the run-to age, without its stars reaching the drawn orbit's lobes, is passed
+      over: two single stars on the drawn orbit. A run to a later age, which the pre-test passes,
+      shows the contact before the earlier age. 4 of 10³ pinned-sample pairs
+      (`a_thousand_timelines_are_the_same_whatever_age_they_are_run_to`), e.g. 1.04 + 0.45 M☉ at
+      a = 3.75 R☉ (P = 0.69 d), in contact by braking at 2.25 Gyr; the sample is weighted against
+      this channel (11% of its primaries are Sun-like, 14% of its periods under 1.3 d, 21% of its
+      ages over 1 Gyr). In the field it is BSE's whole W UMa channel (Stępień 2006): every
+      convective-envelope pair under P ≈ 1.2–1.5 d reaches contact in the engine within 10 Gyr
+      (science check, from eq. 50 at locked spin), and while its primary is on its main sequence
+      the pre-test skips it. A likely, perhaps the main, cause of the contact binaries' tenfold
+      deficit against Rucinski (P11.T11's Risks). Pairs passed over also keep the drawn orbit
+      where the engine would widen it by wind or circularise it (to Δa/a ≈ 1 and Δe ≈ 0.08 in the
+      sample). Options:
+      - (a) A decay-aware pre-test (the science check's): a_min(t) = [a₀⁵ − 5 (C_mb + C_gw a₀)
+        t]^⅕ from eq. 50 at locked spin with R = R_max(until) and the zero-age envelope, braking
+        only above 0.35 M☉, eq. 48 for gravitational radiation, a (1 − 3 J_spin ÷ J_orb)⁻¹ spin
+        reservoir and a tidal spin-up allowance; the pair interacts if a_min (1 − e) is within
+        the lobe test. For 1 + 0.8 M☉ it passes P₀ ≤ 0.64 d at 1 Gyr and ≤ 1.22 d at 10 Gyr, a
+        small extra cost. My lean.
+      - (b) Run every pair under a fixed period (about 2 d), at any age: simpler, costlier.
+      - (c) Keep it and record it.
+    - **Both arrivals** (P06.T15.b's convention, kept here). The engine waits for the later
+      star's arrival, so a massive primary whose low-mass companion arrives after the primary's
+      main sequence never interacts: no common envelope on its giant branch, and its supernova
+      leaves the pair on the drawn orbit. A companion arrives too late below 0.29, 0.62, 0.99,
+      1.19, 1.58, 1.81 and 2.25 M☉ for primaries of 4, 5, 8, 10, 15, 20 and 40 M☉ (Z = 0.02;
+      science check). That is the classic progenitor space of neutron-star and black-hole
+      low-mass X-ray binaries through a common envelope (Kalogera and Webbink 1998), and of
+      post-common-envelope white dwarfs with M dwarfs from 4–7 M☉ primaries, so the channel's
+      yield is zero; and such a pair is carried bound through a supernova that should unbind it.
+      Measured: 42 of 1,846 sampled pairs that can interact in their primary's life (26 of 777
+      from 8 M☉) have a companion arriving after 90% of it. The science check rates it must-fix,
+      pending the owner. Its recommendation, BSE-faithful: start at the first arrival, and carry
+      a star that has not arrived as HPT's zero-age main-sequence star of its mass, its clock held
+      at τ = 0 until its own arrival, for every interaction test (Roche lobe, collision, common
+      envelope, the supernova's orbit, tides, braking), shown on its own pre-main-sequence track
+      until the pair touches it (Hurley, Tout and Pols 2002, §2.8; Kalogera and Webbink 1998,
+      §1; Moe and Di Stefano 2015 observe B stars with pre-main-sequence companions at 3–8.5 d).
+      It moves many massive pairs' histories, the carve and the classes.
+  - _Tests added._ `binary::tests`:
+    - `a_pair_run_short_of_the_main_sequence_stays_two_protostars` (2.27 + 2.21 M☉ at 1 d, to
+      0.4 Myr: one detached segment, two protostars, each its own track's, the drawn orbit,
+      equal to a run to 10⁸ yr; it failed before with the merger at zero age);
+    - `a_track_built_short_of_the_pairs_age_is_built_again` (8.26 + 7.92 M☉ at 2.31 d to
+      37.085 Myr: no cap, equal to a run to 90 Myr, and so are runs to just past each of its
+      events to 40 Myr; it capped before, and placed the primary at its track's age zero just
+      past its main sequence's end);
+    - `a_rebuilt_track_reaches_the_pairs_age` (`track_reaching` at both call sites' placements,
+      for a 5 M☉ track whose gap the guess falls short of);
+    - `a_timeline_is_the_same_whatever_age_it_is_run_to` (60 pairs) and, slow,
+      `a_thousand_timelines_are_the_same_whatever_age_they_are_run_to` (10³: 372 run at both
+      ages, bit for bit; 624 passed over, whose stars on their own tracks agree to the later
+      run's first event; 4 missed interactions, under the 2% the test allows in this sample);
+    - `a_timeline_run_to_just_past_an_event_is_the_same` (8 pairs) and, slow,
+      `a_hundred_timelines_run_to_just_past_their_events_are_the_same` (above).
+    - `sse::track::tests::a_track_built_short_of_its_main_sequence_knows_its_arrival`.
+    - `tests/stellar_system.rs` `young_pairs_whose_protostars_overfill_their_orbits_stay_protostars`
+      (the three repro systems).
+  - _Goldens_ (`golden_diff.py --base 1845d20`: two moved, none new, header at 20).
+    - `stellar/binary_timelines`: all 1,000 digests, no segment count. The digest hashes each
+      segment's paths' `Debug`, which now carries the drawn orbit's `FixedOrbit` and paths that
+      begin at the engine's start, not at zero, and run past the run-to age. Compared by their
+      states alone at the digest's 257 even ages (698 pairs' stars move there):
+      - before both arrivals the orbit is the drawn one (it was reconstructed from the axis at
+        the protostars' masses: up to the whole period at age zero);
+      - in the first engine step the orbit is interpolated from the start (about 10⁻¹² of a);
+      - at 1.2 × 10¹⁰ yr, in the last step, uncut, stars move by up to 2 × 10⁻⁴ (the
+        interpolation across the step), and elsewhere mostly by units in the last place, where
+        the 10⁹-yr cap or the uncut step moved the knots of a long segment (224 sampled states by
+        more than 10⁻⁶);
+      - two double black holes (pairs 309 and 604) merge by gravitational radiation 0.05–0.95%
+        earlier, their only moved segment boundaries: the cap gives their long inspirals more
+        steps, nearer Peters's time (309: 8.977 → 8.892 Gyr, Peters 8.76–8.78 Gyr; 604: 9.067 →
+        9.062 Gyr, Peters 9.026 Gyr). No supernova moved.
+    - `stellar/summaries`: two black holes of one system (mass, core, R and remnant mass) by one
+      unit in the last place, from the uncut last step.
+    - Nothing else moved: plan 06's single stars, the galaxy chain and the planetary and server
+      goldens read no engine state these changes touch.
+  - _Slow suites_ (run capped, all pass): `binary_system` (ruling 137's hydrogen-poor share
+    0.511; 123.5's marked-stripped 1,408 of 1,753, merged 294; contact pairs 1.13 × 10⁻⁴ per
+    faint main-sequence star, unchanged); `binary_carve`; the 10³-pair invariants; the two new
+    slow tests; the R06 census (`a_hundred_thousand_systems_live_and_die_in_order`, 234 s).
+  - _Reviews._ Science check: the citations hold (HTP 2002 §2.8; Moe and Di Stefano 2017 §2;
+    Bate, Bonnell and Bromm 2002; Moe and Kratter 2018), the convention is the defensible choice
+    against merging, worded as a convention; fixed: the test's arrival times (5.1 and 5.5 Myr,
+    not 7) and the step cap's doc; the two findings above are its. Determinism audit: the
+    fallback placement at track age zero and the look-ahead stall (both fixed above), and a test
+    of the windows after events (added); no streams, draws, caches or summation orders. Rust
+    review: units in the new names (`Years` for the arrival and the fixed orbit's age), one
+    `FixedOrbit` for the drawn orbit and its age, the fallback placement, summaries, and the
+    contact phase's end for a contact that never coalesces; all fixed.

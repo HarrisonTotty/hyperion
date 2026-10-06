@@ -410,32 +410,37 @@ impl Engine {
                     self.ctx.composition(),
                 )
             };
-            let reach = start
-                + sse::main_sequence_lifetime(self.ctx.coeffs(), helium, m)
-                + (self.until - self.age).max(0.0);
-            let (track, phase) = if helium {
-                (
+            let guess = start + sse::main_sequence_lifetime(self.ctx.coeffs(), helium, m);
+            let (composition, draws) = (self.ctx.composition(), self.ctx.draws(i));
+            let build = |reach: f64| {
+                if helium {
                     sse::Track::helium_star(
                         SolarMasses::new(m.min(sse::MAX_INITIAL_MASS.value())),
-                        self.ctx.composition(),
-                        self.ctx.draws(i),
+                        composition,
+                        draws,
                         Years::new(reach),
-                    ),
-                    Phase::HeliumHertzsprungGap,
-                )
-            } else {
-                (
+                    )
+                } else {
                     sse::Track::to_age(
                         super::evolve::track_mass(SolarMasses::new(m)),
-                        self.ctx.composition(),
-                        self.ctx.draws(i),
+                        composition,
+                        draws,
                         Years::new(reach),
-                    ),
-                    Phase::HertzsprungGap,
-                )
+                    )
+                }
             };
-            let start = track
-                .age_in_phase(phase, 0.0)
+            let phase = if helium {
+                Phase::HeliumHertzsprungGap
+            } else {
+                Phase::HertzsprungGap
+            };
+            let (track, placed) = super::evolve::track_reaching(
+                guess,
+                self.reach_span_years(self.age),
+                build,
+                |track| track.age_in_phase(phase, 0.0),
+            );
+            let start = placed
                 .or_else(|| track.lifetime().map(Years::value))
                 .unwrap_or(0.0);
             self.members[i] = Member::Shaped {

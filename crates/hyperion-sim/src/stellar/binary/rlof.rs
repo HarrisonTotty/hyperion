@@ -402,7 +402,9 @@ impl Engine {
             if rate <= 0.0 && steps > 0 && unfed < -DETACHED_BY {
                 // The donor has shrunk inside its lobe with nothing to give: the transfer is over.
                 self.accept(&next);
-                self.begin(self.quiet_kind());
+                if self.age < self.until {
+                    self.begin(self.quiet_kind());
+                }
                 return;
             }
             self.accept(&next);
@@ -416,6 +418,11 @@ impl Engine {
             } else {
                 2.0 * dt
             };
+            // The step that reaches or passes the pair's age is the last, whatever it landed on,
+            // which lies beyond the timeline (`detached::StepLimit`).
+            if self.age >= self.until {
+                return;
+            }
             if self.accretor_events(d, rate, accretion.share * rate * dt, accretion) {
                 return;
             }
@@ -432,6 +439,7 @@ impl Engine {
             }
             if let Some(stop) = stop {
                 match stop {
+                    // No step limit is the pair's age (`detached::StepLimit`).
                     super::detached::Stop::Until => return,
                     super::detached::Stop::Boundary => {
                         self.close_segment();
@@ -480,7 +488,7 @@ impl Engine {
         sa: &Structure,
     ) -> (f64, Option<super::detached::Stop>) {
         use super::detached::Stop;
-        let mut limits = super::detached::StepLimit::new(self.until - s.age);
+        let mut limits = super::detached::StepLimit::new();
         if let Some(pin) = &self.pin {
             let at = pin.death.age().value();
             if at > s.age {
@@ -528,6 +536,7 @@ impl Engine {
             1e-4 * thermal.min(phase_limit)
         };
         limits.length(start.min(phase_limit).max(1e-6));
+        limits.length(super::detached::LONGEST_STEP_YEARS);
         limits.resolve()
     }
 
@@ -923,7 +932,7 @@ impl Engine {
                     0.0,
                     self.ctx.composition(),
                     self.ctx.draws(a_idx),
-                    Some((self.until - self.age).max(0.0)),
+                    Some(self.reach_span_years(self.age)),
                 );
                 self.set_member(
                     a_idx,

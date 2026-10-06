@@ -324,7 +324,7 @@ impl Engine {
             track_age,
             mass,
             self.ctx.draws(i),
-            Some((self.until - age).max(0.0)),
+            Some(self.reach_span_years(age)),
         ) {
             // A track already at its remnant goes on as that remnant.
             Remains::Nothing if track.state_at(Years::new(track_age)).phase().is_remnant() => {
@@ -793,11 +793,19 @@ impl Engine {
         }
     }
 
-    /// Runs a contact pair to its coalescence, or to the pair's age where the contact outlasts it
-    /// (see [`Engine::contact`]): the stars keep their masses and the orbit its separation, and a
-    /// carried main sequence ages.
+    /// Runs a contact pair to its coalescence, which comes after the pair's age where the contact
+    /// outlasts it (see [`Engine::contact`]).
+    ///
+    /// The stars keep their masses and the orbit its separation, and a carried main sequence ages.
+    /// The knots run to the coalescence whatever the pair's age, so that they do not depend on it
+    /// (`detached::StepLimit`), and over 16 of the longest steps for a contact that never
+    /// coalesces (two stars on the cooling fits).
     pub(super) fn contact_phase(&mut self) {
-        let end = self.contact_until.min(self.until);
+        let end = if self.contact_until.is_finite() {
+            self.contact_until
+        } else {
+            self.age + 16.0 * super::detached::LONGEST_STEP_YEARS
+        };
         let steps = 16_u32;
         let start = self.age;
         for k in 1..=steps {
@@ -824,7 +832,7 @@ impl Engine {
             }
             self.age = age;
         }
-        if self.age >= self.until && end >= self.until && self.contact_until > self.until {
+        if self.contact_until > self.until {
             return;
         }
         self.close_segment();
@@ -905,18 +913,15 @@ impl Engine {
         }
         let mass = track_mass(SolarMasses::new(m));
         let lifetime = sse::main_sequence_lifetime(self.ctx.coeffs(), false, mass.value());
-        let reach = sse::main_sequence_start(mass, self.ctx.composition())
-            + tau * lifetime
-            + (self.until - self.age).max(0.0);
-        let track = Track::to_age(
-            mass,
-            self.ctx.composition(),
-            self.ctx.draws(0),
-            Years::new(reach),
+        let guess = sse::main_sequence_start(mass, self.ctx.composition()) + tau * lifetime;
+        let (composition, draws) = (self.ctx.composition(), self.ctx.draws(0));
+        let (track, placed) = super::evolve::track_reaching(
+            guess,
+            self.reach_span_years(self.age),
+            |reach| Track::to_age(mass, composition, draws, Years::new(reach)),
+            |track| track.age_in_phase(Phase::MainSequence, tau),
         );
-        let at = track
-            .age_in_phase(Phase::MainSequence, tau)
-            .unwrap_or(tau * lifetime);
+        let at = placed.unwrap_or(tau * lifetime);
         Member::Track {
             track: Arc::new(track),
             offset: super::evolve::offset_for(self.age, at),
@@ -931,7 +936,7 @@ impl Engine {
             tau,
             self.ctx.composition(),
             self.ctx.draws(0),
-            Some((self.until - self.age).max(0.0)),
+            Some(self.reach_span_years(self.age)),
         );
         Member::Track {
             track: Arc::new(track),

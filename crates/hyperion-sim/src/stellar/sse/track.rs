@@ -834,6 +834,33 @@ impl Track {
             .map(|segment| segment.start)
     }
 
+    /// The age at which a hydrogen star's main sequence starts, whether or not the track is built
+    /// that far, or `None` for a track with no main sequence (a naked helium star's, a remnant's).
+    ///
+    /// It is [`Track::main_sequence_start`]'s where the main sequence is built, and the same age
+    /// from the build's own law where the track ends before it, in its protostar or contraction
+    /// (P06.T15.b). Plan 11's engine starts where both stars have arrived (`binary::evolve`'s
+    /// `arrival`): read from the segments alone, a pair run to an age before a star's arrival lost
+    /// that star's arrival and was stepped from age zero, as protostars, which merged at once
+    /// (P11's protostar mergers, 2026-10-05).
+    #[must_use]
+    pub(crate) fn main_sequence_arrival(&self) -> Option<Years> {
+        self.main_sequence_start()
+            .or_else(|| {
+                self.segments
+                    .first()
+                    .filter(|segment| segment.model.is_before_main_sequence())
+                    .map(|_| {
+                        phases::main_sequence_start_years(
+                            self.initial_mass.value(),
+                            &self.coeffs,
+                            self.options.bridges(),
+                        )
+                    })
+            })
+            .map(Years::new)
+    }
+
     /// The initial mass the track was built for, M☉ (clamped into the covered range).
     #[must_use]
     pub const fn initial_mass(&self) -> SolarMasses {

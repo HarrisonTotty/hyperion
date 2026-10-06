@@ -754,3 +754,140 @@ fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
     }
     golden!("stellar/held_bare_core_helium_star", w.as_str());
 }
+
+/// Regression (P11's protostar mergers, 2026-10-05; rendering plan R06's tables): three young
+/// systems of the R06 luminosity fit's galaxy (`sky::binary_light`'s seed, `0x5b1a_0005_0000_5eed`;
+/// layer D, [Fe/H] 0, ages 0.30–0.39 Myr), whose pairs' protostars overfill their orbits. Built to
+/// their own ages, each such pair was merged at age zero into a 0.01 M☉ cooling star beside
+/// nothing, which broke mass conservation and lit a dark protostar at an absolute V magnitude of
+/// 17.5; built to a later age and read back, the same pairs were two protostars. Now no star
+/// interacts before both of a pair have arrived on the main sequence: every star is its own
+/// model's protostar, no pair is run, and each pair run to an age past its arrival reads back the
+/// same two stars.
+#[test]
+fn young_pairs_whose_protostars_overfill_their_orbits_stay_protostars() {
+    use hyperion_sim::id::SystemId;
+    use hyperion_sim::orbit::roche_lobe_radius;
+    use hyperion_sim::stellar::Composition;
+    use hyperion_sim::stellar::binary::{can_interact, evolve};
+    use hyperion_sim::units::consts::SOLAR_RADIUS_M;
+    use hyperion_sim::units::{Dex, HeliumExcess};
+
+    let galaxy = Galaxy::from_params(
+        Seed::new(0x5b1a_0005_0000_5eed),
+        GalaxyParams::milky_way_like(),
+    )
+    .expect("the Milky Way-like gas is mostly neutral");
+    let component = galaxy
+        .fields()
+        .component_id(0)
+        .expect("a galaxy has components");
+    let at = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the root cube");
+    let composition = Composition::from_fe_h(Dex::new(0.0), HeliumExcess::ZERO);
+    let mut overfilled = 0;
+    for (raw, mass, age) in [
+        (
+            0x6214_5968_0000_005c,
+            5.019_768_120_424_701,
+            351_800.520_694_040_17,
+        ),
+        (
+            0x6214_5968_0000_0090,
+            2.527_505_005_945_29,
+            296_917.301_111_903_4,
+        ),
+        (
+            0x6214_5968_0000_0091,
+            5.084_150_481_054_733,
+            386_014.450_187_192_36,
+        ),
+    ] {
+        let record = SystemRecord::from_parts(
+            SystemId::from_raw(raw).expect("a grid ID"),
+            at,
+            SystemOrigin::Grid(component),
+            galaxy.fields().component(component).population(),
+            SolarMasses::new(mass),
+            Years::new(age),
+        );
+        let stars =
+            SystemStars::generate_with(&galaxy, &record, &composition, MultiplicityContext::Free);
+        assert!(stars.pairs().is_empty(), "{raw:#x}: no pair is run yet");
+        let state = stars
+            .state_at(UniverseTime::EPOCH)
+            .expect("the system exists");
+        for (star, model) in state.stars().iter().zip(stars.stars()) {
+            assert_eq!(
+                Some(*star),
+                model.state_at(UniverseTime::EPOCH),
+                "{raw:#x}: each star is its own"
+            );
+            if model.initial_mass().value() >= 0.08 {
+                assert_eq!(star.phase(), Phase::Protostar, "{raw:#x}: {star:?}");
+            }
+        }
+        for (i, j, orbit, input) in star_pairs(&stars) {
+            let until = Years::new(age + 1.0e3);
+            assert!(!can_interact(&input, until), "{raw:#x}: before the arrival");
+            let later = evolve(&input, Years::new(1.0e8)).state_at(Years::new(age));
+            assert_eq!(
+                later.stars(),
+                &[state.stars()[i], state.stars()[j]],
+                "{raw:#x}"
+            );
+            let [r0, r1] = later.stars().map(|s| s.radius().value());
+            let [m0, m1] = later.stars().map(|s| s.mass().value());
+            let periastron = orbit.periapsis();
+            if r0 >= roche_lobe_radius(m0 / m1, periastron).value() / SOLAR_RADIUS_M
+                || r1 >= roche_lobe_radius(m1 / m0, periastron).value() / SOLAR_RADIUS_M
+            {
+                overfilled += 1;
+            }
+        }
+    }
+    assert!(overfilled > 0, "a pair's protostars overfill their orbit");
+}
+
+/// Each pair of two stars of `stars` above 0.08 M☉: the stars' indices, the pair's orbit and the
+/// binary engine's input for it, as plan 11's system stage builds it.
+fn star_pairs(
+    stars: &SystemStars,
+) -> Vec<(
+    usize,
+    usize,
+    hyperion_sim::orbit::KeplerElements,
+    hyperion_sim::stellar::binary::BinaryInput,
+)> {
+    use hyperion_sim::stellar::binary::BinaryInput;
+    use hyperion_sim::stellar::multiplicity::HierarchyNode;
+
+    let hierarchy = stars.hierarchy();
+    hierarchy
+        .pairs()
+        .filter_map(|(node, orbit)| {
+            let HierarchyNode::Pair { inner, outer, .. } = *hierarchy.node(node) else {
+                unreachable!("pairs are pairs");
+            };
+            let (HierarchyNode::Star(a), HierarchyNode::Star(b)) =
+                (*hierarchy.node(inner), *hierarchy.node(outer))
+            else {
+                return None;
+            };
+            let [i, j] = [a, b].map(|s| usize::from(s.get()));
+            let [first, second] = [&stars.stars()[i], &stars.stars()[j]];
+            if second.initial_mass().value() < 0.08 {
+                return None;
+            }
+            let input = BinaryInput::new(
+                first.initial_mass(),
+                second.initial_mass(),
+                *first.composition(),
+                *orbit,
+                [first.draws().clone(), second.draws().clone()],
+                first.age_at_epoch(),
+            )
+            .expect("a pair of stars");
+            Some((i, j, *orbit, input))
+        })
+        .collect()
+}

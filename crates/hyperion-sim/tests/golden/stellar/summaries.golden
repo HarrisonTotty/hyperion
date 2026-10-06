@@ -677,14 +677,14 @@ death at T-9747680549465404.000000000 s by DirectCollapse
 t = -500 yr: Exists
   BlackHole BlackHole BH
   age = 0x41b2b1a948e5b250  # 313633096.8972521
-  mass = 0x40228cc2c6410594  # 9.274923510968428
-  core = 0x40228cc2c6410594  # 9.274923510968428
+  mass = 0x40228cc2c6410593  # 9.274923510968426
+  core = 0x40228cc2c6410593  # 9.274923510968426
   L = 0x0000000000000000  # 0.0
-  R = 0x3f04a46efc4f749a  # 3.9372097979864173e-5
+  R = 0x3f04a46efc4f7499  # 3.937209797986417e-5
   Teff = 0x0000000000000000  # 0.0
   M_V none
   B-V none
-  remnant BlackHole = 0x40228cc2c6410594  # 9.274923510968428
+  remnant BlackHole = 0x40228cc2c6410593  # 9.274923510968426
   no death in the window
   binary class None
   black hole spin = 0x3f809efc7dab8d1b  # 0.00811574228777672
@@ -1333,14 +1333,14 @@ companions at t = 0 yr: Exists
   [1] not variable
   [2] BlackHole BlackHole BH
   [2] age = 0x41b2b1ab3ce5b250  # 313633596.8972521
-  [2] mass = 0x4017dd358abf9bd8  # 5.966024558968421
-  [2] core = 0x4017dd358abf9bd8  # 5.966024558968421
+  [2] mass = 0x4017dd358abf9bd7  # 5.96602455896842
+  [2] core = 0x4017dd358abf9bd7  # 5.96602455896842
   [2] L = 0x0000000000000000  # 0.0
-  [2] R = 0x3efa8e580fe0377c  # 2.5325804919921588e-5
+  [2] R = 0x3efa8e580fe0377b  # 2.5325804919921584e-5
   [2] Teff = 0x0000000000000000  # 0.0
   [2] M_V none
   [2] B-V none
-  [2] remnant BlackHole = 0x4017dd358abf9bd8  # 5.966024558968421
+  [2] remnant BlackHole = 0x4017dd358abf9bd7  # 5.96602455896842
   [2] no death in the window
   [2] binary class None
   [2] black hole spin = 0x3facd928ebb759b4  # 0.0563442981471555

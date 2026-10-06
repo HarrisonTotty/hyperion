@@ -1541,3 +1541,338 @@ fn a_bare_star_at_its_phase_boundary_is_stripped_first() {
         .state;
     assert_eq!(state.phase(), Phase::HeliumMainSequence, "{state:?}");
 }
+
+/// Regression (P11's protostar mergers, 2026-10-05): a pair of 2.27 and 2.21 M☉ at 1 d, run to
+/// 0.4 Myr, before either star reaches the main sequence (at 5.1 and 5.5 Myr). A star's arrival
+/// was read from its track's built segments alone, so a track built short of its main sequence had
+/// none, and the engine stepped from zero age, where the protostars overfill the orbit: it merged
+/// them at once into a 0.01 M☉ cooling star beside nothing. Now the pair waits for both arrivals
+/// (`evolve.rs`, `arrival`): to 0.4 Myr it is two protostars, each its own track's and of its own
+/// accreted mass, on the drawn orbit, as a run to a later age has it.
+#[test]
+fn a_pair_run_short_of_the_main_sequence_stays_two_protostars() {
+    use crate::stellar::sse::Track;
+
+    let input = pair(2.27, 2.21, 1.0, 0.0, 0.02);
+    let until = Years::new(4.0e5);
+    let early = evolve(&input, until);
+    let later = evolve(&input, Years::new(1.0e8));
+    assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+    assert_eq!(early.segments()[0].kind(), SegmentKind::Detached);
+    assert_eq!(early.merger_age(), None);
+    let own = [0, 1].map(|i| {
+        Track::to_age(
+            input.masses()[i],
+            input.composition(),
+            &input.draws()[i],
+            until,
+        )
+    });
+    for k in 1..=40_u32 {
+        let age = Years::new(until.value() * f64::from(k) / 40.0);
+        let state = early.state_at(age);
+        assert_eq!(state, later.state_at(age), "at {age:?}");
+        assert_eq!(state.orbit(), Some(input.orbit()), "at {age:?}");
+        for (star, track) in state.stars().iter().zip(&own) {
+            assert_eq!(star.phase(), Phase::Protostar, "{star:?}");
+            assert_eq!(star, &track.state_at(age));
+        }
+    }
+}
+
+/// Regression (P11's build-age dependence, 2026-10-05): a pair of 8.26 and 7.92 M☉ at 2.31 d, run
+/// to 37.085 Myr, transferring mass on its primary's Hertzsprung gap. The track the primary was
+/// carried on from the end of its main sequence was built to a reach guessed from the closed-form
+/// lifetime, which fell short of its own gap: the pair's age lay past the track's end, the engine
+/// stopped on the track's last boundary 4,096 times, to its cap, and the stars froze. A run past
+/// the next segment had the track built further and went on. Now the track is built again from
+/// where the star is placed on it (`evolve.rs`, `track_reaching`), and the two runs agree.
+#[test]
+fn a_track_built_short_of_the_pairs_age_is_built_again() {
+    use crate::Seed;
+    use crate::coords::{CellSize, GenCell};
+    use crate::id::{BodyId, Layer, SystemId};
+
+    let (m1, m2) = (8.255_234_890_079_752, 7.924_133_480_725_55);
+    let orbit = KeplerElements::from_period(
+        Seconds::new(2.306_744_539_916_993_5 * 86_400.0),
+        GravitationalParameter::from_solar_masses(SolarMasses::new(m1 + m2)),
+        Eccentricity::CIRCULAR,
+        Orientation::new(Radians::new(0.3), Radians::new(0.1), Radians::new(0.2))
+            .expect("an orientation"),
+        Radians::new(1.0),
+    )
+    .expect("an orbit");
+    let cell = GenCell::new(CellSize::Ly8, [3_058, 9, 0]).expect("a cell");
+    let system = SystemId::from_parts(Layer::A, cell, 0).expect("a system");
+    let draws = [0, 1].map(|k| StarDraws::for_star(Seed::new(0x0b1e_5eee), BodyId::new(system, k)));
+    let input = BinaryInput::new(
+        SolarMasses::new(m1),
+        SolarMasses::new(m2),
+        Composition::from_fe_h(
+            crate::units::Dex::new(0.0),
+            crate::units::HeliumExcess::ZERO,
+        ),
+        orbit,
+        draws,
+        Years::new(1.0e9),
+    )
+    .expect("a pair");
+    let until = Years::new(37_085_007.925_425_24);
+    let early = evolve(&input, until);
+    let later = evolve(&input, Years::new(9.0e7));
+    assert!(!early.hit_segment_cap(), "{}", describe(&early));
+    assert_same_history(&early, &later, until);
+    // Just past the end of the primary's main sequence (36.704 Myr) the rebuilt track once held no
+    // gap at all, and the star was placed at its track's age zero, a protostar.
+    assert!(check_after_events(&input, Years::new(4.0e7)) > 20);
+}
+
+/// The ages just past each event of `input`'s run to 1.5 × 10¹⁰ years, up to `last`: each
+/// segment's start plus 10⁻³, 1, 10², 10⁴ and 10⁶ years, where a dependence on the run-to age
+/// shows if anything does (a track built short of a phase just entered).
+fn ages_after_events(later: &BinaryTimeline, last: Years) -> Vec<Years> {
+    let mut ages: Vec<f64> = later
+        .segments()
+        .iter()
+        .map(|s| s.start().value())
+        .filter(|&start| start > 0.0)
+        .flat_map(|start| [1e-3, 1.0, 1e2, 1e4, 1e6].map(|after| start + after))
+        .filter(|&age| age <= last.value())
+        .collect();
+    ages.sort_by(f64::total_cmp);
+    ages.dedup_by(|a, b| a.total_cmp(b).is_eq());
+    ages.into_iter().map(Years::new).collect()
+}
+
+/// [`check_any_age`]'s first case at each of [`ages_after_events`]: every run of `input` to an
+/// age just past one of its events that the pre-test passes has the history of the run to
+/// 1.5 × 10¹⁰ years, bit for bit, and meets no cap. The number of runs compared.
+fn check_after_events(input: &BinaryInput, last: Years) -> usize {
+    let later = evolve(input, Years::new(1.5e10));
+    let mut compared = 0;
+    for until in ages_after_events(&later, last) {
+        if !can_interact(input, until) {
+            continue;
+        }
+        let early = evolve(input, until);
+        assert!(
+            !early.hit_segment_cap(),
+            "to {until:?}: {}",
+            describe(&early)
+        );
+        assert_same_history(&early, &later, until);
+        compared += 1;
+    }
+    compared
+}
+
+/// P11's build-age dependence (2026-10-05, the determinism audit's sweep): runs to just past each
+/// event of eight pinned-sample pairs agree with a run to 1.5 × 10¹⁰ years.
+#[test]
+fn a_timeline_run_to_just_past_an_event_is_the_same() {
+    let mut mix = Mix(0x0b1e_00ab);
+    let compared: usize = (0..8)
+        .map(|i| check_after_events(&pinned_pair(&mut mix, i), Years::new(1.2e10)))
+        .sum();
+    assert!(compared > 50, "{compared} runs compared");
+}
+
+/// [`a_timeline_run_to_just_past_an_event_is_the_same`] over 100 pairs.
+#[test]
+#[ignore = "slow: about 10⁴ binaries run through the engine"]
+fn a_hundred_timelines_run_to_just_past_their_events_are_the_same() {
+    let mut mix = Mix(0x0b1e_00ac);
+    let compared: usize = (0..100)
+        .map(|i| check_after_events(&pinned_pair(&mut mix, i), Years::new(1.2e10)))
+        .sum();
+    eprintln!("{compared} runs compared");
+    assert!(compared > 500, "{compared} runs compared");
+}
+
+/// P11's build-age dependence (2026-10-05): a track the engine rebuilds holds its star to the
+/// pair's age where the reach guessed from the closed forms falls short, at both of
+/// [`super::evolve::track_reaching`]'s call sites. A 5 M☉ star's gap starts after its closed-form
+/// main sequence ends, so a build to just past that end has no gap, which `after_boundary` once
+/// placed at track age 0; and a build that holds a main sequence at τ = 0.999 ends before a span
+/// past it, which `main_sequence_star` once left short.
+#[test]
+fn a_rebuilt_track_reaches_the_pairs_age() {
+    use hyperion_testkit::float::bits;
+
+    use super::evolve::track_reaching;
+    use crate::stellar::sse::{self, Track};
+
+    let (m, comp, draws) = (
+        SolarMasses::new(5.0),
+        Composition::SOLAR,
+        StarDraws::median(),
+    );
+    let full = Track::full(m, &comp, &draws);
+    let build = |reach: f64| Track::to_age(m, &comp, &draws, Years::new(reach));
+    let coeffs = sse::ZCoeffs::new(comp.z_fit());
+    let lifetime = sse::main_sequence_lifetime(&coeffs, false, m.value());
+    let start = sse::main_sequence_start(m, &comp);
+
+    let gap = full
+        .age_in_phase(Phase::HertzsprungGap, 0.0)
+        .expect("a 5 M☉ star crosses the gap");
+    let guess = start + lifetime;
+    assert!(
+        guess < gap,
+        "the guess {guess} yr falls short of the gap at {gap} yr"
+    );
+    let span = 0.5 * (gap - guess);
+    let gap_of = |track: &Track| track.age_in_phase(Phase::HertzsprungGap, 0.0);
+    assert_eq!(gap_of(&build(guess + span)), None, "built short of the gap");
+    let (track, placed) = track_reaching(guess, span, build, gap_of);
+    assert_eq!(placed.map(bits), Some(bits(gap)));
+    assert!(track.built_until().value() >= gap + span);
+
+    let tau = 0.999;
+    let on = full
+        .age_in_phase(Phase::MainSequence, tau)
+        .expect("a main sequence");
+    let guess = start + tau * lifetime;
+    let span = 2.0 * (gap - on);
+    let on_of = |track: &Track| track.age_in_phase(Phase::MainSequence, tau);
+    assert!(
+        build(guess + span).built_until().value() < on + span,
+        "built short of the span"
+    );
+    let (track, placed) = track_reaching(guess, span, build, on_of);
+    assert_eq!(placed.map(bits), Some(bits(on)));
+    assert!(track.built_until().value() >= on + span);
+}
+
+/// That `early` and `later`, the same pair run to `until` and past it, have the same states at
+/// every age to `until`: at 257 even ages, at each of `early`'s segments' starts and halfway
+/// through each, bit for bit.
+fn assert_same_history(early: &BinaryTimeline, later: &BinaryTimeline, until: Years) {
+    let mut ages: Vec<f64> = (0..=256_u32)
+        .map(|k| until.value() * f64::from(k) / 256.0)
+        .collect();
+    for s in early.segments() {
+        let (start, end) = (s.start().value(), s.end().value().min(until.value()));
+        ages.extend([start, start + 0.5 * (end - start)]);
+    }
+    for age in ages {
+        let age = Years::new(age);
+        assert_eq!(
+            early.state_at(age),
+            later.state_at(age),
+            "at {age:?}:\n{}\nagainst\n{}",
+            describe(early),
+            describe(later)
+        );
+    }
+}
+
+/// How a pair run to an earlier age compares with the same pair run to a later one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EarlierRun {
+    /// The engine ran the pair both times: the same history to the earlier age.
+    Same,
+    /// The pre-test passed over the pair at the earlier age (two single stars on the drawn orbit),
+    /// and the later run met no interaction before it.
+    PassedOver,
+    /// The pre-test passed over the pair at the earlier age, but the later run's orbit shrank into
+    /// an interaction before it, which the pre-test, reading the drawn orbit, cannot see.
+    MissedInteraction,
+}
+
+/// Plan 11's consistency to any age (P11's build-age dependence, 2026-10-05), for `input` run to
+/// `until` and to `later`. A pair that [`can_interact`] by `until` has the same history to `until`
+/// as the later run, bit for bit ([`assert_same_history`]). One it passes over is one detached
+/// segment of its stars' own forms on the drawn orbit, and each star on its own track is the later
+/// run's to the later run's first event (a star below 0.1 M☉ on the cooling fits takes its
+/// companion's wind in the later run).
+fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
+    use super::star::Member;
+
+    let early = evolve(input, until);
+    let late = evolve(input, later);
+    if can_interact(input, until) {
+        assert!(!early.hit_segment_cap(), "{}", describe(&early));
+        assert_same_history(&early, &late, until);
+        return EarlierRun::Same;
+    }
+    assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+    // To the later run's first event, which is not compared unless it lies past `until`.
+    let first_event = late.segments()[0].end();
+    let (horizon, last) = if first_event < until {
+        (first_event.value(), 63)
+    } else {
+        (until.value(), 64)
+    };
+    let members = late.segments()[0].members();
+    for k in 0..=last {
+        let age = Years::new(horizon * f64::from(k) / 64.0);
+        let (a, b) = (early.state_at(age), late.state_at(age));
+        for (i, member) in members.iter().enumerate() {
+            if matches!(member, Member::Track { .. }) {
+                assert_eq!(
+                    a.stars()[i],
+                    b.stars()[i],
+                    "at {age:?}:\n{}",
+                    describe(&late)
+                );
+            }
+        }
+    }
+    let interacted = late
+        .segments()
+        .iter()
+        .any(|s| s.kind() != SegmentKind::Detached && s.start() < until);
+    if interacted {
+        EarlierRun::MissedInteraction
+    } else {
+        EarlierRun::PassedOver
+    }
+}
+
+/// Runs `n` pinned-sample pairs ([`pinned_pair`]), each to an age log-uniform in 10⁵–1.2 × 10¹⁰
+/// years and to 1.5 × 10¹⁰, through [`check_any_age`], and returns how many were the same, passed
+/// over and missed interactions.
+fn any_age_over(n: u32, seed: u64) -> [u32; 3] {
+    let mut mix = Mix(seed);
+    let mut counts = [0_u32; 3];
+    for i in 0..n {
+        let input = pinned_pair(&mut mix, i);
+        let until =
+            crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e10 / 1.0e5));
+        let outcome = check_any_age(&input, Years::new(until), Years::new(1.5e10));
+        let slot = match outcome {
+            EarlierRun::Same => 0,
+            EarlierRun::PassedOver => 1,
+            EarlierRun::MissedInteraction => 2,
+        };
+        counts[slot] += 1;
+    }
+    counts
+}
+
+/// The engine's history does not depend on the age it is run to (P11's build-age dependence,
+/// 2026-10-05): [`check_any_age`] over 60 pairs. The pre-test's blind spot, a drawn orbit that
+/// magnetic braking, tides or gravitational radiation shrink into an interaction the pre-test
+/// cannot see, is rare in this sample, which is weighted against it (few Sun-like pairs under
+/// 1.5 d, few ages over 1 Gyr), not in the field (plan 11's Risks).
+#[test]
+fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
+    let [same, passed, missed] = any_age_over(60, 0x0b1e_00a9);
+    assert!(same > 10 && passed > 10, "{same} run, {passed} passed over");
+    assert!(missed <= 1, "{missed} interactions missed");
+}
+
+/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs: 4 of them meet the
+/// pre-test's blind spot (2026-10-05), which the bound of 2% only guards in this sample.
+#[test]
+#[ignore = "slow: 2 × 10³ binaries run through the engine"]
+fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
+    let [same, passed, missed] = any_age_over(1_000, 0x0b1e_00aa);
+    eprintln!("{same} run at both ages, {passed} passed over, {missed} interactions missed");
+    assert!(
+        f64::from(missed) < 0.02 * f64::from(same + passed + missed),
+        "{missed} interactions missed"
+    );
+}

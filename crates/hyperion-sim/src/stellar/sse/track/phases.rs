@@ -32,7 +32,34 @@ use super::build::{
 };
 use super::model::{HeliumCore, Model, Span};
 use super::post_agb::{self, PostAgb};
-use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment};
+use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment, ZCoeffs};
+
+/// The arrival on the zero-age main sequence of a star of `m0` M☉ under `coeffs`, years since its
+/// onset of collapse: `t_zams` (P06.T15.b), at HPT's zero-age main sequence.
+#[must_use]
+fn arrival_years(m0: f64, coeffs: &ZCoeffs) -> f64 {
+    let zams = MainSequence::new(SolarMasses::new(m0), coeffs).at(Megayears::ZERO);
+    premain::arrival_years(m0, zams.luminosity.value(), zams.radius.value())
+}
+
+/// The age, years since its onset of collapse, at which a hydrogen star of `m0` M☉ under
+/// `coeffs` and `bridges` starts its main sequence, without building anything.
+///
+/// It is the first of [`Builder::main_sequence_start`]'s three, which takes it from here. A track
+/// built short of its main sequence reads it here (`Track::main_sequence_arrival`, for plan 11's
+/// engine).
+#[must_use]
+pub(super) fn main_sequence_start_years(m0: f64, coeffs: &ZCoeffs, bridges: Bridges) -> f64 {
+    if bridges == Bridges::Instant {
+        return 0.0;
+    }
+    let arrival = arrival_years(m0, coeffs);
+    if arrival > PROTOSTAR_YEARS {
+        arrival
+    } else {
+        PROTOSTAR_YEARS
+    }
+}
 
 impl Builder<'_> {
     // ---------------------------------------------------------------------------------------------
@@ -67,16 +94,16 @@ impl Builder<'_> {
     /// at age zero: the track has neither stage before it (P06.T12.b compares so).
     #[must_use]
     pub(super) fn main_sequence_start(&self, m0: f64) -> (f64, f64, f64) {
+        let start = main_sequence_start_years(m0, self.phys.coeffs, self.options.bridges());
         if self.options.bridges() == Bridges::Instant {
-            return (0.0, 0.0, 0.0);
+            return (start, 0.0, 0.0);
         }
-        let zams = MainSequence::new(SolarMasses::new(m0), self.phys.coeffs).at(Megayears::ZERO);
-        let arrival = premain::arrival_years(m0, zams.luminosity.value(), zams.radius.value());
+        let arrival = arrival_years(m0, self.phys.coeffs);
         if arrival > PROTOSTAR_YEARS {
-            (arrival, 0.0, arrival)
+            (start, 0.0, arrival)
         } else {
             let tau0 = (PROTOSTAR_YEARS - arrival) / (self.ms_lifetime_myr(m0) * 1e6);
-            (PROTOSTAR_YEARS, tau0.min(MAX_ACCRETING_TAU), arrival)
+            (start, tau0.min(MAX_ACCRETING_TAU), arrival)
         }
     }
 
