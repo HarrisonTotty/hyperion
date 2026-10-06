@@ -1,0 +1,13 @@
+# The reddening table's smoke run: the same grids with a blackbody at every node and the CIE 1924
+# V(λ) standing in for the V band, from the committed CIE tables and silicon alone, so that it runs
+# where the fetched spectra are not; a few seconds.
+task = "star_colour_reddening"
+datasets = ["cie_cmf", "green2008_si"]
+
+[params]
+spectra = "blackbody"
+v_band = "cie_photopic"
+bins_nm = [360, 1100]
+normal_log_g = [0.0, 6.0]
+white_dwarf_log_g = [6.5, 9.5]
+camera_reddening_a_v = 2.0

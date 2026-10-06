@@ -47,6 +47,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use hyperion_sim::galaxy::gas::ccm::extinction_ratio;
+use hyperion_sim::sky::colour::{SUN_LOG_G, SUN_TEFF_K};
 use hyperion_sim::units::Micrometres;
 
 use crate::data::{Dataset, LoadDatasetError, Provenance, load_dataset};
@@ -55,7 +56,7 @@ use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::parallel::map_reduce_chunks;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 
-pub use columns::{BAKE_WAVELENGTH_COUNT, Extras, Sensor, bake_wavelengths_nm};
+pub use columns::{BAKE_WAVELENGTH_COUNT, Extras, Reddening, Sensor, bake_wavelengths_nm};
 pub use photometry::{ColourRow, Observer, VBandSource};
 pub use spectrum::{ReadSpectrumError, Spectrum};
 
@@ -230,6 +231,8 @@ pub struct TableRow {
     pub colour: ColourRow,
     /// The camera, reddening and bake columns (R06.T3.c).
     pub extras: Extras,
+    /// The eye's and the camera's reddening, the `star_colour_reddening` table's (R06.T9.e).
+    pub reddening: Reddening,
 }
 
 /// The table's row for `spectrum`.
@@ -239,6 +242,7 @@ pub fn table_row(observer: &Observer, sensor: &Sensor, spectrum: &Spectrum) -> T
     TableRow {
         colour: observer.row(&bins),
         extras: columns::extras(observer, sensor, spectrum, &bins),
+        reddening: columns::reddening(observer, sensor, &bins),
     }
 }
 
@@ -286,8 +290,9 @@ pub struct StarColourTable {
 pub const CAMERA_TERM_RANGE: (f64, f64) = (-4.0, 3.968_75);
 
 /// The Sun's effective temperature, K (IAU 2015 Resolution B3), and log g from the nominal GM☉ and
-/// R☉: the point whose camera band term is zero.
-pub const SUN: (f64, f64) = (5_772.0, 4.438);
+/// R☉: the point whose camera band term is zero, the sim's `sky::colour::{SUN_TEFF_K, SUN_LOG_G}`,
+/// at which the band takes its reddening.
+pub const SUN: (f64, f64) = (SUN_TEFF_K, SUN_LOG_G);
 
 /// η☉ from `grid`: 10 to the bilinear mean of log₁₀ η over the four nodes about [`SUN`], with the
 /// weights the sim's `sky::colour` takes from the table's rounded nodes, so that the interpolated
@@ -760,6 +765,17 @@ second). The spectra are not redistributed; their provenance is
     }
 }
 
+/// The reddening task's parameters as its manifest records them: the colour table's, and the
+/// extinction in V of the camera's second column.
+fn reddening_parameters(spectra: Spectra, v_band: VBand) -> toml::Table {
+    let mut table = parameters(spectra, v_band);
+    table.insert(
+        "camera_reddening_a_v".to_owned(),
+        toml::Value::Float(columns::CAMERA_REDDENING_A_V),
+    );
+    table
+}
+
 /// The fit's parameters as its manifest records them.
 fn parameters(spectra: Spectra, v_band: VBand) -> toml::Table {
     let text = format!(
@@ -932,8 +948,137 @@ impl FitTask for StarColourTask {
     /// Plan 07's extinction law, which the reddening columns read, at the blue, green and red
     /// channels' and the V band's typical effective wavelengths.
     fn fingerprint(&self) -> SimFingerprint {
+        law_fingerprint()
+    }
+
+    fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
+        let (spectra, v_band) = read_params(manifest, parameters)?;
+        let observer = read_observer(manifest, v_band)?;
+        let sensor = read_sensor(manifest)?;
+        let table = fit(manifest, &observer, &sensor, spectra, threads)?;
+        let mut acceptance = acceptance(&observer, &table);
+        if spectra == Spectra::Models {
+            acceptance.push_str(&pickles_acceptance(manifest, &observer, &table)?);
+        }
+        Ok(TaskOutput {
+            source: SOURCE.to_owned(),
+            acceptance,
+            table: render(&table),
+            provisional: match spectra {
+                Spectra::Models => None,
+                Spectra::Blackbody => Some("R06.T3.a smoke run"),
+            },
+        })
+    }
+}
+
+/// The spectra and the V band a manifest asks for, its parameters checked against `expected`, the
+/// code's.
+///
+/// # Errors
+///
+/// [`RunTaskError`] if a parameter is missing, not one the task knows, or disagrees with the
+/// code's constants.
+fn read_params(
+    manifest: &Manifest,
+    expected: fn(Spectra, VBand) -> toml::Table,
+) -> Result<(Spectra, VBand), RunTaskError> {
+    let spectra = match manifest.str("spectra")? {
+        "models" => Spectra::Models,
+        "blackbody" => Spectra::Blackbody,
+        _ => {
+            return Err(ManifestParamError::new("spectra", "\"models\" or \"blackbody\"").into());
+        }
+    };
+    let v_band = match manifest.str("v_band")? {
+        "bessell_murphy_2012" => VBand::BessellMurphy,
+        "cie_photopic" => VBand::CiePhotopic,
+        _ => {
+            return Err(ManifestParamError::new(
+                "v_band",
+                "\"bessell_murphy_2012\" or \"cie_photopic\"",
+            )
+            .into());
+        }
+    };
+    manifest.expect_params(&expected(spectra, v_band))?;
+    Ok((spectra, v_band))
+}
+
+/// The citations of both colour tables' fits, for their headers' `source`.
+const SOURCE: &str = "model spectra of Husser et al. (2013, A&A 553, A6), Castelli and Kurucz (2003, IAU \
+                     Symp. 210, A20), Lanz and Hubeny (2003, ApJS 146, 417), TMAP (Werner et al. \
+                     2003, ASP Conf. Ser. 288, 31; Rauch and Deetjen 2003, ibid. 103) and Koester (2010, Mem. S. A. It. 81, 921), as the \
+                     Spanish Virtual Observatory and the PHOENIX site serve them; the CIE's 1931 2° \
+                     colour-matching functions, 1924 V(λ), 1951 V′(λ) and D65 (CC BY-SA 4.0); \
+                     Bessell and Murphy (2012, PASP 124, 140) V; retrieved 2026-10-02";
+
+/// The extinction law's probes both colour tables' fingerprints read: plan 07's law at the blue,
+/// green and red channels' and the V band's typical effective wavelengths.
+#[must_use]
+fn law_fingerprint() -> SimFingerprint {
+    SimFingerprint::new(
+        [0.45, 0.53, 0.55, 0.61]
+            .iter()
+            .map(|&um| {
+                (
+                    format!("galaxy::gas::ccm::extinction_ratio({um} µm)"),
+                    extinction_ratio(Micrometres::new(um))
+                        .expect("an optical wavelength is in the law's range"),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The reddening table's name.
+const REDDENING_NAME: &str = "star_colour_reddening";
+
+/// The reddening table's revision, written into its header; bumped when anything below moves it.
+pub const REDDENING_VERSION: u32 = 0;
+
+/// The task `star_colour_reddening`: the colour table's four reddening columns (rendering plan
+/// R06, R06.T9.e; decided 2026-10-06, `decision-r06-t9b-band.md`, item 3), slow, revision
+/// [`REDDENING_VERSION`].
+///
+/// It integrates the same spectra on the same grids as [`StarColourTask`], through the same
+/// [`fit`], and writes only `A_P ÷ A_V`, `A_S ÷ A_V` and the camera's two `A_cam ÷ A_V`
+/// ([`Reddening`]), row for row with `star_colour`'s. They are a table of their own because the
+/// colour table's file holds no more under the repository's 500 KB file limit (497 KB as T3 left
+/// it; the four columns add some 70 KB), as the pair-evolved light's three tables are split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct StarColourReddeningTask;
+
+impl FitTask for StarColourReddeningTask {
+    fn name(&self) -> &'static str {
+        REDDENING_NAME
+    }
+
+    fn class(&self) -> TaskClass {
+        TaskClass::Slow
+    }
+
+    fn table_path(&self) -> &'static str {
+        "star_colour_reddening.rs"
+    }
+
+    fn revision(&self) -> u32 {
+        REDDENING_VERSION
+    }
+
+    fn items(&self) -> &'static [&'static str] {
+        &[
+            "CAMERA_REDDENING_A_V",
+            "NORMAL_REDDENING",
+            "WHITE_DWARF_REDDENING",
+        ]
+    }
+
+    /// Plan 07's extinction law, which every column reads: [`StarColourTask`]'s probes, and the
+    /// law across the camera's band, its infrared branch beyond 0.91 µm among them.
+    fn fingerprint(&self) -> SimFingerprint {
         SimFingerprint::new(
-            [0.45, 0.53, 0.55, 0.61]
+            [0.40, 0.45, 0.53, 0.55, 0.61, 0.80, 1.00]
                 .iter()
                 .map(|&um| {
                     (
@@ -947,50 +1092,212 @@ impl FitTask for StarColourTask {
     }
 
     fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
-        let spectra = match manifest.str("spectra")? {
-            "models" => Spectra::Models,
-            "blackbody" => Spectra::Blackbody,
-            _ => {
-                return Err(
-                    ManifestParamError::new("spectra", "\"models\" or \"blackbody\"").into(),
-                );
-            }
-        };
-        let v_band = match manifest.str("v_band")? {
-            "bessell_murphy_2012" => VBand::BessellMurphy,
-            "cie_photopic" => VBand::CiePhotopic,
-            _ => {
-                return Err(ManifestParamError::new(
-                    "v_band",
-                    "\"bessell_murphy_2012\" or \"cie_photopic\"",
-                )
-                .into());
-            }
-        };
-        manifest.expect_params(&parameters(spectra, v_band))?;
+        let (spectra, v_band) = read_params(manifest, reddening_parameters)?;
         let observer = read_observer(manifest, v_band)?;
         let sensor = read_sensor(manifest)?;
         let table = fit(manifest, &observer, &sensor, spectra, threads)?;
-        let mut acceptance = acceptance(&observer, &table);
-        if spectra == Spectra::Models {
-            acceptance.push_str(&pickles_acceptance(manifest, &observer, &table)?);
-        }
         Ok(TaskOutput {
-            source: "model spectra of Husser et al. (2013, A&A 553, A6), Castelli and Kurucz (2003, IAU \
-                     Symp. 210, A20), Lanz and Hubeny (2003, ApJS 146, 417), TMAP (Werner et al. \
-                     2003, ASP Conf. Ser. 288, 31; Rauch and Deetjen 2003, ibid. 103) and Koester (2010, Mem. S. A. It. 81, 921), as the \
-                     Spanish Virtual Observatory and the PHOENIX site serve them; the CIE's 1931 2° \
-                     colour-matching functions, 1924 V(λ), 1951 V′(λ) and D65 (CC BY-SA 4.0); \
-                     Bessell and Murphy (2012, PASP 124, 140) V; retrieved 2026-10-02"
-                .to_owned(),
-            acceptance,
-            table: render(&table),
+            source: SOURCE.to_owned(),
+            acceptance: reddening_acceptance(&observer, &sensor, &table),
+            table: render_reddening(&table),
             provisional: match spectra {
                 Spectra::Models => None,
-                Spectra::Blackbody => Some("R06.T3.a smoke run"),
+                Spectra::Blackbody => Some("R06.T9.e smoke run"),
             },
         })
     }
+}
+
+/// The reddening table's contents: one `static` a grid, four columns a row, in the colour
+/// table's row order.
+#[must_use]
+pub fn render_reddening(table: &StarColourTable) -> RustTable {
+    let notes = format!(
+        "\
+Each row is the row of the same index in `star_colour`'s grid of the same name, from the same
+model spectrum over the same 1 nm bins (R06.T9.e; `decision-r06-t9b-band.md`, item 3).
+`photopic` and `scotopic` are `A_P ÷ A_V` and `A_S ÷ A_V` at `R_V` = 3.1: plan 07's
+`ccm::extinction_ratio` at the effective wavelength of the spectrum under the CIE 1924 V(λ) and
+the CIE 1951 V′(λ), photon-free, over the law at the V band's photon-weighted effective
+wavelength, as `star_colour`'s display channels are taken. `camera_0` and `camera_2` are
+`A_cam ÷ A_V` for the default sensor at `A_V` → 0 and at `A_V` = {a_v}, as two integrals over the
+same dust, since the camera's band is too broad for one effective wavelength: for dust of d at
+0.55 µm a band of weights w is dimmed by −2.5 log₁₀(∫S w 10^(−0.4 ℓ(λ) d) ÷ ∫S w), ℓ plan 07's
+law, w = QE λ for the camera (400–1,100 nm) and `R_V` λ for V; `camera_0` is the ratio of the two
+bands' mean ℓ, and `camera_2` the ratio at the d that dims V by {a_v}. The sim takes the camera's
+ratio as linear in `A_V` between them. Values are rounded to seven significant digits. The
+columns are a table of their own because `star_colour.rs` holds no more under the repository's
+500 KB file limit.{smoke}",
+        a_v = columns::CAMERA_REDDENING_A_V,
+        smoke = match table.spectra {
+            Spectra::Models => "",
+            Spectra::Blackbody =>
+                "\n\nSMOKE RUN: every node holds a blackbody at its temperature, not its model.",
+        },
+    );
+    RustTable {
+        summary: vec![
+            "The extinction of the eye's photopic and scotopic light and of the default camera's band"
+                .to_owned(),
+            "over the V band's, for every row of the colour table (rendering plan R06, R06.T9.e)."
+                .to_owned(),
+        ],
+        notes: notes.lines().map(str::to_owned).collect(),
+        items: vec![
+            TableItem::Scalar {
+                name: "CAMERA_REDDENING_A_V".to_owned(),
+                doc: vec![
+                    "The extinction in V of the camera's second column, mag: `camera_2` is its"
+                        .to_owned(),
+                    "`A_cam ÷ A_V` there, and the sim takes the ratio as linear in `A_V` through it."
+                        .to_owned(),
+                ],
+                value: columns::CAMERA_REDDENING_A_V,
+            },
+            TableItem::Source(reddening_source("NORMAL", "not-white-dwarf", &table.normal)),
+            TableItem::Source(reddening_source(
+                "WHITE_DWARF",
+                "white-dwarf",
+                &table.white_dwarf,
+            )),
+        ],
+    }
+}
+
+/// A grid's reddening columns as a `static` array of four columns, one row a line: `photopic`,
+/// `scotopic`, `camera_0` and `camera_2`.
+#[must_use]
+fn reddening_source(prefix: &str, what: &str, grid: &Grid) -> String {
+    let mut out = String::new();
+    // Writing to a String cannot fail.
+    let _ = writeln!(
+        out,
+        "/// The {what} grid's reddening, in the order of `star_colour`'s `{prefix}`: columns\n\
+         /// `photopic` (`A_P ÷ A_V`), `scotopic` (`A_S ÷ A_V`), and `camera_0` and `camera_2`\n\
+         /// (`A_cam ÷ A_V` at `A_V` → 0 and at `A_V` = 2).\n{ROW_ATTRIBUTES}\n\
+         pub static {prefix}_REDDENING: [[f64; 4]; {}] = [",
+        grid.rows.len()
+    );
+    for r in &grid.rows {
+        let values = [
+            rounded(r.reddening.photopic),
+            rounded(r.reddening.scotopic),
+            rounded(r.reddening.camera[0]),
+            rounded(r.reddening.camera[1]),
+        ]
+        .map(plain);
+        // Writing to a String cannot fail.
+        let _ = writeln!(out, "    [{}],", values.join(","));
+    }
+    out.push_str("];\n");
+    out
+}
+
+/// The ruling's ranges for the colour table's solar row (`decision-r06-t9b-band.md`, item 3, as
+/// R06.T9.e's tests take them; the sim's `sky::colour` test repeats them), inclusive:
+/// `A_P ÷ A_V`, `A_S ÷ A_V − A_P ÷ A_V`, and `A_cam ÷ A_V` at `A_V` → 0.
+pub const SOLAR_REDDENING_RANGES: [(f64, f64); 3] = [(0.97, 1.00), (0.11, 0.15), (0.78, 0.88)];
+
+/// The reddening columns at [`SUN`], interpolated as the sim's `sky::colour` interpolates the
+/// table: bilinearly in log `T_eff` and log g between the rounded values of the four nodes about
+/// it.
+#[must_use]
+pub fn solar_reddening(grid: &Grid) -> [f64; 4] {
+    let log_t: Vec<f64> = grid
+        .teff
+        .iter()
+        .map(|&(t, _)| rounded(hyperion_sim::math::log10(f64::from(t))))
+        .collect();
+    let (ti, tf) = pickles::bracket(&log_t, hyperion_sim::math::log10(SUN.0));
+    let (gi, gf) = pickles::bracket(&grid.log_g, SUN.1);
+    let column = |i: usize, j: usize, k: usize| {
+        let r = grid.row(i, j).reddening;
+        rounded([r.photopic, r.scotopic, r.camera[0], r.camera[1]][k])
+    };
+    std::array::from_fn(|k| {
+        let low = column(ti, gi, k) * (1.0 - gf) + column(ti, gi + 1, k) * gf;
+        let high = column(ti + 1, gi, k) * (1.0 - gf) + column(ti + 1, gi + 1, k) * gf;
+        low * (1.0 - tf) + high * tf
+    })
+}
+
+/// The reddening table's measured figures for its header: the solar row's columns against the
+/// ruling's ranges, their spread over the dwarfs, and the effective-wavelength method against the
+/// broadband integrals.
+#[must_use]
+fn reddening_acceptance(observer: &Observer, sensor: &Sensor, table: &StarColourTable) -> String {
+    let [photopic, scotopic, camera_0, camera_2] = solar_reddening(&table.normal);
+    let verdict = |value: f64, (lo, hi): (f64, f64)| {
+        if (lo..=hi).contains(&value) {
+            "passes"
+        } else {
+            "FAILS"
+        }
+    };
+    let [p_range, s_range, c_range] = SOLAR_REDDENING_RANGES;
+    let j = table
+        .normal
+        .log_g
+        .iter()
+        .position(|&g| (g - 4.5).abs() < 1e-9)
+        .unwrap_or(0);
+    let dwarfs: Vec<Reddening> = table
+        .normal
+        .teff
+        .iter()
+        .enumerate()
+        .filter(|(_, (t, _))| (3_000..=30_000).contains(t))
+        .map(|(i, _)| table.normal.row(i, j).reddening)
+        .collect();
+    let spread = |f: fn(&Reddening) -> f64| {
+        dwarfs
+            .iter()
+            .map(f)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                (lo.min(v), hi.max(v))
+            })
+    };
+    let (p_lo, p_hi) = spread(|r| r.photopic);
+    let (s_lo, s_hi) = spread(|r| r.scotopic);
+    let (c_lo, c_hi) = spread(|r| r.camera[0]);
+    let worst = method_error(observer, sensor);
+    format!(
+        "at 5,772 K and log g 4.438 `A_P ÷ A_V` {photopic:.4} (in {:.2}–{:.2}; {}), `A_S ÷ A_V` \
+         {scotopic:.4}, their difference {:.4} (in {:.2}–{:.2}; {}), `A_cam ÷ A_V` {camera_0:.4} at \
+         `A_V` → 0 (in {:.2}–{:.2}; {}) and {camera_2:.4} at `A_V` 2; over the dwarfs' rows (log g \
+         4.5) from 3,000 to 30,000 K, `A_P ÷ A_V` {p_lo:.4}–{p_hi:.4}, `A_S ÷ A_V` \
+         {s_lo:.4}–{s_hi:.4}, `A_cam ÷ A_V` at `A_V` → 0 {c_lo:.4}–{c_hi:.4}; the photopic and \
+         scotopic ratios at their effective wavelengths against the broadband integrals at `A_V` 1, \
+         blackbodies of 3,000–30,000 K: within {worst:.4} (the ruling's 0.003; {})",
+        p_range.0,
+        p_range.1,
+        verdict(photopic, p_range),
+        scotopic - photopic,
+        s_range.0,
+        s_range.1,
+        verdict(scotopic - photopic, s_range),
+        c_range.0,
+        c_range.1,
+        verdict(camera_0, c_range),
+        if worst < 0.003 { "passes" } else { "FAILS" },
+    )
+}
+
+/// The largest difference, over blackbodies of 3,000 to 30,000 K, between the photopic and
+/// scotopic ratios at their effective wavelengths and their broadband values over the V band's at
+/// `A_V` 1: the effective-wavelength method's error.
+#[must_use]
+fn method_error(observer: &Observer, sensor: &Sensor) -> f64 {
+    let mut worst: f64 = 0.0;
+    for teff in [3_000.0, 4_000.0, 5_772.0, 10_000.0, 30_000.0] {
+        let bins = Spectrum::blackbody(teff).bin_means();
+        let columns = columns::reddening(observer, sensor, &bins);
+        let [photopic, scotopic] = columns::broadband_eye_reddening(observer, &bins, 1.0);
+        worst = worst
+            .max((photopic - columns.photopic).abs())
+            .max((scotopic - columns.scotopic).abs());
+    }
+    worst
 }
 
 /// The measured figures the header records: ρ of Illuminant A and the Sun's blackbody, D65's

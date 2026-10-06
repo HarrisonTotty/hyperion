@@ -240,6 +240,12 @@ impl Observer {
         &self.photopic
     }
 
+    /// The CIE 1951 V′(λ) by 1 nm bin, zero outside 380–780 nm.
+    #[must_use]
+    pub fn scotopic(&self) -> &[f64] {
+        &self.scotopic
+    }
+
     /// The mean of V(λ) over each bake bin, V(λ) taken as linear between its 1 nm samples.
     ///
     /// # Panics

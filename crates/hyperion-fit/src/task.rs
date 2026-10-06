@@ -96,7 +96,7 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 22] = [
+pub static REGISTRY: [&dyn FitTask; 23] = [
     &tasks::chabrier::ChabrierTask,
     &tasks::cluster_bh::ClusterBhTask,
     &tasks::cluster_retention::ClusterRetentionTask,
@@ -113,6 +113,7 @@ pub static REGISTRY: [&dyn FitTask; 22] = [
     &tasks::sky_binary_light::E_TASK,
     &tasks::sky_envelope::SkyEnvelopeTask,
     &tasks::star_colour::StarColourTask,
+    &tasks::star_colour::StarColourReddeningTask,
     &tasks::stellar_fates::HIGH_TASK,
     &tasks::stellar_fates::LOW_TASK,
     &tasks::stellar_fates::MID_TASK,
@@ -206,6 +207,7 @@ mod tests {
                 "sky_binary_light_e",
                 "sky_envelope",
                 "star_colour",
+                "star_colour_reddening",
                 "stellar_fates_high",
                 "stellar_fates_low",
                 "stellar_fates_mid",

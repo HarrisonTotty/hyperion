@@ -1,0 +1,24 @@
+# The colour table's reddening columns (rendering plan R06, R06.T9.e; decided 2026-10-06,
+# `decision-r06-t9b-band.md`, item 3): the same model spectra on the same grids as `star_colour`,
+# integrated for each band's extinction over the V band's. The parameters are constants of
+# `src/tasks/star_colour/mod.rs` and `columns.rs`, recorded here so that the inputs hash covers
+# them; the task refuses a manifest that disagrees with its code.
+task = "star_colour_reddening"
+datasets = [
+    "atlas9_ck04",
+    "bessell_murphy_2012",
+    "cie_cmf",
+    "green2008_si",
+    "phoenix_husser2013",
+    "tlusty_ostar2002",
+    "tmap",
+    "wd_koester_da",
+]
+
+[params]
+spectra = "models"
+v_band = "bessell_murphy_2012"
+bins_nm = [360, 1100]
+normal_log_g = [0.0, 6.0]
+white_dwarf_log_g = [6.5, 9.5]
+camera_reddening_a_v = 2.0

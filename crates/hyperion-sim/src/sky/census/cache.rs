@@ -510,11 +510,14 @@ mod tests {
                 c.lux_per_v0(),
                 c.sp_ratio(),
                 c.camera_band_mag(),
+                c.photopic_extinction_ratio(),
+                c.scotopic_extinction_ratio(),
             ];
             let arrays = p
                 .into_iter()
                 .chain(c.red_green())
                 .chain(c.extinction_ratio())
+                .chain(c.camera_extinction_ratio())
                 .chain(c.bake_spectrum());
             bits.extend(floats.into_iter().chain(arrays).map(float::bits));
         }

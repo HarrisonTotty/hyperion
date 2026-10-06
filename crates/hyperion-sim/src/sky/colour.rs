@@ -13,15 +13,29 @@
 //! 3,500 K, ATLAS9 to 27,000 K, TLUSTY OSTAR2002 to 55,000 K, TMAP to 100,000 K, and Koester's
 //! DA spectra for white dwarfs, with a blackbody beyond 100,000 K.
 //!
+//! A colour is the star's own light. [`StarColour::reddened`] gives it through dust (R06.T9.e;
+//! decided 2026-10-06, `decision-r06-t9b-band.md`, item 3): each display channel, the photopic and
+//! the scotopic light and the camera's band dimmed by its own `A ÷ A_V`, from the companion table
+//! [`tables::star_colour_reddening`], row for row the colour table's. It is the one function the
+//! band, the limit map's glare and the server's wire read for reddening.
+//!
 //! [`tables::star_colour`]: crate::tables::star_colour
+//! [`tables::star_colour_reddening`]: crate::tables::star_colour_reddening
 
 use crate::math;
 use crate::tables::star_colour::{
     LUMINANCE_RGB, NORMAL, NORMAL_BAKE, NORMAL_LOG_G, NORMAL_LOG_TEFF, WHITE_DWARF,
     WHITE_DWARF_BAKE, WHITE_DWARF_LOG_G, WHITE_DWARF_LOG_TEFF,
 };
+use crate::tables::star_colour_reddening::{NORMAL_REDDENING, WHITE_DWARF_REDDENING};
 
 pub use crate::tables::star_colour::CAMERA_ETA_SUN;
+pub use crate::tables::star_colour_reddening::CAMERA_REDDENING_A_V;
+
+// The reddening table is row for row the colour table's: both are fitted on the same grids.
+const _: () = assert!(
+    NORMAL_REDDENING.len() == NORMAL.len() && WHITE_DWARF_REDDENING.len() == WHITE_DWARF.len()
+);
 
 /// The number of wavelengths of a bake spectrum: R08's fifteen.
 pub const BAKE_WAVELENGTH_COUNT: usize = 15;
@@ -47,7 +61,15 @@ pub const BAKE_WAVELENGTHS_NM: [f64; BAKE_WAVELENGTH_COUNT] = [
     747.333_333_333_333_3,
 ];
 use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M};
-use crate::units::{Kelvin, SolarMasses, SolarRadii};
+use crate::units::{Kelvin, Magnitudes, SolarMasses, SolarRadii};
+
+/// The Sun's effective temperature, K (IAU 2015 Resolution B3's nominal value): with
+/// [`SUN_LOG_G`], the colour table's solar point, where [`CAMERA_ETA_SUN`] is taken.
+pub const SUN_TEFF_K: f64 = 5_772.0;
+
+/// The Sun's surface gravity, log₁₀ g (cgs), from the IAU 2015 nominal GM☉ and R☉
+/// ([`surface_gravity`] of one solar mass and radius, to three decimals).
+pub const SUN_LOG_G: f64 = 4.438;
 
 /// The columns of the fitted colour table's rows (`tables::star_colour`).
 mod column {
@@ -63,6 +85,16 @@ mod column {
     pub const CAMERA_BAND_MAG: usize = 4;
     /// `A_c ÷ A_V` for red, green and blue.
     pub const EXTINCTION: [usize; 3] = [5, 6, 7];
+}
+
+/// The columns of the reddening table's rows (`tables::star_colour_reddening`).
+mod reddening_column {
+    /// `A_P ÷ A_V`, the photopic light's.
+    pub const PHOTOPIC: usize = 0;
+    /// `A_S ÷ A_V`, the scotopic light's.
+    pub const SCOTOPIC: usize = 1;
+    /// The camera's `A_cam ÷ A_V` at `A_V` → 0 and at `CAMERA_REDDENING_A_V`.
+    pub const CAMERA: [usize; 2] = [2, 3];
 }
 
 /// Which grid of model atmospheres a star's colour is read from: chosen by the star's kind
@@ -90,6 +122,9 @@ pub struct StarColour {
     camera_band_mag: f64,
     extinction_ratio: [f64; 3],
     bake_spectrum: [f64; BAKE_WAVELENGTH_COUNT],
+    photopic_extinction_ratio: f64,
+    scotopic_extinction_ratio: f64,
+    camera_extinction_ratio: [f64; 2],
 }
 
 impl StarColour {
@@ -156,6 +191,182 @@ impl StarColour {
     pub const fn bake_spectrum(&self) -> [f64; BAKE_WAVELENGTH_COUNT] {
         self.bake_spectrum
     }
+
+    /// The photopic light's extinction relative to V, `A_P ÷ A_V` at `R_V` = 3.1: plan 07's law at
+    /// the effective wavelength of the spectrum under the CIE 1924 V(λ), over the V band's (about
+    /// 0.985 for the Sun, R06.T9.e).
+    #[must_use]
+    pub const fn photopic_extinction_ratio(&self) -> f64 {
+        self.photopic_extinction_ratio
+    }
+
+    /// The scotopic light's extinction relative to V, `A_S ÷ A_V`, likewise under the CIE 1951
+    /// V′(λ) (about 1.12 for the Sun).
+    #[must_use]
+    pub const fn scotopic_extinction_ratio(&self) -> f64 {
+        self.scotopic_extinction_ratio
+    }
+
+    /// The default camera's extinction relative to V, `A_cam ÷ A_V`, at `A_V` → 0 and at
+    /// [`CAMERA_REDDENING_A_V`]: each band's own integral over the same dust (Design note 18's
+    /// sensor), since the camera's band is too broad for one effective wavelength.
+    #[must_use]
+    pub const fn camera_extinction_ratio(&self) -> [f64; 2] {
+        self.camera_extinction_ratio
+    }
+
+    /// The star's light through dust that dims its V by `a_v` (R06.T9.e; decided 2026-10-06,
+    /// `decision-r06-t9b-band.md`, item 3).
+    ///
+    /// Each band is dimmed by its own ratio: a transmission t = 10<sup>−0.4 k `A_V`</sup> for each
+    /// display channel ([`extinction_ratio`](Self::extinction_ratio)) and for the photopic and the
+    /// scotopic light; the reddened ρ is ρ t<sub>S</sub> ÷ t<sub>P</sub>; and the camera band term
+    /// becomes c − 2.5 log₁₀(t<sub>cam</sub> ÷ t<sub>V</sub>) with t<sub>V</sub> =
+    /// 10<sup>−0.4 `A_V`</sup>, which is c − (1 − k<sub>cam</sub>) `A_V`, k<sub>cam</sub> taken as
+    /// linear in `A_V` through [`camera_extinction_ratio`](Self::camera_extinction_ratio)'s two
+    /// columns. At `A_V` 2 a Sun-like star's eye colour offset falls by about 0.27 mag (in a dark,
+    /// scotopic sky's limit), and its camera term by about 0.36.
+    ///
+    /// Beyond [`CAMERA_REDDENING_A_V`] the line is extrapolated, as the ruling leaves it: for the
+    /// Sun's light it is off the integral by −0.07 mag at `A_V` 5 and −0.74 at 10, and the camera's
+    /// extinction it implies peaks near `A_V` 16 (R06's Risks, "Deviations in T9.e, as built").
+    ///
+    /// `a_v` is a finite extinction, 0 or more (a profile's rounding a hair below zero dims
+    /// nothing to speak of); at 0 every value is the colour's own, bit for bit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::sky::colour::{AtmosphereGrid, star_colour};
+    /// use hyperion_sim::units::{Kelvin, Magnitudes};
+    ///
+    /// let sun = star_colour(Kelvin::new(5_772.0), 4.438, AtmosphereGrid::MainSequence);
+    /// // Behind a magnitude of dust the Sun's light is redder and less scotopic.
+    /// let behind = sun.reddened(Magnitudes::new(1.0));
+    /// let [red, green, blue] = behind.transmission();
+    /// assert!(blue < green && green < red);
+    /// assert!(behind.sp_ratio() < sun.sp_ratio());
+    /// // Silicon sees the dust less than V does: the star is brighter to it relative to V.
+    /// assert!(behind.camera_band_mag() < sun.camera_band_mag());
+    /// ```
+    #[must_use]
+    pub fn reddened(&self, a_v: Magnitudes) -> Reddened {
+        let a = a_v.value();
+        debug_assert!(a.is_finite(), "an extinction of {a} mag");
+        let through = |ratio: f64| math::exp10(-0.4 * ratio * a);
+        let photopic = through(self.photopic_extinction_ratio);
+        let scotopic = through(self.scotopic_extinction_ratio);
+        let [at_zero, at_reference] = self.camera_extinction_ratio;
+        let camera_ratio = at_zero + (at_reference - at_zero) * (a / CAMERA_REDDENING_A_V);
+        let transmission = self.extinction_ratio.map(through);
+        let [t_red, t_green, t_blue] = transmission;
+        let [red, green] = self.red_green;
+        let [yr, yg, _] = LUMINANCE_RGB;
+        // The Rec. 709 luminance of what passes, per unit of the colour's: Y_r r t_r + Y_g g t_g
+        // + Y_b b t_b with Y_b b = 1 − Y_r r − Y_g g, written so that it is one exactly where
+        // every transmission is.
+        let luminance = yr * red * (t_red - t_blue) + yg * green * (t_green - t_blue) + t_blue;
+        Reddened {
+            transmission,
+            photopic_transmission: photopic,
+            scotopic_transmission: scotopic,
+            red_green: [red * t_red / luminance, green * t_green / luminance],
+            sp_ratio: self.sp_ratio * scotopic / photopic,
+            camera_band_mag: self.camera_band_mag - (a - camera_ratio * a),
+        }
+    }
+}
+
+#[cfg(test)]
+impl StarColour {
+    /// This colour behind grey dust: every band dimmed as V is, as the band dimmed its light
+    /// before R06.T9.e, for the tests' unreddened march.
+    #[must_use]
+    pub(crate) const fn with_grey_dust(mut self) -> Self {
+        self.extinction_ratio = [1.0; 3];
+        self.photopic_extinction_ratio = 1.0;
+        self.scotopic_extinction_ratio = 1.0;
+        self.camera_extinction_ratio = [1.0; 2];
+        self
+    }
+}
+
+/// A star's light through dust ([`StarColour::reddened`]): what each band keeps, and the S/P ratio
+/// and camera band term of what is left.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Reddened {
+    transmission: [f64; 3],
+    photopic_transmission: f64,
+    scotopic_transmission: f64,
+    red_green: [f64; 2],
+    sp_ratio: f64,
+    camera_band_mag: f64,
+}
+
+impl Reddened {
+    /// The fraction of each linear Rec. 709 channel's light that passes, red, green and blue: so
+    /// the reddened colour is the colour's red, green and blue times these, at a luminance of the
+    /// photopic transmission's times the colour's.
+    #[must_use]
+    pub const fn transmission(&self) -> [f64; 3] {
+        self.transmission
+    }
+
+    /// The fraction of the photopic light that passes: the star's photopic illuminance is its
+    /// unextinguished one times this.
+    #[must_use]
+    pub const fn photopic_transmission(&self) -> f64 {
+        self.photopic_transmission
+    }
+
+    /// The fraction of the scotopic light that passes.
+    #[must_use]
+    pub const fn scotopic_transmission(&self) -> f64 {
+        self.scotopic_transmission
+    }
+
+    /// The linear Rec. 709 red and green of the light that passes, at unit luminance, as the
+    /// colour's [`red_green`](StarColour::red_green) are: each channel times its transmission,
+    /// over the Rec. 709 luminance of the three.
+    #[must_use]
+    pub const fn red_green(&self) -> [f64; 2] {
+        self.red_green
+    }
+
+    /// [`red_green`](Self::red_green) as the wire carries a chroma (Design note 17).
+    #[must_use]
+    pub fn chroma(&self) -> [f32; 2] {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the chroma is a display value of order one, and f32 is its declared type"
+        )]
+        self.red_green.map(|c| c as f32)
+    }
+
+    /// The S/P ratio ρ of the light that passes, ρ t<sub>S</sub> ÷ t<sub>P</sub> (Design note 3),
+    /// from which a star's eye colour offset is read.
+    #[must_use]
+    pub const fn sp_ratio(&self) -> f64 {
+        self.sp_ratio
+    }
+
+    /// The camera band term of the light that passes, mag, relative to its V after extinction, as
+    /// [`StarColour::camera_band_mag`] is to V.
+    #[must_use]
+    pub const fn camera_band_mag(&self) -> f64 {
+        self.camera_band_mag
+    }
+}
+
+/// The colour of the Sun's light: the table at [`SUN_TEFF_K`] and [`SUN_LOG_G`], the point of
+/// [`CAMERA_ETA_SUN`], whose ratios redden every node of the band (R06.T9.e).
+#[must_use]
+pub fn solar_colour() -> StarColour {
+    star_colour(
+        Kelvin::new(SUN_TEFF_K),
+        SUN_LOG_G,
+        AtmosphereGrid::MainSequence,
+    )
 }
 
 /// The colour of a star of effective temperature `teff` and gravity `log_g` (log₁₀ g, cgs) on
@@ -180,16 +391,27 @@ impl StarColour {
 #[must_use]
 pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour {
     type Bake = [f64; BAKE_WAVELENGTH_COUNT];
-    type Grid<'a> = (&'a [f64], &'a [f64], &'a [[f64; 8]], &'a [Bake]);
-    let (log_teff_nodes, log_g_nodes, rows, bakes): Grid<'static> = match grid {
-        AtmosphereGrid::MainSequence | AtmosphereGrid::Giant => {
-            (&NORMAL_LOG_TEFF, &NORMAL_LOG_G, &NORMAL, &NORMAL_BAKE)
-        }
+    type Grid<'a> = (
+        &'a [f64],
+        &'a [f64],
+        &'a [[f64; 8]],
+        &'a [Bake],
+        &'a [[f64; 4]],
+    );
+    let (log_teff_nodes, log_g_nodes, rows, bakes, reddening): Grid<'static> = match grid {
+        AtmosphereGrid::MainSequence | AtmosphereGrid::Giant => (
+            &NORMAL_LOG_TEFF,
+            &NORMAL_LOG_G,
+            &NORMAL,
+            &NORMAL_BAKE,
+            &NORMAL_REDDENING,
+        ),
         AtmosphereGrid::WhiteDwarf => (
             &WHITE_DWARF_LOG_TEFF,
             &WHITE_DWARF_LOG_G,
             &WHITE_DWARF,
             &WHITE_DWARF_BAKE,
+            &WHITE_DWARF_REDDENING,
         ),
     };
     let (ti, tf) = bracket(log_teff_nodes, math::log10(teff.value()));
@@ -208,6 +430,12 @@ pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour
         let high = bake_at(ti + 1, gi)[k] * (1.0 - gf) + bake_at(ti + 1, gi + 1)[k] * gf;
         low * (1.0 - tf) + high * tf
     });
+    let reddening_at = |a: usize, b: usize| reddening[a * width + b];
+    let mix_reddening = |k: usize| {
+        let low = reddening_at(ti, gi)[k] * (1.0 - gf) + reddening_at(ti, gi + 1)[k] * gf;
+        let high = reddening_at(ti + 1, gi)[k] * (1.0 - gf) + reddening_at(ti + 1, gi + 1)[k] * gf;
+        low * (1.0 - tf) + high * tf
+    };
     StarColour {
         red_green,
         lux_per_v0: mix(column::LUX_PER_V0),
@@ -215,6 +443,9 @@ pub fn star_colour(teff: Kelvin, log_g: f64, grid: AtmosphereGrid) -> StarColour
         camera_band_mag: mix(column::CAMERA_BAND_MAG),
         extinction_ratio: column::EXTINCTION.map(mix),
         bake_spectrum,
+        photopic_extinction_ratio: mix_reddening(reddening_column::PHOTOPIC),
+        scotopic_extinction_ratio: mix_reddening(reddening_column::SCOTOPIC),
+        camera_extinction_ratio: reddening_column::CAMERA.map(mix_reddening),
     }
 }
 
@@ -255,7 +486,11 @@ pub fn surface_gravity(mass: SolarMasses, radius: SolarRadii) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::bits;
+
     use super::*;
+    use crate::sky::eye::{SkyBackground, SpRatio, luminance, star_colour_offset};
+    use crate::units::MagnitudesPerArcsec2;
 
     fn colour(teff: f64, log_g: f64, grid: AtmosphereGrid) -> StarColour {
         star_colour(Kelvin::new(teff), log_g, grid)
@@ -275,8 +510,149 @@ mod tests {
                 let (lux, rho) = (row[column::LUX_PER_V0], row[column::SP_RATIO]);
                 assert!((c.lux_per_v0() - lux).abs() < 1e-9 * lux);
                 assert!((c.sp_ratio() - rho).abs() < 1e-9 * rho);
+                let reddening = NORMAL_REDDENING[i * n + j];
+                let read = [
+                    c.photopic_extinction_ratio(),
+                    c.scotopic_extinction_ratio(),
+                    c.camera_extinction_ratio()[0],
+                    c.camera_extinction_ratio()[1],
+                ];
+                for (got, want) in read.into_iter().zip(reddening) {
+                    assert!((got - want).abs() < 1e-9 * want, "{got} against {want}");
+                }
             }
         }
+    }
+
+    /// Every colour of the table, at its nodes and between them, on both grids.
+    fn sampled_colours() -> Vec<StarColour> {
+        let mut out = vec![StarColour::default()];
+        for grid in [AtmosphereGrid::MainSequence, AtmosphereGrid::WhiteDwarf] {
+            for teff in [
+                2_300.0, 2_870.0, 3_500.0, 4_444.0, 5_772.0, 7_777.0, 12_345.0, 40_000.0, 2.0e5,
+            ] {
+                for log_g in [0.0, 1.3, 4.438, 5.0, 7.0, 8.2, 9.5] {
+                    out.push(colour(teff, log_g, grid));
+                }
+            }
+        }
+        out
+    }
+
+    /// `reddened` at no dust is the colour: every transmission one, and ρ and the camera term the
+    /// colour's own, bit for bit.
+    #[test]
+    fn reddened_by_no_dust_is_the_colour() {
+        for c in sampled_colours() {
+            for a_v in [Magnitudes::ZERO, Magnitudes::new(-0.0)] {
+                let r = c.reddened(a_v);
+                assert_eq!(r.transmission().map(bits), [bits(1.0); 3], "{c:?}");
+                assert_eq!(bits(r.photopic_transmission()), bits(1.0), "{c:?}");
+                assert_eq!(bits(r.scotopic_transmission()), bits(1.0), "{c:?}");
+                assert_eq!(r.red_green().map(bits), c.red_green().map(bits), "{c:?}");
+                assert_eq!(bits(r.sp_ratio()), bits(c.sp_ratio()), "{c:?}");
+                assert_eq!(
+                    bits(r.camera_band_mag()),
+                    bits(c.camera_band_mag()),
+                    "{c:?}"
+                );
+            }
+        }
+    }
+
+    /// Dust takes blue light first and red light last, and the scotopic light, bluer than the
+    /// photopic, before it; so the reddened ρ falls with the dust. (The camera term need not: a
+    /// hot star's light is bluer under silicon than under V.)
+    #[test]
+    fn the_transmissions_order_blue_green_red_and_scotopic_below_photopic() {
+        for c in sampled_colours().into_iter().skip(1) {
+            let mut previous = c.reddened(Magnitudes::ZERO);
+            for a_v in [0.1, 1.0, 2.0, 5.0] {
+                let r = c.reddened(Magnitudes::new(a_v));
+                let [red, green, blue] = r.transmission();
+                assert!(
+                    blue < green && green < red && red < 1.0,
+                    "{c:?} at {a_v}: {r:?}"
+                );
+                assert!(
+                    r.scotopic_transmission() < r.photopic_transmission(),
+                    "{c:?} at {a_v}: {r:?}"
+                );
+                // What passes is redder, and its colour of unit luminance.
+                let [red_now, green_now] = r.red_green();
+                let [red_then, green_then] = previous.red_green();
+                assert!(
+                    red_now / green_now > red_then / green_then,
+                    "{c:?} at {a_v}"
+                );
+                let [yr, yg, yb] = LUMINANCE_RGB;
+                let blue_now = c.blue() * blue
+                    / (yr * c.red_green()[0] * red
+                        + yg * c.red_green()[1] * green
+                        + yb * c.blue() * blue);
+                let y = yr * red_now + yg * green_now + yb * blue_now;
+                assert!((y - 1.0).abs() < 1e-12, "{c:?} at {a_v}: {y}");
+                assert!(r.sp_ratio() < previous.sp_ratio(), "{c:?} at {a_v}");
+                previous = r;
+            }
+        }
+    }
+
+    /// The solar row's ratios lie in the ruling's ranges (`decision-r06-t9b-band.md`, item 3, and
+    /// R06.T9.e's tests: 0.97–1.00, 0.11–0.15 and 0.78–0.88). The camera's are its integrals', 0.874
+    /// and 0.820, above the ruling's effective-wavelength figures (R06's Risks, "Deviations in T9.e,
+    /// as built").
+    #[test]
+    fn the_solar_rows_ratios_are_the_rulings() {
+        let sun = solar_colour();
+        assert_eq!(sun, colour(5_772.0, 4.438, AtmosphereGrid::MainSequence));
+        let (photopic, scotopic) = (
+            sun.photopic_extinction_ratio(),
+            sun.scotopic_extinction_ratio(),
+        );
+        assert!((0.97..=1.00).contains(&photopic), "A_P ÷ A_V {photopic}");
+        assert!(
+            (0.11..=0.15).contains(&(scotopic - photopic)),
+            "A_S ÷ A_V {scotopic} less A_P ÷ A_V {photopic}"
+        );
+        let [camera_0, camera_2] = sun.camera_extinction_ratio();
+        assert!((0.78..=0.88).contains(&camera_0), "A_cam ÷ A_V {camera_0}");
+        // The dust takes the blue first, so what is left sits redder, where silicon sees less
+        // of it.
+        assert!(camera_2 < camera_0, "{camera_2} against {camera_0}");
+        assert_eq!(bits(CAMERA_REDDENING_A_V), bits(2.0));
+    }
+
+    /// At `A_V` 2 the Sun's eye colour offset (against a dark, scotopic sky) falls by about 0.27
+    /// mag, (`A_S` − `A_P`) ÷ `A_V` of it a magnitude, and its camera term by about 0.36 (the ruling's
+    /// "about −0.26" and "about −0.4"), an M dwarf's camera term by more.
+    #[test]
+    fn dust_of_two_magnitudes_moves_the_eye_offset_and_the_camera_term_as_ruled() {
+        let dark = SkyBackground::new(
+            luminance(MagnitudesPerArcsec2::new(30.0)),
+            SpRatio::REFERENCE,
+        )
+        .expect("a background");
+        let offset =
+            |rho: f64| star_colour_offset(SpRatio::new(rho).expect("a ratio"), &dark).value();
+        let two = Magnitudes::new(2.0);
+        let sun = solar_colour();
+        let behind = sun.reddened(two);
+        let eye = offset(behind.sp_ratio()) - offset(sun.sp_ratio());
+        let expected = -2.0 * (sun.scotopic_extinction_ratio() - sun.photopic_extinction_ratio());
+        assert!((eye - expected).abs() < 1e-9, "{eye} against {expected}");
+        assert!((eye + 0.26).abs() < 0.03, "the eye offset moves by {eye}");
+        let camera = behind.camera_band_mag() - sun.camera_band_mag();
+        assert!(
+            (-0.45..-0.3).contains(&camera),
+            "the camera term moves by {camera}"
+        );
+        let m_dwarf = colour(3_550.0, 4.8, AtmosphereGrid::MainSequence);
+        let m_camera = m_dwarf.reddened(two).camera_band_mag() - m_dwarf.camera_band_mag();
+        assert!(
+            m_camera < camera,
+            "an M dwarf's {m_camera} against the Sun's {camera}"
+        );
     }
 
     #[test]

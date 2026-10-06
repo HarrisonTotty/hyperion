@@ -1,7 +1,7 @@
-//! The colour table (rendering plan R06, R06.T3.a and T3.b): the smoke run goes end to end from the
-//! committed CIE tables; with the spectra fetched, the committed table is what the task writes, it
-//! agrees with Pickles' (1998) empirical spectra, and an M dwarf's model is less red than its
-//! blackbody.
+//! The colour table (rendering plan R06, R06.T3.a and T3.b) and its reddening columns (R06.T9.e):
+//! the smoke runs go end to end from the committed CIE tables; with the spectra fetched, the
+//! committed tables are what the tasks write, the colour table agrees with Pickles' (1998)
+//! empirical spectra, and an M dwarf's model is less red than its blackbody.
 //!
 //! The model spectra, Bessell and Murphy's V and Pickles' library are fetched datasets
 //! (`tasks::star_colour`), read from `crates/hyperion-fit/data/cache/`. Without them each such test
@@ -33,6 +33,10 @@ use hyperion_sim::units::Kelvin;
 /// The table the sim compiles, as committed.
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/star_colour.rs");
 
+/// The reddening table the sim compiles, as committed.
+const COMMITTED_REDDENING: &str =
+    include_str!("../../hyperion-sim/src/tables/star_colour_reddening.rs");
+
 /// The fetched cache.
 const CACHE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/cache");
 
@@ -59,14 +63,26 @@ fn fetched(what: &str) -> bool {
 
 #[test]
 fn star_colour_the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count() {
+    smoke_run_passes_the_header_grammar_on_any_thread_count("star_colour");
+}
+
+#[test]
+fn star_colour_reddening_the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count()
+ {
+    smoke_run_passes_the_header_grammar_on_any_thread_count("star_colour_reddening");
+}
+
+/// `name`'s smoke run, on one thread and on three: the same text, provisional, marked as a smoke
+/// run, and declaring every item the task lists.
+fn smoke_run_passes_the_header_grammar_on_any_thread_count(name: &str) {
     let dir = tempfile::tempdir().unwrap();
     let mut texts = Vec::new();
     for threads in ["1", "3"] {
-        let out = dir.path().join(format!("star_colour_{threads}.rs"));
+        let out = dir.path().join(format!("{name}_{threads}.rs"));
         let cli = Cli::try_parse_from([
             "hyperion-fit",
             "run",
-            "star_colour",
+            name,
             "--smoke",
             "--threads",
             threads,
@@ -83,7 +99,7 @@ fn star_colour_the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_th
     let header = split.header().unwrap();
     assert!(matches!(header.kind, Some(HeaderKind::Provisional { .. })));
     assert!(texts[0].contains("SMOKE RUN"));
-    let task = find("star_colour").unwrap();
+    let task = find(name).unwrap();
     for item in task.items() {
         assert!(
             texts[0].contains(&format!("pub const {item}:"))
@@ -96,35 +112,46 @@ fn star_colour_the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_th
 #[test]
 #[ignore = "slow: integrates some 1,300 model spectra, 1 GB of PHOENIX among them"]
 fn star_colour_table_is_reproduced() {
+    table_is_reproduced("star_colour", COMMITTED);
+}
+
+#[test]
+#[ignore = "slow: integrates some 1,300 model spectra, 1 GB of PHOENIX among them"]
+fn star_colour_reddening_table_is_reproduced() {
+    table_is_reproduced("star_colour_reddening", COMMITTED_REDDENING);
+}
+
+/// `name`'s fit on the fetched spectra, on eight threads and on one, renders `committed`.
+fn table_is_reproduced(name: &str, committed: &str) {
     if !fetched("the committed table") {
         return;
     }
     let render = |threads: usize| {
         rerender(
             registry(),
-            find("star_colour").expect("star_colour is registered"),
+            find(name).expect("the task is registered"),
             &Workspace::repository(),
             NonZeroUsize::new(threads).unwrap(),
             GENERATOR_VERSION.get(),
         )
-        .expect("the star_colour task runs on the fetched spectra")
+        .expect("the task runs on the fetched spectra")
         .text
     };
     let rendered = render(8);
     // The models are read in parallel; the thread count must not move a bit.
     assert!(
         render(1) == rendered,
-        "one thread renders another table than eight"
+        "{name}: one thread renders another table than eight"
     );
-    if rendered != COMMITTED {
+    if rendered != committed {
         let line = rendered
             .lines()
-            .zip(COMMITTED.lines())
+            .zip(committed.lines())
             .position(|(a, b)| a != b)
             .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
         panic!(
-            "crates/hyperion-sim/src/tables/star_colour.rs differs from the fit at {line}: run \
-             `just fit star_colour`"
+            "crates/hyperion-sim/src/tables/{name}.rs differs from the fit at {line}: run `just fit \
+             {name}`"
         );
     }
 }

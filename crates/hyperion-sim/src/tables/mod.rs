@@ -44,6 +44,7 @@ pub mod sky_binary_light_d;
 pub mod sky_binary_light_e;
 pub mod sky_envelope;
 pub mod star_colour;
+pub mod star_colour_reddening;
 pub mod stellar_fates_high;
 pub mod stellar_fates_low;
 pub mod stellar_fates_mid;
@@ -163,6 +164,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "star_colour",
         revision: 0,
         since_generator_version: 19,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour_reddening",
+        revision: 0,
+        since_generator_version: 20,
         provisional: false,
     },
     TableInfo {

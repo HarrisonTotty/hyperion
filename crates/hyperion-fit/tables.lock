@@ -192,6 +192,18 @@ provisional = false
 acceptance = "ρ of a 2,856 K blackbody 1.412 (Illuminant A: 1.41), of 5,772 K 2.316 (2.32); D65 to r = g = b within 2.4e-4; `lux_per_v0` over the dwarfs' rows (log g 4.5) from 2,300 to 45,000 K spans 1.001–1.100; η☉ 2.9557 (decision-camera-eta: 3.0 ± 0.1); Pickles (1998) against the table at each type's temperature and gravity, Δ(u′, v′): A0V at 9700 K 0.0012 (under 0.005; passes), F5V at 6550 K 0.0012 (under 0.005; passes), G2V at 5770 K 0.0019 (under 0.005; passes), K0V at 5270 K 0.0032 (under 0.005; passes), K5V at 4440 K 0.0075 (under 0.008; passes: an exception, it lies 0.0075 from the table at its type's 4,440 K and matches a 4,200 K model, near Pickles' own adopted 4,188 K), G8III at 5012 K 0.0011 (under 0.005; passes), M2V at 3560 K 0.0057 (under 0.007; passes: an exception, it lies 0.006 from the table at its type's 3,560 K and matches a 3,260 K model), K0III at 4853 K 0.0050 (under 0.006; passes: an exception, it lies 0.005 from the table at its adopted 4,853 K and matches a 5,050 K model), O5V at 41540 K 0.0072 (under 0.008; passes: an exception, it lies about 0.007 off the models' locus at every temperature, likely the residual reddening of its source stars), M3III at 3631 K 0.0113 (under 0.012; passes: an exception, its colour is a 4,240 K model's, not one near its adopted 3,631 K)"
 
 [[table]]
+name = "star_colour_reddening"
+path = "star_colour_reddening.rs"
+task = "star_colour_reddening"
+revision = 0
+inputs_sha256 = "6dbea09cdb21c3508fda9cdd830310920744af2c98940dbb5a19146f74614a51"
+body_sha256 = "9a15ef78442281db43f2ccabc2275e32b11aff1b07f159665cfb90cc51e485a9"
+fingerprint = [1.464555702942584, 1.287912312603312, 1.0433846710183448, 0.9988500031135108, 0.8903220270199278, 0.5974890117144327, 0.39463072877973937]
+since_generator_version = 20
+provisional = false
+acceptance = "at 5,772 K and log g 4.438 `A_P ÷ A_V` 0.9850 (in 0.97–1.00; passes), `A_S ÷ A_V` 1.1202, their difference 0.1352 (in 0.11–0.15; passes), `A_cam ÷ A_V` 0.8736 at `A_V` → 0 (in 0.78–0.88; passes) and 0.8195 at `A_V` 2; over the dwarfs' rows (log g 4.5) from 3,000 to 30,000 K, `A_P ÷ A_V` 0.9825–0.9903, `A_S ÷ A_V` 1.1068–1.1322, `A_cam ÷ A_V` at `A_V` → 0 0.6416–1.0330; the photopic and scotopic ratios at their effective wavelengths against the broadband integrals at `A_V` 1, blackbodies of 3,000–30,000 K: within 0.0021 (the ruling's 0.003; passes)"
+
+[[table]]
 name = "stellar_fates_high"
 path = "stellar_fates_high.rs"
 task = "stellar_fates_high"

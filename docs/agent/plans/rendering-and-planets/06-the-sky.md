@@ -110,7 +110,13 @@ pub fn is_dark_in_v(state: &StarState) -> bool;
 // sky::colour — the spectral table (Design note 6)
 pub struct StarColour { /* chroma: [f32; 2] (linear Rec. 709 r and g of unit luminance),
     lux_per_v0: f64, sp_ratio: f64, camera_band_mag: f64, extinction_ratio: [f64; 3],
-    bake_spectrum: [f64; BAKE_WAVELENGTH_COUNT] (R08's ask; Design note 6) */ }
+    bake_spectrum: [f64; BAKE_WAVELENGTH_COUNT] (R08's ask; Design note 6),
+    photopic_extinction_ratio: f64, scotopic_extinction_ratio: f64,
+    camera_extinction_ratio: [f64; 2] (A_V → 0 and CAMERA_REDDENING_A_V; R06.T9.e) */ }
+impl StarColour { pub fn reddened(&self, a_v: Magnitudes) -> Reddened; }   // R06.T9.e
+pub struct Reddened { /* transmission: [f64; 3], photopic_transmission: f64,
+    scotopic_transmission: f64, red_green: [f64; 2], sp_ratio: f64, camera_band_mag: f64 */ }
+pub fn solar_colour() -> StarColour;   // SUN_TEFF_K, SUN_LOG_G: the band's reddening (R06.T9.e)
 pub const BAKE_WAVELENGTHS_NM: [f64; BAKE_WAVELENGTH_COUNT];   // R08's 15, mirrored (Design note 6)
 pub const CAMERA_ETA_SUN: f64;   // η☉, the default sensor's e⁻ per V-band photon for the Sun's row (Design note 18), ≈ 3.0
 pub enum AtmosphereGrid { MainSequence, Giant, WhiteDwarf }
@@ -550,7 +556,10 @@ holds.
    peak 1, which gives Φ₀ of Design note 18) and η☉ = `CAMERA_ETA_SUN`, the same quantity for the
    table's 5,772 K, log g 4.438 row (so the Sun's term is 0; +0.11 at O5V, −0.70 at M2V, −2.14 at
    M6V, about −3 at 2,300 K; decision-camera-eta.md); and each display channel's A_c ÷ A_V at R_V = 3.1 through plan 07's `extinction_ratio`
-   at the channel's effective wavelength for that spectrum. For R08's spectral bakes (its Design
+   at the channel's effective wavelength for that spectrum. A companion table,
+   `star_colour_reddening`, row for row the same, adds A_P ÷ A_V and A_S ÷ A_V by the channels'
+   method and the camera's A_cam ÷ A_V at A_V → 0 and 2 from its integrals, which
+   `StarColour::reddened` reads (R06.T9.e; Risks, "Deviations in T9.e, as built"). For R08's spectral bakes (its Design
    note 5) each row also carries `bake_spectrum`, the spectrum's average over each of
    `BAKE_WAVELENGTH_COUNT` (15) bins of R08's `BAKE_WAVELENGTHS_NM`, normalised to unit photopic
    illuminance by the same 15-bin sum (Σ 683 ȳᵢ Sᵢ Δλ = 1 lx, with bin-averaged CIE functions), so
@@ -1111,8 +1120,8 @@ luminosity_matches_realised_cells` passes.
 the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read
 standard_nodes_match_the_full_build_where_the_tables_are_read luminosity_matches_realised_cells
 caps_converge_in_rays`, and the measurements recorded in Risks ("T5.e's panels and node cuts").
-- **R06.T5.f The tables against the realised sky (new, slow; after T8.k, before T17's goldens;
-  decided 2026-10-06, `decision-r06-t9b-band.md`).** Records; gates nothing at first.
+- **R06.T5.f The tables against the realised sky (new, slow; after T8.k, before T17's goldens).**
+  Decided 2026-10-06 (`decision-r06-t9b-band.md`). Records; gates nothing at first.
   1. T5.c's paired comparison at the solar circle, on enough C and D cells that the paired
      deficit's interval is under 3 percentage points: the fit's correction (C 2.1%, D 10.3%)
      against the realised (T5.c: 9.4%, 21.0%).
@@ -1355,8 +1364,8 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
   `just test-slow the_census_is_its_oracle_150_ly_from_the_sun_in_motion`, `just ci`. No
   GENERATOR_VERSION bump.
 
-- **R06.T8.k One boundary (new; after T9.b, before T8.g, with or after T8.j; decided
-  2026-10-06, `decision-r06-t9b-band.md`).** `kept_to` is the cut, `faintest_listable` drops
+- **R06.T8.k One boundary (new; after T9.b, before T8.g, with or after T8.j).** Decided
+  2026-10-06 (`decision-r06-t9b-band.md`). `kept_to` is the cut, `faintest_listable` drops
   `EYE_OFFSET_BOUND_MAG` (removed), and the per-star cut before the sightline is the cut alone.
   A cone's census keeps only the stars inside the cone. `brute_force_sky` follows. The eye
   still sets the cut (T9.d) and the views' culls.
@@ -1511,8 +1520,8 @@ systems. The budget is T17's.
   which no reply has (decided 2026-10-06, `decision-r06-t9b-band.md`). T9.f re-sums one march at
   several radii; T17 measures the first shell (500 ly) against the final caps. Acceptance:
   `cargo test -p hyperion-sim sky::band`.
-- **R06.T9.e Reddening (new; after T9.b, before T9.c; decided 2026-10-06,
-  `decision-r06-t9b-band.md`).** The colour table gains four columns per row from T3's fit:
+- **R06.T9.e Reddening (new; after T9.b, before T9.c).** Decided 2026-10-06
+  (`decision-r06-t9b-band.md`). The colour table gains four columns per row from T3's fit:
   `A_P ÷ A_V` and `A_S ÷ A_V`, by the display channels' method (plan 07's law at the effective
   wavelength of S·V(λ) and S·V′(λ), over V's), and `A_cam ÷ A_V` at A_V → 0 and at A_V 2, from
   the integral over S·QE·λ. Every existing column stays bit for bit (`just fit-check`). If a
@@ -1538,8 +1547,12 @@ systems. The budget is T17's.
   - an overflow star's sums are its reddened colour's.
 
   Files: `sky/{colour,band}.rs`, `tables/star_colour.rs`,
-  `crates/hyperion-fit/src/tasks/star_colour/{columns,mod}.rs`. Acceptance:
-  `cargo test -p hyperion-sim sky::colour sky::band` and `just fit-check`.
+  `crates/hyperion-fit/src/tasks/star_colour/{columns,mod}.rs`. Acceptance (as built, Risks,
+  "Deviations in T9.e, as built"): `cargo test -p hyperion-sim sky::colour`,
+  `cargo test -p hyperion-sim sky::band`, `cargo test -p hyperion-fit star_colour` and
+  `just fit-check`, and once on the fetched spectra `star_colour_table_is_reproduced` and
+  `star_colour_reddening_table_is_reproduced` (`cargo test --profile slow-test -p hyperion-fit
+--test star_colour -- --ignored table_is_reproduced`).
 
 - **R06.T9.c The limit map.** `sky::limits::limit_map` with the glare of Design note 4. Tests:
   each texel's limit is `naked_eye_limit` at its band luminance plus its glare and at its ρ, to
@@ -1561,8 +1574,8 @@ systems. The budget is T17's.
   2026-10-06, `decision-r06-t9b-band.md`; the fixture gives about 8.27); no texel of the full
   limit map, with glare, is deeper than the cut less the 0.45 colour offset; the repeat changes
   the cut by under 0.05 mag. Acceptance: `cargo test -p hyperion-sim sky::limits`.
-- **R06.T9.f The band's march, kept (new; after T9.e, before T11.c; decided 2026-10-06,
-  `decision-r06-t9b-band.md`).** `sky::band::{march_rows, BandMarch, sum_rows}`.
+- **R06.T9.f The band's march, kept (new; after T9.e, before T11.c).** Decided 2026-10-06
+  (`decision-r06-t9b-band.md`). `sky::band::{march_rows, BandMarch, sum_rows}`.
   - `march_rows` marches each ray once, at the rows' texels. Every edge a reply can state is a
     node: each layer's shell edges up to its cap (Design note 13; T8.i's), and its cap (per ray
     after T7.b).
@@ -1584,8 +1597,8 @@ systems. The budget is T17's.
   Bench: `sky/band_near_sun` split into the march and one sum. Files: `sky/band.rs`. Acceptance:
   `cargo test -p hyperion-sim sky::band`.
 
-- **R06.T9.g Diffuse galactic light (new; research first; after T9.f, before T17's goldens;
-  decided 2026-10-06, `decision-r06-t9b-band.md`).** A research agent proposes a model of the
+- **R06.T9.g Diffuse galactic light (new; research first; after T9.f, before T17's goldens).**
+  Decided 2026-10-06 (`decision-r06-t9b-band.md`). A research agent proposes a model of the
   starlight that the band's dust scatters into each ray, from the plan's own dust field and the
   band's own light. For example: single scattering with Draine's 2003 V-band albedo of 0.677 and
   ⟨cos θ⟩ of 0.538 (R_V 3.1; ApJ 598, 1017), g tried over 0.54–0.8 (Mattila et al. 2018), and
@@ -1996,8 +2009,11 @@ bulge, re-deriving open question 19's counts at the current version and explaini
 systems layers C to E hold; the candidates the binary rule of T16.b costs; check the per-layer
 counts against `range_500ly_floor_d` (37,675 systems at version 15, re-measured at the current version). Add goldens:
 `crates/hyperion-sim/tests/golden/sky/census_near_sun.golden`, the census of a pinned observer near
-the Sun to V 7 (IDs, star indices, V to 10⁻⁶ mag), and `sky/band_face_row.golden`, one band face
-row, read by the testkit's golden harness. Record the per-record bound's pass rate (records
+the Sun to V 7 (IDs, star indices, V to 10⁻⁶ mag), `sky/band_face_row.golden`, one band face
+row, and `sky/colour_reddened.golden`, `StarColour`'s three reddening fields (four columns) and every field of
+`reddened` at A_V 0.5, 2 and 5 for a few points on both grids (the per-star reddening T11's wire
+carries, which no other golden pins; determinism audit of R06.T9.e), read by the testkit's golden
+harness. Record the per-record bound's pass rate (records
 generated ÷ records skipped) for single and multiple systems in each census bench, against T16.b's
 25% trigger (decision record item 2). Decide N_max and the sprite budget per setting from the
 measurements (open question 16) and record them. Record the tables' build in CPU and wall time, its
@@ -2112,9 +2128,11 @@ bench -- sky` runs above complete.
 
 No change to generated output and no bump. `generate_cell_where` is `generate_cell` filtered, and
 the goldens prove it; the luminosity tables, the envelope, the caps and the census only read. The
-sky's own output is a function of the generator version and of the committed colour,
-limb-darkening, envelope (`sky_envelope`, T6.b) and pair-evolved light (`sky_binary_light_c`, `_d`
-and `_e`, T5.d) tables, so its goldens (T17) are regenerated whenever any of them moves. The
+sky's own output is a function of the generator version and of the committed colour (with its
+reddening, `star_colour_reddening`, T9.e), limb-darkening, envelope (`sky_envelope`, T6.b) and
+pair-evolved light (`sky_binary_light_c`, `_d` and `_e`, T5.d) tables, so its goldens (T17) are
+regenerated whenever any of them moves. The reddening table took effect at generator version 20
+with no bump: nothing generated reads it, and no golden pins the sky before T17. The
 envelope's move to a fitted table (2026-10-04) made it up to 1 mmag brighter, which moves the caps'
 rule bound and so the caps and the census's planned cells, with no bump: no golden pins them and
 nothing serves them yet (`decision-r06-tables.md`, A.5). T5.d's correction (2026-10-04) moves the
@@ -3940,7 +3958,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       80°) 24.57 against **24.3, the brainstorm table's figure, not the task text's 24**, which 24.57
       misses by 0.07 mag (pending a ruling, below). The science check summed Gaia DR3 itself by the
       test's definitions (V from G by Riello et al. 2021, Table C.2): 22.0 in the plane and
-      24.25–24.29 at the poles;
+      24.25–24.29 at the poles. Ruled 22.05 and 24.3 (`decision-r06-t9b-band.md`); R06.T9.e moved
+      the test's plane reference to 22.05, and reddened the band reads 22.07 and 24.56;
     - the cut: a census near the Sun to V 8 within 200 ly, every cap forced, no eye, restricted to
       V 7 and V 6 (a census of a brighter cut keeps a subset of a deeper one's stars at the same V):
       the listed and band light together hold within 0.02%, the list losing 4.34 × 10⁻⁶ lx from V 8
@@ -4045,6 +4064,150 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   direct starlight only. The light its dust scatters, about 10–35% of the integrated starlight
   and 23–47% of the band's own background (the light fainter than the cut), makes the eye's
   limits about 0.10–0.18 mag too deep. R06.T9.g decides it.
+- **Deviations in T9.e, as built (2026-10-06).** `StarColour::reddened` and the band's five
+  reddened sums, as `decision-r06-t9b-band.md`'s item 3 rules them, with these differences.
+  - **The four columns are a table of their own**, `tables::star_colour_reddening`:
+    `NORMAL_REDDENING` and `WHITE_DWARF_REDDENING` (`[[f64; 4]; N]`, row for row `star_colour`'s
+    grids) and the scalar `CAMERA_REDDENING_A_V` (2). A second slow task, `star_colour_reddening`
+    (revision 0, since generator version 20, with its own manifest and smoke manifest), writes it.
+    It lives in the `star_colour` module and integrates the same spectra through the same `fit`.
+    - Why: T3 had sized `star_colour.rs` (497 KB) to stay under the repository's 500 KB
+      `check-added-large-files`, and four more columns at seven digits would have taken it to some
+      565 KB. The three `sky_binary_light` tables are split the same way.
+    - `star_colour.rs`, its lock entry and its revision are untouched, so every existing column is
+      bit for bit by construction. `star_colour_table_is_reproduced`, run on the fetched spectra
+      (whose checksums all match), reproduces it byte for byte, as
+      `star_colour_reddening_table_is_reproduced` does the new table.
+    - A const assertion in `sky::colour` holds the two tables to the same row counts. Once
+      committed, the new table's content cannot change without a generator-version bump, which the
+      fit enforces.
+    - Its manifest also records `camera_reddening_a_v = 2.0`, checked against the code's
+      `CAMERA_REDDENING_A_V`, so that the inputs hash covers it; and its fingerprint probes the law
+      across the camera's band (0.40–1.00 µm, its infrared branch among them), not only
+      `star_colour`'s four optical points (determinism audit and plan conformance).
+  - **Acceptance as run.** The task's single command took two test filters, which `cargo test`
+    does not take; the acceptance line now reads `cargo test -p hyperion-sim sky::colour`,
+    `cargo test -p hyperion-sim sky::band`, `cargo test -p hyperion-fit star_colour` and
+    `just fit-check`, with the two reproduction tests once on the fetched spectra. T8.k's line has
+    the same two-filter form, left for T8.k. T9.e also moves five task titles (T5.f, T8.k, T9.e,
+    T9.f, T9.g) onto one bold line each, so that `plan_task.py` finds them; the text is unchanged.
+  - **T17 gains `sky/colour_reddened.golden`** (determinism audit): `StarColour`'s reddening fields
+    and every value of `reddened` at a few points on both grids, A_V 0.5, 2 and 5, since nothing
+    else pins the per-star reddening that T11's wire carries.
+  - **The camera's columns are two integrals over the same dust.** For dust of d at 0.55 µm, a
+    band of weights w is dimmed by −2.5 log₁₀(∫S w 10^(−0.4 ℓ d) ÷ ∫S w), with w = QE λ for the
+    camera and R_V λ for V. `camera_0` is the ratio of the two bands' mean ℓ (the limit as A_V →
+    0), and `camera_2` the ratio at the d that dims V by 2.
+    - The ruling names only the camera's integral. Dividing it by the law at V's effective
+      wavelength would put the ratio 0.007 high, because V's own broadband extinction exceeds that
+      by 0.8%.
+    - A_P ÷ A_V and A_S ÷ A_V are the ruling's method: the effective wavelengths, over V's.
+  - **Measured** (the table's acceptance):
+    - at 5,772 K and log g 4.438, A_P ÷ A_V 0.9850 (the ruling's check: 0.987), A_S ÷ A_V 1.1202
+      (1.122), their difference 0.1352;
+    - A_cam ÷ A_V 0.8736 as A_V → 0, and 0.8195 at A_V 2;
+    - over the dwarfs' rows (log g 4.5) from 3,000 to 30,000 K, A_P ÷ A_V 0.9825–0.9903 and
+      A_S ÷ A_V 1.107–1.132 (the ruling: the band's spectra 0.984–0.990 and 1.11–1.13);
+    - the effective-wavelength ratios agree with the broadband integrals over V's within 0.0021 at
+      A_V 1, for blackbodies of 3,000–30,000 K. Against the law at V's effective wavelength they
+      would differ by 0.004–0.007, so the ruling's 0.003 holds for the broadband pair.
+  - **The camera's ratio is above the ruling's figures**, which are effective-wavelength values
+    (science check): its 0.836 → 0.786 for the Sun are ℓ(λ_cam,eff) ÷ ℓ(λ_V,eff) and the
+    effective-wavelength secant (0.834 and 0.787 for a 5,772 K blackbody), and silicon's effective
+    wavelength is 643 nm for the solar row and 664 nm at 5,000 K. Plan 07's law is convex over most
+    of silicon's band (concave only over 401–438 and 662–719 nm), so the band's photon-weighted mean
+    law exceeds the law at its effective wavelength, by 0.038 for the Sun against V's 0.0076. The
+    integrals give:
+    - the Sun 0.874 → 0.820; 5,000–5,800 K 0.84–0.88; 4,500 K 0.81, 4,000 K 0.77, 3,500 K 0.70 and
+      3,000 K 0.64 (the ruling: K and M stars 0.73–0.76);
+    - at A_V 2, the Sun's camera term −0.36 mag (the ruling's "about −0.4"; its own 0.786 implies
+      −0.43), and −0.67 at 3,500 K and −0.77 at 3,000 K (its "about −0.55 for an M star");
+    - the Sun's eye offset −0.27 at A_V 2, in a dark sky's scotopic limit (the ruling's −0.26).
+
+    Both camera columns lie inside T9.e's A_V → 0 range (0.78–0.88); 0.8736 is 0.006 under its top.
+    The integrals are the physically right values for the wire's camera term (science check).
+
+  - **`StarColour` and `Reddened`.**
+    - `StarColour` gains `photopic_extinction_ratio`, `scotopic_extinction_ratio`,
+      `camera_extinction_ratio` and `reddened(a_v: Magnitudes) -> Reddened`.
+    - `Reddened` has getters: the three channels' transmissions; the photopic and the scotopic
+      transmission (the scotopic one added for the band's scotopic sum); the reddened colour of
+      unit luminance, `red_green` and `chroma` (added for T11's wire); ρ t_S ÷ t_P; and the camera
+      term.
+    - The camera term is computed as c − (1 − k_cam) A_V, which is the ruling's c − 2.5 log₁₀(t_cam
+      ÷ t_V) without the round trip. k_cam is linear in A_V through the two columns and
+      extrapolated beyond 2 (pending a ruling, below). A hot star's k_cam starts above 1 (1.033 at
+      30,000 K, 0.971 at A_V 2), so its camera term rises by under 0.01 mag in the first half
+      magnitude of dust, is back at c by A_V 1.06, and falls after (−0.058 at A_V 2).
+    - `reddened` debug-asserts a finite A_V. A profile rounding a hair below zero brightens by that
+      rounding only. `SkyStar` grows by 32 bytes, the four new `f64` of its `StarColour`.
+    - At A_V 0 every value is the colour's own, bit for bit. The chroma's normaliser is written
+      Y_r r (t_r − t_b) + Y_g g (t_g − t_b) + t_b, the same luminance, so that it is exactly one
+      there.
+    - Added: `solar_colour()`, `SUN_TEFF_K`, `SUN_LOG_G`, and `CAMERA_REDDENING_A_V` re-exported.
+  - **The band.**
+    - Each ray keeps five sums: photopic, red, green, blue and scotopic. Each node's light passes
+      through `solar_colour().reddened(A_V)`, with the blue taken from unit luminance before
+      dimming.
+    - A texel's chroma is its red and green over the Rec. 709 luminance of the three, and its ρ the
+      scotopic sum over the photopic.
+    - Each overflow star adds its unextinguished illuminance (V less its A_V) times its own reddened
+      colour, so the 1–2% photopic over-dimming is gone for the points too. The tests' listed
+      light takes the same reddened photopic light.
+    - The unreddened march is test-only: `band_rows_through` with `StarColour::with_grey_dust`,
+      which dims every band as V is, as T9.b did.
+    - The cloud test reads "in blue" as blue over green at unit luminance, 10^(−0.4 (k_b − k_g) A),
+      which does not depend on the texel's mix as blue alone does. Its cloud is offered only to the
+      segments heading its way within six core radii; T9.b's `the_modifiers_near_a_ray_dim_it`
+      shares the source, its 300 ly reach unchanged.
+  - **Measured near the Sun** (cut 6.5, no census, complete everywhere, 16² faces; reddened
+    against grey dust):
+    - μ: the plane 22.074 against 22.088 (T9.b: 22.09), the poles 24.563 (24.57);
+    - ρ: the plane 2.206 against 2.469 (−10.6%), the poles 2.227 against 2.254 (−1.2%);
+    - the plane's colour at unit luminance: r 1.170, g 0.961, b 0.883, against 1.065, 0.972, 1.088
+      (−18.9% blue).
+  - **The cloud test**: A_V 1 on its axis, 10 ly ahead, core 5 ly; its central texels lie behind
+    0.787. Their ρ is 0.9088 against the ratios' 0.9066, and their blue over green 0.8347 against
+    0.8310.
+  - **Conservation** (cuts 8, 7 and 6 within 200 ly) and **the complete-to radius** (1.11% and
+    1.78% against complete nowhere) are T9.b's to the third figure.
+  - **Not changed.**
+    - Until R06.T8.k removes it, the census's own per-star eye offset (`kept_to`) reads the
+      unreddened ρ, so no listing moves.
+    - The protocol and the client are unchanged; T11.a and T11.c read `reddened` for the wire.
+    - The cost is not benched. Each node takes five `exp10` in place of one; the ruling estimates
+      some 50 ms of CPU against the band's 20 s, and T9.f splits the bench.
+  - **Pending rulings (science check of T9.e; built as ruled meanwhile).**
+    - _The display channels' ratios._ T3.c's `extinction_ratio` takes each Rec. 709 channel at the
+      effective wavelength of its colour-matching function's positive lobe. A channel is a linear
+      functional of the spectrum with a signed weight, so its exact A_V → 0 ratio is the signed
+      first moment Σ S c̄ ℓ ÷ Σ S c̄ over V's. The positive lobes drop r̄'s negative lobe at
+      440–540 nm, so the reddened colour's excess comes out about 19% low: the Sun at A_V 1 is r
+      1.196, g 0.960, b 0.725 against its reddened spectrum's own 1.245, 0.959, 0.685 (at A_V 2,
+      1.307, 0.931, 0.563 against 1.410, 0.929, 0.496); 5,000 K light at A_V 1 loses 22.3% of its
+      blue against 27.0%. The band's −18.9% blue would be about −23%. Options:
+      1. keep T3.c's ratios, as ruled (the colour excess some 19% low);
+      2. three signed-moment channel columns in `star_colour_reddening` (the Sun's 0.8345, 1.0066,
+         1.3082 against 0.908, 1.024, 1.279), read by `reddened` in place of `extinction_ratio`,
+         with broadband pairs for the rows whose channel integral nears zero (the white-lifted,
+         out-of-gamut coolest PHOENIX rows): the reddened colour to 0.002 at A_V 1 and 0.007 at 2;
+      3. per-channel secant columns at a few A_V, as the camera's.
+    - _The camera's ratio beyond A_V 2._ The ruling takes it as linear through its two columns
+      and says nothing beyond. Against the integrals the line's camera term is off by −0.07 mag at
+      A_V 5, −0.74 at 10, −5.4 at 20 and −15 at 30 for the Sun's light, and the camera's extinction
+      it implies peaks near A_V 16 and turns negative past 32; the true ratio levels off near
+      0.50–0.55. The plane reaches A_V 30 towards the centre, and T11's wire reads the term for
+      every listed star. Options: secant columns at A_V 5, 10, 20 and 30, interpolated piecewise
+      and held beyond 30 (errors ≤ 0.035 mag below A_V 10 and ≤ 0.19 to 30, checked for the Sun,
+      3,500 K and 30,000 K); or a stated validity limit of A_V 5 (≤ 0.08 mag). The ρ ratio drifts
+      the same way, +0.025 mag at A_V 5 and +0.10 at 10, which the same columns would serve.
+    - _The ruling's camera figures_ (above) are its effective-wavelength values; T9.e's range
+      0.78–0.88 holds the integrals' 0.8736 with 0.006 to spare.
+    - _Which A_V the ratios divide by_ (low priority; T3's convention). The sightline's A_V is the
+      law at 0.549 µm. The P, S and display-channel columns divide by the law at the spectrum's V
+      effective wavelength, the camera's by V's broadband integral, 0.8% higher; each is applied to
+      the sightline's A_V, which is 1–2% off a star's V-band extinction at A_V 2 (0.02–0.04 mag). A
+      sentence of convention in Design note 6 would settle it.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;
