@@ -179,6 +179,76 @@ lint: gen-surface _clippy _oxlint
 _clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# The platforms that `cross-clippy` checks, less the one it runs on: Linux, macOS on Apple silicon
+# and Windows, each on the architecture its developers use. `rust-toolchain.toml` lists them too,
+# so that rustup installs their standard libraries.
+cross_targets := "x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc"
+
+# `_clippy` and `gpu-replay-check`'s Clippy for the other platforms (macOS and Windows, from
+# Linux): code gated to one platform (`cfg(unix)`, `target_os = "linux"`) can leave an import or a
+# helper unused on another, which only that platform's Clippy sees. Clippy never links, so the
+# dependencies that compile C for their target (alloca, under the dev-dependency criterion, and
+# gpu-replay's wayland-backend) get a stand-in compiler and archiver that write empty files, and no
+# SDK is needed: only the rustup targets. The host keeps its own compiler for the build scripts. It
+# builds in `target/cross` and `target/tools-cross`, beside the other builds, so `ci` runs it with
+# the checks beside them: about a second when nothing changed, a minute or more from cold.
+# Clippy for the other platforms (macOS and Windows from Linux), with no SDK.
+cross-clippy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{ justfile_directory() }}"
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    targets=()
+    for target in {{ cross_targets }}; do
+        if [[ "$target" != "$host" ]]; then targets+=("$target"); fi
+    done
+    installed="$(rustup target list --installed)"
+    for target in "${targets[@]}"; do
+        grep -qx "$target" <<<"$installed" || {
+            echo "error: the rustup target $target is missing: run \`rustup target add ${targets[*]}\`" >&2
+            exit 1
+        }
+    done
+    mkdir -p "$root/target/cross"
+    stub="$root/target/cross/stub-cc"
+    # cc-rs probes the compiler with `-E` (answered as clang) and `-?` (refused, so not cl), then
+    # compiles to `-o`/`-Fo` and archives with `ar <mode> <archive>` or `-out:<archive>`. Written
+    # beside and renamed into place, so that a build running the old one never reads half of it.
+    cat >"$stub.new" <<'EOF'
+    #!/usr/bin/env bash
+    # cross-clippy's stand-in C compiler and archiver: an empty file at the output path.
+    set -euo pipefail
+    out=""
+    if [[ $# -ge 2 && "$1" =~ ^[A-Za-z]+$ ]]; then out="$2"; fi
+    prev=""
+    for arg in "$@"; do
+        case "$arg" in
+            -E) echo '#pragma message "clang"'; exit 0 ;;
+            '-?' | '/?') exit 1 ;;
+            --version) echo stub-cc; exit 0 ;;
+        esac
+        if [[ "$prev" == -o ]]; then out="$arg"; fi
+        case "$arg" in
+            -out:*) out="${arg#-out:}" ;;
+            -o?*) out="${arg#-o}" ;;
+            -Fo?* | /Fo?*) out="${arg#?Fo}" ;;
+        esac
+        prev="$arg"
+    done
+    if [[ -z "$out" ]]; then echo "stub-cc: no output path in: $*" >&2; exit 1; fi
+    : >"$out"
+    EOF
+    chmod +x "$stub.new"
+    mv -f "$stub.new" "$stub"
+    flags=()
+    for target in "${targets[@]}"; do
+        export "CC_${target//-/_}=$stub" "AR_${target//-/_}=$stub"
+        flags+=(--target "$target")
+    done
+    cargo clippy --workspace --all-targets "${flags[@]}" --target-dir "$root/target/cross" -- -D warnings
+    cargo clippy --locked --manifest-path "$root/tools/gpu-replay/Cargo.toml" --all-targets "${flags[@]}" \
+        --target-dir "$root/target/tools-cross" -- -D warnings
+
 # oxlint, type-aware; it reads the surface module's `.d.ts`, so `gen-surface` must have run.
 _oxlint:
     pnpm lint
@@ -592,14 +662,15 @@ build: gen-surface
     cargo build --workspace --release
     pnpm build
 
-# `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, in
-# three phases. First, beside the builds, the checks that need no cargo build directory of the
-# worktree (formatting, `tsc`, oxlint, and the relaxed-SIMD refusal and `gpu-replay-check`, which
-# have target directories of their own), their output held until they finish. Second, the cargo steps one after another, since
-# they share the build directory's lock: Clippy, which compiles every target as `cargo check` would,
-# so `check`'s `cargo check` is not repeated; the bindings' check, before any test can rewrite the
-# bindings it compares; the fitted tables' check; then every test build. Third, one hold of the
-# heavy-test lock for all the suites, rather than three turns in the queue behind other worktrees.
+# `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, and
+# `cross-clippy`, in three phases. First, beside the builds, the checks that need no cargo build
+# directory of the worktree (formatting, `tsc`, oxlint, and the relaxed-SIMD refusal,
+# `gpu-replay-check` and `cross-clippy`, which have target directories of their own), their output
+# held until they finish. Second, the cargo steps one after another, since they share the build
+# directory's lock: Clippy, which compiles every target as `cargo check` would, so `check`'s
+# `cargo check` is not repeated; the bindings' check, before any test can rewrite the bindings it
+# compares; the fitted tables' check; then every test build. Third, one hold of the heavy-test lock
+# for all the suites, rather than three turns in the queue behind other worktrees.
 # The gate before a commit: everything but the slow tests, with the fast suites on WebAssembly.
 ci: gen-surface (_wasm-preflight "wasip1" "browser")
     #!/usr/bin/env bash
@@ -607,7 +678,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     cd "{{ justfile_directory() }}"
     side_log="$(mktemp)"
     trap 'rm -f "$side_log"' EXIT
-    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check >"$side_log" 2>&1 &
+    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check cross-clippy >"$side_log" 2>&1 &
     side=$!
     status=0
     just _clippy _browser-clippy gen-protocol-check fit-check _test-build _wasm-fast-build || status=$?
@@ -615,7 +686,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     wait "$side" || side_status=$?
     cat "$side_log"
     if [[ "$status" -ne 0 || "$side_status" -ne 0 ]]; then
-        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal and gpu-replay: exit $side_status)" >&2
+        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay and cross-clippy: exit $side_status)" >&2
         exit 1
     fi
     just _locked just _test-run _wasm-fast-run

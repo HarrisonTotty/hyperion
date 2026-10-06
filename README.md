@@ -172,10 +172,19 @@ somewhere else, and the `LINK` display shows the endpoint in use.
 | `just test`  | `cargo test`              | `vitest`                      |
 
 `just ci` is the gate before a commit: the four checks above, a check that the fitted tables are
-fresh, a check that the generated protocol bindings are up to date, and `just test-wasm-fast`, the
-fast suites on WebAssembly. Without the WebAssembly suites it took about three minutes on a quiet
-machine; they add about two more (measured under shared load, to be re-timed quiet).
+fresh, a check that the generated protocol bindings are up to date, `just cross-clippy`, and
+`just test-wasm-fast`, the fast suites on WebAssembly. Without the WebAssembly suites it took about
+three minutes on a quiet machine; they add about two more (measured under shared load, to be
+re-timed quiet).
 
+- `just cross-clippy`, part of `just ci`, runs Clippy over every target of the workspace and of
+  `tools/gpu-replay` for the other two platforms, of Linux (x86-64), macOS (Apple silicon) and
+  Windows (x86-64, MSVC): macOS and Windows from Linux, Windows and Linux from a Mac. Code gated
+  to one platform (`cfg(unix)`, `target_os = "linux"`) can leave an import or a helper unused on
+  another, which only that platform's Clippy sees. Clippy never links, so it needs no SDK: only the
+  platforms' standard libraries, which rustup installs from `rust-toolchain.toml`, and a stand-in
+  C compiler that it writes under `target/cross/`. It builds in `target/cross` and
+  `target/tools-cross` and runs beside the other builds; on a warm tree it takes about a second.
 - `just ci-slow` is `just ci` plus `just test-slow` and `just test-wasm-slow`. The slow tests take
   far longer than the rest, so run it before a push that changes the sim, and after a
   `GENERATOR_VERSION` bump.
