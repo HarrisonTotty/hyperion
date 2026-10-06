@@ -521,16 +521,22 @@ holds.
    deeper individual exposure asks for a cone. The eye's part cannot be the limit map's deepest
    texel, since the map is computed from the band and the listed stars, which are computed to the
    cut. It is set by the server before the census (researched 2026-09-29; Crumey 2014 eq. 34 as in
-   Design note 2; Leinert et al. 1998, A&AS 127, 1, for integrated starlight near μ 23.8 at the
-   galactic pole): a coarse band pre-pass, `band_rows` from the luminosity tables alone at 16²
-   texels a face with no census and a provisional cut of 7.85, gives each texel's background; the
-   eye's cut is then the colour-corrected Crumey limit at the darkest texel (clamped as Design note 2 says; 7.99 at most since 2026-10-02) plus
-   the largest colour offset, +0.45 mag for a hot star, plus a pad of 0.1 mag, so at most about
-   9.2 (8.54 under the 2026-10-02 clamp). If that cut is deeper than the provisional one the pre-pass runs once more at it; raising
-   the cut removes stars from the band only slightly, so one repeat converges. Glare is left out of
-   the pre-pass, which is conservative, since glare only makes limits shallower. Near the Sun the
-   rule gives about 7.4 + 0.45 + 0.1 at μ 24.3; the fixed 7.85 alone would be too shallow wherever
-   the band, with its bright stars removed, is darker than μ 24.3 (7.72 at μ 25, 8.17 at 26).
+   Design note 2; Gaia DR3 flux sums for the integrated starlight: μ 24.3 at the galactic poles
+   for the stars fainter than V 6.5, and 24.6 for those fainter than V 8.1
+   (`decision-r06-t9b-band.md`)): a coarse band pre-pass, `band_rows` from the luminosity tables
+   alone at 16² texels a face with no census and a provisional cut of 7.85, gives each texel's
+   background; the eye's cut is then the colour-corrected Crumey limit at the darkest texel
+   (clamped as Design note 2 says; 7.99 at most since 2026-10-02) plus the largest colour offset,
+   +0.45 mag for a hot star (the colour table's largest is 0.43, at μ 30), plus a pad of 0.1 mag,
+   so at most about 9.2 (8.54 under the 2026-10-02 clamp). If that cut is deeper than the
+   provisional one the pre-pass runs once more at it; raising the cut removes stars from the band
+   only slightly, so one repeat converges. Glare is left out of the pre-pass, which is
+   conservative, since glare only makes limits shallower. Near the Sun the rule gives about 7.6 +
+   0.45 + 0.1 ≈ 8.15 for the real sky. The pre-pass's darkest texel holds the light fainter than
+   the cut, μ 24.73–24.77 by Gaia DR3 at b ≈ +79°, darker than the 24.3 of the light fainter than
+   V 6.5. The fixture, whose poles are about 0.3 mag faint, gives about 8.27 (decided 2026-10-06,
+   `decision-r06-t9b-band.md`). The fixed 7.85 alone would be too shallow wherever the band is
+   darker than μ 24.3 (7.72 at μ 25, 8.17 at 26).
 6. **The colour table** (researched 2026-09-29). Built by `hyperion-fit` from spectra fetched, not
    vendored (they carry no licence; only the integrated table is committed, with citations): ATLAS9
    (Castelli and Kurucz 2003) for 3,500–50,000 K, PHOENIX (Husser et al. 2013) for 2,300–3,500 K and
@@ -660,8 +666,12 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     which an n × F₁ bound for young multiples needed, is false in V (R06.T6.b measured falls of up
     to at least 0.38 mag on the pre-main sequence, e.g. 5–6 M☉ at 0.52 Myr and \[Fe/H\] −2, the
     hotter star's larger bolometric correction); nothing depends on it since item 2. The census counts stars,
-    not systems. A star is kept if its V is brighter than the cut plus its eye colour offset where
-    the eye is asked. The observer's own system (`exclude`) is left out; its stars are discs.
+    not systems. A star is kept if its V is brighter than the cut, with or without the eye, and,
+    for a query with a cone, if it lies inside the cone. The eye's colour offset is the views' to
+    apply (Design note 20, T13.a). The eye's cut carries the largest offset already (Design note
+    5), and the band subtracts at the cut, so the listing and the band share one boundary (decided
+    2026-10-06, `decision-r06-t9b-band.md`; R06.T8.k). The observer's own system (`exclude`) is
+    left out; its stars are discs.
 11. **Merge, N_max and overflow.** Parts are merged by flux, then system ID, then star index, which
     is total, so the order of cells and jobs cannot change the answer. The brightest N_max are
     listed. The rest (the overflow) the server's band takes (Design note 15); the listed stars a
@@ -713,11 +723,14 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     adds it to its own band layer (Design note 20), so each star's light is counted once. The census
     skips faint stars by mass without summing them, so the subtraction is exact in expectation, as
     the brainstorm says. The texel's luminance, chroma and ρ are the flux-weighted sums, using the
-    luminosity function's mean colour per M_V bin, which the table carries. The limit map then adds
-    the glare (Design note 4) and gives each texel its eye limit. The band depends on the cut, not
-    on the per-direction limit, so there is no loop between them: the cut is uniform, and a star
-    between a texel's limit and the cut is the client's to cull and add to the band (Design note
-    20).
+    luminosity function's mean colour per M_V bin, which the table carries, reddened by the dust in
+    front of each node: each display channel, the photopic light and the scotopic light by its own
+    A ÷ A_V, the colour table's solar row's for the band and each star's own for the overflow,
+    through `StarColour::reddened` (decided 2026-10-06, `decision-r06-t9b-band.md`; R06.T9.e).
+    The limit map then adds the glare (Design note 4) and gives each texel its eye limit. The band
+    depends on the cut, not on the per-direction limit, so there is no loop between them: the cut
+    is uniform, and a star between a texel's limit and the cut is the client's to cull and add to
+    the band (Design note 20).
 16. **The discs** (researched 2026-09-29; Maxted 2018, A&A 616, A39; Claret and Southworth 2022,
     VizieR J/A+A/664/A128, table3, and 2023, J/A+A/674/A63; Claret et al. 2020, J/A+A/634/A93, for
     white dwarfs). The power-2 law I(μ)/I(1) = 1 − c(1 − μ^α): the tables give g = c and h = α in
@@ -869,12 +882,13 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
 
 T1 comes first. T2, T3 and T4 (tables) and T5 (quadrature) can then run side by side, and T6.a
 with them; T6.b needs T5.a, whose mass nodes it reads. T7 needs T5 and T6; T8 needs T2, T3, T4.b
-and T7, and within it T8.e follows T8.b. T9 needs T8; T9.d needs T9.b. T10 needs T9, T4.b and R03's
-frames; T11 needs T10, with T11.c after T11.a. The client, T12–T14, needs T10 for its types and
-R02's `view/`; T13's subtasks follow T12, T13.g follows T13.b and T13.h, and T15's draft precedes
-T13.f, which builds to it. T16.a is out of RM3's scope. It waits on P08.T12, P09.T2.c, P09.T23.b
-and P09.T40.a's feature part, and lands in one integration with P09.T2.c (decided 2026-10-05,
-`decision-r06-t16a-scope.md`). T17 closes RM3's part of this plan without it.
+and T7, and within it T8.e follows T8.b. T9 needs T8; T9.c needs T9.e, T9.d needs T9.b, T9.f needs
+T9.e, and T11.c needs T9.f. T10 needs T9, T4.b and R03's frames; T11 needs T10, with T11.c after
+T11.a. The client, T12–T14, needs T10 for its types and R02's `view/`; T13's subtasks follow T12,
+T13.g follows T13.b and T13.h, and T15's draft precedes T13.f, which builds to it. T16.a is out of
+RM3's scope. It waits on P08.T12, P09.T2.c, P09.T23.b and P09.T40.a's feature part, and lands in
+one integration with P09.T2.c (decided 2026-10-05, `decision-r06-t16a-scope.md`). T17 closes RM3's
+part of this plan without it.
 
 Re-validated 2026-10-02: P11.T11 has wired binary evolution into `SystemStars::state_at`, so
 T16.b no longer waits: it follows T8.e directly and precedes T9, so that the band, the server and
@@ -884,11 +898,13 @@ census and need only R01 and R02, so they can run before T12; T13.f waits on R05
 until T13.f wires them to `SETTINGS`.
 
 Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs in this order:
-T16.b; T8.f; T9.b–d; T8.g, once plan 11's asks A and B are on `rendering-and-planets`; T8.h; T7.b;
-T8.i with T11.d, after T11.a–c; then T17. T7.b, T8.i and T11.d waited on the owner's sign-off. A
-decision agent advised on it, and its advice was adopted on 2026-10-05 under the owner's standing
-delegation (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided
-2026-10-05, `decision-r06-pad-speed.md`), runs after T9.b–d and before T8.g.
+T16.b; T8.f; T9.b; T9.e; T9.c–d; T8.k with T8.j; T9.f; T8.g, once plan 11's asks A and B are on
+`rendering-and-planets`; T8.h; T7.b; T8.i with T11.d, after T11.a–c (T11.c on T9.f); T5.f and
+T9.g before T17's goldens; then T17 (the order amended 2026-10-06, `decision-r06-t9b-band.md`).
+T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
+advice was adopted on 2026-10-05 under the owner's standing delegation
+(`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
+`decision-r06-pad-speed.md`), runs after T9.b–d and before T8.g.
 
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
@@ -1095,6 +1111,29 @@ luminosity_matches_realised_cells` passes.
 the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read
 standard_nodes_match_the_full_build_where_the_tables_are_read luminosity_matches_realised_cells
 caps_converge_in_rays`, and the measurements recorded in Risks ("T5.e's panels and node cuts").
+- **R06.T5.f The tables against the realised sky (new, slow; after T8.k, before T17's goldens;
+  decided 2026-10-06, `decision-r06-t9b-band.md`).** Records; gates nothing at first.
+  1. T5.c's paired comparison at the solar circle, on enough C and D cells that the paired
+     deficit's interval is under 3 percentage points: the fit's correction (C 2.1%, D 10.3%)
+     against the realised (T5.c: 9.4%, 21.0%).
+  2. Eight observers on the solar circle at z☉, 45° apart in azimuth, each a census to V 8
+     within 300 ly with caps forced and no eye. Per layer, record:
+     - the listed light and count, against the tables' expectation;
+     - the counts once as tabulated, and once with the full pair correction, deficit included,
+       through a test-only read;
+     - the light with and without each layer's nearest 50 ly, on both sides;
+     - the eight observers' median light ratio, against the skew's expected median from a
+       Monte Carlo of the tables' own types at these radii (about 0.90 at 200 ly).
+
+  A layer is a finding for T5.d's fit (its young age bins at solar metallicity), handed to the
+  tables lane with these data, if:
+  - its ensemble count ratio under the full correction lies outside 1 ± 3σ;
+  - its paired deficit differs from the fit's at 3σ; or
+  - its median light ratio lies below the skew's expected median at 3σ.
+
+  The band changes nothing on it. Files: `crates/hyperion-sim/tests/sky_realised.rs`,
+  `sky/luminosity.rs` (the test-only read). Acceptance:
+  `just test-slow tables_against_the_realised_sky`, recorded in Risks.
 
 Files: `sky/{luminosity,photometry,binary_light}.rs`, `tables/{sky_binary_light,sky_envelope}.rs`,
 `crates/hyperion-fit/src/tasks/{sky_binary_light,sky_envelope}.rs`,
@@ -1232,9 +1271,9 @@ hyperion-sim --test sky_census`.
 - **R06.T8.f Census cost: the cheap exact steps (new; after T16.b, before T9.b).** Decided
   2026-10-05 (`decision-r06-census-cost.md`). Each step leaves every listed star's bits unchanged.
   `brute_force_sky` is the oracle.
-  1. **Each star is cut before its sightline.** A star whose M_V + DM(d) exceeds the cut plus its
-     own colour offset takes no `sightline`, since A_V ≥ 0. Today's sightlines cost 14,100 CPU-s
-     near the Sun.
+  1. **Each star is cut before its sightline.** A star whose M_V + DM(d) exceeds the cut (plus its
+     own colour offset until R06.T8.k) takes no `sightline`, since A_V ≥ 0. Today's sightlines
+     cost 14,100 CPU-s near the Sun.
   2. **An O(1) cell floor.**
      - `BrightnessEnvelope` keeps, per mass node, its brightest magnitude over every age bin. The
        floor's question, ages 0 to `MAX_AGE_YEARS`, then reads one value a node, bit for bit the
@@ -1315,6 +1354,25 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
   `cargo test -p hyperion-sim sky::census`, `cargo test -p hyperion-sim --test sky_census`,
   `just test-slow the_census_is_its_oracle_150_ly_from_the_sun_in_motion`, `just ci`. No
   GENERATOR_VERSION bump.
+
+- **R06.T8.k One boundary (new; after T9.b, before T8.g, with or after T8.j; decided
+  2026-10-06, `decision-r06-t9b-band.md`).** `kept_to` is the cut, `faintest_listable` drops
+  `EYE_OFFSET_BOUND_MAG` (removed), and the per-star cut before the sightline is the cut alone.
+  A cone's census keeps only the stars inside the cone. `brute_force_sky` follows. The eye
+  still sets the cut (T9.d) and the views' culls.
+
+  Tests:
+  - a census with the eye equals one without it at the same cut, bit for bit;
+  - every kept star is brighter than the cut, and inside the cone when there is one;
+  - T8.e's identity tests and T16.b's pinned systems pass, unchanged in form;
+  - T9.b's conservation tests run with the eye asked, and give the bits they give without it;
+  - for a cone, the listed and band light together equal the full sky's inside the cone, within
+    1%.
+
+  Record each layer's listed and generated counts near the Sun, before and after. Files:
+  `sky/census/{cell,query}.rs`, `tests/common/sky.rs`. Acceptance:
+  `cargo test -p hyperion-sim sky::census sky::band` and
+  `cargo test -p hyperion-sim --test sky_census`.
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f and plan 11's asks A and B).**
   Decided 2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Near the
@@ -1436,28 +1494,114 @@ systems. The budget is T17's.
   reading the tables' light ages through `LuminosityTables::age_for(t, a)` (decided 2026-10-03).
   Tests: the sum over rows equals one call over the face; an observer above the disc sees a band
   brighter towards the plane than towards the pole by the model's own integral; near the Sun the
-  band's surface brightness lies within 0.5 mag of the brainstorm's 22.4 in the plane and 24 at the
-  poles (Gaia DR3 flux sums of stars fainter than V 6.5, as the brainstorm cites); lowering the cut
-  (a brighter limit) moves light from the listed stars and overflow into the band, and raising it
-  moves light back, conserving the total within 1% either way. Decided 2026-10-05
+  band's surface brightness lies within 0.5 mag of 22.05 in the plane (|b| under 5°) and 24.3 at
+  the poles (|b| over 80°), each region's mean luminance of the stars fainter than V 6.5 (Gaia DR3
+  flux sums, 22.06 and 24.28, V from G by Riello et al. 2021, Table C.2;
+  `decision-r06-t9b-band.md`); lowering the cut (a brighter limit) moves light from the listed
+  stars and overflow into the band, and raising it moves light back, conserving the total within
+  1% either way. Decided 2026-10-05
   (`decision-r06-census-cost.md`): `band_rows` takes the census's complete-to radius per layer (per
   ray after T7.b). Beyond it, the band holds all of the layer's light, not only the light fainter
   than the cut. So a sky that is still filling in (T8.i, T11.d) is as bright as the final one, and
   the expected light of the stars beyond the caps is carried rather than dropped. The band's
   boundary is the census's: per layer, per ray after T7.b, as the census lists
   (`decision-r06-census-cost-signoff.md`). Test, added to the conservation test: the listed,
-  overflow and band light together are independent of the complete-to radius, within 1%.
-  Acceptance: `cargo test -p hyperion-sim sky::band`.
-- **R06.T9.c The limit map.** `sky::limits::limit_map` with the glare of Design note 4. Tests: near
-  the Sun the eye limits run 6.6 ± 0.2 in the band and 7.4 ± 0.2 at the poles; a texel within 1° of
-  a V = −1.5 star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of
-  the listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`.
+  overflow and band light together are independent of the complete-to radius, within 1%. The
+  radii are those a reply can state, from the first shell's edge to the final caps, not zero,
+  which no reply has (decided 2026-10-06, `decision-r06-t9b-band.md`). T9.f re-sums one march at
+  several radii; T17 measures the first shell (500 ly) against the final caps. Acceptance:
+  `cargo test -p hyperion-sim sky::band`.
+- **R06.T9.e Reddening (new; after T9.b, before T9.c; decided 2026-10-06,
+  `decision-r06-t9b-band.md`).** The colour table gains four columns per row from T3's fit:
+  `A_P ÷ A_V` and `A_S ÷ A_V`, by the display channels' method (plan 07's law at the effective
+  wavelength of S·V(λ) and S·V′(λ), over V's), and `A_cam ÷ A_V` at A_V → 0 and at A_V 2, from
+  the integral over S·QE·λ. Every existing column stays bit for bit (`just fit-check`). If a
+  fetched source no longer matches its checksum, the four are computed from each row's bake
+  spectrum and the vendored CIE functions, and that is recorded.
+
+  `StarColour::reddened(a_v) → Reddened` gives the r, g and b transmissions, the photopic
+  transmission, the reddened ρ and the reddened camera band term, bit for bit the colour's own at
+  A_V 0. `band_rows` reddens each node's light with the solar row's ratios, in five sums (the
+  photopic light, R, G, B and the scotopic light), and each overflow star by its own `reddened`.
+  T9.c's glare and T11's wire (chroma, eye offset, camera term) read `reddened`. The same commit
+  moves T9.b's plane reference from 22.4 to 22.05 in `sky::band`'s test and doc (item 2).
+
+  Tests:
+  - `reddened(0)` is the colour;
+  - the transmissions order blue < green < red, and scotopic < photopic;
+  - the solar row's `A_S ÷ A_V − A_P ÷ A_V` lies in 0.11–0.15, its `A_P ÷ A_V` in 0.97–1.00, and
+    its `A_cam ÷ A_V` at A_V → 0 in 0.78–0.88;
+  - a Plummer cloud of A_V 1 on +X lowers the texels behind it in ρ and in blue, against an
+    unreddened march, by its ratios to 1%, and leaves −X's bits;
+  - near the Sun the plane's ρ falls 5–20% and the poles' under 1.5%, and the plane's μ moves
+    under 0.05;
+  - an overflow star's sums are its reddened colour's.
+
+  Files: `sky/{colour,band}.rs`, `tables/star_colour.rs`,
+  `crates/hyperion-fit/src/tasks/star_colour/{columns,mod}.rs`. Acceptance:
+  `cargo test -p hyperion-sim sky::colour sky::band` and `just fit-check`.
+
+- **R06.T9.c The limit map.** `sky::limits::limit_map` with the glare of Design note 4. Tests:
+  each texel's limit is `naked_eye_limit` at its band luminance plus its glare and at its ρ, to
+  10⁻⁹ mag; near the Sun, with the band at cut 8.15 (the eye's cut there, T9.d, which follows),
+  the median texel limit is 6.5 ± 0.20 in the band (|b| under 5°) and 7.55 ± 0.22 at the poles
+  (|b| over 80°): Crumey's limit at Gaia DR3's light fainter than the cut there (μ 22.18 and
+  24.62), and T9.b's 0.5 mag of μ through Crumey's slope (0.40 and 0.45 per mag) (decided
+  2026-10-06, `decision-r06-t9b-band.md`; the fixture, whose poles are about 0.3 mag faint, Risks,
+  "The galaxy's local light is low", gives about 6.53 and 7.71); a texel within 1° of a V = −1.5
+  star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of the
+  listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`.
 - **R06.T9.d The eye's cut.** `sky::limits::eye_cut` (Design note 5): the coarse pre-pass at 16²
   texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit, clamped by
-  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), +0.45 and +0.1, and one repeat when the cut deepens. Tests: near the Sun the cut is 7.96 ±
-  0.15; no texel of the full limit map, with glare, is deeper than the cut less the 0.45 colour
-  offset; the repeat changes the cut by under 0.05 mag. Acceptance: `cargo test -p hyperion-sim
-sky::limits`.
+  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), +0.45 and +0.1, and one repeat when the cut deepens. Tests: the cut is the darkest pre-pass texel's
+  `naked_eye_limit` + 0.45 + 0.1 after the repeat, to 10⁻⁹ mag; the colour table's largest eye
+  colour offset at μ 30 is at most 0.45 (it is 0.43); near the Sun the cut is 8.15 ± 0.22:
+  Crumey's limit at the darkest 16² texel of Gaia DR3's light fainter than the cut (μ
+  24.73–24.77), plus 0.55, with T9.b's tolerance carried through Crumey's slope (decided
+  2026-10-06, `decision-r06-t9b-band.md`; the fixture gives about 8.27); no texel of the full
+  limit map, with glare, is deeper than the cut less the 0.45 colour offset; the repeat changes
+  the cut by under 0.05 mag. Acceptance: `cargo test -p hyperion-sim sky::limits`.
+- **R06.T9.f The band's march, kept (new; after T9.e, before T11.c; decided 2026-10-06,
+  `decision-r06-t9b-band.md`).** `sky::band::{march_rows, BandMarch, sum_rows}`.
+  - `march_rows` marches each ray once, at the rows' texels. Every edge a reply can state is a
+    node: each layer's shell edges up to its cap (Design note 13; T8.i's), and its cap (per ray
+    after T7.b).
+  - It keeps, per layer and edge, the running dimmed sums of the light fainter than the cut and
+    of all of the light.
+  - `sum_rows(march, census, complete_to, …)` gives a reply's texels with its overflow points,
+    reading no profile and no table.
+  - `band_rows` becomes `march_rows` at `complete_to`'s own radii, then `sum_rows`, with T9.e's
+    bits.
+
+  Tests:
+  - `sum_rows` at every radius among the edges equals `band_rows` with the same edges as nodes,
+    bit for bit;
+  - the listed, overflow and band light at radii 100, 200 and 400 ly (caps forced) agree within
+    1%;
+  - any split of the rows gives the same bits;
+  - the march's heap is recorded at 64² near the Sun.
+
+  Bench: `sky/band_near_sun` split into the march and one sum. Files: `sky/band.rs`. Acceptance:
+  `cargo test -p hyperion-sim sky::band`.
+
+- **R06.T9.g Diffuse galactic light (new; research first; after T9.f, before T17's goldens;
+  decided 2026-10-06, `decision-r06-t9b-band.md`).** A research agent proposes a model of the
+  starlight that the band's dust scatters into each ray, from the plan's own dust field and the
+  band's own light. For example: single scattering with Draine's 2003 V-band albedo of 0.677 and
+  ⟨cos θ⟩ of 0.538 (R_V 3.1; ApJ 598, 1017), g tried over 0.54–0.8 (Mattila et al. 2018), and
+  each node's radiation field approximated from the band.
+
+  Targets: DGL ÷ all-star ISL of about 0.10–0.35 by direction (Toller 1981, via Mattila et al.
+  2018, A&A 617, A42, §3.1.1), and 0.13 in the year-mean zenith at 40° N (Masana et al. 2021,
+  Table 4), with measured DGL–100 µm slopes considered (Brandt and Draine 2012; Ienaka et al.
+  2013). The proposal states its cost against the band's.
+
+  If no model is within 10% of the band's cost and within a factor 1.5 of the ratios, the
+  omission is stated in Risks and reported to the owner. Otherwise:
+  - it is built into the march's sums as a sum of its own, reddened as the band's light is, so
+    that T9.b's starlight test still compares starlight with Gaia;
+  - it has tests against the targets;
+  - it re-derives T9.c's and T9.d's references with Gaia's ISL plus the DGL.
 
 Files: `sky/band.rs`, `sky/limits.rs`. Bench: `sky/band_near_sun` (all six faces).
 
@@ -1507,7 +1651,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   cancelled request stops its queued jobs and sends nothing further; a range query sent while a
   sky's jobs run is answered first; `n_max` above the cap is `BadRequest` naming `n_max`; a sky
   near the Sun lists `feature_members` in `not_modelled`. Acceptance:
-  `cargo test -p hyperion-server --test sky`.
+  `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye colour offset and camera
+  band term are its `StarColour::reddened(a_v)`'s (R06.T9.e).
 - **R06.T11.b Transfer.** The response and its payload through R03's `BulkPayload::new` and
   `Answer { body, bulk }` (whose `frames` call `bulk::chunk`), the stars then the band, split by
   `stars_bytes` and `band_bytes`, with `BulkPayload`'s `expect(dead_code)` removed; the per-cell
@@ -1517,15 +1662,17 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   pending 15 MiB transfer check in the real renderer is run with this kind, hidden, as R03's Risks
   ask, and recorded. Acceptance: `cargo test -p hyperion-server sky` and `just ci`.
 - **R06.T11.c The band, the limits, the discs and the tables.** The band as bulk jobs by face and
-  row, then the limit map, then `host_discs` of `exclude_system` at the request's time; the
-  luminosity tables built once per galaxy, keyed by `GalaxyKey` alone, under `SingleFlight` in a
-  `ByteLru` of their own budget, `HYPERION_SKY_TABLES_MB` (default 160, two galaxies; separate from
-  `HYPERION_SKY_CACHE_MB`), as `Priority::Bulk` pool jobs from `LuminosityTables::plan` (the
-  envelope is the fitted table, with nothing to build), and the caps as ray-chunk pool jobs
-  (decided 2026-10-03, `decision-r06-tables.md`). Tests: a sky near the Sun returns the stars,
-  texels and host discs the sim returns for the same query; a second identical request shares the
-  tables' build; a second sky in another time bucket shares the build. Acceptance: `cargo test -p
-hyperion-server --test sky`.
+  row through T9.f's `march_rows`, then `sum_rows`, then the limit map, then `host_discs` of
+  `exclude_system` at the request's time; the luminosity tables built once per galaxy, keyed by
+  `GalaxyKey` alone, under `SingleFlight` in a `ByteLru` of their own budget,
+  `HYPERION_SKY_TABLES_MB` (default 160, two galaxies; separate from `HYPERION_SKY_CACHE_MB`), as
+  `Priority::Bulk` pool jobs from `LuminosityTables::plan` (the envelope is the fitted table, with
+  nothing to build), and the caps as ray-chunk pool jobs (decided 2026-10-03,
+  `decision-r06-tables.md`). Tests: a sky near the Sun returns the stars, texels and host discs the
+  sim returns for the same query; a second identical request shares the tables' build; a second
+  sky in another time bucket shares the build. Acceptance:
+  `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye colour offset and camera
+  band term are its `StarColour::reddened(a_v)`'s (R06.T9.e).
 - **R06.T11.d Delivery nearest first (new; after T8.i, T10 and T11.a–c; signed off).** Decided
   2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and
   adopted on 2026-10-05 under the owner's standing delegation
@@ -1539,9 +1686,9 @@ hyperion-server --test sky`.
   - **The jobs.** Census jobs are sized to about 50 ms of expected work, since the pool never
     preempts a running job. A cancelled or superseded census keeps its finished cells, so that a
     moving ship's outer shells still converge through the cache.
-  - **The band.** Each reply's band is re-summed from one march per request: the rays keep their
-    integrals over the fixed shell intervals, and each reply sums the light fainter than the cut
-    inside its radii and all the light beyond them.
+  - **The band.** Each reply's band is re-summed from one march per request (R06.T9.f's
+    `BandMarch`): the rays keep their integrals over the fixed shell intervals, and each reply sums
+    the light fainter than the cut inside its radii and all the light beyond them.
   - **The client** swaps each reply's cube in whole. It bakes the new cube, then swaps it in, with
     no blank or half-baked frame. It may coalesce partial replies, but it always applies the final.
   - **The label.** The view's stars-arriving note and its guide rows are drafted here for the UX
@@ -1864,10 +2011,11 @@ Without R06.T16.a, which is out of RM3's scope (decided 2026-10-05,
 members. The brainstorm's globular-core row (47 Tuc) is recorded as pending T16.a, not re-derived.
 When T16.a lands, it re-benches the census with members against this budget.
 
-The census budget, decided 2026-10-05 (`decision-r06-census-cost.md`), applies near the Sun at cut
-7.95 with the eye (the eye's cut; the camera's cut, 10.06 at 60°, is benched beside it and its
-budget ruled from that figure, `decision-r06-census-cost-signoff.md`), at the current caps, on a
-quiet machine:
+The census budget, decided 2026-10-05 (`decision-r06-census-cost.md`), applies near the Sun at the
+eye's cut as T9.d computes it (about 8.27 on the fixture), benched also at 7.95, its estimate when
+the budget was set (decided 2026-10-06, `decision-r06-t9b-band.md`; the eye's cut; the camera's
+cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
+`decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
 
 - the first sky in at most 150 CPU-s and 10 s wall on the dev machine's default workers;
 - the full cold census in at most 4,000 CPU-s;
@@ -1878,14 +2026,14 @@ adopted on 2026-10-05 under the owner's standing delegation (`decision-r06-censu
 question 1). A decision agent rules the camera's budget from the cut-10.06 bench, and reports it to
 the owner, before T17 closes and before any bridge play-test.
 
-Run the census benches sampled (`HYPERION_SKY_BENCH_SAMPLE`), at cut 7.95 and beside it at 10.06,
-and once whole if the sampled estimate is under an hour on the machine. The census benches, and
-the 1,000 ly identity test once, run on a galaxy built `with_full_potential`, as the server's
-galaxies are. The fixture has no kinematic tables, so its records stand still and
-`Drift::of_record` costs 0.05–0.08 µs. A drawn velocity costs about 0.72 µs (plan 08's T2–T6
-timings), which is some 290 CPU-s over the 4 × 10⁸ records near the Sun until T8.g's bound rejects
-most of them before their drift (decided 2026-10-05, `decision-r06-pad-speed.md`). For each,
-record:
+Run the census benches sampled (`HYPERION_SKY_BENCH_SAMPLE`), at the eye's cut as T9.d computes it
+and at 7.95 (`decision-r06-t9b-band.md`), and beside them at 10.06, and once whole if the sampled
+estimate is under an hour on the machine. The census benches, and the 1,000 ly identity test once,
+run on a galaxy built `with_full_potential`, as the server's galaxies are. The fixture has no
+kinematic tables, so its records stand still and `Drift::of_record` costs 0.05–0.08 µs. A drawn
+velocity costs about 0.72 µs (plan 08's T2–T6 timings), which is some 290 CPU-s over the 4 × 10⁸
+records near the Sun until T8.g's bound rejects most of them before their drift (decided
+2026-10-05, `decision-r06-pad-speed.md`). For each, record:
 
 - each layer's cells, candidates, records, generated and listed;
 - the share of pairs in each of T8.g's cases;
@@ -1897,6 +2045,9 @@ record:
   client, not to shrink the census;
 - the per-reply cost of the band and the limit map. The first reply's band, limit map and shell
   together must fit the first-sky budget;
+- the sky's total light (listed, overflow and band) in the first reply against the final's, at
+  the eye's cut near the Sun, within 1% (T9.b's amendment, decided 2026-10-06,
+  `decision-r06-t9b-band.md`); a miss is a finding for R06.T5.f, not a looser gate;
 - the delivery time of the final reply's stars brighter than V 3.0, against 25% of the full
   census's wall time.
 
@@ -3731,7 +3882,7 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     0.01 ly, at most some 10⁻⁵ of a ray's, is left out. A ray outside a query's cone is complete
     nowhere.
   - **The colours** of the texels and of the overflow's points are the stars' own, before
-    reddening; extinction dims the luminance in V only (pending a ruling, below), which for
+    reddening; extinction dims the luminance in V only (reddened from R06.T9.e), which for
     starlight over-dims the photopic light by 1–2% of A_V (science check, CCM 1989 against CIE
     V(λ)). A texel with no light is white, (1, 1), at the reference ρ.
   - **Added in `sky::luminosity`:** `LuminosityFunction::colour_sums_fainter_than` (crate-only),
@@ -3794,54 +3945,68 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   which no reply has (the view shows `STARS: PENDING` until the first, sign-off condition 4); and
   T8.i's first shell (500 ly) against the final caps, which needs a census past a unit test's
   cost and is T8.i's or T17's to measure.
+
+  Ruled 2026-10-06 (`decision-r06-t9b-band.md`): not the band's. The light's 79–82% is a low but
+  possible realisation under the sum's skew (median about 90%); it and the counts' C and D
+  deficits are measured by R06.T5.f.
+
 - **The band's boundaries that are the census's (found in T9.b; for the orchestrator).**
-  - **The eye's colour offset.** With the eye asked, the census keeps each star to the cut plus
+  - **The eye's colour offset (decided 2026-10-06, `decision-r06-t9b-band.md`: R06.T8.k keeps
+    the census to the cut alone).** With the eye asked, the census keeps each star to the cut plus
     its colour offset at μ 30 (T8.b), while the band subtracts at the cut alone, as Design note
     15 states it. A blue star between the cut and the cut plus its offset is listed and in the
     band; a red one between the cut plus its (negative) offset and the cut is in neither. The
     tests run without the eye. The science check estimates some 2% of the band's light misallocated
     at the poles (half counted twice, half missed; net 0.5% or less, under 0.01 mag in μ and 0.005
     mag in the eye's cut) and some 1.5% gross in the plane. Options: accept it as stated; have the
-    band subtract each M_V bin
-    at the cut plus the bin's mean offset (the tables carry each bin's ρ); or have the census keep
-    to the cut alone and leave the offset to the views (a T8.b change).
-  - **A cone.** A ray outside the cone is complete nowhere, but the census lists every star of
-    each cell whose padded ball meets the cone, some outside it, whose light the band then holds
-    too, as the caps' overshoot is held. Options: accept it; or have the census list only the
-    stars inside the cone (a T8 change).
+    band subtract each M_V bin at the cut plus the bin's mean offset (the tables carry each bin's
+    ρ); or have the census keep to the cut alone and leave the offset to the views (a T8.b
+    change).
+  - **A cone (decided 2026-10-06, `decision-r06-t9b-band.md`: R06.T8.k lists only the stars
+    inside the cone).** A ray outside the cone is complete nowhere, but the census lists every
+    star of each cell whose padded ball meets the cone, some outside it, whose light the band then
+    holds too, as the caps' overshoot is held. Options: accept it; or have the census list only
+    the stars inside the cone (a T8 change).
   - **The final reply's cells.** A final census lists every star of the cells it opens, some just
     beyond its caps, whose light the band also holds, within the caps' stated expected count
     beyond, as the sign-off's condition 2 accepts.
   - **One march per call.** `band_rows` marches its rays on every call, and the radius nodes move
     every layer's nodes. T11.d's one march a request, re-summed per reply (sign-off condition 5),
     needs the march split from the sums: each layer's running fainter and all-light sums at fixed
-    nodes with the shell edges among them, then a cheap sum per reply. T11.d builds it.
-- **Pending rulings from T9.b.**
-  1. **The poles' figure:** 24 (the task and the brainstorm's prose), 24.3 (the brainstorm's
-     table, which the test reads) or 23.8 (Design note 5's Leinert et al. 1998, which the science
-     check could not reach and may be an all-star figure). The science check's own Gaia DR3 sums
-     give 24.25–24.29 (NGP 24.29–24.31, SGP 24.22–24.24), so 24.3 is the better sourced. The band
-     measures 24.57. T9.c's 7.4 ± 0.2 at the poles and T9.d's 7.96 ± 0.15 rest on a darkest texel
-     near μ 24.3: at 24.57 Crumey's limit is about 7.5, so T9.d's cut may land near 8.1, at its
-     bracket's top.
-  2. **The plane's figure:** the same Gaia sums give 22.03–22.06 for |b| under 5° (22.11–22.13
-     under 10°, a median of 1° bins 22.15–22.18), against the brainstorm's 22.4, which they do
-     not reproduce by any of these statistics. The check suggests "μ_V 22.0 in the plane". The
-     test passes against either. At 22.05 the eye's limit is about 6.45, inside T9.c's 6.6 ± 0.2 by
-     0.05; the band's 22.09 gives about 6.47 before glare.
-  3. **Reddening:** whether the band and its overflow are reddened (the wire's stars are, Design
-     note 17). Per the science check, unreddened ρ is 5–20% high in the plane (ρ falls about 1.2%
-     per 0.1 mag of A_V), so the rod-weighted background is 0.06–0.24 mag too bright and the eye's
-     limits there 0.03–0.1 mag too shallow (conservative); 5,000 K light at A_V 1 loses 27% of its
-     blue at unit luminance, a visibly warmer band. At the poles (A_V about 0.1 or less) it is 1% or
-     less, so T9.d's cut is unaffected.
-  4. **The eye's boundary** and 5. **the scope of the complete-to independence**, above.
+    nodes with the shell edges among them, then a cheap sum per reply. R06.T9.f builds it (decided
+    2026-10-06, `decision-r06-t9b-band.md`); T11.c and T11.d consume it.
+- **Pending rulings from T9.b.** Ruled 2026-10-06 (`decision-r06-t9b-band.md`):
+  - the poles 24.3 and the plane 22.05;
+  - T9.c 6.5 ± 0.20 and 7.55 ± 0.22, and T9.d 8.15 ± 0.22;
+  - reddening (R06.T9.e);
+  - the census keeps to the cut (R06.T8.k);
+  - the independence covers the radii a reply states (T17);
+  - the march split (R06.T9.f);
+  - the shortfall measured (R06.T5.f);
+  - the diffuse galactic light (R06.T9.g).
 - **The galaxy's local light is low (found in T9.b; a pointer for the galaxy plans' owner).** The
   fixture's V luminosity density at the Sun is 0.042 L☉ pc⁻³, against Flynn et al. 2006 (MNRAS 372,
   1149): 0.056 for all stars, 0.045–0.047 for M_V ≥ −1, about 10% uncertain. Half of their column,
   24.4 L☉ pc⁻², gives an all-star polar μ_V of 23.67, where the band reads 24.0 (NGP) and 23.9
   (SGP), and the poles of the stars fainter than V 6.5 are 0.28–0.32 mag fainter than the science
   check's Gaia sums: the same size and sign. The 0.5 mag tolerance of T9.b's test holds it.
+
+  Measured 2026-10-06 (`decision-r06-t9b-band.md`):
+  - The local V light is 0.0417 L☉ pc⁻³, 20% of it brighter than M_V −1 as in Flynn et al.'s, so
+    the deficit is the turnoff and clump light per unit mass (volume (M/L)_V 1.00 against 0.75 ±
+    15%).
+  - The column is 19.2 against 24.4 L☉ pc⁻². Σ★ is 30.5 against 33.2 without brown dwarfs, and
+    the column's M/L is 1.59 against 1.36. That is 0.26 mag, which accounts for the poles' 0.29.
+  - It does not touch the census's 79–82%, which compares the model with itself.
+
+  A calibration finding for galaxy plans 02 and 06 (and 11 for the pair light). Their owner
+  compares the fixture's Φ(M_V) with Hipparcos/CNS5 and adds a light row to plan 02's brackets.
+  R06 changes nothing; its near-Sun tests hold the offset.
+
+- **No diffuse galactic light (found 2026-10-06, `decision-r06-t9b-band.md`).** The band holds
+  direct starlight only. The light its dust scatters, about 10–35% of the integrated starlight
+  and 23–47% of the band's own background (the light fainter than the cut), makes the eye's
+  limits about 0.10–0.18 mag too deep. R06.T9.g decides it.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;

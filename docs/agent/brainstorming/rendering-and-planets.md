@@ -1617,9 +1617,12 @@ clock window of ±1,000 years only, and until they are tested over the retarded 
 died within the light-time would be served dead.
 
 The figures familiar from Earth do not hold even near the Sun. Space has no airglow, so the
-background near the Sun is starlight alone, μ_V ≈ 24 mag/arcsec² at the galactic poles and about
-22.4 in the band (Gaia DR3 flux sums of the stars fainter than V 6.5), plus zodiacal light inside a
-system with a zodiacal cloud, about 23.3 at the Sun's ecliptic pole (Leinert et al. 1998). Deeper
+background near the Sun is starlight alone, μ_V ≈ 24.3 mag/arcsec² at the galactic poles (|b|
+over 80°) and about 22.05 in the band (|b| under 5°) (Gaia DR3 flux sums of the stars fainter than
+V 6.5), and the diffuse galactic light the dust scatters, about 10–35% of the integrated starlight
+by direction (Toller 1981, as Mattila et al. 2018, A&A 617, A42, quote it), which the band does not
+yet hold, plus zodiacal light inside a system with a zodiacal cloud, about 23.3 at the Sun's
+ecliptic pole (Leinert et al. 1998). Deeper
 in, the sky is fuller and brighter, and its brighter background lowers the naked-eye limit. The
 limit is Crumey's (2014) point-source threshold, his eq. 53 with Blackwell's scotopic coefficients;
 eq. 55, m = 0.426 μ − 2.365 − 2.5 log₁₀ F, is its linear form for 21 < μ < 25, and backgrounds
@@ -1634,12 +1637,16 @@ until the band's own integral replaces them:
 | Where                                                 | Stars to V 6.5 | Background μ_V, mag/arcsec² | Naked-eye limit, V |
 | ----------------------------------------------------- | -------------- | --------------------------- | ------------------ |
 | Earth's darkest ground sky, for comparison            | 8,874          | 21.8                        | 6.6                |
-| Near the Sun: in the band / at the galactic poles     | 8,874          | 22.4 / 24.3                 | 6.6 / 7.4          |
+| Near the Sun: in the band / at the galactic poles     | 8,874          | 22.05 / 24.3                | 6.45 / 7.4         |
 | Inner disc, 4 kpc out                                 | 2–3.5 × 10⁴    | About 21                    | About 6.1          |
 | Bulge, 1.5 kpc from centre: away from / towards it    | About 4 × 10⁴  | About 22 / 19.7             | 6.5 / 5.6          |
 | Bulge centre, outside the nuclear disc: off / towards | About 3 × 10⁵  | 19.5 / 16.5                 | 5.6 / 5.3          |
 | Nuclear disc: out of / in the plane                   | 0.5–2 × 10⁶    | 18.8 / 17.5                 | About 5.4 / 5.3    |
 | A globular core like 47 Tuc                           | About 4 × 10⁵  | About 21, 17.7 with glare   | About 5            |
+
+The limit map takes as each texel's background the light fainter than the eye's cut, about V 8.15
+near the Sun. That light is darker than these figures by about 0.1 mag in the band and 0.3 at the
+poles (Gaia DR3: 22.18 and 24.60 for V over 8.1), so there the limits are about 6.5 and 7.55.
 
 In a globular core the unresolved light is faint, and what sets the limit is the veiling glare of
 its thousand or so stars brighter than V −5, the same glare the renderer draws as bloom. At the
@@ -1668,7 +1675,7 @@ The practical form:
   counted twice. Per direction, because Crumey's background is the one immediately around the
   target, and the band's brightness varies by 2 mag across the sky near the Sun and about 4 in the
   bulge, so one limit per location would be wrong by up to a magnitude either way. Near the Sun
-  V_lim runs from about 6.6 in the band to 7.4 at the poles, which makes about 15,000 stars visible
+  V_lim runs from about 6.5 in the band to 7.55 at the poles, which makes about 15,000 stars visible
   at once, against Earth's 8,874 Hipparcos stars to V 6.5 (8,404 in the Bright Star Catalogue). The
   census selects to the location's deepest limit, some 2.3 × 10⁴ stars near the Sun, and the
   renderer thresholds per direction. A 16:9 view 60° wide is 36° tall, 0.620 sr, 4.9% of the sky,

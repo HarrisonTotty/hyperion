@@ -4428,3 +4428,12 @@ generator-version change made here, not in R06.
       - Each interval on the grid passes at least one more of its values, so the grid branch takes
         at most n knots, and `built.len() > 2n` is never true there.
       - It is left as it is, since removing it would move nothing.
+- **The local V light is low (a pointer from rendering plan R06, 2026-10-06,
+  `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
+  the fixture's V light is 0.0417 L☉ pc⁻³, 26% under Flynn et al. 2006's 0.056 ± 10%, uniformly
+  across magnitudes, so the deficit is light per unit mass in the turnoff stars and clump giants
+  (M_V 4 to 0), and the column's light is 21% (0.26 mag) low. A calibration finding for plans 02
+  and 06 (and plan 11 for the pair light): the tracks' turnoff and clump light is one of the four
+  candidates, with plan 02's SFH, young disc height and Chabrier's scale. The measurement, and the
+  comparison of the fixture's Φ(M_V) with Hipparcos/CNS5 that parts them, are in plan 02's Risks,
+  "The local V light is low". A fix is a `GENERATOR_VERSION` change.

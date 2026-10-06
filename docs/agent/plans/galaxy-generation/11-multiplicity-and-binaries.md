@@ -2509,3 +2509,10 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     moves more output, so it is held out of version 20 as P11.T4.h, for the next bump, with the
     §3.2 tests as gates. The work in progress is in
     `.git/rm23-scratch/p14j/eagb-core-wip.patch`.
+- **The local V light is low, and the pair light (a pointer from rendering plan R06, 2026-10-06,
+  `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
+  the fixture's V light is 26% under Flynn et al. 2006's 0.056 ± 10% L☉ pc⁻³ (plan 02's Risks,
+  "The local V light is low"). A calibration finding for plans 02 and 06, and for this plan through
+  the pair light: R06's luminosity function is the generator's own quadrature of IMF × SFH ×
+  tracks, with R06.T5.d's pair correction drawn by this plan's laws. A fix is a
+  `GENERATOR_VERSION` change.
