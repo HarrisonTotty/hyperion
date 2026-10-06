@@ -524,7 +524,8 @@ Acceptance: `just ci`.
   directory plan 04 reserved, through its `UniverseStore`: append on change, load on open, an
   unknown version is `LoadKnowledgeError::UnsupportedFormat`, a torn last line is dropped with a
   `tracing::warn!`. Writes go through `spawn_blocking`. Tests: round trip; reopening a universe
-  restores contacts and acknowledgements.
+  restores contacts and acknowledgements. How durable the directory and the appends are on each
+  platform is plan 04's P04.T17.b.
 
 Files: `crates/hyperion-server/src/knowledge/{mod,record,store,persist}.rs`. Acceptance:
 `cargo test -p hyperion-server knowledge`.
@@ -715,6 +716,11 @@ under plan 04's convention: a defaulted `mode`, new request kinds, and the first
   wants soft and hard bands replaces the constant with a function of energy; nothing else changes.
 - **FU Orionis outbursts** are treated as local events. The research notes route them through
   star-forming-region features; if plan 09 lists them at feature level they join T5.d instead.
+- **The alert service's appends on macOS (P12.T8; plan 04, P04.T17.b).** Each Knowledge change is
+  appended and synced before it is applied (T7.b). std's `sync_data` on Apple is
+  `fcntl(F_FULLFSYNC)`, which flushes the drive's cache, so each line costs one full flush. If the
+  service's sighting bursts make that visible, batch several lines per sync, still synced before
+  any of them is applied. Measure on the Mac when T8 lands.
 - **T0, T1, T2 and T4 as built (lane `obs12a`, 2026-09-29, at `GENERATOR_VERSION` 14).** Done;
   T3 is held until the v15 commit. No generated output moves and no golden changes: observation
   and lensing only read. Names and shapes that differ from the sketches:

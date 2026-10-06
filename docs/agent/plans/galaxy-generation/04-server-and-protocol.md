@@ -660,7 +660,8 @@ Accept: `just ci` green; `just server` starts and creates no files until a unive
 17), `UniverseStore::new(&Path)`, `scan() -> Result<Vec<SavedUniverse>, ScanStoreError>` (skips and
 logs with `tracing::warn!` any directory whose name is not 16 hex digits, whose file is unreadable,
 or whose `id` disagrees with its directory), `write(&SavedUniverse) -> Result<(), WriteSaveError>`
-(temporary file, `sync_all`, rename, then sync the directory). All of it is blocking code called
+(temporary file, `sync_all`, rename, then sync the file under its new name and the directory, which
+Windows does not have; P04.T17.b). All of it is blocking code called
 through `spawn_blocking` by the registry.
 
 Tests (temporary directories): write then scan round-trips; a file with an extra unknown field
@@ -1801,3 +1802,34 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     shutdown slow enough to interrupt, which the binary has no seam for, and would depend on timing.
   - _Windows._ Its listeners compile under the Windows Clippy and are untested: no Windows runner
     exists, and raising a console event takes a Win32 call that needs `unsafe`.
+- **Deviations in T17.b, as built.**
+  - _Tests._ None are new, as the task says. The sync under the new name has no effect short of a
+    crash. The step is not gated, so the store tests run it on every platform, Linux included.
+    This was checked by hand by pointing the step at the vanished temporary name. Then 13 of the 17
+    tests in `universe::store` and `knowledge::persist` failed with `"sync renamed file"`, and all
+    passed again once it was reverted. `a_failed_write_reports_the_operation_and_path`, which the
+    task lists, fails at `"create directory"` and never reaches the step. The tests that do reach
+    it include `write_then_scan_round_trips`, `no_temporary_file_is_left_behind`, every
+    persistence test that writes a save, and `the_json_on_disk_equals_the_pinned_form`. That last
+    one also shows that opening the file again for writing leaves it whole.
+  - _Where the account lives._ The platforms' durability is set out in `UniverseStore::write`'s
+    docs, not the module docs. `store` is a private module, so rustdoc never shows its module docs
+    to a reader of the re-exported `write`, and the module docs now point to `write`. Both
+    `sync_directory`s and `write_file_durably` link there as well. On review, the Windows text
+    reads as an expectation. NTFS logs metadata changes in one sequential log, so the file's flush
+    is expected to carry the rename or the new entries with it, as PostgreSQL relies on, but
+    Microsoft documents no such guarantee. `WriteSaveError::Io`'s list of operations gains
+    `"sync renamed file"`.
+  - _Cost._ A save's write is now four syncs: the temporary file, the renamed file, the universe's
+    directory and the directory of universes. On macOS each is an `F_FULLFSYNC`, which the creation
+    of a universe can afford.
+  - _Open point, found on review, not changed._ The first save may create the data directory and
+    `universes/` with `create_dir_all`. Their own entries, in the data directory and its parent, are
+    synced on no platform. POSIX would allow a power cut soon after the first save to lose it, on
+    Unix too. In practice ext4 and XFS commit those entries with the later syncs, since their
+    journals are sequential. The docs state this. The fix would be to sync the parent of each
+    directory that `create_dir_all` created. That is a Unix durability change outside this ruling,
+    and is left to the orchestrator.
+  - _By hand on the owner's Mac._ `cargo test -p hyperion-server -- store knowledge` checks once
+    that APFS takes `F_FULLFSYNC` on a directory (the ruling's relay 2). Not run: there is no Mac
+    here.
