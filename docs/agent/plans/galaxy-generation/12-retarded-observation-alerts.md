@@ -620,14 +620,15 @@ the owner to read, as plan 05 does for its own.
 ### P12.T11 Client: mode and observed readout
 
 `SegmentMark` in plan 05's `spatial/marks.ts`, `drawList.ts` and `paint.ts` (solid or dashed,
-clipped to the viewport, not pickable). `ModeControl` (`NOW` / `OBSERVED`, a display control and not
-a ship command, single-key binding shown), `ObserverMark` on the chart with a "set observer to chart
-centre" control and its coordinates in the readout. In observed mode the chart still draws present
-positions; the selected system, and any system whose apparent offset exceeds four pixels, gets the
-apparent tick and dashed joiner from the pure helper `apparentOffset`. The readout shows state
-`AS OBSERVED`, light age, emitted time, the present position with `~` and the stated error, and an
-em dash for present state, which the crew cannot know. The mode label sits beside the frame and the
-time.
+clipped to the viewport, not pickable) (its width and dash in CSS px, drawn by `paint.ts` at
+R07.T16.f's line scale; decision-thin-line-contrast). `ModeControl` (`NOW` / `OBSERVED`, a display
+control and not a ship command, single-key binding shown), `ObserverMark` on the chart with a "set
+observer to chart centre" control and its coordinates in the readout. In observed mode the chart
+still draws present positions; the selected system, and any system whose apparent offset exceeds
+four pixels, gets the apparent tick and dashed joiner from the pure helper `apparentOffset`. The
+readout shows state `AS OBSERVED`, light age, emitted time, the present position with `~` and the
+stated error, and an em dash for present state, which the crew cannot know. The mode label sits
+beside the frame and the time.
 
 Files: under `apps/hyperion/src/renderer/src/`: `spatial/{marks,drawList,paint}.ts`,
 `displays/galaxy/{LocalChartPanel,ChartControls,SystemReadout,useRangeQuery}.ts(x)`,

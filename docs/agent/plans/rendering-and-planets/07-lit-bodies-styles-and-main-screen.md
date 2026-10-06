@@ -1592,10 +1592,10 @@ tone-mapped image is a following canvas pass with `FrameSubmission.colourLoad` `
 sRGB view, in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6).
 Acceptance: `just ci`; the guide edit is one commit for the owner.
 
-T16 is built as five subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.c (a ruled split,
-under the orchestrator's pre-authorisation of 2026-10-06, when T16 moved to the views lane;
-T16.d and T16.e were added after T16.a by decision-r07-t16a, before the guide's draft, so that
-the draft states what they build). The paragraph above stays the
+T16 is built as six subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.f, T16.c (a ruled split,
+under the orchestrator's pre-authorisation of 2026-10-06, when T16 moved to the views lane; T16.d
+and T16.e were added after T16.a by decision-r07-t16a, and T16.f by decision-thin-line-contrast,
+before the guide's draft, so that the draft states what they build). The paragraph above stays the
 task's whole specification: each subtask builds its share of it, and each runs the console-ux
 skill's scripts.
 
@@ -1643,40 +1643,60 @@ src/renderer/src/view/wireframe src/renderer/src/displays/view`, `just test-rend
   most 52.5rem, or a ruling asked for. Acceptance: `pnpm --filter hyperion exec vitest run
 src/renderer/src/view/post src/renderer/src/view/photometry src/renderer/src/displays/view`, the
   console-ux skill's scripts, `just ci`.
-- **R07.T16.d Strokes at the display's density, and one slope term for both occluders.** R02's
-  `wireframe/drawList.ts`, `wireframe/submit.ts`, `shaders/occluder.wgsl`,
+- **R07.T16.d Strokes of at least 2 device pixels, and one slope term for both occluders.** R02's
+  `wireframe/drawList.ts`, `wireframe/symbology.ts`, `wireframe/submit.ts`, `shaders/occluder.wgsl`,
   `shaders/occluderSphere.wgsl` and `scenes/precision.test.ts`, `photoreal/overlay.ts`,
-  `displays/view/viewFrameDrawer.ts`, R05's `spike/spikeRun.ts` and `spike/DescentSpike.tsx`,
-  and `smoke/wireframe.ts` (decision-r07-t16a, items 1 and 2). `STROKE_PX`, `CASING_PX`,
-  `PREDICTED_DASH_PX` and the view's `SYMBOL_STROKE_PX` are the guide's CSS pixels.
+  `displays/view/viewFrameDrawer.ts`, R05's `spike/spikeRun.ts` and `spike/DescentSpike.tsx`, and
+  `smoke/wireframe.ts`, and `lib/strokes.ts` (new) (decision-r07-t16a, items 1 and 2;
+  decision-thin-line-contrast, items 2 and 4). `STROKE_PX`, `CASING_PX`, `PREDICTED_DASH_PX` and the
+  view's `SYMBOL_STROKE_PX` are the guide's CSS pixels. `lib/strokes.ts` holds
+  `MIN_STROKE_DEVICE_PX` (2), `lineScale(devicePixelRatio)`, the larger of the ratio and 2,
+  `markStrokeDevicePx(devicePixelRatio)`, the larger of 1.5 × the ratio and 2, and
+  `markShiftDevicePx(devicePixelRatio)`, half the second less 0.75 × the ratio.
   `buildWireframeDrawList` takes a required `strokeScale`, the device pixels drawn for each,
-  `max(1, devicePixelRatio)` from its callers, and multiplies every batch's width, casing and
-  dash and every symbology stroke by it. The list carries `strokeScale` and `occluderSlopePx`,
+  `lineScale` of the ratio from its callers, and multiplies every batch's width, casing and dash by
+  it. It also takes a required `markStrokePx`, `markStrokeDevicePx` of the ratio, at which every
+  symbology outline is drawn. Each outline widens outward, so that what lies inside it stays: a
+  symbol's line moves out by `markShiftDevicePx`, a ringed circle's disc by that and its ring by
+  three times that, and every reticle by four times that. The list carries `strokeScale`,
+  `markStrokePx` and `occluderSlopePx`,
   ⌈(`STROKE_PX.heavy` + 2 × `CASING_PX`) × `strokeScale` ÷ 2 + 1⌉ px (Design note 5's
-  w_max ÷ 2 + 1, rounded up: 3 at a scale of 1, 5 at 2). `overlayDrawList` cases every batch to
-  at least `CASING_PX` × `strokeScale`. Both occluders take `occluderSlopePx` as a uniform and
-  push their depth away in the fragment by that many pixels of the depth's screen slope, its
-  magnitude: the sphere as built, in place of its `SLOPE_SCALE`; the hull faces from the
+  w_max ÷ 2 + 1, rounded up: 3 at a scale of 1, 5 at 2). `overlayDrawList` cases every batch to at
+  least `CASING_PX` × `strokeScale`. Both occluders take `occluderSlopePx`
+  as a uniform and push their depth away in the fragment by that many pixels of the depth's screen
+  slope, its magnitude: the sphere as built, in place of its `SLOPE_SCALE`; the hull faces from the
   derivatives of their rasterised depth, exact on a plane, less a constant of 2⁻¹⁶ of the depth
   (Design note 5's 128 units at the larger unit, now the same on every backend), written as
   `frag_depth`. The hull material sets no hardware bias, and `HULL_OCCLUDER_BIAS` and
-  `OccluderMesh.depthBiasAway` go. Below a ratio of 1 every width stays as built; the
-  antialiasing fringe and the stars' point-spread function stay in device pixels. Tests: at
-  `strokeScale` 2 every batch's width, casing and dash and every symbology stroke are twice those
-  at 1, and `occluderSlopePx` is 5; through the drawer, the hull's line draws under `symbology`
-  are `[7, 3]` at a ratio of 2 and `[3.5, 1.5]` at 1 and at 0.78125; the overlay cases to 2 at a
-  scale of 2; both occluder materials take `occluderSlopePx`, and the hull material has no
-  `depthBiasAway`; the precision scene's hidden-line tests take the constant 2⁻¹⁶ in place of
-  their two ends. In `just test-render`: `checkCasedHullEdge` on a face whose depth gradient runs
-  at 45° to the screen's axes, at scales 1 and 2, draws every texel of the cased edge that it
-  draws with no face, the casing's outer texel included; a hull face's depth at a diagonal texel
-  equals the push by the slope's magnitude computed in `f64`, within a tenth of its difference
-  from the larger component's; `checkSphereSlope` reads the uniform; R02.T14.c's show-through
-  check passes unchanged. By hand, not committed: with the hardware's slope term put back, the
-  diagonal check fails on a backend that takes the larger component. Acceptance:
+  `OccluderMesh.depthBiasAway` go. No line, casing or symbology outline is narrower than 2 device
+  pixels at any ratio; the antialiasing fringe and the stars' point-spread function stay in device
+  pixels. Tests: at `strokeScale` 2 every batch's width, casing and dash are twice those at 1, and
+  `occluderSlopePx` is 5; at ratios 0.78125, 1, 2 and 3, `lineScale` is 2, 2, 2 and 3,
+  `markStrokeDevicePx` 2, 2, 3 and 4.5, and `markShiftDevicePx` 0.41, 0.25, 0 and 0; every symbology
+  outline is drawn at `markStrokePx`; at those ratios, outside their as-built radii: a class-0 body
+  symbol's line lies 0.41, 0.25, 0 and 0 px out; a ringed circle's disc lies as much out and its
+  ring three times as much; a reticle's half-size four times as much; through the drawer, the hull's
+  line draws under `symbology` are `[7, 3]` at ratios of 2, 1 and 0.78125 and `[10.5, 4.5]` at 3;
+  the overlay cases to 2 at ratios of 0.78125, 1 and 2; both occluder materials take
+  `occluderSlopePx`, and the hull material has no `depthBiasAway`; the precision scene's hidden-line
+  tests take the constant 2⁻¹⁶ in place of their two ends. In `just test-render`:
+  `checkCasedHullEdge` on a face whose depth gradient runs at 45° to the screen's axes, at scales 1
+  and 2, draws every texel of the cased edge that it draws with no face, the casing's outer texel
+  included; a hull face's depth at a diagonal texel equals the push by the slope's magnitude
+  computed in `f64`, within a tenth of its difference from the larger component's;
+  `checkSphereSlope` reads the uniform; R02.T14.c's show-through check passes unchanged.
+  `checkStrokeContrast` draws on a `--surface-0` target: a 1 px `--text-muted` circle; 1 px
+  `--text-muted` lines at 0°, 3° and 45°; a 1.5 px `--text-muted` line; a dashed `--text` predicted
+  path; and an open body symbol in `--text` with its `--accent` reticle and a `--target` reticle.
+  They are built by `buildWireframeDrawList` at the `strokeScale` and `markStrokePx` of ratios
+  0.78125, 1 and 2, and again through the overlay over a loaded `--text`. At every texel of length
+  along each stroke, the brightest texel across it reaches 6.0:1 against `--surface-0` by WCAG's
+  formula on the 8-bit texel. A control at a `strokeScale` of 1 reads under 6 for the 1 px circle
+  (decision-thin-line-contrast, item 4). By hand, not committed: with the hardware's slope term put
+  back, the diagonal check fails on a backend that takes the larger component. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/wireframe
 src/renderer/src/view/scenes src/renderer/src/view/photoreal src/renderer/src/view/spike
-src/renderer/src/displays/view`,
+src/renderer/src/displays/view src/renderer/src/lib`,
   `just test-render`, the console-ux skill's scripts, `just ci`.
 - **R07.T16.e Craft over the image: windows of glass, opaque faces as silhouettes, and their
   note.** R02's `scene/hull.ts`, `scenes/precision.test.ts`, `wireframe/drawList.ts`,
@@ -1711,23 +1731,109 @@ src/renderer/src/displays/view`,
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene src/renderer/src/view/scenes
 src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src/displays/view`,
   `just test-render`, the console-ux skill's scripts, `just ci`.
+- **R07.T16.f Strokes of 2 device pixels on the spatial displays and the galaxy map.**
+  **Files:** P05's `spatial/paint.ts` and `spatial/LegendSymbol.tsx`, `styles.css`,
+  `displays/galaxy/DensityLegend.tsx`, `lib/strokes.ts`, `main.tsx`, a new `smoke/spatial.ts`
+  (registered in `smoke/page.ts`), and the console-ux skill's `scripts/contrast.py`
+  (decision-thin-line-contrast, items 2 to 4).
+  **The canvas.**
+  - `paint` draws every op but a symbol and a reticle with `lineWidth` set to its `widthPx` ×
+    `lineScale(pixelRatio)` ÷ `pixelRatio`.
+  - It draws a symbol's and a reticle's outline at `markStrokeDevicePx(pixelRatio)` ÷
+    `pixelRatio`.
+  - With δ = `markShiftDevicePx(pixelRatio)` ÷ `pixelRatio`, it moves outlines out: a symbol's
+    path radius by δ, a ringed circle's disc by δ and its ring by 3δ, and a reticle's half-size by
+    4δ.
+
+  So a 1 px line is 2 device px below a ratio of 2, and an outline widens outward, keeping every
+  hole and the ringed circle's gap. Nothing in `spatial/drawList.ts` or
+  `lib/galaxy/hrProjection.ts` changes.
+  **The DOM's SVG strokes.** `lib/strokes.ts` gains `strokeProperties(devicePixelRatio)`, with two
+  properties:
+  - `--line-scale`: `lineScale` ÷ the ratio;
+  - `--mark-stroke`: `markStrokeDevicePx` ÷ the ratio, in px.
+
+  `main.tsx` sets them on the root before the first render, and again whenever the ratio changes
+  (`watchStrokeProperties`, a `matchMedia` resolution listener). `:root` holds their values at a
+  ratio of 2, `1` and `1.5px`. The stylesheet's SVG strokes take them:
+  - the galaxy map's cursor and centre marks, `var(--mark-stroke)` over a casing of
+    `calc(var(--mark-stroke) + 2px * var(--line-scale))`;
+  - the axis triad, the core arrow and every `.symbol-legend__mark`, `var(--mark-stroke)`;
+  - the orbit legend's paths, `calc(1px * var(--line-scale))` and
+    `calc(2px * var(--line-scale))`;
+  - `DensityLegend`'s ticks, `calc(1px * var(--line-scale))`, through a class in place of
+    `strokeWidth={1}`;
+  - the disclosure chevron (`.glyph--disclosure polyline`), `vector-effect: non-scaling-stroke`
+    and `stroke-width: max(var(--mark-stroke), 0.105em)`.
+
+  `LegendSymbol` widens its outline outward as `paint` does: δ, and for a ringed circle δ and 3δ,
+  converted to its box's units with the ratio and the root's rem from `useStrokeMetrics` (new in
+  `lib/strokes.ts`, updated on a change of either). `SunGlyph` and `EarthGlyph` are text and stay
+  as they are.
+  **`contrast.py`** gains `--coverage C` (0 < C ≤ 1), which blends the foreground over the
+  background at that coverage before scoring, and `--blend srgb|linear`: sRGB-encoded values by
+  default (Canvas 2D, SVG and the DOM), or linear light (the view). Its docstring says a stroke
+  scores its pair's ratio, to within 1%, only at 2 device pixels or more.
+  **Tests.**
+  - Through the recording context, at ratios 0.78125, 1, 2 and 3:
+    - a line op's `lineWidth` is 2.56, 2, 1 and 1 times its `widthPx`;
+    - a symbol's and a reticle's `lineWidth` is 2.56, 2, 1.5 and 1.5;
+    - an open circle's arc radius is its as-built radius plus 0.53, 0.25, 0 and 0;
+    - a ringed circle's disc arc is its as-built radius plus the same, and its ring plus 1.59,
+      0.75, 0 and 0;
+    - a reticle's half-size is its as-built size plus 2.12, 1, 0 and 0.
+  - A class-2 open ringed circle at 0.78125 keeps the hole and the gap round its disc that it has
+    as built: 1.56 device px at 100% and 0.94 at 80%.
+  - `LegendSymbol`'s outline radius moves out by the same shifts in its box's units.
+  - `strokeProperties` gives `2.56`/`2.56px`, `2`/`2px`, `1`/`1.5px` and `1`/`1.5px`.
+  - `watchStrokeProperties` sets the root on a change of ratio and stops when disposed.
+  - Each SVG rule named above, read as text from `styles.css`, takes its property.
+  - `DensityLegend`'s ticks carry the class.
+  - None of the strokes changed here sits on `--surface-2`, the one surface where a 2 px stroke in
+    `--text-muted` comes within 1% of 6:1.
+  - By hand, recorded in the as-built entry:
+    `contrast.py text-muted surface-0 --coverage 0.5 --blend linear` prints 4.11:1 FAIL, and
+    `--coverage 0.39` prints 1.97:1 FAIL.
+
+  **In `just test-render`,** `checkSpatialStrokeContrast` (group "R07.T16.f spatial strokes")
+  uses `paint` to draw a draw list on a 2D canvas whose backing store stands for the device, at
+  ratios 0.78125, 1 and 2. The list holds: a 1 px `--text-muted` circle; 1 px lines at 0°, 3° and
+  45°; a 1 px `--text` circle with its ticks; a 2 px `--text` polyline; an open class-0 circle
+  and an open class-2 ringed circle in `--accent`; an `--accent` reticle and a `--target`
+  reticle; and all of these again in the stale tokens. The check asserts:
+  - at every device pixel of length along each stroke, the brightest pixel across it reaches
+    6.0:1 against `--surface-0` by WCAG's formula;
+  - the open circle's centre pixel and the ringed circle's disc centre read `--surface-0`;
+  - a control, a 1 CSS px circle stroked directly at 0.78125, reads under 6.
+
+  **By hand, hidden:** `GALAXY`'s local chart and the orbit map, captured at 1920 × 1080 at a
+  forced device scale factor of 0.78125, for the owner's look at the guide's draft.
+  **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/spatial
+src/renderer/src/displays/galaxy src/renderer/src/displays/system src/renderer/src/components
+src/renderer/src/lib`,
+  `just test-render`, the console-ux skill's scripts, `just ci`.
+
 - **R07.T16.c The guide's draft, for the owner.** `docs/frontend/ux-guidelines.md` alone, in one
-  `docs(guide)` commit, after T16.e, so that it states what is built: decision-r07-t8a-meter's
-  "In T16" edits, fitted to the guide as T19.d signed it off (the data-state bullet's inhibit
-  sentence and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row; the `NO IMAGE TO METER`
-  row's added sentence; the new Status row of the three statuses with their remedy clauses), and
-  a pointer to that row from the `METER` row (decision-r07-t19b-exposure-fit, item 4), each
-  tagged as T16's draft, ending in "the owner signs off". It also takes the two points left for
-  the guide: the meter's `SELECT` legend, left "for T16's draft" by T13 after review (a `Label`
-  row, or the reason a group's legend needs none), and the data-state bullet's "offers `MAN`
-  only", which reads against E5 (T19.d's open points, for the owner's next guide edit). It also
-  drafts decision-r07-t16a's guide text, as T16.d and T16.e built it: the unit of a width, a
-  Layout bullet; a view's strokes at the display's density, in the Views bullet's paragraph on
-  both styles; the craft's silhouette, as the one exception in "Outlines for symbology"; the
-  craft note's Label row; and the added clauses of the `WIREFRAME`, `PHOTOREALISTIC` row and the
-  `TEST HULL` row. Nothing else is new: `BODY PHOTOMETRY: NOT YET MODELLED` is signed off
-  (T19.d), and the several views' refusal adds no entry (decision-r07-t18, item 6). Tests: each
-  status the draft adds is a string in the code, in the words T16.b built. Acceptance:
+  `docs(guide)` commit, after T16.f, so that it states what is built: decision-r07-t8a-meter's "In
+  T16" edits, fitted to the guide as T19.d signed it off (the data-state bullet's inhibit sentence
+  and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row; the `NO IMAGE TO METER` row's added
+  sentence; the new Status row of the three statuses with their remedy clauses), and a pointer to
+  that row from the `METER` row (decision-r07-t19b-exposure-fit, item 4), each tagged as T16's
+  draft, ending in "the owner signs off". It also takes the two points left for the guide: the
+  meter's `SELECT` legend, left "for T16's draft" by T13 after review (a `Label` row, or the reason
+  a group's legend needs none), and the data-state bullet's "offers `MAN` only", which reads against
+  E5 (T19.d's open points, for the owner's next guide edit). It also drafts decision-r07-t16a's
+  guide text, as T16.d, T16.e and T16.f built it: the unit of a width and the floor of 2 device
+  pixels, a Layout bullet; a stroke's contrast as drawn, a Colour bullet (both
+  decision-thin-line-contrast); a view's strokes as Layout gives them, in the Views bullet's
+  paragraph on both styles; the craft's silhouette, as the one exception in "Outlines for
+  symbology"; the craft note's Label row; and the added clauses of the `WIREFRAME`, `PHOTOREALISTIC`
+  row and the `TEST HULL` row. Nothing else is new: `BODY PHOTOMETRY: NOT YET MODELLED` is signed
+  off (T19.d), and the several views' refusal adds no entry (decision-r07-t18, item 6). Tests: each
+  status the draft adds is a string in the code, in the words T16.b built; each note it adds is a
+  string in the code, in the words T16.e built; and each width and colour the text gives is the
+  code's, `lineScale` and `markStrokeDevicePx` included (decision-r07-t16a;
+  decision-thin-line-contrast). Acceptance:
   `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the console-ux skill's scripts.
 
 #### R07.T17 The low setting and benchmarks
@@ -3732,8 +3838,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       scaled by `devicePixelRatio`), so at a ratio of 2, as on a Retina Mac, every stroke and
       casing is half a CSS pixel. It is R02's; the casing over the image now depends on it, and
       the slope bias is reasoned in device pixels too. Scale them by the ratio, or record device
-      pixels as the unit. _Ruled (decision-r07-t16a, item 2): CSS pixels, drawn at
-      `max(1, devicePixelRatio)` device pixels each (T16.d)._
+      pixels as the unit. _Ruled (decision-r07-t16a, item 2; decision-thin-line-contrast, item
+      2): CSS pixels. A line or casing, and a dash's length, is drawn at the larger of the ratio
+      and 2 device pixels each, and a mark's outline at the larger of 1.5 × the ratio and 2,
+      widened outward (T16.d, T16.f)._
     - The image has no hull in it, so the sky and its stars show inside a craft's cased outline,
       where the wireframe's faces hide them. Design note 17 keeps craft as outlines until R11;
       occluding the image under the hull's faces until lit craft exist would be a ruling. _Ruled
@@ -3754,6 +3862,18 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     in the split, T16.b's bare statuses beside `ENABLE` and under `AUTO NOT AVAILABLE`, T8.a's
     focus consider given to T16.b, and `SELECT` and the "offers `MAN` only" wording given to
     T16.c.
+- **Thin lines and the 6:1 (decision-thin-line-contrast).** The guide's 6:1 binds a line or an
+  outline as drawn: the brightest device pixel across it, at its worst position on the grid. No
+  line or outline that a canvas, an SVG or a view draws is under 2 device pixels (T16.d, T16.f).
+  At that width it scores within 1% of its pair. Below a ratio of 2 every line is wider than its
+  CSS width: 2.56 times at 0.78125, the development machine's and the UHD 620's ratio. A ringed
+  circle grows up to 2δ more than other marks, so that the gap round its disc stays. Stated
+  limits:
+  - the DOM's own SVG strokes are tested by width, not captured;
+  - the chrome's borders and outlines rest on Chromium's snapping of border widths to whole
+    device pixels;
+  - a projector's optics and scaler lie outside the pixels the checks read;
+  - text, `☉` and `⊕` are scored on their pair.
 - **Deviations in T16.b, as built** (2026-10-06; the views lane).
   - **Files.** The five the subtask lists. Beyond them: `styles.css` (the run class's comment);
     `test/fakeViewEngine.ts`, whose histogram read-back now weighs a `FakeMeteredImage` by the

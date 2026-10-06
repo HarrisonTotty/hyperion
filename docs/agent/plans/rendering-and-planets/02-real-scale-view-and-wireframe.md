@@ -386,7 +386,8 @@ the call sites here change.
 
    A body's occluder sphere, which writes its own depth (`occluderSphere.wgsl`), takes the same
    slope term in the fragment: its exact ray-sphere depth is pushed away by `SLOPE_SCALE` = 3 px
-   (`occluderSlopePx` since R07.T16.d, which follows the strokes' scale: 3 px at 1, 5 at 2)
+   (`occluderSlopePx` since R07.T16.d, which follows the strokes' scale: 3 px at 1, 5 at 2, the
+   scale being at least 2 by decision-thin-line-contrast)
    (w_max ÷ 2 + 1 for a 1.5 px stroke with 1 px casings, rounded up) of the depth's screen slope,
    taken from the tangent plane at the hit point, its magnitude (the gradient's length, not its larger
    component, which falls up to √2 short where the gradient runs diagonally; corrected in RM1
@@ -447,8 +448,9 @@ the call sites here change.
    antialiasing. Every stroke is a segment instance expanded to a screen-space quad in `lines.wgsl`,
    with coverage computed analytically in the fragment shader over the stroke's width plus a pixel,
    depth-tested against the occluders and never writing depth. A cased mark is two strokes of one
-   instance: the casing at the guide's width (the guide's CSS pixels, drawn at
-   `max(1, devicePixelRatio)` device pixels each since R07.T16.d; decision-r07-t16a) in
+   instance: the casing at the guide's width (the guide's CSS pixels, drawn at the larger of the
+   ratio and 2 device pixels each since R07.T16.d, and a symbology outline at the larger of 1.5 ×
+   the ratio and 2, widened outward; decision-r07-t16a, decision-thin-line-contrast) in
    `--surface-0`, then the coloured stroke, so that the casing is a solid outline, never a blur
    (guide, "Graphs, schematics and spatial displays").
    Babylon's GreasedLine has WGSL shaders (checked on its main branch, 2026-09-29), so it would not

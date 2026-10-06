@@ -2561,7 +2561,9 @@ idle motion, DOM text, keyboard for everything.
   frame always shown, dashes for predicted paths, `--target` for commanded ones, shape for type):
   orbits are solid `--text-muted` ellipses (7.22:1 on `--surface-0`), reference marks like range
   rings and not predictions, so never dashed, and the selected body's orbit is a solid `--text`
-  line 2 px wide because colour alone must not carry the selection (ruling 44.2); zones and belts are labelled annuli drawn as their two
+  line 2 px wide because colour alone must not carry the selection (ruling 44.2; drawn at 4 device
+  pixels below a ratio of 2, twice an orbit's 2, since R07.T16.f (decision-thin-line-contrast));
+  zones and belts are labelled annuli drawn as their two
   edges in `--text-muted`, a belt's edges joined by short radial ticks every 10°, with no fill,
   hatch or dots, since hazard striping is the guide's only pattern fill; `--line` (1.38:1) stays for
   the grid and the scale rings on the reference plane only, because orbits and zone and belt edges
