@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import { goldenLevelTable } from "../../test/terrainFixtures";
@@ -21,6 +21,7 @@ import { stretchKeys } from "./demandRecord";
 import {
   DescentRefused,
   defaultSpikeWorkers,
+  FRAME_MEASURE,
   prepareDescent,
   type PreparedDescent,
   type SpikeFrameInput,
@@ -143,6 +144,30 @@ describe("the spike's run", () => {
     expect(engine.inner.views.flatMap((view) => view.frames).length - before).toBe(3);
     expect(samples[0]?.passesSubmitted).toBe(5);
     run.dispose();
+  });
+
+  it("spans each frame's whole callback once, as its callbackMs, and keeps no entry of it", async () => {
+    const measure = vi.spyOn(performance, "measure");
+    const { run, samples } = await made();
+    run.frame(input(0));
+    run.frame(input(16.7));
+    expect(performance.getEntriesByName(FRAME_MEASURE)).toEqual([]);
+    run.dispose();
+    const spans = measure.mock.calls.flatMap(([name, options]) =>
+      name === FRAME_MEASURE &&
+      typeof options === "object" &&
+      typeof options.start === "number" &&
+      typeof options.end === "number"
+        ? [options.end - options.start]
+        : [],
+    );
+    expect(spans).toHaveLength(2);
+    expect(spans).toEqual(samples.map(({ callbackMs }) => callbackMs));
+  });
+
+  it("names the frame's span as the main process's reducer reads it", () => {
+    // `reduceTrace.ts` holds its own copy of the literal, pinned by its test too.
+    expect(FRAME_MEASURE).toBe("spike.frame");
   });
 
   it("tells of each patch it first requests", async () => {

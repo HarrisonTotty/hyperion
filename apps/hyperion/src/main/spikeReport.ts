@@ -119,20 +119,26 @@ function streaming(value: unknown): SpikeStreamingSegment | null {
 
 /**
  * The trace's windows, or `null` unless each is a start then a later stop request, every window
- * after the one before it.
+ * after the one before it, and only the last failed by the renderer, with a reason.
  */
 function traceWindows(value: unknown): SpikeTraceWindow[] | null {
   const windows = listOf(value, (item): SpikeTraceWindow | null => {
     if (!isRecord(item)) {
       return null;
     }
-    const { startedMs, stopRequestedMs } = item;
-    return isFinite(startedMs) && isFinite(stopRequestedMs) && stopRequestedMs >= startedMs
-      ? { startedMs, stopRequestedMs }
+    const { startedMs, stopRequestedMs, failure } = item;
+    const failureOk = failure === null || (typeof failure === "string" && failure.length > 0);
+    return isFinite(startedMs) &&
+      isFinite(stopRequestedMs) &&
+      stopRequestedMs >= startedMs &&
+      failureOk
+      ? { startedMs, stopRequestedMs, failure }
       : null;
   });
   const ordered = windows?.every(
-    (window, i) => i === 0 || window.startedMs >= (windows[i - 1]?.stopRequestedMs ?? Infinity),
+    (window, i) =>
+      (i === 0 || window.startedMs >= (windows[i - 1]?.stopRequestedMs ?? Infinity)) &&
+      (window.failure === null || i === windows.length - 1),
   );
   return ordered === true ? windows : null;
 }
@@ -183,10 +189,20 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     (isRecord(terrain) &&
       (terrain["vertexPath"] === "baked-offsets" || terrain["vertexPath"] === "face-differences") &&
       (terrain["normals"] === "double" || terrain["normals"] === "mesh"));
-  const { scriptStartMs, warmupS, timer, untimedPasses, uploadBytes, adapterPeakBytes } = value;
+  const {
+    scriptStartMs,
+    traceGuardS,
+    warmupS,
+    timer,
+    untimedPasses,
+    uploadBytes,
+    adapterPeakBytes,
+  } = value;
   if (
     !isFinite(scriptStartMs) ||
     windows === null ||
+    !isFinite(traceGuardS) ||
+    traceGuardS < 0 ||
     passes === null ||
     segments === null ||
     levels === null ||
@@ -207,6 +223,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   return {
     scriptStartMs,
     traceWindows: windows,
+    traceGuardS,
     warmupS,
     segments,
     levels,

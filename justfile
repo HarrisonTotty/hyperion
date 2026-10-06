@@ -107,15 +107,47 @@ descent-demand *args: gen-surface
 # The descent spike (R05.T13.c): builds everything, starts a local server with `--num-workers 2`
 # and runs the client's `--descent-spike` with the spike's options (`--setting high|low`,
 # `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`, `--vertex-path`, `--normals`,
-# `--ridged on|off`, `--dawn-safety on|off`, `--capture <dir>`) and the recipe's own:
-# `--companion-load <threads>` (Design note 20), `--cold-cache` (an empty GPU shader cache) and
-# `--hidden` (the window never shown). `--smoke` runs 10 s hidden and exits with a status. A run
+# `--ridged on|off`, `--dawn-safety on|off`, `--capture <dir>`, `--trace-profile on|off`) and the
+# recipe's own: `--companion-load <threads>` (Design note 20), `--cold-cache` (an empty GPU shader
+# cache) and `--hidden` (the window never shown). The trace is taken in windows of script time
+# (R05.T14.e), with V8's CPU profiler only under `--trace-profile on`, a diagnostic run that is
+# never judged. `--smoke` runs 10 s hidden, its trace in three windows, and exits with a status. A
+# run's profile, where its trace windows wait, is under `target/descent-spike/`, on disk. A run
 # writes its results under `docs/measurements/descent-spike/`. Not part of `ci`.
 # Run the descent spike, e.g. `just descent-spike --setting low` or `just descent-spike --smoke`.
 [positional-arguments]
 descent-spike *args:
     just build
     bash apps/hyperion/scripts/descentSpike.sh "$@"
+
+# The several-views check (R07.T20): builds the client and runs it with `--views-check`, which
+# opens VIEW on the kept PHASE TEST scene, drives it through its phases (a photorealistic primary
+# alone and with two wireframe instruments, a resize of the primary alone, a wireframe primary with
+# two wireframe instruments, with a photorealistic and a wireframe instrument, and alone) and
+# writes a results file and its summary into `docs/measurements/several-views/`. Options:
+# `--setting high|low` (VIEW's setting; the window 1920 × 1080 or 1280 × 720), `--hidden` (never
+# shown, offscreen), `--smoke` (short windows, hidden, written under `target/views-check/`) and
+# `--out <dir>`. A shown run asks once whether every view is the right way up. No server is needed.
+# By hand, on a quiet machine; not part of `ci`.
+# Run the several-views check, e.g. `just views-check` or `just views-check --setting low`.
+[positional-arguments]
+views-check *args: gen-surface
+    pnpm --filter hyperion build
+    bash apps/hyperion/scripts/viewsCheck.sh "$@"
+
+# R07.T21's child window on a second monitor: builds the client and runs the smoke harness's
+# child-window scene on the client's own graphics switches, the opener on the primary display and a
+# same-origin child window, a view of the opener's engine, on the second. It records the child's
+# pacing beside its display's period, both views' frame times and the release of the child's view
+# on its `pagehide`, as `<date>-<machine>-child-window.md` in `docs/measurements/several-views/`.
+# Options: `--seconds <n>` (the child's time, 60 by default), `--hidden` (an offscreen child on one
+# display, the harness's own proof, written under `target/views-check/`) and `--out <dir>`. With
+# one display it refuses (exit 2) before opening any window. Shown: by hand; not part of `ci`.
+# Run the child-window check on two displays, e.g. `just child-window-check --seconds 60`.
+[positional-arguments]
+child-window-check *args: gen-surface
+    pnpm --filter hyperion build
+    bash apps/hyperion/scripts/childWindowCheck.sh "$@"
 
 # Build the client and run the headless smoke harness on SwiftShader, once per capability path
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back

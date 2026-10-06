@@ -23,6 +23,8 @@
  * - The trace is taken in windows of script time (decision-r05-trace-windows.md,
  *   `traceWindows.ts`): the frames at each window's boundary are left out of every per-frame
  *   figure and counted, and a profiled run (`run.trace.profiled`) is a diagnostic, never judged.
+ *   Each window's frame spans are checked against the renderer's frames, and the GPU process's
+ *   slices are those of the categories recorded (decision-r05-trace-windows-2.md).
  */
 
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -39,7 +41,7 @@ import type {
 } from "../preload/api";
 import type { DrmMemoryReading, NvidiaReading } from "./fdinfo";
 import { type Measured, measured, missing } from "./measured";
-import type { GpuProcessFigures } from "./reduceTrace";
+import { GPU_PROCESS_SLICES, type GpuProcessFigures, recordedGpuSlices } from "./reduceTrace";
 import {
   type EngineFigures,
   FULL_BUFFER_PERCENT,
@@ -65,9 +67,12 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * the trace in windows (decision-r05-trace-windows.md): `run.trace` lists the windows and their
  * boundaries, `frames.excludedFrames` counts the frames left out at the boundaries, and the
  * engine's sampled self time moves from `mainThread.split` to `mainThread.engine`, present in a
- * profiled run only.
+ * profiled run only. Version 4 (decision-r05-trace-windows-2.md) adds the trace's `format`, counts
+ * `mainThread.split.ourCodeMs` as the union of the per-frame `spike.frame` spans alone, and lists
+ * only the GPU-process slices whose category was recorded; a window whose frame spans disagree
+ * with the renderer's frames fails.
  */
-export const RESULTS_VERSION = 3;
+export const RESULTS_VERSION = 4;
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -589,13 +594,20 @@ export interface DescentResults {
     readonly passes: Measured<ReadonlyArray<PassFigures>>;
     /** The sum of a frame's timed passes, at the 95th percentile, ms. */
     readonly sumP95Ms: Measured<number>;
-    /** The GPU process's main thread: the CPU side of Chromium's command transport and Dawn. */
+    /**
+     * The GPU process's main thread: the CPU side of Chromium's command transport and Dawn. Its
+     * slices are only those whose category was recorded: `GPUTask` always, `WebGPU` and
+     * `VulkanQueueSubmitHook` with `gpu` (a profiled run).
+     */
     readonly gpuProcess: Measured<GpuProcessFigures>;
   };
   readonly mainThread: {
     /** Our code's time a frame (`performance.measure`), at the 95th percentile, ms. */
     readonly ourCodeP95Ms: Measured<number>;
-    /** The renderer main thread's wall, busy, our-code and idle time, summed over the windows. */
+    /**
+     * The renderer main thread's wall, busy, our-code and idle time, summed over the windows. Our
+     * code is the union of its per-frame `spike.frame` spans.
+     */
     readonly split: Measured<MainThreadSplit>;
     /** The engine adapter's sampled self time: a profiled run's alone. */
     readonly engine: Measured<EngineFigures>;
@@ -661,7 +673,8 @@ function judge(value: number, limit: number, tolerance: number): Verdict {
   return value - tolerance > limit ? "fail" : "marginal";
 }
 
-function row(
+/** A row of a criterion: its limit and value, judged; `not-measured` where either is missing. */
+export function row(
   id: string,
   criterion: string,
   limit: Measured<number>,
@@ -695,12 +708,15 @@ function row(
 }
 
 /** A limit that depends on T, or T's absence. */
-function ofPeriod(periodMs: Measured<number>, limit: (t: number) => number): Measured<number> {
+export function ofPeriod(
+  periodMs: Measured<number>,
+  limit: (t: number) => number,
+): Measured<number> {
   return periodMs.value === null ? missing(periodMs.reason) : measured(limit(periodMs.value));
 }
 
 /** The frame rows of Design note 21 for one set of intervals. */
-function frameRows(
+export function frameRows(
   stats: Measured<FrameStats>,
   periodMs: Measured<number>,
   setting: SpikeSetting,
@@ -751,7 +767,8 @@ function frameRows(
   ];
 }
 
-function overallOf(criteria: ReadonlyArray<Criterion>): Verdict {
+/** A criterion's overall verdict: `fail` over `not-measured` over `marginal` over `pass`. */
+export function overallOf(criteria: ReadonlyArray<Criterion>): Verdict {
   const verdicts = new Set(criteria.map(({ verdict }) => verdict));
   if (verdicts.has("fail")) {
     return "fail";
@@ -1261,6 +1278,7 @@ export function validateResults(value: unknown): string[] {
   checkTraceFigures(value, trace, problems);
   checkExcludedFrames(value, trace, problems);
   checkMainThread(value, trace, problems);
+  checkGpuSlices(value, trace, problems);
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
 }
@@ -1429,9 +1447,14 @@ interface TraceState {
   readonly withoutFigures: string | null;
   /** Whether the run is profiled; `false` without a trace. */
   readonly profiled: boolean;
+  /** The categories recorded, or `null` without a trace or a list of them. */
+  readonly categories: ReadonlyArray<string> | null;
   /** The frames its boundaries leave out; 0 without a trace. */
   readonly boundaryFrames: number;
 }
+
+/** The trace's formats, as `run.trace.value.format` names them. */
+const TRACE_FORMATS: ReadonlySet<unknown> = new Set<TraceRun["format"]>(["json", "perfetto-proto"]);
 
 /** Times written from one computation, compared to a nanosecond. */
 function sameS(a: unknown, b: unknown): boolean {
@@ -1479,7 +1502,12 @@ function checkWindowFigures(
 function checkTrace(trace: unknown, problems: string[]): TraceState {
   if (!isRecord(trace)) {
     problems.push("run.trace is missing");
-    return { withoutFigures: " without run.trace", profiled: false, boundaryFrames: 0 };
+    return {
+      withoutFigures: " without run.trace",
+      profiled: false,
+      categories: null,
+      boundaryFrames: 0,
+    };
   }
   const value = trace["value"];
   if (!isRecord(value)) {
@@ -1489,15 +1517,23 @@ function checkTrace(trace: unknown, problems: string[]): TraceState {
     return {
       withoutFigures: ` without a trace (${String(trace["reason"])})`,
       profiled: false,
+      categories: null,
       boundaryFrames: 0,
     };
   }
   const path = "run.trace.value";
-  const { profiled, categories, recordingMode, bufferKb, guardS, tracedS } = value;
+  const { format, profiled, categories, recordingMode, bufferKb, guardS, tracedS } = value;
+  if (!TRACE_FORMATS.has(format)) {
+    problems.push(`${path}.format is neither json nor perfetto-proto`);
+  }
+  const recorded =
+    Array.isArray(categories) &&
+    categories.every((category: unknown): category is string => typeof category === "string")
+      ? categories
+      : null;
   if (
     typeof profiled !== "boolean" ||
-    !Array.isArray(categories) ||
-    !categories.every((category: unknown) => typeof category === "string") ||
+    recorded === null ||
     typeof recordingMode !== "string" ||
     !isWhole(bufferKb, 0) ||
     !isFiniteAtLeast(guardS, 0) ||
@@ -1572,7 +1608,12 @@ function checkTrace(trace: unknown, problems: string[]): TraceState {
     }
     boundaryFrames += excludedFrames;
   }
-  return { withoutFigures: failed, profiled: profiled === true, boundaryFrames };
+  return {
+    withoutFigures: failed,
+    profiled: profiled === true,
+    categories: recorded,
+    boundaryFrames,
+  };
 }
 
 /**
@@ -1667,6 +1708,39 @@ function checkMainThread(
   }
   if (trace.withoutFigures === null && !trace.profiled) {
     problems.push("mainThread.engine is measured in an unprofiled run");
+  }
+}
+
+/**
+ * The GPU process's slices: exactly those whose category the trace recorded, so that a name not
+ * recorded is absent, never a count of 0.
+ */
+function checkGpuSlices(
+  value: Readonly<Record<string, unknown>>,
+  trace: TraceState,
+  problems: string[],
+): void {
+  const slices = childAt(value, ["gpu", "gpuProcess", "value", "slices"]);
+  if (!Array.isArray(slices) || trace.categories === null) {
+    return;
+  }
+  const path = "gpu.gpuProcess.value.slices";
+  const names = slices.map((slice: unknown) => childAt(slice, ["name"]));
+  const expected = recordedGpuSlices(trace.categories);
+  for (const name of names) {
+    const known = GPU_PROCESS_SLICES.find((slice) => slice.name === name);
+    if (known === undefined) {
+      problems.push(`${path} holds ${String(name)}, which the reducer does not summarise`);
+    } else if (!expected.includes(known.name)) {
+      problems.push(
+        `${path} holds ${known.name}, but its category ${known.category} was not recorded`,
+      );
+    }
+  }
+  for (const name of expected) {
+    if (!names.includes(name)) {
+      problems.push(`${path} lacks ${name}, whose category was recorded`);
+    }
   }
 }
 
@@ -1800,7 +1874,7 @@ function describeTrace(trace: TraceRun): string {
   const excluded = trace.boundaries.reduce((sum, { excludedFrames }) => sum + excludedFrames, 0);
   const count = trace.windows.length;
   return [
-    `${count} ${count === 1 ? "window" : "windows"}, ${trace.tracedS.toFixed(1)} s traced after the warm-up, ${trace.profiled ? "profiled" : "unprofiled"}`,
+    `${count} ${trace.format} ${count === 1 ? "window" : "windows"}, ${trace.tracedS.toFixed(1)} s traced after the warm-up, ${trace.profiled ? "profiled" : "unprofiled"}`,
     trace.boundaries.length === 0
       ? "no boundary"
       : `${trace.boundaries.length} ${trace.boundaries.length === 1 ? "boundary" : "boundaries"} left out ${excluded} frames${stalls.length === 0 ? "" : ` (largest stall ${formatMs(Math.max(...stalls))} ms)`}`,

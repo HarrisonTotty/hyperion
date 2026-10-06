@@ -170,6 +170,7 @@ describe("the descent spike's options", () => {
       ridged: "off",
       dawnSafety: "on",
       capture: null,
+      traceProfile: "off",
     });
   });
 
@@ -196,6 +197,8 @@ describe("the descent spike's options", () => {
         "off",
         "--capture",
         "/data/capture",
+        "--trace-profile",
+        "on",
       ]).spike,
     ).toEqual({
       setting: "low",
@@ -208,6 +211,7 @@ describe("the descent spike's options", () => {
       ridged: "on",
       dawnSafety: "off",
       capture: "/data/capture",
+      traceProfile: "on",
     });
   });
 
@@ -222,6 +226,7 @@ describe("the descent spike's options", () => {
     ["--normals", "triple"],
     ["--ridged", "yes"],
     ["--dawn-safety", "maybe"],
+    ["--trace-profile", "yes"],
   ])("refuses %s %s", (name, value) => {
     expect(refusal(["--descent-spike", name, value]).exitCode).toBe(1);
   });
@@ -249,10 +254,59 @@ describe("the descent spike's options", () => {
     ["--ridged", "on"],
     ["--dawn-safety", "off"],
     ["--capture", "/data/capture"],
+    ["--trace-profile", "on"],
   ])("refuses %s without --descent-spike", (...option) => {
     const error = refusal(option);
     expect(error.exitCode).toBe(1);
     expect(error.message).toContain("--descent-spike");
+  });
+});
+
+describe("the several-views check's options", () => {
+  beforeEach(() => {
+    for (const stream of [process.stdout, process.stderr]) {
+      vi.spyOn(stream, "write").mockImplementation(() => true);
+    }
+  });
+
+  it("gives no check on an ordinary launch", () => {
+    expect(parse([]).viewsCheck).toBeUndefined();
+  });
+
+  it("takes the flag alone with its defaults, and no spike", () => {
+    const args = parse(["--views-check"]);
+    expect(args.viewsCheck).toEqual({ setting: "high", smoke: false, out: null });
+    expect(args.spike).toBeUndefined();
+  });
+
+  it("takes the setting, the smoke and the directory it shares with the spike", () => {
+    expect(
+      parse(["--views-check", "--setting", "low", "--smoke", "--out", "/data/out"]).viewsCheck,
+    ).toEqual({ setting: "low", smoke: true, out: "/data/out" });
+  });
+
+  it("refuses to run with the descent spike", () => {
+    const error = refusal(["--views-check", "--descent-spike"]);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("separate runs");
+  });
+
+  it.each([
+    ["--seed", "7"],
+    ["--workers", "2"],
+    ["--vertex-path", "face-differences"],
+    ["--normals", "mesh"],
+    ["--ridged", "on"],
+    ["--dawn-safety", "off"],
+    ["--capture", "/data/capture"],
+  ])("refuses the spike's %s", (...option) => {
+    const error = refusal(["--views-check", ...option]);
+    expect(error.exitCode).toBe(1);
+    expect(error.message).toContain("not --views-check");
+  });
+
+  it("names both runs for a shared option given without either", () => {
+    expect(refusal(["--smoke"]).message).toContain("--descent-spike or --views-check");
   });
 });
 

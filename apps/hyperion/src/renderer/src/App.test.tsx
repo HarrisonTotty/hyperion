@@ -1,7 +1,7 @@
 import { PROTOCOL_VERSION } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { App } from "./App";
 import { FakeWebSocket } from "./test/FakeWebSocket";
@@ -15,6 +15,7 @@ import {
 } from "./test/sceneFixture";
 import { stubCanvas } from "./test/RecordingContext2D";
 import { stubHyperionApi, TEST_GRAPHICS, TEST_SERVER_URL } from "./test/stubHyperionApi";
+import type { ViewsCheckApi } from "../../preload/api";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function answer(play: () => void): Promise<void> {
@@ -33,10 +34,26 @@ function modeBanner(): HTMLElement | null {
   return screen.queryByRole("status", { name: "Mode" });
 }
 
+/** A views-check launch's functions, each a mock. */
+function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["end"]> } {
+  return {
+    launch: { setting: "high", smoke: true, out: null },
+    startPhase: () => Promise.resolve(),
+    endPhase: () => Promise.resolve(),
+    askRightWayUp: () => Promise.resolve(),
+    writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    end: vi.fn<ViewsCheckApi["end"]>(() => Promise.resolve()),
+  };
+}
+
 describe("App", () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("opens on the link display inside the console frame", () => {
@@ -65,6 +82,34 @@ describe("App", () => {
     const panel = screen.getByRole("region", { name: "Graphics" });
     expect(within(panel).getByText("VULKAN")).toBeInTheDocument();
     expect(await within(panel).findByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
+  });
+
+  it("opens a views-check launch on VIEW", () => {
+    stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, viewsCheckApi());
+    render(<App />);
+
+    const navigation = screen.getByRole("navigation", { name: "Displays" });
+    expect(within(navigation).getByRole("button", { name: "F4 View" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("fails a views-check run whose VIEW cannot be drawn", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = viewsCheckApi();
+    stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+    render(<App />);
+
+    // jsdom has no WebGPU, so the script's first wait runs out.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+    expect(api.end).toHaveBeenCalledWith({
+      status: "fail",
+      reason: expect.stringContaining("VIEW did not show its primary view"),
+    });
   });
 
   it("shows a safe launch in the graphics panel and the header strip", () => {

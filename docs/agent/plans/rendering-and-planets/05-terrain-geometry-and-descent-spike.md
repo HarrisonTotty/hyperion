@@ -979,21 +979,29 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     own), on NVIDIA `nvidia-smi -q -x`'s process list with the device's `memory.used` less a
     baseline (not `--query-compute-apps`, which lists compute processes only and can miss the GPU
     process; researched for R12, its Design note 6), and the adapter's own tally of buffers and
-    textures, against the 1 GB ceiling. The trace comes from Electron's `contentTracing` in the main
-    process, over categories that include `devtools.timeline`, `disabled-by-default-v8.gc`,
-    `blink.user_timing` and `gpu`, and is reduced to the results file in the main process (T14.b).
-    It is taken in windows of script time with a 768 MiB `record-until-full` buffer each, since the
-    tracing service crashed at the stop of a whole descent's trace (Risks). Windows are at most
-    120 s, apart from one window of at most 240 s that holds the approach and flare, the low fast
-    pass, the slowdown and the vertical descent unbroken, and no boundary lies within 10 s of a
-    segment change. Chromium keeps one trace session at a time, so windows never overlap. The frames
-    from a boundary's stop to 1 s after the next window starts are left out of every per-frame
-    figure and counted (T14.d, T14.e). `disabled-by-default-v8.cpu_profiler` is recorded only in a
-    profiled run (`--trace-profile on`), a diagnostic that is never judged. V8 samples each isolate
-    every 100 µs and keeps every sample in the renderer until the trace stops, about 0.31 MB/s an
-    isolate, so in a timed run it would inflate the renderer's memory in proportion to the worker
-    count and interrupt every isolate 10,000 times a second (decided 2026-10-04 by a delegated
-    decision). Chromium quantises WebGPU timestamps to 65.5 µs by default (Dawn's
+    textures, against the 1 GB ceiling. The trace is recorded through the Chrome DevTools Protocol's
+    `Tracing` domain on the spike window's own `webContents.debugger`, which sends only `Tracing`
+    and `IO` commands. It is returned as a stream in Perfetto's protobuf format, and decoded and
+    reduced to the results file in the main process (T14.b, T14.h, T14.i). Its categories are
+    `devtools.timeline`, `disabled-by-default-devtools.timeline`,
+    `disabled-by-default-devtools.timeline.frame`, `disabled-by-default-v8.gc` and
+    `blink.user_timing`. Electron's `contentTracing` writes JSON only. Chromium builds a JSON export
+    in memory at 17.5–20 MB/s, 4.3–5.7 times the trace buffer's bytes, so a JSON stop took 16–44 s,
+    while the protobuf stream (about 1.2 times the buffer) took 2.3–4.8 s (T14.f's measurements,
+    2026-10-05). The trace is taken in windows of script time with a 768 MiB `record-until-full`
+    buffer each. Windows are at most 120 s, apart from the last, which holds everything from 10 s
+    before the approach and flare to the script's end unbroken (at most 300 s). No boundary lies
+    within 10 s of a segment change. Chromium keeps one trace session at a time, so windows never
+    overlap. The frames from a boundary's stop to 1 s after the next window starts are left out of
+    every per-frame figure and counted: at most 5% of the descent after the warm-up and of any
+    segment, and none from 10 s before the approach (T14.d, T14.e, T14.g).
+    `disabled-by-default-v8.cpu_profiler` and `gpu` are recorded only in a profiled run
+    (`--trace-profile on`, with a 1.5 GiB buffer), a diagnostic that is never judged. V8 samples
+    each isolate every 100 µs and keeps every sample in the renderer until the trace stops, about
+    0.31 MB/s an isolate, so in a timed run it would inflate the renderer's memory in proportion to
+    the worker count and interrupt every isolate 10,000 times a second. `gpu` is more than half the
+    trace's bytes for two GPU-process slice names (decided 2026-10-04 and 2026-10-05 by delegated
+    decisions). Chromium quantises WebGPU timestamps to 65.5 µs by default (Dawn's
     `timestamp_quantization` toggle, mask `0xFFFF0000` on the low word), which the brainstorm's "the
     forced switches make available, uncoarsened" gets wrong; measurement runs alone lift it through
     R01's `gpuTiming` option (`GPU_TIMING_SWITCH`), which the spike flag turns on before `ready`
@@ -1069,9 +1077,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     high setting's, not a ninth, and its demand is probably above a ninth too; T13.a's fixed-step
     run measures the ratio rather than assuming it. Two predictions are therefore kept apart: the
     closed form at a fixed k = 5, which must reproduce the brainstorm's worked figures, and the
-    per-level D from T6's bounds, which is the one the runs are measured against. The measured
-    demand, first-time-selected keys a second with the cache's semantics stated, must lie within a
-    factor of two of the per-level D (T13.a), and the recorded figure is patches a second sustained
+    per-level D from T6's bounds, which is the one the runs are measured against, at the tolerance
+    selection runs at, τ ÷ 1.1 in the terrain pass (T11.c). The measured demand,
+    first-time-selected keys a second with the cache's semantics stated, must lie within a factor
+    of two of the per-level D (T13.a), and the recorded figure is patches a second sustained
     against it, as the brainstorm's descent test asks.
 
 20. **Where the spike lives.** In the client, behind a command-line flag, `--descent-spike`, that
@@ -1235,9 +1244,10 @@ Refined on re-validation (2026-10-02), from the code each task touches:
   the first of them creating `main/spike.ts` (T13.c then adds its IPC handlers). T14.a needs T11.a
   and T13.b. T15.a needs T13.c (`--capture`) and T14.a's shim seam; T15.b needs only T15.a's
   capture format, and T15.c follows T15.b.
-- T14.d, T14.e and T14.f (the trace's windows, 2026-10-04) follow T14.c and T15's first capture, in
-  that order. T14.c's visible run, T16 and T17 wait for T14.f. They need nothing of T13.a's demand
-  records, which take no trace, and those need nothing of them.
+- T14.d and T14.e (the trace's windows, 2026-10-04) follow T14.c and T15's first capture. T14.g,
+  T14.h and T14.i (the protobuf trace, 2026-10-05) follow them, in that order, and T14.f, the hidden
+  runs, comes last. T14.c's visible run, T16 and T17 wait for T14.f. They need nothing of T13.a's
+  demand records, which take no trace, and those need nothing of them.
 - Steps that need a visible window, a real vsync, a quiet machine or a display change are pending
   by hand for the owner, with their harness and exact commands prepared by the implementing
   lane, which never shows a window on the development machine's display (`:0`): T11.c's and
@@ -2061,6 +2071,11 @@ src/main/results src/main/spikeReport src/main/spikeSession view/spike/spikeCont
   Boundaries are placed greedily from the start, each as late as allowed. None lies within the
   clearance of a segment change or inside the busy stretch widened by the clearance.
 
+  _Changed by T14.g (2026-10-05, `decision-r05-trace-windows-2.md`):_ the window that holds the busy
+  stretch runs from its widened start to the script's end, at most 300 s
+  (`TRACE_BUSY_WINDOW_MAX_S`), so that no boundary follows it. Today's boundaries are 120, 240, 360,
+  480, 600, 720, 840 and 950 s.
+
 - The controller cycles the trace when the script first passes each boundary, without awaiting it
   in the frame, and records each window's `startedMs` and `stopRequestedMs`. A cycle that fails, or
   that is still pending at the next boundary, ends the trace (not the run): the remaining windows
@@ -2111,42 +2126,236 @@ src/main/spike src/main/spikeSession src/main/cli src/preload`;
   - `just descent-spike --smoke` exits 0, hidden.
 - Suggested subject: `feat(spike): R05.T14.e Take the trace in windows of script time`.
 
-**R05.T14.f The windowed hidden runs.**
+**R05.T14.f The windowed hidden runs** (re-defined 2026-10-05; after T14.g, T14.h and T14.i).
 
-- Three hidden runs on the RTX 3080, one after another. None overlaps another spike run or F4's
-  hard cells, and `free -g` must show ≥ 6 GB available first:
+- **Conditions.** Every run is hidden, on the RTX 3080, under `just _locked` with its own capped
+  scope:
+  - no other spike run and no `descentDemand.mjs` (`pgrep`);
+  - `free -g` ≥ 6 GB available;
+  - the 1-min load recorded at each start.
+- **First, the debugger's A/B:**
+  - six untraced partial low runs, seed 7, to 255 s, in the order detached, attached, detached,
+    attached, detached, attached. "Attached" is the CDP session attached and idle. Each starts
+    only when the 1-min load is ≤ 4. An uncommitted instrument gives the untraced runs and the cap,
+    as `experiment.patch` did.
+  - Per run, over script time 10–255 s: `ourCodeMs` p50 and p95, the rAF interval's p95 and p99,
+    and the renderer's private growth from 60 s.
+  - **The session costs nothing** when, for each of the five figures, the median of the attached
+    runs lies within the detached runs' range, widened by 2% of their median.
+  - Otherwise stop, and report the figures to the orchestrator. The fallback is a browser-level CDP
+    connection, re-ruled then.
+- **Then three full runs:**
   - `--setting low --hidden` (T14.c's results run, re-taken);
-  - `--setting high --hidden` (the default three workers, 4 isolates; it proves the high
-    setting's window sizes before T17);
+  - `--setting high --hidden` (three workers, 4 isolates: the high setting's rates and last window
+    before T17);
   - `--setting low --hidden --trace-profile on`.
-- Each must give:
-  - every window reduced, and no new tracing-service dump in `coredumpctl`;
-  - each window's bytes and `bufferPercent`, with the largest ≤ 50%;
-  - the tracing service's peak ≤ 2 × the largest window's working set plus 100 MB;
-  - in the unprofiled runs, the renderer's private memory growing ≤ 0.1 MB/s from 60 s to the
-    end;
-  - every figure present or null with a stated reason, with `mainThread.engine` present only in
-    the profiled run.
-- **The guard is confirmed** when, pooled over every boundary of the two unprofiled runs, at most
-  2% of rAF intervals in the 5 s after the guard exceed their window's 99th percentile. Otherwise
-  it is raised by whole seconds until that holds, up to 5 s. Beyond that, report to the
-  orchestrator.
-- Each boundary's gap and stall go in T14.c's as-built record. The timings are provisional (a
-  loaded machine).
-- The owner's first visible runs are checked the same way before the next: T14.c's visible run,
-  then T17's first run. Every window must be reduced and the largest `bufferPercent` must be ≤ 50%,
-  or the windows are re-ruled.
-- Files:
+- **Each must give:**
+  - every window decoded and passing the frame-span cross-check, with no data loss and no new
+    tracing-service dump in `coredumpctl`;
+  - each window's protobuf bytes, `bufferPercent` and stop phases;
+  - the largest `bufferPercent` ≤ 50%;
+  - the tracing service's peak at most its largest working set plus 100 MB (no growth at the stop);
+  - each boundary's gap, its excluded frames and its largest rAF interval in the gap;
+  - in the timed runs, the **budget met:** ≤ 5% of the descent after the warm-up, ≤ 5% of each
+    segment, none from 950 s;
+  - in the timed runs, the renderer's private growth ≤ 0.1 MB/s from 60 s;
+  - the post-run decoding's time (≤ 5 min) and the main process's peak during it;
+  - the disk used;
+  - where Chromium spools the stream (the browser's open files during a stop), which must be on
+    disk;
+  - every figure present or null with a stated reason:
+    - `mainThread.engine` and the `WebGPU` and `VulkanQueueSubmitHook` slices only in the profiled
+      run;
+    - `GPUTask` in all.
+
+  The profiled run's exclusions are recorded, not budgeted.
+
+- **The guard is confirmed** when, pooled over every boundary of the two timed runs, at most 2% of
+  rAF intervals in the 5 s after the guard exceed their window's 99th percentile. Otherwise it is
+  raised by whole seconds until that holds, up to 5 s. Beyond that, report to the orchestrator.
+- **If a timed run breaks the budget,** run one hidden low run with a single window (an uncommitted
+  instrument: no boundaries) and report both to the orchestrator before committing.
+- **The owner's first visible runs** are checked the same way before the next: T14.c's visible run,
+  then T16's and T17's first. Every window must be decoded with no data loss, the largest
+  `bufferPercent` must be ≤ 50%, and the budget must be met, or the windows are re-ruled.
+- **Files:**
   - `docs/measurements/descent-spike/<date>-<machine>-low.json`, `-high.json` and
-    `-low-profiled.json`, and their `.md`;
+    `-low-profiled.json`, with their `.md`;
   - `TRACE_BOUNDARY_GUARD_S` in `view/spike/traceWindows.ts`, if raised;
-  - this plan's T14.c as-built record and Risks;
+  - this plan's T14.c as-built record and Risks (the A/B's figures included);
   - `docs/measurements/descent-spike/README.md`'s commands.
-- Acceptance:
-  - the three files validate as version 3, each under 512,000 B (the hook on, never skipped);
-  - the checks above hold, or their failure is reported with figures;
+- **Acceptance:**
+  - the three files validate as version 4, each under 512,000 B (the hook on, never skipped);
+  - the A/B and the checks above hold, or their failure is reported with figures;
   - the visible-run commands in the README are current, for the owner.
 - Suggested subject: `test(spike): R05.T14.f Record the windowed hidden runs`.
+
+**R05.T14.g The frame span, the categories and results version 4.** This comes first. It fixes the
+split's `ourCodeMs` and prepares the protobuf trace, with the JSON transport still in place.
+
+- **The renderer.**
+  - `SpikeRun.frame` reads `ended = performance.now()` once at the callback's end. It calls
+    `performance.measure("spike.frame", { start: started, end: ended })` (`FRAME_MEASURE`), then
+    `performance.clearMeasures("spike.frame")`, and reports `callbackMs = ended − started`, so that
+    the span and `ourCodeMs` are the same two numbers.
+  - `traceBoundaries`: the busy window runs to the script's end, with `TRACE_BUSY_WINDOW_MAX_S` 300.
+- **The main process.**
+  - `TraceReducer`'s `ourCodeMs` is the union of the main thread's `spike.frame` spans. It keeps
+    each such span's start and duration for the cross-check.
+  - `GPU_PROCESS_SLICES` is split by category, and the reducer summarises only the names the
+    session says were recorded.
+  - `SPIKE_TRACE_CATEGORIES` loses `gpu`, and `spikeTraceConfig({ profiled: true })` adds `gpu` and
+    the profiler.
+  - `mergeTraceWindows` gains the per-window frame-span cross-check.
+  - Results version 4 (`format: "json"` for now), and `validateResults`. The replayer writes 4. The
+    three committed files are converted. The README and the plan text of this ruling.
+- The main process's literal `"spike.frame"` is pinned by a test on each side, as
+  `SEGMENT_MEASURE_PREFIX`'s copies are, since the two tsconfig projects cannot share it.
+- **Files:**
+  - `view/spike/spikeRun.ts`, `view/spike/traceWindows.ts`, their tests;
+  - `apps/hyperion/src/main/reduceTrace.ts`, `main/traceWindows.ts`, `main/spike.ts`,
+    `main/spikeSession.ts`, `main/results.ts`, their tests, and `main/fixtures/traces.ts`;
+  - `tools/gpu-replay/src/results.rs`;
+  - the three committed results files;
+  - `docs/measurements/descent-spike/README.md`;
+  - this plan.
+- **Tests:**
+  - a window holding a 60-s `spike.segment:` span and per-frame `spike.frame` spans gives
+    `ourCodeMs` equal to the `spike.frame` union alone;
+  - `traceBoundaries` gives exactly 120, 240, 360, 480, 600, 720, 840 and 950 s for today's
+    profile, the last window holds the busy segments to the end, and a profile whose last window
+    would exceed 300 s throws;
+  - `spikeTraceConfig()` holds the five categories and `spikeTraceConfig({ profiled: true })` adds
+    `gpu` and the profiler;
+  - without `gpu` the slices are `GPUTask` alone, and with it all three;
+  - the cross-check passes on a matching window and fails it with its reason on each of: a missing
+    span, an extra span, a duration off by 0.02 ms, and a start before its frame's rAF time less
+    0.2 ms;
+  - `validateResults` refuses version 3, a `TraceRun` without `format`, and a `WebGPU` slice
+    without `gpu` among the categories;
+  - every committed results file validates as version 4 within 512,000 B;
+  - the replayer's unit test checks version 4;
+  - `SpikeRun` reports `callbackMs` equal to its `spike.frame` span and keeps no `spike.frame`
+    entry after the frame.
+- **Acceptance:**
+  - `pnpm --filter hyperion exec vitest run view/spike/spikeRun view/spike/traceWindows
+src/main/reduceTrace src/main/traceWindows src/main/spike src/main/spikeSession
+src/main/results`;
+  - `just gpu-replay-check`;
+  - the hidden `just descent-spike --smoke` exits 0.
+- Suggested subject: `fix(spike): R05.T14.g Count our code by one frame span and record results
+version 4`.
+
+**R05.T14.h The protobuf trace's decoder.**
+
+- `main/traceProto.ts` streams a Perfetto protobuf trace file and yields the JSON-shaped events
+  `TraceReducer.add` reads. `reduceTraceFile` dispatches by the file's first byte: `{` or `[` for
+  JSON, `0x0a` (`Trace.packet`) for protobuf.
+- It is hand-written and has no dependency. It decodes only:
+  - `TracePacket`: timestamp, `timestamp_clock_id`, `trusted_packet_sequence_id`,
+    `sequence_flags` and `incremental_state_cleared`, `first_packet_on_sequence`, `interned_data`,
+    `trace_packet_defaults`, `track_descriptor`, `track_event`, `clock_snapshot`, and the legacy
+    process and thread descriptors;
+  - interning per sequence: event categories, event names and debug-annotation names, reset when a
+    sequence's incremental state is cleared;
+  - clocks: each sequence's incremental clock from its defaults and clock snapshots, converted to
+    one clock for the whole trace, so that the main thread's and the compositor's sequences agree;
+  - track descriptors: their process and thread (pid, tid, names, and Chrome's process and thread
+    types mapped to the JSON's `Renderer`, `GPU Process`, `Browser`, `CrRendererMain` and
+    `CrGpuMain`), and each sequence's default track;
+  - `TrackEvent`: type, track, categories, name, timestamps, `legacy_event` (phase, ids, duration,
+    pid and tid overrides), debug annotations (scalars, nested dictionaries and legacy JSON values;
+    `startTime` and ProfileChunk's `data` among them), and `chrome_frame_reporter` (state and
+    `layer_tree_host_id`, mapped to the JSON's `STATE_*` names);
+  - slice begins and ends paired per track into complete events; async user-timing pairs keep the
+    reducer's (pid, id, name) matching.
+- Unknown fields are skipped. An event kind the reducer reads that arrives in an encoding the
+  decoder does not know fails the file with its name.
+- Every field number is cited in the TSDoc from Perfetto's protos at the version Chromium 152 ships
+  (`third_party/perfetto/protos/perfetto/trace/…`), and pinned by the fixtures.
+- `trimProtoTrace(bytes, untilUs)` keeps each sequence's packets from its first up to `untilUs`. A
+  sequence's incremental state is a prefix, so the result is a valid trace. It is used to cut the
+  fixtures.
+- **Fixtures** (each ≤ 400 KB, the hook on), recorded from Electron 44.4.3 on the RTX 3080. They
+  come from hidden smokes, with the handoff's `experiment.patch` applied for the recording only and
+  never committed (CDP proto, window files kept, report dumped):
+  - `main/fixtures/spike.pftrace`: the middle window of a timed smoke, trimmed to about 0.5 s;
+  - `main/fixtures/spike-profiled.pftrace`: the same from a `--trace-profile on` smoke;
+  - `main/fixtures/spike.pftrace.report.json`: the timed smoke's report, cut to the fixture's
+    frames (`scriptStartMs`, its window, each frame's script time and `ourCodeMs`).
+
+  The test file records the provenance (date, versions, commands).
+
+- **Tests** (on the fixtures):
+  - the reducer finds the renderer, its `CrRendererMain`, the GPU process and its `CrGpuMain`;
+  - **against the renderer's own series:** one `spike.frame` span for each of the report's frames
+    in the fixture, each duration equal to its `ourCodeMs` within 0.01 ms, each start within its
+    frame;
+  - the window's clock offset agrees within 0.2 ms over its begins;
+  - **across sequences:** each `spike.frame` span starts within 0–17 ms after a `PipelineReporter`
+    begin on the busiest compositor;
+  - every `spike.frame` span lies inside a `RunTask` on `CrRendererMain`, within 1 µs;
+  - `PipelineReporter` states decode to the JSON's names;
+  - GC and `GPUTask` slices are complete, with positive durations;
+  - on the profiled fixture: `WebGPU` and `VulkanQueueSubmitHook` slices are present, and the main
+    thread's ProfileChunk samples give `sampledMs` within 10% of the fixture's main-thread span;
+  - `decode(trimProtoTrace(f, t))` equals `decode(f)` cut at t, per sequence;
+  - decoding with an 8-KiB read size equals decoding with the default;
+  - a truncated packet fails with its offset;
+  - the JSON fixture still reduces through the JSON reader.
+- **Recorded, not a test (as built):**
+  - `trace_processor_shell` v58.2 (the handoff's sha256-checked copy) on the untrimmed window. Per
+    thread, the counts and summed durations of `RunTask`, `GPUTask`, `PipelineReporter`, `MinorGC`
+    and `MajorGC` must equal the decoder's. User timing is left out, being its known fault.
+  - The decoder's speed and peak memory on the untrimmed window.
+- **Acceptance:** `pnpm --filter hyperion exec vitest run src/main/traceProto src/main/reduceTrace`.
+  The fixtures are committed with the hook on, and the oracle comparison is recorded.
+- Suggested subject: `feat(spike): R05.T14.h Decode the protobuf trace`.
+
+**R05.T14.i The trace over CDP.**
+
+- `main/cdpTracing.ts`: `CdpTracing`, implementing `SpikeTracing` over the spike window's
+  `webContents.debugger`.
+  - It attaches (protocol `1.3`) once before the first window, and detaches after the last stop.
+  - Each start is `Tracing.start` with:
+    - `traceConfig` { `recordMode: "recordUntilFull"`, `traceBufferSizeInKb`,
+      `includedCategories`, `excludedCategories: ["*"]` };
+    - `transferMode: "ReturnAsStream"`, `streamFormat: "proto"`, `streamCompression: "none"`;
+    - `bufferUsageReportingInterval: 1000`.
+  - Each stop is `Tracing.end`, waits for `Tracing.tracingComplete`, then reads the stream with
+    `IO.read` (base64, 8 MiB a read) into the window's file, then `IO.close`. It logs both phases'
+    times.
+  - `dataLossOccurred` fails the window ("lost data"). The last `Tracing.bufferUsage.percentFull` (a
+    fraction) × 100 is its `bufferPercent`.
+  - It sends no other command. An unexpected `detach` ends the trace, not the run, as a failed
+    cycle does.
+- `SpikeTrace` takes it in place of `contentTracing`. The buffer is 786,432 KiB, or 1,572,864 KiB
+  profiled. The window files are `spike-trace-<k>.pftrace`, `format` is `"perfetto-proto"`, and
+  `windowFileFailure` adds data loss.
+- `descentSpike.sh` gives Electron a `TMPDIR` on disk (`target/descent-spike/tmp`), removed after
+  the run, so that any spool of the stream stays out of a RAM-backed `/tmp`.
+- `contentTracing` is no longer used by the spike.
+- **Files:**
+  - `apps/hyperion/src/main/cdpTracing.ts`, `main/spike.ts`, `main/spikeSession.ts`,
+    `main/traceWindows.ts` (data loss), `main/index.ts`, their tests;
+  - `apps/hyperion/scripts/descentSpike.sh`, `justfile` (comment);
+  - `docs/measurements/descent-spike/README.md`.
+- **Tests,** on a fake debugger:
+  - the only commands are `Tracing.start`, `Tracing.end`, `IO.read` and `IO.close`, with one attach
+    and one detach;
+  - `Tracing.start`'s parameters are exactly the above, with the profiled buffer when profiled;
+  - a stop waits for `tracingComplete` and writes the stream's chunks in order until `eof`;
+  - `dataLossOccurred` fails the window;
+  - `percentFull` 0.095 gives 9.5 %;
+  - a detach mid-run ends the trace with its reason, and the run goes on;
+  - a start while recording is still refused.
+- **Acceptance:**
+  - `pnpm --filter hyperion exec vitest run src/main/cdpTracing src/main/spike
+src/main/spikeSession src/main/traceWindows`;
+  - the hidden `just descent-spike --smoke` exits 0 with three protobuf windows, each decoded by
+    T14.h's decoder, passing the frame-span cross-check, and deleted. Its window log lines are
+    recorded.
+- Suggested subject: `feat(spike): R05.T14.i Take the trace over CDP as a protobuf stream`.
 
 ### R05.T15 The capture and the native replay
 
@@ -2262,12 +2471,13 @@ records the GPU-time headroom per pass beside the frame intervals. The runs are:
 
 Every timed run pins `--workers 3`, so the memory row is read from the timed runs and there is no
 separate memory run (decided 2026-09-30 by a delegated decision, hardware item 4). Every timed run
-is windowed and unprofiled (T14.e). The first T17 run's windows are checked before the others: every
-window is reduced and none is above half its buffer (`bufferPercent` ≤ 50). Otherwise the runs stop,
-and the windows are re-ruled. If a timed run misses a frame row or the main-thread headroom row, one
-more run on the same seed with `--trace-profile on` gives T19 the engine adapter's share of the main
-thread. It is a diagnostic, not judged, and the only profiled run the owner makes (decided
-2026-10-04 by a delegated decision).
+is windowed and unprofiled (T14.e). The first T17 run's windows are checked before the others. Every
+window is reduced, none lost data or is above half its buffer (`bufferPercent` ≤ 50), and the frames
+left out are within T14.f's budget. Otherwise the runs stop, and the windows are re-ruled. If a
+timed run misses a frame row or the main-thread headroom row, one more run on the same seed with
+`--trace-profile on` gives T19 the engine adapter's share of the main thread and the GPU process's
+`WebGPU` and `VulkanQueueSubmitHook` slices. It is a diagnostic, not judged, and the only profiled
+run the owner makes (decided 2026-10-04 by a delegated decision).
 
 The machine, driver and display are recorded with the results.
 
@@ -2285,9 +2495,12 @@ R10), the worker counts (Design note 11) and, if T16 redesigned it, the low sett
 bound is not among them: both settings select by the hard ε_n plus the sagitta
 (`decision-r05-high-bound.md`). The high setting's vertex path is also read against T13.a's
 effective tolerance. On the ridged planet, `FaceDifferences`' budget of 1,952 lowers τ′ from
-2.1–3.0 px to 1.0–2.3 px (probe, 2026-10-04). ⌊slots ÷ 2⌋ is confirmed or changed against the
-cache's eviction of coarse patches (Risks). The code's defaults change in one commit; the plan's
-Design notes gain "as built" lines.
+2.1–3.0 px to 1.0–2.3 px (probe, 2026-10-04). With ridges off, `BakedOffsets`' 981 binds over the
+late arc at τ ÷ 1.1 (decision-r05-record-tau.md, probe 2026-10-05; the re-run of 2026-10-05: 34%
+of the arc's frames and 30% of the approach's, τ′ at most 0.96 px), so the high setting's vertex
+path also decides whether `DETAIL LIMITED` shows on the default planet. ⌊slots ÷ 2⌋ is confirmed
+or changed against the cache's eviction of coarse patches (Risks). The code's defaults change in
+one commit; the plan's Design notes gain "as built" lines.
 
 - Files: the constants' modules in `view/terrain/` and `view/atmosphere/`, this plan.
 - Tests: the existing tests, updated only where a default is asserted.
@@ -2305,8 +2518,9 @@ for the owner, as are the brainstorm findings this plan reports (Risks and open 
 rule fires, the owner is told before any later plan depends on the browser. If the discrete run
 fails on streaming demand and the demand under min(hard, 4σ_n) (T13.a) would meet the budget, the
 verdict names the selection bound as ours to fix; that is never a fired rule (decisions-r05.md item
-6). The engine adapter's share of the main thread comes from a profiled run: T17's if one was
-needed, else T14.f's hidden one, which is provisional. Timed runs carry none.
+6). The engine adapter's share of the main thread, and the GPU process's `WebGPU` and
+`VulkanQueueSubmitHook` slices, come from a profiled run: T17's if one was needed, else T14.f's
+hidden one, which is provisional. Timed runs carry none.
 
 - Files: this plan, `docs/measurements/descent-spike/README.md`.
 - Acceptance: the verdict names each criterion of Design note 21 with its measured value on each
@@ -2435,9 +2649,11 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   (R10's min(hard, 4σ)) is ruled (2026-10-02, decisions-r05.md item 6): R05 selects by the hard
   bound everywhere, gate runs included; R10.T4 applies min(hard, kσ) under the criterion recorded
   there, from T6's and its own recorded figures. Re-ruled for both settings on the whole-descent
-  records (2026-10-04, `decision-r05-high-bound.md`): unchanged. With ridges off, the hard bound
-  never meets the budget (high at most 915 of 981, low 167 of 648), so the high setting draws
-  within τ with no label. With ridges on, min(hard, 4σ_n) is not a bound: at levels 4–8, p99.9
+  records (2026-10-04, `decision-r05-high-bound.md`): unchanged. With ridges off, at the pass's
+  τ ÷ 1.1 the high setting meets the `BakedOffsets` budget over 34% of the arc's frames and 30%
+  of the approach's, with τ′ at most 0.96 px ≤ τ (decision-r05-record-tau.md, the re-run of
+  2026-10-05). The drawn bound stays within τ at each selection, but `DETAIL LIMITED` shows there.
+  Low never meets its budget. With ridges on, min(hard, 4σ_n) is not a bound: at levels 4–8, p99.9
   reaches 1.23 × 4σ_n and the patch maxima 1.87 × 4σ_n, and σ_n leaves out the included crests'
   interpolation error, which ε_n carries at levels 9–12. The budgeted hard selection's τ′ of
   2–3 px corresponds to about 0.4–1.0 px of measured error. So the high setting shows
@@ -2451,6 +2667,45 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   limited segments may show seams or pops of up to τ′ in bound terms. **Landed (2026-10-04):**
   F1 and F2 (T7 and T11.c, as built). The bands now move with τ′ at each selection; T13.a's
   record gives τ′'s steps between selections (F4, below).
+- **The cadence's 1%** (decision-r05-record-tau.md, "Noted for lane C"; **fixed 2026-10-05**).
+  The pass selects at τ_sel = τ ÷ (1 + m), m = `RESELECT_FRACTION` = 0.1. It re-selected on a
+  move of more than m × d_min, where d_min is the box distance to the nearest selected non-finest
+  patch. That held the drawn error to τ ÷ (1 − m²), about 1.0101 τ, between selections, not to τ.
+  A leaf at d ≥ d_min with ρ ≤ τ_sel is still (1 − m) d away after such a move, so ρ ≤ τ_sel ÷
+  (1 − m).
+  - _The fix._ The pass re-selects on a move of more than `RESELECT_MOVE_FRACTION` = m ÷ (1 + m),
+    about 0.0909, × d_min (`selectionTolerance.ts`, derived from `RESELECT_FRACTION`). Then
+    1 − m ÷ (1 + m) = 1 ÷ (1 + m) and ρ ≤ τ_sel × (1 + m) = τ exactly. Where the budget binds,
+    the bound is (1 + m) τ′, the tolerance of the morph bands. So a coarse–fine edge now stays at
+    morph 1 between selections too. Under the old move it could fall to 0.99 of its band's end,
+    about morph 0.93 for a level whose bound halves, a step the skirts covered.
+  - _Unchanged._ τ_sel stays, and so does T13.a's record, which selects every frame and never
+    reads the move. Its 14 pinned window hashes reproduce. Its header's "at most 0.1 × d_min
+    earlier" still holds, now at most 0.0909.
+  - _Not covered, as before._ Unbaked leaves, which the streaming gate holds and
+    `TERRAIN: STREAMING` reports, are outside the bound. The floor of one finest patch (20.7 m)
+    on d_min loosens it for no leaf that meets τ_sel at the settings' views: a level-18 leaf meets
+    τ_sel only beyond 45 m, on low at 640 px wide.
+  - _Tests._ `selectionTolerance.test.ts` places the worst leaf at d_min with ρ = τ_sel. At
+    m ÷ (1 + m) its ρ after the move is τ to rounding, and at m it is τ ÷ (1 − m²) > 1.01 τ, on
+    both settings at level 18. `terrainPass.test.ts` streams a low camera at 1.5 km.
+    Every leaf it sees stays within τ at the farthest pose the pass keeps the selection for. A
+    move halfway between m ÷ (1 + m) and m of d_min re-selects; that test fails on the old rule.
+  - _The cost, measured_ (a CPU-only replay of the pass's cadence over the record's descent).
+    - Method: seed 7, ridges off, the hard bound, the record's ideal pool and views, at 64 Hz.
+      Ten windows of 20 s (the vertical descent's 10 s), each after 3 s of warm-up from an empty
+      cache. Each window ran at both moves.
+    - The move rule's own selections rose by about 1 + m: 57 → 65 on high and 133 → 143 on low,
+      190 → 208 together (+9.5%).
+    - All selections rose 0.3% on high (3,656 → 3,666) and 1.2% on low (3,004 → 3,039), so the
+      share of frames that select went from 0.300 to 0.301 and from 0.247 to 0.250.
+    - Other triggers decide most selections:
+      - stored bakes;
+      - the camera's turn of more than a pixel, half or more of the selections in the coast and
+        the early arc;
+      - the contacts. While the craft descends (`isDescending`), its ground contact moves every
+        frame, so the pass selects every frame whatever the move: in these windows, the
+        approach's at t 1053–1073 s and the slowdown's.
 - **Coarse patches evicted under load.** In the approach (probe, 2.4 km, both ridge settings),
   patches of levels 2–12 are evicted and re-baked within a second, while the descending contact's
   finest-level region turns over 100–260 bakes a second under an ideal pool. A horizon patch that
@@ -2744,7 +2999,10 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     delegated decision `decision-r05-trace-windows.md`): a whole descent's trace crashed the tracing
     service at its stop (1.35–1.71 GB), so the trace is windowed with a 768 MiB buffer per window,
     and `disabled-by-default-v8.cpu_profiler` is recorded only with `--trace-profile on`
-    (T14.d–T14.f).
+    (T14.d–T14.f). Superseded again (2026-10-05, `decision-r05-trace-windows-2.md`): the trace is
+    recorded over CDP as a Perfetto protobuf stream and decoded in the main process (T14.h, T14.i),
+    and `gpu` is recorded only in profiled runs, so a timed run's GPU-process slices are `GPUTask`
+    alone. The split's "our code" is the union of the per-frame `spike.frame` spans (T14.g).
   - `main/reduceTrace.ts` (`TraceReducer`, `reduceTrace`, `reduceTraceFile`,
     `readTraceEvents`) streams Chromium's one-event-a-line layout, since a descent's trace is too
     large for one `JSON.parse`; `.prettierignore` keeps `src/main/fixtures/*.trace.json` in that
@@ -3183,6 +3441,17 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     under the 2.55–2.76 GB at which G's and H's services were still alive. Windows cannot overlap,
     since Chromium runs one trace session at a time. The frames of each gap and of 1 s after it are
     left out and counted (T14.d, T14.e, T14.f).
+  - _Re-ruled_ (2026-10-05, delegated decision `decision-r05-trace-windows-2.md`), on T14.f's
+    partial runs. The stop's cost is Chromium's JSON export, which the tracing service builds whole
+    in memory before streaming it (192 to 883 MB in about 24 s). That is also the cause of the
+    crash, since JSON is 4.3–5.7 times the buffer's bytes. The export runs at 17.5–20 MB/s whatever
+    the load, so the JSON windows' gaps were 16–44 s, and a descent would leave out 13–29% of its
+    frames and cut the busy stretch. A Perfetto protobuf stream over CDP is about 1.2 times the
+    buffer, read in 2.3–4.8 s a window with no growth of the service and no stall in the gap.
+    Without `gpu` it projects to about 2.4% of a descent left out, all in the descent arc. The trace
+    is therefore protobuf, decoded by the spike's own decoder (T14.h) and checked against the
+    renderer's per-frame series. `gpu` is recorded only in profiled runs, and the last window runs
+    from 950 s to the script's end.
 - **Finding: the renderer's memory growth is the trace's CPU profiler, and the cache kept each
   bake's arrays** (2026-10-04, T14.c's hidden run; for T14's trace remedy and T16).
   - _The question._ In T14.c's hidden run, the renderer's private memory grew about 1.1 MB/s, to
@@ -3349,6 +3618,135 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     validates every committed results file as the current version and within 512,000 B, so the
     next version bump must convert them again.
   - The three subtasks' text in this plan keeps the ruling's suggested subjects, T14.f's included.
+
+- **Deviations in T14.e, as built** (2026-10-05, the trace driven in windows).
+  - _Where things are._ `view/spike/traceWindows.ts` holds `traceBoundaries`, the four constants
+    and `TRACE_BUSY_SEGMENTS`. `main/spike.ts` holds `SPIKE_PROFILER_CATEGORY`, now the one copy
+    of the literal (`main/traceWindows.ts`'s `CPU_PROFILER_CATEGORY` is gone), `SpikeTraceOptions`,
+    `spikeTraceConfig({ profiled })` and `traceSettingsOf`, moved there from `traceWindows.ts` so
+    that the two do not import each other. `SpikeTrace(tracing, { profiled })` exposes `settings`,
+    the configuration every window records with, in place of `index.ts`'s second
+    `spikeTraceConfig()` call. Its `state` is `idle`, `recording` or `busy`, and it refuses any
+    call while another is in flight. The session refuses a cycle or a stop while it is busy, before
+    any window is begun. `bufferUsage()` keeps the plan's name and returns a percentage, as its
+    TSDoc says, where Electron gives a fraction. The session takes
+    `traceDir` (`userData`) in place of `tracePath` and `traceSettings`; `traceWindowFileName(k)`
+    counts from 0, as `run.trace.windows[].index` does. It logs one line per window: its bytes
+    and buffer use, or its failure. `SpikeLaunch.traceProfile` carries `--trace-profile` to
+    `run.options`. The results schema is unchanged (version 3).
+  - _The guard._ The two tsconfig projects can neither import each other's constants nor hold them
+    equal in a test, so the renderer's `TRACE_BOUNDARY_GUARD_S` is the one source. The report
+    carries it as `traceGuardS`, and `mergeTraceWindows(recording, report)` reads it from there;
+    the main process's `TRACE_BOUNDARY_GUARD_S` is gone. T14.f raises it in the renderer only.
+  - _A trace that ends early._ "The remaining windows are failed" is recorded as one failed last
+    window (`SpikeTraceWindow.failure`), from when the trace ended to the run's end, not one per
+    planned window. Each planned boundary the trace never reached would otherwise leave 1 s of
+    frames out with no stall in it. The boundary before the failed window excludes the whole
+    failed or pending cycle. The main process has no file for that window when the start failed,
+    and one when a late cycle started a recording that the last stop ended. `mergeTraceWindows`
+    accepts one file fewer than windows when the last window is failed, and ignores a failed
+    window's file. `readDescentSpikeReport` refuses a failure on any window but the last. A start
+    still pending at the first boundary ends the trace in the same way. `tracedS` now counts only
+    windows that did not fail. A failing last stop fails its window (its file is missing), not
+    the run.
+  - _The smoke traces._ T13.c's `--smoke` took no trace, so it could not show the cycle. A smoke
+    now cycles at 3 and 6 s (`SMOKE_TRACE_BOUNDARIES_S`). That exercises the IPC,
+    `getTraceBufferUsage`, the files, and their reduction and deletion. The session fails the
+    smoke's stop when a window's file fails (`windowFileFailure`: missing, unreadable, empty, no
+    clock offset, or buffer at 99 % or more), and the controller fails a smoke whose trace ended
+    early. A smoke still writes no results. A `--smoke --capture` run traces too, and its span
+    from 5 s crosses the cycle at 6 s, which the capture does not record.
+    - The hidden `just descent-spike --smoke` on the committed tree (2026-10-05, the high
+      setting, RTX 3080, load about 18) exited 0 after 30 s. Its windows were 18,457,209 B
+      (0.31 % of the buffer), 11,303,047 B (0.18 %) and 22,698,503 B (0.50 %), each reduced and
+      deleted, and the profile under `target/descent-spike/` was removed. A run before the
+      review's fixes gave 20,826,061, 12,255,570 and 22,194,612 B at 0.35, 0.19 and 0.49 %.
+  - _The buffer's units._ Electron's `getTraceBufferUsage().percentage` is Chromium's
+    `percent_full`, a fraction from 0 to 1 (CDP's `Tracing.bufferUsage.percentFull`), so
+    `bufferUsage()` scales it by 100. The smoke agrees with that: 0.50 % of 805 MB is about
+    4.0 MB in about 4 s, near the ruling's 1.15 MB/s. Read as a percentage, the buffer would have
+    held 100 times that.
+  - _Finding for T14.f: the window files are 5.6 to 7.8 times the buffer's use._ The ruling sized
+    the files deferred on disk at about 1.5 GB a descent, from the buffer's rate. If a descent's
+    windows keep the smoke's ratio, a 120 s window's JSON file is about 0.8 to 1.1 GB, and a run's
+    files total about 10 GB on disk until the reduction. That is in `target/descent-spike/`, with
+    310 GB free here. The smoke was the high setting's start, not a descent window. T14.f records
+    each window's bytes, and the reduction's time after the run, which is unmeasured and counts
+    against the 45-minute watchdog. Free disk is checked before each run, and for the owner's
+    laptop.
+  - _Files beyond the task's list:_
+    - `main/traceWindows.ts` and its test: the guard, the early end, `windowFileFailure` and
+      `tracedS`;
+    - `main/spikeReport.ts` and its test, `main/results.test.ts` and `main/fixtures/spikeReport.ts`:
+      `failure` and `traceGuardS`;
+    - `preload/spikeLaunch.ts` and its test: `traceProfile`;
+    - `view/spike/SpikeApp.test.tsx`: `stubHyperionApi.ts`'s new `TEST_SPIKE_LAUNCH`, which the
+      controller's test shares.
+
+- **Deviations in T14.g, as built** (2026-10-05, the frame span, the categories and results
+  version 4; `decision-r05-trace-windows-2.md`).
+  - _Where things are._ The renderer's `FRAME_MEASURE` is in `view/spike/spikeRun.ts`, the main
+    process's in `main/reduceTrace.ts`, each pinned to `"spike.frame"` by its own side's test.
+    `MainThreadFigures.frameSpans` (a `SpanList`, which `UserTimingFigures` now extends) keeps the
+    spans for the check, and `MainThreadSplit` leaves it out of the results. `GPU_PROCESS_SLICES`
+    is a list of `{ name, category }`, and `recordedGpuSlices(categories)` gives the names a run
+    records. `ReduceOptions.categories` is required: the session hands `reduce(path, categories)`
+    its trace's `settings.categories`, and `index.ts` wires `reduceTraceFile(path, { categories })`.
+    `main/spike.ts` adds `SPIKE_GPU_CATEGORY` and `SPIKE_TRACE_FORMAT` (`"json"` until T14.i), and
+    `traceSettingsOf(config, format)` takes the format. `main/traceWindows.ts` holds `TraceFormat`,
+    `TraceSettings.format`, `frameSpanFailure` and its constants `FRAME_CHECK_MARGIN_MS` (500),
+    `FRAME_SPAN_EARLY_MS` (0.2) and `FRAME_SPAN_TOLERANCE_MS` (0.01). The merged GPU-process slices
+    are listed from the recorded categories, not from the first window's list.
+  - _The check's stretches._ Each frame's spans are those starting from its rAF time less 0.2 ms to
+    the next frame's rAF time less 0.2 ms, within the ruling's "[rAF time − 0.2 ms, the next frame's
+    rAF time)". With the ruling's bounds, consecutive stretches overlap by 0.2 ms. A frame whose
+    callback began within 0.2 ms of its own rAF time (less the offset's spread) would then count
+    for the frame before it too, which would hold two spans and fail the window. A span moved to
+    0.3 ms before its frame's rAF time therefore falls in the previous frame's stretch, and its test
+    counts two frames that disagree. The series' last frame is not checked: it has no next frame,
+    and the page draws on after the run ends, so the last window holds spans of frames the report
+    does not have. Its script time is held at the script's end, so the stretch of the frame before
+    it ends at that frame's rAF time plus the last rAF interval. The check runs after the span and
+    buffer checks and before the renderer check, so a window's reason is the first that applies.
+  - _The boundaries._ `traceBoundaries` places no boundary after the busy stretch's start less the
+    clearance. It throws up front when that window would exceed 300 s, and when a change's
+    clearance moves the last boundary so early that the last window would. Without a busy stretch,
+    every window is at most 120 s, as before. The controller's test now expects eight cycles.
+  - _Ahead of T14.i._ Design note 18 and the README's trace bullet, as the ruling words them,
+    describe the protobuf trace over CDP, which T14.h and T14.i build. Until then the spike writes
+    JSON through `contentTracing` (`format: "json"`), now without `gpu`, and no recorded run is
+    made. Profiled runs keep the 768 MiB buffer until T14.i, whose task sets 1.5 GiB.
+  - _Results version 4._ `validateResults` refuses a missing or unknown `format`, a GPU-process
+    slice whose category was not recorded, a recorded name that is absent, and a name the reducer
+    does not summarise. The summary's Trace line names the format ("2 json windows"). The three
+    committed files changed in their version number alone (109,428, 109,429 and 8,938 B, as
+    before), and their `.md` files did not change. The replayer's test also pins its null split and
+    GPU process, the fields version 4 changes.
+  - _The smoke._ The hidden `just descent-spike --smoke` on the change (2026-10-05, the high
+    setting, RTX 3080, load about 14, port 7893, not locked) exited 0 after 27 s. Its windows were
+    8,332,428 B (0.18 % of the buffer), 8,152,138 B (0.22 %) and 10,510,229 B (0.30 %), against
+    T14.e's 18.5, 11.3 and 22.7 MB with `gpu`. On the final tree, after the review's fixes (load
+    about 7), it exited 0 after 21 s, with 10,936,865 B (0.25 %), 8,286,071 B (0.24 %) and
+    4,636,633 B (0.14 %). A smoke writes no results and hands the main process no report, so the
+    frame-span check did not run on it. T14.i's acceptance asks its smoke to pass the check, which
+    needs the smoke's frames and window times handed to the session: an open point for T14.i.
+  - _For T14.h: the duration's tolerance._ The renderer's `performance.now()` is coarsened to
+    0.1 ms: every `ourCodeMs` of T14.f's P3 report is a multiple of 0.1 ms. In T14.d's JSON fixture
+    the `spike.frame` begins' `ts − 1000 × startTime` spread over 138 µs, and each end's `ts` is
+    its `callTime`, the call's unclamped time. That page may have left the measure's end to "now".
+    But if Chromium writes unclamped times for a numeric start and end too, the trace's durations
+    differ from `callbackMs` by up to about 0.1–0.2 ms, and every window fails the 0.01 ms check.
+    T14.h's fixture settles this. If they differ, the tolerance is to be re-ruled, for example to
+    two clock quanta (0.2 ms).
+  - _For T14.f: a late callback._ Under load, a frame's callback can begin after the next frame's
+    rAF time, when Chromium dates the next frame by a vsync that passed while this one waited. Its
+    span then lies outside its stretch and fails the window. T14.f's runs show whether this occurs.
+    If it does, pairing spans with frames in order is one remedy, to be ruled.
+  - _Files beyond the task's list:_ `main/index.ts` (the reducer's categories),
+    `view/spike/spikeController.test.ts` (eight cycles, and the new error's text).
+  - _Review._ typescript-reviewer found no must-fix. Its should-fix, that the series' last frame
+    could collect the spans drawn after the run, and its three considers are applied. rust-reviewer
+    found nothing to fix, and its two considers are applied.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,
@@ -3628,9 +4026,10 @@ medium, sizes, figure)`.
     - a change of viewport, field of view, contacts (compared by value, from a copy) or baked
       ranges (any bake stored);
     - a rotation, roll included, of more than one pixel's angle, 2 acos |q · q′| > fov_x ÷ W;
-    - a move of more than `RESELECT_FRACTION` (0.1) × the nearest selected non-finest patch's
-      sphere distance, floored at one finest patch (spheres of ±24.5 km height ranges contain a
-      low camera).
+    - a move of more than `RESELECT_MOVE_FRACTION` = m ÷ (1 + m), about 0.0909 for m =
+      `RESELECT_FRACTION` (0.1), × d_min: the nearest selected non-finest patch's box distance
+      (T13.c, as built: spheres of ±24.5 km height ranges contained a low camera), floored at one
+      finest patch. It was m × d_min until 2026-10-05 (Risks, "The cadence's 1%").
 
     It selects at τ ÷ 1.1 with `maxPatches` = ⌊slots ÷ 2⌋ (981 high `BakedOffsets`, 1,952
     fallback, 648 low) and the cache as `heightRanges`. The draw set, `retain`, the conditions and
@@ -3672,11 +4071,12 @@ medium, sizes, figure)`.
           morph factor by about (k + start ÷ (end − start)) × Δτ′ ÷ τ′, about 6 × Δτ′ ÷ τ′ for a
           level whose bound halves. Selection re-runs on every stored bake, so while streaming
           under the budget τ′ can change almost every frame.
-        - Where τ′ falls between two selections by more than the margin of 1.1, which a camera
-          move of up to 10% also draws on, a patch the looser budget now splits can start partly
-          morphed. Where τ′ rises as much, a merged patch's children may have been partly morphed.
-          Either is a pop of up to about the larger τ′ in bound terms, as every split under the
-          budget was before F2.
+        - Where τ′ falls between two selections, a patch the looser budget now splits can start
+          partly morphed. Where τ′ rises, a merged patch's children may have been partly morphed.
+          The bands' margin of 1.1 is shared with the camera's move since the last selection: the
+          largest move the cadence allows, m ÷ (1 + m) of d_min, uses all of it, so any change
+          of τ′ after such a move shows (Risks, "The cadence's 1%"). Either is a pop of up to
+          about the larger τ′ in bound terms, as every split under the budget was before F2.
         - F4's record could add the change of τ′ between consecutive selections, which sets those
           steps. The ruling's by-hand look at T17's ridged high run is where any of it would show.
         - The coarse side of an edge is not F2's. Crack-freedom also needs the coarse leaf's shared
@@ -4380,6 +4780,147 @@ patchSizeM)` takes the finest patch size as a third argument. The hold is term f
     The cache's own `heightRangeM` lookup costs about as much as the memo's, so selection fed by
     `PatchCache` pays it as well.
 
+- **R05.T7 perf (d), as built (lane B, 2026-10-05): the ridged approach under 2 ms.** The record's
+  ridged high approach (hard bound, 16 Hz) measured 2.8–3.2 ms p95 on the record's path at loads
+  6–17 (lane B's probe, after F4's 29.2 ms was found to be CPU starvation). That is under DN21's
+  13.3 ms but above 4d's 2 ms. This step brings it to 1.43 ms, with selection's output unchanged
+  bit for bit, as perf (c) defined it.
+  - _Profile first._ The approach's frames, ridges on (V8's sampler at 50 µs, from t = 960 s):
+    - the excess test, 16% of a call;
+    - bounds builds, 19%, two thirds of it the ring's directions;
+    - the memo's `Map` lookups by a non-Smi index, 10%;
+    - the cache's `heightRangeM`, 10%, by the same kind of `Map`;
+    - the balance's walks, about 15%;
+    - the heap, 5%;
+    - `hiddenBaked`'s walk and second lookups, 4%;
+    - the output map, 5%.
+
+    About 60 bounds a contact frame are built: 34 new keys, and 27 whose range tightened as a bake
+    landed, on the same key a frame or two later.
+
+  - _What changed._
+    - _The bounds memo is a tree._ Each patch has a cell, kept from call to call and reached from its
+      parent's cell, so a child's bounds need no lookup. The memo's semantics (when the range must
+      be found, when it matches) are the old one's. Past 131,072 cells a call drops the cells none
+      of the last 64 calls read, then waits for twice the cells kept (`pruneSelectionMemo`,
+      exported for its tests). The old memo dropped the older half of a level at 32,768.
+    - _Bounds are packed._ A cell keeps its bounds as 18 numbers in a `Float64Array`, and the
+      excess test, the forced-region rule and the requests' priorities read that form:
+      `viewExcessPacked`, `inForcedRegionPacked` and `distanceToPackedBoxFromM`.
+      `viewExcess`, `inForcedRegion` and `distanceToBoxFromM` pack a `PatchBounds` and call them, so
+      each rule still has one form. The `PatchBounds` object is made only for a drawn patch, and
+      kept while its range holds.
+    - _A patch's geometry is kept._ `patchBounds` is now `patchGeometryInto` (the ring's spheroid
+      points and normals, the centre's frame), then `packPatchBounds` (the heights on), then
+      `unpackPatchBounds`. Selection keeps the last 512 geometries (1.7 MB), so a bounds rebuilt for
+      a tightened range skips about two thirds of the build. On the approach 41% of builds reuse
+      one.
+    - _The ring's warps once a patch._ The 17 columns' s and the 17 rows' t are computed once a
+      build, not twice a vertex. A vertex on a face's edge, whose canonical face may be another,
+      still takes the whole path.
+    - _The patch cache looks up by a typed table._ `PatchKeyTable` (new, `patchKeyTable.ts`)
+      hashes a key's two 32-bit words into an open-addressed `Int32Array`, with linear probing and
+      backward-shift deletion, in place of the per-level `Map`s by `patchKeyIndex`. The draw set's
+      `residentAt(level, index)` is now `residentOver(key, level)`, a key's ancestor at a level, so
+      no index is encoded and decoded again. `insert` refuses a key deeper than `MAX_LEVEL` with a
+      `RangeError` before it changes anything, since such a key does not fit the table's words.
+    - _No second walks._ A traversal node is marked split as its children are made, so the main
+      loop's `isLeaf` walk is gone. The baked children a split leaves out are a bit mask on their
+      parent, set when `nodeOf` looked them up, so `hiddenBaked` is `bareKeys` through a filter
+      (`BareKeyFilter`, new), with no second lookup and no keys built for unbaked ones.
+    - _Smaller costs._
+      - The heap keeps each slot's forced flag and weighted excess in typed arrays beside it, with
+        the same comparisons in the same order.
+      - The leaf set's journal and scratch are count-indexed rather than truncated.
+      - A drawn patch's `SelectedPatch` is kept on its cell while its bounds, `forced` and `seen`
+        hold.
+      - The horizon test tries the top corner nearest the camera first, and the frustum test
+        takes a plane's box reach only where the centre is behind the plane. A box's reach is the
+        centre's plus terms that are never negative, so neither changes an answer.
+    - _The module runner's getters._ Under Vite's module runner, which the record's harness and
+      `just descent-demand` run selection under, each read of an imported binding is a getter
+      call. The game's renderer, bundled or native ESM, does not pay this. The hot modules
+      therefore bind such imports once, at module level:
+      - the packed layout's offsets and `NEAR_PLANE_M` in `viewGeometry.ts`;
+      - `viewExcessPacked`, `inForcedRegionPacked`, `patchKeyIndex` and `MAX_LEVEL` in
+        `select.ts`;
+      - `distanceToPackedBoxFromM` in `grounded.ts`;
+      - `stToUv` in `bounds.ts`.
+
+      Read through the getters, the packed test was slower than the old one: 28% of a call against
+      16%. The function aliases alone are worth 8–11% on the approach.
+  - _Bit for bit._
+    - `pab.mjs` runs runFixedStep's frame loop for the old code and the new side by side, each
+      with its own module instance, memo and `PatchCache`. Every frame it selects with both, in
+      alternating order, and compares the two outputs whole: every key in the map's order, every
+      bound number by `Object.is` (with the sphere's centre being the box's), `forced` and `seen`,
+      the demand's keys, priorities and flags in order, `limited`, `limitExcess` and `hiddenBaked`.
+    - It found no difference in the three high hard-bound cells over the whole descent (0–1,230
+      s): ridges on at 16 Hz (19,681 frames), and ridges off at 16 Hz (19,681) and 64 Hz (78,721).
+      That is 118,083 frames in all. The ridged cell's key hash is the record's `7c53b786241b137a`,
+      and the 64 Hz cell's is its `ec4300c0eecb583f`.
+    - The unit tests' whole-output digests, recorded before perf (c), pass unchanged.
+    - New tests:
+      - `viewGeometry.test.ts` holds the excess test to perf (c)'s form bit for bit, over 10,000
+        patches seen from 400 cameras near the ground, in orbit and inside patches;
+      - `bounds.test.ts` builds bounds from one kept geometry for three ranges against the
+        vector oracle;
+      - `patchKeyTable.test.ts` checks the table against a `Map` over 40,000 random operations;
+      - `select.test.ts` lists filtered bare keys against the filtered list, and checks the
+        memo's prune: kept bounds stay the same objects, and the output after a prune is the
+        same digest;
+      - `grounded.test.ts` holds `inForcedRegion` to the box distance over 289 patches about a
+        contact.
+  - _Measured (provisional, Design note 27)._ The timed A/B is `ab.sh` in
+    `.git/rm23-scratch/r05-b/perfd/`. It runs on the record's path: `rec.mjs` is Vite's runner,
+    runFixedStep as runCell calls it, hard bound, high, the saved ranges and no bakes.
+    - Old and new ran interleaved by round, each as its own process at nice 0.
+    - All of it ran under `just _locked` (972 s), at loads 1.2–5.1. One old round of the
+      ridges-off 16 Hz cell met a load of 11.7.
+    - The governor was schedutil.
+    - Each figure is the median of three rounds; at 64 Hz it is the mean of two.
+    - CPU is the thread's own: `process.cpuUsage()` then `process.threadCpuUsage()` (see the
+      finding below).
+    - Wall time is within 0.04 ms of CPU time at p95 in every approach cell.
+
+    `selectPatches`, CPU p50 / p95 ms, old → new:
+
+    | Segment             | Ridges on, 16 Hz          | Ridges off, 16 Hz         | Ridges off, 64 Hz         |
+    | ------------------- | ------------------------- | ------------------------- | ------------------------- |
+    | orbit coast         | 1.14 / 1.44 → 0.66 / 0.80 | 0.53 / 0.77 → 0.31 / 0.41 | 0.50 / 0.61 → 0.30 / 0.36 |
+    | descent arc         | 1.14 / 1.53 → 0.68 / 0.81 | 0.74 / 1.30 → 0.44 / 0.68 | 0.76 / 1.22 → 0.44 / 0.67 |
+    | approach and flare  | 1.61 / 2.68 → 0.87 / 1.43 | 1.33 / 2.54 → 0.68 / 0.85 | 1.09 / 1.75 → 0.63 / 0.75 |
+    | low fast pass       | 1.43 / 1.76 → 0.75 / 1.09 | 1.34 / 1.69 → 0.70 / 0.87 | 0.94 / 1.19 → 0.53 / 0.65 |
+    | slowdown            | 0.64 / 1.11 → 0.33 / 0.58 | 0.77 / 1.43 → 0.40 / 0.70 | 0.58 / 1.02 → 0.32 / 0.57 |
+    | vertical descent    | 0.22 / 0.30 → 0.12 / 0.17 | 0.22 / 0.31 → 0.12 / 0.17 | 0.23 / 0.31 → 0.12 / 0.17 |
+    | hover and touchdown | 0.20 / 0.20 → 0.10 / 0.10 | 0.20 / 0.20 → 0.10 / 0.10 | 0.21 / 0.21 → 0.10 / 0.11 |
+    - The ridged approach's rounds: old 2.61–2.74 ms p95, new 1.34–1.47 ms.
+    - The old ridges-off approach at 16 Hz varied more, from 1.81 to 2.54 ms (5.58 under the load
+      of 11.7). The new one stays between 0.85 and 0.87 ms.
+    - `pab.mjs`'s paired ratios, measured on the same frames in one process at loads 2–16, agree
+      with the A/B. On the approach's p95: 0.48 ridged, 0.47 and 0.54 ridges off.
+    - In the game's form the gain is smaller, since the old code's getter overhead is gone too.
+      With both variants bundled by esbuild and paired, the ridged approach goes from 2.75 to
+      1.77 ms p95 (0.65×). Bundled and run alone at loads 13–21, it goes from 3.59–3.69 to
+      1.51–1.71 ms wall.
+
+  - _Finding, for the record's timings: `process.threadCpuUsage()` alone is tick-grained here._
+    - The kernel runs tick-based CPU accounting: no `nohz_full`, so no vtime. Its
+      `getrusage(RUSAGE_THREAD)` reads the thread's runtime as of the last scheduler update.
+    - So a 0.37 ms loop reads 0 or 0.997 ms, and the record's frames came out in multiples of
+      about 1 ms.
+    - `process.cpuUsage()` (`RUSAGE_SELF`) updates the running thread's runtime first. Called just
+      before, it makes the thread's reading exact: the same loop reads 0.372 ms. The pair costs
+      about 1.5 µs.
+  - _Still open._
+    - _Quiet-machine runs._ The loads of 1–5 are near quiet but not quiet. The owner's runs stay
+      pending (T14/T17).
+    - _The prune's cost._ A prune walks every cell, about 131,000 of them. In a long flight that
+      would cost a few milliseconds in the one call that prunes. The record never reaches the limit.
+    - _The record's harness._ The module runner's getters still tax the rest of the record's path
+      (the cache, the draw set) and any selection code not bound once. Bundling the record's
+      runner, or saying so beside its timings, is for lane D or the orchestrator.
+
 - **Deviations in T13.b, as built (the spike scene, 2026-10-03).**
   - _Files beyond the plan's two._ The plan names `spikeScene.ts` and `DescentSpike.tsx` and their
     tests. The build adds:
@@ -4643,7 +5184,14 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     0.74 / 1.43, slowdown 0.30 / 1.28, vertical descent 0 / 0 (D 81 and 25), and the hover 0
     against 0 (re-measured after the clearance follow-up, 2026-10-03). The test asserts the six
     within a factor of two: high's arc, approach and low pass, low's approach, low pass and
-    slowdown. Two causes are clear. D assumes a ring all
+    slowdown. **Re-measured at τ ÷ 1.1** (2026-10-05, decision-r05-record-tau.md, D at the same
+    tolerance), high then low: orbit coast 4.41 / 0 (D 0.9 and 0.01 a second), descent arc
+    0.49 / 0 (D 17.9 and 2.4), approach and flare 1.32 / 1.33, low fast pass 0.64 / 1.68,
+    slowdown 0.61 / 1.09, vertical descent 0 / 0 and the hover 0 against 0. The test now asserts
+    high's approach, low pass and slowdown, and low's approach, low pass and slowdown. High's arc
+    misses at 0.494: its window's demand is unchanged at 8.9 a second while D rose 16%, and the
+    window is far from the budget (about 210 patches), so the cause is the frustum's chord below.
+    High's slowdown came within (0.30 → 0.61). Two causes are clear. D assumes a ring all
     round, 4k patches along the leading edge, where the 60° frustum along the track sees the edge's
     chord, about 4k tan(φ ÷ 2), 0.58 of it; and below the cap altitude (about 89 m on high) D's
     vertical term stays positive (h floored at the cap) while nothing new is selected, which is the
@@ -4702,6 +5250,7 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
   - **Record: F4's figures over the whole descent** (2026-10-05, F4 of
     `decision-r05-high-bound.md`; `docs/measurements/descent-spike/2026-10-05-demand-hard.{json,md}`
     and `2026-10-05-demand-calibrated.{json,md}`, record version 2, seed 7, no cell truncated).
+    **Superseded** by the re-run at the pass's τ ÷ 1.1 (below), since it selected at τ.
     - _What was run._ All eight cells were re-run in full, with the level coast, F1–F3 and
       selection's perf (c). Ridges on, high ran at 16 Hz again. Each cell ran as its own process,
       nice, at most four at once, without the heavy-test lock (CPU only). The high hard cells were
@@ -4731,10 +5280,13 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       leaves of level 12 or coarser. F4 asks for "a stand-in at level 12 or coarser". A stand-in
       also draws the resident patches beneath it, since balance and forced splits are not gated,
       and it covers level-13 leaves. Counting the draw set's stand-ins is the wider reading.
-    - _Not changed: the record's tolerance._ The record selects at the setting's τ, but the
-      terrain pass selects at τ ÷ 1.1 (`RESELECT_FRACTION`, T11.c). The record's patch counts
-      and demand are therefore somewhat below the pass's. For the orchestrator: aligning them
-      would move every pinned window hash.
+    - _The record's tolerance_ (decision-r05-record-tau.md, 2026-10-05): the record selects at
+      the pass's τ_sel = τ ÷ (1 + `RESELECT_FRACTION`), and D is computed at the same tolerance
+      in the record and the spike's results. A probe found that at τ the record ran 12–22% low
+      in patches and 0–19% in demand where unlimited. It also missed that the high setting's
+      ridges-off arc hits the 981-patch budget (100% limited at t 703–957 s, τ′ 0.92–0.96 px).
+      Frames the budget already limits select the same either way (the greedy orders by ρ), so
+      their τ′ is unchanged. Superseded by the re-run of 2026-10-05 (record version 3, below).
     - _τ′, hard bound, ridges on._ The probe's 2.1–3.0 px holds. With ridges off neither setting
       is ever limited.
 
@@ -4803,6 +5355,124 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       - High, ridges off: coast 4.7 ms, arc 2.4, approach 8.3, low pass 8.1, slowdown 6.5.
       - High, ridges on: 3.9, 5.2, 29.2, 4.6 and 1.7.
       - Low: 1.7 ms at most in every segment.
+      - Lane B reproduced the ridged high cell bit for bit (2026-10-05): its approach p95 is
+        2.8–3.2 ms on the record's path at load 6–17 (ridges off 1.7–1.8 ms); the 29.2 ms was
+        the cell's nice-10 process starved by the nice-0 integration `just ci` runs (one nice-0
+        competitor on its core gives 28.96 / 55.72 ms). Record version 3 therefore times each
+        selection on the thread's CPU clock too (below).
+  - **Record: the whole descent at the pass's τ ÷ 1.1** (2026-10-05,
+    `decision-r05-record-tau.md`;
+    `docs/measurements/descent-spike/2026-10-05-demand-hard-2.{json,md}` and
+    `2026-10-05-demand-calibrated-2.{json,md}`, record version 3, seed 7, no cell truncated). It
+    supersedes F4's two records, which are kept with a banner because the high-bound ruling, F4's
+    handoff and this plan cite them.
+    - _The tooling_ (24cd2cf, 8c8910f).
+      - `RESELECT_FRACTION` and `selectionTolerancePx(τ)` = τ ÷ (1 + `RESELECT_FRACTION`) moved to
+        `view/terrain/selectionTolerance.ts`, which does not load the engine. The terrain pass,
+        `fixedStep.ts` and `spikeHarness.ts` take τ_sel from it, the pass's by the same
+        expression, bit for bit. `BAND_MARGIN` is now 1 + `RESELECT_FRACTION`, so its equality
+        test went.
+      - The record selects at τ_sel, its τ′ is τ_sel × max(1, `limitExcess` ÷ w), and D is
+        computed at τ_sel. `SETTING_VIEWS` keeps the settings' τ of 1 and 2 px (Design note 7).
+      - It still selects every frame, without the pass's cadence. The pass's selection at a frame
+        is the record's at a pose at most 0.1 × d_min earlier, which moves the demand in time, not
+        in size. The record's header says so.
+      - Version 3 adds, per cell, τ and τ_sel (`tauPx`, `selectionTauPx`). Per segment it adds
+        the share of the limited frames whose τ′ exceeds τ (`limitedOverTauFraction`, null where
+        none is limited), and `selectPatches`' time on the thread's CPU clock beside its
+        wall-clock time (`selectCpuMs`, with its p50, p95 and maximum). The CPU clock is
+        `process.threadCpuUsage`, user and system, which the script passes in, since renderer code
+        does not reach `process`. The summary calls the wall-clock times upper bounds under load.
+      - Tests hold the pass's and the record's selection τ to
+        `TERRAIN_SETTINGS[s].tauPx / (1 + RESELECT_FRACTION)` on both settings, the unlimited
+        frames' τ′ to τ_sel, and the frames' and the spike's D to `perLevelDemand` at τ_sel.
+    - _Deviation: the spike's k_n moves with D._ `SpikeRecorder` computes D under both bounds,
+      and each level's k_n, at τ_sel. The ruling names D alone, but D's per-level term is
+      4 k_L v ÷ S_L, and Design note 18 records the k_n that selection's τ rests on. The results'
+      k_n are therefore 1.1 × T6's at the setting's τ, and the cap k S_finest is about 98 m on
+      high, not 89 m. The committed `2026-10-05-effect-low*` results carry D and k_n at τ under the
+      same results schema. They are provisional harness proofs and are not re-run.
+    - _The pinned windows, re-blessed._ With the selection τ forced back to the setting's τ (a
+      local edit, reverted), all 14 hashes pinned before reproduced, both against the module and
+      against the fixture, and `--write-fixture` rewrote the fixture byte for byte. So the
+      tolerance is the only input that moved. At τ_sel, 12 of the 14 hashes moved; high's vertical
+      descent and hover did not, since their selections are the same at either tolerance. The
+      fixture grew from 108,446 to 121,270 B (+11.8%, against the ruling's expected 20%), with
+      lines only added. For `WITHIN_TWO`, see "Finding: D's factor of two" above.
+    - _What was run._ All eight cells, as F4 ran them: seed 7, 64 Hz, ridges on and high at
+      16 Hz, each cell its own process, nice, at most four at once, without the heavy-test lock.
+      New this time:
+      - each cell ran in its own scope capped at 5 GiB with no swap (`common.md`, CAP EVERY RUN),
+        under caps of 2 h (selection) and 4 h (wall), and a kill at 4 h 5 min;
+      - RSS stayed at 0.3–0.6 GiB a cell;
+      - the cells ran twice, at 24cd2cf and then at 8c8910f with the CPU clock, and every figure but
+        the times agreed, the eight hashes included, so the clock does not move selection. The
+        record is the second run.
+      - The files are named `-2`, since `recordStem` dates a record by its start.
+    - _Where the budget binds, hard bound._ `limited` in F4's record, then in this one; after the
+      semicolon, the share of the limited frames whose τ′ exceeds τ:
+
+      | Cell             | Descent arc       | Approach and flare | Other segments          |
+      | ---------------- | ----------------- | ------------------ | ----------------------- |
+      | high, ridges off | 0% → 34%; 0%      | 0% → 30%; 0%       | 0%                      |
+      | low, ridges off  | 0%                | 0%                 | 0%                      |
+      | high, ridges on  | 100% → 100%; 100% | 74% → 84%; 88%     | coast 100% → 100%; 100% |
+      | low, ridges on   | 48% → 58%; 82%    | 25% → 29%; 88%     | 0%                      |
+      - _High, ridges off._ The budget binds on 34% of the arc's frames (about 310 s of its
+        900 s, the probe's t 703–957 s among them), at τ′ 0.94 / 0.96 / 0.96 px (p50 / p95 /
+        max), and on 30% of the approach's, at 0.92 px. τ′ never exceeds τ, so the drawn bound
+        stays within 1 px at each selection, but `DETAIL LIMITED` shows there. With τ′ above
+        τ_sel, the cadence no longer holds ρ ≤ τ between selections: τ′ ÷ 0.9 is about 1.07 px
+        (decision-r05-record-tau.md). Since T11.c's re-selection move of m ÷ (1 + m) of d_min
+        (2026-10-05, Risks, "The cadence's 1%"), the bound between selections is 1.1 τ′, at most
+        about 1.06 px.
+      - _Ridges on._ F4's τ′ stands where the budget already bound. High's coast is
+        2.07 / 2.11 / 2.11 px and its arc 2.56 / 3.27 / 3.34 px, both identical. The approach's
+        p50 fell from 1.94 to 1.62 px, as more of its frames are limited, by less, and its
+        maximum stays 2.66 px. Low's arc is 2.39 / 2.77 / 2.81 px and its approach
+        2.22 / 2.25 / 2.26 px.
+      - _min(hard, 4σ_n)._ 0% everywhere, as before.
+
+    - _Unlimited segments._ Whole segments' patch counts rose 0–23%, the ridged low coast's 30%
+      (271 → 354). Demand rose −3% to +23%, and the ridged low coast's doubled (7.4 → 15.9 a
+      second). On high with ridges off: the coast 455 → 554 patches (+22%) and 8.7 → 10.4 a
+      second; the low pass 547 → 632 (+16%) and 347.5 → 376.6 a second; the slowdown 298 → 329
+      (+10%) and 153.9 → 159.2. The low fast pass now peaks at 377 a second on high (ridges off)
+      and 382 (ridges on, 16 Hz).
+    - _Demand ÷ D, hard bound_ (high then low, both at τ_sel):
+
+      | Segment            | Ridges off  | Ridges on   |
+      | ------------------ | ----------- | ----------- |
+      | orbit coast        | 0.72 / 1.26 | 0.12 / 1.15 |
+      | descent arc        | 0.60 / 0.79 | 0.09 / 0.45 |
+      | approach and flare | 0.56 / 0.76 | 0.54 / 1.49 |
+      | low fast pass      | 1.10 / 1.35 | 0.90 / 0.67 |
+      | slowdown           | 0.75 / 1.68 | 0.46 / 1.17 |
+
+      D still predicts every unbudgeted moving segment within a factor of two on both settings,
+      but for high's ridged slowdown, now 0.46 (0.50 before). Low's ridged low pass moved most,
+      from 1.13 to 0.67. At τ_sel one more level, 17, meets D's k_L S_L ≥ h at the pass's 300 m
+      above its floor, and its term alone is 55 of D's 141 a second (79 at τ). D's level rule
+      steps with τ wherever a level sits near that threshold, so the ruling's "within a few
+      percent" does not hold there. For T18 and T19, with the frustum correction above.
+
+    - _min(hard, 4σ_n), demand ÷ D_ (high then low): ridges off, coast 1.95 / 0 (D 0.0), arc
+      0.73 / 1.58, approach 0.73 / 1.57, low pass 0.73 / 1.78 and slowdown 0.90 / 5.91; ridges
+      on, 2.35 / 0 (D 0.0), 0.69 / 1.80, 2.04 / 15.06, 0.68 / 1.81 and 0.59 / 4.86.
+    - _`selectPatches`, hard bound, CPU then wall-clock p95_ (ms, loads of 2–19, four processes
+      at once). On this machine's kernel (`CONFIG_HZ=1000`) the thread's CPU clock advances in
+      steps of about 1 ms, and `/proc/thread-self/schedstat` steps with it; Node has no
+      `CLOCK_THREAD_CPUTIME_ID`. So the CPU percentiles hold to about ±1 ms: enough to tell
+      selection's work from a starved process's waits, not the last millisecond of 4d's 2 ms.
+      - High, ridges off: coast 1.0 / 1.0, arc 2.0 / 2.1, approach 3.9 / 3.8, low pass
+        3.0 / 3.6, slowdown 3.0 / 2.6.
+      - High, ridges on (16 Hz): 2.0 / 2.2, 3.0 / 2.9, 5.0 / 5.3, 3.0 / 2.8 and 2.0 / 1.6. The
+        approach's 5.0 ms is at τ_sel with 84% of its frames limited; lane B's 2.8–3.2 ms was at
+        τ.
+      - Low: CPU p95 at most 2.2 ms in every segment (wall at most 2.8 ms).
+      - The largest single selections reach 528 ms on the wall clock but at most 26 ms of CPU
+        on high and 51 ms on low. The rest of a wall-clock maximum is time the thread spent off
+        its core.
   - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
     camera underground (the direction above), not selection: lane B's
     `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With

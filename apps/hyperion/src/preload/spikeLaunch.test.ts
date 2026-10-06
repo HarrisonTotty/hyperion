@@ -19,6 +19,7 @@ const LAUNCH: SpikeLaunch = {
   ridged: "on",
   dawnSafety: "off",
   capture: "/data/capture=1",
+  traceProfile: "on",
 };
 
 describe("the spike's switch", () => {
@@ -57,12 +58,14 @@ describe("readSpikeLaunch", () => {
     ["ridged", true],
     ["dawnSafety", null],
     ["capture", 3],
+    ["traceProfile", "yes"],
+    ["traceProfile", null],
   ])("refuses %s = %j", (field, value) => {
     expect(readSpikeLaunch({ ...LAUNCH, [field]: value })).toBeNull();
   });
 
   it("refuses options with a field missing", () => {
-    const { capture: _, ...partial } = LAUNCH;
+    const { traceProfile: _, ...partial } = LAUNCH;
     expect(readSpikeLaunch(partial)).toBeNull();
     expect(readSpikeLaunch(null)).toBeNull();
   });

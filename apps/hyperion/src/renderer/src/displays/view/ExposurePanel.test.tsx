@@ -71,6 +71,55 @@ describe("ExposurePanel's camera setting", () => {
     });
     expect(settingOf("ND")).toHaveTextContent("28.1 EV ↑ off scale high");
   });
+
+  it("wraps each label with its own value as one member, in the setting's order (R07.T19.b)", () => {
+    // The compact layout sets two members a row; the captures measure the spacing.
+    renderAt({ kind: "auto", ev100: 9.6 });
+    expect(
+      screen.getAllByRole("term").map((term) => {
+        const member = term.parentElement;
+        const value = member?.querySelector("dd");
+        return [
+          term.textContent,
+          member?.classList.contains("view-exposure__member"),
+          member?.children.length,
+          value === undefined || value === null ? null : value.textContent,
+        ];
+      }),
+    ).toEqual([
+      ["APERTURE", true, 2, "f/1.4"],
+      ["SHUTTER", true, 2, "0.00253 s"],
+      ["ND", true, 2, "CLEAR"],
+      ["ISO", true, 2, "100"],
+    ]);
+  });
+});
+
+/** The parts of the panel's reading, as `readingParts` sets them. */
+function readingPartsShown(): string[] {
+  const output = screen.getAllByRole("status")[0];
+  if (output === undefined) {
+    throw new Error("the panel has no reading");
+  }
+  return [...output.querySelectorAll(".view-label__part")].map((part) => part.textContent);
+}
+
+describe("ExposurePanel's reading (R07.T19.b's follow-up)", () => {
+  it("sets the trapped reading in its two parts, so that it breaks at its middle dot", () => {
+    renderAt({ kind: "inhibited", ev100: 11.7, reason: "no_image_to_meter" });
+    expect([screen.getAllByRole("status")[0]?.textContent, readingPartsShown()]).toEqual([
+      "EV100 11.7 INHIBITED · NO IMAGE TO METER",
+      ["EV100 11.7 INHIBITED", "NO IMAGE TO METER"],
+    ]);
+  });
+
+  it("sets a reading without a middle dot as one part", () => {
+    renderAt({ kind: "auto", ev100: 9.6 });
+    expect([screen.getAllByRole("status")[0]?.textContent, readingPartsShown()]).toEqual([
+      "EV100 9.6 AUTO",
+      ["EV100 9.6 AUTO"],
+    ]);
+  });
 });
 
 describe("ExposurePanel", () => {
@@ -97,7 +146,7 @@ describe("ExposurePanel", () => {
   });
 });
 
-const CONSEQUENCE = "Entering a value sets MAN: AUTO resumes only on ENABLE";
+const CONSEQUENCE = "An entry sets MAN: AUTO resumes only on ENABLE";
 
 const REFUSAL = "EV100 INVALID: enter -14.0 to 42.0";
 
@@ -145,6 +194,13 @@ function reading(): string {
 }
 
 describe("ExposurePanel's MAN field (R07.T13.d)", () => {
+  it("states the consequence of an entry in the words that fit one line of the compact column", () => {
+    renderEntry({ kind: "auto", ev100: 9.6 });
+    expect(screen.getByText(/sets MAN/u)).toHaveTextContent(
+      /^An entry sets MAN: AUTO resumes only on ENABLE$/u,
+    );
+  });
+
   it("reads — under AUTO, with its unit, its span and the consequence of an entry", () => {
     const { field } = renderEntry({ kind: "auto", ev100: 9.6 });
     expect(field).toHaveValue("—");

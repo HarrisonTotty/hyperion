@@ -8,16 +8,29 @@
 //! component's ages, the one [`mean_present_mass`](crate::galaxy::fates::mean_present_mass) does,
 //! with the present mass replaced by the V light:
 //!
-//! - **Masses.** 16-point Gauss–Legendre panels in ln m no wider than
-//!   [`MAX_PANEL_LN_MASS`](crate::galaxy::fates::MAX_PANEL_LN_MASS), with edges at the mass
-//!   function's and the fates' breaks, at each layer's band edges and their multiples by the
-//!   companion laws' mass-ratio kinks, and at each mass whose lifetime is an edge of a component's
-//!   ages. The primaries of a layer are its band's nodes, weighted by the mass function. The
-//!   companions of a layer's primaries are spread over the same nodes: node j takes
-//!   H(b<sub>j+1</sub>) − H(b<sub>j</sub>), with H(c) the number of companions below c per
-//!   primary of the layer ([`StellarFates::mean_companions`] and the mass-ratio distribution, as
-//!   [`CompanionMasses`](crate::galaxy::fates::CompanionMasses) integrates them) and the
-//!   b<sub>j</sub> the midpoints between consecutive nodes.
+//! - **Masses.** Gauss–Legendre panels in ln m no wider than
+//!   [`MAX_PANEL_LN_MASS`](crate::galaxy::fates::MAX_PANEL_LN_MASS), a set for each \[Fe/H\] node,
+//!   a [`TablesPlan`]'s [`Stage`] (R06.T5.e, decided 2026-10-05, `decision-r06-t5e-gate-2.md`).
+//!   Their edges are the mass function's and the fates' breaks, each layer's band edges and their
+//!   multiples by the companion laws' mass-ratio kinks, and the masses at which the node's tracks
+//!   (the median draws) leave a living phase, as the track labels its segments, or die, at an age
+//!   edge of any of the galaxy's components that read the node, whatever components a build asks
+//!   for. An old population's giant branch, horizontal branch and AGB lie within some hundredths
+//!   of its turnoff in ln m, and its light changes character at each phase end: left inside
+//!   panels, as when the edges stood at the fates' fitted lifetimes, that structure put 16 nodes a
+//!   panel 0.8% off in an old halo component's light and 1.1% in its colour against 32, and 4
+//!   nodes 6.3% and 7.7% off against 16. The masses are found by
+//!   a scan over the panels of the other edges and a fixed bisection, some 3 CPU-s for the Milky
+//!   Way's 22 stages. Each panel takes a Gauss–Legendre order scaled with its width: 4 nodes on a
+//!   panel at most a quarter of `MAX_PANEL_LN_MASS` wide, 8 on one at most half and 16 on a wider
+//!   one, so never fewer than 32 nodes per unit of ln m. The Milky Way's stages take 138 to 188
+//!   panels, all within a quarter, so 552 to 752 nodes. The primaries of a layer are its band's
+//!   nodes, weighted by the mass function. The companions of a layer's primaries are spread over
+//!   the same nodes: node j takes H(b<sub>j+1</sub>) − H(b<sub>j</sub>), with H(c) the number of
+//!   companions below c per primary of the layer ([`StellarFates::mean_companions`] and the
+//!   mass-ratio distribution, as [`CompanionMasses`](crate::galaxy::fates::CompanionMasses)
+//!   integrates them, over the panels of the stages' shared edges) and the b<sub>j</sub> a panel's
+//!   ends and the midpoints between its consecutive nodes.
 //! - **Metallicity.** Each component's \[Fe/H\] distribution, read at the solar circle
 //!   ([`SOLAR_RADIUS_LENGTHS`] of the galaxy's thin-disc scale lengths) and at its mean age, is
 //!   taken at three-point Gauss–Hermite nodes: the mean and the mean ± √3 σ, weighted 2/3, 1/6 and
@@ -26,7 +39,7 @@
 //!   A disc's radial gradient is not followed: its tables are the solar circle's everywhere.
 //! - **Ages.** Each node's track ([`Track::to_age`], at each metallicity node and the median draws)
 //!   is cut at every phase segment's ends and knots and
-//!   into [`SAMPLES_PER_PHASE`] equal parts of each phase, and the star's V at each part's middle
+//!   into [`SAMPLES_PER_PHASE`] (32) equal parts of each phase, and the star's V at each part's middle
 //!   is held over the part, weighted by the part's share of the component's born systems. A short
 //!   bright phase, a post-AGB crossing or a blue loop, therefore counts for its duration and is
 //!   never missed between two samples. An object below 0.1 M☉ follows plan 06's cooling fits,
@@ -50,8 +63,25 @@
 //! increase so that the caps stay conservative ([`LuminosityFunction::pair_light`]). A galaxy whose
 //! mass function is not the default takes none.
 //!
+//! **Accuracy.** The tables are to be read as every reader reads them: summed over components and
+//! layers, by density times each layer's share. The band and the limit map sum the light fainter
+//! than a limit that moves with distance; the caps sum one layer's counts over its components and
+//! 768 rays; T5.d's component guard sums a component's layers. Read so, the shipped nodes are held
+//! within 1% of the full build, the same panels at 16 nodes a panel, wherever the tables are read:
+//! R06.T5.e's gate, the slow test `standard_nodes_match_the_full_build_where_the_tables_are_read`
+//! (decided 2026-10-05, `decision-r06-t5e-gate.md` and `-2.md`). On the Milky Way they came within
+//! 0.08% of it in every component bin's light and colour, within 0.04% on every band ray at its
+//! four points and within one radial node at every cap. The full build is held within 0.25% of
+//! 32 nodes a panel there (`the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read`;
+//! 0.013% measured). A single function or bin is not good to 1%: one component's layer's light
+//! fainter than a magnitude was off the full build's by up to 3% of the function's light, and one
+//! 0.05-mag bin by up to 5% of it, since a main-sequence node holds one bin for gigayears and fewer
+//! nodes move light between neighbouring bins. A new reader of one function or bin alone re-gates against the
+//! full build.
+//!
 //! Nothing here draws a random word or changes generated output: the tables only read.
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 use crate::galaxy::Galaxy;
@@ -59,18 +89,22 @@ use crate::galaxy::PointLy;
 use crate::galaxy::Population;
 use crate::galaxy::ages::AgeDistribution;
 use crate::galaxy::fates::{
-    StellarFates, companion_share_below, fates_for, ln_mass_panels, mass_with_lifetime, panel_edges,
+    MAX_PANEL_LN_MASS, StellarFates, companion_share_below, fates_for, ln_mass_panels, panel_edges,
 };
 use crate::galaxy::fields::{Component, ComponentId, SOLAR_RADIUS_LENGTHS};
 use crate::galaxy::imf::{MassBand, MassFunction};
-use crate::galaxy::quad::{Gl16Panel, gl16};
+use crate::galaxy::quad::gl16;
 use crate::id::Layer;
 use crate::math;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
 use crate::stellar::substellar;
-use crate::stellar::{Composition, StarState};
-use crate::tables::gauss_legendre::GL16_WEIGHTS;
+use crate::stellar::{Composition, Phase, StarState};
+use crate::tables::gauss_legendre::{
+    GL4_NODES, GL4_WEIGHTS, GL8_NODES, GL8_WEIGHTS, GL16_NODES, GL16_WEIGHTS,
+};
+#[cfg(test)]
+use crate::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
 use crate::units::{HeliumExcess, Magnitudes, SolarLuminositiesV, SolarMasses, Years};
@@ -92,7 +126,8 @@ pub const MAGNITUDE_STEP: f64 = 0.05;
 /// The number of bins between [`BRIGHTEST_MAGNITUDE`] and [`FAINTEST_MAGNITUDE`].
 pub const MAGNITUDE_BINS: usize = 640;
 
-/// The equal parts each living phase of a track is cut into (Design note 7), besides its knots.
+/// The equal parts each living phase of a track is cut into (Design note 7), besides its knots:
+/// 32, kept by R06.T5.e (decided 2026-10-05), whose 16 moved layer A's cap at cut 11 one node in.
 pub const SAMPLES_PER_PHASE: u32 = 32;
 
 /// The light's ages at which a table holds a snapshot, Julian years: 0, 10³, 2 × 10³, 10⁴, 10⁵ and
@@ -277,6 +312,13 @@ fn at_edges_by<T>(values: &[T], m: f64, field: impl Fn(&T) -> f64) -> f64 {
 /// The cumulative luminosity function of one component and layer: per system, the V light of its
 /// stars fainter than an absolute magnitude and the number brighter, at any emitted time back to
 /// the light-crossing bound (Design note 7).
+///
+/// One function alone is not good to 1% at the shipped nodes (R06.T5.e): its light fainter than
+/// a magnitude was off the full build's by up to 3% of its light, and one 0.05-mag bin by up to
+/// 5%.
+/// Summed over components and layers, as the band, the caps and the star counts read them, the
+/// tables are held within 1% of the full build: see the [module](self)'s accuracy. A new reader of
+/// one function or bin alone re-gates against the full build.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LuminosityFunction {
     snapshots: Vec<Snapshot>,
@@ -395,10 +437,43 @@ impl LuminosityFunction {
 pub(crate) struct BuildOptions {
     /// Equal parts per living phase ([`SAMPLES_PER_PHASE`]).
     pub(crate) samples_per_phase: u32,
+    /// The Gauss–Legendre nodes of each mass panel ([`MassNodes`]).
+    pub(crate) mass_nodes: MassNodes,
     /// Whether companions are counted.
     pub(crate) companions: Companions,
     /// Which metallicity bins of a component with a radial gradient are built.
     pub(crate) bins: GradientBins,
+}
+
+/// How many Gauss–Legendre nodes each mass panel of the tables takes (R06.T5.e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MassNodes {
+    /// An order scaled with the panel's width, the shipped nodes (R06.T5.e, decided 2026-10-05):
+    /// 16 on a panel wider than half of [`MAX_PANEL_LN_MASS`], 8 on one wider than a quarter and
+    /// 4 on a narrower one, so never fewer than 32 nodes per unit of ln m.
+    Scaled,
+    /// 16 on every panel, as R06.T5 built them: the full build's.
+    #[cfg(test)]
+    Sixteen,
+    /// 32 on every panel: the reference the full build's own convergence is measured against.
+    #[cfg(test)]
+    ThirtyTwo,
+}
+
+impl MassNodes {
+    /// The rule on [−1, 1], nodes and weights, of a panel `width` wide in ln m.
+    #[must_use]
+    fn rule(self, width: f64) -> (&'static [f64], &'static [f64]) {
+        match self {
+            #[cfg(test)]
+            Self::Sixteen => (&GL16_NODES, &GL16_WEIGHTS),
+            #[cfg(test)]
+            Self::ThirtyTwo => (&GL32_NODES, &GL32_WEIGHTS),
+            Self::Scaled if width > 0.5 * MAX_PANEL_LN_MASS => (&GL16_NODES, &GL16_WEIGHTS),
+            Self::Scaled if width > 0.25 * MAX_PANEL_LN_MASS => (&GL8_NODES, &GL8_WEIGHTS),
+            Self::Scaled => (&GL4_NODES, &GL4_WEIGHTS),
+        }
+    }
 }
 
 /// Whether a table counts the companions of its layer's primaries.
@@ -424,11 +499,22 @@ pub(crate) enum GradientBins {
 }
 
 impl BuildOptions {
-    /// The options the tables are built with.
+    /// The options the tables are built with: R06.T5.e's nodes, [`MassNodes::Scaled`], and
+    /// [`SAMPLES_PER_PHASE`] parts a phase.
     pub(crate) const STANDARD: Self = Self {
         samples_per_phase: SAMPLES_PER_PHASE,
+        mass_nodes: MassNodes::Scaled,
         companions: Companions::Included,
         bins: GradientBins::All,
+    };
+
+    /// The reference R06.T5.e measures the shipped nodes against: 16 nodes on every mass panel,
+    /// [`SAMPLES_PER_PHASE`] parts a phase and \[Fe/H\] nodes at 0.05 dex, T5's orders on T5.e's
+    /// panels.
+    #[cfg(test)]
+    pub(crate) const FULL: Self = Self {
+        mass_nodes: MassNodes::Sixteen,
+        ..Self::STANDARD
     };
 }
 
@@ -468,13 +554,13 @@ impl LuminosityTables {
     /// time through [`age_for`](Self::age_for).
     ///
     /// It builds a track for each mass node at each of the galaxy's reference metallicities, some
-    /// thousand tracks: a minute or more of work on one thread, which the server does once per
+    /// fifteen thousand tracks: half a minute of work on one thread, which the server does once per
     /// galaxy.
     ///
     /// # Examples
     ///
     /// The light of layer C's stars fainter than M<sub>V</sub> 0 near the Sun, seen at the epoch
-    /// from 500 ly away (`no_run`: a full build takes a minute or more).
+    /// from 500 ly away (`no_run`: a full build takes half a minute or more).
     ///
     /// ```no_run
     /// use hyperion_sim::Seed;
@@ -519,7 +605,7 @@ impl LuminosityTables {
     /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
     /// use hyperion_sim::galaxy::params::GalaxyParams;
     /// use hyperion_sim::id::Layer;
-    /// use hyperion_sim::sky::census::{NoSkyCellCache, SkyContext};
+    /// use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext};
     /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
     /// use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
     /// use hyperion_sim::time::Span;
@@ -533,9 +619,11 @@ impl LuminosityTables {
     /// // No star at all, so no light to give a colour.
     /// assert!(c.stars_per_system(Span::ZERO) <= 0.0);
     /// assert!(c.colour_fainter_than(Magnitudes::new(20.0), Span::ZERO).is_none());
+    /// let offsets = CellOffsets::build(&galaxy);
     /// let ctx = SkyContext {
     ///     tables: &dark,
     ///     envelope: &envelope,
+    ///     offsets: &offsets,
     ///     noise: NoiseCache::with_capacity(1 << 12),
     ///     cells: &NoSkyCellCache,
     ///     sources: &[],
@@ -578,7 +666,9 @@ impl LuminosityTables {
     }
 
     /// The work of [`build`](Self::build) split into jobs, for a caller that runs them on its own
-    /// threads (the server's pool, R06.T11.c; the sim spawns none): see [`TablesPlan`].
+    /// threads (the server's pool, R06.T11.c; the sim spawns none): see [`TablesPlan`]. Making
+    /// the plan finds each stage's mass panels (R06.T5.e), some 5 CPU-s for the Milky Way, so a
+    /// server calls this off its async runtime.
     #[must_use]
     pub fn plan(galaxy: &Galaxy) -> TablesPlan {
         let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
@@ -638,8 +728,8 @@ impl LuminosityTables {
     }
 }
 
-/// The mass nodes of one [`SampleJob`] at most: some forty jobs per \[Fe/H\] node, each some tenths
-/// of a second of tracks.
+/// The mass nodes of one [`SampleJob`] at most: some ten jobs per \[Fe/H\] node (the Milky Way's
+/// stages offer 10 to 13 at the shipped nodes), each some tenths of a second of tracks.
 const SAMPLE_JOB_NODES: usize = 64;
 
 /// [`LuminosityTables::build`] as jobs (decided 2026-10-03, `decision-r06-tables.md`), one
@@ -650,13 +740,20 @@ const SAMPLE_JOB_NODES: usize = 64;
 /// from [`bin_sums`](Self::bin_sums) to [`assemble`](Self::assemble). Once its accumulation jobs
 /// have run, a stage's samples are no longer needed and can be dropped.
 ///
-/// One metallicity's samples are some 150 MiB at 32 samples a phase, and the Milky Way's tables
-/// read 22 metallicities. Held to the build's end, as the split first did, they took a full build
-/// to 2.7 GB. Stage by stage it peaks at 280 MiB (test profile, 2026-10-04). Within a stage only
-/// the bins that read its node accumulate, 1 to 22 of the Milky Way's 53, so a pool keeps its
-/// threads busy by sampling the next stage while this one accumulates. That holds two stages'
-/// samples and changes no bit. On 16 threads, under shared load, it took 18.8 s and 439 MiB,
-/// against 23.2 s and 237 MiB stage by stage and the first split's 18.8 s and 2.6 GB.
+/// One metallicity's samples are at most some 60 MiB at the shipped nodes (228 MiB at 16 nodes a
+/// panel, the full build's; 151 MiB under T5's panels), and the Milky Way's tables read 22
+/// metallicities. Held to the build's end, as the
+/// split first did, they took a full build to 2.7 GB. Stage by stage a serial build peaks at
+/// 155 MiB (R06.T5.e's nodes, release test binary, 2026-10-05). Within a stage only the bins that
+/// read its node accumulate, 1 to 22 of the Milky Way's 53, so a pool keeps its threads busy by
+/// sampling the next stage while this one accumulates. That holds two stages' samples and changes
+/// no bit. On 16 threads, under shared load, it took 18.8 s and 439 MiB, against 23.2 s and
+/// 237 MiB stage by stage and the first split's 18.8 s and 2.6 GB (T5's nodes, 2026-10-04).
+///
+/// Each stage has its own mass panels, cut where its tracks end their phases at the galaxy's age
+/// edges (R06.T5.e), so a stage's sample jobs are counted from its own nodes. Making the plan,
+/// serially, takes some 5 CPU-s for the Milky Way (the search for those panels some 3), of the
+/// build's 31, so a server makes it off its async runtime.
 ///
 /// Every job is a pure function of the plan and its inputs. The chunks are put back in their jobs'
 /// order, and every bin adds its nodes in their own order (an accumulation job panics otherwise),
@@ -666,8 +763,8 @@ const SAMPLE_JOB_NODES: usize = 64;
 ///
 /// # Examples
 ///
-/// The jobs run in turn here; a server hands each to its pool (`no_run`: a full build takes a
-/// minute or more of CPU).
+/// The jobs run in turn here; a server hands each to its pool (`no_run`: a full build takes half
+/// a minute or more of CPU).
 ///
 /// ```no_run
 /// use hyperion_sim::Seed;
@@ -695,7 +792,8 @@ pub struct TablesPlan {
     time: UniverseTime,
     options: BuildOptions,
     solar_radius: f64,
-    grid: MassGrid,
+    /// Each stage's mass grid, in the stages' order (R06.T5.e).
+    grids: Vec<MassGrid>,
     brown_dwarfs: BrownDwarfGrid,
     /// The oldest age any snapshot reads, years.
     max_age: f64,
@@ -988,14 +1086,15 @@ impl TablesPlan {
         // The bins in the tables' order: by component index.
         planned.sort_by_key(|(index, _)| *index);
         let bins: Vec<PlannedBin> = planned.into_iter().flat_map(|(_, bins)| bins).collect();
+        let stages = stages_of(&bins);
         Self {
             time,
             options,
             solar_radius,
-            grid: MassGrid::new(galaxy, options),
+            grids: stage_grids(galaxy, time, options, &stages, Years::new(max_age)),
             brown_dwarfs: BrownDwarfGrid::new(galaxy.mass_function()),
             max_age,
-            stages: stages_of(&bins),
+            stages,
             job_nodes: job_nodes.max(1),
             layout,
             bins,
@@ -1007,9 +1106,10 @@ impl TablesPlan {
         }
     }
 
-    /// The mass nodes per \[Fe/H\] node: the stars', then the brown dwarfs'.
-    fn nodes_per_fe_h(&self) -> usize {
-        self.grid.nodes.len() + self.brown_dwarfs.masses.len()
+    /// The mass nodes of a stage: its stars', then the brown dwarfs'.
+    #[must_use]
+    fn stage_nodes(&self, stage: usize) -> usize {
+        self.grids[stage].nodes.len() + self.brown_dwarfs.masses.len()
     }
 
     /// The stages, in the order their accumulation jobs run: by \[Fe/H\], from the lowest.
@@ -1020,7 +1120,7 @@ impl TablesPlan {
     /// The sample jobs of `stage`, in index order: its \[Fe/H\] node's mass nodes in chunks. They
     /// may run in any order and at any time, ahead of the stage's turn too.
     pub fn sample_jobs(&self, stage: Stage) -> impl Iterator<Item = SampleJob> + use<> {
-        let (per, job_nodes) = (self.nodes_per_fe_h(), self.job_nodes);
+        let (per, job_nodes) = (self.stage_nodes(stage.index), self.job_nodes);
         (0..per.div_ceil(job_nodes)).map(move |index| {
             let start = index * job_nodes;
             SampleJob {
@@ -1039,13 +1139,14 @@ impl TablesPlan {
     #[must_use]
     pub fn run_samples(&self, job: SampleJob) -> SampleChunk {
         let composition = composition_at(self.stages[job.stage].fe_h);
-        let stars = self.grid.nodes.len();
+        let grid = &self.grids[job.stage];
+        let stars = grid.nodes.len();
         let samples = job
             .nodes
             .map(|k| {
                 if k < stars {
                     NodeSamples::of_mass(
-                        self.grid.nodes[k].mass,
+                        grid.nodes[k].mass,
                         &composition,
                         self.max_age,
                         self.options.samples_per_phase,
@@ -1076,18 +1177,17 @@ impl TablesPlan {
     pub fn track_samples(&self, chunks: impl IntoIterator<Item = SampleChunk>) -> TrackSamples {
         let mut chunks: Vec<SampleChunk> = chunks.into_iter().collect();
         chunks.sort_by_key(|c| c.job);
-        let per = self.nodes_per_fe_h();
         let stage = chunks.first().map_or(usize::MAX, |c| c.stage);
         assert!(
             stage < self.stages.len()
-                && chunks.len() == per.div_ceil(self.job_nodes)
+                && chunks.len() == self.stage_nodes(stage).div_ceil(self.job_nodes)
                 && chunks
                     .iter()
                     .enumerate()
                     .all(|(i, c)| c.job == i && c.stage == stage),
             "one chunk of each of a stage's sample jobs"
         );
-        let mut samples = Vec::with_capacity(per);
+        let mut samples = Vec::with_capacity(self.stage_nodes(stage));
         for chunk in chunks {
             samples.extend(chunk.samples);
         }
@@ -1119,7 +1219,7 @@ impl TablesPlan {
             "a bin adds its metallicity nodes in their order"
         );
         assert!(
-            samples.stage == job.stage && samples.samples.len() == self.nodes_per_fe_h(),
+            samples.stage == job.stage && samples.samples.len() == self.stage_nodes(job.stage),
             "the samples are of the job's stage"
         );
         let planned = &self.bins[job.bin];
@@ -1129,7 +1229,13 @@ impl TablesPlan {
                 // A star's age then is its age at the epoch plus `shift`.
                 let shift = shift_now - ago;
                 let born_cdf = |age: Years| planned.ages.born_cdf(Years::new(age.value() - shift));
-                samples.add(&self.grid, &self.brown_dwarfs, share, &born_cdf, snapshot);
+                samples.add(
+                    &self.grids[job.stage],
+                    &self.brown_dwarfs,
+                    share,
+                    &born_cdf,
+                    snapshot,
+                );
             }
         }
         sums.added = job.end;
@@ -1683,44 +1789,136 @@ struct Node {
     weights: [f64; LAYER_COUNT],
 }
 
-/// The mass nodes of the stellar range with their layer weights.
+/// The mass nodes of the stellar range with their layer weights, at one \[Fe/H\] node.
 #[derive(Debug, Clone, PartialEq)]
 struct MassGrid {
     nodes: Vec<Node>,
+    /// The panels' edges, M☉, ascending.
+    #[cfg(test)]
+    edges: Vec<f64>,
+}
+
+/// The mass breaks every stage's panels are cut at, M☉: the mass function's and the fates'
+/// breaks, and each layer's band edges with their multiples by the companion laws' mass-ratio
+/// kinks.
+#[must_use]
+fn global_breaks(galaxy: &Galaxy) -> Vec<f64> {
+    // Every population's fates have the same companions and breaks (`fates_for`).
+    let fates = fates_for(Population::OldThinDisc);
+    let mut breaks: Vec<f64> = galaxy
+        .mass_function()
+        .breaks()
+        .iter()
+        .chain(fates.breaks())
+        .copied()
+        .collect();
+    for band in MassBand::ALL {
+        for edge in [band.lo(), band.hi()] {
+            breaks.push(edge);
+            breaks.extend(COMPANION_RATIO_KINKS.iter().map(|q| q * edge));
+        }
+    }
+    breaks
+}
+
+/// An `f64` ordered by [`f64::total_cmp`]: a memo's key, equal only to the same value bit for bit.
+#[derive(Debug, Clone, Copy)]
+struct Exact(f64);
+
+impl PartialEq for Exact {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.total_cmp(&other.0).is_eq()
+    }
+}
+
+impl Eq for Exact {}
+
+impl PartialOrd for Exact {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Exact {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+/// H(c) of [`companions_below`] across a plan's stages, by layer and ln c: it reads the mass
+/// function, the companions and the edges it is integrated over alone, which the memo holds, so
+/// every stage's cells share it.
+#[derive(Debug, Clone, PartialEq)]
+struct CompanionsMemo {
+    /// The edges every H is integrated over, M☉: the global breaks' ([`global_breaks`]).
+    edges: Vec<f64>,
+    /// H by layer index and ln c, `None` from the band's top, where H is flat.
+    values: BTreeMap<(usize, Option<Exact>), f64>,
+}
+
+impl CompanionsMemo {
+    /// An empty memo over `edges`.
+    #[must_use]
+    fn new(edges: Vec<f64>) -> Self {
+        Self {
+            edges,
+            values: BTreeMap::new(),
+        }
+    }
+
+    /// H(c) of `band`'s primaries at c = e<sup>`ln_c`</sup> M☉, from `f` and `fates`, whose
+    /// companions every population shares.
+    fn below(
+        &mut self,
+        f: &dyn MassFunction,
+        fates: &(impl StellarFates + ?Sized),
+        band: MassBand,
+        ln_c: f64,
+    ) -> f64 {
+        // From the band's top H is flat, every companion being lighter than its primary: the
+        // same quadrature, bit for bit, whatever c beyond it.
+        let c = math::exp(ln_c).min(band.hi());
+        let key = (
+            layer_index(Layer::from(band)),
+            (c < band.hi()).then_some(Exact(ln_c)),
+        );
+        let edges = &self.edges;
+        *self
+            .values
+            .entry(key)
+            .or_insert_with(|| companions_below(f, fates, band, c, edges))
+    }
 }
 
 impl MassGrid {
+    /// The grid of one stage, on the panels of `edges` (M☉, [`panel_edges`]' form, split by
+    /// [`ln_mass_panels`]): each panel takes `options`' nodes, and the companions' cells read H(c)
+    /// through `memo`.
     #[must_use]
-    fn new(galaxy: &Galaxy, options: BuildOptions) -> Self {
-        let f = galaxy.mass_function();
+    fn new(
+        f: &dyn MassFunction,
+        options: BuildOptions,
+        edges: &[f64],
+        memo: &mut CompanionsMemo,
+    ) -> Self {
         // Every population's fates have the same companions (`fates_for`).
         let fates = fates_for(Population::OldThinDisc);
-        let mut breaks: Vec<f64> = f.breaks().iter().chain(fates.breaks()).copied().collect();
-        for band in MassBand::ALL {
-            for edge in [band.lo(), band.hi()] {
-                breaks.push(edge);
-                breaks.extend(COMPANION_RATIO_KINKS.iter().map(|q| q * edge));
-            }
-        }
-        for component in galaxy.fields().components() {
-            let population_fates = fates_for(component.population());
-            breaks.extend(
-                component
-                    .ages()
-                    .edges()
-                    .into_iter()
-                    .filter(|&age| age > 0.0)
-                    .filter_map(|age| mass_with_lifetime(population_fates, age)),
-            );
-        }
-        let edges = panel_edges(&breaks);
-        let panels = ln_mass_panels(&edges);
-        let mut nodes = Vec::with_capacity(16 * panels.len());
-        let mut boundaries = Vec::with_capacity(17 * panels.len());
+        let panels = ln_mass_panels(edges);
+        let mut nodes = Vec::with_capacity(
+            panels
+                .iter()
+                .map(|&(lo, hi)| options.mass_nodes.rule(hi - lo).0.len())
+                .sum(),
+        );
+        // Per panel, its companions' cells' ends: one more than its nodes.
+        let mut boundaries: Vec<Vec<f64>> = Vec::with_capacity(panels.len());
         for &(lo, hi) in &panels {
-            let ln_masses = Gl16Panel::nodes(lo, hi);
+            let (rule_nodes, rule_weights) = options.mass_nodes.rule(hi - lo);
             let half = 0.5 * (hi - lo);
-            for (k, (&u, &w)) in ln_masses.iter().zip(&GL16_WEIGHTS).enumerate() {
+            let mid = lo + half;
+            let ln_masses: Vec<f64> = rule_nodes.iter().map(|&x| mid + half * x).collect();
+            let mut cells = Vec::with_capacity(ln_masses.len() + 1);
+            for (k, (&u, &w)) in ln_masses.iter().zip(rule_weights).enumerate() {
                 let m = math::exp(u);
                 let mut weights = [0.0; LAYER_COUNT];
                 for band in MassBand::ALL {
@@ -1732,21 +1930,21 @@ impl MassGrid {
                 nodes.push(Node { mass: m, weights });
                 // The companions' cells: from the panel's start, through the midpoints between
                 // nodes, to its end.
-                boundaries.push(if k == 0 {
+                cells.push(if k == 0 {
                     lo
                 } else {
                     f64::midpoint(ln_masses[k - 1], u)
                 });
             }
-            boundaries.push(hi);
+            cells.push(hi);
+            boundaries.push(cells);
         }
         if options.companions == Companions::Included {
             for band in MassBand::ALL {
                 let layer = layer_index(Layer::from(band));
-                let below = |ln_c: f64| companions_below(f, fates, band, math::exp(ln_c), &edges);
+                let mut below = |ln_c: f64| memo.below(f, fates, band, ln_c);
                 let mut node = 0;
-                for (p, _) in panels.iter().enumerate() {
-                    let cells = &boundaries[p * 17..p * 17 + 17];
+                for cells in &boundaries {
                     let mut previous = below(cells[0]);
                     for &end in &cells[1..] {
                         let next = below(end);
@@ -1757,8 +1955,292 @@ impl MassGrid {
                 }
             }
         }
-        Self { nodes }
+        Self {
+            nodes,
+            #[cfg(test)]
+            edges: edges.to_vec(),
+        }
     }
+}
+
+/// Bisections in ln m of each mass at which a stage's tracks end a phase at an age edge
+/// ([`phase_end_masses`]): from a scan interval at most [`MAX_PANEL_LN_MASS`] wide to 2⁻¹⁰ of it,
+/// at most 4.9 × 10⁻⁴ in ln m (some 6 × 10⁻⁵ for the Milky Way's intervals of about 0.06),
+/// across which the end's age is then interpolated linearly in ln age: every end the Milky Way's
+/// stages solve lies within 4 × 10⁻⁹ of its edge's age (R06.T5.e, 2026-10-05).
+const PHASE_END_BISECTIONS: u32 = 10;
+
+/// How far past an age edge a bisection's tracks are built ([`phase_end_masses`]), as a fraction
+/// of the edge: far enough that both masses the last bisection leaves have reached the end, whose
+/// ages there lie within some 10⁻³ of the edge, and no further, since a track's late phases cost
+/// most of its build.
+const PHASE_END_REACH: f64 = 0.01;
+
+/// A place in a track's life where a stage's panels are cut ([`phase_end_masses`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhaseEnd {
+    /// The end of a living phase, as the track labels it: the end of its last segment in it.
+    Leaves(Phase),
+    /// The star's death.
+    Dies,
+}
+
+/// When a track reaches one of its [`PhaseEnd`]s.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EndAge {
+    /// At this age since the onset of collapse.
+    At(Years),
+    /// After the age the track is built to.
+    Later,
+    /// Never: the track is built through the star's death and has no such end.
+    Never,
+}
+
+impl EndAge {
+    /// Whether the end has come by `age`, or `None` for an end the track never has.
+    #[must_use]
+    fn by(self, age: Years) -> Option<bool> {
+        match self {
+            Self::At(end) => Some(end <= age),
+            Self::Later => Some(false),
+            Self::Never => None,
+        }
+    }
+}
+
+/// The [`PhaseEnd`]s of one track, at the median draws.
+#[derive(Debug, Clone, PartialEq)]
+struct TrackEnds {
+    /// Each living phase's end and its age since the onset of collapse, in the track's order,
+    /// then the death if the track reaches it.
+    ends: Vec<(PhaseEnd, Years)>,
+    /// Whether the track is built through the star's death.
+    complete: bool,
+}
+
+impl TrackEnds {
+    /// The ends of the track of initial mass `mass` (held at 0.1 M☉ or above, where the tracks
+    /// start) and `composition`, built to the age `reach`: a prefix of the stage's samples'
+    /// tracks, bit for bit ([`Track::to_age`]).
+    #[must_use]
+    fn of(mass: SolarMasses, composition: &Composition, reach: Years) -> Self {
+        let track = Track::to_age(
+            SolarMasses::new(mass.value().max(MIN_INITIAL_MASS.value())),
+            composition,
+            &StarDraws::median(),
+            reach,
+        );
+        let built = track.built_until().value();
+        let mut ends: Vec<(PhaseEnd, Years)> = Vec::new();
+        for (start, end, _) in track.segment_ages() {
+            if !end.is_finite() {
+                continue;
+            }
+            let phase = track
+                .state_at(Years::new(f64::midpoint(start, end.min(built))))
+                .phase();
+            if !phase.is_living() {
+                continue;
+            }
+            let label = PhaseEnd::Leaves(phase);
+            match ends.iter_mut().find(|(l, _)| *l == label) {
+                Some(slot) => slot.1 = Years::new(end),
+                None => ends.push((label, Years::new(end))),
+            }
+        }
+        let death = track.lifetime();
+        if let Some(death) = death {
+            ends.push((PhaseEnd::Dies, death));
+        }
+        Self {
+            ends,
+            complete: death.is_some(),
+        }
+    }
+
+    /// When the track reaches `end`.
+    #[must_use]
+    fn age(&self, end: PhaseEnd) -> EndAge {
+        match self.ends.iter().find(|(label, _)| *label == end) {
+            Some(&(_, age)) => EndAge::At(age),
+            None if self.complete => EndAge::Never,
+            None => EndAge::Later,
+        }
+    }
+}
+
+/// Every [`PhaseEnd`] a track can have, in a fixed order.
+fn phase_end_labels() -> impl Iterator<Item = PhaseEnd> {
+    Phase::ALL
+        .into_iter()
+        .filter(|phase| phase.is_living())
+        .map(PhaseEnd::Leaves)
+        .chain(std::iter::once(PhaseEnd::Dies))
+}
+
+/// A mass at which a stage's track ends a phase at an age edge, found by [`phase_end_masses`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SolvedEnd {
+    /// The initial mass.
+    mass: SolarMasses,
+    /// The end the track reaches there.
+    end: PhaseEnd,
+    /// The age edge it reaches it at.
+    age: Years,
+}
+
+/// The initial masses at which the track of `composition` (the median draws) ends a living phase
+/// ([`PhaseEnd::Leaves`], as the track labels its segments) or dies at one of `ages`, each at most
+/// `max_age` (R06.T5.e, decided 2026-10-05, `decision-r06-t5e-gate-2.md`).
+///
+/// For each end and age, the end's age is read at each of the ascending masses `scan_ln_masses`
+/// (ln m, m in M☉), on
+/// tracks built to twice `max_age`, and wherever it crosses the age between neighbours, the
+/// crossing is bisected in ln m [`PHASE_END_BISECTIONS`] times, on tracks built [`PHASE_END_REACH`]
+/// past the age, then placed by the end's ages at the two last masses, linearly in ln age. A phase
+/// end that is not monotone in mass, or that a track has over only part of the range, is followed
+/// wherever the scan sees it cross; a bisection that meets a track without the end gives no mass.
+/// A track is a pure function of its mass and the age it is built to, so each is built once.
+#[must_use]
+fn phase_end_masses(
+    composition: &Composition,
+    ages: &[Years],
+    scan_ln_masses: &[f64],
+    max_age: Years,
+) -> Vec<SolvedEnd> {
+    let mut tracks: BTreeMap<(Exact, Exact), TrackEnds> = BTreeMap::new();
+    let mut end_at = |u: f64, reach: Years, end: PhaseEnd| {
+        tracks
+            .entry((Exact(u), Exact(reach.value())))
+            .or_insert_with(|| TrackEnds::of(SolarMasses::new(math::exp(u)), composition, reach))
+            .age(end)
+    };
+    let scan_reach = Years::new(2.0 * max_age.value());
+    let mut solved = Vec::new();
+    for end in phase_end_labels() {
+        for &age in ages {
+            let reach = Years::new(age.value() * (1.0 + PHASE_END_REACH));
+            for pair in scan_ln_masses.windows(2) {
+                let (Some(lo_ended), Some(hi_ended)) = (
+                    end_at(pair[0], scan_reach, end).by(age),
+                    end_at(pair[1], scan_reach, end).by(age),
+                ) else {
+                    continue;
+                };
+                if lo_ended == hi_ended {
+                    continue;
+                }
+                // The bracket's ends, each with the age its track is built to.
+                let (mut lo, mut hi) = ((pair[0], scan_reach), (pair[1], scan_reach));
+                let mut found = true;
+                for _ in 0..PHASE_END_BISECTIONS {
+                    let mid = (lo.0 + 0.5 * (hi.0 - lo.0), reach);
+                    match end_at(mid.0, mid.1, end).by(age) {
+                        Some(ended) if ended == lo_ended => lo = mid,
+                        Some(_) => hi = mid,
+                        None => {
+                            found = false;
+                            break;
+                        }
+                    }
+                }
+                if !found {
+                    continue;
+                }
+                let (lo_end, hi_end) = (end_at(lo.0, lo.1, end), end_at(hi.0, hi.1, end));
+                let (lo, hi) = (lo.0, hi.0);
+                let ln = |t: Years| math::ln(t.value());
+                let u = match (lo_end, hi_end) {
+                    (EndAge::At(a), EndAge::At(b)) if ln(a).total_cmp(&ln(b)).is_ne() => {
+                        let x = (ln(age) - ln(a)) / (ln(b) - ln(a));
+                        lo + (hi - lo) * x.clamp(0.0, 1.0)
+                    }
+                    _ => lo + 0.5 * (hi - lo),
+                };
+                debug_assert!(u.is_finite(), "a finite ln m for {end:?} at {age:?}");
+                solved.push(SolvedEnd {
+                    mass: SolarMasses::new(math::exp(u)),
+                    end,
+                    age,
+                });
+            }
+        }
+    }
+    solved
+}
+
+/// The ages at `time`, for light of age 0, at which the stars of the components of `galaxy` that
+/// read the \[Fe/H\] node `fe_h` reach an edge of their ages, ascending: every component of the
+/// galaxy whose bins' nodes ([`metallicity_bins`], [`metallicity_nodes`], every bin) include it,
+/// whatever components a build asks for, and every edge of its ages after the epoch's zero.
+#[must_use]
+fn stage_ages(galaxy: &Galaxy, time: UniverseTime, fe_h: f64) -> Vec<Years> {
+    // A star's age at `time` is its age at the epoch plus `shift` (`TablesPlan::run_accumulate`).
+    let shift = time.since_epoch().as_julian_years_f64();
+    let mut ages = Vec::new();
+    for component in galaxy.fields().components() {
+        let reads = metallicity_bins(galaxy, component).iter().any(|&mean| {
+            metallicity_nodes(component, mean)
+                .iter()
+                .any(|&(node, _)| node.total_cmp(&fe_h).is_eq())
+        });
+        if reads {
+            ages.extend(
+                component
+                    .ages()
+                    .edges()
+                    .into_iter()
+                    .filter(|&age| age > 0.0)
+                    .map(|age| Years::new(age + shift)),
+            );
+        }
+    }
+    ages.sort_by(Years::total_cmp);
+    ages.dedup_by(|a, b| a.total_cmp(b).is_eq());
+    ages
+}
+
+/// The ln m at which a stage's phase ends are scanned ([`phase_end_masses`]): the ends of the
+/// panels of the global breaks, from 0.1 M☉, where the tracks start.
+#[must_use]
+fn phase_end_scan(global_edges: &[f64]) -> Vec<f64> {
+    let floor = math::ln(MIN_INITIAL_MASS.value());
+    let panels = ln_mass_panels(global_edges);
+    let mut scan = vec![floor];
+    scan.extend(panels.iter().map(|&(_, hi)| hi).filter(|&u| u > floor));
+    scan
+}
+
+/// Each stage's mass grid (R06.T5.e): its panels cut at the global breaks ([`global_breaks`]) and
+/// at the masses where the tracks at its \[Fe/H\] end a phase or die at an age edge of a component
+/// that reads it ([`stage_ages`], [`phase_end_masses`]). A stage's grid is a function of the
+/// galaxy, its \[Fe/H\] and `time` alone, never of the components or bins a build asks for.
+#[must_use]
+fn stage_grids(
+    galaxy: &Galaxy,
+    time: UniverseTime,
+    options: BuildOptions,
+    stages: &[PlannedStage],
+    max_age: Years,
+) -> Vec<MassGrid> {
+    let breaks = global_breaks(galaxy);
+    let global_edges = panel_edges(&breaks);
+    let scan = phase_end_scan(&global_edges);
+    let mut memo = CompanionsMemo::new(global_edges);
+    stages
+        .iter()
+        .map(|stage| {
+            let ages = stage_ages(galaxy, time, stage.fe_h);
+            let ends = phase_end_masses(&composition_at(stage.fe_h), &ages, &scan, max_age);
+            let masses: Vec<f64> = ends.iter().map(|end| end.mass.value()).collect();
+            MassGrid::new(
+                galaxy.mass_function(),
+                options,
+                &panel_edges(breaks.iter().chain(&masses)),
+                &mut memo,
+            )
+        })
+        .collect()
 }
 
 /// The composition at the reference metallicity `fe_h`, with no helium excess.
@@ -1843,6 +2325,7 @@ mod tests {
     use super::*;
     use crate::galaxy::fates::mean_stars_per_system;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
+    use crate::galaxy::quad::Gl16Panel;
     use crate::sky::eye::REFERENCE_SP_RATIO;
     use crate::stellar::sse::main_sequence_state;
 
@@ -1946,10 +2429,18 @@ mod tests {
     fn doubling_the_samples_moves_no_bin_above_one_percent() {
         // A bin's light and the stars brighter than each edge move by under 1% of the function's
         // light and stars: mass nodes on the main sequence sit at one magnitude for gigayears, so
-        // a bin edge beside one sees its share cross as the samples move.
+        // a bin edge beside one sees its share cross as the samples move. This checks the phase
+        // sampling of the full build, T5.e's panels at 16 nodes a panel, the reference the
+        // shipped nodes are measured against; their own accuracy is
+        // `standard_nodes_match_the_full_build_where_the_tables_are_read`'s, on what the tables'
+        // readers integrate (R06.T5.e, decided 2026-10-05).
+        let full = BuildOptions {
+            bins: GradientBins::SolarCircle,
+            ..BuildOptions::FULL
+        };
         let fine = BuildOptions {
             samples_per_phase: 2 * SAMPLES_PER_PHASE,
-            ..SOLAR_CIRCLE
+            ..full
         };
         let cases = [
             (
@@ -1961,8 +2452,9 @@ mod tests {
                 [Layer::B, Layer::C, Layer::D, Layer::E],
             ),
         ];
+        let mut worst = (0.0_f64, 0.0_f64);
         for (population, layers) in cases {
-            let (id, coarse) = tables(population, SOLAR_CIRCLE);
+            let (id, coarse) = tables(population, full);
             let (_, finer) = tables(population, fine);
             for layer in layers {
                 let (a, b) = (coarse.get(id, layer), finer.get(id, layer));
@@ -1979,6 +2471,7 @@ mod tests {
                             - f.light_fainter_than(edge(k + 1), Span::ZERO).value()
                     };
                     let (la, lb) = (bin(a), bin(b));
+                    worst.0 = worst.0.max((la - lb).abs() / light);
                     assert!(
                         (la - lb).abs() <= 0.01 * light,
                         "{population:?} {layer:?} bin {k}: {la} against {lb} of {light}"
@@ -1987,6 +2480,7 @@ mod tests {
                         a.count_brighter_than(edge(k), Span::ZERO),
                         b.count_brighter_than(edge(k), Span::ZERO),
                     );
+                    worst.1 = worst.1.max((ca - cb).abs() / stars);
                     assert!(
                         (ca - cb).abs() <= 0.01 * stars,
                         "{population:?} {layer:?} edge {k}: {ca} against {cb} of {stars}"
@@ -1994,6 +2488,11 @@ mod tests {
                 }
             }
         }
+        eprintln!(
+            "worst bin {:.3}% of its function's light, worst edge {:.3}% of its stars",
+            100.0 * worst.0,
+            100.0 * worst.1
+        );
     }
 
     #[test]
@@ -2134,30 +2633,56 @@ mod tests {
             })
     }
 
-    /// [`fingerprint`] of the halo's coarse build in `parallel_build_equals_serial`. Before
-    /// R06.T5.d it was `0x6ca2_bafb_4c81_c7b4`, made by the serial loop before the job split
-    /// (fae1c11), so neither the split nor its stages changed a bit. T5.d moved it here twice over:
-    /// by the correction's values, and by [`bits`] hashing each snapshot's applied light, its error
-    /// and its clamped light. A refit of the `sky_binary_light_*` tables moves it again.
-    const SERIAL_FINGERPRINT: u64 = 0x8c44_443c_67ac_13bf;
+    /// [`fingerprint`] of the halo's coarse build in `parallel_build_equals_serial`, under
+    /// [`BuildOptions::STANDARD`]'s other options. Before R06.T5.d it was `0x6ca2_bafb_4c81_c7b4`,
+    /// made by the serial loop before the job split (fae1c11), so neither the split nor its stages
+    /// changed a bit. T5.d moved it to `0x8c44_443c_67ac_13bf` twice over: by the correction's
+    /// values, and by [`bits`] hashing each snapshot's applied light, its error and its clamped
+    /// light. R06.T5.e moved it here (decided 2026-10-05, `decision-r06-t5e-gate-2.md`): by its
+    /// panel edges at the tracks' phase ends, one grid per stage, and by its node rule,
+    /// [`MassNodes::Scaled`]. A refit of the `sky_binary_light_*` tables moves it again, as it
+    /// moves [`FULL_SERIAL_FINGERPRINT`].
+    const SERIAL_FINGERPRINT: u64 = 0xe56b_4376_5fe8_1768;
+
+    /// [`fingerprint`] of the same halo build under [`BuildOptions::FULL`], the reference the
+    /// shipped nodes are measured against: R06.T5.e's panels at 16 nodes a panel (decided
+    /// 2026-10-05). It is new with T5.e's panel edges, which moved it from T5's
+    /// `0x8c44_443c_67ac_13bf`; a refit of the `sky_binary_light_*` tables moves it again.
+    const FULL_SERIAL_FINGERPRINT: u64 = 0xa022_ae9e_49f0_c996;
+
+    /// [`fingerprint`] of the bulge's and the long bar's coarse build in
+    /// `parallel_build_equals_serial`, under [`BuildOptions::STANDARD`]'s other options: their
+    /// stages read the thin discs' young edges too, so it pins the search's pre-main-sequence
+    /// ends and the deaths of intermediate-mass stars (some 5 M☉ at the 10⁸-year edge, which
+    /// reach the white dwarf through the post-AGB crossing), which the halo's old edges do not
+    /// (R06.T5.e). It moves with [`SERIAL_FINGERPRINT`].
+    const PAIR_SERIAL_FINGERPRINT: u64 = 0x9bc9_1279_f62c_9962;
 
     #[test]
     fn parallel_build_equals_serial() {
         // Any partition of the sample jobs (their chunk size), any order, stages sampled ahead of
         // their turn and any threads give `build`'s bits (decided 2026-10-03), at a coarse
         // sampling and for components whose few metallicity nodes keep the test short: the halo
-        // against the pre-split build, then the bulge and the long bar, which share two of their
-        // four stages, [Fe/H] 0 and +0.18.
+        // against its pinned build, under the shipped nodes and the full build's, then the bulge
+        // and the long bar, pinned too, which share two of their four stages, [Fe/H] 0 and
+        // +0.18, and so those stages' grids (R06.T5.e).
         let galaxy = milky_way_galaxy();
         let options = BuildOptions {
             samples_per_phase: 2,
             ..BuildOptions::STANDARD
         };
         let halo = component_of(galaxy, Population::Halo);
-        let halo = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[halo], options);
-        assert_eq!(fingerprint(&halo), SERIAL_FINGERPRINT);
+        let standard = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[halo], options);
+        assert_eq!(fingerprint(&standard), SERIAL_FINGERPRINT);
+        let full = BuildOptions {
+            samples_per_phase: 2,
+            ..BuildOptions::FULL
+        };
+        let full = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &[halo], full);
+        assert_eq!(fingerprint(&full), FULL_SERIAL_FINGERPRINT);
         let ids = [Population::Bulge, Population::LongBar].map(|p| component_of(galaxy, p));
         let serial = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &ids, options);
+        assert_eq!(fingerprint(&serial), PAIR_SERIAL_FINGERPRINT);
         // Chunks of 7 mass nodes rather than the serial build's 64: every stage's sample jobs at
         // once, ahead of their turn, run reversed on four threads.
         let plan = TablesPlan::new(galaxy, REFERENCE_TIME, &ids, options, 7);
@@ -2208,6 +2733,188 @@ mod tests {
             plan.run_accumulate(&samples[job.stage().index()], *job, &mut bin);
             bin
         });
+    }
+
+    /// A grid's masses and weights, bit for bit.
+    fn grid_bits(grid: &MassGrid) -> Vec<u64> {
+        grid.nodes
+            .iter()
+            .flat_map(|node| std::iter::once(node.mass).chain(node.weights))
+            .map(hyperion_testkit::float::bits)
+            .collect()
+    }
+
+    #[test]
+    fn a_stages_grid_is_the_same_whatever_components_are_built() {
+        // R06.T5.e (decided 2026-10-05): a stage's panels are cut where the tracks at its [Fe/H]
+        // end their phases at the age edges of every component that reads it in the galaxy's full
+        // plan, so a build of one component has the full build's grids, bit for bit. The bulge
+        // alone and with the long bar share [Fe/H] 0 and +0.18, which the thin discs read too.
+        let galaxy = milky_way_galaxy();
+        let [bulge, bar] =
+            [Population::Bulge, Population::LongBar].map(|p| component_of(galaxy, p));
+        let alone = TablesPlan::new(
+            galaxy,
+            REFERENCE_TIME,
+            &[bulge],
+            BuildOptions::STANDARD,
+            SAMPLE_JOB_NODES,
+        );
+        let pair = TablesPlan::new(
+            galaxy,
+            REFERENCE_TIME,
+            &[bar, bulge],
+            BuildOptions::STANDARD,
+            SAMPLE_JOB_NODES,
+        );
+        for (stage, grid) in alone.stages.iter().zip(&alone.grids) {
+            let k = pair
+                .stages
+                .iter()
+                .position(|s| s.fe_h.total_cmp(&stage.fe_h).is_eq())
+                .expect("the pair reads every metallicity of the bulge");
+            let (ours, theirs) = (grid_bits(grid), grid_bits(&pair.grids[k]));
+            assert_eq!(ours.len(), theirs.len(), "[Fe/H] {}", stage.fe_h);
+            assert_eq!(
+                ours.iter().zip(&theirs).position(|(a, b)| a != b),
+                None,
+                "[Fe/H] {}: the grids' first difference",
+                stage.fe_h
+            );
+        }
+        // Neither build asks for a thin disc, yet [Fe/H] 0's ages are theirs too: the old thin
+        // disc's 1 Gyr edge among them.
+        let shift = REFERENCE_TIME.since_epoch().as_julian_years_f64();
+        let ages = stage_ages(galaxy, REFERENCE_TIME, 0.0);
+        let has = |age: f64| ages.iter().any(|a| a.total_cmp(&Years::new(age)).is_eq());
+        assert!(has(1e9 + shift), "the old thin disc's 1 Gyr: {ages:?}");
+        assert!(has(1.2e10 + shift), "the bulge's oldest: {ages:?}");
+    }
+
+    #[test]
+    fn a_stages_panels_end_where_its_tracks_end_their_phases_at_the_age_edges() {
+        // R06.T5.e: every mass the search finds for the halo's [Fe/H] −1.5, at its 11 and 12 Gyr
+        // edges, is a panel edge of that stage's grid, and there the track leaves its phase or
+        // dies at the edge to 10⁻⁶ of its age. Each edge has the main sequence's end, the giant
+        // branch's tip and the death, and the first two are where the track's own states change
+        // phase.
+        let galaxy = milky_way_galaxy();
+        let fe_h = -1.5;
+        let reads = |id: &ComponentId| {
+            let component = galaxy.fields().component(*id);
+            metallicity_bins(galaxy, component).iter().any(|&mean| {
+                metallicity_nodes(component, mean)
+                    .iter()
+                    .any(|&(node, _)| node.total_cmp(&fe_h).is_eq())
+            })
+        };
+        let halo = galaxy
+            .fields()
+            .component_ids()
+            .find(reads)
+            .expect("a halo component reads [Fe/H] −1.5");
+        let plan = TablesPlan::new(
+            galaxy,
+            REFERENCE_TIME,
+            &[halo],
+            BuildOptions::STANDARD,
+            SAMPLE_JOB_NODES,
+        );
+        let stage = plan
+            .stages
+            .iter()
+            .position(|s| s.fe_h.total_cmp(&fe_h).is_eq())
+            .expect("the halo component's stage at [Fe/H] −1.5");
+        let ages = stage_ages(galaxy, REFERENCE_TIME, fe_h);
+        let shift = REFERENCE_TIME.since_epoch().as_julian_years_f64();
+        let bits = |ages: &[Years]| -> Vec<u64> {
+            ages.iter()
+                .map(|a| hyperion_testkit::float::bits(a.value()))
+                .collect()
+        };
+        assert_eq!(
+            bits(&ages),
+            bits(&[Years::new(1.1e10 + shift), Years::new(1.2e10 + shift)]),
+            "{ages:?}"
+        );
+        let composition = composition_at(fe_h);
+        let scan = phase_end_scan(&panel_edges(&global_breaks(galaxy)));
+        let solved = phase_end_masses(&composition, &ages, &scan, Years::new(plan.max_age));
+        for &age in &ages {
+            for end in [
+                PhaseEnd::Leaves(Phase::MainSequence),
+                PhaseEnd::Leaves(Phase::FirstGiantBranch),
+                PhaseEnd::Dies,
+            ] {
+                assert!(
+                    solved
+                        .iter()
+                        .any(|s| s.end == end && s.age.total_cmp(&age).is_eq()),
+                    "{end:?} at {age:?}: {solved:?}"
+                );
+            }
+        }
+        let edges = &plan.grids[stage].edges;
+        let reach = Years::new(2.0 * plan.max_age);
+        for s in &solved {
+            assert!(
+                edges.iter().any(|e| e.total_cmp(&s.mass.value()).is_eq()),
+                "{s:?} is no panel edge"
+            );
+            let at = match TrackEnds::of(s.mass, &composition, reach).age(s.end) {
+                EndAge::At(at) => at,
+                other => panic!("{s:?}: {other:?}"),
+            };
+            assert!(
+                (at.value() - s.age.value()).abs() <= 1e-6 * s.age.value(),
+                "{s:?}: the track's end is at {at:?}"
+            );
+            if let PhaseEnd::Leaves(phase @ (Phase::MainSequence | Phase::FirstGiantBranch)) = s.end
+            {
+                let track = Track::to_age(s.mass, &composition, &StarDraws::median(), reach);
+                let phase_at = |f: f64| track.state_at(Years::new(at.value() * f)).phase();
+                assert_eq!(phase_at(1.0 - 1e-9), phase, "{s:?}, just before its end");
+                assert_ne!(phase_at(1.0 + 1e-9), phase, "{s:?}, just after its end");
+            }
+        }
+    }
+
+    #[test]
+    fn companions_below_is_flat_beyond_each_bands_top() {
+        // The companions' memo reads H(c) at a band's top for every c beyond it (R06.T5.e): the
+        // same quadrature bit for bit, since every companion is lighter than its primary. Held
+        // against the direct integral just past the top, at twice it, at the stellar range's
+        // top, and at every panel edge and node beyond it of a stage's grid.
+        let galaxy = milky_way_galaxy();
+        let (f, fates) = (galaxy.mass_function(), fates_for(Population::OldThinDisc));
+        let edges = panel_edges(&global_breaks(galaxy));
+        let plan = bulge_plan();
+        let grid = &plan.grids[0];
+        let masses: Vec<f64> = grid
+            .edges
+            .iter()
+            .copied()
+            .chain(grid.nodes.iter().map(|node| node.mass))
+            .collect();
+        for band in MassBand::ALL {
+            let hi = band.hi();
+            let top = hyperion_testkit::float::bits(companions_below(f, fates, band, hi, &edges));
+            let beyond = [
+                hi * (1.0 + f64::EPSILON),
+                2.0 * hi,
+                crate::galaxy::imf::MASS_LIMIT_HI,
+            ]
+            .into_iter()
+            .chain(masses.iter().copied())
+            .filter(|&c| c > hi);
+            for c in beyond {
+                assert_eq!(
+                    hyperion_testkit::float::bits(companions_below(f, fates, band, c, &edges)),
+                    top,
+                    "{band:?} at {c} M☉"
+                );
+            }
+        }
     }
 
     /// The plan of the bulge's tables, whose one bin adds three metallicities.
@@ -2677,5 +3384,567 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The eye's cut near the Sun, apparent V: 7.4 + 0.45 + 0.1 (R06.T7).
+    const EYE_CUT_V: f64 = 7.95;
+
+    /// The cuts R06.T5.e's gate reads the tables at, apparent V: the eye's near the Sun, and
+    /// [`MAX_CUT_V`](crate::sky::MAX_CUT_V), the deepest a camera's view may ask, to which the
+    /// band and the caps are computed (Design note 5).
+    const GATE_CUTS: [f64; 2] = [EYE_CUT_V, crate::sky::MAX_CUT_V];
+
+    /// The layers that shine: every layer but the rogue planets', which are dark.
+    const LIT_LAYERS: [Layer; 6] = [
+        Layer::A,
+        Layer::B,
+        Layer::C,
+        Layer::D,
+        Layer::E,
+        Layer::BrownDwarf,
+    ];
+
+    /// A V light, L☉,V, and its four colour sums ([`ColourSums`]), in that order.
+    type LightSums = [f64; 5];
+
+    /// The names of a [`LightSums`]' values.
+    const LIGHT_SUMS: [&str; 5] = ["light", "lux", "lux r", "lux g", "lux ρ"];
+
+    /// `f`'s V light per system fainter than `m_v` and its colour sums, for light `ago` old:
+    /// [`LuminosityFunction::light_fainter_than`] and the sums behind
+    /// [`LuminosityFunction::colour_fainter_than`], read as they read them.
+    fn fainter(f: &LuminosityFunction, m_v: f64, ago: Span) -> LightSums {
+        let (a, b, t) = f.bracket(ago);
+        let at = |s: &Snapshot| -> LightSums {
+            let colour = |i: usize| at_edges_by(&s.colour_fainter, m_v, |c| c[i]);
+            [
+                at_edges(&s.light_fainter, m_v),
+                colour(0),
+                colour(1),
+                colour(2),
+                colour(3),
+            ]
+        };
+        let (va, vb) = (at(a), at(b));
+        std::array::from_fn(|i| va[i] + (vb[i] - va[i]) * t)
+    }
+
+    /// |`a` − `b`| ÷ |`b`|, and 0 where both are 0.
+    fn relative(a: f64, b: f64) -> f64 {
+        (a - b).abs() / b.abs().max(f64::MIN_POSITIVE)
+    }
+
+    /// The largest of `a`'s values' differences from `reference`'s, relative, and which value.
+    fn worst_of(a: &LightSums, reference: &LightSums) -> (f64, usize) {
+        a.iter()
+            .zip(reference)
+            .map(|(&x, &y)| relative(x, y))
+            .enumerate()
+            .fold(
+                (0.0, 0),
+                |worst, (i, d)| if d > worst.0 { (d, i) } else { worst },
+            )
+    }
+
+    /// Every component bin's name and, per snapshot, its light and colour sums per system over
+    /// its layers, each layer weighted by its share of the component's systems: a sky made of
+    /// that component alone, as T5.d's component guard reads it.
+    fn component_bin_light(
+        galaxy: &Galaxy,
+        tables: &LuminosityTables,
+    ) -> Vec<(String, Vec<LightSums>)> {
+        let mut out = Vec::new();
+        for id in galaxy.fields().component_ids() {
+            let component = galaxy.fields().component(id);
+            let bins = &tables.layout[id.index()];
+            for (bin, mean) in bins.means.iter().enumerate() {
+                let mut sums = vec![[0.0; 5]; EMITTED_AGO_YEARS.len()];
+                for layer in LIT_LAYERS {
+                    let share = galaxy
+                        .shares()
+                        .component_share(MassBand::from(layer), component);
+                    let function =
+                        &tables.functions[(bins.first + bin) * LAYER_COUNT + layer_index(layer)];
+                    for (sum, s) in sums.iter_mut().zip(&function.snapshots) {
+                        let all = [s.light_fainter[0]].into_iter().chain(s.colour_fainter[0]);
+                        for (v, x) in sum.iter_mut().zip(all) {
+                            *v += share * x;
+                        }
+                    }
+                }
+                let name = format!("{:?} [Fe/H] {mean:+.2}", component.population());
+                out.push((name, sums));
+            }
+        }
+        out
+    }
+
+    /// R06.T5.e's G1: every component bin's light and colour sums over its layers
+    /// ([`component_bin_light`]), at every snapshot, within `tolerance` of `full`'s, relative. The
+    /// failures.
+    fn component_light_gate(
+        galaxy: &Galaxy,
+        full: &LuminosityTables,
+        tables: &LuminosityTables,
+        tolerance: f64,
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
+        let mut worst = (0.0, String::new());
+        let theirs = component_bin_light(galaxy, full);
+        for ((name, ours), (_, theirs)) in component_bin_light(galaxy, tables).iter().zip(&theirs) {
+            // The bin's worst light, and its worst colour sum, over the snapshots.
+            let (mut light, mut colour) = (0.0_f64, (0.0, 0));
+            for (s, (a, b)) in ours.iter().zip(theirs).enumerate() {
+                light = light.max(relative(a[0], b[0]));
+                for (i, (&x, &y)) in a.iter().zip(b).enumerate().skip(1) {
+                    if relative(x, y) > colour.0 {
+                        colour = (relative(x, y), i);
+                    }
+                }
+                let (d, i) = worst_of(a, b);
+                if d > tolerance {
+                    failures.push(format!("G1 {name} snapshot {s} {}: {d:.5}", LIGHT_SUMS[i]));
+                }
+                if d > worst.0 {
+                    worst = (d, format!("{name} snapshot {s} {}", LIGHT_SUMS[i]));
+                }
+            }
+            eprintln!(
+                "G1 {name}: light {:.4}%, colour {:.4}% ({})",
+                100.0 * light,
+                100.0 * colour.0,
+                LIGHT_SUMS[colour.1]
+            );
+        }
+        eprintln!("G1 worst {:.4}% at {}", 100.0 * worst.0, worst.1);
+        failures
+    }
+
+    /// The band's points (R06.T17), ly in the galactic frame ([`GalacticPosition`](crate::coords::GalacticPosition)):
+    /// near the Sun, the inner disc, the bulge 3,000 ly from the centre and the halo 15,000 ly
+    /// above the Sun.
+    const BAND_POINTS: [[f64; 3]; 4] = [
+        [0.0, 26_000.0, 68.0],
+        [0.0, 8_000.0, 0.0],
+        [0.0, 3_000.0, 0.0],
+        [0.0, 26_000.0, 15_000.0],
+    ];
+
+    /// The walls a texel near the Sun is read behind, ly: clear to the wall and opaque beyond. The
+    /// first [`RECORDED_WALLS`] are recorded only: a texel holds under one system within them.
+    const WALLS_LY: [f64; 5] = [30.0, 100.0, 300.0, 1_000.0, 3_000.0];
+
+    /// The walls of [`WALLS_LY`] recorded but not gated.
+    const RECORDED_WALLS: usize = 2;
+
+    /// The solid angle of one texel of a 64² cube face, sr: 4π ÷ (6 × 64²).
+    const TEXEL_SR: f64 = 4.0 * core::f64::consts::PI / (6.0 * 64.0 * 64.0);
+
+    /// The band's radial quadrature from 1 ly to 120,000 ly: 16-point Gauss–Legendre panels in
+    /// ln r at most 0.35 wide (0.76 mag of distance modulus), with an edge at every wall. Each
+    /// node's distance, ly, and weight in ln r; and per wall, the number of nodes within it.
+    fn band_nodes() -> (Vec<(f64, f64)>, [usize; WALLS_LY.len()]) {
+        let edges = [1.0, 30.0, 100.0, 300.0, 1_000.0, 3_000.0, 120_000.0];
+        let mut nodes = Vec::new();
+        let mut within = [0; WALLS_LY.len()];
+        for (k, pair) in edges.windows(2).enumerate() {
+            let (lo, hi) = (math::ln(pair[0]), math::ln(pair[1]));
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "the edges ascend, so the quotient is positive, and at most ln 40 ÷ 0.35 < 11"
+            )]
+            let panels = ((hi - lo) / 0.35).ceil() as u32;
+            for p in 0..panels {
+                let a = lo + (hi - lo) * f64::from(p) / f64::from(panels);
+                let b = lo + (hi - lo) * f64::from(p + 1) / f64::from(panels);
+                let half = 0.5 * (b - a);
+                for (&u, &w) in Gl16Panel::nodes(a, b).iter().zip(&GL16_WEIGHTS) {
+                    nodes.push((math::exp(u), w * half));
+                }
+            }
+            if let Some(wall) = within.get_mut(k) {
+                *wall = nodes.len();
+            }
+        }
+        (nodes, within)
+    }
+
+    /// One ray's band from two table sets, per set ([`ray_band`]).
+    #[derive(Debug, Default)]
+    struct RayBand {
+        /// Per set, cut ([`GATE_CUTS`]) and extinction (none, then the ray's realised profile): the
+        /// light per steradian fainter than the cut less the distance modulus and the extinction,
+        /// and its colour sums, to 120,000 ly.
+        open: [[[LightSums; 2]; 2]; 2],
+        /// Per set and cut, the same with no extinction within each wall of [`WALLS_LY`].
+        walled: [[[LightSums; WALLS_LY.len()]; 2]; 2],
+        /// The expected systems within each wall in one texel ([`TEXEL_SR`]) along the ray.
+        systems: [f64; WALLS_LY.len()],
+        /// Per set and cut, with no extinction, the light by layer ([`LIT_LAYERS`]).
+        layers: [[[f64; LIT_LAYERS.len()]; 2]; 2],
+    }
+
+    /// The band along `direction` from `origin` (ly) through `sets`, at each distance the
+    /// density field times each component's and layer's light fainter than the cut less the
+    /// distance modulus and `extinction` at that distance, read at that distance's light age, as
+    /// Design note 15's texels read them.
+    fn ray_band(
+        galaxy: &Galaxy,
+        sets: [&LuminosityTables; 2],
+        origin: [f64; 3],
+        direction: [f64; 3],
+        extinction: impl Fn(f64) -> f64,
+        (nodes, within): &(Vec<(f64, f64)>, [usize; WALLS_LY.len()]),
+    ) -> RayBand {
+        use crate::galaxy::fields::MAX_COMPONENTS;
+        let fields = galaxy.fields();
+        let mut densities = [0.0; MAX_COMPONENTS];
+        let mut band = RayBand::default();
+        let mut systems = 0.0;
+        let mut wall = 0;
+        for (i, &(r, w)) in nodes.iter().enumerate() {
+            while wall < WALLS_LY.len() && within[wall] == i {
+                for (walled, open) in band.walled.iter_mut().zip(&band.open) {
+                    for (walled, open) in walled.iter_mut().zip(open) {
+                        walled[wall] = open[0];
+                    }
+                }
+                band.systems[wall] = systems;
+                wall += 1;
+            }
+            let p = PointLy::new(
+                origin[0] + r * direction[0],
+                origin[1] + r * direction[1],
+                origin[2] + r * direction[2],
+            );
+            systems += fields.densities(&p, &mut densities) * w * r * r * r * TEXEL_SR;
+            let ago = Span::from_seconds_f64(r * crate::units::consts::SECONDS_PER_JULIAN_YEAR)
+                .unwrap_or(Span::ZERO);
+            let modulus =
+                5.0 * math::log10(r / (10.0 * crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC));
+            let a_v = extinction(r);
+            for id in fields.component_ids() {
+                let rho = densities[id.index()];
+                if rho <= 0.0 {
+                    continue;
+                }
+                let component = fields.component(id);
+                for (l, &layer) in LIT_LAYERS.iter().enumerate() {
+                    let share = galaxy
+                        .shares()
+                        .component_share(MassBand::from(layer), component);
+                    let n = rho * share * w * r;
+                    for (t, set) in sets.iter().enumerate() {
+                        let function = set.get_at(id, layer, &p);
+                        let age = set.age_for(UniverseTime::EPOCH, ago);
+                        for (c, &cut) in GATE_CUTS.iter().enumerate() {
+                            let clear = fainter(function, cut - modulus, age);
+                            let dimmed = if a_v > 0.0 {
+                                fainter(function, cut - modulus - a_v, age)
+                            } else {
+                                clear
+                            };
+                            for (mode, v) in [clear, dimmed].iter().enumerate() {
+                                for (sum, x) in band.open[t][c][mode].iter_mut().zip(v) {
+                                    *sum += n * x;
+                                }
+                            }
+                            band.layers[t][c][l] += n * clear[0];
+                        }
+                    }
+                }
+            }
+        }
+        band
+    }
+
+    /// The sums of `values` over the rays.
+    fn all_sky(bands: &[RayBand], values: impl Fn(&RayBand) -> LightSums) -> LightSums {
+        bands.iter().fold([0.0; 5], |sum, band| {
+            let v = values(band);
+            std::array::from_fn(|i| sum[i] + v[i])
+        })
+    }
+
+    /// G2's open sky at one point: every ray's light and colour sums within `tolerance` of the
+    /// full set's (set 1), relative, at each cut and with and without extinction; prints the
+    /// all-sky figures, the worst ray and the all-sky light by layer.
+    fn open_sky_gate(
+        point: [f64; 3],
+        bands: &[RayBand],
+        tolerance: f64,
+        failures: &mut Vec<String>,
+    ) {
+        for (c, cut) in GATE_CUTS.iter().enumerate() {
+            for (mode, name) in ["no extinction", "realised extinction"].iter().enumerate() {
+                let sky = |t: usize| all_sky(bands, |b| b.open[t][c][mode]);
+                let (d, i) = worst_of(&sky(0), &sky(1));
+                let mut worst = (0.0, 0, 0);
+                for (ray, band) in bands.iter().enumerate() {
+                    let (d, i) = worst_of(&band.open[0][c][mode], &band.open[1][c][mode]);
+                    if d > worst.0 {
+                        worst = (d, i, ray);
+                    }
+                    if d > tolerance {
+                        failures.push(format!(
+                            "G2 {point:?} cut {cut} {name} ray {ray} {}: {d:.5}",
+                            LIGHT_SUMS[i]
+                        ));
+                    }
+                }
+                eprintln!(
+                    "G2 {point:?} cut {cut} {name}: all-sky {:.4}% ({}), worst ray {} {:.4}% ({})",
+                    100.0 * d,
+                    LIGHT_SUMS[i],
+                    worst.2,
+                    100.0 * worst.0,
+                    LIGHT_SUMS[worst.1]
+                );
+            }
+            let layers: Vec<String> = LIT_LAYERS
+                .iter()
+                .enumerate()
+                .map(|(l, layer)| {
+                    let (a, b) = bands.iter().fold((0.0, 0.0), |(a, b), band| {
+                        (a + band.layers[0][c][l], b + band.layers[1][c][l])
+                    });
+                    format!(
+                        "{layer:?} {:+.3}%",
+                        100.0 * (a - b) / b.max(f64::MIN_POSITIVE)
+                    )
+                })
+                .collect();
+            eprintln!(
+                "G2 {point:?} cut {cut} by layer, no extinction: {}",
+                layers.join(", ")
+            );
+        }
+    }
+
+    /// G2's walled texels near the Sun: per ray, the light and colour sums within each wall of
+    /// [`WALLS_LY`] within the larger of 1% and a third of the texel's Poisson scatter,
+    /// 1 ÷ (3 √N) for its N expected systems; the first [`RECORDED_WALLS`] are recorded only.
+    fn walled_gate(bands: &[RayBand], failures: &mut Vec<String>) {
+        for (c, cut) in GATE_CUTS.iter().enumerate() {
+            for (w, wall) in WALLS_LY.iter().enumerate() {
+                let sky = |t: usize| all_sky(bands, |b| b.walled[t][c][w]);
+                let (d, _) = worst_of(&sky(0), &sky(1));
+                // The ray nearest its tolerance: its difference, N and tolerance.
+                let mut worst = (0.0, 0.0, 0.0, 0.0);
+                let (mut least, mut most) = (f64::INFINITY, 0.0_f64);
+                for (ray, band) in bands.iter().enumerate() {
+                    let (diff, i) = worst_of(&band.walled[0][c][w], &band.walled[1][c][w]);
+                    let n = band.systems[w];
+                    let tolerance = (1.0 / (3.0 * n.sqrt())).max(0.01);
+                    (least, most) = (least.min(n), most.max(n));
+                    if diff / tolerance > worst.0 {
+                        worst = (diff / tolerance, diff, n, tolerance);
+                    }
+                    if w >= RECORDED_WALLS && diff > tolerance {
+                        failures.push(format!(
+                            "G2 wall {wall} ly cut {cut} ray {ray} {}: {diff:.5} against {tolerance:.5} \
+                             (N {n:.1})",
+                            LIGHT_SUMS[i]
+                        ));
+                    }
+                }
+                eprintln!(
+                    "G2 wall {wall} ly cut {cut}{}: all-sky {:.4}%, N {least:.1}-{most:.1}, \
+                     nearest its tolerance {:.4}% against {:.3}% (N {:.1})",
+                    if w < RECORDED_WALLS {
+                        " (recorded)"
+                    } else {
+                        ""
+                    },
+                    100.0 * d,
+                    100.0 * worst.1,
+                    100.0 * worst.3,
+                    worst.2
+                );
+            }
+        }
+    }
+
+    /// Whether [`band_gate`] gates the walled texels near the Sun ([`walled_gate`]).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Walls {
+        /// Gated, as a node cut is.
+        Gated,
+        /// Not read, as the reference check needs them not.
+        Unread,
+    }
+
+    /// R06.T5.e's G2: the band along each of the caps' 768 rays at T17's four points
+    /// ([`BAND_POINTS`]), both cuts, without extinction and through each ray's realised profile,
+    /// each ray within `tolerance` of `full`'s, relative, and near the Sun behind walls
+    /// ([`walled_gate`]) if `walls` asks, for `tables` against `full`. The failures.
+    fn band_gate(
+        galaxy: &Galaxy,
+        full: &LuminosityTables,
+        tables: &LuminosityTables,
+        tolerance: f64,
+        walls: Walls,
+    ) -> Vec<String> {
+        use crate::coords::GalacticPosition;
+        use crate::galaxy::gas::noise::NoiseCache;
+        use crate::sky::caps::{CAP_RAYS, RayExtinctions};
+        let nodes = band_nodes();
+        let mut failures = Vec::new();
+        for (k, point) in BAND_POINTS.into_iter().enumerate() {
+            let origin = GalacticPosition::from_light_years(point).expect("in the cube");
+            let mut cache = NoiseCache::with_capacity(1 << 16);
+            let rays = RayExtinctions::measure(galaxy, &origin, CAP_RAYS, &mut cache);
+            let bands: Vec<RayBand> = rays
+                .directions()
+                .enumerate()
+                .map(|(ray, direction)| {
+                    let extinction = |r: f64| rays.along(ray, r);
+                    ray_band(
+                        galaxy,
+                        [tables, full],
+                        point,
+                        direction.components(),
+                        extinction,
+                        &nodes,
+                    )
+                })
+                .collect();
+            open_sky_gate(point, &bands, tolerance, &mut failures);
+            if k == 0 && walls == Walls::Gated {
+                walled_gate(&bands, &mut failures);
+            }
+        }
+        failures
+    }
+
+    /// The points of `caps_converge_in_rays` (R06.T7), ly in the galactic frame
+    /// ([`GalacticPosition`](crate::coords::GalacticPosition)).
+    const CAP_POINTS: [[f64; 3]; 6] = [
+        [0.0, 26_000.0, 68.0],
+        [0.0, 150.0, 0.0],
+        [26_000.0, 0.0, 68.0],
+        [-18_385.0, -18_385.0, 68.0],
+        [0.0, 8_000.0, 0.0],
+        [0.0, 26_000.0, 2_000.0],
+    ];
+
+    /// R06.T5.e's G3 (a) and (b): at [`CAP_POINTS`] and both cuts, every layer's cap from
+    /// `tables` within one radial node of `full`'s, and `full`'s expected count of stars beyond
+    /// it under 1.5. The failures.
+    fn caps_gate(
+        galaxy: &Galaxy,
+        full: &LuminosityTables,
+        tables: &LuminosityTables,
+    ) -> Vec<String> {
+        use crate::coords::GalacticPosition;
+        use crate::galaxy::gas::noise::NoiseCache;
+        use crate::observe::Observer;
+        use crate::sky::caps::{
+            CapResolution, RADIAL_STEPS_PER_DECADE, expected_beyond_caps, layer_caps,
+        };
+        let envelope = crate::sky::testing::milky_way_envelope();
+        let mut failures = Vec::new();
+        for point in CAP_POINTS {
+            let at = GalacticPosition::from_light_years(point).expect("in the cube");
+            let observer = Observer::new(at, UniverseTime::EPOCH).expect("an observer");
+            for cut in GATE_CUTS {
+                let mut cache = NoiseCache::with_capacity(1 << 16);
+                let v = Magnitudes::new(cut);
+                let ours = layer_caps(galaxy, tables, envelope, &observer, v, &mut cache);
+                let theirs = layer_caps(galaxy, full, envelope, &observer, v, &mut cache);
+                let beyond = expected_beyond_caps(
+                    galaxy,
+                    full,
+                    envelope,
+                    &observer,
+                    v,
+                    CapResolution::STANDARD,
+                    &ours,
+                    &mut cache,
+                );
+                for ((a, b), beyond) in ours.iter().zip(&theirs).zip(&beyond) {
+                    let (ra, rb) = (a.radius().value(), b.radius().value());
+                    let steps = (f64::from(RADIAL_STEPS_PER_DECADE) * math::log10(ra / rb)).round();
+                    eprintln!(
+                        "G3 {point:?} cut {cut} {:?}: cap {ra:.0} ly against {rb:.0} ({steps:+} \
+                         nodes), beyond it {:.3} by these tables and {beyond:.3} by the full",
+                        a.layer(),
+                        a.expected_beyond()
+                    );
+                    if steps.abs() > 1.0 || *beyond >= 1.5 {
+                        failures.push(format!(
+                            "G3 {point:?} cut {cut} {:?}: {ra} ly against {rb}, {beyond} beyond",
+                            a.layer()
+                        ));
+                    }
+                }
+            }
+        }
+        failures
+    }
+
+    /// R06.T5.e's G3 (c): the stars brighter than V 5 and 6.5 near the Sun
+    /// ([`stars_brighter_than`]) within 1% of `full`'s. The failures.
+    fn count_gate(
+        galaxy: &Galaxy,
+        full: &LuminosityTables,
+        tables: &LuminosityTables,
+    ) -> Vec<String> {
+        let limits = [5.0, 6.5];
+        let ours = stars_brighter_than(galaxy, tables, &limits);
+        let theirs = stars_brighter_than(galaxy, full, &limits);
+        let mut failures = Vec::new();
+        for ((v, a), b) in limits.iter().zip(&ours).zip(&theirs) {
+            let d = (a - b) / b;
+            eprintln!(
+                "G3 stars brighter than V {v}: {a:.1} against {b:.1} ({:+.4}%)",
+                100.0 * d
+            );
+            if d.abs() > 0.01 {
+                failures.push(format!("G3 stars brighter than V {v}: {a} against {b}"));
+            }
+        }
+        failures
+    }
+
+    #[test]
+    #[ignore = "slow: builds the full tables and the same at 32 nodes a panel"]
+    fn the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read() {
+        // R06.T5.e's reference check (decided 2026-10-05, `decision-r06-t5e-gate-2.md`): the
+        // full build, which the shipped nodes are measured against, is within a quarter of their
+        // gate's 1% of twice its nodes, on G1 and the open band of G2. T5's panels failed this by
+        // 1.08% in an old halo component's colour (`lux·r`; 0.78% in its light), the structure
+        // the panels left unresolved.
+        let galaxy = milky_way_galaxy();
+        let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
+        let fine = BuildOptions {
+            mass_nodes: MassNodes::ThirtyTwo,
+            ..BuildOptions::FULL
+        };
+        let full = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &all, BuildOptions::FULL);
+        let finer = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &all, fine);
+        let mut failures = component_light_gate(galaxy, &finer, &full, 0.0025);
+        failures.extend(band_gate(galaxy, &finer, &full, 0.0025, Walls::Unread));
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    #[ignore = "slow: builds the full and the standard tables"]
+    fn standard_nodes_match_the_full_build_where_the_tables_are_read() {
+        // R06.T5.e's gate (decided 2026-10-05, `decision-r06-t5e-gate.md` and `-2.md`): the
+        // shipped nodes against the full build, on what the tables' readers integrate, since none
+        // reads one 0.05-mag bin or one component's layer alone. G1 a sky of one component bin;
+        // G2 the band's texels, open, through the realised dust and behind near walls; G3 the
+        // caps and the counts.
+        let galaxy = milky_way_galaxy();
+        let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
+        let full = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &all, BuildOptions::FULL);
+        let standard = crate::sky::testing::milky_way_tables();
+        let mut failures = component_light_gate(galaxy, &full, standard, 0.01);
+        failures.extend(band_gate(galaxy, &full, standard, 0.01, Walls::Gated));
+        failures.extend(caps_gate(galaxy, &full, standard));
+        failures.extend(count_gate(galaxy, &full, standard));
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }

@@ -4,7 +4,7 @@
  * head. jsdom lays nothing out, so the harness gives each box its size; the fit, the breaks and
  * the clipping are measured by the hidden captures recorded in R07's Risks.
  */
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fakeViewEngineSource } from "../../test/fakeViewEngine";
@@ -18,8 +18,12 @@ import {
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
-import { GraphicsStatusStore, initialGraphicsStatus } from "../../view/engine/status";
-import { PHOTOREAL_NOT_CREATED } from "./styleRefusals";
+import {
+  DEVICE_LOSS_LIMIT,
+  GraphicsStatusStore,
+  initialGraphicsStatus,
+} from "../../view/engine/status";
+import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import type { ViewEngineSource } from "./useViewEngine";
 
 afterEach(() => {
@@ -82,6 +86,20 @@ function describing(text: string): unknown {
   return expect.stringContaining(text);
 }
 
+/** An engine source whose engine refuses every material: the photorealistic style faults. */
+function refusingMaterialsSource(): ViewEngineSource {
+  const fake = fakeViewEngineSource();
+  return {
+    ...fake.source,
+    load: async (outcome, status) => {
+      const engine = await fake.source.load(outcome, status);
+      return Object.assign(engine, {
+        createMaterialAsync: (): Promise<never> => Promise.reject(new Error("refused")),
+      });
+    },
+  };
+}
+
 /** The style's fault standing under the row, or `null`. */
 function standing(): HTMLElement | null {
   return screen.queryByText(PHOTOREAL_NOT_CREATED, { selector: ".view-folds__standing" });
@@ -110,6 +128,21 @@ async function openInstrument(view: ViewDisplayHarness, name: string): Promise<v
     within(screen.getByRole("group", { name })).getByRole("button", { name: "OPEN" }),
   );
   view.advance(300);
+}
+
+/** Whether the region named `name` is the first panel of the full layout's second column. */
+function headsSecondColumn(name: string): boolean {
+  const panel = screen.getByRole("region", { name });
+  const column = panel.closest(".view__column--b");
+  return column instanceof HTMLElement && within(column).getAllByRole("region")[0] === panel;
+}
+
+/** Points CONTROLS at a view. */
+async function controlsAt(view: ViewDisplayHarness, name: string): Promise<void> {
+  await view.user.click(
+    within(screen.getByRole("group", { name: "CONTROLS" })).getByRole("button", { name }),
+  );
+  view.advance(100);
 }
 
 /** The names of the controls Tab reaches from the primary canvas, in order, up to `steps`. */
@@ -150,7 +183,22 @@ describe("VIEW's full layout (R07.T19.b)", () => {
     expect([
       inOrder,
       panels.map((panel) => panel.closest(".view__column")?.classList.contains("view__column--a")),
-    ]).toEqual([true, [true, true, true, true, false, false]]);
+    ]).toEqual([true, [true, true, true, false, false, false]]);
+  });
+
+  it("heads the second column with the CONTROLS view's style, the primary's or an instrument's", async () => {
+    const view = await setup({ store: await nominalStore() });
+    await openInstrument(view, "INSTRUMENT 1");
+    const primary = headsSecondColumn("Style PRIMARY");
+    await controlsAt(view, "INSTRUMENT 1");
+    expect([
+      primary,
+      headsSecondColumn("Style INSTRUMENT 1"),
+      region("Style PRIMARY"),
+      region("Camera INSTRUMENT 1")
+        ?.closest(".view__column")
+        ?.classList.contains("view__column--a"),
+    ]).toEqual([true, true, null, true]);
   });
 
   it("shows every panel, with no disclosure", async () => {
@@ -333,17 +381,11 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
 
   it("stands a style fault under the row while STYLE is folded", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const fake = fakeViewEngineSource();
-    const source: ViewEngineSource = {
-      ...fake.source,
-      load: async (outcome, status) => {
-        const engine = await fake.source.load(outcome, status);
-        return Object.assign(engine, {
-          createMaterialAsync: (): Promise<never> => Promise.reject(new Error("refused")),
-        });
-      },
-    };
-    const view = await setup({ viewPx: COMPACT_VIEW_PX, store: await nominalStore(), source });
+    const view = await setup({
+      viewPx: COMPACT_VIEW_PX,
+      store: await nominalStore(),
+      source: refusingMaterialsSource(),
+    });
     await toggleStyle(view);
     // Folded, the fault stands under the row, once; open, it is the panel's own line, once.
     const folded = [onShow(PHOTOREAL_NOT_CREATED), standing() !== null];
@@ -354,9 +396,40 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     ]);
   });
 
-  it("offers no STYLE while no view can be drawn, its panel not standing", async () => {
+  it("states no view drawn, not a style fault, once the graphics are ruled out after one", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const store = await nominalStore();
+    const view = await setup({ viewPx: COMPACT_VIEW_PX, store, source: refusingMaterialsSource() });
+    // The photorealistic pipelines refused: a style fault, standing under the row.
+    await toggleStyle(view);
+    const faulted = standing() !== null;
+    // Then the device is lost until the graphics are disabled: no view can be drawn.
+    act(() => {
+      for (let loss = 0; loss < DEVICE_LOSS_LIMIT; loss += 1) {
+        store.dispatch({ kind: "device-lost", reason: "unknown", message: "lost" });
+      }
+    });
+    view.advance(100);
+    const foldedLines = [onShow(PHOTOREAL_NOT_CREATED), onShow(NO_VIEW_DRAWN)];
+    await view.user.click(disclosure("STYLE"));
+    const reason = within(screen.getByRole("region", { name: "Style PRIMARY" })).getByText(
+      NO_VIEW_DRAWN,
+    );
+    expect([faulted, foldedLines, reason.classList.contains("view-style__reason--fault")]).toEqual([
+      true,
+      [0, 0],
+      false,
+    ]);
+  });
+
+  it("offers STYLE while no view can be drawn too, so that the row changes by the meter alone", async () => {
     await compact(new GraphicsStatusStore(initialGraphicsStatus("safe", false)));
-    expect(disclosures().map(([name]) => name)).toEqual(["Instruments", "CAMERA", "EXPOSURE"]);
+    expect(disclosures().map(([name]) => name)).toEqual([
+      "Instruments",
+      "CAMERA",
+      "STYLE",
+      "EXPOSURE",
+    ]);
   });
 });
 
@@ -406,14 +479,6 @@ describe("VIEW's label block at both sizes (R07.T19.b)", () => {
     expect(canvasOf("PRIMARY")).not.toHaveAccessibleDescription(describing("EASED CAMERA MOVES"));
   });
 });
-
-/** Points CONTROLS at a view. */
-async function controlsAt(view: ViewDisplayHarness, name: string): Promise<void> {
-  await view.user.click(
-    within(screen.getByRole("group", { name: "CONTROLS" })).getByRole("button", { name }),
-  );
-  view.advance(100);
-}
 
 describe("VIEW's instruments at both sizes (R07.T19.b)", () => {
   it("states BODY PHOTOMETRY on a photorealistic instrument beside a wireframe primary, not beside a photorealistic one", async () => {

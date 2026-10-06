@@ -85,10 +85,13 @@ export interface SpikeReportExtras {
 }
 
 /**
- * The report as the metrics give it: all of it but where script time starts and the trace's
- * windows, which the run's control adds (`SpikeController`).
+ * The report as the metrics give it: all of it but where script time starts, the trace's windows
+ * and their boundary guard, which the run's control adds (`SpikeController`).
  */
-export type SpikeMetricsReport = Omit<DescentSpikeReport, "scriptStartMs" | "traceWindows">;
+export type SpikeMetricsReport = Omit<
+  DescentSpikeReport,
+  "scriptStartMs" | "traceWindows" | "traceGuardS"
+>;
 
 /** The timer states from best to worst; a run reports the worst it saw. */
 const TIMER_RANK: Readonly<Record<GpuTimer, number>> = { full: 0, quantized: 1, absent: 2 };

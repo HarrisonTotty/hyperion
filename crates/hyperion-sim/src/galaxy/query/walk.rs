@@ -150,19 +150,38 @@ pub fn cells_in_sphere(
     layer: Layer,
     sphere: &QuerySphere,
 ) -> impl Iterator<Item = CellKey> + use<> {
+    Walk::new(layer, sphere)
+        .into_iter()
+        .flat_map(|walk| walk.cells(0).flat_map(move |x| walk.slab(x)))
+}
+
+/// The x coordinates, on `layer`'s grid, of the slabs of cells [`cells_in_sphere`] walks for
+/// `sphere`, ascending: each slab's cells are [`cells_in_sphere_slab`]'s, and the slabs' cells in
+/// this order are [`cells_in_sphere`]'s. A slab may hold no cell. For a caller that splits a walk
+/// into jobs without holding its cells (rendering plan R06, R06.T8.f).
+///
+/// # Panics
+///
+/// Never: the walk's cells lie in the root cube, whose cell coordinates fit in `i32`.
+pub fn sphere_slabs(layer: Layer, sphere: &QuerySphere) -> impl Iterator<Item = i32> + use<> {
     Walk::new(layer, sphere).into_iter().flat_map(|walk| {
-        walk.cells(0).flat_map(move |x| {
-            let gx2_ly2 = walk.gap_squared_ly2(0, x);
-            walk.cells(1)
-                .filter_map(move |y| {
-                    walk.column(gx2_ly2 + walk.gap_squared_ly2(1, y))
-                        .map(|z| (y, z))
-                })
-                .flat_map(move |(y, (z_first, z_last))| {
-                    (z_first..=z_last).map(move |z| walk.key([x, y, z]))
-                })
-        })
+        walk.cells(0)
+            .map(|x| i32::try_from(x).expect("a cell of the root cube fits in i32"))
     })
+}
+
+/// The cells of [`cells_in_sphere`] whose x coordinate on `layer`'s grid is `x`, in its order:
+/// none for an `x` outside [`sphere_slabs`].
+pub fn cells_in_sphere_slab(
+    layer: Layer,
+    sphere: &QuerySphere,
+    x: i32,
+) -> impl Iterator<Item = CellKey> + use<> {
+    let x = i64::from(x);
+    Walk::new(layer, sphere)
+        .filter(|walk| walk.cells(0).contains(&x))
+        .into_iter()
+        .flat_map(move |walk| walk.slab(x))
 }
 
 /// How many cells [`cells_in_sphere`] yields, found column by column without visiting a cell.
@@ -256,6 +275,19 @@ impl Walk {
     #[must_use]
     fn cells(self, axis: usize) -> std::ops::RangeInclusive<i64> {
         self.axes[axis].first..=self.axes[axis].last
+    }
+
+    /// The kept cells whose x coordinate is `x`, in ascending order of y, then z.
+    fn slab(self, x: i64) -> impl Iterator<Item = CellKey> {
+        let gx2_ly2 = self.gap_squared_ly2(0, x);
+        self.cells(1)
+            .filter_map(move |y| {
+                self.column(gx2_ly2 + self.gap_squared_ly2(1, y))
+                    .map(|z| (y, z))
+            })
+            .flat_map(move |(y, (z_first, z_last))| {
+                (z_first..=z_last).map(move |z| self.key([x, y, z]))
+            })
     }
 
     /// The squared distance, ly², from the centre to the slab of `cell` on one axis: zero inside
@@ -423,6 +455,18 @@ mod tests {
         );
         // Ascending and so free of repeats.
         assert!(walked.windows(2).all(|pair| pair[0] < pair[1]));
+        // Slab by slab, the same cells in the same order, and nothing either side of the slabs.
+        let slabs: Vec<i32> = sphere_slabs(layer, sphere).collect();
+        assert!(slabs.windows(2).all(|pair| pair[0] + 1 == pair[1]));
+        let by_slab: Vec<_> = slabs
+            .iter()
+            .flat_map(|&x| cells_in_sphere_slab(layer, sphere, x))
+            .collect();
+        assert_eq!(by_slab, walked, "{layer:?} {sphere:?} by slab");
+        if let (Some(&first), Some(&last)) = (slabs.first(), slabs.last()) {
+            assert_eq!(cells_in_sphere_slab(layer, sphere, first - 1).count(), 0);
+            assert_eq!(cells_in_sphere_slab(layer, sphere, last + 1).count(), 0);
+        }
         walked.len()
     }
 

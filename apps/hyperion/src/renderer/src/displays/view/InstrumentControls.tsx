@@ -7,8 +7,6 @@ import type { ViewKeyAction } from "../../view/camera/keys";
 import { type CameraTarget, offeredPresets } from "../../view/camera/state";
 import { cameraSceneOf } from "../../view/scene/model";
 import { CameraControls } from "./CameraControls";
-import { StyleControl } from "./StyleControl";
-import type { StyleRefusals } from "./styleRefusals";
 import type { InstrumentShown } from "./useInstruments";
 import type { SideFolds } from "./viewLayout";
 import { ViewMarkList } from "./ViewMarkList";
@@ -25,14 +23,10 @@ export interface InstrumentControlsProps {
   readonly stale: boolean;
   readonly easedMoves: boolean;
   readonly reducedMotion: boolean;
-  /** Why each style is held back for the instrument, the adapter's reason first. */
-  readonly refusals: StyleRefusals;
-  /** Whether the photorealistic style's reason is the instrument's own fault. */
-  readonly faulted: boolean;
   readonly onAction: (action: ViewKeyAction) => void;
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
   readonly onSelect: (target: CameraTarget) => void;
-  /** How the camera and style panels stand in the side column's layout. */
+  /** How the camera panel stands in the side column's layout. */
   readonly folds: SideFolds;
 }
 
@@ -47,12 +41,16 @@ function unitsOf(rows: ReadonlyArray<MarkRow>): ReadonlyMap<string, BodyDistance
 }
 
 /**
- * An instrument view's list, camera controls and style control (plan R07, T19), in the side
+ * An instrument view's list and camera controls (plan R07, T19), in the side column's first
  * column while the `CONTROLS` selector points at the instrument, as the primary's are while it
  * points at `PRIMARY`: its targets, each with its range, from which the keyboard selects its mark,
- * its presets, targets and field of view, and its style, held back where the adapter or the
- * quality setting allows it no photorealistic view. Each panel carries the instrument's name as
- * its designator.
+ * and its presets, targets and field of view. Each panel carries the instrument's name as its
+ * designator.
+ *
+ * @remarks
+ * Its style control stands at the head of the second column, where `ViewDisplay` sets the
+ * `CONTROLS` view's style, the primary's or an instrument's (decision-r07-t19b-exposure-fit,
+ * item 2).
  */
 export function InstrumentControls({
   designator,
@@ -61,8 +59,6 @@ export function InstrumentControls({
   stale,
   easedMoves,
   reducedMotion,
-  refusals,
-  faulted,
   onAction,
   onEasedMovesChange,
   onSelect,
@@ -109,17 +105,6 @@ export function InstrumentControls({
         designator={designator}
         id={folds.cameraId}
         hidden={folds.cameraHidden}
-      />
-      <StyleControl
-        renderStyle={run.camera.style}
-        refusals={refusals}
-        faulted={faulted}
-        onStyle={(style) => {
-          onAction({ kind: "style", style });
-        }}
-        designator={designator}
-        id={folds.styleId}
-        hidden={folds.styleHidden}
       />
     </>
   );

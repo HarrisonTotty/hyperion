@@ -304,7 +304,9 @@ fn a_light_helium_star_leaves_a_white_dwarf_of_its_whole_mass() {
     let fate = loop {
         match step.next {
             build::Entry::HeliumShellBurning { star, clock0, mass } => {
-                step = builder.helium_shell_burning(step.end, &star, clock0, mass, step.end_state);
+                step = builder
+                    .helium_shell_burning(step.end, &star, clock0, mass, step.end_state)
+                    .expect("the helium star's shell burning ends");
             }
             build::Entry::Dead(fate) => break fate,
             other => panic!("a helium star of 0.5 M☉ does not enter {other:?}"),
@@ -342,7 +344,9 @@ fn light_helium_star_hand_over(options: TrackOptions) -> ([f64; 3], StarState) {
     let (fate, last) = loop {
         match step.next {
             build::Entry::HeliumShellBurning { star, clock0, mass } => {
-                step = builder.helium_shell_burning(step.end, &star, clock0, mass, step.end_state);
+                step = builder
+                    .helium_shell_burning(step.end, &star, clock0, mass, step.end_state)
+                    .expect("the helium star's shell burning ends");
             }
             build::Entry::Dead(fate) => break (fate, step.end_state),
             other => panic!("a helium star of 0.5 M☉ does not enter {other:?}"),

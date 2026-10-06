@@ -7,12 +7,13 @@
  * Selection is pure and costly, so the pass re-runs it only when its inputs move enough
  * (decision-r05-patch-demand.md, 4d): on a change of setting, viewport, field of view, contacts or
  * baked height ranges; an orientation change of more than one pixel's angle; or a camera move of
- * more than {@link RESELECT_FRACTION} of the distance to the nearest selected patch that is not at
- * the finest level. It selects at τ ÷ (1 + {@link RESELECT_FRACTION}), so that the drawn error
- * stays within τ between runs, and with a budget of half the cache's slots (4b). The morph bands
- * are computed at τ, raised where the budget binds ({@link effectiveTauPx}). The draw set is
- * resolved when selection runs, in place by one `DrawSetResolver` per cache, and the instance and
- * contact records are written every frame into buffers made once.
+ * more than {@link RESELECT_MOVE_FRACTION} = m ÷ (1 + m), for m = `RESELECT_FRACTION`, of the
+ * box distance to the nearest selected patch that is not at the finest level. It selects at
+ * τ ÷ (1 + m), so that the drawn error stays within τ between runs, and with a budget of half the
+ * cache's slots (4b). The morph bands are computed at τ, raised where the budget binds
+ * ({@link effectiveTauPx}). The draw set is resolved when selection runs, in place by one
+ * `DrawSetResolver` per cache, and the instance and contact records are written every frame into
+ * buffers made once.
  *
  * Positions follow R02's differencing: patch origins and contacts are body-fixed `f64`, rotated
  * into the body's non-rotating axes, less the camera in those axes, and narrowed once into the
@@ -52,10 +53,8 @@ import {
   selectPatches,
   type ViewSelectionInput,
 } from "./select";
+import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import type { BakedPatch, BakeSettings, TestPlanetRidges } from "./workers/messages";
-
-/** The fraction of the nearest selected patch's distance the camera may move between selections. */
-export const RESELECT_FRACTION = 0.1;
 
 /**
  * How far through a level's distance band the CDLOD morph to its parent begins (Design note 6): a
@@ -245,13 +244,15 @@ export function morphRangeM(
  * the setting's τ and a view of weight w (decision-r05-high-bound.md, F2).
  *
  * @remarks
- * Selection runs at τ_sel = τ ÷ (1 + {@link RESELECT_FRACTION}) and measures `limitExcess` against
- * it, so every drawn baked leaf has ρ ≤ τ′ = τ_sel × max(1, `limitExcess` ÷ w), the effective
- * tolerance of `Selection.limitExcess` and T13.a's record. The bands, at (1 + m) τ′, keep the
- * margin over the leaves that they have at τ without a budget. A coarse leaf then lies beyond its
- * finer neighbour's band, so their shared edge stays at morph 1 under the budget too, and a split's
- * children start fully morphed. `limitExcess` is 0 when the budget does not bind, which makes the
- * result exactly τ and the bands bit-identical to an unbudgeted selection's.
+ * Selection runs at τ_sel = τ ÷ (1 + m), for m = `RESELECT_FRACTION`, and measures `limitExcess`
+ * against it, so every drawn baked leaf has ρ ≤ τ′ = τ_sel × max(1, `limitExcess` ÷ w), the
+ * effective tolerance of `Selection.limitExcess` and T13.a's record. The bands, at (1 + m) τ′,
+ * keep the margin over the leaves that they have at τ without a budget. A coarse leaf then lies
+ * beyond its finer neighbour's band, and stays beyond it between selections, whose moves of at
+ * most {@link RESELECT_MOVE_FRACTION} × d_min use up exactly that margin. Their shared edge stays
+ * at morph 1 under the budget too, and a split's children start fully morphed. `limitExcess` is 0
+ * when the budget does not bind, which makes the result exactly τ and the bands bit-identical to
+ * an unbudgeted selection's.
  *
  * @param weight - The view's streaming weight, greater than 0.
  */
@@ -426,7 +427,7 @@ export class TerrainPass {
     this.#onResident?.(bake.key);
   }
 
-  /** The primary view as selection takes it: body-fixed, at τ ÷ (1 + m). */
+  /** The primary view as selection takes it: body-fixed, at τ_sel ({@link selectionTolerancePx}). */
   #selectionView(view: TerrainView): ViewSelectionInput {
     const qBody = quaternionFromRows(view.rotation.rows);
     return {
@@ -437,7 +438,7 @@ export class TerrainPass {
       fovXRad: view.fovXRad,
       viewport: view.viewport,
       weight: 1,
-      tauPx: this.#terrain.tauPx / (1 + RESELECT_FRACTION),
+      tauPx: selectionTolerancePx(this.#terrain.tauPx),
     };
   }
 
@@ -463,8 +464,10 @@ export class TerrainPass {
     if (2 * Math.acos(Math.min(dot, 1)) > pixelRad) {
       return true;
     }
+    // m ÷ (1 + m) of d_min, not m, so that the drawn error stays within τ, not τ ÷ (1 − m²).
     return (
-      distance(view.camera.positionM, last.cameraBodyFixedM) > RESELECT_FRACTION * last.nearestM
+      distance(view.camera.positionM, last.cameraBodyFixedM) >
+      RESELECT_MOVE_FRACTION * last.nearestM
     );
   }
 

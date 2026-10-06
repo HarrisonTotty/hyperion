@@ -10,7 +10,10 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::gas::modifiers::GasModifierSource;
 use crate::galaxy::gas::noise::NoiseCache;
 use crate::galaxy::placement::CellKey;
-use crate::galaxy::query::{QuerySphere, SystemSource, cells_in_sphere, pad_for, pad_speed};
+use crate::galaxy::query::{
+    QuerySphere, SystemSource, cells_in_sphere, cells_in_sphere_slab, count_cells_in_sphere,
+    pad_for, pad_speed, sphere_slabs,
+};
 use crate::id::{Layer, SystemId};
 use crate::math;
 use crate::observe::Observer;
@@ -23,6 +26,7 @@ use super::super::envelope::BrightnessEnvelope;
 use super::super::eye::{EyeObserver, MAX_CUT_V};
 use super::super::luminosity::LuminosityTables;
 use super::cache::SkyCellCache;
+use super::cell::CellOffsets;
 
 /// The largest count of stars a sky lists, 3 × 10⁵ (Design note 11): 7.2 MB of payload.
 pub const MAX_N_MAX: u32 = 300_000;
@@ -305,8 +309,9 @@ impl SkyQueryBuilder {
     }
 }
 
-/// What a census job reads and keeps: the tables, the envelope, its own noise cache, the cell
-/// cache and the sources it shares with the other jobs (Design notes 10 and 12).
+/// What a census job reads and keeps: the tables, the envelope, the cells' offset bounds, its own
+/// noise cache, the cell cache and the sources it shares with the other jobs (Design notes 10 and
+/// 12).
 ///
 /// A plain bundle of borrows, built by its caller per job, so its fields are public: it carries no
 /// invariant a constructor could check, and the census reads the tables only through it, so their
@@ -316,6 +321,8 @@ pub struct SkyContext<'a> {
     pub tables: &'a LuminosityTables,
     /// The brightness envelope.
     pub envelope: &'a BrightnessEnvelope,
+    /// The galaxy's bounds on how far a cell's stars lie from their barycentres (R06.T8.f).
+    pub offsets: &'a CellOffsets,
     /// The job's own noise cache, for the caps' rays and the stars' sightlines.
     pub noise: NoiseCache,
     /// The per-cell cache of bright subsets ([`super::cache::NoSkyCellCache`] keeps none).
@@ -337,10 +344,16 @@ impl fmt::Debug for SkyContext<'_> {
 
 /// The census's plan: each layer's cap and the cells to open, in canonical order (layers as
 /// [`CAPPED_LAYERS`], then each layer's cells as [`cells_in_sphere`] walks them).
+///
+/// It keeps each layer's padded sphere and streams the cells from it (R06.T8.f): near the Sun at
+/// the eye's caps they number some 1.1 × 10⁸, which held as keys would take 2.2 GB. A server's
+/// jobs take them slab by slab ([`slabs`](Self::slabs)), each an x slab of one layer's walk.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CensusPlan {
     caps: Vec<LayerCap>,
-    cells: Vec<CellKey>,
+    walks: Vec<LayerWalk>,
+    cone: Option<Cone>,
+    apex: [f64; 3],
 }
 
 impl CensusPlan {
@@ -350,11 +363,92 @@ impl CensusPlan {
         &self.caps
     }
 
-    /// The cells, in canonical order.
-    #[must_use]
-    pub fn cells(&self) -> &[CellKey] {
-        &self.cells
+    /// The cells, in canonical order: [`plan_cells`]'s for the plan's query and caps, streamed.
+    pub fn cells(&self) -> impl Iterator<Item = CellKey> + '_ {
+        self.slabs().flat_map(|slab| slab.cells())
     }
+
+    /// How many cells [`cells`](Self::cells) yields: counted column by column without visiting a
+    /// cell, or, for a cone, by walking them.
+    #[must_use]
+    pub fn cell_count(&self) -> u64 {
+        if self.cone.is_some() {
+            return self.cells().map(|_| 1_u64).sum();
+        }
+        self.walks
+            .iter()
+            .map(|walk| count_cells_in_sphere(walk.layer, &walk.sphere))
+            .sum()
+    }
+
+    /// The plan's jobs: every x slab of each layer's walk, in canonical order, whose cells in turn
+    /// are [`cells`](Self::cells). A slab may hold no cell.
+    pub fn slabs(&self) -> impl Iterator<Item = CellSlab> + '_ {
+        self.walks.iter().flat_map(move |&walk| {
+            sphere_slabs(walk.layer, &walk.sphere).map(move |x| CellSlab {
+                walk,
+                x,
+                cone: self.cone,
+                apex: self.apex,
+            })
+        })
+    }
+}
+
+/// One layer's walk in a [`CensusPlan`]: the sphere of its cap, padded, and the pad.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LayerWalk {
+    layer: Layer,
+    sphere: QuerySphere,
+    pad: LightYears,
+}
+
+/// One x slab of one layer's walk in a [`CensusPlan`]: a census job's share of the plan, which
+/// streams its own cells.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellSlab {
+    walk: LayerWalk,
+    x: i32,
+    cone: Option<Cone>,
+    apex: [f64; 3],
+}
+
+impl CellSlab {
+    /// The layer whose cells the slab holds.
+    #[must_use]
+    pub const fn layer(&self) -> Layer {
+        self.walk.layer
+    }
+
+    /// The slab's x coordinate on its layer's grid.
+    #[must_use]
+    pub const fn x(&self) -> i32 {
+        self.x
+    }
+
+    /// The slab's cells, in canonical order.
+    pub fn cells(&self) -> impl Iterator<Item = CellKey> + use<> {
+        let slab = *self;
+        cells_in_sphere_slab(slab.walk.layer, &slab.walk.sphere, slab.x)
+            .filter(move |&key| meets_cone(slab.cone.as_ref(), slab.apex, key, slab.walk.pad))
+    }
+}
+
+/// Whether `key`'s padded bounding ball meets `cone` about `apex` (ly), or there is no cone.
+#[must_use]
+fn meets_cone(cone: Option<&Cone>, apex: [f64; 3], key: CellKey, pad: LightYears) -> bool {
+    let Some(cone) = cone else {
+        return true;
+    };
+    let size = f64::from(key.layer().cell_size_ly());
+    let half_diagonal = 0.5 * size * 3.0_f64.sqrt();
+    let o = key.origin_ly();
+    let offset = [
+        f64::from(o[0]) + 0.5 * size - apex[0],
+        f64::from(o[1]) + 0.5 * size - apex[1],
+        f64::from(o[2]) + 0.5 * size - apex[2],
+    ];
+    cone.meets_ball(offset, half_diagonal + pad.value())
 }
 
 /// The years light takes to cross `d` ly, as a span.
@@ -388,60 +482,67 @@ pub fn census_plan(
         Some(caps) => caps.clone(),
         None => layer_caps(galaxy, tables, envelope, observer, query.cut(), cache),
     };
-    let cells = plan_cells(query, &caps);
-    CensusPlan { caps, cells }
+    let walks = caps
+        .iter()
+        .filter_map(|cap| layer_walk(query, cap))
+        .collect();
+    CensusPlan {
+        caps,
+        walks,
+        cone: query.cone().copied(),
+        apex: observer.position().to_light_years_f64(),
+    }
+}
+
+/// The walk of `cap`'s layer for `query`: [`cells_in_sphere`] to the cap, padded as the range query
+/// pads at the earliest emitted time the cap allows; `None` for a cap of no radius.
+///
+/// # Panics
+///
+/// If the cap's sphere cannot be built, which a positive finite cap never fails.
+#[must_use]
+fn layer_walk(query: &SkyQuery, cap: &LayerCap) -> Option<LayerWalk> {
+    let observer = query.observer();
+    let t = observer.time();
+    let layer = cap.layer();
+    let radius = cap.radius();
+    if radius.value() <= 0.0 {
+        return None;
+    }
+    // An observer's time is within ±1,000 years and a cap's light time within 2¹⁸ years, so
+    // the subtraction never leaves the clock's range.
+    let earliest = t
+        .checked_sub(light_time(radius.value()))
+        .expect("an observer's time less a cap's light time is on the clock");
+    let speed = pad_speed(layer);
+    let pad = LightYears::new(
+        pad_for(earliest, speed)
+            .value()
+            .max(pad_for(t, speed).value()),
+    );
+    let sphere = QuerySphere::new(*observer.position(), radius, t, pad)
+        .expect("a positive finite cap and pad make a sphere");
+    Some(LayerWalk { layer, sphere, pad })
 }
 
 /// The cells a census of `query` opens for `caps`, in canonical order: each layer's cells of
 /// [`cells_in_sphere`] to its cap, padded as the range query pads at the earliest emitted time
 /// the cap allows, and for a cone only those whose padded bounding ball meets it. A cap of no
-/// radius opens nothing.
+/// radius opens nothing. Held, for a caller whose cells are few: a [`CensusPlan`] streams the same
+/// cells ([`CensusPlan::cells`]).
 ///
 /// # Panics
 ///
 /// If a cap's sphere cannot be built, which a positive finite cap never fails.
 #[must_use]
 pub fn plan_cells(query: &SkyQuery, caps: &[LayerCap]) -> Vec<CellKey> {
-    let observer = query.observer();
-    let centre = *observer.position();
-    let apex = centre.to_light_years_f64();
-    let t = observer.time();
+    let apex = query.observer().position().to_light_years_f64();
     let mut cells = Vec::new();
-    for cap in caps {
-        let layer = cap.layer();
-        let radius = cap.radius();
-        if radius.value() <= 0.0 {
-            continue;
-        }
-        // An observer's time is within ±1,000 years and a cap's light time within 2¹⁸ years, so
-        // the subtraction never leaves the clock's range.
-        let earliest = t
-            .checked_sub(light_time(radius.value()))
-            .expect("an observer's time less a cap's light time is on the clock");
-        let speed = pad_speed(layer);
-        let pad = LightYears::new(
-            pad_for(earliest, speed)
-                .value()
-                .max(pad_for(t, speed).value()),
+    for walk in caps.iter().filter_map(|cap| layer_walk(query, cap)) {
+        cells.extend(
+            cells_in_sphere(walk.layer, &walk.sphere)
+                .filter(|&key| meets_cone(query.cone(), apex, key, walk.pad)),
         );
-        let sphere = QuerySphere::new(centre, radius, t, pad)
-            .expect("a positive finite cap and pad make a sphere");
-        let size = f64::from(layer.cell_size_ly());
-        let half_diagonal = 0.5 * size * 3.0_f64.sqrt();
-        for key in cells_in_sphere(layer, &sphere) {
-            if let Some(cone) = query.cone() {
-                let o = key.origin_ly();
-                let offset = [
-                    f64::from(o[0]) + 0.5 * size - apex[0],
-                    f64::from(o[1]) + 0.5 * size - apex[1],
-                    f64::from(o[2]) + 0.5 * size - apex[2],
-                ];
-                if !cone.meets_ball(offset, half_diagonal + pad.value()) {
-                    continue;
-                }
-            }
-            cells.push(key);
-        }
     }
     cells
 }
@@ -512,6 +613,11 @@ mod tests {
 
     /// A plan with every cap forced, for the cell tests (no tables or rays are read).
     fn forced_plan(radius: f64, cone: Option<Cone>) -> CensusPlan {
+        forced_query_and_plan(radius, cone).1
+    }
+
+    /// [`forced_plan`]'s query and plan.
+    fn forced_query_and_plan(radius: f64, cone: Option<Cone>) -> (SkyQuery, CensusPlan) {
         let galaxy = milky_way_galaxy();
         let tables = LuminosityTables::build_with(
             galaxy,
@@ -530,7 +636,8 @@ mod tests {
             .with_caps_forced(LightYears::new(radius))
             .expect("a valid cap");
         let mut cache = NoiseCache::with_capacity(16);
-        census_plan(galaxy, &tables, &envelope, &query, &mut cache)
+        let plan = census_plan(galaxy, &tables, &envelope, &query, &mut cache);
+        (query, plan)
     }
 
     #[test]
@@ -543,9 +650,10 @@ mod tests {
         );
         assert_eq!(plan.caps().len(), CAPPED_LAYERS.len());
         let apex = observer().position().to_light_years_f64();
+        let cells: Vec<CellKey> = plan.cells().collect();
         // Every cell whose box meets the sphere is there, and the layers come in order.
         let mut last_layer = 0;
-        for key in plan.cells() {
+        for &key in &cells {
             let rank = CAPPED_LAYERS
                 .iter()
                 .position(|&l| l == key.layer())
@@ -578,7 +686,7 @@ mod tests {
                         };
                         let d = (near(0) * near(0) + near(1) * near(1) + near(2) * near(2)).sqrt();
                         if d <= r {
-                            assert!(plan.cells().contains(&key), "{key:?} is missing");
+                            assert!(cells.contains(&key), "{key:?} is missing");
                         }
                     }
                 }
@@ -588,16 +696,16 @@ mod tests {
 
     #[test]
     fn a_cone_keeps_only_cells_whose_box_meets_it() {
-        let all = forced_plan(400.0, None);
+        let all: Vec<CellKey> = forced_plan(400.0, None).cells().collect();
         let cone = Cone::new(UnitVector::NORTH, Degrees::new(10.0)).expect("a cone");
-        let narrow = forced_plan(400.0, Some(cone));
-        assert!(narrow.cells().len() < all.cells().len() / 5);
+        let narrow: Vec<CellKey> = forced_plan(400.0, Some(cone)).cells().collect();
+        assert!(narrow.len() < all.len() / 5);
         let apex = observer().position().to_light_years_f64();
-        for key in narrow.cells() {
-            assert!(all.cells().contains(key));
+        for key in &narrow {
+            assert!(all.contains(key));
         }
         // Every dropped cell's box misses the cone: its bounding ball does.
-        for key in all.cells().iter().filter(|k| !narrow.cells().contains(k)) {
+        for key in all.iter().filter(|k| !narrow.contains(k)) {
             let size = f64::from(key.layer().cell_size_ly());
             let o = key.origin_ly();
             let offset = [
@@ -606,6 +714,35 @@ mod tests {
                 f64::from(o[2]) + 0.5 * size - apex[2],
             ];
             assert!(!cone.meets_ball(offset, 0.5 * size * 3.0_f64.sqrt()));
+        }
+    }
+
+    /// The plan's streamed cells are [`plan_cells`]' for the queries of the tests above, in the
+    /// same order, slab by slab, and its count is theirs (R06.T8.f).
+    #[test]
+    fn streamed_cells_are_plan_cells() {
+        let cone = Cone::new(UnitVector::NORTH, Degrees::new(10.0)).expect("a cone");
+        for (radius, cone) in [(300.0, None), (400.0, None), (400.0, Some(cone))] {
+            let (query, plan) = forced_query_and_plan(radius, cone);
+            let streamed: Vec<CellKey> = plan.cells().collect();
+            let held = plan_cells(&query, plan.caps());
+            assert!(!held.is_empty());
+            assert_eq!(streamed, held, "{radius} ly, cone {cone:?}");
+            assert_eq!(
+                plan.cell_count(),
+                u64::try_from(held.len()).expect("few"),
+                "{radius} ly, cone {cone:?}"
+            );
+            let mut by_slab = Vec::new();
+            for slab in plan.slabs() {
+                for key in slab.cells() {
+                    assert_eq!(key.layer(), slab.layer());
+                    let size = i32::try_from(key.size_ly()).expect("small");
+                    assert_eq!(key.origin_ly()[0], slab.x() * size);
+                    by_slab.push(key);
+                }
+            }
+            assert_eq!(by_slab, held);
         }
     }
 }

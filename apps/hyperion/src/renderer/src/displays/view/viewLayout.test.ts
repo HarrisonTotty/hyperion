@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ElementSize } from "../../lib/useElementSize";
 import {
   DEFAULT_FOLD,
+  FULL_MIN_HEIGHT_BOUND_REM,
   FULL_MIN_HEIGHT_REM,
   FULL_MIN_WIDTH_REM,
   toggledFold,
@@ -23,6 +24,14 @@ describe("VIEW's layout (R07.T19.b)", () => {
     expect(viewLayout(box(1888, 923))).toBe("full");
   });
 
+  it("is full for the box of a maximised 1920 × 1080 window, 53.5 rem under its bars", () => {
+    expect(viewLayout(box(1888, 856))).toBe("full");
+  });
+
+  it("is compact for the app's opening window, 1600 × 900", () => {
+    expect(viewLayout(box(1568, 742))).toBe("compact");
+  });
+
   it("is compact for 1280 × 720, and for 1920 × 1080 at 125% and 150%", () => {
     // The interface scale enlarges the rem: the same window holds fewer of them.
     expect([
@@ -40,6 +49,17 @@ describe("VIEW's layout (R07.T19.b)", () => {
       viewLayout(box(widthPx - 1, heightPx)),
       viewLayout(box(widthPx, heightPx - 1)),
     ]).toEqual(["full", "compact", "compact"]);
+  });
+});
+
+describe("VIEW's full layout's least height (R07.T19.b's follow-up)", () => {
+  // A task that would pass the bound asks for a ruling rather than raise it.
+  it("stays within 52.5 rem, so that a maximised 1920 × 1080 window is full (decision-r07-t19b-exposure-fit, item 2)", () => {
+    expect(FULL_MIN_HEIGHT_REM).toBeLessThanOrEqual(FULL_MIN_HEIGHT_BOUND_REM);
+  });
+
+  it("is bounded at the 53.5 rem box of a maximised 1920 × 1080 window less 1 rem", () => {
+    expect(FULL_MIN_HEIGHT_BOUND_REM).toBe(52.5);
   });
 });
 

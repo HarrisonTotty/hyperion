@@ -4343,3 +4343,88 @@ generator-version change made here, not in R06.
   response reports (and the view labels `WD NOT MODELLED`); M giants are as bright as this plan
   says. **Switched by:** R06.T5.a's `sky::photometry::absolute_v_of_state`, which then reads this
   plan's V for white dwarfs; R06's census and luminosity function follow it with no other change.
+- **The envelope integrator's past-the-grid branch had no knot cap (found by P11.T4.h,
+  2026-10-04; resolved 2026-10-05 by a guard that moves no output, see "Resolved, as built"
+  below).** In `track/build.rs` `envelope_knots`, a knot past the clustered grid steps in age to
+  twice the envelope's remaining life at its present rate of loss. Nothing capped that branch, so
+  if each step falls short the loop pushes a knot every pass, without end.
+  - Each step falls short when the rate of loss drops as the mass nears the core. P11.T4.h's work
+    in progress caused that: the early AGB's remnant τ stepped from ≥ 1 to 0 at M = Mc, and its
+    wind with it. It hung the R06 census and filled the machine's memory (about 5 MiB/s).
+  - Repro: record 0x61f85aa800000001 of seed 0x0600_0029_b000_5eed (the census's galaxy), whose
+    0.84 M☉ companion loses its envelope to its wind on the early AGB; run `StarModel::lifetime`
+    with the step restored.
+  - P11.T4.h removed the step (on the Phase J branch until the 20→21 bump); `stellar_system.rs`
+    `a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate` pins the record.
+  - _Resolved, as built (2026-10-05)._ The guard fails loudly, naming the star, instead of
+    growing, and is bit-identical on every current record.
+    - _What the stall was_ (re-measured with the step restored). It was not a Zeno series of
+      shrinking steps.
+      - The envelope sat at 3.3 × 10⁻¹⁵ M☉ on 0.5102 M☉, about 30 units in the mass's last place,
+        at 2.59 × 10¹⁰ yr.
+      - Each knot's 2e ÷ f, 2.65 × 10⁻⁶ yr, rounded up to one unit in the age's last place, 3.81 ×
+        10⁻⁶ yr.
+      - The midpoints, below the core, saw a wind too weak to move the mass.
+      - So each knot moved the age by one unit, 1.4 × 10⁵ yr short of the span's end: about 4 ×
+        10¹⁰ knots, or some 3 TB.
+    - _The bound._ `MAX_KNOTS_PAST_GRID` = 28 covers steps that resolve the phase's laws.
+      - The worst wind whose rate falls no faster than the envelope is a rate in proportion to it.
+        It leaves 0.153 of the envelope per interval of 4 midpoint steps.
+      - From 150 M☉ such a wind reaches 2⁻⁵⁴ of a 10⁻³ M☉ core in 27 short intervals; one more
+        makes 28. A test checks this against the resolution and its doubling.
+    - _The stall allowance._ Past the 28 knots the build may go on while the age stays within
+      `EnvelopeClock::still_years` of the 28th knot's. That covers stalls at the age's rounding.
+      - `still_years` is 2 × 2⁻⁵² × the clock's larger end (Myr) × 10⁶ × the stretch: how long the
+        phase's clock can stand still, in years of age.
+      - A core read through that clock can stand still where the clock, on the track of the
+        star's effective initial mass, runs ahead of the age. Once the clock moves, the core
+        catches up by more than the envelope left.
+      - A wind continuous over the step cannot stall: it moves the mass by more than the envelope.
+      - Each knot moves the age by at least one unit in its last place, so the window allows at
+        most 1 + `still_years` ÷ (2⁻⁵³ t) knots more: 23 at a clock 5.5 times the age.
+      - The window is checked in age, not by dividing by it, so a zero or NaN age cannot switch
+        the guard off. That was the determinism auditor's point against a first draft that counted
+        knots.
+    - _Why the allowance is needed_ (measured on the R06 census, then the instrumentation removed).
+      - 161 envelope phases take more than one knot past the grid, between 5.2 × 10⁵ and 10⁶ of
+        them in all: 136 take 2, 18 take 3, 5 take 4 and 2 take 5. All are on the thermally pulsing
+        AGB or in core helium burning.
+      - All of them have clocks 3.5–7 times the age at the phase's start, envelopes of
+        10⁻¹⁶–10⁻¹³ M☉, and steps of one or two units of the age.
+      - The 5-knot core-helium-burning case has a clock 5.5 times the age, and its core stood still
+        for about 8 units of the age.
+      - A flat 28 would have left the galaxy as a whole a margin only up to clocks of about 7 times
+        the age.
+    - _The error._ `envelope_knots` returns `IntegrateEnvelopeError::Stalled`. It carries the knots,
+      the phase and its entry, the last knot's age, mass and envelope, and the span's end, in
+      `Years` and `SolarMasses`.
+      - It is propagated with `?` through `envelope_segment`, the six envelope phases and
+        `Builder::phase` to `Builder::run_from`.
+      - `run_from` panics. A stall is a bug in a phase's laws, and the track constructors and
+        their 157 call sites stay infallible.
+      - The message names the star by the mass it enters its life with, its composition, its
+        Reimers η, the options, the resolution and the companion-stripped mark.
+      - With the step restored, record 0x61f85aa800000001 fails in 0.7 s under a 1 GB cap, at 45
+        knots, 28 and 17 more within the allowance. The message reads: "the track of a star
+        entering its life with 0.8411980660928929 M☉ (Composition { z: MetalFraction(0.025711…),
+        fe_h: Dex(0.109089…), helium_excess: HeliumExcess(0.0) }, ReimersEta(0.467527…),
+        TrackOptions { wind: Modern, remnant: MandelMuller2020, bridges: Physical }, Resolution {
+        knots: 16, pulsing_knots: 32, steps: 4 }, companion-stripped mark false) stalled: the
+        EarlyAgb phase entered at 2.589473034261505e10 yr with 0.5112103126692104 M☉ still had an
+        envelope after 45 knots past its grid: 3.3306690738754696e-15 M☉ of 0.5101685949439533 M☉
+        at 2.5899760324016014e10 yr, 1.405475198135376e5 yr before its span's end".
+    - _Tests_, in `build.rs`, on synthetic laws:
+      - A wind that drops a million-fold at the core, on a clock 5 times the age, trips the guard
+        at 44 knots, 28 + 1 + 15, after 8 derivative evaluations a knot. The age moves one unit a
+        knot, and the span's end lies over 10¹⁰ knots away. Without the guard the same case ran
+        2 × 10⁶ knots unchanged; the test's laws now refuse more than 10⁴ evaluations, so a guard
+        that failed fails the test instead of filling memory.
+      - The same star with a continuous wind ends in one knot.
+      - A core read through a clock 13.5 times the age stalls for more than 28 knots and ends
+        within the allowance.
+      - The proportional wind from 150 M☉ ends in 26 knots.
+    - _Output._ `golden_diff` shows 0 moved, and `GENERATOR_VERSION` is unchanged.
+    - _Also found._ `MAX_KNOT_FACTOR` can never fire.
+      - Each interval on the grid passes at least one more of its values, so the grid branch takes
+        at most n knots, and `built.len() > 2n` is never true there.
+      - It is left as it is, since removing it would move nothing.
