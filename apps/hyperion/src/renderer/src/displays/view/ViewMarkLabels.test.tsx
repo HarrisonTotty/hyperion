@@ -1,9 +1,21 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { markStrokeDevicePx, markShiftDevicePx } from "../../lib/strokes";
+import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
+import {
+  BRACKET_MARGIN_REM,
+  contactRadiusPx,
+  reticleGrowthPx,
+} from "../../view/wireframe/symbology";
 import type { MarkRow } from "./viewRun";
-import { ViewMarkLabels } from "./ViewMarkLabels";
+import {
+  LABEL_OFFSET_REM,
+  markLabelShiftPx,
+  markLabelTransform,
+  ViewMarkLabels,
+} from "./ViewMarkLabels";
 
 const ANCHOR: DrawAnchor = {
   target: { kind: "craft", craft: "other" },
@@ -69,4 +81,42 @@ describe("a mark's label", () => {
     unmount();
     expect(labelRef).toHaveBeenLastCalledWith("craft:other", null);
   });
+});
+
+/** The ratios and interface scales the label's place is tested at. */
+const PLACES = [0.78125, 1, 2].flatMap((ratio) =>
+  [0.8, 1, 1.5].map((scale) => [ratio, scale] as const),
+);
+
+describe("a label's place beside its mark (R07.T16.d)", () => {
+  it("stands off by the selection's reticle's growth below a ratio of 4/3, and no more from it", () => {
+    expect([
+      [0.78125, 1, 2].map(markLabelShiftPx),
+      markLabelTransform(ANCHOR, 1),
+      markLabelTransform(ANCHOR, 2),
+    ]).toEqual([
+      [2.65, 1.25, 0],
+      "translate(calc(200px + 0.75rem + 1.25px), 100px)",
+      "translate(calc(100px + 0.75rem), 50px)",
+    ]);
+  });
+
+  it.each(PLACES)(
+    "keeps a selected craft's bracket clear of the plate, as a 1.5 px outline was, at %s and %s",
+    (ratio, scale) => {
+      const remPx = 16 * scale * ratio;
+      const shift = markShiftDevicePx(ratio);
+      // The bracket's half-size, device px, as built and as drawn now; and its outer reach.
+      const asBuilt = contactRadiusPx(remPx) + BRACKET_MARGIN_REM * remPx;
+      const nowReach =
+        asBuilt + reticleGrowthPx(shift) - shift + markStrokeDevicePx(ratio) / 2 + 0.5;
+      const thenReach = asBuilt + (SYMBOL_STROKE_PX * ratio) / 2 + 0.5;
+      const plate = (LABEL_OFFSET_REM * 16 * scale + markLabelShiftPx(ratio)) * ratio;
+      const clearance = plate - nowReach;
+      expect([
+        clearance >= 0,
+        Math.abs(clearance - (LABEL_OFFSET_REM * remPx - thenReach)) < 1e-9,
+      ]).toEqual([true, true]);
+    },
+  );
 });

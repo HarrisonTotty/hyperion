@@ -14,13 +14,19 @@ import { quaternionFromAxisAngle } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
+import { MIN_STROKE_DEVICE_PX } from "../../lib/strokes";
+import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
 import { occluderRadius } from "../depth/depth";
 import { sceneOrigins, type ViewScene } from "../scene/model";
 import {
   buildWireframeDrawList,
+  CASING_PX,
   type DrawCamera,
   type DrawOptions,
   LOW_SETTING_MAX_SPRITES,
+  occluderSlopePxAt,
+  type ViewStrokes,
+  viewStrokesAt,
   type WireframeDrawList,
 } from "./drawList";
 
@@ -36,12 +42,16 @@ const TOKENS: ColourTokens = {
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 
+/** Strokes at a scale of 1: each width as the guide gives it, the outlines not moved. */
+const UNSCALED: ViewStrokes = { strokeScale: 1, markStrokePx: SYMBOL_STROKE_PX, markShiftPx: 0 };
+
 const OPTIONS: DrawOptions = {
   lowSetting: false,
   ev100: -1,
   selection: null,
   destination: null,
   remPx: 16,
+  ...UNSCALED,
 };
 
 /** A free camera 3 × 10⁷ m from the planet along +z, looking at it. */
@@ -208,18 +218,21 @@ describe("buildWireframeDrawList", () => {
     expect(build().lines.find((line) => line.id === "hull:other")?.casingWidthPx).toBe(0);
   });
 
-  it("draws a hull over two-sided occluder faces pushed away by the bias", () => {
+  it("draws a hull over two-sided occluder faces with no hardware bias of their own", () => {
     const mesh = build().occluderMeshes.find((m) => m.id === "other");
-    expect([mesh?.twoSided, mesh?.depthBiasAway]).toEqual([true, { constant: 128, slopeScale: 3 }]);
+    expect([mesh?.twoSided, mesh !== undefined && "depthBiasAway" in mesh]).toEqual([true, false]);
   });
 
-  it("draws occluders, then lines, then sprites", () => {
+  it("draws occluders, then lines, then sprites, and carries its strokes and slope term", () => {
     expect(Object.keys(build())).toEqual([
       "occluderSpheres",
       "occluderMeshes",
       "lines",
       "sprites",
       "anchors",
+      "strokeScale",
+      "markStrokePx",
+      "occluderSlopePx",
     ]);
   });
 
@@ -282,4 +295,151 @@ describe("buildWireframeDrawList", () => {
       .map((line) => line.token);
     expect(tokens).toEqual(["accent", "target"]);
   });
+});
+
+/** A batch's line widths, device px: its stroke, its casing each side and its dash. */
+function widths(list: WireframeDrawList, kinds: (id: string) => boolean): unknown[] {
+  return list.lines
+    .filter((line) => kinds(line.id))
+    .map((line) => [line.id, line.widthPx, line.casingWidthPx, line.dash]);
+}
+
+const isMark = (id: string): boolean => id.startsWith("mark:");
+
+describe("buildWireframeDrawList's strokes (R07.T16.d; decision-thin-line-contrast, item 2)", () => {
+  const selected = { selection: { kind: "body", body: FIXTURE_PLANET } } as const;
+
+  it("draws every line's width, casing and dash twice as wide at a stroke scale of 2", () => {
+    const doubled = (list: WireframeDrawList): unknown[] =>
+      list.lines
+        .filter((line) => !isMark(line.id))
+        .map((line) => [
+          line.id,
+          2 * line.widthPx,
+          2 * line.casingWidthPx,
+          line.dash === null ? null : { onPx: 2 * line.dash.onPx, offPx: 2 * line.dash.offPx },
+        ]);
+    const ringed = aMarkedViewScene({
+      rings: [
+        { body: FIXTURE_PLANET, innerRadiusM: 1e7, outerRadiusM: 1.4e7, normal: vec3(0, 0, 1) },
+      ],
+    });
+    const atTwo = build({ ...selected, strokeScale: 2 }, ringed);
+    expect({
+      kinds: [...new Set(atTwo.lines.map((line) => line.id.split(":")[0] ?? ""))].toSorted(),
+      lines: widths(atTwo, (id) => !isMark(id)),
+      slope: [build(selected, ringed).occluderSlopePx, atTwo.occluderSlopePx],
+    }).toEqual({
+      kinds: ["body", "hull", "mark", "orbit", "predicted", "ring"],
+      lines: doubled(build(selected, ringed)),
+      slope: [3, 5],
+    });
+  });
+
+  it("draws every symbology outline at the marks' width, cased as a line", () => {
+    // The moon shrunk below 3 px, so that it is drawn as its symbol.
+    const base = aMarkedViewScene();
+    const small = {
+      ...base,
+      bodies: base.bodies.map((body) =>
+        body.id === FIXTURE_MOON ? Object.assign({}, body, { radiusM: 1 }) : body,
+      ),
+    };
+    const out = [0.78125, 1, 2, 3].map((ratio) => {
+      const list = build(
+        { ...selected, destination: selected.selection, ...viewStrokesAt(ratio) },
+        small,
+      );
+      const marks = list.lines.filter((line) => isMark(line.id));
+      return [
+        [...new Set(marks.map((line) => line.id.split(":")[1] ?? ""))].toSorted(),
+        [...new Set(marks.map((line) => [line.widthPx, line.casingWidthPx].join(" ")))],
+      ];
+    });
+    const kinds = ["body_symbol", "destination", "flight_path", "selection", "target"];
+    expect(out).toEqual([
+      [kinds, ["2 2"]],
+      [kinds, ["2 2"]],
+      [kinds, ["3 2"]],
+      [kinds, ["4.5 3"]],
+    ]);
+  });
+
+  it("draws no line, casing or outline under 2 device px at ratios 0.78125, 1, 2 and 3", () => {
+    const narrowest = [0.78125, 1, 2, 3].map((ratio) => {
+      const list = build({ ...selected, ...viewStrokesAt(ratio) });
+      // A hull's edge is uncased in the wireframe: its casing is none, not a narrow one.
+      const drawn = list.lines.flatMap((line) =>
+        line.casingWidthPx > 0 ? [line.widthPx, line.casingWidthPx] : [line.widthPx],
+      );
+      return Math.min(...drawn) >= MIN_STROKE_DEVICE_PX;
+    });
+    expect(narrowest).toEqual([true, true, true, true]);
+  });
+
+  it("draws the guide's 1, 1.5 and 2 px lines at 2, 3 and 4 device px below a ratio of 2", () => {
+    const list = build({ ...selected, ...viewStrokesAt(0.78125) });
+    const width = (id: string): number | undefined =>
+      list.lines.find((line) => line.id === id)?.widthPx;
+    expect([
+      width(`body:${FIXTURE_PLANET}:graticule`),
+      width(`body:${FIXTURE_PLANET}:major`),
+      width("hull:other"),
+      width(`orbit:${FIXTURE_MOON}`),
+      list.lines.find((line) => line.id === "predicted:other")?.dash,
+      list.lines.find((line) => line.id === `orbit:${FIXTURE_MOON}`)?.casingWidthPx,
+    ]).toEqual([2, 3, 3, 2, { onPx: 12, offPx: 8 }, 2 * CASING_PX]);
+  });
+
+  it("carries its strokes and the occluders' slope term at each ratio", () => {
+    expect(
+      [0.78125, 1, 2, 3].map((ratio) => {
+        const list = build(viewStrokesAt(ratio));
+        return [list.strokeScale, list.markStrokePx, list.occluderSlopePx];
+      }),
+    ).toEqual([
+      [2, 2, 5],
+      [2, 2, 5],
+      [2, 3, 5],
+      [3, 4.5, 7],
+    ]);
+  });
+
+  it("takes the slope term as the heavy cased edge's half-width and its fringe, rounded up", () => {
+    expect([1, 1.25, 1.5, 2, 3].map(occluderSlopePxAt)).toEqual([3, 4, 4, 5, 7]);
+  });
+});
+
+describe("the selection's and the destination's reticles on one target (R07.T16.d)", () => {
+  it.each(
+    [0.78125, 1, 2].flatMap((ratio) => [0.8, 1, 1.5].map((scale) => [ratio, scale] as const)),
+  )(
+    "keep the destination's casing off the brackets' full-coverage core at %s and %s",
+    (ratio, scale) => {
+      const craft = { kind: "craft", craft: "other" } as const;
+      const strokes = viewStrokesAt(ratio);
+      const remPx = 16 * scale * ratio;
+      const list = build({ selection: craft, destination: craft, remPx, ...strokes });
+      const anchor = list.anchors.find((each) => each.target.kind === "craft");
+      // A reticle's half-size: its corners' farthest reach from the mark along x.
+      const half = (kind: string): number =>
+        Math.max(
+          ...list.lines
+            .flatMap((line) =>
+              line.id.startsWith(`mark:${kind}:`)
+                ? [line.segments[0] ?? 0, line.segments[3] ?? 0]
+                : [],
+            )
+            .map((x) => Math.abs(x - (anchor?.xPx ?? Number.NaN))),
+        );
+      const gap = half("destination") - half("selection");
+      const casingPx = CASING_PX * strokes.strokeScale;
+      // The destination's casing reaches w ÷ 2 + casing + 0.5 from its line; the brackets' core,
+      // where they cover a texel wholly, is w ÷ 2 − 0.5 either side of theirs.
+      const reach = strokes.markStrokePx / 2 + casingPx + 0.5;
+      const core = strokes.markStrokePx / 2 - 0.5;
+      // The segments are `f32`: within 1e-4 px.
+      expect([gap - reach >= core - 1e-4, gap >= 0.25 * remPx - 1e-4]).toEqual([true, true]);
+    },
+  );
 });

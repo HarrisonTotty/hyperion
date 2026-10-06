@@ -4,7 +4,8 @@
  *
  * @remarks
  * The draw list (R02.T13) is packed into four storage buffers, one per shader, and drawn in this
- * order: the bodies' occluder spheres and the hulls' occluder faces (depth only), the star sprites
+ * order: the bodies' occluder spheres and the hulls' occluder faces (depth only, each pushed away
+ * in its fragment by the list's `occluderSlopePx`, R07.T16.d), the star sprites
  * (additive), then each line batch, its `--surface-0` casing first and its stroke over it, both
  * premultiplied over what is beneath. Sprites go before the lines, where the draw list lists them
  * after, so that a mark's casing covers a star beneath it, as the guide's casing rule wants of every
@@ -43,13 +44,7 @@ import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import occluderSphereWgsl from "../shaders/occluderSphere.wgsl?raw";
 import starSpriteWgsl from "../shaders/starSprite.wgsl?raw";
 import toneCurveWgsl from "../shaders/toneCurve.wgsl?raw";
-import {
-  type DrawCamera,
-  HULL_OCCLUDER_BIAS,
-  type LineBatch,
-  type OccluderSphere,
-  type WireframeDrawList,
-} from "./drawList";
+import type { DrawCamera, LineBatch, OccluderSphere, WireframeDrawList } from "./drawList";
 
 /** The wireframe's materials, by name. */
 export type WireframeMaterial = "lines" | "occluderSphere" | "occluderHull" | "starSprite";
@@ -92,10 +87,7 @@ const DISPLAY_NAMES: Readonly<Record<WireframeMaterial, string>> = {
 
 function spec(
   name: WireframeMaterial,
-  state: Pick<
-    WgslMaterialSpec,
-    "uniforms" | "depthWrite" | "colourWrites" | "blend" | "depthBiasAway"
-  >,
+  state: Pick<WgslMaterialSpec, "uniforms" | "depthWrite" | "colourWrites" | "blend">,
 ): WgslMaterialSpec {
   return {
     name: `wireframe:${name}`,
@@ -115,9 +107,11 @@ function spec(
  * The wireframe's four materials (Design notes 5, 9 and 12).
  *
  * @remarks
- * Lines and sprites are depth-tested and write no depth; the occluders write depth and no colour;
- * only the hull's occluder faces carry the depth bias, never a line pass. The uniforms are listed
- * in the order of each shader's `Draw` struct, after its `offsetFromCameraM`.
+ * Lines and sprites are depth-tested and write no depth; the occluders write depth and no colour,
+ * each its own depth from its fragment, pushed away by `occluderSlopePx` pixels of the depth's
+ * screen slope (Design note 5; R07.T16.d). No material sets a hardware depth bias: it is pipeline
+ * state, which could not follow the display's ratio. The uniforms are listed in the order of each
+ * shader's `Draw` struct, after its `offsetFromCameraM`.
  */
 export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMaterialSpec>> = {
   lines: spec("lines", {
@@ -134,17 +128,19 @@ export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMateria
     blend: "premultiplied",
   }),
   occluderSphere: spec("occluderSphere", {
-    uniforms: [],
+    uniforms: [{ name: "occluderSlopePx", type: "f32" }],
     depthWrite: true,
     colourWrites: false,
     blend: "none",
   }),
   occluderHull: spec("occluderHull", {
-    uniforms: [{ name: "firstTriangle", type: "f32" }],
+    uniforms: [
+      { name: "firstTriangle", type: "f32" },
+      { name: "occluderSlopePx", type: "f32" },
+    ],
     depthWrite: true,
     colourWrites: false,
     blend: "none",
-    depthBiasAway: HULL_OCCLUDER_BIAS,
   }),
   starSprite: spec("starSprite", {
     uniforms: [],
@@ -427,6 +423,7 @@ export function packWireframe(
     fovXRad: camera.fovXRad,
   };
   const draws: PackedDraw[] = [];
+  const occluderSlopePx = new Float32Array([list.occluderSlopePx]);
 
   const sphereRows: number[] = [];
   let sphereCount = 0;
@@ -453,7 +450,7 @@ export function packWireframe(
       mesh: "quad",
       instanceCount: sphereCount,
       offsetFromCameraM: ZERO_OFFSET,
-      uniforms: {},
+      uniforms: { occluderSlopePx },
     });
   }
 
@@ -478,7 +475,7 @@ export function packWireframe(
       mesh: "triangle",
       instanceCount: triangles,
       offsetFromCameraM: mesh.originF32,
-      uniforms: { firstTriangle: new Float32Array([firstTriangle]) },
+      uniforms: { firstTriangle: new Float32Array([firstTriangle]), occluderSlopePx },
     });
   }
 

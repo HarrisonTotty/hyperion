@@ -43,6 +43,7 @@ import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
+import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
 import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
 
@@ -173,6 +174,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
 
   await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
+  await checks.group("R07.T16.d the view's strokes as drawn", () =>
+    checkStrokeContrast(engine, checks),
+  );
 
   await checks.group("R05.T10.b the height worker", () => checkHeightWorker(checks));
 

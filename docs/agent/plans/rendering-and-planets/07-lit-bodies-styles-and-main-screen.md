@@ -475,6 +475,22 @@ export function gpuTimeMs(times: ReadonlyArray<PassTimes>): number;
 built); R02's `ViewDisplay.tsx` gains the instrument slots. In Phase C
 R02's `CameraPreset` gains `slaved`, shown `SLAVED` (R07.T25).
 
+### Strokes (`lib/`, R07.T16.d)
+
+```ts
+// lib/strokes.ts (decision-thin-line-contrast, item 2): device widths at a device-pixel ratio.
+export const MIN_STROKE_DEVICE_PX = 2;
+export function lineScale(devicePixelRatio: number): number; // max(2, ratio), px per CSS px
+export function markStrokeDevicePx(devicePixelRatio: number): number; // max(2, 1.5 × ratio)
+export function markShiftDevicePx(devicePixelRatio: number): number; // δ, an outline's move out
+// T16.f adds strokeProperties, watchStrokeProperties and useStrokeMetrics.
+```
+
+R02's `view/wireframe/drawList.ts` gains `ViewStrokes { strokeScale, markStrokePx, markShiftPx }`,
+`viewStrokesAt(devicePixelRatio)`, `occluderSlopePxAt(strokeScale)`, `emptyDrawList(strokes)` and
+`HULL_OCCLUDER_DEPTH_FRACTION`; `displays/view/ViewMarkLabels.tsx` gains
+`markLabelShiftPx(devicePixelRatio)`.
+
 ### Main screen (Phase C)
 
 Protocol (`hyperion_protocol`, mirrored in `@hyperion/protocol`), all additive:
@@ -577,7 +593,9 @@ meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, p
   `CameraOrigins.bodyFixedRotation(body): Rotation3 | null` (`view/coords/position.ts`), `null`
   today since plan 14 sends no rotation; the sphere occluder's `SLOPE_SCALE` is 3 (a WGSL constant
   in `occluderSphere.wgsl`) while the hull faces' `occluder.wgsl` bias keeps `slopeScale: 2`
-  (raised to 3 by T16.a).
+  (raised to 3 by T16.a). _R07.T16.d: both occluders take `occluderSlopePx` in the fragment, the
+  hull faces with no hardware bias, and `DrawOptions` extends `ViewStrokes`; see "Deviations in
+  T16.d, as built"._
 - **R03:** `useScene` and `sceneAt` (`SceneFrame`, with each body's `geometricM`, `apparentM`,
   `emitted` and `hillRadiusM`), bodies as plan 14's `BodySummaryDto` inside R03's
   `SceneBodyDto` and `SceneSystemDto`, each with its granted `level`, `SceneClockDto`,
@@ -4030,6 +4048,185 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     comment, the stall (`METER_STEP_MAX_S`), the live regions and `METERED —`. Not taken:
     removing `meteredEv100` and `InhibitReason` (R02's commands take the one, and the plan names
     the other), and `SOURCE` under a status (above).
+- **Deviations in T16.d, as built** (2026-10-06; the views lane; decision-r07-t16a, items 1 and 2,
+  as decision-thin-line-contrast, items 2 and 4, amends them).
+  - **Files.** Those the subtask lists, and:
+    - `lib/strokes.ts` and its test;
+    - `smoke/strokeContrast.ts`, new, with a test of its arithmetic. It holds `checkStrokeContrast`,
+      which the ruling names but places in no file, registered in `smoke/page.ts` as the group
+      "R07.T16.d the view's strokes as drawn";
+    - the options of the other callers and tests (`photorealFrame.test.ts`, `internalScale.test.ts`,
+      `overlay.test.ts`, `ViewDisplay.test.tsx`, `spikeRun.test.ts`, `smoke/spike.ts`);
+    - the eclipse scene's empty lists, now `emptyDrawList` (`smoke/eclipse.ts`,
+      `scenes/eclipseScene.test.ts`);
+    - `displays/view/ViewMarkLabels.tsx` and its test, and `reticleGrowthPx` in
+      `wireframe/symbology.ts`, for the labels' clearance (below).
+
+    `displays/view/useInstruments.ts`, which the ruling's table names, needs nothing: every
+    instrument draws through `viewFrameDrawer.ts`.
+  - **The strokes.** `DrawOptions` extends `ViewStrokes`: `strokeScale`, `markStrokePx`, and a third
+    required field, `markShiftPx` (δ). δ depends on the ratio, which the other two do not give:
+    0.78125 and 1 both draw at s = 2 and m = 2, but their δ is 0.41 and 0.25. `viewStrokesAt(ratio)`
+    gives all three from `lib/strokes.ts`, and every caller spreads it: `viewFrameDrawer.ts` for the
+    primary and each instrument, `DescentSpike.tsx` through `SpikeFrameInput.strokes`, and the smoke
+    page at a ratio of 1. The list carries `strokeScale`, `markStrokePx` and `occluderSlopePx`. A
+    mark's casing is a line's, `CASING_PX` × s. `lib/strokes.ts` takes a ratio that is not a
+    positive number as 1.
+  - **What the view draws, device px.**
+
+    | Ratio | 1 px line | 1.5 px line | 2 px selected | Casing, each side | Dash on/off | Outline | δ | `occluderSlopePx` |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | 0.78125 | 2 | 3 | 4 | 2 | 12/8 | 2 | 0.41 | 5 |
+    | 1 | 2 | 3 | 4 | 2 | 12/8 | 2 | 0.25 | 5 |
+    | 2 | 2 | 3 | 4 | 2 | 12/8 | 3 | 0 | 5 |
+    | 3 | 3 | 4.5 | 6 | 3 | 18/12 | 4.5 | 0 | 7 |
+
+    Before T16.d every width was the guide's figure in device px at every ratio: 1, 1.5, 2, casings
+    of 1, outlines of 1.5, and a slope term of 3.
+  - **The outward widening.** As ruled for most marks:
+    - a body symbol's circle moves out by δ;
+    - a ringed circle's disc moves out by δ and its ring by 3δ;
+    - the bracket and destination reticles move out by 4δ.
+
+    Where the ruling is silent:
+    - **A polygon symbol.** Each side moves out by δ, and its corners by δ over the unit polygon's
+      inradius (cos π/n), so that its inner edge stays where a 1.5 CSS px outline's would be.
+      T16.f's "a symbol's path radius by δ" means the same for a circle, but would move a polygon's
+      sides out by only δ cos(π/n): T16.f should match the view.
+    - **Two marks the ruling does not list.** A target's ticks, the view's contact mark for a
+      craft, move out by δ, as a symbol's line does. The flight path marker's circle moves out by
+      δ, and its wings and fin start from it, so that both keep their open centres as built.
+  - **The slope term.** As ruled, `occluderSlopePx` is 5 at every ratio up to 2 and 7 at 3, so 5
+    device px of slope show through behind a slanted hull face, where decision-r07-t16a expected 3
+    at a ratio of 1 or below (decision-thin-line-contrast).
+    - The sphere's limb bound is 1.25 px.
+    - `HULL_OCCLUDER_DEPTH_FRACTION` (2⁻¹⁶) is `drawList.ts`'s, and a test holds `occluder.wgsl`'s
+      `DEPTH_FRACTION` equal to it.
+    - Metal has no fine derivative, but on a plane coarse and fine derivatives agree, so the term
+      is exact there too.
+    - naga 30.0.1 validates both composed occluders and translates them to SPIR-V, MSL 2.1 and HLSL.
+      At naga's default MSL version both fail on `instance_index`, as they did before T16.d.
+  - **The smoke checks** (`smoke/wireframe.ts`).
+    - T16.a's `checkCasedHullEdge` is kept on its axis, at s = 1.
+    - `checkDiagonalCasedHullEdge` turns that face 45° and draws at s = 1 and 2. A 45° line meets
+      the texel centres at one sub-pixel phase all along its length, so its far edge lies 24.153 px
+      down the view before the turn. That puts texels in the band a larger-component push would
+      lose: 2.190 px from the edge at s = 1 (the casing's coverage 0.06 there) and 3.604 px at 2
+      (coverage 0.40). Six such texels at each scale draw as with no face, and no texel of the
+      square differs.
+    - `checkHullSlope` reads a hull face's depth at the turned face's middle texel. It is within
+      1.3 × 10⁻⁴ and 1.5 × 10⁻⁴ of the f64 push by the slope's magnitude, at s = 1 and 2, against
+      5.5 × 10⁻³ and 9.2 × 10⁻³ from the larger component's.
+    - `checkSphereSlope` runs at s = 1 and 2, at 3 and 5 px, and matches to seven digits.
+    - R02.T14.c's checks pass as before, the kept scenes drawn at `viewStrokesAt(1)`.
+  - **`checkStrokeContrast`.** It draws three scenes on a 256 px square, at ratios 0.78125, 1 and 2,
+    in the wireframe over `--surface-0` and through the overlay over `--text`:
+    - a ring seen face-on, from cameras rolled 0°, 3° and 45°, whose ticks then lie at those angles
+      and every 10° on;
+    - a planet seen pole-on, its limb 110 px from the centre and rolled the same, for its limb,
+      meridians and prime meridian;
+    - two open circle symbols, the selection's and the destination's on different bodies, beside a
+      dashed predicted path, and a third craft's target ticks.
+
+    **The cross-section** at each pixel of length is the texels whose centres lie within half a
+    texel's diagonal along the stroke and within its half-width and fringe across it. That is the
+    cross-section the ruling's figures take: a stroke up to 2 px wide then peaks at w ÷ 2 of its
+    colour at its worst position, and a 2 px one at all of it. With half a pixel along instead, a
+    2 px line at 45° finds no texel within 0.71 px of its centreline at a corner of the grid
+    (5.9:1).
+
+    **Crossings are not read.** A cross-section that another batch's stroke or casing reaches is
+    left out, because a later batch's casing covers an earlier stroke where they cross, by design
+    (a stated limit).
+
+    **The readings.** Every kind reads its pair's ratio at every ratio, in both styles:
+    - the ring's edges and ticks, the limb and meridians (1 px), and the prime meridian (1.5 px),
+      `--text-muted`: 7.22:1;
+    - the symbols, the dashed path and the target ticks, `--text`: 13.57:1;
+    - the `--accent` reticle: 10.37:1;
+    - the `--target` reticle: 8.15:1.
+
+    The control, the ring as built before T16.d, reads 4.20:1 on its 1 px edges at each ratio. Each
+    kind must read at least 20 points over its frames, and the target's ticks, four of about 3 px,
+    at least 8: they read 12 over the image at 0.78125.
+  - **Captures.** decision-thin-line-contrast retires the brief's "captures at 0.78125 do not move":
+    every line at a ratio under 2 is now at least 2 device px.
+    - **`just test-render --captures`.** Before (at f57f2b1) and after, 98 of the 110 captures are
+      byte-identical. The 12 that move are R05 spike's `craft` and `orbit` instruments, at its
+      three shots on both variants. They are the only captures drawn through
+      `buildWireframeDrawList`: their lines go from 1 to 2 device px, and their outlines from 1.5 to
+      2.
+    - **Hidden captures of `VIEW`'s canvas** (`.git/rm23-scratch/r07-views/t16d/shots/`): PRECISION
+      TEST and FRAME CHANGE TEST from `SEAT` and from `CHASE`, in both styles, the frame clock
+      frozen so that a kept scene holds at t = 0 (two runs of one build are byte-identical).
+      - At a ratio of 0.78125, every frame moves at its strokes only: 0.31% to 1.84% of its pixels,
+        nearly all brighter.
+      - At 2 they move against f57f2b1 by 0.23% to 1.40%, since every width doubles there. Their
+        widths are decision-r07-t16a's (s = 2, m = 3).
+  - **The acceptance's vitest paths** leave out `smoke/strokeContrast.test.ts`, the test of the
+    check's arithmetic, cross-section and dash phase. It runs in the app's whole suite and in
+    `just ci`.
+  - **Open, for the orchestrator** (the UX review's considers, not built):
+    - **Graticule thresholds.** A body's graticule steps (drawn from 8 px across, and at 15° from
+      64 px) are still device px, chosen for 1 px lines. With 2 px lines, a planet some 28 px across
+      has its 30° cells nearly filled (`after-a-precision-chase-wireframe.png`). Scaling both
+      thresholds by the line scale would keep the gaps as built.
+    - **The view's clear colour.** `CLEAR_COLOUR` (`view/engine/webgpu/drawing.ts`) is black, not
+      `--surface-0`. This predates T16.
+  - **By hand, not committed** (`.git/rm23-scratch/r07-views/t16d/byhand/`). The hull's hardware
+    slope term was put back (`depthBiasAway { constant: 128, slopeScale: 3 }`, the fragment writing
+    no depth) and the default variant run on SwiftShader:
+    - `checkHullSlope` reads 0.1226247 at both scales, which is the larger component's push
+      (0.1227427, against the magnitude's 0.1171979 at s = 1): SwiftShader takes the larger
+      component.
+    - `checkDiagonalCasedHullEdge` fails at s = 1, where ten texels of the casing differ, the six
+      at risk among them. It fails at s = 2 too, where 3 px cannot cover a 4 px reach.
+    - T16.a's axis check passes.
+
+    On both paths a constant 1.2 to 1.5 × 10⁻⁴ separates the depth SwiftShader writes from the
+    `f64` model, a 0.02 px shift of the face, inside the check's tenth.
+  - **Two clearances the ruling's widening closed, kept (after the UX review; for the
+    orchestrator).** decision-thin-line-contrast lists "label positions" as unchanged, and gives the
+    destination reticle no rule of its own. Both are kept as built at a ratio of 4/3 and above.
+    - **The marks' labels.** A mark's DOM label stands 0.75 rem right of it, on an opaque
+      `--surface-0` plate. Below a ratio of 1, the selection's bracket about a craft, moved out by
+      4δ and widened by δ, ran under that plate: at 0.78125 the plate covered its right arms' outer
+      half within the label's height (about 4.8:1 at the worst phase, and worse at 80%).
+      `markLabelShiftPx` moves every label out by the bracket's growth, 5δ ÷ the ratio CSS px
+      (2.65 px at 0.78125, 1.25 at 1, 0 from 4/3 up). Its clearance from the plate is then that of a
+      1.5 CSS px bracket at its as-built place, at every interface scale (tested at 80%, 100% and
+      150%, at ratios 0.78125, 1 and 2). A selected body of size class 3 or 4 has run under its
+      label's plate since R02.T15 (its bracket's half-size is 0.69 to 0.75 rem); it is no worse.
+    - **The destination's reticle on the selection.** It stood 0.25 rem outside the bracket: 3.1
+      device px at 0.78125, and 2.5 at 80%. Its casing, drawn after the bracket, reaches 3.5 px, so
+      it covered the bracket's full-coverage core (about 6.3:1 at 100% and 3.4:1 at 80%, from the
+      ramp). The margin is now at least an outline and one casing, 4 device px below 4/3, so that
+      the destination's casing never reaches the bracket's core. That is tested at 80%, 100% and
+      150%, at ratios 0.78125, 1 and 2. No view draws a destination yet: `viewFrameDrawer.ts` and
+      `spikeRun.ts` pass `null`.
+    - **Seen, not changed.** About a craft, the destination reticle's right arms stand 0.875 rem
+      out, and have run under the label's plate at every ratio since R02.T15. That too is latent
+      until a destination is drawn.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest: 87 files, 1,520 tests.
+    - The app's vitest: 327 files, 5,581 tests.
+    - `just check lint` from a clean typecheck cache, and Prettier.
+    - `just test-render`: both variants exit 0, 538 checks (269 each, 255 before), with no
+      uncaptured GPU error.
+    - naga, as above.
+    - The console-ux skill's lint (no new error; its three, `smoke/wireframe.ts`'s test colours and
+      `submit.ts`'s colour parser, predate T16.d), contrast and glyph scripts.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers.
+    - **The UX review's two must-fixes** are fixed, and the reviewer has confirmed it: the labels'
+      clearance and the destination's margin, above.
+    - **The TypeScript review's should-fix**, a reason above each new lint suppression, is fixed.
+      So are its two considers: `INHIBIT`'s ref passed as an object, and the turned face's corners
+      as a tuple.
+    - **The plan-conformance review's three should-fixes** are fixed or recorded: the planet's limb
+      placed at 110 px so that the check reads it; Consumes, the T16 consider and Provides given
+      pointers; and the acceptance's vitest paths recorded.
+    - **Considers taken:** a ring and a symbol in the scale tests, the target ticks read, and the
+      sample floor kept at 20 but for the ticks.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

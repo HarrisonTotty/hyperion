@@ -5,7 +5,7 @@ import { normalise, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import { DEFAULT_FOV_DEG } from "../camera/projection";
 import { precisionScene } from "../scenes/precision";
-import { buildWireframeDrawList, type SpriteStar } from "../wireframe/drawList";
+import { buildWireframeDrawList, type SpriteStar, viewStrokesAt } from "../wireframe/drawList";
 import { internalViewport, spritesAtScale } from "./internalScale";
 
 const CANVAS = { widthPx: 1280, heightPx: 720 };
@@ -50,6 +50,7 @@ function spritesAt(viewport: { readonly widthPx: number; readonly heightPx: numb
       selection: null,
       destination: null,
       remPx: 16,
+      ...viewStrokesAt(1),
       skyStars: skyStars(),
     },
   ).sprites;

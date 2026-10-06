@@ -14,6 +14,7 @@ import {
 } from "../view/spike/spikeRun";
 import { SurfaceQuery } from "../view/spike/surfaceQuery";
 import type { QualitySetting } from "../view/quality/qualitySetting";
+import { viewStrokesAt } from "../view/wireframe/drawList";
 import { base64Of, type CapturedImage } from "./atmosphere";
 import { addCanvas } from "./frames";
 import { type Checks, pause } from "./harness";
@@ -116,6 +117,8 @@ export async function captureSpike(engine: RenderEngine, checks: Checks): Promis
         sizes: SIZES,
         tokens,
         remPx: 16,
+        // A ratio of 1: the captures' fixed sizes and rem are device pixels (R07.T16.d).
+        strokes: viewStrokesAt(1),
         selection: null,
       });
       run.frame(input(0));

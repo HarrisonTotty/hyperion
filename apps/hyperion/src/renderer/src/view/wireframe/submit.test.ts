@@ -13,7 +13,14 @@ import {
 } from "../camera/projection";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
 import { PSF_QUAD_PX, PSF_SIGMA_PX } from "../photometry/magnitude";
-import type { DrawCamera, LineBatch, WireframeDrawList } from "./drawList";
+import {
+  type DrawCamera,
+  emptyDrawList,
+  HULL_OCCLUDER_DEPTH_FRACTION,
+  type LineBatch,
+  viewStrokesAt,
+  type WireframeDrawList,
+} from "./drawList";
 import {
   linearColour,
   MATERIAL_BUFFER,
@@ -36,13 +43,7 @@ const MATERIALS: ReadonlyArray<WireframeMaterial> = [
   "starSprite",
 ];
 
-const EMPTY: WireframeDrawList = {
-  occluderSpheres: [],
-  occluderMeshes: [],
-  lines: [],
-  sprites: [],
-  anchors: [],
-};
+const EMPTY: WireframeDrawList = emptyDrawList(viewStrokesAt(1));
 
 function aBatch(overrides: Partial<LineBatch> = {}): LineBatch {
   return {
@@ -60,10 +61,10 @@ function aBatch(overrides: Partial<LineBatch> = {}): LineBatch {
   };
 }
 
-/** The value of `const <name> = <number>;` in the sprite shader. */
-function spriteConstant(name: string): number {
+/** The value of `const <name> = <number>;` in a material's shader, the sprite's by default. */
+function wgslConstant(name: string, material: WireframeMaterial = "starSprite"): number {
   const found = new RegExp(`const ${name} = ([\\d.]+);`).exec(
-    WIREFRAME_MATERIALS.starSprite.vertexWgsl,
+    WIREFRAME_MATERIALS[material].vertexWgsl,
   );
   return Number(found?.[1]);
 }
@@ -115,10 +116,27 @@ describe("the wireframe's shaders", () => {
   });
 
   it("carries the point-spread constants of the photometry in the sprite shader", () => {
-    expect([spriteConstant("PSF_SIGMA_PX"), spriteConstant("PSF_QUAD_PX")]).toEqual([
+    expect([wgslConstant("PSF_SIGMA_PX"), wgslConstant("PSF_QUAD_PX")]).toEqual([
       PSF_SIGMA_PX,
       PSF_QUAD_PX,
     ]);
+  });
+
+  it("push a hull face away in its fragment by the draw list's constant, as its own depth", () => {
+    const source = WIREFRAME_MATERIALS.occluderHull.fragmentWgsl;
+    expect([
+      wgslConstant("DEPTH_FRACTION", "occluderHull"),
+      /@builtin\(frag_depth\)/.test(source),
+      /dpdxFine\(depth\), dpdyFine\(depth\)/.test(source),
+    ]).toEqual([HULL_OCCLUDER_DEPTH_FRACTION, true, true]);
+  });
+
+  it("take both occluders' slope term from the draw's uniform, not a constant", () => {
+    expect([
+      WIREFRAME_MATERIALS.occluderSphere.uniforms.map((u) => u.name),
+      WIREFRAME_MATERIALS.occluderHull.uniforms.map((u) => u.name),
+      /SLOPE_SCALE/.test(WIREFRAME_MATERIALS.occluderSphere.fragmentWgsl),
+    ]).toEqual([["occluderSlopePx"], ["firstTriangle", "occluderSlopePx"], false]);
   });
 
   it("are composed of ASCII alone", () => {
@@ -140,13 +158,13 @@ function state(spec: WgslMaterialSpec): unknown[] {
 }
 
 describe("the wireframe's materials", () => {
-  it("write depth only from the occluders, and bias only the hull's faces", () => {
+  it("write depth only from the occluders, and set no hardware depth bias", () => {
     expect(
       Object.fromEntries(MATERIALS.map((name) => [name, state(WIREFRAME_MATERIALS[name])])),
     ).toEqual({
       lines: [false, true, "premultiplied", "none", null],
       occluderSphere: [true, false, "none", "none", null],
-      occluderHull: [true, false, "none", "none", { constant: 128, slopeScale: 3 }],
+      occluderHull: [true, false, "none", "none", null],
       starSprite: [false, true, "additive", "none", null],
     });
   });
@@ -218,7 +236,6 @@ describe("packWireframe", () => {
       id: `hull${String(n)}`,
       originF32: new Float32Array([0, 0, -n]),
       triangles: new Float32Array(9 * n).fill(n),
-      depthBiasAway: { constant: 128, slopeScale: 3 } as const,
       twoSided: true as const,
     })),
     lines: [
@@ -241,6 +258,9 @@ describe("packWireframe", () => {
       },
     ],
     anchors: [],
+    strokeScale: 2,
+    markStrokePx: 2,
+    occluderSlopePx: 5,
   };
   const packed = packWireframe(list, CAMERA, VIEWPORT);
   const summary = packed.draws.map((d) => [
@@ -278,6 +298,17 @@ describe("packWireframe", () => {
   it("carries a dash's phase on along a polyline and restarts it at a break", () => {
     const phases = [2, 3, 4].map((segment) => packed.segments[segment * 8 + 3]);
     expect(phases).toEqual([0, 10, 0]);
+  });
+
+  it("gives both occluders the list's slope term", () => {
+    const occluders = packed.draws.filter(
+      (d) => d.material === "occluderSphere" || d.material === "occluderHull",
+    );
+    expect(occluders.map((d) => [d.material, d.uniforms["occluderSlopePx"]?.[0]])).toEqual([
+      ["occluderSphere", 5],
+      ["occluderHull", 5],
+      ["occluderHull", 5],
+    ]);
   });
 
   it("packs a sphere's centre, radius and altitude", () => {

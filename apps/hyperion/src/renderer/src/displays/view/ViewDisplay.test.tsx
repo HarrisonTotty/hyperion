@@ -46,7 +46,8 @@ import type { FrameSubmission } from "../../view/engine/types";
 import { METER_CLASS } from "../../view/post/meter";
 import { precisionScene } from "../../view/scenes/precision";
 import STYLES from "../../styles.css?raw";
-import { buildWireframeDrawList, CASING_PX } from "../../view/wireframe/drawList";
+import { lineScale } from "../../lib/strokes";
+import { buildWireframeDrawList, CASING_PX, viewStrokesAt } from "../../view/wireframe/drawList";
 import { linearColour } from "../../view/wireframe/submit";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
@@ -400,7 +401,14 @@ describe("the VIEW display", () => {
       { pose: runPose(run), fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180 },
       { widthPx: WIDTH_PX, heightPx: HEIGHT_PX },
       readTokens(document.documentElement),
-      { lowSetting: false, ev100: -1, selection: null, destination: null, remPx: 16 },
+      {
+        lowSetting: false,
+        ev100: -1,
+        selection: null,
+        destination: null,
+        remPx: 16,
+        ...viewStrokesAt(1),
+      },
     );
     const anchor = list.anchors[0];
     if (anchor === undefined) {
@@ -1034,9 +1042,10 @@ function hullLineWidths(frame: FrameSubmission | undefined): ReadonlyArray<numbe
 
 /**
  * Whether a frame's line draws come in pairs, each a `--surface-0` casing two casings wider than
- * the stroke drawn after it: every batch cased, its casing beneath it.
+ * the stroke drawn after it: every batch cased, its casing beneath it, at the display's ratio.
  */
 function casedInPairs(frame: FrameSubmission | undefined): boolean {
+  const casingPx = CASING_PX * lineScale(window.devicePixelRatio);
   const lines = (frame?.draws ?? []).filter((draw) => draw.material.name === "wireframe:lines");
   const casing = [...linearColour(readTokens(document.documentElement).surface0)];
   const width = (index: number): number => lines[index]?.uniforms["widthPx"]?.[0] ?? Number.NaN;
@@ -1045,7 +1054,7 @@ function casedInPairs(frame: FrameSubmission | undefined): boolean {
     lines.length % 2 === 0 &&
     lines.every((draw, index) =>
       index % 2 === 1
-        ? width(index - 1) - width(index) === 2 * CASING_PX
+        ? width(index - 1) - width(index) === 2 * casingPx
         : [...(draw.uniforms["colour"] ?? [])].every((value, c) => value === casing[c]),
     )
   );
@@ -1082,8 +1091,26 @@ describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
       view.lastFrame()?.label,
       hullLineWidths(view.lastFrame()),
       casedInPairs(view.lastFrame()),
-    ]).toEqual([[[1.5], false], "symbology", [3.5, 1.5], true]);
+    ]).toEqual([[[3], false], "symbology", [7, 3], true]);
   });
+
+  it.each([
+    [0.78125, [7, 3]],
+    [1, [7, 3]],
+    [2, [7, 3]],
+    [3, [10.5, 4.5]],
+  ] as const)(
+    "draws the hull's cased edge at a ratio of %s as %j device px, never under 2 (R07.T16.d)",
+    async (ratio, widths) => {
+      vi.stubGlobal("devicePixelRatio", ratio);
+      const view = setup({ store: await nominalStore() });
+      await drawPrecisionPhotoreal(view);
+      expect([view.lastFrame()?.label, hullLineWidths(view.lastFrame())]).toEqual([
+        "symbology",
+        widths,
+      ]);
+    },
+  );
 
   it("sets every text over the photorealistic image on a --surface-0 plate, beside an instrument", async () => {
     // On the harness's 1280 × 720 stage, where a slot has room, with INSTRUMENT 1 open over the

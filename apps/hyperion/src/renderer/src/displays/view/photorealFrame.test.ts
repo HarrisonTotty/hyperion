@@ -8,7 +8,7 @@ import { lightingFramesOf } from "../../view/lighting/retarded";
 import { DEFAULT_EXPOSURE, controlEv100, exposureScale } from "../../view/photometry/exposure";
 import { PHASE_GIANT, PHASE_PLANETS, PHASE_STAR, phaseScene } from "../../view/scenes/phaseScene";
 import { HostDiscLayer } from "../../view/sky/disc";
-import { buildWireframeDrawList } from "../../view/wireframe/drawList";
+import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
 import { photorealFrame } from "./photorealFrame";
 import { runPose, startRun } from "./viewRun";
 
@@ -40,6 +40,7 @@ async function frameOfPhaseScene(): Promise<ReturnType<typeof photorealFrame>> {
     selection: null,
     destination: null,
     remPx: 16,
+    ...viewStrokesAt(1),
   });
   return photorealFrame({
     run,

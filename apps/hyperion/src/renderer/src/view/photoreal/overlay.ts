@@ -4,12 +4,13 @@
  * tone-mapped image.
  *
  * @remarks
- * Every mark over the image is stroked twice, a `--surface-0` casing of {@link CASING_PX} on each
- * side beneath its coloured stroke, never a blur or a glow (the guide's "Outlines for symbology"),
- * so that it carries its own dark surface over any part of the image; the image is never dimmed
- * under it. The wireframe style's list cases every batch but the hull edges, whose own faces hide
- * the stars behind them; over the image they are cased like every mark, and the hull faces'
- * slope bias covers their cased width (`HULL_OCCLUDER_BIAS`, the UX decisions, item 12). Until R11
+ * Every mark over the image is stroked twice, a `--surface-0` casing of {@link CASING_PX} CSS px
+ * on each side, drawn at the list's stroke scale, beneath its coloured stroke, never a blur or a
+ * glow (the guide's "Outlines for symbology"), so that it carries its own dark surface over any
+ * part of the image; the image is never dimmed under it. The wireframe style's list cases every
+ * batch but the hull edges, whose own faces hide the stars behind them; over the image they are
+ * cased like every mark, and the hull faces' slope term covers their cased width at every scale
+ * (`occluderSlopePx`; the UX decisions, item 12; R07.T16.d). Until R11
  * draws them, rings stay R02's ellipses and craft R02's hull outlines, cased, never omitted
  * (Design note 17). The star sprites are left out: the image holds the stars. The occluders stay,
  * so that a mark behind a body or a hull stays hidden.
@@ -25,17 +26,21 @@ import {
 import type { WireframeRenderer } from "../wireframe/submit";
 import { PHOTOREAL_PASS_LABELS } from "./passes";
 
-/** A batch as the photorealistic style strokes it: cased by at least {@link CASING_PX}. */
-function cased(line: LineBatch): LineBatch {
-  return line.casingWidthPx >= CASING_PX ? line : { ...line, casingWidthPx: CASING_PX };
+/**
+ * A batch as the photorealistic style strokes it: cased by at least `casingPx`, device px.
+ */
+function cased(line: LineBatch, casingPx: number): LineBatch {
+  return line.casingWidthPx >= casingPx ? line : { ...line, casingWidthPx: casingPx };
 }
 
 /**
  * R02's draw list as the overlay draws it over the image: every line batch cased in its
- * `--surface-0` casing colour at {@link CASING_PX}, the hull edges included, and no star sprite.
+ * `--surface-0` casing colour at {@link CASING_PX} times the list's stroke scale, the hull edges
+ * included, and no star sprite.
  */
 export function overlayDrawList(list: WireframeDrawList): WireframeDrawList {
-  return { ...list, lines: list.lines.map(cased), sprites: [] };
+  const casingPx = CASING_PX * list.strokeScale;
+  return { ...list, lines: list.lines.map((line) => cased(line, casingPx)), sprites: [] };
 }
 
 /**

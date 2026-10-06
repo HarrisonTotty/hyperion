@@ -10,6 +10,7 @@ import { type CameraOrigins, originMinusCamera, relativeToCamera } from "../coor
 import { separable } from "../depth/depth";
 import { TEST_HULL, TEST_PLATE_DISTANCE_M } from "../scene/hull";
 import { sceneOrigins } from "../scene/model";
+import { HULL_OCCLUDER_DEPTH_FRACTION } from "../wireframe/drawList";
 import {
   PRECISION_DURATION_S,
   PRECISION_MOON,
@@ -166,14 +167,15 @@ describe("the precision scene", () => {
 const PLATE_FACES = TEST_HULL.faces.slice(14);
 
 /**
- * Where the ray from `eye` towards `point` first meets one of `faces` pushed away by `biasFraction`
- * of its distance (the occluder's depth bias), as a fraction of the way to `point`, or `null`.
+ * Where the ray from `eye` towards `point` first meets one of `faces` pushed away by the occluder's
+ * constant (its reversed-Z depth times 1 − `depthFraction`, so its distance over 1 −
+ * `depthFraction`), as a fraction of the way to `point`, or `null`.
  */
 function firstHit(
   eye: Vec3,
   point: Vec3,
   faces: ReadonlyArray<readonly [number, number, number]>,
-  biasFraction: number,
+  depthFraction: number,
 ): number | null {
   const direction = sub(point, eye);
   let nearest: number | null = null;
@@ -198,7 +200,7 @@ function firstHit(
     const v = dot(direction, q) / det;
     const t = dot(e2, q) / det;
     if (u >= 0 && v >= 0 && u + v <= 1 && t > 0) {
-      const pushed = t * (1 + biasFraction);
+      const pushed = t / (1 - depthFraction);
       nearest = nearest === null ? pushed : Math.min(nearest, pushed);
     }
   }
@@ -232,9 +234,9 @@ function behindPlate(eye: Vec3, point: Vec3): boolean {
 }
 
 describe("the test hull's hidden lines", () => {
-  // The occluder pass's bias moves a face by 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵ of its distance, the unit's
-  // two ends (Design note 5); the hidden lines must hold at both.
-  const BIASES = [7.6e-6, 1.5e-5];
+  // The hull faces' constant push, 2⁻¹⁶ of the depth on every backend (R07.T16.d), where the
+  // hardware bias moved a face by 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵ of its distance (Design note 5).
+  const BIASES = [HULL_OCCLUDER_DEPTH_FRACTION];
   const eye = TEST_HULL.eyePointM;
 
   it("hides by the plate's faces exactly the parts of the hull's edges behind the plate", () => {

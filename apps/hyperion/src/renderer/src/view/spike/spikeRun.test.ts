@@ -17,6 +17,7 @@ import {
 import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile";
 import { SEGMENT_MEASURE_PREFIX } from "./metrics";
 import { contactRule, TEST_PLANET_FIGURE } from "./spikeScene";
+import { viewStrokesAt } from "../wireframe/drawList";
 import { stretchKeys } from "./demandRecord";
 import {
   DescentRefused,
@@ -74,6 +75,7 @@ function input(nowMs: number): SpikeFrameInput {
     sizes: SIZES,
     tokens: readTokens(document.documentElement),
     remPx: 16,
+    strokes: viewStrokesAt(1),
     selection: null,
   };
 }

@@ -53,7 +53,7 @@ import {
 } from "../view/scenes/eclipseScene";
 import { HostDiscLayer } from "../view/sky/disc";
 import { SKY_SPRITE_HDR_MATERIAL } from "../view/sky/spriteHdr";
-import type { WireframeDrawList } from "../view/wireframe/drawList";
+import { emptyDrawList, viewStrokesAt } from "../view/wireframe/drawList";
 import { base64Of, type CapturedImage } from "./atmosphere";
 import { addCanvas } from "./frames";
 import { type Checks, halfTexels } from "./harness";
@@ -66,13 +66,7 @@ const TEXEL_RELATIVE = 4e-3;
 const TEXEL_ABSOLUTE = 1e-4;
 
 /** No wireframe draw list: the stars are not under test. */
-const NO_LIST: WireframeDrawList = {
-  occluderSpheres: [],
-  occluderMeshes: [],
-  lines: [],
-  sprites: [],
-  anchors: [],
-};
+const NO_LIST = emptyDrawList(viewStrokesAt(1));
 
 /**
  * The scene's photorealistic frame at scene time `sceneS` from `pose` across `fovDeg`, pre-exposed

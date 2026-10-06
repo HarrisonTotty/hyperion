@@ -6,7 +6,12 @@ import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aMarkedViewScene, FIXTURE_PLANET, OFF_PLANET_CAMERA } from "../../test/viewFixtures";
 import type { Viewport } from "../camera/projection";
 import type { ViewScene } from "../scene/model";
-import { buildWireframeDrawList, CASING_PX, type WireframeDrawList } from "../wireframe/drawList";
+import {
+  buildWireframeDrawList,
+  CASING_PX,
+  viewStrokesAt,
+  type WireframeDrawList,
+} from "../wireframe/drawList";
 import { linearColour, WireframeRenderer } from "../wireframe/submit";
 import { overlayDrawList, overlaySubmission } from "./overlay";
 
@@ -42,13 +47,15 @@ function scene(): ViewScene {
   });
 }
 
-function wireframeList(): WireframeDrawList {
+/** The wireframe's list of the scene, its strokes at a display ratio, 1 by default. */
+function wireframeList(ratio = 1): WireframeDrawList {
   return buildWireframeDrawList(scene(), CAMERA, VIEWPORT, TOKENS, {
     lowSetting: false,
     ev100: -1,
     selection: { kind: "body", body: FIXTURE_PLANET },
     destination: null,
-    remPx: 16,
+    remPx: 16 * ratio,
+    ...viewStrokesAt(ratio),
   });
 }
 
@@ -60,10 +67,9 @@ function batchKinds(list: WireframeDrawList): ReadonlyArray<string> {
 describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
   it("cases every mark over the image in --surface-0, the hull's edges included", () => {
     const overlay = overlayDrawList(wireframeList());
+    const casingPx = CASING_PX * overlay.strokeScale;
     const uncased = overlay.lines
-      .filter(
-        (line) => !(line.casingWidthPx === CASING_PX && line.casingColour === TOKENS.surface0),
-      )
+      .filter((line) => !(line.casingWidthPx === casingPx && line.casingColour === TOKENS.surface0))
       .map((line) => line.id);
     expect({ kinds: batchKinds(overlay), uncased }).toEqual({
       kinds: ["body", "hull", "mark", "orbit", "predicted", "ring"],
@@ -81,6 +87,16 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
       overlay.occluderMeshes === list.occluderMeshes,
       overlay.anchors === list.anchors,
     ]).toEqual([true, [], true, true, true]);
+  });
+
+  it("cases every batch to 2 device px at ratios of 0.78125, 1 and 2, and 3 at 3 (R07.T16.d)", () => {
+    expect(
+      [0.78125, 1, 2, 3].map((ratio) =>
+        Array.from(
+          new Set(overlayDrawList(wireframeList(ratio)).lines.map((line) => line.casingWidthPx)),
+        ),
+      ),
+    ).toEqual([[2], [2], [2], [3]]);
   });
 
   it("leaves the wireframe's own list as it was, its hull edges uncased", () => {
@@ -117,7 +133,7 @@ describe("the symbology's canvas pass (R07.T16.a)", () => {
     });
     expect({ draws: lines.length, pairs }).toEqual({
       draws: 2 * drawn.length,
-      pairs: drawn.map((line) => [casing, 2 * CASING_PX, line.widthPx]),
+      pairs: drawn.map((line) => [casing, 2 * CASING_PX * list.strokeScale, line.widthPx]),
     });
     renderer.dispose();
   });

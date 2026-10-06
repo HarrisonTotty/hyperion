@@ -10,14 +10,17 @@
  * own edge and hides one 4 × 10⁻⁵ of the distance behind it, at 1 m and at 10⁸ m (Design note 5); a
  * sphere occluder's depth is pushed by its slope's magnitude where the slope is diagonal; a
  * star sprite peaks in its own pixel, lights nothing outside its quad and sums to the tone curve
- * of its PSF-weighted colour (both added in RM1 validation, m2 and m3); and a hull edge cased as
- * the photorealistic overlay draws it stays whole over its own receding face (R07.T16.a).
+ * of its PSF-weighted colour (both added in RM1 validation, m2 and m3); a hull edge cased as
+ * the photorealistic overlay draws it stays whole over its own receding face (R07.T16.a), on a
+ * slope along an axis and at 45° to the axes, at stroke scales of 1 and 2; and a hull face's depth
+ * is pushed in its fragment by its slope's magnitude (R07.T16.d). Both occluders' slope term is
+ * the list's `occluderSlopePx`, a uniform that follows the stroke scale.
  */
 
 import "../styles.css";
 
-import { dot, normalise, scale, sub, vec3 } from "../geometry/vec3";
-import { DEFAULT_FOV_DEG, NEAR_PLANE_M } from "../view/camera/projection";
+import { cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
+import { DEFAULT_FOV_DEG, NEAR_PLANE_M, project } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { KernelPair } from "../view/engine/kernels";
@@ -27,14 +30,18 @@ import { erf, PSF_QUAD_PX, PSF_SIGMA_PX } from "../view/photometry/magnitude";
 import { type Rgb, spriteToneCurve, toneCurve } from "../view/photometry/toneCurve";
 import toneCurveWgsl from "../view/shaders/toneCurve.wgsl?raw";
 import { overlayDrawList } from "../view/photoreal/overlay";
+import { SYMBOL_STROKE_PX } from "../spatial/symbols";
 import {
   buildWireframeDrawList,
+  CASING_PX,
   type DrawCamera,
-  HULL_OCCLUDER_BIAS,
+  emptyDrawList,
+  HULL_OCCLUDER_DEPTH_FRACTION,
   type LineBatch,
   type OccluderMesh,
   type StarSprite,
   STROKE_PX,
+  viewStrokesAt,
   type WireframeDrawList,
 } from "../view/wireframe/drawList";
 import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
@@ -126,14 +133,20 @@ function batch(
   };
 }
 
-/** An empty draw list. */
-const NOTHING: WireframeDrawList = {
-  occluderSpheres: [],
-  occluderMeshes: [],
-  lines: [],
-  sprites: [],
-  anchors: [],
-};
+/**
+ * An empty draw list at a stroke scale, its outlines unmoved: its `occluderSlopePx` is what the
+ * occluders read (3 at a scale of 1, 5 at 2).
+ */
+function nothingAt(strokeScale: number): WireframeDrawList {
+  return emptyDrawList({
+    strokeScale,
+    markStrokePx: SYMBOL_STROKE_PX * strokeScale,
+    markShiftPx: 0,
+  });
+}
+
+/** An empty draw list, as a view at a ratio of 1 draws: lines at 2 device px per CSS px. */
+const NOTHING: WireframeDrawList = emptyDrawList(viewStrokesAt(1));
 
 /** Renders `list` from the axis camera into a fresh square target and reads colour and depth. */
 async function drawSquare(
@@ -196,6 +209,7 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
       selection: null,
       destination: null,
       remPx: 16,
+      ...viewStrokesAt(1),
     });
     const target = engine.createRenderTarget({
       name: `R02 ${option.name}`,
@@ -256,7 +270,6 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
         id: "near face",
         originF32: new Float32Array(3),
         triangles: face(nearM, nearM, 0),
-        depthBiasAway: HULL_OCCLUDER_BIAS,
         twoSided: true,
       },
     ],
@@ -325,7 +338,6 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
           id: "hull face",
           originF32: new Float32Array(3),
           triangles: face(distanceM, 0.5 * distanceM),
-          depthBiasAway: HULL_OCCLUDER_BIAS,
           twoSided: true,
         },
       ],
@@ -347,8 +359,20 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
     );
   }
 
-  await checkSphereSlope(engine, renderer, checks);
+  for (const strokeScale of [1, 2]) {
+    // The checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    await checkSphereSlope(engine, renderer, checks, strokeScale);
+    // The checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    await checkHullSlope(engine, renderer, checks, strokeScale);
+  }
   await checkCasedHullEdge(engine, renderer, tokens, checks);
+  for (const strokeScale of [1, 2]) {
+    // The checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    await checkDiagonalCasedHullEdge(engine, renderer, tokens, checks, strokeScale);
+  }
   await checkStarSprite(engine, renderer, checks);
   renderer.dispose();
 }
@@ -364,10 +388,11 @@ const CASED_EDGE = { edgeYPx: 24.35, nearYPx: 40, farM: 1, nearM: 0.5 } as const
 /**
  * R07.T16.a: a hull edge cased by the photorealistic overlay (`overlayDrawList`), on the far edge
  * of its own face as the face recedes towards it, draws every texel it draws with no face, its
- * casing's outer texel included: the hull faces' slope bias, 3 px, covers the cased edge's
- * 2.25 px of coverage where the depth's slope runs along the screen's axes, as here (Design note
- * 5's w ÷ 2 + 1, the UX decisions, item 12). The face's depth changes only down the view, so one
- * column reads for all.
+ * casing's outer texel included: the hull faces' slope term, 3 px at a stroke scale of 1, covers
+ * the cased edge's 2.25 px of coverage where the depth's slope runs along the screen's axes, as
+ * here (Design note 5's w ÷ 2 + 1, the UX decisions, item 12). The face's depth changes only down
+ * the view, so one column reads for all. R07.T16.d's {@link checkDiagonalCasedHullEdge} turns it
+ * 45°.
  */
 async function checkCasedHullEdge(
   engine: RenderEngine,
@@ -419,20 +444,20 @@ async function checkCasedHullEdge(
     id: "receding face",
     originF32: new Float32Array(3),
     triangles,
-    depthBiasAway: HULL_OCCLUDER_BIAS,
     twoSided: true,
   };
+  const atOne = nothingAt(1);
   const onFace = await drawSquare(
     engine,
     renderer,
     "R07 cased hull edge",
-    overlayDrawList({ ...NOTHING, occluderMeshes: [recedingFace], lines: [edge] }),
+    overlayDrawList({ ...atOne, occluderMeshes: [recedingFace], lines: [edge] }),
   );
   const bare = await drawSquare(
     engine,
     renderer,
     "R07 bare cased hull edge",
-    overlayDrawList({ ...NOTHING, lines: [edge] }),
+    overlayDrawList({ ...atOne, lines: [edge] }),
   );
   // The column through the edge's middle, from 4 px above the edge to 4 px below its casing.
   const rows = Array.from({ length: 10 }, (_, i) => 20 + i);
@@ -459,10 +484,15 @@ const DIAGONAL_TEXEL = [44, 20] as const;
 
 /**
  * The depth `occluderSphere.wgsl` should write at a texel of the axis camera's square view: the
- * exact ray-sphere depth less `SLOPE_SCALE` (3) px of the depth's screen slope, its magnitude or,
- * for the old form, its larger component.
+ * exact ray-sphere depth less `slopePx` (the list's `occluderSlopePx`) px of the depth's screen
+ * slope, its magnitude or, for the old form, its larger component.
  */
-function sphereDepth(column: number, row: number, slope: "length" | "max"): number {
+function sphereDepth(
+  column: number,
+  row: number,
+  slope: "length" | "max",
+  slopePx: number,
+): number {
   const n = NEAR_PLANE_M;
   // The axis camera's 90° field: s = 1 in both axes of the square view.
   const ndcX = ((column + 0.5) / SIDE_PX) * 2 - 1;
@@ -479,22 +509,27 @@ function sphereDepth(column: number, row: number, slope: "length" | "max"): numb
   const facing = Math.abs(dot(normal, hit));
   const slopeX = (n * Math.abs(normal.x) * 2) / (SIDE_PX * facing);
   const slopeY = (n * Math.abs(normal.y) * 2) / (SIDE_PX * facing);
-  return depth - 3 * (slope === "length" ? Math.hypot(slopeX, slopeY) : Math.max(slopeX, slopeY));
+  return (
+    depth - slopePx * (slope === "length" ? Math.hypot(slopeX, slopeY) : Math.max(slopeX, slopeY))
+  );
 }
 
 /**
  * RM1 validation m2: a body's occluder sphere pushes its depth away by the magnitude of its screen
  * slope, so that a graticule stroke's whole cased width stays in front where the slope runs
- * diagonally (Design note 5).
+ * diagonally (Design note 5); by the list's `occluderSlopePx`, a uniform, at each stroke scale
+ * (R07.T16.d).
  */
 async function checkSphereSlope(
   engine: RenderEngine,
   renderer: WireframeRenderer,
   checks: Checks,
+  strokeScale: number,
 ): Promise<void> {
   const { distanceM, radiusM } = SLOPE_SPHERE;
-  const drawn = await drawSquare(engine, renderer, "R02 sphere slope", {
-    ...NOTHING,
+  const list = nothingAt(strokeScale);
+  const drawn = await drawSquare(engine, renderer, `R02 sphere slope ${String(strokeScale)}`, {
+    ...list,
     occluderSpheres: [
       {
         id: "sphere",
@@ -506,12 +541,244 @@ async function checkSphereSlope(
   });
   const [column, row] = DIAGONAL_TEXEL;
   const seen = drawn.depth[row * SIDE_PX + column] ?? Number.NaN;
-  const want = sphereDepth(column, row, "length");
-  const old = sphereDepth(column, row, "max");
+  const want = sphereDepth(column, row, "length", list.occluderSlopePx);
+  const old = sphereDepth(column, row, "max", list.occluderSlopePx);
   checks.check(
-    "R02.T14 a sphere occluder's depth is pushed by its slope's magnitude where the slope is diagonal",
+    `R02.T14 a sphere occluder's depth is pushed by ${String(list.occluderSlopePx)} px of its slope's magnitude where the slope is diagonal (stroke scale ${String(strokeScale)})`,
     Math.abs(seen - want) < 0.1 * Math.abs(old - want),
     `depth ${seen.toPrecision(7)}, by the magnitude ${want.toPrecision(7)}, by the larger component ${old.toPrecision(7)}`,
+  );
+}
+
+/** A point turned by `angleRad` about the view axis (−z): the picture turned on the screen. */
+function turned(p: Vec3, angleRad: number): Vec3 {
+  const c = Math.cos(angleRad);
+  const s = Math.sin(angleRad);
+  return vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z);
+}
+
+/** The angle the diagonal checks turn their face by: 45°, so that its slope runs diagonally. */
+const DIAGONAL_RAD = Math.PI / 4;
+
+/**
+ * Where the turned face's far edge lies before the turn, px down the view. A 45° line meets the
+ * texel centres at one sub-pixel phase along its length, 1 ÷ √2 px apart across it, so this places
+ * one 2.190 px from the edge on the face's side, inside the band a larger-component push loses at a
+ * stroke scale of 1 (2.121 to 2.25 px, the casing's coverage 0.06 there), and so one 3.604 px from
+ * it, inside the band at 2 (3.536 to 4.0 px, coverage 0.40).
+ */
+const DIAGONAL_EDGE_Y_PX = 24.153;
+
+/**
+ * R07.T16.a's receding face turned by `angleRad`: its far edge, the hull's, at 1 m, `edgeYPx` down
+ * the view before the turn, and its near edge 40 px down at 0.5 m, so that its depth's gradient
+ * runs at `angleRad` to the screen's vertical; as two triangles, with the hull's edge on its far
+ * side, 0.2 m each way.
+ */
+function recedingFaceAt(
+  angleRad: number,
+  edgeYPx: number,
+): {
+  readonly triangles: Float32Array;
+  /** Its far edge's two corners, then its near edge's, turned. */
+  readonly corners: readonly [Vec3, Vec3, Vec3, Vec3];
+  readonly edge: readonly [Vec3, Vec3];
+} {
+  const { nearYPx, farM, nearM } = CASED_EDGE;
+  const heightOverDistance = (yPx: number): number => 1 - (2 * yPx) / SIDE_PX;
+  const farYM = heightOverDistance(edgeYPx) * farM;
+  const nearYM = heightOverDistance(nearYPx) * nearM;
+  const corners = [
+    turned(vec3(-0.25 * farM, farYM, -farM), angleRad),
+    turned(vec3(0.25 * farM, farYM, -farM), angleRad),
+    turned(vec3(0.25 * nearM, nearYM, -nearM), angleRad),
+    turned(vec3(-0.25 * nearM, nearYM, -nearM), angleRad),
+  ] as const;
+  const [a, b, c, d] = corners;
+  const triangles = new Float32Array([a, b, c, a, c, d].flatMap((p) => [p.x, p.y, p.z]));
+  const edge = [
+    turned(vec3(-0.2 * farM, farYM, -farM), angleRad),
+    turned(vec3(0.2 * farM, farYM, -farM), angleRad),
+  ] as const;
+  return { triangles, corners, edge };
+}
+
+/** The axis camera's projection, for the square view. */
+const SQUARE_PROJECTION = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 2 } as const;
+
+/** The square view's size. */
+const SQUARE = { widthPx: SIDE_PX, heightPx: SIDE_PX } as const;
+
+/** A point's place on the square view, px from its top left. */
+function onSquare(p: Vec3): { readonly x: number; readonly y: number } {
+  const at = project(p, SQUARE_PROJECTION, SQUARE);
+  return { x: at.xPx, y: at.yPx };
+}
+
+/**
+ * The reversed-Z depth, `f64`, where the axis camera's ray through the square view's point
+ * (`xPx`, `yPx`) meets the plane through `corners`: n ÷ the distance along −z.
+ */
+function planeDepth(corners: ReadonlyArray<Vec3>, xPx: number, yPx: number): number {
+  const [a, b, c] = corners;
+  if (a === undefined || b === undefined || c === undefined) {
+    throw new Error("a plane needs three corners");
+  }
+  const normal = cross(sub(b, a), sub(c, a));
+  // The 90° field: one unit across the view's half-width at unit distance.
+  const ray = vec3((2 * xPx) / SIDE_PX - 1, 1 - (2 * yPx) / SIDE_PX, -1);
+  const t = dot(normal, a) / dot(normal, ray);
+  return NEAR_PLANE_M / t;
+}
+
+/**
+ * R07.T16.d: a hull face's depth, which `occluder.wgsl` writes in its fragment, is its rasterised
+ * depth times 1 − 2⁻¹⁶ less `occluderSlopePx` px of its screen slope's magnitude, computed here in
+ * `f64` at a texel of a face whose slope runs at 45° to the axes; within a tenth of its difference
+ * from the push by the slope's larger component, which a hardware bias may take.
+ */
+async function checkHullSlope(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  checks: Checks,
+  strokeScale: number,
+): Promise<void> {
+  const list = nothingAt(strokeScale);
+  const turnedFace = recedingFaceAt(DIAGONAL_RAD, DIAGONAL_EDGE_Y_PX);
+  const drawn = await drawSquare(engine, renderer, `R07 hull slope ${String(strokeScale)}`, {
+    ...list,
+    occluderMeshes: [
+      {
+        id: "diagonal face",
+        originF32: new Float32Array(3),
+        triangles: turnedFace.triangles,
+        twoSided: true,
+      },
+    ],
+  });
+  // The texel at the face's middle, well inside it.
+  const middle = onSquare(
+    scale(
+      turnedFace.corners.reduce(
+        (sum, p) => vec3(sum.x + p.x, sum.y + p.y, sum.z + p.z),
+        vec3(0, 0, 0),
+      ),
+      0.25,
+    ),
+  );
+  const column = Math.floor(middle.x);
+  const row = Math.floor(middle.y);
+  const at = (dx: number, dy: number): number =>
+    planeDepth(turnedFace.corners, column + 0.5 + dx, row + 0.5 + dy);
+  // Depth is affine in the screen across a plane, so a central difference is its exact slope.
+  const slopeX = (at(1, 0) - at(-1, 0)) / 2;
+  const slopeY = (at(0, 1) - at(0, -1)) / 2;
+  const kept = at(0, 0) * (1 - HULL_OCCLUDER_DEPTH_FRACTION);
+  const want = kept - list.occluderSlopePx * Math.hypot(slopeX, slopeY);
+  const old = kept - list.occluderSlopePx * Math.max(Math.abs(slopeX), Math.abs(slopeY));
+  const seen = drawn.depth[row * SIDE_PX + column] ?? Number.NaN;
+  checks.check(
+    `R07.T16.d a hull face's depth is pushed by ${String(list.occluderSlopePx)} px of its slope's magnitude where the slope is diagonal (stroke scale ${String(strokeScale)})`,
+    Math.abs(seen - want) < 0.1 * Math.abs(old - want),
+    `texel (${String(column)}, ${String(row)}): depth ${seen.toPrecision(7)}, by the magnitude ${want.toPrecision(7)}, by the larger component ${old.toPrecision(7)}`,
+  );
+}
+
+/**
+ * R07.T16.d: T16.a's cased hull edge on its own receding face, turned 45° so that the face's depth
+ * gradient runs diagonally on the screen, at a stroke scale: it draws every texel of the square that
+ * it draws with no face, the texels that a push by the slope's larger component would lose
+ * included, those whose centres lie between `occluderSlopePx` ÷ √2 and the casing's reach,
+ * w ÷ 2 + 0.5, from the edge on the face's side (0 to 0.13 of the casing at a scale of 1, 0 to
+ * 0.46 at 2). The casing is in `--accent` here, not `--surface-0`, so that those texels read.
+ */
+async function checkDiagonalCasedHullEdge(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  tokens: ColourTokens,
+  checks: Checks,
+  strokeScale: number,
+): Promise<void> {
+  const list = nothingAt(strokeScale);
+  const turnedFace = recedingFaceAt(DIAGONAL_RAD, DIAGONAL_EDGE_Y_PX);
+  const [a, b] = turnedFace.edge;
+  const edge = {
+    ...batch(
+      "diagonal cased hull edge",
+      [a.x, a.y, a.z, b.x, b.y, b.z],
+      tokens.text,
+      STROKE_PX.heavy * strokeScale,
+    ),
+    casingColour: tokens.accent,
+  };
+  const mesh: OccluderMesh = {
+    id: "diagonal receding face",
+    originF32: new Float32Array(3),
+    triangles: turnedFace.triangles,
+    twoSided: true,
+  };
+  const name = `R07 diagonal cased hull edge ${String(strokeScale)}`;
+  const onFace = await drawSquare(
+    engine,
+    renderer,
+    name,
+    overlayDrawList({ ...list, occluderMeshes: [mesh], lines: [edge] }),
+  );
+  const bare = await drawSquare(
+    engine,
+    renderer,
+    `${name} bare`,
+    overlayDrawList({ ...list, lines: [edge] }),
+  );
+  // Every texel of the square, a short readback included, as the axis check reads its column.
+  const differs: string[] = [];
+  for (let row = 0; row < SIDE_PX; row += 1) {
+    for (let column = 0; column < SIDE_PX; column += 1) {
+      const seen = texel(onFace.colour, SIDE_PX, column, row);
+      const want = texel(bare.colour, SIDE_PX, column, row);
+      if ([0, 1, 2].some((c) => !(Math.abs((seen[c] ?? Number.NaN) - (want[c] ?? 0)) <= 2e-3))) {
+        differs.push(`(${String(column)}, ${String(row)})`);
+      }
+    }
+  }
+  // The texels at risk: on the face's side of the edge, within its middle, between the larger
+  // component's push and the casing's reach, each with the casing's coverage there.
+  const from = onSquare(a);
+  const to = onSquare(b);
+  const lengthPx = Math.hypot(to.x - from.x, to.y - from.y);
+  const along = { x: (to.x - from.x) / lengthPx, y: (to.y - from.y) / lengthPx };
+  const [, , nearRight, nearLeft] = turnedFace.corners;
+  const nearEdge = onSquare(
+    scale(vec3(nearRight.x + nearLeft.x, nearRight.y + nearLeft.y, nearRight.z + nearLeft.z), 0.5),
+  );
+  const side = Math.sign(-along.y * (nearEdge.x - from.x) + along.x * (nearEdge.y - from.y));
+  const normal = { x: -along.y * side, y: along.x * side };
+  const reachPx = ((STROKE_PX.heavy + 2 * CASING_PX) * strokeScale) / 2 + 0.5;
+  const fromPx = list.occluderSlopePx / Math.SQRT2;
+  const accent = linearColour(tokens.accent)[1] ?? Number.NaN;
+  const atRisk: string[] = [];
+  const unread: string[] = [];
+  for (let row = 0; row < SIDE_PX; row += 1) {
+    for (let column = 0; column < SIDE_PX; column += 1) {
+      const dx = column + 0.5 - from.x;
+      const dy = row + 0.5 - from.y;
+      const t = dx * along.x + dy * along.y;
+      const d = dx * normal.x + dy * normal.y;
+      if (t > 0.2 * lengthPx && t < 0.8 * lengthPx && d > fromPx && d < reachPx) {
+        const coverage = reachPx - d;
+        atRisk.push(`(${String(column)}, ${String(row)}) ${coverage.toFixed(3)}`);
+        // A texel with a casing worth reading must read it with no face.
+        const green = texel(bare.colour, SIDE_PX, column, row)[1];
+        if (coverage >= 0.03 && !(green >= 0.5 * coverage * accent)) {
+          unread.push(`(${String(column)}, ${String(row)}) ${show([green])}`);
+        }
+      }
+    }
+  }
+  checks.check(
+    `R07.T16.d a cased hull edge on its own face, its slope at 45° to the axes, draws every texel it draws with no face (stroke scale ${String(strokeScale)}, slope term ${String(list.occluderSlopePx)} px)`,
+    differs.length === 0 && atRisk.length >= 3 && unread.length === 0,
+    `texels that differ ${differs.length === 0 ? "none" : differs.slice(0, 12).join(", ")}; texels a larger-component push would lose ${String(atRisk.length)} (${atRisk.slice(0, 6).join(", ")}); unread with no face ${unread.length === 0 ? "none" : unread.join(", ")}`,
   );
 }
 

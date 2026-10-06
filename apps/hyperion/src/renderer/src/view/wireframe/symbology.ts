@@ -1,7 +1,7 @@
 import { norm, normalise, scale, type Vec3 } from "../../geometry/vec3";
 import type { ColourToken } from "../../spatial/drawList";
 import { CONTACT_SIZE_CLASS } from "../../lib/system/bodySymbols";
-import { SIZE_CLASS_REM, symbolOutline } from "../../spatial/symbols";
+import { type OutlinePoint, SIZE_CLASS_REM, symbolOutline } from "../../spatial/symbols";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
 import type { BodyMarkSymbol } from "../scene/model";
@@ -27,7 +27,10 @@ export interface ScreenMark {
   readonly target: CameraTarget | null;
   /** The token its strokes are drawn in (plan 05's `readTokens` names). */
   readonly token: ColourToken;
-  /** Its strokes, each drawn at the symbols' `SYMBOL_STROKE_PX`. */
+  /**
+   * Its strokes, each drawn at the view's mark outline width (`ViewStrokes.markStrokePx`), their
+   * places already moved out by its shift.
+   */
   readonly segments: ReadonlyArray<ScreenSegment>;
   /** The point it marks. */
   readonly anchor: ScreenPx;
@@ -92,41 +95,75 @@ function cardinalTicks(at: ScreenPx, innerPx: number, lengthPx: number): ScreenS
 }
 
 /**
+ * How far a reticle moves out for a mark's outline shift δ (`markShiftDevicePx`): 4δ, a ringed
+ * circle's growth, its ring moved out by 3δ and widened by δ (decision-thin-line-contrast, item 2).
+ */
+const RETICLE_SHIFTS = 4;
+
+/** How far a ringed circle's ring moves out for an outline shift δ: 3δ, its disc moving δ. */
+const RING_SHIFTS = 3;
+
+/**
+ * How far a reticle's outer edge moves out for an outline shift δ, device px: the 4δ it moves and
+ * the δ its half-width gains (`markStrokeDevicePx` ÷ 2 against a 1.5 CSS px outline's), so that
+ * what stands beside it, such as a mark's label, can stand as far off it as it did.
+ */
+export function reticleGrowthPx(shiftPx: number): number {
+  return (RETICLE_SHIFTS + 1) * shiftPx;
+}
+
+/**
  * The bracket reticle about the selection, in `--accent`, as the spatial view's: its half-size the
- * marked symbol's radius and a margin.
+ * marked symbol's radius and a margin, moved out by four times the outlines' shift.
  *
  * @param markRadiusPx - The radius of the mark it encloses, px.
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
  */
 export function bracketReticle(
   target: CameraTarget,
   at: ScreenPx,
   markRadiusPx: number,
   remPx: number,
+  shiftPx: number,
 ): ScreenMark {
   return {
     kind: "selection",
     target,
     token: "accent",
-    segments: corners(at, markRadiusPx + BRACKET_MARGIN_REM * remPx),
+    segments: corners(at, markRadiusPx + BRACKET_MARGIN_REM * remPx + RETICLE_SHIFTS * shiftPx),
     anchor: at,
   };
 }
 
 /**
  * The destination reticle, in `--target`, a margin outside the selection's brackets, so that both
- * show where the destination is also the selection.
+ * show where the destination is also the selection; moved out as the brackets are.
+ *
+ * @remarks
+ * The margin is at least `minGapPx`, a reticle's outline and one casing (R07.T16.d): the
+ * destination is drawn after the selection, so that its casing would otherwise cover the
+ * brackets' full-coverage core below a ratio of 4/3, where 0.25 rem is under 4 device px.
+ *
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
+ * @param minGapPx - The least space between the two reticles' centrelines, device px.
  */
 export function destinationReticle(
   target: CameraTarget,
   at: ScreenPx,
   markRadiusPx: number,
   remPx: number,
+  shiftPx: number,
+  minGapPx: number,
 ): ScreenMark {
+  const marginPx = BRACKET_MARGIN_REM * remPx;
   return {
     kind: "destination",
     target,
     token: "target",
-    segments: corners(at, markRadiusPx + 2 * BRACKET_MARGIN_REM * remPx),
+    segments: corners(
+      at,
+      markRadiusPx + marginPx + Math.max(marginPx, minGapPx) + RETICLE_SHIFTS * shiftPx,
+    ),
     anchor: at,
   };
 }
@@ -164,10 +201,12 @@ export function closureRateMPerS(
  * A target's mark in `--text`: four open cardinal ticks outside the mark's radius, each as long as
  * a bracket's arm, so that corner brackets mean the selection alone (state is never shown by colour
  * alone; decided 2026-09-30 under the owner's delegation); with its range and closure rate (plan
- * R02, R02.T12.c).
+ * R02, R02.T12.c). It is the craft's contact mark, so its ticks move out by the outlines' shift, as
+ * a symbol's line does, and the open centre stays as built.
  *
  * @param relativeM - The target from the range's origin (the own ship, or the camera), m.
  * @param relativeVelocityMPerS - The target's velocity relative to the own ship, m/s, or `null`.
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
  */
 export function targetMark(
   target: CameraTarget,
@@ -175,6 +214,7 @@ export function targetMark(
   markRadiusPx: number,
   relativeM: Vec3,
   relativeVelocityMPerS: Vec3 | null,
+  shiftPx: number,
 ): TargetMark {
   const rangeM = norm(relativeM);
   const closureMPerS = closureRateMPerS(relativeM, relativeVelocityMPerS);
@@ -182,7 +222,7 @@ export function targetMark(
     kind: "target",
     target,
     token: "text",
-    segments: cardinalTicks(at, markRadiusPx, 2 * markRadiusPx * BRACKET_ARM_SHARE),
+    segments: cardinalTicks(at, markRadiusPx + shiftPx, 2 * markRadiusPx * BRACKET_ARM_SHARE),
     anchor: at,
     rangeM,
     closureMPerS,
@@ -200,10 +240,12 @@ function polygon(at: ScreenPx, radiusPx: number, sides: number): ScreenSegment[]
 
 /**
  * The own ship's flight path marker: a circle with wings and a fin where its velocity against the
- * frame's reference points on the view, in `--text` (plan R02, R02.T12.c).
+ * frame's reference points on the view, in `--text` (plan R02, R02.T12.c). Its circle moves out by
+ * the outlines' shift, as a symbol's line does, and its wings and fin start from it.
  *
  * @param velocityMPerS - The own ship's velocity, m/s along the camera frame's axes; only its
  * direction is used, so a slow ship's marker shows as surely as a fast one's.
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
  * @returns `null` with no own ship or no velocity, or where the velocity points behind the camera.
  */
 export function flightPathMarker(
@@ -211,6 +253,7 @@ export function flightPathMarker(
   camera: ProjectionCamera,
   viewport: Viewport,
   remPx: number,
+  shiftPx: number,
 ): ScreenMark | null {
   if (velocityMPerS === null || !(norm(velocityMPerS) > 0)) {
     return null;
@@ -221,7 +264,7 @@ export function flightPathMarker(
     return null;
   }
   const at = { xPx: projected.xPx, yPx: projected.yPx };
-  const radius = FLIGHT_PATH_MARKER_REM.radius * remPx;
+  const radius = FLIGHT_PATH_MARKER_REM.radius * remPx + shiftPx;
   const wing = FLIGHT_PATH_MARKER_REM.wing * remPx;
   const fin = FLIGHT_PATH_MARKER_REM.fin * remPx;
   const wings: ScreenSegment[] = [
@@ -253,10 +296,36 @@ export function symbolRadiusPx(symbol: BodyMarkSymbol, remPx: number): number {
 }
 
 /**
+ * The distance from the centre of a closed unit outline to its nearest side: the unit polygon's
+ * inradius, `cos(π ÷ n)` for a regular n-gon.
+ */
+function unitInradius(points: ReadonlyArray<OutlinePoint>): number {
+  let nearest = Infinity;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (a !== undefined && b !== undefined) {
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      if (length > 0) {
+        nearest = Math.min(nearest, Math.abs(a.x * b.y - a.y * b.x) / length);
+      }
+    }
+  }
+  return nearest;
+}
+
+/**
  * A body's mark from the ship-wide set where it is under 3 px across (Design note 13), in `--text`,
  * or `null` where it is drawn as a sphere.
  *
+ * @remarks
+ * Its outline moves out by the outlines' shift δ, so that its inner edge stays where a 1.5 CSS px
+ * outline's would be (decision-thin-line-contrast, item 2): a circle's radius by δ, a polygon's
+ * sides each by δ, and a ringed circle's disc by δ and its ring by 3δ, so that the disc's hole and
+ * the gap round it both stay.
+ *
  * @param remPx - The interface's rem, px, which the symbol sizes follow.
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
  */
 export function bodySymbolMark(
   target: CameraTarget,
@@ -264,6 +333,7 @@ export function bodySymbolMark(
   at: ScreenPx,
   diameterPx: number,
   remPx: number,
+  shiftPx: number,
 ): ScreenMark | null {
   if (bodyRegime(diameterPx) !== "symbol") {
     return null;
@@ -273,16 +343,21 @@ export function bodySymbolMark(
   let segments: ScreenSegment[];
   switch (outline.kind) {
     case "circle":
-      segments = polygon(at, radiusPx, 24);
+      segments = polygon(at, radiusPx + shiftPx, 24);
       break;
     case "ringed-circle":
       // The ring at the unit radius and the disc inside it, both outlined.
-      segments = [...polygon(at, radiusPx, 24), ...polygon(at, radiusPx * outline.discRadius, 16)];
+      segments = [
+        ...polygon(at, radiusPx + RING_SHIFTS * shiftPx, 24),
+        ...polygon(at, radiusPx * outline.discRadius + shiftPx, 16),
+      ];
       break;
     case "polygon": {
+      // Each side moved out by the shift: its corners by the shift over the unit inradius.
+      const cornerPx = radiusPx + shiftPx / unitInradius(outline.points);
       const points = outline.points.map((p) => ({
-        xPx: at.xPx + p.x * radiusPx,
-        yPx: at.yPx + p.y * radiusPx,
+        xPx: at.xPx + p.x * cornerPx,
+        yPx: at.yPx + p.y * cornerPx,
       }));
       segments = points.slice(1).map((p, i): ScreenSegment => [points[i] ?? p, p]);
       break;
@@ -326,6 +401,13 @@ export interface SymbologyInput {
   readonly ownVelocityMPerS: Vec3 | null;
   /** The interface's rem, px. */
   readonly remPx: number;
+  /** The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`). */
+  readonly markShiftPx: number;
+  /**
+   * The least space between the selection's reticle and the destination's, device px: a reticle's
+   * outline and one casing ({@link destinationReticle}).
+   */
+  readonly minReticleGapPx: number;
 }
 
 function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
@@ -362,6 +444,7 @@ export function symbologyMarks(
           markRadiusPx,
           anchor.craft.relativeM,
           anchor.craft.relativeVelocityMPerS,
+          input.markShiftPx,
         ),
       );
     }
@@ -372,19 +455,37 @@ export function symbologyMarks(
         anchor.at,
         anchor.body.diameterPx,
         input.remPx,
+        input.markShiftPx,
       );
       if (symbol !== null) {
         marks.push(symbol);
       }
     }
     if (sameTarget(input.selection, anchor.target)) {
-      marks.push(bracketReticle(anchor.target, anchor.at, markRadiusPx, input.remPx));
+      marks.push(
+        bracketReticle(anchor.target, anchor.at, markRadiusPx, input.remPx, input.markShiftPx),
+      );
     }
     if (sameTarget(input.destination, anchor.target)) {
-      marks.push(destinationReticle(anchor.target, anchor.at, markRadiusPx, input.remPx));
+      marks.push(
+        destinationReticle(
+          anchor.target,
+          anchor.at,
+          markRadiusPx,
+          input.remPx,
+          input.markShiftPx,
+          input.minReticleGapPx,
+        ),
+      );
     }
   }
-  const marker = flightPathMarker(input.ownVelocityMPerS, camera, viewport, input.remPx);
+  const marker = flightPathMarker(
+    input.ownVelocityMPerS,
+    camera,
+    viewport,
+    input.remPx,
+    input.markShiftPx,
+  );
   if (marker !== null) {
     marks.push(marker);
   }

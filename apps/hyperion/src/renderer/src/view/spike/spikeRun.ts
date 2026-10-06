@@ -43,7 +43,7 @@ import { type PlanetGeometry, planetGeometry } from "../terrain/planet";
 import type { PatchRequest, Selection, SelectionInput } from "../terrain/select";
 import { TerrainPass, type TerrainPool, type TerrainPoolFactory } from "../terrain/terrainPass";
 import type { BakedPatch, TestPlanetRidges } from "../terrain/workers/messages";
-import { buildWireframeDrawList } from "../wireframe/drawList";
+import { buildWireframeDrawList, type ViewStrokes } from "../wireframe/drawList";
 import { WireframeRenderer } from "../wireframe/submit";
 import { stretchKeys } from "./demandRecord";
 import {
@@ -266,6 +266,8 @@ export interface SpikeFrameInput {
   readonly tokens: ColourTokens;
   /** One rem in device pixels. */
   readonly remPx: number;
+  /** How the instruments draw their strokes: `viewStrokesAt` the display's ratio (R07.T16.d). */
+  readonly strokes: ViewStrokes;
   /** The target selected in the list, which the instruments mark with the bracket reticle. */
   readonly selection: CameraTarget | null;
 }
@@ -521,6 +523,7 @@ export class SpikeRun {
             : input.selection,
         destination: null,
         remPx: input.remPx,
+        ...input.strokes,
       });
       this.#instruments[key].render(this.#views[key], list, drawCamera, size);
     }

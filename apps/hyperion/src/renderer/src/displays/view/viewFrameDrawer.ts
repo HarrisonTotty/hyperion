@@ -41,6 +41,7 @@ import {
   buildWireframeDrawList,
   type DrawAnchor,
   type SpriteStar,
+  viewStrokesAt,
 } from "../../view/wireframe/drawList";
 import { WireframeRenderer } from "../../view/wireframe/submit";
 import { photorealFrame } from "./photorealFrame";
@@ -196,6 +197,8 @@ export class ViewFrameDrawer {
         selection: inputs.selection,
         destination: null,
         remPx: size.remPx * ratio,
+        // The guide's CSS-pixel widths at the display's ratio, never under 2 device pixels.
+        ...viewStrokesAt(ratio),
         skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
       },
     );

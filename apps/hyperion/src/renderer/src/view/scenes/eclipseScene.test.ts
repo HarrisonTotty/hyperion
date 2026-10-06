@@ -25,7 +25,7 @@ import { PSF_QUAD_PX } from "../photometry/magnitude";
 import type { PhotorealFrame } from "../photoreal/renderer";
 import { METER_CLASS } from "../post/meter";
 import { HostDiscLayer, type HostDiscRecord, hostPlacements } from "../sky/disc";
-import type { WireframeDrawList } from "../wireframe/drawList";
+import { emptyDrawList, viewStrokesAt } from "../wireframe/drawList";
 import {
   ECLIPSE_CAMERA_OFFSET_M,
   ECLIPSE_CAMERA_POSE,
@@ -59,13 +59,7 @@ const DISC = (() => {
 const EXPOSURE = 1e-4;
 
 /** No wireframe draw list: the frames' stars are not under test. */
-const NO_LIST: WireframeDrawList = {
-  occluderSpheres: [],
-  occluderMeshes: [],
-  lines: [],
-  sprites: [],
-  anchors: [],
-};
+const NO_LIST = emptyDrawList(viewStrokesAt(1));
 
 /** One frame of the scene from a camera, as the view's photorealistic frame assembles it. */
 interface Drawn {

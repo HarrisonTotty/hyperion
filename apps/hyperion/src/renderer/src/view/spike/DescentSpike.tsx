@@ -27,6 +27,7 @@ import { cameraSceneOf } from "../scene/model";
 import type { PatchKey } from "../terrain/patchKey";
 import type { Selection, SelectionInput } from "../terrain/select";
 import type { TestPlanetRidges } from "../terrain/workers/messages";
+import { viewStrokesAt } from "../wireframe/drawList";
 import { spikeExposure } from "./litView";
 import {
   DEFAULT_SPIKE_WORKERS,
@@ -443,6 +444,7 @@ export function DescentSpike({
             sizes: { main: sizes.main, orbit: sizes.orbit, craft: sizes.craft },
             tokens: inputs.tokens,
             remPx: inputs.main.remPx * inputs.main.devicePixelRatio,
+            strokes: viewStrokesAt(inputs.main.devicePixelRatio),
             selection: inputs.selection,
           });
         } catch (error: unknown) {
