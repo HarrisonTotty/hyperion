@@ -1124,7 +1124,10 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   - **The integral.** It uses the disc's own law arithmetic in `f64`, summed over lit, visible
     surface elements in body-fixed axes: each element's shares, as T10.d reconstructs them, times
     each law's I/F, μ and the element's area, on the spheroid where the figure is one. Each light
-    takes its eclipse term from the centre, as now. Texels are sub-sampled as the bound needs.
+    takes its eclipse term from the centre, as now. _R07.T10.b: the point now takes each light's
+    `discEclipseVisible`, the eclipse averaged over its disc, not the centre's term, so that it
+    meets the disc at 3 px through an eclipse (R07's "Deviations in T10.b, as built")._ Texels are
+    sub-sampled as the bound needs.
   - **Caching.** The result may be cached on the sun's and the camera's body-fixed directions
     while it stays within 0.3% of a fresh integral.
   - **Files.** R07's `bodies/draw.ts` and `bodies/discSurface.ts`.

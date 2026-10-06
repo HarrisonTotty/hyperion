@@ -118,11 +118,19 @@ function marchAtLevel(c: number, alpha: number, k: number, level: number): Float
  * result matches a Nelder–Mead minimax to 0.001%. Computed per star and channel on the CPU, in
  * `f64`.
  *
+ * A uniform disc (c = 0) has every partition exact, where the bisection would push every edge to
+ * the limb and leave annuli of no area (whose eclipsed share is 0 ÷ 0, in the shader too): it takes
+ * K annuli of equal area and flux instead.
+ *
  * @param c - The power-2 law's c, 0 to 1.
  * @param alpha - The power-2 law's α, positive.
  * @param k - The number of annuli, at least 1.
  */
 export function annulusEdges(c: number, alpha: number, k: number): AnnulusSet {
+  if (c === 0) {
+    const edges = new Float64Array(k + 1).map((_, j) => Math.sqrt(j / k));
+    return { edges, flux: new Float64Array(k).fill(1 / k), dip: 0 };
+  }
   let low = 0;
   let high = 0.5;
   for (let step = 0; step < EQUAL_DIP_STEPS; step += 1) {
@@ -192,14 +200,60 @@ export function annulusVisibleFraction(
   return Math.max(0, 1 - hidden);
 }
 
+/** One occluder's disc against a star's as a point sees them, in the star's angular radii. */
+export interface Occultation {
+  /** The occluder's angular radius over the star's. */
+  readonly ratio: number;
+  /** The angle between their centres over the star's angular radius. */
+  readonly separation: number;
+}
+
+/**
+ * How one occluder stands against a star from a point: `"inside"` where the point is within the
+ * occluder, which hides the whole star; `null` where it hides none of the star, lying beyond it or
+ * clear of its disc; else its {@link Occultation}.
+ *
+ * @param star - The star's centre and radius, m, in the frame of the point and the occluder.
+ * @param fromM - The point, m.
+ */
+export function occultationFrom(
+  star: { readonly centreM: Vec3; readonly radiusM: number },
+  fromM: Vec3,
+  occluder: Occluder,
+): Occultation | "inside" | null {
+  const toStar = sub(star.centreM, fromM);
+  const starDistanceM = norm(toStar);
+  const starRadiusRad = Math.asin(Math.min(star.radiusM / starDistanceM, 1));
+  const toOccluder = sub(occluder.centreM, fromM);
+  const distanceM = norm(toOccluder);
+  if (distanceM <= occluder.radiusM) {
+    return "inside";
+  }
+  if (distanceM >= starDistanceM) {
+    return null;
+  }
+  const occluderRadiusRad = Math.asin(occluder.radiusM / distanceM);
+  // atan2 of the cross and dot products keeps small separations exact, where acos loses √ε.
+  const occluderDirection = normalise(toOccluder);
+  const starDirection = normalise(toStar);
+  const separationRad = Math.atan2(
+    norm(cross(occluderDirection, starDirection)),
+    dot(occluderDirection, starDirection),
+  );
+  if (separationRad >= occluderRadiusRad + starRadiusRad) {
+    return null;
+  }
+  return { ratio: occluderRadiusRad / starRadiusRad, separation: separationRad / starRadiusRad };
+}
+
 /**
  * The fraction of one channel's flux from `disc` visible from `fromM` past `occluders`.
  *
  * @remarks
  * Each occluder nearer than the star and within the sum of the two angular radii of its direction
- * hides the overlap of its disc with the star's; occluders are taken not to overlap one another,
- * which holds for the shadow cones `occludersFor` (`occluders.ts`) keeps, and their hidden fractions add. A
- * point inside an occluder sees nothing of the star.
+ * hides the overlap of its disc with the star's ({@link occultationFrom}); occluders are taken not
+ * to overlap one another, which holds for the shadow cones `occludersFor` (`occluders.ts`) keeps,
+ * and their hidden fractions add. A point inside an occluder sees nothing of the star.
  *
  * @param fromM - The lit point, m, in the frame of the disc and the occluders.
  * @param k - The number of annuli, {@link DISC_ANNULI_HIGH} or {@link DISC_ANNULI_LOW}.
@@ -210,38 +264,16 @@ export function eclipseVisible(
   occluders: ReadonlyArray<Occluder>,
   k: number,
 ): number {
-  const toStar = sub(disc.centreM, fromM);
-  const starDistanceM = norm(toStar);
-  const starRadiusRad = Math.asin(Math.min(disc.radiusM / starDistanceM, 1));
-  const starDirection = normalise(toStar);
   const annuli = annulusEdges(disc.limbC, disc.limbAlpha, k);
   let visible = 1;
   for (const occluder of occluders) {
-    const toOccluder = sub(occluder.centreM, fromM);
-    const distanceM = norm(toOccluder);
-    if (distanceM <= occluder.radiusM) {
+    const occultation = occultationFrom(disc, fromM, occluder);
+    if (occultation === "inside") {
       return 0;
     }
-    if (distanceM >= starDistanceM) {
-      continue;
+    if (occultation !== null) {
+      visible -= 1 - annulusVisibleFraction(annuli, occultation.ratio, occultation.separation);
     }
-    const occluderRadiusRad = Math.asin(occluder.radiusM / distanceM);
-    // atan2 of the cross and dot products keeps small separations exact, where acos loses √ε.
-    const occluderDirection = normalise(toOccluder);
-    const separationRad = Math.atan2(
-      norm(cross(occluderDirection, starDirection)),
-      dot(occluderDirection, starDirection),
-    );
-    if (separationRad >= occluderRadiusRad + starRadiusRad) {
-      continue;
-    }
-    visible -=
-      1 -
-      annulusVisibleFraction(
-        annuli,
-        occluderRadiusRad / starRadiusRad,
-        separationRad / starRadiusRad,
-      );
   }
   return Math.max(0, visible);
 }
