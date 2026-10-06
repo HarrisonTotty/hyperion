@@ -65,8 +65,14 @@ function partRuns(part: string): ReactNode {
  * middle dots first (decision-r07-t19, item 2a) and then at a space between its unbreakable runs
  * (decision-r07-t19-layout, item 2): `EV100 -1.0 MAN` stays whole where it fits and breaks before
  * its level only where it cannot; a part longer than the block still wraps between its words.
+ *
+ * @remarks
+ * The exposure panel's and the meter's readings are set through it too, so that the same reading
+ * breaks by the same rules wherever it stands: `EV100 11.7 INHIBITED ·` | `NO IMAGE TO METER`,
+ * never inside a status phrase (decision-r07-t19b-exposure-fit, item 1(c)). Its text is the
+ * reading's, unchanged.
  */
-function readingParts(value: string): ReactNode {
+export function readingParts(value: string): ReactNode {
   const seen = new Map<string, number>();
   const nodes: ReactNode[] = [];
   for (const part of value.split(PART_SEPARATOR)) {

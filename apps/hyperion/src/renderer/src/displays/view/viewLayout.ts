@@ -8,9 +8,10 @@ import type { ReactNode } from "react";
 import type { ElementSize } from "../../lib/useElementSize";
 
 /**
- * `full`, the stage beside two side columns (`Instruments`, `Targets`, `Camera` and `Style`; then
- * `Exposure` and `Exposure meter`); or `compact`, one column whose `Camera`, `Style`, `Exposure`
- * and `Exposure meter` panels fold behind a row of disclosure buttons, one open at a time.
+ * `full`, the stage beside two side columns (`Instruments`, `Targets` and `Camera`; then the
+ * `CONTROLS` view's `Style`, `Exposure` and `Exposure meter`, decision-r07-t19b-exposure-fit item
+ * 2); or `compact`, one column whose `Camera`, `Style`, `Exposure` and `Exposure meter` panels fold
+ * behind a row of disclosure buttons, one open at a time.
  */
 export type ViewLayout = "full" | "compact";
 
@@ -22,14 +23,29 @@ export type ViewLayout = "full" | "compact";
 export const FULL_MIN_WIDTH_REM = 98.5;
 
 /**
- * The least height of the `.view` box for the full layout, rem: the first column's tallest state
- * with its list at two rows, as measured at 1920 × 1080 (R07.T19.b's hidden captures, 16 px to the
- * rem): `Instruments` 204 px with both closed, `Targets` 174 px at two rows under its two-line
- * `RANGE FROM CAMERA` head, `Camera` 339 px with `NO OWN SHIP`, both limit reasons and reduced
- * motion, `Style` 141 px with a two-line refusal (99 px without), and three 0.5 rem gaps: 882 px.
- * The ruling estimated about 52 rem (decision-r07-t19-layout, item 1a).
+ * The least height of the `.view` box for the full layout, rem: the taller column's tallest state
+ * with the list at two rows, rounded up to the next 0.25 rem, as measured at 1920 × 1080 (T19.b's
+ * follow-up's hidden captures, 16 px to the rem, the side column's line box 1.25).
+ *
+ * @remarks
+ * The first column's tallest, 729 px: `Instruments` 202.5 px with both closed, `Targets` 173 px at
+ * two rows under its two-line `RANGE FROM CAMERA` head, `Camera` 337.5 px with `NO OWN SHIP`, both
+ * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 728.5 px: `Style` 99.5 px
+ * with a two-line refusal added at 17.5 px a line and its 0.5 rem margin, 43 px (`QUALITY LOW`'s on
+ * an instrument, or the software adapter's, which this machine cannot raise), the exposure
+ * `INHIBITED · OPERATOR` with a refused entry, 362 px, the meter with `METERED`, 208 px, and two
+ * gaps. 729 px is 45.56 rem. It must never pass 52.5 rem, so that a maximised 1920 × 1080 window
+ * (a box of about 53.5 rem) is full (decision-r07-t19b-exposure-fit, item 2): a task that adds to
+ * a side panel re-measures, and asks for a ruling rather than pass it.
  */
-export const FULL_MIN_HEIGHT_REM = 55.25;
+export const FULL_MIN_HEIGHT_REM = 45.75;
+
+/**
+ * The bound on {@link FULL_MIN_HEIGHT_REM}, rem: a maximised 1920 × 1080 window's box, about
+ * 53.5 rem under a title bar and a desktop panel, less 1 rem (decision-r07-t19b-exposure-fit,
+ * item 2).
+ */
+export const FULL_MIN_HEIGHT_BOUND_REM = 52.5;
 
 /**
  * The layout of a `.view` box of `size`: `full` where it is at least {@link FULL_MIN_WIDTH_REM}
@@ -76,15 +92,13 @@ export const FOLD_BUTTONS: ReadonlyArray<{ readonly panel: FoldPanel; readonly l
 ];
 
 /**
- * How the side column's camera and style panels stand: their IDs, by which the disclosure buttons
- * control them, whether each is folded, and what stands between the list and them, the compact
- * layout's row of disclosure buttons and its standing lines.
+ * How the first column's camera panel stands: its ID, by which its disclosure button controls it,
+ * whether it is folded, and what stands between the list and it, the compact layout's row of
+ * disclosure buttons and its standing lines.
  */
 export interface SideFolds {
   readonly cameraId: string;
   readonly cameraHidden: boolean;
-  readonly styleId: string;
-  readonly styleHidden: boolean;
   /** The row of disclosure buttons and its standing lines, or `null` in the full layout. */
   readonly row: ReactNode;
 }

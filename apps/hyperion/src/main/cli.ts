@@ -16,6 +16,10 @@
  * in the trace, off by default; a profiled run is a diagnostic, never judged). Each is refused
  * without the flag.
  *
+ * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
+ * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
+ * so is `--descent-spike`.
+ *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
  * not the same thing.
@@ -24,6 +28,7 @@
 import { Command, InvalidArgumentError, Option } from "commander";
 
 import { DEFAULT_SPIKE_SEED, isU64Decimal, type SpikeLaunch } from "../preload/spikeLaunch";
+import type { ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
 
 /** The variable giving the address of the server to link to, for `--address`. */
 export const ENV_SERVER_ADDR = "HYPERION_SERVER_ADDR";
@@ -46,6 +51,8 @@ export interface ClientArgs {
   readonly port: number;
   /** The descent spike's options when `--descent-spike` is given, else `undefined`. */
   readonly spike?: SpikeLaunch;
+  /** The several-views check's options when `--views-check` is given, else `undefined`. */
+  readonly viewsCheck?: ViewsCheckLaunch;
 }
 
 /** The spike's options other than the flag itself, by their commander attribute names. */
@@ -62,6 +69,9 @@ const SPIKE_OPTIONS = [
   "capture",
   "traceProfile",
 ] as const;
+
+/** The spike's options that `--views-check` takes too. */
+const VIEWS_CHECK_OPTIONS = ["setting", "smoke", "out"] as const;
 
 /** Reads a `--seed` value: a u64 in decimal. */
 export function parseSeed(value: string): string {
@@ -159,12 +169,20 @@ export function buildCommand(version: string): Command {
       new Option("--descent-spike", "run the descent spike (plan R05) in place of the consoles"),
     )
     .addOption(
-      new Option("--setting <SETTING>", "the spike's quality setting").choices(["high", "low"]),
+      new Option("--views-check", "run the several-views check (plan R07) in the consoles' VIEW"),
+    )
+    .addOption(
+      new Option("--setting <SETTING>", "the spike's or the check's quality setting").choices([
+        "high",
+        "low",
+      ]),
     )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
-    .addOption(new Option("--smoke", "a 10 s spike run that exits with a status"))
+    .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
-      new Option("--out <DIR>", "where the spike's results file goes").argParser(parseDirectory),
+      new Option("--out <DIR>", "where the spike's or the check's results file goes").argParser(
+        parseDirectory,
+      ),
     )
     .addOption(
       new Option("--workers <N>", "the spike's height-worker count").argParser(parseWorkers),
@@ -207,13 +225,26 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (typeof address !== "string" || typeof port !== "number") {
     throw new Error("the command line yielded no address and port");
   }
+  if (options["viewsCheck"] === true) {
+    // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
+    if (options["descentSpike"] === true) {
+      command.error("error: --views-check and --descent-spike are separate runs; give one");
+    }
+    const stray = SPIKE_OPTIONS.find(
+      (name) => options[name] !== undefined && !VIEWS_CHECK_OPTIONS.some((each) => each === name),
+    );
+    if (stray !== undefined) {
+      command.error(`error: --${kebab(stray)} is an option of --descent-spike, not --views-check`);
+    }
+    return { address, port, viewsCheck: viewsCheckLaunchOf(options) };
+  }
   if (options["descentSpike"] !== true) {
     const stray = SPIKE_OPTIONS.find((name) => options[name] !== undefined);
     if (stray !== undefined) {
-      // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
-      command.error(
-        `error: --${kebab(stray)} is an option of --descent-spike, which was not given`,
-      );
+      const owners = VIEWS_CHECK_OPTIONS.some((each) => each === stray)
+        ? "--descent-spike or --views-check, neither of which was"
+        : "--descent-spike, which was not";
+      command.error(`error: --${kebab(stray)} is an option of ${owners} given`);
     }
     return { address, port };
   }
@@ -228,6 +259,16 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
 /** A commander attribute name as its option: `vertexPath` is `vertex-path`. */
 function kebab(name: string): string {
   return name.replaceAll(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
+
+/** The several-views check's options, each parsed and checked by commander, with their defaults. */
+function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCheckLaunch {
+  const out = options["out"];
+  return {
+    setting: options["setting"] === "low" ? "low" : "high",
+    smoke: options["smoke"] === true,
+    out: typeof out === "string" ? out : null,
+  };
 }
 
 /** The spike's options, each parsed and checked by commander, with their defaults. */
