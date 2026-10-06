@@ -1447,7 +1447,9 @@ null)` applies a source's report. An operator's `INHIBIT` also takes over a syst
   faces as an open cockpit's is, so that the hull's occluder never encloses the seat camera; its
   1 m plate is a windscreen `TEST_PLATE_DISTANCE_M` = 1 m forward of the eye, facing it. In
   `view/scene/model.ts`: `ViewBody` also carries `kind` (`star`, `planet`, `moon`, for Design note
-  13's symbol), `designation` and `centreM` (system-frame metres); `ViewRing` carries its plane's
+  13's symbol), `designation` and `centreM` (system-frame metres; _R07.T10.a adds `retarded`, its
+  `RetardedCentre` for lighting, `staticRetarded(centreM)` in a kept scene, `null` for a
+  contact_); `ViewRing` carries its plane's
   `normal`, so that a ring does not hang on a rotation that may be `null`; `ViewOrbit` is
   `{ body, parent, orbit: KeplerOrbit }`; `ViewCraft` has `designation`, `pose: CraftPose
 { position, attitude }`, `predictedPath` and `velocityMPerS` (the own ship's flight path marker,

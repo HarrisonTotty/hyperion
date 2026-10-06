@@ -120,7 +120,8 @@ Names used below and defined elsewhere: `HostDiscDto` is R06's wire form of `sky
 channel order B, V, R for the display's b, g, r; R06.T10 fixes the field names);
 `SceneFrameBody` is one body's entry of R03's `SceneFrame`, built as `SceneBodyFrame`
 (`lib/scene/apparent.ts`), a union of `placed` (`geometricM`, `apparentM`, `emitted`, `lightTime`,
-`level`, `hillRadiusM: number | null`) and `contact` (`apparentM`, `emitted` and `level` only);
+`level`, `hillRadiusM: number | null`; _R07.T10.a adds `emittedM` and `emittedVelocityMPerS`_) and
+`contact` (`apparentM`, `emitted` and `level` only);
 `Viewport` is R02's (`view/camera/projection.ts`, `{ widthPx, heightPx }`), the field of view
 being `ProjectionCamera.fovXRad`, so a sketch below that takes `camera: CameraPose` and a viewport
 takes R02's `DrawCamera { pose, fovXRad }` with it; `ViewSpec` is one view's `ViewId`,
@@ -182,6 +183,30 @@ export function planetshineSources(
   lit: ReadonlyArray<LitNeighbour>,
   max: number,
 ): SecondarySource[]; // Design note 7; as built (T11)
+// lighting/retarded.ts, as built (T10.a; decision-r07-t8a, follow-up (a))
+export const RETARDATION_STEPS = 2;
+export function retardedFrom(lit: RetardedCentre, source: RetardedCentre): Vec3;
+export interface LightingFrame {
+  readonly lights: ReadonlyArray<PlacedLight>;
+  readonly occluders: ReadonlyArray<LightingBody>; // every other lit body, retarded
+}
+export function isLitBody(body: ViewBody): boolean;
+export function lightingFrameOf(
+  scene: ViewScene,
+  lit: BodyIdHex,
+  pose: CameraPose,
+  discs: ReadonlyArray<HostDiscDto>,
+): LightingFrame | null;
+export interface LitBodyLighting {
+  readonly body: ViewBody;
+  readonly centreM: Vec3; // drawn, from the camera
+  readonly frame: LightingFrame;
+}
+export function lightingFramesOf(
+  scene: ViewScene,
+  pose: CameraPose,
+  discs: ReadonlyArray<HostDiscDto>,
+): ReadonlyArray<LitBodyLighting>; // every lit body, in the scene's order
 ```
 
 `lighting/oracle.ts`: the `f64` oracles (dense annulus sums, brute-force sphere irradiance, the
@@ -545,7 +570,9 @@ time, previous)` with `previous` required; a body's entry is `SceneBodyFrame`, a
   entry has no `geometricM` or `hillRadiusM`; levels come per body through `SceneSystemDto.grants`
   (`BodyGrantDto { body, level, seen }`), not on each body; `main_screen` is room left by R03's
   Design note 4, not a field (Phase C adds it); the two-clients test is
-  `crates/hyperion-server/tests/scene_agree.rs`.
+  `crates/hyperion-server/tests/scene_agree.rs`. _R07.T10.a adds `emittedM` and
+  `emittedVelocityMPerS` to `placed` entries and to `SceneStarFrame`, the retarded centres lighting
+  takes._
 - **R05:** `selectPatches`, `PlanetGeometry`, `PatchCache` and the patch geometry with per-patch
   `f64` origins; `QualitySetting` (`"high" | "low"`), `ViewSettings` and `SETTINGS`, to which this
   plan adds its settings as fields with their high and low values; the streaming
@@ -684,7 +711,10 @@ and `--port`.
    checked against 2.54 µlx × 10^(−0.4 V) from the star's absolute V through R02's `apparentV`,
    with no extinction inside a system. The star is taken at the body's own emitted time; neglecting
    the star-to-body light time moves the light's direction by the star's reflex speed over c, some
-   10⁻⁸ rad for a Jupiter's pull on a Sun, which a test states. Stars of a multiple system each
+   10⁻⁸ rad for a Jupiter's pull on a Sun, which a test states. _As built (R07.T10.a): each star is
+   taken at the lit body's retarded time less the star-to-body light time (`retardedFrom`). A
+   lone star does not move in the placements, so the reflex error stands; a multiple system's
+   stars are retarded along their orbits._ Stars of a multiple system each
    light the body; a star whose illuminance at the body is under 10⁻⁴ of the brightest is dropped
    (`STAR_CUT_RELATIVE`, owned here and applied by R08 to its suns), so that both plans agree on
    which suns shine.
@@ -2471,6 +2501,8 @@ count }`, at most four), not c and α.
     radius and the disc no position. `lightingBodyOf(frame, radiusM)` makes a lighting body of a
     `placed` entry at its geometric centre, and returns `null` for a `contact`, which never
     occludes and is never eclipsed (decisions-r06-r07, item 4), or for a body of unknown radius.
+    _Removed by R07.T10.a: no view called it, and `lightingFrameOf` places each body retarded,
+    a contact (`ViewBody.retarded` `null`) as no occluder._
     `umbraRadius` and `penumbraRadius` are exported for the tests: Earth's umbra 4,600 km and
     penumbra 8,175 km across at the Moon's distance; the Moon's umbra ends short of Earth.
   - **The WGSL** (`litBody.wgsl`): `sphere_irradiance(h, phi, horizon)` and `howell_view_factor`;
@@ -2511,7 +2543,7 @@ altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     axis through `bodyFixedRotation` (`null` today); a body without a granted radius has no figure
     and stays R02's mark. `BodyPhotometry`, `AppearanceLabel` and the `BodyFigure` re-export live
     there. A `contact` frame entry has no summary here; it never occludes and is never eclipsed
-    (`lightingBodyOf`, T6.c; decisions-r06-r07, item 4).
+    (`lightingBodyOf`, T6.c; decisions-r06-r07, item 4; _since R07.T10.a, `lightingFrameOf`_).
 - **Deviations in T5, as built.**
   - **Inputs.** `litRegimes(bodies, camera, viewport, previous)` and `painterOrder(bodies, regimes,
 hosts)` take `LitSphere`s (identifier, centre from the camera in `f64`, equatorial radius) and
@@ -3478,7 +3510,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (3–6 px on a 1,000 px Earth, against an umbra of at most 270 km), about 50 km for Io's on Jupiter
     against an umbra of 3,600 km. The frame's `geometricM` (the time T, not t_B) is no substitute:
     from 1 au it would put the Moon's shadow some 500 km off. Latent until R06.T11 serves `sky`;
-    kept scenes are static, and `PHASE TEST` is exact.
+    kept scenes are static, and `PHASE TEST` is exact. _Removed by R07.T10.a (see "Deviations in
+    T10.a, as built")._
   - **The disc's law.** `DiscRecord` takes `BodyPhotometry.law` directly, `DiscSurface`'s
     `uniform` case without the type; T8.b threads `DiscSurface` through the record and the shader.
     `bodyDisc.wgsl` writes `body_brdf`'s lunar-Lambert expression inline, with the horizon factor
@@ -3855,7 +3888,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **Neighbours at drawn centres.** Neighbours are placed at the scene's drawn centres, as lights
     and occluders are (T8.a's known limit, "Light positions"). T10.a's retarded geometry must also
     place each neighbour at t_B − |r_N − r_B| ÷ c, and the neighbour's stars at its own retarded
-    time.
+    time. _Removed by R07.T10.a (see "Deviations in T10.a, as built", "Neighbours")._
   - **For R10 and T9.** A lit point's planetshine is `planetshine_irradiance` with the horizon
     argument (0 on the smooth figure) and `lit_disc_term`, over the `SecondarySource`s of its body.
   - **Possible follow-up (not built).** A table in (α, sin ρ, L) would correct the far-field
@@ -4366,7 +4399,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - A mesh body behind a host star shows over the star's disc: R06's disc lies at depth 0, which
       the figure's depth hides (a disc body is ordered by the painter). It needs the body beyond a
       star some pixels across, over depth-writing geometry. Putting R06's disc on its sphere's
-      polar plane, as the limb is, would fix it; that is R06's change (open below).
+      polar plane, as the limb is, would fix it; that is R06's change (ruled below).
     - Where two limbs cross a pixel, the limb's blend over what is beneath keeps T8.a's
       coverage-over error: up to 0.115 of the pixel in the occultation.
     - Each mesh body runs `selectPatches` every frame, and its fragments discard under a depth
@@ -4395,13 +4428,152 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       within 0.680 of it. Over the occultation every step is within 0.592 of the twin and 0.000 of
       the painter's frames, with their classes, and no pixel more than half the moon's where no
       oracle ray meets it.
-  - **By hand, for the owner** (open below): `just test-render --variant=default --captures=DIR`
+  - **By hand, for the owner** (ruled below): `just test-render --variant=default --captures=DIR`
     writes `r07-t9-occultation-{mesh,disc}-NN-default.png`, ten steps of the occultation each at
     512 × 384 through the photorealistic frame, as meshes and as discs. On SwiftShader
     (2026-10-05) the two series are identical to the code at every step.
-  - **Open (for the orchestrator and the owner).**
-    - The by-hand occultation: the live `VIEW` never promotes, since nothing writes depth, so
-      `just client` cannot show the mesh path. Options: (a) the captures as the record; (b) a kept
-      occultation scene with a synthetic depth writer in `SCENE`, which adds a guide row; (c)
-      wait for R10's terrain or lit craft. Lean (a).
-    - A host disc in front of a mesh body: a stated limit, or R06's disc on its polar plane.
+  - **Ruled (orchestrator, 2026-10-05), on T9's two open points.**
+    - The by-hand occultation is recorded from the `just test-render --captures` frames: option
+      (a), the captures as the record. The owner looks at the PNGs. (The live `VIEW` never
+      promotes, since nothing writes depth, so `just client` cannot show the mesh path; (b), a
+      kept occultation scene with a synthetic depth writer, and (c), waiting for R10, were not
+      taken.)
+    - A mesh body behind a star shows over the star's disc, because R06 draws the disc at
+      infinite depth: a stated limit for RM3. No live view promotes a mesh until R10 brings depth
+      writers, and a follow-up for R06 to draw star discs at their limb plane's depth is queued
+      before R10.
+- **Deviations in T10.a, as built (retarded lighting geometry, decision-r07-t8a, follow-up (a)).**
+  - **Ruled: the local body is lit at its retarded time** (the orchestrator, 2026-10-05, under the
+    owner's delegation, on the plan-conformance and science reviews). Decision-r07-t8a (a) gave
+    the local body, drawn at the present, `lightTimeS` 0. Built instead: the local body is still
+    drawn at its present `geometricM`, but is lit like every other body, from its `emittedM`, its
+    velocity then and its real light time. The reasons:
+    - The brainstorm's rule ("The floating origin is already in the simulation"): every
+      time-varying state is drawn at its retarded time, the local body's included, eclipse
+      contacts among them. Lit at the present, its contacts came τ = |r_cam − r_B| ÷ c early: up
+      to 5 s on the Earth, 168 s inside Jupiter's Hill sphere (the frame rule's, at pericentre,
+      5.05 × 10¹⁰ m).
+    - It keeps δ in [0, 2 |r_X − r_B| ÷ c] for every lit body, so that the linear retardation's
+      ½ a δ² stays about 3 m for Io. With τ_B = 0, δ fell to −r_Hill ÷ c. Io was then 9.5–9.9 km
+      off with the camera 5 × 10¹⁰ m from Jupiter. A close moon of a giant on a wide orbit (a
+      Jupiter mass at 30 au, the moon at 2.5 R_J) was some 2,000 km off, about 210 km of it across
+      its shadow's axis at a central transit and up to about 1,000 km near the limb. All of it
+      moved with the camera.
+    - The local body's velocity is exact. Its emitted velocity no longer stands in for the present
+      one.
+  - **For R10 (a pointer, also in R10's Risks).** The local body's terrain is drawn at the present
+    and lit at T − τ. Once R10 adds rotation, the terrain sits ωτ ahead of its lighting: about
+    2,100 km at a Jupiter's equator from its Hill sphere's edge (τ 168 s, v_eq 12.6 km/s), about
+    38 km at τ 3 s.
+    That is the brainstorm's own split between geometry and time-varying state. R10 decides
+    whether to draw rotation-dependent state at the retarded time too.
+  - **Files and names.**
+    - `lib/scene/apparent.ts`: `placed` entries and `SceneStarFrame` gain `emittedM`
+      (`apparentPosition`'s `geometricThenM`) and `emittedVelocityMPerS`. The velocity is the
+      composed orbits' own at `emitted` (`stateAt`'s, through the private `composedVelocity` the
+      ship observer already used), not the ruling's track central difference over ±1 s: it is
+      exact, and costs one chain of Kepler solves rather than two.
+    - `view/scene/model.ts`: `RetardedCentre`, `staticRetarded(centreM)` and the required
+      `ViewBody.retarded`. Every kept scene, and `aBody`, takes `staticRetarded` at the drawn centre
+      (`aBody` at an overridden centre too). `isLitKind` moved here from `displays/view/viewRun.ts`,
+      so that the view's "lit" has one definition.
+    - `view/scene/fromServer.ts`: every star's and placed body's retarded centre, the local body's
+      included, is its `emittedM`, its velocity then and `spanSeconds(lightTime)`; a contact's is
+      `null`.
+    - `lighting/retarded.ts`: `RETARDATION_STEPS`, `retardedFrom`, `LightingFrame`, `isLitBody`
+      (`isLitKind` with a radius), `lightingFrameOf` (`null` for a body that is not lit),
+      `LitBodyLighting` and `lightingFramesOf`. The last gives every lit body, in the scene's
+      order, with its drawn centre and its frame, the drawn centres found once.
+      `LightingFrame.occluders` are `LightingBody`s, which carry the identifier `occludersFor` and
+      planetshine need: a subtype of the ruling's `LightingSphere`.
+    - `lightingBodyOf` (T6.c) is removed. No view called it, and it would have lit the local body
+      by a rule of its own.
+    - `test/sceneFixture.ts` gains `SCENE_CHARTED_PLACE`, `sceneModelOf`, `systemSceneState`,
+      `shipFrameOf`, `viewSceneOf` and `viewBodyOf`. `fromServer.test.ts` now uses them.
+  - **Two fixed-point steps, not one.**
+    - One step from the source's retarded centre leaves the light time wrong by (v ÷ c) δ, and the
+      position by v² δ ÷ c. That is up to 8 m for the Moon, seen from far past it when the
+      Earth–Moon line lies along the Earth's motion, against the ruling's 1 m test (tested at
+      3,000 s, above 1 m; at the eclipse, where the line runs across the motion, 0.23 m).
+    - Two steps leave v³ δ ÷ c², under a millimetre. The brainstorm's `retarded_in_system`
+      iterates for the same reason.
+  - **The translation.** The ruling's drawn(B) + (retardedFrom(B, X) − B's retarded centre) is
+    computed as drawn(X) + ((retarded X − drawn X) − (retarded B − drawn B)). That is the same sum,
+    the camera's offset being a translation, and it is drawn(X) exactly where nothing moves.
+    `retardedFrom` returns a source at rest exactly where it is. So a kept scene lights bit for bit
+    as before: tested on the phase, precision, frame-change and descent-spike scenes, and through
+    `planLitBodies` on the phase scene.
+  - **How the plan takes it.**
+    - `LitBodyInput` and planetshine's `ReflectingBody` gain the required key
+      `lighting: LightingFrame | undefined`, so that every builder states its choice (the
+      TypeScript review).
+    - A body with a frame takes its stars (`lightsOf`, so `pointFlux` and the disc record), its
+      occluders (`occludersOf`) and its planetshine neighbours' places from it.
+    - `undefined` states a static scene's geometry: the frame's hosts and the other bodies where
+      they are drawn. The smoke harness, the occultation scene and the bodies' tests state it.
+    - `placeLights` stays per scene, at the drawn centres, for the painter's order (`HostSphere`),
+      and `PhotorealFrame.lights` is that. The ruling's "per lit body" is `lightingFrameOf`'s own
+      `placeLights` call.
+    - `litBodiesOf(scene, pose, discs)` maps `lightingFramesOf`'s entries, so every lit body has
+      its frame by construction. `litLabelsOf` filters by `isLitBody`.
+  - **Neighbours.** A planetshine neighbour N stands where the lit body's frame puts it, at
+    t_B − |r_N − r_B| ÷ c. Its stars, and the larger bodies that shadow it, are those of its own
+    frame, at its own retarded time, δ before the exact time.
+    - That keeps each neighbour's starlight one evaluation a frame (T11's "once a frame").
+    - It turns the neighbour's star by at most |v_N − v★| δ ÷ d★, with δ ≤ 2 |r_N − r_B| ÷ c:
+      up to 6 × 10⁻⁷ rad for the Earth lighting the Moon.
+    - It moves the neighbour's own eclipse by up to δ: 2.8 s of Io's 254 s ingress.
+    - A neighbour the frame does not hold, a contact, lights nothing.
+  - **The neglected terms, as held.**
+    - The Moon's ½ a δ² takes its barycentric acceleration, 2.9–9.0 × 10⁻³ m/s² (the Sun's
+      5.9 × 10⁻³, plus or minus the Earth's 2.5–3.1 × 10⁻³, apogee to perigee). That gives
+      0.8–3.1 cm; the ruling's "1 cm" is the geocentric figure. Measured 1.2 cm at δ 2.63 s, and
+      held under the bound and under 3 cm.
+    - Io is held within ½ a δ², taking the track's own pull at Io's pericentre (μ = 4π² a³ ÷ P²,
+      0.09% above GM_J, which P's J2 carries) plus the Sun's, and under 3 m, both with Jupiter the
+      local body (5 × 10¹⁰ m off, measured 2.82 m at δ 2.81 s) and not.
+    - The lit body's own aberration: the Earth's perihelion speed, 30.29 km/s, gives
+      1.01 × 10⁻⁴ rad and 0.64 km at its limb (the ruling's "10⁻⁴ rad (0.6 km)", rounded).
+    - The star's reflex motion stays `illuminance.test.ts`'s 4.16 × 10⁻⁸ rad: the placements hold
+      a lone star at the barycentre (the test is renamed for it).
+  - **Figures.** The Earth–Moon cases are at the fixture's partial eclipse (t 4,727,768 s, the
+    axis 7,166 km from the Earth's centre, with the Moon's light time to the Earth). The suite's
+    Io cases run at that time too, where Io's shadow is off Jupiter. The Jupiter–Io probes are at
+    a transit (t 4,826,618 s, the axis 52 km from Jupiter's centre, 45 km without Io's light
+    time), with Io put in Jupiter's orbital plane.
+    - Tested (`retarded.test.ts`): `retardedFrom` within 1 m of the exact track from four cameras
+      (beside the Earth, twice the Moon's distance past it, eight times past it, a tenth of an au
+      across), measured 2 × 10⁻⁵ m to 1.2 cm. The Moon's shadow axis on the Earth does not move
+      (0 m) when the camera's velocity changes by 30 km/s; from the drawn centres it moves 77 and
+      35 km for the far cameras (asserted above 10 km). From a camera beside the Earth and one far
+      past the Moon, at one t_B, it lies within 1 km of the exact tracks and of each other
+      (measured 15 µm to 0.2 mm).
+    - Probe, 2026-10-05, not in the suite: with the camera moving with the Earth (29.8 km/s), the
+      sunlight's direction at the Earth and the Moon turns by 0.90–1.00 × 10⁻⁴ rad from T8.a's
+      drawn placement, and the earthshine's at the Moon by 9.95 × 10⁻⁵ rad. The Moon's shadow axis
+      in T8.a's placement is 0.62–3.27 km off the exact, and in T10.a's at most 0.2 mm off.
+    - Probe, at rest: T8.a's placement put the Moon's shadow axis 0.83, 2.28, 77.3 and 38.2 km off
+      for the four cameras. A 30 km/s change moved it 0.92, 1.77, 77.1 and 35.1 km. A camera at
+      rest in the barycentric frame sees no aberration, so the sunlight does not turn.
+    - Probe, Jupiter–Io, with the camera moving with Jupiter (12.4 km/s): the sunlight at Jupiter
+      and Io turns by 3.5–4.2 × 10⁻⁵ rad and the Jupiter-shine at Io by 4.2 × 10⁻⁵ rad. Io's
+      shadow axis on Jupiter moves 11.4 km for a camera beside Jupiter and 46 km for one
+      6 × 10¹⁰ m past Io, from T8.a's placement.
+    - Probe, Jupiter–Io, with a camera beside the Earth moving with it: the sunlight at Jupiter
+      turns by 2.7 × 10⁻⁶ rad, the Jupiter-shine by 8.7 × 10⁻⁶ rad, and Io's shadow moves 13.8 km.
+    - Probe, at rest beside Jupiter: 11.6 km, almost all from the ruled local-body change (Jupiter
+      drawn at the present, lit 0.67 s back, Io moving at 17 km/s).
+  - **Io's umbra.** T8.a's and the ruling's "an umbra of 3,600 km" is Io's diameter (3,643 km).
+    At Jupiter's cloud tops the umbra is about 3,000 km across and the penumbra about 4,300 km
+    (science check, 2026-10-05).
+  - **Cost.** One retardation per pair of lit bodies a frame, O(n²) beside `occludersFor`'s, for
+    T17's bench.
+  - **Tests.** `lighting/retarded.test.ts` (24). New cases in `apparent.test.ts` (2),
+    `fromServer.test.ts` (4: the local body, another body, a star, a contact), `model.test.ts`
+    (2), `planetshine.test.ts` (4), `draw.test.ts` (6) and `photorealFrame.test.ts` (2).
+    `occluders.test.ts` loses `lightingBodyOf`'s three.
+  - **`just test-render`** (SwiftShader, `default` and `no-subgroups`, 2026-10-06): every check
+    passes (249 and 247), and T9's 34 default captures are byte-identical. Nothing drawn moves:
+    the smoke harness and the kept scenes light statically. Under load (averages of 10 to 40) the
+    photorealistic frame's histogram check twice found no read-back within its 5 s wait; on a
+    quieter machine it passes (226 weighted counts).

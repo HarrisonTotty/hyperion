@@ -207,6 +207,7 @@ function planOfOne(
     centreM,
     figure,
     photometry: PROVISIONAL_PHOTOMETRY,
+    lighting: undefined,
   };
   const writer = sphereFootprint(centreM, figure.equatorialRadiusM, camera, viewport);
   const options: BodyFrameOptions = {

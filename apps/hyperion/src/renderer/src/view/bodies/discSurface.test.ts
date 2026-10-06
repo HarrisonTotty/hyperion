@@ -125,6 +125,7 @@ function bodyAt(
         pole: rotateToBody(ROTATION, vec3(0, 0, 1)),
       },
       photometry: PROVISIONAL_PHOTOMETRY,
+      lighting: undefined,
       ...extra,
     },
     hosts: [{ disc: aHostDisc(), centreM: add(centreM, scale(towards, AU_M)) }],

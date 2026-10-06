@@ -4,7 +4,7 @@ import { IDENTITY_QUATERNION, lookAlong } from "../camera/quaternion";
 import type { ViewPosition } from "../coords/position";
 import { type Rotation3, rotateToBody, rotation3FromRows } from "../coords/rotation";
 import { TEST_HULL } from "../scene/hull";
-import { bodyKindSymbol, type ViewScene } from "../scene/model";
+import { bodyKindSymbol, staticRetarded, type ViewScene } from "../scene/model";
 import {
   AU_M,
   KEPT_BARYCENTRE,
@@ -188,6 +188,7 @@ function frameChangeSceneAt(tS: number): ViewScene {
         radiusM: 6.957e8,
         hillRadiusM: null,
         centreM: vec3(0, 0, 0),
+        retarded: staticRetarded(vec3(0, 0, 0)),
         rotation: null,
         symbol: bodyKindSymbol("star"),
         orbitNormal: null,
@@ -200,6 +201,7 @@ function frameChangeSceneAt(tS: number): ViewScene {
         radiusM: FRAME_CHANGE_PLANET_RADIUS_M,
         hillRadiusM: FRAME_CHANGE_PLANET_HILL_M,
         centreM: FRAME_CHANGE_PLANET_M,
+        retarded: staticRetarded(FRAME_CHANGE_PLANET_M),
         rotation,
         symbol: bodyKindSymbol("planet"),
         orbitNormal: null,
@@ -213,6 +215,7 @@ function frameChangeSceneAt(tS: number): ViewScene {
         radiusM: 1.7374e6,
         hillRadiusM: FRAME_CHANGE_MOON_HILL_M,
         centreM: FRAME_CHANGE_MOON_M,
+        retarded: staticRetarded(FRAME_CHANGE_MOON_M),
         rotation: null,
         symbol: bodyKindSymbol("moon"),
         orbitNormal: null,

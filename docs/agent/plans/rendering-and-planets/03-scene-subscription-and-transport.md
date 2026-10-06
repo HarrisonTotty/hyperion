@@ -1551,7 +1551,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   not change the system (a heartbeat, a craft push), so `sceneAt`'s placements, kept per system
   model, are laid out once per change and not once per push. The acceptance command should read
   `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`, which also runs
-  `lightTime.test.ts`.
+  `lightTime.test.ts`. _R07.T10.a adds `emittedM` (`apparentPosition`'s `geometricThenM`) and
+  `emittedVelocityMPerS` (the composed orbits' velocity at `emitted`) to `placed` entries and to
+  `SceneStarFrame`, the retarded centres lighting takes; fields only._
 - **Deviations in T8.a, as built.** The topic is `scene/topic.rs`: `open` (reached through
   `Handlers::subscribe`) builds the core on the pool at `Priority::Interactive`, re-running the
   job after fetching each system it asks for (`FetchSystemError`) from the body cache, and spawns

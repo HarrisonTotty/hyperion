@@ -11,7 +11,9 @@
  * pointFlux}, the law integrated over the figure for a spheroid), cut by the same eclipse term from
  * the body's centre, laid into R02's point-spread sprite. Each body is also lit by planetshine from
  * the neighbours that light it most (`planetshineSources`, T11), on its disc per lit point and on
- * its point as a point source. Host discs keep their
+ * its point as a point source. A body that carries its lighting frame (`lightingFrameOf`, T10.a)
+ * takes its stars, occluders and neighbours from it, retarded to the light that reaches it, while
+ * the drawing keeps the apparent places. Host discs keep their
  * place in the order, where R06.T13.e's pass draws them (decision-r07-t8a, R06 coordination (d),
  * 2026-10-03): a host's step places R06's disc draw. {@link LitBodyRenderer} binds the plan to the
  * engine: one draw per disc for its wholly covered pixels and one for its limb, one sprite draw per
@@ -51,6 +53,7 @@ import { type Rotation3, rotateToBody } from "../coords/rotation";
 import { annulusEdges, type AnnulusSet, eclipseVisible } from "../lighting/annuli";
 import { type LightAtPoint, lightsAt, type PlacedLight } from "../lighting/hostLights";
 import { type LightingBody, type LightingSphere, occludersFor } from "../lighting/occluders";
+import type { LightingFrame } from "../lighting/retarded";
 import {
   type LitNeighbour,
   litNeighbours,
@@ -117,6 +120,12 @@ export interface LitBodyInput {
    * not known, when a class map's disc shades with its `elsewhere` law.
    */
   readonly rotation?: Rotation3;
+  /**
+   * Its stars and the other lit bodies where its light finds them, retarded (`lightingFrameOf`,
+   * T10.a): what lights, eclipses and planetshines it. `undefined` states a static scene's
+   * geometry: the frame's hosts and the other bodies where they are drawn.
+   */
+  readonly lighting: LightingFrame | undefined;
 }
 
 /** What the plan needs of the view. */
@@ -213,12 +222,18 @@ export function hostAnnuli(
   return sets;
 }
 
-/** The stars that light a body: past the cut, the brightest {@link MAX_DISC_LIGHTS}. */
+/**
+ * The stars that light a body: past the cut, the brightest {@link MAX_DISC_LIGHTS}, from its
+ * lighting frame where it has one.
+ */
 function lightsOf(body: LitBodyInput, hosts: ReadonlyArray<PlacedLight>): LightAtPoint[] {
-  return lightsAt(body.centreM, hosts, MAX_DISC_LIGHTS);
+  return lightsAt(body.centreM, body.lighting?.lights ?? hosts, MAX_DISC_LIGHTS);
 }
 
-/** The bodies that may eclipse a body's lights, the largest seen from it first, at most two. */
+/**
+ * The bodies that may eclipse a body's lights, the largest seen from it first, at most two: of its
+ * lighting frame's occluders where it has one, else of `lighting`, the bodies where they are drawn.
+ */
 function occludersOf(
   body: LitBodyInput,
   lights: ReadonlyArray<LightAtPoint>,
@@ -235,7 +250,7 @@ function occludersOf(
   }));
   const angular = (other: LightingBody): number =>
     other.radiusM / norm(sub(other.centreM, body.centreM));
-  return occludersFor(self, stars, lighting)
+  return occludersFor(self, stars, body.lighting?.occluders ?? lighting)
     .toSorted((a, b) => angular(b) - angular(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .slice(0, MAX_DISC_OCCLUDERS);
 }
@@ -247,6 +262,7 @@ function occludersOf(
  * point and the disc draw one flux. Each planetshine source adds its own term, as a point source
  * at its centre's direction and never eclipsed (Design note 7).
  *
+ * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
  * @param occluders - The bodies that may eclipse its stars (`occludersFor`).
  * @param k - The eclipse term's annuli.
  * @param secondaries - Its planetshine sources (`planetshineSources`).
@@ -428,9 +444,11 @@ function pointSpriteOf(
  * A disc whose footprint overlaps one of `options.depthWriters` or a mesh body is promoted to a
  * mesh (`promoteOverlapping`). A mesh body's limb is drawn in the sequence as a disc's is, so the
  * order takes it as a disc (Design note 2); its figure's pixels are drawn before the sequence, with
- * depth.
+ * depth. The order is the drawing's, by the drawn centres; each body is lit by its own lighting
+ * frame where it has one (T10.a).
  *
- * @param hosts - The host stars, which light the bodies and keep their place in the order.
+ * @param hosts - The host stars where they are drawn, which keep their place in the order and
+ *   light each body that has no lighting frame of its own (`LitBodyInput.lighting`).
  * @param previous - Each body's regime on the previous frame, for the hysteresis.
  */
 export function planLitBodies(

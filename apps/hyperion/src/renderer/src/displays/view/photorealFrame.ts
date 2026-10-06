@@ -5,13 +5,15 @@
  *
  * @remarks
  * The lights are the scene's host discs, a kept scene's own `hostDiscs` or the held sky's `hosts`,
- * placed at their stars' centres in the frame (decision-r07-t8a, item 1); the host discs are drawn
- * by R06's `HostDiscLayer` where the scene draws them (its apparent placement), the lit bodies are
- * the scene's planets, dwarf planets and moons, spheres of their radius with the provisional
- * photometry (R07.T2.a), and the stars are the wireframe draw list's sprites, the sky's or the
- * interim field's, with the host discs under three pixels.
+ * placed at their stars' drawn centres in the frame for the painter's order (decision-r07-t8a,
+ * item 1); the host discs are drawn by R06's `HostDiscLayer` where the scene draws them (its
+ * apparent placement), the lit bodies are the scene's planets, dwarf planets and moons, spheres of
+ * their radius with the provisional photometry (R07.T2.a), each lit by its own lighting frame, its
+ * stars and the other bodies retarded to the light that reaches it (`lightingFramesOf`, T10.a),
+ * and the stars are the wireframe draw list's sprites, the sky's or the interim field's, with the
+ * host discs under three pixels.
  */
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { rotateToBody } from "../../view/coords/rotation";
 import { relativeToCamera } from "../../view/coords/relative";
@@ -27,6 +29,7 @@ import { type ProjectionCamera, project, type Viewport } from "../../view/camera
 import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem, FrameSubmission } from "../../view/engine/types";
 import { hostLights, placeLights, sceneHostDiscs } from "../../view/lighting/hostLights";
+import { isLitBody, lightingFramesOf } from "../../view/lighting/retarded";
 import type { PhotorealFrame } from "../../view/photoreal/renderer";
 import type { MeterMode } from "../../view/post/meter";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
@@ -40,7 +43,7 @@ import {
   type WireframeDrawList,
 } from "../../view/wireframe/drawList";
 import type { DrawnSky } from "./useViewSky";
-import { isLitKind, type ViewRun } from "./viewRun";
+import type { ViewRun } from "./viewRun";
 
 /** What one photorealistic frame is made from. */
 export interface PhotorealInputs {
@@ -83,30 +86,31 @@ const SCENE_BODY_APPEARANCE: {
 
 /** The appearance labels of the bodies a scene's photorealistic frame lights, each once. */
 export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
-  return scene.bodies.some((body) => isLitKind(body.kind) && body.radiusM > 0)
-    ? SCENE_BODY_APPEARANCE.labels
-    : [];
+  return scene.bodies.some(isLitBody) ? SCENE_BODY_APPEARANCE.labels : [];
 }
 
-/** The scene's lit bodies from the camera: spheres of their radius, provisional photometry. */
-export function litBodiesOf(scene: ViewScene, pose: CameraPose): LitBodyInput[] {
-  const origins = sceneOrigins(scene);
-  return scene.bodies
-    .filter((body) => isLitKind(body.kind) && body.radiusM > 0)
-    .map((body) => ({
-      id: body.id,
-      centreM: relativeToCamera(
-        { kind: "system", system: scene.system, m: body.centreM },
-        pose,
-        origins,
-      ),
-      figure: {
-        equatorialRadiusM: body.radiusM,
-        polarRadiusM: body.radiusM,
-        pole: body.rotation === null ? null : rotateToBody(body.rotation, { x: 0, y: 0, z: 1 }),
-      },
-      photometry: SCENE_BODY_APPEARANCE.photometry,
-    }));
+/**
+ * The scene's lit bodies from the camera: spheres of their radius, provisional photometry, each
+ * lit by its own lighting frame (`lightingFramesOf`).
+ *
+ * @param discs - The scene's host discs (`sceneHostDiscs`).
+ */
+export function litBodiesOf(
+  scene: ViewScene,
+  pose: CameraPose,
+  discs: ReadonlyArray<HostDiscDto>,
+): LitBodyInput[] {
+  return lightingFramesOf(scene, pose, discs).map(({ body, centreM, frame }) => ({
+    id: body.id,
+    centreM,
+    figure: {
+      equatorialRadiusM: body.radiusM,
+      polarRadiusM: body.radiusM,
+      pole: body.rotation === null ? null : rotateToBody(body.rotation, { x: 0, y: 0, z: 1 }),
+    },
+    photometry: SCENE_BODY_APPEARANCE.photometry,
+    lighting: frame,
+  }));
 }
 
 /** The photorealistic frame of a stage's run. */
@@ -164,7 +168,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     hostDraws,
     glareSources: inputs.discs.glareSources(camera, viewport, run.camera.role),
     lights,
-    bodies: litBodiesOf(scene, pose),
+    bodies: litBodiesOf(scene, pose, discs),
     // Nothing in a view writes depth yet; R10's terrain and lit craft add their footprints.
     depthWriters: [],
     previousRegimes: inputs.previousRegimes,

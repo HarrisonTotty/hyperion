@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { type LitBodyInput, planLitBodies } from "../../view/bodies/draw";
+import { DISC_ANNULI_HIGH } from "../../view/lighting/annuli";
+import { PLANETSHINE_SOURCES_HIGH } from "../../view/lighting/planetshine";
+import { lightingFramesOf } from "../../view/lighting/retarded";
 import { DEFAULT_EXPOSURE, controlEv100, exposureScale } from "../../view/photometry/exposure";
 import { PHASE_GIANT, PHASE_PLANETS, PHASE_STAR, phaseScene } from "../../view/scenes/phaseScene";
 import { HostDiscLayer } from "../../view/sky/disc";
@@ -19,6 +23,11 @@ const TOKENS = {
   line: "colour-line",
   surface0: "colour-surface-0",
 } as const;
+
+/** A lit body lit as a static scene's: by the frame's hosts and the bodies where drawn. */
+function drawnOnly(body: LitBodyInput): LitBodyInput {
+  return { ...body, lighting: undefined };
+}
 
 async function frameOfPhaseScene(): Promise<ReturnType<typeof photorealFrame>> {
   const engine = await countingRenderEngine();
@@ -56,6 +65,29 @@ describe("a photorealistic frame of the phase scene", () => {
     expect(frame.lights[0]?.disc.star).toBe(0);
     expect(frame.bodies.map((body) => body.id)).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
     expect(frame.bodies.some((body) => body.id === PHASE_STAR)).toBe(false);
+  });
+
+  it("lights each planet by its own lighting frame, retarded to the light that reaches it", async () => {
+    const frame = await frameOfPhaseScene();
+    const run = startRun(phaseScene());
+    const entries = lightingFramesOf(run.scene, runPose(run), run.scene.hostDiscs ?? []);
+    expect(frame.bodies.map((body) => body.lighting)).toEqual(entries.map((entry) => entry.frame));
+  });
+
+  it("lights the kept scene bit for bit as its drawing places it (T10.a)", async () => {
+    const frame = await frameOfPhaseScene();
+    const options = {
+      camera: frame.camera,
+      viewport: frame.viewport,
+      exposureScale: frame.exposureScale,
+      annuli: DISC_ANNULI_HIGH,
+      planetshine: PLANETSHINE_SOURCES_HIGH,
+      setting: frame.setting,
+    };
+    expect(frame.bodies.every((body) => body.lighting !== undefined)).toBe(true);
+    expect(planLitBodies(frame.bodies, frame.lights, options, new Map())).toEqual(
+      planLitBodies(frame.bodies.map(drawnOnly), frame.lights, options, new Map()),
+    );
   });
 
   it("draws no sky without one, and takes the camera's role and field", async () => {

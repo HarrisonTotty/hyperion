@@ -29,7 +29,7 @@ import { lookAlong, multiply, quaternionFromRows, rotate } from "../camera/quate
 import type { ViewPosition } from "../coords/position";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import { TEST_HULL } from "../scene/hull";
-import { bodyKindSymbol, type ViewScene } from "../scene/model";
+import { bodyKindSymbol, staticRetarded, type ViewScene } from "../scene/model";
 import {
   AU_M,
   KEPT_BARYCENTRE,
@@ -304,6 +304,7 @@ export function spikeScene(profile: DescentProfile): KeptScene {
             radiusM: SUN_RADIUS_M,
             hillRadiusM: null,
             centreM: vec3(0, 0, 0),
+            retarded: staticRetarded(vec3(0, 0, 0)),
             rotation: null,
             symbol: bodyKindSymbol("star"),
             orbitNormal: null,
@@ -317,6 +318,7 @@ export function spikeScene(profile: DescentProfile): KeptScene {
             // Earth's Hill radius, 1.5 × 10⁹ m (R02.T4's figure, as `frameChange.ts` takes it).
             hillRadiusM: 1.5e9,
             centreM: planetCentreM,
+            retarded: staticRetarded(planetCentreM),
             rotation,
             symbol: bodyKindSymbol("planet"),
             orbitNormal: null,

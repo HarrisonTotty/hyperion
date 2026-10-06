@@ -14,7 +14,7 @@ import { add, scale, vec3, type Vec3 } from "../../geometry/vec3";
 import type { CameraPose } from "../camera/pose";
 import { lookAlong } from "../camera/quaternion";
 import { SUN_RADIUS_M, sunLikeHostDisc } from "../lighting/hostDisc";
-import { bodyKindSymbol, type ViewBody, type ViewScene } from "../scene/model";
+import { bodyKindSymbol, staticRetarded, type ViewBody, type ViewScene } from "../scene/model";
 import {
   AU_M,
   KEPT_BARYCENTRE,
@@ -76,6 +76,10 @@ export function phasePlanetDirection(phaseDeg: number): Vec3 {
 
 function planet(index: number, phaseDeg: number): ViewBody {
   const id = PHASE_PLANETS[index] ?? keptBody(index + 1);
+  const centreM = add(
+    PHASE_CAMERA_M,
+    scale(phasePlanetDirection(phaseDeg), PHASE_PLANET_DISTANCE_M),
+  );
   return {
     id,
     parent: null,
@@ -83,7 +87,8 @@ function planet(index: number, phaseDeg: number): ViewBody {
     designation: `TEST PLANET ${String(phaseDeg)}°`,
     radiusM: PHASE_PLANET_RADIUS_M,
     hillRadiusM: null,
-    centreM: add(PHASE_CAMERA_M, scale(phasePlanetDirection(phaseDeg), PHASE_PLANET_DISTANCE_M)),
+    centreM,
+    retarded: staticRetarded(centreM),
     rotation: null,
     symbol: bodyKindSymbol("planet"),
     orbitNormal: null,
@@ -100,6 +105,11 @@ function cameraPose(): CameraPose {
 }
 
 function phaseSceneAt(tS: number): ViewScene {
+  const starCentreM = vec3(0, 0, 0);
+  const giantCentreM = add(
+    PHASE_CAMERA_M,
+    scale(phasePlanetDirection(PHASE_GIANT_PHASE_DEG), PHASE_GIANT_DISTANCE_M),
+  );
   return {
     provenance: { kind: "kept", name: PHASE_SCENE_NAME },
     time: keptTime(tS),
@@ -115,7 +125,8 @@ function phaseSceneAt(tS: number): ViewScene {
         designation: "TEST STAR",
         radiusM: SUN_RADIUS_M,
         hillRadiusM: null,
-        centreM: vec3(0, 0, 0),
+        centreM: starCentreM,
+        retarded: staticRetarded(starCentreM),
         rotation: null,
         symbol: bodyKindSymbol("star"),
         orbitNormal: null,
@@ -128,10 +139,8 @@ function phaseSceneAt(tS: number): ViewScene {
         designation: "TEST GIANT",
         radiusM: PHASE_GIANT_RADIUS_M,
         hillRadiusM: null,
-        centreM: add(
-          PHASE_CAMERA_M,
-          scale(phasePlanetDirection(PHASE_GIANT_PHASE_DEG), PHASE_GIANT_DISTANCE_M),
-        ),
+        centreM: giantCentreM,
+        retarded: staticRetarded(giantCentreM),
         rotation: null,
         symbol: bodyKindSymbol("planet"),
         orbitNormal: null,

@@ -29,6 +29,35 @@ import type { HullOutline } from "./hull";
 export type ViewBodyKind = "star" | "planet" | "dwarf_planet" | "moon" | "unresolved";
 
 /**
+ * Where a body was when the light the camera sees left it: its retarded geometric centre in the
+ * system frame, without aberration, which lighting takes where drawing takes the apparent place
+ * (plan R07, T10.a; decision-r07-t8a, follow-up (a)).
+ *
+ * @remarks
+ * The ship's local body is drawn at the present but lit at this retarded time too, as every
+ * time-varying state is drawn (the brainstorm's "the local body's included"; ruled for T10.a).
+ */
+export interface RetardedCentre {
+  /**
+   * Where the body was when the light the camera sees left it, m from the barycentre, galactic
+   * axes.
+   */
+  readonly centreM: Vec3;
+  /** Its velocity relative to the barycentre then, m/s along the galactic axes. */
+  readonly velocityMPerS: Vec3;
+  /**
+   * Light time from the body to the camera, s: the time it is lit at is the scene's less it. It is
+   * 0 in a kept scene.
+   */
+  readonly lightTimeS: number;
+}
+
+/** A kept scene's body, at rest where it is drawn: no light time and no motion (R07.T10.a). */
+export function staticRetarded(centreM: Vec3): RetardedCentre {
+  return { centreM, velocityMPerS: { x: 0, y: 0, z: 0 }, lightTimeS: 0 };
+}
+
+/**
  * A body of the view's scene at the scene's time.
  *
  * @remarks
@@ -51,6 +80,12 @@ export interface ViewBody {
   readonly hillRadiusM: number | null;
   /** Its centre as drawn, m from the system's barycentre along the galactic axes. */
   readonly centreM: Vec3;
+  /**
+   * Its retarded centre, which lighting takes (R07.T10.a): a kept scene's is
+   * {@link staticRetarded} at its drawn centre; `null` only for a contact, which never lights,
+   * occludes or is eclipsed.
+   */
+  readonly retarded: RetardedCentre | null;
   /** Its rotation from body-fixed to body axes, or `null` where rotation is not modelled. */
   readonly rotation: Rotation3 | null;
   /**
@@ -61,6 +96,23 @@ export interface ViewBody {
   readonly orbitNormal: Vec3 | null;
   /** Its mark from the ship-wide symbol set, drawn below 3 px (`lib/system/bodySymbols.ts`). */
   readonly symbol: BodyMarkSymbol;
+}
+
+/** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */
+export function isLitKind(kind: ViewBodyKind): boolean {
+  let lit: boolean;
+  switch (kind) {
+    case "planet":
+    case "dwarf_planet":
+    case "moon":
+      lit = true;
+      break;
+    case "star":
+    case "unresolved":
+      lit = false;
+      break;
+  }
+  return lit;
 }
 
 /** A body's mark in the ship-wide symbol set: its shape and its size class. */

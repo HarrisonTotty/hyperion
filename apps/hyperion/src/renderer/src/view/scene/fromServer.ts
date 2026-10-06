@@ -6,7 +6,9 @@
  * The positions are `sceneAt`'s (rendering plan R03, R03.T13): the ship's local body is drawn where
  * it is at the frame's time (`geometricM`), and every other body and star where the ship sees it
  * (`apparentM`), a free camera's own local body included (R03's design note 7); a contact stands at
- * the server's seen position. The system's designation and galactic position come from a
+ * the server's seen position. Lighting takes each body's retarded centre instead (plan R07,
+ * T10.a): where it was when the light seen left it, without aberration, the local body's
+ * included. The system's designation and galactic position come from a
  * {@link SystemPlace}: the scene's own (R03.T16), or, from a server that does not send it, one the
  * client already holds; the designations are composed here, at every frame, so that one learnt
  * after the arrival relabels the bodies at once.
@@ -20,7 +22,14 @@ import {
 
 import { add, norm, scale, vec3, type Vec3 } from "../../geometry/vec3";
 import { KM_PER_RSUN } from "../../lib/format";
-import { type SceneFrame, sceneAt, shipObserver, systemPlacements } from "../../lib/scene/apparent";
+import {
+  type SceneFrame,
+  type SceneStarFrame,
+  sceneAt,
+  shipObserver,
+  systemPlacements,
+} from "../../lib/scene/apparent";
+import { spanSeconds } from "../../lib/scene/lightTime";
 import type {
   SceneCraft,
   SceneKinematics,
@@ -46,6 +55,7 @@ import {
   type ViewBody,
   type ViewBodyKind,
   type ViewCraft,
+  type RetardedCentre,
   type ViewOrbit,
   type ViewRing,
   type ViewScene,
@@ -185,6 +195,20 @@ function parentOf(
   return null;
 }
 
+/**
+ * A star's or a placed body's retarded centre, the local body's included: where it was when the
+ * light seen left it.
+ */
+function seenRetarded(
+  seen: Pick<SceneStarFrame, "emittedM" | "emittedVelocityMPerS" | "lightTime">,
+): RetardedCentre {
+  return {
+    centreM: seen.emittedM,
+    velocityMPerS: seen.emittedVelocityMPerS,
+    lightTimeS: spanSeconds(seen.lightTime),
+  };
+}
+
 /** A scene position as the view's {@link ViewPosition}, carried `seconds` ahead at `velocity`. */
 function coasted(position: ScenePosition, velocity: Vec3, seconds: number): ViewPosition {
   const delta = scale(velocity, seconds);
@@ -276,8 +300,9 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * section (a body without one is drawn as its symbol at any range), a Hill radius only where
  * `sceneAt` gives one, so that a body below `mass_and_orbit` or placed by `seen` is never the
  * camera's frame. The ship's local body is drawn at its `geometricM`, every other body and star at
- * its `apparentM`. The camera's frame selection measures to these drawn centres (Design note 6,
- * as amended), while `sceneAt` chooses the local body on geometric positions. A body's rotation
+ * its `apparentM`; each is lit from its retarded centre (`ViewBody.retarded`), its `emittedM` with
+ * its velocity then and its light time, the local body's included, and a contact from none. The
+ * camera's frame selection measures to these drawn centres (Design note 6, as amended), while `sceneAt` chooses the local body on geometric positions. A body's rotation
  * is not modelled yet (Design note 14): its pole is its orbit's normal. Rings are drawn
  * about their planet, in its orbital plane (plan 14's convention for this generator version);
  * orbits are every placed planet's and moon's about the body or star it orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
@@ -310,6 +335,7 @@ export function viewSceneFromServer(
       radiusM: host.radiusRsun * SOLAR_RADIUS_M,
       hillRadiusM: null,
       centreM: seen.apparentM,
+      retarded: seenRetarded(seen),
       rotation: null,
       orbitNormal: null,
       symbol: bodyKindSymbol("star"),
@@ -321,15 +347,30 @@ export function viewSceneFromServer(
     if (record === undefined || kind === null) {
       continue;
     }
-    const placed = seen.kind === "placed";
+    let centreM: Vec3;
+    let retarded: RetardedCentre | null;
+    switch (seen.kind) {
+      case "placed":
+        // The local body is drawn at the present, but lit, like every body, at its retarded time:
+        // its eclipse contacts are the light the camera sees (the brainstorm's "the local body's
+        // included"; R07.T10.a, ruled by the orchestrator).
+        centreM = seen.id === frame.localBody ? seen.geometricM : seen.apparentM;
+        retarded = seenRetarded(seen);
+        break;
+      case "contact":
+        centreM = seen.apparentM;
+        retarded = null;
+        break;
+    }
     bodies.push({
       id: seen.id,
       parent: parentOf(record, systemId, records),
       kind,
       designation: bodyDesignation(place.designation, record.bodyIndex),
       radiusM: record.bulk.state === "ok" ? record.bulk.value.radiusM : 0,
-      hillRadiusM: placed ? seen.hillRadiusM : null,
-      centreM: placed && seen.id === frame.localBody ? seen.geometricM : seen.apparentM,
+      hillRadiusM: seen.kind === "placed" ? seen.hillRadiusM : null,
+      centreM,
+      retarded,
       rotation: null,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,
       symbol: symbolOf(record, kind),

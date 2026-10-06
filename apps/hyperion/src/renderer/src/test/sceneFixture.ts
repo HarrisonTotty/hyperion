@@ -3,21 +3,29 @@
  * R03.T12): a state, and the notifications of an arrival, a body re-sent at a new level, a
  * heartbeat and a leaving, by hand, since no server sends them to the client's tests.
  */
-import type {
-  BodyGrantDto,
-  BodySummaryDto,
-  KinematicsDto,
-  SceneBodyDto,
-  SceneClockDto,
-  SceneCraftDto,
-  SceneNotificationDto,
-  SceneStateDto,
-  SceneSystemDto,
-  SystemBodiesDto,
-  SystemIdHex,
-  SystemPlaceDto,
+import {
+  type BodyGrantDto,
+  type BodySummaryDto,
+  galacticPositionFromLy,
+  type KinematicsDto,
+  type SceneBodyDto,
+  type SceneClockDto,
+  type SceneCraftDto,
+  type SceneNotificationDto,
+  type SceneStateDto,
+  type SceneSystemDto,
+  type SystemBodiesDto,
+  type SystemIdHex,
+  type SystemPlaceDto,
+  type UniverseTime,
 } from "@hyperion/protocol";
 
+import type { Vec3 } from "../geometry/vec3";
+import { type SceneFrame, sceneAt, shipObserver } from "../lib/scene/apparent";
+import type { SceneModel, SystemPlace } from "../lib/scene/model";
+import { toSceneModel } from "../lib/scene/sceneWire";
+import { viewSceneFromServer } from "../view/scene/fromServer";
+import type { ViewBody, ViewScene } from "../view/scene/model";
 import { earthContact, FIXTURE_EARTH, FIXTURE_SYSTEM, sliceBodies } from "./planetaryFixture";
 
 /** The fixture system's designation, as a chart would carry it. */
@@ -184,4 +192,97 @@ export function stateAfterLeaving(): SceneStateDto {
     system: null,
     craft: [],
   };
+}
+
+/** The fixture system's place as the client holds it: charted, under {@link SCENE_DESIGNATION}. */
+export const SCENE_CHARTED_PLACE = {
+  kind: "charted",
+  system: FIXTURE_SYSTEM,
+  designation: SCENE_DESIGNATION,
+  barycentre: galacticPositionFromLy([8_000, 26_000, 20]),
+} as const satisfies SystemPlace;
+
+/**
+ * A scene state's model as the wire adapter makes it, naming the system by
+ * {@link designateFixture}.
+ *
+ * @throws Error when the adapter refuses the state.
+ */
+export function sceneModelOf(state: SceneStateDto): SceneModel {
+  const result = toSceneModel(state, designateFixture);
+  if (result.kind !== "ok") {
+    throw new Error(`the fixture's scene is unusable: ${result.fault}`);
+  }
+  return result.model;
+}
+
+/**
+ * A paused scene of `bodies`' system at `time`, every body granted the answer's level, with the
+ * ship in the system frame at `shipM`, m from the barycentre, moving at `velocityMPerS`.
+ */
+export function systemSceneState(
+  bodies: SystemBodiesDto,
+  time: UniverseTime,
+  shipM: Vec3,
+  velocityMPerS: Vec3,
+): SceneStateDto {
+  return {
+    sequence: 0,
+    clock: { time, time_rate: 0, state: "paused" },
+    ship: {
+      position: { frame: "system", system: FIXTURE_SYSTEM, offset_m: [shipM.x, shipM.y, shipM.z] },
+      velocity_m_s: [velocityMPerS.x, velocityMPerS.y, velocityMPerS.z],
+      time,
+    },
+    system: {
+      system: bodies,
+      grants: bodies.bodies.map((body): BodyGrantDto => ({ body: body.id, level: bodies.granted })),
+    },
+    tidal_radius_m: SCENE_TIDAL_RADIUS_M,
+    craft: [],
+  };
+}
+
+/**
+ * The scene as the ship sees it at `time`, from no frame before.
+ *
+ * @throws Error when the ship has no observer in the scene's system.
+ */
+export function shipFrameOf(model: SceneModel, time: UniverseTime = model.clock.time): SceneFrame {
+  const observer = shipObserver(model, time);
+  const frame = observer === null ? null : sceneAt(model, observer, time, null);
+  if (frame === null) {
+    throw new Error("the fixture's scene has no frame");
+  }
+  return frame;
+}
+
+/**
+ * The view's scene of a frame of `model`.
+ *
+ * @throws Error when the scene cannot be drawn.
+ */
+export function viewSceneOf(
+  model: SceneModel,
+  frame: SceneFrame,
+  place: SystemPlace = SCENE_CHARTED_PLACE,
+): ViewScene {
+  const scene = viewSceneFromServer(model, frame, place);
+  if (scene === null) {
+    throw new Error("the fixture's scene cannot be drawn");
+  }
+  return scene;
+}
+
+/**
+ * A body of a view's scene.
+ *
+ * @throws Error when the scene draws no such body.
+ */
+export function viewBodyOf(scene: ViewScene, id: string): ViewBody {
+  const body = scene.bodies.find((each) => each.id === id);
+  if (body === undefined) {
+    throw new Error(`the scene draws no body ${id}`);
+  }
+  return body;
 }
