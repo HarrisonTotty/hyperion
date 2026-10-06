@@ -32,6 +32,10 @@
  * - partial phases are taken at the neighbour's centre, so a moon wider than its planet's penumbra
  *   fades too fast (in 44 s rather than 254 s for Io entering Jupiter's shadow), and a pair of
  *   equal moons never shadows each other.
+ *
+ * Where a body carries its lighting frame (`lightingFrameOf`, T10.a), a neighbour stands where that
+ * frame puts it, retarded to the light that reaches the body, and its stars and shadows are those
+ * of the neighbour's own frame; without one, every body and star is where it is drawn.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -51,6 +55,7 @@ import { eclipseVisible } from "./annuli";
 import { type LightAtPoint, lightsAt, MAX_BODY_LIGHTS, type PlacedLight } from "./hostLights";
 import { photopicIlluminance } from "./illuminance";
 import { asOccluders, type LightingBody, type LightingSphere, occludersFor } from "./occluders";
+import type { LightingFrame } from "./retarded";
 import { sphereIrradianceFactor } from "./sphereIrradiance";
 
 /** The neighbours that light a body by planetshine at most, on the high setting (Design note 7). */
@@ -82,6 +87,11 @@ export interface ReflectingBody {
   readonly centreM: Vec3;
   readonly figure: BodyFigure;
   readonly photometry: BodyPhotometry;
+  /**
+   * Its stars and the other lit bodies where its light finds them (`lightingFrameOf`, T10.a);
+   * `undefined` states a static scene's geometry, where they are drawn.
+   */
+  readonly lighting: LightingFrame | undefined;
 }
 
 /**
@@ -138,7 +148,8 @@ export function phaseMaximum(law: PhotometricLaw): number {
  * of the bodies larger than it: a moon in its planet's shadow, as in a total lunar eclipse, gives
  * no planetshine. A smaller body's shadow is left out, since from the neighbour's centre it would
  * hide the whole star where it hides a spot (Io's on Jupiter takes about 0.1% of Jupiter-shine, a
- * solar eclipse about 10% of earthshine).
+ * solar eclipse about 10% of earthshine). The stars and the bodies are the neighbour's own
+ * lighting frame's where it has one.
  */
 function neighbourLights(
   body: ReflectingBody,
@@ -146,13 +157,16 @@ function neighbourLights(
   hosts: ReadonlyArray<PlacedLight>,
   annuli: number,
 ): LightAtPoint[] {
-  const lights = lightsAt(body.centreM, hosts, MAX_BODY_LIGHTS);
+  const lights = lightsAt(body.centreM, body.lighting?.lights ?? hosts, MAX_BODY_LIGHTS);
   const radiusM = body.figure.equatorialRadiusM;
-  const larger: LightingBody[] = bodies.flatMap((other) =>
-    other.figure.equatorialRadiusM > radiusM
-      ? [{ id: other.id, centreM: other.centreM, radiusM: other.figure.equatorialRadiusM }]
-      : [],
-  );
+  const others: ReadonlyArray<LightingBody> =
+    body.lighting?.occluders ??
+    bodies.map((other) => ({
+      id: other.id,
+      centreM: other.centreM,
+      radiusM: other.figure.equatorialRadiusM,
+    }));
+  const larger = others.filter((other) => other.radiusM > radiusM);
   const stars: LightingSphere[] = lights.map((light) => ({
     centreM: light.host.centreM,
     radiusM: light.host.disc.radius_m,
@@ -190,6 +204,8 @@ function neighbourLights(
 /**
  * The frame's lit bodies as planetshine neighbours.
  *
+ * @param hosts - The lights where they are drawn, which light a body without its own lighting
+ *   frame.
  * @param annuli - The eclipse term's annuli: `DISC_ANNULI_HIGH` or `DISC_ANNULI_LOW`.
  */
 export function litNeighbours(
@@ -269,6 +285,8 @@ function byEstimate(a: Candidate, b: Candidate): number {
  * The candidates are ranked by each one's equivalent sphere of radius √(a c), exact for a sphere
  * and needing no quadrature; one whose upper bound ({@link LitNeighbour.boundLx}) cannot reach the
  * `max`-th best so far is not evaluated. The chosen ones' illuminance integrates their own figure.
+ * Each neighbour stands where the body's lighting frame puts it; one the frame does not hold, a
+ * contact, lights nothing.
  *
  * @param lit - The frame's lit bodies (`litNeighbours`); the body itself among them is skipped.
  * @param max - The sources at most: {@link PLANETSHINE_SOURCES_HIGH} or
@@ -282,12 +300,20 @@ export function planetshineSources(
   if (!(max > 0)) {
     return [];
   }
+  const placed =
+    body.lighting === undefined
+      ? null
+      : new Map(body.lighting.occluders.map((other) => [other.id, other.centreM]));
   let best: Candidate[] = [];
   for (const neighbour of lit) {
     if (neighbour.body.id === body.id || !(neighbour.boundLx > 0)) {
       continue;
     }
-    const toBody = sub(body.centreM, neighbour.body.centreM);
+    const centreM = placed === null ? neighbour.body.centreM : placed.get(neighbour.body.id);
+    if (centreM === undefined) {
+      continue;
+    }
+    const toBody = sub(body.centreM, centreM);
     const distanceM = norm(toBody);
     if (!(distanceM > neighbour.body.figure.equatorialRadiusM * (1 + INSIDE_MARGIN))) {
       continue;

@@ -1,17 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { universeTimeFromYears } from "@hyperion/protocol";
-
 import { vec3 } from "../../geometry/vec3";
-import type { SceneBodyFrame } from "../../lib/scene/apparent";
-import { ZERO_SPAN } from "../../lib/scene/lightTime";
-import {
-  type LightingBody,
-  lightingBodyOf,
-  occludersFor,
-  penumbraRadius,
-  umbraRadius,
-} from "./occluders";
+import { type LightingBody, occludersFor, penumbraRadius, umbraRadius } from "./occluders";
 
 /** Radii, km: the Sun (IAU 2015 B3 nominal), Earth (mean) and the Moon (mean). */
 const SUN_KM = 695_700;
@@ -74,41 +64,5 @@ describe("occludersFor", () => {
   it("never lists a body on the far side of the lit one", () => {
     const moon = moonAt(0);
     expect(occludersFor(earth, [sun], [earth, moon])).toEqual([]);
-  });
-});
-
-describe("lightingBodyOf", () => {
-  const placed: SceneBodyFrame = {
-    kind: "placed",
-    id: "0200080020000000.0103",
-    geometricM: vec3(1, 2, 3),
-    apparentM: vec3(1, 2, 3),
-    emitted: universeTimeFromYears(0),
-    lightTime: ZERO_SPAN,
-    level: "bulk",
-    hillRadiusM: null,
-  };
-
-  it("places a body at its geometric centre with its radius", () => {
-    expect(lightingBodyOf(placed, 6.371e6)).toEqual({
-      id: "0200080020000000.0103",
-      centreM: vec3(1, 2, 3),
-      radiusM: 6.371e6,
-    });
-  });
-
-  it("leaves out a body of unknown radius", () => {
-    expect(lightingBodyOf(placed, null)).toBeNull();
-  });
-
-  it("never makes a contact an occluder (decisions-r06-r07, item 4)", () => {
-    const contact: SceneBodyFrame = {
-      kind: "contact",
-      id: "0200080020000000.0104",
-      apparentM: vec3(1, 2, 3),
-      emitted: universeTimeFromYears(0),
-      level: "contact",
-    };
-    expect(lightingBodyOf(contact, 1e6)).toBeNull();
   });
 });

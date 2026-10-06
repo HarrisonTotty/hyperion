@@ -91,7 +91,10 @@ export interface PhotorealFrame {
   readonly hostDraws: ReadonlyMap<number, ReadonlyArray<DrawItem>>;
   /** R06's glare sources (`HostDiscLayer.glareSources`). */
   readonly glareSources: ReadonlyArray<GlareSource>;
-  /** The lights at their stars' centres in this frame (`placeLights`). */
+  /**
+   * The lights at their stars' drawn centres in this frame (`placeLights`), which keep the hosts'
+   * places in the painter's order and light a body without its own lighting frame.
+   */
   readonly lights: ReadonlyArray<PlacedLight>;
   readonly bodies: ReadonlyArray<LitBodyInput>;
   /**

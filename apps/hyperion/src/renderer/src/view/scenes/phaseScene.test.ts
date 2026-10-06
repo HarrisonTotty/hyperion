@@ -71,7 +71,7 @@ function drawPlanet(index: number) {
     pole: null,
   };
   const plan = planLitBodies(
-    [{ id, centreM: planet, figure, photometry: PROVISIONAL_PHOTOMETRY }],
+    [{ id, centreM: planet, figure, photometry: PROVISIONAL_PHOTOMETRY, lighting: undefined }],
     [{ disc, centreM: star }],
     {
       camera,

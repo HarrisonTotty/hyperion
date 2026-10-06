@@ -49,6 +49,7 @@ import {
 } from "../../view/photometry/exposure";
 import {
   cameraSceneOf,
+  isLitKind,
   sceneOrigins,
   type ViewBodyKind,
   type ViewScene,
@@ -497,23 +498,6 @@ export function labelStatements(
     statements.push(terrain);
   }
   return statements;
-}
-
-/** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */
-export function isLitKind(kind: ViewBodyKind): boolean {
-  let lit: boolean;
-  switch (kind) {
-    case "planet":
-    case "dwarf_planet":
-    case "moon":
-      lit = true;
-      break;
-    case "star":
-    case "unresolved":
-      lit = false;
-      break;
-  }
-  return lit;
 }
 
 /** The statement while the photorealistic style is chosen and its image is not yet drawn. */

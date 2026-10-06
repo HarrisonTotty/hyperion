@@ -8,9 +8,10 @@
  * (`HostDiscDto.mean_luminance_cd_m2`, never the central one). R06 builds each channel as the
  * photopic mean times the star's linear Rec. 709 colour at unit luminance, so the channels'
  * Rec. 709 luminance is the photopic illuminance, which equals 2.54 µlx × `lux_per_v0` ×
- * 10^(−0.4 V) for the star's apparent V (no extinction inside a system). The star is taken at the
- * body's own emitted time: neglecting the star-to-body light time turns the light by the star's
- * reflex speed over c, some 4 × 10⁻⁸ rad for a Sun pulled by a Jupiter.
+ * 10^(−0.4 V) for the star's apparent V (no extinction inside a system). The star is taken where
+ * it was when the light reaching the body left it (`lightingFrameOf`, R07.T10.a). The system's
+ * placements hold a lone star at the barycentre, which leaves out its reflex motion: that turns
+ * the light by the reflex speed over c, some 4 × 10⁻⁸ rad for a Sun pulled by a Jupiter.
  */
 import type { HostDiscDto } from "@hyperion/protocol";
 

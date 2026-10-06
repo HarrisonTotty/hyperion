@@ -71,6 +71,7 @@ function scene(
       centreM,
       figure: lit.figure,
       photometry: lit.photometry,
+      lighting: undefined,
       ...body,
     },
     hosts: [{ disc: aHostDisc(), centreM: add(centreM, scale(towardsStar, AU_M)) }],
@@ -601,6 +602,79 @@ describe("an eclipse", () => {
   });
 });
 
+describe("a body's lighting frame (T10.a)", () => {
+  // The eclipse's Moon, 3 px across, and an Earth drawn far clear of its light.
+  const moonRadiusM = 1.737e6;
+  const { body, hosts } = scene(moonRadiusM / Math.sin(1.5 / PX_PER_RAD), 0, {
+    figure: { equatorialRadiusM: moonRadiusM, polarRadiusM: moonRadiusM, pole: null },
+  });
+  const star = hosts[0]?.centreM ?? vec3(0, 0, 0);
+  const towards = normalise(sub(star, body.centreM));
+  const earth: LitBodyInput = {
+    ...body,
+    id: "0200080020000000.0302",
+    centreM: add(add(body.centreM, scale(towards, 3.844e8)), vec3(5e7, 0, 0)),
+    figure: { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6, pole: null },
+  };
+  const starlight = { ...OPTIONS, planetshine: 0 };
+
+  /** The body lit at quarter phase by its frame, though the frame's hosts light it full. */
+  const quarter = scene(norm(body.centreM), 90);
+  const quarterLit: LitBodyInput = {
+    ...body,
+    lighting: { lights: quarter.hosts, occluders: [] },
+  };
+
+  it("lights a point by its frame's stars, not the frame's drawn hosts", () => {
+    expect(pointFlux(quarterLit, hosts, [], DISC_ANNULI_HIGH)).toEqual(
+      pointFlux(body, quarter.hosts, [], DISC_ANNULI_HIGH),
+    );
+  });
+
+  it("lights a disc by its frame's stars, not the frame's drawn hosts", () => {
+    expect(discFlux(quarterLit, hosts, [], starlight)).toEqual(
+      discFlux(body, quarter.hosts, [], starlight),
+    );
+  });
+
+  /** The light finds the Earth on the Moon's line to the Sun, in front of where it is drawn. */
+  const umbral = {
+    id: earth.id,
+    centreM: add(body.centreM, scale(towards, 3.844e8)),
+    radiusM: 6.371e6,
+  };
+  const shadowed: LitBodyInput = { ...body, lighting: { lights: hosts, occluders: [umbral] } };
+  const previous = new Map([[body.id, "disc" as const]]);
+
+  it("eclipses a body by its frame's occluders, not where they are drawn", () => {
+    expect(discFlux(body, hosts, [earth], starlight)[1]).toBeGreaterThan(0);
+    expect(discFlux(shadowed, hosts, [earth], starlight)[1]).toBe(0);
+  });
+
+  it("hands the disc record its frame's occluders, from the body's centre in its radii", () => {
+    const plan = planLitBodies([shadowed, earth], hosts, starlight, previous);
+    const record = plan.discs.find((each) => each.body === body.id);
+    expect(record?.occluders).toEqual([
+      {
+        centre: scale(sub(umbral.centreM, body.centreM), 1 / moonRadiusM),
+        radius: 6.371e6 / moonRadiusM,
+      },
+    ]);
+  });
+
+  it("keeps the painter's order the drawn centres give", () => {
+    expect(planLitBodies([shadowed, earth], hosts, starlight, previous).order).toEqual(
+      planLitBodies([body, earth], hosts, starlight, previous).order,
+    );
+  });
+
+  it("keeps the regimes the drawn centres give", () => {
+    expect(planLitBodies([shadowed, earth], hosts, starlight, previous).regimes).toEqual(
+      planLitBodies([body, earth], hosts, starlight, previous).regimes,
+    );
+  });
+});
+
 describe("planetshine", () => {
   const moonRadius = 1.7374e6;
   const moonFigure = { equatorialRadiusM: moonRadius, polarRadiusM: moonRadius, pole: null };
@@ -635,6 +709,7 @@ describe("planetshine", () => {
         pole: null,
       },
       photometry: planetPhotometry("Earth"),
+      lighting: undefined,
     };
     return { ...placed, neighbour };
   }

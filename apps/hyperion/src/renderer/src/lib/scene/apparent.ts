@@ -249,7 +249,13 @@ export function placedTrack(placements: SystemPlacements, id: string): SystemTra
   return { positionAt: (time) => composePosition(placements.placements, id, time) };
 }
 
-/** A placed body's or a star's velocity relative to the barycentre at `time`, m/s. */
+/**
+ * A placed body's or a star's velocity relative to the barycentre at `time`, m/s: the time
+ * derivative of `composePosition`, each orbit's own velocity by `stateAt`, a pair member's scaled
+ * by its share.
+ *
+ * @throws Error when `id`, or a body on its chain of parents, is not placed.
+ */
 function composedVelocity(placements: SystemPlacements, id: string, time: UniverseTime): Vec3 {
   let velocity: Vec3 = { x: 0, y: 0, z: 0 };
   let at = id;
@@ -330,6 +336,13 @@ export type SceneBodyFrame =
       /** When the light seen left it. */
       readonly emitted: UniverseTime;
       readonly lightTime: Span;
+      /**
+       * Where it was at `emitted`, m: the retarded geometric centre, without aberration
+       * (`apparentPosition`'s `geometricThenM`; plan R07, T10.a).
+       */
+      readonly emittedM: Vec3;
+      /** Its velocity relative to the barycentre at `emitted`, m/s ({@link composedVelocity}). */
+      readonly emittedVelocityMPerS: Vec3;
       /** The detail level granted for it. */
       readonly level: DetailLevelDto;
       /** Its Hill radius at pericentre, m; `null` below `mass_and_orbit`. */
@@ -356,6 +369,12 @@ export interface SceneStarFrame {
   /** When the light seen left it. */
   readonly emitted: UniverseTime;
   readonly lightTime: Span;
+  /**
+   * Where it was at `emitted`, m: the retarded geometric centre, without aberration (R07.T10.a).
+   */
+  readonly emittedM: Vec3;
+  /** Its velocity relative to the barycentre at `emitted`, m/s ({@link composedVelocity}). */
+  readonly emittedVelocityMPerS: Vec3;
 }
 
 /** The scene at one time, as the ship sees it. */
@@ -413,8 +432,8 @@ function framesBody(body: SystemBody): boolean {
 
 /**
  * The scene at `time` as `observer`, the ship, sees it: each body's and star's geometric and
- * apparent positions and emitted time, each body's level, whether it is a contact and its Hill
- * radius, and the ship's local body.
+ * apparent positions, emitted time and its retarded centre and velocity then, each body's level,
+ * whether it is a contact and its Hill radius, and the ship's local body.
  *
  * @remarks
  * A body not present by its record is left out, as is a population and a body with neither an
@@ -497,6 +516,8 @@ export function sceneAt(
       apparentM: seen.apparentM,
       emitted: seen.emitted,
       lightTime: seen.lightTime,
+      emittedM: seen.geometricThenM,
+      emittedVelocityMPerS: composedVelocity(placements, body.id, seen.emitted),
       level: grant.level,
       hillRadiusM,
     });
@@ -516,6 +537,8 @@ export function sceneAt(
       apparentM: seen.apparentM,
       emitted: seen.emitted,
       lightTime: seen.lightTime,
+      emittedM: seen.geometricThenM,
+      emittedVelocityMPerS: composedVelocity(placements, id, seen.emitted),
     });
   }
 

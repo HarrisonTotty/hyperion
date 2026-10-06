@@ -11,7 +11,7 @@ import {
 import { newCameraState } from "../camera/state";
 import { rotation3FromRows } from "../coords/rotation";
 import { hullOutline, TEST_HULL, TEST_PLATE_DISTANCE_M } from "./hull";
-import { cameraSceneOf, sceneOrigins } from "./model";
+import { cameraSceneOf, sceneOrigins, staticRetarded } from "./model";
 
 describe("hullOutline", () => {
   const base = {
@@ -80,6 +80,24 @@ describe("the view fixtures", () => {
       ship: { kind: "body", body: FIXTURE_PLANET, m: vec3(2e7, 0, 0) },
       camera: "seat",
     });
+  });
+});
+
+describe("staticRetarded", () => {
+  it("puts a kept scene's body at rest where it is drawn, with no light time", () => {
+    const centreM = vec3(1.5e11, 0, -2);
+    expect(staticRetarded(centreM)).toEqual({
+      centreM,
+      velocityMPerS: vec3(0, 0, 0),
+      lightTimeS: 0,
+    });
+    expect(staticRetarded(centreM).centreM).toBe(centreM);
+  });
+
+  it("is every fixture body's, at its own drawn centre", () => {
+    const moved = aBody({ centreM: vec3(1, 2, 3) });
+    expect(moved.retarded).toEqual(staticRetarded(vec3(1, 2, 3)));
+    expect(aBody({ retarded: null }).retarded).toBeNull();
   });
 });
 

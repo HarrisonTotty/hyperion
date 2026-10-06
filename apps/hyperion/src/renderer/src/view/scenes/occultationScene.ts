@@ -112,12 +112,14 @@ export function occultationFrame(
       centreM: PLANET_CENTRE_M,
       figure: sphere(PLANET_RADIUS_M),
       photometry: PROVISIONAL_PHOTOMETRY,
+      lighting: undefined,
     },
     {
       id: OCCULTATION_MOON,
       centreM: moonCentre,
       figure: sphere(MOON_RADIUS_M),
       photometry: PROVISIONAL_PHOTOMETRY,
+      lighting: undefined,
     },
   ];
   const lights: PlacedLight[] = [

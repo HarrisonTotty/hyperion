@@ -14,6 +14,7 @@ import { AU_M } from "../scenes/kept";
 import { DISC_ANNULI_HIGH } from "./annuli";
 import type { PlacedLight } from "./hostLights";
 import { CHANNEL_LUMINANCE, photopicIlluminance, starIlluminance } from "./illuminance";
+import type { LightingBody } from "./occluders";
 import { sphereIrradianceBruteForce, UNIFORM_DISC } from "./oracle";
 import {
   litNeighbours,
@@ -61,6 +62,7 @@ const EARTH: ReflectingBody = {
   centreM: vec3(AU_M, 0, 0),
   figure: sphere(6.371e6),
   photometry: planetPhotometry("Earth"),
+  lighting: undefined,
 };
 
 /** A Moon of p_V 0.12 in every channel on the Moon's template (q at s = 1). */
@@ -78,6 +80,7 @@ function moonAt(angleDeg: number): ReflectingBody {
     centreM: add(EARTH.centreM, scale(offset, EARTH_MOON_M)),
     figure: sphere(1.7374e6),
     photometry: MOON_PHOTOMETRY,
+    lighting: undefined,
   };
 }
 
@@ -159,12 +162,14 @@ describe("planetshine's illuminance", () => {
       centreM: vec3(JUPITER_ORBIT_M, 0, 0),
       figure: { equatorialRadiusM: 7.1492e7, polarRadiusM: 6.6854e7, pole: vec3(0, 0, 1) },
       photometry: planetPhotometry("Jupiter"),
+      lighting: undefined,
     };
     const io: ReflectingBody = {
       id: "0200080020000000.0501",
       centreM: vec3(JUPITER_ORBIT_M - IO_ORBIT_M, 0, 0),
       figure: sphere(1.8215e6),
       photometry: MOON_PHOTOMETRY,
+      lighting: undefined,
     };
     const lux = photopic(io, [io, jupiter]);
     expect(lux).toBeGreaterThan(70 * 0.9);
@@ -194,6 +199,60 @@ describe("planetshine's illuminance", () => {
   });
 });
 
+describe("planetshine under lighting frames (T10.a)", () => {
+  /** Earth as a lighting frame's occluder, at `centreM`. */
+  const earthAt = (centreM: Vec3): LightingBody => ({ id: EARTH.id, centreM, radiusM: 6.371e6 });
+
+  it("places a neighbour where the body's lighting frame puts it, not where it is drawn", () => {
+    // The frame puts Earth 1,000 km off its drawn centre, across the Moon–Earth line.
+    const placed = add(EARTH.centreM, vec3(0, 0, 1e6));
+    const moon: ReflectingBody = {
+      ...moonAt(0),
+      lighting: { lights: [SUN], occluders: [earthAt(placed)] },
+    };
+    const [source] = sourcesOf(moon, [moon, EARTH], [SUN], 2);
+    const towards = sub(placed, moon.centreM);
+    expect(source?.body).toBe(EARTH.id);
+    expect(source?.distanceM).toBeCloseTo(norm(towards), 3);
+    expect(
+      norm(sub(source?.direction ?? vec3(0, 0, 0), scale(towards, 1 / norm(towards)))),
+    ).toBeLessThan(1e-12);
+  });
+
+  it("lights a neighbour by its own frame's stars, not where the stars are drawn", () => {
+    const moon = moonAt(0);
+    // From Earth's own frame the Sun stands beyond the Moon's side of it: new Earth from the Moon.
+    const earth: ReflectingBody = {
+      ...EARTH,
+      lighting: {
+        lights: [{ disc: SUN.disc, centreM: scale(EARTH.centreM, 2) }],
+        occluders: [{ id: moon.id, centreM: moon.centreM, radiusM: moon.figure.equatorialRadiusM }],
+      },
+    };
+    const full = photopic(moon, [moon, EARTH]);
+    expect(photopic(moon, [moon, earth])).toBeLessThan(1e-12 * full);
+  });
+
+  it("takes nothing from a neighbour the body's frame does not hold, a contact", () => {
+    const moon: ReflectingBody = { ...moonAt(0), lighting: { lights: [SUN], occluders: [] } };
+    expect(sourcesOf(moon, [moon, EARTH], [SUN], 2)).toEqual([]);
+  });
+
+  it("shadows a neighbour by the bodies of its own frame", () => {
+    // The Moon drawn clear, 2° from opposition, but in the umbra where its own frame puts Earth.
+    const moon = moonAt(178);
+    const shadowed: ReflectingBody = {
+      ...moon,
+      lighting: {
+        lights: [SUN],
+        occluders: [earthAt(add(EARTH.centreM, sub(moon.centreM, moonAt(180).centreM)))],
+      },
+    };
+    expect(photopic(EARTH, [EARTH, moon])).toBeGreaterThan(0.29);
+    expect(sourcesOf(EARTH, [EARTH, shadowed], [SUN], 2)).toEqual([]);
+  });
+});
+
 describe("planetshine's sources", () => {
   // A moon with three neighbours at full phase from it, each 4 × 10⁸ m away and brighter in turn.
   const moon = moonAt(0);
@@ -202,6 +261,7 @@ describe("planetshine's sources", () => {
     centreM: add(moon.centreM, scale(along, 4e8)),
     figure: sphere(radiusM),
     photometry: planetPhotometry("Earth"),
+    lighting: undefined,
   });
   const faint = neighbour("0010", 2e6, vec3(1, 0, 0));
   const middle = neighbour("0011", 4e6, vec3(Math.cos(0.3), Math.sin(0.3), 0));

@@ -42,7 +42,13 @@ function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
     glareSources: [],
     lights: [{ disc: aHostDisc(), centreM: vec3(AU_M, 0, -1e8) }],
     bodies: [
-      { id: lit.body, centreM: vec3(0, 0, -1e8), figure: lit.figure, photometry: lit.photometry },
+      {
+        id: lit.body,
+        centreM: vec3(0, 0, -1e8),
+        figure: lit.figure,
+        photometry: lit.photometry,
+        lighting: undefined,
+      },
     ],
     depthWriters: [],
     previousRegimes: new Map(),

@@ -62,7 +62,7 @@ describe("starIlluminance", () => {
     ).toBeCloseTo(1, 12);
   });
 
-  it("turns the light by under 10⁻⁷ rad when the star-to-body light time is neglected", () => {
+  it("turns the light by under 10⁻⁷ rad where the star's reflex motion is left out", () => {
     // The Sun's reflex speed about the Sun–Jupiter barycentre: Jupiter's orbital speed, 13.07 km/s,
     // times its mass over the total, 1.8982 × 10²⁷ ÷ (1.9885 × 10³⁰ + 1.8982 × 10²⁷) kg (NASA fact
     // sheets); the direction moves by v ÷ c.

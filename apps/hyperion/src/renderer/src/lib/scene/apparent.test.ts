@@ -487,6 +487,49 @@ describe("sceneAt", () => {
     expect(frame?.stars.map((star) => star.id)).toEqual([idOf("0000")]);
   });
 
+  it("gives each body and star its retarded centre: its track at its emitted time, without aberration", () => {
+    const observer = observerOf(golden);
+    const frame = sceneAt(model, observer, golden.time, null);
+    const placements = systemPlacements(system);
+    const entries = [
+      ...(frame?.bodies ?? []).flatMap((body) => (body.kind === "placed" ? [body] : [])),
+      ...(frame?.stars ?? []),
+    ];
+
+    expect(entries.length).toBeGreaterThan(2);
+    for (const entry of entries) {
+      const seen = seenOrThrow(
+        apparentPosition(placedTrack(placements, entry.id), observer, golden.time, null),
+      );
+      expect(entry.emittedM).toEqual(seen.geometricThenM);
+      expect(entry.emittedM).toEqual(placedTrack(placements, entry.id).positionAt(entry.emitted));
+    }
+  });
+
+  it("gives each body and star its velocity at its emitted time, the track's derivative", () => {
+    const frame = sceneAt(model, observerOf(golden), golden.time, null);
+    const placements = systemPlacements(system);
+    const entries = [
+      ...(frame?.bodies ?? []).flatMap((body) => (body.kind === "placed" ? [body] : [])),
+      ...(frame?.stars ?? []),
+    ];
+
+    const moving = entries.filter((entry) => norm(entry.emittedVelocityMPerS) > 0);
+    expect(moving.length).toBeGreaterThan(1);
+    for (const entry of entries) {
+      const track = placedTrack(placements, entry.id);
+      const ahead = track.positionAt(later(entry.emitted, 1e9));
+      const behind = track.positionAt(later(entry.emitted, -1e9));
+      if (ahead === null || behind === null) {
+        throw new Error("a placed body's track is never absent");
+      }
+      // A central difference over ±1 s, which errs by about j h² ÷ 6 and the positions' rounding
+      // over 2 s, both far under 1 mm/s here.
+      const difference = times(minus(ahead, behind), 0.5);
+      expect(norm(minus(entry.emittedVelocityMPerS, difference))).toBeLessThan(1e-3);
+    }
+  });
+
   it("starts a frame 16 ms on warm from the frame before, within the bound of a cold start", () => {
     const observer = observerOf(golden);
     const before = sceneAt(model, observer, golden.time, null);

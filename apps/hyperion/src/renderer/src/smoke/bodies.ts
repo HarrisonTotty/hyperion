@@ -129,6 +129,7 @@ async function drawDisc(
     centreM,
     figure,
     photometry: PROVISIONAL_PHOTOMETRY,
+    lighting: undefined,
     ...(mapped === null ? {} : { surface: mapped.surface, rotation: mapped.rotation }),
   };
   const options = {
@@ -158,6 +159,7 @@ async function drawDisc(
       centreM: add(centreM, scale(towards, -distanceM)),
       figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
       photometry: PROVISIONAL_PHOTOMETRY,
+      lighting: undefined,
     });
   }
   const plan = planLitBodies([body, ...others], hosts, options, new Map([[body.id, "disc"]]));
@@ -655,6 +657,7 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
           centreM,
           figure: SPHERE,
           photometry: PROVISIONAL_PHOTOMETRY,
+          lighting: undefined,
         },
       ],
       depthWriters: [],

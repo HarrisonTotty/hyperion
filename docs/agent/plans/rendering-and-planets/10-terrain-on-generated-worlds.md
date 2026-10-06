@@ -1272,6 +1272,13 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
 
 ## Risks and open points
 
+- **The local body's terrain sits ωτ ahead of its lighting (from R07.T10.a, ruled 2026-10-05).**
+  R07 lights the ship's local body at its retarded time, T − τ, as the brainstorm draws every
+  time-varying state, while its geometry, and so this plan's terrain, is drawn at the present.
+  Once rotation is drawn, the terrain sits ωτ ahead of its lighting: about 2,100 km at a Jupiter's
+  equator from its Hill sphere's edge (τ 168 s), about 38 km at τ 3 s. This plan decides whether
+  to draw rotation-dependent state (the class map's orientation, shadows on terrain) at the
+  retarded time too.
 - **The selection bound's calibration is an owner ruling.** If T4.a's 99.9th-percentile ratios fall
   at the expected 0.3–0.5, the hard bound costs four to eleven times the patches of a perfect bound;
   selection by min(hard, 4σ) recovers two to three times. The owner rules with T4.a's recorded

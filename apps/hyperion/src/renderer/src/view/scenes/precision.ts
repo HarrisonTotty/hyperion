@@ -2,7 +2,7 @@ import { add, vec3, type Vec3 } from "../../geometry/vec3";
 import type { CameraPose } from "../camera/pose";
 import { IDENTITY_QUATERNION, multiply, quaternionFromAxisAngle } from "../camera/quaternion";
 import { TEST_HULL } from "../scene/hull";
-import { bodyKindSymbol, type ViewScene } from "../scene/model";
+import { bodyKindSymbol, staticRetarded, type ViewScene } from "../scene/model";
 import {
   AU_M,
   KEPT_BARYCENTRE,
@@ -66,6 +66,8 @@ function precisionSceneAt(tS: number): ViewScene {
     positionM: TEST_HULL.eyePointM,
     orientation: IDENTITY_QUATERNION,
   };
+  const planetCentreM = add(PRECISION_SHIP_M, PLANET_OFFSET_M);
+  const moonCentreM = add(PRECISION_SHIP_M, MOON_OFFSET_M);
   return {
     provenance: { kind: "kept", name: PRECISION_SCENE_NAME },
     time: keptTime(tS),
@@ -82,7 +84,8 @@ function precisionSceneAt(tS: number): ViewScene {
         // Earth's mean radius (IUGG; Moritz, Geodetic Reference System 1980).
         radiusM: 6.371e6,
         hillRadiusM: null,
-        centreM: add(PRECISION_SHIP_M, PLANET_OFFSET_M),
+        centreM: planetCentreM,
+        retarded: staticRetarded(planetCentreM),
         rotation: null,
         symbol: bodyKindSymbol("planet"),
         orbitNormal: null,
@@ -95,7 +98,8 @@ function precisionSceneAt(tS: number): ViewScene {
         // The Moon's mean radius (Archinal et al. 2018, IAU WGCCRE).
         radiusM: 1.7374e6,
         hillRadiusM: null,
-        centreM: add(PRECISION_SHIP_M, MOON_OFFSET_M),
+        centreM: moonCentreM,
+        retarded: staticRetarded(moonCentreM),
         rotation: null,
         symbol: bodyKindSymbol("moon"),
         orbitNormal: null,

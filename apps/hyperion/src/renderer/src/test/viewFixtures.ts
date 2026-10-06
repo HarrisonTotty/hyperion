@@ -15,6 +15,7 @@ import type { ViewPosition } from "../view/coords/position";
 import { TEST_HULL } from "../view/scene/hull";
 import {
   bodyKindSymbol,
+  staticRetarded,
   type ViewBody,
   type ViewCraft,
   type ViewScene,
@@ -121,8 +122,12 @@ export function aCameraScene(
   };
 }
 
-/** A body of the fixtures' system, by default the Earth-like planet 1 au out. */
+/**
+ * A body of the fixtures' system, by default the Earth-like planet 1 au out, at rest where it is
+ * drawn (`staticRetarded` at its centre) unless `overrides` gives its `retarded`.
+ */
 export function aBody(overrides: Partial<ViewBody> = {}): ViewBody {
+  const centreM = overrides.centreM ?? FIXTURE_PLANET_CENTRE_M;
   return {
     id: FIXTURE_PLANET,
     parent: null,
@@ -130,7 +135,8 @@ export function aBody(overrides: Partial<ViewBody> = {}): ViewBody {
     designation: "TEST PLANET",
     radiusM: 6.371e6,
     hillRadiusM: FIXTURE_PLANET_HILL_M,
-    centreM: FIXTURE_PLANET_CENTRE_M,
+    centreM,
+    retarded: staticRetarded(centreM),
     rotation: null,
     symbol: bodyKindSymbol("planet"),
     orbitNormal: null,
