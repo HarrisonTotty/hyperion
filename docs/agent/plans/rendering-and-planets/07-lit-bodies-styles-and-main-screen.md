@@ -937,8 +937,11 @@ and `--port`.
     brainstorm's tested case. A same-origin child window's canvas configured with the opener's
     device renders and presents, paced at 16.7 ms from either window's animation frames; closing it
     is not a device loss, but the next submit raises a validation error, so the client drops the
-    child's context on `pagehide` and expects that error. Pacing on a second monitor is untested,
-    for want of one (R07.T21).
+    child's context on `pagehide` and expects that error. _Amended by T21 (2026-10-06): the
+    `pagehide` can come after the opener's next frame, so a child the opener closes itself has its
+    context dropped at that `close()`, and the `pagehide` drops it for every other close (R01.T13's
+    rule as amended, in R01's T13 as-built notes)._ Pacing on a second monitor is untested, for
+    want of one (R07.T21).
 16. **Symbology over the image is cased; text sits on plates.** Every mark over a photorealistic
     image is stroked twice, a `--surface-0` casing at the guide's widths beneath the coloured
     stroke, never a blur or glow (guide item 3); a DOM readout over the canvas sits on its own
@@ -1766,20 +1769,30 @@ R01.T13 records the child-window prototype, with the research probe as its first
 adds what that probe could not: an instrument view in a same-origin child window on a second
 monitor, on R01.T13's prototype branch, recording whether Chromium on X11 paces it from that
 display's vsync, and its frame times beside the main view's; and that the prototype's release of the
-child's context on `pagehide` holds there. Done when a second display is available. Acceptance: the
-record.
+child's context holds there: at the opener's `close()` of the child, with the child's `pagehide` for
+every other close (R01.T13's rule as this task amended it; see below). Done when a second display
+is available. Acceptance: the record.
 
 - **By hand, for the owner (harness prepared 2026-10-05).** With a second display connected and the
   desktop extended onto it, at another refresh rate than the first where one is to hand: `just
   child-window-check --seconds 60`. The opener stands on the primary display and a same-origin
   child, a view of the opener's engine, on the second; the child is resized at 30 s and closed at
-  60 s, its view dropped on its `pagehide`, and the opener draws on for 2 s. It writes
+  60 s, its view dropped at the opener's `close()` of it, and the opener draws on for 2 s. It writes
   `docs/measurements/several-views/<date>-<machine>-child-window.md`: the displays, the child's
   frame intervals against its display's period beside the opener's, both views' GPU time, the
   release and the uncaptured errors after the close. With one display it refuses (exit 2) and
   opens nothing. The checklist is in that directory's README; the record's verdicts are entered
   here as one line when it lands. R01.T13's prototype branch no longer exists; this harness
   rebuilds it (see "Deviations in the T20 and T21 harnesses").
+- **The release rule, amended (2026-10-06), for the next builder of child windows.** The hidden
+  smoke found the child's `pagehide` one of the opener's frames after the opener's `close()`, which
+  R01.T13's rule had assumed could not happen. The rule now: where the opener closes a child
+  itself, it drops the child's view (its context and attachments) at its `close()`, before the
+  call; the child's `pagehide` drops it for every other close, the user's among them; whichever
+  comes first drops it, and the other does nothing. R01's T13 as-built notes hold the rule as it
+  stands. It is built as `holdChildView` in this task's scene (`renderer/src/smoke/childWindow.ts`),
+  the one place it lives while the client opens no window; R07's `InstrumentView` in a child window,
+  when it is built, takes the rule from there. See "Deviations in T21's release at the close".
 
 ### Phase C: the main screen (gated on the sessions plan)
 
@@ -3294,8 +3307,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     cannot be told apart, which the record says. The release passes where the child's `pagehide`
     came; the opener's frames between the close and the `pagehide`, each still drawing the closing
     child, are counted beside it, and the uncaptured-error count judges whether any reached a
-    closed context. The resize passes only where the child drew at a size other than the one
-    before it. The record counts the GPU process's exits, since the shown run
+    closed context (until 2026-10-06; the release is now at the close, see "Deviations in T21's
+    release at the close"). The resize passes only where the child drew at a size other than the
+    one before it. The record counts the GPU process's exits, since the shown run
     is this plan's on-screen check of a child window under the Vulkan surface ("Hidden-window
     resizes restart the GPU process"), and describes the machine as R05's records do.
   - **Smoke runs on this machine** (hidden, never shown, the RTX 3080 under load; not T20's or
@@ -3320,9 +3334,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     about 120 frames in the 2 s after the close with no loss; and the GPU process never exited. A
     `pagehide` a frame late is a finding for the client's rule (R01.T13's assumed it comes before
     the opener's next frame): where the opener closes a child itself, it can drop the view at the
-    close; its resize is the shown run's, since an offscreen child has no size of
-    its own. The one-display refusal, run under headless Ozone so that no display is touched,
-    exits 2 before any window opens.
+    close (done 2026-10-06; see "Deviations in T21's release at the close"); its resize is the
+    shown run's, since an offscreen child has no size of its own. The one-display refusal, run
+    under headless Ozone so that no display is touched, exits 2 before any window opens.
   - **The development machine's display.** Electron on this session's X display (`:1`) reports one
     display, a `VX2450 SERIES` at 60.00 Hz, 2458 × 1383 DIP at a scale of 0.78125 (1920 × 1080
     px), not the projector at 59.94 Hz on `:0` that the README describes (for the orchestrator).
@@ -3357,6 +3371,70 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     sides (the display, the refusal, the window-open handler, the record, the pacing reading).
   - **Gate.** No `just ci` (the Day 2 protocol): `pnpm --filter hyperion test`, `just check lint`,
     and `just test-render`, since `src/smoke/` changed.
+- **Deviations in T21's release at the close, as built** (2026-10-06; the views lane's follow-up
+  to the T21 harness's finding).
+  - **The rule, amended.** R01.T13's rule dropped a child's view on its `pagehide` alone, and
+    assumed that came before the opener's next frame. The hidden smoke found the `pagehide` a frame
+    late in one run of three. So the opener now drops the view at its own `close()` of the child,
+    before the call. The `pagehide` stays the release of every other close. Whichever comes first
+    drops the view, and the other does nothing. R01's T13 as-built notes hold the rule as it
+    stands, and T21's text points to it.
+  - **Where it lives.** `holdChildView(child, view)` in `renderer/src/smoke/childWindow.ts`, T21's
+    scene, gives:
+    - `view()`, the view, or `null` once it is dropped;
+    - `releasedBy()`, `"close"`, `"pagehide"` or `null`;
+    - `close()`, which drops the view, then closes the window.
+
+    Dropping the view also removes the hold's `pagehide` listener, for a client that drops a view
+    while its window stays open. The scene draws `view()` only while it is held. The client opens no window (`main/index.ts`
+    denies every one) and no shared code held the rule, so no production path changed. The first
+    client view in a child window takes `holdChildView` from there, moved where both can import
+    it.
+  - **The record's check** is now "T21 the child's view was dropped at its close", read by
+    `closeRelease` in place of `pagehideRelease`. It passes where the opener's close dropped the
+    view and a `pagehide` came after it, and gives the opener's frames between. It fails where
+    nothing dropped the view, where a `pagehide` dropped it first (the child closed before the
+    opener closed it) or where no `pagehide` came. It reads `releasedBy` by an exhaustive
+    `switch` that assigns its reading in each case, as `view/engine/status.ts` does, since oxlint's
+    `consistent-return` refuses a function that returns from inside its cases.
+  - **A hidden child is not resized.** Halfway, the scene used to resize the hidden child too,
+    though an offscreen child has no size of its own and its resize check passed hidden anyway. A
+    hidden run now resizes no window (`resizeDue`). So the smoke can borrow `:0` as an offscreen
+    proxy, on the orchestrator's condition for T19.d's captures: every window made at its final
+    size and never resized.
+  - **Tests** (`childWindow.test.ts`, the renderer's) use a fake child window whose `pagehide`
+    fires only when the test fires it:
+    - the view is dropped at `close()`; the opener's next frame draws nothing in the child, and
+      the late `pagehide` drops nothing;
+    - a `pagehide` raised inside `close()` finds the view already dropped;
+    - a `pagehide` from a close the opener did not make drops the view, and the opener's `close()`
+      after it drops nothing;
+    - in each case the view is disposed of once, and the hold stops listening once it drops it;
+    - `closeRelease`'s five readings;
+    - `resizeDue`: once, halfway through a shown child's time, and never for a hidden child.
+  - **The hidden smoke, rerun** (2026-10-06, RTX 3080; not T21's record and not committed). The
+    hidden scene ran as `just child-window-check --hidden --seconds 6` runs it, with
+    `--force-device-scale-factor=1` added. It ran under `DISPLAY=:0` as the offscreen proxy, in a
+    capped scope, both windows offscreen, never shown and never resized. There were nine runs in
+    three sets of three: at load average 1.7, after the review's fixes at 16.3, and on the final
+    code at 11.6.
+    - All nine exit 0, with every check passing.
+    - The view was dropped at the close in all nine. The `pagehide` came one of the opener's frames
+      later in three runs (one of the first set, two of the second, none of the third), and before
+      the next frame in the other six.
+    - There were 0 uncaptured GPU errors, 0 device losses and no GPU-process exit in any run.
+    - The opener drew 116–121 frames in the 2 s after the close in eight runs, and 71 in one of the
+      loaded runs, whose frames' 95th percentile was 50.1 ms. Both windows' animation frames came
+      at 16.70 ms (median) in every run.
+    - Electron there reports one display, a `VX2450 SERIES` at 1920 × 1080 and 60.00 Hz, at the
+      forced scale of 1.
+  - **Gate.** No `just ci` (the Day 2 protocol): `pnpm --filter hyperion test` (319 files, 5,289
+    tests), `just check lint` from a clean typecheck cache, and Prettier. There was no
+    `just test-render`: the T21 scene is not among its checks, and the build and the smoke above
+    load the changed page. The typescript-reviewer had no must-fix. Its two should-fix findings
+    are fixed: the hidden run's skipped resize is now `resizeDue`, with tests, and `closeRelease`
+    reads `releasedBy` exhaustively. Its consider is taken: the hold removes its `pagehide`
+    listener.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
     `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in

@@ -7,12 +7,13 @@
  * The opener draws its full-window `cockpit` canvas and the child's `child instrument` canvas
  * every animation frame, each with a marker in its top-left quadrant and a one-pass post-process,
  * as R01.T11's soak does. The child's own `requestAnimationFrame` is timed apart from the
- * opener's: on a second display Chromium should pace it from that display's vsync. Halfway the
- * child is resized; at the end it is closed, and R01.T13's rule is kept: its view is dropped on
- * its `pagehide` (the record says how many of the opener's frames came first; the main process
- * counts any uncaptured GPU error against the run), and the opener draws on for
- * {@link CLOSE_TAIL_MS}. Not part of `just test-render`: it needs a display and a
- * real GPU, and its figures are R07's record.
+ * opener's: on a second display Chromium should pace it from that display's vsync. Halfway a
+ * shown child is resized (a hidden one never is); at the end the opener closes it under R01.T13's
+ * rule as R07.T21 amended it ({@link holdChildView}): its view is dropped at the opener's
+ * `close()`, and its `pagehide`, which can come a frame later, finds nothing left to drop (the
+ * record says how many of the opener's frames came between; the main process counts any
+ * uncaptured GPU error against the run). The opener draws on for {@link CLOSE_TAIL_MS}. Not part
+ * of `just test-render`: it needs a display and a real GPU, and its figures are R07's record.
  */
 
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -79,31 +80,121 @@ export function childPacing(
   };
 }
 
+/** What dropped a child's view: the opener's own `close()` of it, or the child's `pagehide`. */
+export type ChildRelease = "close" | "pagehide";
+
+/** A child window as its view's release reads it. */
+export interface ClosingChild {
+  close(): void;
+  addEventListener(type: "pagehide", listener: () => void): void;
+  removeEventListener(type: "pagehide", listener: () => void): void;
+}
+
+/** A child window's view, held until the opener's `close()` of it or the child's `pagehide`. */
+export interface HeldChildView {
+  /** The view while the child may be drawn, `null` once it is dropped. */
+  view(): RenderView | null;
+  /** What dropped the view, `null` while it is held. */
+  releasedBy(): ChildRelease | null;
+  /** The opener's close of the child: drops the view, then closes the window. */
+  close(): void;
+}
+
 /**
- * Whether the child's view was dropped on its `pagehide`, and how many of the opener's frames
- * came between the close and the `pagehide`, from the opener's frame count at each (`null` where
- * no `pagehide` came).
+ * Holds `view`, a view of the opener's engine on a canvas in `child`, under R01.T13's release
+ * rule as R07.T21 amended it.
  *
  * @remarks
- * R01.T13's rule drops the view on `pagehide` and expected that to come before the opener's next
- * frame. A frame between still draws the closing child; whether any of it reached a closed
- * context is the uncaptured-error count the main process judges, so the frames between are a
- * finding beside the release, not its failure.
+ * Where the opener closes the child itself, {@link HeldChildView.close} disposes of the view (its
+ * context and attachments) before it closes the window: the child's `pagehide` can come one of
+ * the opener's frames after the opener's `close()` (R07.T21's hidden smoke), and that frame would
+ * submit to a closing context. Every other close, the user's among them, is met on the child's
+ * `pagehide`. Whichever comes first disposes of the view; the other does nothing, so it is
+ * disposed of once. The `pagehide` listener is removed with the view.
  */
-export function pagehideRelease(
+export function holdChildView(child: ClosingChild, view: RenderView): HeldChildView {
+  let held: RenderView | null = view;
+  let cause: ChildRelease | null = null;
+  const onPagehide = (): void => {
+    release("pagehide");
+  };
+  const release = (by: ChildRelease): void => {
+    if (held === null) {
+      return;
+    }
+    const dropped = held;
+    held = null;
+    cause = by;
+    child.removeEventListener("pagehide", onPagehide);
+    dropped.dispose();
+  };
+  child.addEventListener("pagehide", onPagehide);
+  return {
+    view: () => held,
+    releasedBy: () => cause,
+    close: () => {
+      // Dropped first, so that a `pagehide` that `close()` raises at once finds nothing to drop.
+      release("close");
+      child.close();
+    },
+  };
+}
+
+/**
+ * Whether the opener's `close()` dropped the child's view, and where the child's `pagehide` came
+ * after it, from the opener's frame count at each (`null` where no `pagehide` came).
+ *
+ * @remarks
+ * The view is dropped at the close, so no frame after it draws the closing child, however late
+ * the `pagehide`; the frames between are a finding beside the release. A `pagehide` that never
+ * came fails it: the `pagehide` is the release of every close the opener does not make.
+ */
+export function closeRelease(
+  releasedBy: ChildRelease | null,
   atClose: number,
   atPagehide: number | null,
 ): { readonly pass: boolean; readonly detail: string } {
-  if (atPagehide === null) {
-    return { pass: false, detail: "no pagehide reached the opener" };
-  }
-  const after = atPagehide - atClose;
-  return after === 0
-    ? { pass: true, detail: "before the opener's next frame after the close" }
-    : {
-        pass: true,
-        detail: `${String(after)} of the opener's frames after the close, each still drawing the closing child (see the uncaptured GPU errors)`,
+  let reading: { readonly pass: boolean; readonly detail: string };
+  switch (releasedBy) {
+    case null:
+      reading = { pass: false, detail: "the view was never dropped" };
+      break;
+    case "pagehide":
+      reading = {
+        pass: false,
+        detail: "the child closed before the opener closed it: its pagehide dropped the view",
       };
+      break;
+    case "close": {
+      const after = atPagehide === null ? null : atPagehide - atClose;
+      reading =
+        after === null
+          ? { pass: false, detail: "dropped at the close, but no pagehide reached the opener" }
+          : {
+              pass: true,
+              detail: `at the close; the pagehide came ${after === 0 ? "before the opener's next frame" : `${String(after)} of the opener's frames later`} and dropped nothing`,
+            };
+      break;
+    }
+  }
+  return reading;
+}
+
+/**
+ * Whether the opener resizes the child on this frame: once, halfway through the child's
+ * `seconds`, and never where the child is hidden.
+ *
+ * @remarks
+ * A hidden child has no size of its own (R01.T13), so its resize is the shown run's; and a hidden
+ * run resizes no window, so that it can borrow a display as an offscreen proxy without reaching it.
+ */
+export function resizeDue(
+  hidden: boolean,
+  resized: boolean,
+  elapsedMs: number,
+  seconds: number,
+): boolean {
+  return !hidden && !resized && elapsedMs >= (seconds * 1000) / 2;
 }
 
 /**
@@ -235,17 +326,18 @@ export async function runChildWindow(
     engine.dispose();
     return;
   }
-  let childView: RenderView | null = engine.createView(fillingCanvas(child), "child instrument");
-  // The opener's frames counted, so that the release is placed against the close.
+  const childView = holdChildView(
+    child,
+    engine.createView(fillingCanvas(child), "child instrument"),
+  );
+  // The opener's frames counted, so that the pagehide is placed against the close.
   const frames: { drawn: number; atClose: number; atPagehide: number | null } = {
     drawn: 0,
     atClose: 0,
     atPagehide: null,
   };
   child.addEventListener("pagehide", () => {
-    childView?.dispose();
-    childView = null;
-    frames.atPagehide = frames.drawn;
+    frames.atPagehide ??= frames.drawn;
   });
 
   const childIntervals: number[] = [];
@@ -279,7 +371,7 @@ export async function runChildWindow(
       last = nowMs;
       frames.drawn += 1;
       draw(cockpit, "cockpit", windowSize(window), nowMs);
-      const view = childView;
+      const view = childView.view();
       if (view !== null) {
         const size = windowSize(child);
         const text = `${String(size.widthPx)} × ${String(size.heightPx)}`;
@@ -289,7 +381,7 @@ export async function runChildWindow(
         draw(view, "child instrument", size, nowMs);
       }
       const elapsedMs = nowMs - start;
-      if (!resized && elapsedMs >= (seconds * 1000) / 2) {
+      if (resizeDue(rates.hidden, resized, elapsedMs, seconds)) {
         resized = true;
         sizesBeforeResize = childSizes.length;
         child.resizeTo(CHILD_RESIZED.width, CHILD_RESIZED.height);
@@ -298,7 +390,7 @@ export async function runChildWindow(
         closedAtMs = nowMs;
         childOpen = false;
         frames.atClose = frames.drawn;
-        child.close();
+        childView.close();
       } else if (closedAtMs !== null) {
         framesAfterClose += 1;
       }
@@ -314,8 +406,8 @@ export async function runChildWindow(
   stopTimes();
   stopFaults();
   const snapshot = status.getSnapshot();
-  const release = pagehideRelease(frames.atClose, frames.atPagehide);
-  checks.check("T21 the child's view was dropped on its pagehide", release.pass, release.detail);
+  const release = closeRelease(childView.releasedBy(), frames.atClose, frames.atPagehide);
+  checks.check("T21 the child's view was dropped at its close", release.pass, release.detail);
   const pacing = childPacing(childIntervals, openerIntervals, rates);
   checks.check("T21 the child is paced by its own display", pacing.pass, pacing.detail);
   const cockpitTimes = times.get("cockpit") ?? [];
@@ -328,7 +420,7 @@ export async function runChildWindow(
   checks.check(
     "T21 the child followed its resize",
     rates.hidden || resizedFrom(childSizes, sizesBeforeResize),
-    `child canvas ${childSizes.join(" → ")} device px${rates.hidden ? "; hidden: an offscreen child has no size of its own (R01.T13), so its resize is the shown run's" : ""}`,
+    `child canvas ${childSizes.join(" → ")} device px${rates.hidden ? "; hidden: not resized, since an offscreen child has no size of its own (R01.T13); its resize is the shown run's" : ""}`,
   );
   checks.check(
     "T21 the opener drew on after the child closed",
