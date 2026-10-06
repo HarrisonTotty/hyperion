@@ -994,7 +994,9 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     within 10 s of a segment change. Chromium keeps one trace session at a time, so windows never
     overlap. The frames from a boundary's stop to 1 s after the next window starts are left out of
     every per-frame figure and counted: at most 5% of the descent after the warm-up and of any
-    segment, and none from 10 s before the approach (T14.d, T14.e, T14.g).
+    segment, and no frame excluded in the approach or any later segment. The last boundary's
+    exclusion (its gap plus the guard) must end before the approach begins (T14.d, T14.e, T14.g;
+    the clause clarified by the orchestrator under delegation, 2026-10-06, T14.f).
     `disabled-by-default-v8.cpu_profiler` and `gpu` are recorded only in a profiled run
     (`--trace-profile on`, with a 1.5 GiB buffer), a diagnostic that is never judged. V8 samples
     each isolate every 100 µs and keeps every sample in the renderer until the trace stops, about
@@ -2157,7 +2159,10 @@ src/main/spike src/main/spikeSession src/main/cli src/preload`;
   - the tracing service's peak at most its largest working set plus 100 MB (no growth at the stop);
   - each boundary's gap, its excluded frames and its largest rAF interval in the gap;
   - in the timed runs, the **budget met:** ≤ 5% of the descent after the warm-up, ≤ 5% of each
-    segment, none from 950 s;
+    segment, and no frame excluded in the approach or any later segment. The last boundary's
+    exclusion (its gap plus the guard) must end before the approach begins. _Clarified by the
+    orchestrator under delegation (2026-10-06):_ the ruling's "none from 950 s" could be read as
+    broken by construction, since its own last boundary is at 950 s;
   - in the timed runs, the renderer's private growth ≤ 0.1 MB/s from 60 s;
   - the post-run decoding's time (≤ 5 min) and the main process's peak during it;
   - the disk used;
@@ -3363,6 +3368,13 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     - **Pending:** the visible run stays with the owner, its command in
       `docs/measurements/descent-spike/README.md` (decisions-r05.md item 7). Its presentation
       figures need the trace's remedy first.
+  - **Re-taken by T14.f, 2026-10-06** (`2026-10-06-effect-low.md`): the hidden low run with the
+    windowed protobuf trace, started at load 0.36. All nine windows were decoded and matched frame
+    by frame, at most 23% of a window's buffer. The trace's figures are present, and 2.16% of the
+    descent was left out at the boundaries. rAF p50 / p95 / p99 were 16.70 / 16.80 / 33.30 ms,
+    terrain 0.68 ms, atmosphere 3.58 ms and GPU memory 0.256 GB. The record is the Risks bullet
+    "R05.T14.f, the windowed hidden runs, as built". The trace's remedy is proven, so the visible
+    run now waits only for the owner, with the check of its windows in the README.
   - Results schema version 2 (2026-10-04, delegated decision): v1's memory samples, an object
     per second, made the T14.c hidden run's file 563,230 B, over the 500 KiB hook. Version 2
     stores them as columns of whole KiB, which brings that run to about 105 kB and an hour's run
@@ -3976,6 +3988,164 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     3. A packet marked as following lost packets fails its window, as `dataLossOccurred` does.
        T14.h built it so: the decoder fails the file ("the trace lost packets of sequence N before
        this one").
+
+- **R05.T14.f, the windowed hidden runs, as built** (2026-10-06; `decision-r05-trace-windows-2.md`,
+  ruling 5d and its T14.f; lane D). All runs hidden on the RTX 3080 (driver 615.71.09, Electron
+  44.4.3, Chromium 152.0.7977.130, Linux `vulkan` mode, timer `full`), seed 7, port 7893. The
+  orchestrator held other heavy work back for the window.
+  - _Conditions._ Each run took `just _locked` for itself alone, with its own 8 GB scope
+    (`--unit=t14f-<run>`, `TasksMax` 4096). It started only when a read-only gate passed, both
+    before the lock and again inside it:
+    - the 1-min load at most 4 (A/B) or 8 (full runs);
+    - no `cargo`, `cargo-nextest`, `rustc` or `descentDemand.mjs`;
+    - no other spike, views-check or `gpu-replay` run;
+    - at the orchestrator's request, no Electron or Chrome process but the run's own;
+    - at least 6 GB available.
+      A no-relaunch guard followed every run. The scripts are uncommitted, in
+      `target/laneD/t14f2/`: `gate.sh`, `go.sh`, `locked.sh`, `run.sh`, the 0.5 s sampler
+      `sample.sh`, and the analyses `ab.py` and `full.py`. Every run's log, samples and report dump
+      are kept there too.
+  - _The instrument_ (uncommitted, `target/laneD/t14f2/ab.patch`):
+    - `HYPERION_T14F_AB=detached|attached` swaps `CdpTracing` for a stand-in, `T14fAbTracing`. It
+      never sends `Tracing.start`, and its stops write empty window files, so every trace figure
+      is null.
+    - In the attached arm it attaches the spike window's own `webContents.debugger` ("1.3") at the
+      first window's start, with `CdpTracing`'s listeners, and detaches it after the last stop. Each
+      attached run logged the attach, then the detach "after 0 protocol messages".
+    - The controller's script ends at `Math.min(durationS, 255)`.
+    - `HYPERION_T14F_REPORT=<file>` dumps the renderer's report at the results call.
+      The full runs carry the dump alone (`full.patch`), which acts only after the run. It gives
+      the guard's statistic, which needs every frame's rAF interval.
+  - **The debugger's A/B: the idle session costs nothing.** Six untraced 255 s low runs, in the
+    order detached, attached, detached, attached, detached, attached. Each figure is taken over
+    script time 10–255 s; the growth is the least-squares slope of the renderer's private memory
+    from 60 s, with 1 MB = 10⁶ B.
+
+    | Run | Arm      | Load at start | Load during | Our code p50 / p95 (ms) | rAF p95 / p99 (ms) | Growth (MB/s) |
+    | --- | -------- | ------------: | ----------- | ----------------------- | ------------------ | ------------: |
+    | 1   | detached |          1.21 | 1.18–2.55   | 1.50 / 1.90             | 16.80 / 33.30      |        0.0526 |
+    | 2   | attached |          0.87 | 0.87–2.18   | 1.50 / 1.80             | 16.80 / 33.30      |        0.0484 |
+    | 3   | detached |          0.62 | 0.62–2.36   | 1.50 / 1.80             | 16.80 / 33.30      |        0.0474 |
+    | 4   | attached |          0.65 | 0.65–2.86   | 1.50 / 1.90             | 16.80 / 33.30      |        0.0541 |
+    | 5   | detached |          0.70 | 0.70–1.18   | 1.50 / 1.90             | 16.80 / 33.30      |        0.0467 |
+    | 6   | attached |          0.36 | 0.36–2.40   | 1.50 / 1.80             | 16.80 / 33.30      |        0.0482 |
+
+    | Figure            | Detached range | Allowed (± 2% of the median) | Attached median | Verdict |
+    | ----------------- | -------------- | ---------------------------- | --------------: | ------- |
+    | our code p50 (ms) | 1.50–1.50      | 1.47–1.53                    |            1.50 | within  |
+    | our code p95 (ms) | 1.80–1.90      | 1.76–1.94                    |            1.80 | within  |
+    | rAF p95 (ms)      | 16.80–16.80    | 16.46–17.14                  |           16.80 | within  |
+    | rAF p99 (ms)      | 33.30–33.30    | 32.63–33.97                  |           33.30 | within  |
+    | growth (MB/s)     | 0.0467–0.0526  | 0.0458–0.0535                |          0.0484 | within  |
+    - Our code's times are on `performance.now()`'s 0.1 ms grid, and the rAF intervals are
+      multiples of the vsync. Their percentiles are therefore coarse, and identical runs give
+      identical values. The growth is the continuous figure. By endpoints the attached median is
+      0.0425 MB/s against a detached range of 0.0299–0.0661 MB/s, also within.
+    - _Run 1 was repeated._ Its first try started at load 1.85, but another lane's pre-commit
+      hook compiled `hyperion-sim` through most of it (load 1.85–15.63, mean 8.94). That try gave
+      our code 1.70 / 5.20 ms, rAF 16.80 / 33.50 ms and growth 0.0570 MB/s. It is kept as
+      `ab1-d-loaded` and left out of the verdict, since the A/B is defined at low load. Its p95 is
+      2.7 times the quiet runs', which shows how much load moves our code's tail.
+
+  - **The three full runs: every check holds.** Each run exited 0, with every window decoded,
+    matched frame by frame and written with no data loss. `coredumpctl` listed 40 dumps before and
+    after each run. All three files validate as version 4 and are 117,718 / 118,703 / 119,073 B
+    once formatted (high / low / low-profiled). Each started below a load of 1, so none is
+    provisional; their verdicts are `not-measured`, being hidden.
+
+    | Figure                              | Low (`--setting low --hidden`) | High (`--setting high --hidden`) | Profiled (`low --trace-profile on`) |
+    | ----------------------------------- | ------------------------------ | -------------------------------- | ----------------------------------- |
+    | Load at start (1/5/15), during      | 0.36 1.11 1.80; 0.36–3.16      | 0.18 1.30 1.64; 0.18–5.14        | 0.03 1.41 2.15; 0.03–4.34           |
+    | Exit, time                          | 0, 1,282 s                     | 0, 1,278 s                       | 0, 1,325 s                          |
+    | Windows 1–8: bytes                  | 84.4–94.3 MB                   | 66.4–81.3 MB                     | 183.7–208.9 MB                      |
+    | Window 9 (950 s to the end): bytes  | 226.1 MB                       | 235.0 MB                         | 503.8 MB                            |
+    | Buffer use, windows 1–8 / 9         | 8.57–9.61% / 23.20%            | 6.86–8.35% / 24.34%              | 9.49–10.79% / 26.34%                |
+    | Stops 1–8: complete / read (ms)     | 1,374–1,565 / 714–837          | 973–1,262 / 467–602              | 3,337–3,878 / 1,492–1,752           |
+    | Last stop: complete / read (ms)     | 4,465 / 1,726                  | 5,013 / 1,971                    | 14,430 / 3,857                      |
+    | Frames checked, windows 1–8 / 9     | 6,362–7,061 / 16,344           | 4,118–5,400 / 16,045             | 6,175–7,038 / 16,104                |
+    | Tracing service: peak / working set | 250 / 250 MB                   | 259 / 258 MB                     | 494 / 492 MB                        |
+    | Gaps                                | 2.13–2.34 s                    | 1.44–1.79 s                      | 4.90–5.60 s                         |
+    | Excluded frames a boundary          | 185–199                        | 29–162                           | 349–388                             |
+    | Largest rAF in a gap                | 16.8–33.4 ms                   | 16.8–183.4 ms                    | 50.0–66.8 ms                        |
+    | Left out: descent / worst segment   | 2.16% / 2.92% (descent arc)    | 1.36% / 2.03% (descent arc)      | 4.19% / 5.66% (recorded only)       |
+    | Last exclusion's end / margin       | 953.14 s / 6.86 s              | 952.46 s / 7.54 s                | 955.92 s / 4.08 s                   |
+    | Renderer growth from 60 s           | 0.082 MB/s (ends 0.076)        | 0.092 MB/s (ends 0.086)          | 0.172 MB/s (profiler; not judged)   |
+    | Decoding / main process's peak      | 34.4 s / 1.00 GB               | 30.3 s / 1.42 GB                 | 66.2 s / 1.13 GB                    |
+    | Disk peak: profile + spool          | 0.98 + 0.23 = 1.19 GB          | 0.85 + 0.24 = 1.00 GB            | 2.12 + 0.50 = 2.61 GB               |
+    | Callbacks after the next rAF time   | 1 of 72,966                    | 4 of 55,119                      | 15 of 72,793                        |
+    - _The budget_ is met in both timed runs: at most 5% of the descent and of each segment, and
+      no frame excluded in the approach or any later segment. Every excluded frame is in the
+      descent arc. The last boundary's exclusion ends 6.86 s (low) and 7.54 s (high) before the
+      approach at 960 s. The ruling's "none from 950 s" could not be met as worded, since its
+      own last boundary is at 950 s and that boundary's exclusion lies after it. The orchestrator
+      ruled it met in intent (2026-10-06, a clarification under delegation): the clause protects
+      the busy stretch from the approach on. Design note 18, T14.f and the README now say so.
+    - _The profiled run's exclusions_ are recorded, not budgeted: 4.19% of the descent and 5.66%
+      of the descent arc, from gaps of 4.9–5.6 s. Its windows are about 2.2 times the timed ones,
+      from the `gpu` category and the CPU profiler.
+    - _The service does not grow at a stop._ Within a stop it grows by at most 5 MB, and its peak
+      is at most 2 MB above its largest working set, against the 100 MB allowed. That working set
+      is the last window's buffer.
+    - _The 950 s window_ is the largest, at 23–26% of its buffer. Its stop's time grows with its
+      bytes: 35–51 MB/s to complete and 119–131 MB/s to read. No window approaches half its
+      buffer.
+    - _The gaps' stalls._ The low run's gaps hold no stall: their largest rAF interval, 33.4 ms,
+      is under the run's own maximum of 50.1 ms. The profiled run's reach 66.8 ms, above its kept
+      maximum of 50.1 ms: about four vsyncs, in stops of 5 s. The high run's reach 183.4 ms, the
+      descent arc's own maximum on high, where that segment's p99 is 100 ms.
+    - _Decoding_ is from the last stop's log line to the last window's reduction line. The main
+      process's RSS swings by about 0.5 GB around each stop as the stream's base64 chunks are
+      decoded, and it does not grow over a run.
+    - _Disk_ is the run's profile, where the window files wait until the end, plus the browser's
+      open spool, from the sizes of its open files (`/proc/<browser>/fd`, every 0.5 s).
+    - _The spool_ was `target/descent-spike/tmp.*/.org.chromium.Chromium.* (deleted)` in every
+      sample that caught a stop (36, 28 and 89 samples), on disk and nowhere else, apart from the
+      browser's own `/dev/shm` segments. The sampler first read the Electron CLI's Node launcher as
+      the browser: Chromium rewrites the browser's command line, so the browser is now found by its
+      executable.
+    - _Figures present or null:_ `validateResults` passes on all three, and every null has its
+      reason. The nulls are "no window shown" (T, and the presentation figures whole and by
+      segment) and NVIDIA's absent DRM fdinfo. `mainThread.engine` is null with the profiler-off
+      reason in the timed runs and present in the profiled one. The GPU process's slices are
+      `GPUTask` alone in the timed runs, and `WebGPU`, `GPUTask` and `VulkanQueueSubmitHook` in
+      the profiled one. The high run adds "no timed pass" (the finding below).
+    - _Callbacks after the next frame's rAF time_ (addendum A item 2, information only) are a
+      callback start later than `scriptStartMs` + 1000 × the next frame's script time: 1, 4 and 15
+      in the three runs.
+
+  - **The guard is confirmed at 1 s.** Pooled over every boundary of the two timed runs, 66 of
+    3,983 rAF intervals (1.66%) in the 5 s after the guard exceed their window's 99th percentile,
+    within the 2% allowed. `TRACE_BOUNDARY_GUARD_S` stays 1.
+    - By run: low 17 of 2,382 (0.71%), high 49 of 1,601 (3.06%).
+    - Of the high run's 49, 39 are at the 950 s boundary. Its next window's p99 is the busy
+      stretch's 33.4 ms, while the 5 s after the guard are descent-arc frames, whose own p99 on
+      high is 100 ms. The excess there is the segments' difference, not the boundary.
+    - For guards of 2, 3, 4 and 5 s the pooled shares are 1.18%, 0.88%, 0.67% and 0.83%. The
+      profiled run gives 1.10% at 1 s, for information.
+  - _Headline figures_ (hidden, so read against no T):
+    - **Low:** rAF p50 / p95 / p99 16.70 / 16.80 / 33.30 ms, maximum 50.10 ms. GPU p95: terrain
+      0.68 ms, atmosphere 3.58 ms. Our code's p95 is 2.10 ms; GPU memory 0.256 GB; 808 frames
+      dropped.
+    - Against T14.c's run of 2026-10-04 (load 10–19), rAF p95 falls from 33.30 to 16.80 ms and
+      our code's p95 from 7.10 to 2.10 ms, the effect of a quiet machine.
+    - **High:** rAF 16.70 / 83.30 / 83.40 ms, maximum 183.4 ms; our code's p95 4.60 ms; GPU
+      memory 0.719 GB; 18,027 frames dropped.
+    - **Profiled:** rAF as low's; terrain 0.67 ms, atmosphere 3.55 ms, our code's p95 2.50 ms.
+  - **Finding, for T17 and T19: the high setting's atmosphere at altitude, and its pass timer.**
+    - In the high run the pass timer gave times only for the first 9.75 s (399 of 55,120 frames),
+      then none, so every GPU-pass figure of the high file is null with "no timed pass". The low
+      runs timed every frame.
+    - In those first 10 s the atmosphere's view pass took 6.42 ms at the median and 70.05 ms at
+      the 95th percentile, against the high setting's 1 ms limit. The terrain pass took 0.13 ms.
+    - The high run's frames are slow where the atmosphere fills the view. In the orbit coast and
+      the descent arc the rAF p95 is 66.7 and 83.3 ms; from the approach on it is 16.8 ms.
+    - The canvas was 1,398 × 793 px, hidden. Whether the timer stops because the GPU falls behind
+      the read-backs is not separated here. It is open for the orchestrator, ahead of T17's
+      visible high runs.
+  - _Other deviations._ The full runs wrote their files straight into this directory, as the
+    owner's runs will. The A/B runs wrote theirs under `target/laneD/t14f2/` (`--out`). The
+    README's T16 and T17 commands use the seeds 7, 0 and 1, which the clearance ruling checked by
+    hand; the plan names no seeds.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

@@ -68,7 +68,8 @@ How the figures are read:
   every trace figure null with its reason. A window fails when it is missing or empty, lost data,
   is short of its span because its buffer filled, or its frame spans disagree with the renderer's.
   The frames left out at boundaries are at most 5% of the descent and of any segment, and none
-  from 10 s before the approach. A profiled run (`--trace-profile on`) adds V8's CPU profiler and
+  in the approach or any later segment: the last boundary's exclusion (its gap plus the guard) must
+  end before the approach begins. A profiled run (`--trace-profile on`) adds V8's CPU profiler and
   `gpu`: it is a diagnostic, its memory includes the profiler's samples, and it is not judged. The
   trace is recorded on the spike window's own debugger, which sends only `Tracing` and `IO`
   commands and is attached before the first window and detached after the last. Each window's
@@ -93,7 +94,69 @@ count are visible, on a quiet machine:
   ```
 
   The lanes prove the harness and the file with hidden runs only, whose presentation figures are
-  null with "no window shown".
+  null with "no window shown". R05.T14.f's three hidden runs (`2026-10-06-effect-low`, `-high` and
+  `-low-profiled`) proved the windowed protobuf trace on this machine: every window decoded and
+  matched frame by frame, at most 26% of a window's buffer, and 2.16% (low) and 1.36% (high) of the
+  descent left out.
 
-- **The UHD 620 runs** (R05.T16) and **the discrete runs** (R05.T17): their commands are in the
-  plan's tasks.
+- **The UHD 620 runs** (R05.T16, by hand for the owner, on the laptop, each on a quiet machine).
+  The baseline, over three seeds, and one high run for comparison, not judged:
+
+  ```sh
+  just descent-spike --setting low --seed 7
+  just descent-spike --setting low --seed 0
+  just descent-spike --setting low --seed 1
+  just descent-spike --setting high --seed 7
+  ```
+
+  The variants, each one factor changed from the first baseline, then a capture of a baseline span
+  and its native replay:
+
+  ```sh
+  just descent-spike --setting low --seed 7 --companion-load 2
+  just descent-spike --setting low --seed 7 --cold-cache
+  just descent-spike --setting low --seed 7 --ridged on
+  just descent-spike --setting low --seed 7 --dawn-safety off
+  just descent-spike --setting low --seed 7 --workers 3
+  just descent-spike --setting low --seed 7 --capture target/descent-spike/capture-t16
+  just replay target/descent-spike/capture-t16
+  ```
+
+- **The discrete runs** (R05.T17, by hand for the owner, on the development machine with the
+  projector in its 1080p 59.94 Hz mode). Every timed run pins `--workers 3`:
+
+  ```sh
+  just descent-spike --setting high --workers 3 --seed 7
+  just descent-spike --setting high --workers 3 --seed 0
+  just descent-spike --setting high --workers 3 --seed 1
+  just descent-spike --setting high --workers 3 --seed 7 --dawn-safety off
+  just descent-spike --setting high --workers 3 --seed 7 --vertex-path face-differences
+  just descent-spike --setting high --workers 3 --seed 7 --normals mesh
+  just descent-spike --setting high --workers 2 --seed 7
+  just descent-spike --setting high --workers 3 --seed 7 --capture target/descent-spike/capture-t17
+  just replay target/descent-spike/capture-t17 --present
+  ```
+
+  Only if a timed run misses a frame row or the main-thread headroom row, one profiled run on that
+  run's seed, a diagnostic that is not judged:
+
+  ```sh
+  just descent-spike --setting high --workers 3 --seed <the seed> --trace-profile on
+  ```
+
+The seeds 7, 0 and 1 are the three whose scripted descent was checked clear of the terrain, with
+ridges off and on (`decision-r05-descent-clearance.md`). A capture run carries the capture's own
+costs, so it is not one of the timed runs.
+
+**The first visible run of each kind is checked before the next** (R05.T14.f): T14.c's run, then
+T16's first and T17's first. Its summary's **Trace** line must name no failed window and a buffer
+use of at most 50%. The frames left out at the boundaries must be at most 5% of the descent and of
+each segment, with none in the approach or a later segment. From the repository's root, on a POSIX
+shell, this prints the three and `PASS` or `FAIL`:
+
+```sh
+node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const t = r.run.trace.value; if (t === null) { console.log("FAIL no trace: " + r.run.trace.reason); process.exit(1); } const failed = t.windows.filter((w) => w.figures.value === null).map((w) => "window " + (w.index + 1) + ": " + w.figures.reason); const buffer = Math.max(...t.windows.map((w) => w.figures.value?.bufferPercent ?? 0)); const pct = (n, kept) => (100 * n) / (n + kept); const f = r.frames; const segments = f.segments.map((s) => [s.segment, pct(s.excludedFrames, s.raf.value?.count ?? 0)]); const busy = f.segments.slice(f.segments.findIndex((s) => s.segment === "approach and flare")).reduce((n, s) => n + s.excludedFrames, 0); console.log("failed windows: " + (failed.length === 0 ? "none" : failed.join("; "))); console.log("largest buffer use: " + buffer.toFixed(1) + " % (at most 50)"); console.log("left out: " + pct(f.excludedFrames, f.raf.value.count).toFixed(2) + " % of the descent (at most 5); worst segment " + Math.max(...segments.map(([, p]) => p)).toFixed(2) + " % (at most 5); " + busy + " frames from the approach on (none)"); const ok = failed.length === 0 && buffer <= 50 && pct(f.excludedFrames, f.raf.value.count) <= 5 && segments.every(([, p]) => p <= 5) && busy === 0; console.log(ok ? "PASS" : "FAIL"); process.exit(ok ? 0 : 1)' docs/measurements/descent-spike/<file>.json
+```
+
+A `FAIL` stops the runs of that kind: the windows are re-ruled before any more are made. A profiled
+run's exclusions are recorded, not budgeted, so the check does not apply to it.
