@@ -17,11 +17,15 @@ import type { Measured } from "./measured";
 import { type TraceFigures, TraceReducer } from "./reduceTrace";
 import {
   ADDED_FILE_LIMIT_BYTES,
+  boundedGpuRow,
   buildResults,
   type DescentResults,
   describeMachine,
   formatAsPrettier,
   frameStats,
+  GPU_CLOCKS_NOT_READ,
+  type GpuClocks,
+  incompleteFramesReason,
   type MachineDescription,
   measured,
   type MemorySample,
@@ -32,6 +36,7 @@ import {
   nearestRank,
   RESULTS_SCHEMA,
   RESULTS_VERSION,
+  row,
   type ResultsFiles,
   type RunDescription,
   sampleMemory,
@@ -118,6 +123,7 @@ function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeRepo
       rafIntervalsMs,
       ourCodeMs: scriptTimesS.map(() => 4),
       callbackStartsMs: callbackStartsOf(1000, scriptTimesS),
+      missingResolves: scriptTimesS.map(() => 0),
       passes: [
         { label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 6) },
         { label: "atmosphere.sky", row: "atmosphere", gpuMs: scriptTimesS.map(() => 1.5) },
@@ -1042,6 +1048,220 @@ function editAt(file: unknown, path: ReadonlyArray<string | number>, value: unkn
   }
 }
 
+/**
+ * {@link reportOf}'s report with incomplete frames: at each of `partialAt`, one of five resolves
+ * missing, its terrain time arriving as `partialTerrainMs` and its other passes' not; at each of
+ * `droppedAt`, all five missing and no pass time.
+ */
+function incompleteReport(
+  partialAt: ReadonlyArray<number>,
+  droppedAt: ReadonlyArray<number>,
+  partialTerrainMs = 100,
+): DescentSpikeReport {
+  const base = reportOf();
+  const partial = new Set(partialAt);
+  const dropped = new Set(droppedAt);
+  const timeAt = (passRow: string, ms: number | null, i: number): number | null => {
+    if (dropped.has(i)) {
+      return null;
+    }
+    if (partial.has(i)) {
+      return passRow === "terrain" ? partialTerrainMs : null;
+    }
+    return ms;
+  };
+  return {
+    ...base,
+    frames: {
+      ...base.frames,
+      missingResolves: base.frames.scriptTimesS.map((_, i) =>
+        dropped.has(i) ? 5 : partial.has(i) ? 1 : 0,
+      ),
+      passes: base.frames.passes.map((pass) =>
+        Object.assign({}, pass, { gpuMs: pass.gpuMs.map((ms, i) => timeAt(pass.row, ms, i)) }),
+      ),
+    },
+  };
+}
+
+/** Frames 300 to 328 (15 to 16.4 s), after {@link reportOf}'s warm-up. */
+const TWENTY_NINE = Array.from({ length: 29 }, (_, k) => 300 + k);
+
+/** {@link incompleteReport}'s results on the `setting` given, its window shown at 60 Hz. */
+function incompleteResults(
+  partialAt: ReadonlyArray<number>,
+  droppedAt: ReadonlyArray<number>,
+  setting: RunDescription["setting"] = "low",
+): DescentResults {
+  return buildResults({
+    run: runOf({ setting }),
+    report: incompleteReport(partialAt, droppedAt),
+    trace: traceOf(),
+    memory: MEMORY,
+  });
+}
+
+/** The GPU's clocks over {@link MEMORY}'s three samples, in a nvidia-smi reading's form. */
+function clocksOf(overrides: Partial<GpuClocks> = {}): GpuClocks {
+  return {
+    source: "nvidia-smi",
+    maxGraphicsMHz: measured(2100),
+    graphicsMHz: measured({ samples: [1980, -1, 1100], gaps: [{ from: 1, to: 1, reason: "N/A" }] }),
+    memoryMHz: measured({ samples: [9501, 9501, 405], gaps: [] }),
+    performanceState: measured({ samples: [0, 0, 5], gaps: [] }),
+    ...overrides,
+  };
+}
+
+describe("a results file's incomplete pass times", () => {
+  it("leaves partial and dropped frames out of every GPU sum, counted after the warm-up", () => {
+    // 29 partial and one dropped after the warm-up, one of each in it (5 and 2.5 s).
+    const results = incompleteResults([100, ...TWENTY_NINE], [50, 400]);
+    expect(results.gpu.incompleteFrames).toEqual(
+      measured({ dropped: 1, partial: 29, frames: 400 }),
+    );
+    // The partial frames' 100 ms terrain times enter no sum: every complete frame's is 6 ms, and
+    // its sum 7.5 or 8 ms.
+    expect(rowOf(results, "terrain").value).toBe(6);
+    expect(results.gpu.sumP95Ms).toEqual(measured(8));
+    expect(rowOf(results, "atmosphere").value).toBe(1.5);
+  });
+
+  it("counts no incomplete frame in a boundary's exclusion, which every per-frame figure leaves out", () => {
+    // Frames 300 to 329 (15 to 16.45 s) are the boundary's; 301 and 400 are incomplete.
+    const base = twoWindowReport();
+    const report: DescentSpikeReport = {
+      ...base,
+      frames: {
+        ...base.frames,
+        missingResolves: base.frames.scriptTimesS.map((_, i) => (i === 301 || i === 400 ? 1 : 0)),
+      },
+    };
+    const results = buildResults({
+      run: runOf(),
+      report,
+      trace: recordingOf(twoWindowTraces().map(windowFile)),
+      memory: MEMORY,
+    });
+    expect(results.frames.excludedFrames).toBe(30);
+    expect(results.gpu.incompleteFrames).toEqual(measured({ dropped: 0, partial: 1, frames: 370 }));
+    expect(results.gpu.incompleteFrames.value?.frames).toBe(results.frames.raf.value?.count);
+  });
+
+  it("keeps every time that arrived in each pass's own percentiles", () => {
+    const results = incompleteResults(TWENTY_NINE, [400]);
+    const terrain = results.gpu.passes.value?.find(({ label }) => label === "terrain");
+    // 399 frames' terrain times arrived, the 29 partial frames' among them: 7.3% at 100 ms.
+    expect(terrain).toMatchObject({ frames: 399, p50Ms: 6, p95Ms: 100 });
+    const sky = results.gpu.passes.value?.find(({ label }) => label === "atmosphere.sky");
+    expect(sky).toMatchObject({ frames: 370 });
+  });
+
+  it("does not measure a row that its incomplete frames could carry over its limit", () => {
+    const results = incompleteResults(TWENTY_NINE, [400]);
+    const reason = incompleteFramesReason(30);
+    expect(reason).toBe(
+      "30 frames' pass times were incomplete (the GPU was more than 27 frames behind)",
+    );
+    for (const [id, value] of [
+      ["headroom-gpu", 8],
+      ["terrain", 6],
+      ["atmosphere", 1.5],
+    ] as const) {
+      expect(rowOf(results, id)).toMatchObject({ value, verdict: "not-measured", note: reason });
+    }
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("passes a row that passes with every incomplete frame above its limit", () => {
+    const results = incompleteResults([300], [400]);
+    expect(results.gpu.incompleteFrames.value).toMatchObject({ dropped: 1, partial: 1 });
+    expect(rowOf(results, "terrain")).toMatchObject({
+      value: 6,
+      verdict: "pass",
+      note: "2 frames with incomplete pass times left out; the verdict holds whatever their times",
+    });
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("fails a row that fails with every incomplete frame below its limit", () => {
+    // The high setting's terrain limit is 5 ms, and the 370 complete frames take 6.
+    const results = incompleteResults(TWENTY_NINE, [400], "high");
+    expect(rowOf(results, "terrain")).toMatchObject({ limit: 5, value: 6, verdict: "fail" });
+    expect(rowOf(results, "atmosphere")).toMatchObject({ limit: 1, verdict: "fail" });
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("gives row's own verdict with no incomplete frame", () => {
+    const values = Array.from({ length: 100 }, (_, i) => 10 + i / 100);
+    const p95 = values[94] ?? Number.NaN;
+    for (const [limitMs, tolerance, verdict] of [
+      [12, 0, "pass"],
+      [p95, TIMESTAMP_QUANTUM_MS, "marginal"],
+      [10.5, 0, "fail"],
+    ] as const) {
+      const bounded = boundedGpuRow(
+        "terrain",
+        "terrain",
+        measured(limitMs),
+        values,
+        0,
+        tolerance,
+        "none",
+      );
+      expect(bounded).toEqual(
+        row("terrain", "terrain", measured(limitMs), "ms", measured(p95), tolerance),
+      );
+      expect(bounded.verdict).toBe(verdict);
+    }
+  });
+
+  it("leaves a row marginal when both placements are marginal", () => {
+    const values = Array.from({ length: 100 }, () => 14.03);
+    expect(
+      boundedGpuRow("terrain", "terrain", measured(14), values, 1, TIMESTAMP_QUANTUM_MS, "none"),
+    ).toMatchObject({ value: 14.03, verdict: "marginal" });
+  });
+
+  it("states the count as the reason for a row with no complete frame", () => {
+    expect(boundedGpuRow("terrain", "terrain", measured(5), [], 3, 0, "none")).toMatchObject({
+      value: null,
+      verdict: "not-measured",
+      note: incompleteFramesReason(3),
+    });
+    expect(incompleteFramesReason(1)).toBe(
+      "1 frame's pass times were incomplete (the GPU was more than 27 frames behind)",
+    );
+  });
+
+  it("states the timer's absence for the count without a timer", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf({ timer: "absent" }),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect(results.gpu.incompleteFrames).toEqual(
+      missing("the pass timer is absent (no timestamp-query)"),
+    );
+  });
+
+  it("writes the GPU's clocks null until they are read", () => {
+    const results = incompleteResults([], []);
+    expect(results.gpu.clocks).toEqual(missing(GPU_CLOCKS_NOT_READ));
+    expect(results.gpu.incompleteFrames).toEqual(measured({ dropped: 0, partial: 0, frames: 400 }));
+  });
+
+  it("states the incomplete frames in the summary", () => {
+    expect(summaryMarkdown(incompleteResults(TWENTY_NINE, [400]))).toContain(
+      "- **Incomplete pass times:** 1 dropped and 29 partial of 400 frames after the warm-up, left out of the GPU rows' sums, whose verdicts hold whatever their times",
+    );
+    expect(summaryMarkdown(incompleteResults([], []))).toContain(
+      "- **Incomplete pass times:** none of 400 frames after the warm-up",
+    );
+  });
+});
+
 describe("the schema check", () => {
   it("refuses a figure that is null without a reason", () => {
     const results = buildResults({
@@ -1285,15 +1505,118 @@ describe("the schema check", () => {
     expect(validateResults(broken)).toEqual([problem]);
   });
 
+  it.each<readonly [string, ReadonlyArray<Edit>, string]>([
+    [
+      "no count of incomplete frames",
+      [[["gpu", "incompleteFrames"], DELETE]],
+      "gpu.incompleteFrames is missing",
+    ],
+    [
+      "a count of incomplete frames that is not whole",
+      [[["gpu", "incompleteFrames", "value", "partial"], 1.5]],
+      "gpu.incompleteFrames.value is not whole counts of dropped, partial and counted frames",
+    ],
+    [
+      "more incomplete frames than it counted",
+      [[["gpu", "incompleteFrames", "value", "dropped"], 372]],
+      "gpu.incompleteFrames.value counts 401 incomplete frames of 400",
+    ],
+    [
+      "counted frames other than those after the warm-up",
+      [[["gpu", "incompleteFrames", "value", "frames"], 500]],
+      "gpu.incompleteFrames.value.frames is 500, not the 400 frames after the warm-up that the rAF figures read",
+    ],
+    [
+      "a pass its incomplete frames make impossible",
+      [[["criteria", "whole", 7, "verdict"], "pass"]],
+      "the terrain row's pass is impossible with 30 of 400 frames' pass times incomplete",
+    ],
+    [
+      "a marginal its incomplete frames make impossible",
+      [[["criteria", "whole", 7, "verdict"], "marginal"]],
+      "the terrain row's marginal is impossible with 30 of 400 frames' pass times incomplete",
+    ],
+    [
+      "a fail its incomplete frames make impossible",
+      [
+        [["gpu", "incompleteFrames", "value", "partial"], 390],
+        [["criteria", "whole", 7, "verdict"], "fail"],
+      ],
+      "the terrain row's fail is impossible with 391 of 400 frames' pass times incomplete",
+    ],
+    ["no clocks", [[["gpu", "clocks"], DELETE]], "gpu.clocks is missing"],
+    [
+      "a clock column shorter than the memory's times",
+      [
+        [
+          ["gpu", "clocks"],
+          measured(clocksOf({ memoryMHz: measured({ samples: [9501, 9501], gaps: [] }) })),
+        ],
+      ],
+      "gpu.clocks.value.memoryMHz has 2 samples, not tMs's 3",
+    ],
+    [
+      "a clock that is not whole MHz",
+      [
+        [
+          ["gpu", "clocks"],
+          measured(
+            clocksOf({ graphicsMHz: measured({ samples: [1980, 1980.5, 1100], gaps: [] }) }),
+          ),
+        ],
+      ],
+      "gpu.clocks.value.graphicsMHz.value.samples[1] is not a whole number of MHz",
+    ],
+    [
+      "an unknown clock source",
+      [[["gpu", "clocks"], measured({ ...clocksOf(), source: "powermetrics" })]],
+      "gpu.clocks.value.source is not nvidia-smi, i915-sysfs or amdgpu-sysfs",
+    ],
+    [
+      "a maximum clock that is not whole MHz",
+      [[["gpu", "clocks"], measured(clocksOf({ maxGraphicsMHz: measured(0) }))]],
+      "gpu.clocks.value.maxGraphicsMHz is not whole MHz",
+    ],
+  ])("refuses %s", (_case, edits, problem) => {
+    const file: unknown = JSON.parse(JSON.stringify(incompleteResults(TWENTY_NINE, [400])));
+    for (const [path, value] of edits) {
+      editAt(file, path, value);
+    }
+    expect(validateResults(file)).toContain(problem);
+  });
+
+  it("accepts a native replay's count of its own frames, which it has no rAF figure for", () => {
+    const results = incompleteResults(TWENTY_NINE, [400]);
+    const replay: DescentResults = {
+      ...results,
+      run: { ...results.run, launchMode: "native-replay" },
+      frames: { ...results.frames, raf: missing("a native replay has no requestAnimationFrame") },
+      gpu: { ...results.gpu, incompleteFrames: measured({ dropped: 30, partial: 0, frames: 600 }) },
+    };
+    expect(validateResults(JSON.parse(JSON.stringify(replay)))).toEqual([]);
+  });
+
+  it("accepts the GPU's clocks with every column as long as the memory's times", () => {
+    const results = incompleteResults(TWENTY_NINE, [400]);
+    const withClocks: DescentResults = {
+      ...results,
+      gpu: {
+        ...results.gpu,
+        clocks: measured(clocksOf({ memoryMHz: missing("i915 gives no memory clock") })),
+      },
+    };
+    expect(validateResults(JSON.parse(JSON.stringify(withClocks)))).toEqual([]);
+  });
+
   it("refuses a file that is not an object", () => {
     expect(validateResults([])).toEqual(["the file is not an object"]);
   });
 
-  it("refuses version 3", () => {
+  it("refuses version 4", () => {
     const results = twoWindowResults();
-    expect(RESULTS_VERSION).toBe(4);
-    expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 3 })))).toEqual([
-      "version is not 4",
+    expect(RESULTS_VERSION).toBe(5);
+    expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 4 })))).toEqual([
+      "version is not 5",
     ]);
   });
 

@@ -120,6 +120,33 @@ describe("the spike's metrics", () => {
     ]);
   });
 
+  it("counts each frame's resolves whose times never arrived, 0 for a complete frame", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    // Five resolves a frame: engine frames 1 to 5, 6 to 10 and 11 to 15.
+    metrics.frame(sample(5, 0));
+    metrics.frame(sample(10, 0.5));
+    metrics.frame(sample(15, 1));
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 9, 10]) {
+      metrics.passTimes(times(n, [["terrain", 1_000_000]]));
+    }
+    const { frames } = metrics.report(EXTRA);
+    // The second frame lost one of its five (partial), the third all five (dropped).
+    expect(frames.missingResolves).toEqual([0, 1, 5]);
+    expect(frames.passes).toEqual([{ label: "terrain", row: "terrain", gpuMs: [5, 4, null] }]);
+  });
+
+  it("counts no missing resolve for a frame that numbered none", () => {
+    const metrics = new SpikeMetrics({ ...OPTIONS, firstEngineFrame: 2 });
+    metrics.frame(sample(3, 0));
+    metrics.frame(sample(3, 0.5));
+    metrics.frame(sample(4, 1));
+    // Resolve 2 is the warm-up's, and resolve 9 follows every frame: neither is a frame's.
+    for (const n of [2, 3, 9]) {
+      metrics.passTimes(times(n, [["terrain", 1_000_000]]));
+    }
+    expect(metrics.report(EXTRA).frames.missingResolves).toEqual([0, 0, 1]);
+  });
+
   it("counts passes beyond the timer's 64 a frame as untimed", () => {
     const metrics = new SpikeMetrics(OPTIONS);
     metrics.frame(sample(1, 0, { passesSubmitted: TIMED_PASSES_A_FRAME + 3 }));

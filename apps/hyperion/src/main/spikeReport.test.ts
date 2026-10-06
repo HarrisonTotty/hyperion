@@ -20,6 +20,15 @@ describe("the spike report's check", () => {
     expect(readDescentSpikeReport(ended)).toEqual(ended);
   });
 
+  it("passes each frame's count of missing resolves through", () => {
+    const report = smallReport();
+    const incomplete: DescentSpikeReport = {
+      ...report,
+      frames: { ...report.frames, missingResolves: [0, 5, 1] },
+    };
+    expect(readDescentSpikeReport(incomplete)?.frames.missingResolves).toEqual([0, 5, 1]);
+  });
+
   it.each<[string, (r: DescentSpikeReport) => unknown]>([
     ["a non-object", () => "report"],
     ["a series of another length", (r) => ({ ...r, frames: { ...r.frames, ourCodeMs: [4] } })],
@@ -28,6 +37,19 @@ describe("the spike report's check", () => {
       (r) => ({ ...r, frames: { ...r.frames, callbackStartsMs: [1000.1] } }),
     ],
     ["no callback starts", (r) => ({ ...r, frames: { ...r.frames, callbackStartsMs: undefined } })],
+    [
+      "missing resolves of another length",
+      (r) => ({ ...r, frames: { ...r.frames, missingResolves: [0, 0] } }),
+    ],
+    ["no missing resolves", (r) => ({ ...r, frames: { ...r.frames, missingResolves: undefined } })],
+    [
+      "a missing-resolve count that is not whole",
+      (r) => ({ ...r, frames: { ...r.frames, missingResolves: [0, 1.5, 0] } }),
+    ],
+    [
+      "a negative missing-resolve count",
+      (r) => ({ ...r, frames: { ...r.frames, missingResolves: [0, -1, 0] } }),
+    ],
     ["a non-finite figure", (r) => ({ ...r, uploadBytes: Number.NaN })],
     ["an unknown timer", (r) => ({ ...r, timer: "fast" })],
     [

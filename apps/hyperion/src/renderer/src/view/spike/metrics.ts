@@ -121,6 +121,8 @@ export class SpikeMetrics {
   readonly #callbackStartsMs: number[] = [];
   /** Each frame's last engine frame number, ascending. */
   readonly #lastEngineFrame: number[] = [];
+  /** Each frame's resolves whose pass times have arrived. */
+  readonly #reportedResolves: number[] = [];
   readonly #passes = new Map<string, Array<number | null>>();
   readonly #segments = new Map<string, SegmentTally>();
   #lastRafMs: number | undefined;
@@ -156,6 +158,7 @@ export class SpikeMetrics {
   /** Records one frame. */
   frame(sample: FrameSample): void {
     this.#lastEngineFrame.push(sample.engineFrame);
+    this.#reportedResolves.push(0);
     this.#scriptTimesS.push(sample.scriptTimeS);
     this.#rafIntervalsMs.push(
       this.#lastRafMs === undefined ? 0 : sample.rafTimestampMs - this.#lastRafMs,
@@ -189,6 +192,7 @@ export class SpikeMetrics {
     if (index === undefined) {
       return;
     }
+    this.#reportedResolves[index] = (this.#reportedResolves[index] ?? 0) + 1;
     for (const { label, ns } of times.passes) {
       let series = this.#passes.get(label);
       if (series === undefined) {
@@ -217,6 +221,20 @@ export class SpikeMetrics {
       }
     }
     return lo < lasts.length ? lo : undefined;
+  }
+
+  /**
+   * Each frame's resolves whose pass times never arrived: those it numbered, after the frame
+   * before it, less those reported. The timer reports a resolve once, so the difference is never
+   * below 0 but for a report the timer would not make; it is floored there.
+   */
+  #missingResolves(): number[] {
+    let before = this.#options.firstEngineFrame ?? 0;
+    return this.#lastEngineFrame.map((last, i) => {
+      const numbered = Math.max(0, last - before);
+      before = Math.max(before, last);
+      return Math.max(0, numbered - (this.#reportedResolves[i] ?? 0));
+    });
   }
 
   /** Records an engine allocation event; uploads are tallied. */
@@ -282,6 +300,7 @@ export class SpikeMetrics {
         rafIntervalsMs: [...this.#rafIntervalsMs],
         ourCodeMs: [...this.#ourCodeMs],
         callbackStartsMs: [...this.#callbackStartsMs],
+        missingResolves: this.#missingResolves(),
         passes: [...this.#passes].map(([label, gpuMs]) => ({
           label,
           row: this.#options.rowOf(label),

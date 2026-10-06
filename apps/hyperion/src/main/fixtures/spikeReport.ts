@@ -16,6 +16,7 @@ export function smallReport(): DescentSpikeReport {
       rafIntervalsMs: [0, 16.7, 16.7],
       ourCodeMs: [4, 4, 4],
       callbackStartsMs: [1000.1, 1016.1, 1033.1],
+      missingResolves: [0, 0, 0],
       passes: [{ label: "terrain", row: "terrain", gpuMs: [1, null, 1.2] }],
     },
     streaming: [

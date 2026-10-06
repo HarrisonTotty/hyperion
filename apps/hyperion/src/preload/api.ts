@@ -180,6 +180,14 @@ export interface SpikeFrameSeries {
    * trace's spans to the frames by it (R05.T14.h, decision-r05-trace-windows-2.md, addendum A).
    */
   readonly callbackStartsMs: ReadonlyArray<number>;
+  /**
+   * Each frame's timer resolves whose pass times never reached the report: 0 for a complete frame
+   * (R05.T14.j, decision-r05-trace-windows-2.md, addendum B). R01's timer drops a resolve while
+   * every read-back buffer is in flight, and a failed read loses one too. Every resolve the timer
+   * reports carries at least one pass, so a frame with a missing resolve and no pass time is
+   * _dropped_, and one with some pass time is _partial_.
+   */
+  readonly missingResolves: ReadonlyArray<number>;
   readonly passes: ReadonlyArray<SpikePassSeries>;
 }
 

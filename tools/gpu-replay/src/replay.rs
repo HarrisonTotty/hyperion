@@ -281,15 +281,17 @@ impl Replayer {
 
     /// Reads back a frame's pass times from a buffer [`Replayer::finish_frame`] gave, once its
     /// mapping has completed.
-    #[must_use]
-    pub fn read_pass_times(&self, staging: &wgpu::Buffer, labels: &[String]) -> FramePassTimes {
-        let Ok(data) = staging.slice(..).get_mapped_range() else {
-            // A buffer whose mapping failed has no times to give; the frame counts as untimed.
-            return FramePassTimes {
-                passes: Vec::new(),
-                end_ticks: None,
-            };
-        };
+    ///
+    /// # Errors
+    ///
+    /// When the mapped range cannot be read: the frame's pass times are then incomplete
+    /// (R05.T14.j).
+    pub fn read_pass_times(
+        &self,
+        staging: &wgpu::Buffer,
+        labels: &[String],
+    ) -> Result<FramePassTimes, wgpu::MapRangeError> {
+        let data = staging.slice(..).get_mapped_range()?;
         let stamps: Vec<u64> = data
             .as_chunks::<8>()
             .0
@@ -316,7 +318,7 @@ impl Replayer {
                 (label.clone(), ns / 1e6)
             })
             .collect();
-        FramePassTimes { passes, end_ticks }
+        Ok(FramePassTimes { passes, end_ticks })
     }
 
     fn missing(index: usize, call: &Call, id: u64) -> ReplayCallError {

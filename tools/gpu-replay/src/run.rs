@@ -195,12 +195,39 @@ pub(crate) fn collect_errors(device: &wgpu::Device) -> Arc<Mutex<Vec<String>>> {
     errors
 }
 
-/// One frame's pass-time read-back: its staging buffer, labels and whether it has mapped.
+/// One frame's pass-time read-back: its staging buffer, labels and how its mapping ended, `None`
+/// until it does.
 #[derive(Debug)]
 struct Reading {
     staging: wgpu::Buffer,
     labels: Vec<String>,
-    mapped: Arc<Mutex<bool>>,
+    mapped: Arc<Mutex<Option<Result<(), String>>>>,
+}
+
+/// The frames' pass times as read back once the replay ends.
+#[derive(Debug)]
+pub(crate) struct FrameTimes {
+    /// The pass times of each frame whose read-back succeeded, in frame order.
+    pub(crate) read: Vec<FramePassTimes>,
+    /// Frames that resolved pass times which were never read back: a mapping or a read that
+    /// failed. Their pass times are incomplete (R05.T14.j).
+    pub(crate) unread: usize,
+    /// Frames that timed no pass, so resolved none.
+    pub(crate) untimed: usize,
+    /// Why the first unread frame was not read back.
+    pub(crate) unread_cause: Option<String>,
+}
+
+impl FrameTimes {
+    /// The replay's finding for its unread frames, if any: how many, and the first one's cause.
+    pub(crate) fn unread_finding(&self) -> Option<String> {
+        self.unread_cause.as_ref().map(|cause| {
+            format!(
+                "{} of the frames' pass times could not be read back; the first: {cause}",
+                self.unread
+            )
+        })
+    }
 }
 
 /// The frames' pass-time read-backs and the submissions that mark each frame's end.
@@ -220,10 +247,11 @@ impl Frames {
         queue: &wgpu::Queue,
     ) -> Result<(), RunReplayError> {
         if let Some((staging, labels, _)) = replayer.finish_frame() {
-            let mapped = Arc::new(Mutex::new(false));
+            let mapped = Arc::new(Mutex::new(None));
             let flag = Arc::clone(&mapped);
             staging.map_async(wgpu::MapMode::Read, .., move |result| {
-                *flag.lock().unwrap_or_else(PoisonError::into_inner) = result.is_ok();
+                *flag.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some(result.map_err(|error| error.to_string()));
             });
             self.readings.push(Reading {
                 staging,
@@ -248,29 +276,50 @@ impl Frames {
         Ok(())
     }
 
-    /// Waits for every frame, then reads the pass times of each frame that mapped.
+    /// Waits for every frame, then reads the pass times of each frame that mapped, and counts
+    /// those that did not.
     pub(crate) fn finish(
         self,
         replayer: &Replayer,
         device: &wgpu::Device,
-    ) -> Result<Vec<FramePassTimes>, RunReplayError> {
+    ) -> Result<FrameTimes, RunReplayError> {
         device
             .poll(wgpu::PollType::Wait {
                 submission_index: None,
                 timeout: Some(GPU_WAIT),
             })
             .map_err(RunReplayError::Poll)?;
-        Ok(self
-            .readings
-            .iter()
-            .filter(|reading| {
-                *reading
-                    .mapped
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-            })
-            .map(|reading| replayer.read_pass_times(&reading.staging, &reading.labels))
-            .collect())
+        let mut read = Vec::with_capacity(self.readings.len());
+        let mut unread = 0;
+        let mut unread_cause = None;
+        for reading in &self.readings {
+            let mapped = reading
+                .mapped
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let times = match mapped {
+                Some(Ok(())) => replayer
+                    .read_pass_times(&reading.staging, &reading.labels)
+                    .map_err(|error| error.to_string()),
+                Some(Err(error)) => Err(error),
+                None => Err("its mapping never completed".to_owned()),
+            };
+            match times {
+                Ok(times) => read.push(times),
+                Err(cause) => {
+                    unread += 1;
+                    unread_cause.get_or_insert(cause);
+                }
+            }
+        }
+        Ok(FrameTimes {
+            read,
+            unread,
+            // Every frame marks its end; only a frame that timed a pass makes a reading.
+            untimed: self.markers.len().saturating_sub(self.readings.len()),
+            unread_cause,
+        })
     }
 }
 
@@ -320,6 +369,7 @@ pub fn replay_offscreen(
         frames.end_frame(&mut replayer, &device, &queue)?;
     }
     let times = frames.finish(&replayer, &device)?;
+    findings.extend(times.unread_finding());
     let main = main_surface(capture);
     Ok(ReplayFigures {
         started_at,
@@ -336,8 +386,10 @@ pub fn replay_offscreen(
         adapter: adapter.get_info(),
         timed: replayer.times_passes(),
         canvas: main.map_or((0, 0), |s| (s.width, s.height)),
-        intervals_ms: gpu_intervals_ms(&times, replayer.timestamp_period_ns()),
-        passes: times.into_iter().map(|frame| frame.passes).collect(),
+        intervals_ms: gpu_intervals_ms(&times.read, replayer.timestamp_period_ns()),
+        unread_frames: times.unread,
+        untimed_frames: times.untimed,
+        passes: times.read.into_iter().map(|frame| frame.passes).collect(),
         rows: rows_of(capture),
         untimed_passes: replayer.untimed_passes(),
         upload_bytes: upload_bytes(capture),

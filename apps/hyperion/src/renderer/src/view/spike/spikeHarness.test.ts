@@ -230,6 +230,8 @@ describe("the spike's recorder", () => {
       { label: "terrain", row: "terrain", gpuMs: [1, 1] },
       { label: "view:wireframe", row: "other", gpuMs: [2, null] },
     ]);
+    // The second frame's resolves 4 and 6 never reported.
+    expect(report.frames.missingResolves).toEqual([0, 2]);
     expect(report.warmupS).toBe(SPIKE_WARMUP_S);
     expect(report.levels).toHaveLength(PLANET.finestLevel + 1);
     expect(report.streaming.map(({ segment }) => segment)).toEqual(
@@ -267,8 +269,31 @@ describe("the spike's recorder", () => {
         passes: [{ label: "terrain", ns: n * 1e6, bracketed: false }],
       });
     }
-    expect(recorder.report({ widthPx: 1280, heightPx: 720 }).frames.passes).toEqual([
-      { label: "terrain", row: "terrain", gpuMs: [1, null, 3] },
+    const { frames } = recorder.report({ widthPx: 1280, heightPx: 720 });
+    expect(frames.passes).toEqual([{ label: "terrain", row: "terrain", gpuMs: [1, null, 3] }]);
+    // The dropped resolve is its frame's one missing resolve.
+    expect(frames.missingResolves).toEqual([0, 1, 0]);
+  });
+
+  it("counts a frame missing one of its five resolves, and one missing all five", () => {
+    const counted = { value: 0, runFrame: (n: number) => n };
+    const recorder = new SpikeRecorder(descent, "low", {
+      resolves: counted,
+      tally: new PipelineTally(() => 0),
+    });
+    for (const [i, last] of [5, 10, 15].entries()) {
+      counted.value = last;
+      recorder.frame(frame(i * 0.016));
+    }
+    for (const n of [1, 2, 3, 4, 5, 6, 8, 9, 10]) {
+      recorder.passTimes({
+        frame: n,
+        timer: "full",
+        passes: [{ label: "terrain", ns: 1e6, bracketed: false }],
+      });
+    }
+    expect(recorder.report({ widthPx: 1280, heightPx: 720 }).frames.missingResolves).toEqual([
+      0, 1, 5,
     ]);
   });
 

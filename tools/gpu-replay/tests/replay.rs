@@ -115,6 +115,11 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     assert_eq!(results["frames"]["source"], "gpu-completion");
     // Two frames, so one interval between their GPU ends.
     assert_eq!(results["frames"]["gpuCompletion"]["value"]["count"], 1);
+    // Both frames' pass times are read back.
+    assert_eq!(
+        results["gpu"]["incompleteFrames"]["value"],
+        serde_json::json!({ "dropped": 0, "partial": 0, "frames": 2 })
+    );
     // The fixture's one pass is the terrain row's (its `passRows`), and the replay times it.
     let terrain = rows
         .iter()

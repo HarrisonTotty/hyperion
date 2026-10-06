@@ -965,25 +965,29 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     each pass's `timestampWrites` at its start and end, read through R01's `onPassTimes` as
     `PassTimes` keyed by each `FrameSubmission.label` (every pass is the adapter's own, so none is
     bracketed, R01 Design note 24; timestamps inside passes need `--enable-unsafe-webgpu`, which is
-    never set); main-thread time split into our code (`performance.measure` spans), the engine
-    adapter (CPU-profiler self time in its lazily imported `engine-*.js` chunk, recorded in profiled
-    runs only, below) and idle; patches a second requested, baked and made resident, against the
-    predicted demand (Design note 19); upload bytes from the engine's `writeBuffer` and
-    `writeTexture` tally (R01's `uploaded` events); pipeline creations after warm-up, from a shim on
-    `createRenderPipeline`, `createComputePipeline` and their asynchronous forms (installed on the
-    device through a wrapped `GPU` handed to the spike's `ViewEngineSource`, since no device is
-    reachable outside R01's adapter), each late one logged with its label, cold and warm caches run
-    separately; garbage-collection pauses per thread from V8's GC trace slices; and memory at 1 Hz:
-    `app.getAppMetrics()` and the renderer's `process.getProcessMemoryInfo()`, the GPU process's DRM
-    fdinfo (`drm-total-*`, `drm-resident-*`, summed over client IDs, since ANGLE and Dawn open their
-    own), on NVIDIA `nvidia-smi -q -x`'s process list with the device's `memory.used` less a
-    baseline (not `--query-compute-apps`, which lists compute processes only and can miss the GPU
-    process; researched for R12, its Design note 6), and the adapter's own tally of buffers and
-    textures, against the 1 GB ceiling. The trace is recorded through the Chrome DevTools Protocol's
-    `Tracing` domain on the spike window's own `webContents.debugger`, which sends only `Tracing`
-    and `IO` commands. It is returned as a stream in Perfetto's protobuf format, and decoded and
-    reduced to the results file in the main process (T14.b, T14.h, T14.i). Its categories are
-    `devtools.timeline`, `disabled-by-default-devtools.timeline`,
+    never set); the frames whose pass times the timer dropped, wholly or in part, while all its
+    read-back buffers were in flight, counted and left out of every per-frame sum (T14.j); the GPU's
+    graphics and memory clocks at 1 Hz beside the memory series, from `nvidia-smi` on NVIDIA and the
+    kernel's sysfs on Intel and AMD under Linux, and null with the reason where no unprivileged
+    reading exists, as on macOS (T14.k); main-thread time split into our code (`performance.measure`
+    spans), the engine adapter (CPU-profiler self time in its lazily imported `engine-*.js` chunk,
+    recorded in profiled runs only, below) and idle; patches a second requested, baked and made
+    resident, against the predicted demand (Design note 19); upload bytes from the engine's
+    `writeBuffer` and `writeTexture` tally (R01's `uploaded` events); pipeline creations after
+    warm-up, from a shim on `createRenderPipeline`, `createComputePipeline` and their asynchronous
+    forms (installed on the device through a wrapped `GPU` handed to the spike's `ViewEngineSource`,
+    since no device is reachable outside R01's adapter), each late one logged with its label, cold
+    and warm caches run separately; garbage-collection pauses per thread from V8's GC trace slices;
+    and memory at 1 Hz: `app.getAppMetrics()` and the renderer's `process.getProcessMemoryInfo()`,
+    the GPU process's DRM fdinfo (`drm-total-*`, `drm-resident-*`, summed over client IDs, since
+    ANGLE and Dawn open their own), on NVIDIA `nvidia-smi -q -x`'s process list with the device's
+    `memory.used` less a baseline (not `--query-compute-apps`, which lists compute processes only
+    and can miss the GPU process; researched for R12, its Design note 6), and the adapter's own
+    tally of buffers and textures, against the 1 GB ceiling. The trace is recorded through the
+    Chrome DevTools Protocol's `Tracing` domain on the spike window's own `webContents.debugger`,
+    which sends only `Tracing` and `IO` commands. It is returned as a stream in Perfetto's protobuf
+    format, and decoded and reduced to the results file in the main process (T14.b, T14.h, T14.i).
+    Its categories are `devtools.timeline`, `disabled-by-default-devtools.timeline`,
     `disabled-by-default-devtools.timeline.frame`, `disabled-by-default-v8.gc` and
     `blink.user_timing`. Electron's `contentTracing` writes JSON only. Chromium builds a JSON export
     in memory at 17.5–20 MB/s, 4.3–5.7 times the trace buffer's bytes, so a JSON stop took 16–44 s,
@@ -1133,6 +1137,17 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     practice (PresentMon's `MsBetweenPresents`, Chromium's dropped-frame metric); the headroom row
     is the defined meaning of open question 2's "fit with headroom".
 
+    _Decided 2026-10-06 by a delegated decision (`decision-r05-trace-windows-2.md`, addendum B):_ a
+    GPU row's percentile is taken over the frames whose every resolve was timed. Frames with a
+    dropped resolve are counted, and the verdict must hold whatever their times were. The row passes
+    only if it passes with them all above its limit, and fails if it fails with them all below it.
+    Otherwise it is not measured, with their count as its reason. A GPU row measures each pass at
+    the clocks the driver chose for the spike's load, which is lighter than the full game's (Design
+    note 17), so a compute-bound pass within its row is within it at any higher clock. Clocks are
+    never pinned: that needs root, changes the machine for every process, has no macOS equivalent
+    and is not the player's condition. They are recorded beside the rows, and a row measured at a
+    median clock below 90% of the GPU's maximum carries a note saying so.
+
     _Decided 2026-09-30 by a delegated decision (the hardware decisions, items 1, 4 and 5):_ the
     discrete half runs on the recommended specification, the RTX 3080, not an RTX 4060-class part.
     The criteria are unchanged, with T the display's measured vsync period: 16.68 ms at the
@@ -1248,8 +1263,10 @@ Refined on re-validation (2026-10-02), from the code each task touches:
   capture format, and T15.c follows T15.b.
 - T14.d and T14.e (the trace's windows, 2026-10-04) follow T14.c and T15's first capture. T14.g,
   T14.h and T14.i (the protobuf trace, 2026-10-05) follow them, in that order, and T14.f, the hidden
-  runs, comes last. T14.c's visible run, T16 and T17 wait for T14.f. They need nothing of T13.a's
-  demand records, which take no trace, and those need nothing of them.
+  runs, comes last. T14.c's visible run, T16 and T17 wait for T14.f. T14.j and T14.k (the GPU rows'
+  incomplete frames and clocks, 2026-10-06) follow T14.f, in that order, and T14.c's visible run,
+  T16 and T17 wait for them too. They need nothing of T13.a's demand records, which take no trace,
+  and those need nothing of them.
 - Steps that need a visible window, a real vsync, a quiet machine or a display change are pending
   by hand for the owner, with their harness and exact commands prepared by the implementing
   lane, which never shows a window on the development machine's display (`:0`): T11.c's and
@@ -2392,6 +2409,98 @@ src/main/spikeSession src/main/traceWindows`;
     recorded.
 - Suggested subject: `feat(spike): R05.T14.i Take the trace over CDP as a protobuf stream`.
 
+**R05.T14.j Incomplete frames and results version 5.**
+
+- **The renderer.**
+  - The spike's recorder knows each frame's resolve numbers (`ResolveCounter`, following
+    `RenderEngine.passTimesFrame`) and which reported times. Its report gains a per-frame count of
+    a frame's numbered resolves that never reported (0 for a complete frame).
+  - The report reader checks the count's length and that it is whole.
+- **The main process.**
+  - `buildResults` takes every per-frame sum over complete frames, and counts incomplete frames
+    after the warm-up, dropped and partial apart.
+  - Each GPU percentile row gets its verdict by addendum B's bound (Design note 21).
+- **Results version 5:**
+  - `gpu.incompleteFrames`;
+  - `gpu.clocks`, written null with "the GPU's clocks are not yet read (R05.T14.k)" until T14.k;
+  - `validateResults`, and the summary's line;
+  - the replayer's version 5;
+  - the six committed files converted;
+  - the README and addendum B's plan text.
+- **Files:**
+  - `view/spike/metrics.ts`, `view/spike/spikeHarness.ts`, their tests;
+  - `preload/api.ts`, `main/spikeReport.ts`, `main/fixtures/spikeReport.ts`;
+  - `main/results.ts`, its test;
+  - `tools/gpu-replay/src/results.rs`;
+  - the six committed results files;
+  - `docs/measurements/descent-spike/README.md`;
+  - this plan.
+- **Tests:**
+  - a frame with one of its five resolves missing is partial, and one with all missing is
+    dropped; neither enters a sum, and both are counted after the warm-up only;
+  - the bound:
+    - a row whose complete frames pass, with k incomplete frames that could push it over, is not
+      measured with the reason;
+    - one that passes even with all k above the limit passes;
+    - one that fails even with all k below fails;
+    - k = 0 gives exactly version 4's verdict;
+  - each pass's own percentiles keep every time that arrived;
+  - `validateResults` refuses version 4, a count above the frames after the warm-up, a clock column
+    of the wrong length, and a pass verdict that the count makes impossible;
+  - every committed file validates as version 5 within 512,000 B;
+  - the replayer's test checks version 5.
+- **Acceptance:**
+  - `pnpm --filter hyperion exec vitest run view/spike/metrics view/spike/spikeHarness
+src/main/spikeReport src/main/results`;
+  - `just gpu-replay-check`;
+  - the hidden `just descent-spike --smoke` exits 0.
+- Suggested subject: `fix(spike): R05.T14.j Count incomplete frames and bound the GPU rows by
+them`.
+
+**R05.T14.k The GPU's clocks.**
+
+- **A reader in `main/gpuClocks.ts`,** run by the 1 Hz sampler beside the memory:
+  - **NVIDIA:** from the `nvidia-smi -q -x` output the sampler already reads. `parseNvidiaSmi`
+    gains `clocks/graphics_clock`, `clocks/mem_clock`, `performance_state` and
+    `max_clocks/graphics_clock`, in MHz, `N/A` as null.
+  - **i915 under Linux:** `gt_act_freq_mhz`, and `gt_RP0_freq_mhz` or `gt_boost_freq_mhz`, of the
+    run's GPU's DRM card. Choose it by the adapter's PCI vendor and device under
+    `/sys/class/drm/card<N>/device/`.
+  - **amdgpu under Linux:** `pp_dpm_sclk` and `pp_dpm_mclk`.
+  - **Otherwise** null with the platform's reason (`process.platform` injected for tests). A
+    sysfs file that is absent or unreadable gives that column null with the path in its reason.
+- **What reaches the results.**
+  - `gpu.clocks` from the samples.
+  - The GPU rows' note: the median graphics clock after the warm-up, against the maximum, when
+    below 90%.
+  - The summary's line: the median, p5 and p95 of the graphics clock, against its maximum, with
+    the source.
+- **The replayer** reads the same sources (`nvidia-smi`, sysfs) before its first frame, after its
+  last, and once a second between. It writes `gpu.clocks` from them.
+- **Files:**
+  - `apps/hyperion/src/main/gpuClocks.ts`, `main/fdinfo.ts` (the parser), `main/results.ts`, their
+    tests;
+  - fixtures: an `nvidia-smi.xml` with clocks (re-recorded on the RTX 3080, unprivileged), and
+    i915 and amdgpu sysfs trees written in the kernel's documented layout;
+  - `tools/gpu-replay/src/` (the reading and `results.rs`);
+  - `docs/measurements/descent-spike/README.md`.
+- **Tests:**
+  - the NVIDIA fixture parses its graphics, memory and maximum clocks and its P-state;
+  - the i915 tree gives `gt_act_freq_mhz` against RP0, and falls back to boost when RP0 is absent;
+  - the amdgpu tree gives the starred levels and the highest;
+  - darwin and win32 (non-NVIDIA) give null with their reasons;
+  - a missing file gives its column null with the path;
+  - the column form holds `-1` for a missing sample, with its gap;
+  - a run at a median 1,100 of 1,980 MHz puts the note on the three GPU rows, and one at 1,950
+    puts none;
+  - the replayer's unit test writes clocks from a stubbed reading.
+- **Acceptance:**
+  - `pnpm --filter hyperion exec vitest run src/main/gpuClocks src/main/fdinfo src/main/results`;
+  - `just gpu-replay-check`;
+  - the hidden `just descent-spike --smoke` on the RTX 3080 exits 0, with its sampled clocks
+    logged and recorded in the as-built notes.
+- Suggested subject: `feat(spike): R05.T14.k Record the GPU's clocks beside the rows`.
+
 ### R05.T15 The capture and the native replay
 
 **R05.T15.a The capture.** A measurement-only shim on `GPUDevice`, `GPUQueue` and the encoders,
@@ -2452,9 +2561,10 @@ One high-setting run at 1080p is recorded for comparison, not judged.
 - Files: `docs/measurements/descent-spike/*.json` and `*.md`.
 - Acceptance: the four results files exist, each with every figure of Design note 18 and the
   machine's load average and governor; the summary states pass or fail against every row of
-  Design note 21's table. Each results file records `PassTimes.timer`, the platform and the
-  launch mode; GPU-time rows on a `quantized` timer carry ±65.5 µs per pass and are marked
-  marginal within that tolerance of their limit (decisions-r06-r07.md item 8).
+  Design note 21's table. Each results file records `PassTimes.timer`, the platform, the launch
+  mode, the frames with incomplete pass times and the GPU's clocks (or why not); GPU-time rows on a
+  `quantized` timer carry ±65.5 µs per pass and are marked marginal within that tolerance of their
+  limit (decisions-r06-r07.md item 8).
 
 **R05.T16.b The variants.** On one seed, each changing one factor from the baseline: a companion
 load on two threads (Design note 20); a cold pipeline cache; ridged terms on; Dawn's safety checks
@@ -2555,7 +2665,12 @@ fails on streaming demand and the demand under min(hard, 4σ_n) (T13.a) would me
 verdict names the selection bound as ours to fix; that is never a fired rule (decisions-r05.md item
 6). The engine adapter's share of the main thread, and the GPU process's `WebGPU` and
 `VulkanQueueSubmitHook` slices, come from a profiled run: T17's if one was needed, else T14.f's
-hidden one, which is provisional. Timed runs carry none.
+hidden one, which is provisional. Timed runs carry none. Each GPU row is read with the clocks
+recorded beside it (T14.k). The verdict is the row as measured. A row that fails while the run's
+median clock was below 90% of the maximum says so, and may cite the pass's times in the samples at
+the maximum clock as evidence, never in the row's place. The replay's and the browser's pass times
+are compared with both runs' clocks stated, and a difference of more than 10% between their median
+clocks is named beside the comparison.
 
 - Files: this plan, `docs/measurements/descent-spike/README.md`.
 - Acceptance: the verdict names each criterion of Design note 21 with its measured value on each
@@ -4184,10 +4299,10 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
         whose GPU falls behind therefore understates its GPU rows.
       - 110 frames (1.7%) are partial, which moves no figure (atmosphere p95 70.41 against 70.40 ms
         without them).
-      - Options for later: count the dropped numbers in the report (results v5) and flag a row; or
-        leave out of the sums any frame missing one of its resolves, as VIEW's
-        `PrimaryFrameTimes` does. A shown window's presentation keeps the backlog to a few frames,
-        so visible runs should rarely drop.
+      - _Ruled_ (2026-10-06, addendum B of `decision-r05-trace-windows-2.md`): incomplete frames are
+        left out of every per-frame sum and counted, dropped and partial apart (results version 5).
+        A GPU row's verdict must hold for any times they had: pass only with them all above the
+        limit, fail if failing with them all below it, else not measured (T14.j).
   - **The atmosphere's cost is real GPU work, and it comes from how the ray march's shader reads
     its medium.**
     - Of the three dispatches, the per-pixel ray march is the cost: p50 6.12 ms, p95 69.88 ms.
@@ -4238,12 +4353,125 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
 
   - **A measurement caveat for T17 and T18:** a GPU row is read at the clocks the driver picks. At
     the spike's light load, this GPU runs a compute-bound pass at about 1.7 times its time at full
-    clock. Options: record the clocks beside the rows (the memory sampler already reads
-    `nvidia-smi`), or rule that a row measures the pass at the clocks it ran at.
+    clock. _Ruled_ (2026-10-06, addendum B): a row measures the pass at the clocks the driver chose,
+    never pinned or normalised. The clocks are recorded at 1 Hz beside the rows, from `nvidia-smi`,
+    or i915's or amdgpu's sysfs, else null with the reason (macOS), and noted on a row measured
+    below 90% of the maximum clock (T14.k).
   - **T17:** with the fix merged, the timer no longer stops. On the committed shader, though,
     high's atmosphere misses its row by 6 times between plateaus and 70 times at p95, and the
     frame rows fail in the coast and the arc. Lane D's view is that T17's high runs wait for
     option 1; until then they would measure a known failure.
+
+- **Deviations in T14.j, as built** (2026-10-06, incomplete frames and results version 5;
+  `decision-r05-trace-windows-2.md`, addendum B).
+  - _Where things are._ The report's `frames.missingResolves` (`preload/api.ts`) holds each
+    frame's resolves that never reported. `SpikeMetrics` keeps a per-frame count of reports and
+    takes the difference from the resolves the frame numbered, after the frame before it, in
+    `report()`, floored at 0. `readDescentSpikeReport` requires the series, as long as the frames'
+    and whole. `results.ts` adds `IncompleteFrames`, `GpuClocks`, `GpuClockSource`,
+    `boundedGpuRow`, `incompleteFramesReason`, `GPU_ROW_IDS`, `GPU_CLOCKS_NOT_READ` and the private
+    `rankIndex`, which `nearestRank` and the schema check now share. The three GPU rows are built
+    by `boundedGpuRow`. `gpu.passes` keeps every time that arrived, and `gpu.sumP95Ms` and the rows
+    read the complete frames only.
+  - _Dropped or partial._ The report carries only the missing count, as ruled. The main process
+    tells the two apart by the pass series: the timer numbers a resolve only when it timed a pass,
+    and every reported resolve writes its passes. A frame with a missing resolve and no pass time is
+    therefore dropped, and one with some is partial.
+  - _The frames counted._ `gpu.incompleteFrames` is `{ dropped, partial, frames }`, one field more
+    than the ruling's. `frames` is the frames counted, so that the check can bound the counts in a
+    replay's file, which has no rAF figure. The counts cover the frames after the warm-up outside
+    the trace's boundary exclusions, the frames every per-frame figure reads, so the bound's k is
+    over the rows' own frames. In a client's file `frames` equals the rAF statistics' count, and
+    the schema check holds it to that.
+  - _The bound._ A row is judged twice, with its k incomplete frames placed at +∞ and at −∞. When
+    both judgements agree, that is its verdict; otherwise it is not measured with the ruling's
+    reason, "k frames' pass times were incomplete (the GPU was more than 27 frames behind)". When
+    both placements are `marginal` (a quantized timer), the row stays marginal, since every
+    placement between gives the same verdict. The ruling names only pass, fail and not measured.
+    A row that holds with k > 0 carries the note "k frames with incomplete pass times left out; the
+    verdict holds whatever their times". With k = 0 the verdict is `row`'s, as in version 4 (a
+    test compares the two).
+  - _The schema check._ Version 5 only. `gpu.incompleteFrames` must be whole counts with dropped
+    plus partial at most `frames`. A GPU row's verdict must be one its count allows. From the
+    counts alone, a pass (or marginal) needs some m ≤ `frames` whose 95th-percentile rank lies
+    below m − k, about 5% of the frames, and a fail needs the rank of `frames` to reach k. The rank
+    is `nearestRank`'s own arithmetic. `gpu.clocks`, when present, must name `nvidia-smi`,
+    `i915-sysfs` or `amdgpu-sysfs`. Its maximum must be whole MHz, and each of its three columns
+    must have the memory series' column form, as long as `tMs`. `checkColumn` names the column's
+    unit (KiB, MHz or P-states).
+  - _For T14.k._ `GpuClocks` is typed ahead of its reader: `maxGraphicsMHz` is a `Measured<number>`
+    so that a missing maximum is null with its reason, and `MemoryColumn` documents its unit as
+    the field's name gives it. T14.k may refine both.
+  - _The summary._ A new line after the trace's: "**Incomplete pass times:** d dropped and p partial
+    of N frames after the warm-up, left out of the GPU rows' sums, whose verdicts hold whatever
+    their times", or "none of N frames after the warm-up", or the reason.
+  - _Frames still in flight at the report._ The report is taken after the trace's last stop. A
+    resolve whose read is still in flight then counts as missing: at the report it never reported.
+    The count is then conservative. It can make a row not measured, never pass or fail it wrongly.
+    The reason still names the 27-frame backlog. A trace that failed before its first window stops
+    at once, so a run's last few frames could be counted so. Waiting for the reads before the
+    report would be a controller change (open, for the orchestrator).
+  - _The replayer._ It resolves once a frame, so its frames are whole or dropped (`partial` 0). It
+    counts a frame dropped when its mapping or its read failed. Before, such a frame vanished from
+    the figures (a failed mapping) or counted as untimed (a failed read).
+    - `Replayer::read_pass_times` returns `Result<_, wgpu::MapRangeError>`. `Frames::finish`
+      returns `FrameTimes { read, unread, untimed, unread_cause }`.
+    - The first cause becomes one of the replay's findings.
+    - `ReplayFigures` has `unread_frames` and `untimed_frames`, and `frames()` sums them with the
+      frames read, so the unread are never more than the frames.
+    - Its rows are bounded the same way (`PassTiming::row`, sorting its own values, by index
+      arithmetic). Its reason is its own: "k frames' pass times could not be read back". The
+      ruling's names the browser timer's 27-frame ring, which the replay has none of.
+    - `gpu.clocks` is null with the client's reason.
+    - A replay file it writes validates under the client's `validateResults`.
+  - _The committed files._ The six files are converted with both new figures null, "not recorded
+    before results version 5", and every row as written. The converter checks losslessness: it
+    removes the two figures, restores the version and compares the result with the version 4 file,
+    values and key order alike.
+    - The five client files were rewritten from JSON and formatted by Prettier, with the keys in
+      `buildResults`' order.
+    - The replay's file was edited as text, in serde's sorted order, so that its `14.0`-style
+      numbers stay as written.
+    - Sizes: 109,638, 109,639, 9,148, 117,928, 118,913 and 119,283 B.
+    - The five summaries were regenerated by `summaryMarkdown` and Prettier, and differ from the
+      committed ones by the new line alone.
+  - _Files beyond the task's list._ `main/spikeSession.test.ts` (the report fixture's field),
+    `tools/gpu-replay/src/run.rs`, `replay.rs`, `window.rs` and `tests/replay.rs` (the replayer's
+    own count). `spikeHarness.ts` needed no change: `SpikeRecorder` passes the engine numbers that
+    `SpikeMetrics` counts. The README gains a "How the figures are read" bullet on incomplete pass
+    times, beside the `gpu` row's addendum text. In this plan, T14.j's text says "addendum B's
+    bound (Design note 21)" for "ruling 1's bound", and Design note 18's paragraph is re-wrapped
+    after the inserted clause.
+  - _The smoke._ The hidden `just descent-spike --smoke` (high, RTX 3080, port 7893, an 8 G scope,
+    `DISPLAY=:0`, offscreen) exited 0 twice. The first run took 22 s at load 2.8, with windows of
+    3,307,956, 2,047,334 and 3,514,768 B (0.15, 0.12 and 0.22 %) and 117, 66 and 174 frames checked.
+    The second, on the final tree, took 28 s at load 18, with 3,018,069, 2,597,484 and 3,346,684 B
+    (0.13, 0.17 and 0.20 %) and 105, 91 and 160 frames checked. The report with its new series
+    passed the main process's reader. A smoke writes no results, so the counts themselves are
+    proven by the tests.
+  - _Gate (all capped)._
+    - The acceptance vitest: 4 files, 181 tests.
+    - `pnpm test`: 325 files, 5,483 tests.
+    - The typecheck from a clean cache, `just check lint` and Prettier.
+    - `just gpu-replay-check`: 27 unit tests and clippy. The replayer's GPU test also passed,
+      offscreen.
+    - The commit hooks.
+  - _Review._ typescript-reviewer found no must-fix. Its three should-fix items are applied:
+    - tests for an impossible `marginal`, a replay's own count, and the boundary exclusion;
+    - unit-neutral names in the column check;
+    - unit-suffixed parameters on `boundedGpuRow`.
+
+    Of its two considers, this record is one. The other, frames still in flight at the report, is
+    recorded above as open.
+
+    rust-reviewer found one must-fix, a float compared through `serde_json::Value` in a test, now
+    compared with a tolerance. Its three should-fix items and three considers are all applied:
+    - one row builder with one limit, which sorts its own values;
+    - `#[must_use]`;
+    - a test for a row with only unread frames;
+    - the read-back's error kept as a finding;
+    - frame counts that hold by construction;
+    - no reallocated placements.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

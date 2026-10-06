@@ -234,6 +234,7 @@ function smokeReport(): DescentSpikeReport {
       rafIntervalsMs: scriptTimesS.map((_, i) => (i === 0 ? 0 : 1000 / 60)),
       ourCodeMs: scriptTimesS.map(() => 4),
       callbackStartsMs: callbackStartsOf(scriptStartMs, scriptTimesS),
+      missingResolves: scriptTimesS.map(() => 0),
       passes: [{ label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 1) }],
     },
   };

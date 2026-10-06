@@ -8,6 +8,7 @@
 - **Launch:** linux, vulkan mode, timer full, seed 7, window hidden, canvas 806 × 431 px
 - **T:** — (no window shown); warm-up 10 s
 - **Trace:** 9 perfetto-proto windows, 1168.7 s traced after the warm-up, profiled; 8 boundaries left out 3022 frames (largest stall 66.80 ms); largest file 480 MiB, buffer use up to 26 %
+- **Incomplete pass times:** — (not recorded before results version 5)
 - **Options:** `--setting low` `--seed 7` `--smoke false` `--ridged off` `--dawnSafety on` `--traceProfile on` `--terrainVertexPath face-differences` `--terrainNormals mesh`
 
 ## The criterion (Design note 21)

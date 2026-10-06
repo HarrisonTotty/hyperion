@@ -136,8 +136,16 @@
     "source": "gpu-completion"
   },
   "gpu": {
+    "clocks": {
+      "reason": "not recorded before results version 5",
+      "value": null
+    },
     "gpuProcess": {
       "reason": "a native replay has no GPU process",
+      "value": null
+    },
+    "incompleteFrames": {
+      "reason": "not recorded before results version 5",
       "value": null
     },
     "passes": {
@@ -353,5 +361,5 @@
   "uploads": {
     "bytes": 8055072
   },
-  "version": 4
+  "version": 5
 }

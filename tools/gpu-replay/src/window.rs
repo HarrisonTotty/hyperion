@@ -250,6 +250,8 @@ pub(crate) fn run(
         .running
         .ok_or_else(|| RunReplayError::window("the window never opened"))?;
     let times = running.frames.finish(&running.replayer, &running.device)?;
+    let mut findings = app.findings;
+    findings.extend(times.unread_finding());
     let intervals_ms = app
         .presented_at
         .windows(2)
@@ -272,7 +274,9 @@ pub(crate) fn run(
         timed: running.replayer.times_passes(),
         canvas: main.map_or((0, 0), |s| (s.width, s.height)),
         intervals_ms,
-        passes: times.into_iter().map(|frame| frame.passes).collect(),
+        unread_frames: times.unread,
+        untimed_frames: times.untimed,
+        passes: times.read.into_iter().map(|frame| frame.passes).collect(),
         rows: rows_of(capture),
         untimed_passes: running.replayer.untimed_passes(),
         upload_bytes: upload_bytes(capture),
@@ -281,6 +285,6 @@ pub(crate) fn run(
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone(),
-        findings: app.findings,
+        findings,
     })
 }

@@ -1,5 +1,5 @@
 //! The replay's results file, in the descent spike's schema (`hyperion.descent-spike.results`
-//! version 4, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
+//! version 5, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
 //! same way (R05 Design notes 18, 21 and 22).
 //!
 //! A native replay has no trace, no `requestAnimationFrame`, no GPU process and no memory
@@ -9,7 +9,9 @@
 //! intervals are the presentation intervals of a presented replay, or, offscreen, the intervals
 //! between the GPU's completions of successive frames (`frames.gpuCompletion`, a replay-only
 //! field), which say what the GPU sustains with nothing presented. Percentiles are by nearest rank
-//! and the criterion's rows are Design note 21's, as the client's writer reads them.
+//! and the criterion's rows are Design note 21's, as the client's writer reads them. A frame whose
+//! pass times were never read back is left out of the GPU rows and counted, and bounds their
+//! verdicts as the client's incomplete frames do (decision-r05-trace-windows-2.md, addendum B).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -30,14 +32,26 @@ pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
 /// by the per-frame `spike.frame` spans, lists only the GPU-process slices of the recorded
 /// categories, and fails a window whose frame spans disagree with the renderer's frames. A replay
 /// has no trace, so it writes `run.trace`, `mainThread.split` and `gpu.gpuProcess` as null and
-/// meets none of those checks.
-pub const RESULTS_VERSION: u64 = 4;
+/// meets none of those checks. Version 5 (the same decision's addendum B) counts the frames whose
+/// pass times are incomplete (`gpu.incompleteFrames`), bounds the GPU rows' verdicts by them, and
+/// adds `gpu.clocks`, null until R05.T14.k reads them.
+pub const RESULTS_VERSION: u64 = 5;
+
+/// Why a results file has no GPU clocks until R05.T14.k reads them, the client's
+/// `GPU_CLOCKS_NOT_READ`.
+const GPU_CLOCKS_NOT_READ: &str = "the GPU's clocks are not yet read (R05.T14.k)";
+
+/// The percentile every GPU row reads (Design note 21).
+const GPU_ROW_PERCENTILE: f64 = 0.95;
 
 /// Why a native replay has no memory figure.
 const NO_MEMORY: &str = "the native replay does not measure memory";
 
 /// Why a native replay has no figure read from a trace.
 const NO_TRACE: &str = "a native replay has no trace";
+
+/// Why a replay on an adapter without `TIMESTAMP_QUERY` has no pass time.
+const TIMER_REASON: &str = "the adapter has no timestamp-query";
 
 /// The memory series' reading columns (the client's `MemorySeries`), each null all run here.
 const MEMORY_COLUMNS: [&str; 8] = [
@@ -97,20 +111,27 @@ pub struct FrameStats {
     pub(crate) hitches: Option<usize>,
 }
 
-/// The `p`th percentile of ascending `sorted` by nearest rank, or `None` for no values.
+/// The index [`nearest_rank`] reads among `len` ascending values at percentile `p`, from 0; the
+/// GPU rows' bounds read the same, as the client's `rankIndex` does. `len` is at least 1.
 #[must_use]
-pub fn nearest_rank(sorted: &[f64], p: f64) -> Option<f64> {
-    if sorted.is_empty() {
-        return None;
-    }
+fn rank_index(len: usize, p: f64) -> usize {
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         clippy::cast_precision_loss,
         reason = "a rank within a list's length, which is far below 2^52"
     )]
-    let rank = (p * sorted.len() as f64).ceil() as usize;
-    sorted.get(rank.clamp(1, sorted.len()) - 1).copied()
+    let rank = (p * len as f64).ceil() as usize;
+    rank.clamp(1, len.max(1)) - 1
+}
+
+/// The `p`th percentile of ascending `sorted` by nearest rank, or `None` for no values.
+#[must_use]
+pub fn nearest_rank(sorted: &[f64], p: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.get(rank_index(sorted.len(), p)).copied()
 }
 
 /// Summarises `intervals_ms` against the period T, or `None` for no intervals.
@@ -201,7 +222,11 @@ pub struct ReplayFigures {
     pub(crate) canvas: (u32, u32),
     /// Intervals between presentations (presented) or GPU completions (offscreen), ms.
     pub(crate) intervals_ms: Vec<f64>,
-    /// Each frame's passes, label and GPU time, ms.
+    /// Frames whose resolved pass times were never read back, which `passes` leaves out.
+    pub(crate) unread_frames: usize,
+    /// Frames that timed no pass, which `passes` leaves out too.
+    pub(crate) untimed_frames: usize,
+    /// Each read-back frame's passes, label and GPU time, ms.
     pub(crate) passes: Vec<Vec<(String, f64)>>,
     /// The row of each pass label, from the capture.
     pub(crate) rows: BTreeMap<String, PassRow>,
@@ -217,6 +242,13 @@ pub struct ReplayFigures {
 }
 
 impl ReplayFigures {
+    /// Every frame replayed: those read back, those never read back and those that timed no pass,
+    /// so that the unread are never more than the frames.
+    #[must_use]
+    pub fn frames(&self) -> usize {
+        self.passes.len() + self.unread_frames + self.untimed_frames
+    }
+
     /// Whether frames were presented in a window.
     #[must_use]
     pub fn presented(&self) -> bool {
@@ -271,7 +303,88 @@ fn row(
 
 fn p95(values: &mut [f64]) -> Option<f64> {
     values.sort_by(f64::total_cmp);
-    nearest_rank(values, 0.95)
+    nearest_rank(values, GPU_ROW_PERCENTILE)
+}
+
+/// Why a GPU row is not measured when the frames whose pass times were not read back could carry
+/// its verdict either way.
+#[must_use]
+fn unread_reason(count: usize) -> String {
+    let frames = if count == 1 { "frame's" } else { "frames'" };
+    format!("{count} {frames} pass times could not be read back")
+}
+
+/// How a replay timed its passes, which its GPU rows read.
+#[derive(Debug, Clone, Copy)]
+struct PassTiming {
+    /// Whether the adapter timed passes (`TIMESTAMP_QUERY`).
+    timed: bool,
+    /// Frames whose resolved pass times were never read back.
+    unread: usize,
+}
+
+impl PassTiming {
+    /// The 95th percentile of `values`, which it sorts, or why there is none.
+    fn p95(self, values: &mut [f64], what: &str) -> Result<f64, String> {
+        if !self.timed {
+            return Err(TIMER_REASON.to_owned());
+        }
+        p95(values).ok_or_else(|| {
+            if self.unread > 0 {
+                unread_reason(self.unread)
+            } else {
+                format!("no timed {what}")
+            }
+        })
+    }
+
+    /// A GPU row: the 95th percentile of `values`, its frames read back, against `limit`, judged
+    /// so that its verdict holds whatever times the unread frames had, as the client's
+    /// `boundedGpuRow` does (decision-r05-trace-windows-2.md, addendum B, ruling 1).
+    ///
+    /// The row passes only if it still passes with every unread frame placed above its limit, and
+    /// fails only if it still fails with every one placed below it; otherwise it is not measured,
+    /// with their count as its reason. With no unread frame it is [`row`]'s.
+    #[must_use]
+    fn row(
+        self,
+        id: &str,
+        criterion: &str,
+        limit: Option<f64>,
+        values: &mut [f64],
+        what: &str,
+    ) -> Value {
+        let value = self.p95(values, what);
+        let mut judged = row(id, criterion, limit, "ms", value.clone(), None);
+        let (Some(limit), Ok(_), true) = (limit, &value, self.unread > 0) else {
+            return judged;
+        };
+        // The percentile's index among the read values and the unread placed after them (above)
+        // or before them (below); `values` is sorted now.
+        let rank = rank_index(values.len() + self.unread, GPU_ROW_PERCENTILE);
+        let above = values.get(rank).copied().unwrap_or(f64::INFINITY);
+        let below = rank
+            .checked_sub(self.unread)
+            .and_then(|i| values.get(i))
+            .copied()
+            .unwrap_or(f64::NEG_INFINITY);
+        let judge = |ms: f64| if ms <= limit { "pass" } else { "fail" };
+        let (verdict, note) = if judge(above) == judge(below) {
+            let frames = if self.unread == 1 { "frame" } else { "frames" };
+            (
+                judge(above),
+                format!(
+                    "{} {frames} with incomplete pass times left out; the verdict holds whatever their times",
+                    self.unread
+                ),
+            )
+        } else {
+            ("not-measured", unread_reason(self.unread))
+        };
+        judged["verdict"] = json!(verdict);
+        judged["note"] = json!(note);
+        judged
+    }
 }
 
 /// The machine's facts the schema records, read from Linux's `/proc` and `/sys` where present.
@@ -422,7 +535,6 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         terrain.extend(t);
         atmosphere.extend(a);
     }
-    let timer_reason = "the adapter has no timestamp-query";
     let passes: Vec<Value> = by_label
         .iter_mut()
         .map(|(label, times)| {
@@ -441,13 +553,11 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             })
         })
         .collect();
-    let gpu_value = |values: &mut Vec<f64>, what: &str| -> Result<f64, String> {
-        if !figures.timed {
-            return Err(timer_reason.to_owned());
-        }
-        p95(values).ok_or_else(|| format!("no timed {what}"))
+    let timing = PassTiming {
+        timed: figures.timed,
+        unread: figures.unread_frames,
     };
-    let sum_p95 = gpu_value(&mut sums, "pass");
+    let sum_p95 = timing.p95(&mut sums, "pass");
     let (terrain_limit, atmosphere_limit, p95_limit, memory_limit) = match figures.setting {
         Setting::High => (5.0, 1.0, period_ms.map(|t| t + 1.0), 3e9),
         Setting::Low => (14.0, 4.0, Some(35.0), 1e9),
@@ -515,29 +625,26 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             Err("a native replay has no main-thread figure".to_owned()),
             None,
         ),
-        row(
+        timing.row(
             "headroom-gpu",
             "GPU pass sum ≤ 0.8 T at the 95th percentile",
             period_ms.map(|t| 0.8 * t),
-            "ms",
-            sum_p95.clone(),
-            None,
+            &mut sums,
+            "pass",
         ),
-        row(
+        timing.row(
             "terrain",
             &format!("terrain GPU time ≤ {terrain_limit} ms at the 95th percentile"),
             Some(terrain_limit),
-            "ms",
-            gpu_value(&mut terrain, "terrain pass"),
-            None,
+            &mut terrain,
+            "terrain pass",
         ),
-        row(
+        timing.row(
             "atmosphere",
             &format!("atmosphere GPU time ≤ {atmosphere_limit} ms at the 95th percentile"),
             Some(atmosphere_limit),
-            "ms",
-            gpu_value(&mut atmosphere, "atmosphere pass"),
-            None,
+            &mut atmosphere,
+            "atmosphere pass",
         ),
         row(
             "memory",
@@ -620,9 +727,20 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             "timer": if figures.timed { "full" } else { "absent" },
             "tolerancePerPassMs": 0,
             "untimedPasses": figures.untimed_passes,
-            "passes": if figures.timed { measured(json!(passes)) } else { missing(timer_reason) },
+            "passes": if figures.timed { measured(json!(passes)) } else { missing(TIMER_REASON) },
             "sumP95Ms": sum_p95.map_or_else(|reason| missing(&reason), |v| measured(json!(v))),
+            // A replay resolves once a frame, so a frame's pass times are whole or none.
+            "incompleteFrames": if figures.timed {
+                measured(json!({
+                    "dropped": figures.unread_frames,
+                    "partial": 0,
+                    "frames": figures.frames(),
+                }))
+            } else {
+                missing(TIMER_REASON)
+            },
             "gpuProcess": missing("a native replay has no GPU process"),
+            "clocks": missing(GPU_CLOCKS_NOT_READ),
         },
         "mainThread": {
             "ourCodeP95Ms": missing("a native replay has no main-thread figure"),
@@ -735,6 +853,8 @@ mod tests {
             timed: true,
             canvas: (1920, 1080),
             intervals_ms: vec![16.7, 16.7],
+            unread_frames: 0,
+            untimed_frames: 0,
             passes: vec![vec![("terrain".to_owned(), 4.0), ("tone".to_owned(), 0.5)]; 4],
             rows,
             untimed_passes: 0,
@@ -772,7 +892,7 @@ mod tests {
     fn the_memory_series_has_no_sample_and_every_reading_null_with_its_reason() {
         let results = results_json(&figures(BTreeMap::new()));
         // The client's version and column names, written out: its `validateResults` reads them.
-        assert_eq!(results["version"], 4);
+        assert_eq!(results["version"], 5);
         let none = json!({ "value": null, "reason": "the native replay does not measure memory" });
         assert_eq!(
             results["memory"]["series"],
@@ -792,10 +912,10 @@ mod tests {
     }
 
     #[test]
-    fn the_file_is_version_4_with_no_trace_window_and_no_engine_figure() {
+    fn the_file_is_version_5_with_no_trace_window_and_no_engine_figure() {
         let results = results_json(&figures(BTreeMap::new()));
         let no_trace = json!({ "value": null, "reason": "a native replay has no trace" });
-        assert_eq!(results["version"], 4);
+        assert_eq!(results["version"], 5);
         assert_eq!(results["run"]["trace"], no_trace);
         assert_eq!(results["mainThread"]["engine"], no_trace);
         // Version 4's split and GPU-process slices are the trace's, so a replay writes neither.
@@ -805,6 +925,97 @@ mod tests {
             json!({ "value": null, "reason": "a native replay has no GPU process" })
         );
         assert_eq!(results["frames"]["excludedFrames"], 0);
+        assert_eq!(
+            results["gpu"]["incompleteFrames"],
+            json!({ "value": { "dropped": 0, "partial": 0, "frames": 4 }, "reason": null })
+        );
+        assert_eq!(
+            results["gpu"]["clocks"],
+            json!({ "value": null, "reason": "the GPU's clocks are not yet read (R05.T14.k)" })
+        );
+    }
+
+    /// `figures` with `count` frames of a terrain pass taking `terrain_ms`, `unread` more of them
+    /// never read back.
+    fn unread_figures(count: usize, terrain_ms: f64, unread: usize) -> ReplayFigures {
+        let mut figures = figures(BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]));
+        figures.passes = vec![vec![("terrain".to_owned(), terrain_ms)]; count];
+        figures.unread_frames = unread;
+        figures
+    }
+
+    #[test]
+    fn frames_never_read_back_are_counted_as_dropped() {
+        let results = results_json(&unread_figures(4, 4.0, 1));
+        assert_eq!(
+            results["gpu"]["incompleteFrames"]["value"],
+            json!({ "dropped": 1, "partial": 0, "frames": 5 })
+        );
+    }
+
+    #[test]
+    fn a_row_its_unread_frames_could_carry_over_its_limit_is_not_measured() {
+        // Four frames at 4 ms of the high setting's 5, and a fifth unread: placed above the limit,
+        // it is the 95th percentile.
+        let results = results_json(&unread_figures(4, 4.0, 1));
+        let terrain = row(&results, "terrain");
+        let value = terrain["value"].as_f64().expect("a value");
+        assert!((value - 4.0).abs() < 1e-12, "{value}");
+        assert_eq!(terrain["verdict"], "not-measured");
+        assert_eq!(
+            terrain["note"],
+            "1 frame's pass times could not be read back"
+        );
+    }
+
+    #[test]
+    fn a_row_passes_or_fails_whatever_its_unread_frames_took() {
+        let passing = results_json(&unread_figures(100, 4.0, 1));
+        assert_eq!(row(&passing, "terrain")["verdict"], "pass");
+        assert_eq!(
+            row(&passing, "terrain")["note"],
+            "1 frame with incomplete pass times left out; the verdict holds whatever their times"
+        );
+        let failing = results_json(&unread_figures(100, 6.0, 3));
+        assert_eq!(row(&failing, "terrain")["verdict"], "fail");
+        assert_eq!(
+            row(&failing, "terrain")["note"],
+            "3 frames with incomplete pass times left out; the verdict holds whatever their times"
+        );
+    }
+
+    #[test]
+    fn a_row_with_only_unread_frames_states_their_count() {
+        let results = results_json(&unread_figures(0, 4.0, 2));
+        let terrain = row(&results, "terrain");
+        assert_eq!(terrain["verdict"], "not-measured");
+        assert_eq!(
+            terrain["note"],
+            "2 frames' pass times could not be read back"
+        );
+        assert_eq!(
+            results["gpu"]["sumP95Ms"]["reason"],
+            "2 frames' pass times could not be read back"
+        );
+        assert_eq!(results["gpu"]["incompleteFrames"]["value"]["frames"], 2);
+    }
+
+    #[test]
+    fn frames_are_those_read_back_unread_and_untimed() {
+        let mut figures = unread_figures(3, 4.0, 1);
+        figures.untimed_frames = 2;
+        assert_eq!(figures.frames(), 6);
+    }
+
+    #[test]
+    fn a_replay_without_a_timer_states_why_it_counts_no_frame() {
+        let mut untimed = unread_figures(4, 4.0, 0);
+        untimed.timed = false;
+        let results = results_json(&untimed);
+        assert_eq!(
+            results["gpu"]["incompleteFrames"],
+            json!({ "value": null, "reason": "the adapter has no timestamp-query" })
+        );
     }
 
     #[test]

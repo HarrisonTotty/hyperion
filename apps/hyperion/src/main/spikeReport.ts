@@ -31,6 +31,10 @@ function finiteList(value: unknown): value is ReadonlyArray<number> {
   return Array.isArray(value) && value.every(isFinite);
 }
 
+function countList(value: unknown): value is ReadonlyArray<number> {
+  return Array.isArray(value) && value.every(isCount);
+}
+
 function listOf<T>(value: unknown, read: (item: unknown) => T | null): T[] | null {
   if (!Array.isArray(value)) {
     return null;
@@ -158,7 +162,8 @@ function latePipeline(value: unknown): SpikeLatePipeline | null {
 
 /**
  * `value` as the renderer's report, or `null` if any part of it is missing or of the wrong type:
- * every series as long as the frames', every figure finite, the trace's windows in order.
+ * every series as long as the frames', every figure finite, each frame's missing resolves a whole
+ * count, the trace's windows in order.
  */
 export function readDescentSpikeReport(value: unknown): DescentSpikeReport | null {
   if (!isRecord(value)) {
@@ -168,12 +173,13 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   if (!isRecord(frames)) {
     return null;
   }
-  const { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs } = frames;
+  const { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs, missingResolves } = frames;
   if (
     !finiteList(scriptTimesS) ||
     !finiteList(rafIntervalsMs) ||
     !finiteList(ourCodeMs) ||
-    !finiteList(callbackStartsMs)
+    !finiteList(callbackStartsMs) ||
+    !countList(missingResolves)
   ) {
     return null;
   }
@@ -181,7 +187,8 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   if (
     rafIntervalsMs.length !== count ||
     ourCodeMs.length !== count ||
-    callbackStartsMs.length !== count
+    callbackStartsMs.length !== count ||
+    missingResolves.length !== count
   ) {
     return null;
   }
@@ -238,7 +245,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     levels,
     timer,
     untimedPasses,
-    frames: { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs, passes },
+    frames: { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs, missingResolves, passes },
     streaming: streamingList,
     uploadBytes,
     latePipelines: late,
