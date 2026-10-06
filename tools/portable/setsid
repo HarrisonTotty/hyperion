@@ -1,0 +1,27 @@
+#!/usr/bin/env perl
+# util-linux's setsid(1), `setsid <command> [args...]`, for systems without it (stock macOS). The
+# justfile appends this directory to PATH, so a system setsid(1) always comes first.
+#
+# It runs the command in a new session, and so a new process group, whose ID is this process's
+# own: the scripts start `setsid ... &` and later kill the whole group as `kill -- -$!`. A process
+# that already leads a group cannot start a session; then, as util-linux's does, it forks, and the
+# child starts the session, while this process waits for it and exits as it did.
+use strict;
+use warnings;
+use POSIX ();
+
+if (!@ARGV || $ARGV[0] =~ /\A-/) {
+    print STDERR "usage: setsid <command> [args...] (this stand-in takes no options)\n";
+    exit 64;
+}
+if (!defined POSIX::setsid()) {
+    my $child = fork() // die "setsid: fork: $!\n";
+    if ($child) {
+        waitpid($child, 0);
+        exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+    }
+    defined POSIX::setsid() or die "setsid: $!\n";
+}
+{ exec { $ARGV[0] } @ARGV }
+print STDERR "setsid: $ARGV[0]: $!\n";
+exit($!{ENOENT} ? 127 : 126);

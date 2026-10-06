@@ -89,6 +89,22 @@ just client    # run the Electron client with hot reload (`just client --help` f
 
 Options to `just client` reach the client: `just client --address 10.0.0.5 --port 9100`.
 
+### Platforms
+
+HYPERION builds and runs on Linux, macOS and Windows. The recipes are bash scripts.
+
+- **Linux** is the reference: the checks and every recorded measurement run there. Where
+  `systemd-run --user` works, the heavy test runs are capped in memory.
+- **macOS** needs the Xcode Command Line Tools (`xcode-select --install`, for clang, git and
+  Python 3) and the prerequisites above, all of which Homebrew has. The recipes run on macOS's own
+  bash 3.2 and BSD tools. Where macOS lacks a util-linux or coreutils tool that a recipe uses
+  (`flock`, `setsid`, `timeout`), the justfile puts a stand-in from `tools/portable/`, written in
+  the system Perl, last on `PATH`. The heavy-test lock works as on Linux, but with no systemd the
+  runs are not capped in memory. `just seed-target` clones with APFS's clonefile(2).
+- **Windows**: run the recipes from WSL 2, a Linux system where they run as on Linux, or from Git
+  Bash. PowerShell and `cmd.exe` cannot run them. `just cross-clippy`, and so `just ci`, needs WSL,
+  since its stand-in C compiler is a bash script. Neither has been tried on Windows yet.
+
 ### Seeing a generated system in `VIEW`
 
 Until sessions exist, the ship is a stand-in that the server starts at the galactic centre, in no
