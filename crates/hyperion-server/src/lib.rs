@@ -8,7 +8,7 @@
 //!
 //! [`Server::start`] builds the shared state from a [`ServerConfig`], [`Server::router`] serves
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
-//! serving has stopped.
+//! serving has stopped. What asks the process to stop, on each platform, is in [`stop`].
 
 pub(crate) mod bulk;
 pub mod cache;
@@ -22,6 +22,7 @@ mod outbound;
 mod requests;
 pub mod scene;
 mod stats;
+pub mod stop;
 mod subscriptions;
 #[cfg(test)]
 mod testing;

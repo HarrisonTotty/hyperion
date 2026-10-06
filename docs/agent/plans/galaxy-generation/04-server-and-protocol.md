@@ -145,6 +145,7 @@ pub mod compute  { CpuPool, Priority, SubmitJobError, CancelToken, SingleFlight,
                    SharedCellCache, CellCacheHandle, DensityMapService, MapKey,
                    RawDensityMap, quantise_map }
 pub mod cache    { ByteLru, HeapBytes }
+pub mod stop     { StopReason, StopRequests, Shutdown, unless_stopped_again }   // T17
 ```
 
 `hyperion_server::app()` is replaced by `Server::router()`. `DEFAULT_ADDR` stays.
@@ -463,7 +464,8 @@ Three tracks run side by side. **A, protocol:** T1 → T2 → T3 → T4 → T5. 
 **C, compute:** T8, T9, T10 in any order → T11, T12. They join at T13 (needs T1, T6.a and T8), then
 T14 (needs T2, T3, T7, T11, T12, T13), T15 and T16. T1–T6 and T8–T10 need nothing from Plans 01–03.
 T7 needs Plan 01's `GENERATOR_VERSION` and `UniverseTime`. T11 needs Plan 02, T12 Plans 02 and 03,
-T14 onwards all three. Within T3 and T14 the lettered subtasks are independent.
+T14 onwards all three. Within T3 and T14 the lettered subtasks are independent. T17, added
+2026-10-06, needs only T6 and runs a, b, c, d in that order; T17.c needs T17.a.
 
 ### Track A: protocol
 
@@ -658,7 +660,8 @@ Accept: `just ci` green; `just server` starts and creates no files until a unive
 17), `UniverseStore::new(&Path)`, `scan() -> Result<Vec<SavedUniverse>, ScanStoreError>` (skips and
 logs with `tracing::warn!` any directory whose name is not 16 hex digits, whose file is unreadable,
 or whose `id` disagrees with its directory), `write(&SavedUniverse) -> Result<(), WriteSaveError>`
-(temporary file, `sync_all`, rename, then sync the directory). All of it is blocking code called
+(temporary file, `sync_all`, rename, then sync the file under its new name and the directory, which
+Windows does not have; P04.T17.b). All of it is blocking code called
 through `spawn_blocking` by the registry.
 
 Tests (temporary directories): write then scan round-trips; a file with an extra unknown field
@@ -1003,6 +1006,201 @@ with the cache adding under 10%, and under 15 ms end to end over loopback; `pong
 a map builds.
 
 Accept: `just bench` runs both files; `just test-slow` passes.
+
+### Track E: the server on every platform
+
+#### P04.T17 Platform behaviour of the server
+
+Added 2026-10-06 by a delegated decision (decision-cross-platform-server.md, items 2, 3 and 4), on
+the findings of the cross-platform Clippy fix (7f8cf94). The server runs on Linux, macOS and
+Windows. Every subtask runs Clippy for `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` as well
+as Linux ("cross-clippy" below): `just cross-clippy` once the tooling lands it, otherwise
+`cargo clippy --workspace --all-targets --target <triple> --target-dir target/cross -- -D warnings`
+for each triple, with a stand-in C compiler and archiver as `CC_<triple>` and `AR_<triple>`, since
+Clippy never links.
+
+**P04.T17.a Stop requests on every platform.** It is P04.T6.a's `main.rs`. Until now the server
+stopped gracefully only on Ctrl-C (SIGINT on Unix). SIGTERM, from systemd, `docker stop`, `kill` or
+Node's `child.kill()`, ended it without the clean close. Both stores are write-through, so that
+loses no acknowledged data, but it costs the clients a clean close (1001) and loses the shutdown's
+log lines, and it will matter more once a sessions plan saves on stop. tokio's `ctrl_c` also
+replaces the default "for the duration of the entire process", so a second Ctrl-C during a slow
+shutdown did nothing and the user could not force the exit: `CpuPool::shutdown` joins workers that
+finish their jobs in hand, and a range query cannot be cancelled.
+
+- _Ruling._
+  - **Unix:** SIGINT and SIGTERM stop the server gracefully.
+  - **SIGHUP is left at its default** (terminate). There are no reload semantics to claim it for,
+    the stores lose nothing, and a handler, once installed, can never give the default back.
+    Revisit when configuration reload exists.
+  - **Windows:** Ctrl-C, Ctrl-Break, Close and Shutdown stop it gracefully. Logoff is not listened
+    for: it "does not indicate which user is logging off", so a service must not stop on it.
+  - **A second stop request of any kind during the shutdown** ends the process at once with
+    status 1, after an error line.
+  - **Statuses:** a graceful stop exits 0 whatever the reason.
+- _Windows' events_ (Microsoft Learn, HandlerRoutine). tokio parks its handler thread for Close,
+  Logoff and Shutdown, so the process runs its shutdown until `main` returns or Windows' timeout
+  ends it.
+
+  | Event                              | Sent when                                          | Timeout                                     |
+  | ---------------------------------- | -------------------------------------------------- | ------------------------------------------- |
+  | `CTRL_CLOSE_EVENT`                 | the console is closed, or End Task in Task Manager | 5,000 ms                                    |
+  | `CTRL_C_EVENT`, `CTRL_BREAK_EVENT` | the keyboard, or `GenerateConsoleCtrlEvent`        | none                                        |
+  | `CTRL_SHUTDOWN_EVENT`              | the system shuts down; "received only by services" | 20,000 ms for a service, otherwise 5,000 ms |
+  | `CTRL_LOGOFF_EVENT`                | a user logs off; services only                     | —                                           |
+
+- _Provides:_ `pub mod stop` in `crates/hyperion-server/src/stop.rs`:
+  - `StopReason { Interrupt, Terminate, Break, ConsoleClosed, SystemShutdown, StdinClosed }`:
+    - every variant on every platform, so matches stay exhaustive;
+    - derives `Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord`;
+    - lowercase `Display` text such as "terminate signal" and "console window closed";
+    - `StdinClosed` is used from T17.c.
+  - `StopRequests::listen() -> StopRequests` and `async fn next(&mut self) -> StopReason`:
+    - On Unix it selects over `tokio::signal::unix` `interrupt()` and `terminate()`.
+    - On Windows it selects over `tokio::signal::windows` `ctrl_c`, `ctrl_break`, `ctrl_close` and
+      `ctrl_shutdown`.
+    - A listener that fails to register is logged at `error` and left out.
+    - No task is spawned.
+  - `Shutdown<T> { Finished(T), Forced(StopReason) }`, and
+    `async fn unless_stopped_again<T>(shutdown: impl Future<Output = T>, again: impl Future<Output = StopReason>) -> Shutdown<T>`.
+- _`main.rs`:_
+  - Still thin: listen, serve with graceful shutdown on the first request, logged as
+    `info!(%reason, "shutting down")`, and race `server.shutdown()` against the next request.
+  - On `Forced`, log `error!(%reason, "a second stop request: exiting before the shutdown finished")`
+    and call `std::process::exit(1)`.
+  - Axum's `with_graceful_shutdown` needs a `'static` future, so the requests are owned by one task
+    or a channel. The implementer chooses, keeping the owner and its handle in `main`.
+- _Tests:_
+  - Unit tests in `stop.rs`:
+    - `a_second_request_during_the_shutdown_forces_the_exit`: a pending shutdown and a ready
+      request give `Forced`;
+    - `a_shutdown_that_finishes_first_is_not_forced`.
+  - `crates/hyperion-server/tests/stop.rs`, `cfg(unix)`: `sigterm_shuts_the_server_down_cleanly`
+    and `sigint_shuts_the_server_down_cleanly`. Each of them:
+    - spawns `env!("CARGO_BIN_EXE_hyperion-server")` with `--port 0`, a temporary `--data-dir`,
+      `--num-workers 1` and `NO_COLOR=1`;
+    - reads stdout until the `listening` line;
+    - sends the signal with `Command::new("kill").args(["-TERM", pid])` (or `-INT`);
+    - asserts exit status 0 within `tokio::time::timeout(10 s)`, and stdout lines with
+      `shutting down` and `server shut down`, matching message text rather than the format.
+  - Windows' listeners cannot be tested here: they compile under cross-clippy and are stated as
+    untested.
+- _Accept:_ `cargo test -p hyperion-server stop`; `cargo test -p hyperion-server --test stop`;
+  cross-clippy for both targets; `just ci`.
+
+**P04.T17.b A durable rename on every platform.** It is P04.T6.b's, and touches one comment of plan
+12's (P12.T7.b). On Windows `std::fs::rename` is `MoveFileExW(…, MOVEFILE_REPLACE_EXISTING)`, with
+no write-through, and a directory cannot be opened to be synced, so `UniverseStore::write`'s
+directory sync does nothing there. Consistency holds, since NTFS journals metadata and the temporary
+file is flushed before the rename. Durability does not: a power cut shortly after `write` returns
+can lose a universe the client was told exists. PostgreSQL's `durable_rename` fsyncs the file under
+its new name and then the parent directory, and skips directories on Windows; the first of those
+steps is the one that works there.
+
+- _Ruling._ Fix this with std alone, on every platform, so that Linux's tests exercise the path:
+  - after the rename, open `universe.json` for writing and `sync_all` it;
+  - keep the Unix directory syncs;
+  - state the limit for Windows. Its directory entries are left to NTFS's journal: the new
+    universe directory, the `knowledge/` directory and the contacts file's name. The flush of the
+    file under its new name, and each Knowledge append's flush, are what commit them, as PostgreSQL
+    relies on. On FAT, exFAT and network shares nothing is promised beyond the files' own data.
+
+  Rejected: `MOVEFILE_WRITE_THROUGH`, which needs `unsafe` and is documented for copy-and-delete
+  moves; and a `FILE_FLAG_BACKUP_SEMANTICS` directory flush, which is undocumented and could make
+  writes fail on file systems that refuse it.
+
+- _Files:_
+  - `crates/hyperion-server/src/universe/store.rs`:
+    - In `write_file_durably`, after `fs::rename`, open the target with
+      `OpenOptions::new().write(true)` and `sync_all()` it, under the operation name
+      `"sync renamed file"`.
+    - Correct `sync_directory`'s docs and the module docs: the Windows reason and limit above, and
+      the `F_FULLFSYNC` note for macOS. std's `sync_all` and `sync_data` on Apple are
+      `fcntl(F_FULLFSYNC)`, which flushes the drive's cache, and XNU passes it to the file system
+      for directories too.
+  - `src/knowledge/persist.rs`: correct `sync_directory`'s docs (docs only). The append's own
+    `sync_data` carries the entries on Windows, and on macOS each append is a full flush of the
+    drive's cache.
+  - Plan 04, P04.T6.b: "temporary file, `sync_all`, rename, then sync the file under its new name
+    and the directory, which Windows does not have".
+  - Plan 12:
+    - P12.T7.b: a pointer to this task.
+    - P12.T8's Risks: the alert service's appends cost one `F_FULLFSYNC` each on macOS. If its
+      sighting bursts make that visible, batch several lines per sync, and measure on the Mac when
+      P12.T8 lands.
+- _Tests:_ none new. The step has no observable effect short of a crash, and the existing
+  `write_then_scan_round_trips`, `no_temporary_file_is_left_behind` and
+  `a_failed_write_reports_the_operation_and_path` run the path. Record that in the task's
+  deviations.
+- _Accept:_ `cargo test -p hyperion-server -- store knowledge` (the ruling's
+  `cargo test -p hyperion-server store knowledge` passes cargo two filters, which it refuses);
+  cross-clippy for both targets; `just ci`. By hand on the owner's Mac, the same `cargo test`
+  verifies the directory `F_FULLFSYNC` on APFS once.
+
+**P04.T17.c Stopping when standard input closes.** It follows T17.a, and must land before R12.T4.b.
+The Electron client starts no server child yet, but one is planned: the single-player brainstorm's
+lean ("The Electron main process starts `hyperion-server` … as a child process") and R12.T4.b ("the
+local server's launch and restarts"). Node's `subprocess.kill()` sends SIGTERM on Unix. On Windows
+the child "will always be killed forcefully and abruptly", by `TerminateProcess`, and a GUI parent
+cannot send console events to its child. So Windows has no graceful stop for a child unless the
+server offers one that is not a signal.
+
+- _Ruling._ For supervised children, on every platform, an opt-in `--stop-on-stdin-close` makes
+  the end of standard input a graceful stop. A parent stops the child by closing its stdin. If the
+  parent dies, the pipe closes on every OS, so the server never outlives its client. This is opt-in
+  because an interactive server's stdin is the terminal, and a server run with stdin closed
+  (systemd's default, or `< /dev/null`) would otherwise stop at once.
+- _Files:_
+  - `src/config.rs`:
+    - `--stop-on-stdin-close` with `HYPERION_STOP_ON_STDIN_CLOSE` (boolish), off by default;
+    - `ServerConfig::stdin_stop() -> StdinStop`, a two-variant enum `{ Watch, Ignore }` rather than
+      a bool;
+    - the builder's setter;
+    - the test that pins every option's variable.
+  - `src/stop.rs`:
+    - `StopRequests::listen(stdin: StdinStop)`.
+    - Under `Watch`, a named `std::thread` (`stdin-watch`) reads and discards stdin until EOF or an
+      error, then signals `StdinClosed` through a tokio oneshot that `next` also selects.
+    - The thread is detached by design. Record that as a documented exception to "every task has a
+      shutdown path": a blocking read on stdin cannot be cancelled, and on tokio's `spawn_blocking`
+      it would hold up the runtime's drop at exit (tokio's `Stdin` documentation). The process's
+      exit ends it.
+  - `main.rs`.
+  - `README.md`: the variable.
+- _Tests:_
+  - Unit: `a_closed_reader_requests_a_stop` (`io::empty()`), and
+    `a_reader_that_fails_requests_a_stop`.
+  - In `tests/stop.rs`, on every platform:
+    - `closing_stdin_stops_the_server_cleanly_when_asked`: piped stdin; wait for `listening`; drop
+      stdin; expect exit 0 and the reason in the log.
+    - `a_closed_stdin_does_not_stop_the_server_by_default`: `Stdio::null()`; wait for `listening`;
+      read the port from that line; `GET /healthz` answers. Then stop the server with SIGTERM on
+      Unix, or `kill()` on Windows.
+- _Accept:_ as T17.a.
+- _The launch contract for R12.T4.b and the sessions plan:_
+  - Start the server with `--stop-on-stdin-close`, piped stdio and an explicit `--data-dir` under
+    `app.getPath("userData")`. The default `./hyperion-data` is relative to the working directory,
+    which is the read-only `/` for a packaged macOS app and the install directory on Windows.
+  - Stop it by ending stdin, waiting up to 10 s, then calling `kill()`. That sends SIGTERM on Unix,
+    another graceful stop, and terminates the process on Windows.
+  - How the launcher learns the port is R12.T4.b's to settle: `--port 0` and the `listening` line,
+    or a fixed port.
+- _Plan amendments:_ R12.T4.b and the single-player brainstorm's local-server lean gain the launch
+  contract above. These are docs only, and the orchestrator applies them, since R12 has not
+  started.
+
+**P04.T17.d The argument tests on Windows.** On Windows an `OsString` holds UTF-16 that need not be
+valid. An unpaired surrogate cannot become a `str`, so clap's parser gives `ErrorKind::InvalidUtf8`,
+as on Unix, and a path keeps it. Both tests are cheap, and cross-clippy compiles them.
+
+- _Files:_ `crates/hyperion-server/src/config.rs` only.
+- _Tests:_ `cfg(windows)` twins of `a_number_that_is_not_unicode_is_refused` and
+  `a_data_directory_need_not_be_unicode`. They build the value with
+  `std::os::windows::ffi::OsStringExt::from_wide(&[0x66, 0x6F, 0xD800])`: "fo" and an unpaired high
+  surrogate. The same assertions apply, and the names gain no platform suffix.
+- _Accept:_ cross-clippy for `x86_64-pc-windows-msvc` with `--all-targets`;
+  `cargo test -p hyperion-server config` on Linux, unchanged; `just ci`. The tests run when a
+  Windows runner exists; state that in the task's deviations.
 
 ## Verification
 
@@ -1569,3 +1767,69 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     longer holds. The test that a map every waiter gave up on frees its key now queues its bands
     behind a held worker and checks that the pool skipped them, where it used to rely on a 1 ms
     timeout. `open`'s documentation no longer promises a `cancelled` it cannot give.
+- **Deviations in T17.a, as built.**
+  - _The listeners._ `StopRequests` holds them as a list of boxed poll functions, one per listener
+    that registered, built from each tokio listener's `poll_recv`, rather than as a
+    `tokio::select!` over fixed fields. A listener that failed is then simply absent, and `next` and
+    that rule are platform-independent and unit-tested on Linux over channel fakes. They are polled
+    in the platform's order (interrupt, terminate; or Ctrl-C, Ctrl-Break, Close, Shutdown): when
+    several requests wait, the first is taken and the rest wait for later calls. A listener that
+    ends is dropped, so that it cannot read as a second request for ever; tokio documents that none
+    ends. `next` is cancel safe, and with no listener it never returns. The `Display` texts are
+    "interrupt signal", "terminate signal", "break signal", "console window closed", "system
+    shutting down" and "standard input closed". `Shutdown<T>` derives the ordering traits as well,
+    under the derive rule. A target that is neither Unix nor Windows is a `compile_error!`, since
+    tokio's signal module covers only those two.
+  - _The race._ `unless_stopped_again` is biased towards the shutdown: one that is ready together
+    with a request is `Finished`. `main` keeps `StopRequests` itself and spawns nothing. One future
+    takes the first request, logs it, hands it to axum's `'static` graceful-shutdown future through
+    a `oneshot`, and then awaits the next request. That future is raced against axum's drain
+    followed by `Server::shutdown`, not `Server::shutdown` alone, so a second request during either
+    forces the exit.
+  - _When listening starts._ `main` calls `listen` after `Server::start` and just before the
+    `listening` line, so the handlers are in place before the line the tests wait for. Until then a
+    stop request ends the process by the platform's default, as before: a start writes nothing, and
+    a request held through a start that hangs (a stalled data directory) could not force the exit.
+    This came from review; the first draft listened before the bind.
+  - _Tests._ `stop.rs` adds four unit tests to the plan's two: a request names its listener and
+    the order holds, a listener that fails to register is left out, one that ends is left out, and
+    the texts are lower case. `tests/stop.rs` also sets `RUST_LOG=info`, clears every variable the
+    server reads (taken from the parser, `ServerArgs::command()`, so T17.c's is cleared with no
+    edit), gives the server a null stdin, and allows 30 s to reach `listening`. It checks that the
+    `shutting down` line names the reason's `Display` text and comes before `server shut down`.
+    Against the `main.rs` before this task both tests fail: SIGTERM killed the server (signal 15),
+    and SIGINT's log named no reason. A forced exit is unit-tested only: an end-to-end test needs a
+    shutdown slow enough to interrupt, which the binary has no seam for, and would depend on timing.
+  - _Windows._ Its listeners compile under the Windows Clippy and are untested: no Windows runner
+    exists, and raising a console event takes a Win32 call that needs `unsafe`.
+- **Deviations in T17.b, as built.**
+  - _Tests._ None are new, as the task says. The sync under the new name has no effect short of a
+    crash. The step is not gated, so the store tests run it on every platform, Linux included.
+    This was checked by hand by pointing the step at the vanished temporary name. Then 13 of the 17
+    tests in `universe::store` and `knowledge::persist` failed with `"sync renamed file"`, and all
+    passed again once it was reverted. `a_failed_write_reports_the_operation_and_path`, which the
+    task lists, fails at `"create directory"` and never reaches the step. The tests that do reach
+    it include `write_then_scan_round_trips`, `no_temporary_file_is_left_behind`, every
+    persistence test that writes a save, and `the_json_on_disk_equals_the_pinned_form`. That last
+    one also shows that opening the file again for writing leaves it whole.
+  - _Where the account lives._ The platforms' durability is set out in `UniverseStore::write`'s
+    docs, not the module docs. `store` is a private module, so rustdoc never shows its module docs
+    to a reader of the re-exported `write`, and the module docs now point to `write`. Both
+    `sync_directory`s and `write_file_durably` link there as well. On review, the Windows text
+    reads as an expectation. NTFS logs metadata changes in one sequential log, so the file's flush
+    is expected to carry the rename or the new entries with it, as PostgreSQL relies on, but
+    Microsoft documents no such guarantee. `WriteSaveError::Io`'s list of operations gains
+    `"sync renamed file"`.
+  - _Cost._ A save's write is now four syncs: the temporary file, the renamed file, the universe's
+    directory and the directory of universes. On macOS each is an `F_FULLFSYNC`, which the creation
+    of a universe can afford.
+  - _Open point, found on review, not changed._ The first save may create the data directory and
+    `universes/` with `create_dir_all`. Their own entries, in the data directory and its parent, are
+    synced on no platform. POSIX would allow a power cut soon after the first save to lose it, on
+    Unix too. In practice ext4 and XFS commit those entries with the later syncs, since their
+    journals are sequential. The docs state this. The fix would be to sync the parent of each
+    directory that `create_dir_all` created. That is a Unix durability change outside this ruling,
+    and is left to the orchestrator.
+  - _By hand on the owner's Mac._ `cargo test -p hyperion-server -- store knowledge` checks once
+    that APFS takes `F_FULLFSYNC` on a directory (the ruling's relay 2). Not run: there is no Mac
+    here.
