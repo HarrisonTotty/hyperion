@@ -19,7 +19,7 @@ import {
   patchKeyString,
 } from "../terrain/patchKey";
 import { levelBoundM, type PlanetGeometry, planetGeometry } from "../terrain/planet";
-import { RESELECT_FRACTION } from "../terrain/selectionTolerance";
+import { SELECTION_MARGIN } from "../terrain/selectionTolerance";
 import { type SlotLayout, terrainSlotLayout } from "../terrain/slotLayout";
 import { type BoundRule, boundedPlanet, type DemandView } from "./demand";
 import {
@@ -51,7 +51,7 @@ export const DEMAND_RECORD_SCHEMA = "hyperion.descent-spike.demand";
  * load; the file carries notes, and no longer one rate, cap or load for every cell.
  *
  * Version 3 (decision-r05-record-tau.md): the cells select, and compute D, at the terrain pass's
- * τ_sel = τ ÷ (1 + `RESELECT_FRACTION`), not at τ; each cell carries τ and τ_sel, and each segment
+ * τ_sel = τ ÷ (1 + `SELECTION_MARGIN`), not at τ; each cell carries τ and τ_sel, and each segment
  * adds the share of its limited frames whose τ′ exceeds τ, and the selection's time on the
  * thread's CPU clock beside its wall-clock time (lane B's finding that wall-clock times under load
  * measure the machine, 2026-10-05).
@@ -480,9 +480,9 @@ export function demandSummary(
           "the machine was quiet is unchecked.",
         ]),
     "",
-    `Selected at τ ÷ ${1 + RESELECT_FRACTION}, the terrain pass's τ_sel; D at the same tolerance; selected every`,
+    `Selected at τ ÷ ${1 + SELECTION_MARGIN}, the terrain pass's τ_sel; D at the same tolerance; selected every`,
     "frame, without the pass's cadence (decision-r05-record-tau.md). The pass's selection at a frame",
-    `is the record's at a pose at most ${RESELECT_FRACTION} × d_min earlier, which moves the demand in time, not in`,
+    `is the record's at a pose at most ${SELECTION_MARGIN} × d_min earlier, which moves the demand in time, not in`,
     "size. Of the `limited` frames, the first table gives the share whose τ′ exceeds the setting's",
     "τ: at τ_sel, a limited frame may still draw within τ.",
     "",

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { levelHeightRangeM, planetGeometry } from "../terrain/planet";
-import { RESELECT_FRACTION } from "../terrain/selectionTolerance";
+import { SELECTION_MARGIN } from "../terrain/selectionTolerance";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 import ridgesOffRanges from "./fixtures/descentRanges.txt?raw";
 import {
@@ -149,7 +149,7 @@ describe("the measured demand", () => {
 
 describe("the demand record", () => {
   it.each(SETTING_VIEWS.map((settingView) => [settingView.setting, settingView] as const))(
-    "selects the %s setting at the terrain pass's τ ÷ (1 + RESELECT_FRACTION)",
+    "selects the %s setting at the terrain pass's τ ÷ (1 + SELECTION_MARGIN)",
     (setting, settingView) => {
       const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
       const cell = runCell({
@@ -166,7 +166,7 @@ describe("the demand record", () => {
       });
       expect([cell.tauPx, cell.selectionTauPx]).toEqual([
         TERRAIN_SETTINGS[setting].tauPx,
-        TERRAIN_SETTINGS[setting].tauPx / (1 + RESELECT_FRACTION),
+        TERRAIN_SETTINGS[setting].tauPx / (1 + SELECTION_MARGIN),
       ]);
     },
   );

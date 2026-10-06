@@ -7,7 +7,7 @@
  * Selection is pure and costly, so the pass re-runs it only when its inputs move enough
  * (decision-r05-patch-demand.md, 4d): on a change of setting, viewport, field of view, contacts or
  * baked height ranges; an orientation change of more than one pixel's angle; or a camera move of
- * more than {@link RESELECT_MOVE_FRACTION} = m ÷ (1 + m), for m = `RESELECT_FRACTION`, of the
+ * more than {@link RESELECT_MOVE_FRACTION} = m ÷ (1 + m), for m = `SELECTION_MARGIN`, of the
  * box distance to the nearest selected patch that is not at the finest level. It selects at
  * τ ÷ (1 + m), so that the drawn error stays within τ between runs, and with a budget of half the
  * cache's slots (4b). The morph bands are computed at τ, raised where the budget binds
@@ -244,7 +244,7 @@ export function morphRangeM(
  * the setting's τ and a view of weight w (decision-r05-high-bound.md, F2).
  *
  * @remarks
- * Selection runs at τ_sel = τ ÷ (1 + m), for m = `RESELECT_FRACTION`, and measures `limitExcess`
+ * Selection runs at τ_sel = τ ÷ (1 + m), for m = `SELECTION_MARGIN`, and measures `limitExcess`
  * against it, so every drawn baked leaf has ρ ≤ τ′ = τ_sel × max(1, `limitExcess` ÷ w), the
  * effective tolerance of `Selection.limitExcess` and T13.a's record. The bands, at (1 + m) τ′,
  * keep the margin over the leaves that they have at τ without a budget. A coarse leaf then lies

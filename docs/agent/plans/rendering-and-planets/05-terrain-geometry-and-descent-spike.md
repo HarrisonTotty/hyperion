@@ -2887,13 +2887,14 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   F1 and F2 (T7 and T11.c, as built). The bands now move with τ′ at each selection; T13.a's
   record gives τ′'s steps between selections (F4, below).
 - **The cadence's 1%** (decision-r05-record-tau.md, "Noted for lane C"; **fixed 2026-10-05**).
-  The pass selects at τ_sel = τ ÷ (1 + m), m = `RESELECT_FRACTION` = 0.1. It re-selected on a
-  move of more than m × d_min, where d_min is the box distance to the nearest selected non-finest
-  patch. That held the drawn error to τ ÷ (1 − m²), about 1.0101 τ, between selections, not to τ.
+  The pass selects at τ_sel = τ ÷ (1 + m), m = `SELECTION_MARGIN` = 0.1 (`RESELECT_FRACTION`
+  until 2026-10-06, R05.T13.a's follow-up). It re-selected on a move of more than m × d_min, where
+  d_min is the box distance to the nearest selected non-finest patch. That held the drawn error to
+  τ ÷ (1 − m²), about 1.0101 τ, between selections, not to τ.
   A leaf at d ≥ d_min with ρ ≤ τ_sel is still (1 − m) d away after such a move, so ρ ≤ τ_sel ÷
   (1 − m).
   - _The fix._ The pass re-selects on a move of more than `RESELECT_MOVE_FRACTION` = m ÷ (1 + m),
-    about 0.0909, × d_min (`selectionTolerance.ts`, derived from `RESELECT_FRACTION`). Then
+    about 0.0909, × d_min (`selectionTolerance.ts`, derived from `SELECTION_MARGIN`). Then
     1 − m ÷ (1 + m) = 1 ÷ (1 + m) and ρ ≤ τ_sel × (1 + m) = τ exactly. Where the budget binds,
     the bound is (1 + m) τ′, the tolerance of the morph bands. So a coarse–fine edge now stays at
     morph 1 between selections too. Under the old move it could fall to 0.99 of its band's end,
@@ -5169,7 +5170,7 @@ medium, sizes, figure)`.
       ranges (any bake stored);
     - a rotation, roll included, of more than one pixel's angle, 2 acos |q · q′| > fov_x ÷ W;
     - a move of more than `RESELECT_MOVE_FRACTION` = m ÷ (1 + m), about 0.0909 for m =
-      `RESELECT_FRACTION` (0.1), × d_min: the nearest selected non-finest patch's box distance
+      `SELECTION_MARGIN` (0.1), × d_min: the nearest selected non-finest patch's box distance
       (T13.c, as built: spheres of ±24.5 km height ranges contained a low camera), floored at one
       finest patch. It was m × d_min until 2026-10-05 (Risks, "The cadence's 1%").
 

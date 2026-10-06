@@ -21,10 +21,10 @@
  * tolerance τ′ (`Selection.limitExcess`), the coarse stand-ins drawn, and the forced region's
  * bakes.
  *
- * It selects at the terrain pass's τ_sel = τ ÷ (1 + `RESELECT_FRACTION`) (`selectionTolerancePx`),
+ * It selects at the terrain pass's τ_sel = τ ÷ (1 + `SELECTION_MARGIN`) (`selectionTolerancePx`),
  * and computes D at the same tolerance (decision-r05-record-tau.md). It selects every frame,
  * without the pass's cadence: the pass's selection at a frame is the run's at a pose at most
- * `RESELECT_FRACTION` × d_min earlier, which moves the demand in time, not in size.
+ * `SELECTION_MARGIN` × d_min earlier, which moves the demand in time, not in size.
  */
 
 import { vec3 } from "../../geometry/vec3";
@@ -47,7 +47,7 @@ import {
   selectPatches,
   type ViewSelectionInput,
 } from "../terrain/select";
-import { RESELECT_FRACTION, selectionTolerancePx } from "../terrain/selectionTolerance";
+import { SELECTION_MARGIN, selectionTolerancePx } from "../terrain/selectionTolerance";
 import type { SlotLayout } from "../terrain/slotLayout";
 import { distanceToBoxFromM } from "../terrain/viewGeometry";
 import { type DemandView, perLevelDemand } from "./demand";
@@ -84,11 +84,11 @@ export const COARSE_STAND_IN_LEVEL = 12;
 
 /**
  * The margin the terrain pass's morph bands keep over the selection's tolerance, 1 +
- * {@link RESELECT_FRACTION} (`terrainPass.ts`, R05.T11.c's F2 as built): where τ′ changes between
+ * {@link SELECTION_MARGIN} (`terrainPass.ts`, R05.T11.c's F2 as built): where τ′ changes between
  * two selections by more than this factor, a split can start partly morphed, or a merge's children
  * have been.
  */
-export const BAND_MARGIN = 1 + RESELECT_FRACTION;
+export const BAND_MARGIN = 1 + SELECTION_MARGIN;
 
 /**
  * A selection's effective tolerance for a view, pixels: the view's τ × max(1, `limitExcess` ÷ w),

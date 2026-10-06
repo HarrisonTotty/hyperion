@@ -25,8 +25,8 @@ import {
   selectionErrorM,
 } from "./select";
 import {
-  RESELECT_FRACTION,
   RESELECT_MOVE_FRACTION,
+  SELECTION_MARGIN,
   selectionTolerancePx,
 } from "./selectionTolerance";
 import {
@@ -303,13 +303,13 @@ describe("the terrain pass", () => {
   });
 
   it.each(["high", "low"] as const)(
-    "selects the %s setting at τ ÷ (1 + RESELECT_FRACTION), the demand record's τ_sel",
+    "selects the %s setting at τ ÷ (1 + SELECTION_MARGIN), the demand record's τ_sel",
     async (setting) => {
       const seen: SelectionInput[] = [];
       const { pass } = await passOn(setting, { onSelect: (input) => seen.push(input) });
       pass.frame(inputAt(northPole(1_000_000)));
       const tauPx = seen[0]?.views[0]?.tauPx;
-      expect(tauPx).toBe(TERRAIN_SETTINGS[setting].tauPx / (1 + RESELECT_FRACTION));
+      expect(tauPx).toBe(TERRAIN_SETTINGS[setting].tauPx / (1 + SELECTION_MARGIN));
       expect(tauPx).toBe(selectionTolerancePx(TERRAIN_SETTINGS[setting].tauPx));
     },
   );
@@ -509,7 +509,7 @@ describe("the terrain pass's selection cadence", () => {
     // The nearest selected patch is at least the height's distance below the camera, less the
     // relief, so a move of a thousandth of it is well within the fraction.
     expect(pass.frame(inputAt(northPole(heightM * 0.999))).reselected).toBe(false);
-    expect(pass.frame(inputAt(northPole(heightM * (1 - 2 * RESELECT_FRACTION)))).reselected).toBe(
+    expect(pass.frame(inputAt(northPole(heightM * (1 - 2 * SELECTION_MARGIN)))).reselected).toBe(
       true,
     );
   });
@@ -554,7 +554,7 @@ describe("the terrain pass's selection cadence", () => {
     const frame = streamed(pass, pool, northPole(heightM));
     const dMinM = nearestBoxM(frame.selection, northPole(heightM).cameraM);
     // Halfway between the two: the former rule, m of d_min, drew the old selection on from here.
-    const fraction = (RESELECT_MOVE_FRACTION + RESELECT_FRACTION) / 2;
+    const fraction = (RESELECT_MOVE_FRACTION + SELECTION_MARGIN) / 2;
     expect(pass.frame(inputAt(northPole(heightM - fraction * dMinM), 16 * 100)).reselected).toBe(
       true,
     );
@@ -834,7 +834,7 @@ describe("the morph bands under the patch budget", () => {
     const frame = streamed(pass, pool, limitedView);
     expect(frame.selection.limited).toBe(true);
     // Past the bands' margin, so that bands at the setting's τ would leave edges unmorphed.
-    expect(frame.selection.limitExcess).toBeGreaterThan(1 + RESELECT_FRACTION);
+    expect(frame.selection.limitExcess).toBeGreaterThan(1 + SELECTION_MARGIN);
     // Nothing stands in, so every drawn patch is a selected leaf.
     expect(frame.drawSet.standingIn).toBe(0);
     const bands = writtenBands(engine, frame.drawSet);

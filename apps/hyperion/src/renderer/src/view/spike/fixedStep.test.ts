@@ -24,7 +24,7 @@ import {
   type ViewSelectionInput,
 } from "../terrain/select";
 import { type SlotLayout, slotLayout } from "../terrain/slotLayout";
-import { RESELECT_FRACTION, selectionTolerancePx } from "../terrain/selectionTolerance";
+import { SELECTION_MARGIN, selectionTolerancePx } from "../terrain/selectionTolerance";
 import { perLevelDemand } from "./demand";
 import { SPIKE_CRAFT_RADIUS_M } from "./spikeScene";
 import {
@@ -40,8 +40,8 @@ import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 
 const PLANET = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
 const HIGH = SETTING_VIEWS[0];
-/** The high setting's τ_sel, as the terrain pass selects: τ ÷ (1 + RESELECT_FRACTION). */
-const HIGH_SELECTION_TAU_PX = (HIGH?.view.tauPx ?? NaN) / (1 + RESELECT_FRACTION);
+/** The high setting's τ_sel, as the terrain pass selects: τ ÷ (1 + SELECTION_MARGIN). */
+const HIGH_SELECTION_TAU_PX = (HIGH?.view.tauPx ?? NaN) / (1 + SELECTION_MARGIN);
 
 /** A cache layout of `slots` slots of 100 B each. */
 function tinyLayout(slots: number): SlotLayout {
@@ -221,7 +221,7 @@ describe("the budget's figures (decision-r05-high-bound.md, F4)", () => {
       layout: low.layout,
     });
     expect(run.frames.map(({ limited, tauPrimePx }) => [limited, tauPrimePx])).toEqual(
-      run.frames.map(() => [false, low.view.tauPx / (1 + RESELECT_FRACTION)]),
+      run.frames.map(() => [false, low.view.tauPx / (1 + SELECTION_MARGIN)]),
     );
   });
 

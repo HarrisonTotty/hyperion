@@ -6,8 +6,8 @@ import { type QualitySetting, TERRAIN_SETTINGS } from "../quality/qualitySetting
 import { planetGeometry } from "./planet";
 import { screenSpaceErrorPx, selectionErrorM, type ViewSelectionInput } from "./select";
 import {
-  RESELECT_FRACTION,
   RESELECT_MOVE_FRACTION,
+  SELECTION_MARGIN,
   selectionTolerancePx,
 } from "./selectionTolerance";
 
@@ -67,9 +67,9 @@ describe("the terrain pass's re-selection move", () => {
     "would let that leaf reach τ ÷ (1 − m²) at the former m of d_min on the %s setting",
     (setting) => {
       const tauPx = TERRAIN_SETTINGS[setting].tauPx;
-      const drawnPx = drawnAfterMovePx(setting, LEVEL, RESELECT_FRACTION);
+      const drawnPx = drawnAfterMovePx(setting, LEVEL, SELECTION_MARGIN);
       expect(drawnPx).toBeGreaterThan(tauPx * 1.01);
-      expect(drawnPx / (tauPx / (1 - RESELECT_FRACTION ** 2))).toBeCloseTo(1, 12);
+      expect(drawnPx / (tauPx / (1 - SELECTION_MARGIN ** 2))).toBeCloseTo(1, 12);
     },
   );
 });

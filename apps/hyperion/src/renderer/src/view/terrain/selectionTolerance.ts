@@ -4,7 +4,7 @@
  * (decision-r05-record-tau.md), and the camera move after which the terrain pass selects again.
  *
  * @remarks
- * The terrain pass selects at τ_sel = τ ÷ (1 + m), for m = {@link RESELECT_FRACTION}, and selects
+ * The terrain pass selects at τ_sel = τ ÷ (1 + m), for m = {@link SELECTION_MARGIN}, and selects
  * again once the camera has moved more than {@link RESELECT_MOVE_FRACTION} = m ÷ (1 + m) of the
  * box distance to the nearest selected patch that is not at the finest level. Together they keep
  * the drawn error within τ between selections.
@@ -15,12 +15,12 @@
  * the nearest selected non-finest patch's box distance between selections
  * ({@link RESELECT_MOVE_FRACTION}).
  */
-export const RESELECT_FRACTION = 0.1;
+export const SELECTION_MARGIN = 0.1;
 
 /**
  * The fraction of d_min that the camera may move before the terrain pass selects again, where
  * d_min is the box distance to the nearest selected patch not at the finest level, floored at one
- * finest patch: m ÷ (1 + m) for m = {@link RESELECT_FRACTION}, about 0.0909
+ * finest patch: m ÷ (1 + m) for m = {@link SELECTION_MARGIN}, about 0.0909
  * (decision-r05-record-tau.md, "Noted for lane C").
  *
  * @remarks
@@ -40,14 +40,14 @@ export const RESELECT_FRACTION = 0.1;
  * band's end, at morph 1. τ_sel is unchanged, and so is T13.a's demand record, which selects
  * every frame.
  */
-export const RESELECT_MOVE_FRACTION = RESELECT_FRACTION / (1 + RESELECT_FRACTION);
+export const RESELECT_MOVE_FRACTION = SELECTION_MARGIN / (1 + SELECTION_MARGIN);
 
 /**
  * The tolerance selection runs at for a setting's τ, pixels: τ_sel = τ ÷ (1 +
- * {@link RESELECT_FRACTION}), as the terrain pass selects and T13.a's demand record measures.
+ * {@link SELECTION_MARGIN}), as the terrain pass selects and T13.a's demand record measures.
  *
  * @param tauPx - The setting's screen-space tolerance τ, pixels.
  */
 export function selectionTolerancePx(tauPx: number): number {
-  return tauPx / (1 + RESELECT_FRACTION);
+  return tauPx / (1 + SELECTION_MARGIN);
 }
