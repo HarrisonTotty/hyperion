@@ -8,6 +8,8 @@ import { SPEED_OF_LIGHT_M_PER_S } from "../../lib/scene/lightTime";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { type DiscPixel, type DiscRecord, rasteriseDisc, viewRay } from "../bodies/discShading";
 import { type BodyFramePlan, planLitBodies } from "../bodies/draw";
+import { compositeBodyFrame } from "../bodies/frameTwin";
+import { sphereFootprint } from "../bodies/regime";
 import type { CameraPose } from "../camera/pose";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { rotate } from "../camera/quaternion";
@@ -22,7 +24,7 @@ import {
 import { PSF_QUAD_PX } from "../photometry/magnitude";
 import type { PhotorealFrame } from "../photoreal/renderer";
 import { METER_CLASS } from "../post/meter";
-import { HostDiscLayer } from "../sky/disc";
+import { HostDiscLayer, type HostDiscRecord, hostDiscRecord, hostPlacements } from "../sky/disc";
 import type { WireframeDrawList } from "../wireframe/drawList";
 import {
   ECLIPSE_CAMERA_OFFSET_M,
@@ -475,7 +477,10 @@ function inStarDisc(drawn: Drawn, x: number, y: number): boolean {
   return dot(ray, axis) > 0 && norm(cross(ray, axis)) < sinRho;
 }
 
-/** The painter's step that draws `body` (its disc, or the run of points it is in), or −1. */
+/**
+ * The painter's step that draws `body` (its disc, a mesh body's limb, or the run of points it is
+ * in), or −1.
+ */
 function bodyStep(plan: BodyFramePlan, body: BodyIdHex): number {
   return plan.steps.findIndex((step) => {
     let drawsIt: boolean;
@@ -486,8 +491,12 @@ function bodyStep(plan: BodyFramePlan, body: BodyIdHex): number {
       case "points":
         drawsIt = step.sprites.some((sprite) => sprite.id === body);
         break;
+      case "limb": {
+        const mesh = plan.meshes[step.mesh];
+        drawsIt = mesh !== undefined && plan.discs[mesh.index]?.body === body;
+        break;
+      }
       case "host":
-      case "limb":
         drawsIt = false;
         break;
     }
@@ -518,6 +527,56 @@ describe("the bodies before and behind the star (T10.c)", () => {
     // Its 68 pixels, each drawn over by the star's disc, opaque, at its later step.
     expect(giant.length).toBeGreaterThan(40);
     expect(giant.every((p) => inStarDisc(drawn, p.xPx + 0.5, p.yPx + 0.5))).toBe(true);
+  });
+
+  it("hides the giant behind the star as a mesh too, the star's disc on its limb's plane", async () => {
+    const sceneS = ECLIPSE_CONJUNCTION_S;
+    const pose = eclipsePoseAtStar(sceneS);
+    const drawn = await drawnAt(sceneS, pose, 2, ZOOMED);
+    const giant = drawn.frame.bodies.find((body) => body.id === ECLIPSE_GIANT);
+    // R07.T9's synthetic depth writer over the giant promotes it: its figure writes its depth.
+    const writer =
+      giant === undefined
+        ? null
+        : sphereFootprint(giant.centreM, giant.figure.equatorialRadiusM, drawn.camera, ZOOMED);
+    if (writer === null) {
+      throw new Error("the giant is not on the view");
+    }
+    const plan = planLitBodies(
+      drawn.frame.bodies,
+      drawn.frame.lights,
+      {
+        camera: drawn.camera,
+        viewport: ZOOMED,
+        exposureScale: EXPOSURE,
+        annuli: DISC_ANNULI_HIGH,
+        planetshine: PLANETSHINE_SOURCES_HIGH,
+        depthWriters: [writer],
+        setting: "high",
+      },
+      new Map(),
+    );
+    const [placement] = hostPlacements(eclipseSceneAt(sceneS), [DISC], pose);
+    if (placement === undefined) {
+      throw new Error("the eclipse scene places no star");
+    }
+    const record = hostDiscRecord(placement, EXPOSURE);
+    /** The pixels the giant keeps a share of, with the star's disc drawn as `star`. */
+    const giantPixels = (star: HostDiscRecord): number =>
+      [
+        ...compositeBodyFrame(
+          plan,
+          drawn.camera,
+          ZOOMED,
+          new Map([[DISC.star, [star]]]),
+        ).pixels.values(),
+      ].filter((pixel) => (pixel.shares.get(ECLIPSE_GIANT) ?? 0) > 0).length;
+    expect(plan.regimes.get(ECLIPSE_GIANT)).toBe("mesh");
+    expect(bodyStep(plan, ECLIPSE_GIANT)).toBeLessThan(starStep(plan));
+    expect(giantPixels(record)).toBe(0);
+    // At infinity, as R06 drew the disc until this follow-up, the figure's depth hid the disc: the
+    // giant then shows in its 32 wholly covered pixels.
+    expect(giantPixels({ ...record, inverseLimbDistancePerM: 0 })).toBeGreaterThan(20);
   });
 
   it("leaves the part of the giant that is not yet behind the star uncovered", async () => {

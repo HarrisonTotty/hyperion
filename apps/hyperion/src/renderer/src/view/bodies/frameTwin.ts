@@ -6,9 +6,11 @@
  * {@link compositeBodyFrame} draws a plan as the renderer's passes do, over black: the `bodies`
  * pass's smooth figures, each pixel a figure covers and its body covers wholly written with its
  * depth where it is nearest (reversed-Z, greater-equal), then the painter's sequence: each disc's
- * two draws at depth 0, so only where no figure drew, and each mesh body's limb at its limb plane's
- * depth, premultiplied over what is beneath and kept by the depth test where a nearer figure drew.
- * It keeps each body's share of every pixel's light. Host discs and points are not drawn.
+ * two draws at depth 0, so only where no figure drew, each mesh body's limb at its limb plane's
+ * depth, premultiplied over what is beneath and kept by the depth test where a nearer figure drew,
+ * and each host disc given, opaque on its own limb plane (R06's `disc.wgsl`, by its twin
+ * {@link rasteriseHostDisc}), so hidden where a nearer figure drew. It keeps each body's share of
+ * every pixel's light; a host disc takes the pixel from every body. Points are not drawn.
  *
  * {@link firstHitShares} is the truth: each pixel's rays, on a grid of `samples` a side, meet the
  * nearest of the bodies' analytic spheroids, in `f64`.
@@ -21,6 +23,7 @@ import type { ProjectionCamera, Viewport } from "../camera/projection";
 import { rotate } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
 import { METER_CLASS, type MeterClass } from "../post/meter";
+import { type HostDiscRecord, rasteriseHostDisc } from "../sky/disc";
 import { type DiscPixel, type DiscRecord, rasteriseDisc, viewRay } from "./discShading";
 import type { BodyFramePlan } from "./draw";
 import { limbDepthAt, rasteriseSmoothMesh } from "./smoothMesh";
@@ -37,7 +40,9 @@ export interface FramePixel {
   readonly shares: ReadonlyMap<BodyIdHex, number>;
 }
 
-/** The twin's frame, with every pixel that is mapped to a pixel the bodies wrote. */
+/**
+ * The twin's frame, with every pixel that is mapped to a pixel the bodies or the host discs wrote.
+ */
 export interface BodyFrame {
   readonly pixels: ReadonlyMap<number, FramePixel>;
   /**
@@ -76,16 +81,19 @@ function blend(w: Working, p: DiscPixel, body: BodyIdHex): void {
 /**
  * A plan's bodies as the renderer draws them into the scene target, in `f64`, over black.
  *
+ * @param hosts - R06's host discs by star (`DiscDraw.record`), each drawn at its host's step in
+ *   the plan's order, as `LitBodyRenderer.draws` places their draws; none by default.
  * @throws Error if the plan names a record it does not hold.
  */
 export function compositeBodyFrame(
   plan: BodyFramePlan,
   camera: ProjectionCamera,
   viewport: Viewport,
+  hosts: ReadonlyMap<number, ReadonlyArray<HostDiscRecord>> = new Map(),
 ): BodyFrame {
   const width = viewport.widthPx;
   const working = new Map<number, Working>();
-  const at = (p: DiscPixel): Working => {
+  const at = (p: { readonly xPx: number; readonly yPx: number }): Working => {
     const index = p.yPx * width + p.xPx;
     let w = working.get(index);
     if (w === undefined) {
@@ -129,7 +137,8 @@ export function compositeBodyFrame(
       }
     }
   }
-  // The painter's sequence: discs at depth 0, limbs on their planes; neither writes depth.
+  // The painter's sequence: discs at depth 0, limbs and host discs on their planes; none writes
+  // depth.
   for (const step of plan.steps) {
     switch (step.kind) {
       case "disc": {
@@ -165,6 +174,17 @@ export function compositeBodyFrame(
         break;
       }
       case "host":
+        for (const record of hosts.get(step.star) ?? []) {
+          for (const p of rasteriseHostDisc(record, camera, viewport)) {
+            const w = at(p);
+            if (p.depth >= w.depth) {
+              w.rgb = [p.rgb[0], p.rgb[1], p.rgb[2]];
+              w.meterClass = METER_CLASS.hostDisc;
+              w.shares = new Map();
+            }
+          }
+        }
+        break;
       case "points":
         break;
     }

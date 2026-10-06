@@ -4814,7 +4814,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - A mesh body behind a host star shows over the star's disc: R06's disc lies at depth 0, which
       the figure's depth hides (a disc body is ordered by the painter). It needs the body beyond a
       star some pixels across, over depth-writing geometry. Putting R06's disc on its sphere's
-      polar plane, as the limb is, would fix it; that is R06's change (ruled below).
+      polar plane, as the limb is, would fix it; that is R06's change (ruled below). _Resolved
+      2026-10-06: R06's disc now lies on that plane; see "The star's disc at its limb's depth",
+      the last entry._
     - Where two limbs cross a pixel, the limb's blend over what is beneath keeps T8.a's
       coverage-over error: up to 0.115 of the pixel in the occultation.
     - Each mesh body runs `selectPatches` every frame, and its fragments discard under a depth
@@ -4856,7 +4858,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - A mesh body behind a star shows over the star's disc, because R06 draws the disc at
       infinite depth: a stated limit for RM3. No live view promotes a mesh until R10 brings depth
       writers, and a follow-up for R06 to draw star discs at their limb plane's depth is queued
-      before R10.
+      before R10. _Resolved 2026-10-06, before R10: the follow-up is built; see "The star's disc
+      at its limb's depth", the last entry._
 - **Deviations in T10.a, as built (retarded lighting geometry, decision-r07-t8a, follow-up (a)).**
   - **Ruled: the local body is lit at its retarded time** (the orchestrator, 2026-10-05, under the
     owner's delegation, on the plan-conformance and science reviews). Decision-r07-t8a (a) gave
@@ -5219,7 +5222,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       star and the moon's shadow off the planet.
   - **The planet behind the star holds while it is a disc or a point.** This is T9's host-disc
     limit, ruled a stated limit for RM3: as a mesh it would show over the star's disc. No view
-    writes depth yet, so no body of the scene is promoted.
+    writes depth yet, so no body of the scene is promoted. _It now holds as a mesh too
+    (2026-10-06): the star's disc lies on its limb's plane, tested with the giant promoted by a
+    synthetic depth writer; see "The star's disc at its limb's depth", the last entry._
   - **`just test-render`** (SwiftShader, `default` and `no-subgroups`, 2026-10-06). Both exit 0,
     with 255 and 253 checks, none failing. That is T10.b's 249 and 247, plus T10.c's three
     checks, its captures' one, and R02.T14.c's two for `ECLIPSE TEST` in `SCENE_OPTIONS`.
@@ -5381,3 +5386,52 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       depth a body off the view is promoted with the writer and promotes every disc in turn: the
       mesh test above promotes a body clear of both. Nothing changes on screen today, since no
       view writes depth. Taking `sphereOutsideView` there too would end it, before R10.
+- **The star's disc at its limb's depth** (2026-10-06; the shading lane: R06's follow-up to T9,
+  queued before R10).
+  - **What changed.** `disc.wgsl`'s vertex stage now puts R06's full-screen triangle on the
+    camera's polar plane of the star's sphere, d cos²ρ along the axis, where T9 puts a mesh body's
+    limb. Before, it lay at depth 0, at infinity.
+    - Its reversed depth is n (u · axis) ÷ (d cos²ρ) for the view ray u = (x_ndc ÷ s,
+      y_ndc ÷ (s a), −1). That is affine on the view, so the triangle's corners carry it
+      unclamped. The depth clip removes the part that sees the plane behind the camera, which
+      holds no pixel of the disc.
+    - The plane holds the limb and lies inside the star along every ray that meets the disc. So a
+      body nearer than the star hides the disc, and a mesh body beyond it, whose figure writes
+      depth, is hidden. The disc still writes no depth, and the painter's order still places disc
+      bodies and limbs about it.
+    - `HostDiscLayer` passes `inverseLimbDistance`, 1 ÷ (d cos²ρ) in m⁻¹, as an `f32` after
+      `exposure`. Its other uniforms are bit-identical to before and the fragment stage is
+      unchanged.
+    - Where nothing writes depth, the depth buffer still holds 0 under every host disc, so no
+      view's output changes. The live view writes none until R10.
+    - `sky/disc.ts` gains `HostDiscRecord` and `hostDiscRecord(placement, exposureScale)`, what a
+      draw carries, and `rasteriseHostDisc`, its `f64` twin, with each lit pixel's light and
+      depth. `DiscDraw` gains `record`.
+    - `compositeBodyFrame` (`bodies/frameTwin.ts`) takes the host records by star (`hosts`, none by
+      default). It draws each at its step, opaque on its plane, so hidden where a nearer figure
+      drew.
+  - **The stated limit is resolved.** That is T9's "Known limits", the ruling of 2026-10-05 and
+    T10.c's "The planet behind the star holds while it is a disc or a point". The test uses T9's
+    synthetic depth writer over `ECLIPSE TEST`'s giant at conjunction: 2° across 320 px, the giant
+    an 8 px disc promoted to a mesh.
+    - On the CPU (`eclipseScene.test.ts`), the twin leaves the giant no share of any pixel. With
+      the disc at infinity, as before, the giant keeps 32 pixels, its wholly covered ones.
+    - On the GPU (`smoke/eclipse.ts`, "R06.T13.e a mesh giant behind the star leaves no texel of
+      its own under the star's disc on its limb's plane"), no channel differs from the frame
+      without the giant, and without the star's disc the giant shows in 68 texels. On the merged
+      base, with the disc at infinity, the same check fails: 128 channels differ, the giant's 32
+      wholly covered pixels.
+    - `disc.test.ts`, at every pixel the disc lights: the plane's depth lies behind the star's near
+      side and before its far side, and equals T9's `limbDepths` plane for the sphere to 10⁻⁹ (a
+      turned camera, 30° across 128 px). The uniform carries 1 ÷ (d cos²ρ) to `f32`. The twin's
+      light is held to the law (10⁻¹²), its flux to π L̄ sin²ρ (1%, the T13.e test, which now
+      sums the twin) and its clamp to 65,504.
+  - **`just test-render`** (SwiftShader, `default` and `no-subgroups`, 2026-10-06). Both exit 0,
+    with 257 and 255 checks, none failing, and no uncaptured GPU error: the merged base's 256 and
+    254 and the mesh giant's check. All 55 captures a variant are byte-identical to the merged
+    base's, and the two variants' to each other. The base (a620deb with only the new check) was
+    run first; it failed that check alone, and so stopped before `no-subgroups`.
+  - **A stated limit: a camera within centimetres of a photosphere.** The plane lies d cos²ρ,
+    about 2 (d − R), ahead. Within about 5 cm of the surface it is nearer than the near plane
+    (0.1 m), and the depth clip removes the disc, which at depth 0 lit the forward hemisphere.
+    `hostPlacements` places no host for a camera inside its star, and no view stands that close.

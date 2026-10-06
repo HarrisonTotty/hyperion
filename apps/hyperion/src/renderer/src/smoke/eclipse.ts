@@ -6,7 +6,9 @@
  * @remarks
  * The checks: the moon's shadow on the planet, drawn into a scene target, equals the CPU twin of
  * the same passes (`compositeBodyFrame`) in texels and classes; the giant behind the star leaves
- * no texel of its own, the frame equal to the same frame without it; the moon in front of the star
+ * no texel of its own, the frame equal to the same frame without it, as a disc and, promoted by a
+ * depth writer, as a mesh under the star's disc on its limb's plane (R06's follow-up to R07.T9);
+ * the moon in front of the star
  * covers exactly the star's texels that its wholly covered pixels take on the CPU. The captures,
  * for the owner's check by eye: the shadow crossing the planet under the camera, the moon crossing
  * the star from inside its penumbra (a partial eclipse, then the total), and the giant passing
@@ -21,7 +23,7 @@ import { cross, dot, norm, normalise } from "../geometry/vec3";
 import { rasteriseDisc, viewRay } from "../view/bodies/discShading";
 import { type BodyFramePlan, LitBodyRenderer, planLitBodies } from "../view/bodies/draw";
 import { compositeBodyFrame, type FramePixel } from "../view/bodies/frameTwin";
-import type { LitRegime } from "../view/bodies/regime";
+import { type LitRegime, type ScreenCircle, sphereFootprint } from "../view/bodies/regime";
 import type { CameraPose } from "../view/camera/pose";
 import {
   NEAR_PLANE_M,
@@ -102,8 +104,15 @@ function eclipseFrame(
   });
 }
 
-/** A frame's plan as the photorealistic renderer makes it on the high setting. */
-function planOf(frame: PhotorealFrame, bodies = frame.bodies): BodyFramePlan {
+/**
+ * A frame's plan as the photorealistic renderer makes it on the high setting, with `depthWriters`
+ * standing for geometry that writes depth (R07.T9's synthetic writer).
+ */
+function planOf(
+  frame: PhotorealFrame,
+  bodies = frame.bodies,
+  depthWriters: ReadonlyArray<ScreenCircle> = [],
+): BodyFramePlan {
   return planLitBodies(
     bodies,
     frame.lights,
@@ -113,13 +122,17 @@ function planOf(frame: PhotorealFrame, bodies = frame.bodies): BodyFramePlan {
       exposureScale: frame.exposureScale,
       annuli: DISC_ANNULI_HIGH,
       planetshine: PLANETSHINE_SOURCES_HIGH,
+      depthWriters,
       setting: "high",
     },
     new Map(),
   );
 }
 
-/** A plan's painter's sequence drawn into a scene target with `hostDraws` at its hosts, read back. */
+/**
+ * A plan drawn into a scene target, read back: its mesh bodies' figures with depth, where it has
+ * any, then its painter's sequence with `hostDraws` at its hosts.
+ */
 async function drawPlan(
   engine: RenderEngine,
   renderer: LitBodyRenderer,
@@ -129,16 +142,29 @@ async function drawPlan(
 ): Promise<Float32Array> {
   const target = createSceneTarget(engine, "smoke eclipse", frame.viewport);
   try {
+    const viewRotation = viewRotation4(frame.camera.orientation);
+    const projection = perspectiveReversedInfinite(
+      frame.camera.fovXRad,
+      frame.viewport.widthPx / frame.viewport.heightPx,
+      NEAR_PLANE_M,
+    );
+    const meshes = renderer.meshDraws(plan);
+    if (meshes.length > 0) {
+      target.render({
+        label: PHOTOREAL_PASS_LABELS.bodies,
+        viewRotation,
+        projection,
+        draws: meshes,
+        postProcesses: [],
+      });
+    }
     target.render({
       label: PHOTOREAL_PASS_LABELS.discs,
-      viewRotation: viewRotation4(frame.camera.orientation),
-      projection: perspectiveReversedInfinite(
-        frame.camera.fovXRad,
-        frame.viewport.widthPx / frame.viewport.heightPx,
-        NEAR_PLANE_M,
-      ),
+      viewRotation,
+      projection,
       draws: renderer.draws(plan, hostDraws),
       postProcesses: [],
+      ...(meshes.length > 0 ? { colourLoad: "load" as const } : {}),
     });
     return halfTexels(await engine.readTexture(target.colour));
   } finally {
@@ -266,6 +292,32 @@ async function checkBehind(
     "T10.c a giant behind the star leaves no texel of its own under the star's disc",
     withGiant.regimes.get(ECLIPSE_GIANT) === "disc" && giantTexels > 20 && differing === 0,
     `regime ${withGiant.regimes.get(ECLIPSE_GIANT) ?? "none"}; ${String(giantTexels)} texels of the giant without the star's disc, ${String(differing)} channels differing from the frame without the giant`,
+  );
+  // Promoted by a depth writer over it (R07.T9's synthetic writer), the giant is a mesh whose
+  // figure writes its depth: the star's disc, on its limb's plane, hides it all the same.
+  const giant = frame.bodies.find((body) => body.id === ECLIPSE_GIANT);
+  const writer =
+    giant === undefined
+      ? null
+      : sphereFootprint(giant.centreM, giant.figure.equatorialRadiusM, frame.camera, viewport);
+  if (writer === null) {
+    throw new Error("the eclipse frame has no giant on the view");
+  }
+  const asMesh = planOf(frame, frame.bodies, [writer]);
+  const meshDrawn = await drawPlan(engine, renderer, asMesh, frame, frame.hostDraws);
+  const meshUnhidden = await drawPlan(engine, renderer, asMesh, frame, new Map());
+  let meshDiffering = 0;
+  for (let i = 0; i < meshDrawn.length; i += 1) {
+    meshDiffering += meshDrawn[i] === bare[i] ? 0 : 1;
+  }
+  let meshTexels = 0;
+  for (let i = 0; i < meshUnhidden.length; i += 4) {
+    meshTexels += (meshUnhidden[i + 1] ?? 0) > 0 ? 1 : 0;
+  }
+  checks.check(
+    "R06.T13.e a mesh giant behind the star leaves no texel of its own under the star's disc on its limb's plane",
+    asMesh.regimes.get(ECLIPSE_GIANT) === "mesh" && meshTexels > 20 && meshDiffering === 0,
+    `regime ${asMesh.regimes.get(ECLIPSE_GIANT) ?? "none"}, ${String(asMesh.meshes.length)} meshes; ${String(meshTexels)} texels of the giant without the star's disc, ${String(meshDiffering)} channels differing from the frame without the giant`,
   );
 }
 

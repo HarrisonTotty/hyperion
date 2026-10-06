@@ -1805,7 +1805,8 @@ src/renderer/src/view/sky`.
   `GlareSource` and one 50° outside does not; `DEFAULT_EYE_OBSERVER` equals the Rust defaults (a
   fixture both read). Files: `view/sky/{disc,discFlux,eye}.ts`, `view/post/{meter,glare}.ts` (if
   R07's are absent), `view/sky/shaders/disc.wgsl`. Acceptance: `pnpm --filter hyperion exec vitest
-run src/renderer/src/view/sky`, `just test-render`.
+run src/renderer/src/view/sky`, `just test-render`. _Since 2026-10-06 the disc lies on its limb's
+  plane rather than at infinity (Risks, "The host discs at their limb's depth")._
 - **R06.T13.f The low setting and the label.** `SkySettings` as R05's `ViewSettings.sky`, with its
   high and low values in R05's `SETTINGS`: face size, sprite budget, N_max and re-bake cadence
   (Design note 22); the label block's sky line (Design note 23), to T15's draft; the two styles: the
@@ -2352,7 +2353,27 @@ star })` and the disc sits at that body's drawn centre; a host the scene lacks i
   `packages/protocol/fixtures/eye_observer.json`, which a Rust test in `sky/eye.rs` and the client's
   disc test both read. The harness's `checkSkyDisc` draws a disc and the band over it on a target
   of its own and checks the centre's luminance, the meter class kept under the band, the clamp,
-  and nothing lit outside.
+  and nothing lit outside. _Since 2026-10-06 the triangle lies on the disc's limb's plane, not at
+  infinity (the next entry)._
+- **The host discs at their limb's depth (2026-10-06; R07's shading lane, the follow-up to R07.T9
+  queued before R10).** Recorded in full in R07's Risks, "The star's disc at its limb's depth".
+  - **Why.** At depth 0 (infinity under reversed-Z), a mesh body beyond a star showed over the
+    star's disc: R07.T9's figure writes its depth, which the disc then failed. R07 ruled it a
+    stated limit for RM3 (2026-10-05), with this follow-up due before R10's depth writers.
+  - **The depth.** `disc.wgsl`'s vertex stage puts the full-screen triangle on the camera's polar
+    plane of the star's sphere, d cos²ρ along the axis, as R07.T9 puts a mesh body's limb. Its
+    reversed depth n (u · axis) ÷ (d cos²ρ) is affine on the view. The plane lies inside the star
+    along every ray that meets the disc, so whatever is nearer than the star hides the disc and a
+    mesh body beyond it is hidden. The disc still writes no depth.
+    - `DISC_MATERIAL` gains the uniform `inverseLimbDistance`, 1 ÷ (d cos²ρ), m⁻¹. Its other
+      uniforms and its fragment stage are unchanged.
+    - `HostDiscRecord` and `hostDiscRecord` hold what a draw carries, `rasteriseHostDisc` is the
+      shader's `f64` twin, and `DiscDraw` gains `record`.
+    - Where nothing writes depth, every view draws as before: the buffer holds 0 under the disc.
+  - **Tested.** The depth against the star's two sides and R07.T9's limb plane, and the twin's
+    light against the law, the flux and the clamp. A mesh giant behind the star in R07's eclipse
+    scene, promoted by a synthetic depth writer, leaves no texel of its own, on the CPU twin and on
+    the GPU (`smoke/eclipse.ts`).
 - **Deviations in T13.g, as built (2026-10-03).** `view/sky/bake.ts` exports `bakeSkyCube(engine,
 input)` over `BakeInput { directions, illuminanceLx, faceSizePx, name }`, returning `BakedCube {
 cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `paddedRowTexels`,
