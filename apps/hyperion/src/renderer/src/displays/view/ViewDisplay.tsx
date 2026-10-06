@@ -88,7 +88,7 @@ import { InstrumentsPanel } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
 import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
 import { PRIMARY_NAME, PRIMARY_VIEW_ID, PRIMARY_VIEW_NAME } from "./viewNames";
-import { AUTO_NOT_AVAILABLE, ExposurePanel } from "./ExposurePanel";
+import { AUTO_NOT_AVAILABLE, ExposurePanel, exposureNote } from "./ExposurePanel";
 import { MeterControl, meterLabel } from "./MeterControl";
 import {
   cameraAnnunciation,
@@ -1108,7 +1108,9 @@ function ViewStage({
         </p>
       ) : null}
       {folded("exposure") && shown.meteredEv100 === null ? (
-        <p className="view-exposure__reason view-folds__standing">{AUTO_NOT_AVAILABLE}</p>
+        <p className="view-exposure__reason view-folds__standing">
+          {exposureNote(AUTO_NOT_AVAILABLE)}
+        </p>
       ) : null}
     </>
   ) : null;

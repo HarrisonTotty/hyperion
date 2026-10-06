@@ -586,7 +586,13 @@ describe("the VIEW display", () => {
   it("says AUTO is not available while there is no image to meter", async () => {
     setup();
     await settle();
-    expect(screen.getByText("AUTO NOT AVAILABLE: NO IMAGE TO METER")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "AUTO NOT AVAILABLE: NO IMAGE TO METER",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("offers its exposure's congruent pair in the guide's order, ENABLE then INHIBIT", async () => {

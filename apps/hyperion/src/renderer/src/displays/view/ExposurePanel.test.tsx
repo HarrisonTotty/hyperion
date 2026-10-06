@@ -183,6 +183,22 @@ function renderEntry(initial: ExposureControl, meteredEv100: number | null = 3) 
   return { user, onChange, field };
 }
 
+/**
+ * The note or line whose whole text is `text`: a paragraph or a span, which may hold a status phrase
+ * in a run of its own.
+ */
+function noteOf(text: string): HTMLElement {
+  return screen.getByText(
+    (_, element) =>
+      (element?.tagName === "P" || element?.tagName === "SPAN") && element.textContent === text,
+  );
+}
+
+/** The runs a note holds unbroken, by their text. */
+function runsOf(note: HTMLElement): Array<string | null> {
+  return [...note.querySelectorAll(".view-label__run")].map((run) => run.textContent);
+}
+
 /** Whether `after` follows `before` in the document. */
 function follows(before: Element, after: Element): boolean {
   return (before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
@@ -349,7 +365,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
       null,
     );
     const iso = screen.getAllByRole("term").at(-1);
-    const notAvailable = screen.getByText("AUTO NOT AVAILABLE: NO IMAGE TO METER");
+    const notAvailable = noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER");
     const enable = screen.getByRole("button", { name: "ENABLE" });
     expect([
       iso?.textContent,
@@ -499,12 +515,6 @@ describe("ExposurePanel's INHIBIT consequence (R07.T13.d's follow-up)", () => {
     expect(screen.getByText(INHIBIT_CONSEQUENCE)).toBeVisible();
   });
 
-  it("states nothing under the operator's own inhibit, where INHIBIT changes nothing", () => {
-    const inhibit = inhibitAt({ kind: "inhibited", ev100: 4, reason: "operator" });
-    expect(inhibit).not.toHaveAttribute("aria-describedby");
-    expect(screen.queryByText(INHIBIT_CONSEQUENCE)).toBeNull();
-  });
-
   it("gives way to the held-back reason alone under MAN", () => {
     const inhibit = inhibitAt(DEFAULT_EXPOSURE);
     expect(inhibit).toHaveAccessibleDescription("NOT AVAILABLE: the exposure is MAN");
@@ -516,5 +526,56 @@ describe("ExposurePanel's INHIBIT consequence (R07.T13.d's follow-up)", () => {
     expect(screen.getByRole("textbox", { name: "MAN" })).toHaveAccessibleDescription(
       `EV100 -14.0 to 42.0 ${CONSEQUENCE}`,
     );
+  });
+});
+
+const OPERATOR_HELD = "NOT AVAILABLE: the exposure is INHIBITED · OPERATOR";
+
+const OPERATOR: ExposureControl = { kind: "inhibited", ev100: 4, reason: "operator" };
+
+describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)", () => {
+  it("holds INHIBIT back, saying the exposure is INHIBITED · OPERATOR, in its consequence's place", () => {
+    const inhibit = inhibitAt(OPERATOR);
+    expect([
+      inhibit.getAttribute("aria-disabled"),
+      screen.queryByText(INHIBIT_CONSEQUENCE),
+    ]).toEqual(["true", null]);
+    expect(inhibit).toHaveAccessibleDescription(OPERATOR_HELD);
+  });
+
+  it("changes nothing when the held-back INHIBIT is pressed", async () => {
+    const { user, onChange } = renderEntry(OPERATOR);
+    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    expect([onChange.mock.calls.length, reading()]).toEqual([0, "EV100 4.0 INHIBITED · OPERATOR"]);
+  });
+
+  it("offers ENABLE there beside a metered value, with nothing beside it", () => {
+    inhibitAt(OPERATOR);
+    const enable = screen.getByRole("button", { name: "ENABLE" });
+    expect([enable.getAttribute("aria-disabled"), enable.getAttribute("aria-describedby")]).toEqual(
+      [null, null],
+    );
+  });
+
+  it("holds ENABLE back there by NO IMAGE TO METER while nothing is metered", () => {
+    inhibitAt(OPERATOR, null);
+    const enable = screen.getByRole("button", { name: "ENABLE" });
+    expect(enable).toHaveAttribute("aria-disabled", "true");
+    expect(enable).toHaveAccessibleDescription("NO IMAGE TO METER");
+  });
+
+  it("sets the level phrase unbroken, so that the note breaks before it and never at its middle dot", () => {
+    inhibitAt(OPERATOR);
+    expect(runsOf(noteOf(OPERATOR_HELD))).toEqual(["INHIBITED · OPERATOR"]);
+  });
+
+  it("holds NO IMAGE TO METER unbroken in AUTO NOT AVAILABLE and beside ENABLE", () => {
+    inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, null);
+    // ENABLE's row: the button and the reason beside it.
+    const enableRow = screen.getByRole("button", { name: "ENABLE" }).parentElement;
+    expect([
+      runsOf(noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER")),
+      enableRow === null ? null : runsOf(enableRow),
+    ]).toEqual([["NO IMAGE TO METER"], ["NO IMAGE TO METER"]]);
   });
 });

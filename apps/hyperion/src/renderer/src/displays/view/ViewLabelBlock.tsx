@@ -34,15 +34,18 @@ const UNBREAKABLE =
   /UT [+-]?\d[\d,.]* yr|V -?\d[\d.]* mag (?:EYE|CAM)|EV100 -?\d[\d.]*|\d{3}\/\d{2}:\d{2}:\d{2}|[+-]?\d[\d,.]*(?:E[+-]?\d+)? (?:km\/s|m\/s|kyr|Myr|Gyr|yr|mag|AU|Gm|Mm|km|m|ly|s)(?![\w/])/g;
 
 /**
- * A part of a reading with its unbreakable runs each set on one line, so that it breaks only at
- * the spaces between them.
+ * A text with each of its runs set on one line, so that it breaks only at the spaces between them
+ * (decision-r07-t19-layout, item 2): a reading's quantities, or the exposure's status phrases in
+ * its notes (decision-r07-owner-ux-signoff, item 1). Its text is unchanged.
+ *
+ * @param runs - The runs that never break, a global pattern.
  */
-function partRuns(part: string): ReactNode {
+export function unbrokenRuns(text: string, runs: RegExp): ReactNode {
   const nodes: ReactNode[] = [];
   let from = 0;
-  for (const match of part.matchAll(UNBREAKABLE)) {
+  for (const match of text.matchAll(runs)) {
     if (match.index > from) {
-      nodes.push(part.slice(from, match.index));
+      nodes.push(text.slice(from, match.index));
     }
     nodes.push(
       <span className="view-label__run" key={match.index}>
@@ -52,10 +55,10 @@ function partRuns(part: string): ReactNode {
     from = match.index + match[0].length;
   }
   if (nodes.length === 0) {
-    return part;
+    return text;
   }
-  if (from < part.length) {
-    nodes.push(part.slice(from));
+  if (from < text.length) {
+    nodes.push(text.slice(from));
   }
   return nodes;
 }
@@ -83,7 +86,7 @@ export function readingParts(value: string): ReactNode {
     seen.set(part, count + 1);
     nodes.push(
       <span className="view-label__part" key={`${part}:${String(count)}`}>
-        {partRuns(part)}
+        {unbrokenRuns(part, UNBREAKABLE)}
       </span>,
     );
   }

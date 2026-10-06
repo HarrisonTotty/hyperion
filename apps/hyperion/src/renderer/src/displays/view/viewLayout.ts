@@ -24,19 +24,20 @@ export const FULL_MIN_WIDTH_REM = 98.5;
 
 /**
  * The least height of the `.view` box for the full layout, rem: the taller column's tallest state
- * with the list at two rows, rounded up to the next 0.25 rem, as measured at 1920 × 1080 (T19.b's
- * follow-up's hidden captures, 16 px to the rem, the side column's line box 1.25).
+ * with the list at two rows, rounded up to the next 0.25 rem, as measured at 1920 × 1080
+ * (R07.T19.d's hidden captures, 16 px to the rem, the side column's line box 1.25).
  *
  * @remarks
  * The first column's tallest, 729 px: `Instruments` 202.5 px with both closed, `Targets` 173 px at
  * two rows under its two-line `RANGE FROM CAMERA` head, `Camera` 337.5 px with `NO OWN SHIP`, both
- * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 728.5 px: `Style` 99.5 px
+ * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 731.5 px: `Style` 99.5 px
  * with a two-line refusal added at 17.5 px a line and its 0.5 rem margin, 43 px (`QUALITY LOW`'s on
  * an instrument, or the software adapter's, which this machine cannot raise), the exposure
- * `INHIBITED · OPERATOR` with a refused entry, 362 px, the meter with `METERED`, 208 px, and two
- * gaps. 729 px is 45.56 rem. It must never pass 52.5 rem, so that a maximised 1920 × 1080 window
- * (a box of about 53.5 rem) is full (decision-r07-t19b-exposure-fit, item 2): a task that adds to
- * a side panel re-measures, and asks for a ruling rather than pass it.
+ * `INHIBITED · OPERATOR` with a refused entry and `INHIBIT` held back beside its two-line reason,
+ * 365 px, the meter with `METERED`, 208 px, and two gaps. 731.5 px is 45.72 rem. It must never pass
+ * 52.5 rem, so that a maximised 1920 × 1080 window (a box of about 53.5 rem) is full
+ * (decision-r07-t19b-exposure-fit, item 2): a task that adds to a side panel re-measures, and asks
+ * for a ruling rather than pass it.
  */
 export const FULL_MIN_HEIGHT_REM = 45.75;
 

@@ -208,6 +208,21 @@ describe("the exposure's automation levels", () => {
     expect(inhibit(DEFAULT_EXPOSURE)).toEqual({ kind: "refused", reason: "not_automatic" });
   });
 
+  it("refuses INHIBIT under the operator's own inhibit, whose effect already holds (decision-r07-owner-ux-signoff)", () => {
+    const held = accepted(inhibit(AUTO));
+    expect(inhibit(held)).toEqual({ kind: "refused", reason: "already_inhibited" });
+  });
+
+  it("still takes INHIBIT under AUTO and under INHIBITED · NO IMAGE TO METER", () => {
+    expect([
+      accepted(inhibit(AUTO)),
+      accepted(inhibit({ kind: "inhibited", ev100: 2, reason: "no_image_to_meter" })),
+    ]).toEqual([
+      { kind: "inhibited", ev100: 3, reason: "operator" },
+      { kind: "inhibited", ev100: 2, reason: "operator" },
+    ]);
+  });
+
   it("takes over a system inhibit as the operator's on INHIBIT, which then does not resume", () => {
     const taken = accepted(inhibit(onMetering(AUTO, null)));
     expect(onMetering(taken, 5)).toEqual({ kind: "inhibited", ev100: 3, reason: "operator" });
