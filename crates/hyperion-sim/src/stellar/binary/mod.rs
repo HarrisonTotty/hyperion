@@ -2,7 +2,8 @@
 //! (2002, MNRAS 329, 897, "BSE"), run forward once into a timeline from which the pair's state at
 //! any age is read.
 //!
-//! A pair close enough to interact ([`can_interact`], plan 11's design note 7) is evolved by
+//! A pair close enough to interact, on its drawn orbit or after the decay the engine's own sinks
+//! can make by then ([`can_interact`], plan 11's design note 7), is evolved by
 //! [`evolve`] from zero age to the age asked for, event to event: detached evolution under winds
 //! and their accretion, tides, magnetic braking and gravitational radiation (`detached.rs`, BSE
 //! sections 2.1–2.4); Roche-lobe overflow, stable or dynamical (`rlof.rs`, section 2.6); common
@@ -46,6 +47,8 @@ pub use classify::{
     SYMBIOTIC_MIN_LUMINOSITY, SYMBIOTIC_XRB_MIN_LUMINOSITY, XRB_MIN_LUMINOSITY, XrbKind,
     carved_class, classify,
 };
+#[cfg(test)]
+pub(crate) use evolve::lobe_reached;
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
 pub(crate) use evolve::{can_interact_with_tracks, evolve_with_tracks};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};

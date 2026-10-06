@@ -89,9 +89,11 @@ pub enum SegmentKind {
     /// One star, or nothing: the pair has coalesced (their sections 2.6.4, 2.6.5, 2.7.2 and
     /// 2.7.3), and the other member is gone.
     Merged,
-    /// Two single stars no longer bound, after `by`'s supernova (their section 2.5).
+    /// Two single stars no longer bound, after `by`'s supernova (their section 2.5) or the mass
+    /// its white dwarf's birth shed at once (appendix A1; P11.T4.j, finding F1 of ruling
+    /// p11-channels).
     Disrupted {
-        /// The star whose supernova unbound the pair.
+        /// The star whose death unbound the pair.
         by: Component,
     },
     /// Both stars fill their Roche lobes (their section 2.6.6), before the pair coalesces.

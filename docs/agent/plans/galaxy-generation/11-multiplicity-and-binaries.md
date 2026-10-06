@@ -452,6 +452,9 @@ given; where it is not, the task that builds it is named.
    time" demands. The timeline is derived data; the caller may cache it with the system.
 7. **Only close pairs run.** `can_interact` compares periastron with the Roche-filling separation
    for each star's largest radius up to the age in question (Eggleton 1983; plan 06's radius bound).
+   _(P11.T4.j, ruling p11-channels of 2026-10-06:)_ a pair can interact if it reaches that test on
+   the drawn orbit, or after the decay the engine's sinks can make by then: magnetic braking at the
+   tidal equilibrium spin, gravitational radiation and the spins' reservoir, bounded from above.
    Everything else is two single stars on an orbit. Wind-fed symbiotics need no orbit change, so
    they are classified from the state of a wide pair. _(P11.T4.i, ruling p11-channels of
    2026-10-06:)_ the engine starts at the first arrival on the main sequence. A star that has not
@@ -991,6 +994,8 @@ P11.T4, as built"._
     - the R06 census time recorded against 234 s: the extra runs are a few per cent;
     - `binary_evolve` and `system_full` re-benched under the lock, recorded as provisional.
   - **Acceptance:** as T4.i, plus the zero-miss gate.
+
+  _As built (Phase J lane, 2026-10-06): see Risks, "P11.T4.j as built"._
 
 ### P11.T5 Classes from state
 
@@ -2792,7 +2797,11 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       2; E bins 0, 2, 4: 0, 6, 2. After: none. The repro systems (D cell 80, [Fe/H] 0:
       0x621459680000005c, …90, …91) are protostars, each its own model's.
   - _The build-age dependence._ `evolve(input, u₁)` and `evolve(input, u₂ > u₁)` now agree bit
-    for bit at every age to u₁ for every pair the pre-test passes at u₁. Four causes, all fixed:
+    for bit at every age to u₁ for every pair the pre-test passes at u₁. _(Strengthened by
+    P11.T4.j:)_ a pair the pre-test passes over at u₁ shows no interaction before u₁ in a run to
+    any later age (stable transfer, a common envelope, contact or a merger, before the pair's
+    first supernova; a passed-over pair's supernova is P11.T10's, finding F3). Four causes, all
+    fixed:
     1. The arrival above. It also made whole histories differ for massive primaries whose
        companion's main sequence was built in one run and not the other.
     2. The last step was cut at the run-to age and joined to its knot linearly, where a later
@@ -3125,3 +3134,182 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       `Frozen` member shown as a 3.93 M☉ black hole. No collapse is recorded.
       `Remains::Collapse`'s core is documented as the last living state. The hold or the strip
       reads a remnant there.
+- **P11.T4.j as built** (Phase J lane, 2026-10-06; ruling p11-channels, §3). The pre-test bounds
+  the engine's own orbital decay. **Built for version 21, committed with its goldens re-blessed at
+  version 20 and held out of integration** until the 20 → 21 bump lands with it, P11.T4.h,
+  9a0950e's fixes, P14.T47.e and P11.T4.i.
+  - _The rule, as built._
+    - `evolve.rs` `interacts`: nothing before the first arrival; then the lobe test on the drawn
+      orbit (`reaches_lobe`, over `largest_radii_rsun`; the same bits as before), and otherwise
+      `detached.rs` `decay_reaches(input, members, start_years, until_years, radii_rsun)`, the
+      ruling's items 1–7. The constants: `DECAY_PIECES` = 4 and `DECAY_SAFETY` = 1.25 (the
+      ruling), with the engine's own `MAGNETIC_BRAKING`, `MAGNETIC_BRAKING_FLOOR`,
+      `GRAVITATIONAL_WAVE_RATE`, k′₂ and k′₃. Hut's f₂ and f₅ are now shared with the tide
+      (`hut_f2`, `hut_f5`, the same expressions, the same bits).
+    - The switches: braking needs `magnetic_braking` and `tides` (the orbit feels braking only
+      through the tides), the spins' reservoir `tides`, W `gravitational_radiation`.
+    - F1's label (`supernova.rs` `Engine::die`): an orbit a non-sudden death's `lose_mass` unbinds,
+      both stars left, is `Disrupted { by }`. The docs of `SegmentKind::Disrupted` and
+      `quiet_kind` say so. The physics (instantaneous loss at a white dwarf's birth, ruling
+      129.4a) is unchanged, for its own ruling.
+    - `binarity.rs`: `interacting_periastron` and `interacting_share` are documented as the lobe
+      part of `can_interact`'s test; `the_threshold_is_can_interacts_boundary` asserts "just
+      inside passes `can_interact` and the lobe test", "just outside fails the lobe test"
+      (`lobe_reached`, `#[cfg(test)] pub(crate)`). The stripping table does not move (it reads
+      the primary's radii only).
+    - The test hook: `evolve_past_the_pre_test` (`#[cfg(test)]`), through `run_pair`'s
+      `PreTest::Past`.
+    - The build-age suites' "missed interaction" is now the ruling's (`interaction_before`): a
+      stable transfer, common envelope, contact or merger leaving one star, before the age and
+      before the pair's first supernova (F3). Their allowances are zero.
+  - _Deviations from the ruling's text and its prototype (`probe-engine.patch`)._
+    - **The pieces are fixed to the track's segments.** Each segment is cut into 4 equal pieces
+      whatever the span, then clipped to it, where the prototype cut [t₀, u] at the segment
+      starts. So the braking integral only grows with u. The passes differ by 4 of 18,000
+      (sample 0: 2,262 against 2,258); samples 1 and 2 are the probe's to the pair.
+    - **The core term.** The ruling's "k′₃ Mc Rc² at their largest" is read where each segment
+      opens in the span and at u (`largest_core`), and the total is capped at k′₃ m R² (Rc ≤ R).
+      Reading it so needs no more: I ≤ k′₂ m R² + Mc (k′₃ Rc² − k′₂ R²), so the core adds nothing
+      while Rc ≤ √(k′₂ ÷ k′₃) R ≈ 0.69 R, a giant's whole life (science check: holds). The
+      prototype left the term out.
+    - **The coarse filter in two steps**, for its cost on giants: first with I ≤ k′₃ m R² for a
+      star past its main sequence (no structure read), then with the core read, then the braking
+      integral. Off the main sequence a piece reads no structure (share 1); on it, the structure
+      at its start. Built at first with the core read before any coarse step, and with a
+      structure read on every piece, the giants' sample cost about three times more (unlocked);
+      now 12.5 µs a pair under the lock (below).
+    - `decay_reaches` takes the lobe test's radii, computed once.
+  - _Tests_ (`stellar/binary/tests.rs` unless said):
+    - `the_decay_bound_never_passes_over_an_interaction` (slow): the ruling's three samples
+      (`bound_conservative`'s, rebuilt as `decay_sample`), 6,000 pairs each, against
+      `evolve_past_the_pre_test`. No miss. Also asserted: no `Merged` segment with both stars
+      present, and every pass at the pair's age passes at 1.6 × 10¹⁰ yr.
+
+      | Sample                       | lobe test passes | engine interacts | lobe test misses | pre-test passes | misses | passes without interaction |
+      | ---------------------------- | ---------------- | ---------------- | ---------------- | --------------- | ------ | -------------------------- |
+      | 0, braking-enriched          | 1,190            | 1,613            | 530              | 2,262           | **0**  | 542                        |
+      | 1, the lane's sampler        | 2,449            | 2,347            | 36               | 2,576           | **0**  | 91                         |
+      | 2, giants near the threshold | 1,152            | 501              | 160              | 2,761           | **0**  | 1,449                      |
+
+      The ruling's figures (first-arrival column) to the pair, but for sample 0's 4 extra passes.
+
+    - `a_thousand_timelines_are_the_same_whatever_age_they_are_run_to` (slow): first ages 392 run
+      at both, 608 passed over, **0 missed** (376, 620, 4 at T4.i); between the arrivals 60, 661,
+      **0** (34, 678, 9). The 13 misses are gone.
+      `a_timeline_is_the_same_whatever_age_it_is_run_to` (60 pairs) asserts zero too.
+    - `a_hundred_timelines_run_to_just_past_their_events_are_the_same` (slow): 3,763 runs just
+      past events and 30 between the arrivals agree.
+    - `a_braked_pair_is_run_before_its_contact`: 1.04 + 0.45 M☉ at a = 3.75 R☉ (P = 0.689 d),
+      [Fe/H] −0.7 (Z = 0.004), median draws: inside its lobes on the drawn orbit, passed at
+      2.0 Gyr; transfer from the primary at 2.158 Gyr, contact at 2.216 Gyr, a ≈ 2.3 R☉ before
+      it; a run to 2.0 Gyr is the run to 3 Gyr there, bit for bit. (At Z = 0.02: 2.631 and
+      2.719 Gyr.)
+    - `the_pre_test_only_widens_with_age`: the 60 pairs and four pinned massive wide pairs at 48
+      ages and their own: a pass stays a pass; `can_interact` equals `can_interact_with_tracks` on
+      full tracks and on tracks built to 1.5 × 10¹⁰ yr (the determinism audit's check).
+    - `a_wide_pair_is_still_passed_over`: 1 + 0.8 M☉ at 10⁴ d fails at 13.8 Gyr. The bound's P₀
+      boundary for a circular 1 + 0.8 M☉ pair ([Fe/H] 0, median draws) is **0.732 d at 1 Gyr and
+      1.537 d at 10 Gyr**, against the science check's 0.64 and 1.22 d at locked spin alone (its
+      own closed form with the reservoir and 1.25: 0.71 and 1.40 d); the lobe test alone, 0.295
+      and 0.544 d.
+    - `the_bound_follows_the_engines_switches`: the braked pair fails without braking or tides; a
+      0.3 + 0.3 M☉ pair at 0.2 d (below the braking floor) passes at 13.8 Gyr by gravitational
+      radiation alone, merges at about 3.6 Gyr in the engine, and fails without it.
+    - `a_giants_tidal_capture_is_run`: 2 + 0.2 M☉ at 1.2 × `interacting_periastron`, circular
+      (P ≈ 2,000 d): a common envelope on the thermally pulsing AGB at 1.502 Gyr, the orbit shrunk
+      by tides before it; a run to 1.5 Gyr agrees.
+    - `a_white_dwarfs_birth_that_unbinds_the_orbit_disrupts_it`: the ruling's F1 trace (10.2 +
+      7.88 M☉, 9,373 d, e 0.45, median draws), past the pre-test: `Disrupted { by: Secondary }`
+      at 43.87 Myr, both stars present, no merger age. It fails on the old label.
+    - `binary_system`'s Rucinski check (below).
+  - _Goldens_ (`golden_diff.py --base ce69992`: one moved, none new, header at 20).
+    - `stellar/binary_timelines`: **21 of 1,000 digests**, every one a pair the bound now passes
+      that the lobe test did not (each from one segment to 2–15); 979 identical, so no run pair
+      moved:
+      - 3 braked into transfer: 0240 (0.87 + 0.60 M☉, 0.72 d: transfer at 1.131 Gyr, contact at
+        1.165), 0349 (0.82 + 0.39, 0.51 d: transfer at 334 Myr, merger at 354 Myr) and 0873
+        (0.93 + 0.52, 0.99 d: transfer at 5.970 Gyr, contact at 6.027);
+      - 14 evolved without interacting: wide pairs with a giant (11, P 1,188–9,582 d) and three
+        short ones braking short of contact by 12 Gyr (0730, 5.81 d; 0790, 1.57 d; 0961, 2.18 d);
+      - 3 wide massive pairs (0330, 0480, 0782) unbound by the secondary's supernova. Their
+        pinned primary's untouched collapse leaves no record (F7);
+      - 1 (0030, 8.18 + 2.36 M☉, 3,657 d) unbound at 40.67 Myr by the primary's oxygen–neon white
+        dwarf's birth: F1's new label, `Disrupted { by: Primary }`.
+    - The ruling expected about 20 digests: the braked contacts plus pairs now evolved without
+      interacting, and F1 "a few, if any". As expected.
+    - Nothing else moved: not `stellar/summaries`, the galaxy chain, nor the planetary or server
+      goldens.
+  - _Statistics_ (slow, capped; against the ruling's §1.2 and §3.3).
+    - `binary_system`, Rucinski (Finding F4's definition, asserted 10⁻³–4 × 10⁻³): contact pairs
+      per main-sequence star of the same M_V over +1.5 < M_V < +5.5, the pair by its combined
+      M_V, **2.84 × 10⁻³ (1/352)**, against the ruling's estimate of 3 × 10⁻³ and Rucinski's
+      about 1/500. By bin (+1.5–2.5, 2.5–3.5, 3.5–4.5, 4.5–5.5): 0, 3.15, 2.48 and 3.41 × 10⁻³
+      against his 1/662, 1/892, none and 1/425. All contact pairs per main-sequence star of
+      +1.5 to +7.5: 2.12 × 10⁻³ (the ruling's 2.1 × 10⁻³); per one fainter than +1.5: 2.85 × 10⁻⁴
+      (1.13 × 10⁻⁴ before, ×2.5; the ruling's 2.9 × 10⁻⁴). Contact pairs in layers A–D: 0, 10,
+      65, 21 (0, 5, 23, 16), the ruling's to the pair.
+    - `binary_system`, marks: stripped 1,407 of 1,752 (80.3%), merged 300 (17.1%), the merger band
+      815 of 986 (82.7%), ruling 137's share 0.506 of 5,120 collapses: the ruling's T4.i + T4.j
+      figures. The F1 relabel moves none of them.
+    - `binary_carve`: redrawn C 20, D 137, E 41; pairs through the engine A 12, B 90, C 3,326,
+      D 11,757, E 8,556 (T4.i: 1, 8, 3,268, 11,749, 8,554; the ruling's 12, 89, 3,324, 11,757,
+      8,556).
+    - `binary_classes`: DNS 112 (in 6–144), 64% at e < 0.3; recycled pulsars' medians unmoved.
+    - The R06 census (`a_hundred_thousand_systems_live_and_die_in_order`) passes in **195 s**
+      under the heavy lock (188 s at T4.i under the lock; 234 s at 9a0950e, unlocked): +4%, the
+      ruling's "a few per cent".
+    - **The pre-test's cost**, its tracks built (an uncommitted scratch copy of the gate's
+      samples, one thread, best of 3, under the heavy lock; provisional): **1.24, 1.16 and
+      12.5 µs a pair** in samples 0, 1 and 2, of which the lobe test alone takes 0.58, 0.83 and
+      0.98 µs: the bound adds 0.66, 0.33 and 11.5 µs. The ruling measured 0.7–2 µs on
+      main-sequence samples and 15–16 µs on giants.
+    - **Benches** under the heavy lock, against ce69992's binaries (provisional):
+      `binary/binary_evolve/algol` 26.05 → 26.01 ms and `…/cataclysmic_variable` 12.29 →
+      12.30 ms; `binary/distribution` 183 → 191 sample pairs passing the pre-test, median 4,289 →
+      4,067 µs, 99th percentile 17.95 → 17.83 ms; `stellar/system_full` over the 50 ly query's 917
+      systems 346.8 → 350.0 ms (+0.9%, 382 µs a system), and the interacting pair 4.07–4.14 →
+      4.08 ms.
+  - _Gate._
+    - fmt and workspace Clippy pass.
+    - The capped workspace bless under `just _locked` (a nested `--unit` scope, 10G): 3,656 of
+      3,657 pass, the one failure the known bless-mode race
+      (`every_golden_file_carries_the_current_version`). Then the non-bless run: **3,657 passed**,
+      745 s.
+    - The slow binary suites (`binary::`, `binary_system`, `binary_carve`, `binary_classes`),
+      capped: 11 passed, 305 s. The census as above.
+  - _Reviews._
+    - Rust review: must-fix applied (units in the new names: `start_years`, `until_years`,
+      `offset_years`, `radii_rsun`, `largest_radii_rsun`, `p_c5`); should-fix applied
+      (`can_interact`'s one-sentence summary, `own_members_with` private again, tests of the
+      switches and of a giant's capture, the clock taken out of the gate test, which the rules
+      forbid in tests: the timing above came from an uncommitted scratch copy under the lock);
+      considered and applied: no `Vec` in `largest_core`, readability renames, a test doc's
+      comparison.
+    - Determinism audit: no must-fix. Applied: the equality of `can_interact` across track builds
+      (should-fix), "widens with age: tested, not proven", the widening check in the slow gate,
+      the capture test's run to an earlier age, `Disrupted`'s doc. Noted: the braking floor read
+      on the drawn mass (a star keeps its track's mass before the first interaction).
+    - Science check: the algebra, units, constants, HPT §7.2, Rucinski's bins and order, and the
+      P₀ boundaries confirmed. Applied: the eccentricity wording (e can grow under tides for a
+      star above about 1.3 Ω_eq; the bound still holds for the engine's Roche test at a, but not
+      provably in Φ or for a periastron collision), the winds' wording (below), "A3–K5" for the
+      +1.5 to +7.5 range, Rucinski's citation and pooled figure, the F1 test's wording.
+  - _Findings, for the orchestrator (not this task's):_
+    - **The wind's spin is not bounded** (science check, should-fix pending a ruling). A locked
+      star's wind carries off 2/3 ṁ R² Ω (HPT eq. 110), which the tides restore from the orbit:
+      for a giant heavier than its companion near its lobe, the drain beats the Jeans widening
+      (the lobe shrinks 0.09–1.9% per 1% of mass lost at q = 3–10). The ruling's "winds only widen
+      the orbit" is therefore not a proof; the bound holds through the reservoir's slack (k′₂ m
+      R_max² against k′₂ (M − Mc) R²) and the zero-miss gate. Options: add (2/3 − k′₂) ΔMᵢ
+      R_max,i² Ω_c to S (the probe's wind-spin variant: 0 misses, up to 2.9× the passes), or keep
+      the doc's statement. Built as ruled, with the doc saying so. The reservoir is also counted
+      once, where a star whose I falls and rises (the flash, a blue loop) could draw it twice.
+    - **The ruling's "F0–K" for +1.5 < M_V < +7.5** is A3–K5 (Pecaut and Mamajek 2013).
+    - **Rucinski's shape.** His 1/500 is the scaling his bins are consistent with; pooled over his
+      tables the four bins give about 1/750, and the engine's 2.84 × 10⁻³ is 1.4× and 2× those.
+      The engine has no contact pair in +1.5 to +2.5, his best-populated bin (18 of his 26
+      systems). For the braking law or the contact lifetime (ruling §3.2), not the pre-test.
+    - **F7 reaches more pairs.** The bound runs wide massive pairs whose giants' reservoir reaches
+      their threshold; three of the 21 golden moves are such pairs whose pinned primary's
+      untouched collapse is not recorded (F7). T4.j runs +6–10% of prior pairs in C–E (ruling
+      §3.1), so F7's fix matters more after it.

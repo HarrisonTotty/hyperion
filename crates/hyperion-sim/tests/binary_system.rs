@@ -3,8 +3,9 @@
 //!
 //! - The rare bright exception (P11.T11): the share of layer-A and -B systems whose combined
 //!   luminosity exceeds a 0.75 M☉ star's at the same age by ten times, by population, under 10⁻³.
-//! - Rucinski's (2002) contact binaries (ruling 114): contact pairs per main-sequence star fainter
-//!   than `M_V` = +1.5, against 1/1,000–1/250.
+//! - Rucinski's (2002) contact binaries (ruling 114; ruling p11-channels' finding F4): contact
+//!   pairs per main-sequence star of the same absolute magnitude over +1.5 < `M_V` < +5.5, the
+//!   pair by its combined `M_V`, against 1/1,000–1/250 (his about 1/500).
 //! - Massive companions counted (rulings 140.9 and 141.7): stars of 8 M☉ and up, of 15 M☉ and up
 //!   and of 2.5–8 M☉ per solar mass formed, companions included, against the primaries alone and
 //!   Kroupa's 0.0409 for 2.5–8 M☉.
@@ -30,10 +31,10 @@ use hyperion_sim::stellar::multiplicity::{
     stripped_mark_min_mass,
 };
 use hyperion_sim::stellar::photometry::absolute_magnitude_v;
-use hyperion_sim::stellar::system::{StarModel, SystemStars, draw_metallicity};
+use hyperion_sim::stellar::system::{StarModel, SystemStars, SystemState, draw_metallicity};
 use hyperion_sim::stellar::{Phase, StarState};
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::{SolarMasses, Years};
+use hyperion_sim::units::{Magnitudes, SolarMasses, Years};
 use hyperion_testkit::lcg::Lcg;
 
 const SEED: u64 = 0x0b17_0011_5eed_0001;
@@ -135,6 +136,28 @@ fn population_slot(p: Population) -> usize {
         .expect("every population is listed")
 }
 
+/// Rucinski's (2002, PASP 114, 1124, Table 3) bins of `M_V`, one magnitude wide from +1.5 to
+/// +5.5 (A3V to G6V).
+const RUCINSKI_BINS: [f64; 5] = [1.5, 2.5, 3.5, 4.5, 5.5];
+
+/// The faintest `M_V` of the wider range, +1.5 to +7.5 (A3V to K5V; Pecaut and Mamajek 2013), the
+/// ruling's figure is also recorded over.
+const WIDER_FAINTEST: f64 = 7.5;
+
+/// Rucinski's (2002, Table 3) contact binaries (EW, EB and ELL systems under 1 d) per
+/// main-sequence star of the same luminosity (Wielen et al. 1983's) in each of
+/// [`RUCINSKI_BINS`]: 1/662, 1/892, none and 1/425, consistent with his adopted about 1/500
+/// (section 8; 2006, MNRAS 368, 1319, sections 1 and 5: 0.2% of FGK dwarfs). Pooled over the
+/// four bins his tables give about 1/750.
+const RUCINSKI_PER_BIN: [f64; 4] = [1.0 / 662.0, 1.0 / 892.0, 0.0, 1.0 / 425.0];
+
+/// The bin of [`RUCINSKI_BINS`] that holds `m_v`, if any.
+fn rucinski_bin(m_v: f64) -> Option<usize> {
+    RUCINSKI_BINS
+        .windows(2)
+        .position(|edges| m_v > edges[0] && m_v <= edges[1])
+}
+
 /// One layer's systems at the epoch.
 #[derive(Debug, Clone, Copy, Default)]
 struct EpochTally {
@@ -144,6 +167,11 @@ struct EpochTally {
     /// Main-sequence stars fainter than `M_V` = +1.5, and pairs in contact at the epoch.
     faint_main_sequence: u64,
     contact: u64,
+    /// Main-sequence stars by their own `M_V` in Rucinski's bins and over +1.5 to +7.5, and the
+    /// contact pairs by their combined `M_V` in his bins.
+    main_sequence_bins: [u64; 4],
+    wider_main_sequence: u64,
+    contact_bins: [u64; 4],
 }
 
 fn merge_epoch(total: &mut EpochTally, part: EpochTally) {
@@ -153,6 +181,54 @@ fn merge_epoch(total: &mut EpochTally, part: EpochTally) {
     }
     total.faint_main_sequence += part.faint_main_sequence;
     total.contact += part.contact;
+    for b in 0..4 {
+        total.main_sequence_bins[b] += part.main_sequence_bins[b];
+        total.contact_bins[b] += part.contact_bins[b];
+    }
+    total.wider_main_sequence += part.wider_main_sequence;
+}
+
+/// The combined `M_V` of `stars`, each a living star with a magnitude: −2.5 log₁₀ Σ 10^(−0.4
+/// `M_V`).
+fn combined_magnitude(stars: &[&StarState]) -> Option<f64> {
+    let flux: Option<f64> = stars
+        .iter()
+        .map(|s| absolute_magnitude_v(s).map(|m| hyperion_sim::math::exp10(-0.4 * m.value())))
+        .sum();
+    flux.map(|f| -2.5 * hyperion_sim::math::log10(f))
+}
+
+/// What the system `stars` adds to the epoch's tally of main-sequence stars and contact pairs.
+fn tally_contacts(stars: &SystemStars, now: &SystemState, acc: &mut EpochTally) {
+    for s in now.stars() {
+        if s.phase() != Phase::MainSequence {
+            continue;
+        }
+        let Some(m_v) = absolute_magnitude_v(s).map(Magnitudes::value) else {
+            continue;
+        };
+        acc.faint_main_sequence += u64::from(m_v > 1.5);
+        acc.wider_main_sequence += u64::from(m_v > 1.5 && m_v <= WIDER_FAINTEST);
+        if let Some(b) = rucinski_bin(m_v) {
+            acc.main_sequence_bins[b] += 1;
+        }
+    }
+    for pair in now.pairs() {
+        if pair.class() != BinaryClass::Contact {
+            continue;
+        }
+        acc.contact += 1;
+        let members = stars
+            .pairs()
+            .iter()
+            .find(|p| p.node() == pair.node())
+            .expect("a contact pair was run")
+            .stars()
+            .map(|s| &now.stars()[usize::from(s.get())]);
+        if let Some(b) = combined_magnitude(&members).and_then(rucinski_bin) {
+            acc.contact_bins[b] += 1;
+        }
+    }
 }
 
 /// A 0.75 M☉ star's luminosity at the age and composition of `stars`' primary, L☉, or `None` if it
@@ -170,11 +246,6 @@ fn reference_luminosity(stars: &SystemStars) -> Option<f64> {
     .map(|s| s.luminosity().value())
 }
 
-fn is_faint_main_sequence(state: &StarState) -> bool {
-    state.phase() == Phase::MainSequence
-        && absolute_magnitude_v(state).is_some_and(|m| m.value() > 1.5)
-}
-
 #[test]
 #[ignore = "slow: 1.6 × 10⁵ grid systems of layers A to D, their pairs run through the engine"]
 fn binary_system_bright_exception_and_contact_binaries() {
@@ -185,8 +256,13 @@ fn binary_system_bright_exception_and_contact_binaries() {
         (Layer::C, 40_000),
         (Layer::D, 30_000),
     ];
+    // Per system of the solar neighbourhood: contact pairs, main-sequence stars fainter than
+    // +1.5 and of +1.5 to +7.5, and by Rucinski's bins.
     let mut contact_per_system = 0.0;
     let mut faint_per_system = 0.0;
+    let mut wider_per_system = 0.0;
+    let mut contact_bins = [0.0; 4];
+    let mut main_sequence_bins = [0.0; 4];
     let mut bright_ab = [0_u64; 7];
     let mut systems_ab = [0_u64; 7];
     for (salt, (layer, n)) in (0_u64..).zip(strata) {
@@ -206,16 +282,7 @@ fn binary_system_bright_exception_and_contact_binaries() {
                 {
                     acc.bright[slot] += 1;
                 }
-                acc.faint_main_sequence += now
-                    .stars()
-                    .iter()
-                    .filter(|s| is_faint_main_sequence(s))
-                    .count() as u64;
-                acc.contact += now
-                    .pairs()
-                    .iter()
-                    .filter(|p| p.class() == BinaryClass::Contact)
-                    .count() as u64;
+                tally_contacts(&stars, &now, acc);
             },
             merge_epoch,
         );
@@ -224,12 +291,24 @@ fn binary_system_bright_exception_and_contact_binaries() {
         // The layer's weight in the solar neighbourhood: its share of the young and old thin
         // discs' systems, which hold nearly all of them.
         let weight = galaxy.shares().share(band, Population::OldThinDisc);
-        contact_per_system += weight * count_f64(tally.contact) / count_f64(systems);
-        faint_per_system += weight * count_f64(tally.faint_main_sequence) / count_f64(systems);
+        let per_system = |n: u64| weight * count_f64(n) / count_f64(systems);
+        contact_per_system += per_system(tally.contact);
+        faint_per_system += per_system(tally.faint_main_sequence);
+        wider_per_system += per_system(tally.wider_main_sequence);
+        for b in 0..4 {
+            contact_bins[b] += per_system(tally.contact_bins[b]);
+            main_sequence_bins[b] += per_system(tally.main_sequence_bins[b]);
+        }
         println!(
-            "layer {layer:?}: {systems} systems, {} faint main-sequence stars, {} contact pairs, \
-             bright by population {:?} of {:?}",
-            tally.faint_main_sequence, tally.contact, tally.bright, tally.systems
+            "layer {layer:?}: {systems} systems, {} faint main-sequence stars ({} of M_V +1.5 to \
+             +5.5 by bin {:?}), {} contact pairs ({:?} by bin), bright by population {:?} of {:?}",
+            tally.faint_main_sequence,
+            tally.main_sequence_bins.iter().sum::<u64>(),
+            tally.main_sequence_bins,
+            tally.contact,
+            tally.contact_bins,
+            tally.bright,
+            tally.systems
         );
         if matches!(layer, Layer::A | Layer::B) {
             for i in 0..7 {
@@ -238,9 +317,27 @@ fn binary_system_bright_exception_and_contact_binaries() {
             }
         }
     }
-    let rucinski = contact_per_system / faint_per_system;
+    for b in 0..4 {
+        println!(
+            "contact pairs per main-sequence star of M_V {:+.1} to {:+.1}: {:.2e} (Rucinski 2002: \
+             {:.2e})",
+            RUCINSKI_BINS[b],
+            RUCINSKI_BINS[b + 1],
+            contact_bins[b] / main_sequence_bins[b],
+            RUCINSKI_PER_BIN[b]
+        );
+    }
+    let rucinski = contact_bins.iter().sum::<f64>() / main_sequence_bins.iter().sum::<f64>();
     println!(
-        "contact pairs per main-sequence star fainter than M_V = +1.5: {rucinski:.2e} (Rucinski 2002: 1e-3 to 4e-3)"
+        "contact pairs per main-sequence star of the same M_V over +1.5 to +5.5: {rucinski:.2e} \
+         (Rucinski 2002: about 1/500; 1e-3 to 4e-3 allowed); all contact pairs per main-sequence \
+         star of +1.5 to +7.5 {:.2e}, fainter than +1.5 {:.2e}",
+        contact_per_system / wider_per_system,
+        contact_per_system / faint_per_system
+    );
+    assert!(
+        (1.0e-3..=4.0e-3).contains(&rucinski),
+        "{rucinski:.2e} contact pairs per main-sequence star"
     );
     for (i, (&bright, &systems)) in bright_ab.iter().zip(&systems_ab).enumerate() {
         if systems == 0 {

@@ -101,10 +101,20 @@ impl Engine {
             // A white dwarf born as the envelope goes: continuous, and whatever envelope a companion
             // left on the star goes with it, without a kick.
             let lost = before - remnant.mass().value();
-            if lost > 1e-9 && self.orbit.is_some() {
+            let bound = self.orbit.is_some();
+            if lost > 1e-9 && bound {
                 self.lose_mass(i, before, remnant.mass().value(), None);
             }
-            self.kind = self.quiet_kind();
+            // An orbit the loss unbinds leaves both stars: the pair is disrupted, not merged
+            // (finding F1 of ruling p11-channels, 2026-10-06, the label only).
+            self.kind =
+                if bound && self.orbit.is_none() && !self.members.iter().any(Member::is_gone) {
+                    SegmentKind::Disrupted {
+                        by: Component::of_index(i),
+                    }
+                } else {
+                    self.quiet_kind()
+                };
             return;
         }
         let kick = self.companion_kick(i, &death, &remnant);

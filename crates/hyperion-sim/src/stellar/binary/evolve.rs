@@ -52,13 +52,21 @@ const MAX_EVENTS: u32 = 4_096;
 /// The most steps one phase takes, past which the engine stops as it does at [`MAX_SEGMENTS`].
 pub(super) const MAX_STEPS: u32 = 200_000;
 
-/// Whether a pair can interact by `until_age`, the cheap pre-test (plan 11, design note 7): the
-/// first star has arrived on the main sequence by then, and the periastron of its orbit is inside
-/// the Roche-filling separation of either star's largest radius up to then, r ≥ `r_L(q)` a (1 − e)
-/// with Eggleton's lobe (1983) and each star's [`Track::max_radius_until`]. A star that has not
-/// arrived by then takes its zero-age main-sequence radius, as the engine carries it (P11.T4.i). A
-/// star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits, their first. Everything
-/// else is two single stars on an orbit.
+/// Whether a pair can interact by `until_age`: the engine's cheap pre-test (plan 11, design note 7).
+///
+/// The first star has arrived on the main sequence by then, and either the periastron of the drawn
+/// orbit is inside the Roche-filling separation of either star's largest radius up to then (the
+/// lobe test: r ≥ `r_L(q)` a (1 − e) with Eggleton's lobe (1983) and each star's
+/// [`Track::max_radius_until`]), or the engine's own sinks of orbital angular momentum can shrink
+/// the orbit into that test by then (P11.T4.j, ruling p11-channels of 2026-10-06): magnetic braking
+/// at the tidal equilibrium spin (BSE equation 50), gravitational radiation (equation 48) and the
+/// spin the tides can take from the orbit (equations 34–35), each at its largest. Those are the
+/// W Ursae Majoris channel and the giants' tidal captures, which the lobe test alone passes over.
+///
+/// A star that has not arrived by then takes its zero-age main-sequence radius, as the engine
+/// carries it (P11.T4.i). A star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits,
+/// their first. Everything else is two single stars on an orbit: a pair this passes over at an age
+/// shows no interaction before it in a run to any later age.
 ///
 /// # Examples
 ///
@@ -70,29 +78,34 @@ pub(super) const MAX_STEPS: u32 = 200_000;
 /// use hyperion_sim::units::{GravitationalParameter, Radians, Seconds, SolarMasses, Years};
 ///
 /// let days = |d: f64| Seconds::new(d * 86_400.0);
-/// let orbit = |period| {
+/// let orbit = |total: f64, period| {
 ///     KeplerElements::from_period(
 ///         days(period),
-///         GravitationalParameter::from_solar_masses(SolarMasses::new(2.0)),
+///         GravitationalParameter::from_solar_masses(SolarMasses::new(total)),
 ///         Eccentricity::CIRCULAR,
 ///         Orientation::new(Radians::new(0.0), Radians::new(0.0), Radians::new(0.0))?,
 ///         Radians::new(0.0),
 ///     )
 /// };
-/// let pair = |period| {
+/// let pair = |m1: f64, m2: f64, period| {
 ///     BinaryInput::new(
-///         SolarMasses::new(1.2),
-///         SolarMasses::new(0.8),
+///         SolarMasses::new(m1),
+///         SolarMasses::new(m2),
 ///         Composition::SOLAR,
-///         orbit(period).map_err(|e| e.to_string())?,
+///         orbit(m1 + m2, period).map_err(|e| e.to_string())?,
 ///         [StarDraws::median(), StarDraws::median()],
 ///         Years::new(5.0e9),
 ///     )
 ///     .map_err(|e| e.to_string())
 /// };
 /// // A 1.2 M☉ star's giant branch reaches a 100-day companion, but not one 10⁶ days out.
-/// assert!(can_interact(&pair(100.0)?, Years::new(1.0e10)));
-/// assert!(!can_interact(&pair(1.0e6)?, Years::new(1.0e10)));
+/// assert!(can_interact(&pair(1.2, 0.8, 100.0)?, Years::new(1.0e10)));
+/// assert!(!can_interact(&pair(1.2, 0.8, 1.0e6)?, Years::new(1.0e10)));
+/// // At 0.69 days a 1.04 and a 0.45 M☉ star stay inside their lobes on the drawn orbit, but
+/// // magnetic braking brings them into transfer at 2.6 Gyr: the pair is run by 2 Gyr.
+/// let braked = pair(1.04, 0.45, 0.69)?;
+/// assert!(!can_interact(&braked, Years::new(1.0e8)));
+/// assert!(can_interact(&braked, Years::new(2.0e9)));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
@@ -179,6 +192,27 @@ pub(crate) fn evolve_with_tracks(
     until_age: Years,
     tracks: [Option<Arc<Track>>; 2],
 ) -> BinaryTimeline {
+    run_pair(input, until_age, tracks, PreTest::Gate)
+}
+
+/// Whether [`run_pair`] reads the pre-test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreTest {
+    /// A pair that cannot interact is two single stars on the drawn orbit (the generator's).
+    Gate,
+    /// Every pair is run through the engine, for the tests that check the pre-test against it.
+    #[cfg(test)]
+    Past,
+}
+
+/// [`evolve`] with the stars' own tracks, the pre-test read as `pre_test` says.
+#[must_use]
+fn run_pair(
+    input: &BinaryInput,
+    until_age: Years,
+    tracks: [Option<Arc<Track>>; 2],
+    pre_test: PreTest,
+) -> BinaryTimeline {
     let until = until_age.value().max(0.0);
     let ctx = Arc::new(Context::of(input));
     let [own_primary, own_secondary] = tracks;
@@ -189,7 +223,12 @@ pub(crate) fn evolve_with_tracks(
     let pin = pinned_death(input, full_primary);
     let primary_track = pin.as_ref().map(|p| Arc::clone(&p.track)).or(own_primary);
     let members = own_members_with(input, until, [primary_track, own_secondary]);
-    if !interacts(input, &members, until) {
+    let gated = match pre_test {
+        PreTest::Gate => true,
+        #[cfg(test)]
+        PreTest::Past => false,
+    };
+    if gated && !interacts(input, &members, until) {
         let segment = Segment::new(
             SegmentKind::Detached,
             0.0,
@@ -211,6 +250,14 @@ pub(crate) fn evolve_with_tracks(
     let mut engine = Engine::new(ctx, start, until, members, orbit, pin.map(|p| p.pin));
     engine.run();
     engine.finish()
+}
+
+/// [`evolve`] past the pre-test: the engine runs every pair, whether [`can_interact`] passes it or
+/// not, so that the tests can check the pre-test against the engine itself (P11.T4.j).
+#[cfg(test)]
+#[must_use]
+pub(super) fn evolve_past_the_pre_test(input: &BinaryInput, until_age: Years) -> BinaryTimeline {
+    run_pair(input, until_age, [None, None], PreTest::Past)
 }
 
 /// Where the engine starts stepping for a pair of `members` run to `until`: where the first star
@@ -268,7 +315,11 @@ pub(super) fn arrival(members: &[Member; 2], until: f64) -> f64 {
 /// own main sequence's start if that is later (the primary's may be given, built in full), or the
 /// cooling fits below 0.1 M☉.
 #[must_use]
-fn own_members(input: &BinaryInput, until: f64, primary: Option<Arc<Track>>) -> [Member; 2] {
+pub(super) fn own_members(
+    input: &BinaryInput,
+    until: f64,
+    primary: Option<Arc<Track>>,
+) -> [Member; 2] {
     own_members_with(input, until, [primary, None])
 }
 
@@ -341,36 +392,71 @@ pub(super) fn track_mass(m: SolarMasses) -> SolarMasses {
 
 /// Whether the pair can interact by `until` on its members' own tracks ([`can_interact`]): never
 /// before the first star has arrived on the main sequence (`arrival`), where the stars' largest
-/// radii would be their contracting ones. A star that has not arrived by `until` takes its
-/// largest radius at its arrival, its zero-age main-sequence radius, as the engine reads it
-/// ([`engine_track_age_years`](super::star::engine_track_age_years)).
+/// radii would be their contracting ones; then if the drawn orbit reaches the lobe test
+/// ([`reaches_lobe`]), or if the decay the engine's own sinks can make by `until` brings it there
+/// ([`decay_reaches`](super::detached::decay_reaches), P11.T4.j). A star that has not arrived by
+/// `until` takes its largest radius at its arrival, its zero-age main-sequence radius, as the
+/// engine reads it ([`engine_track_age_years`](super::star::engine_track_age_years)).
 #[must_use]
-fn interacts(input: &BinaryInput, members: &[Member; 2], until: f64) -> bool {
-    if arrival(members, until) >= until {
+pub(super) fn interacts(input: &BinaryInput, members: &[Member; 2], until: f64) -> bool {
+    let start = arrival(members, until);
+    if start >= until {
         return false;
     }
+    let radii = largest_radii_rsun(input, members, until);
+    reaches_lobe(input, radii)
+        || super::detached::decay_reaches(input, members, start, until, radii)
+}
+
+/// Each star's largest radius up to the engine's age `until_years`, R☉, as the lobe test reads
+/// it: a star on its own track its [`Track::max_radius_until`] at its engine age, held to no less
+/// than its arrival ([`engine_track_age_years`](super::star::engine_track_age_years)); a star
+/// below 0.1 M☉ the first of P06.T13's cooling fits; anything else none.
+#[must_use]
+pub(super) fn largest_radii_rsun(
+    input: &BinaryInput,
+    members: &[Member; 2],
+    until_years: f64,
+) -> [f64; 2] {
+    let masses = input.masses();
+    core::array::from_fn(|i| match &members[i] {
+        Member::Track { track, offset } => {
+            let at = super::star::engine_track_age_years(track, *offset, until_years);
+            track.max_radius_until(Years::new(at)).value()
+        }
+        Member::Cooling { .. } => substellar::cooling(masses[i], Years::ZERO, input.composition())
+            .map_or(0.0, |s| s.radius().value()),
+        Member::Shaped { .. }
+        | Member::MainSequence { .. }
+        | Member::Frozen { .. }
+        | Member::Remnant { .. }
+        | Member::Gone => 0.0,
+    })
+}
+
+/// The lobe test on the drawn orbit (design note 7): whether either star of the largest radii
+/// `radii_rsun` ([`largest_radii_rsun`]) reaches its Roche lobe at the drawn orbit's periastron.
+#[must_use]
+pub(super) fn reaches_lobe(input: &BinaryInput, radii_rsun: [f64; 2]) -> bool {
     let [m1, m2] = input.masses().map(SolarMasses::value);
     let periastron = input.orbit().periapsis();
     (0..2).any(|i| {
         let (m, other) = if i == 0 { (m1, m2) } else { (m2, m1) };
-        let largest = match &members[i] {
-            Member::Track { track, offset } => {
-                let at = super::star::engine_track_age_years(track, *offset, until);
-                track.max_radius_until(Years::new(at)).value()
-            }
-            Member::Cooling { .. } => {
-                substellar::cooling(SolarMasses::new(m), Years::ZERO, input.composition())
-                    .map_or(0.0, |s| s.radius().value())
-            }
-            Member::Shaped { .. }
-            | Member::MainSequence { .. }
-            | Member::Frozen { .. }
-            | Member::Remnant { .. }
-            | Member::Gone => 0.0,
-        };
         let lobe = roche_lobe_radius(m / other, periastron).value() / SOLAR_RADIUS_M;
-        largest >= lobe
+        radii_rsun[i] >= lobe
     })
+}
+
+/// The lobe part of [`can_interact`] alone: whether the first star has arrived by `until_age` and
+/// the drawn orbit reaches the lobe test then, without the decay the engine's sinks can make
+/// (plan 08's `interacting_periastron` is this test's boundary).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn lobe_reached(input: &BinaryInput, until_age: Years) -> bool {
+    let until = until_age.value().max(0.0);
+    let members = own_members(input, until, None);
+    arrival(&members, until) < until
+        && reaches_lobe(input, largest_radii_rsun(input, &members, until))
 }
 
 /// The primary's single-star death, which the engine may not move (plan 11, design note 16), with
@@ -717,7 +803,10 @@ impl Engine {
     }
 
     /// The kind a pair without Roche-lobe overflow is in: detached while bound, merged when one
-    /// member is gone, disrupted otherwise.
+    /// member is gone, disrupted once disrupted. An orbit a death unbinds is labelled by the
+    /// death itself, [`SegmentKind::Disrupted`] by the star that died (`Engine::explode`, and
+    /// `Engine::die` for a white dwarf's birth, P11.T4.j's F1); with no orbit, no member gone and
+    /// no disruption before, the kind is [`SegmentKind::Merged`].
     #[must_use]
     pub(super) fn quiet_kind(&self) -> SegmentKind {
         if self.orbit.is_some() {

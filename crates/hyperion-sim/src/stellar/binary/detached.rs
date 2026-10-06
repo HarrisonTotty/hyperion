@@ -31,12 +31,15 @@
 
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::stellar::sse::Structure;
-use crate::units::Years;
+use crate::stellar::Phase;
+use crate::stellar::sse::{CORE_GYRATION, ENVELOPE_GYRATION, Structure, Track};
 use crate::units::consts::{GM_SUN, SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M, SPEED_OF_LIGHT};
+use crate::units::{SolarMasses, Years};
 
+use super::BinaryParams;
 use super::evolve::{Engine, roche_lobe};
 use super::star::{G, Kind, Member, moment_of_inertia, positive};
+use super::timeline::BinaryInput;
 
 /// Peters's (1964) (32/5) G³ M☉³ ÷ (c⁵ R☉⁴) in yr⁻¹: the coefficient of BSE equations 48 and 49,
 /// which BSE rounds to 8.315 × 10⁻¹⁰.
@@ -921,10 +924,10 @@ fn tide(
     let sqrt_one_e2 = one_e2.sqrt();
     let cube = one_e2 * sqrt_one_e2;
     // Hut's (1981) polynomials in e².
-    let f2 = 1.0 + e2 * (7.5 + e2 * (5.625 + e2 * 0.3125));
+    let f2 = hut_f2(e2);
     let f3 = 1.0 + e2 * (3.75 + e2 * (1.875 + e2 * 0.078_125));
     let f4 = 1.0 + e2 * (1.5 + e2 * 0.125);
-    let f5 = 1.0 + e2 * (3.0 + e2 * 0.375);
+    let f5 = hut_f5(e2);
     let de = -27.0 * k_over_t * q * (1.0 + q) * ra6 * ra2 * e
         / math::powi(sqrt_one_e2, 13).max(1e-300)
         * (f3 - 11.0 / 18.0 * cube * f4 * spin / omega);
@@ -935,6 +938,18 @@ fn tide(
         spin_rate,
         equilibrium: f2 * omega / (f5 * cube),
     })
+}
+
+/// Hut's (1981) f₂ in `e2` = e²: 1 + 15/2 e² + 45/8 e⁴ + 5/16 e⁶ (BSE equation 34).
+#[must_use]
+fn hut_f2(e2: f64) -> f64 {
+    1.0 + e2 * (7.5 + e2 * (5.625 + e2 * 0.3125))
+}
+
+/// Hut's (1981) f₅ in `e2` = e²: 1 + 3 e² + 3/8 e⁴ (BSE equation 34).
+#[must_use]
+fn hut_f5(e2: f64) -> f64 {
+    1.0 + e2 * (3.0 + e2 * 0.375)
 }
 
 /// (k ÷ T), yr⁻¹, and `r_g²` of the tide on a star of structure `st` and `kind` (BSE equations 30,
@@ -998,6 +1013,384 @@ fn damping(
         return None;
     }
     Some((k_over_t, rg2))
+}
+
+// ---------------------------------------------------------------------------------------------
+// The pre-test's bound on the engine's own decay (P11.T4.j).
+
+/// The pieces each segment of a star's track is cut into for [`decay_reaches`]'s braking integral
+/// (ruling p11-channels of 2026-10-06, section 3.1, item 4).
+const DECAY_PIECES: u32 = 4;
+
+/// The factor on the decay that [`decay_reaches`] bounds (ruling p11-channels, section 3.1, item
+/// 6): for the midpoint integrator, and for the drawn masses standing for the stars' own, which
+/// only lose mass.
+const DECAY_SAFETY: f64 = 1.25;
+
+/// Whether the engine's own sinks of orbital angular momentum can bring a pair into design note
+/// 7's lobe test by `until_years`: the pre-test's bound (P11.T4.j, ruling p11-channels of
+/// 2026-10-06, section 3.1).
+///
+/// `members` are the stars on their own forms from zero age (`evolve.rs`'s `own_members`),
+/// stepped from `start_years` (the first arrival), and `radii_rsun` their largest radii up to
+/// `until_years` as the lobe test reads them, R☉. The bound is the engine's, term by term, so that
+/// a pair it passes over shows no interaction before `until_years` in a run to any later age.
+///
+/// In the semi-latus rectum p = a (1 − e²), with the drawn orbit's p₀ and e₀, the drawn masses m₁
+/// and m₂ (M = m₁ + m₂, μ = m₁ m₂ ÷ M) and the engine's units (R☉, M☉, yr):
+///
+/// 1. The lobe test passes at the periastron `r_c` = maxᵢ Rᵢ ÷ `f_L`(mᵢ ÷ mⱼ) (Eggleton 1983), or
+///    `p_c` = `r_c` (1 + e₀).
+/// 2. Tides spin no star past its equilibrium Φ √(G M ÷ p³) (BSE equation 34), Φ = f₂(e) ÷ f₅(e)
+///    (Hut 1981), taken at e₀: e falls under gravitational radiation, and under tides while no
+///    star spins faster than about 1.3 times its equilibrium (Hut 1981; BSE equation 25 and section
+///    2.3); a faster star raises e but gives the orbit angular momentum, and the engine reads the
+///    lobe at a ≥ p, so `p_c` bounds its Roche test whatever e does. Magnetic braking at that spin
+///    (BSE equation 50, K = 5.83 × 10⁻¹⁶) takes
+///    d(p⁵) ÷ dt = −10 K (G M ÷ μ) Φ³ Σᵢ (`M_env` ÷ M)ᵢ Rᵢ³ from the orbit, whatever p is.
+/// 3. The spins can take at most S = `Ω_c` Σᵢ Iᵢ from the orbit, `Ω_c` the equilibrium spin at
+///    `p_c` and Iᵢ bounding BSE equation 35's k′₂ (M − Mc) R² + k′₃ Mc Rc² over the span: k′₂ mᵢ
+///    Rᵢ² ([`ENVELOPE_GYRATION`]), plus k′₃ Mc Rc² ([`CORE_GYRATION`]) at their largest
+///    ([`largest_core`]), which is zero on the main sequence, and no more than k′₃ mᵢ Rᵢ². That is
+///    the Darwin instability's spin-up and a star's growth at a locked spin. Taken first, it leaves
+///    J′ = J₀ − S of the orbit's J₀ = μ √(G M p₀): the pair can interact if J′ ≤ 0, and otherwise
+///    starts from p′ = p₀ (J′ ÷ J₀)².
+/// 4. Braking, B = 10 K (G M ÷ μ) Φ³ Σᵢ ∫ (`M_env` ÷ M)ᵢ Rᵢ³ dt over the span, of each star above
+///    [`MAGNETIC_BRAKING_FLOOR`] (no remnant brakes), bounded piece by piece
+///    ([`braking_integral`]).
+/// 5. Gravitational radiation (BSE equation 48, Peters 1964), W = 10 β′ m₁ m₂ M (1 + 7/8 e₀²) p₀
+///    times the span, β′ = [`GRAVITATIONAL_WAVE_RATE`]: its rate at p₀ bounds it at every p ≤ p₀.
+/// 6. The pair can interact if p′⁵ − [`DECAY_SAFETY`] (B + W) ≤ `p_c`⁵.
+/// 7. A coarse test comes first, with every envelope's share 1 and each star's largest radius
+///    over the whole span, and Iᵢ at most k′₃ mᵢ Rᵢ² for a star with a core: a pair it rejects
+///    cannot interact, and most pairs end there. It is taken again with the core read from the
+///    track before the braking integral.
+///
+/// The bound is conservative in each term it holds: circularisation keeps p; a super-synchronous
+/// star spins the orbit up, and a sub-synchronous one brakes more weakly than at equilibrium, its
+/// spin-up being the reservoir's; every term is at its largest. Winds widen the orbit by the mass
+/// they take and are left out, but the spin a locked star's wind carries off (HPT equation 110),
+/// which the tides restore from the orbit, is not bounded here (ruling p11-channels' reservoir, as
+/// ruled): the slack of the reservoir and the zero-miss gate guard it. Before
+/// the pair's first interaction every star keeps its track's mass, so the braking floor read on
+/// the drawn mass is the engine's. The bound widens with `until_years` as `p_c`, B and W grow,
+/// though `Ω_c` falls with `p_c`: tested (`the_pre_test_only_widens_with_age`), not proven. A term
+/// whose [`BinaryParams`](super::BinaryParams) switch is off is left out: braking and the spins'
+/// reservoir reach the orbit through the tides.
+#[must_use]
+pub(super) fn decay_reaches(
+    input: &BinaryInput,
+    members: &[Member; 2],
+    start_years: f64,
+    until_years: f64,
+    radii_rsun: [f64; 2],
+) -> bool {
+    let (start, until, radii) = (start_years, until_years, radii_rsun);
+    let span = until - start;
+    let m = input.masses().map(SolarMasses::value);
+    let orbit = input.orbit();
+    let e0 = orbit.eccentricity().value();
+    let e2 = e0 * e0;
+    let p0 = orbit.semi_major_axis().value() / SOLAR_RADIUS_M * (1.0 - e2);
+    // 1. The critical orbit.
+    let p_c = (0..2)
+        .map(|i| radii[i] / roche_lobe(m[i], m[1 - i], 1.0))
+        .fold(0.0, f64::max)
+        * (1.0 + e0);
+    if !(positive(span) && positive(p_c) && positive(p0)) {
+        return false;
+    }
+    // 2, 5 and 6: the pair-wide terms.
+    let decay = Decay::new(input.params(), m, e2, p0, p_c, span);
+    let brakes = |i: usize| decay.brakes(m[i]);
+    let track_of = |i: usize| match &members[i] {
+        Member::Track { track, offset } => Some((&**track, *offset)),
+        Member::Shaped { .. }
+        | Member::MainSequence { .. }
+        | Member::Cooling { .. }
+        | Member::Frozen { .. }
+        | Member::Remnant { .. }
+        | Member::Gone => None,
+    };
+    let cored: [Option<(&Track, f64)>; 2] = core::array::from_fn(|i| {
+        track_of(i).filter(|&(track, offset)| past_main_sequence(track, offset, until))
+    });
+    // 3. The spins' moments of inertia: k′₂ m R² with no core, and at most k′₃ m R² (Rc ≤ R).
+    let envelope_inertia = |i: usize| ENVELOPE_GYRATION * m[i] * radii[i] * radii[i];
+    let inertia_bound = |i: usize| {
+        if cored[i].is_some() {
+            CORE_GYRATION * m[i] * radii[i] * radii[i]
+        } else {
+            envelope_inertia(i)
+        }
+    };
+    // 7. The coarse test.
+    let coarse_braking = both(|i| {
+        if brakes(i) {
+            radii[i] * radii[i] * radii[i] * span
+        } else {
+            0.0
+        }
+    });
+    if !decay.reaches(both(inertia_bound), coarse_braking) {
+        return false;
+    }
+    // 3. The core read from the track, and the coarse test again with it: with no star past its
+    // main sequence, the inertia is the coarse test's and the test is not repeated.
+    let inertia = if cored.iter().any(Option::is_some) {
+        let read = both(|i| match cored[i] {
+            Some((track, offset)) => {
+                let (mc, rc) = largest_core(track, offset, start, until);
+                (envelope_inertia(i) + CORE_GYRATION * mc * rc * rc).min(inertia_bound(i))
+            }
+            None => envelope_inertia(i),
+        });
+        if !decay.reaches(read, coarse_braking) {
+            return false;
+        }
+        read
+    } else {
+        both(envelope_inertia)
+    };
+    // 4. Braking, piece by piece.
+    let braking = both(|i| match track_of(i) {
+        Some((track, offset)) if brakes(i) => braking_integral(track, offset, start, until),
+        Some(_) | None => 0.0,
+    });
+    decay.reaches(inertia, braking)
+}
+
+/// The sum of `f` over the pair's two stars, the primary's first.
+#[must_use]
+fn both(f: impl Fn(usize) -> f64) -> f64 {
+    f(0) + f(1)
+}
+
+/// The pair-wide terms of [`decay_reaches`]'s test.
+struct Decay {
+    /// J₀, the drawn orbit's angular momentum, M☉ R☉² yr⁻¹.
+    j0: f64,
+    /// p₀, the drawn orbit's semi-latus rectum, R☉.
+    p0_rsun: f64,
+    /// `p_c`⁵, the lobe test's semi-latus rectum to the fifth, R☉⁵.
+    p_c5: f64,
+    /// `Ω_c`, rad yr⁻¹, where tides pass the spins' angular momentum to the orbit, else 0.
+    omega_c: f64,
+    /// 10 K (G M ÷ μ) Φ³, R☉² yr⁻¹, where braking reaches the orbit, else 0.
+    braking: f64,
+    /// W, R☉⁵.
+    radiation: f64,
+}
+
+impl Decay {
+    /// The terms for the drawn masses `masses_msun`, e₀² `e2`, p₀ and `p_c` (`p0_rsun`,
+    /// `p_c_rsun`) and the span's length `span_years`, under `params`.
+    #[must_use]
+    fn new(
+        params: &BinaryParams,
+        masses_msun: [f64; 2],
+        e2: f64,
+        p0_rsun: f64,
+        p_c_rsun: f64,
+        span_years: f64,
+    ) -> Self {
+        let [m1, m2] = masses_msun;
+        let total = m1 + m2;
+        let mu = m1 * m2 / total;
+        let phi = hut_f2(e2) / hut_f5(e2);
+        let omega_c = if params.tides {
+            phi * (G * total / (p_c_rsun * p_c_rsun * p_c_rsun)).sqrt()
+        } else {
+            0.0
+        };
+        let braking = if params.tides && params.magnetic_braking {
+            10.0 * MAGNETIC_BRAKING * G * total / mu * phi * phi * phi
+        } else {
+            0.0
+        };
+        let radiation = if params.gravitational_radiation {
+            10.0 * GRAVITATIONAL_WAVE_RATE
+                * m1
+                * m2
+                * total
+                * (1.0 + 0.875 * e2)
+                * p0_rsun
+                * span_years
+        } else {
+            0.0
+        };
+        Self {
+            j0: mu * (G * total * p0_rsun).sqrt(),
+            p0_rsun,
+            p_c5: math::powi(p_c_rsun, 5),
+            omega_c,
+            braking,
+            radiation,
+        }
+    }
+
+    /// Whether a star of drawn mass `mass_msun` brakes the orbit: above BSE's floor, with braking
+    /// and tides on.
+    #[must_use]
+    fn brakes(&self, mass_msun: f64) -> bool {
+        mass_msun > MAGNETIC_BRAKING_FLOOR && positive(self.braking)
+    }
+
+    /// Items 3 and 6: whether the orbit, less the spins' reservoir of the moments of inertia
+    /// `inertia` (M☉ R☉²), reaches `p_c` under the braking integral `braking` (R☉³ yr) and
+    /// gravitational radiation.
+    #[must_use]
+    fn reaches(&self, inertia: f64, braking: f64) -> bool {
+        let j = self.j0 - self.omega_c * inertia;
+        if j <= 0.0 {
+            return true;
+        }
+        let ratio = j / self.j0;
+        let p = self.p0_rsun * ratio * ratio;
+        math::powi(p, 5) - DECAY_SAFETY * (self.braking * braking + self.radiation) <= self.p_c5
+    }
+}
+
+/// Whether a star on `track`, placed at `offset_years`, has left its main sequence by the engine's
+/// age `until_years` (a track with no main sequence counts as having left it): only then can it
+/// hold a core.
+#[must_use]
+fn past_main_sequence(track: &Track, offset_years: f64, until_years: f64) -> bool {
+    match track.main_sequence_end() {
+        Some(end) => end.value() < until_years - offset_years,
+        None => track.main_sequence_arrival().is_none(),
+    }
+}
+
+/// The track ages, years, from the star's arrival to `until_years`, at which a star on `track`
+/// placed at `offset_years` and stepped from the engine's age `start_years` has each segment of its
+/// track open in the span: the span's start or the segment's own. A remnant's segment, which never
+/// ends, is left out: a remnant neither brakes nor holds a core beyond its whole self, which the
+/// envelope term holds.
+fn openings(
+    track: &Track,
+    offset_years: f64,
+    start_years: f64,
+    until_years: f64,
+) -> impl Iterator<Item = (f64, f64, f64)> + '_ {
+    let hi = (until_years - offset_years).max(0.0);
+    let from = (start_years - offset_years)
+        .max(0.0)
+        .max(track.main_sequence_arrival().map_or(0.0, Years::value));
+    track
+        .segment_ages()
+        .take_while(move |&(s, _, _)| s < hi)
+        .filter(move |&(_, e, _)| e > from && e.is_finite())
+        .map(move |(s, e, _)| (s.max(from), s, e))
+}
+
+/// The track ages, years, of the pieces of [`braking_integral`] for a star on `track` placed at
+/// `offset_years`, from the engine's age `start_years` to `until_years`: each segment of
+/// [`openings`] cut into [`DECAY_PIECES`] equal pieces whatever the span, so that the bound only
+/// grows with it, each clipped to the span, with the segment's opening.
+fn pieces(
+    track: &Track,
+    offset_years: f64,
+    start_years: f64,
+    until_years: f64,
+) -> impl Iterator<Item = (f64, f64, f64)> + '_ {
+    let hi = (until_years - offset_years).max(0.0);
+    let n = f64::from(DECAY_PIECES);
+    openings(track, offset_years, start_years, until_years).flat_map(move |(first, s, e)| {
+        (0..DECAY_PIECES).filter_map(move |k| {
+            let a = s + (e - s) * f64::from(k) / n;
+            let b = if k + 1 == DECAY_PIECES {
+                e
+            } else {
+                s + (e - s) * f64::from(k + 1) / n
+            };
+            let (a, b) = (a.max(first), b.min(hi));
+            (b > a).then_some((first, a, b))
+        })
+    })
+}
+
+/// The core's largest mass, M☉, and radius, R☉, of a star on `track` placed at `offset_years`,
+/// from the engine's age `start_years` to `until_years` ([`decay_reaches`], item 3), read where
+/// each segment opens in the span ([`openings`]) and at `until_years`.
+///
+/// Read so, they may miss their largest between those ages, and no more is needed: the envelope
+/// term k′₂ m R² holds k′₂ Mc R², which the star does not have, so I ≤ k′₂ m R² + Mc (k′₃ Rc² −
+/// k′₂ R²), and the core adds nothing while Rc ≤ √(k′₂ ÷ k′₃) R ≈ 0.69 R, a giant's whole life.
+#[must_use]
+fn largest_core(
+    track: &Track,
+    offset_years: f64,
+    start_years: f64,
+    until_years: f64,
+) -> (f64, f64) {
+    let hi = (until_years - offset_years).max(0.0);
+    let arrival = track.main_sequence_arrival().map_or(0.0, Years::value);
+    openings(track, offset_years, start_years, until_years)
+        .map(|(first, _, _)| first)
+        .chain(core::iter::once(hi.max(arrival)))
+        .filter_map(|age| track.own_structure_at(age))
+        .fold((0.0_f64, 0.0_f64), |(mc, rc), st| {
+            (
+                mc.max(st.state.core_mass().value()),
+                rc.max(st.core_radius.value()),
+            )
+        })
+}
+
+/// ∫ (`M_env` ÷ M) R³ dt, R☉³ yr, of a star on `track` placed at `offset_years`, from the engine's
+/// age `start_years` to `until_years`, bounded above piece by piece (ruling p11-channels of
+/// 2026-10-06, section 3.1, item 4; [`pieces`]).
+///
+/// On a piece the radius is at most [`Track::max_radius_until`] its end, and the envelope's share
+/// `M_env` ÷ M at most its value at the piece's start on the main sequence, where HPT section
+/// 7.2's `M_env,0` (1 − τ)^¼ falls with τ; elsewhere at most 1 (the pieces hold no remnant).
+/// Before its own arrival the star is its zero-age self, as the engine carries it
+/// ([`engine_track_age_years`](super::star::engine_track_age_years)).
+#[must_use]
+fn braking_integral(track: &Track, offset_years: f64, start_years: f64, until_years: f64) -> f64 {
+    let lo = (start_years - offset_years).max(0.0);
+    let hi = (until_years - offset_years).max(0.0);
+    let arrival = track.main_sequence_arrival().map_or(0.0, Years::value);
+    let radius = |b: f64| track.max_radius_until(Years::new(b.max(arrival))).value();
+    let cube = |r: f64| r * r * r;
+    let share_at = |age: f64| envelope_share(track.own_structure_at(age).as_ref());
+    // The main sequence's segments: from its start to the first segment past it.
+    let main_sequence = (
+        track.main_sequence_start().unwrap_or(f64::INFINITY),
+        track
+            .main_sequence_end()
+            .map_or(f64::INFINITY, Years::value),
+    );
+    let mut sum = 0.0;
+    // Held at its zero-age self before its own arrival.
+    if lo < arrival {
+        sum += share_at(arrival) * cube(radius(arrival)) * (arrival.min(hi) - lo);
+    }
+    for (first, a, b) in pieces(track, offset_years, start_years, until_years) {
+        let share = if first >= main_sequence.0 && first < main_sequence.1 {
+            share_at(a)
+        } else {
+            1.0
+        };
+        if share > 0.0 {
+            sum += share * cube(radius(b)) * (b - a);
+        }
+    }
+    sum
+}
+
+/// `M_env` ÷ M of a star of structure `st` as [`braking_integral`] bounds it from a piece's start:
+/// the structure's own on the main sequence, 0 for a remnant or nothing, 1 otherwise.
+#[must_use]
+fn envelope_share(st: Option<&Structure>) -> f64 {
+    match st {
+        Some(st) if st.state.phase() == Phase::MainSequence => {
+            (st.envelope.mass / st.state.mass().value()).clamp(0.0, 1.0)
+        }
+        Some(st) if !st.state.phase().is_remnant() => 1.0,
+        Some(_) | None => 0.0,
+    }
 }
 
 #[cfg(test)]

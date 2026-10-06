@@ -1807,8 +1807,8 @@ enum EarlierRun {
     /// The pre-test passed over the pair at the earlier age (two single stars on the drawn orbit),
     /// and the later run met no interaction before it.
     PassedOver,
-    /// The pre-test passed over the pair at the earlier age, but the later run's orbit shrank into
-    /// an interaction before it, which the pre-test, reading the drawn orbit, cannot see.
+    /// The pre-test passed over the pair at the earlier age, but the later run holds an
+    /// interaction before it ([`interaction_before`]): the pre-test failed to bound the decay.
     MissedInteraction,
 }
 
@@ -1851,15 +1851,44 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
             }
         }
     }
-    let interacted = late
-        .segments()
-        .iter()
-        .any(|s| s.kind() != SegmentKind::Detached && s.start() < until);
-    if interacted {
+    if interaction_before(&late, until).is_some() {
         EarlierRun::MissedInteraction
     } else {
         EarlierRun::PassedOver
     }
+}
+
+/// The first segment of `timeline` that is an interaction starting before `until` and before the
+/// pair's first supernova (ruling p11-channels of 2026-10-06, section 1.2): stable transfer, a
+/// common envelope, contact, or a merger that leaves one star. A detached or disrupted segment is
+/// none, and a supernova of a pair the pre-test passes over is not the pre-test's to foresee
+/// (finding F3: plan 11's P11.T10 decides wide pairs' supernovae).
+fn interaction_before(timeline: &BinaryTimeline, until: Years) -> Option<&Segment> {
+    let first_supernova = timeline
+        .supernovae()
+        .iter()
+        .map(|s| s.age().value())
+        .fold(f64::INFINITY, f64::min);
+    timeline.segments().iter().find(|s| {
+        let interacts = match s.kind() {
+            SegmentKind::Detached | SegmentKind::Disrupted { .. } => false,
+            SegmentKind::Merged => one_star_left(timeline, s),
+            SegmentKind::StableTransfer { .. }
+            | SegmentKind::CommonEnvelope
+            | SegmentKind::Contact => true,
+        };
+        interacts && s.start() < until && s.start().value() < first_supernova
+    })
+}
+
+/// Whether one of the pair's stars is gone at the start of `segment` of `timeline`, as a merger
+/// leaves it.
+fn one_star_left(timeline: &BinaryTimeline, segment: &Segment) -> bool {
+    timeline
+        .state_at(segment.start())
+        .stars()
+        .iter()
+        .any(|s| s.phase() == Phase::NoRemnant)
 }
 
 /// Runs `n` pinned-sample pairs ([`pinned_pair`]), each to an age log-uniform in 10⁵–1.2 × 10¹⁰
@@ -1895,10 +1924,8 @@ fn any_age_over(n: u32, seed: u64) -> [[u32; 3]; 2] {
 
 /// The engine's history does not depend on the age it is run to (P11's build-age dependence,
 /// 2026-10-05): [`check_any_age`] over 60 pairs, and between their stars' arrivals (P11.T4.i).
-/// The pre-test's blind spot, a drawn orbit that magnetic braking, tides or gravitational
-/// radiation shrink into an interaction the pre-test cannot see, is rare in this sample, which is
-/// weighted against it (few Sun-like pairs under 1.5 d, few ages over 1 Gyr), not in the field
-/// (plan 11's Risks).
+/// No pair the pre-test passes over interacts before its age in the later run (P11.T4.j: the
+/// pre-test bounds the decay that magnetic braking, tides and gravitational radiation make).
 #[test]
 fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
     // The runs between the arrivals are checked as the others are; none of them passes the
@@ -1906,14 +1933,13 @@ fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
     // directly).
     let [[same, passed, missed], _] = any_age_over(60, 0x0b1e_00a9);
     assert!(same > 10 && passed > 10, "{same} run, {passed} passed over");
-    assert!(missed <= 1, "{missed} interactions missed");
+    assert_eq!(missed, 0, "{missed} interactions missed");
 }
 
 /// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs, with the ages between
-/// arrivals (P11.T4.i). 4 of the first ages meet the pre-test's blind spot (2026-10-05), which the
-/// bound of 2% of the pairs only guards in this sample; the misses between the arrivals (9 of 721
-/// at T4.i, pairs under 1.4 d that braking or tides bring into contact from the first arrival)
-/// are recorded, for P11.T4.j's decay-aware pre-test to remove.
+/// arrivals (P11.T4.i). No interaction is missed (P11.T4.j): before the decay-aware pre-test, 4 of
+/// the first ages and 9 of the 721 between the arrivals were pairs under 1.4 d that braking or
+/// tides bring into contact or a merger before the age, which the drawn-orbit test passed over.
 #[test]
 #[ignore = "slow: about 3.4 × 10³ binaries run through the engine"]
 fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
@@ -1925,9 +1951,10 @@ fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
         "{same} run at both ages, {passed} passed over, {missed} interactions missed; between \
          arrivals {same_between} run, {passed_between} passed over, {missed_between} missed"
     );
-    assert!(
-        f64::from(missed) < 0.02 * f64::from(same + passed + missed),
-        "{missed} interactions missed"
+    assert_eq!(missed, 0, "{missed} interactions missed at the first ages");
+    assert_eq!(
+        missed_between, 0,
+        "{missed_between} interactions missed between the arrivals"
     );
     assert!(same_between > 0, "{same_between} run between arrivals");
 }
@@ -2401,4 +2428,551 @@ fn a_late_companions_supernova_is_applied() {
             );
         }
     }
+}
+
+/// P11.T4.j: a 1.04 + 0.45 M☉ pair at a = 3.75 R☉ (P = 0.69 d) whose stars stay inside their
+/// lobes on the drawn orbit is brought into transfer and contact by magnetic braking at about
+/// 2.2 Gyr. The pre-test passes it at 2.0 Gyr, so a run to 2.0 Gyr is the run to 3 Gyr to then,
+/// bit for bit; before P11.T4.j it was two single stars on the drawn orbit.
+#[test]
+fn a_braked_pair_is_run_before_its_contact() {
+    let input = pair(1.04, 0.45, period_days(1.04, 0.45, 3.75), 0.0, 0.004);
+    let at = Years::new(2.0e9);
+    assert!(
+        !lobe_reached(&input, at),
+        "inside the lobes on the drawn orbit"
+    );
+    assert!(can_interact(&input, at));
+    let later = evolve(&input, Years::new(3.0e9));
+    let stages = starts(&later);
+    let transfer = find(&stages, 0, |kind, _| *kind != SegmentKind::Detached)
+        .expect("braking brings the pair into contact");
+    assert!(
+        matches!(
+            stages[transfer].0,
+            SegmentKind::StableTransfer {
+                donor: Component::Primary
+            }
+        ),
+        "{}",
+        describe(&later)
+    );
+    let contact =
+        find(&stages, transfer, |kind, _| *kind == SegmentKind::Contact).expect("a contact pair");
+    let [onset, touch] = [transfer, contact].map(|k| later.segments()[k].start().value());
+    assert!(
+        (2.1e9..2.3e9).contains(&onset) && (2.15e9..2.35e9).contains(&touch),
+        "transfer at {onset} yr, contact at {touch} yr:\n{}",
+        describe(&later)
+    );
+    // The orbit shrinks by braking alone before the transfer: a third of its axis.
+    let before = later.state_at(Years::new(onset * (1.0 - 1e-9)));
+    let a = before
+        .orbit()
+        .map_or(f64::INFINITY, |o| o.semi_major_axis().value())
+        / crate::units::consts::SOLAR_RADIUS_M;
+    assert!(a < 2.5, "a = {a} R☉ at the onset");
+    assert_same_history(&evolve(&input, at), &later, at);
+}
+
+/// The full tracks of `input`'s stars, where they have tracks (not below 0.1 M☉), as
+/// [`can_interact_with_tracks`] takes them.
+fn full_tracks(input: &BinaryInput) -> [Option<std::sync::Arc<crate::stellar::sse::Track>>; 2] {
+    use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+    core::array::from_fn(|i| {
+        let m = super::evolve::track_mass(input.masses()[i]);
+        (m >= MIN_INITIAL_MASS)
+            .then(|| std::sync::Arc::new(Track::full(m, input.composition(), &input.draws()[i])))
+    })
+}
+
+/// P11.T4.j: the pre-test only widens with age, and reads the same on any build of the stars'
+/// tracks. Over the 60 pairs of [`a_timeline_is_the_same_whatever_age_it_is_run_to`] and four
+/// massive wide pairs whose primary is pinned (design note 16), at 48 ages from 10⁵ to 1.5 × 10¹⁰
+/// years, each pair's own age there and the ages between its stars' arrivals: a pair that can
+/// interact by one age can by every later one; and [`can_interact`] (tracks built to the age) is
+/// [`can_interact_with_tracks`] on full tracks, as `evolve`'s pinned primary and plan 06's
+/// `SystemStars` give them, and on tracks built to 1.5 × 10¹⁰ years.
+#[test]
+fn the_pre_test_only_widens_with_age() {
+    use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+
+    let mut mix = Mix(0x0b1e_00a9);
+    let massive = [
+        (12.0, 0.3, 2_000.0),
+        (12.0, 3.0, 4_000.0),
+        (30.0, 1.0, 3_000.0),
+        (30.0, 10.0, 6_000.0),
+    ]
+    .map(|(m1, m2, period)| (pair(m1, m2, period, 0.0, 0.02), None));
+    let pairs = (0..60)
+        .map(|i| {
+            let input = pinned_pair(&mut mix, i);
+            let own =
+                crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e5));
+            (input, Some(own))
+        })
+        .chain(massive);
+    let mut passes = 0;
+    for (i, (input, own)) in pairs.enumerate() {
+        let built = |i: usize| {
+            let m = super::evolve::track_mass(input.masses()[i]);
+            (m >= MIN_INITIAL_MASS).then(|| {
+                std::sync::Arc::new(Track::to_age(
+                    m,
+                    input.composition(),
+                    &input.draws()[i],
+                    Years::new(1.5e10),
+                ))
+            })
+        };
+        let long = [built(0), built(1)];
+        let mut ages: Vec<f64> = (0..48)
+            .map(|k| {
+                crate::math::exp(
+                    crate::math::ln(1.0e5) + f64::from(k) / 47.0 * crate::math::ln(1.5e5),
+                )
+            })
+            .chain(own)
+            .chain(ages_between_arrivals(&input).into_iter().map(Years::value))
+            .collect();
+        ages.sort_by(f64::total_cmp);
+        let tracks = full_tracks(&input);
+        let mut first_pass: Option<f64> = None;
+        for age in ages {
+            let until = Years::new(age);
+            let can = can_interact_with_tracks(&input, until, tracks.clone());
+            assert_eq!(can, can_interact(&input, until), "pair {i} at {age} yr");
+            assert_eq!(
+                can,
+                can_interact_with_tracks(&input, until, long.clone()),
+                "pair {i} at {age} yr"
+            );
+            if let Some(first) = first_pass {
+                assert!(can, "pair {i} passes at {first} yr but not at {age} yr");
+            } else if can {
+                first_pass = Some(age);
+                passes += 1;
+            }
+        }
+    }
+    assert!(passes > 10, "{passes} pairs pass at some age");
+}
+
+/// P11.T4.j: a wide pair is still two single stars. 1 + 0.8 M☉ at 10⁴ d fails at 13.8 Gyr. The
+/// bound's boundary for a circular 1 + 0.8 M☉ pair ([Fe/H] 0, median draws) lies at P₀ ≈ 0.73 d
+/// at 1 Gyr and 1.54 d at 10 Gyr, against the science check's 0.64 and 1.22 d from BSE equation
+/// 50 at a locked spin alone (plan 11's Risks): above them by the spins' reservoir and the
+/// safety factor, and over twice the lobe test's own boundary (0.30 and 0.54 d).
+#[test]
+fn a_wide_pair_is_still_passed_over() {
+    assert!(!can_interact(
+        &pair(1.0, 0.8, 1.0e4, 0.0, 0.02),
+        Years::new(1.38e10)
+    ));
+    let tracks = full_tracks(&pair(1.0, 0.8, 1.0, 0.0, 0.02));
+    let boundary = |until: f64, test: &dyn Fn(&BinaryInput, Years) -> bool| {
+        let (mut lo, mut hi) = (0.1_f64, 30.0_f64);
+        for _ in 0..40 {
+            let mid = (lo * hi).sqrt();
+            if test(&pair(1.0, 0.8, mid, 0.0, 0.02), Years::new(until)) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    };
+    let bound =
+        |input: &BinaryInput, until: Years| can_interact_with_tracks(input, until, tracks.clone());
+    let [p1, p10] = [1.0e9, 1.0e10].map(|u| boundary(u, &bound));
+    let [l1, l10] = [1.0e9, 1.0e10].map(|u| boundary(u, &lobe_reached));
+    eprintln!(
+        "1 + 0.8 M☉: the bound passes P₀ ≤ {p1:.3} d at 1 Gyr and ≤ {p10:.3} d at 10 Gyr (science \
+         check 0.64 and 1.22 d); the lobe test alone {l1:.3} and {l10:.3} d"
+    );
+    assert!((0.64..0.85).contains(&p1), "{p1} d at 1 Gyr");
+    assert!((1.22..1.8).contains(&p10), "{p10} d at 10 Gyr");
+    assert!(l1 < 0.5 * p1 && l10 < 0.5 * p10, "{l1} and {l10} d");
+}
+
+/// Finding F1 of ruling p11-channels (2026-10-06), the label: a white dwarf's birth that sheds
+/// enough at once to unbind the orbit leaves both stars, a disruption by the star that died, not a
+/// merger. The ruling's trace, 10.2 + 7.88 M☉ at P = 9,373 d and e = 0.45 (\[Fe/H\] 0, median
+/// draws), run past the pre-test: at 43.9 Myr the secondary's super-AGB track goes from its early
+/// AGB through the post-AGB (1.37 M☉) to an oxygen–neon white dwarf, and its death sheds the
+/// envelope its progenitor still holds at once, through BSE appendix A1's instantaneous mass loss
+/// with no kick (ruling 129.4a), which unbinds the orbit. The physics, an adiabatic superwind
+/// instead, is left for its own ruling.
+#[test]
+fn a_white_dwarfs_birth_that_unbinds_the_orbit_disrupts_it() {
+    let input = pair(10.2, 7.88, 9_373.0, 0.45, 0.02);
+    let timeline = super::evolve::evolve_past_the_pre_test(&input, Years::new(1.0e8));
+    let unbound = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() != SegmentKind::Detached)
+        .expect("the orbit is unbound");
+    assert_eq!(
+        unbound.kind(),
+        SegmentKind::Disrupted {
+            by: Component::Secondary
+        },
+        "{}",
+        describe(&timeline)
+    );
+    let state = timeline.state_at(unbound.start());
+    assert!(
+        state.stars().iter().all(|s| s.phase() != Phase::NoRemnant) && state.orbit().is_none(),
+        "{}",
+        describe(&timeline)
+    );
+    assert!(timeline.merger_age().is_none());
+}
+
+/// A pair of `m1` and `m2` M☉ at `period_days` and `e`, of \[Fe/H\] `fe_h`, with each star's own
+/// draws (the `i`th system of a layer-A strip of cells): the pairs of ruling p11-channels' probe
+/// `bound_conservative` (section 1.2).
+fn drawn_pair(m1: f64, m2: f64, period_days: f64, e: f64, fe_h: f64, i: u32) -> BinaryInput {
+    use crate::Seed;
+    use crate::coords::{CellSize, GenCell};
+    use crate::id::{BodyId, Layer, SystemId};
+    use crate::units::{Dex, HeliumExcess};
+
+    let orbit = KeplerElements::from_period(
+        Seconds::new(period_days * 86_400.0),
+        GravitationalParameter::from_solar_masses(SolarMasses::new(m1 + m2)),
+        Eccentricity::new(e).expect("an eccentricity in [0, 1)"),
+        Orientation::new(Radians::new(0.3), Radians::new(0.1), Radians::new(0.2))
+            .expect("an orientation"),
+        Radians::new(1.0),
+    )
+    .expect("an orbit");
+    let x = i32::try_from(i % 4_000).expect("a small index") - 2_000;
+    let z = i32::try_from(i / 4_000).expect("a small index");
+    let cell = GenCell::new(CellSize::Ly8, [x, 9, z]).expect("a cell");
+    let system = SystemId::from_parts(Layer::A, cell, 0).expect("a system");
+    let draws = [0, 1].map(|k| StarDraws::for_star(Seed::new(0x0b1e_5eee), BodyId::new(system, k)));
+    BinaryInput::new(
+        SolarMasses::new(m1),
+        SolarMasses::new(m2),
+        Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO),
+        orbit,
+        draws,
+        Years::new(1.0e9),
+    )
+    .expect("a pair")
+}
+
+/// `exp(ln lo + x ln(hi ÷ lo))`: log-uniform on `lo`–`hi` at `x` in [0, 1).
+fn log_uniform(lo: f64, hi: f64, x: f64) -> f64 {
+    crate::math::exp(crate::math::ln(lo) + x * crate::math::ln(hi / lo))
+}
+
+/// The `n` pairs of sample `kind` of ruling p11-channels' check of the pre-test against the engine
+/// (section 1.2), each with the age it is run to, at \[Fe/H\] 0, −0.7 and −1.6 in turn:
+///
+/// - 0, enriched in the braking channel: 0.3–2.5 M☉ primaries, P 0.2–8 d (eccentric to 0.4 above
+///   2 d), ages 10⁷–1.38 × 10¹⁰ years, all log-uniform;
+/// - 1, the pinned sample's ranges: 0.8–40 M☉, 0.3–10⁴ d (eccentric to 0.7 above 5 d), ages
+///   10⁵–1.6 × 10¹⁰ years;
+/// - 2, giants near the drawn threshold: 1–40 M☉ at a periastron 0.98–1.6 times plan 08's
+///   [`interacting_periastron`](crate::galaxy::displaced::binarity::interacting_periastron),
+///   half of them eccentric to 0.5, run to 1.38 × 10¹⁰ years.
+///
+/// The companion takes a mass ratio uniform in 0.05–1, no lighter than 0.08 M☉.
+fn decay_sample(kind: u8, n: u32) -> Vec<(BinaryInput, Years)> {
+    let mut mix = Mix(0x0b1e_0c11 ^ u64::from(kind));
+    (0..n)
+        .map(|i| {
+            let fe_h = [0.0, -0.7, -1.6][usize::try_from(i % 3).expect("a small index")];
+            let (m1, m2, period, e, until) = match kind {
+                0 => {
+                    let m1 = log_uniform(0.3, 2.5, mix.next());
+                    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+                    let period = log_uniform(0.2, 8.0, mix.next());
+                    let e = if period > 2.0 { 0.4 * mix.next() } else { 0.0 };
+                    (m1, m2, period, e, log_uniform(1.0e7, 1.38e10, mix.next()))
+                }
+                1 => {
+                    let m1 = log_uniform(0.8, 40.0, mix.next());
+                    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+                    let period = log_uniform(0.3, 1.0e4, mix.next());
+                    let e = if period > 5.0 { 0.7 * mix.next() } else { 0.0 };
+                    let until = crate::math::exp10(5.0 + 5.2 * mix.next());
+                    (m1, m2, period, e, until)
+                }
+                _ => {
+                    use crate::galaxy::displaced::binarity::interacting_periastron;
+                    use crate::units::{Dex, HeliumExcess};
+                    let m1 = log_uniform(1.0, 40.0, mix.next());
+                    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+                    let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
+                    let threshold =
+                        interacting_periastron(SolarMasses::new(m1), m2 / m1, &comp).value();
+                    let factor = 0.98 + 0.62 * mix.next();
+                    let e = if mix.next() < 0.5 {
+                        0.0
+                    } else {
+                        0.5 * mix.next()
+                    };
+                    let a = threshold * factor / (1.0 - e);
+                    let gm = crate::units::consts::GM_SUN * (m1 + m2);
+                    let period = core::f64::consts::TAU * (a * a * a / gm).sqrt() / 86_400.0;
+                    (m1, m2, period, e, 1.38e10)
+                }
+            };
+            (drawn_pair(m1, m2, period, e, fe_h, i), Years::new(until))
+        })
+        .collect()
+}
+
+/// One sample's check of the pre-test against the engine run past it.
+#[derive(Debug, Clone, Default)]
+struct DecayTally {
+    pairs: u32,
+    /// Pairs the lobe test alone passes, the engine interacts, and the lobe test alone misses.
+    drawn: u32,
+    interacting: u32,
+    missed_by_drawn: u32,
+    /// Pairs the pre-test passes, misses, and passes that do not interact.
+    passes: u32,
+    missed: Vec<String>,
+    passes_without_interaction: u32,
+    /// Merged segments with both stars still present (finding F1): none.
+    merged_with_both: u32,
+    /// Pairs the pre-test passes at their age but not at 1.6 × 10¹⁰ years: none.
+    narrowed: u32,
+}
+
+impl DecayTally {
+    fn merge(&mut self, part: Self) {
+        self.pairs += part.pairs;
+        self.drawn += part.drawn;
+        self.interacting += part.interacting;
+        self.missed_by_drawn += part.missed_by_drawn;
+        self.passes += part.passes;
+        self.missed.extend(part.missed);
+        self.passes_without_interaction += part.passes_without_interaction;
+        self.merged_with_both += part.merged_with_both;
+        self.narrowed += part.narrowed;
+    }
+
+    /// Checks `input` run to `until`: the lobe test alone and the pre-test, on the stars' own
+    /// tracks built once, against the engine run past it.
+    fn check(&mut self, input: &BinaryInput, until: Years) {
+        use super::evolve::{
+            arrival, evolve_past_the_pre_test, interacts, largest_radii_rsun, own_members,
+            reaches_lobe,
+        };
+        let u = until.value();
+        let members = own_members(input, u, None);
+        let drawn =
+            arrival(&members, u) < u && reaches_lobe(input, largest_radii_rsun(input, &members, u));
+        let passes = interacts(input, &members, u);
+        self.narrowed += u32::from(passes && !can_interact(input, Years::new(1.6e10)));
+        let timeline = evolve_past_the_pre_test(input, until);
+        let interaction = interaction_before(&timeline, until);
+        self.pairs += 1;
+        self.drawn += u32::from(drawn);
+        self.passes += u32::from(passes);
+        self.merged_with_both += u32::try_from(
+            timeline
+                .segments()
+                .iter()
+                .filter(|s| s.kind() == SegmentKind::Merged && !one_star_left(&timeline, s))
+                .count(),
+        )
+        .expect("a few segments");
+        if let Some(segment) = interaction {
+            self.interacting += 1;
+            self.missed_by_drawn += u32::from(!drawn);
+            if !passes {
+                let [m1, m2] = input.masses().map(SolarMasses::value);
+                self.missed.push(format!(
+                    "{m1:.3} + {m2:.3} M☉ at {:.3} d, e {:.2}, to {u:.3e} yr: {:?} at {:.4e} yr",
+                    input.orbit().period().value() / 86_400.0,
+                    input.orbit().eccentricity().value(),
+                    segment.kind(),
+                    segment.start().value()
+                ));
+            }
+        } else if passes && !drawn {
+            self.passes_without_interaction += 1;
+        }
+    }
+}
+
+/// `check` over `items` in eight shares, share k taking the items k, k + 8, …, merged in share
+/// order: on threads of their own, or one after another on wasm32-wasip1, which has none.
+fn in_shares<I: Sync>(items: &[I], check: impl Fn(&mut DecayTally, &I) + Sync) -> DecayTally {
+    const SHARES: usize = 8;
+    let share = |k: usize| {
+        let mut part = DecayTally::default();
+        for item in items.iter().skip(k).step_by(SHARES) {
+            check(&mut part, item);
+        }
+        part
+    };
+    #[cfg(not(target_family = "wasm"))]
+    let parts: Vec<DecayTally> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..SHARES)
+            .map(|k| {
+                let share = &share;
+                scope.spawn(move || share(k))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a share's thread"))
+            .collect()
+    });
+    #[cfg(target_family = "wasm")]
+    let parts: Vec<DecayTally> = (0..SHARES).map(share).collect();
+    let mut total = DecayTally::default();
+    for part in parts {
+        total.merge(part);
+    }
+    total
+}
+
+/// P11.T4.j's gate (ruling p11-channels of 2026-10-06, section 3.3): over the three samples of the
+/// ruling's probe, 6,000 pairs each, every pair the pre-test passes over at its age shows no
+/// stable transfer, common envelope, contact or merger before it ([`interaction_before`]) when
+/// the engine runs it anyway. None is allowed. The lobe test alone missed 530, 36 and 160 of
+/// them (the braking channel, the pinned sample's ranges, giants' tidal captures). The passes that
+/// do not interact are recorded. No merger leaves both stars (finding F1), and every pair the
+/// pre-test passes at its age it passes at 1.6 × 10¹⁰ years too.
+#[test]
+#[ignore = "slow: 1.8 × 10⁴ binaries run through the engine"]
+fn the_decay_bound_never_passes_over_an_interaction() {
+    let mut missed = 0;
+    for kind in 0..3_u8 {
+        let sample = decay_sample(kind, 6_000);
+        let t = in_shares(&sample, |tally, (input, until)| tally.check(input, *until));
+        eprintln!(
+            "sample {kind}: {} pairs; the lobe test passes {}, the engine interacts in {}, the lobe \
+             test misses {}; the pre-test passes {}, misses {}, passes {} that do not interact",
+            t.pairs,
+            t.drawn,
+            t.interacting,
+            t.missed_by_drawn,
+            t.passes,
+            t.missed.len(),
+            t.passes_without_interaction,
+        );
+        for line in t.missed.iter().take(20) {
+            eprintln!("  missed: {line}");
+        }
+        assert_eq!(
+            t.merged_with_both, 0,
+            "sample {kind}: mergers leaving both stars"
+        );
+        assert_eq!(
+            t.narrowed, 0,
+            "sample {kind}: passes lost by 1.6 × 10¹⁰ years"
+        );
+        assert!(t.missed_by_drawn > 0, "sample {kind} tests the bound");
+        missed += t.missed.len();
+    }
+    assert_eq!(missed, 0, "interactions the pre-test passed over");
+}
+
+/// P11.T4.j: each term of the bound is the engine's, and goes with its [`BinaryParams`] switch.
+/// The braked 1.04 + 0.45 M☉ pair at 0.69 d passes at 2 Gyr only with magnetic braking and the
+/// tides that pass it to the orbit. A 0.3 + 0.3 M☉ pair at 0.2 d, below BSE's braking floor and
+/// inside its lobes on the drawn orbit, passes at 13.8 Gyr by gravitational radiation alone, which
+/// merges it in the engine at about 3.6 Gyr, and fails without it.
+#[test]
+fn the_bound_follows_the_engines_switches() {
+    let with = |params: BinaryParams| move |input: BinaryInput| input.with_params(params);
+    let generator = with(BinaryParams::GENERATOR);
+    let no_braking = with(BinaryParams {
+        magnetic_braking: false,
+        ..BinaryParams::GENERATOR
+    });
+    let no_tides = with(BinaryParams {
+        tides: false,
+        ..BinaryParams::GENERATOR
+    });
+    let no_radiation = with(BinaryParams {
+        gravitational_radiation: false,
+        ..BinaryParams::GENERATOR
+    });
+    let braked = || pair(1.04, 0.45, 0.69, 0.0, 0.02);
+    let at = Years::new(2.0e9);
+    assert!(can_interact(&generator(braked()), at));
+    assert!(can_interact(&no_radiation(braked()), at));
+    assert!(!can_interact(&no_braking(braked()), at), "without braking");
+    assert!(!can_interact(&no_tides(braked()), at), "without tides");
+    let dwarfs = || pair(0.3, 0.3, 0.2, 0.0, 0.02);
+    let until = Years::new(1.38e10);
+    assert!(!lobe_reached(&dwarfs(), until));
+    assert!(can_interact(&generator(dwarfs()), until));
+    assert!(can_interact(&no_tides(dwarfs()), until));
+    assert!(
+        !can_interact(&no_radiation(dwarfs()), until),
+        "without radiation"
+    );
+    let timeline = evolve(&dwarfs(), until);
+    let merger = timeline.merger_age().map(Years::value);
+    assert!(
+        merger.is_some_and(|age| (3.0e9..4.2e9).contains(&age)),
+        "{merger:?}:\n{}",
+        describe(&timeline)
+    );
+}
+
+/// P11.T4.j: a giant's tidal capture beyond the drawn threshold is run. A 2 + 0.2 M☉ pair at 1.2
+/// times plan 08's `interacting_periastron`, circular (P ≈ 2,000 d), never reaches a lobe on its
+/// drawn orbit, but the giant spins up at the orbit's expense (Darwin's instability) and engulfs
+/// its companion: a common envelope on the thermally pulsing asymptotic giant branch at about
+/// 1.50 Gyr, the orbit shrunk by tides before it. A run to 1.5 Gyr agrees with it
+/// ([`check_any_age`]).
+#[test]
+fn a_giants_tidal_capture_is_run() {
+    use crate::galaxy::displaced::binarity::interacting_periastron;
+
+    let (m1, q) = (2.0, 0.1);
+    let a = 1.2 * interacting_periastron(SolarMasses::new(m1), q, &Composition::SOLAR).value()
+        / crate::units::consts::SOLAR_RADIUS_M;
+    let input = pair(m1, m1 * q, period_days(m1, m1 * q, a), 0.0, 0.02);
+    let until = Years::new(1.38e10);
+    assert!(
+        !lobe_reached(&input, until),
+        "inside its lobe on the drawn orbit"
+    );
+    assert!(can_interact(&input, until));
+    let timeline = evolve(&input, until);
+    let stages = starts(&timeline);
+    let envelope = find(&stages, 0, |kind, _| *kind != SegmentKind::Detached)
+        .expect("the giant engulfs its companion");
+    let age = timeline.segments()[envelope].start().value();
+    assert_eq!(
+        stages[envelope].0,
+        SegmentKind::CommonEnvelope,
+        "{}",
+        describe(&timeline)
+    );
+    assert!((1.49e9..1.51e9).contains(&age), "at {age} yr");
+    // The envelope is a segment of no length: the giant is read just before it.
+    let before = timeline.state_at(Years::new(age * (1.0 - 1e-9)));
+    assert_eq!(
+        before.stars()[0].phase(),
+        Phase::ThermallyPulsingAgb,
+        "{}",
+        describe(&timeline)
+    );
+    let axis = before
+        .orbit()
+        .map_or(f64::INFINITY, |o| o.semi_major_axis().value());
+    let drawn = input.orbit().semi_major_axis().value();
+    assert!(
+        axis < drawn,
+        "the orbit shrinks before the envelope: {axis} m from {drawn} m"
+    );
+    assert_ne!(
+        check_any_age(&input, Years::new(1.5e9), until),
+        EarlierRun::MissedInteraction
+    );
 }
