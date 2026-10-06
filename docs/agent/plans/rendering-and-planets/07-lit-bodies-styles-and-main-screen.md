@@ -1582,6 +1582,65 @@ tone-mapped image is a following canvas pass with `FrameSubmission.colourLoad` `
 sRGB view, in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6).
 Acceptance: `just ci`; the guide edit is one commit for the owner.
 
+T16 is built as three subtasks, in this order (a ruled split, under the orchestrator's
+pre-authorisation of 2026-10-06, when T16 moved to the views lane). The paragraph above stays the
+task's whole specification: each subtask builds its share of it, and each runs the console-ux
+skill's scripts.
+
+- **R07.T16.a The overlay, cased, and the hull faces' bias.** `photoreal/overlay.ts` (new),
+  `displays/view/viewFrameDrawer.ts`, R02's `wireframe/drawList.ts` and `shaders/occluder.wgsl`,
+  and `smoke/wireframe.ts` (Design notes 16–17; the UX decisions, item 12). The symbology's canvas
+  pass over the tone-mapped image is R02's draw list with every line batch cased in `--surface-0`
+  at `CASING_PX`, the hull edges included, which the wireframe style leaves uncased, and with no
+  star sprites, which the image holds. It is labelled `symbology` and loads the tone-mapped image
+  (`colourLoad: "load"`, through the sRGB view). Rings and hulls stay R02's cased marks until R11.
+  `HULL_OCCLUDER_BIAS.slopeScale` goes from 2 to 3, the sphere occluder's `SLOPE_SCALE`, so that a
+  cased hull edge's coverage stays in front of its own faces; the bias is one for both styles. The
+  DOM readouts over the canvas, the label block and the marks' labels, stand on their
+  `--surface-0` plates as built, and the label block's `STYLE` line and
+  `BODY PHOTOMETRY: NOT YET MODELLED` are built (T7, T8.a, T19). Tests: in a scene with a hull, a
+  ring, an orbit, a predicted path, bodies and marks, every batch of the overlay has a
+  `--surface-0` casing of `CASING_PX` and the overlay has no sprite, while the wireframe's own list
+  keeps its hull edges uncased; against the fake engine, the drawer's overlay submits each batch's
+  casing before its stroke, under `symbology`; the hull material's bias is
+  `{ constant: 128, slopeScale: 3 }`; in the photorealistic style every text over the primary's
+  image is on a plate, and each plate's rule in `styles.css` paints `var(--surface-0)`; in
+  `just test-render`, a cased hull edge on its own receding face draws every texel it draws with
+  no face. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/photoreal
+src/renderer/src/view/wireframe src/renderer/src/displays/view`, `just test-render`, the console-ux
+  skill's scripts, `just ci`.
+- **R07.T16.b The meter's causes, and their words on the panels.** R07's `post/autoExposure.ts`,
+  R02's `photometry/exposure.ts`, `displays/view/ExposurePanel.tsx`, `MeterControl.tsx` and
+  `ViewDisplay.tsx` (decision-r07-t8a-meter, item 1; decision-r07-owner-ux-signoff, item 1). Every
+  part of T16's text from "`AutoExposure` keeps why it has no metered value" to "stays held back
+  under the operator's own": the cause (`no-image`, `nothing-weighed`, `acquiring`); R02's
+  `InhibitReason` `"nothing_weighed"` with the meter in force, read as `INHIBITED · NO LIT SIDE`
+  and its twins; the statuses `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, with their
+  remedy clauses on the meter's control, in `ENABLE`'s reason and in `AUTO NOT AVAILABLE: …`, in
+  the panel and under the compact layout's row; the `acquiring` window, with no status and
+  `ENABLE` held back with `NOT AVAILABLE: not yet metered`; the `MAN` field never held back; and
+  `INHIBIT`'s consequence under each new system inhibit. Tests: T16's three (`NO LIT SIDE` after
+  0.5 s and not before, never `NO IMAGE TO METER`; a meter change clearing it at once; `AUTO`
+  resuming when a lit body is metered); `NO DARK SIDE` under `DARK` and `STAR DISC ONLY` under
+  `AVG`; `ENABLE` and the `MAN` field in the window; the inhibit's reading and `INHIBIT`'s note at
+  each new level. By hand, hidden: T19.b's follow-up's captures re-taken with `EXPOSURE` and
+  `EXPOSURE METER` open and each status standing, the 0.5rem probe passing and the least height at
+  most 52.5rem, or a ruling asked for. Acceptance: `pnpm --filter hyperion exec vitest run
+src/renderer/src/view/post src/renderer/src/view/photometry src/renderer/src/displays/view`, the
+  console-ux skill's scripts, `just ci`.
+- **R07.T16.c The guide's draft, for the owner.** `docs/frontend/ux-guidelines.md` alone, in one
+  `docs(guide)` commit, after T16.b, so that it states what is built: decision-r07-t8a-meter's
+  "In T16" edits, fitted to the guide as T19.d signed it off (the data-state bullet's inhibit
+  sentence and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row; the `NO IMAGE TO METER`
+  row's added sentence; the new Status row of the three statuses with their remedy clauses), and
+  a pointer to that row from the `METER` row (decision-r07-t19b-exposure-fit, item 4), each
+  tagged as T16's draft, ending in "the owner signs off". Nothing else is new: `PHOTOREALISTIC`
+  and `BODY PHOTOMETRY: NOT YET MODELLED` are signed off (T19.d), the several views' refusal adds
+  no entry (decision-r07-t18, item 6), and the "Outlines for symbology" bullet already cases every
+  mark over the image. Tests: each status the draft adds is a string in the code, in the words
+  T16.b built. Acceptance: `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the
+  console-ux skill's scripts.
+
 #### R07.T17 The low setting and benchmarks
 
 Add the rest of Design note 18's settings as fields of R05's `ViewSettings`, with their high and
