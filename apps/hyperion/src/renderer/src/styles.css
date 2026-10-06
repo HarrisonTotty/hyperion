@@ -3125,7 +3125,10 @@ body {
 
 /*
  * The list takes what the controls leave, and scrolls within itself; the column never does, and is
- * clipped rather than scrolled, so that no focused control can scroll it.
+ * clipped rather than scrolled, so that no focused control can scroll it. It sets its own line box,
+ * 17.5 px at 0.875rem and 20 px at 1rem, the same on every platform and at every scale, so that the
+ * heights measured for its fit hold where they were not measured; buttons and fields inherit it
+ * (decision-r07-t19b-exposure-fit, item 1(f)).
  */
 .view__side {
   display: flex;
@@ -3136,9 +3139,21 @@ body {
   overflow: clip;
   /* Room for the focus ring of a control at the column's edge. */
   overflow-clip-margin: 0.25rem;
+  line-height: 1.25;
 }
 
-/* The full layout: the first column, then the primary's exposure in the second. */
+/*
+ * The compact column's parts stand 0.25rem apart: every boundary between them is a panel's
+ * hairline or a 2rem button row's own padding (decision-r07-t19b-exposure-fit, item 1(d)).
+ */
+.view--compact .view__side {
+  gap: 0.25rem;
+}
+
+/*
+ * The full layout: the first column (`Instruments`, `Targets`, `Camera`), then the second (the
+ * `CONTROLS` view's `Style`, then the primary's exposure; decision-r07-t19b-exposure-fit, item 2).
+ */
 .view--full .view__side {
   display: grid;
   grid-template-columns: 26rem 20rem;
@@ -3421,8 +3436,7 @@ body {
 /*
  * The camera's setting (`.readout`): one member per row, its value right of its label, each value
  * wide enough for the longest, `1.25E-4 s`, `409,600 ↑` and `28.1 EV ↑`, so that nothing beside it
- * moves. Its rows stand 0.25rem apart, not `.readout`'s 0.5rem, to spare the side column's height,
- * which is already short of room (plan R07, T19's side column, pending the owner).
+ * moves. Its rows stand 0.25rem apart, not `.readout`'s 0.5rem, to spare the side column's height.
  */
 .view-exposure__triple {
   gap: 0.25rem 1.5rem;
@@ -3431,6 +3445,31 @@ body {
 
 .view-exposure__triple dd {
   min-width: 9ch;
+}
+
+/* In the full layout a member is no box, so that the readout's two-column grid is unchanged. */
+.view-exposure__member {
+  display: contents;
+}
+
+/*
+ * In the compact layout, two members a row, `APERTURE` and `SHUTTER`, then `ND` and `ISO`: each
+ * label 0.75rem from its own value and the members 1.5rem apart, so that a label never stands
+ * nearer another member's value than its own (decision-r07-t19b-exposure-fit, item 1(a)).
+ */
+.view--compact .view-exposure__triple {
+  grid-template-columns: repeat(2, max-content);
+  gap: 0.25rem 1.5rem;
+}
+
+.view--compact .view-exposure__member {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.view--compact .view-exposure__triple dd {
+  white-space: nowrap;
 }
 
 /*
@@ -3486,10 +3525,27 @@ body {
   gap: 0.25rem;
 }
 
+/*
+ * In the full layout's 20rem column both notes beside the buttons can wrap: the rows stand 0.75rem
+ * apart, so that the two notes never read as one block (decision-r07-t19b-exposure-fit, item 5).
+ */
+.view--full .view-exposure__commands {
+  gap: 0.75rem;
+}
+
 .view-exposure__command {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/*
+ * A held-back reason or `INHIBIT`'s consequence beside its button has no bottom margin, so that its
+ * text centres on the button's label (decision-r07-t19b-exposure-fit, item 5); the standing line
+ * above the commands keeps its 0.5rem.
+ */
+.view-exposure__command > .view-exposure__reason {
+  margin: 0;
 }
 
 /*

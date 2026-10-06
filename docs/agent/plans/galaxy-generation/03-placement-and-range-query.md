@@ -389,7 +389,11 @@ Decisions where the brainstorm is silent. None contradicts it.
     to −(H + L) is evaluation of found objects, which is plan 12's.
 13. **Padding speed is per layer behind one function.** `pad_speed(layer)` returns `PAD_SPEED` for
     every layer now. Plan 08 raises it for the unbound class in layer E, which is the brainstorm's
-    "only the unbound class needs more".
+    "only the unbound class needs more". Plan 08 keeps every record of a layer below that layer's
+    pad speed and checks it in `epoch_velocity` (P08.T17). Plan 09 raises layer D's pad together
+    with the hypervelocity survivors it places there (P09.T34.b). `escape_cut_holds(layer)` names
+    the layers that hold no record exempt from the escape cut (decided 2026-10-05,
+    `decision-r06-pad-speed.md`).
 14. **Result order** is by distance at t, then by ID, using `total_cmp`. It is independent of walk
     order and cache state.
 15. **Whole cells only.** `generate_cell` always produces every accepted system of the cell, which

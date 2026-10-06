@@ -2690,6 +2690,45 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   limited segments may show seams or pops of up to τ′ in bound terms. **Landed (2026-10-04):**
   F1 and F2 (T7 and T11.c, as built). The bands now move with τ′ at each selection; T13.a's
   record gives τ′'s steps between selections (F4, below).
+- **The cadence's 1%** (decision-r05-record-tau.md, "Noted for lane C"; **fixed 2026-10-05**).
+  The pass selects at τ_sel = τ ÷ (1 + m), m = `RESELECT_FRACTION` = 0.1. It re-selected on a
+  move of more than m × d_min, where d_min is the box distance to the nearest selected non-finest
+  patch. That held the drawn error to τ ÷ (1 − m²), about 1.0101 τ, between selections, not to τ.
+  A leaf at d ≥ d_min with ρ ≤ τ_sel is still (1 − m) d away after such a move, so ρ ≤ τ_sel ÷
+  (1 − m).
+  - _The fix._ The pass re-selects on a move of more than `RESELECT_MOVE_FRACTION` = m ÷ (1 + m),
+    about 0.0909, × d_min (`selectionTolerance.ts`, derived from `RESELECT_FRACTION`). Then
+    1 − m ÷ (1 + m) = 1 ÷ (1 + m) and ρ ≤ τ_sel × (1 + m) = τ exactly. Where the budget binds,
+    the bound is (1 + m) τ′, the tolerance of the morph bands. So a coarse–fine edge now stays at
+    morph 1 between selections too. Under the old move it could fall to 0.99 of its band's end,
+    about morph 0.93 for a level whose bound halves, a step the skirts covered.
+  - _Unchanged._ τ_sel stays, and so does T13.a's record, which selects every frame and never
+    reads the move. Its 14 pinned window hashes reproduce. Its header's "at most 0.1 × d_min
+    earlier" still holds, now at most 0.0909.
+  - _Not covered, as before._ Unbaked leaves, which the streaming gate holds and
+    `TERRAIN: STREAMING` reports, are outside the bound. The floor of one finest patch (20.7 m)
+    on d_min loosens it for no leaf that meets τ_sel at the settings' views: a level-18 leaf meets
+    τ_sel only beyond 45 m, on low at 640 px wide.
+  - _Tests._ `selectionTolerance.test.ts` places the worst leaf at d_min with ρ = τ_sel. At
+    m ÷ (1 + m) its ρ after the move is τ to rounding, and at m it is τ ÷ (1 − m²) > 1.01 τ, on
+    both settings at level 18. `terrainPass.test.ts` streams a low camera at 1.5 km.
+    Every leaf it sees stays within τ at the farthest pose the pass keeps the selection for. A
+    move halfway between m ÷ (1 + m) and m of d_min re-selects; that test fails on the old rule.
+  - _The cost, measured_ (a CPU-only replay of the pass's cadence over the record's descent).
+    - Method: seed 7, ridges off, the hard bound, the record's ideal pool and views, at 64 Hz.
+      Ten windows of 20 s (the vertical descent's 10 s), each after 3 s of warm-up from an empty
+      cache. Each window ran at both moves.
+    - The move rule's own selections rose by about 1 + m: 57 → 65 on high and 133 → 143 on low,
+      190 → 208 together (+9.5%).
+    - All selections rose 0.3% on high (3,656 → 3,666) and 1.2% on low (3,004 → 3,039), so the
+      share of frames that select went from 0.300 to 0.301 and from 0.247 to 0.250.
+    - Other triggers decide most selections:
+      - stored bakes;
+      - the camera's turn of more than a pixel, half or more of the selections in the coast and
+        the early arc;
+      - the contacts. While the craft descends (`isDescending`), its ground contact moves every
+        frame, so the pass selects every frame whatever the move: in these windows, the
+        approach's at t 1053–1073 s and the slowdown's.
 - **Coarse patches evicted under load.** In the approach (probe, 2.4 km, both ridge settings),
   patches of levels 2–12 are evicted and re-baked within a second, while the descending contact's
   finest-level region turns over 100–260 bakes a second under an ideal pool. A horizon patch that
@@ -4113,9 +4152,10 @@ medium, sizes, figure)`.
     - a change of viewport, field of view, contacts (compared by value, from a copy) or baked
       ranges (any bake stored);
     - a rotation, roll included, of more than one pixel's angle, 2 acos |q · q′| > fov_x ÷ W;
-    - a move of more than `RESELECT_FRACTION` (0.1) × the nearest selected non-finest patch's
-      sphere distance, floored at one finest patch (spheres of ±24.5 km height ranges contain a
-      low camera).
+    - a move of more than `RESELECT_MOVE_FRACTION` = m ÷ (1 + m), about 0.0909 for m =
+      `RESELECT_FRACTION` (0.1), × d_min: the nearest selected non-finest patch's box distance
+      (T13.c, as built: spheres of ±24.5 km height ranges contained a low camera), floored at one
+      finest patch. It was m × d_min until 2026-10-05 (Risks, "The cadence's 1%").
 
     It selects at τ ÷ 1.1 with `maxPatches` = ⌊slots ÷ 2⌋ (981 high `BakedOffsets`, 1,952
     fallback, 648 low) and the cache as `heightRanges`. The draw set, `retain`, the conditions and
@@ -4157,11 +4197,12 @@ medium, sizes, figure)`.
           morph factor by about (k + start ÷ (end − start)) × Δτ′ ÷ τ′, about 6 × Δτ′ ÷ τ′ for a
           level whose bound halves. Selection re-runs on every stored bake, so while streaming
           under the budget τ′ can change almost every frame.
-        - Where τ′ falls between two selections by more than the margin of 1.1, which a camera
-          move of up to 10% also draws on, a patch the looser budget now splits can start partly
-          morphed. Where τ′ rises as much, a merged patch's children may have been partly morphed.
-          Either is a pop of up to about the larger τ′ in bound terms, as every split under the
-          budget was before F2.
+        - Where τ′ falls between two selections, a patch the looser budget now splits can start
+          partly morphed. Where τ′ rises, a merged patch's children may have been partly morphed.
+          The bands' margin of 1.1 is shared with the camera's move since the last selection: the
+          largest move the cadence allows, m ÷ (1 + m) of d_min, uses all of it, so any change
+          of τ′ after such a move shows (Risks, "The cadence's 1%"). Either is a pop of up to
+          about the larger τ′ in bound terms, as every split under the budget was before F2.
         - F4's record could add the change of τ′ between consecutive selections, which sets those
           steps. The ruling's by-hand look at T17's ridged high run is where any of it would show.
         - The coarse side of an edge is not F2's. Crack-freedom also needs the coarse leaf's shared
@@ -5508,7 +5549,9 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
         max), and on 30% of the approach's, at 0.92 px. τ′ never exceeds τ, so the drawn bound
         stays within 1 px at each selection, but `DETAIL LIMITED` shows there. With τ′ above
         τ_sel, the cadence no longer holds ρ ≤ τ between selections: τ′ ÷ 0.9 is about 1.07 px
-        (decision-r05-record-tau.md).
+        (decision-r05-record-tau.md). Since T11.c's re-selection move of m ÷ (1 + m) of d_min
+        (2026-10-05, Risks, "The cadence's 1%"), the bound between selections is 1.1 τ′, at most
+        about 1.06 px.
       - _Ridges on._ F4's τ′ stands where the budget already bound. High's coast is
         2.07 / 2.11 / 2.11 px and its arc 2.56 / 3.27 / 3.34 px, both identical. The approach's
         p50 fell from 1.94 to 1.62 px, as more of its frames are limited, by less, and its

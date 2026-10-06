@@ -250,6 +250,7 @@ Figures rule. Only what differs is stated here.
   a run under load is marked provisional and repeated (R05's Design note 27, R12's Design note 7). A
   missed budget target is a finding for R12, not a failure.
 - **Results live under `docs/measurements/`.** R05's runs go to `docs/measurements/descent-spike/`,
+  R07's by-hand runs of several views (T20, T21) to `docs/measurements/several-views/`,
   R12's consolidated record and generated budget table to `docs/measurements/rendering/`
   (`runs.v1.jsonl`, `budget.md`); every other plan records its benchmarks in its as-built notes,
   which R12 folds in. The directory is not yet in `.claude/CLAUDE.md`'s documentation layout;

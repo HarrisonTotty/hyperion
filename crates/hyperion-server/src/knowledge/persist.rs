@@ -273,16 +273,15 @@ fn push_line(text: &mut String, line: &impl Serialize) {
     text.push('\n');
 }
 
-/// Makes the entries of `dir` durable.
-#[cfg(unix)]
+/// Makes the entries of `dir` durable on Unix, and does nothing elsewhere.
+///
+/// Other platforms cannot open a directory as a file to sync it.
 fn sync_directory(dir: &Path) -> io::Result<()> {
-    File::open(dir).and_then(|handle| handle.sync_all())
-}
-
-/// Makes the entries of `dir` durable. Other platforms cannot open a directory as a file.
-#[cfg(not(unix))]
-fn sync_directory(_dir: &Path) -> io::Result<()> {
-    Ok(())
+    if cfg!(unix) {
+        File::open(dir).and_then(|handle| handle.sync_all())
+    } else {
+        Ok(())
+    }
 }
 
 /// Reads the store in `dir` (module documentation).

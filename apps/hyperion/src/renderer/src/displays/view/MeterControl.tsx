@@ -4,6 +4,7 @@ import { formatNumber } from "../../lib/format";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import type { ExposureReading } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
+import { readingParts } from "./ViewLabelBlock";
 import { viewDisplayName } from "./viewNames";
 import { exposureReading } from "./viewRun";
 
@@ -103,7 +104,7 @@ export function MeterControl({
       ) : (
         <>
           <p className="view-meter__reading">
-            <output>{exposureReading(reading.control)}</output>
+            <output>{readingParts(exposureReading(reading.control))}</output>
           </p>
           {unfollowedEv100 === null ? null : (
             <p className="field">

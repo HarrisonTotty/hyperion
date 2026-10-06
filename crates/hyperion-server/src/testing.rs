@@ -8,6 +8,7 @@ use std::future::IntoFuture;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -54,22 +55,19 @@ pub(crate) struct Harness {
     server: Server,
     stop_serving: oneshot::Sender<()>,
     serving: JoinHandle<io::Result<()>>,
-    /// The low-water mark of the socket accepted last.
+    /// The low-water mark of the socket accepted last, on Linux and Android, where
+    /// [`tap_socket`](crate::tap_socket) sets it.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     lowat: Arc<AtomicU32>,
     _data_dir: TempDir,
 }
 
-/// A socket's `TCP_NOTSENT_LOWAT`, 0 where the option does not exist.
+/// A socket's `TCP_NOTSENT_LOWAT`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn read_lowat(tcp: &TcpStream) -> u32 {
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    return socket2::SockRef::from(tcp)
+    socket2::SockRef::from(tcp)
         .tcp_notsent_lowat()
-        .expect("the option can be read");
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    {
-        let _ = tcp;
-        0
-    }
+        .expect("the option can be read")
 }
 
 impl Harness {
@@ -123,13 +121,16 @@ impl Harness {
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let lowat = Arc::new(AtomicU32::new(0));
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let tapped = Arc::clone(&lowat);
         let listener = listener.tap_io(move |tcp| {
             match tap {
                 Tap::LowWaterMark => crate::tap_socket(tcp),
                 Tap::Kernel => {}
             }
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             tapped.store(read_lowat(tcp), Ordering::Release);
         });
         let (stop_serving, stopped) = oneshot::channel::<()>();
@@ -152,13 +153,16 @@ impl Harness {
             server,
             stop_serving,
             serving,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             lowat,
             _data_dir: data_dir,
         }
     }
 
-    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any
-    /// or where the option does not exist (rendering plan R03, R03.T10.a).
+    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any.
+    ///
+    /// Linux and Android only, where socket2 exposes the option (rendering plan R03, R03.T10.a).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub(crate) fn accepted_lowat(&self) -> u32 {
         self.lowat.load(Ordering::Acquire)
     }
