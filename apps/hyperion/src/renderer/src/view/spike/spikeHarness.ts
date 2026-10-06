@@ -32,6 +32,7 @@ import {
   SpikeMetrics,
   type SpikeMetricsReport,
 } from "./metrics";
+import { PassReads, trackPassReads } from "./passReads";
 import { PipelineTally, shimPipelines, wrapGpu } from "./pipelineShim";
 
 /** The warm-up the criterion leaves out, s (Design note 21), and the pipeline tally's too. */
@@ -116,19 +117,20 @@ export class ResolveCounter {
 }
 
 /**
- * The spike's measured GPU: its engine source, the pipeline tally its devices feed, and the
- * resolve numbering its engine feeds.
+ * The spike's measured GPU: its engine source, the pipeline tally its devices feed, the resolve
+ * numbering its engine feeds, and the pass-time reads its devices' timer makes.
  */
 export interface SpikeGpu {
   readonly source: ViewEngineSource;
   readonly tally: PipelineTally;
   readonly resolves: ResolveCounter;
+  readonly reads: PassReads;
 }
 
 /**
  * The spike's engine source over `gpu` (the browser's `navigator.gpu`): every device it gives is
- * shimmed for the pipeline tally, then wrapped for the capture where one is given, and told to the
- * resolve numbering, which follows the engine it loads.
+ * shimmed for the pipeline tally and the pass-time reads, then wrapped for the capture where one
+ * is given, and told to the resolve numbering, which follows the engine it loads.
  *
  * @param scriptTimeS - The descent's script time now, s, which each pipeline creation is stamped
  *   with.
@@ -140,17 +142,19 @@ export function spikeGpu(
 ): SpikeGpu {
   const tally = new PipelineTally(scriptTimeS);
   const resolves = new ResolveCounter();
+  const reads = new PassReads(() => resolves.value);
   const wrapped =
     gpu === undefined
       ? undefined
       : wrapGpu(gpu, (device) => {
           resolves.deviceMade();
-          const shimmed = shimPipelines(device, tally);
+          const shimmed = trackPassReads(shimPipelines(device, tally), reads);
           return capture === null ? shimmed : capture.wrapDevice(shimmed);
         });
   return {
     tally,
     resolves,
+    reads,
     source: {
       requestAdapter: () => requestAdapterOutcome(wrapped),
       load: async (outcome, status) => {
@@ -165,6 +169,9 @@ export function spikeGpu(
     },
   };
 }
+
+/** What the recorder needs of the pass-time reads (`PassReads`). */
+export type SpikeReads = Pick<PassReads, "ended" | "inFlight" | "settled">;
 
 /** What the recorder needs of the measured descent (T13.b's `PreparedDescent`). */
 export interface RecordedDescent {
@@ -210,7 +217,12 @@ export class SpikeRecorder {
   readonly #metrics: SpikeMetrics;
   readonly #calibrated: PlanetGeometry;
   readonly #resolves: Pick<ResolveCounter, "value" | "runFrame">;
+  readonly #reads: SpikeReads;
   readonly #tally: PipelineTally;
+  /** The engine's last timing frame number before the run's first frame. */
+  readonly #firstEngineFrame: number;
+  /** The engine's last timing frame number by the end of the last frame recorded. */
+  #lastEngineFrame: number;
   #lastScriptS = 0;
   #patchesCalibrated = 0;
   #liveBytes = 0;
@@ -224,13 +236,17 @@ export class SpikeRecorder {
     setting: QualitySetting,
     gpu: {
       readonly resolves: Pick<ResolveCounter, "value" | "runFrame">;
+      readonly reads: SpikeReads;
       readonly tally: PipelineTally;
     },
   ) {
     const { planet, profile, omittedSigmaM } = descent;
     this.#calibrated = boundedPlanet(planet, "calibrated", omittedSigmaM);
     this.#resolves = gpu.resolves;
+    this.#reads = gpu.reads;
     this.#tally = gpu.tally;
+    this.#firstEngineFrame = gpu.resolves.value;
+    this.#lastEngineFrame = this.#firstEngineFrame;
     const settingView = SETTING_VIEWS.find((v) => v.setting === setting)?.view;
     if (settingView === undefined) {
       throw new Error(`no view for the ${setting} setting`);
@@ -256,7 +272,7 @@ export class SpikeRecorder {
       })),
       rowOf,
       predicted: (segment) => predicted.get(segment) ?? { hardPerS: 0, calibratedPerS: 0 },
-      firstEngineFrame: gpu.resolves.value,
+      firstEngineFrame: this.#firstEngineFrame,
     });
   }
 
@@ -267,9 +283,10 @@ export class SpikeRecorder {
       this.#warmupEnded = true;
       this.#tally.endWarmup();
     }
+    this.#lastEngineFrame = this.#resolves.value;
     this.#metrics.frame({
       ...sample,
-      engineFrame: this.#resolves.value,
+      engineFrame: this.#lastEngineFrame,
       patchesCalibrated: this.#patchesCalibrated,
     });
   }
@@ -287,9 +304,21 @@ export class SpikeRecorder {
     this.#metrics.patches(event, 1, this.#lastScriptS);
   }
 
-  /** The engine's pass times (`RenderEngine.onPassTimes`). */
+  /** The engine's pass times (`RenderEngine.onPassTimes`), which end their read. */
   passTimes(times: PassTimes): void {
-    this.#metrics.passTimes({ ...times, frame: this.#resolves.runFrame(times.frame) });
+    const frame = this.#resolves.runFrame(times.frame);
+    this.#reads.ended(frame);
+    this.#metrics.passTimes({ ...times, frame });
+  }
+
+  /**
+   * Waits for the reads of the recorded frames' pass times still in flight, at most `timeoutMs`
+   * (R05.T14.k): the run's control does so after the trace's last stop, before the report.
+   *
+   * @returns Whether every one ended in time.
+   */
+  readsSettled(timeoutMs: number): Promise<boolean> {
+    return this.#reads.settled(this.#firstEngineFrame, this.#lastEngineFrame, timeoutMs);
   }
 
   /** The engine's allocations (`RenderEngine.onAllocation`): uploads, and the live peak. */
@@ -311,6 +340,11 @@ export class SpikeRecorder {
       async: creation.async,
       scriptTimeS: creation.scriptTimeS,
     }));
-    return this.#metrics.report({ latePipelines, adapterPeakBytes: this.#peakBytes, canvas });
+    return this.#metrics.report({
+      inFlightResolves: this.#reads.inFlight(),
+      latePipelines,
+      adapterPeakBytes: this.#peakBytes,
+      canvas,
+    });
   }
 }

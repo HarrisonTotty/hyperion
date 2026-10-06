@@ -28,6 +28,7 @@ const OPTIONS: SpikeMetricsOptions = {
 };
 
 const EXTRA = {
+  inFlightResolves: [],
   latePipelines: [],
   adapterPeakBytes: 1024,
   canvas: { widthPx: 1280, heightPx: 720 },
@@ -133,6 +134,20 @@ describe("the spike's metrics", () => {
     // The second frame lost one of its five (partial), the third all five (dropped).
     expect(frames.missingResolves).toEqual([0, 1, 5]);
     expect(frames.passes).toEqual([{ label: "terrain", row: "terrain", gpuMs: [5, 4, null] }]);
+  });
+
+  it("counts each frame's missing resolves still being read at the report", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    metrics.frame(sample(5, 0));
+    metrics.frame(sample(10, 0.5));
+    metrics.frame(sample(15, 1));
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 9, 10]) {
+      metrics.passTimes(times(n, [["terrain", 1_000_000]]));
+    }
+    // 8 and 13 to 15 are still being read; 9 is listed but reported, and 16 follows every frame.
+    const { frames } = metrics.report({ ...EXTRA, inFlightResolves: [8, 9, 13, 14, 15, 16] });
+    expect(frames.missingResolves).toEqual([0, 1, 5]);
+    expect(frames.inFlightResolves).toEqual([0, 1, 3]);
   });
 
   it("counts no missing resolve for a frame that numbered none", () => {

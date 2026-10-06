@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DescentSpikeReport, SpikeApi, SpikeEnd, SpikeLaunch } from "../../../../preload/api";
 import { TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
@@ -8,9 +8,11 @@ import { planetGeometry } from "../terrain/planet";
 import { RECORD_SEED, recordProfile } from "./demandRecord";
 import { DESCENT_SEGMENTS, DescentProfile, landingSiteOf } from "./descentProfile";
 import { GpuCapture } from "./capture";
+import { PassReads } from "./passReads";
 import { PipelineTally } from "./pipelineShim";
 import {
   CAPTURE_FRAMES,
+  PASS_READS_WAIT_MS,
   SMOKE_S,
   SMOKE_TRACE_BOUNDARIES_S,
   type SpanCapture,
@@ -129,21 +131,24 @@ function controllerOf(
 ): ReturnType<typeof fakeSpike> & {
   readonly controller: SpikeController;
   readonly resolves: { value: number; runFrame: (n: number) => number };
+  /** The pass-time reads, numbered by `resolves`. */
+  readonly reads: PassReads;
   /** The controller's `performance.now()`, ms, which a test moves. */
   readonly clock: { ms: number };
 } {
   const fake = fakeSpike(launch);
   const resolves = { value: 0, runFrame: (n: number) => n };
+  const reads = new PassReads(() => resolves.value);
   const clock = { ms: 0 };
   const controller = new SpikeController({
     spike: fake.spike,
-    gpu: { resolves, tally: new PipelineTally(() => 0) },
+    gpu: { resolves, reads, tally: new PipelineTally(() => 0) },
     capture,
     canvas: () => ({ widthPx: 1280, heightPx: 720 }),
     nowMs: () => clock.ms,
     log: () => undefined,
   });
-  return { ...fake, controller, resolves, clock };
+  return { ...fake, controller, resolves, reads, clock };
 }
 
 /** A frame at a script time, its script starting at `scriptStartMs`. */
@@ -200,7 +205,84 @@ async function flyBoundaries(
   await settle();
 }
 
+/**
+ * A prepared run on fake timers whose two frames number two resolves each, every one read: the
+ * first frame at 0 s, the second at the script's end, which finishes the run. Each listener the
+ * engine's times reach is returned, with a report of a resolve's times.
+ */
+async function readRun(): Promise<
+  ReturnType<typeof controllerOf> & { readonly report: (frame: number) => void }
+> {
+  const run = controllerOf(LAUNCH);
+  const listeners: Array<(times: PassTimes) => void> = [];
+  run.controller.engine({
+    onPassTimes: (listener) => {
+      listeners.push(listener);
+      return () => undefined;
+    },
+    onAllocation: () => () => undefined,
+  });
+  run.controller.prepared(DESCENT);
+  await vi.advanceTimersByTimeAsync(0);
+  for (const [t, last] of [
+    [0, 2],
+    [DESCENT.profile.durationS, 4],
+  ] as const) {
+    for (let n = last - 1; n <= last; n += 1) {
+      run.resolves.value = n;
+      run.reads.began();
+    }
+    run.controller.frame(frame(t));
+  }
+  const report = (n: number): void => {
+    for (const listener of listeners) {
+      listener({
+        frame: n,
+        timer: "full",
+        passes: [{ label: "terrain", ns: 2e6, bracketed: false }],
+      });
+    }
+  };
+  return { ...run, report };
+}
+
 describe("the spike's run control", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("waits after the trace's last stop for the pass-time reads in flight, then reports", async () => {
+    vi.useFakeTimers();
+    const run = await readRun();
+    for (const n of [1, 2]) {
+      run.report(n);
+    }
+    // The trace's stop has resolved; the last frame's two reads are still in flight.
+    await vi.advanceTimersByTimeAsync(400);
+    expect(run.calls).toContain("stopTrace");
+    expect(run.calls).not.toContain("writeResults");
+    run.report(3);
+    run.report(4);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.calls.at(-2)).toBe("writeResults");
+    expect(run.reports[0]?.frames.missingResolves).toEqual([0, 0]);
+    expect(run.reports[0]?.frames.inFlightResolves).toEqual([0, 0]);
+  });
+
+  it("counts a read still in flight after the wait as missing, in flight at the report", async () => {
+    vi.useFakeTimers();
+    const run = await readRun();
+    for (const n of [1, 2, 3]) {
+      run.report(n);
+    }
+    await vi.advanceTimersByTimeAsync(PASS_READS_WAIT_MS - 1);
+    expect(run.calls).not.toContain("writeResults");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.reports[0]?.frames.missingResolves).toEqual([0, 1]);
+    expect(run.reports[0]?.frames.inFlightResolves).toEqual([0, 1]);
+    expect(run.ends).toEqual([{ status: "pass" }]);
+  });
+
   it("measures the whole descent, then writes its results and ends with a pass", async () => {
     const { controller, calls, ends, reports, resolves } = controllerOf(LAUNCH);
     const listeners: Array<(times: PassTimes) => void> = [];

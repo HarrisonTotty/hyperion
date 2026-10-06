@@ -13,18 +13,21 @@ import {
   windowFile,
   windowTrace,
 } from "./fixtures/traces";
+import type { GpuClockSample } from "./gpuClocks";
 import type { Measured } from "./measured";
 import { type TraceFigures, TraceReducer } from "./reduceTrace";
 import {
   ADDED_FILE_LIMIT_BYTES,
   boundedGpuRow,
   buildResults,
+  clockNote,
   type DescentResults,
+  describeClockSamples,
   describeMachine,
   formatAsPrettier,
   frameStats,
-  GPU_CLOCKS_NOT_READ,
   type GpuClocks,
+  gpuClocksOf,
   incompleteFramesReason,
   type MachineDescription,
   measured,
@@ -34,6 +37,7 @@ import {
   type MemorySources,
   missing,
   nearestRank,
+  READ_IN_FLIGHT_REASON,
   RESULTS_SCHEMA,
   RESULTS_VERSION,
   row,
@@ -124,6 +128,7 @@ function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeRepo
       ourCodeMs: scriptTimesS.map(() => 4),
       callbackStartsMs: callbackStartsOf(1000, scriptTimesS),
       missingResolves: scriptTimesS.map(() => 0),
+      inFlightResolves: scriptTimesS.map(() => 0),
       passes: [
         { label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 6) },
         { label: "atmosphere.sky", row: "atmosphere", gpuMs: scriptTimesS.map(() => 1.5) },
@@ -238,6 +243,24 @@ function twoWindowReport(): DescentSpikeReport {
   };
 }
 
+/**
+ * A sample's clocks as `nvidia-smi` gives them on the RTX 3080 (its maximum 2,115 MHz, the memory
+ * at 9,501 MHz in P0), or at the maximum `maxMHz` given.
+ */
+function nvidiaClocksAt(
+  graphicsMHz: number,
+  { memoryMHz = 9501, state = 0, maxMHz = 2115 } = {},
+): GpuClockSample {
+  return {
+    kind: "clocks",
+    source: "nvidia-smi",
+    maxGraphicsMHz: measured(maxMHz),
+    graphicsMHz: measured(graphicsMHz),
+    memoryMHz: measured(memoryMHz),
+    performanceState: measured(state),
+  };
+}
+
 function sample(tS: number, nvidiaDeviceBytes: number | null): MemorySample {
   return {
     tS,
@@ -250,6 +273,7 @@ function sample(tS: number, nvidiaDeviceBytes: number | null): MemorySample {
     drmTotalBytes: null,
     nvidiaDeviceBytes,
     nvidiaGpuProcessBytes: null,
+    clocks: nvidiaClocksAt(1980),
   };
 }
 
@@ -300,6 +324,11 @@ function longRun(count: number): MemorySample[] {
     drmTotalBytes: null,
     nvidiaDeviceBytes: (404 + Math.round(4 * next())) * MIB,
     nvidiaGpuProcessBytes: (186 + Math.round(6 * next())) * MIB,
+    // The driver's clocks wander between P5 and P0 as T14's diagnosis saw them.
+    clocks: nvidiaClocksAt(15 * Math.round(60 + 72 * next()), {
+      memoryMHz: next() < 0.2 ? 810 : 9501,
+      state: Math.round(5 * next()),
+    }),
   }));
 }
 
@@ -1159,7 +1188,7 @@ describe("a results file's incomplete pass times", () => {
 
   it("does not measure a row that its incomplete frames could carry over its limit", () => {
     const results = incompleteResults(TWENTY_NINE, [400]);
-    const reason = incompleteFramesReason(30);
+    const reason = incompleteFramesReason({ frames: 30, inFlight: 0 });
     expect(reason).toBe(
       "30 frames' pass times were incomplete (the GPU was more than 27 frames behind)",
     );
@@ -1205,7 +1234,7 @@ describe("a results file's incomplete pass times", () => {
         "terrain",
         measured(limitMs),
         values,
-        0,
+        { frames: 0, inFlight: 0 },
         tolerance,
         "none",
       );
@@ -1219,17 +1248,26 @@ describe("a results file's incomplete pass times", () => {
   it("leaves a row marginal when both placements are marginal", () => {
     const values = Array.from({ length: 100 }, () => 14.03);
     expect(
-      boundedGpuRow("terrain", "terrain", measured(14), values, 1, TIMESTAMP_QUANTUM_MS, "none"),
+      boundedGpuRow(
+        "terrain",
+        "terrain",
+        measured(14),
+        values,
+        { frames: 1, inFlight: 0 },
+        TIMESTAMP_QUANTUM_MS,
+        "none",
+      ),
     ).toMatchObject({ value: 14.03, verdict: "marginal" });
   });
 
   it("states the count as the reason for a row with no complete frame", () => {
-    expect(boundedGpuRow("terrain", "terrain", measured(5), [], 3, 0, "none")).toMatchObject({
+    const three = { frames: 3, inFlight: 0 };
+    expect(boundedGpuRow("terrain", "terrain", measured(5), [], three, 0, "none")).toMatchObject({
       value: null,
       verdict: "not-measured",
-      note: incompleteFramesReason(3),
+      note: incompleteFramesReason(three),
     });
-    expect(incompleteFramesReason(1)).toBe(
+    expect(incompleteFramesReason({ frames: 1, inFlight: 0 })).toBe(
       "1 frame's pass times were incomplete (the GPU was more than 27 frames behind)",
     );
   });
@@ -1246,10 +1284,67 @@ describe("a results file's incomplete pass times", () => {
     );
   });
 
-  it("writes the GPU's clocks null until they are read", () => {
+  it("counts no frame incomplete with no resolve missing", () => {
     const results = incompleteResults([], []);
-    expect(results.gpu.clocks).toEqual(missing(GPU_CLOCKS_NOT_READ));
     expect(results.gpu.incompleteFrames).toEqual(measured({ dropped: 0, partial: 0, frames: 400 }));
+  });
+
+  it("gives frames whose missing reads were in flight at the report that reason, not the backlog's", () => {
+    // Of the 30 incomplete frames, the last 29 partial ones' single missing resolve was still in
+    // flight; the dropped frame 400's five were not, so it is the backlog's.
+    const base = incompleteReport(TWENTY_NINE, [400]);
+    const report: DescentSpikeReport = {
+      ...base,
+      frames: {
+        ...base.frames,
+        inFlightResolves: base.frames.missingResolves.map((count, i) =>
+          i >= 300 && i < 329 ? count : 0,
+        ),
+      },
+    };
+    const results = buildResults({ run: runOf(), report, trace: traceOf(), memory: MEMORY });
+    const reason = incompleteFramesReason({ frames: 30, inFlight: 29 });
+    expect(reason).toBe(
+      "30 frames' pass times were incomplete (1 as the GPU was more than 27 frames behind, 29 read in flight at the report)",
+    );
+    expect(rowOf(results, "terrain")).toMatchObject({ verdict: "not-measured", note: reason });
+    expect(results.gpu.incompleteFrames).toEqual(
+      measured({ dropped: 1, partial: 29, frames: 400 }),
+    );
+  });
+
+  it("names only the reads in flight when every incomplete frame's were", () => {
+    expect(incompleteFramesReason({ frames: 2, inFlight: 2 })).toBe(
+      `2 frames' pass times were incomplete (${READ_IN_FLIGHT_REASON})`,
+    );
+  });
+
+  it("counts a frame with a resolve in flight and another dropped as the backlog's", () => {
+    const base = incompleteReport([], [400]);
+    const report: DescentSpikeReport = {
+      ...base,
+      frames: {
+        ...base.frames,
+        inFlightResolves: base.frames.missingResolves.map((_, i) => (i === 400 ? 4 : 0)),
+      },
+    };
+    const results = buildResults({ run: runOf(), report, trace: traceOf(), memory: MEMORY });
+    expect(rowOf(results, "terrain")).toMatchObject({
+      verdict: "pass",
+      note: "1 frame with incomplete pass times left out; the verdict holds whatever their times",
+    });
+  });
+
+  it("names the frames in flight at the report in a verdict that holds", () => {
+    const base = incompleteReport([300], []);
+    const report: DescentSpikeReport = {
+      ...base,
+      frames: { ...base.frames, inFlightResolves: base.frames.missingResolves },
+    };
+    const results = buildResults({ run: runOf(), report, trace: traceOf(), memory: MEMORY });
+    expect(rowOf(results, "terrain").note).toBe(
+      "1 frame with incomplete pass times left out (1 read in flight at the report); the verdict holds whatever their times",
+    );
   });
 
   it("states the incomplete frames in the summary", () => {
@@ -1259,6 +1354,201 @@ describe("a results file's incomplete pass times", () => {
     expect(summaryMarkdown(incompleteResults([], []))).toContain(
       "- **Incomplete pass times:** none of 400 frames after the warm-up",
     );
+  });
+});
+
+/**
+ * `count` samples at 1 Hz from 0.2 s in P2, the graphics clock at `beforeMHz` in the 10 s warm-up
+ * and `afterMHz` after it, of a maximum of 1,980 MHz.
+ */
+function clockedMemory(count: number, beforeMHz: number, afterMHz: number): MemorySample[] {
+  return Array.from({ length: count }, (_, i) => ({
+    ...sample(i + 0.2, 400 * MIB),
+    clocks: nvidiaClocksAt(i + 0.2 < 10 ? beforeMHz : afterMHz, { maxMHz: 1980, state: 2 }),
+  }));
+}
+
+/** {@link reportOf}'s results over `memory`, its window shown at 60 Hz on the low setting. */
+function clockedResults(
+  memory: ReadonlyArray<MemorySample>,
+  report: DescentSpikeReport = reportOf(),
+): DescentResults {
+  return buildResults({ run: runOf(), report, trace: traceOf(), memory });
+}
+
+/** `memory` with each sample's clocks those `clocksAt` gives, the others' kept. */
+function reclocked(
+  memory: ReadonlyArray<MemorySample>,
+  clocksAt: (i: number) => GpuClockSample | null,
+): MemorySample[] {
+  return memory.map((entry, i) =>
+    Object.assign({}, entry, { clocks: clocksAt(i) ?? entry.clocks }),
+  );
+}
+
+/** `count` copies of `value`. */
+function repeated(value: number, count: number): number[] {
+  return Array.from({ length: count }, () => value);
+}
+
+/** The rows a GPU clock note may sit on. */
+const GPU_ROWS = ["headroom-gpu", "terrain", "atmosphere"] as const;
+
+/** The note of a run at a median 1,100 of 1,980 MHz. */
+const NOTE_1100 = "measured at a median 1100 of 1980 MHz (the driver's choice at this load)";
+
+describe("a results file's GPU clocks", () => {
+  it("records every sample's clocks on the memory series' times", () => {
+    const results = clockedResults(clockedMemory(30, 1980, 1100));
+    expect(results.gpu.clocks).toEqual(
+      measured({
+        source: "nvidia-smi",
+        maxGraphicsMHz: measured(1980),
+        graphicsMHz: measured({
+          samples: [...repeated(1980, 10), ...repeated(1100, 20)],
+          gaps: [],
+        }),
+        memoryMHz: measured({ samples: repeated(9501, 30), gaps: [] }),
+        performanceState: measured({ samples: repeated(2, 30), gaps: [] }),
+      }),
+    );
+    expect(results.memory.series.tMs).toHaveLength(30);
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("notes a median of 1,100 of 1,980 MHz after the warm-up on the three GPU rows", () => {
+    // The warm-up's ten samples at the maximum count for nothing.
+    const results = clockedResults(clockedMemory(30, 1980, 1100));
+    for (const id of GPU_ROWS) {
+      expect(rowOf(results, id)).toMatchObject({ verdict: "pass", note: NOTE_1100 });
+    }
+    for (const id of ["p50", "headroom-main", "memory"]) {
+      expect(rowOf(results, id).note ?? "").not.toContain("median");
+    }
+  });
+
+  it("notes nothing at a median of 1,950 of 1,980 MHz", () => {
+    const results = clockedResults(clockedMemory(30, 1100, 1950));
+    for (const id of GPU_ROWS) {
+      expect(rowOf(results, id).note).toBeNull();
+    }
+    expect(
+      clockNote(results.gpu.clocks, results.memory.series.tMs, results.run.warmupS),
+    ).toBeNull();
+  });
+
+  it("adds the note after a row's own", () => {
+    const results = clockedResults(clockedMemory(30, 1980, 1100), incompleteReport([300], [400]));
+    expect(rowOf(results, "terrain").note).toBe(
+      `2 frames with incomplete pass times left out; the verdict holds whatever their times; ${NOTE_1100}`,
+    );
+  });
+
+  it("puts no note on a row with no value", () => {
+    const results = clockedResults(clockedMemory(30, 1980, 1100), reportOf({ timer: "absent" }));
+    expect(rowOf(results, "terrain")).toMatchObject({
+      value: null,
+      note: "the pass timer is absent (no timestamp-query)",
+    });
+  });
+
+  it("notes nothing without a maximum or a sample after the warm-up", () => {
+    const clocks = gpuClocksOf(clockedMemory(30, 1100, 1100));
+    const tMs = memorySeries(clockedMemory(30, 1100, 1100)).tMs;
+    expect(clockNote(clocks, tMs, 10)).toBe(NOTE_1100);
+    expect(clockNote(clocks, tMs, 60)).toBeNull();
+    const noMaximum =
+      clocks.value === null
+        ? clocks
+        : measured({ ...clocks.value, maxGraphicsMHz: missing("N/A") });
+    expect(clockNote(noMaximum, tMs, 10)).toBeNull();
+  });
+
+  it("writes -1 for a sample whose clock is missing, with its gap", () => {
+    const unavailable = reclocked(clockedMemory(5, 1100, 1100), (i) =>
+      i === 1
+        ? {
+            ...nvidiaClocksAt(1100, { maxMHz: 1980 }),
+            graphicsMHz: missing("nvidia-smi gives no clocks/graphics_clock (N/A)"),
+          }
+        : i === 3
+          ? { kind: "unavailable", reason: "nvidia-smi failed: timed out" }
+          : null,
+    );
+    expect(gpuClocksOf(unavailable).value?.graphicsMHz).toEqual(
+      measured({
+        samples: [1100, -1, 1100, -1, 1100],
+        gaps: [
+          { from: 1, to: 1, reason: "nvidia-smi gives no clocks/graphics_clock (N/A)" },
+          { from: 3, to: 3, reason: "nvidia-smi failed: timed out" },
+        ],
+      }),
+    );
+    expect(gpuClocksOf(unavailable).value?.memoryMHz).toEqual(
+      measured({
+        samples: [9501, 9501, 9501, -1, 9501],
+        gaps: [{ from: 3, to: 3, reason: "nvidia-smi failed: timed out" }],
+      }),
+    );
+  });
+
+  it.each<readonly [string, () => MemorySample[], string]>([
+    [
+      "no source for the run's GPU",
+      () =>
+        reclocked(clockedMemory(3, 1100, 1100), () => ({
+          kind: "unavailable",
+          reason: "no unprivileged GPU clock reading on darwin; powermetrics needs root",
+        })),
+      "no unprivileged GPU clock reading on darwin; powermetrics needs root",
+    ],
+    ["no sample", () => [], "no memory sample"],
+    [
+      "no graphics clock at any sample",
+      () =>
+        reclocked(clockedMemory(3, 1100, 1100), () => ({
+          ...nvidiaClocksAt(1100),
+          graphicsMHz: missing("no nvidia-smi on this machine"),
+        })),
+      "no nvidia-smi on this machine",
+    ],
+  ])("are null with the reason for %s", (_case, memory, reason) => {
+    expect(gpuClocksOf(memory())).toEqual(missing(reason));
+  });
+
+  it("keeps a reading its source does not give null with the reason", () => {
+    const memory = reclocked(clockedMemory(30, 600, 600), () => ({
+      kind: "clocks",
+      source: "i915-sysfs",
+      maxGraphicsMHz: measured(1150),
+      graphicsMHz: measured(600),
+      memoryMHz: missing("i915 gives no memory clock: the GPU shares the system's memory"),
+      performanceState: missing("i915 has no performance states"),
+    }));
+    const results = clockedResults(memory);
+    expect(results.gpu.clocks.value).toMatchObject({
+      source: "i915-sysfs",
+      memoryMHz: missing("i915 gives no memory clock: the GPU shares the system's memory"),
+      performanceState: missing("i915 has no performance states"),
+    });
+    expect(rowOf(results, "terrain").note).toBe(
+      "measured at a median 600 of 1150 MHz (the driver's choice at this load)",
+    );
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("states the clocks after the warm-up in the summary", () => {
+    expect(summaryMarkdown(clockedResults(clockedMemory(30, 1980, 1100)))).toContain(
+      "- **GPU clocks:** from nvidia-smi; graphics median 1100 MHz (56 %), p5 1100, p95 1100, after the warm-up, of 1980 MHz; memory median 9501 MHz; performance state P2",
+    );
+    expect(summaryMarkdown(clockedResults([]))).toContain("- **GPU clocks:** — (no memory sample)");
+  });
+
+  it("lists every sample for a smoke's log", () => {
+    expect(describeClockSamples(gpuClocksOf(clockedMemory(3, 1980, 1100)))).toBe(
+      "from nvidia-smi, maximum 1980 MHz; graphics MHz 1980 1980 1980; memory MHz 9501 9501 9501; performance states 2 2 2",
+    );
+    expect(describeClockSamples(missing("no memory sample"))).toBe("— (no memory sample)");
   });
 });
 
@@ -1342,6 +1632,12 @@ describe("the schema check", () => {
     expect(validateResults({ schema: "x", version: 1 })).toContain(
       "schema is not hyperion.descent-spike.results",
     );
+  });
+
+  it("holds no clock column to a memory series without times, whose own problem it names", () => {
+    const file: unknown = JSON.parse(JSON.stringify(clockedResults(clockedMemory(3, 1980, 1100))));
+    editAt(file, ["memory", "series", "tMs"], DELETE);
+    expect(validateResults(file)).toEqual(["memory.series.tMs is not a list of whole ms"]);
   });
 
   it("refuses version 1's memory samples", () => {
@@ -1902,6 +2198,15 @@ function sources(overrides: Partial<MemorySources> = {}): MemorySources {
           : { kind: "unavailable", reason: "wrong process" },
       ),
     nvidia: () => Promise.resolve({ kind: "unavailable", reason: "no nvidia-smi on this machine" }),
+    clocks: () =>
+      Promise.resolve({
+        kind: "clocks",
+        source: "i915-sysfs",
+        maxGraphicsMHz: measured(1150),
+        graphicsMHz: measured(600),
+        memoryMHz: missing("i915 gives no memory clock: the GPU shares the system's memory"),
+        performanceState: missing("i915 has no performance states"),
+      }),
     nowMs: () => 5000,
     ...overrides,
   };
@@ -1965,6 +2270,41 @@ describe("a memory sample", () => {
       drmTotalBytes: 9,
       nvidiaDeviceBytes: null,
       nvidiaGpuProcessBytes: null,
+      clocks: {
+        kind: "clocks",
+        source: "i915-sysfs",
+        maxGraphicsMHz: measured(1150),
+        graphicsMHz: measured(600),
+        memoryMHz: missing("i915 gives no memory clock: the GPU shares the system's memory"),
+        performanceState: missing("i915 has no performance states"),
+      },
+    });
+  });
+
+  it("reads the clocks from the sample's own nvidia-smi reading", async () => {
+    const readings: unknown[] = [];
+    const unavailable = { kind: "unavailable", reason: "no nvidia-smi on this machine" } as const;
+    await sampleMemory(
+      sources({
+        nvidia: () => Promise.resolve(unavailable),
+        clocks: (nvidia) => {
+          readings.push(nvidia);
+          return Promise.resolve({ kind: "unavailable", reason: "none" });
+        },
+      }),
+      0,
+    );
+    expect(readings).toEqual([unavailable]);
+  });
+
+  it("gives a sample whose clock reader rejects no clocks, with the reason", async () => {
+    const reading = await sampleMemory(
+      sources({ clocks: () => Promise.reject(new Error("sysfs gone")) }),
+      0,
+    );
+    expect(reading.clocks).toEqual({
+      kind: "unavailable",
+      reason: "the GPU's clocks could not be read: sysfs gone",
     });
   });
 
@@ -1983,6 +2323,12 @@ describe("a memory sample", () => {
                 reservedBytes: 320 * MIB,
                 usedBytes: 900 * MIB,
                 processes: [{ pid: 11, type: "G", name: "electron", usedBytes: 600 * MIB }],
+                clocks: {
+                  graphicsMHz: 1980,
+                  memoryMHz: 9501,
+                  maxGraphicsMHz: 2115,
+                  performanceState: 0,
+                },
               },
             ],
           }),

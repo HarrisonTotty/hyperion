@@ -29,6 +29,15 @@ describe("the spike report's check", () => {
     expect(readDescentSpikeReport(incomplete)?.frames.missingResolves).toEqual([0, 5, 1]);
   });
 
+  it("passes each frame's count of resolves still being read through", () => {
+    const report = smallReport();
+    const inFlight: DescentSpikeReport = {
+      ...report,
+      frames: { ...report.frames, missingResolves: [0, 5, 1], inFlightResolves: [0, 2, 1] },
+    };
+    expect(readDescentSpikeReport(inFlight)?.frames.inFlightResolves).toEqual([0, 2, 1]);
+  });
+
   it.each<[string, (r: DescentSpikeReport) => unknown]>([
     ["a non-object", () => "report"],
     ["a series of another length", (r) => ({ ...r, frames: { ...r.frames, ourCodeMs: [4] } })],
@@ -49,6 +58,25 @@ describe("the spike report's check", () => {
     [
       "a negative missing-resolve count",
       (r) => ({ ...r, frames: { ...r.frames, missingResolves: [0, -1, 0] } }),
+    ],
+    [
+      "no resolves in flight",
+      (r) => ({ ...r, frames: { ...r.frames, inFlightResolves: undefined } }),
+    ],
+    [
+      "resolves in flight of another length",
+      (r) => ({ ...r, frames: { ...r.frames, inFlightResolves: [0, 0] } }),
+    ],
+    [
+      "a count in flight that is not whole",
+      (r) => ({ ...r, frames: { ...r.frames, inFlightResolves: [0, 0.5, 0] } }),
+    ],
+    [
+      "more resolves in flight than missing",
+      (r) => ({
+        ...r,
+        frames: { ...r.frames, missingResolves: [0, 1, 0], inFlightResolves: [0, 2, 0] },
+      }),
     ],
     ["a non-finite figure", (r) => ({ ...r, uploadBytes: Number.NaN })],
     ["an unknown timer", (r) => ({ ...r, timer: "fast" })],

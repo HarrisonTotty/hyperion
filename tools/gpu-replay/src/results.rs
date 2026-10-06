@@ -3,7 +3,11 @@
 //! same way (R05 Design notes 18, 21 and 22).
 //!
 //! A native replay has no trace, no `requestAnimationFrame`, no GPU process and no memory
-//! readings: those figures are null with the reason. With no trace there are no trace windows, so
+//! readings: those figures are null with the reason. The GPU's clocks are read before the first
+//! frame, once a second and after the last (`clocks.rs`), on the memory series' times, whose
+//! memory readings are all null; a GPU row measured at a median clock below 90% of the maximum
+//! says so, as the client's do (decision-r05-trace-windows-2.md, addendum B). With no trace there
+//! are no trace windows, so
 //! no frame is left out at their boundaries (`frames.excludedFrames` is 0) and the engine's
 //! sampled time (`mainThread.engine`) is null (decision-r05-trace-windows.md). A replay's frame
 //! intervals are the presentation intervals of a presented replay, or, offscreen, the intervals
@@ -21,6 +25,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::clocks::{ClockReadings, ClockSample, Reading};
+
 /// The schema name the client's results files carry.
 pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
 
@@ -34,12 +40,18 @@ pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
 /// has no trace, so it writes `run.trace`, `mainThread.split` and `gpu.gpuProcess` as null and
 /// meets none of those checks. Version 5 (the same decision's addendum B) counts the frames whose
 /// pass times are incomplete (`gpu.incompleteFrames`), bounds the GPU rows' verdicts by them, and
-/// adds `gpu.clocks`, null until R05.T14.k reads them.
+/// adds `gpu.clocks`, the GPU's clocks on the memory series' times (R05.T14.k).
 pub const RESULTS_VERSION: u64 = 5;
 
-/// Why a results file has no GPU clocks until R05.T14.k reads them, the client's
-/// `GPU_CLOCKS_NOT_READ`.
-const GPU_CLOCKS_NOT_READ: &str = "the GPU's clocks are not yet read (R05.T14.k)";
+/// Why a replay with no clock sample has no clocks.
+const NO_CLOCK_SAMPLE: &str = "no clock sample";
+
+/// The fraction of the maximum graphics clock below which a GPU row says what it was measured at,
+/// the client's `CLOCK_NOTE_FRACTION`.
+const CLOCK_NOTE_FRACTION: f64 = 0.9;
+
+/// The rows read from per-frame GPU times, which a clock note may sit on.
+const GPU_ROW_IDS: [&str; 3] = ["headroom-gpu", "terrain", "atmosphere"];
 
 /// The percentile every GPU row reads (Design note 21).
 const GPU_ROW_PERCENTILE: f64 = 0.95;
@@ -65,15 +77,144 @@ const MEMORY_COLUMNS: [&str; 8] = [
     "nvidiaGpuProcessKiB",
 ];
 
-/// A native replay's memory series: no sample, and every reading null with the reason.
+/// A native replay's memory series: the clock samples' times, and every memory reading null with
+/// the reason.
 #[must_use]
-fn memory_series() -> Value {
+fn memory_series(clocks: &[ClockSample]) -> Value {
     let mut series = serde_json::Map::new();
-    series.insert("tMs".to_owned(), json!([]));
+    let t_ms: Vec<u64> = clocks.iter().map(|sample| sample.t_ms).collect();
+    series.insert("tMs".to_owned(), json!(t_ms));
     for column in MEMORY_COLUMNS {
         series.insert(column.to_owned(), missing(NO_MEMORY));
     }
     Value::Object(series)
+}
+
+/// The distinct reasons of `reasons`, in their first order, joined.
+#[must_use]
+fn joined<'a>(reasons: impl IntoIterator<Item = &'a str>) -> String {
+    let mut distinct: Vec<&str> = Vec::new();
+    for reason in reasons {
+        if !distinct.contains(&reason) {
+            distinct.push(reason);
+        }
+    }
+    distinct.join("; ")
+}
+
+/// A column of readings in the client's `MemoryColumn` form: each reading, -1 within its gaps,
+/// and the gaps, consecutive samples of one reason being one; null with every reason when no
+/// sample has a reading. `readings` is not empty.
+#[must_use]
+fn reading_column(readings: impl IntoIterator<Item = Reading>) -> Value {
+    let mut samples: Vec<i64> = Vec::new();
+    let mut gaps: Vec<(usize, usize, String)> = Vec::new();
+    for (i, reading) in readings.into_iter().enumerate() {
+        match reading {
+            Ok(value) => samples.push(i64::from(value)),
+            Err(reason) => {
+                samples.push(-1);
+                match gaps.last_mut() {
+                    Some((_, to, last)) if *to + 1 == i && *last == reason => *to = i,
+                    _ => gaps.push((i, i, reason)),
+                }
+            }
+        }
+    }
+    if samples.iter().all(|reading| *reading == -1) {
+        return missing(&joined(gaps.iter().map(|(_, _, reason)| reason.as_str())));
+    }
+    let gaps: Vec<Value> = gaps
+        .into_iter()
+        .map(|(from, to, reason)| json!({ "from": from, "to": to, "reason": reason }))
+        .collect();
+    measured(json!({ "samples": samples, "gaps": gaps }))
+}
+
+/// The readings of the first sample that has any, and their source's maximum: the largest any of
+/// its samples read.
+#[must_use]
+fn source_readings(clocks: &[ClockSample]) -> Option<(&ClockReadings, Option<u32>)> {
+    let first = clocks
+        .iter()
+        .find_map(|sample| sample.readings.as_ref().ok())?;
+    let max = clocks
+        .iter()
+        .filter_map(|sample| sample.readings.as_ref().ok())
+        .filter(|readings| readings.source == first.source)
+        .filter_map(|readings| readings.max_graphics_mhz.as_ref().ok().copied())
+        .max();
+    Some((first, max))
+}
+
+/// The replay's `gpu.clocks`, as the client's `gpuClocksOf` builds it from its samples: the first
+/// reading's source, a column a reading on the samples' times, and the largest maximum read;
+/// without a graphics clock at any sample, null with that reason.
+#[must_use]
+fn clocks_json(clocks: &[ClockSample]) -> Value {
+    if clocks.is_empty() {
+        return missing(NO_CLOCK_SAMPLE);
+    }
+    let Some((first, max)) = source_readings(clocks) else {
+        return missing(&joined(clocks.iter().filter_map(|sample| {
+            sample.readings.as_ref().err().map(String::as_str)
+        })));
+    };
+    let source = first.source;
+    let column = |pick: fn(&ClockReadings) -> &Reading| {
+        reading_column(clocks.iter().map(|sample| match &sample.readings {
+            Ok(readings) if readings.source == source => pick(readings).clone(),
+            Ok(readings) => Err(format!(
+                "read from {}, not the replay's {}",
+                readings.source.name(),
+                source.name()
+            )),
+            Err(reason) => Err(reason.clone()),
+        }))
+    };
+    let graphics = column(|readings| &readings.graphics_mhz);
+    if graphics["value"].is_null() {
+        return graphics;
+    }
+    let max_graphics = max.map_or_else(
+        || {
+            missing(
+                first
+                    .max_graphics_mhz
+                    .as_ref()
+                    .err()
+                    .map_or("no maximum", String::as_str),
+            )
+        },
+        |mhz| measured(json!(mhz)),
+    );
+    measured(json!({
+        "source": source.name(),
+        "maxGraphicsMHz": max_graphics,
+        "graphicsMHz": graphics,
+        "memoryMHz": column(|readings| &readings.memory_mhz),
+        "performanceState": column(|readings| &readings.performance_state),
+    }))
+}
+
+/// The note a GPU row carries when the replay's median graphics clock was below
+/// [`CLOCK_NOTE_FRACTION`] of the maximum, as the client's `clockNote` words it; a replay has no
+/// warm-up, so every sample counts.
+#[must_use]
+fn clock_note(clocks: &[ClockSample]) -> Option<String> {
+    let (first, max) = source_readings(clocks)?;
+    let max = max?;
+    let mut graphics: Vec<u32> = clocks
+        .iter()
+        .filter_map(|sample| sample.readings.as_ref().ok())
+        .filter(|readings| readings.source == first.source)
+        .filter_map(|readings| readings.graphics_mhz.as_ref().ok().copied())
+        .collect();
+    graphics.sort_unstable();
+    let median = *graphics.get(rank_index(graphics.len(), 0.5))?;
+    (f64::from(median) < CLOCK_NOTE_FRACTION * f64::from(max)).then(|| {
+        format!("measured at a median {median} of {max} MHz (the driver's choice at this load)")
+    })
 }
 
 /// A figure, or `null` with the reason, as the schema writes it.
@@ -239,6 +380,8 @@ pub struct ReplayFigures {
     /// What the replay could not do as captured: the capture's own problems, features the
     /// adapter lacks, a canvas format the window cannot present.
     pub(crate) findings: Vec<String>,
+    /// The GPU's clocks, read before the first frame, once a second and after the last.
+    pub(crate) clocks: Vec<ClockSample>,
 }
 
 impl ReplayFigures {
@@ -659,6 +802,20 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             None,
         ),
     ];
+    let mut whole = whole;
+    if let Some(note) = clock_note(&figures.clocks) {
+        for entry in &mut whole {
+            let gpu_row = entry["id"]
+                .as_str()
+                .is_some_and(|id| GPU_ROW_IDS.contains(&id));
+            if gpu_row && !entry["value"].is_null() {
+                entry["note"] = json!(match entry["note"].as_str() {
+                    Some(own) => format!("{own}; {note}"),
+                    None => note.clone(),
+                });
+            }
+        }
+    }
     let overall = {
         let verdicts: Vec<&str> = whole
             .iter()
@@ -740,7 +897,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
                 missing(TIMER_REASON)
             },
             "gpuProcess": missing("a native replay has no GPU process"),
-            "clocks": missing(GPU_CLOCKS_NOT_READ),
+            "clocks": clocks_json(&figures.clocks),
         },
         "mainThread": {
             "ourCodeP95Ms": missing("a native replay has no main-thread figure"),
@@ -752,7 +909,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         "uploads": { "bytes": figures.upload_bytes },
         "pipelines": { "late": [] },
         "memory": {
-            "series": memory_series(),
+            "series": memory_series(&figures.clocks),
             "gpuHeadline": missing(NO_MEMORY),
             "peakAppBytes": missing(NO_MEMORY),
             "peakTracingBytes": missing(NO_TRACE),
@@ -861,6 +1018,7 @@ mod tests {
             upload_bytes: 0,
             errors: Vec::new(),
             findings: Vec::new(),
+            clocks: Vec::new(),
         }
     }
 
@@ -886,6 +1044,88 @@ mod tests {
         assert_eq!(row(&results, "terrain")["verdict"], "pass");
         assert_eq!(row(&results, "headroom-gpu")["verdict"], "not-measured");
         assert_eq!(results["gpu"]["sumP95Ms"]["value"], 4.5);
+    }
+
+    /// Readings from `nvidia-smi` of a 2,115 MHz GPU at `graphics_mhz` in P2.
+    fn nvidia_at(graphics_mhz: u32) -> ClockReadings {
+        ClockReadings {
+            source: crate::clocks::ClockSourceKind::NvidiaSmi,
+            max_graphics_mhz: Ok(2115),
+            graphics_mhz: Ok(graphics_mhz),
+            memory_mhz: Ok(9501),
+            performance_state: Ok(2),
+        }
+    }
+
+    #[test]
+    fn the_clocks_are_written_from_their_samples_on_the_memory_series_times() {
+        let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
+        let mut stubbed = figures(rows);
+        stubbed.clocks = vec![
+            ClockSample::new(12, Ok(nvidia_at(1110))),
+            ClockSample::new(1013, Err("nvidia-smi failed: timed out".to_owned())),
+            ClockSample::new(2014, Ok(nvidia_at(1320))),
+            ClockSample::new(2400, Ok(nvidia_at(1965))),
+        ];
+        let results = results_json(&stubbed);
+        assert_eq!(
+            results["memory"]["series"]["tMs"],
+            json!([12, 1013, 2014, 2400])
+        );
+        let gap = json!([{ "from": 1, "to": 1, "reason": "nvidia-smi failed: timed out" }]);
+        assert_eq!(
+            results["gpu"]["clocks"],
+            json!({
+                "value": {
+                    "source": "nvidia-smi",
+                    "maxGraphicsMHz": { "value": 2115, "reason": null },
+                    "graphicsMHz": {
+                        "value": { "samples": [1110, -1, 1320, 1965], "gaps": gap },
+                        "reason": null,
+                    },
+                    "memoryMHz": {
+                        "value": { "samples": [9501, -1, 9501, 9501], "gaps": gap },
+                        "reason": null,
+                    },
+                    "performanceState": {
+                        "value": { "samples": [2, -1, 2, 2], "gaps": gap },
+                        "reason": null,
+                    },
+                },
+                "reason": null,
+            })
+        );
+        // The median of 1,110, 1,320 and 1,965 MHz is 62% of the maximum: the GPU rows with a
+        // value say so, the others not.
+        let note = "measured at a median 1320 of 2115 MHz (the driver's choice at this load)";
+        assert_eq!(row(&results, "terrain")["note"], note);
+        assert_eq!(
+            row(&results, "atmosphere")["note"],
+            "no timed atmosphere pass"
+        );
+        // A frame row with a value keeps its own note alone.
+        assert_eq!(row(&results, "p50")["note"], "no period T");
+    }
+
+    #[test]
+    fn a_median_clock_near_the_maximum_puts_no_note() {
+        let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
+        let mut stubbed = figures(rows);
+        stubbed.clocks = vec![ClockSample::new(0, Ok(nvidia_at(1965))); 3];
+        assert_eq!(row(&results_json(&stubbed), "terrain")["note"], Value::Null);
+    }
+
+    #[test]
+    fn clocks_with_no_reading_are_null_with_the_reason() {
+        let mut stubbed = figures(BTreeMap::new());
+        let reason = "no unprivileged GPU clock reading on macos; powermetrics needs root";
+        stubbed.clocks = vec![ClockSample::new(0, Err(reason.to_owned())); 2];
+        assert_eq!(results_json(&stubbed)["gpu"]["clocks"], missing(reason));
+        stubbed.clocks.clear();
+        assert_eq!(
+            results_json(&stubbed)["gpu"]["clocks"],
+            missing("no clock sample")
+        );
     }
 
     #[test]
@@ -931,7 +1171,7 @@ mod tests {
         );
         assert_eq!(
             results["gpu"]["clocks"],
-            json!({ "value": null, "reason": "the GPU's clocks are not yet read (R05.T14.k)" })
+            json!({ "value": null, "reason": "no clock sample" })
         );
     }
 

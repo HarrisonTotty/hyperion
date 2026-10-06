@@ -163,7 +163,7 @@ function latePipeline(value: unknown): SpikeLatePipeline | null {
 /**
  * `value` as the renderer's report, or `null` if any part of it is missing or of the wrong type:
  * every series as long as the frames', every figure finite, each frame's missing resolves a whole
- * count, the trace's windows in order.
+ * count and those still being read at the report no more than them, the trace's windows in order.
  */
 export function readDescentSpikeReport(value: unknown): DescentSpikeReport | null {
   if (!isRecord(value)) {
@@ -173,13 +173,21 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   if (!isRecord(frames)) {
     return null;
   }
-  const { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs, missingResolves } = frames;
+  const {
+    scriptTimesS,
+    rafIntervalsMs,
+    ourCodeMs,
+    callbackStartsMs,
+    missingResolves,
+    inFlightResolves,
+  } = frames;
   if (
     !finiteList(scriptTimesS) ||
     !finiteList(rafIntervalsMs) ||
     !finiteList(ourCodeMs) ||
     !finiteList(callbackStartsMs) ||
-    !countList(missingResolves)
+    !countList(missingResolves) ||
+    !countList(inFlightResolves)
   ) {
     return null;
   }
@@ -188,7 +196,9 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     rafIntervalsMs.length !== count ||
     ourCodeMs.length !== count ||
     callbackStartsMs.length !== count ||
-    missingResolves.length !== count
+    missingResolves.length !== count ||
+    inFlightResolves.length !== count ||
+    inFlightResolves.some((reading, i) => reading > (missingResolves[i] ?? 0))
   ) {
     return null;
   }
@@ -245,7 +255,15 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     levels,
     timer,
     untimedPasses,
-    frames: { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs, missingResolves, passes },
+    frames: {
+      scriptTimesS,
+      rafIntervalsMs,
+      ourCodeMs,
+      callbackStartsMs,
+      missingResolves,
+      inFlightResolves,
+      passes,
+    },
     streaming: streamingList,
     uploadBytes,
     latePipelines: late,

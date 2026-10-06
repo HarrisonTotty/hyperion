@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
 import { fakeEngineModule, type FakeRenderEngine } from "../../test/fakeRenderEngine";
@@ -11,6 +11,7 @@ import type { SelectionInput } from "../terrain/select";
 import { selectionTolerancePx } from "../terrain/selectionTolerance";
 import { boundedPlanet, type DemandView, levelRatio } from "./demand";
 import { recordProfile, SETTING_VIEWS } from "./demandRecord";
+import { PassReads } from "./passReads";
 import { PipelineTally, wrapGpu } from "./pipelineShim";
 import {
   meanDemand,
@@ -195,6 +196,8 @@ describe("the spike's engine source", () => {
         postProcesses: [],
       });
     expect([engine.passTimesFrame, measured.resolves.value]).toEqual([1, 1]);
+    // The timer's staging buffer began its read, numbered by the engine's count.
+    expect(measured.reads.inFlight()).toEqual([1]);
     engine.dispose();
   });
 });
@@ -202,11 +205,16 @@ describe("the spike's engine source", () => {
 describe("the spike's recorder", () => {
   const descent = { planet: PLANET, profile: recordProfile(), omittedSigmaM: SIGMA };
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("gives each frame the engine frames resolved since the one before", () => {
     // The counter stands at 0 when the run starts; each frame resolves three engine frames.
     const counted = { value: 0, runFrame: (n: number) => n };
     const recorder = new SpikeRecorder(descent, "low", {
       resolves: counted,
+      reads: new PassReads(() => counted.value),
       tally: new PipelineTally(() => 0),
     });
     counted.value = 3;
@@ -251,6 +259,7 @@ describe("the spike's recorder", () => {
     resolves.follow(engine);
     const recorder = new SpikeRecorder(descent, "low", {
       resolves,
+      reads: new PassReads(() => resolves.value),
       tally: new PipelineTally(() => 0),
     });
     resolveOn(dev);
@@ -275,10 +284,69 @@ describe("the spike's recorder", () => {
     expect(frames.missingResolves).toEqual([0, 1, 0]);
   });
 
+  it("ends a read with its report, and reports its frames' reads still in flight", () => {
+    const counted = { value: 0, runFrame: (n: number) => n };
+    const reads = new PassReads(() => counted.value);
+    const recorder = new SpikeRecorder(descent, "low", {
+      resolves: counted,
+      reads,
+      tally: new PipelineTally(() => 0),
+    });
+    // Two frames of two resolves each, every resolve read.
+    for (const [i, last] of [2, 4].entries()) {
+      for (let n = last - 1; n <= last; n += 1) {
+        counted.value = n;
+        reads.began();
+      }
+      recorder.frame(frame(i * 0.016));
+    }
+    for (const n of [1, 2, 3]) {
+      recorder.passTimes({
+        frame: n,
+        timer: "full",
+        passes: [{ label: "terrain", ns: 1e6, bracketed: false }],
+      });
+    }
+    expect(reads.inFlight()).toEqual([4]);
+    const { frames } = recorder.report({ widthPx: 1280, heightPx: 720 });
+    expect(frames.missingResolves).toEqual([0, 1]);
+    expect(frames.inFlightResolves).toEqual([0, 1]);
+  });
+
+  it("waits only for the reads of the frames it recorded", async () => {
+    vi.useFakeTimers();
+    const counted = { value: 1, runFrame: (n: number) => n };
+    const reads = new PassReads(() => counted.value);
+    // Resolve 1's read began before the run; resolve 3's after its last frame.
+    reads.began();
+    const recorder = new SpikeRecorder(descent, "low", {
+      resolves: counted,
+      reads,
+      tally: new PipelineTally(() => 0),
+    });
+    counted.value = 2;
+    reads.began();
+    recorder.frame(frame(0));
+    counted.value = 3;
+    reads.began();
+    const outcome: { settled: boolean | null } = { settled: null };
+    void recorder.readsSettled(1000).then((settled) => {
+      outcome.settled = settled;
+      return settled;
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(outcome.settled).toBeNull();
+    recorder.passTimes({ frame: 2, timer: "full", passes: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(outcome.settled).toBe(true);
+    expect(reads.inFlight()).toEqual([1, 3]);
+  });
+
   it("counts a frame missing one of its five resolves, and one missing all five", () => {
     const counted = { value: 0, runFrame: (n: number) => n };
     const recorder = new SpikeRecorder(descent, "low", {
       resolves: counted,
+      reads: new PassReads(() => counted.value),
       tally: new PipelineTally(() => 0),
     });
     for (const [i, last] of [5, 10, 15].entries()) {
@@ -308,6 +376,7 @@ describe("the spike's recorder", () => {
     }
     const report = new SpikeRecorder(descent, "high", {
       resolves: new ResolveCounter(),
+      reads: new PassReads(() => 0),
       tally: new PipelineTally(() => 0),
     }).report({ widthPx: 1, heightPx: 1 });
     return { report, atSelection: { ...view, tauPx: selectionTolerancePx(view.tauPx) } };
@@ -339,7 +408,11 @@ describe("the spike's recorder", () => {
 
   it("records the calibrated count of the same selection inputs", () => {
     const tally = new PipelineTally(() => 0);
-    const recorder = new SpikeRecorder(descent, "low", { resolves: new ResolveCounter(), tally });
+    const recorder = new SpikeRecorder(descent, "low", {
+      resolves: new ResolveCounter(),
+      reads: new PassReads(() => 0),
+      tally,
+    });
     const view = SETTING_VIEWS[1]?.view;
     const pose = recordProfile().poseAt(1000);
     const input: SelectionInput = {
@@ -367,7 +440,11 @@ describe("the spike's recorder", () => {
 
   it("ends the pipeline warm-up at 10 s and tracks the adapter's live peak", () => {
     const tally = new PipelineTally(() => 0);
-    const recorder = new SpikeRecorder(descent, "high", { resolves: new ResolveCounter(), tally });
+    const recorder = new SpikeRecorder(descent, "high", {
+      resolves: new ResolveCounter(),
+      reads: new PassReads(() => 0),
+      tally,
+    });
     recorder.allocation({ kind: "created", name: "a", bytes: 100, category: "other" });
     recorder.allocation({ kind: "created", name: "b", bytes: 50, category: "other" });
     recorder.allocation({ kind: "destroyed", name: "a", bytes: 100, category: "other" });

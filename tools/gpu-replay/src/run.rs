@@ -3,11 +3,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::Value;
 
 use crate::capture::{Capture, QUEUE_ID};
+use crate::clocks::{ClockSampler, ClockSource};
 use crate::replay::{FramePassTimes, FrameTarget, ReplayCallError, Replayer, UnknownFormatError};
 use crate::results::{PassRow, ReplayFigures, Setting};
 
@@ -184,6 +185,16 @@ pub(crate) fn frame_ranges(capture: &Capture) -> Vec<std::ops::Range<usize>> {
         .collect()
 }
 
+/// The clock source of the replayed adapter, its DRM card searched under `/sys` on Linux.
+pub(crate) fn clock_source(adapter: &wgpu::AdapterInfo) -> ClockSource {
+    ClockSource::choose(
+        std::env::consts::OS,
+        adapter.vendor,
+        adapter.device,
+        Path::new("/sys"),
+    )
+}
+
 pub(crate) fn collect_errors(device: &wgpu::Device) -> Arc<Mutex<Vec<String>>> {
     let errors = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&errors);
@@ -352,6 +363,7 @@ pub fn replay_offscreen(
 ) -> Result<ReplayFigures, RunReplayError> {
     let setting = setting_of(capture, setting)?;
     let started_at = SystemTime::now();
+    let started = Instant::now();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
@@ -363,12 +375,15 @@ pub fn replay_offscreen(
     let errors = collect_errors(&device);
     let mut replayer = Replayer::new(device.clone(), queue.clone(), capture.surfaces())?;
     replayer.replay_setup(capture)?;
+    let info = adapter.get_info();
+    let clocks = ClockSampler::start(clock_source(&info), started);
     let mut frames = Frames::default();
     for range in frame_ranges(capture) {
         replayer.replay(capture, range, &FrameTarget::Offscreen)?;
         frames.end_frame(&mut replayer, &device, &queue)?;
     }
     let times = frames.finish(&replayer, &device)?;
+    let clocks = clocks.finish();
     findings.extend(times.unread_finding());
     let main = main_surface(capture);
     Ok(ReplayFigures {
@@ -383,7 +398,7 @@ pub fn replay_offscreen(
             .to_owned(),
         presented: false,
         display_hz: None,
-        adapter: adapter.get_info(),
+        adapter: info,
         timed: replayer.times_passes(),
         canvas: main.map_or((0, 0), |s| (s.width, s.height)),
         intervals_ms: gpu_intervals_ms(&times.read, replayer.timestamp_period_ns()),
@@ -398,6 +413,7 @@ pub fn replay_offscreen(
             .unwrap_or_else(PoisonError::into_inner)
             .clone(),
         findings,
+        clocks,
     })
 }
 

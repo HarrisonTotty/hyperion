@@ -3,6 +3,7 @@
 //! browser's cost can be priced against native (Design note 22).
 
 pub mod capture;
+mod clocks;
 pub mod replay;
 pub mod results;
 pub mod run;

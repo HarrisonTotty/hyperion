@@ -83,6 +83,11 @@ export interface SegmentPrediction {
 
 /** What the report takes from outside the metrics: the shim's, the tally's and the view's. */
 export interface SpikeReportExtras {
+  /**
+   * The engine frame numbers whose pass-time reads are still in flight as the report is taken
+   * (`PassReads`, R05.T14.k), which each frame's `inFlightResolves` counts among its missing.
+   */
+  readonly inFlightResolves: ReadonlyArray<number>;
   readonly latePipelines: ReadonlyArray<SpikeLatePipeline>;
   /** The adapter's peak bytes, from T11.a's `allocationTally`. */
   readonly adapterPeakBytes: number;
@@ -237,6 +242,23 @@ export class SpikeMetrics {
     });
   }
 
+  /**
+   * Each frame's missing resolves among `inFlight`, the engine frame numbers still being read:
+   * those it numbered that have not reported, each at most once.
+   */
+  #inFlightResolves(inFlight: ReadonlyArray<number>): number[] {
+    const counts = this.#lastEngineFrame.map(() => 0);
+    for (const engineFrame of new Set(inFlight)) {
+      const index = this.#frameOfEngine(engineFrame);
+      if (index !== undefined) {
+        counts[index] = (counts[index] ?? 0) + 1;
+      }
+    }
+    // An in-flight number the frame also has a report for is not missing; floored as the count is.
+    const missingResolves = this.#missingResolves();
+    return counts.map((count, i) => Math.min(count, missingResolves[i] ?? 0));
+  }
+
   /** Records an engine allocation event; uploads are tallied. */
   allocation(event: AllocationEvent): void {
     if (event.kind === "uploaded") {
@@ -301,6 +323,7 @@ export class SpikeMetrics {
         ourCodeMs: [...this.#ourCodeMs],
         callbackStartsMs: [...this.#callbackStartsMs],
         missingResolves: this.#missingResolves(),
+        inFlightResolves: this.#inFlightResolves(extra.inFlightResolves),
         passes: [...this.#passes].map(([label, gpuMs]) => ({
           label,
           row: this.#options.rowOf(label),

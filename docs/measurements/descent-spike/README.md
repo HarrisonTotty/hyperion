@@ -15,8 +15,8 @@ One run is two files, written by the client's main process at the end of the run
   same way. Once Prettier formats it, a file stays under the repository's 500 KiB limit for added
   files for runs of up to about two hours; the writer warns of one that would not, and still writes
   it in full.
-- `<date>-<machine>-<setting>.md`: its summary: the criterion's rows with their verdicts, frames
-  by segment, streaming and memory.
+- `<date>-<machine>-<setting>.md`: its summary: the criterion's rows with their verdicts, the
+  GPU's clocks, frames by segment, streaming and memory.
 
 `<machine>` is the host name, lower-cased, with anything but `a`–`z`, `0`–`9` and `-` dropped.
 
@@ -24,7 +24,8 @@ A native replay of a run's capture (R05.T15, `just replay <capture>`) writes
 `<date>-<machine>-<setting>-replay.json` in the same schema. Its frames are timed by the GPU's
 completions offscreen, or by presentation with `--present`. Each pass is timed by the replay's own
 timestamps. Every figure a replay cannot have (the trace, the main thread, memory, rAF) is null,
-with its reason. The capture (`--capture <dir>`: `capture.json` and `capture.bin`) is hundreds of
+with its reason. It reads the GPU's clocks from the same sources as the client, before its first
+frame, once a second and after its last, on the memory series' times. The capture (`--capture <dir>`: `capture.json` and `capture.bin`) is hundreds of
 megabytes and is never committed.
 
 ## What a results file holds
@@ -62,6 +63,24 @@ How the figures are read:
   outside the trace's boundary exclusions. Each pass's own percentiles keep every time that
   arrived. A GPU row passes only if it passes with them all above its limit, fails only if it
   fails with them all below it, and is otherwise not measured, with their count as the reason.
+  After the trace's last stop the run waits up to 1 s for the reads still in flight before it
+  takes its report (R05.T14.k). A frame whose every missing read was still in flight then is
+  counted the same way, with the reason "read in flight at the report", not the GPU's backlog.
+- **The GPU's clocks** (`decision-r05-trace-windows-2.md`, addendum B, ruling 2; R05.T14.k): a GPU
+  row measures each pass at the clocks the driver chose for the spike's load, never pinned or
+  normalised. `gpu.clocks` records them at 1 Hz on the memory series' times, in its column form
+  (whole MHz, and the performance state's number, P0 being 0), with the maximum graphics clock and
+  the source. On NVIDIA, under Linux and Windows, they come from the `nvidia-smi -q -x` the memory
+  sampler already runs. Under Linux, an Intel GPU's come from i915's sysfs, `gt_act_freq_mhz`
+  against `gt_RP0_freq_mhz` (or `gt_boost_freq_mhz`), with no memory clock or state, and an AMD
+  GPU's from amdgpu's `pp_dpm_sclk` and `pp_dpm_mclk`. Any user can read either, on the DRM card
+  whose PCI vendor and device are the run's GPU's. On macOS (where `powermetrics` needs root), and
+  on Windows for another vendor's GPU, they are null with the reason. A GPU row (`headroom-gpu`,
+  `terrain`, `atmosphere`) whose median graphics clock after the warm-up was below 90% of the
+  maximum carries the note "measured at a median N of M MHz (the driver's choice at this load)".
+  The summary's **GPU clocks** line gives the graphics clock's median, 5th and 95th percentiles
+  against the maximum. The files written before R05.T14.k have none ("not recorded before results
+  version 5").
 - **The selection bound** (decisions-r05.md item 6): selection uses the hard bound; the file also
   records demand and patch counts under min(hard, 4σ_n), so that a failure on streaming demand alone
   that the calibrated bound would meet is called ours to fix, not a fired rule.
@@ -90,8 +109,9 @@ How the figures are read:
 client with `--descent-spike` and the options given (R05.T13.c). `--out <dir>` sets where the files
 go (this directory by default). `just descent-spike --smoke` runs 10 s hidden and writes no file:
 it checks its trace's three windows as a run's are, each decoded and its frame spans matched to the
-renderer's frames, and exits 1 with the first failed window's reason (R05.T14.i). The runs that
-count are visible, on a quiet machine:
+renderer's frames, and exits 1 with the first failed window's reason (R05.T14.i). Its log lists
+every clock sample (`descent spike: GPU clocks sampled …`), and a run's log the summary's clock
+line. The runs that count are visible, on a quiet machine:
 
 - **The development machine's low-setting run** (R05.T14.c, by hand for the owner): with the
   projector in its 1080p 59.94 Hz mode, nothing else running and the load average under 1:
@@ -107,7 +127,9 @@ count are visible, on a quiet machine:
   descent left out.
 
 - **The UHD 620 runs** (R05.T16, by hand for the owner, on the laptop, each on a quiet machine).
-  The baseline, over three seeds, and one high run for comparison, not judged:
+  The clocks come from i915's sysfs and need no privilege; on this part they also follow the
+  package's shared power budget, so the CPU's load shows in them. The baseline, over three seeds,
+  and one high run for comparison, not judged:
 
   ```sh
   just descent-spike --setting low --seed 7

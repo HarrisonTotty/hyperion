@@ -4410,7 +4410,10 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     The count is then conservative. It can make a row not measured, never pass or fail it wrongly.
     The reason still names the 27-frame backlog. A trace that failed before its first window stops
     at once, so a run's last few frames could be counted so. Waiting for the reads before the
-    report would be a controller change (open, for the orchestrator).
+    report would be a controller change (open, for the orchestrator). _Ruled_ (2026-10-06, the
+    orchestrator): the controller waits up to 1 s for the reads in flight before the report, and a
+    read still outstanding then is missing with its own reason, "read in flight at the report", not
+    the backlog's. Built in T14.k (its record, below).
   - _The replayer._ It resolves once a frame, so its frames are whole or dropped (`partial` 0). It
     counts a frame dropped when its mapping or its read failed. Before, such a frame vanished from
     the figures (a failed mapping) or counted as untimed (a failed read).
@@ -4472,6 +4475,124 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     - the read-back's error kept as a finding;
     - frame counts that hold by construction;
     - no reallocated placements.
+
+- **Deviations in T14.k, as built** (2026-10-06, the GPU's clocks; `decision-r05-trace-windows-2.md`,
+  addendum B, ruling 2, and the orchestrator's ruling on T14.j's open question).
+  - _Where things are._ `main/gpuClocks.ts` holds `GpuClockReader` (its `read(nvidia)` never
+    rejects), `GpuClockSample`, `GpuClockReadings`, `GpuIdentity`, `SysfsFiles`, `nvidiaClocks`,
+    `parseDpmLevels` and the reasons' constants. `GpuClockSource` moved there from `results.ts`,
+    which re-exports it. `parseNvidiaSmi` (`main/fdinfo.ts`) gives each GPU's `clocks`, each block
+    read within its own element, since `applications_clocks` and the others reuse the names.
+    `results.ts` adds `MemorySample.clocks`, `MemorySources.clocks(nvidia)`, `gpuClocksOf`,
+    `clockNote`, `CLOCK_NOTE_FRACTION`, `describeClocks`, `describeClockSamples` and an exported
+    `activeGpu`, and drops `GPU_CLOCKS_NOT_READ` (the replayer's copy too). `index.ts` reads the run's
+    GPU from `app.getGPUInfo("basic")` once, at the first sample.
+  - _The source._ It is chosen once, from Chromium's active GPU. NVIDIA (vendor `0x10de`) reads
+    `nvidia-smi` on every platform but macOS; Intel (`0x8086`) reads i915 and AMD (`0x1002`) amdgpu,
+    under Linux alone, on the lowest-numbered `card<N>` whose `device/vendor` and `device/device`
+    are the GPU's. A GPU Chromium does not report, another vendor, or no matching card gives
+    `gpu.clocks` null with the reason. NVIDIA's clocks are the reading's first GPU's, as T14.c's
+    memory figure is; a machine with two NVIDIA GPUs running on the second would read the wrong
+    one (not handled).
+  - _The readings._ i915 has no memory clock (it shares the system's memory) and no performance
+    states, and amdgpu's levels are not performance states (their numbering runs the other way
+    from NVIDIA's), so those columns are null with their reasons. The maximum is the largest any
+    sample read, which is constant in practice. A run whose graphics clock is missing at every
+    sample has `gpu.clocks` null with that reason, rather than a source with empty columns.
+  - _After the warm-up._ The memory series' times count from the measuring's start, which the
+    committed runs place 0.07 to 0.15 s after script time 0 (their first window's `fromS`). The
+    note and the summary read "after the warm-up" as `tMs ≥ 1000 × warmupS`, so at 1 Hz at most one
+    sample is misplaced. The summary computes it from the file alone.
+  - _The note._ "measured at a median N of M MHz (the driver's choice at this load)", without
+    thousands separators. It is added after a row's own note with "; ", and only to a GPU row with
+    a value. The median is by nearest rank, the files' convention.
+  - _The summary and the logs._ The summary's new line is "**GPU clocks:** from <source>;
+    graphics median N MHz (P %), p5 …, p95 …, after the warm-up, of M MHz; memory median … MHz;
+    performance states Pa to Pb". A smoke's 10 s are all warm-up and it writes no file, so its log
+    lists every sample (`descent spike: GPU clocks sampled …`); a full run logs the summary's line.
+  - _No schema change._ Version 5's shapes hold, so the version stays. The six committed files keep
+    `gpu.clocks` null ("not recorded before results version 5"); the five summaries gain the clock
+    line, "— (not recorded before results version 5)", and nothing else.
+  - _Fixtures._ `nvidia-smi.xml` was re-recorded unprivileged on the RTX 3080 (2026-10-06, idle:
+    P8, 210 and 405 MHz). It is trimmed to the elements read, with the clock blocks that reuse
+    their names. Its maximum graphics clock is 2,115 MHz, above the 1,965–1,980 MHz the diagnosis
+    saw at P0, so a run at P0 notes nothing. `fdinfo.test.ts` follows its new memory (123 MiB, two
+    processes). The sysfs trees are `sysfs/i915` (a UHD 620, `0x8086:0x5917`, RP0 1,150 MHz),
+    `sysfs/amdgpu` (an RX 6800 XT, `0x1002:0x73bf`, as card1 beside an Intel card0) and
+    `sysfs/i915-no-rp0`, which the replayer's fallback test reads in place of a temporary
+    directory. The kernel writes `pp_dpm_*` lines with a trailing space, which the repository's
+    trailing-whitespace hook would strip from a file, so the trees omit it and the parsers' tests
+    hold the kernel's exact form inline.
+  - _The replayer._ `tools/gpu-replay/src/clocks.rs` reads the same sources, chosen at run time by
+    `std::env::consts::OS` and the adapter's vendor and device, with no `cfg` gating, so every
+    platform compiles every reader. `nvidia-smi` is bounded at 5 s, as the client's is. A
+    `ClockSampler` takes its first reading before the first frame, then one a second on its own
+    thread, and the last after the frames' GPU work has ended. `memory.series.tMs` holds the
+    clock samples' times, and every memory column stays null. The GPU rows carry the client's note,
+    a replay having no warm-up. Its file validates under the client's `validateResults` (the gate's
+    replays, below).
+  - _Reads in flight at the report_ (the orchestrator's ruling on T14.j's open question). After the
+    trace's last stop the controller waits up to `PASS_READS_WAIT_MS` (1,000 ms) for the reads of
+    the recorded frames' pass times still in flight, then takes its report. A read still
+    outstanding then is missing with the reason "read in flight at the report", not the backlog's.
+    - `view/spike/passReads.ts`: `PassReads` and `trackPassReads`. The spike's device wrapper
+      replaces `createBuffer` on the device instance, and `mapAsync` on each staging buffer R01's
+      timer labels `pass times readback <k>`. A read's number is `ResolveCounter.value` when its
+      mapping begins, which is its resolve's, since the timer maps just after the resolve's own
+      submission. It ends with its report, or with a failed mapping. A resolve the timer dropped
+      makes no read, so it is never in flight. A test through the real engine checks the label.
+    - `SpikeRecorder.readsSettled` waits for reads numbered after its first engine frame up to its
+      last frame's, so reads begun before the numbering followed the engine, or after the run's
+      last frame, are never waited for. A timed-out wait is logged.
+    - The report's `frames.inFlightResolves` counts each frame's missing resolves still being read
+      (at most its `missingResolves`), and the reader checks it. A hand-made report needs it.
+    - `buildResults` counts a frame whose every missing read was in flight as incomplete with that
+      reason (`READ_IN_FLIGHT_REASON`). A frame with a dropped resolve as well is the backlog's. The
+      counts stay within `dropped` and `partial`, so the schema is unchanged. `IncompleteCount`
+      (`{ frames, inFlight }`) is what `boundedGpuRow` and `incompleteFramesReason` take now. The
+      not-measured reason names both causes with their counts, and the "verdict holds" note names
+      the frames in flight.
+    - A read whose mapping succeeded but whose report never came (the timer's
+      `getMappedRange` threw) stays in flight, and so counts as in flight after the wait.
+  - _The smoke._ The hidden `just descent-spike --smoke` (high, RTX 3080, port 7893, an 8 G scope,
+    `DISPLAY=:0`, offscreen, no resize) exited 0 twice, each logging its ten clock samples from
+    `nvidia-smi`, against a maximum of 2,115 MHz.
+    - The first took 22 s at load 11.8. Its graphics clock was 210 MHz, then 1,965 MHz six times
+      and 1,980 MHz three times; its memory clock 405, then 9,501 MHz; its state P8, then P0.
+      Windows of 3,198,235, 2,781,053 and 3,460,885 B (0.13, 0.18 and 0.25 %), and 116, 104 and
+      171 frames checked.
+    - The second, on the final tree, took 24 s at load 27.5: 285 MHz, then 1,965 MHz three times
+      and 1,980 MHz six times, with the same memory clocks and states. Windows of 2,351,844,
+      3,038,634 and 3,321,068 B (0.12, 0.18 and 0.26 %), and 70, 115 and 166 frames checked.
+    - So the GPU runs at P0 within a second of the smoke's start, at 93% of its maximum, which puts
+      no note on a row. A smoke writes no results, so the file's clocks are proven by the tests and
+      the replay.
+  - _Gate (all capped)._
+    - The acceptance vitest: 3 files, 183 tests.
+    - `pnpm test`: 327 files, 5,542 tests.
+    - The typecheck from a clean cache, `just check lint` and Prettier.
+    - `just gpu-replay-check`: 40 unit tests and clippy.
+    - `just cross-clippy`, for macOS and Windows. Its caches were seeded by a reflink copy of the
+      primary checkout's `target/cross` and `target/tools-cross`. It ran in a 10 G scope, as one
+      Clippy over the whole workspace for two targets.
+    - The replayer's GPU test, offscreen. A replay of the fixture offscreen read the clocks
+      twice. At idle that was 210 of 2,115 MHz at P8; an earlier one, before the review fixes,
+      read 1,800 MHz at P0. Its file validates under the client's `validateResults`.
+    - The commit hooks.
+  - _Review._ typescript-reviewer found no must-fix. Its three should-fix items are applied: a
+    regression test for the clock check without the series' times, the report reader's refusals of
+    a bad `inFlightResolves`, and the tests that had more than one reason to fail split. rust-reviewer
+    found no must-fix. Its three should-fix items and its consider are applied: the sampler's
+    interval passed in (`start_every`), so that no test's count of samples rests on the wall clock;
+    the clocks module
+    private to the crate; `#[must_use]` on the new pure helpers; and a timed-out `nvidia-smi` killed
+    and given up without the blocking wait, which a run stuck in the driver would hold (its
+    not-found and timed-out paths now tested, the latter on Unix).
+  - _Files beyond the task's list._ `preload/api.ts`, `main/spikeReport.ts`,
+    `main/fixtures/spikeReport.ts`, `main/spikeSession.ts` and its test, `main/index.ts`;
+    `view/spike/passReads.ts`, `metrics.ts`, `spikeHarness.ts`, `spikeController.ts` and their tests
+    (the orchestrator's addition); the five summaries; and `tools/gpu-replay/src/lib.rs`,
+    `run.rs` and `window.rs`.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

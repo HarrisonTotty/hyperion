@@ -188,6 +188,13 @@ export interface SpikeFrameSeries {
    * _dropped_, and one with some pass time is _partial_.
    */
   readonly missingResolves: ReadonlyArray<number>;
+  /**
+   * Each frame's missing resolves whose reads were still in flight when the report was taken, at
+   * most its `missingResolves` (R05.T14.k, the orchestrator's ruling on T14.j's open question).
+   * The run's control waits up to 1 s after the trace's last stop for the reads in flight; one
+   * still outstanding then is missing for that reason, not because the timer dropped it.
+   */
+  readonly inFlightResolves: ReadonlyArray<number>;
   readonly passes: ReadonlyArray<SpikePassSeries>;
 }
 

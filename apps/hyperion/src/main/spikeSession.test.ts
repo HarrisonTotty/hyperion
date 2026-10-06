@@ -9,7 +9,7 @@ import type {
 import { DEFAULT_SPIKE_SEED } from "../preload/spikeLaunch";
 import { CdpTracing } from "./cdpTracing";
 import { FakeDebugger, memoryWriter } from "./fixtures/debugger";
-import { measured, type RunDescription, validateResults } from "./results";
+import { measured, type MemorySample, type RunDescription, validateResults } from "./results";
 import type { TraceFigures } from "./reduceTrace";
 import { SpikeTrace, type TraceWindowStop } from "./spike";
 import { SpikeSession, type SpikeSessionDeps, traceWindowFileName } from "./spikeSession";
@@ -137,6 +137,7 @@ function depsOf(
   reduce: SpikeSessionDeps["reduce"],
   size: (path: string) => Promise<number>,
   launch: SpikeLaunch = LAUNCH,
+  memory: ReadonlyArray<MemorySample> = [],
 ) {
   const written = new Map<string, string | Uint8Array>();
   const removed: string[] = [];
@@ -149,7 +150,7 @@ function depsOf(
     trace,
     traceDir: "/profile",
     reduce,
-    memory: { start: memoryStart, stop: () => Promise.resolve([]) },
+    memory: { start: memoryStart, stop: () => Promise.resolve(memory) },
     outDir: "/out",
     exit: (code) => {
       exits.push(code);
@@ -190,6 +191,7 @@ function sessionOf(
   size?: (path: string) => Promise<number>,
   launch: SpikeLaunch = LAUNCH,
   settings: TraceSettings = UNPROFILED,
+  memory: ReadonlyArray<MemorySample> = [],
 ) {
   const trace = fakeTrace(settings);
   const sizeOf =
@@ -198,8 +200,32 @@ function sessionOf(
       trace.files.has(path)
         ? Promise.resolve(4096)
         : Promise.reject(new Error(`ENOENT: no such file, stat '${path}'`)));
-  const { deps, ...made } = depsOf(trace, reduce, sizeOf, launch);
+  const { deps, ...made } = depsOf(trace, reduce, sizeOf, launch, memory);
   return { session: new SpikeSession(deps), ...made, trace };
+}
+
+/** Memory samples at 1 Hz from 0.2 s, `nvidia-smi` reading each graphics clock in P2 of 2,115 MHz. */
+function clockedSamples(graphicsMHz: ReadonlyArray<number>): MemorySample[] {
+  return graphicsMHz.map((mhz, i) => ({
+    tS: i + 0.2,
+    appBytes: 1024,
+    gpuProcessBytes: null,
+    tracingBytes: 0,
+    rendererPrivateBytes: null,
+    drmResidentBytes: null,
+    drmReason: "no GPU process",
+    drmTotalBytes: null,
+    nvidiaDeviceBytes: null,
+    nvidiaGpuProcessBytes: null,
+    clocks: {
+      kind: "clocks",
+      source: "nvidia-smi",
+      maxGraphicsMHz: measured(2115),
+      graphicsMHz: measured(mhz),
+      memoryMHz: measured(9501),
+      performanceState: measured(2),
+    },
+  }));
 }
 
 /** A window's trace on the report's clock, `smallReport`'s one window. */
@@ -235,6 +261,7 @@ function smokeReport(): DescentSpikeReport {
       ourCodeMs: scriptTimesS.map(() => 4),
       callbackStartsMs: callbackStartsOf(scriptStartMs, scriptTimesS),
       missingResolves: scriptTimesS.map(() => 0),
+      inFlightResolves: scriptTimesS.map(() => 0),
       passes: [{ label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 1) }],
     },
   };
@@ -512,6 +539,42 @@ describe("a spike run's session", () => {
       "descent spike: trace boundary 1 of 2: 300 ms from the stop to the next start",
       "descent spike: trace boundary 2 of 2: 300 ms from the stop to the next start",
     ]);
+  });
+
+  it("logs a smoke's every clock sample, since it writes no results file", async () => {
+    const { session, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+      UNPROFILED,
+      clockedSamples([1410, 1965, 900]),
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    await ops.writeResults(smokeReport());
+    expect(logs).toContain(
+      "descent spike: GPU clocks sampled from nvidia-smi, maximum 2115 MHz; graphics MHz 1410 1965 900; memory MHz 9501 9501 9501; performance states 2 2 2",
+    );
+  });
+
+  it("logs a run's clocks after the warm-up beside its results file", async () => {
+    const { session, logs } = sessionOf(
+      () => Promise.resolve(goodTrace()),
+      undefined,
+      LAUNCH,
+      UNPROFILED,
+      clockedSamples([1965, ...Array.from({ length: 10 }, () => 1980), 1110, 1320]),
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    await ops.writeResults(smallReport());
+    expect(logs).toContain(
+      "descent spike: GPU clocks from nvidia-smi; graphics median 1320 MHz (62 %), p5 1110, p95 1980, after the warm-up, of 2115 MHz; memory median 9501 MHz; performance state P2",
+    );
   });
 
   it("answers a smoke's results call with the reason of a window whose frame spans disagree, and the smoke exits 1 with it", async () => {

@@ -24,6 +24,7 @@ import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
 import { CdpTracing } from "./cdpTracing";
 import { type ClientArgs, parseClientArgs, serverUrlOf, userArgs } from "./cli";
 import { parseNvidiaSmi, readDrmMemory, readNvidiaSmi } from "./fdinfo";
+import { GpuClockReader } from "./gpuClocks";
 import {
   applyGraphicsSwitches,
   type ChromiumSwitch,
@@ -33,7 +34,7 @@ import {
 } from "./graphics/switches";
 import { isOwnPage } from "./ipcSender";
 import { reduceTraceFile } from "./reduceTrace";
-import { describeMachine, MemorySampler, nodeMachineSources } from "./results";
+import { activeGpu, describeMachine, MemorySampler, nodeMachineSources } from "./results";
 import { launchSwitches, registerSpikeHandlers, SpikeTrace } from "./spike";
 import { SpikeSession } from "./spikeSession";
 import { reduceWindowFile, registerViewsCheckHandlers, ViewsCheckSession } from "./viewsCheck";
@@ -246,12 +247,17 @@ function startSpikeSession(
   const startedAt = new Date();
   /** The renderer's last private-memory reading, bytes, for the sampler. */
   let rendererBytes: number | null = null;
+  const clocks = new GpuClockReader({
+    platform: process.platform,
+    gpu: () => app.getGPUInfo("basic").then(activeGpu),
+  });
   const memory = new MemorySampler(
     {
       appMetrics: () => app.getAppMetrics(),
       rendererPrivateBytes: () => Promise.resolve(rendererBytes),
       drm: (pid) => readDrmMemory(pid, process.platform),
       nvidia: () => readNvidiaSmi(),
+      clocks: (nvidia) => clocks.read(nvidia),
       nowMs: () => performance.now(),
     },
     (error: unknown) => {

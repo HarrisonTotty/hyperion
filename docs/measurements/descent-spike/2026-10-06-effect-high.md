@@ -7,6 +7,7 @@
 - **T:** — (no window shown); warm-up 10 s
 - **Trace:** 9 perfetto-proto windows, 1198.7 s traced after the warm-up, unprofiled; 8 boundaries left out 743 frames (largest stall 183.40 ms); largest file 224 MiB, buffer use up to 24 %
 - **Incomplete pass times:** — (not recorded before results version 5)
+- **GPU clocks:** — (not recorded before results version 5)
 - **Options:** `--setting high` `--seed 7` `--smoke false` `--ridged off` `--dawnSafety on` `--traceProfile off` `--terrainVertexPath baked-offsets` `--terrainNormals double`
 
 ## The criterion (Design note 21)

@@ -43,6 +43,7 @@ import type {
   SpikePassTimer,
 } from "../preload/api";
 import type { DrmMemoryReading, NvidiaReading } from "./fdinfo";
+import type { GpuClockReadings, GpuClockSample, GpuClockSource } from "./gpuClocks";
 import { type Measured, measured, missing } from "./measured";
 import { GPU_PROCESS_SLICES, type GpuProcessFigures, recordedGpuSlices } from "./reduceTrace";
 import {
@@ -58,6 +59,7 @@ import {
 } from "./traceWindows";
 
 export { type Measured, measured, missing } from "./measured";
+export type { GpuClockSource } from "./gpuClocks";
 
 /** The file's schema name and version, which T15.c's replayer writes too. */
 export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
@@ -75,8 +77,8 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * only the GPU-process slices whose category was recorded; a window whose frame spans disagree
  * with the renderer's frames fails. Version 5 (the same decision's addendum B) takes the GPU rows'
  * sums over the frames whose pass times are complete, counts the others in `gpu.incompleteFrames`
- * and bounds the rows' verdicts by them, and adds `gpu.clocks`, written null until R05.T14.k
- * reads them.
+ * and bounds the rows' verdicts by them, and adds `gpu.clocks`, the GPU's clocks beside the memory
+ * series (R05.T14.k).
  */
 export const RESULTS_VERSION = 5;
 
@@ -91,9 +93,6 @@ const PRETTIER_PRINT_WIDTH = 100;
 
 /** Dawn's timestamp quantum, 65,536 ns (`timestamp_quantization`, Design note 18), ms. */
 export const TIMESTAMP_QUANTUM_MS = 0.065_536;
-
-/** Why a results file has no GPU clocks until R05.T14.k reads them. */
-export const GPU_CLOCKS_NOT_READ = "the GPU's clocks are not yet read (R05.T14.k)";
 
 /** The rows read from per-frame GPU times, whose verdicts the incomplete frames bound. */
 export const GPU_ROW_IDS: ReadonlySet<string> = new Set(["headroom-gpu", "terrain", "atmosphere"]);
@@ -238,6 +237,8 @@ export interface MemorySample {
   readonly nvidiaDeviceBytes: number | null;
   /** `nvidia-smi`'s figure for the GPU process, bytes, where its process list has it. */
   readonly nvidiaGpuProcessBytes: number | null;
+  /** The GPU's clocks at the same instant (R05.T14.k), or why the run's GPU has no reading. */
+  readonly clocks: GpuClockSample;
 }
 
 /** Consecutive samples at which a reading is missing for one reason. */
@@ -298,16 +299,14 @@ type MemoryColumnName = Exclude<keyof MemorySeries, "tMs">;
 const NO_MEMORY_SAMPLE = "no memory sample";
 
 /**
- * One reading's column.
+ * One reading's column, in the reading's own whole unit.
  *
- * @param bytesOf - The reading at a sample, bytes, or `null` where it is missing.
- * @param reasonOf - Why a sample has no reading.
+ * @param readingOf - The reading at a sample, a whole number, or why it is missing there.
  * @returns The column, or `null` with every reason given when no sample has the reading.
  */
-function memoryColumn(
+function readingColumn(
   memory: ReadonlyArray<MemorySample>,
-  bytesOf: (sample: MemorySample) => number | null,
-  reasonOf: (sample: MemorySample) => string,
+  readingOf: (sample: MemorySample) => Measured<number>,
 ): Measured<MemoryColumn> {
   if (memory.length === 0) {
     return missing(NO_MEMORY_SAMPLE);
@@ -315,14 +314,13 @@ function memoryColumn(
   const samples: number[] = [];
   const gaps: Array<{ from: number; to: number; reason: string }> = [];
   memory.forEach((sample, i) => {
-    const bytes = bytesOf(sample);
-    if (bytes !== null) {
-      // Exact for every source, which reports KiB or MiB.
-      samples.push(Math.round(bytes / 1024));
+    const reading = readingOf(sample);
+    if (reading.value !== null) {
+      samples.push(reading.value);
       return;
     }
     samples.push(-1);
-    const reason = reasonOf(sample);
+    const reason = reading.reason;
     const last = gaps.at(-1);
     if (last !== undefined && last.to === i - 1 && last.reason === reason) {
       last.to = i;
@@ -330,10 +328,28 @@ function memoryColumn(
       gaps.push({ from: i, to: i, reason });
     }
   });
-  if (samples.every((kib) => kib === -1)) {
+  if (samples.every((reading) => reading === -1)) {
     return missing([...new Set(gaps.map(({ reason }) => reason))].join("; "));
   }
   return measured({ samples, gaps });
+}
+
+/**
+ * One memory reading's column, in whole KiB.
+ *
+ * @param bytesOf - The reading at a sample, bytes, or `null` where it is missing.
+ * @param reasonOf - Why a sample has no reading.
+ */
+function memoryColumn(
+  memory: ReadonlyArray<MemorySample>,
+  bytesOf: (sample: MemorySample) => number | null,
+  reasonOf: (sample: MemorySample) => string,
+): Measured<MemoryColumn> {
+  return readingColumn(memory, (sample) => {
+    const bytes = bytesOf(sample);
+    // Exact for every source, which reports KiB or MiB.
+    return bytes === null ? missing(reasonOf(sample)) : measured(Math.round(bytes / 1024));
+  });
 }
 
 /**
@@ -373,6 +389,123 @@ export function memorySeries(memory: ReadonlyArray<MemorySample>): MemorySeries 
   };
 }
 
+/**
+ * The results file's GPU clocks, built from the sampler's readings on the memory series' times.
+ *
+ * @remarks
+ * The source is the first reading's, which the reader keeps for the run; a sample whose clocks
+ * are missing is a gap in each column with its reason. Without a graphics clock at any sample the
+ * figure is missing with that reason. The maximum is the largest any sample read.
+ */
+export function gpuClocksOf(memory: ReadonlyArray<MemorySample>): Measured<GpuClocks> {
+  if (memory.length === 0) {
+    return missing(NO_MEMORY_SAMPLE);
+  }
+  const read = memory.flatMap(({ clocks }) => (clocks.kind === "clocks" ? [clocks] : []));
+  const first = read[0];
+  if (first === undefined) {
+    const reasons = memory.flatMap(({ clocks }) =>
+      clocks.kind === "unavailable" ? [clocks.reason] : [],
+    );
+    return missing([...new Set(reasons)].join("; "));
+  }
+  const { source } = first;
+  const readingOf =
+    (pickReading: (clocks: GpuClockReadings) => Measured<number>) =>
+    ({ clocks }: MemorySample): Measured<number> => {
+      if (clocks.kind === "unavailable") {
+        return missing(clocks.reason);
+      }
+      return clocks.source === source
+        ? pickReading(clocks)
+        : missing(`read from ${clocks.source}, not the run's ${source}`);
+    };
+  const graphicsMHz = readingColumn(
+    memory,
+    readingOf(({ graphicsMHz: mhz }) => mhz),
+  );
+  if (graphicsMHz.value === null) {
+    return missing(graphicsMHz.reason);
+  }
+  let maxMHz: number | null = null;
+  for (const clocks of read) {
+    const mhz = clocks.source === source ? clocks.maxGraphicsMHz.value : null;
+    if (mhz !== null) {
+      maxMHz = Math.max(maxMHz ?? mhz, mhz);
+    }
+  }
+  return measured({
+    source,
+    maxGraphicsMHz:
+      maxMHz === null ? missing(first.maxGraphicsMHz.reason ?? "no maximum") : measured(maxMHz),
+    graphicsMHz,
+    memoryMHz: readingColumn(
+      memory,
+      readingOf(({ memoryMHz: mhz }) => mhz),
+    ),
+    performanceState: readingColumn(
+      memory,
+      readingOf(({ performanceState: state }) => state),
+    ),
+  });
+}
+
+/** The readings of a column at or after `fromMs` on `tMs`, gaps left out, ascending. */
+function readingsFrom(
+  column: Measured<MemoryColumn>,
+  tMs: ReadonlyArray<number>,
+  fromMs: number,
+): number[] {
+  if (column.value === null) {
+    return [];
+  }
+  return column.value.samples
+    .filter((reading, i) => reading >= 0 && (tMs[i] ?? Number.NEGATIVE_INFINITY) >= fromMs)
+    .toSorted((a, b) => a - b);
+}
+
+/** The fraction of the maximum graphics clock below which a GPU row says what it was measured at. */
+export const CLOCK_NOTE_FRACTION = 0.9;
+
+/**
+ * The note a GPU row carries when the median graphics clock after the warm-up was below
+ * {@link CLOCK_NOTE_FRACTION} of the maximum (addendum B, ruling 2), or `null`.
+ *
+ * @remarks
+ * The memory series' times count from the measuring's start, which is within a few hundred
+ * milliseconds of script time 0 (the first trace window's start), so the warm-up is read on them
+ * as it is in script time.
+ *
+ * @param tMs - The memory series' times, ms.
+ * @param warmupS - The warm-up, s.
+ */
+export function clockNote(
+  clocks: Measured<GpuClocks>,
+  tMs: ReadonlyArray<number>,
+  warmupS: number,
+): string | null {
+  const maxMHz = clocks.value?.maxGraphicsMHz.value ?? null;
+  if (clocks.value === null || maxMHz === null) {
+    return null;
+  }
+  const after = readingsFrom(clocks.value.graphicsMHz, tMs, 1000 * warmupS);
+  if (after.length === 0) {
+    return null;
+  }
+  const medianMHz = nearestRank(after, 0.5);
+  return medianMHz < CLOCK_NOTE_FRACTION * maxMHz
+    ? `measured at a median ${medianMHz} of ${maxMHz} MHz (the driver's choice at this load)`
+    : null;
+}
+
+/** `entry` with `note` added after any note it has; unchanged when it has no value or no note. */
+function withNote(entry: Criterion, note: string | null): Criterion {
+  if (note === null || entry.value === null) {
+    return entry;
+  }
+  return { ...entry, note: entry.note === null ? note : `${entry.note}; ${note}` };
+}
+
 /** A column's peak, bytes, or its reason. */
 function columnPeakBytes(column: Measured<MemoryColumn>): Measured<number> {
   if (column.value === null) {
@@ -391,6 +524,8 @@ export interface MemorySources {
   rendererPrivateBytes(): Promise<number | null>;
   drm(pid: number): Promise<DrmMemoryReading>;
   nvidia(): Promise<NvidiaReading>;
+  /** The GPU's clocks, given the sample's own `nvidia-smi` reading (`GpuClockReader.read`). */
+  clocks(nvidia: NvidiaReading): Promise<GpuClockSample>;
   nowMs(): number;
 }
 
@@ -425,6 +560,11 @@ export async function sampleMemory(sources: MemorySources, startMs: number): Pro
       : sources.drm(gpuPid),
     sources.nvidia(),
   ]);
+  // The clocks' reader is not expected to reject; a failure costs this sample's clocks alone.
+  const clocks = await sources.clocks(nvidia).catch((error: unknown): GpuClockSample => ({
+    kind: "unavailable",
+    reason: `the GPU's clocks could not be read: ${error instanceof Error ? error.message : String(error)}`,
+  }));
   const gpu = nvidia.kind === "nvidia" ? nvidia.gpus[0] : undefined;
   return {
     tS: (sources.nowMs() - startMs) / 1000,
@@ -437,6 +577,7 @@ export async function sampleMemory(sources: MemorySources, startMs: number): Pro
     drmTotalBytes: drm.kind === "drm" ? drm.totalBytes : null,
     nvidiaDeviceBytes: gpu?.usedBytes ?? null,
     nvidiaGpuProcessBytes: gpu?.processes.find(({ pid }) => pid === gpuPid)?.usedBytes ?? null,
+    clocks,
   };
 }
 
@@ -565,16 +706,13 @@ export interface IncompleteFrames {
   readonly frames: number;
 }
 
-/** Where a run's GPU clocks are read (R05.T14.k). */
-export type GpuClockSource = "nvidia-smi" | "i915-sysfs" | "amdgpu-sysfs";
-
 /**
  * The GPU's clocks at 1 Hz on the memory series' times, as the driver chose them: a GPU row
  * measures each pass at them, never pinned or normalised (addendum B, ruling 2; R05.T14.k).
  */
 export interface GpuClocks {
   readonly source: GpuClockSource;
-  /** The GPU's maximum graphics clock, whole MHz. */
+  /** The GPU's maximum graphics clock, whole MHz: the largest any sample read. */
   readonly maxGraphicsMHz: Measured<number>;
   /** The graphics clock at each sample, whole MHz, in the memory series' column form. */
   readonly graphicsMHz: Measured<MemoryColumn>;
@@ -774,13 +912,42 @@ export function row(
 }
 
 /**
- * Why a GPU row is not measured when its incomplete frames could carry its verdict either way
- * (decision-r05-trace-windows-2.md, addendum B, ruling 1).
- *
- * @param count - The frames whose pass times are incomplete.
+ * A GPU row's incomplete frames: how many, and how many of them are incomplete only because their
+ * reads were still in flight when the report was taken.
  */
-export function incompleteFramesReason(count: number): string {
-  return `${count} ${count === 1 ? "frame's" : "frames'"} pass times were incomplete (the GPU was more than 27 frames behind)`;
+export interface IncompleteCount {
+  readonly frames: number;
+  /** Frames every missing resolve of which was still being read at the report, at most `frames`. */
+  readonly inFlight: number;
+}
+
+/** No incomplete frame. */
+const NO_INCOMPLETE: IncompleteCount = { frames: 0, inFlight: 0 };
+
+/**
+ * Why a frame's pass times are missing when its reads were still in flight at the report: the
+ * controller waits for them up to 1 s after the trace's last stop (R05.T14.k, the orchestrator's
+ * ruling on T14.j's open question), not the GPU's backlog of addendum B.
+ */
+export const READ_IN_FLIGHT_REASON = "read in flight at the report";
+
+/** Why the timer dropped a resolve: the GPU's backlog (addendum B, ruling 1). */
+const GPU_BACKLOG_REASON = "the GPU was more than 27 frames behind";
+
+/**
+ * Why a GPU row is not measured when its incomplete frames could carry its verdict either way
+ * (decision-r05-trace-windows-2.md, addendum B, ruling 1): the GPU's backlog, or the reads still
+ * in flight at the report, or both with their counts.
+ */
+export function incompleteFramesReason({ frames, inFlight }: IncompleteCount): string {
+  const backlog = frames - inFlight;
+  const cause =
+    inFlight === 0
+      ? GPU_BACKLOG_REASON
+      : backlog === 0
+        ? READ_IN_FLIGHT_REASON
+        : `${backlog} as ${GPU_BACKLOG_REASON}, ${inFlight} ${READ_IN_FLIGHT_REASON}`;
+  return `${frames} ${frames === 1 ? "frame's" : "frames'"} pass times were incomplete (${cause})`;
 }
 
 /**
@@ -790,11 +957,11 @@ export function incompleteFramesReason(count: number): string {
  */
 function gpuPercentile(
   values: ReadonlyArray<number>,
-  incomplete: number,
+  incomplete: IncompleteCount,
   noValue: string,
 ): Measured<number> {
   if (values.length === 0) {
-    return missing(incomplete > 0 ? incompleteFramesReason(incomplete) : noValue);
+    return missing(incomplete.frames > 0 ? incompleteFramesReason(incomplete) : noValue);
   }
   return measured(
     nearestRank(
@@ -829,7 +996,7 @@ export function boundedGpuRow(
   criterion: string,
   limit: Measured<number>,
   valuesMs: ReadonlyArray<number>,
-  incomplete: number,
+  incomplete: IncompleteCount,
   toleranceMs: number,
   noValue: string,
 ): Criterion {
@@ -841,10 +1008,11 @@ export function boundedGpuRow(
     gpuPercentile(valuesMs, incomplete, noValue),
     toleranceMs,
   );
-  if (incomplete === 0 || plain.value === null || plain.limit === null) {
+  const count = incomplete.frames;
+  if (count === 0 || plain.value === null || plain.limit === null) {
     return plain;
   }
-  const placed = (ms: number): number[] => Array.from({ length: incomplete }, () => ms);
+  const placed = (ms: number): number[] => Array.from({ length: count }, () => ms);
   const sorted = valuesMs.toSorted((a, b) => a - b);
   const above = judge(
     nearestRank([...sorted, ...placed(Infinity)], GPU_ROW_PERCENTILE),
@@ -859,10 +1027,12 @@ export function boundedGpuRow(
   if (above !== below) {
     return { ...plain, verdict: "not-measured", note: incompleteFramesReason(incomplete) };
   }
+  const inFlight =
+    incomplete.inFlight === 0 ? "" : ` (${incomplete.inFlight} ${READ_IN_FLIGHT_REASON})`;
   return {
     ...plain,
     verdict: above,
-    note: `${incomplete} ${incomplete === 1 ? "frame" : "frames"} with incomplete pass times left out; the verdict holds whatever their times`,
+    note: `${count} ${count === 1 ? "frame" : "frames"} with incomplete pass times left out${inFlight}; the verdict holds whatever their times`,
   };
 }
 
@@ -1007,7 +1177,10 @@ function statsOrMissing(
  * are left out of every per-frame figure, and a failed window, one with no timed event among them
  * (`EMPTY_TRACE_REASON`), makes every figure read from the trace missing with its reason. A frame
  * the renderer reports missing resolves for is left out of the GPU rows' sums and counted, and
- * the rows are judged by {@link boundedGpuRow}. The GPU's clocks are null until R05.T14.k.
+ * the rows are judged by {@link boundedGpuRow}; a frame whose missing reads were all still in
+ * flight at the report is counted with that reason ({@link READ_IN_FLIGHT_REASON}). The GPU's
+ * clocks come from the memory samples, and a GPU row measured at a median clock below 90% of the
+ * maximum says so ({@link clockNote}).
  */
 export function buildResults(input: ResultsInput): DescentResults {
   const { run, report, memory } = input;
@@ -1076,16 +1249,26 @@ export function buildResults(input: ResultsInput): DescentResults {
   const complete: number[] = [];
   let droppedTimes = 0;
   let partialTimes = 0;
+  let inFlightTimes = 0;
   for (const i of warm) {
-    if ((frames.missingResolves[i] ?? 0) === 0) {
+    const missingResolves = frames.missingResolves[i] ?? 0;
+    if (missingResolves === 0) {
       complete.push(i);
-    } else if (frames.passes.some((pass) => (pass.gpuMs[i] ?? null) !== null)) {
+      continue;
+    }
+    // A frame with a resolve the timer dropped is the backlog's, whatever else is in flight.
+    if ((frames.inFlightResolves[i] ?? 0) >= missingResolves) {
+      inFlightTimes += 1;
+    }
+    if (frames.passes.some((pass) => (pass.gpuMs[i] ?? null) !== null)) {
       partialTimes += 1;
     } else {
       droppedTimes += 1;
     }
   }
-  const incomplete = timed ? droppedTimes + partialTimes : 0;
+  const incomplete: IncompleteCount = timed
+    ? { frames: droppedTimes + partialTimes, inFlight: inFlightTimes }
+    : NO_INCOMPLETE;
   const incompleteFrames: Measured<IncompleteFrames> = timed
     ? measured({ dropped: droppedTimes, partial: partialTimes, frames: warm.length })
     : missing(timerReason);
@@ -1149,6 +1332,8 @@ export function buildResults(input: ResultsInput): DescentResults {
   const ourCodeP95Ms = p95Of(pick(frames.ourCodeMs, warm), "no frame after the warm-up");
 
   const series = memorySeries(memory);
+  const clocks = gpuClocksOf(memory);
+  const clockMeasured = clockNote(clocks, series.tMs, report.warmupS);
   const nvidiaDevicePeakBytes = columnPeakBytes(series.nvidiaDeviceKiB);
   const nvidiaLessBaseline: Measured<number> =
     run.nvidiaBaselineBytes === null
@@ -1178,33 +1363,35 @@ export function buildResults(input: ResultsInput): DescentResults {
       "ms",
       ourCodeP95Ms,
     ),
-    boundedGpuRow(
-      "headroom-gpu",
-      "GPU pass sum ≤ 0.8 T at the 95th percentile",
-      headroomLimit,
-      allSums.values,
-      incomplete,
-      allSums.maxPasses * tolerancePerPassMs,
-      timed ? "no timed pass" : timerReason,
-    ),
-    boundedGpuRow(
-      "terrain",
-      `terrain GPU time ≤ ${limits.terrainMs} ms at the 95th percentile`,
-      measured(limits.terrainMs),
-      terrain.values,
-      incomplete,
-      terrain.maxPasses * tolerancePerPassMs,
-      timed ? "no timed terrain pass" : timerReason,
-    ),
-    boundedGpuRow(
-      "atmosphere",
-      `atmosphere GPU time ≤ ${limits.atmosphereMs} ms at the 95th percentile`,
-      measured(limits.atmosphereMs),
-      atmosphere.values,
-      incomplete,
-      atmosphere.maxPasses * tolerancePerPassMs,
-      timed ? "no timed atmosphere pass" : timerReason,
-    ),
+    ...[
+      boundedGpuRow(
+        "headroom-gpu",
+        "GPU pass sum ≤ 0.8 T at the 95th percentile",
+        headroomLimit,
+        allSums.values,
+        incomplete,
+        allSums.maxPasses * tolerancePerPassMs,
+        timed ? "no timed pass" : timerReason,
+      ),
+      boundedGpuRow(
+        "terrain",
+        `terrain GPU time ≤ ${limits.terrainMs} ms at the 95th percentile`,
+        measured(limits.terrainMs),
+        terrain.values,
+        incomplete,
+        terrain.maxPasses * tolerancePerPassMs,
+        timed ? "no timed terrain pass" : timerReason,
+      ),
+      boundedGpuRow(
+        "atmosphere",
+        `atmosphere GPU time ≤ ${limits.atmosphereMs} ms at the 95th percentile`,
+        measured(limits.atmosphereMs),
+        atmosphere.values,
+        incomplete,
+        atmosphere.maxPasses * tolerancePerPassMs,
+        timed ? "no timed atmosphere pass" : timerReason,
+      ),
+    ].map((entry) => withNote(entry, clockMeasured)),
     row(
       "memory",
       setting === "high" ? "GPU resident ≤ 3 GB" : "GPU resident ≤ 1 GB",
@@ -1273,7 +1460,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       sumP95Ms,
       incompleteFrames,
       gpuProcess: pooled.value === null ? missing(pooled.reason) : pooled.value.gpuProcess,
-      clocks: missing(GPU_CLOCKS_NOT_READ),
+      clocks,
     },
     mainThread: {
       ourCodeP95Ms,
@@ -1329,8 +1516,11 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 /** The GPU a run's description names. */
 type GpuDescription = NonNullable<MachineDescription["gpu"]["value"]>;
 
-/** The active GPU of Chromium's basic GPU information, narrowed from what Electron returns. */
-function activeGpu(info: unknown): Measured<GpuDescription> {
+/**
+ * The active GPU of Chromium's basic GPU information (`app.getGPUInfo("basic")`), narrowed from
+ * what Electron returns: the run's GPU, whose clocks `GpuClockReader` reads.
+ */
+export function activeGpu(info: unknown): Measured<GpuDescription> {
   const devices = isRecord(info) ? info["gpuDevice"] : undefined;
   const list = Array.isArray(devices) ? devices.filter(isRecord) : [];
   const device = list.find((entry) => entry["active"] === true) ?? list[0];
@@ -2033,7 +2223,11 @@ function checkClocks(value: Readonly<Record<string, unknown>>, problems: string[
     problems.push(`${path}.maxGraphicsMHz is not whole MHz`);
   }
   const tMs = childAt(value, ["memory", "series", "tMs"]);
-  const count = Array.isArray(tMs) ? tMs.length : 0;
+  if (!Array.isArray(tMs)) {
+    // The memory check names the series' problem; there are no times to hold the columns to.
+    return;
+  }
+  const count = tMs.length;
   for (const [name, unit] of [
     ["graphicsMHz", "MHz"],
     ["memoryMHz", "MHz"],
@@ -2191,6 +2385,75 @@ function describeIncomplete({ dropped, partial, frames }: IncompleteFrames): str
     : `${dropped} dropped and ${partial} partial of ${frames} frames after the warm-up, left out of the GPU rows' sums, whose verdicts hold whatever their times`;
 }
 
+/**
+ * The GPU's clocks after the warm-up in words: the graphics clock's median, 5th and 95th
+ * percentiles against its maximum, the memory clock's median and the performance states, with
+ * the source; the warm-up read on the memory series' times as {@link clockNote} reads it.
+ *
+ * @param tMs - The memory series' times, ms.
+ * @param warmupS - The warm-up, s.
+ */
+export function describeClocks(
+  clocks: GpuClocks,
+  tMs: ReadonlyArray<number>,
+  warmupS: number,
+): string {
+  const fromMs = 1000 * warmupS;
+  const graphics = readingsFrom(clocks.graphicsMHz, tMs, fromMs);
+  const maxMHz = clocks.maxGraphicsMHz.value;
+  const maximum =
+    maxMHz === null ? `an unknown maximum (${clocks.maxGraphicsMHz.reason})` : `${maxMHz} MHz`;
+  const parts = [`from ${clocks.source}`];
+  if (graphics.length === 0) {
+    parts.push(`no graphics clock after the warm-up, of ${maximum}`);
+  } else {
+    const medianMHz = nearestRank(graphics, 0.5);
+    const share = maxMHz === null ? "" : ` (${((100 * medianMHz) / maxMHz).toFixed(0)} %)`;
+    parts.push(
+      `graphics median ${medianMHz} MHz${share}, p5 ${nearestRank(graphics, 0.05)}, p95 ${nearestRank(graphics, 0.95)}, after the warm-up, of ${maximum}`,
+    );
+  }
+  const memoryMHz = readingsFrom(clocks.memoryMHz, tMs, fromMs);
+  if (memoryMHz.length > 0) {
+    parts.push(`memory median ${nearestRank(memoryMHz, 0.5)} MHz`);
+  }
+  const states = readingsFrom(clocks.performanceState, tMs, fromMs);
+  const [lowest] = states;
+  const highest = states.at(-1);
+  if (lowest !== undefined && highest !== undefined) {
+    parts.push(
+      lowest === highest
+        ? `performance state P${lowest}`
+        : `performance states P${lowest} to P${highest}`,
+    );
+  }
+  return parts.join("; ");
+}
+
+/** A clock column's every sample in words, `—` in its gaps, after its name. */
+function describeColumn(name: string, figure: Measured<MemoryColumn>): string {
+  return figure.value === null
+    ? `${name} — (${figure.reason})`
+    : `${name} ${figure.value.samples.map((reading) => (reading < 0 ? "—" : String(reading))).join(" ")}`;
+}
+
+/**
+ * Every sample of the GPU's clocks in words, for a run's log: a smoke, whose 10 s are all
+ * warm-up, writes no results file, so its log is where its clocks are seen.
+ */
+export function describeClockSamples(clocks: Measured<GpuClocks>): string {
+  if (clocks.value === null) {
+    return `— (${clocks.reason})`;
+  }
+  const { source, maxGraphicsMHz, graphicsMHz, memoryMHz, performanceState } = clocks.value;
+  return [
+    `from ${source}, maximum ${textOr(maxGraphicsMHz, (mhz) => `${mhz} MHz`)}`,
+    describeColumn("graphics MHz", graphicsMHz),
+    describeColumn("memory MHz", memoryMHz),
+    describeColumn("performance states", performanceState),
+  ].join("; ");
+}
+
 /** The heading of a profiled run's summary: its figures are a diagnostic's. */
 const PROFILED_HEADING =
   "**PROFILED: diagnostic, not judged; renderer and app memory include the CPU profiler's samples.**";
@@ -2212,6 +2475,7 @@ export function summaryMarkdown(results: DescentResults): string {
     `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,
     `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Incomplete pass times:** ${textOr(results.gpu.incompleteFrames, describeIncomplete)}`,
+    `- **GPU clocks:** ${textOr(results.gpu.clocks, (clocks) => describeClocks(clocks, memory.series.tMs, run.warmupS))}`,
     `- **Options:** ${Object.entries(run.options)
       .map(([key, value]) => `\`--${key} ${String(value)}\``)
       .join(" ")}`,

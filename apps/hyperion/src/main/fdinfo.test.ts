@@ -17,7 +17,9 @@ import {
  * driver 615.71.09, 2026-10-02); the i915 and amdgpu files in the kernel's documented layout
  * (Documentation/gpu/drm-usage-stats.rst, i915's and amdgpu's `show_fdinfo`), amdgpu's client 34 in
  * the older `drm-memory-*` form and client 35 in the newer `drm-total-*` one, since neither device
- * is in the development machine.
+ * is in the development machine. `nvidia-smi.xml` is `nvidia-smi -q -x` on the same machine, run
+ * unprivileged with the GPU idle (2026-10-06, R05.T14.k), trimmed to the elements read and the
+ * clock blocks beside them.
  */
 const FIXTURES = join(__dirname, "fixtures");
 
@@ -150,7 +152,7 @@ describe("the GPU process's DRM memory", () => {
 });
 
 describe("nvidia-smi", () => {
-  it("reads the device's memory and its processes from a recorded report", () => {
+  it("reads the device's memory, its processes and its clocks from a recorded report", () => {
     expect(parseNvidiaSmi(fixture("nvidia-smi.xml"))).toEqual({
       kind: "nvidia",
       driverVersion: "615.71.09",
@@ -160,21 +162,51 @@ describe("nvidia-smi", () => {
           productName: "NVIDIA GeForce RTX 3080",
           totalBytes: 10_240 * MIB,
           reservedBytes: 320 * MIB,
-          usedBytes: 168 * MIB,
+          usedBytes: 123 * MIB,
           processes: [
-            { pid: 1303, type: "G", name: "/usr/lib/Xorg", usedBytes: 110 * MIB },
-            { pid: 1439, type: "G", name: "alacritty", usedBytes: 10 * MIB },
-            { pid: 421_400, type: "G", name: "alacritty", usedBytes: 10 * MIB },
+            { pid: 1351, type: "G", name: "/usr/lib/Xorg", usedBytes: 84 * MIB },
+            { pid: 1431, type: "G", name: "alacritty", usedBytes: 10 * MIB },
           ],
+          // Idle: the lowest state, its clocks far below the maximum.
+          clocks: { graphicsMHz: 210, memoryMHz: 405, maxGraphicsMHz: 2115, performanceState: 8 },
         },
       ],
     });
   });
 
   it("reads N/A as null", () => {
-    const xml = fixture("nvidia-smi.xml").replace("<used>168 MiB</used>", "<used>N/A</used>");
+    const xml = fixture("nvidia-smi.xml").replace("<used>123 MiB</used>", "<used>N/A</used>");
     const reading = parseNvidiaSmi(xml);
     expect(reading.kind === "nvidia" ? reading.gpus[0]?.usedBytes : "unread").toBeNull();
+  });
+
+  it("reads a clock or a performance state of N/A as null", () => {
+    const xml = fixture("nvidia-smi.xml")
+      .replace("<graphics_clock>210 MHz</graphics_clock>", "<graphics_clock>N/A</graphics_clock>")
+      .replace(
+        "<performance_state>P8</performance_state>",
+        "<performance_state>N/A</performance_state>",
+      );
+    const reading = parseNvidiaSmi(xml);
+    expect(reading.kind === "nvidia" ? reading.gpus[0]?.clocks : "unread").toEqual({
+      graphicsMHz: null,
+      memoryMHz: 405,
+      maxGraphicsMHz: 2115,
+      performanceState: null,
+    });
+  });
+
+  it("reads each clock in its own block, not the application clocks beside it", () => {
+    const xml = fixture("nvidia-smi.xml").replace(
+      /<clocks>[\s\S]*?<\/clocks>/,
+      "<clocks><mem_clock>9501 MHz</mem_clock></clocks>",
+    );
+    const reading = parseNvidiaSmi(xml);
+    expect(reading.kind === "nvidia" ? reading.gpus[0]?.clocks : "unread").toMatchObject({
+      graphicsMHz: null,
+      memoryMHz: 9501,
+      maxGraphicsMHz: 2115,
+    });
   });
 
   it("is null with its reason when it lists no GPU", () => {

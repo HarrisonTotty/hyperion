@@ -7,6 +7,7 @@
 - **T:** — (no window shown); warm-up 10 s
 - **Trace:** — (the trace has no timed event)
 - **Incomplete pass times:** — (not recorded before results version 5)
+- **GPU clocks:** — (not recorded before results version 5)
 - **Options:** `--setting low` `--seed 7` `--smoke false` `--ridged off` `--dawnSafety on` `--terrainVertexPath face-differences` `--terrainNormals mesh`
 
 ## The criterion (Design note 21)

@@ -1,6 +1,7 @@
 /**
  * GPU memory readings for the descent spike (plan R05, T14.c, Design note 18): the GPU process's
- * DRM fdinfo, and `nvidia-smi -q -x` where the driver is NVIDIA's.
+ * DRM fdinfo, and `nvidia-smi -q -x` where the driver is NVIDIA's, whose clocks the spike records
+ * too (T14.k, `gpuClocks.ts`).
  *
  * @remarks
  * DRM fdinfo is the kernel's per-client usage (Documentation/gpu/drm-usage-stats.rst): each open
@@ -211,7 +212,22 @@ export interface NvidiaProcess {
   readonly usedBytes: number | null;
 }
 
-/** One NVIDIA GPU's memory. */
+/**
+ * One NVIDIA GPU's clocks as the driver chose them (R05.T14.k, decision-r05-trace-windows-2.md,
+ * addendum B, ruling 2), each `null` where `nvidia-smi` writes `N/A`.
+ */
+export interface NvidiaClocks {
+  /** `clocks/graphics_clock`, whole MHz. */
+  readonly graphicsMHz: number | null;
+  /** `clocks/mem_clock`, whole MHz. */
+  readonly memoryMHz: number | null;
+  /** `max_clocks/graphics_clock`, whole MHz: the highest graphics clock the GPU runs at. */
+  readonly maxGraphicsMHz: number | null;
+  /** `performance_state`'s number: 0 for P0, the highest, up to 15 for P15, the lowest. */
+  readonly performanceState: number | null;
+}
+
+/** One NVIDIA GPU's memory and clocks. */
 export interface NvidiaGpu {
   /** The PCI bus ID, as the `<gpu id=…>` attribute gives it. */
   readonly busId: string;
@@ -220,6 +236,7 @@ export interface NvidiaGpu {
   readonly reservedBytes: number | null;
   readonly usedBytes: number | null;
   readonly processes: ReadonlyArray<NvidiaProcess>;
+  readonly clocks: NvidiaClocks;
 }
 
 /** What `nvidia-smi -q -x` reports, or why it reports nothing. */
@@ -244,14 +261,28 @@ function block(xml: string, tag: string): string | undefined {
   return start < 0 || end < 0 ? undefined : xml.slice(start + tag.length + 2, end);
 }
 
+/** A clock as `nvidia-smi` writes it, `<n> MHz`, or `undefined` (as for `N/A`). */
+function parseMHz(text: string | undefined): number | undefined {
+  const match = /^(\d+)\s*MHz$/.exec(text ?? "");
+  return match === null ? undefined : Number(match[1]);
+}
+
+/** A performance state as `nvidia-smi` writes it, `P<n>`, as its number, or `undefined`. */
+function parsePerformanceState(text: string | undefined): number | undefined {
+  const match = /^P(\d+)$/.exec(text ?? "");
+  return match === null ? undefined : Number(match[1]);
+}
+
 /**
  * Parses `nvidia-smi -q -x`.
  *
  * @remarks
  * Only the elements read are parsed, by pattern: `driver_version`, each `<gpu id>` with its
- * `product_name`, its `fb_memory_usage` (`total`, `reserved`, `used`, in MiB) and its
- * `processes`' `process_info` (`pid`, `type`, `process_name`, `used_memory`). A value of `N/A`
- * reads as `null`.
+ * `product_name`, its `fb_memory_usage` (`total`, `reserved`, `used`, in MiB), its `processes`'
+ * `process_info` (`pid`, `type`, `process_name`, `used_memory`), its `performance_state`, and the
+ * `graphics_clock` and `mem_clock` of its `clocks` and the `graphics_clock` of its `max_clocks`
+ * (R05.T14.k). The other clock blocks (`applications_clocks`, `deferred_clocks` and more) use the
+ * same element names, so each is read within its own block. A value of `N/A` reads as `null`.
  */
 export function parseNvidiaSmi(xml: string): NvidiaReading {
   const driverVersion = tagText(xml, "driver_version") ?? tagText(xml, "kmd_version");
@@ -274,6 +305,8 @@ export function parseNvidiaSmi(xml: string): NvidiaReading {
         usedBytes: parseBytes(tagText(process, "used_memory") ?? "") ?? null,
       });
     }
+    const clocks = block(body, "clocks") ?? "";
+    const maxClocks = block(body, "max_clocks") ?? "";
     gpus.push({
       busId,
       productName: tagText(body, "product_name") ?? "",
@@ -281,6 +314,12 @@ export function parseNvidiaSmi(xml: string): NvidiaReading {
       reservedBytes: parseBytes(tagText(fb, "reserved") ?? "") ?? null,
       usedBytes: parseBytes(tagText(fb, "used") ?? "") ?? null,
       processes: processes.filter(({ pid }) => Number.isInteger(pid)),
+      clocks: {
+        graphicsMHz: parseMHz(tagText(clocks, "graphics_clock")) ?? null,
+        memoryMHz: parseMHz(tagText(clocks, "mem_clock")) ?? null,
+        maxGraphicsMHz: parseMHz(tagText(maxClocks, "graphics_clock")) ?? null,
+        performanceState: parsePerformanceState(tagText(body, "performance_state")) ?? null,
+      },
     });
   }
   if (gpus.length === 0) {

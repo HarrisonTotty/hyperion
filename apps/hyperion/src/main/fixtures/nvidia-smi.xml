@@ -1,7 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE nvidia_smi_log SYSTEM "nvsmi_device_v13.dtd">
 <nvidia_smi_log>
-	<timestamp>Fri Oct  2 19:05:28 2026</timestamp>
+	<timestamp>Tue Oct  6 15:55:18 2026</timestamp>
 	<driver_version>615.71.09</driver_version>
 	<!-- driver_version is deprecated and will be removed in CUDA 14.0; use kmd_version instead -->
 	<cuda_version>13.4</cuda_version>
@@ -11,34 +11,63 @@
 	<attached_gpus>1</attached_gpus>
 	<gpu id="00000000:08:00.0">
 		<product_name>NVIDIA GeForce RTX 3080</product_name>
-		<!-- trimmed to the elements fdinfo.ts reads -->
+		<!-- trimmed to the elements fdinfo.ts reads, beside the clock blocks it must not mistake for them -->
+		<performance_state>P8</performance_state>
+		<clocks_event_reasons>
+			<clocks_event_reason_gpu_idle>Active</clocks_event_reason_gpu_idle>
+			<clocks_event_reason_applications_clocks_setting>Not Active</clocks_event_reason_applications_clocks_setting>
+			<clocks_event_reason_sw_power_cap>Not Active</clocks_event_reason_sw_power_cap>
+			<clocks_event_reason_hw_slowdown>Not Active</clocks_event_reason_hw_slowdown>
+			<clocks_event_reason_hw_thermal_slowdown>Not Active</clocks_event_reason_hw_thermal_slowdown>
+			<clocks_event_reason_hw_power_brake_slowdown>Not Active</clocks_event_reason_hw_power_brake_slowdown>
+			<clocks_event_reason_sync_boost>Not Active</clocks_event_reason_sync_boost>
+			<clocks_event_reason_sw_thermal_slowdown>Not Active</clocks_event_reason_sw_thermal_slowdown>
+			<clocks_event_reason_display_clocks_setting>Not Active</clocks_event_reason_display_clocks_setting>
+			<clocks_event_reason_board_limit>Not Active</clocks_event_reason_board_limit>
+			<clocks_event_reason_reliability>Not Active</clocks_event_reason_reliability>
+		</clocks_event_reasons>
 		<fb_memory_usage>
 			<total>10240 MiB</total>
 			<reserved>320 MiB</reserved>
-			<used>168 MiB</used>
-			<free>9753 MiB</free>
+			<used>123 MiB</used>
+			<free>9799 MiB</free>
 		</fb_memory_usage>
+		<clocks>
+			<graphics_clock>210 MHz</graphics_clock>
+			<sm_clock>210 MHz</sm_clock>
+			<mem_clock>405 MHz</mem_clock>
+			<video_clock>555 MHz</video_clock>
+		</clocks>
+		<applications_clocks>
+			<graphics_clock>Requested functionality has been deprecated</graphics_clock>
+			<mem_clock>Requested functionality has been deprecated</mem_clock>
+		</applications_clocks>
+		<default_applications_clocks>
+			<graphics_clock>Requested functionality has been deprecated</graphics_clock>
+			<mem_clock>Requested functionality has been deprecated</mem_clock>
+		</default_applications_clocks>
+		<deferred_clocks>
+			<mem_clock>N/A</mem_clock>
+		</deferred_clocks>
+		<max_clocks>
+			<graphics_clock>2115 MHz</graphics_clock>
+			<sm_clock>2115 MHz</sm_clock>
+			<mem_clock>9501 MHz</mem_clock>
+			<video_clock>1965 MHz</video_clock>
+		</max_clocks>
 		<processes>
 			<process_info>
 				<gpu_instance_id>N/A</gpu_instance_id>
 				<compute_instance_id>N/A</compute_instance_id>
-				<pid>1303</pid>
+				<pid>1351</pid>
 				<type>G</type>
 				<process_name>/usr/lib/Xorg</process_name>
-				<used_memory>110 MiB</used_memory>
+				<used_memory>84 MiB</used_memory>
 			</process_info>
 			<process_info>
 				<gpu_instance_id>N/A</gpu_instance_id>
 				<compute_instance_id>N/A</compute_instance_id>
-				<pid>1439</pid>
-				<type>G</type>
-				<process_name>alacritty</process_name>
-				<used_memory>10 MiB</used_memory>
-			</process_info>
-			<process_info>
-				<gpu_instance_id>N/A</gpu_instance_id>
-				<compute_instance_id>N/A</compute_instance_id>
-				<pid>421400</pid>
+				<pid>1431</pid>
 				<type>G</type>
 				<process_name>alacritty</process_name>
 				<used_memory>10 MiB</used_memory>

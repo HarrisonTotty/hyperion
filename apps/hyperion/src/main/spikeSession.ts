@@ -1,8 +1,8 @@
 /**
- * One descent-spike run in the main process (plan R05, T13.c, T14.c, T14.d, T14.e, T14.i): the
- * trace and the 1 Hz memory sampler between the renderer's start and stop, the trace's windows at
- * the renderer's cycles, the results file from its report, the capture's files, and the app's exit
- * with the run's status.
+ * One descent-spike run in the main process (plan R05, T13.c, T14.c, T14.d, T14.e, T14.i, T14.k):
+ * the trace and the 1 Hz memory sampler, with the GPU's clocks beside the memory, between the
+ * renderer's start and stop, the trace's windows at the renderer's cycles, the results file from
+ * its report, the capture's files, and the app's exit with the run's status.
  *
  * @remarks
  * The trace is a list of windows (decision-r05-trace-windows.md). Each window is written to its own
@@ -28,6 +28,9 @@ import { type Measured, measured, missing } from "./measured";
 import type { TraceFigures } from "./reduceTrace";
 import {
   buildResults,
+  describeClocks,
+  describeClockSamples,
+  gpuClocksOf,
   type MemorySample,
   type ResultsFiles,
   type RunDescription,
@@ -364,6 +367,10 @@ export class SpikeSession {
       throw new Error("the spike wrote results before it started measuring");
     }
     if (this.#deps.launch.smoke) {
+      // A smoke's 10 s are all warm-up and it writes no file: its log holds every clock sample.
+      this.#deps.log(
+        `descent spike: GPU clocks sampled ${describeClockSamples(gpuClocksOf(this.#memory))}`,
+      );
       return { kind: "smoke checked", failure: this.#checkSmokeTrace(report) };
     }
     const described = await this.#run;
@@ -380,6 +387,10 @@ export class SpikeSession {
             },
           };
     const results = buildResults({ run, report, trace: this.#trace, memory: this.#memory });
+    const { clocks } = results.gpu;
+    this.#deps.log(
+      `descent spike: GPU clocks ${clocks.value === null ? `— (${clocks.reason})` : describeClocks(clocks.value, results.memory.series.tMs, report.warmupS)}`,
+    );
     const paths = await writeResults(this.#deps.outDir, results, this.#files.results);
     this.#deps.log(`descent spike: results in ${paths.json}`);
     return { kind: "written", paths };

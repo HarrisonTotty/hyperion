@@ -18,11 +18,12 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::capture::Capture;
+use crate::clocks::ClockSampler;
 use crate::replay::{FrameTarget, Replayer, canvas_view_formats};
 use crate::results::{ReplayFigures, Setting};
 use crate::run::{
-    Frames, RunReplayError, collect_errors, device_for, frame_ranges, main_surface, rows_of,
-    upload_bytes,
+    Frames, RunReplayError, clock_source, collect_errors, device_for, frame_ranges, main_surface,
+    rows_of, upload_bytes,
 };
 
 /// Acquisitions that may fail in a row before the replay gives up.
@@ -40,10 +41,13 @@ struct Running {
     adapter: wgpu::AdapterInfo,
     errors: Arc<Mutex<Vec<String>>>,
     display_hz: Option<f64>,
+    clocks: ClockSampler,
 }
 
 struct App<'a> {
     capture: &'a Capture,
+    /// When the replay started, which the clock samples' times count from.
+    started: Instant,
     instance: wgpu::Instance,
     running: Option<Running>,
     ranges: Vec<std::ops::Range<usize>>,
@@ -122,6 +126,9 @@ impl App<'_> {
             .current_monitor()
             .and_then(|monitor| monitor.refresh_rate_millihertz())
             .map(|millihertz| f64::from(millihertz) / 1000.0);
+        let info = adapter.get_info();
+        // Read before the first frame, which the next redraw replays.
+        let clocks = ClockSampler::start(clock_source(&info), self.started);
         Ok(Running {
             window,
             surface,
@@ -130,9 +137,10 @@ impl App<'_> {
             queue,
             replayer,
             frames: Frames::default(),
-            adapter: adapter.get_info(),
+            adapter: info,
             errors,
             display_hz,
+            clocks,
         })
     }
 
@@ -226,9 +234,11 @@ pub(crate) fn run(
     setting: Setting,
 ) -> Result<ReplayFigures, RunReplayError> {
     let started_at = SystemTime::now();
+    let started = Instant::now();
     let event_loop = EventLoop::new().map_err(RunReplayError::window)?;
     let mut app = App {
         capture,
+        started,
         instance: wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
             event_loop.owned_display_handle(),
         ))),
@@ -250,6 +260,7 @@ pub(crate) fn run(
         .running
         .ok_or_else(|| RunReplayError::window("the window never opened"))?;
     let times = running.frames.finish(&running.replayer, &running.device)?;
+    let clocks = running.clocks.finish();
     let mut findings = app.findings;
     findings.extend(times.unread_finding());
     let intervals_ms = app
@@ -286,5 +297,6 @@ pub(crate) fn run(
             .unwrap_or_else(PoisonError::into_inner)
             .clone(),
         findings,
+        clocks,
     })
 }

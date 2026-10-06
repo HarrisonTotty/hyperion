@@ -13,6 +13,10 @@
  * trace but not the run: one last window, failed with the reason, stands for the rest of the run,
  * so that no boundary the trace never reached leaves frames out.
  *
+ * After the trace's last stop, the run waits up to {@link PASS_READS_WAIT_MS} for the reads of its
+ * frames' pass times still in flight before it takes its report (R05.T14.k), so that a frame whose
+ * times were merely late is complete; a read still outstanding then is missing for that reason.
+ *
  * A smoke hands its report to the same results call as a run: the main process checks the trace's
  * windows against it, frame by frame, writes no file, and answers the first failed window's
  * reason, which fails the smoke (decision-r05-trace-windows-2.md, addendum A).
@@ -34,7 +38,12 @@ import {
 import type { SelectionInput } from "../terrain/select";
 import type { GpuCapture } from "./capture";
 import type { PipelineTally } from "./pipelineShim";
-import { type RecordedDescent, type ResolveCounter, SpikeRecorder } from "./spikeHarness";
+import {
+  type RecordedDescent,
+  type ResolveCounter,
+  type SpikeReads,
+  SpikeRecorder,
+} from "./spikeHarness";
 import { TRACE_BOUNDARY_GUARD_S, traceBoundaries } from "./traceWindows";
 
 /** How long `--smoke` runs, script seconds. */
@@ -52,6 +61,13 @@ export const CAPTURE_FRAMES = 120;
 
 /** How often the renderer's memory is handed to the main process's sampler, ms. */
 const MEMORY_INTERVAL_MS = 1000;
+
+/**
+ * How long the run waits after the trace's last stop for the pass-time reads still in flight
+ * before it takes its report, ms (R05.T14.k, the orchestrator's ruling on T14.j's open question):
+ * a read outstanding after it is missing as read in flight at the report.
+ */
+export const PASS_READS_WAIT_MS = 1000;
 
 /** What one frame tells the controller (lane C's `SpikeFrameSample`). */
 export interface ControllerFrame {
@@ -78,6 +94,7 @@ export interface SpikeControllerDeps {
   readonly spike: SpikeApi;
   readonly gpu: {
     readonly resolves: Pick<ResolveCounter, "value" | "runFrame">;
+    readonly reads: SpikeReads;
     readonly tally: PipelineTally;
   };
   /** T15.a's capture when `--capture` is given (the parts the controller drives). */
@@ -387,6 +404,13 @@ export class SpikeController {
         last.stopRequestedMs = stopRequestedMs;
       }
       await spike.stopTrace();
+      // The reads of the frames' pass times still in flight end first, within the bound, so that
+      // only one outstanding after it counts as missing, for that reason.
+      if (!(await recorder.readsSettled(PASS_READS_WAIT_MS))) {
+        this.#deps.log(
+          `pass-time reads were still in flight ${String(PASS_READS_WAIT_MS)} ms after the trace's last stop`,
+        );
+      }
       const traceWindows: SpikeTraceWindow[] = this.#windows.map((window) => ({
         startedMs: window.startedMs,
         stopRequestedMs: window.stopRequestedMs ?? stopRequestedMs,
