@@ -16,10 +16,11 @@
 //! # Reddening
 //!
 //! A colour is the star's own light. [`StarColour::reddened`] gives it through dust (R06.T9.e;
-//! decided 2026-10-06, `decision-r06-t9b-band.md`, item 3 and its addendum), from four companion
-//! tables row for row the colour table's: [`tables::star_colour_reddening`] and the three of
-//! [`REDDENING_A_V_NODES`] (`star_colour_reddening_av02_05`, `_av10_15` and `_av20_30`). It is
-//! the one function the band, the limit map's glare and the server's wire read for reddening.
+//! decided 2026-10-06, `decision-r06-t9b-band.md`, item 3 and its addendum), from five companion
+//! tables row for row the colour table's: [`tables::star_colour_reddening`] and the four of
+//! [`REDDENING_A_V_NODES`] (`star_colour_reddening_av02_05`, `_av07p5`, `_av10_15` and
+//! `_av20_30`). It is the one function the band, the limit map's glare and the server's wire read
+//! for reddening.
 //!
 //! - **One A<sub>V</sub>.** Every A<sub>V</sub> here is plan 07's sightline quantity: the law's
 //!   normalisation at x = 1.82 µm⁻¹ (CCM's 0.549 µm) times the dust column, the only extinction the
@@ -50,23 +51,25 @@ use crate::tables::star_colour::{
 };
 use crate::tables::star_colour_reddening::{NORMAL_REDDENING, WHITE_DWARF_REDDENING};
 use crate::tables::{
-    star_colour_reddening_av02_05 as av02_05, star_colour_reddening_av10_15 as av10_15,
-    star_colour_reddening_av20_30 as av20_30,
+    star_colour_reddening_av02_05 as av02_05, star_colour_reddening_av07p5 as av07p5,
+    star_colour_reddening_av10_15 as av10_15, star_colour_reddening_av20_30 as av20_30,
 };
 
 pub use crate::tables::star_colour::CAMERA_ETA_SUN;
 
 /// The extinctions at which the reddening tables hold each band's secant, mag of plan 07's
-/// sightline A<sub>V</sub> (decided 2026-10-06, `decision-r06-t9b-band.md`, addendum item 2): the
-/// secants are piecewise linear in A<sub>V</sub> through the moment at 0 and these, and held beyond
-/// the last. A listed star lies behind at most about A<sub>V</sub> 21 − DM (no cut exceeds
+/// sightline A<sub>V</sub> (decided 2026-10-06, `decision-r06-t9b-band.md`, addendum item 2, and
+/// the node at 7.5 ruled the same day for the camera term between 5 and 10): the secants are
+/// piecewise linear in A<sub>V</sub> through the moment at 0 and these, and held beyond the last.
+/// A listed star lies behind at most about A<sub>V</sub> 21 − DM (no cut exceeds
 /// [`MAX_CUT_V`](crate::sky::eye::MAX_CUT_V) and no star is brighter than about M<sub>V</sub> −10),
 /// so 30 covers every listable star. `hyperion-fit` reads this constant, and its manifests record
 /// it.
-pub const REDDENING_A_V_NODES: [f64; REDDENING_NODE_COUNT] = [2.0, 5.0, 10.0, 15.0, 20.0, 30.0];
+pub const REDDENING_A_V_NODES: [f64; REDDENING_NODE_COUNT] =
+    [2.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0];
 
 /// The number of [`REDDENING_A_V_NODES`].
-pub const REDDENING_NODE_COUNT: usize = 6;
+pub const REDDENING_NODE_COUNT: usize = 7;
 
 // The reddening tables are row for row the colour table's: all are fitted on the same grids.
 const _: () = assert!(
@@ -74,6 +77,8 @@ const _: () = assert!(
         && WHITE_DWARF_REDDENING.len() == WHITE_DWARF.len()
         && av02_05::NORMAL_SECANTS.len() == NORMAL.len()
         && av02_05::WHITE_DWARF_SECANTS.len() == WHITE_DWARF.len()
+        && av07p5::NORMAL_SECANTS.len() == NORMAL.len()
+        && av07p5::WHITE_DWARF_SECANTS.len() == WHITE_DWARF.len()
         && av10_15::NORMAL_SECANTS.len() == NORMAL.len()
         && av10_15::WHITE_DWARF_SECANTS.len() == WHITE_DWARF.len()
         && av20_30::NORMAL_SECANTS.len() == NORMAL.len()
@@ -212,6 +217,91 @@ impl TablePoint {
     }
 }
 
+/// The four node tables, each holding one or two of [`REDDENING_A_V_NODES`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum NodeTable {
+    /// `star_colour_reddening_av02_05`: A<sub>V</sub> 2 and 5.
+    Av02To05,
+    /// `star_colour_reddening_av07p5`: A<sub>V</sub> 7.5.
+    Av07p5,
+    /// `star_colour_reddening_av10_15`: A<sub>V</sub> 10 and 15.
+    Av10To15,
+    /// `star_colour_reddening_av20_30`: A<sub>V</sub> 20 and 30.
+    Av20To30,
+}
+
+/// Where each node of [`REDDENING_A_V_NODES`] is held: its node table and its place there, each
+/// place nine bands wide. A test holds it to each table's own `A_V_NODES`.
+const NODE_PLACES: [(NodeTable, usize); REDDENING_NODE_COUNT] = [
+    (NodeTable::Av02To05, 0),
+    (NodeTable::Av02To05, 1),
+    (NodeTable::Av07p5, 0),
+    (NodeTable::Av10To15, 0),
+    (NodeTable::Av10To15, 1),
+    (NodeTable::Av20To30, 0),
+    (NodeTable::Av20To30, 1),
+];
+
+/// One grid's reddening tables: the curves at `A_V` → 0 and the four node tables.
+#[derive(Debug, Clone, Copy)]
+struct ReddeningTables {
+    zero: &'static [[f64; 15]],
+    av02_05: &'static [[f64; 18]],
+    av07p5: &'static [[f64; 9]],
+    av10_15: &'static [[f64; 18]],
+    av20_30: &'static [[f64; 18]],
+}
+
+impl ReddeningTables {
+    /// The tables of `grid`.
+    #[must_use]
+    const fn of(grid: Grid) -> Self {
+        match grid {
+            Grid::Normal => Self {
+                zero: &NORMAL_REDDENING,
+                av02_05: &av02_05::NORMAL_SECANTS,
+                av07p5: &av07p5::NORMAL_SECANTS,
+                av10_15: &av10_15::NORMAL_SECANTS,
+                av20_30: &av20_30::NORMAL_SECANTS,
+            },
+            Grid::WhiteDwarf => Self {
+                zero: &WHITE_DWARF_REDDENING,
+                av02_05: &av02_05::WHITE_DWARF_SECANTS,
+                av07p5: &av07p5::WHITE_DWARF_SECANTS,
+                av10_15: &av10_15::WHITE_DWARF_SECANTS,
+                av20_30: &av20_30::WHITE_DWARF_SECANTS,
+            },
+        }
+    }
+
+    /// Band `b`'s secant at node `node` of [`REDDENING_A_V_NODES`], read from its node table's
+    /// column by `read`, whatever the table's width.
+    #[must_use]
+    fn secant(&self, node: usize, b: usize, read: &impl ReadColumn) -> f64 {
+        let (table, place) = NODE_PLACES[node];
+        let k = place * band::COUNT + b;
+        match table {
+            NodeTable::Av02To05 => read.read(self.av02_05, k),
+            NodeTable::Av07p5 => read.read(self.av07p5, k),
+            NodeTable::Av10To15 => read.read(self.av10_15, k),
+            NodeTable::Av20To30 => read.read(self.av20_30, k),
+        }
+    }
+}
+
+/// A read of column `k` from a table's rows, whatever their width.
+trait ReadColumn {
+    /// Column `k` of `rows`.
+    fn read<const N: usize>(&self, rows: &[[f64; N]], k: usize) -> f64;
+}
+
+/// Every read is the point's bilinear mix.
+impl ReadColumn for TablePoint {
+    fn read<const N: usize>(&self, rows: &[[f64; N]], k: usize) -> f64 {
+        self.mix(rows, k)
+    }
+}
+
 /// A star's colour as the sky draws it (Design note 6).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct StarColour {
@@ -299,35 +389,17 @@ impl StarColour {
     #[must_use]
     pub fn reddening(&self) -> Reddening {
         let at = self.table;
-        let (zero, nodes): (&[[f64; 15]], [&[[f64; 18]]; 3]) = match at.grid {
-            Grid::Normal => (
-                &NORMAL_REDDENING,
-                [
-                    &av02_05::NORMAL_SECANTS,
-                    &av10_15::NORMAL_SECANTS,
-                    &av20_30::NORMAL_SECANTS,
-                ],
-            ),
-            Grid::WhiteDwarf => (
-                &WHITE_DWARF_REDDENING,
-                [
-                    &av02_05::WHITE_DWARF_SECANTS,
-                    &av10_15::WHITE_DWARF_SECANTS,
-                    &av20_30::WHITE_DWARF_SECANTS,
-                ],
-            ),
-        };
+        let tables = ReddeningTables::of(at.grid);
         let secants = std::array::from_fn(|b| {
             std::array::from_fn(|n| {
                 if n == 0 {
-                    at.mix(zero, reddening_column::MOMENTS + b)
+                    at.mix(tables.zero, reddening_column::MOMENTS + b)
                 } else {
-                    // Each node file holds two nodes, nine bands each.
-                    let (file, second) = ((n - 1) / 2, (n - 1) % 2);
-                    at.mix(nodes[file], second * band::COUNT + b)
+                    tables.secant(n - 1, b, &at)
                 }
             })
         });
+        let zero = tables.zero;
         Reddening {
             red_green: self.red_green,
             sp_ratio: self.sp_ratio,
@@ -812,32 +884,27 @@ mod tests {
         out
     }
 
+    /// One row of a table, read whatever its width.
+    struct Row(usize);
+
+    impl ReadColumn for Row {
+        fn read<const N: usize>(&self, rows: &[[f64; N]], k: usize) -> f64 {
+            rows[self.0][k]
+        }
+    }
+
     /// The reddening tables' columns of row `row` of `grid`: the parts' values and, per band, the
     /// moment and the secant at each node.
-    fn table_columns(grid: Grid, row: usize) -> ([f64; 6], [[f64; 7]; 9]) {
-        let (zero, nodes): (&[[f64; 15]], [&[[f64; 18]]; 3]) = match grid {
-            Grid::Normal => (
-                &NORMAL_REDDENING,
-                [
-                    &av02_05::NORMAL_SECANTS,
-                    &av10_15::NORMAL_SECANTS,
-                    &av20_30::NORMAL_SECANTS,
-                ],
-            ),
-            Grid::WhiteDwarf => (
-                &WHITE_DWARF_REDDENING,
-                [
-                    &av02_05::WHITE_DWARF_SECANTS,
-                    &av10_15::WHITE_DWARF_SECANTS,
-                    &av20_30::WHITE_DWARF_SECANTS,
-                ],
-            ),
-        };
-        let parts = std::array::from_fn(|p| zero[row][p]);
+    fn table_columns(grid: Grid, row: usize) -> ([f64; 6], [[f64; REDDENING_NODE_COUNT + 1]; 9]) {
+        let tables = ReddeningTables::of(grid);
+        let parts = std::array::from_fn(|p| tables.zero[row][p]);
         let secants = std::array::from_fn(|b| {
-            std::array::from_fn(|n| match n {
-                0 => zero[row][6 + b],
-                _ => nodes[(n - 1) / 2][row][((n - 1) % 2) * 9 + b],
+            std::array::from_fn(|n| {
+                if n == 0 {
+                    tables.zero[row][6 + b]
+                } else {
+                    tables.secant(n - 1, b, &Row(row))
+                }
             })
         });
         (parts, secants)
@@ -1139,7 +1206,23 @@ mod tests {
     /// The node files say which nodes they hold, and they are the sim's.
     #[test]
     fn the_node_files_hold_the_sims_nodes() {
-        let held: Vec<f64> = [av02_05::A_V_NODES, av10_15::A_V_NODES, av20_30::A_V_NODES].concat();
+        // Each node is read from the table and place that hold it.
+        for (n, &(table, place)) in NODE_PLACES.iter().enumerate() {
+            let held: &[f64] = match table {
+                NodeTable::Av02To05 => &av02_05::A_V_NODES,
+                NodeTable::Av07p5 => &av07p5::A_V_NODES,
+                NodeTable::Av10To15 => &av10_15::A_V_NODES,
+                NodeTable::Av20To30 => &av20_30::A_V_NODES,
+            };
+            assert_eq!(bits(held[place]), bits(REDDENING_A_V_NODES[n]), "node {n}");
+        }
+        let held: Vec<f64> = [
+            &av02_05::A_V_NODES[..],
+            &av07p5::A_V_NODES[..],
+            &av10_15::A_V_NODES[..],
+            &av20_30::A_V_NODES[..],
+        ]
+        .concat();
         assert_eq!(
             held.iter().map(|&a| bits(a)).collect::<Vec<_>>(),
             REDDENING_A_V_NODES.map(bits)

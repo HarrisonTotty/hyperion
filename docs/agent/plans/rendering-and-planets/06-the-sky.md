@@ -111,7 +111,7 @@ pub fn is_dark_in_v(state: &StarState) -> bool;
 pub struct StarColour { /* chroma: [f32; 2] (linear Rec. 709 r and g of unit luminance),
     lux_per_v0: f64, sp_ratio: f64, camera_band_mag: f64, extinction_ratio: [f64; 3],
     bake_spectrum: [f64; BAKE_WAVELENGTH_COUNT] (R08's ask; Design note 6),
-    the colour's place in its grid, where the four reddening tables are read (R06.T9.e) */ }
+    the colour's place in its grid, where the five reddening tables are read (R06.T9.e) */ }
 impl StarColour { pub fn reddened(&self, a_v: Magnitudes) -> Reddened;     // R06.T9.e
     pub fn reddening(&self) -> Reddening; }
 pub struct Reddening { /* the six parts at unit luminance, nine bands' secants at A_V → 0 and
@@ -119,7 +119,7 @@ pub struct Reddening { /* the six parts at unit luminance, nine bands' secants a
 pub struct Reddened { /* transmission: [f64; 3], photopic_transmission: f64,
     scotopic_transmission: f64, red_green: [f64; 2], sp_ratio: f64, camera_band_mag: f64,
     v_extinction: Magnitudes */ }
-pub const REDDENING_A_V_NODES: [f64; 6];   // 2, 5, 10, 15, 20, 30 (R06.T9.e, the band ruling's addendum)
+pub const REDDENING_A_V_NODES: [f64; 7];   // 2, 5, 7.5, 10, 15, 20, 30 (R06.T9.e, the band ruling's addendum)
 pub fn lift_into_gamut(rgb: [f64; 3]) -> [f64; 3];   // T3's rule, the fit's `unit_rgb` bit for bit
 pub fn solar_colour() -> StarColour;   // SUN_TEFF_K, SUN_LOG_G: the band's reddening (R06.T9.e)
 pub const BAKE_WAVELENGTHS_NM: [f64; BAKE_WAVELENGTH_COUNT];   // R08's 15, mirrored (Design note 6)
@@ -561,9 +561,9 @@ holds.
    peak 1, which gives Φ₀ of Design note 18) and η☉ = `CAMERA_ETA_SUN`, the same quantity for the
    table's 5,772 K, log g 4.438 row (so the Sun's term is 0; +0.11 at O5V, −0.70 at M2V, −2.14 at
    M6V, about −3 at 2,300 K; decision-camera-eta.md); and each display channel's A_c ÷ A_V at R_V = 3.1 through plan 07's `extinction_ratio`
-   at the channel's effective wavelength for that spectrum. Four companion tables,
-   `star_colour_reddening` and its node files `_av02_05`, `_av10_15` and `_av20_30`, row for row
-   the same, add 69 columns: for the six positive and negative parts of the Rec. 709
+   at the channel's effective wavelength for that spectrum. Five companion tables,
+   `star_colour_reddening` and its node files `_av02_05`, `_av07p5`, `_av10_15` and `_av20_30`, row
+   for row the same, add 78 columns: for the six positive and negative parts of the Rec. 709
    colour-matching functions, V, the scotopic and the camera, each band's moment at A_V → 0 and
    its secant at `REDDENING_A_V_NODES`, with each part's value per unit luminance, which
    `StarColour::reddened` reads (R06.T9.e; Risks, "Deviations in T9.e, as built"). Every A_V in the colour tables,
@@ -1542,10 +1542,11 @@ systems. The budget is T17's.
   several radii; T17 measures the first shell (500 ly) against the final caps. Acceptance:
   `cargo test -p hyperion-sim sky::band`.
 - **R06.T9.e Reddening (new; after T9.b, before T9.c).** Decided 2026-10-06
-  (`decision-r06-t9b-band.md`). The colour table gains a companion's 69 columns per row from T3's
+  (`decision-r06-t9b-band.md`). The colour table gains a companion's 78 columns per row from T3's
   fit and spectra, each over plan 07's sightline A_V: for the six positive and negative parts of
   the Rec. 709 colour-matching functions, V, the scotopic and the camera, each band's moment at
-  A_V → 0 and its secant at `REDDENING_A_V_NODES` (2, 5, 10, 15, 20 and 30), with each part's
+  A_V → 0 and its secant at `REDDENING_A_V_NODES` (2, 5, 7.5, 10, 15, 20 and 30; 7.5 ruled the
+  same day, the addendum's amendment), with each part's
   value per unit luminance. The photopic is the parts' luminance. They are split by node across
   files under the 500 KB limit; every existing column stays bit for bit (`just fit-check`).
   Decided 2026-10-06, `decision-r06-t9b-band.md`, addendum.
@@ -1576,8 +1577,8 @@ systems. The budget is T17's.
      | the eye offset (ρ)                             | 0.01 mag  |                       | 0.05 mag  |
      | V's extinction                                 | 0.005 mag |                       | 0.05 mag  |
 
-  3. the Sun: at A_V 1, b is 0.685 ± 0.003 at unit luminance (T3.c's ratios gave 0.725); at A_V
-     2, 0.496 ± 0.005;
+  3. the Sun: at A_V 1, b is 0.689 ± 0.003 at unit luminance (T3.c's ratios gave 0.725); at A_V
+     2, 0.500 ± 0.005 (amended, below);
   4. continuity and one lift: the sim's lift of each row's c⁺(0) − c⁻(0) equals `star_colour`'s
      chroma within 10⁻⁶, and equals the fit's `unit_rgb` bit for bit;
   5. the photopic identity: with `LUMINANCE_RGB`, Σ Y_c c(A) from the exact parts equals the
@@ -1593,18 +1594,21 @@ systems. The budget is T17's.
      colour's. The plane's blue at unit luminance (expected near −23%) and its ρ are re-measured
      and recorded.
 
-  As built, tests 2 and 3 differ (Risks, "Deviations in T9.e, as built"): the camera term between
-  A_V 5 and 10 is held to 0.05 mag, test 2 also takes a 45,000 K dwarf, and the Sun's blue is held
-  to its own spectrum's 0.689 and 0.500 (the ruled 0.685 and 0.496 are the 5,750 K, log g 4.5
-  node's).
+  Amended the same day (the ruling's "Amendment, 2026-10-06: test 3's reference and the node at
+  7.5"): test 3's reference is the interpolated solar row's own spectrum, at A_V 1 b 0.689 ± 0.003
+  and at A_V 2 0.500 ± 0.005 (the first figures, 0.685 and 0.496, were the 5,750 K, log g 4.5
+  node's); and the node at 7.5 keeps test 2's camera term within 0.035 mag to A_V 10, where test 2
+  also samples 6.25 and 8.75. As built, test 2 also takes a 45,000 K dwarf (Risks, "Deviations in
+  T9.e, as built").
 
-  Files: `sky/{colour,band}.rs`, `tables/star_colour_reddening{,_av02_05,_av10_15,_av20_30}.rs`,
-  `crates/hyperion-fit/src/tasks/star_colour/{columns,mod,photometry}.rs`, the four tasks'
+  Files: `sky/{colour,band}.rs`,
+  `tables/star_colour_reddening{,_av02_05,_av07p5,_av10_15,_av20_30}.rs`,
+  `crates/hyperion-fit/src/tasks/star_colour/{columns,mod,photometry}.rs`, the five tasks'
   manifests. Acceptance (as built, Risks, "Deviations in T9.e, as built"): `cargo test -p
 hyperion-sim sky::colour`, `cargo test -p hyperion-sim sky::band`, `cargo test -p hyperion-fit
 star_colour` and `just fit-check`, and once on the fetched spectra the four slow tests
-  (`cargo test --profile slow-test -p hyperion-fit --test star_colour -- --ignored`): both tables'
-  reproduction on eight threads and on one, every row's lift and photopic identity, and test 2.
+  (`cargo test --profile slow-test -p hyperion-fit --test star_colour -- --ignored`): the colour
+  table's and the five reddening tables' reproduction on eight threads and on one, every row's lift and photopic identity, and test 2.
 
 - **R06.T9.c The limit map.** `sky::limits::limit_map` with the glare of Design note 4. Tests:
   each texel's limit is `naked_eye_limit` at its band luminance plus its glare and at its ρ, to
@@ -2185,7 +2189,8 @@ bench -- sky` runs above complete.
 No change to generated output and no bump. `generate_cell_where` is `generate_cell` filtered, and
 the goldens prove it; the luminosity tables, the envelope, the caps and the census only read. The
 sky's own output is a function of the generator version and of the committed colour (with its
-reddening, `star_colour_reddening` and its node files `_av02_05`, `_av10_15` and `_av20_30`, T9.e),
+reddening, `star_colour_reddening` and its node files `_av02_05`, `_av07p5`, `_av10_15` and
+`_av20_30`, T9.e),
 limb-darkening, envelope (`sky_envelope`, T6.b) and
 pair-evolved light (`sky_binary_light_c`, `_d` and `_e`, T5.d) tables, so its goldens (T17) are
 regenerated whenever any of them moves. The reddening tables took effect at generator version 20
@@ -4131,24 +4136,27 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   `decision-r06-t9b-band.md`'s item 3 and its addendum rule them, with these differences. T9.e's
   first build (62e2074: four columns at revision 0, A_P ÷ A_V and A_S ÷ A_V at effective
   wavelengths, the camera's at A_V → 0 and 2) never reached the integration branch; the amendment
-  replaced it in one regeneration, as the addendum asked.
-  - **Four companion tables, split by node.** `tables::star_colour_reddening` holds the curves at
+  replaced it in one regeneration, as the addendum asked, and took the node at A_V 7.5 the same
+  day (the ruling's "Amendment, 2026-10-06: test 3's reference and the node at 7.5").
+  - **Five companion tables, split by node.** `tables::star_colour_reddening` holds the curves at
     A_V → 0 (`NORMAL_REDDENING`, `WHITE_DWARF_REDDENING`, `[[f64; 15]; N]`: the six parts' values
     at unit luminance, r⁺, r⁻, g⁺, g⁻, b⁺ and b⁻, then the nine bands' moments).
     `star_colour_reddening_av02_05`, `_av10_15` and `_av20_30` hold every band's secant at two
-    nodes each (`A_V_NODES`, `NORMAL_SECANTS`, `WHITE_DWARF_SECANTS`, `[[f64; 18]; N]`).
-    - Four slow tasks in the `star_colour` module, the same `fit`, one manifest and one smoke
+    nodes each (`A_V_NODES`, `NORMAL_SECANTS`, `WHITE_DWARF_SECANTS`, `[[f64; 18]; N]`), and
+    `_av07p5` at the one node 7.5 (`[[f64; 9]; N]`): 78 columns a row.
+    - Five slow tasks in the `star_colour` module, the same `fit`, one manifest and one smoke
       manifest each, each table its own `@generated` header and `tables.lock` entry, revision 1
-      since generator version 20 (REGISTRY 26). A const assertion holds all four to the colour
+      since generator version 20 (REGISTRY 27). A const assertion holds all five to the colour
       table's row counts.
-    - Sizes 282, 309, 314 and 317 KB, 1.22 MB together (the addendum's estimate: 1.45 MB).
-      `star_colour.rs` (497 KB), its lock entry and its revision are untouched, byte for byte.
+    - Sizes 282, 309, 164, 314 and 317 KB, 1.39 MB together (the addendum's estimate for 69
+      columns: 1.45 MB). `star_colour.rs` (497 KB), its lock entry and its revision are untouched,
+      byte for byte.
     - `REDDENING_A_V_NODES` replaces `CAMERA_REDDENING_A_V`. It is the sim's (`sky::colour`),
       which the fit reads; each manifest records `a_v_nodes`, checked against it, so the inputs hash
-      covers it; each node file restates its two, which a sim test holds to the sim's.
-    - The fingerprint (all four tables): plan 07's law at 12 wavelengths from 0.38 to 1.10 µm;
+      covers it; each node file restates its own, which a sim test holds to the sim's.
+    - The fingerprint (all five tables): plan 07's law at 12 wavelengths from 0.38 to 1.10 µm;
       the dust's transmission at 0.8 µm through each node, by the sim's `exp10`, and its `log10`,
-      through which every secant is taken; the six nodes; and the sim's `lift_into_gamut` of three
+      through which every secant is taken; the seven nodes; and the sim's `lift_into_gamut` of three
       fixed colours, two of them out of gamut (the channel lifted to zero is not probed).
     - **The parts take nine significant digits**, every other column seven. At seven, the lift of
       a row's c⁺ − c⁻ missed `star_colour`'s chroma by 1.0 × 10⁻⁶ (test 4 asks within 10⁻⁶); at
@@ -4178,8 +4186,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     star reddened out of gamut adds no white of its own lift. `point_lux` still takes the census's
     V less the bare A_V, until T8.k makes the census's V the star's own.
   - **`StarColour` holds its place in its grid** (the grid, the cell, the fractions: 24 bytes), not
-    the 69 columns, and `reddening()` reads the four tables there as `star_colour` reads the colour
-    table; `SkyStar` is 8 bytes smaller than T9.e's first build left it. `Reddening` (584 bytes,
+    the 78 columns, and `reddening()` reads the five tables there as `star_colour` reads the colour
+    table; `SkyStar` is 8 bytes smaller than T9.e's first build left it. `Reddening` (656 bytes,
     `StarColour::reddening`, `Reddening::through`) is the curves resolved, which the band reads
     once a call. `photopic_extinction_ratio`, `scotopic_extinction_ratio` and
     `camera_extinction_ratio` give way to `reddened`'s outputs; `Reddened` gains `v_extinction`,
@@ -4187,18 +4195,20 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **Measured** (the tables' headers):
     - the solar row as A_V → 0: A_P ÷ A_V 0.9913, A_S ÷ A_V 1.1278 (their difference 0.1365),
       A_cam ÷ A_V 0.8774 and V's own 1.0043 (the addendum: 0.876 for the camera, 1.003 for V);
-    - its secants at A_V 2, 5, 10, 15, 20 and 30: V 0.9990, 0.9909, 0.9770, 0.9628, 0.9482 and
-      0.9184 (the addendum: 0.998, 0.990, 0.976, —, 0.947); the camera 0.8187, 0.7468, 0.6643,
-      0.6112, 0.5746 and 0.5264; the scotopic 1.1178, 1.1038, 1.0832, 1.0656, 1.0502 and 1.0238;
-      the photopic 0.9844, 0.9748, 0.9604, 0.9474, 0.9353 and 0.9126;
+    - its secants at A_V 2, 5, 7.5, 10, 15, 20 and 30: V 0.9990, 0.9909, 0.9840, 0.9770, 0.9628,
+      0.9482 and 0.9184 (the addendum: 0.998, 0.990, —, 0.976, —, 0.947); the camera 0.8187,
+      0.7468, 0.7007, 0.6643, 0.6112, 0.5746 and 0.5264; the scotopic 1.1178, 1.1038, 1.0931,
+      1.0832, 1.0656, 1.0502 and 1.0238; the photopic 0.9844, 0.9748, 0.9674, 0.9604, 0.9474,
+      0.9353 and 0.9126;
     - at A_V 2 the Sun's camera term moves −0.361 mag and its eye offset −0.267;
     - over the dwarfs (log g 4.5, 3,000–30,000 K) as A_V → 0: A_P ÷ A_V 0.9716–1.0135, A_S ÷ A_V
       1.0975–1.1575, A_cam ÷ A_V 0.6344–1.0532, V's 0.9856–1.0196;
     - the parts' photopic transmission against the direct V(λ) integral within 3.6 × 10⁻¹⁵ at
       every node on every row (test 5's 10⁻⁴).
   - **Against the direct integrals** (test 2, the rows' own spectra, the solar row its four ATLAS9
-    nodes mixed at unit luminance by the sim's weights), the worst over the eight rows, and a
-    45,000 K dwarf added beyond the addendum's list (science check of the amendment):
+    nodes mixed at unit luminance by the sim's weights; A_V 0.5, 1, 1.5, 3, 4, 6.25, 7, 8.75, 12,
+    17 and 25), the worst over the eight rows, and a 45,000 K dwarf added beyond the addendum's
+    list (science check of the amendment):
 
     | Quantity                | To A_V 5 | To A_V 20 | To A_V 30 | Its row (worst)             |
     | ----------------------- | -------- | --------- | --------- | --------------------------- |
@@ -4209,27 +4219,28 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     | V's extinction, mag     | 0.0002   | 0.0012    | 0.0153    | 3,000 K; 3,000 K; 2,300 K   |
 
     The photopic's 0.0030 to A_V 20 and 0.0200 to 30 sit at their tolerances, so the secants keep
-    seven digits (the addendum allowed six). The cool rows are tighter (2,300–4,000 K: the colour
-    within 0.008 at every dust, the camera term within 0.057).
+    seven digits (the addendum allowed six). The camera term's 0.0510 to A_V 20 is at 12 or 17,
+    under that range's 0.2. The cool rows are tighter (2,300–4,000 K: the colour within 0.007 at
+    every dust, the camera term within 0.057).
 
-  - **Test 2's camera term between A_V 5 and 10 is held to 0.05 mag, not 0.035** (pending a
-    ruling). It is the representation's limit: a secant linear between nodes errs by about ½ k″ (A
-    − 5)(10 − A), and the camera term carries that times A. The tables' own camera secants bend by
-    k″ ≈ 0.0015 for the solar row and 0.0021–0.0022 for the 10,000 K and 30,000 K dwarfs over A_V
-    5–10 (V's by under 10⁻⁴), so at A_V 7 about 0.032 and 0.044. Measured at 7: the 30,000 K dwarf
-    0.048, the 10,000 K dwarf 0.046, the 10,000 K white dwarf 0.042, the solar row 0.034; the
-    45,000 K dwarf passes 0.05 (the addendum's 0.035 was checked on blackbodies). Options: accept
-    0.05 (4% margin); a node at 7.5 (nine more columns and a fifth file; about 0.008 at 7 and 0.014
-    at worst on 5–10); or a monotone cubic through the same seven points (Fritsch and Carlson 1980,
-    SIAM J. Numer. Anal. 17, 238), no new columns but a change to the ruled representation.
-  - **Test 3's references are the solar row's own spectrum's** (pending the orchestrator): the
-    Sun's blue at unit luminance is 0.6894 at A_V 1 and 0.5003 at 2, against the direct integrals
-    of the table's solar spectrum, 0.6893 at 1, which the sim reproduces to 1.1 × 10⁻⁴. The
-    addendum's 0.685 ± 0.003 and 0.496 ± 0.005 are the 5,750 K, log g 4.5 ATLAS9 node's alone
-    (0.6847 and 0.4967 from the tables' columns, as T9.e's first science check took the nearest
-    node for the Sun), 0.004 below the solar row's; a 5,772 K blackbody gives 0.669 and 0.482. So
-    the test asserts 0.689 ± 0.003 and 0.500 ± 0.005, and that T3.c's ratios gave 0.725.
-  - **Figures the ruled text rounds** (pending the owner; the ruled sentences are left as
+  - **The node at A_V 7.5 holds the camera term to 0.035 mag to A_V 10** (ruled 2026-10-06, the
+    ruling's amendment). With nodes at 5 and 10 only, the camera's secant, linear between them,
+    missed the direct integrals by 0.048 mag at A_V 7 (30,000 K dwarf; the 10,000 K dwarf 0.046,
+    the 10,000 K white dwarf 0.042, the solar row 0.034): a secant linear between nodes errs by
+    about ½ k″ (A − A₁)(A₂ − A), and the camera term carries that times A, and the camera secants
+    bend by k″ ≈ 0.0015 (solar) to 0.0022 (hot rows) over A_V 5–10 (the addendum's 0.035 had been
+    checked on blackbodies). With the node at 7.5, test 2 samples A_V 6.25, 7 and 8.75 between 5
+    and 10 as well: the camera term is within 0.0084 at A_V 7 on every row, and within 0.0143 at
+    worst between 5 and 10 (the 30,000 K dwarf at 8.75), against the kept 0.035. A loosened 0.05
+    and a monotone cubic were the alternatives declined.
+  - **Test 3's references are the solar row's own spectrum's** (ruled 2026-10-06, the ruling's
+    amendment): the Sun's blue at unit luminance is 0.6894 at A_V 1 and 0.5003 at 2, against the
+    direct integrals of the table's solar spectrum, 0.6893 at 1, which the sim reproduces to 1.1 ×
+    10⁻⁴. The addendum's first 0.685 ± 0.003 and 0.496 ± 0.005 are the 5,750 K, log g 4.5 ATLAS9
+    node's alone (0.6847 and 0.4967 from the tables' columns, as T9.e's first science check took
+    the nearest node for the Sun); a 5,772 K blackbody gives 0.669 and 0.482. The test asserts
+    0.689 ± 0.003 and 0.500 ± 0.005, and that T3.c's ratios gave 0.725.
+  - **Figures the ruled text rounds** (kept as ruled, 2026-10-06; the ruled sentences are left as
     written): Design note 6's V secant, "about 1.003 A_V … 0.976 A_V at A_V 10", is 1.0043 and
     0.9770 in the tables; the Risk "The camera cut is in V"'s "about −3 mag at A_V 10 and −8 at
     A_V 20" is −3.13 and −7.47 for the solar row, (k_cam − k_V) A_V. T3.c's `extinction_ratio`, which
@@ -4249,14 +4260,16 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **Acceptance as run.** The task's single command took two test filters, which `cargo test`
     does not take; the acceptance line reads `cargo test -p hyperion-sim sky::colour`,
     `cargo test -p hyperion-sim sky::band`, `cargo test -p hyperion-fit star_colour` and
-    `just fit-check`, with the four slow tests once on the fetched spectra. T8.k's line has the
+    `just fit-check`, with the four slow tests once on the fetched spectra (the colour table's
+    and the five reddening tables' reproduction among them). T8.k's line has the
     same two-filter form, left for T8.k. T9.e also moved five task titles (T5.f, T8.k, T9.e, T9.f,
     T9.g) onto one bold line each, so that `plan_task.py` finds them.
   - **T17 gains `sky/colour_reddened.golden`** (determinism audit): every field of `reddened` at a
     few points on both grids at A_V 0.5, 2 and 5, off the nodes at 1, 7, 17 and 25, and held at 40.
     Until it lands, no gate compares the reddened light's bits across targets (native against
     wasm32-wasip1): the sim's bit checks compare one target with itself, and the rest take
-    tolerances (determinism audit of the amendment; nothing generated or served reads it yet).
+    tolerances (determinism audit of the amendment; nothing generated or served reads it yet;
+    the deferral to T17 accepted 2026-10-06).
   - **The fetched spectra** are read through read-only per-dataset symlinks into
     `.claude/worktrees/agent-ad163063e17117877/crates/hyperion-fit/data/cache/`, whose checksums
     all match.

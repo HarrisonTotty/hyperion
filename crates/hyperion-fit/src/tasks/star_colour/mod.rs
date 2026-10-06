@@ -44,6 +44,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::num::NonZeroUsize;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use hyperion_sim::galaxy::gas::ccm::extinction_ratio;
@@ -234,7 +235,7 @@ pub struct TableRow {
     pub colour: ColourRow,
     /// The camera, reddening and bake columns (R06.T3.c).
     pub extras: Extras,
-    /// The light's reddening through dust, the four `star_colour_reddening` tables' columns
+    /// The light's reddening through dust, the five `star_colour_reddening` tables' columns
     /// (R06.T9.e).
     pub reddening: Reddening,
 }
@@ -1132,13 +1133,14 @@ fn law_fingerprint() -> SimFingerprint {
 
 /// The reddening tables' revision, written into each header; bumped when anything below moves
 /// them. Revision 0, R06.T9.e's first four columns, never reached the integration branch; revision
-/// 1 is the addendum's 69.
+/// 1 is the addendum's, with the node at `A_V` 7.5 (none has reached it either).
 pub const REDDENING_VERSION: u32 = 1;
 
-/// One of the four reddening tables (R06.T9.e; decided 2026-10-06, `decision-r06-t9b-band.md`,
-/// addendum): the 69 columns a row are some 1.3 MB at seven significant digits, so they are split by
-/// node to keep each file under the repository's 500 KB limit, as the pair-evolved light's three
-/// tables are split. Every table is row for row `star_colour`'s, from the same spectra.
+/// One of the five reddening tables (R06.T9.e; decided 2026-10-06, `decision-r06-t9b-band.md`,
+/// addendum, with the node at `A_V` 7.5 ruled the same day): the 78 columns a row are some 1.4 MB
+/// at seven significant digits, so they are split by node to keep each file under the repository's
+/// 500 KB limit, as the pair-evolved light's three tables are split. Every table is row for row
+/// `star_colour`'s, from the same spectra.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ReddeningFile {
     /// `star_colour_reddening`: each part's value at unit luminance and each band's moment, the
@@ -1146,6 +1148,9 @@ pub enum ReddeningFile {
     AtZero,
     /// `star_colour_reddening_av02_05`: every band's secant at `A_V` 2 and 5 (18 columns).
     Av02To05,
+    /// `star_colour_reddening_av07p5`: at 7.5 (9 columns), the node ruled for the camera term
+    /// between 5 and 10.
+    Av07p5,
     /// `star_colour_reddening_av10_15`: at 10 and 15.
     Av10To15,
     /// `star_colour_reddening_av20_30`: at 20 and 30.
@@ -1154,7 +1159,13 @@ pub enum ReddeningFile {
 
 impl ReddeningFile {
     /// Every file, in name order.
-    pub const ALL: [Self; 4] = [Self::AtZero, Self::Av02To05, Self::Av10To15, Self::Av20To30];
+    pub const ALL: [Self; 5] = [
+        Self::AtZero,
+        Self::Av02To05,
+        Self::Av07p5,
+        Self::Av10To15,
+        Self::Av20To30,
+    ];
 
     /// The table's name, which is its task's.
     #[must_use]
@@ -1162,6 +1173,7 @@ impl ReddeningFile {
         match self {
             Self::AtZero => "star_colour_reddening",
             Self::Av02To05 => "star_colour_reddening_av02_05",
+            Self::Av07p5 => "star_colour_reddening_av07p5",
             Self::Av10To15 => "star_colour_reddening_av10_15",
             Self::Av20To30 => "star_colour_reddening_av20_30",
         }
@@ -1173,39 +1185,41 @@ impl ReddeningFile {
         match self {
             Self::AtZero => "star_colour_reddening.rs",
             Self::Av02To05 => "star_colour_reddening_av02_05.rs",
+            Self::Av07p5 => "star_colour_reddening_av07p5.rs",
             Self::Av10To15 => "star_colour_reddening_av10_15.rs",
             Self::Av20To30 => "star_colour_reddening_av20_30.rs",
         }
     }
 
-    /// The index in [`REDDENING_A_V_NODES`] of the first of a node file's two nodes; `None` for
-    /// the curves at `A_V` → 0.
+    /// The indices in [`REDDENING_A_V_NODES`] of a node file's nodes; `None` for the curves at
+    /// `A_V` → 0.
     #[must_use]
-    pub const fn first_node(self) -> Option<usize> {
+    pub const fn nodes(self) -> Option<Range<usize>> {
         match self {
             Self::AtZero => None,
-            Self::Av02To05 => Some(0),
-            Self::Av10To15 => Some(2),
-            Self::Av20To30 => Some(4),
+            Self::Av02To05 => Some(0..2),
+            Self::Av07p5 => Some(2..3),
+            Self::Av10To15 => Some(3..5),
+            Self::Av20To30 => Some(5..7),
         }
     }
 
     /// The columns of `r`'s row in this table, as written: the parts and the moments, or the
-    /// secants at the file's two nodes, node-major. The parts take nine significant digits, so
-    /// that the raw colour they give, a difference of two, lifts to the colour table's chroma
-    /// within 10⁻⁶ (the addendum's test 4); every other column seven.
+    /// secants at the file's nodes, node-major. The parts take nine significant digits, so that
+    /// the raw colour they give, a difference of two, lifts to the colour table's chroma within
+    /// 10⁻⁶ (the addendum's test 4); every other column seven.
     #[must_use]
     pub fn columns(self, r: &Reddening) -> Vec<f64> {
-        match self.first_node() {
+        match self.nodes() {
             None => r
                 .parts
                 .iter()
                 .map(|&p| rounded_to(p, PART_DIGITS))
                 .chain(r.moments.iter().map(|&m| rounded(m)))
                 .collect(),
-            Some(n) => r.secants[n]
+            Some(nodes) => r.secants[nodes]
                 .iter()
-                .chain(&r.secants[n + 1])
+                .flatten()
                 .map(|&k| rounded(k))
                 .collect(),
         }
@@ -1217,7 +1231,7 @@ impl ReddeningFile {
 ///
 /// It integrates the same spectra on the same grids as [`StarColourTask`], through the same
 /// [`fit`], and writes only its file's columns of [`Reddening`], row for row with `star_colour`'s.
-/// The four tasks share their manifests' parameters, their fingerprint and the fit.
+/// The five tasks share their manifests' parameters, their fingerprint and the fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StarColourReddeningTask {
     /// The table it writes.
@@ -1232,6 +1246,11 @@ pub static REDDENING_TASK: StarColourReddeningTask = StarColourReddeningTask {
 /// The secants at `A_V` 2 and 5.
 pub static REDDENING_AV02_05_TASK: StarColourReddeningTask = StarColourReddeningTask {
     file: ReddeningFile::Av02To05,
+};
+
+/// The secants at `A_V` 7.5.
+pub static REDDENING_AV07P5_TASK: StarColourReddeningTask = StarColourReddeningTask {
+    file: ReddeningFile::Av07p5,
 };
 
 /// The secants at `A_V` 10 and 15.
@@ -1264,9 +1283,10 @@ impl FitTask for StarColourReddeningTask {
     fn items(&self) -> &'static [&'static str] {
         match self.file {
             ReddeningFile::AtZero => &["NORMAL_REDDENING", "WHITE_DWARF_REDDENING"],
-            ReddeningFile::Av02To05 | ReddeningFile::Av10To15 | ReddeningFile::Av20To30 => {
-                &["A_V_NODES", "NORMAL_SECANTS", "WHITE_DWARF_SECANTS"]
-            }
+            ReddeningFile::Av02To05
+            | ReddeningFile::Av07p5
+            | ReddeningFile::Av10To15
+            | ReddeningFile::Av20To30 => &["A_V_NODES", "NORMAL_SECANTS", "WHITE_DWARF_SECANTS"],
         }
     }
 
@@ -1371,51 +1391,54 @@ k for silicon. A band of weights w is dimmed by T(A) = ∫S w 10^(−0.4 ℓ A) 
 secant is k(A) = −2.5 log₁₀ T(A) ÷ A; the sim takes each secant as piecewise linear in A through
 its moment and the nodes, and held beyond 30. The photopic light has no column: it is the parts'
 Rec. 709 luminance. Values are rounded to seven significant digits, the parts to nine. The
-columns are split by node across four tables, each under the repository's 500 KB file limit.";
-    let own = match file.first_node() {
+columns are split by node across five tables, each under the repository's 500 KB file limit.";
+    let own = match file.nodes() {
         None => "\
 This table holds, per row, each part's value per unit of the unreddened luminance, ∫S c̄± ÷ ∫S
 ȳ (the raw colour of unit luminance, before T3's lift into gamut, is c⁺ − c⁻), and each band's
 first moment of the law, ∫S w ℓ ÷ ∫S w, its secant's limit as `A_V` → 0."
             .to_owned(),
-        Some(n) => format!(
-            "This table holds, per row, every band's secant at `A_V` {} and at {} (`A_V_NODES`), of\nthe sim's `REDDENING_A_V_NODES`.",
-            REDDENING_A_V_NODES[n],
-            REDDENING_A_V_NODES[n + 1]
+        Some(held) => format!(
+            "This table holds, per row, every band's secant at `A_V` {} (`A_V_NODES`), of\nthe sim's `REDDENING_A_V_NODES`.",
+            node_list(held, " and at ")
         ),
     };
     let notes = format!("{common}\n\n{own}{smoke}");
-    let summary = match file.first_node() {
+    let summary = match file.nodes() {
         None => vec![
             "The reddening of the colour table's light as `A_V` → 0: each colour-matching function's parts"
                 .to_owned(),
             "and each band's moment, for every row (rendering plan R06, R06.T9.e).".to_owned(),
         ],
-        Some(n) => vec![
+        Some(held) => vec![
             format!(
-                "The reddening of the colour table's light at `A_V` {} and {}: each band's secant, for every",
-                REDDENING_A_V_NODES[n],
-                REDDENING_A_V_NODES[n + 1]
+                "The reddening of the colour table's light at `A_V` {}: each band's secant, for every",
+                node_list(held, " and ")
             ),
             "row (rendering plan R06, R06.T9.e).".to_owned(),
         ],
     };
-    let (normal, white_dwarf) = match file.first_node() {
+    let (normal, white_dwarf) = match file.nodes() {
         None => ("NORMAL_REDDENING", "WHITE_DWARF_REDDENING"),
         Some(_) => ("NORMAL_SECANTS", "WHITE_DWARF_SECANTS"),
     };
     let mut items = Vec::new();
-    if let Some(n) = file.first_node() {
+    if let Some(held) = file.nodes() {
+        let first = held.start;
         items.push(TableItem::Array {
             name: "A_V_NODES".to_owned(),
             doc: vec![
-                format!(
-                    "The table's two nodes, mag of the sightline's `A_V`: nodes {n} and {} of the sim's",
-                    n + 1
-                ),
+                if held.len() == 2 {
+                    format!(
+                        "The table's two nodes, mag of the sightline's `A_V`: nodes {first} and {} of the sim's",
+                        first + 1
+                    )
+                } else {
+                    format!("The table's node, mag of the sightline's `A_V`: node {first} of the sim's")
+                },
                 "`REDDENING_A_V_NODES`.".to_owned(),
             ],
-            values: REDDENING_A_V_NODES[n..n + 2].to_vec(),
+            values: REDDENING_A_V_NODES[held].to_vec(),
         });
     }
     items.push(TableItem::Source(reddening_source(
@@ -1439,6 +1462,16 @@ first moment of the law, ∫S w ℓ ÷ ∫S w, its secant's limit as `A_V` → 0
     }
 }
 
+/// The `A_V` of `nodes` of [`REDDENING_A_V_NODES`], joined by `and`: "2 and 5", or "7.5".
+#[must_use]
+fn node_list(nodes: Range<usize>, and: &str) -> String {
+    REDDENING_A_V_NODES[nodes]
+        .iter()
+        .map(f64::to_string)
+        .collect::<Vec<_>>()
+        .join(and)
+}
+
 /// The names of the nine bands, in their column order, for the tables' documentation.
 const BAND_NAMES: &str = "`r⁺`, `r⁻`, `g⁺`, `g⁻`, `b⁺`, `b⁻`, `v`, `scotopic`, `camera`";
 
@@ -1451,7 +1484,7 @@ fn reddening_source(
     grid: &Grid,
     file: ReddeningFile,
 ) -> String {
-    let (count, columns) = match file.first_node() {
+    let (count, columns) = match file.nodes() {
         None => (
             PART_COUNT + BAND_COUNT,
             format!(
@@ -1459,13 +1492,20 @@ fn reddening_source(
                  /// the nine bands' moments, {BAND_NAMES}"
             ),
         ),
-        Some(n) => (
-            2 * BAND_COUNT,
-            format!(
-                "the nine bands' secants at `A_V` {}, {BAND_NAMES}, then the same at\n/// `A_V` {}",
-                REDDENING_A_V_NODES[n],
-                REDDENING_A_V_NODES[n + 1]
-            ),
+        Some(nodes) => (
+            nodes.len() * BAND_COUNT,
+            if nodes.len() == 2 {
+                format!(
+                    "the nine bands' secants at `A_V` {}, {BAND_NAMES}, then the same at\n/// `A_V` {}",
+                    REDDENING_A_V_NODES[nodes.start],
+                    REDDENING_A_V_NODES[nodes.start + 1]
+                )
+            } else {
+                format!(
+                    "the nine bands' secants at `A_V` {}, {BAND_NAMES}",
+                    REDDENING_A_V_NODES[nodes.start]
+                )
+            },
         ),
     };
     let mut out = String::new();
@@ -1565,13 +1605,13 @@ fn node_acceptance(
     observer: &Observer,
     table: &StarColourTable,
     file: ReddeningFile,
-    n: usize,
+    nodes: Range<usize>,
 ) -> String {
     let luminance = observer.luminance();
     let sun = solar_columns(&table.normal, file);
     let at_zero = solar_columns(&table.normal, ReddeningFile::AtZero);
     let mut out = String::from("at 5,772 K and log g 4.438, the secants");
-    for (k, a) in [(0, REDDENING_A_V_NODES[n]), (1, REDDENING_A_V_NODES[n + 1])] {
+    for (k, &a) in REDDENING_A_V_NODES[nodes].iter().enumerate() {
         let s = &sun[k * BAND_COUNT..(k + 1) * BAND_COUNT];
         // Writing to a String cannot fail.
         let _ = write!(
@@ -1671,8 +1711,8 @@ fn reddening_acceptance(
     table: &StarColourTable,
     file: ReddeningFile,
 ) -> String {
-    if let Some(n) = file.first_node() {
-        return node_acceptance(observer, table, file, n);
+    if let Some(nodes) = file.nodes() {
+        return node_acceptance(observer, table, file, nodes);
     }
     let luminance = observer.luminance();
     let verdict = |pass: bool| if pass { "passes" } else { "FAILS" };

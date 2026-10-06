@@ -1,4 +1,4 @@
-//! The colour table (rendering plan R06, R06.T3.a and T3.b) and its four reddening tables
+//! The colour table (rendering plan R06, R06.T3.a and T3.b) and its five reddening tables
 //! (R06.T9.e): the smoke runs go end to end from the committed CIE tables; with the spectra fetched,
 //! the committed tables are what the tasks write, the colour table agrees with Pickles' (1998)
 //! empirical spectra, an M dwarf's model is less red than its blackbody, and the reddened light the
@@ -43,7 +43,7 @@ use hyperion_sim::units::{Kelvin, Magnitudes};
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/star_colour.rs");
 
 /// The reddening tables the sim compiles, as committed, by name.
-const COMMITTED_REDDENING: [(&str, &str); 4] = [
+const COMMITTED_REDDENING: [(&str, &str); 5] = [
     (
         "star_colour_reddening",
         include_str!("../../hyperion-sim/src/tables/star_colour_reddening.rs"),
@@ -51,6 +51,10 @@ const COMMITTED_REDDENING: [(&str, &str); 4] = [
     (
         "star_colour_reddening_av02_05",
         include_str!("../../hyperion-sim/src/tables/star_colour_reddening_av02_05.rs"),
+    ),
+    (
+        "star_colour_reddening_av07p5",
+        include_str!("../../hyperion-sim/src/tables/star_colour_reddening_av07p5.rs"),
     ),
     (
         "star_colour_reddening_av10_15",
@@ -143,7 +147,7 @@ fn star_colour_table_is_reproduced() {
 }
 
 #[test]
-#[ignore = "slow: integrates some 1,300 model spectra, 1 GB of PHOENIX among them, four times"]
+#[ignore = "slow: integrates some 1,300 model spectra, 1 GB of PHOENIX among them, five times"]
 fn star_colour_reddening_table_is_reproduced() {
     for (name, committed) in COMMITTED_REDDENING {
         table_is_reproduced(name, committed);
@@ -661,8 +665,7 @@ fn tolerance(q: usize, a: f64) -> f64 {
     match q {
         0 => [0.005, 0.02, 0.07][range_of(a)],
         1 => [0.003, 0.003, 0.02][range_of(a)],
-        2 if a <= 5.0 => 0.035,
-        2 if a <= 10.0 => 0.05,
+        2 if a <= 10.0 => 0.035,
         2 => 0.2,
         3 => [0.01, 0.05, 0.05][range_of(a)],
         _ => [0.005, 0.05, 0.05][range_of(a)],
@@ -692,7 +695,8 @@ fn errors(colour: &StarColour, a: f64, d: &Direct) -> [f64; 5] {
     ]
 }
 
-/// The addendum's test 2: between the nodes (`A_V` 0.5, 1, 1.5, 3, 4, 7, 12, 17 and 25), the
+/// The addendum's test 2: between the nodes (`A_V` 0.5, 1, 1.5, 3, 4, 7, 12, 17 and 25, and 6.25 and
+/// 8.75, the middles of the intervals about the node at 7.5, where the camera term errs most), the
 /// reddened light the sim reads off the tables lies within the ruled tolerances of the direct
 /// integrals of the rows' own spectra, for the solar row, 30,000 K and 10,000 K dwarfs, a
 /// 4,000 K giant of log g 1.5, 3,500 K and 3,000 K dwarfs, the coolest PHOENIX row and a 10,000 K
@@ -705,13 +709,13 @@ fn errors(colour: &StarColour, a: f64, d: &Direct) -> [f64; 5] {
 /// | --- | --- | --- | --- |
 /// | the lifted colour at unit luminance, a channel | 0.005 | 0.02 | 0.07 |
 /// | the photopic | 0.003 mag | 0.003 mag | 0.02 mag |
-/// | the camera term | 0.035 mag | 0.05 mag to 10, 0.2 beyond | 0.2 mag |
+/// | the camera term | 0.035 mag | 0.035 mag to 10, 0.2 beyond | 0.2 mag |
 /// | the eye offset, 2.5 log₁₀ ρ | 0.01 mag | 0.05 mag | 0.05 mag |
 /// | V's extinction | 0.005 mag | 0.05 mag | 0.05 mag |
 ///
-/// The camera term between `A_V` 5 and 10 is held to 0.05 mag, not the addendum's 0.035: the hot
-/// rows' secant bends between the nodes at 5 and 10 (0.048 for the 30,000 K dwarf at 7; R06's Risks,
-/// "Deviations in T9.e, as built").
+/// The camera term holds the addendum's 0.035 to `A_V` 10 with the node at 7.5 (ruled 2026-10-06):
+/// without it the hot rows' secant bent between the nodes at 5 and 10 by up to 0.048 at 7 (R06's
+/// Risks, "Deviations in T9.e, as built").
 #[test]
 #[ignore = "slow: reads and integrates twelve model spectra"]
 fn star_colour_reddening_between_the_nodes_is_the_direct_integrals() {
@@ -722,12 +726,21 @@ fn star_colour_reddening_between_the_nodes_is_the_direct_integrals() {
     let sensor = sensor();
     let law = law_by_bin();
     let mut worst = [[0.0_f64; 3]; 5];
+    // The camera term's worst between A_V 5 and 10, and its row and dust.
+    let mut camera_5_10 = (0.0_f64, "", 0.0);
+    let mut camera_at_7 = 0.0_f64;
     let mut failures = Vec::new();
     for row in between_the_nodes_rows(&observer) {
         let mut own = [[0.0_f64; 3]; 5];
-        for a in [0.5, 1.0, 1.5, 3.0, 4.0, 7.0, 12.0, 17.0, 25.0] {
+        for a in [0.5, 1.0, 1.5, 3.0, 4.0, 6.25, 7.0, 8.75, 12.0, 17.0, 25.0] {
             let d = direct(&observer, &sensor, &law, &row.bins, a);
             for (q, e) in errors(&row.colour, a, &d).into_iter().enumerate() {
+                if q == 2 && a > 5.0 && a <= 10.0 && e > camera_5_10.0 {
+                    camera_5_10 = (e, row.name, a);
+                }
+                if q == 2 && (a - 7.0).abs() < 1e-12 {
+                    camera_at_7 = camera_at_7.max(e);
+                }
                 worst[q][range_of(a)] = worst[q][range_of(a)].max(e);
                 own[q][range_of(a)] = own[q][range_of(a)].max(e);
                 if e > tolerance(q, a) {
@@ -755,5 +768,9 @@ fn star_colour_reddening_between_the_nodes_is_the_direct_integrals() {
             worst[q][0], worst[q][1], worst[q][2]
         );
     }
+    eprintln!(
+        "the camera term between A_V 5 and 10: worst {:.4}, {} at A_V {}; at A_V 7, {camera_at_7:.4}",
+        camera_5_10.0, camera_5_10.1, camera_5_10.2
+    );
     assert!(failures.is_empty(), "{}", failures.join("; "));
 }

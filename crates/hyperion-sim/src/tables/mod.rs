@@ -46,6 +46,7 @@ pub mod sky_envelope;
 pub mod star_colour;
 pub mod star_colour_reddening;
 pub mod star_colour_reddening_av02_05;
+pub mod star_colour_reddening_av07p5;
 pub mod star_colour_reddening_av10_15;
 pub mod star_colour_reddening_av20_30;
 pub mod stellar_fates_high;
@@ -177,6 +178,12 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "star_colour_reddening_av02_05",
+        revision: 1,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour_reddening_av07p5",
         revision: 1,
         since_generator_version: 20,
         provisional: false,

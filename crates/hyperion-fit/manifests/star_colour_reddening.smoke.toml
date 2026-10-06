@@ -10,4 +10,4 @@ v_band = "cie_photopic"
 bins_nm = [360, 1100]
 normal_log_g = [0.0, 6.0]
 white_dwarf_log_g = [6.5, 9.5]
-a_v_nodes = [2.0, 5.0, 10.0, 15.0, 20.0, 30.0]
+a_v_nodes = [2.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0]
