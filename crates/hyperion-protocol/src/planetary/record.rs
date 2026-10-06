@@ -718,14 +718,14 @@ pub(crate) mod tests {
         })
     }
 
-    /// An Earth's photometry, illustrative: Earth's template and the generator's temperate Bond
-    /// albedo of 0.306.
+    /// An Earth's photometry, illustrative: Earth's template, Robinson 2026's p (P14.T47.e) and the
+    /// generator's temperate Bond albedo of 0.306.
     pub(crate) fn earth_photometry() -> BodyPhotometryDto {
         BodyPhotometryDto {
             geometric_albedo: BandsDto {
-                b: 0.44,
-                v: 0.434,
-                r: 0.411,
+                b: 0.263,
+                v: 0.215,
+                r: 0.21,
             },
             phase_template: PhaseTemplateDto::Earth,
             phase_exponent: BandsDto {
@@ -735,19 +735,19 @@ pub(crate) mod tests {
             },
             lunar_lambert_share: 0.0,
             bond_albedo: 0.306,
-            bond_ratio: 1.859_43,
+            bond_ratio: 0.921_53,
             provisional: false,
         }
     }
 
     pub(crate) fn earth_photometry_json() -> Value {
         json!({
-            "geometric_albedo": { "b": 0.44, "v": 0.434, "r": 0.411 },
+            "geometric_albedo": { "b": 0.263, "v": 0.215, "r": 0.21 },
             "phase_template": "earth",
             "phase_exponent": { "b": 1.0, "v": 1.0, "r": 1.0 },
             "lunar_lambert_share": 0.0,
             "bond_albedo": 0.306,
-            "bond_ratio": 1.859_43,
+            "bond_ratio": 0.921_53,
             "provisional": false,
         })
     }

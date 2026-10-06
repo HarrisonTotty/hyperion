@@ -2561,9 +2561,7 @@ idle motion, DOM text, keyboard for everything.
   frame always shown, dashes for predicted paths, `--target` for commanded ones, shape for type):
   orbits are solid `--text-muted` ellipses (7.22:1 on `--surface-0`), reference marks like range
   rings and not predictions, so never dashed, and the selected body's orbit is a solid `--text`
-  line 2 px wide because colour alone must not carry the selection (ruling 44.2; drawn at 4 device
-  pixels below a ratio of 2, twice an orbit's 2, since R07.T16.f (decision-thin-line-contrast));
-  zones and belts are labelled annuli drawn as their two
+  line 2 px wide because colour alone must not carry the selection (ruling 44.2); zones and belts are labelled annuli drawn as their two
   edges in `--text-muted`, a belt's edges joined by short radial ticks every 10°, with no fill,
   hatch or dots, since hazard striping is the guide's only pattern fill; `--line` (1.38:1) stays for
   the grid and the scale rings on the reference plane only, because orbits and zone and belt edges
@@ -3468,6 +3466,9 @@ it:
 - Drafted for the owner (R07.T1, Phase J): P14.T46 makes one bump for the moment of inertia, the
   rotation and figure sections and their pins, and one additive protocol change; P14.T47's
   photometry rides in it (decision-p14-phase-j). Neither adds a draw or a domain tag.
+- P14.T47.e (Earth after Robinson 2026) rides in the 20 → 21 bump with P11.T4.h and plan 11's
+  protostar and build-age fix (decision-r07-earth-albedo); its goldens are blessed at 20 until that
+  bump, which only flips the version. It adds no draw or domain tag.
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
   pulsar-planet probability, `SATELLITE_STABILITY_FRACTION`, the white dwarf pollution fit.
@@ -6491,7 +6492,7 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - _`TemplateRow`._ `albedo` is `Bands`, not `Option<Bands>` (every row has one; one-band
     analogues are grey). The row also carries `lunar_lambert_share` and the A6 field
     `phase_integral`. The literals are q: Moon 0.626110, Mercury and magma 0.479802, Mars
-    1.084648, Venus 1.344240, Earth 1.310569 (1.3116 from P14.T47.e), Jupiter 1.311719, Saturn
+    1.084648, Venus 1.344240, Earth 1.310569 (1.311573 since P14.T47.e), Jupiter 1.311719, Saturn
     1.356623, Uranus 1.301738, Neptune 1.242006, airless ice 0.80 and snowball 1.01 (s 0.821537 and
     0.667472), which a test reproduces to 10⁻⁹. `BodyPhotometry::phase_integral` is `const`.
   - _`PhotometryInputs`_ gains `equilibrium_temperature` for A8's hot-giant flag.
@@ -6539,3 +6540,96 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - _`photometry/templates.golden`_ (`tests/photometry_templates_golden.rs`): every template's Φ_c
     at whole degrees 0–180° for L in {0, 0.5, 1} in B, V and R at its exponents, and q per band;
     at the row's own L the q is the row's literal to 10⁻⁹.
+- **P14.T47.e, as built (Phase J lane, 2026-10-06). Goldens re-blessed at 20; `GENERATOR_VERSION`
+  not bumped.** The commit is held out of integration with P11.T4.h (ee47311) and plan 11's
+  protostar and build-age fix (9a0950e). The 20 → 21 bump comes after, as its own task, and only
+  flips the version. The task's "the golden tests at 21" pass at 20 until then.
+  - _The dimming._ Eq. 14 is written from g, as the client's `earthDimming` is: 3.75 log₁₀ of the
+    base 1 + g² + 2g cos α over the same base at α = 0, which is (1 + g)². The entry's literal
+    form, (1.1089 − 0.66 cos α) ÷ 0.4489, is the same up to rounding. Dividing by the base at 0
+    makes Δm(0) zero exactly, so Φ_t(0) is 1 bit for bit. It runs through `math::cos` and
+    `math::log10`, with the private `EARTH_HG_ASYMMETRY` = −0.33.
+  - _The row_ is as the entry gives it: `valid_to` 144°, p 0.263, 0.215 and 0.210, s 1,
+    `reference_bond` 0.306, and the entry's source string.
+    - q is 1.311572861542696, and the clamp acts from 139.006°.
+    - Past 144° the held f, 5.65, is cut to 4.
+    - Eq. 14 alone over 0°–180° gives 1.350.
+    - 0.23 q = 0.302, 2.6% above Robinson's 0.294.
+    - The stated ratio is 0.922; with Mallama's p it was 1.859.
+  - _How the albedos split._ The ruling's 0.263, 0.215 and 0.210 are Model 07's B, V and R
+    (0.277, 0.226, 0.221) times f ÷ that model's visual p, 0.23 ÷ 0.242. Normalising the three
+    ratios to a mean of 0.23 would give 0.264, 0.215 and 0.211 instead. The row's comment states
+    this, and a test holds the row to it within 5 × 10⁻⁴.
+  - _Tests._ `earth_is_robinson_2026s_fit`:
+    - R07.T4.d's dimming figures at 30°, 90°, 120° and 144°, to 10⁻⁴ mag;
+    - Φ_t against eq. 14 written out in its Henyey–Greenstein form, to 10⁻¹² over 0°–144°;
+    - the range, L, the flag, the source and the band split.
+
+    `earths_clamp_and_phase_integral_match_the_client`:
+    - the clamp from 139.006° (f under 4 at 138.9°, at 4 by 139.1°, the crossing bisected to
+      5 × 10⁻⁴°);
+    - the held f, 5.65, cut to 4;
+    - eq. 14 alone giving 1.350;
+    - q 1.3116;
+    - 0.23 q within 3% of 0.294.
+
+    Tests (a) and (b) take Earth's 1.312 and its ratio 0.215 × 1.3116 ÷ 0.306.
+
+  - _Goldens._ `golden_diff.py --base 9a0950e` shows 5 moved and nothing else. The verdict's "not
+    bumped" is expected.
+    - _`photometry/templates.golden`'s `earth` block._ 528 of its 547 lines move: `valid_to`, the
+      three q lines and Φ at 0°–180°. The 19 that stay are α = 0 at each L, α = 180° at L = 1
+      (0 on both), and 166°–180° at L = 0, where both curves sit on the clamp, 4 Φ_L.
+    - _Four `planetary/systems` goldens._ `close_binary` has 8 Earth blocks (56 values), and
+      `filler_c`, `solar_like` and `wide_binary` have 2 each (14 values). In each block p and q
+      per band and `bond_ratio` move.
+    - _Not six goldens._ The ruling listed six, found by a search for 0.434: `solar_like`,
+      `close_binary`, `filler_b`, `filler_c`, `hierarchical_triple` and `red_giant`.
+      - `filler_b`, `hierarchical_triple` and `red_giant` hold no Earth-template body. Their
+        0.434 is the leading digits of other values, such as `water = 0.43419…`.
+      - `wide_binary` does hold one.
+      - The same four goldens carry Earth's template at 97c969c and on `rendering-and-planets`.
+    - No server golden carries an Earth-template body.
+  - _The wire example_ (the ruling's item 5). Several places held the hand values 0.44, 0.434 and
+    0.411 with a ratio of 1.85943:
+    - `earth_photometry` in `hyperion-protocol`'s `planetary/record.rs`;
+    - the shared fixture `packages/protocol/fixtures/planetary.json`, twice;
+    - the p_B check in `planetary.test.ts`.
+
+    They now hold Robinson's 0.263, 0.215 and 0.21, with 0.92153. This is illustrative, not a
+    golden.
+
+  - _The client agrees._ The check ran R07.T4.d's own `templates.ts`, `law.ts`, `shapes.ts` and
+    `phase.ts` from `rendering-and-planets` under Node, against the new `earth` block.
+    - `valid_to` has the same bits.
+    - Φ agrees at every whole degree for L of 0, 0.5 and 1, within 3.7 × 10⁻¹⁴ relative.
+    - At the golden's q, `lawFor`'s 1,800-interval solve gives s = 1 to 3 × 10⁻¹⁵. At the fixture's
+      1.312 it gives 0.99961, as T4.d recorded.
+    - The client's general `phaseIntegral` uses 7,200 intervals. It gives q 2.5 × 10⁻⁸ higher at
+      L = 0, because the clamp's kink at 139.006° falls between nodes. At L = 0.5 and 1 the two
+      agree to 5 × 10⁻¹³.
+
+    So R07.T2.b's test against `templates.golden` should compare q on 1,800 intervals, or allow
+    at least 10⁻⁷.
+
+  - _Plan text._ This file takes `rendering-and-planets`' text (38e7d65 and 0f38a01, which carry
+    the ruling's T47.e entry) so that this note lands under it. A later merge sees the same hunks
+    on both sides.
+  - _Reviewed._
+    - The determinism auditor found nothing. The new arm runs through `math::cos` and
+      `math::log10`, in a fixed order, with no draw, tag or cache. `templates.golden` computes it
+      live, so `just test-wasm-fast` compares it on `wasm32-wasip1` too. Every move is explained.
+    - The science check found no fault. It read eq. 5, eq. 14, §5.2, §5.3 and §7 in
+      arXiv:2507.22258v2 (the typeset PSJ text not seen). It re-derived every figure above, the
+      f ÷ 0.242 split and the golden's Φ at L = 0 (to 5 × 10⁻¹⁵ relative). Its notes are applied:
+      - the module doc words the split as Model 07's B, V and R scaled by 0.23 ÷ 0.242;
+      - the row's comment gives CERES's 0.2915 in full (EBAF Ed4.0, 99.1 ÷ 340.0 W m⁻²);
+      - the test's eq. 14 is written as eq. 5's P_HG at Θ = 180° − α, so it no longer shares the
+        template's substitution of cos Θ.
+  - _Open, for the owner (not changed here)._ The temperate state's Bond albedo of 0.306
+    (`atmosphere.rs`) is cited to NASA's Earth fact sheet. Since its update of 15 November 2024
+    the fact sheet gives 0.294, the figure `irradiation.rs` cites from it. Earth's drawn p does
+    not change, because A_ref cancels by ruling 9. The temperate Bond albedo and the stated ratio
+    would change: 0.282 ÷ 0.294 = 0.959. Against CERES the ratio is 0.967, not the ruling's 0.96.
+    The choice is to re-cite 0.306 as the fact sheet's value before 2024, or to move the state to
+    0.294 under a later bump (P14.T13.c's owner).

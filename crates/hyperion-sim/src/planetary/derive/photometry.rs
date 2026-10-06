@@ -17,16 +17,19 @@
 //!
 //! Each [`PhaseTemplate`] is an analogue's V phase curve `Φ_t` = 10^(−0.4 [V(α) − V(0)])
 //! ([`template_phase`]): the planets' from Mallama and Hilton 2018 (Astronomy and Computing 25,
-//! 10, arXiv:1808.01973, eqs. 2–17, the globe-only forms for Saturn), each inside the range the
-//! paper states; the Moon's from Krisciunas and Schaefer 1991 (PASP 103, 1033, eq. 9), a fit to
-//! the lunar table of Allen 1973 (_Astrophysical Quantities_, 3rd ed., p. 143), held past 150°
-//! and without an opposition surge, which `airless_ice` and `snowball` borrow. The analogues'
-//! geometric albedos in B, V and R are Mallama, Krobusek and Pavlov 2017 (Icarus 282, 19,
-//! Table 7). The rows, their exponents s and phase integrals q are [`PHASE_TEMPLATES`]. s and q
-//! are constants of each template, stored as literals (decision-p14-phase-j A6): s is 1 for a
-//! template whose curve is its analogue's own, and for a borrowed curve it is the s at which `q_V`
-//! is the analogue's measured q ([`exponent_for`]); a test reproduces both. `s_B` = `s_V` = `s_R`
-//! everywhere: each curve is a single band.
+//! 10, arXiv:1808.01973, eqs. 2–17, the globe-only forms for Saturn), Earth's excepted, each
+//! inside the range the paper states; Earth's from Robinson 2026 (PSJ 7, 12, arXiv:2507.22258,
+//! eq. 14), a Henyey–Greenstein fit to the measured visual curve over 5°–144° (P14.T47.e,
+//! decision-r07-earth-albedo); the Moon's from Krisciunas and Schaefer 1991 (PASP 103, 1033,
+//! eq. 9), a fit to the lunar table of Allen 1973 (_Astrophysical Quantities_, 3rd ed., p. 143),
+//! held past 150° and without an opposition surge, which `airless_ice` and `snowball` borrow. The
+//! analogues' geometric albedos in B, V and R are Mallama, Krobusek and Pavlov 2017 (Icarus 282,
+//! 19, Table 7), except Earth's, which are Robinson 2026's Model 07 B, V and R (§5.2) scaled by
+//! the fit's f ÷ that model's visual p, 0.23 ÷ 0.242 (§5.3). The rows, their exponents s and phase
+//! integrals q are [`PHASE_TEMPLATES`]. s and q are constants of each template, stored as literals
+//! (decision-p14-phase-j A6): s is 1 for a template whose curve is its analogue's own, and for a
+//! borrowed curve it is the s at which `q_V` is the analogue's measured q ([`exponent_for`]); a
+//! test reproduces both. `s_B` = `s_V` = `s_R` everywhere: each curve is a single band.
 //!
 //! # The choice and the albedos (P14.T47.b; decision-phase-curves; decision-p14-phase-j)
 //!
@@ -41,7 +44,7 @@
 //!
 //! `p_c` = `p_c,analogue` × `A_Bond` ÷ `A_ref`, capped so that `p_c` `q_c` ≤ 1, where `A_ref`
 //! ([`TemplateRow::reference_bond`]) is the Bond albedo the generator gives the analogue body, so
-//! that every Solar System analogue in its own state is drawn with Table 7's p (ruling 9). The
+//! that every Solar System analogue in its own state is drawn with its row's p (ruling 9). The
 //! stated ratio `p_V` `q_V` ÷ `A_Bond` is a check only.
 
 use core::f64::consts::PI;
@@ -196,7 +199,15 @@ impl PhaseTemplate {
                     polynomial(&[236.058_28 + 4.384, -2.819_14, 8.390_34e-3], alpha_deg)
                 }
             }
-            Self::Earth => polynomial(&[0.0, -1.06e-3, 2.054e-4], alpha_deg),
+            Self::Earth => {
+                // Robinson 2026's eq. 14, Φ_t = [(1 + g)² ÷ (1 + g² + 2g cos α)]^(3/2), a
+                // Henyey–Greenstein function at the scattering angle 180° − α, as a dimming:
+                // 3.75 log₁₀ of the base over the same sum at α = 0, 1 + g² + 2g, which is
+                // (1 + g)² up to rounding and makes the dimming at opposition 0 exactly.
+                let g = EARTH_HG_ASYMMETRY;
+                let base = |cos: f64| 1.0 + g * g + 2.0 * g * cos;
+                3.75 * math::log10(base(math::cos(alpha_deg * DEG)) / base(1.0))
+            }
             Self::Mars => polynomial(&[0.0, 2.267e-2, -1.302e-4], alpha_deg),
             Self::Jupiter => {
                 if alpha_deg <= JUPITER_JOIN_DEG {
@@ -237,6 +248,10 @@ const JUPITER_JOIN_DEG: f64 = 12.0;
 
 /// Saturn's join between eqs. 11 and 12, degrees: eq. 12's −8.94 is set to agree at 6° (§3.6).
 const SATURN_JOIN_DEG: f64 = 6.0;
+
+/// The asymmetry g of Earth's Henyey–Greenstein phase curve, dimensionless: −0.33, Robinson
+/// 2026 (PSJ 7, 12, eq. 14), back-scattering towards opposition.
+const EARTH_HG_ASYMMETRY: f64 = -0.33;
 
 /// Σ cₖ xᵏ, coefficients ascending, by Horner's rule in a fixed order.
 fn polynomial(coefficients: &[f64], x: f64) -> f64 {
@@ -344,20 +359,25 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
     },
     TemplateRow {
         template: PhaseTemplate::Earth,
+        // The eq. 14 fit's f = 0.23, its geometric albedo, in Model 07's band ratios 0.277 :
+        // 0.226 : 0.221 (that model's B, V and R against its visual 0.242), whose flat 0.4–0.5,
+        // 0.5–0.6 and 0.6–0.7 µm bands stand for Johnson's. CERES's Bond albedo in the source is
+        // EBAF Ed4.0's 99.1 ÷ 340.0 W m⁻² = 0.2915 (Loeb et al. 2018, J. Climate 31, 895,
+        // Table 5).
         albedo: Bands {
-            b: 0.512,
-            v: 0.434,
-            r: 0.418,
+            b: 0.263,
+            v: 0.215,
+            r: 0.210,
         },
         reference_bond: BondAlbedo::from_fraction(0.306),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_EARTH),
         lunar_lambert_share: 0.0,
-        valid_to: Radians::new(180.0 * DEG),
+        valid_to: Radians::new(144.0 * DEG),
         provisional: false,
-        source: "Mallama and Hilton 2018, eq. 5 (Tinetti et al. 2006's realistic clouds, fitted \
-                 by Mallama et al. 2017), taken over 0–180°; Mallama et al. 2017, Table 7; Bond \
-                 albedo 0.306 (NASA's fact sheet)",
+        source: "Robinson 2026, PSJ 7, 12, eq. 14 (g = −0.33, f = 0.23), to 144°; p from §5's \
+                 band ratios at f; Bond albedo 0.306 (the temperate state; CERES 0.2915, Loeb et \
+                 al. 2018)",
     },
     TemplateRow {
         template: PhaseTemplate::Jupiter,
@@ -480,7 +500,7 @@ const Q_MOON: f64 = 0.626_110_411_296_755;
 const Q_MERCURY: f64 = 0.479_801_866_292_407_7;
 const Q_MARS: f64 = 1.084_647_566_489_643_3;
 const Q_VENUS: f64 = 1.344_239_863_487_745_5;
-const Q_EARTH: f64 = 1.310_569_402_843_046_3;
+const Q_EARTH: f64 = 1.311_572_861_542_696;
 const Q_JUPITER: f64 = 1.311_718_956_968_471_3;
 const Q_SATURN: f64 = 1.356_623_222_499_990_8;
 const Q_URANUS: f64 = 1.301_738_407_075_694_5;
@@ -860,13 +880,14 @@ mod tests {
         }
     }
 
-    /// (a) Mercury's `q_V` is 0.480 (Mallama et al. 2002's 0.478) and Earth's 1.311, to 0.5%; every
-    /// template's q lies in 0.4–1.7.
+    /// (a) Mercury's `q_V` is 0.480 (Mallama et al. 2002's 0.478) and Earth's 1.312 (eq. 2 and
+    /// Robinson 2026's eq. 14, the clamp acting on Earth from 139°), to 0.5%; every template's q
+    /// lies in 0.4–1.7.
     #[test]
     fn the_phase_integrals_are_the_analogues() {
         let q = |t: PhaseTemplate| t.row().phase_integral.v;
         assert!((q(PhaseTemplate::Mercury) / 0.480 - 1.0).abs() < 0.005);
-        assert!((q(PhaseTemplate::Earth) / 1.311 - 1.0).abs() < 0.005);
+        assert!((q(PhaseTemplate::Earth) / 1.312 - 1.0).abs() < 0.005);
         for template in PhaseTemplate::ALL {
             assert!((0.4..=1.7).contains(&q(template)), "{template:?}");
         }
@@ -898,11 +919,100 @@ mod tests {
             }
             assert!(!photometry.provisional(), "{name}");
         }
-        // The stated ratios, findings for P14.T13.c and not failures: Mercury's 0.62 and Earth's
-        // 1.86 (decision-p14-phase-j).
+        // The stated ratios, findings for P14.T13.c and not failures: Mercury's 0.62
+        // (decision-p14-phase-j) and Earth's 0.92 (decision-r07-earth-albedo; Mallama's p gave
+        // 1.86).
         let ratio = |name| BodyPhotometry::derive(&inputs_of(found(&planets, name))).bond_ratio();
         assert!((ratio("Mercury") - 0.142 * 0.4798 / 0.11).abs() < 0.01);
-        assert!((ratio("Earth") - 0.434 * 1.3106 / 0.306).abs() < 0.01);
+        assert!((ratio("Earth") - 0.215 * 1.3116 / 0.306).abs() < 0.01);
+    }
+
+    /// Robinson 2026's eq. 14 written out as the paper gives it, independently of the template's
+    /// dimming: his eq. 5's Henyey–Greenstein function `P_HG`(Θ) = (1 − g²) ÷ (1 + g² − 2g cos
+    /// Θ)^(3/2) of g = −0.33 at the scattering angle Θ = 180° − α, over its value at α = 0,
+    /// unclamped and over 0°–180°.
+    fn robinson_eq14(alpha: Radians) -> f64 {
+        let g: f64 = -0.33;
+        let henyey_greenstein =
+            |theta: f64| (1.0 - g * g) / math::powf(1.0 + g * g - 2.0 * g * math::cos(theta), 1.5);
+        henyey_greenstein(PI - alpha.value()) / henyey_greenstein(PI)
+    }
+
+    /// P14.T47.e: Earth's template is Robinson 2026's eq. 14 to 144° (its dimming by hand at 30°,
+    /// 90°, 120° and 144° to 10⁻⁴ mag, R07.T4.d's figures, and the paper's form to 10⁻¹²), held
+    /// beyond, with Model 07's band ratios at f = 0.23.
+    #[test]
+    fn earth_is_robinson_2026s_fit() {
+        let earth = PhaseTemplate::Earth;
+        for (degrees, mag) in [
+            (30.0, 0.292_82),
+            (90.0, 1.472_79),
+            (120.0, 1.897_05),
+            (144.0, 2.112_93),
+        ] {
+            let dimming = earth.dimming(degrees);
+            assert!((dimming - mag).abs() < 1e-4, "{degrees}°: {dimming}");
+        }
+        assert_same_bits(earth.dimming(0.0), 0.0);
+        for i in 0..=144 {
+            let alpha = Radians::new(f64::from(i) * DEG);
+            let (template, paper) = (template_phase(earth, alpha), robinson_eq14(alpha));
+            assert!(
+                (template - paper).abs() < 1e-12,
+                "{i}°: {template} against {paper}"
+            );
+        }
+        let row = earth.row();
+        assert!((row.valid_to.value() - 144.0 * DEG).abs() < 1e-15);
+        assert!(row.lunar_lambert_share.abs() < 1e-15);
+        assert!(!row.provisional);
+        assert!(row.source.starts_with("Robinson 2026, PSJ 7, 12, eq. 14 "));
+        // Model 07's B, V and R (0.277, 0.226, 0.221) scaled from its visual p of 0.242 to the
+        // fit's f = 0.23, to the rounding of the third decimal.
+        for (p, model) in [
+            (row.albedo.b, 0.277),
+            (row.albedo.v, 0.226),
+            (row.albedo.r, 0.221),
+        ] {
+            assert!((p - model * 0.23 / 0.242).abs() < 5e-4, "{p}");
+        }
+    }
+
+    /// P14.T47.e: Earth's law at L = 0 is clamped from 139.006° (R07.T4.d's onset), and past
+    /// 144° the held f of 5.65 is cut to 4; eq. 14 alone over 0°–180° would integrate to 1.350;
+    /// 0.23 q is within 3% of Robinson's visual spherical albedo of 0.294 (0.302).
+    #[test]
+    fn earths_clamp_and_phase_integral_match_the_client() {
+        let earth = PhaseTemplate::Earth;
+        let f = |degrees: f64| {
+            let alpha = Radians::new(degrees * DEG);
+            channel_phase(earth, 0.0, 1.0, alpha) / shape_phase(0.0, alpha)
+        };
+        assert!(f(138.9) < PHASE_F_CLAMP, "{}", f(138.9));
+        assert!((f(139.1) - PHASE_F_CLAMP).abs() < 1e-12, "{}", f(139.1));
+        let (mut below, mut above) = (138.9, 139.1);
+        for _ in 0..60 {
+            let middle = f64::midpoint(below, above);
+            let alpha = Radians::new(middle * DEG);
+            if template_phase(earth, alpha) < PHASE_F_CLAMP * shape_phase(0.0, alpha) {
+                below = middle;
+            } else {
+                above = middle;
+            }
+        }
+        assert!(
+            (below - 139.006).abs() < 5e-4,
+            "the clamp acts from {below}°"
+        );
+        let end = earth.row().valid_to;
+        let unclamped = template_phase(earth, end) / shape_phase(0.0, end);
+        assert!((unclamped - 5.65).abs() < 0.005, "{unclamped}");
+        assert_same_bits(held_factor(earth, 0.0, 1.0), PHASE_F_CLAMP);
+        let alone = simpson(robinson_eq14);
+        assert!((alone - 1.350).abs() < 5e-4, "{alone}");
+        let q = earth.row().phase_integral.v;
+        assert!((q - 1.3116).abs() < 5e-5, "{q}");
+        assert!((0.23 * q / 0.294 - 1.0).abs() < 0.03, "{}", 0.23 * q);
     }
 
     fn airless(material: SurfaceMaterial, state: SurfaceState, bond: f64) -> PhotometryInputs {

@@ -275,7 +275,7 @@ describe("body_detail", () => {
     expect(figure.law).toBe("rotational");
     expect(figure.datum).toBe("solid_surface");
     expect(photometry.phase_template).toBe("earth");
-    expect(photometry.geometric_albedo.b).toBe(0.44);
+    expect(photometry.geometric_albedo.b).toBe(0.263);
     expect(photometry.provisional).toBe(false);
   });
 

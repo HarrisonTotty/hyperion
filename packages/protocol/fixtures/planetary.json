@@ -196,9 +196,9 @@
             "state": "ok",
             "value": {
               "geometric_albedo": {
-                "b": 0.44,
-                "v": 0.434,
-                "r": 0.411
+                "b": 0.263,
+                "v": 0.215,
+                "r": 0.21
               },
               "phase_template": "earth",
               "phase_exponent": {
@@ -208,7 +208,7 @@
               },
               "lunar_lambert_share": 0.0,
               "bond_albedo": 0.306,
-              "bond_ratio": 1.85943,
+              "bond_ratio": 0.92153,
               "provisional": false
             }
           }
@@ -1096,9 +1096,9 @@
           "state": "ok",
           "value": {
             "geometric_albedo": {
-              "b": 0.44,
-              "v": 0.434,
-              "r": 0.411
+              "b": 0.263,
+              "v": 0.215,
+              "r": 0.21
             },
             "phase_template": "earth",
             "phase_exponent": {
@@ -1108,7 +1108,7 @@
             },
             "lunar_lambert_share": 0.0,
             "bond_albedo": 0.306,
-            "bond_ratio": 1.85943,
+            "bond_ratio": 0.92153,
             "provisional": false
           }
         },
