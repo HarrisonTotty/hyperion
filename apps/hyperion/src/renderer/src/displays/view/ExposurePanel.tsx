@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useRef, useState } from "react";
+import { type ReactNode, type Ref, useId, useRef, useState } from "react";
 
 import { formatNumber, formatSignificant } from "../../lib/format";
 import { isEmptyEntry, showSelected } from "../../lib/textEntry";
@@ -40,6 +40,11 @@ export interface ExposurePanelProps {
   readonly metering: Metering;
   /** Called with the control after an accepted command. */
   readonly onChange: (exposure: ExposureControl) => void;
+  /**
+   * Receives its `INHIBIT` button, the control before the meter's in the full layout's second
+   * column, to which the focus goes when the meter's panel goes (R07.T16.b's ruling), or none.
+   */
+  readonly inhibitRef?: Ref<HTMLButtonElement> | undefined;
 }
 
 /** The decimals a `MAN` entry keeps and shows: one, the reading's precision. */
@@ -175,19 +180,29 @@ interface ExposureCommandProps {
    */
   readonly consequence?: string | undefined;
   readonly onChange: (exposure: ExposureControl) => void;
+  /** Receives its button, or none. */
+  readonly buttonRef?: Ref<HTMLButtonElement> | undefined;
 }
 
 /**
  * A command button, held back with its reason where the command would be refused, or offered with
  * its consequence, if it has one, in the reason's place; either describes the button.
  */
-function ExposureCommand({ label, result, metering, consequence, onChange }: ExposureCommandProps) {
+function ExposureCommand({
+  label,
+  result,
+  metering,
+  consequence,
+  onChange,
+  buttonRef,
+}: ExposureCommandProps) {
   const noteId = useId();
   const refused = result.kind === "refused";
   const note = refused ? refusalWords(result.reason, metering) : consequence;
   return (
     <div className="view-exposure__command">
       <button
+        ref={buttonRef}
         type="button"
         className="control"
         // Held back rather than disabled, so that it keeps focus and can say why.
@@ -494,6 +509,7 @@ export function ExposurePanel({
   designator,
   id,
   hidden,
+  inhibitRef,
 }: ExposurePanelProps) {
   const titleId = useId();
   // `INHIBIT` shuts the automation down under `AUTO` and takes a system inhibit over, whatever its
@@ -537,6 +553,7 @@ export function ExposurePanel({
           metering={metering}
           consequence={inhibitStates ? INHIBIT_CONSEQUENCE : undefined}
           onChange={onChange}
+          buttonRef={inhibitRef}
         />
       </div>
     </section>

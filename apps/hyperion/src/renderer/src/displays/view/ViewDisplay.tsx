@@ -1052,10 +1052,20 @@ function ViewStage({
         foldButtonsRef.current.set(panel, button);
       }
     };
+  // The Exposure panel's INHIBIT button, which takes the focus when the meter's panel goes in the
+  // full layout.
+  const inhibitButtonRef = useRef<HTMLButtonElement | null>(null);
   // The focus inside a panel that folds goes to that panel's disclosure button, and a panel that
-  // goes away (the meter, on a style switch) gives its focus to CAMERA's.
+  // goes away (the meter, on a style switch, a fault or the stand-in while the pipelines compile)
+  // gives its focus to CAMERA's in the compact layout, and in the full layout to INHIBIT, the
+  // control before it in the second column (the orchestrator's ruling on R07.T16.b).
   useLayoutEffect(() => {
-    if (!compact || focusedFold === null || focusedFold === opened) {
+    if (focusedFold === null) {
+      return;
+    }
+    const folding = compact && focusedFold !== opened;
+    const meterGone = !compact && focusedFold === "meter" && !meterStands;
+    if (!folding && !meterGone) {
       return;
     }
     const active = document.activeElement;
@@ -1064,11 +1074,16 @@ function ViewStage({
       active === document.body ||
       !active.isConnected ||
       active.closest("[hidden]") !== null;
-    if (lost) {
+    if (!lost) {
+      return;
+    }
+    if (folding) {
       const buttons = foldButtonsRef.current;
       (buttons.get(focusedFold) ?? buttons.get(DEFAULT_FOLD))?.focus();
+    } else {
+      inhibitButtonRef.current?.focus();
     }
-  }, [compact, focusedFold, opened, foldButtonsRef]);
+  }, [compact, focusedFold, opened, meterStands, foldButtonsRef]);
 
   // The CONTROLS view's camera and style, which a folded panel's standing lines describe. Its style
   // panel heads the second column and stands in every engine state, so that nothing under it moves
@@ -1322,6 +1337,7 @@ function ViewStage({
             designator={PRIMARY_NAME}
             id={foldIds.exposure}
             hidden={folded("exposure")}
+            inhibitRef={inhibitButtonRef}
           />
           {meterStands ? (
             <MeterControl

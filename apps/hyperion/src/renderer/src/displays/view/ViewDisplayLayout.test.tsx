@@ -233,6 +233,47 @@ describe("VIEW's full layout (R07.T19.b)", () => {
       ),
     ]).toEqual([[], true]);
   });
+
+  it("gives the focus to INHIBIT, the control before the meter, when the meter goes", async () => {
+    // The orchestrator's ruling on R07.T16.b: the compact layout gives it to CAMERA instead.
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(
+      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole("button", {
+        name: "LIT",
+      }),
+    );
+    const focusedOnMeter = document.activeElement?.textContent;
+    // Back to the wireframe: the meter's control, and its panel, go.
+    await toggleStyle(view);
+    expect([
+      focusedOnMeter,
+      region("Exposure meter PRIMARY"),
+      document.activeElement ===
+        within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getByRole("button", {
+          name: "INHIBIT",
+        }),
+    ]).toEqual(["LIT", null, true]);
+  });
+
+  it("leaves the focus where it is when the meter goes from under a control outside it", async () => {
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    const wireframe = within(screen.getByRole("region", { name: "Style PRIMARY" })).getByRole(
+      "button",
+      { name: "WIREFRAME" },
+    );
+    await view.user.click(wireframe);
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    expect([region("Exposure meter PRIMARY"), document.activeElement === wireframe]).toEqual([
+      null,
+      true,
+    ]);
+  });
 });
 
 describe("VIEW's compact layout (R07.T19.b)", () => {

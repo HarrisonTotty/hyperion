@@ -3959,17 +3959,23 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     reads against it. The UX review leans to keeping it, as the only honest reading; the
     plan-conformance review asks for a ruling. Other choices would be a bare `INHIBITED` in the
     window, or the new meter's status taken early; the guide has neither. T16.c's row must say
-    what is ruled.
+    what is ruled. _Ruled by the orchestrator (2026-10-06, the UX review's lean): as built, the
+    reading keeping the standing cause until the window ends; T16.c's row says so._
   - **T8.a's consider, not settled: for a ruling.** In the compact layout the focus already goes to
     `CAMERA`'s disclosure (decision-r07-t19-layout). In the full layout, a meter button holding the
     focus when key `4`, a fault or the wireframe stand-in while the pipelines recompile unmounts
     the panel leaves the focus on the page's body; a press on the Style panel takes the focus there
     first. The full layout's target is a UX choice no ruling covers: (a) the Style panel's pressed
     button; (b) `CAMERA`, as in compact; (c) the Exposure panel's last control, `INHIBIT`, the
-    meter's predecessor in column B (the UX review's lean); (d) leave it.
+    meter's predecessor in column B (the UX review's lean); (d) leave it. _Ruled by the
+    orchestrator (2026-10-06): (c). Built after T16.d: `ViewDisplay`'s focus effect gives the focus
+    to `INHIBIT` (`ExposurePanel`'s `inhibitRef`) when the meter's panel goes in the full layout
+    with the focus inside it; the compact layout keeps `CAMERA`. Tested in
+    `ViewDisplayLayout.test.tsx`, with a twin that leaves a focus outside the panel where it is._
   - **For T16.c.** `NO IMAGE TO METER` can still stand beside a drawn image after a histogram
     timeout with the image drawn (a read-back fault), the plan's `no-image`. The ruling's sentence
-    for the guide, "Never shown beside a drawn image", needs that exception.
+    for the guide, "Never shown beside a drawn image", needs that exception. _Ruled by the
+    orchestrator (2026-10-06): T16.c's sentence gains the exception._
   - **Tests.**
     - `autoExposure.test.ts`: under `LIT` with no lit body, acquiring until 0.45 s and
       `NO LIT SIDE` by 0.65 s, never `no-image`, and the inhibit raised with the status;
@@ -4442,7 +4448,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     its own, `NO LIT SIDE`, `NO DARK SIDE` and `STAR DISC ONLY`, built in T16. The transient before
     the first histogram gets no word. Until T16, `NO IMAGE TO METER` stands for both, beyond the
     guide's row. Focus on a meter button is lost when the panel unmounts on a style change (a
-    consider for T16).
+    consider for T16). _Settled for the compact layout by T19.b and for the full one after T16.b
+    (the orchestrator's ruling): see "Deviations in T16.b, as built"._
   - **After review.** The loop tells an operator's command from its own publication by keeping
     what it last read of the display's control apart from what it last gave it, so a frame between
     a readout and React's commit cannot revert the smoothing; it gives the display a control only
