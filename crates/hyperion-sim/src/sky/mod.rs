@@ -20,11 +20,14 @@
 //! - [`caps`]: how far out the census looks in each layer.
 //! - [`census`]: the stars an observer sees brighter than a cut: the query, its plan and the
 //!   per-cell cache.
+//! - [`band`]: the light of the stars the census did not list, along rays from the observer: the
+//!   unresolved band.
 //!
 //! Everything here only reads the galaxy: nothing changes generated output, and nothing draws a
 //! random word, except [`binary_light`]'s fit sampling, which generates systems of its own galaxy
 //! offline, as the census generates the galaxy's.
 
+pub mod band;
 pub mod binary_light;
 pub mod caps;
 pub mod census;
