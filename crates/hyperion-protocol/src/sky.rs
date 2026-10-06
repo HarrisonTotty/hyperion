@@ -186,12 +186,14 @@ pub struct BandSpecDto {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum SkyGapDto {
-    /// Members of star clusters and other features (until plan 09's P09.T40): `CLUSTERS NOT
+    /// Members of star clusters and other features (until R06.T16.a): `CLUSTERS: NOT YET
     /// MODELLED`.
     FeatureMembers,
-    /// Members of the galactic centre, whose orbits are not propagated (until P09.T28).
+    /// Members of the galactic centre, whose orbits are not propagated (until P09.T28): also
+    /// `CLUSTERS: NOT YET MODELLED`.
     CentreMembers,
-    /// White dwarfs, which have no V magnitude yet (plan 06's A4): `WD NOT MODELLED`.
+    /// White dwarfs, which have no V magnitude yet (plan 06's A4): `WHITE DWARFS: NOT YET
+    /// MODELLED`.
     WhiteDwarfs,
 }
 

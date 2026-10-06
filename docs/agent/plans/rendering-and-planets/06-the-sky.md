@@ -8,7 +8,8 @@
   [R03 The scene subscription and bulk transport](03-scene-subscription-and-transport.md) (outbound
   binary frames and their envelope); galaxy plans
   [06](../galaxy-generation/06-stellar-stage.md) (the stellar brief, `BriefModel`, photometry),
-  [09](../galaxy-generation/09-features-and-catalogue-classes.md) (feature members, from P09.T40)
+  [09](../galaxy-generation/09-features-and-catalogue-classes.md) (feature members, for R06.T16.a,
+  which is out of RM3's scope: from P09.T2.c and P09.T40)
   and [12](../galaxy-generation/12-retarded-observation-alerts.md) (`hyperion_sim::observe`).
   Through them it reads galaxy plans 03, 04, 07, 11, 13 and 15 (`hyperion-fit`). R05's
   `QualitySetting`, `ViewSettings` and `SETTINGS` carry the sky's settings (T13.f).
@@ -73,6 +74,10 @@ Non-goals:
 - Sensor consoles, telescopes and any magnitude limit other than the eye's and the view camera's.
 - Stars in the view's DOM list. The list holds contacts, bodies and the selected target, as the
   brainstorm's accessibility section says.
+- Feature members in RM3: star clusters, OB associations, globulars and the galactic centre's
+  cluster. R06.T16.a is out of RM3's scope and lands with galaxy plan 09's P09.T2.c. Until
+  then the field keeps their stars, spread through it, and every view says
+  `CLUSTERS: NOT YET MODELLED` (decided 2026-10-05, `decision-r06-t16a-scope.md`).
 
 ## Provides
 
@@ -401,6 +406,9 @@ SightlineMarcher, SharedSightlineCache}`) is on `origin/galaxy-generation` only,
   As built, neither `SystemSource` nor `FeatureMemberSource` is `Sync`, so each census job builds
   its own `SkyContext` and sources over shared caches, as `range_query`'s callers do; P09.T40 is not
   built on `main` or on `origin/galaxy-generation`, and the server's range query passes no sources.
+  R06.T16.a, which reads it, is out of RM3's scope and lands with P09.T2.c (decided 2026-10-05,
+  `decision-r06-t16a-scope.md`). Until P09.T2.c nothing reads φ (`FeatureShare::None`), so the field
+  keeps the members' share, and `FeatureGas` is passed nowhere.
 - **Galaxy plan 11:** `stellar::multiplicity::star_positions_at(&SystemHierarchy, t, out)` (its
   `out` holds `(BodyId, SystemPosition)`), `StarIndex`, the hierarchy in `SystemStars`
   (`hierarchy()`); and the rule that every star's mass is at most the pair's total (Design note
@@ -633,8 +641,8 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     `TraceMotionError` counts it in the tallies until P09.T28); the brief at the emitted time; a
     bound on the system's flux; if that bound passes the cut, `SystemStars::generate` and every
     star's state, V, position (`star_positions_at` about the system's apparent position), colour and
-    one `sightline` (`Realised`, `Budget(64)`, the feature modifiers once P09.T40 supplies them)
-    from the apparent position to the observer. The flux bound is gated by the primary's phase
+    one `sightline` (`Realised`, `Budget(64)`, and plan 09's feature modifiers from R06.T16.a,
+    after RM3) from the apparent position to the observer. The flux bound is gated by the primary's phase
     (researched 2026-09-29; Flower 1996, ApJ 469, 355, and Martins and Plez 2006, A&A 457, 637, for
     hot stars' bolometric corrections; De Marco and Schmutz 1999, A&A 345, 163, for γ² Vel, whose O
     companion outshines its Wolf–Rayet primary in V; Siess et al. 2000 for V rising with mass on
@@ -851,8 +859,8 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     `STARS V 9.5 mag CAM`, and, while any stand-in holds, what it is:
     `STARS: RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION` (R02's stand-in, R02's Design note 16,
     until this plan lands), and what the sky leaves out as one composed note after a middle dot,
-    `CLUSTERS: NOT YET MODELLED` (until R06.T16), `WHITE DWARFS: NOT YET MODELLED` (until A4), or
-    both, `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`. The band is noted as
+    `CLUSTERS: NOT YET MODELLED` (until R06.T16.a, after RM3, and the centre's members),
+    `WHITE DWARFS: NOT YET MODELLED` (until A4), or both, `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`. The band is noted as
     `INTEGRATED STARLIGHT` in the DOM list's view notes, in the photorealistic style only. The
     flash threshold binds the stars: pixel-integrated sprites are the mechanism, and a test holds a
     moving star's summed energy within 1%.
@@ -864,7 +872,9 @@ with them; T6.b needs T5.a, whose mass nodes it reads. T7 needs T5 and T6; T8 ne
 and T7, and within it T8.e follows T8.b. T9 needs T8; T9.d needs T9.b. T10 needs T9, T4.b and R03's
 frames; T11 needs T10, with T11.c after T11.a. The client, T12–T14, needs T10 for its types and
 R02's `view/`; T13's subtasks follow T12, T13.g follows T13.b and T13.h, and T15's draft precedes
-T13.f, which builds to it. T16.a waits on P09.T40. T17 closes.
+T13.f, which builds to it. T16.a is out of RM3's scope. It waits on P08.T12, P09.T2.c, P09.T23.b
+and P09.T40.a's feature part, and lands in one integration with P09.T2.c (decided 2026-10-05,
+`decision-r06-t16a-scope.md`). T17 closes RM3's part of this plan without it.
 
 Re-validated 2026-10-02: P11.T11 has wired binary evolution into `SystemStars::state_at`, so
 T16.b no longer waits: it follows T8.e directly and precedes T9, so that the band, the server and
@@ -877,7 +887,8 @@ Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs 
 T16.b; T8.f; T9.b–d; T8.g, once plan 11's asks A and B are on `rendering-and-planets`; T8.h; T7.b;
 T8.i with T11.d, after T11.a–c; then T17. T7.b, T8.i and T11.d waited on the owner's sign-off. A
 decision agent advised on it, and its advice was adopted on 2026-10-05 under the owner's standing
-delegation (`decision-r06-census-cost-signoff.md`).
+delegation (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided
+2026-10-05, `decision-r06-pad-speed.md`), runs after T9.b–d and before T8.g.
 
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
@@ -1271,6 +1282,40 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
   floor of a layer whose systems are all single, the brown dwarfs', reads each primary's own mass,
   not 2 m₁, as its flux bound does. As built: Risks, "Deviations in T8.f, as built".
 
+- **R06.T8.j The census in motion (new; after T9.b, before T8.g; no output moves).** Decided
+  2026-10-05 (`decision-r06-pad-speed.md`). The census pads its cells (`layer_walk`) and its
+  bound before the drift (`CellReach`) by `pad_speed(layer)`, as the range query does. But no
+  record has ever moved in its tests:
+  - its identity tests and benches run in the fixture galaxy, which is built without kinematic
+    tables;
+  - its oracle opens the census's own cells, so it could not see a record that outruns the pad.
+
+  This task tests the census in a galaxy whose systems move.
+  1. `the_census_plan_holds_every_record_its_caps_see` (unit, `sky::census::cell`).
+     - The galaxy is the Milky Way fixture's seed, built `with_full_potential` once for the
+       module's tests in a `OnceLock`. T8.f's moving-galaxy test then shares it.
+     - The observers stand at the Sun at the epoch, at +H and at −H, and 250 ly from the Sun at
+       +900 years.
+     - Caps are forced to A 24, B 48, brown dwarfs 48, C 96, D 192 and E 384 ly.
+     - Each layer's cells are walked independently of `pad_speed`: to the cap plus `pad_for` at
+       5,000 km/s over the earliest emitted time. They are generated whole.
+     - For every record:
+       - its speed is below its layer's `pad_speed`;
+       - its displacement from its epoch position, at the emitted time and at the observer's time
+         (the retardation's first guess), is at most its cell's `CellReach` pad;
+       - if its apparent position lies within its layer's cap, its cell is among `plan_cells`'.
+     - Some 10⁴ records are expected, in a few seconds after the galaxy's build.
+  2. (slow) `the_census_is_its_oracle_150_ly_from_the_sun_in_motion` (`tests/sky_census.rs`):
+     T8.e's 150 ly identity test at cut 11.0, in the moving galaxy, with the observer at +H.
+     Every assertion is unchanged.
+  3. `CellReach::of`'s doc comment names P08.T17's assertion.
+
+  Files: `sky/census/cell.rs`, `tests/sky_census.rs`, `tests/common/sky.rs` (a moving galaxy, and
+  an observer near the Sun at a given time) and `06-the-sky.md`. Acceptance:
+  `cargo test -p hyperion-sim sky::census`, `cargo test -p hyperion-sim --test sky_census`,
+  `just test-slow the_census_is_its_oracle_150_ly_from_the_sun_in_motion`, `just ci`. No
+  GENERATOR_VERSION bump.
+
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f and plan 11's asks A and B).**
   Decided 2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Near the
   Sun, the multiple-system bound left 98% of the census in generation. The per-record bound becomes
@@ -1451,10 +1496,18 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   request's `CancelToken`, merged once all finish; the census never enters the interactive queue,
   so a chart's query is never held behind it. The time check reuses `convert::query_time`
   (made `pub(crate)`), and the system check `placement::resolve` in a pool job, as
-  `requests/scene.rs` does. Each job builds its own `SkyContext`, the sources not being `Sync`. Tests (integration, over the
-  WebSocket, at a small census): a cancelled request stops its queued jobs and sends nothing
-  further; a range query sent while a sky's jobs run is answered first; `n_max` above the cap is
-  `BadRequest` naming `n_max`. Acceptance: `cargo test -p hyperion-server --test sky`.
+  `requests/scene.rs` does. Each job builds its own `SkyContext`, the sources not being `Sync`.
+  The reply's `not_modelled` lists `feature_members` whenever the merged census's
+  `feature_members_absent` holds, which is every reply until R06.T16.a. It lists `centre_members`
+  and `white_dwarfs` by T8.c's mapping. `SkyGapDto`'s doc comments in `hyperion-protocol`'s
+  `sky.rs` take the signed-off wording (`CLUSTERS: NOT YET MODELLED`,
+  `WHITE DWARFS: NOT YET MODELLED`) and "until R06.T16.a" (decided 2026-10-05,
+  `decision-r06-t16a-scope.md`). The doc comments were corrected with this plan text
+  (2026-10-06), ahead of T11.a. Tests (integration, over the WebSocket, at a small census): a
+  cancelled request stops its queued jobs and sends nothing further; a range query sent while a
+  sky's jobs run is answered first; `n_max` above the cap is `BadRequest` naming `n_max`; a sky
+  near the Sun lists `feature_members` in `not_modelled`. Acceptance:
+  `cargo test -p hyperion-server --test sky`.
 - **R06.T11.b Transfer.** The response and its payload through R03's `BulkPayload::new` and
   `Answer { body, bulk }` (whose `frames` call `bulk::chunk`), the stars then the band, split by
   `stars_bytes` and `band_bytes`, with `BulkPayload`'s `expect(dead_code)` removed; the per-cell
@@ -1674,17 +1727,64 @@ draft, and the owner's sign-off recorded in this plan.
 
 ### R06.T16 Feature members and binaries
 
-- **R06.T16.a Feature members (after P09.T40).** P09.T40 registers plan 09's sources in the
-  `SystemsInRange` handler; the sky handler builds the same sources over P09.T40's caches, and the
-  census reads them: `FeatureMemberSource` and the centre's members through the `SystemSource`
-  hook, with the same skips (a member's mass word is its own, so the floor applies), and
-  `FeatureGas` as the sightline's modifiers. `CLUSTERS` leaves the label's composed
-  `NOT YET MODELLED` note (`CLUSTERS: NOT YET MODELLED` is withdrawn, and
-  `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED` becomes `WHITE DWARFS: NOT YET MODELLED`).
-  Tests: the Pleiades-like cluster of a pinned seed appears as a clump of bright stars from 400 ly;
-  the globular core's sky from its centre lists stars to V 6.5 within a factor of two of the
-  brainstorm's about 4 × 10⁵ (its 47 Tuc row). Acceptance: `cargo test -p hyperion-sim
-sky::census::features` and `just ci`.
+- **R06.T16.a Feature members (out of RM3's scope; lands with P09.T2.c).** Decided 2026-10-05
+  (`decision-r06-t16a-scope.md`). RM3 closes without this subtask. Every sky reply lists
+  `feature_members` in `not_modelled`, so each view's label reads `CLUSTERS: NOT YET MODELLED`
+  (Design note 23).
+  - **Why it can wait, and why it cannot land alone.** Until galaxy plan 09's P09.T2.c nothing
+    reads φ. The field keeps every population's whole budget (`FeatureShare::None`), so:
+    - the clusters' and associations' stars are already in the sky, spread through the field
+      instead of gathered into clusters;
+    - the counts, the caps and the band are right in expectation.
+
+    Members taken in before P09.T2.c would be counted twice. P09.T2.c without this subtask would
+    take φ out of the sky, its caps and its band. As built, φ_young stays near 0.9 until
+    associations begin to dissolve at 30 Myr. So that would be about nine in ten of the O and
+    early-B stars, and at least a quarter of all B stars. The two therefore land in one
+    integration, at P09.T2.c's generator version, as T16.b did with plan 11's wiring.
+
+  - **Prerequisites:**
+    - P08.T12, whose `stay_share` P09.T2.c reads;
+    - P09.T2.c;
+    - P09.T23.b, which pads each feature by its own members' speed bound;
+    - the part of P09.T40.a this subtask reads: a byte-bounded `FeatureCellCache` and interior
+      cache (`ClusterModelCache`) that the census's jobs share, `FeatureMemberSource` registered
+      in `SystemsInRange`, and `FeatureGas` passed where `NoModifiers` is.
+
+    P09.T40's centre and catalogue-class sources wait on P09.T29 and T37, and are not needed. The
+    centre's members join with P09.T28.b–T29, which clears the `centre_members` gap.
+
+  - **The census.** The sky handler builds the same sources over P09.T40's caches. The census
+    reads `FeatureMemberSource` through the `SystemSource` hook, with the same skips (a member's
+    mass word is its own, so the floor applies), and `FeatureGas` as the sightline's modifiers.
+    Feature members, and from P09.T28 the centre's members, are a source's records and move by
+    their own laws. The census takes them within their source's own reach: each feature padded
+    by its own speed bound (P09.T23.b), and the centre by its orbits (P09.T29). It never pads
+    them by the cell rule, and it always generates them (Design note 10).
+  - **To design at re-validation, before it starts:**
+    1. **The band and the caps.** They read the density field (Design notes 9 and 15), which from
+       P09.T2.c holds 1 − φ of each population. The members' light fainter than the cut and
+       beyond each cap, a globular's included, must reach the band. Their counts brighter than
+       the cut must reach each cap's `expected_beyond`. Otherwise the band loses φ of the young
+       disc's light, and a cap can stop short of a bright association.
+    2. **The cost.** Members are always generated. A living star costs about 10 µs and a remnant
+       1.35–1.6 ms, because `draw_member` builds a `StarModel` per attempt (plan 09's T23
+       findings). A query in the disc visits every feature whose reach touches it, a nursery's
+       1,750 ly included. Before this subtask lands, the census near the Sun is benched with
+       members against T17's budget.
+  - **The label.** `CLUSTERS` leaves the label's composed `NOT YET MODELLED` note once neither
+    `feature_members` nor `centre_members` is listed. `CLUSTERS: NOT YET MODELLED` is then
+    withdrawn, and `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED` becomes
+    `WHITE DWARFS: NOT YET MODELLED`.
+  - **Tests:**
+    - the Pleiades-like cluster of a pinned seed appears as a clump of bright stars from 400 ly;
+    - the globular core's sky from its centre lists stars to V 6.5 within a factor of two of the
+      brainstorm's about 4 × 10⁵ (its 47 Tuc row);
+    - near the Sun, the census's count to V 6.5 is within Poisson error of the count expected
+      from the field and the members together (item 1's design).
+
+    Acceptance: `cargo test -p hyperion-sim sky::census::features`, the member-cost bench of
+    item 2, and `just ci`.
 - **R06.T16.b Binaries (after P11.T6–T11; due now, after T8.e).** When plan 11 wires binary
   evolution into `SystemStars`, `max_star_mass` returns min(2 m₁, 150 M☉), the envelope's age
   range starts at zero, and the n × F₁ bound requires a system that cannot have interacted (Design
@@ -1759,6 +1859,10 @@ per-galaxy tables at most 30 CPU-s on a quiet machine, and the cold first sky ne
 `decision-r06-t5e-gate-2.md`), whose own timing is provisional; deeper node cuts must pass
 T5.e's two slow tests. If the cold first sky fails, the stage chain's schedule (T11.c's
 lookahead and chunking; T5.e records each stage's nodes) is measured before any further cut.
+Without R06.T16.a, which is out of RM3's scope (decided 2026-10-05,
+`decision-r06-t16a-scope.md`), every figure here is the grid's, and the census takes no feature
+members. The brainstorm's globular-core row (47 Tuc) is recorded as pending T16.a, not re-derived.
+When T16.a lands, it re-benches the census with members against this budget.
 
 The census budget, decided 2026-10-05 (`decision-r06-census-cost.md`), applies near the Sun at cut
 7.95 with the eye (the eye's cut; the camera's cut, 10.06 at 60°, is benched beside it and its
@@ -1775,7 +1879,13 @@ question 1). A decision agent rules the camera's budget from the cut-10.06 bench
 the owner, before T17 closes and before any bridge play-test.
 
 Run the census benches sampled (`HYPERION_SKY_BENCH_SAMPLE`), at cut 7.95 and beside it at 10.06,
-and once whole if the sampled estimate is under an hour on the machine. For each, record:
+and once whole if the sampled estimate is under an hour on the machine. The census benches, and
+the 1,000 ly identity test once, run on a galaxy built `with_full_potential`, as the server's
+galaxies are. The fixture has no kinematic tables, so its records stand still and
+`Drift::of_record` costs 0.05–0.08 µs. A drawn velocity costs about 0.72 µs (plan 08's T2–T6
+timings), which is some 290 CPU-s over the 4 × 10⁸ records near the Sun until T8.g's bound rejects
+most of them before their drift (decided 2026-10-05, `decision-r06-pad-speed.md`). For each,
+record:
 
 - each layer's cells, candidates, records, generated and listed;
 - the share of pairs in each of T8.g's cases;
@@ -1833,7 +1943,8 @@ bench -- sky` runs above complete.
   The camera model's agreement with measured cameras (Vida et al. 2021; Jenniskens et al. 2011) is
   Design note 18's research, re-checked by hand in T17, not a test.
 - **The galaxy's statistics:** the star-count slope and the band's surface brightness near the Sun
-  (T5, T9); the brainstorm's sky table rows re-derived at the current version (T17).
+  (T5, T9); the brainstorm's sky table rows re-derived at the current version (T17), all but the
+  globular core's, which waits on R06.T16.a.
 - **Conservation:** light moves between points, overflow and band without loss (T9, T13).
 - **Order independence** of the census over jobs and cells (T8.c) and of the band over rows (T9.b).
 - **Benches:** `sky/luminosity_tables`, `sky/census_near_sun`, `sky/census_nuclear_disc`,
@@ -3439,8 +3550,12 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
       from zero, as after the drift; a forced single's span the light-time interval. The pad
       rests, as the range query's padding and the floors do, on every grid record moving slower
       than its layer's `pad_speed`. Plan 08's draw holds speeds below the least of the escape
-      speed and 1,000 km/s, and layer E pads at 3,000 km/s. P08.T12.d's kicked remnants, up to
-      some 2,200 km/s, would break it outside layer E, as they would the range query's padding.
+      speed and 1,000 km/s, and layer E pads at 3,000 km/s. Plan 08 places nothing faster than
+      1,000 km/s outside layer E. Its kicks are at most 990 km/s since ruling 96.2, and its exempt
+      classes are capped below their layer's pad. P09.T34.b raises layer D's pad together with the
+      survivors it places there. So nothing breaks the premise (decided 2026-10-05,
+      `decision-r06-pad-speed.md`). P08.T17 asserts it at every grid velocity, and R06.T8.j tests
+      the census in motion.
     - The plan holds each layer's padded sphere, and `CensusPlan::cells()` streams the cells.
       `cell_count()` counts them column by column (by walking, for a cone). The jobs are
       `CensusPlan::slabs()`: a `CellSlab` for each x slab of a layer's walk, which streams its
@@ -3577,12 +3692,21 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   (`galaxy/gas/extinction.rs`), can round just below zero far from the cloud, beyond some 100
   cores. The census holds a negative A_V at zero (`star_extinction`), so it is guarded. The
   rounding is plan 09's to fix.
-- **Fast records and the pad speed (found in T8.f; a pointer for plan 08's owner).** The census's
-  bound before the drift, its floors and the range query's padding all assume that each grid
-  record moves slower than its layer's `pad_speed`. Plan 08's draw holds speeds below the least of
-  the escape speed and 1,000 km/s, and layer E pads at 3,000 km/s. P08.T12.d's kicked remnants, up
-  to about 2,200 km/s, would break that outside layer E. A separate decision agent is ruling on it
-  (`decision-r06-pad-speed.md`).
+- **The pad speed premise (decided 2026-10-05, `decision-r06-pad-speed.md`).** Found in T8.f; this
+  replaces that task's pointer for plan 08's owner, whose kick figure the ruling retires.
+  - The census's walk and its bound before the drift rest on every record of a layer moving
+    below `pad_speed(layer)`. So do plan 03's range query and plan 12's lensing walk.
+  - It holds today, when every grid record moves below min(v_esc, 1,000 km/s).
+  - It holds after plan 08. Its kicks are at most 990 km/s since ruling 96.2, and its fast classes
+    are layer E's, which pads at 3,000 km/s.
+  - It holds after P09.T34.b, which raises layer D's pad together with its survivors.
+  - Nothing the census lists moves faster than 1,000 km/s, since neutron stars, black holes and
+    white dwarfs have no V. That is right for neutron stars and black holes at these cuts; white
+    dwarfs wait for A4, and the real ones brighter than 11.0 (Sirius B, 40 Eri B, Procyon B) are
+    slow companions. The stars expected to be missed near the Sun are 0 at cut 7.95 and 0 at
+    11.0.
+  - P08.T17 owns the premise and asserts it, P09.T23.b pads feature members by their own bound,
+    and R06.T8.j tests the census in motion.
 - **Deviations in T9.b, as built (2026-10-06).** `sky::band::{CubeFace, BandSpec, BandTexel,
 band_rows}` as Design notes 14 and 15 set them out, with these differences.
   - **The amendment's argument.** `band_rows(galaxy, ctx, query, census, complete_to, spec, face,
@@ -3718,3 +3842,27 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   24.4 L☉ pc⁻², gives an all-star polar μ_V of 23.67, where the band reads 24.0 (NGP) and 23.9
   (SGP), and the poles of the stars fainter than V 6.5 are 0.28–0.32 mag fainter than the science
   check's Gaia sums: the same size and sign. The 0.5 mag tolerance of T9.b's test holds it.
+- **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
+  - **Why.** R06.T16.a needs:
+    - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;
+    - P09.T23.b;
+    - a part of P09.T40.a. P09.T40 is built on no branch and, as written, follows plan 09's
+      phase 7.
+
+    None of that is RM3's, and it would put two bumps and an unmeasured member cost on the
+    census's critical path.
+
+  - **What the sky is meanwhile.** Until P09.T2.c the field keeps the members' share, so the sky
+    has the right stars and light in expectation, spread through the field.
+    - What it lacks is clumps: no Pleiades- or Hyades-like clusters, no OB associations
+      gathering the bright B stars, and no globulars as naked-eye points.
+    - In the real sky, such members are about 5% of the 8,874 stars to V 6.5, but 16% of the B
+      stars. Scorpius–Centaurus alone has 157 B-type members, 107 of them brighter than V 6.5
+      (de Zeeuw et al. 1999).
+    - Sightlines carry no clouds or superbubble holes from plan 09 (`FeatureGas`), as no other
+      consumer does yet.
+    - Every view states the gap: `CLUSTERS: NOT YET MODELLED`.
+  - **The rule that keeps it honest.** P09.T2.c lands only with R06.T16.a. Members before it
+    are counted twice. P09.T2.c alone would take φ of each population out of the sky and its
+    band. That is about nine in ten of the O and early-B stars, since φ_young stays near 0.9
+    until associations dissolve from 30 Myr.
