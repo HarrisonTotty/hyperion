@@ -24,12 +24,14 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to bind {}", config.addr()))?;
     let addr = listener.local_addr()?;
+    let stdin = config.stdin_stop();
     let server = Server::start(config)
         .await
         .context("failed to start the server")?;
     // Only now, and before the `listening` line: a start writes nothing, so until here a stop
     // request may end the process at once, by the platform's default, even if the start hangs.
-    let mut requests = StopRequests::listen();
+    // Standard input is not read until here either, so an end that came earlier stops it now.
+    let mut requests = StopRequests::listen(stdin);
     tracing::info!(%addr, "listening");
 
     // Graceful shutdown stops accepting and drains HTTP requests; `Server::shutdown` then closes
