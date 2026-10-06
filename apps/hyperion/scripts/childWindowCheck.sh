@@ -3,7 +3,8 @@
 # runs the smoke harness's child-window scene (`--smoke-child`) on the client's own graphics
 # switches: an opener whose full-window canvas stands for the main view, on the primary display,
 # and a same-origin child window on the second display whose canvas is a view of the opener's
-# engine. The child is resized halfway and closed at the end, its view dropped on its `pagehide`,
+# engine. The child is resized halfway (a hidden one never is) and closed at the end, its view
+# dropped at the opener's `close()` of it (before its `pagehide`, which can come a frame later),
 # and the opener draws on for 2 s. The run writes its record (the displays and every check with
 # its figures) as `<date>-<machine>-child-window.md`.
 #
@@ -11,10 +12,10 @@
 #
 # --seconds is how long the child draws before it closes (60 by default). With one display the
 # harness refuses, exit 2, before it opens any window. --hidden puts an offscreen child on the same
-# display to prove the harness where there is one display; it adds `--disable-vulkan-surface`,
-# since creating a hidden offscreen window restarts the GPU process under the Vulkan surface
-# (R01.T12 and T13), and writes under target/views-check/. A shown run writes under
-# docs/measurements/several-views/ (--out elsewhere).
+# display, never resized, to prove the harness where there is one display; it adds
+# `--disable-vulkan-surface`, since creating a hidden offscreen window restarts the GPU process
+# under the Vulkan surface (R01.T12 and T13), and writes under target/views-check/. A shown run
+# writes under docs/measurements/several-views/ (--out elsewhere).
 #
 # The run gets a fresh `--user-data-dir`, removed afterwards; Electron runs in a process group of
 # its own under `timeout`, killed when the script ends for any reason. The exit status is the

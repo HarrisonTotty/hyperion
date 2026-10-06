@@ -180,7 +180,8 @@ views-check *args: gen-surface
 # child-window scene on the client's own graphics switches, the opener on the primary display and a
 # same-origin child window, a view of the opener's engine, on the second. It records the child's
 # pacing beside its display's period, both views' frame times and the release of the child's view
-# on its `pagehide`, as `<date>-<machine>-child-window.md` in `docs/measurements/several-views/`.
+# at the opener's `close()` of it, as `<date>-<machine>-child-window.md` in
+# `docs/measurements/several-views/`.
 # Options: `--seconds <n>` (the child's time, 60 by default), `--hidden` (an offscreen child on one
 # display, the harness's own proof, written under `target/views-check/`) and `--out <dir>`. With
 # one display it refuses (exit 2) before opening any window. Shown: by hand; not part of `ci`.

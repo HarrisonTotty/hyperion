@@ -8,8 +8,9 @@
  * the smoke harness, outside the client, whose every window stays denied: an opener whose full
  * window canvas stands for the main view, and a same-origin `window.open` child on another display
  * whose canvas is a view of the opener's engine, drawn from the opener's animation frames. The page
- * keeps R01.T13's rule (it drops the child's view on the child's `pagehide`) and records both
- * windows' frame intervals, each view's GPU time and what follows the child's closing. A hidden
+ * keeps R01.T13's rule as R07.T21 amended it (it drops the child's view at the opener's `close()`
+ * of it, or on the child's `pagehide` where the child closes otherwise) and records both windows'
+ * frame intervals, each view's GPU time and what follows the child's closing. A hidden
  * variant (`--smoke-child-hidden=1`) puts an offscreen child on the same display, to prove the
  * harness on a machine with one display; its pacing is offscreen rendering's, not a display's.
  */
