@@ -17,7 +17,8 @@
  *   bound selection uses and under min(hard, 4σ_n), so that a failure on demand alone that the
  *   calibrated bound would meet can be called ours to fix.
  * - The quiet-machine rule (Design note 27): a run started with the load average at or above 1 is
- *   marked provisional.
+ *   marked provisional, and so is every run on Windows, which keeps no load average (R05.T20,
+ *   `machineLoad.ts`).
  * - Chromium's tracing service is the measurement's own process, so its memory is reported apart
  *   from the app's.
  * - The trace is taken in windows of script time (decision-r05-trace-windows.md,
@@ -44,6 +45,15 @@ import type {
 } from "../preload/api";
 import type { DrmMemoryReading, NvidiaReading } from "./fdinfo";
 import type { GpuClockReadings, GpuClockSample, GpuClockSource } from "./gpuClocks";
+import {
+  type LoadAverage,
+  type LoadSources,
+  keepsLoadAverage,
+  NO_WINDOWS_LOAD_AVERAGE,
+  type Quiet,
+  quietOf,
+  readLoadAverage,
+} from "./machineLoad";
 import { type Measured, measured, missing } from "./measured";
 import { GPU_PROCESS_SLICES, type GpuProcessFigures, recordedGpuSlices } from "./reduceTrace";
 import {
@@ -174,9 +184,14 @@ export interface MachineDescription {
   readonly cpu: string;
   readonly logicalCores: number;
   readonly memoryBytes: number;
+  /** The first CPU's cpufreq governor, Linux's alone, or why there is none. */
   readonly governor: Measured<string>;
-  /** The 1-, 5- and 15-minute load averages when the run started. */
-  readonly loadAverage: readonly [number, number, number];
+  /**
+   * The 1-, 5- and 15-minute load averages when the run started. Windows keeps none, and its
+   * zeros stand in for them, since results version 5 keeps a number triple; the run's `quiet` says
+   * so (decision-cross-platform-server.md item 6).
+   */
+  readonly loadAverage: LoadAverage;
   /** Chromium's GPU description (`app.getGPUInfo("basic")`), or why it is missing. */
   readonly gpu: Measured<{
     readonly vendorId: number;
@@ -753,7 +768,7 @@ export interface DescentResults {
     readonly periodMs: Measured<number>;
     readonly warmupS: number;
     readonly canvas: DescentSpikeReport["canvas"];
-    readonly quiet: { readonly provisional: boolean; readonly note: string | null };
+    readonly quiet: Quiet;
     /** The trace's windows and boundaries, or why the run has no trace. */
     readonly trace: Measured<TraceRun>;
   };
@@ -1414,9 +1429,6 @@ export function buildResults(input: ResultsInput): DescentResults {
   }));
   const overall = overallOf([...whole, ...segmentCriteria.flatMap(({ criteria }) => criteria)]);
 
-  const load = run.machine.loadAverage[0];
-  const provisional = load >= 1;
-
   return {
     schema: RESULTS_SCHEMA,
     version: RESULTS_VERSION,
@@ -1435,12 +1447,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       periodMs,
       warmupS: report.warmupS,
       canvas: report.canvas,
-      quiet: {
-        provisional,
-        note: provisional
-          ? `load average ${load.toFixed(2)} at the start (Design note 27 asks under 1): provisional`
-          : null,
-      },
+      quiet: quietOf(run.platform, run.machine.loadAverage),
       trace: merged.run,
     },
     levels: report.levels,
@@ -1495,19 +1502,38 @@ export function buildResults(input: ResultsInput): DescentResults {
   };
 }
 
-/** The readers {@link describeMachine} uses, for tests. */
-export interface MachineSources {
+/** The readers {@link describeMachine} uses, for tests: the platform's among them. */
+export interface MachineSources extends LoadSources {
   hostname(): string;
   cpus(): ReadonlyArray<{ readonly model: string }>;
   totalmem(): number;
-  loadavg(): ReadonlyArray<number>;
   readFile(path: string): Promise<string>;
   /** Chromium's basic GPU information (`app.getGPUInfo("basic")`). */
   gpuInfo(): Promise<unknown>;
 }
 
-/** The scaling governor of the first CPU, which the run records (Design note 27). */
+/** The scaling governor of the first CPU, which a run on Linux records (Design note 27). */
 const GOVERNOR_PATH = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor";
+
+/** The names a reason gives the platforms Electron runs on. */
+const PLATFORM_NAMES: Readonly<Partial<Record<NodeJS.Platform, string>>> = {
+  darwin: "macOS",
+  linux: "Linux",
+  win32: "Windows",
+};
+
+/** The first CPU's governor on `platform`: cpufreq's on Linux, and none elsewhere. */
+async function governorOf(sources: MachineSources): Promise<Measured<string>> {
+  if (sources.platform !== "linux") {
+    return missing(
+      `no cpufreq governor on ${PLATFORM_NAMES[sources.platform] ?? sources.platform}`,
+    );
+  }
+  return sources.readFile(GOVERNOR_PATH).then(
+    (text) => measured(text.trim()),
+    () => missing(`${GOVERNOR_PATH} could not be read`),
+  );
+}
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1539,13 +1565,14 @@ export function activeGpu(info: unknown): Measured<GpuDescription> {
   });
 }
 
-/** The machine a run is on, read at its start. */
+/**
+ * The machine a run is on, read at its start.
+ *
+ * @throws Error when `loadavg` gives fewer than three averages ({@link readLoadAverage}).
+ */
 export async function describeMachine(sources: MachineSources): Promise<MachineDescription> {
-  const [l1 = 0, l5 = 0, l15 = 0] = sources.loadavg();
-  const governor = await sources.readFile(GOVERNOR_PATH).then(
-    (text) => measured(text.trim()),
-    () => missing(`${GOVERNOR_PATH} could not be read`),
-  );
+  const load = readLoadAverage(sources);
+  const governor = await governorOf(sources);
   const gpu = await sources
     .gpuInfo()
     .then(activeGpu, (error: unknown) =>
@@ -1564,7 +1591,7 @@ export async function describeMachine(sources: MachineSources): Promise<MachineD
     logicalCores: cpuList.length,
     memoryBytes: sources.totalmem(),
     governor,
-    loadAverage: [l1, l5, l15],
+    loadAverage: load.value ?? [0, 0, 0],
     gpu,
   };
 }
@@ -1572,6 +1599,7 @@ export async function describeMachine(sources: MachineSources): Promise<MachineD
 /** This process's machine readers, with Chromium's GPU information from `gpuInfo`. */
 export function nodeMachineSources(gpuInfo: () => Promise<unknown>): MachineSources {
   return {
+    platform: process.platform,
     hostname,
     cpus,
     totalmem,
@@ -2464,12 +2492,13 @@ export function summaryMarkdown(results: DescentResults): string {
   const fromPresentation = frames.source === "presentation";
   const whole = intervalsOf(frames);
   const headline = memory.gpuHeadline;
+  const keptLoad = keepsLoadAverage(run.platform);
   return [
     `# Descent spike: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
     "",
     ...(run.trace.value?.profiled === true ? [PROFILED_HEADING, ""] : []),
-    `- **Overall:** ${criteria.overall}${run.quiet.provisional ? " (provisional: not a quiet machine)" : ""}`,
-    `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${run.machine.loadAverage.map((load) => load.toFixed(2)).join(", ")}`,
+    `- **Overall:** ${criteria.overall}${run.quiet.provisional ? (keptLoad ? " (provisional: not a quiet machine)" : ` (provisional: ${NO_WINDOWS_LOAD_AVERAGE})`) : ""}`,
+    `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${keptLoad ? run.machine.loadAverage.map((load) => load.toFixed(2)).join(", ") : "none (Windows keeps none)"}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
     `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,

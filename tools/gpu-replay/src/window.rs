@@ -20,7 +20,7 @@ use winit::window::{Window, WindowId};
 use crate::capture::Capture;
 use crate::clocks::ClockSampler;
 use crate::replay::{FrameTarget, Replayer, canvas_view_formats};
-use crate::results::{ReplayFigures, Setting};
+use crate::results::{MachineSources, ReplayFigures, Setting};
 use crate::run::{
     Frames, RunReplayError, clock_source, collect_errors, device_for, frame_ranges, main_surface,
     rows_of, upload_bytes,
@@ -235,6 +235,8 @@ pub(crate) fn run(
 ) -> Result<ReplayFigures, RunReplayError> {
     let started_at = SystemTime::now();
     let started = Instant::now();
+    // Before the replay's own work, so that its load average is the machine's at the start.
+    let machine = MachineSources::read();
     let event_loop = EventLoop::new().map_err(RunReplayError::window)?;
     let mut app = App {
         capture,
@@ -247,7 +249,12 @@ pub(crate) fn run(
         next: 0,
         failed_acquisitions: 0,
         presented_at: Vec::new(),
-        findings: capture.problems().to_vec(),
+        findings: capture
+            .problems()
+            .iter()
+            .cloned()
+            .chain(machine.findings())
+            .collect(),
         failure: None,
     };
     event_loop
@@ -298,5 +305,6 @@ pub(crate) fn run(
             .clone(),
         findings,
         clocks,
+        machine,
     })
 }

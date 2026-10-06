@@ -88,7 +88,10 @@ How the figures are read:
   the driver writes no `drm-*` memory keys (hardware decision item 2). The tracing service is the
   measurement's own and is reported apart from the app.
 - **A quiet machine** (Design note 27): a run started with the load average at or above 1 is marked
-  provisional, and does not count towards the verdict.
+  provisional, and does not count towards the verdict. Windows keeps no load average, so a run or a
+  replay there is always provisional, its quiet rule unchecked; its `loadAverage` is zeros, since
+  results version 5 keeps a number triple, and a demand record's Windows cells record an empty list.
+  The governor is Linux's alone, and null with the reason elsewhere (R05.T20).
 - **The trace** is a Perfetto protobuf stream over CDP, taken in windows of script time
   (R05.T14.e, T14.i) and decoded by the spike's own decoder (T14.h). A window that fails makes
   every trace figure null with its reason. A window fails when it is missing or empty, lost data,

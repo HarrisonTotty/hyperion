@@ -325,6 +325,17 @@ describe("the record's file (version 3)", () => {
     expect(demandSummary([], "2026-10-04T00:00:00Z", ["a note"])).toContain("- a note");
   });
 
+  it("says how many cells recorded no load average, which Windows keeps none of", () => {
+    const windows = { ...cellOf("hard", 40), loadAverage: [] };
+    const summary = demandSummary([windows, cellOf("calibrated", 981)], "2026-10-04T00:00:00Z");
+    expect(summary).toContain("1 of the 2 cells recorded no load average: Windows keeps none");
+  });
+
+  it("says nothing of the load average where every cell recorded one", () => {
+    const summary = demandSummary([cellOf("hard", 40)], "2026-10-04T00:00:00Z");
+    expect(summary).not.toContain("recorded no load average");
+  });
+
   it("states the tolerance it selects at, the terrain pass's", () => {
     expect(demandSummary([], "2026-10-05T00:00:00Z")).toContain(
       "Selected at τ ÷ 1.1, the terrain pass's τ_sel; D at the same tolerance;",

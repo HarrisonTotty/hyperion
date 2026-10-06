@@ -30,6 +30,7 @@ import {
   gpuClocksOf,
   incompleteFramesReason,
   type MachineDescription,
+  type MachineSources,
   measured,
   type MemorySample,
   MemorySampler,
@@ -593,6 +594,35 @@ describe("a results file", () => {
     });
     expect(results.run.quiet.provisional).toBe(true);
     expect(summaryMarkdown(results)).toContain("provisional");
+  });
+
+  it("marks every run on Windows provisional, since Windows keeps no load average", () => {
+    expect(windowsResults().run.quiet).toEqual({
+      provisional: true,
+      note: "Windows keeps no load average: the quiet-machine rule (Design note 27) is unchecked",
+    });
+  });
+
+  it("says in the summary why a run on Windows is provisional", () => {
+    expect(summaryMarkdown(windowsResults())).toContain(
+      "(provisional: Windows keeps no load average)",
+    );
+  });
+
+  it("states no load average in a Windows run's summary, not its zeros", () => {
+    expect(summaryMarkdown(windowsResults())).toContain("load average none (Windows keeps none)");
+  });
+
+  it("keeps a Windows run's zeros as version 5's load average triple", () => {
+    expect(validateResults(JSON.parse(JSON.stringify(windowsResults())))).toEqual([]);
+  });
+
+  it("does not mark a run on macOS at a load of 0.5 provisional", () => {
+    expect(macResults().run.quiet).toEqual({ provisional: false, note: null });
+  });
+
+  it("states a macOS run's load average in its summary", () => {
+    expect(summaryMarkdown(macResults())).toContain("load average 0.50, 0.40, 0.30");
   });
 
   it("states why the trace's figures are missing when there is no trace", () => {
@@ -2177,6 +2207,26 @@ describe("the committed results files", () => {
   });
 });
 
+/** A run on Windows, whose `os.loadavg()` gives zeros, kept as the description's triple. */
+function windowsResults(): DescentResults {
+  return buildResults({
+    run: runOf({ platform: "win32", machine: { ...MACHINE, loadAverage: [0, 0, 0] } }),
+    report: reportOf(),
+    trace: traceOf(),
+    memory: MEMORY,
+  });
+}
+
+/** A run on macOS at a load average of 0.5. */
+function macResults(): DescentResults {
+  return buildResults({
+    run: runOf({ platform: "darwin", machine: { ...MACHINE, loadAverage: [0.5, 0.4, 0.3] } }),
+    report: reportOf(),
+    trace: traceOf(),
+    memory: MEMORY,
+  });
+}
+
 /** Memory readers with a browser, a GPU process and the tracing service. */
 function sources(overrides: Partial<MemorySources> = {}): MemorySources {
   return {
@@ -2342,9 +2392,33 @@ describe("a memory sample", () => {
   });
 });
 
+/** Readers of a machine on `platform` with no `/proc` or `/sys`, and the paths it was asked to read. */
+function withoutProcOrSys(
+  platform: NodeJS.Platform,
+  loadavg: ReadonlyArray<number>,
+): { readonly read: ReadonlyArray<string>; readonly readers: MachineSources } {
+  const read: string[] = [];
+  return {
+    read,
+    readers: {
+      platform,
+      hostname: () => "mac-mini",
+      cpus: () => [{ model: "Apple M2" }],
+      totalmem: () => 16e9,
+      loadavg: () => loadavg,
+      readFile: (path) => {
+        read.push(path);
+        return Promise.reject(new Error(`ENOENT: no such file or directory, open '${path}'`));
+      },
+      gpuInfo: () => Promise.resolve({}),
+    },
+  };
+}
+
 describe("the machine's description", () => {
   it("records the CPU, governor, load and Chromium's active GPU", async () => {
     const machine = await describeMachine({
+      platform: "linux",
       hostname: () => "Dev.Box_1",
       cpus: () => [{ model: "AMD Ryzen 7 3700X 8-Core Processor " }, { model: "same" }],
       totalmem: () => 32e9,
@@ -2376,14 +2450,43 @@ describe("the machine's description", () => {
 
   it("states why the governor and the GPU are missing", async () => {
     const machine = await describeMachine({
+      platform: "linux",
       hostname: () => "x",
       cpus: () => [],
       totalmem: () => 1,
-      loadavg: () => [],
+      loadavg: () => [0.1, 0.1, 0.1],
       readFile: () => Promise.reject(new Error("ENOENT")),
       gpuInfo: () => Promise.resolve({}),
     });
     expect(machine.governor.reason).toContain("scaling_governor could not be read");
     expect(machine.gpu).toEqual(missing("Chromium reports no GPU device"));
+  });
+
+  it("reads no governor on macOS, and no file", async () => {
+    const { read, readers } = withoutProcOrSys("darwin", [0.5, 0.4, 0.3]);
+    const machine = await describeMachine(readers);
+    expect({ governor: machine.governor, read }).toEqual({
+      governor: missing("no cpufreq governor on macOS"),
+      read: [],
+    });
+  });
+
+  it("records the load average on macOS", async () => {
+    const machine = await describeMachine(withoutProcOrSys("darwin", [0.5, 0.4, 0.3]).readers);
+    expect(machine.loadAverage).toEqual([0.5, 0.4, 0.3]);
+  });
+
+  it("reads no governor on Windows, and no file", async () => {
+    const { read, readers } = withoutProcOrSys("win32", [0, 0, 0]);
+    const machine = await describeMachine(readers);
+    expect({ governor: machine.governor, read }).toEqual({
+      governor: missing("no cpufreq governor on Windows"),
+      read: [],
+    });
+  });
+
+  it("keeps Windows' zeros as the load average it lacks", async () => {
+    const machine = await describeMachine(withoutProcOrSys("win32", [0, 0, 0]).readers);
+    expect(machine.loadAverage).toEqual([0, 0, 0]);
   });
 });

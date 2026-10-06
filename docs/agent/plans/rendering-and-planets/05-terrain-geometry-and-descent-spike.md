@@ -1231,6 +1231,8 @@ LIMITED` whenever terrain is in view. Full depth under grounded bodies on every 
     taken on a quiet machine: no other test, build or agent running, the load average under 1
     before the run starts and recorded with it, and the CPU governor recorded. A figure taken
     otherwise is marked provisional in its results file and does not count towards the verdict.
+    Windows keeps no load average, so a run there is always provisional, its quiet rule unchecked;
+    only Linux has a cpufreq governor, which is null with its reason elsewhere (T20).
 
 ## Tasks
 
@@ -1267,6 +1269,9 @@ Refined on re-validation (2026-10-02), from the code each task touches:
   incomplete frames and clocks, 2026-10-06) follow T14.f, in that order, and T14.c's visible run,
   T16 and T17 wait for them too. They need nothing of T13.a's demand records, which take no trace,
   and those need nothing of them.
+- T20 (the machine's facts on every platform, 2026-10-06) follows T14.i, since lane D owns
+  `results.ts` and the replayer's results until then. Nothing waits on it, but a run or a demand
+  record on macOS or Windows reads its machine honestly only after it.
 - Steps that need a visible window, a real vsync, a quiet machine or a display change are pending
   by hand for the owner, with their harness and exact commands prepared by the implementing
   lane, which never shows a window on the development machine's display (`:0`): T11.c's and
@@ -2542,6 +2547,9 @@ as the results file, in its schema.
   and writes a results file; the owner does the same for a UHD 620 capture on the UHD 620. The
   presented replay opens a window with FIFO presentation, so on the development machine it is
   pending by hand for the owner, with the lane's capture and exact command recorded.
+- Results note (T20): the replay's machine facts are read at its start through `sysinfo`, on every
+  platform alike, with the governor from sysfs on Linux. On Windows, which keeps no load average, a
+  replay is always provisional.
 
 ### R05.T16 The UHD 620 runs
 
@@ -2675,6 +2683,67 @@ clocks is named beside the comparison.
 - Files: this plan, `docs/measurements/descent-spike/README.md`.
 - Acceptance: the verdict names each criterion of Design note 21 with its measured value on each
   machine; the owner has the drafted brainstorm edit.
+
+### R05.T20 Machine facts on every platform
+
+Added 2026-10-06 by a delegated decision (`decision-cross-platform-server.md`, items 6 and 7). It
+runs after T14.i has merged, since lane D owns `results.ts` and the replayer's results until then.
+
+Off Linux the replayer's `machine()` recorded `cpu: "unknown"`, `name: "machine"`,
+`memoryBytes: 0` and a `loadAverage` of `[0, 0, 0]` written as if it had been measured. The
+provisional rule is `load_1 >= 1.0`, so every replay on the Mac or on Windows claimed a quiet
+machine, a wrong verdict under Design note 27. The client has the same flaw on Windows, where
+Node's `os.loadavg()` returns zeros, and `scripts/descentDemand.mjs` read `/proc/loadavg`, which
+throws on macOS and Windows. `sysinfo` 0.39.6 (MSRV 1.95), with `default-features = false,
+features = ["system"]`, gives the host name, the CPU's brand and the total memory on all three
+platforms, and the load average on Linux and macOS ("currently not working on Windows"). The tool
+is outside the workspace, so the dependency touches neither the workspace's dependency list nor
+its lint. On Linux it reads the same `/proc` sources, so Linux results stay the same.
+
+The ruling: use `sysinfo` in the tool. Windows has no load average, so a Windows run is always
+provisional, with the note "Windows keeps no load average: the quiet-machine rule (Design note 27)
+is unchecked". The field stays a number triple under results version 5; a later schema version,
+bumped for other reasons, should make `loadAverage` a `Measured`. The same rule goes into the
+client's results, and `descentDemand.mjs` stops reading `/proc/loadavg`.
+
+- _Files:_
+  - `tools/gpu-replay/Cargo.toml`:
+    `sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }`.
+  - `tools/gpu-replay/src/results.rs`:
+    - `machine()` reads through a small `MachineSources` seam: hostname, CPU brand, total memory,
+      load or none, and governor or a reason. The production source is `sysinfo`, with `/sys` for
+      the governor on Linux.
+    - Elsewhere the governor's reason is "no cpufreq governor on macOS" or "… on Windows".
+    - On Windows, `provisional: true` with the note above.
+    - The hostname keeps its normalisation.
+  - `apps/hyperion/src/main/results.ts`:
+    - The provisional rule becomes `platform === "win32" || load >= 1`, with the same note.
+    - The governor's reason depends on the platform.
+    - `os.loadavg()` returns zeros on Windows (Node's documentation).
+  - `apps/hyperion/scripts/descentDemand.mjs`: `os.loadavg()` instead of reading `/proc/loadavg`,
+    which throws on macOS and Windows.
+  - This plan: Design note 27's sentence on the platforms (no load average on Windows, so
+    provisional; no governor off Linux), and T15.c's results note.
+- _Tests:_
+  - gpu-replay unit tests of `machine` over fixture sources, for Linux, macOS and Windows: the
+    name's normalisation, a missing CPU giving `"unknown"`, Windows provisional with its note, a
+    macOS load of 0.5 not provisional.
+  - `results.test.ts`: a `win32` run is provisional with the note; a `darwin` run at load 0.5 is
+    not.
+  - The demand script's machine-facts path runs with `/proc` absent, through an injected reader
+    (the orchestrator's addition).
+- _Accept:_
+  - `just gpu-replay-check`;
+  - `pnpm --filter hyperion test results`;
+  - `node --check apps/hyperion/scripts/descentDemand.mjs`;
+  - `just cross-clippy`, which runs the replayer's Clippy for `aarch64-apple-darwin` and
+    `x86_64-pc-windows-msvc` without an SDK;
+  - `just ci`.
+- The Electron main process's other platform branches (item 7) are not this task's. They are R12.T0's
+  audit list: DRM fdinfo and `nvidia-smi` off Linux, `workingSetSize` across platforms, the launch
+  mode that is always `default` off Linux and so the quantized timer, and R12's `/sys`-only
+  samplers.
+- Suggested subject: `fix(replay): R05.T20 Read the machine's facts on every platform`.
 
 ## Verification
 
@@ -4593,6 +4662,102 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     `view/spike/passReads.ts`, `metrics.ts`, `spikeHarness.ts`, `spikeController.ts` and their tests
     (the orchestrator's addition); the five summaries; and `tools/gpu-replay/src/lib.rs`,
     `run.rs` and `window.rs`.
+
+- **Deviations in T20, as built** (2026-10-06, the machine's facts on every platform;
+  `decision-cross-platform-server.md`, items 6 and 7).
+  - _Where things are._
+    - The replayer's `results.rs` holds `MachineSources`, whose fields are private and whose
+      `read()` and `findings()` the crate calls, and the private `Platform` (`Linux`, `MacOs`,
+      `Windows`, `Other(name)`). The per-platform rules are the pure functions
+      `load_average_on(platform, read)` and `governor_on(platform, read)`, which `read()` calls
+      and the tests run for every platform on any host. `machine(sources, adapter)` and
+      `quiet(load)` write them.
+      `ReplayFigures.machine` carries the facts, and `run.platform` is their platform's name.
+    - The client's `main/machineLoad.ts` holds `LoadAverage`, `LoadSources`,
+      `NO_WINDOWS_LOAD_AVERAGE`, `QUIET_RULE_UNCHECKED`, `keepsLoadAverage`, `readLoadAverage`,
+      `recordedLoadAverage`, `Quiet` and `quietOf`. `results.ts` uses it, and `descentDemand.mjs`
+      loads it through Vite's `runnerImport`, as it loads `demandRecord.ts`. `MachineSources`
+      extends `LoadSources`, so it gains `platform`, which `nodeMachineSources` fills from
+      `process.platform`. `run.quiet` is typed `Quiet`.
+  - _Read at the start._ The replayer read the machine when it wrote its results, after the
+    replay, so its "load average … at the start" was the load at the end, the replay's own work
+    included. Both the offscreen and the presented replay now read the facts before that work. This
+    goes beyond the ruling.
+  - _No schema change._ Results version 5's shapes hold: `loadAverage` stays a number triple, zeros
+    on Windows, and `run.quiet` says why. The committed files do not change. All six results files
+    are Linux runs, the five summaries regenerate byte-identical, and a replay of the fixture on
+    this machine records the committed replay's name, CPU, threads, memory and governor.
+  - _Facts that could not be read._ The schema keeps the host name, CPU, threads and memory plain
+    values, so an unread one is written as before (`"machine"`, `"unknown"`, 0 and 0), and a line in
+    `replay.findings` says which, for example "the machine's memory could not be read:
+    run.machine.memoryBytes is 0". This goes beyond the ruling. The client's Node readers always
+    answer; a short `os.loadavg()` reading, which Node never gives, throws.
+  - _The load average's limits._
+    - On Windows `sysinfo` is never asked. It emulates a load average from the processor queue's
+      length, sampled every 5 s from its first call, so at a replay's start it would read 0.
+    - A platform `sysinfo` has no backend for (`IS_SUPPORTED_SYSTEM` false) has none either, "no
+      load average on <platform>", so its replays are provisional too (rust-reviewer's consider).
+    - Elsewhere `sysinfo` gives zeros where the platform's call fails (an unreadable
+      `/proc/loadavg`, a failed `getloadavg`), which cannot be told from a reading. The replayer
+      did the same on Linux before. This is stated, not handled.
+  - _The CPU on Arm Linux._ `sysinfo` names an Arm CPU by its "CPU part" where cpuinfo has one,
+    over the model name, so an Arm Linux replay's `cpu` differs from before. None of the three
+    target platforms is affected.
+  - _The demand record._
+    - A Windows cell records `loadAverage: []`. The type allows it, so the record stays version 3.
+      The summary then adds "k of the n cells recorded no load average: Windows keeps none, so
+      whether the machine was quiet is unchecked."
+    - The script now imports the surface module by a `file://` URL, since Node's loader refuses a
+      Windows path (`C:\…`) as a specifier. typescript-reviewer found this beyond the rules: the
+      script would otherwise still have failed on Windows before its first cell.
+    - Vite's `runnerImport` takes the two TypeScript modules' plain paths. That it accepts a
+      Windows path is unverified, since there is no Windows runner.
+  - _The summary._ A Windows run's summary says "(provisional: Windows keeps no load average)" and
+    "load average none (Windows keeps none)" in place of the zeros. `keepsLoadAverage` takes Node's
+    `win32` and Rust's `windows`, a replay's `run.platform`.
+  - _Tests._
+    - The replayer, 14 new: the two rules on each platform; fixture sources for Linux, macOS and
+      Windows; the name's normalisation; an unread CPU as `"unknown"`; the findings; this machine's
+      facts; and, under `cfg(target_os = "linux")`, this machine's facts against `/proc`. Off Linux
+      `this_machines_facts_are_read` runs alone, the stated limit.
+    - `machineLoad.test.ts`, 12: the reading on each platform; the throw; the rule; the demand
+      script's path with `/proc` absent, through an injected `os.loadavg`; and the script's own
+      source, which records through `recordedLoadAverage` with Node's `loadavg` and names no
+      `/proc` (the pattern has its own test).
+    - `results.test.ts`, 10 new: a `win32` run is provisional with the note, with its two summary
+      lines, and its zeros valid under version 5; a `darwin` run at load 0.5 is not provisional;
+      `describeMachine` on macOS and Windows reads no file.
+    - `demandRecord.test.ts`, 2: the summary's line, and its absence.
+  - _Not done here._ Item 7's other platform branches are R12.T0's audit list, written into plan 12
+    with the R12.T4.b launch contract. The views check (`viewsCheckResults.ts`) and the child-window
+    check's summary (`smoke/childWindow.ts`) still judge `load >= 1` alone. They are another lane's
+    files, so they are on that list and relayed to the orchestrator: each should take `quietOf`.
+  - _Gate (all capped)._
+    - The targeted vitest (`machineLoad`, `results`, `demandRecord`): 3 files, 211 tests.
+    - `pnpm test`: 328 files, 5,650 tests.
+    - The typecheck from a clean cache, `just check lint`, Prettier and rustfmt.
+    - `just gpu-replay-check`: 54 unit tests and Clippy.
+    - `just cross-clippy` for macOS and Windows, which checks `sysinfo` and the replayer for both.
+      The ruling's own `--target aarch64-apple-darwin` Clippy is part of it, with no SDK.
+    - `node --check apps/hyperion/scripts/descentDemand.mjs`.
+    - The replayer's GPU test, offscreen. A replay of the fixture offscreen, whose file validates
+      under the client's `validateResults`.
+    - A short demand run through the new path, into scratch:
+      `--rules calibrated --ridges off --settings low --cap-hours 0.0005 --wall-cap-hours 0.05`.
+      It exited 0 in about 11 s, its cell's load average read from `os.loadavg()`.
+    - The commit hooks.
+  - _Review._ rust-reviewer found no must-fix. Its five should-fix items are applied: the
+    per-platform rules made pure functions tested on any host; the fields and `Platform` private;
+    the Windows choice an exhaustive match; `#[must_use]` on the pure writers; and a one-sentence
+    summary line. So are its three considers: no load average where `sysinfo` has no backend; the
+    Arm rule in the Linux test; and the getter's doc. typescript-reviewer found no must-fix. Its
+    should-fix is applied, the tests split to one reason to fail each, and so are its three
+    considers: the source test's patterns and their own test, the duplicate `loadavg` and `quiet`
+    type removed, and the summary's wording built from the constant. Its finding beyond the rules,
+    the Windows import, is fixed too.
+  - _Files beyond the task's list._ `main/machineLoad.ts` and its test,
+    `tools/gpu-replay/src/run.rs`, `window.rs` and `Cargo.lock`, `view/spike/demandRecord.ts` and
+    its test, `docs/measurements/descent-spike/README.md`, and plan 12 (T0 and T4.b).
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

@@ -16,14 +16,21 @@
 //! and the criterion's rows are Design note 21's, as the client's writer reads them. A frame whose
 //! pass times were never read back is left out of the GPU rows and counted, and bounds their
 //! verdicts as the client's incomplete frames do (decision-r05-trace-windows-2.md, addendum B).
+//!
+//! The machine's facts are read at the replay's start through [`MachineSources`], from `sysinfo`
+//! on every platform and the cpufreq governor from sysfs on Linux (R05.T20,
+//! decision-cross-platform-server.md item 6). Windows keeps no load average, so a replay there is
+//! always provisional: whether its machine was quiet (Design note 27) is unchecked.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
+use sysinfo::{CpuRefreshKind, LoadAvg, MemoryRefreshKind, RefreshKind, System};
 
 use crate::clocks::{ClockReadings, ClockSample, Reading};
 
@@ -64,6 +71,194 @@ const NO_TRACE: &str = "a native replay has no trace";
 
 /// Why a replay on an adapter without `TIMESTAMP_QUERY` has no pass time.
 const TIMER_REASON: &str = "the adapter has no timestamp-query";
+
+/// The first CPU's cpufreq governor on Linux, which the run records (Design note 27).
+const GOVERNOR_PATH: &str = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor";
+
+/// Why a Windows machine has no load average, as the client words it.
+const NO_WINDOWS_LOAD_AVERAGE: &str = "Windows keeps no load average";
+
+/// The platform a replay runs on, which decides which of the machine's facts exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Platform {
+    /// Linux, the one platform with a cpufreq governor.
+    Linux,
+    /// macOS.
+    MacOs,
+    /// Windows, which keeps no load average.
+    Windows,
+    /// Another, by `std::env::consts::OS`'s name.
+    Other(&'static str),
+}
+
+impl Platform {
+    /// The platform this binary was built for.
+    #[must_use]
+    fn current() -> Self {
+        match std::env::consts::OS {
+            "linux" => Self::Linux,
+            "macos" => Self::MacOs,
+            "windows" => Self::Windows,
+            other => Self::Other(other),
+        }
+    }
+
+    /// `std::env::consts::OS`'s name for it, which `run.platform` records.
+    #[must_use]
+    fn name(self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::MacOs => "macos",
+            Self::Windows => "windows",
+            Self::Other(name) => name,
+        }
+    }
+
+    /// Its name in a reason.
+    #[must_use]
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Linux => "Linux",
+            Self::MacOs => "macOS",
+            Self::Windows => "Windows",
+            Self::Other(name) => name,
+        }
+    }
+}
+
+/// The machine's facts as a replay read them at its start, which the results file records.
+///
+/// It is the seam through which every platform's facts are tested on any (R05.T20): [`read`]
+/// fills it from `sysinfo`, and the per-platform rules are [`load_average_on`] and
+/// [`governor_on`].
+///
+/// [`read`]: MachineSources::read
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MachineSources {
+    /// The platform.
+    platform: Platform,
+    /// The host name as the platform gives it, before the file name's normalisation.
+    host_name: Option<String>,
+    /// The first CPU's brand.
+    cpu_brand: Option<String>,
+    /// The threads the replay may run on.
+    logical_cores: Option<usize>,
+    /// The machine's memory, bytes.
+    memory_bytes: Option<u64>,
+    /// The 1-, 5- and 15-minute load averages, or why there are none.
+    load_average: Result<[f64; 3], String>,
+    /// The first CPU's cpufreq governor, or why there is none.
+    governor: Result<String, String>,
+}
+
+/// The load average on `platform`, from `read`, which gives `sysinfo`'s or `None` where `sysinfo`
+/// has no backend; or why there is none.
+///
+/// Windows keeps no load average: `sysinfo` emulates one from the processor queue's length,
+/// sampled every 5 s from its first call, so at a replay's start it would read 0, which is not a
+/// reading. `read` is not called there. Elsewhere `sysinfo` gives zeros where the platform's call
+/// fails (an unreadable `/proc/loadavg`, a failed `getloadavg`), which cannot be told from a
+/// reading; the replayer before it did the same on Linux.
+fn load_average_on(
+    platform: Platform,
+    read: impl FnOnce() -> Option<LoadAvg>,
+) -> Result<[f64; 3], String> {
+    match platform {
+        Platform::Windows => Err(NO_WINDOWS_LOAD_AVERAGE.to_owned()),
+        Platform::Linux | Platform::MacOs | Platform::Other(_) => read()
+            .map(|load| [load.one, load.five, load.fifteen])
+            .ok_or_else(|| format!("no load average on {}", platform.display_name())),
+    }
+}
+
+/// The first CPU's cpufreq governor on `platform`, from `read`, which reads [`GOVERNOR_PATH`]; or
+/// why there is none. Only Linux has one, so `read` is called there alone.
+fn governor_on(
+    platform: Platform,
+    read: impl FnOnce() -> io::Result<String>,
+) -> Result<String, String> {
+    match platform {
+        // The reason leaves out the error, as the client's does, so that the two read alike.
+        Platform::Linux => read()
+            .map(|text| text.trim().to_owned())
+            .map_err(|_| format!("{GOVERNOR_PATH} could not be read")),
+        Platform::MacOs | Platform::Windows | Platform::Other(_) => Err(format!(
+            "no cpufreq governor on {}",
+            platform.display_name()
+        )),
+    }
+}
+
+impl MachineSources {
+    /// This machine's facts now: the host name, CPU, memory and load average from `sysinfo`, which
+    /// reads `/proc` on Linux as the replayer did before, and the governor from sysfs on Linux.
+    #[must_use]
+    pub(crate) fn read() -> Self {
+        let platform = Platform::current();
+        let system = System::new_with_specifics(
+            RefreshKind::nothing()
+                .with_cpu(CpuRefreshKind::nothing())
+                .with_memory(MemoryRefreshKind::nothing().with_ram()),
+        );
+        Self {
+            platform,
+            host_name: System::host_name(),
+            cpu_brand: system
+                .cpus()
+                .first()
+                .map(|cpu| cpu.brand().trim().to_owned())
+                .filter(|brand| !brand.is_empty()),
+            // An error here is the platform's refusal to say, which the findings report.
+            logical_cores: std::thread::available_parallelism()
+                .ok()
+                .map(std::num::NonZero::get),
+            memory_bytes: Some(system.total_memory()).filter(|bytes| *bytes > 0),
+            load_average: load_average_on(platform, || {
+                sysinfo::IS_SUPPORTED_SYSTEM.then(System::load_average)
+            }),
+            governor: governor_on(platform, || fs::read_to_string(GOVERNOR_PATH)),
+        }
+    }
+
+    /// The facts that could not be read, as findings that say what the file holds instead, since
+    /// the schema keeps them plain values.
+    #[must_use]
+    pub(crate) fn findings(&self) -> Vec<String> {
+        let unread = |what: &str, written: &str| {
+            format!("the machine's {what} could not be read: run.machine.{written}")
+        };
+        let mut findings = Vec::new();
+        if self
+            .host_name
+            .as_deref()
+            .is_none_or(|name| normalised(name).is_empty())
+        {
+            findings.push(unread("host name", "name is \"machine\""));
+        }
+        if self.cpu_brand.is_none() {
+            findings.push(unread("CPU", "cpu is \"unknown\""));
+        }
+        if self.logical_cores.is_none() {
+            findings.push(unread("thread count", "logicalCores is 0"));
+        }
+        if self.memory_bytes.is_none() {
+            findings.push(unread("memory", "memoryBytes is 0"));
+        }
+        findings
+    }
+}
+
+/// A host name as the file name and `run.machine.name` take it, as the client's: lower-cased,
+/// with everything but ASCII letters, digits and `-` dropped.
+#[must_use]
+fn normalised(host_name: &str) -> String {
+    host_name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect()
+}
 
 /// The memory series' reading columns (the client's `MemorySeries`), each null all run here.
 const MEMORY_COLUMNS: [&str; 8] = [
@@ -378,10 +573,13 @@ pub struct ReplayFigures {
     /// Validation errors wgpu reported during the replay.
     pub(crate) errors: Vec<String>,
     /// What the replay could not do as captured: the capture's own problems, features the
-    /// adapter lacks, a canvas format the window cannot present.
+    /// adapter lacks, a canvas format the window cannot present, the machine's facts it could not
+    /// read.
     pub(crate) findings: Vec<String>,
     /// The GPU's clocks, read before the first frame, once a second and after the last.
     pub(crate) clocks: Vec<ClockSample>,
+    /// The machine's facts, read at the replay's start.
+    pub(crate) machine: MachineSources,
 }
 
 impl ReplayFigures {
@@ -404,7 +602,7 @@ impl ReplayFigures {
         &self.errors
     }
 
-    /// What the replay could not do as captured.
+    /// What the replay could not do as captured, and the machine's facts it could not read.
     #[must_use]
     pub fn findings(&self) -> &[String] {
         &self.findings
@@ -530,52 +728,30 @@ impl PassTiming {
     }
 }
 
-/// The machine's facts the schema records, read from Linux's `/proc` and `/sys` where present.
-fn machine(adapter: &wgpu::AdapterInfo) -> Value {
-    let read = |path: &str| fs::read_to_string(path).ok();
-    let name: String = read("/proc/sys/kernel/hostname")
-        .unwrap_or_default()
-        .trim()
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .collect();
-    let cpu = read("/proc/cpuinfo")
-        .and_then(|text| {
-            text.lines()
-                .find(|line| line.starts_with("model name"))
-                .and_then(|line| line.split(':').nth(1))
-                .map(|model| model.trim().to_owned())
-        })
-        .unwrap_or_else(|| "unknown".to_owned());
-    let memory = read("/proc/meminfo")
-        .and_then(|text| {
-            text.lines()
-                .find(|line| line.starts_with("MemTotal:"))
-                .and_then(|line| line.split_whitespace().nth(1))
-                .and_then(|kib| kib.parse::<u64>().ok())
-        })
-        .map_or(0, |kib| kib * 1024);
-    let load: Vec<f64> = read("/proc/loadavg")
-        .map(|text| {
-            text.split_whitespace()
-                .take(3)
-                .filter_map(|v| v.parse().ok())
-                .collect()
-        })
+/// The machine's facts as the schema records them, from `sources`.
+///
+/// A fact that could not be read is the schema's plain value ([`MachineSources::findings`] says
+/// which), and a load average the platform keeps none of is zeros, since results version 5 keeps it
+/// a number triple (a later version makes it a `Measured`: decision-cross-platform-server.md item
+/// 6); [`quiet`] then marks the run provisional and says why.
+#[must_use]
+fn machine(sources: &MachineSources, adapter: &wgpu::AdapterInfo) -> Value {
+    let name = sources
+        .host_name
+        .as_deref()
+        .map(normalised)
         .unwrap_or_default();
-    let governor = read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor").map_or_else(
-        || missing("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor could not be read"),
-        |text| measured(json!(text.trim())),
-    );
-    let cores = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
+    let load = sources.load_average.as_ref().map_or([0.0; 3], |load| *load);
     json!({
         "name": if name.is_empty() { "machine".to_owned() } else { name },
-        "cpu": cpu,
-        "logicalCores": cores,
-        "memoryBytes": memory,
-        "governor": governor,
-        "loadAverage": [load.first().copied().unwrap_or(0.0), load.get(1).copied().unwrap_or(0.0), load.get(2).copied().unwrap_or(0.0)],
+        "cpu": sources.cpu_brand.as_deref().unwrap_or("unknown"),
+        "logicalCores": sources.logical_cores.unwrap_or(0),
+        "memoryBytes": sources.memory_bytes.unwrap_or(0),
+        "governor": sources
+            .governor
+            .as_ref()
+            .map_or_else(|reason| missing(reason), |governor| measured(json!(governor))),
+        "loadAverage": load,
         "gpu": measured(json!({
             "vendorId": adapter.vendor,
             "deviceId": adapter.device,
@@ -583,6 +759,24 @@ fn machine(adapter: &wgpu::AdapterInfo) -> Value {
             "description": adapter.name,
         })),
     })
+}
+
+/// Design note 27's rule for a replay started at `load_average`: provisional at a 1-minute load of
+/// 1 or more, and always without a load average (Windows keeps none), when whether the machine was
+/// quiet is unchecked; the client's `quietOf` words it alike.
+#[must_use]
+fn quiet(load_average: &Result<[f64; 3], String>) -> Value {
+    match load_average {
+        Ok([one, ..]) if *one >= 1.0 => json!({
+            "provisional": true,
+            "note": format!("load average {one:.2} at the start (Design note 27 asks under 1): provisional"),
+        }),
+        Ok(_) => json!({ "provisional": false, "note": null }),
+        Err(reason) => json!({
+            "provisional": true,
+            "note": format!("{reason}: the quiet-machine rule (Design note 27) is unchecked"),
+        }),
+    }
 }
 
 /// The date and time of `time` as ISO 8601 in UTC, to the second.
@@ -829,18 +1023,12 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             "pass"
         }
     };
-    let load = machine(&figures.adapter);
-    let load_1 = load
-        .get("loadAverage")
-        .and_then(|l| l.get(0))
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
     json!({
         "schema": RESULTS_SCHEMA,
         "version": RESULTS_VERSION,
         "run": {
             "startedAt": iso8601(figures.started_at),
-            "machine": load,
+            "machine": machine(&figures.machine, &figures.adapter),
             "versions": {
                 "app": format!("gpu-replay {}", env!("CARGO_PKG_VERSION")),
                 "electron": "none (native replay)",
@@ -848,7 +1036,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
                 "node": "none (native replay)",
                 "v8": "none (native replay)",
             },
-            "platform": std::env::consts::OS,
+            "platform": figures.machine.platform.name(),
             "launchMode": "native-replay",
             "setting": figures.setting.name(),
             "seed": figures.seed,
@@ -864,10 +1052,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             "periodMs": period_ms.map_or_else(|| missing(period_reason), |t| measured(json!(t))),
             "warmupS": 0,
             "canvas": { "widthPx": figures.canvas.0, "heightPx": figures.canvas.1 },
-            "quiet": {
-                "provisional": load_1 >= 1.0,
-                "note": (load_1 >= 1.0).then(|| format!("load average {load_1:.2} at the start (Design note 27 asks under 1): provisional")),
-            },
+            "quiet": quiet(&figures.machine.load_average),
             "trace": missing(NO_TRACE),
         },
         "levels": [],
@@ -1019,7 +1204,247 @@ mod tests {
             errors: Vec::new(),
             findings: Vec::new(),
             clocks: Vec::new(),
+            machine: sources(Platform::Linux),
         }
+    }
+
+    /// `sysinfo`'s reading of a quiet machine's load average.
+    const QUIET_LOAD: LoadAvg = LoadAvg {
+        one: 0.5,
+        five: 0.4,
+        fifteen: 0.3,
+    };
+
+    /// The facts of a quiet machine on `platform`, through the per-platform rules that
+    /// [`MachineSources::read`] applies.
+    fn sources(platform: Platform) -> MachineSources {
+        MachineSources {
+            platform,
+            host_name: Some("Dev.Box_1 ".to_owned()),
+            cpu_brand: Some("AMD Ryzen 7 3700X 8-Core Processor".to_owned()),
+            logical_cores: Some(16),
+            memory_bytes: Some(33_554_432_000),
+            load_average: load_average_on(platform, || Some(QUIET_LOAD)),
+            governor: governor_on(platform, || Ok("schedutil\n".to_owned())),
+        }
+    }
+
+    #[test]
+    fn the_load_average_is_sysinfos_on_linux_and_macos() {
+        for platform in [Platform::Linux, Platform::MacOs] {
+            assert_eq!(
+                load_average_on(platform, || Some(QUIET_LOAD)),
+                Ok([0.5, 0.4, 0.3]),
+                "{platform:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_has_no_load_average_and_is_never_asked_for_one() {
+        assert_eq!(
+            load_average_on(Platform::Windows, || panic!("read on Windows")),
+            Err("Windows keeps no load average".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_platform_sysinfo_does_not_support_has_no_load_average() {
+        assert_eq!(
+            load_average_on(Platform::Other("haiku"), || None),
+            Err("no load average on haiku".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_governor_is_read_on_linux_alone() {
+        assert_eq!(
+            governor_on(Platform::Linux, || Ok("schedutil\n".to_owned())),
+            Ok("schedutil".to_owned())
+        );
+        for (platform, name) in [(Platform::MacOs, "macOS"), (Platform::Windows, "Windows")] {
+            assert_eq!(
+                governor_on(platform, || panic!("read on {name}")),
+                Err(format!("no cpufreq governor on {name}"))
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreadable_governor_on_linux_names_its_file() {
+        assert_eq!(
+            governor_on(Platform::Linux, || Err(io::ErrorKind::NotFound.into())),
+            Err(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor could not be read"
+                    .to_owned()
+            )
+        );
+    }
+
+    /// The results of a replay on a machine of `sources`.
+    fn on(sources: MachineSources) -> Value {
+        let mut replay = figures(BTreeMap::new());
+        replay.machine = sources;
+        results_json(&replay)
+    }
+
+    #[test]
+    fn a_linux_replay_records_its_facts_and_governor() {
+        let results = on(sources(Platform::Linux));
+        assert_eq!(results["run"]["platform"], "linux");
+        let machine = &results["run"]["machine"];
+        assert_eq!(machine["name"], "devbox1", "normalised as the client's");
+        assert_eq!(machine["cpu"], "AMD Ryzen 7 3700X 8-Core Processor");
+        assert_eq!(machine["logicalCores"], 16);
+        assert_eq!(machine["memoryBytes"], 33_554_432_000_u64);
+        assert_eq!(machine["governor"], measured(json!("schedutil")));
+        assert_eq!(machine["loadAverage"], json!([0.5, 0.4, 0.3]));
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({ "provisional": false, "note": null })
+        );
+    }
+
+    #[test]
+    fn a_busy_machine_makes_the_replay_provisional() {
+        let mut busy = sources(Platform::Linux);
+        busy.load_average = Ok([1.5, 0.9, 0.4]);
+        assert_eq!(
+            on(busy)["run"]["quiet"],
+            json!({
+                "provisional": true,
+                "note": "load average 1.50 at the start (Design note 27 asks under 1): provisional",
+            })
+        );
+    }
+
+    #[test]
+    fn a_macos_replay_at_a_load_of_a_half_is_not_provisional() {
+        let results = on(sources(Platform::MacOs));
+        assert_eq!(results["run"]["platform"], "macos");
+        assert_eq!(
+            results["run"]["machine"]["governor"],
+            missing("no cpufreq governor on macOS")
+        );
+        assert_eq!(
+            results["run"]["machine"]["loadAverage"],
+            json!([0.5, 0.4, 0.3])
+        );
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({ "provisional": false, "note": null })
+        );
+    }
+
+    #[test]
+    fn a_windows_replay_is_provisional_with_its_note() {
+        let results = on(sources(Platform::Windows));
+        assert_eq!(results["run"]["platform"], "windows");
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({
+                "provisional": true,
+                "note": "Windows keeps no load average: the quiet-machine rule (Design note 27) is unchecked",
+            })
+        );
+        // Results version 5 keeps the load average a number triple; the note says it is none.
+        assert_eq!(
+            results["run"]["machine"]["loadAverage"],
+            json!([0.0, 0.0, 0.0])
+        );
+        assert_eq!(
+            results["run"]["machine"]["governor"],
+            missing("no cpufreq governor on Windows")
+        );
+    }
+
+    #[test]
+    fn a_host_name_with_nothing_left_after_normalising_is_machine() {
+        let mut unnamed = sources(Platform::Linux);
+        unnamed.host_name = Some("__.".to_owned());
+        assert_eq!(on(unnamed.clone())["run"]["machine"]["name"], "machine");
+        unnamed.host_name = None;
+        assert_eq!(on(unnamed)["run"]["machine"]["name"], "machine");
+    }
+
+    #[test]
+    fn a_cpu_not_read_is_unknown() {
+        let mut unread = sources(Platform::MacOs);
+        unread.cpu_brand = None;
+        assert_eq!(on(unread)["run"]["machine"]["cpu"], "unknown");
+    }
+
+    #[test]
+    fn facts_not_read_are_findings_that_say_what_the_file_holds() {
+        assert_eq!(sources(Platform::Windows).findings(), Vec::<String>::new());
+        let unread = MachineSources {
+            host_name: None,
+            cpu_brand: None,
+            logical_cores: None,
+            memory_bytes: None,
+            ..sources(Platform::Windows)
+        };
+        assert_eq!(
+            unread.findings(),
+            [
+                "the machine's host name could not be read: run.machine.name is \"machine\"",
+                "the machine's CPU could not be read: run.machine.cpu is \"unknown\"",
+                "the machine's thread count could not be read: run.machine.logicalCores is 0",
+                "the machine's memory could not be read: run.machine.memoryBytes is 0",
+            ]
+        );
+        let results = on(unread);
+        assert_eq!(results["run"]["machine"]["memoryBytes"], 0);
+        assert_eq!(results["run"]["machine"]["logicalCores"], 0);
+    }
+
+    #[test]
+    fn this_machines_facts_are_read() {
+        let read = MachineSources::read();
+        assert_eq!(read.platform, Platform::current());
+        assert_eq!(read.findings(), Vec::<String>::new(), "{read:?}");
+        match read.platform {
+            Platform::Windows => {
+                assert_eq!(read.load_average, Err(NO_WINDOWS_LOAD_AVERAGE.to_owned()));
+            }
+            Platform::Linux | Platform::MacOs | Platform::Other(_) => {
+                assert!(read.load_average.is_ok(), "{read:?}");
+            }
+        }
+    }
+
+    /// `sysinfo` reads Linux's facts from the files the replayer read before it, so a Linux
+    /// replay's facts are unchanged by R05.T20, except on an Arm machine whose cpuinfo names its
+    /// CPU part, which `sysinfo` takes for the brand over the model name. Elsewhere there are no
+    /// such files, and `this_machines_facts_are_read` alone runs.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_facts_are_those_proc_gives() {
+        let read = MachineSources::read();
+        let proc = |path: &str| fs::read_to_string(path).expect("a Linux machine has /proc");
+        assert_eq!(
+            read.host_name.as_deref(),
+            Some(proc("/proc/sys/kernel/hostname").trim())
+        );
+        // On Arm, `sysinfo` names the CPU by its part where cpuinfo gives one.
+        let cpuinfo = proc("/proc/cpuinfo");
+        let model = cpuinfo
+            .lines()
+            .find(|line| line.starts_with("model name"))
+            .and_then(|line| line.split(':').nth(1));
+        if let (Some(model), false) = (model, cpuinfo.contains("CPU part")) {
+            assert_eq!(read.cpu_brand.as_deref(), Some(model.trim()));
+        }
+        let mem_total_kib: Option<u64> = proc("/proc/meminfo")
+            .lines()
+            .find(|line| line.starts_with("MemTotal:"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|kib| kib.parse().ok());
+        assert_eq!(read.memory_bytes, mem_total_kib.map(|kib| kib * 1024));
+        assert_eq!(
+            read.governor.is_ok(),
+            fs::read_to_string(GOVERNOR_PATH).is_ok()
+        );
     }
 
     fn row<'a>(results: &'a Value, id: &str) -> &'a Value {

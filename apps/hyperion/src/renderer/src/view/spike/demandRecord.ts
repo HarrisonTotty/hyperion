@@ -148,7 +148,10 @@ export interface RecordedCell extends DemandCell {
   readonly wallCapHours: number | null;
   /** How long the cell took, bakes included, s. */
   readonly wallS: number;
-  /** The machine's 1, 5 and 15 min load averages as the cell ended. */
+  /**
+   * The machine's 1, 5 and 15 min load averages as the cell ended, Node's `os.loadavg()`; empty
+   * on Windows, which keeps none (R05.T20), as the record's summary says.
+   */
   readonly loadAverage: ReadonlyArray<number>;
 }
 
@@ -450,12 +453,16 @@ function budgetRow(s: SegmentFigures): string {
   return `| ${cells.join(" | ")} |`;
 }
 
-/** The record's Markdown summary, with `notes` on how its cells were run. */
+/**
+ * The record's Markdown summary, with `notes` on how its cells were run; a cell that carries its
+ * load average ({@link RecordedCell}) and has none is counted in it.
+ */
 export function demandSummary(
-  cells: ReadonlyArray<DemandCell>,
+  cells: ReadonlyArray<DemandCell & Partial<Pick<RecordedCell, "loadAverage">>>,
   startedAt: string,
   notes: ReadonlyArray<string> = [],
 ): string {
+  const unloaded = cells.filter((cell) => cell.loadAverage?.length === 0).length;
   const lines = [
     `# Descent demand record, ${startedAt.slice(0, 10)}`,
     "",
@@ -466,6 +473,12 @@ export function demandSummary(
     "Timings are provisional unless the machine was quiet (Design note 27). The selection's wall-clock",
     "times are upper bounds under load, since a nice process waiting for a core counts the wait; its",
     "time on the thread's CPU clock (`process.threadCpuUsage`, user and system) is its own work.",
+    ...(unloaded === 0
+      ? []
+      : [
+          `${unloaded} of the ${cells.length} cells recorded no load average: Windows keeps none, so whether`,
+          "the machine was quiet is unchecked.",
+        ]),
     "",
     `Selected at τ ÷ ${1 + RESELECT_FRACTION}, the terrain pass's τ_sel; D at the same tolerance; selected every`,
     "frame, without the pass's cadence (decision-r05-record-tau.md). The pass's selection at a frame",

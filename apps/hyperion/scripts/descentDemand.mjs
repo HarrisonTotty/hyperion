@@ -17,10 +17,14 @@
 // Each --note is a line of the record's notes. --merge runs nothing: it writes one record into
 // --out from the records given, their cells in that order, as the cells run one process each.
 // Selection is timed on the wall clock and on this thread's CPU clock (`process.threadCpuUsage`):
-// under load the first counts the waits for a core, the second the selection's own work.
+// under load the first counts the waits for a core, the second the selection's own work. Each
+// cell records the machine's load average as it ended, from Node's `os.loadavg()` through
+// `src/main/machineLoad.ts`, so that the record runs on every platform; Windows keeps none, and
+// its cells record an empty list (R05.T20).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { loadavg } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { runnerImport } from "vite";
 
@@ -51,8 +55,6 @@ function writeRecord(record, out, stem, file) {
   return join(out, stem);
 }
 
-const loadAverage = () => readFileSync("/proc/loadavg", "utf8").split(" ").slice(0, 3).map(Number);
-
 const nowMs = () => performance.now();
 
 /**
@@ -68,7 +70,10 @@ const cpuNowMs =
     : undefined;
 
 async function main(args) {
-  const surface = await import(join(app, "src/renderer/src/generated/surface/hyperion_surface.js"));
+  // A file URL, since Node's loader refuses a Windows path (`C:\...`) as a module specifier.
+  const surface = await import(
+    pathToFileURL(join(app, "src/renderer/src/generated/surface/hyperion_surface.js")).href
+  );
   surface.initSync({
     module: readFileSync(join(app, "src/renderer/src/generated/surface/hyperion_surface_bg.wasm")),
   });
@@ -76,6 +81,10 @@ async function main(args) {
     join(app, "src/renderer/src/view/spike/demandRecord.ts"),
     { configFile: false, logLevel: "error" },
   );
+  const { module: machine } = await runnerImport(join(app, "src/main/machineLoad.ts"), {
+    configFile: false,
+    logLevel: "error",
+  });
   const notes = options(args, "note");
   const out = option(args, "out", join(repo, "docs/measurements/descent-spike"));
   const merge = option(args, "merge", null);
@@ -206,7 +215,7 @@ async function main(args) {
           capHours: shareMs / 3_600_000,
           wallCapHours: Number.isFinite(wallCapHours) ? wallCapHours : null,
           wallS,
-          loadAverage: loadAverage(),
+          loadAverage: machine.recordedLoadAverage({ platform: process.platform, loadavg }),
         });
         write();
         process.stdout.write(

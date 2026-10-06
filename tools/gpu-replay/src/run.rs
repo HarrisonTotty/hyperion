@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::capture::{Capture, QUEUE_ID};
 use crate::clocks::{ClockSampler, ClockSource};
 use crate::replay::{FramePassTimes, FrameTarget, ReplayCallError, Replayer, UnknownFormatError};
-use crate::results::{PassRow, ReplayFigures, Setting};
+use crate::results::{MachineSources, PassRow, ReplayFigures, Setting};
 
 /// Why a replay could not run.
 #[derive(Debug, thiserror::Error)]
@@ -364,6 +364,8 @@ pub fn replay_offscreen(
     let setting = setting_of(capture, setting)?;
     let started_at = SystemTime::now();
     let started = Instant::now();
+    // Before the replay's own work, so that its load average is the machine's at the start.
+    let machine = MachineSources::read();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
@@ -371,6 +373,7 @@ pub fn replay_offscreen(
     }))
     .map_err(RunReplayError::NoAdapter)?;
     let mut findings = capture.problems().to_vec();
+    findings.extend(machine.findings());
     let (device, queue) = device_for(&adapter, capture, &mut findings)?;
     let errors = collect_errors(&device);
     let mut replayer = Replayer::new(device.clone(), queue.clone(), capture.surfaces())?;
@@ -414,6 +417,7 @@ pub fn replay_offscreen(
             .clone(),
         findings,
         clocks,
+        machine,
     })
 }
 
