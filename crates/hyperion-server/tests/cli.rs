@@ -9,7 +9,8 @@ use std::process::Output;
 use std::time::Duration;
 
 use hyperion_server::config::{
-    ENV_ADDR, ENV_CELL_CACHE_MB, ENV_DATA_DIR, ENV_MAP_CACHE_MB, ENV_PORT, ENV_WORKERS,
+    ENV_ADDR, ENV_CELL_CACHE_MB, ENV_DATA_DIR, ENV_MAP_CACHE_MB, ENV_PORT, ENV_STOP_ON_STDIN_CLOSE,
+    ENV_WORKERS,
 };
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -95,6 +96,28 @@ async fn a_bad_variable_is_refused_as_its_option() {
     );
     assert!(
         stderr(&output).contains("invalid value '0' for '--num-workers <COUNT>'"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[tokio::test]
+async fn the_stop_on_stdin_close_variable_takes_only_a_yes_or_a_no() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = run(
+        dir.path(),
+        &[],
+        &[(ENV_STOP_ON_STDIN_CLOSE, Path::new("sometimes"))],
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(USAGE_ERROR),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("invalid value 'sometimes' for '--stop-on-stdin-close'"),
         "{}",
         stderr(&output)
     );

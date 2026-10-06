@@ -4,17 +4,22 @@
 //! can instead be set by an environment variable; one given on the command line wins. Tests and
 //! embedders build a [`ServerConfig`] with [`ServerConfig::builder`].
 //!
-//! | Option           | Variable                   | Default                                      |
-//! | ---------------- | -------------------------- | -------------------------------------------- |
-//! | `--address`      | `HYPERION_ADDR`            | `127.0.0.1`                                  |
-//! | `--port`         | `HYPERION_PORT`            | `7878`                                       |
-//! | `--data-dir`     | `HYPERION_DATA_DIR`        | `./hyperion-data`                            |
-//! | `--num-workers`  | `HYPERION_WORKERS`         | available parallelism less one, at least one |
-//! | `--cell-cache`   | `HYPERION_CELL_CACHE_MB`   | 256 (MiB)                                    |
-//! | `--map-cache`    | `HYPERION_MAP_CACHE_MB`    | 64 (MiB)                                     |
-//! | `--system-cache` | `HYPERION_SYSTEM_CACHE_MB` | 128 (MiB)                                    |
-//! | `--body-cache`   | `HYPERION_BODY_CACHE_MB`   | 128 (MiB)                                    |
-//! | `--brief-cache`  | `HYPERION_BRIEF_CACHE_MB`  | 64 (MiB)                                     |
+//! | Option                  | Variable                       | Default                                      |
+//! | ----------------------- | ------------------------------ | -------------------------------------------- |
+//! | `--address`             | `HYPERION_ADDR`                | `127.0.0.1`                                  |
+//! | `--port`                | `HYPERION_PORT`                | `7878`                                       |
+//! | `--data-dir`            | `HYPERION_DATA_DIR`            | `./hyperion-data`                            |
+//! | `--num-workers`         | `HYPERION_WORKERS`             | available parallelism less one, at least one |
+//! | `--cell-cache`          | `HYPERION_CELL_CACHE_MB`       | 256 (MiB)                                    |
+//! | `--map-cache`           | `HYPERION_MAP_CACHE_MB`        | 64 (MiB)                                     |
+//! | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | 128 (MiB)                                    |
+//! | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | 128 (MiB)                                    |
+//! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
+//! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
+//!
+//! `--stop-on-stdin-close` is a switch. Its variable takes clap's boolish values, in any case:
+//! `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`, `f`, `false`, `off` or `0` for off.
+//! It refuses anything else, the empty string included.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
@@ -25,9 +30,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::builder::{BoolishValueParser, TypedValueParser};
+use clap::{ArgAction, Parser};
 
 use crate::DEFAULT_ADDR;
+use crate::stop::StdinStop;
 use crate::universe::{Entropy, OsEntropy};
 
 /// The variable giving the IP address to listen on, for `--address`.
@@ -48,6 +55,8 @@ pub const ENV_SYSTEM_CACHE_MB: &str = "HYPERION_SYSTEM_CACHE_MB";
 pub const ENV_BODY_CACHE_MB: &str = "HYPERION_BODY_CACHE_MB";
 /// The variable giving the brief cache's budget in MiB, for `--brief-cache`.
 pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
+/// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
+pub const ENV_STOP_ON_STDIN_CLOSE: &str = "HYPERION_STOP_ON_STDIN_CLOSE";
 
 /// The data directory when `--data-dir` is not given, relative to the working directory.
 pub const DEFAULT_DATA_DIR: &str = "./hyperion-data";
@@ -125,6 +134,25 @@ pub struct ServerArgs {
     /// Budget of the cache of range briefs' star models, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
     brief_cache: CacheBudget,
+
+    /// Stop gracefully when standard input closes, for a server run as another program's child
+    #[arg(
+        long,
+        env = ENV_STOP_ON_STDIN_CLOSE,
+        action = ArgAction::SetTrue,
+        value_parser = BoolishValueParser::new().map(stdin_stop),
+    )]
+    stop_on_stdin_close: StdinStop,
+}
+
+/// The stop on standard input that a switch asks for.
+#[must_use]
+fn stdin_stop(watch: bool) -> StdinStop {
+    if watch {
+        StdinStop::Watch
+    } else {
+        StdinStop::Ignore
+    }
 }
 
 impl From<ServerArgs> for ServerConfig {
@@ -139,6 +167,7 @@ impl From<ServerArgs> for ServerConfig {
             system_cache,
             body_cache,
             brief_cache,
+            stop_on_stdin_close,
         } = args;
         Self::builder()
             .addr(SocketAddr::new(address, port))
@@ -149,6 +178,7 @@ impl From<ServerArgs> for ServerConfig {
             .system_cache_bytes(system_cache.bytes)
             .body_cache_bytes(body_cache.bytes)
             .brief_cache_bytes(brief_cache.bytes)
+            .stdin_stop(stop_on_stdin_close)
             .build()
     }
 }
@@ -210,6 +240,7 @@ pub struct ServerConfig {
     system_cache_bytes: usize,
     body_cache_bytes: usize,
     brief_cache_bytes: usize,
+    stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
     craft_source: Arc<dyn CraftSource>,
@@ -270,6 +301,15 @@ impl ServerConfig {
         self.brief_cache_bytes
     }
 
+    /// Whether the end of standard input stops the server.
+    ///
+    /// The binary's `main` reads this, for [`StopRequests::listen`](crate::stop::StopRequests::listen);
+    /// [`Server`](crate::Server) does not, since a program that embeds one stops it itself.
+    #[must_use]
+    pub fn stdin_stop(&self) -> StdinStop {
+        self.stdin_stop
+    }
+
     /// Where seeds and universe IDs are drawn from.
     #[must_use]
     pub fn entropy(&self) -> &Arc<dyn Entropy> {
@@ -307,6 +347,7 @@ impl Default for ServerConfigBuilder {
                 system_cache_bytes: DEFAULT_SYSTEM_CACHE.bytes,
                 body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
+                stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
                 craft_source: Arc::new(NoCraft),
@@ -371,6 +412,13 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn brief_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.brief_cache_bytes = bytes;
+        self
+    }
+
+    /// Whether the end of standard input stops the server; [`StdinStop::Ignore`] by default.
+    #[must_use]
+    pub fn stdin_stop(mut self, stdin: StdinStop) -> Self {
+        self.config.stdin_stop = stdin;
         self
     }
 
@@ -453,6 +501,7 @@ mod tests {
         usize,
         usize,
         usize,
+        StdinStop,
     );
 
     fn fields(config: &ServerConfig) -> Fields<'_> {
@@ -465,6 +514,7 @@ mod tests {
             config.system_cache_bytes(),
             config.body_cache_bytes(),
             config.brief_cache_bytes(),
+            config.stdin_stop(),
         )
     }
 
@@ -489,6 +539,7 @@ mod tests {
                 128 * 1024 * 1024,
                 128 * 1024 * 1024,
                 64 * 1024 * 1024,
+                StdinStop::Ignore,
             )
         );
     }
@@ -514,6 +565,7 @@ mod tests {
             "5",
             "--brief-cache",
             "7",
+            "--stop-on-stdin-close",
         ]);
         assert_eq!(
             fields(&config),
@@ -525,8 +577,17 @@ mod tests {
                 0,
                 2 << 20,
                 5 << 20,
-                7 << 20
+                7 << 20,
+                StdinStop::Watch,
             )
+        );
+    }
+
+    #[test]
+    fn the_stop_on_stdin_close_is_a_switch() {
+        assert_eq!(
+            refusal(&["--stop-on-stdin-close=yes"]),
+            ErrorKind::TooManyValues
         );
     }
 
@@ -557,6 +618,10 @@ mod tests {
                 (Some("system-cache"), Some("HYPERION_SYSTEM_CACHE_MB")),
                 (Some("body-cache"), Some("HYPERION_BODY_CACHE_MB")),
                 (Some("brief-cache"), Some("HYPERION_BRIEF_CACHE_MB")),
+                (
+                    Some("stop-on-stdin-close"),
+                    Some("HYPERION_STOP_ON_STDIN_CLOSE")
+                ),
             ]
         );
     }
@@ -690,6 +755,7 @@ mod tests {
             .system_cache_bytes(30)
             .body_cache_bytes(40)
             .brief_cache_bytes(50)
+            .stdin_stop(StdinStop::Watch)
             .build();
         assert_eq!(
             fields(&config),
@@ -701,7 +767,8 @@ mod tests {
                 20,
                 30,
                 40,
-                50
+                50,
+                StdinStop::Watch,
             )
         );
     }

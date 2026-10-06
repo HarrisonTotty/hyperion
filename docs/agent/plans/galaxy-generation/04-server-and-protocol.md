@@ -145,7 +145,7 @@ pub mod compute  { CpuPool, Priority, SubmitJobError, CancelToken, SingleFlight,
                    SharedCellCache, CellCacheHandle, DensityMapService, MapKey,
                    RawDensityMap, quantise_map }
 pub mod cache    { ByteLru, HeapBytes }
-pub mod stop     { StopReason, StopRequests, Shutdown, unless_stopped_again }   // T17
+pub mod stop     { StopReason, StopRequests, StdinStop, Shutdown, unless_stopped_again }   // T17
 ```
 
 `hyperion_server::app()` is replaced by `Server::router()`. `DEFAULT_ADDR` stays.
@@ -1181,8 +1181,11 @@ server offers one that is not a signal.
   - Start the server with `--stop-on-stdin-close`, piped stdio and an explicit `--data-dir` under
     `app.getPath("userData")`. The default `./hyperion-data` is relative to the working directory,
     which is the read-only `/` for a packaged macOS app and the install directory on Windows.
-  - Stop it by ending stdin, waiting up to 10 s, then calling `kill()`. That sends SIGTERM on Unix,
-    another graceful stop, and terminates the process on Windows.
+  - Stop it by ending stdin, waiting up to 10 s, then calling `kill()`. On Unix that sends SIGTERM.
+    If the shutdown that stdin started is still running, the signal is a second stop request and
+    forces the exit (status 1), by T17.a's rule. If the server had not seen stdin end, it is a
+    graceful stop. On Windows `kill()` terminates the process. (Corrected as built: the ruling
+    called the SIGTERM "another graceful stop".)
   - How the launcher learns the port is R12.T4.b's to settle: `--port 0` and the `listening` line,
     or a fixed port.
 - _Plan amendments:_ R12.T4.b and the single-player brainstorm's local-server lean gain the launch
@@ -1833,3 +1836,62 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
   - _By hand on the owner's Mac._ `cargo test -p hyperion-server -- store knowledge` checks once
     that APFS takes `F_FULLFSYNC` on a directory (the ruling's relay 2). Not run: there is no Mac
     here.
+- **Deviations in T17.c, as built.**
+  - _Where `StdinStop` lives._ In `stop`, beside the requests it configures, and `config` imports
+    it; the Provides block lists it. `ServerConfig::stdin_stop` is read by `main` alone. `Server`
+    ignores it, since a program that embeds a server stops that server itself.
+  - _The parser._ `ServerArgs` holds a `StdinStop`, not a `bool`: clap's `SetTrue` with
+    `BoolishValueParser`, mapped to the enum. The switch takes no value, so
+    `--stop-on-stdin-close=yes` is refused. The variable takes clap's boolish values, in any case:
+    `y`, `yes`, `t`, `true`, `on` or `1`, or `n`, `no`, `f`, `false`, `off` or `0`. Anything else,
+    the empty string included, is a usage error (exit 2).
+  - _The watch._ `listen` adds it after the platform's listeners, through the private `add`, so it
+    is polled last. A thread that cannot be spawned is logged at `error` and left out, as a
+    listener that fails to register is. The thread runs `io::copy` into `io::sink()`, which retries
+    on `Interrupted`. A read error is logged at `warn` and counts as the end. The listener gives one
+    request and then ends, so the next `next` drops it, since a tokio oneshot panics if it is
+    polled after it has completed. A sender dropped unsent also counts as the end, logged at
+    `error`: only a panic in the thread drops it, and a server that can no longer see its parent go
+    should stop rather than outlive it. A missing stdin reads as an empty one. On Unix, std opens
+    `/dev/null` for a closed fd 0 when the process starts, and reads `EBADF` as the end as well. On
+    Windows it reads an invalid handle as the end, and a pipe whose writer has closed
+    (`ERROR_BROKEN_PIPE`) too. So `Watch` with no stdin stops the server at once, as the ruling
+    expects. (This is from std's documented behaviour; its source was not installed here to check.)
+  - _The exception for the thread._ The detached `stdin-watch` thread is recorded as the plan asks,
+    as an exception to "every task has a shutdown path", in `stop`'s module docs under "The thread
+    that watches standard input". `StopRequests`' docs point there.
+  - _When the watch starts._ With the signals, after `Server::start` and before the `listening`
+    line. If stdin ends earlier, the server stops just after it starts listening.
+  - _Tests._ The plan's two unit tests come with two more: a watch whose reader panics requests a
+    stop, and a reader requests a stop only at its end. In the second, a rendezvous channel shows
+    that two chunks are read and discarded without a request. All four run the watch over fake
+    readers through the private `watch_to_the_end`, never through `listen`. `tests/stop.rs` gates
+    on `cfg(unix)` only the two signal tests, their helper `shuts_down_cleanly_on` and `signal`.
+    The rest runs on every platform, with a `cfg(windows)` `kill`.
+    - Beyond the plan's two, `closing_stdin_stops_the_server_cleanly_when_its_variable_asks` sets
+      `HYPERION_STOP_ON_STDIN_CLOSE=1`.
+    - Both closing tests first check that `/healthz` answers while stdin is open. `/healthz` is
+      asked by a bare HTTP/1.1 `GET` over a `TcpStream`, since the crate has no HTTP client, at the
+      address in the `listening` line's `addr=` field.
+    - In the default test on Unix, the SIGTERM must give exit 0 and a `shutting down` line naming
+      the `terminate signal`. Had the null stdin stopped the server, the test fails whichever way
+      that went: `/healthz` fails, or the `shutting down` line names standard input, or, if the
+      signal came during that shutdown, the exit is forced with status 1. On Windows the test calls
+      `kill()`, which is `TerminateProcess`, and checks that no `shutting down` line was written.
+    - `tests/cli.rs` gains `the_stop_on_stdin_close_variable_takes_only_a_yes_or_a_no`, and
+      `config.rs` gains `the_stop_on_stdin_close_is_a_switch`. Both are named so that
+      `cargo test -p hyperion-server stop` selects them.
+    - Checked against faults in `main`. Always ignoring stdin, both closing tests fail. Always
+      watching it, the default test and both signal tests fail.
+    - _Open, from review._ No test sets the variable to an off value (`0`) or to `y` or `t`. Only
+      clap's implicit `false` reaches `Ignore`. `tests/cli.rs` still clears a fixed list of
+      variables, which leaves out the new one, as it already left out the three cache variables. Its
+      `run` should take the names from the parser, as `tests/stop.rs` does. Both are left for a
+      follow-up, since they need a test run while the machine is held quiet for timings.
+  - _Other platforms._ Linux runs every test here. On macOS the signal tests and the stdin tests
+    compile under cross-clippy. On Windows the stdin tests do, without the signal tests. Both will
+    run once a runner exists.
+  - _The launch contract._ R12.T4.b passes `--stop-on-stdin-close` (or
+    `HYPERION_STOP_ON_STDIN_CLOSE=1`) and an explicit `--data-dir`, as this task's contract says.
+    Its last step is corrected above. A SIGTERM after the server has seen stdin end is a second
+    request, and forces exit 1 rather than stopping gracefully.
