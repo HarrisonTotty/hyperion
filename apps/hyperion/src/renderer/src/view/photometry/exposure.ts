@@ -238,7 +238,12 @@ export type ExposureCommandResult =
   | {
       readonly kind: "refused";
       readonly reason:
-        "no_image_to_meter" | "not_automatic" | "already_auto" | "invalid_triple" | "invalid_ev100";
+        | "no_image_to_meter"
+        | "not_automatic"
+        | "already_auto"
+        | "already_inhibited"
+        | "invalid_triple"
+        | "invalid_ev100";
     };
 
 /** The exposure value a control stands at, EV100. */
@@ -317,11 +322,16 @@ export function setAuto(meteredEv100: number | null): ExposureCommandResult {
 
 /**
  * The operator's `INHIBIT`: holds an `AUTO` exposure where it stands, or takes over a system inhibit
- * as the operator's, so that it no longer resumes by itself when the source returns.
+ * as the operator's, so that it no longer resumes by itself when the source returns; refused where
+ * it cannot act, under `MAN` (`not_automatic`), and where its effect already holds, under the
+ * operator's own inhibit (`already_inhibited`, decision-r07-owner-ux-signoff, item 1).
  */
 export function inhibit(control: ExposureControl): ExposureCommandResult {
   if (control.kind === "manual") {
     return { kind: "refused", reason: "not_automatic" };
+  }
+  if (control.kind === "inhibited" && control.reason === "operator") {
+    return { kind: "refused", reason: "already_inhibited" };
   }
   return {
     kind: "accepted",
@@ -330,8 +340,8 @@ export function inhibit(control: ExposureControl): ExposureCommandResult {
 }
 
 /**
- * The operator's `ENABLE`: returns the exposure to `AUTO` at the metered value, from `MAN` or from
- * an inhibit of either origin (the guide's `ENABLE` rows; R07.T8.a, decision-r07-t8a-meter);
+ * The operator's `ENABLE`: sets the exposure to `AUTO` at the metered value, from `MAN` or from an
+ * inhibit of either origin (the guide's `ENABLE` rows; R07.T8.a, decision-r07-t8a-meter);
  * refused with `NO IMAGE TO METER` while there is no source, and under `AUTO`.
  *
  * @param meteredEv100 - The source's current metered value, or `null` where there is no source.

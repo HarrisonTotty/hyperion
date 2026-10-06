@@ -69,7 +69,10 @@ export function lightingState(
   return skyPending ? "pending" : "hosts-not-received";
 }
 
-/** The label block's line for a lighting state, `null` when lit (drafted for the owner). */
+/**
+ * The label block's line for a lighting state, `null` when lit: `LIGHTING: PENDING` or
+ * `LIGHTING: NOT RECEIVED` (decision-r07-owner-ux-signoff).
+ */
 export function lightingStatement(state: LightingState): string | null {
   let line: string | null;
   switch (state) {
@@ -80,7 +83,7 @@ export function lightingStatement(state: LightingState): string | null {
       line = "LIGHTING: PENDING";
       break;
     case "hosts-not-received":
-      line = "LIGHTING: STAR DISCS NOT RECEIVED";
+      line = "LIGHTING: NOT RECEIVED";
       break;
   }
   return line;

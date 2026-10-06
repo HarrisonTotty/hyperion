@@ -105,9 +105,19 @@ function standing(): HTMLElement | null {
   return screen.queryByText(PHOTOREAL_NOT_CREATED, { selector: ".view-folds__standing" });
 }
 
-/** How many of the lines reading `text` are on show, in no folded panel. */
+/**
+ * How many of the lines reading `text` are on show, in no folded panel: each the innermost element
+ * whose whole text it is, so that a line holding a phrase unbroken in a run of its own counts.
+ */
 function onShow(text: string): number {
-  return screen.queryAllByText(text).filter((line) => line.closest("[hidden]") === null).length;
+  return screen
+    .queryAllByText(
+      (_, element) =>
+        element !== null &&
+        element.textContent === text &&
+        [...element.children].every((child) => child.textContent !== text),
+    )
+    .filter((line) => line.closest("[hidden]") === null).length;
 }
 
 async function chooseScene(view: ViewDisplayHarness, name: string): Promise<void> {
@@ -353,6 +363,18 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     ]);
   });
 
+  it("holds NO IMAGE TO METER unbroken in the folded exposure's status under the row (R07.T19.d)", async () => {
+    await compact();
+    const line = screen.getByText(
+      (_, element) =>
+        element?.classList.contains("view-folds__standing") === true &&
+        element.textContent === "AUTO NOT AVAILABLE: NO IMAGE TO METER",
+    );
+    expect([...line.querySelectorAll(".view-label__run")].map((run) => run.textContent)).toEqual([
+      "NO IMAGE TO METER",
+    ]);
+  });
+
   it("moves no scroll position of its column or the work area as Tab passes every control", async () => {
     // jsdom lays nothing out and never scrolls on focus, so this guards against code that
     // scrolls; the hidden captures measure the column's fit and the work area's scrollTop.
@@ -496,7 +518,7 @@ describe("VIEW's instruments at both sizes (R07.T19.b)", () => {
   });
 
   it("states the lighting on a photorealistic instrument beside a wireframe primary, not beside a photorealistic one", async () => {
-    const lighting = "LIGHTING: STAR DISCS NOT RECEIVED";
+    const lighting = "LIGHTING: NOT RECEIVED";
     const view = await setup({ store: await nominalStore() });
     await chooseScene(view, "PRECISION TEST");
     await openInstrument(view, "INSTRUMENT 1");

@@ -5045,7 +5045,10 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       - `CAMERA ELV` and `DESCENT REFUSED` are added.
 
       The guide gains the measurement banner in Layout, the `SCENE` row's `DESCENT SPIKE`, and 18
-      drafted nomenclature rows.
+      drafted nomenclature rows. They were signed off on 2026-10-05 under the owner's delegation
+      (decision-r07-owner-ux-signoff; R07.T19.d), with one amendment: `TEST STAR`, `TEST PLANET`
+      and `TEST CRAFT` join one row with the kept scenes' test designations. `ELV`'s row is widened
+      for `CAMERA ELV`.
 
     - The orbit instrument's `CAMERA` reads `SCRIPTED`, not `FREE`. It keeps only `FRAME`, `TIME`,
       `STYLE`, `CAMERA` and `FOV`, as the craft instrument does. It draws the craft as a target

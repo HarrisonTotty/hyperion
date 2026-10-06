@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 
 import { formatNumber, formatSignificant } from "../../lib/format";
 import { isEmptyEntry, showSelected } from "../../lib/textEntry";
@@ -15,7 +15,7 @@ import {
   shownTriple,
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
-import { readingParts } from "./ViewLabelBlock";
+import { readingParts, unbrokenRuns } from "./ViewLabelBlock";
 import { exposureReading } from "./viewRun";
 
 /** Props of {@link ExposurePanel}. */
@@ -53,16 +53,37 @@ const MAN_SPAN = [MAN_EV100_MIN, MAN_EV100_MAX]
  */
 export const AUTO_NOT_AVAILABLE = "AUTO NOT AVAILABLE: NO IMAGE TO METER";
 
-/** Why a command is held back or an entry refused, in the guide's `STATUS: clause` form. */
+/**
+ * Why a command is held back or an entry refused, in the guide's `STATUS: clause` form; a command
+ * whose effect already holds names the level as the reading shows it.
+ */
 const REFUSAL_WORDS: Readonly<
   Record<Extract<ExposureCommandResult, { kind: "refused" }>["reason"], string>
 > = {
   no_image_to_meter: "NO IMAGE TO METER",
   not_automatic: "NOT AVAILABLE: the exposure is MAN",
   already_auto: "NOT AVAILABLE: the exposure is AUTO",
+  already_inhibited: "NOT AVAILABLE: the exposure is INHIBITED · OPERATOR",
   invalid_triple: "NOT AVAILABLE: the triple is not valid",
   invalid_ev100: `EV100 INVALID: enter ${MAN_SPAN}`,
 };
+
+/**
+ * The exposure's status phrases, which a note never breaks inside (decision-r07-owner-ux-signoff,
+ * item 1): the operator's inhibit, as the reading shows it, and the cause that holds `ENABLE` back.
+ */
+const STATUS_PHRASES = /INHIBITED · OPERATOR|NO IMAGE TO METER/gu;
+
+/**
+ * A note of the exposure's, its status phrases each set unbroken, so that a narrow column breaks
+ * it before a phrase and never inside one, at the middle dot least of all:
+ * `NOT AVAILABLE: the exposure is` | `INHIBITED · OPERATOR`, and `AUTO NOT AVAILABLE:` |
+ * `NO IMAGE TO METER` (decision-r07-owner-ux-signoff, item 1, as decision-r07-t19-layout item 2
+ * marks a reading's runs). Its text is the note's, unchanged.
+ */
+export function exposureNote(note: string): ReactNode {
+  return unbrokenRuns(note, STATUS_PHRASES);
+}
 
 /** An entry that is not a number, refused as one outside the span is. */
 const NOT_A_NUMBER: ExposureCommandResult = { kind: "refused", reason: "invalid_ev100" };
@@ -156,7 +177,7 @@ function ExposureCommand({ label, result, consequence, onChange }: ExposureComma
           }
           id={noteId}
         >
-          {note}
+          {exposureNote(note)}
         </span>
       )}
     </div>
@@ -418,9 +439,11 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
  * unit and automation level, `EV100 -1.0 MAN`, the camera's setting at every level (`APERTURE`,
  * `SHUTTER`, `ND`, `ISO`; R07.T13.c), the `MAN` field that enters the operator's value (R07.T13.d),
  * and the congruent pair `ENABLE` and `INHIBIT`, in the guide's order, each held back with its
- * reason where it would be refused. There is no button named `AUTO` nor one named `MAN` (the
- * guide's "Controls and commanding"); while there is no image to meter, `AUTO NOT AVAILABLE`
- * stands with `NO IMAGE TO METER`.
+ * reason where its effect already holds or it cannot act: `ENABLE` under `AUTO` and with nothing to
+ * meter, `INHIBIT` under `MAN` and under `INHIBITED · OPERATOR` (decision-r07-owner-ux-signoff,
+ * item 1). There is no button named `AUTO` nor one named `MAN` (the guide's "Controls and
+ * commanding"); while there is no image to meter, `AUTO NOT AVAILABLE` stands with
+ * `NO IMAGE TO METER`.
  *
  * @remarks
  * Display controls: the exposure is the view's own, not the ship's, so a command acts at once. The
@@ -438,7 +461,8 @@ export function ExposurePanel({
 }: ExposurePanelProps) {
   const titleId = useId();
   // `INHIBIT` shuts the automation down under `AUTO` and takes a system inhibit over, so it states
-  // its consequence there; under the operator's own inhibit it changes nothing (decision-r07-t13d).
+  // its consequence there (decision-r07-t13d); under the operator's own inhibit it is held back
+  // (decision-r07-owner-ux-signoff).
   const inhibitStates =
     exposure.kind === "auto" || (exposure.kind === "inhibited" && exposure.reason !== "operator");
   return (
@@ -457,7 +481,9 @@ export function ExposurePanel({
       </p>
       <CameraSetting triple={shownTriple(exposure)} />
       <ManualEntry exposure={exposure} onChange={onChange} />
-      {meteredEv100 === null ? <p className="view-exposure__reason">{AUTO_NOT_AVAILABLE}</p> : null}
+      {meteredEv100 === null ? (
+        <p className="view-exposure__reason">{exposureNote(AUTO_NOT_AVAILABLE)}</p>
+      ) : null}
       <div className="view-exposure__commands">
         <ExposureCommand
           label="ENABLE"

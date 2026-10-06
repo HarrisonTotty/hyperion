@@ -586,7 +586,13 @@ describe("the VIEW display", () => {
   it("says AUTO is not available while there is no image to meter", async () => {
     setup();
     await settle();
-    expect(screen.getByText("AUTO NOT AVAILABLE: NO IMAGE TO METER")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "AUTO NOT AVAILABLE: NO IMAGE TO METER",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("offers its exposure's congruent pair in the guide's order, ENABLE then INHIBIT", async () => {
@@ -891,7 +897,7 @@ describe("the VIEW display's server scene", () => {
     ]).toEqual([expect.anything(), true, expect.anything(), false, true]);
   });
 
-  it("says a camera report was refused, with the server's reason", async () => {
+  it("says a camera report was rejected, with the server's reason", async () => {
     const view = setup();
     await openUniverse(view);
     await sceneArrives(view.socket);
@@ -911,7 +917,7 @@ describe("the VIEW display's server scene", () => {
     await settle();
     view.advance(300);
     expect(
-      screen.getByText("CAMERA REPORT REFUSED: a camera is outside the scene's reach"),
+      screen.getByText("CAMERA REPORT REJECTED: a camera is outside the scene's reach"),
     ).toBeInTheDocument();
   });
 
@@ -1005,7 +1011,7 @@ describe("the VIEW display's style (R07.T8.a)", () => {
     advance(100);
     await settle();
     advance(300);
-    expect(labelBlock().includes("LIGHTING: STAR DISCS NOT RECEIVED")).toBe(true);
+    expect(labelBlock().includes("LIGHTING: NOT RECEIVED")).toBe(true);
   });
 });
 

@@ -3540,6 +3540,14 @@ body {
 }
 
 /*
+ * The button keeps its label's width: a held-back reason wider than the room beside it wraps there
+ * rather than squeeze the button under its label (`.control`'s 2rem least width lets it shrink).
+ */
+.view-exposure__command > .control {
+  flex: none;
+}
+
+/*
  * A held-back reason or `INHIBIT`'s consequence beside its button has no bottom margin, so that its
  * text centres on the button's label (decision-r07-t19b-exposure-fit, item 5); the standing line
  * above the commands keeps its 0.5rem.
@@ -3727,7 +3735,9 @@ body {
 
 /*
  * A run of a reading that never breaks: a quantity with its sign, unit, band or prefix, a star
- * limit with its kind, `UT` with its first group, a clock reading (decision-r07-t19-layout, 2).
+ * limit with its kind, `UT` with its first group, a clock reading (decision-r07-t19-layout, 2);
+ * and in an exposure note, a status phrase, `INHIBITED · OPERATOR` or `NO IMAGE TO METER`
+ * (decision-r07-owner-ux-signoff, item 1).
  */
 .view-label__run {
   white-space: nowrap;

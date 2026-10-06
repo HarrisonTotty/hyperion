@@ -121,17 +121,18 @@ function staleAnnunciation(reason: SceneStaleReason): SceneAnnunciation {
 }
 
 /**
- * The line for a camera report the server did not accept: refused, with its reason, as a refusal;
- * unanswered, as a fault.
+ * The line for a camera report the server did not accept, in the ship's words for a request's
+ * outcomes (decision-r07-owner-ux-signoff): rejected, with its reason, as a refusal; timed out, as
+ * a fault.
  */
 export function cameraAnnunciation(fault: CameraReportFault): SceneAnnunciation {
   let shown: SceneAnnunciation;
   switch (fault.kind) {
     case "refused":
-      shown = { text: `CAMERA REPORT REFUSED: ${fault.reason}`, standing: "refused" };
+      shown = { text: `CAMERA REPORT REJECTED: ${fault.reason}`, standing: "refused" };
       break;
     case "timed_out":
-      shown = { text: "CAMERA REPORT UNANSWERED", standing: "fault" };
+      shown = { text: "CAMERA REPORT TIMED OUT", standing: "fault" };
       break;
   }
   return shown;
