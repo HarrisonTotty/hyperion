@@ -55,6 +55,8 @@ export interface ControllerFrame {
   readonly rafTimestampMs: number;
   /** Script time 0's `requestAnimationFrame` timestamp, ms. */
   readonly scriptStartMs: number;
+  /** The callback's start, `performance.now()` ms: its `spike.frame` span's start. */
+  readonly callbackStartMs: number;
   readonly callbackMs: number;
   readonly passesSubmitted: number;
   readonly patchesHard: number;

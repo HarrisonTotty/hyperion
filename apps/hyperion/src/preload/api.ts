@@ -160,6 +160,12 @@ export interface SpikeFrameSeries {
    * the row is a lower bound; the trace's split gives the rest.
    */
   readonly ourCodeMs: ReadonlyArray<number>;
+  /**
+   * Each frame's callback start, `performance.now()` ms: the start its `spike.frame` span receives,
+   * which the trace carries exactly as the span's `args.startTime`. The main process matches the
+   * trace's spans to the frames by it (R05.T14.h, decision-r05-trace-windows-2.md, addendum A).
+   */
+  readonly callbackStartsMs: ReadonlyArray<number>;
   readonly passes: ReadonlyArray<SpikePassSeries>;
 }
 

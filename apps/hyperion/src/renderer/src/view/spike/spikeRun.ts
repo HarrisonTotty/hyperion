@@ -227,6 +227,11 @@ export interface SpikeFrameSample {
    */
   readonly scriptStartMs: number;
   /**
+   * The frame callback's start, `performance.now()` ms: the start its {@link FRAME_MEASURE} span
+   * receives, which the trace carries as the span's `args.startTime` (R05.T14.h).
+   */
+  readonly callbackStartMs: number;
+  /**
    * The frame callback's own time, ms: its {@link FRAME_MEASURE} span's duration, the same two
    * `performance.now()` readings.
    */
@@ -536,6 +541,7 @@ export class SpikeRun {
       scriptTimeS: tS,
       rafTimestampMs: input.nowMs,
       scriptStartMs: startMs,
+      callbackStartMs: started,
       callbackMs: ended - started,
       // The terrain, the atmosphere's composite, the display and the two instruments.
       passesSubmitted: 5,

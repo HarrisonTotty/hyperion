@@ -5,7 +5,14 @@ import { format, resolveConfig } from "prettier";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DescentSpikeReport } from "../preload/api";
-import { PROFILED, recordingOf, UNPROFILED, windowFile, windowTrace } from "./fixtures/traces";
+import {
+  callbackStartsOf,
+  PROFILED,
+  recordingOf,
+  UNPROFILED,
+  windowFile,
+  windowTrace,
+} from "./fixtures/traces";
 import type { Measured } from "./measured";
 import { type TraceFigures, TraceReducer } from "./reduceTrace";
 import {
@@ -109,6 +116,7 @@ function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeRepo
       scriptTimesS,
       rafIntervalsMs,
       ourCodeMs: scriptTimesS.map(() => 4),
+      callbackStartsMs: callbackStartsOf(1000, scriptTimesS),
       passes: [
         { label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 6) },
         { label: "atmosphere.sky", row: "atmosphere", gpuMs: scriptTimesS.map(() => 1.5) },
@@ -720,10 +728,14 @@ describe("a results file of a windowed trace", () => {
           mainThread:
             second.mainThread === null
               ? null
-              : { ...second.mainThread, frameSpans: { startsUs: [], durationsMs: [] } },
+              : {
+                  ...second.mainThread,
+                  frameSpans: { startsUs: [], durationsMs: [], startTimesMs: [] },
+                },
         }),
-      // The second window checks the frames from 16.0 s to 29.6 s, 0.5 s inside [15.5, 30.1] s.
-      "the trace's frame spans disagree with the renderer's (273 of 273 frames)",
+      // The second window checks the frames whose callbacks start 0.5 s inside [15.5, 30.1] s:
+      // those of 16.0 s to 29.55 s, each 0.1 ms after its rAF time.
+      "the trace's frame spans disagree with the renderer's (272 of 272 frames)",
     ],
     [
       "another renderer",

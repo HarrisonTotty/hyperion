@@ -40,6 +40,11 @@ export interface FrameSample {
   readonly scriptTimeS: number;
   /** The `requestAnimationFrame` timestamp, ms. */
   readonly rafTimestampMs: number;
+  /**
+   * The frame callback's start, `performance.now()` ms: its `spike.frame` span's start, which
+   * the trace carries as the span's `args.startTime`.
+   */
+  readonly callbackStartMs: number;
   /** The main thread's time in the frame callback, engine submission included, ms. */
   readonly callbackMs: number;
   /** Passes the frame submitted. */
@@ -113,6 +118,7 @@ export class SpikeMetrics {
   readonly #scriptTimesS: number[] = [];
   readonly #rafIntervalsMs: number[] = [];
   readonly #ourCodeMs: number[] = [];
+  readonly #callbackStartsMs: number[] = [];
   /** Each frame's last engine frame number, ascending. */
   readonly #lastEngineFrame: number[] = [];
   readonly #passes = new Map<string, Array<number | null>>();
@@ -155,6 +161,7 @@ export class SpikeMetrics {
       this.#lastRafMs === undefined ? 0 : sample.rafTimestampMs - this.#lastRafMs,
     );
     this.#ourCodeMs.push(sample.callbackMs);
+    this.#callbackStartsMs.push(sample.callbackStartMs);
     for (const series of this.#passes.values()) {
       series.push(null);
     }
@@ -274,6 +281,7 @@ export class SpikeMetrics {
         scriptTimesS: [...this.#scriptTimesS],
         rafIntervalsMs: [...this.#rafIntervalsMs],
         ourCodeMs: [...this.#ourCodeMs],
+        callbackStartsMs: [...this.#callbackStartsMs],
         passes: [...this.#passes].map(([label, gpuMs]) => ({
           label,
           row: this.#options.rowOf(label),

@@ -146,7 +146,7 @@ describe("the spike's run", () => {
     run.dispose();
   });
 
-  it("spans each frame's whole callback once, as its callbackMs, and keeps no entry of it", async () => {
+  it("spans each frame's whole callback once, from its callbackStartMs for its callbackMs, and keeps no entry of it", async () => {
     const measure = vi.spyOn(performance, "measure");
     const { run, samples } = await made();
     run.frame(input(0));
@@ -158,11 +158,17 @@ describe("the spike's run", () => {
       typeof options === "object" &&
       typeof options.start === "number" &&
       typeof options.end === "number"
-        ? [options.end - options.start]
+        ? [{ startMs: options.start, durationMs: options.end - options.start }]
         : [],
     );
     expect(spans).toHaveLength(2);
-    expect(spans).toEqual(samples.map(({ callbackMs }) => callbackMs));
+    // The same numbers the measure received, which the trace carries as its `args.startTime`.
+    expect(spans).toEqual(
+      samples.map(({ callbackStartMs, callbackMs }) => ({
+        startMs: callbackStartMs,
+        durationMs: callbackMs,
+      })),
+    );
   });
 
   it("names the frame's span as the main process's reducer reads it", () => {

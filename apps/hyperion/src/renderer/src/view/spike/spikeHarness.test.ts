@@ -35,6 +35,7 @@ async function device(gpu: GPU): Promise<GPUDevice> {
 function frame(scriptTimeS: number): {
   scriptTimeS: number;
   rafTimestampMs: number;
+  callbackStartMs: number;
   callbackMs: number;
   passesSubmitted: number;
   patchesHard: number;
@@ -43,6 +44,7 @@ function frame(scriptTimeS: number): {
   return {
     scriptTimeS,
     rafTimestampMs: 1000 * scriptTimeS,
+    callbackStartMs: 1000 * scriptTimeS + 0.1,
     callbackMs: 2,
     passesSubmitted: 5,
     patchesHard: 300,

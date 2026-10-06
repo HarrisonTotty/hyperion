@@ -23,6 +23,11 @@ describe("the spike report's check", () => {
   it.each<[string, (r: DescentSpikeReport) => unknown]>([
     ["a non-object", () => "report"],
     ["a series of another length", (r) => ({ ...r, frames: { ...r.frames, ourCodeMs: [4] } })],
+    [
+      "callback starts of another length",
+      (r) => ({ ...r, frames: { ...r.frames, callbackStartsMs: [1000.1] } }),
+    ],
+    ["no callback starts", (r) => ({ ...r, frames: { ...r.frames, callbackStartsMs: undefined } })],
     ["a non-finite figure", (r) => ({ ...r, uploadBytes: Number.NaN })],
     ["an unknown timer", (r) => ({ ...r, timer: "fast" })],
     [

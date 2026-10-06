@@ -42,6 +42,7 @@ function sample(
     engineFrame,
     scriptTimeS,
     rafTimestampMs: 1000 + scriptTimeS * 1000,
+    callbackStartMs: 1000.1 + scriptTimeS * 1000,
     callbackMs: 3,
     passesSubmitted: 4,
     patchesHard: 100,
@@ -63,12 +64,13 @@ describe("the spike's metrics", () => {
   it("records each frame's script time, rAF interval and callback time in order", () => {
     const metrics = new SpikeMetrics(OPTIONS);
     metrics.frame(sample(7, 0));
-    metrics.frame(sample(8, 0.5, { callbackMs: 5 }));
+    metrics.frame(sample(8, 0.5, { callbackMs: 5, callbackStartMs: 1502.3 }));
     metrics.frame(sample(9, 1.25));
     const { frames } = metrics.report(EXTRA);
     expect(frames.scriptTimesS).toEqual([0, 0.5, 1.25]);
     expect(frames.rafIntervalsMs).toEqual([0, 500, 750]);
     expect(frames.ourCodeMs).toEqual([3, 5, 3]);
+    expect(frames.callbackStartsMs).toEqual([1000.1, 1502.3, 2250.1]);
   });
 
   it("aligns pass times with their frame by the engine's frame number, ns to ms", () => {

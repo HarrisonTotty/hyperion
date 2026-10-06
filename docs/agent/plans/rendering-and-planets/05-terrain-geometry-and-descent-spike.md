@@ -2276,21 +2276,41 @@ version 4`.
 - `trimProtoTrace(bytes, untilUs)` keeps each sequence's packets from its first up to `untilUs`. A
   sequence's incremental state is a prefix, so the result is a valid trace. It is used to cut the
   fixtures.
+- The renderer's report gains `callbackStartsMs`, each frame's callback start: `SpikeRun`'s
+  `started`, the start its `spike.frame` measure receives. `mergeTraceWindows`'s frame-span check
+  matches spans to frames by identity.
+  - A frame whose callback start lies at least 0.5 s inside its window has exactly one span whose
+    `args.startTime` equals it within 10⁻⁶ ms.
+  - That span's duration is within 0.25 ms of its `ourCodeMs` (`FRAME_SPAN_TOLERANCE_MS`): two of
+    `performance.now()`'s 0.1 ms quanta, since Chromium may write the endpoints unclamped.
+  - A span in that interior that matches no frame fails the window, unless it starts after the
+    series' last callback (the page draws on after the run).
+  - The last frame is checked. `FRAME_SPAN_EARLY_MS` goes.
+  - Files beyond the decoder's: `view/spike/spikeRun.ts`, `view/spike/metrics.ts`,
+    `preload/api.ts`, `main/spikeReport.ts`, `main/fixtures/spikeReport.ts`,
+    `main/traceWindows.ts`, `main/fixtures/traces.ts`, and their tests.
 - **Fixtures** (each ≤ 400 KB, the hook on), recorded from Electron 44.4.3 on the RTX 3080. They
-  come from hidden smokes, with the handoff's `experiment.patch` applied for the recording only and
-  never committed (CDP proto, window files kept, report dumped):
-  - `main/fixtures/spike.pftrace`: the middle window of a timed smoke, trimmed to about 0.5 s;
-  - `main/fixtures/spike-profiled.pftrace`: the same from a `--trace-profile on` smoke;
-  - `main/fixtures/spike.pftrace.report.json`: the timed smoke's report, cut to the fixture's
-    frames (`scriptStartMs`, its window, each frame's script time and `ourCodeMs`).
+  come from short hidden partial runs (low, seed 7, ended at 30 s by the handoff's
+  `experiment.patch`, applied for the recording only and never committed: CDP proto, window files
+  kept, report dumped), since a smoke hands the main process no report
+  (`decision-r05-trace-windows-2.md`, addendum A):
+  - `main/fixtures/spike.pftrace`: the timed partial's window, trimmed to about 0.5 s;
+  - `main/fixtures/spike-profiled.pftrace`: the same from a `--trace-profile on` partial;
+  - `main/fixtures/spike.pftrace.report.json`: the timed partial's report, cut to the fixture's
+    frames (`scriptStartMs`, its window, and each frame's script time, `ourCodeMs` and
+    `callbackStartsMs`).
+
+  The timed fixture holds at least one GC slice on the renderer.
 
   The test file records the provenance (date, versions, commands).
 
 - **Tests** (on the fixtures):
   - the reducer finds the renderer, its `CrRendererMain`, the GPU process and its `CrGpuMain`;
   - **against the renderer's own series:** one `spike.frame` span for each of the report's frames
-    in the fixture, each duration equal to its `ourCodeMs` within 0.01 ms, each start within its
-    frame;
+    in the fixture, its `args.startTime` equal to the frame's `callbackStartsMs` within 10⁻⁶ ms and
+    its duration within 0.25 ms of its `ourCodeMs`. The test file records whether the trace's
+    endpoints are the values passed or unclamped, and the fixture's largest deviation. Any frame
+    beyond 0.25 ms, or any identity that fails, stops the task for the orchestrator;
   - the window's clock offset agrees within 0.2 ms over its begins;
   - **across sequences:** each `spike.frame` span starts within 0–17 ms after a `PipelineReporter`
     begin on the busiest compositor;
@@ -2302,7 +2322,10 @@ version 4`.
   - `decode(trimProtoTrace(f, t))` equals `decode(f)` cut at t, per sequence;
   - decoding with an 8-KiB read size equals decoding with the default;
   - a truncated packet fails with its offset;
-  - the JSON fixture still reduces through the JSON reader.
+  - the JSON fixture still reduces through the JSON reader;
+  - the identity check fails a window for a missing span, a duplicated span, a span whose duration
+    is off by 0.3 ms, and an unmatched span inside the interior; it ignores a span that starts after
+    the last callback; it passes a callback that began after the next frame's rAF time.
 - **Recorded, not a test (as built):**
   - `trace_processor_shell` v58.2 (the handoff's sha256-checked copy) on the untrimmed window. Per
     thread, the counts and summed durations of `RunTask`, `GPUTask`, `PipelineReporter`, `MinorGC`
@@ -3708,6 +3731,109 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   - _Review._ typescript-reviewer found no must-fix. Its should-fix, that the series' last frame
     could collect the spans drawn after the run, and its three considers are applied. rust-reviewer
     found nothing to fix, and its two considers are applied.
+
+- **Deviations in T14.h, as built** (2026-10-05, the protobuf trace's decoder;
+  `decision-r05-trace-windows-2.md` and its addendum A).
+  - _Where things are._ `main/traceProto.ts` holds `ProtoTraceDecoder` (one packet at a time,
+    `DecodedPacket` with its sequence, its time on the trace's clock and its events),
+    `tracePackets`, `decodeProtoPackets`, `decodeProtoTrace`, `readProtoTraceBatches` (one array of
+    events a read, 4 MiB by default, `DEFAULT_PROTO_READ_BYTES`), `readProtoTraceEvents` and
+    `trimProtoTrace`. Its field numbers are Perfetto's at
+    `9c7ce42050379be8c24a270f395e00c7347965cb`, the revision Chromium 152.0.7977.130's `DEPS` pins
+    (`protos/perfetto/trace/…` and `protos/third_party/chromium/chrome_track_event.proto`,
+    `chrome_enums.proto`).
+    `main/reduceTrace.ts` adds `readTraceFileEvents`, which reads a file by its first byte (`{` or
+    `[` JSON, `0x0a` protobuf, none for an empty file, and any other byte fails naming the file),
+    and `reduceTraceFile` reduces a protobuf trace a read at a time, since one asynchronous step an
+    event cost more than reducing it (2.4 s against 1.0 s for the timed window).
+    `MainThreadFigures.frameSpans` is a `FrameSpanList`, whose `startTimesMs` keeps each begin's
+    `args.startTime`. `main/traceWindows.ts` has `FRAME_SPAN_IDENTITY_MS` (10⁻⁶),
+    `FRAME_SPAN_TOLERANCE_MS` (0.25), `FrameSpanReport`, and
+    `frameSpanFailure(trace, time, report)`, which takes no clock offset. A window's reason adds
+    "; k spans match no frame" for strays, and a span without a `startTime` is one. The
+    renderer's `SpikeFrameSample`, `ControllerFrame` and `FrameSample` carry `callbackStartMs`, and
+    the report's `frames.callbackStartsMs`, which `readDescentSpikeReport` requires as long as the
+    frames.
+  - _What Chromium 152 writes._ Every slice is typed, with no `legacy_event`, except V8's `Profile`
+    and `ProfileChunk` samples (phase `P`, unscoped IDs, `track_uuid` 0, `data` as a legacy JSON
+    value) and some `C` counters. Each sequence's timestamps are on its incremental µs clock (64)
+    and its absolute twin (65), rebased by its snapshots against `MONOTONIC`, the primary clock.
+    The events written after the fact carry explicit `MONOTONIC` timestamps: the user-timing spans
+    and the `PipelineReporter`s. Each `performance.measure` span has its own track, a child of the
+    main thread's track. Each `PipelineReporter` has its own track, a child of the renderer's
+    process track, with its state in `ChromeTrackEvent.frame_reporter` (extension 1075). The
+    renderer's thread IDs are its sandbox's (1, 2, …). Busy sequences clear their incremental
+    state every 0.5 s.
+  - _Slices on other tracks than a thread's_ become async begins and ends, as `trace_processor`'s
+    JSON conversion writes them. So the GC states V8 writes on child tracks of a thread
+    (`Scavenge`, `Marking`, `ObservablePause`) are not GC pauses: only thread-track slices are.
+  - _Addendum A's stop conditions did not fire._ On the untrimmed windows, the timed run's 1,753
+    frames have 1,752 spans by identity (its first callback ran before the trace began) and the
+    profiled run's 1,619 have 1,618, with no span left over. The largest |duration − `ourCodeMs`|
+    is 0.0010 ms in both. **Chromium writes the endpoints as the values passed** (clamped to
+    0.1 ms), within 0.0010 ms, not unclamped. The fixture's test pins both.
+  - _The fixtures' cuts._ The window's first 0.3 s are the page's start-up: GC, slow frames, and
+    reporters written after the cut. The ruling's tests fail there. A steady-state 0.5 s is about
+    410 KB timed and 845 KB profiled. So `trimProtoTrace(bytes, untilUs, fromUs?)` gains an
+    optional start. Each sequence is then kept from its first packet at or after it that clears
+    its state, which re-sends its interning, clocks and tracks.
+    - `spike.pftrace` is the timed window from 20.0 to 20.5 s after its first event: 388,210 B,
+      27 frames, two `MinorGC` and one `MajorGC` on the main thread.
+    - `spike-profiled.pftrace` is the profiled window's first 0.21 s: 357,362 B, a prefix, since
+      only a window's start holds the CPU profiles' `Profile` events. 0.21 s is what 400 KB holds.
+    - The windows were 24,584,692 B (2.48 % of the buffer, no data loss) and 50,582,974 B
+      (5.19 %), from two hidden partial runs of 43 s and 49 s under an 8 GB cap, with no new
+      coredump.
+  - _Tests reworded to what the fixtures can show._
+    - "Inside a `RunTask` within 1 µs": the end within 1 µs, but the start within 0.25 ms. The
+      start the page passed is clamped, so it falls up to 127 µs before its task (p99 102 µs) in
+      the timed window.
+    - "`sampledMs` within 10 % of the fixture's main-thread span": of the span the main thread was
+      sampled over, from the profile's start plus its first delta to its last chunk. V8 took the
+      first sample 95 ms after the profile's start, itself 90 ms into the window, so the samples
+      cover only the fixture's last 24 ms.
+    - The cross-sequence check covers the spans at least 100 ms before the fixture's end, since a
+      frame's reporter is written at its presentation.
+    - The GC slices are complete with durations ≥ 0, since V8's phases are timed in whole µs (4 of
+      372 on the renderer are 0 µs long). The pauses and `GPUTask`s are positive.
+    - The trim test compares with `decodeProtoPackets`' packets cut per sequence.
+    - Hand-made traces test the start cut, skipped fields, a known name in an unknown encoding,
+      and a packet that is not one.
+  - _The oracle_ (`trace_processor_shell` v58.2, development only), on both untrimmed windows.
+    - Per process and thread, the counts and summed durations of `RunTask`, `GPUTask`, `MinorGC`,
+      `MajorGC`, `WebGPU` and `VulkanQueueSubmitHook` equal the decoder's to the nanosecond, in
+      all 23 and 25 groups.
+    - The `PipelineReporter` counts are equal (3,549 and 3,273). But 2,353 of the timed window's
+      reporters are 1–11 µs longer in it: it sorts a track's ends by time, so it ends a reporter at
+      a child `Swap`'s end written 1 µs after the reporter's own. The decoder pairs ends in the
+      writer's order, as the ruling's stack per track does.
+  - _Speed and memory_ (provisional, under other lanes' load).
+    - At a load of 4–12, the timed window (24.6 MB) frames in 0.15 s, decodes in 0.75 s and reduces
+      in 1.0 s at a peak of 315 MB, about 25 MB/s.
+    - At a load of 28, it reduces in 1.9 s, and the profiled window (50.6 MB) in 3.8 s, both at
+      about 310 MB, so 13 MB/s.
+    - That projects to 0.6–1.2 min for a timed run's windows (about 0.9 GB) and 1.3–2.6 min for a
+      profiled run's (about 2 GB), inside T14.f's 5 min. The decoder holds one read and its
+      events at a time; the reducer's intervals grow with the window, as with JSON.
+  - _Files beyond the task's list:_ `view/spike/spikeController.ts` (`ControllerFrame`), and the
+    tests of the harness, the controller, the results and the report.
+  - _Beyond the ruling's decoder._ A packet marked `previous_packet_dropped` other than its
+    sequence's first fails the file, since a lost end would pair its begin with another slice's.
+    In both windows the mark is on each sequence's first packet alone. A framing error other than
+    a short read fails at once, rather than waiting for bytes that cannot mend it.
+  - _A crash after the recording._ The session crashed and the machine rebooted after both runs
+    had finished (exit 0). The fixtures, cut again from the kept windows with the final decoder,
+    are byte-identical, and the identity and oracle figures above are those of the final decoder.
+  - _Review._ typescript-reviewer found no must-fix. Its five should-fix are applied:
+    - `signed()` decodes negative `int64`s exactly (−1 had come out 0);
+    - a framing error other than a short read fails at once;
+    - the dispatch tests remove every temporary directory;
+    - the fixture tests with several claims are split;
+    - the exported decoders document their `@throws`.
+
+    Its three considers are applied too: the lost-packet failure, a test pinning the decoder's
+    copy of the reducer's names to `GPU_PROCESS_SLICES`, and a hand-made trace read a byte at a
+    time.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

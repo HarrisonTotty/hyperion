@@ -132,6 +132,7 @@ function frame(scriptTimeS: number, scriptStartMs = 0) {
     scriptTimeS,
     rafTimestampMs: scriptStartMs + scriptTimeS * 1000,
     scriptStartMs,
+    callbackStartMs: scriptStartMs + scriptTimeS * 1000 + 0.1,
     callbackMs: 3,
     passesSubmitted: 5,
     patchesHard: 100,
