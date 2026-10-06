@@ -2,7 +2,16 @@
  * The `f64` oracles that the lighting and shading closed forms are tested against (plan R07,
  * Design notes 5 and 6): slow, dense numerical integrals, never called by the renderer.
  */
-import { circleOverlapArea } from "./annuli";
+import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import {
+  annulusEdges,
+  annulusVisibleFraction,
+  circleOverlapArea,
+  type LimbDarkenedDisc,
+  type Occluder,
+  occultationFrom,
+} from "./annuli";
+import { gaussLegendre } from "./quadrature";
 
 /** A reflectance I/F as a function of μ₀, μ and the phase angle, rad. */
 export type Reflectance = (mu0: number, mu: number, phaseRad: number) => number;
@@ -42,42 +51,6 @@ export function discIntegral(reflectance: Reflectance, phaseRad: number, nodes =
     sum += (w[i] ?? 0) * inner * (Math.PI / 2);
   }
   return (sum * halfLon) / Math.PI;
-}
-
-/** A Gauss–Legendre rule on [−1, 1]. */
-export interface GaussLegendreRule {
-  /** The nodes. */
-  readonly x: Float64Array;
-  /** The weights, summing to 2. */
-  readonly w: Float64Array;
-}
-
-/** Gauss–Legendre nodes and weights on [−1, 1], by Newton's method on Pₙ. */
-export function gaussLegendre(n: number): GaussLegendreRule {
-  const x = new Float64Array(n);
-  const w = new Float64Array(n);
-  for (let i = 0; i < n; i += 1) {
-    let z = Math.cos((Math.PI * (i + 0.75)) / (n + 0.5));
-    let derivative = 0;
-    for (let iteration = 0; iteration < 100; iteration += 1) {
-      let p0 = 1;
-      let p1 = 0;
-      for (let k = 1; k <= n; k += 1) {
-        const p2 = p1;
-        p1 = p0;
-        p0 = ((2 * k - 1) * z * p1 - (k - 1) * p2) / k;
-      }
-      derivative = (n * (z * p0 - p1)) / (z * z - 1);
-      const step = p0 / derivative;
-      z -= step;
-      if (Math.abs(step) < 1e-15) {
-        break;
-      }
-    }
-    x[i] = z;
-    w[i] = 2 / ((1 - z * z) * derivative * derivative);
-  }
-  return { x, w };
 }
 
 /** A star's intensity across its disc, I(μ) ÷ I(1), μ the cosine at the star's surface. */
@@ -217,4 +190,110 @@ export function eclipseIntegralVisibleFraction(
 /** A power-2 law I(μ) ÷ I(1) = 1 − c (1 − μ^α) as a {@link LimbProfile}. */
 export function power2Profile(c: number, alpha: number): LimbProfile {
   return (mu) => 1 - c * (1 - mu ** alpha);
+}
+
+/** One far point's view of a body: its unit direction from the body, the law's L and the whole. */
+export interface FarView {
+  readonly towards: Vec3;
+  readonly share: number;
+  /** ∫ (I/F) μ dS ÷ A f(α) over the lit, visible body: π R² [L + ⅔ (1 − L)] Φ_shape(α), m². */
+  readonly totalM2: number;
+}
+
+/**
+ * The fraction of a body's reflected light towards far points that one occluder's shadow leaves,
+ * by brute force over the surface (plan R07, T10.b's oracle): V̄ = 1 − ∫ (1 − V) (I/F) μ dS ÷
+ * ∫ (I/F) μ dS, one channel's eclipse term V taken at each surface point itself, never along a
+ * shadow axis.
+ *
+ * @remarks
+ * The midpoint rule over `side` × `side` points in (θ, φ), θ the angle of the normal from the
+ * star's direction (μ₀ = cos θ, the lit hemisphere) and φ the azimuth about it,
+ * dS = R² sin θ dθ dφ, over the region whose projection along the star's direction is the
+ * occluder's penumbra there (its exact tangent cone at the plane through the centre, widened by
+ * the axis's drift across the lit depth). At each point V is the eclipse term (`occultationFrom` and the K annuli,
+ * `eclipseVisible`'s arithmetic) and (I/F) μ ∝ [L · 2μ₀ ÷ (μ₀ + μ) + (1 − L) μ₀] μ for μ > 0,
+ * continuous over the surface. Each view's whole is its `totalM2`.
+ *
+ * @param body - The body's centre and radius, m, a sphere.
+ * @param views - The far points, each with its law's L; V is shared by all of them.
+ * @param side - Points along each coordinate.
+ */
+export function discEclipseBruteForce(
+  star: LimbDarkenedDisc,
+  body: { readonly centreM: Vec3; readonly radiusM: number },
+  occluder: Occluder,
+  views: ReadonlyArray<FarView>,
+  k: number,
+  side = 1000,
+): number[] {
+  const radius = body.radiusM;
+  const starM = sub(star.centreM, body.centreM);
+  const d = norm(starM);
+  const s = scale(starM, 1 / d);
+  const seed = Math.abs(s.x) < 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+  const e1 = normalise(cross(seed, s));
+  const e2 = cross(s, e1);
+  const occluderM = sub(occluder.centreM, body.centreM);
+  const relative = { centreM: occluderM, radiusM: occluder.radiusM };
+  const starSphere = { centreM: starM, radiusM: star.radiusM };
+  const annuli = annulusEdges(star.limbC, star.limbAlpha, k);
+  // The penumbra's disc about the axis's crossing of the plane through the centre.
+  const axis = sub(occluderM, starM);
+  const axisLength = norm(axis);
+  const t = -d / dot(axis, s);
+  const crossing = add(starM, scale(axis, t));
+  const behind = (t - 1) * axisLength;
+  const sinGamma = (star.radiusM + occluder.radiusM) / axisLength;
+  const penumbra = (occluder.radiusM + behind * sinGamma) / Math.sqrt(1 - sinGamma * sinGamma);
+  const unitAxis = scale(axis, 1 / axisLength);
+  const reach = penumbra + (norm(cross(unitAxis, s)) / Math.abs(dot(unitAxis, s))) * radius;
+  const b = Math.hypot(dot(crossing, e1), dot(crossing, e2));
+  const rhoLow = Math.max(0, b - reach);
+  const rhoHigh = Math.min(radius, b + reach);
+  if (!(rhoLow < rhoHigh)) {
+    return views.map(() => 1);
+  }
+  const theta0 = Math.asin(rhoLow / radius);
+  const theta1 = Math.asin(rhoHigh / radius);
+  const towardsAxis = Math.atan2(dot(crossing, e2), dot(crossing, e1));
+  const halfWidth = b > reach ? Math.asin(reach / b) : Math.PI;
+  const phi0 = towardsAxis - halfWidth;
+  const dTheta = (theta1 - theta0) / side;
+  const dPhi = (2 * halfWidth) / side;
+  const deficits = views.map(() => 0);
+  for (let i = 0; i < side; i += 1) {
+    const theta = theta0 + (i + 0.5) * dTheta;
+    const mu0 = Math.cos(theta);
+    const sinTheta = Math.sin(theta);
+    const area = radius * radius * sinTheta * dTheta * dPhi;
+    for (let j = 0; j < side; j += 1) {
+      const phi = phi0 + (j + 0.5) * dPhi;
+      const u = sinTheta * Math.cos(phi);
+      const v = sinTheta * Math.sin(phi);
+      const normal = vec3(
+        u * e1.x + v * e2.x + mu0 * s.x,
+        u * e1.y + v * e2.y + mu0 * s.y,
+        u * e1.z + v * e2.z + mu0 * s.z,
+      );
+      const occultation = occultationFrom(starSphere, scale(normal, radius), relative);
+      if (occultation === null) {
+        continue;
+      }
+      const hidden =
+        occultation === "inside"
+          ? 1
+          : 1 - annulusVisibleFraction(annuli, occultation.ratio, occultation.separation);
+      for (let n = 0; n < views.length; n += 1) {
+        const view = views[n];
+        const mu = view === undefined ? 0 : dot(normal, view.towards);
+        if (view === undefined || mu <= 0) {
+          continue;
+        }
+        const reflected = ((view.share * 2 * mu0) / (mu0 + mu) + (1 - view.share) * mu0) * mu;
+        deficits[n] = (deficits[n] ?? 0) + hidden * reflected * area;
+      }
+    }
+  }
+  return views.map((view, n) => 1 - (deficits[n] ?? 0) / view.totalM2);
 }

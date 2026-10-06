@@ -12,6 +12,7 @@ import { discIntegratedPhase, geometricAlbedo } from "../appearance/phase";
 import { V0_ILLUMINANCE_LX } from "../photometry/magnitude";
 import { AU_M } from "../scenes/kept";
 import { DISC_ANNULI_HIGH } from "./annuli";
+import { discEclipseVisible } from "./discEclipse";
 import type { PlacedLight } from "./hostLights";
 import { CHANNEL_LUMINANCE, photopicIlluminance, starIlluminance } from "./illuminance";
 import type { LightingBody } from "./occluders";
@@ -110,9 +111,10 @@ describe("planetshine's illuminance", () => {
     // The Moon between Sun and Earth, so Earth is full from it. Earth's p is the fixture's,
     // Robinson 2026's (PSJ 7, 12, eq. 14: f = 0.23 in his band ratios 0.277 : 0.226 : 0.221),
     // (r, g, b) 0.210, 0.215 and 0.263; at full phase only p counts (decision-r07-earth-albedo,
-    // R07.T4.d). The Moon's shadow on Earth, a smaller body's, is left out.
+    // R07.T4.d). There the Moon's own shadow falls on Earth, a central solar eclipse, so the Moon
+    // is left out of the lit bodies here, as no occluder (the eclipse is tested below).
     const moon = moonAt(0);
-    const [source, ...rest] = sourcesOf(moon, [moon, EARTH], [SUN], 2);
+    const [source, ...rest] = sourcesOf(moon, [EARTH], [SUN], 2);
     expect(rest).toHaveLength(0);
     const lux = photopicIlluminance(source?.illuminance ?? [0, 0, 0]);
     expect(Math.abs(lux / fullPhaseLx(EARTH, 6.371e6, EARTH_MOON_M) - 1)).toBeLessThan(1e-9);
@@ -126,7 +128,7 @@ describe("planetshine's illuminance", () => {
 
   it("places Earth's source on the Moon–Earth line at its angular radius", () => {
     const moon = moonAt(0);
-    const [source] = sourcesOf(moon, [moon, EARTH], [SUN], 2);
+    const [source] = sourcesOf(moon, [EARTH], [SUN], 2);
     expect(source?.body).toBe(EARTH.id);
     expect(source?.direction.x).toBeCloseTo(1, 12);
     expect(source?.distanceM).toBeCloseTo(EARTH_MOON_M, 3);
@@ -154,9 +156,10 @@ describe("planetshine's illuminance", () => {
     expect(photopic(EARTH, [EARTH, moonAt(178)])).toBeGreaterThan(0.29);
   });
 
-  it("lights Io at inferior conjunction with about 70 lx of Jupiter-shine, Io's shadow left out", () => {
+  it("lights Io at inferior conjunction with about 70 lx of Jupiter-shine, less Io's own shadow", () => {
     // Jupiter 6.487% oblate (NASA's 71,492 and 66,854 km at 1 bar), its pole across the line; p from
-    // Mallama et al. 2017, defined against π a c. Io's own shadow lies on Jupiter's centre.
+    // Mallama et al. 2017, defined against π a c. Io's own shadow lies on Jupiter's centre, which
+    // takes 1.5 (R_Io ÷ √(a c))² of the light, 0.10% (decision-r07-earth-albedo, Q2).
     const jupiter: ReflectingBody = {
       id: "0200080020000000.0005",
       centreM: vec3(JUPITER_ORBIT_M, 0, 0),
@@ -174,13 +177,82 @@ describe("planetshine's illuminance", () => {
     const lux = photopic(io, [io, jupiter]);
     expect(lux).toBeGreaterThan(70 * 0.9);
     expect(lux).toBeLessThan(70 * 1.1);
-    // The spheroid's integral meets the closed form over √(a c) to its quadrature's 10⁻³.
+    // The spheroid's integral meets the closed form over √(a c) to its quadrature's 10⁻³, once Io's
+    // shadow is taken off; that is the lit bodies' order of size.
     const closed = fullPhaseLx(jupiter, Math.sqrt(7.1492e7 * 6.6854e7), IO_ORBIT_M);
-    expect(Math.abs(lux / closed - 1)).toBeLessThan(1e-3);
+    const clear = photopic(io, [jupiter]);
+    expect(Math.abs(clear / closed - 1)).toBeLessThan(1e-3);
+    const shadowShare = 1.5 * (1.8215e6 / Math.sqrt(7.1492e7 * 6.6854e7)) ** 2;
+    expect(shadowShare).toBeCloseTo(1.04e-3, 5);
+    expect(Math.abs(1 - lux / clear - shadowShare)).toBeLessThan(0.02 * shadowShare);
     // About 6 stops below the sunlight there (Design note 7).
     const sunlight = photopicIlluminance(starIlluminance(SUN.disc, norm(io.centreM)));
     expect(Math.log2(sunlight / lux)).toBeGreaterThan(5.5);
     expect(Math.log2(sunlight / lux)).toBeLessThan(6.5);
+  });
+
+  it("takes the Moon's own shadow from earthshine in a central solar eclipse, 10.8%", () => {
+    // Earth full from the Moon, the Moon's shadow on Earth's centre: decision-r07-earth-albedo's
+    // 10.7% under a uniform Sun with parallel light (`discEclipse.test.ts`); the limb-darkened Sun
+    // at 1 au, whose shadow cone widens by (1 + x ÷ d)², takes 10.8%. Planetshine before R07.T10.b
+    // left a smaller body's shadow out.
+    const moon = moonAt(0);
+    const eclipsed = photopic(moon, [moon, EARTH]);
+    const clear = photopic(moon, [EARTH]);
+    expect(1 - eclipsed / clear).toBeGreaterThan(0.107);
+    expect(1 - eclipsed / clear).toBeLessThan(0.109);
+    // Each channel's starlight on Earth is cut by Earth's eclipse as the Moon sees it.
+    const [source] = sourcesOf(moon, [moon, EARTH], [SUN], 2);
+    const [clearSource] = sourcesOf(moon, [EARTH], [SUN], 2);
+    const towards = scale(sub(moon.centreM, EARTH.centreM), 1 / EARTH_MOON_M);
+    const visible = discEclipseVisible(
+      SUN,
+      EARTH,
+      [{ centreM: moon.centreM, radiusM: 1.7374e6 }],
+      towards,
+      EARTH.photometry.law.lommelSeeligerShare,
+      DISC_ANNULI_HIGH,
+    );
+    for (const c of [0, 1, 2] as const) {
+      expect(
+        Math.abs((source?.illuminance[c] ?? 0) / (clearSource?.illuminance[c] ?? 1) - visible[c]),
+      ).toBeLessThan(1e-12);
+    }
+  });
+
+  it("takes the eclipse per body lit: one that sees the shadowed face loses it, one that does not keeps all", () => {
+    // A third body sees Earth at 130° of phase, where the Moon's penumbra, within 34° of the
+    // sub-solar point, is out of its view: its earthshine is the clear one exactly.
+    const moon = moonAt(0);
+    const aside: ReflectingBody = {
+      ...moonAt(0),
+      id: "0200080020000000.0302",
+      centreM: add(
+        EARTH.centreM,
+        scale(vec3(-Math.cos(130 * RAD), Math.sin(130 * RAD), 0), EARTH_MOON_M),
+      ),
+    };
+    const lit = [moon, EARTH, aside];
+    expect(photopic(moon, lit)).toBeLessThan(0.9 * photopic(moon, [EARTH]));
+    const earthshine = (all: ReadonlyArray<ReflectingBody>) =>
+      sourcesOf(aside, all, [SUN], 2).find((source) => source.body === EARTH.id);
+    expect(earthshine(lit)).toBeDefined();
+    expect(earthshine(lit)).toEqual(earthshine([EARTH, aside]));
+  });
+
+  it("shadows one of a pair of equal moons by the other, as the larger-body rule never did", () => {
+    // Two Moons 10⁴ km apart on the Sun's line: the far one is in the near one's umbra but for its
+    // rim, and its light on the near one's night side all but goes.
+    const near = moonAt(0);
+    const far: ReflectingBody = {
+      ...near,
+      id: "0200080020000000.0302",
+      centreM: add(near.centreM, vec3(1e7, 0, 0)),
+    };
+    const shadowed = photopic(near, [near, far]);
+    const clear = photopic(near, [far]);
+    expect(clear).toBeGreaterThan(0);
+    expect(shadowed).toBeLessThan(0.05 * clear);
   });
 
   it("takes about nothing from a neighbour at new phase", () => {

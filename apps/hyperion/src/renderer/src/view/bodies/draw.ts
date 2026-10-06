@@ -6,12 +6,14 @@
  * {@link planLitBodies} is pure: each body's regime (`litRegimes`), the painter's sequence by power
  * (`painterOrder`), and per body the stars that light it (the brightest two past
  * `STAR_CUT_RELATIVE`), their illuminance at it (`starIlluminance`), their annuli per channel
- * (`annulusEdges`) and the bodies that may eclipse them (`occludersFor`, the two largest). A disc
+ * (`hostAnnuli`) and the bodies that may eclipse them (`occludersFor`, the two largest). A disc
  * becomes a {@link DiscRecord}; a point a sprite of flux F = E p (a ÷ Δ)² Φ(α) per channel ({@link
- * pointFlux}, the law integrated over the figure for a spheroid), cut by the same eclipse term from
- * the body's centre, laid into R02's point-spread sprite. Each body is also lit by planetshine from
- * the neighbours that light it most (`planetshineSources`, T11), on its disc per lit point and on
- * its point as a point source. A body that carries its lighting frame (`lightingFrameOf`, T10.a)
+ * pointFlux}, the law integrated over the figure for a spheroid), cut by the same eclipse averaged
+ * over the disc it would draw (`discEclipseVisible`, T10.b), laid into R02's point-spread sprite.
+ * Each body is also lit by planetshine from the neighbours that light it most
+ * (`planetshineSources`, T11), on its disc per lit point and on its point as a point source, each
+ * neighbour's starlight cut by its own eclipse as the body sees it (T10.b). A body that carries its
+ * lighting frame (`lightingFrameOf`, T10.a)
  * takes its stars, occluders and neighbours from it, retarded to the light that reaches it, while
  * the drawing keeps the apparent places. Host discs keep their
  * place in the order, where R06.T13.e's pass draws them (decision-r07-t8a, R06 coordination (d),
@@ -28,7 +30,7 @@
  * disc's limb draw at its place in the sequence, on the limb's plane. Both shade from its disc
  * record, so a promoted disc and its mesh draw the same light.
  */
-import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
+import type { BodyIdHex } from "@hyperion/protocol";
 
 import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { DiscSurface } from "../appearance/bodyAppearance";
@@ -50,8 +52,8 @@ import type {
 } from "../engine/types";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
-import { annulusEdges, type AnnulusSet, eclipseVisible } from "../lighting/annuli";
-import { type LightAtPoint, lightsAt, type PlacedLight } from "../lighting/hostLights";
+import { discEclipseVisible } from "../lighting/discEclipse";
+import { hostAnnuli, type LightAtPoint, lightsAt, type PlacedLight } from "../lighting/hostLights";
 import { type LightingBody, type LightingSphere, occludersFor } from "../lighting/occluders";
 import type { LightingFrame } from "../lighting/retarded";
 import {
@@ -192,36 +194,6 @@ export interface BodyFramePlan {
 /** A body whose centre is within this fraction of its radius is seen from inside, and not drawn. */
 const INSIDE_MARGIN = 1e-9;
 
-/** Each host's annuli per channel and K, made once per disc: the construction bisects. */
-const ANNULI = new WeakMap<
-  HostDiscDto,
-  Map<number, readonly [AnnulusSet, AnnulusSet, AnnulusSet]>
->();
-
-/** A host's annuli in display order (r, g, b) from R06's B, V, R limb laws. */
-export function hostAnnuli(
-  disc: HostDiscDto,
-  k: number,
-): readonly [AnnulusSet, AnnulusSet, AnnulusSet] {
-  let byK = ANNULI.get(disc);
-  if (byK === undefined) {
-    byK = new Map();
-    ANNULI.set(disc, byK);
-  }
-  const cached = byK.get(k);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const [b, v, r] = disc.limb;
-  const sets = [
-    annulusEdges(r.c, r.alpha, k),
-    annulusEdges(v.c, v.alpha, k),
-    annulusEdges(b.c, b.alpha, k),
-  ] as const;
-  byK.set(k, sets);
-  return sets;
-}
-
 /**
  * The stars that light a body: past the cut, the brightest {@link MAX_DISC_LIGHTS}, from its
  * lighting frame where it has one.
@@ -256,11 +228,13 @@ function occludersOf(
 }
 
 /**
- * A point body's flux at the camera per display channel, lx, each star's cut by the eclipse term
- * from the body's centre: E p (a ÷ Δ)² Φ(α) for a sphere; for a spheroid the law integrated over
- * its figure, (E ÷ π)(a ÷ Δ)² A′ f(α) K (`bodyReflection`, A′ the disc's scaled A), so that the
- * point and the disc draw one flux. Each planetshine source adds its own term, as a point source
- * at its centre's direction and never eclipsed (Design note 7).
+ * A point body's flux at the camera per display channel, lx: E p (a ÷ Δ)² Φ(α) for a sphere; for a
+ * spheroid the law integrated over its figure, (E ÷ π)(a ÷ Δ)² A′ f(α) K (`bodyReflection`, A′ the
+ * disc's scaled A), so that the point and the disc draw one flux. Each star's light is cut by its
+ * eclipse over the disc the camera sees (`discEclipseVisible`, T10.b), the share of the light the
+ * disc regime's pixels sum, so that the flux stays continuous at the 3 px switch through an
+ * eclipse. Each planetshine source adds its own term, as a point source at its centre's direction
+ * and never eclipsed (Design note 7).
  *
  * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
  * @param occluders - The bodies that may eclipse its stars (`occludersFor`).
@@ -282,24 +256,16 @@ export function pointFlux(
   const flux: [number, number, number] = [0, 0, 0];
   for (const light of lightsOf(body, hosts)) {
     const reflected = bodyReflection(body.figure, law, normalise(light.toStarM), toCamera);
-    const [bLaw, vLaw, rLaw] = light.host.disc.limb;
-    const laws = [rLaw, vLaw, bLaw] as const;
+    const visible = discEclipseVisible(
+      light.host,
+      body,
+      blockers,
+      toCamera,
+      law.lommelSeeligerShare,
+      k,
+    );
     for (const ch of [0, 1, 2] as const) {
-      const visible =
-        blockers.length === 0
-          ? 1
-          : eclipseVisible(
-              {
-                centreM: light.host.centreM,
-                radiusM: light.host.disc.radius_m,
-                limbC: laws[ch].c,
-                limbAlpha: laws[ch].alpha,
-              },
-              body.centreM,
-              blockers,
-              k,
-            );
-      flux[ch] += light.illuminance[ch] * solid * reflected[ch] * visible;
+      flux[ch] += light.illuminance[ch] * solid * reflected[ch] * visible[ch];
     }
   }
   for (const source of secondaries) {

@@ -33,10 +33,9 @@ import {
   rasteriseDisc,
   viewRay,
 } from "./discShading";
-import type { PlacedLight } from "../lighting/hostLights";
+import { hostAnnuli, type PlacedLight } from "../lighting/hostLights";
 import {
   type BodyFrameOptions,
-  hostAnnuli,
   LitBodyRenderer,
   type LitBodyInput,
   planLitBodies,
@@ -573,12 +572,13 @@ describe("an eclipse", () => {
     expect(shadowed / free).toBeGreaterThan(0.05);
   });
 
-  it("darkens the disc and the point alike, to 2%", () => {
+  it("darkens the disc and the point alike, to 1%", () => {
+    // The point takes the eclipse over its disc (T10.b); from its centre it was 2% off.
     const disc = discFlux(body, hosts, [earth])[1] / discFlux(body, hosts)[1];
     const point =
       pointFlux(body, hosts, [occluder], DISC_ANNULI_HIGH)[1] /
       pointFlux(body, hosts, [], DISC_ANNULI_HIGH)[1];
-    expect(Math.abs(disc / point - 1)).toBeLessThan(0.02);
+    expect(Math.abs(disc / point - 1)).toBeLessThan(0.01);
   });
 
   it("leaves no light inside the umbra, and ignores an occluder beyond the star", () => {
@@ -600,6 +600,123 @@ describe("an eclipse", () => {
       12,
     );
   });
+});
+
+describe("a body's eclipse over its disc (T10.b)", () => {
+  /**
+   * Jupiter's semi-major axis, Io's about it and Io's radius, m (NASA GSFC, the Jupiter and Jovian
+   * Satellite Fact Sheets).
+   */
+  const jupiterOrbitM = 7.78479e11;
+  const ioOrbitM = 4.218e8;
+  const ioRadiusM = 1.8215e6;
+  const jupiterFigure = {
+    equatorialRadiusM: 7.1492e7,
+    polarRadiusM: 6.6854e7,
+    pole: vec3(0, 1, 0),
+  };
+
+  it("keeps a point Jupiter 99.9% of its light in Io's central shadow transit, where its centre gave 0", () => {
+    // Jupiter from Earth at opposition, 5° of phase, Io on the Sun's line to Jupiter's centre.
+    const sunward = vec3(Math.sin(5 * RAD), 0, Math.cos(5 * RAD));
+    const jupiter: LitBodyInput = {
+      id: "0200080020000000.0005",
+      centreM: vec3(0, 0, -(jupiterOrbitM - AU_M)),
+      figure: jupiterFigure,
+      photometry: planetPhotometry("Jupiter"),
+      lighting: undefined,
+    };
+    const hosts: PlacedLight[] = [
+      { disc: aHostDisc(), centreM: add(jupiter.centreM, scale(sunward, jupiterOrbitM)) },
+    ];
+    const io = {
+      id: "0200080020000000.0501",
+      centreM: add(jupiter.centreM, scale(sunward, ioOrbitM)),
+      radiusM: ioRadiusM,
+    };
+    const clear = pointFlux(jupiter, hosts, [], DISC_ANNULI_HIGH);
+    const eclipsed = pointFlux(jupiter, hosts, [io], DISC_ANNULI_HIGH);
+    // The share Io's shadow takes, 1.5 (R_Io ÷ √(a c))² (1 + x ÷ d)², is 0.104%: the ruling's
+    // "at most 0.10%" (decision-r07-earth-albedo, Q2), so 99.896% is kept.
+    const share =
+      1.5 *
+      (ioRadiusM / Math.sqrt(7.1492e7 * 6.6854e7)) ** 2 *
+      (1 + ioOrbitM / (jupiterOrbitM - ioOrbitM)) ** 2;
+    for (const c of [0, 1, 2] as const) {
+      expect(eclipsed[c] / clear[c]).toBeGreaterThan(0.9989);
+      expect(eclipsed[c] / clear[c]).toBeLessThan(1);
+      expect(Math.abs(1 - eclipsed[c] / clear[c] - share)).toBeLessThan(0.01 * share);
+    }
+  });
+
+  /**
+   * An Io-like moon `px` across, lit at phase `phaseDeg` by a Sun 5.2 au off, and a Jupiter-sized
+   * occluder 4.218 × 10⁸ m sunward whose shadow axis passes `axisM` from its centre.
+   */
+  function ingress(
+    px: number,
+    phaseDeg: number,
+    axisM: number,
+    photometry: LitBodyInput["photometry"],
+  ): {
+    readonly body: LitBodyInput;
+    readonly hosts: PlacedLight[];
+    readonly jupiter: LitBodyInput;
+  } {
+    const distanceM = ioRadiusM / Math.sin(px / 2 / PX_PER_RAD);
+    const centreM = vec3(0, 0, -distanceM);
+    const sunward = vec3(Math.sin(phaseDeg * RAD), 0, Math.cos(phaseDeg * RAD));
+    const across = vec3(0, 1, 0);
+    const starM = add(centreM, scale(sunward, jupiterOrbitM + ioOrbitM));
+    const body: LitBodyInput = {
+      id: "0200080020000000.0501",
+      centreM,
+      figure: { equatorialRadiusM: ioRadiusM, polarRadiusM: ioRadiusM, pole: null },
+      photometry,
+      lighting: undefined,
+    };
+    const jupiter: LitBodyInput = {
+      id: "0200080020000000.0005",
+      centreM: add(
+        add(centreM, scale(sunward, ioOrbitM)),
+        scale(across, (axisM * jupiterOrbitM) / (jupiterOrbitM + ioOrbitM)),
+      ),
+      figure: jupiterFigure,
+      photometry: planetPhotometry("Jupiter"),
+      lighting: undefined,
+    };
+    return { body, hosts: [{ disc: aHostDisc(), centreM: starM }], jupiter };
+  }
+
+  const lunar = photometryFor([0.6, 0.6, 0.6], [0.626, 0.626, 0.626], "moon");
+  const starlight = { ...OPTIONS, planetshine: 0 };
+  for (const [lawName, photometry] of [
+    ["the provisional Lambert law", PROVISIONAL_PHOTOMETRY],
+    ["a lunar law", lunar],
+  ] as const) {
+    it(`draws one flux on the disc and the point at the 3 px switch through an Io-like ingress, to 1%, under ${lawName}`, () => {
+      // Jupiter's umbra at Io is 71,154 km in radius and its penumbra 71,908 km: the axis from
+      // the last limb's entering the umbra to first contact, at a quarter, half and three quarters.
+      let worst = 0;
+      for (const phaseDeg of [30, 90]) {
+        for (const fraction of [0.25, 0.5, 0.75]) {
+          const axisM = 6.9332e7 + fraction * 4.397e6;
+          const { body, hosts, jupiter } = ingress(3, phaseDeg, axisM, photometry);
+          const occluder = { id: jupiter.id, centreM: jupiter.centreM, radiusM: 7.1492e7 };
+          const disc = discFlux(body, hosts, [jupiter], starlight);
+          const point = pointFlux(body, hosts, [occluder], DISC_ANNULI_HIGH);
+          const free = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+          // A real ingress: neither clear nor dark.
+          expect(point[1] / free[1]).toBeGreaterThan(0.05);
+          expect(point[1] / free[1]).toBeLessThan(0.95);
+          for (const c of [0, 1, 2] as const) {
+            worst = Math.max(worst, Math.abs(disc[c] / point[c] - 1));
+          }
+        }
+      }
+      expect(worst).toBeLessThan(0.01);
+    });
+  }
 });
 
 describe("a body's lighting frame (T10.a)", () => {

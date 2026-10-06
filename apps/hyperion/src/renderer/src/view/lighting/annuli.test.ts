@@ -60,6 +60,16 @@ function worstError(law: Power2, k: number): number {
 }
 
 describe("annulusEdges", () => {
+  it("splits a uniform disc into K annuli of equal area and flux, none of them empty", () => {
+    // The bisection would push every edge to the limb for c = 0, leaving annuli of no area.
+    const set = annulusEdges(0, 1, 4);
+    expect([...set.edges]).toEqual([0, 0.5, Math.SQRT1_2, Math.sqrt(0.75), 1]);
+    expect([...set.flux]).toEqual([0.25, 0.25, 0.25, 0.25]);
+    expect(set.dip).toBe(0);
+    // A disc of a quarter of the star's radius on its centre hides 1/16 of it.
+    expect(annulusVisibleFraction(set, 0.25, 0)).toBeCloseTo(1 - 1 / 16, 14);
+  });
+
   it("runs K edges from the centre to the limb, rising", () => {
     const { edges } = annulusEdges(SUN_V.c, SUN_V.alpha, 4);
     expect(edges).toHaveLength(5);

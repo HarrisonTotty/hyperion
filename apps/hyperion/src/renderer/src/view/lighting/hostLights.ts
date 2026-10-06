@@ -15,6 +15,7 @@ import { type BodyIdHex, formatBodyId, type HostDiscDto } from "@hyperion/protoc
 import { norm, sub, type Vec3 } from "../../geometry/vec3";
 import type { Rgb } from "../photometry/toneCurve";
 import type { ViewScene } from "../scene/model";
+import { annulusEdges, type AnnulusSet } from "./annuli";
 import { photopicIlluminance, shiningStars, starIlluminance } from "./illuminance";
 
 /** A host star that lights the scene: R06's disc, and the star's body in the scene. */
@@ -144,4 +145,34 @@ export function lightsAt(
   return kept
     .toSorted((a, b) => photopicIlluminance(b.illuminance) - photopicIlluminance(a.illuminance))
     .slice(0, max);
+}
+
+/** Each host's annuli per channel and K, made once per disc: the construction bisects. */
+const ANNULI = new WeakMap<
+  HostDiscDto,
+  Map<number, readonly [AnnulusSet, AnnulusSet, AnnulusSet]>
+>();
+
+/** A host's annuli in display order (r, g, b) from R06's B, V, R limb laws. */
+export function hostAnnuli(
+  disc: HostDiscDto,
+  k: number,
+): readonly [AnnulusSet, AnnulusSet, AnnulusSet] {
+  let byK = ANNULI.get(disc);
+  if (byK === undefined) {
+    byK = new Map();
+    ANNULI.set(disc, byK);
+  }
+  const cached = byK.get(k);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const [b, v, r] = disc.limb;
+  const sets = [
+    annulusEdges(r.c, r.alpha, k),
+    annulusEdges(v.c, v.alpha, k),
+    annulusEdges(b.c, b.alpha, k),
+  ] as const;
+  byK.set(k, sets);
+  return sets;
 }

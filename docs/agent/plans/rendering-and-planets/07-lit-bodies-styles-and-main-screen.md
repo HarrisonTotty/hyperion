@@ -207,6 +207,19 @@ export function lightingFramesOf(
   pose: CameraPose,
   discs: ReadonlyArray<HostDiscDto>,
 ): ReadonlyArray<LitBodyLighting>; // every lit body, in the scene's order
+// lighting/discEclipse.ts, as built (T10.b; decision-r07-earth-albedo, Q3)
+export interface EclipsedBody {
+  readonly centreM: Vec3;
+  readonly figure: BodyFigure; // taken as its equivalent sphere √(a c)
+}
+export function discEclipseVisible(
+  star: PlacedLight, // its B, V and R limb laws: the result is per display channel
+  body: EclipsedBody,
+  occluders: ReadonlyArray<Occluder>,
+  towards: Vec3, // unit, from the body to the far point
+  share: number, // L
+  k: number,
+): Rgb;
 ```
 
 `lighting/oracle.ts`: the `f64` oracles (dense annulus sums, brute-force sphere irradiance, the
@@ -2021,7 +2034,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   120°, 71% at 150°, all of it from 170.6°; 10% at 150° for Earth seen from the Moon). A
   correction table in (α, sin ρ, L) would remove both; not built.
 - **The disc-averaged eclipse** (R07.T10.b, decision-r07-earth-albedo) is taken on the equivalent
-  sphere √(a c); an oblate body shaded by a larger one errs at the second order in f.
+  sphere √(a c); an oblate body shaded by a larger one errs at the second order in f. _As built
+  (R07.T10.b), the science check finds the error first order in f: about f ÷ 5 of a small central
+  shadow's share under Lambert, up to f ÷ 2 in an ingress's length (see "Deviations in T10.b, as
+  built"); for the orchestrator._
 - **Gas giants' cloud bands** are left by R11 to neither R08 nor itself, and R11 advises this plan;
   this plan draws a uniform,
   oblate giant and no plan generates bands. The roadmap's open item records a research lean that
@@ -2188,7 +2204,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   - **Extra exports.** `geometricAlbedo(law)` (`phase.ts`); `lighting/oracle.ts` is created here,
     ahead of T6.a, with `discIntegral(reflectance, α, nodes = 200)` (Gauss–Legendre over
     photometric longitude and latitude, on any `Reflectance`), `Reflectance`, `gaussLegendre` and
-    `GaussLegendreRule`.
+    `GaussLegendreRule`. _R07.T10.b moved `gaussLegendre` and `GaussLegendreRule` to
+    `lighting/quadrature.ts`._
   - **The clamp's departure in q at s = 1**, exact f on both sides: Venus −0.317%, Earth −0.656%
     (R07.T4.d's eq. 14, clamped from 139.0°; −0.011% on eq. 5), Uranus −0.008%, every other
     template 0.
@@ -3468,8 +3485,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     reads `releasedBy` exhaustively. Its consider is taken: the hold removes its `pagehide`
     listener.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
-  - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli`, `LitBodyRenderer`,
-    `BODY_DISC_MATERIALS`), with the record, its packer and the shader's `f64` twin in
+  - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
+    `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the
+    record, its packer and the shader's `f64` twin in
     `bodies/discShading.ts` (`DiscRecord`, `packDiscRecords`, `rasteriseDisc`,
     `compositeDiscPixels`), the oblate integrals in `bodies/oblate.ts`, the lights in
     `lighting/hostLights.ts` and `lighting/hostDisc.ts`, and `shaders/bodyDisc.wgsl`, registered
@@ -3527,8 +3545,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     Only the switch at 3 px matters to continuity.
   - **Eclipses.** A disc's samples take the eclipse term of each of its (at most two) occluders,
     their hidden fractions added; a point takes it from its centre. In a penumbra the two agree to
-    2% for a Moon-sized body 3 px across. An occluder beyond the star hides nothing; a point inside
-    one sees none of it.
+    2% for a Moon-sized body 3 px across. _Replaced by R07.T10.b: the point takes the eclipse over
+    its disc, and the two agree to 2 × 10⁻⁵ there._ An occluder beyond the star hides nothing; a
+    point inside one sees none of it.
   - **Tests.** `view/bodies` (the sweep, the extents of a Saturn-like f = 0.098 disc at 100 px to
     half a pixel, classes, eclipses, the plan's order, the records' layout, the renderer's draws,
     table and buffers against R05's counting engine), `view/scenes/phaseScene.test.ts` (the limbs
@@ -3898,7 +3917,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         Lambert, ε = r ÷ Δ (0.34% for the Moon, 0.32% for Io).
   - **The neighbour's starlight is eclipsed (a deviation; confirmed as an interim, replaced by
     R07.T10.b, decision-r07-earth-albedo).** It takes the eclipse term from its centre, counting
-    only the bodies larger than the neighbour. This fixes two cases:
+    only the bodies larger than the neighbour. _Replaced by R07.T10.b: the eclipse over the
+    neighbour's disc as the body it lights sees it, by bodies of every size (see "Deviations in
+    T10.b, as built")._ This fixes two cases:
     - In a total lunar eclipse, Design note 7 as first written left 0.31 lx of moonlight on
       Earth's night side. The truth is about 10–50 µlx, light refracted by Earth's air, which no
       plan draws yet (Hernitschek, Schmidt and Vollmer 2008, Applied Optics 47, H62, Table 2: 9.6
@@ -3934,7 +3955,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       left out as an occluder there, because at zero phase the Moon is in its shadow.
     - Jupiter-shine on Io at inferior conjunction is 66.7 lx, in Io's own shadow transit, with
       Jupiter 6.5% oblate. That is within 10⁻³ of the closed form over √(a c) and 6.16 stops below
-      the sunlight. The plan's 70 lx ± 10% is kept.
+      the sunlight. The plan's 70 lx ± 10% is kept. _R07.T10.b: Io's own shadow now takes 0.104%
+      of it, and the closed form is met by the clear light._
     - A neighbour at new phase gives under 10⁻¹² of full.
     - The `view/bodies` tests: a lunar disc's night-side pixel equals E (Δ ÷ d)² × exposure ÷ π ×
       `brdf` to 10⁻⁶, and the night side keeps `unlitBody`.
@@ -3975,7 +3997,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **Found, for T10 (not fixed here) → R07.T10.b (decision-r07-earth-albedo).** A point body
     takes its eclipse from its centre, so a point Jupiter goes fully black during Io's shadow
     transit: `pointFlux` gives 0 against 5.16 × 10⁻⁵ lx clear, measured 2026-10-04. R07.T10.b's
-    disc-averaged eclipse, shared by `pointFlux` and planetshine's neighbour, fixes it.
+    disc-averaged eclipse, shared by `pointFlux` and planetshine's neighbour, fixes it. _Fixed by
+    R07.T10.b: it keeps 99.896%._
 - **Deviations in T4.d, as built (Earth after Robinson 2026, decision-r07-earth-albedo).**
   - **The template.** `templates.ts`' `earth` is eq. 14 in its magnitude form, with
     `EARTH_HG_ASYMMETRY` = −0.33, to 144°, L = 0, not provisional. Its source string cites eq. 14
@@ -4596,7 +4619,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       its frame by construction. `litLabelsOf` filters by `isLitBody`.
   - **Neighbours.** A planetshine neighbour N stands where the lit body's frame puts it, at
     t_B − |r_N − r_B| ÷ c. Its stars, and the larger bodies that shadow it, are those of its own
-    frame, at its own retarded time, δ before the exact time.
+    frame, at its own retarded time, δ before the exact time. _R07.T10.b: bodies of every size
+    shadow it, from the same frame._
     - That keeps each neighbour's starlight one evaluation a frame (T11's "once a frame").
     - It turns the neighbour's star by at most |v_N − v★| δ ÷ d★, with δ ≤ 2 |r_N − r_B| ÷ c:
       up to 6 × 10⁻⁷ rad for the Earth lighting the Moon.
@@ -4655,3 +4679,120 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     the smoke harness and the kept scenes light statically. Under load (averages of 10 to 40) the
     photorealistic frame's histogram check twice found no read-back within its 5 s wait; on a
     quieter machine it passes (226 weighted counts).
+- **Deviations in T10.b, as built (a body's eclipse over its disc, decision-r07-earth-albedo, Q3).**
+  - **Files and names.**
+    - `lighting/discEclipse.ts`: `discEclipseVisible(star, body, occluders, towards, share, k)` and
+      `EclipsedBody` (a centre and a figure, taken as the sphere √(a c)). `star` is the
+      `PlacedLight`, whose B, V and R limb laws give the result per display channel (r, g, b): one
+      call does all three, since the quadrature in θ is the same for every channel.
+    - `lighting/annuli.ts`: `occultationFrom` and `Occultation`, `eclipseVisible`'s geometry for one
+      occluder (bit-identical), so that each node's term is `eclipseVisible`'s arithmetic with the
+      annuli made once.
+    - `hostAnnuli` moved from `bodies/draw.ts` to `lighting/hostLights.ts`, since
+      `discEclipse.ts`, which `draw.ts` imports, needs it.
+    - `lighting/quadrature.ts`: `gaussLegendre` and `GaussLegendreRule`, moved out of the oracles,
+      which the renderer never imports.
+    - `lighting/oracle.ts`: `discEclipseBruteForce` and `FarView` (each view carries its whole,
+      `totalM2`), the test's oracle.
+  - **A uniform disc.** `annulusEdges` gave a law with c = 0 annuli of no area, 0 ÷ 0 on the CPU and
+    in the shader. It now gives K annuli of equal area and flux there; nothing changes for c > 0.
+  - **The point's occluders.** `pointFlux` takes the two that `occludersOf` keeps
+    (`MAX_DISC_OCCLUDERS`, the largest as seen from the body), not all of `occludersFor`'s list.
+    They are the disc record's two, so the point and the disc it becomes at 3 px leave out the same
+    shadows: a third, as in a triple transit on Jupiter, about 0.1% each. Planetshine's `shadowing`
+    is the whole list.
+  - **The quadrature, as built.**
+    - **Depth.** Each node's eclipse term is taken at its ring's w-weighted mean depth, not in the
+      centre's plane. In the centre's plane alone the error reaches 1.6 × 10⁻³ against the oracle,
+      over the task's 10⁻³, for a Moon-sized body 4 × 10⁸ m behind its occluder at 1 au. With the
+      mean depth the cone's spread enters at second order. The task's "below R★ R ÷ d" for that
+      spread is about (R★ + R_o) R ÷ d (science check, 2026-10-06).
+    - **The view's edge.** ρ is also split where the rings meet the edge of the far point's view
+      (μ = 0, a half-ellipse on the disc): at its two ends on the rim and at its points nearest and
+      furthest from the axis (32 samples and bisection). Without these splits phases of 60° to 120°
+      erred by up to 4 × 10⁻³. An arc is split where μ crosses 0 (24 samples and 30 bisections). A
+      ring outside the edge's distances from the axis is wholly in view or wholly out, and is not
+      sampled.
+    - **Rules.** Gauss–Legendre under the substitution x = (1 − cos πt) ÷ 2, 8 nodes a piece of ρ
+      and 16 an arc of θ.
+    - **The exact 0 and 1.** These come from the exact tangent cones, (R_o + x sin γ) ÷ cos γ,
+      with a margin for the axis's drift across the lit depth. The umbra's least is taken over the
+      lit depths, since an occluder larger than its star has an umbra that widens behind it.
+  - **The equivalent sphere errs at first order in f, not second.** The ruled Risks line (above,
+    "The disc-averaged eclipse") says "at the second order in f". Under Lambert at zero phase a
+    spheroid seen equator-on has m(0) = ⅔ (1 − ε ÷ 10 + …), ε = a² ÷ c² − 1 ≈ 2f. So a small central
+    shadow's share is off by about f ÷ 5: 0.104% on the sphere against 0.106% for Io's on Jupiter.
+    An ingress across a larger shadow is off by up to f ÷ 2 in its length (science check,
+    2026-10-06). The code keeps the sphere; the doc comment says first order. The ruled line is
+    left for the orchestrator.
+  - **Figures tested.**
+    - **Against the oracle.** The oracle takes V at each of 10⁶ surface points, in (θ, φ) about the
+      star's direction. A grid in the projected plane erred by 3.9 × 10⁻⁴ at the rim, where w jumps.
+      Over radius ratios 0.02–30, three separations, 0°, 60° and 120° and L 0 and 1, the worst error
+      is 4.9 × 10⁻⁵ in V. Wherever the eclipse takes over a thousandth of the light, the error is
+      within 0.25% of what it takes (tested at 1%). Each channel is pinned to its own law to 10⁻⁶.
+    - **The central solar eclipse.** A full Lambert Earth keeps 0.8922 of its light towards the
+      Moon, under a uniform Sun at 1 au; the oracle agrees to 3 × 10⁻⁷, and so does the science
+      check's own (0.89220). The ruling's 0.893 matches the same eclipse in parallel light, 0.89272
+      with the Sun at infinity at its angular radius. The ruling's script is not kept, and its
+      first-order 0.888 has no (1 + x ÷ d)². At 1 au the shadow cone widens over the 384,400 km by
+      (1 + x ÷ d)², 1.005 in area. Both are tested. The ruling's 10.7% is thus 10.8% at 1 au (10.80%
+      under `sunLikeHostDisc`, which planetshine loses there). From the Moon's own distance, each
+      element of Earth weighted by its inverse square, 11.0% (science check): a stated error of
+      planetshine's far point.
+    - **A point Jupiter in Io's central transit.** Seen from 5° of phase it keeps 99.896%, not 0: in
+      the g channel 3.019 × 10⁻⁵ of 3.022 × 10⁻⁵ lx, Jupiter at 5.2 au seen from Earth at
+      opposition. The share taken is 1.5 (R_Io ÷ √(a c))² (1 + x ÷ d)² = 0.104%. The ruling's "at
+      most 0.10%" is its own (1,821.6 ÷ 69,134)² × 1.5 = 0.1041%, rounded
+      (decision-r07-earth-albedo, Q2). The task's 99.9% floor comes from that rounding, so the test
+      holds the point at or above 99.89% and the share to 1%. The 2026-10-04 probe's geometry,
+      5.16 × 10⁻⁵ lx clear, is not recorded.
+    - **Io entering Jupiter's shadow.** Io's radius is NASA's 1,821.5 km and its speed
+      2π a ÷ P = 17.338 km/s, on a straight path across the axis. Seen from the Sun's side, the fade
+      from 1 to 0 takes 252.5 s against (2 R_Io + w_p) ÷ v = 253.6 s (w_p 754 km). Its last second's
+      light lies under the quadrature's 10⁻⁶ and rounds to 0. Its centre fades in 43.5 s.
+      - From 17° of phase one contact's sliver lies on the far side, which one depending on which
+        way the far point leans along the track: 248.9 s and 246.4 s are seen, 250.5 s with the
+        lean out of the plane.
+      - Io's real path meets the shadow 9.8° from opposition, more slowly across it, and takes about
+        257 s (science check).
+    - **The 3 px switch.** Through an Io-like ingress at 30° and 90° and three depths, the disc's
+      summed pixels meet the point to 0.20% under the provisional Lambert law and 0.16% under a
+      lunar law. T8.a's Moon in Earth's penumbra now agrees to 2 × 10⁻⁵, where it was allowed 2%;
+      it is tested at 1%.
+  - **Planetshine.**
+    - `LitNeighbour` gains `shadowing` (its `occludersFor` list, of every size, in the neighbour's
+      own frame) and `annuli`. Its `lights` are uneclipsed, and so is `boundLx`.
+    - `planetshineSources` cuts each candidate's lights by `discEclipseVisible` towards the body
+      (`eclipsedLights`). It does so only for a candidate past the bound that has shadowing bodies,
+      and the cut light ranks it as well as lighting the body.
+    - `towards` comes from the body's frame. The neighbour's stars and the bodies that shadow it
+      come from its own frame, as T10.a placed them, with T10.a's stated δ (2.8 s of Io's 254 s).
+    - The handoff's alternative, the pair's occluders from the lit body's frame, was not taken.
+      That frame's occluders leave out the lit body itself, which is the occluder of a solar
+      eclipse. They are also retarded to the light reaching the lit body rather than the neighbour,
+      so they would not line up with the neighbour's own stars. It would also cost an
+      `occludersFor` a pair.
+    - The "larger than the neighbour" filter is gone, so a solar eclipse takes its share and equal
+      moons shadow each other (tested).
+  - **Tests.** `lighting/discEclipse.test.ts` (19), new cases in `annuli.test.ts` (the uniform
+    disc), `planetshine.test.ts` (3) and `draw.test.ts` (3). Changed:
+    - Earthshine at full Earth leaves the Moon out of the lit bodies, as its sibling test leaves
+      Earth out at full Moon, since the Moon's own shadow falls there.
+    - Jupiter-shine on Io takes Io's shadow off, 0.104%, before meeting the closed form to 10⁻³.
+    - T8.a's disc and point in a penumbra are held to 1%, not 2%.
+  - **`just test-render`** (SwiftShader, `default` and `no-subgroups`, 2026-10-06). Every check
+    passes (249 and 247), and the 68 captures are byte-identical to T10.a's: no captured scene has
+    a point in a shadow or a shadowed neighbour. T11's smoke check sets its neighbour on the
+    anti-solar line, so its earthshine now carries the Moon's own shadow, on the GPU and in the twin
+    alike. It still meets the twin within 0.258 of the tolerance.
+  - **Cost.** A call (one light, one occluder, all three channels) took 0.15–0.2 ms at a load
+    average of 36. It is made only where the occluder list is not empty. Provisional, for T17's
+    bench.
+  - **Unchanged.** The disc's starlight eclipse term, the records' layout and every shader. A
+    disc's planetshine sources (`DiscRecord.secondaries`) now carry the neighbour's eclipse over its
+    disc, as the point's do, and a uniform star's annuli are no longer empty.
+  - **For R10 (a pointer, also at R10.T10.f).** R10.T10.f's "takes its eclipse term from the
+    centre, as now" is stale. The point's eclipse is now `discEclipseVisible`, the average over the
+    disc. T10.f keeps it, so that the point meets the disc at 3 px through an eclipse. Passed to
+    the orchestrator for R10's owner.
