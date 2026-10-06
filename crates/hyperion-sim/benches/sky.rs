@@ -1,6 +1,6 @@
 //! Benchmarks of the sky (rendering plan R06): the luminosity tables' build, the census near the
-//! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), and later
-//! the band.
+//! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), and the band
+//! near the Sun (R06.T9.b).
 //!
 //! They run on `GalaxyParams::milky_way_like()` with a fixed seed. A miss is a finding to record,
 //! not a CI failure: CI compiles these and never runs them. Every figure below is provisional
@@ -36,6 +36,7 @@
 //! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17) | 1.8 × 10⁶ CPU-s, sampled |
 //! | `sky/census_near_sun/warm` | ≤ 25% of cold (T17) | not yet run |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
+//! | `sky/band_near_sun` | within the first sky's (T17) | 20.2 CPU-s, provisional |
 //!
 //! The cold near-Sun figure is R06.T8.f's sampled run (2026-10-05, `HYPERION_SKY_BENCH_SAMPLE`
 //! 1,000, criterion's `--test`, 15 workers, load about 15, so provisional): 1.83 × 10⁶ CPU-s
@@ -47,6 +48,15 @@
 //!
 //! The brainstorm's 400–800 CPU-s and 5 × 10⁹ candidates are the inner bulge's under the near-Sun
 //! caps held fixed; the nuclear disc's bench takes its own caps, which are far smaller.
+//!
+//! The band bench marches all six faces of `BandSpec::STANDARD` (64² texels a face, 24,576 rays)
+//! near the Sun at the eye's cut, complete to the caps, as the server's band of a final reply
+//! (R06.T11), one face row a job; its census is empty, since the overflow's points cost nothing
+//! beside the rays. Its time is the CPU time, summed over the jobs, as the censuses'. R06.T9.b's
+//! one run (2026-10-05, criterion's `--test`, under the heavy-test lock, load 3–5, so provisional):
+//! 20.2 CPU-s on 15 workers, 1.37 s wall. A 16² band took 1.7 s on one thread in the test profile,
+//! about 1.1 ms a ray, four fifths of it the luminosity functions' reads and one fifth the ray's
+//! profile.
 
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap};
@@ -66,7 +76,8 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, cell_heap_bytes};
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
-use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap};
+use hyperion_sim::sky::band::{BandSpec, CompleteTo, CubeFace, band_rows};
+use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap, layer_caps};
 use hyperion_sim::sky::census::{
     CellOffsets, CellSlab, CensusTallies, NoSkyCellCache, Served, SkyCellCache, SkyCensus,
     SkyContext, SkyQuery, census_cell, census_plan, merge_census, serve_from_entry,
@@ -103,6 +114,7 @@ static PRINTED_COLD: AtomicBool = AtomicBool::new(false);
 static PRINTED_FILL: AtomicBool = AtomicBool::new(false);
 static PRINTED_WARM: AtomicBool = AtomicBool::new(false);
 static PRINTED_NUCLEAR: AtomicBool = AtomicBool::new(false);
+static PRINTED_BAND: AtomicBool = AtomicBool::new(false);
 
 fn galaxy() -> Galaxy {
     Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
@@ -607,10 +619,81 @@ fn luminosity_tables(c: &mut Criterion) {
     group.finish();
 }
 
+fn band_near_sun(c: &mut Criterion) {
+    let query = eye_query(SUN_LY);
+    let workers = workers();
+    let spec = BandSpec::STANDARD;
+    let jobs: Vec<(CubeFace, u16)> = CubeFace::ALL
+        .iter()
+        .flat_map(|&face| (0..spec.face_texels()).map(move |row| (face, row)))
+        .collect();
+    let complete: OnceCell<CompleteTo> = OnceCell::new();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    group.bench_function("band_near_sun", |b| {
+        let sky = sky();
+        // The caps the census of a final reply is complete to, made outside the timing.
+        let complete = complete.get_or_init(|| {
+            let mut noise = NoiseCache::with_capacity(NOISE_SLOTS);
+            CompleteTo::of_caps(&layer_caps(
+                &sky.galaxy,
+                &sky.tables,
+                &sky.envelope,
+                query.observer(),
+                query.cut(),
+                &mut noise,
+            ))
+        });
+        b.iter_custom(|iters| {
+            let mut cpu = Duration::ZERO;
+            for _ in 0..iters {
+                let began = Instant::now();
+                let (rows, busy) = on_pool(&jobs, workers, &|&(face, row): &(CubeFace, u16)| {
+                    let mut ctx = SkyContext {
+                        tables: &sky.tables,
+                        envelope: &sky.envelope,
+                        offsets: &sky.offsets,
+                        noise: NoiseCache::with_capacity(NOISE_SLOTS),
+                        cells: &NoSkyCellCache,
+                        sources: &[],
+                        modifiers: &NoModifiers,
+                    };
+                    let mut out = Vec::with_capacity(usize::from(spec.face_texels()));
+                    band_rows(
+                        &sky.galaxy,
+                        &mut ctx,
+                        black_box(&query),
+                        &SkyCensus::empty(),
+                        complete,
+                        &spec,
+                        face,
+                        row..row + 1,
+                        &mut out,
+                    );
+                    out
+                });
+                if !PRINTED_BAND.swap(true, Ordering::Relaxed) {
+                    let texels = rows.iter().map(|(_, row)| row.len()).sum::<usize>();
+                    println!(
+                        "sky/band_near_sun: {texels} texels, {:.1} CPU-s on {workers} workers, \
+                         {:.2} s wall",
+                        busy.as_secs_f64(),
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                cpu += busy;
+            }
+            cpu
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     sky_benches,
     luminosity_tables,
     census_near_sun,
-    census_nuclear_disc
+    census_nuclear_disc,
+    band_near_sun
 );
 criterion_main!(sky_benches);
