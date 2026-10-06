@@ -1385,8 +1385,8 @@ By hand, recorded: the occultation. Acceptance: `just ci`, `just test-render`.
   - against a brute-force f64 surface integral (10⁶ points) to 10⁻³ absolute, over radius
     ratios 0.02–30, separations across the penumbra, phases 0°, 60° and 120°, and L 0 and 1;
   - a body wholly in the umbra gives exactly 0, and one clear of every penumbra exactly 1;
-  - Earth's light towards the Moon in a central solar eclipse is the oracle's 0.893 of clear
-    (uniform Sun, Lambert);
+  - Earth's light towards the Moon in a central solar eclipse is the oracle's 0.892 at 1 au
+    (0.893 in parallel light) of clear (uniform Sun, Lambert);
   - a point Jupiter in Io's shadow transit keeps 99.9–100% of its clear flux (the measured
     5.16 × 10⁻⁵ lx case, not 0);
   - a point Io entering Jupiter's shadow fades from 1 to 0 over about 254 s (the centre: 44 s);
@@ -1402,7 +1402,10 @@ src/renderer/src/view/bodies`, `just test-render`.
   the flux on a probe point over the crossing against the oracle to the setting's error; the planet
   behind the star is covered by the star's disc. By hand, recorded: a partial eclipse seen from the
   penumbra, the star's disc partly covered by the moon's disc through the painter order. Acceptance:
-  `just ci`, `just test-render`.
+  `just ci`, `just test-render`. _As built (R07.T10.c): `ECLIPSE TEST`, one kept scene whose clock
+  runs a hundred times the script's, with a free camera in the planet's frame in place of a ship's
+  seat; its bodies move and are lit at their retarded places. See "Deviations in T10.c, as
+  built"._
 
 #### R07.T11 Planetshine
 
@@ -2100,10 +2103,12 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   120°, 71% at 150°, all of it from 170.6°; 10% at 150° for Earth seen from the Moon). A
   correction table in (α, sin ρ, L) would remove both; not built.
 - **The disc-averaged eclipse** (R07.T10.b, decision-r07-earth-albedo) is taken on the equivalent
-  sphere √(a c); an oblate body shaded by a larger one errs at the second order in f. _As built
-  (R07.T10.b), the science check finds the error first order in f: about f ÷ 5 of a small central
-  shadow's share under Lambert, up to f ÷ 2 in an ingress's length (see "Deviations in T10.b, as
-  built"); for the orchestrator._
+  sphere √(a c); an oblate body in another's shadow errs at first order in f: about f ÷ 5 of a
+  small central shadow's share under Lambert (0.104% against 0.106% for Io's on Jupiter) and up to
+  f ÷ 2 in an ingress's length. The code keeps the sphere; integrating on the spheroid itself is
+  not built. _Reworded by
+  the orchestrator's ruling on T10.b (2026-10-06), from "errs at the second order in f", after
+  T10.b's science check (see "Deviations in T10.b, as built")._
 - **Gas giants' cloud bands** are left by R11 to neither R08 nor itself, and R11 advises this plan;
   this plan draws a uniform,
   oblate giant and no plan generates bands. The roadmap's open item records a research lean that
@@ -4075,7 +4080,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - Its two errors, removed by R07.T10.b's disc-averaged eclipse:
       - A smaller body's shadow is left out. From the neighbour's centre it would hide the whole
         star where it hides a spot: about 0.1% of Jupiter-shine for Io's shadow, and up to 11% of
-        earthshine in a central solar eclipse (10.7% by brute force).
+        earthshine in a central solar eclipse (10.8% by brute force).
       - Partial phases are taken at the neighbour's centre, so a moon wider than the planet's
         penumbra fades too fast: in 44 s rather than 254 s for Io entering Jupiter's shadow. The
         "larger than" test also never shadows a pair of equal moons in a mutual eclipse.
@@ -4870,7 +4875,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     shadow's share is off by about f ÷ 5: 0.104% on the sphere against 0.106% for Io's on Jupiter.
     An ingress across a larger shadow is off by up to f ÷ 2 in its length (science check,
     2026-10-06). The code keeps the sphere; the doc comment says first order. The ruled line is
-    left for the orchestrator.
+    left for the orchestrator. _Ruled 2026-10-06: the line is reworded to first order (applied
+    with R07.T10.c); integrating on the spheroid is not built._
   - **Figures tested.**
     - **Against the oracle.** The oracle takes V at each of 10⁶ surface points, in (θ, φ) about the
       star's direction. A grid in the projected plane erred by 3.9 × 10⁻⁴ at the rim, where w jumps.
@@ -4885,7 +4891,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       (1 + x ÷ d)², 1.005 in area. Both are tested. The ruling's 10.7% is thus 10.8% at 1 au (10.80%
       under `sunLikeHostDisc`, which planetshine loses there). From the Moon's own distance, each
       element of Earth weighted by its inverse square, 11.0% (science check): a stated error of
-      planetshine's far point.
+      planetshine's far point. _Ruled 2026-10-06 (applied with R07.T10.c): T10.b's test line now
+      reads "0.892 at 1 au (0.893 in parallel light)", and the ruling's 10.7% in T11's
+      deviations reads 10.8%._
     - **A point Jupiter in Io's central transit.** Seen from 5° of phase it keeps 99.896%, not 0: in
       the g channel 3.019 × 10⁻⁵ of 3.022 × 10⁻⁵ lx, Jupiter at 5.2 au seen from Earth at
       opposition. The share taken is 1.5 (R_Io ÷ √(a c))² (1 + x ÷ d)² = 0.104%. The ruling's "at
@@ -4942,3 +4950,158 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     centre, as now" is stale. The point's eclipse is now `discEclipseVisible`, the average over the
     disc. T10.f keeps it, so that the point meets the disc at 3 px through an eclipse. Passed to
     the orchestrator for R10's owner.
+- **Deviations in T10.c, as built (the eclipse scene).**
+  - **Files and names.**
+    - `view/scenes/eclipseScene.ts`: `ECLIPSE_SCENE_NAME` (`ECLIPSE TEST`); the bodies
+      `ECLIPSE_STAR`, `ECLIPSE_PLANET`, `ECLIPSE_MOON` and `ECLIPSE_GIANT` (indices 0 to 3);
+      `ECLIPSE_TIME_RATE` (100), `ECLIPSE_DURATION_S` (270), `ECLIPSE_MID_S` (10,100 s of the
+      scene's clock) and `ECLIPSE_CONJUNCTION_S` (20,500); the radii and orbits;
+      `ECLIPSE_CAMERA_OFFSET_M`, `ECLIPSE_CAMERA_POSE` and `eclipsePoseAtStar(sceneS)` (the camera
+      turned to the star); `eclipsePlaceAt(body, sceneS)` and its `EclipsePlace`, the exact tracks
+      the tests' oracles take; `eclipseSceneAt(sceneS)` and `eclipseScene()`.
+    - `displays/view/viewRun.ts`: `SCENE_OPTIONS` gains it, after `PHASE TEST`.
+    - `smoke/eclipse.ts`: `checkEclipse` (three checks) and `captureEclipse` (three series), run by
+      `smoke/page.ts`; `scripts/testRender.sh`'s comment names the captures.
+    - Doc comments only: `ViewBody.retarded` (`view/scene/model.ts`), `retardedFrom` and
+      `placedFor` (`lighting/retarded.ts`) and the kept scenes' lighting test (`retarded.test.ts`)
+      now say "a kept scene at rest", since this scene's bodies move.
+    - Unchanged: `view/photoreal/renderer.ts` and `displays/view/photorealFrame.ts`, which the views
+      lane's T16 also edits. The smoke file and the tests call `photorealFrame` as the view does.
+  - **One scene, its clock at ×100.** The scene's clock runs `ECLIPSE_TIME_RATE` (100) times the
+    script's (`timeRate` 100). A planet takes hours to pass behind its star (12,168 s for this
+    giant), and a moon's penumbra about 2 h to cross a point (6,914 s). At ×100 the 270 s script
+    holds the shadow's whole crossing of the planet's disc, the eclipse at the camera and the
+    giant's passage, and starts and ends with every body clear. It is the first kept scene whose
+    clock is not 1 and whose bodies move.
+  - **The bodies.**
+    - A Sun-like star at rest at the barycentre (`sunLikeHostDisc`).
+    - An Earth-sized planet at 1 au.
+    - A Moon-sized moon on a circle of 363,300 km about the planet, the Moon's perigee distance,
+      so that its umbra reaches the planet: a total eclipse, the umbra 155 km and the penumbra
+      6,811 km across the shadow's axis (25.07 d a turn, against the Moon's 27.32 d at its mean
+      distance).
+    - A Jupiter-sized giant on a circle of 0.05 au, a hot Jupiter's (P 4.08 d).
+    - The orbits are circular, coplanar and prograde, each at √(G(M + m) ÷ r³), from IAU 2015
+      Resolution B3's nominal GMs and DE430's lunar GM. So every new moon is an eclipse.
+    - The planet does not turn, and its reflex about the planet–moon barycentre (4,414 km here,
+      4,671 km for Earth's) is left out. Every body takes T2.a's provisional photometry, as every
+      scene body does until T2.b.
+  - **A free camera in the planet's frame stands for the ship.** The plan's "ship in a moon's
+    penumbra" is the camera at the ship's place. The scene has no own ship: the test hull's
+    windscreen plate, 1 m square and 1 m ahead of the seat's eye, would stand across a seat's view
+    of the eclipse. The free camera starts 20,000 km above the point beneath the star at
+    mid-eclipse, held in the planet's frame (it stays there through the script, tested), looking
+    down. With the star as its target it turns to the star.
+  - **"A camera crossing a moon's shadow", as built.** The camera hovers and the shadow crosses it.
+    The shadow moves across the planet's disc from the view's left to its right at 0.985 km/s in
+    the planet's frame, of the scene's clock (98.5 km/s of the script's). It is on the planet from
+    about 1 s to 200 s of the script, on the part the camera sees from 3 s to 198 s. Its cone
+    crosses the camera at 0.989 km/s: the camera is in the penumbra for 6,698 s (67 s of the
+    script) and in the umbra for 345 s (3.5 s). The script starts with the penumbra 96 km clear of
+    the planet.
+  - **Lit at the retarded time.** Each moving body's retarded centre carries its velocity and no
+    light time to the camera (`lightTimeS` 0, a kept scene's), so `retardedFrom` places each source
+    where the light reaching the lit body left it.
+    - The moon's shadow falls 34.8 km (the moon's 28.7 km/s over its 1.21 s light time) from where
+      the moon's place at the scene's time would cast it: 3.2 px at 10° across 320 px.
+    - The planet, the camera's local body, is lit at the scene's time, which is its drawn time
+      here.
+    - `retardedFrom` takes the light time from the lit body's centre, not from each surface point.
+      The light reaching the point beneath the star passed the moon 0.021 s later, so its shadow
+      there is 0.6 km (R_P v ÷ c) off, under a tenth of the tested pixel.
+  - **Drawn at the scene's time, lit at the retarded time (a stated limit of a kept scene).** A
+    kept scene draws its bodies where they are, with no light time to the camera, while its
+    lighting is retarded. Seen from the penumbra, the moon drawn over the star is therefore ahead
+    of the eclipse the camera stands in by the moon's light time to the camera, 1.12 s: 32 km
+    (9.6 × 10⁻⁵ rad, 1.05 px at 10° at 1080p), or 33 s of the scene's clock (0.33 s of the
+    script), a tenth of the 345 s totality. A server scene draws the apparent place and has no
+    such offset. Nothing compares the two in the view, since a camera's own light is not drawn.
+  - **The tests** (14, `eclipseScene.test.ts`), through the view's path: `photorealFrame`, then
+    `planLitBodies`, then `rasteriseDisc`.
+    - **The umbra and penumbra to a pixel.** Each wholly covered pixel of the planet is classed as
+      drawn: umbra where its meter class is `unlitBody`, penumbra where its starlight is below the
+      same pixel's unshadowed, else clear. The oracle classes it at its centre by the exact
+      tangent cones, as angles from the surface point the pixel's ray meets, with the moon on its
+      exact track at that point's own retarded time (fixed-point steps). A pixel may differ only
+      beside the oracle's boundary.
+      - At 45° across 480 px (34.5 km a pixel), entering and leaving: 18,052 and 24,488 penumbral
+        pixels, 12 and 14 umbral; 8 and 44 differ, every one beside the boundary.
+      - At 10° across 320 px (10.9 km a pixel), at mid-eclipse: the umbra's 160 pixels, none
+        differing.
+      - The same frame against the moon's place at the scene's time differs at 40 pixels more
+        than a pixel from that boundary, so the test sees the retardation.
+    - **The probe's flux over the crossing.** The probe is the point beneath the camera, the centre
+      of a 3 × 3 view a milliradian across, over 75 frames 100 s apart (mid-eclipse ± 3,700 s).
+      Its starlight's share of the same pixel unshadowed, planetshine left out, is held to the
+      exact eclipse integral (`eclipseIntegralVisibleFraction`) per channel.
+      - Worst 0.29% on the high setting (K = 4) and 0.48% on the low (K = 3).
+      - "The setting's error" is read as T6.b's bound for the Sun's V, 0.58% and 1.02%. The scene's
+        law (`sunLikeHostDisc`'s Claret and Southworth V-band law in every channel) errs at most
+        0.56% and 0.98% on T6.b's grid, under them.
+      - The probe is clear at both ends and total at two frames.
+    - **The planet behind the star.**
+      - At 2° across 320 px, a test field below the view's 10°, the giant is an 8 px disc. It is
+        drawn before the star's disc, and every one of its 68 pixels lies under that disc.
+      - 5,600 s earlier, at the star's limb, 38 of its 68 pixels lie outside it, uncovered.
+      - At the view's 60° at 1080p it is a 1.5 px point. Its sprite is drawn before the star, and
+        its 7 px quad lies inside the star's 15.5 px disc. At the view's 10° it is a 9.8 px disc.
+    - **The partial eclipse through the painter's order** (beyond the plan's list, the by-hand
+      item's CPU half). From the penumbra, 2,000 s before mid-eclipse, the moon's disc is drawn
+      after the star's and covers 0.3192 of the star's 5,712 pixels. The two circles' overlap is
+      0.3189.
+    - **Planetshine in the eclipse** (beyond the list). The moon's planetshine keeps 0.892 of the
+      planet's light in the central eclipse, by `discEclipseVisible` (T10.b).
+    - Also: the selector offers the scene; `stepRun` keeps the free camera in the planet's frame
+      through the script; the script starts and ends with the moon and the giant clear of the
+      star and the moon's shadow off the planet.
+  - **The planet behind the star holds while it is a disc or a point.** This is T9's host-disc
+    limit, ruled a stated limit for RM3: as a mesh it would show over the star's disc. No view
+    writes depth yet, so no body of the scene is promoted.
+  - **`just test-render`** (SwiftShader, `default` and `no-subgroups`, 2026-10-06). Both exit 0,
+    with 255 and 253 checks, none failing. That is T10.b's 249 and 247, plus T10.c's three
+    checks, its captures' one, and R02.T14.c's two for `ECLIPSE TEST` in `SCENE_OPTIONS`.
+    - The shadow on the GPU: texels within 0.322 and 0.153 of the tolerance of the twin, no class
+      differing (45° across 240 px entering, 10° across 160 px central; 2 and 40 umbral pixels).
+    - The giant behind the star: no channel differs from the frame without it (68 of its texels
+      show without the star's disc).
+    - The moon in front: it takes 1,776 of the star's 5,712 texels, as on the CPU.
+    - 21 new captures a variant, the same in both. The 68 earlier captures are byte-identical to
+      T10.b's.
+  - **By hand, recorded (for the owner).** The partial eclipse seen from the penumbra, the star's
+    disc partly covered by the moon's through the painter's order, is the capture series
+    `r07-t10c-eclipse-penumbra-t068` to `-t101` (the total at `t101`), at the view's narrowest 10°.
+    The shadow's crossing is `r07-t10c-eclipse-shadow-t021` to `-t151` at 60°, and the giant's
+    passage `r07-t10c-eclipse-behind-t135` to `-t205` at 10°. All are 768 × 432, in
+    `/home/quantum/gh/hyperion/.git/rm23-scratch/r07-shading/t10c/captures-3/`.
+    - They are the record as T9's occultation captures are (the orchestrator's ruling of
+      2026-10-05, option (a)), extended here to T10.c pending the orchestrator.
+    - The shadow is exposed at EV100 15, for the sunlit day side. The penumbra is exposed at
+      EV100 30, as through a solar filter, so that the star's disc and its limb darkening lie
+      inside AgX's range. The giant is exposed at EV100 27, the star's centre at the top of that
+      range and the giant's full disc, about 10⁻³ of its luminance, some 3 stops below middle
+      grey; at EV100 30 it is lost in black. Even so, its 3.9 px disc is a faint dot beside the
+      star (`t135`), and lost against the star's edge once half behind it. At the day side's
+      exposure the star's glare fills an eye view's whole frame, as the Sun's fills an eye, and
+      hides both the moon's bite and the giant.
+    - In the view, `ECLIPSE TEST` shows them live: the star as the target, the field at 10°, and
+      `MAN` near EV100 30 for the penumbra (from 67 s of the script to 134 s) and 27 for the giant
+      (from 144 s to 266 s).
+  - **Test fields below the view's narrowest.** The probe's 0.06° and the giant's 2° are test
+    fields below `FOV_STEPS_DEG`'s 10°; the giant is also tested at the view's own 60°, and is a
+    9.8 px disc at its 10° at 1080p.
+  - **Left for the orchestrator and the owner.**
+    - The guide's `SCENE` row, and its row of the kept scenes' designations (`TEST STAR` …), do not
+      name `ECLIPSE TEST`, as T10.c calls for no guide edit. Drafts, not entered (the views lane's
+      T16 is editing that table):
+      - `SCENE`: "… a kept test scene, `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` or
+        `ECLIPSE TEST`, under the training banner, …";
+      - a row `ECLIPSE TEST` | Scene | "The kept test scene of eclipses, its clock at a hundred
+        times: a moon's shadow crossing an Earth-sized planet beneath a camera 20,000 km above it,
+        the moon crossing a Sun-like star seen from inside its penumbra, and a giant passing
+        behind the star";
+      - the designations row: "… `ECLIPSE TEST`'s Sun-like star, Earth-sized planet, Moon-sized
+        moon and Jupiter-sized giant …".
+    - The label block does not state a kept scene's clock rate: `TIME` runs a hundred times fast
+      here with nothing saying so.
+    - Whether a free camera in the planet's frame stands for the plan's "ship in a moon's
+      penumbra".

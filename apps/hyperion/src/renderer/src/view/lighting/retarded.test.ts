@@ -591,7 +591,10 @@ describe("lightingFramesOf", () => {
   });
 });
 
-/** Every kept scene at a few times, with its camera's pose. */
+/**
+ * Every kept scene at rest at a few times, with its camera's pose: all but T10.c's eclipse scene,
+ * whose bodies move and are lit where their light finds them (`eclipseScene.test.ts`).
+ */
 function keptScenes(): ReadonlyArray<{ readonly scene: ViewScene; readonly pose: CameraPose }> {
   const kept: ReadonlyArray<KeptScene> = [
     phaseScene(),
@@ -607,7 +610,7 @@ function keptScenes(): ReadonlyArray<{ readonly scene: ViewScene; readonly pose:
   );
 }
 
-describe("a kept scene's lighting", () => {
+describe("a kept scene at rest's lighting", () => {
   it("is its drawing's, bit for bit: every light and occluder where it is drawn", () => {
     for (const { scene, pose } of keptScenes()) {
       const discs = scene.hostDiscs ?? DISCS;

@@ -54,6 +54,7 @@ import {
   type ViewBodyKind,
   type ViewScene,
 } from "../../view/scene/model";
+import { ECLIPSE_SCENE_NAME, eclipseScene } from "../../view/scenes/eclipseScene";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
@@ -70,11 +71,15 @@ export interface SceneOption {
   readonly make: () => KeptScene;
 }
 
-/** The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST` and `PHASE TEST` (R07.T8.a). */
+/**
+ * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a) and
+ * `ECLIPSE TEST` (R07.T10.c).
+ */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
   { name: FRAME_CHANGE_SCENE_NAME, make: frameChangeScene },
   { name: PHASE_SCENE_NAME, make: phaseScene },
+  { name: ECLIPSE_SCENE_NAME, make: eclipseScene },
 ];
 
 /** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */

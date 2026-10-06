@@ -64,7 +64,9 @@ export const RETARDATION_STEPS = 2;
  * @remarks
  * δ is the time from that light leaving the source back to the source's own retarded time: the
  * lit body's is the scene's less τ_lit, the source's less τ_s. A source at rest is where it is,
- * exactly, so that a kept scene's lighting is its drawing's.
+ * exactly, so that a kept scene at rest is lit where it is drawn. A kept scene that moves its
+ * bodies (T10.c's eclipse scene) has no light time to the camera, so δ is the light time from the
+ * source to the lit body alone.
  */
 export function retardedFrom(lit: RetardedCentre, source: RetardedCentre): Vec3 {
   const { centreM, velocityMPerS } = source;
@@ -143,7 +145,7 @@ function sceneLighting(
  * @remarks
  * Computed as drawn(source) + ((retarded source − drawn source) − (retarded lit − drawn lit)),
  * which is the same sum, the camera's offset being a translation, and is drawn(source) exactly
- * where nothing moves, as in a kept scene.
+ * where nothing moves, as in a kept scene at rest.
  */
 function placedFor(lit: DrawnBody, litRetarded: RetardedCentre, source: DrawnBody): Vec3 {
   if (source.body.retarded === null) {

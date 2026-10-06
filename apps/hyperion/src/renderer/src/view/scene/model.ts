@@ -52,7 +52,7 @@ export interface RetardedCentre {
   readonly lightTimeS: number;
 }
 
-/** A kept scene's body, at rest where it is drawn: no light time and no motion (R07.T10.a). */
+/** A body at rest in a kept scene, where it is drawn: no light time and no motion (R07.T10.a). */
 export function staticRetarded(centreM: Vec3): RetardedCentre {
   return { centreM, velocityMPerS: { x: 0, y: 0, z: 0 }, lightTimeS: 0 };
 }
@@ -81,9 +81,10 @@ export interface ViewBody {
   /** Its centre as drawn, m from the system's barycentre along the galactic axes. */
   readonly centreM: Vec3;
   /**
-   * Its retarded centre, which lighting takes (R07.T10.a): a kept scene's is
-   * {@link staticRetarded} at its drawn centre; `null` only for a contact, which never lights,
-   * occludes or is eclipsed.
+   * Its retarded centre, which lighting takes (R07.T10.a): a kept scene's is its drawn centre with
+   * no light time, at rest ({@link staticRetarded}) or with its velocity where the scene moves it
+   * (R07.T10.c's eclipse scene); `null` only for a contact, which never lights, occludes or is
+   * eclipsed.
    */
   readonly retarded: RetardedCentre | null;
   /** Its rotation from body-fixed to body axes, or `null` where rotation is not modelled. */

@@ -27,6 +27,7 @@ import {
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
+import { captureEclipse, checkEclipse } from "./eclipse";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
@@ -189,6 +190,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R07.T8.a sprite depth", () => checkSpriteDepth(engine, checks));
   await checks.group("R07.T8.b the class-map hook", () => checkClassMap(engine, checks));
   await checks.group("R07.T9 mesh bodies", () => checkMeshBodies(engine, checks));
+  await checks.group("R07.T10.c the eclipse scene", () => checkEclipse(engine, checks));
   await checks.group("R07.T8.a the photorealistic frame", () =>
     checkPhotorealFrame(engine, checks),
   );
@@ -232,6 +234,18 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
       images = [...images, ...frames];
       checks.check(
         "R07.T9 the occultation captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
+    });
+  }
+
+  if (captures) {
+    await checks.group("R07.T10.c the eclipse captures", async () => {
+      const frames = await captureEclipse(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R07.T10.c the eclipse captures",
         frames.length > 0,
         `${String(frames.length)} frames`,
       );
