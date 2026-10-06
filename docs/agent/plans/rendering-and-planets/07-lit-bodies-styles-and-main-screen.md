@@ -993,13 +993,16 @@ and `--port`.
     image is stroked twice, a `--surface-0` casing at the guide's widths beneath the coloured
     stroke, never a blur or glow (guide item 3); a DOM readout over the canvas sits on its own
     `--surface-0` plate. The wireframe style's marks follow the guide's ordinary rules. The image is
-    never dimmed under symbology. Status colours reserved for symbology cannot be reserved from
+    never dimmed under symbology. The one exception is a craft's silhouette, under Design note 17
+    (decision-r07-t16a, item 3). Status colours reserved for symbology cannot be reserved from
     photons, so marks are told from the image by shape and outline (brainstorm, The contrast
     problem).
 17. **Nothing in the scene goes undrawn in the photorealistic style.** Until R11 draws rings they
-    are R02's ring ellipses, and craft are R02's hull outlines, both cased over the image. A body
-    with no photometric section is drawn with the provisional photometry and labelled (Design note
-    5), never omitted.
+    are R02's ring ellipses, cased over the image. Until hull art exists craft are R02's hull
+    outlines, cased over the image on a `--surface-0` silhouette of their opaque faces, so that
+    nothing behind those faces shows through, and labelled `CRAFT PHOTOMETRY: NOT YET MODELLED`;
+    a window is glass and hides nothing (decision-r07-t16a, item 3). A body with no photometric
+    section is drawn with the provisional photometry and labelled (Design note 5), never omitted.
 18. **Low settings are built with the high ones.** Histogram over a quarter-resolution input;
     bloom with fewer levels at quarter resolution; `DISC_ANNULI_LOW` annuli; planetshine from one
     neighbour; 720p presented upscaled; one photorealistic view. The budget rows are the targets:
@@ -1589,8 +1592,10 @@ tone-mapped image is a following canvas pass with `FrameSubmission.colourLoad` `
 sRGB view, in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6).
 Acceptance: `just ci`; the guide edit is one commit for the owner.
 
-T16 is built as three subtasks, in this order (a ruled split, under the orchestrator's
-pre-authorisation of 2026-10-06, when T16 moved to the views lane). The paragraph above stays the
+T16 is built as five subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.c (a ruled split,
+under the orchestrator's pre-authorisation of 2026-10-06, when T16 moved to the views lane;
+T16.d and T16.e were added after T16.a by decision-r07-t16a, before the guide's draft, so that
+the draft states what they build). The paragraph above stays the
 task's whole specification: each subtask builds its share of it, and each runs the console-ux
 skill's scripts.
 
@@ -1638,8 +1643,76 @@ src/renderer/src/view/wireframe src/renderer/src/displays/view`, `just test-rend
   most 52.5rem, or a ruling asked for. Acceptance: `pnpm --filter hyperion exec vitest run
 src/renderer/src/view/post src/renderer/src/view/photometry src/renderer/src/displays/view`, the
   console-ux skill's scripts, `just ci`.
+- **R07.T16.d Strokes at the display's density, and one slope term for both occluders.** R02's
+  `wireframe/drawList.ts`, `wireframe/submit.ts`, `shaders/occluder.wgsl`,
+  `shaders/occluderSphere.wgsl` and `scenes/precision.test.ts`, `photoreal/overlay.ts`,
+  `displays/view/viewFrameDrawer.ts`, R05's `spike/spikeRun.ts` and `spike/DescentSpike.tsx`,
+  and `smoke/wireframe.ts` (decision-r07-t16a, items 1 and 2). `STROKE_PX`, `CASING_PX`,
+  `PREDICTED_DASH_PX` and the view's `SYMBOL_STROKE_PX` are the guide's CSS pixels.
+  `buildWireframeDrawList` takes a required `strokeScale`, the device pixels drawn for each,
+  `max(1, devicePixelRatio)` from its callers, and multiplies every batch's width, casing and
+  dash and every symbology stroke by it. The list carries `strokeScale` and `occluderSlopePx`,
+  ⌈(`STROKE_PX.heavy` + 2 × `CASING_PX`) × `strokeScale` ÷ 2 + 1⌉ px (Design note 5's
+  w_max ÷ 2 + 1, rounded up: 3 at a scale of 1, 5 at 2). `overlayDrawList` cases every batch to
+  at least `CASING_PX` × `strokeScale`. Both occluders take `occluderSlopePx` as a uniform and
+  push their depth away in the fragment by that many pixels of the depth's screen slope, its
+  magnitude: the sphere as built, in place of its `SLOPE_SCALE`; the hull faces from the
+  derivatives of their rasterised depth, exact on a plane, less a constant of 2⁻¹⁶ of the depth
+  (Design note 5's 128 units at the larger unit, now the same on every backend), written as
+  `frag_depth`. The hull material sets no hardware bias, and `HULL_OCCLUDER_BIAS` and
+  `OccluderMesh.depthBiasAway` go. Below a ratio of 1 every width stays as built; the
+  antialiasing fringe and the stars' point-spread function stay in device pixels. Tests: at
+  `strokeScale` 2 every batch's width, casing and dash and every symbology stroke are twice those
+  at 1, and `occluderSlopePx` is 5; through the drawer, the hull's line draws under `symbology`
+  are `[7, 3]` at a ratio of 2 and `[3.5, 1.5]` at 1 and at 0.78125; the overlay cases to 2 at a
+  scale of 2; both occluder materials take `occluderSlopePx`, and the hull material has no
+  `depthBiasAway`; the precision scene's hidden-line tests take the constant 2⁻¹⁶ in place of
+  their two ends. In `just test-render`: `checkCasedHullEdge` on a face whose depth gradient runs
+  at 45° to the screen's axes, at scales 1 and 2, draws every texel of the cased edge that it
+  draws with no face, the casing's outer texel included; a hull face's depth at a diagonal texel
+  equals the push by the slope's magnitude computed in `f64`, within a tenth of its difference
+  from the larger component's; `checkSphereSlope` reads the uniform; R02.T14.c's show-through
+  check passes unchanged. By hand, not committed: with the hardware's slope term put back, the
+  diagonal check fails on a backend that takes the larger component. Acceptance:
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/wireframe
+src/renderer/src/view/scenes src/renderer/src/view/photoreal src/renderer/src/view/spike
+src/renderer/src/displays/view`,
+  `just test-render`, the console-ux skill's scripts, `just ci`.
+- **R07.T16.e Craft over the image: windows of glass, opaque faces as silhouettes, and their
+  note.** R02's `scene/hull.ts`, `scenes/precision.test.ts`, `wireframe/drawList.ts`,
+  `wireframe/submit.ts` and `shaders/occluder.wgsl`, `photoreal/overlay.ts`,
+  `displays/view/viewRun.ts` and what passes its statements, and `smoke/wireframe.ts`
+  (decision-r07-t16a, item 3; Design notes 16 and 17). `HullOutline` gains `windows`, the
+  indices of its glazed faces, which `hullOutline()` refuses out of range or repeated;
+  `TEST_HULL`'s plate, its last two faces, is its one window. In both styles a hull's
+  `OccluderMesh` holds its opaque faces alone, so that a window hides nothing, and its edges stay
+  drawn. `OccluderMesh` gains `fill`, a colour or `null`: the wireframe fills none; the overlay
+  fills every mesh in the list's `--surface-0`, so that over the image a craft is its cased
+  outline on a `--surface-0` silhouette. The `symbology` pass draws the bodies' occluder spheres,
+  then the filled hull meshes, depth-written with T16.d's push, then the lines; the fill is
+  opaque, its colour a uniform, drawn after tone mapping, so the meter is unchanged.
+  `photorealStatements` adds `CRAFT PHOTOMETRY: NOT YET MODELLED` while the photorealistic frame
+  is drawn and the scene has a craft, the own ship included, outside the early return for a scene
+  with no lit body; with `BODY PHOTOMETRY: NOT YET MODELLED` it composes into
+  `BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED` in that note's place. Tests: `hullOutline()`
+  refuses a bad window index; `TEST_HULL`'s occluder mesh has its 14 opaque faces and none of the
+  plate's; the overlay's meshes are filled in `--surface-0` and the wireframe's are not; against
+  the fake engine, the drawer's `symbology` pass draws the filled meshes after the spheres and
+  before every line; the precision scene's plate tests become the plate hiding nothing from the
+  seat and the hull's own edges in front of its opaque faces; the note in the photorealistic
+  style with a craft and none in the wireframe or while preparing, composed with the body note,
+  and shown with craft but no lit body. In `just test-render`, over a loaded colour: a filled
+  face reads `--surface-0` at its interior texels and leaves the colour beyond its edge and
+  behind a sphere occluder in front of it; a cased hull edge behind a window draws as with no
+  window; and a hull's own cased edge draws as in T16.d's check. By hand, hidden: captures at
+  1920 × 1080 and 1280 × 720 from `SEAT` and from `CHASE` on a photorealistic primary over a lit
+  body with a photorealistic `CHASE` instrument open, the composed note standing, the 0.5rem
+  probe passing and the least height at most 52.5rem, or a ruling asked for. Acceptance:
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene src/renderer/src/view/scenes
+src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src/displays/view`,
+  `just test-render`, the console-ux skill's scripts, `just ci`.
 - **R07.T16.c The guide's draft, for the owner.** `docs/frontend/ux-guidelines.md` alone, in one
-  `docs(guide)` commit, after T16.b, so that it states what is built: decision-r07-t8a-meter's
+  `docs(guide)` commit, after T16.e, so that it states what is built: decision-r07-t8a-meter's
   "In T16" edits, fitted to the guide as T19.d signed it off (the data-state bullet's inhibit
   sentence and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row; the `NO IMAGE TO METER`
   row's added sentence; the new Status row of the three statuses with their remedy clauses), and
@@ -1647,12 +1720,15 @@ src/renderer/src/view/post src/renderer/src/view/photometry src/renderer/src/dis
   tagged as T16's draft, ending in "the owner signs off". It also takes the two points left for
   the guide: the meter's `SELECT` legend, left "for T16's draft" by T13 after review (a `Label`
   row, or the reason a group's legend needs none), and the data-state bullet's "offers `MAN`
-  only", which reads against E5 (T19.d's open points, for the owner's next guide edit). Nothing
-  else is new: `PHOTOREALISTIC` and `BODY PHOTOMETRY: NOT YET MODELLED` are signed off (T19.d),
-  the several views' refusal adds no entry (decision-r07-t18, item 6), and the "Outlines for
-  symbology" bullet already cases every mark over the image. Tests: each status the draft adds is
-  a string in the code, in the words T16.b built. Acceptance: `pnpm exec prettier --check
-docs/frontend/ux-guidelines.md`, the console-ux skill's scripts.
+  only", which reads against E5 (T19.d's open points, for the owner's next guide edit). It also
+  drafts decision-r07-t16a's guide text, as T16.d and T16.e built it: the unit of a width, a
+  Layout bullet; a view's strokes at the display's density, in the Views bullet's paragraph on
+  both styles; the craft's silhouette, as the one exception in "Outlines for symbology"; the
+  craft note's Label row; and the added clauses of the `WIREFRAME`, `PHOTOREALISTIC` row and the
+  `TEST HULL` row. Nothing else is new: `BODY PHOTOMETRY: NOT YET MODELLED` is signed off
+  (T19.d), and the several views' refusal adds no entry (decision-r07-t18, item 6). Tests: each
+  status the draft adds is a string in the code, in the words T16.b built. Acceptance:
+  `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the console-ux skill's scripts.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -2156,7 +2232,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   measured from a sphere would meet the smooth figure with a seam of up to 21 km on an Earth.
 - **Ordering against craft.** Promotion to a mesh settles depth for bodies against depth-writing
   geometry; craft are outlines until hull art exists, and when lit hulls arrive they join the
-  promotion rule as depth-writing geometry.
+  promotion rule as depth-writing geometry. Until then a craft over the photorealistic image is a
+  `--surface-0` silhouette of its opaque faces under its cased outline, labelled
+  `CRAFT PHOTOMETRY: NOT YET MODELLED` (T16.e). The glare and bloom of a source it hides still
+  spread around it, the meter weighs the pixels it hides, and its shape is the stand-in's
+  (decision-r07-t16a, item 3).
 - **The main screen is gated** on a plan that does not exist. Its task list is written against the
   brainstorm and will be re-fitted (T22–T28 each begin so); the sessions plan may choose a command
   envelope that reshapes `MainScreenCommand`, and must accept input sent on change.
@@ -2185,7 +2265,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   covered (R02's Risks, T13 as built). As built at `ce7aeb3` the sphere occluder's `SLOPE_SCALE`
   is already 3 (RM1 validation, for graticule strokes); the one to raise is the hull faces'
   `occluder.wgsl` depth bias, `slopeScale` 2. _Built by T16.a (2026-10-06): cased over the image,
-  `slopeScale` 3 in both styles; see "Deviations in T16.a, as built"._
+  `slopeScale` 3 in both styles; see "Deviations in T16.a, as built"._ _The slope term moves into
+  the fragment and follows the strokes' scale in T16.d (decision-r07-t16a, items 1 and 2)._
 - **The camera's local state, decided 2026-09-30 by a delegated decision** (the UX decisions,
   item 14). R02's `CameraState` keeps `free` (`FreeFlight`) and `move` (`EasedMove`), a local
   view's integration state. This plan moves them into a local wrapper, so that the server-held
@@ -3614,7 +3695,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     3 ÷ √2 = 2.12 px of the cased edge's 2.25 px of coverage, and the face may hide up to 0.13 of
     the casing's outer texel there. **For the orchestrator:** keep 3, as ruled (the UX decisions,
     item 12), or raise it to about 3.2 (2.25 × √2 = 3.18), which keeps the coverage in front on
-    every slope and widens the show-through behind a slanted face by the same factor.
+    every slope and widens the show-through behind a slanted face by the same factor. _Ruled
+    (decision-r07-t16a, item 1): neither. The hull faces take the sphere occluder's slope term,
+    its magnitude in the fragment, at `occluderSlopePx`, with no hardware bias (T16.d)._
   - **Plates, as built.** Nothing changes: the label block and the marks' labels stand on their
     `--surface-0` plates (R02.T15). An instrument's slot over the primary's image is a `.panel` on
     `--surface-1`, opaque chrome with its label block on it (the guide's Views bullet: "each a
@@ -3649,10 +3732,14 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       scaled by `devicePixelRatio`), so at a ratio of 2, as on a Retina Mac, every stroke and
       casing is half a CSS pixel. It is R02's; the casing over the image now depends on it, and
       the slope bias is reasoned in device pixels too. Scale them by the ratio, or record device
-      pixels as the unit.
+      pixels as the unit. _Ruled (decision-r07-t16a, item 2): CSS pixels, drawn at
+      `max(1, devicePixelRatio)` device pixels each (T16.d)._
     - The image has no hull in it, so the sky and its stars show inside a craft's cased outline,
       where the wireframe's faces hide them. Design note 17 keeps craft as outlines until R11;
-      occluding the image under the hull's faces until lit craft exist would be a ruling.
+      occluding the image under the hull's faces until lit craft exist would be a ruling. _Ruled
+      (decision-r07-t16a, item 3): windows hide nothing; over the image a hull's opaque faces are
+      a `--surface-0` silhouette under its cased outline, labelled
+      `CRAFT PHOTOMETRY: NOT YET MODELLED` (T16.e)._
   - **Gate.** No `just ci` (the Day 2 protocol). The acceptance's vitest (32 files, 420 tests),
     the app's vitest (324 files, 5,433 tests), `just check lint` from a clean typecheck cache,
     Prettier, `just test-render` (both variants, 232 checks each, 0 uncaptured GPU errors) and the
