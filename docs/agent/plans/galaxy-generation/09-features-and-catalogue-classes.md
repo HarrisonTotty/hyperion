@@ -532,7 +532,11 @@ cell; registry golden. Acceptance:
   goldens. Tests: the young field's age histogram against (1 − φ) × budget by chi-square; the map
   unchanged bit for bit. Acceptance: `just ci` green with regenerated goldens, and the diff of
   goldens reviewed to touch only counts, never the layout of an unaffected cell's survivors
-  (candidates keep their streams).
+  (candidates keep their streams). **It lands with rendering plan R06's R06.T16.a**, in one
+  integration at this task's version (decided 2026-10-05, `decision-r06-t16a-scope.md`). R06's sky
+  census, caps and band read the field alone. So the field gives up φ only when the sky takes the
+  members in. Otherwise the sky loses φ of each population: about nine in ten of the young disc's
+  O and early-B stars, and at least a quarter of its B stars.
 
 #### P09.T3 The feature catalogue grid
 
@@ -1325,7 +1329,11 @@ for `hello`.
   with interior mutability because `SystemSource` takes `&self`. The `SystemsInRange` handler
   registers `FeatureMemberSource`, `CentreMemberSource` and `CatalogueClassSource`, and passes
   `FeatureGas` wherever it passed `NoModifiers`. Tests: eviction never changes a reply; a range
-  query over the WebSocket inside a globular returns members with their origin.
+  query over the WebSocket inside a globular returns members with their origin. Rendering plan
+  R06's R06.T16.a reads only the features' part: `FeatureCellCache`, `ClusterModelCache`,
+  `FeatureMemberSource` registered, and `FeatureGas` passed. That part may be built ahead of the
+  centre's and the catalogue classes' sources, which wait on P09.T29 and T37 (decided 2026-10-05,
+  `decision-r06-t16a-scope.md`).
 - **P09.T40.b Handlers.** `FeaturesInRange`, `FeatureDetail` and `BlackHoleState` on the CPU pool;
   `GalaxyFeatures` computed in the background and cached per universe, like the density map. Tests:
   integration tests over the WebSocket for each message, including an unknown feature ID and a
