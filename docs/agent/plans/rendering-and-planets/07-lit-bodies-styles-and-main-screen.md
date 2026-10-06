@@ -1502,8 +1502,10 @@ recorded: a Sun-like star in frame with a lit planet, hues holding in the highli
 
 #### R07.T16 Symbology over the image, and the phrases
 
-`photoreal/overlay.ts` (Design notes 16–17): R02's draw list with casing on in the photorealistic
-style; rings and hulls as cased marks until R11; DOM readouts on `--surface-0` plates; the label
+After T19.d, which is the last to edit `ExposurePanel.tsx` and R02's `exposure.ts` before it
+(decision-r07-owner-ux-signoff). `photoreal/overlay.ts` (Design notes 16–17): R02's draw list with
+casing on in the photorealistic style; rings and hulls as cased marks until R11; DOM readouts on
+`--surface-0` plates; the label
 block gains the style and `BODY PHOTOMETRY: NOT YET MODELLED` (its `METER` line is built by T19.b,
 decision-r07-t19-layout, and its `METER` and `AVG` rows are drafted by T19.b's follow-up,
 decision-r07-t19b-exposure-fit); hull edges cased over the
@@ -1525,14 +1527,14 @@ the cause beside the metered value; while it is `acquiring`, neither shows a met
 `NO IMAGE TO METER`, and `ENABLE` is held back with `NOT AVAILABLE: not yet metered`; the `MAN`
 field (T13.d) is never held back, `acquiring` included, and `INHIBIT` states
 `Then AUTO resumes only on ENABLE` under each new system inhibit as under `NO IMAGE TO METER`
-(decision-r07-t13d). Tests: under
-`LIT` with no lit body, a drawn image reads `NO LIT SIDE`, never `NO IMAGE TO METER`, after 0.5 s
-and not before; a meter change clears it at once; `AUTO` resumes when a lit body is metered. Its
-other tests: every overlay mark over the image has a casing stroke; plates are present for every
-readout; the console-ux skill's lint and contrast scripts pass. Symbology over the tone-mapped
-image is a following canvas pass with `FrameSubmission.colourLoad` `"load"` through the sRGB view,
-in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6). Acceptance:
-`just ci`; the guide edit is one commit for the owner.
+(decision-r07-t13d), and stays held back under the operator's own (decision-r07-owner-ux-signoff).
+Tests: under `LIT` with no lit body, a drawn image reads `NO LIT SIDE`, never `NO IMAGE TO METER`,
+after 0.5 s and not before; a meter change clears it at once; `AUTO` resumes when a lit body is
+metered. Its other tests: every overlay mark over the image has a casing stroke; plates are present
+for every readout; the console-ux skill's lint and contrast scripts pass. Symbology over the
+tone-mapped image is a following canvas pass with `FrameSubmission.colourLoad` `"load"` through the
+sRGB view, in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6).
+Acceptance: `just ci`; the guide edit is one commit for the owner.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -1712,6 +1714,21 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
   with the same camera, style and size submit the same passes but the histogram's, and an
   instrument submits no histogram; T8.a's metering tests pass unchanged. Acceptance: `pnpm test`,
   `just test-render`, `just ci`.
+- **R07.T19.d The owner's sign-off of `VIEW`'s wording** (decision-r07-owner-ux-signoff). After
+  T19.b's follow-up, and before T16, which starts from it. `INHIBIT` is held back under
+  `INHIBITED · OPERATOR` with `NOT AVAILABLE: the exposure is INHIBITED · OPERATOR` (R02's
+  `exposure.ts` refuses it with `already_inhibited`), the level phrase unbroken, as `ENABLE` is
+  under `AUTO`. `LIGHTING: STAR DISCS NOT RECEIVED` becomes `LIGHTING: NOT RECEIVED`,
+  `ROTATION NOT YET MODELLED` becomes `ROTATION: NOT YET MODELLED`, and `CAMERA REPORT REFUSED`
+  and `CAMERA REPORT UNANSWERED` become `CAMERA REPORT REJECTED` and `CAMERA REPORT TIMED OUT`.
+  The guide's drafts from R02.T2.f, R02.T15, R02.T17, R05.T13.b, the decision of 2026-10-02 and
+  R07 are signed off with the ruling's amendments in one `docs(guide)` commit, all but the
+  `INSTRUMENT 1`, `INSTRUMENT 2` row, which waits for the owner's look at the slots. Tests:
+  `INHIBIT` refused and described under the operator's inhibit, still offered under `AUTO` and a
+  system inhibit; the renamed strings; no draft tag left but that row's. By hand, hidden: the
+  compact `EXPOSURE` captures E3 and E7 (the trapped wireframe under `INHIBIT`) pass
+  decision-r07-t19b-exposure-fit's probe, `INHIBIT`'s row at most 36 px. Acceptance:
+  `pnpm test`, the console-ux skill's scripts, `just ci`.
 
 #### R07.T20 Several views, by hand
 
@@ -2895,7 +2912,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **For T19.d, the next task to add to column B.** Its held-back `INHIBIT` note under
     `INHIBITED · OPERATOR` (at most about 20 px, decision-r07-owner-ux-signoff) falls in column B's
     tallest state, which then passes 732 px. T19.d re-measures and raises `FULL_MIN_HEIGHT_REM`,
-    within 52.5 rem.
+    within 52.5 rem. Re-measured by T19.d: the note adds 3 px, and the least height stays
+    45.75 rem (see "Deviations in T19.d, as built").
   - **Targets' floor in the full layout.** `.view-targets`' 10 rem floor is under two rows when
     the head takes two lines (173 px). From the least height up, the list keeps two rows by
     construction: at the least height, `Targets` stands at 176 px in the camera's worst. Below it
@@ -2969,7 +2987,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     standing line `AUTO NOT AVAILABLE: NO IMAGE TO METER` still breaks inside its status in column
     B (`… NO IMAGE TO` | `METER`), where the reading above now keeps it whole. T19.d sets
     `INHIBITED · OPERATOR` unbroken in its new note, and can hold `NO IMAGE TO METER` the same way,
-    at no height.
+    at no height. Built by T19.d.
   - **Tests.**
     - `viewLayout.test.ts`: the threshold both ways; a maximised 1920 × 1080 box is full, and the
       1600 × 900 opening window compact; the least height within its 52.5 rem bound.
@@ -2990,6 +3008,123 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (field) row read `An entry sets MAN: AUTO resumes only on ENABLE`, and the row's tag adds
     R07.T19.b. The `METER` row, with the sign-off's `EXPOSURE METER` panel name, and the `AVG` row
     follow `METERED`. Prettier re-padded the nomenclature table; that change is whitespace only.
+- **The owner's sign-off (decision-r07-owner-ux-signoff, 2026-10-05, under the owner's
+  delegation; built by T19.d).** The guide's drafts from R02, R05 and R07 are signed off, 15 rows
+  with amendments, and `ELV`'s row is widened for `CAMERA ELV`. The exposure reading is not a
+  primary readout and stays 1rem, and `G` 124 now defines one as a display's headline value.
+  `ENABLE` stands, its verb "sets". `NO IMAGE TO METER` keeps its four words, as signed off.
+  **Pending, for the owner's look:** the instrument slots (the `INSTRUMENT 1`, `INSTRUMENT 2`
+  row, and the Views bullet's first sentence and its statements clause). The stated limits: at
+  1280 × 720 two slots cover most of the primary's image; they fit there only while each holds
+  one statement, beyond which the second `OPEN` is held back; and a statement appearing without
+  room sets `INSTRUMENT 2` under `INSTRUMENT 1`. The ruling gives the steps.
+- **Deviations in T19.d, as built** (2026-10-06; decision-r07-owner-ux-signoff).
+  - **Files.** Within the ruling's list, `exposure.ts`'s `enable` TSDoc takes item 3's verb,
+    "sets". Beyond it:
+    - `ViewLabelBlock.tsx`: the reading's private `partRuns` becomes the exported
+      `unbrokenRuns(text, runs)`, which `ExposurePanel.tsx`'s `exposureNote` also uses;
+    - `ViewDisplay.tsx`: the compact standing line `AUTO NOT AVAILABLE: …` goes through
+      `exposureNote` too;
+    - `styles.css`: a command row's button keeps its width (below), and the run class's comment;
+    - `viewLayout.ts`: `FULL_MIN_HEIGHT_REM`'s TSDoc parts;
+    - `ViewDisplay.test.tsx` and `ViewDisplayLayout.test.tsx`: a line holding a phrase in a run of
+      its own is found by its whole text;
+    - `styleRefusals.ts`: `PHOTOREAL_NOT_CREATED`'s TSDoc no longer calls it drafted for the owner.
+  - **Unbroken phrases.** Spans, not U+00A0: `exposureNote` sets `INHIBITED · OPERATOR` and
+    `NO IMAGE TO METER` each in a `.view-label__run` (`white-space: nowrap`), so the text, the
+    accessible descriptions and the captures' strings are unchanged. It covers every note of the
+    exposure: the reasons and the statement beside `ENABLE` and `INHIBIT`, and the standing line in
+    the panel and under the compact row. In column B the standing line now breaks
+    `AUTO NOT AVAILABLE:` | `NO IMAGE TO METER`, at no height (T19.b's follow-up's UX consider).
+  - **A command row's button keeps its width** (found by the captures). `.control`'s 2 rem least
+    width let a button shrink beside a note wider than the room: beside the new note `INHIBIT`
+    fell to about 55 px under its 81 px label, and in column B, as built by T19.b's follow-up,
+    `ENABLE` under `AUTO` fell to 70 px, its label overflowing and its note standing 10 px left of
+    `INHIBIT`'s. `.view-exposure__command > .control` now sets `flex: none`. No height changes.
+    jsdom lays nothing out, so the captures carry the check (each button's width and overflow).
+  - **`LightingState` keeps `"hosts-not-received"`.** The ruling's optional rename is not taken:
+    the value is internal, and `view/lighting/hostLights.ts` is the shading lane's, so the change
+    stays one string and a TSDoc line.
+  - **The least height stays 45.75 rem.** The note adds 3 px, not the ruling's "at most about
+    20 px" (its three-line case): beside the button there is 204.9 px, so
+    `NOT AVAILABLE: the exposure` fits and the note takes two lines, a 35 px row, in column B as in
+    compact. Column B's tallest is 731.5 px: `Style` 99.5 px plus the 43 px two-line refusal this
+    machine cannot raise, the exposure at `INHIBITED · OPERATOR` with a refused entry 365 px, the
+    meter with `METERED` 208 px, and two gaps. Column A's is 729 px. 731.5 px is 45.72 rem, which
+    rounds up to 45.75 rem, so `FULL_MIN_HEIGHT_REM` is unchanged and its TSDoc gives the new
+    parts. At the least height column B keeps 43 px in E3, the unraisable refusal's height: 0.5 px
+    to spare, by construction. The other candidate is a drawn image whose meter weighs nothing at
+    the operator's inhibit with a refused entry (E8 below): column B is 674 px there, `Style`
+    99.5 px, the exposure 408 px with its standing line and both notes, the meter 150.5 px with
+    `NO IMAGE TO METER` and no reading, and two gaps, so 717 px with the refusal. E3 stays the
+    tallest.
+  - **The harness** (hidden, not committed; `.git/rm23-scratch/r07-views/shots-t19d/`, from
+    T19.b's follow-up's, with `table.py`).
+    - `:1` is gone since the owner's re-login, and `:0` is the session. The orchestrator approved
+      the offscreen proxy under `DISPLAY=:0`: no native window at all, `--disable-vulkan-surface`,
+      `--force-device-scale-factor=1`, the relaunch refused, in a capped scope with
+      `TasksMax=4096`.
+    - Each window is made at its final size and never resized; the page and the view box are only
+      checked, and every run's were exact. The least height's page is the box plus the 158 px of
+      chrome.
+    - `trappedExposure` gains E7: after E6, `INHIBIT`, then `99`. The own-ship runs gain E3 before
+      E5, and the full runs gain E8 after E7: `PRECISION TEST` drawn photorealistic under
+      `METER LIT`, whose bodies are black with no star disc, so that the meter weighs nothing,
+      with `99` refused. The measures gain each note's runs with their line boxes, the standing
+      line, and each button's width and overflow.
+  - **By hand, measured** (hidden, never shown; 2026-10-06, the RTX 3080).
+    - **The runs:** `full`, `max1080` (856 px box), `atfull` (732 px), `belowfull` (731 px,
+      compact), `compact720` (562 px), `zoom150` (565 px), `zoom125` (708 px), `ownship720` and
+      `ownship150`. All 123 states pass every check of decision-r07-t19b-exposure-fit item 1,
+      the 0.5 rem probe included, and no relaunch, GPU-process restart or failure was logged.
+    - **Compact, `EXPOSURE` open: the panel, `Targets` and the spare**, in px:
+
+      | State | 1280 × 720 | 150% | 125% | Own ship, 720p | Own ship, 150% |
+      | --- | --- | --- | --- | --- | --- |
+      | E3 `INHIBITED · OPERATOR`, refused | 268.5 / 194 / 61 | 267.8 / 198 / 66 | 268.1 / 341.2 / 208 | 268.5 / 215.5 / 102 | 267.8 / 219.5 / 107 |
+      | E7 trapped, `INHIBIT`, refused | 294 / 168.5 / 35 | 293.3 / 172.5 / 40 | 293.6 / 315.7 / 183 | 294 / 190 / 77 | 293.3 / 194 / 82 |
+
+      E1, E2 and E4–E6 are as T19.b's follow-up measured them. E6 is still the worst, at 18 px
+      (720p), 23 px (150%) and 166 px (125%), against the 8 px required.
+    - **`INHIBIT`'s row** under `INHIBITED · OPERATOR` is 35 px (at most 36), its note two lines:
+      `NOT AVAILABLE: the exposure is` | `INHIBITED · OPERATOR` in compact, and
+      `NOT AVAILABLE: the exposure` | `is INHIBITED · OPERATOR` in column B. The phrase stands on
+      one line box in every capture, so the note never breaks at the `·`. In E7 `ENABLE` is held
+      back by `NO IMAGE TO METER` and `INHIBIT` by its note: the view offers `MAN` only.
+    - **Full, column B:** the exposure panel in E1–E8 is 326.5, 348, 365, 306, 386.5, 408, 408 and
+      408 px, and the column 612.5, 634, 688.5, 609.5, 494, 515.5, 515.5 and 674 px. In E8 the
+      label block reads `ROTATION: NOT YET MODELLED` and `LIGHTING: NOT RECEIVED`. The least spare
+      at the 53.5 rem box is 167 px in column B (E3) and 140 px in `Camera`; at the least height,
+      43 px in column B (E3) and 16 px in column A.
+  - **Tests.**
+    - `exposure.test.ts`: `INHIBIT` refused with `already_inhibited` under the operator's inhibit,
+      and still taken under `AUTO` and `INHIBITED · NO IMAGE TO METER`.
+    - `ExposurePanel.test.tsx`: under `INHIBITED · OPERATOR`, `INHIBIT` held back and described by
+      its reason in its consequence's place, and a press changing nothing; `ENABLE` offered beside
+      a metered value and held back by `NO IMAGE TO METER` without one; the level phrase in one
+      run; `NO IMAGE TO METER` in one run in the standing line and beside `ENABLE`. The test that
+      said `INHIBIT` states nothing there is replaced.
+    - The renamed strings, where the old ones were asserted.
+    - `ViewDisplayLayout.test.tsx`: the compact layout's folded-exposure status under the row
+      holds `NO IMAGE TO METER` in one run (it fails with the line set as plain text).
+    - `rg -F` over `apps/` and `docs/frontend/` finds none of the four old strings, and finds
+      `owner signs off` on the `INSTRUMENT 1`, `INSTRUMENT 2` row alone.
+  - **Gate.** The acceptance command (453 tests), the app's vitest (319 files, 5,281 tests),
+    `just check lint` from a clean tsc cache, Prettier and the console-ux skill's lint (0 errors,
+    the 11 old checks), contrast and glyph scripts. No `glyphs.py --ranges`, since no U+00A0 is
+    used. No `just test-render`: the smoke draws none of the changed statuses or rules, and no
+    shader, `view/engine/` or `src/smoke/` file changed. No `just ci` (the Day 2 protocol).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, with no must-fix. Fixed: a
+    test of the compact status line's run, the `ENABLE` test split in two, own-ship E3 and E8
+    captured, T16's re-wrapped lines, and the stale remark in `styleRefusals.ts`.
+  - **Open, for the orchestrator (the UX review's considers).**
+    - The data-state bullet's "A view with nothing to meter offers `MAN` only" reads, taken
+      literally, against E5, where `INHIBIT` stays offered to take a system inhibit over (the
+      commanding bullet; the ruling, item 1, reason 3). A wording point for the owner's next guide
+      edit, such as "offers no level but `MAN`"; the signed-off text is left as ruled.
+    - In the B612 Mono readings the gap after a part's `·` looks wider than the one before it
+      (`EV100 11.7 INHIBITED ·  OPERATOR`, compact E7). It predates this task (`readingParts`,
+      T19.b); most likely the font's middle dot sits left of its cell's centre. Not measured.
 - **Deviations in T19.c, as built** (2026-10-05).
   - **Files.** `viewFrameDrawer.ts`: `ViewFrameInputs.meter` (`MeterMode | null`),
     `ViewFrameDrawer.takeHistogram` and `makeViewFrameDrawer`, which makes a view's drawer at once
@@ -4054,10 +4189,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       such field. As built here, the `MAN` field selected its fill, so typing replaced it, but
       `CURSOR`'s and the chart's fields left the caret after the restored value, so typing appended
       to it. Built by T13.d's second follow-up.
-  - **For the owner (the ruling's unruled aside).** `INHIBIT` under `INHIBITED · OPERATOR` is now
-    the only level where it is offered with nothing beside it (accepted as a no-op). Whether it
-    should be held back with `NOT AVAILABLE: the exposure is INHIBITED` (about 300 px, which wraps
-    in the as-built column) is left as built.
+  - **Ruled (decision-r07-owner-ux-signoff, item 1; built by T19.d).** `INHIBIT` under
+    `INHIBITED · OPERATOR` is held back with `NOT AVAILABLE: the exposure is INHIBITED · OPERATOR`,
+    as `ENABLE` is under `AUTO`. Offered, it advertised in `--accent` a command with no effect,
+    whose press showed nothing. The note takes two lines in the compact column (3 px) and at most
+    three in column B.
   - **Gate.** The acceptance command (920 tests), the app's vitest (4,832), `just check lint`,
     Prettier and the console-ux skill's scripts. No `just test-render`, since no shader, `view/engine/` or
     `src/smoke/` file changed, and no `just ci` (the Day 2 protocol).
@@ -4147,13 +4283,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     or `src/smoke/` file changed. No `just ci` (the Day 2 protocol).
   - **Reviewed** by the TypeScript and UX reviewers, with no must-fix or should-fix. The UX
     review's one point is open below.
-  - **Open (for the orchestrator, from the UX review; the ruled words are built).** The guide's
-    bullet says a field "enters its value with `Enter` or when it is left", so its "and so does
-    entering it emptied" now also says that leaving an emptied field selects its value, where the
-    ruling leaves leaving unchanged. Nothing shows it, since the focus has gone, but the sentence
-    sets a requirement. The `MAN` (field) row and the fields' remarks keep the two apart. Options:
-    as ruled, or "…selected so that typing replaces it, and so does `Enter` on it emptied; left
-    emptied, it shows the value. Neither is refused." A draft for the owner either way.
+  - **Ruled (decision-r07-owner-ux-signoff, item 5; built by T19.d).** The bullet reads "… has a
+    way out that enters nothing and is never refused: `Escape` … shows the field's value again,
+    selected so that typing replaces it; `Enter` in the emptied field does the same; left emptied,
+    the field shows its value." It no longer requires a selection on leaving, and "never refused"
+    covers all three acts.
   - **By hand, for the owner** (a focused, visible window; jsdom gives only the selection's
     offsets): `Escape` and an emptied `Enter` in each of the five fields, the value highlighted in
     `--accent` and replaced by the next key, also after a click that left the caret inside the

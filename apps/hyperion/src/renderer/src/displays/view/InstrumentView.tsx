@@ -105,7 +105,7 @@ function instrumentLines(
  * width under its label block and canvas, while they hold: `POSITIONS AS SEEN FROM SHIP`,
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`) unless the primary's block shows the same
- * line (decision-r07-t19-layout, item 5). `ROTATION NOT YET MODELLED`, about the scene's bodies, is
+ * line (decision-r07-t19-layout, item 5). `ROTATION: NOT YET MODELLED`, about the scene's bodies, is
  * the primary's alone. Its list and its camera and style controls are the side column's while
  * `CONTROLS` points at it.
  */

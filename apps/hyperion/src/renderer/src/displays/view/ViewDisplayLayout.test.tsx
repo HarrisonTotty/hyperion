@@ -518,7 +518,7 @@ describe("VIEW's instruments at both sizes (R07.T19.b)", () => {
   });
 
   it("states the lighting on a photorealistic instrument beside a wireframe primary, not beside a photorealistic one", async () => {
-    const lighting = "LIGHTING: STAR DISCS NOT RECEIVED";
+    const lighting = "LIGHTING: NOT RECEIVED";
     const view = await setup({ store: await nominalStore() });
     await chooseScene(view, "PRECISION TEST");
     await openInstrument(view, "INSTRUMENT 1");

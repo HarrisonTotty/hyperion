@@ -1348,6 +1348,13 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   line, written `STARS <n> DRAWN · <m> WITHOUT V · RADII <e>/<d>/<c>/<a>` with the list's
   placeholder convention; the `SYSTEM BARYCENTRIC`, `BODY` and `GALACTIC` frame rows gain the
   view's use, marked `(R02.T2.f draft)`. Design notes 6, 7 and 11 carry decisions 16, 13 and 15.
+  These rows, with R02.T15's and R02.T17's, were signed off with amendments on 2026-10-05 under
+  the owner's delegation (decision-r07-owner-ux-signoff; built by R07.T19.d). The amendments:
+  `INHIBIT` held back under the operator's own inhibit, and `ENABLE` "sets" `AUTO`;
+  `NO IMAGE TO METER`'s meaning since the instrument views, and "who inhibited it, or why";
+  `ROTATION: NOT YET MODELLED`, in the composed form; `CAMERA REPORT REJECTED` and
+  `CAMERA REPORT TIMED OUT`, the ship's request outcomes; the count line's `ly`; the scene rows'
+  "the ship's system"; `STYLES`; and the test designations in one row.
 - **Deviations in R02.T7.a, as built.** `Quaternion` operations are in `view/camera/quaternion.ts`
   (`quaternion`, `IDENTITY_QUATERNION`, `quaternionFromAxisAngle`, `multiply`, `conjugate`,
   `rotate`, `rotationRows`). Matrices are `Float32Array`s in WGSL's column-major order:

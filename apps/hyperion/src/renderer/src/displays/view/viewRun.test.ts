@@ -193,19 +193,19 @@ describe("the label block", () => {
     expect([offHull(seat), offHull(chase)]).toEqual([false, true]);
   });
 
-  it("says ROTATION NOT YET MODELLED while a body's rotation is not modelled", () => {
+  it("says ROTATION: NOT YET MODELLED while a body's rotation is not modelled", () => {
     expect(labelStatements(startRun(unrotated(frameChangeScene())))).toEqual([
-      "ROTATION NOT YET MODELLED",
+      "ROTATION: NOT YET MODELLED",
     ]);
   });
 
   it("adds the terrain annunciation after the other statements while it is shown", () => {
     const run = startRun(unrotated(frameChangeScene()));
     expect(labelStatements(run, "TERRAIN: STREAMING")).toEqual([
-      "ROTATION NOT YET MODELLED",
+      "ROTATION: NOT YET MODELLED",
       "TERRAIN: STREAMING",
     ]);
-    expect(labelStatements(run, null)).toEqual(["ROTATION NOT YET MODELLED"]);
+    expect(labelStatements(run, null)).toEqual(["ROTATION: NOT YET MODELLED"]);
   });
 
   it("names the system and galactic frames", () => {
@@ -394,7 +394,7 @@ describe("the style", () => {
       ...albedo,
     ]);
     expect(photorealStatements(photoreal, "hosts-not-received", "photorealistic", [])).toEqual([
-      "LIGHTING: STAR DISCS NOT RECEIVED",
+      "LIGHTING: NOT RECEIVED",
     ]);
   });
 

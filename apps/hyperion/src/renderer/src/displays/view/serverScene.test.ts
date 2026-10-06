@@ -125,16 +125,16 @@ describe("where the server's scene stands", () => {
 });
 
 describe("a camera report the server did not accept", () => {
-  it("reads as refused with its reason, or as timed out", () => {
+  it("reads as rejected with its reason, or as timed out", () => {
     expect([
       cameraAnnunciation({ kind: "refused", reason: "a camera is outside the scene's reach" }),
       cameraAnnunciation({ kind: "timed_out" }),
     ]).toEqual([
       {
-        text: "CAMERA REPORT REFUSED: a camera is outside the scene's reach",
+        text: "CAMERA REPORT REJECTED: a camera is outside the scene's reach",
         standing: "refused",
       },
-      { text: "CAMERA REPORT UNANSWERED", standing: "fault" },
+      { text: "CAMERA REPORT TIMED OUT", standing: "fault" },
     ]);
   });
 });

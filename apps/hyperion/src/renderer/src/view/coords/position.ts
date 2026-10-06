@@ -44,7 +44,7 @@ export interface FrameOrigins {
   /**
    * The body's rotation from its body-fixed axes to its body frame, or `null` where the rotation
    * is not modelled (plan R02, Design note 14): the body-fixed axes are then taken as the body
-   * frame's, and the view says `ROTATION NOT YET MODELLED`.
+   * frame's, and the view says `ROTATION: NOT YET MODELLED`.
    */
   bodyFixedRotation(body: BodyIdHex): Rotation3 | null;
 }

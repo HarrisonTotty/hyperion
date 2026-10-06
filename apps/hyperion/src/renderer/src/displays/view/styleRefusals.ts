@@ -15,7 +15,8 @@ export type StyleRefusals = Readonly<Record<RenderStyle, string | null>>;
 
 /**
  * The refusal where the photorealistic view's pipelines could not be made: a fault of the
- * console's own graphics, shown in `--status-caution` while it lasts (drafted for the owner).
+ * console's own graphics, shown in `--status-caution` while it lasts (the guide's
+ * `GRAPHICS STYLE REFUSED`).
  */
 export const PHOTOREAL_NOT_CREATED =
   "GRAPHICS STYLE REFUSED: photorealistic style not created, relaunch to retry";

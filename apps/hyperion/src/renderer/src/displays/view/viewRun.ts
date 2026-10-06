@@ -436,7 +436,7 @@ export function cameraReading(camera: CameraState): string {
  * style, the camera preset ({@link cameraReading}), the field of view and the exposure with its
  * level, and the star source;
  * the scene's name in a kept scene; `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull;
- * `ROTATION NOT YET MODELLED` while a body's rotation is not modelled.
+ * `ROTATION: NOT YET MODELLED` while a body's rotation is not modelled.
  *
  * @param stale - Whether the server's scene is stale (`useScene`'s `stale`): its time, held where
  *   the scene went stale, then reads as the guide's stale value.
@@ -491,7 +491,7 @@ export function labelStatements(
     statements.push(POSITIONS_FROM_SHIP);
   }
   if (run.scene.bodies.some((body) => body.rotation === null)) {
-    statements.push("ROTATION NOT YET MODELLED");
+    statements.push("ROTATION: NOT YET MODELLED");
   }
   if (terrain !== null) {
     statements.push(terrain);
