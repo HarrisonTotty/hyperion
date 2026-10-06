@@ -3326,7 +3326,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `PHASE TEST`'s bodies, for T20 and the shading lane. The primary, whose code path changed but
     not its passes: GPU 2.77–2.81 ms per frame (its histogram 0.024 ms) against 2.66–2.80 ms for
     the inline loop before, measured the same way; CPU 7.8–8.3 ms per draw against 7.1–10.9 ms,
-    within the load's spread. T20 measures on a quiet machine.
+    within the load's spread. T20 measures on a quiet machine. _Explained in "The photorealistic
+    view's per-draw cost, investigated": a small disc's sampling, about 2 million cycles a view._
   - **Gate.** No `just ci` (the Day 2 protocol). `just test-render`, since R07's renderer changed.
 - **Deviations in the T20 and T21 harnesses, as built** (2026-10-05; the harnesses only, the runs
   being the owner's).
@@ -3450,8 +3451,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     and 3.88 ms (median, 95th percentile) on high, 8.31 and 9.34 ms on low; the GPU process's
     time a canvas 0.95 ms (high) and 0.61–2.41 ms (low). A photorealistic instrument at 240 × 180
     px took 4.8–5.8 ms of GPU time a draw, the `discs` pass's cost per draw that T19.c found
-    (1.74 ms then), grown: a finding for the shading lane. Earlier smokes, before the windows were
-    clipped and with `gpu` traced, read the GPU process's time a canvas at 1.4–2.4 ms.
+    (1.74 ms then), grown: a finding for the shading lane (_the same cycles at a lower clock; see
+    "The photorealistic view's per-draw cost, investigated"_). Earlier smokes, before the windows
+    were clipped and with `gpu` traced, read the GPU process's time a canvas at 1.4–2.4 ms.
     `just child-window-check --hidden --seconds 6` (load average 4.3, with
     `--disable-vulkan-surface`), run three times: the child opened (0 × 0, offscreen, as R01.T13
     found); its view was dropped on its `pagehide`, before the opener's next frame in two of them and
@@ -5266,3 +5268,116 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       here with nothing saying so.
     - Whether a free camera in the planet's frame stands for the plan's "ship in a moon's
       penumbra".
+- **The photorealistic view's per-draw cost, investigated** (2026-10-06; the shading lane, from
+  T19.c's 1.87 ms an instrument frame and the T20 smoke's 4.8–5.8 ms).
+  - **The cause: a small disc's sampling, run in series in a few fragments.** A disc under 32 px
+    (`SMALL_DISC_PX`) takes 8 × 8 cells in every pixel, and each cell within two cell widths of the
+    limb takes up to nine points (T8.a's sampling). A fragment runs its 64 cells one after another,
+    and a warp across the limb runs the nine-point branch at a cell for any lane that needs it:
+    about 576 shades in series, each about 3,500 cycles, 2.0 million cycles. A disc of 4–31 px has
+    at most about 1,200 fragments, so the GPU holds a handful of warps and waits on the longest one.
+    That chain sets the pass's time, whatever the view's size. In `PHASE TEST` the half planet is
+    13 px across in a 240 px instrument at 60° (62 px in the primary), and the giant a 14 px disc at
+    the primary's edge.
+  - **How it was measured.** Hidden runs on the RTX 3080, the window offscreen at 1920 × 1080 and
+    never resized, `--hyperion-gpu-timing`, `PHASE TEST` with the primary (1120 × 900) and both
+    instruments (240 × 180) photorealistic in `FREE`, 6 s phases. Each view's GPU time per pass was
+    summed over the resolves its draw numbered, through temporary counters never committed. The
+    GPU's clocks were logged by `nvidia-smi` every 250 ms; load averages 5–15, another lane's
+    Electron sometimes on the GPU. The harness is
+    `/home/quantum/gh/hyperion/.git/rm23-scratch/r07-shading/cost-t19/` (`run-cost.sh`,
+    `hook-cost.js`, `instrumentation.patch`, `cycles.js`, the raw logs).
+  - **The evidence.** Times are medians of the `discs` pass; cycles are the time at the phase's
+    median graphics clock.
+    - The cycles hold while the clocks move: an instrument at 60° takes 2.01–2.02 million cycles
+      at 1,140–1,980 MHz (1.02 ms at 1,980 MHz, 1.77 ms at 1,140 MHz), and 2.18 million at
+      510 MHz (4.28 ms). The memory clock, 810 to 9,501 MHz, changes nothing: the chain is
+      arithmetic latency, not memory.
+    - Not per pixel: at 30°, 45°, 90° and 120° (discs of 4–29 px) the instrument takes 1.87–2.05
+      million cycles. At 20° (43 px, so one cell inside and 4 × 4 on the limb) it takes 0.47
+      million, and at 10° (87 px) 0.54 million.
+    - Per cell: a build with 4 × 4 cells below 32 px takes 0.54 million, the 16 cells' share of 64.
+    - Planetshine's two sources are 41% of a shade: a build without them takes 1.18 million.
+    - The phase table's fetches are off the chain: a build fetching fixed texels takes 1.99
+      million.
+    - Two small discs in one view overlap rather than add: with the giant also in the instrument,
+      2.17 million.
+    - The rest of an instrument's frame is small: bloom 0.056 ms (0.116 ms in the primary, 23 times
+      larger), tone mapping 0.009 ms, sky 0.003 ms, symbology 0.008 ms, no histogram, all at
+      1,980 MHz. Its scene target is its own size. Uploads, pipelines and bind groups cost no GPU
+      time in a pass.
+  - **Why the T20 smoke read 4.8–5.8 ms, and 9.2 ms in its second run.** Its phase was a
+    wireframe primary with one photorealistic instrument. The GPU idles there, and the driver
+    drops its clocks: in three of this harness's four runs of the phase to medians of
+    510–780 MHz (P5), and in the fourth it held 1,800 MHz (1.21 ms). The same 2.2 million cycles
+    read 4.28 ms at 510 MHz, and 9.2 ms is them at about 240 MHz, near the card's floor. T19.c's
+    1.87 ms, with all three views photorealistic, was the chain at about 1,150 MHz.
+  - **Cut, keeping the output: a disc wholly off the view draws nothing.**
+    - `sphereScreenRect` gives the whole view to a sphere with any silhouette corner behind the
+      near plane, which a body behind the camera, or beside it across the camera's plane, has.
+      That body's two draws covered every pixel, each fragment rejecting itself. `PHASE TEST`'s
+      full planet stands 90° off the axis.
+    - `planLitBodies` now drops the disc record of a body wholly beyond a side plane widened by
+      `OUTSIDE_VIEW_MARGIN_PX`, 8 px (`sphereOutsideView`, `bodies/regime.ts`). Its regime is kept.
+    - The primary's `discs` pass falls from 2.80 to 2.26–2.28 million cycles (−19%: 1.42 to
+      1.15 ms at 1,980 MHz). The instruments' is unchanged: there the whole-view draws cost
+      nothing measurable. The cut grows where the GPU is bound by throughput rather than latency:
+      the UHD 620 at 1280 × 720, or a 4K view.
+    - Tested (`draw.test.ts`, `regime.test.ts`):
+      - Such a body, beside or behind the camera, keeps its regime and has no record, as a disc
+        and, promoted, as a mesh with no figure and no limb. Both tests fail before the change.
+      - Spheres just beyond each widened plane (beside the view, level with a corner, across the
+        camera's plane, behind) leave no pixel the disc's twin (`rasteriseDisc`) would draw. The
+        sweep takes 10°, 60° and 120° across a 72 × 40 and a 40 × 72 view (whose height spans
+        144°), 3 and 300 radii, and a sphere, f = 0.098 and the record's cap f = 0.2 with an
+        oblique pole. With no margin 21 of its 36 cases draw pixels; from 1 px none do.
+      - A sphere that the edge cuts, or whose limb is a pixel past it, is kept.
+    - `just test-render` (SwiftShader, 2026-10-06): both variants exit 0, 255 checks each, none
+      failing, no uncaptured GPU error. All 55 captures a variant are byte-identical to the merged
+      base's, run first with the change stashed, and the two variants' to each other. The base's
+      run failed only the histogram check that times out under load, as recorded for T10.b, and so
+      stopped before `no-subgroups`. Against T10.c's captures only R05's three spike craft frames
+      moved, in both variants, as they do in the base: T16.a's hull bias, merged in. The review's
+      changes after the run rename two locals and touch only comments and tests.
+  - **Options for the small disc's chain (a design change, for a ruling).**
+    - (a) Fewer cells as the disc grows below 32 px, at 8 × 8 near the 3 px switch: for example
+      n = min(8, max(4, ⌈48 ÷ d⌉)) for a disc d px across. The 4 × 4 build is its measure: −73% (an
+      instrument's 2.01 to 0.54 million cycles, 1.02 to 0.27 ms at 1,980 MHz, 4.3 to about 1.1 ms
+      at 510 MHz). It moves every capture with a disc of about 7–31 px, and T8.a's sweep (3, 3.3 and
+      6 px within 1%), the phase scene's limb and terminator to half a pixel and the Saturn
+      extents must hold again.
+    - (b) The cells in parallel: a compute pass shades each small disc's cells one a thread and sums
+      each pixel's in the cells' order, and the disc's draws read the sums. The chain falls to one
+      cell's (three limb angles and up to nine shades, about 35,000 cycles), and the cost becomes
+      throughput, under 0.1 ms an instrument here. The output stays, but for any difference in how
+      the compiler fuses the two stages' arithmetic. It needs a new pass, its buffers, its twin and
+      its tests: the larger change.
+    - (c) Cheaper shades with the same output: the per-draw rows and directions hoisted out of
+      `shade`. At most 10–20%, since the star's horizon term and planetshine are per point. Any
+      change to the order of the shader's arithmetic risks a last-bit difference from the twin.
+    - (d) Nine points only in the cells the limb crosses, not those within two cell widths of it.
+      This changes the limb's integral, and a warp still takes the nine-point branch for any lane
+      that needs it.
+    - The lane's lean: (a), the smallest change for most of the gain; (b) if the output must stay.
+  - **Projected on the UHD 620 (an estimate; the owner's T17 and T20 runs settle it).** The chain
+    is about 576 dependent shades on any GPU. Taking Gen9 at 3,000–7,000 cycles a shade gives
+    1.2–4 million cycles: about 1–4 ms at its 1.1 GHz, and 4–14 ms at its 300 MHz floor. Its
+    throughput alone, for the same work in SIMD8 with the same divergence, would take about 2 ms.
+    - On the low setting, one photorealistic view at most. A photorealistic primary with two
+      wireframe instruments carries one chain where a small disc is in view, as `PHASE TEST`'s
+      giant is: 1–4 ms of the 33 ms. A wireframe primary with a photorealistic and a wireframe
+      instrument carries one chain on each frame the instrument draws, against 0.8 T (13.3 ms) at
+      60 Hz. It passes at full clock and may miss at the floor, where an idle GPU's clocks may sit,
+      as this machine's did in that phase.
+    - On high, with both instruments and the primary photorealistic, up to three chains, about
+      3–12 ms at full clock.
+    - The figures scale with the clock, so the owner's runs should record the GPU's clock beside
+      each pass time (on Intel, `gt_cur_freq_mhz` under `/sys/class/drm/card0/`).
+  - **Left open, not measured apart.**
+    - R06's host disc is a full-view triangle for every host of 3 px or more, on the view or not.
+    - R02's wireframe occluder spheres take the same whole-view rectangle behind the camera
+      (`packWireframe`).
+    - `sphereFootprint` (T9) gives such a body the whole view's circle, so once a view writes
+      depth a body off the view is promoted with the writer and promotes every disc in turn: the
+      mesh test above promotes a body clear of both. Nothing changes on screen today, since no
+      view writes depth. Taking `sphereOutsideView` there too would end it, before R10.

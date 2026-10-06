@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { add, cross, dot, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   aHostDisc,
   aLitBody,
@@ -465,6 +465,29 @@ describe("the plan", () => {
     const { body, hosts } = scene(1e6, 0);
     const plan = planLitBodies([body], hosts, OPTIONS, new Map());
     expect(plan.discs).toHaveLength(0);
+  });
+
+  it("draws no disc wholly off the view, beside the camera or behind it, and keeps its regime", () => {
+    // PHASE TEST's full planet stands 90° off the axis, across the camera's plane, where its
+    // rectangle was the whole view: two draws over every pixel for none of its own.
+    const { body, hosts } = scene(2e8, 0);
+    const placed = (id: string, centreM: Vec3): LitBodyInput => ({
+      ...body,
+      id,
+      centreM,
+    });
+    const beside = placed("0200080020000000.0401", vec3(2e8, 0, 0));
+    const behind = placed("0200080020000000.0402", vec3(0, 3e7, 2e8));
+    const plan = planLitBodies(
+      [body, beside, behind],
+      hosts,
+      OPTIONS,
+      new Map([body, beside, behind].map((each) => [each.id, "disc" as const])),
+    );
+    expect(plan.discs.map((record) => record.body)).toEqual([body.id]);
+    expect(plan.steps.filter((step) => step.kind === "disc")).toHaveLength(1);
+    expect(plan.regimes.get(beside.id)).toBe("disc");
+    expect(plan.regimes.get(behind.id)).toBe("disc");
   });
 });
 
@@ -1153,6 +1176,31 @@ describe("mesh bodies (T9)", () => {
     );
     expect(limbs).toEqual([MOON, PLANET]);
     expect(plan.steps.filter((step) => step.kind === "disc")).toHaveLength(1);
+  });
+
+  it("draws no figure and no limb for a mesh body wholly off the view, and keeps its regime", () => {
+    const { bodies, hosts } = sceneOfThree();
+    const planet = bodies[0];
+    if (planet === undefined) {
+      throw new Error("the scene has no planet");
+    }
+    // Beside the camera, across its plane: its footprint is the whole view's, so the depth writer
+    // over the planet promotes it too (and, through it, the body clear of both).
+    const beside: LitBodyInput = {
+      ...planet,
+      id: "0200080020000000.0304",
+      centreM: vec3(2e8, 0, 0),
+    };
+    const writer = sphereFootprint(planet.centreM, 6.371e6, CAMERA, VIEWPORT);
+    const all = [...bodies, beside];
+    const plan = planLitBodies(
+      all,
+      hosts,
+      { ...OPTIONS, depthWriters: writer === null ? [] : [writer] },
+      new Map(all.map((b) => [b.id, "disc" as const])),
+    );
+    expect(plan.regimes.get(beside.id)).toBe("mesh");
+    expect(plan.meshes.map((m) => plan.discs[m.index]?.body)).not.toContain(beside.id);
   });
 
   it("promotes nothing without a depth writer", () => {

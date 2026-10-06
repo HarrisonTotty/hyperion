@@ -1,19 +1,24 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import { add, cross, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, cross, norm, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { angularDiameterPx } from "../wireframe/bodies";
+import { sphereScreenRect } from "../wireframe/submit";
+import { type DiscRecord, rasteriseDisc } from "./discShading";
 import {
   type LitRegime,
   type LitSphere,
   litRegimes,
   GAS_GIANT_FULL_PASS_BOUNDARY_M,
+  OUTSIDE_VIEW_MARGIN_PX,
   POINT_BELOW_PX,
   promoteOverlapping,
   type ScreenCircle,
   sphereFootprint,
+  sphereOutsideView,
 } from "./regime";
 
 const RAD_PER_DEG = Math.PI / 180;
@@ -238,5 +243,131 @@ describe("a sphere's footprint (T9)", () => {
 
   it("is null for a sphere behind the camera", () => {
     expect(sphereFootprint(vec3(0, 0, 2e7), 6.371e6, CAMERA, HD)).toBeNull();
+  });
+});
+
+describe("a sphere wholly off the view (R07.T19's per-draw cost)", () => {
+  // Small, so that the disc's twin tests every pixel quickly; the margin is in pixels. The tall
+  // view's height spans 144° at a 120° width.
+  const SMALL: Viewport = { widthPx: 72, heightPx: 40 };
+  const TALL: Viewport = { widthPx: 40, heightPx: 72 };
+  const RADIUS_M = 6.371e6;
+
+  /** A body's disc record over the whole of `viewport`, for the twin's own per-pixel test. */
+  function wholeViewRecord(
+    centreM: Vec3,
+    pole: Vec3,
+    flattening: number,
+    viewport: Viewport = SMALL,
+  ): DiscRecord {
+    const distanceM = norm(centreM);
+    return {
+      body: BODY,
+      rect: { leftPx: 0, topPx: 0, rightPx: viewport.widthPx, bottomPx: viewport.heightPx },
+      direction: scale(centreM, 1 / distanceM),
+      radiusOverDistance: RADIUS_M / distanceM,
+      pole,
+      polarOverEquatorial: 1 - flattening,
+      interiorSamples: 1,
+      limbSamples: 1,
+      surface: { kind: "uniform", law: PROVISIONAL_PHOTOMETRY.law },
+      tableRows: [0],
+      exposureOverPi: 1,
+      lights: [],
+      occluders: [],
+      secondaries: [],
+    };
+  }
+
+  /**
+   * Centres just beyond each side plane widened by the margin, at `distanceM` along the plane:
+   * beside the view, level with its corner, across the camera's plane (90° off the axis) and
+   * behind the camera.
+   */
+  function justBeyond(camera: ProjectionCamera, viewport: Viewport, distanceM: number): Vec3[] {
+    const tanHalf = Math.tan(camera.fovXRad / 2);
+    const marginTan = (OUTSIDE_VIEW_MARGIN_PX * 2 * tanHalf) / viewport.widthPx;
+    const tanX = tanHalf + marginTan;
+    const tanY = (tanHalf * viewport.heightPx) / viewport.widthPx + marginTan;
+    const sides = [
+      { out: vec3(1, 0, 0), along: vec3(0, 1, 0), tan: tanX, other: tanY },
+      { out: vec3(-1, 0, 0), along: vec3(0, 1, 0), tan: tanX, other: tanY },
+      { out: vec3(0, 1, 0), along: vec3(1, 0, 0), tan: tanY, other: tanX },
+      { out: vec3(0, -1, 0), along: vec3(1, 0, 0), tan: tanY, other: tanX },
+    ];
+    return sides.flatMap(({ out, along, tan, other }) => {
+      const normal = normalise(add(out, vec3(0, 0, tan)));
+      const inPlane = add(scale(out, tan), vec3(0, 0, -1));
+      return [inPlane, add(inPlane, scale(along, other)), along, scale(inPlane, -1)].map((p) =>
+        add(scale(normalise(p), distanceM), scale(normal, RADIUS_M * (1 + 1e-6))),
+      );
+    });
+  }
+
+  const FIGURES = [
+    { figure: "a sphere", pole: vec3(0, 1, 0), flattening: 0 },
+    { figure: "Saturn's f = 0.098", pole: vec3(1, 0, 0), flattening: 0.098 },
+    { figure: "the record's cap f = 0.2, its pole oblique", pole: vec3(1, 1, 1), flattening: 0.2 },
+  ];
+  const cases = [SMALL, TALL].flatMap((viewport) =>
+    [10, 60, 120].flatMap((fovDeg) =>
+      [3, 300].flatMap((distanceRadii) =>
+        FIGURES.map(({ figure, pole, flattening }) => ({
+          view: `${viewport.widthPx} × ${viewport.heightPx}`,
+          viewport,
+          fovDeg,
+          distanceRadii,
+          figure,
+          pole: normalise(pole),
+          flattening,
+        })),
+      ),
+    ),
+  );
+
+  it.each(cases)(
+    "leaves no pixel the disc would draw: $figure at $distanceRadii radii, $fovDeg° across $view",
+    ({ viewport, fovDeg, distanceRadii, pole, flattening }) => {
+      const camera = { orientation: IDENTITY_QUATERNION, fovXRad: fovDeg * RAD_PER_DEG };
+      const centres = justBeyond(camera, viewport, distanceRadii * RADIUS_M);
+      expect(centres.every((c) => sphereOutsideView(c, RADIUS_M, camera, viewport))).toBe(true);
+      const drawn = centres.flatMap((c) =>
+        rasteriseDisc(wholeViewRecord(c, pole, flattening, viewport), camera, viewport),
+      );
+      expect(drawn).toEqual([]);
+    },
+  );
+
+  it("keeps a sphere the view's edge cuts", () => {
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD_PER_DEG };
+    const tanHalf = Math.tan(camera.fovXRad / 2);
+    const onEdge = scale(normalise(vec3(tanHalf, 0, -1)), 30 * RADIUS_M);
+    expect(sphereOutsideView(onEdge, RADIUS_M, camera, SMALL)).toBe(false);
+    expect(rasteriseDisc(wholeViewRecord(onEdge, vec3(0, 1, 0), 0), camera, SMALL)).not.toEqual([]);
+  });
+
+  it("keeps a sphere whose limb is within the margin", () => {
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD_PER_DEG };
+    const tanHalf = Math.tan(camera.fovXRad / 2);
+    // Its limb a pixel past the edge: off the view, but within the margin.
+    const pixelTan = (2 * tanHalf) / SMALL.widthPx;
+    const pastEdge = add(
+      scale(normalise(vec3(tanHalf + pixelTan, 0, -1)), 30 * RADIUS_M),
+      scale(normalise(vec3(1, 0, tanHalf + pixelTan)), RADIUS_M),
+    );
+    expect(sphereOutsideView(pastEdge, RADIUS_M, camera, SMALL)).toBe(false);
+  });
+
+  it("holds behind the camera and across its plane, where the rectangle is the whole view", () => {
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD_PER_DEG };
+    for (const centre of [vec3(2e8, 0, 0), vec3(0, 0, 2e8)]) {
+      expect(sphereScreenRect(centre, RADIUS_M, camera, HD)).toEqual({
+        leftPx: 0,
+        topPx: 0,
+        rightPx: HD.widthPx,
+        bottomPx: HD.heightPx,
+      });
+      expect(sphereOutsideView(centre, RADIUS_M, camera, HD)).toBe(true);
+    }
   });
 });

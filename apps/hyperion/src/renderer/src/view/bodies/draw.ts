@@ -94,6 +94,7 @@ import {
   promoteOverlapping,
   type ScreenCircle,
   sphereFootprint,
+  sphereOutsideView,
 } from "./regime";
 import {
   DISC_LIMB_DEPTHS,
@@ -311,6 +312,11 @@ function discRecordOf(
   const { equatorialRadiusM: a, polarRadiusM: c } = body.figure;
   const distanceM = norm(body.centreM);
   if (!(distanceM > a * (1 + INSIDE_MARGIN))) {
+    return null;
+  }
+  // A body wholly off the view draws no pixel. Behind the camera or across its plane its rectangle
+  // is the whole view, which its two draws would cover.
+  if (sphereOutsideView(body.centreM, a, options.camera, options.viewport)) {
     return null;
   }
   const rect = sphereScreenRect(body.centreM, a, options.camera, options.viewport);
