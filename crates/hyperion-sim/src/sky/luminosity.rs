@@ -376,12 +376,34 @@ impl LuminosityFunction {
     /// light that left them `emitted_ago` ago; `None` where there is no such light.
     #[must_use]
     pub fn colour_fainter_than(&self, m_v: Magnitudes, emitted_ago: Span) -> Option<LightColour> {
-        let m = m_v.value();
-        let sums: ColourSums = std::array::from_fn(|i| {
-            self.read(emitted_ago, |s| at_edges_by(&s.colour_fainter, m, |c| c[i]))
-        });
-        let light = self.read(emitted_ago, |s| at_edges(&s.light_fainter, m));
+        let sums = self.colour_sums_fainter_than(m_v, emitted_ago);
+        let light = self.read(emitted_ago, |s| at_edges(&s.light_fainter, m_v.value()));
         LightColour::of_sums(sums, light)
+    }
+
+    /// The colour sums per system of the stars fainter than absolute magnitude `m_v`, for light
+    /// that left them `emitted_ago` ago, unnormalised.
+    ///
+    /// In order: the V light times `lux_per_v0` (the photopic light, L☉,V × `lux_per_v0`), then
+    /// the photopic light times each chroma channel, then the photopic light times ρ. They are the
+    /// sums [`colour_fainter_than`](Self::colour_fainter_than) divides, so that a reader adding
+    /// the light of several functions (the band, R06.T9.b) weights each by its own light. An `m_v`
+    /// of −∞ reads all of the light.
+    #[must_use]
+    pub(crate) fn colour_sums_fainter_than(
+        &self,
+        m_v: Magnitudes,
+        emitted_ago: Span,
+    ) -> ColourSums {
+        let (a, b, t) = self.bracket(emitted_ago);
+        let m = m_v.value();
+        std::array::from_fn(|i| {
+            let (va, vb) = (
+                at_edges_by(&a.colour_fainter, m, |c| c[i]),
+                at_edges_by(&b.colour_fainter, m, |c| c[i]),
+            );
+            va + (vb - va) * t
+        })
     }
 
     /// The number of stars per system dark in V ([`super::photometry::is_dark_in_v`]).
@@ -2322,12 +2344,15 @@ impl BrownDwarfGrid {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
     use crate::galaxy::fates::mean_stars_per_system;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::quad::Gl16Panel;
     use crate::sky::eye::REFERENCE_SP_RATIO;
     use crate::stellar::sse::main_sequence_state;
+    use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 
     fn component_of(galaxy: &Galaxy, population: Population) -> ComponentId {
         galaxy
@@ -3123,6 +3148,47 @@ mod tests {
             (slope - 0.49).abs() < 0.1,
             "slope {slope} dex a magnitude from {counts:?}"
         );
+    }
+
+    /// The band's read, the colour sums unnormalised, is each snapshot's sum read at the
+    /// magnitude and interpolated in the light's age, bit for bit, between and beyond the bins and
+    /// at every light age; the colour divides those sums, and −∞ reads all of the light.
+    #[test]
+    fn the_colour_sums_are_the_sums_the_colour_divides() {
+        let galaxy = milky_way_galaxy();
+        let tables = crate::sky::testing::milky_way_tables();
+        let all = Magnitudes::new(f64::NEG_INFINITY);
+        for id in galaxy.fields().component_ids() {
+            for layer in Layer::ALL {
+                let f = tables.get(id, layer);
+                for years in [0.0, 500.0, 2e3, 5e4, 3e5] {
+                    let ago =
+                        Span::from_seconds_f64(years * SECONDS_PER_JULIAN_YEAR).expect("a span");
+                    for m in [-13.0, -4.321, 0.0, 7.777, 19.99, 25.0, f64::NEG_INFINITY] {
+                        let sums = f.colour_sums_fainter_than(Magnitudes::new(m), ago);
+                        for (i, &sum) in sums.iter().enumerate() {
+                            let read = f.read(ago, |s| at_edges_by(&s.colour_fainter, m, |c| c[i]));
+                            assert_same_bits(sum, read);
+                        }
+                        let m = Magnitudes::new(m);
+                        let light = f.light_fainter_than(m, ago).value();
+                        match f.colour_fainter_than(m, ago) {
+                            Some(colour) => {
+                                assert_same_bits(sums[0] / light, colour.lux_per_v0());
+                                assert_same_bits(sums[1] / sums[0], colour.chroma()[0]);
+                                assert_same_bits(sums[2] / sums[0], colour.chroma()[1]);
+                                assert_same_bits(sums[3] / sums[0], colour.sp_ratio());
+                            }
+                            None => assert!(light <= 0.0 || sums[0] <= 0.0, "{sums:?}"),
+                        }
+                    }
+                    assert_same_bits(
+                        f.light_fainter_than(all, ago).value(),
+                        f.total_light(ago).value(),
+                    );
+                }
+            }
+        }
     }
 
     /// The cells that carry most of `planned`'s correction error at light age `now`, each layer's

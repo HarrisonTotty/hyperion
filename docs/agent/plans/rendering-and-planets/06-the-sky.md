@@ -3583,3 +3583,138 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   the escape speed and 1,000 km/s, and layer E pads at 3,000 km/s. P08.T12.d's kicked remnants, up
   to about 2,200 km/s, would break that outside layer E. A separate decision agent is ruling on it
   (`decision-r06-pad-speed.md`).
+- **Deviations in T9.b, as built (2026-10-06).** `sky::band::{CubeFace, BandSpec, BandTexel,
+band_rows}` as Design notes 14 and 15 set them out, with these differences.
+  - **The amendment's argument.** `band_rows(galaxy, ctx, query, census, complete_to, spec, face,
+rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is new and public:
+    one radius for each layer of `CAPPED_LAYERS`. `of_caps(&[LayerCap])` gives each layer its cap
+    (nowhere for a layer the caps lack), `everywhere()` serves a band with no census (T9.d's
+    pre-pass), and `nowhere()` and `radius(layer)` complete it. Until T8.i a census is complete to
+    its plan's caps; T7.b makes the radii per ray and T8.i may move them onto `SkyCensus`. Each
+    radius is a node of its ray, so the trapezoid never straddles the step from the fainter light
+    to all of it. `out` is appended to, row by row from the top, each row from its left.
+  - **`BandSpec`** holds `face_texels` and `nodes_per_decade` (the sketch's "steps per ray"; a
+    ray's node count depends on its distance to the root cube's edge): `STANDARD` (64, 12),
+    `Default`, `new` returning `None` for a zero or a face above `MAX_FACE_TEXELS` (1,024). Added
+    for T9.c, T11 and the tests: `texel_direction`, `texel_of` (WebGPU's face orientation and the
+    client's x-then-y-then-z ties, in `f64`, not T13.b's `f32`-exact rule, so an overflow star on
+    a texel edge may land one texel over from the client's) and `texel_solid_angle_sr`, the exact
+    atan2 area of `texelSolidAnglesSr`; both texel functions panic off the face. `CubeFace` gains
+    `ALL` and `layer()`.
+  - **The rays.** `FIRST_NODE_LY` 0.01 ly; `BAND_PROFILE_QUALITY` `Budget(256)` (P07.T10.c's
+    `SIGHTLINE_QUALITY` value), with the modifiers near each ray. The light is the trapezoid
+    rule's in distance; twelve nodes a decade agree with 48 to 0.02 mag. The light nearer than
+    0.01 ly, at most some 10⁻⁵ of a ray's, is left out. A ray outside a query's cone is complete
+    nowhere.
+  - **The colours** of the texels and of the overflow's points are the stars' own, before
+    reddening; extinction dims the luminance in V only (pending a ruling, below), which for
+    starlight over-dims the photopic light by 1–2% of A_V (science check, CCM 1989 against CIE
+    V(λ)). A texel with no light is white, (1, 1), at the reference ρ.
+  - **Added in `sky::luminosity`:** `LuminosityFunction::colour_sums_fainter_than` (crate-only),
+    the unnormalised sums, which `colour_fainter_than` now divides (same bits). A test holds each
+    sum, over every layer and light age, to the snapshot read bit for bit.
+  - **The tests** (`cargo test -p hyperion-sim sky::band`, 15 with the luminosity read's; about
+    140 s on two threads, most of it the shared table build and one census):
+    - the row split: four splits, rows run last first, warm and cold noise caches, a census's
+      overflow past `n_max` 20 among the faces, bit for bit; the overflow's light reaches the
+      faces to 10⁻⁹;
+    - above the disc, 2,000 ly above the Sun, the texels 1.3° from each pole at `STANDARD`: μ 26.69
+      towards the pole and 23.35 towards the plane, each within 3% of the model's own integral (96
+      nodes a decade, full-quality sightlines, the tables' public reads: 26.70 and 23.34), and so
+      their ratio;
+    - near the Sun, the stars fainter than V 6.5 (no census, complete everywhere), 16² faces, each
+      region's mean luminance: the plane (|b| under 5°) μ 22.09 against 22.4 and the poles (|b| over
+      80°) 24.57 against **24.3, the brainstorm table's figure, not the task text's 24**, which 24.57
+      misses by 0.07 mag (pending a ruling, below). The science check summed Gaia DR3 itself by the
+      test's definitions (V from G by Riello et al. 2021, Table C.2): 22.0 in the plane and
+      24.25–24.29 at the poles;
+    - the cut: a census near the Sun to V 8 within 200 ly, every cap forced, no eye, restricted to
+      V 7 and V 6 (a census of a brighter cut keeps a subset of a deeper one's stars at the same V):
+      the listed and band light together hold within 0.02%, the list losing 4.34 × 10⁻⁶ lx from V 8
+      to 7 as the band gains 4.46 × 10⁻⁶, and 6.02 against 6.10 × 10⁻⁶ from 7 to 6; at `n_max` 100
+      the light leaving the list reaches the band to 10⁻⁹;
+    - the complete-to radius, a test of its own: complete to 100 ly against 200 ly, with the census
+      listing only the stars within the radius (as T8.i's partial replies will), 0.68% apart (the
+      next item for the band of no census);
+    - the cone, the modifiers (a Plummer cloud on +X dims that face and leaves −X's bits), a
+      texel with no light, rows or a texel off the face, the face mapping (the client's own
+      `cubeTexelOf` cases, and every texel's centre back to itself), the solid angles (4π).
+  - **The bench** `sky/band_near_sun`: the six faces of `STANDARD` near the Sun at cut 7.95 with
+    the eye, complete to `layer_caps`, an empty census, one face row a job. One run (criterion's
+    `--test`, under the heavy-test lock, load 3–5, provisional): 20.2 CPU-s on 15 workers, 1.37 s
+    wall. On one thread at 16² the reads of the luminosity functions take four fifths of a ray
+    (some 135 ns each, 6 layers × 17 components a node) and its profile one fifth. Sharing each
+    node's age bracket and magnitude bin across its functions is the first lever, if T17 needs one.
+  - **Cross-target bits** rest on review (determinism audit: nothing to fix) until T17's
+    `sky/band_face_row.golden`, which should take a `CompleteTo::of_caps` radius inside its rays
+    and a census with an overflow, so that the radius nodes and the points are pinned too.
+  - Not built: `eye_limit` stays `None` (T9.c sets it, and will need a crate-visible setter);
+    `sky/limits.rs` (T9.c, T9.d).
+- **The band's conservation (found in T9.b; for the orchestrator).** Against the band of no census
+  (complete nowhere, all of the light), the listed and band light near the Sun to V 8 fall short by
+  1.12% complete to 100 ly and 1.79% to 200 ly: the realised census lists 79% and 82% of the light
+  the tables expect of its stars brighter than the cut. At 300 ly, per layer, the listed light is C
+  86%, D 87% and E 63% of the expectation, over 5,679, 642 and 143 stars. The counts are C 0.95,
+  D 0.75 and E 0.85 of `count_brighter_than`, which keeps only the pair-evolved excess by design
+  (T5.d), so they read high by an amount not yet measured; C's and D's are 4σ and 6σ below it,
+  which skew cannot make. Two causes (science check): the skew of a light sum that the rare
+  bright and the nearest stars carry (about r₁ ÷ R of a type's light within R lies inside the
+  radius r₁ that holds one expected star of it: some 15–20 pc for giants, a third of the local V
+  light, and 4 pc for A and F stars), so most realisations hold less than the mean and the deficit
+  shrinks slowly with the radius (57% listed at 50 ly); and T5.c's realised-against-table
+  residuals at the solar circle (C −4.4%, D −20.4% with the correction), a systematic of the same
+  sign that likely carries most of D's. Averaging over some eight observers on the solar circle,
+  or leaving each layer's nearest r₁ out of both sides, would part them (the check's estimate of
+  what remains: 5–10%). Between two radii the census lists
+  (100 and 200 ly) the light holds to 0.68%, and between cuts to 0.02%. Not asserted: radius zero,
+  which no reply has (the view shows `STARS: PENDING` until the first, sign-off condition 4); and
+  T8.i's first shell (500 ly) against the final caps, which needs a census past a unit test's
+  cost and is T8.i's or T17's to measure.
+- **The band's boundaries that are the census's (found in T9.b; for the orchestrator).**
+  - **The eye's colour offset.** With the eye asked, the census keeps each star to the cut plus
+    its colour offset at μ 30 (T8.b), while the band subtracts at the cut alone, as Design note
+    15 states it. A blue star between the cut and the cut plus its offset is listed and in the
+    band; a red one between the cut plus its (negative) offset and the cut is in neither. The
+    tests run without the eye. The science check estimates some 2% of the band's light misallocated
+    at the poles (half counted twice, half missed; net 0.5% or less, under 0.01 mag in μ and 0.005
+    mag in the eye's cut) and some 1.5% gross in the plane. Options: accept it as stated; have the
+    band subtract each M_V bin
+    at the cut plus the bin's mean offset (the tables carry each bin's ρ); or have the census keep
+    to the cut alone and leave the offset to the views (a T8.b change).
+  - **A cone.** A ray outside the cone is complete nowhere, but the census lists every star of
+    each cell whose padded ball meets the cone, some outside it, whose light the band then holds
+    too, as the caps' overshoot is held. Options: accept it; or have the census list only the
+    stars inside the cone (a T8 change).
+  - **The final reply's cells.** A final census lists every star of the cells it opens, some just
+    beyond its caps, whose light the band also holds, within the caps' stated expected count
+    beyond, as the sign-off's condition 2 accepts.
+  - **One march per call.** `band_rows` marches its rays on every call, and the radius nodes move
+    every layer's nodes. T11.d's one march a request, re-summed per reply (sign-off condition 5),
+    needs the march split from the sums: each layer's running fainter and all-light sums at fixed
+    nodes with the shell edges among them, then a cheap sum per reply. T11.d builds it.
+- **Pending rulings from T9.b.**
+  1. **The poles' figure:** 24 (the task and the brainstorm's prose), 24.3 (the brainstorm's
+     table, which the test reads) or 23.8 (Design note 5's Leinert et al. 1998, which the science
+     check could not reach and may be an all-star figure). The science check's own Gaia DR3 sums
+     give 24.25–24.29 (NGP 24.29–24.31, SGP 24.22–24.24), so 24.3 is the better sourced. The band
+     measures 24.57. T9.c's 7.4 ± 0.2 at the poles and T9.d's 7.96 ± 0.15 rest on a darkest texel
+     near μ 24.3: at 24.57 Crumey's limit is about 7.5, so T9.d's cut may land near 8.1, at its
+     bracket's top.
+  2. **The plane's figure:** the same Gaia sums give 22.03–22.06 for |b| under 5° (22.11–22.13
+     under 10°, a median of 1° bins 22.15–22.18), against the brainstorm's 22.4, which they do
+     not reproduce by any of these statistics. The check suggests "μ_V 22.0 in the plane". The
+     test passes against either. At 22.05 the eye's limit is about 6.45, inside T9.c's 6.6 ± 0.2 by
+     0.05; the band's 22.09 gives about 6.47 before glare.
+  3. **Reddening:** whether the band and its overflow are reddened (the wire's stars are, Design
+     note 17). Per the science check, unreddened ρ is 5–20% high in the plane (ρ falls about 1.2%
+     per 0.1 mag of A_V), so the rod-weighted background is 0.06–0.24 mag too bright and the eye's
+     limits there 0.03–0.1 mag too shallow (conservative); 5,000 K light at A_V 1 loses 27% of its
+     blue at unit luminance, a visibly warmer band. At the poles (A_V about 0.1 or less) it is 1% or
+     less, so T9.d's cut is unaffected.
+  4. **The eye's boundary** and 5. **the scope of the complete-to independence**, above.
+- **The galaxy's local light is low (found in T9.b; a pointer for the galaxy plans' owner).** The
+  fixture's V luminosity density at the Sun is 0.042 L☉ pc⁻³, against Flynn et al. 2006 (MNRAS 372,
+  1149): 0.056 for all stars, 0.045–0.047 for M_V ≥ −1, about 10% uncertain. Half of their column,
+  24.4 L☉ pc⁻², gives an all-star polar μ_V of 23.67, where the band reads 24.0 (NGP) and 23.9
+  (SGP), and the poles of the stars fainter than V 6.5 are 0.28–0.32 mag fainter than the science
+  check's Gaia sums: the same size and sign. The 0.5 mag tolerance of T9.b's test holds it.
