@@ -3,9 +3,12 @@ import { type DurationSummary, recordedGpuSlices, type TraceFigures } from "../r
 import { type Measured, measured } from "../measured";
 import type { TraceRecording, TraceSettings, TraceWindowFile } from "../traceWindows";
 
-/** An unprofiled run's settings, as T14.g's default trace records them: no `gpu`, no profiler. */
+/**
+ * An unprofiled run's settings, as the spike's default trace records them (T14.g, T14.i): a
+ * protobuf stream, no `gpu`, no profiler, a 768 MiB buffer.
+ */
 export const UNPROFILED: TraceSettings = {
-  format: "json",
+  format: "perfetto-proto",
   profiled: false,
   categories: [
     "devtools.timeline",
@@ -18,21 +21,32 @@ export const UNPROFILED: TraceSettings = {
   bufferKb: 786_432,
 };
 
-/** A profiled run's: the same, with `gpu` and V8's CPU profiler. */
+/** A profiled run's: the same, with `gpu` and V8's CPU profiler, and a 1.5 GiB buffer. */
 export const PROFILED: TraceSettings = {
   ...UNPROFILED,
   profiled: true,
   categories: [...UNPROFILED.categories, "gpu", "disabled-by-default-v8.cpu_profiler"],
+  bufferKb: 1_572_864,
 };
 
 /** The renderer's frames a window's `spike.frame` spans are made from: a report's. */
 export interface FrameSource {
-  readonly scriptStartMs: number;
-  readonly frames: Pick<SpikeFrameSeries, "scriptTimesS" | "ourCodeMs">;
+  readonly frames: Pick<SpikeFrameSeries, "ourCodeMs" | "callbackStartsMs">;
 }
 
-/** How long after its frame's `requestAnimationFrame` time a made frame span starts, ms. */
-export const FRAME_SPAN_LAG_MS = 0.1;
+/** How long after its frame's `requestAnimationFrame` time a test report's callback starts, ms. */
+export const CALLBACK_LAG_MS = 0.1;
+
+/**
+ * A test report's callback starts: each {@link CALLBACK_LAG_MS} after its frame's
+ * `requestAnimationFrame` time, `scriptStartMs` + 1000 × its script time.
+ */
+export function callbackStartsOf(
+  scriptStartMs: number,
+  scriptTimesS: ReadonlyArray<number>,
+): number[] {
+  return scriptTimesS.map((t) => scriptStartMs + 1000 * t + CALLBACK_LAG_MS);
+}
 
 /** What a test gives of one window's reduced trace. */
 export interface WindowTraceOptions {
@@ -57,26 +71,23 @@ export interface WindowTraceOptions {
   /** The categories recorded, which list the GPU process's slices; {@link UNPROFILED}'s by default. */
   readonly categories?: ReadonlyArray<string>;
   /**
-   * The frames whose `spike.frame` spans the window holds: one for each frame whose rAF time lies
-   * in `[fromMs, toMs]`, starting {@link FRAME_SPAN_LAG_MS} after it and lasting its `ourCodeMs`.
-   * None without.
+   * The frames whose `spike.frame` spans the window holds: one for each frame whose callback starts
+   * in `[fromMs, toMs]`, from its callback start (its `args.startTime`) for its `ourCodeMs`. None
+   * without.
    */
   readonly frames?: FrameSource;
 }
 
-/** The frames of `source` whose rAF times lie in `[fromMs, toMs]`, as their spans: page ms. */
+/** The frames of `source` whose callbacks start in `[fromMs, toMs]`, as their spans: page ms. */
 export function frameSpansOf(
   source: FrameSource,
   fromMs: number,
   toMs: number,
 ): Array<{ readonly startMs: number; readonly durationMs: number }> {
-  const { scriptTimesS, ourCodeMs } = source.frames;
-  return scriptTimesS.flatMap((t, i) => {
-    const rafMs = source.scriptStartMs + 1000 * t;
-    return rafMs >= fromMs && rafMs <= toMs
-      ? [{ startMs: rafMs + FRAME_SPAN_LAG_MS, durationMs: ourCodeMs[i] ?? 0 }]
-      : [];
-  });
+  const { callbackStartsMs, ourCodeMs } = source.frames;
+  return callbackStartsMs.flatMap((startMs, i) =>
+    startMs >= fromMs && startMs <= toMs ? [{ startMs, durationMs: ourCodeMs[i] ?? 0 }] : [],
+  );
 }
 
 /**
@@ -115,6 +126,7 @@ export function windowTrace(options: WindowTraceOptions): TraceFigures {
       frameSpans: {
         startsUs: spans.map(({ startMs }) => us(startMs)),
         durationsMs: spans.map(({ durationMs }) => durationMs),
+        startTimesMs: spans.map(({ startMs }) => startMs),
       },
       engineSelfMs: engine?.selfMs ?? null,
       sampledMs: engine?.sampledMs ?? null,
@@ -148,9 +160,9 @@ export function windowTrace(options: WindowTraceOptions): TraceFigures {
   };
 }
 
-/** A window's file holding `trace`, of 1 MB with a tenth of its buffer used. */
+/** A window's file holding `trace`, of 1 MB with a tenth of its buffer used and no data lost. */
 export function windowFile(trace: TraceFigures): TraceWindowFile {
-  return { trace: measured(trace), bytes: 1_000_000, bufferPercent: 10 };
+  return { trace: measured(trace), bytes: 1_000_000, bufferPercent: 10, lostData: false };
 }
 
 /** A recording of `windows`, unprofiled unless `settings` says otherwise. */

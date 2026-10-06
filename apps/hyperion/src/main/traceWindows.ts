@@ -1,8 +1,10 @@
 /**
- * The descent spike's trace in windows of script time (plan R05, T14.d, T14.e and T14.g;
- * decision-r05-trace-windows.md and decision-r05-trace-windows-2.md): each window's reduced trace
- * placed in script time and checked frame by frame against the renderer's own series, the frames
- * left out at its boundaries, and the windows' figures pooled into the results file's.
+ * The descent spike's trace in windows of script time (plan R05, T14.d, T14.e, T14.g, T14.h and
+ * T14.i;
+ * decision-r05-trace-windows.md and decision-r05-trace-windows-2.md with its addendum A): each
+ * window's reduced trace placed in script time and checked frame by frame against the renderer's
+ * own series, the frames left out at its boundaries, and the windows' figures pooled into the
+ * results file's.
  *
  * @remarks
  * Chromium keeps one trace session at a time, and its tracing service crashed reading out a whole
@@ -23,9 +25,10 @@
  * - times and counts are summed and maxima are the largest. The percentiles are taken over the
  *   pooled intervals (`results.ts`), never averaged over windows;
  * - one failed window makes every figure read from the trace missing with "trace window k of n:
- *   <reason>": a file that is missing or not a trace, a trace with no event or no clock offset, a
- *   window that filled its buffer, one whose frame spans disagree with the renderer's frames
- *   ({@link frameSpanFailure}), or one that shows another renderer than the others.
+ *   <reason>": a stop that failed, a file that is missing or not a trace, a trace with no event or
+ *   no clock offset, a window that filled its buffer or lost data, one whose frame spans disagree
+ *   with the renderer's frames ({@link frameSpanFailure}), or one that shows another renderer than
+ *   the others.
  */
 
 import type { TraceConfig } from "electron";
@@ -63,19 +66,31 @@ export const SHORT_SPAN_FRACTION = 0.95;
 export const FULL_BUFFER_PERCENT = 99;
 
 /**
- * How far inside its window a frame's `requestAnimationFrame` time must lie for the window's frame
- * spans to be checked against it, ms (decision-r05-trace-windows-2.md, results version 4).
+ * Why a window whose stop said Chromium lost data failed (`Tracing.tracingComplete`'s
+ * `dataLossOccurred`; decision-r05-trace-windows-2.md, ruling 6).
+ */
+export const LOST_DATA_REASON = "it lost data (Chromium's dataLossOccurred)";
+
+/**
+ * How far inside its window a frame's callback start must lie for the window's frame spans to be
+ * checked against it, ms (decision-r05-trace-windows-2.md, results version 4, and addendum A).
  */
 export const FRAME_CHECK_MARGIN_MS = 500;
 
 /**
- * How far before its frame's `requestAnimationFrame` time a frame span may start, ms: the spread
- * of the window's clock offset (T14.d's fixture: its begins agree within 0.2 ms).
+ * How close a frame span's `args.startTime` must be to its frame's callback start
+ * (`callbackStartsMs`) for the span to be that frame's, ms: the two are the same double, which the
+ * protobuf trace carries exactly and Chromium's JSON at full precision (addendum A, ruling 2).
  */
-export const FRAME_SPAN_EARLY_MS = 0.2;
+export const FRAME_SPAN_IDENTITY_MS = 1e-6;
 
-/** How far a frame span's duration may differ from the renderer's `ourCodeMs` for it, ms. */
-export const FRAME_SPAN_TOLERANCE_MS = 0.01;
+/**
+ * How far a frame span's duration may differ from the renderer's `ourCodeMs` for it, ms: two of
+ * `performance.now()`'s 0.1 ms quanta and a margin, since Chromium may write the span's endpoints
+ * unclamped (addendum A, ruling 1). Electron 44.4.3's protobuf trace writes the values passed, to
+ * within 1 µs (R05.T14.h's fixture).
+ */
+export const FRAME_SPAN_TOLERANCE_MS = 0.25;
 
 /**
  * How a window's trace is written: Chromium's JSON (Electron's `contentTracing`), or a Perfetto
@@ -102,15 +117,20 @@ export interface TraceSettings {
 
 /** One window's file as the main process reduced it. */
 export interface TraceWindowFile {
-  /** The reduced trace, or why the file gave none (missing, unreadable or not a trace). */
+  /**
+   * The reduced trace, or why the window gave none (its stop failed, or its file is missing,
+   * unreadable or not a trace).
+   */
   readonly trace: Measured<TraceFigures>;
   /** The file's size, bytes, or `null` when it could not be read. */
   readonly bytes: number | null;
   /**
-   * The buffer's use just before the stop (`getTraceBufferUsage`), %, or `null` when Electron
-   * reports none.
+   * The buffer's last reported use before the stop (`Tracing.bufferUsage`), %, or `null` when
+   * Chromium reported none.
    */
   readonly bufferPercent: number | null;
+  /** Whether the stop said Chromium lost some of the window's data. */
+  readonly lostData: boolean;
 }
 
 /** A run's trace: how it was recorded, and its windows' files in order. */
@@ -125,7 +145,7 @@ export interface TraceWindowFigures {
   readonly spanMs: number;
   /** The file's size, bytes. */
   readonly bytes: number;
-  /** The buffer's use before the stop, %, or `null` when Electron reports none. */
+  /** The buffer's use before the stop, %, or `null` when Chromium reported none. */
   readonly bufferPercent: number | null;
 }
 
@@ -216,6 +236,11 @@ export interface PooledTraceFigures {
 export interface MergedTrace {
   /** The results file's `run.trace`, or why the run has no trace. */
   readonly run: Measured<TraceRun>;
+  /**
+   * For each of `run`'s windows, how many frames its frame-span check checked, or `null` for a
+   * window that failed; none without a trace. For the run's log, not the results file.
+   */
+  readonly checkedFrames: ReadonlyArray<number | null>;
   /** The boundaries' excluded intervals, in order; none without a trace. */
   readonly exclusions: ReadonlyArray<ScriptInterval>;
   /** The pooled figures, or why every figure read from the trace is missing. */
@@ -227,7 +252,15 @@ export interface TraceWindowsReport extends Pick<
   DescentSpikeReport,
   "scriptStartMs" | "traceWindows" | "traceGuardS" | "warmupS" | "segments"
 > {
-  readonly frames: Pick<SpikeFrameSeries, "scriptTimesS" | "rafIntervalsMs" | "ourCodeMs">;
+  readonly frames: Pick<
+    SpikeFrameSeries,
+    "scriptTimesS" | "rafIntervalsMs" | "ourCodeMs" | "callbackStartsMs"
+  >;
+}
+
+/** What the frame-span check reads of the renderer's frames. */
+export interface FrameSpanReport {
+  readonly frames: Pick<SpikeFrameSeries, "ourCodeMs" | "callbackStartsMs">;
 }
 
 /** A window that passed its checks: its trace, the trace's clock offset, and its file's figures. */
@@ -236,6 +269,8 @@ interface GoodWindow {
   /** The trace's {@link TraceFigures.clockOffsetUs}, known present. */
   readonly offsetUs: number;
   readonly figures: TraceWindowFigures;
+  /** The frames its frame-span check checked. */
+  readonly checkedFrames: number;
   readonly failure: null;
 }
 
@@ -302,77 +337,128 @@ function bufferFailure(file: TraceWindowFile): string | null {
 }
 
 /**
- * Why a window's file failed, by the checks that need no renderer times, or `null`: the file
- * missing or not a trace, a trace with no event or no clock offset, or a buffer used to
- * {@link FULL_BUFFER_PERCENT}. A smoke run, which writes no results, is failed on it.
+ * Why a window's file failed, by the checks that need no renderer times, or `null`: the stop
+ * failed, the file missing or not a trace, a trace with no event or no clock offset, a buffer used
+ * to {@link FULL_BUFFER_PERCENT}, or lost data. The run's log gives it as each window is reduced.
  */
 export function windowFileFailure(file: TraceWindowFile): string | null {
   const check = checkFile(file);
-  return check.kind === "failed" ? check.reason : bufferFailure(file);
+  return check.kind === "failed"
+    ? check.reason
+    : (bufferFailure(file) ?? (file.lostData ? LOST_DATA_REASON : null));
+}
+
+/** The first index of `sorted` whose value is at least `value`. */
+function lowerBound(sorted: ReadonlyArray<number>, value: number): number {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((sorted[mid] ?? Number.POSITIVE_INFINITY) < value) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+}
+
+/** A window's frame spans against the renderer's frames ({@link checkFrameSpans}). */
+export interface FrameSpanCheck {
+  /** The frames whose callback start lies at least {@link FRAME_CHECK_MARGIN_MS} inside it. */
+  readonly checked: number;
+  /** Those without exactly one span, or whose span's duration is off. */
+  readonly disagreeing: number;
+  /** Spans in that interior that match no frame, or have no `startTime`. */
+  readonly strays: number;
 }
 
 /**
- * Why a window's frame spans disagree with the renderer's frames, or `null` when they agree.
+ * A window's frame spans checked against the renderer's frames: how many frames were checked, and
+ * how many disagree.
  *
  * @remarks
- * Each frame whose `requestAnimationFrame` time (`scriptStartMs` + 1000 × its script time) lies at
- * least {@link FRAME_CHECK_MARGIN_MS} inside the window's `[startedMs, stopRequestedMs]` must have
- * exactly one span on the renderer's main thread whose start, placed on the page's clock by the
- * window's offset, lies from its rAF time less {@link FRAME_SPAN_EARLY_MS} to the next frame's
- * less the same; its duration must be the report's `ourCodeMs` for the frame within
- * {@link FRAME_SPAN_TOLERANCE_MS}. The frames' stretches meet without overlapping, so that no span
- * counts for two frames.
- *
- * The series' last frame has no next frame, and the page draws on after it, its frames unrecorded,
- * so it is not checked. Its script time is held at the script's end, so its rAF time, which ends
- * the stretch of the frame before it, is that frame's plus the last rAF interval.
+ * Spans are matched to frames by identity (addendum A, ruling 2): a span is a frame's when its
+ * `args.startTime` equals the frame's callback start within {@link FRAME_SPAN_IDENTITY_MS}, so the
+ * match depends on no clock offset or `requestAnimationFrame` time, and a frame whose callback
+ * began late is still its own. Each frame whose callback start lies at least
+ * {@link FRAME_CHECK_MARGIN_MS} inside the window's `[startedMs, stopRequestedMs]` (the series' last
+ * frame among them) must have exactly one span, its duration the report's `ourCodeMs` for it within
+ * {@link FRAME_SPAN_TOLERANCE_MS}. A span whose `startTime` lies in that interior and matches no
+ * reported frame fails the window too, unless it is later than the series' last callback start: the
+ * page draws on after the run, its frames unrecorded. A span without a `startTime` can be placed
+ * by none, and fails it.
  */
-export function frameSpanFailure(
+export function checkFrameSpans(
   trace: TraceFigures,
-  offsetUs: number,
   time: SpikeTraceWindow,
-  report: Pick<TraceWindowsReport, "scriptStartMs" | "frames">,
-): string | null {
-  const { scriptTimesS, rafIntervalsMs, ourCodeMs } = report.frames;
-  const last = scriptTimesS.length - 1;
-  const scriptRafMs = (i: number): number =>
-    report.scriptStartMs + 1000 * (scriptTimesS[i] ?? Number.NaN);
-  const rafMs = (i: number): number =>
-    i === last && i > 0 ? scriptRafMs(i - 1) + (rafIntervalsMs[i] ?? Number.NaN) : scriptRafMs(i);
-  const spans = trace.mainThread?.frameSpans ?? { startsUs: [], durationsMs: [] };
-  const startsMs = spans.startsUs.map((us) => (us - offsetUs) / 1000);
+  report: FrameSpanReport,
+): FrameSpanCheck {
+  const { callbackStartsMs, ourCodeMs } = report.frames;
+  const fromMs = time.startedMs + FRAME_CHECK_MARGIN_MS;
+  const toMs = time.stopRequestedMs - FRAME_CHECK_MARGIN_MS;
+  const frameSpans = trace.mainThread?.frameSpans;
+  const spans = (frameSpans?.startTimesMs ?? [])
+    .map((startMs, k) => ({ startMs, durationMs: frameSpans?.durationsMs[k] ?? Number.NaN }))
+    .flatMap(({ startMs, durationMs }) => (startMs === null ? [] : [{ startMs, durationMs }]))
+    .toSorted((a, b) => a.startMs - b.startMs);
+  const unplaced = (frameSpans?.startTimesMs.length ?? 0) - spans.length;
+  const startsMs = spans.map(({ startMs }) => startMs);
+  const matched = new Set<number>();
   let checked = 0;
   let disagreeing = 0;
-  let next = 0;
-  for (let i = 0; i < last; i += 1) {
-    const atMs = rafMs(i);
-    if (
-      atMs < time.startedMs + FRAME_CHECK_MARGIN_MS ||
-      atMs > time.stopRequestedMs - FRAME_CHECK_MARGIN_MS
+  for (const [i, startMs] of callbackStartsMs.entries()) {
+    let count = 0;
+    let durationMs = Number.NaN;
+    for (
+      let k = lowerBound(startsMs, startMs - FRAME_SPAN_IDENTITY_MS);
+      k < spans.length &&
+      (startsMs[k] ?? Number.POSITIVE_INFINITY) <= startMs + FRAME_SPAN_IDENTITY_MS;
+      k += 1
     ) {
+      matched.add(k);
+      count += 1;
+      durationMs = spans[k]?.durationMs ?? Number.NaN;
+    }
+    if (startMs < fromMs || startMs > toMs) {
       continue;
     }
     checked += 1;
-    const fromMs = atMs - FRAME_SPAN_EARLY_MS;
-    const toMs = rafMs(i + 1) - FRAME_SPAN_EARLY_MS;
-    while (next < startsMs.length && (startsMs[next] ?? 0) < fromMs) {
-      next += 1;
-    }
-    let count = 0;
-    let durationMs = Number.NaN;
-    while (next < startsMs.length && (startsMs[next] ?? 0) < toMs) {
-      durationMs = spans.durationsMs[next] ?? Number.NaN;
-      count += 1;
-      next += 1;
-    }
     const expectedMs = ourCodeMs[i] ?? Number.NaN;
     if (count !== 1 || !(Math.abs(durationMs - expectedMs) <= FRAME_SPAN_TOLERANCE_MS)) {
       disagreeing += 1;
     }
   }
-  return disagreeing === 0
-    ? null
-    : `the trace's frame spans disagree with the renderer's (${disagreeing} of ${checked} frames)`;
+  const lastStartMs = callbackStartsMs.at(-1) ?? Number.NEGATIVE_INFINITY;
+  const strays =
+    unplaced +
+    spans.filter(
+      ({ startMs }, k) =>
+        !matched.has(k) && startMs >= fromMs && startMs <= toMs && startMs <= lastStartMs,
+    ).length;
+  return { checked, disagreeing, strays };
+}
+
+/**
+ * Why a window's frame spans disagree with the renderer's frames, or `null` when they agree, by
+ * {@link checkFrameSpans}.
+ */
+export function frameSpanFailure(
+  trace: TraceFigures,
+  time: SpikeTraceWindow,
+  report: FrameSpanReport,
+): string | null {
+  return disagreementOf(checkFrameSpans(trace, time, report));
+}
+
+/** Why a window's checked frame spans disagree, or `null`. */
+function disagreementOf({ checked, disagreeing, strays }: FrameSpanCheck): string | null {
+  if (disagreeing === 0 && strays === 0) {
+    return null;
+  }
+  const stray =
+    strays === 0 ? "" : `; ${strays} ${strays === 1 ? "span matches" : "spans match"} no frame`;
+  return `the trace's frame spans disagree with the renderer's (${disagreeing} of ${checked} frames${stray})`;
 }
 
 /** A window's file against the time the renderer recorded it and the renderer's frames. */
@@ -396,7 +482,11 @@ function checkWindow(
   if (full !== null) {
     return failed(full);
   }
-  const disagree = frameSpanFailure(trace, offsetUs, time, report);
+  if (file.lostData) {
+    return failed(LOST_DATA_REASON);
+  }
+  const frameCheck = checkFrameSpans(trace, time, report);
+  const disagree = disagreementOf(frameCheck);
   if (disagree !== null) {
     return failed(disagree);
   }
@@ -404,6 +494,7 @@ function checkWindow(
     trace,
     offsetUs,
     figures: { spanMs, bytes, bufferPercent: file.bufferPercent },
+    checkedFrames: frameCheck.checked,
     failure: null,
   };
 }
@@ -436,7 +527,7 @@ function sameRenderer(checked: ReadonlyArray<Checked>): Checked[] {
 
 /** A run with no trace, every figure read from one missing for `reason`. */
 function noTrace(reason: string): MergedTrace {
-  return { run: missing(reason), exclusions: [], figures: missing(reason) };
+  return { run: missing(reason), checkedFrames: [], exclusions: [], figures: missing(reason) };
 }
 
 /** The length of `[fromS, toS)` within `[lowS, highS)`, s. */
@@ -478,7 +569,12 @@ export function mergeTraceWindows(
       time.failure !== null
         ? failed(time.failure)
         : checkWindow(
-            files[i] ?? { trace: missing("no trace file"), bytes: null, bufferPercent: null },
+            files[i] ?? {
+              trace: missing("no trace file"),
+              bytes: null,
+              bufferPercent: null,
+              lostData: false,
+            },
             time,
             report,
           ),
@@ -544,7 +640,12 @@ export function mergeTraceWindows(
     failure === undefined
       ? measured(pool(good, settings, report, exclusions))
       : missing(`trace window ${firstFailed + 1} of ${n}: ${failure.failure}`);
-  return { run: measured(run), exclusions, figures };
+  return {
+    run: measured(run),
+    checkedFrames: checked.map((window) => (isGood(window) ? window.checkedFrames : null)),
+    exclusions,
+    figures,
+  };
 }
 
 /** Every window's figures pooled, each placed in script time by its clock offset. */

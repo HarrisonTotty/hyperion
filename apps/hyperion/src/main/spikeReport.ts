@@ -168,12 +168,21 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   if (!isRecord(frames)) {
     return null;
   }
-  const { scriptTimesS, rafIntervalsMs, ourCodeMs } = frames;
-  if (!finiteList(scriptTimesS) || !finiteList(rafIntervalsMs) || !finiteList(ourCodeMs)) {
+  const { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs } = frames;
+  if (
+    !finiteList(scriptTimesS) ||
+    !finiteList(rafIntervalsMs) ||
+    !finiteList(ourCodeMs) ||
+    !finiteList(callbackStartsMs)
+  ) {
     return null;
   }
   const count = scriptTimesS.length;
-  if (rafIntervalsMs.length !== count || ourCodeMs.length !== count) {
+  if (
+    rafIntervalsMs.length !== count ||
+    ourCodeMs.length !== count ||
+    callbackStartsMs.length !== count
+  ) {
     return null;
   }
   const passes = listOf(frames["passes"], (item) => pass(item, count));
@@ -229,7 +238,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     levels,
     timer,
     untimedPasses,
-    frames: { scriptTimesS, rafIntervalsMs, ourCodeMs, passes },
+    frames: { scriptTimesS, rafIntervalsMs, ourCodeMs, callbackStartsMs, passes },
     streaming: streamingList,
     uploadBytes,
     latePipelines: late,

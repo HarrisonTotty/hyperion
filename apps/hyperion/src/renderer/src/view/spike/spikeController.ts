@@ -1,6 +1,6 @@
 /**
- * The descent spike's run control in the renderer (plan R05, T13.c, T14.e): it answers the run's
- * listeners, starts and stops the main process's measuring, cycles the trace at its windows'
+ * The descent spike's run control in the renderer (plan R05, T13.c, T14.e, T14.i): it answers the
+ * run's listeners, starts and stops the main process's measuring, cycles the trace at its windows'
  * boundaries, captures a span of frames when `--capture` is given, and ends the run with its
  * results or, for `--smoke`, its status.
  *
@@ -12,6 +12,10 @@
  * frame awaiting it. A cycle that fails, or that is still pending at the next boundary, ends the
  * trace but not the run: one last window, failed with the reason, stands for the rest of the run,
  * so that no boundary the trace never reached leaves frames out.
+ *
+ * A smoke hands its report to the same results call as a run: the main process checks the trace's
+ * windows against it, frame by frame, writes no file, and answers the first failed window's
+ * reason, which fails the smoke (decision-r05-trace-windows-2.md, addendum A).
  */
 
 import type {
@@ -38,8 +42,8 @@ export const SMOKE_S = 10;
 
 /**
  * Where a smoke run cycles its trace, script seconds: three windows in its 10 s, so that the smoke
- * proves the cycle, the window files and their reduction end to end (T14.e), where the descent's
- * first boundary, at 120 s, is beyond it.
+ * proves the cycle, the window files, their decoding and the frame-span check end to end (T14.e,
+ * T14.i), where the descent's first boundary, at 120 s, is beyond it.
  */
 export const SMOKE_TRACE_BOUNDARIES_S: ReadonlyArray<number> = [3, 6];
 
@@ -55,6 +59,8 @@ export interface ControllerFrame {
   readonly rafTimestampMs: number;
   /** Script time 0's `requestAnimationFrame` timestamp, ms. */
   readonly scriptStartMs: number;
+  /** The callback's start, `performance.now()` ms: its `spike.frame` span's start. */
+  readonly callbackStartMs: number;
   readonly callbackMs: number;
   readonly passesSubmitted: number;
   readonly patchesHard: number;
@@ -381,24 +387,13 @@ export class SpikeController {
         last.stopRequestedMs = stopRequestedMs;
       }
       await spike.stopTrace();
-      if (this.#launch.smoke) {
-        const ended = this.#traceEnded;
-        await spike.end(
-          ended !== null
-            ? { status: "fail", reason: ended }
-            : recorder.bakedPatches > 0
-              ? { status: "pass" }
-              : { status: "fail", reason: "no patch was baked in a worker" },
-        );
-        return;
-      }
       const traceWindows: SpikeTraceWindow[] = this.#windows.map((window) => ({
         startedMs: window.startedMs,
         stopRequestedMs: window.stopRequestedMs ?? stopRequestedMs,
         failure: window.failure,
       }));
       const terrain = this.#terrain;
-      await spike.writeResults({
+      const answer = await spike.writeResults({
         ...recorder.report(this.#deps.canvas()),
         scriptStartMs,
         traceWindows,
@@ -407,6 +402,19 @@ export class SpikeController {
           ? {}
           : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
       });
+      if (this.#launch.smoke) {
+        // A trace that ended early has a failed last window, which the check names first.
+        const failure =
+          (answer.kind === "smoke checked" ? answer.failure : null) ?? this.#traceEnded;
+        await spike.end(
+          failure !== null
+            ? { status: "fail", reason: failure }
+            : recorder.bakedPatches > 0
+              ? { status: "pass" }
+              : { status: "fail", reason: "no patch was baked in a worker" },
+        );
+        return;
+      }
       await spike.end({ status: "pass" });
     } catch (error: unknown) {
       this.#deps.log("the descent spike could not finish", error);

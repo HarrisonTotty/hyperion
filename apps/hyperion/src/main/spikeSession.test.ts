@@ -1,13 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { SpikeLaunch } from "../preload/api";
+import type {
+  DescentSpikeReport,
+  SpikeLaunch,
+  SpikeResultsAnswer,
+  SpikeResultsPaths,
+} from "../preload/api";
 import { DEFAULT_SPIKE_SEED } from "../preload/spikeLaunch";
+import { CdpTracing } from "./cdpTracing";
+import { FakeDebugger, memoryWriter } from "./fixtures/debugger";
 import { measured, type RunDescription, validateResults } from "./results";
 import type { TraceFigures } from "./reduceTrace";
+import { SpikeTrace, type TraceWindowStop } from "./spike";
 import { SpikeSession, type SpikeSessionDeps, traceWindowFileName } from "./spikeSession";
 import { smallReport } from "./fixtures/spikeReport";
-import { PROFILED, UNPROFILED, windowTrace } from "./fixtures/traces";
-import type { TraceSettings } from "./traceWindows";
+import { callbackStartsOf, PROFILED, UNPROFILED, windowTrace } from "./fixtures/traces";
+import { LOST_DATA_REASON, type TraceSettings } from "./traceWindows";
 
 const LAUNCH: SpikeLaunch = {
   setting: "low",
@@ -49,13 +57,20 @@ const RUN: RunDescription = {
 /** How the fake trace's next cycle ends: whole, or failing in its stop or its start. */
 type CycleOutcome = "whole" | "stop fails" | "start fails";
 
-/** A trace that records its calls, its buffer an eighth used before every stop. */
+/** What the fake trace's stops tell: an eighth of the buffer used, no data lost. */
+const EIGHTH: TraceWindowStop = { lostData: false, bufferPercent: 12.5 };
+
+/** A trace that records its calls; each stop tells {@link EIGHTH} unless a test says otherwise. */
 function fakeTrace(settings: TraceSettings = UNPROFILED): SpikeSessionDeps["trace"] & {
   readonly calls: string[];
   failStop: boolean;
   /** Holds the trace busy, as a start, stop or cycle in flight does. */
   busy: boolean;
   nextCycle: CycleOutcome;
+  /** What the stops tell. */
+  told: TraceWindowStop;
+  /** Whether it has been closed, after which it refuses to start, as `CdpTracing` does. */
+  closed: boolean;
   /** The files its stops wrote. */
   readonly files: Set<string>;
 } {
@@ -68,12 +83,19 @@ function fakeTrace(settings: TraceSettings = UNPROFILED): SpikeSessionDeps["trac
     failStop: false,
     busy: false,
     nextCycle: "whole",
+    told: EIGHTH,
+    closed: false,
     settings,
     get state() {
       return this.busy ? "busy" : state;
     },
     start() {
       calls.push("start");
+      if (this.closed) {
+        return Promise.reject(
+          new Error("the spike's trace did not start: the trace's debugger session is closed"),
+        );
+      }
       state = "recording";
       return Promise.resolve();
     },
@@ -81,55 +103,46 @@ function fakeTrace(settings: TraceSettings = UNPROFILED): SpikeSessionDeps["trac
       calls.push(`stop ${path}`);
       state = "idle";
       if (this.failStop) {
-        return Promise.reject(new Error("service gone"));
+        return Promise.reject(new Error("the spike's trace did not stop: service gone"));
       }
       files.add(path);
-      return Promise.resolve(path);
+      return Promise.resolve(this.told);
     },
-    cycle(path) {
+    cycle(path, stopped) {
       calls.push(`cycle ${path}`);
       const outcome = this.nextCycle;
       this.nextCycle = "whole";
       if (outcome === "stop fails") {
         state = "idle";
-        return Promise.reject(new Error("the spike's trace did not stop"));
+        return Promise.reject(new Error("the spike's trace did not stop: service gone"));
       }
       files.add(path);
+      stopped(this.told);
       if (outcome === "start fails") {
         state = "idle";
-        return Promise.reject(new Error("the spike's trace did not start"));
+        return Promise.reject(new Error("the spike's trace did not start: service gone"));
       }
-      return Promise.resolve(path);
+      return Promise.resolve();
     },
-    bufferUsage() {
-      calls.push("buffer");
-      return Promise.resolve(12.5);
+    close() {
+      calls.push("close");
+      this.closed = true;
     },
   };
 }
 
-/**
- * A session over fakes, with what it wrote and how it ended; its trace files are 4 kB, and a file
- * the trace never wrote cannot be read.
- */
-function sessionOf(
-  reduce: SpikeSessionDeps["reduce"] = () => Promise.reject(new Error("bad")),
-  size?: (path: string) => Promise<number>,
+/** A session's deps over `trace`, with what it writes and how it ends, its files in memory. */
+function depsOf(
+  trace: SpikeSessionDeps["trace"],
+  reduce: SpikeSessionDeps["reduce"],
+  size: (path: string) => Promise<number>,
   launch: SpikeLaunch = LAUNCH,
-  settings: TraceSettings = UNPROFILED,
 ) {
   const written = new Map<string, string | Uint8Array>();
   const removed: string[] = [];
   const exits: number[] = [];
   const logs: string[] = [];
   const memoryStart = vi.fn<() => void>();
-  const trace = fakeTrace(settings);
-  const sizeOf =
-    size ??
-    ((path: string) =>
-      trace.files.has(path)
-        ? Promise.resolve(4096)
-        : Promise.reject(new Error(`ENOENT: no such file, stat '${path}'`)));
   const deps: SpikeSessionDeps = {
     launch,
     describe: () => Promise.resolve(RUN),
@@ -154,7 +167,7 @@ function sessionOf(
         removed.push(path);
         return Promise.resolve();
       },
-      size: sizeOf,
+      size,
       results: {
         mkdir: () => Promise.resolve(),
         exists: (path) => Promise.resolve(written.has(path)),
@@ -165,12 +178,98 @@ function sessionOf(
       },
     },
   };
-  return { session: new SpikeSession(deps), memoryStart, written, removed, exits, logs, trace };
+  return { deps, memoryStart, written, removed, exits, logs };
+}
+
+/**
+ * A session over fakes, with what it wrote and how it ended; its trace files are 4 kB, and a file
+ * the trace never wrote cannot be read.
+ */
+function sessionOf(
+  reduce: SpikeSessionDeps["reduce"] = () => Promise.reject(new Error("bad")),
+  size?: (path: string) => Promise<number>,
+  launch: SpikeLaunch = LAUNCH,
+  settings: TraceSettings = UNPROFILED,
+) {
+  const trace = fakeTrace(settings);
+  const sizeOf =
+    size ??
+    ((path: string) =>
+      trace.files.has(path)
+        ? Promise.resolve(4096)
+        : Promise.reject(new Error(`ENOENT: no such file, stat '${path}'`)));
+  const { deps, ...made } = depsOf(trace, reduce, sizeOf, launch);
+  return { session: new SpikeSession(deps), ...made, trace };
 }
 
 /** A window's trace on the report's clock, `smallReport`'s one window. */
 function goodTrace(): TraceFigures {
   return windowTrace({ offsetUs: 7e9, fromMs: 900, toMs: 61_100 });
+}
+
+/** The results file a full run's results call wrote. */
+function pathsOf(answer: SpikeResultsAnswer): SpikeResultsPaths {
+  if (answer.kind !== "written") {
+    throw new Error("a full run's results call wrote no file");
+  }
+  return answer.paths;
+}
+
+/** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */
+function smokeReport(): DescentSpikeReport {
+  const scriptStartMs = 1000;
+  const scriptTimesS = Array.from({ length: 600 }, (_, i) => i / 60);
+  const base = smallReport();
+  return {
+    ...base,
+    scriptStartMs,
+    traceWindows: [
+      { startedMs: 900, stopRequestedMs: 4000, failure: null },
+      { startedMs: 4300, stopRequestedMs: 7000, failure: null },
+      { startedMs: 7300, stopRequestedMs: 11_000, failure: null },
+    ],
+    segments: [{ name: "orbit coast", startS: 0, endS: 10 }],
+    frames: {
+      scriptTimesS,
+      rafIntervalsMs: scriptTimesS.map((_, i) => (i === 0 ? 0 : 1000 / 60)),
+      ourCodeMs: scriptTimesS.map(() => 4),
+      callbackStartsMs: callbackStartsOf(scriptStartMs, scriptTimesS),
+      passes: [{ label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 1) }],
+    },
+  };
+}
+
+/**
+ * The smoke's `k`-th window's trace, its frame spans the report's, or, with `skew`, those of the
+ * frames from its second second on lengthened by 0.3 ms.
+ */
+function smokeTrace(k: number, skew = false): TraceFigures {
+  const report = smokeReport();
+  const time = report.traceWindows[k];
+  if (time === undefined) {
+    throw new Error(`the smoke has no window ${k}`);
+  }
+  const frames = skew
+    ? {
+        frames: {
+          ...report.frames,
+          ourCodeMs: report.frames.ourCodeMs.map((ms, i) =>
+            (report.frames.callbackStartsMs[i] ?? 0) > time.startedMs + 1000 ? ms + 0.3 : ms,
+          ),
+        },
+      }
+    : report;
+  return windowTrace({
+    offsetUs: 7e9,
+    fromMs: time.startedMs,
+    toMs: time.stopRequestedMs,
+    frames,
+  });
+}
+
+/** The window index of a smoke's window file. */
+function windowOf(path: string): number {
+  return [0, 1, 2].findIndex((k) => path.endsWith(traceWindowFileName(k)));
 }
 
 describe("a spike run's session", () => {
@@ -182,8 +281,8 @@ describe("a spike run's session", () => {
     ops.rendererMemory(1234);
     expect(session.rendererPrivateBytes()).toBe(1234);
     await ops.stopMeasuring();
-    expect(removed).toEqual(["/profile/spike-trace-0.json"]);
-    const paths = await ops.writeResults(smallReport());
+    expect(removed).toEqual(["/profile/spike-trace-0.pftrace"]);
+    const paths = pathsOf(await ops.writeResults(smallReport()));
     expect(paths.json).toBe("/out/2026-10-03-devbox-low.json");
     const text = written.get(paths.json);
     expect(typeof text).toBe("string");
@@ -199,9 +298,9 @@ describe("a spike run's session", () => {
     const ops = session.operations();
     await ops.startMeasuring();
     await ops.stopMeasuring();
-    expect(trace.calls).toEqual(["start", "buffer", "stop /profile/spike-trace-0.json"]);
-    expect(removed).toEqual(["/profile/spike-trace-0.json"]);
-    const paths = await ops.writeResults(smallReport());
+    expect(trace.calls).toEqual(["start", "stop /profile/spike-trace-0.pftrace", "close"]);
+    expect(removed).toEqual(["/profile/spike-trace-0.pftrace"]);
+    const paths = pathsOf(await ops.writeResults(smallReport()));
     const results: unknown = JSON.parse(String(written.get(paths.json)));
     expect(validateResults(results)).toEqual([]);
     expect(results).toMatchObject({
@@ -233,10 +332,22 @@ describe("a spike run's session", () => {
     const ops = session.operations();
     await ops.startMeasuring();
     await ops.stopMeasuring();
-    const paths = await ops.writeResults(smallReport());
+    const paths = pathsOf(await ops.writeResults(smallReport()));
     const text = String(written.get(paths.json));
     expect(validateResults(JSON.parse(text))).toEqual([]);
     expect(text).toContain("trace window 1 of 1: its file could not be read: ENOENT: no such file");
+  });
+
+  it("fails a window whose stop said Chromium lost data", async () => {
+    const { session, written, trace } = sessionOf(() => Promise.resolve(goodTrace()));
+    trace.told = { lostData: true, bufferPercent: 3 };
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const paths = pathsOf(await ops.writeResults(smallReport()));
+    const text = String(written.get(paths.json));
+    expect(validateResults(JSON.parse(text))).toEqual([]);
+    expect(text).toContain(`trace window 1 of 1: ${LOST_DATA_REASON}`);
   });
 
   it("reduces each window with the categories its trace recorded", async () => {
@@ -273,15 +384,13 @@ describe("a spike run's session", () => {
     // Nothing is reduced during the run.
     expect(reduced).toEqual([]);
     await ops.stopMeasuring();
-    const files = [0, 1, 2].map((k) => `/profile/spike-trace-${k}.json`);
+    const files = [0, 1, 2].map((k) => `/profile/spike-trace-${k}.pftrace`);
     expect(trace.calls).toEqual([
       "start",
-      "buffer",
       `cycle ${files[0]}`,
-      "buffer",
       `cycle ${files[1]}`,
-      "buffer",
       `stop ${files[2]}`,
+      "close",
     ]);
     expect(reduced).toEqual(files);
     expect(removed).toEqual(files);
@@ -299,13 +408,14 @@ describe("a spike run's session", () => {
     await ops.startMeasuring();
     await trace.stop("/elsewhere");
     await expect(ops.cycleTrace()).rejects.toThrow(/not recording/);
-    // A trace stopped already has no last window to stop, and the refused cycle wrote none.
+    // A trace stopped already has no last window to stop, and the refused cycle wrote none; the
+    // transport is still closed.
     await ops.stopMeasuring();
-    expect(trace.calls).toEqual(["start", "stop /elsewhere"]);
+    expect(trace.calls).toEqual(["start", "stop /elsewhere", "close"]);
   });
 
   it.each<readonly [CycleOutcome, string]>([
-    ["stop fails", "trace window 1 of 2: its file could not be read: ENOENT"],
+    ["stop fails", "trace window 1 of 2: the spike's trace did not stop: service gone"],
     ["start fails", "trace window 2 of 2: the trace's cycle at 30 s failed"],
   ])(
     "keeps the window of a cycle whose %s, stops nothing more, and fails the trace",
@@ -319,20 +429,22 @@ describe("a spike run's session", () => {
       await expect(ops.cycleTrace()).rejects.toThrow(/did not/);
       await ops.stopMeasuring();
       // The cycle's window is reduced and removed; the stopped trace has no last stop.
-      expect(trace.calls).toEqual(["start", "buffer", "cycle /profile/spike-trace-0.json"]);
-      expect(removed).toEqual(["/profile/spike-trace-0.json"]);
+      expect(trace.calls).toEqual(["start", "cycle /profile/spike-trace-0.pftrace", "close"]);
+      expect(removed).toEqual(["/profile/spike-trace-0.pftrace"]);
       const report = smallReport();
-      const paths = await ops.writeResults({
-        ...report,
-        traceWindows: [
-          { startedMs: 900, stopRequestedMs: 31_000, failure: null },
-          {
-            startedMs: 31_500,
-            stopRequestedMs: 61_100,
-            failure: `the trace's cycle at 30 s failed: ${outcome}`,
-          },
-        ],
-      });
+      const paths = pathsOf(
+        await ops.writeResults({
+          ...report,
+          traceWindows: [
+            { startedMs: 900, stopRequestedMs: 31_000, failure: null },
+            {
+              startedMs: 31_500,
+              stopRequestedMs: 61_100,
+              failure: `the trace's cycle at 30 s failed: ${outcome}`,
+            },
+          ],
+        }),
+      );
       const text = String(written.get(paths.json));
       expect(validateResults(JSON.parse(text))).toEqual([]);
       expect(text).toContain(reason);
@@ -350,55 +462,157 @@ describe("a spike run's session", () => {
     expect(trace.calls).toEqual(["start"]);
     trace.busy = false;
     await ops.stopMeasuring();
-    expect(trace.calls).toEqual(["start", "buffer", "stop /profile/spike-trace-0.json"]);
+    expect(trace.calls).toEqual(["start", "stop /profile/spike-trace-0.pftrace", "close"]);
   });
 
-  it("fails the last window, not the run, when its stop fails", async () => {
-    const { session, written, trace } = sessionOf(
-      () => Promise.resolve(goodTrace()),
-      (path) =>
-        path.endsWith(traceWindowFileName(0))
-          ? Promise.reject(new Error("ENOENT: no such file"))
-          : Promise.resolve(4096),
-    );
+  it("fails the last window, not the run, when its stop fails, with the stop's reason", async () => {
+    const reduce = vi.fn<SpikeSessionDeps["reduce"]>(() => Promise.resolve(goodTrace()));
+    const { session, written, trace, removed, logs } = sessionOf(reduce);
     trace.failStop = true;
     const ops = session.operations();
     await ops.startMeasuring();
     await expect(ops.stopMeasuring()).resolves.toBeUndefined();
-    const paths = await ops.writeResults(smallReport());
+    // No part of the failed stop's file is read, and whatever it left is removed.
+    expect(reduce).not.toHaveBeenCalled();
+    expect(removed).toEqual(["/profile/spike-trace-0.pftrace"]);
+    expect(trace.calls.at(-1)).toBe("close");
+    expect(logs).toContain(
+      "descent spike: the trace's last stop failed: the spike's trace did not stop: service gone",
+    );
+    const paths = pathsOf(await ops.writeResults(smallReport()));
     expect(String(written.get(paths.json))).toContain(
-      "trace window 1 of 1: its file could not be read: ENOENT: no such file",
+      "trace window 1 of 1: the spike's trace did not stop: service gone",
     );
   });
 
-  it("fails a smoke run's stop when a window failed, and passes one whose windows are whole", async () => {
-    const smoke = { ...LAUNCH, smoke: true };
-    const bad = sessionOf(
-      (path) =>
-        Promise.resolve(
-          path.endsWith(traceWindowFileName(1)) ? { ...goodTrace(), span: null } : goodTrace(),
-        ),
+  it("checks a smoke's three windows in its results call, logs each, and writes no results file", async () => {
+    const { session, written, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
       undefined,
-      smoke,
+      { ...LAUNCH, smoke: true },
     );
-    await bad.session.operations().startMeasuring();
-    await bad.session.operations().cycleTrace();
-    await expect(bad.session.operations().stopMeasuring()).rejects.toThrow(
-      "trace window 2 of 2: the trace has no timed event",
-    );
-    const good = sessionOf(() => Promise.resolve(goodTrace()), undefined, smoke);
-    await good.session.operations().startMeasuring();
-    await good.session.operations().cycleTrace();
-    await expect(good.session.operations().stopMeasuring()).resolves.toBeUndefined();
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    await expect(ops.writeResults(smokeReport())).resolves.toEqual({
+      kind: "smoke checked",
+      failure: null,
+    });
+    expect(written.size).toBe(0);
+    // Each window checks the frames at least 0.5 s inside it: about 2 s of 60 Hz frames.
+    expect(logs.filter((line) => line.includes("frames match"))).toEqual([
+      "descent spike: trace window 1 of 3: the spans of 126 frames match the renderer's",
+      "descent spike: trace window 2 of 3: the spans of 102 frames match the renderer's",
+      "descent spike: trace window 3 of 3: the spans of 162 frames match the renderer's",
+    ]);
+    expect(logs.filter((line) => line.includes("boundary"))).toEqual([
+      "descent spike: trace boundary 1 of 2: 300 ms from the stop to the next start",
+      "descent spike: trace boundary 2 of 2: 300 ms from the stop to the next start",
+    ]);
   });
 
-  it("measures again after a stop, but not twice at once", async () => {
+  it("answers a smoke's results call with the reason of a window whose frame spans disagree, and the smoke exits 1 with it", async () => {
+    const { session, written, logs, exits } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path), windowOf(path) === 1)),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    const reason =
+      "trace window 2 of 3: the trace's frame spans disagree with the renderer's (72 of 102 frames)";
+    const answer = await ops.writeResults(smokeReport());
+    expect(answer).toEqual({ kind: "smoke checked", failure: reason });
+    expect(written.size).toBe(0);
+    expect(logs).toContain(
+      "descent spike: trace window 2 of 3 failed: the trace's frame spans disagree with the renderer's (72 of 102 frames)",
+    );
+    // The renderer ends the run with the answer's reason.
+    ops.end(1, answer.kind === "smoke checked" ? answer.failure : null);
+    expect(exits).toEqual([1]);
+    expect(logs.at(-1)).toBe(`descent spike: FAIL ${reason}`);
+  });
+
+  it("fails a smoke whose window lost data, with the reason", async () => {
+    const { session, trace } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    trace.told = { lostData: true, bufferPercent: 1 };
+    await ops.cycleTrace();
+    trace.told = EIGHTH;
+    await ops.stopMeasuring();
+    await expect(ops.writeResults(smokeReport())).resolves.toEqual({
+      kind: "smoke checked",
+      failure: `trace window 2 of 3: ${LOST_DATA_REASON}`,
+    });
+  });
+
+  it("goes on when the trace's debugger session detaches mid-run, failing its window with the reason", async () => {
+    const fake = new FakeDebugger();
+    const writer = memoryWriter();
+    const logs: string[] = [];
+    const trace = new SpikeTrace(
+      new CdpTracing(fake, {
+        log: (line) => {
+          logs.push(line);
+        },
+        nowMs: () => 0,
+        openFile: writer.openFile,
+      }),
+    );
+    const { deps } = depsOf(
+      trace,
+      () => Promise.resolve(windowTrace({ offsetUs: 7e9, fromMs: 900, toMs: 31_000 })),
+      (path) => Promise.resolve(writer.files.get(path)?.length ?? 0),
+    );
+    const ops = new SpikeSession(deps).operations();
+    await ops.startMeasuring();
+    fake.lose("Render process gone.");
+    const reason = "the trace's debugger session detached: Render process gone.";
+    await expect(ops.cycleTrace()).rejects.toThrow(`the spike's trace did not stop: ${reason}`);
+    // The run goes on: its stop and its results.
+    await expect(ops.stopMeasuring()).resolves.toBeUndefined();
+    expect(fake.calls).toEqual(["attach 1.3", "Tracing.start"]);
+    const paths = pathsOf(
+      await ops.writeResults({
+        ...smallReport(),
+        traceWindows: [
+          { startedMs: 900, stopRequestedMs: 31_000, failure: null },
+          {
+            startedMs: 31_000,
+            stopRequestedMs: 61_100,
+            failure: `the trace's cycle at 30 s failed: the spike's trace did not stop: ${reason}`,
+          },
+        ],
+      }),
+    );
+    expect(paths.json).toBe("/out/2026-10-03-devbox-low.json");
+    expect(logs).toContain(`descent spike: ${reason}`);
+  });
+
+  it("refuses to measure twice at once", async () => {
+    const { session } = sessionOf();
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await expect(ops.startMeasuring()).rejects.toThrow(/already/);
+  });
+
+  it("refuses to measure again once its stop has closed the trace", async () => {
     const { session } = sessionOf();
     const ops = session.operations();
     await ops.startMeasuring();
     await ops.stopMeasuring();
-    await expect(ops.startMeasuring()).resolves.toBeUndefined();
-    await expect(ops.startMeasuring()).rejects.toThrow(/already/);
+    await expect(ops.startMeasuring()).rejects.toThrow(/debugger session is closed/);
   });
 
   it("refuses to stop before starting, and to write before measuring", async () => {

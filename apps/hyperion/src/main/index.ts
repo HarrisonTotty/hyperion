@@ -21,6 +21,7 @@ import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunc
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
 import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
+import { CdpTracing } from "./cdpTracing";
 import { type ClientArgs, parseClientArgs, serverUrlOf, userArgs } from "./cli";
 import { parseNvidiaSmi, readDrmMemory, readNvidiaSmi } from "./fdinfo";
 import {
@@ -217,9 +218,15 @@ function spikeWatchdogMs(launch: SpikeLaunch): number {
   return launch.smoke ? 180_000 : 45 * 60_000;
 }
 
+/** Writes one line of a spike run's log to stdout, where the recipe reads it. */
+function logLine(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
+
 /**
- * Wires a spike run's handlers to its window (T13.c): the trace, the memory sampler and the
- * results file, each call checked against the window's own page.
+ * Wires a spike run's handlers to its window (T13.c): the trace, over the window's own debugger
+ * (T14.i), the memory sampler and the results file, each call checked against the window's own
+ * page.
  */
 function startSpikeSession(
   window: BrowserWindow,
@@ -229,7 +236,13 @@ function startSpikeSession(
   hidden: boolean,
   nvidiaBaselineBytes: number | null,
 ): void {
-  const trace = new SpikeTrace(contentTracing, { profiled: launch.traceProfile === "on" });
+  const trace = new SpikeTrace(
+    new CdpTracing(window.webContents.debugger, {
+      log: logLine,
+      nowMs: () => performance.now(),
+    }),
+    { profiled: launch.traceProfile === "on" },
+  );
   const startedAt = new Date();
   /** The renderer's last private-memory reading, bytes, for the sampler. */
   let rendererBytes: number | null = null;
@@ -281,9 +294,7 @@ function startSpikeSession(
     exit: (code) => {
       app.exit(code);
     },
-    log: (line) => {
-      process.stdout.write(`${line}\n`);
-    },
+    log: logLine,
   });
   const page = pageUrl();
   registerSpikeHandlers<IpcMainInvokeEvent>({

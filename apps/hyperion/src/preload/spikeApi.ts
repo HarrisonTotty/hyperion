@@ -7,7 +7,14 @@
  * bundled apart from the main process; `spikeApi.test.ts` holds them equal.
  */
 
-import type { DescentSpikeReport, SpikeApi, SpikeEnd, SpikeLaunch, SpikeResultsPaths } from "./api";
+import type {
+  DescentSpikeReport,
+  SpikeApi,
+  SpikeEnd,
+  SpikeLaunch,
+  SpikeResultsAnswer,
+  SpikeResultsPaths,
+} from "./api";
 import { spikeLaunchFromArgv } from "./spikeLaunch";
 
 /** The spike's channels (`main/spike.ts`'s `SPIKE_CHANNELS`). */
@@ -37,6 +44,25 @@ function isPaths(value: unknown): value is SpikeResultsPaths {
   );
 }
 
+/**
+ * The main process's answer to a results call, or `null` when it is not the answer `launch`
+ * expects: a smoke's check, or a full run's file.
+ */
+function readResultsAnswer(value: unknown, launch: SpikeLaunch): SpikeResultsAnswer | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const kind: unknown = Reflect.get(value, "kind");
+  if (launch.smoke) {
+    const failure: unknown = Reflect.get(value, "failure");
+    return kind === "smoke checked" && (failure === null || typeof failure === "string")
+      ? { kind, failure }
+      : null;
+  }
+  const paths: unknown = Reflect.get(value, "paths");
+  return kind === "written" && isPaths(paths) ? { kind, paths } : null;
+}
+
 /** The spike's functions for `launch`. */
 export function spikeApi(launch: SpikeLaunch, deps: SpikeApiDeps): SpikeApi {
   const { invoke } = deps;
@@ -55,11 +81,18 @@ export function spikeApi(launch: SpikeLaunch, deps: SpikeApiDeps): SpikeApi {
       await invoke(SPIKE_CHANNEL_NAMES.memory, Math.round((await deps.privateKib()) * 1024));
     },
     writeResults: async (report: DescentSpikeReport) => {
-      const paths = await invoke(SPIKE_CHANNEL_NAMES.writeResults, report);
-      if (!isPaths(paths)) {
-        throw new Error("the main process wrote no results file");
+      const answer = readResultsAnswer(
+        await invoke(SPIKE_CHANNEL_NAMES.writeResults, report),
+        launch,
+      );
+      if (answer === null) {
+        throw new Error(
+          launch.smoke
+            ? "the main process did not check the smoke's trace"
+            : "the main process wrote no results file",
+        );
       }
-      return paths;
+      return answer;
     },
     writeCapture: async (capture) => {
       const dir = await invoke(SPIKE_CHANNEL_NAMES.writeCapture, capture);

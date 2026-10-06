@@ -1,11 +1,14 @@
 /**
- * The trace reducer of the descent spike (plan R05, T14.b): Chromium's JSON trace in, the frame,
- * GPU-process, main-thread and GC figures of Design note 18 out.
+ * The trace reducer of the descent spike (plan R05, T14.b, T14.h): Chromium's JSON trace or a
+ * Perfetto protobuf trace in, the frame, GPU-process, main-thread and GC figures of Design note 18
+ * out.
  *
  * @remarks
  * A full descent's trace is about a gigabyte, beyond what one `JSON.parse` of the file can hold, so
  * {@link readTraceEvents} streams it a line at a time, relying on the layout Chromium writes: a
- * `{"traceEvents":[` line, one event a line, and the last event's line ending `],"metadata":`.
+ * `{"traceEvents":[` line, one event a line, and the last event's line ending `],"metadata":`. A
+ * protobuf trace is decoded a piece at a time into the same JSON-shaped events (`traceProto.ts`),
+ * and {@link readTraceFileEvents} tells the two apart by the file's first byte.
  * {@link TraceReducer} folds events in any order and summarises at the end.
  *
  * The events read, as recorded from Electron 44.4.3 on 2026-10-02 (the test's fixture):
@@ -30,8 +33,15 @@
  */
 
 import { createReadStream } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { open as openFile, readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
+
+import {
+  PROTO_TRACE_FIRST_BYTE,
+  type ProtoReadOptions,
+  readProtoTraceBatches,
+  readProtoTraceEvents,
+} from "./traceProto";
 
 /** Matches the URL of the renderer's lazily imported engine chunk, `engine-<hash>.js`. */
 export const ENGINE_CHUNK_PATTERN = /\/engine-[\w-]+\.js$/;
@@ -124,6 +134,18 @@ export interface SpanList {
   readonly durationsMs: ReadonlyArray<number>;
 }
 
+/**
+ * The renderer's {@link FRAME_MEASURE} spans, each with the start the page passed it, by which the
+ * main process matches them to the renderer's frames (R05.T14.h).
+ */
+export interface FrameSpanList extends SpanList {
+  /**
+   * Every span's `args.startTime`, the `performance.now()` ms its measure was given, in order of
+   * its start; `null` for a span whose begin carries none.
+   */
+  readonly startTimesMs: ReadonlyArray<number | null>;
+}
+
 /** One `performance.measure` name's spans on one thread. */
 export interface UserTimingFigures extends DurationSummary, SpanList {
   readonly name: string;
@@ -146,7 +168,7 @@ export interface MainThreadFigures {
    */
   readonly ourCodeMs: number;
   /** Its {@link FRAME_MEASURE} spans, for the check against the renderer's own frames. */
-  readonly frameSpans: SpanList;
+  readonly frameSpans: FrameSpanList;
   /**
    * Sampled self time in the engine chunk, ms; `null` without a CPU profile of the thread. Where
    * our spans enclose engine calls it lies inside `ourCodeMs` as well.
@@ -364,13 +386,20 @@ interface ProfileState {
   sampledUs: number;
 }
 
-/** A pending async begin: its thread, time and the state a `PipelineReporter` carries. */
+/**
+ * A pending async begin: its thread, time, the state a `PipelineReporter` carries, and the start
+ * a `performance.measure` span was given.
+ */
 interface Begin {
   readonly tid: number;
   readonly ts: number;
   readonly state: string | undefined;
   readonly host: number | undefined;
+  readonly startMs: number | undefined;
 }
+
+/** A `performance.measure` span: its start and end, µs, and the start it was given, ms. */
+type MeasureSpan = readonly [startUs: number, endUs: number, startMs: number | null];
 
 /** A frame's end: its presentation time and state. */
 type FrameEnd = readonly [endUs: number, state: string | undefined];
@@ -395,7 +424,7 @@ export class TraceReducer {
   readonly #begins = new Map<string, Begin>();
   /** Per process, per compositor: frame ends. */
   readonly #frames = new Map<number, Map<number, FrameEnd[]>>();
-  readonly #userTiming = new Map<string, Array<readonly [number, number]>>();
+  readonly #userTiming = new Map<string, MeasureSpan[]>();
   /** Per thread, each user-timing begin's `ts − 1000 × args.startTime`, µs. */
   readonly #clockOffsets = new Map<string, number[]>();
   readonly #profiles = new Map<string, ProfileState>();
@@ -468,8 +497,8 @@ export class TraceReducer {
       const reporter = event.args["frame_reporter"];
       const state = isRecord(reporter) ? stringOf(reporter["state"]) : undefined;
       const host = isRecord(reporter) ? numberOf(reporter["layer_tree_host_id"]) : undefined;
-      this.#begins.set(key, { tid: event.tid, ts: event.ts, state, host });
       const startMs = isMeasure ? numberOf(event.args["startTime"]) : undefined;
+      this.#begins.set(key, { tid: event.tid, ts: event.ts, state, host, startMs });
       if (startMs !== undefined) {
         pushTo(this.#clockOffsets, threadKey(event.pid, event.tid), event.ts - 1000 * startMs);
       }
@@ -491,6 +520,7 @@ export class TraceReducer {
       pushTo(this.#userTiming, `${event.pid}\u0000${begin.tid}\u0000${event.name}`, [
         begin.ts,
         event.ts,
+        begin.startMs ?? null,
       ] as const);
     }
   }
@@ -656,10 +686,11 @@ export class TraceReducer {
       tid,
       wallMs,
       busyMs,
-      ourCodeMs: unionLengthUs(spans) / 1000,
+      ourCodeMs: unionLengthUs(spans.map(([start, end]) => [start, end] as const)) / 1000,
       frameSpans: {
         startsUs: spans.map(([start]) => start),
         durationsMs: spans.map(([start, end]) => (end - start) / 1000),
+        startTimesMs: spans.map(([, , startMs]) => startMs),
       },
       engineSelfMs: profile === undefined ? null : profile.engineUs / 1000,
       sampledMs: profile === undefined ? null : profile.sampledUs / 1000,
@@ -811,7 +842,67 @@ export async function reduceTrace(
   return reducer.figures();
 }
 
-/** Reduces a trace file written by {@link SpikeTrace}'s `stop`. */
-export function reduceTraceFile(path: string, options: ReduceOptions): Promise<TraceFigures> {
-  return reduceTrace(readTraceEvents(path), options);
+/** A file's first byte, or `undefined` for an empty file. */
+async function firstByte(path: string): Promise<number | undefined> {
+  const handle = await openFile(path, "r");
+  try {
+    const { bytesRead, buffer } = await handle.read(new Uint8Array(1), 0, 1, 0);
+    return bytesRead === 0 ? undefined : buffer[0];
+  } finally {
+    await handle.close();
+  }
+}
+
+/** The first byte of a JSON trace: `{` of `{"traceEvents":[`, or `[` of a bare array. */
+const JSON_FIRST_BYTES: ReadonlySet<number> = new Set([0x7b, 0x5b]);
+
+/**
+ * The events of a trace file by its first byte: `{` or `[` for Chromium's JSON
+ * ({@link readTraceEvents}), {@link PROTO_TRACE_FIRST_BYTE} for a Perfetto protobuf trace
+ * (`readProtoTraceEvents`); none for an empty file, which a crashed tracing service leaves.
+ *
+ * @throws Error naming the file when its first byte is neither, or as each reader throws.
+ */
+export async function* readTraceFileEvents(
+  path: string,
+  options: ProtoReadOptions = {},
+): AsyncGenerator<unknown, void, undefined> {
+  const first = await firstByte(path);
+  if (first === undefined) {
+    return;
+  }
+  if (first === PROTO_TRACE_FIRST_BYTE) {
+    yield* readProtoTraceEvents(path, options);
+    return;
+  }
+  if (!JSON_FIRST_BYTES.has(first)) {
+    throw new Error(
+      `${path} is not a trace: its first byte, 0x${first.toString(16).padStart(2, "0")}, begins neither JSON nor a Perfetto protobuf trace`,
+    );
+  }
+  yield* readTraceEvents(path);
+}
+
+/**
+ * Reduces a trace file written by {@link SpikeTrace}'s `stop`, JSON or protobuf, as
+ * {@link readTraceFileEvents} reads it.
+ *
+ * @throws Error as {@link readTraceFileEvents} does.
+ */
+export async function reduceTraceFile(
+  path: string,
+  options: ReduceOptions & ProtoReadOptions,
+): Promise<TraceFigures> {
+  if ((await firstByte(path)) !== PROTO_TRACE_FIRST_BYTE) {
+    return reduceTrace(readTraceFileEvents(path), options);
+  }
+  // A protobuf trace's events a piece at a time: one asynchronous step an event costs more than
+  // reducing it.
+  const reducer = new TraceReducer(options);
+  for await (const events of readProtoTraceBatches(path, options)) {
+    for (const event of events) {
+      reducer.add(event);
+    }
+  }
+  return reducer.figures();
 }

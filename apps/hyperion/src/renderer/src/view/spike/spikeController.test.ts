@@ -28,7 +28,12 @@ const DESCENT = {
   omittedSigmaM: Array.from({ length: 25 }, () => 1e9),
 };
 
-/** A fake preload, recording each call; each cycle answers as the next queued answer says. */
+/**
+ * A fake preload, recording each call; each cycle answers as the next queued answer says, and the
+ * results call as the main process does: a full run's file written, or a smoke's trace checked,
+ * failing with `results.smokeFailure` or, when `results.checkTrace` is set, with the first window
+ * the renderer failed, as the main process's merge does.
+ */
 function fakeSpike(launch: SpikeLaunch): {
   readonly spike: SpikeApi;
   readonly calls: string[];
@@ -36,11 +41,16 @@ function fakeSpike(launch: SpikeLaunch): {
   readonly reports: DescentSpikeReport[];
   /** How the next cycles answer, in order; a cycle beyond them resolves. */
   readonly cycles: Array<() => Promise<void>>;
+  readonly results: { smokeFailure: string | null; checkTrace: boolean };
 } {
   const calls: string[] = [];
   const ends: SpikeEnd[] = [];
   const reports: DescentSpikeReport[] = [];
   const cycles: Array<() => Promise<void>> = [];
+  const results: { smokeFailure: string | null; checkTrace: boolean } = {
+    smokeFailure: null,
+    checkTrace: true,
+  };
   const spike: SpikeApi = {
     launch,
     startTrace: () => {
@@ -62,7 +72,17 @@ function fakeSpike(launch: SpikeLaunch): {
     writeResults: (report) => {
       calls.push("writeResults");
       reports.push(report);
-      return Promise.resolve({ json: "a.json", markdown: "a.md" });
+      if (!launch.smoke) {
+        return Promise.resolve({ kind: "written", paths: { json: "a.json", markdown: "a.md" } });
+      }
+      const n = report.traceWindows.length;
+      const failed = report.traceWindows.findIndex(({ failure }) => failure !== null);
+      const window = report.traceWindows[failed];
+      const renderer =
+        results.checkTrace && window !== undefined && window.failure !== null
+          ? `trace window ${failed + 1} of ${n}: ${window.failure}`
+          : null;
+      return Promise.resolve({ kind: "smoke checked", failure: results.smokeFailure ?? renderer });
     },
     writeCapture: () => {
       calls.push("writeCapture");
@@ -74,7 +94,7 @@ function fakeSpike(launch: SpikeLaunch): {
       return Promise.resolve();
     },
   };
-  return { spike, calls, ends, reports, cycles };
+  return { spike, calls, ends, reports, cycles, results };
 }
 
 /** A capture that records what the controller asks of it. */
@@ -132,6 +152,7 @@ function frame(scriptTimeS: number, scriptStartMs = 0) {
     scriptTimeS,
     rafTimestampMs: scriptStartMs + scriptTimeS * 1000,
     scriptStartMs,
+    callbackStartMs: scriptStartMs + scriptTimeS * 1000 + 0.1,
     callbackMs: 3,
     passesSubmitted: 5,
     patchesHard: 100,
@@ -384,13 +405,62 @@ describe("the spike's run control", () => {
     expect(run.ends).toEqual([]);
     run.controller.frame(frame(SMOKE_S));
     await settle();
-    expect(run.calls).toEqual(["startTrace", "cycleTrace", "cycleTrace", "stopTrace", "end"]);
+    expect(run.calls).toEqual([
+      "startTrace",
+      "cycleTrace",
+      "cycleTrace",
+      "stopTrace",
+      "writeResults",
+      "end",
+    ]);
     expect(run.ends).toEqual([{ status: "pass" }]);
-    expect(run.reports).toEqual([]);
   });
 
-  it("fails a smoke run whose trace ended early, with the reason", async () => {
+  it("hands a smoke's report, with its three windows' times, to the results call", async () => {
     const run = controllerOf({ ...LAUNCH, smoke: true });
+    run.controller.prepared(DESCENT);
+    run.controller.patch("baked");
+    await flyBoundaries(run, SMOKE_TRACE_BOUNDARIES_S, SMOKE_S);
+    expect(run.reports).toHaveLength(1);
+    expect(run.reports[0]?.traceWindows).toEqual([
+      { startedMs: 0, stopRequestedMs: 3000, failure: null },
+      { startedMs: 3300, stopRequestedMs: 6000, failure: null },
+      { startedMs: 6300, stopRequestedMs: 10_000, failure: null },
+    ]);
+    expect(run.reports[0]?.frames.callbackStartsMs).toHaveLength(
+      run.reports[0]?.frames.scriptTimesS.length ?? -1,
+    );
+  });
+
+  it("fails a smoke whose results call answers a failed window, with that window's reason", async () => {
+    const run = controllerOf({ ...LAUNCH, smoke: true });
+    const reason =
+      "trace window 2 of 3: the trace's frame spans disagree with the renderer's (3 of 102 frames)";
+    run.results.smokeFailure = reason;
+    run.controller.prepared(DESCENT);
+    run.controller.patch("baked");
+    await flyBoundaries(run, SMOKE_TRACE_BOUNDARIES_S, SMOKE_S);
+    expect(run.calls.slice(-2)).toEqual(["writeResults", "end"]);
+    expect(run.ends).toEqual([{ status: "fail", reason }]);
+  });
+
+  it("fails a smoke run whose trace ended early, with its failed window's reason", async () => {
+    const run = controllerOf({ ...LAUNCH, smoke: true });
+    run.cycles.push(() => Promise.reject(new Error("the tracing service is gone")));
+    run.controller.prepared(DESCENT);
+    run.controller.patch("baked");
+    await flyBoundaries(run, SMOKE_TRACE_BOUNDARIES_S, SMOKE_S);
+    expect(run.ends).toEqual([
+      {
+        status: "fail",
+        reason: "trace window 2 of 2: the trace's cycle at 3 s failed: the tracing service is gone",
+      },
+    ]);
+  });
+
+  it("fails a smoke run whose trace ended early even if the check passed it", async () => {
+    const run = controllerOf({ ...LAUNCH, smoke: true });
+    run.results.checkTrace = false;
     run.cycles.push(() => Promise.reject(new Error("the tracing service is gone")));
     run.controller.prepared(DESCENT);
     run.controller.patch("baked");
@@ -450,7 +520,7 @@ describe("the spike's run control", () => {
     expect(untraced(calls)).toEqual(["writeCapture"]);
     controller.frame(frame(SMOKE_S));
     await settle();
-    expect(untraced(calls)).toEqual(["writeCapture", "end"]);
+    expect(untraced(calls)).toEqual(["writeCapture", "writeResults", "end"]);
   });
 
   it("ends and writes a span the run outlasts, where the run ends", async () => {
@@ -463,7 +533,7 @@ describe("the spike's run control", () => {
     controller.frame(frame(SMOKE_S));
     await settle();
     expect(capture.log).toContain("end");
-    expect(untraced(calls)).toEqual(["writeCapture", "end"]);
+    expect(untraced(calls)).toEqual(["writeCapture", "writeResults", "end"]);
   });
 
   it("starts a full run's span 5 s into the low fast pass", () => {

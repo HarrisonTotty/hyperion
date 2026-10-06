@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   FRAME_MEASURE,
   readTraceEvents,
+  readTraceFileEvents,
   recordedGpuSlices,
   reduceTrace,
   reduceTraceFile,
@@ -145,10 +146,20 @@ describe("the trace reducer on a recorded trace", () => {
     // overlap, so our code is their sum, and the main thread keeps each.
     const frames = userTiming.find(({ name }) => name === FRAME_MEASURE);
     expect(mainThread?.ourCodeMs).toBeCloseTo(frames?.totalMs ?? Number.NaN, 9);
-    expect(mainThread?.frameSpans).toEqual({
+    expect(mainThread?.frameSpans).toMatchObject({
       startsUs: frames?.startsUs,
       durationsMs: frames?.durationsMs,
     });
+    // Each span keeps the start its begin carries, `ts − 1000 × startTime` within 0.2 ms of the
+    // trace's clock offset.
+    const startTimesMs = mainThread?.frameSpans.startTimesMs ?? [];
+    expect(startTimesMs).toHaveLength(7);
+    for (const [k, startMs] of startTimesMs.entries()) {
+      const startUs = mainThread?.frameSpans.startsUs[k] ?? Number.NaN;
+      expect(
+        Math.abs(startUs - 1000 * (startMs ?? Number.NaN) - (reduced().clockOffsetUs ?? 0)),
+      ).toBeLessThanOrEqual(200);
+    }
     expect(mainThread?.engineSelfMs).toBeGreaterThan(0);
     expect(mainThread?.engineSelfMs).toBeLessThanOrEqual(mainThread?.sampledMs ?? 0);
   });
@@ -304,6 +315,7 @@ describe("the trace reducer on hand-made events", () => {
     expect(figures.mainThread?.frameSpans).toEqual({
       startsUs: [1_000_000, 1_016_700, 1_033_400],
       durationsMs: [4, 3, 5],
+      startTimesMs: [1000, 1016.7, 1033.4],
     });
   });
 
@@ -447,5 +459,65 @@ describe("reading a trace file", () => {
   it("names the line that does not parse", async () => {
     const path = await written('{"traceEvents":[\n{"name":"a"},\n{"name":\n');
     await expect(all(path)).rejects.toThrow(/trace\.json:3 is not a trace event/);
+  });
+});
+
+/** Every event of a trace file, read by its first byte. */
+async function fileEvents(path: string): Promise<unknown[]> {
+  const out: unknown[] = [];
+  for await (const event of readTraceFileEvents(path)) {
+    out.push(event);
+  }
+  return out;
+}
+
+describe("reading a trace file by its first byte", () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true })));
+  });
+
+  /** `data` written to a file of its own, removed after the test. */
+  async function written(data: string | Uint8Array): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "hyperion-trace-"));
+    dirs.push(dir);
+    const path = join(dir, "trace");
+    await writeFile(path, data);
+    return path;
+  }
+
+  it("reads JSON beginning with { or [", async () => {
+    await expect(fileEvents(await written('{"traceEvents":[{"name":"a"}]}'))).resolves.toEqual([
+      { name: "a" },
+    ]);
+    await expect(fileEvents(await written('[{"name":"b"}]'))).resolves.toEqual([{ name: "b" }]);
+  });
+
+  it("decodes a Perfetto protobuf trace beginning with Trace.packet's tag", async () => {
+    // One packet naming a process: `process_descriptor` (field 43, its tag 0xda 0x02) of pid 5.
+    const name = [...new TextEncoder().encode("Renderer")];
+    const descriptor = [0x08, 0x05, 0x32, name.length, ...name];
+    const packet = [0xda, 0x02, descriptor.length, ...descriptor];
+    const path = await written(new Uint8Array([0x0a, packet.length, ...packet]));
+    await expect(fileEvents(path)).resolves.toEqual([
+      expect.objectContaining({
+        ph: "M",
+        name: "process_name",
+        pid: 5,
+        args: { name: "Renderer" },
+      }),
+    ]);
+  });
+
+  it("reads an empty file, which a crashed tracing service leaves, as no events", async () => {
+    await expect(fileEvents(await written(""))).resolves.toEqual([]);
+  });
+
+  it("refuses a file beginning with any other byte, naming it", async () => {
+    const path = await written("not a trace");
+    await expect(fileEvents(path)).rejects.toThrow(
+      `${path} is not a trace: its first byte, 0x6e, begins neither JSON nor a Perfetto protobuf trace`,
+    );
   });
 });

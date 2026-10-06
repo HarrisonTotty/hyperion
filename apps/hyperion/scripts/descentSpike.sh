@@ -8,7 +8,7 @@
 # Spike options (the client's, `src/main/cli.ts`): --setting high|low, --seed <u64>, --smoke,
 # --out <dir>, --workers <n>, --vertex-path baked-offsets|face-differences, --normals double|mesh,
 # --ridged on|off, --dawn-safety on|off, --capture <dir>, --trace-profile on|off (V8's CPU profiler
-# in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e).
+# and `gpu` in the trace, off by default: a profiled run is a diagnostic, never judged; R05.T14.e).
 #
 # --companion-load <threads> runs that many busy threads beside the run, standing in for the
 # server's arrival work (Design note 20). --cold-cache starts with an empty Chromium GPU shader
@@ -17,8 +17,10 @@
 # --hidden never shows the window (offscreen rendering), as --smoke never does.
 #
 # Each run gets a fresh `--user-data-dir` under target/descent-spike/, on disk and never under
-# TMPDIR, removed afterwards: the trace's window files wait there until the run ends, about 1.5 GB
-# for a descent, which a RAM-backed /tmp cannot hold (decision-r05-trace-windows.md). The server,
+# TMPDIR, removed afterwards: the trace's window files wait there until the run ends, about 1 GB
+# for a timed descent and 2 GB for a profiled one, which a RAM-backed /tmp cannot hold (decision-r05-trace-windows.md). Electron's
+# TMPDIR is a fresh directory there too, removed afterwards, since Chromium spools each window's
+# protobuf stream to a temporary file before the client reads it over CDP (R05.T14.i). The server,
 # the companion load and Electron run in process groups of their own under `timeout`, each group
 # killed when the script ends for any reason. The exit status is the client's: 0 pass, 1 fail, 3
 # the watchdog.
@@ -56,6 +58,7 @@ for arg in "${spike_args[@]}"; do
 done
 
 profile=""
+spool=""
 groups=()
 cleanup() {
     for group in "${groups[@]}"; do
@@ -63,6 +66,9 @@ cleanup() {
     done
     if [[ -n "$profile" ]]; then
         rm -rf -- "$profile"
+    fi
+    if [[ -n "$spool" ]]; then
+        rm -rf -- "$spool"
     fi
 }
 trap cleanup EXIT INT TERM
@@ -80,13 +86,14 @@ done
 
 mkdir -p "$cache_keep"
 profile="$(mktemp -d "$runs/profile.XXXXXX")"
+spool="$(mktemp -d "$runs/tmp.XXXXXX")"
 if [[ $cold -eq 0 ]]; then
     cp -a "$cache_keep/." "$profile/"
 else
     rm -rf -- "${cache_keep:?}"/*
 fi
 
-env_run=()
+env_run=("TMPDIR=$spool")
 if [[ $hidden -eq 1 ]]; then
     env_run+=(HYPERION_SPIKE_HIDDEN=1)
 fi

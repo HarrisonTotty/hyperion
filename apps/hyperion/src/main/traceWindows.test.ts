@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { PROFILED, recordingOf, UNPROFILED, windowFile, windowTrace } from "./fixtures/traces";
+import {
+  callbackStartsOf,
+  PROFILED,
+  recordingOf,
+  UNPROFILED,
+  windowFile,
+  windowTrace,
+} from "./fixtures/traces";
 import { measured, missing } from "./measured";
 import type { TraceFigures } from "./reduceTrace";
 import {
+  checkFrameSpans,
   EMPTY_TRACE_REASON,
   frameSpanFailure,
+  LOST_DATA_REASON,
   mergeTraceWindows,
   NO_CLOCK_OFFSET_REASON,
   type PooledTraceFigures,
@@ -18,7 +27,8 @@ import {
  * Two windows of a 20 s script that starts at 1,000 ms: the first from −0.1 s to its stop request
  * at 10.0 s, the second from its start at 10.5 s to 20.0 s. The boundary's exclusion is
  * [10.0, 11.5) s. A frame every 0.25 s, each 250 ms after the one before, but the one at 10.5 s,
- * after the gap, 750 ms, and each with 3 ms of our code.
+ * after the gap, 750 ms, and each with its callback starting 0.1 ms after its rAF time and 3 ms of
+ * our code.
  */
 function report(): TraceWindowsReport {
   const scriptTimesS = Array.from({ length: 81 }, (_, i) => i / 4);
@@ -38,6 +48,7 @@ function report(): TraceWindowsReport {
       scriptTimesS,
       rafIntervalsMs: scriptTimesS.map((t) => (t === 0 ? 0 : t === 10.5 ? 750 : 250)),
       ourCodeMs: scriptTimesS.map(() => 3),
+      callbackStartsMs: callbackStartsOf(1000, scriptTimesS),
     },
   };
 }
@@ -125,6 +136,24 @@ describe("the trace's windows, merged", () => {
       measured({ spanMs: 10_100, bytes: 1_000_000, bufferPercent: 10 }),
       measured({ spanMs: 9500, bytes: 1_000_000, bufferPercent: 10 }),
     ]);
+  });
+
+  it("counts the frames each window's span check checked, for the run's log", () => {
+    const merged = mergeTraceWindows(recordingOf(twoWindows().map(windowFile)), report());
+    // Callbacks at 1.5, 1.75, …, 10.25 s in the first window's interior [1.4, 10.5] s, and at
+    // 12, 12.25, …, 20.25 s in the second's [12, 20.5] s.
+    expect(merged.checkedFrames).toEqual([36, 34]);
+  });
+
+  it("fails a window that lost data, giving it no count", () => {
+    const [first, second] = twoWindows().map(windowFile);
+    if (first === undefined || second === undefined) {
+      throw new Error("no two windows");
+    }
+    const merged = mergeTraceWindows(recordingOf([first, { ...second, lostData: true }]), report());
+    expect(merged.figures.reason).toBe(`trace window 2 of 2: ${LOST_DATA_REASON}`);
+    expect(merged.run.value?.windows[1]?.figures.reason).toBe(LOST_DATA_REASON);
+    expect(merged.checkedFrames).toEqual([36, null]);
   });
 
   it("form presentation intervals within a window, never across its gap", () => {
@@ -249,7 +278,12 @@ describe("the trace's windows, merged", () => {
     const trace = windowTrace({ offsetUs: 7e9, fromMs: at(-0.1), toMs: at(10) });
     const merged = mergeTraceWindows(recordingOf([windowFile(trace)]), report());
     const reason = "the renderer reported 2 trace windows, and the main process wrote 1";
-    expect(merged).toEqual({ run: missing(reason), exclusions: [], figures: missing(reason) });
+    expect(merged).toEqual({
+      run: missing(reason),
+      checkedFrames: [],
+      exclusions: [],
+      figures: missing(reason),
+    });
   });
 
   it("has no trace when the renderer reports no window", () => {
@@ -259,12 +293,18 @@ describe("the trace's windows, merged", () => {
         ...report(),
         traceWindows: [],
       }),
-    ).toEqual({ run: missing(reason), exclusions: [], figures: missing(reason) });
+    ).toEqual({
+      run: missing(reason),
+      checkedFrames: [],
+      exclusions: [],
+      figures: missing(reason),
+    });
   });
 
   it("passes on why there is no trace at all", () => {
     expect(mergeTraceWindows(missing("the trace was not recorded"), report())).toEqual({
       run: missing("the trace was not recorded"),
+      checkedFrames: [],
       exclusions: [],
       figures: missing("the trace was not recorded"),
     });
@@ -333,10 +373,11 @@ describe("the boundaries' guard", () => {
   });
 });
 
-/** One frame span, its start in the trace's clock. */
+/** One frame span: its start in the trace's clock, its duration, and its `args.startTime`. */
 interface Span {
   readonly startUs: number;
   readonly durationMs: number;
+  readonly startMs: number | null;
 }
 
 /** `trace` with its main thread's frame spans edited. */
@@ -345,9 +386,13 @@ function withSpans(trace: TraceFigures, edit: (spans: Span[]) => Span[]): TraceF
   if (main === null) {
     throw new Error("the window has no main thread");
   }
-  const { startsUs, durationsMs } = main.frameSpans;
+  const { startsUs, durationsMs, startTimesMs } = main.frameSpans;
   const edited = edit(
-    startsUs.map((startUs, i) => ({ startUs, durationMs: durationsMs[i] ?? 0 })),
+    startsUs.map((startUs, i) => ({
+      startUs,
+      durationMs: durationsMs[i] ?? 0,
+      startMs: startTimesMs[i] ?? null,
+    })),
   ).toSorted((a, b) => a.startUs - b.startUs);
   return {
     ...trace,
@@ -356,6 +401,7 @@ function withSpans(trace: TraceFigures, edit: (spans: Span[]) => Span[]): TraceF
       frameSpans: {
         startsUs: edited.map(({ startUs }) => startUs),
         durationsMs: edited.map(({ durationMs }) => durationMs),
+        startTimesMs: edited.map(({ startMs }) => startMs),
       },
     },
   };
@@ -364,28 +410,62 @@ function withSpans(trace: TraceFigures, edit: (spans: Span[]) => Span[]): TraceF
 /** The first window's span of the frame at 5 s: the 21st, its frames being 0, 0.25, …, 10 s. */
 const AT_5_S = 20;
 
-/** The trace's clock, µs, of the first window at page ms `ms`. */
-function firstUs(ms: number): number {
-  return 7e9 + 1000 * ms;
+/** A span on the first window's clock of a callback starting at page ms `startMs`. */
+function spanAt(startMs: number, durationMs = 3): Span {
+  return { startUs: 7e9 + 1000 * startMs, durationMs, startMs };
 }
 
-/** The reason every trace figure is missing when the first window's spans disagree. */
-function disagree(m: number): string {
-  // The first window checks the frames from 0.5 s to 9.5 s, 0.5 s inside [−0.1, 10.0] s.
-  return `trace window 1 of 2: the trace's frame spans disagree with the renderer's (${m} of 37 frames)`;
+/**
+ * The first window's frames checked: those whose callbacks start 0.5 s inside [−0.1, 10.0] s, at
+ * 0.5 s to 9.25 s; the one at 9.5 s starts 0.1 ms too late.
+ */
+const CHECKED = 36;
+
+/** The reason a window fails when its spans disagree with `m` of its `n` frames' and `strays`. */
+function disagreement(m: number, strays = 0, n = CHECKED): string {
+  const stray =
+    strays === 0 ? "" : `; ${strays} ${strays === 1 ? "span matches" : "spans match"} no frame`;
+  return `the trace's frame spans disagree with the renderer's (${m} of ${n} frames${stray})`;
 }
 
-describe("the frame-span check", () => {
+/** The second window, to `at(21)`, with its spans edited, and a report whose last window ends there. */
+function endingAt21(edit: (spans: Span[]) => Span[]): {
+  readonly windows: ReadonlyArray<TraceFigures>;
+  readonly report: TraceWindowsReport;
+} {
+  const [first] = twoWindows();
+  if (first === undefined) {
+    throw new Error("no first window");
+  }
+  const base = report();
+  const second = withSpans(
+    windowTrace({ offsetUs: 9e9, fromMs: at(10.5), toMs: at(21), frames: base }),
+    edit,
+  );
+  return {
+    windows: [first, second],
+    report: {
+      ...base,
+      traceWindows: [
+        { startedMs: 900, stopRequestedMs: 11_000, failure: null },
+        { startedMs: 11_500, stopRequestedMs: at(21), failure: null },
+      ],
+    },
+  };
+}
+
+describe("the frame-span check, by identity", () => {
   /** The first window with its spans edited, merged with the second as it is. */
-  function mergedWith(edit: (spans: Span[]) => Span[]): ReturnType<typeof mergeTraceWindows> {
-    const [first, second] = twoWindows();
-    if (first === undefined || second === undefined) {
+  function mergedWith(
+    edit: (spans: Span[]) => Span[],
+    base: TraceWindowsReport = report(),
+  ): ReturnType<typeof mergeTraceWindows> {
+    const [, second] = twoWindows();
+    const first = windowTrace({ offsetUs: 7e9, fromMs: at(-0.1), toMs: at(10), frames: base });
+    if (second === undefined) {
       throw new Error("no two windows");
     }
-    return mergeTraceWindows(
-      recordingOf([withSpans(first, edit), second].map(windowFile)),
-      report(),
-    );
+    return mergeTraceWindows(recordingOf([withSpans(first, edit), second].map(windowFile)), base);
   }
 
   it("passes windows with one span a frame, of its frame's ourCodeMs", () => {
@@ -394,97 +474,124 @@ describe("the frame-span check", () => {
     expect(merged.run.value?.windows.map(({ figures }) => figures.reason)).toEqual([null, null]);
   });
 
-  it("passes a span within 0.2 ms before its frame and 0.01 ms of its ourCodeMs", () => {
+  it("passes a span 0.24 ms off its frame's ourCodeMs", () => {
     const merged = mergedWith((spans) =>
-      spans.map((span, k) =>
-        k === AT_5_S ? { startUs: firstUs(at(5) - 0.15), durationMs: 3.009 } : span,
-      ),
+      spans.map((span, k) => (k === AT_5_S ? { ...span, durationMs: 3.24 } : span)),
     );
     expect(merged.figures.reason).toBeNull();
   });
 
-  it.each<readonly [string, (spans: Span[]) => Span[], number]>([
-    ["a missing span", (spans) => spans.filter((_, k) => k !== AT_5_S), 1],
-    ["an extra span", (spans) => [...spans, { startUs: firstUs(at(5) + 2), durationMs: 3 }], 1],
+  it.each<readonly [string, (spans: Span[]) => Span[], string]>([
+    ["a missing span", (spans) => spans.filter((_, k) => k !== AT_5_S), disagreement(1)],
     [
-      "a duration off by 0.02 ms",
+      "a duplicated span",
+      (spans) => [...spans, ...spans.filter((_, k) => k === AT_5_S)],
+      disagreement(1),
+    ],
+    [
+      "a span whose duration is off by 0.3 ms",
       (spans) =>
         spans.map((span, k) =>
-          k === AT_5_S ? { ...span, durationMs: span.durationMs + 0.02 } : span,
+          k === AT_5_S ? { ...span, durationMs: span.durationMs + 0.3 } : span,
         ),
-      1,
+      disagreement(1),
     ],
-    // The span then lies in the frame before's stretch: that frame has two, and its own none.
     [
-      "a start before its frame's rAF time less 0.2 ms",
-      (spans) =>
-        spans.map((span, k) => (k === AT_5_S ? { ...span, startUs: firstUs(at(5) - 0.3) } : span)),
-      2,
+      "an unmatched span inside the interior",
+      (spans) => [...spans, spanAt(at(5) + 2)],
+      disagreement(0, 1),
     ],
-  ])("fails the window for %s, and so every trace figure", (_case, edit, m) => {
+    [
+      "a span whose startTime is 2·10⁻⁶ ms off its frame's callback start",
+      (spans) =>
+        spans.map((span, k) =>
+          k === AT_5_S && span.startMs !== null ? { ...span, startMs: span.startMs + 2e-6 } : span,
+        ),
+      disagreement(1, 1),
+    ],
+    [
+      "a span without a startTime",
+      (spans) => [...spans, { startUs: 7e9 + 1000 * at(5.1), durationMs: 3, startMs: null }],
+      disagreement(0, 1),
+    ],
+  ])("fails the window for %s, and so every trace figure", (_case, edit, reason) => {
     const merged = mergedWith(edit);
-    expect(merged.figures).toEqual(missing(disagree(m)));
-    expect(merged.run.value?.windows.map(({ figures }) => figures.reason)).toEqual([
-      `the trace's frame spans disagree with the renderer's (${m} of 37 frames)`,
-      null,
-    ]);
+    expect(merged.figures).toEqual(missing(`trace window 1 of 2: ${reason}`));
+    expect(merged.run.value?.windows.map(({ figures }) => figures.reason)).toEqual([reason, null]);
   });
 
-  it("checks only the frames at least 0.5 s inside their window", () => {
-    // Without the spans of 0.25 s and 9.75 s, just outside the checked stretch, it passes; without
+  it("passes a callback that began after the next frame's rAF time", () => {
+    // The frame at 5 s waits until 0.05 ms after the next frame's rAF time, 5.25 s, and runs its
+    // 3 ms; the next frame's callback starts after it.
+    const base = report();
+    const late = base.frames.callbackStartsMs.map((ms, i) =>
+      i === AT_5_S ? at(5.25) + 0.05 : i === AT_5_S + 1 ? at(5.25) + 3.2 : ms,
+    );
+    const merged = mergedWith((spans) => spans, {
+      ...base,
+      frames: { ...base.frames, callbackStartsMs: late },
+    });
+    expect(merged.figures.reason).toBeNull();
+  });
+
+  it("checks only the frames whose callbacks start at least 0.5 s inside their window", () => {
+    // Without the spans of 0.25 s and 9.5 s, just outside the checked interior, it passes; without
     // the one of 0.5 s, inside it, it fails.
     expect(
-      mergedWith((spans) => spans.filter((_, k) => k !== 1 && k !== 39)).figures.reason,
+      mergedWith((spans) => spans.filter((_, k) => k !== 1 && k !== 38)).figures.reason,
     ).toBeNull();
-    expect(mergedWith((spans) => spans.filter((_, k) => k !== 2)).figures.reason).toBe(disagree(1));
-  });
-
-  it("does not check the series' last frame, after which the page draws on unrecorded", () => {
-    // The second window stops 1 s after the last frame, at 20 s, and holds the spans of two frames
-    // the page drew after it, which the report does not have.
-    const ends = {
-      ...report(),
-      traceWindows: [
-        { startedMs: 900, stopRequestedMs: 11_000, failure: null },
-        { startedMs: 11_500, stopRequestedMs: at(21), failure: null },
-      ],
-    };
-    const [first] = twoWindows();
-    const second = withSpans(
-      windowTrace({ offsetUs: 9e9, fromMs: at(10.5), toMs: at(21), frames: report() }),
-      (spans) => [
-        ...spans,
-        ...[20.25, 20.5].map((t) => ({ startUs: 9e9 + 1000 * (at(t) + 0.1), durationMs: 3 })),
-      ],
+    expect(mergedWith((spans) => spans.filter((_, k) => k !== 2)).figures.reason).toBe(
+      `trace window 1 of 2: ${disagreement(1)}`,
     );
-    if (first === undefined) {
-      throw new Error("no first window");
-    }
+  });
+
+  it("checks the series' last frame", () => {
+    // The second window stops 1 s after the last frame, at 20 s, so that frame is 0.5 s inside it.
+    const whole = endingAt21((spans) => spans);
     expect(
-      mergeTraceWindows(recordingOf([first, second].map(windowFile)), ends).figures.reason,
+      mergeTraceWindows(recordingOf(whole.windows.map(windowFile)), whole.report).figures.reason,
+    ).toBeNull();
+    const without = endingAt21((spans) => spans.slice(0, -1));
+    expect(
+      mergeTraceWindows(recordingOf(without.windows.map(windowFile)), without.report).figures
+        .reason,
+    ).toMatch(/^trace window 2 of 2: the trace's frame spans disagree with the renderer's \(1 of /);
+  });
+
+  it("ignores the spans that start after the series' last callback, which the page draws on", () => {
+    const after = endingAt21((spans) => [
+      ...spans,
+      ...[20.25, 20.5].map((t) => ({
+        startUs: 9e9 + 1000 * (at(t) + 0.1),
+        durationMs: 3,
+        startMs: at(t) + 0.1,
+      })),
+    ]);
+    expect(
+      mergeTraceWindows(recordingOf(after.windows.map(windowFile)), after.report).figures.reason,
     ).toBeNull();
   });
 
-  it("ends the stretch before the last frame at its rAF time by its interval, its script time held", () => {
-    // The script ends 0.1 ms after the frame at 19.75 s, so the last frame's script time is held
-    // at 19.7501 s; its rAF time, 250 ms after the one before, is 20 s.
-    const base = report();
-    const held = {
-      ...base,
-      traceWindows: [
-        { startedMs: 900, stopRequestedMs: 11_000, failure: null },
-        { startedMs: 11_500, stopRequestedMs: at(21), failure: null },
-      ],
-      frames: { ...base.frames, scriptTimesS: [...base.frames.scriptTimesS.slice(0, -1), 19.7501] },
-    };
+  it("counts the frames it checked, those that disagree and the spans that match none", () => {
     const [first] = twoWindows();
-    const second = windowTrace({ offsetUs: 9e9, fromMs: at(10.5), toMs: at(21), frames: report() });
-    if (first === undefined) {
+    const time = report().traceWindows[0];
+    if (first === undefined || time === undefined) {
       throw new Error("no first window");
     }
-    expect(
-      mergeTraceWindows(recordingOf([first, second].map(windowFile)), held).figures.reason,
-    ).toBeNull();
+    expect(checkFrameSpans(first, time, report())).toEqual({
+      checked: 36,
+      disagreeing: 0,
+      strays: 0,
+    });
+    const stray = withSpans(first, (spans) => [
+      ...spans.filter((_, k) => k !== AT_5_S),
+      spanAt(at(5) + 7),
+    ]);
+    expect(checkFrameSpans(stray, time, report())).toEqual({
+      checked: 36,
+      disagreeing: 1,
+      strays: 1,
+    });
   });
 
   it("is checked against a window's own times", () => {
@@ -494,17 +601,15 @@ describe("the frame-span check", () => {
       throw new Error("no first window");
     }
     const none = withSpans(first, () => []);
-    expect(frameSpanFailure(none, 7e9, time, report())).toBe(
-      "the trace's frame spans disagree with the renderer's (37 of 37 frames)",
-    );
+    expect(frameSpanFailure(none, time, report())).toBe(disagreement(CHECKED));
     // A window under a second long holds no frame 0.5 s inside it.
     const short = { ...time, startedMs: at(9.6), stopRequestedMs: at(10) };
-    expect(frameSpanFailure(none, 7e9, short, report())).toBeNull();
+    expect(frameSpanFailure(none, short, report())).toBeNull();
   });
 });
 
 describe("a window's file alone", () => {
-  it("fails without a trace, an event, a clock offset or a size, or with a full buffer", () => {
+  it("fails without a trace, an event, a clock offset or a size, or with a full buffer or lost data", () => {
     const trace = windowTrace({ offsetUs: 7e9, fromMs: at(0), toMs: at(3) });
     const good = windowFile(trace);
     expect(windowFileFailure(good)).toBeNull();
@@ -519,5 +624,6 @@ describe("a window's file alone", () => {
     expect(windowFileFailure({ ...good, bufferPercent: 99 })).toBe(
       "it filled its buffer: 99 % of it was used",
     );
+    expect(windowFileFailure({ ...good, lostData: true })).toBe(LOST_DATA_REASON);
   });
 });
