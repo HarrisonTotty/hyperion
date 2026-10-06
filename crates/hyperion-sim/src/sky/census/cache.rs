@@ -502,6 +502,9 @@ mod tests {
         let mut bits = Vec::new();
         for star in parts.iter().flat_map(|(stars, _)| stars) {
             let c = star.colour();
+            // The reddening tables are read at the colour's place in its grid: through a magnitude of
+            // dust, its bits are that place's.
+            let r = c.reddened(Magnitudes::new(1.0));
             let p = star.apparent().to_light_years_f64();
             let floats = [
                 star.distance().value(),
@@ -510,14 +513,16 @@ mod tests {
                 c.lux_per_v0(),
                 c.sp_ratio(),
                 c.camera_band_mag(),
-                c.photopic_extinction_ratio(),
-                c.scotopic_extinction_ratio(),
+                r.photopic_transmission(),
+                r.scotopic_transmission(),
+                r.v_extinction().value(),
+                r.camera_band_mag(),
             ];
             let arrays = p
                 .into_iter()
                 .chain(c.red_green())
                 .chain(c.extinction_ratio())
-                .chain(c.camera_extinction_ratio())
+                .chain(r.red_green())
                 .chain(c.bake_spectrum());
             bits.extend(floats.into_iter().chain(arrays).map(float::bits));
         }

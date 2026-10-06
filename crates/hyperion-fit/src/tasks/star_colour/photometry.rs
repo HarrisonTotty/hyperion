@@ -201,11 +201,7 @@ impl Observer {
     /// on its own.
     #[must_use]
     pub fn unit_rgb(&self, xyz: [f64; 3]) -> [f64; 3] {
-        let y = xyz[1];
-        let unit = xyz.map(|v| v / y);
-        let rgb = self
-            .to_rgb
-            .map(|row| row[0] * unit[0] + row[1] * unit[1] + row[2] * unit[2]);
+        let rgb = self.raw_rgb(xyz);
         let lowest = rgb[0].min(rgb[1]).min(rgb[2]);
         if lowest >= 0.0 {
             rgb
@@ -213,6 +209,17 @@ impl Observer {
             let t = 1.0 / (1.0 - lowest);
             rgb.map(|c| 1.0 + t * (c - 1.0))
         }
+    }
+
+    /// Linear Rec. 709 of `xyz` at unit luminance, before [`unit_rgb`](Self::unit_rgb)'s lift into
+    /// gamut: a channel may be negative. The sim's `sky::colour::lift_into_gamut` of it is
+    /// `unit_rgb`'s colour, bit for bit (R06.T9.e).
+    #[must_use]
+    pub fn raw_rgb(&self, xyz: [f64; 3]) -> [f64; 3] {
+        let y = xyz[1];
+        let unit = xyz.map(|v| v / y);
+        self.to_rgb
+            .map(|row| row[0] * unit[0] + row[1] * unit[1] + row[2] * unit[2])
     }
 
     /// Each bin's Rec. 709 colour-matching functions: the matrix applied to x̄, ȳ and z̄.

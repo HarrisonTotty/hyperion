@@ -34,16 +34,18 @@
 //! offset, while the band subtracts at the cut alone, as Design note 15 states it (until R06.T8.k).
 //!
 //! The light is reddened by the dust in front of it (R06.T9.e; decided 2026-10-06,
-//! `decision-r06-t9b-band.md`, item 3), through [`StarColour::reddened`]: each node's light by the
-//! ratios of the colour table's solar point ([`solar_colour`]), since the band's mix of spectra
-//! moves them by some ±0.03 a channel per magnitude of A<sub>V</sub>, and each overflow star by its
-//! own. A ray keeps five sums: its photopic light dimmed by the photopic transmission, its linear
-//! Rec. 709 red, green and blue light each by its channel's (the blue from unit luminance before
-//! the dimming), and its scotopic light by the scotopic transmission. A texel's luminance is the
-//! photopic sum, its chroma (linear Rec. 709 red and green at unit luminance, as
-//! [`StarColour::chroma`]) the red and green sums over the Rec. 709 luminance of the three, and
-//! its S/P ratio ρ the scotopic sum over the photopic, from the luminosity functions' colour of
-//! each M<sub>V</sub> bin (Design note 15) and each overflow star's own colour.
+//! `decision-r06-t9b-band.md`, item 3 and its addendum), through [`StarColour::reddened`]: each
+//! node's light by the reddening curves of the colour table's solar point ([`solar_colour`]),
+//! since the band's mix of spectra moves them by some ±0.03 a channel per magnitude of
+//! A<sub>V</sub>, and each overflow star by its own. A ray keeps five sums: its photopic light
+//! dimmed by the photopic transmission, its linear Rec. 709 red, green and blue light each by its
+//! channel's (the solar row's signed channel through the dust over its own, the blue from unit
+//! luminance before the dimming), and its scotopic light by the scotopic transmission. A texel's
+//! luminance is the photopic sum, its chroma (linear Rec. 709 red and green at unit luminance, as
+//! [`StarColour::chroma`]) the red and green sums over the Rec. 709 luminance of the three,
+//! lifted into gamut by T3's rule where the dust has taken a channel below zero, and its S/P
+//! ratio ρ the scotopic sum over the photopic, from the luminosity functions' colour of each
+//! M<sub>V</sub> bin (Design note 15) and each overflow star's own reddened colour.
 //!
 //! The photopic luminance of a ray is K ∫ Σ ρ<sub>c</sub> s<sub>c,l</sub> ℓ<sub>c,l</sub>(d)
 //! 10<sup>−0.4 k<sub>P</sub> A<sub>V</sub>(d)</sup> dd, with ρ<sub>c</sub> the component's systems per ly³,
@@ -77,7 +79,7 @@ use crate::units::{CandelasPerSquareMetre, LightYears, Magnitudes};
 
 use super::caps::{CAPPED_LAYERS, LayerCap};
 use super::census::{SkyCensus, SkyContext, SkyQuery};
-use super::colour::{Reddened, StarColour, solar_colour};
+use super::colour::{Reddened, Reddening, StarColour, lift_into_gamut, solar_colour};
 use super::eye::{REFERENCE_SP_RATIO, illuminance_of_magnitude};
 use super::luminosity::LuminosityTables;
 use crate::tables::star_colour::LUMINANCE_RGB;
@@ -383,7 +385,9 @@ pub struct BandTexel {
 impl BandTexel {
     /// The texel of the five light sums `sums`, cd m⁻² ([`Sums`]). A texel with no light takes
     /// white's chroma, (1, 1), and the reference star's ρ ([`REFERENCE_SP_RATIO`]); one whose red,
-    /// green and blue sum to no luminance takes white's chroma.
+    /// green and blue sum to no luminance takes white's chroma. A colour out of gamut, as light
+    /// whose blue the dust has taken below zero can be (R06.T9.e), is lifted into it by T3's rule
+    /// ([`lift_into_gamut`]).
     #[must_use]
     fn of_sums(sums: Sums) -> Self {
         debug_assert!(
@@ -399,7 +403,9 @@ impl BandTexel {
                 reason = "the chroma is a display value of order one, and f32 is its declared type"
             )]
             let chroma = if rgb_luminance > 0.0 {
-                [(red / rgb_luminance) as f32, (green / rgb_luminance) as f32]
+                let [red, green, _] =
+                    lift_into_gamut([red, green, blue].map(|c| c / rgb_luminance));
+                [red as f32, green as f32]
             } else {
                 [1.0, 1.0]
             };
@@ -450,9 +456,10 @@ type Sums = [f64; 5];
 
 /// The five sums ([`Sums`]) of light whose four undimmed sums are `sums` (the luminosity
 /// functions' order: the photopic light, then it times each chroma channel, then it times ρ),
-/// through `dust`: the photopic light dimmed by its transmission, each channel by its own, the
-/// blue taken from unit luminance before the dimming, b = (1 − Y<sub>r</sub> r − Y<sub>g</sub> g)
-/// ÷ Y<sub>b</sub>, and the scotopic light by the scotopic transmission.
+/// through `dust`: the photopic light dimmed by its transmission, each channel by its own (the
+/// solar row's signed channel through the dust over its own, so a channel past its change of sign
+/// subtracts), the blue taken from unit luminance before the dimming, b = (1 − Y<sub>r</sub> r −
+/// Y<sub>g</sub> g) ÷ Y<sub>b</sub>, and the scotopic light by the scotopic transmission.
 #[must_use]
 fn dimmed(sums: [f64; 4], dust: &Reddened) -> Sums {
     let [light, red, green, scotopic] = sums;
@@ -470,7 +477,16 @@ fn dimmed(sums: [f64; 4], dust: &Reddened) -> Sums {
 
 /// The five sums ([`Sums`]) of a star of colour `colour`, apparent V `v` after an extinction of
 /// `a_v`, lux: its photopic illuminance unextinguished, from V less the extinction and its
-/// `lux_per_v0`, times its colour, reddened by its own [`StarColour::reddened`] at `a_v`.
+/// `lux_per_v0`, times its colour, reddened by its own [`StarColour::reddened`] at `a_v`: each
+/// channel by its own transmission, the photopic and the scotopic light by theirs.
+///
+/// The channels are the star's signed light, added to the texel before any lift into gamut, since
+/// light adds linearly: a channel's transmission times its unreddened colour is its reddened light
+/// exactly, because no row of the colour table is out of gamut unreddened. The texel lifts the
+/// total.
+///
+/// The census's V is M<sub>V</sub> + DM + `A_V` until R06.T8.k, which makes it the star's own V
+/// extinction ([`Reddened::v_extinction`]); this subtraction follows it there.
 #[must_use]
 fn point_lux(colour: &StarColour, v: Magnitudes, a_v: Magnitudes) -> Sums {
     let light = illuminance_of_magnitude(v - a_v).value() * colour.lux_per_v0();
@@ -514,10 +530,10 @@ fn distance_to_edge_ly(origin_ly: [f64; 3], along: [f64; 3]) -> f64 {
 }
 
 /// What a band call holds for every ray: the components, each layer's share of their systems, the
-/// colour whose ratios redden every node, and the ray's scratch buffers.
+/// reddening curves that dim every node, and the ray's scratch buffers.
 struct Rays {
     components: Vec<ComponentId>,
-    dust: StarColour,
+    dust: Reddening,
     /// Per layer of [`CAPPED_LAYERS`], each component's share of its systems.
     shares: [[f64; MAX_COMPONENTS]; BAND_LAYERS],
     nodes: Vec<LightYears>,
@@ -558,7 +574,7 @@ impl Side {
 
 impl Rays {
     #[must_use]
-    fn new(galaxy: &Galaxy, dust: StarColour) -> Self {
+    fn new(galaxy: &Galaxy, dust: &Reddening) -> Self {
         let fields = galaxy.fields();
         let components: Vec<ComponentId> = fields.component_ids().collect();
         let mut shares = [[0.0; MAX_COMPONENTS]; BAND_LAYERS];
@@ -571,7 +587,7 @@ impl Rays {
         }
         Self {
             components,
-            dust,
+            dust: *dust,
             shares,
             nodes: Vec::new(),
             a_v: Vec::new(),
@@ -696,7 +712,7 @@ impl Rays {
         let mut previous: Option<f64> = None;
         for (node, extinction) in self.nodes.iter().zip(&self.a_v) {
             let distance = node.value();
-            let through = self.dust.reddened(*extinction);
+            let through = self.dust.through(*extinction);
             let point = PointLy::new(
                 from[0] + distance * along[0],
                 from[1] + distance * along[1],
@@ -824,12 +840,12 @@ pub fn band_rows(
         *spec,
         face,
         rows,
-        &solar_colour(),
+        &solar_colour().reddening(),
         out,
     );
 }
 
-/// [`band_rows`], with each node's light reddened by `dust`'s ratios: the solar point's for the
+/// [`band_rows`], with each node's light reddened by the curves `dust`: the solar point's for the
 /// band, a grey dust's for the tests' unreddened march.
 #[expect(
     clippy::too_many_arguments,
@@ -844,7 +860,7 @@ fn band_rows_through(
     spec: BandSpec,
     face: CubeFace,
     rows: Range<u16>,
-    dust: &StarColour,
+    dust: &Reddening,
     out: &mut Vec<BandTexel>,
 ) {
     let side = spec.face_texels();
@@ -863,7 +879,7 @@ fn band_rows_through(
             math::cos(cone.half_angle().value() * RADIANS_PER_DEGREE),
         )
     });
-    let mut rays = Rays::new(galaxy, *dust);
+    let mut rays = Rays::new(galaxy, dust);
     let mut texels: Vec<Sums> = Vec::with_capacity(rows.len() * width);
     for row in rows.clone() {
         for column in 0..side {
@@ -981,16 +997,22 @@ mod tests {
         complete_to: &CompleteTo,
         spec: BandSpec,
     ) -> Vec<BandTexel> {
-        whole_band_through(query, census, complete_to, spec, &solar_colour())
+        whole_band_through(
+            query,
+            census,
+            complete_to,
+            spec,
+            &solar_colour().reddening(),
+        )
     }
 
-    /// Every face of the band, each node's light reddened by `dust`'s ratios.
+    /// Every face of the band, each node's light reddened by the curves `dust`.
     fn whole_band_through(
         query: &SkyQuery,
         census: &SkyCensus,
         complete_to: &CompleteTo,
         spec: BandSpec,
-        dust: &StarColour,
+        dust: &Reddening,
     ) -> Vec<BandTexel> {
         let mut ctx = context();
         let mut out = Vec::new();
@@ -1021,11 +1043,11 @@ mod tests {
     }
 
     impl Dust {
-        /// The colour whose ratios dim the nodes.
-        fn colour(self) -> StarColour {
+        /// The curves that dim the nodes.
+        fn curves(self) -> Reddening {
             match self {
-                Self::Reddening => solar_colour(),
-                Self::Grey => solar_colour().with_grey_dust(),
+                Self::Reddening => solar_colour().reddening(),
+                Self::Grey => solar_colour().reddening().with_grey_dust(),
             }
         }
     }
@@ -1041,7 +1063,7 @@ mod tests {
                 &SkyCensus::empty(),
                 &CompleteTo::everywhere(),
                 spec(16),
-                &dust.colour(),
+                &dust.curves(),
             )
         };
         match dust {
@@ -1624,16 +1646,19 @@ mod tests {
     }
 
     /// A star's five sums are its colour's, reddened by its own extinction: the photopic light its
-    /// unextinguished illuminance times the photopic transmission, each channel its own, and the
-    /// scotopic its reddened ρ times the photopic; and the band adds an overflow star's sums to
-    /// the faces, photopic and scotopic light alike.
+    /// unextinguished illuminance times the photopic transmission, each channel its unextinguished
+    /// light times its own transmission, and the scotopic its reddened ρ times the photopic; a
+    /// texel holding only it has its reddened colour, lifted into gamut where the dust has taken a
+    /// channel below zero (`A_V` 12); and the band adds an overflow star's sums to the faces,
+    /// photopic and scotopic light alike.
     #[test]
     fn an_overflow_stars_sums_are_its_reddened_colours() {
         let census = census_to(CENSUS_CUT, 50.0, n(20));
+        let [yr, yg, yb] = LUMINANCE_RGB;
         for star in census.overflow().iter().take(5) {
             let colour = star.colour();
             let unextinguished = star.v() - star.a_v();
-            for a_v in [star.a_v().value(), 0.5, 2.0] {
+            for a_v in [star.a_v().value(), 0.5, 2.0, 12.0] {
                 // The same star behind a_v of dust.
                 let a_v = Magnitudes::new(a_v);
                 let v = unextinguished + a_v;
@@ -1646,13 +1671,14 @@ mod tests {
                     photopic,
                     light * red * t_red,
                     light * green * t_green,
-                    light * colour.blue() * t_blue,
+                    light * (1.0 - yr * red - yg * green) / yb * t_blue,
                     photopic * reddened.sp_ratio(),
                 ];
                 let sums = point_lux(colour, v, a_v);
                 for (got, want) in sums.iter().zip(expected) {
+                    // A channel past its change of sign is near zero: compared on the light's scale.
                     assert!(
-                        (got / want - 1.0).abs() < 1e-9,
+                        (got - want).abs() <= 1e-9 * light,
                         "A_V {}: {sums:?} against {expected:?}",
                         a_v.value()
                     );
@@ -1662,7 +1688,7 @@ mod tests {
                 assert!((texel.sp_ratio() / reddened.sp_ratio() - 1.0).abs() < 1e-12);
                 for (got, want) in texel.chroma().iter().zip(reddened.red_green()) {
                     assert!(
-                        (f64::from(*got) / want - 1.0).abs() < 1e-6,
+                        (f64::from(*got) - want).abs() < 2e-6,
                         "{got} against {want}"
                     );
                 }
@@ -1950,9 +1976,9 @@ mod tests {
     /// A cloud of `A_V` 1 close ahead on +X (10 ly away, core 5 ly), with nearly all of its rays'
     /// light behind it, lowers the texels behind it in ρ and in blue by its own ratios, to 1%: the
     /// reddened march's ratio of clouded to clear, over the same of an unreddened march (grey
-    /// dust, whose cloud dims every band alike), is 10<sup>−0.4 (k<sub>S</sub> − k<sub>P</sub>)
-    /// A</sup> for ρ and 10<sup>−0.4 (k<sub>b</sub> − k<sub>g</sub>) A</sup> for blue over green,
-    /// A each ray's own column through the cloud. The rays heading away keep their bits.
+    /// dust, whose cloud dims every band alike), is the solar curves' t<sub>S</sub> ÷
+    /// t<sub>P</sub> for ρ and t<sub>b</sub> ÷ t<sub>g</sub> for blue over green, at A each ray's
+    /// own column through the cloud. The rays heading away keep their bits.
     #[test]
     fn a_cloud_reddens_the_texels_behind_it_by_its_ratios() {
         let galaxy = milky_way_galaxy();
@@ -1964,9 +1990,9 @@ mod tests {
         let core_ly = 5.0;
         let density = HYDROGEN_COLUMN_PER_MAG / (4.0 / 3.0 * core_ly * CENTIMETRES_PER_LIGHT_YEAR);
         let cloud = OneCloud::at(10.0, core_ly, density);
-        let solar = solar_colour();
+        let solar = solar_colour().reddening();
         let grey = solar.with_grey_dust();
-        let face = |modifiers: &dyn GasModifierSource, face: CubeFace, dust: &StarColour| {
+        let face = |modifiers: &dyn GasModifierSource, face: CubeFace, dust: &Reddening| {
             let mut ctx = context();
             ctx.modifiers = modifiers;
             let mut out = Vec::new();
@@ -2023,8 +2049,6 @@ mod tests {
             (axis - 1.0).abs() < 0.02,
             "the cloud's A_V on its axis {axis}"
         );
-        let rho_ratio = solar.scotopic_extinction_ratio() - solar.photopic_extinction_ratio();
-        let [_, k_green, k_blue] = solar.extinction_ratio();
         for (row, column_index) in [(3_u16, 3_u16), (3, 4), (4, 3), (4, 4)] {
             let k = usize::from(row) * 8 + usize::from(column_index);
             let a = column(spec.texel_direction(CubeFace::PosX, row, column_index));
@@ -2033,9 +2057,11 @@ mod tests {
                     / (f(&unreddened.1[k]) / f(&unreddened.0[k]))
             };
             let (rho, blue) = (double(BandTexel::sp_ratio), double(blue_over_green));
+            let behind = solar.through(Magnitudes::new(a));
+            let [_, t_green, t_blue] = behind.transmission();
             let (rho_expected, blue_expected) = (
-                math::exp10(-0.4 * rho_ratio * a),
-                math::exp10(-0.4 * (k_blue - k_green) * a),
+                behind.scotopic_transmission() / behind.photopic_transmission(),
+                t_blue / t_green,
             );
             eprintln!(
                 "({row}, {column_index}) behind A_V {a:.4}: ρ {rho:.5} (its ratios' {rho_expected:.5}), \

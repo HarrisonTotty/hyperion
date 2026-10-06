@@ -1,7 +1,8 @@
-//! The colour table (rendering plan R06, R06.T3.a and T3.b) and its reddening columns (R06.T9.e):
-//! the smoke runs go end to end from the committed CIE tables; with the spectra fetched, the
-//! committed tables are what the tasks write, the colour table agrees with Pickles' (1998)
-//! empirical spectra, and an M dwarf's model is less red than its blackbody.
+//! The colour table (rendering plan R06, R06.T3.a and T3.b) and its four reddening tables
+//! (R06.T9.e): the smoke runs go end to end from the committed CIE tables; with the spectra fetched,
+//! the committed tables are what the tasks write, the colour table agrees with Pickles' (1998)
+//! empirical spectra, an M dwarf's model is less red than its blackbody, and the reddened light the
+//! sim reads between the nodes is the direct integrals' of the rows' own spectra.
 //!
 //! The model spectra, Bessell and Murphy's V and Pickles' library are fetched datasets
 //! (`tasks::star_colour`), read from `crates/hyperion-fit/data/cache/`. Without them each such test
@@ -15,27 +16,51 @@ use std::path::Path;
 use clap::Parser as _;
 use hyperion_fit::cli::{Cli, run};
 use hyperion_fit::emit::{HeaderKind, TableText, Workspace};
-use hyperion_fit::pipeline::rerender;
+use hyperion_fit::pipeline::{ManifestKind, load_manifest, rerender};
 use hyperion_fit::task::{find, registry};
-use hyperion_fit::tasks::star_colour::columns::{BAKE_WAVELENGTH_COUNT, extras};
+use hyperion_fit::tasks::star_colour::columns::{
+    BAKE_WAVELENGTH_COUNT, dimmed_bins, extras, law_by_bin,
+};
 use hyperion_fit::tasks::star_colour::photometry::uv_prime;
 use hyperion_fit::tasks::star_colour::pickles::{PICKLES_TYPES, parse_pickles};
 use hyperion_fit::tasks::star_colour::spectrum::{BIN_COUNT, bin_centre_nm};
 use hyperion_fit::tasks::star_colour::{
-    Observer, Sensor, Spectrum, bake_wavelengths_nm, read_observer_from_dir, read_sensor_from_dir,
+    Observer, Sensor, Source, Spectra, Spectrum, bake_wavelengths_nm, fit, read_model_spectrum,
+    read_observer_from_dir, read_sensor_from_dir,
 };
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::math;
-use hyperion_sim::sky::colour::{AtmosphereGrid, BAKE_WAVELENGTHS_NM, CAMERA_ETA_SUN, star_colour};
-use hyperion_sim::tables::star_colour::{NORMAL_BAKE, WHITE_DWARF_BAKE};
-use hyperion_sim::units::Kelvin;
+use hyperion_sim::sky::colour::{
+    AtmosphereGrid, BAKE_WAVELENGTHS_NM, CAMERA_ETA_SUN, SUN_LOG_G, SUN_TEFF_K, StarColour,
+    lift_into_gamut, solar_colour, star_colour,
+};
+use hyperion_sim::tables::star_colour::{
+    LUMINANCE_RGB, NORMAL_BAKE, NORMAL_LOG_G, NORMAL_LOG_TEFF, WHITE_DWARF_BAKE,
+};
+use hyperion_sim::units::{Kelvin, Magnitudes};
 
 /// The table the sim compiles, as committed.
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/star_colour.rs");
 
-/// The reddening table the sim compiles, as committed.
-const COMMITTED_REDDENING: &str =
-    include_str!("../../hyperion-sim/src/tables/star_colour_reddening.rs");
+/// The reddening tables the sim compiles, as committed, by name.
+const COMMITTED_REDDENING: [(&str, &str); 4] = [
+    (
+        "star_colour_reddening",
+        include_str!("../../hyperion-sim/src/tables/star_colour_reddening.rs"),
+    ),
+    (
+        "star_colour_reddening_av02_05",
+        include_str!("../../hyperion-sim/src/tables/star_colour_reddening_av02_05.rs"),
+    ),
+    (
+        "star_colour_reddening_av10_15",
+        include_str!("../../hyperion-sim/src/tables/star_colour_reddening_av10_15.rs"),
+    ),
+    (
+        "star_colour_reddening_av20_30",
+        include_str!("../../hyperion-sim/src/tables/star_colour_reddening_av20_30.rs"),
+    ),
+];
 
 /// The fetched cache.
 const CACHE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/cache");
@@ -67,9 +92,11 @@ fn star_colour_the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_th
 }
 
 #[test]
-fn star_colour_reddening_the_smoke_run_passes_the_header_grammar_and_is_the_same_on_any_thread_count()
+fn star_colour_reddening_the_smoke_runs_pass_the_header_grammar_and_are_the_same_on_any_thread_count()
  {
-    smoke_run_passes_the_header_grammar_on_any_thread_count("star_colour_reddening");
+    for (name, _) in COMMITTED_REDDENING {
+        smoke_run_passes_the_header_grammar_on_any_thread_count(name);
+    }
 }
 
 /// `name`'s smoke run, on one thread and on three: the same text, provisional, marked as a smoke
@@ -116,9 +143,11 @@ fn star_colour_table_is_reproduced() {
 }
 
 #[test]
-#[ignore = "slow: integrates some 1,300 model spectra, 1 GB of PHOENIX among them"]
+#[ignore = "slow: integrates some 1,300 model spectra, 1 GB of PHOENIX among them, four times"]
 fn star_colour_reddening_table_is_reproduced() {
-    table_is_reproduced("star_colour_reddening", COMMITTED_REDDENING);
+    for (name, committed) in COMMITTED_REDDENING {
+        table_is_reproduced(name, committed);
+    }
 }
 
 /// `name`'s fit on the fetched spectra, on eight threads and on one, renders `committed`.
@@ -420,4 +449,311 @@ fn star_colour_the_camera_term_follows_gaias_g_minus_v() {
             "{file}: {term:.3} against {gaia:.3}"
         );
     }
+}
+
+/// The full reddening manifest, which names the datasets' directories.
+fn reddening_manifest() -> hyperion_fit::manifest::Manifest {
+    load_manifest(
+        &Workspace::repository(),
+        find("star_colour_reddening").expect("the task is registered"),
+        ManifestKind::Full,
+    )
+    .expect("the manifest loads")
+}
+
+/// The addendum's tests 4 and 5 on the fetched spectra, every row of both grids: the sim's
+/// `lift_into_gamut` of each row's raw colour is `unit_rgb`'s, bit for bit, unreddened (no row is
+/// out of gamut) and behind `A_V` 30 (every row is), so on both of the lift's branches; and the
+/// exact parts' photopic transmission is the direct V(λ) integral's within 10⁻⁴ at every node.
+#[test]
+#[ignore = "slow: integrates some 1,300 model spectra, 1 GB of PHOENIX among them"]
+fn star_colour_reddening_every_row_lifts_as_t3_and_keeps_the_photopic_identity() {
+    if !fetched("the reddening's every row") {
+        return;
+    }
+    let observer = observer();
+    let table = fit(
+        &reddening_manifest(),
+        &observer,
+        &sensor(),
+        Spectra::Models,
+        NonZeroUsize::new(8).unwrap(),
+    )
+    .unwrap();
+    let mut worst: f64 = 0.0;
+    let mut lifted = [0, 0];
+    for row in table.normal.rows.iter().chain(&table.white_dwarf.rows) {
+        for (k, xyz) in [row.reddening.xyz, row.reddening.xyz_at_last_node]
+            .into_iter()
+            .enumerate()
+        {
+            let raw = observer.raw_rgb(xyz);
+            lifted[k] += usize::from(raw.iter().any(|&c| c < 0.0));
+            let (sim, t3) = (lift_into_gamut(raw), observer.unit_rgb(xyz));
+            // `total_cmp` is equal exactly when the bits are.
+            assert!(
+                sim.iter().zip(&t3).all(|(a, b)| a.total_cmp(b).is_eq()),
+                "{sim:?} against {t3:?}"
+            );
+        }
+        worst = worst.max(row.reddening.photopic_identity);
+    }
+    eprintln!(
+        "the parts' photopic transmission against V(λ)'s: within {worst:.2e}; lifted, of every row: \
+         {} unreddened, {} behind A_V 30",
+        lifted[0], lifted[1]
+    );
+    assert!(worst < 1e-4, "{worst}");
+    assert_eq!(
+        lifted[1],
+        table.normal.rows.len() + table.white_dwarf.rows.len(),
+        "every row's light is out of gamut behind A_V 30"
+    );
+}
+
+/// One row of the between-the-nodes test: its name, the spectrum's 1 nm bin means, and the sim's
+/// colour of it.
+struct Row {
+    name: &'static str,
+    bins: Vec<f64>,
+    colour: StarColour,
+}
+
+/// A grid node's spectrum, read from the cache.
+fn node_bins(source: Source, teff: u32, log_g_centi: i32) -> Vec<f64> {
+    read_model_spectrum(&reddening_manifest(), source, teff, log_g_centi)
+        .unwrap_or_else(|e| panic!("{} at {teff} K, log g {log_g_centi}: {e}", source.label()))
+        .bin_means()
+}
+
+/// The direct integrals of a spectrum's bin means `bins` behind sightline `A_V` `a`, as the
+/// reddened values the sim gives: the colour of unit luminance lifted into gamut, the photopic and
+/// V extinctions, mag, ρ, and the camera's extinction less V's, mag.
+fn direct(observer: &Observer, sensor: &Sensor, law: &[f64], bins: &[f64], a: f64) -> Direct {
+    let dimmed = dimmed_bins(bins, law, a);
+    let (before, after) = (observer.integrals(bins), observer.integrals(&dimmed));
+    let band = |b: &[f64], w: &dyn Fn(usize) -> f64| -> f64 {
+        b.iter().enumerate().map(|(i, &s)| s * w(i)).sum()
+    };
+    let v = |i: usize| observer.v_photons()[i];
+    let camera = |i: usize| sensor.qe()[i] * bin_centre_nm(i);
+    let extinction =
+        |w: &dyn Fn(usize) -> f64| -2.5 * math::log10(band(&dimmed, w) / band(bins, w));
+    Direct {
+        rgb: observer.unit_rgb(after.xyz),
+        photopic: -2.5 * math::log10(after.photopic / before.photopic),
+        v: extinction(&v),
+        sp_ratio: 1_700.0 * after.scotopic / (683.0 * after.photopic),
+        camera: extinction(&camera) - extinction(&v),
+    }
+}
+
+/// [`direct`]'s values.
+struct Direct {
+    rgb: [f64; 3],
+    photopic: f64,
+    v: f64,
+    sp_ratio: f64,
+    camera: f64,
+}
+
+/// The colour table's solar point's spectrum: its four ATLAS9 nodes' spectra, each at unit
+/// luminance, mixed by the weights the sim takes from the table's rounded nodes.
+fn solar_bins(observer: &Observer) -> Vec<f64> {
+    let bracket = |nodes: &[f64], x: f64| {
+        let i = nodes
+            .partition_point(|&n| n <= x)
+            .saturating_sub(1)
+            .min(nodes.len() - 2);
+        (
+            i,
+            ((x - nodes[i]) / (nodes[i + 1] - nodes[i])).clamp(0.0, 1.0),
+        )
+    };
+    let (ti, tf) = bracket(&NORMAL_LOG_TEFF, math::log10(SUN_TEFF_K));
+    let (gi, gf) = bracket(&NORMAL_LOG_G, SUN_LOG_G);
+    // The nodes are whole kelvin and hundredths of a dex; the table holds their rounded values.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a grid temperature of a few thousand kelvin, rounded to a whole kelvin"
+    )]
+    let node_teff = |i: usize| (math::exp10(NORMAL_LOG_TEFF[i]) + 0.5).floor() as u32;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a grid gravity of 0–6 in hundredths"
+    )]
+    let node_g = |j: usize| (NORMAL_LOG_G[j] * 100.0).round() as i32;
+    let mut solar = vec![0.0; BIN_COUNT];
+    for (i, wt) in [(ti, 1.0 - tf), (ti + 1, tf)] {
+        for (j, wg) in [(gi, 1.0 - gf), (gi + 1, gf)] {
+            let bins = node_bins(Source::Atlas9, node_teff(i), node_g(j));
+            let luminance = observer.integrals(&bins).xyz[1];
+            for (sum, s) in solar.iter_mut().zip(&bins) {
+                *sum += wt * wg * s / luminance;
+            }
+        }
+    }
+    solar
+}
+
+/// The rows of the between-the-nodes test, with their spectra.
+fn between_the_nodes_rows(observer: &Observer) -> Vec<Row> {
+    let dwarf = AtmosphereGrid::MainSequence;
+    let at = |t: f64, g: f64, grid| star_colour(Kelvin::new(t), g, grid);
+    vec![
+        Row {
+            name: "the solar row",
+            bins: solar_bins(observer),
+            colour: solar_colour(),
+        },
+        Row {
+            name: "a 45,000 K dwarf",
+            bins: node_bins(Source::Tlusty, 45_000, 450),
+            colour: at(45_000.0, 4.5, dwarf),
+        },
+        Row {
+            name: "a 30,000 K dwarf",
+            bins: node_bins(Source::Tlusty, 30_000, 450),
+            colour: at(30_000.0, 4.5, dwarf),
+        },
+        Row {
+            name: "a 10,000 K dwarf",
+            bins: node_bins(Source::Atlas9, 10_000, 450),
+            colour: at(10_000.0, 4.5, dwarf),
+        },
+        Row {
+            name: "a 4,000 K giant",
+            bins: node_bins(Source::Atlas9, 4_000, 150),
+            colour: at(4_000.0, 1.5, AtmosphereGrid::Giant),
+        },
+        Row {
+            name: "a 3,500 K dwarf",
+            bins: node_bins(Source::Atlas9, 3_500, 500),
+            colour: at(3_500.0, 5.0, dwarf),
+        },
+        Row {
+            name: "a 3,000 K dwarf",
+            bins: node_bins(Source::Phoenix, 3_000, 500),
+            colour: at(3_000.0, 5.0, dwarf),
+        },
+        Row {
+            name: "the coolest PHOENIX row",
+            bins: node_bins(Source::Phoenix, 2_300, 500),
+            colour: at(2_300.0, 5.0, dwarf),
+        },
+        Row {
+            name: "a 10,000 K white dwarf",
+            bins: node_bins(Source::Koester, 10_000, 800),
+            colour: at(10_000.0, 8.0, AtmosphereGrid::WhiteDwarf),
+        },
+    ]
+}
+
+/// The between-the-nodes test's range of `A_V` `a`: to 5, to 20 or to 30.
+fn range_of(a: f64) -> usize {
+    usize::from(a > 5.0) + usize::from(a > 20.0)
+}
+
+/// The between-the-nodes test's tolerance of quantity `q` (in [`QUANTITIES`]' order) at `A_V`
+/// `a`, mag or a channel at unit luminance.
+fn tolerance(q: usize, a: f64) -> f64 {
+    match q {
+        0 => [0.005, 0.02, 0.07][range_of(a)],
+        1 => [0.003, 0.003, 0.02][range_of(a)],
+        2 if a <= 5.0 => 0.035,
+        2 if a <= 10.0 => 0.05,
+        2 => 0.2,
+        3 => [0.01, 0.05, 0.05][range_of(a)],
+        _ => [0.005, 0.05, 0.05][range_of(a)],
+    }
+}
+
+/// The between-the-nodes test's quantities.
+const QUANTITIES: [&str; 5] = ["colour", "photopic", "camera", "eye offset", "V extinction"];
+
+/// The sim's reddened light of `colour` behind `a` against the direct integrals `d`: each of
+/// [`QUANTITIES`]' errors.
+fn errors(colour: &StarColour, a: f64, d: &Direct) -> [f64; 5] {
+    let unreddened = colour.reddened(Magnitudes::ZERO);
+    let r = colour.reddened(Magnitudes::new(a));
+    let [red, green] = r.red_green();
+    let [yr, yg, yb] = LUMINANCE_RGB;
+    let rgb = [red, green, (1.0 - yr * red - yg * green) / yb];
+    [
+        rgb.iter()
+            .zip(&d.rgb)
+            .map(|(s, t)| (s - t).abs())
+            .fold(0.0, f64::max),
+        (-2.5 * math::log10(r.photopic_transmission()) - d.photopic).abs(),
+        (r.camera_band_mag() - unreddened.camera_band_mag() - d.camera).abs(),
+        (2.5 * math::log10(r.sp_ratio() / d.sp_ratio)).abs(),
+        (r.v_extinction().value() - d.v).abs(),
+    ]
+}
+
+/// The addendum's test 2: between the nodes (`A_V` 0.5, 1, 1.5, 3, 4, 7, 12, 17 and 25), the
+/// reddened light the sim reads off the tables lies within the ruled tolerances of the direct
+/// integrals of the rows' own spectra, for the solar row, 30,000 K and 10,000 K dwarfs, a
+/// 4,000 K giant of log g 1.5, 3,500 K and 3,000 K dwarfs, the coolest PHOENIX row and a 10,000 K
+/// white dwarf; and, beyond the addendum's list, a 45,000 K dwarf, so that the hot rows' camera term
+/// is bounded beyond 30,000 K too (the science check of the amendment). No row of either grid is
+/// out of gamut unreddened, so the coolest PHOENIX row, 2,300 K at log g 5, stands for the lifted
+/// one: reddening lifts it from `A_V` 5.
+///
+/// | Quantity | To `A_V` 5 | To 20 | To 30 |
+/// | --- | --- | --- | --- |
+/// | the lifted colour at unit luminance, a channel | 0.005 | 0.02 | 0.07 |
+/// | the photopic | 0.003 mag | 0.003 mag | 0.02 mag |
+/// | the camera term | 0.035 mag | 0.05 mag to 10, 0.2 beyond | 0.2 mag |
+/// | the eye offset, 2.5 log₁₀ ρ | 0.01 mag | 0.05 mag | 0.05 mag |
+/// | V's extinction | 0.005 mag | 0.05 mag | 0.05 mag |
+///
+/// The camera term between `A_V` 5 and 10 is held to 0.05 mag, not the addendum's 0.035: the hot
+/// rows' secant bends between the nodes at 5 and 10 (0.048 for the 30,000 K dwarf at 7; R06's Risks,
+/// "Deviations in T9.e, as built").
+#[test]
+#[ignore = "slow: reads and integrates twelve model spectra"]
+fn star_colour_reddening_between_the_nodes_is_the_direct_integrals() {
+    if !fetched("the reddening between the nodes") {
+        return;
+    }
+    let observer = observer();
+    let sensor = sensor();
+    let law = law_by_bin();
+    let mut worst = [[0.0_f64; 3]; 5];
+    let mut failures = Vec::new();
+    for row in between_the_nodes_rows(&observer) {
+        let mut own = [[0.0_f64; 3]; 5];
+        for a in [0.5, 1.0, 1.5, 3.0, 4.0, 7.0, 12.0, 17.0, 25.0] {
+            let d = direct(&observer, &sensor, &law, &row.bins, a);
+            for (q, e) in errors(&row.colour, a, &d).into_iter().enumerate() {
+                worst[q][range_of(a)] = worst[q][range_of(a)].max(e);
+                own[q][range_of(a)] = own[q][range_of(a)].max(e);
+                if e > tolerance(q, a) {
+                    failures.push(format!(
+                        "{} at A_V {a}: {} off by {e:.4} (tolerance {})",
+                        row.name,
+                        QUANTITIES[q],
+                        tolerance(q, a)
+                    ));
+                }
+            }
+            if row.name == "the solar row" && a <= 3.0 {
+                eprintln!("the solar row at A_V {a}: the direct colour {:?}", d.rgb);
+            }
+        }
+        eprintln!(
+            "{}: worst to A_V 5, 20 and 30: colour {:.4?}, photopic {:.4?}, camera {:.4?}, eye \
+             offset {:.4?}, V {:.4?}",
+            row.name, own[0], own[1], own[2], own[3], own[4]
+        );
+    }
+    for (q, name) in QUANTITIES.iter().enumerate() {
+        eprintln!(
+            "{name}: worst {:.4} to A_V 5, {:.4} to 20, {:.4} to 30",
+            worst[q][0], worst[q][1], worst[q][2]
+        );
+    }
+    assert!(failures.is_empty(), "{}", failures.join("; "));
 }

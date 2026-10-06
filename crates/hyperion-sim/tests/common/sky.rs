@@ -31,7 +31,7 @@ use hyperion_sim::sky::census::{
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::LightYears;
+use hyperion_sim::units::{LightYears, Magnitudes};
 use hyperion_testkit::float;
 
 /// The most threads the oracle and its census run on: eight, a share of a machine other test
@@ -286,6 +286,9 @@ pub fn float_bits(stars: &[SkyStar]) -> Vec<u64> {
     let mut bits = Vec::new();
     for star in stars {
         let c = star.colour();
+        // The reddening tables are read at the colour's place in its grid: through a magnitude of
+        // dust, its bits are that place's.
+        let r = c.reddened(Magnitudes::new(1.0));
         let floats = [
             star.distance().value(),
             star.v().value(),
@@ -293,8 +296,10 @@ pub fn float_bits(stars: &[SkyStar]) -> Vec<u64> {
             c.lux_per_v0(),
             c.sp_ratio(),
             c.camera_band_mag(),
-            c.photopic_extinction_ratio(),
-            c.scotopic_extinction_ratio(),
+            r.photopic_transmission(),
+            r.scotopic_transmission(),
+            r.v_extinction().value(),
+            r.camera_band_mag(),
         ];
         let arrays = star
             .apparent()
@@ -302,7 +307,7 @@ pub fn float_bits(stars: &[SkyStar]) -> Vec<u64> {
             .into_iter()
             .chain(c.red_green())
             .chain(c.extinction_ratio())
-            .chain(c.camera_extinction_ratio())
+            .chain(r.red_green())
             .chain(c.bake_spectrum());
         bits.extend(floats.into_iter().chain(arrays).map(float::bits));
     }
