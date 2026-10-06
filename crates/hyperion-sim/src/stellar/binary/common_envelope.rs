@@ -774,18 +774,31 @@ impl Engine {
     }
 
     /// How long member `i`, a main-sequence star, has left on its main sequence at its mass now,
-    /// years.
+    /// years: the whole of it for a star on its own track that has not yet arrived, which is its
+    /// zero-age main-sequence star to the engine
+    /// ([`engine_track_age_years`](super::star::engine_track_age_years), P11.T4.i), not the time to
+    /// its arrival.
     #[must_use]
-    fn main_sequence_left(&self, i: usize) -> f64 {
+    pub(super) fn main_sequence_left(&self, i: usize) -> f64 {
         let (m, tau) = self.current(i);
+        let left = |track: &Track, offset: f64| {
+            let (_, end, track_age) = super::evolve::phase_ahead(track, offset, self.age);
+            (end - track_age).max(0.0)
+        };
         match &self.members[i] {
             Member::MainSequence { helium, .. } => {
                 (1.0 - tau).max(0.0) * sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, m)
             }
-            Member::Track { track, offset } | Member::Shaped { track, offset, .. } => {
-                let (_, end, track_age) = super::evolve::phase_ahead(track, *offset, self.age);
-                (end - track_age).max(0.0)
+            Member::Track { track, offset } => {
+                match super::star::arrival_ahead_years(track, *offset, self.age) {
+                    Some(arrival) => {
+                        let (_, end) = track.phase_span(arrival);
+                        (end - arrival).max(0.0)
+                    }
+                    None => left(track, *offset),
+                }
             }
+            Member::Shaped { track, offset, .. } => left(track, *offset),
             Member::Cooling { .. }
             | Member::Frozen { .. }
             | Member::Remnant { .. }

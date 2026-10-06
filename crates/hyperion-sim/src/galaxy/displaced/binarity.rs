@@ -28,8 +28,10 @@
 //!   quadrature over that band ([`exact_stripped_share`]): exact, and drawing nothing.
 //!
 //! [`interacting_periastron`] stays P11.T4.a's [`can_interact`] boundary, either star's largest
-//! radius up to the primary's death, for the engine's gate ([`interacting_share`]); ruling 123.3
-//! checks stripped over interacting at 0.5–0.75.
+//! radius up to the primary's death (a companion that has not arrived on its main sequence by then
+//! at its zero-age main-sequence radius, as the engine carries it since P11.T4.i), for the
+//! engine's gate ([`interacting_share`]); ruling 123.3 checks stripped over interacting at
+//! 0.5–0.75.
 //!
 //! # The table
 //!
@@ -57,7 +59,7 @@ use crate::stellar::draws::{StarDraws, StarDrawsParts};
 use crate::stellar::multiplicity::{
     MultiplicityModel, band_share_as_drawn, stripped_share_as_drawn as multiplicity_share,
 };
-use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track};
+use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, main_sequence_start};
 use crate::tables::stripping;
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, SolarMasses, Years};
@@ -74,7 +76,12 @@ fn unstripped_median() -> StarDraws {
 
 /// A star's largest radius up to `until` (or its whole life), in solar radii, from its track at
 /// the median draws; zero below the tracks' lightest mass. Tracks stop at [`MAX_INITIAL_MASS`]
-/// (150 M☉ since P06.T14), so a heavier star is taken as one of that mass.
+/// (150 M☉ since P06.T14), so a heavier star is taken as one of that mass. A star that has not
+/// arrived on its main sequence by `until` takes its radius at its arrival, its zero-age
+/// main-sequence radius, as [`can_interact`] reads it (P11.T4.i). The age returned is `until`,
+/// or the star's death.
+///
+/// [`can_interact`]: crate::stellar::binary::can_interact
 fn largest_radius(m: SolarMasses, comp: &Composition, until: Option<Years>) -> (f64, Years) {
     if m < MIN_INITIAL_MASS {
         return (0.0, Years::ZERO);
@@ -86,13 +93,20 @@ fn largest_radius(m: SolarMasses, comp: &Composition, until: Option<Years>) -> (
     };
     let draws = unstripped_median();
     let track = match until {
-        Some(age) => Track::to_age(m0, comp, &draws, age),
+        Some(age) => {
+            let reach = age.value().max(main_sequence_start(m0, comp));
+            Track::to_age(m0, comp, &draws, Years::new(reach))
+        }
         None => Track::full(m0, comp, &draws),
     };
     let end = until
         .or_else(|| track.lifetime())
         .unwrap_or_else(|| track.built_until());
-    (track.max_radius_until(end).value(), end)
+    let read = match track.main_sequence_arrival() {
+        Some(arrival) if arrival > end => arrival,
+        Some(_) | None => end,
+    };
+    (track.max_radius_until(read).value(), end)
 }
 
 /// The largest periastron at which stars of `r_1` and `r_2` solar radii and masses `m1` and `m2`

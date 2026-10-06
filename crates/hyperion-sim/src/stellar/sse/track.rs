@@ -839,10 +839,11 @@ impl Track {
     ///
     /// It is [`Track::main_sequence_start`]'s where the main sequence is built, and the same age
     /// from the build's own law where the track ends before it, in its protostar or contraction
-    /// (P06.T15.b). Plan 11's engine starts where both stars have arrived (`binary::evolve`'s
-    /// `arrival`): read from the segments alone, a pair run to an age before a star's arrival lost
-    /// that star's arrival and was stepped from age zero, as protostars, which merged at once
-    /// (P11's protostar mergers, 2026-10-05).
+    /// (P06.T15.b). Plan 11's engine starts where the first star has arrived (`binary::evolve`'s
+    /// `arrival`, P11.T4.i; where both had, before) and reads a later star as its own zero-age
+    /// main-sequence star until its arrival: read from the segments alone, a pair run to an age
+    /// before a star's arrival lost that star's arrival and was stepped from age zero, as
+    /// protostars, which merged at once (P11's protostar mergers, 2026-10-05).
     #[must_use]
     pub(crate) fn main_sequence_arrival(&self) -> Option<Years> {
         self.main_sequence_start()

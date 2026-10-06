@@ -187,14 +187,17 @@ impl Engine {
 
     /// Turns member `i` into the form whose mass the binary carries: a main sequence into a
     /// carried main sequence, a later phase onto its track's closed forms, a remnant into one the
-    /// binary feeds.
+    /// binary feeds. A star that has not yet arrived on its main sequence becomes its zero-age
+    /// main-sequence star at τ = 0, which it was to the engine already
+    /// ([`engine_track_age_years`](super::star::engine_track_age_years), P11.T4.i), and ages from
+    /// there.
     pub(super) fn carry(&mut self, i: usize) {
         let age = self.age;
         let Member::Track { track, offset } = &self.members[i] else {
             return;
         };
         let (track, offset) = (Arc::clone(track), *offset);
-        let track_age = (age - offset).max(0.0);
+        let track_age = super::star::engine_track_age_years(&track, offset, age);
         let state = track.state_at(Years::new(track_age));
         let mass = state.mass().value();
         self.members[i] = if state.phase().is_remnant() {

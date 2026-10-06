@@ -15,6 +15,14 @@
 //! says, with plan 06's remnant and kick (design note 16): the engine takes that age as a fixed
 //! boundary, holds the star at its last living state if its own binary history would end it
 //! sooner, and explodes whatever the pair has made of it then.
+//!
+//! The engine starts where the first star arrives on its main sequence ([`arrival`], P11.T4.i).
+//! A companion still contracting then, as a low-mass companion of a massive primary is through
+//! the primary's whole life, is carried as its own zero-age main-sequence star until its own
+//! arrival ([`engine_track_age_years`]), as Hurley, Tout and Pols (2002, section 2.8) start both
+//! stars, and is shown on its own pre-main-sequence track until the pair touches it.
+//!
+//! [`engine_track_age_years`]: super::star::engine_track_age_years
 
 use std::sync::Arc;
 
@@ -44,12 +52,13 @@ const MAX_EVENTS: u32 = 4_096;
 /// The most steps one phase takes, past which the engine stops as it does at [`MAX_SEGMENTS`].
 pub(super) const MAX_STEPS: u32 = 200_000;
 
-/// Whether a pair can interact by `until_age`, the cheap pre-test (plan 11, design note 7): both
-/// stars have arrived on the main sequence by then, and the periastron of its orbit is inside the
-/// Roche-filling separation of either star's largest radius up to then, r ≥ `r_L(q)` a (1 − e)
-/// with Eggleton's lobe (1983) and each star's [`Track::max_radius_until`]. A star below 0.1 M☉
-/// takes the largest radius of P06.T13's cooling fits, their first. Everything else is two single
-/// stars on an orbit.
+/// Whether a pair can interact by `until_age`, the cheap pre-test (plan 11, design note 7): the
+/// first star has arrived on the main sequence by then, and the periastron of its orbit is inside
+/// the Roche-filling separation of either star's largest radius up to then, r ≥ `r_L(q)` a (1 − e)
+/// with Eggleton's lobe (1983) and each star's [`Track::max_radius_until`]. A star that has not
+/// arrived by then takes its zero-age main-sequence radius, as the engine carries it (P11.T4.i). A
+/// star below 0.1 M☉ takes the largest radius of P06.T13's cooling fits, their first. Everything
+/// else is two single stars on an orbit.
 ///
 /// # Examples
 ///
@@ -204,8 +213,9 @@ pub(crate) fn evolve_with_tracks(
     engine.finish()
 }
 
-/// Where the engine starts stepping for a pair of `members` run to `until`: where both stars have
-/// arrived on the main sequence (P06.T15.b), and no later than `until`.
+/// Where the engine starts stepping for a pair of `members` run to `until`: where the first star
+/// arrives on the main sequence (P06.T15.b; P11.T4.i, ruling p11-channels of 2026-10-06), and no
+/// later than `until`.
 ///
 /// A convention, as in the codes plan 11 follows: binary population codes evolve both stars from
 /// the zero-age main sequence (Hurley, Tout and Pols 2002, section 2.8), and the orbits plan 11
@@ -214,12 +224,22 @@ pub(crate) fn evolve_with_tracks(
 /// sequence does to a pair is already in them: close pairs form wider and are brought in then
 /// (Bate, Bonnell and Bromm 2002; Moe and Kratter 2018), and the pairs that merge while embedded
 /// (Stahler 2010; Tokovinin and Moe 2020) are counted as single stars. Merging the drawn pairs
-/// whose contracting stars overfill their orbits would count those mergers twice. So no star
-/// interacts before the arrival: each is its own protostar or contraction on the drawn orbit,
-/// detached, in the timeline's first segment, and a pair whose contracting stars would overfill
-/// that orbit waits, as two stars, until it can interact on the main sequence. Shown before then,
-/// such stars overlap their orbit, and the drawn orbit holds their final masses while they
-/// accrete.
+/// whose contracting stars overfill their orbits would count those mergers twice. So nothing
+/// interacts before the first arrival, which is never before accretion ends
+/// ([`PROTOSTAR_YEARS`](crate::stellar::premain::PROTOSTAR_YEARS)): each star is its own
+/// protostar or contraction on the drawn orbit,
+/// detached, in the timeline's first segment. Shown before then, such stars overlap their orbit,
+/// and the drawn orbit holds their final masses while they accrete.
+///
+/// From the first arrival a star still contracting is its own zero-age main-sequence star to the
+/// engine, its clock held at τ = 0 until its own arrival
+/// ([`engine_track_age_years`](super::star::engine_track_age_years)), so that a massive primary
+/// meets a low-mass companion that arrives after the primary's main sequence ends, and its
+/// supernova acts on the pair. At \[Fe/H\] 0 such companions are those below about 0.3, 1.0 and
+/// 1.8 M☉ beside 4, 8 and 20 M☉; the last rests on the arrival law's Kelvin–Helmholtz extension,
+/// and would be nearer 2 M☉ in MIST (`premain`). Between the two arrivals the later star fills its
+/// lobe only where its zero-age radius overfills the drawn orbit, never by its contracting
+/// radius.
 ///
 /// Each arrival is [`Track::main_sequence_arrival`], which does not depend on how far the track is
 /// built, so neither does the start: a pair run to an age before a star's arrival is the same pair,
@@ -239,18 +259,26 @@ pub(super) fn arrival(members: &[Member; 2], until: f64) -> f64 {
             | Member::Remnant { .. }
             | Member::Gone => None,
         })
-        .fold(0.0_f64, f64::max)
+        .reduce(f64::min)
+        .unwrap_or(0.0)
         .min(until)
 }
 
-/// Each star on its own single-star form from zero age: its track built to `until` (the
-/// primary's may be given, built in full), or the cooling fits below 0.1 M☉.
+/// Each star on its own single-star form from zero age: its track built to `until`, or to its
+/// own main sequence's start if that is later (the primary's may be given, built in full), or the
+/// cooling fits below 0.1 M☉.
 #[must_use]
 fn own_members(input: &BinaryInput, until: f64, primary: Option<Arc<Track>>) -> [Member; 2] {
     own_members_with(input, until, [primary, None])
 }
 
 /// [`own_members`] with any of the stars' tracks given.
+///
+/// Every track is built at least to its own star's arrival on the main sequence
+/// ([`sse::main_sequence_start`], which is [`Track::main_sequence_arrival`] bit for bit): a star
+/// that has not arrived by `until` is read there, as its zero-age main-sequence star
+/// ([`engine_track_age_years`](super::star::engine_track_age_years)). A track's segments are the
+/// same however far it is built, so this changes no state the pair had before.
 #[must_use]
 fn own_members_with(
     input: &BinaryInput,
@@ -274,13 +302,14 @@ fn own_members_with(
                 Years::new(reach),
             ))
         };
-        let track = tracks[i].take().unwrap_or_else(|| build(until));
-        // A build that ends within the margin past `until` is built on (`reach_margin_years`).
-        let margin = reach_margin_years(until);
-        let track = if track.built_until().value() > until + margin {
+        let need = until.max(sse::main_sequence_start(track_mass(m), input.composition()));
+        let track = tracks[i].take().unwrap_or_else(|| build(need));
+        // A build that ends within the margin past `need` is built on (`reach_margin_years`).
+        let margin = reach_margin_years(need);
+        let track = if track.built_until().value() > need + margin {
             track
         } else {
-            build(until + margin)
+            build(need + margin)
         };
         Member::Track { track, offset: 0.0 }
     })
@@ -311,8 +340,10 @@ pub(super) fn track_mass(m: SolarMasses) -> SolarMasses {
 }
 
 /// Whether the pair can interact by `until` on its members' own tracks ([`can_interact`]): never
-/// before both stars have arrived on the main sequence (`arrival`), where a star's largest radius
-/// is its contracting one.
+/// before the first star has arrived on the main sequence (`arrival`), where the stars' largest
+/// radii would be their contracting ones. A star that has not arrived by `until` takes its
+/// largest radius at its arrival, its zero-age main-sequence radius, as the engine reads it
+/// ([`engine_track_age_years`](super::star::engine_track_age_years)).
 #[must_use]
 fn interacts(input: &BinaryInput, members: &[Member; 2], until: f64) -> bool {
     if arrival(members, until) >= until {
@@ -323,7 +354,10 @@ fn interacts(input: &BinaryInput, members: &[Member; 2], until: f64) -> bool {
     (0..2).any(|i| {
         let (m, other) = if i == 0 { (m1, m2) } else { (m2, m1) };
         let largest = match &members[i] {
-            Member::Track { track, .. } => track.max_radius_until(Years::new(until)).value(),
+            Member::Track { track, offset } => {
+                let at = super::star::engine_track_age_years(track, *offset, until);
+                track.max_radius_until(Years::new(at)).value()
+            }
             Member::Cooling { .. } => {
                 substellar::cooling(SolarMasses::new(m), Years::ZERO, input.composition())
                     .map_or(0.0, |s| s.radius().value())
@@ -515,7 +549,7 @@ pub(super) struct Engine {
 
 impl Engine {
     /// An engine for a pair of `members` on `orbit`, stepping from `start` (years; zero age, or
-    /// where both stars have arrived on the main sequence), its first segment from zero age.
+    /// where the first star has arrived on the main sequence), its first segment from zero age.
     #[must_use]
     pub(super) fn new(
         ctx: Arc<Context>,

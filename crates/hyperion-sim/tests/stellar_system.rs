@@ -761,9 +761,9 @@ fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
 /// their own ages, each such pair was merged at age zero into a 0.01 M☉ cooling star beside
 /// nothing, which broke mass conservation and lit a dark protostar at an absolute V magnitude of
 /// 17.5; built to a later age and read back, the same pairs were two protostars. Now no star
-/// interacts before both of a pair have arrived on the main sequence: every star is its own
-/// model's protostar, no pair is run, and each pair run to an age past its arrival reads back the
-/// same two stars.
+/// interacts before the first of a pair has arrived on the main sequence (P11.T4.i; before it,
+/// before both had): every star is its own model's protostar, no pair is run, and each pair run to
+/// an age past its arrival reads back the same two stars.
 #[test]
 fn young_pairs_whose_protostars_overfill_their_orbits_stay_protostars() {
     use hyperion_sim::id::SystemId;

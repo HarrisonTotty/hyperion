@@ -186,8 +186,8 @@ pub(crate) struct OrbitPath {
     pub(crate) axis: Path,
     pub(crate) eccentricity: Path,
     /// The drawn orbit itself, up to an age: for a pair that never interacts, two single stars on
-    /// their orbit (plan 11, design note 7), and for a pair the engine runs, its orbit before both
-    /// stars have arrived on the main sequence (`evolve.rs`, `arrival`).
+    /// their orbit (plan 11, design note 7), and for a pair the engine runs, its orbit before the
+    /// first star has arrived on the main sequence (`evolve.rs`, `arrival`; P11.T4.i).
     pub(crate) fixed: Option<FixedOrbit>,
 }
 

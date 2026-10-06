@@ -1450,8 +1450,10 @@ fn a_held_bare_core_that_touches_its_companion_merges() {
 }
 
 /// Ruling 132.3: pair 0077 of the pinned thousand (2.23 + 1.16 M☉ at 0.56 d) feeds its companion
-/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,052.655 Myr, once,
-/// where the steps used to close in on its receding end until the segment cap.
+/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,052.889 Myr, once,
+/// where the steps used to close in on its receding end until the segment cap. (1,052.655 Myr
+/// before P11.T4.i, which starts the engine at the primary's arrival, 7 Myr before the
+/// companion's, and so moves its knots.)
 #[test]
 fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
     let mut mix = Mix(0x0b1e_0001);
@@ -1471,7 +1473,7 @@ fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
         .map(|state| state.age().value())
         .expect("the accretor leaves its main sequence");
     assert!(
-        (left - 1.052_655e9).abs() <= 1.0e3,
+        (left - 1.052_889e9).abs() <= 1.0e3,
         "left at {left} yr: {}",
         describe(&timeline)
     );
@@ -1546,9 +1548,10 @@ fn a_bare_star_at_its_phase_boundary_is_stripped_first() {
 /// 0.4 Myr, before either star reaches the main sequence (at 5.1 and 5.5 Myr). A star's arrival
 /// was read from its track's built segments alone, so a track built short of its main sequence had
 /// none, and the engine stepped from zero age, where the protostars overfill the orbit: it merged
-/// them at once into a 0.01 M☉ cooling star beside nothing. Now the pair waits for both arrivals
-/// (`evolve.rs`, `arrival`): to 0.4 Myr it is two protostars, each its own track's and of its own
-/// accreted mass, on the drawn orbit, as a run to a later age has it.
+/// them at once into a 0.01 M☉ cooling star beside nothing. Now the pair waits for the first
+/// arrival (`evolve.rs`, `arrival`; for both, before P11.T4.i): to 0.4 Myr it is two protostars,
+/// each its own track's and of its own accreted mass, on the drawn orbit, as a run to a later age
+/// has it.
 #[test]
 fn a_pair_run_short_of_the_main_sequence_stays_two_protostars() {
     use crate::stellar::sse::Track;
@@ -1625,7 +1628,7 @@ fn a_track_built_short_of_the_pairs_age_is_built_again() {
     assert_same_history(&early, &later, until);
     // Just past the end of the primary's main sequence (36.704 Myr) the rebuilt track once held no
     // gap at all, and the star was placed at its track's age zero, a protostar.
-    assert!(check_after_events(&input, Years::new(4.0e7)) > 20);
+    assert!(check_after_events(&input, Years::new(4.0e7))[0] > 20);
 }
 
 /// The ages just past each event of `input`'s run to 1.5 × 10¹⁰ years, up to `last`: each
@@ -1645,13 +1648,35 @@ fn ages_after_events(later: &BinaryTimeline, last: Years) -> Vec<Years> {
     ages.into_iter().map(Years::new).collect()
 }
 
-/// [`check_any_age`]'s first case at each of [`ages_after_events`]: every run of `input` to an
-/// age just past one of its events that the pre-test passes has the history of the run to
-/// 1.5 × 10¹⁰ years, bit for bit, and meets no cap. The number of runs compared.
-fn check_after_events(input: &BinaryInput, last: Years) -> usize {
+/// The ages between `input`'s two arrivals on the main sequence, where its stars' arrivals differ
+/// (P11.T4.i: the engine runs from the first, with the later star its own zero-age self): the
+/// first arrival plus 10⁻³, 1, 10², 10⁴ and 10⁶ years, and halfway, each before the later one.
+fn ages_between_arrivals(input: &BinaryInput) -> Vec<Years> {
+    let Some((first, late)) = first_and_late(input) else {
+        return Vec::new();
+    };
+    [1e-3, 1.0, 1e2, 1e4, 1e6]
+        .map(|after| first + after)
+        .into_iter()
+        .chain([first + 0.5 * (late - first)])
+        .filter(|&age| age < late)
+        .map(Years::new)
+        .collect()
+}
+
+/// [`check_any_age`]'s first case at each of [`ages_after_events`] and
+/// [`ages_between_arrivals`]: every run of `input` to an age just past one of its events, or
+/// between its stars' arrivals, that the pre-test passes has the history of the run to
+/// 1.5 × 10¹⁰ years, bit for bit, and meets no cap. The number of runs compared just past events
+/// and between the arrivals.
+fn check_after_events(input: &BinaryInput, last: Years) -> [usize; 2] {
     let later = evolve(input, Years::new(1.5e10));
-    let mut compared = 0;
-    for until in ages_after_events(&later, last) {
+    let mut compared = [0; 2];
+    let ages = ages_after_events(&later, last)
+        .into_iter()
+        .map(|age| (0, age))
+        .chain(ages_between_arrivals(input).into_iter().map(|age| (1, age)));
+    for (kind, until) in ages {
         if !can_interact(input, until) {
             continue;
         }
@@ -1662,32 +1687,38 @@ fn check_after_events(input: &BinaryInput, last: Years) -> usize {
             describe(&early)
         );
         assert_same_history(&early, &later, until);
-        compared += 1;
+        compared[kind] += 1;
     }
     compared
 }
 
+/// [`check_after_events`] over the first `n` pairs of the pinned sample of seed `seed`, summed.
+fn after_events_over(n: u32, seed: u64) -> [usize; 2] {
+    let mut mix = Mix(seed);
+    (0..n)
+        .map(|i| check_after_events(&pinned_pair(&mut mix, i), Years::new(1.2e10)))
+        .fold([0; 2], |[a, b], [c, d]| [a + c, b + d])
+}
+
 /// P11's build-age dependence (2026-10-05, the determinism audit's sweep): runs to just past each
-/// event of eight pinned-sample pairs agree with a run to 1.5 × 10¹⁰ years.
+/// event of eight pinned-sample pairs, and between their stars' arrivals (P11.T4.i), agree with a
+/// run to 1.5 × 10¹⁰ years.
 #[test]
 fn a_timeline_run_to_just_past_an_event_is_the_same() {
-    let mut mix = Mix(0x0b1e_00ab);
-    let compared: usize = (0..8)
-        .map(|i| check_after_events(&pinned_pair(&mut mix, i), Years::new(1.2e10)))
-        .sum();
-    assert!(compared > 50, "{compared} runs compared");
+    // None of these eight pairs passes the pre-test between its arrivals
+    // (`a_late_companion_meets_its_primarys_envelope` compares such runs directly).
+    let [events, _] = after_events_over(8, 0x0b1e_00ab);
+    assert!(events > 50, "{events} runs compared just past events");
 }
 
 /// [`a_timeline_run_to_just_past_an_event_is_the_same`] over 100 pairs.
 #[test]
 #[ignore = "slow: about 10⁴ binaries run through the engine"]
 fn a_hundred_timelines_run_to_just_past_their_events_are_the_same() {
-    let mut mix = Mix(0x0b1e_00ac);
-    let compared: usize = (0..100)
-        .map(|i| check_after_events(&pinned_pair(&mut mix, i), Years::new(1.2e10)))
-        .sum();
-    eprintln!("{compared} runs compared");
-    assert!(compared > 500, "{compared} runs compared");
+    let [events, between] = after_events_over(100, 0x0b1e_00ac);
+    eprintln!("{events} runs compared just past events, {between} between arrivals");
+    assert!(events > 500, "{events} runs compared just past events");
+    assert!(between > 0, "{between} runs compared between arrivals");
 }
 
 /// P11's build-age dependence (2026-10-05): a track the engine rebuilds holds its star to the
@@ -1832,47 +1863,542 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
 }
 
 /// Runs `n` pinned-sample pairs ([`pinned_pair`]), each to an age log-uniform in 10⁵–1.2 × 10¹⁰
-/// years and to 1.5 × 10¹⁰, through [`check_any_age`], and returns how many were the same, passed
-/// over and missed interactions.
-fn any_age_over(n: u32, seed: u64) -> [u32; 3] {
+/// years, and one whose stars' arrivals differ also to an age uniform between them (P11.T4.i), and
+/// each to 1.5 × 10¹⁰, through [`check_any_age`], and returns how many runs were the same, passed
+/// over and missed interactions, at the first ages and between the arrivals. The ages between
+/// arrivals are drawn on a stream of their own, so that the pairs and their first ages are the
+/// sample's as before.
+fn any_age_over(n: u32, seed: u64) -> [[u32; 3]; 2] {
     let mut mix = Mix(seed);
-    let mut counts = [0_u32; 3];
+    let mut between = Mix(seed ^ 0x0a77_1fa1_0000_0000);
+    let mut counts = [[0_u32; 3]; 2];
     for i in 0..n {
         let input = pinned_pair(&mut mix, i);
         let until =
             crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e10 / 1.0e5));
-        let outcome = check_any_age(&input, Years::new(until), Years::new(1.5e10));
-        let slot = match outcome {
-            EarlierRun::Same => 0,
-            EarlierRun::PassedOver => 1,
-            EarlierRun::MissedInteraction => 2,
-        };
-        counts[slot] += 1;
+        let mut ages = vec![(0, until)];
+        if let Some((first, late)) = first_and_late(&input) {
+            ages.push((1, first + (late - first) * between.next()));
+        }
+        for (kind, until) in ages {
+            let outcome = check_any_age(&input, Years::new(until), Years::new(1.5e10));
+            let slot = match outcome {
+                EarlierRun::Same => 0,
+                EarlierRun::PassedOver => 1,
+                EarlierRun::MissedInteraction => 2,
+            };
+            counts[kind][slot] += 1;
+        }
     }
     counts
 }
 
 /// The engine's history does not depend on the age it is run to (P11's build-age dependence,
-/// 2026-10-05): [`check_any_age`] over 60 pairs. The pre-test's blind spot, a drawn orbit that
-/// magnetic braking, tides or gravitational radiation shrink into an interaction the pre-test
-/// cannot see, is rare in this sample, which is weighted against it (few Sun-like pairs under
-/// 1.5 d, few ages over 1 Gyr), not in the field (plan 11's Risks).
+/// 2026-10-05): [`check_any_age`] over 60 pairs, and between their stars' arrivals (P11.T4.i).
+/// The pre-test's blind spot, a drawn orbit that magnetic braking, tides or gravitational
+/// radiation shrink into an interaction the pre-test cannot see, is rare in this sample, which is
+/// weighted against it (few Sun-like pairs under 1.5 d, few ages over 1 Gyr), not in the field
+/// (plan 11's Risks).
 #[test]
 fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
-    let [same, passed, missed] = any_age_over(60, 0x0b1e_00a9);
+    // The runs between the arrivals are checked as the others are; none of them passes the
+    // pre-test in this sample (`a_late_companion_meets_its_primarys_envelope` compares such runs
+    // directly).
+    let [[same, passed, missed], _] = any_age_over(60, 0x0b1e_00a9);
     assert!(same > 10 && passed > 10, "{same} run, {passed} passed over");
     assert!(missed <= 1, "{missed} interactions missed");
 }
 
-/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs: 4 of them meet the
-/// pre-test's blind spot (2026-10-05), which the bound of 2% only guards in this sample.
+/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs, with the ages between
+/// arrivals (P11.T4.i). 4 of the first ages meet the pre-test's blind spot (2026-10-05), which the
+/// bound of 2% of the pairs only guards in this sample; the misses between the arrivals (9 of 721
+/// at T4.i, pairs under 1.4 d that braking or tides bring into contact from the first arrival)
+/// are recorded, for P11.T4.j's decay-aware pre-test to remove.
 #[test]
-#[ignore = "slow: 2 × 10³ binaries run through the engine"]
+#[ignore = "slow: about 3.4 × 10³ binaries run through the engine"]
 fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
-    let [same, passed, missed] = any_age_over(1_000, 0x0b1e_00aa);
-    eprintln!("{same} run at both ages, {passed} passed over, {missed} interactions missed");
+    let [
+        [same, passed, missed],
+        [same_between, passed_between, missed_between],
+    ] = any_age_over(1_000, 0x0b1e_00aa);
+    eprintln!(
+        "{same} run at both ages, {passed} passed over, {missed} interactions missed; between \
+         arrivals {same_between} run, {passed_between} passed over, {missed_between} missed"
+    );
     assert!(
         f64::from(missed) < 0.02 * f64::from(same + passed + missed),
         "{missed} interactions missed"
     );
+    assert!(same_between > 0, "{same_between} run between arrivals");
+}
+
+/// Each star's arrival on its main sequence, years ([`Track::main_sequence_arrival`], which needs
+/// no main sequence built), or `None` for a star below 0.1 M☉ on the cooling fits.
+///
+/// [`Track::main_sequence_arrival`]: crate::stellar::sse::Track::main_sequence_arrival
+fn arrivals(input: &BinaryInput) -> [Option<f64>; 2] {
+    use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+
+    [0, 1].map(|i| {
+        let m = input.masses()[i];
+        (m >= MIN_INITIAL_MASS).then(|| {
+            Track::to_age(
+                super::evolve::track_mass(m),
+                input.composition(),
+                &input.draws()[i],
+                Years::ZERO,
+            )
+            .main_sequence_arrival()
+            .expect("a hydrogen star arrives")
+            .value()
+        })
+    })
+}
+
+/// The first and the later of `input`'s two arrivals, years, where both stars have one and they
+/// differ.
+fn first_and_late(input: &BinaryInput) -> Option<(f64, f64)> {
+    let [Some(a), Some(b)] = arrivals(input) else {
+        return None;
+    };
+    let (first, late) = if a <= b { (a, b) } else { (b, a) };
+    (first < late).then_some((first, late))
+}
+
+/// Eggleton's (1983) Roche-lobe radius over the separation, `r_L ÷ a` (dimensionless), of a star of
+/// `m` beside one of `other` (M☉): a star's reach, the periastron at which it fills its lobe, is
+/// its radius over this.
+fn lobe_fraction(m: f64, other: f64) -> f64 {
+    crate::orbit::roche_lobe_radius(m / other, crate::units::Metres::new(1.0)).value()
+}
+
+/// A 1 M☉ star's track built past its arrival on the main sequence, the arrival (years) and its
+/// structure there, at solar metallicity and the median draws.
+fn one_solar_mass_late() -> (
+    std::sync::Arc<crate::stellar::sse::Track>,
+    f64,
+    crate::stellar::sse::Structure,
+) {
+    let late = std::sync::Arc::new(crate::stellar::sse::Track::to_age(
+        SolarMasses::new(1.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        Years::new(1.0e8),
+    ));
+    let arrival = late
+        .main_sequence_arrival()
+        .expect("a 1 M☉ star arrives")
+        .value();
+    let zams = late.own_structure_at(arrival).expect("a star");
+    (late, arrival, zams)
+}
+
+/// P11.T4.i (ruling p11-channels, 2026-10-06): a star that has not arrived on its main sequence is
+/// its own zero-age main-sequence star to the engine, bit for bit its track's structure at the
+/// arrival, at τ = 0 ([`engine_track_age_years`](super::star::engine_track_age_years)), while the
+/// timeline shows it contracting on its own track.
+#[test]
+fn a_late_star_is_its_zero_age_self_to_the_engine() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+    use super::timeline::Context;
+    use crate::stellar::premain::PROTOSTAR_YEARS;
+
+    let input = pair(15.0, 1.0, period_days(15.0, 1.0, 3_000.0), 0.0, 0.02);
+    let ctx = Context::of(&input);
+    let (late, arrival, zams) = one_solar_mass_late();
+    assert_eq!(zams.state.phase(), Phase::MainSequence);
+    assert_eq!(
+        late.main_sequence_fraction(arrival).map(bits),
+        Some(bits(0.0))
+    );
+    let member = Member::Track {
+        track: std::sync::Arc::clone(&late),
+        offset: 0.0,
+    };
+    for age in [
+        PROTOSTAR_YEARS,
+        1.0e6,
+        0.5 * arrival,
+        arrival * (1.0 - 1e-9),
+    ] {
+        let shown = late.state_at(Years::new(age));
+        assert_eq!(shown.phase(), Phase::PreMainSequence, "at {age} yr");
+        assert_eq!(member.state_at(&ctx, 1, age), shown, "at {age} yr");
+        let read = member.evaluate(&ctx, 1, age, 1.0, 0.0).expect("a star");
+        assert_eq!(format!("{read:?}"), format!("{zams:?}"), "at {age} yr");
+        assert_eq!(
+            member.radius(&ctx, 1, age, 1.0, 0.0).map(bits),
+            Some(bits(zams.state.radius().value())),
+            "at {age} yr"
+        );
+        assert_eq!(
+            bits(member.mass_at(age)),
+            bits(zams.state.mass().value()),
+            "at {age} yr"
+        );
+        if age <= 0.5 * arrival {
+            assert!(
+                shown.radius().value() > zams.state.radius().value(),
+                "a contracting star is larger than its zero-age self"
+            );
+        }
+    }
+    // From its arrival it is its own track's star again.
+    let later = 1.5 * arrival;
+    assert_eq!(
+        format!("{:?}", member.evaluate(&ctx, 1, later, 1.0, 0.0)),
+        format!("{:?}", late.own_structure_at(later))
+    );
+}
+
+/// P11.T4.i: a star the binary carries before its arrival on the main sequence (a 1 M☉ companion
+/// of a 15 M☉ primary past the end of its main sequence at 12.8 Myr, at 13.5 Myr) becomes a
+/// main-sequence star of its track's mass at τ = 0 (`rlof.rs`'s `carry`), and the engine starts at
+/// the primary's arrival. Before then it has its whole main sequence left
+/// (`Engine::main_sequence_left`, which a contact reads), not the time to its arrival.
+#[test]
+fn a_late_star_is_carried_at_zero_age() {
+    use std::sync::Arc;
+
+    use hyperion_testkit::float::bits;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::Member;
+    use super::timeline::Context;
+    use crate::stellar::sse::Track;
+
+    let input = pair(15.0, 1.0, period_days(15.0, 1.0, 3_000.0), 0.0, 0.02);
+    let (late, arrival, zams) = one_solar_mass_late();
+    let (_, main_sequence_end) = late.phase_span(arrival);
+    let primary = Arc::new(Track::to_age(
+        SolarMasses::new(15.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        Years::new(2.0e7),
+    ));
+    let members = [primary, late].map(|track| Member::Track { track, offset: 0.0 });
+    let start = super::evolve::arrival(&members, 2.0e7);
+    assert_eq!(
+        bits(start),
+        bits(
+            members[0]
+                .track()
+                .and_then(|(t, _)| t.main_sequence_arrival())
+                .expect("an arrival")
+                .value()
+        ),
+        "the engine starts at the primary's arrival"
+    );
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(
+        0.0,
+        k.semi_major_axis().value() / crate::units::consts::SOLAR_RADIUS_M,
+        0.0,
+        *k.orientation(),
+        k.mean_anomaly_at_epoch(),
+    );
+    let mut engine = Engine::new(
+        Arc::new(Context::of(&input)),
+        start,
+        2.0e7,
+        members,
+        orbit,
+        None,
+    );
+    engine.age = 1.35e7;
+    assert_eq!(
+        bits(engine.main_sequence_left(1)),
+        bits(main_sequence_end - arrival),
+        "a late star has its whole main sequence left"
+    );
+    engine.carry(1);
+    match &engine.members[1] {
+        Member::MainSequence {
+            helium: false,
+            mass,
+            tau,
+        } => {
+            assert_eq!(bits(mass.last()), bits(zams.state.mass().value()));
+            assert_eq!(bits(tau.last()), bits(0.0));
+        }
+        other => panic!("carried as {}", other.form()),
+    }
+}
+
+/// P11.T4.i: the engine starts at the first arrival (`evolve.rs`'s `arrival`). Run to an age
+/// between the two arrivals, a pair is tested with the later star's zero-age main-sequence radius,
+/// not its contracting one: 5 + 1 M☉ at a periastron the contracting companion overfills but its
+/// zero-age self does not is passed over. A pair on an orbit inside the companion's zero-age reach
+/// (and so the primary's, which is the larger) is stepped from the first arrival and interacts in
+/// its first steps, long before the companion's own arrival.
+#[test]
+fn the_engine_starts_at_the_first_arrival() {
+    use std::sync::Arc;
+
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+    use crate::stellar::sse::Track;
+
+    let (m1, m2) = (5.0, 1.0);
+    let base = pair(m1, m2, 10.0, 0.0, 0.02);
+    let (first, late) = first_and_late(&base).expect("two arrivals");
+    let tracks = [m1, m2].map(|m| {
+        Arc::new(Track::to_age(
+            SolarMasses::new(m),
+            &Composition::SOLAR,
+            &StarDraws::median(),
+            Years::new(late * 1.1),
+        ))
+    });
+    let members = tracks
+        .clone()
+        .map(|track| Member::Track { track, offset: 0.0 });
+    assert_eq!(
+        bits(super::evolve::arrival(&members, 1.0e10)),
+        bits(first),
+        "the first arrival"
+    );
+    assert_eq!(
+        bits(first),
+        bits(
+            tracks[0]
+                .main_sequence_arrival()
+                .expect("an arrival")
+                .value()
+        )
+    );
+
+    let until = 2.0 * first;
+    assert!(
+        until < late,
+        "{until} yr is before the companion's arrival at {late} yr"
+    );
+    let contracting = tracks[1].state_at(Years::new(until)).radius().value();
+    let zams = tracks[1]
+        .own_structure_at(late)
+        .expect("a star")
+        .state
+        .radius()
+        .value();
+    let primary = tracks[0].max_radius_until(Years::new(until)).value();
+    let reach = |r: f64, m: f64, other: f64| r / lobe_fraction(m, other);
+    let (reach_zams, reach_contracting, reach_primary) = (
+        reach(zams, m2, m1),
+        reach(contracting, m2, m1),
+        reach(primary, m1, m2),
+    );
+    let circular = |a_rsun: f64| pair(m1, m2, period_days(m1, m2, a_rsun), 0.0, 0.02);
+    let between = reach_contracting.min(reach_primary.max(reach_zams) * 1.5);
+    assert!(
+        reach_primary.max(reach_zams) < between && between < reach_contracting,
+        "a separation the contracting companion overfills alone: at {until:.4e} yr the companion \
+         reaches {reach_contracting:.3} R☉ ({contracting:.3} R☉; zero-age {reach_zams:.3}, \
+         {zams:.3} R☉), the primary {reach_primary:.3} R☉"
+    );
+    let apart = circular(between);
+    assert!(
+        !can_interact(&apart, Years::new(until)),
+        "passed over at {between} R☉"
+    );
+    let run = evolve(&apart, Years::new(until));
+    assert_eq!(run.segments().len(), 1, "{}", describe(&run));
+
+    let touching = circular(0.95 * reach_zams);
+    assert!(
+        can_interact(&touching, Years::new(until)),
+        "inside the zero-age reach"
+    );
+    let run = evolve(&touching, Years::new(until));
+    let met = run
+        .segments()
+        .iter()
+        .find(|s| s.kind() != SegmentKind::Detached)
+        .expect("an interaction");
+    assert!(
+        met.start().value() >= first && met.start().value() <= first + 1e-3 * (late - first),
+        "{:?} at {:?}, the first arrival at {first} yr: {}",
+        met.kind(),
+        met.start(),
+        describe(&run)
+    );
+}
+
+/// The primary's death as plan 06 gives it, for a pair of median draws at solar metallicity.
+fn plan_06_death(input: &BinaryInput) -> Years {
+    crate::stellar::system::StarModel::new(
+        input.masses()[0],
+        *input.composition(),
+        StarDraws::median(),
+        input.age_at_epoch(),
+    )
+    .expect("a star")
+    .death()
+    .expect("a massive star dies")
+    .age()
+}
+
+/// The orbit of the two late-companion tests below, R☉: about half the drawn-orbit reach of a 15
+/// or 20 M☉ red supergiant's largest radius (1,420 and 1,511 R☉) beside a 1 M☉ companion.
+const LATE_COMPANION_ORBIT_RSUN: f64 = 1_200.0;
+
+/// P11.T4.i (ruling p11-channels, 2026-10-06): a 1 M☉ companion of a 15 M☉ primary arrives on its
+/// main sequence (at 37 Myr) long after the primary's death (at 14.3 Myr). On an orbit of 1,200 R☉
+/// the supergiant fills its Roche lobe: a common envelope or a merger before plan 06's pinned
+/// death, the collapse recorded at that death, and the companion shown contracting on its own
+/// track until the interaction. Before T4.i the engine waited for both arrivals, after the death,
+/// and the pair was one detached segment with no supernova record.
+#[test]
+fn a_late_companion_meets_its_primarys_envelope() {
+    let input = pair(
+        15.0,
+        1.0,
+        period_days(15.0, 1.0, LATE_COMPANION_ORBIT_RSUN),
+        0.0,
+        0.02,
+    );
+    let death = plan_06_death(&input);
+    let (first, late) = first_and_late(&input).expect("two arrivals");
+    assert!(
+        late > death.value(),
+        "the companion arrives after the death"
+    );
+    let timeline = evolve(&input, Years::new(5.0e7));
+    let met = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() != SegmentKind::Detached)
+        .expect("an interaction");
+    assert!(
+        matches!(
+            met.kind(),
+            SegmentKind::CommonEnvelope | SegmentKind::Merged
+        ) && met.start() < death
+            && met.start().value() > first,
+        "{}",
+        describe(&timeline)
+    );
+    let [primary, _] = timeline.supernova_ages();
+    let primary = primary.expect("the primary's collapse is recorded");
+    assert!(
+        (primary.value() - death.value()).abs() <= 1e-9 * death.value(),
+        "{primary:?} against plan 06's {death:?}: {}",
+        describe(&timeline)
+    );
+    for k in 0..32_u32 {
+        let age = Years::new(first + (met.start().value() - first) * f64::from(k) / 32.0);
+        let shown = timeline.state_at(age).stars()[1];
+        assert_eq!(shown.phase(), Phase::PreMainSequence, "at {age:?}");
+    }
+    // The build-age contract between the two arrivals, where the pair is run with its companion as
+    // its zero-age self: from the age the pre-test first passes (the supergiant's drawn reach) to
+    // the envelope, a run to an age there is the run to 50 Myr, bit for bit.
+    let (mut lo, mut hi) = (first, met.start().value());
+    assert!(
+        can_interact(&input, Years::new(hi)),
+        "the pre-test passes by the envelope"
+    );
+    for _ in 0..60 {
+        let mid = f64::midpoint(lo, hi);
+        if can_interact(&input, Years::new(mid)) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    assert!(
+        hi < met.start().value(),
+        "the pre-test passes before the envelope"
+    );
+    for share in [0.25, 0.5, 0.75] {
+        let until = Years::new(hi + share * (met.start().value() - hi));
+        assert_eq!(
+            check_any_age(&input, until, Years::new(5.0e7)),
+            EarlierRun::Same,
+            "to {until:?}"
+        );
+    }
+}
+
+/// P11.T4.i: a 1 M☉ companion of a 20 M☉ primary (dead at 9.9 Myr, the companion arriving at
+/// 37 Myr), on an orbit of 1,200 R☉ the primary's giant reaches, passes the pre-test. The common
+/// envelope leaves the helium star and the companion on a close orbit, and the primary's collapse
+/// at plan 06's death is applied to it (BSE appendix A1): recorded, and the pair bound or not as
+/// the state after it shows. Without a kick that is Blaauw's criterion on a circular orbit: bound
+/// while less than half the pair's mass is lost. Before T4.i the engine started after the death,
+/// recorded no supernova, and left the pair bound on the drawn orbit.
+#[test]
+fn a_late_companions_supernova_is_applied() {
+    let (m1, m2) = (20.0, 1.0);
+    for kicks in [false, true] {
+        let params = BinaryParams {
+            natal_kicks: kicks,
+            ..BinaryParams::GENERATOR
+        };
+        let input = pair(
+            m1,
+            m2,
+            period_days(m1, m2, LATE_COMPANION_ORBIT_RSUN),
+            0.0,
+            0.02,
+        )
+        .with_params(params);
+        let death = plan_06_death(&input);
+        let (_, late) = first_and_late(&input).expect("two arrivals");
+        assert!(
+            late > death.value(),
+            "the companion arrives after the death"
+        );
+        assert!(
+            can_interact(&input, Years::new(5.0e7)),
+            "inside the drawn reach"
+        );
+        let timeline = evolve(&input, Years::new(5.0e7));
+        assert!(
+            timeline
+                .segments()
+                .iter()
+                .any(|s| s.kind() == SegmentKind::CommonEnvelope && s.start() < death),
+            "a common envelope before the death: {}",
+            describe(&timeline)
+        );
+        let record = timeline
+            .supernovae()
+            .iter()
+            .find(|s| s.component() == Component::Primary)
+            .expect("the primary's supernova is recorded");
+        assert!(
+            (record.age().value() - death.value()).abs() <= 1e-9 * death.value(),
+            "{:?} against plan 06's {death:?}",
+            record.age()
+        );
+        let before = timeline.state_at(Years::new(death.value() * (1.0 - 1e-9)));
+        let after = timeline.state_at(Years::new(death.value() * (1.0 + 1e-9)));
+        assert!(
+            before.orbit().is_some(),
+            "bound before: {}",
+            describe(&timeline)
+        );
+        assert_eq!(
+            after.orbit().is_some(),
+            record.bound(),
+            "{}",
+            describe(&timeline)
+        );
+        if !kicks {
+            let e = before.orbit().map_or(1.0, |o| o.eccentricity().value());
+            assert!(e < 1e-9, "circular before the collapse: e {e}");
+            let total = before.total_mass().value();
+            let lost = total - (record.remnant().mass().value() + before.stars()[1].mass().value());
+            assert!(lost > 0.0, "the collapse loses mass: {lost} M☉");
+            assert_eq!(
+                record.bound(),
+                lost < 0.5 * total,
+                "{lost} of {total} M☉ lost: {}",
+                describe(&timeline)
+            );
+        }
+    }
 }
