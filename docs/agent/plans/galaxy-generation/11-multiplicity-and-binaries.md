@@ -172,6 +172,7 @@ pub struct HierarchyBound { /* attempts: attempt 0 first, then each later attemp
     before holds a star–star pair; the fallback, the primary alone */ }
 pub struct AttemptBound { /* attempt; stars: index, body, kind and initial mass (bit for bit);
     pairs `run_pairs` may run: their two stars and drawn periastron (bit for bit); may_carve */ }
+pub struct BoundPair { /* as built: node; two StarIndex, inner first; drawn periastron (m) */ }
 pub fn hierarchy_bound(galaxy: &Galaxy, record: &SystemRecord, composition: &Composition)
     -> HierarchyBound;
 ```
@@ -4020,3 +4021,98 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - _So over the tries, q reaches 0.95 in 99–100% of records._
     - _Without the periastron, P11.T17 can bound no pair._
   - _R06.T8.g's gates and R06.T17's budget are re-ruled in R06's plan._
+
+- **Deviations in P11.T16, as built (2026-10-07; at version 21, nothing generated moves, so no
+  bump and no golden changes).**
+  - _The API._ `stellar::multiplicity::{hierarchy_bound, HierarchyBound, AttemptBound, BoundPair}`
+    are in `stellar/multiplicity/bound.rs`, with the ruled signature.
+    - `AttemptBound` holds its attempt's whole `SystemHierarchy`, orbits included
+      (`hierarchy()`). `stars()` is its slots: a star's `StarIndex` is its position, which is
+      also its body index.
+    - A pair is a `BoundPair`, added to Provides. It holds its node, its two stars (the inner
+      member first, the engine's primary, as in `PairTimeline::stars`) and the drawn periastron,
+      `KeplerElements::periapsis`, bit for bit. P11.T17 reads the two masses through `stars()`.
+    - `may_carve()` is a method: whether the attempt holds a `BoundPair`.
+    - `fallback()` gives the primary only after a listed attempt 7 that may carve, the one case in
+      which `after_last_attempt` can run. It adds no star.
+    - `primary()` and `attempt(n)` are added.
+  - _The seam._ `RecordDraw`, in `hierarchy.rs`. `draw_hierarchy_with` is now
+    `RecordDraw::new(..).stars_at(attempt)`, so the draw and the bound share one path. Once a
+    record it builds:
+    - the limits: the tidal cut's place, a forced context's widest separation, and the primary's
+      stripped mark, which `innermost` reads at the record's own attempt;
+    - `DirectPeriods`, at the first attempt that draws the direct construction.
+
+    `Draw` loses its `correction` field. `SystemStars::generate` still draws each attempt afresh.
+    A test checks that one `RecordDraw` gives every attempt alone, bit for bit, in any order of
+    attempts.
+
+  - _Not kept._ The tidal radius's denominator once a record was timed in a scratch build. It
+    gained nothing within load noise: 6.06 against 5.95 ms for 400 C records, 54.0 against 57.2
+    for E. `substellar.rs` is unchanged.
+  - _Files beyond the plan's list, all for tests._
+    - `binary/carve.rs`: its `CARVED` record, galaxy and record builder move into a
+      `#[cfg(test)] pub(crate) mod testing`.
+    - `multiplicity/testing.rs`: `records_near`, the first n records of the cells nearest a
+      point, shell by shell (the probe's sample). The bench keeps its own copy.
+    - `.config/nextest.toml`: the bound's four-thread tests take four slots.
+  - _Tests._ All are in `bound.rs`, so `cargo nextest run -p hyperion-sim stellar::multiplicity`
+    runs the fast ones. They use the probe's fixture (seed `0x0926_0000`), near the Sun at
+    (0, 26,000, 68) ly and in the bulge at (0, 2,000, 300) ly.
+    - The fast tests:
+      - 10³ records a layer near the Sun, one test a layer;
+      - `CARVED`, and the same record under a forced context, which lists attempt 0 alone;
+      - eight attempts that may carve, found among 400 E records by a pair test written apart
+        from the bound's, and records that stop at attempts 0 and 1;
+      - brown dwarfs, which list attempt 0 alone;
+      - each attempt listed equals `draw_hierarchy_of_composition` at that attempt alone, bit for
+        bit;
+      - order independence;
+      - a scan of the bound's own code, comments left out, for any stream, tag, word, mark or
+        star's draws. With `tags.golden` unchanged, this pins "no word the draw does not read".
+    - The slow test, `the_hierarchy_bound_holds_for_generated_systems`, takes 10⁵ records of each
+      of A–C and 2 × 10⁴ of each of D–E at each place: 6.8 × 10⁵ systems. Every one passed. It
+      took 247 s on four threads, at a load of 9–22.
+  - _The slow test's counts._ Records by the number of attempts listed, %:
+
+    | Layer, place | 1    | 2    | 3    | 4   | 5   | 6   | 7   | 8    | Mean | Fallback listed | Redrawn |
+    | ------------ | ---- | ---- | ---- | --- | --- | --- | --- | ---- | ---- | --------------- | ------- |
+    | A, Sun       | 73.7 | 19.3 | 5.1  | 1.4 | 0.4 | 0.1 | 0.0 | 0.0  | 1.36 | 5               | 0       |
+    | B, Sun       | 62.7 | 23.4 | 8.7  | 3.2 | 1.3 | 0.5 | 0.2 | 0.1  | 1.60 | 32              | 0       |
+    | C, Sun       | 53.0 | 24.7 | 11.4 | 5.6 | 2.8 | 1.3 | 0.6 | 0.6  | 1.90 | 328             | 84      |
+    | D, Sun       | 37.6 | 22.7 | 14.0 | 8.8 | 5.7 | 3.4 | 2.1 | 5.7  | 2.70 | 852             | 144     |
+    | E, Sun       | 14.1 | 9.9  | 7.4  | 5.4 | 3.8 | 2.9 | 2.3 | 54.2 | 5.64 | 10,513          | 55      |
+    | A, bulge     | 73.6 | 19.5 | 5.0  | 1.4 | 0.4 | 0.1 | 0.0 | 0.0  | 1.36 | 4               | 0       |
+    | B, bulge     | 62.1 | 23.6 | 8.9  | 3.4 | 1.3 | 0.5 | 0.2 | 0.1  | 1.61 | 39              | 0       |
+    | C, bulge     | 53.0 | 24.6 | 11.7 | 5.6 | 2.7 | 1.3 | 0.6 | 0.6  | 1.90 | 315             | 79      |
+    | D, bulge     | 36.8 | 22.8 | 14.2 | 9.0 | 5.7 | 3.3 | 2.1 | 6.0  | 2.72 | 909             | 132     |
+    | E, bulge     | 14.2 | 10.3 | 7.4  | 5.5 | 4.1 | 3.0 | 2.3 | 53.0 | 5.58 | 10,229          | 53      |
+    - 547 redrawn systems were found in all, against the 50 expected. None was kept at the
+      fallback.
+    - The means match the ruling's estimates: C about 1.2–1.9, D about 2.5 and E about 5.8.
+    - A and B list 1.4–1.6 attempts, though their pairs almost never reach the engine (none of
+      the probe's 400 generated a layer did): the ruled cover stops only at an attempt with no
+      star–star pair. The deferred lever (b) would cut it.
+
+  - _The cost._ The `stellar/hierarchy_bound` bench ran under the heavy-test lock, at a load of
+    8–13 on the shared machine, so it is provisional. It used 400 records a layer nearest the
+    bench file's Sun-like point (seed `0x0311_1000_0000_0000`, (0, 26,000, 0) ly), not the
+    probe's sample. Per record:
+
+    | Layer | Attempts listed | `draw_hierarchy_of_composition` over them, µs | The bound, µs | Ratio (gate ≤ 1.25) | First measure with the cover, µs |
+    | ----- | --------------- | --------------------------------------------- | ------------- | ------------------- | -------------------------------- |
+    | A     | 1.43            | 4.5                                           | 4.7           | 1.04                | —                                |
+    | B     | 1.57            | 7.0                                           | 7.1           | 1.02                | —                                |
+    | C     | 1.90            | 15.9                                          | 14.8          | 0.93                | 8.5–13                           |
+    | D     | 2.56            | 103.6                                         | 50.2          | 0.49                | 45                               |
+    | E     | 5.82            | 337.8                                         | 142.9         | 0.42                | 180                              |
+    - The gate holds in every layer. A and B take the spine construction, so the bound is their
+      draws plus its lists. D and E save `DirectPeriods` at every attempt after their first.
+    - C and D lie above the first measure and E below it. The ruling's estimate with speed-ups
+      (C 7, D 30, E 110) is not reached. Of the two speed-ups it names, `DirectPeriods` once a
+      record is kept, and the tidal denominator once a record gave nothing.
+    - For R06 (a finding, not a fix). On these figures and the ruling's records past the floor,
+      the bound costs about 2.5 × 10⁴ CPU-s near the Sun at the spherical caps, and 9,700 at
+      T7.b's caps. That is the ruling's "as measured" row, not its "with speed-ups" row. So
+      R06.T8.g's expected totals become about 3.6–4.4 × 10⁴ and 1.5–1.8 × 10⁴ CPU-s, still inside
+      its gates of 6 × 10⁴ and 2.5 × 10⁴.

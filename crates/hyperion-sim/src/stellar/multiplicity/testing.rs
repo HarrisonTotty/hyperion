@@ -6,8 +6,8 @@ use super::period_fit;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO};
-use crate::galaxy::placement::SystemRecord;
-use crate::id::SystemId;
+use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+use crate::id::{Layer, SystemId};
 
 /// The sample size of the property tests (P11.T2 and T3.b): 10⁴ hierarchies.
 pub(crate) const SAMPLE: u32 = 10_000;
@@ -77,6 +77,45 @@ pub(super) fn log_uniform_records(
             record(galaxy, id, at, mass)
         })
         .collect()
+}
+
+/// The first `n` records of `layer` in the cells nearest `at`: the cell holding it, then each
+/// shell of cells about that cell in turn, each cell's records in order, a neighbourhood's systems
+/// as placement makes them (P11.T16's probe's sample). Fewer if 40 shells hold fewer.
+pub(crate) fn records_near(
+    galaxy: &Galaxy,
+    layer: Layer,
+    at: &GalacticPosition,
+    n: usize,
+) -> Vec<SystemRecord> {
+    let centre = CellKey::containing(layer, at)
+        .expect("a point inside the root cube")
+        .gen_cell()
+        .to_array();
+    let mut records = Vec::with_capacity(n);
+    let mut cell = Vec::new();
+    for r in 0_i32..40 {
+        for i in -r..=r {
+            for j in -r..=r {
+                for k in -r..=r {
+                    if i.abs().max(j.abs()).max(k.abs()) != r {
+                        continue;
+                    }
+                    let Ok(key) =
+                        CellKey::new(layer, [centre[0] + i, centre[1] + j, centre[2] + k])
+                    else {
+                        continue;
+                    };
+                    generate_cell(galaxy, key, &mut cell);
+                    records.extend(cell.iter().take(n - records.len()));
+                    if records.len() == n {
+                        return records;
+                    }
+                }
+            }
+        }
+    }
+    records
 }
 
 /// `n` records at `at` whose primaries all formed with `mass` M☉.
