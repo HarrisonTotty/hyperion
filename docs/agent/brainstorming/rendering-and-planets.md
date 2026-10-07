@@ -1620,8 +1620,8 @@ The figures familiar from Earth do not hold even near the Sun. Space has no airg
 background near the Sun is starlight alone, μ_V ≈ 24.3 mag/arcsec² at the galactic poles (|b|
 over 80°) and about 22.05 in the band (|b| under 5°) (Gaia DR3 flux sums of the stars fainter than
 V 6.5), and the diffuse galactic light the dust scatters, about 10–35% of the integrated starlight
-by direction (Toller 1981, as Mattila et al. 2018, A&A 617, A42, quote it), which the band does not
-yet hold, plus zodiacal light inside a system with a zodiacal cloud, about 23.3 at the Sun's
+by direction (Toller 1981; Leinert et al. 1998, Table 39), which the band holds (R06.T9.g), plus
+zodiacal light inside a system with a zodiacal cloud, about 23.3 at the Sun's
 ecliptic pole (Leinert et al. 1998). Deeper
 in, the sky is fuller and brighter, and its brighter background lowers the naked-eye limit. The
 limit is Crumey's (2014) point-source threshold, his eq. 53 with Blackwell's scotopic coefficients;
@@ -1646,7 +1646,8 @@ until the band's own integral replaces them:
 
 The limit map takes as each texel's background the light fainter than the eye's cut, about V 8.15
 near the Sun. That light is darker than these figures by about 0.1 mag in the band and 0.3 at the
-poles (Gaia DR3: 22.18 and 24.60 for V over 8.1), so there the limits are about 6.5 and 7.55.
+poles (Gaia DR3: 22.18 and 24.60 for V over 8.1), so there, with the diffuse light, the limits are
+about 6.4 and 7.5.
 
 In a globular core the unresolved light is faint, and what sets the limit is the veiling glare of
 its thousand or so stars brighter than V −5, the same glare the renderer draws as bloom. At the

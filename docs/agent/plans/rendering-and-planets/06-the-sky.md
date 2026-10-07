@@ -46,7 +46,7 @@ In scope:
 
 - `hyperion_sim::sky`: the naked-eye threshold and glare, the star colour and disc tables, the
   cumulative luminosity function, the brightness envelope and the candidate skips, the layer caps,
-  the census, the band map and the limit map, and the host discs.
+  the census, the band map (with the diffuse galactic light) and the limit map, and the host discs.
 - One function each in two built modules: a mass-first candidate walk in `galaxy::placement` and a
   cumulative extinction profile beside `horizon` in `galaxy::gas::extinction`, both bit-identical
   to what exists.
@@ -220,7 +220,8 @@ pub fn sum_rows(march: &BandMarch, census: &SkyCensus, complete_to: &CompleteTo,
 
 // sky::limits (Design notes 4 and 5)
 pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
-    eye: &EyeObserver) -> Magnitudes;              // coarse pre-pass, darkest texel, +0.453 +0.1
+    eye: &EyeObserver, illumination: Option<&Illumination>)
+    -> Magnitudes;                                 // coarse pre-pass, darkest texel, +0.453 +0.1
 pub struct Glare { /* each listed star's direction, photopic and scotopic illuminance at the eye
     after its own reddening, and their pyramid over the band's texels */ } // R06.T9.c and T9.i, as built
 impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar],
@@ -234,6 +235,19 @@ pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
     band: &mut [BandTexel]);                                      // limit_rows over six faces
 pub fn eye_offsets(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
     band: &[BandTexel]) -> Vec<Magnitudes>;         // R06.T9.h: each listed star's own limit less its texel's
+
+// sky::dgl — the diffuse galactic light (R06.T9.g; decision-r06-t9g-dgl.md)
+pub const ILLUMINATION_SPEC: BandSpec;      // 16² on the standard nodes: the eye cut's pre-pass's
+pub struct Illumination { /* the observer's own sky of all starlight at ILLUMINATION_SPEC: each
+    texel's five sums and its ray's A_V to the edge, and the scattered field's fixed point */ }
+impl Illumination { pub fn march(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer)
+        -> Self;                            // or by rows for the server's jobs, then assembled
+    pub fn observer(&self) -> &Observer; pub fn heap_bytes(&self) -> usize; }
+impl SkyQueryBuilder { pub fn illumination(self, illumination: Arc<Illumination>) -> Self; }
+impl SkyQuery { pub fn illumination(&self) -> Option<&Illumination>; }
+impl BandTexel { pub fn diffuse_luminance(&self) -> CandelasPerSquareMetre; }
+pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
+    eye: &EyeObserver, illumination: Option<&Illumination>) -> Magnitudes;
 
 // sky::disc (Design note 16)
 pub struct PowerTwo { /* c: f64, alpha: f64 */ }
@@ -591,12 +605,16 @@ holds.
    2026-10-06 on R06.T9.h's open question 1), plus a pad of 0.1 mag, so at most about 9.2 (8.54
    under the 2026-10-02 clamp). If that cut is deeper than the provisional one the pre-pass runs
    once more at it; raising the cut removes stars from the band only slightly, so one repeat
-   converges. Glare is left out of the pre-pass, which is
-   conservative, since glare only makes limits shallower. Near the Sun the rule gives about 7.6 +
-   0.453 + 0.1 ≈ 8.15 for the real sky. The pre-pass's darkest texel holds the light fainter than
-   the cut, μ 24.73–24.77 by Gaia DR3 at b ≈ +79°, darker than the 24.3 of the light fainter than
-   V 6.5. The fixture, whose poles are about 0.3 mag faint, gives about 8.27 (decided 2026-10-06,
-   `decision-r06-t9b-band.md`). The fixed 7.85 alone would be too shallow wherever the band is
+   converges; the diffuse galactic light, which no cut changes, makes the step smaller still (about
+   0.01 near the Sun; R06.T9.g). Glare is left out of the pre-pass, which is conservative, since
+   glare only makes limits shallower. Near the Sun the rule gives about 7.55 + 0.453 + 0.1 ≈ 8.10
+   for the real sky. The pre-pass's darkest texel holds the light fainter than the cut and the
+   diffuse galactic light, μ about 24.60–24.65: Gaia DR3's 24.73–24.77 at b ≈ +79°, and the light
+   its dust scatters (R06.T9.g). That is darker than the 24.3 of the light fainter than V 6.5. The
+   fixture gives about 8.0. Its poles are about 0.3 mag faint in starlight, and its dust gives them
+   about four times the real diffuse light (decided 2026-10-06, `decision-r06-t9b-band.md`;
+   re-derived 2026-10-07, `decision-r06-t9g-dgl.md`). The fixed 7.85 alone would be too shallow
+   wherever the band is
    darker than μ 24.3 (7.72 at μ 25, and 7.99, Crumey's clamp, from μ 25.6; the 8.17 at 26 first
    given here is eq. 34 before the 2026-10-02 clamp).
 6. **The colour table** (researched 2026-09-29). Built by `hyperion-fit` from spectra fetched, not
@@ -807,12 +825,24 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     front of each node: each display channel, the photopic light and the scotopic light by its own
     A ÷ A_V, the colour table's solar row's for the band and each star's own for the overflow,
     through `StarColour::reddened` (decided 2026-10-06, `decision-r06-t9b-band.md`; R06.T9.e).
+
+    To each texel's light the band adds the diffuse galactic light (R06.T9.g;
+    `decision-r06-t9g-dgl.md`):
+    - the observer's own sky of all starlight, scattered once by the ray's dust (Henyey and
+      Greenstein's phase function, Draine's 2003 albedo and g per sum), with its higher orders where
+      the dust is thick;
+    - reddened by the solar row's curves through the ray's A_V.
+
+    It is the same for every cut, reply, census and cone, and is no star's light, so the listing and
+    the band still share one boundary.
+
     The limit map then adds the glare (Design note 4) and gives each texel its eye limit and each
     listed star its eye offset, its own limit less its texel's (R06.T9.h). Its background is the
     light fainter than the eye's cut, even when a camera's deeper cut sets the band's (R06.T9.j).
     The band depends on the cut, not on the per-direction limit, so there is no loop between
     them: the cut is uniform, and a star between a texel's limit and the cut is the client's to cull
     and add to the band (Design note 20).
+
 16. **The discs** (researched 2026-09-29; Maxted 2018, A&A 616, A39; Claret and Southworth 2022,
     VizieR J/A+A/664/A128, table3, and 2023, J/A+A/674/A63; Claret et al. 2020, J/A+A/634/A93, for
     white dwarfs). The power-2 law I(μ)/I(1) = 1 − c(1 − μ^α): the tables give g = c and h = α in
@@ -1760,17 +1790,20 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   (`cargo test --profile slow-test -p hyperion-fit --test star_colour -- --ignored`): the colour
   table's and the five reddening tables' reproduction on eight threads and on one, every row's lift and photopic identity, and test 2.
 
-- **R06.T9.c The limit map.** `sky::limits::limit_map` with the glare of Design note 4. Tests:
-  each texel's limit is `naked_eye_limit` at its band luminance plus its glare and at its ρ, to
-  10⁻⁹ mag; near the Sun, with the band at cut 8.15 (the eye's cut there, T9.d, which follows),
-  the median texel limit is 6.5 ± 0.20 in the band (|b| under 5°) and 7.55 ± 0.22 at the poles
-  (|b| over 80°): Crumey's limit at Gaia DR3's light fainter than the cut there (μ 22.18 and
-  24.62), and T9.b's 0.5 mag of μ through Crumey's slope (0.40 and 0.45 per mag) (decided
-  2026-10-06, `decision-r06-t9b-band.md`; the fixture, whose poles are about 0.3 mag faint, Risks,
-  "The galaxy's local light is low", gives about 6.53 and 7.71); a texel within 1° of a V = −1.5
-  star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of the
-  listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`. As built
-  (Risks, "Deviations in T9.c, as built"): `Glare::of_listed` resolves each listed star's
+- **R06.T9.c The limit map.** `sky::limits::limit_map` with the glare of Design note 4. Tests: each
+  texel's limit is `naked_eye_limit` at its band luminance plus its glare and at its ρ, to 10⁻⁹ mag;
+  near the Sun, with the band at cut 8.15 and the diffuse galactic light (R06.T9.g), the median
+  texel limit is 6.41 ± 0.20 in the band (|b| under 5°) and 7.51 ± 0.22 at the poles (|b| over 80°).
+  These are Crumey's limit at Gaia DR3's light fainter than the cut there plus the diffuse light (μ
+  21.95 and 24.53): in the band, Toller's 0.21 of the light fainter than V 6.5 (Leinert et al. 1998,
+  Table 39); at the poles, 250 nW m⁻² sr⁻¹ per magnitude of Schlafly and Finkbeiner's A_V of about
+  0.04. The tolerance is T9.b's 0.5 mag of μ through Crumey's slope (0.40 and 0.45 per mag) (decided
+  2026-10-06, `decision-r06-t9b-band.md`; re-derived 2026-10-07, `decision-r06-t9g-dgl.md`). The
+  fixture gives about 6.29 and 7.41 (6.53 and 7.71 without the diffuse light): its poles are about
+  0.3 mag faint in starlight, and its dust is thicker than the sky's (Risks). A texel within 1° of a
+  V = −1.5 star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of
+  the listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`. As
+  built (Risks, "Deviations in T9.c, as built"): `Glare::of_listed` resolves each listed star's
   reddened light once a census, and `limit_rows` sets a job's rows, as `band_rows` takes them. The
   self-veil, the map's cost and E's plane, which T9.c left open, were decided 2026-10-06
   (`decision-r06-t9c-glare.md`): R06.T9.h, R06.T9.i and R06.T9.j.
@@ -1818,20 +1851,22 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
     `cargo test -p hyperion-sim sky::eye`.
 - **R06.T9.d The eye's cut.** `sky::limits::eye_cut` (Design note 5): the coarse pre-pass at 16²
   texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit, clamped by
-  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), + the
-  colour table's largest colour offset (0.453) and +0.1, and one repeat when the cut deepens.
-  Tests: the cut is the darkest pre-pass texel's
-  `naked_eye_limit` + 0.453 + 0.1 after the repeat, to 10⁻⁹ mag; the colour table's largest eye
-  colour offset at μ 30 is at most 0.46 (it is 0.453); near the Sun the cut is 8.15 ± 0.22:
-  Crumey's limit at the darkest 16² texel of Gaia DR3's light fainter than the cut (μ
-  24.73–24.77), plus 0.553, with T9.b's tolerance carried through Crumey's slope (decided
-  2026-10-06, `decision-r06-t9b-band.md`; the fixture gives about 8.27); no texel of the full
-  limit map with no glare, which bounds every listed star's own limit after its self-exclusion
-  (R06.T9.h), is deeper than the cut less the largest colour offset (0.453), and a miss is a
-  finding for the pad, not a looser test; the repeat changes the cut by under 0.05 mag. The
-  colour offset is the table's real maximum, 0.453, not the first 0.43 and +0.45 (the
-  orchestrator's ruling of 2026-10-06 on R06.T9.h's open question 1). Acceptance:
-  `cargo test -p hyperion-sim sky::limits`.
+  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), + the colour
+  table's largest colour offset (0.453) and +0.1, and one repeat when the cut deepens. Tests: the
+  cut is the darkest pre-pass texel's `naked_eye_limit` + 0.453 + 0.1 after the repeat, to 10⁻⁹ mag;
+  the colour table's largest eye colour offset at μ 30 is at most 0.46 (it is 0.453); near the Sun,
+  with the diffuse galactic light (R06.T9.g), the cut is 8.10 ± 0.22. That is Crumey's limit at the
+  darkest 16² texel of Gaia DR3's light fainter than the cut plus the diffuse light (μ about
+  24.60–24.65; the diffuse light at 250 nW m⁻² sr⁻¹ per magnitude of Schlafly and Finkbeiner's A_V,
+  0.03–0.07 there), plus 0.553, with T9.b's tolerance carried through Crumey's slope (decided
+  2026-10-06, `decision-r06-t9b-band.md`; re-derived 2026-10-07, `decision-r06-t9g-dgl.md`). The
+  fixture gives about 8.0, and 8.28 without the diffuse light; no texel of the full limit map with
+  no glare, which bounds every listed star's own limit after its self-exclusion (R06.T9.h), is
+  deeper than the cut less the largest colour offset (0.453), and a miss is a finding for the pad,
+  not a looser test; the repeat changes the cut by under 0.05 mag (about 0.01 near the Sun with the
+  diffuse light, which no cut changes). The colour offset is the table's real maximum, 0.453, not
+  the first 0.43 and +0.45 (the orchestrator's ruling of 2026-10-06 on R06.T9.h's open question 1).
+  Acceptance: `cargo test -p hyperion-sim sky::limits`.
 - **R06.T9.i The far field (new; after T9.h, and after T9.d in the order; before T9.j, T11.c and T17's goldens).**
   Decided 2026-10-06 (`decision-r06-t9c-glare.md`, item 2).
   - Per face, a pyramid of the band's texels, from its leaves (the band's texels) to one node a
@@ -1927,23 +1962,82 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
     Bench: `sky/band_near_sun/march_camera` and `/march_camera_no_eye`.
 
 - **R06.T9.g Diffuse galactic light (new; research first; after T9.f, before T17's goldens).**
-  Decided 2026-10-06 (`decision-r06-t9b-band.md`). A research agent proposes a model of the
-  starlight that the band's dust scatters into each ray, from the plan's own dust field and the
-  band's own light. For example: single scattering with Draine's 2003 V-band albedo of 0.677 and
-  ⟨cos θ⟩ of 0.538 (R_V 3.1; ApJ 598, 1017), g tried over 0.54–0.8 (Mattila et al. 2018), and
-  each node's radiation field approximated from the band.
-
-  Targets: DGL ÷ all-star ISL of about 0.10–0.35 by direction (Toller 1981, via Mattila et al.
-  2018, A&A 617, A42, §3.1.1), and 0.13 in the year-mean zenith at 40° N (Masana et al. 2021,
-  Table 4), with measured DGL–100 µm slopes considered (Brandt and Draine 2012; Ienaka et al.
-  2013). The proposal states its cost against the band's.
-
-  If no model is within 10% of the band's cost and within a factor 1.5 of the ratios, the
-  omission is stated in Risks and reported to the owner. Otherwise:
-  - it is built into the march's sums as a sum of its own, reddened as the band's light is, so
-    that T9.b's starlight test still compares starlight with Gaia;
-  - it has tests against the targets;
-  - it re-derives T9.c's and T9.d's references with Gaia's ISL plus the DGL.
+  Decided 2026-10-06 (`decision-r06-t9b-band.md`); its model decided 2026-10-07
+  (`decision-r06-t9g-dgl.md`). `sky::dgl`: the starlight the band's dust scatters into each ray,
+  from plan 07's dust and the band's own light.
+  - **The illumination.** The observer's own sky of all starlight: `march_rows` at 16² texels a
+    face (the eye cut's pre-pass's directions), complete nowhere, with no census, reddened as the
+    band is. It holds each texel's five sums, in cd m⁻², and its ray's A_V to the root cube's
+    edge, A_∞. It is every scattering point's field (the local-field approximation), exact in a
+    uniform medium. It depends on the observer and time alone, not on the cut, the eye, the cone,
+    the census or the replies. It is built once a request, before the eye's cut, and stated on
+    the query (`SkyQueryBuilder::illumination`, refused for another observer); `eye_cut` takes
+    it.
+  - **Single scattering.** For a ray along d and each sum X (photopic, red, green, blue,
+    scotopic):
+    - J_X(d) = Σ_k Φ_X(d · d_k) F_X,k Ω_k ÷ Σ_k Φ_X(d · d_k) Ω_k over the illumination's texels,
+      with Φ_X Henyey and Greenstein's (Draine 2003, eq. 4) at the sum's g;
+    - D_X = 1 − t_X(A_∞), with t_X the solar row's transmission of the sum through the ray's own
+      A_∞ (`Reddening::through`): κ_X A_∞ ÷ 1.0857 for thin dust and 1 for thick;
+    - the single-scattered light is ω_X D_X J_X[F].
+  - **The higher orders, where the dust is thick.** S is the fixed point, on the illumination's
+    texels, of S_X = ω_X D_X (J_X[F] + J_X[S]), iterated to 10⁻⁴ of the largest photopic S (at
+    most 64 times). A ray's diffuse light is DGL_X = ω_X D_X (J_X[F] + D_X J_X[S]): ω ÷ (1 − ω)
+    of a uniform medium's light, and within −8% to +11% of an exact plane-parallel solution at
+    every latitude near the Sun, for the fixture's dust and for a realistic layer.
+  - **The dust.** ω and g are Draine's (2003; the WD01 R_V 3.1 model,
+    `kext_albedo_WD_MW_3.1_60_D03.all`), linear in ln λ. Each is taken at the wavelength where
+    Cardelli et al.'s A_λ ÷ A_V is the solar row's moment of the sum at A_V → 0 (for a channel,
+    its two parts' (c⁺k⁺ − c⁻k⁻) ÷ (c⁺ − c⁻)). That gives about ω 0.677 and g 0.536 photopic,
+    0.676 and 0.551 scotopic, and 0.667–0.677 and 0.51–0.565 in the channels. The camera reads
+    the band's luminance at η☉, as before (Design note 18).
+  - **In the band.** `march_rows` keeps each ray's diffuse sums beside its slots, and `sum_rows`
+    adds them to each texel and to the eye's light. So the light is the same in every reply and
+    under any cut, census or cone, and T9.j's eye light keeps its bits.
+    `BandTexel::diffuse_luminance` gives the part. A query with no illumination gives the band
+    as before, bit for bit: T9.b's starlight test and the conservation tests take it so.
+  - Tests:
+    - the kernel within 10⁻⁷ of its closed form, its weights normalised to 10⁻¹², and Draine's V
+      row;
+    - a uniform sky: J = F, single scattering ω D F, grey D = 1 − 10^(−0.4 A_∞), to 10⁻¹²;
+    - behind thick dust (A_∞ 100), ω ÷ (1 − ω) of the light within 10⁻⁴;
+    - thin dust, linear in A_∞ and equal to ω κ A_∞ ÷ 1.0857 of the light, within 10⁻³;
+    - a lone source scatters by the kernel's ratio, forward over backward above 1;
+    - D_X = 1 − t_X to 10⁻¹⁵, monotone, and κ_X ÷ 1.0857 per magnitude for thin dust;
+    - the diffuse sums bit for bit whatever the cut (6.5, 8.15, 10.06 with the eye at 8.15), the
+      replies, the census, a 30° cone, the split of the rows and the order of the illumination's
+      jobs;
+    - a texel is its starlight and its diffuse light, and the eye's light under a camera's cut
+      takes the same diffuse sums;
+    - on a plane-parallel sky (Flynn et al. 2006's local light as 41% at h 100 pc and 59% at 300
+      pc; grey dust of h 125 pc at 0.7 mag kpc⁻¹; the observer 20.8 pc up), the diffuse light
+      over the starlight in Toller's bins (Leinert et al. 1998, Table 39: 0.21, 0.34, 0.31, 0.19,
+      0.25, 0.17, 0.17, 0.12 at |b| 0–5, 5–10, 10–15, 15–20, 20–30, 30–40, 40–60, 60–90°)
+      within a factor 1.5, and within 5% of the ruling's 0.286, 0.213, 0.192, 0.180, 0.165, 0.147,
+      0.129 and 0.113;
+    - near the Sun at 16², over texels at |b| over 40°, the median of the diffuse light's μ_V
+      plus 2.5 log₁₀ A_∞ within 23.82 ± 0.44. That is 250 nW m⁻² sr⁻¹ per magnitude of A_V,
+      ×/÷ 1.5: Kawara et al. 2017, Ienaka et al. 2013, Matsuoka et al. 2011, Brandt and Draine
+      2012 and Postman et al. 2024, through Schlafly and Finkbeiner 2011's 0.0505 mag per MJy
+      sr⁻¹. The ruling's model of the fixture gives about 24.0. The slope's median at |b| 30–40°
+      over that above 70° lies in 1.1–1.8 (about 1.3);
+    - T9.c's and T9.d's references, re-derived with Gaia's ISL plus the diffuse light (T9.c,
+      T9.d).
+  - Record:
+    - the fixture's diffuse light over its starlight in Toller's bins, over the whole sky
+      (Leinert et al. 1998: typically 20–30%), and in the year-mean zenith at 40° N (Masana et
+      al. 2021, Table 4: 0.13, modelled);
+    - over the eye's background at the poles and in the band;
+    - the iteration count, the 16² illumination against 8², and T9.d's pad with the light.
+    - The ruling's model of the fixture gives 0.59 to 0.30 by bin and 0.47 over the sky, about
+      twice the real sky's, from its dust (Risks, "The fixture's dust is thick for the diffuse
+      light").
+  - Bench: `sky/illumination`, and `sky/band_near_sun/march` with and without it. Gate,
+    provisional: the illumination and the march's increase together at most 10% of the march
+    without them, in one run (the ruling's estimate: 6–9%).
+  - Files: `sky/{dgl,band,limits,mod}.rs`, `sky/census/query.rs`, `benches/sky.rs`. Acceptance:
+    `cargo test -p hyperion-sim sky::dgl`, `cargo test -p hyperion-sim sky::band` and
+    `cargo test -p hyperion-sim sky::limits`, as three commands.
 
 Files: `sky/band.rs`, `sky/limits.rs`. Bench: `sky/band_near_sun` (all six faces; since R06.T9.f
 `sky/band_near_sun/march` and `/sum`) and `sky/limit_map` (R06.T9.i).
@@ -1978,7 +2072,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
 
 - **R06.T11.a Handler, validation and the census.** `requests/sky.rs`: validation (the observer in
   the cube, time within ±H, `n_max` and `camera_limit_v` in range, a known `exclude_system` through
-  `resolve`, and no `eye` with a `cone`), the eye's cut by `eye_cut` and the request's cut as
+  `resolve`, and no `eye` with a `cone`), the request's illumination (R06.T9.g: its 1,536 rays as
+  bulk jobs, then its fixed point), then the eye's cut by `eye_cut` with it and the request's cut as
   the deeper of it and `camera_limit_v`, the census as `Priority::Bulk` jobs of a few hundred
   cells each under the request's `CancelToken`, merged once all finish; the census never enters
   the interactive queue,
@@ -2016,9 +2111,9 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   pending 15 MiB transfer check in the real renderer is run with this kind, hidden, as R03's Risks
   ask, and recorded. Acceptance: `cargo test -p hyperion-server sky` and `just ci`.
 - **R06.T11.c The band, the limits, the discs and the tables.** The band as bulk jobs by face and
-  row through T9.f's `march_rows`, then `sum_rows`, then the limit map, against the eye's
-  background and with T9.j's glare at the request's eye cut, and each listed star's eye offset
-  (R06.T9.h), then `host_discs` of
+  row through T9.f's `march_rows` on the query that states the request's illumination (R06.T9.g),
+  then `sum_rows`, then the limit map, against the eye's background and with T9.j's glare at the
+  request's eye cut, and each listed star's eye offset (R06.T9.h), then `host_discs` of
   `exclude_system` at the request's time; the luminosity tables built once per galaxy, keyed by
   `GalaxyKey` alone, under `SingleFlight` in a `ByteLru` of their own budget,
   `HYPERION_SKY_TABLES_MB` (default 160, two galaxies; separate from `HYPERION_SKY_CACHE_MB`), as
@@ -2376,7 +2471,8 @@ T11's wire carries, which no other golden pins; determinism audit of R06.T9.e an
 ruling's addendum), and `sky/eye_cut.golden`, each pre-pass's darkest limit and cut and the eye's
 cut near the Sun (a repeat) and in the nuclear disc (none), whose bits set every eye reply's
 census and no other golden pins (determinism audit of R06.T9.d), read by the testkit's golden
-harness. Record the A_V distribution of the
+harness. The goldens `sky/band_face_row.golden` and `sky/eye_cut.golden` are written with the
+illumination. Record the A_V distribution of the
 listed stars (the shares above A_V 2, 5, 10 and 20) in each census bench, near the Sun at both
 cuts and in the inner bulge (`decision-r06-t9b-band.md`, addendum item 2). Record the per-record bound's pass rate (records
 generated ÷ records skipped) for single and multiple systems in each census bench, against T16.b's
@@ -2396,7 +2492,8 @@ members. The brainstorm's globular-core row (47 Tuc) is recorded as pending T16.
 When T16.a lands, it re-benches the census with members against this budget.
 
 The census budget, decided 2026-10-05 (`decision-r06-census-cost.md`), applies near the Sun at the
-eye's cut as T9.d computes it (about 8.27 on the fixture), benched also at 7.95, its estimate when
+eye's cut as T9.d computes it (about 8.0 on the fixture with the diffuse light, R06.T9.g; 8.28
+before it), benched also at 7.95, its estimate when
 the budget was set (decided 2026-10-06, `decision-r06-t9b-band.md`; the eye's cut; the camera's
 cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
 `decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
@@ -2438,6 +2535,7 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
 - the per-reply cost of the band and the limit map (T9.i's pyramid; `sky/limit_map` at 300,000
   stars). The first reply's band, limit map and shell
   together must fit the first-sky budget;
+- the illumination's cost per request, inside the first sky's budget;
 - the sky's total light (listed, overflow and band) in the first reply against the final's, at
   the eye's cut near the Sun, within 1% (T9.b's amendment, decided 2026-10-06,
   `decision-r06-t9b-band.md`); a miss is a finding for R06.T5.f, not a looser gate;
@@ -4486,7 +4584,7 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - the independence covers the radii a reply states (T17);
   - the march split (R06.T9.f);
   - the shortfall measured (R06.T5.f);
-  - the diffuse galactic light (R06.T9.g).
+  - the diffuse galactic light (R06.T9.g; modelled 2026-10-07, `decision-r06-t9g-dgl.md`).
 - **The galaxy's local light is low (found in T9.b; a pointer for the galaxy plans' owner).** The
   fixture's V luminosity density at the Sun is 0.042 L☉ pc⁻³, against Flynn et al. 2006 (MNRAS 372,
   1149): 0.056 for all stars, 0.045–0.047 for M_V ≥ −1, about 10% uncertain. Half of their column,
@@ -4506,10 +4604,52 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   compares the fixture's Φ(M_V) with Hipparcos/CNS5 and adds a light row to plan 02's brackets.
   R06 changes nothing; its near-Sun tests hold the offset.
 
-- **No diffuse galactic light (found 2026-10-06, `decision-r06-t9b-band.md`).** The band holds
-  direct starlight only. The light its dust scatters, about 10–35% of the integrated starlight
-  and 23–47% of the band's own background (the light fainter than the cut), makes the eye's
-  limits about 0.10–0.18 mag too deep. R06.T9.g decides it.
+- **The diffuse galactic light (found 2026-10-06, `decision-r06-t9b-band.md`; modelled
+  2026-10-07, `decision-r06-t9g-dgl.md`; R06.T9.g).**
+  - **The model.** The band holds the starlight its dust scatters: the observer's own sky as each
+    scattering point's field, with the higher orders weighted by the ray's depth.
+  - **Its accuracy.** Against an exact plane-parallel solution near the Sun it is within −8% to
+    +11% at every latitude, for the fixture's dust and for a realistic layer. The plain local
+    field's series is 19–49% high at high latitude, and single scattering alone 18–31% low in the
+    band.
+  - **Against the measurements,** on a realistic layer: Toller's ratios within a factor 1.5 in
+    every latitude bin (0.62–1.36); the year-mean zenith at 40° N within 1.6 (0.20, against
+    Masana et al.'s modelled 0.13); and the measured slopes per magnitude of dust at the top of
+    their spread. Those slopes are 1.3–1.8 times their geometric mean at |b| 30–90°, within
+    1.3 of Kawara et al.'s and Pioneer's, and about twice New Horizons'.
+  - **The phase function's g.** Draine's g of about 0.54 is below most fitted optical values
+    (0.6–0.8; Gordon 2004, Mattila et al. 2018):
+    - g 0.7 with ω 0.65 would lower the high-latitude light per magnitude of dust by about a
+      quarter, and miss Toller's band bin;
+    - g 0.8 with ω 0.58 would lower it by about 45%, and miss his bins at 20–60°.
+  - **Left out:**
+    - extended red emission, some 20–30% of the red diffuse light (Witt et al. 2008; Chellew et
+      al. 2022);
+    - reflection nebulae about listed stars;
+    - the field's departure from the observer's own off the disc and inside clouds;
+    - the realised stars' light: the field is the tables' expected light, some 20% above the
+      fixture's realised sky (Risks, "The galaxy's local light is low").
+  - **Its effect.** Near the Sun it moves the real sky's eye limits by about −0.04 at the poles
+    and −0.09 in the band, and T9.d's cut by about −0.05.
+  - **The upgrade,** if the galaxy plans keep a thick dust layer: the field at a few heights
+    above and below the observer, at 2–5 CPU-s.
+- **The fixture's dust is thick for the diffuse light (found 2026-10-07,
+  `decision-r06-t9g-dgl.md`; a pointer for galaxy plan 07's owner).**
+  - **The fixture:** its neutral layer is 700 ly high (`GasDiscParams::HEIGHT`), and its dust
+    column to the poles is 0.25 mag (P07.T8).
+  - **The real sky:**
+    - the dust's scale height near the Sun is 125–135 pc (Marshall et al. 2006; Drimmel and
+      Spergel 2001);
+    - Schlafly and Finkbeiner's (2011) A_V is 0.032 at the north galactic pole, 0.042 at the
+      south and about 0.066 at (l 230°, b +79°), the darkest Gaia texel;
+    - the Sun lies in the low-density Local Bubble, which the fixture lacks.
+  - **The diffuse light:** the fixture's is about 2–3 times Toller's ratios by latitude (0.59 to
+    0.30, against 0.21–0.34 to 0.12). At the poles it is about 0.7 of the eye's background,
+    against about 0.09 for the real sky.
+  - **The limits:** the fixture's polar eye limits move by about −0.27 mag, against −0.04, and
+    its eye's cut falls to about 8.0.
+  - R06's references are the real sky's; the fixture's offset is recorded and routed. The same
+    column reddens the band's poles and every nearby star's sightline.
 - **Deviations in T9.e, as built (2026-10-06; amended the same day to the band ruling's
   addendum).** `StarColour::reddened` and the band's five reddened sums, as
   `decision-r06-t9b-band.md`'s item 3 and its addendum rule them, with these differences. T9.e's
@@ -4939,7 +5079,9 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       load about 15. That is two 16² bands, 3,072 rays. A release timing is T17's, with the
       per-reply costs; T11.a may run the faces as jobs.
     - T9.c's and T9.h's tests, and T9.i's and T9.j's, keep the ruled 8.15, the real sky's figure.
-      T17 benches the census at the computed 8.28, beside 7.95.
+      T17 benches the census at the computed 8.28, beside 7.95. _With the diffuse light (R06.T9.g,
+      `decision-r06-t9g-dgl.md`) the fixture's cut is about 8.0 and the repeat about +0.01: a light
+      no cut changes dilutes the step._
     - The probe's source and the logs are in `.git/rm23-scratch/r06-census/t9d/`.
   - **The pad rests on a smooth sky (science check; for the orchestrator).** The clamp alone keeps
     the 64² map within the pad only where the darkest 16² texel sees to 7.89 or deeper (μ about
