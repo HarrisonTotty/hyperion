@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -67,19 +67,25 @@ async function runCheck(
     engines: timed.engines,
     setting,
   });
-  // The fake clock's frames are stamped on it; the script reads the same clock through them.
+  // The fake clock's frames are stamped on it; the script reads the same clock through them. The
+  // wrapper is set through `window`, not `vi.stubGlobal`. Vitest's jsdom global holds the frame
+  // function behind a getter and setter that answer the last value set, the fake clock's here. The
+  // stub would swap that pair for a plain value, `vi.useRealTimers()` would put jsdom's function
+  // on the plain value, and Vitest's unstub, which runs before the next test, would put the pair
+  // back, still answering the dead fake clock's function to every later file in the worker
+  // (`isolate: false`).
   const fakeFrame = window.requestAnimationFrame;
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+  window.requestAnimationFrame = (callback) =>
     fakeFrame.call(window, (timeMs) => {
       frameMs = timeMs;
       callback(timeMs);
-    }),
-  );
+    });
   const restoreFrames = probe.installFrameClock(window);
   try {
     return await driven(harness, timed, probe, () => frameMs, stopAt);
   } finally {
     restoreFrames();
+    window.requestAnimationFrame = fakeFrame;
   }
 }
 
@@ -271,5 +277,16 @@ describe("the views check's script", () => {
     ]);
     // Every phase ends with the stage at its own width.
     expect(stageWidths.every((width) => width === "")).toBe(true);
+  });
+
+  it("leaves the page's own animation frames to the tests after it", async () => {
+    const own = window.requestAnimationFrame;
+    await runCheck();
+    // What runs between this test and the next, in this file or a later one in the worker: the
+    // `afterEach` hooks, then Vitest's unstub.
+    vi.useRealTimers();
+    cleanup();
+    vi.unstubAllGlobals();
+    expect(window.requestAnimationFrame).toBe(own);
   });
 });

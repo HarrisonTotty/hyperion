@@ -8731,3 +8731,23 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     For the orchestrator: `plan_task.py` files T2.c's `Tests` and `Acceptance` under the whole of
     T2, so `--acceptance R07.T2.c` prints none.
   - Scratch: `.git/rm23-scratch/r07-t2c/` (the logs, the test-render wrapper and its captures).
+- **T20's views-check test no longer leaves a dead `requestAnimationFrame` (test reliability,
+  2026-10-07).** `viewsCheckRun.test.tsx`'s `runCheck` wrapped the fake clock's frame function
+  through `vi.stubGlobal` while `fakeFramesAndTimeouts` had the clock installed. Vitest's jsdom
+  global holds the frame function behind a getter and setter that answer the last value set, the
+  fake clock's here. The stub swapped that pair for a plain value, `vi.useRealTimers()` in
+  `afterEach` put jsdom's function on the plain value, and Vitest's unstub (`unstubGlobals`),
+  which runs before the next test, put the pair back, still answering the dead clock's function.
+  Under `isolate: false` no real frame fired again in that worker. That is what failed
+  `SystemDisplay.test.tsx`'s "starts afresh at the chart's time", recorded above as a load flake
+  (T16.f, T16.g, T2.b) and since moved onto the fake clock (P14.T41.a). `runCheck` now sets the
+  wrapper through `window` and puts the fake clock's function back in its `finally`, so the unstub
+  has nothing to restore. A new test, "leaves the page's own animation frames to the tests after
+  it", runs the steps between two tests by hand and fails on the old helper; the other tests'
+  assertions are unchanged. A probe running the file first in one worker before a victim that
+  waits on one real frame (shuffle seed 3, 5 copies at a time under `CPUQuota=400%`) failed 20 of
+  20 runs before and passed 20 of 20 after. No other app test stubs, spies on or reassigns a frame
+  or timer function. Gate: vitest on `displays/view` (414 tests in 21 files) and on the whole app
+  (8,012 in 341 files) at 4 workers, and `just check lint` from a clean tsc cache. TypeScript
+  review: no must-fix or should-fix; its consider, the comment's account of the getter and setter,
+  is applied. Scratch: `.git/rm23-scratch/fix-raf-polluter/`.
