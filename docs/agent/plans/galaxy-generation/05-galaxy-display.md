@@ -1496,8 +1496,9 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   - _Other marks inside the destination's chevron set (a stated limit;
     decision-r07-quality-and-destination, addendum C, C6). On a crowded chart other marks' symbols
     can lie inside the set, as a selection's bracket encloses its neighbours on a true-scale chart;
-    the operator zooms to part them. Which mark is the destination stays plain: the four apices point at one centre, its
-    label stands at the set's corner, and the list and readout name it. No neighbour's name stands
-    in or beside the set, since a lesser label within 0.25 rem of it gives way, and the chevrons,
-    drawn last, stay whole over a neighbour's symbol. The first task that commands a destination
-    asks for a ruling if a neighbour is taken for the destination by hand._
+    the operator zooms to part them. Which mark is the destination stays plain: the four apices
+    point at one centre, its label stands at the set's corner, and the list and readout name it.
+    No neighbour's name stands in or beside the set, since a lesser label within 0.25 rem of it
+    gives way, and the chevrons, drawn last, stay whole over a neighbour's symbol. The first task
+    that commands a destination asks for a ruling if a neighbour is taken for the destination by
+    hand._

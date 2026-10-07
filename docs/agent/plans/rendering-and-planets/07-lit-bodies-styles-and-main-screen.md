@@ -1727,7 +1727,9 @@ moved to the views lane; T16.d and T16.e were added after T16.a by decision-r07-
 decision-thin-line-contrast, T16.g by decision-r07-t16d-followups, and T16.h, T16.i and T16.j by
 decision-r07-quality-and-destination, before the guide's draft, so that the draft states what they
 build) (T16.i and T16.j follow it: T16.j adds no guide text, and the draft states T16.i's one clause
-ahead of it). The paragraph above stays the task's whole specification:
+ahead of it). T16.k, the kept scene's clock rate on the label block, is split off from T16.c under
+the orchestrator's ruling carried for it, and follows where the orchestrator places it, never beside
+T16.i. The paragraph above stays the task's whole specification:
 each subtask builds its share of it, and each runs the console-ux skill's scripts.
 
 - **R07.T16.a The overlay, cased, and the hull faces' bias.** `photoreal/overlay.ts` (new),
@@ -2213,6 +2215,9 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
   it).
   Acceptance: `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the console-ux skill's
   scripts.
+  _As built: see Risks, "Deviations in T16.c, as built". The draft also holds T10.c's
+  `ECLIPSE TEST` rows and the kept scene's clock rate, by the orchestrator's rulings carried for
+  T16.c; the clock's line is split off as R07.T16.k._
 - **R07.T16.i The view's labels clear of its chrome.** `displays/view/ViewDisplay.tsx`
   (`placeMarkLabels`) and `ViewMarkLabels.tsx`, and their tests
   (decision-r07-quality-and-destination, Q6 (a), and addenda B and C).
@@ -2308,6 +2313,26 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
   **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/spatial
 src/renderer/src/displays/galaxy src/renderer/src/displays/system`, the console-ux skill's
   scripts, `just ci`.
+
+- **R07.T16.k The kept scene's clock rate on the label block** (split off from T16.c, under the
+  orchestrator's ruling carried for it, 2026-10-06: "drafted in T16.c, built there or split off";
+  its place in the order is the orchestrator's). `displays/view/viewRun.ts` (`labelLines`) and its
+  test. T16.c's draft has a kept scene whose clock runs at other than one second a second state
+  its rate on the `PRIMARY` view's label block, `SCENE CLOCK ×100` in `ECLIPSE TEST` (the guide's
+  `SCENE` row, and "`SCENE CLOCK` stands with `SCENE`" in the Views bullet). Today
+  `ViewScene.timeRate` is read nowhere in `displays/view`, so `ECLIPSE TEST`'s `TIME` runs a
+  hundred times fast with nothing saying so (T10.c's open point).
+  - `labelLines` adds `SCENE CLOCK` after `SCENE` while a kept scene's `timeRate` is not 1, its
+    value `×` and the rate as a whole number (`×100`). An instrument's block does not repeat it,
+    as it does not repeat `SCENE`.
+  - Whether the form is `×100` or a unit rate beside `RUN 1 d/s` is the owner's, in T16.c's draft;
+    the line is built as drafted.
+
+  **Tests:** `ECLIPSE TEST`'s block reads `SCENE CLOCK ×100` after `SCENE`; `PRECISION TEST`,
+  `FRAME CHANGE TEST`, `PHASE TEST` and the server's scene have no such line; an instrument's block
+  has none. **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`,
+  the console-ux skill's scripts (glyphs for `×`), `just ci`. Never side by side with T16.i, which
+  edits `displays/view/` too.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -5525,7 +5550,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       (`-01`, `-05`, `-11`, `-15`); `-07`'s 0 is another mark's ink, at 14 to 15:1, standing
       between.
       So at 80% the criterion holds only where a column at about 1.05:1, the stroke's antialiased
-      tail, is read as `--surface-0`, as T16.h read it (pending, below). A destination's own label
+      tail, is read as `--surface-0`, as T16.h read it (pending, below; ruled yes by addendum C,
+      C2: below 1.07:1 is ground). A destination's own label
       no longer stands beside the bracket's ink at all.
     - **`VIEW`'s TEST PLANET**, at 0.78125: its upper-right place meets the selected moon, its
       upper-left the label block, so it takes the lower right, below the set (`crops/d-v078-01`).
@@ -5571,8 +5597,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       counted, and the pending items. Its considers were taken: the stylesheet's padding test, the
       plate against every chevron, T16.h's bullet annotated, the selection's label as a limit, and
       plates read unrounded.
-  - **Pending, for the orchestrator or the owner** (each ruled by decision-r07-quality-and-destination,
-    addendum C):
+  - **Pending, for the orchestrator or the owner** (each ruled by
+    decision-r07-quality-and-destination, addendum C):
     - P05: may selecting a mark outside `chooseLabels`' count move the destination's label?
       Addendum B's "clear of every other label" and "selecting never moves a label" cannot both
       hold there. _Ruled (C1): no. The destination's label is placed as though no mark were
@@ -5598,6 +5624,127 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       chevron set (class 4, 80%, `crops/d-m078-08-large-80-both.png`). _Ruled (C6): no rule and no
       task; a stated limit in P05's Risks, "Labels beside reticles". The first task that commands a
       destination asks for a ruling if a neighbour is taken for the destination by hand._
+- **Deviations in T16.c, as built** (2026-10-07; the views lane; the guide text of
+  decision-r07-t16a, decision-thin-line-contrast, decision-r07-t16d-followups and
+  decision-r07-quality-and-destination, items 1 to 9 as addenda A and B amend them;
+  decision-r07-t8a-meter's "In T16"; decision-r07-t19b-exposure-fit, item 4; the orchestrator's
+  rulings carried for T16.c).
+  - **Commits.** The draft is one `docs(guide): R07.T16.c …` commit of the guide alone, as the
+    bullet asks. This entry, T16.k, the bullet's pointer, T10.c's pointers, two tidy-ups of the
+    addendum-C commit and the README's line of what awaits the owner are a `docs(plans)` commit
+    after it. Two new cells (the `CRAFT PHOTOMETRY` name and the `NO LIT SIDE` meaning) widen the
+    nomenclature table, so Prettier re-pads every row; `git show -b` shows the draft alone.
+  - **What the draft holds**, each part tagged as a draft ending "the owner signs off" (the Q1
+    items with T17's tag, T10.c's rows with T10.c's, the clock with T16.k's):
+    - Colour: a stroke's contrast as drawn, with its cross-section, its exclusions and the coverage
+      a pair is relied on at; `DECORATION ON`'s pointer to "Views"; the craft's silhouette, the one
+      exception in "Outlines for symbology".
+    - Layout: the unit of a width and the floor of 2 device pixels.
+    - Data states: the meter's own status in the exposure bullet.
+    - The three-dimensional conventions and the Views kept list: the chevrons and the labels'
+      place.
+    - Views: `QUALITY`, and `SCENE CLOCK` with `SCENE`, on the primary's block alone; the
+      paragraph on both styles (strokes as "Layout" gives them, the black ground, the label
+      sentence).
+    - Rows: `WIREFRAME`, `PHOTOREALISTIC`; `AUTO`, `MAN`, `INHIBITED`; `NO IMAGE TO METER`; new
+      `NO LIT SIDE`, `NO DARK SIDE`, `STAR DISC ONLY`; new `CRAFT PHOTOMETRY`; `TEST HULL`; the
+      test designations; `DECORATION ON`; new `CHEVRONS DESTINATION`; `SCENE`; new
+      `ECLIPSE TEST`; `METER`'s pointer; new `SELECT`; `QUALITY` as a `Setting`. `GRAPHICS` stands
+      as T17 drafted it.
+  - **Fitted to what is built** (each beyond a ruling's exact words; for the owner):
+    - **The data-state bullet** reads "has no rendered image or has faulted" for "has closed or
+      faulted", as T19.d signed off the `NO IMAGE TO METER` row; and "cannot take `AUTO`:
+      `ENABLE` is held back" for "offers `MAN` only", which read against E5, where `INHIBIT` stays
+      offered under a system inhibit (T19.d's open point). After the UX re-review it points to the
+      status row for the 0.5 s before anything is metered.
+    - **The meter's window** (the UX review's must-fix, and the plan-conformance review's).
+      decision-r07-t8a-meter's "neither panel shows a meter status or `NO IMAGE TO METER`" read
+      against the orchestrator's ruling that the reading keeps a standing inhibit's cause until
+      the window ends. The status row now says that no status stands on the meter's control,
+      beside `ENABLE` or after `AUTO NOT AVAILABLE:`, and that the reading keeps its cause
+      (`INHIBITED · NO LIT SIDE` under `METER DARK`, `INHIBITED · NO IMAGE TO METER` beside the
+      image once it is back). The `NO IMAGE TO METER` row's "Never shown beside a drawn image"
+      gains both exceptions, the histogram timeout (the orchestrator's ruling) and the kept
+      reading. The window opens whenever the image comes to be drawn, or the meter changes, with
+      no value held, as T16.b built it; the status stands bare beside `ENABLE` and after
+      `AUTO NOT AVAILABLE:`.
+    - **The Colour bullet's ends.** "A dash is scored more than a pixel from its ends" became "a
+      stroke is scored more than a pixel's length along it from an open end, a pixel's diagonal at
+      45°, as a dash is from its ends": the checks leave arm and line ends out as built
+      (`CUT_END_MARGIN_PX`, `openEnds`; the canvas chevrons' √2 px), and
+      decision-r07-t16d-followups (b) asks that a hand measure reach the check's verdict. The UX
+      review's must-fix gave the diagonal.
+    - **The craft.** "Outlines for symbology" states the ruled limits (T16.e's point): a hidden
+      light's glare and bloom still spread round a silhouette, and the meter weighs what it hides.
+      The `CRAFT PHOTOMETRY` row reads "the image does not yet compute a craft's light" for "no
+      craft's light is computed by this generator version", since craft are not the generator's
+      output, and counts the own ship whether or not one is in the picture, since the note is
+      scene-wide.
+    - **The view's labels.** The label sentence gains "Every change of a label's place, or of
+      whether it is shown, is a cut, never eased", with its reason (T16.g's consider). Its tag
+      names R07.T16.i as the builder of "never shown in part" (Q6). Item 6 takes its own tag,
+      since item 5's stands under another heading.
+    - **Tags that name a later builder:** `CHEVRONS DESTINATION`, shown in each legend by the
+      first task that commands a destination; the label sentence, R07.T16.i; `SCENE CLOCK`,
+      R07.T16.k.
+  - **Taken from the orchestrator's rulings carried for T16.c,** beyond the bullet's list: T10.c's
+    `ECLIPSE TEST` texts as T10.c drafted them (the `SCENE` row, a row of its own, its bodies in
+    the designations); and `SCENE CLOCK ×100` in the `SCENE` row, with "`SCENE CLOCK` stands with
+    `SCENE`" in the Views bullet. The guide is T16.c's one file, so the clock's line is split off
+    as R07.T16.k (above), for the orchestrator to place in the order. The UX review's should-fix,
+    a rate with no unit beside `RUN 1 d/s`, is put to the owner in the `SCENE` row's tag, the
+    form kept as ruled.
+  - **`SELECT`** takes a `Label` row (T13's point: "a Label row, or the reason a group's legend
+    needs none").
+  - **T16.c's tests, by reading** (`rg` over the renderer, the scripts):
+    - every status, remedy and note the draft adds is a string in the code: `NO LIT SIDE`,
+      `NO DARK SIDE`, `STAR DISC ONLY` (`exposure.ts`), their remedies (`MeterControl.tsx`),
+      `NOT AVAILABLE: not yet metered` and `AUTO NOT AVAILABLE:` (`ExposurePanel.tsx`), `SELECT`,
+      `CRAFT PHOTOMETRY: NOT YET MODELLED` and its composed form (`viewRun.ts`), `ECLIPSE TEST` and
+      its four designations (`eclipseScene.ts`), `QUALITY HIGH` and `LOW` (`QUALITY_NAMES`);
+    - `CHEVRONS DESTINATION` (by Q2, as `TICKS TARGET`) and `SCENE CLOCK` (T16.k) are not;
+    - the widths are `lib/strokes.ts`'s (`lineScale` the larger of 2 and the ratio,
+      `markStrokeDevicePx` the larger of 2 and 1.5 × the ratio, 2.56 at 0.78125) and
+      `STROKE_PX`'s 1 and 2 px orbits; the black is `CLEAR_COLOUR`'s; the cross-section is
+      `CROSS_SECTION_ALONG_PX` (√½ px), with T16.g's exclusion, `DASH_MARGIN_PX` and
+      `CUT_END_MARGIN_PX` (1 px); the 1% is `PAIR_TOLERANCE`;
+    - the chevrons are `destinationChevrons` (above, below, left, right, pointing in, arms at 45°,
+      each `BRACKET_ARM_SHARE` of the side), the clearances `LABEL_TEXT_CLEARANCE_REM` (0.25) and
+      `LABEL_NEIGHBOUR_CLEARANCE_REM` (0.5), the places `DESTINATION_LABEL_PLACES`, and the rise
+      `destinationLabelRisePx`;
+    - the 15/16 is `contrast.py`'s documented canvas peak; at `--coverage 0.9375` 21 of the 24
+      text pairs pass and the three the Colour text names fail (5.47, 5.965 and 5.47:1);
+    - `TEST_HULL`'s plate is 1 m square and 1 m before the eye (`hull.ts`), `METER_TIMEOUT_S` is
+      0.5 s, and `ECLIPSE TEST`'s camera stands 20,000 km above its planet.
+  - **Not taken** (the plan-conformance review's consider): "or before anything is metered" in
+    `ENABLE`'s held-back cases in the commanding bullet and its row. The status row states it, and
+    "with nothing to meter" covers a window in which nothing has been metered.
+  - **Gate.** Prettier on the guide and both plans; the console-ux skill's lint (no renderer file
+    changed), contrast (every pairing passes) and glyphs (`×`, `·` and `°` in both faces). No
+    vitest and no `just ci`: the bullet's acceptance is Prettier and the scripts (the Day 2
+    protocol).
+  - **Reviewed** by the UX reviewer, on the guide edit itself, and the plan-conformance reviewer.
+    - **UX:** two must-fixes (the window's kept reading; the chevrons' end margin), both applied
+      and confirmed resolved on re-review; its should-fixes (`SCENE CLOCK`'s builder and its place
+      in the Views list; its form) applied or put to the owner; its considers: the cut's reason
+      taken, and two left to the owner (below).
+    - **Plan conformance:** no must-fix. Its should-fixes are taken (the window, `SCENE CLOCK`'s
+      builder, the designations clause's tag, this entry), with its considers but one (above):
+      the legend's builder in its tag, and the addendum-C commit's stale pointer and two long
+      lines.
+  - **Open, for the owner, with the draft:**
+    - the Colour bullet's open ends, which widen the ruled "a dash … from its ends";
+    - the kept reading: for up to 0.5 s after the image comes back from the wireframe,
+      `INHIBITED · NO IMAGE TO METER` stands beside a drawn image (the orchestrator's ruling on
+      T16.b, now stated in both rows);
+    - `SCENE CLOCK ×100` against a unit rate beside `RUN 1 d/s`, and whether it takes a row of its
+      own;
+    - `SELECT`, a verb where the style control's legend names its setting (`STYLE`); the plan's
+      other option, no row and the reason a group's legend needs none, stands;
+    - `NOT YET MODELLED`'s gloss, "this generator version does not compute it", which the craft
+      note no longer fits;
+    - T16.h's crops for the chevrons and raised labels (`.git/rm23-scratch/r07-views/t16h/` and
+      `t16h-fu/crops/`) and T16.e's silhouettes (`t16e/`), for the look the drafts describe.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the
@@ -7094,8 +7241,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         behind the star";
       - the designations row: "… `ECLIPSE TEST`'s Sun-like star, Earth-sized planet, Moon-sized
         moon and Jupiter-sized giant …".
+
+      _Drafted by R07.T16.c, as written here, each tagged T10.c's (the orchestrator's ruling)._
     - The label block does not state a kept scene's clock rate: `TIME` runs a hundred times fast
-      here with nothing saying so.
+      here with nothing saying so. _Ruled by the orchestrator (2026-10-06): drafted in T16.c,
+      `SCENE CLOCK ×100`; the line is split off as R07.T16.k._
     - Whether a free camera in the planet's frame stands for the plan's "ship in a moon's
       penumbra".
 - **The photorealistic view's per-draw cost, investigated** (2026-10-06; the shading lane, from
