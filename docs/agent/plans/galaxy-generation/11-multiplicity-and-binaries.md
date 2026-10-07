@@ -1558,11 +1558,14 @@ passes its four retention bands, change the default here with the bump. Acceptan
 This plan changes generated output in T1.d, T2.c, T2.d, T6, T7, T8, T10 and T15, each with its own
 bump and regenerated goldens. T11 moves output too, as built: a paired star's summary is its pair's
 state (round 9c, `bin5b`, whose T2.d, T7 and T11 take one bump in the orchestrator's version 16
-batch). T4.g and T4.h move output too, as built: T4.g in P14 Phase J's version 20 batch, T4.h
-(the early AGB's core radius and remnant at SSE's τ) in the version 21 batch with P14.T47.e.
-T4.i and T4.j move output too, in the version 21 batch with T4.h, 9a0950e's fixes and P14.T47.e.
-T4.k moves output too, in the version 21 batch with them (rulings p11-supernova-pins and
-p11-t4k-faults); T4.l moves it at version 22, with its own bump. T1.d
+batch). T4.g and T4.h move output too, as built: T4.g in P14 Phase J's version 20 batch. T4.h
+(the early AGB's core radius and remnant at SSE's τ), 9a0950e's protostar and build-age fixes,
+T4.i, T4.j and T4.k (rulings p11-channels, p11-supernova-pins and p11-t4k-faults) took version 21
+together, with P14.T47.e and P14.T13.c's Bond albedo, in one bump (Phase J lane, 2026-10-06; Risks,
+"The 20 → 21 bump, as built"). Each was committed with its goldens blessed at 20, and the bump
+re-blessed them at 21 without moving a value. T4.l moves output at version 22, with its own bump,
+and T4.m rides it (ruling p11-c2-swell). At 21, `just fit-check` finds R06's
+`sky_binary_light_c`, `_d` and `_e` stale until their refit, the next task. T1.d
 moves every star once, because the mean mass per system changes
 the system count (plan 02 lists it among its known future bumps). After that no primary moves: IDs,
 positions, primary masses, ages, primary draws, death times and kicks are untouched, except that T7
@@ -3754,3 +3757,59 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - T4.k's collapse invariants skip capped timelines, as the 10³ suites assert none.
   - BSE keeps the accretor's own core and gives it the step's net gain as envelope, behind a gate
     (`evolv2.f` 1480–1491): P11.T4.m's rule, which removes both caps.
+- **The local V light is low, and the pair light (a pointer from rendering plan R06, 2026-10-06,
+  `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
+  the fixture's V light is 26% under Flynn et al. 2006's 0.056 ± 10% L☉ pc⁻³ (plan 02's Risks,
+  "The local V light is low"). A calibration finding for plans 02 and 06, and for this plan through
+  the pair light: R06's luminosity function is the generator's own quadrature of IMF × SFH ×
+  tracks, with R06.T5.d's pair correction drawn by this plan's laws. A fix is a
+  `GENERATOR_VERSION` change.
+- **The 20 → 21 bump, as built** (Phase J lane, 2026-10-06; decision-p11-t4k-faults §4). P14.T13.c's
+  Bond albedo (`p14-albedo`'s two commits, cherry-picked after T4.k) and three merges of
+  `rendering-and-planets` (to 33f609c4) come first. Then one `feat(sim)` commit bumps
+  `GENERATOR_VERSION` to 21, with its `assert_eq!`, and re-blesses every golden at 21
+  (`HYPERION_BLESS=1 cargo nextest run --workspace` under the heavy lock).
+  - _The bump moves no value itself._ Against the merge before it, `golden_diff` shows 102
+    header-only files and `galaxy_parameters`' own `generator_version` field. The six surface
+    goldens keep `TEST_PLANET_VERSION`.
+  - _Against 97c969c_, the branch's last version 20, whose goldens integration still holds bit for
+    bit: 35 files moved, 1 new, 67 header-only. Only the held commits touch a golden; no merge
+    does.
+
+    | Commit              | Goldens moved                                                                                                                                                                                                                                          |
+    | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+    | ee47311, P11.T4.h   | 26 galaxy, gas, feature, catalogue, query, placement, planetary-context and server goldens (the galaxy chain at the last bits, through `fates::mean_present_mass`); `stellar/early_agb_remnant` (new); its share of `binary_timelines` and `summaries` |
+    | 9a0950e             | `binary_timelines` (all 1,000 digests); `summaries` (two black holes by an ulp)                                                                                                                                                                        |
+    | 3a52ca8, P14.T47.e  | `photometry/templates` (528 values); the Earth photometry of `close_binary`, `filler_c`, `solar_like` and `wide_binary`                                                                                                                                |
+    | ce69992, P11.T4.i   | `binary_timelines` (655 digests); `summaries` (one white dwarf)                                                                                                                                                                                        |
+    | 1e47d16, P11.T4.j   | `binary_timelines` (21 digests)                                                                                                                                                                                                                        |
+    | 3b55013d, P11.T4.k  | `binary_timelines` (55 digests)                                                                                                                                                                                                                        |
+    | f7b6b4eb, P14.T13.c | 56 values: `derive_body` and five planetary systems                                                                                                                                                                                                    |
+    | 1845d20, cdebae44   | none                                                                                                                                                                                                                                                   |
+
+    In all, `binary_timelines` moves all 1,000 digests: 372 in place, and 628 with a new segment
+    count in their label. `summaries` moves 29 values and one relabelled death. T47.e and the
+    albedo share 8 of `close_binary`'s 72 moved values and 2 of each other system's 18.
+
+  - _Two of R06's pins outside the goldens move too._ Integration's tests hold them, and this
+    branch's commits had been blessed without those tests. Each was bisected on integration
+    (a50d8a73) with each held commit's code applied in turn, then re-pinned in the bump:
+    - `sky::luminosity`'s three build fingerprints move with T4.h alone;
+    - `sky_census`'s pinned merger 0x4204_6c99_ff00_000a moves with T4.i alone. Its pair merges at
+      58.4 Myr, not 144.2 Myr, and is now a 1.12 M☉ core-helium-burning giant. Census and oracle
+      still agree.
+
+    R06's Risks, "Generator version 21", has the detail.
+
+  - _Fitted tables._ At 21, `just fit-check` reports `sky_binary_light_c`, `_d` and `_e` stale,
+    since their probes read the binary engine. `hyperion-fit`'s `the_committed_tables_are_fresh`
+    fails with them, so integration's `just ci` cannot pass at 21 until R06 refits them. Every other
+    table is fresh.
+  - _Open, for the orchestrator (the determinism auditor's must-fix)._ The refit moves the sky's
+    output: R06's luminosity tables, and so the three fingerprints again. For (seed, 21) to name one
+    output, the refit should land in version 21, at `--since 21` on this branch, before the batch
+    reaches integration. The alternative is a bump of its own, to 22, which moves T4.l to 23.
+  - _Gate._ fmt; workspace clippy, natively and on wasm32-wasip1 (base, surface, sim, testkit);
+    `just cross-clippy`. Under the heavy lock: the non-bless workspace run, 3,807 of 3,808 (the
+    fit test above fails); the doctests; the slow binary suites, 11 of 11; the R06 census, 187 s.
+    The determinism auditor finds the bump itself clean.

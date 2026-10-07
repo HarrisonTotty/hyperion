@@ -1,4 +1,4 @@
-# generator_version = 20
+# generator_version = 21
 # every template's law at 1 degree steps for L in {0, 0.5, 1}, and its q, in B, V, R
 template moon share=1.0 valid_to=2.6179938779914944 s=1.0,1.0,1.0
 l=0.0 q=0.6259978412998671,0.6259978412998671,0.6259978412998671

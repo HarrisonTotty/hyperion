@@ -5339,3 +5339,28 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     are counted twice. P09.T2.c alone would take φ of each population out of the sky and its
     band. That is about nine in ten of the O and early-B stars, since φ_young stays near 0.9
     until associations dissolve from 30 Myr.
+- **Generator version 21 (the galaxy plans' Phase J lane, 2026-10-06; R06's code is unchanged,
+  two of its test pins move).** The 20 → 21 bump lands plan 11's P11.T4.h–k, 9a0950e's protostar
+  and build-age fixes, and plan 14's P14.T47.e and T13.c (galaxy plan 11's Risks, "The 20 → 21
+  bump, as built"). Two of this plan's pins move with them. Each was bisected on
+  `rendering-and-planets` (a50d8a73), with each held commit's code applied in turn:
+  - `sky::luminosity`'s `SERIAL_FINGERPRINT`, `FULL_SERIAL_FINGERPRINT` and
+    `PAIR_SERIAL_FINGERPRINT` move with P11.T4.h alone: the early AGB's core and small-envelope
+    remnant at SSE's τ, which the single-star tracks read. They are now `0x5c11_7d93_64a9_5339`,
+    `0xb581_e39e_74e3_414c` and `0xffe0_8298_a09d_eb2e`.
+  - `sky_census`'s `the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them` moves
+    with P11.T4.i alone, which starts a pair at its first arrival:
+    - 0x4204_6c99_ff00_000a's pair merges at 58.4 Myr, not 144.2 Myr. At the census time
+      (5.36 Gyr) the product is a 1.12 M☉ core-helium-burning giant at V 7.08, not a 1.23 M☉
+      first-giant-branch star at V 7.44. The test now takes each system's phase.
+    - 0x21fe_5648_7ff0_0001 merges at 107.3 Myr, not 136.0 Myr, and stays a 1.19 M☉ giant, now at
+      V 7.27, not 7.53.
+    - Census and oracle still agree star for star. Both stars stay brighter than T8.b's bound at
+      their primaries' mass and within T16.b's.
+  - **Stale at 21:** `sky_binary_light_c`, `_d` and `_e`. `just fit-check` reports each one's
+    probes moved: `cell([Fe/H] 0, age bin 21).light`, `(…, 16).light` and `(…, 11).light`. So
+    `hyperion-fit`'s `the_committed_tables_are_fresh` fails, and `just ci` cannot pass until the
+    refit. The refit moves the three fingerprints again, and T5.e's slow tests re-run after it.
+    At version 20 it took C 1,166 s on 8 threads, D 637 s on 8 and E 1,797 s on 14, under loads
+    of 25–45 (T5.d's as-built entry). `sky_envelope`, `star_colour` and the five reddening tables
+    are fresh.

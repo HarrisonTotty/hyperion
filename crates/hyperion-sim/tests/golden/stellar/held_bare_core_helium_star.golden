@@ -1,4 +1,4 @@
-# generator_version = 20
+# generator_version = 21
 system = 0x81fd865fd000000f
 [0] NeutronStar
 [0] mass = 0x3ff7c21e7638e5d8  # 1.4848923318917198

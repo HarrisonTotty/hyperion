@@ -262,13 +262,21 @@ fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
 
 /// T8.e's two merged giants near the Sun, which its oracle found the census missing (R06's Risks,
 /// "Merger products outshine the flux bound until T16.b"), listed at the eye's cut, 7.95: in B,
-/// a 1.19 M☉ giant of a 0.64 M☉ primary at V 7.53 from 354 ly; in C, a 1.23 M☉ giant of a
-/// 0.76 M☉ primary at V 7.44 from 620 ly.
+/// a 1.19 M☉ giant of a 0.64 M☉ primary at V 7.27 from 354 ly; in C, a 1.12 M☉
+/// core-helium-burning giant of a 0.76 M☉ primary at V 7.08 from 620 ly. Before P11.T4.i (the
+/// integration branch's version 20) the second was a 1.23 M☉ giant on its first giant branch at
+/// V 7.44, and the first was at V 7.53. T4.i, which starts a pair at its first arrival on the main
+/// sequence (generator version 21), merges the first pair at 107.3 Myr rather than 136.0 Myr and
+/// the second at 58.4 rather than 144.2 Myr, so at the same age the second is past its helium
+/// flash.
 #[test]
 fn the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them() {
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
-    for raw in [0x21fe_5648_7ff0_0001, 0x4204_6c99_ff00_000a] {
-        pinned_merger(raw, &query, Phase::FirstGiantBranch);
+    for (raw, phase) in [
+        (0x21fe_5648_7ff0_0001, Phase::FirstGiantBranch),
+        (0x4204_6c99_ff00_000a, Phase::CoreHeliumBurning),
+    ] {
+        pinned_merger(raw, &query, phase);
     }
 }
 

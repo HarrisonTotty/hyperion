@@ -2663,25 +2663,30 @@ mod tests {
     /// made by the serial loop before the job split (fae1c11), so neither the split nor its stages
     /// changed a bit. T5.d moved it to `0x8c44_443c_67ac_13bf` twice over: by the correction's
     /// values, and by [`bits`] hashing each snapshot's applied light, its error and its clamped
-    /// light. R06.T5.e moved it here (decided 2026-10-05, `decision-r06-t5e-gate-2.md`): by its
-    /// panel edges at the tracks' phase ends, one grid per stage, and by its node rule,
-    /// [`MassNodes::Scaled`]. A refit of the `sky_binary_light_*` tables moves it again, as it
-    /// moves [`FULL_SERIAL_FINGERPRINT`].
-    const SERIAL_FINGERPRINT: u64 = 0xe56b_4376_5fe8_1768;
+    /// light. R06.T5.e moved it to `0xe56b_4376_5fe8_1768` (decided 2026-10-05,
+    /// `decision-r06-t5e-gate-2.md`): by its panel edges at the tracks' phase ends, one grid per
+    /// stage, and by its node rule, [`MassNodes::Scaled`]. Generator version 21 moved it here, by
+    /// plan 11's P11.T4.h alone (the early AGB's core and small-envelope remnant at SSE's τ, which
+    /// the single-star tracks read; the rest of the version-21 batch leaves it). A refit of the
+    /// `sky_binary_light_*` tables moves it again, as it moves [`FULL_SERIAL_FINGERPRINT`].
+    const SERIAL_FINGERPRINT: u64 = 0x5c11_7d93_64a9_5339;
 
     /// [`fingerprint`] of the same halo build under [`BuildOptions::FULL`], the reference the
     /// shipped nodes are measured against: R06.T5.e's panels at 16 nodes a panel (decided
     /// 2026-10-05). It is new with T5.e's panel edges, which moved it from T5's
-    /// `0x8c44_443c_67ac_13bf`; a refit of the `sky_binary_light_*` tables moves it again.
-    const FULL_SERIAL_FINGERPRINT: u64 = 0xa022_ae9e_49f0_c996;
+    /// `0x8c44_443c_67ac_13bf` to `0xa022_ae9e_49f0_c996`, and P11.T4.h moved it here at generator
+    /// version 21, as it moved [`SERIAL_FINGERPRINT`]; a refit of the `sky_binary_light_*` tables
+    /// moves it again.
+    const FULL_SERIAL_FINGERPRINT: u64 = 0xb581_e39e_74e3_414c;
 
     /// [`fingerprint`] of the bulge's and the long bar's coarse build in
     /// `parallel_build_equals_serial`, under [`BuildOptions::STANDARD`]'s other options: their
     /// stages read the thin discs' young edges too, so it pins the search's pre-main-sequence
     /// ends and the deaths of intermediate-mass stars (some 5 M☉ at the 10⁸-year edge, which
     /// reach the white dwarf through the post-AGB crossing), which the halo's old edges do not
-    /// (R06.T5.e). It moves with [`SERIAL_FINGERPRINT`].
-    const PAIR_SERIAL_FINGERPRINT: u64 = 0x9bc9_1279_f62c_9962;
+    /// (R06.T5.e). It moves with [`SERIAL_FINGERPRINT`]: P11.T4.h moved it from
+    /// `0x9bc9_1279_f62c_9962` at generator version 21.
+    const PAIR_SERIAL_FINGERPRINT: u64 = 0xffe0_8298_a09d_eb2e;
 
     #[test]
     fn parallel_build_equals_serial() {

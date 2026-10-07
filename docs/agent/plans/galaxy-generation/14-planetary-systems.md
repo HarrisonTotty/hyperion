@@ -3469,12 +3469,13 @@ it:
 - Drafted for the owner (R07.T1, Phase J): P14.T46 makes one bump for the moment of inertia, the
   rotation and figure sections and their pins, and one additive protocol change; P14.T47's
   photometry rides in it (decision-p14-phase-j). Neither adds a draw or a domain tag.
-- P14.T47.e (Earth after Robinson 2026) rides in the 20 → 21 bump with P11.T4.h and plan 11's
-  protostar and build-age fix (decision-r07-earth-albedo); its goldens are blessed at 20 until that
-  bump, which only flips the version. It adds no draw or domain tag.
+- P14.T47.e (Earth after Robinson 2026) took version 21 in the 20 → 21 bump with P11.T4.h and
+  plan 11's protostar and build-age fix (decision-r07-earth-albedo), and with P11.T4.i–k. Its
+  goldens were blessed at 20 until that bump, which only flipped the version (Phase J lane,
+  2026-10-06; plan 11's Risks, "The 20 → 21 bump, as built"). It adds no draw or domain tag.
 - P14.T13.c's Bond albedo (the temperate state 0.306 → 0.294, with the `reference_bond` of mars and
-  earth; decision-p11-t4k-faults) rides in the same 20 → 21 bump, blessed at 20 until then. It adds
-  no draw or domain tag.
+  earth; decision-p11-t4k-faults) took version 21 in the same bump: 56 values in six goldens,
+  blessed at 20 until then. It adds no draw or domain tag.
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
   pulsar-planet probability, `SATELLITE_STABILITY_FRACTION`, the white dwarf pollution fit.
