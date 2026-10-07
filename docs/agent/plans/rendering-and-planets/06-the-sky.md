@@ -199,8 +199,13 @@ pub fn band_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
 // sky::limits (Design notes 4 and 5)
 pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
     eye: &EyeObserver) -> Magnitudes;              // coarse pre-pass, darkest texel, +0.45 +0.1
-pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, band: &mut [BandTexel],
-    listed: &[SkyStar]);                                          // glare, then V_lim per texel
+pub struct Glare { /* each listed star's direction, photopic and scotopic illuminance at the eye
+    after its own reddening */ }                                  // R06.T9.c, as built
+impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar]) -> Self; }
+pub fn limit_rows(eye: &EyeObserver, spec: &BandSpec, glare: &Glare, face: CubeFace,
+    rows: Range<u16>, texels: &mut [BandTexel]);                  // glare, then V_lim per texel
+pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
+    band: &mut [BandTexel]);                                      // limit_rows over six faces
 
 // sky::disc (Design note 16)
 pub struct PowerTwo { /* c: f64, alpha: f64 */ }
@@ -1619,7 +1624,9 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   2026-10-06, `decision-r06-t9b-band.md`; the fixture, whose poles are about 0.3 mag faint, Risks,
   "The galaxy's local light is low", gives about 6.53 and 7.71); a texel within 1° of a V = −1.5
   star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of the
-  listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`.
+  listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`. As built
+  (Risks, "Deviations in T9.c, as built"): `Glare::of_listed` resolves each listed star's
+  reddened light once a census, and `limit_rows` sets a job's rows, as `band_rows` takes them.
 - **R06.T9.d The eye's cut.** `sky::limits::eye_cut` (Design note 5): the coarse pre-pass at 16²
   texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit, clamped by
   `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), +0.45 and +0.1, and one repeat when the cut deepens. Tests: the cut is the darkest pre-pass texel's
@@ -2068,7 +2075,9 @@ systems layers C to E hold; the candidates the binary rule of T16.b costs; check
 counts against `range_500ly_floor_d` (37,675 systems at version 15, re-measured at the current version). Add goldens:
 `crates/hyperion-sim/tests/golden/sky/census_near_sun.golden`, the census of a pinned observer near
 the Sun to V 7 (IDs, star indices, V to 10⁻⁶ mag), `sky/band_face_row.golden`, one band face
-row, and `sky/colour_reddened.golden`, every field of `reddened` at A_V 0.5, 2 and 5, off the
+row with its eye limits after `limit_rows` against the glare of a census with stars within 1° and
+near 100° of its texels (the limit map's bits across targets, which no other golden pins;
+determinism audit of R06.T9.c), and `sky/colour_reddened.golden`, every field of `reddened` at A_V 0.5, 2 and 5, off the
 nodes at 1, 7, 17 and 25, and held at 40, for a few points on both grids (the per-star reddening
 T11's wire carries, which no other golden pins; determinism audit of R06.T9.e and the band
 ruling's addendum), read by the testkit's golden harness. Record the A_V distribution of the
@@ -2644,7 +2653,9 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   until plan 06 owns it. Each is labelled or tallied.
 - **Glare double count.** F = 1.4 was fitted on real fields that include some glare, and the map
   adds glare explicitly; the error is small against the model's own 0.1–0.2 mag, and a field factor
-  setting absorbs it.
+  setting absorbs it. Its likeliest part is the far field (science check of R06.T9.c): all the stars brighter than V
+  8.15 sum to about V −5.4 for the real sky, which spread evenly veil the fixture's poles by some
+  12%, −0.04 to −0.06 mag on their limits.
 - **The camera model's defaults** are a full-frame video camera of today at high gain; open
   question 16 leaves its parameters open, and the performance runs and the owner's sense of the
   main screen may move them. They are one table in `cameraLimit.ts`. The model is optimistic for
@@ -4047,8 +4058,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **Cross-target bits** rest on review (determinism audit: nothing to fix) until T17's
     `sky/band_face_row.golden`, which should take a `CompleteTo::of_caps` radius inside its rays
     and a census with an overflow, so that the radius nodes and the points are pinned too.
-  - Not built: `eye_limit` stays `None` (T9.c sets it, and will need a crate-visible setter);
-    `sky/limits.rs` (T9.c, T9.d).
+  - Not built: `eye_limit` stays `None` (T9.c sets it, and will need a crate-visible setter;
+    built in T9.c as `set_eye_limit`); `sky/limits.rs` (T9.c, T9.d).
 - **The band's conservation (found in T9.b; for the orchestrator).** Against the band of no census
   (complete nowhere, all of the light), the listed and band light near the Sun to V 8 fall short by
   1.12% complete to 100 ly and 1.79% to 200 ly: the realised census lists 79% and 82% of the light
@@ -4294,6 +4305,89 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     0.820 for the Sun, 0.84–0.88 for 5,000–5,800 K, 0.81, 0.77, 0.70 and 0.64 from 4,500 to
     3,000 K, at A_V 2 −0.36 and −0.67 to −0.77; item 3, and so the solar camera range is now
     0.84–0.92); and every column divides by plan 07's sightline A_V (item 4, Design note 6).
+- **Deviations in T9.c, as built (2026-10-06).** `sky::limits::{Glare, limit_rows, limit_map}`
+  as Design note 4 sets the glare out, with these differences.
+  - **The signatures.** The sketch's `limit_map(eye, spec, band, listed)` cannot place a star
+    without the observer, and a server runs the band's rows as jobs (T11.c). So
+    `Glare::of_listed(observer, listed)` resolves each listed star once a census: its direction,
+    its photopic illuminance after its own reddening (`band::unextinguished_lux`, shared with the
+    overflow's points, times the photopic transmission) and its scotopic light, that times
+    `colour().reddened(a_v()).sp_ratio()`. It debug-asserts the census's order (`sky_order`), in
+    which the veil is summed. `limit_rows(eye, spec, glare, face, rows, texels)` sets the eye
+    limits of a job's rows, in `band_rows`' order, and `limit_map(eye, spec, glare, band)` runs it
+    over the six faces. The default `Glare` holds no star (T9.d's pre-pass). The overflow does not
+    glare: its light is in its texel already, as E ÷ Ω, about 2,000 sr⁻¹ times E at 64², against
+    a texel mean of its own glare of about 560 sr⁻¹ times E (science check). A star at the observer's position adds none.
+  - **The background.** A texel of band luminance B and ratio ρ is seen against B′ = B + Σ E★
+    K(θ★) at ρ′ = (ρ B + Σ ρ★ E★ K(θ★)) ÷ B′, K CIE 146's veil per lux. In a scotopic background
+    that is exactly Design note 4's rod weighting, ρ★ ÷ 1.408; in a mesopic one it is MES2 over the
+    whole background at one adaptation (MES2 is linear in the light at a fixed m), where `eye.rs`'s
+    example had weighed the veil at the band's own m (under about 0.03 mag apart). The example and
+    `blackwell_equivalent_factor`'s doc now take the mixture. With no veil a texel's background is
+    its own luminance and ρ, bit for bit. ρ′ is held within 0.01–100 and B′ at 10¹² cd m⁻²
+    (`SpRatio::MIN`, `SpRatio::MAX` and `SkyBackground::MAX_LUMINANCE`, new), which no starlight
+    reaches. The band's luminance, chroma and ρ are unchanged.
+  - **θ** is from the texel's centre, the direction its ray takes, clamped at 0.1° by
+    `veiling_luminance`. A cosine test skips the sources past 100.01° and leaves the 100° cut to
+    `veiling_luminance`, so the two never part (a test pins both sides).
+  - **Also:** `BandTexel::set_eye_limit` (crate) and a test-only `BandTexel::of_light`;
+    `eye::GLARE_MAX_ANGLE_DEG` crate-visible.
+  - **The tests** (`cargo test -p hyperion-sim sky::limits`, 9; about 55 s on two threads, most of
+    it the tables, a 16² band and a census within 100 ly):
+    - the identity: every texel of the near-Sun band at 16², cut 8.15, against 1,522 sources (the
+      1,520 stars the census lists to V 8.15 within 100 ly, and two placed: V −1.5 0.05° from a
+      texel's centre, read at 0.1°, and V −9 0.3° from another's, whose two texels are mesopic),
+      within 3.1 × 10⁻¹¹ mag of the definition written again with `atan2` angles and each
+      channel's own `veiling_luminance`;
+    - the medians at cut 8.15, 16² faces, the reddened band complete everywhere with no census:
+      against the band alone 6.545 over 128 texels in the band (|b| under 5°) and 7.693 over 8 at
+      the poles (|b| over 80°); with the glare of the 1,520 stars, 6.544 and 7.668. The ruled
+      6.5 ± 0.20 and 7.55 ± 0.22 (the ruling's estimate for the fixture, 6.53 and 7.71). The census
+      within 100 ly stands in for the final reply's, too dear for a unit test: its brightest stars
+      are the nearest, but the far field of the whole list is larger (see "Glare double count");
+    - a V −1.5 star of Sirius's colour 0.5° from a 64² texel's centre: 5.65 against its
+      neighbours' mean 7.06 towards the north galactic pole, 5.63 against 6.51 in the plane (the
+      science check reproduced 5.69 / 7.09 and 5.66 / 6.45);
+    - a field factor of 2 moves every limit by −2.5 log₁₀(2 ÷ 1.4) to 10⁻⁹, as the client's
+      `fieldFactorOffsetMag` assumes;
+    - the map reads only the band's light and the listed stars: row splits give the same bits,
+      the chroma does not enter, with no glare each limit is the band's own bit for bit, and a
+      texel with no light and no glare is seen to Crumey's clamp;
+    - the glare reads each star's reddened light (all 1,520 near-Sun stars lie behind some dust);
+    - the reach: 99.995° veils by exactly its `veiling_luminance`, 100.005° adds exactly nothing,
+      and 100.02° and 120° are not read; two refusals.
+  - **The cost** (a probe, not committed; dev build, the sim at opt-level 2, load 5–8,
+    provisional): 19 ns a texel–star pair, so a 64² band against 4,824 stars (V 8.15 within
+    200 ly) takes 2.25 CPU-s, and `Glare::of_listed` 0.6 µs a star. The map is texels × listed:
+    some 14 CPU-s at the eye's cut with the final caps if the fixture lists 3 × 10⁴ stars there
+    (an estimate), and about 140 CPU-s at `MAX_N_MAX` (300,000, a camera's cut with the eye
+    open), the whole first-sky budget. For T17 to measure. Every listed star veils its texel
+    within 0.1° at some 10⁴ sr⁻¹ times its E, so dropping faint stars changes the map unless the self-veil
+    below is ruled first; a far field from a coarse map is the other lever.
+  - **Cross-target bits** rest on review (determinism audit: nothing to fix, GENERATOR_VERSION 20,
+    no golden moves) until T17's `sky/band_face_row.golden`, which now also pins the row's eye
+    limits against a census's glare.
+  - **Open, for a ruling: a star veils its own texel.** Design note 4 sums every listed star and
+    T9.c samples at the texel's centre, so a listed star near its texel's centre veils that texel,
+    and the client gives every star of a texel its limit (`view/sky/limits.ts`). Crumey's eq. 34
+    fits Blackwell's point-source thresholds, which already hold the target's own scattered light;
+    CIE 146's equation is for a source 0.1°–100° from the target. The science check, on the
+    fixture's median band at 64²: a star 0.01, 0.1, 0.3 and 0.5 mag above the limit culls itself
+    within 0.49°, 0.22°, 0.15° and 0.12° of the centre at the poles (0.28° and 0.13° for the
+    first two in the plane, none beyond), up to 0.77 mag above it within 0.1° (0.20 in the
+    plane). Averaged, that is a limit about 0.055 mag shallower at the poles and 0.015 in the
+    plane, some 4–5% and 1.5% of the visible stars lost, on a grid of texel centres. Options: (a)
+    keep it as stated (built); (b) per-star self-exclusion: the server gives each listed star the
+    difference ΔV★ ≥ 0 between its texel's limit without its own veil and with it, in which F
+    cancels, carried on the star's wire eye offset (Design note 17) with no wire change (the
+    science check's lean); (c) a texel mean of the veil over Crumey's summation area, about one
+    64² texel (eq. 63: 37.6′ radius at μ 21.83), smoother but still about 0.05 mag biased, best
+    with (b).
+  - **Not settled by the sources** (science check): CIE 146 itself was not reached, and the
+    equation was checked against a secondary quotation; whether its E is the illuminance normal
+    to the star, as built, or on the pupil's plane (E cos θ, nothing past 90°), which would make
+    the far-field veil 0.71 times as large (at the poles −0.041 mag rather than −0.056 for the
+    whole list; nothing within about 20° of a star moves).
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;

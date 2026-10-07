@@ -441,11 +441,32 @@ impl BandTexel {
         self.sp_ratio
     }
 
-    /// The eye's limit in the texel's direction, which the limit map sets (R06.T9.c); `None` until
-    /// then and where the eye was not asked.
+    /// The eye's limit in the texel's direction, which the limit map sets
+    /// ([`limit_rows`](super::limits::limit_rows), R06.T9.c); `None` until then and where the eye
+    /// was not asked.
     #[must_use]
     pub const fn eye_limit(&self) -> Option<Magnitudes> {
         self.eye_limit
+    }
+
+    /// Sets the eye's limit in the texel's direction: the limit map's.
+    pub(crate) const fn set_eye_limit(&mut self, limit: Magnitudes) {
+        self.eye_limit = Some(limit);
+    }
+}
+
+#[cfg(test)]
+impl BandTexel {
+    /// A white texel of photopic luminance `luminance`, cd m⁻², and S/P ratio `sp_ratio`, with no
+    /// eye limit: for the limit map's tests.
+    #[must_use]
+    pub(crate) const fn of_light(luminance: f64, sp_ratio: f64) -> Self {
+        Self {
+            luminance: CandelasPerSquareMetre::new(luminance),
+            chroma: [1.0, 1.0],
+            sp_ratio,
+            eye_limit: None,
+        }
     }
 }
 
@@ -476,25 +497,34 @@ fn dimmed(sums: [f64; 4], dust: &Reddened) -> Sums {
 }
 
 /// The five sums ([`Sums`]) of a star of colour `colour`, apparent V `v` after an extinction of
-/// `a_v`, lux: its photopic illuminance unextinguished, from V less the extinction and its
-/// `lux_per_v0`, times its colour, reddened by its own [`StarColour::reddened`] at `a_v`: each
-/// channel by its own transmission, the photopic and the scotopic light by theirs.
+/// `a_v`, lux: its photopic illuminance unextinguished ([`unextinguished_lux`]) times its colour,
+/// reddened by its own [`StarColour::reddened`] at `a_v`: each channel by its own transmission,
+/// the photopic and the scotopic light by theirs.
 ///
 /// The channels are the star's signed light, added to the texel before any lift into gamut, since
 /// light adds linearly: a channel's transmission times its unreddened colour is its reddened light
 /// exactly, because no row of the colour table is out of gamut unreddened. The texel lifts the
 /// total.
-///
-/// The census's V is M<sub>V</sub> + DM + `A_V` until R06.T8.k, which makes it the star's own V
-/// extinction ([`Reddened::v_extinction`]); this subtraction follows it there.
 #[must_use]
 fn point_lux(colour: &StarColour, v: Magnitudes, a_v: Magnitudes) -> Sums {
-    let light = illuminance_of_magnitude(v - a_v).value() * colour.lux_per_v0();
+    let light = unextinguished_lux(colour, v, a_v);
     let [red, green] = colour.red_green();
     dimmed(
         [light, light * red, light * green, light * colour.sp_ratio()],
         &colour.reddened(a_v),
     )
+}
+
+/// The photopic illuminance, lux, of a star of colour `colour` and apparent V `v` after an
+/// extinction of `a_v`, were there no dust: V less the extinction, through its `lux_per_v0`. Its
+/// photopic illuminance is this times its [`Reddened::photopic_transmission`] at `a_v`, as the
+/// band's overflow points and the limit map's glare take it.
+///
+/// The census's V is M<sub>V</sub> + DM + `A_V` until R06.T8.k, which makes it the star's own V
+/// extinction ([`Reddened::v_extinction`]); this subtraction follows it there.
+#[must_use]
+pub(super) fn unextinguished_lux(colour: &StarColour, v: Magnitudes, a_v: Magnitudes) -> f64 {
+    illuminance_of_magnitude(v - a_v).value() * colour.lux_per_v0()
 }
 
 /// The photopic illuminance of one L☉,V at 10 pc times (10 pc)² in ly², lux ly²: the band's K, so

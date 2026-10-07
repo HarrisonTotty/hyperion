@@ -110,7 +110,7 @@ const MAX_LUMINANCE: f64 = 1e12;
 /// CIE 146:2002's validity bounds of the glare angle, degrees: smaller angles are read as 0.1°, and
 /// a source beyond 100° adds no glare.
 const GLARE_MIN_ANGLE_DEG: f64 = 0.1;
-const GLARE_MAX_ANGLE_DEG: f64 = 100.0;
+pub(crate) const GLARE_MAX_ANGLE_DEG: f64 = 100.0;
 
 /// An [`EyeObserver`], an [`SpRatio`], a [`SkyBackground`] or a [`PhotopicWeight`] could not be
 /// built from the values given.
@@ -240,6 +240,10 @@ impl SpRatio {
     pub const BLACKWELL: Self = Self(BLACKWELL_SP_RATIO);
     /// The reference star of B − V = 0.7 ([`REFERENCE_SP_RATIO`]).
     pub const REFERENCE: Self = Self(REFERENCE_SP_RATIO);
+    /// The least ratio accepted, 0.01.
+    pub const MIN: Self = Self(SP_RATIO_RANGE.0);
+    /// The greatest ratio accepted, 100.
+    pub const MAX: Self = Self(SP_RATIO_RANGE.1);
 
     /// The ratio `value`.
     ///
@@ -272,6 +276,9 @@ pub struct SkyBackground {
 }
 
 impl SkyBackground {
+    /// The brightest luminance accepted, 10¹² cd m⁻².
+    pub const MAX_LUMINANCE: CandelasPerSquareMetre = CandelasPerSquareMetre::new(MAX_LUMINANCE);
+
     /// A background of photopic luminance `luminance` and S/P ratio `sp_ratio`.
     ///
     /// # Errors
@@ -400,7 +407,10 @@ pub fn mesopic_weight(background: &SkyBackground) -> PhotopicWeight {
 /// Blackwell's light, at photopic weight `photopic_weight`: the ratio of the two lights' MES2
 /// mesopic luminances, (m + (1 − m) ρ V′(λ₀)) ÷ (m + (1 − m) 1.408 V′(λ₀)) (see the
 /// [module](self) documentation). It is ρ ÷ 1.408, Crumey's eq. 6, when scotopic and 1 when
-/// photopic. The limit map weights each glare source's illuminance by it.
+/// photopic. A background of several lights, as the limit map's band and the veils of its stars
+/// are (R06.T9.c), is their photopic luminances' sum at the S/P ratio of their scotopic light over
+/// it: this weighting of each light at the whole background's m, since MES2 is linear in the light
+/// at a fixed m.
 #[must_use]
 pub fn blackwell_equivalent_factor(sp_ratio: SpRatio, photopic_weight: PhotopicWeight) -> f64 {
     let m = photopic_weight.0;
@@ -521,26 +531,29 @@ pub fn star_colour_offset(star: SpRatio, background: &SkyBackground) -> Magnitud
 /// # Examples
 ///
 /// The glare of a bright star 1° from a faint one is added to the band behind the faint one, in
-/// the band's own light, before its limit is taken; a red star is then seen to a brighter
+/// the star's own light (its scotopic veil the photopic one times its S/P ratio), before its
+/// limit is taken, as the limit map adds it (R06.T9.c); a red star is then seen to a brighter
 /// magnitude than the reference star:
 ///
 /// ```
 /// use hyperion_sim::sky::eye::{
-///     EyeObserver, SkyBackground, SpRatio, blackwell_equivalent_factor, illuminance_of_magnitude,
-///     luminance, mesopic_weight, naked_eye_limit, star_colour_offset, veiling_luminance,
+///     EyeObserver, SkyBackground, SpRatio, illuminance_of_magnitude, luminance, naked_eye_limit,
+///     star_colour_offset, veiling_luminance,
 /// };
 /// use hyperion_sim::units::{Degrees, Magnitudes, MagnitudesPerArcsec2};
 ///
 /// let eye = EyeObserver::default();
-/// let starlight = SpRatio::new(2.26)?;
-/// let band = SkyBackground::new(luminance(MagnitudesPerArcsec2::new(22.4)), starlight)?;
-/// // A V = −1.5 star of ratio 2.6, its veil weighed by the rods as the band's light is.
-/// let m = mesopic_weight(&band);
-/// let weight = blackwell_equivalent_factor(SpRatio::new(2.6)?, m)
-///     / blackwell_equivalent_factor(starlight, m);
-/// let glare = illuminance_of_magnitude(Magnitudes::new(-1.5)) * weight;
+/// let starlight = 2.26;
+/// let band = SkyBackground::new(
+///     luminance(MagnitudesPerArcsec2::new(22.4)),
+///     SpRatio::new(starlight)?,
+/// )?;
+/// // A V = −1.5 star of ratio 2.6, 1° away: the band's and the veil's light together.
+/// let glare = illuminance_of_magnitude(Magnitudes::new(-1.5));
 /// let veil = veiling_luminance(&eye, glare, Degrees::new(1.0)).ok_or("a valid glare")?;
-/// let glared = SkyBackground::new(band.luminance() + veil, starlight)?;
+/// let total = band.luminance() + veil;
+/// let ratio = (band.luminance().value() * starlight + veil.value() * 2.6) / total.value();
+/// let glared = SkyBackground::new(total, SpRatio::new(ratio)?)?;
 /// let limit = naked_eye_limit(&eye, &glared);
 /// assert!(limit < naked_eye_limit(&eye, &band));
 /// let red = limit + star_colour_offset(SpRatio::new(1.2)?, &glared);
@@ -843,6 +856,26 @@ mod tests {
             None
         );
         assert_eq!(magnitude_of_illuminance(Lux::ZERO), None);
+    }
+
+    #[test]
+    fn the_accepted_ranges_are_their_bounds() {
+        assert_eq!(SpRatio::new(SpRatio::MIN.value()), Ok(SpRatio::MIN));
+        assert_eq!(SpRatio::new(SpRatio::MAX.value()), Ok(SpRatio::MAX));
+        assert_eq!(
+            SpRatio::new(0.999 * SpRatio::MIN.value()),
+            Err(BuildEyeError::SpRatio)
+        );
+        assert_eq!(
+            SpRatio::new(1.001 * SpRatio::MAX.value()),
+            Err(BuildEyeError::SpRatio)
+        );
+        let brightest = SkyBackground::MAX_LUMINANCE;
+        assert!(SkyBackground::new(brightest, SpRatio::REFERENCE).is_ok());
+        assert_eq!(
+            SkyBackground::new(brightest * 1.001, SpRatio::REFERENCE),
+            Err(BuildEyeError::Luminance)
+        );
     }
 
     #[test]

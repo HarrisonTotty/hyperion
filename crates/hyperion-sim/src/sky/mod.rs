@@ -22,6 +22,8 @@
 //!   per-cell cache.
 //! - [`band`]: the light of the stars the census did not list, along rays from the observer: the
 //!   unresolved band.
+//! - [`limits`]: the naked eye's limit in every direction of the band, against its light and the
+//!   listed stars' glare: the limit map.
 //!
 //! Everything here only reads the galaxy: nothing changes generated output, and nothing draws a
 //! random word, except [`binary_light`]'s fit sampling, which generates systems of its own galaxy
@@ -35,6 +37,7 @@ pub mod colour;
 pub mod disc;
 pub mod envelope;
 pub mod eye;
+pub mod limits;
 pub mod luminosity;
 pub mod photometry;
 #[cfg(test)]
