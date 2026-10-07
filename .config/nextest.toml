@@ -43,8 +43,9 @@ test-group = "sky-tables"
 filter = "package(hyperion-sim) & test(=stellar::multiplicity::bound::tests::the_hierarchy_bound_holds_for_generated_systems)"
 threads-required = 4
 
+# R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
-filter = "package(hyperion-sim) & binary(=sky_census)"
+filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"
 threads-required = 8
 
 [profile.slow]

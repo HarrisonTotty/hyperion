@@ -836,8 +836,11 @@ pub struct TablesPlan {
 /// Whether a build adds the pair-evolved correction (R06.T5.d).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PairEvolution {
-    /// The fitted differences are added.
+    /// The fitted differences are added, the counts taking only their increase.
     Corrected,
+    /// The fitted differences are added, the counts taking them whole, deficit included: R06.T5.f's
+    /// test-only read ([`TablesPlan::with_full_pair_counts`]).
+    FullCounts,
     /// Every star is evolved alone: a galaxy of another mass function than the fit's.
     Ignored,
 }
@@ -1263,6 +1266,44 @@ impl TablesPlan {
         sums.added = job.end;
     }
 
+    /// This plan, assembling tables whose counts take R06.T5.d's whole pair-evolved difference,
+    /// deficit included: R06.T5.f's test-only read of the counts the census's pair-evolved stars
+    /// should show (decided 2026-10-06, `decision-r06-t9b-band.md`).
+    ///
+    /// The shipped tables' counts take only the increase, each edge the larger of the single-star
+    /// and corrected counts, made non-decreasing, so that the caps stay conservative; where mergers
+    /// and stripping remove stars they read high. These take each 1-mag bin's fitted count
+    /// difference whole, spread over its sub-bins as the shipped ones spread it, so a count
+    /// brighter than an edge may fall below the single-star one, and an edge's count below a
+    /// brighter edge's. Their light, colours and [`LuminosityFunction::pair_light`] are the
+    /// shipped tables' bit for bit, and a plan that takes no correction (a galaxy of another mass
+    /// function) is unchanged. Assembled from the same sums as the shipped plan (a [`BinSums`]
+    /// clones), they cost one more assembly, not another build. No reader in the sim uses them,
+    /// and nothing may serve or cache them: they are not the galaxy's tables, though they look it.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_full_pair_counts(mut self) -> Self {
+        self.pair_evolution = match self.pair_evolution {
+            PairEvolution::Corrected | PairEvolution::FullCounts => PairEvolution::FullCounts,
+            PairEvolution::Ignored => PairEvolution::Ignored,
+        };
+        self
+    }
+
+    /// This plan, assembling the single-star tables: every star evolved alone, without R06.T5.d's
+    /// pair-evolved correction. R06.T5.f's test-only read beside
+    /// [`with_full_pair_counts`](Self::with_full_pair_counts), so that the realised systems'
+    /// stars, each evolved alone, are held against the tables that assume it, and the fitted
+    /// difference against the realised one. Assembled from the same sums as the shipped plan;
+    /// like the full counts' tables, they are not the galaxy's, and nothing may serve or cache
+    /// them.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn without_pair_correction(mut self) -> Self {
+        self.pair_evolution = PairEvolution::Ignored;
+        self
+    }
+
     /// The tables from every bin's sums, in any order, once each has added all its nodes: each
     /// bin's functions are finished from its sums, then put in the tables' order.
     ///
@@ -1321,9 +1362,11 @@ impl TablesPlan {
     /// step, once every node is in and before the cumulative sums are taken; applied once per bin,
     /// it keeps the bits whatever order the stages ran in.
     fn correct_for_pairs(&self, sums: &mut BinSums) {
-        if self.pair_evolution == PairEvolution::Ignored {
-            return;
-        }
+        let counts = match self.pair_evolution {
+            PairEvolution::Corrected => binary_light::PairCounts::Excess,
+            PairEvolution::FullCounts => binary_light::PairCounts::Full,
+            PairEvolution::Ignored => return,
+        };
         let planned = &self.bins[sums.bin];
         let shift_now = self.time.since_epoch().as_julian_years_f64();
         for (&ago, bins) in EMITTED_AGO_YEARS.iter().zip(&mut sums.snapshots) {
@@ -1336,7 +1379,8 @@ impl TablesPlan {
                 if let Some(c) = binary_light::correction(layer, &weight_of, &planned.metallicities)
                 {
                     let b = &mut bins[layer_index(layer)];
-                    b.pair = binary_light::apply(&c, &mut b.light, &mut b.count, &mut b.colour);
+                    b.pair =
+                        binary_light::apply(&c, &mut b.light, &mut b.count, &mut b.colour, counts);
                 }
             }
         }
@@ -3194,6 +3238,95 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// R06.T5.f's test-only reads: from the same sums, tables with the full pair counts keep the
+    /// shipped tables' light, colours and applied correction bit for bit, and their counts are the
+    /// single-star counts (the plan without the correction) plus the whole fitted difference, of
+    /// which the shipped counts, at every edge, are the running maximum of the larger; layers
+    /// without a correction keep their counts. The halo's coarse build, as
+    /// `parallel_build_equals_serial` takes it, loses stars to pairs.
+    #[test]
+    fn the_full_pair_counts_keep_the_light_and_the_deficit() {
+        let galaxy = milky_way_galaxy();
+        let options = BuildOptions {
+            samples_per_phase: 2,
+            ..BuildOptions::STANDARD
+        };
+        let halo = component_of(galaxy, Population::Halo);
+        let plan = TablesPlan::new(galaxy, REFERENCE_TIME, &[halo], options, SAMPLE_JOB_NODES);
+        let mut sums = plan.bin_sums();
+        for stage in plan.stages() {
+            let samples =
+                plan.track_samples(plan.sample_jobs(stage).map(|job| plan.run_samples(job)));
+            for job in plan.accumulate_jobs(stage) {
+                plan.run_accumulate(&samples, job, &mut sums[job.bin]);
+            }
+        }
+        let shipped = plan.assemble(sums.clone());
+        let full = plan.clone().with_full_pair_counts().assemble(sums.clone());
+        let ignored = plan.without_pair_correction();
+        assert_eq!(ignored.pair_evolution, PairEvolution::Ignored);
+        // A plan that takes no correction is left as it is.
+        assert_eq!(ignored.clone().with_full_pair_counts(), ignored);
+        let single = ignored.assemble(sums);
+        let floats = |values: &[f64]| -> Vec<u64> {
+            values
+                .iter()
+                .map(|&v| hyperion_testkit::float::bits(v))
+                .collect()
+        };
+        let mut below_single = 0_u64;
+        for (k, ((s, f), one)) in shipped
+            .functions
+            .iter()
+            .zip(&full.functions)
+            .zip(&single.functions)
+            .enumerate()
+        {
+            let layer = Layer::ALL[k % LAYER_COUNT];
+            for ((a, b), c) in s.snapshots.iter().zip(&f.snapshots).zip(&one.snapshots) {
+                assert_eq!(
+                    floats(&a.light_fainter),
+                    floats(&b.light_fainter),
+                    "{layer:?}"
+                );
+                assert_eq!(
+                    floats(a.colour_fainter.as_flattened()),
+                    floats(b.colour_fainter.as_flattened()),
+                    "{layer:?}"
+                );
+                assert_eq!(
+                    floats(&[a.pair.light, a.pair.sigma, a.pair.clamped, a.beyond, a.dark]),
+                    floats(&[b.pair.light, b.pair.sigma, b.pair.clamped, b.beyond, b.dark]),
+                    "{layer:?}"
+                );
+                if !binary_light::LAYERS.contains(&layer) {
+                    assert_eq!(floats(&a.count_brighter), floats(&b.count_brighter));
+                    assert_eq!(floats(&b.count_brighter), floats(&c.count_brighter));
+                    continue;
+                }
+                let mut held = 0.0_f64;
+                for ((&shipped, &full), &single) in a
+                    .count_brighter
+                    .iter()
+                    .zip(&b.count_brighter)
+                    .zip(&c.count_brighter)
+                {
+                    held = held.max(single.max(full));
+                    assert!(
+                        (shipped - held).abs() <= 1e-12 * (1.0 + held),
+                        "{layer:?}: {shipped} shipped against {held}, the running maximum of \
+                         {single} single and {full} full"
+                    );
+                    below_single += u64::from(full < single - 1e-12 * (1.0 + single));
+                }
+            }
+        }
+        assert!(
+            below_single > 0,
+            "the halo's pairs remove stars at some edge"
+        );
     }
 
     /// The cells that carry most of `planned`'s correction error at light age `now`, each layer's

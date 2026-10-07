@@ -25,7 +25,9 @@
 //!   single-star light there (evenly where there is none) and the light of a sub-bin is held at
 //!   no less than zero; the counts take only the increase, each edge holding the larger of the
 //!   single and corrected counts, made non-decreasing. A galaxy whose mass function is not the
-//!   default takes no correction (a deviation recorded in the plan).
+//!   default takes no correction (a deviation recorded in the plan). R06.T5.f's test-only read
+//!   (`TablesPlan::with_full_pair_counts`) takes the whole count difference instead, deficit
+//!   included, to compare the realised sky's counts with.
 //!
 //! Ages below 10⁵ years (protostars, dark) and above 1.5 × 10¹⁰ years take no correction. The
 //! envelope and the caps' rule bound are not touched: they bound the brightest star, which binary
@@ -561,13 +563,27 @@ pub(crate) struct Applied {
     pub(crate) clamped: f64,
 }
 
+/// How [`apply`] corrects a snapshot's counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PairCounts {
+    /// The increase only, as the tables hold them (R06.T5.d): each edge takes the larger of the
+    /// single-star and corrected counts brighter than it, made non-decreasing, so that the caps
+    /// that read them stay conservative.
+    Excess,
+    /// The whole fitted difference, deficit included, neither held at the single-star count nor
+    /// made non-decreasing: R06.T5.f's test-only read of what the pairs do to the counts.
+    Full,
+}
+
 /// Applies `c` to one snapshot's bins (`luminosity`'s 0.05-mag bins from the brightest edge: the
-/// light, the counts and the colour sums), returning what it did.
+/// light, the counts and the colour sums), returning what it did. The light and colour are the
+/// same whatever `counts` says.
 pub(crate) fn apply(
     c: &Correction,
     light: &mut [f64],
     count: &mut [f64],
     colour: &mut [[f64; 4]],
+    counts: PairCounts,
 ) -> Applied {
     let mut applied = Applied {
         sigma: c.sigma,
@@ -599,7 +615,16 @@ pub(crate) fn apply(
             applied.light += light[k] - was;
         }
     }
-    // Counts: the increase only, edge by edge from the brightest, then non-decreasing.
+    match counts {
+        PairCounts::Excess => count_excess(c, count),
+        PairCounts::Full => count_whole(c, count),
+    }
+    applied
+}
+
+/// The counts' share of `c`, the increase only: edge by edge from the brightest, each the larger
+/// of the single-star and corrected counts brighter than it, then non-decreasing.
+fn count_excess(c: &Correction, count: &mut [f64]) {
     let (mut single, mut corrected, mut held, mut previous) = (0.0, 0.0, 0.0_f64, 0.0);
     for (j, d) in c.delta.iter().enumerate() {
         let sub = j * SUB_BINS_PER_BIN..(j + 1) * SUB_BINS_PER_BIN;
@@ -618,7 +643,24 @@ pub(crate) fn apply(
             previous = held;
         }
     }
-    applied
+}
+
+/// The counts' share of `c`, whole: each 1-mag bin's count difference over its sub-bins by their
+/// counts, as [`count_excess`] spreads it, so a sub-bin may fall below zero.
+fn count_whole(c: &Correction, count: &mut [f64]) {
+    for (j, d) in c.delta.iter().enumerate() {
+        let sub = j * SUB_BINS_PER_BIN..(j + 1) * SUB_BINS_PER_BIN;
+        let total = count[sub.clone()].iter().fold(0.0, |a, &n| a + n);
+        for k in sub {
+            #[expect(clippy::cast_precision_loss, reason = "20 sub-bins, exact in f64")]
+            let share = if total > 0.0 {
+                count[k] / total
+            } else {
+                1.0 / SUB_BINS_PER_BIN as f64
+            };
+            count[k] += share * d[COUNT];
+        }
+    }
 }
 
 /// Each cell's part of `layer`'s correction error for a component bin, as [`correction`] weighs
@@ -772,7 +814,7 @@ mod tests {
         }
         light[70] = 1.0;
         count[70] = 2.0;
-        let applied = apply(&c, &mut light, &mut count, &mut colour);
+        let applied = apply(&c, &mut light, &mut count, &mut colour, PairCounts::Excess);
         // Bin 1 had no light: its gain is spread evenly.
         assert!(light[20..40].iter().all(|&l| (l - 0.1).abs() < 1e-15));
         assert!(
@@ -804,6 +846,62 @@ mod tests {
             "{}",
             edges[SUB_BINS - 1]
         );
+    }
+
+    #[test]
+    fn the_full_count_rule_keeps_the_deficit_and_changes_no_light() {
+        let mut delta = [[0.0; VALUES]; MAGNITUDE_BINS];
+        delta[1] = [2.0, 2.0, 2.0, 2.0, 2.0, 0.5];
+        delta[2] = [-3.0, -3.0, -3.0, -3.0, -3.0, -1.0];
+        let c = Correction { delta, sigma: 0.25 };
+        let start = || {
+            let mut light = vec![0.0; SUB_BINS];
+            let mut count = vec![0.0; SUB_BINS];
+            for k in 40..50 {
+                light[k] = 0.2;
+                count[k] = 1.0;
+            }
+            light[70] = 1.0;
+            count[70] = 2.0;
+            (light, count, vec![[0.2; 4]; SUB_BINS])
+        };
+        let (mut light, mut count, mut colour) = start();
+        let excess = apply(&c, &mut light, &mut count, &mut colour, PairCounts::Excess);
+        let (mut full_light, mut full_count, mut full_colour) = start();
+        let full = apply(
+            &c,
+            &mut full_light,
+            &mut full_count,
+            &mut full_colour,
+            PairCounts::Full,
+        );
+        let bits = |values: &[f64]| -> Vec<u64> {
+            values
+                .iter()
+                .map(|&v| hyperion_testkit::float::bits(v))
+                .collect()
+        };
+        assert_eq!(
+            bits(&[full.light, full.sigma, full.clamped]),
+            bits(&[excess.light, excess.sigma, excess.clamped])
+        );
+        assert_eq!(bits(&full_light), bits(&light));
+        assert_eq!(
+            bits(full_colour.as_flattened()),
+            bits(colour.as_flattened())
+        );
+        // Bin 1's half star, spread evenly over its empty sub-bins; bin 2's lost star, by its
+        // sub-bins' counts, below the single-star count; nothing else moves.
+        assert!(
+            full_count[20..40]
+                .iter()
+                .all(|&n| (n - 0.025).abs() < 1e-15)
+        );
+        assert!(full_count[40..50].iter().all(|&n| (n - 0.9).abs() < 1e-15));
+        assert!(full_count[50..60].iter().all(|&n| n.abs() < 1e-300));
+        assert!((full_count[70] - 2.0).abs() < 1e-15);
+        let total = full_count.iter().fold(0.0, |a, &n| a + n);
+        assert!((total - 11.5).abs() < 1e-12, "{total}");
     }
 
     #[test]
