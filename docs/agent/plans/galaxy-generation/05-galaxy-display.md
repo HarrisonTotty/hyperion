@@ -1480,14 +1480,24 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
     the upper right, the upper left, the lower right and the lower left that lies inside the view
     and stands 0.5 rem clear of every other mark, at its bracket's place, and of every other chosen
     label that can be drawn (its mark in view, or pinned), at its place on its line, and covers no
-    furniture; else the first inside the view; else
-    the upper right, held inside it (ruling 149.1), where it can stand on the chevrons: a third case
-    for the 149.1 ruling._
+    furniture; else the first inside the view; else it is not drawn, and is not held inside
+    (ruling 149.1) (addendum C; T16.j)._
   - _A lesser label within 0.5 rem of the destination's, or within 0.25 rem of its chevron set, is
     dropped, so that no other name stands nearer the destination's label than its own set, or runs
     through its chevrons (the follow-up's UX review)._
   - _Pending a ruling: selecting a mark outside `chooseLabels`' count gives it a label, which can
     send a nearby destination's label to another place. Addendum B's "clear of every other label"
-    and "selecting never moves a label" cannot both hold there._
+    and "selecting never moves a label" cannot both hold there._ _Ruled (addendum C): the
+    destination's label is placed as though nothing were selected, and the selection's label
+    yields to it (T16.j)._
   - _The selection's label, pinned, is never dropped, and can run through a neighbouring
-    destination's chevrons (a stated limit)._
+    destination's chevrons (a stated limit)._ _Ruled (addendum C): the destination's label is
+    placed as though nothing were selected, and the selection's label yields to it (T16.j)._
+  - _Other marks inside the destination's chevron set (a stated limit;
+    decision-r07-quality-and-destination, addendum C, C6). On a crowded chart other marks' symbols
+    can lie inside the set, as a selection's bracket encloses its neighbours on a true-scale chart;
+    the operator zooms to part them. Which mark is the destination stays plain: the four apices point at one centre, its
+    label stands at the set's corner, and the list and readout name it. No neighbour's name stands
+    in or beside the set, since a lesser label within 0.25 rem of it gives way, and the chevrons,
+    drawn last, stay whole over a neighbour's symbol. The first task that commands a destination
+    asks for a ruling if a neighbour is taken for the destination by hand._

@@ -2137,6 +2137,11 @@ src/renderer/src/displays/system src/renderer/src/lib src/renderer/src/smoke`, `
       reticles and label (in the view, and of the chrome T16.i names). It takes the upper right
       where none is.
     - It is never dropped.
+
+    _Addendum C amends the last resort: with no place clear, the first place inside the display
+    and 0.25 rem clear of the chrome; with none inside, the label is hidden whole. The selection is
+    no input to its place, and a label made by a selection yields to it (T16.i, T16.j)._
+
   - The chevrons' reach no longer moves a label outward. The destination's report raises the
     label, in the frame that first draws the chevrons, and it cuts. Selecting never moves it.
 
@@ -2210,20 +2215,32 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
   scripts.
 - **R07.T16.i The view's labels clear of its chrome.** `displays/view/ViewDisplay.tsx`
   (`placeMarkLabels`) and `ViewMarkLabels.tsx`, and their tests
-  (decision-r07-quality-and-destination, Q6 (a)).
-  - A label is never shown in part. `placeMarkLabels` tests each plate, its size measured from
-    the DOM, against:
-    - the chrome over the stage: the `PRIMARY` view's label block, each open instrument slot, and
-      any statement or plate over the canvas;
-    - the stage's edges;
+  (decision-r07-quality-and-destination, Q6 (a), and addenda B and C).
+  - A label is never shown in part. `placeMarkLabels` places each plate, its size measured from
+    the DOM, only where it lies wholly inside the stage. It must stand clear of:
+    - the chrome over the stage, by at least 0.25 rem: the `PRIMARY` view's label block, each open
+      instrument slot, and any statement or plate over the canvas;
     - the plates already placed.
-  - The labels are placed in order: the selection's, the destination's, then the rest by range,
-    nearest first.
-  - Each tries, at its own offset from its mark, the right, the left (mirrored), then below and
-    above, centred on the mark. A destination's label tries the upper right, the upper left, the
-    lower right and the lower left, above or below its whole chevron set, and takes the first
-    0.5 rem clear of other marks (decision-r07-quality-and-destination, addendum B). Where none is
-    clear it is hidden whole.
+  - **The order:** the destination's label first, then the selection's, then the rest by range,
+    nearest first. The destination's place counts the other marks and the other labels at their
+    places on their lines, as though no mark were selected.
+  - **A destination's label** tries the upper right, the upper left, the lower right and the lower
+    left, above or below its whole chevron set, each with its near edge at the bracket place:
+    - first, the first place 0.5 rem clear of the chrome and of every other mark and label;
+    - else, the first place inside the stage and 0.25 rem clear of the chrome;
+    - else, it is hidden whole. It is never drawn past the stage's edge.
+
+    (decision-r07-quality-and-destination, addenda B and C).
+
+  - **Every other label** tries, at its own offset from its mark, the right, the left (mirrored),
+    then below and above, centred on the mark. It takes the first place that stands:
+    - 0.5 rem clear of the destination's plate;
+    - 0.25 rem clear of the destination's chevron set (the square of half-size
+      `destinationSetReachPx`);
+    - 0.25 rem clear of the chrome, and clear of the plates placed.
+
+    Where none does, it is hidden whole.
+
   - The mark stays on the canvas and in the list.
   - A label leaves a place, or comes back from hidden, only when the place it moves to is clear by
     0.25 rem. Each change cuts.
@@ -2232,7 +2249,12 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
   - in the compact layout, a mark under the label block's right edge takes its label to the left,
     and one wholly under it hides its label whole;
   - a label never stands in part under an instrument slot, past the stage's edge or under another
-    label, and the selection's label wins over a neighbour's;
+    label, and the selection's label wins over a neighbour's, but never moves the destination's;
+  - a destination's label with no place 0.5 rem clear takes the first place inside the stage, and
+    with none inside is hidden whole, never shown past the stage's edge;
+  - another label 0.5 rem or nearer the destination's plate, or 0.25 rem or nearer its set, takes
+    its next place or is hidden;
+  - no plate stands within 0.25 rem of the label block or an instrument slot;
   - a mark that moves 0.2 rem back and forth across an obstacle's edge leaves its label where it
     is.
 
@@ -2242,8 +2264,9 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
   console-ux skill's scripts, `just ci`.
 
 - **R07.T16.j P05's furniture text clear of marks and stalks.** P05's `spatial/furniture.ts`
-  (`triadLayout`, `coreArrowLayout`, `placeCurveLabels`) and `spatial/SpatialView.tsx`, and
-  their tests (decision-r07-quality-and-destination, Q6 (b) to (d)).
+  (`triadLayout`, `coreArrowLayout`, `placeCurveLabels`), `spatial/labels.ts` (`placeLabels`) and
+  `spatial/SpatialView.tsx`, and their tests (decision-r07-quality-and-destination, Q6 (b) to (d),
+  and addendum C).
   - **The triad.** `triadLayout` tests each label candidate, by 0.125 rem, against every axis's
     end symbol (its circle, `TRIAD_MARKER_REM` + δ, or its arrowhead), every axis line and the
     labels placed. Where none clears all three, the first that clears the symbols and the labels
@@ -2257,6 +2280,21 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
     label also tries points along its ring either way from its coreward point, after its four
     boxes. Where no candidate clears the stalks, the first that clears everything else is taken,
     so no label is dropped for a stalk's sake. No stalk is cut, and no plate is drawn.
+  - **The destination's neighbours on the spatial displays** (decision-r07-quality-and-destination,
+    addendum C). In `placeLabels`:
+    - **The destination's label is placed first.** It is placed against the marks and against the
+      labels `chooseLabels` would choose with no selection, at their line places.
+    - **A mark chosen only because it is selected** gets its label after the destination's. Within
+      0.5 rem of the destination's label, or 0.25 rem of its chevron set, the label flips to its
+      other side, and where that is no clearer it is not drawn.
+    - **Where no place lies inside the view,** the destination's label is not drawn. It is not held
+      inside (ruling 149.1).
+
+    **Tests:**
+    - selecting a mark outside `chooseLabels`' count, beside the destination, leaves the
+      destination's label where it was and flips or drops the selection's;
+    - a destination at a corner of a view too small for any place has no label, and none stands on
+      its chevrons.
 
   **Tests:**
   - the tilted local chart's triad, with `COREWARD` 0.125 rem clear of `NORTH`'s symbol;
@@ -5402,7 +5440,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     with none inside, the upper right, held inside the view on P05 (ruling 149.1), unclipped in
     the view, whose overlay hides what passes its edge. So at a right edge it takes the upper left,
     as a label flips, and at the top the lower right. _For T16.c's B5 wording, which names only the
-    0.5 rem._
+    0.5 rem._ _Amended (decision-r07-quality-and-destination, addendum C, C3): the first place
+    inside the display, confirmed, and 0.25 rem clear of the chrome; with none inside, the label is
+    hidden whole on both displays, not held inside on P05 (ruling 149.1) nor drawn past the stage's
+    edge in the view (T16.i, T16.j). B5's item 5 and item 8 state it already, so the guide's draft
+    gains nothing (C7)._
   - **The neighbours.**
     - Every other mark at its bracket place's outer edge, drawn or not: P05's
       `reticleHalfSizePx` + 4δ + half the stroke, and the view's `DrawAnchor.markReachPx`, the same
@@ -5426,14 +5468,18 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     before the loop writes any label in the frame, and only while a destination's label is shown. A
     destination's plate mounts hidden at the upper right and the loop shows it at its place, so that
     it never shows a frame at a place it then leaves.
-  - _Stated limits:_
+  - _Stated limits_ (confirmed by addendum C, C3, but for the third, which C1 and C3 replace;
+    T16.i adds the view's hysteresis, and P05's labels take none, re-placing only as the camera
+    moves):
     - no hysteresis between places until T16.i: a mark moving across a threshold cuts its label
       from place to place;
     - a disc is taken as its bounding square, about 0.41 r beyond its outline at the corners, and a
       craft's hull larger than its bracket is not counted;
     - P05: the selection's label, pinned, is never dropped, and can run through a neighbouring
       destination's chevrons; and where no place fits inside the view, the held upper right can
-      stand on the chevrons (P05's Risks, "Labels beside reticles");
+      stand on the chevrons (P05's Risks, "Labels beside reticles"). _Replaced (addendum C, C1 and
+      C3): a label that stands only because of a selection yields to the destination's, flipping
+      or not drawn, and a destination's label with no place inside the view is not drawn (T16.j)._
     - no code path commands a destination yet (`viewFrameDrawer.ts`, `useLocalChart.ts`,
       `orbitMap.ts` and `bodyFrame.ts` pass none), so the live view never reaches this path; the
       harness sets one.
@@ -5525,17 +5571,33 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       counted, and the pending items. Its considers were taken: the stylesheet's padding test, the
       plate against every chevron, T16.h's bullet annotated, the selection's label as a limit, and
       plates read unrounded.
-  - **Pending, for the orchestrator or the owner:**
+  - **Pending, for the orchestrator or the owner** (each ruled by decision-r07-quality-and-destination,
+    addendum C):
     - P05: may selecting a mark outside `chooseLabels`' count move the destination's label?
       Addendum B's "clear of every other label" and "selecting never moves a label" cannot both
-      hold there.
+      hold there. _Ruled (C1): no. The destination's label is placed as though no mark were
+      selected, against the labels `chooseLabels` would choose with no selection. A label that
+      exists, or stands where it does, only because of a selection yields to it: within 0.5 rem of
+      the destination's label or 0.25 rem of its chevron set it flips to its other side, or is not
+      drawn. In the view T16.i places the destination's label first (T16.i, T16.j)._
     - Does a column at about 1.05:1 against `--surface-0` count as "a whole device pixel of
-      `--surface-0`" at 80%? Two 80% states depend on it.
+      `--surface-0`" at 80%? Two 80% states depend on it. _Ruled (C2): yes. For the clearance
+      criteria a device pixel counts as `--surface-0` where it reads below 1.07:1 against it, the
+      step from `--surface-0` to `--surface-1`, so the follow-up's 80% states meet the criterion._
     - T16.i: its "Where none is clear it is hidden whole" now follows the destination's sentence
       and meets addendum B's "never dropped". And where no place fits inside the stage, this
       build's upper right can pass the stage's edge, which T16.i's "never shown in part" forbids.
+      _Ruled (C3, C4): where the rules meet they yield in this order, the first strongest: a label
+      is never shown in part; no chevron stands on a label's line or beside its text; a label
+      stands 0.25 rem clear of the chrome; a destination's label stands 0.5 rem clear of other
+      marks and labels; a destination's label is drawn. So "never dropped" means never dropped for
+      a neighbour's sake. A destination's label takes the first place 0.5 rem clear, else the first
+      inside the display and 0.25 rem clear of the chrome, else it is hidden whole (T16.i's rule as
+      amended; T16.j for P05)._
     - Seen, not this task's: on a crowded chart other marks' symbols lie inside the destination's
-      chevron set (class 4, 80%, `crops/d-m078-08-large-80-both.png`).
+      chevron set (class 4, 80%, `crops/d-m078-08-large-80-both.png`). _Ruled (C6): no rule and no
+      task; a stated limit in P05's Risks, "Labels beside reticles". The first task that commands a
+      destination asks for a ruling if a neighbour is taken for the destination by hand._
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the
