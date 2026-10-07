@@ -15,7 +15,8 @@ import { localFrameAt, planeFrame } from "../geometry/frame";
 import type { PointMark, SpatialScene } from "./marks";
 import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
-import { add, scale, vec3 } from "../geometry/vec3";
+import { textSizeRem } from "./labels";
+import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 
@@ -1803,6 +1804,119 @@ describe("SpatialView at the display's ratio (R07.T16.f)", () => {
     renderView({ scene: aScene({ selectedId: "a" }) });
 
     expect(labelLeftPx("A") - atTwo).toBeCloseTo(1.25, 9);
+  });
+});
+
+/** The default camera's scale in a 1200 × 900 stage: the fit radius of 50 in its shorter side, 2 rem in. */
+const FIT_PX_PER_UNIT = (450 - 32) / 50;
+
+/** The point on the reference plane that the default camera, `OBLIQUE` at the fit, draws at a place. */
+function onPlaneAt(xPx: number, yPx: number) {
+  const basis = viewBasis(FRAME, PRESETS.oblique);
+  const across = (xPx - 600) / FIT_PX_PER_UNIT;
+  const up = (450 - yPx) / FIT_PX_PER_UNIT;
+  const rc = dot(FRAME.coreward, basis.right);
+  const rs = dot(FRAME.spinward, basis.right);
+  const uc = dot(FRAME.coreward, basis.up);
+  const us = dot(FRAME.spinward, basis.up);
+  const det = rc * us - rs * uc;
+  return add(
+    scale(FRAME.coreward, (across * us - rs * up) / det),
+    scale(FRAME.spinward, (rc * up - across * uc) / det),
+  );
+}
+
+/** Where the default camera draws a point, CSS px. */
+function drawnAt(position: Vec3) {
+  return project(
+    position,
+    viewBasis(FRAME, PRESETS.oblique),
+    { ...PRESETS.oblique, pxPerUnit: FIT_PX_PER_UNIT },
+    { widthPx: 1200, heightPx: 900, remPx: 16 },
+  );
+}
+
+describe("SpatialView's furniture text clear of the marks (R07.T16.j)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("gives the curve labels the marks' symbols to keep clear of: a ring's label leaves a mark on its first place", () => {
+    // The plane ring's label would stand from 8 px right of and 4 px below its coreward point; a
+    // mark on the plane sits 30 px right of and 12 px below it.
+    const ring = drawnAt(scale(FRAME.coreward, 20));
+    const at = onPlaneAt(ring.xPx + 30, ring.yPx + 12);
+    renderView({
+      scene: aScene({
+        points: [aMark("m", { position: at })],
+        plane: { spacing: 20, extent: 50, rings: [{ radius: 20, label: "PLANE 20 ly" }] },
+      }),
+    });
+    const [leftRem = Number.NaN, topRem = Number.NaN] = (
+      /^translate\(([-\d.e]+)rem, ([-\d.e]+)rem\)$/u.exec(placement(overlayLabel("PLANE 20 ly"))) ??
+      []
+    )
+      .slice(1)
+      .map(Number);
+    const size = textSizeRem("PLANE 20 ly", 0.1);
+    const box = {
+      leftPx: 16 * leftRem,
+      topPx: 16 * topRem,
+      widthPx: size.widthRem * 16,
+      heightPx: size.heightRem * 16,
+    };
+    const mark = drawnAt(at);
+    // The class-2 symbol's outline reaches 6.5 px from its centre at a ratio of 1.
+    const gapPx = Math.hypot(
+      Math.max(0, box.leftPx - mark.xPx, mark.xPx - box.leftPx - box.widthPx),
+      Math.max(0, box.topPx - mark.yPx, mark.yPx - box.topPx - box.heightPx),
+    );
+
+    const atFirstPlace =
+      Math.abs(box.leftPx - ring.xPx - 8) < 1e-6 && Math.abs(box.topPx - ring.yPx - 4) < 1e-6;
+
+    expect([atFirstPlace, gapPx >= 6.5 + 2 - 1e-6]).toEqual([false, true]);
+  });
+
+  it.each([
+    ["0.375 rem below the query edge's is not drawn", 40.75, false],
+    ["0.625 rem below it is drawn", 44.75, true],
+  ] as const)(
+    "gives the marks' labels the curve labels to stand 0.5 rem from: a label %s",
+    (_, yPx, drawn) => {
+      // The query edge's label stands above the top of its circle, at (600, 32), from 608 px across
+      // and 8.5 to 26 px down; a mark's label at its right, from 610 px across, centred on it.
+      renderView({ scene: aScene({ points: [aMark("m", { position: onPlaneAt(594, yPx) })] }) });
+
+      expect(screen.queryByText("M") !== null).toBe(drawn);
+    },
+  );
+
+  it("keeps the destination's label where it was on selecting a mark outside the eight labelled, and flips the selection's", () => {
+    // Eight marks of higher priority along the foot of the view; the selection, of the lowest, 20 px
+    // left of and 50 px above the destination, its long label at the right running into the
+    // destination's at the upper right.
+    const heavy = Array.from({ length: 8 }, (_, index) =>
+      aMark(`h${String(index)}`, {
+        position: onPlaneAt(150 + index * 120, 820),
+        labelPriority: 10 + index,
+      }),
+    );
+    const points = [
+      ...heavy,
+      aMark("d", { position: onPlaneAt(600, 400), label: "DEST", labelPriority: 0 }),
+      aMark("s", { position: onPlaneAt(580, 350), label: "SELECTED MARK", labelPriority: -1 }),
+    ];
+    const { unmount } = renderView({ scene: aScene({ points, destinationId: "d" }) });
+    const before = placement(overlayLabel("DEST"));
+    unmount();
+
+    renderView({ scene: aScene({ points, destinationId: "d", selectedId: "s" }) });
+
+    expect([placement(overlayLabel("DEST")), placement(overlayLabel("SELECTED MARK"))]).toEqual([
+      before,
+      expect.stringContaining("- 100%"),
+    ]);
   });
 });
 

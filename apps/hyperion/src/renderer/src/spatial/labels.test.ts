@@ -13,6 +13,7 @@ import {
 } from "./labels";
 import type { PointMark, SizeClass } from "./marks";
 import {
+  boxGapPx,
   bracketArmPx,
   DESTINATION_LABEL_PLACES,
   type DestinationLabelPlace,
@@ -247,7 +248,7 @@ describe("placeLabels", () => {
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(380 - 6 - OFFSET_AT_TWO_PX, 9);
   });
 
-  it("keeps a label whole inside a view too narrow for it on either side of its mark", () => {
+  it("keeps a label whole and 0.25 rem inside a view too narrow for it on either side of its mark", () => {
     const narrow: Viewport = { widthPx: 160, heightPx: 100, remPx: 16 };
     const [label] = placeLabels(
       [mark("a", 1, "9FG 567Z04 B-3")],
@@ -257,9 +258,9 @@ describe("placeLabels", () => {
       null,
     );
 
-    expect(label?.leftPx).toBeGreaterThanOrEqual(0);
-    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeLessThanOrEqual(160);
-    expect(label?.topPx).toBe(0);
+    expect(label?.leftPx).toBeGreaterThanOrEqual(4);
+    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeLessThanOrEqual(156);
+    expect(label?.topPx).toBe(4);
   });
 
   it("drops a lesser label that overlaps one already placed", () => {
@@ -281,7 +282,10 @@ describe("placeLabels", () => {
     ];
     const furniture = { leftPx: 0, topPx: 40, widthPx: 400, heightPx: 70 };
 
-    const placed = placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, ["picked"], [furniture]);
+    const placed = placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, {
+      pinnedIds: ["picked"],
+      obstacles: [furniture],
+    });
 
     expect(placed.map((label) => label.id)).toEqual(["picked", "clear"]);
   });
@@ -290,7 +294,7 @@ describe("placeLabels", () => {
     const chosen = chooseLabels([mark("heavy", 9), mark("picked", 1)], "picked", null);
     const anchors = [anchor("heavy", 100, 100), anchor("picked", 102, 101)];
 
-    const placed = placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, ["picked"]);
+    const placed = placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, { pinnedIds: ["picked"] });
 
     expect(placed.map((label) => label.id)).toEqual(["picked"]);
   });
@@ -302,7 +306,7 @@ describe("placeLabels", () => {
       VIEWPORT,
       AT_TWO,
       null,
-      ["picked"],
+      { pinnedIds: ["picked"] },
     );
 
     expect(placed).toHaveLength(1);
@@ -453,7 +457,7 @@ describe("placeLabels", () => {
       VIEWPORT,
       strokes,
       "a",
-      ["picked", "a"],
+      { pinnedIds: ["picked", "a"] },
     );
 
     expect(placeOf(label, at)).toBe("upper-left");
@@ -463,7 +467,9 @@ describe("placeLabels", () => {
     const strokes = reticleStrokesCssPx(1);
     const at = anchor("a", 100, 100);
     const furniture = { leftPx: 110, topPx: 50, widthPx: 40, heightPx: 20 };
-    const [label] = placeLabels([mark("a", 1)], [at], VIEWPORT, strokes, "a", [], [furniture]);
+    const [label] = placeLabels([mark("a", 1)], [at], VIEWPORT, strokes, "a", {
+      obstacles: [furniture],
+    });
 
     expect(placeOf(label, at)).toBe("upper-left");
   });
@@ -543,13 +549,12 @@ describe("placeLabels", () => {
     // The neighbour's label, near the upper-right box, sends it to the upper left either way: the
     // destination takes every chosen label at its place, placed before it or not.
     const anchors = [anchor("a", 100, 100), anchor("n", 100, 44, 0)];
-    const unselected = placeLabels([mark("a", 1), mark("n", 0)], anchors, VIEWPORT, strokes, "a", [
-      "a",
-    ]);
-    const selected = placeLabels([mark("n", 0), mark("a", 1)], anchors, VIEWPORT, strokes, "a", [
-      "n",
-      "a",
-    ]);
+    const unselected = placeLabels([mark("a", 1), mark("n", 0)], anchors, VIEWPORT, strokes, "a", {
+      pinnedIds: ["a"],
+    });
+    const selected = placeLabels([mark("n", 0), mark("a", 1)], anchors, VIEWPORT, strokes, "a", {
+      pinnedIds: ["n", "a"],
+    });
 
     expect(selected.find((label) => label.id === "a")).toEqual(
       unselected.find((label) => label.id === "a"),
@@ -563,9 +568,9 @@ describe("placeLabels", () => {
     // right.
     const chosen = [mark("far", 9, "OUTSIDE THE VIEW"), mark("a", 1)];
     const at = anchor("a", 100, 100);
-    const placed = placeLabels(chosen, [anchor("far", -5, 66, 0), at], VIEWPORT, strokes, "a", [
-      "a",
-    ]);
+    const placed = placeLabels(chosen, [anchor("far", -5, 66, 0), at], VIEWPORT, strokes, "a", {
+      pinnedIds: ["a"],
+    });
 
     expect(
       placeOf(
@@ -658,4 +663,266 @@ describe("placeLabels", () => {
 
     expect(large?.widthPx).toBeCloseTo((small?.widthPx ?? 0) * 1.5, 9);
   });
+});
+
+/**
+ * A chart's marks about a destination "d" at (200, 150), labelled `DEST`: eight of the highest
+ * priority along the foot of the view, which `chooseLabels` labels, and a mark "s" of `priority`
+ * at `at`, which it labels only while it is selected where its priority is the lowest.
+ */
+function chartAbout(at: readonly [number, number], priority: number) {
+  const heavy = Array.from({ length: 8 }, (_, index) => mark(`h${String(index)}`, 10 + index));
+  const points = [mark("d", 0, "DEST"), mark("s", priority, "S1"), ...heavy];
+  const anchors = [
+    anchor("d", 200, 150),
+    anchor("s", at[0], at[1]),
+    ...heavy.map((point, index) => anchor(point.id, 20 + index * 45, 285)),
+  ];
+  /** The labels placed with `selectedId` selected, as `SpatialView` places them. */
+  const placed = (selectedId: string | null): ReadonlyArray<PlacedLabel> => {
+    const chosen = chooseLabels(points, selectedId, "d");
+    const unselected = new Set(chooseLabels(points, null, "d").map((point) => point.id));
+    const pinned = [selectedId, "d"].filter((id): id is string => id !== null);
+    return placeLabels(chosen, anchors, VIEWPORT, reticleStrokesCssPx(1), "d", {
+      pinnedIds: pinned,
+      unselectedIds: unselected,
+    });
+  };
+  return { placed, destination: anchors[0] ?? anchor("d", 200, 150) };
+}
+
+/** The destination's chevron set about `at` at a ratio of 1 and 100%, CSS px: 21.19 px about it. */
+function chevronSetAbout(at: Anchor): BoxPx {
+  const strokes = reticleStrokesCssPx(1);
+  const halfPx = bracketPx(strokes, at);
+  const reachPx =
+    halfPx + destinationGapPx(16, strokes.minGapPx) + bracketArmPx(halfPx) * Math.SQRT1_2 + 1;
+  return {
+    leftPx: at.xPx - reachPx,
+    topPx: at.yPx - reachPx,
+    widthPx: 2 * reachPx,
+    heightPx: 2 * reachPx,
+  };
+}
+
+/** The label of `id` among those placed, which must be there. */
+function labelOf(placed: ReadonlyArray<PlacedLabel>, id: string): PlacedLabel {
+  const label = placed.find((candidate) => candidate.id === id);
+  if (label === undefined) {
+    throw new Error(`no label is placed for ${id}`);
+  }
+  return label;
+}
+
+describe("placeLabels about the destination, as though nothing were selected (R07.T16.j)", () => {
+  it("leaves the destination's label at the upper right on selecting a mark outside chooseLabels' count beside it", () => {
+    // The selection's label at the right, from 196 px across and 91.25 to 108.75 px down, would
+    // run into the destination's at the upper right, from 216 px across and 107.31 to 124.81 px down.
+    const chart = chartAbout([180, 100], -1);
+
+    const unselected = labelOf(chart.placed(null), "d");
+    const selected = labelOf(chart.placed("s"), "d");
+
+    expect([selected, placeOf(selected, chart.destination)]).toEqual([unselected, "upper-right"]);
+  });
+
+  it("flips the label of a selection outside chooseLabels' count beside the destination to its left, 0.5 rem clear of the destination's label and 0.25 rem of its chevrons", () => {
+    const chart = chartAbout([180, 100], -1);
+
+    const placed = chart.placed("s");
+    const selection = labelOf(placed, "s");
+
+    expect([
+      selection.side,
+      boxGapPx(selection, labelOf(placed, "d")) >= 8,
+      boxGapPx(selection, chevronSetAbout(chart.destination)) >= 4,
+    ]).toEqual(["left", true, true]);
+  });
+
+  it.each([
+    ["outside chooseLabels' count", -1],
+    ["among chooseLabels' count", 30],
+  ] as const)(
+    "draws no label for a selection %s whose label would run into the destination's chevrons on either side",
+    (_, priority) => {
+      // Just below the destination: either side of its line runs into the chevron set, 21.19 px
+      // about the destination's centre.
+      const chart = chartAbout([200, 175], priority);
+
+      const unselected = chart.placed(null).find((label) => label.id === "d");
+      const selected = chart.placed("s");
+
+      expect([
+        selected.find((label) => label.id === "d"),
+        selected.some((label) => label.id === "s"),
+      ]).toEqual([unselected, false]);
+    },
+  );
+
+  it("draws no label for a selection at the view's right edge whose other side would be held back across its own mark", () => {
+    // The selection 0.5 rem inside the right edge has its label flipped to the left, from 358.64 to
+    // 376 px across, which runs into the destination's chevron set below it. Its right-hand side
+    // runs off the view, and held inside it would stand over the selection's own bracket.
+    const placed = placeLabels(
+      [mark("s", 1, "S1"), mark("d", 0, "DEST")],
+      [anchor("s", 392, 100), anchor("d", 350, 130)],
+      VIEWPORT,
+      reticleStrokesCssPx(1),
+      "d",
+      { pinnedIds: ["s", "d"] },
+    );
+
+    expect(placed.map((label) => label.id)).toEqual(["d"]);
+  });
+
+  it("draws no label for a destination at a corner of a view too small for any place, and none on its chevrons", () => {
+    // A view 60 px square: every place about a destination 8 px from its top left runs out of it,
+    // or within 0.25 rem of its edges. A neighbour's label, flipped to the left, runs into the set.
+    const small: Viewport = { widthPx: 60, heightPx: 60, remPx: 16 };
+    const at = anchor("d", 8, 8);
+    const placed = placeLabels(
+      [mark("d", 1, "DEST"), mark("n", 0, "N")],
+      [at, anchor("n", 40, 30)],
+      small,
+      reticleStrokesCssPx(1),
+      "d",
+      { pinnedIds: ["d"] },
+    );
+
+    expect([
+      placed.some((label) => label.id === "d"),
+      placed.every((label) => boxGapPx(label, chevronSetAbout(at)) >= 4),
+    ]).toEqual([false, true]);
+  });
+
+  it("draws no label for a destination whose only place inside the view lies within 0.25 rem of its edge", () => {
+    // About a destination at (8, 8) in a view 62 px wide the lower right ends 58.72 px across,
+    // 3.28 px inside the right edge; 70 px wide, it stands 0.25 rem inside.
+    const placed = (widthPx: number) =>
+      placeLabels(
+        [mark("d", 1, "DEST")],
+        [anchor("d", 8, 8)],
+        { widthPx, heightPx: 120, remPx: 16 },
+        reticleStrokesCssPx(1),
+        "d",
+        { pinnedIds: ["d"] },
+      ).map((label) => label.id);
+
+    expect([placed(62), placed(70)]).toEqual([[], ["d"]]);
+  });
+});
+
+describe("placeLabels apart and off the edges (R07.T16.j; addendum D, D4 and D5)", () => {
+  it.each([
+    ["0.375 rem apart, drops the lower-priority one", 6, ["upper"]],
+    ["0.625 rem apart, draws both", 10, ["upper", "lower"]],
+  ] as const)("of two lesser labels stacked %s", (_, apartPx, drawn) => {
+    // Each label is one line, 17.5 px tall, centred on its mark.
+    const placed = placeLabels(
+      [mark("upper", 1), mark("lower", 0)],
+      [anchor("upper", 100, 100), anchor("lower", 100, 100 + 17.5 + apartPx)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+    );
+
+    expect(placed.map((label) => label.id)).toEqual(drawn);
+  });
+
+  it.each([
+    ["0.375 rem off, is not drawn", 6, []],
+    ["0.625 rem off, is drawn", 10, ["lesser"]],
+  ] as const)(
+    "of a lesser label below other text over the view, a curve label or the core arrow's, one %s",
+    (_, apartPx, drawn) => {
+      // The label, centred on its mark at 100 px down, runs from 91.25 to 108.75 px.
+      const text: BoxPx = {
+        leftPx: 90,
+        topPx: 91.25 - apartPx - 17.5,
+        widthPx: 120,
+        heightPx: 17.5,
+      };
+      const placed = placeLabels(
+        [mark("lesser", 1)],
+        [anchor("lesser", 100, 100)],
+        VIEWPORT,
+        AT_TWO,
+        null,
+        {
+          texts: [text],
+        },
+      );
+
+      expect(placed.map((label) => label.id)).toEqual(drawn);
+    },
+  );
+
+  it("draws no destination label where every place inside the view lies over furniture or other text", () => {
+    // Furniture across the destination's two upper places, and a curve label across its lower ones.
+    const at = anchor("a", 100, 100);
+    const placed = placeLabels([mark("a", 1)], [at], VIEWPORT, reticleStrokesCssPx(1), "a", {
+      pinnedIds: ["a"],
+      obstacles: [{ leftPx: 20, topPx: 50, widthPx: 160, heightPx: 30 }],
+      texts: [{ leftPx: 20, topPx: 120, widthPx: 160, heightPx: 30 }],
+    });
+
+    expect(placed).toEqual([]);
+  });
+
+  it("takes the destination's first place over no furniture where none is 0.5 rem clear of the marks", () => {
+    // Neighbours within 0.5 rem of all four places; furniture over the two upper ones.
+    const at = anchor("a", 100, 100);
+    const around = [
+      [130, 45],
+      [70, 45],
+      [130, 155],
+      [70, 155],
+    ].map(([xPx = 0, yPx = 0], i) => anchor(`near-${String(i)}`, xPx, yPx));
+    const [label] = placeLabels(
+      [mark("a", 1)],
+      [at, ...around],
+      VIEWPORT,
+      reticleStrokesCssPx(1),
+      "a",
+      {
+        pinnedIds: ["a"],
+        obstacles: [{ leftPx: 20, topPx: 50, widthPx: 160, heightPx: 30 }],
+      },
+    );
+
+    expect(placeOf(label, at)).toBe("lower-right");
+  });
+
+  it("starts a pinned label held inside at the left 0.25 rem in", () => {
+    const [label] = placeLabels(
+      [mark("picked", 1)],
+      [anchor("picked", -50, 100)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { pinnedIds: ["picked"] },
+    );
+
+    expect(label?.leftPx).toBe(4);
+  });
+
+  it.each([
+    ["0.125 rem", 2, "left"],
+    ["0.375 rem", 6, "right"],
+  ] as const)(
+    "flips a label whose right place would end %s inside the right edge, only within 0.25 rem of it",
+    (_, insidePx, side) => {
+      // "HD 140283", 78.12 px wide, its box 14.75 px from its mark's centre at a ratio of 2.
+      const xPx = 400 - insidePx - 78.12 - OFFSET_AT_TWO_PX - 6;
+      const [label] = placeLabels(
+        [mark("a", 1, "HD 140283")],
+        [anchor("a", xPx, 100)],
+        VIEWPORT,
+        AT_TWO,
+        null,
+      );
+
+      expect(label?.side).toBe(side);
+    },
+  );
 });

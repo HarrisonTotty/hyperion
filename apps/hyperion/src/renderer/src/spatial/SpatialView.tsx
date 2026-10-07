@@ -33,11 +33,13 @@ import {
   coreArrowBoxes,
   coreArrowLayout,
   coreLabelText,
+  markInksPx,
   placeCurveLabels,
   TRIAD_BOX_REM,
   triadBoxRem as triadBoxOf,
   triadFootprintPx,
   triadLayout,
+  triadShiftRem,
 } from "./furniture";
 import { chooseLabels, markLabelTransform, placeLabels } from "./labels";
 import type { LocalFrame } from "../geometry/frame";
@@ -334,11 +336,16 @@ export function SpatialView({
   const shownAngles = useThrottledValue(cameraState.angles, READOUT_INTERVAL_MS);
 
   // The marks to label depend on the scene alone, and choosing them sorts every mark: a few
-  // thousand on a chart, which a drag would otherwise sort again at every frame.
-  const chosenMarks = useMemo(
-    () => chooseLabels(scene.points, scene.selectedId, scene.destinationId),
-    [scene],
-  );
+  // thousand on a chart, which a drag would otherwise sort again at every frame. Those chosen with
+  // no selection are the labels the destination's is placed against, so that the destination's
+  // label stands where it does whatever is selected (decision-r07-quality-and-destination, addendum
+  // C, C1; R07.T16.j).
+  const { chosenMarks, unselectedIds } = useMemo(() => {
+    const chosen = chooseLabels(scene.points, scene.selectedId, scene.destinationId);
+    const unselected =
+      scene.selectedId === null ? chosen : chooseLabels(scene.points, null, scene.destinationId);
+    return { chosenMarks: chosen, unselectedIds: new Set(unselected.map((mark) => mark.id)) };
+  }, [scene]);
   const pinnedIds = [scene.selectedId, scene.destinationId].filter(
     (id): id is string => id !== null,
   );
@@ -351,7 +358,15 @@ export function SpatialView({
   // clips what leaves it and the guide has a 3D view always show its triad.
   const shownAxes = axes ?? scene.frame;
   const triadBoxRem = viewport === null ? TRIAD_BOX_REM : triadBoxOf(viewport);
-  const triad = triadLayout(scene.frame, cameraState.angles, triadBoxRem, shownAxes);
+  // Laid out as `AxisTriad` lays it out, its labels clear of its circles where they are drawn
+  // (R07.T16.j).
+  const triad = triadLayout(
+    scene.frame,
+    cameraState.angles,
+    triadBoxRem,
+    shownAxes,
+    triadShiftRem(pixelRatio, remPx),
+  );
   const triadBox: BoxPx | null =
     viewport === null ? null : triadFootprintPx(triad, viewport, triadBoxRem);
   const coreArrow =
@@ -365,14 +380,20 @@ export function SpatialView({
           [triadBox],
           shownAxes,
         );
+  // The curve labels keep clear of the marks' stalks and symbols as well (R07.T16.j).
   const curveLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
-      : placeCurveLabels(drawList.curveLabels, viewport, [
-          triadBox,
-          ...coreArrowBoxes(coreArrow, viewport.remPx),
-        ]);
-  // Marks' labels, placed last, keep off the furniture and the curve labels.
+      : placeCurveLabels(
+          drawList.curveLabels,
+          viewport,
+          [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx)],
+          markInksPx(drawList.ops, pixelRatio),
+        );
+  // Marks' labels, placed last, keep off the core arrow and 0.5 rem from the other text: the triad,
+  // the core arrow's label and the curve labels (decision-r07-quality-and-destination, addendum D,
+  // D4; R07.T16.j).
+  const coreLabel = coreArrow === null || coreArrow.kind === "undefined" ? [] : [coreArrow.label];
   const markLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
@@ -382,8 +403,14 @@ export function SpatialView({
           viewport,
           reticleStrokesCssPx(pixelRatio),
           scene.destinationId,
-          pinnedIds,
-          [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx), ...curveLabels],
+          {
+            pinnedIds,
+            obstacles: coreArrowBoxes(coreArrow, viewport.remPx).filter(
+              (box) => !coreLabel.includes(box),
+            ),
+            texts: [triadBox, ...coreLabel, ...curveLabels],
+            unselectedIds,
+          },
         );
 
   const canvasRef = useRef<HTMLCanvasElement>(null);

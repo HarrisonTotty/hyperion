@@ -530,7 +530,13 @@ or `mark`, its place or `null` for hidden, its `changesMs`) and `MARK_LABEL_SIDE
 `markLabelPlaces(anchors, plates, stage, { chrome?, selection?, previous?, nowMs? })` returns each
 label's state; `markLabelTransform(anchor, devicePixelRatio, state)` returns a transform or `null`,
 with `sideLabelTransform` and `destinationLabelTransform` beside it (see "Deviations in T16.i, as
-built")._
+built")._ _As built by T16.j: `spatial/symbols.ts` gains `LABEL_EDGE_CLEARANCE_REM` (0.25), and
+`destinationLabelPlace` returns `DestinationLabelPlace | null`;
+`placeLabels(chosen, anchors, viewport, reticles, destinationId, surroundings?)` takes a
+`LabelSurroundings` (`pinnedIds`, `obstacles`, `texts`, `unselectedIds`) in place of its two optional
+arguments; `furniture.ts`'s
+`triadLayout` takes δ (`triadShiftRem`) and `placeCurveLabels` the marks' inks (`markInksPx`,
+`InkPx`); `RingLabel.alongPx` is new (see "Deviations in T16.j, as built")._
 
 ### Main screen (Phase C)
 
@@ -2316,10 +2322,17 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
     end symbol (its circle, `TRIAD_MARKER_REM` + δ, or its arrowhead), every axis line and the
     labels placed. Where none clears all three, the first that clears the symbols and the labels
     is taken, crossing a line; where none does, the label stands as built. No label is dropped.
+    The base place stands beyond its axis's end at the least distance at which its box's true
+    distance from the tip is the as-built clearance (`TRIAD_MARKER_REM` + `LABEL_GAP_REM` for an
+    away or towards end, `LABEL_GAP_REM` for an arrowhead), not that clearance along the axis. The
+    label's own symbol and line are tested like the others (addendum D, D8).
   - **The core arrow.** `coreArrowLayout` tests each label candidate against the arrow itself, at
     least `CORE_HEAD_REM` + `CORE_GAP_REM` from its shaft and head, measured from the arrow's
     segment, as well as the furniture. A candidate clamped into the view onto the arrow is passed
-    over. Where none clears both, the first that clears the arrow is taken.
+    over. Where none clears both, the first that clears the arrow is taken. The place beyond the
+    tail stands its box `CORE_HEAD_REM` + `CORE_GAP_REM` from the tail by true distance, by the
+    triad's helper, so that it clears the arrow. In a view too small for the label, the first
+    candidate stands as built (addendum D, D9).
   - **Curve labels.** `placeCurveLabels`' search also refuses a box that a mark's stalk or symbol
     comes within 0.125 rem of, `SpatialView` passing it the marks' stalks and symbols. A ring's
     label also tries points along its ring either way from its coreward point, after its four
@@ -2329,11 +2342,12 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
     addendum C). In `placeLabels`:
     - **The destination's label is placed first.** It is placed against the marks and against the
       labels `chooseLabels` would choose with no selection, at their line places.
-    - **A mark chosen only because it is selected** gets its label after the destination's. Within
-      0.5 rem of the destination's label, or 0.25 rem of its chevron set, the label flips to its
-      other side, and where that is no clearer it is not drawn.
-    - **Where no place lies inside the view,** the destination's label is not drawn. It is not held
-      inside (ruling 149.1).
+    - **The selection's label**, whether or not `chooseLabels`' count would choose its mark, is
+      placed after the destination's. Within 0.5 rem of the destination's label, or 0.25 rem of its
+      chevron set, the label flips to its other side, and where the other side is not clear either
+      it is not drawn (addendum D, D10).
+    - **Where no place lies 0.25 rem inside the view's edges,** the destination's label is not
+      drawn. It is not held inside (ruling 149.1).
 
     **Tests:**
     - selecting a mark outside `chooseLabels`' count, beside the destination, leaves the
@@ -2341,18 +2355,38 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
     - a destination at a corner of a view too small for any place has no label, and none stands on
       its chevrons.
 
+  - **Labels apart and off the edges** (addendum D, D4 and D5). In `placeLabels`:
+    - a label that may be dropped is also dropped where its box stands within
+      `LABEL_NEIGHBOUR_CLEARANCE_REM` of a label placed, as where it overlaps one;
+    - every label's box is held 0.25 rem inside the view's edges, the furniture's `EDGE_REM`:
+      `clampInto`'s bounds, `lineLabel`'s flip and the destination's inside test.
+
+    **Tests:**
+    - two lesser labels 0.375 rem apart, stacked: the lower-priority one is not drawn; 0.625 rem
+      apart, both are;
+    - a pinned label held inside at the left starts 0.25 rem in;
+    - a label whose right place would end 0.125 rem inside the right edge flips.
+
   **Tests:**
   - the tilted local chart's triad, with `COREWARD` 0.125 rem clear of `NORTH`'s symbol;
   - an orbit-map arrow near the view's edge, whose label is clear of its shaft and head;
   - a ring label with a stalk through its place, moved along the ring and clear of it;
   - a ring label hemmed in by stalks on every candidate, kept at its first place clear of all but
-    them.
+    them;
+  - the triad's unobstructed base place, for an away end and an arrowhead at 15°, 21°, 30°, 45°
+    and 70° from the horizontal, stands its box `clear` from its tip by true distance;
+  - the core arrow's place beyond the tail stands its box 0.625 rem from the tail.
 
   **By hand, hidden:** T16.f's `GALAXY` harness, the tilted local chart and the orbit map at
   0.78125.
   **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/spatial
 src/renderer/src/displays/galaxy src/renderer/src/displays/system`, the console-ux skill's
   scripts, `just ci`.
+  _As built: see Risks, "Deviations in T16.j, as built". The triad tries one tier ahead of D8's,
+  and all three of the core arrow's places stand at the least reach, by the orchestrator's rulings
+  during the build; D4 also holds a lesser label 0.5 rem from the curve labels, the core label and
+  the triad, C3's second tier counts P05's furniture and text as chrome, and the triad's labels
+  stand 0.25 rem inside the stage's left and bottom edges (D5)._
 
 - **R07.T16.k The kept scene's clock rate on the label block** (split off from T16.c, under the
   orchestrator's ruling carried for it, 2026-10-06: "drafted in T16.c, built there or split off";
@@ -6017,6 +6051,180 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         every axis is tested (D8);_
       - _the core arrow's place beyond the tail stands 0.625 rem from the tail (D9);_
       - _on P05 the selection's label yields to the destination's whatever the count (D10)._
+- **Deviations in T16.j, as built** (2026-10-07; the views lane; decision-r07-quality-and-destination,
+  Q6 (b) to (d), addendum C (C1, C3, C5, C6) and addendum D (D4, D5, D8 to D10), with the
+  orchestrator's rulings on the lane's questions during the build, each recorded below).
+  - **Files.** Those the bullet lists, and:
+    - `spatial/drawList.ts`: `RingLabel.alongPx`, optional, the points every 15° round a ring either
+      way from its label's point, the nearest first and the far side last (23), given to the plane's
+      rings and to an annulus's outer edge; a path's label has none;
+    - `spatial/symbols.ts`: `LABEL_EDGE_CLEARANCE_REM` (0.25, D5), which `furniture.ts`'s
+      `EDGE_REM` now takes; `destinationLabelPlace` returns `DestinationLabelPlace | null`, `null`
+      where no place may hold the label (C3);
+    - `spatial/AxisTriad.tsx`: it passes δ to `triadLayout`, and `TRIAD_HEAD_REM` (0.3) moves from
+      it to `furniture.ts`, so that the layout tests the arrowhead it draws;
+    - the tests of `drawList`, `furniture`, `labels` and `SpatialView`.
+  - **Signatures.**
+    - `triadLayout(frame, angles, boxRem?, shown?, shiftRem = 0)` takes δ in `rem`, from the new
+      `triadShiftRem(devicePixelRatio, remPx)`, which `AxisTriad` and `SpatialView` both call, so
+      that the layout and its footprint agree.
+    - `placeCurveLabels(labels, viewport, obstacles, marks = [])` takes the marks' inks, which
+      `markInksPx(ops, devicePixelRatio)` gives from the draw list. `InkPx` (`from`, `to`,
+      `halfWidthPx`: a segment and its half-width, a disc where its ends meet), `segmentBoxGapPx`,
+      `inkGapPx` and `TRIAD_HEAD_REM` are exported.
+    - `placeLabels(chosen, anchors, viewport, reticles, destinationId, surroundings = {})`: its two
+      optional arguments become a `LabelSurroundings`, `{ pinnedIds?, obstacles?, texts?,
+      unselectedIds? }` (after the TypeScript review's consider on eight positional arguments). `texts`
+      is the other text over the view (below); `unselectedIds` the marks `chooseLabels` would label
+      with no selection, which `SpatialView` computes with `chosenMarks` in one memo; absent, every
+      chosen label that can be drawn is counted, as when nothing is selected. The labels are returned
+      in `chosen`'s order.
+  - **The triad** (D8, and the orchestrator's ruling on the lane's by-hand finding).
+    - Every axis's end symbol and line is tested, its own included, as their drawn paths with no
+      width, as the ruling names them: the circle of radius `TRIAD_MARKER_REM` + δ, taken as a
+      disc; the arrowhead's two barbs; the line from the origin to the circle or the tip. The labels
+      placed before are tested by box distance at 0.125 rem (Q6 (b)), not D4's 0.5 rem, whose exact
+      change names `placeLabels` alone.
+    - The first place stands at the least reach along the axis at which its box's true distance
+      from the tip is `TRIAD_MARKER_REM` + `LABEL_GAP_REM` (an away or towards end) or
+      `LABEL_GAP_REM` (an arrowhead), found by halving with one helper, `leastReachPx`, which also
+      places the core arrow's label.
+    - **A tier ahead of D8's** (the orchestrator's ruling on the by-hand finding below; Q6 (b) and
+      D8 kept the order unchanged): the first candidate that clears all three and whose box stands
+      nearer its own axis's tip than any other axis's; else D8's tiers unchanged. D8 alone put
+      `COREWARD` a line up on the default `OBLIQUE` chart, 0.96 rem above `NORTH`'s circle and
+      1.72 rem from its own, which sent `NORTH` a whole label right, stacked 0.125 rem over
+      `SPINWARD`. On the 5° grid of camera directions, views with a label nearer another axis's tip
+      than its own: 716 as built before T16.j, 734 under D8 alone, 78 with the tier, of 2,664, in
+      the 15 × 8 rem box; 1,067 under D8 alone and 175 with the tier in a box 4.625 rem tall.
+    - **Off the stage's edges** (the orchestrator's ruling on the reviews' point, under D5): the
+      triad's box sits flush in the stage's bottom left-hand corner, so `inBox` holds each label
+      0.25 rem inside the box's left and bottom sides, off the canvas's focus ring. D5's premise,
+      "P05's furniture stands 0.25 rem in", did not hold for the triad.
+  - **The core arrow** (D9, and the orchestrator's approval of the lane's fourth point). All three
+    places, beside the arrow's middle either side and beyond its tail, stand at the least reach
+    along their direction at which the box's true distance from the arrow's segment is 0.625 rem
+    (`besideArrow`), then are clamped into the view; a clamped place on the arrow is passed over. As
+    built the places beside the middle stood 0.625 rem along the perpendicular, so that a slanting
+    arrow's end came nearer (at 45° the tail lay inside the box: T16.f's orbit-map defect). Probed
+    every 5° in views of 360 × 300, 1,200 × 900 and 1,574 × 980 px with the triad as furniture: the
+    as-built label stood within 0.625 rem of its segment in 2,293, 2,410 and 2,420 of 2,661
+    directions with the as-built triad, and in 2,304, 2,403 and 2,417 with the final one; the final
+    code in none; the label moves in 2,440 to 2,448. Vertical and horizontal arrows keep their
+    places. "The first candidate stands as built" is the first place as placed.
+  - **Curve labels.**
+    - A box keeps 0.125 rem from each mark's ink, not its centre line: a stalk at the line scale
+      (`lineScale` ÷ the ratio times its width); a symbol to its outline's outer edge as `paint`
+      draws it (a circle's radius and δ, a polygon's corners by δ over its inradius with their
+      mitre, a ringed circle's ring by 3δ), and half the mark stroke. The selection's bracket and
+      the destination's chevrons are not counted.
+    - The inks are sorted once into a grid of 2 rem cells over the view (`inksNear`), so that a
+      chart of a few thousand marks tests each box against the stalks near it alone.
+    - A ring's label tries its four boxes beside each point along its ring after its own point's.
+      An annulus's label does the same along its outer edge, beyond the bullet's "a ring's label",
+      since an annulus's edges are rings on the plane too (the orbit map's habitable zone). A path's
+      label keeps its four boxes.
+  - **The destination's neighbours** (C1, C3, C5; D10).
+    - The destination's label is placed first, against the other marks at their bracket places,
+      the labels `unselectedIds` names at their line places and the other text; the selection's
+      label next, whatever `chooseLabels`' count (D10), flipped where it stands within 0.5 rem of
+      the destination's label or 0.25 rem of its set, and not drawn where the other side is not
+      clear either; then the rest, dropped as before.
+    - **The other side only in full** (the UX review's must-fix): a selection's label takes its
+      other side only where it stands there at its own place, not held inside the view back across
+      its own bracket, as at the view's right edge with the destination to its left; else it is not
+      drawn.
+    - **C3's second tier on P05** (the orchestrator's ruling on the UX review's should-fix): P05's
+      furniture and its text count as its chrome. Every place must lie 0.25 rem inside the view and
+      over no furniture or text; the first choice must also stand 0.5 rem clear of the marks, the
+      labels and the text. With no such place the label is not drawn (rule 3 over rule 5).
+    - The destination's label is placed by its own rule whether or not `pinnedIds` names it. A
+      destination whose mark lies just past the view's edge, with a place inside, keeps its label,
+      as the rule is written (D3 is the view's).
+  - **Apart and off the edges** (D4, D5).
+    - As ruled: a lesser label within 0.5 rem of a label placed is dropped; `clampInto` holds every
+      box 0.25 rem inside the view, `lineLabel` flips 0.25 rem before the right edge, and the
+      destination's places are 0.25 rem inside.
+    - **D4 against the other text** (the orchestrator's ruling on the UX and plan-conformance
+      reviews' point; D4's rule says every label, its exact change only mark labels): a lesser label
+      is also dropped within 0.5 rem of `texts`, which `SpatialView` gives as the triad's footprint,
+      the core arrow's label and the curve labels; the arrow's mark stays an obstacle tested by
+      overlap; pinned labels are unchanged. The capture before it had `PGG 5G0001 A-0` 0.43 rem
+      above `RANGE 0.01 ly SET`, which T16.j had moved off its stalk.
+  - **Tests.** The bullet's, D8's and D11's, and: the triad's labels 0.125 rem clear of every axis's
+    symbol and line and of the labels before them from every direction at four ratio and scale
+    pairs; the tier's `OBLIQUE` names (COREWARD left of its circle, NORTH over its tip, no stack,
+    each label nearer its own tip); 0.25 rem inside the stage's left and bottom edges in two boxes;
+    its last two tiers (a line crossed in a box 10 rem wide; the first place kept on an arrowhead);
+    the core arrow from every direction on the chart's frame and an orbit map's tilted one, narrow
+    and wide; both places beside a 45° arrow at 0.625 rem, its tail included; the place beyond the
+    tail; furniture given up before the arrow; a sphere's label off a stalk and never dropped for
+    one; a symbol's clearance; `markInksPx`'s widths; the ring's and the annulus's points along; a
+    yielding selection not drawn across its own mark; a lesser label 0.375 and 0.625 rem below
+    other text; the destination with every place over furniture or text, and its second tier;
+    `SpatialView` passing the inks, `unselectedIds` and the curve labels as text. Each rule was
+    checked by removing it and seeing its tests fail (`.git/rm23-scratch/r07-views/t16j/mut/`).
+  - **By hand, hidden** (`.git/rm23-scratch/r07-views/t16j/galaxy/`, T16.f's harness copied; a
+    2458 × 1382 CSS px window at 0.78125, 1920 × 1080 device px; `base-*` HEAD's build, `after-*`
+    before the tier and the reviews' fixes, `after2-*` the final build; crops in `../crops/`). The
+    base and `after-*` ran against a server at `GEN VER 20`, `after2-*` at 21 (the primary's release
+    binary was rebuilt between); the charts' marks stand where they did.
+    - The local chart from `OBLIQUE`: `COREWARD` no longer covers `NORTH`'s symbol; it stands left of
+      its own circle, about 0.4 rem inside the stage, `NORTH` above its tip and `SPINWARD` to the
+      right (`crops/after2-chart-triad-wide.png`; D8 alone, `crops/after-chart-triad.png`).
+    - `CORE 26,000.0 ly` on the chart and `CORE 25,997.4 ly` on the orbit map stand clear of their
+      arrows (`crops/after2-chart-core.png`, `after2-orbit-corner.png`).
+    - `RANGE 0.01 ly SET` moves left, clear of the stalk. `PLANE 0.01 ly SET` is still crossed by
+      PGG 5J0002 A-0's stalk, the last resort as ruled: at the least drive range the ring is a
+      point, so its places along the ring coincide, and its left places hold RANGE's label
+      (`crops/after2-chart-centre.png`).
+    - D4 drops stacked mark labels, as ruled: on the oblique chart PGG 5H0001 A-0 and PGG 5H0101
+      A-0, each under 0.5 rem from a neighbour's, and PGG 5G0001 A-0, 0.43 rem above RANGE's
+      (D4 against the other text); from `TOP`, PGG 5H0001 A-0. The list names them.
+    - `TOP`'s triad: `NORTH` a little lower, its first place by true distance. The galaxy map is
+      unchanged but the clock and `GEN VER`.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest (the bullet's paths): 53 files, 2,214 tests, all pass. The app's: 339
+      files, 7,988 tests, all pass.
+    - `just check lint` from a clean typecheck cache: exit 0. Prettier on every changed file.
+    - `just test-render`, both variants with captures, on the final build (`t16j/render.sh`):
+      each exit 0, 610 checks (305 a variant), and all 110 captures
+      byte-identical to T16.i's final captures (`t16i/captures-final`), whose renderer HEAD carries
+      unchanged. No capture is drawn by the spatial displays.
+    - The console-ux skill's lint (0 errors, 0 checks in the six changed renderer files), contrast
+      (every pairing passes) and glyphs (no new character reaches the screen). No WGSL changed.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers.
+    - **TypeScript:** no must-fix. Its should-fixes were taken: the curve-label tests fail where a
+      label is dropped; the tier's test split, one reason each; the memo over `markInksPx` dropped.
+      Of its considers, the options object and the triad's `rem` note were taken. Not taken: drawing
+      `AxisTriad` from `SpatialView`'s layout (a change to P05's component and plan 14's props;
+      open, below).
+    - **UX:** its must-fix (a yielding selection across its own mark) was taken, and its two
+      should-fixes by the orchestrator's rulings (D4 against the other text; C3's second tier). Its
+      considers are open, below.
+    - **Plan conformance:** its must-fix, the gates and captures on the final tree, was taken; its
+      drafted records are these, and its considers (D4 against curve labels, the triad off the
+      edges) were ruled and built.
+  - **Open, for the orchestrator or the owner** (seen, not ruled; not T16.j's):
+    - on the orbit map the Kuiper belt's outer edge, a `--text-muted` reference curve that carries
+      meaning, runs through `SPINWARD`'s label, and from `TOP` the query edge's circle through a
+      mark's label: the triad's and the marks' labels are tested against their own furniture and
+      marks, not the scene's curves;
+    - the triad's labels stand 0.125 rem apart (Q6 (b)), not D4's 0.5 rem; the tier avoids the
+      `OBLIQUE` stack, but not every stack;
+    - curve labels do not count the selection's bracket or the destination's chevrons as ink (the
+      UX review's consider: count every mark's bracket place);
+    - a ring that is a point on screen has no other places; its label crosses a stalk at the last
+      resort;
+    - P05's labels have no hysteresis: a curve label can jump round its ring as a drag turns the
+      camera (the UX review's consider; C3 gave P05's labels none);
+    - D3 hides a view label whose mark has left the picture, but P05 holds a pinned selection's label
+      inside the view;
+    - the triad is laid out from two metric sources, `SpatialView`'s `useElementSize` and
+      `AxisTriad`'s `useStrokeMetrics`, which agree in practice; one layout passed down would
+      settle it;
+    - `unselectedIds` is optional, and a caller with a selection that leaves it out lets selecting
+      move the destination's label.
 - **Deviations in T16.k, as built** (2026-10-07; the views lane; the orchestrator's ruling carried
   for T16.c, in the form T16.c drafted).
   - **Files and names.**

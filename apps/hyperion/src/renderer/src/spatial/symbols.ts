@@ -236,6 +236,13 @@ export const LABEL_TEXT_CLEARANCE_REM = 0.25;
 export const LABEL_NEIGHBOUR_CLEARANCE_REM = 0.5;
 
 /**
+ * How far a spatial display's labels and furniture stand inside its view's edges, rem: 0.25, the
+ * layout's base unit, so that no label's text stands on the canvas's inset focus ring
+ * (decision-r07-quality-and-destination, addendum D, D5; R07.T16.j).
+ */
+export const LABEL_EDGE_CLEARANCE_REM = 0.25;
+
+/**
  * How far above a mark's centre a destination's label's box stands, px, its bottom edge above the
  * whole chevron set, or its top edge as far below it (decision-r07-quality-and-destination, addendum
  * B): the upper chevron's apex distance, an arm's run outward (`armPx` ÷ √2, 0.47 of the bracket's
@@ -373,10 +380,12 @@ export function boxGapPx(a: ScreenBoxPx, b: ScreenBoxPx): number {
 }
 
 /**
- * The place a destination's label takes (decision-r07-quality-and-destination, addendum B): the
- * first of {@link DESTINATION_LABEL_PLACES} whose box lies inside the display and is clear, at least
- * {@link LABEL_NEIGHBOUR_CLEARANCE_REM} from every other mark and label; else the first inside the
- * display; else the upper right. The label is never dropped.
+ * The place a destination's label takes on the spatial displays (decision-r07-quality-and-destination,
+ * addenda B and C): the first of {@link DESTINATION_LABEL_PLACES} whose box lies inside the display
+ * and is clear, at least {@link LABEL_NEIGHBOUR_CLEARANCE_REM} from every other mark and label; else
+ * the first inside the display; else none, `null`, and the label is not drawn. It is never held
+ * inside the display, where it would stand on its own chevrons (ruling 149.1; addendum C, C3;
+ * R07.T16.j).
  *
  * @remarks
  * The spatial displays' `placeLabels` takes it, with estimated boxes. The view's `markLabelPlaces`
@@ -387,14 +396,15 @@ export function boxGapPx(a: ScreenBoxPx, b: ScreenBoxPx): number {
  * right, as a label flips at the edge.
  *
  * @param boxOf - The label's box at a place.
- * @param inside - Whether a box lies wholly inside the display.
+ * @param inside - Whether a box may stand at a place at all: wholly inside the display, and on the
+ *   spatial displays over no furniture or other text, their chrome (addendum C, C3; R07.T16.j).
  * @param clear - Whether a box stands clear of every other mark and label.
  */
 export function destinationLabelPlace(
   boxOf: (place: DestinationLabelPlace) => ScreenBoxPx,
   inside: (box: ScreenBoxPx) => boolean,
   clear: (box: ScreenBoxPx) => boolean,
-): DestinationLabelPlace {
+): DestinationLabelPlace | null {
   const shown = DESTINATION_LABEL_PLACES.filter((place) => inside(boxOf(place)));
-  return shown.find((place) => clear(boxOf(place))) ?? shown[0] ?? "upper-right";
+  return shown.find((place) => clear(boxOf(place))) ?? shown[0] ?? null;
 }

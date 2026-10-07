@@ -413,6 +413,37 @@ describe("buildDrawList annotations", () => {
     expect(ring?.yPx).toBeCloseTo(150, 9);
   });
 
+  it("gives a ring's label the points along its ring every 15° either way from its coreward point, the far side last (R07.T16.j)", () => {
+    const scene = sceneOf([], {
+      plane: { spacing: 20, extent: 50, rings: [{ radius: 30, label: "PLANE 30 ly" }] },
+    });
+    const camera = cameraAt(30);
+
+    const [label] = buildDrawList(scene, camera, VIEWPORT, GAP_PX).curveLabels;
+    const along = label?.placement === "ring" ? (label.alongPx ?? []) : [];
+    const ringAt = (angleDeg: number) => {
+      const angle = (angleDeg * Math.PI) / 180;
+      return project(
+        local(30 * Math.cos(angle), 30 * Math.sin(angle), 0),
+        viewBasis(FRAME, camera),
+        camera,
+        VIEWPORT,
+      );
+    };
+
+    expect(along).toHaveLength(23);
+    for (const [index, angleDeg] of [
+      [0, 15],
+      [1, -15],
+      [2, 30],
+      [21, -165],
+      [22, 180],
+    ] as const) {
+      expect(along[index]?.xPx).toBeCloseTo(ringAt(angleDeg).xPx, 9);
+      expect(along[index]?.yPx).toBeCloseTo(ringAt(angleDeg).yPx, 9);
+    }
+  });
+
   it("gives no label to an unlabelled grid ring", () => {
     expect(
       buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX).curveLabels.map((label) => label.text),
@@ -940,7 +971,28 @@ describe("buildDrawList annuli", () => {
         xPx: expect.closeTo(CENTRE.xPx, 9),
         yPx: expect.closeTo(CENTRE.yPx + 20 * K, 9),
         stack: 0,
+        alongPx: expect.any(Array),
       },
+    ]);
+  });
+
+  it("gives an annulus's label the points along its outer edge either way from its rimward point (R07.T16.j)", () => {
+    const scene = bareScene({ annuli: [annulus("hz", 10, 20, { label: "HABITABLE ZONE" })] });
+
+    const [label] = buildDrawList(scene, TOP, VIEWPORT, GAP_PX).curveLabels;
+    const along = label?.placement === "ring" ? (label.alongPx ?? []) : [];
+    // From the top, 15° on from rimward, away from spinward, which is to the left.
+    const next = project(
+      local(20 * Math.cos((195 * Math.PI) / 180), 20 * Math.sin((195 * Math.PI) / 180), 0),
+      viewBasis(FRAME, TOP),
+      TOP,
+      VIEWPORT,
+    );
+
+    expect([along.length, along[0]?.xPx, along[0]?.yPx]).toEqual([
+      23,
+      expect.closeTo(next.xPx, 9),
+      expect.closeTo(next.yPx, 9),
     ]);
   });
 

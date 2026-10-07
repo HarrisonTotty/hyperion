@@ -176,6 +176,13 @@ export interface CircleLabel extends CurveLabelBase {
  */
 export interface RingLabel extends CurveLabelBase {
   readonly placement: "ring";
+  /**
+   * Further points of its ring the label may stand beside where its own point has no room, as a
+   * sphere's label moves round its circle: every 15° round the ring either way from its point, the
+   * nearest first, out to the far side (R07.T16.j). A ring's and an annulus's outer edge's; absent
+   * for a path's.
+   */
+  readonly alongPx?: ReadonlyArray<ScreenPoint>;
 }
 
 /** Where to put the DOM label of a sphere, a ring, an annulus or a path. */
@@ -669,6 +676,34 @@ function reticleOps(
   return ops;
 }
 
+/** How far apart the points along a ring that its label tries stand, in degrees round it. */
+const RING_LABEL_STEP_DEG = 15;
+
+/**
+ * The angles from a ring label's own point at which it also tries the ring, nearest first: every
+ * {@link RING_LABEL_STEP_DEG} either way, the far side last.
+ */
+const RING_LABEL_TURNS_DEG: ReadonlyArray<number> = Array.from(
+  { length: 180 / RING_LABEL_STEP_DEG },
+  (_, index) => (index + 1) * RING_LABEL_STEP_DEG,
+).flatMap((turnDeg) => (turnDeg === 180 ? [180] : [turnDeg, -turnDeg]));
+
+/**
+ * The points along a ring of `radius` about `centre` on the reference plane that a label at
+ * `fromDeg` (from coreward, towards spinward) also tries, on the screen (R07.T16.j).
+ */
+function ringPointsPx(
+  scene: SpatialScene,
+  centre: Vec3,
+  radius: number,
+  fromDeg: number,
+  toScreen: (point: Vec3) => ScreenPoint,
+): ReadonlyArray<ScreenPoint> {
+  return RING_LABEL_TURNS_DEG.map((turnDeg) =>
+    toScreen(onPlaneAt(scene, centre, radius, fromDeg + turnDeg)),
+  );
+}
+
 function ringLabels(
   scene: SpatialScene,
   basis: ViewBasis,
@@ -676,6 +711,8 @@ function ringLabels(
   viewport: Viewport,
 ): CurveLabel[] {
   const labels: CurveLabel[] = [];
+  const toScreen = (point: Vec3): ScreenPoint => screen(project(point, basis, camera, viewport));
+  const origin = { x: 0, y: 0, z: 0 };
   for (const [index, ring] of scene.plane.rings.entries()) {
     if (ring.label.length === 0) {
       continue;
@@ -688,6 +725,7 @@ function ringLabels(
       xPx: at.xPx,
       yPx: at.yPx,
       stack: 0,
+      alongPx: ringPointsPx(scene, origin, ring.radius, 0, toScreen),
     });
   }
   return labels;
@@ -705,23 +743,37 @@ function markCurveLabels(
   viewport: Viewport,
 ): CurveLabel[] {
   const labels: CurveLabel[] = [];
-  const pointLabel = (key: string, text: string, point: Vec3): void => {
-    if (text.length === 0) {
-      return;
-    }
-    const at = project(point, basis, camera, viewport);
-    labels.push({ key, text, placement: "ring", xPx: at.xPx, yPx: at.yPx, stack: 0 });
-  };
+  const toScreen = (point: Vec3): ScreenPoint => screen(project(point, basis, camera, viewport));
   for (const annulus of scene.annuli ?? []) {
+    if (annulus.label.length === 0) {
+      continue;
+    }
     const centre = footOnPlane(annulus, scene.frame.north);
-    pointLabel(
-      `annulus:${annulus.id}`,
-      annulus.label,
-      onPlaneAt(scene, centre, annulus.outerRadius, annulus.labelSpinward === true ? 90 : 180),
-    );
+    const fromDeg = annulus.labelSpinward === true ? 90 : 180;
+    const at = toScreen(onPlaneAt(scene, centre, annulus.outerRadius, fromDeg));
+    labels.push({
+      key: `annulus:${annulus.id}`,
+      text: annulus.label,
+      placement: "ring",
+      xPx: at.xPx,
+      yPx: at.yPx,
+      stack: 0,
+      alongPx: ringPointsPx(scene, centre, annulus.outerRadius, fromDeg, toScreen),
+    });
   }
   for (const path of scene.paths ?? []) {
-    pointLabel(`path:${path.id}`, path.label, path.labelAt);
+    if (path.label.length === 0) {
+      continue;
+    }
+    const at = toScreen(path.labelAt);
+    labels.push({
+      key: `path:${path.id}`,
+      text: path.label,
+      placement: "ring",
+      xPx: at.xPx,
+      yPx: at.yPx,
+      stack: 0,
+    });
   }
   return labels;
 }

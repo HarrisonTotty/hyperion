@@ -1,12 +1,18 @@
-import { markShiftDevicePx, useStrokeMetrics } from "../lib/strokes";
+import { useStrokeMetrics } from "../lib/strokes";
 import type { CameraAngles } from "./camera";
 import type { LocalFrame } from "../geometry/frame";
-import { TRIAD_MARKER_REM, type TriadAxis, type TriadBoxRem, triadLayout } from "./furniture";
+import {
+  TRIAD_HEAD_REM,
+  TRIAD_MARKER_REM,
+  type TriadAxis,
+  type TriadBoxRem,
+  triadLayout,
+  triadShiftRem,
+} from "./furniture";
 
 /** SVG user units in a `rem`, so that stroke widths read as CSS pixels at 100%. */
 const UNITS_PER_REM = 16;
-/** The arrowhead of an axis across the screen, and the dot of the towards symbol, in `rem`. */
-const HEAD_REM = 0.3;
+/** The dot of the towards symbol, in `rem`. */
 const DOT_REM = 0.09;
 
 function length(point: { readonly x: number; readonly y: number }): number {
@@ -44,7 +50,7 @@ function AxisMark({ axis, shiftRem }: AxisMarkProps) {
     y: direction.y * Math.max(0, lineReachRem),
   };
   const crossUnits = markerUnits * Math.SQRT1_2;
-  const headUnits = units(HEAD_REM);
+  const headUnits = units(TRIAD_HEAD_REM);
   const barb = (sign: number): string => {
     const angle = Math.atan2(direction.y, direction.x) + Math.PI + (sign * Math.PI) / 6;
     return `${tipXUnits + headUnits * Math.cos(angle)},${tipYUnits + headUnits * Math.sin(angle)}`;
@@ -104,10 +110,11 @@ export interface AxisTriadProps {
  * system's own plane still points to galactic north, coreward and spinward.
  */
 export function AxisTriad({ frame, angles, boxRem, axes: shown }: AxisTriadProps) {
-  const axes = triadLayout(frame, angles, boxRem, shown ?? frame);
-  // A mark's outline, at `--mark-stroke`, widens outward by δ (R07.T16.f): δ in `rem`.
+  // A mark's outline, at `--mark-stroke`, widens outward by δ (R07.T16.f), and the labels keep clear
+  // of the circles where they are drawn (R07.T16.j): δ in `rem`.
   const { devicePixelRatio, remPx } = useStrokeMetrics();
-  const shiftRem = markShiftDevicePx(devicePixelRatio) / devicePixelRatio / remPx;
+  const shiftRem = triadShiftRem(devicePixelRatio, remPx);
+  const axes = triadLayout(frame, angles, boxRem, shown ?? frame, shiftRem);
   const halfWidth = units(boxRem.width / 2);
   const halfHeight = units(boxRem.height / 2);
   return (
