@@ -200,9 +200,12 @@ pub fn band_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
 pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
     eye: &EyeObserver) -> Magnitudes;              // coarse pre-pass, darkest texel, +0.453 +0.1
 pub struct Glare { /* each listed star's direction, photopic and scotopic illuminance at the eye
-    after its own reddening */ }                                  // R06.T9.c, as built
+    after its own reddening, and their pyramid over the band's texels */ } // R06.T9.c and T9.i, as built
 impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar],
-    eye_cut: Magnitudes) -> Self; }                 // R06.T9.j: only the stars brighter than the eye's cut glare
+    spec: &BandSpec) -> Self;                       // R06.T9.i, as built: built for its band's texels
+    pub fn of_points(points: impl IntoIterator<Item = (UnitVector, Lux, SpRatio)>,
+        spec: &BandSpec) -> Self; }                 // R06.T9.i: point sources, a synthetic sky's
+// R06.T9.j: of_listed also takes eye_cut: Magnitudes; only the stars brighter than the eye's cut glare
 pub fn limit_rows(eye: &EyeObserver, spec: &BandSpec, glare: &Glare, face: CubeFace,
     rows: Range<u16>, texels: &mut [BandTexel]);                  // glare, then V_lim per texel
 pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
@@ -1736,6 +1739,10 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
     machine (the ruling's model: about 2).
   - Files: `sky/limits.rs`, `benches/sky.rs`. Acceptance:
     `cargo test -p hyperion-sim sky::limits`.
+  - As built (Risks, "Deviations in T9.i, as built"): `Glare::of_listed` takes the band's
+    `BandSpec`, whose texels its pyramid holds, and `Glare::of_points` gives a synthetic sky's glare
+    for the bench. The synthetic sky's test of every texel is slow, and runs as:
+    `cargo test --profile slow-test -p hyperion-sim --lib -- --ignored sky::limits::tests::on_300_000_synthetic_stars`.
 - **R06.T9.f The band's march, kept (new; after T9.e, before T11.c).** Decided 2026-10-06
   (`decision-r06-t9b-band.md`). `sky::band::{march_rows, BandMarch, sum_rows}`.
   - `march_rows` marches each ray once, at the rows' texels. Every edge a reply can state is a
@@ -4499,7 +4506,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     open), the whole first-sky budget. For T17 to measure. Every listed star veils its texel
     within 0.1° at some 10⁴ sr⁻¹ times its E, so dropping faint stars changes the map unless the self-veil
     below is ruled first; a far field from a coarse map is the other lever. _Decided 2026-10-06
-    (`decision-r06-t9c-glare.md`, item 2): R06.T9.i._
+    (`decision-r06-t9c-glare.md`, item 2): R06.T9.i. Built 2026-10-07 (below, "Deviations in
+    T9.i, as built")._
   - **Cross-target bits** rest on review (determinism audit: nothing to fix, GENERATOR_VERSION 20,
     no golden moves) until T17's `sky/band_face_row.golden`, which now also pins the row's eye
     limits against a census's glare.
@@ -4728,6 +4736,109 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **Not changed.** GENERATOR_VERSION stays 20. Nothing served or golden reads the cut (T11.a
     will call it), and no golden moves. The older records citing 7.95 (T7's, T8.e's and T8.f's)
     stand as the estimate they were.
+- **Deviations in T9.i, as built (2026-10-07).** The glare's pyramid in `sky::limits`, as the task
+  sets it out, with the ruling's near field and opening angle (4° and 0.25, not tuned), and with
+  these details.
+  - **The signatures.** The pyramid holds the band's own texels, so a glare is built for its band.
+    - `Glare::of_listed(observer, listed, spec)` takes the band's `BandSpec`.
+    - `limit_rows`, `limit_map` and `eye_offsets` keep their signatures. Each refuses a glare built
+      for faces of another size.
+    - `Glare::default()` has no pyramid and serves a band of any size, as T9.d's pre-pass needs.
+    - New and public: `Glare::of_points(points, spec)`, the glare of point sources, each a direction,
+      a `Lux` and an `SpRatio`. The bench needs it for its synthetic sky, since no `SkyStar` can be
+      made outside the crate.
+    - T9.j still adds the eye's cut to `of_listed`.
+  - **The pyramid.** All of it is private: `Pyramid`, `GlareNode`, `Square`, `NodeHolds` and
+    `GlareLight`.
+    - Per face, the leaves are the band's texels. Each square of texels is halved, rounding up for
+      a side that is not a power of two, up to one root a face. A square with no glaring star has no
+      node.
+    - A star glares where it has a direction and light. Its leaf is `BandSpec::texel_of` of its
+      direction, as `eye_offsets` finds it. A leaf keeps its stars in the census's order (a stable
+      sort).
+    - Each node keeps its stars' photopic and scotopic light and their photopic-weighted mean
+      direction. That direction is the normalised Σ E u of its stars, carried up unnormalised, not a
+      mean of its children's directions.
+    - Its radius is a leaf's largest angle to one of its stars, and a parent's largest angle to a
+      child's direction plus that child's radius, which bounds its stars.
+    - A node of one star keeps that star's direction, bit for bit, and radius 0. A node of one child
+      keeps the child's direction and radius. So a lone star taken whole gives its own exact term.
+  - **The rule, in cosines.** Each node keeps two cosines, against which a texel's centre is tested
+    by one dot product:
+    - −sin r, at or below which the node is skipped (d − r ≥ 90°);
+    - cos max(4 r, r + 4°), at or below which it is taken whole (r ≤ 0.25 d and d − r ≥ 4°).
+
+    A node taken whole adds its light times `veil_per_lux_at` at its mean direction, and nothing at
+    or beyond 90°. Every term, a star's or a node's, is that one function, K(θ) cos θ, which T9.h's
+    subtraction reads.
+
+  - **A texel's own leaf.** Before the cosines, every node whose square holds the texel is opened, by
+    an integer test of its face, level, row and column. So the rule holds at any band size. At 16² a
+    face-centre texel's corner lies 5° from its centre, past the near field: the test places two
+    stars there in a leaf that the cosines alone would take whole.
+  - **The order.** The roots go in face order and each node's children in their squares' order,
+    depth first. So each texel's veil depends on its direction, its own texel and the pyramid alone,
+    and any split of rows gives the same bits (tested at 16² and 64²). The sim spawns no threads,
+    and a server's jobs split rows.
+  - **The exact sum** is the same traversal with every node opened (`Opening::Every`, test-only),
+    each leaf's stars summed one by one. T9.c's and T9.h's identity test and T9.h's reach test take
+    it, still within 3.07 × 10⁻¹¹ mag. The pyramid gives a lone source's bits too, which the reach
+    test also checks.
+  - **Counted.** A private `Tally` trait counts the nodes tested, the nodes taken whole and the pairs
+    summed. The map's own runs count into `()`, which costs nothing.
+  - **Tests** (`cargo test -p hyperion-sim sky::limits`: 28, of which 5 are new and 1 is slow; 143 s
+    on four threads; logs in `.git/rm23-scratch/r06-census/t9i/`, the final runs in `final/`):
+    - Near the Sun at 64², cut 8.15, against the glare of the census within 200 ly (4,824 stars):
+      texel limits within 4.35 × 10⁻⁴ mag of the exact sum, 2.32 × 10⁻⁵ on average, and eye offsets
+      within 5.9 × 10⁻⁵. The pyramid sums 151,559 pairs and takes 6,989,356 nodes whole, 16.6 times
+      fewer evaluations than the exact sum's 118,554,624 pairs. With T9.c's two placed sources too
+      (4,826 sources): within 4.35 × 10⁻⁴ mag, 1.70 × 10⁻⁵ on average, and eye offsets within 5.9 ×
+      10⁻⁵, from 151,660 pairs and 6,994,610 nodes. Rows split as jobs give the same bits on +X and
+      +Z.
+    - The synthetic sky of 300,000 stars to V 10.06, the ruling's model's `sphere`: density 1 + 3
+      exp(−|b| ÷ 10°), N(< V) ∝ 10^(0.45 V) from V −1.5, ρ 1.5–3, and a band of μ 24.6 at the poles
+      to 22.2 in the plane. The pyramid makes 995 evaluations a texel: 12,790,116 pairs and
+      11,657,759 nodes taken whole, 301.6 times fewer than the exact sum's 7,372,800,000 pairs (the
+      ruling's model: 989 and 303 times). It tests 17,695,511 nodes. One row of each face lies
+      within 2.73 × 10⁻⁴ mag of the exact sum, and rows split as jobs give the same bits on −Y.
+    - Slow (`#[ignore]`, 140 s in the slow-test profile): every texel of the synthetic sky within
+      3.82 × 10⁻⁴ mag of the exact sum, 1.51 × 10⁻⁴ on average, and every eye offset within 2.53 ×
+      10⁻⁴ (the ruling's model: 4.2 × 10⁻⁴ and 1.5 × 10⁻⁴).
+    - A texel always opens its own leaf (above): there its veil and the stars' eye offsets are the
+      exact sum's, bit for bit, and the texel across the corner takes the leaf whole.
+    - A glare built for 16² faces is refused by an 8² band.
+    - The synthetic sky is held to a digest, `SYNTHETIC_SKY_DIGEST`, which the bench's copy of it
+      asserts too.
+  - **The cost** (provisional):
+    - By the process's CPU clock (`utime` and `stime`), on one thread in the slow-test profile at
+      load 6.6–8.3: at 300,000 stars the pyramid's map takes 1.38 CPU-s and the glare's build 0.07,
+      1.45 CPU-s in all, against 161.3 CPU-s for the exact sum (21.9 ns a pair), 111 times as much.
+      That is within the gate of 3 CPU-s. An earlier run by wall time, at load 11–23, gave 1.42 s
+      and 0.08 s against 190.9 s (25.9 ns a pair).
+    - The bench, `sky/limit_map`, release, without the heavy-test lock: another lane's refit held
+      it for hours, so the orchestrator ruled a provisional run at `CPUQuota=400%` (3 workers, load
+      7.7–9.5). `near_sun`: 0.32 CPU-s, 0.11 s wall (criterion 289 ms an iteration, the glare's
+      build 0.005 s). `synthetic_300k`: 1.03 CPU-s, 0.38 s wall (criterion 1.03 s, the build 0.055
+      s). The jobs' CPU time is each job's wall time, as the file's other benches take it. A
+      locked re-timing on a quiet machine is pending, for the orchestrator to schedule.
+    - The pair count is the gate that does not depend on the machine: 301.6 times fewer
+      evaluations, against the 100 the task asks for.
+  - **The medians** at 64² near the Sun, with the census's glare: 6.542 in the band and 7.664 at the
+    poles, as T9.h's probe had with E cos θ (6.542 and 7.664). With the placed V −9 star too, 6.489
+    and 7.334. That star lights a whole hemisphere: at 60° its veil, about 1.7 × 10⁻⁵ cd m⁻², is about
+    1.5 times the poles' own band (about 1.2 × 10⁻⁵).
+  - **Not changed.** No wire bytes, client code or wire docs change, and T9.d's tests read no glare.
+    GENERATOR_VERSION stays 20, and no golden moves: nothing generated or golden reads the map.
+    Cross-target bits rest on review until T17's `band_face_row.golden` pins the pyramid's bits,
+    after T9.j. The skip and whole decisions turn on libm's `sin`, `cos` and `acos`, as the
+    sightlines' do (determinism audit).
+  - **Reviews.** Determinism audit: nothing to fix (`golden_diff` 0). Applied from its
+    suggestions: the test and the bench hold their two copies of the synthetic sky to one digest,
+    and a test holds a leaf to the census's order. Science check: the physics and the cosine forms
+    are confirmed. Applied: the synthetic band's profile and the exact sum's cost in the docs, the
+    tolerance's quantum (a texel limit's millimagnitude, a tenth of an eye offset's centimagnitude),
+    the 0.13 mag's opening angle (0.5), a note that a node's scotopic sum errs at first order in its
+    stars' spread of ρ, and two phrases here.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;

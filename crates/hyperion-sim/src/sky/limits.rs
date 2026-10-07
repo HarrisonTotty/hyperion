@@ -1,5 +1,6 @@
 //! The naked eye's limit in every direction of the band, and each listed star's own: the limit
-//! map and the eye offsets (rendering plan R06, R06.T9.c and R06.T9.h; Design notes 4, 5 and 17).
+//! map and the eye offsets (rendering plan R06, R06.T9.c, R06.T9.h and R06.T9.i; Design notes 4,
+//! 5 and 17).
 //!
 //! Each texel's limit is Crumey's threshold ([`naked_eye_limit`]) against the background the eye
 //! sees in the direction of the texel's centre, the direction its ray takes: the band's light there,
@@ -35,6 +36,16 @@
 //! weight of the whole background, band and veils together, since the eye adapts to all it sees
 //! ([`blackwell_equivalent_factor`]'s construction). F stays the observer's: the glare is
 //! modelled, not folded into F (R06's Risks, "Glare double count").
+//!
+//! **The far field** (R06.T9.i; decided 2026-10-06, `decision-r06-t9c-glare.md`, item 2). The
+//! sum over every listed star costs texels × stars: for a 64² band at the census's 300,000 stars,
+//! about 140 CPU-s at T9.c's 19 ns a pair, and 161 CPU-s measured on one thread in T9.i (21.9 ns
+//! a pair, R06's Risks, "Deviations in T9.i, as built"). So the veil is summed over a pyramid of
+//! the band's own texels
+//! ([`Glare`]): star by star within 4° of a texel's centre, and beyond by node monopoles under an
+//! opening angle of 0.25. Every texel's limit is then within 0.001 mag of the exact sum, the
+//! quantum of the wire's texel limit (millimagnitudes, Design note 17). A texel always opens its
+//! own leaf, so each star's own term below is still the term the map added for it.
 //!
 //! **A star's own veil is not its own background** (R06.T9.h). Crumey's eq. 34 fits Blackwell's
 //! thresholds for small targets seen by real eyes, so the target's own light scattered in the eye
@@ -75,6 +86,63 @@ use super::eye::{
     veiling_luminance,
 };
 
+/// The glare's near field, degrees (R06.T9.i; decided 2026-10-06, `decision-r06-t9c-glare.md`,
+/// item 2). A node of the glare's pyramid is taken whole only where its stars may all lie this far
+/// or more from a texel's centre. Nearer, CIE's 10 ÷ θ³ term varies too fast across a node for one
+/// direction to stand for it. In the ruling's model, on 30,000 stars, an opening angle alone took
+/// monopoles a few tenths of a degree from bright stars, with errors of up to 0.13 mag at an
+/// opening angle of 0.5 and 0.013 mag at 0.25.
+const NEAR_FIELD_DEG: f64 = 4.0;
+
+/// The glare pyramid's opening angle (the same ruling): a node is taken whole only where its
+/// radius is at most this fraction of its angle from a texel's centre.
+const OPENING_ANGLE: f64 = 0.25;
+
+/// The veil per lux in the plane of the eye, cd m⁻² lx⁻¹, of light whose direction has the cosine
+/// `cos` with a texel's centre. It is [`veiling_luminance`]'s per lux at that angle θ, times cos θ
+/// for the illuminance in the plane of the eye. It is `None` at or beyond 90°, behind the eye's
+/// plane, which gives no illuminance there.
+///
+/// Every term of the map's veil, a star's or a node's, and each star's own term
+/// ([`eye_offsets`]) is this. So the term a star is excluded by is, bit for bit, the term the map
+/// added for it.
+#[must_use]
+fn veil_per_lux_at(eye: &EyeObserver, cos: f64) -> Option<f64> {
+    if cos <= 0.0 {
+        return None;
+    }
+    let angle = math::acos(cos.min(1.0)) / RADIANS_PER_DEGREE;
+    let per_lux = veiling_luminance(eye, Lux::new(1.0), Degrees::new(angle))
+        .expect("a unit illuminance and an angle of 0–90° are valid")
+        .value();
+    Some(per_lux * cos)
+}
+
+/// The photopic and scotopic veil, cd m⁻², of light `light` (photopic and scotopic illuminance at
+/// the eye, lux) from direction `from` over a texel whose centre lies in direction `toward`: none
+/// where [`veil_per_lux_at`] is `None`.
+#[must_use]
+fn veil_of(
+    eye: &EyeObserver,
+    toward: &UnitVector,
+    from: &UnitVector,
+    light: [f64; 2],
+) -> Option<[f64; 2]> {
+    veil_per_lux_at(eye, toward.dot(from)).map(|per_lux| [light[0] * per_lux, light[1] * per_lux])
+}
+
+/// The angle between `a` and `b`, degrees.
+#[must_use]
+fn angle_deg(a: &UnitVector, b: &UnitVector) -> f64 {
+    math::acos(a.dot(b).clamp(-1.0, 1.0)) / RADIANS_PER_DEGREE
+}
+
+/// A `u32` index into one of the pyramid's arrays, as a `usize`.
+#[must_use]
+fn at(index: u32) -> usize {
+    usize::try_from(index).expect("a u32 index fits the usize of every target the sim builds for")
+}
+
 /// One listed star as the glare reads it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct GlareSource {
@@ -90,66 +158,437 @@ struct GlareSource {
 }
 
 impl GlareSource {
-    /// The veil per lux of this source's illuminance over a texel whose centre lies in direction
-    /// `toward`, cd m⁻² lx⁻¹: [`veiling_luminance`]'s per lux at its angle θ, times cos θ for the
-    /// illuminance in the plane of the eye. `None` for a source with no direction, and for one at
-    /// or beyond 90°, behind the eye's plane, which gives no illuminance there.
-    ///
-    /// The map's veil and each star's own term ([`eye_offsets`]) are both this, so the term a star
-    /// is excluded by is, bit for bit, the term the map added for it.
+    /// Its photopic and scotopic light, lux.
     #[must_use]
-    fn veil_per_lux(&self, eye: &EyeObserver, toward: &UnitVector) -> Option<f64> {
-        let cos = toward.dot(&self.direction?);
-        if cos <= 0.0 {
-            return None;
-        }
-        let angle = math::acos(cos.min(1.0)) / RADIANS_PER_DEGREE;
-        let per_lux = veiling_luminance(eye, Lux::new(1.0), Degrees::new(angle))
-            .expect("a unit illuminance and an angle of 0–90° are valid")
-            .value();
-        Some(per_lux * cos)
+    const fn light(&self) -> [f64; 2] {
+        [self.photopic, self.scotopic]
     }
 
-    /// The photopic and scotopic veil this source adds over a texel in direction `toward`, cd m⁻²:
-    /// none where [`veil_per_lux`](Self::veil_per_lux) is `None`.
+    /// The photopic and scotopic veil this source adds over a texel in direction `toward`, cd m⁻²
+    /// ([`veil_of`]): none for a source with no direction, and none at or beyond 90°.
     #[must_use]
     fn veil(&self, eye: &EyeObserver, toward: &UnitVector) -> Option<[f64; 2]> {
-        self.veil_per_lux(eye, toward)
-            .map(|per_lux| [self.photopic * per_lux, self.scotopic * per_lux])
+        veil_of(eye, toward, &self.direction?, self.light())
+    }
+}
+
+/// A count of what the glare's traversal evaluates, so that its cost can be stated independently
+/// of the machine (R06.T9.i). The map's own runs count nothing (`()`).
+trait Tally {
+    /// A node tested.
+    fn visit(&mut self);
+    /// A node taken whole, by its monopole.
+    fn whole(&mut self);
+    /// A star–texel pair summed, in an opened leaf.
+    fn pair(&mut self);
+}
+
+impl Tally for () {
+    fn visit(&mut self) {}
+    fn whole(&mut self) {}
+    fn pair(&mut self) {}
+}
+
+/// How the glare's pyramid is traversed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Opening {
+    /// By the ruling's rule: the near field star by star, the far field by node monopoles.
+    Pyramid,
+    /// Every node opened, every star summed one by one: the exact sum, which the tests take as the
+    /// reference.
+    #[cfg(test)]
+    Every,
+}
+
+/// A square of a face's texels, the region a node of the glare's pyramid covers: its face, its
+/// level (0 for a texel), and its row and column at that level, a texel's row and column halved
+/// `level` times. A face of a side that is not a power of two has partial squares at its bottom
+/// and right edges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Square {
+    face: CubeFace,
+    level: u8,
+    row: u16,
+    column: u16,
+}
+
+impl Square {
+    /// The square of the next level up that holds this one.
+    #[must_use]
+    const fn parent(self) -> Self {
+        Self {
+            face: self.face,
+            level: self.level + 1,
+            row: self.row >> 1,
+            column: self.column >> 1,
+        }
+    }
+
+    /// Whether it holds the texel at `row` and `column` of `face`.
+    #[must_use]
+    fn holds(self, face: CubeFace, row: u16, column: u16) -> bool {
+        self.face == face && row >> self.level == self.row && column >> self.level == self.column
+    }
+}
+
+/// What a node of the glare's pyramid holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NodeHolds {
+    /// Its children, `len` node indices from `start` in [`Pyramid::links`], in their squares'
+    /// order.
+    Children { start: u32, len: u32 },
+    /// A leaf's stars, `len` from `start` in [`Pyramid::stars`], in the census's order.
+    Stars { start: u32, len: u32 },
+}
+
+/// A glaring star as the pyramid holds it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GlareLight {
+    /// Its direction from the observer.
+    direction: UnitVector,
+    /// Its photopic and scotopic illuminance at the eye, lux.
+    light: [f64; 2],
+}
+
+/// One node of the glare's pyramid: the glaring stars of a square of a face's texels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GlareNode {
+    /// Its stars' photopic-weighted mean direction, at which it is taken whole: a lone star's own
+    /// direction, bit for bit.
+    centre: UnitVector,
+    /// Its stars' photopic and scotopic illuminance at the eye, lux, summed.
+    light: [f64; 2],
+    /// The cosine between a texel's centre and [`centre`](Self::centre) at or below which the node
+    /// lies wholly behind the eye's plane, d − r ≥ 90°: −sin r, r its radius (below every cosine
+    /// for r ≥ 90°).
+    behind_at: f64,
+    /// The cosine at or below which it is taken whole, r ≤ 0.25 d and d − r ≥ 4°: cos max(4 r, r +
+    /// 4°) (below every cosine where that reaches 180°).
+    whole_at: f64,
+    /// The texels it covers.
+    square: Square,
+    holds: NodeHolds,
+}
+
+impl GlareNode {
+    /// The node of radius `radius_deg` about `centre` (the angle from it within which its stars
+    /// lie, degrees), with its rule's two cosines.
+    #[must_use]
+    fn new(
+        centre: UnitVector,
+        light: [f64; 2],
+        radius_deg: f64,
+        square: Square,
+        holds: NodeHolds,
+    ) -> Self {
+        let behind_at = if radius_deg < 90.0 {
+            -math::sin(radius_deg * RADIANS_PER_DEGREE)
+        } else {
+            f64::NEG_INFINITY
+        };
+        let whole_from_deg = (radius_deg / OPENING_ANGLE).max(radius_deg + NEAR_FIELD_DEG);
+        let whole_at = if whole_from_deg < 180.0 {
+            math::cos(whole_from_deg * RADIANS_PER_DEGREE)
+        } else {
+            f64::NEG_INFINITY
+        };
+        Self {
+            centre,
+            light,
+            behind_at,
+            whole_at,
+            square,
+            holds,
+        }
+    }
+}
+
+/// A node while the pyramid is built: its square, its index, its stars' photopic-weighted sum of
+/// directions (lux) and its radius, degrees.
+#[derive(Debug, Clone, Copy)]
+struct Built {
+    square: Square,
+    index: u32,
+    weighted: [f64; 3],
+    radius_deg: f64,
+}
+
+/// The glare's pyramid over a band's texels (R06.T9.i; decided 2026-10-06,
+/// `decision-r06-t9c-glare.md`, item 2): per face, from its leaves, the band's texels, up to one
+/// node a face, each node of a square of texels holding its glaring stars' light, their mean
+/// direction and their radius about it.
+#[derive(Debug, Clone, PartialEq)]
+struct Pyramid {
+    /// The side of the band's faces, texels: the leaves'.
+    face_texels: u16,
+    nodes: Vec<GlareNode>,
+    /// Each face's root, in [`CubeFace::ALL`]'s order, for the faces that hold a glaring star.
+    roots: Vec<u32>,
+    /// The internal nodes' children.
+    links: Vec<u32>,
+    /// The glaring stars, leaf by leaf.
+    stars: Vec<GlareLight>,
+}
+
+impl Pyramid {
+    /// The pyramid of `sources` over the texels of a band of `spec`. A star glares where it has a
+    /// direction and light; its leaf is the texel its direction falls in ([`BandSpec::texel_of`]),
+    /// as [`eye_offsets`] finds it.
+    ///
+    /// Each leaf keeps its stars in the census's order. Each node's sums run over its stars or its
+    /// children in a fixed order, so the pyramid is a function of `sources` and the band alone.
+    #[must_use]
+    fn build(spec: BandSpec, sources: &[GlareSource]) -> Self {
+        let mut placed: Vec<(Square, GlareLight)> = sources
+            .iter()
+            .filter_map(|source| {
+                let direction = source.direction?;
+                if source.photopic <= 0.0 {
+                    return None;
+                }
+                let (face, row, column) = spec
+                    .texel_of(direction.components())
+                    .expect("a unit direction falls in a texel");
+                let square = Square {
+                    face,
+                    level: 0,
+                    row,
+                    column,
+                };
+                let light = source.light();
+                debug_assert!(
+                    light.iter().all(|l| l.is_finite()),
+                    "a star's light of {light:?} lx"
+                );
+                Some((square, GlareLight { direction, light }))
+            })
+            .collect();
+        // A stable sort: each leaf keeps the census's order.
+        placed.sort_by_key(|(square, _)| *square);
+        let mut pyramid = Self {
+            face_texels: spec.face_texels(),
+            nodes: Vec::new(),
+            roots: Vec::new(),
+            links: Vec::new(),
+            stars: placed.iter().map(|(_, star)| *star).collect(),
+        };
+        let mut level = Vec::new();
+        let mut start = 0;
+        for leaf in placed.chunk_by(|a, b| a.0 == b.0) {
+            let end = start + leaf.len();
+            level.push(pyramid.leaf(leaf[0].0, start, end));
+            start = end;
+        }
+        let mut side = spec.face_texels();
+        while side > 1 {
+            let mut children = std::mem::take(&mut level);
+            children.sort_by_key(|child| (child.square.parent(), child.square));
+            for family in children.chunk_by(|a, b| a.square.parent() == b.square.parent()) {
+                level.push(pyramid.parent(family));
+            }
+            side = side.div_ceil(2);
+        }
+        pyramid.roots = level.iter().map(|root| root.index).collect();
+        pyramid
+    }
+
+    /// Adds the leaf of `square` holding the stars `start..end`.
+    fn leaf(&mut self, square: Square, start: usize, end: usize) -> Built {
+        let members = &self.stars[start..end];
+        let (mut light, mut weighted) = ([0.0, 0.0], [0.0; 3]);
+        for star in members {
+            light = [light[0] + star.light[0], light[1] + star.light[1]];
+            let u = star.direction.components();
+            weighted = [0, 1, 2].map(|k| weighted[k] + star.light[0] * u[k]);
+        }
+        let (centre, radius_deg) = if let [star] = members {
+            (star.direction, 0.0)
+        } else {
+            let centre = UnitVector::from_components(weighted)
+                .expect("the stars of one texel, each of positive light, have a mean direction");
+            let radius = members
+                .iter()
+                .map(|star| angle_deg(&centre, &star.direction))
+                .fold(0.0, f64::max);
+            (centre, radius)
+        };
+        let holds = NodeHolds::Stars {
+            start: u32::try_from(start).expect("under 2³² glaring stars"),
+            len: u32::try_from(members.len()).expect("under 2³² glaring stars"),
+        };
+        self.push(
+            GlareNode::new(centre, light, radius_deg, square, holds),
+            weighted,
+            radius_deg,
+        )
+    }
+
+    /// Adds the parent of `family`, the nodes of one square's quarters, in their squares' order.
+    fn parent(&mut self, family: &[Built]) -> Built {
+        let start = self.links.len();
+        self.links.extend(family.iter().map(|child| child.index));
+        let (mut light, mut weighted) = ([0.0, 0.0], [0.0; 3]);
+        for child in family {
+            let node = &self.nodes[at(child.index)];
+            light = [light[0] + node.light[0], light[1] + node.light[1]];
+            weighted = [0, 1, 2].map(|k| weighted[k] + child.weighted[k]);
+        }
+        let (centre, radius_deg) = if let [only] = family {
+            (self.nodes[at(only.index)].centre, only.radius_deg)
+        } else {
+            let centre = UnitVector::from_components(weighted).expect(
+                "the stars of one face, each of positive light and within 55° of its axis, have a \
+                 mean direction",
+            );
+            let radius = family
+                .iter()
+                .map(|child| {
+                    angle_deg(&centre, &self.nodes[at(child.index)].centre) + child.radius_deg
+                })
+                .fold(0.0, f64::max);
+            (centre, radius)
+        };
+        let holds = NodeHolds::Children {
+            start: u32::try_from(start).expect("under 2³² nodes"),
+            len: u32::try_from(family.len()).expect("at most four quarters"),
+        };
+        let square = family[0].square.parent();
+        self.push(
+            GlareNode::new(centre, light, radius_deg, square, holds),
+            weighted,
+            radius_deg,
+        )
+    }
+
+    /// Adds `node`, of the photopic-weighted sum of directions `weighted` and radius `radius_deg`.
+    fn push(&mut self, node: GlareNode, weighted: [f64; 3], radius_deg: f64) -> Built {
+        let index = u32::try_from(self.nodes.len()).expect("under 2³² nodes");
+        let square = node.square;
+        self.nodes.push(node);
+        Built {
+            square,
+            index,
+            weighted,
+            radius_deg,
+        }
+    }
+
+    /// The photopic and scotopic veil over the texel `texel` (its face, row and column), whose
+    /// centre lies in direction `toward`, cd m⁻² (the [`Glare`] documentation): the roots in face
+    /// order, each node's children in their squares' order, each opened leaf's stars in the
+    /// census's order. `stack` is the traversal's, its contents discarded.
+    #[must_use]
+    fn veil(
+        &self,
+        eye: &EyeObserver,
+        toward: &UnitVector,
+        texel: (CubeFace, u16, u16),
+        opening: Opening,
+        stack: &mut Vec<u32>,
+        tally: &mut impl Tally,
+    ) -> [f64; 2] {
+        let (face, row, column) = texel;
+        let (mut photopic, mut scotopic) = (0.0, 0.0);
+        stack.clear();
+        stack.extend(self.roots.iter().rev());
+        while let Some(index) = stack.pop() {
+            let node = &self.nodes[at(index)];
+            tally.visit();
+            // A texel always opens its own leaf, and so every node above it, whatever the rule's
+            // radius and angle: the star's own term is then the term `eye_offsets` subtracts.
+            if opening == Opening::Pyramid && !node.square.holds(face, row, column) {
+                let cos = toward.dot(&node.centre);
+                if cos <= node.behind_at {
+                    continue;
+                }
+                if cos <= node.whole_at {
+                    tally.whole();
+                    if let Some(per_lux) = veil_per_lux_at(eye, cos) {
+                        photopic += node.light[0] * per_lux;
+                        scotopic += node.light[1] * per_lux;
+                    }
+                    continue;
+                }
+            }
+            match node.holds {
+                NodeHolds::Children { start, len } => {
+                    stack.extend(self.links[at(start)..at(start + len)].iter().rev());
+                }
+                NodeHolds::Stars { start, len } => {
+                    for star in &self.stars[at(start)..at(start + len)] {
+                        tally.pair();
+                        if let Some([p, s]) = veil_of(eye, toward, &star.direction, star.light) {
+                            photopic += p;
+                            scotopic += s;
+                        }
+                    }
+                }
+            }
+        }
+        [photopic, scotopic]
     }
 }
 
 /// The glare of a census's listed stars as the limit map reads it (Design note 4): each star's
 /// direction from the observer, and its photopic and scotopic illuminance at the eye after its own
-/// reddening.
+/// reddening, summed over a pyramid of the band's texels (R06.T9.i).
 ///
-/// A request builds it once from its census, and every job of the band's rows reads it: each star's
-/// reddening is resolved here, once. It holds one entry a listed star, in the census's order, which
-/// [`eye_offsets`] keeps. The default holds no star, as a band's limits against its own light alone
-/// (the eye cut's pre-pass, R06.T9.d) are.
+/// A request builds it once from its census, for its band, and every job of the band's rows reads
+/// it: each star's reddening is resolved here, once. It holds one entry a listed star, in the
+/// census's order, which [`eye_offsets`] keeps. The default holds no star, as a band's limits
+/// against its own light alone (the eye cut's pre-pass, R06.T9.d) are, and serves a band of any
+/// size.
+///
+/// **The pyramid** (decided 2026-10-06, `decision-r06-t9c-glare.md`, item 2). Per face, a pyramid
+/// of the band's own texels runs from its leaves, the texels, up to one node a face, halving each
+/// square of texels at each level. Each node keeps its glaring stars' photopic and scotopic
+/// illuminance, their photopic-weighted mean direction (a lone star's own) and an angular radius r
+/// within which they lie about it. Over each texel, a node at angle d from the texel's centre,
+/// measured to its mean direction:
+///
+/// - is skipped when d − r ≥ 90°, since every star it holds is then behind the eye's plane;
+/// - is taken whole when r ≤ 0.25 d and d − r ≥ 4°: its illuminance times the veil per lux in the
+///   plane of the eye at its mean direction;
+/// - is otherwise opened, and an opened leaf is summed star by star.
+///
+/// A node's scotopic light is taken whole at its photopic mean direction too. About that
+/// direction the photopic sum's first-order error vanishes, but the scotopic sum keeps one, in the
+/// spread of the stars' ρ within the node. The tests bound both together.
+///
+/// A texel always opens its own leaf, so the term [`eye_offsets`] subtracts for a star is exactly
+/// the term the map added. The traversal and the sums run in a fixed order, so each texel's veil
+/// is a function of its own direction and the census alone, and any split of rows gives the same
+/// bits. Against the exact sum, every star summed one by one, each texel's limit is within 0.001
+/// mag, at 64² near the Sun and on a synthetic sky of 300,000 stars to V 10.06, which the pyramid
+/// sums in about a three-hundredth of the exact sum's evaluations (R06's Risks, "Deviations in
+/// T9.i, as built").
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Glare {
     sources: Vec<GlareSource>,
+    /// The pyramid the veil is summed over, for the band it was built for: `None` for the default,
+    /// which holds no star.
+    pyramid: Option<Pyramid>,
 }
 
 impl Glare {
     /// The glare of the stars `listed` (a [`SkyCensus`](super::census::SkyCensus)'s listed stars,
-    /// not its overflow, whose light the band holds) as `observer` sees them.
+    /// not its overflow, whose light the band holds) as `observer` sees them, over the texels of a
+    /// band of `spec`, the band whose limits it sets.
     ///
     /// Each star's photopic illuminance is its unextinguished light through its own
     /// [`StarColour::reddened`](super::colour::StarColour::reddened) at its extinction, as the
     /// band's overflow points take it, and its scotopic light that times the reddened S/P ratio. A
     /// star at the observer's own position, which has no direction, adds no glare.
     ///
-    /// The veil is summed in the stars' order, so `listed` is the census's own, by
-    /// [`sky_order`](super::census::sky_order), as [`SkyCensus::listed`](super::census::SkyCensus::listed)
-    /// gives it.
+    /// Each leaf of the pyramid sums its stars in the census's order, so `listed` is the census's
+    /// own, by [`sky_order`](super::census::sky_order), as
+    /// [`SkyCensus::listed`](super::census::SkyCensus::listed) gives it.
     ///
     /// # Panics
     ///
     /// In debug builds, if `listed` is not in that order.
     #[must_use]
-    pub fn of_listed(observer: &Observer, listed: &[SkyStar]) -> Self {
+    pub fn of_listed(observer: &Observer, listed: &[SkyStar], spec: &BandSpec) -> Self {
         debug_assert!(
             listed
                 .windows(2)
@@ -173,7 +612,69 @@ impl Glare {
                 }
             })
             .collect();
-        Self { sources }
+        Self::of_sources(sources, *spec)
+    }
+
+    /// The glare of point sources `points`, each its direction from the observer, its photopic
+    /// illuminance at the eye and its S/P ratio, over the texels of a band of `spec`: a synthetic
+    /// sky's, as the limit map's bench takes 300,000 stars (`sky/limit_map`). The sources are
+    /// summed in their order within each leaf, as [`of_listed`](Self::of_listed)'s stars are.
+    ///
+    /// # Panics
+    ///
+    /// If an illuminance is negative or not finite.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::coords::UnitVector;
+    /// use hyperion_sim::sky::band::BandSpec;
+    /// use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude};
+    /// use hyperion_sim::sky::limits::Glare;
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// // A V 0 star towards the north galactic pole and a V 1 star along +x, both of the
+    /// // reference colour.
+    /// let rho = SpRatio::REFERENCE;
+    /// let points = [
+    ///     (UnitVector::NORTH, illuminance_of_magnitude(Magnitudes::new(0.0)), rho),
+    ///     (UnitVector::X, illuminance_of_magnitude(Magnitudes::new(1.0)), rho),
+    /// ];
+    /// let glare = Glare::of_points(points, &BandSpec::STANDARD);
+    /// assert_eq!(glare.len(), 2);
+    /// ```
+    #[must_use]
+    pub fn of_points(
+        points: impl IntoIterator<Item = (UnitVector, Lux, SpRatio)>,
+        spec: &BandSpec,
+    ) -> Self {
+        let sources = points
+            .into_iter()
+            .map(|(direction, illuminance, sp_ratio)| {
+                let photopic = illuminance.value();
+                assert!(
+                    photopic.is_finite() && photopic >= 0.0,
+                    "a glaring source of {photopic} lx"
+                );
+                GlareSource {
+                    direction: Some(direction),
+                    photopic,
+                    scotopic: photopic * sp_ratio.value(),
+                    sp_ratio: sp_ratio.value(),
+                }
+            })
+            .collect();
+        Self::of_sources(sources, *spec)
+    }
+
+    /// The glare of `sources` over the texels of a band of `spec`.
+    #[must_use]
+    fn of_sources(sources: Vec<GlareSource>, spec: BandSpec) -> Self {
+        let pyramid = Pyramid::build(spec, &sources);
+        Self {
+            sources,
+            pyramid: Some(pyramid),
+        }
     }
 
     /// The number of listed stars it holds, one a star, whether or not each glares.
@@ -188,36 +689,34 @@ impl Glare {
         self.sources.is_empty()
     }
 
-    /// The photopic and scotopic veiling luminance towards `toward`, cd m⁻²: each source's
-    /// [`GlareSource::veil`], summed in the sources' order.
-    #[must_use]
-    fn veil(&self, eye: &EyeObserver, toward: &UnitVector) -> [f64; 2] {
-        let (mut photopic, mut scotopic) = (0.0, 0.0);
-        for [p, s] in self
-            .sources
-            .iter()
-            .filter_map(|source| source.veil(eye, toward))
-        {
-            photopic += p;
-            scotopic += s;
+    /// Panics unless it was built for a band of `spec`'s faces, or holds no pyramid.
+    fn assert_for(&self, spec: BandSpec) {
+        if let Some(pyramid) = &self.pyramid {
+            assert_eq!(
+                pyramid.face_texels,
+                spec.face_texels(),
+                "a glare built for faces of {0}² texels read on a band of {1}² texels",
+                pyramid.face_texels,
+                spec.face_texels()
+            );
         }
-        [photopic, scotopic]
     }
-}
 
-#[cfg(test)]
-impl Glare {
-    /// This glare and one more source: a star in `direction` of photopic illuminance `photopic`,
-    /// lux, and S/P ratio `sp_ratio`.
+    /// The photopic and scotopic veiling luminance over the texel `texel` (its face, row and
+    /// column) in direction `toward`, cd m⁻² ([`Pyramid::veil`]): none for the default.
     #[must_use]
-    fn with_source(mut self, direction: UnitVector, photopic: f64, sp_ratio: f64) -> Self {
-        self.sources.push(GlareSource {
-            direction: Some(direction),
-            photopic,
-            scotopic: photopic * sp_ratio,
-            sp_ratio,
-        });
-        self
+    fn veil(
+        &self,
+        eye: &EyeObserver,
+        toward: &UnitVector,
+        texel: (CubeFace, u16, u16),
+        opening: Opening,
+        stack: &mut Vec<u32>,
+        tally: &mut impl Tally,
+    ) -> [f64; 2] {
+        self.pyramid.as_ref().map_or([0.0, 0.0], |pyramid| {
+            pyramid.veil(eye, toward, texel, opening, stack, tally)
+        })
     }
 }
 
@@ -270,21 +769,21 @@ fn texel_limit(eye: &EyeObserver, texel: &BandTexel, veil: [f64; 2]) -> Magnitud
 /// Sets the eye's limit of each texel of rows `rows` (from the top) of `face`, `texels` in
 /// [`band_rows`](super::band::band_rows)' order (row by row, each from its left): Crumey's
 /// threshold for `eye` against the texel's light and the veiling glare `glare` over it (Design note
-/// 4; the [module](self) documentation). Each texel keeps the veil, photopic and scotopic, beside
-/// its limit, for [`eye_offsets`].
+/// 4; the [module](self) documentation), summed over the glare's pyramid ([`Glare`], R06.T9.i).
+/// Each texel keeps the veil, photopic and scotopic, beside its limit, for [`eye_offsets`].
 ///
 /// A server runs it on each job's rows of the band; each texel's limit is a function of its own
-/// light, its direction and the glare alone, so any split of a face's rows gives the same bits.
-/// The texels' light, chroma and ρ are not changed.
+/// light, its direction and the glare alone, the pyramid traversed in a fixed order, so any split
+/// of a face's rows gives the same bits. The texels' light, chroma and ρ are not changed.
 ///
 /// An S/P ratio of the band and the veils together outside 0.01–100, which no starlight reaches, is
 /// read at the nearer bound, and a background brighter than 10¹² cd m⁻² at that.
 ///
 /// # Panics
 ///
-/// If `rows` reaches past the face's last row, or `texels` is not those rows' texels in number;
-/// and in debug builds, if a texel's light or the veil over it is not finite, which no band or
-/// census gives.
+/// If `rows` reaches past the face's last row, `texels` is not those rows' texels in number, or
+/// `glare` was built for a band of faces of another size; and in debug builds, if a texel's light
+/// or the veil over it is not finite, which no band or census gives.
 pub fn limit_rows(
     eye: &EyeObserver,
     spec: &BandSpec,
@@ -292,6 +791,33 @@ pub fn limit_rows(
     face: CubeFace,
     rows: Range<u16>,
     texels: &mut [BandTexel],
+) {
+    set_limits(
+        eye,
+        *spec,
+        glare,
+        face,
+        rows,
+        texels,
+        Opening::Pyramid,
+        &mut (),
+    );
+}
+
+/// [`limit_rows`], with the pyramid opened by `opening`, its evaluations counted in `tally`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "limit_rows' six, the opening and the tally"
+)]
+fn set_limits(
+    eye: &EyeObserver,
+    spec: BandSpec,
+    glare: &Glare,
+    face: CubeFace,
+    rows: Range<u16>,
+    texels: &mut [BandTexel],
+    opening: Opening,
+    tally: &mut impl Tally,
 ) {
     let side = spec.face_texels();
     assert!(
@@ -303,10 +829,19 @@ pub fn limit_rows(
         rows.len() * usize::from(side),
         "texels for rows {rows:?} of a face of {side}² texels"
     );
+    glare.assert_for(spec);
+    let mut stack = Vec::new();
     let places = rows.flat_map(|row| (0..side).map(move |column| (row, column)));
     for (texel, (row, column)) in texels.iter_mut().zip(places) {
         let toward = spec.texel_direction(face, row, column);
-        let veil = glare.veil(eye, &toward);
+        let veil = glare.veil(
+            eye,
+            &toward,
+            (face, row, column),
+            opening,
+            &mut stack,
+            tally,
+        );
         let limit = texel_limit(eye, texel, veil);
         texel.set_eye_limit(limit, veil);
     }
@@ -370,6 +905,18 @@ pub fn limit_rows(
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare, band: &mut [BandTexel]) {
+    map_limits(eye, *spec, glare, band, Opening::Pyramid, &mut ());
+}
+
+/// [`limit_map`], with the pyramid opened by `opening`, its evaluations counted in `tally`.
+fn map_limits(
+    eye: &EyeObserver,
+    spec: BandSpec,
+    glare: &Glare,
+    band: &mut [BandTexel],
+    opening: Opening,
+    tally: &mut impl Tally,
+) {
     let side = spec.face_texels();
     let face_len = usize::from(side) * usize::from(side);
     assert_eq!(
@@ -381,7 +928,7 @@ pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare, band: &mut [
         .into_iter()
         .zip(band.chunks_exact_mut(face_len))
     {
-        limit_rows(eye, spec, glare, face, 0..side, texels);
+        set_limits(eye, spec, glare, face, 0..side, texels, opening, tally);
     }
 }
 
@@ -443,8 +990,9 @@ fn eye_offset_parts(
     let own = source
         .veil(eye, &spec.texel_direction(face, row, column))
         .unwrap_or([0.0, 0.0]);
-    // The texel's veil is a sum of non-negative terms that holds this one, so in floating point it
-    // is at least this term, and each difference is at least zero.
+    // The texel's veil is a sum of non-negative terms that holds this one, bit for bit, since a
+    // texel always opens its own leaf of the pyramid. So in floating point it is at least this
+    // term, and each difference is at least zero.
     debug_assert!(
         own[0] <= veil[0] && own[1] <= veil[1],
         "a star's own veil {own:?} within its texel's {veil:?}: the band's limits are this glare's"
@@ -463,8 +1011,9 @@ fn eye_offset_parts(
 /// A star's own veil is not its own background (the [module](self) documentation). A star's texel
 /// is the one its direction falls in ([`BandSpec::texel_of`]), and its own limit is
 /// [`naked_eye_limit`] against that texel's background less the veil the map added for it, at its
-/// angle from the texel's centre (the same term, bit for bit), plus its [`star_colour_offset`] at
-/// its reddened ρ against that background. Its offset is that less the texel's limit, the sum of:
+/// angle from the texel's centre (the same term, bit for bit, since a texel always opens its own
+/// leaf of the glare's pyramid, R06.T9.i), plus its [`star_colour_offset`] at its reddened ρ
+/// against that background. Its offset is that less the texel's limit, the sum of:
 ///
 /// - its self-exclusion, its own limit before the colour offset less the texel's limit, which is
 ///   never negative in a scotopic texel;
@@ -488,9 +1037,10 @@ fn eye_offset_parts(
 ///
 /// # Panics
 ///
-/// If `band` is not six faces of `spec`'s texels in number, or a star's texel has no eye limit
-/// (the limit map was not run on `band`); and in debug builds, if a star's own veil exceeds its
-/// texel's, as a band whose limits were set against another glare can give.
+/// If `band` is not six faces of `spec`'s texels in number, `glare` was built for a band of faces
+/// of another size, or a star's texel has no eye limit (the limit map was not run on `band`); and
+/// in debug builds, if a star's own veil exceeds its texel's, as a band whose limits were set
+/// against another glare can give.
 ///
 /// # Examples
 ///
@@ -552,7 +1102,7 @@ fn eye_offset_parts(
 /// for face in CubeFace::ALL {
 ///     band_rows(&galaxy, &mut ctx, &query, &census, &complete_to, &spec, face, 0..16, &mut band);
 /// }
-/// let (eye, glare) = (EyeObserver::default(), Glare::of_listed(&observer, listed));
+/// let (eye, glare) = (EyeObserver::default(), Glare::of_listed(&observer, listed, &spec));
 /// limit_map(&eye, &spec, &glare, &mut band);
 /// let n = usize::from(spec.face_texels());
 /// for (star, offset) in listed.iter().zip(eye_offsets(&eye, &spec, &glare, &band)) {
@@ -579,6 +1129,7 @@ pub fn eye_offsets(
         CubeFace::ALL.len() * usize::from(side) * usize::from(side),
         "a band of six faces of {side}² texels"
     );
+    glare.assert_for(*spec);
     glare
         .sources
         .iter()
@@ -822,6 +1373,7 @@ mod tests {
     use core::num::NonZeroU32;
 
     use hyperion_testkit::float::bits;
+    use hyperion_testkit::golden::f64_digest;
 
     use super::*;
     use crate::coords::GalacticPosition;
@@ -838,7 +1390,7 @@ mod tests {
         BLACKWELL_SP_RATIO, DARKEST_BACKGROUND, PhotopicWeight, REFERENCE_SP_RATIO,
         illuminance_of_magnitude, luminance, mesopic_weight, surface_brightness,
     };
-    use crate::sky::testing::{milky_way_envelope, milky_way_offsets, milky_way_tables};
+    use crate::sky::testing::{milky_way_envelope, milky_way_offsets, milky_way_tables, uniforms};
     use crate::time::UniverseTime;
     use crate::units::{Kelvin, LightYears, MagnitudesPerArcsec2};
 
@@ -922,12 +1474,12 @@ mod tests {
         })
     }
 
-    /// The stars a census near the Sun lists brighter than `cut` within [`GLARE_RADIUS_LY`], every
-    /// cap forced to it, with no eye.
-    fn listed_near_the_sun(cut: f64) -> Vec<SkyStar> {
+    /// The stars a census near the Sun lists brighter than `cut` within `radius_ly`, every cap
+    /// forced to it, with no eye.
+    fn listed_near_the_sun(cut: f64, radius_ly: f64) -> Vec<SkyStar> {
         let galaxy = milky_way_galaxy();
         let query = query(cut)
-            .with_caps_forced(LightYears::new(GLARE_RADIUS_LY))
+            .with_caps_forced(LightYears::new(radius_ly))
             .expect("a forced cap");
         let mut ctx = context();
         let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
@@ -945,7 +1497,7 @@ mod tests {
     /// [`GLARE_RADIUS_LY`] ([`listed_near_the_sun`]): built once.
     fn nearby_stars() -> &'static [SkyStar] {
         static STARS: OnceLock<Vec<SkyStar>> = OnceLock::new();
-        STARS.get_or_init(|| listed_near_the_sun(EYE_CUT))
+        STARS.get_or_init(|| listed_near_the_sun(EYE_CUT, GLARE_RADIUS_LY))
     }
 
     /// The direction `degrees` from `direction`, turned towards the galactic plane's +X or, for a
@@ -1008,12 +1560,19 @@ mod tests {
             .collect()
     }
 
-    fn glare_of(sources: &[(UnitVector, f64, f64)]) -> Glare {
-        sources
+    /// The glare of `sources`, each its direction, its photopic illuminance, lux, and its S/P
+    /// ratio, over a band of `spec`.
+    fn glare_of(spec: BandSpec, sources: &[(UnitVector, f64, f64)]) -> Glare {
+        let sources = sources
             .iter()
-            .fold(Glare::default(), |glare, &(u, e, rho)| {
-                glare.with_source(u, e, rho)
+            .map(|&(u, photopic, sp_ratio)| GlareSource {
+                direction: Some(u),
+                photopic,
+                scotopic: photopic * sp_ratio,
+                sp_ratio,
             })
+            .collect();
+        Glare::of_sources(sources, spec)
     }
 
     /// The plan's definition, written out again: the background over a texel in direction
@@ -1099,6 +1658,44 @@ mod tests {
         band
     }
 
+    /// The near-Sun band with its limits set against `glare` by the exact sum, every node of the
+    /// pyramid opened, as T9.c's and T9.h's identities take it (R06.T9.i).
+    fn limited_exactly(glare: &Glare, eye: &EyeObserver) -> Vec<BandTexel> {
+        let mut band = near_the_sun().to_vec();
+        map_limits(eye, spec(16), glare, &mut band, Opening::Every, &mut ());
+        band
+    }
+
+    /// What a traversal of the glare's pyramid evaluated (R06.T9.i).
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    struct Evaluations {
+        /// Nodes tested.
+        visits: u64,
+        /// Nodes taken whole.
+        wholes: u64,
+        /// Star–texel pairs summed in opened leaves.
+        pairs: u64,
+    }
+
+    impl Evaluations {
+        /// Its evaluations of the kernel: the pairs and the nodes taken whole.
+        fn evaluated(self) -> u64 {
+            self.pairs + self.wholes
+        }
+    }
+
+    impl Tally for Evaluations {
+        fn visit(&mut self) {
+            self.visits += 1;
+        }
+        fn whole(&mut self) {
+            self.wholes += 1;
+        }
+        fn pair(&mut self) {
+            self.pairs += 1;
+        }
+    }
+
     /// The texel of a band of `spec` that `direction` falls in: its index in the band's order and
     /// the direction of its centre.
     fn texel_of(spec: BandSpec, direction: &UnitVector) -> (usize, UnitVector) {
@@ -1117,32 +1714,41 @@ mod tests {
     /// which makes that texel's background mesopic.
     fn fixture_sources(spec: BandSpec) -> Vec<(UnitVector, f64, f64)> {
         let mut sources = sources_of(nearby_stars());
-        sources.push(star_at(
-            off(spec.texel_direction(CubeFace::PosZ, 8, 8), 0.05),
-            -1.5,
-            9_940.0,
-            4.3,
-        ));
-        sources.push(star_at(
-            off(spec.texel_direction(CubeFace::PosX, 7, 7), 0.3),
-            -9.0,
-            5_772.0,
-            4.438,
-        ));
+        sources.extend(placed_sources(spec));
         sources
+    }
+
+    /// T9.c's two placed sources at a band of `spec`: a V −1.5 white star 0.05° from the centre of
+    /// texel (8, 8) of +Z, and a V −9 solar one 0.3° from that of texel (7, 7) of +X.
+    fn placed_sources(spec: BandSpec) -> [(UnitVector, f64, f64); 2] {
+        [
+            star_at(
+                off(spec.texel_direction(CubeFace::PosZ, 8, 8), 0.05),
+                -1.5,
+                9_940.0,
+                4.3,
+            ),
+            star_at(
+                off(spec.texel_direction(CubeFace::PosX, 7, 7), 0.3),
+                -9.0,
+                5_772.0,
+                4.438,
+            ),
+        ]
     }
 
     /// The identity: every texel's limit is `naked_eye_limit` at the background written again from
     /// the definition, and every listed star's own limit, its texel's plus its eye offset, is
     /// `naked_eye_limit` plus `star_colour_offset` at that background without its own veil, to
-    /// 10⁻⁹ mag, on the near-Sun fixture and its two placed sources.
+    /// 10⁻⁹ mag, on the near-Sun fixture and its two placed sources. The map takes the exact sum,
+    /// every node of the glare's pyramid opened (R06.T9.i).
     #[test]
     fn each_texels_limit_and_each_stars_own_are_crumeys_at_their_light_and_glare() {
         let spec = spec(16);
         let eye = EyeObserver::default();
         let sources = fixture_sources(spec);
-        let glare = glare_of(&sources);
-        let band = limited(&glare, &eye);
+        let glare = glare_of(spec, &sources);
+        let band = limited_exactly(&glare, &eye);
         let (mut worst, mut mesopic) = (0.0_f64, 0);
         for (texel, (toward, _)) in band.iter().zip(texel_latitudes(spec)) {
             let background = reference_background(&eye, texel, &toward, &sources, None);
@@ -1190,7 +1796,7 @@ mod tests {
         let eye = EyeObserver::default();
         let (none, nearby) = (
             Glare::default(),
-            Glare::of_listed(&observer(), nearby_stars()),
+            Glare::of_listed(&observer(), nearby_stars(), &spec),
         );
         for (what, glare) in [("the band alone", &none), ("with the glare", &nearby)] {
             let band = limited(glare, &eye);
@@ -1230,7 +1836,7 @@ mod tests {
             let centre = spec.texel_direction(face, 32, 32);
             let (u, e, rho) = star_at(off(centre, 0.5), -1.5, 9_940.0, 4.3);
             assert!(angle_deg(&centre, &u) < 1.0);
-            let glare = Glare::default().with_source(u, e, rho);
+            let glare = glare_of(spec, &[(u, e, rho)]);
             limit_rows(&eye, &spec, &glare, face, rows, &mut texels);
             let limit = |row: usize, column: usize| {
                 texels[(row - 31) * n + column]
@@ -1261,7 +1867,7 @@ mod tests {
     #[test]
     fn a_field_factor_moves_every_limit_by_its_own_offset_and_no_eye_offset() {
         let spec = spec(16);
-        let glare = glare_of(&fixture_sources(spec));
+        let glare = glare_of(spec, &fixture_sources(spec));
         let (keen_eye, typical_eye) = (
             EyeObserver::default(),
             EyeObserver::new(2.0, 25.0, 0.5).expect("an eye"),
@@ -1295,7 +1901,7 @@ mod tests {
     fn the_map_reads_only_the_bands_light_and_the_listed_stars() {
         let spec = spec(16);
         let eye = EyeObserver::default();
-        let glare = Glare::of_listed(&observer(), nearby_stars());
+        let glare = Glare::of_listed(&observer(), nearby_stars(), &spec);
         let face = &near_the_sun()[..256];
         // Each texel's limit and the veil it keeps, which the eye offsets read.
         let limits = |texels: &[BandTexel]| -> Vec<(u64, [u64; 2])> {
@@ -1392,7 +1998,7 @@ mod tests {
     #[test]
     fn the_glare_reads_each_stars_reddened_light() {
         let stars = nearby_stars();
-        let glare = Glare::of_listed(&observer(), stars);
+        let glare = Glare::of_listed(&observer(), stars, &spec(16));
         assert_eq!(glare.len(), stars.len());
         assert!(!glare.is_empty());
         let mut reddened_stars = 0;
@@ -1420,7 +2026,9 @@ mod tests {
     /// The glare reaches 90°, the plane of the eye, and no further (R06.T9.h): a source 89.995°
     /// from a texel's centre veils it by exactly its `veiling_luminance` per lux times cos θ times
     /// its illuminance, and one at 90.005°, behind the eye's plane, adds exactly nothing, as those
-    /// at 99.995° and 120° do not. The texel keeps that veil beside its limit.
+    /// at 99.995° and 120° do not. The texel keeps that veil beside its limit. The sources are
+    /// summed exactly, every node of the glare's pyramid opened; the pyramid gives a lone source's
+    /// bits too, since a node of one star is taken at the star's own direction (R06.T9.i).
     #[test]
     fn the_glare_reaches_90_degrees_in_the_plane_of_the_eye_and_no_further() {
         let spec = BandSpec::new(8, 12).expect("a spec");
@@ -1428,14 +2036,26 @@ mod tests {
         let toward = spec.texel_direction(CubeFace::PosX, 4, 4);
         let (e, rho) = (illuminance_of_magnitude(Magnitudes::new(-1.5)).value(), 2.6);
         let texel = BandTexel::of_light(luminance(MagnitudesPerArcsec2::new(24.5)).value(), 2.26);
-        let lit = |angles: &[f64]| {
-            let glare = angles.iter().fold(Glare::default(), |glare, &angle| {
-                glare.with_source(off(toward, angle), e, rho)
-            });
+        let lit_by = |angles: &[f64], opening: Opening| {
+            let sources: Vec<_> = angles
+                .iter()
+                .map(|&angle| (off(toward, angle), e, rho))
+                .collect();
+            let glare = glare_of(spec, &sources);
             let mut texels = vec![texel; 64];
-            limit_rows(&eye, &spec, &glare, CubeFace::PosX, 0..8, &mut texels);
+            set_limits(
+                &eye,
+                spec,
+                &glare,
+                CubeFace::PosX,
+                0..8,
+                &mut texels,
+                opening,
+                &mut (),
+            );
             texels[4 * 8 + 4]
         };
+        let lit = |angles: &[f64]| lit_by(angles, Opening::Every);
         let limit_bits = |texel: BandTexel| bits(texel.eye_limit().expect("a limit").value());
         let near = off(toward, 89.995);
         let cos = toward.dot(&near);
@@ -1450,6 +2070,12 @@ mod tests {
         let within = lit(&[89.995]);
         assert_eq!(limit_bits(within), expected);
         assert_eq!(within.eye_veil().map(|v| v.map(bits)), Some(veil.map(bits)));
+        assert_eq!(lit_by(&[89.995], Opening::Pyramid), within, "the pyramid");
+        assert_eq!(
+            limit_bits(lit_by(&[90.005], Opening::Pyramid)),
+            bits(texel_limit(&eye, &texel, [0.0, 0.0]).value()),
+            "the pyramid"
+        );
         assert_eq!(limit_bits(lit(&[89.995, 90.005, 99.995, 120.0])), expected);
         let own = bits(texel_limit(&eye, &texel, [0.0, 0.0]).value());
         let behind = lit(&[90.005, 99.995, 120.0]);
@@ -1472,10 +2098,9 @@ mod tests {
         let own_limit = texel_limit(&eye, &pole, [0.0, 0.0]);
         let v = own_limit - Magnitudes::new(0.05);
         let u = off(centre, 0.05);
-        let glare = Glare::default().with_source(
-            u,
-            illuminance_of_magnitude(v).value(),
-            REFERENCE_SP_RATIO,
+        let glare = glare_of(
+            spec,
+            &[(u, illuminance_of_magnitude(v).value(), REFERENCE_SP_RATIO)],
         );
         let mut band = vec![pole; CubeFace::ALL.len() * n * n];
         limit_map(&eye, &spec, &glare, &mut band);
@@ -1523,7 +2148,7 @@ mod tests {
         let spec = spec(16);
         let eye = EyeObserver::default();
         let stars = nearby_stars();
-        let glare = Glare::of_listed(&observer(), stars);
+        let glare = Glare::of_listed(&observer(), stars, &spec);
         let band = limited(&glare, &eye);
         let (mut scotopic, mut deciding, mut saturated) = (0, 0, 0);
         let (mut decides, mut decided_offset, mut largest_offset, mut far) =
@@ -1601,7 +2226,7 @@ mod tests {
         // The star of V `v`: its texel's limit, and its eye offset in its two parts.
         let at = |v: f64| {
             let illuminance = illuminance_of_magnitude(Magnitudes::new(v)).value();
-            let glare = Glare::default().with_source(u, illuminance, rho);
+            let glare = glare_of(spec, &[(u, illuminance, rho)]);
             let mut band = vec![dark; CubeFace::ALL.len() * n * n];
             limit_map(eye, &spec, &glare, &mut band);
             let parts = eye_offset_parts(eye, spec, &glare.sources[0], &band);
@@ -1706,13 +2331,27 @@ mod tests {
     fn a_star_that_adds_no_veil_takes_its_colour_offset_alone() {
         let spec = BandSpec::new(8, 12).expect("a spec");
         let eye = EyeObserver::default();
-        let mut glare = Glare::default().with_source(UnitVector::NORTH, 0.0, 3.0);
-        glare.sources.push(GlareSource {
-            direction: None,
-            photopic: 1e-6,
-            scotopic: 3e-6,
-            sp_ratio: 3.0,
-        });
+        let glare = Glare::of_sources(
+            vec![
+                GlareSource {
+                    direction: Some(UnitVector::NORTH),
+                    photopic: 0.0,
+                    scotopic: 0.0,
+                    sp_ratio: 3.0,
+                },
+                GlareSource {
+                    direction: None,
+                    photopic: 1e-6,
+                    scotopic: 3e-6,
+                    sp_ratio: 3.0,
+                },
+            ],
+            spec,
+        );
+        assert!(
+            glare.pyramid.as_ref().is_some_and(|p| p.stars.is_empty()),
+            "neither glares"
+        );
         let texel = BandTexel::of_light(luminance(MagnitudesPerArcsec2::new(17.0)).value(), 2.26);
         let mut band = vec![texel; CubeFace::ALL.len() * 64];
         limit_map(&eye, &spec, &glare, &mut band);
@@ -1732,6 +2371,445 @@ mod tests {
         assert!(
             (offsets[0].value() - scotopic).abs() > 1e-3,
             "the mesopic offset fades"
+        );
+    }
+
+    /// The tolerance on a texel's limit and a star's eye offset against the exact sum, mag
+    /// (R06.T9.i; `decision-r06-t9c-glare.md`, item 2): the wire's quantum for a texel's limit
+    /// (millimagnitudes), and a tenth of an eye offset's (centimagnitudes).
+    const PYRAMID_TOLERANCE_MAG: f64 = 0.001;
+
+    /// The tolerance on the texels' mean difference from the exact sum, mag (the same ruling).
+    const PYRAMID_MEAN_TOLERANCE_MAG: f64 = 0.0003;
+
+    /// How far T9.i's near-Sun census looks, ly: its fixture's stars are those a census lists
+    /// within it brighter than the eye's cut, 8.15.
+    const FAR_FIELD_RADIUS_LY: f64 = 200.0;
+
+    /// The stars a census near the Sun lists brighter than the eye's cut within
+    /// [`FAR_FIELD_RADIUS_LY`]: built once.
+    fn stars_within_200_ly() -> &'static [SkyStar] {
+        static STARS: OnceLock<Vec<SkyStar>> = OnceLock::new();
+        STARS.get_or_init(|| listed_near_the_sun(EYE_CUT, FAR_FIELD_RADIUS_LY))
+    }
+
+    /// The band near the Sun at the eye's cut at the server's 64² faces, with no census, complete
+    /// everywhere: built once.
+    fn near_the_sun_at_64() -> &'static [BandTexel] {
+        static BAND: OnceLock<Vec<BandTexel>> = OnceLock::new();
+        BAND.get_or_init(|| band_at(EYE_CUT, BandSpec::STANDARD))
+    }
+
+    /// The glare pyramid's limits against the exact sum's, over one band.
+    #[derive(Debug)]
+    struct AgainstExact {
+        /// The largest and the mean difference of a texel's limit, mag.
+        largest: f64,
+        mean: f64,
+        /// The largest difference of an eye offset, mag.
+        largest_offset: f64,
+        /// What the pyramid evaluated.
+        evaluations: Evaluations,
+        /// The band with the pyramid's limits.
+        band: Vec<BandTexel>,
+    }
+
+    /// The limits of `band` (a band of `spec` without them) against `glare` summed over the
+    /// pyramid, against those of the exact sum, every node opened; and the eye offsets of each.
+    fn against_exact(
+        eye: &EyeObserver,
+        spec: BandSpec,
+        glare: &Glare,
+        band: &[BandTexel],
+    ) -> AgainstExact {
+        let mut evaluations = Evaluations::default();
+        let mut pyramid = band.to_vec();
+        map_limits(
+            eye,
+            spec,
+            glare,
+            &mut pyramid,
+            Opening::Pyramid,
+            &mut evaluations,
+        );
+        let mut exact = band.to_vec();
+        map_limits(eye, spec, glare, &mut exact, Opening::Every, &mut ());
+        let differences: Vec<f64> = pyramid
+            .iter()
+            .zip(&exact)
+            .map(|(a, b)| {
+                (a.eye_limit().expect("a limit") - b.eye_limit().expect("a limit"))
+                    .value()
+                    .abs()
+            })
+            .collect();
+        #[expect(clippy::cast_precision_loss, reason = "a band's texels, under 2⁵³")]
+        let mean = differences.iter().sum::<f64>() / differences.len() as f64;
+        let largest_offset = eye_offsets(eye, &spec, glare, &pyramid)
+            .iter()
+            .zip(eye_offsets(eye, &spec, glare, &exact))
+            .map(|(a, b)| (*a - b).value().abs())
+            .fold(0.0, f64::max);
+        AgainstExact {
+            largest: differences.iter().copied().fold(0.0, f64::max),
+            mean,
+            largest_offset,
+            evaluations,
+            band: pyramid,
+        }
+    }
+
+    /// Prints `found` for `what`, `sources` glaring over `texels`, and holds it to the ruled
+    /// tolerances.
+    fn assert_within_tolerance(what: &str, found: &AgainstExact, sources: usize, texels: usize) {
+        let Evaluations {
+            visits,
+            wholes,
+            pairs,
+        } = found.evaluations;
+        let exact_pairs = u64::try_from(sources * texels).expect("under 2⁶⁴ pairs");
+        #[expect(clippy::cast_precision_loss, reason = "counts under 2⁵³")]
+        let fewer = exact_pairs as f64 / found.evaluations.evaluated() as f64;
+        eprintln!(
+            "{what}: {sources} sources over {texels} texels; the pyramid against the exact sum: \
+             texel limits within {:.2e} mag at most, {:.2e} on average, eye offsets within \
+             {:.2e}; {pairs} pairs and {wholes} nodes taken whole ({fewer:.1}× fewer \
+             evaluations than the exact sum's {exact_pairs} pairs), {visits} nodes tested",
+            found.largest, found.mean, found.largest_offset
+        );
+        assert!(
+            found.largest <= PYRAMID_TOLERANCE_MAG,
+            "{what}: a texel's limit differs by {}",
+            found.largest
+        );
+        assert!(
+            found.mean <= PYRAMID_MEAN_TOLERANCE_MAG,
+            "{what}: the texels differ by {} on average",
+            found.mean
+        );
+        assert!(
+            found.largest_offset <= PYRAMID_TOLERANCE_MAG,
+            "{what}: an eye offset differs by {}",
+            found.largest_offset
+        );
+    }
+
+    /// The limits' bits of the rows of `face` of `band` (a band of `spec` without limits) set in
+    /// the jobs `splits` (each a range of rows), the last first, against those of the face set
+    /// whole, `whole` (the face's texels with their limits).
+    fn assert_rows_split_alike(
+        spec: BandSpec,
+        glare: &Glare,
+        band: &[BandTexel],
+        face: CubeFace,
+        splits: &[Range<u16>],
+        whole: &[BandTexel],
+    ) {
+        let eye = EyeObserver::default();
+        let n = usize::from(spec.face_texels());
+        let first = usize::from(face.layer()) * n * n;
+        let limits = |texels: &[BandTexel]| -> Vec<(u64, [u64; 2])> {
+            texels
+                .iter()
+                .map(|t| {
+                    (
+                        bits(t.eye_limit().expect("a limit").value()),
+                        t.eye_veil().expect("a veil").map(bits),
+                    )
+                })
+                .collect()
+        };
+        let mut parts = Vec::new();
+        for rows in splits.iter().rev() {
+            let at = first + usize::from(rows.start) * n..first + usize::from(rows.end) * n;
+            let mut texels = band[at].to_vec();
+            limit_rows(&eye, &spec, glare, face, rows.clone(), &mut texels);
+            parts.push((rows.start, texels));
+        }
+        parts.sort_by_key(|(start, _)| *start);
+        let split: Vec<BandTexel> = parts.into_iter().flat_map(|(_, t)| t).collect();
+        assert_eq!(
+            limits(&split),
+            limits(whole),
+            "{face:?} split at {splits:?}"
+        );
+    }
+
+    /// Near the Sun at the server's 64² faces, against the glare of the stars a census lists within
+    /// 200 ly brighter than the eye's cut, alone and with T9.c's two placed sources, every texel's
+    /// limit summed over the glare's pyramid is within 0.001 mag of the exact sum's, their mean
+    /// within 0.0003 mag, and every eye offset within 0.001 mag (R06.T9.i). A face set in a
+    /// server's jobs, split in rows, has the bits of the face set whole.
+    #[test]
+    fn near_the_sun_the_pyramid_is_within_0_001_mag_of_the_exact_sum() {
+        let spec = BandSpec::STANDARD;
+        let eye = EyeObserver::default();
+        let band = near_the_sun_at_64();
+        let census = sources_of(stars_within_200_ly());
+        let mut placed = census.clone();
+        placed.extend(placed_sources(spec));
+        for (what, sources) in [
+            ("the census", &census),
+            ("the census and the placed sources", &placed),
+        ] {
+            let glare = glare_of(spec, sources);
+            let found = against_exact(&eye, spec, &glare, band);
+            let (plane, _) = median_limit(&found.band, spec, 0.0..5.0);
+            let (poles, _) = median_limit(&found.band, spec, 80.0..90.1);
+            eprintln!(
+                "near the Sun at 64², cut {EYE_CUT}, with the glare of {what}: the median limit \
+                 is {plane:.4} in the band and {poles:.4} at the poles"
+            );
+            assert_within_tolerance(what, &found, sources.len(), band.len());
+        }
+        let glare = glare_of(spec, &placed);
+        let mut whole = band.to_vec();
+        limit_map(&eye, &spec, &glare, &mut whole);
+        let n = 64 * 64;
+        for (face, splits) in [
+            (CubeFace::PosX, [0..7, 7..40, 40..64]),
+            (CubeFace::PosZ, [0..1, 1..33, 33..64]),
+        ] {
+            let whole = &whole[usize::from(face.layer()) * n..][..n];
+            assert_rows_split_alike(spec, &glare, band, face, &splits, whole);
+        }
+    }
+
+    /// The ruling's synthetic sky (`decision-r06-t9c-glare.md`, item 2, its model's `sphere`): `n`
+    /// stars over the whole sky, concentrated towards the plane as 1 + 3 exp(−|b| ÷ 10°), of V from
+    /// −1.5 to `faintest` with N(< V) ∝ 10^(0.45 V), and of S/P ratio uniform in 1.5–3. Each is
+    /// its direction, its photopic illuminance, lux, and its ratio.
+    fn synthetic_sky(n: usize, faintest: f64) -> Vec<(UnitVector, f64, f64)> {
+        const SLOPE: f64 = 0.45;
+        let (lo, hi) = (math::exp10(SLOPE * -1.5), math::exp10(SLOPE * faintest));
+        let mut deviates = uniforms(0x0009_1a00);
+        let mut next = || deviates.next().expect("an endless stream");
+        let mut sky = Vec::with_capacity(n);
+        while sky.len() < n {
+            let z = 2.0 * next() - 1.0;
+            let (sin, cos) = math::sin_cos(std::f64::consts::TAU * next());
+            let b = math::asin(z).abs() / RADIANS_PER_DEGREE;
+            if 4.0 * next() > 1.0 + 3.0 * math::exp(-b / 10.0) {
+                continue;
+            }
+            let across = (1.0 - z * z).sqrt();
+            let direction =
+                UnitVector::from_components([across * cos, across * sin, z]).expect("a direction");
+            let v = math::log10(lo + next() * (hi - lo)) / SLOPE;
+            let photopic = illuminance_of_magnitude(Magnitudes::new(v)).value();
+            sky.push((direction, photopic, 1.5 + 1.5 * next()));
+        }
+        sky
+    }
+
+    /// A band of `spec` for the synthetic sky, as the ruling's model's `sphere` takes it: its light
+    /// runs from μ 24.6 at the poles to 22.2 in the plane, the poles' luminance plus the plane's
+    /// excess over it times exp(−|b| ÷ 10°), at ρ 2.26.
+    fn synthetic_band(spec: BandSpec) -> Vec<BandTexel> {
+        let poles = luminance(MagnitudesPerArcsec2::new(24.6)).value();
+        let plane = luminance(MagnitudesPerArcsec2::new(22.2)).value();
+        texel_latitudes(spec)
+            .into_iter()
+            .map(|(_, b)| BandTexel::of_light(poles + (plane - poles) * math::exp(-b / 10.0), 2.26))
+            .collect()
+    }
+
+    /// The synthetic sky's fingerprint at 300,000 stars to V 10.06: [`f64_digest`] of each star's
+    /// direction, illuminance and ratio, in order. The bench's own copy of [`synthetic_sky`]
+    /// asserts the same (`benches/sky.rs`, `SYNTHETIC_SKY_DIGEST`), so the two cannot part.
+    const SYNTHETIC_SKY_DIGEST: u64 = 0x8b8b_938a_6811_c91f;
+
+    /// The synthetic sky at the census's largest listing, 300,000 stars to V 10.06 (a camera's cut
+    /// with the eye open), as its glare over the server's 64² band: built once. Its stars are held
+    /// to [`SYNTHETIC_SKY_DIGEST`].
+    fn synthetic_glare() -> &'static (usize, Glare) {
+        static GLARE: OnceLock<(usize, Glare)> = OnceLock::new();
+        GLARE.get_or_init(|| {
+            let n = usize::try_from(MAX_N_MAX).expect("300,000 fits a usize");
+            let sky = synthetic_sky(n, 10.06);
+            let values: Vec<f64> = sky
+                .iter()
+                .flat_map(|(u, e, rho)| {
+                    let [x, y, z] = u.components();
+                    [x, y, z, *e, *rho]
+                })
+                .collect();
+            let digest = f64_digest(&values);
+            assert_eq!(
+                digest, SYNTHETIC_SKY_DIGEST,
+                "the synthetic sky's digest {digest:#018x}"
+            );
+            (sky.len(), glare_of(BandSpec::STANDARD, &sky))
+        })
+    }
+
+    /// On the synthetic sky of 300,000 stars to V 10.06 at 64², the pyramid evaluates at most a
+    /// hundredth of the exact sum's star–texel pairs: its pairs summed star by star and its nodes
+    /// taken whole, counted, so the test does not depend on the machine (R06.T9.i; the ruling's
+    /// model, about a three-hundredth). One row of each face is held to the exact sum, as the slow
+    /// test holds every texel, and a face split in rows has the bits of the face set whole.
+    #[test]
+    fn on_300_000_synthetic_stars_the_pyramid_evaluates_at_most_a_hundredth_of_the_pairs() {
+        let spec = BandSpec::STANDARD;
+        let eye = EyeObserver::default();
+        let (n, glare) = synthetic_glare();
+        let band = synthetic_band(spec);
+        let mut evaluations = Evaluations::default();
+        let mut limited = band.clone();
+        map_limits(
+            &eye,
+            spec,
+            glare,
+            &mut limited,
+            Opening::Pyramid,
+            &mut evaluations,
+        );
+        let exact_pairs = u64::try_from(n * band.len()).expect("under 2⁶⁴ pairs");
+        #[expect(clippy::cast_precision_loss, reason = "counts under 2⁵³")]
+        let (fewer, per_texel) = (
+            exact_pairs as f64 / evaluations.evaluated() as f64,
+            evaluations.evaluated() as f64 / band.len() as f64,
+        );
+        eprintln!(
+            "{n} synthetic stars over {} texels: the pyramid sums {} pairs and takes {} nodes \
+             whole, {per_texel:.0} evaluations a texel, {fewer:.1}× fewer than the exact sum's \
+             {exact_pairs} pairs; {} nodes tested",
+            band.len(),
+            evaluations.pairs,
+            evaluations.wholes,
+            evaluations.visits
+        );
+        assert!(
+            evaluations.evaluated() * 100 <= exact_pairs,
+            "{evaluations:?} against {exact_pairs} pairs"
+        );
+        let side = spec.face_texels();
+        let mut worst = 0.0_f64;
+        for (k, face) in CubeFace::ALL.into_iter().enumerate() {
+            let row = u16::try_from(5 + 11 * k).expect("a row");
+            let first = (usize::from(face.layer()) * 64 + usize::from(row)) * 64;
+            let mut exact = band[first..first + 64].to_vec();
+            set_limits(
+                &eye,
+                spec,
+                glare,
+                face,
+                row..row + 1,
+                &mut exact,
+                Opening::Every,
+                &mut (),
+            );
+            for (a, b) in limited[first..first + 64].iter().zip(&exact) {
+                let d = (a.eye_limit().expect("a limit") - b.eye_limit().expect("a limit")).value();
+                worst = worst.max(d.abs());
+            }
+        }
+        eprintln!("one row of each face against the exact sum: within {worst:.2e} mag");
+        assert!(worst <= PYRAMID_TOLERANCE_MAG, "{worst}");
+        let face = CubeFace::NegY;
+        let n_face = usize::from(side) * usize::from(side);
+        let whole = &limited[usize::from(face.layer()) * n_face..][..n_face];
+        assert_rows_split_alike(spec, glare, &band, face, &[0..30, 30..31, 31..64], whole);
+    }
+
+    /// On the synthetic sky of 300,000 stars to V 10.06 at 64², every texel's limit summed over
+    /// the glare's pyramid is within 0.001 mag of the exact sum's, their mean within 0.0003 mag,
+    /// and every eye offset within 0.001 mag (R06.T9.i).
+    #[test]
+    #[ignore = "slow: the exact sum over 7.4 × 10⁹ star–texel pairs, some minutes"]
+    fn on_300_000_synthetic_stars_the_pyramid_is_within_0_001_mag_of_the_exact_sum() {
+        let spec = BandSpec::STANDARD;
+        let (n, glare) = synthetic_glare();
+        let band = synthetic_band(spec);
+        let found = against_exact(&EyeObserver::default(), spec, glare, &band);
+        assert_within_tolerance("300,000 synthetic stars", &found, *n, band.len());
+    }
+
+    /// A texel always opens its own leaf (R06.T9.i). Two stars near a corner of a 16² texel, over
+    /// 4° from its centre and 0.3° apart, lie in a leaf that the rule alone would take whole from
+    /// that centre. The texel sums them star by star, so its veil and their eye offsets are the
+    /// exact sum's, bit for bit. The texel across the corner takes the leaf whole.
+    #[test]
+    fn a_texel_always_opens_its_own_leaf() {
+        let spec = spec(16);
+        let eye = EyeObserver::default();
+        let face = CubeFace::PosZ;
+        // Texel (8, 8) of +Z covers face coordinates 0–0.125 in both, the direction (s, −t, 1) for
+        // s along its columns and t down its rows; its corner at (0, 0) is texel (7, 7)'s too.
+        let on_face =
+            |s: f64, t: f64| UnitVector::from_components([s, -t, 1.0]).expect("a direction");
+        let (e, rho) = (illuminance_of_magnitude(Magnitudes::new(0.0)).value(), 2.3);
+        let sources = [
+            (on_face(0.004, 0.004), e, rho),
+            (on_face(0.0092, 0.004), e, rho),
+        ];
+        for (u, _, _) in &sources {
+            assert_eq!(spec.texel_of(u.components()), Some((face, 8, 8)));
+        }
+        assert!((angle_deg(&sources[0].0, &sources[1].0) - 0.3).abs() < 0.01);
+        let glare = glare_of(spec, &sources);
+        let pyramid = glare.pyramid.as_ref().expect("a pyramid");
+        let leaf = pyramid
+            .nodes
+            .iter()
+            .find(|node| matches!(node.holds, NodeHolds::Stars { len: 2, .. }))
+            .expect("the two stars' leaf");
+        let NodeHolds::Stars { start, .. } = leaf.holds else {
+            unreachable!("a leaf holds stars")
+        };
+        let held: Vec<UnitVector> = pyramid.stars[at(start)..at(start) + 2]
+            .iter()
+            .map(|star| star.direction)
+            .collect();
+        assert_eq!(held, [sources[0].0, sources[1].0], "the census's order");
+        let own = spec.texel_direction(face, 8, 8);
+        let cos = own.dot(&leaf.centre);
+        assert!(
+            cos > leaf.behind_at && cos <= leaf.whole_at,
+            "the rule alone takes the leaf whole from its own texel: {cos} against {leaf:?}"
+        );
+        let texel = BandTexel::of_light(luminance(MagnitudesPerArcsec2::new(24.0)).value(), 2.26);
+        let veils = |opening: Opening| {
+            let mut band = vec![texel; CubeFace::ALL.len() * 256];
+            map_limits(&eye, spec, &glare, &mut band, opening, &mut ());
+            let offsets: Vec<u64> = eye_offsets(&eye, &spec, &glare, &band)
+                .iter()
+                .map(|o| bits(o.value()))
+                .collect();
+            (band, offsets)
+        };
+        let ((pyramid_band, pyramid_offsets), (exact_band, exact_offsets)) =
+            (veils(Opening::Pyramid), veils(Opening::Every));
+        let index = (usize::from(face.layer()) * 16 + 8) * 16 + 8;
+        let veil_bits = |band: &[BandTexel]| band[index].eye_veil().map(|v| v.map(bits));
+        assert_eq!(veil_bits(&pyramid_band), veil_bits(&exact_band));
+        assert_eq!(pyramid_offsets, exact_offsets);
+        let mut across = Evaluations::default();
+        let corner = spec.texel_direction(face, 7, 7);
+        let _ = glare.veil(
+            &eye,
+            &corner,
+            (face, 7, 7),
+            Opening::Pyramid,
+            &mut Vec::new(),
+            &mut across,
+        );
+        assert_eq!(across.pairs, 0, "{across:?}");
+        assert_eq!(across.wholes, 1, "{across:?}");
+    }
+
+    #[test]
+    #[should_panic(expected = "a glare built for faces of 16² texels read on a band of 8² texels")]
+    fn a_glare_built_for_another_band_is_refused() {
+        let glare = glare_of(spec(16), &[(UnitVector::X, 1e-6, 2.26)]);
+        let mut texels = vec![BandTexel::of_light(1e-5, 2.26); 64];
+        limit_rows(
+            &EyeObserver::default(),
+            &BandSpec::new(8, 12).expect("a spec"),
+            &glare,
+            CubeFace::PosX,
+            0..8,
+            &mut texels,
         );
     }
 
@@ -1968,8 +3046,8 @@ mod tests {
             deepest <= bound,
             "a texel sees to {deepest}, past {bound}: a finding for the pad"
         );
-        let stars = listed_near_the_sun(cut.value());
-        let glare = Glare::of_listed(&observer(), &stars);
+        let stars = listed_near_the_sun(cut.value(), GLARE_RADIUS_LY);
+        let glare = Glare::of_listed(&observer(), &stars, &spec);
         limit_map(&eye, &spec, &glare, &mut band);
         let offsets = eye_offsets(&eye, &spec, &glare, &band);
         let (mut faintest_own, mut largest_offset) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -2052,13 +3130,9 @@ mod tests {
     #[should_panic(expected = "the limit map sets every texel's eye limit")]
     fn a_band_without_its_limits_is_refused_by_the_eye_offsets() {
         let band = vec![BandTexel::of_light(1e-5, 2.26); 6 * 64];
-        let glare = Glare::default().with_source(UnitVector::X, 1e-6, 2.26);
-        let _ = eye_offsets(
-            &EyeObserver::default(),
-            &BandSpec::new(8, 12).expect("a spec"),
-            &glare,
-            &band,
-        );
+        let spec = BandSpec::new(8, 12).expect("a spec");
+        let glare = glare_of(spec, &[(UnitVector::X, 1e-6, 2.26)]);
+        let _ = eye_offsets(&EyeObserver::default(), &spec, &glare, &band);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Benchmarks of the sky (rendering plan R06): the luminosity tables' build, the census near the
-//! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), and the band
-//! near the Sun (R06.T9.b).
+//! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), the band
+//! near the Sun (R06.T9.b), and the limit map (R06.T9.i).
 //!
 //! They run on `GalaxyParams::milky_way_like()` with a fixed seed. A miss is a finding to record,
 //! not a CI failure: CI compiles these and never runs them. Every figure below is provisional
@@ -37,6 +37,8 @@
 //! | `sky/census_near_sun/warm` | ≤ 25% of cold (T17) | not yet run |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/band_near_sun` | within the first sky's (T17) | 20.2 CPU-s, provisional |
+//! | `sky/limit_map/near_sun` | within the first sky's (T17) | 0.32 CPU-s, provisional |
+//! | `sky/limit_map/synthetic_300k` | ≤ 3 CPU-s (R06.T9.i) | 1.03 CPU-s, provisional |
 //!
 //! The cold near-Sun figure is R06.T8.f's sampled run (2026-10-05, `HYPERION_SKY_BENCH_SAMPLE`
 //! 1,000, criterion's `--test`, 15 workers, load about 15, so provisional): 1.83 × 10⁶ CPU-s
@@ -57,6 +59,22 @@
 //! 20.2 CPU-s on 15 workers, 1.37 s wall. A 16² band took 1.7 s on one thread in the test profile,
 //! about 1.1 ms a ray, four fifths of it the luminosity functions' reads and one fifth the ray's
 //! profile.
+//!
+//! The limit map's benches (R06.T9.i) set the eye's limits of all six faces of `BandSpec::STANDARD`
+//! against a glare, one face row a job, as the server will after each reply's band (R06.T11.c).
+//! Their band is the near-Sun band at V 8.15 with no census, complete everywhere. `limit_map/
+//! near_sun` takes the glare of the stars a census lists there within 200 ly brighter than V 8.15,
+//! R06.T9.i's fixture. `limit_map/synthetic_300k` takes the glare ruling's synthetic sky of 300,000
+//! stars to V 10.06 (`MAX_N_MAX`, a camera's cut with the eye open), the same stars as the sim's
+//! test of the pyramid. Their time is the glare's build, on one thread, plus the jobs' CPU time.
+//! The gate is provisional (`decision-r06-t9c-glare.md`, item 2): at most 3 CPU-s at 300,000 stars
+//! on the dev machine. The exact sum, every star over every texel, would take about 140 CPU-s at
+//! R06.T9.c's 19 ns a pair; R06.T9.i measured 161 CPU-s on one thread (21.9 ns a pair). R06.T9.i's
+//! one run (2026-10-07, without the heavy-test lock, which another lane's long run held, so at
+//! `CPUQuota=400%`, 3 workers, load 7.7–9.5: provisional): `near_sun` 0.32 CPU-s, 0.11 s wall
+//! (criterion 289 ms an iteration); `synthetic_300k` 1.03 CPU-s, 0.38 s wall (criterion 1.03 s).
+//! By the process's CPU clock on one thread, in the slow-test profile, 300,000 stars took 1.45
+//! CPU-s: 1.38 for the map and 0.07 for the glare's build. A locked re-timing is pending.
 
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap};
@@ -68,24 +86,30 @@ use std::time::{Duration, Instant};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
-use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::coords::{GalacticPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, cell_heap_bytes};
+use hyperion_sim::math;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
-use hyperion_sim::sky::band::{BandSpec, CompleteTo, CubeFace, band_rows};
+use hyperion_sim::sky::band::{BandSpec, BandTexel, CompleteTo, CubeFace, band_rows};
 use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap, layer_caps};
 use hyperion_sim::sky::census::{
-    CellOffsets, CellSlab, CensusTallies, NoSkyCellCache, Served, SkyCellCache, SkyCensus,
-    SkyContext, SkyQuery, census_cell, census_plan, merge_census, serve_from_entry,
+    CellOffsets, CellSlab, CensusTallies, MAX_N_MAX, NoSkyCellCache, Served, SkyCellCache,
+    SkyCensus, SkyContext, SkyQuery, SkyStar, census_cell, census_plan, merge_census,
+    serve_from_entry,
 };
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
+use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude};
+use hyperion_sim::sky::limits::{Glare, limit_rows};
 use hyperion_sim::sky::luminosity::{BinSums, LuminosityTables};
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::{LightYears, Magnitudes, SolarMasses};
+use hyperion_sim::units::consts::RADIANS_PER_DEGREE;
+use hyperion_sim::units::{LightYears, Lux, Magnitudes, SolarMasses};
+use hyperion_testkit::golden::f64_digest;
 
 /// The fixture's seed, the sim's sky tests' own.
 const SEED: u64 = 0x0926_0000;
@@ -115,6 +139,22 @@ static PRINTED_FILL: AtomicBool = AtomicBool::new(false);
 static PRINTED_WARM: AtomicBool = AtomicBool::new(false);
 static PRINTED_NUCLEAR: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND: AtomicBool = AtomicBool::new(false);
+static PRINTED_LIMIT_MAP_NEAR_SUN: AtomicBool = AtomicBool::new(false);
+static PRINTED_LIMIT_MAP_SYNTHETIC: AtomicBool = AtomicBool::new(false);
+
+/// The limit map's near-Sun fixture (R06.T9.i): the eye's cut there, V 8.15 (R06.T9.d's figure
+/// for the real sky, at which T9.c's to T9.i's tests are ruled), and the census within 200 ly.
+const LIMIT_MAP_CUT_V: f64 = 8.15;
+const LIMIT_MAP_RADIUS_LY: f64 = 200.0;
+
+/// The synthetic sky's depth, V: a camera's cut with the eye open, at which the census lists its
+/// largest number of stars, `MAX_N_MAX` (the glare ruling's sky at `N_max`).
+const SYNTHETIC_CUT_V: f64 = 10.06;
+
+/// The synthetic sky's fingerprint at `MAX_N_MAX` stars to `SYNTHETIC_CUT_V`: `f64_digest` of each
+/// star's direction, illuminance and ratio, in order. The sim's test of the pyramid asserts the
+/// same (`sky::limits`' `SYNTHETIC_SKY_DIGEST`), so this copy of its sky cannot part from it.
+const SYNTHETIC_SKY_DIGEST: u64 = 0x8b8b_938a_6811_c91f;
 
 fn galaxy() -> Galaxy {
     Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
@@ -689,11 +729,200 @@ fn band_near_sun(c: &mut Criterion) {
     group.finish();
 }
 
+/// The limit map's near-Sun fixture: the 64² band of the stars fainter than the cut with no
+/// census, complete everywhere, its faces in `CubeFace::ALL`'s order, and the stars the census
+/// lists within 200 ly brighter than the cut, with their observer.
+struct LimitMapFixture {
+    observer: Observer,
+    band: Vec<BandTexel>,
+    listed: Vec<SkyStar>,
+}
+
+/// The near-Sun fixture of the limit map, the band and the census each on the pool.
+fn limit_map_fixture(sky: &Sky, workers: usize, jobs: &[(CubeFace, u16)]) -> LimitMapFixture {
+    let at = GalacticPosition::from_light_years(SUN_LY).expect("in the root cube");
+    let observer = Observer::new(at, UniverseTime::EPOCH).expect("the epoch is on the clock");
+    let query = SkyQuery::builder(observer, Magnitudes::new(LIMIT_MAP_CUT_V))
+        .build()
+        .expect("a valid query");
+    let spec = BandSpec::STANDARD;
+    let (rows, _) = on_pool(jobs, workers, &|&(face, row): &(CubeFace, u16)| {
+        let mut ctx = SkyContext {
+            tables: &sky.tables,
+            envelope: &sky.envelope,
+            offsets: &sky.offsets,
+            noise: NoiseCache::with_capacity(NOISE_SLOTS),
+            cells: &NoSkyCellCache,
+            sources: &[],
+            modifiers: &NoModifiers,
+        };
+        let mut out = Vec::with_capacity(usize::from(spec.face_texels()));
+        band_rows(
+            &sky.galaxy,
+            &mut ctx,
+            &query,
+            &SkyCensus::empty(),
+            &CompleteTo::everywhere(),
+            &spec,
+            face,
+            row..row + 1,
+            &mut out,
+        );
+        out
+    });
+    let forced = query
+        .with_caps_forced(LightYears::new(LIMIT_MAP_RADIUS_LY))
+        .expect("a forced cap");
+    let run = census(sky, &forced, &NoSkyCellCache, workers, 1);
+    LimitMapFixture {
+        observer,
+        band: rows.into_iter().flat_map(|(_, row)| row).collect(),
+        listed: run.census.listed().to_vec(),
+    }
+}
+
+/// The glare ruling's synthetic sky (`decision-r06-t9c-glare.md`, item 2), as the sim's own test of
+/// the pyramid takes it, star for star (`sky::limits`' `synthetic_sky`, on the same `SplitMix64`
+/// stream as the sky tests' `uniforms`): `n` stars over the whole sky, concentrated towards the
+/// plane as 1 + 3 exp(−|b| ÷ 10°), of V from −1.5 to `faintest` with N(< V) ∝ 10^(0.45 V), and of
+/// S/P ratio uniform in 1.5–3.
+fn synthetic_sky(n: usize, faintest: f64) -> Vec<(UnitVector, Lux, SpRatio)> {
+    const SLOPE: f64 = 0.45;
+    let (lo, hi) = (math::exp10(SLOPE * -1.5), math::exp10(SLOPE * faintest));
+    let mut state = 0x0009_1a00_u64;
+    let mut next = || {
+        let z = mix(state);
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        #[expect(clippy::cast_precision_loss, reason = "53 bits, exact in f64")]
+        let u = (z >> 11) as f64 / (1_u64 << 53) as f64;
+        u
+    };
+    let mut sky = Vec::with_capacity(n);
+    while sky.len() < n {
+        let z = 2.0 * next() - 1.0;
+        let (sin, cos) = math::sin_cos(std::f64::consts::TAU * next());
+        let b = math::asin(z).abs() / RADIANS_PER_DEGREE;
+        if 4.0 * next() > 1.0 + 3.0 * math::exp(-b / 10.0) {
+            continue;
+        }
+        let across = (1.0 - z * z).sqrt();
+        let direction =
+            UnitVector::from_components([across * cos, across * sin, z]).expect("a direction");
+        let v = math::log10(lo + next() * (hi - lo)) / SLOPE;
+        let rho = SpRatio::new(1.5 + 1.5 * next()).expect("a ratio within 1.5–3");
+        sky.push((direction, illuminance_of_magnitude(Magnitudes::new(v)), rho));
+    }
+    let values: Vec<f64> = sky
+        .iter()
+        .flat_map(|(u, e, rho)| {
+            let [x, y, z] = u.components();
+            [x, y, z, e.value(), rho.value()]
+        })
+        .collect();
+    let digest = f64_digest(&values);
+    assert_eq!(
+        digest, SYNTHETIC_SKY_DIGEST,
+        "the synthetic sky's digest {digest:#018x}: the sim's test's sky, star for star"
+    );
+    sky
+}
+
+/// One limit map as the server will run it (R06.T11.c): the glare `build` gives, on one thread,
+/// then each of `jobs` (a face's row) on the pool, `band`'s rows' limits set against it. Its CPU
+/// time is the build's and the jobs' together. Prints the first run's costs as `name`.
+fn limit_map_once(
+    name: &str,
+    printed: &AtomicBool,
+    build: &dyn Fn() -> Glare,
+    band: &[BandTexel],
+    jobs: &[(CubeFace, u16)],
+    workers: usize,
+) -> Duration {
+    let spec = BandSpec::STANDARD;
+    let side = usize::from(spec.face_texels());
+    let began = Instant::now();
+    let glare = build();
+    let glare_time = began.elapsed();
+    let (rows, busy) = on_pool(jobs, workers, &|&(face, row): &(CubeFace, u16)| {
+        let first = (usize::from(face.layer()) * side + usize::from(row)) * side;
+        let mut texels = band[first..first + side].to_vec();
+        limit_rows(
+            &EyeObserver::default(),
+            &spec,
+            black_box(&glare),
+            face,
+            row..row + 1,
+            &mut texels,
+        );
+        texels
+    });
+    black_box(rows);
+    if !printed.swap(true, Ordering::Relaxed) {
+        println!(
+            "sky/limit_map/{name}: {} stars over {} texels: the glare built in {:.3} s, the map \
+             {:.2} CPU-s on {workers} workers ({:.2} s wall), {:.2} CPU-s in all",
+            glare.len(),
+            band.len(),
+            glare_time.as_secs_f64(),
+            busy.as_secs_f64(),
+            began.elapsed().as_secs_f64(),
+            (glare_time + busy).as_secs_f64()
+        );
+    }
+    glare_time + busy
+}
+
+fn limit_map(c: &mut Criterion) {
+    let workers = workers();
+    let spec = BandSpec::STANDARD;
+    let jobs: Vec<(CubeFace, u16)> = CubeFace::ALL
+        .iter()
+        .flat_map(|&face| (0..spec.face_texels()).map(move |row| (face, row)))
+        .collect();
+    // The fixture and the synthetic sky are made only when a bench that reads them is run.
+    let fixture: OnceCell<LimitMapFixture> = OnceCell::new();
+    let synthetic: OnceCell<Vec<(UnitVector, Lux, SpRatio)>> = OnceCell::new();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    group.bench_function("limit_map/near_sun", |b| {
+        let fixture = fixture.get_or_init(|| limit_map_fixture(sky(), workers, &jobs));
+        let build = || Glare::of_listed(&fixture.observer, &fixture.listed, &spec);
+        b.iter_custom(|iters| {
+            (0..iters)
+                .map(|_| {
+                    let name = "near_sun";
+                    let printed = &PRINTED_LIMIT_MAP_NEAR_SUN;
+                    limit_map_once(name, printed, &build, &fixture.band, &jobs, workers)
+                })
+                .sum()
+        });
+    });
+    group.bench_function("limit_map/synthetic_300k", |b| {
+        let fixture = fixture.get_or_init(|| limit_map_fixture(sky(), workers, &jobs));
+        let stars = synthetic.get_or_init(|| {
+            let n = usize::try_from(MAX_N_MAX).expect("300,000 fits a usize");
+            synthetic_sky(n, SYNTHETIC_CUT_V)
+        });
+        let build = || Glare::of_points(stars.iter().copied(), &spec);
+        b.iter_custom(|iters| {
+            (0..iters)
+                .map(|_| {
+                    let name = "synthetic_300k";
+                    let printed = &PRINTED_LIMIT_MAP_SYNTHETIC;
+                    limit_map_once(name, printed, &build, &fixture.band, &jobs, workers)
+                })
+                .sum()
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     sky_benches,
     luminosity_tables,
     census_near_sun,
     census_nuclear_disc,
-    band_near_sun
+    band_near_sun,
+    limit_map
 );
 criterion_main!(sky_benches);
