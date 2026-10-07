@@ -5,16 +5,17 @@
  */
 export type EyeDto = { 
 /**
- * Crumey's (2014) field factor F, finite and at least 1, 1.4 by default; every limit moves
- * by −2.5 log₁₀ F.
+ * Crumey's (2014) field factor F, 0.1 to 100, 1.4 by default (his real observers' 1.4–2.4);
+ * every limit moves by −2.5 log₁₀ F.
  */
 field_factor: number, 
 /**
- * The observer's age, years, finite and positive, 25 by default (CIE 146:2002's glare,
+ * The observer's age, years, finite and not negative, 25 by default (CIE 146:2002's glare,
  * whose age term is fitted over about 20–80 years).
  */
 age_years: number, 
 /**
- * The eye's pigmentation p, 0 to 1, 0.5 by default (CIE 146:2002's glare).
+ * The eye's pigmentation p, 0 to 1.2, 0.5 by default (CIE 146:2002's glare: 0 for black eyes,
+ * 1 for light ones and 1.2 for very light blue-green).
  */
 pigmentation: number, };

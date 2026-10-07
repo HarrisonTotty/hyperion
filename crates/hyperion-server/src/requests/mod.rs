@@ -12,11 +12,12 @@
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
-//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], and the
-//! scene's in [`scene`].
+//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], the
+//! scene's in [`scene`], and the sky's in [`sky`].
 
 mod galaxy;
 mod scene;
+mod sky;
 mod system;
 mod universe;
 
@@ -104,7 +105,8 @@ fn open_topic(
 /// The server's handlers: every request kind, and the code that answers it.
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
-/// (P06.T34), and plan 14's `system_bodies` and `body_detail` (P14.T36). A later plan's kind that
+/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and rendering plan R06's `sky`
+/// (R06.T11.a, as the census's JSON until T11.b and T11.c). A later plan's kind that
 /// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
@@ -153,8 +155,7 @@ impl Handler for Handlers {
             // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
             // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
-            // Rendering plan R06's kind, defined by R06.T10 and served from R06.T11.
-            RequestBody::Sky(_) => Box::pin(ready(Err(not_served_yet("sky")))),
+            RequestBody::Sky(request) => Box::pin(sky::answer(state, request, token).map(answered)),
         }
     }
 
@@ -1198,8 +1199,7 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it, and R06's `sky`
-        // until R06.T11 serves it.
+        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it.
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
@@ -1210,11 +1210,10 @@ mod tests {
                         | RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
-                        | RequestBody::Sky(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 4);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

@@ -39,7 +39,7 @@ use axum::{Router, routing::get};
 
 use crate::compute::{
     CpuPool, DensityMapService, GalaxyCache, SharedBodyCache, SharedBriefCache, SharedCellCache,
-    SharedSystemCache, ShutDownPoolError, StartPoolError,
+    SharedSystemCache, ShutDownPoolError, SkyCaps, StartPoolError,
 };
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -110,6 +110,8 @@ pub(crate) struct AppState {
     /// Each open universe's scene clock and ship stand-in, which `scene_ship` sets (rendering
     /// plan R03, Design note 2).
     pub(crate) scene: SceneService,
+    /// How far a sky's census looks (rendering plan R06, R06.T11.a).
+    pub(crate) sky_caps: SkyCaps,
 }
 
 impl Server {
@@ -194,6 +196,7 @@ impl Server {
                     Arc::clone(config.scene_knowledge()),
                     Arc::clone(config.craft_source()),
                 ),
+                sky_caps: config.sky_caps(),
             }),
         })
     }

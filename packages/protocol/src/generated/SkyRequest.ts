@@ -28,15 +28,20 @@ time: UniverseTime,
  */
 eye: EyeDto | null, 
 /**
- * The deepest camera limit of the views open, V, finite and at most [`MAX_CUT_V`].
+ * The deepest camera limit of the views open, V, finite and at most [`MAX_CUT_V`]. A request
+ * asks the eye, a camera's limit or both; one that asks neither is refused, naming this field.
  */
 camera_limit_v: number | null, 
 /**
- * The most stars to list, at most [`MAX_SKY_STARS`]; [`MAX_SKY_STARS`] where absent.
+ * The most stars to list, from 1 to [`MAX_SKY_STARS`]; [`MAX_SKY_STARS`] where absent.
  */
 n_max: number | null, 
 /**
- * A cone to restrict the census to, for an exposure deeper than the cut allows.
+ * An instrument's field stop, for a deep exposure of a narrow field: the census lists only the
+ * stars of the band's texels that meet the cone, and the band is complete only in them, so no
+ * star outside them glares inside it. The naked eye has no field stop, so a request with both
+ * `eye` and a cone is refused, `bad_request` naming `cone`; an instrument that wants both
+ * sends two requests (decided 2026-10-07, `decision-r06-t8k-cone.md`).
  */
 cone: ConeDto | null, 
 /**

@@ -17,12 +17,21 @@
 //! | 12–15 | the distance, light-years, `f32` |
 //! | 16–17 | the apparent V after extinction, millimagnitudes, `i16` |
 //! | 18–21 | the chroma after reddening, two `u16` fractions of 65,535 |
-//! | 22    | the eye's colour offset, centimagnitudes, `i8` |
+//! | 22    | the eye offset, the star's own eye limit less its texel's, centimagnitudes, `i8` (−1.28 to +1.27) |
 //! | 23    | the view camera's band term, −2.5 log₁₀(η ÷ η☉), units of 1/32 mag, `i8` (−4.0 to +3.97) |
 //!
 //! The chroma is the star's linear Rec. 709 chromaticity, r ÷ (r + g + b) and g ÷ (r + g + b),
 //! each in [0, 1]; b's is one less the two. A client recovers the colour of unit luminance by
 //! dividing (r, g, b) by 0.2126 r + 0.7152 g + 0.0722 b.
+//!
+//! The eye offset is what an eye view adds to the band texel's eye limit in the star's direction
+//! to have the star's own limit (rendering plan R06, R06.T9.h; decided 2026-10-06,
+//! `decision-r06-t9c-glare.md`): its colour offset against its texel's background, from its S/P
+//! ratio after its own reddening, and its glare's self-exclusion. Until R06.T11.c builds the limit
+//! map it is the colour offset alone, against a scotopic background, 2.5 log₁₀(ρ★ ÷ 2.297). It
+//! saturates at −1.28: a cool star behind several magnitudes of dust can fall below that (a 2,300 K
+//! dwarf from A<sub>V</sub> about 3.3, a red giant from about 7), and a view then keeps it where
+//! its own limit would cull it.
 //!
 //! A band texel is [`SKY_TEXEL_BYTES`], 12, in the cube's face order (+X, −X, +Y, −Y, +Z, −Z on the
 //! galactic axes, WebGPU's layer order), rows from the top, each face
@@ -44,7 +53,8 @@ use crate::primitives::{GalacticPosition, SystemIdHex, UniverseIdHex, UniverseTi
 
 /// The deepest cut a request may ask, V 11.0, above which a narrow zoom would ask for some 10⁶
 /// stars (rendering plan R06, Design note 5); a deeper exposure asks for a cone. The sim's
-/// `sky::eye::MAX_CUT_V` (R06.T2) is to hold the same value, which R06.T11's handler tests.
+/// `sky::eye::MAX_CUT_V` (R06.T2) holds the same value, which the server's handler tests
+/// (R06.T11.a).
 pub const MAX_CUT_V: f64 = 11.0;
 
 /// The most stars a request may list, 3 × 10⁵ (7.2 MB of payload; Design note 11), and the
@@ -73,11 +83,16 @@ pub struct SkyRequest {
     /// The eye's parameters, where an eye view is open; then the server sets the eye's cut and
     /// returns each band texel's eye limit.
     pub eye: Option<EyeDto>,
-    /// The deepest camera limit of the views open, V, finite and at most [`MAX_CUT_V`].
+    /// The deepest camera limit of the views open, V, finite and at most [`MAX_CUT_V`]. A request
+    /// asks the eye, a camera's limit or both; one that asks neither is refused, naming this field.
     pub camera_limit_v: Option<f64>,
-    /// The most stars to list, at most [`MAX_SKY_STARS`]; [`MAX_SKY_STARS`] where absent.
+    /// The most stars to list, from 1 to [`MAX_SKY_STARS`]; [`MAX_SKY_STARS`] where absent.
     pub n_max: Option<u32>,
-    /// A cone to restrict the census to, for an exposure deeper than the cut allows.
+    /// An instrument's field stop, for a deep exposure of a narrow field: the census lists only the
+    /// stars of the band's texels that meet the cone, and the band is complete only in them, so no
+    /// star outside them glares inside it. The naked eye has no field stop, so a request with both
+    /// `eye` and a cone is refused, `bad_request` naming `cone`; an instrument that wants both
+    /// sends two requests (decided 2026-10-07, `decision-r06-t8k-cone.md`).
     pub cone: Option<ConeDto>,
     /// The observer's own system, whose stars are discs and are left out of the census.
     pub exclude_system: Option<SystemIdHex>,
@@ -87,23 +102,32 @@ pub struct SkyRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct EyeDto {
-    /// Crumey's (2014) field factor F, finite and at least 1, 1.4 by default; every limit moves
-    /// by −2.5 log₁₀ F.
+    /// Crumey's (2014) field factor F, 0.1 to 100, 1.4 by default (his real observers' 1.4–2.4);
+    /// every limit moves by −2.5 log₁₀ F.
     pub field_factor: f64,
-    /// The observer's age, years, finite and positive, 25 by default (CIE 146:2002's glare,
+    /// The observer's age, years, finite and not negative, 25 by default (CIE 146:2002's glare,
     /// whose age term is fitted over about 20–80 years).
     pub age_years: f64,
-    /// The eye's pigmentation p, 0 to 1, 0.5 by default (CIE 146:2002's glare).
+    /// The eye's pigmentation p, 0 to 1.2, 0.5 by default (CIE 146:2002's glare: 0 for black eyes,
+    /// 1 for light ones and 1.2 for very light blue-green).
     pub pigmentation: f64,
 }
 
-/// A cone of directions about an axis.
+/// A cone of directions about an axis: an instrument's field stop (Design note 5; decided
+/// 2026-10-07, `decision-r06-t8k-cone.md`).
+///
+/// Behind a field stop no light from outside the field reaches the detector. A cone's census lists
+/// only the stars of the band's texels that meet it: those whose centres lie within its half-angle
+/// plus the band's largest texel radius, 1.27° at 64² a face. So no star outside them glares inside
+/// it, and its band holds all of the light outside them. The naked eye has no field stop, and its
+/// glare reaches 90°, so it cannot ask a cone: a request with both [`SkyRequest::eye`] and a cone is
+/// refused.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ConeDto {
     /// The axis, a unit vector on the galactic axes.
     pub axis: [f64; 3],
-    /// The half-angle, degrees, above 0 and at most 180.
+    /// The half-angle, degrees, above 0 and at most 90.
     pub half_angle_deg: f64,
 }
 

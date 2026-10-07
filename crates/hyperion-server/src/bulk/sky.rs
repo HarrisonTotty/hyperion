@@ -21,7 +21,10 @@ pub(crate) struct SkyStarWire {
     pub(crate) v_mag: f64,
     /// The chromaticity after reddening, r ÷ (r + g + b) and g ÷ (r + g + b), each in [0, 1].
     pub(crate) chroma: [f64; 2],
-    /// The eye's colour offset, mag; carried to 0.01 mag within ±1.27.
+    /// The eye offset, mag: the star's own eye limit less its texel's (R06.T9.h), its colour offset
+    /// alone against a scotopic background until R06.T11.c builds the limit map. Carried to 0.01
+    /// mag within −1.28 to +1.27, so a cool star behind several magnitudes of dust, whose offset
+    /// can fall below −1.28, is kept by a view where its own limit would cull it.
     pub(crate) eye_offset_mag: f64,
     /// The view camera's band term, −2.5 log₁₀(η ÷ η☉), mag; carried in 1/32 mag within −4.0 to
     /// +3.97 (decision-camera-eta.md).

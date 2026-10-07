@@ -5,11 +5,12 @@
  * @remarks
  * The server lists every star brighter than the request's cut, the deepest of the views open, so
  * each view drops those fainter than its own limit: the eye by the limit map's limit in the star's
- * direction, moved by the star's eye colour offset (a hot star is seen fainter, Design note 3); a
- * camera by its one limit against the star's V plus its camera band term (the sensor's response
- * to the star's spectrum, Design note 6). A culled star's light is not lost: it is added to the
- * band layer's texel in its direction, so the view's total light is kept and the band is
- * brightened by exactly what was dropped.
+ * direction, moved by the star's eye offset, its own eye limit less its texel's (its colour offset,
+ * by which a hot star is seen fainter, Design note 3, and its glare's self-exclusion, R06.T9.h; the
+ * colour offset alone until R06.T11.c); a camera by its one limit against the star's V plus its
+ * camera band term (the sensor's response to the star's spectrum, Design note 6). A culled star's
+ * light is not lost: it is added to the band layer's texel in its direction, so the view's total
+ * light is kept and the band is brightened by exactly what was dropped.
  */
 
 import type { SkyStars } from "@hyperion/protocol";

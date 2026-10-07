@@ -34,6 +34,7 @@ use clap::builder::{BoolishValueParser, TypedValueParser};
 use clap::{ArgAction, Parser};
 
 use crate::DEFAULT_ADDR;
+use crate::compute::SkyCaps;
 use crate::stop::StdinStop;
 use crate::universe::{Entropy, OsEntropy};
 
@@ -244,6 +245,7 @@ pub struct ServerConfig {
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
     craft_source: Arc<dyn CraftSource>,
+    sky_caps: SkyCaps,
 }
 
 impl ServerConfig {
@@ -327,6 +329,12 @@ impl ServerConfig {
     pub fn craft_source(&self) -> &Arc<dyn CraftSource> {
         &self.craft_source
     }
+
+    /// How far a sky's census looks (rendering plan R06, Design note 9).
+    #[must_use]
+    pub fn sky_caps(&self) -> SkyCaps {
+        self.sky_caps
+    }
 }
 
 /// Builds a [`ServerConfig`], starting from the defaults.
@@ -351,6 +359,7 @@ impl Default for ServerConfigBuilder {
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
                 craft_source: Arc::new(NoCraft),
+                sky_caps: SkyCaps::DERIVED,
             },
         }
     }
@@ -443,6 +452,15 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn craft_source(mut self, craft: impl CraftSource + 'static) -> Self {
         self.config.craft_source = Arc::new(craft);
+        self
+    }
+
+    /// How far a sky's census looks; [`SkyCaps::DERIVED`] by default, each layer's own cap. Tests
+    /// force one small radius on every layer, so that a census takes seconds; no option or
+    /// variable sets it.
+    #[must_use]
+    pub fn sky_caps(mut self, caps: SkyCaps) -> Self {
+        self.config.sky_caps = caps;
         self
     }
 

@@ -1947,11 +1947,17 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   sky's jobs run is answered first; `n_max` above the cap is `BadRequest` naming `n_max`; a
   request with both `eye` and `cone` is `BadRequest` naming `cone`; a sky
   near the Sun lists `feature_members` in `not_modelled`. Acceptance:
-  `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye colour offset and camera
-  band term are its `StarColour::reddened(a_v)`'s (R06.T9.e). The wire's V is the star's own, M_V + DM +
+  `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye offset and camera band
+  term are its `StarColour::reddened(a_v)`'s (R06.T9.e). Until T11.c builds the limit map, its eye
+  offset is its colour offset alone, against a scotopic background. From T11.c it is
+  `sky::limits::eye_offsets`', its own eye limit less its texel's (R06.T9.h; decided 2026-10-06,
+  `decision-r06-t9c-glare.md`), quantised once. The wire field's doc comments say so:
+  `hyperion-protocol`'s `sky.rs` table, `@hyperion/protocol`'s `eyeOffsetMag`, the server's
+  `SkyStarWire` and `view/sky/cull.ts`. No bytes change. The wire's V is the star's own, M_V + DM +
   v★(A_V) A_V, which the census cuts, and its camera term is relative to it (addendum item 4).
   The protocol's doc comments on `SkyRequest.cone` and `ConeDto` call a cone an instrument's
-  field stop, refused with the eye (`decision-r06-t8k-cone.md`).
+  field stop, refused with the eye (`decision-r06-t8k-cone.md`). As built: Risks, "Deviations in
+  T11.a, as built".
 - **R06.T11.b Transfer.** The response and its payload through R03's `BulkPayload::new` and
   `Answer { body, bulk }` (whose `frames` call `bulk::chunk`), the stars then the band, split by
   `stars_bytes` and `band_bytes`, with `BulkPayload`'s `expect(dead_code)` removed; the per-cell
@@ -1961,7 +1967,9 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   pending 15 MiB transfer check in the real renderer is run with this kind, hidden, as R03's Risks
   ask, and recorded. Acceptance: `cargo test -p hyperion-server sky` and `just ci`.
 - **R06.T11.c The band, the limits, the discs and the tables.** The band as bulk jobs by face and
-  row through T9.f's `march_rows`, then `sum_rows`, then the limit map, then `host_discs` of
+  row through T9.f's `march_rows`, then `sum_rows`, then the limit map, against the eye's
+  background and with T9.j's glare at the request's eye cut, and each listed star's eye offset
+  (R06.T9.h), then `host_discs` of
   `exclude_system` at the request's time; the luminosity tables built once per galaxy, keyed by
   `GalaxyKey` alone, under `SingleFlight` in a `ByteLru` of their own budget,
   `HYPERION_SKY_TABLES_MB` (default 160, two galaxies; separate from `HYPERION_SKY_CACHE_MB`), as
@@ -1970,9 +1978,11 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   `decision-r06-tables.md`). Tests: a sky near the Sun returns the stars, texels and host discs the
   sim returns for the same query; a second identical request shares the tables' build; a second
   sky in another time bucket shares the build. Acceptance:
-  `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye colour offset and camera
-  band term are its `StarColour::reddened(a_v)`'s (R06.T9.e). The wire's V is the star's own, M_V + DM +
-  v★(A_V) A_V, which the census cuts, and its camera term is relative to it (addendum item 4).
+  `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye offset and camera band
+  term are its `StarColour::reddened(a_v)`'s (R06.T9.e). Its eye offset is
+  `sky::limits::eye_offsets`', its own eye limit less its texel's (R06.T9.h; decided 2026-10-06,
+  `decision-r06-t9c-glare.md`). The wire's V is the star's own, M_V + DM + v★(A_V) A_V, which the
+  census cuts, and its camera term is relative to it (addendum item 4).
 - **R06.T11.d Delivery nearest first (new; after T8.i, T10 and T11.a–c; signed off).** Decided
   2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and
   adopted on 2026-10-05 under the owner's standing delegation
@@ -5858,3 +5868,109 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     the behaviour name, since the plan's acceptance names the test.
   - **Logs**: `.git/rm23-scratch/r06-census/t5f/record2/` (the record's binary, its tree's diff,
     `record.log` and memory samples), `record.log` (the first record) and `pilot.log`.
+- **Deviations in T11.a, as built (2026-10-07).** The handler, its checks and the census as bulk
+  jobs, as the task sets them out, with these details.
+  - **Where.** `requests/sky.rs` holds the handler (`answer`), the checks (`SkyAsk`, a
+    `TryFrom<&SkyRequest>`), the reply and the wire's star (`wire_star`), as the task names; the
+    other kinds check their fields in `convert/`. The jobs are in `compute/sky.rs` (new):
+    `SkyCaps`, `SkyTables` and the bulk jobs of the tables, the eye's cut, the plan and the census.
+    `convert.rs` makes `query_time` and `mass_layer` `pub(crate)` and splits
+    `root_cube_position(field, …)` from `query_centre`; `bulk::sky` becomes `pub(crate)`.
+  - **The checks**, in this order: the universe, `time`, `observer` (canonical and in the root
+    cube), `eye.field_factor`, `eye.age_years` and `eye.pigmentation` (at `EyeObserver::new`'s
+    ranges), `camera_limit_v` (finite and at most V 11, refused rather than clamped), `n_max`,
+    `cone` and `exclude_system`. Beyond the task's list:
+    - a request that asks neither the eye nor a camera has no cut, and is refused naming
+      `camera_limit_v`;
+    - `n_max` 0 is refused, as above the cap;
+    - an eye with a cone is refused first, with the sim's `ConeWithEye` text. Then a cone's axis
+      must be of unit length within 10⁻⁶, and its half-angle within (0°, 90°];
+    - `exclude_system` is decoded, then looked up by `resolve` in an interactive `try_submit` job
+      after the galaxy and before any bulk job, as `scene_ship` does. Either refusal is
+      `unknown_system` naming `exclude_system`.
+  - **Protocol doc comments, no wire change.** `SkyRequest.cone` and `ConeDto` call a cone an
+    instrument's field stop, refused with the eye. `ConeDto.half_angle_deg` is at most 90, the
+    sim's (it read 180). `EyeDto` states the ranges the server takes, F 0.1–100, age ≥ 0 and p
+    0–1.2 (it read F ≥ 1, age > 0 and p 0–1, which nothing enforced). `n_max` is from 1, a request
+    of neither eye nor camera is refused, and `MAX_CUT_V` is tested. The glare ruling's wire doc
+    comments land here (`decision-r06-t9c-glare.md`, §4): the payload table's byte 22,
+    `eyeOffsetMag`, `SkyStarWire` and `view/sky/cull.ts`, with T9.h's −1.28 saturation. T11.c's
+    two sentences of that ruling are applied with T11.a's text.
+  - **The cut.** The eye's cut is `sky::limits::eye_cut` in one bulk job, the request's cut the
+    deeper of it and the camera's limit, and the query takes `.eye(eye).eye_cut(eye_cut)`
+    (R06.T9.j). T9.d's "T11.a may run the faces as jobs" is not taken. Plan text not yet applied:
+    `decision-r06-t9g-dgl.md`'s T11.a sentence (the request's illumination before the eye's cut)
+    waits for R06.T9.g.
+  - **The census's jobs.**
+    - 256 cells a job (`CENSUS_JOB_CELLS`), in the plan's canonical order. The cells are handed
+      out on the request's task, and at most `BULK_QUEUE_CAPACITY` (256) jobs are outstanding.
+      Sizing by cost, about 50 ms a job, is T11.d's.
+    - Each job builds its own `SkyContext`: 2¹⁴ noise slots, `NoSkyCellCache` (T11.b brings the
+      server's), no sources and `NoModifiers`.
+    - Each job checks, before each cell, the request's token and a census-scoped token that a
+      `CancelOnDrop` raises when the census ends early (a failed job, a dropped future).
+    - The parts are joined as they arrive: the stars concatenated and the tallies summed from the
+      first, as `merge_census` sums them. The join is merged in one more bulk job, which is the
+      same census, since the merge's order is total. `the_jobs_census_is_the_one_pass_census_star_for_star`
+      holds them equal.
+    - A job's cost is far from its cells' count. Near the Sun at forced caps the few D and E cells
+      about the observer dominate, since the census generates their every system until T8.g. A
+      probe on one thread of a test build at load 16 gave: 20 ly, 256 cells in 5.7 s; 50 ly, 2,008
+      cells in 7.3 s; 120 ly, 21,760 cells in 85 jobs in 36 s.
+    - Considered, not done: fewer jobs outstanding, so that a density map's bands, also bulk, need
+      not queue behind up to 256 census jobs.
+  - **The tables are built for each request,** in one bulk job (`SkyTables`): the luminosity
+    tables (`LuminosityTables::build`, 64–140 s of one worker in release), the envelope and the
+    cells' offset bounds. The plan's caps are one bulk job. So a chart's query can wait behind
+    those single jobs on a busy pool, though never in the interactive queue. T11.c builds the
+    tables once per galaxy as staged jobs under a single flight, caches them, and runs the caps as
+    ray chunks.
+  - **A small census for tests: `SkyCaps` (new, public in `hyperion_server::compute`).** The plan
+    names no seam, and a census to the derived caps near the Sun costs 10³–10⁶ CPU-s until T8.g.
+    `ServerConfigBuilder::sky_caps(SkyCaps::forced(radius))` forces every layer's cap; no option
+    or variable sets it. A forced census reads no luminosity table, so it is given
+    `LuminosityTables::dark`. The eye's cut is then a dark sky's, V 8.54 at the default eye
+    (Crumey's 7.99 plus 0.553), and each layer states its cap as the radius with nothing expected
+    beyond it.
+  - **The reply is a stub until T11.b and T11.c.** It is the census's JSON:
+    - `cut_v`, each capped layer's census (A, B, C, D, E, brown dwarfs) by T8.c's mapping, `listed`
+      and `overflow`, `valid_until` and `not_modelled`;
+    - an empty manifest (0 chunks, 0 bytes), with `stars_bytes` and `band_bytes` 0;
+    - no `hosts`, and the query's band shape, 64² a face.
+
+    `listed` counts the census's stars though the payload carries none yet. `sky` is no longer
+    answered `unsupported` (T10's interim).
+
+  - **`valid_until`.** Design note 13's rule, with each listed star within 1 ly taken at its
+    layer's `pad_speed` (1,000 km/s; 3,000 for E), since a `SkyStar` carries no velocity. The sky
+    is then asked again early, never late: a star 0.5 ly off holds it 5.3 days, or 1.8 in E.
+  - **The wire's star** (`wire_star`, `expect(dead_code)` until T11.b sends it):
+    - its V is `SkyStar::v`;
+    - its chroma is the chromaticity of `reddened(a_v).red_green()` (T10's conversion);
+    - its camera term is the reddened one, relative to that V;
+    - its eye offset is its colour offset alone, scotopic, at the reddened ρ (the glare ruling's
+      interim), until T11.c's `eye_offsets`.
+  - **Tests.**
+    - `--test sky`, 6 tests, 20 s at 4 threads under load 16: the task's five, and
+      `the_cut_is_the_eyes_under_a_shallower_camera`, bit for bit the sim's dark eye cut. The
+      near-Sun test also matches each layer's tallies and the listed and overflow counts with the
+      sim's one pass.
+    - The cancel test's bound is exact. Once `cancelled` is read the token is cancelled, so at most
+      the one job in hand completes afterwards, and the queued ones are skipped.
+    - The range query's test reads the query's answer before the sky's, with the census's jobs
+      in the pool and none in the interactive queue.
+    - Every wait is on the pool's counters or the frames, bounded by the harness's patience.
+    - Unit tests: `requests::sky`, 8 (every refusal names its field, the cut's rule, the wire's
+      star over a 25 ly census, `valid_until`, the chromaticity, the protocol's limits, the
+      feature members' gap, an unknown `exclude_system`); `compute::sky`, 2.
+  - **Open, for the orchestrator.**
+    1. **The stub reaches the live client.** The `VIEW` display asks for its sky on every
+       published run (`useViewSky`). With T11.a merged it holds a sky with no stars and no
+       texels. `view/sky/band.ts`'s `bandTexels` then throws "a band of 0 texels is not six faces
+       of 64²", and R02's interim field is gone. Land T11.a with T11.b and T11.c, or keep the
+       client from asking until then.
+    2. **The cost of a real sky.** Until T8.g, a sky to the derived caps near the Sun is some
+       10⁵–10⁶ CPU-s of bulk work (T8.f's sampled 1.64 × 10⁶), after a table build of minutes, and
+       the client's request starts one whenever a view asks for a sky. Its jobs never block a
+       chart, and closing the view cancels it, but they fill every worker meanwhile, against the
+       2026-10-06 load limits.

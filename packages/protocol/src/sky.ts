@@ -41,7 +41,12 @@ export interface SkyStars {
    * the two.
    */
   readonly chroma: Float32Array;
-  /** The eye's colour offset, mag, to 0.01. */
+  /**
+   * The eye offset, mag, to 0.01: the star's own eye limit less its texel's, which an eye view adds
+   * to the band's eye limit in the star's direction (R06.T9.h). Until R06.T11.c it is the star's
+   * colour offset alone, against a scotopic background. It saturates at −1.28, so a cool star behind
+   * several magnitudes of dust is kept where its own limit would cull it.
+   */
   readonly eyeOffsetMag: Float32Array;
   /**
    * The view camera's band term, −2.5 log₁₀(η ÷ η☉), mag, to 1/32: a star is in a camera's view when
