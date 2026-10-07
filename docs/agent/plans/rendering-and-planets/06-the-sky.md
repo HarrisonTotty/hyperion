@@ -1406,7 +1406,7 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
   an observer near the Sun at a given time) and `06-the-sky.md`. Acceptance:
   `cargo test -p hyperion-sim sky::census`, `cargo test -p hyperion-sim --test sky_census`,
   `just test-slow the_census_is_its_oracle_150_ly_from_the_sun_in_motion`, `just ci`. No
-  GENERATOR_VERSION bump.
+  GENERATOR_VERSION bump. As built: Risks, "Deviations in T8.j, as built".
 
 - **R06.T8.k One boundary (new; after T9.b, before T8.g, with or after T8.j).** Decided
   2026-10-06 (`decision-r06-t9b-band.md`). `kept_to` is the cut, `faintest_listable` drops
@@ -2194,7 +2194,8 @@ envelope_bounds_dense_tracks envelope_bounds_pair_states caps_converge_in_rays
 the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read
 standard_nodes_match_the_full_build_where_the_tables_are_read
 the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
-the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, `just bench -- sky`) and record the
+the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc
+the_census_is_its_oracle_150_ly_from_the_sun_in_motion`, `just bench -- sky`) and record the
 figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
 "a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
@@ -4138,6 +4139,9 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
     11.0.
   - P08.T17 owns the premise and asserts it, P09.T23.b pads feature members by their own bound,
     and R06.T8.j tests the census in motion.
+    _Tested by R06.T8.j (2026-10-07): in the fixture with its kinematic tables, 63,715 records
+    seen by four observers moved at most 295–463 km/s by layer (E the fastest), each within its
+    cell's pad, and every one seen within its cap was in a planned cell._
 - **Deviations in T9.b, as built (2026-10-06).** `sky::band::{CubeFace, BandSpec, BandTexel,
 band_rows}` as Design notes 14 and 15 set them out, with these differences.
   - **The amendment's argument.** `band_rows(galaxy, ctx, query, census, complete_to, spec, face,
@@ -4960,6 +4964,34 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     the 2,300 K dwarfs, which never sit at the boundary) are confirmed. Applied: `SkyStar::a_v`'s V secant at
     A_V → 0, 2 and 10 with its source, and the band test's reference integral cut and dimmed by
     the solar point's curves.
+- **Deviations in T8.j, as built (2026-10-07).** The census in motion, as the pad-speed ruling
+  (`decision-r06-pad-speed.md`, §4 item 6) sets it out, built with T8.k, with these details.
+  - The moving galaxy is the fixture cloned and built `with_full_potential`, in a `OnceLock` that
+    T8.f's moving-galaxy test now shares. Its parameters are the fixture's, so its offsets are.
+  - `the_census_plan_holds_every_record_its_caps_see`: the walk is a cube of cells about each
+    observer, keeping each cell whose box comes within the cap plus the pad at 5,000 km/s
+    (`cells_meeting_ball`, test-only), not plan 03's `cells_in_sphere`. It checks 63,715 records
+    (the task's "some 10⁴"; asserted at least 30,000), 27,681 of them within their caps, each
+    in a planned cell. The fastest records move at A 295, B 279, the brown dwarfs 293, C 334, D
+    307 and E 463 km/s. Each lies within its cell's pad at the observer's time, at the
+    retardation's first guess and at its emitted time. The task's parenthetical calls the
+    observer's time the first guess; the first guess is the observer's time less the present
+    distance's light time, from which the light's age is taken (science check), and the test
+    checks all three.
+  - The slow `the_census_is_its_oracle_150_ly_from_the_sun_in_motion` (`tests/sky_census.rs`,
+    `agree_in` with the galaxy, helpers `moving` and `observer_near_sun_at` in
+    `tests/common/sky.rs`) passes: the census generates 32,917 of 42,076 systems (39,943 at the
+    epoch at rest) and agrees with its oracle bit for bit. 22 s in the slow-test profile, unlocked,
+    at load about 10. Native only, as the other slow identity tests are.
+  - `CellReach::of`'s doc names P08.T17's assertion in `epoch_velocity`.
+  - **Gates**: T8.k's, which ran on both; the motion test is among `sky::census`' 36, and the slow
+    test ran by name in the slow-test profile, 23 s.
+  - **Not changed.** No output moves, GENERATOR_VERSION stays 20 and no golden moves: the task
+    adds tests and helpers only.
+  - **Reviews** (with T8.k's). Determinism audit: nothing to fix; the moving galaxy's `OnceLock`
+    and the walk's `BTreeSet` are order-free. Science check: the pad's fixed point,
+    β(|t| + far + offset) ÷ (1 − β), and the walk's pad over the earliest emitted time are
+    confirmed. Applied: the first-guess check above.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;

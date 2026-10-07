@@ -629,7 +629,11 @@ impl CellReach {
     /// It rests, as the range query's padding and the cells' floors do, on every grid record moving
     /// slower than its layer's [`pad_speed`]: plan 08's draw holds every speed below the least of
     /// the escape speed and 1,000 km/s (`galaxy::kinematics::draw`), and layer E pads at
-    /// 3,000 km/s.
+    /// 3,000 km/s. P08.T17 owns that premise: plan 08's
+    /// [`epoch_velocity`](crate::galaxy::query::epoch_velocity), through which
+    /// [`Drift::of_record`] reads every grid velocity, debug-asserts each speed below its layer's
+    /// [`pad_speed`] (decided 2026-10-05, `decision-r06-pad-speed.md`), and R06.T8.j tests this pad
+    /// and the plan's cells in a galaxy whose systems move.
     #[must_use]
     fn of(offsets: &CellOffsets, key: CellKey, query: &SkyQuery) -> Self {
         let apex = query.observer().position().to_light_years_f64();
@@ -1026,7 +1030,7 @@ mod tests {
     use crate::id::CentreMemberId;
     use crate::observe::Observer;
     use crate::sky::census::cache::NoSkyCellCache;
-    use crate::sky::census::query::{Cone, census_plan};
+    use crate::sky::census::query::{Cone, census_plan, plan_cells};
     use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
     use crate::units::Degrees;
 
@@ -1054,6 +1058,14 @@ mod tests {
 
     fn observer_at(ly: [f64; 3]) -> Observer {
         Observer::new(position(ly), UniverseTime::EPOCH).expect("an observer")
+    }
+
+    /// The fixture's galaxy built with its kinematic tables, so that its systems move: built once
+    /// for the module's tests of the census in motion (R06.T8.f, R06.T8.j). Its parameters are the
+    /// fixture's, so [`milky_way_offsets`] serve it.
+    fn moving_galaxy() -> &'static Galaxy {
+        static MOVING: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
+        MOVING.get_or_init(|| milky_way_galaxy().clone().with_full_potential())
     }
 
     /// Every float of `stars` that a census measures, as bits, in order: `PartialEq` holds 0.0 and
@@ -1703,14 +1715,9 @@ mod tests {
     /// Sun, at the epoch and up to 900 years from it, in a galaxy whose systems move (R06.T8.f).
     #[test]
     fn the_bound_before_the_drift_never_rejects_what_the_bound_after_it_passes() {
-        let moving = Galaxy::from_params(
-            milky_way_galaxy().seed(),
-            crate::galaxy::params::GalaxyParams::milky_way_like(),
-        )
-        .expect("the fixture builds")
-        .with_full_potential();
+        let moving = moving_galaxy();
         let envelope = milky_way_envelope();
-        let offsets = CellOffsets::build(&moving);
+        let offsets = CellOffsets::build(moving);
         let at = |ly: [f64; 3], years: i64| {
             let t = UniverseTime::from_julian_years(years).expect("in the window");
             Observer::new(position(ly), t).expect("an observer")
@@ -1742,7 +1749,7 @@ mod tests {
                 let key = CellKey::of(record.id()).expect("a grid record");
                 let reach = CellReach::of(&offsets, key, &query);
                 let before = passes_before_drift(envelope, record, &query, &reach);
-                let drift = Drift::of_record(&moving, record).expect("a grid record moves");
+                let drift = Drift::of_record(moving, record).expect("a grid record moves");
                 let r = retarded(query.observer(), &drift);
                 let d = query
                     .observer()
@@ -1947,5 +1954,201 @@ mod tests {
         }
         eprintln!("the cone keeps {kept} stars of its cells and leaves out {left_out}");
         assert!(kept > 0 && left_out > 0, "{kept} kept, {left_out} left out");
+    }
+
+    /// The census in motion (R06.T8.j; `decision-r06-pad-speed.md`): in the fixture built with its
+    /// kinematic tables, observers at the Sun at the epoch, at +H and at −H, and 250 ly from it at
+    /// +900 years, every record of every cell within each layer's forced cap (A 24, B 48, the brown
+    /// dwarfs 48, C 96, D 192 and E 384 ly) plus a pad at 5,000 km/s over the light's earliest
+    /// time, walked independently of [`pad_speed`] and generated whole, moves below its layer's
+    /// [`pad_speed`]; lies within its cell's [`CellReach`] pad of its epoch position at the
+    /// observer's time, at the retardation's first guess (the observer's time less the light time
+    /// of the present distance, at which the light's age is taken) and at its emitted time; and,
+    /// where its apparent position lies within its layer's cap, is in a cell of
+    /// [`plan_cells`]'.
+    #[test]
+    fn the_census_plan_holds_every_record_its_caps_see() {
+        let moving = moving_galaxy();
+        let offsets = milky_way_offsets();
+        assert!(offsets.is_for(moving));
+        let h = crate::time::CLOCK_WINDOW_H.as_julian_years_f64();
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the clock window is 1,000 years, a whole number"
+        )]
+        let h = h.round() as i64;
+        let at = |ly: [f64; 3], years: i64| {
+            let t = UniverseTime::from_julian_years(years).expect("in the window");
+            Observer::new(position(ly), t).expect("an observer")
+        };
+        let observers = [
+            at(SUN, 0),
+            at(SUN, h),
+            at(SUN, -h),
+            at([SUN[0] + 250.0, SUN[1], SUN[2]], 900),
+        ];
+        let caps = [
+            (Layer::A, 24.0),
+            (Layer::B, 48.0),
+            (Layer::BrownDwarf, 48.0),
+            (Layer::C, 96.0),
+            (Layer::D, 192.0),
+            (Layer::E, 384.0),
+        ];
+        let radii: Vec<(Layer, LightYears)> = caps
+            .iter()
+            .map(|&(layer, r)| (layer, LightYears::new(r)))
+            .collect();
+        let forced: Vec<crate::sky::caps::LayerCap> = radii
+            .iter()
+            .map(|&(layer, r)| crate::sky::caps::LayerCap::forced(layer, r))
+            .collect();
+        let mut counts = InMotion::default();
+        for observer in observers {
+            let query = SkyQuery::builder(observer, Magnitudes::new(11.0))
+                .build()
+                .expect("a valid query")
+                .with_caps_forced_per_layer(&radii)
+                .expect("forced caps");
+            let planned: std::collections::BTreeSet<CellKey> =
+                plan_cells(&query, &forced).into_iter().collect();
+            for &(layer, cap) in &caps {
+                check_layer_in_motion(&query, &planned, layer, cap, &mut counts);
+            }
+        }
+        let InMotion {
+            checked,
+            seen,
+            fastest,
+        } = counts;
+        let fastest: Vec<String> = caps
+            .iter()
+            .map(|&(layer, _)| {
+                let km_s = fastest[usize::from(layer.value())] / 1e3;
+                format!("{layer:?} {km_s:.0}")
+            })
+            .collect();
+        eprintln!(
+            "{checked} records checked, {seen} seen within their caps; the fastest, km/s: {}",
+            fastest.join(", ")
+        );
+        assert!(
+            checked >= 30_000 && seen >= 10_000,
+            "{checked} checked, {seen} seen"
+        );
+    }
+
+    /// What [`the_census_plan_holds_every_record_its_caps_see`] counted: the records checked, those
+    /// seen within their caps, and each layer's largest speed, m/s, by [`Layer::value`].
+    #[derive(Debug, Default)]
+    struct InMotion {
+        checked: u32,
+        seen: u32,
+        fastest: [f64; Layer::ALL.len()],
+    }
+
+    /// Checks every record of `layer`'s cells within `cap` ly of `query`'s observer, plus a pad at
+    /// 5,000 km/s over the light's earliest time, in [`moving_galaxy`], against its layer's
+    /// [`pad_speed`], its cell's [`CellReach`] pad, and the `planned` cells where its apparent
+    /// position lies within the cap; adds to `counts`.
+    fn check_layer_in_motion(
+        query: &SkyQuery,
+        planned: &std::collections::BTreeSet<CellKey>,
+        layer: Layer,
+        cap: f64,
+        counts: &mut InMotion,
+    ) {
+        let moving = moving_galaxy();
+        let observer = query.observer();
+        let t = observer.time();
+        let walk_speed = crate::units::KilometresPerSecond::new(5_000.0);
+        let earliest = t
+            .checked_sub(
+                Span::from_seconds_f64(cap * crate::units::consts::SECONDS_PER_JULIAN_YEAR)
+                    .expect("a span"),
+            )
+            .expect("on the clock");
+        let pad = pad_for(earliest, walk_speed)
+            .value()
+            .max(pad_for(t, walk_speed).value());
+        let pad_speed_m_s = crate::units::MetresPerSecond::from(pad_speed(layer)).value();
+        let ly = |a: &GalacticPosition, b: &GalacticPosition| {
+            a.distance_to(b).value() / METRES_PER_LIGHT_YEAR
+        };
+        let mut records = Vec::new();
+        let apex = observer.position().to_light_years_f64();
+        for key in cells_meeting_ball(layer, apex, cap + pad) {
+            let reach = CellReach::of(milky_way_offsets(), key, query);
+            generate_cell(moving, key, &mut records);
+            for record in &records {
+                let drift = Drift::of_record(moving, record).expect("a grid record moves");
+                let speed = drift.velocity().speed().value();
+                assert!(speed < pad_speed_m_s, "{record:?} at {speed} m/s");
+                let fastest = &mut counts.fastest[usize::from(layer.value())];
+                *fastest = fastest.max(speed);
+                let r = retarded(observer, &drift);
+                let epoch = record.epoch_position();
+                let present = crate::observe::Trajectory::position_at(&drift, t);
+                // The retardation's first guess: the light time of the present distance back.
+                let first_guess = t
+                    .checked_sub(crate::observe::light_time(
+                        observer.position().distance_to(&present),
+                    ))
+                    .expect("on the clock");
+                let guessed = crate::observe::Trajectory::position_at(&drift, first_guess);
+                let (now, guess, then) = (
+                    ly(epoch, &present),
+                    ly(epoch, &guessed),
+                    ly(epoch, r.apparent_position()),
+                );
+                assert!(
+                    now <= reach.pad && guess <= reach.pad && then <= reach.pad,
+                    "{record:?} for {observer:?}: moved {now} ly by now, {guess} ly by the first \
+                     guess and {then} ly by the emitted time, pad {}",
+                    reach.pad
+                );
+                if ly(observer.position(), r.apparent_position()) <= cap {
+                    assert!(
+                        planned.contains(&key),
+                        "{record:?} is seen within {cap} ly by {observer:?} from {key:?}, which \
+                         the plan does not open"
+                    );
+                    counts.seen += 1;
+                }
+                counts.checked += 1;
+            }
+        }
+    }
+
+    /// The cells of `layer` whose box comes within `radius_ly` of `apex_ly`, by a walk of the
+    /// cube of cells about it: [`plan_cells`]' oracle.
+    fn cells_meeting_ball(layer: Layer, apex_ly: [f64; 3], radius_ly: f64) -> Vec<CellKey> {
+        let size = f64::from(layer.cell_size_ly());
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "cell indices near the Sun, far inside i32"
+        )]
+        let index = |a: f64| (a / size).floor() as i32;
+        let range = |k: usize| index(apex_ly[k] - radius_ly)..=index(apex_ly[k] + radius_ly);
+        let mut cells = Vec::new();
+        for x in range(0) {
+            for y in range(1) {
+                for z in range(2) {
+                    let key = CellKey::new(layer, [x, y, z]).expect("in the cube");
+                    let o = key.origin_ly();
+                    let near_sq: f64 = (0..3)
+                        .map(|k| {
+                            let lo = f64::from(o[k]);
+                            let near = apex_ly[k].clamp(lo, lo + size) - apex_ly[k];
+                            near * near
+                        })
+                        .sum();
+                    if near_sq.sqrt() <= radius_ly {
+                        cells.push(key);
+                    }
+                }
+            }
+        }
+        cells
     }
 }

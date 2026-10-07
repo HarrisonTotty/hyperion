@@ -10,6 +10,10 @@
 //! own V, `M_V` + DM plus its own V band's extinction behind its sightline's `A_V`, brighter than
 //! the cut alone, with the eye or without it, and inside the query's cone where it has one.
 //!
+//! The fixture is built without kinematic tables, so its systems stand still. [`moving`] builds
+//! the same galaxy with them, and [`observer_near_sun_at`] stands an observer near the Sun at any
+//! time of the clock window, for the census in motion (R06.T8.j).
+//!
 //! The cells run on up to [`THREADS`] threads, each with its own context, and their parts are
 //! merged by `merge_census`, whose order is total and whose tallies are sums, so neither the
 //! threads' count nor their timing changes a bit. Both read tables for no component
@@ -86,6 +90,25 @@ pub fn observer_in_nuclear_disc(galaxy: &Galaxy) -> Observer {
         "the nuclear disc's scale length is {length} ly, inside the place"
     );
     observer_at(NUCLEAR_DISC_LY)
+}
+
+/// An observer near the Sun ([`SUN_LY`]) at `t`.
+///
+/// # Panics
+///
+/// If `galaxy`'s bar reaches the place, as [`observer_near_sun`]; or if `t` lies outside the
+/// clock window.
+#[must_use]
+pub fn observer_near_sun_at(galaxy: &Galaxy, t: UniverseTime) -> Observer {
+    Observer::new(*observer_near_sun(galaxy).position(), t).expect("a time within the clock window")
+}
+
+/// `galaxy` built with its kinematic tables (`Galaxy::with_full_potential`), so that its systems
+/// move, as the server's galaxies do (R06.T8.j; `decision-r06-pad-speed.md`). Its records and
+/// stars are the fixture's; only their drifts differ.
+#[must_use]
+pub fn moving(galaxy: &Galaxy) -> Galaxy {
+    galaxy.clone().with_full_potential()
 }
 
 fn observer_at(ly: [f64; 3]) -> Observer {

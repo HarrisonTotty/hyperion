@@ -14,6 +14,13 @@
 //! | slow | near the Sun | A 300 ly, B 500 ly | 7.95 | 246,600 |
 //! | slow | near the Sun | C, D and E, 1,000 ly | 7.95 | 1.40 M |
 //! | slow | nuclear disc | D and E, 20 ly (the eight cells at the place) | 7.95 | 0.88 M |
+//! | slow | near the Sun at +H, in motion | every layer, 150 ly | 11 | 39,600 |
+//!
+//! The fixture is built without kinematic tables, so its systems keep their epoch positions. The
+//! census pads its cells and its bound before the drift by each layer's pad speed, so the last row
+//! runs the fast near-Sun test in the fixture built with them, whose systems move (R06.T8.j,
+//! `decision-r06-pad-speed.md`); `sky::census::cell`'s tests check its plan and pad against an
+//! independent walk in the same galaxy.
 //!
 //! The plan's 200 ly in the nuclear disc would generate 17.3 M systems for D and E alone, and the
 //! 10 ly over every layer accepted on 2026-10-03 would generate 1.9 M, since a cell there holds up
@@ -116,7 +123,17 @@ enum Skips {
 /// bit for bit, at the query's `n_max` and at a third of the listed, and that the census lists
 /// stars; and, as `skips` says, that it skips systems. Returns each layer's generated systems.
 fn agree(what: &str, query: SkyQuery, radii: &[(Layer, LightYears)], skips: Skips) -> Generated {
-    let g = galaxy();
+    agree_in(galaxy(), what, query, radii, skips)
+}
+
+/// [`agree`] in the galaxy `g`.
+fn agree_in(
+    g: &Galaxy,
+    what: &str,
+    query: SkyQuery,
+    radii: &[(Layer, LightYears)],
+    skips: Skips,
+) -> Generated {
     let n_max = query.n_max();
     let census = census_parts(g, query.clone(), radii);
     let brute = brute_force_parts(g, query, radii);
@@ -313,6 +330,30 @@ fn the_census_is_its_oracle_150_ly_from_the_sun() {
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(11.0));
     agree(
         "every layer within 150 ly of the Sun",
+        query,
+        &every_layer(LightYears::new(150.0)),
+        Skips::Asserted,
+    );
+}
+
+/// T8.e's 150 ly identity test in motion (R06.T8.j; `decision-r06-pad-speed.md`): in the fixture
+/// built with its kinematic tables, whose systems move, with the observer at +H, the census and
+/// its oracle agree as they do at rest. Slow: the galaxy's kinematic tables are built first.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: builds the fixture's kinematic tables, then the 150 ly identity test"]
+fn the_census_is_its_oracle_150_ly_from_the_sun_in_motion() {
+    use common::sky::{moving, observer_near_sun_at};
+    use hyperion_sim::time::CLOCK_WINDOW_H;
+
+    let g = moving(galaxy());
+    let plus_h = UniverseTime::EPOCH
+        .checked_add(CLOCK_WINDOW_H)
+        .expect("+H is on the clock");
+    let query = eye_query(observer_near_sun_at(&g, plus_h), Magnitudes::new(11.0));
+    agree_in(
+        &g,
+        "every layer within 150 ly of the Sun at +H, in motion",
         query,
         &every_layer(LightYears::new(150.0)),
         Skips::Asserted,
