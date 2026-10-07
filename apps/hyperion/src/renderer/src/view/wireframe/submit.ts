@@ -4,10 +4,11 @@
  *
  * @remarks
  * The draw list (R02.T13) is packed into four storage buffers, one per shader, and drawn in this
- * order: the bodies' occluder spheres and the hulls' occluder faces (depth only, each pushed away
- * in its fragment by the list's `occluderSlopePx`, R07.T16.d), the star sprites
- * (additive), then each line batch, its `--surface-0` casing first and its stroke over it, both
- * premultiplied over what is beneath. Sprites go before the lines, where the draw list lists them
+ * order: the bodies' occluder spheres and the hulls' opaque faces (each pushed away in its
+ * fragment by the list's `occluderSlopePx`, R07.T16.d; depth only, or over the photorealistic image
+ * a silhouette filled opaque in its mesh's `fill`, R07.T16.e), the star sprites (additive), then
+ * each line batch, its `--surface-0` casing first and its stroke over it, both premultiplied over
+ * what is beneath. Sprites go before the lines, where the draw list lists them
  * after, so that a mark's casing covers a star beneath it, as the guide's casing rule wants of every
  * mark over the image. The shaders are standard WGSL in R01's convention (its Design note 23):
  * `frame.wgsl`'s `Frame` at `@group(0)`, each material's `Draw` at `@group(1)` (the draw's offset
@@ -46,8 +47,12 @@ import starSpriteWgsl from "../shaders/starSprite.wgsl?raw";
 import toneCurveWgsl from "../shaders/toneCurve.wgsl?raw";
 import type { DrawCamera, LineBatch, OccluderSphere, WireframeDrawList } from "./drawList";
 
-/** The wireframe's materials, by name. */
-export type WireframeMaterial = "lines" | "occluderSphere" | "occluderHull" | "starSprite";
+/**
+ * The wireframe's materials, by name: `occluderHull` a hull's faces as depth alone, and
+ * `hullSilhouette` the same faces filled opaque over the photorealistic image (R07.T16.e).
+ */
+export type WireframeMaterial =
+  "lines" | "occluderSphere" | "occluderHull" | "hullSilhouette" | "starSprite";
 
 /** The meshes the wireframe instances: a unit quad's two triangles, and one triangle. */
 export type WireframeMesh = "quad" | "triangle";
@@ -63,6 +68,7 @@ const SOURCES: Readonly<Record<WireframeMaterial, string>> = {
   lines: frameWgsl + linesWgsl,
   occluderSphere: frameWgsl + occluderSphereWgsl,
   occluderHull: frameWgsl + occluderWgsl,
+  hullSilhouette: frameWgsl + occluderWgsl,
   starSprite: frameWgsl + toneCurveWgsl + starSpriteWgsl,
 };
 
@@ -71,6 +77,7 @@ export const MATERIAL_BUFFER: Readonly<Record<WireframeMaterial, WireframeBuffer
   lines: "segments",
   occluderSphere: "spheres",
   occluderHull: "corners",
+  hullSilhouette: "corners",
   starSprite: "sprites",
 };
 
@@ -82,6 +89,7 @@ const DISPLAY_NAMES: Readonly<Record<WireframeMaterial, string>> = {
   lines: "WIREFRAME LINES",
   occluderSphere: "BODY OCCLUDER",
   occluderHull: "HULL OCCLUDER",
+  hullSilhouette: "HULL SILHOUETTE",
   starSprite: "STAR SPRITES",
 };
 
@@ -104,14 +112,35 @@ function spec(
 }
 
 /**
- * The wireframe's four materials (Design notes 5, 9 and 12).
+ * Whether each material writes the depth that hides what follows it, so that its draws go before
+ * the background and every line (R06.T13.g; R07.T16.e): the occluders and the hulls' silhouettes.
+ */
+const IS_OCCLUDER: Readonly<Record<WireframeMaterial, boolean>> = {
+  lines: false,
+  occluderSphere: true,
+  occluderHull: true,
+  hullSilhouette: true,
+  starSprite: false,
+};
+
+/** A hull face's uniforms, for both of its materials, which share one source. */
+const HULL_UNIFORMS: WgslMaterialSpec["uniforms"] = [
+  { name: "firstTriangle", type: "f32" },
+  { name: "occluderSlopePx", type: "f32" },
+  { name: "fill", type: "vec4f" },
+];
+
+/**
+ * The wireframe's five materials (Design notes 5, 9 and 12).
  *
  * @remarks
  * Lines and sprites are depth-tested and write no depth; the occluders write depth and no colour,
  * each its own depth from its fragment, pushed away by `occluderSlopePx` pixels of the depth's
- * screen slope (Design note 5; R07.T16.d). No material sets a hardware depth bias: it is pipeline
- * state, which could not follow the display's ratio. The uniforms are listed in the order of each
- * shader's `Draw` struct, after its `offsetFromCameraM`.
+ * screen slope (Design note 5; R07.T16.d). The hull's silhouette is its occluder with colour
+ * writes on: opaque, its colour the draw's `fill` (R07.T16.e; decision-r07-t16a, item 3). No
+ * material sets a hardware depth bias: it is pipeline state, which could not follow the display's
+ * ratio. The uniforms are listed in the order of each shader's `Draw` struct, after its
+ * `offsetFromCameraM`.
  */
 export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMaterialSpec>> = {
   lines: spec("lines", {
@@ -134,12 +163,15 @@ export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMateria
     blend: "none",
   }),
   occluderHull: spec("occluderHull", {
-    uniforms: [
-      { name: "firstTriangle", type: "f32" },
-      { name: "occluderSlopePx", type: "f32" },
-    ],
+    uniforms: HULL_UNIFORMS,
     depthWrite: true,
     colourWrites: false,
+    blend: "none",
+  }),
+  hullSilhouette: spec("hullSilhouette", {
+    uniforms: HULL_UNIFORMS,
+    depthWrite: true,
+    colourWrites: true,
     blend: "none",
   }),
   starSprite: spec("starSprite", {
@@ -469,14 +501,26 @@ export function packWireframe(
         0,
       );
     }
-    // Each hull is its own draw at its own origin, reading its range of the one buffer.
-    draws.push({
-      material: "occluderHull",
-      mesh: "triangle",
-      instanceCount: triangles,
-      offsetFromCameraM: mesh.originF32,
-      uniforms: { firstTriangle: new Float32Array([firstTriangle]), occluderSlopePx },
-    });
+    // Each hull is its own draw at its own origin, reading its range of the one buffer: depth
+    // alone, or a silhouette filled opaque in its colour (R07.T16.e).
+    const first = new Float32Array([firstTriangle]);
+    draws.push(
+      mesh.fill === null
+        ? {
+            material: "occluderHull",
+            mesh: "triangle",
+            instanceCount: triangles,
+            offsetFromCameraM: mesh.originF32,
+            uniforms: { firstTriangle: first, occluderSlopePx },
+          }
+        : {
+            material: "hullSilhouette",
+            mesh: "triangle",
+            instanceCount: triangles,
+            offsetFromCameraM: mesh.originF32,
+            uniforms: { firstTriangle: first, occluderSlopePx, fill: linearColour(mesh.fill) },
+          },
+    );
   }
 
   const spriteRows: number[] = [];
@@ -588,6 +632,7 @@ export class WireframeRenderer {
         lines: material("lines"),
         occluderSphere: material("occluderSphere"),
         occluderHull: material("occluderHull"),
+        hullSilhouette: material("hullSilhouette"),
         starSprite: material("starSprite"),
       },
       meshes: {
@@ -662,10 +707,11 @@ export class WireframeRenderer {
         storageBuffers: { [bufferName]: buffers[bufferName] },
       };
     });
-    // The occluders, then the background they hide, then everything else in its packed order.
+    // The occluders, then the background they hide, then everything else in its packed order: the
+    // spheres before the hulls' faces, a silhouette's included, and every line after them.
     const isOccluder = (index: number): boolean => {
       const material = packed.draws[index]?.material;
-      return material === "occluderSphere" || material === "occluderHull";
+      return material !== undefined && IS_OCCLUDER[material];
     };
     const draws = [
       ...bound.filter((_, index) => isOccluder(index)),

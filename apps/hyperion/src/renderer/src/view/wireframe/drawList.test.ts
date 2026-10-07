@@ -17,6 +17,8 @@ import { relativeToCamera } from "../coords/relative";
 import { MIN_STROKE_DEVICE_PX } from "../../lib/strokes";
 import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
 import { occluderRadius } from "../depth/depth";
+import { narrow } from "../coords/narrow";
+import { TEST_HULL } from "../scene/hull";
 import { sceneOrigins, type ViewScene } from "../scene/model";
 import {
   buildWireframeDrawList,
@@ -56,6 +58,22 @@ const OPTIONS: DrawOptions = {
 
 /** A free camera 3 × 10⁷ m from the planet along +z, looking at it. */
 const CAMERA: DrawCamera = OFF_PLANET_CAMERA;
+
+/** `TEST_HULL`'s plate's corners in `f32`, as an unturned hull's draw list has them. */
+const PLATE_CORNERS = TEST_HULL.vertices.slice(9, 13).map((v) => narrow(v));
+
+/**
+ * How many of the items packed in `packed`, `size` corners of three `f32` each (a hull mesh's
+ * triangles, a batch's segments), lie wholly on `TEST_HULL`'s plate.
+ */
+function onThePlate(packed: Float32Array, size: number): number {
+  const corner = (i: number): Float32Array => packed.subarray(i * 3, i * 3 + 3);
+  const onPlate = (c: Float32Array): boolean =>
+    PLATE_CORNERS.some((p) => p.every((value, axis) => value === c[axis]));
+  return Array.from({ length: packed.length / (3 * size) }, (_, item) => item).filter((item) =>
+    Array.from({ length: size }, (_, j) => corner(item * size + j)).every(onPlate),
+  ).length;
+}
 
 /** The labels of the body marks of a list, `null` for a body drawn larger than its symbol. */
 function bodyLabels(list: WireframeDrawList): unknown[] {
@@ -221,6 +239,22 @@ describe("buildWireframeDrawList", () => {
   it("draws a hull over two-sided occluder faces with no hardware bias of their own", () => {
     const mesh = build().occluderMeshes.find((m) => m.id === "other");
     expect([mesh?.twoSided, mesh !== undefined && "depthBiasAway" in mesh]).toEqual([true, false]);
+  });
+
+  it("gives TEST_HULL's mesh its 14 opaque faces and none of its window's (R07.T16.e)", () => {
+    const triangles =
+      build().occluderMeshes.find((m) => m.id === "other")?.triangles ?? new Float32Array(0);
+    expect([triangles.length / 9, onThePlate(triangles, 3)]).toEqual([14, 0]);
+  });
+
+  it("fills none of the wireframe's hull meshes, which hide by depth alone (R07.T16.e)", () => {
+    expect([...new Set(build().occluderMeshes.map((m) => m.fill))]).toEqual([null]);
+  });
+
+  it("still draws the four edges of TEST_HULL's window (R07.T16.e)", () => {
+    const segments =
+      build().lines.find((line) => line.id === "hull:other")?.segments ?? new Float32Array(0);
+    expect(onThePlate(segments, 2)).toBe(4);
   });
 
   it("draws occluders, then lines, then sprites, and carries its strokes and slope term", () => {

@@ -30,7 +30,12 @@ describe("hullEdges", () => {
 });
 
 describe("hullFaces", () => {
-  it("returns every face of TEST_HULL as a triangle", () => {
-    expect(hullFaces(TEST_HULL, IDENTITY_QUATERNION)).toHaveLength(TEST_HULL.faces.length);
+  it("returns TEST_HULL's 14 opaque faces as triangles, and none of its window's (R07.T16.e)", () => {
+    const faces = hullFaces(TEST_HULL, IDENTITY_QUATERNION);
+    const plate = TEST_HULL.vertices.slice(9, 13);
+    const onPlate = faces.filter((corners) =>
+      corners.every((corner) => plate.some((p) => norm(sub(p, corner)) === 0)),
+    );
+    expect([faces.length, onPlate.length]).toEqual([14, 0]);
   });
 });

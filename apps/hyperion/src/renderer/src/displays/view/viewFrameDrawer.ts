@@ -210,7 +210,7 @@ export class ViewFrameDrawer {
       inputs.availability.photorealistic &&
       this.#photoreal.status !== "failed"
     ) {
-      drawn = this.#drawPhotoreal(inputs, viewport, camera, list, cube, exposed);
+      drawn = this.#drawPhotoreal(inputs, tokens, viewport, camera, list, cube, exposed);
     }
     if (!drawn) {
       this.#wireframe.render(
@@ -226,6 +226,7 @@ export class ViewFrameDrawer {
 
   #drawPhotoreal(
     inputs: ViewFrameInputs,
+    tokens: ColourTokens,
     viewport: ViewSize,
     camera: { readonly pose: CameraPose; readonly fovXRad: number },
     list: ReturnType<typeof buildWireframeDrawList>,
@@ -258,8 +259,9 @@ export class ViewFrameDrawer {
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
           previousRegimes: this.#regimes,
           meter: inputs.meter,
-          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a).
-          overlay: overlaySubmission(this.#wireframe, list, camera, viewport),
+          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), and
+          // the craft on their silhouettes (R07.T16.e).
+          overlay: overlaySubmission(this.#wireframe, list, tokens, camera, viewport),
         }),
       );
       if (plan === null) {

@@ -25,6 +25,7 @@ import {
   linearColour,
   MATERIAL_BUFFER,
   OUTSIDE_VIEW_MARGIN_PX,
+  type PackedDraw,
   packWireframe,
   sphereScreenRect,
   WIREFRAME_MATERIALS,
@@ -40,6 +41,7 @@ const MATERIALS: ReadonlyArray<WireframeMaterial> = [
   "lines",
   "occluderSphere",
   "occluderHull",
+  "hullSilhouette",
   "starSprite",
 ];
 
@@ -136,7 +138,21 @@ describe("the wireframe's shaders", () => {
       WIREFRAME_MATERIALS.occluderSphere.uniforms.map((u) => u.name),
       WIREFRAME_MATERIALS.occluderHull.uniforms.map((u) => u.name),
       /SLOPE_SCALE/.test(WIREFRAME_MATERIALS.occluderSphere.fragmentWgsl),
-    ]).toEqual([["occluderSlopePx"], ["firstTriangle", "occluderSlopePx"], false]);
+    ]).toEqual([["occluderSlopePx"], ["firstTriangle", "occluderSlopePx", "fill"], false]);
+  });
+
+  it("draw a hull's silhouette from its occluder's source, its colour the draw's fill (R07.T16.e)", () => {
+    const silhouette = WIREFRAME_MATERIALS.hullSilhouette;
+    const fragment = silhouette.fragmentWgsl.slice(
+      silhouette.fragmentWgsl.indexOf("fn fragmentMain"),
+    );
+    expect([
+      silhouette.vertexWgsl === WIREFRAME_MATERIALS.occluderHull.vertexWgsl,
+      silhouette.uniforms,
+      /out\.colour = draw\.fill;/.test(fragment),
+      // No colour literal: the fill is the token's, through the uniform.
+      /vec4f\(\s*[\d.]/.test(fragment),
+    ]).toEqual([true, WIREFRAME_MATERIALS.occluderHull.uniforms, true, false]);
   });
 
   it("are composed of ASCII alone", () => {
@@ -165,6 +181,7 @@ describe("the wireframe's materials", () => {
       lines: [false, true, "premultiplied", "none", null],
       occluderSphere: [true, false, "none", "none", null],
       occluderHull: [true, false, "none", "none", null],
+      hullSilhouette: [true, true, "none", "none", null],
       starSprite: [false, true, "additive", "none", null],
     });
   });
@@ -226,6 +243,12 @@ describe("sphereScreenRect", () => {
   });
 });
 
+/** A packed draw's `fill` uniform, or `null` where it has none. */
+function fillOf(draw: PackedDraw): number[] | null {
+  const value = draw.uniforms["fill"];
+  return value === undefined ? null : [...value];
+}
+
 describe("packWireframe", () => {
   const list: WireframeDrawList = {
     occluderSpheres: [
@@ -237,6 +260,8 @@ describe("packWireframe", () => {
       originF32: new Float32Array([0, 0, -n]),
       triangles: new Float32Array(9 * n).fill(n),
       twoSided: true as const,
+      // The first depth only, as the wireframe draws a hull; the second filled, as the overlay does.
+      fill: n === 2 ? "#05080d" : null,
     })),
     lines: [
       aBatch({ id: "cased" }),
@@ -274,7 +299,7 @@ describe("packWireframe", () => {
     expect(summary).toEqual([
       ["occluderSphere", 1, null, null],
       ["occluderHull", 1, null, 0],
-      ["occluderHull", 2, null, 1],
+      ["hullSilhouette", 2, null, 1],
       ["starSprite", 1, null, null],
       ["lines", 1, 3, 0],
       ["lines", 1, 1, 0],
@@ -302,12 +327,22 @@ describe("packWireframe", () => {
 
   it("gives both occluders the list's slope term", () => {
     const occluders = packed.draws.filter(
-      (d) => d.material === "occluderSphere" || d.material === "occluderHull",
+      (d) => d.material !== "lines" && d.material !== "starSprite",
     );
     expect(occluders.map((d) => [d.material, d.uniforms["occluderSlopePx"]?.[0]])).toEqual([
       ["occluderSphere", 5],
       ["occluderHull", 5],
-      ["occluderHull", 5],
+      ["hullSilhouette", 5],
+    ]);
+  });
+
+  it("fills a silhouette in its mesh's colour, linear, and gives depth-only faces none (R07.T16.e)", () => {
+    const hulls = packed.draws.filter(
+      (d) => d.material === "occluderHull" || d.material === "hullSilhouette",
+    );
+    expect(hulls.map((d) => [d.material, fillOf(d)])).toEqual([
+      ["occluderHull", null],
+      ["hullSilhouette", [...linearColour("#05080d")]],
     ]);
   });
 
@@ -532,18 +567,53 @@ describe("WireframeRenderer", () => {
     ).toEqual([4_096, 16_384]);
   });
 
+  it("draws the spheres, then the silhouettes, before the background and every line (R07.T16.e)", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const list: WireframeDrawList = {
+      ...EMPTY,
+      occluderSpheres: [
+        { id: "near", centreF32: new Float32Array([0, 0, -1e7]), radiusM: 1e6, altitudeM: 9e6 },
+      ],
+      occluderMeshes: [
+        {
+          id: "hull",
+          originF32: new Float32Array([0, 0, -1]),
+          triangles: new Float32Array(9).fill(1),
+          twoSided: true,
+          fill: "#05080d",
+        },
+      ],
+      lines: [aBatch()],
+    };
+    const cube = {
+      mesh: { kind: "mesh", name: "sky cube triangle" },
+      material: { kind: "material", name: "sky:cubeDisplay" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    } as const;
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [cube]);
+    expect(frame.draws.map((d) => d.material.name)).toEqual([
+      "wireframe:occluderSphere",
+      "wireframe:hullSilhouette",
+      "sky:cubeDisplay",
+      "wireframe:lines",
+      "wireframe:lines",
+    ]);
+  });
+
   it("makes its materials again when the engine restores its device", () => {
     const engine = new RecordingEngine();
     const renderer = new WireframeRenderer(engine);
     engine.restore();
     renderer.dispose();
-    expect(engine.materials.length).toBe(8);
+    expect(engine.materials.length).toBe(10);
   });
 
   it("stops following the engine's restores once disposed", () => {
     const engine = new RecordingEngine();
     new WireframeRenderer(engine).dispose();
     engine.restore();
-    expect(engine.materials.length).toBe(4);
+    expect(engine.materials.length).toBe(5);
   });
 });

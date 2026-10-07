@@ -398,6 +398,50 @@ describe("the style", () => {
     ]);
   });
 
+  it("states the craft's photometry with a craft, composed with the bodies' note (R07.T16.e)", () => {
+    // PRECISION TEST: a planet and its moon, and the own ship.
+    const wireframe = startRun(precisionScene());
+    const photoreal = done(commandRun(wireframe, { kind: "style", style: "toggle" }, CUT, BOTH));
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    expect([
+      photorealStatements(photoreal, "lit", "photorealistic", albedo),
+      photorealStatements(photoreal, "pending", "photorealistic", albedo),
+      photorealStatements(photoreal, "lit", "photorealistic", []),
+      photorealStatements(photoreal, "lit", "wireframe", albedo),
+      photorealStatements(wireframe, "lit", "wireframe", albedo),
+    ]).toEqual([
+      ["BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      ["LIGHTING: PENDING", "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      ["CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      ["PHOTOREALISTIC: PREPARING"],
+      [],
+    ]);
+  });
+
+  it("states the craft's photometry with a craft and no lit body, and no note with neither (R07.T16.e)", () => {
+    const photoreal = done(
+      commandRun(startRun(precisionScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const unlit = { ...photoreal, scene: { ...photoreal.scene, bodies: [] } };
+    const empty = { ...unlit, scene: { ...unlit.scene, craft: [], ownShip: null } };
+    expect([
+      photorealStatements(unlit, "hosts-not-received", "photorealistic", []),
+      photorealStatements(empty, "hosts-not-received", "photorealistic", []),
+    ]).toEqual([["CRAFT PHOTOMETRY: NOT YET MODELLED"], []]);
+  });
+
+  it("states no craft's photometry for a scene with none (R07.T16.e)", () => {
+    // PHASE TEST: lit bodies and no craft.
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    expect([
+      photoreal.scene.craft.length,
+      photorealStatements(photoreal, "lit", "photorealistic", albedo),
+    ]).toEqual([0, albedo]);
+  });
+
   it("says the photorealistic style is pending while the view still draws its wireframe", () => {
     const photoreal = done(
       commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),

@@ -509,11 +509,33 @@ export function labelStatements(
 export const PHOTOREAL_PREPARING = "PHOTOREALISTIC: PREPARING";
 
 /**
+ * The note while the photorealistic frame is drawn and its scene has a craft, the own ship
+ * included (R07.T16.e; decision-r07-t16a, item 3): no craft's light is computed, so each is drawn
+ * as its cased hull outline on a `--surface-0` silhouette, never read as its own.
+ */
+export const CRAFT_PHOTOMETRY_STATEMENT = "CRAFT PHOTOMETRY: NOT YET MODELLED";
+
+/**
+ * {@link CRAFT_PHOTOMETRY_STATEMENT} composed with `BODY PHOTOMETRY: NOT YET MODELLED` into one
+ * note, in that note's place, while both hold, as the guide composes its pairs of notes.
+ */
+export const BODY_AND_CRAFT_PHOTOMETRY_STATEMENT = "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED";
+
+/** The body note that {@link BODY_AND_CRAFT_PHOTOMETRY_STATEMENT} takes the place of. */
+const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLED";
+
+/**
  * The photorealistic style's statements under the label block (R07.T8.a), none in the wireframe:
  * {@link PHOTOREAL_PREPARING} while the view still draws its wireframe in its place (its pipelines
  * compiling); then, while the scene has a body to light, the lighting line while no star lights it
  * (decision-r07-t8a, item 1) and each label the drawn bodies carry (`BODY PHOTOMETRY: NOT YET
- * MODELLED` for the provisional photometry, Design note 5).
+ * MODELLED` for the provisional photometry, Design note 5); and, while the scene has a craft,
+ * {@link CRAFT_PHOTOMETRY_STATEMENT}, composed with the body note into
+ * {@link BODY_AND_CRAFT_PHOTOMETRY_STATEMENT} where both hold (R07.T16.e).
+ *
+ * @remarks
+ * Scene-level, as the bodies' labels are (`litLabelsOf`): a craft's note stands with the scene's
+ * craft, whether or not one is in the picture, and with no lit body as well.
  *
  * @param drawn - The style the view's last frame was drawn in.
  * @param labels - The appearance labels of the bodies the photorealistic frame lights.
@@ -530,11 +552,21 @@ export function photorealStatements(
   if (drawn !== "photorealistic") {
     return [PHOTOREAL_PREPARING];
   }
+  const hasCraft = run.scene.craft.length > 0;
   if (!run.scene.bodies.some((body) => isLitKind(body.kind))) {
-    return [];
+    return hasCraft ? [CRAFT_PHOTOMETRY_STATEMENT] : [];
   }
   const line = lightingStatement(lighting);
-  return [...(line === null ? [] : [line]), ...new Set(labels)];
+  const bodyNotes: ReadonlyArray<string> = [...new Set(labels)];
+  let notes = bodyNotes;
+  if (hasCraft) {
+    notes = bodyNotes.includes(BODY_PHOTOMETRY_LABEL)
+      ? bodyNotes.map((note) =>
+          note === BODY_PHOTOMETRY_LABEL ? BODY_AND_CRAFT_PHOTOMETRY_STATEMENT : note,
+        )
+      : [...bodyNotes, CRAFT_PHOTOMETRY_STATEMENT];
+  }
+  return [...(line === null ? [] : [line]), ...notes];
 }
 
 /**

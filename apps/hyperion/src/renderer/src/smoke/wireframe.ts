@@ -12,14 +12,17 @@
  * star sprite peaks in its own pixel, lights nothing outside its quad and sums to the tone curve
  * of its PSF-weighted colour (both added in RM1 validation, m2 and m3); a hull edge cased as
  * the photorealistic overlay draws it stays whole over its own receding face (R07.T16.a), on a
- * slope along an axis and at 45° to the axes, at stroke scales of 1 and 2; and a hull face's depth
- * is pushed in its fragment by its slope's magnitude (R07.T16.d). Both occluders' slope term is
- * the list's `occluderSlopePx`, a uniform that follows the stroke scale.
+ * slope along an axis and at 45° to the axes, at stroke scales of 1 and 2; a hull face's depth is
+ * pushed in its fragment by its slope's magnitude (R07.T16.d); and over a loaded colour a hull's
+ * silhouette reads `--surface-0` inside its faces and leaves the image beyond them and behind a
+ * body in front, its own cased edges stay whole over it, and an edge behind a window draws as with
+ * no window, in both styles (R07.T16.e). Both occluders' slope term is the list's
+ * `occluderSlopePx`, a uniform that follows the stroke scale.
  */
 
 import "../styles.css";
 
-import { cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
+import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import { DEFAULT_FOV_DEG, NEAR_PLANE_M, project } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
@@ -47,6 +50,8 @@ import {
 import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
 import { type ColourTokens, readTokens } from "../spatial/paint";
 import { runPose, SCENE_OPTIONS, startRun } from "../displays/view/viewRun";
+import { aViewCraft, aViewScene, FIXTURE_SYSTEM, NO_TURN } from "../test/viewFixtures";
+import { type HullOutline, hullOutline } from "../view/scene/hull";
 import { type Checks, halfTexels, show, texel } from "./harness";
 
 /** The side of the square targets the checks draw into, px. */
@@ -148,15 +153,36 @@ function nothingAt(strokeScale: number): WireframeDrawList {
 /** An empty draw list, as a view at a ratio of 1 draws: lines at 2 device px per CSS px. */
 const NOTHING: WireframeDrawList = emptyDrawList(viewStrokesAt(1));
 
-/** Renders `list` from the axis camera into a fresh square target and reads colour and depth. */
+/**
+ * Renders `list` from the axis camera into a fresh square target and reads colour and depth: onto
+ * the cleared target, or with `under` over a target first filled with that colour and loaded, as
+ * the symbology's pass loads the tone-mapped image (R07.T16.e).
+ */
 async function drawSquare(
   engine: RenderEngine,
   renderer: WireframeRenderer,
   name: string,
   list: WireframeDrawList,
+  under: string | null = null,
 ): Promise<{ readonly colour: Float32Array; readonly depth: Float32Array }> {
   const target = squareTarget(engine, name);
-  target.render(renderer.frame(list, AXIS_CAMERA, { widthPx: SIDE_PX, heightPx: SIDE_PX }));
+  const square = { widthPx: SIDE_PX, heightPx: SIDE_PX };
+  if (under === null) {
+    target.render(renderer.frame(list, AXIS_CAMERA, square));
+  } else {
+    // The image's stand-in: one uncased screen-space stroke wider than the square.
+    const image: LineBatch = {
+      ...batch(
+        "image",
+        [-SIDE_PX, SIDE_PX / 2, 0, 2 * SIDE_PX, SIDE_PX / 2, 0],
+        under,
+        4 * SIDE_PX,
+      ),
+      space: "screen",
+    };
+    target.render(renderer.frame({ ...NOTHING, lines: [image] }, AXIS_CAMERA, square));
+    target.render({ ...renderer.frame(list, AXIS_CAMERA, square), colourLoad: "load" });
+  }
   const colour = halfTexels(await engine.readTexture(target.colour));
   const depth = new Float32Array(await engine.readTexture(target.depth ?? target.colour));
   target.dispose();
@@ -271,6 +297,7 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
         originF32: new Float32Array(3),
         triangles: face(nearM, nearM, 0),
         twoSided: true,
+        fill: null,
       },
     ],
   });
@@ -339,6 +366,7 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
           originF32: new Float32Array(3),
           triangles: face(distanceM, 0.5 * distanceM),
           twoSided: true,
+          fill: null,
         },
       ],
       lines,
@@ -373,6 +401,8 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
     // oxlint-disable-next-line no-await-in-loop
     await checkDiagonalCasedHullEdge(engine, renderer, tokens, checks, strokeScale);
   }
+  await checkSilhouette(engine, renderer, tokens, checks);
+  await checkWindow(engine, renderer, tokens, checks);
   await checkStarSprite(engine, renderer, checks);
   renderer.dispose();
 }
@@ -386,13 +416,38 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
 const CASED_EDGE = { edgeYPx: 24.35, nearYPx: 40, farM: 1, nearM: 0.5 } as const;
 
 /**
+ * How much farther the cased edge checks' control face stands than the face itself: a power of
+ * two, so that every corner, scaled about the camera, and its projection are exact in `f32`, and
+ * the control's silhouette fills the very texels the face's does, behind the edge (R07.T16.e).
+ */
+const BEHIND_FACTOR = 4;
+
+/**
+ * A face's triangles moved {@link BEHIND_FACTOR} times as far from the axis camera: the same
+ * silhouette on the square, standing well behind anything drawn at the face's own depth.
+ */
+function behind(mesh: OccluderMesh): OccluderMesh {
+  return {
+    ...mesh,
+    id: `${mesh.id} behind`,
+    triangles: mesh.triangles.map((value) => value * BEHIND_FACTOR),
+  };
+}
+
+/**
  * R07.T16.a: a hull edge cased by the photorealistic overlay (`overlayDrawList`), on the far edge
- * of its own face as the face recedes towards it, draws every texel it draws with no face, its
- * casing's outer texel included: the hull faces' slope term, 3 px at a stroke scale of 1, covers
- * the cased edge's 2.25 px of coverage where the depth's slope runs along the screen's axes, as
- * here (Design note 5's w ÷ 2 + 1, the UX decisions, item 12). The face's depth changes only down
- * the view, so one column reads for all. R07.T16.d's {@link checkDiagonalCasedHullEdge} turns it
- * 45°.
+ * of its own face as the face recedes towards it, draws every texel it draws with the face behind
+ * it, its casing's outer texel included: the hull faces' slope term, 3 px at a stroke scale of 1,
+ * covers the cased edge's 2.25 px of coverage where the depth's slope runs along the screen's
+ * axes, as here (Design note 5's w ÷ 2 + 1, the UX decisions, item 12). The face's depth changes
+ * only down the view, so one column reads for all. R07.T16.d's {@link checkDiagonalCasedHullEdge}
+ * turns it 45°.
+ *
+ * @remarks
+ * Since R07.T16.e the overlay fills the face, a `--surface-0` silhouette, over a loaded colour, as
+ * the symbology's pass draws over the image. So the control is the same face {@link behind} the
+ * edge, whose silhouette fills the same texels, rather than no face, whose texels the casing's
+ * partial coverage would blend over the loaded colour instead.
  */
 async function checkCasedHullEdge(
   engine: RenderEngine,
@@ -445,19 +500,24 @@ async function checkCasedHullEdge(
     originF32: new Float32Array(3),
     triangles,
     twoSided: true,
+    fill: null,
   };
   const atOne = nothingAt(1);
+  // Over the image's stand-in, a colour neither the edge, its casing nor the silhouette takes.
+  const under = tokens.textMuted;
   const onFace = await drawSquare(
     engine,
     renderer,
     "R07 cased hull edge",
-    overlayDrawList({ ...atOne, occluderMeshes: [recedingFace], lines: [edge] }),
+    overlayDrawList({ ...atOne, occluderMeshes: [recedingFace], lines: [edge] }, tokens),
+    under,
   );
   const bare = await drawSquare(
     engine,
     renderer,
-    "R07 bare cased hull edge",
-    overlayDrawList({ ...atOne, lines: [edge] }),
+    "R07 cased hull edge, the face behind it",
+    overlayDrawList({ ...atOne, occluderMeshes: [behind(recedingFace)], lines: [edge] }, tokens),
+    under,
   );
   // The column through the edge's middle, from 4 px above the edge to 4 px below its casing.
   const rows = Array.from({ length: 10 }, (_, i) => 20 + i);
@@ -467,12 +527,12 @@ async function checkCasedHullEdge(
     const want = texel(bare.colour, SIDE_PX, 32, row);
     return [0, 1, 2].some((c) => !(Math.abs((seen[c] ?? Number.NaN) - (want[c] ?? 0)) <= 2e-3));
   });
-  // The control: the casing's outer texel, 2.15 px below the edge, is drawn with no face.
+  // The control: the casing's outer texel, 2.15 px below the edge, is drawn with the face behind.
   const outer = texel(bare.colour, SIDE_PX, 32, 26);
   checks.check(
-    "R07.T16.a a cased hull edge on its own receding face draws every texel it draws with no face",
+    "R07.T16.a a cased hull edge on its own receding face, filled over the image, draws every texel it draws with the face behind it (R07.T16.e)",
     differs.length === 0 && outer[1] > 0.02,
-    `rows that differ ${differs.length === 0 ? "none" : differs.join(", ")}; the casing's outer texel with the face ${show(texel(onFace.colour, SIDE_PX, 32, 26))}, with none ${show(outer)}`,
+    `rows that differ ${differs.length === 0 ? "none" : differs.join(", ")}; the casing's outer texel with the face ${show(texel(onFace.colour, SIDE_PX, 32, 26))}, with it behind ${show(outer)}`,
   );
 }
 
@@ -653,6 +713,7 @@ async function checkHullSlope(
         originF32: new Float32Array(3),
         triangles: turnedFace.triangles,
         twoSided: true,
+        fill: null,
       },
     ],
   });
@@ -687,10 +748,12 @@ async function checkHullSlope(
 /**
  * R07.T16.d: T16.a's cased hull edge on its own receding face, turned 45° so that the face's depth
  * gradient runs diagonally on the screen, at a stroke scale: it draws every texel of the square that
- * it draws with no face, the texels that a push by the slope's larger component would lose
- * included, those whose centres lie between `occluderSlopePx` ÷ √2 and the casing's reach,
+ * it draws with the face behind it, the texels that a push by the slope's larger component would
+ * lose included, those whose centres lie between `occluderSlopePx` ÷ √2 and the casing's reach,
  * w ÷ 2 + 0.5, from the edge on the face's side (0 to 0.13 of the casing at a scale of 1, 0 to
  * 0.46 at 2). The casing is in `--accent` here, not `--surface-0`, so that those texels read.
+ * Since R07.T16.e the face is filled over a loaded colour, so the control is the same face
+ * {@link behind} the edge rather than no face, as in {@link checkCasedHullEdge}.
  */
 async function checkDiagonalCasedHullEdge(
   engine: RenderEngine,
@@ -716,19 +779,23 @@ async function checkDiagonalCasedHullEdge(
     originF32: new Float32Array(3),
     triangles: turnedFace.triangles,
     twoSided: true,
+    fill: null,
   };
   const name = `R07 diagonal cased hull edge ${String(strokeScale)}`;
+  const under = tokens.textMuted;
   const onFace = await drawSquare(
     engine,
     renderer,
     name,
-    overlayDrawList({ ...list, occluderMeshes: [mesh], lines: [edge] }),
+    overlayDrawList({ ...list, occluderMeshes: [mesh], lines: [edge] }, tokens),
+    under,
   );
   const bare = await drawSquare(
     engine,
     renderer,
-    `${name} bare`,
-    overlayDrawList({ ...list, lines: [edge] }),
+    `${name}, the face behind it`,
+    overlayDrawList({ ...list, occluderMeshes: [behind(mesh)], lines: [edge] }, tokens),
+    under,
   );
   // Every texel of the square, a short readback included, as the axis check reads its column.
   const differs: string[] = [];
@@ -767,7 +834,7 @@ async function checkDiagonalCasedHullEdge(
       if (t > 0.2 * lengthPx && t < 0.8 * lengthPx && d > fromPx && d < reachPx) {
         const coverage = reachPx - d;
         atRisk.push(`(${String(column)}, ${String(row)}) ${coverage.toFixed(3)}`);
-        // A texel with a casing worth reading must read it with no face.
+        // A texel with a casing worth reading must read it with the face behind.
         const green = texel(bare.colour, SIDE_PX, column, row)[1];
         if (coverage >= 0.03 && !(green >= 0.5 * coverage * accent)) {
           unread.push(`(${String(column)}, ${String(row)}) ${show([green])}`);
@@ -776,10 +843,273 @@ async function checkDiagonalCasedHullEdge(
     }
   }
   checks.check(
-    `R07.T16.d a cased hull edge on its own face, its slope at 45° to the axes, draws every texel it draws with no face (stroke scale ${String(strokeScale)}, slope term ${String(list.occluderSlopePx)} px)`,
+    `R07.T16.d a cased hull edge on its own face, its slope at 45° to the axes, filled over the image, draws every texel it draws with the face behind it (stroke scale ${String(strokeScale)}, slope term ${String(list.occluderSlopePx)} px; R07.T16.e)`,
     differs.length === 0 && atRisk.length >= 3 && unread.length === 0,
-    `texels that differ ${differs.length === 0 ? "none" : differs.slice(0, 12).join(", ")}; texels a larger-component push would lose ${String(atRisk.length)} (${atRisk.slice(0, 6).join(", ")}); unread with no face ${unread.length === 0 ? "none" : unread.join(", ")}`,
+    `texels that differ ${differs.length === 0 ? "none" : differs.slice(0, 12).join(", ")}; texels a larger-component push would lose ${String(atRisk.length)} (${atRisk.slice(0, 6).join(", ")}); unread with the face behind ${unread.length === 0 ? "none" : unread.join(", ")}`,
   );
+}
+
+/**
+ * R07.T16.e's silhouette: a hull face, its distance and half-side, m, over texels 16 to 48 of the
+ * axis camera's square each way; and a body's occluder sphere in front of the face's upper right,
+ * its centre from the camera and its radius, m, about 4.4 px in radius on the square.
+ */
+const SILHOUETTE = {
+  face: { distanceM: 4, halfM: 2 },
+  sphere: { centreM: vec3(0.6, 0.6, -2), radiusM: 0.3 },
+} as const;
+
+/** How far a texel's centre must lie from an aliased edge for the silhouette check to read it, px. */
+const EDGE_CLEARANCE_PX = 2;
+
+/**
+ * How far the ray through texel (`column`, `row`) of the axis camera's square passes outside the
+ * sphere's limb, px on the square: negative on its disc. Its angle from the limb times half the
+ * square's side, which is a unit of tangent across the 90° field: no more than the distance on
+ * the square off the axis, so that a clearance in it is a clearance on the square.
+ */
+function pastLimbPx(column: number, row: number, centreM: Vec3, radiusM: number): number {
+  const ray = normalise(
+    vec3((2 * (column + 0.5)) / SIDE_PX - 1, 1 - (2 * (row + 0.5)) / SIDE_PX, -1),
+  );
+  const along = dot(centreM, ray);
+  const perpM = norm(sub(centreM, scale(ray, along)));
+  return ((perpM - radiusM) / along) * (SIDE_PX / 2);
+}
+
+/** What the silhouette check reads at a texel: the kind of place, and the colour it must be. */
+interface SilhouetteReading {
+  readonly kind: "inside" | "behindBody" | "beyond";
+  readonly want: Float32Array;
+}
+
+/**
+ * What texel (`column`, `row`) must read in the silhouette check, or `null` for one too near an
+ * edge or the limb: the image on the body's disc and beyond the face, `--surface-0` inside it.
+ */
+function silhouetteReading(
+  column: number,
+  row: number,
+  colours: { readonly surface: Float32Array; readonly image: Float32Array },
+): SilhouetteReading | null {
+  const { face: square, sphere } = SILHOUETTE;
+  // The face's edges on the square, px: its half-side over its distance, half the side a unit.
+  const halfPx = (square.halfM / square.distanceM) * (SIDE_PX / 2);
+  const from = SIDE_PX / 2 - halfPx;
+  const to = SIDE_PX / 2 + halfPx;
+  const centres = [column + 0.5, row + 0.5];
+  const inFace = centres.every((c) => c > from + EDGE_CLEARANCE_PX && c < to - EDGE_CLEARANCE_PX);
+  const offFace = centres.some((c) => c < from - EDGE_CLEARANCE_PX || c > to + EDGE_CLEARANCE_PX);
+  const limbPx = pastLimbPx(column, row, sphere.centreM, sphere.radiusM);
+  let reading: SilhouetteReading | null = null;
+  if (limbPx < -EDGE_CLEARANCE_PX) {
+    reading = { kind: "behindBody", want: colours.image };
+  } else if (inFace && limbPx > EDGE_CLEARANCE_PX) {
+    reading = { kind: "inside", want: colours.surface };
+  } else if (offFace) {
+    reading = { kind: "beyond", want: colours.image };
+  }
+  return reading;
+}
+
+/**
+ * R07.T16.e: over a loaded colour, the overlay's silhouette of a hull face reads `--surface-0` at
+ * its interior texels, and leaves the loaded colour beyond its edges and where a body's occluder
+ * sphere stands in front of it (decision-r07-t16a, item 3): the spheres are drawn first, and the
+ * silhouette is depth-tested against them. Its own edges are aliased, and lie under its cased
+ * outline in a view, so texels within {@link EDGE_CLEARANCE_PX} of an edge or the limb are not
+ * read.
+ */
+async function checkSilhouette(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  tokens: ColourTokens,
+  checks: Checks,
+): Promise<void> {
+  const { face: square, sphere } = SILHOUETTE;
+  const mesh: OccluderMesh = {
+    id: "silhouette",
+    originF32: new Float32Array(3),
+    triangles: face(square.distanceM, square.halfM),
+    twoSided: true,
+    fill: null,
+  };
+  const { x, y, z } = sphere.centreM;
+  const distanceM = Math.hypot(x, y, z);
+  const list = overlayDrawList(
+    {
+      ...NOTHING,
+      occluderSpheres: [
+        {
+          id: "body in front",
+          centreF32: new Float32Array([x, y, z]),
+          radiusM: sphere.radiusM,
+          altitudeM: distanceM - sphere.radiusM,
+        },
+      ],
+      occluderMeshes: [mesh],
+    },
+    tokens,
+  );
+  const under = tokens.text;
+  const drawn = await drawSquare(engine, renderer, "R07 silhouette", list, under);
+  const surface = linearColour(tokens.surface0);
+  const image = linearColour(under);
+  const tally = { inside: 0, behindBody: 0, beyond: 0 };
+  const wrong: string[] = [];
+  for (let row = 0; row < SIDE_PX; row += 1) {
+    for (let column = 0; column < SIDE_PX; column += 1) {
+      const reading = silhouetteReading(column, row, { surface, image });
+      if (reading === null) {
+        continue;
+      }
+      tally[reading.kind] += 1;
+      const seen = texel(drawn.colour, SIDE_PX, column, row);
+      if (!sameColour(seen, reading.want)) {
+        wrong.push(`${reading.kind} (${String(column)}, ${String(row)}) ${show(seen)}`);
+      }
+    }
+  }
+  checks.check(
+    "R07.T16.e over the image a hull face's silhouette reads --surface-0 inside it, and leaves the image beyond its edges and behind a body in front of it",
+    wrong.length === 0 && tally.inside > 400 && tally.behindBody >= 10 && tally.beyond > 1000,
+    `texels read inside ${String(tally.inside)}, behind the body ${String(tally.behindBody)}, beyond ${String(tally.beyond)}; wrong ${wrong.length === 0 ? "none" : wrong.slice(0, 8).join(", ")}; --surface-0 ${show(surface)}, the image ${show(image)}`,
+  );
+}
+
+/**
+ * R07.T16.e's window hull, at the axis camera and unturned: a window 0.5 m square 1 m ahead, over
+ * texels 24 to 40 of the square each way; an opaque panel beside it, over texels 3 to 16 across;
+ * and an edge 2 m ahead behind the window, across its middle at 31.2 px down, from 25.6 to 38.4 px
+ * across. The window's two faces are its first.
+ */
+const WINDOW_HULL: HullOutline = hullOutline({
+  name: "WINDOW TEST",
+  vertices: [
+    vec3(-0.25, -0.25, -1),
+    vec3(0.25, -0.25, -1),
+    vec3(0.25, 0.25, -1),
+    vec3(-0.25, 0.25, -1),
+    vec3(-0.9, -0.25, -1),
+    vec3(-0.5, -0.25, -1),
+    vec3(-0.5, 0.25, -1),
+    vec3(-0.9, 0.25, -1),
+    vec3(-0.4, 0.05, -2),
+    vec3(0.4, 0.05, -2),
+  ],
+  edges: [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 0],
+    [4, 5],
+    [5, 6],
+    [6, 7],
+    [7, 4],
+    [8, 9],
+  ],
+  faces: [
+    [0, 1, 2],
+    [0, 2, 3],
+    [4, 5, 6],
+    [4, 6, 7],
+  ],
+  windows: [0, 1],
+  eyePointM: vec3(0, 0, 0),
+  lengthM: 2,
+});
+
+/** The texels at the core of the window hull's edge behind its window: its middle row, clear of its ends. */
+const BEHIND_WINDOW_CORE = Array.from({ length: 8 }, (_, i) => [28 + i, 31] as const);
+
+/**
+ * The window hull's draw list, from the axis camera, through `buildWireframeDrawList`, as a view
+ * at a ratio of 1 draws it: the hull the only thing in its scene.
+ */
+function windowList(hull: HullOutline, tokens: ColourTokens): WireframeDrawList {
+  const scene = aViewScene({
+    bodies: [],
+    stars: [],
+    ownShip: null,
+    craft: [
+      aViewCraft({
+        id: "window test",
+        designation: hull.name,
+        hull,
+        pose: {
+          position: { kind: "system", system: FIXTURE_SYSTEM, m: vec3(0, 0, 0) },
+          attitude: NO_TURN,
+        },
+      }),
+    ],
+  });
+  return buildWireframeDrawList(scene, AXIS_CAMERA, SQUARE, tokens, {
+    lowSetting: false,
+    ev100: 0,
+    selection: null,
+    destination: null,
+    remPx: 16,
+    ...viewStrokesAt(1),
+  });
+}
+
+/**
+ * R07.T16.e: a hull's cased edge behind its window draws as with no window, in each style: the
+ * window's faces are in no mesh, so they hide nothing, and every texel of the square is as it is
+ * with those faces taken out of the hull (decision-r07-t16a, item 3). Over the image, through the
+ * overlay over a loaded colour; in the wireframe, on the cleared target. The control makes the
+ * window an opaque face, which hides the edge's core.
+ */
+async function checkWindow(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  tokens: ColourTokens,
+  checks: Checks,
+): Promise<void> {
+  const noWindow: HullOutline = { ...WINDOW_HULL, faces: WINDOW_HULL.faces.slice(2), windows: [] };
+  const opaque: HullOutline = { ...WINDOW_HULL, windows: [] };
+  const stroke = linearColour(tokens.text);
+  for (const style of ["overlay", "wireframe"] as const) {
+    const listOf = (hull: HullOutline): WireframeDrawList =>
+      style === "overlay"
+        ? overlayDrawList(windowList(hull, tokens), tokens)
+        : windowList(hull, tokens);
+    const under = style === "overlay" ? tokens.textMuted : null;
+    const name = `R07 window ${style}`;
+    // The checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const glazed = await drawSquare(engine, renderer, name, listOf(WINDOW_HULL), under);
+    // The checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const bare = await drawSquare(engine, renderer, `${name}, none`, listOf(noWindow), under);
+    // The checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const shut = await drawSquare(engine, renderer, `${name}, opaque`, listOf(opaque), under);
+    let differs = 0;
+    for (let row = 0; row < SIDE_PX; row += 1) {
+      for (let column = 0; column < SIDE_PX; column += 1) {
+        const seen = texel(glazed.colour, SIDE_PX, column, row);
+        const want = texel(bare.colour, SIDE_PX, column, row);
+        if ([0, 1, 2].some((c) => !(Math.abs((seen[c] ?? Number.NaN) - (want[c] ?? 0)) <= 2e-3))) {
+          differs += 1;
+        }
+      }
+    }
+    const drawnCore = BEHIND_WINDOW_CORE.filter(([column, row]) =>
+      sameColour(texel(glazed.colour, SIDE_PX, column, row), stroke),
+    ).length;
+    const hiddenCore = BEHIND_WINDOW_CORE.filter(
+      ([column, row]) => !sameColour(texel(shut.colour, SIDE_PX, column, row), stroke),
+    ).length;
+    const [column, row] = BEHIND_WINDOW_CORE[0] ?? [0, 0];
+    checks.check(
+      `R07.T16.e a hull's ${style === "overlay" ? "cased " : ""}edge behind its window draws as with no window, ${style === "overlay" ? "over the image" : "in the wireframe"}`,
+      differs === 0 &&
+        drawnCore === BEHIND_WINDOW_CORE.length &&
+        hiddenCore === BEHIND_WINDOW_CORE.length,
+      `texels that differ from no window ${String(differs)}; the edge's core drawn at ${String(drawnCore)} of ${String(BEHIND_WINDOW_CORE.length)} texels, hidden by an opaque window at ${String(hiddenCore)}; (${String(column)}, ${String(row)}) ${show(texel(glazed.colour, SIDE_PX, column, row))}, opaque ${show(texel(shut.colour, SIDE_PX, column, row))}`,
+    );
+  }
 }
 
 /** The sprite check's star: where it falls, px, off its pixel's centre, and its colour per weight. */

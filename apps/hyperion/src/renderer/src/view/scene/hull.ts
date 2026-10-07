@@ -2,8 +2,8 @@ import { type Vec3, vec3 } from "../../geometry/vec3";
 
 /**
  * A craft's hull as the wireframe draws it: vertices in the hull's own frame, edges as index pairs,
- * and triangulated faces for the depth-only occluder that hides its hidden lines (plan R02, Design
- * note 15).
+ * and triangulated faces for the occluder that hides its hidden lines (plan R02, Design note 15),
+ * less its windows, which hide nothing (R07.T16.e).
  *
  * @remarks
  * Hull axes are the camera's convention (`OwnShip`): +x to starboard, +y dorsal, −z forward, in
@@ -18,8 +18,14 @@ export interface HullOutline {
   readonly vertices: ReadonlyArray<Vec3>;
   /** The edges drawn as lines, as pairs of vertex indices. */
   readonly edges: ReadonlyArray<readonly [number, number]>;
-  /** The faces, as triangles of vertex indices, drawn depth-only. */
+  /** The faces, as triangles of vertex indices: the occluder's, but for its windows. */
   readonly faces: ReadonlyArray<readonly [number, number, number]>;
+  /**
+   * The glazed faces, as indices into {@link HullOutline.faces}: glass, which hides nothing in
+   * either style, so that they go into no occluder; their edges are still drawn
+   * (decision-r07-t16a, item 3).
+   */
+  readonly windows: ReadonlyArray<number>;
   /** The pilot's eye point, m in hull axes. */
   readonly eyePointM: Vec3;
   /** The hull's length along its z axis, m. */
@@ -27,9 +33,11 @@ export interface HullOutline {
 }
 
 /**
- * Builds a {@link HullOutline}, checking that every edge and face names vertices it has.
+ * Builds a {@link HullOutline}, checking that every edge and face names vertices it has, and every
+ * window a face it has, once.
  *
- * @throws RangeError if an index is not an integer within the vertices, or a vertex is not finite.
+ * @throws RangeError if an index is not an integer within the vertices, a window is not an integer
+ *   within the faces or is named twice, or a vertex is not finite.
  */
 export function hullOutline(outline: HullOutline): HullOutline {
   const count = outline.vertices.length;
@@ -45,6 +53,19 @@ export function hullOutline(outline: HullOutline): HullOutline {
         `hull ${outline.name} names vertex ${String(index)} of ${String(count)}`,
       );
     }
+  }
+  const faceCount = outline.faces.length;
+  const glazed = new Set<number>();
+  for (const face of outline.windows) {
+    if (!(Number.isInteger(face) && face >= 0 && face < faceCount)) {
+      throw new RangeError(
+        `hull ${outline.name} names face ${String(face)} of ${String(faceCount)} as a window`,
+      );
+    }
+    if (glazed.has(face)) {
+      throw new RangeError(`hull ${outline.name} names face ${String(face)} as a window twice`);
+    }
+    glazed.add(face);
   }
   return outline;
 }
@@ -65,7 +86,8 @@ export const TEST_PLATE_DISTANCE_M = 1;
  * The hand-made test hull (plan R02, Design note 15): a 20 m craft, a wedge from its nose at z =
  * −10 m to a 6 m × 4 m section at z = −4 m and a flared 8 m × 5 m stern at z = +10 m, with a 1 m
  * square plate (a windscreen) standing 1 m forward of the seat's eye point, facing it, above the
- * nose.
+ * nose. The plate, its last two faces, is its one window, which hides nothing (R07.T16.e;
+ * decision-r07-t16a, item 3).
  *
  * @remarks
  * Labelled `TEST HULL` wherever it appears. It stands for R03's ship stand-in and for any craft
@@ -136,6 +158,8 @@ export const TEST_HULL: HullOutline = hullOutline({
     [9, 10, 11],
     [9, 11, 12],
   ],
+  // The plate's two faces.
+  windows: [14, 15],
   eyePointM: TEST_EYE_POINT_M,
   lengthM: 20,
 });

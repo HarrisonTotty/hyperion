@@ -700,7 +700,7 @@ export async function checkStrokeContrast(engine: RenderEngine, checks: Checks):
           selection: frame.marked ? { kind: "body", body: FIXTURE_MOON } : null,
           destination: frame.marked ? { kind: "body", body: SECOND_MOON } : null,
         });
-        const list = style === "overlay" ? overlayDrawList(built) : built;
+        const list = style === "overlay" ? overlayDrawList(built, tokens) : built;
         // The checks run in order: each reads the GPU back before the next draws.
         // oxlint-disable-next-line no-await-in-loop
         const image = await drawOver(

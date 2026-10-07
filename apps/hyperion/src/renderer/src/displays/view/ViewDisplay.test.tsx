@@ -147,6 +147,18 @@ function hullDistanceM(frame: FrameSubmission | undefined): number {
   return o === undefined ? Number.NaN : norm(vec3(o[0] ?? 0, o[1] ?? 0, o[2] ?? 0));
 }
 
+/** The materials of a frame's draws, in their order. */
+function materialNames(frame: FrameSubmission | undefined): string[] {
+  return (frame?.draws ?? []).map((draw) => draw.material.name);
+}
+
+/** A frame's draws of hull faces, each its material and its `fill` uniform (empty for none). */
+function hullFaceDraws(frame: FrameSubmission | undefined): Array<[string, number[]]> {
+  return (frame?.draws ?? [])
+    .filter((draw) => /^wireframe:(occluderHull|hullSilhouette)$/.test(draw.material.name))
+    .map((draw) => [draw.material.name, [...(draw.uniforms["fill"] ?? [])]]);
+}
+
 /** The number of line draws in a frame. */
 function lineDraws(frame: FrameSubmission | undefined): number {
   return frame?.draws.filter((draw) => draw.material.name === "wireframe:lines").length ?? 0;
@@ -1111,6 +1123,44 @@ describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
       ]);
     },
   );
+
+  it("draws the bodies' occluders, then the craft's silhouettes, then every line, under symbology (R07.T16.e)", async () => {
+    const view = setup({ store: await nominalStore() });
+    await drawPrecisionPhotoreal(view);
+    const drawn = materialNames(view.lastFrame());
+    const lastSphere = drawn.lastIndexOf("wireframe:occluderSphere");
+    const firstSilhouette = drawn.indexOf("wireframe:hullSilhouette");
+    expect([
+      view.lastFrame()?.label,
+      lastSphere >= 0 && lastSphere < firstSilhouette,
+      drawn.lastIndexOf("wireframe:hullSilhouette") < drawn.indexOf("wireframe:lines"),
+    ]).toEqual(["symbology", true, true]);
+  });
+
+  it("fills the craft's silhouettes in --surface-0 over the image, and none in the wireframe (R07.T16.e)", async () => {
+    const view = setup({ store: await nominalStore() });
+    await settle();
+    view.advance(300);
+    const wireframe = hullFaceDraws(view.lastFrame());
+    await drawPrecisionPhotoreal(view);
+    const surface = [...linearColour(readTokens(document.documentElement).surface0)];
+    expect({
+      wireframe: [...new Set(wireframe.map(([name]) => name))],
+      overlay: [...new Set(hullFaceDraws(view.lastFrame()).map((draw) => JSON.stringify(draw)))],
+    }).toEqual({
+      wireframe: ["wireframe:occluderHull"],
+      overlay: [JSON.stringify(["wireframe:hullSilhouette", surface])],
+    });
+  });
+
+  it("says BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED over the image of a scene with a craft (R07.T16.e)", async () => {
+    const view = setup({ store: await nominalStore() });
+    await drawPrecisionPhotoreal(view);
+    expect([
+      labelBlock().includes("BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"),
+      labelBlock().includes("BODY PHOTOMETRY: NOT YET MODELLED"),
+    ]).toEqual([true, false]);
+  });
 
   it("sets every text over the photorealistic image on a --surface-0 plate, beside an instrument", async () => {
     // On the harness's 1280 × 720 stage, where a slot has room, with INSTRUMENT 1 open over the

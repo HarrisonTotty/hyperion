@@ -598,6 +598,21 @@ describe("VIEW's instruments at both sizes (R07.T19.b)", () => {
     expect(canvasOf("INSTRUMENT 1")).not.toHaveAccessibleDescription(describing(photometry));
   });
 
+  it("states BODY AND CRAFT PHOTOMETRY on a photorealistic instrument beside a wireframe primary, not beside a photorealistic one (R07.T16.e)", async () => {
+    // PRECISION TEST: a planet and its moon, and the own ship.
+    const photometry = "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED";
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PRECISION TEST");
+    await openInstrument(view, "INSTRUMENT 1");
+    await controlsAt(view, "INSTRUMENT 1");
+    await toggleStyle(view);
+    expect(canvasOf("INSTRUMENT 1")).toHaveAccessibleDescription(describing(photometry));
+    await controlsAt(view, "PRIMARY");
+    await toggleStyle(view);
+    expect(canvasOf("PRIMARY")).toHaveAccessibleDescription(describing(photometry));
+    expect(canvasOf("INSTRUMENT 1")).not.toHaveAccessibleDescription(describing(photometry));
+  });
+
   it("states the lighting on a photorealistic instrument beside a wireframe primary, not beside a photorealistic one", async () => {
     const lighting = "LIGHTING: NOT RECEIVED";
     const view = await setup({ store: await nominalStore() });

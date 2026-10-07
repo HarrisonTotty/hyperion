@@ -59,6 +59,11 @@ function wireframeList(ratio = 1): WireframeDrawList {
   });
 }
 
+/** Each mesh's shape, its fill aside: its craft, origin, triangles and sidedness. */
+function shape(meshes: WireframeDrawList["occluderMeshes"]): unknown[] {
+  return meshes.map((mesh) => [mesh.id, mesh.originF32, mesh.triangles, mesh.twoSided]);
+}
+
 /** The kinds of the batches of a list, from their stable names: `hull`, `ring`, `mark`, … */
 function batchKinds(list: WireframeDrawList): ReadonlyArray<string> {
   return [...new Set(list.lines.map((line) => line.id.split(":")[0] ?? ""))].toSorted();
@@ -66,7 +71,7 @@ function batchKinds(list: WireframeDrawList): ReadonlyArray<string> {
 
 describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
   it("cases every mark over the image in --surface-0, the hull's edges included", () => {
-    const overlay = overlayDrawList(wireframeList());
+    const overlay = overlayDrawList(wireframeList(), TOKENS);
     const casingPx = CASING_PX * overlay.strokeScale;
     const uncased = overlay.lines
       .filter((line) => !(line.casingWidthPx === casingPx && line.casingColour === TOKENS.surface0))
@@ -79,21 +84,33 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
 
   it("draws no star sprite, the image's, and keeps every occluder and mark anchor", () => {
     const list = wireframeList();
-    const overlay = overlayDrawList(list);
+    const overlay = overlayDrawList(list, TOKENS);
     expect([
       list.sprites.length > 0,
       overlay.sprites,
       overlay.occluderSpheres === list.occluderSpheres,
-      overlay.occluderMeshes === list.occluderMeshes,
+      shape(overlay.occluderMeshes),
       overlay.anchors === list.anchors,
-    ]).toEqual([true, [], true, true, true]);
+    ]).toEqual([true, [], true, shape(list.occluderMeshes), true]);
+  });
+
+  it("fills every hull's opaque faces in --surface-0, a silhouette, as the wireframe does not (R07.T16.e)", () => {
+    const list = wireframeList();
+    const overlay = overlayDrawList(list, TOKENS);
+    expect({
+      meshes: overlay.occluderMeshes.length > 0,
+      overlay: [...new Set(overlay.occluderMeshes.map((mesh) => mesh.fill))],
+      wireframe: [...new Set(list.occluderMeshes.map((mesh) => mesh.fill))],
+    }).toEqual({ meshes: true, overlay: [TOKENS.surface0], wireframe: [null] });
   });
 
   it("cases every batch to 2 device px at ratios of 0.78125, 1 and 2, and 3 at 3 (R07.T16.d)", () => {
     expect(
       [0.78125, 1, 2, 3].map((ratio) =>
         Array.from(
-          new Set(overlayDrawList(wireframeList(ratio)).lines.map((line) => line.casingWidthPx)),
+          new Set(
+            overlayDrawList(wireframeList(ratio), TOKENS).lines.map((line) => line.casingWidthPx),
+          ),
         ),
       ),
     ).toEqual([[2], [2], [2], [3]]);
@@ -101,7 +118,7 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
 
   it("leaves the wireframe's own list as it was, its hull edges uncased", () => {
     const list = wireframeList();
-    overlayDrawList(list);
+    overlayDrawList(list, TOKENS);
     expect(list.lines.find((line) => line.id === "hull:other")?.casingWidthPx).toBe(0);
   });
 });
@@ -109,7 +126,7 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
 describe("the symbology's canvas pass (R07.T16.a)", () => {
   it("is labelled for the pass timer and loads the tone-mapped image beneath it", async () => {
     const renderer = new WireframeRenderer(await countingRenderEngine());
-    const pass = overlaySubmission(renderer, wireframeList(), CAMERA, VIEWPORT);
+    const pass = overlaySubmission(renderer, wireframeList(), TOKENS, CAMERA, VIEWPORT);
     expect([pass.label, pass.colourLoad, pass.encoding]).toEqual(["symbology", "load", undefined]);
     renderer.dispose();
   });
@@ -117,7 +134,7 @@ describe("the symbology's canvas pass (R07.T16.a)", () => {
   it("strokes each batch's --surface-0 casing, two casings wider, before the batch itself", async () => {
     const renderer = new WireframeRenderer(await countingRenderEngine());
     const list = wireframeList();
-    const pass = overlaySubmission(renderer, list, CAMERA, VIEWPORT);
+    const pass = overlaySubmission(renderer, list, TOKENS, CAMERA, VIEWPORT);
     const lines = pass.draws.filter((draw) => draw.material.name === "wireframe:lines");
     const casing = [...linearColour(TOKENS.surface0)];
     // Each batch with a segment is drawn twice, its casing then its stroke, in the list's order.
@@ -135,6 +152,26 @@ describe("the symbology's canvas pass (R07.T16.a)", () => {
       draws: 2 * drawn.length,
       pairs: drawn.map((line) => [casing, 2 * CASING_PX * list.strokeScale, line.widthPx]),
     });
+    renderer.dispose();
+  });
+
+  it("draws the bodies' occluder spheres, then the silhouettes, then every line (R07.T16.e)", async () => {
+    const renderer = new WireframeRenderer(await countingRenderEngine());
+    const pass = overlaySubmission(renderer, wireframeList(), TOKENS, CAMERA, VIEWPORT);
+    const kinds = pass.draws.map((draw) => draw.material.name);
+    // The order of each kind's first and last draw.
+    const span = (name: string): readonly [number, number] => [
+      kinds.indexOf(name),
+      kinds.lastIndexOf(name),
+    ];
+    const [sphereFirst, sphereLast] = span("wireframe:occluderSphere");
+    const [silhouetteFirst, silhouetteLast] = span("wireframe:hullSilhouette");
+    const [lineFirst] = span("wireframe:lines");
+    expect([sphereFirst >= 0, sphereLast < silhouetteFirst, silhouetteLast < lineFirst]).toEqual([
+      true,
+      true,
+      true,
+    ]);
     renderer.dispose();
   });
 });

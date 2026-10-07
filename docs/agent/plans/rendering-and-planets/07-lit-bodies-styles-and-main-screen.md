@@ -4336,6 +4336,151 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       pointers; and the acceptance's vitest paths recorded.
     - **Considers taken:** a ring and a symbol in the scale tests, the target ticks read, and the
       sample floor kept at 20 but for the ticks.
+- **Deviations in T16.e, as built** (2026-10-06; the views lane; decision-r07-t16a, item 3).
+  - **Files.** Those the subtask lists, and:
+    - `wireframe/hulls.ts` and its test: `hullFaces` leaves out a hull's windows, so that both
+      styles take their meshes from one place;
+    - `displays/view/viewFrameDrawer.ts`, which passes its tokens to the overlay;
+    - `smoke/strokeContrast.ts`'s overlay call, and `InstrumentView.tsx`'s doc comment;
+    - the tests of `scene/model.test.ts` (where `hullOutline`'s tests live), `ViewDisplay.test.tsx`,
+      `ViewDisplayLayout.test.tsx` and `viewRun.test.ts`;
+    - the README's ask of the craft plan, which now names `windows`.
+  - **The overlay's colour.** `overlayDrawList(list, tokens)` and
+    `overlaySubmission(renderer, list, tokens, camera, viewport)` take the tokens the list was built
+    with, in place of T16.a's `(list)` and `(renderer, list, camera, viewport)`. A list holds no
+    `--surface-0` of its own, only each batch's `casingColour`, which a smoke check may set to
+    another token. A view builds its list and its overlay from the same tokens, so the silhouette
+    and the casings are one surface.
+  - **The silhouette is a material of its own.** `hullSilhouette` (`HULL SILHOUETTE` in the
+    shader catalogue) is composed from the same `occluder.wgsl` as `occluderHull`, with colour
+    writes on and `blend: "none"`, since colour writes are pipeline state.
+    - Both share the `Draw` struct, which gains `fill: vec4f`. A depth-only draw passes none, and
+      the engine packs it as zeros, which its colour writes never write.
+    - `packWireframe` picks the material by `OccluderMesh.fill`, a token's value that
+      `linearColour` converts.
+    - `submit.ts`'s `IS_OCCLUDER` record, one entry a material, puts the silhouettes among the
+      occluders, after the spheres and before the background and every line.
+  - **The silhouette is a ground, not a mark** (the orchestrator's question after
+    decision-r07-t16d-followups; the UX reviewer's judgement). Its `--surface-0` stands 1.05:1
+    above the view's black ground (`CLEAR_COLOUR`, kept black by that ruling's (e)), so over empty
+    space it shows only where it hides a star or a body. decision-r07-t16a, item 3, rules it so: the
+    opaque faces are filled "beneath its cased outline" so that "nothing behind them shows
+    through", and the silhouette and the casing are "one surface". The mark is the craft's cased
+    `--text` outline, 13.57:1 against that surface, which is what the guide scores (`G` 62–63, a
+    mark against its surface; `G` 88–90, the casing as the mark's own dark surface).
+    `CRAFT PHOTOMETRY: NOT YET MODELLED` says that its light is not computed. A test holds that
+    every side of `TEST_HULL`'s opaque faces is a drawn edge, but the diagonals of its flat quads,
+    so that the outline always encloses the silhouette. `hullOutline()` does not check this, so a
+    hull from the craft plan must keep it.
+  - **The note.** `CRAFT_PHOTOMETRY_STATEMENT` and `BODY_AND_CRAFT_PHOTOMETRY_STATEMENT` in
+    `viewRun.ts`, the strings T16.c's test reads. It is scene-level: it stands while the scene has
+    a craft, whether or not one is in the picture. With no lit body, the craft's note stands alone.
+    It follows the lighting line, in the body note's place where both hold. `PRECISION TEST`'s one
+    craft is its own ship, so its tests show that the own ship counts.
+  - **The precision tests.** R02.T11.b's two plate tests are replaced, as the subtask says:
+    - from the seat, the hull's occluder (`hullFaces`) leaves points of the hull's edges behind
+      the plate seen, and the plate's faces, were they opaque, would hide every one of them (the
+      control);
+    - each of the hull's 16 edges stays in front of the opaque faces it bounds, along its length,
+      from the seat and from `CHASE`'s place, under the 2⁻¹⁶ push.
+
+    That the mesh holds the 14 opaque faces and none of the plate's is `hulls.test.ts`'s and
+    `drawList.test.ts`'s.
+  - **The smoke checks** (`smoke/wireframe.ts`).
+    - **The cased-edge checks' control.** `checkCasedHullEdge` (T16.a) and
+      `checkDiagonalCasedHullEdge` (T16.d) now draw through the filled overlay over a loaded
+      `--text-muted`, as the symbology's pass draws over the image. Their control is the same face
+      `BEHIND_FACTOR` (4) times as far away, in place of no face. With no face, the casing's
+      partial coverage would blend over the loaded colour instead of the silhouette. A power of 2
+      keeps every corner and its projection exact in `f32`, so the control's silhouette fills the
+      same texels and stands behind the edge. The casing's outer texel (T16.a) and the texels at
+      risk (T16.d) are read on the control, so a silhouette drawn over the lines would still fail
+      them. The checks' names say so. On both variants no texel differs, on the axis or on the diagonal
+      at scales 1 and 2. The casing's outer texel reads 0.0743 in green on both draws, and the six
+      texels at risk read the casing at coverages of 0.060 and 0.396.
+    - **`checkSilhouette`.** A face over texels 16 to 48 of the 64 px square, 4 m away, with a
+      body's occluder sphere about 4.4 px in radius in front of its upper right, through the
+      overlay over a loaded `--text`. Texels within 2 px of the face's edges or the limb are not
+      read. It reads `--surface-0` inside the face, and the loaded colour beyond it and on the
+      sphere's disc. It reads 671 texels inside, 22 on the disc and 2,800 beyond, none
+      wrong.
+    - **`checkWindow`.** A hull of its own, `WINDOW TEST` (smoke only): a window 1 m ahead, an
+      opaque panel beside it, and an edge 2 m ahead behind the window. It is built through
+      `buildWireframeDrawList` and drawn three ways in each style (through the overlay over a
+      loaded `--text-muted`, and in the wireframe on the cleared target): glazed, with the window's
+      faces taken out, and with the window opaque. Glazed matches taken out at every texel, the
+      edge's eight core texels read `--text`, and the opaque window hides all eight. In both styles no texel differs from the window taken out, and the
+      opaque window hides 8 of the 8 core texels.
+    - **`checkStrokeContrast`** reads as in T16.d, though the marks scene's third craft now stands
+      on its silhouette over the image: its ticks read 12.81:1 on 12 points at 0.78125.
+  - **Captures.**
+    - **`just test-render --captures`,** on the merged base (d95cd9d) and after: 106 of the 110
+      are byte-identical. The 4 that move are R05 spike's `craft` instrument at its `arc` and
+      `low-pass` shots, on both variants: 9 px in a 4 × 3 px patch of its 240 × 180, the plate's
+      footprint, through which the hull's edges now show.
+    - **Hidden captures of `VIEW`'s canvas** (`.git/rm23-scratch/r07-views/t16e/canvas/`, T16.d's
+      harness): `PRECISION TEST` and `FRAME CHANGE TEST`, from `SEAT` and `CHASE` in both styles,
+      at ratios of 0.78125 and 2.
+      - From `CHASE` in the wireframe: byte-identical.
+      - From `SEAT` in the wireframe: 0.27% to 0.51% of the pixels move, all brighter. That is what
+        lies behind the windscreen: the nose's edges, and in `PRECISION TEST` its planet and moon.
+      - From `SEAT` over the image: 1.55% to 2.34%, all brighter, as in the wireframe.
+      - From `CHASE` over the image: 1.43% to 1.51%, the hull's silhouette, nearly all brighter,
+        since `--surface-0` stands above the black ground. 411 px are darker at 0.78125, where the
+        hull now hides what lay behind it.
+  - **By hand, hidden** (`.git/rm23-scratch/r07-views/t16e/page/`, T16.b's harness with its own
+    flow). `PRECISION TEST` and `FRAME CHANGE TEST` at 1920 × 1080 (the full
+    layout) and 1280 × 720 (compact), at a ratio of 1. The primary is photorealistic, from `SEAT`
+    and then `CHASE`, with a photorealistic `INSTRUMENT 1` at `CHASE`.
+    - The composed note stands on the primary's block in every state, and the instrument does not
+      repeat it.
+    - Checks 1 to 3 pass. The 0.5rem probe passes everywhere: a spare of 333 to 334 px in the full
+      layout's column B and Camera, and 151 px in the compact layout's open panel.
+    - The least heights are 36.34 and 36.75 rem in the full layout and 28.41 rem in the compact,
+      all at most 52.5 rem. The Tab sweep scrolls nothing.
+    - In the compact layout the composed note takes three lines, breaking inside
+      `NOT YET MODELLED`. `ROTATION: NOT YET MODELLED` and `LIGHTING: NOT RECEIVED` beside it
+      already break the same way: the label block's statements are plain text.
+    - Neither scene has host discs, so `LIGHTING: NOT RECEIVED` stands and their bodies draw dark.
+      No kept scene has both a craft and a body a star lights (`PHASE TEST` and `ECLIPSE TEST` have
+      no craft), so the lit body is one in the code's sense (`isLitBody`), unlit.
+    - Seen, not T16.e's: in `FRAME CHANGE TEST` the list's name `TEST LANDER · TEST HULL` is
+      truncated in both layouts.
+  - **The acceptance's vitest paths** leave out `view/engine/catalogue.test.ts`, which keeps
+    `HULL SILHOUETTE` unique and in the console's form. It runs in the app's whole suite and in
+    `just ci`.
+  - **For T16.c** (the UX review's points, not built):
+    - the ruled limits stand nowhere on the screen: a hidden source's glare and bloom still spread
+      round a silhouette, and the meter weighs the pixels a craft hides. The draft's "Outlines for
+      symbology" exception and its Label row could state them, so that the owner signs the
+      exception seeing them;
+    - the drafted row's "no craft's light is computed by this generator version" borrows
+      `NOT YET MODELLED`'s definition, but craft are not the generator's output; T16.c may word
+      it otherwise.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest: 39 files, 618 tests.
+    - The app's vitest: 330 files, 5,812 tests.
+    - `just check lint` from a clean typecheck cache, and Prettier.
+    - `just test-render`: both variants exit 0, 550 checks (275 each, 271 before: the three new
+      checks and the catalogue's `HULL SILHOUETTE`), with no uncaptured GPU error.
+    - naga 30.0.1 validates the composed `occluder.wgsl` and translates it to SPIR-V, MSL 2.1 and
+      HLSL.
+    - The console-ux skill's lint (no new error; its three predate T16.e: `smoke/wireframe.ts`'s
+      test colours and `submit.ts`'s colour parser), contrast and glyph scripts.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers. None found a must-fix.
+    - **TypeScript:** its three should-fixes are fixed: the reasons above two lint suppressions;
+      `isOccluder` made exhaustive (`IS_OCCLUDER`); and tests split to one reason to fail each,
+      `hullOutline`'s returning its input restored. So are its considers: the docs of
+      `occluderMeshes` and of the silhouette check's sphere, and a Windows views check recording
+      its load average as none.
+    - **UX:** no breach beyond the ruled exception, which waits on the owner's sign-off (T16.c).
+      Its two points for T16.c are above. Asked whether the silhouette must itself reach the
+      guide's contrast, it judged the rulings settle it as a ground, not a mark (above), and its
+      consider, a test that the outline encloses the silhouette, is taken.
+    - **Plan conformance:** its should-fixes are taken: the control recorded here, and the
+      ride-along (`src/main/`, `src/smoke/`) kept to its own commit. So are its considers: the
+      README's ask, and the silhouette check's doc. The subtask's bold title runs over two lines,
+      so `plan_task.py` cannot find R07.T16.e; it is left as ruled, for the orchestrator.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

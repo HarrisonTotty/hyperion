@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { add, cross, dot, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import type { CameraPose } from "../camera/pose";
 import { DEFAULT_FOV_DEG, project, viewRotation, type Viewport } from "../camera/projection";
-import { rotate } from "../camera/quaternion";
+import { IDENTITY_QUATERNION, rotate } from "../camera/quaternion";
+import { CHASE_OFFSET_HULL_LENGTHS } from "../camera/state";
 import { narrow } from "../coords/narrow";
 import type { ViewPosition } from "../coords/position";
 import { type CameraOrigins, originMinusCamera, relativeToCamera } from "../coords/relative";
@@ -11,6 +12,7 @@ import { separable } from "../depth/depth";
 import { TEST_HULL, TEST_PLATE_DISTANCE_M } from "../scene/hull";
 import { sceneOrigins } from "../scene/model";
 import { HULL_OCCLUDER_DEPTH_FRACTION } from "../wireframe/drawList";
+import { hullFaces } from "../wireframe/hulls";
 import {
   PRECISION_DURATION_S,
   PRECISION_MOON,
@@ -163,8 +165,31 @@ describe("the precision scene", () => {
   });
 });
 
-/** The test hull's plate: its two triangles, the last faces of `TEST_HULL`. */
-const PLATE_FACES = TEST_HULL.faces.slice(14);
+/** A triangle's corners, m in hull axes. */
+type Triangle = readonly [Vec3, Vec3, Vec3];
+
+/** The test hull's faces with these indices, as triangles in hull axes. */
+function facesAt(indices: ReadonlyArray<number>): Triangle[] {
+  return indices.map((index) => {
+    const [i = -1, j = -1, k = -1] = TEST_HULL.faces[index] ?? [];
+    const a = TEST_HULL.vertices[i];
+    const b = TEST_HULL.vertices[j];
+    const c = TEST_HULL.vertices[k];
+    if (a === undefined || b === undefined || c === undefined) {
+      throw new Error(`the test hull has no face ${String(index)}`);
+    }
+    return [a, b, c] as const;
+  });
+}
+
+/** The test hull's plate: its two triangles, the last faces of `TEST_HULL`, and its window. */
+const PLATE_FACES = facesAt([14, 15]);
+
+/**
+ * The hull's occluder, as the draw list builds it in both styles: its opaque faces, its window
+ * left out (R07.T16.e), turned by no attitude.
+ */
+const OCCLUDER_FACES: ReadonlyArray<Triangle> = hullFaces(TEST_HULL, IDENTITY_QUATERNION);
 
 /**
  * Where the ray from `eye` towards `point` first meets one of `faces` pushed away by the occluder's
@@ -174,18 +199,12 @@ const PLATE_FACES = TEST_HULL.faces.slice(14);
 function firstHit(
   eye: Vec3,
   point: Vec3,
-  faces: ReadonlyArray<readonly [number, number, number]>,
+  faces: ReadonlyArray<Triangle>,
   depthFraction: number,
 ): number | null {
   const direction = sub(point, eye);
   let nearest: number | null = null;
-  for (const [i, j, k] of faces) {
-    const a = TEST_HULL.vertices[i];
-    const b = TEST_HULL.vertices[j];
-    const c = TEST_HULL.vertices[k];
-    if (a === undefined || b === undefined || c === undefined) {
-      throw new Error(`the test hull has no face ${String(i)}, ${String(j)}, ${String(k)}`);
-    }
+  for (const [a, b, c] of faces) {
     // Möller–Trumbore.
     const e1 = sub(b, a);
     const e2 = sub(c, a);
@@ -236,30 +255,46 @@ function behindPlate(eye: Vec3, point: Vec3): boolean {
 describe("the test hull's hidden lines", () => {
   // The hull faces' constant push, 2⁻¹⁶ of the depth on every backend (R07.T16.d), where the
   // hardware bias moved a face by 7.6 × 10⁻⁶ to 1.5 × 10⁻⁵ of its distance (Design note 5).
-  const BIASES = [HULL_OCCLUDER_DEPTH_FRACTION];
-  const eye = TEST_HULL.eyePointM;
+  const bias = HULL_OCCLUDER_DEPTH_FRACTION;
+  const seat = TEST_HULL.eyePointM;
+  // The chase camera's place, astern and above (R02's preset).
+  const chase = scale(CHASE_OFFSET_HULL_LENGTHS, TEST_HULL.lengthM);
+  const hiddenBy = (eye: Vec3, faces: ReadonlyArray<Triangle>) => (point: Vec3) => {
+    const hit = firstHit(eye, point, faces, bias);
+    return hit !== null && hit < 1;
+  };
 
-  it("hides by the plate's faces exactly the parts of the hull's edges behind the plate", () => {
+  it("hides nothing behind the plate, a window, from the seat, which its faces would hide were they opaque (R07.T16.e)", () => {
     const samples = edgeSamples(TEST_HULL.edges.slice(0, 16), 101);
-    const behind = samples.filter((point) => behindPlate(eye, point));
-    const mismatches = BIASES.flatMap((bias) =>
-      samples.filter((point) => {
-        const hit = firstHit(eye, point, PLATE_FACES, bias);
-        return (hit !== null && hit < 1) !== behindPlate(eye, point);
-      }),
-    );
-    expect({ someBehind: behind.length > 0, mismatches }).toEqual({
-      someBehind: true,
-      mismatches: [],
-    });
+    const behind = samples.filter((point) => behindPlate(seat, point));
+    // Seen through the window: behind the plate, and hidden by none of the hull's opaque faces.
+    const seen = behind.filter((point) => !hiddenBy(seat, OCCLUDER_FACES)(point));
+    expect({
+      behind: behind.length > 0,
+      seen: seen.length > 0,
+      // The control: the plate's faces, were they opaque, would hide each of them.
+      hiddenByThePlate: seen.filter(hiddenBy(seat, PLATE_FACES)).length === seen.length,
+    }).toEqual({ behind: true, seen: true, hiddenByThePlate: true });
   });
 
-  it("keeps the plate's own edges, along their length, in front of its biased faces", () => {
-    const samples = edgeSamples(TEST_HULL.edges.slice(16), 101);
-    const hidden = BIASES.flatMap((bias) =>
-      samples.filter((point) => {
-        const hit = firstHit(eye, point, PLATE_FACES, bias);
-        return hit !== null && hit < 1;
+  it("keeps the hull's own edges, along their length, in front of its opaque faces, from the seat and from astern", () => {
+    // Each edge against the opaque faces it bounds, those holding both of its ends.
+    const hidden = [seat, chase].flatMap((eye) =>
+      TEST_HULL.edges.slice(0, 16).flatMap(([i, j]): string[] => {
+        const own = facesAt(
+          TEST_HULL.faces.flatMap((face, index) =>
+            face.includes(i) && face.includes(j) && !TEST_HULL.windows.includes(index)
+              ? [index]
+              : [],
+          ),
+        );
+        const name = `edge ${String(i)}-${String(j)}`;
+        if (own.length === 0) {
+          return [`${name} bounds no opaque face`];
+        }
+        return edgeSamples([[i, j]], 101)
+          .filter(hiddenBy(eye, own))
+          .map((p) => `${name} at (${String(p.x)}, ${String(p.y)}, ${String(p.z)})`);
       }),
     );
     expect(hidden).toEqual([]);

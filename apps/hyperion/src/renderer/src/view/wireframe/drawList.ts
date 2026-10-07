@@ -164,9 +164,14 @@ export interface OccluderSphere {
 }
 
 /**
- * A hull's depth-only faces, two-sided, each pushed away from the camera in its fragment by the
- * list's {@link WireframeDrawList.occluderSlopePx} of its depth's screen slope and by
- * {@link HULL_OCCLUDER_DEPTH_FRACTION} of its depth.
+ * A hull's opaque faces, two-sided, each pushed away from the camera in its fragment by the list's
+ * {@link WireframeDrawList.occluderSlopePx} of its depth's screen slope and by
+ * {@link HULL_OCCLUDER_DEPTH_FRACTION} of its depth: depth only in the wireframe, and over the
+ * photorealistic image a silhouette filled in {@link OccluderMesh.fill} (R07.T16.e).
+ *
+ * @remarks
+ * Its windows are in no mesh, so that they hide nothing in either style (decision-r07-t16a, item
+ * 3).
  */
 export interface OccluderMesh {
   /** The craft. */
@@ -177,6 +182,12 @@ export interface OccluderMesh {
   readonly triangles: Float32Array;
   /** Drawn two-sided, so that a winding flip cannot unhide every hidden line. */
   readonly twoSided: true;
+  /**
+   * The colour its faces are filled in, opaque, as `readTokens` read it, or `null` for faces that
+   * write depth alone: `null` in the wireframe's list, whose faces hide by depth; `--surface-0`
+   * over the photorealistic image (`overlayDrawList`), so that nothing behind them shows through.
+   */
+  readonly fill: string | null;
 }
 
 /** A star as a sprite: where it falls on the view and its pre-exposed colour. */
@@ -236,7 +247,10 @@ export type AnchorLabel =
 export interface WireframeDrawList {
   /** The bodies' occluder spheres. */
   readonly occluderSpheres: ReadonlyArray<OccluderSphere>;
-  /** The hulls' occluder faces. */
+  /**
+   * The hulls' opaque faces: depth only in the wireframe's own list (`fill` `null`), filled in
+   * `--surface-0` by `overlayDrawList` over the photorealistic image (R07.T16.e).
+   */
   readonly occluderMeshes: ReadonlyArray<OccluderMesh>;
   /** The line batches, view-space first, then screen-space symbology. */
   readonly lines: ReadonlyArray<LineBatch>;
@@ -375,8 +389,9 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * Bodies are culled by the frustum in `f64` (Design note 8) and drawn by their regime (Design note
  * 13): occluder spheres of `occluderRadius`, limb and graticule lines, and below 3 px their symbol;
  * rings are their ellipses; orbits solid `--text-muted` at 1 px, the selected one's `--text` at
- * 2 px; hulls their edges over their two-sided occluder faces, pushed away in the fragment by
- * {@link WireframeDrawList.occluderSlopePx}; a craft's predicted path the
+ * 2 px; hulls their edges, their windows' included, over their two-sided opaque faces, depth
+ * only, pushed away in the fragment by {@link WireframeDrawList.occluderSlopePx}, a window
+ * hiding nothing (R07.T16.e); a craft's predicted path the
  * only dashed batch; the selection's bracket reticle in `--accent`, the destination's in
  * `--target` and the own ship's flight path marker; stars as sprites pre-exposed at the exposure,
  * the brightest 2,000 at the low setting. Every stroke is cased in `--surface-0`, since every mark
@@ -558,7 +573,9 @@ export function buildWireframeDrawList(
         triangles.set(narrow(corner), i * 9 + j * 3);
       });
     });
-    occluderMeshes.push({ id: craft.id, originF32, triangles, twoSided: true });
+    // Its opaque faces alone, its windows hiding nothing; depth only, the wireframe's faces filling
+    // nothing (R07.T16.e).
+    occluderMeshes.push({ id: craft.id, originF32, triangles, twoSided: true, fill: null });
   }
 
   for (const craft of scene.craft) {
