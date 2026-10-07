@@ -249,7 +249,7 @@ export type PhaseTemplateId =
   | "neptune"
   | "airless-ice"
   | "snowball"
-  | "magma"; // the last three provisional and labelled
+  | "magma"; // the last three provisional: flagged, labelled on no view
 export interface PhaseTemplate {
   readonly phaseV: (alphaRad: number) => number; // Φ_t, Φ_t(0) = 1
   readonly validToRad: number; // held beyond, Design note 5
@@ -260,7 +260,8 @@ export interface BodyPhotometry {
   readonly phaseIntegral: Rgb; // q per channel, from the law
   readonly law: PhotometricLaw;
   readonly bondRatioCheck: number | null; // p_V q_V ÷ A_Bond as plan 14 states it; a check only
-  readonly provenance: "modelled" | "provisional";
+  // the section's; the section's on a curve it flags provisional, unlabelled; none (labelled)
+  readonly provenance: "modelled" | "modelled-provisional" | "provisional";
 }
 export const PROVISIONAL_PHOTOMETRY: BodyPhotometry; // until plan 14's section, labelled
 export const PHASE_F_CLAMP = 4;
@@ -844,7 +845,10 @@ and `--port`.
    owner, not an input the client reconciles. Until the
    section is on the wire a body takes `PROVISIONAL_PHOTOMETRY`, a Lambert sphere of spherical
    albedo 0.3 (p = 0.2, q = 1.5, brighter at large phase than any real body), and the label block
-   says `BODY PHOTOMETRY: NOT YET MODELLED` (a phrase for the owner, R07.T16).
+   says `BODY PHOTOMETRY: NOT YET MODELLED` (a phrase for the owner, R07.T16). A section whose
+   curve plan 14 flags `provisional` is drawn as it states and takes no label: the picture is the
+   simulated body's, and the flag is the generator's note on its source
+   (decision-r07-provisional-photometry, 2026-10-07).
 6. **The horizon in closed form, eclipses by annuli** (researched 2026-09-29; Howell's catalogue of
    radiation view factors, configuration B-43 (Cunningham 1961; Hauptmann 1968),
    <https://www.thermalradiation.net/tablecon.html>, formula transcribed from memory and verified by
@@ -1253,13 +1257,20 @@ owner (delegated decision pending)". Accepted with amendments 2026-10-02 (decisi
 - **R07.T2.b The section, once plan 14 has built it.** After plan 14's subtask lands and
   `just gen-protocol` has run, `lib/system/bodiesWire.ts` and `lib/system/model.ts` parse
   `photometry` and the figure as `SectionDto`s, and `fromWire.ts` maps them to `BodyPhotometry` with
-  `provenance: "modelled"`, `bondRatioCheck` and `BodyFigure`; and `view/scene/fromServer.ts` reads
-  P14.T46.f's rotation section into the scene body's `rotation` through `rotation3FromRows`
-  (decision-p14-phase-j), which orients R10's class maps. Tests: fixtures in each section
-  state; a stated ratio that disagrees with the law's q_V by more than 5% is logged for plan 14's
-  owner. It waits for P14.T47.e and R07.T4.d, as does any client test against `templates.golden`:
+  `provenance: "modelled"` (`"modelled-provisional"` where the section's `provisional` holds,
+  carried as data and labelled on no view, decision-r07-provisional-photometry), `bondRatioCheck`
+  and `BodyFigure`; and `view/scene/fromServer.ts` reads P14.T46.f's rotation section into the
+  scene body's `rotation` through `rotation3FromRows` (decision-p14-phase-j), which orients R10's
+  class maps. Tests: fixtures in each section state; a section flagged `provisional` maps to
+  `modelled-provisional` and adds no label, and a scene whose lit bodies all carry `ok` sections,
+  one flagged, states no `BODY PHOTOMETRY` note; a stated ratio that disagrees with the law's q_V
+  by more than 5% is logged for plan 14's owner. It waits for P14.T47.e and R07.T4.d, as does any client test against `templates.golden`:
   before them every temperate world above 30 kPa would be drawn 1.9× too bright
-  (decision-r07-earth-albedo). Acceptance: `pnpm test`, `just ci`.
+  (decision-r07-earth-albedo). Acceptance: `pnpm test`, `just ci`. _As built (2026-10-07): see
+  Risks, "Deviations in T2.b, as built". The rotation section is parsed beside the two named, the
+  client's twin of `body_fixed_at` (T1, item 5) is `lib/system/rotation.ts`, and a section flagged
+  `provisional` is carried as `modelled-provisional`, labelled on no view
+  (decision-r07-provisional-photometry)._
 
 #### R07.T3 Illuminance at a body
 
@@ -2813,8 +2824,12 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   `PRIMARY` view's label block (`QUALITY`) and the `LINK` display's `Graphics` panel; see
   "Deviations in T17, as built"._
 - **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
-  Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
-  Venus's curve unlabelled; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
+  Ganymede's and Europa's; magma, Mercury's) are provisional, as are hot giants and warm
+  sub-Neptunes on a cold giant's curve (decision-p14-phase-j A8). Plan 14 flags each such section,
+  and the client keeps the flag as `provenance: "modelled-provisional"`. No view labels them
+  (decision-r07-provisional-photometry, 2026-10-07). The picture is the simulated body's, and the
+  flag is the generator's note on its source. A hot giant's larger error is its albedo (plan 14's
+  F2, P14.T13.c's, deferred). Thick magma oceans take Venus's curve unflagged; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
   al. 2016 would settle Jupiter); and plan 14's airless-rock Bond albedo is a check for its owner
   (T1). Earth's albedo is resolved (decision-r07-earth-albedo). Its curve, Robinson 2026's eq. 14,
   is cut by the clamp from 139°, up to 29% at 144°, inside that phase's 38% weather spread. It is
@@ -2972,7 +2987,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   flattening and the Saturn-like moment of inertia (T8.a's and T9's oblate figures); rotation and
   pole on the wire (P14.T14 is sim-only; the oblate axis in T8.a and T9, and R02's
   `bodyFixedRotation`); the spheroid datum (Design note 19, for R05, R09 and R10). Until then every
-  body is a sphere of its mean radius with the provisional photometry, labelled. **For the owner**
+  body is a sphere of its mean radius with the provisional photometry, labelled. _Built by plan 14
+  (P14.T46–T47) and read by T2.b (2026-10-07): rotation, figure and photometry._ **For the owner**
   (smallest choice made, reversible): a `contact` body (apparent position only) is lit from its
   apparent direction without eclipse or planetshine and, with no resolved radius, stays R02's
   mark (T2.a); the lean is to keep it so until a contact carries a radius.
@@ -2985,7 +3001,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
     `shapePhase`, `shapeGeometricAlbedo`) and `phaseIntegral` (Simpson, 7,200 intervals), since
     the f table needs Φ_shape and `phase.ts` (T4.b) imports the table; T4.b's `phase.ts` keeps
     `discIntegratedPhase` and `lawFor`. `Rgb` is in display order (r, g, b): index 0 is R, 2 is B.
-  - **`PhaseTemplate` gains two fields:** `provisional: boolean`, for T5 and T16's labels, and
+  - **`PhaseTemplate` gains two fields:** `provisional: boolean`, for T5 and T16's labels,
+    _(no view labels it: decision-r07-provisional-photometry, 2026-10-07)_ and
     `lommelSeeligerShare`, the L that goes with the curve by Design note 5 (1 for the Moon,
     Mercury, airless ice, the snowball and magma, 0.5 for Mars, 0 otherwise), so that the
     templates' keys and laws live in one place (`templates.ts`) and change cheaply (the
@@ -3004,8 +3021,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   - **Borrowed shapes (decision-phase-curves, 2026-10-02, after the phase-curve check's four
     mismatches with galaxy's classes):** airless ice and the snowball take the Moon's curve at L = 1,
     their q reached through s (Ganymede's 0.80 at s ≈ 0.82, ratio 0.98; Europa's 1.01 at s ≈ 0.67,
-    ratio 0.99, both inside T2.b's 5%); magma takes Mercury's, for the thin branch below 30 kPa
-    only. All three are `provisional` and labelled. The Moon's constant is `MOON_KS91`. q does not
+    ratio 0.99, the analogues' own, within P14.T47 test (b)'s 5% of 1, which is not T2.b's check
+    of the law against the stated ratio, science check of T2.b); magma takes Mercury's, for the thin branch below 30 kPa
+    only. All three are `provisional` _(flagged; labelled on no view,
+    decision-r07-provisional-photometry)_. The Moon's constant is `MOON_KS91`. q does not
     depend on L inside a template's range; past it, where f is held while the shape varies with L,
     it does (see T4.b).
     The selection rule (30 kPa, the cloud term suspended) is T5's and T1's draft's, and no template
@@ -3414,6 +3433,8 @@ altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     and stays R02's mark. `BodyPhotometry`, `AppearanceLabel` and the `BodyFigure` re-export live
     there. A `contact` frame entry has no summary here; it never occludes and is never eclipsed
     (`lightingBodyOf`, T6.c; decisions-r06-r07, item 4; _since R07.T10.a, `lightingFrameOf`_).
+    _T2.b drops `rotation`: `appearanceFromWire(body)` takes the pole from the figure or rotation
+    section._
 - **Deviations in T5, as built.**
   - **Inputs.** `litRegimes(bodies, camera, viewport, previous)` and `painterOrder(bodies, regimes,
 hosts)` take `LitSphere`s (identifier, centre from the camera in `f64`, equatorial radius) and
@@ -6037,7 +6058,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `uniform` case without the type; T8.b threads `DiscSurface` through the record and the shader.
     `bodyDisc.wgsl` writes `body_brdf`'s lunar-Lambert expression inline, with the horizon factor
     for μ₀ and the Lommel–Seeliger floor, so a change inside `body_brdf` must be mirrored there.
-    The view builds `LitBodyInput`, not `BodyAppearance`, until T2.b.
+    The view builds `LitBodyInput`, not `BodyAppearance`, until T2.b. _T2.b keeps `LitBodyInput`,
+    built from `ViewBody.appearance` (see "Deviations in T2.b, as built")._
   - **Sampling, as built (correcting part 1's "the count is not raised").** The grid stays 8 × 8
     below 32 px and 4 × 4 on limb pixels above; each cell within two cell widths of the limb is
     shaded at up to nine points (three Gauss points in each of its profile's three pieces) after
@@ -6069,7 +6091,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **Lit bodies in the view** are the scene's planets, dwarf planets and moons: spheres of
     `ViewBody.radiusM`, the pole from the body-fixed rotation where there is one, with the
     provisional photometry. The figure and photometry from the wire (`appearanceFromWire`) reach
-    the view with T2.b.
+    the view with T2.b. _Done by T2.b (`heldAppearanceOf`, `ViewBody.appearance`)._
   - **Tests.** `view/photoreal/renderer.test.ts` (nothing drawn before the pipelines; the sky pass,
     then the bodies loading it; the tone map in-pass; the overlay loading; a restore remaking the
     resources and a making it overtakes abandoned; dispose releasing buffers and textures),
@@ -7284,7 +7306,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       Resolution B3's nominal GMs and DE430's lunar GM. So every new moon is an eclipse.
     - The planet does not turn, and its reflex about the planet–moon barycentre (4,414 km here,
       4,671 km for Earth's) is left out. Every body takes T2.a's provisional photometry, as every
-      scene body does until T2.b.
+      scene body does until T2.b. _Since T2.b a server body takes its sections; a kept scene's
+      still takes the provisional photometry._
   - **A free camera in the planet's frame stands for the ship.** The plan's "ship in a moon's
     penumbra" is the camera at the ship's place. The scene has no own ship: the test hull's
     windscreen plate, 1 m square and 1 m ahead of the seat's eye, would stand across a seat's view
@@ -8422,3 +8445,154 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the client's runs (`build-variants.sh`, `hook-annuli.js`, `run-app.sh`, `run-app-all.sh`),
       their logs (`run-r{1,2,3}-*.log`, `meta-*`, `clocks-*`) and the table (`analyse-app.js`,
       `app-r1r2r3.txt`).
+- **Deviations in T2.b, as built** (2026-10-07; the shading lane, once P14.T47.e and T4.d were on
+  `rendering-and-planets` at `GENERATOR_VERSION` 21, merged by name at 56f90e22).
+  `just gen-protocol` and `just gen-surface` changed nothing: plan 14's bindings were already
+  generated.
+  - **Parsing** (`lib/system/model.ts`, `bodiesWire.ts`).
+    - `SystemBody` gains `rotation`, `figure` and `photometry`, as `Section`s of
+      `SystemBodyRotation`, `SystemBodyFigure` and `SystemBodyPhotometry` (with `JohnsonBands`).
+      The rotation section is parsed beside the two the task names, since `fromServer.ts` reads
+      it. An absent field is an older server's `not_modelled` (P14.T46.f).
+    - A bad value faults the answer, as every section's does: the rotation's node, quarter and
+      pole orthonormal and right-handed to 2.5 × 10⁻¹³, rates, ages and the clock's period
+      positive, angles finite; the figure's 0 < c ≤ a, f in [0, 1), a unit pole and a moment of
+      inertia factor in (0, 0.4]; p and s positive in every band, L in [0, 1], A_Bond in [0, 1),
+      a positive ratio.
+    - The axes' 2.5 × 10⁻¹³ is a quarter of `ROTATION_ORTHONORMAL_TOLERANCE`, so that the axes
+      turned by any W still pass `rotation3FromRows`. It is stricter than the simulation's
+      promise of 10⁻¹² (`coords/body_fixed.rs`); the golden's 134 laws are within 4.4 × 10⁻¹⁶
+      (plan-conformance review).
+    - The lock is a union, `RotationLock`: `never`, `outside_clock` (a locking age, its instant
+      outside the clock's range) or `in_clock` (both), so that no law holds an instant without its
+      age (TypeScript review). An instant beyond ±(2⁵³ − 1) s, which `JSON.parse` rounds, is only
+      compared with times inside the window, so it need only be whole seconds.
+  - **The twin of `body_fixed_at`** (T1, item 5): `lib/system/rotation.ts`, `rotationAngleAt`,
+    `bodyFixedAxesAt` and `BodyFixedAxes`, the simulation's operations in its order. `lib/orbit.ts`
+    exports `fractionOfPeriod` for the locked clock. `rotation.test.ts` reads
+    `frame/body_rotations.golden`: 134 laws, 968 angles, every branch (no lock in the clock,
+    locked synchronous and 3:2, before a lock ahead and behind). Tolerance 10⁻⁹ rad; measured bit
+    for bit.
+  - **`appearanceFromWire(body)`** loses T2.a's `rotation` argument. The figure is the figure
+    section's a, c and pole; without one, a sphere of `bulk.radius_m` about the rotation section's
+    pole, or about none.
+  - **The modelled law is built, not solved** (decision-p14-phase-j, A6): A = p ÷ [L + ⅔(1 − L)]
+    and s per band, B, V and R as the display's b, g and r, on the section's template and L.
+    `lawFor` is not used. q is the new `lawPhaseIntegral` (`phase.ts`), Simpson over 7,200
+    intervals of the exact, clamped and held f, as plan 14 defines q.
+  - **A section flagged `provisional`** (a borrowed curve, or a hot giant or warm sub-Neptune,
+    P14.T47.b) is `provenance: "modelled-provisional"`, a third value (the science check's
+    should-fix, which found the flag dropped). Ruled 2026-10-07
+    (decision-r07-provisional-photometry): no view labels it, and none will. The picture is the
+    simulated body's; `BODY PHOTOMETRY: NOT YET MODELLED` keeps its condition (no `ok` section)
+    and its composition with the craft note. The ruling's plan text is applied in Provides,
+    Design note 5, T2.b, the Risks line on borrowed templates and T4.a's deviations. The flagged
+    sections are 444 of the 722 `ok` entries in the systems goldens (370 airless ice, 36 snowball,
+    28 hot giants and warm sub-Neptunes, 10 magma). A hot giant's larger error, its albedo, is
+    plan 14's F2, deferred and not fixed here.
+  - **The 5% rule** (Design note 5), as the science check ruled it: a body is a finding where
+    p_V × the law's q_V ÷ A_Bond departs from the stated ratio by more than
+    `BOND_RATIO_TOLERANCE` (0.05), that is, the law's q_V from the q_V the ratio implies. It is not
+    the ratio's distance from 1: the ratio is physical, and constant on each template, since p
+    scales with A_Bond ÷ A_ref. The goldens' ratios are Mercury and magma 0.619, Mars 0.627, Earth
+    0.959, airless ice 0.983, the snowball 0.995, Venus 1.219, Neptune 1.615, Saturn 1.991 and
+    Jupiter 2.076. The check catches the client and the server drifting apart (another L than the
+    template's moves Mars's q by about 9%).
+    - Measured by a scratch probe (not committed) over the 722 photometric blocks of
+      `planetary/systems/*.golden` at version 21: the client's ratio within 8.2 × 10⁻⁸ of the
+      stated one, and its q of the pinned q, per band. **No body is a finding.**
+    - T4.a's "both inside T2.b's 5%" is re-attributed to P14.T47's test (b).
+  - **Caches and the report.**
+    - `heldPhotometryOf(section)` keys a section's photometry by its values (the provisional flag
+      included) and keeps the `HELD_PHOTOMETRIES_KEPT` (256) used most recently. A body re-sent at
+      a new level parses its whole system again (`sceneWire.ts`' `withBody`), and its law object,
+      and so its phase table, stay (TypeScript review).
+    - `heldAppearanceOf(body)` holds a record's appearance in a `WeakMap`: a pure memo, which a
+      render may call.
+    - `reportBondRatioFinding(designation, finding)` warns once a body and finding
+      (`console.warn`, for plan 14's owner); `reportBondRatioFindings(scene)` (`fromServer.ts`)
+      reports a scene's. `ViewDisplay`'s drawing loop calls it beside the camera report, never a
+      render: the first scene is made in a `useState` initialiser (the TypeScript review's
+      should-fix).
+    - Exports beyond Provides: `modelledPhotometry`, `ModelledPhotometry`, `heldPhotometryOf`,
+      `HELD_PHOTOMETRIES_KEPT`, `heldAppearanceOf`, `reportBondRatioFinding`,
+      `BOND_RATIO_TOLERANCE`, `BondRatioFinding`, `WireAppearance.bondRatioFinding`,
+      `PROVISIONAL_LABELS`, `lawPhaseIntegral`.
+  - **The scene** (`view/scene/model.ts`, `fromServer.ts`).
+    - `ViewBody.appearance` is new and required: a server body's `heldAppearanceOf`, `null` for a
+      star and every kept scene's body, which keep the provisional photometry and its label.
+    - `ViewBody.radiusM` is the figure's a, or the mean radius where only the bulk is sent.
+    - `ViewBody.rotation` is the section's law through `rotation3FromRows` at the time the body is
+      drawn at: the frame's for the ship's local body, drawn at the present, and its light's
+      emission for every other, drawn where it is seen (a choice of this task; the science check
+      confirmed it). An Earth 500 s of light away turns 0.036 rad meanwhile. The local body's
+      surface the camera sees left it a light time before: about v_eq ÷ c as seen, 1.6 µrad for
+      an Earth and 42 µrad for a Jupiter, under a pixel in a field wider than about 4.6° across
+      1,920 px.
+    - `litBodiesOf` takes the appearance's figure and photometry, and passes the rotation, which
+      orients a class map; `litLabelsOf` takes each lit body's labels.
+    - **Camera reports**: `cameraKinematics` turns a `body_fixed` position into its body's frame
+      before adding the camera's galactic offset. It took the fixed axes as the body frame's,
+      true only while no body turned. Latent: no server craft is `body_fixed`.
+  - **The view still builds `LitBodyInput`**, not `BodyAppearance` (T8.a's "until T2.b"):
+    `bodyAppearance` is still not called, the regime being decided inside `planLitBodies`. For
+    R08 and R10, who read `BodyAppearance`.
+  - **Plan 14's fixture.** The shared fixture's Earth gave its pole and quarter as the sine and
+    cosine of two angles (0.409052 rad, unit only to 5.7 × 10⁻⁷), which `rotation3FromRows`
+    refuses. They are now the sine and cosine of 0.409 in `packages/protocol/fixtures/planetary.json`
+    and `crates/hyperion-protocol/src/planetary/record.rs` (`earth_rotation` and its JSON,
+    `earth_figure_json`); illustrative values, no golden or binding moves (`cargo test -p
+    hyperion-protocol` passes). Its axes stay synthetic: its pole is 76.8° from its orbit's
+    normal, not 0.409 rad, and its node is not in the orbital plane (the science check's
+    consider; no check reads them). For plan 14's owner.
+  - **`templates.golden`** (`appearance/templatesGolden.test.ts`), every template at every whole
+    degree for L 0, 0.5 and 1:
+    - Φ_c of the exact f to 10⁻¹² (measured 8.9 × 10⁻¹⁶), and q to 10⁻⁶ relative (9.7 × 10⁻⁸;
+      the generator's Simpson sum has 1,800 intervals);
+    - Φ through the shader's table (`discIntegratedPhase`) to 10⁻⁶ relative (`f32`), but at the
+      piecewise fits' joins, Jupiter's 12° and Saturn's 6°, where the table's node and the
+      golden's degree fall on either side of the fit's own step: 3.7 × 10⁻⁴ and 7.5 × 10⁻⁴,
+      bounded at 10⁻³ (plan-conformance review);
+    - each template's L and range, `lawFor` recovering s to 10⁻⁶, and the `earth` block, Robinson
+      2026's eq. 14.
+  - **Left as they stand.**
+    - `ROTATION: NOT YET MODELLED` stays on in every server scene: the host stars carry no
+      rotation (the guide's row speaks of a graticule about the orbit normal, and stars have
+      graticules). Keep it, or leave stars out? For the owner.
+    - No capture moves: every capture is a kept scene's, whose lit bodies' inputs are unchanged.
+  - **Tests.** `bodiesWire.test.ts` (each section `ok`, in each other state and absent; the lock's
+    three kinds; 18 refusals), `rotation.test.ts` (new), `fromWire.test.ts` (the modelled law, its
+    q, the templates' names, each state, the figure's three cases, the ratio either side of 5%,
+    `modelled-provisional`, the caches, the report), `templatesGolden.test.ts` (new),
+    `fromServer.test.ts` (the rotation at each drawn time, the light time's spin, the appearance
+    across frames, the radius, the report once, a body-fixed camera report),
+    `photorealFrame.test.ts` (the lit bodies' sections and labels; no note with every lit body's
+    section `ok`, one flagged, as the ruling asks), `ViewDisplay.test.tsx` (the
+    loop reports a finding once), `bodyAppearance.test.ts`.
+  - **Gate**, on the committed code (b66fce86, b70a170b, on the merge 3df09359).
+    - The app's vitest: 7,967 tests in 341 files, all passing (84 s at 4 workers). Two earlier
+      runs each failed only `SystemDisplay.test.tsx`'s "starts afresh at the chart's time", a
+      `waitFor` timing out under load, which passes alone and which the views lane records as a
+      load flake. The protocol package's 174, and `cargo test -p hyperion-protocol` (344), on the
+      fixture's change.
+    - `just check lint` from a clean tsc cache, and Prettier.
+    - `just test-render`, both variants, with captures: exit 0, 306 and 304 checks, none failing,
+      no uncaptured GPU error (2026-10-07, 10:58–11:12, after 15 minutes' wait for the heavy
+      lock). Against T17's 110 captures, all 82 of R07's are byte-identical. The 10 that differ
+      are R05's `hillaire-ground-noon`, `hillaire-ground-sunset`, `hillaire-orbit`, `spike-arc`
+      and `spike-low-pass`, in both variants, from lanes merged since T17 (R05.T12.e's marches,
+      657c1091, and T16.f's and T16.g's strokes and graticules). No capture draws a server scene,
+      and the kept scenes' lit bodies take inputs T2.b leaves unchanged.
+    - `just ci` was not run, under the Day 2 protocol.
+  - **Reviewed.**
+    - TypeScript: no must-fix. Its should-fix, the warning reachable from a render, is applied
+      (above). Its three considers are applied: the lock as a union, the value-keyed cache, and
+      clearer assertions.
+    - Plan conformance: no must-fix. Of its three should-fix items, the label and the view's
+      `LitBodyInput` are recorded here, and the table's Φ is tested. Its considers: q is made once
+      a section (`heldPhotometryOf`), the axes' margin and a stale TSDoc are recorded and fixed.
+    - Science check: no must-fix. The 5% reading is confirmed, with reasons. Its should-fix, the
+      dropped flag, is carried as data and ruled unlabelled (above). Its considers are applied: T4.a's wording, the
+      fixture's synthetic axes recorded, and the local body's lag stated in `fromServer.ts`.
+  - Scratch: `.git/rm23-scratch/r07-shading/t2b/` (the probes in `probes/`, the logs, the
+    test-render wrapper and its captures).

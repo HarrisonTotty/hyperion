@@ -6542,7 +6542,11 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     `templates.golden` pins. The shared fixture (`packages/protocol/fixtures/planetary.json`)
     gives the slice's Earth an `ok` section of each (illustrative values) in `system_bodies` and
     `body_detail`, `not_resolved` ones in the mass-and-orbit and contact records, and the giant and
-    the populated system none, as an older server's.
+    the populated system none, as an older server's. _The Earth's pole and quarter there were the
+    sine and cosine of two angles, unit only to 5.7 × 10⁻⁷, which the client's
+    `rotation3FromRows` refuses; R07.T2.b made them the sine and cosine of 0.409, here and in
+    `record.rs`' `earth_rotation` (R07's Risks, "Deviations in T2.b, as built"). Its axes stay
+    synthetic: the pole is 76.8° from the fixture orbit's normal._
   - _`golden_systems_are_pinned`_ writes the three sections after every older line of a body, so
     that the older lines keep their keys, with W at −H, the epoch and +H and each band's q.
   - _`frame/body_rotations.golden`_ (`tests/body_rotations_golden.rs`): 131 laws of the three
