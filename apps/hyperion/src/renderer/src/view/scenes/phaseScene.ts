@@ -92,6 +92,7 @@ function planet(index: number, phaseDeg: number): ViewBody {
     centreM,
     retarded: staticRetarded(centreM),
     rotation: null,
+    appearance: null,
     symbol: bodyKindSymbol("planet"),
     orbitNormal: null,
   };
@@ -138,6 +139,7 @@ function phaseSceneAt(tS: number): ViewScene {
         centreM: starCentreM,
         retarded: staticRetarded(starCentreM),
         rotation: null,
+        appearance: null,
         symbol: bodyKindSymbol("star"),
         orbitNormal: null,
       },
@@ -152,6 +154,7 @@ function phaseSceneAt(tS: number): ViewScene {
         centreM: giantCentreM,
         retarded: staticRetarded(giantCentreM),
         rotation: null,
+        appearance: null,
         symbol: bodyKindSymbol("planet"),
         orbitNormal: null,
       },

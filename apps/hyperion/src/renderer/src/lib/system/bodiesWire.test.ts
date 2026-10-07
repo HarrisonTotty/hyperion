@@ -1,4 +1,13 @@
-import type { BodyStateDto, OrbitDriftDto, SectionDto, UniverseTime } from "@hyperion/protocol";
+import type {
+  BodyFigureDto,
+  BodyPhotometryDto,
+  BodyRotationDto,
+  BodyStateDto,
+  BodySummaryDto,
+  OrbitDriftDto,
+  SectionDto,
+  UniverseTime,
+} from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -431,5 +440,233 @@ describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
 
   it("still refuses an orbit's valid_until beyond 2^53 s, which the client computes with", () => {
     expect(faultOf(withValidUntil({ seconds: -LONG_AGO_S, nanos: 0 }))).toBe("orbit time unusable");
+  });
+});
+
+/** The slice's answer with its Earth's summary changed by `change`. */
+function withEarth(change: (earth: BodySummaryDto) => BodySummaryDto) {
+  return sliceBodiesWith((body) => (body.id === FIXTURE_EARTH ? change(body) : body));
+}
+
+/** The value of an `ok` section of the slice's Earth, as the fixture gives it. */
+function earthValue<K extends "rotation" | "figure" | "photometry">(
+  key: K,
+): Extract<NonNullable<BodySummaryDto[K]>, { state: "ok" }>["value"] {
+  const section = sliceBodies().bodies.find((body) => body.id === FIXTURE_EARTH)?.[key];
+  if (section?.state !== "ok") {
+    throw new Error(`the fixture's Earth has an ok ${key} section`);
+  }
+  return section.value;
+}
+
+/** The slice's answer with its Earth's rotation law changed by `change`. */
+function withRotation(change: Partial<BodyRotationDto>) {
+  return withEarth((earth) => ({
+    ...earth,
+    rotation: { state: "ok", value: { ...earthValue("rotation"), ...change } },
+  }));
+}
+
+/** The slice's answer with its Earth's figure changed by `change`. */
+function withFigure(change: Partial<BodyFigureDto>) {
+  return withEarth((earth) => ({
+    ...earth,
+    figure: { state: "ok", value: { ...earthValue("figure"), ...change } },
+  }));
+}
+
+/** The slice's answer with its Earth's photometry changed by `change`. */
+function withPhotometry(change: Partial<BodyPhotometryDto>) {
+  return withEarth((earth) => ({
+    ...earth,
+    photometry: { state: "ok", value: { ...earthValue("photometry"), ...change } },
+  }));
+}
+
+function earthOf(response = sliceBodies()) {
+  const earth = bodiesOf(response).bodies.bodies.find((body) => body.id === FIXTURE_EARTH);
+  if (earth === undefined) {
+    throw new Error("the slice's answer lists its Earth");
+  }
+  return earth;
+}
+
+describe("the rotation, figure and photometry sections (P14.T46.f, P14.T47.d; R07.T2.b)", () => {
+  it("reads the Earth's rotation law in the client's units", () => {
+    expect(earthOf().rotation).toEqual({
+      state: "ok",
+      value: {
+        pole: { x: 0, y: -0.39769200800981236, z: 0.9175189735177814 },
+        equatorNode: { x: 1, y: 0, z: 0 },
+        equatorQuarter: { x: 0, y: 0.9175189735177814, z: 0.39769200800981236 },
+        obliquityRad: 0.409,
+        initialRateRadPerS: 7.292115e-5,
+        lockedRateRadPerS: 1.9909866e-7,
+        ageAtEpochS: 1.44e17,
+        lock: { kind: "never" },
+        resonance: "synchronous",
+        clockPeriodS: earthValue("rotation").clock_period_s,
+        clockMeanAnomalyAtEpochRad: earthValue("rotation").clock_mean_anomaly_at_epoch_rad,
+        subPrimaryAngleRad: earthValue("rotation").sub_primary_angle_rad,
+        phaseAtEpochRad: earthValue("rotation").phase_at_epoch_rad,
+        capturePhaseRad: earthValue("rotation").capture_phase_rad,
+      },
+    });
+  });
+
+  it("reads the Earth's figure, its spheroid about its pole", () => {
+    expect(earthOf().figure).toEqual({
+      state: "ok",
+      value: {
+        equatorialRadiusM: 6_378_137,
+        polarRadiusM: 6_356_752.314245179,
+        flattening: 0.0033528106647474805,
+        pole: { x: 0, y: -0.39769200800981236, z: 0.9175189735177814 },
+        momentOfInertiaFactor: 0.33,
+        law: "rotational",
+        datum: "solid_surface",
+      },
+    });
+  });
+
+  it("reads the Earth's photometry per band, with its stated ratio", () => {
+    expect(earthOf().photometry).toEqual({
+      state: "ok",
+      value: {
+        geometricAlbedo: { b: 0.263, v: 0.215, r: 0.21 },
+        phaseTemplate: "earth",
+        phaseExponent: { b: 1, v: 1, r: 1 },
+        lunarLambertShare: 0,
+        bondAlbedo: 0.294,
+        bondRatio: 0.95914,
+        provisional: false,
+      },
+    });
+  });
+
+  it("reads the sections a record carries, and what a lower level withholds", () => {
+    const full = toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION);
+    const massAndOrbit = toBodyDetail(earthMassAndOrbit(), FIXTURE_SYSTEM, DESIGNATION);
+    if (full.kind !== "ok" || massAndOrbit.kind !== "ok") {
+      throw new Error("the fixture's records are usable");
+    }
+
+    expect(
+      [full, massAndOrbit].map(({ detail: { record } }) => [
+        record.rotation.state,
+        record.figure.state,
+        record.photometry.state,
+      ]),
+    ).toEqual([
+      ["ok", "ok", "ok"],
+      ["not_resolved", "not_resolved", "not_resolved"],
+    ]);
+  });
+
+  it("reads a summary without the fields, an older server's, as not modelled", () => {
+    const jupiter = bodiesOf().bodies.bodies.find((body) => body.id !== FIXTURE_EARTH);
+
+    expect([jupiter?.rotation, jupiter?.figure, jupiter?.photometry]).toEqual([
+      { state: "not_modelled" },
+      { state: "not_modelled" },
+      { state: "not_modelled" },
+    ]);
+  });
+
+  it.each(["not_resolved", "not_modelled", "not_applicable"] as const)(
+    "keeps each section tagged %s as the server tagged it",
+    (state) => {
+      const earth = earthOf(
+        withEarth((body) => ({
+          ...body,
+          rotation: { state },
+          figure: { state },
+          photometry: { state },
+        })),
+      );
+
+      expect([earth.rotation, earth.figure, earth.photometry]).toEqual([
+        { state },
+        { state },
+        { state },
+      ]);
+    },
+  );
+
+  it("reads a lock far outside the clock window, which it only compares", () => {
+    const lockedLongAgo = withRotation({
+      locking_age_s: 1.5e17,
+      locks_at: { seconds: -59_362_396_298_040_352, nanos: 0 },
+    });
+
+    expect(faultOf(lockedLongAgo)).toBe("no fault");
+  });
+
+  const badAxes: ReadonlyArray<readonly [string, Partial<BodyRotationDto>]> = [
+    ["a node off the equator", { equator_node: [1, 1e-12, 0] }],
+    ["a left-handed triad", { equator_quarter: [0, -0.9175189735177814, -0.39769200800981236] }],
+    ["a pole of 0", { pole: [0, 0, 0] }],
+  ];
+  it.each(badAxes)("refuses %s", (_name, change) => {
+    expect(faultOf(withRotation(change))).toBe("rotation axes unusable");
+  });
+
+  const badLaws: ReadonlyArray<readonly [string, Partial<BodyRotationDto>]> = [
+    ["a clock period of 0", { clock_period_s: 0 }],
+    ["a spin rate below 0", { initial_rate_rad_s: -7.292115e-5 }],
+    ["an obliquity past π", { obliquity_rad: 4 }],
+    ["a phase that is not finite", { phase_at_epoch_rad: Number.NaN }],
+  ];
+  it.each(badLaws)("refuses a rotation law with %s", (_name, change) => {
+    expect(faultOf(withRotation(change))).toBe("rotation law unusable");
+  });
+
+  it("reads a body that never locks, one that locks beyond the clock, and one within it", () => {
+    const at = { seconds: 946_728_000, nanos: 0 };
+    const lockOf = (change: Partial<BodyRotationDto>) => {
+      const rotation = earthOf(withRotation(change)).rotation;
+      return rotation.state === "ok" ? rotation.value.lock : null;
+    };
+
+    expect([
+      lockOf({}),
+      lockOf({ locking_age_s: 2e17 }),
+      lockOf({ locking_age_s: 1.44e17 + 946_728_000, locks_at: at }),
+    ]).toEqual([
+      { kind: "never" },
+      { kind: "outside_clock", lockingAgeS: 2e17 },
+      { kind: "in_clock", lockingAgeS: 1.44e17 + 946_728_000, locksAt: at },
+    ]);
+  });
+
+  it("refuses a locking age of 0", () => {
+    expect(faultOf(withRotation({ locking_age_s: 0 }))).toBe("rotation law unusable");
+  });
+
+  it("refuses a lock in the window without a locking age", () => {
+    expect(faultOf(withRotation({ locks_at: { seconds: 1e9, nanos: 0 } }))).toBe(
+      "rotation lock unusable",
+    );
+  });
+
+  const badFigures: ReadonlyArray<readonly [string, Partial<BodyFigureDto>]> = [
+    ["a polar radius above the equatorial", { polar_radius_m: 6_400_000 }],
+    ["a radius of 0", { equatorial_radius_m: 0 }],
+    ["a pole that is not unit", { pole: [0, 0, 2] }],
+    ["a moment of inertia factor above a uniform sphere's", { moment_of_inertia_factor: 0.5 }],
+  ];
+  it.each(badFigures)("refuses a figure with %s", (_name, change) => {
+    expect(faultOf(withFigure(change))).toBe("figure unusable");
+  });
+
+  const badPhotometry: ReadonlyArray<readonly [string, Partial<BodyPhotometryDto>]> = [
+    ["a geometric albedo of 0", { geometric_albedo: { b: 0.263, v: 0, r: 0.21 } }],
+    ["an exponent below 0", { phase_exponent: { b: 1, v: -1, r: 1 } }],
+    ["a Lommel–Seeliger share above 1", { lunar_lambert_share: 1.5 }],
+    ["a Bond albedo of 1", { bond_albedo: 1 }],
+    ["a stated ratio that is not finite", { bond_ratio: Number.POSITIVE_INFINITY }],
+  ];
+  it.each(badPhotometry)("refuses a photometry with %s", (_name, change) => {
+    expect(faultOf(withPhotometry(change))).toBe("photometry unusable");
   });
 });

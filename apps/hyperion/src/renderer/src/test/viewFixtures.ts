@@ -141,6 +141,7 @@ export function aBody(overrides: Partial<ViewBody> = {}): ViewBody {
     centreM,
     retarded: staticRetarded(centreM),
     rotation: null,
+    appearance: null,
     symbol: bodyKindSymbol("planet"),
     orbitNormal: null,
     ...overrides,

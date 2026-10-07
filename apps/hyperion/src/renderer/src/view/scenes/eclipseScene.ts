@@ -260,6 +260,7 @@ function bodyAt(
     centreM,
     retarded,
     rotation: null,
+    appearance: null,
     symbol: bodyKindSymbol(kind),
     orbitNormal: kind === "star" ? null : vec3(0, 0, 1),
   };

@@ -235,7 +235,7 @@ function centred(value: number, periodS: number): number {
  * @throws RangeError for a time whose seconds are not a safe integer or whose nanoseconds are not a
  *   whole number below 10⁹.
  */
-function fractionOfPeriod(time: UniverseTime, periodS: number): number {
+export function fractionOfPeriod(time: UniverseTime, periodS: number): number {
   if (!Number.isSafeInteger(time.seconds)) {
     throw new RangeError(`${String(time.seconds)} s is not a universe time's whole seconds`);
   }

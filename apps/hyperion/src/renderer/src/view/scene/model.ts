@@ -8,6 +8,7 @@ import type {
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
+import type { WireAppearance } from "../appearance/fromWire";
 import {
   BODY_MIN_SIZE_CLASS,
   CONTACT_SIZE_CLASS,
@@ -74,7 +75,10 @@ export interface ViewBody {
   readonly kind: ViewBodyKind;
   /** Its designation as the view labels it. */
   readonly designation: string;
-  /** Its (equatorial) radius, m. */
+  /**
+   * Its equatorial radius, m: a server body's figure's a where plan 14 sends a figure, its mean
+   * radius where it sends only the bulk (a sphere), and 0 where no radius is granted.
+   */
   readonly radiusM: number;
   /** Its Hill radius at pericentre, m, or `null` where it is not known. */
   readonly hillRadiusM: number | null;
@@ -87,8 +91,20 @@ export interface ViewBody {
    * eclipsed.
    */
   readonly retarded: RetardedCentre | null;
-  /** Its rotation from body-fixed to body axes, or `null` where rotation is not modelled. */
+  /**
+   * Its rotation from body-fixed to body axes at the time it is drawn at, or `null` where rotation
+   * is not modelled: a server body's from its rotation section (plan R07, T2.b), at the frame's
+   * time for the ship's local body, drawn at the present, and at its light's emission for every
+   * other, drawn where it is seen.
+   */
   readonly rotation: Rotation3 | null;
+  /**
+   * How it is shaded where the photorealistic style lights it (plan R07, T2.b): a server body's
+   * figure, photometry and labels from plan 14's sections (`heldAppearanceOf`), or `null`, as for
+   * a star and a kept scene's body, when a lit body is a sphere of {@link ViewBody.radiusM} with the
+   * provisional photometry, labelled (Design note 5).
+   */
+  readonly appearance: WireAppearance | null;
   /**
    * The unit normal of its orbit, along the galactic axes, which stands for its pole while its
    * rotation is not modelled (Design note 14); `null` where it has no orbit drawn from elements,

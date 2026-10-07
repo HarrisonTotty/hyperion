@@ -8,6 +8,7 @@ const WIRE: WireAppearance = {
   photometry: PROVISIONAL_PHOTOMETRY,
   figure: { equatorialRadiusM: 6.4e6, polarRadiusM: 6.4e6, pole: null },
   labels: ["BODY PHOTOMETRY: NOT YET MODELLED"],
+  bondRatioFinding: null,
 };
 
 describe("bodyAppearance", () => {

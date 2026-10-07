@@ -40,12 +40,20 @@ import type {
 import { barycentreAt } from "../../lib/scene/place";
 import { bodySymbol } from "../../lib/system/bodySymbols";
 import { orbitNormal } from "../../lib/system/hierarchy";
-import type { SystemBody } from "../../lib/system/model";
+import type { Section, SystemBody, SystemBodyRotation } from "../../lib/system/model";
+import { bodyFixedAxesAt } from "../../lib/system/rotation";
 import { bodyDesignation } from "../../lib/system/wire";
+import { heldAppearanceOf, reportBondRatioFinding } from "../appearance/fromWire";
 import type { CameraPose, CraftId } from "../camera/pose";
 import { IDENTITY_QUATERNION, lookAlong } from "../camera/quaternion";
-import { galacticTranslated, type ViewPosition } from "../coords/position";
+import { type FrameOrigins, galacticTranslated, type ViewPosition } from "../coords/position";
 import { frameOrigin } from "../coords/relative";
+import {
+  IDENTITY_ROTATION,
+  type Rotation3,
+  rotateToBody,
+  rotation3FromRows,
+} from "../coords/rotation";
 import { TEST_HULL } from "./hull";
 import {
   bodyKindSymbol,
@@ -131,6 +139,22 @@ export function serverSceneAtFrame(source: ServerSceneSource, nowMs: number): Vi
   return viewSceneFromServer(source.model, frame, source.place);
 }
 
+/**
+ * Reports each of the scene's bodies whose stated p_V q_V ÷ A_Bond departs from its law's by more
+ * than 5%, once a body and finding (`reportBondRatioFinding`; R07 Design note 5).
+ *
+ * @remarks
+ * A side effect, `console.warn`: the drawing loop calls it, never a render.
+ */
+export function reportBondRatioFindings(scene: ViewScene): void {
+  for (const body of scene.bodies) {
+    const finding = body.appearance?.bondRatioFinding ?? null;
+    if (finding !== null) {
+      reportBondRatioFinding(body.designation, finding);
+    }
+  }
+}
+
 /** The view's kind of a body of plan 14's, or `null` for a population, which is not a point. */
 function viewKind(body: SystemBody): ViewBodyKind | null {
   let kind: ViewBodyKind | null;
@@ -193,6 +217,23 @@ function parentOf(
     }
   }
   return null;
+}
+
+/**
+ * A body's rotation from body-fixed to body axes at `time` from its rotation section, through
+ * `rotation3FromRows` (decision-p14-phase-j), or `null` where the section is not `ok`.
+ *
+ * @remarks
+ * The rows are the transpose of the simulation's `FrameRotation` rows (meridian, east, pole): the
+ * body-fixed axes are R's columns, as R02's `BodyFixedRotation` holds them. `toSystemBodiesModel`
+ * accepted only axes whose turn by any W passes the check.
+ */
+function rotationAt(section: Section<SystemBodyRotation>, time: UniverseTime): Rotation3 | null {
+  if (section.state !== "ok") {
+    return null;
+  }
+  const { meridian: x, east: y, pole: z } = bodyFixedAxesAt(section.value, time);
+  return rotation3FromRows([vec3(x.x, y.x, z.x), vec3(x.y, y.y, z.y), vec3(x.z, y.z, z.z)]);
 }
 
 /**
@@ -303,7 +344,10 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * its `apparentM`; each is lit from its retarded centre (`ViewBody.retarded`), its `emittedM` with
  * its velocity then and its light time, the local body's included, and a contact from none. The
  * camera's frame selection measures to these drawn centres (Design note 6, as amended), while `sceneAt` chooses the local body on geometric positions. A body's rotation
- * is not modelled yet (Design note 14): its pole is its orbit's normal. Rings are drawn
+ * is its rotation section's law at the time it is drawn at (R07.T2.b), the frame's for the local
+ * body and its light's emission for every other, and `null` without the section, when its pole
+ * stands as its orbit's normal (Design note 14); its figure and photometry are its sections'
+ * (`heldAppearanceOf`, made once a record), and its radius its figure's equatorial one. Rings are drawn
  * about their planet, in its orbital plane (plan 14's convention for this generator version);
  * orbits are every placed planet's and moon's about the body or star it orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
  * The ship stand-in is the own ship, in the system frame at the observer's present position.
@@ -337,6 +381,7 @@ export function viewSceneFromServer(
       centreM: seen.apparentM,
       retarded: seenRetarded(seen),
       rotation: null,
+      appearance: null,
       orbitNormal: null,
       symbol: bodyKindSymbol("star"),
     });
@@ -349,6 +394,12 @@ export function viewSceneFromServer(
     }
     let centreM: Vec3;
     let retarded: RetardedCentre | null;
+    // The time it is drawn at, which its rotation is taken at: the present for the local body, the
+    // light's emission for every other body, drawn where it is seen. The local body's surface the
+    // camera sees left it a light time before, which turns it by about v_eq ÷ c as seen, whatever
+    // the distance: 1.6 µrad for an Earth, 42 µrad for a Jupiter, under a pixel but in a field
+    // narrower than about 4.6° across 1,920 px on a fast giant.
+    let drawnAt: UniverseTime;
     switch (seen.kind) {
       case "placed":
         // The local body is drawn at the present, but lit, like every body, at its retarded time:
@@ -356,22 +407,26 @@ export function viewSceneFromServer(
         // included"; R07.T10.a, ruled by the orchestrator).
         centreM = seen.id === frame.localBody ? seen.geometricM : seen.apparentM;
         retarded = seenRetarded(seen);
+        drawnAt = seen.id === frame.localBody ? frame.time : seen.emitted;
         break;
       case "contact":
         centreM = seen.apparentM;
         retarded = null;
+        drawnAt = seen.emitted;
         break;
     }
+    const appearance = heldAppearanceOf(record);
     bodies.push({
       id: seen.id,
       parent: parentOf(record, systemId, records),
       kind,
       designation: bodyDesignation(place.designation, record.bodyIndex),
-      radiusM: record.bulk.state === "ok" ? record.bulk.value.radiusM : 0,
+      radiusM: appearance.figure?.equatorialRadiusM ?? 0,
       hillRadiusM: seen.kind === "placed" ? seen.hillRadiusM : null,
       centreM,
       retarded,
-      rotation: null,
+      rotation: rotationAt(record.rotation, drawnAt),
+      appearance,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,
       symbol: symbolOf(record, kind),
     });
@@ -456,20 +511,32 @@ export function viewSceneFromServer(
   };
 }
 
+/**
+ * A position in its body's non-rotating frame where it is held in the body's fixed one: turned by
+ * the body's rotation as the scene holds it (none, where the rotation is not modelled).
+ */
+function inBodyFrame(position: ViewPosition, origins: FrameOrigins): ViewPosition {
+  if (position.kind !== "body_fixed") {
+    return position;
+  }
+  const rotation = origins.bodyFixedRotation(position.body) ?? IDENTITY_ROTATION;
+  return { kind: "body", body: position.body, m: rotateToBody(rotation, position.m) };
+}
+
 /** A view's position as the scene's camera report states it. */
-function scenePositionOf(position: ViewPosition): ScenePosition {
+function scenePositionOf(position: ViewPosition, origins: FrameOrigins): ScenePosition {
+  const held = inBodyFrame(position, origins);
   let result: ScenePosition;
-  switch (position.kind) {
+  switch (held.kind) {
     case "galactic":
-      result = { kind: "galactic", position: position.position };
+      result = { kind: "galactic", position: held.position };
       break;
     case "system":
-      result = { kind: "system", system: position.system, offsetM: position.m };
+      result = { kind: "system", system: held.system, offsetM: held.m };
       break;
     case "body":
     case "body_fixed":
-      // No scene body has a rotation yet, so its fixed axes are its frame's (Design note 14).
-      result = { kind: "body", body: position.body, offsetM: position.m };
+      result = { kind: "body", body: held.body, offsetM: held.m };
       break;
   }
   return result;
@@ -488,10 +555,16 @@ function scenePositionOf(position: ViewPosition): ScenePosition {
  */
 export function cameraKinematics(pose: CameraPose, scene: ViewScene): SceneKinematics {
   const origins = sceneOrigins(scene);
-  const origin = frameOrigin(pose.frame, origins);
+  // The camera's offset is along the galactic axes, so a craft held in a body's fixed frame is
+  // first put in the body's non-rotating one.
+  const origin = inBodyFrame(frameOrigin(pose.frame, origins), origins);
   const position: ViewPosition =
     origin.kind === "galactic"
       ? { kind: "galactic", position: galacticTranslated(origin.position, pose.positionM) }
       : { ...origin, m: add(origin.m, pose.positionM) };
-  return { position: scenePositionOf(position), velocityMPerS: vec3(0, 0, 0), time: scene.time };
+  return {
+    position: scenePositionOf(position, origins),
+    velocityMPerS: vec3(0, 0, 0),
+    time: scene.time,
+  };
 }

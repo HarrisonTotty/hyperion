@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { stepRun, startServerRun, type ViewRun } from "../../displays/view/viewRun";
 import { bodyPositionM, layoutBodies } from "../../displays/system/bodyMap";
-import { add, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
+import { add, dot, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import type { SceneFrame } from "../../lib/scene/apparent";
 import { CAMERA_REPORT_INTERVAL_MS, CameraReporter } from "../../lib/scene/cameraReports";
 import { spanSeconds } from "../../lib/scene/lightTime";
@@ -32,9 +32,14 @@ import type { CameraPose } from "../camera/pose";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { sceneFrameFor, viewId } from "../camera/state";
 import { galacticTranslated } from "../coords/position";
+import { rotateToBody } from "../coords/rotation";
+import { bodyFixedAxesAt } from "../../lib/system/rotation";
+import type { SystemBody } from "../../lib/system/model";
+import { heldAppearanceOf, PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import { TEST_HULL } from "./hull";
 import {
   cameraKinematics,
+  reportBondRatioFindings,
   SERVER_OWN_SHIP,
   serverSceneAtFrame,
   serverSceneAtPush,
@@ -456,6 +461,171 @@ describe("the server's scene as the view draws it", () => {
   });
 });
 
+/** The ship 1 au out in the slice's system, where its Earth is not the local body. */
+function stateInSystem(seconds = 3_000): SceneStateDto {
+  return { ...stateNearEarth(seconds), ship: shipInSystem(seconds) };
+}
+
+/** A record of the scene's system, by ID. */
+function recordOf(model: ReturnType<typeof sceneModelOf>, id: string): SystemBody {
+  const record = model.system?.bodies.bodies.find((body) => body.id === id);
+  if (record === undefined) {
+    throw new Error(`the fixture's scene holds no record ${id}`);
+  }
+  return record;
+}
+
+/** The record's body-fixed axes at `time`, from its rotation section. */
+function axesAt(record: SystemBody, time: Parameters<typeof bodyFixedAxesAt>[1]) {
+  if (record.rotation.state !== "ok") {
+    throw new Error(`the fixture's ${record.id} has a rotation section`);
+  }
+  return bodyFixedAxesAt(record.rotation.value, time);
+}
+
+/** The body-fixed axes a view body's rotation holds, each in the body frame, or `null`. */
+function heldAxes(scene: ViewScene, id: string) {
+  const rotation = viewBodyOf(scene, id).rotation;
+  return rotation === null
+    ? null
+    : {
+        meridian: rotateToBody(rotation, vec3(1, 0, 0)),
+        east: rotateToBody(rotation, vec3(0, 1, 0)),
+        pole: rotateToBody(rotation, vec3(0, 0, 1)),
+      };
+}
+
+describe("a server body's rotation and shading from plan 14's sections (R07.T2.b)", () => {
+  it("turns the ship's local body by its rotation law at the frame's time, drawn at the present", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const frame = shipFrameOf(model);
+    expect(frame.localBody).toBe(FIXTURE_EARTH);
+    expect(heldAxes(viewSceneOf(model, frame), FIXTURE_EARTH)).toEqual(
+      axesAt(recordOf(model, FIXTURE_EARTH), frame.time),
+    );
+  });
+
+  it("turns every other body by its law when the light seen left it, where it is drawn", () => {
+    const model = sceneModelOf(stateInSystem());
+    const frame = shipFrameOf(model);
+    const earth = frame.bodies.find((each) => each.id === FIXTURE_EARTH);
+    if (earth?.kind !== "placed") {
+      throw new Error("the fixture's frame places its Earth");
+    }
+    const record = recordOf(model, FIXTURE_EARTH);
+    const held = heldAxes(viewSceneOf(model, frame), FIXTURE_EARTH);
+    expect(frame.localBody).not.toBe(FIXTURE_EARTH);
+    expect(held).toEqual(axesAt(record, earth.emitted));
+  });
+
+  it("turns it the light time's spin short of the present", () => {
+    const model = sceneModelOf(stateInSystem());
+    const frame = shipFrameOf(model);
+    const earth = frame.bodies.find((each) => each.id === FIXTURE_EARTH);
+    const record = recordOf(model, FIXTURE_EARTH);
+    if (earth?.kind !== "placed" || record.rotation.state !== "ok") {
+      throw new Error("the fixture's frame places its Earth, which turns");
+    }
+    const held = heldAxes(viewSceneOf(model, frame), FIXTURE_EARTH)?.meridian ?? vec3(0, 0, 0);
+    const turnedRad = Math.acos(dot(held, axesAt(record, frame.time).meridian));
+    const spunRad = record.rotation.value.initialRateRadPerS * spanSeconds(earth.lightTime);
+    expect(spunRad).toBeGreaterThan(0.01);
+    expect(turnedRad).toBeCloseTo(spunRad, 9);
+  });
+
+  it("holds the pole along the body-fixed z axis", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const pole = heldAxes(viewSceneOf(model, shipFrameOf(model)), FIXTURE_EARTH)?.pole;
+    const record = recordOf(model, FIXTURE_EARTH);
+    expect(pole).toEqual(record.rotation.state === "ok" ? record.rotation.value.pole : null);
+  });
+
+  it("gives a body without a rotation section, and a star, no rotation", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const scene = viewSceneOf(model, shipFrameOf(model));
+    const star = scene.bodies.find((body) => body.kind === "star");
+    expect([viewBodyOf(scene, FIXTURE_JUPITER).rotation, star?.rotation]).toEqual([null, null]);
+  });
+
+  it("shades a body with its sections' appearance, one object a record across frames", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const first = viewSceneOf(model, shipFrameOf(model));
+    const later = viewSceneOf(model, shipFrameOf(model, { seconds: 3_100, nanos: 0 }));
+    const appearance = viewBodyOf(first, FIXTURE_EARTH).appearance;
+    expect(appearance).toBe(heldAppearanceOf(recordOf(model, FIXTURE_EARTH)));
+    expect(viewBodyOf(later, FIXTURE_EARTH).appearance).toBe(appearance);
+    expect([appearance?.photometry.provenance, appearance?.labels]).toEqual(["modelled", []]);
+  });
+
+  it("draws a body with a figure at its equatorial radius, one without at its mean radius", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const scene = viewSceneOf(model, shipFrameOf(model));
+    const jupiter = recordOf(model, FIXTURE_JUPITER);
+    expect([
+      viewBodyOf(scene, FIXTURE_EARTH).radiusM,
+      viewBodyOf(scene, FIXTURE_JUPITER).radiusM,
+    ]).toEqual([6_378_137, jupiter.bulk.state === "ok" ? jupiter.bulk.value.radiusM : Number.NaN]);
+  });
+
+  it("shades a body without a photometric section with the provisional photometry, labelled", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const appearance = viewBodyOf(
+      viewSceneOf(model, shipFrameOf(model)),
+      FIXTURE_JUPITER,
+    ).appearance;
+    expect([appearance?.photometry, appearance?.labels]).toEqual([
+      PROVISIONAL_PHOTOMETRY,
+      ["BODY PHOTOMETRY: NOT YET MODELLED"],
+    ]);
+  });
+
+  it("reports a body whose stated ratio departs from its law's, once across frames", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = stateNearEarth();
+    const system = state.system;
+    if (system === null) {
+      throw new Error("the fixture's state holds a system");
+    }
+    const earth = system.system.bodies.find((body) => body.id === FIXTURE_EARTH);
+    if (earth?.photometry?.state !== "ok") {
+      throw new Error("the fixture's Earth has a photometric section");
+    }
+    // A ratio three times the Earth's, which no law of its section reaches.
+    const misstated = {
+      ...earth,
+      photometry: { state: "ok" as const, value: { ...earth.photometry.value, bond_ratio: 3 } },
+    };
+    const bodies = system.system.bodies.map((body) =>
+      body.id === FIXTURE_EARTH ? misstated : body,
+    );
+    const model = sceneModelOf({
+      ...state,
+      system: { ...system, system: { ...system.system, bodies } },
+    });
+
+    reportBondRatioFindings(viewSceneOf(model, shipFrameOf(model)));
+    reportBondRatioFindings(viewSceneOf(model, shipFrameOf(model, { seconds: 3_100, nanos: 0 })));
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]?.[0]).toMatch(/^body H7K 4C0RFZ D-7 \/768: .*plan 14's owner$/);
+  });
+
+  it("reports nothing for bodies whose ratios agree with their laws", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const model = sceneModelOf(stateNearEarth());
+
+    reportBondRatioFindings(viewSceneOf(model, shipFrameOf(model)));
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("gives a star no appearance", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const star = viewSceneOf(model, shipFrameOf(model)).bodies.find((body) => body.kind === "star");
+    expect(star?.appearance).toBeNull();
+  });
+});
+
 describe("the view's camera reports", () => {
   it("carry the pose at once on each frame change and at R03's rate otherwise", () => {
     vi.useFakeTimers();
@@ -522,6 +692,43 @@ describe("the view's camera reports", () => {
       kind: "system",
       system: FIXTURE_SYSTEM,
       offsetM: add(shipM, vec3(0, 10, 60)),
+    });
+  });
+
+  it("state a camera held to a craft in a turning body's fixed frame in that body's frame", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const drawn = viewSceneOf(model, shipFrameOf(model));
+    const rotation = viewBodyOf(drawn, FIXTURE_EARTH).rotation;
+    if (rotation === null) {
+      throw new Error("the fixture's Earth turns");
+    }
+    const fixedM = vec3(1e7, 0, 0);
+    const own = drawn.craft.find((craft) => craft.id === SERVER_OWN_SHIP);
+    if (own === undefined) {
+      throw new Error("the fixture's scene has its own ship");
+    }
+    const scene: ViewScene = {
+      ...drawn,
+      craft: [
+        {
+          ...own,
+          pose: { ...own.pose, position: { kind: "body_fixed", body: FIXTURE_EARTH, m: fixedM } },
+        },
+        ...drawn.craft.filter((craft) => craft.id !== SERVER_OWN_SHIP),
+      ],
+    };
+    const report = cameraKinematics(
+      {
+        frame: { kind: "craft", craft: SERVER_OWN_SHIP },
+        positionM: vec3(0, 10, 60),
+        orientation: IDENTITY_QUATERNION,
+      },
+      scene,
+    );
+    expect(report.position).toEqual({
+      kind: "body",
+      body: FIXTURE_EARTH,
+      offsetM: add(rotateToBody(rotation, fixedM), vec3(0, 10, 60)),
     });
   });
 });

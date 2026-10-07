@@ -7,8 +7,9 @@
  * The lights are the scene's host discs, a kept scene's own `hostDiscs` or the held sky's `hosts`,
  * placed at their stars' drawn centres in the frame for the painter's order (decision-r07-t8a,
  * item 1); the host discs are drawn by R06's `HostDiscLayer` where the scene draws them (its
- * apparent placement), the lit bodies are the scene's planets, dwarf planets and moons, spheres of
- * their radius with the provisional photometry (R07.T2.a), each lit by its own lighting frame, its
+ * apparent placement), the lit bodies are the scene's planets, dwarf planets and moons, with their
+ * sections' figure and photometry (R07.T2.b) or, without them, spheres of their radius with the
+ * provisional photometry (R07.T2.a), each lit by its own lighting frame, its
  * stars and the other bodies retarded to the light that reaches it (`lightingFramesOf`, T10.a),
  * and the stars are the wireframe draw list's sprites, the sky's or the interim field's, with the
  * host discs under three pixels.
@@ -20,7 +21,7 @@ import { relativeToCamera } from "../../view/coords/relative";
 import type { Vec3 } from "../../geometry/vec3";
 import {
   type AppearanceLabel,
-  type BodyPhotometry,
+  PROVISIONAL_LABELS,
   PROVISIONAL_PHOTOMETRY,
 } from "../../view/appearance/fromWire";
 import type { LitBodyInput } from "../../view/bodies/draw";
@@ -29,7 +30,7 @@ import { type ProjectionCamera, project, type Viewport } from "../../view/camera
 import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem, FrameSubmission } from "../../view/engine/types";
 import { hostLights, placeLights, sceneHostDiscs } from "../../view/lighting/hostLights";
-import { isLitBody, lightingFramesOf } from "../../view/lighting/retarded";
+import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
 import type { PhotorealFrame } from "../../view/photoreal/renderer";
 import type { MeterMode } from "../../view/post/meter";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
@@ -76,22 +77,36 @@ function starRecord(sprite: WireframeDrawList["sprites"][number]): SpriteRecord 
 }
 
 /**
- * What a scene body is lit with until R07.T2.b reads plan 14's section: the provisional
- * photometry, labelled (Design note 5).
+ * The appearance labels of the bodies a scene's photorealistic frame lights, each once, in the
+ * scene's order: a body's own (none with its photometric section, R07.T2.b), or, with no
+ * appearance, the provisional photometry's (Design note 5).
  */
-const SCENE_BODY_APPEARANCE: {
-  readonly photometry: BodyPhotometry;
-  readonly labels: ReadonlyArray<AppearanceLabel>;
-} = { photometry: PROVISIONAL_PHOTOMETRY, labels: ["BODY PHOTOMETRY: NOT YET MODELLED"] };
-
-/** The appearance labels of the bodies a scene's photorealistic frame lights, each once. */
 export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
-  return scene.bodies.some(isLitBody) ? SCENE_BODY_APPEARANCE.labels : [];
+  const labels = scene.bodies
+    .filter(isLitBody)
+    .flatMap((body) => body.appearance?.labels ?? PROVISIONAL_LABELS);
+  return [...new Set(labels)];
+}
+
+/** A lit body of the scene as the frame lights it, with its rotation where it has one. */
+function litBodyOf({ body, centreM, frame }: LitBodyLighting): LitBodyInput {
+  const id = body.id;
+  const figure = body.appearance?.figure ?? {
+    equatorialRadiusM: body.radiusM,
+    polarRadiusM: body.radiusM,
+    pole: body.rotation === null ? null : rotateToBody(body.rotation, { x: 0, y: 0, z: 1 }),
+  };
+  const photometry = body.appearance?.photometry ?? PROVISIONAL_PHOTOMETRY;
+  return body.rotation === null
+    ? { id, centreM, figure, photometry, lighting: frame }
+    : { id, centreM, figure, photometry, rotation: body.rotation, lighting: frame };
 }
 
 /**
- * The scene's lit bodies from the camera: spheres of their radius, provisional photometry, each
- * lit by its own lighting frame (`lightingFramesOf`).
+ * The scene's lit bodies from the camera, each lit by its own lighting frame (`lightingFramesOf`):
+ * a server body with its sections' figure and photometry (R07.T2.b), and its rotation, which
+ * orients a class map; a body with no appearance, or none with a figure, a sphere of its radius
+ * about its rotation's pole with the provisional photometry.
  *
  * @param discs - The scene's host discs (`sceneHostDiscs`).
  */
@@ -100,17 +115,7 @@ export function litBodiesOf(
   pose: CameraPose,
   discs: ReadonlyArray<HostDiscDto>,
 ): LitBodyInput[] {
-  return lightingFramesOf(scene, pose, discs).map(({ body, centreM, frame }) => ({
-    id: body.id,
-    centreM,
-    figure: {
-      equatorialRadiusM: body.radiusM,
-      polarRadiusM: body.radiusM,
-      pole: body.rotation === null ? null : rotateToBody(body.rotation, { x: 0, y: 0, z: 1 }),
-    },
-    photometry: SCENE_BODY_APPEARANCE.photometry,
-    lighting: frame,
-  }));
+  return lightingFramesOf(scene, pose, discs).map(litBodyOf);
 }
 
 /** The photorealistic frame of a stage's run. */

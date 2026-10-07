@@ -11,11 +11,15 @@
  * Earth mass, so that the readout's `M⊕` is the server's.
  */
 import {
+  type BandsDto,
   type BodyDetailDto,
+  type BodyFigureDto,
   type BodyIdHex,
   type BodyKindDto,
   type BodyOrbitDto,
+  type BodyPhotometryDto,
   type BodyRecordDto,
+  type BodyRotationDto,
   type BodyStateDto,
   type BodySummaryDto,
   type BulkPropertiesDto,
@@ -35,7 +39,8 @@ import {
   type ZoneDto,
 } from "@hyperion/protocol";
 
-import { vec3 } from "../../geometry/vec3";
+import { cross, dot, vec3, type Vec3 } from "../../geometry/vec3";
+import { ROTATION_ORTHONORMAL_TOLERANCE } from "../../view/coords/rotation";
 import { NEAR_PARABOLIC_ECCENTRICITY, type OrbitDrift } from "../orbit";
 import type {
   BodyDetail,
@@ -46,11 +51,16 @@ import type {
   BulkProperties,
   HabitableZone,
   HierarchyNode,
+  JohnsonBands,
   OrbitHost,
   Population,
+  RotationLock,
   Section,
   SystemBodies,
   SystemBody,
+  SystemBodyFigure,
+  SystemBodyPhotometry,
+  SystemBodyRotation,
   SystemModel,
   SystemPlane,
   Zone,
@@ -276,6 +286,176 @@ function toBulk(bulk: BulkPropertiesDto): BulkProperties {
   };
 }
 
+/**
+ * A section that an older server leaves out (plan 14, P14.T46.f): absent, it reads as that server's
+ * `not_modelled`.
+ */
+function toOptionalSection<T, U>(
+  section: SectionDto<T> | undefined,
+  convert: (value: T) => U,
+): Section<U> {
+  return section === undefined ? { state: "not_modelled" } : toSection(section, convert);
+}
+
+function finite(value: number): boolean {
+  return Number.isFinite(value);
+}
+
+function toVec3(components: [number, number, number]): Vec3 {
+  return vec3(components[0], components[1], components[2]);
+}
+
+/**
+ * How far from orthonormal the wire's equator and pole may be: a quarter of the view's
+ * `ROTATION_ORTHONORMAL_TOLERANCE`, so that the axes turned by any W still pass
+ * `rotation3FromRows`, whose departures are at most twice the axes' and rounding.
+ */
+const AXES_ORTHONORMAL_TOLERANCE = ROTATION_ORTHONORMAL_TOLERANCE / 4;
+
+/** Whether a vector is finite and of unit length to {@link AXES_ORTHONORMAL_TOLERANCE}. */
+function unit(v: Vec3): boolean {
+  return (
+    finite(v.x) &&
+    finite(v.y) &&
+    finite(v.z) &&
+    Math.abs(dot(v, v) - 1) <= AXES_ORTHONORMAL_TOLERANCE
+  );
+}
+
+/** Whether two vectors are perpendicular to {@link AXES_ORTHONORMAL_TOLERANCE}. */
+function perpendicular(a: Vec3, b: Vec3): boolean {
+  return Math.abs(dot(a, b)) <= AXES_ORTHONORMAL_TOLERANCE;
+}
+
+/**
+ * A lock as the wire states it, checked: a locking age, positive, wherever a lock's instant is
+ * given.
+ *
+ * @remarks
+ * A lock long before or after the clock window is only compared with the times the client computes
+ * with, which `JSON.parse`'s rounding of its seconds beyond ±(2⁵³ − 1) s cannot reorder, so its
+ * instant need only be whole seconds and nanoseconds.
+ */
+function toLock(lockingAgeS: number | null, locksAt: UniverseTime | null): RotationLock {
+  if (lockingAgeS === null) {
+    check(locksAt === null, "rotation lock unusable");
+    return { kind: "never" };
+  }
+  check(positive(lockingAgeS), "rotation law unusable");
+  if (locksAt === null) {
+    return { kind: "outside_clock", lockingAgeS };
+  }
+  check(displayableTime(locksAt), "rotation lock unusable");
+  return { kind: "in_clock", lockingAgeS, locksAt };
+}
+
+/**
+ * A rotation law, checked: its node, quarter and pole an orthonormal right-handed triad, its rates,
+ * ages and clock period positive, its angles finite, and a lock's instant with its locking age.
+ */
+function toRotation(rotation: BodyRotationDto): SystemBodyRotation {
+  const pole = toVec3(rotation.pole);
+  const node = toVec3(rotation.equator_node);
+  const quarter = toVec3(rotation.equator_quarter);
+  check(
+    unit(pole) &&
+      unit(node) &&
+      unit(quarter) &&
+      perpendicular(node, quarter) &&
+      perpendicular(node, pole) &&
+      perpendicular(quarter, pole) &&
+      dot(node, cross(quarter, pole)) > 0,
+    "rotation axes unusable",
+  );
+  check(
+    rotation.obliquity_rad >= 0 &&
+      rotation.obliquity_rad <= Math.PI &&
+      positive(rotation.initial_rate_rad_s) &&
+      positive(rotation.locked_rate_rad_s) &&
+      positive(rotation.age_at_epoch_s) &&
+      positive(rotation.clock_period_s) &&
+      [
+        rotation.clock_mean_anomaly_at_epoch_rad,
+        rotation.sub_primary_angle_rad,
+        rotation.phase_at_epoch_rad,
+        rotation.capture_phase_rad,
+      ].every(finite),
+    "rotation law unusable",
+  );
+  return {
+    pole,
+    equatorNode: node,
+    equatorQuarter: quarter,
+    obliquityRad: rotation.obliquity_rad,
+    initialRateRadPerS: rotation.initial_rate_rad_s,
+    lockedRateRadPerS: rotation.locked_rate_rad_s,
+    ageAtEpochS: rotation.age_at_epoch_s,
+    lock: toLock(rotation.locking_age_s, rotation.locks_at),
+    resonance: rotation.resonance,
+    clockPeriodS: rotation.clock_period_s,
+    clockMeanAnomalyAtEpochRad: rotation.clock_mean_anomaly_at_epoch_rad,
+    subPrimaryAngleRad: rotation.sub_primary_angle_rad,
+    phaseAtEpochRad: rotation.phase_at_epoch_rad,
+    capturePhaseRad: rotation.capture_phase_rad,
+  };
+}
+
+/** A figure, checked: 0 < c ≤ a, a flattening in `[0, 1)`, a unit pole, a factor in `(0, 0.4]`. */
+function toFigure(figure: BodyFigureDto): SystemBodyFigure {
+  const pole = toVec3(figure.pole);
+  check(
+    positive(figure.equatorial_radius_m) &&
+      positive(figure.polar_radius_m) &&
+      figure.polar_radius_m <= figure.equatorial_radius_m &&
+      figure.flattening >= 0 &&
+      figure.flattening < 1 &&
+      unit(pole) &&
+      figure.moment_of_inertia_factor > 0 &&
+      figure.moment_of_inertia_factor <= 0.4,
+    "figure unusable",
+  );
+  return {
+    equatorialRadiusM: figure.equatorial_radius_m,
+    polarRadiusM: figure.polar_radius_m,
+    flattening: figure.flattening,
+    pole,
+    momentOfInertiaFactor: figure.moment_of_inertia_factor,
+    law: figure.law,
+    datum: figure.datum,
+  };
+}
+
+function toBands(bands: BandsDto): JohnsonBands {
+  return { b: bands.b, v: bands.v, r: bands.r };
+}
+
+/**
+ * A photometric section, checked: p and s positive in every band, L in `[0, 1]`, a Bond albedo in
+ * `[0, 1)` and a positive stated ratio.
+ */
+function toPhotometry(photometry: BodyPhotometryDto): SystemBodyPhotometry {
+  const p = photometry.geometric_albedo;
+  const s = photometry.phase_exponent;
+  check(
+    [p.b, p.v, p.r, s.b, s.v, s.r].every(positive) &&
+      photometry.lunar_lambert_share >= 0 &&
+      photometry.lunar_lambert_share <= 1 &&
+      photometry.bond_albedo >= 0 &&
+      photometry.bond_albedo < 1 &&
+      positive(photometry.bond_ratio),
+    "photometry unusable",
+  );
+  return {
+    geometricAlbedo: toBands(p),
+    phaseTemplate: photometry.phase_template,
+    phaseExponent: toBands(s),
+    lunarLambertShare: photometry.lunar_lambert_share,
+    bondAlbedo: photometry.bond_albedo,
+    bondRatio: photometry.bond_ratio,
+    provisional: photometry.provisional,
+  };
+}
+
 function toMassMearth(massKg: number): number {
   check(positive(massKg), "mass unusable");
   return massKg / EARTH_MASS_KG;
@@ -414,6 +594,9 @@ function toBody(body: BodySummaryDto, system: SystemIdHex, designation: string):
     rings: toSection(body.rings, toIds),
     population: toSection(body.population, toPopulation),
     bulk: toSection(body.bulk, toBulk),
+    rotation: toOptionalSection(body.rotation, toRotation),
+    figure: toOptionalSection(body.figure, toFigure),
+    photometry: toOptionalSection(body.photometry, toPhotometry),
   };
 }
 

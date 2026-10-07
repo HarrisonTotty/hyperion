@@ -1,4 +1,4 @@
-import type { ResponseBody, SystemIdHex } from "@hyperion/protocol";
+import type { ResponseBody, SceneSystemDto, SystemIdHex } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
@@ -12,7 +12,7 @@ import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
-import { FIXTURE_SYSTEM } from "../../test/planetaryFixture";
+import { FIXTURE_EARTH, FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import {
   anOpenedUniverse,
   aStellarBrief,
@@ -895,8 +895,9 @@ async function sceneArrives(
   socket: FakeWebSocket,
   system: SystemIdHex = FIXTURE_SYSTEM,
   stated: "place" | "no_place" = "place",
+  sceneSystem: SceneSystemDto = sliceSceneSystem(),
 ): Promise<void> {
-  const { place: _place, ...withoutPlace } = sliceSceneSystem();
+  const { place: _place, ...withoutPlace } = sceneSystem;
   const answer: ResponseBody = {
     kind: "subscribe",
     subscription: 5,
@@ -905,7 +906,7 @@ async function sceneArrives(
       sequence: 0,
       clock: sceneClock(3_000),
       ship: shipInSystem(3_000),
-      system: stated === "place" ? sliceSceneSystem() : withoutPlace,
+      system: stated === "place" ? sceneSystem : withoutPlace,
       tidal_radius_m: SCENE_TIDAL_RADIUS_M,
       craft: [],
     },
@@ -938,6 +939,38 @@ describe("the VIEW display's server scene", () => {
       screen.getByText("SCENE NOT AVAILABLE: no universe open"),
       labelBlock(),
     ]).toEqual(["true", expect.anything(), expect.stringMatching(/SCENE.*PRECISION TEST/)]);
+  });
+
+  it("reports a body whose stated photometric ratio departs from its law's, from its drawing loop", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const slice = sliceSceneSystem();
+    const earth = slice.system.bodies.find((body) => body.id === FIXTURE_EARTH);
+    if (earth?.photometry?.state !== "ok") {
+      throw new Error("the fixture's Earth has a photometric section");
+    }
+    // A ratio four times the Earth's, which no law of its section reaches.
+    const misstated = {
+      ...earth,
+      photometry: { state: "ok" as const, value: { ...earth.photometry.value, bond_ratio: 4 } },
+    };
+    const sceneSystem: SceneSystemDto = {
+      ...slice,
+      system: {
+        ...slice.system,
+        bodies: slice.system.bodies.map((body) => (body.id === FIXTURE_EARTH ? misstated : body)),
+      },
+    };
+    const findings = () =>
+      warn.mock.calls.filter(([message]) => String(message).includes("plan 14's owner"));
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket, FIXTURE_SYSTEM, "place", sceneSystem);
+    await settle();
+    view.advance(300);
+    await settle();
+    view.advance(300);
+    expect(findings()).toHaveLength(1);
+    expect(String(findings()[0]?.[0])).toMatch(/^body H7K 4C0RFZ D-7 \/768: /);
   });
 
   it("draws the server's scene once it arrives, and reports its camera", async () => {

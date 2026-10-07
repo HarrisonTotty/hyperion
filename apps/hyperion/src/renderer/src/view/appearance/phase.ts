@@ -11,6 +11,7 @@
 import type { Rgb } from "../photometry/toneCurve";
 import {
   PHASE_F_CLAMP,
+  phaseFactor,
   phaseFactorFromTable,
   phaseFactorTableOf,
   type PhaseTemplateId,
@@ -28,6 +29,37 @@ export function discIntegratedPhase(law: PhotometricLaw, phaseRad: number): Rgb 
   const [r, g, b] = phaseFactorFromTable(phaseFactorTableOf(law), phaseRad);
   const shape = shapePhase(law.lommelSeeligerShare, phaseRad);
   return [r * shape, g * shape, b * shape];
+}
+
+/** Simpson intervals of {@link lawPhaseIntegral} over [0, π], as `shapes.ts`' `phaseIntegral`. */
+const LAW_INTEGRAL_INTERVALS = 7200;
+
+/**
+ * The law's phase integral per channel, q = 2 ∫₀^π f(α) Φ_shape(α; L) sin α dα, with the exact f
+ * (clamped, and held past the template's range), as plan 14 defines a body's q (P14.T47).
+ *
+ * @remarks
+ * Simpson's rule over 7,200 intervals, as `shapes.ts`' `phaseIntegral`, with each node's f found
+ * once for the three channels. The table the shader reads interpolates f, which moves q by about
+ * 10⁻⁴ ({@link discIntegratedPhase}).
+ */
+export function lawPhaseIntegral(law: PhotometricLaw): Rgb {
+  const n = LAW_INTEGRAL_INTERVALS;
+  const h = Math.PI / n;
+  const sums: [number, number, number] = [0, 0, 0];
+  for (let i = 0; i <= n; i += 1) {
+    const alpha = i * h;
+    const weight =
+      (i === 0 || i === n ? 1 : i % 2 === 1 ? 4 : 2) *
+      shapePhase(law.lommelSeeligerShare, alpha) *
+      Math.sin(alpha);
+    const f = phaseFactor(law, alpha);
+    sums[0] += weight * f[0];
+    sums[1] += weight * f[1];
+    sums[2] += weight * f[2];
+  }
+  const scale = (2 * h) / 3;
+  return [sums[0] * scale, sums[1] * scale, sums[2] * scale];
 }
 
 /** The law's geometric albedo per channel: p = A [L + ⅔(1 − L)], since f(0) = 1. */

@@ -65,6 +65,7 @@ import {
 } from "../../view/photometry/exposure";
 import {
   cameraKinematics,
+  reportBondRatioFindings,
   serverSceneAtFrame,
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
@@ -843,6 +844,8 @@ function ViewStage({
       const reading = auto.step(drawer?.takeHistogram(), dtS);
       if (run.source.kind === "server" && current !== null) {
         current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
+        // Here in the loop, not in the render that made the first scene: it logs.
+        reportBondRatioFindings(run.scene);
       }
       if (drawer !== null) {
         if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
