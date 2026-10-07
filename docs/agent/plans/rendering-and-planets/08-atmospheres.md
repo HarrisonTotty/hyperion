@@ -1395,6 +1395,8 @@ altitude, with a blend band. Tests (no GPU):
 
 - the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges;
 - R05.T12.e's quadrature gate holds for the widened march, at one sun and at `SKY_SUN_CAP`;
+- the sky-view table's interpolation across the limb, from cameras at 60–100 km, against the march
+  at the same pixels, recorded with the blend band's altitudes;
 - the limb falls to zero outside the top;
 - a body's atmosphere is drawn at `apparentM`, and only the ship's local body at `geometricM`,
   including when a free camera sits inside another body's Hill sphere.

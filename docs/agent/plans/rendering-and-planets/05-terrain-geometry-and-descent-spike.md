@@ -952,10 +952,12 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     the ground or a limb's tangent point), not evenly. A ray from a camera inside the atmosphere
     that falls to its lowest point and climbs out again places its camera side toward the camera
     instead, since the view's own attenuation puts that side's light there (addendum A). The counts
-    are those above, and each term's density is evaluated once a sample (R05.T12.e). Even steps
-    under-sample the aerosol's 1.2 km scale height at the dense end. A 100 km vertical ray at 30–32
-    even steps undercounts its column by about 24%, and an `f64` model puts the sky from the ground
-    up to 28% off and the disc from orbit up to 7%.
+    are those above, except the high setting's sky view, which takes 75 steps (addendum B: from
+    60–100 km, a limb ray's narrow source at its tangent point needs them), and each term's density
+    is evaluated once a sample (R05.T12.e). Even steps under-sample the aerosol's 1.2 km scale
+    height at the dense end. A 100 km vertical ray at 30–32 even steps undercounts its column by
+    about 24%, and an `f64` model puts the sky from the ground up to 28% off and the disc from orbit
+    up to 7%.
 
 17. **The spike's lit view is not a render style.** R07 owns the photorealistic style, its
     full-screen AgX pass, the histogram and bloom; R02 owns the AgX function itself, `toneCurve`
@@ -1894,10 +1896,10 @@ camera, t_k = t_start + L_side·(k ÷ n_side)² (lane C's V1, adopted in addendu
 throughput · S · Δt · g(x) per channel, with x = σ_t·Δt and g(x) = (1 − e^(−x)) ÷ x, computed as 1 −
 x·(1/2 − x/6) below x = 0.01 and directly from 0.01 up. The helper is in `common.wgsl`, and the
 step's transmittance stays e^(−x). One WGSL helper and one TypeScript twin hold the rule. Another
-placement may replace it only if it passes the gate below at no more steps. High keeps 30 sky-view
-and 32 march steps; low keeps 16 and 16, with the march at half resolution. A count rises only if a
-gate requires it, to the least that passes, and the task refers back above 45 (sky view) or 48
-(march).
+placement may replace it only if it passes the gate below at no more steps. High takes 75 sky-view
+steps (addendum B of `decision-r05-high-atmosphere.md`) and keeps 32 march steps; low keeps 16 and
+16, with the march at half resolution. A count rises only if a gate requires it, to the least that
+passes, and the task refers back above 90 (sky view) or 48 (march).
 
 - Files:
   - `view/atmosphere/marchSteps.ts` and its test;
@@ -1914,7 +1916,11 @@ gate requires it, to the least that passes, and the task refers back above 45 (s
       beyond 32 km from 20 and 60 km; and, near level, from 0.5–5 km to terrain at 40–150 km. Over
       its sky rays: from 2 m, 1 km, 10 km and 50 km; and, from cameras at 0.5–50 km, the band
       between the local and the visible horizon (0.2, 0.5, 0.8 and 0.98 of the dip, and 0.01° either
-      side of the horizontal) and rays 0.01°, 0.1°, 0.5° and 2° past the visible horizon;
+      side of the horizontal) and rays 0.01°, 0.1°, 0.5° and 2° past the visible horizon; and, from
+      cameras at 60, 80 and 99.999 km: limb rays at tangent heights of 0.84, 2.5, 8.4 and 25 km,
+      with the sun at 30° and 90° at the tangent point and azimuths 0, 90 and 180°; and the band at
+      0.2, 0.5, 0.8 and 0.98 of the dip, with the sun at 30, 80, 90 and 95° at the camera and
+      azimuths 0 and 180°;
     - e = max over channels of |ΔL| ÷ max(L, 10⁻³ L_max), at most 2%;
     - at most 5% for twilight rays: at the segment's lowest point t\*, the sun more than 80° from
       the zenith and the ray within 10° of the horizon, each by more than 10⁻¹² rad;
@@ -1923,9 +1929,10 @@ gate requires it, to the least that passes, and the task refers back above 45 (s
       Low's worst e over the whole set is no worse than even's, and each family and class where low
       is worse is listed in Risks.
   - **On SwiftShader** (`just test-render`, both variants): the march and the sky view at their
-    setting's counts agree with the same kernels at 1,024 steps, in the same run, within the gate's
-    tolerances plus 1% on high. On low, within the twin's worst e at low's count for the same kernel
-    and class, plus 1%. The 1,024-step references take the stable step factor.
+    setting's counts (and at a frame from 80 km looking at the limb with the sun on its horizon)
+    agree with the same kernels at 1,024 steps, in the same run, within the gate's tolerances plus
+    1% on high. On low, within the twin's worst e at low's count for the same kernel and class, plus
+    1%. The 1,024-step references take the stable step factor.
 - Acceptance:
   - `pnpm --filter hyperion exec vitest run view/atmosphere`, `just check lint` and
     `just test-render` pass;
@@ -1934,9 +1941,9 @@ gate requires it, to the least that passes, and the task refers back above 45 (s
       1,024 steps (2,048 confirming), through the composite: p99 of e ≤ 1% and max ≤ 5%. Even 32/30,
       even 16 and half resolution are recorded beside them;
     - **the timing.** Lane C's 150 s harness, high and low, before (28479b9) and after, in one
-      window. The march at matched clocks is at most 5% slower. The rest of the frame is within 6
-      and 18 ms at p95. Low's atmosphere is no higher than its 3.00 / 3.60 ms before. There is no
-      plateau.
+      window. The march at matched clocks is at most 5% slower. The sky view's p95 at matched clocks
+      is at most 2.6 times its before. The rest of the frame is within 6 and 18 ms at p95. Low's
+      atmosphere is no higher than its 3.00 / 3.60 ms before. There is no plateau.
 - Suggested subject: `fix(atmosphere): R05.T12.e Step the marches toward the dense air`.
 
 ### R05.T13 The spike
@@ -5460,6 +5467,26 @@ medium, sizes, figure)`.
     - _The f32 cancellation._ The 1,024-step reference also exposed an f32 cancellation in (S − S·T)
       ÷ σ_t at tiny optical depths, up to 15% on SwiftShader. The per-frame kernels take a stable
       step factor (T12.e), within 2 × 10⁻⁵, and the multiple-scattering kernel takes it in R08.T6.a.
+  - _Addendum B (2026-10-06)._
+    - _The gap._ The sky view serves cameras up to 100 km, and the gate first stopped at 50 km. From
+      60–100 km, a limb ray falls far below a camera in thin air.
+    - _V1 there._ V1 puts its long steps at the ray's narrow source at t\*: 8.1% at twilight at 30
+      steps (lane C's 72 rays; the decision's model agrees). The band from 60–100 km cameras fails
+      at twilight under every placement at 30: Q 24%, V1 9%.
+    - _The fix._ The high sky view's count rises from 30 to 75 under V1, for a worst of 0.40%
+      ordinary and 3.20% twilight over both families. The pass's p95 goes from about 0.17 to about
+      0.43 ms at light-load clocks, inside the joint row.
+    - _Not taken:_
+      - **switches between V1 and Q.** With density alone they fail at twilight. With the sun's
+        transmittance (Ws) they pass at 45, but a hard switch risks a seam in the twilight sky; Ws
+        is kept as the lever if the sky view's cost must fall;
+      - **importance by the view's opacity,** which fails twilight;
+      - **a split at the shadow's edge,** left to R08.T8;
+      - **counts by the camera's height,** which would save at most 0.26 ms.
+    - _The fallback,_ if the sky view's p95 exceeds 2.6 times its before: the camera side split at
+      its midpoint, with half its steps toward each end (E), at 60 steps (worst 2.71%).
+    - _Open for R08.T8._ The 192 × 108 table's angular resolution across the limb, seen from 60–100
+      km, is unmeasured.
 - **The atmosphere's budget estimate is contradicted (a brainstorm finding, for T19 and R12).**
   - _The measurement._ The brainstorm's 0.5–1 ms for the discrete column, for an RTX 4060-class
     part, compares with:
