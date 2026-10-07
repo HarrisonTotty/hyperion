@@ -1610,6 +1610,10 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   - `just test-slow phase_envelope_bounds_dense_tracks`;
   - `just ci`.
 
+  As built (Risks, "Deviations in T8.m, as built"): the relative age is read against the table's
+  own track lifetimes, not `lifetime_bracket`; three η intervals; each cell widened in relative age
+  by its own spread; runs merged within 0.2 mag; the rows packed (format 1, 375 kB).
+
 - **R06.T8.h The cell cache keyed by magnitude (new; after T8.g).** Decided 2026-10-05
   (`decision-r06-census-cost.md`). Near the Sun every C–E floor is its band's lower edge, so Design
   note 12's mass key makes an entry hold every record of its cell. At 64 MiB the cache then holds
@@ -2348,7 +2352,8 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read
 standard_nodes_match_the_full_build_where_the_tables_are_read
 the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
 the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc
-the_census_is_its_oracle_150_ly_from_the_sun_in_motion`, `just bench -- sky`) and record the
+the_census_is_its_oracle_150_ly_from_the_sun_in_motion phase_envelope_bounds_dense_tracks`,
+`just bench -- sky`) and record the
 figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
 "a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
@@ -5306,6 +5311,159 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     and the walk's `BTreeSet` are order-free. Science check: the pad's fixed point,
     β(|t| + far + offset) ÷ (1 − β), and the walk's pad over the earliest emitted time are
     confirmed. Applied: the first-guess check above.
+- **Deviations in T8.m, as built (2026-10-07).** The phase envelope, as the hierarchy-bound
+  ruling's T8.m block sets it out, with these details. The coordinator approved the storage and
+  the four deviations below on 2026-10-07, after the size measurement, on five conditions, each
+  met:
+  - a versioned, documented format (format 1, below);
+  - its lengths checked against its header in `PhaseEnvelope::fitted`, decoded once, with no
+    allocation per reading;
+  - fit-check and the sim fingerprint cover the packed bytes, and a refit reproduces them;
+  - a test that decodes the table and spot-checks cells against tracks sampled now;
+  - the file under about 400 kB with margin. The fit crate's
+    `the_committed_table_stays_under_its_ceiling` holds it there, so a refit past 400 kB fails
+    before the 500 kB hook and needs a new ruling.
+  - **The size.** At the ruled resolution a cell's row needs some twenty segments even merged
+    within 0.2 mag, since the giant branches climb several magnitudes within the fine bins (a probe
+    of every cell, 2026-10-07). As fixed bins the table would be some 17 MB of text. As merged
+    runs of readable decimal integers it would be 0.9–1.5 MB, over the 500 kB hook, which is never
+    skipped. The one readable option under about 400 kB halves both the mass and the \[Fe/H\]
+    intervals: its mean looseness over bright bins (V < 0) is 0.23 mag against the cells' own rows,
+    and the ruled cells packed are 0.07 mag.
+  - **Format 1** (`sky::phase::FORMAT`, `tables::sky_phase_envelope`). In order:
+    - `FORMAT`;
+    - `DIMENSIONS`: mass nodes 198, \[Fe/H\] nodes 12, η nodes 4, bins 322, distinct rows 3,349,
+      segments 66,112;
+    - `DARK` (`i16::MAX`);
+    - `LIFETIMES`: per node of mass, \[Fe/H\] and η, in that nesting, a `u16` in 10⁻⁴ dex of
+      log₁₀ years below the cap of 2 × 10¹⁰ years, 0 at the cap;
+    - `CELL_ROWS`: per cell (mass, then \[Fe/H\], then η interval), its row among `ROWS`, from 0;
+    - `ROWS`: one distinct row a line, its segments in order of relative age. Each segment is four
+      base64 characters (RFC 4648, no padding) of three bytes: the run of bins it covers (1–255),
+      then its value as a little-endian `i16`, the brightest M<sub>V</sub> of its bins, margin
+      included, in integer millimagnitudes rounded brighter, or `DARK`. A row ends where its runs
+      reach the last bin.
+
+    `PhaseEnvelope::fitted` checks the format, the axes and the decoded counts against
+    `DIMENSIONS`, panics on a mismatch, and decodes once. A reading allocates nothing. The file is
+    375,389 bytes. Fit-check's body hash covers the packed rows, and a refit reproduces them byte
+    for byte. `a_handful_of_cells_are_the_fit_of_todays_tracks` decodes the table and holds three
+    mass intervals' cells, every \[Fe/H\] and η interval, segment for segment to tracks sampled
+    now.
+
+  - **The relative age** is the star's age over the table's own lifetime. That lifetime is the
+    death age of the generator's track at each node (median draws but η), capped at 2 × 10¹⁰
+    years, interpolated linearly in ln L within the star's cell. The fit and the reader take it
+    alike, so no bracket is read.
+    - The ruled `FittedFates::lifetime_bracket` answers only within its η nodes, −3σ to +3σ
+      (±2.4σ above 8 M☉), so not at η = 0 or ±3.5σ, both inside the table's span. It starts at
+      0.741 M☉, refuses changes of route, allocates, and reaches ±1.4% at its 99th percentile
+      below 2.5 M☉ and ±2% in a usable cell (14–20 fine bins).
+    - The lifetime keeps η, which moves it by up to 0.0051 dex at a node.
+    - A star below 0.741 M☉ is bounded as any other. Below 0.1 M☉, and where a track outlives
+      the cap, it is read against the cap, so its relative age never reaches the fine bins.
+  - **The η nodes** are −0.5 ÷ 0.07 (η = 0), −3.5σ, the median and +7σ: three intervals. The
+    brightness envelope's +3.5σ node is merged into [0, 7], which is conservative. It would split
+    only the 2 × 10⁻⁴ of stars above it, whose winds are stronger.
+  - **Runs merged** within 0.2 mag of their brightest (`MERGE_TOLERANCE_MAG`), growing by 0.2 mag a
+    mag fainter than M<sub>V</sub> +10. Only layer A (cap about 11 ly) and the brown dwarfs (2 ly)
+    could list stars that faint. A bright value is at most 0.2009 mag brighter than a bin it holds,
+    beyond the margin, and on average about 0.07 mag.
+  - **A spread in relative age per cell**, set by the slow test's findings (the table widens,
+    never the test). Its first run found 53 stars brighter than the table in 1.2 × 10⁶ checks:
+    - a 6.5 M☉ TP-AGB star at relative age 1.006, where the table was dark. Plan 06's
+      companion-stripped mark moves a death in 5.5–11 M☉ by up to 1.05%;
+    - a 1 M☉ star at η +4.7, which becomes a helium star and lives 1.3% past the table's lifetime.
+      The lifetime kinks between its η nodes at that change of route;
+    - massive stars (58–104 M☉) in the Hertzsprung gap and core helium burning, by up to 1.4 mag.
+      Their brief excursions move by up to 3% of the lifetime over 0.18 dex of \[Fe/H\], and by a
+      bin or two between mass samples;
+    - one 2 M☉ giant 0.026 mag past the margin.
+
+    So within 5.5–11 M☉ each sample is the brighter of the star with and without the stripped
+    mark. Each cell is widened by the least spread of `SPREADS` (0.05% to 6.4% of the relative
+    age) under which each of its samples with neighbours on both sides along an axis is bounded
+    by those two alone, margin included: a test at twice the samples' spacing. The cells' spreads
+    are:
+
+    | Spread | 0.05% | 0.1% | 0.2% | 0.4% | 0.8% | 1.6% | 3.2% | 6.4% |
+    | ------ | ----- | ---- | ---- | ---- | ---- | ---- | ---- | ---- |
+    | Cells  | 4,662 | 5    | 826  | 447  | 391  | 87   | 31   | 52   |
+
+    So 72% of the cells keep the fine bins' resolution, and the rest take their spread's. All 52
+    cells at 6.4% passed no spread: their samples differ by more than the margin at twice their
+    spacing whatever the spread, so they take the largest, and only the slow test holds them. 64 cells shine beyond 1.05 after widening, which the last bin holds.
+
+  - **The slow test**, `phase_envelope_bounds_dense_tracks` (`tests/sky_phase_envelope.rs`, 44 s).
+    It checks 10⁵ single stars, log-uniform in mass over 0.0124–150 M☉, \[Fe/H\] −2.6 to +0.4, an
+    η draw from −7.5 to +7σ and a realised star's other draws, each at 12 ages: a third
+    log-uniform over 10⁴ years to 1.5 × 10¹⁰ years and two thirds in the fine bins.
+    - On the final table no star is brighter than it: no violation in 1.2 × 10⁶ checks, which
+      bounds the rate of violations under the test's sampling below 2.5 × 10⁻⁶ at 95%.
+    - **The margin used** is at most 0.068 mag of the 0.3 mag margin (`MARGIN_MAG`; a 90 M☉
+      star in core helium burning), and 8 of the 1.2 × 10⁶ checks use any of it. That seed is in-sample:
+      its first run set the spreads and the stripped mark's sampling. An independent seed
+      (`0x7a3_1f00_5eed_0002`, the stars' own seeds offset by 9 × 10⁶), run once, used at most
+      0.006 mag.
+  - **The fit.** `hyperion-fit`'s task `sky_phase_envelope` (slow class, with a smoke manifest of
+    the two intervals either side of 0.1 M☉) takes 72 s wall and 266 CPU-s on 4 threads at load
+    4–7 (provisional), for 253,736 samples (each interval sampling its own ends), 197,225 of them
+    tracks. Its fingerprint probes the mass nodes and eleven samples' lifetimes and parts, two of
+    them in the electron-capture window.
+  - **The reader.** `PhaseEnvelope::fitted` copies and decodes the table once. Then:
+    - `brightest(mass, composition, η, ages)` reads the star's cell, its lifetime there, the bins
+      its relative ages span, and a binary search of the cell's segments;
+    - `lifetime(…)` gives the lifetime read;
+    - `sky::testing::phase_envelope()` serves the crate's tests.
+
+    A positive mass outside 0.0124–150 M☉ reads the nearest cell. A NaN or non-positive mass, or a
+    helium excess, reads the table's brightest value, which skips nothing. An empty range of ages,
+    or a NaN end, reads nothing, as the brightness envelope's does. A draw
+    above +7σ (one in 10¹²) is read at +7σ, outside the slow test, as the brightness envelope
+    reads it.
+
+  - `sky::envelope` shares its phase-cutting with this table (`track_parts`, a bit-exact
+    refactor of `enter_track`): `sky_envelope`'s fast refit reproduces its body unchanged.
+  - **Helium excess.** The table is built at ΔY = 0, as `sky_envelope` is, and reads a
+    composition by its clamped Z alone. `tables::helium` (P06.T17) is the identity today, so it
+    bounds every star; the ruled bracket would refuse any ΔY ≠ 0. A star with a helium excess reads
+    the table's brightest value, which skips nothing. When P15.T7 fits `tables::helium`, the table
+    must be refitted with helium-excess nodes. That axis would grow the table past the approved
+    ceiling, so its storage needs a ruling before P15.T7 lands.
+  - **The mass axis.** Format 1 stores no masses. It reads `tables::sky_envelope::MASSES`, checked
+    by count in `fitted()`, by value in `every_cell_of_the_fitted_table_covers_every_bin`, and by
+    the fingerprint's `mass_nodes` probes (count, ends and sum). A refit of `sky_envelope` on new
+    nodes needs a refit of this table.
+  - **Reviews (2026-10-07).** The determinism audit found nothing that moves output, and asked for
+    fingerprint probes inside the electron-capture window and among the 50–110 M☉ stars (6.5, 8
+    and 80 M☉ added) and a window interval in the spot-check (6.4–6.8 M☉ added). The science check
+    found no constant wrong; its doc corrections are applied, and its one finding of looseness is
+    below. The Rust review's must-fixes (a documented panic in `quantize_lifetime`, and discarded
+    `fmt` results) and should-fixes are applied: typed sample and lifetime functions, private
+    cell fields, `pub(crate)` internals, a range-read test, a test of each malformed table, and a
+    NaN lower age or a non-positive mass made safe.
+  - **Deferred corrections, looseness only (reported to main).**
+    - Stars of 1.9–3.3 M☉ at \[Fe/H\] −0.5 to +0.18 leave their main sequence at relative age
+      0.77–0.80, inside the last coarse bin, 0.64–0.80. So a third of their main sequence is bounded
+      1.5–2 mag too bright (a 2.2 M☉ star at M<sub>V</sub> +0.5, listable to about 1,000 ly at cut
+      8, takes a bound listable to about 2,300 ly). Fine bins from 0.75 would cure it, against the
+      ruled 0.8.
+    - Any spread widens a coarse bin by a whole neighbour on each side, about ±25% in relative age,
+      where the spread asks for 0.05–6.4%. Widening each part's ages before binning, rather than
+      the bins, would keep the coarse bins' resolution.
+    - A pre-main sequence is cut into 32 equal parts with no knots, so its first part carries the
+      birthline's brightness: 0.15 M☉ is bounded at M<sub>V</sub> 9.19 to about 11 Myr, some 2 mag
+      looser than the star at 10 Myr. Cutting it at the coarse bins' edges, as the cooling fits are
+      cut, would cure it.
+  - **Not changed.** No generated output moves: `GENERATOR_VERSION` stays 21 and no golden moves.
+    Nothing generated reads the table yet; R06.T8.g will.
+  - **Gates (2026-10-07).** fmt; clippy, native and wasm32-wasip1; `--lib -- sky::phase` and
+    `sky::envelope`; `--lib -- sky::`; the doctests of `sky::phase`; the fit crate's tests;
+    `just fit-check`, fresh; `sky_envelope`'s refit, body unchanged; and the slow test by name.
+    `just ci` is the orchestrator's (Day 2 protocol).
+  - **Open, for T8.g.** The share of records the table lets T8.g reject is unmeasured until T8.g.
+    The widened cells (28%), the 0.2 mag merging, the three η intervals and the deferred
+    looseness above all loosen it against the ruled design, which could not be stored.
 - **Deviations in T9.f, as built (2026-10-07).** The band's march kept, as the band ruling
   (`decision-r06-t9b-band.md`, item 7) sets it out, with these details.
   - **The API** (`sky/band.rs`):

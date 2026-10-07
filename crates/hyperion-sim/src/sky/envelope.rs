@@ -95,8 +95,9 @@ pub const AGE_BINS: usize = 192;
 /// The oldest age the envelope covers, years: older than any star of any galaxy.
 pub const MAX_AGE_YEARS: f64 = 1.5e10;
 
-/// The heaviest mass the cooling fits are read at for the node at 0.1 M☉.
-const COOLING_TOP: f64 = 0.099_999;
+/// The heaviest mass, M☉, the cooling fits are read at for the node at 0.1 M☉, here and in the
+/// phase envelope ([`super::phase`]).
+pub(crate) const COOLING_TOP_MSUN: f64 = 0.099_999;
 
 /// The age bins either side of a bin that [`AGE_SPREAD_FACTOR`] spans.
 #[must_use]
@@ -479,7 +480,7 @@ pub fn raw_node(m: f64, fe_h: &[f64], samples_per_phase: u32) -> [f64; AGE_BINS 
         if m <= MIN_INITIAL_MASS.value() {
             // At 0.1 M☉ itself the tracks and the cooling fits meet, and stars just below it
             // follow the fits, which are brighter there.
-            enter_cooling(m.min(COOLING_TOP), &composition, &mut bins);
+            enter_cooling(m.min(COOLING_TOP_MSUN), &composition, &mut bins);
             if m < MIN_INITIAL_MASS.value() {
                 continue;
             }
@@ -582,9 +583,24 @@ fn magnitude(state: &StarState) -> f64 {
     absolute_v_of_state(state).map_or(f64::INFINITY, Magnitudes::value)
 }
 
-/// Enters a track's life in `bins`: each part's brightest of five points over the part.
+/// Enters a track's life in `bins`: each part's brightest of five points over the part
+/// ([`track_parts`]).
 fn enter_track(track: &Track, samples_per_phase: u32, bins: &mut [f64; AGE_BINS + 1]) {
+    for (a, b, v) in track_parts(track, samples_per_phase) {
+        enter(bins, a, b, v);
+    }
+}
+
+/// A track's life up to [`MAX_AGE_YEARS`] cut into parts, each `(from, to, v)`.
+///
+/// `from` and `to` are ages, years, and `v` the brightest absolute V of five points over the
+/// part, its ends read just inside it in its own segment. Each phase is cut at its knots and into
+/// `samples_per_phase` equal parts; a part where none of the five shines is left out. Shared by
+/// this envelope and the phase envelope ([`super::phase`]), so the two read a track alike.
+#[must_use]
+pub(crate) fn track_parts(track: &Track, samples_per_phase: u32) -> Vec<(f64, f64, f64)> {
     let built = track.built_until().value().min(MAX_AGE_YEARS);
+    let mut parts = Vec::new();
     let mut cuts = Vec::new();
     for (start, end, knots) in track.segment_ages() {
         let end = end.min(built);
@@ -610,10 +626,11 @@ fn enter_track(track: &Track, samples_per_phase: u32, bins: &mut [f64; AGE_BINS 
                 })
                 .fold(f64::INFINITY, f64::min);
             if v.is_finite() {
-                enter(bins, a, b, v);
+                parts.push((a, b, v));
             }
         }
     }
+    parts
 }
 
 /// Enters an object below 0.1 M☉, on plan 06's cooling fits, in `bins`: its magnitude falls with

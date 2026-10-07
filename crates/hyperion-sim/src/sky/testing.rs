@@ -8,6 +8,7 @@ use crate::galaxy::features::centre::testing::milky_way_galaxy;
 use super::census::CellOffsets;
 use super::envelope::BrightnessEnvelope;
 use super::luminosity::LuminosityTables;
+use super::phase::PhaseEnvelope;
 
 /// The fixture's luminosity tables, at the reference time.
 pub(crate) fn milky_way_tables() -> &'static LuminosityTables {
@@ -20,6 +21,13 @@ pub(crate) fn milky_way_tables() -> &'static LuminosityTables {
 pub(crate) fn milky_way_envelope() -> &'static BrightnessEnvelope {
     static ENVELOPE: OnceLock<BrightnessEnvelope> = OnceLock::new();
     ENVELOPE.get_or_init(BrightnessEnvelope::fitted)
+}
+
+/// The phase envelope: the fitted table, which depends on no galaxy, so it costs a copy of the
+/// table.
+pub(crate) fn phase_envelope() -> &'static PhaseEnvelope {
+    static ENVELOPE: OnceLock<PhaseEnvelope> = OnceLock::new();
+    ENVELOPE.get_or_init(PhaseEnvelope::fitted)
 }
 
 /// The fixture's bounds on how far a cell's stars lie from their barycentres.

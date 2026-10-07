@@ -39,6 +39,7 @@ pub mod envelope;
 pub mod eye;
 pub mod limits;
 pub mod luminosity;
+pub mod phase;
 pub mod photometry;
 #[cfg(test)]
 mod testing;

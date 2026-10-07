@@ -44,6 +44,7 @@ pub mod sky_binary_light_d;
 )]
 pub mod sky_binary_light_e;
 pub mod sky_envelope;
+pub mod sky_phase_envelope;
 pub mod star_colour;
 pub mod star_colour_reddening;
 pub mod star_colour_reddening_av02_05;
@@ -169,6 +170,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "sky_envelope",
         revision: 0,
         since_generator_version: 19,
+        provisional: false,
+    },
+    TableInfo {
+        name: "sky_phase_envelope",
+        revision: 0,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {

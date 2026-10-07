@@ -192,6 +192,18 @@ provisional = false
 acceptance = "198 mass nodes × 193 age bins from 9240 tracks; 1856 bins dark; every stored value brighter than the build's by 0.000000 to 0.001000 mag (never fainter, so the table bounds the build); brightest -12.850 mag"
 
 [[table]]
+name = "sky_phase_envelope"
+path = "sky_phase_envelope.rs"
+task = "sky_phase_envelope"
+revision = 0
+inputs_sha256 = "6c383342a33bcc36ac48cfc0f9b749aa8a84a8eed37d8cf0d85110aaa7d0b5fa"
+body_sha256 = "a905eb4a16eadddc5d7383f6b5450bc8cb876b7067c55411714bdb30f7919255"
+fingerprint = [198.0, 0.01240972504160122, 150.0, 3135.200629251452, 0.0, 57.0, 840.6061083037024, 13.026173102302929, 0.0, 135.0, 1836.7577018800384, 10.575633729507718, 0.0, 64.0, 637.2106755136858, 6.267616976433615, 3395.0, 332.0, -48.02438056332567, -5.296648202109787, 2041.0, 378.0, 406.3197030603642, -3.816923123561792, 1538.0, 379.0, 901.9536133131066, -1.6909826094614504, 17489.0, 357.0, -683.5650780518276, -6.151294708685611, 24785.0, 654.0, -2310.0645875150803, -6.9492230464171385, 26689.0, 466.0, -2068.472730743051, -5.96135135577902, 34068.0, 233.0, -993.1117459444654, -8.450988196992652, 36813.0, 232.0, -1248.9196635919998, -9.999264782660214]
+since_generator_version = 21
+provisional = false
+acceptance = "6501 cells × 322 bins (mass intervals 0..197 sampled) from 253736 samples (each interval sampling its own ends), 197225 of them tracks; 4224 of 9504 node lifetimes at the cap; cells by spread [4662, 5, 826, 447, 391, 87, 31, 52] (of [0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064]), 52 of them passing no spread; 3349 distinct rows of 66112 segments; 64 cells lit beyond the fine bins; every stored value brighter than V 10 brighter than its bins, less the margin, by at most 0.2009 mag; brightest -12.850 mag"
+
+[[table]]
 name = "star_colour"
 path = "star_colour.rs"
 task = "star_colour"
