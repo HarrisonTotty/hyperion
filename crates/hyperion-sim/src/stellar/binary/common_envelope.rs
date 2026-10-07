@@ -9,7 +9,12 @@
 //!   giants' cores are what their tracks leave when the envelope goes (`Track::remains_at`). A
 //!   helium giant's carbon–oxygen core at or above the Chandrasekhar mass is no white dwarf: it
 //!   collapses at once, companion-stripped (ruling 129.4c), the ultra-stripped supernova of Tauris,
-//!   Langer and Podsiadlowski (2015); so does one a Roche lobe strips to its core.
+//!   Langer and Podsiadlowski (2015); so does one a Roche lobe strips to its core. A core whose
+//!   helium star has no life left dies at once too (P11.T4.k): a massive early-AGB star stripped
+//!   in the last few thousand years before its own death collapses; a 1–3 M☉ star stripped late
+//!   on its early AGB, whose carbon–oxygen core is past its helium star's `Mc,max` (HPT equation
+//!   89), leaves its carbon–oxygen white dwarf; a non-degenerate core too light to burn helium
+//!   is a helium white dwarf at once.
 //!   Otherwise the cores coalesce where the first filled its lobe, and the product keeps the
 //!   envelope left unbound: the mass `M_f` of equation 77 (with R ∝ M^−x, equations 74–76), by
 //!   Newton's rule as BSE solves it.
@@ -37,7 +42,7 @@ use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::units::{Megayears, SolarMasses, Years};
 
-use super::evolve::{Engine, roche_lobe, track_mass};
+use super::evolve::{Engine, clock_resolution_years, roche_lobe, track_mass};
 use super::rlof::{dynamical, kelvin_helmholtz};
 use super::star::{G, Kind, Member, Path, cooling_origin, moment_of_inertia, positive};
 use super::timeline::{IaPoolChannel, PooledIaEvent, SegmentKind};
@@ -285,8 +290,8 @@ impl Engine {
         for i in 0..2 {
             self.corotate(i);
         }
-        // A bare core at or above the Chandrasekhar mass collapses on the orbit the envelope
-        // left (ruling 129.4c).
+        // A bare core with no life left dies on the orbit the envelope left (ruling 129.4c;
+        // P11.T4.k).
         for (i, collapses) in [(d, donor_collapses), (o, other_collapses)] {
             if collapses && !self.members[i].is_gone() {
                 self.die(i);
@@ -296,12 +301,18 @@ impl Engine {
 
     /// Member `i` as its track leaves it when a common envelope or its Roche lobe removes its
     /// envelope now: a naked helium star on its own track, a white dwarf the binary carries, or
-    /// the member as it was if it has no envelope to lose; with whether the member collapses now
+    /// the member as it was if it has no envelope to lose; with whether the member dies now
     /// ([`Engine::die`], once the caller has set the orbit).
     ///
-    /// A bare core at or above the Chandrasekhar mass collapses now (ruling 129.4c), on the track
-    /// its stripping starts, which dies at once. A pinned primary whose collapse is still to come
-    /// is held at the bare core's state instead (plan 11, design note 16).
+    /// A bare core with no life left ([`Remains::Ended`]) dies now, on the track its stripping
+    /// starts, which dies at once: a core at or above the Chandrasekhar mass collapses (ruling
+    /// 129.4c), and a helium star whose own clock has already ended collapses or becomes its white
+    /// dwarf (P11.T4.k, ruling p11-supernova-pins of 2026-10-06), through `die`'s companion-stripped
+    /// kick or its white dwarf's quiet loss. A pinned primary whose collapse is still to come, or
+    /// due now (a strip that lands on the pin), is held at the bare core's last living state
+    /// instead, until its pin, which collapses it once (plan 11, design note 16; `Engine::run`'s
+    /// backstop).
+    /// No member is placed alive on a track that is a remnant from its own start.
     #[must_use]
     pub(super) fn stripped_member(&self, i: usize) -> (Member, bool) {
         let Some((_, offset)) = self.members[i].track() else {
@@ -334,13 +345,23 @@ impl Engine {
                 }
             }
             Remains::Nothing => return None,
-            Remains::HeliumStar(star) => Member::Track {
-                track: Arc::new(*star),
-                offset: age,
-            },
-            Remains::Collapse {
+            Remains::HeliumStar(star) => {
+                debug_assert!(
+                    !star.is_remnant_from_its_start(),
+                    "a helium star dead from its start is placed alive at {age} yr"
+                );
+                Member::Track {
+                    track: Arc::new(*star),
+                    offset: age,
+                }
+            }
+            Remains::Ended {
                 core, core_radius, ..
-            } if i == 0 && self.pin.is_some_and(|p| p.death.age().value() > age) => {
+            } if i == 0
+                && self.pin.is_some_and(|p| {
+                    p.death.age().value() >= age - clock_resolution_years(age)
+                }) =>
+            {
                 let state = crate::stellar::StarState::new(crate::stellar::StarStateParts {
                     phase: core.phase(),
                     age: core.age(),
@@ -353,7 +374,7 @@ impl Engine {
                 });
                 return Some((Member::Frozen { state, core_radius }, false));
             }
-            Remains::Collapse { track, .. } => {
+            Remains::Ended { track, .. } => {
                 return Some((
                     Member::Track {
                         track: Arc::new(*track),
@@ -807,12 +828,20 @@ impl Engine {
     }
 
     /// Runs a contact pair to its coalescence, which comes after the pair's age where the contact
-    /// outlasts it (see [`Engine::contact`]).
+    /// outlasts it (see [`Engine::contact`]), or to the primary's pin.
     ///
     /// The stars keep their masses and the orbit its separation, and a carried main sequence ages.
     /// The knots run to the coalescence whatever the pair's age, so that they do not depend on it
     /// (`detached::StepLimit`), and over 16 of the longest steps for a contact that never
     /// coalesces (two stars on the cooling fits).
+    ///
+    /// A pin inside the contact stops the knots there, a knot landing on it whatever the age asked
+    /// (P11.T4.k, ruling p11-t4k-faults of 2026-10-06, finding C: before it the contact ran to its
+    /// coalescence past the pin, and the merger's product died at its own later age). The pin is
+    /// acted on ([`Engine::pinned_collapse`]) where it lies before the pair's age; otherwise the
+    /// pair is left in contact, as a contact outlasting the age is. A primary the binary keeps on
+    /// its main sequence then explodes from it at plan 06's age (design note 16, a departure
+    /// recorded in plan 11's Risks).
     pub(super) fn contact_phase(&mut self) {
         let end = if self.contact_until.is_finite() {
             self.contact_until
@@ -821,8 +850,13 @@ impl Engine {
         };
         let steps = 16_u32;
         let start = self.age;
+        let pin = self
+            .pin
+            .map(|pin| pin.death.age().value())
+            .filter(|&at| at > start && at <= end);
         for k in 1..=steps {
             let age = start + (end - start) * f64::from(k) / f64::from(steps);
+            let age = pin.map_or(age, |at| age.min(at));
             for i in 0..2 {
                 let (m, tau) = self.current(i);
                 let tau = match &self.members[i] {
@@ -844,6 +878,16 @@ impl Engine {
                 orbit.set(age, a, e);
             }
             self.age = age;
+            if pin.is_some_and(|at| age >= at) {
+                if age < self.until {
+                    self.contact_until = 0.0;
+                    self.pinned_collapse();
+                    if self.kind == SegmentKind::Contact {
+                        self.begin(self.quiet_kind());
+                    }
+                }
+                return;
+            }
         }
         if self.contact_until > self.until {
             return;

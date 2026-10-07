@@ -37,7 +37,7 @@ use super::super::helium::{self, HeliumStar};
 use super::super::ms::{self, MainSequence};
 use super::super::wind;
 use super::build::{Builder, Entry, Keep, Resolution};
-use super::model::{HeliumCore, Model, early_agb_core};
+use super::model::{HeliumCore, Model, Span, early_agb_core};
 use super::{
     Coordinate, HeliumHook, HeliumTable, MAX_INITIAL_MASS, Track, TrackOptions, reimers_eta,
 };
@@ -385,8 +385,18 @@ impl Track {
     /// - A thermally pulsing AGB star and a helium giant leave the white dwarf of their core:
     ///   carbon–oxygen, or oxygen–neon from a core at the base of the AGB (or a helium star) of
     ///   1.6 M☉ (HPT sections 6.1 and 6.2.1). A helium giant's core at or above the Chandrasekhar
-    ///   mass is no white dwarf: it collapses at once ([`Remains::Collapse`], ruling 129.4c).
+    ///   mass is no white dwarf: it collapses at once ([`Remains::Ended`], ruling 129.4c).
     /// - A main-sequence star, a helium main-sequence star and a remnant have no envelope to lose.
+    ///
+    /// A naked helium star whose track has no life left, a remnant from its own start, is no
+    /// helium star either: it is [`Remains::Ended`] too, with the helium star's last living state
+    /// (P11.T4.k, ruling p11-supernova-pins of 2026-10-06). That is the early AGB's core stripped
+    /// when its helium star's clock ([`HeliumStar::from_early_agb`]) already lies past that star's
+    /// own end: a massive star stripped in the last few thousand years before its own death,
+    /// whose core collapses, or a 1–3 M☉ star stripped late on its early AGB, whose carbon–oxygen
+    /// core is past its helium star's `Mc,max` (HPT equation 89), a carbon–oxygen white dwarf. Or
+    /// it is a non-degenerate core too light to burn helium, a helium white dwarf at once. SSE's
+    /// `hrdiag` turns such a star into its remnant at once.
     #[must_use]
     pub(crate) fn remains_at(
         &self,
@@ -412,13 +422,15 @@ impl Track {
         let mc = point.core_mass.value().min(mass);
         let luminosity = point.luminosity;
         let helium_star = |mass: f64, tau0: f64| {
-            Remains::HeliumStar(Box::new(Self::helium_star_from(
+            let tau0 = tau0.clamp(0.0, 1.0);
+            self.stripped_to(
+                Entry::HeliumMainSequence { mass, tau0 },
+                &LastLiving::helium_main_sequence(SolarMasses::new(mass), tau0),
                 SolarMasses::new(mass),
-                tau0,
-                &self.composition,
+                age,
                 draws,
                 age_max,
-            )))
+            )
         };
         match &segment.model {
             Model::Protostar(_)
@@ -448,17 +460,19 @@ impl Track {
             Model::EarlyAgb { phase, span, .. } => {
                 let (star, clock0) = HeliumStar::from_early_agb(phase, span.at(coord));
                 let mass = SolarMasses::new(star.mass().value().min(mass));
-                Remains::HeliumStar(Box::new(Self::build_from_entry(
+                let last = LastLiving::helium_giant(star.clone(), clock0, mass);
+                self.stripped_to(
                     Entry::HeliumShellBurning {
                         star: Box::new(star),
                         clock0,
                         mass: mass.value(),
                     },
+                    &last,
                     mass,
-                    &self.composition,
+                    age,
                     draws,
                     age_max,
-                )))
+                )
             }
             Model::ThermallyPulsingAgb { .. } => {
                 let oxygen_neon = self.segments[..index].iter().rev().any(|s| {
@@ -517,11 +531,47 @@ impl Track {
             age_max,
         );
         let core = self.structure_at(age, mc);
-        Remains::Collapse {
+        Remains::Ended {
             track: Box::new(track),
             core: core.state,
             core_radius: core.core_radius,
         }
+    }
+
+    /// What [`Track::remains_at`] leaves at `age` when the star's core becomes the naked helium
+    /// star entered at `entry`, of initial mass `initial_mass`, whose last living state is
+    /// `last`: that helium star on its own track from the stripping ([`Remains::HeliumStar`]), or,
+    /// if the track has no life left, a remnant from its own start, [`Remains::Ended`] with that
+    /// state (P11.T4.k).
+    #[must_use]
+    fn stripped_to(
+        &self,
+        entry: Entry,
+        last: &LastLiving,
+        initial_mass: SolarMasses,
+        age: f64,
+        draws: &StarDraws,
+        age_max: Option<f64>,
+    ) -> Remains {
+        let track = Self::build_from_entry(entry, initial_mass, &self.composition, draws, age_max);
+        if !track.is_remnant_from_its_start() {
+            return Remains::HeliumStar(Box::new(track));
+        }
+        let (core, core_radius) = last.structure(&track, age);
+        Remains::Ended {
+            track: Box::new(track),
+            core,
+            core_radius,
+        }
+    }
+
+    /// Whether the track has no living segment: built to its death, and dead at its own start.
+    ///
+    /// Its [`Track::lifetime`] is zero. A helium star stripped past its own end is such a track
+    /// (P11.T4.k).
+    #[must_use]
+    pub(crate) fn is_remnant_from_its_start(&self) -> bool {
+        self.lifetime().is_some_and(|t| t.value() <= 0.0)
     }
 
     /// The age on this track at which the star is at `fraction` (0–1) through the first segment
@@ -653,13 +703,17 @@ pub(crate) enum Remains {
     Nothing,
     /// A naked helium star, whose track starts at the stripping.
     HeliumStar(Box<Track>),
-    /// A bare carbon–oxygen core at or above the Chandrasekhar mass, which is no white dwarf
-    /// (ruling 129.4c): the core collapses now, companion-stripped, as Tauris, Langer and
-    /// Podsiadlowski's (2015) ultra-stripped supernova. `track` is its helium-star track from the
-    /// stripping, which dies at its start with plan 06's remnant; `core` is the core's state at
-    /// the stripping, its last living one, and `core_radius` its structure's core radius there
-    /// (P11.T4.g).
-    Collapse {
+    /// A bare core with no life left, which dies now (SSE's `hrdiag`, at its next call).
+    ///
+    /// It is a carbon–oxygen core at or above the Chandrasekhar mass, which is no white dwarf and
+    /// collapses, companion-stripped, as Tauris, Langer and Podsiadlowski's (2015) ultra-stripped
+    /// supernova (ruling 129.4c); or a naked helium star whose own clock has already ended at the
+    /// stripping, which collapses or becomes its white dwarf (P11.T4.k, ruling p11-supernova-pins
+    /// of 2026-10-06). `track` is its helium-star track from the stripping, which dies at its
+    /// start and holds its own end, plan 06's laws' remnant; `core` is the core's last living
+    /// state, a helium star's or the helium giant's being stripped, never a hydrogen giant's or a
+    /// remnant's, and `core_radius` its structure's core radius there (P11.T4.g).
+    Ended {
         track: Box<Track>,
         core: StarState,
         core_radius: SolarRadii,
@@ -672,6 +726,70 @@ pub(crate) enum Remains {
         mass: SolarMasses,
         last_luminosity: SolarLuminosities,
     },
+}
+
+/// A stripped core's naked helium star at its last living instant, for a track that has no life
+/// left ([`Track::stripped_to`], P11.T4.k).
+///
+/// It is the helium star's own model, at the stripped core's mass, where its clock ends.
+#[derive(Debug, Clone)]
+struct LastLiving {
+    model: Model,
+    /// The model's coordinate there ([`Model::point`]'s): the fractional age τ, 0–1, on the helium
+    /// main sequence, and the fraction of the span, 0, on the helium giant's zero-length span.
+    coord: f64,
+    /// The stripped core's mass.
+    mass: SolarMasses,
+}
+
+impl LastLiving {
+    /// A helium giant `star` entered at its clock `clock0` with `mass` (the early AGB's core,
+    /// [`HeliumStar::from_early_agb`]), at the end of its own clock.
+    ///
+    /// The clock ends at `t_end`, where its core reaches `Mc,SN` or `Mc,max` (HPT section 6.1,
+    /// equations 75 and 89), or where it enters if that is earlier. Its phase is the helium
+    /// Hertzsprung gap or giant branch by HPT's radius rule (equation 85), at the stripped mass.
+    #[must_use]
+    fn helium_giant(star: HeliumStar, clock0: Megayears, mass: SolarMasses) -> Self {
+        let end = star.t_end();
+        let clock = if clock0 < end { clock0 } else { end };
+        Self {
+            model: Model::HeliumShellBurning {
+                star,
+                span: Span::new(clock, clock),
+            },
+            coord: 0.0,
+            mass,
+        }
+    }
+
+    /// A helium main-sequence star of `mass` entered at fractional age `tau0`, 0–1: one too light
+    /// to burn helium is a helium white dwarf from its start, and lives last as it enters.
+    #[must_use]
+    const fn helium_main_sequence(mass: SolarMasses, tau0: f64) -> Self {
+        Self {
+            model: Model::HeliumMainSequence { fixed: None },
+            coord: tau0,
+            mass,
+        }
+    }
+
+    /// The state at the star's age `age`, years, with its wind, on the closed forms of `track`,
+    /// the helium star's own, and the core radius of that structure ([`core_radius`]: 5 `R_WD`(Mc)
+    /// for a helium giant, none on the helium main sequence).
+    #[must_use]
+    fn structure(&self, track: &Track, age: f64) -> (StarState, SolarRadii) {
+        let mt = SolarMasses::new(self.mass.value().max(super::build::MIN_EVALUATED_MASS));
+        let point = self.model.point(&track.physics(), self.coord, mt, 0.0);
+        let evaluated = super::Evaluated {
+            point,
+            mass: mt.value(),
+            fraction: 1.0,
+        };
+        let state = track.star_state(&evaluated, age);
+        let core_radius = core_radius(&self.model, &state, self.coord, &track.coeffs);
+        (state, core_radius)
+    }
 }
 
 /// The parts of `state`.
@@ -1468,7 +1586,7 @@ mod tests {
                 "{m}: core {core:?}"
             );
             match star.remains_at(age, state.mass().value(), &draws, None) {
-                Remains::Collapse {
+                Remains::Ended {
                     track, core: bare, ..
                 } => {
                     assert!(collapses, "{m}");
@@ -1486,6 +1604,123 @@ mod tests {
                 }
                 other => panic!("{m}: expected a collapse or a white dwarf, got {other:?}"),
             }
+        }
+    }
+
+    /// P11.T4.k (ruling p11-supernova-pins, 2026-10-06; finding F8): a core whose naked helium
+    /// star has no life left at the stripping is [`Remains::Ended`], never a living helium star:
+    /// the helium-star track dead from its start, which holds its own end, and the helium star's
+    /// last living state, a helium star's phase at the stripped core's mass.
+    ///
+    /// - A 20 M☉ star at \[Fe/H\] 0 stripped on its early AGB at 9.8524 Myr leaves a helium star
+    ///   of its 6.81 M☉ core with 10.8 kyr to live; at 9.8665 Myr, 3.6 kyr before its own death,
+    ///   one whose clock (`HeliumStar::from_early_agb`) is already past its end, which collapses.
+    /// - A 1.2 M☉ star stripped at the end of its early AGB leaves a helium star of its 0.51 M☉
+    ///   core whose carbon–oxygen core is past its shell limit `Mc,max` (HPT equation 89), a
+    ///   carbon–oxygen white dwarf of its whole mass at once.
+    /// - A 2.2 M☉ star stripped on its Hertzsprung gap leaves a non-degenerate core lighter than
+    ///   the lightest helium star that burns helium, a helium white dwarf at once.
+    ///
+    /// Before T4.k each was a `Remains::HeliumStar` whose track is a remnant from its start.
+    #[test]
+    fn a_core_stripped_past_its_helium_stars_end_has_no_life_left() {
+        use crate::stellar::remnant::RemnantKind;
+
+        let draws = StarDraws::median();
+        let helium = |phase: Phase| {
+            matches!(
+                phase,
+                Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+            )
+        };
+        let heavy = Track::full(SolarMasses::new(20.0), &solar(), &draws);
+        let mass_at = |track: &Track, age: f64| track.state_at(Years::new(age)).mass().value();
+        match heavy.remains_at(9.8524e6, mass_at(&heavy, 9.8524e6), &draws, None) {
+            Remains::HeliumStar(star) => {
+                let life = star.lifetime().expect("built in full").value();
+                assert!((1.0e4..1.2e4).contains(&life), "{life} yr left");
+            }
+            other => panic!("expected a living helium star, got {other:?}"),
+        }
+        let age = 9.8665e6;
+        let stripped = heavy.state_at(Years::new(age));
+        assert_eq!(stripped.phase(), Phase::EarlyAgb);
+        match heavy.remains_at(age, stripped.mass().value(), &draws, None) {
+            Remains::Ended {
+                track,
+                core,
+                core_radius,
+            } => {
+                assert!(track.is_remnant_from_its_start(), "{:?}", track.lifetime());
+                assert!(
+                    track.death().is_some_and(|d| d.kind().is_sudden()),
+                    "{:?}",
+                    track.death()
+                );
+                assert_eq!(
+                    track.remnant().map(|r| r.kind()),
+                    Some(RemnantKind::BlackHole)
+                );
+                assert!(helium(core.phase()), "{core:?}");
+                let mc = stripped.core_mass().value();
+                assert!((core.mass().value() - mc).abs() < 1e-9 * mc, "{core:?}");
+                assert!(
+                    core.core_mass() > SolarMasses::ZERO && core.core_mass() <= core.mass(),
+                    "{core:?}"
+                );
+                let rc = (5.0
+                    * white_dwarf_radius(
+                        crate::stellar::remnant::RemnantRecipe::default(),
+                        core.core_mass(),
+                    )
+                    .value())
+                .min(core.radius().value());
+                assert!(
+                    rc.total_cmp(&core_radius.value()).is_eq(),
+                    "{core_radius:?} against 5 R_WD(Mc) held to R, {rc} R☉"
+                );
+            }
+            other => panic!("expected a core with no life left, got {other:?}"),
+        }
+        let light = Track::full(SolarMasses::new(1.2), &solar(), &draws);
+        let life = light.lifetime().expect("built in full").value();
+        let late = (1..2_000)
+            .map(|k| life - f64::from(k) * 1.0e3)
+            .find(|&age| light.state_at(Years::new(age)).phase() == Phase::EarlyAgb)
+            .expect("a 1.2 M☉ star ends its early AGB");
+        match light.remains_at(late, mass_at(&light, late), &draws, None) {
+            Remains::Ended { track, core, .. } => {
+                assert!(track.is_remnant_from_its_start(), "{:?}", track.lifetime());
+                let dwarf = track.remnant().expect("a white dwarf");
+                assert_eq!(dwarf.kind(), RemnantKind::WhiteDwarf);
+                assert!(
+                    (dwarf.mass().value() - core.mass().value()).abs() < 1e-12,
+                    "{dwarf:?} against {core:?}"
+                );
+                assert!(helium(core.phase()), "{core:?}");
+            }
+            other => panic!("expected a core with no life left, got {other:?}"),
+        }
+        let gap_star = Track::full(SolarMasses::new(2.2), &solar(), &draws);
+        let gap = (0..20_000)
+            .map(|k| f64::from(k) * 1.0e5)
+            .find(|&age| gap_star.state_at(Years::new(age)).phase() == Phase::HertzsprungGap)
+            .expect("a 2.2 M☉ star crosses its Hertzsprung gap");
+        match gap_star.remains_at(gap, mass_at(&gap_star, gap), &draws, None) {
+            Remains::Ended {
+                track,
+                core,
+                core_radius,
+            } => {
+                assert!(track.is_remnant_from_its_start(), "{:?}", track.lifetime());
+                assert_eq!(track.state_at(Years::ZERO).phase(), Phase::HeliumWhiteDwarf);
+                assert_eq!(core.phase(), Phase::HeliumMainSequence);
+                assert!(
+                    core_radius.value().total_cmp(&0.0).is_eq(),
+                    "no core on the helium main sequence: {core_radius:?}"
+                );
+            }
+            other => panic!("expected a core with no life left, got {other:?}"),
         }
     }
 

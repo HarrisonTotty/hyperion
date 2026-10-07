@@ -340,6 +340,22 @@ impl Engine {
     }
 
     /// Runs stable transfer from member `d` to its next event.
+    ///
+    /// A step whose limit is a death ([`Stop::Death`]) or the primary's pin ([`Stop::Pinned`])
+    /// is never ended by the detachment test: the dying donor reads inside its lobe as its
+    /// remnant there, and the death or the pin would otherwise never be seen again. It goes
+    /// through the step's acts like any other step, T4.g's strip first, and its stop is acted on.
+    /// Where that leaves the donor with nothing living, the transfer ends there, as
+    /// [`Engine::quiet_kind`] decides (P11.T4.k, ruling p11-t4k-faults of 2026-10-06, finding A:
+    /// before it the "transfer is over" return came first, which lost the collapses of case BB
+    /// helium donors onto neutron stars and black holes, most of which still transfer when they
+    /// collapse, 39 of Tauris, Langer and Podsiadlowski's 2015 table 1's 47, and of pinned transfer
+    /// donors). The landing step reads the dying donor's overfill at its death, a remnant's radius,
+    /// so it moves no mass: the donor keeps about one step's transfer, BSE equation 92's target of
+    /// 0.5% of its mass, in its mass before (a known departure, recorded in plan 11's Risks).
+    ///
+    /// [`Stop::Death`]: super::detached::Stop::Death
+    /// [`Stop::Pinned`]: super::detached::Stop::Pinned
     #[expect(
         clippy::too_many_lines,
         reason = "one loop over BSE section 2.6's steps and their exits"
@@ -363,6 +379,15 @@ impl Engine {
                 self.collide();
                 return;
             };
+            // A transfer whose donor has died has ended (below): no step starts from one. A white
+            // dwarf gives mass as a remnant (BSE section 2.6.5).
+            debug_assert!(
+                sd.state.phase().is_living()
+                    || Kind::of(sd.state.phase(), s.masses[d]).is_white_dwarf(),
+                "a transfer step from a donor with nothing living, a {:?} at {} yr",
+                sd.state.phase(),
+                s.age
+            );
             // The structures just evaluated are the ones `stability` would evaluate again: the
             // snapshot is the pair now.
             match self.stability_of(d, s.masses[d], s.masses[a_idx], &sd, &sa) {
@@ -402,7 +427,11 @@ impl Engine {
                 self.collide();
                 return;
             };
-            if rate <= 0.0 && steps > 0 && unfed < -DETACHED_BY {
+            let lands_on_death = matches!(
+                stop,
+                Some(super::detached::Stop::Death(_) | super::detached::Stop::Pinned)
+            );
+            if rate <= 0.0 && steps > 0 && unfed < -DETACHED_BY && !lands_on_death {
                 // The donor has shrunk inside its lobe with nothing to give: the transfer is over.
                 self.accept(&next);
                 if self.age < self.until {
@@ -451,10 +480,12 @@ impl Engine {
                     }
                     super::detached::Stop::Death(i) => {
                         self.die(i);
+                        self.end_without_a_living_donor(d);
                         return;
                     }
                     super::detached::Stop::Pinned => {
                         self.pinned_collapse();
+                        self.end_without_a_living_donor(d);
                         return;
                     }
                     super::detached::Stop::Stripped(i) => {
@@ -466,6 +497,22 @@ impl Engine {
                     | super::detached::Stop::Coalescence => {}
                 }
             }
+        }
+    }
+
+    /// Ends the transfer from member `d` if a death or the pin it has just acted on left that
+    /// donor with nothing living, the pair going on as [`Engine::quiet_kind`] decides: a remnant
+    /// read as the donor of a next transfer step would merge the pair ([`Engine::stability_of`]).
+    pub(super) fn end_without_a_living_donor(&mut self, d: usize) {
+        if !matches!(self.kind, SegmentKind::StableTransfer { .. }) {
+            return;
+        }
+        let (m, tau) = self.current(d);
+        let living = self
+            .structure(d, self.age, m, tau)
+            .is_some_and(|s| s.state.phase().is_living());
+        if !living {
+            self.begin(self.quiet_kind());
         }
     }
 

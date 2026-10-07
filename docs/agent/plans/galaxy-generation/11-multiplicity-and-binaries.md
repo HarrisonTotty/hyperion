@@ -997,6 +997,246 @@ P11.T4, as built"._
 
   _As built (Phase J lane, 2026-10-06): see Risks, "P11.T4.j as built"._
 
+- **P11.T4.k Every collapse in a run pair is applied** (ruling p11-supernova-pins, 2026-10-06,
+  amended by ruling p11-t4k-faults, 2026-10-06; findings F7 and F8 of P11.T4.i, and A and C of
+  T4.k's own gate; output moves; version-21 batch, after T4.j, re-blessed at 20 and held out of
+  integration like T4.h–T4.j).
+  - **The rule.** A core collapse takes the dying star's last living mass, never its remnant's
+    (ruling 129.4a). It is applied through BSE appendix A1, and recorded.
+    - A star whose own clock has ended is a collapse now, or the pin's hold, never a living
+      track (design note 16; ruling 129.4c).
+    - Every phase that advances the engine's age acts on a death or the pin that it reaches.
+  - **F7, `binary/supernova.rs` `Engine::pinned_collapse`:**
+    - A member on the pin's own track whose track dies now, to the engine clock's resolution
+      (`own_death_now`), is living by construction. The pin wins the tie with the track's own
+      `Stop::Death`, and the track there already shows its remnant.
+    - Its mass before:
+      - a `Member::Track` takes the death's progenitor mass (helium core plus envelope);
+      - a `Member::Shaped` takes its carried mass at its last living instant (`last_living`),
+        read on its closed forms there;
+      - both are the readings `Engine::die` takes.
+    - The `Member::Track` stays its own track, placed with `offset_for` as `die` places it. It
+      shows plan 06's remnant bit for bit (debug-assert `track.remnant() == pin remnant`).
+    - Every other form keeps today's reading.
+    - Update the docs of the module and of `pinned_collapse`.
+    - Plan 11's ruling-129.4a text gains: "the pin's collapse takes the living mass, never the
+      remnant's".
+  - **F8, `sse/track/binary.rs` `Track::remains_at`:**
+    - A strip whose helium star has no life left (its built track is a remnant from its own
+      start, `Track::is_remnant_from_its_start`) is `Remains::Ended`, renamed from `Collapse`.
+      That is "a bare core with no life left".
+      - `track` is the helium track that is dead from its start, and holds its own end.
+      - `core` is the helium star's last living state at the stripped mass (`LastLiving`): the
+        helium giant at min(clock₀, t_end), or the light helium main-sequence star.
+      - `core_radius` is that structure's.
+    - Every helium-star arm goes through `stripped_to`. The arms found:
+      - the early AGB: a massive core collapses as a neutron star or black hole, and a
+        1–3 M☉ star stripped at the end of its early AGB leaves a carbon–oxygen white dwarf of
+        its whole mass;
+      - the HG and FGB of 2.0–2.5 M☉: a core below the lightest helium star is a helium white
+        dwarf at once.
+  - **The engine's handling** (`common_envelope.rs` `stripped_member_at`):
+    - Any star but a pinned primary with its pin still to come dies at once through `die`.
+    - A pinned primary is `Member::Frozen` at `core` until its pin.
+    - Debug-assert that no helium star is placed alive when it is dead from its start.
+  - **A, `binary/rlof.rs` `transfer_phase`:**
+    - A step whose limit is a death (`Stop::Death`) or the pin (`Stop::Pinned`) is not ended
+      by the detachment test. It goes through the step's acts, and its stop is acted on, T4.g's
+      strip first.
+    - Where the stop leaves the donor with nothing living, the transfer ends there, as
+      `quiet_kind` decides. Debug-assert that no transfer step starts from a donor that is not
+      living.
+    - Before T4.k, the "transfer is over" return came first: the donor read inside its lobe as
+      its remnant, so the death or the pin was never seen again. That lost the case BB helium
+      donors' collapses (55 per 12,000 layer-E prior pairs) and the pinned transfer donors'.
+  - **C, `binary/common_envelope.rs` `contact_phase`:**
+    - The knots stop at the pin where it lies inside the contact, whatever the age asked.
+    - The pin is acted on only where it lies before the pair's age. Otherwise the pair stays in
+      contact, as a contact outlasting the age does.
+    - `contact_until` is cleared after the collapse.
+    - Before T4.k the contact ran to its coalescence past the pin, and the merger product died
+      at its own later age (pairs 0223 and 0277 of the thousand).
+  - **The backstop, `binary/evolve.rs` `Engine::run`:**
+    - Before each phase, a pin still pending at the engine's age (to `own_death_now`'s
+      resolution) is acted on.
+    - Debug-assert that no pending pin lies behind the engine's age.
+  - **Tests** (`stellar/binary/tests.rs`, unless said):
+    - The pins ruling's tests, as built:
+      - `an_untouched_pinned_primary_collapses_on_its_orbit`;
+      - `a_wind_stripped_primary_collapses_in_place`;
+      - `a_late_companions_supernova_is_applied`, at 0.9 of the drawn reach;
+      - `a_core_stripped_past_its_end_is_held_until_its_pin`;
+      - `a_core_stripped_past_its_end_dies_at_once` (pairs 0544 and 0145);
+      - sse's `a_core_stripped_past_its_helium_stars_end_has_no_life_left`.
+    - `a_carried_primary_collapses_at_its_pin` (the carried tie): one of 0134, 0156, 0446, 0554
+      and 0677.
+      - The record is at the pin.
+      - Its mass before is the shaped member's carried mass at `last_living` of the death, to
+        10⁻¹².
+      - The remnant is plan 06's, capped at that mass.
+    - `a_transfers_last_step_applies_the_pin` (A): pair 0004.
+      - The pinned primary, a stable-transfer donor on its own track, has its record at its pin:
+        a 14.13 M☉ black hole at 6.4576 Myr, bound.
+      - Before T4.k there was no record.
+    - `a_transfers_last_step_applies_the_death` (A): pair 0741.
+      - The helium-star companion, transferring onto the black hole, has its record at its own
+        death: a 1.411 M☉ neutron star at 18.6316 Myr, bound.
+      - No merger follows.
+      - Before T4.k there was no record, and the pair merged at 985.7 Myr.
+    - `a_contact_stops_at_the_pin` (C): pair 0277.
+      - The record is at 46.831 Myr, from the main-sequence primary in contact.
+      - A run to 30 Myr, inside the contact and before the pin, records nothing, stays in
+        contact, and equals the full run up to 30 Myr bit for bit.
+    - Invariants in the 10³-pair suite (`check_collapses`, in `check_invariants` and
+      `a_thousand_timelines_are_pinned`), on every timeline not capped:
+      - no member goes from a living phase to a neutron star or black hole without a supernova
+        record at that age (10⁻⁹ relative);
+      - every pinned primary living just before its pin has a record at its pin;
+      - no segment's member is a track that is a remnant from its own start, unless the engine
+        placed it there by its death.
+  - **Goldens:**
+    - `stellar/binary_timelines`: about 55 of 1,000 digests (the prototype's).
+      - By cause: 33 F7 (the pins ruling's 29, plus 0330, 0480, 0782 and 0886, wide pairs that
+        T4.j now runs), 7 F8, 5 the carried tie, and 10 A and C.
+      - Every one gains a record or moves one (0277: the collapse moves from 69.05 to 46.83 Myr).
+      - Count the moves by cause, as T4.i did.
+    - `stellar/summaries` and `stellar/hierarchies`: none expected. Run `golden_diff`.
+  - **Statistics** (slow; record them, and assert where they are asserted now). The expected
+    figures are ruling p11-t4k-faults' probe on layer E's 12,000 prior pairs, against 1e47d16:
+    - primary records 5,457 → 6,755;
+    - companion records 1,225 → 1,301;
+    - bound BH + BH 386 → 460, NS + BH 94 → 119;
+    - double neutron stars 112 → 115 (window 6–144);
+    - the hydrogen-poor share of all records 0.587 → 0.538;
+    - "nothing living left" 168 → 146, plus 2 capped timelines;
+    - the shown bound share after the primary's collapse 73.6% → 66.8% (recorded 43.2% →
+      42.2%);
+    - `binary_system`: ruling 137's share recorded (about 0.48), and ruling 123.5's marks
+      unchanged;
+    - `binary_carve` within Poisson; the R06 census passes, with its time recorded.
+  - **Acceptance:**
+    - `cargo nextest run -p hyperion-sim -E 'test(binary::)'`;
+    - the slow `binary_system`, `binary_carve` and `binary_classes` suites, the 10³-pair suites
+      and the R06 census, with the figures recorded in Risks;
+    - the scratch collapse census: 0 faults in the pinned thousand, and none in 22,000 prior
+      pairs outside capped timelines;
+    - determinism-auditor, science-checker and rust-reviewer reviews.
+
+  _As built (Phase J lane, 2026-10-06): see Risks, "P11.T4.k as built"._
+
+- **P11.T4.l A passed-over pair's collapses** (ruling p11-supernova-pins, 2026-10-06; finding
+  F3, P11.T10's first half brought forward; output moves; version 22, its own bump; after
+  P11.T4.k and the version-21 refit).
+  - **The rule.** A pair that `can_interact` passes over is two single stars on its drawn orbit
+    (design note 7). If either star collapses (a sudden death) before the age asked, the drawn
+    orbit stands to the collapse.
+    - **The pinned primary:** plan 06's age, remnant and kick, with T4.k's living mass. Any other
+      star: its own track's death, its remnant, and `companion_kick`.
+    - At the collapse, BSE appendix A1 is applied once. Its input is the drawn orbit's relative
+      position and velocity at the collapse's universe time (the rails' phase), widened for the
+      mass both stars' winds have lost since zero age.
+      - The widening is Jeans mode with no accretion (HTP02 §2.2): a M_total is constant, e and
+        the true anomaly are kept, so r × f and v ÷ f, with f = M_total,0 ÷ M_total,before.
+      - It is a closed form of the stars' own masses at the collapse, so it does not depend on
+        the age asked.
+      - The orbit shown before the collapse stays the drawn one (design note 7's convention).
+        Showing it widened would make a pair's pre-collapse states depend on whether its run
+        reaches the collapse.
+    - **Bound:** the pair goes on, on the new orbit's fixed elements, with the recoil recorded.
+    - **Unbound:** `Disrupted { by }`, both stars their own models.
+    - A later collapse in a still-bound pair is applied the same way on the post-collapse orbit.
+    - Every collapse writes its `SupernovaRecord`.
+    - The stars stay their own tracks bit for bit; only the orbit and the records change.
+  - **After a bound collapse,** the pre-test is asked again of the new orbit, from the collapse
+    to the age asked: the lobe test at its periastron with each star's largest radius over that
+    span, and T4.j's decay bound from the collapse.
+    - If it passes, the engine runs from the collapse (`Engine::new` at the collapse's age with
+      the members and the new orbit).
+    - Otherwise the orbit stays fixed.
+    - Measured: 0–3 of 5,607 such pairs interact after their collapse. That is 0 with the
+      widened input, 1 with the unwidened drawn orbit, and 3 by the engine route.
+    - In pair 6441 (unwidened) a neutron star born at 39 Myr is kicked onto an eccentric orbit
+      and meets its companion's giant at periastron: a common envelope, then the helium star
+      feeds the neutron star and is consumed.
+    - A kick-free collapse cannot bring a periastron in. Instantaneous mass loss leaves the new
+      periastron at least the old one (checked over 2 × 10⁵ random phases and eccentricities).
+    - Two or three more pairs show `Merged` only as F1's label, for an orbit unbound later by the
+      companion's white-dwarf birth. T4.j relabels it `Disrupted`.
+  - **Files:**
+    - `binary/evolve.rs`: `evolve_with_tracks`'s passed-over branch.
+    - `binary/supernova.rs`: a driver for passed-over collapses, reusing `explode` and
+      `lose_mass`.
+    - `stellar/system.rs`: `run_pairs`' doc (a dead pair is run so that its collapses act on its
+      orbit).
+    - Plan 11:
+      - design note 7 gains "…two single stars on an orbit that their core collapses change (BSE
+        appendix A1)";
+      - P11.T10 is amended as in this ruling's §7;
+      - the version-21 limit in Risks is closed.
+  - **Known departure, recorded.**
+    - The orbit shown before the collapse is the drawn one, not the wind-widened one, as for
+      every passed-over pair. The widening factor is M_total,0 ÷ M_total, for example 1.6 for
+      25 + 20 M☉ and 2.5 for a 40 M☉ primary that winds strip to 10 M☉ beside 10 M☉.
+    - A1 starts from the widened state, so the orbit after a bound collapse is the widened one,
+      and the shown orbit steps there.
+    - Measured: the widening moves the statistics by under 1% (the bound share 34.0% → 33.9%),
+      and slows the wide pairs' walkaways by about 5%.
+    - A white dwarf's birth in a passed-over pair still keeps the drawn orbit. That is F1's
+      physics, under its own ruling.
+  - **The build-age contract** holds bit for bit:
+    - up to a collapse, the drawn orbit does not depend on the age asked;
+    - past it, the closed form and any engine run start at the collapse;
+    - T4.j's wording, that a pair the pre-test passes over at u₁ shows no interaction before u₁
+      in a run to any later age, covers the post-collapse pre-test.
+  - **Tests:**
+    - `a_wide_pair_is_unbound_by_its_primarys_collapse`. 15 + 3 M☉ at P = 10⁵ d, circular,
+      kicks off, so the pair is passed over.
+      - The record is at plan 06's death; more than half the pair's mass is lost, so
+        `Disrupted { by: Primary }`.
+      - The companion's velocity is its orbital velocity in the barycentre frame to 10⁻⁹.
+      - There is no recoil, and both stars are their own models.
+    - `a_wide_black_hole_pair_stays_bound`. A direct-collapse primary (40 M☉) beside 10 M☉ at
+      P = 10⁵ d: bound, with A1's a′ and e′ for the small mass lost, a record, and a recoil.
+    - `a_kicked_wide_pair_that_closes_is_run_from_its_collapse`. Find one on the built engine:
+      the probe found 0–3 per 5,607, so search 10⁵ layer-E prior pairs. If none appears, test
+      the path with a constructed post-collapse orbit: the engine started at a collapse on a
+      given eccentric orbit, whose periastron the companion's giant reaches.
+    - `the_widening_is_jeans_mode`: for a kick-free collapse, A1's input separation is the drawn
+      one × f, e is the drawn one, and the true anomaly is the rails', to 10⁻¹².
+    - `a_passed_over_pair_is_the_same_whatever_age_it_is_run_to`: ages before and after its
+      collapses, bit for bit to the earlier.
+    - The build-age suites gain passed-over pairs with collapses in their age draws.
+    - `binary_classes`: the shown double-neutron-star class agrees with the record count
+      within 15 pairs (126 against 112).
+  - **Goldens:**
+    - `stellar/binary_timelines`: the 15 passed-over pairs with a collapse among the 1,000
+      (0083, 0221, 0330, 0430, 0480, 0538, 0629, 0648, 0775, 0782, 0836, 0872, 0886, 0887,
+      0998), each with its record and segments.
+    - System goldens: none expected (checked with the prototype).
+    - Run `golden_diff`.
+  - **Statistics** (expected, §3; layer E, 12,000 prior pairs):
+    - the shown bound share after the primary's collapse 70.3% → 34.0% (neutron stars 17.2%,
+      black holes 61.2%);
+    - ruling 137's share about 0.48 → about 0.32–0.38 in `binary_system`;
+    - bound NS/BH + living star −86% in time;
+    - the shown double-neutron-star class −64%;
+    - symbiotic NS X-ray binaries −95%;
+    - released companions of 2.5 M☉ or more 1,001 → 2,212, 99.7% of the new ones below
+      30 km/s;
+    - double neutron stars by record 112, no move;
+    - Roche-lobe LMXBs and millisecond pulsars unchanged;
+    - the R06 census time recorded.
+    - Run `just fit-check`. The R06 sky tables are expected not to move: 1 pair in 5,607
+      changes its light. If a table does move, refit it in this task.
+  - **The wind-spin term** (orchestrator ruling on P11.T4.j's open question, 2026-10-06). T4.j's
+    decay bound is kept as built in version 21. T4.l adds the term it lacks, so that the bound is
+    provable: a locked star's wind takes 2/3 ṁ R² Ω (HPT eq. 110), which the tides refill from the
+    orbit, so S gains (2/3 − k′₂) ΔMᵢ R_max,i² Ω_c for each star (the T4.j probe's wind-spin
+    variant: 0 misses, up to 2.9 × the passes). Re-run the zero-miss gate
+    (`the_decay_bound_never_passes_over_an_interaction`) and record the passes.
+  - **Acceptance:** as T4.k's, plus `GENERATOR_VERSION` 21 → 22 with every golden re-blessed,
+    and P11.T10's agreement test, if it then exists, re-baselined.
+
 ### P11.T5 Classes from state
 
 Build `BinaryClass`, `classify`: Algol and contact pairs; blue straggler (a main-sequence star above
@@ -1320,7 +1560,9 @@ bump and regenerated goldens. T11 moves output too, as built: a paired star's su
 state (round 9c, `bin5b`, whose T2.d, T7 and T11 take one bump in the orchestrator's version 16
 batch). T4.g and T4.h move output too, as built: T4.g in P14 Phase J's version 20 batch, T4.h
 (the early AGB's core radius and remnant at SSE's τ) in the version 21 batch with P14.T47.e.
-T4.i and T4.j move output too, in the version 21 batch with T4.h, 9a0950e's fixes and P14.T47.e. T1.d
+T4.i and T4.j move output too, in the version 21 batch with T4.h, 9a0950e's fixes and P14.T47.e.
+T4.k moves output too, in the version 21 batch with them (rulings p11-supernova-pins and
+p11-t4k-faults); T4.l moves it at version 22, with its own bump. T1.d
 moves every star once, because the mean mass per system changes
 the system count (plan 02 lists it among its known future bumps). After that no primary moves: IDs,
 positions, primary masses, ages, primary draws, death times and kicks are untouched, except that T7
@@ -2284,7 +2526,8 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
   - _129.4a, the pinned hold._ `Engine::die` holds a pinned primary whose own track dies first at
     its last living state with the mass it has then (amended by P11.T4.g, 2026-10-03: the last
     living state is the member's, at the binary's mass, and a bare core is stripped to its helium
-    star or white dwarf before any hold) (a star on its own track takes its track's
+    star or white dwarf before any hold; amended by P11.T4.k, 2026-10-06: the pin's collapse takes
+    the living mass, never the remnant's) (a star on its own track takes its track's
     living mass; the track's mass at the death is its remnant's, which the hold took before), and
     leaves the orbit as it is. Two more faults of the same kind were found and fixed: a detached
     step that lands on a star's own death took the remnant's mass at the step's end, so the orbit
@@ -2540,7 +2783,10 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     own track's death, which tripped the track's range check in debug builds. Release builds held it
     at the track's last age already; the hold is now explicit for `Shaped` members, so debug and
     release agree and no golden moves. **A finding (provisional; ruling deferred):** the engine's
-    detached step does not always end a segment at a shaped star's own death.
+    detached step does not always end a segment at a shaped star's own death. One more instance
+    (ruling p11-t4k-faults, 2026-10-06): a capped timeline's last segment, stretched to the age
+    asked, reads its shaped member past that member's death (layer-E prior pair 8002 of
+    `binary_classes`' sampler; see "P11.T4.g's finding C2" below).
   - _Measured_ (slow, `tests/binary_system.rs`, 2026-09-30; every figure provisional, rulings
     deferred):
     - The bright exception: 4 of 86,185 old-thin-disc layer-A and -B systems (4.6 × 10⁻⁵), none of
@@ -2630,7 +2876,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     collapse `swell` turns the fed helium star into a core-helium-burning giant with a thin
     envelope again and again (about every 0.03 Myr), each stripped back at once by the transfer
     strip, so the test allows such a giant with M > Mc at each segment's start beside the helium
-    phases. R stays under 3 R☉ throughout. `swell`'s core is the finding left open.
+    phases. R stays under 3 R☉ throughout. `swell`'s core is the finding left open (its measured
+    consequence, ruling p11-t4k-faults: "P11.T4.g's finding C2" below).
   - _The invariant_ (`check_no_bare_giant`, in the 60-pair and 10³-pair suites) checks M > Mc,
     the engine's own test, not M > Mc + 10⁻⁹: a donor's wind or transfer can leave an envelope of
     10⁻¹² M☉ at a step. It checks at each segment's start and at the knots of a carried star's mass
@@ -3116,7 +3363,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
         The ruling's "1.3–2" holds only for the LMXB progenitors. The doc carries the measured
         range: the proxy understates coalescence at a common envelope's exit most for the
         lightest companions. For the orchestrator.
-  - _Findings, not this task's (for the orchestrator; the science check confirms both readings):_
+  - _Findings, not this task's (for the orchestrator; the science check confirms both readings;
+    both fixed by P11.T4.k, rulings p11-supernova-pins and p11-t4k-faults):_
     - **F7. An untouched pinned primary collapses without a record.**
       - A primary pinned to plan 06's collapse (design note 16) that is still on its own track at
         its death gets no supernova record, and its collapse does not act on the orbit.
@@ -3304,12 +3552,205 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       R_max,i² Ω_c to S (the probe's wind-spin variant: 0 misses, up to 2.9× the passes), or keep
       the doc's statement. Built as ruled, with the doc saying so. The reservoir is also counted
       once, where a star whose I falls and rises (the flash, a blue loop) could draw it twice.
-    - **The ruling's "F0–K" for +1.5 < M_V < +7.5** is A3–K5 (Pecaut and Mamajek 2013).
+      _Ruled (orchestrator, 2026-10-06):_ T4.j's bound is kept as built in version 21, and the
+      missing wind-spin term goes into P11.T4.l, the 21 → 22 task, so that the bound becomes
+      provable (T4.l's block, "The wind-spin term").
+    - **The ruling's "F0–K" for +1.5 < M_V < +7.5** is A3–K5 (Pecaut and Mamajek 2013, ApJS 208,
+      9, extended in Mamajek's online dwarf table, v2022.04.16: A3V M_V 1.70 to K5V 7.28; the
+      paper's own table has no M_V).
+      _Ruled (orchestrator, 2026-10-06):_ the label is corrected to A3–K5; the channels ruling's
+      table carried "F0–K".
     - **Rucinski's shape.** His 1/500 is the scaling his bins are consistent with; pooled over his
       tables the four bins give about 1/750, and the engine's 2.84 × 10⁻³ is 1.4× and 2× those.
       The engine has no contact pair in +1.5 to +2.5, his best-populated bin (18 of his 26
       systems). For the braking law or the contact lifetime (ruling §3.2), not the pre-test.
+      _Ruled (orchestrator, 2026-10-06):_ the empty +1.5 to +2.5 bin points at the braking law or
+      the contact lifetime, and is an input to the queued binary-population calibration
+      investigation (P06, P08, P11, after the 20 → 21 bump), beside F1's physics, F9–F12, F14 and
+      the wind-spin term.
     - **F7 reaches more pairs.** The bound runs wide massive pairs whose giants' reservoir reaches
       their threshold; three of the 21 golden moves are such pairs whose pinned primary's
       untouched collapse is not recorded (F7). T4.j runs +6–10% of prior pairs in C–E (ruling
       §3.1), so F7's fix matters more after it.
+- **P11.T4.k as built** (Phase J lane, 2026-10-06; rulings p11-supernova-pins and p11-t4k-faults).
+  Every collapse in a run pair is applied once, from the star's last living mass. **Built for
+  version 21, committed with its goldens re-blessed at version 20 and held out of integration**
+  until the 20 → 21 bump lands with it, P11.T4.h, 9a0950e's fixes, P14.T47.e, P11.T4.i, T4.j and
+  the Bond albedo.
+  - _The rule, as built._
+    - F7 and the carried tie (`supernova.rs`): `Engine::pinned_collapse` reads member 0 through
+      `own_death_now(pin age)`, which finds the pin's own track at its death: a track (own or
+      carried) whose death's age on the track is the pin's and falls at the engine's age, both to
+      the clock's resolution (`evolve.rs` `clock_resolution_years`, 4 ε of the age, which
+      `phase_ahead` now shares). A `Member::Track` there explodes from the death's progenitor mass
+      and stays its own track, placed with `offset_for`; a `Member::Shaped` is read on its closed
+      forms at `last_living` at its carried mass. Plan 06's remnant is capped at the mass before
+      (`held_to`).
+    - F8 (`sse/track/binary.rs`): `Remains::Collapse` is renamed `Remains::Ended`; every
+      helium-star arm of `remains_at` goes through `stripped_to`, which returns `Ended` for a
+      track dead from its start (`Track::is_remnant_from_its_start`), with `LastLiving`'s state and
+      core radius. `common_envelope.rs` `stripped_member_at`: `Ended` dies at once through `die`,
+      or is the pinned primary's `Frozen` hold; a debug assertion keeps a dead helium star from
+      being placed alive.
+    - A (`rlof.rs` `transfer_phase`): a step whose limit is `Stop::Death` or `Stop::Pinned` skips
+      the detachment test; after its stop, `end_without_a_living_donor` ends a transfer whose
+      donor has nothing living. A debug assertion: no transfer step starts from a donor that is
+      neither living nor a white dwarf.
+    - C (`common_envelope.rs` `contact_phase`): the knots stop at a pin inside the contact; the pin
+      is acted on only before the pair's age, with `contact_until` cleared.
+    - The backstop (`evolve.rs` `Engine::run`, `pin_due_now`): before each phase a pin due at the
+      engine's age is acted on; a pin behind the engine's age is debug-asserted against, naming the
+      pair's composition and draws.
+  - _Deviations from the ruling's text._
+    - **The carried tie's mass before** is the landing step's carried mass (`mass.last()` of the
+      restarted path, the path's at the pin), as `Engine::die` reads a carried star's, not the
+      path's at `last_living`. The two differ by the wind over 10⁻¹² of the age (pair 0446: within
+      10⁻¹²; up to about 3 × 10⁻¹¹ relative for the other carried pins). The living test is read at
+      `last_living` on the closed forms, as ruled.
+    - **`own_death_now` checks that the track is the pin's**: its death's age on the track equals
+      the pin's (review: determinism audit and plan conformance), so a track dead from its start
+      placed at a strip on the pin's age is never taken for the pin's own.
+    - **A strip or a death landing on the pin is held, not applied** (review): the hold guards in
+      `die` and `stripped_member_at` take a pin at or after the engine's age, to the clock's
+      resolution (`>=`, where they read `>`), so that the backstop collapses the primary once with
+      plan 06's remnant. Without it such a tie would collapse the primary twice. No sampled pair
+      meets it; no digest moves.
+    - **The donor debug assertion** allows a white-dwarf donor, which gives mass as a remnant (BSE
+      §2.6.5).
+    - **The backstop also ends a transfer** whose donor its collapse leaves with nothing living,
+      as A does at a step's stop; and the contact phase goes on as `quiet_kind` decides where the
+      pin finds nothing living.
+    - **`check_collapses`** also skips the pairs the pre-test passes over (the version-21 limit,
+      below); its first invariant exempts a compact star a merger leaves inside its companion (a
+      Thorne–Żytkow object, BSE §2.7.3); its third checks the neutron-star and black-hole tracks,
+      a white dwarf's birth leaving no record (the placement's debug assertion covers it in debug
+      builds). Test hooks: `evolve::pinned_death_age_years` and `pinned_track_and_pin`.
+    - **Tests.** `a_core_stripped_past_its_end_dies_at_once` takes pairs 0544 and 0145: 0703, the
+      pins ruling's choice, now records its primary's carried collapse at 12.51 Myr and no longer
+      strips its companion past its end. The carried tie's test takes 0446 and checks the orbit
+      after against A1 for that mass before. `a_contact_stops_at_the_pin` checks the build-age
+      contract at 30, 46 and 46.9 Myr (determinism audit). Three more (rust review):
+      `a_pin_due_at_the_engines_age_is_applied`, `a_pin_left_behind_is_a_fault` (debug builds)
+      and `a_transfer_without_a_living_donor_ends`. `a_white_dwarfs_birth_that_unbinds_the_orbit_disrupts_it` (P11.T4.j's F1
+      label) moves from the channels ruling's 10.2 + 7.88 M☉ trace, which F7 now unbinds at its
+      primary's collapse, to pinned pair 0030 (the primary's oxygen–neon white dwarf at 40.67 Myr).
+      The sse test covers the early AGB at 20 and 1.2 M☉ and the Hertzsprung gap at 2.2 M☉, not the
+      first giant branch.
+    - Earlier entries keep `Remains::Collapse`, the name they were written with. T4.l's golden list
+      (measured at ce69992) names 0330, 0480, 0782 and 0886, which T4.j now runs and which moved
+      here as F7 pairs: re-measure it in T4.l.
+  - _Goldens_ (`golden_diff.py --base 1e47d16`: one file moved, none new, the header at 20).
+    - `stellar/binary_timelines`: **55 of 1,000 digests**, the ruling's prototype to the digest:
+      - 33 F7: 0076, 0082, 0084, 0086, 0088, 0112, 0191, 0243, 0258, 0268, 0311, 0330, 0346, 0408,
+        0429, 0460, 0480, 0490, 0548, 0616, 0761, 0782, 0805, 0831, 0844, 0845, 0886, 0904, 0915,
+        0936, 0950, 0985, 0994;
+      - 7 F8: 0257, 0539, 0544, 0572, 0701, 0703, 0739;
+      - 5 the carried tie: 0134, 0156, 0446, 0554, 0677;
+      - 10 A and C: 0004, 0326, 0741, 0829, 0880 (A's records), 0223, 0277 (C), and 0170, 0835,
+        0862, which keep their records and segment counts and move in their bits (A acts on a
+        death in the landing step rather than after it).
+      - Every pair but those three gains a record or moves one (0277: 69.05 → 46.83 Myr); 0257 and
+        0703 gain two. 9 change their segment counts (0134, 0223, 0257, 0277, 0326, 0554, 0677,
+        0741, 0829).
+    - Nothing else moved: not `stellar/summaries`, `stellar/hierarchies`,
+      `stellar/held_bare_core_helium_star`, the galaxy chain, nor the planetary or server goldens.
+  - _Statistics._
+    - The scratch population probe (the channels ruling's sampler, 12,000 layer-E and 10,000
+      layer-D prior pairs to 13.8 Gyr), against 1e47d16:
+      - layer E: primary records 5,457 → 6,755; companion records 1,225 → 1,301; bound BH + BH
+        386 → 460, NS + BH 94 → 119, NS + NS 112 → 115; the hydrogen-poor share of all records
+        0.587 → 0.538; "nothing living left" 168 → 148 (146 two-strip white dwarfs and the 2 capped
+        pairs); the bound share after the primary's collapse 73.6% → 66.8% shown (43.2% → 42.2%
+        recorded);
+      - layer D: primary records 208 → 232, "nothing living left" 39 unchanged;
+      - the ruling's figures, to the pair.
+    - The scratch collapse census (`check_collapses`' invariants, counted): **0 faults in the
+      pinned thousand** (103 at 1e47d16), and none in the 22,000 prior pairs outside the capped
+      timelines, 1723 and 8002 of layer E (P11.T4.g's C2) and 6695 of layer D (F15), reported
+      apart.
+    - `binary_system`: ruling 137's hydrogen-poor share **0.500** of 5,323 collapses (0.506 of
+      5,120 before; the ruling's estimate about 0.48); ruling 123.5's marks unchanged (1,407 of
+      1,752 stripped, 300 merged, the merger band 815 of 986); Rucinski unchanged (2.84 × 10⁻³).
+    - `binary_carve`: identical to T4.j's counts.
+    - `binary_classes`: bound double neutron stars **115** (in 6–144), 63% at e < 0.3, 26 merging
+      (about 30 per Myr by VG18's yield); the recycled pulsars' medians unchanged.
+    - The 10³-pair suites pass; the decay bound's zero-miss gate passes (0 misses; passes
+      unchanged; the engine interacts in 2,335 and 312 pairs of samples 1 and 2, against 2,347 and
+      501, since the collapses it now applies unbind pairs first).
+    - The R06 census passes in **188 s** under the heavy lock (195 s at T4.j).
+  - _Gate._ fmt and `cargo clippy -p hyperion-sim --all-targets -D warnings`; the targeted
+    `binary::` and sse suites (86 tests); the workspace bless under `just _locked` (3,668 of 3,669,
+    the one failure the known bless-mode race) and then the non-bless gate (**3,669 passed**,
+    729 s); the slow binary suites (11 passed) and the census, all capped.
+  - _Reviews._ Determinism audit: no must-fix; applied: the hold guards for a strip on the pin,
+    `own_death_now`'s check of the pin's own track, the contact's build-age checks. Rust review:
+    applied the must-fix (`LastLiving::helium_giant` takes its star), units in names and types
+    (`SolarMasses` in `LastLiving`, `OwnDeath`'s `offset_years`, the test helpers' suffixes),
+    intra-doc links and summaries, assertion messages, the shared clock resolution, the merged
+    test helpers and the three tests above; not applied: a debug assertion for a death (not the
+    pin) left behind, which would fire on the member `die` has just placed at its death. Plan
+    conformance: no must-fix; the carried test checks A1, and the deviations above are recorded.
+    Science check: fixed the white-dwarf donor's section (BSE §2.6.5), the F8 windows by arm,
+    A3–K5's source (Mamajek's dwarf table), the progenitor-mass wording, F13's metallicity and
+    island, F14's merging yield against Pol et al.'s intervals, and Tauris et al.'s 39 of 47 for A.
+- **Version 21 limit: a passed-over pair's collapses** (ruling p11-supernova-pins, 2026-10-06,
+  figures re-measured by ruling p11-t4k-faults; fixed by P11.T4.l at version 22).
+  - A pair that the pre-test passes over keeps its drawn orbit through its stars' core collapses,
+    with no record, mass loss or kick.
+  - These are 42% of layer-E primaries' collapses (5,012 of 11,915 in the 12,000 prior pairs,
+    after T4.j's bound) and 36% of layer D's (150 of 421).
+  - So version 21 shows:
+    - the bound share after the primary's collapse at 66.8%, against about 34% with T4.l;
+    - bound NS/BH beside a living star for 26.4 × 10⁶ pair-Myr per 12,000 pairs (T4.l: about
+      4.5 × 10⁶, measured at ce69992);
+    - double-neutron-star states in 282 pairs, against 115 by record;
+    - symbiotic neutron-star X-ray binaries for 25,600 pair-Myr (T4.l: about 1,900);
+    - ruling 137's hydrogen-poor share of recorded collapses at 0.54, against about 0.38.
+  - Positions are unaffected (the drawn hierarchy). Pair light moves in 1 of 5,607 such pairs.
+- **P11.T4.k's known departures** (ruling p11-t4k-faults, 2026-10-06).
+  - **A transfer's last step** reads the dying donor's overfill at its death, a remnant's radius,
+    so it moves no mass. The donor keeps about one step's transfer (BSE eq. 92's target of 0.5% of
+    its mass) in its mass before. Case BB donors mostly do collapse during their transfer (Tauris,
+    Langer and Podsiadlowski 2015, MNRAS 451, 2123, Table 1: 39 of 47).
+  - **A pinned primary that the binary keeps on its main sequence** (a Case A donor whose binary
+    main sequence outlasts plan 06's death) explodes from it at plan 06's age (design note 16).
+    - In the detached and transfer phases this was so before T4.k; T4.k extends it to contact.
+    - Pairs 0223 and 0277 of the thousand collapse at τ 0.999 and 0.987, 18.5 kyr and 0.68 Myr
+      before their binary main sequences would end. Their merger products would have died 10
+      and 22 Myr later.
+  - **Pinned primaries stripped by the binary keep plan 06's single-star remnant**, capped at
+    their mass (design note 16).
+    - Binary-stripped stars have smaller carbon–oxygen cores. For case B strips, Schneider,
+      Podsiadlowski and Müller (2021, A&A 645, A5, Table 1) move black-hole formation from
+      ≳ 34 M☉ to ≳ 67.5 M☉ (the complements of Table 1's neutron-star ranges, at Z = 0.0142; case
+      B also has a black-hole island at about 31.5–34 M☉, where the trend runs the other way).
+    - Finding F13: plan 06's remnant law should read the stripped mark, as its kick law does.
+      Routed to P15.T5.c, with its own bump.
+- **Finding F14 (ruling p11-t4k-faults): wide bound double neutron stars.**
+  - 115 bound per 12,000 layer-E prior pairs (7.2 × 10⁻⁵ per M☉ formed) is about 4.4 times
+    COMPAS's (Vigna-Gómez et al. 2018).
+  - Only 21% of them merge, against VG18's 73%. The merging yield, about 26 per Myr, is at the
+    low edge of Pol et al.'s 90% intervals (2019, 2020) and inside Colom i Bernadich et al.'s
+    (2023).
+  - Routed to the binary-population calibration investigation with F9–F12.
+- **P11.T4.g's finding C2 (`swell`'s core) has a measured consequence** (ruling p11-t4k-faults;
+  ruled by ruling p11-c2-swell, 2026-10-06, and fixed by P11.T4.m at version 22).
+  - A helium main-sequence accretor fed hydrogen by a main-sequence donor:
+    - is swelled at any positive rate, even while its wind outweighs what it is fed, into a
+      core-helium-burning giant whose envelope is the placement's miss (−0.2 to −0.6% of its
+      core);
+    - T4.g's strip, or a common envelope, makes it a helium star again at once;
+    - transfer resumes.
+  - The cycle repeats, every 1–66 kyr, until the timeline's 64 segments (`MAX_SEGMENTS`) cap it.
+    Its later deaths, pins included, are never reached, and its stretched last segment reads its
+    shaped member past that member's death.
+  - How often: 2 of 12,000 layer-E prior pairs (1723 and 8002 of `binary_classes`' sampler).
+  - The layer-D capped pair, 6695 of 10,000 (4.29 + 2.91 M☉, P 4.19 d, Z 0.0024), is not C2 but
+    **finding F15** (ruling p11-c2-swell; fixed by P11.T4.m): `rejuvenated_tau` counts a helium
+    star as convectively mixed (τ × m₀ ÷ m₁), where BSE (`evolv2.f` 1889–1900) and COMPAS's
+    default keep its fraction burnt. Fed near its end, its steps land short of it and the
+    segments shrink to the cap, at 183.1 Myr, its stretched segment showing a hot subdwarf to
+    13.8 Gyr.
+  - T4.k's collapse invariants skip capped timelines, as the 10³ suites assert none.
+  - BSE keeps the accretor's own core and gives it the step's net gain as envelope, behind a gate
+    (`evolv2.f` 1480–1491): P11.T4.m's rule, which removes both caps.

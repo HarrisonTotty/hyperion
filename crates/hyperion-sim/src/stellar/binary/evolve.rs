@@ -505,6 +505,22 @@ fn pinned_death(input: &BinaryInput, full: Option<Arc<Track>>) -> Option<PinnedT
     })
 }
 
+/// The age of the primary's pinned death, years, if design note 16 pins it ([`pinned_death`]),
+/// for the tests' invariants.
+#[cfg(test)]
+#[must_use]
+pub(super) fn pinned_death_age_years(input: &BinaryInput) -> Option<f64> {
+    pinned_death(input, None).map(|pinned| pinned.pin.death.age().value())
+}
+
+/// The primary's pin ([`pinned_death`]) and the full track it is read from, for the tests that
+/// start an engine at the pin.
+#[cfg(test)]
+#[must_use]
+pub(super) fn pinned_track_and_pin(input: &BinaryInput) -> Option<(Arc<Track>, Pin)> {
+    pinned_death(input, None).map(|pinned| (pinned.track, pinned.pin))
+}
+
 /// The orbit as the engine carries it: its semi-major axis (R☉) and eccentricity now, its
 /// orientation and mean anomaly at the epoch, and their paths through the current segment.
 #[derive(Debug, Clone, PartialEq)]
@@ -679,6 +695,12 @@ impl Engine {
     }
 
     /// Runs the pair to its age, or to the cap.
+    ///
+    /// Before each phase a pin still pending at the engine's age, to the resolution of its clock
+    /// ([`clock_resolution_years`]), is acted on (P11.T4.k, ruling p11-t4k-faults of 2026-10-06):
+    /// a backstop for any exit that a step landing on the pin takes before its stop, such as
+    /// T4.g's strip, which wins that step ([`Engine::integrate`]) and leaves the pin no longer
+    /// ahead. No phase passes a pin it has not acted on (debug-asserted).
     pub(super) fn run(&mut self) {
         let mut events = 0_u32;
         while self.age < self.until && !self.capped {
@@ -687,6 +709,7 @@ impl Engine {
                 self.capped = true;
                 break;
             }
+            self.pin_due_now();
             match self.kind {
                 SegmentKind::StableTransfer { donor } => self.transfer_phase(donor.index()),
                 SegmentKind::Contact => self.contact_phase(),
@@ -694,6 +717,32 @@ impl Engine {
                 | SegmentKind::CommonEnvelope
                 | SegmentKind::Merged
                 | SegmentKind::Disrupted { .. } => self.detached_phase(),
+            }
+        }
+    }
+
+    /// Acts on the primary's pin if it is due at the engine's age, to the resolution of its clock
+    /// ([`clock_resolution_years`], as [`Engine::own_death_now`] reads it): see [`Engine::run`].
+    fn pin_due_now(&mut self) {
+        let Some(pin) = &self.pin else {
+            return;
+        };
+        let at = pin.death.age().value();
+        let resolution = clock_resolution_years(self.age);
+        debug_assert!(
+            at >= self.age - resolution,
+            "the primary's pin at {at} yr lies behind the engine at {} yr ({:?}; the primary a {:?} \
+             of {:?}, drawn {:?})",
+            self.age,
+            self.kind,
+            self.members[0].state_at(&self.ctx, 0, self.age).phase(),
+            self.ctx.composition(),
+            self.ctx.draws(0)
+        );
+        if (at - self.age).abs() <= resolution {
+            self.pinned_collapse();
+            if let SegmentKind::StableTransfer { donor } = self.kind {
+                self.end_without_a_living_donor(donor.index());
             }
         }
     }
@@ -857,12 +906,21 @@ impl Engine {
 pub(super) fn phase_ahead(track: &Track, offset: f64, age: f64) -> (f64, f64, f64) {
     let track_age = (age - offset).max(0.0);
     let (start, end) = track.phase_span(track_age);
-    let resolution = 4.0 * f64::EPSILON * age.abs().max(1.0);
+    let resolution = clock_resolution_years(age);
     if end.is_finite() && end + offset - age <= resolution {
         let (next_start, next_end) = track.phase_span(end);
         return (next_start, next_end, track_age.max(end));
     }
     (start, end, track_age)
+}
+
+/// The resolution of the engine's clock at the engine's age `age_years`, years: 4 ε of the age (of
+/// a year below one), within which two ages are the same instant to the engine. A step that starts
+/// so near a boundary is at it ([`phase_ahead`]), and a death or the pin that falls so near the age
+/// is now ([`Engine::own_death_now`], [`Engine::run`]'s backstop).
+#[must_use]
+pub(super) fn clock_resolution_years(age_years: f64) -> f64 {
+    4.0 * f64::EPSILON * age_years.abs().max(1.0)
 }
 
 /// A track for a star the engine places on it now at `at(track)`, a track age, built far enough to

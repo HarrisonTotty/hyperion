@@ -6,7 +6,11 @@
 //!   kick. The engine takes the age as a fixed boundary. If the binary would end the star sooner
 //!   (a stripped helium star that dies first, say), the star is held at its last living state until
 //!   then, with the mass it had, and the orbit is left as it was (ruling 129.4a); if the pair has
-//!   merged, the product collapses; if nothing living is left, there is no collapse.
+//!   merged, the product collapses; if nothing living is left, there is no collapse. The collapse
+//!   takes the star's last living mass, never its remnant's (P11.T4.k, ruling p11-supernova-pins of
+//!   2026-10-06): a primary still on its own track then is the pin's own track at its death, which
+//!   explodes from the death's progenitor mass (helium core plus envelope), losing that less plan
+//!   06's remnant (BSE appendix A1's ΔM₁), and goes on showing its own remnant, plan 06's.
 //! - **Any other death** sheds its mass at the death, through appendix A1 or the white dwarf's
 //!   quiet loss, and never before it: the step that lands on it keeps the dying star's living mass
 //!   (ruling 129.4a).
@@ -26,6 +30,17 @@
 //!   barycentre recoils (equation A14), which the record keeps.
 //! - **Accretion-induced collapse** of a white dwarf at the Chandrasekhar mass (section 2.6.5) is
 //!   `rlof.rs`'s, through [`Engine::explode`].
+//! - **Every phase that advances the engine's age acts on a death or the pin that it reaches**
+//!   (P11.T4.k, ruling p11-t4k-faults of 2026-10-06): the detached and transfer steps' stops, a
+//!   transfer's last step included (`rlof.rs`), the contact's knots, which stop at the pin
+//!   (`common_envelope.rs`), and a backstop in [`Engine::run`] for a pin due at the engine's age
+//!   that a phase left behind.
+//! - **A bare core with no life left** ([`Remains::Ended`]: a helium giant's core at or above the
+//!   Chandrasekhar mass, ruling 129.4c, or a stripped core whose helium star's own clock has
+//!   already ended, P11.T4.k) dies at once through [`Engine::die`], on the orbit its stripping
+//!   left, or is the pinned primary's hold until its pin (`common_envelope.rs`).
+//!
+//! [`Remains::Ended`]: crate::stellar::sse::Remains::Ended
 
 use crate::coords::{SystemVector, SystemVelocity};
 use crate::orbit::{Orbit, elements_from_state};
@@ -40,7 +55,7 @@ use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Years};
 
 use super::detached::last_living;
-use super::evolve::{Engine, LiveOrbit};
+use super::evolve::{Engine, LiveOrbit, clock_resolution_years};
 use super::star::{Member, Path, positive};
 use super::timeline::{Component, SegmentKind, SupernovaRecord};
 
@@ -57,7 +72,8 @@ impl Engine {
         let (Some(death), Some(remnant)) = (track.death(), track.remnant()) else {
             return;
         };
-        // A pinned primary does not die before plan 06's age: it is held at its last living
+        // A pinned primary does not die before plan 06's age, nor at it, where the pin collapses
+        // it once (P11.T4.k; `Engine::run`'s backstop): it is held at its last living
         // state, which is the member's own at the mass the binary gives it, and the orbit is left
         // as it is (ruling 129.4a as amended by P11.T4.g). A star on its own track has its
         // track's mass there (the track's mass at the death itself is its remnant's); one the
@@ -65,7 +81,11 @@ impl Engine {
         // luminosity through the small-envelope perturbation (HPT section 6.3). A star with no envelope left there is a naked helium star or a white dwarf
         // (HPT section 6; BSE `hrdiag`): it is stripped first, and is held only if that
         // leaves it with nothing to lose.
-        if i == 0 && self.pin.is_some_and(|p| p.death.age().value() > self.age) {
+        if i == 0
+            && self.pin.is_some_and(|p| {
+                p.death.age().value() >= self.age - clock_resolution_years(self.age)
+            })
+        {
             self.hold(&track, offset);
             return;
         }
@@ -127,8 +147,8 @@ impl Engine {
     /// ([`Member::evaluate`]'s, read at the track's age itself), and its core radius is that
     /// structure's. A structure with no envelope (M ≤ Mc) is stripped first through
     /// [`Engine::stripped_member_at`] at the same age: a helium star lives on with the pin still
-    /// waiting, and a bare core at or above the Chandrasekhar mass is held at the core's state
-    /// (ruling 129.4c).
+    /// waiting, and a bare core with no life left (at or above the Chandrasekhar mass, ruling
+    /// 129.4c, or a helium star past its own end, P11.T4.k) is held at its last living state.
     fn hold(&mut self, track: &std::sync::Arc<sse::Track>, offset: f64) {
         let living = last_living(self.age - offset);
         let carried = match &self.members[0] {
@@ -217,27 +237,85 @@ impl Engine {
     }
 
     /// The primary's pinned death now (design note 16): plan 06's remnant and kick, whatever the
-    /// pair has made of the star.
+    /// pair has made of the star, from the star's last living mass, never its remnant's (ruling
+    /// 129.4a; P11.T4.k, ruling p11-supernova-pins of 2026-10-06).
+    ///
+    /// - **A primary still on its own track** is the pin's own track at its death: the step lands
+    ///   on the death, where the pin wins the tie with the track's own [`Stop::Death`], and the
+    ///   track there already shows its remnant. It is living by construction. Its mass before is
+    ///   the death's progenitor mass (helium core plus envelope), as [`Engine::die`] takes it for a
+    ///   star on its own track, and it stays its own track, which shows plan 06's remnant bit for
+    ///   bit (finding F7: read at the pin, the remnant was taken for nothing living, and the
+    ///   collapse left no record, no mass loss and no kick).
+    /// - **A star the binary carries on the pin's own track** (a donor in stable transfer, say)
+    ///   meets the same tie when its track dies at the pin: it is read at its track's last living
+    ///   instant, on its closed forms, and its mass before is the mass the binary gives it there
+    ///   (the carried tie, ruling p11-t4k-faults of 2026-10-06: the pins ruling's "the carried or
+    ///   held mass otherwise").
+    /// - **Any other form** (a star the binary carries on another track, a held one, a merger's
+    ///   product) is read as it is now; if nothing living is left there is no collapse.
+    ///
+    /// [`Stop::Death`]: super::detached::Stop::Death
     pub(super) fn pinned_collapse(&mut self) {
         self.close_segment();
         let Some(pin) = self.pin.take() else {
             return;
         };
-        let (mass, tau) = self.current(0);
-        let living = self
-            .structure(0, self.age, mass, tau)
-            .is_some_and(|s| s.state.phase().is_living());
+        let own_death = self.own_death_now(pin.death.age().value());
+        if let (
+            Member::Track { .. },
+            Some(OwnDeath {
+                track,
+                offset_years,
+                death,
+            }),
+        ) = (&self.members[0], &own_death)
+        {
+            let p = death.progenitor();
+            let before = p.helium_core_mass().value() + p.envelope_mass().value();
+            let remnant = held_to(pin.remnant, before);
+            debug_assert!(
+                track.remnant() == Some(remnant),
+                "an untouched primary's own track shows plan 06's remnant: {:?} against {remnant:?}",
+                track.remnant()
+            );
+            self.set_member(
+                0,
+                Member::Track {
+                    track: std::sync::Arc::clone(track),
+                    offset: *offset_years,
+                },
+            );
+            self.explode(0, before, remnant, pin.kick);
+            return;
+        }
+        let (mass, living) =
+            if let (Member::Shaped { mass, .. }, Some(OwnDeath { track, death, .. })) =
+                (&self.members[0], own_death)
+            {
+                // A star the binary carries whose own track dies now: read on its closed forms at its
+                // last living instant, at the mass the binary gives it. That mass is the landing
+                // step's, as `die` reads it: the carried mass does not fall at the death, and differs
+                // from its path's at the last living instant only by the wind of 10⁻¹² of the age.
+                let carried = mass.last();
+                let last = last_living(death.age().value());
+                let living = track
+                    .structure_at(last, carried.max(1e-6))
+                    .state
+                    .phase()
+                    .is_living();
+                (carried, living)
+            } else {
+                let (mass, tau) = self.current(0);
+                let living = self
+                    .structure(0, self.age, mass, tau)
+                    .is_some_and(|s| s.state.phase().is_living());
+                (mass, living)
+            };
         if !living {
             return;
         }
-        // Plan 06's remnant is its single star's; a star the binary has stripped below it cannot
-        // leave more than itself, and keeps plan 06's kind at its own mass (a finding recorded in
-        // plan 11's Risks).
-        let remnant = if pin.remnant.mass().value() > mass {
-            CompactRemnant::new(pin.remnant.kind(), SolarMasses::new(mass))
-        } else {
-            pin.remnant
-        };
+        let remnant = held_to(pin.remnant, mass);
         let phase = match remnant.kind() {
             RemnantKind::BlackHole => Phase::BlackHole,
             RemnantKind::NeutronStar => Phase::NeutronStar,
@@ -256,6 +334,42 @@ impl Engine {
         };
         self.set_member(0, member);
         self.explode(0, mass, remnant, pin.kick);
+    }
+
+    /// The primary's own track at its death now, if member 0 is on the pin's own track (a star on
+    /// it, or one the binary carries on its closed forms) and that track dies now: its death's age
+    /// on the track is the pin's, `pin_age_years`, and it falls at the engine's age, both to the
+    /// resolution of the engine's clock ([`clock_resolution_years`]). For
+    /// [`Engine::pinned_collapse`].
+    #[must_use]
+    fn own_death_now(&self, pin_age_years: f64) -> Option<OwnDeath> {
+        let (track, offset) = match &self.members[0] {
+            Member::Track { track, offset } | Member::Shaped { track, offset, .. } => {
+                (track, *offset)
+            }
+            Member::MainSequence { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => return None,
+        };
+        let death = track.death()?;
+        let at = death.age().value();
+        let the_pins = (at - pin_age_years).abs() <= clock_resolution_years(pin_age_years);
+        if !the_pins || (at + offset - self.age).abs() > clock_resolution_years(self.age) {
+            return None;
+        }
+        // Placed as `die` places a death: at it or past it, never an ulp short.
+        let offset_years = if self.age - offset >= at {
+            offset
+        } else {
+            super::evolve::offset_for(self.age, at)
+        };
+        Some(OwnDeath {
+            track: std::sync::Arc::clone(track),
+            offset_years,
+            death,
+        })
     }
 
     /// Member `i`, of mass `before`, explodes now into `remnant` with `kick` (BSE appendix A1), the
@@ -460,4 +574,24 @@ impl Engine {
             };
         }
     }
+}
+
+/// Plan 06's `remnant` for a pinned primary of `mass_msun` M☉ before its collapse: its single
+/// star's, and of plan 06's kind at the star's own mass where the binary has stripped it below
+/// that, since a star cannot leave more than itself (a finding recorded in plan 11's Risks).
+#[must_use]
+fn held_to(remnant: CompactRemnant, mass_msun: f64) -> CompactRemnant {
+    if remnant.mass().value() > mass_msun {
+        CompactRemnant::new(remnant.kind(), SolarMasses::new(mass_msun))
+    } else {
+        remnant
+    }
+}
+
+/// The primary's own track at its death now ([`Engine::own_death_now`]).
+struct OwnDeath {
+    track: std::sync::Arc<sse::Track>,
+    /// The track's offset, years, placed so that the track is at its death at the engine's age.
+    offset_years: f64,
+    death: crate::stellar::remnant::Death,
 }
