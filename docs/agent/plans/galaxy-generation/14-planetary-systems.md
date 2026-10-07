@@ -6702,23 +6702,36 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     - The moved goldens and `planetary::derive`'s tests pass on `wasm32-wasip1` too.
     - The one slow test that holds T_eq to 10⁻³ a year passes, in 189 s:
       `radius_temperature_and_envelope_are_continuous_across_the_window_slow`.
-  - _Not changed, outside the ruling._ These are for the orchestrator:
-    - The wire example still gives `bond_albedo` 0.306 and `bond_ratio` 0.92153, "the
-      generator's temperate Bond albedo of 0.306". It is in `earth_photometry`
-      (`hyperion-protocol`'s `planetary/record.rs`) and twice in the shared fixture
-      `packages/protocol/fixtures/planetary.json`. These are illustrative values, not goldens.
-    - `irradiation.rs`'s planets test says its black-body temperatures are the sheets'. Earth's
-      255.0 K is right for 0.294, but it is not the sheet's 254.0 K.
-    - The `atmosphere()` doc example still gives Earth's equilibrium temperature as 254 K, the
-      figure at 0.306 (255.1 K now). It is an input there, and the example still passes, with T_s
-      within 2 K of 288 K. At 255 K it would sit near 290 K, at the edge of that bound.
+  - _Follow-up, on the orchestrator's rulings (a second commit under P14.T13.c)._ No golden and
+    no `GENERATOR_VERSION` moves.
+    - _The wire example._ `earth_photometry` (`hyperion-protocol`'s `planetary/record.rs`) and
+      the shared fixture `packages/protocol/fixtures/planetary.json`, twice, gave `bond_albedo`
+      0.306 and `bond_ratio` 0.92153. They now give 0.294 and 0.95914, the golden's 0.9591434 to
+      the old figure's five places. These are illustrative values, not goldens. The bindings are
+      generated from the types, so they do not change.
+    - _The `atmosphere()` doc example_ keeps its 254 K input, now called illustrative: Earth's at
+      0.306, and 255 K at 0.294. At 255 K the example gives T_s 289.70 K, only 0.30 K inside its
+      ±2 K bound about 288 K, under the 0.5 K margin the ruling asked for. At 254 K it gives
+      287.89 K.
+    - _`irradiation.rs`'s planets test_ no longer says Earth's black-body temperature is the
+      sheet's. Its 255 K follows from 0.294, and the sheet still prints 254.0 K, its figure at
+      0.306.
+    - _`reference_bond` reads the state table._ `SurfaceState::albedo` is a `const fn`, and every
+      row but snowball's takes `reference_bond` from it in the analogue's state, so the two cannot
+      drift apart:
+      - moon, mercury and magma (Mercury's curve) from airless rock;
+      - mars and earth from temperate;
+      - venus from the runaway greenhouse;
+      - the four giants from the gas envelope;
+      - airless_ice from airless ice.
+
+      Snowball keeps Europa's measured 0.68 (ruling 9). Every value keeps its bits.
   - _Reviewed._
     - The science check confirmed 0.294 and the ratio of 0.959, and corrected the date and the
       source as above. It could not see Loeb et al. 2018's Table 5 (paywalled). The same 99.1 and
       340.0 W m⁻² are in Table 4-1 of the CERES EBAF Ed4.1 Data Quality Summary.
     - The determinism auditor found nothing to fix. The constant is the only change that reaches
       output: no draw, tag, order or step count moves. Every moved value follows from it
-      bit for bit, and no golden that should have moved stayed put. Its hardening suggestion is
-      left for P14.T13.c's owner: a test that each analogue row's `reference_bond` has the bits
-      of its state's albedo, except magma (Mercury's 0.11) and snowball (Europa's 0.68). Today
-      only the goldens' p would catch the three 0.294 literals drifting apart.
+      bit for bit, and no golden that should have moved stayed put. It suggested tying each
+      analogue row's `reference_bond` to its state's albedo, so that the three 0.294 literals
+      could not drift apart. The follow-up above does so.

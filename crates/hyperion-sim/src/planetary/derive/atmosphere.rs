@@ -749,7 +749,7 @@ impl SurfaceState {
     ///   CERES's EBAF Ed4.0 gives 0.2915, Loeb et al. 2018, J. Climate 31, 895);
     /// - a snowball 0.50, between bare ice's 0.6 (Pierrehumbert et al. 2011) and Titan's hazy 0.27.
     #[must_use]
-    pub fn albedo(self, material: SurfaceMaterial) -> BondAlbedo {
+    pub const fn albedo(self, material: SurfaceMaterial) -> BondAlbedo {
         BondAlbedo::from_fraction(match self {
             Self::GasEnvelope => 0.34,
             Self::MagmaOcean => 0.10,
@@ -976,8 +976,9 @@ fn greenhouse(
 ///
 /// # Examples
 ///
-/// Earth, with its median inventory at its equilibrium temperature, keeps its air, warms to about
-/// 288 K and is temperate:
+/// An Earth with its median inventory keeps its air, warms to about 288 K and is temperate. Its
+/// equilibrium temperature of 254 K is illustrative: it is Earth's at the earlier temperate albedo
+/// of 0.306, and 255 K at today's 0.294.
 ///
 /// ```
 /// use hyperion_sim::planetary::derive::atmosphere::{

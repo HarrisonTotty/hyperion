@@ -207,8 +207,8 @@
                 "r": 1.0
               },
               "lunar_lambert_share": 0.0,
-              "bond_albedo": 0.306,
-              "bond_ratio": 0.92153,
+              "bond_albedo": 0.294,
+              "bond_ratio": 0.95914,
               "provisional": false
             }
           }
@@ -1107,8 +1107,8 @@
               "r": 1.0
             },
             "lunar_lambert_share": 0.0,
-            "bond_albedo": 0.306,
-            "bond_ratio": 0.92153,
+            "bond_albedo": 0.294,
+            "bond_ratio": 0.95914,
             "provisional": false
           }
         },

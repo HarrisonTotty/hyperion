@@ -269,6 +269,10 @@ pub struct TemplateRow {
     pub albedo: Bands,
     /// `A_ref`, the Bond albedo the generator gives the analogue body (decision-p14-phase-j,
     /// ruling 9): a body of that albedo is drawn with [`albedo`](Self::albedo) itself.
+    ///
+    /// Each row reads it from [`SurfaceState::albedo`] in the analogue's state, so that the two
+    /// cannot drift apart. The material matters only to an airless state. The exception is
+    /// snowball's, Europa's measured 0.68, since the generator would class Europa as airless ice.
     pub reference_bond: BondAlbedo,
     /// The exponents s in `Φ_t^s` per band.
     pub exponents: Bands,
@@ -297,7 +301,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
     TemplateRow {
         template: PhaseTemplate::Moon,
         albedo: Bands::grey(0.12),
-        reference_bond: BondAlbedo::from_fraction(0.11),
+        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MOON),
         lunar_lambert_share: 1.0,
@@ -314,7 +318,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.142,
             r: 0.172,
         },
-        reference_bond: BondAlbedo::from_fraction(0.11),
+        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MERCURY),
         lunar_lambert_share: 1.0,
@@ -331,7 +335,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.170,
             r: 0.288,
         },
-        reference_bond: BondAlbedo::from_fraction(0.294),
+        reference_bond: SurfaceState::Temperate.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MARS),
         lunar_lambert_share: 0.5,
@@ -348,7 +352,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.689,
             r: 0.708,
         },
-        reference_bond: BondAlbedo::from_fraction(0.76),
+        reference_bond: SurfaceState::RunawayGreenhouse.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_VENUS),
         lunar_lambert_share: 0.0,
@@ -369,7 +373,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.215,
             r: 0.210,
         },
-        reference_bond: BondAlbedo::from_fraction(0.294),
+        reference_bond: SurfaceState::Temperate.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_EARTH),
         lunar_lambert_share: 0.0,
@@ -386,7 +390,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.538,
             r: 0.495,
         },
-        reference_bond: BondAlbedo::from_fraction(0.34),
+        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_JUPITER),
         lunar_lambert_share: 0.0,
@@ -403,7 +407,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.499,
             r: 0.568,
         },
-        reference_bond: BondAlbedo::from_fraction(0.34),
+        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_SATURN),
         lunar_lambert_share: 0.0,
@@ -420,7 +424,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.488,
             r: 0.202,
         },
-        reference_bond: BondAlbedo::from_fraction(0.34),
+        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_URANUS),
         lunar_lambert_share: 0.0,
@@ -437,7 +441,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.442,
             r: 0.181,
         },
-        reference_bond: BondAlbedo::from_fraction(0.34),
+        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_NEPTUNE),
         lunar_lambert_share: 0.0,
@@ -450,7 +454,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
     TemplateRow {
         template: PhaseTemplate::AirlessIce,
         albedo: Bands::grey(0.43),
-        reference_bond: BondAlbedo::from_fraction(0.35),
+        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Ice),
         exponents: Bands::grey(S_AIRLESS_ICE),
         phase_integral: Bands::grey(0.80),
         lunar_lambert_share: 1.0,
@@ -464,6 +468,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
     TemplateRow {
         template: PhaseTemplate::Snowball,
         albedo: Bands::grey(0.67),
+        // Europa's measured Bond albedo, not a state's (ruling 9).
         reference_bond: BondAlbedo::from_fraction(0.68),
         exponents: Bands::grey(S_SNOWBALL),
         phase_integral: Bands::grey(1.01),
@@ -481,7 +486,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.142,
             r: 0.172,
         },
-        reference_bond: BondAlbedo::from_fraction(0.11),
+        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MERCURY),
         lunar_lambert_share: 1.0,

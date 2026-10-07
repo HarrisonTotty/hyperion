@@ -355,9 +355,12 @@ mod tests {
 
     #[test]
     fn the_planets_equilibrium_temperatures_follow_from_their_albedos() {
-        // Semi-major axes (au) and eccentricities from NASA's fact sheets; Bond albedos and
-        // black-body temperatures from the same sheets (fetched 2026-09-23), except Venus's 0.76,
-        // plan 14's, where the sheet has 0.77 and 226.6 K.
+        // Semi-major axes (au), eccentricities and Bond albedos from NASA's fact sheets (fetched
+        // 2026-09-23), except Venus's 0.76, plan 14's, where the sheet has 0.77 and 226.6 K.
+        // The ", fact sheet" rows take the sheets' black-body temperatures. The others give the
+        // temperature at the albedo listed, to the kelvin: Venus's 229 K is at 0.76, and Earth's
+        // 255 K follows from its 0.294 (the sheet still prints 254.0 K, its figure at the 0.306
+        // before its update of 11 January 2024).
         for (name, a, e, albedo, expected) in [
             ("Earth", 1.000_000_11, 0.016_7, 0.294, 255.0),
             ("Venus", 0.723_331_99, 0.006_8, 0.76, 229.0),
