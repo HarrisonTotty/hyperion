@@ -19,7 +19,7 @@ import {
   patchKeyString,
 } from "../terrain/patchKey";
 import { levelBoundM, type PlanetGeometry, planetGeometry } from "../terrain/planet";
-import { SELECTION_MARGIN } from "../terrain/selectionTolerance";
+import { RESELECT_MOVE_FRACTION, SELECTION_MARGIN } from "../terrain/selectionTolerance";
 import { type SlotLayout, terrainSlotLayout } from "../terrain/slotLayout";
 import { type BoundRule, boundedPlanet, type DemandView } from "./demand";
 import {
@@ -43,7 +43,7 @@ import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 /** The record's schema name. */
 export const DEMAND_RECORD_SCHEMA = "hyperion.descent-spike.demand";
 /**
- * The record's schema version; bumped with any change to its shape.
+ * The record's schema version; bumped with any change to its shape or to what a field means.
  *
  * @remarks
  * Version 2 (decision-r05-high-bound.md, F4): each segment adds τ′ and its steps, the coarse
@@ -55,8 +55,13 @@ export const DEMAND_RECORD_SCHEMA = "hyperion.descent-spike.demand";
  * adds the share of its limited frames whose τ′ exceeds τ, and the selection's time on the
  * thread's CPU clock beside its wall-clock time (lane B's finding that wall-clock times under load
  * measure the machine, 2026-10-05).
+ *
+ * Version 4 (2026-10-06) keeps version 3's shape, but its CPU times are exact: the script reads
+ * the thread's clock just after `process.cpuUsage`, where version 3's stepped by the kernel's
+ * tick, about 1 ms (lane B, R05.T7 perf (d)). The summary says so, so {@link mergeRecords}
+ * refuses version 3's files, which it would summarise as exact.
  */
-export const DEMAND_RECORD_VERSION = 3;
+export const DEMAND_RECORD_VERSION = 4;
 
 /** Whether the test planet's ridges are on. */
 export type RidgesSetting = "off" | "on";
@@ -155,7 +160,7 @@ export interface RecordedCell extends DemandCell {
   readonly loadAverage: ReadonlyArray<number>;
 }
 
-/** The record's file, `<date>-demand-<rules>.json` ({@link recordStem}), version 3. */
+/** The record's file, `<date>-demand-<rules>.json` ({@link recordStem}), version 4. */
 export interface DemandRecordFile {
   /**
    * {@link DEMAND_RECORD_SCHEMA} and {@link DEMAND_RECORD_VERSION} as written: a file read back
@@ -472,7 +477,11 @@ export function demandSummary(
     "second), the per-level prediction D, the share of frames `limited`, and the selection time.",
     "Timings are provisional unless the machine was quiet (Design note 27). The selection's wall-clock",
     "times are upper bounds under load, since a nice process waiting for a core counts the wait; its",
-    "time on the thread's CPU clock (`process.threadCpuUsage`, user and system) is its own work.",
+    "time on the thread's CPU clock (`process.threadCpuUsage`, user and system, read just after",
+    "`process.cpuUsage`, which brings the thread's count up to date on a kernel that counts CPU time",
+    "in ticks) is its own work. Both are taken under Vite's module runner, where each read of an",
+    "imported binding is a getter call that the bundled game does not make, so they need not be the",
+    "game's times (R05's Risks, \"The record's module runner\").",
     ...(unloaded === 0
       ? []
       : [
@@ -482,9 +491,10 @@ export function demandSummary(
     "",
     `Selected at τ ÷ ${1 + SELECTION_MARGIN}, the terrain pass's τ_sel; D at the same tolerance; selected every`,
     "frame, without the pass's cadence (decision-r05-record-tau.md). The pass's selection at a frame",
-    `is the record's at a pose at most ${SELECTION_MARGIN} × d_min earlier, which moves the demand in time, not in`,
-    "size. Of the `limited` frames, the first table gives the share whose τ′ exceeds the setting's",
-    "τ: at τ_sel, a limited frame may still draw within τ.",
+    `is the record's at a pose at most m ÷ (1 + m) = ${RESELECT_MOVE_FRACTION.toFixed(4)} × d_min earlier, for the margin`,
+    `m = ${SELECTION_MARGIN}, which moves the demand in time, not in size. Of the \`limited\` frames, the first`,
+    "table gives the share whose τ′ exceeds the setting's τ: at τ_sel, a limited frame may still draw",
+    "within τ.",
     "",
     "The second table of each cell (decision-r05-high-bound.md, F4):",
     "",

@@ -21,10 +21,11 @@
  * tolerance τ′ (`Selection.limitExcess`), the coarse stand-ins drawn, and the forced region's
  * bakes.
  *
- * It selects at the terrain pass's τ_sel = τ ÷ (1 + `SELECTION_MARGIN`) (`selectionTolerancePx`),
- * and computes D at the same tolerance (decision-r05-record-tau.md). It selects every frame,
- * without the pass's cadence: the pass's selection at a frame is the run's at a pose at most
- * `SELECTION_MARGIN` × d_min earlier, which moves the demand in time, not in size.
+ * It selects at the terrain pass's τ_sel = τ ÷ (1 + m), m = `SELECTION_MARGIN`
+ * (`selectionTolerancePx`), and computes D at the same tolerance (decision-r05-record-tau.md). It
+ * selects every frame, without the pass's cadence: the pass's selection at a frame is the run's at
+ * a pose at most `RESELECT_MOVE_FRACTION` = m ÷ (1 + m), about 0.0909, × d_min earlier, which moves
+ * the demand in time, not in size.
  */
 
 import { vec3 } from "../../geometry/vec3";
@@ -227,8 +228,8 @@ export interface FixedStepOptions {
   readonly nowMs: () => number;
   /**
    * The thread's CPU-time clock `selectPatches` is also timed by, ms: user and system time, as
-   * Node's `process.threadCpuUsage` gives it (the record's script). None by default, the CPU
-   * times then null.
+   * Node's `process.threadCpuUsage` gives it just after `process.cpuUsage` (the record's script).
+   * None by default, the CPU times then null.
    */
   readonly cpuNowMs?: () => number;
   /**

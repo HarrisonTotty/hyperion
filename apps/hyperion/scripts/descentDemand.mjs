@@ -16,11 +16,14 @@
 // record, and the record is rewritten after every cell, so a killed run keeps the cells it ended.
 // Each --note is a line of the record's notes. --merge runs nothing: it writes one record into
 // --out from the records given, their cells in that order, as the cells run one process each.
-// Selection is timed on the wall clock and on this thread's CPU clock (`process.threadCpuUsage`):
-// under load the first counts the waits for a core, the second the selection's own work. Each
-// cell records the machine's load average as it ended, from Node's `os.loadavg()` through
-// `src/main/machineLoad.ts`, so that the record runs on every platform; Windows keeps none, and
-// its cells record an empty list (R05.T20).
+// Selection is timed on the wall clock and on this thread's CPU clock (`process.threadCpuUsage`,
+// read just after `process.cpuUsage`, which makes it exact; `src/tools/threadCpuClock.ts`): under
+// load the first counts the waits for a core, the second the selection's own work. Both run under
+// Vite's module runner, whose getters for imported bindings the bundled game does not call, so they
+// need not be the game's times (R05's Risks, "The record's module runner"). Each cell records the
+// machine's load average as it ended, from Node's `os.loadavg()` through `src/main/machineLoad.ts`,
+// so that the record runs on every platform; Windows keeps none, and its cells record an empty
+// list (R05.T20).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { loadavg } from "node:os";
 import { dirname, join } from "node:path";
@@ -57,18 +60,6 @@ function writeRecord(record, out, stem, file) {
 
 const nowMs = () => performance.now();
 
-/**
- * This thread's CPU time, user and system, ms: what the selection itself costs under load. Node
- * before 23.9 lacks `process.threadCpuUsage`; the record's CPU times are then null.
- */
-const cpuNowMs =
-  typeof process.threadCpuUsage === "function"
-    ? () => {
-        const { user, system } = process.threadCpuUsage();
-        return (user + system) / 1000;
-      }
-    : undefined;
-
 async function main(args) {
   // A file URL, since Node's loader refuses a Windows path (`C:\...`) as a module specifier.
   const surface = await import(
@@ -85,6 +76,13 @@ async function main(args) {
     configFile: false,
     logLevel: "error",
   });
+  const { module: cpuClock } = await runnerImport(join(app, "src/tools/threadCpuClock.ts"), {
+    configFile: false,
+    logLevel: "error",
+  });
+  // This thread's CPU time, ms, exact (`src/tools/threadCpuClock.ts`); none before Node 23.9,
+  // the record's CPU times then null.
+  const cpuNowMs = cpuClock.threadCpuClockMs(process);
   const notes = options(args, "note");
   const out = option(args, "out", join(repo, "docs/measurements/descent-spike"));
   const merge = option(args, "merge", null);

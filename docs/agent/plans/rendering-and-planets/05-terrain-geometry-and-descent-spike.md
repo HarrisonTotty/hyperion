@@ -2847,6 +2847,44 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   agents' tests; every figure in this plan measured today, including the research agents' Threefry
   timing and the estimates built on it, is re-measured on a quiet machine (Design note 27) before it
   decides anything.
+- **The record's module runner** (2026-10-06, lane D, R05.T13.a's follow-up). The record's
+  script (`just descent-demand`) runs its TypeScript through Vite's module runner (`runnerImport`),
+  where each read of an imported binding is a getter call. The bundled game reads them directly, and
+  R05.T7 perf (d) bound selection's hot imports once at module level for that reason. The record's
+  selection times therefore need not be the game's, and its summary says so beside the timing
+  columns (record version 4).
+  - _Measured on today's code_ (`target/laneD/rcpu/ab.sh` and `rb.mjs`, scratch, not committed):
+    - The 14 fixture windows (seed 7, ridges off, min(hard, 4σ_n), 64 Hz) ran through `runCell`
+      on the exact CPU clock, five measured passes after one of warm-up.
+    - Each form ran in its own process: the runner, and an esbuild bundle of `demandRecord.ts`, the
+      game's form, as perf (d) bundled its variants.
+    - Four rounds of each, interleaved ABBA, under `just _locked`, nice 0, schedutil, at loads
+      6–11.
+    - Both forms gave the 14 pinned hashes.
+
+    | Selection CPU time (ms), range over rounds | Runner                    | Bundle                    |
+    | ------------------------------------------ | ------------------------- | ------------------------- |
+    | High: sum over 4,515 selections            | 988–1,104                 | 1,115–1,259               |
+    | High: p50 / p95                            | 0.163–0.170 / 0.697–0.738 | 0.167–0.174 / 0.851–0.931 |
+    | Low: sum over 4,515 selections             | 672–789                   | 774–833                   |
+    | Low: p50 / p95                             | 0.082–0.088 / 0.532–0.610 | 0.086–0.088 / 0.644–0.734 |
+
+    The bundle was not faster: about 14% more CPU time in all, p95 about 20% higher, p50 within
+    5%. Why was not examined. So on these windows the record's selection times do not overstate a
+    bundled build's.
+
+  - _Not the runner against the bundle._ Lane B's 2.75 against 1.77 ms (perf (d), "In the game's
+    form") is the old selection against the new, both bundled. On the record's path the same step
+    went from 2.68 to 1.43 ms (CPU p95). No measurement yet sets the runner beside the bundle on the
+    ridged high approach, where perf (d) found the getters costly before it bound them.
+  - _Bundling the record's runner: described, not built._ The script would build `demandRecord.ts`,
+    `machineLoad.ts` and `threadCpuClock.ts` into one ES module before importing it, by file URL
+    (for Windows), from a cache directory. The tool would be Vite's own `build` (rolldown, SSR
+    mode, which needs a config and a written output) or esbuild, which bundles it in one call (a
+    scratch build did) but is only a dependency of the toolchain, not of the app. That is not
+    trivial, and by the measurement above it would not bring the times nearer the game's. Neither
+    Node form is the renderer's rolldown bundle running in Chromium's V8. The figures of record for
+    selection time stay the perf A/Bs and the owner's runs of the built client (T16, T17).
 - **The cache layout is R10's, built here.** R05 builds fixed slots, storage buffers and the
   instanced draw to R10's specification (Design note 10) so that nothing is rebuilt; if R10's
   plan changes the layout before T8 runs, T8 follows R10. `BakedOffsets` is barred from the low
@@ -2901,7 +2939,8 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
     about morph 0.93 for a level whose bound halves, a step the skirts covered.
   - _Unchanged._ τ_sel stays, and so does T13.a's record, which selects every frame and never
     reads the move. Its 14 pinned window hashes reproduce. Its header's "at most 0.1 × d_min
-    earlier" still holds, now at most 0.0909.
+    earlier" still holds, now at most 0.0909. Since R05.T13.a's follow-up (2026-10-06) the header
+    says "at most m ÷ (1 + m) = 0.0909 × d_min earlier".
   - _Not covered, as before._ Unbaked leaves, which the streaming gate holds and
     `TERRAIN: STREAMING` reports, are outside the bound. The floor of one finest patch (20.7 m)
     on d_min loosens it for no leaf that meets τ_sel at the settings' views: a level-18 leaf meets
@@ -6610,6 +6649,7 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       steps of about 1 ms, and `/proc/thread-self/schedstat` steps with it; Node has no
       `CLOCK_THREAD_CPUTIME_ID`. So the CPU percentiles hold to about ±1 ms: enough to tell
       selection's work from a starved process's waits, not the last millisecond of 4d's 2 ms.
+      Record version 4 reads the clock exactly (the follow-up below).
       - High, ridges off: coast 1.0 / 1.0, arc 2.0 / 2.1, approach 3.9 / 3.8, low pass
         3.0 / 3.6, slowdown 3.0 / 2.6.
       - High, ridges on (16 Hz): 2.0 / 2.2, 3.0 / 2.9, 5.0 / 5.3, 3.0 / 2.8 and 2.0 / 1.6. The
@@ -6619,6 +6659,92 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
       - The largest single selections reach 528 ms on the wall clock but at most 26 ms of CPU
         on high and 51 ms on low. The rest of a wall-clock maximum is time the thread spent off
         its core.
+  - **The follow-up: the CPU clock, the move's wording and the margin's name** (2026-10-06, lane
+    D; record version 4).
+    - _The CPU column is exact._ Read alone, `process.threadCpuUsage()` gives the thread's runtime
+      as of the scheduler's last update, which this kernel makes once a tick (R05.T7 perf (d),
+      lane B's finding). Version 3's CPU times therefore came in steps of about 1 ms. The script
+      now reads the thread's clock just after `process.cpuUsage()`, which brings the calling
+      thread's runtime up to date first.
+      - The clock is `threadCpuClockMs` in `src/tools/threadCpuClock.ts` (new). The script loads
+        it through Vite's runner, as it loads `machineLoad.ts`.
+      - Its test stands in a kernel that counts CPU time in ticks, and fails without the call.
+      - `FixedStepOptions.cpuNowMs`'s doc and the script's header say how the clock is read.
+      - Off Linux the call is harmless. The resolution there is the system's and unmeasured:
+        Windows's thread times are known to step at the clock interrupt, 15.6 ms by default.
+    - _Shown on a short CPU-only replay_ (`target/laneD/rcpu/paired.mjs`, scratch). The 14 fixture
+      windows (seed 7, ridges off, min(hard, 4σ_n), 64 Hz) ran through `runCell` with each
+      reading in its own runs: three rounds, alternating, 5,418 selections each, at loads 20–22.
+      Separate runs are needed, since the call updates the runtime that a plain reading would
+      see.
+
+      | Reading                     | CPU p50 / p95 / max (ms) | Readings of 0 | On a 0.997 ms step | Within 20 µs of wall |
+      | --------------------------- | ------------------------ | ------------- | ------------------ | -------------------- |
+      | `threadCpuUsage` alone (v3) | 0.000 / 0.996 / 7.557    | 78.1%         | 94.0%              | 0.7%                 |
+      | after `cpuUsage` (v4)       | 0.130 / 0.754 / 5.703    | 0.0%          | 0.2%               | 98.8%                |
+
+      The exact reading's distance from the wall clock is 0.4 µs at p50 and 6.9 µs at p95 (126 µs
+      and 861 µs before). A reading costs 1.46 µs against 0.55 µs, so a selection's two cost about
+      1.8 µs more. Both readings' 14 hashes are the pinned ones.
+
+    - _New figures at seed 7_ (`target/laneD/rcpu/cells/`, scratch, not committed as a record).
+      - Three hard-bound cells ran in full with the exact clock: high and low with ridges off at
+        64 Hz, and high with ridges on at 16 Hz.
+      - Each ran as F4's did: its own process, nice, in a capped scope, CPU only, no lock. Loads
+        were 11–17 and wall times 372, 1,970 and 2,796 s.
+      - The machine's crash at 18:35 cut the first ridged run short. It was re-run alone after
+        the reboot.
+      - Each hash, and every figure but the times, equals the `-2` record's.
+
+      `selectPatches`' CPU time, p50 / p95 / max (ms), then the `-2` record's (version 3):
+
+      | Segment             | High, off            | v3                  | Low, off           | v3                 | High, on (16 Hz)   | v3                  |
+      | ------------------- | -------------------- | ------------------- | ------------------ | ------------------ | ------------------ | ------------------- |
+      | orbit coast         | 0.37 / 0.62 / 1.48   | 1.00 / 1.00 / 2.79  | 0.06 / 0.12 / 0.67 | 0.00 / 0.99 / 1.05 | 1.25 / 2.13 / 2.93 | 1.99 / 2.00 / 4.31  |
+      | descent arc         | 0.64 / 1.42 / 142.16 | 1.00 / 1.99 / 12.75 | 0.06 / 0.16 / 4.49 | 0.00 / 0.99 / 8.13 | 0.85 / 1.72 / 4.03 | 1.99 / 2.98 / 6.91  |
+      | approach and flare  | 1.14 / 2.08 / 13.06  | 1.99 / 3.93 / 26.25 | 0.19 / 0.42 / 1.12 | 0.97 / 1.25 / 3.08 | 1.38 / 2.58 / 6.18 | 2.98 / 4.97 / 26.34 |
+      | low fast pass       | 0.97 / 1.72 / 3.28   | 1.99 / 3.01 / 6.92  | 0.23 / 0.56 / 1.26 | 0.99 / 1.00 / 1.99 | 1.33 / 2.43 / 5.10 | 1.99 / 2.99 / 4.98  |
+      | slowdown            | 0.56 / 1.15 / 13.37  | 1.00 / 2.95 / 6.76  | 0.23 / 0.50 / 1.57 | 0.00 / 1.00 / 1.98 | 0.63 / 1.09 / 2.16 | 1.00 / 2.00 / 2.40  |
+      | vertical descent    | 0.12 / 0.26 / 0.61   | 0.00 / 1.00 / 1.00  | 0.16 / 0.20 / 0.48 | 0.00 / 1.00 / 1.00 | 0.12 / 0.18 / 0.53 | 0.00 / 1.00 / 1.00  |
+      | hover and touchdown | 0.10 / 0.11 / 0.45   | 0.00 / 1.00 / 22.79 | 0.10 / 0.15 / 4.01 | 0.00 / 1.00 / 9.95 | 0.10 / 0.12 / 0.62 | 0.00 / 1.00 / 1.00  |
+
+      Version 3's readings sat on whole ticks (0, 1.00, 1.99); version 4's do not. The new times
+      also carry perf (d) (39e7534), which the `-2` records predate; the replay above isolates the
+      clock.
+
+      - Wall-clock p95 is within 0.21 ms of CPU p95 in every segment on high with ridges off,
+        0.02 ms on low and 0.49 ms on the ridged cell.
+      - High ridges-off's arc holds one selection of 142 ms of CPU, not examined: a garbage
+        collection on the thread is one candidate.
+      - _Finding, for T18 and lane B._ At τ_sel the ridged high approach's CPU p95 is 2.58 ms, and
+        high ridges-off's is 2.08 ms: both above 4d's 2 ms. The ridged coast (2.13 ms) and low
+        fast pass (2.43 ms) are above it too. Perf (d)'s 1.43 ms was measured at τ, where fewer
+        of the approach's frames are limited (74% against 84%). These are provisional: loads of
+        11–13, nice, under the module runner. The bundled game's figures are the owner's T17
+        runs.
+
+    - _The move's wording._ `fixedStep.ts`'s module doc and the record's header said the pass's
+      selection at a frame is the record's "at a pose at most 0.1 × d_min earlier". That held
+      until 13b011b (R05.T11.c, 2026-10-05, Risks, "The cadence's 1%"), after which the bound is
+      m ÷ (1 + m), about 0.0909. Both now say so, the header from `RESELECT_MOVE_FRACTION` itself:
+      "at most m ÷ (1 + m) = 0.0909 × d_min earlier, for the margin m = 0.1".
+    - _Record version 4._ The version rule is the record's shape, which has not changed. But the
+      CPU column's meaning has, and the header now says the reading is exact. So `mergeRecords`
+      refuses version 3's files, which it would otherwise summarise as exact; a test holds that.
+      The header also says the times are taken under Vite's module runner (Risks, "The record's
+      module runner").
+    - _The committed records are not refreshed._ The clock never moves selection: the hashes
+      agree. So only the `-2` records' CPU column is coarse, and their notes already hold it to
+      about ±1 ms. Selection times are provisional either way: the figures of record are lane B's
+      A/Bs and the owner's quiet-machine runs, and a refresh earns its place only beside those.
+      `2026-10-05-demand-{hard,calibrated}-2.md` gain a banner on the CPU column, the move's
+      wording and the runner. Their JSON is unchanged, still version 3.
+    - _The rename._ `RESELECT_FRACTION` is now `SELECTION_MARGIN`: since 13b011b it is the
+      selection's margin m, and the move is `RESELECT_MOVE_FRACTION`. It runs across lanes B, C
+      and D's files: `selectionTolerance.ts`, `terrainPass.ts`, `fixedStep.ts`, `demandRecord.ts`
+      and their tests. The output is bit-identical: the 14 pinned hashes and the fixture are
+      unchanged, and the header still prints τ ÷ 1.1. The plan's dated records keep the old name.
+      Its text on the live code ("The cadence's 1%", T11.c's cadence) uses the new one.
   - **Resolved: the selection's "collapse" near the ground** (2026-10-03). It was the record's
     camera underground (the direction above), not selection: lane B's
     `belowDatum.wasm.test.ts` selects down to the finest level 1.6 m above the true ground. With

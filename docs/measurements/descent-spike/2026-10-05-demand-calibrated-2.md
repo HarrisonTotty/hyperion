@@ -1,5 +1,20 @@
 # Descent demand record, 2026-10-05
 
+**Corrected 2026-10-06** (R05.T13.a's follow-up, record version 4). The record stands and its
+JSON is unchanged. Two of its statements are corrected, and two caveats are added:
+
+- Its CPU column read `process.threadCpuUsage` alone, which on this kernel steps by the scheduler's
+  tick, about 1 ms, as the notes say. Version 4 reads the thread's clock just after
+  `process.cpuUsage`, which makes it exact. No other figure depends on the clock: the hashes agree.
+- "At most 0.1 × d_min earlier" described the terrain pass before 13b011b (R05.T11.c, after this
+  record). The pass now re-selects on a move of m ÷ (1 + m) = 0.0909 × d_min. The record selects
+  every frame, so none of its figures moves.
+- Its times were taken under Vite's module runner, whose getters for imported bindings the bundled
+  game does not call, so they need not be the game's (R05's Risks, "The record's module runner").
+- Its times predate R05.T7 perf (d) (39e7534), which made selection about half as costly with its
+  output unchanged bit for bit. Every figure but the times is still current; R05.T13.a's follow-up
+  in the plan gives three hard-bound cells re-timed at seed 7 with the exact clock.
+
 Notes:
 
 - Selected at the terrain pass's τ ÷ 1.1 (τ_sel), with D at the same tolerance (decision-r05-record-tau.md, R05.T13.a's follow-up, 24cd2cf), and each selection timed on the thread's CPU clock as well as the wall clock (8c8910f). Otherwise flown as F4's record: the level orbit coast, F1–F3 and selection's perf (c), with T14.c's cache keeping no bake's arrays, which selection does not see. Supersedes 2026-10-05-demand-calibrated, which selected at τ.

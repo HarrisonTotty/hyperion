@@ -223,7 +223,7 @@ function fileOf(startedAt: string, cells: RecordedCell[]): DemandRecordFile {
   };
 }
 
-describe("the record's file (version 3)", () => {
+describe("the record's file (version 4)", () => {
   const [high] = SETTING_VIEWS;
   /** A short orbit-coast cell of `rule`, under a budget of `maxPatches`, as the script records it. */
   const cellOf = (rule: "hard" | "calibrated", maxPatches: number): RecordedCell => {
@@ -290,6 +290,12 @@ describe("the record's file (version 3)", () => {
     );
   });
 
+  it("refuses version 3's files, whose CPU times stepped by the kernel's tick", () => {
+    const cell = cellOf("hard", 981);
+    const tickGrained = { ...fileOf("2026-10-05T00:00:00.000Z", [cell]), version: 3 };
+    expect(() => mergeRecords([tickGrained], [])).toThrow(/version 3/);
+  });
+
   it("refuses to merge records of two seeds", () => {
     const cell = cellOf("hard", 981);
     const other = { ...fileOf("2026-10-04T00:00:00.000Z", [cell]), seed: "5" };
@@ -339,6 +345,24 @@ describe("the record's file (version 3)", () => {
   it("states the tolerance it selects at, the terrain pass's", () => {
     expect(demandSummary([], "2026-10-05T00:00:00Z")).toContain(
       "Selected at τ ÷ 1.1, the terrain pass's τ_sel; D at the same tolerance;",
+    );
+  });
+
+  it("states the terrain pass's re-selection move as m ÷ (1 + m) of d_min", () => {
+    const summary = demandSummary([], "2026-10-06T00:00:00Z").replaceAll("\n", " ");
+    expect(summary).toContain("at a pose at most m ÷ (1 + m) = 0.0909 × d_min earlier");
+    expect(summary).toContain(`for the margin m = ${SELECTION_MARGIN},`);
+  });
+
+  it("says its CPU clock is read just after the process's", () => {
+    expect(demandSummary([], "2026-10-06T00:00:00Z").replaceAll("\n", " ")).toContain(
+      "read just after `process.cpuUsage`",
+    );
+  });
+
+  it("says its times, taken under Vite's module runner, need not be the game's", () => {
+    expect(demandSummary([], "2026-10-06T00:00:00Z").replaceAll("\n", " ")).toContain(
+      "Both are taken under Vite's module runner, where each read of an imported binding is a getter call that the bundled game does not make, so they need not be the game's times",
     );
   });
 
