@@ -575,7 +575,8 @@ impl Glare {
     /// not its overflow, whose light the band holds) as `observer` sees them, over the texels of a
     /// band of `spec`, the band whose limits it sets.
     ///
-    /// Each star's photopic illuminance is its unextinguished light through its own
+    /// Each star's photopic illuminance is its unextinguished light (its V less its own V band's
+    /// extinction, R06.T8.k) through its own
     /// [`StarColour::reddened`](super::colour::StarColour::reddened) at its extinction, as the
     /// band's overflow points take it, and its scotopic light that times the reddened S/P ratio. A
     /// star at the observer's own position, which has no direction, adds no glare.
@@ -602,7 +603,7 @@ impl Glare {
                 let direction =
                     UnitVector::from_components(origin.displacement_to(star.apparent()).metres());
                 let reddened = star.colour().reddened(star.a_v());
-                let photopic = unextinguished_lux(star.colour(), star.v(), star.a_v())
+                let photopic = unextinguished_lux(star.colour(), star.v(), &reddened)
                     * reddened.photopic_transmission();
                 GlareSource {
                     direction,
@@ -1548,7 +1549,9 @@ mod tests {
             .iter()
             .map(|star| {
                 let reddened = star.colour().reddened(star.a_v());
-                let unextinguished = illuminance_of_magnitude(star.v() - star.a_v()).value()
+                // The census's V holds the star's own V extinction (R06.T8.k).
+                let unextinguished = illuminance_of_magnitude(star.v() - reddened.v_extinction())
+                    .value()
                     * star.colour().lux_per_v0();
                 (
                     UnitVector::from_components(origin.displacement_to(star.apparent()).metres())

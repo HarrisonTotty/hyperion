@@ -14,8 +14,8 @@ pub mod query;
 
 pub use cache::{NoSkyCellCache, Served, SkyCellCache, serve_from_entry};
 pub use cell::{
-    Bound, CellOffsets, CensusTallies, EYE_OFFSET_BOUND_MAG, GRID_STAR_BOUND, LayerTally, SkyStar,
-    cell_floor, cell_offset_bound, census_cell, census_record, flux_bound, star_offset_bound,
+    Bound, CellOffsets, CensusTallies, GRID_STAR_BOUND, LayerTally, SkyStar, cell_floor,
+    cell_offset_bound, census_cell, census_record, flux_bound, star_offset_bound,
 };
 pub use merge::{SkyCensus, merge_census, sky_order};
 pub use query::{

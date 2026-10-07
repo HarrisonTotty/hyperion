@@ -13,8 +13,11 @@
 //! [`LuminosityTables::age_for`]), dimmed by the node's extinction:
 //!
 //! - **within the layer's complete-to radius** ([`CompleteTo`]), the light of its stars fainter
-//!   than the cut there, M<sub>V</sub> = cut − DM(d) − A<sub>V</sub>(d), since the census lists the
-//!   brighter ones;
+//!   than the cut there, M<sub>V</sub> = cut − DM(d) − v☉(A<sub>V</sub>) A<sub>V</sub>(d), since
+//!   the census lists the brighter ones: the census cuts each star's own V, M<sub>V</sub> + DM plus
+//!   its own V band's extinction, and the band takes the solar point's V band
+//!   ([`Reddened::v_extinction`] of [`solar_colour`]'s curves; R06.T8.k, decided 2026-10-06,
+//!   `decision-r06-t9b-band.md`, addendum item 4);
 //! - **beyond it, all of the layer's light** (decided 2026-10-05, `decision-r06-census-cost.md`):
 //!   so a sky that is still filling in is as bright as the final one, and the expected light of the
 //!   stars beyond the caps is carried rather than dropped. The boundary is the census's
@@ -30,8 +33,11 @@
 //! expectation, not star by star. Two edges of that bookkeeping are the census's, not the band's
 //! (R06's Risks, "The band's conservation"): a final census lists every star of the cells it opens,
 //! some just beyond its caps, whose light the band holds too, as the caps' stated expected count
-//! beyond allows; and where the eye is asked the census keeps each star to the cut plus its colour
-//! offset, while the band subtracts at the cut alone, as Design note 15 states it (until R06.T8.k).
+//! beyond allows; and the census's boundary in V is each star's own V extinction while the band's
+//! is the solar point's, (v★ − v☉) A<sub>V</sub> apart, under 0.05 mag at A<sub>V</sub> 2 and some
+//! 0.2 at 10, which moves a thin sliver of dimmed light between the two (addendum item 4). The
+//! census keeps each star to the cut alone, with the eye or without it, and within a query's cone
+//! only, so the eye's colour offset and the cone's edge are boundaries the two share (R06.T8.k).
 //!
 //! The light is reddened by the dust in front of it (R06.T9.e; decided 2026-10-06,
 //! `decision-r06-t9b-band.md`, item 3 and its addendum), through [`StarColour::reddened`]: each
@@ -73,7 +79,7 @@ use crate::id::Layer;
 use crate::math;
 use crate::time::Span;
 use crate::units::consts::{
-    METRES_PER_LIGHT_YEAR, RADIANS_PER_DEGREE, SECONDS_PER_JULIAN_YEAR, SOLAR_ABSOLUTE_MAGNITUDE_V,
+    METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR, SOLAR_ABSOLUTE_MAGNITUDE_V,
 };
 use crate::units::{CandelasPerSquareMetre, LightYears, Magnitudes};
 
@@ -519,7 +525,7 @@ fn dimmed(sums: [f64; 4], dust: &Reddened) -> Sums {
     ]
 }
 
-/// The five sums ([`Sums`]) of a star of colour `colour`, apparent V `v` after an extinction of
+/// The five sums ([`Sums`]) of a star of colour `colour`, apparent V `v` behind a sightline of
 /// `a_v`, lux: its photopic illuminance unextinguished ([`unextinguished_lux`]) times its colour,
 /// reddened by its own [`StarColour::reddened`] at `a_v`: each channel by its own transmission,
 /// the photopic and the scotopic light by theirs.
@@ -530,24 +536,24 @@ fn dimmed(sums: [f64; 4], dust: &Reddened) -> Sums {
 /// total.
 #[must_use]
 fn point_lux(colour: &StarColour, v: Magnitudes, a_v: Magnitudes) -> Sums {
-    let light = unextinguished_lux(colour, v, a_v);
+    let reddened = colour.reddened(a_v);
+    let light = unextinguished_lux(colour, v, &reddened);
     let [red, green] = colour.red_green();
     dimmed(
         [light, light * red, light * green, light * colour.sp_ratio()],
-        &colour.reddened(a_v),
+        &reddened,
     )
 }
 
-/// The photopic illuminance, lux, of a star of colour `colour` and apparent V `v` after an
-/// extinction of `a_v`, were there no dust: V less the extinction, through its `lux_per_v0`. Its
-/// photopic illuminance is this times its [`Reddened::photopic_transmission`] at `a_v`, as the
-/// band's overflow points and the limit map's glare take it.
-///
-/// The census's V is M<sub>V</sub> + DM + `A_V` until R06.T8.k, which makes it the star's own V
-/// extinction ([`Reddened::v_extinction`]); this subtraction follows it there.
+/// The photopic illuminance, lux, of a star of colour `colour` and apparent V `v` behind the dust
+/// `reddened` (its colour's [`StarColour::reddened`] at its sightline's A<sub>V</sub>), were there
+/// no dust: V less its own V band's extinction ([`Reddened::v_extinction`]), as the census measures
+/// V (R06.T8.k), through its `lux_per_v0`. Its photopic illuminance is this times
+/// [`Reddened::photopic_transmission`], as the band's overflow points and the limit map's glare
+/// take it.
 #[must_use]
-pub(super) fn unextinguished_lux(colour: &StarColour, v: Magnitudes, a_v: Magnitudes) -> f64 {
-    illuminance_of_magnitude(v - a_v).value() * colour.lux_per_v0()
+pub(super) fn unextinguished_lux(colour: &StarColour, v: Magnitudes, reddened: &Reddened) -> f64 {
+    illuminance_of_magnitude(v - reddened.v_extinction()).value() * colour.lux_per_v0()
 }
 
 /// The photopic illuminance of one L☉,V at 10 pc times (10 pc)² in ly², lux ly²: the band's K, so
@@ -777,7 +783,9 @@ impl Rays {
                 Span::from_seconds_f64(distance * SECONDS_PER_JULIAN_YEAR)
                     .expect("a light time within the root cube's diagonal is a span"),
             );
-            let limit = Magnitudes::new(cut - distance_modulus(distance) - extinction.value());
+            // The census cuts each star's own V; the band, the solar point's (R06.T8.k).
+            let limit =
+                Magnitudes::new(cut - distance_modulus(distance) - through.v_extinction().value());
             for (l, &radius) in radii_ly.iter().enumerate() {
                 let side = Side::of(distance, radius);
                 let light = self.layer_light(tables, l, &point, &densities, limit, ago, side);
@@ -807,10 +815,12 @@ impl Rays {
 /// `census` is the census the band completes and `complete_to` the radii to which it is complete:
 /// within them the band holds the light fainter than `query`'s cut, beyond them all of the light,
 /// and the census's overflow as points. A query with a cone is complete only within it: every ray
-/// outside the cone holds all of the light. The light is reddened by the dust in front of it, each
-/// node's by the solar point's ratios and each overflow star's by its own (R06.T9.e). `ctx`
-/// supplies the luminosity tables, the gas modifiers and the noise cache of the rays' profiles;
-/// its other fields are not read.
+/// outside the cone holds all of the light, and the census lists only the stars inside it
+/// (R06.T8.k). The light fainter than the cut is taken below M<sub>V</sub> = cut − DM − v☉
+/// A<sub>V</sub>, the solar point's V extinction (R06.T8.k). The light is reddened by the dust in
+/// front of it, each node's by the solar point's ratios and each overflow star's by its own
+/// (R06.T9.e). `ctx` supplies the luminosity tables, the gas modifiers and the noise cache of the
+/// rays' profiles; its other fields are not read.
 ///
 /// Each texel is a function of its own ray and of the overflow, so the texels of any split of a
 /// face's rows, appended in order, are one call's over the face, bit for bit; the noise cache
@@ -926,12 +936,9 @@ fn band_rows_through(
     }
     let width = usize::from(side);
     let to_luminance = light_to_lux_ly2();
-    let cone = query.cone().map(|cone| {
-        (
-            cone.axis(),
-            math::cos(cone.half_angle().value() * RADIANS_PER_DEGREE),
-        )
-    });
+    let cone = query
+        .cone()
+        .map(|cone| (cone.axis(), cone.cos_half_angle()));
     let mut rays = Rays::new(galaxy, dust);
     let mut texels: Vec<Sums> = Vec::with_capacity(rows.len() * width);
     for row in rows.clone() {
@@ -991,6 +998,7 @@ mod tests {
     use crate::sky::eye::surface_brightness;
     use crate::sky::testing::{milky_way_envelope, milky_way_offsets, milky_way_tables};
     use crate::time::UniverseTime;
+    use crate::units::consts::RADIANS_PER_DEGREE;
     use crate::units::{Degrees, HydrogenPerCm3, MagnitudesPerArcsec2};
 
     /// The Sun's place in the fixture, ly, as the sim's other sky tests stand.
@@ -1212,35 +1220,66 @@ mod tests {
             .collect()
     }
 
+    /// Whether a test's queries ask for the eye, which since R06.T8.k moves no star of the census.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Eye {
+        /// The eye is asked, as the cockpit's sky asks it.
+        Asked,
+        /// No eye: a camera's sky.
+        NotAsked,
+    }
+
+    /// [`query_at`] near the Sun to `cut`, with the eye if `eye` asks it.
+    fn query_near_the_sun(cut: f64, eye: Eye) -> SkyQuery {
+        let builder = SkyQuery::builder(observer_at(SUN), Magnitudes::new(cut));
+        match eye {
+            Eye::Asked => builder.eye(crate::sky::eye::EyeObserver::default()),
+            Eye::NotAsked => builder,
+        }
+        .build()
+        .expect("a valid query")
+    }
+
+    /// The listed stars of `query`'s census with every cap forced to `radius`, merged at
+    /// [`MAX_N_MAX`].
+    fn listed_with_caps_forced(query: &SkyQuery, radius: f64) -> Vec<SkyStar> {
+        let galaxy = milky_way_galaxy();
+        let query = query
+            .clone()
+            .with_caps_forced(LightYears::new(radius))
+            .expect("a forced cap");
+        let mut ctx = context();
+        let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
+        let mut stars = Vec::new();
+        for key in plan.cells() {
+            census_cell(galaxy, &mut ctx, key, &query, &mut stars);
+        }
+        merge_census([(stars, CensusTallies::default())], n(MAX_N_MAX))
+            .listed()
+            .to_vec()
+    }
+
     /// The stars a census near the Sun lists to V [`CENSUS_CUT`] within [`CENSUS_RADIUS_LY`],
-    /// every cap forced to it, with no eye, so that the census keeps each star to the cut alone as
-    /// the band subtracts it: built once for the tests that read it.
-    fn census_stars() -> &'static [SkyStar] {
-        static STARS: OnceLock<Vec<SkyStar>> = OnceLock::new();
-        STARS.get_or_init(|| {
-            let galaxy = milky_way_galaxy();
-            let query = query_at(SUN, CENSUS_CUT)
-                .with_caps_forced(LightYears::new(CENSUS_RADIUS_LY))
-                .expect("a forced cap");
-            let mut ctx = context();
-            let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
-            let mut stars = Vec::new();
-            for key in plan.cells() {
-                census_cell(galaxy, &mut ctx, key, &query, &mut stars);
-            }
-            merge_census([(stars, CensusTallies::default())], n(MAX_N_MAX))
-                .listed()
-                .to_vec()
-        })
+    /// every cap forced to it, with the eye or without it as `eye` says: the census keeps each
+    /// star to the cut alone either way, as the band subtracts it (R06.T8.k). Built once for each.
+    fn census_stars(eye: Eye) -> &'static [SkyStar] {
+        static ASKED: OnceLock<Vec<SkyStar>> = OnceLock::new();
+        static NOT_ASKED: OnceLock<Vec<SkyStar>> = OnceLock::new();
+        let build =
+            || listed_with_caps_forced(&query_near_the_sun(CENSUS_CUT, eye), CENSUS_RADIUS_LY);
+        match eye {
+            Eye::Asked => ASKED.get_or_init(build),
+            Eye::NotAsked => NOT_ASKED.get_or_init(build),
+        }
     }
 
     /// The census to `cut` complete to `radius` (at most the census's own): its stars brighter
     /// than the cut within the radius, as a partial reply lists them (R06.T8.i), so that listing
     /// and band share one boundary, merged at `n_max`. A census of a brighter cut keeps a subset
     /// of a deeper one's stars, each with the same V, since no star's V depends on the cut.
-    fn census_to(cut: f64, radius: f64, n_max: NonZeroU32) -> SkyCensus {
+    fn census_to(cut: f64, radius: f64, n_max: NonZeroU32, eye: Eye) -> SkyCensus {
         assert!(cut <= CENSUS_CUT && radius <= CENSUS_RADIUS_LY);
-        let stars: Vec<SkyStar> = census_stars()
+        let stars: Vec<SkyStar> = census_stars(eye)
             .iter()
             .filter(|s| s.v().value() < cut && s.distance().value() <= radius)
             .copied()
@@ -1249,17 +1288,44 @@ mod tests {
     }
 
     /// The listed, overflow and band light near the Sun at `cut`, complete to `radius`, lux: the
-    /// listed stars' light and the band's (which holds the overflow).
-    fn total_light(cut: f64, radius: f64, n_max: NonZeroU32, spec: BandSpec) -> (f64, f64) {
-        let census = census_to(cut, radius, n_max);
-        let band = whole_band(&query_at(SUN, cut), &census, &complete_within(radius), spec);
+    /// listed stars' light and the band's (which holds the overflow), with the eye as `eye` says.
+    fn total_light(
+        cut: f64,
+        radius: f64,
+        n_max: NonZeroU32,
+        spec: BandSpec,
+        eye: Eye,
+    ) -> (f64, f64) {
+        let census = census_to(cut, radius, n_max, eye);
+        let query = query_near_the_sun(cut, eye);
+        let band = whole_band(&query, &census, &complete_within(radius), spec);
         (stars_lux(census.listed()), band_lux(&band, spec))
+    }
+
+    /// [`total_light`] with the eye asked, held to its bits without the eye: the eye moves no star
+    /// between the list and the band (R06.T8.k).
+    fn total_light_with_the_eye(
+        cut: f64,
+        radius: f64,
+        n_max: NonZeroU32,
+        spec: BandSpec,
+    ) -> (f64, f64) {
+        let (listed, band) = total_light(cut, radius, n_max, spec, Eye::Asked);
+        let (listed_no_eye, band_no_eye) = total_light(cut, radius, n_max, spec, Eye::NotAsked);
+        assert_eq!(
+            [bits(listed), bits(band)],
+            [bits(listed_no_eye), bits(band_no_eye)],
+            "cut {cut}, complete to {radius} ly: {listed} + {band} lx with the eye, \
+             {listed_no_eye} + {band_no_eye} lx without"
+        );
+        (listed, band)
     }
 
     /// The model's own integral along `u` for `query` with no census, complete everywhere,
     /// independently of the band's quadrature: 96 nodes a decade, each node's extinction from a
     /// full-quality sightline to it, and the luminosity functions' light and colour read through
-    /// their public functions. Photopic luminance, cd m⁻².
+    /// their public functions, the light cut at the solar point's V extinction and dimmed by its
+    /// photopic transmission, as the band's is (R06.T9.e, R06.T8.k). Photopic luminance, cd m⁻².
     fn reference_luminance(query: &SkyQuery, direction: UnitVector) -> f64 {
         let galaxy = milky_way_galaxy();
         let tables = milky_way_tables();
@@ -1269,6 +1335,7 @@ mod tests {
         let edge = distance_to_edge_ly(from, along);
         let mut cache = NoiseCache::with_capacity(1 << 16);
         let components: Vec<ComponentId> = galaxy.fields().component_ids().collect();
+        let solar = solar_colour().reddening();
         let mut densities = [0.0; MAX_COMPONENTS];
         let mut nodes: Vec<f64> = (0..2_000_u32)
             .map(|step| FIRST_NODE_LY * math::exp10(f64::from(step) / 96.0))
@@ -1304,8 +1371,12 @@ mod tests {
                     query.observer().time(),
                     Span::from_seconds_f64(distance * SECONDS_PER_JULIAN_YEAR).expect("a span"),
                 );
-                let limit =
-                    Magnitudes::new(query.cut().value() - distance_modulus(distance) - extinction);
+                let through = solar.through(Magnitudes::new(extinction));
+                let limit = Magnitudes::new(
+                    query.cut().value()
+                        - distance_modulus(distance)
+                        - through.v_extinction().value(),
+                );
                 let mut light = 0.0;
                 for &layer in &CAPPED_LAYERS {
                     let band = MassBand::from(layer);
@@ -1322,7 +1393,7 @@ mod tests {
                         }
                     }
                 }
-                light * math::exp10(-0.4 * extinction)
+                light * through.photopic_transmission()
             })
             .collect();
         let sum: f64 = (1..nodes.len())
@@ -1452,7 +1523,7 @@ mod tests {
         let spec = spec(8);
         let query = query_at(SUN, CENSUS_CUT);
         // The census within 50 ly, its overflow past the 20 brightest, to land in the faces.
-        let census = census_to(CENSUS_CUT, 50.0, n(20));
+        let census = census_to(CENSUS_CUT, 50.0, n(20), Eye::NotAsked);
         let complete = complete_within(50.0);
         assert!(census.overflow().len() > 50, "{}", census.overflow().len());
         let mut ctx = context();
@@ -1706,16 +1777,17 @@ mod tests {
     /// photopic and scotopic light alike.
     #[test]
     fn an_overflow_stars_sums_are_its_reddened_colours() {
-        let census = census_to(CENSUS_CUT, 50.0, n(20));
+        let census = census_to(CENSUS_CUT, 50.0, n(20), Eye::NotAsked);
         let [yr, yg, yb] = LUMINANCE_RGB;
         for star in census.overflow().iter().take(5) {
             let colour = star.colour();
-            let unextinguished = star.v() - star.a_v();
+            // The census's V holds the star's own V extinction (R06.T8.k).
+            let unextinguished = star.v() - colour.reddened(star.a_v()).v_extinction();
             for a_v in [star.a_v().value(), 0.5, 2.0, 12.0] {
                 // The same star behind a_v of dust.
                 let a_v = Magnitudes::new(a_v);
-                let v = unextinguished + a_v;
                 let reddened = colour.reddened(a_v);
+                let v = unextinguished + reddened.v_extinction();
                 let light = illuminance_of_magnitude(unextinguished).value() * colour.lux_per_v0();
                 let [red, green] = colour.red_green();
                 let [t_red, t_green, t_blue] = reddened.transmission();
@@ -1780,7 +1852,8 @@ mod tests {
     /// Lowering the cut moves the light of the stars between the cuts from the listed stars and
     /// the overflow into the band, and raising it moves it back: the listed, overflow and band
     /// light together is kept within 1% either way, as it is when `n_max` moves stars from the
-    /// list into the overflow (exactly, but for rounding).
+    /// list into the overflow (exactly, but for rounding). The eye is asked, and every total is
+    /// the bits it is without it (R06.T8.k).
     #[test]
     fn lowering_or_raising_the_cut_conserves_the_light() {
         let spec = spec(8);
@@ -1788,7 +1861,7 @@ mod tests {
         let r = CENSUS_RADIUS_LY;
         let mut totals = Vec::new();
         for cut in [CENSUS_CUT, 7.0, 6.0] {
-            let (listed, band) = total_light(cut, r, all, spec);
+            let (listed, band) = total_light_with_the_eye(cut, r, all, spec);
             eprintln!(
                 "cut {cut}, complete to {r} ly: listed {listed:.5e} lx, band {band:.5e} lx, \
                  together {:.5e} lx",
@@ -1820,7 +1893,7 @@ mod tests {
         }
         // n_max keeps the 100 brightest: the rest overflow into the band, with no light lost.
         for (cut, listed, band) in totals {
-            let (listed_100, band_100) = total_light(cut, r, n(100), spec);
+            let (listed_100, band_100) = total_light_with_the_eye(cut, r, n(100), spec);
             let (moved_out, moved_in) = (listed - listed_100, band_100 - band);
             assert!(moved_out > 0.0, "cut {cut}");
             assert!(
@@ -1832,7 +1905,8 @@ mod tests {
 
     /// The listed, overflow and band light together does not depend on how far the census is
     /// complete, within 1%: a census complete to 100 ly and one complete to 200 ly (as a partial
-    /// and a later reply, R06.T8.i) give the same sky's light.
+    /// and a later reply, R06.T8.i) give the same sky's light. The eye is asked, and every total
+    /// is the bits it is without it (R06.T8.k).
     ///
     /// Against the band of no census at all, complete nowhere, the listed stars' light falls
     /// short of the tables' expectation of it by more (printed, not asserted; R06's Risks, "The
@@ -1845,14 +1919,14 @@ mod tests {
     fn the_light_does_not_depend_on_the_complete_to_radius() {
         let spec = spec(8);
         let all = n(MAX_N_MAX);
-        let query = query_at(SUN, CENSUS_CUT);
+        let query = query_near_the_sun(CENSUS_CUT, Eye::Asked);
         let nowhere = band_lux(
             &whole_band(&query, &SkyCensus::empty(), &CompleteTo::nowhere(), spec),
             spec,
         );
         let mut totals = Vec::new();
         for radius in [100.0, CENSUS_RADIUS_LY] {
-            let (listed, band) = total_light(CENSUS_CUT, radius, all, spec);
+            let (listed, band) = total_light_with_the_eye(CENSUS_CUT, radius, all, spec);
             eprintln!(
                 "complete to {radius} ly: listed {listed:.5e} lx, band {band:.5e} lx, together \
                  {:.5e} lx, {:+.2}% against the band complete nowhere ({nowhere:.5e} lx); the \
@@ -1922,6 +1996,107 @@ mod tests {
             "{inside} inside, {outside} outside"
         );
         assert_ne!(fainter, everything);
+    }
+
+    /// For a cone, the listed and band light together are the full sky's inside the cone, within
+    /// 1% (R06.T8.k): a 30° cone's census near the Sun to V [`CENSUS_CUT`] within
+    /// [`CENSUS_RADIUS_LY`], with the eye asked, lists exactly the full census's stars inside the
+    /// cone, star for star and bit for bit, and its band's texels inside the cone are the full
+    /// band's. Before R06.T8.k the cone's census also listed the stars of its cells outside the
+    /// cone, whose light its band, complete nowhere there, held too: printed here.
+    #[test]
+    fn a_cones_listed_and_band_light_are_the_full_skys_inside_it() {
+        let spec = spec(16);
+        let cone = Cone::new(UnitVector::X, Degrees::new(30.0)).expect("a cone");
+        let narrow = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .eye(crate::sky::eye::EyeObserver::default())
+            .cone(cone)
+            .build()
+            .expect("a valid query");
+        let origin = *observer_at(SUN).position();
+        let inside = |star: &SkyStar| cone.holds(&origin.displacement_to(star.apparent()));
+        let coned = listed_with_caps_forced(&narrow, CENSUS_RADIUS_LY);
+        let full = census_stars(Eye::NotAsked);
+        let full_inside: Vec<SkyStar> = full.iter().filter(|s| inside(s)).copied().collect();
+        assert!(
+            coned
+                .iter()
+                .all(|s| inside(s) && s.v().value() <= CENSUS_CUT)
+        );
+        assert_eq!(
+            coned, full_inside,
+            "the cone's stars are the full sky's inside it"
+        );
+        let star_bits = |stars: &[SkyStar]| {
+            stars
+                .iter()
+                .flat_map(|s| {
+                    [
+                        bits(s.v().value()),
+                        bits(s.a_v().value()),
+                        bits(s.distance().value()),
+                    ]
+                })
+                .collect::<Vec<u64>>()
+        };
+        assert_eq!(star_bits(&coned), star_bits(&full_inside));
+        // The texels whose centres lie inside the cone, as the band tests a ray.
+        let complete = complete_within(CENSUS_RADIUS_LY);
+        let band_inside = |query: &SkyQuery, census: &SkyCensus| {
+            whole_band(query, census, &complete, spec)
+                .iter()
+                .zip(texel_geometry(spec))
+                .filter(|(_, (u, _))| u.dot(&cone.axis()) >= cone.cos_half_angle())
+                .map(|(t, (_, w))| t.luminance().value() * w)
+                .sum::<f64>()
+        };
+        let all = n(MAX_N_MAX);
+        let cone_sky = merge_census([(coned.clone(), CensusTallies::default())], all);
+        let full_sky = census_to(CENSUS_CUT, CENSUS_RADIUS_LY, all, Eye::NotAsked);
+        let (cone_band, full_band) = (
+            band_inside(&narrow, &cone_sky),
+            band_inside(&query_near_the_sun(CENSUS_CUT, Eye::NotAsked), &full_sky),
+        );
+        assert_eq!(bits(cone_band), bits(full_band), "the band inside the cone");
+        let cone_light = stars_lux(cone_sky.listed()) + cone_band;
+        let full_light = stars_lux(&full_inside) + full_band;
+        // What the cone's census listed before R06.T8.k beyond these: its cells' stars outside it.
+        let mut ctx = context();
+        let forced = narrow
+            .clone()
+            .with_caps_forced(LightYears::new(CENSUS_RADIUS_LY))
+            .expect("a forced cap");
+        let cells: std::collections::BTreeSet<crate::galaxy::placement::CellKey> = census_plan(
+            milky_way_galaxy(),
+            ctx.tables,
+            ctx.envelope,
+            &forced,
+            &mut ctx.noise,
+        )
+        .cells()
+        .collect();
+        let outside: Vec<SkyStar> = full
+            .iter()
+            .filter(|s| {
+                !inside(s)
+                    && crate::galaxy::placement::CellKey::of(s.system())
+                        .is_ok_and(|key| cells.contains(&key))
+            })
+            .copied()
+            .collect();
+        eprintln!(
+            "a 30° cone within {CENSUS_RADIUS_LY} ly to V {CENSUS_CUT}: {} stars listed, \
+             {cone_light:.5e} lx with the band inside it, the full sky's {full_light:.5e} lx; its \
+             cells' {} stars outside it, {:.2}% of that light, were listed before R06.T8.k",
+            coned.len(),
+            outside.len(),
+            100.0 * stars_lux(&outside) / cone_light
+        );
+        assert!(!coned.is_empty() && !outside.is_empty());
+        assert!(
+            (cone_light / full_light - 1.0).abs() < 0.01,
+            "{cone_light} lx against {full_light} lx"
+        );
     }
 
     /// A cloud on the +X axis from the Sun, given to the segments that head its way and pass

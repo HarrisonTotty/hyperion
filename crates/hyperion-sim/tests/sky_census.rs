@@ -60,8 +60,7 @@ use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::CAPPED_LAYERS;
 use hyperion_sim::sky::census::{
-    CensusTallies, EYE_OFFSET_BOUND_MAG, GRID_STAR_BOUND, SkyQuery, flux_bound, merge_census,
-    star_offset_bound,
+    CensusTallies, GRID_STAR_BOUND, SkyQuery, flux_bound, merge_census, star_offset_bound,
 };
 use hyperion_sim::sky::envelope::{BrightnessEnvelope, max_star_mass};
 use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
@@ -81,7 +80,8 @@ fn galaxy() -> &'static Galaxy {
     })
 }
 
-/// The eye's query to apparent V `cut`: a star is kept to the cut plus its colour offset.
+/// The eye's query to apparent V `cut`: a star is kept to the cut alone, as without the eye
+/// (R06.T8.k).
 fn eye_query(observer: Observer, cut: Magnitudes) -> SkyQuery {
     SkyQuery::builder(observer, cut)
         .eye(EyeObserver::default())
@@ -230,15 +230,11 @@ fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
         - 2.5 * math::log10(f64::from(GRID_STAR_BOUND));
     let m_v = absolute_v_of_state(merged).expect("it shines").value();
     assert!(m_v < at_m1, "{what}: M_V {m_v} within {at_m1}");
-    // T8.b's census skipped a system whose bound could not pass the cut at its nearest.
-    let offset = if query.eye().is_some() {
-        EYE_OFFSET_BOUND_MAG
-    } else {
-        0.0
-    };
+    // T8.b's census skipped a system whose bound could not pass the cut at its nearest; the eye
+    // adds nothing to the cut since R06.T8.k.
     let nearest = star.distance().value() - star_offset_bound(g, record).value();
     let faintest =
-        query.cut().value() + offset - 5.0 * math::log10(nearest / (10.0 * LIGHT_YEARS_PER_PARSEC));
+        query.cut().value() - 5.0 * math::log10(nearest / (10.0 * LIGHT_YEARS_PER_PARSEC));
     assert!(
         at_m1 > faintest,
         "{what}: the bound at m₁, {at_m1}, passes {faintest}"

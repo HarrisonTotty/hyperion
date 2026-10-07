@@ -431,13 +431,27 @@ mod tests {
         builder.build().expect("a valid query")
     }
 
-    /// A looser query (deeper, and the eye's, which keeps a star to the cut plus its colour
-    /// offset), a tighter one, and the tighter from 200 ly along x: every floor of the tighter is
-    /// at or above the looser's, and the move lowers the floors of the cells it nears and raises
-    /// the others'.
+    /// A looser query (deeper, the eye's, which since R06.T8.k keeps a star to the cut alone as
+    /// any query does, and a 60° cone's along +x, which keeps only the stars inside it but opens
+    /// the cells of the same floors), a tighter one, and the tighter from 200 ly along x: every
+    /// floor of the tighter is at or above the looser's, and the move lowers the floors of the
+    /// cells it nears and raises the others'.
     fn queries() -> [SkyQuery; 3] {
+        let cone = crate::sky::census::Cone::new(
+            crate::coords::UnitVector::X,
+            crate::units::Degrees::new(60.0),
+        )
+        .expect("a cone");
+        let loose = SkyQuery::builder(
+            Observer::new(position(SUN), UniverseTime::EPOCH).expect("an observer"),
+            Magnitudes::new(9.0),
+        )
+        .eye(EyeObserver::default())
+        .cone(cone)
+        .build()
+        .expect("a valid query");
         [
-            query_at(SUN, 9.0, true),
+            loose,
             query_at(SUN, 6.0, false),
             query_at([SUN[0] + 200.0, SUN[1], SUN[2]], 6.0, false),
         ]

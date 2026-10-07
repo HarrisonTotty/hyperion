@@ -761,7 +761,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     is not, and is documented as an instrument's integral. Its end value equals `sightline` over
     the whole ray to rounding, which a test pins.
 15. **What the band holds.** At each node, for each component and layer, the density times the
-    luminosity function's light fainter than M_V = cut − DM(d) − A_V(d) at the emitted time, all of
+    luminosity function's light fainter than M_V = cut − DM(d) − v☉(A_V) A_V(d) at the emitted
+    time (the solar row's V secant, since the census cuts each star's own V; R06.T8.k, decided
+    2026-10-06, `decision-r06-t9b-band.md`, addendum item 4; first written − A_V(d)), all of
     a layer's light beyond its cap, and then the overflow (the kept stars past N_max) splatted into
     their texels as points. The listed stars are never in the server's band: a client that culls one
     adds it to its own band layer (Design note 20), so each star's light is counted once. The census
@@ -1431,7 +1433,9 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
   Record each layer's listed and generated counts near the Sun, before and after. Files:
   `sky/census/{cell,query}.rs`, `tests/common/sky.rs`. Acceptance:
   `cargo test -p hyperion-sim sky::census sky::band` and
-  `cargo test -p hyperion-sim --test sky_census`.
+  `cargo test -p hyperion-sim --test sky_census`. The first is two commands as built,
+  `cargo test -p hyperion-sim --lib -- sky::census` and `… -- sky::band`: `cargo test` takes one
+  filter before `--`. As built: Risks, "Deviations in T8.k, as built".
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f and plan 11's asks A and B).**
   Decided 2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Near the
@@ -4238,12 +4242,16 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     mag in the eye's cut) and some 1.5% gross in the plane. Options: accept it as stated; have the
     band subtract each M_V bin at the cut plus the bin's mean offset (the tables carry each bin's
     ρ); or have the census keep to the cut alone and leave the offset to the views (a T8.b
-    change).
+    change). _Built in R06.T8.k (2026-10-07): near the Sun to V 8.15 within 200 ly the eye's
+    census listed 101 stars fainter than the cut and missed 43 brighter; it now lists the no-eye
+    census's 4,823, bit for bit (Risks, "Deviations in T8.k, as built")._
   - **A cone (decided 2026-10-06, `decision-r06-t9b-band.md`: R06.T8.k lists only the stars
     inside the cone).** A ray outside the cone is complete nowhere, but the census lists every
     star of each cell whose padded ball meets the cone, some outside it, whose light the band then
     holds too, as the caps' overshoot is held. Options: accept it; or have the census list only
-    the stars inside the cone (a T8 change).
+    the stars inside the cone (a T8 change). _Built in R06.T8.k (2026-10-07): a 30° cone's cells
+    within 200 ly of the Sun hold 424 stars brighter than V 8 outside it, 20% of the light of the
+    290 inside, which its census no longer lists._
   - **The final reply's cells.** A final census lists every star of the cells it opens, some just
     beyond its caps, whose light the band also holds, within the caps' stated expected count
     beyond, as the sign-off's condition 2 accepts.
@@ -4839,6 +4847,119 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     tolerance's quantum (a texel limit's millimagnitude, a tenth of an eye offset's centimagnitude),
     the 0.13 mag's opening angle (0.5), a note that a node's scotopic sum errs at first order in its
     stars' spread of ρ, and two phrases here.
+- **Deviations in T8.k, as built (2026-10-07).** One boundary, as the band ruling
+  (`decision-r06-t9b-band.md`, item 4 and the fourth item of its addendum) sets it out, built with
+  T8.j, with these details.
+  - **The kept test** (`sky/census/cell.rs`). A star is kept if its own V, M_V + DM plus
+    `colour.reddened(a_v).v_extinction()` behind its sightline's A_V, is at or brighter than the
+    cut, with the eye or without it.
+    - `faintest_listable` is the cut less the distance modulus. `kept_to`, the scotopic sky it read
+      and `EYE_OFFSET_BOUND_MAG` (0.6) are gone, the constant from `sky::census`'s public API too,
+      with its test `the_eye_offset_bound_holds_over_the_colour_table`. T9.d's tests hold the cut's
+      largest offset, 0.453.
+    - Private `own_v_extinction(colour, a_v)` debug-asserts a non-negative extinction. The
+      determinism audit found V's secant at least 0.865 on every row of the five reddening tables,
+      so v★ A_V ≥ 0 and the cut before the sightline and the flux bound stay exact.
+    - The colour is read after the cut before the sightline, not before it: a star cut there no
+      longer reads the colour table. No output moves for it.
+    - `SkyStar::v` is now that V, and `SkyStar::a_v` stays the sightline's A_V. The wire (T11.a)
+      carries the V.
+  - **The cone** (`sky/census/query.rs`, new and public): `Cone::cos_half_angle()` and
+    `Cone::holds(&GalacticDisplacement)`, the cosine of a displacement with the axis at least the
+    half-angle's, its edge included, tested in metres. The band's rays read the same cosine. Each
+    star is tested on its direction once its position is known, before its distance and
+    sightline, in both modes, so `brute_force_sky` follows with no change of its own. The cells a
+    cone's plan opens and their floors are unchanged.
+  - **The band** (`sky/band.rs`). `light_along` subtracts the light at cut − DM − v☉(A_V) A_V,
+    the `v_extinction` of the node's own solar curves (for the tests' grey dust, A_V as before).
+    `unextinguished_lux(colour, v, &Reddened)` takes the star's reddening and subtracts its own V
+    extinction, so the overflow's points (`point_lux`) and the glare (`Glare::of_listed`) take a
+    star's unextinguished light as M_V + DM exactly. Design note 15's formula is amended to match.
+  - **Tests** (the acceptance's two-filter line is two commands, `--lib -- sky::census` and
+    `--lib -- sky::band`, since `cargo test` takes one filter before `--`):
+    - `a_census_with_the_eye_equals_one_without_it`: the 18 cells by the Sun at V 9, with the eye
+      and without it, list the same 47 stars and tallies, bit for bit; 4 of them lie within 0.46
+      mag of the cut.
+    - `every_kept_star_is_brighter_than_the_cut_and_inside_the_cone`: each cell of a 30° cone's plan
+      about +X within 60 ly at V 11, the eye asked, keeps 60 stars, each brighter than the cut and
+      inside the cone. They are the no-cone census's stars inside it, star for star and bit for bit,
+      and its oracle's. The 243 outside are left out.
+    - T8.e's identity tests and T16.b's pinned systems pass unchanged in form
+      (`--test sky_census`, 6 of 6). `pinned_merger`'s check of T8.b's skip adds no eye offset to
+      the cut, which the constant's removal makes.
+    - T9.b's conservation tests run with the eye asked and assert their totals' bits equal without
+      it: the cuts 8, 7 and 6 within 0.02%, as before; against the band complete nowhere −1.11% to
+      100 ly and −1.78% to 200 ly (T9.b's −1.12% and −1.79%).
+    - `a_cones_listed_and_band_light_are_the_full_skys_inside_it`: a 30° cone near the Sun to V 8
+      within 200 ly, at 16², lists the full census's 290 stars inside the cone, bit for bit, and
+      its band's texels inside it are the full band's. Together 9.4586 × 10⁻⁵ lx, as the full
+      sky's inside the cone. Its cells hold 424 more stars outside the cone, 20.0% of that light,
+      which the census listed before T8.k and the band, complete nowhere outside, held too.
+    - Updated, not new: the sightline-cut test reads the star's own V extinction; the post-AGB
+      test's M_V, the overflow test's V and `sky::limits`' `sources_of` subtract it.
+    - The cache's order tests take a 60° cone in their looser query (determinism audit), so the
+      cached-equals-uncached checks cover a cone's census.
+  - **Counts near the Sun, before and after** (the census within 200 ly, every cap forced; a probe,
+    not committed, `.git/rm23-scratch/r06-census/t8k/zz_t8k_probe.rs`):
+
+    | Query                  | Listed: A, B, C, D, E  | Listed                   | Generated: A, B, C, D, E            |
+    | ---------------------- | ---------------------- | ------------------------ | ----------------------------------- |
+    | V 8.15, eye, before    | 3, 42, 4,218, 465, 154 | 4,882 (101 past the cut) | 23,979, 8,196, 13,606, 3,628, 1,800 |
+    | V 8.15, no eye, before | 4, 55, 4,157, 456, 152 | 4,824                    | 18,145, 8,196, 13,606, 3,628, 1,800 |
+    | V 8.15, either, after  | 4, 55, 4,156, 456, 152 | 4,823                    | 18,145, 8,196, 13,606, 3,628, 1,800 |
+    | V 7.95, eye, before    | 3, 35, 3,746, 432, 147 | 4,363 (137 past the cut) | 22,114, 8,196, 13,606, 3,628, 1,800 |
+    | V 7.95, no eye, before | 4, 47, 3,636, 425, 142 | 4,254                    | 16,216, 8,196, 13,606, 3,628, 1,800 |
+    | V 7.95, either, after  | 4, 47, 3,634, 425, 142 | 4,252                    | 16,216, 8,196, 13,606, 3,628, 1,800 |
+
+    The brown dwarfs list none. At 8.15 the eye's census listed 101 blue stars past the cut, which
+    the band held too, and missed 43 red ones within it (13 of them in B). The star's own V moves
+    one C star past 8.15 and two past 7.95 (v★ above 1). Dropping the 0.6 mag from the floor and
+    the flux bound generates 24% fewer of A's systems there; C to E generate every record either
+    way.
+
+    The sampled near-Sun bench at the bench's eye cut, 7.95 (`HYPERION_SKY_BENCH_SAMPLE=1000`,
+    criterion's `--test`, release, 3 workers at `CPUQuota=400%`, unlocked, so its time is
+    provisional), per layer, the records past the floor (the same in both) and the share
+    generated, before → after: C 1.988 × 10⁸, 98.26% → 98.22%; D 6.514 × 10⁷, 99.92% → 99.91%; E
+    1.343 × 10⁸, 99.99% → 99.99%. Accepted
+    (scaled by 1,000): C 27,000 → 25,000, D 5,000 → 6,000, E 14,000 → 9,000; the sample listed 46
+    → 40. A, B and the brown dwarfs open no sampled cell. The estimate fell from 1.75 × 10⁶ to 1.40
+    × 10⁶ CPU-s, but the load fell too (about 15–20 before, 10–14 after), so the change is not
+    measured. Near the Sun the census's cost stays generation's, which T8.g's bound addresses.
+
+  - **Not changed.** GENERATOR_VERSION stays 20 and no golden moves (`golden_diff` 0): nothing
+    generated or golden reads the census or the band. The caps (T7) still count stars brighter
+    than cut − DM − A_V on each ray's bare A_V; they are an estimate, and the rule's bound takes
+    the least extinction over the rays, where v★ is within about 0.01 of 1, so the gap is a few
+    thousandths of a magnitude. T7.b, which counts each ray's own cap, can take each ray's v☉.
+  - **Open, for the orchestrator** (science check; not built, since each departs from the
+    ruling's text):
+    - The cone's edge is shared to a band texel, not exactly: the census tests each star's
+      direction, the band each texel's centre. For a 30° cone the misplaced light largely cancels.
+      A cone narrower than a texel (about 1.4° at 64²) can hold no texel centre, and then the band
+      holds all of the light there beside the listed stars, near the Sun some 0.9 mag brighter than
+      the light fainter than the cut. Keeping a star by its texel's centre, at the request's
+      `BandSpec`, would share the split exactly.
+    - With a cone, no star outside it is listed, so none glares over the texels inside it, though
+      the veil reaches 90°. That is right for an instrument's field stop and not for a naked eye;
+      the cockpit eye asks no cone.
+    - In release builds a sightline's NaN A_V gives a NaN V, which `merge_census`'s release
+      assertion refuses, as before (determinism audit; older than T8.k).
+  - **Gates** (2026-10-07, on the code of T8.k and T8.j together, capped at `CPUQuota=400%`, load
+    8–13, the heavy lock held elsewhere, so timings are provisional; logs
+    `.git/rm23-scratch/r06-census/t8k/final/`):
+    - fmt; clippy, workspace native and sim wasm32-wasip1 (`-D warnings`);
+    - `--lib -- sky::census` 36 passed, 2 ignored (83 s, four threads); `--lib -- sky::band` 18
+      passed (120 s); the rest of `sky::` 117 passed, 4 ignored (165 s);
+    - `--test sky_census` 6 of 6 (20 s); sky doctests 22 of 22, `Cone::holds`' example among them;
+    - Prettier on the plan; every pre-commit hook.
+  - **Reviews.** Determinism audit: nothing must-fix or should-fix. Applied: `Cone::holds` takes a
+    `GalacticDisplacement`, so its unit is in its type; the cache's queries take a cone. Science
+    check: nothing must-fix; the kept test, the band's v☉ subtraction, the unextinguished light and
+    the (v★ − v☉) A_V figures (−0.038 to +0.034 at A_V 2, −0.21 to +0.18 at 10, on every row but
+    the 2,300 K dwarfs, which never sit at the boundary) are confirmed. Applied: `SkyStar::a_v`'s V secant at
+    A_V → 0, 2 and 10 with its source, and the band test's reference integral cut and dimmed by
+    the solar point's curves.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;

@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::coords::UnitVector;
+use crate::coords::{GalacticDisplacement, UnitVector};
 use crate::galaxy::Galaxy;
 use crate::galaxy::gas::modifiers::GasModifierSource;
 use crate::galaxy::gas::noise::NoiseCache;
@@ -95,6 +95,44 @@ impl Cone {
     #[must_use]
     pub const fn half_angle(&self) -> Degrees {
         self.half_angle
+    }
+
+    /// The cosine of the half-angle: a direction lies inside the cone where its cosine with the
+    /// axis is at least this. The census's stars ([`holds`](Self::holds)) and the band's rays
+    /// (`band_rows`) test against the one value.
+    #[must_use]
+    pub fn cos_half_angle(&self) -> f64 {
+        math::cos(self.half_angle.value() * RADIANS_PER_DEGREE)
+    }
+
+    /// Whether the direction of `displacement` from the apex lies inside the cone, its edge
+    /// included: its cosine with the axis at least [`cos_half_angle`](Self::cos_half_angle),
+    /// tested in metres as the displacement holds them. A zero displacement has no direction and is
+    /// held, as a census with no cone keeps it; no star the census measures lies at its observer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::coords::{GalacticDisplacement, UnitVector};
+    /// use hyperion_sim::sky::census::{BuildSkyQueryError, Cone};
+    /// use hyperion_sim::units::Degrees;
+    /// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+    ///
+    /// let cone = Cone::new(UnitVector::X, Degrees::new(10.0))?;
+    /// let ly = METRES_PER_LIGHT_YEAR;
+    /// // A star a light-year along the axis and a tenth of one across it, 5.7° off the axis.
+    /// assert!(cone.holds(&GalacticDisplacement::new([ly, 0.1 * ly, 0.0])));
+    /// // One as far across as along, 45° off it.
+    /// assert!(!cone.holds(&GalacticDisplacement::new([ly, ly, 0.0])));
+    /// # Ok::<(), BuildSkyQueryError>(())
+    /// ```
+    #[must_use]
+    pub fn holds(&self, displacement: &GalacticDisplacement) -> bool {
+        let d = displacement.metres();
+        let u = self.axis.components();
+        let along = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+        let length = math::hypot(math::hypot(d[0], d[1]), d[2]);
+        along >= self.cos_half_angle() * length
     }
 
     /// Whether a ball of radius `radius_ly` whose centre lies `offset_ly` from the apex (both in
@@ -190,7 +228,10 @@ impl SkyQuery {
         self.cut
     }
 
-    /// The eye, if the sky is asked for one: then a star is kept to the cut plus its colour offset.
+    /// The eye, if the sky is asked for one. It sets the cut (R06.T9.d) and each view's cull, but
+    /// not the census: a star is kept to the cut alone, with the eye or without it, and each view
+    /// applies the star's colour offset (decided 2026-10-06, `decision-r06-t9b-band.md`;
+    /// R06.T8.k).
     #[must_use]
     pub const fn eye(&self) -> Option<&EyeObserver> {
         self.eye.as_ref()
@@ -263,7 +304,7 @@ impl SkyQuery {
 }
 
 impl SkyQueryBuilder {
-    /// Asks for the eye's limits, which keep each star to the cut plus its colour offset.
+    /// Asks for the eye's limits. The census still keeps each star to the cut alone (R06.T8.k).
     #[must_use]
     pub fn eye(mut self, eye: EyeObserver) -> Self {
         self.query.eye = Some(eye);
@@ -277,7 +318,8 @@ impl SkyQueryBuilder {
         self
     }
 
-    /// A narrow field.
+    /// A narrow field: the census opens only the cells whose padded ball meets the cone, and keeps
+    /// only the stars inside it ([`Cone::holds`]; R06.T8.k).
     #[must_use]
     pub fn cone(mut self, cone: Cone) -> Self {
         self.query.cone = Some(cone);

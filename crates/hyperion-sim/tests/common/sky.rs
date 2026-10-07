@@ -6,7 +6,9 @@
 //! each cap's padded sphere R06.T8.a's tests check), so the two differ only in the skips: the
 //! census takes each cell's bright subset above its mass floor and bounds each record's light
 //! before generating it, while the oracle generates every record of every cell and measures each
-//! with `census_record(…, Bound::Ignored, …)`.
+//! with `census_record(…, Bound::Ignored, …)`. Both keep a star by the same test (R06.T8.k): its
+//! own V, `M_V` + DM plus its own V band's extinction behind its sightline's `A_V`, brighter than
+//! the cut alone, with the eye or without it, and inside the query's cone where it has one.
 //!
 //! The cells run on up to [`THREADS`] threads, each with its own context, and their parts are
 //! merged by `merge_census`, whose order is total and whose tallies are sums, so neither the
@@ -102,6 +104,8 @@ pub fn every_layer(radius: LightYears) -> Vec<(Layer, LightYears)> {
 
 /// The census's oracle: every system of every cell the census of `query` opens with every cap
 /// forced to `radius`, generated whole and measured with no skip, merged at the query's `n_max`.
+/// Each star is kept as the census keeps it: by its own V, to the cut alone and within the cone
+/// (R06.T8.k).
 ///
 /// # Panics
 ///

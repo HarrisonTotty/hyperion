@@ -12,9 +12,17 @@
 //! position; and only if the bound can pass the cut is the system generated
 //! ([`SystemStars::generate`]), each star read from the pair-evolved [`SystemStars::state_at`]'s
 //! stars at the emitted time, placed by [`star_positions_at`] about the system's apparent position,
-//! dimmed by its distance and, unless that alone already puts it past the cut, one [`sightline`] to
-//! the observer, and kept if its V is brighter than the cut, plus its eye colour offset where the
-//! eye is asked.
+//! left out if it lies outside the query's cone, dimmed by its distance and, unless that alone
+//! already puts it past the cut, by its own V band's extinction along one [`sightline`] to the
+//! observer, and kept if its V is brighter than the cut.
+//!
+//! The cut alone keeps a star, with or without the eye: the eye's cut already carries the largest
+//! colour offset (Design note 5), each view applies a star's own, and the band subtracts the light
+//! at the cut, so the listing and the band share one boundary, and within a cone the cone's
+//! (decided 2026-10-06, `decision-r06-t9b-band.md`; R06.T8.k). A star's V is M<sub>V</sub> + DM
+//! plus its own V band's extinction behind its sightline's A<sub>V</sub>, its colour's
+//! [`reddened`](StarColour::reddened) there, as the wire carries it (the ruling's addendum, item
+//! 4).
 //!
 //! Each skip is exact: it drops only what the census would drop after it, so the census's stars
 //! are bit for bit those of the brute force, which generates every system and measures every star
@@ -41,7 +49,6 @@
 //! [`LuminosityTables::age_for`](crate::sky::luminosity::LuminosityTables::age_for).
 
 use core::f64::consts::LN_2;
-use std::sync::LazyLock;
 
 use crate::coords::{GalacticPosition, SystemPosition};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
@@ -66,30 +73,12 @@ use crate::units::{LightYears, Magnitudes, SolarMasses, Years};
 
 use super::super::colour::StarColour;
 use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, always_single, max_star_mass};
-use super::super::eye::{SkyBackground, SpRatio, luminance, star_colour_offset};
 use super::super::photometry::{absolute_v_of_state, colour_of_state};
 use super::query::{SkyContext, SkyQuery};
-
-/// The background each star's eye colour offset is taken against: μ 30 of reference light, fully
-/// scotopic, where the offset is largest, as the eye's cut assumes at the darkest texel (Design
-/// note 5); the limit map culls each texel's stars after.
-static SCOTOPIC_SKY: LazyLock<SkyBackground> = LazyLock::new(|| {
-    SkyBackground::new(
-        luminance(crate::units::MagnitudesPerArcsec2::new(30.0)),
-        SpRatio::REFERENCE,
-    )
-    .expect("a valid background")
-});
 
 /// The quality of each star's sightline (Design note 10).
 const STAR_SIGHTLINE_QUALITY: Quality =
     Quality::Budget(core::num::NonZeroU32::new(64).expect("64 is not zero"));
-
-/// A bound on any star's eye colour offset, mag: the colour table's hottest rows, its 500,000 K
-/// blackbodies, give ρ 3.4850, 2.5 log₁₀(3.4850 ÷ 2.297) = 0.453 (Design note 5's largest colour
-/// offset, which the eye's cut carries), held to 0.6 so that a census never skips a star its offset
-/// would keep; a test holds every row of the table under it.
-pub const EYE_OFFSET_BOUND_MAG: f64 = 0.6;
 
 /// The distance modulus at `d_ly` light-years: 5 log₁₀(d ÷ 10 pc).
 #[must_use]
@@ -150,13 +139,20 @@ impl SkyStar {
         self.emitted
     }
 
-    /// Its apparent V, extinction included.
+    /// Its apparent V: M<sub>V</sub> + DM plus its own V band's extinction, its colour's
+    /// [`reddened`](StarColour::reddened) at [`a_v`](Self::a_v), the V the census cuts and the
+    /// wire carries (R06.T8.k; `decision-r06-t9b-band.md`, addendum item 4).
     #[must_use]
     pub const fn v(&self) -> Magnitudes {
         self.v
     }
 
-    /// Its extinction in V along the sightline.
+    /// The extinction along its sightline, plan 07's A<sub>V</sub>: the law's normalisation at
+    /// 0.549 µm times the dust column, which every reddening column divides by (Design note 6).
+    /// Its own V band is dimmed by `colour().reddened(a_v()).v_extinction()`: for the Sun's light
+    /// about 1.004 times this as A<sub>V</sub> → 0, 0.999 at A<sub>V</sub> 2 and 0.977 at 10 (the
+    /// reddening tables' solar point, `tables/star_colour_reddening*.rs`;
+    /// `decision-r06-t9b-band.md`, addendum item 4).
     #[must_use]
     pub const fn a_v(&self) -> Magnitudes {
         self.a_v
@@ -222,7 +218,7 @@ impl LayerTally {
         self.generated
     }
 
-    /// Stars kept: brighter than the cut, plus their eye colour offset where the eye is asked.
+    /// Stars kept: brighter than the cut, and inside the query's cone where it has one (R06.T8.k).
     #[must_use]
     pub const fn accepted(&self) -> u64 {
         self.accepted
@@ -332,37 +328,36 @@ pub enum Bound {
 }
 
 /// A star's apparent V at `d_ly` light-years with no extinction: `m_v` plus the distance modulus.
-/// The census adds its extinction to this, so a star this alone puts past [`kept_to`] stays past
-/// it.
+/// The census adds its own V extinction to this ([`own_v_extinction`]), which is never negative,
+/// so a star this alone puts past the cut stays past it.
 #[must_use]
 fn unextinguished_v(m_v: Magnitudes, d_ly: f64) -> f64 {
     m_v.value() + distance_modulus(d_ly.max(1e-6))
 }
 
-/// The faintest apparent V a star of `colour` is kept to for `query`: the cut, plus the star's eye
-/// colour offset where the eye is asked.
+/// The extinction of a star of `colour`'s own V band behind a sightline of `a_v`, mag: v★(A) A,
+/// the [`v_extinction`](crate::sky::colour::Reddened::v_extinction) of its
+/// [`reddened`](StarColour::reddened) (R06.T8.k; `decision-r06-t9b-band.md`, addendum item 4),
+/// zero bit for bit with no dust. Every band's transmission falls with A<sub>V</sub> from one on
+/// every row of the colour table (R06.T9.e's tests), so it is never negative, which keeps the cut
+/// before the sightline and the flux bound exact.
 #[must_use]
-fn kept_to(query: &SkyQuery, colour: &StarColour) -> f64 {
-    let offset = if query.eye().is_some() {
-        SpRatio::new(colour.sp_ratio())
-            .map_or(0.0, |rho| star_colour_offset(rho, &SCOTOPIC_SKY).value())
-    } else {
-        0.0
-    };
-    query.cut().value() + offset
+fn own_v_extinction(colour: &StarColour, a_v: Magnitudes) -> f64 {
+    let extinction = colour.reddened(a_v).v_extinction().value();
+    debug_assert!(
+        extinction >= 0.0,
+        "a V extinction of {extinction} mag behind A_V {}",
+        a_v.value()
+    );
+    extinction
 }
 
 /// The faintest absolute V a system's brightest possible star could have and still be listed at
-/// `d_ly` light-years with no extinction, mag: the cut, the largest eye offset where the eye is
-/// asked, less the distance modulus.
+/// `d_ly` light-years with no extinction, mag: the cut less the distance modulus. The eye adds
+/// nothing: the census keeps each star to the cut alone (R06.T8.k).
 #[must_use]
 fn faintest_listable(query: &SkyQuery, d_ly: f64) -> f64 {
-    let offset = if query.eye().is_some() {
-        EYE_OFFSET_BOUND_MAG
-    } else {
-        0.0
-    };
-    query.cut().value() + offset - distance_modulus(d_ly.max(1e-6))
+    query.cut().value() - distance_modulus(d_ly.max(1e-6))
 }
 
 /// The most bodies a grid system's hierarchy holds at the stellar level: plan 11's
@@ -888,6 +883,7 @@ fn record_stars(
         Vec::with_capacity(usize::from(GRID_STAR_BOUND));
     star_positions_at(stars.hierarchy(), emitted, &mut positions);
     let observer_at = observer.position();
+    let cut = query.cut().value();
     let mut modifiers: Vec<GasModifier> = Vec::new();
     for (body, place) in &positions {
         let index = u8::try_from(body.body_index())
@@ -909,18 +905,24 @@ fn record_stars(
         let Some(apparent) = place.to_galactic(r.apparent_position()) else {
             continue;
         };
+        // A cone's census keeps only the stars inside it, so that its listing and the band share
+        // the cone's boundary (R06.T8.k). Both modes keep to it: it is the kept test, not a skip.
+        if let Some(cone) = query.cone()
+            && !cone.holds(&observer_at.displacement_to(&apparent))
+        {
+            continue;
+        }
         let d = observer_at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
         let unextinguished = unextinguished_v(m_v, d);
-        let colour = colour_of_state(star);
-        let limit = kept_to(query, &colour);
-        // A_V is never negative (below), and adding it never lowers a float: a star past the cut
-        // before its extinction stays past it, so it takes no sightline (R06.T8.f).
-        if bound == Bound::Applied && unextinguished > limit {
+        // The star's own V extinction is never negative (below), and adding it never lowers a
+        // float: a star past the cut before it stays past it, so it takes no sightline (R06.T8.f).
+        if bound == Bound::Applied && unextinguished > cut {
             continue;
         }
         let a_v = star_extinction(galaxy, ctx, &apparent, observer_at, &mut modifiers);
-        let v = unextinguished + a_v.value();
-        if v > limit {
+        let colour = colour_of_state(star);
+        let v = unextinguished + own_v_extinction(&colour, a_v);
+        if v > cut {
             continue;
         }
         out.push(SkyStar {
@@ -1016,6 +1018,7 @@ pub fn census_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coords::UnitVector;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::gas::modifiers::NoModifiers;
     use crate::galaxy::gas::noise::NoiseCache;
@@ -1023,7 +1026,9 @@ mod tests {
     use crate::id::CentreMemberId;
     use crate::observe::Observer;
     use crate::sky::census::cache::NoSkyCellCache;
+    use crate::sky::census::query::{Cone, census_plan};
     use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
+    use crate::units::Degrees;
 
     /// The Sun's place in the fixture, ly.
     const SUN: [f64; 3] = [0.0, 26_000.0, 68.0];
@@ -1049,6 +1054,40 @@ mod tests {
 
     fn observer_at(ly: [f64; 3]) -> Observer {
         Observer::new(position(ly), UniverseTime::EPOCH).expect("an observer")
+    }
+
+    /// Every float of `stars` that a census measures, as bits, in order: `PartialEq` holds 0.0 and
+    /// −0.0 equal.
+    fn star_bits(stars: &[SkyStar]) -> Vec<u64> {
+        stars
+            .iter()
+            .flat_map(|s| {
+                [s.v().value(), s.a_v().value(), s.distance().value()]
+                    .into_iter()
+                    .chain(s.apparent().offset_metres())
+                    .map(hyperion_testkit::float::bits)
+            })
+            .collect()
+    }
+
+    /// One cell of each layer at, one cell out from and three cells out from the Sun along x.
+    fn cells_by_the_sun() -> Vec<CellKey> {
+        let mut cells = Vec::new();
+        for layer in [
+            Layer::A,
+            Layer::B,
+            Layer::C,
+            Layer::D,
+            Layer::E,
+            Layer::BrownDwarf,
+        ] {
+            let size = f64::from(layer.cell_size_ly());
+            for step in [0.0, 1.0, 3.0] {
+                let p = [SUN[0] + step * size, SUN[1], SUN[2]];
+                cells.push(CellKey::containing(layer, &position(p)).expect("in the cube"));
+            }
+        }
+        cells
     }
 
     /// At least `n` of `layer`'s records, from the cells of a growing cube about `at`.
@@ -1393,8 +1432,9 @@ mod tests {
         assert_eq!(listed_at_cut.len(), 1, "{listed_at_cut:?}");
         assert_eq!(listed_at_cut[0], *giant);
         let bound = flux_bound(envelope, &record, giant.emitted()).expect("it shines");
-        let giant_m_v =
-            giant.v().value() - giant.a_v().value() - distance_modulus(giant.distance().value());
+        let giant_m_v = giant.v().value()
+            - own_v_extinction(giant.colour(), giant.a_v())
+            - distance_modulus(giant.distance().value());
         assert!(
             bound.value() <= giant_m_v,
             "{} over {giant_m_v}",
@@ -1557,28 +1597,6 @@ mod tests {
         assert!(a.feature_members_absent());
     }
 
-    #[test]
-    fn the_eye_offset_bound_holds_over_the_colour_table() {
-        use crate::tables::star_colour::{NORMAL, WHITE_DWARF};
-        let dark = SkyBackground::new(
-            luminance(crate::units::MagnitudesPerArcsec2::new(30.0)),
-            SpRatio::REFERENCE,
-        )
-        .expect("a valid background");
-        let mut largest = f64::NEG_INFINITY;
-        // The table is interpolated bilinearly in ρ itself, so no colour exceeds its largest row.
-        for row in NORMAL.iter().chain(&WHITE_DWARF) {
-            let rho = SpRatio::new(row[3]).expect("a table row's ratio is valid");
-            let offset = star_colour_offset(rho, &dark).value();
-            largest = largest.max(offset);
-        }
-        assert!(largest < EYE_OFFSET_BOUND_MAG, "{largest}");
-        assert!(
-            largest > 0.3,
-            "the hottest rows are near Design note 5's 0.453: {largest}"
-        );
-    }
-
     /// The census of a cell, skips and all, equals every record of the cell measured with no
     /// skip: the floor and the flux bound never change an answer.
     ///
@@ -1595,21 +1613,7 @@ mod tests {
             .build()
             .expect("a valid query");
         let mut ctx = context();
-        let mut cells = Vec::new();
-        for layer in [
-            Layer::A,
-            Layer::B,
-            Layer::C,
-            Layer::D,
-            Layer::E,
-            Layer::BrownDwarf,
-        ] {
-            let size = f64::from(layer.cell_size_ly());
-            for step in [0.0, 1.0, 3.0] {
-                let p = [SUN[0] + step * size, SUN[1], SUN[2]];
-                cells.push(CellKey::containing(layer, &position(p)).expect("in the cube"));
-            }
-        }
+        let mut cells = cells_by_the_sun();
         // A's cells 36–40 cells (288–320 ly) out along x, five rows of them along y.
         for (x, y) in (36..=40).flat_map(|x| (-2..=2).map(move |y| (x, y))) {
             let p = [
@@ -1762,8 +1766,9 @@ mod tests {
     }
 
     /// Over the stars of 10⁴ generated systems of every layer, near the Sun and in the bulge, no
-    /// star that the cut before its sightline drops would have passed the cut after it: `A_V` is
-    /// never negative, and adding it never lowers a magnitude (R06.T8.f).
+    /// star that the cut before its sightline drops would have passed the cut after it: `A_V` and
+    /// each star's own V extinction behind it are never negative, and adding one never lowers a
+    /// magnitude (R06.T8.f; R06.T8.k).
     #[test]
     fn the_sightline_cut_never_drops_a_star_the_cut_keeps() {
         let galaxy = milky_way_galaxy();
@@ -1806,7 +1811,7 @@ mod tests {
                     let at = query.observer().position();
                     let d = at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
                     let before = unextinguished_v(m_v, d);
-                    let limit = kept_to(&query, &colour_of_state(star));
+                    let limit = query.cut().value();
                     let a_v = sightline(
                         galaxy.gas(),
                         &apparent,
@@ -1816,10 +1821,14 @@ mod tests {
                         &[],
                         &mut noise,
                     )
-                    .a_v()
-                    .value();
-                    let v = before + a_v;
-                    assert!(a_v >= 0.0 && v >= before, "{record:?}: A_V {a_v}");
+                    .a_v();
+                    let own = own_v_extinction(&colour_of_state(star), a_v);
+                    let v = before + own;
+                    assert!(
+                        a_v.value() >= 0.0 && own >= 0.0 && v >= before,
+                        "{record:?}: A_V {}, its own V extinction {own}",
+                        a_v.value()
+                    );
                     if before > limit {
                         assert!(v > limit, "{record:?}");
                         dropped += 1;
@@ -1834,5 +1843,109 @@ mod tests {
             dropped > 1_000 && kept > 10,
             "{dropped} dropped, {kept} kept"
         );
+    }
+
+    /// The eye moves no star in or out of the census (R06.T8.k): the cells of every layer by the
+    /// Sun, censused at one cut with the eye asked and without it, list the same stars with the
+    /// same tallies, bit for bit. Some of the stars lie within the colour table's largest offset of
+    /// the cut, where the eye once moved each star's boundary by its own offset.
+    #[test]
+    fn a_census_with_the_eye_equals_one_without_it() {
+        let galaxy = milky_way_galaxy();
+        let cut = Magnitudes::new(9.0);
+        let without = SkyQuery::builder(observer_at(SUN), cut)
+            .build()
+            .expect("a valid query");
+        let with = SkyQuery::builder(observer_at(SUN), cut)
+            .eye(crate::sky::eye::EyeObserver::default())
+            .build()
+            .expect("a valid query");
+        let cells = cells_by_the_sun();
+        let mut ctx = context();
+        let mut run = |query: &SkyQuery| {
+            let mut stars = Vec::new();
+            let mut tallies = CensusTallies::default();
+            for &key in &cells {
+                tallies.add(&census_cell(galaxy, &mut ctx, key, query, &mut stars));
+            }
+            (stars, tallies)
+        };
+        let (eye_stars, eye_tallies) = run(&with);
+        let (stars, tallies) = run(&without);
+        assert_eq!(eye_stars, stars);
+        assert_eq!(star_bits(&eye_stars), star_bits(&stars));
+        assert_eq!(eye_tallies, tallies);
+        let near_the_cut = stars
+            .iter()
+            .filter(|s| s.v().value() > cut.value() - 0.46)
+            .count();
+        eprintln!(
+            "{} stars, {near_the_cut} within 0.46 mag of the cut, the same with the eye",
+            stars.len()
+        );
+        assert!(near_the_cut > 0, "no star near the cut, of {}", stars.len());
+    }
+
+    /// Every star a cone's census keeps is brighter than the cut and inside the cone (R06.T8.k),
+    /// and they are the stars the same cells list with no cone that lie inside it, star for star
+    /// and bit for bit, while some of those cells' stars lie outside it: each cell of a 30° cone's
+    /// plan within 60 ly of the Sun, at V 11 with the eye asked. The oracle of each cell, its every
+    /// record measured with no skip, keeps the same stars.
+    #[test]
+    fn every_kept_star_is_brighter_than_the_cut_and_inside_the_cone() {
+        let galaxy = milky_way_galaxy();
+        let observer = observer_at(SUN);
+        let cut = Magnitudes::new(11.0);
+        let cone = Cone::new(UnitVector::X, Degrees::new(30.0)).expect("a cone");
+        let build = |cone: Option<Cone>| {
+            let mut builder =
+                SkyQuery::builder(observer, cut).eye(crate::sky::eye::EyeObserver::default());
+            if let Some(cone) = cone {
+                builder = builder.cone(cone);
+            }
+            builder
+                .build()
+                .expect("a valid query")
+                .with_caps_forced(LightYears::new(60.0))
+                .expect("a forced cap")
+        };
+        let (narrow, wide) = (build(Some(cone)), build(None));
+        let mut ctx = context();
+        let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &narrow, &mut ctx.noise);
+        let inside =
+            |star: &SkyStar| cone.holds(&observer.position().displacement_to(star.apparent()));
+        let (mut kept, mut left_out) = (0_usize, 0_usize);
+        let mut records = Vec::new();
+        for key in plan.cells() {
+            let (mut coned, mut all) = (Vec::new(), Vec::new());
+            census_cell(galaxy, &mut ctx, key, &narrow, &mut coned);
+            census_cell(galaxy, &mut ctx, key, &wide, &mut all);
+            for star in &coned {
+                assert!(star.v() <= cut, "{star:?}");
+                assert!(inside(star), "{star:?} lies outside the cone");
+            }
+            let within: Vec<SkyStar> = all.iter().filter(|s| inside(s)).copied().collect();
+            assert_eq!(coned, within, "{key:?}");
+            assert_eq!(star_bits(&coned), star_bits(&within), "{key:?}");
+            generate_cell(galaxy, key, &mut records);
+            let mut oracle = Vec::new();
+            let mut tally = CensusTallies::default();
+            for record in &records {
+                census_record(
+                    galaxy,
+                    &mut ctx,
+                    record,
+                    &narrow,
+                    Bound::Ignored,
+                    &mut tally,
+                    &mut oracle,
+                );
+            }
+            assert_eq!(coned, oracle, "{key:?}: the oracle");
+            kept += coned.len();
+            left_out += all.len() - within.len();
+        }
+        eprintln!("the cone keeps {kept} stars of its cells and leaves out {left_out}");
+        assert!(kept > 0 && left_out > 0, "{kept} kept, {left_out} left out");
     }
 }
