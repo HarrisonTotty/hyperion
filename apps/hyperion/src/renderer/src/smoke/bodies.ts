@@ -814,6 +814,10 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
       overlay: null,
       meter: "lit",
     });
+    // The canvas is read back in the task that drew it, before the wait for the histogram:
+    // WebGPU may destroy a canvas's texture at the next rendering update, as the RTX 3080 run
+    // does (SwiftShader's keeps it), and a copy from it then is refused and reads zeros.
+    const bytes = await view.readBack();
     // The frame's histogram under `LIT`, read back a frame or so late: the lit side counts.
     let histogram = renderer.takeHistogram();
     for (let attempt = 0; attempt < 200 && histogram === undefined; attempt += 1) {
@@ -828,7 +832,6 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
       counted > 0,
       `${histogram === undefined ? "no histogram" : "a histogram"}: ${String(counted)} weighted counts`,
     );
-    const bytes = await view.readBack();
     const at = (x: number, y: number): number => bytes[(y * viewport.widthPx + x) * 4 + 1] ?? 0;
     const litSide = at(36, 18);
     const sky = at(2, 2);

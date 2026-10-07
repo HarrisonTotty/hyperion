@@ -5533,7 +5533,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     once, `takeHistogram` clearing it), the meter mounted only beside a drawn photorealistic image
     in `ViewDisplay.test.tsx`, and in `just test-render` a frame's histogram under `LIT` counting
     the lit side of a planet 20 px across (226 weighted counts). `test/fakeViewEngine.ts` answers
-    the kernel, its dispatch and its read-back (an empty histogram).
+    the kernel, its dispatch and its read-back (an empty histogram). _The histogram's wait came
+    before the canvas's read-back, which read zeros on the RTX 3080: see "T8.a's canvas check on
+    the RTX 3080, fixed"._
   - **For the owner (ux-reviewer)**: `MeterControl`'s layout under the Style panel at 1920 × 1080
     and 1280 × 720, and the smoothing speeds by eye (T13.b's by-eye checks: a lit planet on black,
     a star entering the frame, the cockpit turning to a planet) with `just client` on `PHASE TEST`.
@@ -7559,7 +7561,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - The check reads the canvas back only after waiting up to 5 s for the histogram. A
         presented canvas texture expires, so a later read may see a fresh, cleared one. This is
         a likely cause, not verified. SwiftShader passes it.
-      - Not fixed in T17: the next shading task.
+      - Not fixed in T17: the next shading task. _Found and fixed after T17: the read was late,
+        but no fresh texture was read; the copy was refused and read zeros. See "T8.a's canvas
+        check on the RTX 3080, fixed"._
   - **Gate.**
     - The app's vitest: 6,082 tests in 335 files, plus the protocol's 174.
     - `just check lint` from a clean tsc cache, and Prettier.
@@ -7583,3 +7587,61 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - R02's sprite cap;
       - the 1080p and 720p canvases.
       - Its should-fix items were applied too: the owner's kit, the pointers and these deviations.
+- **T8.a's canvas check on the RTX 3080, fixed** (2026-10-07; the shading lane, after T17, from
+  lane C's report). `smoke/bodies.ts`' "T8.a a photorealistic frame tones a lit planet onto the
+  canvas over a black sky" read 0 everywhere on every hidden RTX smoke run lane C made (before
+  and after its 0c57be5, and for R05.T12.e), and passed on SwiftShader.
+  - **The cause is the check, not the renderer.**
+    - The check read the canvas back only after its wait for the histogram (`pause(25)` polls,
+      about 50 ms on the RTX). `WebGpuView.readBack` asks for a read in the task that drew the
+      canvas, and every other read-back in the harness keeps to that.
+    - By then the canvas's current texture had been destroyed: WebGPU expires it at the next
+      rendering update.
+    - The copy was refused, so the staging buffer mapped its zeros. Each of lane C's RTX logs
+      holds the uncaptured error: "Destroyed texture [Texture (unlabeled 64x36 px,
+      TextureFormat::RGBA8Unorm)] used in a submit", from the encoder `view readback`.
+    - The late read came in with part 3 (2d9656c6, 2026-10-04), which put the histogram's wait
+      before `view.readBack()`. Part 2's check (beccb60e) read the canvas in the drawing task.
+  - **Evidence.** A scratch probe drew the check's own frame, waited one way, then read the
+    canvas back inside a validation error scope, every wait twice. It ran hidden on the RTX 3080
+    and on SwiftShader on 2026-10-07, and was never committed.
+    - On the RTX three reads gave lit side 200, sky 0 and no error: in the same task, after a
+      microtask, and in the next `requestAnimationFrame` callback (before that update presents).
+    - Four others gave the destroyed-texture error and lit side 0, sky 0: after a `setTimeout` of
+      0 (one rendering update between), 25 ms, 100 ms and the histogram's wait.
+    - On SwiftShader every wait read 200 and 0 with no error, up to 3.7 s and 225 rendering
+      updates. Its canvas keeps the texture, so `just test-render` could not see the fault.
+    - Both composited in software (`gpu_compositing` at `disabled_software`, the offscreen
+      window), so the compositing mode is not the difference. The runs also differ in the Ozone
+      platform (X11 against headless) and ANGLE's backend (Vulkan against SwiftShader). Which of
+      these keeps SwiftShader's texture was not isolated.
+    - The renderer draws right on the RTX: the reads in the drawing task hold the planet.
+  - **The fix.** The check reads the canvas back straight after `renderer.render`, before the
+    histogram's wait. The two checks report in their old order, and nothing outside the smoke
+    page changed. It holds on any WebGPU backend, since a read in the drawing task comes before
+    any rendering update.
+  - **No test fails before it on SwiftShader**, which keeps the texture. The regression record is
+    the RTX run: the probe's build, which carried the unmodified check, failed it; the fix passes.
+  - **Gate.**
+    - The hidden RTX smoke (lane C's switches, under the GPU lock): `default` twice and
+      `no-subgroups` once. Each exited 0, with 278, 278 and 276 checks, none failing and no
+      uncaptured GPU error. The check reads lit side 200, sky 0.
+    - `just test-render`, both variants, without captures: exit 0, 278 and 276 checks, none
+      failing and no uncaptured GPU error. The check reads lit side 200, sky 0 there too.
+    - `just check lint` from a clean tsc cache, and Prettier.
+    - No app vitest: only the smoke page changed. `just ci` was not run, under the Day 2
+      protocol.
+  - **Reviewed.**
+    - TypeScript: no must-fix or should-fix items. Two considers change the engine, not the
+      check, so they are left for the orchestrator:
+      - a remark on `RenderView.readBack` that a read must come in the drawing task, with
+        `view.ts`'s "once the task that got it yields" brought to the rendering update;
+      - a validation error scope in `readCanvasTexture`, so that a late read rejects with a named
+        error rather than returning zeros.
+    - Plan conformance: no must-fix items. Its three should-fix items were applied: the
+      difference between the runs not isolated, R05.T12.e's prefix, and where the late read came
+      from (with a pointer in part 3).
+      - Its considers: T17's guessed cause is corrected at its pointer. R05's Risks record of the
+        failure gets no pointer here, since it is lane C's plan.
+  - Scratch: `.git/rm23-scratch/r07-shading/t8a-rtx/`. It holds `rtx-smoke.sh`, `sw-smoke.sh`,
+    `diag/` (the probe, its patch and logs) and `rtx-fix-{1,2,3}.log`.
