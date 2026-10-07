@@ -1,6 +1,7 @@
 //! Benchmarks of the sky (rendering plan R06): the luminosity tables' build, the census near the
 //! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), the band
-//! near the Sun, marched and summed (R06.T9.b, T9.f), and the limit map (R06.T9.i).
+//! near the Sun, marched and summed (R06.T9.b, T9.f) and under a camera's cut (R06.T9.j), and the
+//! limit map (R06.T9.i).
 //!
 //! They run on `GalaxyParams::milky_way_like()` with a fixed seed. A miss is a finding to record,
 //! not a CI failure: CI compiles these and never runs them. Every figure below is provisional
@@ -38,6 +39,8 @@
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 22.7 CPU-s, provisional |
 //! | `sky/band_near_sun/sum` | within each reply's (T17) | 0.002 CPU-s, provisional |
+//! | `sky/band_near_sun/march_camera` | within the first sky's (T17) | 29.5 CPU-s, provisional |
+//! | `sky/band_near_sun/march_camera_no_eye` | none (the camera's march's reference) | 22.5 CPU-s, provisional |
 //! | `sky/limit_map/near_sun` | within the first sky's (T17) | 0.32 CPU-s, provisional |
 //! | `sky/limit_map/synthetic_300k` | ≤ 3 CPU-s (R06.T9.i) | 1.03 CPU-s, provisional |
 //!
@@ -64,7 +67,17 @@
 //! replies and 22 slots a ray, a heap of 21.8 MB, 22.7 CPU-s for the march (7.6 s wall) against
 //! 18.5 CPU-s for one of the caps alone, the band before the split, and 0.002 CPU-s for the sum.
 //! R06.T9.b's one run of the band before the split (2026-10-05, under the heavy-test lock, load
-//! 3–5): 20.2 CPU-s on 15 workers, 1.37 s wall. A 16² band took 1.7 s on one thread in the test
+//! 3–5): 20.2 CPU-s on 15 workers, 1.37 s wall.
+//!
+//! `band_near_sun/march_camera` marches a camera's request at V 10.06 with the eye at 7.95 beside
+//! it, so the march keeps the light fainter than the eye's cut too (R06.T9.j), and
+//! `band_near_sun/march_camera_no_eye` the same request with no eye; the second sums cost the
+//! difference. R06.T9.j's one run of each (2026-10-07, criterion's `--test`, three workers at
+//! `CPUQuota=400%`, without the heavy-test lock, which another lane held, load about 10, so
+//! provisional): at 10.06 the caps are A 46, B 260, C 19,416, D 19,416, E 41,804 and the brown
+//! dwarfs 1 ly, with eight replies; with the eye's light the march holds 49.3 MB and took 29.5
+//! CPU-s (9.9 s wall), and without it 24.7 MB and 22.5 CPU-s (7.5 s wall). The second sums double
+//! the heap and add 31% to the time. In the same run `band_near_sun/march` took 20.0 CPU-s. A 16² band took 1.7 s on one thread in the test
 //! profile, about 1.1 ms a ray, four fifths of it the luminosity functions' reads and one fifth the
 //! ray's profile.
 //!
@@ -92,7 +105,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::measurement::WallTime;
+use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
@@ -129,6 +143,10 @@ const SEED: u64 = 0x0926_0000;
 /// the caps' decision and the census's slow tests use, until R06.T9's `eye_cut` computes it.
 const EYE_CUT_V: f64 = 7.95;
 
+/// A camera's cut near the Sun beside the eye's, V (R06.T9.j): the glare ruling's 10.06, a camera
+/// with the eye open, at which a census near the Sun lists `MAX_N_MAX` stars.
+const CAMERA_CUT_V: f64 = 10.06;
+
 /// Near the Sun, ly: the plan's Sun-like test place, 26,000 ly from the centre on +y (the
 /// fixture's solar circle is 3.8 disc lengths, about 26,600 ly; R₀ = 8.178 kpc, GRAVITY
 /// Collaboration 2019, A&A 625, L10) and 68 ly above the plane (z☉ = 20.8 ± 0.3 pc, Bennett and
@@ -151,6 +169,8 @@ static PRINTED_WARM: AtomicBool = AtomicBool::new(false);
 static PRINTED_NUCLEAR: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_SUM: AtomicBool = AtomicBool::new(false);
+static PRINTED_BAND_CAMERA: AtomicBool = AtomicBool::new(false);
+static PRINTED_BAND_CAMERA_NO_EYE: AtomicBool = AtomicBool::new(false);
 static PRINTED_LIMIT_MAP_NEAR_SUN: AtomicBool = AtomicBool::new(false);
 static PRINTED_LIMIT_MAP_SYNTHETIC: AtomicBool = AtomicBool::new(false);
 
@@ -741,59 +761,95 @@ fn band_caps(sky: &Sky, query: &SkyQuery) -> Vec<LayerCap> {
     )
 }
 
-/// The band of a near-Sun request, split as the server runs it (R06.T9.f): `band_near_sun/march`
-/// marches all six faces once, one face row a job, keeping every reply of [`shell_replies`];
-/// `band_near_sun/sum` sums the final reply's texels from that march, one face row a job. Each
-/// prints, once, its CPU time and wall time, and the march its heap.
-fn band_near_sun(c: &mut Criterion) {
-    let query = eye_query(SUN_LY);
+/// The near-Sun request of a camera at [`CAMERA_CUT_V`], with the eye asked beside it at
+/// [`EYE_CUT_V`] (`eye` true) or not at all (R06.T9.j).
+fn camera_query(ly: [f64; 3], eye: bool) -> SkyQuery {
+    let at = GalacticPosition::from_light_years(ly).expect("in the root cube");
+    let observer = Observer::new(at, UniverseTime::EPOCH).expect("the epoch is on the clock");
+    let builder = SkyQuery::builder(observer, Magnitudes::new(CAMERA_CUT_V));
+    let builder = if eye {
+        builder
+            .eye(EyeObserver::default())
+            .eye_cut(Magnitudes::new(EYE_CUT_V))
+    } else {
+        builder
+    };
+    builder.build().expect("a valid query")
+}
+
+/// A request's caps and the replies of its shell plan ([`shell_replies`]), made once.
+type Replies = OnceCell<(Vec<LayerCap>, Vec<CompleteTo>)>;
+
+/// The caps and replies of `query`, made in `cell` on first use.
+fn replies_of<'a>(cell: &'a Replies, query: &SkyQuery) -> &'a (Vec<LayerCap>, Vec<CompleteTo>) {
+    cell.get_or_init(|| {
+        let caps = band_caps(sky(), query);
+        let replies = shell_replies(&caps);
+        (caps, replies)
+    })
+}
+
+/// Marches all six faces of `spec` for `query`, one face row of `jobs` a job on `workers` threads,
+/// keeping `replies`: each job's march and the jobs' CPU time.
+fn march_all(
+    query: &SkyQuery,
+    replies: &[CompleteTo],
+    spec: BandSpec,
+    jobs: &[(CubeFace, u16)],
+    workers: usize,
+) -> (Vec<(usize, BandMarch)>, Duration) {
+    let sky = sky();
+    on_pool(jobs, workers, &|&(face, row): &(CubeFace, u16)| {
+        march_rows(
+            &sky.galaxy,
+            &mut job_context(sky),
+            black_box(query),
+            replies.iter().copied(),
+            &spec,
+            face,
+            row..row + 1,
+        )
+    })
+}
+
+/// The march's bench `name` (`sky/band_near_sun/<name>`) for `query`: all six faces of
+/// `BandSpec::STANDARD`, one face row a job, keeping the replies of its shell plan. Prints once
+/// (`printed`) the rows, the replies and caps, the heap, the CPU time and the wall time.
+fn bench_march(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    name: &str,
+    query: &SkyQuery,
+    printed: &AtomicBool,
+) {
     let workers = workers();
     let spec = BandSpec::STANDARD;
     let jobs: Vec<(CubeFace, u16)> = CubeFace::ALL
         .iter()
         .flat_map(|&face| (0..spec.face_texels()).map(move |row| (face, row)))
         .collect();
-    // The caps and the replies, and for the sums the march, made outside the timing.
-    let replies: OnceCell<(Vec<LayerCap>, Vec<CompleteTo>)> = OnceCell::new();
-    let replies = || {
-        replies.get_or_init(|| {
-            let caps = band_caps(sky(), &query);
-            let replies = shell_replies(&caps);
-            (caps, replies)
-        })
-    };
-    let march_all = |replies: &[CompleteTo]| {
-        let sky = sky();
-        on_pool(&jobs, workers, &|&(face, row): &(CubeFace, u16)| {
-            march_rows(
-                &sky.galaxy,
-                &mut job_context(sky),
-                black_box(&query),
-                replies.iter().copied(),
-                &spec,
-                face,
-                row..row + 1,
-            )
-        })
-    };
-    let mut group = c.benchmark_group("sky");
-    group.sample_size(10);
-    group.bench_function("band_near_sun/march", |b| {
-        let (caps, replies) = replies();
+    // The caps and the replies, made outside the timing.
+    let replies: Replies = OnceCell::new();
+    group.bench_function(format!("band_near_sun/{name}"), |b| {
+        let (caps, replies) = replies_of(&replies, query);
         b.iter_custom(|iters| {
             let mut cpu = Duration::ZERO;
             for _ in 0..iters {
                 let began = Instant::now();
-                let (marches, busy) = march_all(replies);
-                if !PRINTED_BAND.swap(true, Ordering::Relaxed) {
+                let (marches, busy) = march_all(query, replies, spec, &jobs, workers);
+                if !printed.swap(true, Ordering::Relaxed) {
                     let heap = marches.iter().map(|(_, m)| m.heap_bytes()).sum::<usize>();
+                    let eye = marches.first().and_then(|(_, m)| m.eye_cut()).map_or_else(
+                        || "no eye light".to_owned(),
+                        |cut| format!("the eye's light to V {}", cut.value()),
+                    );
                     let radii: Vec<String> = caps
                         .iter()
                         .map(|cap| format!("{:?} {:.0}", cap.layer(), cap.radius().value()))
                         .collect();
                     println!(
-                        "sky/band_near_sun/march: {} rows, {} replies (caps {}), heap {heap} \
-                         bytes, {:.1} CPU-s on {workers} workers, {:.2} s wall",
+                        "sky/band_near_sun/{name}: cut V {}, {eye}; {} rows, {} replies (caps \
+                         {}), heap {heap} bytes, {:.1} CPU-s on {workers} workers, {:.2} s wall",
+                        query.cut().value(),
                         marches.len(),
                         replies.len(),
                         radii.join(", "),
@@ -806,11 +862,32 @@ fn band_near_sun(c: &mut Criterion) {
             cpu
         });
     });
+}
+
+/// The band of a near-Sun request, split as the server runs it (R06.T9.f): `band_near_sun/march`
+/// marches all six faces once, one face row a job, keeping every reply of [`shell_replies`];
+/// `band_near_sun/sum` sums the final reply's texels from that march, one face row a job. Each
+/// prints, once, its CPU time and wall time, and the march its heap. `band_near_sun/march_camera`
+/// marches a camera's request at [`CAMERA_CUT_V`] with the eye at [`EYE_CUT_V`] beside it, keeping
+/// the eye's light too (R06.T9.j), and `band_near_sun/march_camera_no_eye` the same request with
+/// no eye: the second sums cost their difference.
+fn band_near_sun(c: &mut Criterion) {
+    let query = eye_query(SUN_LY);
+    let workers = workers();
+    let spec = BandSpec::STANDARD;
+    let jobs: Vec<(CubeFace, u16)> = CubeFace::ALL
+        .iter()
+        .flat_map(|&face| (0..spec.face_texels()).map(move |row| (face, row)))
+        .collect();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    bench_march(&mut group, "march", &query, &PRINTED_BAND);
     let held: OnceCell<Vec<BandMarch>> = OnceCell::new();
+    let replies: Replies = OnceCell::new();
     group.bench_function("band_near_sun/sum", |b| {
-        let (caps, replies) = replies();
+        let (caps, replies) = replies_of(&replies, &query);
         let marches = held.get_or_init(|| {
-            march_all(replies)
+            march_all(&query, replies, spec, &jobs, workers)
                 .0
                 .into_iter()
                 .map(|(_, march)| march)
@@ -840,6 +917,18 @@ fn band_near_sun(c: &mut Criterion) {
             cpu
         });
     });
+    bench_march(
+        &mut group,
+        "march_camera",
+        &camera_query(SUN_LY, true),
+        &PRINTED_BAND_CAMERA,
+    );
+    bench_march(
+        &mut group,
+        "march_camera_no_eye",
+        &camera_query(SUN_LY, false),
+        &PRINTED_BAND_CAMERA_NO_EYE,
+    );
     group.finish();
 }
 
@@ -1000,7 +1089,8 @@ fn limit_map(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("limit_map/near_sun", |b| {
         let fixture = fixture.get_or_init(|| limit_map_fixture(sky(), workers, &jobs));
-        let build = || Glare::of_listed(&fixture.observer, &fixture.listed, &spec);
+        let cut = Magnitudes::new(LIMIT_MAP_CUT_V);
+        let build = || Glare::of_listed(&fixture.observer, &fixture.listed, &spec, cut);
         b.iter_custom(|iters| {
             (0..iters)
                 .map(|_| {

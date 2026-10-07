@@ -48,6 +48,8 @@ pub enum BuildSkyQueryError {
     ConeHalfAngle,
     /// A forced cap is not finite and non-negative, or reaches past the root cube's diagonal.
     ForcedCap,
+    /// The eye's cut is asked without the eye, or is not finite, or is deeper than the cut.
+    EyeCut,
 }
 
 impl fmt::Display for BuildSkyQueryError {
@@ -57,6 +59,9 @@ impl fmt::Display for BuildSkyQueryError {
             Self::NMax => "n_max is above 300,000",
             Self::ConeHalfAngle => "the cone's half-angle is not within 0 to 90 degrees",
             Self::ForcedCap => "a forced cap is not within 0 to the root cube's diagonal",
+            Self::EyeCut => {
+                "the eye's cut is asked without the eye, or is not finite or deeper than the cut"
+            }
         })
     }
 }
@@ -150,14 +155,17 @@ impl Cone {
     }
 }
 
-/// What a sky is asked for: an observer, a cut, the eye if asked, the count budget, an optional
-/// cone and the observer's own system to leave out (Design notes 5, 10 and 11). Built through
-/// [`SkyQuery::builder`].
+/// What a sky is asked for: an observer, a cut, the eye and its own cut if asked, the count
+/// budget, an optional cone and the observer's own system to leave out (Design notes 5, 10 and 11).
+/// Built through [`SkyQuery::builder`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct SkyQuery {
     observer: Observer,
     cut: Magnitudes,
     eye: Option<EyeObserver>,
+    /// The eye's cut: `Some` exactly when the eye is asked once built, and never deeper than the
+    /// cut.
+    eye_cut: Option<Magnitudes>,
     n_max: NonZeroU32,
     cone: Option<Cone>,
     exclude: Option<SystemId>,
@@ -208,6 +216,7 @@ impl SkyQuery {
                 observer,
                 cut,
                 eye: None,
+                eye_cut: None,
                 n_max: DEFAULT_N_MAX,
                 cone: None,
                 exclude: None,
@@ -235,6 +244,19 @@ impl SkyQuery {
     #[must_use]
     pub const fn eye(&self) -> Option<&EyeObserver> {
         self.eye.as_ref()
+    }
+
+    /// The eye's cut, apparent V, if the sky is asked for the eye: the cut of the eye's own
+    /// request, at which its limit map is taken whatever the query's cut (R06.T9.j; decided
+    /// 2026-10-06, `decision-r06-t9c-glare.md`), so that at the same census radius the eye's limits
+    /// are the eye-only request's, bit for bit. It is the query's cut unless a camera's deeper cut
+    /// set that (Design note 5), and is never deeper than it. The band then keeps the light fainter
+    /// than the eye's cut beside its own, as the eye's background
+    /// ([`march_rows`](super::super::band::march_rows)), and only the listed stars at or brighter
+    /// than it glare ([`Glare::of_listed`](super::super::limits::Glare::of_listed)).
+    #[must_use]
+    pub const fn eye_cut(&self) -> Option<Magnitudes> {
+        self.eye_cut
     }
 
     /// The most stars listed.
@@ -304,10 +326,54 @@ impl SkyQuery {
 }
 
 impl SkyQueryBuilder {
-    /// Asks for the eye's limits. The census still keeps each star to the cut alone (R06.T8.k).
+    /// Asks for the eye's limits, at the query's cut unless [`eye_cut`](Self::eye_cut) sets the
+    /// eye's own. The census still keeps each star to the cut alone (R06.T8.k).
     #[must_use]
     pub fn eye(mut self, eye: EyeObserver) -> Self {
         self.query.eye = Some(eye);
+        self
+    }
+
+    /// The eye's own cut, where a camera's deeper cut sets the query's (Design note 5; R06.T9.j):
+    /// the eye's limits are then those of a request at the eye's cut alone, its background the
+    /// light fainter than it and its glare the stars at or brighter than it
+    /// ([`SkyQuery::eye_cut`]). The server gives the eye's cut [`eye_cut`](super::super::limits::eye_cut)'s
+    /// value and the query the deeper of the two. Asked without [`eye`](Self::eye), it is refused.
+    ///
+    /// # Examples
+    ///
+    /// The cockpit eye beside a camera that sees to V 10.06:
+    ///
+    /// ```
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::observe::Observer;
+    /// use hyperion_sim::sky::EyeObserver;
+    /// use hyperion_sim::sky::census::{BuildSkyQueryError, SkyQuery};
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+    /// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+    /// let (eye_cut, camera) = (Magnitudes::new(8.28), Magnitudes::new(10.06));
+    /// let query = SkyQuery::builder(observer.clone(), camera)
+    ///     .eye(EyeObserver::default())
+    ///     .eye_cut(eye_cut)
+    ///     .build()?;
+    /// assert_eq!((query.cut(), query.eye_cut()), (camera, Some(eye_cut)));
+    /// // An eye-only request takes its cut as the eye's.
+    /// let eye_only = SkyQuery::builder(observer.clone(), eye_cut).eye(EyeObserver::default()).build()?;
+    /// assert_eq!(eye_only.eye_cut(), Some(eye_cut));
+    /// // The eye's cut is never deeper than the cut the census lists to.
+    /// let deeper = SkyQuery::builder(observer, eye_cut)
+    ///     .eye(EyeObserver::default())
+    ///     .eye_cut(camera)
+    ///     .build();
+    /// assert_eq!(deeper, Err(BuildSkyQueryError::EyeCut));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn eye_cut(mut self, eye_cut: Magnitudes) -> Self {
+        self.query.eye_cut = Some(eye_cut);
         self
     }
 
@@ -337,9 +403,11 @@ impl SkyQueryBuilder {
     ///
     /// # Errors
     ///
-    /// [`BuildSkyQueryError::Cut`] unless the cut is finite and at most [`MAX_CUT_V`], and
-    /// [`BuildSkyQueryError::NMax`] if `n_max` is above [`MAX_N_MAX`].
-    pub fn build(self) -> Result<SkyQuery, BuildSkyQueryError> {
+    /// [`BuildSkyQueryError::Cut`] unless the cut is finite and at most [`MAX_CUT_V`],
+    /// [`BuildSkyQueryError::NMax`] if `n_max` is above [`MAX_N_MAX`], and
+    /// [`BuildSkyQueryError::EyeCut`] if the eye's cut is asked without the eye, or is not finite
+    /// or is deeper than the cut.
+    pub fn build(mut self) -> Result<SkyQuery, BuildSkyQueryError> {
         let cut = self.query.cut.value();
         if !(cut.is_finite() && cut <= MAX_CUT_V) {
             return Err(BuildSkyQueryError::Cut);
@@ -347,6 +415,14 @@ impl SkyQueryBuilder {
         if self.query.n_max.get() > MAX_N_MAX {
             return Err(BuildSkyQueryError::NMax);
         }
+        self.query.eye_cut = match (self.query.eye, self.query.eye_cut) {
+            (None, None) => None,
+            (Some(_), None) => Some(self.query.cut),
+            (Some(_), Some(eye_cut)) if eye_cut.value().is_finite() && eye_cut.value() <= cut => {
+                Some(eye_cut)
+            }
+            (None | Some(_), Some(_)) => return Err(BuildSkyQueryError::EyeCut),
+        };
         Ok(self.query)
     }
 }
@@ -636,11 +712,52 @@ mod tests {
             );
         }
         assert!(query().with_caps_forced(LightYears::ZERO).is_ok());
+        let eye = |cut: f64, eye_cut: Option<f64>, asked: bool| {
+            let builder = SkyQuery::builder(observer(), Magnitudes::new(cut));
+            let builder = if asked {
+                builder.eye(EyeObserver::default())
+            } else {
+                builder
+            };
+            match eye_cut {
+                Some(eye_cut) => builder.eye_cut(Magnitudes::new(eye_cut)),
+                None => builder,
+            }
+            .build()
+            .map(|query| query.eye_cut().map(Magnitudes::value))
+        };
+        assert_eq!(eye(10.06, Some(8.15), true), Ok(Some(8.15)));
+        assert_eq!(eye(8.15, Some(8.15), true), Ok(Some(8.15)));
+        assert_eq!(eye(8.15, None, true), Ok(Some(8.15)), "an eye-only request");
+        assert_eq!(eye(8.15, None, false), Ok(None), "no eye");
+        for (cut, eye_cut, asked) in [
+            (8.15, 10.06, true),
+            (8.15, f64::NAN, true),
+            (8.15, f64::NEG_INFINITY, true),
+            (10.06, 8.15, false),
+        ] {
+            assert_eq!(
+                eye(cut, Some(eye_cut), asked),
+                Err(BuildSkyQueryError::EyeCut),
+                "cut {cut}, the eye's {eye_cut}, the eye asked: {asked}"
+            );
+        }
+        let forced = SkyQuery::builder(observer(), Magnitudes::new(10.06))
+            .eye(EyeObserver::default())
+            .eye_cut(Magnitudes::new(8.15))
+            .build()
+            .and_then(|query| query.with_caps_forced(LightYears::new(100.0)));
+        assert_eq!(
+            forced.map(|query| query.eye_cut()),
+            Ok(Some(Magnitudes::new(8.15))),
+            "a forced cap keeps the eye's cut"
+        );
         for error in [
             BuildSkyQueryError::Cut,
             BuildSkyQueryError::NMax,
             BuildSkyQueryError::ConeHalfAngle,
             BuildSkyQueryError::ForcedCap,
+            BuildSkyQueryError::EyeCut,
         ] {
             let text = error.to_string();
             let field = match error {
@@ -648,6 +765,7 @@ mod tests {
                 BuildSkyQueryError::NMax => "n_max",
                 BuildSkyQueryError::ConeHalfAngle => "half-angle",
                 BuildSkyQueryError::ForcedCap => "forced cap",
+                BuildSkyQueryError::EyeCut => "eye's cut",
             };
             assert!(text.contains(field), "{text}");
         }

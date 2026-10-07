@@ -9,6 +9,19 @@
 //! Lighting Res. Technol. 35, 163), which Design note 4 takes for the "standard way" (Adrian 1989,
 //! Lighting Res. Technol. 21, 181) to which Crumey (2014, MNRAS 442, 2600, §1.6.3) leaves glare.
 //!
+//! **The eye's own sky** (R06.T9.j; decided 2026-10-06, `decision-r06-t9c-glare.md`). The eye's
+//! map is the eye-only request's, whatever the request's cut. Where a camera's deeper cut sets the
+//! band's, the background is the expected light fainter than the eye's cut
+//! ([`SkyQuery::eye_cut`](super::census::SkyQuery::eye_cut)), which the band's march keeps beside
+//! its own light ([`march_rows`](super::band::march_rows)), and only the listed stars at or
+//! brighter than the eye's cut glare ([`Glare::of_listed`]). A listed star fainter than it adds
+//! neither glare nor background, since its light is in that expected light already, and its eye
+//! offset is its colour offset alone. At the same census radius, opening a camera view so changes
+//! none of the eye's limits or offsets, bit for bit. A camera's deeper caps reach further: there
+//! the census lists the rare stars brighter than the eye's cut, under one expected a layer by the
+//! caps' rule, which glare and may be seen, where an eye-only request holds them as expected light
+//! (R06's Risks, "Deviations in T9.j, as built").
+//!
 //! The glare's illuminance is taken in the plane of the eye, perpendicular to the line of sight,
 //! as CIE 146:2002 defines it (and IJspeert et al. 1990, Vision Res. 30, 699; Stiles and Crawford
 //! 1937, Proc. R. Soc. B 122, 255; see [`veiling_luminance`]): a star of illuminance E at θ from a
@@ -26,6 +39,8 @@
 //! (`star.colour().reddened(star.a_v()).sp_ratio()`, R06.T9.e) and K(θ) the veil per lux in the
 //! eye's plane at θ from the texel's centre (θ clamped at 0.1°, cos θ the plane's factor, nothing
 //! at or beyond 90°), a texel of band luminance B and ratio ρ is seen against
+//!
+//! (B and ρ the light fainter than the eye's cut, the band's own at the eye's cut)
 //!
 //! - a photopic luminance B′ = B + Σ E★ K(θ★) cos θ★, and
 //! - an S/P ratio ρ′ = (ρ B + Σ ρ★ E★ K(θ★) cos θ★) ÷ B′, the band's and the veils' light together.
@@ -149,7 +164,9 @@ struct GlareSource {
     /// Its direction from the observer, on the galactic axes: `None` for a star at the observer's
     /// own position, which has none and glares nothing.
     direction: Option<UnitVector>,
-    /// Its photopic illuminance at the eye after its own reddening, normal to its direction, lux.
+    /// Its photopic illuminance at the eye after its own reddening, normal to its direction, lux,
+    /// that glares: zero for a listed star fainter than the eye's cut, which glares nothing
+    /// (R06.T9.j).
     photopic: f64,
     /// Its scotopic light at the eye, its photopic illuminance times its reddened S/P ratio, lux.
     scotopic: f64,
@@ -531,7 +548,8 @@ impl Pyramid {
 
 /// The glare of a census's listed stars as the limit map reads it (Design note 4): each star's
 /// direction from the observer, and its photopic and scotopic illuminance at the eye after its own
-/// reddening, summed over a pyramid of the band's texels (R06.T9.i).
+/// reddening, summed over a pyramid of the band's texels (R06.T9.i). Only the stars at or brighter
+/// than the eye's cut glare (R06.T9.j).
 ///
 /// A request builds it once from its census, for its band, and every job of the band's rows reads
 /// it: each star's reddening is resolved here, once. It holds one entry a listed star, in the
@@ -568,18 +586,30 @@ pub struct Glare {
     /// The pyramid the veil is summed over, for the band it was built for: `None` for the default,
     /// which holds no star.
     pyramid: Option<Pyramid>,
+    /// The eye's cut its stars glare to, where it was built of a census's listed stars (R06.T9.j):
+    /// a band whose texels hold the light fainter than an eye's cut must be of this one.
+    eye_cut: Option<Magnitudes>,
 }
 
 impl Glare {
     /// The glare of the stars `listed` (a [`SkyCensus`](super::census::SkyCensus)'s listed stars,
     /// not its overflow, whose light the band holds) as `observer` sees them, over the texels of a
-    /// band of `spec`, the band whose limits it sets.
+    /// band of `spec`, the band whose limits it sets, for an eye of cut `eye_cut`
+    /// ([`SkyQuery::eye_cut`](super::census::SkyQuery::eye_cut)).
     ///
     /// Each star's photopic illuminance is its unextinguished light (its V less its own V band's
     /// extinction, R06.T8.k) through its own
     /// [`StarColour::reddened`](super::colour::StarColour::reddened) at its extinction, as the
     /// band's overflow points take it, and its scotopic light that times the reddened S/P ratio. A
     /// star at the observer's own position, which has no direction, adds no glare.
+    ///
+    /// Only the stars the eye's own request lists glare (R06.T9.j; decided 2026-10-06,
+    /// `decision-r06-t9c-glare.md`): those at or brighter than `eye_cut`, the census's boundary
+    /// (R06.T8.k). A star fainter than it, which a camera's deeper cut lists, keeps its entry with
+    /// no light: it glares nothing, since its light is in the eye's background already as expected
+    /// light, and its eye offset is its colour offset alone. So the glare of a census at a camera's
+    /// cut is, bit for bit, that of the eye-only census of the same radius, whose stars are its
+    /// first ones. At the eye's own cut every listed star glares.
     ///
     /// Each leaf of the pyramid sums its stars in the census's order, so `listed` is the census's
     /// own, by [`sky_order`](super::census::sky_order), as
@@ -589,7 +619,12 @@ impl Glare {
     ///
     /// In debug builds, if `listed` is not in that order.
     #[must_use]
-    pub fn of_listed(observer: &Observer, listed: &[SkyStar], spec: &BandSpec) -> Self {
+    pub fn of_listed(
+        observer: &Observer,
+        listed: &[SkyStar],
+        spec: &BandSpec,
+        eye_cut: Magnitudes,
+    ) -> Self {
         debug_assert!(
             listed
                 .windows(2)
@@ -603,8 +638,12 @@ impl Glare {
                 let direction =
                     UnitVector::from_components(origin.displacement_to(star.apparent()).metres());
                 let reddened = star.colour().reddened(star.a_v());
-                let photopic = unextinguished_lux(star.colour(), star.v(), &reddened)
-                    * reddened.photopic_transmission();
+                let photopic = if star.v() <= eye_cut {
+                    unextinguished_lux(star.colour(), star.v(), &reddened)
+                        * reddened.photopic_transmission()
+                } else {
+                    0.0
+                };
                 GlareSource {
                     direction,
                     photopic,
@@ -613,7 +652,10 @@ impl Glare {
                 }
             })
             .collect();
-        Self::of_sources(sources, *spec)
+        Self {
+            eye_cut: Some(eye_cut),
+            ..Self::of_sources(sources, *spec)
+        }
     }
 
     /// The glare of point sources `points`, each its direction from the observer, its photopic
@@ -675,6 +717,7 @@ impl Glare {
         Self {
             sources,
             pyramid: Some(pyramid),
+            eye_cut: None,
         }
     }
 
@@ -722,16 +765,17 @@ impl Glare {
 }
 
 /// The background the eye sees over `texel` with the veil `[photopic, scotopic]` over it, cd m⁻²
-/// (the [module](self) documentation). With no veil it is the texel's own, luminance and ρ bit for
-/// bit.
+/// (the [module](self) documentation): the light fainter than the eye's cut
+/// ([`BandTexel::eye_background`], the texel's own unless a camera's deeper cut set the band's,
+/// R06.T9.j) and the veil. With no veil it is that light's luminance and ρ, bit for bit.
 #[must_use]
 fn background(texel: &BandTexel, veil: [f64; 2]) -> SkyBackground {
     let [photopic_veil, scotopic_veil] = veil;
-    let light = texel.luminance().value();
+    let (light, sp_ratio) = texel.eye_background();
+    let light = light.value();
     debug_assert!(
-        light.is_finite() && texel.sp_ratio().is_finite(),
-        "a band texel's light {light} and ratio {}",
-        texel.sp_ratio()
+        light.is_finite() && sp_ratio.is_finite(),
+        "a band texel's eye light {light} and ratio {sp_ratio}"
     );
     debug_assert!(
         photopic_veil.is_finite() && scotopic_veil.is_finite(),
@@ -739,12 +783,9 @@ fn background(texel: &BandTexel, veil: [f64; 2]) -> SkyBackground {
     );
     let (luminance, sp_ratio) = if photopic_veil > 0.0 {
         let luminance = light + photopic_veil;
-        (
-            luminance,
-            (light * texel.sp_ratio() + scotopic_veil) / luminance,
-        )
+        (luminance, (light * sp_ratio + scotopic_veil) / luminance)
     } else {
-        (light, texel.sp_ratio())
+        (light, sp_ratio)
     };
     SkyBackground::new(
         CandelasPerSquareMetre::new(luminance.min(SkyBackground::MAX_LUMINANCE.value())),
@@ -769,9 +810,11 @@ fn texel_limit(eye: &EyeObserver, texel: &BandTexel, veil: [f64; 2]) -> Magnitud
 
 /// Sets the eye's limit of each texel of rows `rows` (from the top) of `face`, `texels` in
 /// [`band_rows`](super::band::band_rows)' order (row by row, each from its left): Crumey's
-/// threshold for `eye` against the texel's light and the veiling glare `glare` over it (Design note
-/// 4; the [module](self) documentation), summed over the glare's pyramid ([`Glare`], R06.T9.i).
-/// Each texel keeps the veil, photopic and scotopic, beside its limit, for [`eye_offsets`].
+/// threshold for `eye` against the texel's light fainter than the eye's cut (its own, or the eye's
+/// that the march kept beside it under a camera's deeper cut, R06.T9.j) and the veiling glare
+/// `glare` over it (Design note 4; the [module](self) documentation), summed over the glare's
+/// pyramid ([`Glare`], R06.T9.i). Each texel keeps the veil, photopic and scotopic, beside its
+/// limit, for [`eye_offsets`].
 ///
 /// A server runs it on each job's rows of the band; each texel's limit is a function of its own
 /// light, its direction and the glare alone, the pyramid traversed in a fixed order, so any split
@@ -784,7 +827,9 @@ fn texel_limit(eye: &EyeObserver, texel: &BandTexel, veil: [f64; 2]) -> Magnitud
 ///
 /// If `rows` reaches past the face's last row, `texels` is not those rows' texels in number, or
 /// `glare` was built for a band of faces of another size; and in debug builds, if a texel's light
-/// or the veil over it is not finite, which no band or census gives.
+/// or the veil over it is not finite, which no band or census gives, or if a texel holds the light
+/// fainter than an eye's cut other than the one `glare`'s stars glare to (R06.T9.j), which would
+/// count the stars between the two twice or not at all.
 pub fn limit_rows(
     eye: &EyeObserver,
     spec: &BandSpec,
@@ -834,6 +879,14 @@ fn set_limits(
     let mut stack = Vec::new();
     let places = rows.flat_map(|row| (0..side).map(move |column| (row, column)));
     for (texel, (row, column)) in texels.iter_mut().zip(places) {
+        debug_assert!(
+            texel
+                .eye_light_cut()
+                .is_none_or(|cut| glare.eye_cut.is_none_or(|glares_to| glares_to == cut)),
+            "a texel of the light fainter than V {:?} under a glare to V {:?}",
+            texel.eye_light_cut(),
+            glare.eye_cut
+        );
         let toward = spec.texel_direction(face, row, column);
         let veil = glare.veil(
             eye,
@@ -1021,8 +1074,9 @@ fn eye_offset_parts(
 /// - its colour offset, Design note 3's 2.5 log₁₀(ρ★ ÷ 2.297) in a scotopic texel, fading by MES2's
 ///   photopic weight in a mesopic one.
 ///
-/// A star that adds no veil takes its colour offset alone; a star at the observer's own position,
-/// which has no direction, takes it against a scotopic sky. The texels' limits do not change.
+/// A star that adds no veil takes its colour offset alone, as a star fainter than the eye's cut
+/// does, which glares nothing (R06.T9.j); a star at the observer's own position, which has no
+/// direction, takes it against a scotopic sky. The texels' limits do not change.
 ///
 /// The field factor cancels: it moves both limits by −2.5 log₁₀ F, so a view's own factor, applied
 /// as that offset to every texel, leaves each star's own limit exact. The wire quantises the offset
@@ -1087,6 +1141,7 @@ fn eye_offset_parts(
 /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
 /// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
 /// let query = SkyQuery::builder(observer, Magnitudes::new(8.15))
+///     .eye(EyeObserver::default())
 ///     .build()?
 ///     .with_caps_forced(LightYears::new(30.0))?;
 /// let plan = census_plan(&galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
@@ -1103,7 +1158,8 @@ fn eye_offset_parts(
 /// for face in CubeFace::ALL {
 ///     band_rows(&galaxy, &mut ctx, &query, &census, &complete_to, &spec, face, 0..16, &mut band);
 /// }
-/// let (eye, glare) = (EyeObserver::default(), Glare::of_listed(&observer, listed, &spec));
+/// let eye = *query.eye().ok_or("the eye")?;
+/// let glare = Glare::of_listed(&observer, listed, &spec, query.eye_cut().ok_or("the eye's cut")?);
 /// limit_map(&eye, &spec, &glare, &mut band);
 /// let n = usize::from(spec.face_texels());
 /// for (star, offset) in listed.iter().zip(eye_offsets(&eye, &spec, &glare, &band)) {
@@ -1296,8 +1352,8 @@ fn eye_cut_passes(
 /// moves the cut by about 0.04 mag. The darkest limit moves about 0.11 mag per magnitude of cut, so
 /// what is left, about 0.005, makes the final band darker, the side the pad covers.
 ///
-/// So every star an eye view can see is listed, in the eye-only request's map (and, from R06.T9.j,
-/// in the eye's map under a camera's deeper cut). A star's own limit is its texel's limit in the
+/// So every star an eye view can see is listed, in the eye-only request's map, which is also the
+/// eye's map under a camera's deeper cut (R06.T9.j). A star's own limit is its texel's limit in the
 /// final map plus its eye offset ([`eye_offsets`], R06.T9.h). That is at most its texel's limit
 /// with no glare plus its colour offset, and no texel of that map is deeper than the cut less the
 /// largest colour offset. Glare is left out of the pre-pass, which is conservative, since glare
@@ -1373,7 +1429,7 @@ mod tests {
 
     use core::num::NonZeroU32;
 
-    use hyperion_testkit::float::bits;
+    use hyperion_testkit::float::{bits, bits_f32};
     use hyperion_testkit::golden::f64_digest;
 
     use super::*;
@@ -1381,7 +1437,8 @@ mod tests {
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::gas::modifiers::NoModifiers;
     use crate::galaxy::gas::noise::NoiseCache;
-    use crate::sky::band::{CompleteTo, band_rows};
+    use crate::sky::band::{BandMarch, CompleteTo, band_rows, march_rows, sum_rows};
+    use crate::sky::caps::{CAPPED_LAYERS, LayerCap};
     use crate::sky::census::{
         CensusTallies, MAX_N_MAX, NoSkyCellCache, SkyCensus, SkyContext, SkyQuery, census_cell,
         census_plan, merge_census,
@@ -1799,7 +1856,7 @@ mod tests {
         let eye = EyeObserver::default();
         let (none, nearby) = (
             Glare::default(),
-            Glare::of_listed(&observer(), nearby_stars(), &spec),
+            Glare::of_listed(&observer(), nearby_stars(), &spec, Magnitudes::new(EYE_CUT)),
         );
         for (what, glare) in [("the band alone", &none), ("with the glare", &nearby)] {
             let band = limited(glare, &eye);
@@ -1904,7 +1961,7 @@ mod tests {
     fn the_map_reads_only_the_bands_light_and_the_listed_stars() {
         let spec = spec(16);
         let eye = EyeObserver::default();
-        let glare = Glare::of_listed(&observer(), nearby_stars(), &spec);
+        let glare = Glare::of_listed(&observer(), nearby_stars(), &spec, Magnitudes::new(EYE_CUT));
         let face = &near_the_sun()[..256];
         // Each texel's limit and the veil it keeps, which the eye offsets read.
         let limits = |texels: &[BandTexel]| -> Vec<(u64, [u64; 2])> {
@@ -2001,7 +2058,7 @@ mod tests {
     #[test]
     fn the_glare_reads_each_stars_reddened_light() {
         let stars = nearby_stars();
-        let glare = Glare::of_listed(&observer(), stars, &spec(16));
+        let glare = Glare::of_listed(&observer(), stars, &spec(16), Magnitudes::new(EYE_CUT));
         assert_eq!(glare.len(), stars.len());
         assert!(!glare.is_empty());
         let mut reddened_stars = 0;
@@ -2151,7 +2208,7 @@ mod tests {
         let spec = spec(16);
         let eye = EyeObserver::default();
         let stars = nearby_stars();
-        let glare = Glare::of_listed(&observer(), stars, &spec);
+        let glare = Glare::of_listed(&observer(), stars, &spec, Magnitudes::new(EYE_CUT));
         let band = limited(&glare, &eye);
         let (mut scotopic, mut deciding, mut saturated) = (0, 0, 0);
         let (mut decides, mut decided_offset, mut largest_offset, mut far) =
@@ -2816,6 +2873,478 @@ mod tests {
         );
     }
 
+    /// A camera's cut beside the eye's near the Sun, V (R06.T9.j): 10.06, the glare ruling's
+    /// figure for a camera with the eye open, beside the eye's ruled 8.15.
+    const CAMERA_CUT: f64 = 10.06;
+
+    /// A request near the Sun to `cut` with the eye asked at `eye_cut`.
+    fn request(cut: f64, eye_cut: f64) -> SkyQuery {
+        SkyQuery::builder(observer(), Magnitudes::new(cut))
+            .eye(EyeObserver::default())
+            .eye_cut(Magnitudes::new(eye_cut))
+            .build()
+            .expect("a valid query")
+    }
+
+    /// The stars a census near the Sun lists to `cut` within [`GLARE_RADIUS_LY`], every cap forced
+    /// to it, as a census complete to that radius lists them (those within it).
+    fn within_the_radius(stars: &[SkyStar]) -> Vec<SkyStar> {
+        stars
+            .iter()
+            .filter(|s| s.distance().value() <= GLARE_RADIUS_LY)
+            .copied()
+            .collect()
+    }
+
+    /// The stars a census near the Sun lists to the camera's cut within [`GLARE_RADIUS_LY`]
+    /// ([`within_the_radius`]): built once.
+    fn camera_stars() -> &'static [SkyStar] {
+        static STARS: OnceLock<Vec<SkyStar>> = OnceLock::new();
+        STARS.get_or_init(|| within_the_radius(&listed_near_the_sun(CAMERA_CUT, GLARE_RADIUS_LY)))
+    }
+
+    /// The replies of T9.j's requests near the Sun: complete to [`GLARE_RADIUS_LY`], as their
+    /// censuses are, and everywhere, where the band holds only the light fainter than the cut.
+    fn camera_replies() -> [CompleteTo; 2] {
+        let caps: Vec<LayerCap> = CAPPED_LAYERS
+            .iter()
+            .map(|&layer| LayerCap::forced(layer, LightYears::new(GLARE_RADIUS_LY)))
+            .collect();
+        [CompleteTo::of_caps(&caps), CompleteTo::everywhere()]
+    }
+
+    /// The six faces of the band near the Sun at 16² marched for `query`, keeping
+    /// [`camera_replies`].
+    fn marched(query: &SkyQuery) -> Vec<BandMarch> {
+        let mut ctx = context();
+        CubeFace::ALL
+            .iter()
+            .map(|&face| {
+                let replies = camera_replies();
+                march_rows(
+                    milky_way_galaxy(),
+                    &mut ctx,
+                    query,
+                    replies,
+                    &spec(16),
+                    face,
+                    0..16,
+                )
+            })
+            .collect()
+    }
+
+    /// [`marched`] for the camera's request, the eye at its cut beside it: built once.
+    fn camera_marches() -> &'static [BandMarch] {
+        static MARCHES: OnceLock<Vec<BandMarch>> = OnceLock::new();
+        MARCHES.get_or_init(|| marched(&request(CAMERA_CUT, EYE_CUT)))
+    }
+
+    /// [`marched`] for the eye-only request: built once.
+    fn eye_only_marches() -> &'static [BandMarch] {
+        static MARCHES: OnceLock<Vec<BandMarch>> = OnceLock::new();
+        MARCHES.get_or_init(|| marched(&request(EYE_CUT, EYE_CUT)))
+    }
+
+    /// The band of `marches`, a band's six faces, summed for `reply` with `census`.
+    fn summed(marches: &[BandMarch], census: &SkyCensus, reply: &CompleteTo) -> Vec<BandTexel> {
+        let mut band = Vec::new();
+        for march in marches {
+            sum_rows(march, census, reply, &mut band);
+        }
+        band
+    }
+
+    /// Every texel's eye limit and the veil beside it, as bits.
+    fn map_bits(band: &[BandTexel]) -> Vec<(u64, [u64; 2])> {
+        band.iter()
+            .map(|t| {
+                (
+                    bits(t.eye_limit().expect("a limit").value()),
+                    t.eye_veil().expect("a veil").map(bits),
+                )
+            })
+            .collect()
+    }
+
+    /// The eye's map of a band of `marches` summed for `reply` with `census`, against the glare of
+    /// its listed stars at the eye's cut `eye_cut`: the band with its limits, and every listed
+    /// star's eye offset as bits.
+    fn eye_map(
+        marches: &[BandMarch],
+        census: &SkyCensus,
+        reply: &CompleteTo,
+        eye_cut: f64,
+    ) -> (Vec<BandTexel>, Vec<u64>) {
+        let (spec, eye) = (spec(16), EyeObserver::default());
+        let mut band = summed(marches, census, reply);
+        let glare = Glare::of_listed(
+            &observer(),
+            census.listed(),
+            &spec,
+            Magnitudes::new(eye_cut),
+        );
+        limit_map(&eye, &spec, &glare, &mut band);
+        let offsets = eye_offsets(&eye, &spec, &glare, &band)
+            .iter()
+            .map(|o| bits(o.value()))
+            .collect();
+        (band, offsets)
+    }
+
+    /// Near the Sun, a request at a camera's cut of V 10.06 with the eye's cut at 8.15 gives the
+    /// eye limits and eye offsets of the request at 8.15, bit for bit, for the stars both list
+    /// (R06.T9.j; `decision-r06-t9c-glare.md`). Both censuses look within 100 ly, every cap forced
+    /// to it, and both bands are complete to that radius, or everywhere, at 16². It holds with
+    /// every star listed, with the camera's census overflowing by stars between the cuts, and with
+    /// both overflowing. The eye-only census is the camera's stars at or brighter than 8.15, in
+    /// its order.
+    #[test]
+    fn a_camera_cut_leaves_the_eye_the_limits_and_offsets_of_the_eye_only_request() {
+        let (camera_stars, eye_stars) = (camera_stars(), within_the_radius(nearby_stars()));
+        let key = |s: &SkyStar| (s.system(), s.star(), bits(s.v().value()));
+        let brighter: Vec<_> = camera_stars
+            .iter()
+            .filter(|s| s.v().value() <= EYE_CUT)
+            .map(key)
+            .collect();
+        assert_eq!(
+            eye_stars.iter().map(key).collect::<Vec<_>>(),
+            brighter,
+            "the eye-only census is the camera's to the eye's cut"
+        );
+        let between = camera_stars.len() - eye_stars.len();
+        assert!(between > 0, "stars between the cuts");
+        let count = |n: usize| NonZeroU32::new(u32::try_from(n).expect("a count")).expect("some");
+        let n_maxes = [
+            count(camera_stars.len()),
+            count(eye_stars.len() + between / 2),
+            count(eye_stars.len() / 2),
+        ];
+        for (k, reply) in camera_replies().iter().enumerate() {
+            for n_max in n_maxes {
+                let camera =
+                    merge_census([(camera_stars.to_vec(), CensusTallies::default())], n_max);
+                let eye_only = merge_census([(eye_stars.clone(), CensusTallies::default())], n_max);
+                let what = format!(
+                    "reply {k}, n_max {n_max}: {} and {} listed, {} and {} overflowing",
+                    camera.listed().len(),
+                    eye_only.listed().len(),
+                    camera.overflow().len(),
+                    eye_only.overflow().len()
+                );
+                let (camera_band, camera_offsets) =
+                    eye_map(camera_marches(), &camera, reply, EYE_CUT);
+                let (eye_band, eye_only_offsets) =
+                    eye_map(eye_only_marches(), &eye_only, reply, EYE_CUT);
+                assert_eq!(
+                    map_bits(&camera_band),
+                    map_bits(&eye_band),
+                    "{what}: the limits"
+                );
+                let both = eye_only.listed().len();
+                assert_eq!(camera.listed()[..both], *eye_only.listed(), "{what}");
+                assert_eq!(
+                    camera_offsets[..both],
+                    eye_only_offsets,
+                    "{what}: the eye offsets"
+                );
+            }
+        }
+    }
+
+    /// The galactic poles' light between V 8.15 and 10.06 as a step in surface brightness: the
+    /// light fainter than 10.06 is 2.5 log₁₀(1 ÷ (1 − 0.380)) = 0.52 mag fainter than that
+    /// fainter than 8.15 within 10° of the poles, from Gaia DR3's flux sums (`gaia_source_lite`,
+    /// V from G by Riello et al. 2021, A&A 649, A3, Table C.2; the band ruling's own pull,
+    /// `decision-r06-t9b-band.md`): 38.5% at the north pole and 37.5% at the south. The
+    /// tolerance holds the step of about 0.1 mag between the two poles and Gaia's limit at G
+    /// 20.7, and the fixture's own scatter.
+    const POLES_STEP_8_15_TO_10_06: (f64, f64) = (0.52, 0.15);
+
+    /// What R06.T9.j changes near the Sun: with both bands complete everywhere at 16², the camera's
+    /// band at V 10.06 is darker in every texel than the eye's background, the light fainter than
+    /// 8.15, at the poles (|b| over 80°) by Gaia DR3's 0.52 ± 0.15 mag, and the map T9.i made of
+    /// it, every star the camera's census lists within 100 ly glaring, is not the eye-only
+    /// request's, which the eye now keeps under the camera.
+    #[test]
+    fn under_a_camera_cut_t9is_map_was_not_the_eyes() {
+        let spec = spec(16);
+        let all = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let everywhere = &camera_replies()[1];
+        let camera = merge_census([(camera_stars().to_vec(), CensusTallies::default())], all);
+        let eye_only = merge_census(
+            [(within_the_radius(nearby_stars()), CensusTallies::default())],
+            all,
+        );
+        let (eye_band, _) = eye_map(eye_only_marches(), &eye_only, everywhere, EYE_CUT);
+        let (under_the_camera, _) = eye_map(camera_marches(), &camera, everywhere, EYE_CUT);
+        assert_eq!(map_bits(&under_the_camera), map_bits(&eye_band));
+        let camera_band = summed(camera_marches(), &camera, everywhere);
+        let darker = camera_band
+            .iter()
+            .map(|t| t.luminance().value() / t.eye_background().0.value())
+            .fold(0.0, f64::max);
+        // The poles' mean light, each texel by its solid angle: the camera's band and the eye's.
+        let (mut band_light, mut eye_light) = (0.0, 0.0);
+        let side = spec.face_texels();
+        let places = CubeFace::ALL.iter().flat_map(|_| {
+            (0..side).flat_map(move |row| (0..side).map(move |column| (row, column)))
+        });
+        for ((texel, (_, b)), (row, column)) in
+            camera_band.iter().zip(texel_latitudes(spec)).zip(places)
+        {
+            if b > 80.0 {
+                let omega = spec.texel_solid_angle_sr(row, column);
+                band_light += texel.luminance().value() * omega;
+                eye_light += texel.eye_background().0.value() * omega;
+            }
+        }
+        let step = 2.5 * math::log10(eye_light / band_light);
+        let mut as_built: Vec<BandTexel> = camera_band
+            .into_iter()
+            .map(BandTexel::without_eye_light)
+            .collect();
+        let glare = Glare::of_listed(
+            &observer(),
+            camera.listed(),
+            &spec,
+            Magnitudes::new(CAMERA_CUT),
+        );
+        limit_map(&EyeObserver::default(), &spec, &glare, &mut as_built);
+        let medians = |band: &[BandTexel]| {
+            [0.0..5.0, 80.0..90.1].map(|latitudes| median_limit(band, spec, latitudes).0)
+        };
+        let ([eye_plane, eye_poles], [built_plane, built_poles]) =
+            (medians(&eye_band), medians(&as_built));
+        eprintln!(
+            "near the Sun at 16², the stars within {GLARE_RADIUS_LY} ly, complete everywhere: the \
+             camera's band at V {CAMERA_CUT} holds at most {darker:.3} of the eye's background at \
+             {EYE_CUT}; the eye's median limits are {eye_plane:.4} in the band and {eye_poles:.4} \
+             at the poles, with or without the camera, where T9.i's map under the camera gave \
+             {built_plane:.4} and {built_poles:.4} ({} stars glaring, not {}); at the poles the \
+             camera's band is {step:.3} mag fainter than the eye's background",
+            camera.listed().len(),
+            eye_only.listed().len()
+        );
+        assert!(
+            darker < 1.0,
+            "the band between the cuts is the eye's background"
+        );
+        let (expected, tolerance) = POLES_STEP_8_15_TO_10_06;
+        assert!(
+            (step - expected).abs() <= tolerance,
+            "the poles' step {step} against Gaia's {expected} ± {tolerance}"
+        );
+        assert_ne!(
+            map_bits(&as_built),
+            map_bits(&eye_band),
+            "T9.i's map moves with the camera"
+        );
+        assert!(
+            built_poles > eye_poles,
+            "a darker background deepens T9.i's poles"
+        );
+    }
+
+    /// A listed star between the cuts changes no texel's eye limit (R06.T9.j). Near the Sun, the
+    /// camera's census within 100 ly lists stars between V 8.15 and 10.06: the map with them,
+    /// against the glare at the eye's cut, is the map without them, bit for bit. Each one glares
+    /// nothing, and its eye offset is its colour offset alone, against its texel's background,
+    /// its self-exclusion exactly zero. Against the glare at the camera's cut, as T9.i took them,
+    /// they move the limits, the brightest of them its own texel's.
+    #[test]
+    fn a_listed_star_between_the_cuts_changes_no_texels_eye_limit() {
+        let spec = spec(16);
+        let eye = EyeObserver::default();
+        let all = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let census = merge_census([(camera_stars().to_vec(), CensusTallies::default())], all);
+        let band = summed(camera_marches(), &census, &camera_replies()[0]);
+        let brighter: Vec<SkyStar> = census
+            .listed()
+            .iter()
+            .filter(|s| s.v().value() <= EYE_CUT)
+            .copied()
+            .collect();
+        // The camera's cut as T9.i took it: the band's own light, every listed star glaring.
+        let map = |stars: &[SkyStar], cut: f64| {
+            let glare = Glare::of_listed(&observer(), stars, &spec, Magnitudes::new(cut));
+            let mut mapped = if cut < CAMERA_CUT {
+                band.clone()
+            } else {
+                band.iter()
+                    .copied()
+                    .map(BandTexel::without_eye_light)
+                    .collect()
+            };
+            limit_map(&eye, &spec, &glare, &mut mapped);
+            (mapped, glare)
+        };
+        let (with, glare) = map(census.listed(), EYE_CUT);
+        let (without, _) = map(&brighter, EYE_CUT);
+        assert_eq!(map_bits(&with), map_bits(&without), "the eye's limits");
+        let mut between = 0;
+        for (source, star) in glare.sources.iter().zip(census.listed()) {
+            if star.v().value() <= EYE_CUT {
+                continue;
+            }
+            between += 1;
+            assert_eq!(bits(source.photopic), bits(0.0), "{star:?} glares nothing");
+            let parts = eye_offset_parts(&eye, spec, source, &with);
+            assert_eq!(bits(parts.self_exclusion.value()), bits(0.0), "{star:?}");
+            let (index, _) = texel_of(spec, &source.direction.expect("a direction"));
+            let texel = &with[index];
+            let against = background(texel, texel.eye_veil().expect("a veil"));
+            let colour = star_colour_offset(held_ratio(source.sp_ratio), &against);
+            assert_eq!(bits(parts.colour.value()), bits(colour.value()), "{star:?}");
+        }
+        assert_eq!(between, census.listed().len() - brighter.len());
+        // At the camera's cut every listed star glares, as T9.i took them, over the band's own light.
+        let (camera_with, _) = map(census.listed(), CAMERA_CUT);
+        let (camera_without, _) = map(&brighter, CAMERA_CUT);
+        assert_ne!(map_bits(&camera_with), map_bits(&camera_without));
+        let brightest = census
+            .listed()
+            .iter()
+            .find(|s| s.v().value() > EYE_CUT)
+            .expect("a star between the cuts");
+        let toward = observer()
+            .position()
+            .displacement_to(brightest.apparent())
+            .metres();
+        let (index, _) = texel_of(
+            spec,
+            &UnitVector::from_components(toward).expect("a direction"),
+        );
+        let limit = |band: &[BandTexel]| band[index].eye_limit().expect("a limit").value();
+        let moved = limit(&camera_without) - limit(&camera_with);
+        eprintln!(
+            "{between} listed stars between V {EYE_CUT} and {CAMERA_CUT} within {GLARE_RADIUS_LY} \
+             ly: no texel's eye limit moves; glaring, as T9.i took them, the brightest (V {:.3}) \
+             would take {moved:.2e} mag from its own texel's limit",
+            brightest.v().value()
+        );
+        assert!(moved > 0.0, "{moved}");
+    }
+
+    /// A request whose cut is the eye's gives T9.i's bits (R06.T9.j). Near the Sun at 8.15, the eye
+    /// asked at its own cut, stated or by default, and no eye at all march the same texels, with
+    /// no eye light of their own, as `band_rows` gives them; the glare of the stars the request
+    /// lists is T9.i's, every one glaring with its light as T9.i took it; so the map and the eye
+    /// offsets are those T9.i made of them.
+    #[test]
+    fn a_request_whose_cut_is_the_eyes_gives_t9is_bits() {
+        let spec = spec(16);
+        let eye = EyeObserver::default();
+        let reply = camera_replies()[0];
+        let census = merge_census(
+            [(within_the_radius(nearby_stars()), CensusTallies::default())],
+            NonZeroU32::new(MAX_N_MAX).expect("not zero"),
+        );
+        let by_default = SkyQuery::builder(observer(), Magnitudes::new(EYE_CUT))
+            .eye(eye)
+            .build()
+            .expect("a valid query");
+        // Stated, by default, and no eye; each fresh, since a clone's vectors hold less room.
+        let marches = [
+            marched(&request(EYE_CUT, EYE_CUT)),
+            marched(&by_default),
+            marched(&query(EYE_CUT)),
+        ];
+        let mut t9i = Vec::new();
+        let mut ctx = context();
+        for face in CubeFace::ALL {
+            band_rows(
+                milky_way_galaxy(),
+                &mut ctx,
+                &query(EYE_CUT),
+                &census,
+                &reply,
+                &spec,
+                face,
+                0..16,
+                &mut t9i,
+            );
+        }
+        // Every float of a texel as bits.
+        let texel_bits = |band: &[BandTexel]| -> Vec<(u64, [u32; 2], u64)> {
+            band.iter()
+                .map(|t| {
+                    (
+                        bits(t.luminance().value()),
+                        t.chroma().map(bits_f32),
+                        bits(t.sp_ratio()),
+                    )
+                })
+                .collect()
+        };
+        let heap = |marches: &[BandMarch]| marches.iter().map(BandMarch::heap_bytes).sum::<usize>();
+        for faces in &marches {
+            assert!(
+                faces.iter().all(|m| m.eye_cut().is_none()),
+                "no eye light kept"
+            );
+            assert_eq!(heap(faces), heap(&marches[2]), "one set of slots");
+            let band = summed(faces, &census, &reply);
+            assert_eq!(texel_bits(&band), texel_bits(&t9i), "the texels");
+            assert_eq!(
+                band, t9i,
+                "no eye light of their own, as band_rows gives none"
+            );
+        }
+        let glare = Glare::of_listed(
+            &observer(),
+            census.listed(),
+            &spec,
+            Magnitudes::new(EYE_CUT),
+        );
+        let t9i_glare = glare_of(spec, &sources_of(census.listed()));
+        assert_eq!(
+            (&glare.sources, &glare.pyramid),
+            (&t9i_glare.sources, &t9i_glare.pyramid),
+            "every listed star glares, with T9.i's light"
+        );
+        assert_eq!(glare.eye_cut, Some(Magnitudes::new(EYE_CUT)));
+        let mut band = summed(eye_only_marches(), &census, &reply);
+        limit_map(&eye, &spec, &glare, &mut band);
+        limit_map(&eye, &spec, &t9i_glare, &mut t9i);
+        assert_eq!(map_bits(&band), map_bits(&t9i), "the map");
+        let offsets = |band: &[BandTexel], glare: &Glare| -> Vec<u64> {
+            eye_offsets(&eye, &spec, glare, band)
+                .iter()
+                .map(|o| bits(o.value()))
+                .collect()
+        };
+        assert_eq!(
+            offsets(&band, &glare),
+            offsets(&t9i, &t9i_glare),
+            "the eye offsets"
+        );
+    }
+
+    /// A band whose texels hold the light fainter than the eye's cut is refused by a glare built to
+    /// another cut (R06.T9.j): a glare to the camera's cut would have the stars between the cuts
+    /// glare over a background that holds their light already. A debug assertion, as the band's
+    /// cut is the march's and the glare's the caller's.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "under a glare to V")]
+    fn a_glare_to_another_eye_cut_is_refused_by_the_eyes_light() {
+        let spec = spec(16);
+        let census = merge_census(
+            [(camera_stars().to_vec(), CensusTallies::default())],
+            NonZeroU32::new(MAX_N_MAX).expect("not zero"),
+        );
+        let mut band = summed(camera_marches(), &census, &camera_replies()[0]);
+        let glare = Glare::of_listed(
+            &observer(),
+            census.listed(),
+            &spec,
+            Magnitudes::new(CAMERA_CUT),
+        );
+        limit_map(&EyeObserver::default(), &spec, &glare, &mut band);
+    }
+
     /// The eye cut's passes for the default eye near the Sun: built once.
     fn eye_cut_near_the_sun() -> &'static EyeCutPasses {
         static PASSES: OnceLock<EyeCutPasses> = OnceLock::new();
@@ -3050,7 +3579,7 @@ mod tests {
             "a texel sees to {deepest}, past {bound}: a finding for the pad"
         );
         let stars = listed_near_the_sun(cut.value(), GLARE_RADIUS_LY);
-        let glare = Glare::of_listed(&observer(), &stars, &spec);
+        let glare = Glare::of_listed(&observer(), &stars, &spec, cut);
         limit_map(&eye, &spec, &glare, &mut band);
         let offsets = eye_offsets(&eye, &spec, &glare, &band);
         let (mut faintest_own, mut largest_offset) = (f64::NEG_INFINITY, f64::NEG_INFINITY);

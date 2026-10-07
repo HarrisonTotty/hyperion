@@ -76,6 +76,19 @@
 //! [`sum_rows`] then adds one reply's sums over the layers and the census's overflow points,
 //! reading no profile and no luminosity table. [`band_rows`] is the march at its one reply's
 //! radii, then its sum.
+//!
+//! **The eye's light under a camera's cut** (R06.T9.j; decided 2026-10-06,
+//! `decision-r06-t9c-glare.md`). The eye's limits are those of the eye's own request, whatever the
+//! request's cut: their background is the light fainter than the eye's cut ([`SkyQuery::eye_cut`]),
+//! not the band's. Where a camera's deeper cut sets the query's, the march also keeps, per layer and
+//! radius, the five sums of the light fainter than the eye's cut within the radius plus all of the
+//! light beyond it (the band's own sums beyond the radius), and [`sum_rows`] gives each texel that
+//! light beside its own, with the overflow's stars an eye-only request would hold there (those at
+//! or brighter than the eye's cut). A listed star fainter than the eye's cut adds no light to it:
+//! its light is there already, as expected light. Each of those sums takes the arithmetic of a
+//! march at the eye's cut, so at the same replies (the same census radius) a texel's eye light is,
+//! bit for bit, the texel of the eye-only request's band. The band's own texels, as sent, are
+//! unchanged.
 
 use std::ops::Range;
 
@@ -90,6 +103,7 @@ use crate::galaxy::imf::MassBand;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::Layer;
 use crate::math;
+use crate::observe::Observer;
 use crate::time::Span;
 use crate::units::consts::{
     METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR, SOLAR_ABSOLUTE_MAGNITUDE_V,
@@ -407,6 +421,33 @@ pub struct BandTexel {
     chroma: [f32; 2],
     sp_ratio: f64,
     eye: Option<EyeLimit>,
+    /// The light fainter than the eye's cut, where a camera's deeper cut set the band's (R06.T9.j):
+    /// the eye's background. `None` where the texel's own light is the eye's. Not on the wire.
+    eye_light: Option<EyeLight>,
+}
+
+/// The light the eye's limit is taken against where it is not the band's own (R06.T9.j): the light
+/// fainter than the eye's cut in a texel's direction, its photopic luminance and S/P ratio, and that
+/// cut, which the limit map's glare must share.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EyeLight {
+    luminance: CandelasPerSquareMetre,
+    sp_ratio: f64,
+    cut: Magnitudes,
+}
+
+/// The photopic luminance and S/P ratio of light of the five sums `sums` ([`Sums`]), as a texel
+/// takes them: the photopic sum, held at zero or more, and the scotopic sum over it, or the
+/// reference star's ρ ([`REFERENCE_SP_RATIO`]) where there is no light.
+#[must_use]
+fn luminance_and_ratio(sums: &Sums) -> (CandelasPerSquareMetre, f64) {
+    let [luminance, .., scotopic] = *sums;
+    let sp_ratio = if luminance > 0.0 {
+        scotopic / luminance
+    } else {
+        REFERENCE_SP_RATIO
+    };
+    (CandelasPerSquareMetre::new(luminance.max(0.0)), sp_ratio)
 }
 
 /// The eye's limit in a texel's direction and the veil it was taken against, as the limit map sets
@@ -430,31 +471,46 @@ impl BandTexel {
             sums.iter().all(|v| v.is_finite()),
             "a band texel's sums {sums:?}"
         );
-        let [luminance, red, green, blue, scotopic] = sums;
+        let [luminance, red, green, blue, _] = sums;
         let [yr, yg, yb] = LUMINANCE_RGB;
         let rgb_luminance = yr * red + yg * green + yb * blue;
-        let (chroma, sp_ratio) = if luminance > 0.0 {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "the chroma is a display value of order one, and f32 is its declared type"
-            )]
-            let chroma = if rgb_luminance > 0.0 {
-                let [red, green, _] =
-                    lift_into_gamut([red, green, blue].map(|c| c / rgb_luminance));
-                [red as f32, green as f32]
-            } else {
-                [1.0, 1.0]
-            };
-            (chroma, scotopic / luminance)
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the chroma is a display value of order one, and f32 is its declared type"
+        )]
+        let chroma = if luminance > 0.0 && rgb_luminance > 0.0 {
+            let [red, green, _] = lift_into_gamut([red, green, blue].map(|c| c / rgb_luminance));
+            [red as f32, green as f32]
         } else {
-            ([1.0, 1.0], REFERENCE_SP_RATIO)
+            [1.0, 1.0]
         };
+        let (luminance, sp_ratio) = luminance_and_ratio(&sums);
         Self {
-            luminance: CandelasPerSquareMetre::new(luminance.max(0.0)),
+            luminance,
             chroma,
             sp_ratio,
             eye: None,
+            eye_light: None,
         }
+    }
+
+    /// The texel with the light fainter than the eye's cut `cut` of the five sums `eye` ([`Sums`])
+    /// as the eye's background, where the march kept it (R06.T9.j).
+    #[must_use]
+    fn with_eye_light(mut self, eye: Option<(Sums, Magnitudes)>) -> Self {
+        self.eye_light = eye.map(|(sums, cut)| {
+            debug_assert!(
+                sums.iter().all(|v| v.is_finite()),
+                "a band texel's eye sums {sums:?}"
+            );
+            let (luminance, sp_ratio) = luminance_and_ratio(&sums);
+            EyeLight {
+                luminance,
+                sp_ratio,
+                cut,
+            }
+        });
+        self
     }
 
     /// The texel's photopic luminance: the light of every star the census did not list.
@@ -503,6 +559,27 @@ impl BandTexel {
     pub(crate) const fn set_eye_limit(&mut self, limit: Magnitudes, veil: [f64; 2]) {
         self.eye = Some(EyeLimit { limit, veil });
     }
+
+    /// The light the eye's limit in the texel's direction is taken against, its photopic luminance
+    /// and S/P ratio: the light fainter than the eye's cut (R06.T9.j). That is the texel's own light
+    /// unless a camera's deeper cut set the band's, when the march kept the eye's beside it.
+    #[must_use]
+    pub(crate) const fn eye_background(&self) -> (CandelasPerSquareMetre, f64) {
+        match self.eye_light {
+            Some(light) => (light.luminance, light.sp_ratio),
+            None => (self.luminance, self.sp_ratio),
+        }
+    }
+
+    /// The eye's cut of the light [`eye_background`](Self::eye_background) gives, where the march
+    /// kept it beside the texel's own (R06.T9.j); `None` where the texel's own light is the eye's.
+    #[must_use]
+    pub(crate) const fn eye_light_cut(&self) -> Option<Magnitudes> {
+        match self.eye_light {
+            Some(light) => Some(light.cut),
+            None => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -516,6 +593,17 @@ impl BandTexel {
             chroma: [1.0, 1.0],
             sp_ratio,
             eye: None,
+            eye_light: None,
+        }
+    }
+
+    /// The texel without the eye's light, its own light as the eye's background: the texel as
+    /// R06.T9.i read it under a camera's cut, for the tests that measure what R06.T9.j changes.
+    #[must_use]
+    pub(crate) const fn without_eye_light(self) -> Self {
+        Self {
+            eye_light: None,
+            ..self
         }
     }
 }
@@ -693,11 +781,12 @@ const NOWHERE_LY: [f64; 1] = [0.0];
 
 /// A face's rows of a band, marched (R06.T9.f; see the [module](self) documentation): each ray's
 /// five sums ([`Sums`]) of a reply complete to each radius the march keeps, per layer, from which
-/// [`sum_rows`] gives any of those replies' texels.
+/// [`sum_rows`] gives any of those replies' texels; and, where a camera's deeper cut set the
+/// query's, the same of the light fainter than the eye's cut, the eye's background (R06.T9.j).
 ///
-/// Its heap is the rays' slots, 40 bytes for each layer's radius and ray
-/// ([`heap_bytes`](Self::heap_bytes)): at 64² texels a face, with six layers' one radius each, some
-/// 5.9 MB for the band.
+/// Its heap is the rays' slots, 40 bytes for each layer's radius and ray, twice that where it keeps
+/// the eye's light ([`heap_bytes`](Self::heap_bytes)): at 64² texels a face, with six layers' one
+/// radius each, some 5.9 MB for the band.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BandMarch {
     spec: BandSpec,
@@ -707,9 +796,13 @@ pub struct BandMarch {
     origin: GalacticPosition,
     /// Per layer of [`CAPPED_LAYERS`], the radii it keeps, ly, ascending and each once.
     kept: [Vec<f64>; BAND_LAYERS],
+    /// The eye's cut, where it is shallower than the query's and the march keeps the light fainter
+    /// than it beside the band's (R06.T9.j).
+    eye_cut: Option<Magnitudes>,
     /// Each ray's slots, in the band's order (row by row from the top, each row from its left):
     /// each layer's radii in turn, each slot the sums of a reply complete to that radius in that
-    /// layer, in L☉,V × `lux_per_v0` per ly², before K.
+    /// layer, in L☉,V × `lux_per_v0` per ly², before K; then, where the march keeps the eye's
+    /// light, the same slots of the light fainter than the eye's cut.
     sums: Vec<Sums>,
 }
 
@@ -730,6 +823,14 @@ impl BandMarch {
     #[must_use]
     pub fn rows(&self) -> Range<u16> {
         self.rows.clone()
+    }
+
+    /// The eye's cut whose light the march keeps beside the band's, the eye's background
+    /// (R06.T9.j): the query's eye's cut where it is shallower than the query's, and `None` where
+    /// the query asks no eye or asks it at its own cut, whose light is the band's.
+    #[must_use]
+    pub const fn eye_cut(&self) -> Option<Magnitudes> {
+        self.eye_cut
     }
 
     /// Whether the march keeps every layer's radius of `complete_to`, so that [`sum_rows`] can sum
@@ -753,10 +854,17 @@ impl BandMarch {
                 .sum::<usize>()
     }
 
-    /// The slots a ray holds.
+    /// The slots a ray holds of one light: the band's, and as many of the eye's where it keeps
+    /// them.
     #[must_use]
     fn slots(&self) -> usize {
         slot_starts(&self.kept)[BAND_LAYERS]
+    }
+
+    /// The sums a ray holds: its band's slots, then the eye's where the march keeps them.
+    #[must_use]
+    fn ray_len(&self) -> usize {
+        self.slots() * lights(self.eye_cut)
     }
 
     /// The slot of each layer's radius of `complete_to` in a ray's sums.
@@ -783,11 +891,21 @@ impl BandMarch {
     }
 }
 
+/// The lights a march keeps for each ray: the band's, and the eye's where a camera's deeper cut
+/// set the query's (`eye_cut`).
+#[must_use]
+const fn lights(eye_cut: Option<Magnitudes>) -> usize {
+    if eye_cut.is_some() { 2 } else { 1 }
+}
+
 /// What a march holds for every ray: the components, each layer's share of their systems, the
-/// reddening curves that dim every node, and the ray's scratch buffers.
+/// reddening curves that dim every node, the eye's cut where the march keeps its light, and the
+/// ray's scratch buffers.
 struct Rays {
     components: Vec<ComponentId>,
     dust: Reddening,
+    /// The eye's cut, V, where the march keeps the light fainter than it (R06.T9.j).
+    eye_cut: Option<f64>,
     /// Per layer of [`CAPPED_LAYERS`], each component's share of its systems.
     shares: [[f64; MAX_COMPONENTS]; BAND_LAYERS],
     nodes: Vec<LightYears>,
@@ -797,14 +915,41 @@ struct Rays {
     within: Vec<Sums>,
     /// A ray's slots: all of the light beyond each radius, from the radius out.
     beyond: Vec<Sums>,
+    /// A ray's slots: the light fainter than the eye's cut within each radius, from the first
+    /// node, where the march keeps it; empty otherwise.
+    eye_within: Vec<Sums>,
 }
 
-/// One layer's photopic light sums at one node, per ly³: of its stars fainter than the cut, and of
-/// all its stars, each zero where the node does not need it.
+/// One layer's photopic light sums at one node, per ly³: of its stars fainter than the cut, of all
+/// its stars, and of its stars fainter than the eye's cut, each zero where the node does not need
+/// it.
 #[derive(Debug, Clone, Copy, Default)]
 struct NodeLight {
     fainter: [f64; 4],
     all: [f64; 4],
+    eye_fainter: [f64; 4],
+}
+
+impl NodeLight {
+    /// Its light dimmed by the dust `through` in front of the node ([`dimmed`]): of the stars
+    /// fainter than the cut, of all of them, and of those fainter than the eye's cut, each zero
+    /// where `needs` does not ask it. The eye's is zero where the march keeps none, as summed.
+    #[must_use]
+    fn dimmed(self, needs: Needs, through: &Reddened) -> (Sums, Sums, Sums) {
+        let fainter = |light: [f64; 4]| {
+            if needs.fainter {
+                dimmed(light, through)
+            } else {
+                [0.0; 5]
+            }
+        };
+        let all = if needs.all {
+            dimmed(self.all, through)
+        } else {
+            [0.0; 5]
+        };
+        (fainter(self.fainter), all, fainter(self.eye_fainter))
+    }
 }
 
 /// Which of a layer's light a node needs: the light fainter than the cut, at the nodes out to the
@@ -842,9 +987,42 @@ fn add_to(sums: &mut Sums, more: Sums) {
     }
 }
 
+/// Writes one light's slots of a ray into `out`, in the march's order (`ours`, the first slot of
+/// each layer's radii in [`BandMarch`]): each slot the light fainter than a cut within its radius,
+/// `within`, plus all of the light beyond it, `beyond`, both in the ray's own order (`starts`). A
+/// ray outside the cone (`reach`) has one radius a layer, whose sums fill every slot of its layer.
+fn fill_slots(
+    within: &[Sums],
+    beyond: &[Sums],
+    starts: &[usize; BAND_LAYERS + 1],
+    ours: &[usize; BAND_LAYERS + 1],
+    reach: Reach,
+    out: &mut [Sums],
+) {
+    for l in 0..BAND_LAYERS {
+        let theirs = &mut out[ours[l]..ours[l + 1]];
+        let slots = starts[l]..starts[l + 1];
+        let mut totals = within[slots.clone()]
+            .iter()
+            .zip(&beyond[slots])
+            .map(|(within, beyond)| std::array::from_fn(|k| within[k] + beyond[k]));
+        match reach {
+            Reach::Inside => {
+                for (slot, total) in theirs.iter_mut().zip(totals) {
+                    *slot = total;
+                }
+            }
+            Reach::Outside => {
+                let nowhere: Sums = totals.next().expect("a layer keeps one radius");
+                theirs.fill(nowhere);
+            }
+        }
+    }
+}
+
 impl Rays {
     #[must_use]
-    fn new(galaxy: &Galaxy, dust: &Reddening) -> Self {
+    fn new(galaxy: &Galaxy, dust: &Reddening, eye_cut: Option<Magnitudes>) -> Self {
         let fields = galaxy.fields();
         let components: Vec<ComponentId> = fields.component_ids().collect();
         let mut shares = [[0.0; MAX_COMPONENTS]; BAND_LAYERS];
@@ -858,12 +1036,14 @@ impl Rays {
         Self {
             components,
             dust: *dust,
+            eye_cut: eye_cut.map(Magnitudes::value),
             shares,
             nodes: Vec::new(),
             a_v: Vec::new(),
             modifiers: Vec::new(),
             within: Vec::new(),
             beyond: Vec::new(),
+            eye_within: Vec::new(),
         }
     }
 
@@ -892,11 +1072,14 @@ impl Rays {
     }
 
     /// Layer `l`'s light at `point`, whose components' densities are `densities`, for light `ago`
-    /// old: the light fainter than `limit` and all of it, each where `needs` asks it.
+    /// old: the light fainter than `limit` and all of it, each where `needs` asks it, and the light
+    /// fainter than `eye_limit`, where there is one, wherever it asks the light fainter than
+    /// `limit`. Each is summed over the components in one order, so the light fainter than an
+    /// eye's limit has the bits of the light fainter than the same limit.
     #[expect(
         clippy::too_many_arguments,
-        reason = "one node's inputs: the tables, the layer, the point and its densities, the limit, \
-                  the light's age and what the node needs of the layer"
+        reason = "one node's inputs: the tables, the layer, the point and its densities, the two \
+                  limits, the light's age and what the node needs of the layer"
     )]
     #[must_use]
     fn layer_light(
@@ -905,7 +1088,7 @@ impl Rays {
         l: usize,
         point: &PointLy,
         densities: &[f64; MAX_COMPONENTS],
-        limit: Magnitudes,
+        (limit, eye_limit): (Magnitudes, Option<Magnitudes>),
         ago: Span,
         needs: Needs,
     ) -> NodeLight {
@@ -922,6 +1105,12 @@ impl Rays {
                 for (sum, value) in light.fainter.iter_mut().zip(sums) {
                     *sum += systems * value;
                 }
+                if let Some(eye_limit) = eye_limit {
+                    let sums = function.colour_sums_fainter_than(eye_limit, ago);
+                    for (sum, value) in light.eye_fainter.iter_mut().zip(sums) {
+                        *sum += systems * value;
+                    }
+                }
             }
             if needs.all {
                 let sums =
@@ -937,12 +1126,15 @@ impl Rays {
     /// Marches the ray along `direction` into `out`, its slots in `edges`' order (each layer's kept
     /// radii in turn): for each, the five sums ([`Sums`], in L☉,V × `lux_per_v0` per ly², before
     /// K) of the light fainter than the cut out to the radius plus all of the light beyond it, each
-    /// node's light reddened by the call's dust. A ray outside the cone (`reach`) is complete
-    /// nowhere, so each of its slots holds all of its layer's light.
+    /// node's light reddened by the call's dust; then, where the march keeps the eye's light, the
+    /// same slots of the light fainter than the eye's cut out to the radius plus all of the light
+    /// beyond it (R06.T9.j). A ray outside the cone (`reach`) is complete nowhere, so each of its
+    /// slots holds all of its layer's light.
     ///
     /// Within a layer the light fainter than the cut is summed from the first node, and each
     /// radius's light beyond it from the radius out, interval by interval in distance order, so a
-    /// radius's slot is the bits a march keeping it alone takes over the same nodes.
+    /// radius's slot is the bits a march keeping it alone takes over the same nodes. The eye's
+    /// slots share the light beyond each radius, and so are the bits of a march at the eye's cut.
     #[expect(
         clippy::too_many_arguments,
         reason = "one ray's inputs: the galaxy, the job's context, the query, the direction, the \
@@ -968,60 +1160,43 @@ impl Rays {
             Reach::Outside => ([NOWHERE_LY.as_slice(); BAND_LAYERS], &[]),
         };
         let starts = slot_starts(&kept);
+        let eye_slots = if self.eye_cut.is_some() {
+            starts[BAND_LAYERS]
+        } else {
+            0
+        };
         self.within.clear();
         self.within.resize(starts[BAND_LAYERS], [0.0; 5]);
         self.beyond.clear();
         self.beyond.resize(starts[BAND_LAYERS], [0.0; 5]);
+        self.eye_within.clear();
+        self.eye_within.resize(eye_slots, [0.0; 5]);
         self.march_slots(galaxy, ctx, query, direction, &kept, node_radii, spec);
         let ours = slot_starts(&edges.kept);
-        for l in 0..BAND_LAYERS {
-            let theirs = &mut out[ours[l]..ours[l + 1]];
-            let slots = starts[l]..starts[l + 1];
-            let mut totals = self.within[slots.clone()]
-                .iter()
-                .zip(&self.beyond[slots])
-                .map(|(within, beyond)| std::array::from_fn(|k| within[k] + beyond[k]));
-            match reach {
-                Reach::Inside => {
-                    for (slot, total) in theirs.iter_mut().zip(totals) {
-                        *slot = total;
-                    }
-                }
-                Reach::Outside => {
-                    let nowhere: Sums = totals.next().expect("a layer keeps one radius");
-                    theirs.fill(nowhere);
-                }
-            }
+        let (band, eye) = out.split_at_mut(ours[BAND_LAYERS]);
+        fill_slots(&self.within, &self.beyond, &starts, &ours, reach, band);
+        if self.eye_cut.is_some() {
+            fill_slots(&self.eye_within, &self.beyond, &starts, &ours, reach, eye);
         }
     }
 
-    /// The node-by-node march of one ray into [`Rays::within`] and [`Rays::beyond`], whose slots
-    /// are each layer's `kept` radii in turn and start at zero; `node_radii` are the radii taken
-    /// as nodes. Each interval lies within or beyond each radius, since a radius is a node, or
-    /// nearer than the first, or past the last. A radius's slot stops taking the fainter light,
-    /// and starts taking all of it, at the first interval beyond it.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one ray's inputs: the galaxy, the job's context, the query, the direction, the \
-                  radii kept and taken as nodes, and the band's resolution"
-    )]
-    fn march_slots(
+    /// Places the nodes of the ray from `observer` along `direction` to the root cube's edge, with
+    /// `node_radii` among them, and their extinction profile; `false` for a ray that ends before
+    /// its first node, which holds no light.
+    fn trace(
         &mut self,
         galaxy: &Galaxy,
         ctx: &mut SkyContext<'_>,
-        query: &SkyQuery,
+        observer: &Observer,
         direction: UnitVector,
-        kept: &[&[f64]; BAND_LAYERS],
         node_radii: &[f64],
         spec: BandSpec,
-    ) {
-        let observer = query.observer();
+    ) -> bool {
         let origin = observer.position();
-        let from = origin.to_light_years_f64();
         let along = direction.components();
-        let edge_ly = distance_to_edge_ly(from, along);
+        let edge_ly = distance_to_edge_ly(origin.to_light_years_f64(), along);
         if edge_ly <= FIRST_NODE_LY {
-            return;
+            return false;
         }
         self.place_nodes(edge_ly, node_radii, spec.nodes_per_decade());
         let end = origin
@@ -1043,16 +1218,49 @@ impl Rays {
             &mut ctx.noise,
             &mut self.a_v,
         );
+        true
+    }
+
+    /// The node-by-node march of one ray into [`Rays::within`] and [`Rays::beyond`], and
+    /// [`Rays::eye_within`] where the march keeps the eye's light, whose slots are each layer's
+    /// `kept` radii in turn and start at zero; `node_radii` are the radii taken as nodes. Each
+    /// interval lies within or beyond each radius, since a radius is a node, or nearer than the
+    /// first, or past the last. A radius's slot stops taking the fainter light, and starts taking
+    /// all of it, at the first interval beyond it. The light fainter than the eye's cut is run as
+    /// the light fainter than the cut is, at the eye's cut: the same nodes, limits and order.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one ray's inputs: the galaxy, the job's context, the query, the direction, the \
+                  radii kept and taken as nodes, and the band's resolution"
+    )]
+    fn march_slots(
+        &mut self,
+        galaxy: &Galaxy,
+        ctx: &mut SkyContext<'_>,
+        query: &SkyQuery,
+        direction: UnitVector,
+        kept: &[&[f64]; BAND_LAYERS],
+        node_radii: &[f64],
+        spec: BandSpec,
+    ) {
+        let observer = query.observer();
+        let from = observer.position().to_light_years_f64();
+        let along = direction.components();
+        if !self.trace(galaxy, ctx, observer, direction, node_radii, spec) {
+            return;
+        }
         let tables = ctx.tables;
         let cut = query.cut().value();
+        let eye_cut = self.eye_cut;
         let starts = slot_starts(kept);
         let mut densities = [0.0; MAX_COMPONENTS];
-        // Per layer: the fainter light run from the first node, how many of its radii the intervals
-        // so far have passed (each slot holding the fainter light as it stood there), and the
-        // dimmed light at the previous node.
+        // Per layer: the fainter light run from the first node, and the light fainter than the
+        // eye's cut, how many of its radii the intervals so far have passed (each slot holding the
+        // fainter light as it stood there), and the dimmed light at the previous node.
         let mut fainter = [[0.0; 5]; BAND_LAYERS];
+        let mut eye_fainter = [[0.0; 5]; BAND_LAYERS];
         let mut passed = [0_usize; BAND_LAYERS];
-        let mut before = [([0.0; 5], [0.0; 5]); BAND_LAYERS];
+        let mut before = [([0.0; 5], [0.0; 5], [0.0; 5]); BAND_LAYERS];
         let mut previous: Option<f64> = None;
         for (node, extinction) in self.nodes.iter().zip(&self.a_v) {
             let distance = node.value();
@@ -1068,34 +1276,40 @@ impl Rays {
                 Span::from_seconds_f64(distance * SECONDS_PER_JULIAN_YEAR)
                     .expect("a light time within the root cube's diagonal is a span"),
             );
-            // The census cuts each star's own V; the band, the solar point's (R06.T8.k).
-            let limit =
-                Magnitudes::new(cut - distance_modulus(distance) - through.v_extinction().value());
+            // The census cuts each star's own V; the band, the solar point's (R06.T8.k). The eye's
+            // limit is the same expression at the eye's cut, so its bits are a march's there.
+            let (modulus, v_extinction) = (distance_modulus(distance), through.v_extinction());
+            let limit = Magnitudes::new(cut - modulus - v_extinction.value());
+            let eye_limit =
+                eye_cut.map(|eye| Magnitudes::new(eye - modulus - v_extinction.value()));
             for (l, radii) in kept.iter().enumerate() {
                 let needs = Needs::of(distance, radii);
-                let light = self.layer_light(tables, l, &point, &densities, limit, ago, needs);
-                let here = (
-                    if needs.fainter {
-                        dimmed(light.fainter, &through)
-                    } else {
-                        [0.0; 5]
-                    },
-                    if needs.all {
-                        dimmed(light.all, &through)
-                    } else {
-                        [0.0; 5]
-                    },
+                let light = self.layer_light(
+                    tables,
+                    l,
+                    &point,
+                    &densities,
+                    (limit, eye_limit),
+                    ago,
+                    needs,
                 );
+                let here = light.dimmed(needs, &through);
                 if let Some(last) = previous {
                     let width = distance - last;
                     let slots = starts[l]..starts[l + 1];
                     // The radii this interval lies beyond take the fainter light as it stands.
                     while passed[l] < radii.len() && radii[passed[l]] < distance {
                         self.within[slots.start + passed[l]] = fainter[l];
+                        if eye_cut.is_some() {
+                            self.eye_within[slots.start + passed[l]] = eye_fainter[l];
+                        }
                         passed[l] += 1;
                     }
                     if needs.fainter {
                         add_to(&mut fainter[l], trapezoid(before[l].0, here.0, width));
+                        if eye_cut.is_some() {
+                            add_to(&mut eye_fainter[l], trapezoid(before[l].2, here.2, width));
+                        }
                     }
                     if passed[l] > 0 {
                         let all = trapezoid(before[l].1, here.1, width);
@@ -1110,8 +1324,14 @@ impl Rays {
         }
         // The radii at or past the ray's last node take all of the fainter light.
         for (l, radii) in kept.iter().enumerate() {
-            for slot in &mut self.within[starts[l] + passed[l]..starts[l] + radii.len()] {
+            let rest = starts[l] + passed[l]..starts[l] + radii.len();
+            for slot in &mut self.within[rest.clone()] {
                 *slot = fainter[l];
+            }
+            if eye_cut.is_some() {
+                for slot in &mut self.eye_within[rest] {
+                    *slot = eye_fainter[l];
+                }
             }
         }
     }
@@ -1128,6 +1348,13 @@ impl Rays {
 /// complete only within it: every ray outside the cone holds all of the light, whatever a reply's
 /// radii. `ctx` supplies the luminosity tables, the gas modifiers and the noise cache of the rays'
 /// profiles; its other fields are not read.
+///
+/// Where the query asks the eye at a cut shallower than its own ([`SkyQuery::eye_cut`], a camera's
+/// deeper cut setting the query's), the march also keeps, per layer and radius, the same sums of
+/// the light fainter than the eye's cut, the eye's background (R06.T9.j): a second set of slots,
+/// which doubles its heap. They take the arithmetic of a march at the eye's cut over the same
+/// nodes, so [`sum_rows`] gives each texel the eye-only request's light beside its own, bit for
+/// bit.
 ///
 /// Each ray is a function of its own direction, so the marches of any split of a face's rows, each
 /// summed, give the texels of one march over the face, bit for bit; the noise cache changes the
@@ -1241,17 +1468,22 @@ fn march_rows_through(
             .is_ok()),
         "every radius a march keeps is a node of its rays: {edges:?}"
     );
-    let slots = slot_starts(&edges.kept)[BAND_LAYERS];
-    let mut sums = vec![[0.0; 5]; rows.len() * usize::from(side) * slots];
+    // The eye's light is kept only where a camera's deeper cut set the query's: at the eye's own
+    // cut the band's light is the eye's (R06.T9.j).
+    let eye_cut = query
+        .eye_cut()
+        .filter(|eye| eye.value() < query.cut().value());
+    let ray_len = slot_starts(&edges.kept)[BAND_LAYERS] * lights(eye_cut);
+    let mut sums = vec![[0.0; 5]; rows.len() * usize::from(side) * ray_len];
     if !sums.is_empty() {
         let region = query
             .cone()
             .map(|cone| (cone.axis(), cone.cos_half_angle()));
-        let mut rays = Rays::new(galaxy, dust);
+        let mut rays = Rays::new(galaxy, dust, eye_cut);
         let texels = rows
             .clone()
             .flat_map(|row| (0..side).map(move |column| (row, column)));
-        for ((row, column), out) in texels.zip(sums.chunks_exact_mut(slots)) {
+        for ((row, column), out) in texels.zip(sums.chunks_exact_mut(ray_len)) {
             let direction = spec.texel_direction(face, row, column);
             let reach = Reach::of(region, direction);
             rays.march(galaxy, ctx, query, direction, &edges, reach, spec, out);
@@ -1263,6 +1495,7 @@ fn march_rows_through(
         rows,
         origin: *query.observer().position(),
         kept: edges.kept,
+        eye_cut,
         sums,
     }
 }
@@ -1277,6 +1510,15 @@ fn march_rows_through(
 /// complete. A march of any split of a face's rows, each summed, gives one march's texels over the
 /// face, bit for bit, and a reply's texels are those of a march that keeps that reply alone over
 /// the same nodes.
+///
+/// Where the march keeps the eye's light (a camera's deeper cut, R06.T9.j), each texel also takes
+/// the light fainter than the eye's cut, as the eye's background: the eye's slots at the reply's
+/// radii, and the overflow's stars at or brighter than the eye's cut, those an eye-only request
+/// lists or overflows too, each placed and reddened as in the band. A listed or overflowing star
+/// fainter than the eye's cut adds nothing to it: its light is there as expected light. The
+/// census lists by V, so an eye-only census of the same radius is this one's stars at or brighter
+/// than the eye's cut, in the same order, and the eye's light is, bit for bit, its texels'. The
+/// texels' own light, chroma and ρ are as without it.
 ///
 /// # Panics
 ///
@@ -1294,15 +1536,21 @@ pub fn sum_rows(
     let (spec, face, rows) = (march.spec, march.face, &march.rows);
     let width = usize::from(spec.face_texels());
     let to_luminance = light_to_lux_ly2();
-    let mut texels: Vec<Sums> = march
+    let one_light = march.slots();
+    let summed = |ray: &[Sums]| {
+        let mut light = [0.0; 5];
+        for &slot in &slots {
+            add_to(&mut light, ray[slot]);
+        }
+        light.map(|v| v * to_luminance)
+    };
+    // Each texel's light, and the eye's where the march keeps it.
+    let mut texels: Vec<(Sums, Option<Sums>)> = march
         .sums
-        .chunks_exact(march.slots())
+        .chunks_exact(march.ray_len())
         .map(|ray| {
-            let mut light = [0.0; 5];
-            for &slot in &slots {
-                add_to(&mut light, ray[slot]);
-            }
-            light.map(|v| v * to_luminance)
+            let (band, eye) = ray.split_at(one_light);
+            (summed(band), march.eye_cut.map(|_| summed(eye)))
         })
         .collect();
     // The overflow, as points: each star's five sums over its texel's solid angle, reddened by its
@@ -1319,11 +1567,24 @@ pub fn sum_rows(
         let omega = spec.texel_solid_angle_sr(row, column);
         let at = usize::from(row - rows.start) * width + usize::from(column);
         let light = point_lux(star.colour(), star.v(), star.a_v());
-        for (sum, lux) in texels[at].iter_mut().zip(light) {
+        let (band, eye) = &mut texels[at];
+        for (sum, lux) in band.iter_mut().zip(light) {
             *sum += lux / omega;
         }
+        // An eye-only census keeps the stars at or brighter than its cut (R06.T8.k).
+        if let (Some(eye), Some(eye_cut)) = (eye, march.eye_cut)
+            && star.v() <= eye_cut
+        {
+            for (sum, lux) in eye.iter_mut().zip(light) {
+                *sum += lux / omega;
+            }
+        }
     }
-    out.extend(texels.into_iter().map(BandTexel::of_sums));
+    out.extend(
+        texels
+            .into_iter()
+            .map(|(band, eye)| BandTexel::of_sums(band).with_eye_light(eye.zip(march.eye_cut))),
+    );
 }
 
 /// The band's texels of rows `rows` (from the top) of `face`, appended to `out` row by row, each
@@ -1337,8 +1598,10 @@ pub fn sum_rows(
 /// (R06.T8.k). The light fainter than the cut is taken below M<sub>V</sub> = cut − DM − v☉
 /// A<sub>V</sub>, the solar point's V extinction (R06.T8.k). The light is reddened by the dust in
 /// front of it, each node's by the solar point's ratios and each overflow star's by its own
-/// (R06.T9.e). `ctx` supplies the luminosity tables, the gas modifiers and the noise cache of the
-/// rays' profiles; its other fields are not read.
+/// (R06.T9.e). Where the query asks the eye at a cut shallower than its own, each texel also holds
+/// the light fainter than the eye's cut, as the eye's background ([`march_rows`]; R06.T9.j). `ctx`
+/// supplies the luminosity tables, the gas modifiers and the noise cache of the rays' profiles; its
+/// other fields are not read.
 ///
 /// Each texel is a function of its own ray and of the overflow, so the texels of any split of a
 /// face's rows, appended in order, are one call's over the face, bit for bit; the noise cache
@@ -1471,7 +1734,6 @@ mod tests {
     use crate::galaxy::gas::extinction::sightline;
     use crate::galaxy::gas::modifiers::{GasModifierSource, NoModifiers};
     use crate::galaxy::gas::noise::NoiseCache;
-    use crate::observe::Observer;
     use crate::sky::census::{
         CensusTallies, Cone, MAX_N_MAX, NoSkyCellCache, SkyStar, census_cell, census_plan,
         merge_census,
@@ -2546,32 +2808,67 @@ mod tests {
         assert!(quadrature < 0.03 && whole < 0.002, "{quadrature}, {whole}");
     }
 
+    /// Every float of `texels` as bits, with the eye's light ([`BandTexel::eye_background`]).
+    fn texel_and_eye_bits(texels: &[BandTexel]) -> Vec<(u64, [u32; 2], u64, [u64; 2])> {
+        texels
+            .iter()
+            .zip(texel_bits(texels))
+            .map(|(t, (luminance, chroma, sp_ratio, _))| {
+                let (eye, eye_ratio) = t.eye_background();
+                (
+                    luminance,
+                    chroma,
+                    sp_ratio,
+                    [bits(eye.value()), bits(eye_ratio)],
+                )
+            })
+            .collect()
+    }
+
     /// Rows marched in any split, in any order and through a warm or a cold noise cache, each
     /// summed, give one march's texels over the face for every reply it keeps, bit for bit, the
     /// overflow's points split with them (R06.T9.f); and so does a march of the replies in reverse
-    /// order with one of them twice.
+    /// order with one of them twice. So does the eye's light beside each texel, of a request whose
+    /// eye's cut, 6.5, is shallower than its own (R06.T9.j).
     #[test]
     fn a_march_in_any_split_of_the_rows_sums_to_the_same_bits() {
+        let eye = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .eye(crate::sky::eye::EyeObserver::default())
+            .eye_cut(Magnitudes::new(6.5))
+            .build()
+            .expect("a valid query");
+        for query in [query_at(SUN, CENSUS_CUT), eye] {
+            any_split_of_the_rows_sums_to_the_same_bits(&query);
+        }
+    }
+
+    /// [`a_march_in_any_split_of_the_rows_sums_to_the_same_bits`] for `query`.
+    fn any_split_of_the_rows_sums_to_the_same_bits(query: &SkyQuery) {
         let galaxy = milky_way_galaxy();
         let spec = spec(8);
-        let query = query_at(SUN, CENSUS_CUT);
         let census = census_to(CENSUS_CUT, 50.0, n(20), Eye::NotAsked);
         let replies = replies_near_the_sun();
         let mut ctx = context();
         let sums = |march: &BandMarch, reply: &CompleteTo| {
             let mut out = Vec::new();
             sum_rows(march, &census, reply, &mut out);
-            out
+            texel_and_eye_bits(&out)
         };
         let mut reordered = replies.to_vec();
         reordered.reverse();
         reordered.push(replies[2]);
         for face in CubeFace::ALL {
-            let whole = march_rows(galaxy, &mut ctx, &query, replies, &spec, face, 0..8);
+            let whole = march_rows(galaxy, &mut ctx, query, replies, &spec, face, 0..8);
+            let shallower = query.eye_cut().filter(|eye| *eye < query.cut());
+            assert_eq!(
+                whole.eye_cut(),
+                shallower,
+                "the eye's light kept where its cut is shallower"
+            );
             let shuffled = march_rows(
                 galaxy,
                 &mut ctx,
-                &query,
+                query,
                 reordered.clone(),
                 &spec,
                 face,
@@ -2580,8 +2877,8 @@ mod tests {
             assert_eq!(shuffled.slots(), whole.slots());
             for reply in &replies {
                 assert_eq!(
-                    texel_bits(&sums(&shuffled, reply)),
-                    texel_bits(&sums(&whole, reply)),
+                    sums(&shuffled, reply),
+                    sums(&whole, reply),
                     "{face:?}, the replies reordered"
                 );
             }
@@ -2598,18 +2895,123 @@ mod tests {
                 let mut parts: Vec<BandMarch> = split
                     .iter()
                     .rev()
-                    .map(|rows| march_rows(galaxy, ctx, &query, replies, &spec, face, rows.clone()))
+                    .map(|rows| march_rows(galaxy, ctx, query, replies, &spec, face, rows.clone()))
                     .collect();
                 parts.sort_by_key(|part| part.rows().start);
                 for reply in &replies {
-                    let joined: Vec<BandTexel> =
-                        parts.iter().flat_map(|part| sums(part, reply)).collect();
-                    assert_eq!(
-                        texel_bits(&joined),
-                        texel_bits(&sums(&whole, reply)),
-                        "{face:?}, split {split:?}"
-                    );
+                    let joined: Vec<_> = parts.iter().flat_map(|part| sums(part, reply)).collect();
+                    assert_eq!(joined, sums(&whole, reply), "{face:?}, split {split:?}");
                 }
+            }
+        }
+    }
+
+    /// The eye's light from the march of a request whose camera's cut is deeper than the eye's
+    /// (R06.T9.j), on two pairs of cuts: a camera at V 10.06 beside the eye's 8.15 with no census,
+    /// and 8.0 beside 6.5 with a census within 50 ly whose brightest 20 are listed, so that both
+    /// requests overflow and the deeper one's overflow holds stars between the cuts too. For every
+    /// reply of [`replies_near_the_sun`]:
+    ///
+    /// - every texel's eye light, `sum_rows` at the eye's cut from the deeper march, is the texel
+    ///   of the march at the eye's cut, luminance and ρ bit for bit, its census the deeper one's
+    ///   stars at or brighter than the eye's cut;
+    /// - the band's texels, as sent, are those of the deeper march without the eye's light, bit
+    ///   for bit;
+    /// - the march keeps a second set of slots, and a request whose eye's cut is its own keeps
+    ///   none.
+    ///
+    /// With no census, the eye's light is brighter than the band's own in every texel complete
+    /// everywhere, by the light between the cuts.
+    #[test]
+    fn every_sum_at_the_eyes_cut_from_a_deeper_march_is_the_march_at_the_eyes_cut() {
+        let galaxy = milky_way_galaxy();
+        let spec = spec(8);
+        let replies = replies_near_the_sun();
+        let eye = crate::sky::eye::EyeObserver::default();
+        let asked = |cut: f64, eye_cut: f64| {
+            SkyQuery::builder(observer_at(SUN), Magnitudes::new(cut))
+                .eye(eye)
+                .eye_cut(Magnitudes::new(eye_cut))
+                .build()
+                .expect("a valid query")
+        };
+        let census_at = |cut: f64| {
+            let stars: Vec<SkyStar> = census_stars(Eye::NotAsked)
+                .iter()
+                .filter(|s| s.v().value() <= cut && s.distance().value() <= 50.0)
+                .copied()
+                .collect();
+            merge_census([(stars, CensusTallies::default())], n(20))
+        };
+        let (deep_census, shallow_census) = (census_at(CENSUS_CUT), census_at(6.5));
+        assert!(
+            !shallow_census.overflow().is_empty()
+                && deep_census.overflow().iter().any(|s| s.v().value() > 6.5),
+            "both overflow, the deeper one with stars between the cuts too"
+        );
+        let mut ctx = context();
+        for (camera, eye_cut, deep_census, shallow_census) in [
+            (10.06, 8.15, &SkyCensus::empty(), &SkyCensus::empty()),
+            (CENSUS_CUT, 6.5, &deep_census, &shallow_census),
+        ] {
+            let mut brighter = (0_usize, f64::INFINITY);
+            for face in CubeFace::ALL {
+                let march = |query: &SkyQuery, ctx: &mut SkyContext<'_>| {
+                    march_rows(galaxy, ctx, query, replies, &spec, face, 0..8)
+                };
+                let deep = march(&asked(camera, eye_cut), &mut ctx);
+                let plain = march(&query_at(SUN, camera), &mut ctx);
+                let shallow = march(&asked(eye_cut, eye_cut), &mut ctx);
+                assert_eq!(deep.eye_cut, Some(Magnitudes::new(eye_cut)));
+                assert_eq!((plain.eye_cut, shallow.eye_cut), (None, None));
+                assert_eq!(deep.ray_len(), 2 * plain.ray_len());
+                assert_eq!(shallow.ray_len(), shallow.slots());
+                assert!(deep.heap_bytes() >= 2 * plain.sums.len() * size_of::<Sums>());
+                for (k, reply) in replies.iter().enumerate() {
+                    let sum = |march: &BandMarch, census: &SkyCensus| {
+                        let mut out = Vec::new();
+                        sum_rows(march, census, reply, &mut out);
+                        out
+                    };
+                    let (texels, alone) = (sum(&deep, deep_census), sum(&plain, deep_census));
+                    let at_the_eyes_cut = sum(&shallow, shallow_census);
+                    let what = format!("cuts {camera} and {eye_cut}, {face:?}, reply {k}");
+                    assert_eq!(texel_bits(&texels), texel_bits(&alone), "{what}: as sent");
+                    assert!(alone.iter().all(|t| t.eye_light.is_none()), "{what}");
+                    let eye_light = |texels: &[BandTexel]| -> Vec<[u64; 2]> {
+                        texels
+                            .iter()
+                            .map(|t| {
+                                let (luminance, sp_ratio) = t.eye_background();
+                                [bits(luminance.value()), bits(sp_ratio)]
+                            })
+                            .collect()
+                    };
+                    assert!(texels.iter().all(|t| t.eye_light.is_some()), "{what}");
+                    assert_eq!(
+                        eye_light(&texels),
+                        eye_light(&at_the_eyes_cut),
+                        "{what}: the eye's light"
+                    );
+                    assert!(at_the_eyes_cut.iter().all(|t| t.eye_light.is_none()));
+                    if deep_census.overflow().is_empty() && *reply == CompleteTo::everywhere() {
+                        for texel in &texels {
+                            let ratio =
+                                texel.eye_background().0.value() / texel.luminance().value();
+                            assert!(ratio > 1.0, "{what}: {ratio}");
+                            brighter = (brighter.0 + 1, brighter.1.min(ratio));
+                        }
+                    }
+                }
+            }
+            if deep_census.overflow().is_empty() {
+                eprintln!(
+                    "a camera to V {camera} beside the eye's {eye_cut}: complete everywhere, the \
+                     eye's light is brighter than the band's in all {} texels, by {:.3} times at \
+                     least",
+                    brighter.0, brighter.1
+                );
+                assert_eq!(brighter.0, CubeFace::ALL.len() * 64);
             }
         }
     }

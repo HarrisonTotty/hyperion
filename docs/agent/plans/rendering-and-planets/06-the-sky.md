@@ -161,8 +161,11 @@ pub const CAP_RAYS: usize;                                          // 48
 
 // sky::census (Design notes 10–13)
 pub struct SkyQuery { /* observer: Observer, cut: Magnitudes, eye: Option<EyeObserver>,
+    eye_cut: Option<Magnitudes> (the eye's own, at most the cut; R06.T9.j, as built),
     n_max: NonZeroU32, cone: Option<Cone>, exclude: Option<SystemId> */ }
 pub struct SkyQueryBuilder;                                        // SkyQuery::builder(..)
+impl SkyQuery { pub fn eye_cut(&self) -> Option<Magnitudes>; }    // R06.T9.j: the cut when unstated
+impl SkyQueryBuilder { pub fn eye_cut(self, eye_cut: Magnitudes) -> Self; } // a camera's deeper cut beside it
 impl SkyQuery { #[cfg(any(test, feature = "testing"))]
     pub fn with_caps_forced(self, radius: LightYears) -> Self; }   // brute_force_sky's census
 pub struct Cone { /* axis: UnitVector, half_angle: Degrees */ }
@@ -197,8 +200,10 @@ pub fn band_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
     census: &SkyCensus, complete_to: &CompleteTo, spec: &BandSpec, face: CubeFace,
     rows: Range<u16>, out: &mut Vec<BandTexel>);   // march_rows of its one reply, then sum_rows
 pub struct BandMarch { /* spec, face, rows, the observer's position, each layer's kept radii,
-    each ray's five sums per layer and radius */ }                // R06.T9.f, as built
+    each ray's five sums per layer and radius, and under a camera's deeper cut the same of the
+    light fainter than the eye's cut (R06.T9.j) */ }               // R06.T9.f, as built
 impl BandMarch { pub fn holds(&self, complete_to: &CompleteTo) -> bool;
+    pub fn eye_cut(&self) -> Option<Magnitudes>;   // R06.T9.j: Some where it keeps the eye's light
     pub fn heap_bytes(&self) -> usize; }
 pub fn march_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
     replies: impl IntoIterator<Item = CompleteTo>, spec: &BandSpec, face: CubeFace,
@@ -212,10 +217,10 @@ pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
 pub struct Glare { /* each listed star's direction, photopic and scotopic illuminance at the eye
     after its own reddening, and their pyramid over the band's texels */ } // R06.T9.c and T9.i, as built
 impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar],
-    spec: &BandSpec) -> Self;                       // R06.T9.i, as built: built for its band's texels
+    spec: &BandSpec, eye_cut: Magnitudes) -> Self;  // R06.T9.i and T9.j, as built: for its band's
+                                                    // texels; only the stars at or brighter than the eye's cut glare
     pub fn of_points(points: impl IntoIterator<Item = (UnitVector, Lux, SpRatio)>,
         spec: &BandSpec) -> Self; }                 // R06.T9.i: point sources, a synthetic sky's
-// R06.T9.j: of_listed also takes eye_cut: Magnitudes; only the stars brighter than the eye's cut glare
 pub fn limit_rows(eye: &EyeObserver, spec: &BandSpec, glare: &Glare, face: CubeFace,
     rows: Range<u16>, texels: &mut [BandTexel]);                  // glare, then V_lim per texel
 pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
@@ -548,7 +553,7 @@ holds.
    R06.T9.h). The far field is summed over a pyramid of the band's texels, within 0.001 mag of the
    exact sum (R06.T9.i). From R06.T9.j the eye's map is the eye-only request's whatever the
    request's cut: its background is the expected light fainter than the eye's cut, and only the
-   listed stars brighter than it glare. Decided 2026-10-06, `decision-r06-t9c-glare.md`. It is
+   listed stars brighter than it glare (as built, at or brighter than it: the census's boundary). Decided 2026-10-06, `decision-r06-t9c-glare.md`. It is
    added to the band's luminance before the threshold. Defaults A = 25, p = 0.5 are `EyeObserver`
    fields. F stays 1.4: the glare is then modelled rather than folded into F, a small double count
    Risks records. The glare of the camera's own star and sunlit bodies is not in the map; the
@@ -1806,6 +1811,12 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   - Record the march's heap and time with the second sums, at 64² near the Sun.
   - Files: `sky/{band,limits}.rs`. Acceptance: `cargo test -p hyperion-sim sky::band` and
     `cargo test -p hyperion-sim sky::limits`, as two commands.
+  - As built (Risks, "Deviations in T9.j, as built"): the query states the eye's cut
+    (`SkyQuery::eye_cut`, `SkyQueryBuilder::eye_cut`), which `march_rows` and `band_rows` read,
+    so their signatures stay; each texel holds the eye's light beside its own, which the limit map
+    reads; the eye's light holds the overflow's stars at or brighter than the eye's cut, so the
+    identity holds at any N_max; and a star at the eye's cut itself glares, as the census keeps it.
+    Bench: `sky/band_near_sun/march_camera` and `/march_camera_no_eye`.
 
 - **R06.T9.g Diffuse galactic light (new; research first; after T9.f, before T17's goldens).**
   Decided 2026-10-06 (`decision-r06-t9b-band.md`). A research agent proposes a model of the
@@ -4577,7 +4588,9 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   camera view would change the cockpit eye's stars. Each camera-only star's own light, added to
   its texel, would instead leave single texels up to 0.2 mag deep, past T9.d's pad. From
   R06.T9.j the eye's map is the eye-only request's: the expected light fainter than the eye's
-  cut, and the glare of the stars brighter than it.
+  cut, and the glare of the stars brighter than it. _Built in R06.T9.j (Risks, "Deviations in
+  T9.j, as built"): near the Sun the camera's band had moved the eye's median limits by +0.12 in
+  the band and +0.24 at the poles; they are now the eye-only request's, bit for bit._
 - **Deviations in T9.h, as built (2026-10-06).** `sky::limits::eye_offsets`, as the task sets
   it, with these details.
   - **One term, used twice.** `GlareSource::veil_per_lux` (private) is the veil per lux in the
@@ -5148,6 +5161,160 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       quadrature, not the bulge's, measured node by node; and T9.b's 0.02 mag is annotated with the
       per-texel figures. Its considers are recorded above: T11.d marches every reply the shell plan
       can state, T17 records the 64² difference, and the ruling's memory counted four sums.
+- **Deviations in T9.j, as built (2026-10-07).** The eye's own sky under a camera's cut, as the
+  glare ruling (`decision-r06-t9c-glare.md`, the finding in item 2) sets it out, with these details.
+  - **The eye's cut is the query's** (`sky/census/query.rs`, outside the task's files).
+    - `SkyQuery::eye_cut()` gives it, and `SkyQueryBuilder::eye_cut(m)` sets it beside `.eye(…)`.
+      Unstated, it is the query's cut, the eye-only request's. It is refused without the eye, not
+      finite, or deeper than the cut (`BuildSkyQueryError::EyeCut`). A forced cap keeps it. The
+      census does not read it.
+    - The task names no place for it. The march reads it from its query, so `march_rows`,
+      `band_rows` and `sum_rows` keep their signatures, and every band path gives the eye's
+      background. A parameter of `march_rows` alone would have left `band_rows` silently at the
+      camera's background.
+    - T11.c builds the query to the deeper cut, with `.eye(eye).eye_cut(eye_cut)`, and passes
+      `query.eye_cut()` to `Glare::of_listed`.
+  - **The second sums** (`sky/band.rs`). Only where the eye's cut is shallower than the query's,
+    each ray holds a second set of slots after the band's (`BandMarch::eye_cut()`, public, and the
+    private `ray_len`).
+    - Each slot is the light fainter than the eye's cut within its radius, run from the first
+      node, plus the band's own sums beyond it, which both sets share.
+    - `layer_light` reads `colour_sums_fainter_than` at the eye's limit beside the cut's, over the
+      components in one order. The limit is the same expression at the eye's cut, with the distance
+      modulus taken once a node.
+    - `fill_slots`, `Rays::trace` and `NodeLight::dimmed` are split out of the march, the arithmetic
+      unchanged. A ray outside a cone holds all of its light in both sets.
+  - **The eye's light beside each texel.** `sum_rows` gives each texel a private `eye_light`: the
+    luminance and ρ of the light fainter than the eye's cut, with that cut. It has no chroma and is
+    not on the wire.
+    - `BandTexel::eye_background()` (crate) gives it, or the texel's own light where there is none.
+      The limit map's `background` reads it, so `limit_rows`, `limit_map` and `eye_offsets` keep
+      their signatures.
+    - `luminance_and_ratio` is shared by `of_sums` and the eye's light, so the two take one
+      arithmetic. The band's texels as sent are unchanged, bit for bit.
+  - **The overflow in the eye's light** (beyond the ruling's text). The overflow's stars at or
+    brighter than the eye's cut are points in the eye's background, as they are in the eye-only
+    request's band. Those fainter add nothing, since their light is expected light.
+    - The census lists by V (`sky_order`). So an eye-only census of the same radius is the camera's
+      census's first stars, and its overflow is the camera's overflow's stars at or brighter than
+      the eye's cut, in the same order.
+    - So the eye's map is the eye-only request's bit for bit at any N_max. The ruling claims it
+      "wherever the eye's own listing fits N_max". The test holds it with every star listed, with
+      the camera's census overflowing by stars between the cuts, and with both overflowing.
+    - The science check agrees: these are the eye-only request's own points, not camera-only
+      stars, so the review's must-fix against adding E ÷ Ω does not apply to them.
+  - **The boundary.** The census keeps V ≤ cut (R06.T8.k), so a star at exactly the eye's cut is
+    listed by an eye-only census and glares there. `Glare::of_listed` glares V ≤ `eye_cut`, and
+    `sum_rows` takes overflow points at V ≤ the eye's cut. The ruling's "at or fainter than it adds
+    neither" is read as the census's "fainter". The case is of measure zero, but the bits need it.
+    Design note 4 says so.
+  - **`Glare::of_listed(observer, listed, spec, eye_cut)`.** A star fainter than the eye's cut
+    keeps its entry, one per listed star as `len()` counts, with no light. The pyramid skips it.
+    Its eye offset is exactly its colour offset against its texel's background, its self-exclusion
+    exactly +0. The glare keeps its eye cut. In debug builds `limit_rows` refuses a texel whose eye
+    light is of another cut (determinism audit). Without that check, a glare to the camera's cut
+    would have the stars between the cuts glare over a background that holds their light already.
+  - **At the same census radius, not at the server's caps** (determinism audit, should-fix; for
+    the orchestrator).
+    - The identity holds between requests of the same replies, as the task's test has them. A
+      server's caps come from the cut, so the camera's request at 10.06 reaches farther than the
+      eye-only request at 8.15.
+    - In that further shell, the camera's census lists the stars brighter than the eye's cut. By
+      the caps' rule they are under one expected star a layer. They glare, and may be seen, where
+      the eye-only request holds them as expected light, and the eye's background there holds only
+      the light fainter than the eye's cut.
+    - The eye's map is then not the eye-only request's bit for bit, though it is the more complete
+      sky: real stars in place of their expected light (science check). A cone has the same effect.
+      T8.l refuses an eye with a cone.
+    - Holding the bits there too would take the eye-only request's own caps as another reply of the
+      march, the eye's light summed at them, and the glare and the eye's overflow kept to the stars
+      within the eye's cap for their layer. The eye's stars would then be a subsequence of the
+      camera's, not a prefix. Not built: it is a ruling's to make. The docs say "at the same census
+      radius".
+  - **Tests** (`--lib -- sky::band`, `sky::limits` and `sky::census::query`; seven new or changed):
+    - `a_camera_cut_leaves_the_eye_the_limits_and_offsets_of_the_eye_only_request`, the task's
+      first test. It runs near the Sun at 16², both censuses within 100 ly with every cap forced:
+      922 stars at V 8.15 and 1,537 at 10.06. Both bands are complete to 100 ly or everywhere. At
+      N_max 1,537, 1,229 and 461 the eye limits, the veils and the eye-only stars' offsets are equal
+      bit for bit. The eye-only census is the camera's to 8.15, star for star.
+    - `a_listed_star_between_the_cuts_changes_no_texels_eye_limit`. The 615 stars between the cuts
+      move no texel's limit, and each one's eye offset is its colour offset alone, bit for bit.
+      Glaring at the camera's cut over the band's own light, as T9.i took them, they move the
+      limits. The brightest, V 8.155, would take 2.4 × 10⁻⁵ mag from its own texel's limit.
+    - `a_request_whose_cut_is_the_eyes_gives_t9is_bits`. The eye asked at its own cut, stated or by
+      default, and no eye at all give `band_rows`' texels with one set of slots. The glare is T9.i's
+      sources and pyramid, so the map and the offsets are T9.i's.
+    - `every_sum_at_the_eyes_cut_from_a_deeper_march_is_the_march_at_the_eyes_cut`, at 8² over T9.f's
+      six replies. With 10.06 beside 8.15 and no census, the eye's light is brighter than the band's
+      in all 384 texels complete everywhere, by 1.171 times at least. With 8.0 beside 6.5, the census
+      within 50 ly at N_max 20 overflows in both requests.
+    - `under_a_camera_cut_t9is_map_was_not_the_eyes`: the record below. Its poles' step is held to
+      Gaia DR3's 0.52 ± 0.15 mag (science check).
+    - `a_glare_to_another_eye_cut_is_refused_by_the_eyes_light` (debug builds).
+    - Changed: `a_march_in_any_split_of_the_rows_sums_to_the_same_bits` also runs a request with the
+      eye's cut at 6.5 and compares each texel's eye light (determinism audit).
+    - `every_refusal_names_its_field` takes `EyeCut`. The doctest of `SkyQueryBuilder::eye_cut` is
+      new, and `eye_offsets`' asks the eye and passes its cut.
+  - **T9.i's bits.** A probe (not committed; `.git/rm23-scratch/r06-census/t9j/probe_full.rs`, logs
+    `probe-before.txt` and `probe-after-same.txt`) hashed four maps with their eye offsets before
+    and after the change. The four are T9.c's 16² fixture, the eye-only and as-built camera
+    requests at 16² complete to 100 ly, and T9.i's 64² fixture. All four are identical:
+    0x29ad9027412cd0ab, 0x3ddb49800fbcdb91, 0x71d60f26027c5a8e and 0x4400b67988bfd2e9. The camera
+    request with the eye's cut gives the eye-only request's digest for its eye-only stars. Nothing in
+    the tree pins those bits before T17's `sky/band_face_row.golden` (determinism audit).
+  - **The record.** Probe logs `probe-after-record.txt`. Near the Sun, both bands complete
+    everywhere, each census's glare within the radius. These are the eye's median limits in the
+    band (|b| < 5°) and at the poles (|b| > 80°):
+
+    | Faces, glare within               | Eye only (V 8.15) | Camera to 10.06, as T9.i built | Camera, T9.j    |
+    | --------------------------------- | ----------------- | ------------------------------ | --------------- |
+    | 16², 100 ly (922 / 1,537 stars)   | 6.5445 / 7.6738   | 6.6836 / 7.9210                | 6.5445 / 7.6738 |
+    | 64², 200 ly (3,815 / 7,883 stars) | 6.5428 / 7.6672   | 6.6664 / 7.9043                | 6.5428 / 7.6672 |
+    - Without glare at 64²: 6.5480 / 7.6834 for the eye alone, and 6.6722 / 7.9345 as built.
+    - So the camera had moved the eye's limits by +0.12 in the band and +0.24 at the poles, deeper
+      than T9.d's bound (the cut less 0.453). The camera's extra glare took back only 0.006 and
+      0.030 of it within 200 ly.
+    - The light between V 8.15 and 10.06 is 39.1% of the eye's background at the poles (μ 24.922
+      against 25.461, 64²) and 22.7% in the plane (22.192 against 22.472).
+    - Against Gaia DR3, from the band ruling's own pull within 10° of each pole, it is 38.0%: 38.5%
+      at the north pole and 37.5% at the south. The plane is about 18%, at low confidence: G-binned,
+      with V − G shifting 0.2–0.5 (science check). So the fixture's share at the poles is right,
+      though its pole light is 0.3 mag faint (Risks, "The galaxy's local light is low"). The ruling's
+      "a fifth to a third" is low: Gaia's step from V 6.5 to 8.1 is 26%, but from 8.15 to 10.06 it is
+      38%. Correcting the ruling's text is the orchestrator's call.
+    - Complete to 100 ly instead, the camera moved the 16² medians by under 0.001, since beyond
+      100 ly both bands hold all of the light.
+
+  - **The march's heap and time** (bench, one run each, criterion's `--test`, release, three
+    workers at `CPUQuota=400%`, without the heavy-test lock, which another lane held, at load about
+    10, so provisional):
+    - `sky/band_near_sun/march_camera` is near the Sun at V 10.06 with the eye's light to 7.95. Its
+      caps are A 46, B 260, C 19,416, D 19,416, E 41,804 and the brown dwarfs 1 ly, with eight
+      replies. It holds **49.3 MB** (49,299,456 bytes) and took **29.5 CPU-s** (9.9 s wall).
+    - `/march_camera_no_eye`, the same request with no eye, holds 24.7 MB and took 22.5 CPU-s (7.5
+      s wall).
+    - So the second sums double the heap and add 31% to the time. The eye-only `/march` at 7.95 took
+      20.0 CPU-s in the same run, against T9.f's 22.7. Logs: `bench-march.txt`.
+  - **Not changed.** No wire bytes, wire docs or client code. T9.d's tests and their bound are
+    unchanged: the eye's map under a camera is now the eye-only map they bound. GENERATOR_VERSION
+    stays 20, and no golden moves (`golden_diff` 0): nothing generated or golden reads the band or
+    the map.
+  - **Gates** (2026-10-07, capped at `CPUQuota=400%`, four jobs, load 6–14, so provisional; logs in
+    `.git/rm23-scratch/r06-census/t9j/final/`): fmt; clippy, workspace native and sim
+    wasm32-wasip1 (`-D warnings`); `--lib -- sky::`; `--test sky_census`; sky doctests; Prettier on
+    the plan; every pre-commit hook.
+  - **Reviews.**
+    - Determinism audit: nothing must-fix. All four bit-identity claims hold by construction, for
+      the same replies. Applied:
+      - the "same census radius" qualifier and the record above (should-fix);
+      - the row-split test with the eye's light (should-fix);
+      - the glare's eye cut checked against the texels' (consider);
+      - the T9.i probe digests (consider).
+    - Science check: nothing must-fix. The physics and the boundary reading are confirmed. Applied:
+      - the poles' share against Gaia DR3 (should-fix);
+      - the module doc's "all of the light beyond it" (should-fix);
+      - the "same census radius" qualifier, Design note 4's boundary wording, and an assertion on
+        the poles' step (considers).
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;
