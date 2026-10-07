@@ -501,7 +501,7 @@ export interface RenderView {
   readonly name: string;
   resize(size: ViewSize): void; // this view's attachments only
   render(frame: FrameSubmission): void;
-  readBack(): Promise<Float32Array | Uint8Array>; // harness only: copyTextureToBuffer
+  readBack(): Promise<Float32Array | Uint8Array>; // harness only: copyTextureToBuffer, in the drawing task
   dispose(): void;
 }
 export interface FrameSubmission {
@@ -580,6 +580,9 @@ export class ColourSelfSample extends Error {
 export class PresentationOnlyReadback extends Error {
   readonly kernelName: string;
 }
+export class CanvasReadBackRefused extends Error {
+  readonly viewName: string; // its cause: the device's GPUError
+} // added by R07.T8.a (2026-10-07): RenderView.readBack rejects with it for a refused (late) copy
 
 // loadEngine.ts: imports webgpu/engine dynamically and wraps it in a ResilientEngine.
 export function loadRenderEngine(

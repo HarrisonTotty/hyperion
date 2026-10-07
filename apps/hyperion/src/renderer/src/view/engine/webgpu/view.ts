@@ -15,7 +15,13 @@
 
 import { BUFFER_USAGE, MAP_MODE, TEXTURE_USAGE } from "../gpuFlags";
 import type { TextureSpec } from "../memory";
-import type { FrameSubmission, RenderView, TextureHandle, ViewSize } from "../types";
+import {
+  CanvasReadBackRefused,
+  type FrameSubmission,
+  type RenderView,
+  type TextureHandle,
+  type ViewSize,
+} from "../types";
 import type { FrameOutput } from "./drawing";
 import { type IntermediateHost, Intermediates } from "./intermediates";
 import { paddedBytesPerRow } from "./readback";
@@ -144,15 +150,19 @@ export class WebGpuView implements RenderView {
    * sRGB-encoded, rows from the top, whatever the canvas's own byte order.
    *
    * @remarks
-   * A canvas texture expires once the task that got it yields, so this is called in the same task
-   * as the `render` it reads, before any `await`.
+   * A canvas texture is destroyed at the next rendering update, so this is called in the same task
+   * as the `render` it reads, before any `await` that lets the task end. On the RTX 3080 it lived
+   * through microtasks and the next `requestAnimationFrame` callback, and was gone after a
+   * `setTimeout` of 0 (R07.T8.a's canvas check); a read should not lean on that.
+   *
+   * @throws {@link CanvasReadBackRefused} (the promise rejects) when the device refuses the copy.
    */
   readBack(): Promise<Uint8Array> {
     const texture = this.#lastTexture;
     if (texture === null) {
       return Promise.reject(new Error(`view ${this.name} has drawn nothing to read back`));
     }
-    return readCanvasTexture(this.#host.device, texture, this.#format === "bgra8unorm");
+    return readCanvasTexture(this.#host.device, texture, this.#format === "bgra8unorm", this.name);
   }
 
   dispose(): void {
@@ -229,11 +239,21 @@ export function unpadRows(
   return texels;
 }
 
-/** Copies an 8-bit canvas texture to the CPU as RGBA, rows unpadded. */
-async function readCanvasTexture(
+/**
+ * Copies an 8-bit canvas texture to the CPU as RGBA, rows unpadded.
+ *
+ * @remarks
+ * The copy and its submit sit in a validation error scope: a refused copy, such as one of a canvas
+ * texture already destroyed, leaves the staging buffer's zeros, which would read as a black canvas.
+ *
+ * @param viewName - The view whose canvas it is, for the error.
+ * @throws {@link CanvasReadBackRefused} (the promise rejects) when the device refuses the copy.
+ */
+export async function readCanvasTexture(
   device: GPUDevice,
   texture: GPUTexture,
   bgra: boolean,
+  viewName: string,
 ): Promise<Uint8Array> {
   const { width, height } = texture;
   const bytesPerRow = paddedBytesPerRow(width, 4);
@@ -243,10 +263,21 @@ async function readCanvasTexture(
     size: bytesPerRow * height,
     usage: BUFFER_USAGE.COPY_DST | BUFFER_USAGE.MAP_READ,
   });
-  const encoder = device.createCommandEncoder({ label: "view readback" });
-  encoder.copyTextureToBuffer({ texture }, { buffer: staging, bytesPerRow }, { width, height });
-  device.queue.submit([encoder.finish()]);
   try {
+    device.pushErrorScope("validation");
+    let refusal: Promise<GPUError | null>;
+    try {
+      const encoder = device.createCommandEncoder({ label: "view readback" });
+      encoder.copyTextureToBuffer({ texture }, { buffer: staging, bytesPerRow }, { width, height });
+      device.queue.submit([encoder.finish()]);
+    } finally {
+      // Popped even if the encoding throws, so that the scope never takes a later error.
+      refusal = device.popErrorScope();
+    }
+    const error = await refusal;
+    if (error !== null) {
+      throw new CanvasReadBackRefused(viewName, error);
+    }
     await staging.mapAsync(MAP_MODE.READ);
     return unpadRows(new Uint8Array(staging.getMappedRange()), width, height, bytesPerRow, bgra);
   } finally {

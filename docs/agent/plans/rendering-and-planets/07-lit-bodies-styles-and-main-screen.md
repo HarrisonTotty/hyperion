@@ -7645,6 +7645,21 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         `view.ts`'s "once the task that got it yields" brought to the rendering update;
       - a validation error scope in `readCanvasTexture`, so that a late read rejects with a named
         error rather than returning zeros.
+      - _Both were applied after the annuli fix, on the orchestrator's word (2026-10-07):_
+        - _`RenderView.readBack`'s TSDoc says that a read comes in the task that drew the canvas,
+          before the rendering update that destroys its texture. `WebGpuView.readBack`'s gives
+          what the probe measured._
+        - _`readCanvasTexture` is exported and takes the view's name. It opens a validation
+          error scope over its copy and submit, and pops it in a `finally`. A refused copy
+          rejects with `CanvasReadBackRefused` (`engine/types.ts`, with the device's error as
+          its cause), and the staging buffer is destroyed._
+        - _`FakeDevice` fakes error scopes (`scopeErrors`, `errorScopes`). `view.test.ts` has
+          four tests: an accepted copy's texels, the rejection, the staging buffer destroyed,
+          and the scope closed._
+        - _Every caller of `readBack` is a smoke check inside `Checks.group`, which records the
+          rejection as a failing check, or a pass-through. None relied on zeros._
+        - _`just test-render` held the change: see the gate of "The kept scenes' annuli,
+          fixed". R01's Provides sketch marks the new class._
     - Plan conformance: no must-fix items. Its three should-fix items were applied: the
       difference between the runs not isolated, R05.T12.e's prefix, and where the late read came
       from (with a pointer in part 3).

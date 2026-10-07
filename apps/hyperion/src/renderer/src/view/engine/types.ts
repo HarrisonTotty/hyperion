@@ -254,7 +254,19 @@ export interface RenderView {
   /** Resizes this view's attachments only. */
   resize(size: ViewSize): void;
   render(frame: FrameSubmission): void;
-  /** The harness's copy of the canvas texture, by `copyTextureToBuffer`. */
+  /**
+   * The harness's copy of the canvas texture, by `copyTextureToBuffer`.
+   *
+   * @remarks
+   * Call it in the task that drew the canvas: after `render`, before any `await` that lets the
+   * task end, such as a timer or another read-back's mapping. WebGPU destroys a canvas's current
+   * texture at the next rendering update, when the canvas is presented, and refuses a copy of it
+   * after that. SwiftShader keeps the texture, so only a hardware run shows a late read
+   * (R07.T8.a's canvas check on the RTX 3080).
+   *
+   * @throws {@link CanvasReadBackRefused} (the promise rejects) when the device refuses the copy,
+   *   as it does a late read's.
+   */
   readBack(): Promise<Float32Array | Uint8Array>;
   dispose(): void;
 }
@@ -632,6 +644,25 @@ export class ColourSelfSample extends Error {
     this.name = "ColourSelfSample";
     this.targetName = targetName;
     this.ownerName = ownerName;
+  }
+}
+
+/**
+ * Thrown by {@link RenderView.readBack} when the device refused the copy of the canvas, as it refuses a
+ * read made after the rendering update that destroyed the canvas's texture. Without it the read
+ * would give the staging buffer's zeros, a black canvas (R07.T8.a's canvas check on the RTX 3080).
+ */
+export class CanvasReadBackRefused extends Error {
+  readonly viewName: string;
+
+  /** @param refusal - The device's validation error, kept as the `cause`. */
+  constructor(viewName: string, refusal: GPUError) {
+    super(
+      `the copy of view ${viewName}'s canvas was refused (read after the rendering update?): ${refusal.message}`,
+      { cause: refusal },
+    );
+    this.name = "CanvasReadBackRefused";
+    this.viewName = viewName;
   }
 }
 
