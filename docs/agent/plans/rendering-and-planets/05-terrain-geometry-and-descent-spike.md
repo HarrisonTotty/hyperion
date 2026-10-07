@@ -5629,8 +5629,45 @@ medium, sizes, figure)`.
     variants, for the owner's pending look. They are in
     `.git/rm23-orchestration/laneC-captures-t12e/`, beside the earlier `laneC-captures/`. Hillaire's
     medium is clean, so they change little.
-  - _Still to record:_ option 1's largest difference, the image check (step 6) and the timing
-    (step 7), each in its own commit.
+  - _The image check_ (step 6; 2026-10-06, hidden on the RTX 3080, under the GPU lock).
+    - _How._ A temporary instrument (`t12e/imagecheck.py`, never committed) renders each frame
+      again under variants and logs e per atmosphere pixel as page warnings. A pixel counts where a
+      channel of the 1,024-step composite exceeds 10⁻³ of the frame's brightest, and e is floored
+      at the same.
+    - _The frames:_ the 14 check frames (7 cases on each setting), addendum B's frame from 80 km at
+      the limb's sunset on each setting, and the 3 comparison captures (high's sizes, Hillaire's
+      medium).
+    - _What is compared._ Each variant through the composite against the same kernels at 1,024
+      steps. 2,048 steps confirm the reference: p99 0.00% and worst 0.45% on high.
+    - _High passes._ Over its 11 frames (119,586 pixels), the shipped kernels give p50 0.08%, p99
+      0.32% and max 2.09% (the orbit capture). The gate is p99 ≤ 1% and max ≤ 5%. Per frame the
+      worst are the 400 km terminator (2.02%) and the 80 km limb (1.01%).
+    - _For the record_ (high's frames):
+
+      | Variant                                 | p99   | Max    |
+      | --------------------------------------- | ----- | ------ |
+      | Shipped (V1, 32 / 75)                   | 0.32% | 2.09%  |
+      | As built (28479b9's kernels at 32 / 30) | 16.8% | 20.2%  |
+      | Even 16 (28479b9's kernels at 16 / 16)  | 41.6% | 83.9%  |
+      | Half resolution through low's upsample  | 79.2% | 3,569% |
+
+      Half resolution's worst pixels are at silhouettes, where the nearest-depth texel belongs to
+      another surface. That closes options 2 and 3 on measured images.
+
+    - _Low_ is recorded, not gated, since low's only gate is the twin's. Shipped: p99 4.03% and max
+      17.4% (the 80 km limb). As built: 51.5% and 83.7%.
+    - _The run's other checks._ One FAIL: R07.T8.a's "a photorealistic frame tones a lit planet
+      onto the canvas over a black sky" (`smoke/bodies.ts`). It touches no atmosphere code, and it
+      failed the same way on lane C's RTX runs at 0c57be5, before and after.
+  - _Option 1's largest difference_ (the same run).
+    - _The variant._ 28479b9's even steps and step form, with the densities once, against 28479b9's
+      kernels as built.
+    - _The outputs:_ the sky view, the aerial perspective, the ray march and the composite of the 19
+      frames.
+    - _The result._ 37 of 4.7 million stored values differ, each by one rgba16float step. The
+      largest e is 9.7 × 10⁻⁴, one half-float step. That fits the ruling's "at most about
+      2 × 10⁻⁴" before the output's rounding.
+  - _Still to record:_ the timing (step 7), in its own commit.
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
