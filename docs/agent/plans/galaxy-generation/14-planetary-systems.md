@@ -3476,6 +3476,14 @@ it:
 - P14.T13.c's Bond albedo (the temperate state 0.306 → 0.294, with the `reference_bond` of mars and
   earth; decision-p11-t4k-faults) took version 21 in the same bump: 56 values in six goldens,
   blessed at 20 until then. It adds no draw or domain tag.
+- Version 21 also carries two refits at `--since 21`, which the batch had staled:
+  - plan 06's `stellar_fates_low` and `_mid`, by P11.T4.h's early-AGB core;
+  - R06's `sky_binary_light_c`, `_d` and `_e`, by the batch's pair evolution.
+
+  They are committed after the bump and land with the batch, so that (seed, 21) names one output
+  (R06's Risks, "Generator version 21"). They move the sky's luminosity tables, no golden and no
+  planetary value.
+
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
   pulsar-planet probability, `SATELLITE_STABILITY_FRACTION`, the white dwarf pollution fit.

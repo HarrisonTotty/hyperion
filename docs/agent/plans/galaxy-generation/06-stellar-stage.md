@@ -2239,6 +2239,8 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
   Mark size follows the chart's size classes, and the panel says `SYMBOLS NOT TO SCALE` as the chart
   does. Selecting a point selects the system everywhere. The canvas has an accessible name and is
   not focusable: keyboard access is through the shared list. It redraws on demand, never on a loop.
+  _Its frame, pegs and marks are drawn by `paint.ts` at R07.T16.f's widths
+  (decision-thin-line-contrast)._
 - **Files:** `apps/hyperion/src/renderer/src/displays/galaxy/HrDiagram.tsx`,
   `lib/galaxy/hrProjection.ts`, tests (with plan 05's `RecordingContext2D`).
 - **Tests:** projection maps the Sun to the expected pixel; picking tolerance of at least `1rem`;
@@ -2814,7 +2816,7 @@ domain_tags_are_pinned`, since `events` alone misses the registry tests and the 
   - _Determinism._ No platform transcendental bypasses `math`, nothing `usize`-dependent reaches
     output, and the `Lattice` cache lives for one call. Latent: a release build lets a NaN into a
     `StarState`, whose range checks are debug assertions.
-- **P06.T35.b's outline, as built alone (round 7, `ui`).** Only the `ringed-circle` value of `SymbolShape` and its outline are built, for plan 14's `SYSTEM` display; `starSymbols.ts`, the `STARS` filter and the legend wait for the stellar wire types. `SymbolOutline` gains a third kind, `{ kind: "ringed-circle", discRadius }`, with `discRadius` `RINGED_DISC_SHARE` = 1/3 of the ring's radius; the painter fills the disc alone, then adds the ring to the path and strokes both once, so open and filled differ only by the fill (tested in the draw list and on a recorded canvas). **Deviation, for the orchestrator to rule:** the task asks that it read open against filled at the smallest `SIZE_CLASS_REM`, which no ringed circle can: at size class 0 (8 px at 100%) the ring's and the disc's 1.5 px outlines take 6 px, leaving 2 px for the gap round the disc and the open disc's hole, which cannot both be a pixel wide. The third splits it evenly, 2 px each at size class 2 and 1.2 px at 80%, and the test asserts both at least the outline's width at class 2 — the smallest class a giant is expected to take, since D17 ties size to the initial-mass layer and giants should come from layer C (0.75–2.5 M☉) and above in a galaxy of the Milky Way's age; `starSymbols.ts` should confirm that when it lands, or plan 06 should give giants a size class floor.
+- **P06.T35.b's outline, as built alone (round 7, `ui`).** Only the `ringed-circle` value of `SymbolShape` and its outline are built, for plan 14's `SYSTEM` display; `starSymbols.ts`, the `STARS` filter and the legend wait for the stellar wire types. `SymbolOutline` gains a third kind, `{ kind: "ringed-circle", discRadius }`, with `discRadius` `RINGED_DISC_SHARE` = 1/3 of the ring's radius; the painter fills the disc alone, then adds the ring to the path and strokes both once, so open and filled differ only by the fill (tested in the draw list and on a recorded canvas). **Deviation, for the orchestrator to rule:** the task asks that it read open against filled at the smallest `SIZE_CLASS_REM`, which no ringed circle can: at size class 0 (8 px at 100%) the ring's and the disc's 1.5 px outlines take 6 px, leaving 2 px for the gap round the disc and the open disc's hole, which cannot both be a pixel wide. The third splits it evenly, 2 px each at size class 2 and 1.2 px at 80%, and the test asserts both at least the outline's width at class 2 — the smallest class a giant is expected to take, since D17 ties size to the initial-mass layer and giants should come from layer C (0.75–2.5 M☉) and above in a galaxy of the Milky Way's age; `starSymbols.ts` should confirm that when it lands, or plan 06 should give giants a size class floor. _Since R07.T16.f, below a device-pixel ratio of 4/3, the ring moves out three times as far as the disc, so its hole and gap stand as built at every ratio, and a ringed circle grows up to 2δ more than other marks (decision-thin-line-contrast)._
 - **Deviations in T15.c, as built (`planet`, round 7; rulings 33 and 38).** Only the disc-lifetime
   law is built, because plan 14's disc is its first caller: `stellar::premain::disc_lifetime` of a
   mass and a rank, in `Megayears`, with `disc_lifetime_mean(mass)` and the constants
@@ -4443,3 +4445,56 @@ generator-version change made here, not in R06.
     0.14% of the main sequence at 5 M☉, none at 0.8–2 M☉), and before it from 12 M☉ (the
     accreting τ₀). Nothing reads the closed form as the end but plan 11's track reaches, which
     now check the track itself (`binary::evolve::track_reaching`).
+- **The local V light is low (a pointer from rendering plan R06, 2026-10-06,
+  `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
+  the fixture's V light is 0.0417 L☉ pc⁻³, 26% under Flynn et al. 2006's 0.056 ± 10%, uniformly
+  across magnitudes, so the deficit is light per unit mass in the turnoff stars and clump giants
+  (M_V 4 to 0), and the column's light is 21% (0.26 mag) low. A calibration finding for plans 02
+  and 06 (and plan 11 for the pair light): the tracks' turnoff and clump light is one of the four
+  candidates, with plan 02's SFH, young disc height and Chabrier's scale. The measurement, and the
+  comparison of the fixture's Φ(M_V) with Hipparcos/CNS5 that parts them, are in plan 02's Risks,
+  "The local V light is low". A fix is a `GENERATOR_VERSION` change.
+- **`stellar_fates_low` and `_mid` went stale by rerun at generator version 21, and were refitted
+  at 21 (Phase J lane, 2026-10-07).** At 21, before the refit, `hyperion-fit check --rerun-fast`
+  reproduced neither committed file. `just fit-check` and `hyperion-fit`'s
+  `the_committed_tables_are_fresh` (which runs `Rerun::None`) still passed, since neither task's
+  sim fingerprint probes moved.
+  - _What moved._ No route or death age moved. Only these white-dwarf nodes did, 85 of their 111
+    moved values by a unit in the eighth significant digit and 4 by more than 10⁻⁶ relative:
+    - `_low`: 101 of 5,376 nodes, 98 `BridgedCarbonOxygenWhiteDwarf` and 3
+      `CarbonOxygenWhiteDwarf`. The mass `a` moved in 32 of them, by at most 2 × 10⁻⁸ M☉. `b`
+      moved in 76: the knee's log₁₀ L by at most 1.1 × 10⁻⁵ dex, and the cooling origin by at
+      most 6.3 × 10⁻⁸ Myr;
+    - `_mid`: 3 of 5,760 nodes, all `BridgedOxygenNeonWhiteDwarf`, in `b` alone, by at most
+      10⁻⁷ dex.
+
+    Each cell's validated bound is 3 times its worst error at its validation points: a median of
+    5.9 × 10⁻⁴ in `a` and 3.1 × 10⁻⁴ in `b` in `_low` (the files' acceptance lines). The moves
+    sit far inside it.
+
+  - _The cause: P11.T4.h alone_ (ee47311, the early AGB's core and small-envelope remnant at SSE's
+    τ), which the AGB cores of `FateNode::of`'s full tracks read. Both reruns were made in scratch
+    worktrees. At 97c969c (version 20) the rerun reproduces both committed bodies. At ee47311 it
+    gives version 21's bodies bit for bit.
+  - _The ruling, changed the same day_ (the orchestrator, `status.md`, 2026-10-07). It first kept
+    both tables as committed for 21, with a refit in the version-22 batch. It changed that to a
+    refit at 21, before the batch lands, for four reasons:
+    - No version-21 output has been published, so re-blessing at 21 makes no (seed, 21)
+      ambiguity.
+    - Kept, the tables would leave `just test-slow` (which ends with `check --rerun-fast`) and
+      `just ci-slow` red for every lane for as long as 21 lasts. That could hide a third
+      `RerunDiffers`, which is the forgotten-bump guard.
+    - `hyperion-fit run` would have accepted a later refit at 21, since their `since` was 13. It
+      would have moved every reader of `FittedFates` under (seed, 21) without a bump.
+    - The 22 batch would have refitted them anyway.
+  - _The refit, as built._ `hyperion-fit run stellar_fates_low --since 21` and `_mid` took 2 s and
+    1 s on 16 threads under the heavy lock. Their bodies are the attribution reruns' to the byte.
+    R06's `sky_binary_light_*` tables were then refitted again on them (R06's Risks, "Generator
+    version 21"), and every golden re-blessed at 21.
+  - _What the refit moved downstream: nothing measured._
+    - The bless passed 3,808 of 3,808, and `golden_diff` against the bump finds no golden changed.
+    - R06's three luminosity build fingerprints held at their values from the first refit.
+    - The binary-light refit on the new fates wrote the same three bodies to the byte.
+
+    The moved white-dwarf nodes reach none of them. Since the refit, `check --rerun-fast` reports
+    no stale table.

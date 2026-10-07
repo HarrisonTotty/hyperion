@@ -1563,9 +1563,16 @@ batch). T4.g and T4.h move output too, as built: T4.g in P14 Phase J's version 2
 T4.i, T4.j and T4.k (rulings p11-channels, p11-supernova-pins and p11-t4k-faults) took version 21
 together, with P14.T47.e and P14.T13.c's Bond albedo, in one bump (Phase J lane, 2026-10-06; Risks,
 "The 20 → 21 bump, as built"). Each was committed with its goldens blessed at 20, and the bump
-re-blessed them at 21 without moving a value. T4.l moves output at version 22, with its own bump,
-and T4.m rides it (ruling p11-c2-swell). At 21, `just fit-check` finds R06's
-`sky_binary_light_c`, `_d` and `_e` stale until their refit, the next task. T1.d
+re-blessed them at 21 without moving a value. The batch also staled four fitted tables, which
+were refitted at `--since 21` on the same branch and land with it, so that (seed, 21) names one
+output:
+
+- plan 06's `stellar_fates_low` and `_mid`, which T4.h left stale by rerun, by a unit in about the
+  eighth significant digit (plan 06's Risks), with every golden re-blessed at 21 after them;
+- R06's `sky_binary_light_c`, `_d` and `_e`, whose probes run pair evolution, refitted on the new
+  fates (R06's Risks, "Generator version 21").
+
+T4.l moves output at version 22, with its own bump, and T4.m rides it (ruling p11-c2-swell). T1.d
 moves every star once, because the mean mass per system changes
 the system count (plan 02 lists it among its known future bumps). After that no primary moves: IDs,
 positions, primary masses, ages, primary draws, death times and kicks are untouched, except that T7
@@ -3786,6 +3793,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     | 3b55013d, P11.T4.k  | `binary_timelines` (55 digests)                                                                                                                                                                                                                        |
     | f7b6b4eb, P14.T13.c | 56 values: `derive_body` and five planetary systems                                                                                                                                                                                                    |
     | 1845d20, cdebae44   | none                                                                                                                                                                                                                                                   |
+    | fates refit at 21   | none: the refit commit re-blesses every golden after refitting `stellar_fates_low` and `_mid` (P11.T4.h's early-AGB core, through the fates), and no golden moves                                                                                      |
 
     In all, `binary_timelines` moves all 1,000 digests: 372 in place, and 628 with a new segment
     count in their label. `summaries` moves 29 values and one relabelled death. T47.e and the
@@ -3801,15 +3809,33 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
 
     R06's Risks, "Generator version 21", has the detail.
 
-  - _Fitted tables._ At 21, `just fit-check` reports `sky_binary_light_c`, `_d` and `_e` stale,
+  - _Fitted tables._ At 21, `just fit-check` reported `sky_binary_light_c`, `_d` and `_e` stale,
     since their probes read the binary engine. `hyperion-fit`'s `the_committed_tables_are_fresh`
-    fails with them, so integration's `just ci` cannot pass at 21 until R06 refits them. Every other
-    table is fresh.
-  - _Open, for the orchestrator (the determinism auditor's must-fix)._ The refit moves the sky's
-    output: R06's luminosity tables, and so the three fingerprints again. For (seed, 21) to name one
-    output, the refit should land in version 21, at `--since 21` on this branch, before the batch
-    reaches integration. The alternative is a bump of its own, to 22, which moves T4.l to 23.
-  - _Gate._ fmt; workspace clippy, natively and on wasm32-wasip1 (base, surface, sim, testkit);
-    `just cross-clippy`. Under the heavy lock: the non-bless workspace run, 3,807 of 3,808 (the
-    fit test above fails); the doctests; the slow binary suites, 11 of 11; the R06 census, 187 s.
+    failed with them, so integration's `just ci` could not pass at 21 without a refit. Every other
+    table was fresh by its probes.
+  - _The refit, in 21 (ruled 2026-10-07 on the determinism auditor's must-fix)._ The refit moves the
+    sky's output: R06's luminosity tables, and so the three fingerprints again. So that (seed, 21)
+    names one output, it was made at `--since 21` on this branch, in one commit after the bump,
+    and lands with the batch rather than taking a bump of its own. R06's Risks, "Generator version
+    21", has the refit as built.
+  - _Stale by rerun: the fates, refitted in 21 too._ `hyperion-fit check --rerun-fast` at 21 also
+    found plan 06's `stellar_fates_low` and `_mid` stale by rerun, moved by T4.h alone. The
+    orchestrator first kept them for 21 with a refit in the version-22 batch. The same day
+    (`status.md`, 2026-10-07) it ruled them refitted at 21 instead:
+    - no version-21 output is published;
+    - kept, they would leave `just test-slow` and `just ci-slow` red at 21 and could hide a third
+      `RerunDiffers`;
+    - a later `just fit` at 21 would have moved every `FittedFates` reader without a bump.
+
+    So the refit commit refits both at `--since 21`, then the binary-light tables again on them,
+    and re-blesses every golden at 21. Plan 06's Risks has the fates' detail. The row
+    "fates refit at 21" of the table above attributes its golden moves.
+
+  - _Landing._ The bump (2ecdeb4a) and the refit land in the same push. The bump alone fails
+    `the_committed_tables_are_fresh`, and neither its sky nor its fates are version 21's.
+  - _The bump's gate_ (the refit's is in R06's Risks, "Generator version 21": 3,808 of 3,808, and
+    `--rerun-fast` with 0 failures). fmt; workspace clippy, natively and on wasm32-wasip1 (base,
+    surface, sim, testkit); `just cross-clippy`. Under the heavy lock: the non-bless workspace run,
+    3,807 of 3,808 (the fit test above fails); the doctests; the slow binary suites, 11 of 11; the
+    R06 census, 187 s.
     The determinism auditor finds the bump itself clean.

@@ -3179,7 +3179,8 @@ stars_per_system, dark_per_system, remnants_per_system}`, `LightColour` (flux-we
 - **T5.d's pair-evolved light, as built (2026-10-04/05, `decision-r06-tables.md` A, "T5.d gate
   reading" and "T5.d caps after the pair correction").**
   - **One task a layer (a deviation).** The ruling's one `sky_binary_light` task is three,
-    `sky_binary_light_c`, `_d` and `_e` (class Slow, revision 0, since generator version 20),
+    `sky_binary_light_c`, `_d` and `_e` (class Slow, revision 0, since generator version 20;
+    refitted at 21 to 176, 172 and 211 kB, Risks, "Generator version 21"),
     each writing `tables::sky_binary_light_<layer>` (193, 185 and 216 kB), as `stellar_fates_{low,
 mid,high}` are split: their some 68,000 values do not fit the 500 kB
     `check-added-large-files` limit in one file. One struct (`SkyBinaryLightTask { layer:
@@ -3225,9 +3226,11 @@ FitLayer }`, in `crates/hyperion-fit/src/tasks/sky_binary_light.rs`), three stat
   - **Fingerprint.** Per layer, two cells where its primaries are giants, at solar and a tenth
     solar \[Fe/H\] (C: age bins 21 and 24, 640 systems each; D: 16 and 17, 96; E: 11 and 12, 48),
     and one young cell where the protostars are, age bin 2 at solar \[Fe/H\], 2,000 systems (the
-    caps ruling, so that fit-check sees plan 11's protostar fix): each of a bin's six summed
+    caps ruling, so that fit-check sees plan 11's protostar fix; moved to cells that pair
+    evolution still changes at 21, Risks, "Generator version 21"): each of a bin's six summed
     differences, the light difference times its bin's index (where the light lands), its
-    absolute value and the systems changed. About 1.5 s a layer in fit-check.
+    absolute value and the systems changed. About 1.5 s a layer in fit-check (2.5, 4.0 and 2.2 s
+    with the probe cells of 21).
   - **The build.** `TablesPlan::correct_for_pairs` is the first part of `assemble`'s finish step
     for each bin, once its every metallicity stage is in: it adds the correction to the bin's
     single-star `Bins` at each snapshot, before the cumulative sums. Each cell's coefficient is
@@ -5339,15 +5342,18 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     are counted twice. P09.T2.c alone would take φ of each population out of the sky and its
     band. That is about nine in ten of the O and early-B stars, since φ_young stays near 0.9
     until associations dissolve from 30 Myr.
-- **Generator version 21 (the galaxy plans' Phase J lane, 2026-10-06; R06's code is unchanged,
-  two of its test pins move).** The 20 → 21 bump lands plan 11's P11.T4.h–k, 9a0950e's protostar
-  and build-age fixes, and plan 14's P14.T47.e and T13.c (galaxy plan 11's Risks, "The 20 → 21
-  bump, as built"). Two of this plan's pins move with them. Each was bisected on
+- **Generator version 21 (the galaxy plans' Phase J lane, 2026-10-06 and 07; R06's code is
+  unchanged; its three pair-light tables are refitted at 21, twice, their young probe cells move,
+  and two of its test pins move).** The 20 → 21 bump lands plan 11's P11.T4.h–k, 9a0950e's
+  protostar and build-age fixes, and plan 14's P14.T47.e and T13.c (galaxy plan 11's Risks, "The
+  20 → 21 bump, as built"). Two of this plan's pins move with them. Each was bisected on
   `rendering-and-planets` (a50d8a73), with each held commit's code applied in turn:
   - `sky::luminosity`'s `SERIAL_FINGERPRINT`, `FULL_SERIAL_FINGERPRINT` and
-    `PAIR_SERIAL_FINGERPRINT` move with P11.T4.h alone: the early AGB's core and small-envelope
-    remnant at SSE's τ, which the single-star tracks read. They are now `0x5c11_7d93_64a9_5339`,
-    `0xb581_e39e_74e3_414c` and `0xffe0_8298_a09d_eb2e`.
+    `PAIR_SERIAL_FINGERPRINT` moved in the bump with P11.T4.h alone: the early AGB's core and
+    small-envelope remnant at SSE's τ, which the single-star tracks read. 2ecdeb4a pinned them at
+    `0x5c11_7d93_64a9_5339`, `0xb581_e39e_74e3_414c` and `0xffe0_8298_a09d_eb2e`. The refit below
+    moved them again, to `0x9d13_13d6_2725_9e79`, `0xd063_b6fb_cde6_ee63` and
+    `0xc6c9_59ed_9001_fd37`.
   - `sky_census`'s `the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them` moves
     with P11.T4.i alone, which starts a pair at its first arrival:
     - 0x4204_6c99_ff00_000a's pair merges at 58.4 Myr, not 144.2 Myr. At the census time
@@ -5357,10 +5363,97 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       V 7.27, not 7.53.
     - Census and oracle still agree star for star. Both stars stay brighter than T8.b's bound at
       their primaries' mass and within T16.b's.
-  - **Stale at 21:** `sky_binary_light_c`, `_d` and `_e`. `just fit-check` reports each one's
-    probes moved: `cell([Fe/H] 0, age bin 21).light`, `(…, 16).light` and `(…, 11).light`. So
-    `hyperion-fit`'s `the_committed_tables_are_fresh` fails, and `just ci` cannot pass until the
-    refit. The refit moves the three fingerprints again, and T5.e's slow tests re-run after it.
-    At version 20 it took C 1,166 s on 8 threads, D 637 s on 8 and E 1,797 s on 14, under loads
-    of 25–45 (T5.d's as-built entry). `sky_envelope`, `star_colour` and the five reddening tables
-    are fresh.
+  - **Stale at 21 after the bump:** `sky_binary_light_c`, `_d` and `_e`. `just fit-check`
+    reported each one's probes moved: `cell([Fe/H] 0, age bin 21).light`, `(…, 16).light` and
+    `(…, 11).light`. So `hyperion-fit`'s `the_committed_tables_are_fresh` failed, and `just ci`
+    could not pass without the refit. The determinism auditor's must-fix (the refit moves the
+    sky's output) was ruled on 2026-10-07: refit at `--since 21` on the bump's branch, and land
+    the refit with the batch, with no bump of its own.
+  - **Before the refit** (2026-10-07, under the heavy lock), the nine slow sky tests the bump had
+    left unrun all passed at 21. They are `sky_envelope`'s three, `caps_converge_in_rays`,
+    `luminosity_matches_realised_cells`, T5.e's
+    `the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read`, and the census's
+    oracle tests 1,000 ly from the Sun, for the dwarfs near it and for D and E in the nuclear disc.
+    - `the_fitted_envelope_is_the_build_rounded_brighter` passes, so `sky_envelope` is fresh in
+      fact and not only by its 15 sparse probes. It is not refitted.
+    - `hyperion-fit check --rerun-fast` reproduces every fast table it can rerun, except plan 06's
+      `stellar_fates_low` and `_mid` (below). `limb_darkening` and `wd_cooling` are not rerun
+      without their fetched datasets; they read only `math` and constants from the sim.
+  - **The first refit, as built.** The three layers ran one after another under the heavy lock, each
+    with the `just fit` recipe's command from its release build:
+    `hyperion-fit run sky_binary_light_<layer> --since 21 --threads 16`.
+    - _Cost_: C 472 s, D 416 s and E 1,063 s, so 1,951 s of wall time and 2.61 × 10⁴ CPU-s
+      (7.25 CPU-hours), against about 4.0 × 10⁴ CPU-s at version 20 under loads of 25–45. The
+      load stayed at 15–18 and the fit's RSS at no more than 37 MiB. No data were fetched (the
+      tables read none).
+    - _What moved_: the bodies, their sim fingerprints and `since-generator-version` 21. Manifests,
+      inputs and revisions are unchanged.
+    - _Size_: the files are 176, 172 and 211 kB (193, 185 and 216 at 20), all under the 500 kB
+      limit.
+    - _Systems changed by pair evolution_: C 1.10% → 0.99%, D 6.98% → 6.99% and E 12.78% →
+      13.21%.
+    - _Young cells_: cells younger than about 10⁷ yr (age bins 0–10) lose many of their pair
+      differences: the tables hold 464, 372 and 129 more empty bins in C, D and E. 9a0950e keeps
+      protostars apart, and P11.T4.i starts a pair at its first arrival. The fingerprint's young
+      probe cell (age bin 2 at solar \[Fe/H\]) changed 16, 47 and 12 systems at 20 and none at 21.
+    - _The pair-correction gate_
+      (`the_pair_correction_is_known_to_two_percent_and_clamps_under_half_a_percent`; correction,
+      1σ, clamped; version 20's are in T5.d's entry):
+      - solar circle: C −2.05%, 0.29%, 0.000%; D −10.40%, 0.73%, 0.019%; E −21.45%, 1.13%,
+        0.010%;
+      - bulge: C −3.24%, 0.29%, 0.000%; D −9.64%, 0.90%, 0.034%; E −13.65%, 0.56%, 0.037%.
+
+      In the component guard, the largest 1σ is 1.00% (the old thin disc at \[Fe/H\] −1) and the
+      largest clamp 0.31% (the old thin disc at −0.5). All are within 2% and 0.5%.
+
+    - _After it_: `just fit-check` gives 21 fresh, the 6 provisional tables' warnings and none
+      stale. `check --rerun-fast` finds only the two fates tables, as before. The three
+      fingerprints are re-pinned. R06's whole slow sky suite passes on the refitted tables: 13
+      tests, T5.e's two among them, in 4,161 s under the lock. The nuclear disc's census oracle
+      test took 2,430 s of that.
+    - _T5.c's gate_ (`luminosity_matches_realised_cells`), realised against the corrected tables:
+      - solar circle C −4.4%, D −20.2%, E +49.2%;
+      - bulge C −3.3%, D +0.3%, E −4.0%.
+
+      At 20 they were solar circle −4.4%, −20.4% and +47.7%, and bulge −3.6%, +0.5% and −4.5%.
+      The cells' paired deficit against the tables', each within Z √(Σ d² + σ²):
+      - solar circle C 9.4% against 2.1%, D 21.1% against 10.6%, E −0.9% against 22.1%;
+      - bulge C 3.6% against 3.3%, D 10.8% against 10.0%, E 10.5% against 14.2%.
+
+    - _The caps_ (cut 7.95, `layer_caps`' doc table, re-measured at 21): as at 20 everywhere but
+      the nuclear disc, where C goes from 116 to 127 ly and D from 205 to 225 ly. Before the refit
+      they were version 20's to the light year.
+  - **Then the fates, and a second refit** (the orchestrator's ruling, `status.md`, 2026-10-07).
+    `check --rerun-fast` had found plan 06's `stellar_fates_low` and `_mid` stale by rerun at 21.
+    P11.T4.h alone moves a few white-dwarf nodes, by about a unit in the eighth significant digit.
+    The ruling first kept them for the version-22 batch, then had them refitted at 21 (plan 06's
+    Risks has both and the detail). The binary-light tables, which read the fates through
+    `fit_galaxy`, were then refitted again on them, with the young probe cells below.
+    - _Cost_: C 464 s, D 362 s and E 1,056 s, so 1,882 s of wall time and 2.61 × 10⁴ CPU-s. With
+      the first refit, that makes 3,833 s and 5.22 × 10⁴ CPU-s (14.5 CPU-hours) on 16 threads.
+    - _What moved_: the three bodies are byte for byte the first refit's. Only the probes and their
+      sim fingerprints changed, so every figure above stands.
+    - _Downstream_: the re-bless at 21 passed 3,808 of 3,808 and moved no golden. The three
+      luminosity fingerprints held at the values above.
+    - _Checks_: `just fit-check` gives 21 fresh and 6 provisional. `check --rerun-fast` gives 21
+      fresh and 0 failures, with only the provisional tables and the two fits whose datasets are
+      not fetched as warnings. R06's whole slow sky suite passes again on the final tables: 13
+      tests in 4,130 s, with the caps and T5.c's figures as above to the digit.
+  - **The young probe cells, amended** (the orchestrator's sign-off, `status.md`, 2026-10-07, on
+    the determinism auditor's point). T5.d's caps ruling took one young probe cell a layer: age bin
+    2 at solar \[Fe/H\] on 2,000 systems, where the protostars were, so that `fit-check` sees a
+    change to them. At 21 it read 0 in all nine values in every layer, since 9a0950e and P11.T4.i
+    leave no pair interacting there, so it could see nothing.
+    - The sign-off named C's bin 8, D's bin 9 and E's bin 3, the tables' first filled young bins.
+      At solar \[Fe/H\], though, C's bin 8 and D's bin 9 change none of their first 20,000
+      systems; C's fills only at its 2 × 10⁵.
+    - So each layer takes the youngest solar cell whose first systems include a handful that pair
+      evolution changes, at a cost of seconds. C takes age bin 12 (25–40 Myr) on 20,000 systems
+      (14 changed at 21), D bin 12 on 10,000 (8) and E bin 3 (0.4–0.6 Myr) on 2,000 (9).
+      `FitLayer::probe_cells` says so.
+    - `fit-check` now takes 2.5, 4.0 and 2.2 s for the three layers' fingerprints, against about
+      1.5 s each before. No body depends on the probes.
+    - With working probes, a later batch's `fit-check` sees these Slow tasks again, which
+      `--rerun-fast` cannot. Its fallback stays to rerun each layer into scratch
+      (`hyperion-fit run sky_binary_light_<layer> --out <path>`) and compare bodies, or to refit
+      at the new version.

@@ -425,16 +425,18 @@ fn count(
 /// `tables` are the galaxy's, read at the observer's time through
 /// [`LuminosityTables::age_for`]; `cache` is the caller's noise cache for the rays.
 ///
-/// Measured at cut 7.95 (the eye's near the Sun), version 20, with R06.T5.d's pair-evolved
-/// correction (whose count excess raised C near the Sun from 6,764 ly and D from 8,193), against
-/// the brainstorm's version-14 estimates (C 3,000, D 4,300 and E 10,000 ly near the Sun; a few
-/// hundred to about 1,000 in the nuclear disc), which the tests do not pin (decided 2026-10-03 and
-/// 2026-10-04), caps in ly (R06.T7, the slow test `caps_converge_in_rays`; T17 re-derives them):
+/// Measured at cut 7.95 (the eye's near the Sun), version 21, with R06.T5.d's pair-evolved
+/// correction as refitted at 21. Its count excess raised C near the Sun from 6,764 ly and D from
+/// 8,193; the refit moved only the nuclear disc's C, from 116 ly, and D, from 205. They stand
+/// against the brainstorm's version-14 estimates (C 3,000, D 4,300 and E 10,000 ly near the Sun; a
+/// few hundred to about 1,000 in the nuclear disc), which the tests do not pin (decided 2026-10-03
+/// and 2026-10-04). Caps in ly (R06.T7, the slow test `caps_converge_in_rays`; T17 re-derives
+/// them):
 ///
 /// | Point (ly) | A | B | C | D | E |
 /// | ---------- | - | - | - | - | - |
 /// | Near the Sun (0, 26,000, 68) | 11 | 68 | 8,193 | 9,925 | 21,369 |
-/// | Nuclear disc (0, 150, 0) | 13 | 17 | 116 | 205 | 362 |
+/// | Nuclear disc (0, 150, 0) | 13 | 17 | 127 | 225 | 362 |
 /// | Solar circle (26,000, 0, 68) | 11 | 68 | 7,444 | 9,018 | 19,416 |
 /// | Solar circle (−18,385, −18,385, 68) | 15 | 75 | 8,193 | 9,925 | 23,519 |
 /// | Inner disc (0, 8,000, 0) | 26 | 100 | 8,193 | 12,023 | 17,641 |

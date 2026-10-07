@@ -76,14 +76,19 @@ impl FitLayer {
     /// The fingerprint's probe cells, as (\[Fe/H\] node, age bin, systems): two where the
     /// layer's primaries are giants, at solar and at a tenth of solar metallicity, with enough
     /// systems that a few dozen of them interact (layer C's systems interact least and cost
-    /// least); and one young cell, age bin 2 at solar metallicity, where the protostars are
-    /// (decided 2026-10-04, so that fit-check sees a change to them).
+    /// least); and one young cell at solar metallicity, so that fit-check sees a change to the
+    /// young pairs (decided 2026-10-04). That cell was age bin 2, where the protostars were, until
+    /// plan 11's protostar fix and P11.T4.i left it empty in every layer at generator version 21.
+    /// It is now the youngest solar cell whose first systems include a handful that pair
+    /// evolution changes, at a cost of a few seconds: age bin 12 (25–40 Myr) in C and D, on
+    /// 20,000 and 10,000 systems, and age bin 3 (0.4–0.6 Myr) in E, on 2,000 (14, 8 and 9 changed
+    /// at 21; amended 2026-10-07, R06's Risks, "Generator version 21").
     #[must_use]
     pub const fn probe_cells(self) -> [(usize, usize, u32); 3] {
         match self {
-            Self::C => [(3, 21, 640), (1, 24, 640), (3, 2, 2_000)],
-            Self::D => [(3, 16, 96), (1, 17, 96), (3, 2, 2_000)],
-            Self::E => [(3, 11, 48), (1, 12, 48), (3, 2, 2_000)],
+            Self::C => [(3, 21, 640), (1, 24, 640), (3, 12, 20_000)],
+            Self::D => [(3, 16, 96), (1, 17, 96), (3, 12, 10_000)],
+            Self::E => [(3, 11, 48), (1, 12, 48), (3, 3, 2_000)],
         }
     }
 }

@@ -143,19 +143,19 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "sky_binary_light_c",
         revision: 0,
-        since_generator_version: 20,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {
         name: "sky_binary_light_d",
         revision: 0,
-        since_generator_version: 20,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {
         name: "sky_binary_light_e",
         revision: 0,
-        since_generator_version: 20,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {
@@ -209,13 +209,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "stellar_fates_low",
         revision: 0,
-        since_generator_version: 13,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {
         name: "stellar_fates_mid",
         revision: 0,
-        since_generator_version: 13,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {
