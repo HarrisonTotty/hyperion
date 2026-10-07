@@ -718,6 +718,24 @@ pub fn solar_colour() -> StarColour {
     )
 }
 
+/// The largest S/P ratio ρ of any colour the table gives, reddened or not: its largest row's over
+/// both grids, 3.4850, the 500,000 K blackbody rows (the blackbody's Rayleigh–Jeans limit is about
+/// 3.496).
+///
+/// [`star_colour`] mixes four rows with weights in 0–1, clamped at the grids' edges, so no colour
+/// exceeds its largest row but by a rounding, and dust only lowers ρ, since it takes more of the
+/// scotopic light than of the photopic ([`StarColour::reddened`], R06.T9.e). The eye's cut carries
+/// this ratio's colour offset (R06.T9.d; Design note 5).
+#[must_use]
+pub(crate) fn largest_sp_ratio() -> f64 {
+    NORMAL
+        .iter()
+        .chain(&WHITE_DWARF)
+        .map(|row| row[column::SP_RATIO])
+        // Every row's ρ is finite and positive, so the largest is exact whatever the order.
+        .fold(f64::NEG_INFINITY, f64::max)
+}
+
 /// The colour of a star of effective temperature `teff` and gravity `log_g` (log₁₀ g, cgs) on
 /// `grid`, interpolated bilinearly in log₁₀ `T_eff` and log₁₀ g and clamped at the grid's edges.
 ///
@@ -1119,6 +1137,38 @@ mod tests {
                 "the Sun at {a_v}: {red} {green} {blue}"
             );
         }
+    }
+
+    /// No colour the table gives, at its nodes or between them, unreddened or behind any dust, has
+    /// an S/P ratio above [`largest_sp_ratio`], which is a row's own: the eye's cut carries that
+    /// ratio's colour offset as the largest any star has (R06.T9.d).
+    #[test]
+    fn no_colour_reddened_or_not_has_a_rho_above_the_tables_largest() {
+        let largest = largest_sp_ratio();
+        assert!(
+            NORMAL
+                .iter()
+                .chain(&WHITE_DWARF)
+                .any(|row| bits(row[column::SP_RATIO]) == bits(largest)),
+            "a row's own ratio"
+        );
+        let colours = node_colours()
+            .into_iter()
+            .map(|(_, _, c)| c)
+            .chain(sampled_colours().into_iter().skip(1));
+        let mut checked = 0;
+        for c in colours {
+            for a_v in [0.0, 0.1, 1.0, 2.0, 7.5, 12.0, 30.0, 40.0] {
+                let rho = c.reddened(Magnitudes::new(a_v)).sp_ratio();
+                assert!(
+                    rho <= largest * (1.0 + 1e-12),
+                    "{c:?} at A_V {a_v}: ρ {rho} against {largest}"
+                );
+                checked += 1;
+            }
+        }
+        eprintln!("the table's largest ρ is {largest:.4}, over {checked} colours and dusts");
+        assert!((3.48..3.50).contains(&largest), "{largest}");
     }
 
     /// Test 6 of the addendum: every band's transmission falls with the dust on every row of

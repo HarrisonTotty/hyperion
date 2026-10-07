@@ -198,7 +198,7 @@ pub fn band_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
 
 // sky::limits (Design notes 4 and 5)
 pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
-    eye: &EyeObserver) -> Magnitudes;              // coarse pre-pass, darkest texel, +0.45 +0.1
+    eye: &EyeObserver) -> Magnitudes;              // coarse pre-pass, darkest texel, +0.453 +0.1
 pub struct Glare { /* each listed star's direction, photopic and scotopic illuminance at the eye
     after its own reddening */ }                                  // R06.T9.c, as built
 impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar],
@@ -554,16 +554,19 @@ holds.
    alone at 16² texels a face with no census and a provisional cut of 7.85, gives each texel's
    background; the eye's cut is then the colour-corrected Crumey limit at the darkest texel
    (clamped as Design note 2 says; 7.99 at most since 2026-10-02) plus the largest colour offset,
-   +0.45 mag for a hot star (the colour table's largest is 0.43, at μ 30), plus a pad of 0.1 mag,
-   so at most about 9.2 (8.54 under the 2026-10-02 clamp). If that cut is deeper than the
-   provisional one the pre-pass runs once more at it; raising the cut removes stars from the band
-   only slightly, so one repeat converges. Glare is left out of the pre-pass, which is
+   the colour table's own largest, at most 0.46 (it is 0.453, at μ 30, for its 500,000 K
+   blackbody rows; first given here as 0.43, and the cut as +0.45; the orchestrator's ruling of
+   2026-10-06 on R06.T9.h's open question 1), plus a pad of 0.1 mag, so at most about 9.2 (8.54
+   under the 2026-10-02 clamp). If that cut is deeper than the provisional one the pre-pass runs
+   once more at it; raising the cut removes stars from the band only slightly, so one repeat
+   converges. Glare is left out of the pre-pass, which is
    conservative, since glare only makes limits shallower. Near the Sun the rule gives about 7.6 +
-   0.45 + 0.1 ≈ 8.15 for the real sky. The pre-pass's darkest texel holds the light fainter than
+   0.453 + 0.1 ≈ 8.15 for the real sky. The pre-pass's darkest texel holds the light fainter than
    the cut, μ 24.73–24.77 by Gaia DR3 at b ≈ +79°, darker than the 24.3 of the light fainter than
    V 6.5. The fixture, whose poles are about 0.3 mag faint, gives about 8.27 (decided 2026-10-06,
    `decision-r06-t9b-band.md`). The fixed 7.85 alone would be too shallow wherever the band is
-   darker than μ 24.3 (7.72 at μ 25, 8.17 at 26).
+   darker than μ 24.3 (7.72 at μ 25, and 7.99, Crumey's clamp, from μ 25.6; the 8.17 at 26 first
+   given here is eq. 34 before the 2026-10-02 clamp).
 6. **The colour table** (researched 2026-09-29). Built by `hyperion-fit` from spectra fetched, not
    vendored (they carry no licence; only the integrated table is committed, with citations): ATLAS9
    (Castelli and Kurucz 2003) for 3,500–50,000 K, PHOENIX (Husser et al. 2013) for 2,300–3,500 K and
@@ -1691,15 +1694,19 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
     `cargo test -p hyperion-sim sky::eye`.
 - **R06.T9.d The eye's cut.** `sky::limits::eye_cut` (Design note 5): the coarse pre-pass at 16²
   texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit, clamped by
-  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), +0.45 and +0.1, and one repeat when the cut deepens. Tests: the cut is the darkest pre-pass texel's
-  `naked_eye_limit` + 0.45 + 0.1 after the repeat, to 10⁻⁹ mag; the colour table's largest eye
-  colour offset at μ 30 is at most 0.45 (it is 0.43); near the Sun the cut is 8.15 ± 0.22:
+  `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), + the
+  colour table's largest colour offset (0.453) and +0.1, and one repeat when the cut deepens.
+  Tests: the cut is the darkest pre-pass texel's
+  `naked_eye_limit` + 0.453 + 0.1 after the repeat, to 10⁻⁹ mag; the colour table's largest eye
+  colour offset at μ 30 is at most 0.46 (it is 0.453); near the Sun the cut is 8.15 ± 0.22:
   Crumey's limit at the darkest 16² texel of Gaia DR3's light fainter than the cut (μ
-  24.73–24.77), plus 0.55, with T9.b's tolerance carried through Crumey's slope (decided
+  24.73–24.77), plus 0.553, with T9.b's tolerance carried through Crumey's slope (decided
   2026-10-06, `decision-r06-t9b-band.md`; the fixture gives about 8.27); no texel of the full
   limit map with no glare, which bounds every listed star's own limit after its self-exclusion
-  (R06.T9.h), is deeper than the cut less the 0.45 colour offset, and a miss is a finding for the
-  pad, not a looser test; the repeat changes the cut by under 0.05 mag. Acceptance:
+  (R06.T9.h), is deeper than the cut less the largest colour offset (0.453), and a miss is a
+  finding for the pad, not a looser test; the repeat changes the cut by under 0.05 mag. The
+  colour offset is the table's real maximum, 0.453, not the first 0.43 and +0.45 (the
+  orchestrator's ruling of 2026-10-06 on R06.T9.h's open question 1). Acceptance:
   `cargo test -p hyperion-sim sky::limits`.
 - **R06.T9.i The far field (new; after T9.h, and after T9.d in the order; before T9.j, T11.c and T17's goldens).**
   Decided 2026-10-06 (`decision-r06-t9c-glare.md`, item 2).
@@ -2196,7 +2203,10 @@ with stars within 1° and near 90° of its texels (the limit map's bits across t
 other golden pins; determinism audit of R06.T9.c), and `sky/colour_reddened.golden`, every field of `reddened` at A_V 0.5, 2 and 5, off the
 nodes at 1, 7, 17 and 25, and held at 40, for a few points on both grids (the per-star reddening
 T11's wire carries, which no other golden pins; determinism audit of R06.T9.e and the band
-ruling's addendum), read by the testkit's golden harness. Record the A_V distribution of the
+ruling's addendum), and `sky/eye_cut.golden`, each pre-pass's darkest limit and cut and the eye's
+cut near the Sun (a repeat) and in the nuclear disc (none), whose bits set every eye reply's
+census and no other golden pins (determinism audit of R06.T9.d), read by the testkit's golden
+harness. Record the A_V distribution of the
 listed stars (the shares above A_V 2, 5, 10 and 20) in each census bench, near the Sun at both
 cuts and in the inner bulge (`decision-r06-t9b-band.md`, addendum item 2). Record the per-record bound's pass rate (records
 generated ÷ records skipped) for single and multiple systems in each census bench, against T16.b's
@@ -2943,7 +2953,9 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   7.99, reached at μ 25.6 in starlight (ρ₀ 2.26); T2's figures 8.17 at μ 26 and 8.64 at μ 27 are
   7.99. Design note 5's eye cut is at most about 7.99 + 0.45 + 0.1 = 8.54 (not 9.2); near the Sun,
   whose darkest texel is about μ 24.3, T9.d's 7.96 ± 0.15 is unaffected. Recorded as a brainstorm
-  correction in the roadmap.
+  correction in the roadmap. _Superseded 2026-10-06: T9.d's reference is 8.15 ± 0.22
+  (`decision-r06-t9b-band.md`, item 1), and the largest colour offset is 0.453, so the cut is at
+  most 7.99 + 0.453 + 0.1 = 8.54 (R06.T9.d)._
 - **Deviations in T2, as built.** `sky::eye` takes its background as a validated
   `SkyBackground { luminance, sp_ratio: SpRatio }` (`SkyBackground::new`, `SpRatio::new`, both
   `Result<_, BuildEyeError>`), so `threshold_illuminance(eye, &SkyBackground)`,
@@ -3502,7 +3514,8 @@ BuildSkyQueryError, SkyContext, CensusPlan, census_plan}` as sketched, with `MAX
   `CensusTallies`, `Bound`, `flux_bound`, `cell_floor`, `census_record` and `census_cell`, with
   `EYE_OFFSET_BOUND_MAG`, `GRID_STAR_BOUND`, `star_offset_bound` and `cell_offset_bound`.
   - `EYE_OFFSET_BOUND_MAG` is 0.6 mag, above every row of the colour table, whose hottest give about
-    0.43; the table is bilinear in ρ, so no colour exceeds its rows.
+    0.43; the table is bilinear in ρ, so no colour exceeds its rows. _It is 0.4526, ρ 3.4850, the
+    500,000 K blackbody rows (R06.T9.d)._
   - `census_cell` returns its `CensusTallies` rather than only filling `out`. `census_record`, with
     its `Bound`, is public so that the oracle measures each record as the census does, with
     `Bound::Ignored`.
@@ -4556,7 +4569,10 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       grids, ρ 3.4850. The blackbody rows run from ρ 3.4501 (+0.4417) at 120,000 K, and the
       Rayleigh–Jeans limit is +0.4560 (science check). The ruling and Design note 5 have +0.43.
       Design note 5's +0.45 is short by 0.0026, which its 0.1 pad absorbs; it is a finding for
-      T9.d's test "at most 0.45 (it is 0.43)".
+      T9.d's test "at most 0.45 (it is 0.43)". _Ruled 2026-10-06 by the orchestrator (T9.h's open
+      question 1): the table's real maximum, +0.453, everywhere. Design note 5 and T9.d read "at
+      most 0.46 (it is 0.453)", and the 0.1 pad keeps its role. The ruled 0.16 mag of window lost
+      stays as it is. Built in R06.T9.d._
     - At Crumey's clamp, over a texel whose colour-corrected background is exactly 10⁻⁵ cd m⁻²,
       the hottest star sits 0.05° from a 64² texel's centre (read at 0.1°), at the default eye
       (F 1.4, 25 years). Its own limit is 8.440. The brightest star its self-exclusion decides is
@@ -4618,6 +4634,99 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       the grid's loss is removed. The ruling's model puts (a)'s loss at 2–3% at the poles.
   - **Not changed.** No wire bytes, no client code and no wire doc comments: T11.a carries those
     (the ruling's §5). GENERATOR_VERSION stays 20, and no golden moves.
+- **Deviations in T9.d, as built (2026-10-06).** `sky::limits::eye_cut`, with the sketch's
+  signature, as Design note 5 sets it, with these details.
+  - **The colour offset is the table's.** A private `largest_colour_offset()` is
+    `star_colour_offset` of `colour::largest_sp_ratio()` in a scotopic sky: +0.4526.
+    `largest_sp_ratio` (crate, new) is the largest row's ρ over both grids, 3.4850, the 500,000 K
+    blackbody rows. This follows the orchestrator's ruling of 2026-10-06 on T9.h's open question 1.
+    Design note 5, the Provides comment and T9.d now read 0.453, "at most 0.46" and 0.553.
+    - Against the first +0.45 the cut moves by +0.003 (the 0.0026 and the repeat's share). That is
+      under the ruling's 0.01, and the pad keeps all of its 0.1.
+    - A test in `sky::colour` holds every node colour and the sampled ones at or under that ρ,
+      unreddened and behind A_V 0.1–40 (15,040 cases). Dust lowers ρ for a CCM law because V′
+      weighs bluer light than V, which is not a theorem, so the test guards it (science check).
+    - `EYE_OFFSET_BOUND_MAG`'s doc takes the figure. Its 0.6 stays until R06.T8.k removes it.
+  - **The pieces.** All private:
+    - `PRE_PASS_SPEC`, 16² on the standard 12 nodes a decade;
+    - `PROVISIONAL_CUT_V`, 7.85, and `CUT_PAD_MAG`, 0.1;
+    - `PrePass` (the darkest limit and the cut) and `EyeCutPasses` (the first pass and the repeat).
+
+    The pre-pass is `band_rows` with `SkyCensus::empty()` and `CompleteTo::everywhere()`, on a
+    query with no eye or cone (the band reads neither), then `limit_map` with `Glare::default()`.
+    The repeat runs when the first cut is deeper than 7.85. A debug assertion holds the repeat's
+    darkest limit no shallower than the first's, to 10⁻⁹. That is the premise that what the repeat
+    leaves lies on the side the pad covers.
+
+  - **Held at `MAX_CUT_V`.** `SkyQuery` refuses a cut deeper than V 11, and the repeat queries at
+    the cut, so the cut is held there. Only an eye of F under about 0.15 reaches it (`EyeObserver`
+    takes F from 0.1). A test holds an F 0.1 eye there.
+  - **The full map in the bound test.** The task's "full limit map with no glare" is the 64² band
+    at the cut, with no census and complete everywhere. That is the darkest band any reply at that
+    cut has: a census's caps add the light beyond them, and its overflow adds its stars' own light.
+    So it bounds every eye-only reply's map, and, from R06.T9.j, every reply's eye map. The test
+    also takes the glare of the stars a census lists within 100 ly at the cut, and holds each
+    one's own limit within the cut.
+  - **Tests** (`cargo test -p hyperion-sim sky::limits`, 23, of which 8 are new; and the new test
+    in `sky::colour`):
+    - the identity: both passes' darkest limits and cuts, against the 16² band's
+      `naked_eye_limit` recomputed for each texel plus the table's largest offset at μ 30, to
+      10⁻⁹. They also match the darkest limit plus `largest_colour_offset` plus the pad bit for
+      bit, and `eye_cut` gives the repeat's bits;
+    - the offset: +0.4526, at most 0.46, and above the 120,000 K row's +0.442;
+    - near the Sun: 8.2811, against 8.15 ± 0.22;
+    - the repeat: 8.2386 → 8.2811, +0.0425, under 0.05;
+    - the bound: the deepest 64² texel without glare (|b| 81.9°) sees to 7.7350. That is 0.0935
+      within the cut less the offset, 7.8285. With the glare of the 1,587 stars listed within
+      100 ly at the cut, the deepest own limit is 8.0099 and the largest eye offset +2.267;
+    - also new:
+      - in the nuclear disc, at (0, 150, 0), the darkest 16² texel sees to 6.8172, so the cut is
+        7.3698, with no repeat;
+      - an F 0.1 eye is held at V 11;
+      - on one warm context, the Sun's and the nuclear disc's cuts have the same bits in any order
+        (`assert_order_independent`), and the Sun's are a cold context's (determinism audit).
+  - **Records** (near the Sun, the default eye, dev build):
+    - The first pass: the darkest 16² texel, at |b| 78.8° and μ 24.916, sees to 7.6860, so the
+      cut is 8.2386. The repeat: the same texel, at μ 25.011, sees to 7.7285, so the cut is 8.2811.
+      The band ruling's probe had 24.92, 7.68 and about 8.27. With the first +0.45 the cut would be
+      about 8.278.
+    - The pad: 0.0065 of it is used. About 0.0046 is the final band at 8.2811 being darker than
+      the repeat's at 8.2386 (0.11 mag of limit per magnitude of cut). About 0.002 is the 64²
+      texels against the 16².
+    - The stars listed at the cut: 1,587 within 100 ly (1,520 at 8.15), and 5,168 within 200 ly
+      (4,824 at 8.15).
+    - The cost: `eye_cut` took 5.4 s on one thread in the test profile, with the tables built, at
+      load about 15. That is two 16² bands, 3,072 rays. A release timing is T17's, with the
+      per-reply costs; T11.a may run the faces as jobs.
+    - T9.c's and T9.h's tests, and T9.i's and T9.j's, keep the ruled 8.15, the real sky's figure.
+      T17 benches the census at the computed 8.28, beside 7.95.
+    - The probe's source and the logs are in `.git/rm23-scratch/r06-census/t9d/`.
+  - **The pad rests on a smooth sky (science check; for the orchestrator).** The clamp alone keeps
+    the 64² map within the pad only where the darkest 16² texel sees to 7.89 or deeper (μ about
+    25.4). Near the Sun its 7.73 leaves that to the polar sky being smooth on 5° scales, which the
+    test measures at one observer.
+    - A dark cloud smaller than a 16² texel (7°), lying between the pre-pass's rays, could put a
+      64² texel behind it more than 0.1 deeper than the pre-pass saw. The excess is at most the
+      clamp's 7.99 less the darkest limit.
+    - It was not seen here: the fixture has no modifiers, and plan 09's clouds reach no
+      sightline yet.
+    - A second observer near a cloud in the test, or a pre-pass that also samples the clouds'
+      directions, would settle it.
+  - **Also amended.**
+    - Design note 5's "8.17 at 26" was eq. 34 before the 2026-10-02 clamp; it now reads 7.99 from
+      μ 25.6 (science check).
+    - T17 gains `sky/eye_cut.golden`. No golden pins the cut before then, and one added now would
+      need a re-bless in the 20 → 21 batch (determinism audit).
+  - **Files and acceptance.** Besides `sky/limits.rs`, two files:
+    - `sky/colour.rs`: `largest_sp_ratio` and its test;
+    - `sky/census/cell.rs`: a doc comment and an assertion message.
+
+    Acceptance as built: `cargo test -p hyperion-sim sky::limits` and
+    `cargo test -p hyperion-sim sky::colour`.
+
+  - **Not changed.** GENERATOR_VERSION stays 20. Nothing served or golden reads the cut (T11.a
+    will call it), and no golden moves. The older records citing 7.95 (T7's, T8.e's and T8.f's)
+    stand as the estimate they were.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;

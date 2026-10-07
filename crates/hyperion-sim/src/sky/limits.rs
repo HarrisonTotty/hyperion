@@ -50,20 +50,29 @@
 //! sky's light, and the band layer draws only the sky's. The glare of the observer's own stars and
 //! of sunlit bodies is not in the map (Design note 4).
 //!
+//! **The eye's cut** ([`eye_cut`], R06.T9.d; Design note 5), the faintest V a sky with the eye
+//! lists, is set before the census, since the map is computed from the census: a coarse pre-pass
+//! of the band with no census and no glare gives each direction's limit, and the cut is the
+//! darkest one's plus the largest colour offset any star has plus a pad, so that every star an eye
+//! view can see is listed.
+//!
 //! [`blackwell_equivalent_factor`]: super::eye::blackwell_equivalent_factor
 
 use std::ops::Range;
 
 use crate::coords::UnitVector;
+use crate::galaxy::Galaxy;
 use crate::math;
 use crate::observe::Observer;
 use crate::units::consts::RADIANS_PER_DEGREE;
 use crate::units::{CandelasPerSquareMetre, Degrees, Lux, Magnitudes};
 
-use super::band::{BandSpec, BandTexel, CubeFace, unextinguished_lux};
-use super::census::{SkyStar, sky_order};
+use super::band::{BandSpec, BandTexel, CompleteTo, CubeFace, band_rows, unextinguished_lux};
+use super::census::{SkyCensus, SkyContext, SkyQuery, SkyStar, sky_order};
+use super::colour::largest_sp_ratio;
 use super::eye::{
-    EyeObserver, SkyBackground, SpRatio, naked_eye_limit, star_colour_offset, veiling_luminance,
+    EyeObserver, MAX_CUT_V, SkyBackground, SpRatio, naked_eye_limit, star_colour_offset,
+    veiling_luminance,
 };
 
 /// One listed star as the glare reads it.
@@ -577,6 +586,235 @@ pub fn eye_offsets(
         .collect()
 }
 
+/// The eye cut's pre-pass band (Design note 5): 16² texels a face, 7.1° wide at the faces' centres
+/// and 5.2° on average, on the server's nodes a decade.
+const PRE_PASS_SPEC: BandSpec = BandSpec::new(16, BandSpec::STANDARD.nodes_per_decade())
+    .expect("16² faces on the standard nodes are a band");
+
+/// The pre-pass's provisional cut, V 7.85 (Design note 5): its band holds the light of the stars
+/// fainter than it, until the cut it gives is known.
+const PROVISIONAL_CUT_V: f64 = 7.85;
+
+/// The eye cut's pad, mag (Design note 5). It covers a texel of the server's 64² band darker than
+/// the pre-pass's darkest 16² texel, and the final band, at the cut, a little darker than the
+/// repeat's, at the cut before it. The colour offset is the table's own largest, so the pad keeps
+/// all of its 0.1 for these.
+const CUT_PAD_MAG: f64 = 0.1;
+
+/// The largest eye colour offset any star has, mag: [`star_colour_offset`] of the colour table's
+/// largest S/P ratio in a scotopic sky, where every offset is largest, since in a mesopic one each
+/// fades towards zero (Design note 3), and dust only lowers a star's ρ.
+///
+/// It is +0.4526, from the 500,000 K blackbody rows' ρ 3.4850. This is the table's own maximum,
+/// which the orchestrator ruled on 2026-10-06 (T9.h's open question 1). Design note 5 first
+/// gave it as 0.43, and the cut as +0.45.
+#[must_use]
+fn largest_colour_offset() -> Magnitudes {
+    star_colour_offset(held_ratio(largest_sp_ratio()), &scotopic_sky())
+}
+
+/// One run of the eye cut's pre-pass (Design note 5).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PrePass {
+    /// Its darkest texel's limit, V.
+    darkest: Magnitudes,
+    /// The cut it gives, V: `darkest` plus [`largest_colour_offset`] plus [`CUT_PAD_MAG`], held at
+    /// [`MAX_CUT_V`].
+    cut: Magnitudes,
+}
+
+/// The eye cut's pre-pass at [`PROVISIONAL_CUT_V`], and its one repeat at the cut that gave, when
+/// that is deeper.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EyeCutPasses {
+    first: PrePass,
+    repeat: Option<PrePass>,
+}
+
+impl EyeCutPasses {
+    /// The eye's cut: the repeat's, or the first pass's where there was none.
+    #[must_use]
+    fn cut(&self) -> Magnitudes {
+        self.repeat.unwrap_or(self.first).cut
+    }
+}
+
+/// The pre-pass's band for `observer` and `eye` at `band_cut`, its six faces in
+/// [`CubeFace::ALL`]'s order, with their limits against no glare: [`band_rows`] at
+/// [`PRE_PASS_SPEC`] with no census and complete everywhere, then [`limit_map`].
+#[must_use]
+fn pre_pass_band(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    observer: &Observer,
+    eye: &EyeObserver,
+    band_cut: Magnitudes,
+) -> Vec<BandTexel> {
+    let query = SkyQuery::builder(*observer, band_cut)
+        .build()
+        .expect("a finite cut held at V 11 is a query");
+    let side = PRE_PASS_SPEC.face_texels();
+    let mut band = Vec::with_capacity(CubeFace::ALL.len() * usize::from(side) * usize::from(side));
+    for face in CubeFace::ALL {
+        band_rows(
+            galaxy,
+            ctx,
+            &query,
+            &SkyCensus::empty(),
+            &CompleteTo::everywhere(),
+            &PRE_PASS_SPEC,
+            face,
+            0..side,
+            &mut band,
+        );
+    }
+    limit_map(eye, &PRE_PASS_SPEC, &Glare::default(), &mut band);
+    band
+}
+
+/// One run of the pre-pass whose band holds the light fainter than `band_cut`
+/// ([`pre_pass_band`]), its cut taking `offset`, the largest colour offset.
+#[must_use]
+fn pre_pass(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    observer: &Observer,
+    eye: &EyeObserver,
+    band_cut: Magnitudes,
+    offset: Magnitudes,
+) -> PrePass {
+    let darkest = pre_pass_band(galaxy, ctx, observer, eye, band_cut)
+        .iter()
+        .map(|texel| {
+            texel
+                .eye_limit()
+                .expect("the limit map sets every texel's limit")
+                .value()
+        })
+        // Every limit is finite and positive (eq. 34's threshold is), so the largest is exact
+        // whatever the order: no NaN and no signed zero reach the fold.
+        .fold(f64::NEG_INFINITY, f64::max);
+    PrePass {
+        darkest: Magnitudes::new(darkest),
+        cut: Magnitudes::new((darkest + offset.value() + CUT_PAD_MAG).min(MAX_CUT_V)),
+    }
+}
+
+/// The pre-pass and its repeat ([`eye_cut`]).
+#[must_use]
+fn eye_cut_passes(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    observer: &Observer,
+    eye: &EyeObserver,
+) -> EyeCutPasses {
+    let offset = largest_colour_offset();
+    let provisional = Magnitudes::new(PROVISIONAL_CUT_V);
+    let first = pre_pass(galaxy, ctx, observer, eye, provisional, offset);
+    let repeat = (first.cut > provisional).then(|| {
+        let repeat = pre_pass(galaxy, ctx, observer, eye, first.cut, offset);
+        // A deeper cut only takes light from the band, which only deepens its limits (to a
+        // rounding), so what one repeat leaves lies on the side the pad covers.
+        debug_assert!(
+            repeat.darkest.value() >= first.darkest.value() - 1e-9,
+            "a deeper cut leaves the band darker: {first:?}, then {repeat:?}"
+        );
+        repeat
+    });
+    EyeCutPasses { first, repeat }
+}
+
+/// The eye's cut for `observer` and `eye`, V: the faintest V a sky with the eye lists (Design note
+/// 5; R06.T9.d).
+///
+/// The server sets it before the census, since the limit map is computed from the census. A coarse
+/// pre-pass of the band, [`band_rows`] from the luminosity tables alone at 16² texels a face, with
+/// no census and complete everywhere, holds the light of the stars fainter than a provisional cut
+/// of V 7.85. [`limit_map`] with no glare then gives each texel its limit, Crumey's threshold at
+/// the texel's own light and ρ ([`naked_eye_limit`], which holds it at his darkest background:
+/// 7.99 at F 1.4). The cut is:
+///
+/// - the darkest texel's limit;
+/// - plus the largest eye colour offset any star has: +0.453, the colour table's 500,000 K
+///   blackbody rows in a scotopic sky;
+/// - plus a pad of 0.1 mag.
+///
+/// If that is deeper than V 7.85, the pre-pass runs once more at it, and the repeat gives the cut.
+/// A deeper cut takes little light from the band, so one repeat suffices. Near the Sun the repeat
+/// moves the cut by about 0.04 mag. The darkest limit moves about 0.11 mag per magnitude of cut, so
+/// what is left, about 0.005, makes the final band darker, the side the pad covers.
+///
+/// So every star an eye view can see is listed, in the eye-only request's map (and, from R06.T9.j,
+/// in the eye's map under a camera's deeper cut). A star's own limit is its texel's limit in the
+/// final map plus its eye offset ([`eye_offsets`], R06.T9.h). That is at most its texel's limit
+/// with no glare plus its colour offset, and no texel of that map is deeper than the cut less the
+/// largest colour offset. Glare is left out of the pre-pass, which is conservative, since glare
+/// only makes limits shallower. The pad covers a texel of the server's 64² band darker than the
+/// pre-pass's darkest, and the final band at the cut a little darker than the repeat's. R06's
+/// Risks, "Deviations in T9.d, as built", records the margin near the Sun.
+///
+/// The cut is held at [`MAX_CUT_V`]. Only an eye of field factor under about 0.15, far keener than
+/// any observer (Crumey's 1.4–2.4), would pass it.
+///
+/// It reads the tables, the noise and the modifiers of `ctx`, and marches two bands of 1,536 rays
+/// near the Sun (one where the first cut is no deeper than V 7.85).
+///
+/// # Panics
+///
+/// In debug builds, if the repeat's darkest limit is shallower than the first pass's, or as
+/// [`limit_rows`] panics on a texel's light that is not finite; no band gives either.
+///
+/// # Examples
+///
+/// The cut near the Sun for the default eye, at which the census then lists the sky (`no_run`: the
+/// tables take a minute or more to build):
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext, SkyQuery};
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::eye::EyeObserver;
+/// use hyperion_sim::sky::limits::eye_cut;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+///
+/// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?;
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let offsets = CellOffsets::build(&galaxy);
+/// let mut ctx = SkyContext {
+///     tables: &tables,
+///     envelope: &envelope,
+///     offsets: &offsets,
+///     noise: NoiseCache::with_capacity(1 << 16),
+///     cells: &NoSkyCellCache,
+///     sources: &[],
+///     modifiers: &NoModifiers,
+/// };
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+/// let eye = EyeObserver::default();
+/// let cut = eye_cut(&galaxy, &mut ctx, &observer, &eye);
+/// assert!(cut.value() > 7.85, "the darkest sky near the Sun deepens the provisional cut");
+/// let query = SkyQuery::builder(observer, cut).eye(eye).build()?;
+/// # let _ = query;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn eye_cut(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    observer: &Observer,
+    eye: &EyeObserver,
+) -> Magnitudes {
+    eye_cut_passes(galaxy, ctx, observer, eye).cut()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::OnceLock;
@@ -598,7 +836,7 @@ mod tests {
     use crate::sky::colour::{AtmosphereGrid, solar_colour, star_colour};
     use crate::sky::eye::{
         BLACKWELL_SP_RATIO, DARKEST_BACKGROUND, PhotopicWeight, REFERENCE_SP_RATIO,
-        illuminance_of_magnitude, luminance, mesopic_weight,
+        illuminance_of_magnitude, luminance, mesopic_weight, surface_brightness,
     };
     use crate::sky::testing::{milky_way_envelope, milky_way_offsets, milky_way_tables};
     use crate::time::UniverseTime;
@@ -684,26 +922,30 @@ mod tests {
         })
     }
 
+    /// The stars a census near the Sun lists brighter than `cut` within [`GLARE_RADIUS_LY`], every
+    /// cap forced to it, with no eye.
+    fn listed_near_the_sun(cut: f64) -> Vec<SkyStar> {
+        let galaxy = milky_way_galaxy();
+        let query = query(cut)
+            .with_caps_forced(LightYears::new(GLARE_RADIUS_LY))
+            .expect("a forced cap");
+        let mut ctx = context();
+        let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
+        let mut stars = Vec::new();
+        for key in plan.cells() {
+            census_cell(galaxy, &mut ctx, key, &query, &mut stars);
+        }
+        let all = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        merge_census([(stars, CensusTallies::default())], all)
+            .listed()
+            .to_vec()
+    }
+
     /// The stars a census near the Sun lists brighter than the eye's cut within
-    /// [`GLARE_RADIUS_LY`], every cap forced to it, with no eye: built once.
+    /// [`GLARE_RADIUS_LY`] ([`listed_near_the_sun`]): built once.
     fn nearby_stars() -> &'static [SkyStar] {
         static STARS: OnceLock<Vec<SkyStar>> = OnceLock::new();
-        STARS.get_or_init(|| {
-            let galaxy = milky_way_galaxy();
-            let query = query(EYE_CUT)
-                .with_caps_forced(LightYears::new(GLARE_RADIUS_LY))
-                .expect("a forced cap");
-            let mut ctx = context();
-            let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
-            let mut stars = Vec::new();
-            for key in plan.cells() {
-                census_cell(galaxy, &mut ctx, key, &query, &mut stars);
-            }
-            let all = NonZeroU32::new(MAX_N_MAX).expect("not zero");
-            merge_census([(stars, CensusTallies::default())], all)
-                .listed()
-                .to_vec()
-        })
+        STARS.get_or_init(|| listed_near_the_sun(EYE_CUT))
     }
 
     /// The direction `degrees` from `direction`, turned towards the galactic plane's +X or, for a
@@ -1491,6 +1733,307 @@ mod tests {
             (offsets[0].value() - scotopic).abs() > 1e-3,
             "the mesopic offset fades"
         );
+    }
+
+    /// The eye cut's passes for the default eye near the Sun: built once.
+    fn eye_cut_near_the_sun() -> &'static EyeCutPasses {
+        static PASSES: OnceLock<EyeCutPasses> = OnceLock::new();
+        PASSES.get_or_init(|| {
+            eye_cut_passes(
+                milky_way_galaxy(),
+                &mut context(),
+                &observer(),
+                &EyeObserver::default(),
+            )
+        })
+    }
+
+    /// The colour table's largest eye colour offset at μ 30, written again from the table: each
+    /// row's [`star_colour_offset`] in a fully scotopic sky of reference light, as the census's
+    /// own bound reads it.
+    fn table_largest_colour_offset() -> f64 {
+        use crate::tables::star_colour::{NORMAL, WHITE_DWARF};
+        let dark = SkyBackground::new(
+            luminance(MagnitudesPerArcsec2::new(30.0)),
+            SpRatio::REFERENCE,
+        )
+        .expect("a background");
+        NORMAL
+            .iter()
+            .chain(&WHITE_DWARF)
+            .map(|row| {
+                let rho = SpRatio::new(row[3]).expect("a row's ratio");
+                star_colour_offset(rho, &dark).value()
+            })
+            .fold(f64::NEG_INFINITY, f64::max)
+    }
+
+    /// The band near the Sun at `cut` with no census, complete everywhere, at `spec`'s faces: six
+    /// faces in [`CubeFace::ALL`]'s order, without limits.
+    fn band_at(cut: f64, spec: BandSpec) -> Vec<BandTexel> {
+        let query = query(cut);
+        let side = spec.face_texels();
+        let mut band = Vec::new();
+        for face in CubeFace::ALL {
+            band_rows(
+                milky_way_galaxy(),
+                &mut context(),
+                &query,
+                &SkyCensus::empty(),
+                &CompleteTo::everywhere(),
+                &spec,
+                face,
+                0..side,
+                &mut band,
+            );
+        }
+        band
+    }
+
+    /// The darkest texel of `band` by Crumey's limit at its own light and ρ, written again from
+    /// `naked_eye_limit` rather than read from the limit map: its index, limit and surface
+    /// brightness.
+    fn darkest_texel(band: &[BandTexel], eye: &EyeObserver) -> (usize, f64, f64) {
+        band.iter()
+            .enumerate()
+            .map(|(i, texel)| {
+                let own = SkyBackground::new(
+                    texel.luminance(),
+                    SpRatio::new(texel.sp_ratio()).expect("a ratio"),
+                )
+                .expect("a background");
+                let mu = surface_brightness(texel.luminance())
+                    .expect("a lit texel")
+                    .value();
+                (i, naked_eye_limit(eye, &own).value(), mu)
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("a band of texels")
+    }
+
+    /// The cut is the darkest pre-pass texel's `naked_eye_limit` plus the colour table's largest
+    /// eye colour offset (0.453) plus 0.1, after the repeat, to 10⁻⁹ mag (R06.T9.d), written again
+    /// from the definition: the 16² band near the Sun at the repeat's cut, each texel's limit
+    /// Crumey's at its own light and ρ, and the offset the table's largest row's at μ 30. The
+    /// first pass's cut is the same at the provisional 7.85. The darkest limits, and each cut from
+    /// them, are those bits exactly, and the public function gives the repeat's cut, bit for bit.
+    #[test]
+    fn the_eye_cut_is_the_darkest_pre_pass_limit_plus_the_largest_colour_offset_and_the_pad() {
+        let eye = EyeObserver::default();
+        let passes = eye_cut_near_the_sun();
+        let offset = table_largest_colour_offset();
+        let spec = spec(16);
+        let latitudes = texel_latitudes(spec);
+        let repeat = passes
+            .repeat
+            .expect("near the Sun the first cut is deeper than 7.85, so the pre-pass repeats");
+        for (band_cut, pass) in [
+            (PROVISIONAL_CUT_V, passes.first),
+            (passes.first.cut.value(), repeat),
+        ] {
+            let (index, darkest, mu) = darkest_texel(&band_at(band_cut, spec), &eye);
+            let expected = darkest + offset + 0.1;
+            eprintln!(
+                "near the Sun, the pre-pass at V {band_cut:.4}: the darkest 16² texel (|b| \
+                 {:.1}°, μ {mu:.3}) sees to {darkest:.4}, so the cut is {:.4} (+{offset:.4} \
+                 +0.1)",
+                latitudes[index].1,
+                pass.cut.value()
+            );
+            assert!(
+                (pass.darkest.value() - darkest).abs() < 1e-9,
+                "the darkest limit {:?} against {darkest}",
+                pass.darkest
+            );
+            assert!(
+                (pass.cut.value() - expected).abs() < 1e-9,
+                "the cut {:?} against {expected}",
+                pass.cut
+            );
+            // With no glare the map's background is the texel's own light and ρ, bit for bit, and
+            // the band is the same whatever the noise cache holds.
+            assert_eq!(bits(pass.darkest.value()), bits(darkest));
+            assert_eq!(
+                bits(pass.cut.value()),
+                bits(darkest + largest_colour_offset().value() + CUT_PAD_MAG)
+            );
+        }
+        let cut = eye_cut(milky_way_galaxy(), &mut context(), &observer(), &eye);
+        assert_eq!(bits(cut.value()), bits(repeat.cut.value()));
+    }
+
+    /// The cut depends on nothing a server's job has asked before: on one context whose noise
+    /// cache stays warm, near the Sun and in the nuclear disc in any order, each observer's cut
+    /// has the same bits, and the Sun's are those of a cold context's.
+    #[test]
+    fn the_eye_cut_is_the_same_whatever_was_asked_before_it() {
+        use std::cell::RefCell;
+
+        use hyperion_testkit::order::assert_order_independent;
+
+        let eye = EyeObserver::default();
+        let nuclear = Observer::new(
+            GalacticPosition::from_light_years([0.0, 150.0, 0.0]).expect("in the cube"),
+            UniverseTime::EPOCH,
+        )
+        .expect("an observer");
+        let ctx = RefCell::new(context());
+        let cut = |at: &Observer| {
+            bits(eye_cut(milky_way_galaxy(), &mut ctx.borrow_mut(), at, &eye).value())
+        };
+        assert_order_independent(&[observer(), nuclear], cut);
+        assert_eq!(cut(&observer()), bits(eye_cut_near_the_sun().cut().value()));
+    }
+
+    /// The colour table's largest eye colour offset at μ 30 is at most 0.46 (it is 0.453, the
+    /// 500,000 K blackbody rows; the orchestrator's ruling of 2026-10-06 on T9.h's open question
+    /// 1), and [`largest_colour_offset`], which the cut adds, is it.
+    #[test]
+    fn the_colour_tables_largest_eye_colour_offset_is_at_most_0_46() {
+        let largest = table_largest_colour_offset();
+        eprintln!("the colour table's largest eye colour offset at μ 30 is {largest:+.4}");
+        assert!(largest <= 0.46, "{largest}");
+        assert!(
+            largest > 0.44,
+            "the hottest rows' offset lies past the 120,000 K row's +0.442: {largest}"
+        );
+        assert!(
+            (largest_colour_offset().value() - largest).abs() < 1e-12,
+            "{:?} against {largest}",
+            largest_colour_offset()
+        );
+    }
+
+    /// Near the Sun the cut is 8.15 ± 0.22 (`decision-r06-t9b-band.md`, item 1): Crumey's limit at
+    /// the darkest 16² texel of Gaia DR3's light fainter than the cut (μ 24.73–24.77), plus
+    /// 0.553, with T9.b's 0.5 mag of μ through Crumey's slope there. The fixture, whose poles are about
+    /// 0.3 mag faint (R06's Risks, "The galaxy's local light is low"), gives about 8.27.
+    #[test]
+    fn near_the_sun_the_eye_cut_is_8_15_within_0_22() {
+        let cut = eye_cut_near_the_sun().cut().value();
+        eprintln!("near the Sun the eye's cut is V {cut:.4}");
+        assert!((cut - 8.15).abs() <= 0.22, "{cut}");
+    }
+
+    /// The pre-pass's one repeat changes the cut by under 0.05 mag near the Sun, and only deepens
+    /// it: a deeper cut takes light from the band.
+    #[test]
+    fn the_repeat_moves_the_cut_by_under_0_05_mag() {
+        let passes = eye_cut_near_the_sun();
+        let repeat = passes.repeat.expect("the pre-pass repeats near the Sun");
+        let moved = (repeat.cut - passes.first.cut).value();
+        eprintln!(
+            "near the Sun the repeat moves the cut from {:.4} to {:.4}, by {moved:+.4}",
+            passes.first.cut.value(),
+            repeat.cut.value()
+        );
+        assert!((0.0..0.05).contains(&moved), "{moved}");
+    }
+
+    /// No texel of the full limit map with no glare is deeper than the cut less the largest colour
+    /// offset, and a miss is a finding for the pad, not a looser test (R06.T9.d, restated by
+    /// `decision-r06-t9c-glare.md`). The no-glare map bounds every listed star's own limit after
+    /// its self-exclusion (R06.T9.h).
+    ///
+    /// This runs near the Sun, at the server's 64² faces and at the eye's cut, against the band
+    /// with no census, complete everywhere. That is the darkest band any reply at that cut has: a
+    /// census's caps only add the light beyond them, and its overflow adds its stars' own light.
+    /// So its limits are the deepest of any reply's map without glare.
+    ///
+    /// With the glare of the stars a census lists within [`GLARE_RADIUS_LY`] at the cut, every
+    /// listed star's own limit, its texel's plus its eye offset, is no deeper than the cut.
+    #[test]
+    fn no_texel_of_the_map_without_glare_is_deeper_than_the_cut_less_the_largest_colour_offset() {
+        let eye = EyeObserver::default();
+        let cut = eye_cut_near_the_sun().cut();
+        let spec = BandSpec::STANDARD;
+        let mut band = band_at(cut.value(), spec);
+        limit_map(&eye, &spec, &Glare::default(), &mut band);
+        let latitudes = texel_latitudes(spec);
+        let (index, deepest) = band
+            .iter()
+            .map(|t| t.eye_limit().expect("a limit").value())
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("texels");
+        let bound = (cut - largest_colour_offset()).value();
+        eprintln!(
+            "near the Sun at cut {:.4}, the deepest 64² texel without glare (|b| {:.1}°) sees to \
+             {deepest:.4}, {:.4} within the cut less the largest colour offset, {bound:.4}",
+            cut.value(),
+            latitudes[index].1,
+            bound - deepest
+        );
+        assert!(
+            deepest <= bound,
+            "a texel sees to {deepest}, past {bound}: a finding for the pad"
+        );
+        let stars = listed_near_the_sun(cut.value());
+        let glare = Glare::of_listed(&observer(), &stars);
+        limit_map(&eye, &spec, &glare, &mut band);
+        let offsets = eye_offsets(&eye, &spec, &glare, &band);
+        let (mut faintest_own, mut largest_offset) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for (source, offset) in glare.sources.iter().zip(&offsets) {
+            let direction = source.direction.expect("a star away from the observer");
+            let (at, _) = texel_of(spec, &direction);
+            let own = band[at].eye_limit().expect("a limit") + *offset;
+            faintest_own = faintest_own.max(own.value());
+            largest_offset = largest_offset.max(offset.value());
+        }
+        eprintln!(
+            "{} stars listed within {GLARE_RADIUS_LY} ly at the cut: the deepest own limit is \
+             {faintest_own:.4}, the largest eye offset {largest_offset:+.4}",
+            stars.len()
+        );
+        assert!(
+            faintest_own <= cut.value(),
+            "a listed star sees to {faintest_own}, past the cut {cut:?}"
+        );
+    }
+
+    /// Where the first cut is no deeper than the provisional 7.85, as in the nuclear disc's bright
+    /// sky, the pre-pass does not repeat and its first cut is the eye's.
+    #[test]
+    fn in_a_bright_sky_the_pre_pass_does_not_repeat() {
+        let eye = EyeObserver::default();
+        let at = GalacticPosition::from_light_years([0.0, 150.0, 0.0]).expect("in the cube");
+        let nuclear = Observer::new(at, UniverseTime::EPOCH).expect("an observer");
+        let passes = eye_cut_passes(milky_way_galaxy(), &mut context(), &nuclear, &eye);
+        eprintln!(
+            "in the nuclear disc the darkest 16² texel sees to {:.4}, so the cut is {:.4}",
+            passes.first.darkest.value(),
+            passes.first.cut.value()
+        );
+        assert!(passes.repeat.is_none(), "{passes:?}");
+        assert!(passes.first.cut.value() <= PROVISIONAL_CUT_V, "{passes:?}");
+        let expected = passes.first.darkest + largest_colour_offset() + Magnitudes::new(0.1);
+        assert!(
+            (passes.cut() - expected).value().abs() < 1e-12,
+            "{:?} against {expected:?}",
+            passes.cut()
+        );
+        let near_the_sun = eye_cut_near_the_sun().cut();
+        assert!(
+            passes.cut() < near_the_sun,
+            "{:?} against the Sun's {near_the_sun:?}",
+            passes.cut()
+        );
+    }
+
+    /// An eye keen enough that its cut would pass V 11, the deepest a sky is asked to, is held
+    /// there, in the first pass and the repeat: a field factor of 0.1, beyond any observer's,
+    /// deepens every limit by 2.87 mag.
+    #[test]
+    fn a_cut_past_v_11_is_held_there() {
+        let keen = EyeObserver::new(0.1, 25.0, 0.5).expect("an eye");
+        let passes = eye_cut_passes(milky_way_galaxy(), &mut context(), &observer(), &keen);
+        assert!(passes.repeat.is_some(), "a repeat at V 11");
+        assert!(
+            passes.first.darkest.value() + largest_colour_offset().value() + 0.1 > MAX_CUT_V,
+            "{passes:?}"
+        );
+        assert_eq!(bits(passes.first.cut.value()), bits(MAX_CUT_V));
+        assert_eq!(bits(passes.cut().value()), bits(MAX_CUT_V));
     }
 
     #[test]

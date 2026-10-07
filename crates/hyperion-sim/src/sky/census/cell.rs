@@ -85,9 +85,10 @@ static SCOTOPIC_SKY: LazyLock<SkyBackground> = LazyLock::new(|| {
 const STAR_SIGHTLINE_QUALITY: Quality =
     Quality::Budget(core::num::NonZeroU32::new(64).expect("64 is not zero"));
 
-/// A bound on any star's eye colour offset, mag: the colour table's hottest rows give ρ about 3.4,
-/// 2.5 log₁₀(3.4 ÷ 2.297) = 0.43 (Design note 5's +0.45), held to 0.6 so that a census never skips
-/// a star its offset would keep; a test holds every row of the table under it.
+/// A bound on any star's eye colour offset, mag: the colour table's hottest rows, its 500,000 K
+/// blackbodies, give ρ 3.4850, 2.5 log₁₀(3.4850 ÷ 2.297) = 0.453 (Design note 5's largest colour
+/// offset, which the eye's cut carries), held to 0.6 so that a census never skips a star its offset
+/// would keep; a test holds every row of the table under it.
 pub const EYE_OFFSET_BOUND_MAG: f64 = 0.6;
 
 /// The distance modulus at `d_ly` light-years: 5 log₁₀(d ÷ 10 pc).
@@ -1574,7 +1575,7 @@ mod tests {
         assert!(largest < EYE_OFFSET_BOUND_MAG, "{largest}");
         assert!(
             largest > 0.3,
-            "the hottest rows are near Design note 5's 0.45: {largest}"
+            "the hottest rows are near Design note 5's 0.453: {largest}"
         );
     }
 
