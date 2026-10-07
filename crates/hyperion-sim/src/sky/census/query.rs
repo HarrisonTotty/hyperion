@@ -248,12 +248,17 @@ impl SkyQuery {
 
     /// The eye's cut, apparent V, if the sky is asked for the eye: the cut of the eye's own
     /// request, at which its limit map is taken whatever the query's cut (R06.T9.j; decided
-    /// 2026-10-06, `decision-r06-t9c-glare.md`), so that at the same census radius the eye's limits
-    /// are the eye-only request's, bit for bit. It is the query's cut unless a camera's deeper cut
+    /// 2026-10-06, `decision-r06-t9c-glare.md`). It is the query's cut unless a camera's deeper cut
     /// set that (Design note 5), and is never deeper than it. The band then keeps the light fainter
     /// than the eye's cut beside its own, as the eye's background
     /// ([`march_rows`](super::super::band::march_rows)), and only the listed stars at or brighter
     /// than it glare ([`Glare::of_listed`](super::super::limits::Glare::of_listed)).
+    ///
+    /// So the eye's map under a camera's cut is the eye-only request's at the camera's census
+    /// radii (the same replies and `n_max`), bit for bit. Beyond the eye-only request's own caps, which follow its shallower cut,
+    /// the camera's census lists the real stars brighter than the eye's cut, under one expected a
+    /// layer, which the eye-only request holds as expected light: accepted as the truer sky
+    /// (decided 2026-10-07, `decision-r06-t9c-glare.md`, addendum 2).
     #[must_use]
     pub const fn eye_cut(&self) -> Option<Magnitudes> {
         self.eye_cut

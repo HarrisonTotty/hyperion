@@ -23,6 +23,12 @@ test-group = "sky-tables"
 filter = "package(hyperion-sim) & binary(=sky_census)"
 threads-required = 8
 
+# Two of the sky's band tests run their census's cells on four threads of their own, so each takes
+# four slots rather than a nominal one.
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & (test(=sky::limits::tests::the_eyes_light_is_independent_of_the_census_radius) | test(=sky::band::tests::one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent))"
+threads-required = 4
+
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits)/) | binary(/^sky_/))"
 test-group = "sky-tables"

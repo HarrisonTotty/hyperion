@@ -551,9 +551,13 @@ holds.
    699; Stiles and Crawford 1937, Proc. R. Soc. B 122, 255). A star's own veil is not its own
    background: each listed star's eye offset is its own limit less its texel's (Design note 17;
    R06.T9.h). The far field is summed over a pyramid of the band's texels, within 0.001 mag of the
-   exact sum (R06.T9.i). From R06.T9.j the eye's map is the eye-only request's whatever the
-   request's cut: its background is the expected light fainter than the eye's cut, and only the
-   listed stars brighter than it glare (as built, at or brighter than it: the census's boundary). Decided 2026-10-06, `decision-r06-t9c-glare.md`. It is
+   exact sum (R06.T9.i). From R06.T9.j the eye's map is the eye-only request's at the same census
+   radii, whatever the request's cut: its background is the expected light fainter than the eye's
+   cut, and only the listed stars brighter than it glare (as built, at or brighter than it: the
+   census's boundary). Where a camera's caps reach farther, its census lists the real stars brighter
+   than the eye's cut beyond the eye-only caps, under one expected a layer, which glare and may be
+   seen where an eye-only request holds their expected light (decided 2026-10-07,
+   `decision-r06-t9c-glare.md`, addendum 2). Decided 2026-10-06, `decision-r06-t9c-glare.md`. It is
    added to the band's luminance before the threshold. Defaults A = 25, p = 0.5 are `EyeObserver`
    fields. F stays 1.4: the glare is then modelled rather than folded into F, a small double count
    Risks records. The glare of the camera's own star and sunlit bodies is not in the map; the
@@ -1792,7 +1796,7 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
 
 - **R06.T9.j The eye's own sky under a camera's cut (new; after T9.d, T9.f and T9.i; before T11.c and T17's goldens).**
   Decided 2026-10-06 (`decision-r06-t9c-glare.md`, the finding in item 2).
-  - The eye's map is the eye-only request's, whatever the request's cut.
+  - The eye's map is the eye-only request's at the same census radii, whatever the request's cut.
   - When the request's cut is deeper than the eye's (a camera's), `march_rows` also keeps, per
     layer and edge, the five sums of the light fainter than the eye's cut. `sum_rows` gives the
     eye's background from them, beside the band's texels.
@@ -1809,6 +1813,12 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
     - every `sum_rows` at the eye's cut from a deeper march equals the march at the eye's cut,
       bit for bit.
   - Record the march's heap and time with the second sums, at 64² near the Sun.
+  - Follow-up (decided 2026-10-07, `decision-r06-t9c-glare.md`, addendum 2): beyond the eye-only
+    caps, a camera's census lists real stars brighter than the eye's cut, accepted as the truer
+    sky. Test `the_eyes_light_is_independent_of_the_census_radius`: near the Sun at 16², the
+    camera's request at 10.06 with the eye's cut at 8.15, forced to 100 ly and to 200 ly, each band
+    complete to its radius, gives the eye's light (the listed stars at or brighter than the eye's
+    cut, and the eye's background) within 1% at both.
   - Files: `sky/{band,limits}.rs`. Acceptance: `cargo test -p hyperion-sim sky::band` and
     `cargo test -p hyperion-sim sky::limits`, as two commands.
   - As built (Risks, "Deviations in T9.j, as built"): the query states the eye's cut
@@ -2301,6 +2311,10 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
 - the sky's total light (listed, overflow and band) in the first reply against the final's, at
   the eye's cut near the Sun, within 1% (T9.b's amendment, decided 2026-10-06,
   `decision-r06-t9b-band.md`); a miss is a finding for R06.T5.f, not a looser gate;
+- near the Sun, the expected count of stars brighter than the eye's cut between the eye-only caps
+  and the camera's, per layer: the bound on what a camera's census adds to the eye's sky
+  (`decision-r06-t9c-glare.md`, addendum 2). Where a whole camera census runs, the realised count,
+  and how many of those stars the eye sees;
 - the delivery time of the final reply's stars brighter than V 3.0, against 25% of the full
   census's wall time.
 
@@ -4593,7 +4607,10 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   R06.T9.j the eye's map is the eye-only request's: the expected light fainter than the eye's
   cut, and the glare of the stars brighter than it. _Built in R06.T9.j (Risks, "Deviations in
   T9.j, as built"): near the Sun the camera's band had moved the eye's median limits by +0.12 in
-  the band and +0.24 at the poles; they are now the eye-only request's, bit for bit._
+  the band and +0.24 at the poles; they are now the eye-only request's, bit for bit._ _At equal
+  census radii. A camera's own caps reach farther, and there its census's real stars brighter than
+  the eye's cut, under one expected a layer, are accepted as the truer sky (decided 2026-10-07,
+  `decision-r06-t9c-glare.md`, addendum 2)._
 - **Deviations in T9.h, as built (2026-10-06).** `sky::limits::eye_offsets`, as the task sets
   it, with these details.
   - **One term, used twice.** `GlareSource::veil_per_lux` (private) is the veil per lux in the
@@ -5233,7 +5250,19 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       march, the eye's light summed at them, and the glare and the eye's overflow kept to the stars
       within the eye's cap for their layer. The eye's stars would then be a subsequence of the
       camera's, not a prefix. Not built: it is a ruling's to make. The docs say "at the same census
-      radius".
+      radius". _Decided 2026-10-07 (`decision-r06-t9c-glare.md`, addendum 2): option (a), the
+      truer sky, held by `the_eyes_light_is_independent_of_the_census_radius` and recorded in
+      T17._ _Measured (2026-10-07, at 16², every star listed): within 100 ly the eye's light
+      lists 922 stars beside its background, 9.372 × 10⁻⁴ lx in all; within 200 ly 3,815 stars,
+      9.310 × 10⁻⁴ lx (−0.66%). The 2,893 stars between the radii give 3.79 × 10⁻⁵ lx in place
+      of 4.42 × 10⁻⁵ lx of expected light, 86% of it: the census's realisation against the
+      tables' expectation, not the band's (`decision-r06-t9b-band.md`, items 5 and 8), and the
+      step T9.b's `the_light_does_not_depend_on_the_complete_to_radius` measures between the same
+      radii at V 8 (−0.68%; −1.11% and −1.78% against the band complete nowhere, as T8.k re-ran
+      it). A double count would read +4% and a loss −5%. The test took 58 s under nextest, its
+      tables built in its own process (test profile, its census on four threads,
+      `CPUQuota=400%`, load about 11, provisional); nextest gives it four slots. On
+      wasm32-wasip1 its census runs on one thread (not timed)._
   - **Tests** (`--lib -- sky::band`, `sky::limits` and `sky::census::query`; seven new or changed):
     - `a_camera_cut_leaves_the_eye_the_limits_and_offsets_of_the_eye_only_request`, the task's
       first test. It runs near the Sun at 16², both censuses within 100 ly with every cap forced:

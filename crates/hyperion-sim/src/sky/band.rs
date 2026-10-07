@@ -88,7 +88,12 @@
 //! its light is there already, as expected light. Each of those sums takes the arithmetic of a
 //! march at the eye's cut, so at the same replies (the same census radius) a texel's eye light is,
 //! bit for bit, the texel of the eye-only request's band. The band's own texels, as sent, are
-//! unchanged.
+//! unchanged. The eye's map under a camera's cut is so the eye-only request's at the camera's
+//! census radii (the same replies and `n_max`). Beyond the eye-only request's own caps the
+//! camera's census lists the real stars brighter than the eye's cut, under one expected a layer,
+//! which the eye-only request holds as expected light: accepted as the truer sky, since those
+//! stars take the place of their expected light in the eye's background, in expectation, not star
+//! by star (decided 2026-10-07, `decision-r06-t9c-glare.md`, addendum 2).
 
 use std::ops::Range;
 
@@ -1354,7 +1359,9 @@ impl Rays {
 /// the light fainter than the eye's cut, the eye's background (R06.T9.j): a second set of slots,
 /// which doubles its heap. They take the arithmetic of a march at the eye's cut over the same
 /// nodes, so [`sum_rows`] gives each texel the eye-only request's light beside its own, bit for
-/// bit.
+/// bit, at the same replies: the eye's map under a camera's cut is the eye-only request's at the
+/// camera's census radii, its replies and `n_max` (decided 2026-10-07,
+/// `decision-r06-t9c-glare.md`, addendum 2).
 ///
 /// Each ray is a function of its own direction, so the marches of any split of a face's rows, each
 /// summed, give the texels of one march over the face, bit for bit; the noise cache changes the
@@ -1518,7 +1525,11 @@ fn march_rows_through(
 /// fainter than the eye's cut adds nothing to it: its light is there as expected light. The
 /// census lists by V, so an eye-only census of the same radius is this one's stars at or brighter
 /// than the eye's cut, in the same order, and the eye's light is, bit for bit, its texels'. The
-/// texels' own light, chroma and ρ are as without it.
+/// texels' own light, chroma and ρ are as without it. The contract is the eye-only request's light
+/// at the camera's census radii (the same replies and `n_max`): beyond the eye-only request's own caps, the camera's census lists
+/// the real stars brighter than the eye's cut, under one expected a layer, in place of the expected
+/// light the eye-only request holds there (decided 2026-10-07, `decision-r06-t9c-glare.md`,
+/// addendum 2).
 ///
 /// # Panics
 ///
