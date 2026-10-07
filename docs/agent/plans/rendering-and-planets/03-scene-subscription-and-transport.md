@@ -1950,3 +1950,24 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
 - **Fixed in RM1 validation (2026-10-02): cleanups.** `#[must_use]` on `Ready::empty`, `welcome`,
   `End::close_frame` and `Stream::new`; `ScenePush::merge` indexes the earlier bodies by ID once
   instead of searching them for each later body; a stray TSDoc line above `CLOCK_WINDOW_S` removed.
+- **T8.b's slow-reader test, made deterministic (2026-10-07).**
+  `a_stuck_writer_gets_one_notification_with_the_latest_craft_and_the_second_s_changes` failed in
+  integration CI-55 at a load near 25 ("a notification after the clogging response"), and in 4 of
+  56 runs as 14 concurrent copies beside eight busy loops (load 21–31). The test sent `subscribe`
+  and the clogging request together, and under load the scene's opening, on the harness's one
+  pool worker, finished after the clogging response was queued, so its `subscribed` answer was
+  held behind it (as designed: terminal frames are queued in the order their requests finish) and
+  came where the merged notification was expected. Two more waits leaned on timing or on the
+  sockets: the stuck second's `sleep` stood in for the heartbeat's push having merged, and the
+  frames queued before the clogging response had to fit the kernel's buffers, or the response,
+  queued only into an empty queue, would wait behind them for good. The test now reads the
+  `subscribed` answer before it sticks the writer, `Harness::stick_writer_reading` reads on until
+  the clogging response is queued, and the stuck second is counted rather than timed: the test's
+  knowledge and craft source count what they are asked, and the client reads once 64 craft ticks
+  have passed and an advance has been followed by a tick, by which its push has merged; the advance
+  is a heartbeat, since the test checks first that no body's `valid_until` falls within a day of
+  the start (the first is at 33,554,432 s for its seed). The craft check is exact rather than
+  "within a second before the clock": the merged craft are stated no earlier than the last asked
+  while stuck and no later than the push's clock. No server change. Afterwards, twice 80 runs as
+  20 concurrent copies beside twelve busy loops (load 21–31) and 84 as 14 copies (load 5–15): no
+  failure.

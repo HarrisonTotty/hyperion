@@ -466,7 +466,7 @@ mod tests {
 
     use crate::requests::{Handler, HandlerFuture, SubscribeFuture};
     use crate::scene::{CraftSource, CraftState, SceneKnowledge};
-    use crate::testing::{Harness, NEVER, Scripted, WAIT};
+    use crate::testing::{Client, Harness, NEVER, Scripted, WAIT};
     use crate::ws::ConnectionLimits;
 
     /// The stand-in 1 au from `system`'s barycentre at rest, the clock at `start` at `rate`.
@@ -651,12 +651,26 @@ mod tests {
         }
     }
 
-    /// Every craft, and the bodies of odd slots, are contacts.
+    /// What the scene has asked of [`Contacts`] and [`TenCraft`], for a test to wait on while the
+    /// writer is stuck and nothing the task pushes reaches the client.
+    #[derive(Debug, Clone, Copy, Default)]
+    struct Asked {
+        /// Grants asked. The core asks one for each body at every advance, in a pool job, and the
+        /// task merges the advance's push once the job is back, before it asks for craft again.
+        grants: u64,
+        /// Craft lists asked: one at each craft tick, which the task pushes at once.
+        craft: u64,
+        /// The scene time the latest craft list was asked at.
+        craft_time: Option<UniverseTime>,
+    }
+
+    /// Every craft, and the bodies of odd slots, are contacts; each grant is counted.
     #[derive(Debug)]
-    struct Contacts;
+    struct Contacts(watch::Sender<Asked>);
 
     impl SceneKnowledge for Contacts {
         fn grant(&self, body: BodyId, asked: DetailLevel) -> DetailLevel {
+            self.0.send_modify(|so_far| so_far.grants += 1);
             if (body.body_index() >> 8) % 2 == 1 {
                 DetailLevel::Contact
             } else {
@@ -669,12 +683,16 @@ mod tests {
         }
     }
 
-    /// Ten craft, each stating the scene time it was asked at.
+    /// Ten craft, each stating the scene time it was asked at; each ask is counted.
     #[derive(Debug)]
-    struct TenCraft;
+    struct TenCraft(watch::Sender<Asked>);
 
     impl CraftSource for TenCraft {
         fn craft_at(&self, _universe: UniverseId, t: UniverseTime) -> Vec<CraftState> {
+            self.0.send_modify(|so_far| {
+                so_far.craft += 1;
+                so_far.craft_time = Some(t);
+            });
             (0..10_u8)
                 .map(|k| {
                     CraftState::new(SceneCraftDto {
@@ -699,12 +717,92 @@ mod tests {
         }
     }
 
-    /// With the writer stuck for a second, the craft pushed at 64 Hz and the heartbeat's contacts
-    /// merge into one pending push, which the queue never holds; once the client reads, one
-    /// notification carries the latest craft and the contacts (R03.T8.b).
+    /// Reads the `subscribed` answer to request `id`, which must come next, and returns the
+    /// contacts the ship sees in it.
+    async fn contacts_seen_on_opening(
+        client: &mut Client,
+        id: u32,
+    ) -> std::collections::BTreeSet<hyperion_protocol::BodyIdHex> {
+        let message = client.next_message().await;
+        let ServerMessage::Response {
+            id: answered,
+            body: ResponseBody::Subscribe(subscribed),
+        } = message
+        else {
+            panic!("expected `subscribed`, got {message:?}");
+        };
+        assert_eq!(answered, RequestId(id));
+        let SubscriptionState::Scene(opened) = subscribed.state;
+        let seen: std::collections::BTreeSet<_> = opened
+            .system
+            .expect("the stand-in is in the system")
+            .grants
+            .iter()
+            .filter(|grant| grant.seen.is_some())
+            .map(|grant| grant.body.clone())
+            .collect();
+        assert!(!seen.is_empty(), "the ship sees contacts");
+        seen
+    }
+
+    /// The earliest `valid_until` among the bodies a scene of `universe` at `setting` sends when it
+    /// opens at `asked`: the first time its task wakes to advance for one.
+    async fn first_due(
+        state: &Arc<AppState>,
+        universe: &crate::universe::Universe,
+        asked: DetailLevel,
+        setting: &SceneSetting,
+    ) -> Option<UniverseTime> {
+        let mut source = SceneSource {
+            state: Arc::clone(state),
+            universe: universe.id().into(),
+            id: universe.id(),
+            key: universe.key(),
+            galaxy: state.galaxies.get(universe.key()).await.unwrap(),
+            systems: Arc::new(BTreeMap::new()),
+        };
+        let token = CancelToken::new();
+        let built = build(&mut source, &token, asked, setting, Vec::new());
+        let (core, _) = timeout(WAIT, built)
+            .await
+            .expect("timed out building the scene")
+            .unwrap();
+        core.next_due()
+    }
+
+    /// Waits out a second of a scene task's work, counted rather than timed.
+    ///
+    /// It is counted through what the task asks of [`Contacts`] and [`TenCraft`]: 64 craft ticks,
+    /// and an advance with a tick after it, by which the advance's push has merged. Returns the
+    /// scene time of the latest craft asked for.
+    async fn a_second_of_ticks_and_an_advance(asking: &mut watch::Receiver<Asked>) -> UniverseTime {
+        let ticks =
+            u64::try_from(SCENE_HEARTBEAT.as_micros() / CRAFT_PUSH_INTERVAL.as_micros()).unwrap();
+        let from = *asking.borrow_and_update();
+        let advancing = timeout(WAIT, asking.wait_for(|now| now.grants > from.grants))
+            .await
+            .expect("timed out waiting for an advance")
+            .expect("the test holds a sender")
+            .craft;
+        timeout(
+            WAIT,
+            asking.wait_for(|now| now.craft > advancing && now.craft >= from.craft + ticks),
+        )
+        .await
+        .expect("timed out waiting for the craft ticks")
+        .expect("the test holds a sender")
+        .craft_time
+        .expect("craft were asked for")
+    }
+
+    /// With the writer stuck for a second of craft ticks and a heartbeat, the craft pushed at
+    /// 64 Hz and the heartbeat's contacts merge into one pending push, which the queue never
+    /// holds; once the client reads, one notification carries the latest craft and the contacts
+    /// (R03.T8.b).
     #[tokio::test]
     async fn a_stuck_writer_gets_one_notification_with_the_latest_craft_and_the_second_s_changes() {
         let (handler, mut calls) = Scripted::new();
+        let (asked, mut asking) = watch::channel(Asked::default());
         let harness = Harness::start_configured(
             ScriptedRequests(handler),
             ConnectionLimits {
@@ -712,15 +810,23 @@ mod tests {
                 write_timeout: NEVER,
                 close_timeout: WAIT,
             },
-            |config| config.scene_knowledge(Contacts).craft_source(TenCraft),
+            |config| {
+                config
+                    .scene_knowledge(Contacts(asked.clone()))
+                    .craft_source(TenCraft(asked.clone()))
+            },
         )
         .await;
         let state = Arc::clone(harness.state());
         let (universe, cell) = universe_and_cell(&state).await;
         let start = UniverseTime::new(3_600, 0).unwrap();
-        state
-            .scene
-            .set(universe.id(), in_system(cell[0].id(), start, 1));
+        let setting = in_system(cell[0].id(), start, 1);
+        state.scene.set(universe.id(), setting.clone());
+        // Every advance the test waits for is a heartbeat: nothing changes the setting or the
+        // cameras, and no body's elements change within a day of the start.
+        let due = first_due(&state, &universe, DetailLevel::Bulk, &setting).await;
+        let day = start.checked_add(Span::from_seconds(86_400)).unwrap();
+        assert!(due.is_none_or(|due| due > day), "a body is due at {due:?}");
 
         let mut client = harness.connect_slow_reader().await;
         client.hello().await;
@@ -732,40 +838,33 @@ mod tests {
             }),
         });
         client.request(1, subscribe).await;
-        let clogging = harness.stick_writer(&mut calls, &mut client, 2).await;
+        // Live before the writer sticks, so that the pushes that wait are a live subscription's,
+        // and its answer is not held behind the clogging response, as one that finished later
+        // would be.
+        let seen = contacts_seen_on_opening(&mut client, 1).await;
+        let mut last = 0;
         let stuck = harness
-            .outbound_until(|counters| counters.queued_bytes() >= clogging)
-            .await
-            .queued_bytes();
-        // The second the writer stays stuck: the scenario, not a wait for something to happen.
-        tokio::time::sleep(SCENE_HEARTBEAT + CRAFT_PUSH_INTERVAL * 8).await;
+            .stick_writer_reading(&mut calls, &mut client, 2, |message| match message {
+                ServerMessage::Notification {
+                    body: NotificationBody::Scene(notification),
+                    ..
+                } => last = notification.sequence,
+                other => panic!("unexpected {other:?}"),
+            })
+            .await;
+        // Stuck through a heartbeat, the advance waited for.
+        let latest = a_second_of_ticks_and_an_advance(&mut asking).await;
         let still = harness.server().stats().outbound().queued_bytes();
-        assert!(
-            still <= stuck,
-            "nothing queued while stuck: {still} > {stuck} bytes"
+        assert_eq!(
+            still, stuck,
+            "nothing queued while stuck, and the clogging response not yet written"
         );
 
-        let mut last = 0;
-        let mut seen = std::collections::BTreeSet::new();
         loop {
             match client.next_message().await {
                 ServerMessage::Response {
                     id: RequestId(2), ..
                 } => break,
-                ServerMessage::Response {
-                    body: ResponseBody::Subscribe(subscribed),
-                    ..
-                } => {
-                    let SubscriptionState::Scene(state) = subscribed.state;
-                    let system = state.system.expect("the stand-in is in the system");
-                    seen = system
-                        .grants
-                        .iter()
-                        .filter(|grant| grant.seen.is_some())
-                        .map(|grant| grant.body.clone())
-                        .collect();
-                }
-                ServerMessage::Response { .. } => {}
                 ServerMessage::Notification {
                     body: NotificationBody::Scene(notification),
                     ..
@@ -781,26 +880,24 @@ mod tests {
             panic!("a notification after the clogging response");
         };
         assert_eq!(merged.sequence, last + 1, "numbered on from the last sent");
-        // The latest craft: stated within a tick or two of the push's time, which a heartbeat
-        // merged in after them may pass.
+        // The latest craft: those asked for last while the writer was stuck, or later ones, and
+        // never stated after the push's time, which a heartbeat merged in after them may pass.
         let craft = merged.craft.expect("the craft ride with the merged push");
         assert_eq!(craft.len(), 10);
         let clock = UniverseTime::new(merged.clock.time.seconds, merged.clock.time.nanos).unwrap();
         let stated =
             UniverseTime::new(craft[0].state.time.seconds, craft[0].state.time.nanos).unwrap();
-        let behind = clock.checked_since(stated).unwrap();
         assert!(
-            !behind.is_negative() && behind < Span::from_seconds(1),
-            "craft stated {behind} before the push"
+            latest <= stated && stated <= clock,
+            "craft stated at {stated}, the latest asked while stuck at {latest}, the push at {clock}"
         );
-        // Every body the heartbeat moved in that second: each contact the ship sees.
+        // Every body the heartbeat moved: each contact the ship sees.
         let moved: std::collections::BTreeSet<_> = merged
             .bodies
             .iter()
             .filter(|body| body.seen.is_some())
             .map(|body| body.record.id.clone())
             .collect();
-        assert!(!seen.is_empty());
         assert!(
             seen.is_subset(&moved),
             "the heartbeat's contacts: {seen:?} in {moved:?}"

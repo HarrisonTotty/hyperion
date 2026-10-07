@@ -259,6 +259,51 @@ impl Harness {
         clogging_frame_len(id)
     }
 
+    /// [`Harness::stick_writer`] for a client its subscriptions push to, which reads on until the
+    /// clogging response is queued.
+    ///
+    /// Each message read is handed to `read`; the client stops reading once the response is
+    /// queued. Returns the bytes queued then, the response's alone.
+    ///
+    /// The response is larger than any budget a test sets, so it is queued only into an empty
+    /// queue. A client that stopped reading first could leave a push queued behind a writer the
+    /// sockets' buffers had already stopped, and the response held behind it for good; how much
+    /// those buffers take differs from one platform to another. Reading until the response is
+    /// queued leaves nothing before it, whatever they take.
+    pub(crate) async fn stick_writer_reading(
+        &self,
+        calls: &mut Calls,
+        client: &mut Client,
+        id: u32,
+        mut read: impl FnMut(ServerMessage),
+    ) -> usize {
+        client.request(id, body(id)).await;
+        let call = calls.next().await;
+        assert_eq!(call.id(), id, "the request that sticks the writer");
+        assert!(call.respond(bulky_response(CLOGGING_BYTES)));
+        let clogging = clogging_frame_len(id);
+        let mut counters = self.state().outbound_stats.subscribe();
+        let mut queued =
+            std::pin::pin!(counters.wait_for(|counters| counters.queued_bytes() >= clogging));
+        timeout(WAIT, async {
+            loop {
+                tokio::select! {
+                    biased;
+                    counters = &mut queued => {
+                        break counters
+                            .expect("the counters live as long as the server")
+                            .queued_bytes();
+                    }
+                    // Dropped in the middle of a frame, this loses nothing: the part read stays in
+                    // the client's WebSocket, which finishes the frame at its next read.
+                    message = client.next_message() => read(message),
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the clogging response to be queued")
+    }
+
     /// Waits until `count` connections are open.
     pub(crate) async fn connections_until(&self, count: usize) {
         timeout(WAIT, self.state().connections.wait_until_open(count))
