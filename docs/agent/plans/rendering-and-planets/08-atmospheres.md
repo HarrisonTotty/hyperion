@@ -1289,6 +1289,8 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
     quadrature gate (its rays, metric and tolerances), with the multiple-scattering term included;
     the multiple-scattering kernel's even steps are measured against a placed reference and
     recorded;
+  - the multiple-scattering kernel takes R05.T12.e's stable step factor from `common.wgsl`, and its
+    twin records the change;
   - two identical half-density terms equal one;
   - optical depth adds across terms.
 

@@ -949,11 +949,13 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 
     _Decided 2026-10-06 by a delegated decision (`decision-r05-high-atmosphere.md`):_ the sky view
     and the ray march place their steps quadratically toward each ray's lowest point (the camera,
-    the ground or a limb's tangent point), not evenly, at the counts above, and each term's density
-    is evaluated once a sample (R05.T12.e). Even steps under-sample the aerosol's 1.2 km scale
-    height at the dense end. A 100 km vertical ray at 30–32 even steps undercounts its column by
-    about 24%, and an `f64` model puts the sky from the ground up to 28% off and the disc from orbit
-    up to 7%.
+    the ground or a limb's tangent point), not evenly. A ray from a camera inside the atmosphere
+    that falls to its lowest point and climbs out again places its camera side toward the camera
+    instead, since the view's own attenuation puts that side's light there (addendum A). The counts
+    are those above, and each term's density is evaluated once a sample (R05.T12.e). Even steps
+    under-sample the aerosol's 1.2 km scale height at the dense end. A 100 km vertical ray at 30–32
+    even steps undercounts its column by about 24%, and an `f64` model puts the sky from the ground
+    up to 28% off and the disc from orbit up to 7%.
 
 17. **The spike's lit view is not a render style.** R07 owns the photorealistic style, its
     full-screen AgX pass, the histogram and bloom; R02 owns the AgX function itself, `toneCurve`
@@ -1882,13 +1884,20 @@ the sample's scattering, extinction and phased scattering in place of calling `m
 output is not bit-identical; the largest difference is recorded.
 
 The sky view and the ray march split each ray's segment at t\* = clamp(−o·d, t_start, t_end), the
-point nearest the centre of the body (or of the sky view's own sphere). Each side gets steps in
-proportion to its length, and at least one if it is not empty. The steps are placed at t_k = t\* ±
-L_side·(k ÷ n_side)², and each is sampled at its midpoint with the existing analytic step. One WGSL
-helper and one TypeScript twin hold the rule. Another placement may replace it only if it passes the
-gate below at no more steps. High keeps 30 sky-view and 32 march steps; low keeps 16 and 16, with
-the march at half resolution. A count rises only if a gate requires it, to the least that passes,
-and the task refers back above 45 (sky view) or 48 (march).
+point nearest the centre of the body (or of the sky view's own sphere). A segment with both sides
+non-empty shares its steps in proportion to the square root of each side's length, with at least one
+a side; a one-sided segment gives all its steps to its side. Each side is placed quadratically
+toward t\*, t_k = t\* ± L_side·(k ÷ n_side)². The exception is the camera side of a two-sided
+segment that starts at a camera inside the atmosphere, which is placed quadratically toward the
+camera, t_k = t_start + L_side·(k ÷ n_side)² (lane C's V1, adopted in addendum A of
+`decision-r05-high-atmosphere.md`). Each step is sampled at its midpoint. Its in-scattering is
+throughput · S · Δt · g(x) per channel, with x = σ_t·Δt and g(x) = (1 − e^(−x)) ÷ x, computed as 1 −
+x·(1/2 − x/6) below x = 0.01 and directly from 0.01 up. The helper is in `common.wgsl`, and the
+step's transmittance stays e^(−x). One WGSL helper and one TypeScript twin hold the rule. Another
+placement may replace it only if it passes the gate below at no more steps. High keeps 30 sky-view
+and 32 march steps; low keeps 16 and 16, with the march at half resolution. A count rises only if a
+gate requires it, to the least that passes, and the task refers back above 45 (sky view) or 48
+(march).
 
 - Files:
   - `view/atmosphere/marchSteps.ts` and its test;
@@ -1901,16 +1910,22 @@ and the task refers back above 45 (sky view) or 48 (march).
     - an `f64` twin of the two kernels' quadrature: Earth's terms on a sphere of WGS 84's a, single
       scattering, and a Lambertian ground of 0.15 lit through `opticalDepth.ts`'s sun transmittance;
     - against 4,096 placed steps, themselves within 0.05% of 8,192;
-    - over the decision's 90 march rays from 400 km (disc, R08's limb heights, and terrain beyond 32
-      km from 20 and 60 km) and its sky rays from 2 m, 1 km, 10 km and 50 km;
+    - over the decision's march rays: from 400 km, the disc and R08's limb heights; to terrain
+      beyond 32 km from 20 and 60 km; and, near level, from 0.5–5 km to terrain at 40–150 km. Over
+      its sky rays: from 2 m, 1 km, 10 km and 50 km; and, from cameras at 0.5–50 km, the band
+      between the local and the visible horizon (0.2, 0.5, 0.8 and 0.98 of the dip, and 0.01° either
+      side of the horizontal) and rays 0.01°, 0.1°, 0.5° and 2° past the visible horizon;
     - e = max over channels of |ΔL| ÷ max(L, 10⁻³ L_max), at most 2%;
-    - at most 5% for grazing twilight rays: the sun more than 80° from the zenith at the ray's
-      reference point, and the ray within 10° of that point's horizon;
+    - at most 5% for twilight rays: at the segment's lowest point t\*, the sun more than 80° from
+      the zenith and the ray within 10° of the horizon, each by more than 10⁻¹² rad;
     - the as-built even placement fails it;
-    - low's counts are recorded, and none is worse than even placement at the same count.
+    - low's counts are recorded per family and class beside even placement's at the same count.
+      Low's worst e over the whole set is no worse than even's, and each family and class where low
+      is worse is listed in Risks.
   - **On SwiftShader** (`just test-render`, both variants): the march and the sky view at their
     setting's counts agree with the same kernels at 1,024 steps, in the same run, within the gate's
-    tolerances plus 1%.
+    tolerances plus 1% on high. On low, within the twin's worst e at low's count for the same kernel
+    and class, plus 1%. The 1,024-step references take the stable step factor.
 - Acceptance:
   - `pnpm --filter hyperion exec vitest run view/atmosphere`, `just check lint` and
     `just test-render` pass;
@@ -5421,6 +5436,30 @@ medium, sizes, figure)`.
   - _Half resolution, not taken on high._ Low's upsample takes the nearest-depth texel, so on the
     limb from orbit every other pixel reads a texel 1.7 km of tangent height away, where the
     radiance e-folds in 9–10 km: a step of 18–21%.
+  - _Addendum A (2026-10-06)._
+    - _The band._ The gate first lacked the band between the local and the visible horizon. There a
+      ray from a camera inside the atmosphere falls to a lowest point below the camera, then climbs
+      out. Q gave the camera side 1–4 of 30 steps, its longest at the camera, where the view's
+      attenuation puts the light. At 30 steps that cost 11–13% (ordinary) and about 80% (twilight),
+      worse than even steps' 5% and 30%.
+    - _V1._ Lane C's V1 places that side toward the camera and shares steps by the square root of
+      each side's length: 1.3% and 4.1% at 30 steps (the decision's model; the lane's 300 rays,
+      1.35% and 3.46%). One-sided rays and rays from orbit are unchanged.
+    - _Two more families_ joined the gate: rays just past the visible horizon, and the march from
+      0.5–5 km to terrain at 40–150 km. Q passes high on both (3.7% and 2.4% at twilight), though
+      even steps do better there.
+    - _Low's known trades._ At low's 16 steps, the placement is worse than even steps on three
+      families:
+      - the daylit limb, 4.8% against 1.6%;
+      - near-level twilight march rays from low cameras, 9.1% against 2.5%;
+      - twilight rays just past the visible horizon, 17.4% against 3.5%.
+
+      Elsewhere it improves low's worst from 27–96% to 5–18%. No placement tried (Q, P, the
+      exponents, or half the steps toward each end) is better on both sides.
+
+    - _The f32 cancellation._ The 1,024-step reference also exposed an f32 cancellation in (S − S·T)
+      ÷ σ_t at tiny optical depths, up to 15% on SwiftShader. The per-frame kernels take a stable
+      step factor (T12.e), within 2 × 10⁻⁵, and the multiple-scattering kernel takes it in R08.T6.a.
 - **The atmosphere's budget estimate is contradicted (a brainstorm finding, for T19 and R12).**
   - _The measurement._ The brainstorm's 0.5–1 ms for the discrete column, for an RTX 4060-class
     part, compares with:
