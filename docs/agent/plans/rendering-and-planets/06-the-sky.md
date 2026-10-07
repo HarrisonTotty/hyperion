@@ -201,11 +201,14 @@ pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
     eye: &EyeObserver) -> Magnitudes;              // coarse pre-pass, darkest texel, +0.45 +0.1
 pub struct Glare { /* each listed star's direction, photopic and scotopic illuminance at the eye
     after its own reddening */ }                                  // R06.T9.c, as built
-impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar]) -> Self; }
+impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar],
+    eye_cut: Magnitudes) -> Self; }                 // R06.T9.j: only the stars brighter than the eye's cut glare
 pub fn limit_rows(eye: &EyeObserver, spec: &BandSpec, glare: &Glare, face: CubeFace,
     rows: Range<u16>, texels: &mut [BandTexel]);                  // glare, then V_lim per texel
 pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
     band: &mut [BandTexel]);                                      // limit_rows over six faces
+pub fn eye_offsets(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
+    band: &[BandTexel]) -> Vec<Magnitudes>;         // R06.T9.h: each listed star's own limit less its texel's
 
 // sky::disc (Design note 16)
 pub struct PowerTwo { /* c: f64, alpha: f64 */ }
@@ -486,10 +489,10 @@ holds.
    function, the band and the limit map. The client decides only what each view draws of what it
    was sent: its limit, the bake, the sprites. The server therefore needs the eye's threshold, the
    colour table and the disc parameters, and the client needs none of the tables: every star and
-   texel arrives with its chroma and its photopic flux already computed, and carries its eye colour
-   offset and its camera band term as fields that each view applies (Design note 17). One table in
-   Rust, no TypeScript copy: what a client plan needs of a host star's colour (R07, R08) travels on
-   `HostDiscDto`.
+   texel arrives with its chroma and its photopic flux already computed, and carries its eye offset
+   (its own eye limit less its texel's) and its camera band term as fields that each view applies
+   (Design note 17). One table in Rust, no TypeScript copy: what a client plan needs of a host
+   star's colour (R07, R08) travels on `HostDiscDto`.
 2. **Crumey's threshold, eq. 34 everywhere** (researched 2026-09-29; Crumey 2014, arXiv:1405.4209,
    eqs. 5–7, 18, 26–28, 32–34, 53–55 and §1.3; checked by computation). ΔI = F (√(a₁B^½ + a₂B^¾ +
    a₃B) + a₄B^¼ + a₅B^½)² lux, a₁ = 5.949 × 10⁻⁸, a₂ = −2.389 × 10⁻⁷, a₃ = 2.459 × 10⁻⁷, a₄ = 4.120
@@ -524,11 +527,19 @@ holds.
 4. **Glare from resolved stars** (researched 2026-09-29; CIE 146:2002 general disability glare via
    Vos 2003; Adrian 1989 as Crumey's "standard way"). L_veil = E [10 ÷ θ³ + (5 ÷ θ² + 0.1 p ÷ θ)(1 +
    (A ÷ 62.5)⁴) + 0.0025 p], θ in degrees clamped at 0.1°, summed over every listed star within
-   100°, with E rod-weighted by ρ★ ÷ 1.408 as the background is. It is added to the band's
-   luminance before the threshold. Defaults A = 25, p = 0.5 are `EyeObserver` fields. F stays 1.4:
-   the glare is then modelled rather than folded into F, a small double count Risks records. The
-   glare of the camera's own star and sunlit bodies is not in the map; the brainstorm names only the
-   resolved stars.
+   90° of the texel's centre, with E rod-weighted by ρ★ ÷ 1.408 as the background is. E is the
+   illuminance in the plane of the eye: E cos θ for a star of illuminance E at θ from the line of
+   sight, and none from behind the eye's plane (CIE 146:2002; IJspeert et al. 1990, Vision Res. 30,
+   699; Stiles and Crawford 1937, Proc. R. Soc. B 122, 255). A star's own veil is not its own
+   background: each listed star's eye offset is its own limit less its texel's (Design note 17;
+   R06.T9.h). The far field is summed over a pyramid of the band's texels, within 0.001 mag of the
+   exact sum (R06.T9.i). From R06.T9.j the eye's map is the eye-only request's whatever the
+   request's cut: its background is the expected light fainter than the eye's cut, and only the
+   listed stars brighter than it glare. Decided 2026-10-06, `decision-r06-t9c-glare.md`. It is
+   added to the band's luminance before the threshold. Defaults A = 25, p = 0.5 are `EyeObserver`
+   fields. F stays 1.4: the glare is then modelled rather than folded into F, a small double count
+   Risks records. The glare of the camera's own star and sunlit bodies is not in the map; the
+   brainstorm names only the resolved stars.
 5. **Two kinds of limit, one request.** A view is either the eye (the single-player cockpit window)
    or a camera (the main screen and every other view). The eye's limit per direction is the limit
    map's; a camera's is `cameraLimitV` (Design note 18). The response's `cut_v` is the deepest of
@@ -754,10 +765,12 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     front of each node: each display channel, the photopic light and the scotopic light by its own
     A ÷ A_V, the colour table's solar row's for the band and each star's own for the overflow,
     through `StarColour::reddened` (decided 2026-10-06, `decision-r06-t9b-band.md`; R06.T9.e).
-    The limit map then adds the glare (Design note 4) and gives each texel its eye limit. The band
-    depends on the cut, not on the per-direction limit, so there is no loop between them: the cut
-    is uniform, and a star between a texel's limit and the cut is the client's to cull and add to
-    the band (Design note 20).
+    The limit map then adds the glare (Design note 4) and gives each texel its eye limit and each
+    listed star its eye offset, its own limit less its texel's (R06.T9.h). Its background is the
+    light fainter than the eye's cut, even when a camera's deeper cut sets the band's (R06.T9.j).
+    The band depends on the cut, not on the per-direction limit, so there is no loop between
+    them: the cut is uniform, and a star between a texel's limit and the cut is the client's to cull
+    and add to the band (Design note 20).
 16. **The discs** (researched 2026-09-29; Maxted 2018, A&A 616, A39; Claret and Southworth 2022,
     VizieR J/A+A/664/A128, table3, and 2023, J/A+A/674/A63; Claret et al. 2020, J/A+A/634/A93, for
     white dwarfs). The power-2 law I(μ)/I(1) = 1 − c(1 − μ^α): the tables give g = c and h = α in
@@ -780,8 +793,10 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
 17. **The wire.** A star is 24 bytes, little-endian: its unit direction from the observer as three
     `f32` (12; 0.012″ of rounding), its distance in light-years as `f32` (4; parallax sprites need
     it), its apparent V after extinction as `i16` millimagnitudes (2), its chroma after reddening as
-    two `u16` fractions (4), its eye colour offset as `i8` centimagnitudes and its camera band term
-    as `i8` in units of 1/32 mag, rounded half away from zero and saturating at −4.0 and +3.97 (2).
+    two `u16` fractions (4), its eye offset as `i8` centimagnitudes (its own eye limit less its
+    texel's: its colour offset against its texel's background and its self-exclusion, R06.T9.h;
+    decided 2026-10-06, `decision-r06-t9c-glare.md`) and its camera band term as `i8` in units of
+    1/32 mag, rounded half away from zero and saturating at −4.0 and +3.97 (2).
     A band texel is 12 bytes: luminance `f32`, chroma two `u16`, eye limit `i16`
     millimagnitudes at the request's F (`i16::MIN` where the eye was not asked), and its ρ as `u16`
     × 10⁻⁴. Stars then texels form the response's one bulk payload, announced by R03's
@@ -909,8 +924,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
 
 T1 comes first. T2, T3 and T4 (tables) and T5 (quadrature) can then run side by side, and T6.a
 with them; T6.b needs T5.a, whose mass nodes it reads. T7 needs T5 and T6; T8 needs T2, T3, T4.b
-and T7, and within it T8.e follows T8.b. T9 needs T8; T9.c needs T9.e, T9.d needs T9.b, T9.f needs
-T9.e, and T11.c needs T9.f. T10 needs T9, T4.b and R03's frames; T11 needs T10, with T11.c after
+and T7, and within it T8.e follows T8.b. T9 needs T8; T9.c needs T9.e, T9.h needs T9.c, T9.d needs
+T9.b, T9.i needs T9.h, T9.f needs T9.e, T9.j needs T9.d, T9.f and T9.i, and T11.c needs T9.f and
+T9.j. T10 needs T9, T4.b and R03's frames; T11 needs T10, with T11.c after
 T11.a. The client, T12–T14, needs T10 for its types and R02's `view/`; T13's subtasks follow T12,
 T13.g follows T13.b and T13.h, and T15's draft precedes T13.f, which builds to it. T16.a is out of
 RM3's scope. It waits on P08.T12, P09.T2.c, P09.T23.b and P09.T40.a's feature part, and lands in
@@ -925,9 +941,10 @@ census and need only R01 and R02, so they can run before T12; T13.f waits on R05
 until T13.f wires them to `SETTINGS`.
 
 Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs in this order:
-T16.b; T8.f; T9.b; T9.e; T9.c–d; T8.k with T8.j; T9.f; T8.g, once plan 11's asks A and B are on
-`rendering-and-planets`; T8.h; T7.b; T8.i with T11.d, after T11.a–c (T11.c on T9.f); T5.f and
-T9.g before T17's goldens; then T17 (the order amended 2026-10-06, `decision-r06-t9b-band.md`).
+T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.g, once plan
+11's asks A and B are on `rendering-and-planets`; T8.h; T7.b; T8.i with T11.d, after T11.a–c (T11.c
+on T9.f); T5.f and T9.g before T17's goldens; then T17 (the order amended 2026-10-06,
+`decision-r06-t9b-band.md` and `decision-r06-t9c-glare.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
 advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
@@ -1241,8 +1258,9 @@ caps_converge_in_rays`.
   The harness also measures visibility-based caps, at the eye's cut and at the camera's. They
   count the stars brighter than the pre-pass's per-texel limit plus the colour offset and the pad,
   rather than the uniform cut; each ray takes the deepest pre-pass limit within its cone. Their
-  safety test: no texel of the final limit map, with glare, is deeper than the limit its ray's cap
-  was counted at. They are adopted, with no further sign-off, if they pass that test and
+  safety test: no texel of the final limit map with no glare, which bounds every listed star's own
+  limit after its self-exclusion (R06.T9.h), is deeper than the limit its ray's cap was counted at.
+  They are adopted, with no further sign-off, if they pass that test and
   `caps_converge_in_rays` and open at least 20% fewer systems near the Sun at either cut.
 
   Tests:
@@ -1626,7 +1644,51 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   star is at least 0.3 mag shallower than its neighbours' mean; the map is a function of the
   listed stars and the band alone. Acceptance: `cargo test -p hyperion-sim sky::limits`. As built
   (Risks, "Deviations in T9.c, as built"): `Glare::of_listed` resolves each listed star's
-  reddened light once a census, and `limit_rows` sets a job's rows, as `band_rows` takes them.
+  reddened light once a census, and `limit_rows` sets a job's rows, as `band_rows` takes them. The
+  self-veil, the map's cost and E's plane, which T9.c left open, were decided 2026-10-06
+  (`decision-r06-t9c-glare.md`): R06.T9.h, R06.T9.i and R06.T9.j.
+- **R06.T9.h The eye offsets and the eye's plane (new; T9.c's follow-up, before T9.d).**
+  Decided 2026-10-06 (`decision-r06-t9c-glare.md`, items 1 and 3).
+  - A star's own veil is not its own background: Blackwell's thresholds hold a target's own
+    scattered light, and CIE 146's veil is one source's over another target. `limit_rows` keeps
+    each texel's veil, photopic and scotopic, beside its limit.
+  - `eye_offsets(eye, spec, glare, band)` gives each listed star, in the census's order, its own
+    eye limit less its texel's:
+    - its self-exclusion: `naked_eye_limit` at its texel's background less the veil the map
+      added for it, at its angle from its texel's centre (`BandSpec::texel_of` of its direction),
+      less the texel's limit;
+    - plus `star_colour_offset` of its reddened ρ against that background.
+
+    A star that adds no veil takes its colour offset alone. The texels' limits do not change.
+
+  - E is the illuminance in the plane of the eye (CIE 146:2002; IJspeert et al. 1990, Vision
+    Res. 30, 699; Stiles and Crawford 1937, Proc. R. Soc. B 122, 255). A star of illuminance E at
+    θ from a texel's centre gives E cos θ, and none at or beyond 90°. `veiling_luminance` keeps
+    its arithmetic, and its doc names the plane.
+  - Tests:
+    - the identity. Every texel's limit, and every listed star's own limit (its texel's plus its
+      eye offset), is `naked_eye_limit` (plus `star_colour_offset`) at the background written
+      again from the definition, to 10⁻⁹ mag. The definition uses atan2 angles and E cos θ, and
+      leaves the star's own term out of its own limit. It runs on T9.c's fixture and its two
+      placed sources;
+    - a star of the reference colour, 0.05° from a 64² texel's centre at the poles and 0.05 mag
+      brighter than its own limit (its texel's less its own veil), is culled at its texel's limit
+      and kept at its own;
+    - a field factor of 2 leaves every eye offset as at 1.4, to 10⁻⁹;
+    - every self-exclusion is non-negative in the fixture's scotopic texels;
+    - the reach: a source at 89.995° veils by exactly E cos θ times its `veiling_luminance` per
+      lux, and one at 90.005° adds exactly nothing;
+    - T9.c's other tests, as built.
+  - Record:
+    - the medians against T9.c's 6.544 and 7.668;
+    - the largest self-exclusion that decides a near-Sun star (its V between its texel's limit
+      and its own);
+    - the largest eye offset any listed star then has, against the wire's +1.27 (at Crumey's
+      clamp the ruling gives about 1.0 + 0.43);
+    - the largest self-exclusion of a star within 0.5 mag of its limit and 0.6° or more from its
+      texel's centre (the ruling's model: under 0.01).
+  - Files: `sky/{limits,band,eye}.rs`. Acceptance: `cargo test -p hyperion-sim sky::limits` and
+    `cargo test -p hyperion-sim sky::eye`.
 - **R06.T9.d The eye's cut.** `sky::limits::eye_cut` (Design note 5): the coarse pre-pass at 16²
   texels a face through `band_rows` with `SkyCensus::empty()`, the darkest texel's limit, clamped by
   `naked_eye_limit` itself (Crumey's 10⁻⁵ cd m⁻², decided 2026-10-02; no second clamp), +0.45 and +0.1, and one repeat when the cut deepens. Tests: the cut is the darkest pre-pass texel's
@@ -1635,8 +1697,38 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   Crumey's limit at the darkest 16² texel of Gaia DR3's light fainter than the cut (μ
   24.73–24.77), plus 0.55, with T9.b's tolerance carried through Crumey's slope (decided
   2026-10-06, `decision-r06-t9b-band.md`; the fixture gives about 8.27); no texel of the full
-  limit map, with glare, is deeper than the cut less the 0.45 colour offset; the repeat changes
-  the cut by under 0.05 mag. Acceptance: `cargo test -p hyperion-sim sky::limits`.
+  limit map with no glare, which bounds every listed star's own limit after its self-exclusion
+  (R06.T9.h), is deeper than the cut less the 0.45 colour offset, and a miss is a finding for the
+  pad, not a looser test; the repeat changes the cut by under 0.05 mag. Acceptance:
+  `cargo test -p hyperion-sim sky::limits`.
+- **R06.T9.i The far field (new; after T9.h, and after T9.d in the order; before T9.j, T11.c and T17's goldens).**
+  Decided 2026-10-06 (`decision-r06-t9c-glare.md`, item 2).
+  - Per face, a pyramid of the band's texels, from its leaves (the band's texels) to one node a
+    face. Each node keeps its glaring stars' photopic and scotopic illuminance, their
+    photopic-weighted mean direction, and an angular radius r that bounds them about it.
+  - For each texel, a node at angle d, measured to its mean direction:
+    - is skipped when d − r ≥ 90°;
+    - is taken whole when r ≤ 0.25 d and d − r ≥ 4°: its illuminance times E cos θ's veil per lux
+      at its mean direction;
+    - is otherwise opened; an opened leaf is summed star by star.
+  - A texel always opens its own leaf, so T9.h's offsets stay exact. The traversal and the sums
+    are in a fixed order, so any split of rows gives the same bits. The radius and the angle are
+    the ruling's model's, and may be tuned to the tolerance.
+  - A test-only exact sum (every node opened) keeps T9.c's and T9.h's identity tests at 10⁻⁹.
+  - Tests:
+    - every texel's limit within 0.001 mag of the exact sum, and their mean within 0.0003 mag, at
+      64². This holds on the near-Sun fixture (the census within 200 ly to V 8.15, with T9.c's two
+      placed sources) and on a synthetic sky of 300,000 stars to V 10.06, concentrated towards
+      the plane. Every eye offset is within 0.001 mag of the exact sum's;
+    - on the synthetic sky the pyramid evaluates at most a hundredth of the exact sum's
+      star–texel pairs. They are counted, so the test does not depend on the machine (the
+      ruling's model: about a three-hundredth);
+    - any split of rows gives the same bits.
+  - Bench: `sky/limit_map`, at 64², on the near-Sun fixture and at 300,000 synthetic stars. T17
+    records it per reply. The gate, provisional: at most 3 CPU-s at 300,000 stars on the dev
+    machine (the ruling's model: about 2).
+  - Files: `sky/limits.rs`, `benches/sky.rs`. Acceptance:
+    `cargo test -p hyperion-sim sky::limits`.
 - **R06.T9.f The band's march, kept (new; after T9.e, before T11.c).** Decided 2026-10-06
   (`decision-r06-t9b-band.md`). `sky::band::{march_rows, BandMarch, sum_rows}`.
   - `march_rows` marches each ray once, at the rows' texels. Every edge a reply can state is a
@@ -1660,6 +1752,28 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   Bench: `sky/band_near_sun` split into the march and one sum. Files: `sky/band.rs`. Acceptance:
   `cargo test -p hyperion-sim sky::band`.
 
+- **R06.T9.j The eye's own sky under a camera's cut (new; after T9.d, T9.f and T9.i; before T11.c and T17's goldens).**
+  Decided 2026-10-06 (`decision-r06-t9c-glare.md`, the finding in item 2).
+  - The eye's map is the eye-only request's, whatever the request's cut.
+  - When the request's cut is deeper than the eye's (a camera's), `march_rows` also keeps, per
+    layer and edge, the five sums of the light fainter than the eye's cut. `sum_rows` gives the
+    eye's background from them, beside the band's texels.
+  - `Glare::of_listed(observer, listed, eye_cut)`: only the listed stars brighter than the eye's
+    cut glare. A listed star at or fainter than it adds neither glare nor background, since its
+    light is in the expected light already. Its eye offset is its colour offset alone.
+  - The band's texels as sent do not change.
+  - Tests:
+    - near the Sun, a request at a camera's cut of 10.06 with the eye's cut at 8.15 gives the
+      eye limits and eye offsets of the request at 8.15, bit for bit, for the stars both list. Both
+      use the same census radius;
+    - a listed star between the cuts changes no texel's eye limit;
+    - a request whose cut is the eye's gives T9.i's bits;
+    - every `sum_rows` at the eye's cut from a deeper march equals the march at the eye's cut,
+      bit for bit.
+  - Record the march's heap and time with the second sums, at 64² near the Sun.
+  - Files: `sky/{band,limits}.rs`. Acceptance: `cargo test -p hyperion-sim sky::band` and
+    `cargo test -p hyperion-sim sky::limits`, as two commands.
+
 - **R06.T9.g Diffuse galactic light (new; research first; after T9.f, before T17's goldens).**
   Decided 2026-10-06 (`decision-r06-t9b-band.md`). A research agent proposes a model of the
   starlight that the band's dust scatters into each ray, from the plan's own dust field and the
@@ -1679,7 +1793,8 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   - it has tests against the targets;
   - it re-derives T9.c's and T9.d's references with Gaia's ISL plus the DGL.
 
-Files: `sky/band.rs`, `sky/limits.rs`. Bench: `sky/band_near_sun` (all six faces).
+Files: `sky/band.rs`, `sky/limits.rs`. Bench: `sky/band_near_sun` (all six faces) and
+`sky/limit_map` (R06.T9.i).
 
 ### R06.T10 The protocol
 
@@ -2075,9 +2190,10 @@ systems layers C to E hold; the candidates the binary rule of T16.b costs; check
 counts against `range_500ly_floor_d` (37,675 systems at version 15, re-measured at the current version). Add goldens:
 `crates/hyperion-sim/tests/golden/sky/census_near_sun.golden`, the census of a pinned observer near
 the Sun to V 7 (IDs, star indices, V to 10⁻⁶ mag), `sky/band_face_row.golden`, one band face
-row with its eye limits after `limit_rows` against the glare of a census with stars within 1° and
-near 100° of its texels (the limit map's bits across targets, which no other golden pins;
-determinism audit of R06.T9.c), and `sky/colour_reddened.golden`, every field of `reddened` at A_V 0.5, 2 and 5, off the
+row with its eye limits after `limit_rows` and the eye offsets of its listed stars, generated after
+R06.T9.i and T9.j (whose bits it pins; `decision-r06-t9c-glare.md`), against the glare of a census
+with stars within 1° and near 90° of its texels (the limit map's bits across targets, which no
+other golden pins; determinism audit of R06.T9.c), and `sky/colour_reddened.golden`, every field of `reddened` at A_V 0.5, 2 and 5, off the
 nodes at 1, 7, 17 and 25, and held at 40, for a few points on both grids (the per-star reddening
 T11's wire carries, which no other golden pins; determinism audit of R06.T9.e and the band
 ruling's addendum), read by the testkit's golden harness. Record the A_V distribution of the
@@ -2131,7 +2247,8 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
   and by the owner on the laptop. A census that breaks the frame budget is a finding. Its remedy is
   for the server to lower its bulk work's priority, or the workers it gives bulk work, beside a
   client, not to shrink the census;
-- the per-reply cost of the band and the limit map. The first reply's band, limit map and shell
+- the per-reply cost of the band and the limit map (T9.i's pyramid; `sky/limit_map` at 300,000
+  stars). The first reply's band, limit map and shell
   together must fit the first-sky budget;
 - the sky's total light (listed, overflow and band) in the first reply against the final's, at
   the eye's cut near the Sun, within 1% (T9.b's amendment, decided 2026-10-06,
@@ -2655,7 +2772,11 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   adds glare explicitly; the error is small against the model's own 0.1–0.2 mag, and a field factor
   setting absorbs it. Its likeliest part is the far field (science check of R06.T9.c): all the stars brighter than V
   8.15 sum to about V −5.4 for the real sky, which spread evenly veil the fixture's poles by some
-  12%, −0.04 to −0.06 mag on their limits.
+  12%, −0.04 to −0.06 mag on their limits. The pupil's plane (R06.T9.h) makes the far field about
+  0.71 times the as-built one, so this double count is about a third smaller, some −0.03 to −0.04
+  mag at the poles. CIE's 90°–100° range, light past the cornea and through the eye wall, takes no
+  illuminance in the eye's plane, and is left out. The two readings of E differ in all by
+  0.010–0.015 mag at the poles (decided 2026-10-06, `decision-r06-t9c-glare.md`).
 - **The camera model's defaults** are a full-frame video camera of today at high gain; open
   question 16 leaves its parameters open, and the performance runs and the owner's sense of the
   main screen may move them. They are one table in `cameraLimit.ts`. The model is optimistic for
@@ -4363,7 +4484,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     (an estimate), and about 140 CPU-s at `MAX_N_MAX` (300,000, a camera's cut with the eye
     open), the whole first-sky budget. For T17 to measure. Every listed star veils its texel
     within 0.1° at some 10⁴ sr⁻¹ times its E, so dropping faint stars changes the map unless the self-veil
-    below is ruled first; a far field from a coarse map is the other lever.
+    below is ruled first; a far field from a coarse map is the other lever. _Decided 2026-10-06
+    (`decision-r06-t9c-glare.md`, item 2): R06.T9.i._
   - **Cross-target bits** rest on review (determinism audit: nothing to fix, GENERATOR_VERSION 20,
     no golden moves) until T17's `sky/band_face_row.golden`, which now also pins the row's eye
     limits against a census's glare.
@@ -4382,12 +4504,27 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     cancels, carried on the star's wire eye offset (Design note 17) with no wire change (the
     science check's lean); (c) a texel mean of the veil over Crumey's summation area, about one
     64² texel (eq. 63: 37.6′ radius at μ 21.83), smoother but still about 0.05 mag biased, best
-    with (b).
+    with (b). _Decided 2026-10-06 (`decision-r06-t9c-glare.md`, item 1): option (b), R06.T9.h.
+    The ruling's model, scored against each star's own limit, puts (a)'s loss at 2–3% at the poles
+    (−0.02 to −0.03 mag), with 17–20% fewer visible stars within 0.25° of each texel's centre.
+    (c)'s bias is 5–7%; (b) is unbiased. The other stars' veils stay sampled at the texel's
+    centre, which is unbiased but places a bright star's halo as a square; T13's by-hand check
+    looks for it, and the ruling has its remedy._
   - **Not settled by the sources** (science check): CIE 146 itself was not reached, and the
     equation was checked against a secondary quotation; whether its E is the illuminance normal
     to the star, as built, or on the pupil's plane (E cos θ, nothing past 90°), which would make
     the far-field veil 0.71 times as large (at the poles −0.041 mag rather than −0.056 for the
-    whole list; nothing within about 20° of a star moves).
+    whole list; nothing within about 20° of a star moves). _Decided 2026-10-06
+    (`decision-r06-t9c-glare.md`, item 3): the plane of the eye, E cos θ, and none from behind it;
+    R06.T9.h._
+- **The eye's background when a camera is open (found and decided 2026-10-06,
+  `decision-r06-t9c-glare.md`).** As T9.c is built, the band holds the light fainter than the
+  request's cut. A camera's 10.06 then darkens the eye's background, against the band ruling's
+  "light fainter than the eye's cut", and lists stars between the cuts that veil, so opening a
+  camera view would change the cockpit eye's stars. Each camera-only star's own light, added to
+  its texel, would instead leave single texels up to 0.2 mag deep, past T9.d's pad. From
+  R06.T9.j the eye's map is the eye-only request's: the expected light fainter than the eye's
+  cut, and the glare of the stars brighter than it.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;
