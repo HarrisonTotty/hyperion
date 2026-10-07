@@ -33,7 +33,7 @@
 //!
 //! The glare of a resolved star is CIE 146:2002's general disability glare equation (Vos 2003,
 //! "Reflections on glare", Lighting Res. Technol. 35, 163), the "standard way" Crumey points to
-//! (Adrian 1989); see [`veiling_luminance`].
+//! (Adrian 1989), of the glare's illuminance in the plane of the eye; see [`veiling_luminance`].
 
 use std::error::Error;
 use std::fmt;
@@ -108,9 +108,10 @@ const SP_RATIO_RANGE: (f64, f64) = (0.01, 100.0);
 const MAX_LUMINANCE: f64 = 1e12;
 
 /// CIE 146:2002's validity bounds of the glare angle, degrees: smaller angles are read as 0.1°, and
-/// a source beyond 100° adds no glare.
+/// a source beyond 100° adds no glare. (A source at or beyond 90° gives no illuminance in the plane
+/// of the eye, so the limit map never reaches the upper bound; see [`veiling_luminance`].)
 const GLARE_MIN_ANGLE_DEG: f64 = 0.1;
-pub(crate) const GLARE_MAX_ANGLE_DEG: f64 = 100.0;
+const GLARE_MAX_ANGLE_DEG: f64 = 100.0;
 
 /// An [`EyeObserver`], an [`SpRatio`], a [`SkyBackground`] or a [`PhotopicWeight`] could not be
 /// built from the values given.
@@ -526,6 +527,18 @@ pub fn star_colour_offset(star: SpRatio, background: &SkyBackground) -> Magnitud
 /// θ in degrees, A the observer's age and p their pigmentation. Below 0.1°, the equation's lower
 /// bound, θ is read as 0.1°; beyond 100°, its upper bound, the source adds nothing.
 ///
+/// E is the glare illuminance in the plane of the observer's eye, the pupil's plane, which is
+/// perpendicular to the line of sight. CIE 146:2002's abstract gives the veil of "a point glare
+/// source at an angle Theta (in degrees) to the line of sight that gives rise to an illuminance E
+/// glare (in lx) in the plane of the observer's eye". IJspeert, de Waard, van den Berg and de Jong
+/// (1990, Vision Res. 30, 699), whose data set CIE's age term, take "the illuminance caused by the
+/// point source at the pupil plane", and Stiles and Crawford (1937, Proc. R. Soc. B 122, 255) take
+/// the illumination on the pupillary plane. A source of illuminance E normal to its own direction, at
+/// θ from the line of sight, therefore gives E cos θ, which the caller passes. A source at or
+/// beyond 90° lies behind the eye's plane and gives none there, so the limit map takes none
+/// (R06.T9.h, decided 2026-10-06, `decision-r06-t9c-glare.md`), although CIE's range runs to 100°
+/// for light that reaches the retina past the cornea and through the eye wall.
+///
 /// `None` for an illuminance or an angle that is negative or not finite.
 ///
 /// # Examples
@@ -536,10 +549,12 @@ pub fn star_colour_offset(star: SpRatio, background: &SkyBackground) -> Magnitud
 /// magnitude than the reference star:
 ///
 /// ```
+/// use hyperion_sim::math;
 /// use hyperion_sim::sky::eye::{
 ///     EyeObserver, SkyBackground, SpRatio, illuminance_of_magnitude, luminance, naked_eye_limit,
 ///     star_colour_offset, veiling_luminance,
 /// };
+/// use hyperion_sim::units::consts::RADIANS_PER_DEGREE;
 /// use hyperion_sim::units::{Degrees, Magnitudes, MagnitudesPerArcsec2};
 ///
 /// let eye = EyeObserver::default();
@@ -548,8 +563,9 @@ pub fn star_colour_offset(star: SpRatio, background: &SkyBackground) -> Magnitud
 ///     luminance(MagnitudesPerArcsec2::new(22.4)),
 ///     SpRatio::new(starlight)?,
 /// )?;
-/// // A V = −1.5 star of ratio 2.6, 1° away: the band's and the veil's light together.
-/// let glare = illuminance_of_magnitude(Magnitudes::new(-1.5));
+/// // A V = −1.5 star of ratio 2.6, 1° away: its illuminance in the plane of the eye, E cos 1°,
+/// // then the band's and the veil's light together.
+/// let glare = illuminance_of_magnitude(Magnitudes::new(-1.5)) * math::cos(RADIANS_PER_DEGREE);
 /// let veil = veiling_luminance(&eye, glare, Degrees::new(1.0)).ok_or("a valid glare")?;
 /// let total = band.luminance() + veil;
 /// let ratio = (band.luminance().value() * starlight + veil.value() * 2.6) / total.value();

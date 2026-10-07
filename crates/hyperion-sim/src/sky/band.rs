@@ -379,7 +379,16 @@ pub struct BandTexel {
     luminance: CandelasPerSquareMetre,
     chroma: [f32; 2],
     sp_ratio: f64,
-    eye_limit: Option<Magnitudes>,
+    eye: Option<EyeLimit>,
+}
+
+/// The eye's limit in a texel's direction and the veil it was taken against, as the limit map sets
+/// them (R06.T9.h).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EyeLimit {
+    limit: Magnitudes,
+    /// The listed stars' veiling glare over the texel, photopic and scotopic, cd m⁻².
+    veil: [f64; 2],
 }
 
 impl BandTexel {
@@ -417,7 +426,7 @@ impl BandTexel {
             luminance: CandelasPerSquareMetre::new(luminance.max(0.0)),
             chroma,
             sp_ratio,
-            eye_limit: None,
+            eye: None,
         }
     }
 
@@ -446,12 +455,26 @@ impl BandTexel {
     /// was not asked.
     #[must_use]
     pub const fn eye_limit(&self) -> Option<Magnitudes> {
-        self.eye_limit
+        match self.eye {
+            Some(eye) => Some(eye.limit),
+            None => None,
+        }
     }
 
-    /// Sets the eye's limit in the texel's direction: the limit map's.
-    pub(crate) const fn set_eye_limit(&mut self, limit: Magnitudes) {
-        self.eye_limit = Some(limit);
+    /// The listed stars' veiling glare over the texel that its eye limit was taken against,
+    /// photopic and scotopic, cd m⁻² (R06.T9.h): `None` where the limit map has set no limit.
+    #[must_use]
+    pub(crate) const fn eye_veil(&self) -> Option<[f64; 2]> {
+        match self.eye {
+            Some(eye) => Some(eye.veil),
+            None => None,
+        }
+    }
+
+    /// Sets the eye's limit in the texel's direction and the veil `veil` (photopic and scotopic, cd
+    /// m⁻²) it was taken against: the limit map's.
+    pub(crate) const fn set_eye_limit(&mut self, limit: Magnitudes, veil: [f64; 2]) {
+        self.eye = Some(EyeLimit { limit, veil });
     }
 }
 
@@ -465,7 +488,7 @@ impl BandTexel {
             luminance: CandelasPerSquareMetre::new(luminance),
             chroma: [1.0, 1.0],
             sp_ratio,
-            eye_limit: None,
+            eye: None,
         }
     }
 }

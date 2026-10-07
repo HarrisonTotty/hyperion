@@ -4525,6 +4525,99 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   its texel, would instead leave single texels up to 0.2 mag deep, past T9.d's pad. From
   R06.T9.j the eye's map is the eye-only request's: the expected light fainter than the eye's
   cut, and the glare of the stars brighter than it.
+- **Deviations in T9.h, as built (2026-10-06).** `sky::limits::eye_offsets`, as the task sets
+  it, with these details.
+  - **One term, used twice.** `GlareSource::veil_per_lux` (private) is the veil per lux in the
+    plane of the eye, `veiling_luminance` per lux at θ times cos θ, and `None` at cos θ ≤ 0. The
+    map sums it, and `eye_offsets` recomputes it for each star at its texel's centre
+    (`BandSpec::texel_of`, then `texel_direction`), so the term subtracted is the term the map
+    added, bit for bit. A rounded sum of non-negative terms is never less than any of them, so the
+    difference is never negative; a debug assertion holds it.
+  - **The veil kept.** `BandTexel` keeps the veil beside its limit (a private `EyeLimit`);
+    `set_eye_limit(limit, veil)` and `eye_veil()` are crate-visible, and `eye_limit()` is
+    unchanged.
+  - **One glare entry a listed star.** `GlareSource` gains `sp_ratio` (the reddened ρ, for the
+    colour offset) and its direction becomes an `Option`, so `Glare` keeps every listed star in
+    the census's order and `eye_offsets` returns one offset a star. A star at the observer's own
+    position has no direction, glares nothing and takes its colour offset against a scotopic sky.
+    `Glare::len()` now counts the listed stars, not only those that glare; in a census they are
+    the same.
+  - **E cos θ.** `REACH_MARGIN_DEG` is gone, and `GLARE_MAX_ANGLE_DEG` is private to `eye.rs`
+    again. `veiling_luminance` keeps its arithmetic and its 100° bound. Its doc names the plane
+    with the three sources, and its example takes E cos 1°. `crates/hyperion-sim/clippy.toml`
+    gains `IJspeert` in `doc-valid-idents`.
+  - **"Decides".** In the tests and records, the self-exclusion decides a star when the star's V
+    lies between its limit before the self-exclusion (its texel's limit plus its colour offset)
+    and its own limit. The task's "between its texel's limit and its own" would also count, for a
+    hot star, stars that the colour offset decides alone.
+  - **The saturation, measured (for the owner).** Two of the ruling's figures are corrected
+    here, and both are reported for the owner to rule on.
+    - The colour table's largest colour offset is +0.4526: the 500,000 K blackbody row of both
+      grids, ρ 3.4850. The blackbody rows run from ρ 3.4501 (+0.4417) at 120,000 K, and the
+      Rayleigh–Jeans limit is +0.4560 (science check). The ruling and Design note 5 have +0.43.
+      Design note 5's +0.45 is short by 0.0026, which its 0.1 pad absorbs; it is a finding for
+      T9.d's test "at most 0.45 (it is 0.43)".
+    - At Crumey's clamp, over a texel whose colour-corrected background is exactly 10⁻⁵ cd m⁻²,
+      the hottest star sits 0.05° from a 64² texel's centre (read at 0.1°), at the default eye
+      (F 1.4, 25 years). Its own limit is 8.440. The brightest star its self-exclusion decides is
+      V 7.443, under a texel limit of 6.990. That star has the largest eye offset, +1.450 (0.997
+      self-exclusion and +0.453 colour), 0.180 past the wire's +1.27, where the ruling estimated
+      about 1.0 + 0.43.
+    - A star's V less its texel's limit rises with its V (science check: the texel limit's slope
+      in V is at most 0.905 times the star's share of the background). So the +1.27 culls a star
+      the offset would keep only when a star at its own limit lies more than 1.27 fainter than
+      its texel's limit. At the default eye it lies 1.100 fainter, so the saturation culls none:
+      the window lost is 0.000 mag. The ruling's "at most about 0.16" took the offset's excess,
+      at the window's bright end, for the window lost.
+    - It passes 1.27 from F ≈ 2.2 at 25 years (2.07 at 70, 1.97 at 80 with p 1.2). The window
+      lost is then 0.046 mag at Crumey's F 2.4, and 0.120 at F 2.4, 80 years and p 1.2. That is
+      within the ruled 0.16, which the test holds over those eyes. The client sends F 1.4 today.
+    - Near the Sun no listed star's verdict changes with the saturation, in the fixture or at 64²
+      (below).
+    - Older than T9.h, at the wire's other end (science check): a cool star behind several
+      magnitudes of dust can have an offset below −1.28. Its colour offset falls by the scotopic
+      less the photopic extinction, about 0.137 mag per magnitude of A_V (the Sun's). That
+      happens for a 2,300 K dwarf (−0.825 unreddened) from about A_V 3.3, and for a red giant
+      (about −0.35) from A_V 7. The wire then keeps such a star where its own limit would cull
+      it. It never happens near the Sun, but a dusty sightline elsewhere can reach it. This is for
+      T11.a, where the wire's doc comments land.
+  - **Tests** (`cargo test -p hyperion-sim sky::limits`, 15; `sky::eye`, 15, unchanged):
+    - the identity: texels and stars' own limits, within 3.07 × 10⁻¹¹ mag;
+    - the pole star: V 7.662, 0.05° from a 64² texel's centre towards the north galactic pole. Its
+      texel sees to 7.162 and the star to its own 7.712 (offset +0.550), which is its texel's
+      limit with no glare, bit for bit;
+    - F = 2 against 1.4: the offsets agree within 1.1 × 10⁻¹⁴;
+    - no self-exclusion is negative in a scotopic texel (all 1,520 stars' texels);
+    - the reach at 89.995° and 90.005° (and 99.995° and 120°, which add nothing), and the texel's
+      kept veil;
+    - also new: the saturation at the clamp, at F 1.4, F 2.4, and F 2.4 at 80 years (above); row
+      splits give the same veils and eye offsets; a star that adds no veil, of no illuminance
+      in a mesopic texel or with no direction, takes its colour offset alone; and two refusals
+      (a band of another size, a band without its limits).
+  - **Records.** The fixture: 16², the census within 100 ly (1,520 stars). A probe, not
+    committed: 64², the census within 200 ly (4,824 stars). Both near the Sun at cut 8.15, on a
+    dev build. The probe's source and output are in `.git/rm23-scratch/r06-census/t9h/`
+    (`probe64.rs`, `probe64.txt`).
+    - The medians, plane and poles: at 16², 6.544 and 7.671, against T9.c's 6.544 and 7.668 (no
+      glare: 6.545 and 7.693). At 64²: no glare 6.548 and 7.684; E normal to 100°, as T9.c built
+      it, 6.542 and 7.659; E cos θ 6.542 and 7.664. The median texel difference at the poles is
+      +0.0045 (largest +0.0050). The ruling's +0.010 is for a 30,000-star list's larger far field.
+    - The largest self-exclusion that decides a star: 0.483 at 16² (one star decided), and 0.610
+      at 64² (49 decided, median 0.252). The ruling's model gives 0.73 at the poles, median 0.23.
+    - The largest eye offset: of a decided star, +0.480 at 16² and +0.697 at 64²; at Crumey's
+      clamp, +1.450 (above). Any listed star's can be larger (+1.75 and +2.26), for a bright star
+      near its texel's centre: such a star is much brighter than its texel's limit, so the
+      saturation changes nothing for it.
+    - The largest self-exclusion of a star within 0.5 mag of its own limit and 0.6° or more from
+      its texel's centre: 5.2 × 10⁻³ at 16², and 7.2 × 10⁻³ at 64². The ruling's model: under
+      0.01.
+    - The self-exclusion's effect at 64²: 2,719 of the 4,824 listed stars are seen at their own
+      limits, against 2,670 at their texel's limit plus their colour offset, +1.8%. That is +3.0%
+      at |b| over 60° (449 against 436), +1.9% at the poles (54 against 53), and none in the
+      plane (176 against 176). Within 0.25° of a texel's centre 316 are seen against 280, +13%:
+      the grid's loss is removed. The ruling's model puts (a)'s loss at 2–3% at the poles.
+  - **Not changed.** No wire bytes, no client code and no wire doc comments: T11.a carries those
+    (the ruling's §5). GENERATOR_VERSION stays 20, and no golden moves.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;
