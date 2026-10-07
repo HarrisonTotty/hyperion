@@ -164,11 +164,14 @@ pub const STAR_BODY_INDEX_END: u16 = 16;             // body indices 0..16: plan
 pub struct RedrawAttempt(/* u8, 0..MAX_REDRAWS */);
 pub const MAX_REDRAWS: u8 = 8;
 pub const DRAWS_PER_ATTEMPT: u64 = 64;               // words; equals plan 06's `ATTEMPT_WORDS`
-// R06's ask A (P11.T16; decision-r06-census-cost §7): every star's initial mass and every
-// star–star pair's least periastron over the attempts `SystemStars::generate` can keep, for the
-// sky census's bound star by star (rendering plan R06, R06.T8.g). Reads the draw's words only.
-pub struct HierarchyBound { /* stars: initial masses (bit for bit), each with its body and
-    attempt; pairs: their two stars and a periastron no larger than the drawn one */ }
+// R06's ask A (P11.T16; decision-r06-census-cost §7, decision-p11-t16-hierarchy-bound): the
+// hierarchy of every attempt `SystemStars::generate` can keep, drawn by the generator's own draw,
+// so exact by construction, for the sky census's bound star by star (rendering plan R06,
+// R06.T8.g). Reads the draw's words only.
+pub struct HierarchyBound { /* attempts: attempt 0 first, then each later attempt while the one
+    before holds a star–star pair; the fallback, the primary alone */ }
+pub struct AttemptBound { /* attempt; stars: index, body, kind and initial mass (bit for bit);
+    pairs `run_pairs` may run: their two stars and drawn periastron (bit for bit); may_carve */ }
 pub fn hierarchy_bound(galaxy: &Galaxy, record: &SystemRecord, composition: &Composition)
     -> HierarchyBound;
 ```
@@ -1543,52 +1546,82 @@ passes its four retention bands, change the default here with the bump. Acceptan
 ### P11.T16 The census's hierarchy bound (R06's ask A)
 
 Decided 2026-10-05 (`decision-r06-census-cost.md`, §7, "Ask A"), for rendering plan R06's
-R06.T8.g, the sky census's bound star by star. Built at `GENERATOR_VERSION` 21, beside P11.T17 (ask
-B), while the 21 → 22 batch (T4.l, T4.m) waits (owner, 2026-10-07: features first).
+R06.T8.g, the sky census's bound star by star. Its form and cost were ruled on 2026-10-07
+(`decision-p11-t16-hierarchy-bound.md`), after the lane's measurement (Risks, "P11.T16's cost,
+measured"). It is built at `GENERATOR_VERSION` 21, beside P11.T17 (ask B), while the 21 → 22
+batch (T4.l, T4.m) waits (owner, 2026-10-07: features first).
 
-`stellar::multiplicity::hierarchy_bound(galaxy, record, composition) -> HierarchyBound` lists, for
-every redraw attempt that `SystemStars::generate` can keep:
+`stellar::multiplicity::hierarchy_bound(galaxy, record, composition) -> HierarchyBound` is exact
+by construction. For every redraw attempt that `SystemStars::generate` can keep, it is the
+hierarchy that the generator's own draw gives: `draw_hierarchy_with` at `composition` and the
+record's `grid_multiplicity`, then `substellar::with_companion`. For each attempt it lists:
 
-- each star's initial mass, bit for bit, with its body and attempt, so that the census can read its
-  η from its `StarDraws`;
-- each star–star pair (the pairs `run_pairs` may send to the engine) with a periastron no larger
-  than the drawn orbit's.
+- each star, with its `StarIndex`, body, `SlotKind` and initial mass, bit for bit, so that the
+  census can read its η from its `StarDraws` at that attempt (the primary's at attempt 0, since
+  the primary is never redrawn);
+- each star–star pair that `run_pairs` may send to the engine (both members stars, neither a
+  brown dwarf), with its two stars and its drawn periastron, bit for bit;
+- whether it may carve: whether it holds such a pair.
 
-The attempts are every one the generator can keep:
+The attempts listed are attempt 0, then attempt n + 1 for as long as attempt n may carve, through
+attempt 7. Then comes the single star that `after_last_attempt` keeps: the primary, attempt 0's
+star 0. A record that `carve::grid_redraws` does not redraw lists attempt 0 alone. So the bound
+lists every attempt the generator can keep, and it may list attempts the generator does not keep,
+never fewer. Within an attempt, the stability test's tries are the draw's own, so the bound lists
+the try that the draw keeps.
 
-- each companion's stability redraws within an attempt;
-- the carve redraws of P11.T7, attempts 1–7;
-- the single star that `after_last_attempt` keeps.
+An interval bound in place of the exact draw was weighed and rejected on measurement
+(`decision-p11-t16-hierarchy-bound.md`):
 
-The bound may list more than the generator keeps, never less. R06.T8.g reads it in this order:
+- Without the period, a companion's q is known only to a factor of about 2: 1.7 in C's direct
+  construction and 2.1–2.2 in D and E.
+- Without the stability test, the kept try is unknown. Every companion keeps its first try in 75%
+  of D's multiples and 25% of E's, at 1.7 and 3.5 tries a companion.
+- So over the tries, q reaches 0.95 in 99–100% of records, which is today's running maximum.
+- Without the periastron, P11.T17 can bound no pair.
 
-1. the record's composition (`draw_metallicity`);
-2. this bound;
-3. each pair's `pair_light_bound` (P11.T17) at the bound's periastron;
-4. each star's own row of `sky_phase_envelope`.
+It reads the generator's existing words only. It opens no stream that `draw_hierarchy` does not,
+and it adds no tag and draws no new word; tests pin this. Generated output does not move, so there
+is no bump. Speed-ups are allowed only through a seam in `hierarchy.rs` that the draw and the bound
+share, and only if `SystemStars::generate` and every golden stay bit for bit unchanged. Examples
+are one `DirectPeriods` a record across the attempts listed, and the tidal radius's denominator
+once a record.
 
-It reads the generator's existing words only. It opens no stream that `draw_hierarchy` does not, and
-it adds no tag and draws no new word; tests pin this. Generated output does not move, so there is no
-bump.
-
-Cost: at most 3 µs a record in layers C–E, where `draw_hierarchy_of_composition` cost 28, 103 and
-146 µs in the ruling's probe. If 3 µs is infeasible while exact, the task reports with measurements
-and options before building. It never trades correctness for speed: the bound never misses a kept
-attempt.
+Cost: the ruling's 3 µs is retired. An exact bound costs about the draws it repeats. Before it was
+built, it was measured at C 8.5–13, D 45 and E 180 µs a record with the cover, and 7.6, 34 and
+62 µs at attempt 0 alone. Gate: in every layer near the Sun, the bound costs at most 1.25 times the
+sum of `draw_hierarchy_of_composition` over the attempts it lists, measured in the same bench.
+Record each layer's cost (provisional under shared load).
 
 Tests:
 
-- (slow) `the_hierarchy_bound_holds_for_generated_systems`: for 10⁵ records of each stellar layer
-  (A–E) near the Sun and in the bulge, the generated system's stars and star–star pairs are among
-  the bound's. Each mass matches bit for bit, and no drawn periastron is smaller than the bound's.
-- The bound adds no tag (`tests/golden/rng/tags.golden` unchanged) and reads no word the draw does
-  not read.
+- (slow) `the_hierarchy_bound_holds_for_generated_systems`: for 10⁵ records of each of layers A, B
+  and C, and 2 × 10⁴ of each of D and E, near the Sun and in the bulge:
+  - the attempt that `SystemStars::generate` keeps is listed;
+  - its hierarchy's stars and star–star pairs are the bound's for that attempt, each mass and each
+    periastron bit for bit;
+  - record the share of records listing each number of attempts, and the redrawn systems found
+    (at least 50 in all are expected).
+- Fast tests:
+  - the same over 10³ records of each layer near the Sun;
+  - `carve.rs`'s `CARVED` record (a 12 M☉ primary 30 Myr old whose first attempt holds an X-ray
+    binary), whose kept attempt is listed;
+  - a record whose eight attempts all may carve lists all eight, then the fallback.
+- The bound adds no tag (`tests/golden/rng/tags.golden` unchanged) and reads no word the draw
+  does not read.
 - The bound is a pure function: twice the same, in any order.
-- A bench, `hierarchy_bound`, per layer near the Sun.
+- A bench, `hierarchy_bound`, per layer near the Sun, beside `draw_hierarchy_of_composition` over
+  the same attempts.
 
-Files: `stellar/multiplicity/bound.rs` (new), `stellar/multiplicity/mod.rs`, `benches/stellar.rs`,
-and the slow test. Acceptance: `cargo nextest run -p hyperion-sim stellar::multiplicity`, the slow
-test by name, the bench (provisional under shared load). See Risks, "P11.T16's cost, measured".
+Files: `stellar/multiplicity/bound.rs` (new), `stellar/multiplicity/{mod,hierarchy,substellar}.rs`,
+`benches/stellar.rs`, and the slow test. Acceptance:
+
+- `cargo nextest run -p hyperion-sim stellar::multiplicity`;
+- the slow test by name;
+- the bench (provisional under shared load);
+- `just ci`.
+
+See Risks, "P11.T16's cost, measured".
 
 ## Verification
 
@@ -3896,7 +3929,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     3,807 of 3,808 (the fit test above fails); the doctests; the slow binary suites, 11 of 11; the
     R06 census, 187 s.
     The determinism auditor finds the bump itself clean.
-- **P11.T16's cost, measured (2026-10-07; pending a ruling, nothing built).** Before building, the
+- **P11.T16's cost, measured (2026-10-07; ruled the same day).** Before building, the
   lane measured whether ask A can be exact at 3 µs. The probe ran on one thread in release, at a load
   of 7–14, so every timing is provisional. It used the Milky Way fixture (seed `0x0926_0000`) and
   4,000 records a layer from the cells nearest (0, 26,000, 68) ly, at attempt 0 and each record's
@@ -3975,3 +4008,15 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
 
   The lane's lean: (a) now, and (b) once P11.T17 lands. The bound stays exact and its cost is
   recorded. (c) belongs with lever 13 if T17's budget is missed.
+
+  _Ruled 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`):_
+  - _(a), exact by construction, with bit-exact speed-ups only. The 3 µs is retired, and the gate
+    is 1.25 times the draws the bound repeats._
+  - _(b) and (c) are deferred levers (`deferred-corrections.md`), and (d) is rejected._
+  - _An interval bound was measured and rejected:_
+    - _Without the period, q is known to a factor of about 2._
+    - _Without the stability test, the kept try is unknown: D keeps every companion's first try in
+      75% of its multiples, and E in 25%._
+    - _So over the tries, q reaches 0.95 in 99–100% of records._
+    - _Without the periastron, P11.T17 can bound no pair._
+  - _R06.T8.g's gates and R06.T17's budget are re-ruled in R06's plan._
