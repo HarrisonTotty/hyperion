@@ -2536,7 +2536,10 @@ mod tests {
             wholes,
             pairs,
         } = found.evaluations;
-        let exact_pairs = u64::try_from(sources * texels).expect("under 2⁶⁴ pairs");
+        // In u64: the slow test's product (300,000 × 24,576 = 7.4 × 10⁹) overflows a 32-bit
+        // usize on wasm32, as 218f0cb9 found of the pair-count test.
+        let exact_pairs = u64::try_from(sources).expect("a count fits u64")
+            * u64::try_from(texels).expect("a count fits u64");
         #[expect(clippy::cast_precision_loss, reason = "counts under 2⁵³")]
         let fewer = exact_pairs as f64 / found.evaluations.evaluated() as f64;
         eprintln!(
