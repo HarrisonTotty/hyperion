@@ -99,10 +99,20 @@ export const PLATE_SIDE_PADDING_REM = 0.25;
 export const CHROME_CLEARANCE_REM = 0.25;
 
 /**
+ * How far every label's plate stands inside each edge of the stage, rem: one base unit, C3's rule-3
+ * clearance, as P05's furniture stands (the label block and the instrument slots stand 0.5 rem
+ * in), so that no plate covers the canvas's inset 2 px focus ring at any scale
+ * (decision-r07-quality-and-destination, addendum D, D5). A destination's label keeps it in both
+ * its tiers.
+ */
+export const EDGE_CLEARANCE_REM = 0.25;
+
+/**
  * How much clearer than it must be a place must stand for a label to move to it, or to come back
- * to it from hidden, rem (R07.T16.i): one base unit, on every count, the stage's edges included.
- * So a mark that jitters, or moves a fraction of this back and forth across an obstacle's edge,
- * leaves its label where it is.
+ * to it from hidden, rem (R07.T16.i): one base unit, on every count, the stage's edges included,
+ * and its mark's centre that far inside the stage (addendum D, D3). So a mark that jitters, or
+ * moves a fraction of this back and forth across an obstacle's edge or the stage's, leaves its
+ * label where it is.
  */
 export const LABEL_HYSTERESIS_REM = 0.25;
 
@@ -242,8 +252,9 @@ export interface MarkLabelSurroundings {
 interface PlaceOption<Place> {
   readonly place: Place;
   /**
-   * Whether the plate fits at the place with `marginPx` more clearance on every count; with
-   * `standing`, also clear of where the labels not yet placed stood after the frame before.
+   * Whether the plate fits at the place with `marginPx` more clearance on every count, its mark's
+   * centre that far inside the stage; with `standing`, also clear of where the labels not yet placed
+   * stood after the frame before.
    */
   readonly fits: (marginPx: number, standing: boolean) => boolean;
 }
@@ -318,9 +329,12 @@ function shownPlace(state: MarkLabelState | undefined): string | null {
 
 /**
  * Each mark's label's place in a frame, or that it is hidden whole (R07.T16.i;
- * decision-r07-quality-and-destination, Q6 (a) and addenda B and C). A label is never shown in
- * part: each plate, its size as laid out, takes a place only where it lies wholly inside the stage,
- * {@link CHROME_CLEARANCE_REM} clear of the chrome and clear of the plates placed before it.
+ * decision-r07-quality-and-destination, Q6 (a) and addenda B to D). A label is never shown in part,
+ * and names only a mark in the picture: each plate, its size as laid out, takes a place only while
+ * its mark's centre lies inside the stage (addendum D, D3), and only where it stands
+ * {@link EDGE_CLEARANCE_REM} inside each of the stage's edges (D5), {@link CHROME_CLEARANCE_REM}
+ * clear of the chrome and `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the plates placed before it
+ * (D4).
  *
  * - **The order:** the destination's label first, then the selection's, then the rest by range,
  *   nearest first.
@@ -328,15 +342,16 @@ function shownPlace(state: MarkLabelState | undefined): string | null {
  *   below its whole chevron set with its near edge at the bracket place: first the first
  *   `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the chrome and of every other mark, at its reach
  *   (`DrawAnchor.markReachPx`), and every other label's plate at its place on its mark's line; else
- *   the first {@link CHROME_CLEARANCE_REM} clear of the chrome; else it is hidden whole.
+ *   the first {@link CHROME_CLEARANCE_REM} clear of the chrome; else it is hidden whole. Each place
+ *   stands {@link EDGE_CLEARANCE_REM} inside the stage's edges.
  * - **Every other label** tries its sides ({@link MARK_LABEL_SIDES}) and takes the first
  *   `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the destination's plate, `LABEL_TEXT_CLEARANCE_REM`
  *   clear of the destination's chevron set (the square of half-size `destinationSetReachPx`),
- *   {@link CHROME_CLEARANCE_REM} clear of the chrome, and clear of the plates placed; else it is
- *   hidden whole.
+ *   {@link CHROME_CLEARANCE_REM} clear of the chrome, and `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of
+ *   the plates placed; else it is hidden whole.
  * - **Hysteresis:** a label leaves a place, or comes back from hidden, only for a place clear by
- *   {@link LABEL_HYSTERESIS_REM} more, and changes at most {@link LABEL_CHANGE_LIMIT} times in
- *   {@link LABEL_CHANGE_WINDOW_MS} (`choosePlace`).
+ *   {@link LABEL_HYSTERESIS_REM} more, its mark's centre as far inside the stage, and changes at
+ *   most {@link LABEL_CHANGE_LIMIT} times in {@link LABEL_CHANGE_WINDOW_MS} (`choosePlace`).
  *
  * @remarks
  * The destination's place counts every other mark at its bracket's place, whether or not it is
@@ -346,7 +361,10 @@ function shownPlace(state: MarkLabelState | undefined): string | null {
  * the order. So selecting a mark, which changes only the order, moves no label, and the order decides
  * where labels come to meet. A label at its limit of changes is hidden, not moved, when its mark
  * becomes or stops being the destination, until the window allows. A label whose plate is not laid
- * out is hidden.
+ * out is hidden. So is a label whose mark's centre has left the stage, the destination's and the
+ * selection's included, whatever place would fit; its mark stays pickable within the draw list's
+ * `ANCHOR_MARGIN_REM`, and in the list, and the destination's chevron set still holds other labels
+ * off.
  *
  * @param plates - The labels' plates' sizes as laid out, by their target's key.
  * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
@@ -485,13 +503,32 @@ function heldBoxPx(
   return box;
 }
 
-/** Whether `box` lies inside the stage, at least `marginPx` in from each of its edges. */
+/**
+ * Whether `box` lies inside the stage, at least {@link EDGE_CLEARANCE_REM} and `marginPx` in from
+ * each of its edges (decision-r07-quality-and-destination, addendum D, D5).
+ */
 function insideBy(box: ScreenBoxPx, stage: MarkLabelStage, marginPx: number): boolean {
+  const inPx = EDGE_CLEARANCE_REM * stage.remPx + marginPx;
   return (
-    box.leftPx >= marginPx &&
-    box.topPx >= marginPx &&
-    box.leftPx + box.widthPx <= stage.widthPx - marginPx &&
-    box.topPx + box.heightPx <= stage.heightPx - marginPx
+    box.leftPx >= inPx &&
+    box.topPx >= inPx &&
+    box.leftPx + box.widthPx <= stage.widthPx - inPx &&
+    box.topPx + box.heightPx <= stage.heightPx - inPx
+  );
+}
+
+/**
+ * Whether an anchor's centre lies inside the stage, at least `marginPx` in from each of its edges,
+ * on them at no margin (decision-r07-quality-and-destination, addendum D, D3): a label names a mark
+ * in the picture, and a mark whose centre has left it has none.
+ */
+function centreInsideBy(anchor: DrawAnchor, stage: MarkLabelStage, marginPx: number): boolean {
+  const { xPx, yPx } = centreCssPx(anchor, stage);
+  return (
+    xPx >= marginPx &&
+    yPx >= marginPx &&
+    xPx <= stage.widthPx - marginPx &&
+    yPx <= stage.heightPx - marginPx
   );
 }
 
@@ -499,7 +536,9 @@ function insideBy(box: ScreenBoxPx, stage: MarkLabelStage, marginPx: number): bo
  * A destination's label's places, in their order: each of its four places
  * `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the chrome, of every other mark at its reach and of every
  * other label's plate at its place on its line; then each {@link CHROME_CLEARANCE_REM} clear of the
- * chrome alone (decision-r07-quality-and-destination, addendum C, C3).
+ * chrome alone (decision-r07-quality-and-destination, addendum C, C3). Each stands
+ * {@link EDGE_CLEARANCE_REM} inside the stage's edges, and fits only while the destination's centre
+ * lies inside the stage (addendum D, D3 and D5).
  *
  * @param risePx - The anchor's `labelRisePx`, device px.
  */
@@ -531,7 +570,11 @@ function destinationOptions(
       place,
       fits: (marginPx) => {
         const box = destinationBoxPx(anchor, plate, place, risePx, stage);
-        return insideBy(box, stage, marginPx) && clear(box, marginPx);
+        return (
+          centreInsideBy(anchor, stage, marginPx) &&
+          insideBy(box, stage, marginPx) &&
+          clear(box, marginPx)
+        );
       },
     }));
   return [
@@ -547,10 +590,13 @@ function destinationOptions(
 }
 
 /**
- * Any other label's places, its sides in their order, each `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of
- * the destination's plate, `LABEL_TEXT_CLEARANCE_REM` clear of its chevron set,
- * {@link CHROME_CLEARANCE_REM} clear of the chrome, and clear of the plates placed; and with
- * `standing`, clear of where the labels not yet placed stood.
+ * Any other label's places, its sides in their order, each {@link EDGE_CLEARANCE_REM} inside the
+ * stage's edges, `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the destination's plate,
+ * `LABEL_TEXT_CLEARANCE_REM` clear of its chevron set, {@link CHROME_CLEARANCE_REM} clear of the
+ * chrome, and `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the plates placed; and with `standing`, as
+ * clear of where the labels not yet placed stood, so that a label moving by choice never forces a
+ * later one out (decision-r07-quality-and-destination, addendum D, D4). Each fits only while the
+ * mark's centre lies inside the stage (D3).
  */
 function sideOptions(
   anchor: DrawAnchor,
@@ -558,21 +604,19 @@ function sideOptions(
   frame: LabelFrame,
 ): ReadonlyArray<PlaceOption<MarkLabelSide>> {
   const { stage } = frame;
+  const neighbourPx = LABEL_NEIGHBOUR_CLEARANCE_REM * stage.remPx;
   return MARK_LABEL_SIDES.map((place): PlaceOption<MarkLabelSide> => ({
     place,
     fits: (marginPx, standing) => {
       const box = sideBoxPx(anchor, plate, place, stage);
       return (
+        centreInsideBy(anchor, stage, marginPx) &&
         insideBy(box, stage, marginPx) &&
         clearOfAll(box, frame.chrome, CHROME_CLEARANCE_REM * stage.remPx + marginPx) &&
-        clearOfAll(
-          box,
-          frame.destinationPlates,
-          LABEL_NEIGHBOUR_CLEARANCE_REM * stage.remPx + marginPx,
-        ) &&
+        clearOfAll(box, frame.destinationPlates, neighbourPx + marginPx) &&
         clearOfAll(box, frame.sets, LABEL_TEXT_CLEARANCE_REM * stage.remPx + marginPx) &&
-        clearOfAll(box, frame.placed, marginPx) &&
-        (!standing || clearOfAll(box, frame.held.values(), marginPx))
+        clearOfAll(box, frame.placed, neighbourPx + marginPx) &&
+        (!standing || clearOfAll(box, frame.held.values(), neighbourPx + marginPx))
       );
     },
   }));

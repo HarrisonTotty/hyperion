@@ -33,6 +33,7 @@ import {
   FULL_VIEW_PX,
   type LaidOutBoxPx,
   renderViewDisplay,
+  shownMarkLabelPx,
   STAGE_HEIGHT_PX,
   STAGE_WIDTH_PX,
   stubViewLayout,
@@ -54,7 +55,12 @@ import type { FrameSubmission } from "../../view/engine/types";
 import { METER_CLASS } from "../../view/post/meter";
 import { precisionScene } from "../../view/scenes/precision";
 import { lineScale } from "../../lib/strokes";
-import { buildWireframeDrawList, CASING_PX, viewStrokesAt } from "../../view/wireframe/drawList";
+import {
+  buildWireframeDrawList,
+  CASING_PX,
+  type DrawAnchor,
+  viewStrokesAt,
+} from "../../view/wireframe/drawList";
 import { linearColour } from "../../view/wireframe/submit";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
@@ -169,6 +175,46 @@ async function freeCameraLabel({ user, advance }: Setup): Promise<HTMLElement | 
   return screen
     .getAllByText(name ?? "", { exact: false })
     .find((each) => each.classList.contains("view-marks__label"));
+}
+
+/**
+ * The display's first frame, the precision scene at its start, and its marks where the draw list
+ * puts them for the same camera and stage.
+ */
+function firstFrameMarks() {
+  const run = stepRun(startRun(precisionScene()), {
+    serverScene: null,
+    dtS: 0,
+    held: new Set(),
+    reducedMotion: false,
+  });
+  const list = buildWireframeDrawList(
+    run.scene,
+    { pose: runPose(run), fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180 },
+    { widthPx: WIDTH_PX, heightPx: HEIGHT_PX },
+    readTokens(document.documentElement),
+    {
+      lowSetting: false,
+      ev100: -1,
+      selection: null,
+      destination: null,
+      remPx: 16,
+      ...viewStrokesAt(1),
+    },
+  );
+  return { run, list };
+}
+
+/** TEST PLANET's mark among a frame's. */
+function planetAnchor({ run, list }: ReturnType<typeof firstFrameMarks>): DrawAnchor {
+  const id = run.scene.bodies.find((body) => body.designation === "TEST PLANET")?.id;
+  const anchor = list.anchors.find(
+    (each) => each.target.kind === "body" && each.target.body === id,
+  );
+  if (anchor === undefined) {
+    throw new Error("TEST PLANET has no mark in the precision scene's first frame");
+  }
+  return anchor;
 }
 
 /** Lets the engine's promises settle. */
@@ -438,28 +484,7 @@ describe("the VIEW display", () => {
     const { user, advance } = setup();
     await settle();
     advance(16);
-    // The display's first frame is the scene at its start; its marks are where the draw list puts
-    // them for the same camera and viewport.
-    const run = stepRun(startRun(precisionScene()), {
-      serverScene: null,
-      dtS: 0,
-      held: new Set(),
-      reducedMotion: false,
-    });
-    const list = buildWireframeDrawList(
-      run.scene,
-      { pose: runPose(run), fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180 },
-      { widthPx: WIDTH_PX, heightPx: HEIGHT_PX },
-      readTokens(document.documentElement),
-      {
-        lowSetting: false,
-        ev100: -1,
-        selection: null,
-        destination: null,
-        remPx: 16,
-        ...viewStrokesAt(1),
-      },
-    );
+    const { run, list } = firstFrameMarks();
     const anchor = list.anchors[0];
     if (anchor === undefined) {
       throw new Error("the precision scene's first frame has no mark in view");
@@ -701,6 +726,60 @@ describe("the VIEW display", () => {
       shown(whole),
     ]).toEqual(["", true, false, true, false]);
   });
+
+  it.each([
+    ["ArrowLeft", "right edge", ["right", "left", "hidden", "gone"]],
+    ["ArrowRight", "left edge", ["right", "hidden", "gone"]],
+    ["ArrowUp", "foot", ["right", "above", "hidden", "gone"]],
+    ["ArrowDown", "top edge", ["right", "below", "hidden", "gone"]],
+  ] as const)(
+    "turning a free camera by %s past the stage's %s, shows TEST PLANET's label only 0.25 rem inside the stage and while its mark's centre lies inside it (R07.T16.i's follow-up)",
+    async (key, _, changes) => {
+      // Every frame of the turn, about 7 to 9 px of the mark's motion each: the label's side, or
+      // that it is hidden or gone with its mark, and any frame that shows it too near an edge or
+      // beside a mark whose centre has left the stage (addendum D, D3 and D5).
+      stubMatchMedia(true);
+      const view = setup();
+      const offsetPx = planetAnchor(firstFrameMarks()).labelOffsetPx;
+      // D5's 0.25 rem at the harness's rem of 16 px, as ruled, not as the code holds it.
+      const edgePx = 0.25 * 16;
+      await freeCameraLabel(view);
+      await view.user.click(screen.getByRole("application"));
+      await view.user.keyboard(`{${key}>}`);
+      const seen: string[] = [];
+      const faults: string[] = [];
+      for (let frame = 0; frame < 80; frame += 1) {
+        view.advance(16);
+        const label = screen
+          .queryAllByText("TEST PLANET", { exact: false })
+          .find((each) => each.classList.contains("view-marks__label"));
+        const shown = label === undefined ? null : shownMarkLabelPx(label, offsetPx, 16);
+        const now = label === undefined ? "gone" : (shown?.side ?? "hidden");
+        if (seen.at(-1) !== now) {
+          seen.push(now);
+        }
+        const box = shown?.box;
+        const centre = shown?.centrePx;
+        if (
+          box !== undefined &&
+          centre !== undefined &&
+          !(
+            box.leftPx >= edgePx &&
+            box.topPx >= edgePx &&
+            box.leftPx + box.widthPx <= WIDTH_PX - edgePx &&
+            box.topPx + box.heightPx <= HEIGHT_PX - edgePx &&
+            centre.xPx >= 0 &&
+            centre.yPx >= 0 &&
+            centre.xPx <= WIDTH_PX &&
+            centre.yPx <= HEIGHT_PX
+          )
+        ) {
+          faults.push(`${String(frame)}: ${JSON.stringify(shown)}`);
+        }
+      }
+      expect({ seen, faults }).toEqual({ seen: changes, faults: [] });
+    },
+  );
 
   it("stops flying when its canvas loses focus", async () => {
     stubMatchMedia(true);

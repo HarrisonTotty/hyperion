@@ -2449,6 +2449,7 @@ src/renderer/src/displays/galaxy src/renderer/src/displays/system`, the console-
   _P05's share of D4 and D5 is R07.T16.j's. If T16.j is committed before that share reaches its
   agent, the share joins this commit (`spatial/labels.ts` and its tests), which then also follows
   T16.j._
+  _As built: see Risks, "Deviations in T16.i's follow-up, as built"._
 
 #### R07.T17 The low setting and benchmarks
 
@@ -5934,6 +5935,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - So selecting, which changes only the order, moves no label, and the order decides where
       labels come to meet. A hidden nearer or selected label waits for a clear place rather than
       taking a standing farther label's (open, below).
+    - _Amended by T16.i's follow-up (addendum D, D3 and D4): every count also holds the mark's
+      centre inside the stage by the margin, and "clear of where every label not yet placed
+      stood" is 0.5 rem clear of it._
   - **Three changes a second** (the plan-conformance review's must-fix, the UX review's
     should-fix). Q6 (a)'s "never more than three times a second" (`G` 940's flash limit), which
     C4's text does not repeat, is built: a label changes its place, or whether it is shown, at
@@ -5954,7 +5958,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     written, not only while a destination's label is shown (T16.h's follow-up): one forced layout a
     frame at most. Every label mounts hidden, and the loop shows it at its place.
   - **"By range"** is `DrawAnchor.distanceM`, the camera's, nearest first.
-  - **"Clear of the plates placed"** is no overlap; two plates may touch (open, below).
+  - **"Clear of the plates placed"** is no overlap; two plates may touch (open, below). _Amended
+    by T16.i's follow-up (D4): 0.5 rem (`LABEL_NEIGHBOUR_CLEARANCE_REM`), plate to plate._
   - **The chrome** is every direct child of `.view__overlay` but the marks' labels and the slots'
     column, which is empty between its slots, and each open slot: today the label block, with its
     statements, and the slots.
@@ -5974,6 +5979,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     DOM lays them out, under an open slot, its state carried from frame to frame, and placed on
     every vsync of a 30 Hz primary. Each of the hysteresis, held-place, forced-move, limit,
     every-vsync and kept-state rules was checked by breaking it and seeing its test fail.
+    _Amended by T16.i's follow-up (D5): the stage's right edge, foot and corner, and the
+    destination's last resort, are now tested 0.25 rem inside the stage, not merely inside it._
   - **By hand, hidden** (`.git/rm23-scratch/r07-views/t16i/`; `page/run.sh` with `page/hook.js`,
     T16.f's page harness with a measure of every label against the block, the slots, the stage and
     each other, and a per-frame sampler; `base-*`, the same runs on HEAD's build):
@@ -6288,6 +6295,107 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `VIEW`'s `TIME` would run so with nothing on the block saying so, the gap T16.k closes for
     kept scenes. The plan and the guide limit the line to kept scenes, so it is built as
     specified.
+- **Deviations in T16.i's follow-up, as built** (2026-10-07; the views lane;
+  decision-r07-quality-and-destination, addendum D, D3 to D5).
+  - **Files.** Those the bullet lists, and:
+    - `displays/view/ViewDisplay.tsx`: `placeMarkLabels`' doc alone;
+    - `view/wireframe/drawList.ts`: `ANCHOR_MARGIN_REM`'s doc alone, which said a mark at the edge
+      "keeps its label" (the orchestrator's leave): a mark past the edge stays pickable, with no
+      label;
+    - `test/viewDisplayHarness.tsx`: `shownMarkLabelPx(label, labelOffsetPx, remPx)` and
+      `ShownMarkLabelPx`, a shown label's side, plate and mark's centre read back from its
+      transform;
+    - `displays/view/ViewDisplay.test.tsx`: the turn test, with `firstFrameMarks` (the pick test's
+      draw list, now shared) and `planetAnchor`.
+  - **Names.** `EDGE_CLEARANCE_REM` (0.25) is new, exported beside `CHROME_CLEARANCE_REM` as D5
+    names it, and `insideBy` adds it to every caller's margin.
+    `centreInsideBy(anchor, stage, marginPx)` is new, private to the module. `markLabelPlaces`
+    keeps its signature. T16.j's
+    `LABEL_EDGE_CLEARANCE_REM` (`spatial/symbols.ts`) holds the same 0.25 rem on P05, so two
+    constants state one rule once both land (the plan-conformance review's consider; open, below).
+  - **The centre takes each place's margin,** as D3's exact change says. A label keeps its place
+    with its mark's centre on the edge; it moves by choice, comes back, or moves when forced only
+    while the centre stands 0.25 rem inside. So a label forced from its place while its centre lies
+    within 0.25 rem of an edge is hidden, not moved. A label just mounted needs no margin.
+  - **"From where every label not yet placed stood"** is the standing test, as D4's exact change
+    says: a move by choice, a return and a first showing keep 0.5 rem and the margin from every
+    held plate, so a move back by choice waits for 0.75 rem. A label forced from its place still
+    takes a farther label's place, which gives way (D6, as built).
+  - **The shared fixture.** T16.i's `farther` moves from x 420 to 415. Its left plate stood 6.5 px
+    from `nearer`'s right one, under D4's 0.5 rem; at 415 it stands 11.5 px clear, and T16.i's
+    tests of the pair keep their places.
+  - **Tests beyond the list:**
+    - the corner case kept: hidden at 0.125 rem, at the left at 0.375 rem;
+    - a destination hidden where every place lies inside the stage but none 0.25 rem inside;
+    - in the DOM harness, a free camera turned by each arrow key, 80 frames each, taking TEST
+      PLANET out past each edge. Its label goes right, left, hidden, gone (the right edge); right,
+      hidden, gone (the left); right, above, hidden, gone (the foot); right, below, hidden, gone
+      (the top). No frame shows it within the ruled 0.25 rem of an edge, or beside a mark whose
+      centre lies outside the stage.
+
+    Each rule was broken and its tests seen to fail (`t16i-followup/mutate*.log`). With no centre
+    test, 3 unit tests and the 4 DOM cases failed; with the centre at no margin, the out-and-back
+    test; with placed or held plates tested by overlap alone, 2 and 1; with plates flush with the
+    edges, 5 unit tests and 3 DOM cases (the left edge's never brings a plate near it).
+  - **By hand, hidden** (`.git/rm23-scratch/r07-views/t16i-fu/`, a link to `t16i-followup/`;
+    T16.i's `page/run.sh` with a new `page/hook.js`, on probe copies of the builds,
+    `patch-probe.py`, never committed, which record each mark's centre and let the hook move TEST
+    MOON; `base-*` is HEAD's build):
+    - **Compact, 1280 × 720:** unchanged. TEST PLANET's mark lies under the block, and its label
+      is hidden whole in all six states, as in the base.
+    - **Turning in `FREE`,** eight steps, every frame sampled (about 71 a step): hidden, below,
+      right, left at the right edge, then hidden in all four frames whose centre lay past the edge,
+      then gone. The least edge gap is 0.30 rem, and no frame stands a plate within 0.25 rem of an
+      edge or the chrome. The base shows one frame 0.12 rem from the right edge, and two frames with
+      the label beside a mark whose centre had passed it.
+    - **Focus:** the canvas focused from the keyboard by 24 Tab presses through the page, with
+      `:focus-visible` holding (DevTools' focus emulation gives the never-shown window page focus).
+      - At 100% the 2 px `--accent` ring is whole on every row beside TEST PLANET's plate,
+        0.49 rem from the right edge, with 6 px of the view's black between them
+        (`crops/after-focus720d-ring.png`).
+      - At 80% the ring snaps to one device pixel (1.25 CSS px). It is whole beside a plate
+        0.56 rem in, with 6 device px between (`crops/after-focus80c-ring.png`).
+    - **Two labels:** no kept scene shows two at once from any preset at 60° to 120°
+      (`run-*-survey720.log`), and no client places the server's ship in a system. So the probe
+      moves TEST MOON beside TEST PLANET at 1 au, from `SEAT`, a pixel at a time:
+      - mounted afresh at each place (`pairfresh`): stacked, TEST MOON (the farther) takes its left
+        below 0.5 rem, and both stand at the right from 0.5 rem; end to end, it stands below,
+        0.516 rem clear, until its right is 0.5 rem clear. The base stands both at the right,
+        0 to 0.44 rem apart stacked and 0.06 to 0.49 rem end to end, where `TEST PLANET TEST M…`
+        reads as one name (`crops/{base,after}-pairfresh720-*`);
+      - moved on from place to place (`pair`): a label moved by choice comes back at 0.75 rem.
+        End to end, the moon's label, forced from its stacked place, stays hidden while every
+        place stands between 0.5 and 0.75 rem clear.
+    - **Seen:** end to end, TEST MOON's symbol lies under TEST PLANET's plate in both builds, so
+      its label below stands under no symbol shown (D2's stated limit; the UX review's consider).
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest (`src/renderer/src/displays/view`): 21 files, 425 tests, all pass.
+      The app's: 341 files, 8,023 tests, all pass.
+    - `just check lint` from a clean typecheck cache: exit 0. Prettier on every changed file.
+    - `just test-render`, both variants with captures, on the base (HEAD, the changes stashed) and
+      after, under one hold of the heavy lock (`t16i-followup/render-pair.sh`): each exit 0,
+      610 checks, and all 110 captures byte-identical. The DOM labels are in none of them. The final
+      tree's bundle differs from the one rendered in one doc comment alone.
+    - The console-ux skill's lint (0 errors in the three changed renderer source files), contrast
+      (every pairing passes) and glyphs (no new character).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers: no must-fix.
+    - Taken: `EDGE_CLEARANCE_REM`'s doc, which had the block's and slots' inset wrong (the plan's
+      should-fix); the harness's capture groups checked, and `OffsetPx` (the TypeScript
+      considers); the DOM test's threshold the ruled 0.25 rem, not the constant, and T16.i's stale
+      records amended (the plan's considers).
+  - **Open, for the orchestrator:**
+    - the two 0.25 rem constants, `EDGE_CLEARANCE_REM` and T16.j's `LABEL_EDGE_CLEARANCE_REM`, once
+      both land: one could alias the other;
+    - TEST MOON's label under no symbol shown, end to end (D2's "when to revisit" asks for a ruling
+      if a label is read as naming the mark it covers);
+    - the UX review's sighting: `TARGETS` shows one row of two at 1280 × 720 in both builds, so
+      the second mark's name needs a scroll. It predates this commit, and may be the hidden
+      window's;
+    - not captured: the ring beside a plate at its least clearance (0.25 rem), 1920 × 1080, and
+      150%.
+  - **P05's share** of D4 and D5 is T16.j's. D11's plan text came with T16.j's
+    `docs(plans): R07 Plan the quality-and-destination ruling's addendum D …` commit; the views
+    lane's own copy of it was not landed.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

@@ -424,10 +424,11 @@ function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
  * Moves each mark's label with its mark, on every animation frame, at the marks the last drawn
  * frame placed; its text changes at 4 Hz (RM1 m10). Each takes its place by `markLabelPlaces`
  * (R07.T16.i;
- * decision-r07-quality-and-destination, Q6 (a) and addenda B and C): a place where its plate lies
- * wholly inside the stage and clear of the chrome and the plates placed before it, the destination's
- * label first, at its `labelRisePx` above or below its whole chevron set, then the selection's, then
- * the rest by range; or it is hidden whole. A label whose mark this frame did not draw is hidden
+ * decision-r07-quality-and-destination, Q6 (a) and addenda B to D): while its mark's centre lies
+ * inside the stage, a place where its plate stands 0.25 rem inside the stage's edges, clear of the
+ * chrome and 0.5 rem clear of the plates placed before it, the destination's label first, at its
+ * `labelRisePx` above or below its whole chevron set, then the selection's, then the rest by range;
+ * or it is hidden whole. A label whose mark this frame did not draw is hidden
  * until the next readout removes it. Each change of place, or of whether it is shown, cuts, never
  * eased as the guide's state transitions are: an eased move would carry its opaque plate over a
  * reticle for up to 150 ms, below the 6:1 a mark's meaning needs (decision-r07-t16d-followups, (d);

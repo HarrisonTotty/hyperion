@@ -298,6 +298,25 @@ describe("a destination's label above its chevron set (R07.T16.h's follow-up; de
     });
   });
 
+  it("takes the first place 0.25 rem inside the stage (addendum D, D5)", () => {
+    // Its upper places' tops 2 px below the stage's top edge, then 4 px.
+    const near = { ...DESTINATION, yPx: 40 };
+    const clear = { ...DESTINATION, yPx: 42 };
+    expect([
+      destinationPlace([near], plates(near)),
+      destinationPlace([clear], plates(clear)),
+    ]).toEqual(["lower-right", "upper-right"]);
+  });
+
+  it("is hidden whole where no place lies 0.25 rem inside the stage, though each lies inside it (addendum D, D5)", () => {
+    // Its upper places' tops on the stage's top edge, its lower places' bottoms on its foot.
+    const shallow = { widthPx: 260, heightPx: 76, devicePixelRatio: 1, remPx: 16 };
+    const middle = { ...DESTINATION, xPx: 130, yPx: 38 };
+    expect(
+      markLabelPlaces([middle], plates(middle), shallow, { nowMs: 0 }).get(KEY)?.place,
+    ).toBeNull();
+  });
+
   it("is hidden whole where every place inside the stage stands within 0.25 rem of the chrome", () => {
     const chrome = [{ leftPx: 0, topPx: 0, widthPx: 800, heightPx: 600 }];
     expect(destinationPlace([DESTINATION], plates(DESTINATION), { chrome })).toBeNull();
@@ -360,9 +379,12 @@ const COMPACT_BLOCK: ScreenBoxPx = { leftPx: 8, topPx: 8, widthPx: 484.27, heigh
 const FULL_STAGE = { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 } as const;
 const SLOT: ScreenBoxPx = { leftPx: 717, topPx: 8, widthPx: 555, heightPx: 254 };
 
-/** Two marks whose labels meet at their right: the nearer at 1 km, the other 5 px lower. */
+/**
+ * Two marks whose labels meet at their right: the nearer at 1 km, the other 15 px right and 5 px
+ * lower, whose plate at its left stands 11.5 px, past 0.5 rem, from the nearer's at its right.
+ */
 const nearer = aMarkAt("nearer", 400, 300, 1_000);
-const farther = aMarkAt("farther", 420, 305, 2_000);
+const farther = aMarkAt("farther", 415, 305, 2_000);
 
 /** One mark's label's place in the compact layout, by the block. */
 function compactPlace(xPx: number, yPx: number): LabelPlace | undefined {
@@ -374,6 +396,12 @@ function compactPlace(xPx: number, yPx: number): LabelPlace | undefined {
 function slotPlace(xPx: number, yPx: number): LabelPlace | undefined {
   const mark = aMarkAt("planet", xPx, yPx);
   return placesOf([mark], planetPlates(mark), FULL_STAGE, { chrome: [SLOT] })[0];
+}
+
+/** One mark's label's place on the full layout's stage, with no chrome over it. */
+function stagePlace(xPx: number, yPx: number): LabelPlace | undefined {
+  const mark = aMarkAt("planet", xPx, yPx);
+  return placesOf([mark], planetPlates(mark), FULL_STAGE)[0];
 }
 
 describe("a label clear of the view's chrome, its edges and other labels (R07.T16.i; decision-r07-quality-and-destination, Q6 (a) and addendum C)", () => {
@@ -401,13 +429,18 @@ describe("a label clear of the view's chrome, its edges and other labels (R07.T1
   });
 
   it.each([
-    ["the stage's right edge", 1275, 400, "left"],
-    ["the stage's foot", 640, 712, "above"],
-    ["the stage's top right corner", 1278, 2, null],
-  ] as const)("never stands past %s", (_, xPx, yPx, place) => {
-    const mark = aMarkAt("planet", xPx, yPx);
-    expect(placesOf([mark], planetPlates(mark), FULL_STAGE)[0]).toBe(place);
-  });
+    // Its plate at the right ending 2 px inside the right edge, then 6 px.
+    ["the stage's right edge", [1156.75, 400], "left", [1152.75, 400], "right"],
+    // Its plate on its line ending 2 px above the foot, then 6 px.
+    ["the stage's foot", [640, 709], "above", [640, 705], "right"],
+    // Its plate at the left starting 2 px below the top, then 6 px; no other place lies inside.
+    ["the stage's top right corner", [1262, 11], null, [1262, 15], "left"],
+  ] as const)(
+    "never stands within 0.25 rem of %s, and stands 0.375 rem inside it (addendum D, D5)",
+    (_, [xPx, yPx], near, [clearXPx, clearYPx], clear) => {
+      expect([stagePlace(xPx, yPx), stagePlace(clearXPx, clearYPx)]).toEqual([near, clear]);
+    },
+  );
 
   it("stands no plate within 0.25 rem of the label block", () => {
     // Its plate at the right and the left 3.5 px under the block's foot, then 4.5 px.
@@ -608,6 +641,80 @@ describe("a label's hysteresis (R07.T16.i)", () => {
       "right",
       null,
       null,
+    ]);
+  });
+});
+
+describe("a label whose mark's centre leaves the stage (R07.T16.i's follow-up; decision-r07-quality-and-destination, addendum D, D3)", () => {
+  it("hides the label whole of a mark 0.5 rem past the stage's right edge, though its left place lies inside, and takes the left 0.5 rem inside", () => {
+    // Its plate at the left ends 5.25 px inside the edge, then 21.25 px.
+    expect([stagePlace(1288, 400), stagePlace(1272, 400)]).toEqual([null, "left"]);
+  });
+
+  it("keeps its label hidden as its mark moves 0.125 rem out and back, until its centre is 0.25 rem inside", () => {
+    // Its centre 2 px inside the right edge, 2 px past it, then 2, 3 and 4 px inside.
+    const xs = [1278, 1282, 1278, 1277, 1276];
+    expect(
+      framesOf(
+        xs.map((x) => aMarkAt("planet", x, 400)),
+        FULL_STAGE,
+        [],
+      ),
+    ).toEqual(["left", null, null, null, "left"]);
+  });
+
+  it("hides the destination's label whole past the stage's top edge, its chevron set still holding other labels off", () => {
+    // The destination's centre 4 px above the stage, its lower places inside; its set's square
+    // reaches 12 px down, 3 px above a neighbour's plate at its right.
+    const above = { ...DESTINATION, yPx: -4 };
+    const near = aCraftAt("near", 100, 24);
+    expect([
+      placesOf([above, near], plates(above, near), STAGE),
+      placesOf([near], plates(near), STAGE),
+    ]).toEqual([[null, "below"], ["right"]]);
+  });
+});
+
+describe("labels 0.5 rem apart (R07.T16.i's follow-up; decision-r07-quality-and-destination, addendum D, D4)", () => {
+  /** The nearer of each pair, its plate at its right 413.25 to 521.25 px across, 291 to 309 down. */
+  const first = aMarkAt("first", 400, 300, 1_000);
+
+  it.each([
+    // 24 px below the nearer, then 28 px: its plate at the right 6 px under the nearer's, then 10.
+    ["stacked", [400, 324], "left", [400, 328]],
+    // 114 px right of the nearer, then 118 px: its plate at the right 6 px past the nearer's, then 10.
+    ["end to end", [514, 300], "below", [518, 300]],
+  ] as const)(
+    "takes the farther of two labels %s to its next place 0.375 rem from the nearer's, and leaves both at the right 0.625 rem apart",
+    (_, [xPx, yPx], next, [clearXPx, clearYPx]) => {
+      const near = aMarkAt("second", xPx, yPx, 2_000);
+      const clear = aMarkAt("second", clearXPx, clearYPx, 2_000);
+      expect([
+        placesOf([first, near], planetPlates(first, near), FULL_STAGE),
+        placesOf([first, clear], planetPlates(first, clear), FULL_STAGE),
+      ]).toEqual([
+        ["right", next],
+        ["right", "right"],
+      ]);
+    },
+  );
+
+  it("never moves a label by choice to within 0.5 rem of where a label not yet placed stands", () => {
+    // The nearer at its left while a box covers its right, the farther at its right 24 px below;
+    // then the box is gone, and the nearer's right would stand 6 px above the farther's plate.
+    const lower = aMarkAt("lower", 400, 324, 2_000);
+    const laidOut = planetPlates(first, lower);
+    const box: ScreenBoxPx = { leftPx: 420, topPx: 285, widthPx: 80, heightPx: 20 };
+    const before = markLabelPlaces([first, lower], laidOut, FULL_STAGE, {
+      chrome: [box],
+      nowMs: 0,
+    });
+    expect([
+      [first, lower].map((mark) => before.get(targetKey(mark.target))?.place),
+      placesOf([first, lower], laidOut, FULL_STAGE, { previous: before, nowMs: 1_000 }),
+    ]).toEqual([
+      ["left", "right"],
+      ["left", "right"],
     ]);
   });
 });

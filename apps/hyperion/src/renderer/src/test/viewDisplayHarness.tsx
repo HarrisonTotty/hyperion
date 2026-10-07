@@ -12,6 +12,8 @@ import { vi } from "vitest";
 import { UniverseProvider } from "../components/UniverseProvider";
 import type { ViewEngineSource } from "../displays/view/useViewEngine";
 import { ViewDisplay } from "../displays/view/ViewDisplay";
+import { type MarkLabelSide, PLATE_SIDE_PADDING_REM } from "../displays/view/ViewMarkLabels";
+import type { OffsetPx } from "../spatial/symbols";
 import { ViewSceneProvider } from "../displays/view/ViewSceneProvider";
 import { UniversePanel } from "../displays/galaxy/UniversePanel";
 import { requestAdapterOutcome } from "../view/engine/platform";
@@ -82,6 +84,98 @@ export const MARK_LABEL_PX = { widthPx: 108, heightPx: 18 } as const;
 export interface LaidOutBoxPx extends LaidOutPx {
   readonly leftPx: number;
   readonly topPx: number;
+}
+
+/**
+ * A shown mark's label as the harness lays it out, read back from its transform (R07.T16.i's
+ * follow-up).
+ */
+export interface ShownMarkLabelPx {
+  /** The side of its mark at which it stands. */
+  readonly side: MarkLabelSide;
+  /** Its plate's box, {@link MARK_LABEL_PX}, CSS px from the stage's top left. */
+  readonly box: LaidOutBoxPx;
+  /** Its mark's centre, CSS px from the stage's top left. */
+  readonly centrePx: OffsetPx;
+}
+
+/** A CSS length in px as `sideLabelTransform` writes it, a number's `String`. */
+const PX = String.raw`(-?\d+(?:\.\d+)?(?:e[-+]?\d+)?)px`;
+
+/** Each side's transform as `sideLabelTransform` writes it, its two lengths captured. */
+const SIDE_TRANSFORMS: ReadonlyArray<readonly [MarkLabelSide, RegExp]> = [
+  ["right", new RegExp(String.raw`^translate\(${PX}, ${PX}\)$`, "u")],
+  ["left", new RegExp(String.raw`^translate\(calc\(${PX} - 100%\), ${PX}\)$`, "u")],
+  [
+    "below",
+    new RegExp(
+      String.raw`^translate\(calc\(${PX} - 50%\), calc\(${PX} \+ [\d.]+rem \+ 50%\)\)$`,
+      "u",
+    ),
+  ],
+  [
+    "above",
+    new RegExp(
+      String.raw`^translate\(calc\(${PX} - 50%\), calc\(${PX} - [\d.]+rem - 50%\)\)$`,
+      "u",
+    ),
+  ],
+];
+
+/**
+ * Where a mark's label stands, read back from the transform the drawing loop gave it at a ratio
+ * of 1, with its plate laid out at {@link MARK_LABEL_PX} as {@link stubViewLayout} lays it out;
+ * `null` where it is hidden.
+ *
+ * @param labelOffsetPx - Its mark's `DrawAnchor.labelOffsetPx`, CSS px at a ratio of 1.
+ * @param remPx - The stage's rem, CSS px.
+ * @throws Error where a shown label's transform is none of the four sides'.
+ */
+export function shownMarkLabelPx(
+  label: HTMLElement,
+  labelOffsetPx: number,
+  remPx: number,
+): ShownMarkLabelPx | null {
+  if (label.style.visibility === "hidden") {
+    return null;
+  }
+  const { transform } = label.style;
+  const found = SIDE_TRANSFORMS.map(([side, form]) => ({ side, match: form.exec(transform) })).find(
+    (each) => each.match !== null,
+  );
+  const [, xText, yText] = found?.match ?? [];
+  if (found === undefined || xText === undefined || yText === undefined) {
+    throw new Error(`a shown mark label's transform is none of its sides': ${transform}`);
+  }
+  const { side } = found;
+  // The two lengths are the plate's near edge or centre across, and its mark's line or its near
+  // edge's line beyond the offset down; the plate's own `translate: 0 -50%` centres it on the line.
+  const xPx = Number(xText);
+  const yPx = Number(yText);
+  const { widthPx, heightPx } = MARK_LABEL_PX;
+  const paddingPx = PLATE_SIDE_PADDING_REM * remPx;
+  let leftPx: number;
+  let topPx: number;
+  let centrePx: OffsetPx;
+  switch (side) {
+    case "right":
+      [leftPx, topPx] = [xPx, yPx - heightPx / 2];
+      centrePx = { xPx: xPx - labelOffsetPx, yPx };
+      break;
+    case "left":
+      [leftPx, topPx] = [xPx - widthPx, yPx - heightPx / 2];
+      centrePx = { xPx: xPx + labelOffsetPx, yPx };
+      break;
+    case "below":
+      [leftPx, topPx] = [xPx - widthPx / 2, yPx + paddingPx];
+      centrePx = { xPx, yPx: yPx - labelOffsetPx };
+      break;
+    case "above":
+      [leftPx, topPx] = [xPx - widthPx / 2, yPx - paddingPx - heightPx];
+      centrePx = { xPx, yPx: yPx + labelOffsetPx };
+      break;
+  }
+  return { side, box: { leftPx, topPx, widthPx, heightPx }, centrePx };
 }
 
 /** A box laid out at the origin. */

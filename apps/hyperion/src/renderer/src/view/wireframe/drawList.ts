@@ -137,8 +137,11 @@ export function occluderSlopePxAt(strokeScale: number): number {
 export const HULL_OCCLUDER_DEPTH_FRACTION = 2 ** -16;
 
 /**
- * How far outside the view a mark may fall and still be anchored (labelled and pickable), rem: 2,
- * the guide's touch target, so that a mark at the edge keeps its label. A choice of RM1 validation.
+ * How far outside the view a mark may fall and still be anchored, rem: 2, the guide's touch
+ * target, so that a mark at the edge stays pickable. A choice of RM1 validation. Its DOM label is
+ * shown only while its centre lies inside the view (the view's `markLabelPlaces`;
+ * decision-r07-quality-and-destination, addendum D, D3): a mark past the edge stays pickable but
+ * has no label.
  */
 export const ANCHOR_MARGIN_REM = 2;
 
