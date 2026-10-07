@@ -14,6 +14,7 @@
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
 pub mod binary;
+pub mod binary_reach;
 pub mod chabrier;
 pub mod cluster_dynamics;
 pub mod cluster_retention;
@@ -74,6 +75,12 @@ pub struct TableInfo {
 /// listed.
 // @begin-manifest: written by hyperion-fit from tables.lock. Do not edit.
 pub const MANIFEST: &[TableInfo] = &[
+    TableInfo {
+        name: "binary_reach",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
     TableInfo {
         name: "chabrier",
         revision: 1,

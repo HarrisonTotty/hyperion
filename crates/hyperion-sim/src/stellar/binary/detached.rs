@@ -49,10 +49,10 @@ pub(super) const GRAVITATIONAL_WAVE_RATE: f64 = 32.0 / 5.0 * (GM_SUN * GM_SUN * 
     * SECONDS_PER_JULIAN_YEAR;
 
 /// Magnetic braking's constant, M☉ R☉² yr⁻² with Ω in rad yr⁻¹ (BSE equation 50).
-const MAGNETIC_BRAKING: f64 = 5.83e-16;
+pub(super) const MAGNETIC_BRAKING: f64 = 5.83e-16;
 
 /// No magnetic braking for a fully convective star (BSE section 2.4, Rappaport et al. 1983), M☉.
-const MAGNETIC_BRAKING_FLOOR: f64 = 0.35;
+pub(super) const MAGNETIC_BRAKING_FLOOR: f64 = 0.35;
 
 /// Tides act on a star whose radius is at least this share of its Roche lobe (the published
 /// code's `rad ≥ 0.01 rol`).
@@ -940,15 +940,17 @@ fn tide(
     })
 }
 
-/// Hut's (1981) f₂ in `e2` = e²: 1 + 15/2 e² + 45/8 e⁴ + 5/16 e⁶ (BSE equation 34).
+/// Hut's (1981, A&A 99, 126) f₂ in `e2` = e²: 1 + 15/2 e² + 45/8 e⁴ + 5/16 e⁶, which BSE's
+/// equations 25, 26 and 34 use.
 #[must_use]
-fn hut_f2(e2: f64) -> f64 {
+pub(super) fn hut_f2(e2: f64) -> f64 {
     1.0 + e2 * (7.5 + e2 * (5.625 + e2 * 0.3125))
 }
 
-/// Hut's (1981) f₅ in `e2` = e²: 1 + 3 e² + 3/8 e⁴ (BSE equation 34).
+/// Hut's (1981, A&A 99, 126) f₅ in `e2` = e²: 1 + 3 e² + 3/8 e⁴, which BSE's equations 25, 26
+/// and 34 use.
 #[must_use]
-fn hut_f5(e2: f64) -> f64 {
+pub(super) fn hut_f5(e2: f64) -> f64 {
     1.0 + e2 * (3.0 + e2 * 0.375)
 }
 
@@ -1025,7 +1027,7 @@ const DECAY_PIECES: u32 = 4;
 /// The factor on the decay that [`decay_reaches`] bounds (ruling p11-channels, section 3.1, item
 /// 6): for the midpoint integrator, and for the drawn masses standing for the stars' own, which
 /// only lose mass.
-const DECAY_SAFETY: f64 = 1.25;
+pub(super) const DECAY_SAFETY: f64 = 1.25;
 
 /// Whether the engine's own sinks of orbital angular momentum can bring a pair into design note
 /// 7's lobe test by `until_years`: the pre-test's bound (P11.T4.j, ruling p11-channels of

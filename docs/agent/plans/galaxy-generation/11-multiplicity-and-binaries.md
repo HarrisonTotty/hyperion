@@ -207,11 +207,13 @@ pub enum MergedBinaryFate { StaysJudgedOnPairVelocity, StaysJudgedOnKick, Ejecte
 pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate; // the default P15.T5.c reviews
 ```
 
-The census's bound on a pair's light (P11.T17, R06's ask B, `decision-r06-census-cost.md` §7):
-`PairLight { Detached, Remnants, Bright(Magnitudes) }` and
+The census's bound on a pair's light (P11.T17, R06's ask B, `decision-r06-census-cost.md` §7;
+interface ruled in `decision-p11-t16-hierarchy-bound.md` §5):
+`PairLight { Detached, Unchanged, Remnants, Bright(Magnitudes) }` and
 `pair_light_bound(a, b, periastron_min, composition, ages) -> Option<PairLight>`, over fitted
 tables only (T17.a's `tables::binary_reach`, T17.b's pair-light tables), for rendering plan
-R06.T8.g.
+R06.T8.g. T17.a also provides the reach table's reader,
+`largest_radius_bound(masses, composition, age) -> Option<ReachBound>`.
 
 ### `stellar::system` (extends plan 06's `SystemStars`)
 
@@ -1634,36 +1636,47 @@ See Risks, "P11.T16's cost, measured".
 
 Asked by rendering plan R06 (`decision-r06-census-cost.md` §7, ask B, 2026-10-05) for R06.T8.g,
 the census's bound star by star. Before a system is generated, the census must know whether a
-pair of two stars can hold a listable star:
+pair of two stars can hold a listable star. Its interface and standard were ruled on 2026-10-07
+(`decision-p11-t16-hierarchy-bound.md` §§5 and 8):
 
-```rust
-pub fn pair_light_bound(a: SolarMasses, b: SolarMasses, periastron_min: Metres,
-    composition: &Composition, ages: RangeInclusive<Years>) -> Option<PairLight>;
-```
+> The interface is fixed in T17.a and is unchanged by T17.b and T17.c (decided 2026-10-07,
+> `decision-p11-t16-hierarchy-bound.md`).
+> `pair_light_bound(a, b, periastron_min, composition, ages) -> Option<PairLight>` takes the two
+> stars' initial masses as P11.T16 lists them, bit for bit, and the pair's drawn periastron.
+> `None` means the pair cannot be bounded, and R06.T8.g generates its record.
+>
+> - `Detached`: the pair cannot have interacted by the window's end, by a closed-form, conservative
+>   test. Each star is its own single-star model. A pair with a star that explodes by the window's
+>   end is `Detached` only if the test also bounds its periastron after the kick.
+> - `Unchanged`: each star of the pair living in the window is its own single-star model, and no
+>   product of the pair lives in it. The census treats it as `Detached`.
+> - `Remnants`: no star or product of the pair lives in the window.
+> - `Bright(M)`: a living star may depart from its own single-star model, or a product may live.
+>   Each such star and product is no brighter than M, margin included. The census bounds each
+>   living star of the pair by the brighter of its own bound and M.
+>
+> T17.a returns `Detached` or `None`. T17.c adds `Unchanged`, `Remnants` and `Bright` from T17.b's
+> tables.
+>
+> A table's verdict covers its cell's whole interval, with a margin. An undersampled cell, or one
+> with a departing star or a product within the margin of its verdict's boundary, returns `None`.
+> The slow test samples pairs from realised systems (P11.T16's lists at the attempts kept), on a
+> seed independent of the fit's. A violation widens the table, never the test. T17.b's sampling
+> (2–7 CPU-h) is approved, and its tables are refitted with the 21 → 22 batch.
 
-The masses and least periastron come from P11.T16's `hierarchy_bound`, and the ages are the
-record's light-time ages. The result is one of three:
+The products `Bright` bounds include mergers, mass gainers, rejuvenated stars, stripped stars and
+core mergers, such as R06.T5.d's helium giant. The function reads fitted tables only, costs at most
+1 µs, and adds no stream, tag, word or bump.
 
-- `Detached`: the pair cannot have interacted by the window's end, so its stars are their own
-  single-star models.
-- `Remnants`: every star and product its evolution can hold is a remnant throughout the window.
-- `Bright(M)`: M is no fainter than any star or product of the pair at any age in the window,
-  margin included. The products include mergers, mass gainers, rejuvenated stars, stripped stars
-  and core mergers, such as R06.T5.d's helium giant.
+**Scope check (2026-10-07).** The tables the ask names did not exist:
 
-The function reads fitted tables only, costs at most 1 µs, and adds no stream, tag, word or bump.
-It answers `None` where its tables do not reach; the census then keeps `max_star_mass`'s widened
-envelope, as R06.T8.g provides for "any pair plan 11 cannot bound".
-
-**Scope check (2026-10-07).** The tables the ask names do not exist:
-
-- No certified radius maxima exist. Plan 08's `stripping` table holds three stage radii of
+- No certified radius maxima existed. Plan 08's `stripping` table holds three stage radii of
   5.5–150 M☉ primaries at the median draws, with no age axis.
-- No table of products' masses or alive windows exists.
+- No table of products' masses or alive windows existed.
 - `FittedFates::lifetime_bracket` (P06.T38.d) exists, from 0.741 M☉.
 
-Lifetimes alone cannot certify `Remnants` or `Bright` at version 21, because the engine can make a
-living star long after both stars' own deaths:
+Lifetimes alone cannot certify `Unchanged`, `Remnants` or `Bright` at version 21, because the
+engine can make a living star long after both stars' own deaths:
 
 - A main-sequence donor is eroded by stable transfer onto a remnant (BSE's critical ratio 3 for
   such donors, so a black hole takes almost any companion) into a long-lived lighter star.
@@ -1673,36 +1686,51 @@ living star long after both stars' own deaths:
 - A stripped helium star outlives its progenitor by up to some 10⁸–10⁹ years.
 
 So the products' alive windows are measured on `evolve` itself, as sampled tables, and the slow
-test against `evolve` is the guarantee. The task is three subtasks.
+test against `evolve` is the guarantee. The task is three subtasks, a → b → c, one agent each.
 
 Order: after P11.T4.k, at version 21. It is independent of P11.T16, and R06.T8.g consumes both.
-`Detached` must agree with the generator as built at 21, including P11.T4.j's decay bound without
-P11.T4.l's wind-spin term. When the version-22 batch (P11.T4.l, T4.m) lands, re-run T17.a's and
-T17.c's slow tests, and T17.b's fit-check. Interface: the bound is built over mass intervals, with
-exact masses as the case of zero width, so that a ruling on `hierarchy_bound`'s form
-(`decision-p11-t16-hierarchy-bound.md`) can pass intervals instead.
+`Detached` agrees with the generator as built at 21, including P11.T4.j's decay bound without
+P11.T4.l's wind-spin term.
 
-- **P11.T17.a The reach table and `Detached`.**
+**The version-22 batch** (P11.T4.l, T4.m). T4.l adds the wind-spin term to the decay bound (its
+sample 2's passes rise from 2,761 to 5,047), changes `decay_reaches` to take a `TestedOrbit`, and
+lets a passed-over pair's collapse hand the pair to the engine, with its kick. Then:
+
+- `Detached` must still bound the periastron after a kick, or return `None` for every pair a star
+  of which can explode by the window's end. T17.a does the latter at 21 already.
+- T17.a's test `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` pins today's
+  behaviour and fails when T4.l lands, so the rule is looked at again then.
+- Re-run T17.a's and T17.c's slow tests, and refit T17.b's tables, in the batch.
+
+- **P11.T17.a The reach table, the interface and `Detached`.**
   - **The table.** `hyperion-fit` task `binary_reach` (class Fast, fit-check, sim fingerprint)
     writes `tables::binary_reach`. Its cells are:
     - 96 mass intervals even in ln m over 0.08–150 M☉;
     - 7 intervals of log₁₀(Z_fit ÷ 0.02) between the nodes −2.301 (the tracks' clamp), −2, −1.5,
       −1, −0.5, −0.25, 0 and +0.176 (the other clamp);
     - age bins: one from 0 to 10⁵ years, then 104 even in log age of 0.05 dex, to 10^10.2 years.
-
-    Each value is the largest `Track::max_radius_until` of the stars sampled in the cell, read at
-    the bin's upper age × a spread factor and held to no earlier than the star's arrival on the
-    main sequence. That is how `can_interact` reads it (P11.T4.i). The cell's stars are sampled at
-    5 masses (the edges and 3 between), 4 metallicities (the edges and 2 between) and the
-    envelope's 5 η draws, from η = 0 to +7σ. Below 0.1 M☉ the value is P06.T13's cooling radius
-    at age 0. Values are in integer hundredths of a dex, rounded up. Each cell also keeps its
-    earliest main-sequence end over the samples, divided by the spread, from which a star may hold
-    a core (k′₃ in the reservoir). The spread factor and a radius margin are set so that the dense
-    slow test passes, and the test records them.
-
-  - **`Detached`.** A conservative copy of `can_interact`'s test for every orbit of periastron at
-    least `periastron_min`, every eccentricity and every η, with each star's largest radius R̂ᵢ
-    read from the table at the window's end:
+  - **Its values.** Each cell takes the largest `Track::max_radius_until` of the stars sampled in
+    it, read at the bin's upper age × a spread factor and held to no earlier than the star's
+    arrival on the main sequence, as `can_interact` reads it (P11.T4.i).
+    - The cell's stars are sampled at its edges and points between: 9 masses, 7 metallicities,
+      and 11 Reimers η draws from η = 0 to +7σ.
+    - Inside plan 06's companion-stripped window (`fates::STRIPPED_WINDOW`) they are sampled with
+      the mark both set and not, since the mark moves a track's last phases there.
+    - Below 0.1 M☉ the value is P06.T13's cooling radius at age 0.
+    - Where two neighbouring mass samples fall, the cell also allows the rise into the larger
+      from its own neighbour, capped. The largest radius climbs steeply with mass up to a
+      discontinuity and drops there, so the sample short of a drop lies below the peak.
+    - Each row is made non-decreasing in age, as `max_radius_until` is.
+    - Values are in integer hundredths of a dex, rounded up, with a radius margin.
+    - Each cell also keeps two ages, each divided by the spread:
+      - its samples' earliest main-sequence end, from which a star may hold a core (k′₃ in the
+        reservoir);
+      - their earliest sudden death (a core's collapse, an electron capture, a pair instability).
+    - The sampling, the spread and the margin are set so that the dense slow test passes, and the
+      test records them.
+  - **`Detached`.** A conservative copy of `can_interact`'s test, with each star's largest radius
+    R̂ᵢ read from the table at the window's end. It holds for every orbit of periastron at least
+    `periastron_min`, every eccentricity and every η:
     - The lobe test fails at `periastron_min`: R̂ᵢ < f_L(qᵢ) `periastron_min` for both stars.
     - Then T4.j's coarse decay test fails there, its terms bounded over e:
       - It is taken in r_p: p₀ = r_p (1 + e) and p_c = r_c (1 + e).
@@ -1714,41 +1742,65 @@ exact masses as the case of zero width, so that a ruling on `hierarchy_bound`'s 
       - The span is the whole window's end, from zero age.
     - The test also checks that its left side only grows with r_p from `periastron_min` (its
       derivative there is non-negative, and increasing). Otherwise the pair is not `Detached`.
-    - Every term is monotone in the R̂ᵢ, the masses and the span, so mass intervals take each
-      term's worst end.
-  - **The interface.** `PairLight { Detached, Remnants, Bright(Magnitudes) }`, and
-    `pair_light_bound`. Until T17.c the function answers `Some(Detached)` or `None`.
+    - **No star can have died suddenly by the window's end.** A kick can leave an eccentric orbit
+      whose periastron the drawn one does not bound, and the engine runs such a pair, kick and
+      all, whenever it can interact by +H or holds a remnant then. The pre-test's build-age
+      contract and T4.j's zero-miss gate cover interactions before the first supernova only. So a
+      pair a star of which may have collapsed by then is `None` (§5's "or to `None`").
+    - A white dwarf's birth only widens the orbit, so it is no bar.
+  - **The interface**, fixed for T17.b and T17.c:
+    `PairLight { Detached, Unchanged, Remnants, Bright(Magnitudes) }` and `pair_light_bound`,
+    answering `Some(Detached)` or `None` until T17.c.
   - **Tests.**
-    - Fast: a wide pair is `Detached` and a close one is not; `Detached` only shrinks with the age
-      and grows with the periastron and narrower mass intervals; the eccentricity factors are
-      their suprema on a fine grid of e; out-of-domain input is `None`; 2,000 generated pairs agree
-      with `can_interact` (no `Detached` pair passes the pre-test).
-    - (slow) `the_reach_table_bounds_dense_tracks`: over ≥ 10⁵ random stars (mass log-uniform over
-      0.08–150 M☉, Z_fit over its range, η from both the normal law and its extremes, ages log-
-      and linear-uniform to 1.5 × 10¹⁰ years), no `max_radius_until` at the engine's age exceeds
-      the table. Record the least ratio, which is the margin used.
-    - (slow) `no_detached_pair_is_passed_by_the_pre_test`: over ≥ 10⁵ star–star pairs of each
-      layer A–E, from the generator's own hierarchies near the Sun, each at its record's age (old
-      cells) and at a young age (10⁵–10⁸ years), no `Detached` pair passes `can_interact` at its
-      window's end. Record the share of `Detached` per layer and age class.
-  - **Bench.** `pair_light_bound` in `benches/binary.rs`: at most 1 µs, recorded as provisional
-    under load.
-  - **Files.** `stellar/binary/{light,reach}.rs`, `tables/binary_reach.rs`,
-    `crates/hyperion-fit/src/tasks/binary_reach.rs`, its manifest and `tables.lock`.
+    - Fast:
+      - a wide pair is `Detached` and a close one is not;
+      - `Detached` only shrinks with the age and grows with the periastron and narrower mass
+        intervals;
+      - the eccentricity factors are their suprema on a fine grid of e;
+      - a pair whose star may have exploded is `None`;
+      - out-of-domain input is `None`, non-finite masses included;
+      - the answer is the same bit for bit whichever star comes first, over 10⁴ queries;
+      - `assemble`'s errors, and a raised sample raising exactly the cells that hold it;
+      - the golden `stellar/pair_light`: the reader's bits on a grid of node edges, and 256
+        verdicts;
+      - 2,000 generated pairs agree with `can_interact`: no `Detached` pair passes the pre-test;
+      - version 21's passed-over collapse keeps the drawn orbit (the pin above).
+    - (slow) `the_reach_table_bounds_dense_tracks`:
+      - over 10⁵ random pairs, 2 × 10⁵ stars (mass log-uniform over 0.08–150 M☉, [Fe/H] past
+        both clamps, η from the normal law and its extremes, a random stripped mark, ages log-
+        and linear-uniform to 1.5 × 10¹⁰ years), a fifth of them in a stratum at the old turnoff
+        (0.8–2.2 M☉, [Fe/H] −1.2 to −0.1, within 10% of the star's main-sequence end);
+      - no radius the engine's pre-test reads (`largest_radii_rsun` of `own_members`) exceeds the
+        table, no core is missed, and no sudden death is missed;
+      - record the least ratio, which is the margin used.
+    - (slow) `no_detached_pair_is_passed_by_the_pre_test`:
+      - over 10⁵ star–star pairs of each layer A–E, from the generator's own hierarchies near
+        the Sun, each at its record's age (old cells) and at a young age (10⁵–10⁸ years);
+      - no `Detached` pair passes `can_interact` at its window's end;
+      - record the share of `Detached` per layer and age class, against the pre-test's own.
+  - **Bench.** `binary/pair_light_bound` in `benches/binary.rs`: at most 1 µs a call, recorded
+    as provisional under load.
+  - **Files.**
+    - `stellar/binary/{light,reach}.rs` and `tables/binary_reach.rs`;
+    - `crates/hyperion-fit/src/tasks/binary_reach.rs`, its manifest and `tables.lock`.
   - **Acceptance.**
-    - `cargo nextest run -p hyperion-sim -E 'test(binary::)'`;
+    - `cargo nextest run -p hyperion-sim -E 'test(binary::)'`, and
+      `cargo nextest run -p hyperion-fit -E 'test(binary_reach)'`;
+    - `cargo test -p hyperion-sim --doc` for `largest_radius_bound` and `pair_light_bound`;
     - both slow tests by name;
     - `just fit-check`;
-    - the science checker on the reduction over e and the radius margin.
+    - the science checker on the reduction over e, the radius margin and the collapse rule.
 
-- **P11.T17.b The pair-light tables** (a fit run of about 2–7 CPU-hours: the orchestrator's
-  go-ahead before the run).
+  _As built (2026-10-07): see Risks, "P11.T17.a as built"._
+
+- **P11.T17.b The pair-light tables** (approved 2026-10-07, about 2–7 CPU-hours, for a fresh
+  agent; the run plan is in `.git/rm23-orchestration/handoff/handoff-p11-bounds.md`).
   - **Probe first** (at most 0.5 CPU-hours, scratch, not committed). Over 10⁴ pairs of each of
-    layers C, D and E, from the generator's hierarchies, run `evolve` to 1.5 × 10¹⁰ years. For
+    layers C, D and E, from realised systems' hierarchies, run `evolve` to 1.5 × 10¹⁰ years. For
     each pair, record:
     - the latest age at which a living star exists;
-    - the latest age at which a changed star or product is alive (a state other than the star's own
-      single-star model at that age);
+    - the latest age at which a departing star or a product is alive: a state other than the
+      star's own single-star model at that age;
     - which channel holds it: an unchanged star, an eroded donor, a gainer or merger, a stripped
       helium star, a white-dwarf merger product, or a common-envelope survivor.
 
@@ -1758,45 +1810,53 @@ exact masses as the case of zero width, so that a ruling on `hierarchy_bound`'s 
   - **The tables.** `hyperion-fit` tasks `binary_pair_light_c`, `_d` and `_e`, one file a layer
     under 500 kB, each with fit-check and a sim fingerprint.
     - Proposed axes: the primary's initial mass in the layer, the companion's (or q), the
-      metallicity at about four cells, and the least periastron in log bins from 1 R☉ to past
-      T17.a's widest reach at 1.5 × 10¹⁰ years. Each cell is cumulative over every wider
-      periastron, since the pair's own orbit may be any of them.
-    - Per log-age bin, each cell stores:
-      - the brightest V of any living star of the pair;
-      - the brightest V of any changed star or product;
-      - DARK where none lives.
-    - The values are from pairs sampled through `evolve`, at the cell's masses, metallicities and
-      periastra, and at eccentricities, η, kick and common-envelope draws from the generator's
-      laws and their extremes. They are dilated by one cell on each axis and brightened by a
-      margin.
+      metallicity at about four cells, and the drawn periastron in log bins from 1 R☉ to past
+      T17.a's widest reach at 1.5 × 10¹⁰ years.
+    - Per log-age bin, each cell stores the brightest V of any departing star or product, DARK
+      where none lives, and the share of its samples that hold one, so that T17.c can tell an
+      undersampled or borderline cell.
+    - The values are from pairs sampled through `evolve` across the cell, edges included, at
+      eccentricities, η, kick and common-envelope draws from the generator's laws and their
+      extremes. They are dilated by one cell on each axis and brightened by a margin.
     - Cost at about 10 ms a pair, with the age bins' brightness read on each segment's knots and
       sampled phases: 64–128 pairs a cell, about 6–12 × 10⁵ pairs, so 2–7 CPU-hours.
+  - **An open option: a core-inertia column** (the orchestrator, 2026-10-07: not built in
+    T17.a).
+    - T17.a's `Detached` uses T4.j's coarse reservoir, k′₃ m R̂² for a star that may hold a core.
+      T4.j's refined test reads k′₂ M_env R² + k′₃ Mc Rc².
+    - A reach-table column of each cell's largest core term would recover part of D's lost
+      `Detached` share (26% of D's old pairs against the pre-test's 32%) and C's (77% against
+      84%). The tables here cover those pairs anyway.
+    - Build it only if T17.c's measured shares show the loss matters.
+  - **The run.** A long CPU-only run:
+    - a capped scope with `-p CPUQuota=400%` and a timeout of about 3× its expected time;
+    - started at a 1-minute load of 16 or less;
+    - built through `build-slot`, and run outside the heavy lock (§5);
+    - its RSS watched past 10 minutes.
   - **Tests.** The fit validates on held-out pairs per cell. Fast: the readers' shapes.
   - **Acceptance.** `just fit-check`; the probe's figures and the fit's cost are recorded in the
     Risks.
 
-- **P11.T17.c `Remnants` and `Bright`, against `evolve`.**
-  - **The function.** `Detached` (T17.a) first. Otherwise read T17.b's cell at the window's age
-    bins:
-    - `Remnants` where no living star is in any of them;
-    - otherwise `Bright(M)`, M the brightest over them.
-  - **If ruled, `Unchanged`.** A variant meaning "every living star in the window is one of the
-    pair's stars on its own single-star model": T17.b's changed-light value is DARK over the
-    window. The census treats it as `Detached`, each star taking its own bound.
-    - The ruling's counts, 1.4 × 10⁷ C, 2.5 × 10⁷ D and 1.0 × 10⁸ E systems near the Sun, are
-      pairs that interacted but hold no changed living star.
-    - As defined, `Remnants` means all dark, so it excludes those whose untouched companion lives.
-      That is most of E's interacted pairs with companions under about 2 M☉, and most of C's and
-      D's.
-    - The question is with the T16 decision advisor (2026-10-07).
-  - **Tests** (slow, against `evolve`, over ≥ 10⁵ pairs of each layer at random ages in old and
-    young cells):
+- **P11.T17.c `Unchanged`, `Remnants` and `Bright`, against `evolve`.**
+  - **The function.** `Detached` (T17.a) first. Otherwise read T17.b's cell over the window's
+    age bins:
+    - `Remnants` where neither star's own model nor any departing star or product lives in any of
+      them;
+    - `Unchanged` where no departing star or product lives in any of them;
+    - otherwise `Bright(M)`, with M the brightest of the departing stars and products over them;
+    - `None` for an undersampled cell, or one with a departing star or product within the
+      margin of its verdict's boundary (the threshold is set and recorded);
+    - `Bright` wherever a sample is equally consistent with `Unchanged` and `Bright`.
+  - **Tests** (slow, against `evolve`, over ≥ 10⁵ pairs of each layer drawn from realised
+    systems, P11.T16's lists at the attempts kept, near the Sun and in the bulge, at random ages
+    in the window, on a seed independent of the fit's):
     - no `Detached` pair interacts before the window's end;
-    - no `Remnants` pair holds a living star in the window;
-    - every `Bright` bound holds within its margin;
-    - if ruled, no `Unchanged` pair holds a changed star in the window.
+    - no `Unchanged` pair holds a departing living star or a living product in the window;
+    - no `Remnants` pair holds a living star or product in the window;
+    - every star is no brighter than the brighter of its own bound and M.
 
-    Record each case's share per layer and the margin used.
+    Record each case's share per layer, the `None` share, and the margin used. A violation widens
+    the table, never the test.
 
   - **Bench.** At most 1 µs.
   - **Reviews.** The science checker on the margins, the products list and the remnant windows.
@@ -4298,3 +4358,127 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       T7.b's caps. That is the ruling's "as measured" row, not its "with speed-ups" row. So
       R06.T8.g's expected totals become about 3.6–4.4 × 10⁴ and 1.5–1.8 × 10⁴ CPU-s, still inside
       its gates of 6 × 10⁴ and 2.5 × 10⁴.
+- **P11.T17.a as built** (2026-10-07, at version 21; `decision-r06-census-cost.md` §7, ask B;
+  `decision-p11-t16-hierarchy-bound.md` §§5 and 8). No generated output moves, and there is no
+  bump: nothing generated reads the new table.
+  - **Built:**
+    - `stellar/binary/reach.rs`: the grid, `reach_node`, `assemble` and the drop allowance for
+      `hyperion-fit`; the reader `ReachTable`; and the public
+      `largest_radius_bound(masses, composition, age) -> Option<ReachBound>`, with `radius_rsun`,
+      `may_hold_core` and `may_have_collapsed`.
+    - `stellar/binary/light.rs`: `PairLight` with all four of §5's variants, and
+      `pair_light_bound`, which returns `Detached` or `None`.
+    - `tables::binary_reach` (297 kB), `hyperion-fit`'s Fast task `binary_reach` and its
+      manifest, `benches/binary.rs`'s `binary/pair_light_bound`, and the golden
+      `stellar/pair_light` (new, at 21).
+    - In `detached.rs`, `MAGNETIC_BRAKING`, `MAGNETIC_BRAKING_FLOOR`, `DECAY_SAFETY`, `hut_f2`
+      and `hut_f5` became `pub(super)`, and the last two cite Hut (1981). Nothing else in the
+      engine changed.
+  - **Public surface beyond Provides:** `stellar::binary::reach` is public for `hyperion-fit`:
+    - the grid's constants;
+    - `ReachNode`, `ReachCells`, `AssembleReachError` and `assemble`;
+    - `reach_node`, `mass_node_msun`, `fe_h_node` and `centidex_to_rsun`.
+
+    `pair_light_bound_over` (mass intervals) is crate-private, used by the width test only; the
+    ruling makes the census's inputs exact.
+
+  - **The supernova rule** (ruling §5, "or to `None`").
+    - A pair one of whose stars may have died suddenly by the window's end is `None`, read from
+      each cell's earliest sudden death ÷ 1.1.
+    - At 21 a pair that the pre-test passes over at +H keeps its drawn orbit through its
+      collapses (the T4.l agent: finding F3).
+    - But a pair passed over only at the window's end, and run to +H (because it can interact by
+      then, or holds a remnant), goes through the engine from zero age, kick and all. T4.j's
+      zero-miss gate covers interactions before the first supernova only.
+    - So the rule is needed at 21 as well as at 22. The test
+      `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` pins the F3 behaviour and
+      fails when T4.l lands, by design.
+  - **The sampling, set by the dense test and the science check:**
+    - each cell's stars at 9 masses, 7 metallicities (0.083 dex apart at most) and 11 η draws (η =
+      0, then −3.5σ to +3.5σ in nine steps, then +7σ);
+    - inside `fates::STRIPPED_WINDOW` (5.5–11 M☉), each with the companion-stripped mark both set
+      and not. In 6.5–8.4 M☉ the mark moves a track's last phases: an 8.26 M☉ star at
+      [Fe/H] +0.26 reached 2,289 R☉, against the median mark's 871 R☉;
+    - the margin is 0.02 dex and the spread 1.1.
+  - **The spread's basis** (science check). Hurley, Pols and Tout's (2000) t_BGB changes by up to
+    4% across a mass sub-interval, and by up to 10.5% across 0.167 dex of metallicity at
+    0.8–0.9 M☉. The first plan's three metallicity sub-intervals left about 15% corner to
+    corner, which 1.1 did not cover. Six give about 9.5%.
+  - **The drop allowance.**
+    - The largest radius climbs with mass up to a discontinuity and drops there. At the
+      metal-poor clamp it goes from 1,308 R☉ at 41.60 M☉ through 1,440 R☉ at the sample at
+      41.89 M☉ to 1,531 R☉ at 42.19 M☉, about 0.06 dex a sample, and falls 25% by 42.20 M☉. At
+      [Fe/H] −1.55 it steps down near 36.9 M☉.
+    - Where two neighbouring mass samples fall, the cell also takes the larger sample plus the
+      rise into it from its own neighbour. The rise is capped at `DROP_ALLOWANCE_MAX_DEX` =
+      0.1 dex: without the cap, a sample pair straddling a phase's onset doubled its jump, and
+      the largest stored radius went from 6,607 to 25,119 R☉.
+    - Each row is then a running maximum in age. The plan-conformance review found 36 values
+      falling with age, where the allowance switched sides between bins, all past their cells'
+      earliest collapse.
+    - It covers the mass axis only. Metallicity and η rely on the margin and the dense test.
+  - **The fit:**
+    - 672 cells × 105 age bins, from 33,067 samples and 385,968 tracks;
+    - 66 s wall on 4 threads, about 4.4 CPU-minutes;
+    - stored radii 0.148–6,607 R☉;
+    - 214 cells may all still be on their main sequence at 10¹⁰ years;
+    - 286 cells hold a sudden death, the lightest from 5.548 M☉ (the stripped electron-capture
+      window at low Z).
+  - **The dense slow test** (`the_reach_table_bounds_dense_tracks`; 2 × 10⁵ stars, a fifth of
+    them at the old turnoff; 45 s):
+    - 0 failures; least ratio 0.0203 dex, so none of the 0.02 dex margin is used;
+    - three other seeds, not committed (`0x1111_2222_3333_4445`, `0x5eed_0b17_dead_beef`,
+      `0x7a1e_0017_0000_0003`), give 0.0202, 0.0202 and 0.0201 dex, with 0 failures in
+      6 × 10⁵ more stars;
+    - while the sampling was set, it found 137 failures, by up to 0.45 dex (the stripped mark,
+      and η between draws), then 24 (the spikes at 37 and 42 M☉), then 3, then none.
+  - **`Detached` against the pre-test** (`no_detached_pair_is_passed_by_the_pre_test`):
+    - 10⁵ pairs a layer, from the generator's hierarchies near the Sun, at attempts 0–7 in turn
+      (P11.T16's lists are not in this tree); 151 s on 4 cores;
+    - **no `Detached` pair passes `can_interact`.**
+
+    | Layer, ages     | Pre-test passes over | `Detached` | Of those passed over | A star may have collapsed |
+    | --------------- | -------------------- | ---------- | -------------------- | ------------------------- |
+    | A, the record's | 99.78%               | 99.69%     | 99.91%               | 0                         |
+    | A, 10⁵–10⁸ yr   | 100%                 | 99.93%     | 99.93%               | 0                         |
+    | B, the record's | 98.92%               | 98.20%     | 99.27%               | 0                         |
+    | B, young        | 99.99%               | 99.63%     | 99.64%               | 0                         |
+    | C, the record's | 83.67%               | 77.46%     | 92.59%               | 0                         |
+    | C, young        | 99.92%               | 99.38%     | 99.46%               | 0                         |
+    | D, the record's | 31.64%               | 25.96%     | 82.03%               | 8.21%                     |
+    | D, young        | 98.66%               | 97.35%     | 98.67%               | 0.99%                     |
+    | E, the record's | 11.02%               | 0.95%      | 8.57%                | 94.09%                    |
+    | E, young        | 73.16%               | 66.16%     | 90.43%               | 28.52%                    |
+    - C's and D's other losses come from three things: the coarse reservoir (k′₃ m R̂² where a
+      star may hold a core, T4.j's coarse test, not its refined k′₂ M_env R² + k′₃ Mc Rc²), the
+      cells' width, and the margins.
+    - A core-inertia column would recover part of them. It is left as an open option in T17.b.
+
+  - **Reviews.**
+    - rust-reviewer: the must-fixes applied. Units are in the names, helium excess is read by
+      `has_helium_excess`, and `let _ = writeln!` carries a comment.
+    - determinism-auditor: no must-fix. Applied:
+      - the masses are sorted before the bound, so it is the same bit for bit in either order
+        (it differed by one ulp in 28% of swaps), with a test;
+      - the golden `stellar/pair_light`;
+      - probes at 5.5, 11 and 150 M☉ and the metal-rich clamp.
+    - plan-conformance-reviewer: this entry, the running maximum, the drop allowance recorded,
+      the doc example, and the acceptance commands.
+    - science-checker: no must-fix.
+      - It confirmed the reduction over e end to end: 82,673 random and 4,000 edge cases against
+        the engine's coarse test, with no violation.
+      - Its should-fixes are applied: the spread's basis above, the white dwarf's reason (Veras et
+        al. 2011, MNRAS 417, 2104, eq. 21, which also notes real white dwarfs' small kicks), and
+        the probe figures.
+    - Left as considered:
+      - the generated item docs keep their grid numbers as text;
+      - the drop allowance does not cover metallicity or η.
+  - **Cost** (`binary/pair_light_bound/queries`, run under the heavy lock at a 1-minute load of
+    8.7; provisional, since the machine was shared):
+    - 404 µs for 1,024 census-like queries: 0.39 µs a call, 2.5 × 10⁶ a second, against the
+      1 µs target;
+    - 519 of the 1,024 queries are `Detached`.
+  - **At the version-22 batch:**
+    - re-run both slow tests;
+    - refit `binary_reach` if fit-check finds it stale;
+    - revisit the supernova rule when the pin fails (the task text's 22-batch note).

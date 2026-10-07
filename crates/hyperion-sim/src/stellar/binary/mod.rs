@@ -22,14 +22,21 @@
 //! The engine's parameters are [`BinaryParams`], BSE's table 3 with the generator's defaults
 //! (design note 14). Nothing generated calls the engine yet: plan 11's P11.T6–T11 wire it into the
 //! system stage.
+//!
+//! For a caller that must know what a pair can hold before the pair is generated, as rendering
+//! plan R06's census must, [`pair_light_bound`] answers from fitted tables alone (P11.T17):
+//! whether the pair is still two single stars, from the reach table ([`reach`],
+//! [`largest_radius_bound`]), which bounds the radii [`can_interact`] reads.
 
 pub(crate) mod carve;
 mod classify;
 mod common_envelope;
 mod detached;
 mod evolve;
+mod light;
 mod marks;
 mod params;
+pub mod reach;
 mod recycling;
 mod rlof;
 pub(crate) use rlof::{CODE_Q, GAP_Q};
@@ -51,8 +58,10 @@ pub use classify::{
 pub(crate) use evolve::lobe_reached;
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
 pub(crate) use evolve::{can_interact_with_tracks, evolve_with_tracks};
+pub use light::{PairLight, pair_light_bound};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};
 pub use params::{BinaryParams, WindSpeedFactor};
+pub use reach::{ReachBound, largest_radius_bound};
 pub use recycling::{MILLISECOND_PULSAR_MAX_PERIOD, PulsarAt, is_millisecond_pulsar};
 pub use timeline::{
     BinaryInput, BinaryState, BinaryTimeline, BuildBinaryInputError, Component, IaPoolChannel,
