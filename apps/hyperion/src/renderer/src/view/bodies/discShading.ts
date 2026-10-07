@@ -13,9 +13,10 @@
  * law is its `DiscSurface`'s: one law, or under a class map each class's law weighted by the
  * class's share at the hit and the uniform law by what is left (`discSurface.ts`). Every length is divided before it reaches `f32`: the centre is a unit
  * direction with a ÷ D, and every light and occluder is relative to the body's centre over a.
- * A pixel's n × n cells are {@link SMALL_DISC_SAMPLES} per axis on a disc under
- * {@link SMALL_DISC_PX}, so that its summed flux meets the point's at the 3 px switch; on a larger
- * disc one inside and {@link LIMB_SAMPLES} per axis on the limb. A pixel whose four corners all
+ * A pixel's n × n cells are set by the disc's size ({@link discSamples}): {@link FINE_DISC_SAMPLES}
+ * per axis on a disc under {@link FINE_DISC_PX}, so that its summed flux meets the point's at the
+ * 3 px switch; {@link SMALL_DISC_SAMPLES} per axis from there to under {@link SMALL_DISC_PX}; on a
+ * larger disc one inside and {@link LIMB_SAMPLES} per axis on the limb. A pixel whose four corners all
  * meet the body is drawn opaque with its meter class; one on the limb premultiplied by its
  * coverage, keeping the class beneath (decision-r07-t8a, item 3). Near the limb a cell's light is
  * integrated across its profile in √δ, the depth inside the limb (see {@link rasteriseDisc}).
@@ -64,14 +65,66 @@ export const MAX_DISC_OCCLUDERS = 2;
 /** The lit neighbours that light one disc by planetshine at most: the high setting's count. */
 export const MAX_DISC_SECONDARIES = PLANETSHINE_SOURCES_HIGH;
 
-/** A disc under this diameter, px, is sampled {@link SMALL_DISC_SAMPLES}² times in every pixel. */
+/**
+ * A disc under this diameter, px, is sampled {@link FINE_DISC_SAMPLES}² times in every pixel: the
+ * discs that can meet their point at the 3 px switch, 0.7 px above its band's top, 3.3 px
+ * (decision-r07-small-disc-cost).
+ */
+export const FINE_DISC_PX = 4;
+
+/**
+ * Samples per axis in every pixel of a disc under {@link FINE_DISC_PX}: of the counts measured (4,
+ * 5, 6 and 8 per axis), the only one that meets the point there to 1% (6 × 6 errs by 1.15%, 4 × 4
+ * by 1.38%).
+ */
+export const FINE_DISC_SAMPLES = 8;
+
+/**
+ * A disc under this diameter, px, is sampled in every pixel, {@link SMALL_DISC_SAMPLES}² times from
+ * {@link FINE_DISC_PX} up.
+ */
 export const SMALL_DISC_PX = 32;
 
-/** Samples per axis in every pixel of a small disc. */
-export const SMALL_DISC_SAMPLES = 8;
+/**
+ * Samples per axis in every pixel of a disc from {@link FINE_DISC_PX} to under
+ * {@link SMALL_DISC_PX}: within T8.a's 1% of the exact flux there, as 8 × 8 is (worst 0.52%
+ * against 0.49%), for a quarter of its serial shades.
+ */
+export const SMALL_DISC_SAMPLES = 4;
 
 /** Samples per axis in a larger disc's limb pixels. */
 export const LIMB_SAMPLES = 4;
+
+/** Samples per axis in a disc's wholly covered pixels and in its limb pixels. */
+export interface DiscSamples {
+  readonly interior: number;
+  readonly limb: number;
+}
+
+/**
+ * The cells per axis a disc `diameterPx` across takes in its pixels (R07.T8.c,
+ * decision-r07-small-disc-cost).
+ *
+ * @remarks
+ * Two levels below {@link SMALL_DISC_PX}: {@link FINE_DISC_SAMPLES} in every pixel under
+ * {@link FINE_DISC_PX}, {@link SMALL_DISC_SAMPLES} in every pixel from there; one inside and
+ * {@link LIMB_SAMPLES} on the limb above. A pure function of the frame, with no hysteresis: a disc
+ * crossing 4 px changes its flux by up to 0.41%, one crossing 32 px by up to 0.29%, under half an
+ * 8-bit step at white. A diameter that is not a number takes the large disc's counts, as an
+ * unbounded one does.
+ *
+ * @param diameterPx - The disc's angular diameter at the centre pixel's scale
+ *   (`angularDiameterPx`), px.
+ */
+export function discSamples(diameterPx: number): DiscSamples {
+  if (diameterPx < FINE_DISC_PX) {
+    return { interior: FINE_DISC_SAMPLES, limb: FINE_DISC_SAMPLES };
+  }
+  if (diameterPx < SMALL_DISC_PX) {
+    return { interior: SMALL_DISC_SAMPLES, limb: SMALL_DISC_SAMPLES };
+  }
+  return { interior: 1, limb: LIMB_SAMPLES };
+}
 
 /** The display channels' indices, r, g, b. */
 const CHANNELS = [0, 1, 2] as const;
@@ -796,4 +849,75 @@ export function compositeDiscPixels(pixels: ReadonlyArray<DiscPixel>): Composite
     });
   }
   return [...byPixel.values()];
+}
+
+/** One pixel's mean light over its point samples, and the share of them that meet the body. */
+export interface SampledPixel {
+  readonly xPx: number;
+  readonly yPx: number;
+  readonly rgb: Rgb;
+  readonly coverage: number;
+}
+
+/**
+ * The record's pixels point-sampled m × m times each with the disc's own light, in `f64`: the
+ * brute force that the twin's cells are held to (R07.T8.c, decision-r07-small-disc-cost, G5′).
+ *
+ * @remarks
+ * Each sample is the ray through its point of the pixel, on the cells' grid of centres
+ * ({@link sampleOffset}), shaded where it meets the spheroid and black where it misses: no cell
+ * profile and no Gauss points. Every pixel of the record's rectangle that a sample meets is
+ * returned, in row order. The cost grows as m², so a test keeps the disc to a few pixels.
+ *
+ * @param samplesPerAxis - m, a positive integer.
+ * @param classMap - The texels of the record's class map; `null` for a uniform surface.
+ * @throws Error if `samplesPerAxis` is not a positive integer; for a class-map record without its
+ *   texels, or with another map's class count.
+ */
+export function pointSampleDisc(
+  record: DiscRecord,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+  samplesPerAxis: number,
+  classMap: ClassMapTexels | null = null,
+): SampledPixel[] {
+  if (!Number.isInteger(samplesPerAxis) || samplesPerAxis < 1) {
+    throw new Error(
+      `a pixel takes a positive whole number of samples per axis, got ${samplesPerAxis}`,
+    );
+  }
+  const body = viewBodyOf(record, camera, classMap);
+  const m = samplesPerAxis;
+  const share = 1 / (m * m);
+  const pixels: SampledPixel[] = [];
+  const { rect } = record;
+  for (let y = Math.floor(rect.topPx); y < Math.ceil(rect.bottomPx); y += 1) {
+    for (let x = Math.floor(rect.leftPx); x < Math.ceil(rect.rightPx); x += 1) {
+      const sum: [number, number, number] = [0, 0, 0];
+      let hits = 0;
+      for (let i = 0; i < m; i += 1) {
+        for (let j = 0; j < m; j += 1) {
+          const ray = viewRay(x + (i + 0.5) / m, y + (j + 0.5) / m, camera, viewport);
+          const q = hitSpheroid(body, ray);
+          if (q === null) {
+            continue;
+          }
+          hits += 1;
+          const { radiance } = shade(body, record, q, ray);
+          for (const c of CHANNELS) {
+            sum[c] += radiance[c];
+          }
+        }
+      }
+      if (hits > 0) {
+        pixels.push({
+          xPx: x,
+          yPx: y,
+          rgb: [sum[0] * share, sum[1] * share, sum[2] * share],
+          coverage: hits * share,
+        });
+      }
+    }
+  }
+  return pixels;
 }

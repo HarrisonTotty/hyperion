@@ -76,13 +76,11 @@ import {
   type DiscOccluder,
   type DiscRecord,
   type DiscSecondary,
+  discSamples,
   type DrawnDiscSurface,
-  LIMB_SAMPLES,
   MAX_DISC_LIGHTS,
   MAX_DISC_OCCLUDERS,
   packDiscRecords,
-  SMALL_DISC_PX,
-  SMALL_DISC_SAMPLES,
 } from "./discShading";
 import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { bodyReflection, figurePole } from "./oblate";
@@ -329,8 +327,7 @@ function discRecordOf(
       ? rotateToBody(surface.rotation, vec3(0, 0, 1))
       : figurePole(body.figure);
   const aOverD = a / distanceM;
-  const small =
-    angularDiameterPx(body.centreM, a, options.camera, options.viewport) < SMALL_DISC_PX;
+  const samples = discSamples(angularDiameterPx(body.centreM, a, options.camera, options.viewport));
   const lights: DiscLight[] = lightsOf(body, hosts).map((light) => {
     const d = norm(light.toStarM);
     return {
@@ -359,8 +356,8 @@ function discRecordOf(
     radiusOverDistance: aOverD,
     pole,
     polarOverEquatorial: c / a,
-    interiorSamples: small ? SMALL_DISC_SAMPLES : 1,
-    limbSamples: small ? SMALL_DISC_SAMPLES : LIMB_SAMPLES,
+    interiorSamples: samples.interior,
+    limbSamples: samples.limb,
     surface,
     tableRows,
     exposureOverPi: options.exposureScale / Math.PI,

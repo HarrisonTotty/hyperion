@@ -24,6 +24,7 @@ import {
 import { starIlluminance } from "../lighting/illuminance";
 import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import { oblateAlbedoScale } from "./oblate";
+import type { Rgb } from "../photometry/toneCurve";
 import { AU_M } from "../scenes/kept";
 import { METER_CLASS } from "../post/meter";
 import {
@@ -197,8 +198,8 @@ describe("the disc and the point at the 3 px switch", () => {
   const distanceFor = (px: number): number => radius / Math.sin(px / 2 / PX_PER_RAD);
   /**
    * The worst |disc ÷ reference − 1| per channel over 16 sub-pixel placements of the centre: the
-   * point's flux at the switch (3 and 3.3 px), or the exact near-field surface integral where no
-   * point is drawn (decision-r07-t8a, follow-up (b)).
+   * point's flux across the switch's band (2.7–3.3 px), or the exact near-field surface integral
+   * where no point is drawn (decision-r07-t8a, follow-up (b); from 4 px, decision-r07-small-disc-cost).
    */
   const worstOver = (
     px: number,
@@ -208,7 +209,8 @@ describe("the disc and the point at the 3 px switch", () => {
   ): number => {
     const distance = distanceFor(px);
     let worst = 0;
-    let nearField: [number, number, number] | null = null;
+    // The near field at the centred placement, and the point's flux there.
+    let centred: { readonly nearField: Rgb; readonly point: Rgb } | null = null;
     for (let i = 0; i < 4; i += 1) {
       for (let j = 0; j < 4; j += 1) {
         const offset = vec3(
@@ -223,9 +225,21 @@ describe("the disc and the point at the 3 px switch", () => {
           centreM: add(host.centreM, offset),
         }));
         const disc = discFlux(moved, hosts);
-        // The near field moves by under 10⁻⁴ over a pixel's offsets: taken once, centred.
-        nearField ??= reference === "point" ? null : nearFieldFlux(moved, hosts);
-        const truth = nearField ?? pointFlux(moved, hosts, [], DISC_ANNULI_HIGH);
+        const point = pointFlux(moved, hosts, [], DISC_ANNULI_HIGH);
+        // A centre moved x px turns the phase by up to x ÷ 1,663 rad, which moves a crescent's flux
+        // by up to 0.25% at 150°; the near field's ratio to the point moves by under 10⁻⁴. So the
+        // near field is taken once, centred, and carried to each placement by the point's ratio
+        // (to 3 × 10⁻⁵ of an integral at each placement).
+        centred ??=
+          reference === "point" ? null : { nearField: nearFieldFlux(moved, hosts), point };
+        const truth: Rgb =
+          centred === null
+            ? point
+            : [
+                (centred.nearField[0] * point[0]) / centred.point[0],
+                (centred.nearField[1] * point[1]) / centred.point[1],
+                (centred.nearField[2] * point[2]) / centred.point[2],
+              ];
         for (const c of [0, 1, 2] as const) {
           worst = Math.max(worst, Math.abs(disc[c] / truth[c] - 1));
         }
@@ -240,13 +254,25 @@ describe("the disc and the point at the 3 px switch", () => {
       { equatorialRadiusM: radius, polarRadiusM: radius * (1 - 0.098), pole: vec3(0, 1, 0) },
     ],
   ] as const;
+  // Across the switch's band, 2.7–3.3 px, the disc (8 × 8 cells) meets the point it switches
+  // with: the ruling's 2.75, 3 and 3.3 px, and 2.701 px, just above the 2.7 px where a disc
+  // shrinking turns to a point (2.7 px itself puts the placements off the centre under it).
+  // From 4 px (4 × 4 cells) to 32 px, where no point is drawn, it meets the exact near-field
+  // integral of the same law, the far-field point being the less accurate there (decision-r07-t8a,
+  // follow-up (b); decision-r07-small-disc-cost, G1 and G2). The ruling's 4 px row is taken at
+  // 4.01 px: a placement off the centre stands a little farther off, which takes a disc 4 px
+  // across at the centre pixel's scale just under 4 px, and so back to 8 × 8.
+  const sizes = [
+    ...[2.701, 2.75, 3, 3.3].map((px) => [px, "point"] as const),
+    ...[4.01, 4.5, 5, 6, 7, 8, 9.6, 11, 12, 13, 16, 24, 31.5].map(
+      (px) => [px, "near-field"] as const,
+    ),
+  ];
   for (const [name, figure] of figures) {
-    for (const px of [3, 3.3, 6]) {
-      for (const phaseDeg of [0, 90, 150]) {
-        // At 3 and 3.3 px the disc meets the point it switches with; at 6 px, where no point is
-        // drawn, the exact near-field integral of the same law, the far-field point being the less
-        // accurate there (decision-r07-t8a, follow-up (b)).
-        const reference = px === 6 ? "near-field" : "point";
+    for (const [px, reference] of sizes) {
+      // 120° also at 6 and 13 px, the sizes where the 150° crescent (0.134 R deep) outgrows the
+      // near-limb band of 8 × 8 (about 0.31 px) and of 4 × 4 (about 0.63 px).
+      for (const phaseDeg of px === 6 || px === 13 ? [0, 90, 120, 150] : [0, 90, 150]) {
         it(`sums to the ${reference} flux within 1% for ${name} at ${String(px)} px and ${String(phaseDeg)}°`, () => {
           expect(worstOver(px, phaseDeg, { figure }, reference)).toBeLessThan(0.01);
         });
@@ -270,26 +296,39 @@ describe("the disc and the point at the 3 px switch", () => {
     }
   });
 
+  /** The lunar law (L = 1) and the f = 0.098 spheroid seen from 45° latitude. */
+  const moon = {
+    ...PROVISIONAL_PHOTOMETRY,
+    law: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+  };
+  const tilted = {
+    equatorialRadiusM: radius,
+    polarRadiusM: radius * (1 - 0.098),
+    pole: vec3(0, Math.SQRT1_2, Math.SQRT1_2),
+  };
+
   it("holds for a lunar law (L = 1)", () => {
-    const moon = {
-      ...PROVISIONAL_PHOTOMETRY,
-      law: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
-    };
     for (const phaseDeg of [0, 90, 150]) {
       expect(worstOver(3, phaseDeg, { photometry: moon })).toBeLessThan(0.01);
     }
   });
 
   it("holds for a spheroid seen from 45° latitude", () => {
-    const tilted = {
-      equatorialRadiusM: radius,
-      polarRadiusM: radius * (1 - 0.098),
-      pole: vec3(0, Math.SQRT1_2, Math.SQRT1_2),
-    };
     for (const phaseDeg of [0, 90, 150]) {
       expect(worstOver(3, phaseDeg, { figure: tilted })).toBeLessThan(0.01);
     }
   });
+
+  // From 4 to 32 px at 150°, against the near field (decision-r07-small-disc-cost, G2′).
+  for (const px of [4.01, 8, 13, 24]) {
+    it(`holds the near-field flux for a lunar law (L = 1) to 1% at ${String(px)} px and 150°`, () => {
+      expect(worstOver(px, 150, { photometry: moon }, "near-field")).toBeLessThan(0.01);
+    });
+
+    it(`holds the near-field flux for a spheroid seen from 45° latitude to 1% at ${String(px)} px and 150°`, () => {
+      expect(worstOver(px, 150, { figure: tilted }, "near-field")).toBeLessThan(0.01);
+    });
+  }
 
   it("keeps the agreement off the view's centre at 40 px", () => {
     const distance = distanceFor(40);
@@ -332,7 +371,7 @@ describe("the disc's geometry", () => {
   });
 
   it("writes the lit class on the day side, the unlit on the night side and none on the limb", () => {
-    // 20 px across, every pixel sampled 8 × 8; the terminator 1.7 px left of the centre.
+    // 20 px across, every pixel sampled 4 × 4 (T8.c); the terminator 1.7 px left of the centre.
     const { body, hosts } = scene(6.371e6 / Math.sin(10 / PX_PER_RAD), 80);
     const plan = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
     const record = plan.discs[0];
@@ -555,6 +594,23 @@ describe("the records", () => {
     );
   });
 
+  // The cells by size (T8.c, decision-r07-small-disc-cost): 8 × 8 under 4 px, 4 × 4 to 32 px.
+  for (const [px, cells] of [
+    [3.5, 8],
+    [13, 4],
+  ] as const) {
+    it(`packs a ${String(px)} px disc's ${String(cells)} × ${String(cells)} cells in every pixel in row 3`, () => {
+      const { body, hosts } = scene(6.371e6 / Math.sin(px / 2 / PX_PER_RAD), 0);
+      const plan = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+      const record = plan.discs[0];
+      if (record === undefined) {
+        throw new Error("no disc");
+      }
+      // Row 3's x and y: the cells per axis inside and on the limb.
+      expect(Array.from(packDiscRecords([record]).subarray(12, 14))).toEqual([cells, cells]);
+    });
+  }
+
   it("orders a host's annuli r, g, b from R06's B, V, R laws", () => {
     const disc = aHostDisc({
       limb: [
@@ -739,6 +795,34 @@ describe("a body's eclipse over its disc (T10.b)", () => {
       }
       expect(worst).toBeLessThan(0.01);
     });
+  }
+
+  // The disc's eclipsed share of its clear flux against the point's `discEclipseVisible`, at the
+  // cells each size takes (T8.c, decision-r07-small-disc-cost, G6), 4.01 px standing for 4 px.
+  for (const [lawName, photometry] of [
+    ["the provisional Lambert law", PROVISIONAL_PHOTOMETRY],
+    ["a lunar law", lunar],
+  ] as const) {
+    for (const px of [4.01, 6, 12, 24]) {
+      it(`keeps the disc's eclipsed share within 0.005 of the point's through an Io-like ingress at ${String(px)} px, under ${lawName}`, () => {
+        let worst = 0;
+        for (const phaseDeg of [30, 90]) {
+          for (const fraction of [0.25, 0.5, 0.75]) {
+            const axisM = 6.9332e7 + fraction * 4.397e6;
+            const { body, hosts, jupiter } = ingress(px, phaseDeg, axisM, photometry);
+            const occluder = { id: jupiter.id, centreM: jupiter.centreM, radiusM: 7.1492e7 };
+            const disc = discFlux(body, hosts, [jupiter], starlight);
+            const clearDisc = discFlux(body, hosts, [], starlight);
+            const point = pointFlux(body, hosts, [occluder], DISC_ANNULI_HIGH);
+            const clearPoint = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+            for (const c of [0, 1, 2] as const) {
+              worst = Math.max(worst, Math.abs(disc[c] / clearDisc[c] - point[c] / clearPoint[c]));
+            }
+          }
+        }
+        expect(worst).toBeLessThan(0.005);
+      });
+    }
   }
 });
 

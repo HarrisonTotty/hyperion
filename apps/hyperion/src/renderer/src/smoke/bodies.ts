@@ -1,7 +1,8 @@
 /**
- * The smoke page's lit-body checks (plan R07, T8.a and T8.b): `shaders/bodyDisc.wgsl`'s two draws
- * into an `rgba16float` target the test makes, against `bodies/discShading.ts`' CPU rasteriser of
- * the same arithmetic: a disc's texels and meter classes; its summed flux against the point's at
+ * The smoke page's lit-body checks (plan R07, T8.a, T8.b and T8.c): `shaders/bodyDisc.wgsl`'s two
+ * draws into an `rgba16float` target the test makes, against `bodies/discShading.ts`' CPU rasteriser
+ * of the same arithmetic: a disc's texels and meter classes; a crescent at each sampling level
+ * (8 × 8, 4 × 4, and one inside with 4 × 4 on the limb); its summed flux against the point's at
  * the 3 px switch, over phases and sub-pixel placements; a Saturn-like f = 0.098 disc's extents at
  * 100 px; a disc under a half-surveyed two-class map, and under a map of one class equal to the
  * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11).
@@ -96,6 +97,8 @@ interface Drawn {
   readonly expected: ReadonlyArray<CompositePixel>;
   readonly body: LitBodyInput;
   readonly hosts: ReadonlyArray<PlacedLight>;
+  /** The cells per axis the record took inside and on the limb; `null` where it drew no disc. */
+  readonly samples: readonly [number, number] | null;
 }
 
 /**
@@ -182,7 +185,9 @@ async function drawDisc(
       record === undefined
         ? []
         : compositeDiscPixels(rasteriseDisc(record, camera, viewport, mapped?.texels ?? null));
-    return { viewport, camera, texels, expected, body, hosts };
+    const samples =
+      record === undefined ? null : ([record.interiorSamples, record.limbSamples] as const);
+    return { viewport, camera, texels, expected, body, hosts, samples };
   } finally {
     target.dispose();
   }
@@ -247,6 +252,7 @@ export async function checkBodies(engine: RenderEngine, checks: Checks): Promise
   const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
   try {
     await checkTexels(engine, renderer, checks);
+    await checkSamplingLevels(engine, renderer, checks);
     await checkFlux(engine, renderer, checks);
     await checkExtents(engine, renderer, checks);
     await checkPlanetshine(engine, renderer, checks);
@@ -297,7 +303,7 @@ async function checkTexels(
   renderer: LitBodyRenderer,
   checks: Checks,
 ): Promise<void> {
-  // 20 px across, every pixel sampled 8 × 8, at 80° so that the terminator crosses pixels.
+  // 20 px across, every pixel sampled 4 × 4 (T8.c), at 80° so that the terminator crosses pixels.
   const drawn = await drawDisc(engine, renderer, { widthPx: 48, heightPx: 48 }, 20, 80, SPHERE);
   const { worst, classes, seen, mismatches } = texelAgreement(drawn);
   checks.check(
@@ -330,6 +336,49 @@ async function checkTexels(
     classes &&
       [METER_CLASS.litBody, METER_CLASS.unlitBody, METER_CLASS.other].every((c) => seen.has(c)),
     `classes seen ${[...seen].toSorted((x, y) => x - y).join(", ")}; each as the rasteriser's ${String(classes)}${mismatches.length > 0 ? `: ${mismatches.slice(0, 6).join("; ")}` : ""}`,
+  );
+}
+
+/**
+ * T8.c: a crescent at 150° drawn at each sampling level against the CPU rasteriser: 3.5 px (8 × 8
+ * in every pixel), 13 px (4 × 4 in every pixel) and 40 px (one inside, 4 × 4 on the limb), each
+ * with the counts its record takes.
+ */
+async function checkSamplingLevels(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+): Promise<void> {
+  const levels = [
+    [3.5, 8, 8],
+    [13, 4, 4],
+    [40, 1, 4],
+  ] as const;
+  let pass = true;
+  const cases: string[] = [];
+  for (const [diameterPx, interior, limb] of levels) {
+    // The harness's checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const drawn = await drawDisc(
+      engine,
+      renderer,
+      { widthPx: 64, heightPx: 64 },
+      diameterPx,
+      150,
+      SPHERE,
+    );
+    const { worst, classes } = texelAgreement(drawn);
+    const [takenInterior, takenLimb] = drawn.samples ?? [0, 0];
+    const counted = takenInterior === interior && takenLimb === limb;
+    pass &&= counted && classes && worst <= 1 && drawn.expected.length > 0;
+    cases.push(
+      `${String(diameterPx)} px: ${String(takenInterior)} inside, ${String(takenLimb)} on the limb; ${String(drawn.expected.length)} pixels within ${worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(classes)}`,
+    );
+  }
+  checks.check(
+    "R07.T8.c a crescent's texels equal the CPU rasteriser's at each sampling level: 8 × 8 under 4 px, 4 × 4 to 32 px, one inside and 4 × 4 on the limb above",
+    pass,
+    cases.join("; "),
   );
 }
 

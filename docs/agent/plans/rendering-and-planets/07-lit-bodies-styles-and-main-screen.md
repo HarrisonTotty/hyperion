@@ -1361,6 +1361,80 @@ smoke harness renders an empty photorealistic frame with finite texels. Acceptan
   uniform law; a map of one class equal to the uniform law gives the uniform disc to 10⁻⁵; the
   disc's integrated p equals the area-weighted p of the classes. Acceptance: `just ci`,
   `just test-render`.
+- **R07.T8.c Small discs sampled by size** (decision-r07-small-disc-cost).
+  - **What it does.** `discSamples(diameterPx)` in `bodies/discShading.ts` sets a disc record's
+    cells: 8 × 8 in every pixel below `FINE_DISC_PX` (4 px); 4 × 4 in every pixel from 4 px to
+    under `SMALL_DISC_PX` (32 px); one inside and 4 × 4 on the limb above.
+    - The constants are `FINE_DISC_PX = 4`, `FINE_DISC_SAMPLES = 8` and `SMALL_DISC_SAMPLES = 4`;
+      `LIMB_SAMPLES` is unchanged.
+    - `discRecordOf` (`bodies/draw.ts`) takes its counts from `discSamples`.
+    - There is no hysteresis, and no change to `bodyDisc.wgsl`. The twin follows from the record.
+    - It replaces T8.a's "8 × 8 below 32 px" (decision-r07-t8a, item 3, refinement 4).
+  - **Files.** `bodies/discShading.ts`, `bodies/draw.ts`, `bodies/draw.test.ts`, the smoke
+    harness's disc checks, and this plan. _As built, also `bodies/discShading.test.ts`._
+  - **Tests** (decision-r07-small-disc-cost §2):
+    - `discSamples` at 3.99, 4, 31.99 and 32 px, and the records' row 3 for a 3.5 px and a 13 px
+      disc.
+    - G1 at 2.75, 3 and 3.3 px.
+    - G2 and G2′.
+    - G4's steps at 4 and 32 px.
+    - G5, with G5′ anchoring its reference.
+    - G6 through T10.b's `ingress` at 4, 6, 12 and 24 px.
+    - T8.a's, T9's, T10.b's and T10.c's tests unchanged.
+  - **Acceptance.**
+    - `pnpm --filter hyperion exec vitest run src/renderer/src/view/bodies
+src/renderer/src/view/scenes src/renderer/src/view/lighting`.
+    - `just test-render`, both variants: G10 re-measured; the captures holding a disc of 4–31 px
+      listed as changed and every other capture byte-identical to the base.
+    - `just ci`.
+    - By hand, hidden, on the RTX 3080, with the lane's cost harness
+      (`.git/rm23-scratch/r07-shading/cost-t19/`): `PHASE TEST` all photorealistic, each
+      instrument's `discs` pass at most 0.6 M cycles at the logged clock. The 4 × 4 build measured
+      0.54 M. A 3.5 px disc's view is recorded beside it, about 2.0 M, unchanged until T8.d.
+  - _As built (2026-10-06, the shading lane): see Risks, "Deviations in T8.c, as built"._
+- **R07.T8.d The cells in parallel** (decision-r07-small-disc-cost, §1.2).
+  - **What it does.** A compute pass `disc cells` shades every cell of every disc under 32 px,
+    one invocation a cell. Each pixel's cells are summed by one invocation in `pixel_sum`'s order.
+    - The disc's interior and limb draws, and a promoted small body's mesh interior, read the
+      pixel's sum (record row 51) in place of running `pixel_sum`.
+    - Their tests, classes and coverage are unchanged.
+    - A disc of 32 px or more keeps the in-fragment path, as does a record whose row 51 says so.
+    - One dispatch per photorealistic view per frame, between `sky` and `discs`, and none without
+      a small disc.
+    - The twin is unchanged: no arithmetic changes.
+  - **Files.**
+    - New: `shaders/bodyDiscCells.wgsl`, registered in `WGSL_CATALOGUE` as `BODY DISC CELLS`.
+    - Shaders: `shaders/bodyDisc.wgsl`, `shaders/bodyDiscDraw.wgsl` and `shaders/smoothMesh.wgsl`
+      (the `cell_sums` binding, at one free `@group(2)` number in both includers).
+    - TypeScript: `bodies/discShading.ts` (row 51, `DISC_ROWS` 52, the jobs), `bodies/draw.ts`
+      (`LitBodyRenderer`'s buffers and dispatch), `photoreal/renderer.ts`, `photoreal/passes.ts`
+      (`discCells`), `test/fakeViewEngine.ts` and `test/countingRenderEngine.ts` as needed.
+    - The smoke harness's disc checks.
+  - **Tests.**
+    - Against the fake or counting engine:
+      - A frame with a 3.5 px and a 13 px disc dispatches `disc cells` once, before `discs`, with
+        one job per pixel of their rectangles, and writes their row 51.
+      - A frame whose discs are all 32 px or more dispatches nothing and writes −1 there.
+      - Three photorealistic views dispatch once each.
+      - The pass list puts `disc cells` between `sky` and `discs`, no label repeated.
+      - A device loss remakes the kernel and buffers.
+      - `TIMING_FRAMES_IN_FLIGHT` still covers three frames' resolves of a photorealistic primary
+        with two photorealistic instruments.
+    - `just test-render`, both variants:
+      - G11 for a 3.5 px disc (8 × 8), a 13 px and a 20 px disc (4 × 4), and a small body
+        promoted to the mesh regime, each drawn through the pass and in-fragment in the same run.
+      - G10 against the twin.
+      - The kernel in the catalogue check.
+      - No uncaptured GPU error.
+  - **Acceptance.**
+    - `pnpm test`, `just test-render` and `just ci`.
+    - By hand, hidden, on the RTX 3080, with the cost harness:
+      - In `PHASE TEST` all photorealistic, an instrument's `disc cells` and `discs` together at
+        most 0.2 M cycles, from 0.54 M after T8.c.
+      - A view whose only disc is 3.5 px at most 0.2 M cycles, from about 2.0 M.
+      - The primary recorded as limited by its discs of 32 px or more (about 0.47–0.54 M).
+    - A bound missed is recorded and goes to the orchestrator for a ruling. It does not fail
+      silently.
 
 #### R07.T9 Mesh bodies
 
@@ -1868,7 +1942,30 @@ reversible choice, recorded in Risks. Record the benchmarks of T12, T14 and T15 
 style's frame time on the development machine's RTX 3080, which exceeds the RTX 4060 class of the
 brainstorm's Testing section, at 1080p, and, by the owner, on the UHD 620 at 720p, each on a quiet
 machine, under `--hyperion-gpu-timing`, in this plan as "as built" figures replacing the probes'
-provisional ones; R12 consolidates them. Tests (Vitest): `VIEW` given `low` draws its sky and its
+provisional ones; R12 consolidates them.
+
+T8.c, T8.d and T19.e land before these benchmarks (decision-r07-small-disc-cost). The
+benchmarks include the `disc cells` and `discs` passes of a view holding:
+
+- a disc of 3.3–4 px (8 × 8);
+- one of 4–32 px (4 × 4);
+- one of 32 px or more.
+
+Each size is checked against the logged disc plan. Every pass time is recorded with the GPU's
+clock beside it, and in cycles at that clock:
+
+- `nvidia-smi` on the RTX 3080;
+- on the UHD 620, `gt_act_freq_mhz` (the actual) beside `gt_cur_freq_mhz` (the requested).
+  - These are read under `/sys/class/drm/cardN/`, the card whose `device/driver` is i915. It is
+    not always `card0`.
+  - They are sampled during the timed passes, since the actual frequency reads 0 while the GPU
+    idles.
+
+A permitted reorder (decision-r07-small-disc-cost): if the orchestrator needs `low` selectable for
+the owner's UHD 620 runs before T8.d lands, T17 may go first. T8.d then re-takes T17's discs-pass
+rows on the 3080, and the owner's UHD 620 runs wait for T8.d.
+
+Tests (Vitest): `VIEW` given `low` draws its sky and its
 photorealistic frame at the low setting's values. Acceptance: `pnpm test`, `just ci`; the figures
 recorded with their settings, flags, load and dates.
 
@@ -2103,6 +2200,12 @@ Recorded in this plan. Acceptance: the record.
   `high` until T17 (see "Deviations in the T20 and T21 harnesses"). When the records land, each
   run's verdicts are entered here as one line. `PER_CANVAS_OVERHEAD_MS` stays at 0.3 ms until
   then (ruled 2026-10-05), and changes on the owner's ruling of which figure it takes.
+- **The small disc's cost and the second criterion** (decision-r07-small-disc-cost). Once T8.d
+  lands, a small disc's cost is throughput and grows with the view's pixels, so the remedy above
+  for a miss of the second criterion (the instrument's scale under the controller) can act on
+  it. Before T8.d it could not: lowering the scale does not shorten a chain, and can push a disc
+  into the 8 × 8 band. A miss whose `discs` pass holds a disc of 32 px or more is the residual
+  (a large disc's 4 × 4 limb, 0.47–0.54 M cycles) and is recorded as a finding.
 
 #### R07.T21 A child window on a second monitor
 
@@ -4274,7 +4377,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     is within 0.8% everywhere but 6 px at 150°, 1.6%, of which 1.1% is the point's own far-field
     error (below), so that the 6 px rows meet the exact near-field integral at 1% instead (part 2,
     follow-up (b)). A lunar law and a spheroid seen from 45° latitude
-    are within 1% at 3 px.
+    are within 1% at 3 px. _Amended by R07.T8.c (decision-r07-small-disc-cost): 8 × 8 below 4 px,
+    4 × 4 from 4 to 32 px; see part 2's "Sampling, as built"._
   - **The ray in `f32`.** The hit is taken by cross products in the scaled space,
     q′ = −(r̂ × u′) × r̂ − √((a ÷ D)² − |r̂ × u′|²) r̂, never b² − rr · power, which cancels to 7% for
     a body 10⁻³ rad across (the first GPU run read 1.2–60% at 3 px against the twin's 0.4%).
@@ -4368,6 +4472,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     shaded at up to nine points (three Gauss points in each of its profile's three pieces) after
     three limb-angle evaluations, and above 32 px the interior pixels within about 2 px of the limb
     are integrated the same way and classed by those points. The cost goes to T17's bench.
+    _Amended by R07.T8.c (decision-r07-small-disc-cost): 8 × 8 below 4 px, 4 × 4 from 4 to
+    32 px._
   - **Promotion** (`promoteOverlapping`) is not called: the frame has no depth-writing geometry
     yet (no mesh bodies, terrain or lit hulls); T9 calls it with footprints. _Called from T9's
     `planLitBodies` (see "Deviations in T9, as built")._
@@ -4407,7 +4513,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     meets the point it switches with; at 6 px, where no point is drawn, the disc meets an exact
     `f64` near-field surface integral of its own law (`nearFieldFlux` in `draw.test.ts`, 400 × 800
     midpoint), and a test pins the far-field point's own error there, 1 − F_exact ÷ F_point =
-    6.1 a ÷ D at 150° and 0.59 a ÷ D at 90°, to 0.2%.
+    6.1 a ÷ D at 150° and 0.59 a ÷ D at 90°, to 0.2%. _Since T8.c these rows run at 4 × 4, and
+    the near field, taken once centred, is carried to each placement by the point's ratio (see
+    "Deviations in T8.c, as built")._
   - **By hand, for the owner**: `PHASE TEST` with `4` (the target keys stepping through the 0°,
     90° and 150° planets and the `TEST GIANT`, a Jupiter from 10¹⁰ m) on the development machine
     with `just client`, recorded in the as-built notes; `StyleControl`'s layout at 1920 × 1080 and
@@ -4501,6 +4609,17 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `ExposurePanel.test.tsx` (new): under `AUTO`, `ENABLE` is held back and described as
     `NOT AVAILABLE: the exposure is AUTO`; under `MAN`, `INHIBIT` as
     `NOT AVAILABLE: the exposure is MAN`. `exposure.test.ts` takes the renamed reason.
+- **Sample counts by size** (T8.c, decision-r07-small-disc-cost).
+  - Where the counts change: 8 × 8 below 4 px, 4 × 4 to 32 px, one inside and 4 × 4 on the limb
+    above. The counts are a pure function of the frame, with no hysteresis.
+  - The steps: a disc crossing 4 px changes its flux by up to 0.41%, and one crossing 32 px by up
+    to 0.29%. That is under half an 8-bit step at white.
+  - Pixel errors against brute force: at most 1.24% of the disc's brightest pixel, in a fully
+    covered pixel by a 12 px crescent's terminator. The limb's worst, 1.16%, is a large disc's
+    own limb error. The RMS is at most 0.20%.
+  - The dominant flux error at high phase: the crescent's terminator lying in centre-sampled
+    cells beyond the nine-point band, at most 0.8%. _As built, against a near-field oracle that
+    follows each placement's phase: at most 0.52% (see "Deviations in T8.c, as built")._
 - **Deviations in T8.b, as built (the class-map hook).**
   - **Files.** `bodies/discSurface.ts` (`MAX_DISC_CLASSES` 16, `CLASS_MAP_FORMAT` `rgba8unorm`,
     `CLASSES_PER_LAYER`, `classMapLayers`, `ClassMapTexels`, `ClassMapTexel`, `classMapTexelOf`,
@@ -5720,7 +5839,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     at most about 1,200 fragments, so the GPU holds a handful of warps and waits on the longest one.
     That chain sets the pass's time, whatever the view's size. In `PHASE TEST` the half planet is
     13 px across in a 240 px instrument at 60° (62 px in the primary), and the giant a 14 px disc at
-    the primary's edge.
+    the primary's edge. _Since T8.c a disc of 4–32 px takes 4 × 4 cells, and its chain a quarter
+    of the shades (see "Deviations in T8.c, as built")._
   - **How it was measured.** Hidden runs on the RTX 3080, the window offscreen at 1920 × 1080 and
     never resized, `--hyperion-gpu-timing`, `PHASE TEST` with the primary (1120 × 900) and both
     instruments (240 × 180) photorealistic in `FREE`, 6 s phases. Each view's GPU time per pass was
@@ -5817,7 +5937,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - On high, with both instruments and the primary photorealistic, up to three chains, about
       3–12 ms at full clock.
     - The figures scale with the clock, so the owner's runs should record the GPU's clock beside
-      each pass time (on Intel, `gt_cur_freq_mhz` under `/sys/class/drm/card0/`).
+      each pass time (on Intel, `gt_cur_freq_mhz` under `/sys/class/drm/card0/`). _T17 reads
+      `gt_act_freq_mhz` beside it, on the i915 card, which is not always `card0`
+      (decision-r07-small-disc-cost)._
   - **Left open, not measured apart.**
     - R06's host disc is a full-view triangle for every host of 3 px or more, on the view or not.
       _Built by T19.e: none off the view, and a quad over its rectangle on it._
@@ -5828,6 +5950,27 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       mesh test above promotes a body clear of both. Nothing changes on screen today, since no
       view writes depth. Taking `sphereOutsideView` there too would end it, before R10. _Built by
       T19.e: no footprint off the view._ See "Deviations in T19.e, as built", the last entry.
+  - _Ruled 2026-10-06 (decision-r07-small-disc-cost):_
+    - **The sampling.** (a) is taken in two levels, not the lean's ramp: 8 × 8 below 4 px, the
+      only cells that meet T8.a's 1% at the 3 px switch (6 × 6 reaches 1.15%, 4 × 4 1.38%), and
+      4 × 4 from 4 px to 32 px.
+      - 4 × 4 is within 0.77% of the exact near-field flux there, against 8 × 8's 0.79%. It is the
+        better of the two on crescents from 6 to 11 px, where 8 × 8's narrower nine-point band
+        leaves the terminator centre-sampled.
+      - Built as T8.c. _As built, against a near-field oracle that follows each placement's
+        phase: 0.52% against 8 × 8's 0.49% over 4–31.5 px. At 6–11 px and 150°, 4 × 4 reads
+        0.005–0.31% against 8 × 8's 0.29–0.49%, better but for f = 0.098 at 9.6 px (0.31% against
+        0.29%). See "Deviations in T8.c, as built"._
+    - **The cell pass.** (b) is then taken for every disc under 32 px, as T8.d, so that a small
+      disc's cost is throughput:
+      - the 2.7–4 px disc's 2.0 M-cycle chain goes;
+      - the resolution controller's scale acts on small discs again.
+    - **Not taken.** (c) is not ordered. (d) is rejected: it narrows the band that carries
+      crescents and changes the edge integral.
+    - **Off-view draws.** R06's host disc and R02's occluder spheres need no change for the chain.
+      T19.e removes their off-view draws, and bounds the host disc's draw, with no texel changed.
+    - **Order and residual.** T8.c, T8.d and T19.e precede T17. The residual is a disc of 32 px or
+      more's 4 × 4 limb, 0.47–0.54 M cycles.
 - **The star's disc at its limb's depth** (2026-10-06; the shading lane: R06's follow-up to T9,
   queued before R10).
   - **What changed.** `disc.wgsl`'s vertex stage now puts R06's full-screen triangle on the
@@ -5979,3 +6122,145 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       settle it).
     - Harness: `/home/quantum/gh/hyperion/.git/rm23-scratch/r07-shading/star-depth/cost/`
       (`build-variants.sh`, logs, `cycles-sd1.txt`), with `cost-t19/`'s instrumentation.
+- **Deviations in T8.c, as built** (2026-10-06; the shading lane, after T19.e). Built as
+  decision-r07-small-disc-cost rules it: the constants, `discSamples` and `discRecordOf`'s counts,
+  with no hysteresis and no shader change.
+  - **`discSamples(diameterPx)`** returns `DiscSamples` (`{ interior, limb }`): 8 × 8 below
+    `FINE_DISC_PX`, 4 × 4 below `SMALL_DISC_PX`, one inside and `LIMB_SAMPLES` on the limb above.
+    NaN, and +∞ (which `angularDiameterPx` gives for a camera inside the body), take the large
+    disc's counts, as before.
+  - **Files.** The plan names `bodies/draw.test.ts`. The flux gates against the point and the
+    near field (G1, G2, G2′), row 3 and G6 are there, beside T8.a's rows they extend. A new
+    `bodies/discShading.test.ts`, beside `discSamples`, holds its table, G4, G5, G5′ and the brute
+    force's own tests, so that the two files run in parallel (about 46 s and 27 s under load 19).
+  - **`pointSampleDisc`** (new, `bodies/discShading.ts`): a record's pixels point-sampled m × m
+    times each with the disc's own `shade`, in `f64`, the brute force of G5′. It sits beside the
+    twin because it needs the twin's private ray and shade.
+  - **The near-field oracle, corrected (science check, must-fix).** `worstOver` took the near
+    field once, at the centred placement. A centre moved x px also turns the phase by up to
+    x ÷ 1,663 rad, which moves a crescent's flux by up to 0.25% at 150° (0.07% at 90°). The near
+    field is now carried to each placement by the point's ratio, which matches an integral at
+    each placement to 3 × 10⁻⁵. T8.a's 6 px rows take the corrected oracle too, and pass. The bias
+    had read the disc's error high, since the disc's own error is negative. The ruling's figures
+    of 0.77% and 0.79% (and so "at most 0.8%") carry it. Corrected:
+    - G2's worst is 0.52% under 4 × 4 (a sphere at 13 px, 150°) against 0.49% under 8 × 8 (6 px,
+      150°). Over 4–31.5 px, 4 × 4 is within the 1% as 8 × 8 is, not more accurate, and
+      `SMALL_DISC_SAMPLES`' TSDoc says so.
+    - At 6–11 px and 150° the ruling's comparison stands: 4 × 4 reads 0.005–0.31% against
+      8 × 8's 0.29–0.49%, better at every size but f = 0.098 at 9.6 px (0.31% against 0.29%).
+    - G2′'s worst is 0.45% (lunar law) and 0.46% (the 45°-latitude spheroid), both at 13 px. The
+      ruling's 0.57% and 0.63% came from sizes without a 13 px row; the biased oracle gives 0.62%
+      and 0.71% there.
+  - **4.01 px stands for the ruling's 4 px** in G2, G2′, G5 and G6. A placement off the centre
+    stands a little farther off, which takes a disc 4 px across at the centre pixel's scale just
+    under 4 px (3.9999992 px at 0.75 px off), and so back to 8 × 8. G6, which is centred, takes
+    4.01 px too, for uniformity. G4 sets its counts itself, so it takes 4.0 px.
+  - **G1's band starts at 2.7 px, not 2.75 px.** A shrinking disc turns to a point at 2.7 px
+    (`POINT_BELOW_PX` × (1 − `REGIME_HYSTERESIS`)), so a row at 2.701 px joins the ruling's 2.75,
+    3 and 3.3 px. 2.7 px itself puts the placements off the centre under it, where no disc is
+    drawn.
+    - G1's worst is 0.85% (f = 0.098, 2.75 px, 150°); 0.84% at 2.701 px. The ruling's 0.76% was
+      measured at 2.8–3.3 px only (0.46% at 2.8 px), and the error is not smooth in size: 0.39%
+      to 0.82% between 2.701 and 2.75 px for the sphere at 150°.
+    - Its G1′ figure of 0.73% is the lunar law's 3.3 px row. At 3 px, the test's size, it is
+      0.10%, and the 45°-latitude spheroid 0.81%.
+    - The cells there are 8 × 8, unchanged by T8.c.
+  - **G5's reference.** It is the 32 × 32 twin, as ruled, from 4 px. Below 4 px it is the
+    64 × 64 twin.
+    - A 3 px crescent at 150° is 0.2 px deep, beyond 32 × 32's near-limb band (about 0.08 px).
+      Its terminator falls in centre-sampled cells, and the 32 × 32 twin stands 0.32% of the peak
+      from a converged brute force there (1,024² samples a pixel), against 64 × 64's 0.11% and
+      8 × 8's own 0.22%.
+    - G5′ gains that case: the 64 × 64 twin at 3 px and 150° against 512² samples a pixel (256²
+      is itself 0.20% off there, 512² 0.017%), within 0.3%. It takes about 5 s, under a 60 s
+      limit. The ruled case at 4 px reads 0.18% against 256².
+    - The errors are taken in each channel against that channel's peak, the RMS over the pixels
+      either drawing covers (the night side included, as the ruling's probe takes it), the worst
+      channel's.
+  - **The figures** (`f64` twin, 16 placements and three channels unless stated):
+
+    | Gate | Bound | As built | Ruling |
+    |---|---|---|---|
+    | G1, 2.701–3.3 px, against the point | 1% | 0.85% | 0.76% (2.8–3.3 px) |
+    | G1′, 3 px: lunar law; 45° spheroid | 1% | 0.10%; 0.81% | 0.73%; 0.81% |
+    | G2, 4.01–31.5 px, against the near field | 1% | 0.52% | 0.77% |
+    | G2′, 4.01, 8, 13, 24 px at 150° | 1% | 0.45%; 0.46% | 0.57%; 0.63% |
+    | G4, the steps at 4 px and 31.9 px | 0.5% | 0.41%; 0.29% | 0.41%; 0.29% |
+    | G5, every pixel: max; RMS; coverage | 1.5%; 0.3%; 0.0025 | 1.22%; 0.18%; 0.0018 | 1.24%; 0.20%; 0.0017 |
+    | G5′, the reference against brute force | 0.3% | 0.18% (4 px, 32 × 32, 256²); 0.11% (3 px, 64 × 64, 1,024²) | 0.09% (64 × 64 at 512²) |
+    | G6, the eclipsed share against `discEclipseVisible` | 0.005 | 0.0010 | 0.0011 |
+
+    G4's worst are the f = 0.098 spheroid at 150° (4 px) and the 45° spheroid at 120° (32 px).
+    G5's worst is a 12 px crescent's pixel by its terminator, at 150°. G6 takes the provisional
+    Lambert and a lunar law.
+  - **The smoke harness.** A new check, "R07.T8.c a crescent's texels equal the CPU rasteriser's
+    at each sampling level …", draws 3.5, 13 and 40 px crescents at 150° and holds each record's
+    counts (8/8, 4/4, 1/4), texels and classes to the twin. Its texels are within 0.074, 0.126 and
+    0.084 of the tolerance (0.4% relative + 10⁻⁴). `checkTexels`' 20 px disc now runs at 4 × 4:
+    within 0.237 of the tolerance (G10 re-measured; the 3 px flux stays within 0.42% of the
+    point).
+  - **`just test-render`** (SwiftShader, 2026-10-06, after the machine's reboot).
+    - `default` exit 0 with 259 checks, the base's 258 and the new one.
+    - `no-subgroups` failed only T8.a's histogram check, "no histogram: 0 weighted counts", which
+      times out under load (load 19–21; recorded for T10.b and T19.e). Rerun alone it exited 0
+      with 257 checks (the base's 256 and the new one), the histogram's 228 counts among them, and
+      the same captures.
+  - **No capture moved, because none holds a disc of 4–31 px.**
+    - All 55 captures a variant are byte-identical to the merged base's, run first with T8.c's
+      production files stashed, and to each other across variants.
+    - The ruling's "every capture with a disc of about 4 to 31 px moves" holds with no such
+      capture. Planned as the captures draw them:
+      - `ECLIPSE TEST`'s giant is 3.91 px at 10° across 768 px, so it stays 8 × 8.
+      - Its moon is 45.3 px and its planet larger.
+      - T9's occultation captures are drawn at 512 × 384, four times the scene's 128 px: the moon
+        48.1 px and the planet 180 px, both on the large rule.
+      - No other capture draws a lit body.
+    - The 4 × 4 level is held on the GPU by the new smoke check instead.
+  - **The cost, measured** (hidden and offscreen on the RTX 3080, 2026-10-06 19:56–20:06, after
+    the reboot). The per-draw cost harness (`.git/rm23-scratch/r07-shading/cost-t19/`) ran under
+    `just _locked`, with `nvidia-smi`'s clocks every 250 ms.
+    - Two instrumented builds of the merged head, without and with T8.c's production edits.
+    - Three rounds: the `var` plan, the `fov` plan, and `var` again in the other order.
+    - Load 6–12 in the first two rounds and 34–70 in the third. The crash-telemetry sampler,
+      `nvidia-smi` every 2 s, started at 20:02:57, during the third.
+    - Times are medians of the `discs` pass, and cycles are the time at the phase's median
+      graphics clock.
+  - **The instruments.** `PHASE TEST` all photorealistic, each 240 × 180 at 60°, its only disc the
+    13 px planet at 4 × 4. The `discs` pass took 2.00–2.04 million cycles before (1.65–1.70 ms
+    at 1,185–1,215 MHz) and 0.48–0.55 million after: −73% to −76%, under the ruled 0.6 million in
+    every round.
+    - After: 1.18–1.20 ms at 450 MHz, 0.77–0.79 ms at 690 MHz, 2.28–2.32 ms at 210 MHz. At
+      1,980 MHz, 0.54 million cycles is 0.27 ms.
+    - The driver drops the clock under the lighter load, from 1,155–1,215 MHz to 210–780 MHz.
+      So the time falls by less than the cycles: 1.70 ms to 1.20 ms in the first round.
+    - The other fields, after: 30° 0.43–0.53 million, 45° 0.59, 90° 0.57, and 120° 0.63 (two
+      4 × 4 discs in view). 10° and 20° hold discs of 32 px or more, at 0.39–0.53 million before
+      and after.
+  - **The primary** (1120 × 900): the 62 px half planet, and the 14 px giant, now 4 × 4. It took
+    2.23–2.38 million cycles before (median 2.26) and 0.49–0.67 million after (median 0.60), the
+    ruling's projected 0.54–0.6.
+  - **A disc under 4 px.** In the `var` plan's last phase `PHASE TEST`'s giant, about 3 px and so
+    8 × 8, enters each instrument beside the planet.
+    - Those instruments took 2.17–2.19 million cycles after and 2.18 before: the 8 × 8 chain,
+      unchanged until T8.d.
+    - T20's phase (one photorealistic instrument, the giant in it) took 2.18–2.25 million either
+      way.
+    - This stands for the ruling's 3.5 px view: the harness's widest field, 120°, puts the
+      planets at 4–8 px, so it has no 3.5 px case.
+  - **The figures are provisional.** The machine was shared, and T17 retakes them.
+  - **`just ci`** was not run, under the Day 2 protocol: the orchestrator runs it on the merge.
+  - **Plan text.** The ruling's T8.c, T8.d, T17 and T20 text and its Risks bullets are inserted:
+    - T8.c and T8.d after T8.b;
+    - T17's paragraphs before "Tests (Vitest)", the permitted reorder as their last;
+    - T20's note as the last bullet of its entry;
+    - the "Ruled 2026-10-06" bullet at the end of the per-draw cost entry;
+    - the amendment on T8.a's "Sampling, as built".
+    - The ruling places "Sample counts by size" after a Risks bullet "Disc anti-aliasing (T8.a)".
+      That is decision-r07-t8a's own Risks bullet, which the plan folded into part 1's "Sampling"
+      and "Risks (decision-r07-t8a)" items. The new bullet follows T8.a's four as-built entries,
+      before T8.b's.
+    - decision-r07-t8a's item 3, refinement 4, carries the ruled amendment (an orchestration
+      file, not tracked).
+    - The inserted text keeps the ruling's figures. The corrections above are for the ruling's
+      author, and so is "the only cells" of the "Ruled" bullet: of the counts measured (4, 5, 6
+      and 8 per axis), 7 × 7 untried.
