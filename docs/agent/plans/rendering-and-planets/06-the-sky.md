@@ -4273,6 +4273,14 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **The fetched spectra** are read through read-only per-dataset symlinks into
     `.claude/worktrees/agent-ad163063e17117877/crates/hyperion-fit/data/cache/`, whose checksums
     all match.
+  - **Test 8 without the fetched V band** (fixed forward after integration CI-40). Without
+    Bessell and Murphy's Table 1, as in CI, on GitHub and on a fresh checkout, the fit's observer
+    takes the photopic stand-in, V(λ) λ, whose moment for the 5,772 K blackbody is 0.9839, outside
+    V's 0.99–1.02. The fit's unit test `the_reddening_columns_of_sunlight_are_the_rulings` holds V
+    to that range only on the fetched V band; otherwise it holds V's column to the stand-in's own
+    integral (to 10⁻¹²) and below the photopic's. The committed table's solar row, fitted on the
+    real V band, stays held to all four ranges by the sim's `the_solar_rows_ratios_are_the_rulings`,
+    fetched or not.
   - **Not changed.**
     - Until R06.T8.k, the census's per-star eye offset (`kept_to`) reads the unreddened ρ, and its
       V is M_V + DM + the bare A_V, so no listing moves. T8.k cuts on each star's own V (the

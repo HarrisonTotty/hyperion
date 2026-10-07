@@ -417,22 +417,44 @@ pub(super) mod tests {
     /// the addendum corrects them (`decision-r06-t9b-band.md`, items 3 and 4: `A_P ÷ A_V`
     /// 0.97–1.01, `A_S ÷ A_V − A_P ÷ A_V` 0.11–0.15, `A_cam ÷ A_V` 0.84–0.92 and V's own 0.99–1.02,
     /// all as `A_V` → 0).
+    ///
+    /// V's range is the real V band's, Bessell and Murphy's, which is fetched: without it the
+    /// observer's V is the photopic stand-in, and the test holds V's column to that band's own
+    /// integral instead. The committed table's solar row, fitted on the real V band, is held to
+    /// all four ranges by the sim's `sky::colour` test `the_solar_rows_ratios_are_the_rulings`,
+    /// fetched or not.
     #[test]
     fn the_reddening_columns_of_sunlight_are_the_rulings() {
         let observer = super::super::photometry::tests::observer();
         let sensor = sensor();
-        let sun = reddening(
-            &observer,
-            &sensor,
-            &Spectrum::blackbody(5_772.0).bin_means(),
-        );
+        let bins = Spectrum::blackbody(5_772.0).bin_means();
+        let sun = reddening(&observer, &sensor, &bins);
         let ratios = super::super::ratios_at_zero(&sun.parts, &sun.moments, observer.luminance());
         let [photopic, difference, camera, v] = super::super::SOLAR_REDDENING_RANGES;
         let within = |(lo, hi): (f64, f64), value: f64| (lo..=hi).contains(&value);
         assert!(within(photopic, ratios[0]), "{ratios:?}");
         assert!(within(difference, ratios[1] - ratios[0]), "{ratios:?}");
         assert!(within(camera, ratios[2]), "{ratios:?}");
-        assert!(within(v, ratios[3]), "{ratios:?}");
+        if super::super::photometry::tests::bessell().is_some() {
+            assert!(within(v, ratios[3]), "{ratios:?}");
+        } else {
+            // The stand-in is V(λ) photon-weighted, V(λ) λ: V's moment is that band's mean of the
+            // law. The weight λ moves it to the red, where the law is lower, so it lies below the
+            // photopic's, the same V(λ) unweighted.
+            let law = law_by_bin();
+            let (mut light, mut moment) = (0.0, 0.0);
+            for (i, (&s, &l)) in bins.iter().zip(&law).enumerate() {
+                let w = observer.photopic()[i] * bin_centre_nm(i);
+                light += s * w;
+                moment += s * l * w;
+            }
+            let stand_in = moment / light;
+            assert!(
+                (ratios[3] / stand_in - 1.0).abs() < 1e-12,
+                "{ratios:?} against the stand-in's {stand_in}"
+            );
+            assert!(ratios[3] < ratios[0], "{ratios:?}");
+        }
         // The dust takes the blue first, so what is left is redder, and silicon and V see less of
         // it per magnitude.
         for b in [V_BAND, CAMERA_BAND] {
