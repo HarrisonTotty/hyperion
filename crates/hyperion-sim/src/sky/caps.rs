@@ -26,6 +26,8 @@
 //! The plan first dimmed every direction by the least extinction of 48 rays, the polar rays' near
 //! the Sun, and then each ray by the mean field's; R06's Risks record both and what they missed.
 
+use std::ops::Range;
+
 use crate::coords::{GalacticPosition, UnitVector};
 use crate::galaxy::fields::MAX_COMPONENTS;
 use crate::galaxy::gas::extinction::{NoiseMode, Quality, profile};
@@ -163,9 +165,15 @@ fn profile_nodes() -> Vec<f64> {
 }
 
 /// The extinction in V along rays from a point, each from one [`profile`] march in the realised
-/// field at full quality.
+/// field at full quality: a whole Fibonacci lattice of rays, or one consecutive share of one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RayExtinctions {
+    /// The point the rays start from.
+    origin: GalacticPosition,
+    /// The rays of the whole lattice the rays are of.
+    lattice: usize,
+    /// The lattice's index of the first ray held.
+    first: usize,
     nodes: Vec<f64>,
     directions: Vec<UnitVector>,
     /// Each ray's A<sub>V</sub> at each node.
@@ -181,9 +189,55 @@ impl RayExtinctions {
         rays: usize,
         cache: &mut NoiseCache,
     ) -> Self {
+        Self::measure_rays(galaxy, origin, rays, 0..rays, cache)
+    }
+
+    /// The rays `which` of a Fibonacci lattice of `rays` rays from `origin`: one share of
+    /// [`measure`](Self::measure)'s rays, which a server measures as several jobs, each with its
+    /// own `cache`, and [`join`](Self::join)s in order (decided 2026-10-03,
+    /// `decision-r06-tables.md`, item B.4; R06.T11.c). Each ray is a function of its own direction
+    /// alone, and the cache changes no value, so the shares joined are `measure`'s bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// If `which` runs backwards or reaches past the lattice's `rays`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    /// use hyperion_sim::sky::caps::RayExtinctions;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(7));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+    /// let measure = |which| {
+    ///     RayExtinctions::measure_rays(&galaxy, &sun, 8, which, &mut NoiseCache::with_capacity(64))
+    /// };
+    /// let joined = RayExtinctions::join([measure(0..3), measure(3..8)]);
+    /// let whole = RayExtinctions::measure(&galaxy, &sun, 8, &mut NoiseCache::with_capacity(64));
+    /// assert_eq!(joined, whole);
+    /// # Ok::<(), &str>(())
+    /// ```
+    #[must_use]
+    pub fn measure_rays(
+        galaxy: &Galaxy,
+        origin: &GalacticPosition,
+        rays: usize,
+        which: Range<usize>,
+        cache: &mut NoiseCache,
+    ) -> Self {
+        assert!(
+            which.start <= which.end && which.end <= rays,
+            "rays {which:?} of a lattice of {rays}"
+        );
         let nodes = profile_nodes();
         let distances: Vec<LightYears> = nodes.iter().map(|&d| LightYears::new(d)).collect();
-        let directions = fibonacci_sphere(rays);
+        let mut directions = fibonacci_sphere(rays);
+        directions.truncate(which.end);
+        directions.drain(..which.start);
         let mut out = Vec::with_capacity(nodes.len());
         let profiles = directions
             .iter()
@@ -203,10 +257,52 @@ impl RayExtinctions {
             })
             .collect();
         Self {
+            origin: *origin,
+            lattice: rays,
+            first: which.start,
             nodes,
             directions,
             profiles,
         }
+    }
+
+    /// Consecutive shares of one lattice's rays from one point ([`measure_rays`](Self::measure_rays)),
+    /// in the lattice's order, as one: the rays of every share in turn.
+    ///
+    /// # Panics
+    ///
+    /// If `shares` is empty, or its shares are not of one lattice from one point, each starting
+    /// where the one before it ends, from the lattice's first ray.
+    #[must_use]
+    pub fn join(shares: impl IntoIterator<Item = Self>) -> Self {
+        let mut shares = shares.into_iter();
+        let mut joined = shares.next().expect("a share of rays to join");
+        assert_eq!(
+            joined.first, 0,
+            "the shares start at the lattice's first ray"
+        );
+        for share in shares {
+            assert!(
+                share.origin == joined.origin
+                    && share.lattice == joined.lattice
+                    && share.first == joined.first + joined.directions.len(),
+                "the shares of one lattice from one point, in order: rays from {} of {} after {} of \
+                 {}",
+                share.first,
+                share.lattice,
+                joined.directions.len(),
+                joined.lattice
+            );
+            joined.directions.extend(share.directions);
+            joined.profiles.extend(share.profiles);
+        }
+        joined
+    }
+
+    /// Whether the rays are the whole lattice's, from `origin`.
+    #[must_use]
+    fn is_lattice_from(&self, origin: &GalacticPosition) -> bool {
+        self.first == 0 && self.directions.len() == self.lattice && self.origin == *origin
     }
 
     /// The rays' directions, in order.
@@ -336,8 +432,34 @@ fn count(
     resolution: CapResolution,
     cache: &mut NoiseCache,
 ) -> Counts {
+    let rays = RayExtinctions::measure(galaxy, observer.position(), resolution.rays, cache);
+    count_over(
+        galaxy,
+        tables,
+        envelope,
+        observer,
+        cut,
+        resolution.steps_per_decade,
+        &rays,
+    )
+}
+
+/// The count for `observer` at `cut` over `rays`, a whole lattice measured from the observer, at
+/// `steps_per_decade` radial steps a decade.
+fn count_over(
+    galaxy: &Galaxy,
+    tables: &LuminosityTables,
+    envelope: &BrightnessEnvelope,
+    observer: &Observer,
+    cut: Magnitudes,
+    steps_per_decade: u32,
+    rays: &RayExtinctions,
+) -> Counts {
     let origin = observer.position();
-    let rays = RayExtinctions::measure(galaxy, origin, resolution.rays, cache);
+    assert!(
+        rays.is_lattice_from(origin),
+        "the caps count a whole lattice of rays from the observer"
+    );
     let any = galaxy
         .fields()
         .component_ids()
@@ -354,7 +476,7 @@ fn count(
                     max_star_mass(SolarMasses::new(band.hi())),
                     (Years::ZERO, Years::new(super::envelope::MAX_AGE_YEARS)),
                 )
-                .map_or(NEAREST_LY, |m| rule_bound(m.value(), cut.value(), &rays))
+                .map_or(NEAREST_LY, |m| rule_bound(m.value(), cut.value(), rays))
         })
         .collect();
     let farthest = bounds.iter().copied().fold(NEAREST_LY, f64::max);
@@ -365,7 +487,7 @@ fn count(
         clippy::cast_sign_loss,
         reason = "a few decades of distance, a few hundred steps"
     )]
-    let steps = ((decades * f64::from(resolution.steps_per_decade)).ceil() as u32).max(1);
+    let steps = ((decades * f64::from(steps_per_decade)).ceil() as u32).max(1);
     let radii: Vec<f64> = (0..=steps)
         .map(|k| NEAREST_LY * math::exp10(decades * f64::from(k) / f64::from(steps)))
         .collect();
@@ -377,7 +499,7 @@ fn count(
     let mut per_ln_r = vec![vec![0.0; radii.len()]; CAPPED_LAYERS.len()];
     let mut densities = [0.0; MAX_COMPONENTS];
     #[expect(clippy::cast_precision_loss, reason = "a few thousand rays")]
-    let weight = 4.0 * core::f64::consts::PI / resolution.rays as f64;
+    let weight = 4.0 * core::f64::consts::PI / rays.lattice as f64;
     for (i, &r) in radii.iter().enumerate() {
         let ago = tables.age_for(
             observer.time(),
@@ -483,7 +605,85 @@ pub fn layer_caps_at(
     resolution: CapResolution,
     cache: &mut NoiseCache,
 ) -> Vec<LayerCap> {
-    let counts = count(galaxy, tables, envelope, observer, cut, resolution, cache);
+    caps_of(&count(
+        galaxy, tables, envelope, observer, cut, resolution, cache,
+    ))
+}
+
+/// [`layer_caps`] over rays already measured: `rays`, the whole lattice of
+/// [`CapResolution::STANDARD`]'s [`CAP_RAYS`] rays from the observer's position, which a server
+/// measures in shares on its pool ([`RayExtinctions::measure_rays`], joined in order), each with a
+/// noise cache of its own (decided 2026-10-03, `decision-r06-tables.md`, item B.4; R06.T11.c).
+///
+/// The count is serial in ray order, as [`layer_caps`]' is, so the caps are its own bit for bit:
+/// the rays are, since each is a function of its own direction alone and a cache changes no value.
+///
+/// # Panics
+///
+/// If `rays` are not the whole lattice of [`CAP_RAYS`] rays measured from `observer`'s position, or
+/// as [`layer_caps`] panics.
+///
+/// # Examples
+///
+/// The caps near the Sun with their rays measured in four shares, as four jobs of a server's
+/// would, each with a noise cache of its own (`no_run`: the tables take a minute or more to build).
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::caps::{CAP_RAYS, RayExtinctions, layer_caps, layer_caps_over};
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::Magnitudes;
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+/// let quarter = CAP_RAYS / 4;
+/// let shares = (0..4).map(|k| {
+///     let mut own = NoiseCache::with_capacity(1 << 16);
+///     let which = k * quarter..(k + 1) * quarter;
+///     RayExtinctions::measure_rays(&galaxy, &sun, CAP_RAYS, which, &mut own)
+/// });
+/// let rays = RayExtinctions::join(shares);
+/// let cut = Magnitudes::new(7.95);
+/// let caps = layer_caps_over(&galaxy, &tables, &envelope, &observer, cut, &rays);
+/// let mut cache = NoiseCache::with_capacity(1 << 16);
+/// assert_eq!(caps, layer_caps(&galaxy, &tables, &envelope, &observer, cut, &mut cache));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn layer_caps_over(
+    galaxy: &Galaxy,
+    tables: &LuminosityTables,
+    envelope: &BrightnessEnvelope,
+    observer: &Observer,
+    cut: Magnitudes,
+    rays: &RayExtinctions,
+) -> Vec<LayerCap> {
+    assert_eq!(
+        rays.lattice, CAP_RAYS,
+        "the standard caps count the standard lattice's rays"
+    );
+    caps_of(&count_over(
+        galaxy,
+        tables,
+        envelope,
+        observer,
+        cut,
+        CapResolution::STANDARD.steps_per_decade,
+        rays,
+    ))
+}
+
+/// Each layer's cap from its count: the least radius beyond which under one star is expected.
+#[must_use]
+fn caps_of(counts: &Counts) -> Vec<LayerCap> {
     let radii = &counts.radii;
     CAPPED_LAYERS
         .iter()
@@ -641,6 +841,43 @@ mod tests {
         }
         let e = radius(&nuclear, Layer::E);
         assert!(e < 1_500.0, "{e}");
+    }
+
+    /// Rays measured in shares, each with a cache of its own, and joined in order are one
+    /// measure's, and the caps over them are `layer_caps`' bit for bit: the server's ray-chunk
+    /// jobs (R06.T11.c; `decision-r06-tables.md`, item B.4).
+    #[test]
+    fn caps_over_rays_measured_in_shares_are_layer_caps() {
+        let galaxy = milky_way_galaxy();
+        let observer = observer_at([0.0, 26_000.0, 68.0]);
+        let origin = observer.position();
+        let shares = [0..1, 1..100, 100..100, 100..101, 101..CAP_RAYS];
+        let joined = RayExtinctions::join(shares.into_iter().map(|which| {
+            let mut own = NoiseCache::with_capacity(1 << 10);
+            RayExtinctions::measure_rays(galaxy, origin, CAP_RAYS, which, &mut own)
+        }));
+        let mut cache = NoiseCache::with_capacity(1 << 16);
+        assert_eq!(
+            joined,
+            RayExtinctions::measure(galaxy, origin, CAP_RAYS, &mut cache)
+        );
+        let cut = Magnitudes::new(7.95);
+        let (tables, envelope) = (milky_way_tables(), milky_way_envelope());
+        assert_eq!(
+            layer_caps_over(galaxy, tables, envelope, &observer, cut, &joined),
+            caps_at([0.0, 26_000.0, 68.0])
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the shares of one lattice from one point, in order")]
+    fn shares_out_of_order_are_refused() {
+        let galaxy = milky_way_galaxy();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).expect("in the cube");
+        let mut cache = NoiseCache::with_capacity(1 << 10);
+        let mut share = |which| RayExtinctions::measure_rays(galaxy, &sun, 8, which, &mut cache);
+        let (first, third) = (share(0..2), share(4..8));
+        let _ = RayExtinctions::join([first, third]);
     }
 
     #[test]

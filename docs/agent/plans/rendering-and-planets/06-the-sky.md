@@ -158,6 +158,11 @@ pub struct LayerCap { /* layer, radius: LightYears, rule_bound: LightYears,
 pub fn layer_caps(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
     observer: &Observer, cut: Magnitudes, cache: &mut NoiseCache) -> Vec<LayerCap>;
 pub const CAP_RAYS: usize;                                          // 48
+impl RayExtinctions { pub fn measure_rays(galaxy: &Galaxy, origin: &GalacticPosition,
+    rays: usize, which: Range<usize>, cache: &mut NoiseCache) -> Self;  // one share of the rays
+    pub fn join(shares: impl IntoIterator<Item = Self>) -> Self; }     // R06.T11.c, as built
+pub fn layer_caps_over(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
+    observer: &Observer, cut: Magnitudes, rays: &RayExtinctions) -> Vec<LayerCap>; // the server's
 
 // sky::census (Design notes 10–13)
 pub struct SkyQuery { /* observer: Observer, cut: Magnitudes, eye: Option<EyeObserver>,
@@ -181,6 +186,8 @@ pub struct SkyContext<'a> { /* tables: &'a LuminosityTables, envelope: &'a Brigh
 pub struct CensusPlan { /* caps: Vec<LayerCap>, cells: Vec<CellKey> (canonical order) */ }
 pub fn census_plan(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
     query: &SkyQuery, cache: &mut NoiseCache) -> CensusPlan;
+pub fn census_plan_of(query: &SkyQuery, caps: Vec<LayerCap>) -> CensusPlan; // R06.T11.c, as built
+impl SkyQuery { pub fn forced_caps(&self) -> Option<&[LayerCap]>; }        // R06.T11.c, as built
 pub fn census_cell(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, key: CellKey, query: &SkyQuery,
     out: &mut Vec<SkyStar>);
 pub struct SkyCensus { /* listed: Vec<SkyStar> (by flux, then system, then star),
@@ -1506,6 +1513,9 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
     over axes, not its ceiling.
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f and plan 11's asks A and B).**
+  Its landing turns the server's sky on by default: T11.c's switch, `--serve-sky` (Risks,
+  "Deviations in T11.c, as built": `SkyService`'s default becomes `Served`, and the switch takes a
+  value so that it can still be turned off).
   Decided 2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Near the
   Sun, the multiple-system bound left 98% of the census in generation. The per-record bound becomes
   one per star, computed before generation. The order is:
@@ -1986,7 +1996,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   term are its `StarColour::reddened(a_v)`'s (R06.T9.e). Its eye offset is
   `sky::limits::eye_offsets`', its own eye limit less its texel's (R06.T9.h; decided 2026-10-06,
   `decision-r06-t9c-glare.md`). The wire's V is the star's own, M_V + DM + v★(A_V) A_V, which the
-  census cuts, and its camera term is relative to it (addendum item 4).
+  census cuts, and its camera term is relative to it (addendum item 4). As built: Risks,
+  "Deviations in T11.c, as built" (the switch is `--serve-sky`, `HYPERION_SERVE_SKY`, off).
 - **R06.T11.d Delivery nearest first (new; after T8.i, T10 and T11.a–c; signed off).** Decided
   2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and
   adopted on 2026-10-05 under the owner's standing delegation
@@ -2028,6 +2039,10 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   - near the Sun the first reply arrives within T17's first-sky budget on the dev machine.
 
   Acceptance: the server's sky tests and `just ci`.
+
+  T11.d's first items are T11.c's hookups (Risks, "Deviations in T11.c, as built", "Not done
+  here"): R06.T9.g's illumination, R06.T7.b's per-ray radii and its eye visibility map, the near-Sun
+  test's replies, and the bench `sky_near_sun_cold`.
 
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
@@ -5933,14 +5948,15 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     cells' offset bounds. The plan's caps are one bulk job. So a chart's query can wait behind
     those single jobs on a busy pool, though never in the interactive queue. T11.c builds the
     tables once per galaxy as staged jobs under a single flight, caches them, and runs the caps as
-    ray chunks.
+    ray chunks. _Since T11.c: so built, in `compute/sky_tables.rs`'s `SkyTablesService`._
   - **A small census for tests: `SkyCaps` (new, public in `hyperion_server::compute`).** The plan
     names no seam, and a census to the derived caps near the Sun costs 10³–10⁶ CPU-s until T8.g.
     `ServerConfigBuilder::sky_caps(SkyCaps::forced(radius))` forces every layer's cap; no option
     or variable sets it. A forced census reads no luminosity table, so it is given
     `LuminosityTables::dark`. The eye's cut is then a dark sky's, V 8.54 at the default eye
     (Crumey's 7.99 plus 0.553), and each layer states its cap as the radius with nothing expected
-    beyond it.
+    beyond it. _Since T11.c: dark by default; `with_galaxy_tables()` builds the galaxy's own for a
+    test of the band's light._
   - **The reply is a stub until T11.b and T11.c.** It is the census's JSON:
     - `cut_v`, each capped layer's census (A, B, C, D, E, brown dwarfs) by T8.c's mapping, `listed`
       and `overflow`, `valid_until` and `not_modelled`;
@@ -6008,7 +6024,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       `SkyTexelWire` needs none: the encoder's signature uses it.
   - **The band's part is empty until T11.c.** The payload is the stars alone: `band_bytes` is 0,
     and `band.face_texels` still states 64. The client's `bandTexels` would throw on this reply,
-    which is one reason for the switch above.
+    which is one reason for the switch above. _Since T11.c: the band's 24,576 texels follow the
+    stars._
   - **The cache** (`compute/sky_cells.rs`, new; Design note 12).
     - `SharedSkyCellCache` is a `SharedByteLru` over `(GalaxyKey, CellKey)`. Its entry,
       `SkyCellEntry`, holds the floor it was built at and the cell's records at or above it, in
@@ -6116,3 +6133,357 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       already flag it (`decision-p11-t16-hierarchy-bound.md`, "The warm budget": with records
       alone a warm census still generates the survivors, about 20–35% of cold after T8.g). T8.h
       measures it.
+- **Deviations in T11.c, as built (2026-10-07).** The band, the limits, the discs, the tables and
+  the landing switch, as the task sets them out, with these details.
+  - **The landing switch.** `--serve-sky`, or `HYPERION_SERVE_SKY` (clap's boolish values), a
+    switch like `--stop-on-stdin-close`, off by default, in `config.rs` and the README's options
+    table. `config::SkyService` (`Unsupported`, the default, and `Served`;
+    `hyperion_server::SkyService`) is set by `ServerConfigBuilder::sky_service`, held on
+    `AppState` and logged at start (`sky_service`).
+    - Off, `Handlers` answers `sky` with `not_served_yet("sky")` before reading anything, as before
+      T11.a. On, it calls `sky::answer`.
+    - Tests: `config`'s `the_sky_is_served_only_when_its_switch_is_on` and its lists of options and
+      variables; `requests`' `kinds_without_a_handler_are_answered_unsupported`, which takes `sky`
+      again (the unit harness leaves the switch off); and `tests/sky.rs`'s
+      `with_the_switch_off_a_sky_is_unsupported_and_no_job_reaches_the_pool`, in which the pool's
+      counters, the tables' and the cells' are unchanged by the request. Every other server in
+      `tests/sky.rs` turns the switch on.
+    - **For R06.T8.g's landing** (a pointer in T8.g): `SkyService`'s default becomes `Served`. A
+      clap `SetTrue` switch cannot then be turned off on the command line, so the option takes a
+      value too (for example `--serve-sky=false`); the variable already takes `0` or `false`.
+  - **The tables** (`compute/sky_tables.rs`, new).
+    - `SkyTablesService`: a `SharedByteLru<GalaxyKey, SkyTables>` behind a `SingleFlight`, keyed by
+      `GalaxyKey` alone and made with the one source its server's caps name. Its budget is
+      `HYPERION_SKY_TABLES_MB`, or `--sky-tables` (default 160 MiB, a whole MiB, 0 caches
+      nothing), with `ServerConfigBuilder::sky_tables_bytes` and the start log's `sky_tables_mib`.
+    - `SkyTablesCounters` (the cache's `LruCounters` and `builds`) are on
+      `ServerStats::sky_tables()`, beyond the plan. A request that builds counts two misses, one
+      before its flight and one inside it, as the density maps do, and one that joins a flight one.
+    - An entry is `SkyTables`: the luminosity tables, the envelope (the fitted table) and the cells'
+      offset bounds, charged their `heap_bytes`. `SkyTables::new(tables, galaxy)` makes one;
+      `compute::sky::tables` and `SkyTables::build` are gone.
+    - The build is bulk jobs under the flight's own token, cancelled once every waiter has gone:
+      one job makes `LuminosityTables::plan`; then each stage's sample jobs, and its accumulation
+      jobs, each bin's `BinSums` moved into its job and handed back; then one job assembles the
+      tables.
+    - The next stage's samples are queued just after a stage's accumulation, so the workers take
+      the accumulation first: the one-stage lookahead that the memory fix's record leaves to T11.c
+      (Risks, "The job split in stages"). It holds two stages' samples at once, about 440 MiB on 16
+      threads against 240 MiB. Not measured here: T17 times the build.
+    - Equal on the wire: the near-Sun test below holds every star's 24 bytes and every texel's 12
+      over the pool-built tables equal to those over `LuminosityTables::build`. The tables are not
+      compared directly; the sim's `parallel_build_equals_serial` holds the split.
+  - **Forced caps and the tables (a test seam beyond the plan).** `SkyCaps` also says which tables
+    a sky reads: `SkyTablesSource::Galaxy` for the derived caps, and `Dark` (T11.a's
+    `LuminosityTables::dark`, built at once) for `SkyCaps::forced`. `with_galaxy_tables()` builds
+    the galaxy's own on the pool under forced caps, for the near-Sun test. Under dark tables the
+    band holds only the overflow's stars.
+  - **The caps as ray-chunk jobs (a sim change, additive).** T7's text leaves the split to the
+    server, but the sim had no seam for it. Added:
+    - `RayExtinctions::measure_rays(galaxy, origin, rays, which, cache)`, one share of a lattice,
+      and `RayExtinctions::join(shares)`, which refuses shares out of order or of other lattices
+      (it now records its origin, lattice and first ray);
+    - `sky::caps::layer_caps_over(galaxy, tables, envelope, observer, cut, &rays)`, the caps over
+      a measured lattice of `CAP_RAYS`; `sky::census::census_plan_of(query, caps)`, the plan to
+      given caps; and `SkyQuery::forced_caps()`, which the server's plan branches on;
+    - `count` split into the measure and `count_over`, with the same arithmetic, so no bit moves.
+
+    The server measures 24 rays a job (`CAP_JOB_RAYS`, 32 jobs, each with its own noise cache),
+    then one job counts them in ray order and makes the plan. A query's forced caps are one job, as
+    before. Tests: the sim's `caps_over_rays_measured_in_shares_are_layer_caps` (the rays and the
+    caps near the Sun at 7.95, bit for bit), `shares_out_of_order_are_refused`,
+    `a_plan_to_given_caps_is_the_plan_that_forces_them` and `measure_rays`' doctest; the server's
+    `the_caps_rays_measured_in_jobs_are_the_sims_caps`, over dark tables, so every count is nought
+    but each rule bound reads every ray.
+
+  - **The band** (`compute::sky`).
+    - The march reads no census, so it runs while the census does (`try_join`): two rows of a face
+      a job (`BAND_JOB_ROWS`, 192 jobs of 128 rays), each `march_rows` of the one reply the plan's
+      `CompleteTo::of_caps` states, at the query's band (`SkyQuery::band_spec`).
+    - After the merge, where the eye is asked, one job builds the glare (`Glare::of_listed` at the
+      eye's cut). Then one job a march sums it (`sum_rows`) and sets its texels' limits
+      (`limit_rows`), and one more job gives every listed star its eye offset (`eye_offsets`) over
+      the whole band.
+    - Without the eye there is no glare, no limit and no offset: each texel's eye limit is the
+      wire's `i16::MIN`, and each star's eye offset its colour offset alone against a scotopic
+      background, T11.a's interim, unchanged.
+    - `BulkJobs` (new) queues jobs and gives their results in order. A failed job, or a dropped
+      future, abandons the jobs not yet begun, as the census's do.
+    - Each sum walks the census's whole overflow to find its texels' stars. At 10⁶ overflowing
+      stars (a camera's V 11 near the Sun) that is some 15 ms a job, 3 CPU-s a reply, beside a
+      census of 10⁵ CPU-s. At the eye's cut and the default N_max nothing overflows near the Sun
+      (3–6 × 10⁴ listed). Not measured.
+    - `eye_offsets` is one job over every listed star, the sim's signature taking them all. Its
+      cost at N_max is not measured, and `sky/limit_map` does not time it: T17's per-reply cost of
+      the limit map should include it.
+  - **Single jobs of seconds.** The tables' plan (about 5 CPU-s for the Milky Way), its assembly,
+    the eye's cut (two pre-passes), the glare and the eye offsets each run as one job. On a busy
+    pool a chart's query can wait for one of them, though never in the interactive queue. T11.d
+    sizes the jobs.
+  - **The discs.** `exclude_system`'s stars come from the server's system cache
+    (`SharedSystemCache::get_or_generate`) in one bulk job, then `host_discs` at the request's
+    time, each a `HostDiscDto`. A system whose stars are not generated (a centre member, a rogue
+    planet: `KindNotGenerated`, `LayerNotGenerated`) has no disc, and the reply's `hosts` is empty;
+    a system that does not resolve, which `check_exclude` has ruled out, panics the job
+    (`internal`).
+  - **The wire.** `wire_star` takes the eye offset, and `wire_texel` (new) gives a texel's
+    luminance as `f32`, its chromaticity, its eye limit (`i16::MIN` where the eye was not asked)
+    and ρ. The doc comments on the eye offset say where it now comes from: `hyperion-protocol`'s
+    `sky.rs`, `@hyperion/protocol`'s `eyeOffsetMag`, the server's `SkyStarWire` and
+    `view/sky/cull.ts`. No bytes change.
+  - **Tests.**
+    - `cargo nextest run -p hyperion-server`: 472 passed, 5 skipped, 299 s at 4 threads under load
+      7–12. Of it, `--test sky` is 11 tests. A served sky now also marches its band, some 27 CPU-s
+      in a test build, so each served sky takes 45–60 s; the refusal tests march nothing.
+    - `a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_returns` (81 s): forced
+      to 30 ly over the galaxy's tables, built on the server's pool and serially in the test. It
+      asks the eye and a camera's V 9, so the march keeps the eye's light (R06.T9.j), `n_max` 16, so
+      that the overflow is splatted into the band, and a system of the Sun's own cell in layer E
+      left out. Each star's 24 bytes and each texel's 12 equal those Design note 17's table makes
+      of the sim's census, its `march_rows` of the same one reply and `sum_rows`, `limit_map` and
+      `eye_offsets`, as T9.f's record asks of this comparison; the hosts equal `host_discs`. A
+      nextest override puts it in the `sky-tables` group at four slots.
+    - `a_second_identical_sky_shares_the_tables_build`: two skies at once on two connections, one
+      build, the same bytes. `a_second_sky_in_another_time_bucket_shares_the_build`: at the epoch,
+      then 900 years before it, one build and a hit. Both over dark tables, whose build is
+      moments, so a cache hit would also give one build: the flight itself is pinned by
+      `compute::sky_tables`' unit tests.
+    - The two T11.b tests' `band_bytes` of 0 become six faces of 64² texels.
+    - Unit tests: `compute::sky_tables`' (two skies asked at once, the worker held, share one build
+      with three misses; a build no sky waits for is given up, its job skipped; a budget of nought
+      keeps nothing; another galaxy's key is refused); `compute::sky`'s band jobs' order,
+      `BulkJobs`' order and a dropped `BulkJobs`' jobs not run; `requests::sky`'s
+      `a_wire_texel_is_its_band_texel`, `a_host_disc_on_the_wire_is_the_sims` and
+      `an_excluded_systems_stars_are_its_discs_and_a_rogue_planet_has_none`.
+    - Acceptance as built: `cargo test -p hyperion-server --test sky`; also the server's lib tests
+      (`compute::sky`, `compute::sky_tables`, `requests::sky`, `config`),
+      `cargo test -p hyperion-sim sky::caps`, `cargo test -p hyperion-sim sky::census::query` and
+      `measure_rays`' doctest.
+  - **Open, for the owner (low priority).** When the observer's own system is a centre member,
+    `hosts` is empty and `not_modelled` says nothing of it, so the view would draw no disc with no
+    label saying why (Design note 23's honesty). No RM3 view is expected to start in one.
+  - **Not done here (T11.d's first items).**
+    1. R06.T9.g's illumination (not landed). The request's illumination is built first, 1,536
+       rays as bulk jobs, then its fixed point, and stated on the query
+       (`SkyQueryBuilder::illumination`), which `march_rows` and `band_rows` read with their
+       signatures unchanged; `eye_cut` gains an `Option<&Illumination>` (`decision-r06-t9g-dgl.md`,
+       §3.4 and §5). The server calls `march_rows` once (`compute::sky::march`) and `eye_cut` once
+       (`compute::sky::eye_cut`).
+    2. R06.T7.b's per-ray radii, which the reply carries. `CompleteTo` is `Copy` today, and
+       `compute::sky::march` and `band` copy it into each job; the near-Sun test's sim side copies
+       it too.
+    3. R06.T7.b's eye visibility map (`sky::limits::eye_visibility`, the eye-cut pre-pass's 16²
+       limits, set on `SkyQueryBuilder`), which the server sets on eye-only requests. T7.b's lane,
+       not yet landed, reports 41% fewer systems opened near the Sun.
+    4. The near-Sun test marches one reply; T11.d's several replies change the replies it gives.
+    5. The server bench `sky_near_sun_cold`, T11.d's since T11.b.
+- **R06.T5.f's measurements, as built (2026-10-07, generator version 21; `decision-r06-t9b-band.md`,
+  item 8).** The tables against the realised sky, as the task sets it out: a record that gates only
+  its own sample. Seed 0x0926_0000 (the fixture), at the epoch, on the shipped tables (T5.d's
+  correction as refitted at 21).
+  - **The build.**
+    - `crates/hyperion-sim/tests/sky_realised.rs`, one slow test, `tables_against_the_realised_sky`.
+      It keeps the plan's name, which its acceptance filters by. It runs on 8 threads, and its
+      nextest slow-profile override takes 8 slots. It is native only, since wasm32 has no threads.
+    - The tables are built once from `LuminosityTables::plan` on the test's threads and assembled
+      three ways from the same `BinSums`: as shipped, with the full pair counts and as single stars.
+    - The test-only reads (`sky/luminosity.rs`) are two `#[doc(hidden)] pub` plan modifiers, as
+      `sky::envelope` exposes its fit's helpers, since the integration test reaches only the public
+      API:
+      - `TablesPlan::with_full_pair_counts` takes each 1-mag bin's whole fitted count difference,
+        spread over its sub-bins as the shipped counts spread it, neither held at the single-star
+        count nor made non-decreasing. Its light, colours and `pair_light` are the shipped tables'
+        bit for bit;
+      - `TablesPlan::without_pair_correction` gives the single-star tables. It is a deviation: the
+        task names one read, and the paired counts need the single-star counts (the science check).
+    - `sky/binary_light.rs`: `apply` takes `PairCounts` (`Excess`, the shipped rule, unchanged;
+      `Full`), and the two count rules are `count_excess` and `count_whole`. The shipped path's bits
+      are unchanged: `parallel_build_equals_serial`'s three pins hold. Unit tests:
+      - `the_full_count_rule_keeps_the_deficit_and_changes_no_light`;
+      - `the_full_pair_counts_keep_the_light_and_the_deficit`: the shipped counts are, edge by edge,
+        the running maximum of the single-star and full counts; the halo loses stars at some edge;
+        a plan without the correction is unchanged.
+  - **1. The paired deficit** at the solar circle: T5.c's 6³ block at (0, 26,000, 0) ly and its
+    turns about the centre, in the plane. f = Σ(S − P) ÷ ΣS over every realised system, against the
+    fit's correction over the same blocks (−`pair_light` ÷ the single-star light, its 1σ added
+    linearly over components and blocks, an upper bound):
+
+    | Layer        | Blocks (cells) | Systems   | Realised f    | The fit's     | Difference          | Interval |
+    | ------------ | -------------- | --------- | ------------- | ------------- | ------------------- | -------- |
+    | C            | 64 (13,824)    | 165,055   | 2.56% ± 0.49  | 2.01% ± 0.28  | +0.55 points, +1.0σ | 1.64     |
+    | D            | 256 (55,296)   | 1,062,507 | 8.91% ± 0.53  | 8.67% ± 0.60  | +0.23 points, +0.3σ | 1.94     |
+    | E (recorded) | 64 (13,824)    | 557,330   | 14.94% ± 3.41 | 17.09% ± 0.55 | −2.15 points, −0.6σ | 13.06    |
+    - The 1σ is the ratio of sums' (the delta method). T5.c's form, √Σδ² ÷ ΣS, gives 0.50, 0.54 and
+      3.77, and a jackknife over the blocks 0.43, 0.59 and 3.97. The interval is a half-width:
+      3.29 times the widest of the three, asserted under 3 points in C and D (the full widths are
+      3.28 and 3.88). It leaves out the fit's 1σ, which no number of cells can shrink.
+    - D's 256 blocks are the most that fit about the circle without sharing a cell (638 ly apart,
+      a block 384 ly wide). A pilot of 8 blocks a layer gave a 1σ of 1.3 points in C and 3.2–4.9 in
+      D, whose few bright systems carry its scatter. E is not asked for; it places E's count
+      finding below.
+    - T5.c's block alone gives C 9.44% and D 21.12% against the fit's 2.06% and 10.56% there:
+      T5.c's 9.4% and 21.0% were that block's scatter (about 1.9σ and 1.0σ). The fit's D share
+      varies with azimuth (10.56% at T5.c's block, 8.67% over the circle), as the young disc does.
+    - The same systems' light against the tables (1σ compound Poisson, then the blocks' jackknife):
+
+      | Layer | Pair-evolved against the tables | Single against the single-star tables |
+      | ----- | ------------------------------- | ------------------------------------- |
+      | C     | 0.955 ± 0.010 ± 0.010           | 0.961 ± 0.010 ± 0.010                 |
+      | D     | 1.000 ± 0.010 ± 0.010           | 1.003 ± 0.009 ± 0.009                 |
+      | E     | 1.103 ± 0.072 ± 0.061           | 1.075 ± 0.068 ± 0.063                 |
+
+      C's single-star light by component falls with age: the young thin disc 1.021 ± 0.040, the
+      old thin disc's sub-discs at 0.56, 1.5, 3.1, 5.6 and 8.6 Gyr 0.962, 0.996, 0.970, 0.946 and
+      0.925 (± 0.017–0.027), the thick disc 0.832 ± 0.069. D's components lie within 1–2σ of 1
+      but the oldest sub-disc, 1.052 ± 0.021. E's, at 0.05, 0.56 and 1.5 Gyr, are 1.08 ± 0.08,
+      1.026 ± 0.016 and 1.138 ± 0.024.
+
+    - The same systems' stars brighter than M<sub>V</sub> 4, 2 and 0 (1σ compound Poisson by
+      system), single against the single-star tables and pair-evolved against the full counts,
+      and the pairs' change of the count against the fit's:
+
+      | Layer, M<sub>V</sub> | Single        | Pair-evolved, full counts | The pairs' change | The fit's |
+      | -------------------- | ------------- | ------------------------- | ----------------- | --------- |
+      | C, 4                 | 0.969 ± 0.006 | 0.970 ± 0.006             | −1.64% ± 0.09     | −1.75%    |
+      | C, 2                 | 0.965 ± 0.014 | 0.965 ± 0.014             | −2.50% ± 0.30     | −2.51%    |
+      | C, 0                 | 0.922 ± 0.051 | 0.894 ± 0.050             | −2.41% ± 2.76     | +0.57%    |
+      | D, 4                 | 1.013 ± 0.003 | 1.021 ± 0.003             | −20.79% ± 0.10    | −21.41%   |
+      | D, 2                 | 1.002 ± 0.004 | 1.003 ± 0.004             | −13.71% ± 0.13    | −13.86%   |
+      | D, 0                 | 1.008 ± 0.007 | 1.015 ± 0.007             | −6.23% ± 0.20     | −6.87%    |
+      | E, 4                 | 1.111 ± 0.005 | 1.165 ± 0.006             | −28.95% ± 0.17    | −32.27%   |
+      | E, 2                 | 1.077 ± 0.008 | 1.113 ± 0.009             | −28.35% ± 0.25    | −30.63%   |
+      | E, 0                 | 1.037 ± 0.013 | 1.048 ± 0.015             | −23.16% ± 0.46    | −23.97%   |
+
+      The shipped counts of D and E equal the single-star ones there, as the excess-only rule
+      gives where pairs remove stars. The fit's count change carries no tabulated error, so the
+      pairs' columns differ by more than their realised σ alone would allow without being a test.
+
+  - **2. Eight observers** at (26,000 sin φ, 26,000 cos φ, 68) ly, φ = 0°, 45°, …, 315° (observer 0
+    the sim's Sun-like place), each a census to V 8 within 300 ly with every cap forced and no eye,
+    its stars within 300 ly. The expectation integrates the density field times the tables along
+    768 Fibonacci rays at 1-ly nodes, each ray through its own realised dust at the census's
+    sightline quality (`Budget(64)`), selected at the cut less the distance modulus and the Sun's V
+    extinction behind the ray's A<sub>V</sub> (T8.k's subtraction; the census's own stars take
+    their own colours', some 0.01 mag apart within 300 ly). Light is V flux, Σ 10<sup>−0.4 V</sup>
+    of the dimmed stars, not the band's photopic lux. Per layer, listed against the expectation:
+
+    | Observer | C listed, tabulated, full | Light, from 50 ly | D listed, tabulated, full | Light, from 50 ly | E listed, tabulated, full | Light, from 50 ly |
+    | -------- | ------------------------- | ----------------- | ------------------------- | ----------------- | ------------------------- | ----------------- |
+    | 0        | 5,682, 5,998, 5,894       | 0.859, 0.957      | 633, 852, 653             | 0.876, 0.841      | 139, 168, 111             | 0.651, 0.795      |
+    | 1        | 9,318, 9,747, 9,594       | 0.988, 1.028      | 1,603, 1,879, 1,579       | 1.423, 1.361      | 336, 402, 290             | 0.607, 0.699      |
+    | 2        | 5,765, 6,020, 5,916       | 1.004, 1.004      | 651, 853, 654             | 3.594, 1.266      | 151, 168, 111             | 0.471, 0.504      |
+    | 3        | 7,526, 8,142, 8,013       | 0.914, 0.926      | 1,528, 1,740, 1,478       | 1.270, 1.006      | 311, 377, 273             | 0.708, 0.817      |
+    | 4        | 5,518, 5,693, 5,594       | 1.123, 0.974      | 658, 827, 635             | 0.883, 1.081      | 122, 163, 108             | 0.551, 0.677      |
+    | 5        | 9,174, 9,718, 9,566       | 1.123, 0.930      | 1,634, 1,876, 1,577       | 0.992, 1.048      | 285, 402, 290             | 0.346, 0.420      |
+    | 6        | 5,816, 6,008, 5,904       | 1.049, 0.974      | 676, 853, 653             | 1.328, 0.962      | 136, 168, 111             | 32.4, 0.767       |
+    | 7        | 8,783, 9,293, 9,147       | 0.878, 0.948      | 1,508, 1,841, 1,551       | 0.821, 0.893      | 358, 396, 286             | 0.766, 0.942      |
+
+    The observers between the axes (odd) hold about 1.6 times the others' C and 2.2 times their D
+    and E stars, and the tables expect it: the density there (the fixture's arms). Observer 0
+    reproduces T9.b's single observer (C 5,679, D 642 and E 143 listed, 86%, 87% and 63% of the
+    light) to the census's changes since (T8.k, T9.e). A and B list 2–7 and 32–56 stars each.
+    - **The ensemble's counts**, σ the listed stars' compound-Poisson scatter by system (√Σk²)
+      alone, since the fit tabulates no error of its count difference (so each σ is an upper bound
+      on the significance):
+
+      | Layer | Listed | Tabulated (ratio) | Full pair counts (ratio)        |
+      | ----- | ------ | ----------------- | ------------------------------- |
+      | A     | 33     | 32.8 (1.006)      | 32.8 (1.006 ± 0.190)            |
+      | B     | 378    | 342.1 (1.105)     | 342.1 (1.105 ± 0.061, +1.7σ)    |
+      | C     | 57,582 | 60,616.8 (0.950)  | 59,628.1 (0.966 ± 0.004, −7.8σ) |
+      | D     | 8,891  | 10,720.3 (0.829)  | 8,780.6 (1.013 ± 0.013, +1.0σ)  |
+      | E     | 1,838  | 2,242.2 (0.820)   | 1,578.9 (1.164 ± 0.034, +4.9σ)  |
+
+      The brown dwarfs, some 10⁻⁸ stars a census, are left out.
+
+    - **The skew's Monte Carlo**, 20,000 trials of all eight observers, each trial against its
+      model's exact mean, which lies within 0.2% of the rays' expectation for every observer but
+      observer 3 (−1.3% to −1.6% in C, D and E, its patchier dust). The eight observers' median
+      light ratio against the distribution of the trials' eight-observer medians, z from the share of
+      trials at or below it (the half-width's z beside it):
+
+      | Ratio                         | Eight observers' median | One observer's (interquartile) | Eight's median (16–84%) | z             |
+      | ----------------------------- | ----------------------- | ------------------------------ | ----------------------- | ------------- |
+      | A within 300 ly               | 0.805                   | 0.685 (0.400–1.111)            | 0.691 (0.507–0.929)     | +0.51         |
+      | B within 300 ly               | 0.968                   | 0.867 (0.719–1.073)            | 0.869 (0.775–0.986)     | +0.86         |
+      | C within 300 ly               | 0.996                   | 0.964 (0.922–1.021)            | 0.965 (0.938–0.997)     | +0.98         |
+      | D within 300 ly               | 1.131                   | 0.910 (0.816–1.041)            | 0.911 (0.850–0.984)     | +2.40 (+3.02) |
+      | E within 300 ly               | 0.629                   | 0.656 (0.456–0.988)            | 0.661 (0.534–0.840)     | −0.23         |
+      | C from 50 to 300 ly           | 0.965                   | 0.996 (0.971–1.024)            | 0.996 (0.981–1.013)     | −2.03         |
+      | D from 50 to 300 ly           | 1.027                   | 0.972 (0.894–1.070)            | 0.973 (0.924–1.030)     | +0.95         |
+      | E from 50 to 300 ly           | 0.733                   | 0.737 (0.516–1.082)            | 0.742 (0.604–0.930)     | −0.06         |
+      | Every layer within 300 ly     | 0.964                   | 0.915 (0.840–1.023)            | 0.917 (0.870–0.976)     | +0.82         |
+      | Every layer from 50 to 300 ly | 0.938                   | 0.956 (0.893–1.040)            | 0.957 (0.918–1.004)     | −0.47         |
+      | Every layer within 200 ly     | 0.972                   | 0.882 (0.785–1.021)            | 0.883 (0.825–0.959)     | +1.14         |
+
+      Each observer's own Monte Carlo is printed too. The Sun's place holds 0.821 of its light
+      within 200 ly against its own median of 0.907 (interquartile 0.832–1.021), and the ruling's
+      "about 0.90" was its estimate there. The observers between the axes, whose light more rare
+      bright stars carry, have medians of 0.83–0.85.
+
+    - The Monte Carlo's approximations, none of which matters at the 3σ thresholds (science check):
+      - every 0.05-mag bin of the tables at the observer is a type at the bin's middle magnitude, as
+        many stars as carry its light (±2.3% in a star's light across a bin);
+      - each shell takes its sky-averaged density per component (exact, the light depending only on
+        r once A is fixed) and its sky-averaged extinction (second order);
+      - one light age, at 150 ly (about 10⁻⁵ in the light);
+      - each star is drawn alone, though a system's stars stand together (Σk² ÷ Σk is 1.46 for D's
+        listed stars and 1.54 for E's), so D's and E's distributions are somewhat narrow.
+
+  - **Findings for the tables lane** (the task's rules; T5.d's fit and the tables, with these data
+    and the logs below). Recorded, not fixed (FEATURES FIRST, 2026-10-07):
+    - **C's counts** under the full correction, 0.966 ± 0.004 (−7.8σ). The pair correction is not
+      its cause: the realised pairs change C's counts as the fit does (−1.64% against −1.75%
+      brighter than M<sub>V</sub> 4) and its light as the fit does (2.56% against 2.01%). The
+      realised single stars fall short of the single-star tables, by 3.1% in stars brighter than
+      M<sub>V</sub> 4 and 3.9% in light, the more so the older the component (by 7.5% at 8.6 Gyr
+      and 17% in the thick disc), and C's light beyond 50 ly is short by as much (0.965, −2.0σ
+      against the skew). T5.c's gate allows 5% for
+      the tables' median draws, track sampling and reference metallicity, which may hold it.
+    - **E's counts** under the full correction, 1.164 ± 0.034 (+4.9σ). The realised single stars
+      exceed the single-star tables by 11% brighter than M<sub>V</sub> 4 (by 4% brighter than 0),
+      and the fit's count change removes more than the realised pairs do (−32.3% against −29.0% ±
+      0.2): together 1.165, the ensemble's. The shipped counts, which the caps read, are the
+      single-star ones there, so the second does not reach the caps; the first does, by E's bright
+      stars short in the counts the caps take beyond their radii.
+  - **What is settled.**
+    - No paired-deficit finding: the fit's correction matches the realised in C and D at the solar
+      circle, and in E within E's wide interval. The band ruling's suspicion that the fit
+      under-corrects young D populations there is not borne out.
+    - D's count deficit (T9.b's 0.75, 0.829 here) is the pair deficit the shipped counts leave out
+      by design (1.013 ± 0.013 with it); its light is the tables' (1.000 ± 0.010).
+    - The 79–82% near the Sun is that place's low realisation (its own skew's 25th percentile or
+      so), as ruled.
+    - No median-light finding. D's median lies above the skew's (+2.4σ by the tail, +3.0σ by the
+      half-width), which the one-sided rule does not count; its nearest 50 ly carry it.
+  - **Deviations.**
+    - Item 1 records E's blocks and, for C, D and E, the light (with its σ, the jackknife and the
+      components) and the counts against the single-star tables, beside the paired light the
+      task asks for: the science check's should-fix, to place the count findings. The interval is
+      asserted in C and D only.
+    - The second test-only read, `without_pair_correction`, and `sky/binary_light.rs` and
+      `.config/nextest.toml` beyond the task's Files.
+    - The record ran its slow-test binary by name (`--ignored --exact`), the record-making run, in
+      a capped scope at a 400% CPU quota and not under `just _locked`: the lock's queue held the
+      orchestrator's `just ci` and a multi-hour hold, and the lane's rules keep a single CPU-only
+      slow test off the lock. `just test-slow` would also rerun `hyperion-fit check --rerun-fast`,
+      which nothing here touches.
+    - The median test's statistic is the trials' tail share at 20,000 trials (the science check),
+      not 3 times the half-width.
+  - **Cost** (provisional: unlocked, at a 400% quota, load 4–35):
+    - The record: 3,759 s wall and 14,886 CPU-s (user 14,873, system 13), peak 737 MiB (the
+      scope's `memory.peak`).
+    - Its parts: the tables and C's blocks 50 s; D's blocks 24.8 min (some 5.6 ms a system); E's
+      29.7 min (some 12.8 ms a system); the eight observers 6.5 min; the Monte Carlo 53 s.
+    - A first record with 4,000 trials and without E and the light, component and count lines
+      gave the same figures elsewhere: 1,975 s and 7,849 CPU-s, 681 MiB. A pilot of 8 blocks a
+      layer, 2 observers and 400 trials: 151 s and 578 CPU-s, 484 MiB.
+  - **Gates**: `cargo fmt --check`; Clippy `-D warnings`, the workspace natively and the sim on
+    wasm32-wasip1; `cargo test -p hyperion-sim --lib -- sky::` (192 pass); the slow test by name
+    as above. Determinism audit: nothing to fix (no output, golden or fingerprint moves; no bump).
+    Science check: no must-fix; its three should-fixes applied (the light's σ, the count σ's
+    statement, the paired counts and E to place the findings). Rust review: no must-fix; applied
+    (the full read's untested branch, exhaustive matches, an `expect`, a cast's reason); declined:
+    the behaviour name, since the plan's acceptance names the test.
+  - **Logs**: `.git/rm23-scratch/r06-census/t5f/record2/` (the record's binary, its tree's diff,
+    `record.log` and memory samples), `record.log` (the first record) and `pilot.log`.

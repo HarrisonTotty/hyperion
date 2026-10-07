@@ -27,11 +27,12 @@
 //! The eye offset is what an eye view adds to the band texel's eye limit in the star's direction
 //! to have the star's own limit (rendering plan R06, R06.T9.h; decided 2026-10-06,
 //! `decision-r06-t9c-glare.md`): its colour offset against its texel's background, from its S/P
-//! ratio after its own reddening, and its glare's self-exclusion. Until R06.T11.c builds the limit
-//! map it is the colour offset alone, against a scotopic background, 2.5 log₁₀(ρ★ ÷ 2.297). It
-//! saturates at −1.28: a cool star behind several magnitudes of dust can fall below that (a 2,300 K
-//! dwarf from A<sub>V</sub> about 3.3, a red giant from about 7), and a view then keeps it where
-//! its own limit would cull it.
+//! ratio after its own reddening, and its glare's self-exclusion, from the server's limit map
+//! (R06.T11.c). Where the eye was not asked, the texels hold no eye limit, and it is the colour
+//! offset alone, against a scotopic background, 2.5 log₁₀(ρ★ ÷ 2.297). It saturates at −1.28: a
+//! cool star behind several magnitudes of dust can fall below that (a 2,300 K dwarf from
+//! A<sub>V</sub> about 3.3, a red giant from about 7), and a view then keeps it where its own limit
+//! would cull it.
 //!
 //! A band texel is [`SKY_TEXEL_BYTES`], 12, in the cube's face order (+X, −X, +Y, −Y, +Z, −Z on the
 //! galactic axes, WebGPU's layer order), rows from the top, each face

@@ -16,11 +16,18 @@
 //! | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | 128 (MiB)                                    |
 //! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
 //! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 64 (MiB)                                     |
+//! | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | 160 (MiB)                                    |
+//! | `--serve-sky`           | `HYPERION_SERVE_SKY`           | off                                          |
 //! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
 //!
-//! `--stop-on-stdin-close` is a switch. Its variable takes clap's boolish values, in any case:
-//! `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`, `f`, `false`, `off` or `0` for off.
-//! It refuses anything else, the empty string included.
+//! `--serve-sky` and `--stop-on-stdin-close` are switches. Their variables take clap's boolish
+//! values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`, `f`, `false`,
+//! `off` or `0` for off. They refuse anything else, the empty string included.
+//!
+//! `--serve-sky` is the sky's landing switch (rendering plan R06, R06.T11.c; decided 2026-10-07 by
+//! the orchestrator). Off, the server answers `sky` as it did before R06.T11.a, `unsupported`, and
+//! no job of it reaches the pool, so a client that asks for its sky is untouched until R06.T8.g,
+//! whose landing turns it on by default.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
@@ -59,6 +66,10 @@ pub const ENV_BODY_CACHE_MB: &str = "HYPERION_BODY_CACHE_MB";
 pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
 /// The variable giving the sky's cell cache's budget in MiB, for `--sky-cache`.
 pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
+/// The variable giving the sky tables' cache's budget in MiB, for `--sky-tables`.
+pub const ENV_SKY_TABLES_MB: &str = "HYPERION_SKY_TABLES_MB";
+/// The variable that turns the sky on, for `--serve-sky`.
+pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
 pub const ENV_STOP_ON_STDIN_CLOSE: &str = "HYPERION_STOP_ON_STDIN_CLOSE";
 
@@ -82,6 +93,10 @@ pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
 /// Provisional: R06.T8.h sets it from one near-Sun sky's entry bytes. A sky forced to 200 ly near
 /// the Sun at V 11 kept 25.5 MB of entries (R06's Risks, "Deviations in T11.b, as built").
 pub const DEFAULT_SKY_CACHE_MIB: usize = 64;
+/// The sky tables' cache's budget when `--sky-tables` is not given, in MiB: two galaxies' luminosity
+/// tables, about 55 MiB each with their snapshots (rendering plan R06, R06.T11.c; decided
+/// 2026-10-03, `decision-r06-tables.md`, item B.2).
+pub const DEFAULT_SKY_TABLES_MIB: usize = 160;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -103,6 +118,9 @@ const DEFAULT_BRIEF_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_SKY_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_SKY_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_SKY_TABLES: CacheBudget = CacheBudget {
+    bytes: DEFAULT_SKY_TABLES_MIB * BYTES_PER_MIB,
 };
 
 /// The server's command line.
@@ -152,6 +170,20 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_SKY_CACHE_MB, default_value_t = DEFAULT_SKY_CACHE)]
     sky_cache: CacheBudget,
 
+    /// Budget of the cache of each galaxy's sky tables, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_SKY_TABLES_MB, default_value_t = DEFAULT_SKY_TABLES)]
+    sky_tables: CacheBudget,
+
+    /// Serve `sky` requests, which are answered `unsupported` otherwise (until rendering plan R06's
+    /// census is fast enough to serve)
+    #[arg(
+        long,
+        env = ENV_SERVE_SKY,
+        action = ArgAction::SetTrue,
+        value_parser = BoolishValueParser::new().map(sky_service),
+    )]
+    serve_sky: SkyService,
+
     /// Stop gracefully when standard input closes, for a server run as another program's child
     #[arg(
         long,
@@ -160,6 +192,32 @@ pub struct ServerArgs {
         value_parser = BoolishValueParser::new().map(stdin_stop),
     )]
     stop_on_stdin_close: StdinStop,
+}
+
+/// Whether the server answers `sky` (rendering plan R06): its landing switch, `--serve-sky`
+/// (R06.T11.c; decided 2026-10-07 by the orchestrator).
+///
+/// R06.T11.a–c land behind it, off, so that the live client, which asks for its sky whenever a view
+/// opens, is untouched until R06.T8.g makes a sky near the Sun cheap enough to serve; T8.g's landing
+/// turns it on by default. Tests turn it on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum SkyService {
+    /// `sky` is answered `unsupported`, as before R06.T11.a, and none of its work reaches the pool:
+    /// the default.
+    #[default]
+    Unsupported,
+    /// `sky` is served: its census, band, limit map and host discs (R06.T11.a–c).
+    Served,
+}
+
+/// The sky's service that a switch asks for.
+#[must_use]
+fn sky_service(serve: bool) -> SkyService {
+    if serve {
+        SkyService::Served
+    } else {
+        SkyService::Unsupported
+    }
 }
 
 /// The stop on standard input that a switch asks for.
@@ -185,6 +243,8 @@ impl From<ServerArgs> for ServerConfig {
             body_cache,
             brief_cache,
             sky_cache,
+            sky_tables,
+            serve_sky,
             stop_on_stdin_close,
         } = args;
         Self::builder()
@@ -197,6 +257,8 @@ impl From<ServerArgs> for ServerConfig {
             .body_cache_bytes(body_cache.bytes)
             .brief_cache_bytes(brief_cache.bytes)
             .sky_cache_bytes(sky_cache.bytes)
+            .sky_tables_bytes(sky_tables.bytes)
+            .sky_service(serve_sky)
             .stdin_stop(stop_on_stdin_close)
             .build()
     }
@@ -260,6 +322,8 @@ pub struct ServerConfig {
     body_cache_bytes: usize,
     brief_cache_bytes: usize,
     sky_cache_bytes: usize,
+    sky_tables_bytes: usize,
+    sky_service: SkyService,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
@@ -328,6 +392,18 @@ impl ServerConfig {
         self.sky_cache_bytes
     }
 
+    /// The sky tables' cache's budget, in bytes (rendering plan R06, R06.T11.c).
+    #[must_use]
+    pub fn sky_tables_bytes(&self) -> usize {
+        self.sky_tables_bytes
+    }
+
+    /// Whether the server answers `sky` (rendering plan R06, R06.T11.c's landing switch).
+    #[must_use]
+    pub fn sky_service(&self) -> SkyService {
+        self.sky_service
+    }
+
     /// Whether the end of standard input stops the server.
     ///
     /// The binary's `main` reads this, for [`StopRequests::listen`](crate::stop::StopRequests::listen);
@@ -381,6 +457,8 @@ impl Default for ServerConfigBuilder {
                 body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
                 sky_cache_bytes: DEFAULT_SKY_CACHE.bytes,
+                sky_tables_bytes: DEFAULT_SKY_TABLES.bytes,
+                sky_service: SkyService::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
@@ -456,6 +534,24 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn sky_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.sky_cache_bytes = bytes;
+        self
+    }
+
+    /// The sky tables' cache's budget, in bytes.
+    ///
+    /// Zero caches nothing: every sky builds its galaxy's tables, though skies asked at once still
+    /// share one build.
+    #[must_use]
+    pub fn sky_tables_bytes(mut self, bytes: usize) -> Self {
+        self.config.sky_tables_bytes = bytes;
+        self
+    }
+
+    /// Whether the server answers `sky`; [`SkyService::Unsupported`] by default, until R06.T8.g.
+    /// Tests serve it.
+    #[must_use]
+    pub fn sky_service(mut self, service: SkyService) -> Self {
+        self.config.sky_service = service;
         self
     }
 
@@ -555,6 +651,8 @@ mod tests {
         usize,
         usize,
         usize,
+        usize,
+        SkyService,
         StdinStop,
     );
 
@@ -569,6 +667,8 @@ mod tests {
             config.body_cache_bytes(),
             config.brief_cache_bytes(),
             config.sky_cache_bytes(),
+            config.sky_tables_bytes(),
+            config.sky_service(),
             config.stdin_stop(),
         )
     }
@@ -595,6 +695,8 @@ mod tests {
                 128 * 1024 * 1024,
                 64 * 1024 * 1024,
                 64 * 1024 * 1024,
+                160 * 1024 * 1024,
+                SkyService::Unsupported,
                 StdinStop::Ignore,
             )
         );
@@ -623,6 +725,9 @@ mod tests {
             "7",
             "--sky-cache",
             "11",
+            "--sky-tables",
+            "13",
+            "--serve-sky",
             "--stop-on-stdin-close",
         ]);
         assert_eq!(
@@ -637,6 +742,8 @@ mod tests {
                 5 << 20,
                 7 << 20,
                 11 << 20,
+                13 << 20,
+                SkyService::Served,
                 StdinStop::Watch,
             )
         );
@@ -647,6 +754,18 @@ mod tests {
         assert_eq!(
             refusal(&["--stop-on-stdin-close=yes"]),
             ErrorKind::TooManyValues
+        );
+    }
+
+    /// The sky's landing switch is off unless it is given (R06.T11.c).
+    #[test]
+    fn the_sky_is_served_only_when_its_switch_is_on() {
+        assert_eq!(config(&[]).sky_service(), SkyService::Unsupported);
+        assert_eq!(config(&["--serve-sky"]).sky_service(), SkyService::Served);
+        assert_eq!(refusal(&["--serve-sky=yes"]), ErrorKind::TooManyValues);
+        assert_eq!(
+            ServerConfig::builder().build().sky_service(),
+            SkyService::Unsupported
         );
     }
 
@@ -678,6 +797,8 @@ mod tests {
                 (Some("body-cache"), Some("HYPERION_BODY_CACHE_MB")),
                 (Some("brief-cache"), Some("HYPERION_BRIEF_CACHE_MB")),
                 (Some("sky-cache"), Some("HYPERION_SKY_CACHE_MB")),
+                (Some("sky-tables"), Some("HYPERION_SKY_TABLES_MB")),
+                (Some("serve-sky"), Some("HYPERION_SERVE_SKY")),
                 (
                     Some("stop-on-stdin-close"),
                     Some("HYPERION_STOP_ON_STDIN_CLOSE")
@@ -768,6 +889,7 @@ mod tests {
         assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
         assert_eq!(DEFAULT_SKY_CACHE.to_string(), "64");
+        assert_eq!(DEFAULT_SKY_TABLES.to_string(), "160");
     }
 
     #[test]
@@ -817,6 +939,8 @@ mod tests {
             .body_cache_bytes(40)
             .brief_cache_bytes(50)
             .sky_cache_bytes(60)
+            .sky_tables_bytes(70)
+            .sky_service(SkyService::Served)
             .stdin_stop(StdinStop::Watch)
             .build();
         assert_eq!(
@@ -831,6 +955,8 @@ mod tests {
                 40,
                 50,
                 60,
+                70,
+                SkyService::Served,
                 StdinStop::Watch,
             )
         );

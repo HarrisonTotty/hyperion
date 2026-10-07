@@ -29,6 +29,14 @@ threads-required = 8
 filter = "package(hyperion-sim) & (test(=sky::limits::tests::the_eyes_light_is_independent_of_the_census_radius) | test(=sky::band::tests::one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent))"
 threads-required = 4
 
+# R06.T11.c's near-Sun sky builds the galaxy's luminosity tables twice, on the server's pool and
+# serially in the test, and marches its band on three threads of its own beside the server's three
+# workers, so it takes four slots and joins the tables' group.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & binary(=sky) & test(=a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_returns)"
+test-group = "sky-tables"
+threads-required = 4
+
 # The hierarchy bound's tests (P11.T16) check their records on four threads of their own, so each
 # takes four slots rather than a nominal one.
 [[profile.default.overrides]]

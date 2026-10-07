@@ -472,6 +472,13 @@ impl SkyQuery {
         self.exclude
     }
 
+    /// Each layer's forced cap, where the query forces its caps
+    /// ([`with_caps_forced`](Self::with_caps_forced)): `None` where [`census_plan`] derives them.
+    #[must_use]
+    pub fn forced_caps(&self) -> Option<&[LayerCap]> {
+        self.forced_caps.as_deref()
+    }
+
     /// The same query with every layer's cap forced to `radius`: the census the brute force is
     /// compared with (R06.T8.e). A forced cap states nothing beyond it, and the plan reads no
     /// luminosity table.
@@ -814,11 +821,31 @@ pub fn census_plan(
     query: &SkyQuery,
     cache: &mut NoiseCache,
 ) -> CensusPlan {
-    let observer = query.observer();
     let caps = match &query.forced_caps {
         Some(caps) => caps.clone(),
-        None => layer_caps(galaxy, tables, envelope, observer, query.cut(), cache),
+        None => layer_caps(
+            galaxy,
+            tables,
+            envelope,
+            query.observer(),
+            query.cut(),
+            cache,
+        ),
     };
+    census_plan_of(query, caps)
+}
+
+/// The census's plan for `query` to `caps`, one per layer of [`CAPPED_LAYERS`], which the caller
+/// has computed: [`census_plan`] after its caps, for a server that runs the caps' rays as jobs of
+/// its own ([`layer_caps_over`](crate::sky::caps::layer_caps_over); R06.T11.c). The query's own
+/// forced caps, if it has them, are not read: the plan takes `caps`.
+///
+/// # Panics
+///
+/// If a cap's sphere cannot be built, which a positive finite cap never fails.
+#[must_use]
+pub fn census_plan_of(query: &SkyQuery, caps: Vec<LayerCap>) -> CensusPlan {
+    let observer = query.observer();
     let walks = caps
         .iter()
         .filter_map(|cap| layer_walk(query, cap))
@@ -1090,6 +1117,18 @@ mod tests {
         let mut cache = NoiseCache::with_capacity(16);
         let plan = census_plan(galaxy, &tables, &envelope, &query, &mut cache);
         (query, plan)
+    }
+
+    /// The plan to caps a caller computed is the plan of the query that forces them: the plan the
+    /// server makes after its caps' ray jobs (R06.T11.c).
+    #[test]
+    fn a_plan_to_given_caps_is_the_plan_that_forces_them() {
+        let (forced, plan) = forced_query_and_plan(300.0, None);
+        let unforced = SkyQuery::builder(observer(), Magnitudes::new(7.0))
+            .build()
+            .expect("a valid query");
+        assert_eq!(census_plan_of(&unforced, plan.caps().to_vec()), plan);
+        assert_eq!(census_plan_of(&forced, plan.caps().to_vec()), plan);
     }
 
     #[test]

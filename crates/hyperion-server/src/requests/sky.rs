@@ -1,42 +1,50 @@
-//! The sky's handler (rendering plan R06, R06.T11.a and T11.b; Design notes 5 and 9–17): `sky`,
-//! every star brighter than a view's limit as seen from a point at a time.
+//! The sky's handler (rendering plan R06, R06.T11.a–c; Design notes 5 and 9–17): `sky`, every star
+//! brighter than a view's limit as seen from a point at a time, the light of the rest as a band, the
+//! eye's limit in every direction, and the observer's own stars as discs.
 //!
 //! The request is checked field by field, as every handler's is: the universe, then `time`,
 //! `observer`, `eye`, `camera_limit_v`, `n_max`, `cone` and `exclude_system`, whose ID plan 03's
 //! `resolve` looks up in a pool job, as the scene's frames are. The eye's cut is then the eye cut's
 //! pre-pass, and the request's cut is the deeper of it and the camera's limit. Everything the sky
 //! computes runs as bulk jobs on the CPU pool, never in the interactive queue
-//! ([`compute::sky`](crate::compute::sky)): the tables, the eye's cut, the census's plan, the
-//! census itself a few hundred cells to a job over the server's cell cache, the merge, and the
-//! payload.
+//! ([`compute::sky`](crate::compute::sky)): the galaxy's tables, built once and kept; the eye's
+//! cut; the caps' rays, a few dozen to a job, and the census's plan; the census itself a few hundred
+//! cells to a job over the server's cell cache, while the band's rays are marched a face's two rows
+//! to a job; the merge; the band's sums and the eye's limits a job a march, and the eye offsets; the
+//! host discs of `exclude_system` at the request's time; and the payload.
 //!
 //! The answer is the census's JSON (the cut, each layer's cap and tallies, the listed and overflow
-//! counts, `valid_until` and what is not modelled) and its bulk payload, in R03's binary frames
-//! before it (R06.T11.b): each listed star in the census's order in its wire form ([`wire_star`]),
-//! then the band's texels, the response's `stars_bytes` and `band_bytes` splitting it and its
-//! manifest stating the whole. Until R06.T11.c computes the band, the limits and the discs, the
-//! band's part is empty (`band_bytes` 0) and the reply has no host disc; the band's shape is the
-//! server's, 64² a face.
+//! counts, `valid_until`, the band's shape, the host discs and what is not modelled) and its bulk
+//! payload, in R03's binary frames before it (R06.T11.b): each listed star in the census's order in
+//! its wire form ([`wire_star`]), then the band's texels in the cube's face order ([`wire_texel`]),
+//! the response's `stars_bytes` and `band_bytes` splitting it and its manifest stating the whole.
+//! The band's shape is the query's, 64² a face.
+//!
+//! The server answers `sky` only behind its landing switch, `--serve-sky` (R06.T11.c); off, as it
+//! is by default until R06.T8.g, the request never reaches this handler.
 
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use futures_util::future::try_join;
 use hyperion_protocol::{
-    BandSpecDto, ConeDto, ErrorCode, EyeDto, MAX_CUT_V, MAX_SKY_STARS, RequestError, ResponseBody,
-    SkyGapDto, SkyLayerCensusDto, SkyRequest, SkyResponse, SystemIdHex,
+    BandSpecDto, ConeDto, ErrorCode, EyeDto, HostDiscDto, MAX_CUT_V, MAX_SKY_STARS, PowerTwoDto,
+    RequestError, ResponseBody, SkyGapDto, SkyLayerCensusDto, SkyRequest, SkyResponse, SystemIdHex,
 };
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::resolve;
+use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::pad_speed;
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
+use hyperion_sim::sky::band::{BandTexel, CompleteTo};
 use hyperion_sim::sky::caps::LayerCap;
 use hyperion_sim::sky::census::{
     BuildSkyQueryError, CensusTallies, Cone, LayerTally, SkyCensus, SkyQuery, SkyStar,
 };
+use hyperion_sim::sky::disc::{HostDisc, host_discs};
 use hyperion_sim::sky::eye::{BuildEyeError, SkyBackground, SpRatio, star_colour_offset};
 use hyperion_sim::tables::star_colour::LUMINANCE_RGB;
 use hyperion_sim::time::{Span, UniverseTime};
@@ -47,10 +55,10 @@ use hyperion_sim::units::{CandelasPerSquareMetre, Degrees, LightYears, Magnitude
 
 use super::universe::openable_universe;
 use crate::AppState;
-use crate::bulk::sky::{EncodedSky, SkyStarWire, encode_sky_payload};
+use crate::bulk::sky::{EncodedSky, SkyStarWire, SkyTexelWire, encode_sky_payload};
 use crate::bulk::{Answer, BulkPayload};
-use crate::compute::sky::CensusInputs;
-use crate::compute::{self, CancelToken, JobError, Priority, SkyCaps};
+use crate::compute::sky::{CensusInputs, SkyBand};
+use crate::compute::{self, CancelToken, ComputeError, GalaxyKey, JobError, Priority, SkyCaps};
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 
 /// The longest a sky holds before it is asked again, s: one Julian year (Design note 13).
@@ -67,12 +75,12 @@ const NEAR_STAR_LY: f64 = 1.0;
 const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 
 /// Every star brighter than the request's cut as seen from its observer at its time: the census's
-/// JSON, and its stars as the bulk payload before it (R06.T11.a and T11.b; the band and the discs
-/// are T11.c's).
+/// JSON with the host discs, and its stars and band as the bulk payload before it (R06.T11.a–c).
 ///
-/// The tables, the eye's cut, the plan, the census, its merge and the payload each run as bulk
-/// jobs under `token`, the census a few hundred cells to a job, so a cancelled request's queued
-/// jobs are skipped and a running census job stops at its next cell.
+/// The tables, the eye's cut, the caps and plan, the census and the band's march, the merge, the
+/// band's sums and limits, the eye offsets, the discs and the payload each run as bulk jobs under
+/// `token`, so a cancelled request's queued jobs are skipped and a running census job stops at its
+/// next cell. The galaxy's tables are built once, shared by every sky of the galaxy at any time.
 ///
 /// # Errors
 ///
@@ -95,7 +103,8 @@ pub(crate) async fn answer(
         check_exclude(&state, &galaxy, system, named, token.clone()).await?;
     }
     let pool = &state.pool;
-    let tables = compute::sky::tables(pool, &galaxy, state.sky_caps, &token).await?;
+    let caps = state.sky_caps;
+    let tables = state.sky_tables.get(universe.key(), &galaxy).await?;
     let eye = match asked.eye {
         Some(eye) => Some((
             eye,
@@ -103,7 +112,7 @@ pub(crate) async fn answer(
         )),
         None => None,
     };
-    let query = Arc::new(asked.query(eye, state.sky_caps));
+    let query = Arc::new(asked.query(eye, caps));
     let plan = compute::sky::plan(pool, &galaxy, &tables, &query, &token).await?;
     let inputs = CensusInputs {
         galaxy,
@@ -112,23 +121,53 @@ pub(crate) async fn answer(
         cells: Arc::clone(&state.sky_cells),
         query: Arc::clone(&query),
     };
-    let census = Arc::new(compute::sky::census(pool, &inputs, &plan, &token).await?);
+    // The band's rays read no census, so they are marched while it runs.
+    let complete_to = CompleteTo::of_caps(plan.caps());
+    let (census, marches) = try_join(
+        compute::sky::census(pool, &inputs, &plan, &token),
+        compute::sky::march(pool, &inputs, complete_to, &token),
+    )
+    .await?;
+    let census = Arc::new(census);
     tracing::debug!(
         cut = query.cut().value(),
         listed = census.listed().len(),
         overflow = census.overflow().len(),
         "sky censused"
     );
+    let band = compute::sky::band(pool, &query, marches, &census, complete_to, &token).await?;
+    let hosts = match asked.exclude {
+        Some(system) => {
+            discs(
+                &state,
+                universe.key(),
+                &inputs.galaxy,
+                system,
+                &query,
+                &token,
+            )
+            .await?
+        }
+        None => Vec::new(),
+    };
     let (observer, listed) = (*query.observer(), Arc::clone(&census));
     let encoded = compute::sky::bulk(pool, &token, move |_: &CancelToken| {
-        payload(&observer, &listed)
+        payload(&observer, &listed, &band)
     })
     .await?;
     let bulk = BulkPayload::new(encoded.bytes.clone()).expect(
         "a sky's payload, at most N_max's 3 × 10⁵ stars and six faces of texels (7.5 MB), has far \
          fewer chunks than a u32 counts",
     );
-    let body = response(request, &query, plan.caps(), &census, &bulk, &encoded);
+    let body = response(
+        request,
+        &query,
+        plan.caps(),
+        &census,
+        hosts,
+        &bulk,
+        &encoded,
+    );
     Ok(Answer {
         body: ResponseBody::Sky(Box::new(body)),
         bulk: Some(bulk),
@@ -136,17 +175,98 @@ pub(crate) async fn answer(
 }
 
 /// The sky's bulk payload (Design note 17): each listed star of `census` as the wire carries it,
-/// seen from `observer`, in the census's order, then the band's texels.
+/// seen from `observer`, in the census's order, with its eye offset from `band`, then `band`'s
+/// texels in the cube's face order.
 ///
-/// The band is empty until R06.T11.c computes it, so the payload is the stars alone.
+/// Where the eye was not asked, a star's eye offset is its colour offset alone, against a scotopic
+/// background ([`scotopic_colour_offset`]), and every texel's eye limit is the wire's "not asked".
+/// `band` is of `census`, so it holds an eye offset for each of its listed stars where the eye was
+/// asked.
 #[must_use]
-fn payload(observer: &Observer, census: &SkyCensus) -> EncodedSky {
-    let stars: Vec<SkyStarWire> = census
-        .listed()
-        .iter()
-        .map(|star| wire_star(observer, star))
-        .collect();
-    encode_sky_payload(&stars, &[])
+fn payload(observer: &Observer, census: &SkyCensus, band: &SkyBand) -> EncodedSky {
+    let listed = census.listed();
+    let stars: Vec<SkyStarWire> = match band.eye_offsets() {
+        Some(offsets) => {
+            debug_assert_eq!(offsets.len(), listed.len(), "an eye offset per listed star");
+            listed
+                .iter()
+                .zip(offsets)
+                .map(|(star, &offset)| wire_star(observer, star, offset))
+                .collect()
+        }
+        None => listed
+            .iter()
+            .map(|star| {
+                let ratio = star.colour().reddened(star.a_v()).sp_ratio();
+                wire_star(observer, star, scotopic_colour_offset(ratio))
+            })
+            .collect(),
+    };
+    let texels: Vec<SkyTexelWire> = band.texels().iter().map(wire_texel).collect();
+    encode_sky_payload(&stars, &texels)
+}
+
+/// The discs of `system`'s stars at the query's time (Design note 16; R06.T11.c), in one bulk job
+/// under `token`: the system's stars from the server's system cache, generated if they are not
+/// held, then `host_discs`.
+///
+/// A system whose stars are not generated, a centre member until plan 09's system stage or a rogue
+/// planet, which has none, has no disc to draw: the reply's hosts are then empty.
+///
+/// # Errors
+///
+/// Those of [`compute::sky::bulk`], whose job panics if `system` names no system of the galaxy,
+/// which [`check_exclude`] has ruled out: it is answered `internal`.
+async fn discs(
+    state: &Arc<AppState>,
+    key: GalaxyKey,
+    galaxy: &Arc<Galaxy>,
+    system: SystemId,
+    query: &SkyQuery,
+    token: &CancelToken,
+) -> Result<Vec<HostDiscDto>, ComputeError> {
+    let (shared, galaxy, t) = (
+        Arc::clone(state),
+        Arc::clone(galaxy),
+        query.observer().time(),
+    );
+    compute::sky::bulk(&state.pool, token, move |_: &CancelToken| {
+        match shared.systems.get_or_generate(key, &galaxy, system) {
+            Ok(stars) => host_discs(&galaxy, &stars, t)
+                .iter()
+                .map(host_disc)
+                .collect(),
+            // A system the stellar stage does not generate has no star to draw as a disc.
+            Err(
+                ResolveSystemError::KindNotGenerated | ResolveSystemError::LayerNotGenerated(_),
+            ) => Vec::new(),
+            Err(ResolveSystemError::NoSuchSystem) => {
+                panic!("the excluded system {system} was resolved before the sky's jobs")
+            }
+        }
+    })
+    .await
+}
+
+/// A host star's disc as the wire carries it (Design note 16): every array in B, V, R order.
+#[must_use]
+fn host_disc(disc: &HostDisc) -> HostDiscDto {
+    let colour = disc.colour();
+    HostDiscDto {
+        star: disc.star().get(),
+        radius_m: disc.radius().value(),
+        teff_k: disc.teff().value(),
+        log_g: disc.log_g(),
+        mean_luminance_cd_m2: disc.mean_luminance().map(CandelasPerSquareMetre::value),
+        central_luminance_cd_m2: disc.central_luminance().map(CandelasPerSquareMetre::value),
+        limb: disc.limb().map(|law| PowerTwoDto {
+            c: law.c(),
+            alpha: law.alpha(),
+        }),
+        chroma: colour.chroma(),
+        lux_per_v0: colour.lux_per_v0(),
+        bake_spectrum: colour.bake_spectrum(),
+    }
 }
 
 /// A `sky` request, checked: the observer, what is asked of the eye and the camera, the count
@@ -340,16 +460,16 @@ async fn check_exclude(
         .map_err(|error| unknown_exclude(named, error))
 }
 
-/// The census's answer (R06.T11.a): the cut, each layer's cap and tallies, the counts, the time it
-/// holds to and what is not modelled, with the manifest of `bulk` and where `encoded` splits.
-///
-/// The hosts are none until T11.c.
+/// The census's answer (R06.T11.a–c): the cut, each layer's cap and tallies, the counts, the time it
+/// holds to, the band's shape, the host discs `hosts` and what is not modelled, with the manifest
+/// of `bulk` and where `encoded` splits.
 #[must_use]
 fn response(
     request: SkyRequest,
     query: &SkyQuery,
     caps: &[LayerCap],
     census: &SkyCensus,
+    hosts: Vec<HostDiscDto>,
     bulk: &BulkPayload,
     encoded: &EncodedSky,
 ) -> SkyResponse {
@@ -366,7 +486,7 @@ fn response(
         band: BandSpecDto {
             face_texels: query.band_spec().face_texels(),
         },
-        hosts: Vec::new(),
+        hosts,
         not_modelled: not_modelled(tallies),
         bulk: bulk.manifest(),
         stars_bytes: encoded.stars_bytes,
@@ -454,22 +574,28 @@ fn valid_until_of(
         .expect("a time in the clock window a year on is on the clock")
 }
 
-/// A listed star as the wire carries it (Design note 17; R06.T11.a, sent from T11.b).
+/// A listed star as the wire carries it (Design note 17; R06.T11.a, sent from T11.b), with
+/// `eye_offset`.
 ///
 /// It holds its unit direction from `observer` and its distance, its own V, M<sub>V</sub> + DM +
-/// v★(A<sub>V</sub>) A<sub>V</sub>, which the census cuts, and its chroma, eye offset and camera
-/// band term after its own reddening, [`StarColour::reddened`] at its A<sub>V</sub> (R06.T9.e), the
-/// camera term relative to that V.
+/// v★(A<sub>V</sub>) A<sub>V</sub>, which the census cuts, and its chroma and camera band term after
+/// its own reddening, [`StarColour::reddened`] at its A<sub>V</sub> (R06.T9.e), the camera term
+/// relative to that V.
 ///
-/// Until R06.T11.c builds the limit map, its eye offset is its colour offset alone, against a
-/// scotopic background: 2.5 log₁₀(ρ★ ÷ 2.297) at its reddened S/P ratio ρ★ (Crumey 2014, eq. 15;
-/// `decision-r06-t9c-glare.md`, §4). From T11.c it is `sky::limits::eye_offsets`', its own eye
-/// limit less its texel's (R06.T9.h). A star at the observer's own position, which no census
-/// lists, would be given no direction.
+/// Its eye offset is `sky::limits::eye_offsets`', its own eye limit less its texel's (R06.T9.h;
+/// decided 2026-10-06, `decision-r06-t9c-glare.md`): its colour offset at its reddened S/P ratio
+/// against its texel's background, and its glare's self-exclusion. Where the eye was not asked,
+/// there is no limit map, and it is the colour offset alone against a scotopic background,
+/// [`scotopic_colour_offset`]. A star at the observer's own position, which no census lists, would
+/// be given no direction.
 ///
 /// [`StarColour::reddened`]: hyperion_sim::sky::colour::StarColour::reddened
 #[must_use]
-pub(crate) fn wire_star(observer: &Observer, star: &SkyStar) -> SkyStarWire {
+pub(crate) fn wire_star(
+    observer: &Observer,
+    star: &SkyStar,
+    eye_offset: Magnitudes,
+) -> SkyStarWire {
     let reddened = star.colour().reddened(star.a_v());
     let toward = observer
         .position()
@@ -490,14 +616,34 @@ pub(crate) fn wire_star(observer: &Observer, star: &SkyStar) -> SkyStarWire {
         distance_ly,
         v_mag: star.v().value(),
         chroma: chromaticity(reddened.red_green()),
-        eye_offset_mag: scotopic_colour_offset(reddened.sp_ratio()).value(),
+        eye_offset_mag: eye_offset.value(),
         camera_band_mag: reddened.camera_band_mag(),
     }
 }
 
+/// A band texel as the wire carries it (Design note 17; R06.T11.c): its luminance as `f32`, its
+/// chromaticity ([`chromaticity`] of its linear Rec. 709 red and green at unit luminance), its eye
+/// limit where the eye was asked, and its S/P ratio.
+#[must_use]
+pub(crate) fn wire_texel(texel: &BandTexel) -> SkyTexelWire {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the wire carries the luminance as f32 (Design note 17), and a sky's lies far \
+                  inside f32's range"
+    )]
+    let luminance_cd_m2 = texel.luminance().value() as f32;
+    SkyTexelWire {
+        luminance_cd_m2,
+        chroma: chromaticity(texel.chroma().map(f64::from)),
+        eye_limit_mag: texel.eye_limit().map(Magnitudes::value),
+        sp_ratio: texel.sp_ratio(),
+    }
+}
+
 /// The eye colour offset of light of S/P ratio `sp_ratio` against a background of no light,
-/// where every offset is its scotopic 2.5 log₁₀(ρ★ ÷ 2.297) (`sky::eye::star_colour_offset`).
-/// The ratio is held within [`SpRatio`]'s 0.01–100, which no starlight leaves.
+/// where every offset is its scotopic 2.5 log₁₀(ρ★ ÷ 2.297) (Crumey 2014, eq. 15;
+/// `sky::eye::star_colour_offset`): a star's eye offset where the eye was not asked. The ratio is
+/// held within [`SpRatio`]'s 0.01–100, which no starlight leaves.
 #[must_use]
 fn scotopic_colour_offset(sp_ratio: f64) -> Magnitudes {
     let ratio = SpRatio::new(sp_ratio.clamp(SpRatio::MIN.value(), SpRatio::MAX.value()))
@@ -539,6 +685,9 @@ mod tests {
     use crate::compute::sky::SkyTables;
     use crate::requests::Handlers;
     use crate::testing::{Harness, WAIT};
+    use hyperion_sim::galaxy::placement::{SystemRecord, generate_cell};
+    use hyperion_sim::sky::luminosity::LuminosityTables;
+    use hyperion_sim::stellar::system::SystemStars;
 
     /// The seed of the galaxy these tests look at the sky of.
     const SEED: u64 = 0x4d2;
@@ -791,7 +940,7 @@ mod tests {
     fn a_wire_star_is_its_census_star_after_its_own_reddening() {
         let galaxy = Galaxy::new(Seed::new(SEED));
         let caps = SkyCaps::forced(LightYears::new(25.0)).unwrap();
-        let tables = SkyTables::build(&galaxy, caps);
+        let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
         let asked = SkyAsk::try_from(&request()).unwrap();
         let query = asked.query(None, caps);
         let mut ctx = tables.march_context();
@@ -814,8 +963,9 @@ mod tests {
         assert!(census.listed().len() > 10, "{}", census.listed().len());
         let observer = query.observer();
         for star in census.listed() {
-            let wire = wire_star(observer, star);
             let reddened = star.colour().reddened(star.a_v());
+            // A sky without the eye takes each star's colour offset alone, scotopic.
+            let wire = wire_star(observer, star, scotopic_colour_offset(reddened.sp_ratio()));
             assert_eq!(wire.v_mag.to_bits(), star.v().value().to_bits());
             assert_eq!(
                 wire.camera_band_mag.to_bits(),
@@ -826,7 +976,6 @@ mod tests {
                 chromaticity(reddened.red_green()).map(f64::to_bits)
             );
             assert!(wire.chroma.iter().all(|c| (0.0..=1.0).contains(c)));
-            // Its colour offset alone, scotopic, until R06.T11.c's limit map.
             let colour = 2.5 * hyperion_sim::math::log10(reddened.sp_ratio() / REFERENCE_SP_RATIO);
             assert!(
                 (wire.eye_offset_mag - colour).abs() < 1e-12,
@@ -845,6 +994,172 @@ mod tests {
                     < 1e-6 * star.distance().value()
             );
         }
+    }
+
+    /// A texel's wire form takes its luminance as `f32`, its chromaticity, its eye limit where the
+    /// eye was asked and its ρ (Design note 17).
+    #[test]
+    fn a_wire_texel_is_its_band_texel() {
+        let galaxy = Galaxy::new(Seed::new(SEED));
+        let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
+        let asked = SkyAsk::try_from(&request()).unwrap();
+        let query = asked.query(None, SkyCaps::forced(LightYears::ZERO).unwrap());
+        let spec = BandSpec::new(4, 12).unwrap();
+        let mut texels = Vec::new();
+        hyperion_sim::sky::band::band_rows(
+            &galaxy,
+            &mut tables.march_context(),
+            &query,
+            &SkyCensus::empty(),
+            &CompleteTo::nowhere(),
+            &spec,
+            hyperion_sim::sky::band::CubeFace::PosZ,
+            0..4,
+            &mut texels,
+        );
+        assert_eq!(texels.len(), 16);
+        for texel in &texels {
+            let wire = wire_texel(texel);
+            #[expect(clippy::cast_possible_truncation, reason = "the wire's f32")]
+            let luminance = texel.luminance().value() as f32;
+            assert_eq!(wire.luminance_cd_m2.to_bits(), luminance.to_bits());
+            assert_eq!(
+                wire.chroma.map(f64::to_bits),
+                chromaticity(texel.chroma().map(f64::from)).map(f64::to_bits)
+            );
+            assert_eq!(wire.eye_limit_mag, None, "no eye was asked");
+            assert_eq!(wire.sp_ratio.to_bits(), texel.sp_ratio().to_bits());
+        }
+    }
+
+    /// A host's disc on the wire is the sim's, field for field, in B, V, R order (Design note 16).
+    #[test]
+    fn a_host_disc_on_the_wire_is_the_sims() {
+        let galaxy = Galaxy::new(Seed::new(19));
+        let mut cell = Vec::new();
+        generate_cell(
+            &galaxy,
+            CellKey::new(Layer::E, [0, 203, 0]).unwrap(),
+            &mut cell,
+        );
+        let discs: Vec<HostDisc> = cell
+            .iter()
+            .map(|record| {
+                host_discs(
+                    &galaxy,
+                    &SystemStars::generate(&galaxy, record),
+                    UniverseTime::EPOCH,
+                )
+            })
+            .find(|discs| !discs.is_empty())
+            .expect("a system of the cell with a star to draw");
+        for disc in &discs {
+            let dto = host_disc(disc);
+            let colour = disc.colour();
+            assert_eq!(dto.star, disc.star().get());
+            assert_eq!(
+                [dto.radius_m, dto.teff_k, dto.log_g, dto.lux_per_v0].map(f64::to_bits),
+                [
+                    disc.radius().value(),
+                    disc.teff().value(),
+                    disc.log_g(),
+                    colour.lux_per_v0()
+                ]
+                .map(f64::to_bits)
+            );
+            for channel in 0..3 {
+                assert_eq!(
+                    dto.mean_luminance_cd_m2[channel].to_bits(),
+                    disc.mean_luminance()[channel].value().to_bits()
+                );
+                assert_eq!(
+                    dto.central_luminance_cd_m2[channel].to_bits(),
+                    disc.central_luminance()[channel].value().to_bits()
+                );
+                assert_eq!(
+                    (
+                        dto.limb[channel].c.to_bits(),
+                        dto.limb[channel].alpha.to_bits()
+                    ),
+                    (
+                        disc.limb()[channel].c().to_bits(),
+                        disc.limb()[channel].alpha().to_bits()
+                    )
+                );
+            }
+            assert_eq!(
+                dto.chroma.map(f32::to_bits),
+                colour.chroma().map(f32::to_bits)
+            );
+            assert_eq!(
+                dto.bake_spectrum.map(f64::to_bits),
+                colour.bake_spectrum().map(f64::to_bits)
+            );
+        }
+    }
+
+    /// The first record of `layer`'s cells near the Sun that `keep` takes, walking out along x.
+    fn near_the_sun(
+        galaxy: &Galaxy,
+        layer: Layer,
+        keep: impl Fn(&SystemRecord) -> bool,
+    ) -> SystemRecord {
+        let at = hyperion_sim::coords::GalacticPosition::from_light_years(SUN_LY.map(f64::from))
+            .unwrap();
+        let sun = CellKey::containing(layer, &at).unwrap();
+        let size = i32::try_from(sun.size_ly()).unwrap();
+        let [x, y, z] = sun.origin_ly().map(|ly| ly.div_euclid(size));
+        let mut cell = Vec::new();
+        (0..64)
+            .find_map(|step| {
+                generate_cell(
+                    galaxy,
+                    CellKey::new(layer, [x + step, y, z]).ok()?,
+                    &mut cell,
+                );
+                cell.iter().find(|record| keep(record)).copied()
+            })
+            .expect("a record near the Sun")
+    }
+
+    /// An excluded system's stars come back as their discs at the query's time, and a rogue
+    /// planet, whose stars are not generated, as none (R06.T11.c).
+    #[tokio::test]
+    async fn an_excluded_systems_stars_are_its_discs_and_a_rogue_planet_has_none() {
+        let harness = Harness::start(Handlers).await;
+        let galaxy = Arc::new(Galaxy::new(Seed::new(SEED)));
+        let key = GalaxyKey::new(SEED, hyperion_sim::GENERATOR_VERSION);
+        let query = SkyAsk::try_from(&request())
+            .unwrap()
+            .query(None, SkyCaps::DERIVED);
+        let t = query.observer().time();
+        let lit = |record: &SystemRecord| {
+            !host_discs(&galaxy, &SystemStars::generate(&galaxy, record), t).is_empty()
+        };
+        let host = near_the_sun(&galaxy, Layer::E, lit);
+        let rogue = near_the_sun(&galaxy, Layer::RoguePlanet, |_| true);
+        let token = CancelToken::new();
+        for (system, expected) in [
+            (
+                host.id(),
+                host_discs(&galaxy, &SystemStars::generate(&galaxy, &host), t)
+                    .iter()
+                    .map(host_disc)
+                    .collect::<Vec<_>>(),
+            ),
+            (rogue.id(), Vec::new()),
+        ] {
+            let found = timeout(
+                WAIT,
+                discs(harness.state(), key, &galaxy, system, &query, &token),
+            )
+            .await
+            .expect("timed out drawing the discs")
+            .unwrap();
+            assert_eq!(found, expected, "{system}");
+        }
+        assert!(!host_discs(&galaxy, &SystemStars::generate(&galaxy, &host), t).is_empty());
+        harness.stop().await;
     }
 
     async fn universe(harness: &Harness) -> UniverseIdHex {

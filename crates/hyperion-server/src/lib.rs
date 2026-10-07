@@ -39,7 +39,8 @@ use axum::{Router, routing::get};
 
 use crate::compute::{
     CpuPool, DensityMapService, GalaxyCache, SharedBodyCache, SharedBriefCache, SharedCellCache,
-    SharedSkyCellCache, SharedSystemCache, ShutDownPoolError, SkyCaps, StartPoolError,
+    SharedSkyCellCache, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService,
+    StartPoolError,
 };
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -49,7 +50,7 @@ use crate::stats::{OutboundStats, RequestStats};
 use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
-pub use config::{ServerArgs, ServerConfig, ServerConfigBuilder};
+pub use config::{ServerArgs, ServerConfig, ServerConfigBuilder, SkyService};
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
 
 /// Address the server listens on when neither `--address` and `--port` nor their variables are
@@ -110,8 +111,14 @@ pub(crate) struct AppState {
     /// Each open universe's scene clock and ship stand-in, which `scene_ship` sets (rendering
     /// plan R03, Design note 2).
     pub(crate) scene: SceneService,
-    /// How far a sky's census looks (rendering plan R06, R06.T11.a).
+    /// Whether `sky` is answered: the sky's landing switch (rendering plan R06, R06.T11.c).
+    pub(crate) sky_service: SkyService,
+    /// How far a sky's census looks, and which luminosity tables it reads (rendering plan R06,
+    /// R06.T11.a).
     pub(crate) sky_caps: SkyCaps,
+    /// Each galaxy's sky tables, built once on the pool and kept in the configured byte budget
+    /// (rendering plan R06, R06.T11.c).
+    pub(crate) sky_tables: SkyTablesService,
     /// The census cells' bright subsets built so far, in the configured byte budget: what a sky's
     /// census jobs read and share (rendering plan R06, R06.T11.b; Design note 12).
     pub(crate) sky_cells: Arc<SharedSkyCellCache>,
@@ -171,6 +178,11 @@ impl Server {
         let briefs = SharedBriefCache::new(config.brief_cache_bytes());
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
         let sky_cells = Arc::new(SharedSkyCellCache::new(config.sky_cache_bytes()));
+        let sky_tables = SkyTablesService::new(
+            Arc::clone(&pool),
+            config.sky_caps().tables(),
+            config.sky_tables_bytes(),
+        );
         tracing::info!(
             data_dir = %config.data_dir().display(),
             workers = config.workers().get(),
@@ -180,6 +192,8 @@ impl Server {
             body_cache_mib = config.body_cache_bytes() / (1 << 20),
             brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
             sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
+            sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
+            sky_service = ?config.sky_service(),
             "server started"
         );
         Ok(Self {
@@ -201,7 +215,9 @@ impl Server {
                     Arc::clone(config.scene_knowledge()),
                     Arc::clone(config.craft_source()),
                 ),
+                sky_service: config.sky_service(),
                 sky_caps: config.sky_caps(),
+                sky_tables,
                 sky_cells,
             }),
         })
@@ -430,6 +446,7 @@ mod tests {
             (fresh.systems(), defaults.system_cache_bytes()),
             (fresh.briefs(), defaults.brief_cache_bytes()),
             (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
+            (fresh.sky_tables().cache(), defaults.sky_tables_bytes()),
         ] {
             assert_eq!(
                 (
@@ -445,6 +462,7 @@ mod tests {
             );
         }
         assert_eq!(fresh.sky_cells().rebuilt(), 0);
+        assert_eq!(fresh.sky_tables().builds(), 0);
         let mut client = harness.connect().await;
         assert_eq!(stats().connections(), 1);
         client.hello().await;

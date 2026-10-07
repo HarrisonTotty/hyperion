@@ -9,7 +9,9 @@ use tokio::sync::watch;
 
 use crate::AppState;
 use crate::cache::LruCounters;
-use crate::compute::{BodyCacheCounters, GalaxyCounters, PoolCounters, SkyCellCounters};
+use crate::compute::{
+    BodyCacheCounters, GalaxyCounters, PoolCounters, SkyCellCounters, SkyTablesCounters,
+};
 
 /// A snapshot of the server's activity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -25,6 +27,7 @@ pub struct ServerStats {
     bodies: BodyCacheCounters,
     briefs: LruCounters,
     sky_cells: SkyCellCounters,
+    sky_tables: SkyTablesCounters,
 }
 
 impl ServerStats {
@@ -43,6 +46,7 @@ impl ServerStats {
             bodies: state.bodies.counters(),
             briefs: state.briefs.counters(),
             sky_cells: state.sky_cells.counters(),
+            sky_tables: state.sky_tables.counters(),
         }
     }
 
@@ -119,6 +123,13 @@ impl ServerStats {
     #[must_use]
     pub fn sky_cells(&self) -> SkyCellCounters {
         self.sky_cells
+    }
+
+    /// The sky tables' cache's contents and use, including its byte budget, and the tables built:
+    /// every sky of a galaxy, at any time, shares one build (rendering plan R06, R06.T11.c).
+    #[must_use]
+    pub fn sky_tables(&self) -> SkyTablesCounters {
+        self.sky_tables
     }
 }
 

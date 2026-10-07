@@ -42,7 +42,6 @@ use tokio::sync::oneshot;
 use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
 use tracing::Instrument;
 
-use crate::AppState;
 use crate::bulk::{Answer, BulkPayload};
 use crate::compute::{
     CancelToken, ComputeError, JobError, Priority, SubmitJobError, panic_message,
@@ -50,6 +49,7 @@ use crate::compute::{
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
 use crate::subscriptions::{Pusher, SubscriptionCommand, Subscriptions};
+use crate::{AppState, SkyService};
 
 /// What a handler returns: its answer, the response's body with any bulk payload, or why there is
 /// none.
@@ -106,8 +106,10 @@ fn open_topic(
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
 /// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and rendering plan R06's `sky`
-/// (R06.T11.a and T11.b: the census's JSON and its stars in bulk, the band and the discs from
-/// T11.c), the one kind answered in bulk. A later plan's kind that this server's
+/// (R06.T11.a–c: the census's JSON, its stars and band in bulk, and the host discs), the one kind
+/// answered in bulk, behind its landing switch ([`SkyService`](crate::SkyService)): until R06.T8.g
+/// turns it on by default, `sky` is answered `unsupported` unless the server is started with
+/// `--serve-sky`. A later plan's kind that this server's
 /// [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`. A kind the
 /// protocol already defines but whose handler has not landed is answered `unsupported` here, under
 /// its own ID, as an older server would answer it (plan 04, design note 15): `body_events` until
@@ -156,7 +158,11 @@ impl Handler for Handlers {
             // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
             // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
-            RequestBody::Sky(request) => Box::pin(sky::answer(state, request, token)),
+            RequestBody::Sky(request) => match state.sky_service {
+                SkyService::Served => Box::pin(sky::answer(state, request, token)),
+                // The landing switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
+                SkyService::Unsupported => Box::pin(ready(Err(not_served_yet("sky")))),
+            },
         }
     }
 
@@ -1200,7 +1206,8 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it.
+        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and R06's `sky`
+        // while its landing switch is off, as it is by default until R06.T8.g (R06.T11.c).
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
@@ -1211,10 +1218,11 @@ mod tests {
                         | RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
+                        | RequestBody::Sky(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 5);
         for body in events {
             let name = kind(&body);
             let answer = Handlers
