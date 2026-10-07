@@ -8,7 +8,8 @@
 //! before generating it, while the oracle generates every record of every cell and measures each
 //! with `census_record(…, Bound::Ignored, …)`. Both keep a star by the same test (R06.T8.k): its
 //! own V, `M_V` + DM plus its own V band's extinction behind its sightline's `A_V`, brighter than
-//! the cut alone, with the eye or without it, and inside the query's cone where it has one.
+//! the cut alone, with the eye or without it, and, for a query with a cone, in the band's texels
+//! that meet it (its `ConeRegion`, R06.T8.l).
 //!
 //! The fixture is built without kinematic tables, so its systems stand still. [`moving`] builds
 //! the same galaxy with them, and [`observer_near_sun_at`] stands an observer near the Sun at any
@@ -127,8 +128,8 @@ pub fn every_layer(radius: LightYears) -> Vec<(Layer, LightYears)> {
 
 /// The census's oracle: every system of every cell the census of `query` opens with every cap
 /// forced to `radius`, generated whole and measured with no skip, merged at the query's `n_max`.
-/// Each star is kept as the census keeps it: by its own V, to the cut alone and within the cone
-/// (R06.T8.k).
+/// Each star is kept as the census keeps it: by its own V, to the cut alone (R06.T8.k), and for a
+/// cone in its region's texels (R06.T8.l).
 ///
 /// # Panics
 ///

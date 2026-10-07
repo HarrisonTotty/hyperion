@@ -36,8 +36,12 @@
 //! beyond allows; and the census's boundary in V is each star's own V extinction while the band's
 //! is the solar point's, (v★ − v☉) A<sub>V</sub> apart, under 0.05 mag at A<sub>V</sub> 2 and some
 //! 0.2 at 10, which moves a thin sliver of dimmed light between the two (addendum item 4). The
-//! census keeps each star to the cut alone, with the eye or without it, and within a query's cone
-//! only, so the eye's colour offset and the cone's edge are boundaries the two share (R06.T8.k).
+//! census keeps each star to the cut alone, with the eye or without it (R06.T8.k), and for a query
+//! with a cone only in the cone's region, the band's texels about it, every texel that meets it
+//! among them ([`ConeRegion`]; R06.T8.l, decided 2026-10-07, `decision-r06-t8k-cone.md`). The band
+//! is complete in the region's texels and complete nowhere in the others, and the census lists
+//! exactly the stars that [`BandSpec::texel_of`] places in the region's, so the cut and the cone's
+//! region are boundaries the two share exactly.
 //!
 //! The light is reddened by the dust in front of it (R06.T9.e; decided 2026-10-06,
 //! `decision-r06-t9b-band.md`, item 3 and its addendum), through [`StarColour::reddened`]: each
@@ -113,10 +117,10 @@ use crate::time::Span;
 use crate::units::consts::{
     METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR, SOLAR_ABSOLUTE_MAGNITUDE_V,
 };
-use crate::units::{CandelasPerSquareMetre, LightYears, Magnitudes};
+use crate::units::{CandelasPerSquareMetre, LightYears, Magnitudes, Radians};
 
 use super::caps::{CAPPED_LAYERS, LayerCap};
-use super::census::{SkyCensus, SkyContext, SkyQuery};
+use super::census::{ConeRegion, SkyCensus, SkyContext, SkyQuery};
 use super::colour::{Reddened, Reddening, StarColour, lift_into_gamut, solar_colour};
 use super::eye::{REFERENCE_SP_RATIO, illuminance_of_magnitude};
 use super::luminosity::LuminosityTables;
@@ -325,6 +329,25 @@ impl BandSpec {
             index
         };
         Some((face, along(t), along(s)))
+    }
+
+    /// The band's largest texel radius: the greatest angle from any texel's centre to its own
+    /// corners, the farthest points of a texel from its centre (R06.T8.l; decided 2026-10-07,
+    /// `decision-r06-t8k-cone.md`).
+    ///
+    /// For faces of n texels a side it is atan(√2 ÷ n). The cube's projection makes its texels
+    /// largest at a face's centre, where the face meets the sphere face on, and there one end of a
+    /// texel's half-diagonal, √2 ÷ n long on the face at unit distance, is the face's centre: the
+    /// texel's own centre for an odd n, its corner for an even one. It is 1.266° at
+    /// [`STANDARD`](Self::STANDARD)'s 64² and 5.05° at 16². Every point of a texel lies within it
+    /// of the texel's centre, so a direction within α of a cone's axis lies in a texel whose
+    /// centre is within α plus this.
+    #[must_use]
+    pub fn largest_texel_radius(&self) -> Radians {
+        Radians::new(math::atan2(
+            core::f64::consts::SQRT_2,
+            f64::from(self.face_texels),
+        ))
     }
 
     /// The solid angle of the texel at `row` and `column`, steradians: the same on every face.
@@ -708,8 +731,8 @@ struct Edges {
     /// Per layer of [`CAPPED_LAYERS`], each radius to which a reply is complete, ly, ascending and
     /// each once: 0 for nowhere, +∞ for everywhere.
     kept: [Vec<f64>; BAND_LAYERS],
-    /// The radii every ray inside the query's cone takes as nodes, ly, ascending and each once:
-    /// every layer's kept radii (and, in the tests, more).
+    /// The radii every ray in the query's cone's region (or of a query with no cone) takes as
+    /// nodes, ly, ascending and each once: every layer's kept radii (and, in the tests, more).
     nodes: Vec<f64>,
 }
 
@@ -758,22 +781,23 @@ fn slot_starts<T: AsRef<[f64]>>(kept: &[T; BAND_LAYERS]) -> [usize; BAND_LAYERS 
 }
 
 /// How a ray's texel stands against its query's cone, the one place a ray's region is decided: a
-/// query with a cone is complete only inside it, where its census lists stars (R06.T8.k).
+/// query with a cone is complete only in the cone's region, the band's texels about it, where its
+/// census lists stars (R06.T8.l).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reach {
-    /// Inside the cone, or no cone: complete to each reply's radii.
+    /// In the cone's region, or no cone: complete to each reply's radii.
     Inside,
-    /// Outside the cone: complete nowhere, all of the light, whatever a reply's radii.
+    /// Outside the cone's region: complete nowhere, all of the light, whatever a reply's radii.
     Outside,
 }
 
 impl Reach {
-    /// The reach of the ray along `direction` for a cone of axis and cosine `region`, if any:
-    /// inside where its cosine with the axis is at least the cone's, the value
-    /// [`Cone::holds`](super::census::Cone::holds) tests the census's stars against.
+    /// The reach of the ray through the texel at `row` and `column` of `face` for the cone's
+    /// `region`, if any: inside where [`ConeRegion::holds_texel`]
+    /// holds it, the test the census keeps each star's texel by.
     #[must_use]
-    fn of(region: Option<(UnitVector, f64)>, direction: UnitVector) -> Self {
-        if region.is_some_and(|(axis, cos)| direction.dot(&axis) < cos) {
+    fn of(region: Option<&ConeRegion>, face: CubeFace, row: u16, column: u16) -> Self {
+        if region.is_some_and(|region| !region.holds_texel(face, row, column)) {
             Self::Outside
         } else {
             Self::Inside
@@ -781,7 +805,7 @@ impl Reach {
     }
 }
 
-/// The radius of a ray outside its query's cone: complete nowhere.
+/// The radius of a ray outside its query's cone's region: complete nowhere.
 const NOWHERE_LY: [f64; 1] = [0.0];
 
 /// A face's rows of a band, marched (R06.T9.f; see the [module](self) documentation): each ray's
@@ -995,7 +1019,8 @@ fn add_to(sums: &mut Sums, more: Sums) {
 /// Writes one light's slots of a ray into `out`, in the march's order (`ours`, the first slot of
 /// each layer's radii in [`BandMarch`]): each slot the light fainter than a cut within its radius,
 /// `within`, plus all of the light beyond it, `beyond`, both in the ray's own order (`starts`). A
-/// ray outside the cone (`reach`) has one radius a layer, whose sums fill every slot of its layer.
+/// ray outside the cone's region (`reach`) has one radius a layer, whose sums fill every slot of
+/// its layer.
 fn fill_slots(
     within: &[Sums],
     beyond: &[Sums],
@@ -1133,8 +1158,8 @@ impl Rays {
     /// K) of the light fainter than the cut out to the radius plus all of the light beyond it, each
     /// node's light reddened by the call's dust; then, where the march keeps the eye's light, the
     /// same slots of the light fainter than the eye's cut out to the radius plus all of the light
-    /// beyond it (R06.T9.j). A ray outside the cone (`reach`) is complete nowhere, so each of its
-    /// slots holds all of its layer's light.
+    /// beyond it (R06.T9.j). A ray outside the cone's region (`reach`) is complete nowhere, so
+    /// each of its slots holds all of its layer's light.
     ///
     /// Within a layer the light fainter than the cut is summed from the first node, and each
     /// radius's light beyond it from the radius out, interval by interval in distance order, so a
@@ -1350,9 +1375,11 @@ impl Rays {
 /// The light is that of [`band_rows`]: within a layer's radius, the light fainter than `query`'s
 /// cut at M<sub>V</sub> = cut − DM − v☉ A<sub>V</sub> (R06.T8.k), beyond it all of the layer's
 /// light, each node's light reddened by the solar point's curves (R06.T9.e). A query with a cone is
-/// complete only within it: every ray outside the cone holds all of the light, whatever a reply's
-/// radii. `ctx` supplies the luminosity tables, the gas modifiers and the noise cache of the rays'
-/// profiles; its other fields are not read.
+/// complete only in the cone's region, the band's texels about it ([`SkyQuery::cone_region`];
+/// R06.T8.l), whose stars alone its census lists: every ray of a texel
+/// outside the region holds all of the light, whatever a reply's radii. `ctx` supplies the
+/// luminosity tables, the gas modifiers and the noise cache of the rays' profiles; its other fields
+/// are not read.
 ///
 /// Where the query asks the eye at a cut shallower than its own ([`SkyQuery::eye_cut`], a camera's
 /// deeper cut setting the query's), the march also keeps, per layer and radius, the same sums of
@@ -1369,7 +1396,9 @@ impl Rays {
 ///
 /// # Panics
 ///
-/// If `replies` is empty, or `rows` reaches past the face's last row.
+/// If `replies` is empty, `rows` reaches past the face's last row, the query has a cone and
+/// `spec` is not its [`SkyQuery::band_spec`], whose texels make the cone's region, or the rays'
+/// slots number more than the address space holds.
 ///
 /// # Examples
 ///
@@ -1468,6 +1497,13 @@ fn march_rows_through(
         rows.end <= side,
         "rows {rows:?} reach past a face of {side} rows"
     );
+    let region = query.cone_region();
+    assert!(
+        region.is_none_or(|region| region.spec() == spec),
+        "a cone's band is marched at its query's band, {:?}, not at {spec:?}: its region is made \
+         of that band's texels",
+        query.band_spec()
+    );
     debug_assert!(
         edges.kept.iter().flatten().all(|radius| edges
             .nodes
@@ -1481,18 +1517,22 @@ fn march_rows_through(
         .eye_cut()
         .filter(|eye| eye.value() < query.cut().value());
     let ray_len = slot_starts(&edges.kept)[BAND_LAYERS] * lights(eye_cut);
-    let mut sums = vec![[0.0; 5]; rows.len() * usize::from(side) * ray_len];
+    // Checked: on wasm32 a `usize` is 32 bits, and a band of many replies at a fine face could
+    // pass it before its allocation is refused.
+    let len = rows
+        .len()
+        .checked_mul(usize::from(side))
+        .and_then(|texels| texels.checked_mul(ray_len))
+        .expect("a march's slots number fewer than the address space holds");
+    let mut sums = vec![[0.0; 5]; len];
     if !sums.is_empty() {
-        let region = query
-            .cone()
-            .map(|cone| (cone.axis(), cone.cos_half_angle()));
         let mut rays = Rays::new(galaxy, dust, eye_cut);
         let texels = rows
             .clone()
             .flat_map(|row| (0..side).map(move |column| (row, column)));
         for ((row, column), out) in texels.zip(sums.chunks_exact_mut(ray_len)) {
             let direction = spec.texel_direction(face, row, column);
-            let reach = Reach::of(region, direction);
+            let reach = Reach::of(region, face, row, column);
             rays.march(galaxy, ctx, query, direction, &edges, reach, spec, out);
         }
     }
@@ -1604,10 +1644,11 @@ pub fn sum_rows(
 ///
 /// `census` is the census the band completes and `complete_to` the radii to which it is complete:
 /// within them the band holds the light fainter than `query`'s cut, beyond them all of the light,
-/// and the census's overflow as points. A query with a cone is complete only within it: every ray
-/// outside the cone holds all of the light, and the census lists only the stars inside it
-/// (R06.T8.k). The light fainter than the cut is taken below M<sub>V</sub> = cut − DM − v☉
-/// A<sub>V</sub>, the solar point's V extinction (R06.T8.k). The light is reddened by the dust in
+/// and the census's overflow as points. A query with a cone is complete only in the cone's region,
+/// the band's texels about it: every ray of a texel outside it holds all of the light, and the
+/// census lists only the stars of the region's texels (R06.T8.l). The light fainter than the cut
+/// is taken below M<sub>V</sub> = cut − DM − v☉ A<sub>V</sub>, the solar point's V extinction
+/// (R06.T8.k). The light is reddened by the dust in
 /// front of it, each node's by the solar point's ratios and each overflow star's by its own
 /// (R06.T9.e). Where the query asks the eye at a cut shallower than its own, each texel also holds
 /// the light fainter than the eye's cut, as the eye's background ([`march_rows`]; R06.T9.j). `ctx`
@@ -1620,7 +1661,8 @@ pub fn sum_rows(
 ///
 /// # Panics
 ///
-/// If `rows` reaches past the face's last row.
+/// If `rows` reaches past the face's last row, or the query has a cone and `spec` is not its
+/// [`SkyQuery::band_spec`].
 ///
 /// # Examples
 ///
@@ -3135,18 +3177,21 @@ mod tests {
         }
     }
 
-    /// A census of a cone lists stars only inside it: inside the band is the full sky's, complete
-    /// as asked, and outside it holds all of the light, bit for bit.
+    /// A census of a cone lists stars only in its region, the band's texels about it: in
+    /// them the band is the full sky's, complete as asked, and outside them it holds all of the
+    /// light, bit for bit (R06.T8.k, R06.T8.l).
     #[test]
-    fn a_cone_is_complete_only_inside_it() {
+    fn a_cone_is_complete_only_in_its_region() {
         let galaxy = milky_way_galaxy();
         let spec = spec(8);
         let observer = observer_at(SUN);
         let cone = Cone::new(UnitVector::X, Degrees::new(30.0)).expect("a cone");
         let narrow = SkyQuery::builder(observer, Magnitudes::new(9.0))
             .cone(cone)
+            .band_spec(spec)
             .build()
             .expect("a valid query");
+        let region = *narrow.cone_region().expect("a region");
         let wide = SkyQuery::builder(observer, Magnitudes::new(9.0))
             .build()
             .expect("a valid query");
@@ -3173,7 +3218,12 @@ mod tests {
             let row = u16::try_from(k / 8).expect("a row");
             let column = u16::try_from(k % 8).expect("a column");
             let u = spec.texel_direction(CubeFace::PosX, row, column);
-            if u.dot(&UnitVector::X) >= math::cos(30.0 * RADIANS_PER_DEGREE) {
+            let within = math::cos(30.0 * RADIANS_PER_DEGREE + spec.largest_texel_radius().value());
+            assert_eq!(
+                region.holds_texel(CubeFace::PosX, row, column),
+                u.dot(&UnitVector::X) >= within
+            );
+            if region.holds_texel(CubeFace::PosX, row, column) {
                 assert_eq!(texel, &fainter[k]);
                 inside += 1;
             } else {
@@ -3188,105 +3238,674 @@ mod tests {
         assert_ne!(fainter, everything);
     }
 
-    /// For a cone, the listed and band light together are the full sky's inside the cone, within
-    /// 1% (R06.T8.k): a 30° cone's census near the Sun to V [`CENSUS_CUT`] within
-    /// [`CENSUS_RADIUS_LY`], with the eye asked, lists exactly the full census's stars inside the
-    /// cone, star for star and bit for bit, and its band's texels inside the cone are the full
-    /// band's. Before R06.T8.k the cone's census also listed the stars of its cells outside the
-    /// cone, whose light its band, complete nowhere there, held too: printed here.
-    #[test]
-    fn a_cones_listed_and_band_light_are_the_full_skys_inside_it() {
-        let spec = spec(16);
-        let cone = Cone::new(UnitVector::X, Degrees::new(30.0)).expect("a cone");
-        let narrow = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
-            .eye(crate::sky::eye::EyeObserver::default())
-            .cone(cone)
-            .build()
-            .expect("a valid query");
-        let origin = *observer_at(SUN).position();
-        let inside = |star: &SkyStar| cone.holds(&origin.displacement_to(star.apparent()));
-        let coned = listed_with_caps_forced(&narrow, CENSUS_RADIUS_LY);
-        let full = census_stars(Eye::NotAsked);
-        let full_inside: Vec<SkyStar> = full.iter().filter(|s| inside(s)).copied().collect();
-        assert!(
-            coned
-                .iter()
-                .all(|s| inside(s) && s.v().value() <= CENSUS_CUT)
-        );
-        assert_eq!(
-            coned, full_inside,
-            "the cone's stars are the full sky's inside it"
-        );
-        let star_bits = |stars: &[SkyStar]| {
-            stars
-                .iter()
-                .flat_map(|s| {
-                    [
-                        bits(s.v().value()),
-                        bits(s.a_v().value()),
-                        bits(s.distance().value()),
-                    ]
-                })
-                .collect::<Vec<u64>>()
-        };
-        assert_eq!(star_bits(&coned), star_bits(&full_inside));
-        // The texels whose centres lie inside the cone, as the band tests a ray.
-        let complete = complete_within(CENSUS_RADIUS_LY);
-        let band_inside = |query: &SkyQuery, census: &SkyCensus| {
-            whole_band(query, census, &complete, spec)
-                .iter()
-                .zip(texel_geometry(spec))
-                .filter(|(_, (u, _))| u.dot(&cone.axis()) >= cone.cos_half_angle())
-                .map(|(t, (_, w))| t.luminance().value() * w)
-                .sum::<f64>()
-        };
-        let all = n(MAX_N_MAX);
-        let cone_sky = merge_census([(coned.clone(), CensusTallies::default())], all);
-        let full_sky = census_to(CENSUS_CUT, CENSUS_RADIUS_LY, all, Eye::NotAsked);
-        let (cone_band, full_band) = (
-            band_inside(&narrow, &cone_sky),
-            band_inside(&query_near_the_sun(CENSUS_CUT, Eye::NotAsked), &full_sky),
-        );
-        assert_eq!(bits(cone_band), bits(full_band), "the band inside the cone");
-        let cone_light = stars_lux(cone_sky.listed()) + cone_band;
-        let full_light = stars_lux(&full_inside) + full_band;
-        // What the cone's census listed before R06.T8.k beyond these: its cells' stars outside it.
-        let mut ctx = context();
-        let forced = narrow
-            .clone()
-            .with_caps_forced(LightYears::new(CENSUS_RADIUS_LY))
-            .expect("a forced cap");
-        let cells: std::collections::BTreeSet<crate::galaxy::placement::CellKey> = census_plan(
-            milky_way_galaxy(),
-            ctx.tables,
-            ctx.envelope,
-            &forced,
-            &mut ctx.noise,
-        )
-        .cells()
-        .collect();
-        let outside: Vec<SkyStar> = full
+    /// Every float of a star that the band or a view reads, as bits.
+    fn star_bits(stars: &[SkyStar]) -> Vec<u64> {
+        stars
             .iter()
-            .filter(|s| {
-                !inside(s)
-                    && crate::galaxy::placement::CellKey::of(s.system())
-                        .is_ok_and(|key| cells.contains(&key))
+            .flat_map(|s| {
+                let at = s.apparent().to_light_years_f64();
+                [
+                    bits(s.v().value()),
+                    bits(s.a_v().value()),
+                    bits(s.distance().value()),
+                    bits(at[0]),
+                    bits(at[1]),
+                    bits(at[2]),
+                ]
             })
+            .collect()
+    }
+
+    /// The query near the Sun to V [`CENSUS_CUT`] with `cone`, its region of a band of `spec`.
+    fn cone_query(cone: Cone, spec: BandSpec) -> SkyQuery {
+        SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .cone(cone)
+            .band_spec(spec)
+            .build()
+            .expect("a valid query")
+    }
+
+    /// A band's texel beside its face, row and column.
+    type Placed = ((CubeFace, u16, u16), BandTexel);
+
+    /// The band of `query` and `census` complete to `complete_to` at `spec`, over each face's rows
+    /// of `rows` in turn, with each texel's face, row and column beside it.
+    fn band_over(
+        query: &SkyQuery,
+        census: &SkyCensus,
+        complete_to: &CompleteTo,
+        spec: BandSpec,
+        rows: &[(CubeFace, Range<u16>)],
+    ) -> Vec<Placed> {
+        let mut ctx = context();
+        let mut band = Vec::new();
+        let mut places = Vec::new();
+        for (face, rows) in rows {
+            band_rows(
+                milky_way_galaxy(),
+                &mut ctx,
+                query,
+                census,
+                complete_to,
+                &spec,
+                *face,
+                rows.clone(),
+                &mut band,
+            );
+            for row in rows.clone() {
+                places.extend((0..spec.face_texels()).map(|column| (*face, row, column)));
+            }
+        }
+        assert_eq!(band.len(), places.len());
+        places.into_iter().zip(band).collect()
+    }
+
+    /// The stars of `census` the band would hold within [`CENSUS_RADIUS_LY`], every one listed:
+    /// those of `stars` within the radius.
+    fn listed_within_the_radius(stars: &[SkyStar]) -> SkyCensus {
+        let within: Vec<SkyStar> = stars
+            .iter()
+            .filter(|s| s.distance().value() <= CENSUS_RADIUS_LY)
             .copied()
             .collect();
+        let census = merge_census([(within, CensusTallies::default())], n(MAX_N_MAX));
+        assert!(census.overflow().is_empty());
+        census
+    }
+
+    /// The full sky near the Sun at 16²: its census to V [`CENSUS_CUT`] within
+    /// [`CENSUS_RADIUS_LY`], complete to it, with no cone; and the band complete nowhere, which
+    /// holds all of the light. Built once.
+    fn full_and_nowhere_at_16() -> &'static [Vec<Placed>; 2] {
+        static BANDS: OnceLock<[Vec<Placed>; 2]> = OnceLock::new();
+        BANDS.get_or_init(|| {
+            let spec = spec(16);
+            let rows = every_row(spec);
+            let query = query_near_the_sun(CENSUS_CUT, Eye::NotAsked);
+            let full = listed_within_the_radius(census_stars(Eye::NotAsked));
+            [
+                band_over(
+                    &query,
+                    &full,
+                    &complete_within(CENSUS_RADIUS_LY),
+                    spec,
+                    &rows,
+                ),
+                band_over(
+                    &query,
+                    &SkyCensus::empty(),
+                    &CompleteTo::nowhere(),
+                    spec,
+                    &rows,
+                ),
+            ]
+        })
+    }
+
+    /// Every row of every face of a band of `spec`.
+    fn every_row(spec: BandSpec) -> Vec<(CubeFace, Range<u16>)> {
+        CubeFace::ALL
+            .iter()
+            .map(|&face| (face, 0..spec.face_texels()))
+            .collect()
+    }
+
+    /// The rows of each face holding a texel of `region`, from its first such row to its last.
+    fn rows_meeting(region: &ConeRegion) -> Vec<(CubeFace, Range<u16>)> {
+        let side = region.spec().face_texels();
+        CubeFace::ALL
+            .iter()
+            .filter_map(|&face| {
+                let met: Vec<u16> = (0..side)
+                    .filter(|&row| (0..side).any(|column| region.holds_texel(face, row, column)))
+                    .collect();
+                Some((face, *met.first()?..*met.last()? + 1))
+            })
+            .collect()
+    }
+
+    /// 10⁴ directions inside `cone`: 100 rings at (k + ½) hundredths of its half-angle from the
+    /// axis, of 100 directions each, as displacements of a metre.
+    fn lattice_inside(cone: &Cone) -> Vec<GalacticDisplacement> {
+        let axis = cone.axis();
+        let other = if axis.components()[0].abs() > 0.9 {
+            UnitVector::NORTH
+        } else {
+            UnitVector::X
+        };
+        let across = UnitVector::from_components(axis.cross(&other)).expect("not along the other");
+        let third = UnitVector::from_components(axis.cross(&across)).expect("perpendicular");
+        let (u, a, b) = (axis.components(), across.components(), third.components());
+        let half_angle = cone.half_angle().value() * RADIANS_PER_DEGREE;
+        let mut lattice = Vec::with_capacity(10_000);
+        for ring in 0..100_u32 {
+            let (sin_t, cos_t) = math::sin_cos(half_angle * (f64::from(ring) + 0.5) / 100.0);
+            for step in 0..100_u32 {
+                let (sin_p, cos_p) =
+                    math::sin_cos(2.0 * core::f64::consts::PI * f64::from(step) / 100.0);
+                lattice.push(GalacticDisplacement::new(std::array::from_fn(|k| {
+                    cos_t * u[k] + sin_t * (cos_p * a[k] + sin_p * b[k])
+                })));
+            }
+        }
+        lattice
+    }
+
+    /// What a cone's sky shares with the full sky's near the Sun, texel by texel.
+    #[derive(Debug)]
+    struct ConeRecord {
+        /// The region's texels and their solid angle, sr.
+        texels: usize,
+        region_sr: f64,
+        /// The cone's own solid angle, sr; the ruling's (1 + ρ ÷ α)², the region's mean over
+        /// cones; and the bound on the region's, the cap of α + 2ρ over the cone, which its
+        /// texels reach.
+        cone_sr: f64,
+        estimate: f64,
+        bound: f64,
+        /// The stars the cone's census lists, and those of them inside the cone itself.
+        listed: usize,
+        inside: usize,
+        /// The cells the cone's plan opens, and the full sky's.
+        cells: u64,
+        full_cells: u64,
+    }
+
+    /// A cone's census and band share the band's texels exactly (R06.T8.l; decided 2026-10-07,
+    /// `decision-r06-t8k-cone.md`, item 1): near the Sun to V [`CENSUS_CUT`] within
+    /// [`CENSUS_RADIUS_LY`], every cap forced to it, for `cone` at `spec` over `rows`, against the
+    /// full sky's band `full` and the band complete nowhere `nowhere` over the same rows:
+    ///
+    /// 1. the cone's census lists exactly the full census's stars whose texels
+    ///    ([`BandSpec::texel_of`]) are in the region, star for star and bit for bit, each at or
+    ///    brighter than the cut;
+    /// 2. each region texel's band is the full sky's texel, bit for bit, and each other texel the
+    ///    band's complete nowhere, bit for bit;
+    /// 3. so, texel by texel, the listed and band light are the full sky's in the region and all
+    ///    of the light outside it, to 10⁻¹² relative;
+    /// 4. every direction of a lattice of 10⁴ inside the cone lies in a region texel;
+    /// 5. the full census's stars inside the cone itself are all listed.
+    fn assert_a_cone_shares_the_bands_texels(
+        cone: Cone,
+        spec: BandSpec,
+        rows: &[(CubeFace, Range<u16>)],
+        [full, nowhere]: [&[Placed]; 2],
+    ) -> ConeRecord {
+        let query = cone_query(cone, spec);
+        let region = *query.cone_region().expect("a region");
+        let origin = *observer_at(SUN).position();
+        let toward = |star: &SkyStar| origin.displacement_to(star.apparent());
+        let what = format!(
+            "a {}° cone at {}²",
+            cone.half_angle().value(),
+            spec.face_texels()
+        );
+        // 1. The cone's stars: the full census's of the region's texels.
+        let coned = listed_with_caps_forced(&query, CENSUS_RADIUS_LY);
+        let all = census_stars(Eye::NotAsked);
+        let in_region: Vec<SkyStar> = all
+            .iter()
+            .filter(|s| region.holds(&toward(s)))
+            .copied()
+            .collect();
+        assert!(coned.iter().all(|s| s.v().value() <= CENSUS_CUT), "{what}");
+        assert_eq!(
+            coned, in_region,
+            "{what}: the full census's stars of the region"
+        );
+        assert_eq!(star_bits(&coned), star_bits(&in_region), "{what}");
+        // 2 and 3. The band and the light, texel by texel.
+        let (cone_sky, full_sky) = (
+            listed_within_the_radius(&coned),
+            listed_within_the_radius(all),
+        );
+        let band = band_over(
+            &query,
+            &cone_sky,
+            &complete_within(CENSUS_RADIUS_LY),
+            spec,
+            rows,
+        );
+        let (texels, region_sr) = assert_texel_by_texel(
+            &what,
+            &region,
+            &band,
+            [full, nowhere],
+            [&cone_sky, &full_sky],
+        );
+        let inside = assert_the_field_is_complete(&what, &region, all, &coned);
+        let cells = |query: &SkyQuery| {
+            let mut ctx = context();
+            let query = query
+                .clone()
+                .with_caps_forced(LightYears::new(CENSUS_RADIUS_LY))
+                .expect("a forced cap");
+            census_plan(
+                milky_way_galaxy(),
+                ctx.tables,
+                ctx.envelope,
+                &query,
+                &mut ctx.noise,
+            )
+            .cell_count()
+        };
+        let alpha = cone.half_angle().value() * RADIANS_PER_DEGREE;
+        let rho = spec.largest_texel_radius().value();
+        let cap = |angle: f64| 2.0 * core::f64::consts::PI * (1.0 - math::cos(angle));
+        let record = ConeRecord {
+            texels,
+            region_sr,
+            cone_sr: cap(alpha),
+            estimate: math::powi(1.0 + rho / alpha, 2),
+            bound: cap(alpha + 2.0 * rho) / cap(alpha),
+            listed: coned.len(),
+            inside,
+            cells: cells(&query),
+            full_cells: cells(&query_near_the_sun(CENSUS_CUT, Eye::NotAsked)),
+        };
         eprintln!(
-            "a 30° cone within {CENSUS_RADIUS_LY} ly to V {CENSUS_CUT}: {} stars listed, \
-             {cone_light:.5e} lx with the band inside it, the full sky's {full_light:.5e} lx; its \
-             cells' {} stars outside it, {:.2}% of that light, were listed before R06.T8.k",
-            coned.len(),
-            outside.len(),
-            100.0 * stars_lux(&outside) / cone_light
+            "{what}: its region is {} texels, {:.4e} sr, {:.2} times the cone's {:.4e} sr (the \
+             ruling's (1 + ρ ÷ α)² {:.2}, at most {:.2}); it lists {} stars, the full census's of \
+             those texels bit for bit, {} of them inside the cone; its plan opens {} cells of the \
+             full sky's {}",
+            record.texels,
+            record.region_sr,
+            record.region_sr / record.cone_sr,
+            record.cone_sr,
+            record.estimate,
+            record.bound,
+            record.listed,
+            record.inside,
+            record.cells,
+            record.full_cells
         );
-        assert!(!coned.is_empty() && !outside.is_empty());
+        assert!(record.texels > 0, "{record:?}");
         assert!(
-            (cone_light / full_light - 1.0).abs() < 0.01,
-            "{cone_light} lx against {full_light} lx"
+            record.region_sr <= record.bound * record.cone_sr,
+            "{record:?}"
         );
+        record
+    }
+
+    /// Items 4 and 5 of [`assert_a_cone_shares_the_bands_texels`] for the cone's `region`, the full
+    /// census's stars `all` and the cone's `coned`: the field is complete, every direction of the
+    /// lattice inside the cone lying in a region texel, and the full census's stars inside the
+    /// cone itself are listed, as many as are returned.
+    fn assert_the_field_is_complete(
+        what: &str,
+        region: &ConeRegion,
+        all: &[SkyStar],
+        coned: &[SkyStar],
+    ) -> usize {
+        let cone = region.cone();
+        for direction in lattice_inside(cone) {
+            assert!(
+                cone.holds(&direction),
+                "{what}: {direction:?} inside the cone"
+            );
+            assert!(
+                region.holds(&direction),
+                "{what}: {direction:?} in the region"
+            );
+        }
+        let origin = *observer_at(SUN).position();
+        let inside: Vec<&SkyStar> = all
+            .iter()
+            .filter(|s| cone.holds(&origin.displacement_to(s.apparent())))
+            .collect();
+        assert!(
+            inside.iter().all(|s| coned.contains(s)),
+            "{what}: the stars inside the cone"
+        );
+        inside.len()
+    }
+
+    /// Items 2 and 3 of [`assert_a_cone_shares_the_bands_texels`] for the cone's `region` and
+    /// `band`, against the full sky's band and the band complete nowhere over the same texels,
+    /// with the cone's census and the full one, each within the radius: the region's texels and
+    /// their solid angle, sr.
+    fn assert_texel_by_texel(
+        what: &str,
+        region: &ConeRegion,
+        band: &[Placed],
+        [full, nowhere]: [&[Placed]; 2],
+        [cone_sky, full_sky]: [&SkyCensus; 2],
+    ) -> (usize, f64) {
+        let spec = region.spec();
+        let origin = *observer_at(SUN).position();
+        // Each texel's listed light, lux, its stars placed as the band places its overflow's.
+        let starlight = |census: &SkyCensus| {
+            let mut light = std::collections::BTreeMap::new();
+            for star in census.listed() {
+                let toward = origin.displacement_to(star.apparent());
+                let place = spec.texel_of(toward.metres()).expect("a direction");
+                *light.entry(place).or_insert(0.0) += stars_lux(std::slice::from_ref(star));
+            }
+            light
+        };
+        let (cone_stars, full_stars) = (starlight(cone_sky), starlight(full_sky));
+        assert!(
+            cone_stars
+                .keys()
+                .all(|&(face, row, column)| region.holds_texel(face, row, column)),
+            "{what}: a listed star outside the region"
+        );
+        let (mut texels, mut region_sr) = (0_usize, 0.0);
+        for (k, (((place, texel), (at_full, full_texel)), (at_nowhere, nowhere_texel))) in
+            band.iter().zip(full).zip(nowhere).enumerate()
+        {
+            assert_eq!(
+                (place, place),
+                (at_full, at_nowhere),
+                "{what}: the same texels"
+            );
+            let &(face, row, column) = place;
+            let omega = spec.texel_solid_angle_sr(row, column);
+            let held = region.holds_texel(face, row, column);
+            let (expected, stars) = if held {
+                texels += 1;
+                region_sr += omega;
+                (full_texel, full_stars.get(place).copied().unwrap_or(0.0))
+            } else {
+                (nowhere_texel, 0.0)
+            };
+            assert_eq!(
+                texel_bits(std::slice::from_ref(texel)),
+                texel_bits(std::slice::from_ref(expected)),
+                "{what}: texel {k} {place:?}, in the region: {held}"
+            );
+            let light =
+                texel.luminance().value() * omega + cone_stars.get(place).copied().unwrap_or(0.0);
+            let theirs = expected.luminance().value() * omega + stars;
+            assert!(
+                (light / theirs - 1.0).abs() <= 1e-12,
+                "{what}: texel {place:?}, {light} lx against {theirs} lx"
+            );
+        }
+        (texels, region_sr)
+    }
+
+    /// The brightest star the full census near the Sun lists within [`CENSUS_RADIUS_LY`] whose
+    /// direction lies more than `degrees` from every texel centre of a band of `spec`: the axis of
+    /// a cone of that half-angle holding no texel centre and a star.
+    fn a_star_between_the_texel_centres(spec: BandSpec, degrees: f64) -> UnitVector {
+        let origin = *observer_at(SUN).position();
+        let side = spec.face_texels();
+        let centres: Vec<UnitVector> = CubeFace::ALL
+            .iter()
+            .flat_map(|&face| {
+                (0..side).flat_map(move |row| {
+                    (0..side).map(move |column| spec.texel_direction(face, row, column))
+                })
+            })
+            .collect();
+        let cos = math::cos(degrees * RADIANS_PER_DEGREE);
+        census_stars(Eye::NotAsked)
+            .iter()
+            .filter(|s| s.distance().value() <= CENSUS_RADIUS_LY)
+            .map(|s| {
+                UnitVector::from_components(origin.displacement_to(s.apparent()).metres())
+                    .expect("a star away from the observer")
+            })
+            .find(|u| centres.iter().all(|c| c.dot(u) < cos))
+            .expect("a star between the texel centres")
+    }
+
+    /// A 1° cone at 16², narrower than a texel and holding no texel's centre, about a star near
+    /// the Sun: its region is the texels about it, which the census lists and the band completes
+    /// exactly (R06.T8.l). Keeping a star by its texel's centre would have listed nothing.
+    #[test]
+    fn a_1_degree_cone_holding_no_texel_centre_shares_the_bands_texels_exactly() {
+        let spec = spec(16);
+        let cone = Cone::new(
+            a_star_between_the_texel_centres(spec, 2.0),
+            Degrees::new(1.0),
+        )
+        .expect("a cone");
+        let [full, nowhere] = full_and_nowhere_at_16();
+        let record = assert_a_cone_shares_the_bands_texels(
+            cone,
+            spec,
+            &every_row(spec),
+            [full.as_slice(), nowhere.as_slice()],
+        );
+        let side = spec.face_texels();
+        for face in CubeFace::ALL {
+            for row in 0..side {
+                for column in 0..side {
+                    let centre = spec.texel_direction(face, row, column);
+                    assert!(
+                        !cone.holds(&GalacticDisplacement::new(centre.components())),
+                        "a texel centre inside the cone"
+                    );
+                }
+            }
+        }
+        assert!(record.inside > 0, "{record:?}");
+    }
+
+    /// A 10° cone at 16² about a corner of the cube, where three faces meet (R06.T8.l).
+    #[test]
+    fn a_10_degree_cone_shares_the_bands_texels_exactly() {
+        let spec = spec(16);
+        let corner = UnitVector::from_components([1.0, 1.0, 1.0]).expect("a direction");
+        let cone = Cone::new(corner, Degrees::new(10.0)).expect("a cone");
+        let [full, nowhere] = full_and_nowhere_at_16();
+        let record = assert_a_cone_shares_the_bands_texels(
+            cone,
+            spec,
+            &every_row(spec),
+            [full.as_slice(), nowhere.as_slice()],
+        );
+        let region = *cone_query(cone, spec).cone_region().expect("a region");
+        let faces: Vec<CubeFace> = rows_meeting(&region)
+            .iter()
+            .map(|(face, _)| *face)
+            .collect();
+        assert_eq!(faces, [CubeFace::PosX, CubeFace::PosY, CubeFace::PosZ]);
+        assert!(record.inside > 0, "{record:?}");
+    }
+
+    /// A cone's overflow falls in its region (R06.T8.l; the ruling's "the overflow's points read
+    /// the same region"): the 10° cone at 16² about the cube's corner, its census within
+    /// [`CENSUS_RADIUS_LY`] merged at an `n_max` of 10, so that most of its stars are the band's
+    /// points. Every overflowing star's texel, as the band places it, is in the region; every
+    /// texel outside it is the band complete nowhere, bit for bit; and each region texel's listed
+    /// and band light, its points among it, is the full sky's to 10⁻¹² relative.
+    #[test]
+    fn a_cones_overflow_falls_in_its_region() {
+        let spec = spec(16);
+        let corner = UnitVector::from_components([1.0, 1.0, 1.0]).expect("a direction");
+        let cone = Cone::new(corner, Degrees::new(10.0)).expect("a cone");
+        let query = cone_query(cone, spec);
+        let region = *query.cone_region().expect("a region");
+        let origin = *observer_at(SUN).position();
+        let place_of = |star: &SkyStar| {
+            spec.texel_of(origin.displacement_to(star.apparent()).metres())
+                .expect("a direction")
+        };
+        let within: Vec<SkyStar> =
+            listed_within_the_radius(&listed_with_caps_forced(&query, CENSUS_RADIUS_LY))
+                .listed()
+                .to_vec();
+        let census = merge_census([(within, CensusTallies::default())], n(10));
+        assert!(
+            census.overflow().len() > census.listed().len(),
+            "most overflow"
+        );
+        for star in census.overflow() {
+            let (face, row, column) = place_of(star);
+            assert!(
+                region.holds_texel(face, row, column),
+                "{star:?} overflows outside"
+            );
+        }
+        let band = band_over(
+            &query,
+            &census,
+            &complete_within(CENSUS_RADIUS_LY),
+            spec,
+            &every_row(spec),
+        );
+        let [full, nowhere] = full_and_nowhere_at_16();
+        let full_sky = listed_within_the_radius(census_stars(Eye::NotAsked));
+        let lux_in = |stars: &[SkyStar], at: (CubeFace, u16, u16)| -> f64 {
+            stars
+                .iter()
+                .filter(|s| place_of(s) == at)
+                .map(|s| stars_lux(std::slice::from_ref(s)))
+                .sum()
+        };
+        let mut points = 0_usize;
+        for (((place, texel), (_, full_texel)), (_, nowhere_texel)) in
+            band.iter().zip(full).zip(nowhere)
+        {
+            let &(face, row, column) = place;
+            if !region.holds_texel(face, row, column) {
+                assert_eq!(
+                    texel_bits(std::slice::from_ref(texel)),
+                    texel_bits(std::slice::from_ref(nowhere_texel)),
+                    "{place:?} outside the region"
+                );
+                continue;
+            }
+            let omega = spec.texel_solid_angle_sr(row, column);
+            let light = texel.luminance().value() * omega + lux_in(census.listed(), *place);
+            let theirs = full_texel.luminance().value() * omega + lux_in(full_sky.listed(), *place);
+            assert!(
+                (light / theirs - 1.0).abs() <= 1e-12,
+                "{place:?}: {light} lx against {theirs} lx"
+            );
+            if texel_bits(std::slice::from_ref(texel))
+                != texel_bits(std::slice::from_ref(full_texel))
+            {
+                points += 1;
+            }
+        }
+        eprintln!(
+            "a 10° cone at 16² listing 10 of its {} stars: {} texels hold its points, each with \
+             the full sky's light",
+            census.listed().len() + census.overflow().len(),
+            points
+        );
+        assert!(points > 0, "the overflow's points are in the band");
+    }
+
+    /// A 30° cone at 16² along +X, T8.k's, now shared by the band's texels exactly (R06.T8.l):
+    /// T8.k's test held its listed and band light to the full sky's within 1%.
+    #[test]
+    fn a_30_degree_cone_shares_the_bands_texels_exactly() {
+        let spec = spec(16);
+        let cone = Cone::new(UnitVector::X, Degrees::new(30.0)).expect("a cone");
+        let [full, nowhere] = full_and_nowhere_at_16();
+        let record = assert_a_cone_shares_the_bands_texels(
+            cone,
+            spec,
+            &every_row(spec),
+            [full.as_slice(), nowhere.as_slice()],
+        );
+        assert!(record.inside > 0, "{record:?}");
+    }
+
+    /// A 0.3° cone at the server's 64², about the brightest star the census lists near the Sun,
+    /// on the rows its region meets (R06.T8.l): about 27 times the cone's area on average over
+    /// axes (29 here), and at most the cap of α + 2ρ, 89 times, the cost of a sub-degree field in
+    /// a band of 1.3° texels.
+    #[test]
+    fn a_0_3_degree_cone_at_64_shares_the_bands_texels_exactly() {
+        let spec = BandSpec::STANDARD;
+        let origin = *observer_at(SUN).position();
+        let brightest = census_stars(Eye::NotAsked)
+            .iter()
+            .find(|s| s.distance().value() <= CENSUS_RADIUS_LY)
+            .expect("a star");
+        let axis =
+            UnitVector::from_components(origin.displacement_to(brightest.apparent()).metres())
+                .expect("a direction");
+        let cone = Cone::new(axis, Degrees::new(0.3)).expect("a cone");
+        let region = *cone_query(cone, spec).cone_region().expect("a region");
+        let rows = rows_meeting(&region);
+        let query = query_near_the_sun(CENSUS_CUT, Eye::NotAsked);
+        let full = band_over(
+            &query,
+            &listed_within_the_radius(census_stars(Eye::NotAsked)),
+            &complete_within(CENSUS_RADIUS_LY),
+            spec,
+            &rows,
+        );
+        let nowhere = band_over(
+            &query,
+            &SkyCensus::empty(),
+            &CompleteTo::nowhere(),
+            spec,
+            &rows,
+        );
+        let record = assert_a_cone_shares_the_bands_texels(
+            cone,
+            spec,
+            &rows,
+            [full.as_slice(), nowhere.as_slice()],
+        );
+        assert!(record.inside > 0, "{record:?}");
+    }
+
+    /// A cone's band marched at a band other than its query's is refused: its region is made of the
+    /// query's band's texels, which the census keeps its stars by (R06.T8.l).
+    #[test]
+    #[should_panic(expected = "a cone's band is marched at its query's band")]
+    fn a_cones_band_at_another_resolution_is_refused() {
+        let cone = Cone::new(UnitVector::X, Degrees::new(10.0)).expect("a cone");
+        let _ = march_rows(
+            milky_way_galaxy(),
+            &mut context(),
+            &cone_query(cone, spec(16)),
+            [CompleteTo::everywhere()],
+            &spec(8),
+            CubeFace::PosX,
+            0..1,
+        );
+    }
+
+    /// The band's largest texel radius, atan(√2 ÷ n), is the greatest angle from any texel's centre
+    /// to a point of its edge, as a scan of every texel's corners and of points along its edges
+    /// finds it on faces of n texels a side: 1.266° at 64² and 5.05° at 16² (R06.T8.l).
+    #[test]
+    fn the_largest_texel_radius_is_the_farthest_point_of_any_texel_from_its_centre() {
+        let angle = |a: &UnitVector, b: [f64; 3]| {
+            let b = UnitVector::from_components(b).expect("a direction");
+            let sine = a.cross(&b).iter().map(|c| c * c).sum::<f64>().sqrt();
+            math::atan2(sine, a.dot(&b))
+        };
+        for side in [1_u16, 2, 3, 8, 15, 16, 63, 64] {
+            let spec = spec(side);
+            let n = f64::from(side);
+            let edge = |i: u16| 2.0 * f64::from(i) / n - 1.0;
+            // Every face is the same up to its axes, so one face's texels are every face's.
+            let face = CubeFace::NegY;
+            let mut largest = 0.0_f64;
+            for row in 0..side {
+                for column in 0..side {
+                    let centre = spec.texel_direction(face, row, column);
+                    let (s0, s1) = (edge(column), edge(column + 1));
+                    let (t0, t1) = (edge(row), edge(row + 1));
+                    for k in 0..=8_u32 {
+                        let f = f64::from(k) / 8.0;
+                        let (s, t) = (s0 + f * (s1 - s0), t0 + f * (t1 - t0));
+                        for (s, t) in [(s, t0), (s, t1), (s0, t), (s1, t)] {
+                            largest = largest.max(angle(&centre, face.through(s, t)));
+                        }
+                    }
+                }
+            }
+            let radius = spec.largest_texel_radius().value();
+            assert!(
+                (largest / radius - 1.0).abs() < 1e-12,
+                "{side}²: the scan's {largest} rad against {radius} rad"
+            );
+        }
+        let degrees = |side: u16| spec(side).largest_texel_radius().value() / RADIANS_PER_DEGREE;
+        assert!((degrees(64) - 1.266).abs() < 0.001, "{}", degrees(64));
+        assert!((degrees(16) - 5.051).abs() < 0.001, "{}", degrees(16));
     }
 
     /// A cloud on the +X axis from the Sun, given to the segments that head its way and pass

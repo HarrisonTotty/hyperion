@@ -12,14 +12,18 @@
 //! position; and only if the bound can pass the cut is the system generated
 //! ([`SystemStars::generate`]), each star read from the pair-evolved [`SystemStars::state_at`]'s
 //! stars at the emitted time, placed by [`star_positions_at`] about the system's apparent position,
-//! left out if it lies outside the query's cone, dimmed by its distance and, unless that alone
-//! already puts it past the cut, by its own V band's extinction along one [`sightline`] to the
-//! observer, and kept if its V is brighter than the cut.
+//! left out if it lies outside the region of the query's cone, dimmed by its distance and, unless
+//! that alone already puts it past the cut, by its own V band's extinction along one [`sightline`]
+//! to the observer, and kept if its V is brighter than the cut.
 //!
 //! The cut alone keeps a star, with or without the eye: the eye's cut already carries the largest
 //! colour offset (Design note 5), each view applies a star's own, and the band subtracts the light
-//! at the cut, so the listing and the band share one boundary, and within a cone the cone's
-//! (decided 2026-10-06, `decision-r06-t9b-band.md`; R06.T8.k). A star's V is M<sub>V</sub> + DM
+//! at the cut, so the listing and the band share one boundary (decided 2026-10-06,
+//! `decision-r06-t9b-band.md`; R06.T8.k). For a cone they share its region too: a star is kept
+//! only if the band's texel it lies in is in the cone's region, whose centre lies within the
+//! cone's half-angle plus the band's largest texel radius ([`ConeRegion::holds`], by the lookup
+//! the band places its overflow's stars by), where the band is complete (decided 2026-10-07,
+//! `decision-r06-t8k-cone.md`; R06.T8.l). A star's V is M<sub>V</sub> + DM
 //! plus its own V band's extinction behind its sightline's A<sub>V</sub>, its colour's
 //! [`reddened`](StarColour::reddened) there, as the wire carries it (the ruling's addendum, item
 //! 4).
@@ -218,7 +222,8 @@ impl LayerTally {
         self.generated
     }
 
-    /// Stars kept: brighter than the cut, and inside the query's cone where it has one (R06.T8.k).
+    /// Stars kept: brighter than the cut (R06.T8.k), and in the query's cone's region where it has
+    /// one (R06.T8.l).
     #[must_use]
     pub const fn accepted(&self) -> u64 {
         self.accepted
@@ -909,10 +914,12 @@ fn record_stars(
         let Some(apparent) = place.to_galactic(r.apparent_position()) else {
             continue;
         };
-        // A cone's census keeps only the stars inside it, so that its listing and the band share
-        // the cone's boundary (R06.T8.k). Both modes keep to it: it is the kept test, not a skip.
-        if let Some(cone) = query.cone()
-            && !cone.holds(&observer_at.displacement_to(&apparent))
+        // A cone's census keeps only the stars of its region's texels, so that its listing and the
+        // band share the region exactly (R06.T8.l): the star's texel by the band's own lookup, of
+        // the same displacement the band places an overflow star by. Both modes keep to it: it is
+        // the kept test, not a skip.
+        if let Some(region) = query.cone_region()
+            && !region.holds(&observer_at.displacement_to(&apparent))
         {
             continue;
         }
@@ -1893,20 +1900,20 @@ mod tests {
         assert!(near_the_cut > 0, "no star near the cut, of {}", stars.len());
     }
 
-    /// Every star a cone's census keeps is brighter than the cut and inside the cone (R06.T8.k),
-    /// and they are the stars the same cells list with no cone that lie inside it, star for star
-    /// and bit for bit, while some of those cells' stars lie outside it: each cell of a 30° cone's
-    /// plan within 60 ly of the Sun, at V 11 with the eye asked. The oracle of each cell, its every
-    /// record measured with no skip, keeps the same stars.
+    /// Every star a cone's census keeps is brighter than the cut and in the cone's region, the
+    /// band's texels about it (R06.T8.k, R06.T8.l), and they are the stars the same cells list
+    /// with no cone whose texels lie in the region, star for star and bit for bit, while some of
+    /// those cells' stars lie outside it: each cell of a 30° cone's plan within 60 ly of the Sun,
+    /// at V 11, at the server's 64² band. The oracle of each cell, its every record measured with
+    /// no skip, keeps the same stars.
     #[test]
-    fn every_kept_star_is_brighter_than_the_cut_and_inside_the_cone() {
+    fn every_kept_star_is_brighter_than_the_cut_and_in_the_cones_region() {
         let galaxy = milky_way_galaxy();
         let observer = observer_at(SUN);
         let cut = Magnitudes::new(11.0);
         let cone = Cone::new(UnitVector::X, Degrees::new(30.0)).expect("a cone");
         let build = |cone: Option<Cone>| {
-            let mut builder =
-                SkyQuery::builder(observer, cut).eye(crate::sky::eye::EyeObserver::default());
+            let mut builder = SkyQuery::builder(observer, cut);
             if let Some(cone) = cone {
                 builder = builder.cone(cone);
             }
@@ -1917,10 +1924,11 @@ mod tests {
                 .expect("a forced cap")
         };
         let (narrow, wide) = (build(Some(cone)), build(None));
+        let region = *narrow.cone_region().expect("a region");
         let mut ctx = context();
         let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &narrow, &mut ctx.noise);
         let inside =
-            |star: &SkyStar| cone.holds(&observer.position().displacement_to(star.apparent()));
+            |star: &SkyStar| region.holds(&observer.position().displacement_to(star.apparent()));
         let (mut kept, mut left_out) = (0_usize, 0_usize);
         let mut records = Vec::new();
         for key in plan.cells() {
@@ -1929,7 +1937,7 @@ mod tests {
             census_cell(galaxy, &mut ctx, key, &wide, &mut all);
             for star in &coned {
                 assert!(star.v() <= cut, "{star:?}");
-                assert!(inside(star), "{star:?} lies outside the cone");
+                assert!(inside(star), "{star:?} lies outside the cone's region");
             }
             let within: Vec<SkyStar> = all.iter().filter(|s| inside(s)).copied().collect();
             assert_eq!(coned, within, "{key:?}");

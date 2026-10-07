@@ -1492,6 +1492,9 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
   - Record the region's area against the cone's, at each test cone.
   - Files: `sky/census/{query,cell}.rs`, `sky/band.rs`. Acceptance:
     `cargo test -p hyperion-sim --lib -- sky::census` and `… -- sky::band`, as two commands.
+  - As built (Risks, "Deviations in T8.l, as built"): the plan opens cells by α + 2ρ, which a
+    region texel's stars need, not α + ρ; the ruling's (1 + ρ ÷ α)² is the region's mean area
+    over axes, not its ceiling.
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f and plan 11's asks A and B).**
   Decided 2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Near the
@@ -5065,7 +5068,98 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   and band share the band's texels that meet it, so a cone of half-angle α lists up to
   (1 + ρ ÷ α)² its own area: 2.3 times at 2.5°, 27 at 0.3°. A sub-degree instrument field needs a
   band finer than 64² for its own background in any case. That band is the instrument plan's to
-  design. No RM3 view asks a cone.
+  design. No RM3 view asks a cone. _As built (R06.T8.l, science check): (1 + ρ ÷ α)² is the area
+  of the cap the region's texel centres lie in, so it is the region's mean over axes, not its
+  ceiling. The texels reach to α + 2ρ, and the ceiling is cap(α + 2ρ) ÷ cap(α): 1.17 at 30°, 1.64
+  at 9°, 4.05 at 2.5°, 89 at 0.3° and 692 at 0.1° at 64². Measured 29 at 0.3° and 2.32 at 10° (16²),
+  each a little above the mean (Risks, "Deviations in T8.l, as built")._
+- **Deviations in T8.l, as built (2026-10-07).** The cone by the band's texels and no eye with a
+  cone, as the cone ruling (`decision-r06-t8k-cone.md`, items 1 and 2) sets it out, with these
+  details.
+  - **The region** (`sky/census/query.rs`, new and public). `ConeRegion::new(cone, spec)` holds the
+    cone, the band's `BandSpec` and cos(α + ρ). It gives `cone()`, `spec()`, `reach()` (α + ρ),
+    `cos_reach()`, `holds_texel(face, row, column)` (the texel's centre against `cos_reach`) and
+    `holds(&GalacticDisplacement)` (the texel `BandSpec::texel_of` places the direction in; a zero
+    displacement held, as `Cone::holds` holds it, and a non-finite one not, which no star has).
+    - ρ is `BandSpec::largest_texel_radius()` (`sky/band.rs`), atan(√2 ÷ n): 1.266° at 64² and
+      5.051° at 16². A test scans every texel's corners and edge points at eight face sizes, 1² to
+      64²; the science check scanned the corners to 1,024². The texels are largest at a face's
+      centre, and their edges are great circles, so a corner is a texel's farthest point.
+    - Every texel that meets the cone is in the region, and some that do not: at 30° (16²) 96
+      texels against about 88 that meet it. The docs say "the band's texels about it" where the
+      ruling says "that meet it".
+  - **The query carries its band.** `SkyQuery::band_spec()` and `SkyQueryBuilder::band_spec(spec)`
+    give it, `BandSpec::STANDARD` unless set. The region is computed once, when the cone or the band
+    is set (`SkyQuery::cone_region()`), and the census and the band read its one cosine.
+    `march_rows` refuses, in release builds too, a cone's band marched at another `BandSpec`. A
+    query with no cone reads its band nowhere, so the eye cut's 16² pre-pass is unchanged.
+  - **The census** keeps a star when `region.holds(observer.displacement_to(apparent))`, the
+    displacement `sum_rows` places an overflow star by, so a star and its texel agree bit for bit.
+    `Cone::holds` stays as the cone's own edge, which the tests read.
+  - **The band.** `Reach::of(region, face, row, column)` reads `holds_texel`, the one place a ray's
+    region is decided. Without a cone every ray is `Inside`, as before.
+  - **The plan opens cells by α + 2ρ, not the ruling's α + ρ** (science check: should-fix, for the
+    ruling's bullet). A region texel's centre lies within α + ρ of the axis and its points within ρ
+    of its centre, so its stars lie up to α + 2ρ out. Cells opened by α + ρ could miss the stars on
+    a region texel's far side, whose light its complete band leaves out. The plan text says only
+    "the widened cone". `ConeRegion`'s private `meets_ball` widens it, plus 10⁻⁹ rad against
+    rounding (`PLAN_MARGIN_RAD`; determinism audit). `Cone::meets_ball` is gone; a private
+    `ball_meets_cone` serves the plan and its test. Opening more cells moves no listed star.
+  - **The region's area.** The ruling's "at most (1 + ρ ÷ α)²" is the area of the cap the region's
+    texel centres lie in. That is the mean over axes, not a ceiling, which is cap(α + 2ρ) ÷ cap(α)
+    (the "A narrow cone's region" entry above). `ConeRegion`'s docs give both.
+  - **No eye with a cone.** `BuildSkyQueryError::ConeWithEye` reads "the naked eye cannot ask a
+    cone: it has no field stop". `SkyQueryBuilder::build` refuses it after the eye cut's checks,
+    whichever of the two was set first. `Cone`'s docs and `SkyQueryBuilder::cone`'s call a cone an
+    instrument's field stop. They state that stray light scattered into the field is not modelled,
+    and that the eye has no field stop narrower than its own field (science check). The protocol's
+    doc comments (`SkyRequest.cone`, `ConeDto`) and the server's `BadRequest` are T11.a's, as its
+    plan text says.
+  - **Tests** (`--lib -- sky::census` and `-- sky::band`). Near the Sun to V 8, every cap forced to
+    200 ly, each cone's census and band against the full sky's:
+
+    | Cone, band | Axis                                                   | Region texels, sr | ÷ the cone | (1 + ρ ÷ α)² | Ceiling | Listed | Inside the cone | Cells opened   |
+    | ---------- | ------------------------------------------------------ | ----------------- | ---------- | ------------ | ------- | ------ | --------------- | -------------- |
+    | 1°, 16²    | the brightest star within 200 ly 2° from every centre  | 2, 0.02940        | 30.7       | 36.6         | 122.9   | 9      | 1               | 1,653 (1.8%)   |
+    | 10°, 16²   | (1, 1, 1), a corner of the cube, over three faces      | 45, 0.2219        | 2.32       | 2.27         | 4.01    | 63     | 24              | 4,124 (4.4%)   |
+    | 30°, 16²   | +X                                                     | 96, 1.111         | 1.32       | 1.37         | 1.75    | 396    | 290             | 13,127 (14.0%) |
+    | 0.3°, 64²  | the brightest star within 200 ly, on the rows it meets | 6, 0.002503       | 29.1       | 27.2         | 89.1    | 3      | 3               | 406 (0.43%)    |
+
+    Cells opened are counted against the full sky's 93,440.
+    - Each of the four tests asserts the ruling's five items. The listed stars are exactly the full
+      census's stars of the region's texels, star for star and bit for bit (V, A_V, distance and
+      position). Each region texel is the full sky's and each other the band complete nowhere, bit
+      for bit. Texel by texel, the light is the full sky's to 10⁻¹² relative. A lattice of 10⁴
+      directions inside the cone lies in region texels. The full census's stars inside the cone
+      itself are listed. The 1° test also asserts that no texel centre lies within 1°.
+    - The 30° cone's 290 stars inside the cone are T8.k's 290. Its region lists 396. T8.k's
+      `a_cones_listed_and_band_light_are_the_full_skys_inside_it` (within 1%) is replaced by
+      `a_30_degree_cone_shares_the_bands_texels_exactly`.
+    - `a_cones_overflow_falls_in_its_region` (determinism audit, should-fix). The 10° cone's 49 stars
+      within 200 ly are merged at an `n_max` of 10. Every overflowing star's texel, as the band
+      places it, is in the region. Every other texel is the band complete nowhere, bit for bit, and
+      each region texel's light is the full sky's to 10⁻¹² relative (26 texels hold points).
+    - Also new: `the_largest_texel_radius_is_the_farthest_point_of_any_texel_from_its_centre`,
+      `a_cones_band_at_another_resolution_is_refused`, `an_eye_with_a_cone_is_refused` and
+      `a_cones_region_is_of_the_querys_band`. `ConeRegion`'s doctest: a 1° cone at a 16² face's
+      centre holds no texel centre, but its region holds the four texels about it.
+    - Changed: `a_cone_is_complete_only_in_its_region` (8²; it was `…_inside_it`) and
+      `every_kept_star_is_brighter_than_the_cut_and_in_the_cones_region` (cell; 65 kept, 272 left
+      out). Both take the region and no eye. `a_cone_keeps_only_cells_whose_box_meets_it` takes the
+      widened cone and asserts it opens cells the cone alone would not. `every_refusal_names_its_field`
+      takes `ConeWithEye`. The cache's looser query keeps its 60° cone without the eye.
+
+  - **wasm32's 32-bit `usize`** (the orchestrator's sweep after CI-53's T9.i overflow, 218f0cb9).
+    `march_rows`' slot count, rows × face side × slots a ray, is a checked product now (T9.f's
+    code). Every other `usize` product or sum in T8.l's code and tests, and in the T9.f and T9.j
+    code it touches, is bounded by a face's 1,024² texels, a test's few thousand stars, or a
+    `Vec`'s own bytes (`heap_bytes`). T9.i's `assert_within_tolerance` multiplied its pairs in
+    `usize` too, 300,000 × 24,576 in its slow test; that is fixed in a commit of its own.
+  - **Owed elsewhere.** T7.b's caps at v☉ (ruling item 3) are T7.b's, as its plan text says. The
+    ruling's §1 bullet "cells are opened by the widened cone, α + ρ" and its cost table's "at most"
+    are for the orchestrator to correct in the decision record.
+  - **Not changed.** GENERATOR_VERSION stays 20 and no golden moves (`golden_diff` 0). No query
+    without a cone changes: every ray is `Inside` and no star is tested.
 - **Deviations in T8.j, as built (2026-10-07).** The census in motion, as the pad-speed ruling
   (`decision-r06-pad-speed.md`, §4 item 6) sets it out, built with T8.k, with these details.
   - The moving galaxy is the fixture cloned and built `with_full_potential`, in a `OnceLock` that

@@ -19,6 +19,6 @@ pub use cell::{
 };
 pub use merge::{SkyCensus, merge_census, sky_order};
 pub use query::{
-    BuildSkyQueryError, CellSlab, CensusPlan, Cone, MAX_FORCED_CAP_LY, MAX_N_MAX, SkyContext,
-    SkyQuery, SkyQueryBuilder, census_plan, plan_cells,
+    BuildSkyQueryError, CellSlab, CensusPlan, Cone, ConeRegion, MAX_FORCED_CAP_LY, MAX_N_MAX,
+    SkyContext, SkyQuery, SkyQueryBuilder, census_plan, plan_cells,
 };
