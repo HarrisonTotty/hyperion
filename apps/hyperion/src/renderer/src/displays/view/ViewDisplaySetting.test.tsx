@@ -198,14 +198,31 @@ function wireframeSegments(view: Setup): number {
   );
 }
 
+/**
+ * `VIEW` given `setting` drawing `PHASE TEST` in the wireframe, its field of view narrowed by the
+ * camera panel from 60° to 30°, where high draws the half planet's graticule at 15°.
+ *
+ * @remarks
+ * The half planet is 88 device px across at 60° on the 1,600 px primary and 123 px at 45°, under
+ * `FINE_GRATICULE_FROM_PX` at the line scale (128 device px at a ratio of 1 since R07.T16.g), so
+ * that high draws its graticule at 30° there as low does. At 30° it is 190 px across, above it.
+ */
+async function phaseTestAt30Deg(setting: QualitySetting): Promise<Setup> {
+  const view = await phaseTest(setting);
+  const narrower = screen.getByRole("button", { name: "Narrower field of view" });
+  // 60° to 45° to 30°.
+  await view.user.click(narrower);
+  await view.user.click(narrower);
+  view.advance(300);
+  return view;
+}
+
 describe("VIEW's wireframe at the setting it is given (R07.T17)", () => {
-  it("draws R02's low wireframe on low, PHASE TEST's graticules at 30° only and so fewer lines", async () => {
-    const high = await phaseTest("high");
-    high.advance(300);
+  it("draws R02's low wireframe on low, PHASE TEST's half planet at FOV 30° gridded every 30° rather than 15°, and so fewer lines", async () => {
+    const high = await phaseTestAt30Deg("high");
     const atHigh = wireframeSegments(high);
     cleanup();
-    const low = await phaseTest("low");
-    low.advance(300);
+    const low = await phaseTestAt30Deg("low");
     const atLow = wireframeSegments(low);
     expect([atHigh > 0, atLow > 0, atLow < atHigh]).toEqual([true, true, true]);
   });

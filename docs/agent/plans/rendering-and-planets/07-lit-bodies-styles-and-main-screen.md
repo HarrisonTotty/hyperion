@@ -7405,6 +7405,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - A photorealistic instrument beside a wireframe primary blooms over the setting's levels.
       - The label block reads `QUALITY LOW` or `QUALITY HIGH`.
       - The wireframe draws fewer lines on low.
+        _Fixed forward after T16.g: the case now narrows `PHASE TEST`'s field of view from 60° to
+        30°. T16.g draws the 15° graticule from 128 device px at a ratio of 1, and at 60° the half
+        planet is 88 px across, so high drew 30° there as low does and both drew 992 segments. At
+        30° it is 190 px, and high draws 1,136 against low's 608. The low form was unchanged. A
+        bisect with T17 cherry-picked: it passes on T16.g's parent and fails on T16.g and on T17 as
+        landed, before T16.f._
       - The sky is asked at N_max 10⁵ against 3 × 10⁵.
     - Elsewhere:
       - `useViewSky.test.tsx`: N_max, and 2,048 of 3,000 bright stars drawn as sprites on low,
