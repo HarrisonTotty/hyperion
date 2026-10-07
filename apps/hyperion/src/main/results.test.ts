@@ -638,11 +638,23 @@ describe("a results file", () => {
   });
 
   it("states no load average in a Windows run's summary, not its zeros", () => {
-    expect(summaryMarkdown(windowsResults())).toContain("load average none (Windows keeps none)");
+    expect(summaryMarkdown(windowsResults())).toContain(
+      "load average none (Windows keeps no load average)",
+    );
   });
 
-  it("keeps a Windows run's zeros as version 5's load average triple", () => {
+  it("records no load average for a Windows run, with the reason, not its zeros", () => {
+    expect(windowsResults().run.machine.loadAverage).toEqual(
+      missing("Windows keeps no load average"),
+    );
+  });
+
+  it("validates a Windows run's file, which has no load average", () => {
     expect(validateResults(JSON.parse(JSON.stringify(windowsResults())))).toEqual([]);
+  });
+
+  it("records a macOS run's load average as measured", () => {
+    expect(macResults().run.machine.loadAverage).toEqual(measured([0.5, 0.4, 0.3]));
   });
 
   it("does not mark a run on macOS at a load of 0.5 provisional", () => {
@@ -2223,6 +2235,46 @@ describe("the schema check", () => {
       "two joint rows",
       [[["criteria", "whole", 8, "id"], "terrain-atmosphere"]],
       "criteria.whole has 2 terrain-atmosphere rows, not one",
+    ],
+    [
+      "version 5's bare load-average triple",
+      [
+        [
+          ["run", "machine", "loadAverage"],
+          [0.4, 0.6, 0.8],
+        ],
+      ],
+      "run.machine.loadAverage is a bare triple, version 5's form: version 6 records it as a value with its reason",
+    ],
+    [
+      "no load average without its reason",
+      [[["run", "machine", "loadAverage"], { value: null }]],
+      "run.machine.loadAverage is not three averages with no reason, or none with its reason",
+    ],
+    [
+      "a load average without its reason's null",
+      [[["run", "machine", "loadAverage"], { value: [0.4, 0.6, 0.8] }]],
+      "run.machine.loadAverage is not three averages with no reason, or none with its reason",
+    ],
+    [
+      "no load average",
+      [[["run", "machine", "loadAverage"], DELETE]],
+      "run.machine has no load average",
+    ],
+    [
+      "a load average that is not three averages",
+      [[["run", "machine", "loadAverage"], measured([0.4, 0.6])]],
+      "run.machine.loadAverage.value is not the three load averages",
+    ],
+    [
+      "a load average measured on Windows",
+      [[["run", "platform"], "win32"]],
+      "run.machine.loadAverage is measured on win32, which keeps no load average",
+    ],
+    [
+      "no load average on a run that is not provisional",
+      [[["run", "machine", "loadAverage"], missing("no load average on haiku")]],
+      "run.quiet is not provisional, but run.machine.loadAverage is none",
     ],
   ])("refuses %s", (_case, edits, problem) => {
     const file: unknown = JSON.parse(JSON.stringify(incompleteResults(TWENTY_NINE, [400])));

@@ -7,8 +7,9 @@
  * which keeps none (Node's `os` documentation). A Windows reading is therefore no reading: a run
  * there is always provisional, since whether its machine was quiet is unchecked. Nothing here reads
  * `/proc`, so the descent's demand record (`scripts/descentDemand.mjs`, which loads this module)
- * runs on every platform. The results file keeps its load average a number triple until a later
- * schema version makes it a `Measured` (the ruling); the demand record writes an empty list.
+ * runs on every platform. Since results version 6 the results file records the load average as a
+ * `Measured`, none with {@link NO_WINDOWS_LOAD_AVERAGE} on Windows; the demand record writes an
+ * empty list.
  */
 
 import { type Measured, measured, missing } from "./measured";

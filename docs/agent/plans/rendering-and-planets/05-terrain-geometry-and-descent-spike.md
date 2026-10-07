@@ -4791,7 +4791,10 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   - _No schema change._ Results version 5's shapes hold: `loadAverage` stays a number triple, zeros
     on Windows, and `run.quiet` says why. The committed files do not change. All six results files
     are Linux runs, the five summaries regenerate byte-identical, and a replay of the fixture on
-    this machine records the committed replay's name, CPU, threads, memory and governor.
+    this machine records the committed replay's name, CPU, threads, memory and governor. _Since
+    results version 6_ (2026-10-06, the orchestrator's ruling after T14.l), the results file
+    records `loadAverage` as a `Measured`, none with its reason on Windows ("Deviations in T14.l,
+    as built").
   - _Facts that could not be read._ The schema keeps the host name, CPU, threads and memory plain
     values, so an unread one is written as before (`"machine"`, `"unknown"`, 0 and 0), and a line in
     `replay.findings` says which, for example "the machine's memory could not be read:
@@ -5016,11 +5019,54 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
         record's file list.
       - Of its considers, a stale comment and two wordings are fixed. Holding the estimates to the
         setting is not taken, for the reason under "The schema check".
-  - _Open, for the orchestrator._ T20's ruling says "a later schema version, bumped for other
-    reasons, should make `loadAverage` a `Measured`". Version 6 is such a bump, but T14.l's text
-    does not include it, so the field stays a number triple. The docs now say "versions 5 and 6".
-    It can join version 6 before it lands, at the cost of converting the six files again, or wait
-    for the next bump.
+  - _Version 6 carries T20's change too_ (ruled by the orchestrator, 2026-10-06, in a follow-up
+    commit, `feat(spike): R05.T20 Record the load average as a value with its reason`). T20's
+    ruling said that "a later schema version, bumped for other reasons, should make `loadAverage`
+    a `Measured`", and version 6 had landed nowhere.
+    - _The file._ `run.machine` is a `RecordedMachine`: the run's description with `loadAverage`
+      a `Measured`. On Windows it is none, with `readLoadAverage`'s and `quietOf`'s reason,
+      "Windows keeps no load average", in place of zeros. The replayer writes its reading's
+      `Result` the same way, with "no load average on <platform>" where `sysinfo` has no backend.
+    - _The description stays a triple._ `MachineDescription.loadAverage` keeps Node's zeros on
+      Windows, since the views check's and the child window's records (R07) reuse it and keep their
+      own schemas. `buildResults` takes the `Measured` from it by `keepsLoadAverage`, the one case
+      in which `readLoadAverage` gives none.
+    - _The summary._ A Windows run's line reads "load average none (Windows keeps no load
+      average)", and its overall verdict's "(provisional: …)" takes the same reason.
+    - _The schema check._ It refuses:
+      - a bare triple, version 5's form ("… is a bare triple, version 5's form: version 6 records
+        it as a value with its reason");
+      - a value that is not three averages;
+      - a value with a reason, or none without one;
+      - a value on Windows;
+      - a run with none that is not provisional.
+    - _The committed files._ All six are Linux runs. Each keeps its averages as the value, edited
+      as text (`target/laneD/t14l/load6.mts`) in its own key order, and their summaries regenerate
+      unchanged.
+    - _Tests._ `results.test.ts` gains a Windows run's none with its reason, its file's
+      validation, a macOS run's measured value, and seven refusals. The Windows summary's wording
+      is updated. `results.rs` gains an unsupported platform's none with its reason and its whole
+      quiet note, and its Linux, macOS and Windows tests assert the `Measured` form.
+      `tests/replay.rs` asserts the form its platform gives.
+    - _Gate_ (capped; cargo through a build slot), on the branch with `rendering-and-planets`
+      dcd99216 merged, so that the views check's and the child window's uses of the description
+      are covered:
+      - the targeted vitest (results, report, session, machine load, views check, child window):
+        7 files, 316 tests;
+      - `pnpm test`, the typecheck from a clean cache, `just check lint`, Prettier and rustfmt;
+      - `just gpu-replay-check` (59 unit tests and Clippy), and the replayer's GPU test offscreen
+        under the GPU lock;
+      - a fixture replay's version 6 file, validated by the client's `validateResults`;
+      - the six converted files, validated;
+      - the commit's hooks.
+    - _Review._ typescript-reviewer and rust-reviewer found no must-fix.
+      - typescript-reviewer's should-fix is applied: the check now requires the reason.
+      - rust-reviewer's should-fix is applied: `RESULTS_VERSION`'s doc names the change.
+      - Their considers are applied too: the TSDoc is rewrapped, the GPU test asserts its
+        platform's form, and the unsupported platform's whole quiet note is pinned.
+      - rust-reviewer also asked whether a version 6 file written before this change could reach
+        the check. None exists outside scratch, and the refusal now says "a bare triple, version
+        5's form" rather than naming its version.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

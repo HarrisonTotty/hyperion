@@ -81,7 +81,26 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     // The setting and seed come from the capture's `meta`.
     assert_eq!(results["run"]["setting"], "low");
     assert_eq!(results["run"]["seed"], "7");
-    assert!(results["run"]["machine"]["loadAverage"].is_array());
+    // A value with its reason (results version 6): three averages where the platform keeps them,
+    // and none with Windows' reason there.
+    let load = &results["run"]["machine"]["loadAverage"];
+    match results["run"]["platform"].as_str() {
+        Some("windows") => {
+            assert_eq!(
+                *load,
+                serde_json::json!({ "value": null, "reason": "Windows keeps no load average" })
+            );
+            assert_eq!(results["run"]["quiet"]["provisional"], true);
+        }
+        Some("linux" | "macos") => {
+            assert_eq!(load["reason"], Value::Null);
+            assert_eq!(load["value"].as_array().map(Vec::len), Some(3), "{load}");
+        }
+        _ => assert!(
+            load["value"].is_array() || load["reason"].is_string(),
+            "{load}"
+        ),
+    }
     assert!(results["run"]["switches"].is_array());
     for key in ["levels", "streaming"] {
         assert!(results[key].is_array(), "{key} is a list");

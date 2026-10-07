@@ -94,7 +94,8 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * series (R05.T14.k). Version 6 (decision-r05-high-atmosphere.md, R05.T14.l) replaces the
  * `terrain` and `atmosphere` rows with one, `terrain-atmosphere`, judged on each frame's sum of
  * both against their estimates' sum, and adds `gpu.rows`, each pass row's per-frame sum against
- * its estimate.
+ * its estimate. It also records `run.machine.loadAverage` as a `Measured`, none with the reason on
+ * Windows, where version 5 wrote zeros (R05.T20, decision-cross-platform-server.md item 6).
  */
 export const RESULTS_VERSION = 6;
 
@@ -219,8 +220,8 @@ export interface MachineDescription {
   readonly governor: Measured<string>;
   /**
    * The 1-, 5- and 15-minute load averages when the run started. Windows keeps none, and its
-   * zeros stand in for them, since results versions 5 and 6 keep a number triple; the run's `quiet`
-   * says so (decision-cross-platform-server.md item 6).
+   * zeros stand in for them here, as the views check's and the child window's records keep them;
+   * a results file records none, with the reason ({@link RecordedMachine}).
    */
   readonly loadAverage: LoadAverage;
   /** Chromium's GPU description (`app.getGPUInfo("basic")`), or why it is missing. */
@@ -230,6 +231,26 @@ export interface MachineDescription {
     readonly driverVersion: string | null;
     readonly description: string | null;
   }>;
+}
+
+/**
+ * The machine as a results file records it (results version 6; R05.T20,
+ * decision-cross-platform-server.md item 6): its description, with the load average a
+ * {@link Measured}, so that a platform that keeps none, as Windows does, records none with the
+ * reason rather than zeros that could pass for a reading.
+ */
+export interface RecordedMachine extends Omit<MachineDescription, "loadAverage"> {
+  readonly loadAverage: Measured<LoadAverage>;
+}
+
+/** The run's machine as its results file records it, on `platform`. */
+function recordedMachine(platform: string, machine: MachineDescription): RecordedMachine {
+  return {
+    ...machine,
+    loadAverage: keepsLoadAverage(platform)
+      ? measured(machine.loadAverage)
+      : missing(NO_WINDOWS_LOAD_AVERAGE),
+  };
 }
 
 /** What describes a run, gathered by the main process at its start. */
@@ -804,7 +825,7 @@ export interface DescentResults {
   readonly version: typeof RESULTS_VERSION;
   readonly run: {
     readonly startedAt: string;
-    readonly machine: MachineDescription;
+    readonly machine: RecordedMachine;
     readonly versions: RunDescription["versions"];
     readonly platform: NodeJS.Platform;
     /** The client's launch mode, or `native-replay` for `tools/gpu-replay`'s results (T15.c). */
@@ -1527,7 +1548,7 @@ export function buildResults(input: ResultsInput): DescentResults {
     version: RESULTS_VERSION,
     run: {
       startedAt: run.startedAt.toISOString(),
-      machine: run.machine,
+      machine: recordedMachine(run.platform, run.machine),
       versions: run.versions,
       platform: run.platform,
       launchMode: run.launchMode,
@@ -1709,16 +1730,18 @@ const VERDICTS: ReadonlySet<string> = new Set(["pass", "fail", "marginal", "not-
  * Checks a parsed results file against its schema.
  *
  * @returns The problems found, empty for a valid file. Beyond the shape of each required part,
- * every figure must be present or `null` with a stated reason; without a trace, or with a failed
- * window, no figure read from the trace may be present, nor the engine's in an unprofiled run; the
- * trace's windows must be in order with one boundary between each pair, whose exclusions neither
- * overlap nor fall out of order and whose frames are the file's excluded frames; the memory
- * series must be whole: every column as long as the times, readings in whole KiB, -1 at its gaps'
- * samples alone, and each peak its column's maximum; the incomplete frames must be whole counts
- * within the frames after the warm-up, and no GPU row's verdict one they make impossible; each
- * clock column must be as long as the times; and terrain and atmosphere must be one criterion row,
- * whose limit is their estimates' sum, with each one's figures in `gpu.rows`, percentiles in
- * order and `overEstimate` true exactly when its 95th percentile is above its estimate.
+ * every figure must be present or `null` with a stated reason; the load average must be three
+ * averages or none with its reason, never on Windows, and a run without one provisional; without a
+ * trace, or with a failed window, no figure read from the trace may be present, nor the engine's in
+ * an unprofiled run; the trace's windows must be in order with one boundary between each pair,
+ * whose exclusions neither overlap nor fall out of order and whose frames are the file's excluded
+ * frames; the memory series must be whole: every column as long as the times, readings in whole
+ * KiB, -1 at its gaps' samples alone, and each peak its column's maximum; the incomplete frames
+ * must be whole counts within the frames after the warm-up, and no GPU row's verdict one they make
+ * impossible; each clock column must be as long as the times; and terrain and atmosphere must be
+ * one criterion row, whose limit is their estimates' sum, with each one's figures in `gpu.rows`,
+ * percentiles in order and `overEstimate` true exactly when its 95th percentile is above its
+ * estimate.
  */
 export function validateResults(value: unknown): string[] {
   const problems: string[] = [];
@@ -1744,10 +1767,7 @@ export function validateResults(value: unknown): string[] {
     if (!["full", "quantized", "absent"].includes(String(run["timer"]))) {
       problems.push("run.timer is not full, quantized or absent");
     }
-    const machine = run["machine"];
-    if (!isRecord(machine) || !Array.isArray(machine["loadAverage"])) {
-      problems.push("run.machine has no load average");
-    }
+    checkLoadAverage(run, problems);
     if (!Array.isArray(run["switches"])) {
       problems.push("run.switches is not a list");
     }
@@ -1783,6 +1803,51 @@ export function validateResults(value: unknown): string[] {
   checkRestOfFrame(value, problems);
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
+}
+
+/**
+ * `run.machine.loadAverage` (results version 6, R05.T20): a value with its reason, never a bare
+ * triple (version 5's form); three averages with no reason, or none with one; none on a platform
+ * that keeps none (Windows), whose zeros are no reading; and a run with none is provisional, since
+ * its quiet-machine rule is unchecked.
+ */
+function checkLoadAverage(run: Readonly<Record<string, unknown>>, problems: string[]): void {
+  const load = childAt(run, ["machine", "loadAverage"]);
+  const path = "run.machine.loadAverage";
+  if (Array.isArray(load)) {
+    problems.push(
+      `${path} is a bare triple, version 5's form: version 6 records it as a value with its reason`,
+    );
+    return;
+  }
+  if (!isRecord(load)) {
+    problems.push("run.machine has no load average");
+    return;
+  }
+  const averages = load["value"];
+  const reason = load["reason"];
+  if (averages === null ? typeof reason !== "string" || reason.length === 0 : reason !== null) {
+    problems.push(`${path} is not three averages with no reason, or none with its reason`);
+    return;
+  }
+  if (averages === null) {
+    if (childAt(run, ["quiet", "provisional"]) !== true) {
+      problems.push(`run.quiet is not provisional, but ${path} is none`);
+    }
+    return;
+  }
+  if (
+    !Array.isArray(averages) ||
+    averages.length !== 3 ||
+    !averages.every((average: unknown) => isFiniteAtLeast(average, 0))
+  ) {
+    problems.push(`${path}.value is not the three load averages`);
+    return;
+  }
+  const platform = String(run["platform"]);
+  if (!keepsLoadAverage(platform)) {
+    problems.push(`${path} is measured on ${platform}, which keeps no load average`);
+  }
 }
 
 /** Each column's peak among the memory figures, or `null` for a column without one. */
@@ -2701,13 +2766,13 @@ export function summaryMarkdown(results: DescentResults): string {
   const fromPresentation = frames.source === "presentation";
   const whole = intervalsOf(frames);
   const headline = memory.gpuHeadline;
-  const keptLoad = keepsLoadAverage(run.platform);
+  const load = run.machine.loadAverage;
   return [
     `# Descent spike: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
     "",
     ...(run.trace.value?.profiled === true ? [PROFILED_HEADING, ""] : []),
-    `- **Overall:** ${criteria.overall}${run.quiet.provisional ? (keptLoad ? " (provisional: not a quiet machine)" : ` (provisional: ${NO_WINDOWS_LOAD_AVERAGE})`) : ""}`,
-    `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${keptLoad ? run.machine.loadAverage.map((load) => load.toFixed(2)).join(", ") : "none (Windows keeps none)"}`,
+    `- **Overall:** ${criteria.overall}${run.quiet.provisional ? (load.value === null ? ` (provisional: ${load.reason})` : " (provisional: not a quiet machine)") : ""}`,
+    `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${load.value === null ? `none (${load.reason})` : load.value.map((average) => average.toFixed(2)).join(", ")}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
     `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,

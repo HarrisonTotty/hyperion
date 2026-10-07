@@ -12,7 +12,10 @@
         "value": "schedutil",
         "reason": null
       },
-      "loadAverage": [0.46, 1.33, 1.64],
+      "loadAverage": {
+        "value": [0.46, 1.33, 1.64],
+        "reason": null
+      },
       "gpu": {
         "value": {
           "vendorId": 4318,

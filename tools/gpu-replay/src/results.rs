@@ -53,7 +53,9 @@ pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
 /// adds `gpu.clocks`, the GPU's clocks on the memory series' times (R05.T14.k). Version 6
 /// (decision-r05-high-atmosphere.md, R05.T14.l) replaces the `terrain` and `atmosphere` rows with
 /// one, `terrain-atmosphere`, and adds `gpu.rows`, each pass row's per-frame sums against its
-/// estimate.
+/// estimate. It also records `run.machine.loadAverage` as a value with its reason, none where the
+/// platform keeps none (Windows) or where `sysinfo` has no backend, where version 5 wrote zeros
+/// (R05.T20, decision-cross-platform-server.md item 6).
 pub const RESULTS_VERSION: u64 = 6;
 
 /// Why a replay with no clock sample has no clocks.
@@ -764,9 +766,10 @@ impl PassTiming {
 /// The machine's facts as the schema records them, from `sources`.
 ///
 /// A fact that could not be read is the schema's plain value ([`MachineSources::findings`] says
-/// which), and a load average the platform keeps none of is zeros, since results versions 5 and 6
-/// keep it a number triple (a later version makes it a `Measured`: decision-cross-platform-server.md
-/// item 6); [`quiet`] then marks the run provisional and says why.
+/// which). The load average is a value with its reason (results version 6, R05.T20;
+/// decision-cross-platform-server.md item 6): null where the platform keeps none, as Windows does,
+/// or where `sysinfo` has no backend, with that reason; [`quiet`] then marks the run provisional
+/// and says why.
 #[must_use]
 fn machine(sources: &MachineSources, adapter: &wgpu::AdapterInfo) -> Value {
     let name = sources
@@ -774,7 +777,6 @@ fn machine(sources: &MachineSources, adapter: &wgpu::AdapterInfo) -> Value {
         .as_deref()
         .map(normalised)
         .unwrap_or_default();
-    let load = sources.load_average.as_ref().map_or([0.0; 3], |load| *load);
     json!({
         "name": if name.is_empty() { "machine".to_owned() } else { name },
         "cpu": sources.cpu_brand.as_deref().unwrap_or("unknown"),
@@ -784,7 +786,10 @@ fn machine(sources: &MachineSources, adapter: &wgpu::AdapterInfo) -> Value {
             .governor
             .as_ref()
             .map_or_else(|reason| missing(reason), |governor| measured(json!(governor))),
-        "loadAverage": load,
+        "loadAverage": sources
+            .load_average
+            .as_ref()
+            .map_or_else(|reason| missing(reason), |load| measured(json!(load))),
         "gpu": measured(json!({
             "vendorId": adapter.vendor,
             "deviceId": adapter.device,
@@ -1303,6 +1308,24 @@ mod tests {
     }
 
     #[test]
+    fn a_load_average_not_read_is_written_with_its_reason() {
+        let mut unsupported = sources(Platform::Other("haiku"));
+        unsupported.load_average = load_average_on(Platform::Other("haiku"), || None);
+        let results = on(unsupported);
+        assert_eq!(
+            results["run"]["machine"]["loadAverage"],
+            missing("no load average on haiku")
+        );
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({
+                "provisional": true,
+                "note": "no load average on haiku: the quiet-machine rule (Design note 27) is unchecked",
+            })
+        );
+    }
+
+    #[test]
     fn the_governor_is_read_on_linux_alone() {
         assert_eq!(
             governor_on(Platform::Linux, || Ok("schedutil\n".to_owned())),
@@ -1344,7 +1367,7 @@ mod tests {
         assert_eq!(machine["logicalCores"], 16);
         assert_eq!(machine["memoryBytes"], 33_554_432_000_u64);
         assert_eq!(machine["governor"], measured(json!("schedutil")));
-        assert_eq!(machine["loadAverage"], json!([0.5, 0.4, 0.3]));
+        assert_eq!(machine["loadAverage"], measured(json!([0.5, 0.4, 0.3])));
         assert_eq!(
             results["run"]["quiet"],
             json!({ "provisional": false, "note": null })
@@ -1374,7 +1397,7 @@ mod tests {
         );
         assert_eq!(
             results["run"]["machine"]["loadAverage"],
-            json!([0.5, 0.4, 0.3])
+            measured(json!([0.5, 0.4, 0.3]))
         );
         assert_eq!(
             results["run"]["quiet"],
@@ -1393,10 +1416,10 @@ mod tests {
                 "note": "Windows keeps no load average: the quiet-machine rule (Design note 27) is unchecked",
             })
         );
-        // Results versions 5 and 6 keep the load average a number triple; the note says it is none.
+        // No zeros that could pass for a reading: none, with Windows' reason.
         assert_eq!(
             results["run"]["machine"]["loadAverage"],
-            json!([0.0, 0.0, 0.0])
+            missing("Windows keeps no load average")
         );
         assert_eq!(
             results["run"]["machine"]["governor"],

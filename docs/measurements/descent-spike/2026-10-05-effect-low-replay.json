@@ -341,7 +341,10 @@
           "vendorId": 4318
         }
       },
-      "loadAverage": [8.59, 16.55, 19.31],
+      "loadAverage": {
+        "reason": null,
+        "value": [8.59, 16.55, 19.31]
+      },
       "logicalCores": 16,
       "memoryBytes": 33555202048,
       "name": "effect"
