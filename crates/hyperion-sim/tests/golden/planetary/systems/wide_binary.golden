@@ -627,7 +627,7 @@ iron = 0x3f91d8bf32962564  # 0.01742838617568533
 rock = 0x3fef713a066b4ed5  # 0.9825716138243147
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406d155981996826  # 232.6671760555484
+t_eq_k = 0x406d3553d93987ab  # 233.66648541675872
 moons: []
 rings: []
 population: NotApplicable
@@ -675,8 +675,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body 0700 B e: Planet about Some(Star(1)), Present
 mass_mearth = 0x3fec0cd216d6cd47  # 0.8765650220943052
 a_m = 0x4245957d87f0a67d  # 185404690401.3007
@@ -3581,7 +3581,7 @@ iron = 0x3f91d8bf32962564  # 0.01742838617568533
 rock = 0x3fef713a066b4ed5  # 0.9825716138243147
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406d155983b411e9  # 232.66717705888667
+t_eq_k = 0x406d3553db5681b3  # 233.66648642440632
 moons: []
 rings: []
 population: NotApplicable
@@ -3629,8 +3629,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body 0700 B e: Planet about Some(Star(1)), Present
 mass_mearth = 0x3fec0cd216d6cd47  # 0.8765650220943052
 a_m = 0x4245957d87f0a67d  # 185404690401.3007

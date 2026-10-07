@@ -745,7 +745,8 @@ impl SurfaceState {
     /// - airless rock 0.11, the Moon's Bond albedo (NASA's fact sheet), and airless ice 0.35, the
     ///   lane's for a Galilean moon's dirty ice, below Ganymede's geometric albedo of 0.43;
     /// - a runaway greenhouse 0.76, Venus's (Haus et al. 2016, Icarus 272, 178);
-    /// - temperate 0.306, Earth's (NASA's fact sheet);
+    /// - temperate 0.294, Earth's (NASA's Earth fact sheet, since its update of 11 January 2024;
+    ///   CERES's EBAF Ed4.0 gives 0.2915, Loeb et al. 2018, J. Climate 31, 895);
     /// - a snowball 0.50, between bare ice's 0.6 (Pierrehumbert et al. 2011) and Titan's hazy 0.27.
     #[must_use]
     pub fn albedo(self, material: SurfaceMaterial) -> BondAlbedo {
@@ -757,7 +758,7 @@ impl SurfaceState {
                 SurfaceMaterial::Ice => 0.35,
             },
             Self::RunawayGreenhouse => 0.76,
-            Self::Temperate => 0.306,
+            Self::Temperate => 0.294,
             Self::Snowball => 0.50,
         })
     }

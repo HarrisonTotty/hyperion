@@ -331,7 +331,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.170,
             r: 0.288,
         },
-        reference_bond: BondAlbedo::from_fraction(0.306),
+        reference_bond: BondAlbedo::from_fraction(0.294),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MARS),
         lunar_lambert_share: 0.5,
@@ -339,7 +339,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
         provisional: false,
         source: "Mallama and Hilton 2018, eq. 6, to 50° (eq. 7, an average of Earth and Mercury, \
                  not used: f is held past 50°); Mallama et al. 2017, Table 7; measured Bond \
-                 albedo 0.250 (NASA's fact sheet), the generator's temperate 0.306",
+                 albedo 0.250 (NASA's fact sheet), the generator's temperate 0.294",
     },
     TemplateRow {
         template: PhaseTemplate::Venus,
@@ -369,15 +369,15 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.215,
             r: 0.210,
         },
-        reference_bond: BondAlbedo::from_fraction(0.306),
+        reference_bond: BondAlbedo::from_fraction(0.294),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_EARTH),
         lunar_lambert_share: 0.0,
         valid_to: Radians::new(144.0 * DEG),
         provisional: false,
         source: "Robinson 2026, PSJ 7, 12, eq. 14 (g = −0.33, f = 0.23), to 144°; p from §5's \
-                 band ratios at f; Bond albedo 0.306 (the temperate state; CERES 0.2915, Loeb et \
-                 al. 2018)",
+                 band ratios at f; Bond albedo 0.294 (the temperate state; NASA's Earth fact \
+                 sheet, 11 January 2024; CERES 0.2915, Loeb et al. 2018)",
     },
     TemplateRow {
         template: PhaseTemplate::Jupiter,
@@ -920,11 +920,11 @@ mod tests {
             assert!(!photometry.provisional(), "{name}");
         }
         // The stated ratios, findings for P14.T13.c and not failures: Mercury's 0.62
-        // (decision-p14-phase-j) and Earth's 0.92 (decision-r07-earth-albedo; Mallama's p gave
-        // 1.86).
+        // (decision-p14-phase-j) and Earth's 0.959 at the temperate 0.294 (decision-p11-t4k-faults;
+        // 0.92 at 0.306, decision-r07-earth-albedo; Mallama's p gave 1.86).
         let ratio = |name| BodyPhotometry::derive(&inputs_of(found(&planets, name))).bond_ratio();
         assert!((ratio("Mercury") - 0.142 * 0.4798 / 0.11).abs() < 0.01);
-        assert!((ratio("Earth") - 0.215 * 1.3116 / 0.306).abs() < 0.01);
+        assert!((ratio("Earth") - 0.215 * 1.3116 / 0.294).abs() < 0.01);
     }
 
     /// Robinson 2026's eq. 14 written out as the paper gives it, independently of the template's
@@ -1060,7 +1060,7 @@ mod tests {
         let temperate = |pressure: f64| {
             BodyPhotometry::derive(&PhotometryInputs {
                 surface_pressure: Some(Pascals::new(pressure)),
-                ..airless(SurfaceMaterial::Rock, SurfaceState::Temperate, 0.306)
+                ..airless(SurfaceMaterial::Rock, SurfaceState::Temperate, 0.294)
             })
             .template()
         };

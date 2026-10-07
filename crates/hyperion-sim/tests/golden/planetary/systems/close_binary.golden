@@ -118,7 +118,7 @@ iron = 0x3f99be4cda4e6ed4  # 0.025140000175823143
 rock = 0x3fef320d992d8c89  # 0.9748599998241768
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406e19a1120fb463  # 240.8009119326335
+t_eq_k = 0x406e3ab998b4b87d  # 241.835155823679
 moons: [0201]
 rings: []
 population: NotApplicable
@@ -166,8 +166,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body 0201 AB c I: Moon(GiantImpact) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3f7520ff9f05f4fb  # 0.005158422966244243
 a_m = 0x41a66a4cf3b25d97  # 188032633.84837028
@@ -1638,7 +1638,7 @@ iron = 0x3f9bdeffda40781f  # 0.027217862793001864
 rock = 0x3fef2108012dfc3f  # 0.9727821372069981
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40709999da2a255d  # 265.6000615736319
+t_eq_k = 0x4070abda64352687  # 266.7408182216827
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -1686,8 +1686,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body e304 BELT 3-4: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f9c87801b1644bf  # 0.027860643056162312
 a_m = 0x42631c7d8456de89  # 656658932406.9542
@@ -2095,7 +2095,7 @@ iron = 0x3fc9f99d1da5c188  # 0.20293010661727018
 rock = 0x3fe98198b8968f9e  # 0.7970698933827298
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406b10f9f51ee500  # 216.5305123904618
+t_eq_k = 0x406b2ebc88ef9af8  # 217.46051451490325
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -2143,8 +2143,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body e402 BELT 4-2: DwarfPlanet about Some(Body(BodyIndex(58368))), Present
 mass_mearth = 0x3fa2fa4851394d6f  # 0.03706575385572363
 a_m = 0x426cf87434f78072  # 995419596732.0139
@@ -2168,7 +2168,7 @@ iron = 0x3fb4999e3da12798  # 0.08046902660967559
 rock = 0x3fed6ccc384bdb0d  # 0.9195309733903244
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406a85c590e6a0cd  # 212.18036694569165
+t_eq_k = 0x406aa2ef15a3f388  # 213.0916851236509
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -2216,8 +2216,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body e403 BELT 4-3: DwarfPlanet about Some(Body(BodyIndex(58368))), Present
 mass_mearth = 0x3f934f6afccd2ec9  # 0.01885764282205463
 a_m = 0x4268ef032c92c430  # 856713421974.1309
@@ -5550,7 +5550,7 @@ iron = 0x3f99be4cda4e6ed4  # 0.025140000175823143
 rock = 0x3fef320d992d8c89  # 0.9748599998241768
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406e19a142bd34d0  # 240.80093514398914
+t_eq_k = 0x406e3ab9c997bea4  # 241.8351791347278
 moons: [0201]
 rings: []
 population: NotApplicable
@@ -5598,8 +5598,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body 0201 AB c I: Moon(GiantImpact) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3f7520ff9f05f4fb  # 0.005158422966244243
 a_m = 0x41a66a4d972778d0  # 188032715.5770936
@@ -7070,7 +7070,7 @@ iron = 0x3f9bdeffda40781f  # 0.027217862793001864
 rock = 0x3fef2108012dfc3f  # 0.9727821372069981
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40709999f50293dd  # 265.6000871754348
+t_eq_k = 0x4070abda7f2b196e  # 266.7408439334457
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -7118,8 +7118,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body e304 BELT 3-4: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f9c87801b1644bf  # 0.027860643056162312
 a_m = 0x42631c7d8456de89  # 656658932406.9542
@@ -7527,7 +7527,7 @@ iron = 0x3fc9f99d1da5c188  # 0.20293010661727018
 rock = 0x3fe98198b8968f9e  # 0.7970698933827298
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406b10fa20e465c4  # 216.5305332623376
+t_eq_k = 0x406b2ebcb4e53c75  # 217.4605354764241
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -7575,8 +7575,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body e402 BELT 4-2: DwarfPlanet about Some(Body(BodyIndex(58368))), Present
 mass_mearth = 0x3fa2fa4851394d6f  # 0.03706575385572363
 a_m = 0x426cf87434f78072  # 995419596732.0139
@@ -7600,7 +7600,7 @@ iron = 0x3fb4999e3da12798  # 0.08046902660967559
 rock = 0x3fed6ccc384bdb0d  # 0.9195309733903244
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406a85c5bbcb0295  # 212.18038739824684
+t_eq_k = 0x406aa2ef40b77e84  # 213.0917056640502
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -7648,8 +7648,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body e403 BELT 4-3: DwarfPlanet about Some(Body(BodyIndex(58368))), Present
 mass_mearth = 0x3f934f6afccd2ec9  # 0.01885764282205463
 a_m = 0x4268ef032c92c430  # 856713421974.1309

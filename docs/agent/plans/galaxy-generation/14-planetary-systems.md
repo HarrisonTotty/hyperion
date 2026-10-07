@@ -1256,10 +1256,11 @@ Solar System values without a generator.
       - 2.89 √p(H₂O) + 1.55 (75.6 K ÷ `T_eq`)² √p(N₂), bar, fitted on Venus, Earth and Titan; Mars
         is the prediction (214 K). Below 100 Pa a body is airless; over 1,394 K, or before P14.T28.a's
         `molten_until`, a magma ocean. Albedos by state: gas envelope 0.34, magma 0.10, airless rock
-        0.11 and ice 0.35, runaway 0.76, temperate 0.306, snowball 0.50. The Solar System table gives
-        Venus 735 K at 58 bar, Earth 288 K at 0.78 bar with 42 Pa of CO₂, Mars 214 K at 0.11 bar
-        (nitrogen: its real 6 mbar of CO₂ is non-thermal loss this model has not), Titan 94 K at
-        1.4 bar, and airless Mercury, Moon, Ganymede and Ceres.
+        0.11 and ice 0.35, runaway 0.76, temperate 0.306 (0.294 since decision-p11-t4k-faults; Risks),
+        snowball 0.50. The Solar System table gives Venus 735 K at 58 bar, Earth 288 K at 0.78 bar
+        with 42 Pa of CO₂, Mars 214 K at 0.11 bar (nitrogen: its real 6 mbar of CO₂ is non-thermal
+        loss this model has not), Titan 94 K at 1.4 bar, and airless Mercury, Moon, Ganymede and
+        Ceres.
 
 #### P14.T14 Rotation and tides
 
@@ -3221,8 +3222,9 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
   Albedos: for every template p_c = p_c,analogue × A_Bond ÷ A_ref, then capped so that p_c q_c ≤ 1,
   where the analogue's p is Table 7's (Earth's Robinson 2026's, below; Ganymede's and Europa's
   above; the Moon's p_V 0.12, NASA's fact sheet). A_ref (`reference_bond`) is the Bond albedo the
-  generator gives the analogue body: moon and mercury 0.11, mars and earth 0.306, venus 0.76, the
-  four giants 0.34, airless_ice 0.35, magma 0.11 (Mercury's curve). snowball takes Europa's measured
+  generator gives the analogue body: moon and mercury 0.11, mars and earth 0.306 (0.294 with the
+  temperate state since decision-p11-t4k-faults), venus 0.76, the four giants 0.34, airless_ice
+  0.35, magma 0.11 (Mercury's curve). snowball takes Europa's measured
   0.68, since the generator would not class Europa as a snowball (decision-p14-phase-j, 9). Each
   row's source keeps the analogue's measured Bond albedo (Mercury 0.088, Mars 0.250, Jupiter 0.343,
   Saturn 0.342, Uranus 0.300, Neptune 0.290). So every Solar System analogue in its own state is
@@ -3348,7 +3350,8 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
   7's; Earth's Robinson 2026's), and Uranus is drawn with Neptune's; a generated airless-ice body
   and a snowball each state a ratio within 5% of 1 (0.43 × 0.80 ÷ 0.35 = 0.98 and 0.99); every
   analogue's stated ratio is asserted and recorded, Mercury's (0.142 × 0.480 ÷ 0.11 = 0.62) and
-  Earth's (0.215 × 1.312 ÷ 0.306 = 0.92) among them; a gas giant at T_eq 300 K is `provisional`, one
+  Earth's (0.215 × 1.312 ÷ 0.306 = 0.92; 0.959 at the temperate 0.294 since
+  decision-p11-t4k-faults) among them; a gas giant at T_eq 300 K is `provisional`, one
   at 120 K is not; p_c q_c ≤ 1 for
   every sampled body;
   two calls agree bit for bit. (c) The section's states by kind and level. (d) A wire-form test per
@@ -3469,6 +3472,9 @@ it:
 - P14.T47.e (Earth after Robinson 2026) rides in the 20 → 21 bump with P11.T4.h and plan 11's
   protostar and build-age fix (decision-r07-earth-albedo); its goldens are blessed at 20 until that
   bump, which only flips the version. It adds no draw or domain tag.
+- P14.T13.c's Bond albedo (the temperate state 0.306 → 0.294, with the `reference_bond` of mars and
+  earth; decision-p11-t4k-faults) rides in the same 20 → 21 bump, blessed at 20 until then. It adds
+  no draw or domain tag.
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
   pulsar-planet probability, `SATELLITE_STABILITY_FRACTION`, the white dwarf pollution fit.
@@ -6633,3 +6639,86 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     would change: 0.282 ÷ 0.294 = 0.959. Against CERES the ratio is 0.967, not the ruling's 0.96.
     The choice is to re-cite 0.306 as the fact sheet's value before 2024, or to move the state to
     0.294 under a later bump (P14.T13.c's owner).
+  - _Resolved_ by decision-p11-t4k-faults (§2.3): the state moves to 0.294 (the next entry). The
+    fact sheet's albedo changed in its update of 11 January 2024; the update of 15 November 2024
+    changed methane only.
+- **P14.T13.c, Earth's Bond albedo from NASA's fact sheet, as built (albedo lane, 2026-10-06).
+  Goldens re-blessed at 20; `GENERATOR_VERSION` not bumped.** The ruling is
+  decision-p11-t4k-faults, §2.3 and §6. The commit is held for the Phase J lane to cherry-pick
+  after P11.T4.k's. The 20 → 21 bump comes after both.
+  - _The change._ The temperate state's Bond albedo goes from 0.306 to 0.294
+    (`SurfaceState::albedo`). The `reference_bond` of the `mars` and `earth` rows goes with it,
+    since A_ref is the generator's albedo for the analogue (decision-p14-phase-j, 9). Each row's
+    source string gives the new figure.
+  - _The citation._ The doc cites NASA's Earth fact sheet "since its update of 11 January 2024".
+    The science check read the sheet and its Wayback Machine snapshots:
+    - the pages of 3 January 2023, 12 September 2023 and 26 December 2023 give 0.306 (the
+      last two stamped 5 June 2023);
+    - the page of 12 January 2024, stamped 11 January 2024, gives 0.294;
+    - the update of 15 November 2024 changed methane only.
+
+    So the ruling's "since November 2024" and the open note's date above are corrected. The sheet
+    names no source for its Bond albedo, so the doc does not call 0.294 CERES's. CERES's EBAF
+    Ed4.0 value, 99.1 ÷ 340.0 W m⁻² = 0.2915 (Loeb et al. 2018, J. Climate 31, 895), stands beside
+    it as a comparison, 0.9% lower. The sheet's black-body temperature of 254.0 K was not updated
+    with the albedo (it needs A = 0.306), so it is not quoted beside 0.294.
+
+  - _p does not change._ For a temperate body A_Bond ÷ A_ref is 0.294 ÷ 0.294, exactly 1, as
+    0.306 ÷ 0.306 was. The Earth and Mars templates keep their rows' p bit for bit. The stated
+    ratios become:
+    - Earth's, 0.215 × 1.3116 ÷ 0.294 = **0.959** (0.95914 in the goldens; 0.922 at 0.306);
+    - Mars's, 0.627 (0.603 at 0.306).
+  - _Temperatures._ A temperate body's T_eq rises by (0.706 ÷ 0.694)^¼, or 0.43%. In the Solar
+    System table:
+    - Earth: T_eq 254.05 → 255.14 K (the `irradiation.rs` example's 255.1 K), T_s 287.98 →
+      289.95 K, and 0.777 → 0.779 bar;
+    - Mars: T_eq 206.03 → 206.91 K, T_s 214.14 → 215.06 K.
+
+    T13.c's greenhouse fit is not refitted. Earth stays well within test (c)'s 8%.
+
+  - _Tests._
+    - `the_table_s_surface_temperatures_are_within_eight_per_cent` takes Earth's albedo, 0.294,
+      and T_eq 255 K (254 K before), with the value in its message.
+    - `the_solar_system_draws_itself` takes Earth's ratio at 0.294.
+    - `the_borrowed_curves_keep_their_ratios` takes 0.294 as its temperate input. It tests the
+      template's choice only.
+  - _Goldens._ `golden_diff.py` against 1e47d16: 6 moved and nothing else. The verdict's "not
+    bumped" is expected.
+    - `planetary/derive_body`: 8 values. These are Earth's and Mars's T_eq, albedo, surface
+      temperature and surface pressure.
+    - Five `planetary/systems` goldens. Each temperate body's block moves `t_eq_k`,
+      `bond_albedo` and `bond_ratio`, and nothing else:
+      - `close_binary`: 8 blocks, 24 values;
+      - `filler_c`, `solar_like` and `wide_binary`: 2 blocks each, on Earth's template;
+      - `m_dwarf_resonant_chain`: 2 blocks, on Mars's template.
+
+      No golden body changes state, and no p moves. Elsewhere in the universe a body near a
+      threshold (retention, the airless pressure, the solidus) may now change state, which is
+      still planetary output.
+
+    - No server golden moves. The sim's and the server's fast suites pass otherwise.
+      - The 7 `sky::luminosity` tests were not run. On this base (without a934837) each builds a
+        2–4 GB table, and the sky reads no planetary code.
+    - The moved goldens and `planetary::derive`'s tests pass on `wasm32-wasip1` too.
+    - The one slow test that holds T_eq to 10⁻³ a year passes, in 189 s:
+      `radius_temperature_and_envelope_are_continuous_across_the_window_slow`.
+  - _Not changed, outside the ruling._ These are for the orchestrator:
+    - The wire example still gives `bond_albedo` 0.306 and `bond_ratio` 0.92153, "the
+      generator's temperate Bond albedo of 0.306". It is in `earth_photometry`
+      (`hyperion-protocol`'s `planetary/record.rs`) and twice in the shared fixture
+      `packages/protocol/fixtures/planetary.json`. These are illustrative values, not goldens.
+    - `irradiation.rs`'s planets test says its black-body temperatures are the sheets'. Earth's
+      255.0 K is right for 0.294, but it is not the sheet's 254.0 K.
+    - The `atmosphere()` doc example still gives Earth's equilibrium temperature as 254 K, the
+      figure at 0.306 (255.1 K now). It is an input there, and the example still passes, with T_s
+      within 2 K of 288 K. At 255 K it would sit near 290 K, at the edge of that bound.
+  - _Reviewed._
+    - The science check confirmed 0.294 and the ratio of 0.959, and corrected the date and the
+      source as above. It could not see Loeb et al. 2018's Table 5 (paywalled). The same 99.1 and
+      340.0 W m⁻² are in Table 4-1 of the CERES EBAF Ed4.1 Data Quality Summary.
+    - The determinism auditor found nothing to fix. The constant is the only change that reaches
+      output: no draw, tag, order or step count moves. Every moved value follows from it
+      bit for bit, and no golden that should have moved stayed put. Its hardening suggestion is
+      left for P14.T13.c's owner: a test that each analogue row's `reference_bond` has the bits
+      of its state's albedo, except magma (Mercury's 0.11) and snowball (Europa's 0.68). Today
+      only the goldens' p would catch the three 0.294 literals drifting apart.

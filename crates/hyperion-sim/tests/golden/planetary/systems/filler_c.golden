@@ -111,7 +111,7 @@ iron = 0x3fc625ab6c849436  # 0.17302458571171692
 rock = 0x3fea769524dedaf2  # 0.826975414288283
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406da9c6f4f92250  # 237.3055367341899
+t_eq_k = 0x406dca647fb7575b  # 238.32476793106875
 moons: [0201]
 rings: []
 population: NotApplicable
@@ -159,8 +159,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body 0201 A c I: Moon(Captured) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3dc39d99df9961a8  # 3.568062160825185e-11
 a_m = 0x41c1db8ddfbc12a5  # 599202751.469319
@@ -2750,7 +2750,7 @@ iron = 0x3fc625ab6c849436  # 0.17302458571171692
 rock = 0x3fea769524dedaf2  # 0.826975414288283
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406da9c7049dabf9  # 237.3055441932227
+t_eq_k = 0x406dca648f6d141a  # 238.3247754221382
 moons: [0201]
 rings: []
 population: NotApplicable
@@ -2798,8 +2798,8 @@ phase_integral_b = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_v = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 phase_integral_r = 0x3ff4fc33d32a5a2d  # 1.311572861542696
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd395810624dd2f  # 0.306
-bond_ratio = 0x3fed7d2c619fe821  # 0.9215299517375152
+bond_albedo = 0x3fd2d0e560418937  # 0.294
+bond_ratio = 0x3feeb14d8a2e4532  # 0.9591434191553729
 body 0201 A c I: Moon(Captured) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3dc39d99df9961a8  # 3.568062160825185e-11
 a_m = 0x41c1db8ddfbc12a5  # 599202751.469319
