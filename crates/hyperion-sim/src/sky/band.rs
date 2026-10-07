@@ -62,13 +62,26 @@
 //!
 //! Every texel is a function of its own ray and of the overflow stars that fall in it, added in the
 //! census's order, so a face computed in any split of its rows gives the same bits.
+//!
+//! **The march and the sums** (R06.T9.f; decided 2026-10-06, `decision-r06-t9b-band.md`, item 7).
+//! A request's band is marched once and summed for each of its replies, which differ only in the
+//! radii to which their census is complete (R06.T8.i, T11.d). [`march_rows`] marches each ray once,
+//! with every radius a reply can state (each reply's [`CompleteTo`]) a node of it, and keeps, per
+//! layer and radius, the five sums of a reply complete to that radius: the light fainter than the
+//! cut within the radius, run from the first node, plus all of the light beyond it, run from the
+//! radius out. Both are summed node by node in distance order, so each radius's sums are those a
+//! march of that radius alone takes over the same nodes, bit for bit, whatever other radii the
+//! march keeps. A reply's texels therefore depend, within the quadrature, on the other radii of
+//! its request, which are nodes of every ray: all of one request's replies share their nodes.
+//! [`sum_rows`] then adds one reply's sums over the layers and the census's overflow points,
+//! reading no profile and no luminosity table. [`band_rows`] is the march at its one reply's
+//! radii, then its sum.
 
-use std::cmp::Ordering;
 use std::ops::Range;
 
 use core::num::NonZeroU32;
 
-use crate::coords::{GalacticDisplacement, ROOT_HALF_WIDTH_LY, UnitVector};
+use crate::coords::{GalacticDisplacement, GalacticPosition, ROOT_HALF_WIDTH_LY, UnitVector};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::gas::extinction::{NoiseMode, Quality, profile};
@@ -329,7 +342,8 @@ impl Default for BandSpec {
 /// fainter than the cut, beyond it all of the layer's light.
 ///
 /// Until the census states its own (R06.T8.i), a census is complete to its plan's caps
-/// ([`CompleteTo::of_caps`]); until R06.T7.b, one radius a layer.
+/// ([`CompleteTo::of_caps`]); until R06.T7.b, one radius a layer. Each reply of a request states
+/// its own, and one [`march_rows`] keeps every reply's radii (R06.T9.f).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CompleteTo {
     /// Each layer's radius, ly, in [`CAPPED_LAYERS`]' order: 0 for nowhere, +∞ for everywhere.
@@ -345,7 +359,7 @@ impl CompleteTo {
             radii_ly: CAPPED_LAYERS.map(|layer| {
                 caps.iter()
                     .find(|cap| cap.layer() == layer)
-                    .map_or(0.0, |cap| cap.radius().value().max(0.0))
+                    .map_or(0.0, |cap| above_zero_or_zero(cap.radius().value()))
             }),
         }
     }
@@ -377,6 +391,13 @@ impl CompleteTo {
             .position(|&l| l == layer)
             .map_or(LightYears::ZERO, |i| LightYears::new(self.radii_ly[i]))
     }
+}
+
+/// `radius` where it is above zero, and +0 otherwise, of either sign: a march and its sums find a
+/// radius by its bits (R06.T9.f), and `f64::max` may keep −0.
+#[must_use]
+fn above_zero_or_zero(radius: f64) -> f64 {
+    if radius > 0.0 { radius } else { 0.0 }
 }
 
 /// One texel of the band (Design note 15; the wire's 12 bytes, Design note 17, before encoding).
@@ -588,7 +609,181 @@ fn distance_to_edge_ly(origin_ly: [f64; 3], along: [f64; 3]) -> f64 {
     if exit.is_finite() { exit.max(0.0) } else { 0.0 }
 }
 
-/// What a band call holds for every ray: the components, each layer's share of their systems, the
+/// The radii a march keeps a reply's sums at, and the radii its rays take as nodes.
+#[derive(Debug, Clone, PartialEq)]
+struct Edges {
+    /// Per layer of [`CAPPED_LAYERS`], each radius to which a reply is complete, ly, ascending and
+    /// each once: 0 for nowhere, +∞ for everywhere.
+    kept: [Vec<f64>; BAND_LAYERS],
+    /// The radii every ray inside the query's cone takes as nodes, ly, ascending and each once:
+    /// every layer's kept radii (and, in the tests, more).
+    nodes: Vec<f64>,
+}
+
+impl Edges {
+    /// The radii of `replies`, each layer's and every layer's.
+    ///
+    /// # Panics
+    ///
+    /// If `replies` holds no reply.
+    #[must_use]
+    fn of_replies(replies: impl IntoIterator<Item = CompleteTo>) -> Self {
+        let mut kept: [Vec<f64>; BAND_LAYERS] = Default::default();
+        for reply in replies {
+            for (radii, &radius) in kept.iter_mut().zip(&reply.radii_ly) {
+                radii.push(radius);
+            }
+        }
+        assert!(
+            !kept[0].is_empty(),
+            "a march keeps the radii of one reply at least"
+        );
+        for radii in &mut kept {
+            ascending_once(radii);
+        }
+        let mut nodes: Vec<f64> = kept.iter().flatten().copied().collect();
+        ascending_once(&mut nodes);
+        Self { kept, nodes }
+    }
+}
+
+/// Sorts `radii` ascending and keeps each once.
+fn ascending_once(radii: &mut Vec<f64>) {
+    radii.sort_by(f64::total_cmp);
+    radii.dedup_by(|left, right| left.total_cmp(right).is_eq());
+}
+
+/// Each layer's first slot in a ray's sums, for each layer's `kept` radii in turn, then the slots
+/// a ray holds.
+#[must_use]
+fn slot_starts<T: AsRef<[f64]>>(kept: &[T; BAND_LAYERS]) -> [usize; BAND_LAYERS + 1] {
+    let mut starts = [0; BAND_LAYERS + 1];
+    for (l, radii) in kept.iter().enumerate() {
+        starts[l + 1] = starts[l] + radii.as_ref().len();
+    }
+    starts
+}
+
+/// How a ray's texel stands against its query's cone, the one place a ray's region is decided: a
+/// query with a cone is complete only inside it, where its census lists stars (R06.T8.k).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    /// Inside the cone, or no cone: complete to each reply's radii.
+    Inside,
+    /// Outside the cone: complete nowhere, all of the light, whatever a reply's radii.
+    Outside,
+}
+
+impl Reach {
+    /// The reach of the ray along `direction` for a cone of axis and cosine `region`, if any:
+    /// inside where its cosine with the axis is at least the cone's, the value
+    /// [`Cone::holds`](super::census::Cone::holds) tests the census's stars against.
+    #[must_use]
+    fn of(region: Option<(UnitVector, f64)>, direction: UnitVector) -> Self {
+        if region.is_some_and(|(axis, cos)| direction.dot(&axis) < cos) {
+            Self::Outside
+        } else {
+            Self::Inside
+        }
+    }
+}
+
+/// The radius of a ray outside its query's cone: complete nowhere.
+const NOWHERE_LY: [f64; 1] = [0.0];
+
+/// A face's rows of a band, marched (R06.T9.f; see the [module](self) documentation): each ray's
+/// five sums ([`Sums`]) of a reply complete to each radius the march keeps, per layer, from which
+/// [`sum_rows`] gives any of those replies' texels.
+///
+/// Its heap is the rays' slots, 40 bytes for each layer's radius and ray
+/// ([`heap_bytes`](Self::heap_bytes)): at 64² texels a face, with six layers' one radius each, some
+/// 5.9 MB for the band.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BandMarch {
+    spec: BandSpec,
+    face: CubeFace,
+    rows: Range<u16>,
+    /// The observer's position, from which the overflow's stars are placed in their texels.
+    origin: GalacticPosition,
+    /// Per layer of [`CAPPED_LAYERS`], the radii it keeps, ly, ascending and each once.
+    kept: [Vec<f64>; BAND_LAYERS],
+    /// Each ray's slots, in the band's order (row by row from the top, each row from its left):
+    /// each layer's radii in turn, each slot the sums of a reply complete to that radius in that
+    /// layer, in L☉,V × `lux_per_v0` per ly², before K.
+    sums: Vec<Sums>,
+}
+
+impl BandMarch {
+    /// The band's resolution.
+    #[must_use]
+    pub const fn spec(&self) -> BandSpec {
+        self.spec
+    }
+
+    /// The face.
+    #[must_use]
+    pub const fn face(&self) -> CubeFace {
+        self.face
+    }
+
+    /// The rows marched, from the top.
+    #[must_use]
+    pub fn rows(&self) -> Range<u16> {
+        self.rows.clone()
+    }
+
+    /// Whether the march keeps every layer's radius of `complete_to`, so that [`sum_rows`] can sum
+    /// a reply complete to it.
+    #[must_use]
+    pub fn holds(&self, complete_to: &CompleteTo) -> bool {
+        self.kept
+            .iter()
+            .zip(&complete_to.radii_ly)
+            .all(|(radii, radius)| radii.binary_search_by(|r| r.total_cmp(radius)).is_ok())
+    }
+
+    /// The bytes the march holds on the heap.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.sums.capacity() * size_of::<Sums>()
+            + self
+                .kept
+                .iter()
+                .map(|radii| radii.capacity() * size_of::<f64>())
+                .sum::<usize>()
+    }
+
+    /// The slots a ray holds.
+    #[must_use]
+    fn slots(&self) -> usize {
+        slot_starts(&self.kept)[BAND_LAYERS]
+    }
+
+    /// The slot of each layer's radius of `complete_to` in a ray's sums.
+    ///
+    /// # Panics
+    ///
+    /// If the march does not keep a layer's radius.
+    #[must_use]
+    fn slots_of(&self, complete_to: &CompleteTo) -> [usize; BAND_LAYERS] {
+        let starts = slot_starts(&self.kept);
+        std::array::from_fn(|l| {
+            let radius = complete_to.radii_ly[l];
+            let at = self.kept[l]
+                .binary_search_by(|r| r.total_cmp(&radius))
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "complete to {radius} ly in layer {:?} is not a radius the march keeps: \
+                         {:?}",
+                        CAPPED_LAYERS[l], self.kept[l]
+                    )
+                });
+            starts[l] + at
+        })
+    }
+}
+
+/// What a march holds for every ray: the components, each layer's share of their systems, the
 /// reddening curves that dim every node, and the ray's scratch buffers.
 struct Rays {
     components: Vec<ComponentId>,
@@ -598,6 +793,10 @@ struct Rays {
     nodes: Vec<LightYears>,
     a_v: Vec<Magnitudes>,
     modifiers: Vec<GasModifier>,
+    /// A ray's slots: the light fainter than the cut within each radius, from the first node.
+    within: Vec<Sums>,
+    /// A ray's slots: all of the light beyond each radius, from the radius out.
+    beyond: Vec<Sums>,
 }
 
 /// One layer's photopic light sums at one node, per ly³: of its stars fainter than the cut, and of
@@ -608,26 +807,38 @@ struct NodeLight {
     all: [f64; 4],
 }
 
-/// Where a node lies against a layer's complete-to radius, which is a node of its own.
+/// Which of a layer's light a node needs: the light fainter than the cut, at the nodes out to the
+/// layer's farthest radius, and all of it, at the nodes from its nearest radius on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Side {
-    /// Within it: the intervals on both sides take the light fainter than the cut.
-    Within,
-    /// At it: the interval ending here takes the fainter light, the one starting here all of it.
-    At,
-    /// Beyond it: the intervals on both sides take all of the light.
-    Beyond,
+struct Needs {
+    fainter: bool,
+    all: bool,
 }
 
-impl Side {
-    /// The side of a node `distance_ly` out against a radius of `radius_ly` (+∞ for everywhere).
+impl Needs {
+    /// What a node `distance_ly` out needs of a layer that keeps the radii `radii_ly`, ascending
+    /// and not empty.
     #[must_use]
-    fn of(distance_ly: f64, radius_ly: f64) -> Self {
-        match distance_ly.total_cmp(&radius_ly) {
-            Ordering::Less => Self::Within,
-            Ordering::Equal => Self::At,
-            Ordering::Greater => Self::Beyond,
+    fn of(distance_ly: f64, radii_ly: &[f64]) -> Self {
+        let nearest = radii_ly.first().expect("a layer keeps one radius at least");
+        let farthest = radii_ly.last().expect("a layer keeps one radius at least");
+        Self {
+            fainter: distance_ly <= *farthest,
+            all: distance_ly >= *nearest,
         }
+    }
+}
+
+/// The trapezoid rule's sums over an interval of `width` between the sums `left` and `right`.
+#[must_use]
+fn trapezoid(left: Sums, right: Sums, width: f64) -> Sums {
+    std::array::from_fn(|k| f64::midpoint(left[k], right[k]) * width)
+}
+
+/// Adds `more` to `sums`, sum by sum.
+fn add_to(sums: &mut Sums, more: Sums) {
+    for (sum, value) in sums.iter_mut().zip(more) {
+        *sum += value;
     }
 }
 
@@ -651,12 +862,14 @@ impl Rays {
             nodes: Vec::new(),
             a_v: Vec::new(),
             modifiers: Vec::new(),
+            within: Vec::new(),
+            beyond: Vec::new(),
         }
     }
 
     /// A ray's distance nodes to `edge_ly`: geometric from [`FIRST_NODE_LY`], `per_decade` a
-    /// decade, then the edge, and every complete-to radius between, ascending and each once.
-    fn place_nodes(&mut self, edge_ly: f64, radii_ly: &[f64; BAND_LAYERS], per_decade: u16) {
+    /// decade, then the edge, and every radius of `radii_ly` between, ascending and each once.
+    fn place_nodes(&mut self, edge_ly: f64, radii_ly: &[f64], per_decade: u16) {
         self.nodes.clear();
         let per_decade = f64::from(per_decade);
         for step in 0_u32.. {
@@ -679,12 +892,11 @@ impl Rays {
     }
 
     /// Layer `l`'s light at `point`, whose components' densities are `densities`, for light `ago`
-    /// old: the light fainter than `limit` unless the node is beyond the layer's radius, and all of
-    /// it unless the node is within it.
+    /// old: the light fainter than `limit` and all of it, each where `needs` asks it.
     #[expect(
         clippy::too_many_arguments,
         reason = "one node's inputs: the tables, the layer, the point and its densities, the limit, \
-                  the light's age and the node's side of the layer's radius"
+                  the light's age and what the node needs of the layer"
     )]
     #[must_use]
     fn layer_light(
@@ -695,10 +907,9 @@ impl Rays {
         densities: &[f64; MAX_COMPONENTS],
         limit: Magnitudes,
         ago: Span,
-        side: Side,
+        needs: Needs,
     ) -> NodeLight {
         let layer = CAPPED_LAYERS[l];
-        let (fainter, all) = (side != Side::Beyond, side != Side::Within);
         let mut light = NodeLight::default();
         for &id in &self.components {
             let systems = densities[id.index()] * self.shares[l][id.index()];
@@ -706,13 +917,13 @@ impl Rays {
                 continue;
             }
             let function = tables.get_at(id, layer, point);
-            if fainter {
+            if needs.fainter {
                 let sums = function.colour_sums_fainter_than(limit, ago);
                 for (sum, value) in light.fainter.iter_mut().zip(sums) {
                     *sum += systems * value;
                 }
             }
-            if all {
+            if needs.all {
                 let sums =
                     function.colour_sums_fainter_than(Magnitudes::new(f64::NEG_INFINITY), ago);
                 for (sum, value) in light.all.iter_mut().zip(sums) {
@@ -723,26 +934,96 @@ impl Rays {
         light
     }
 
-    /// The five light sums along `direction` ([`Sums`], in L☉,V × `lux_per_v0` per ly², before
-    /// K), each node's light reddened by the call's dust.
-    fn light_along(
+    /// Marches the ray along `direction` into `out`, its slots in `edges`' order (each layer's kept
+    /// radii in turn): for each, the five sums ([`Sums`], in L☉,V × `lux_per_v0` per ly², before
+    /// K) of the light fainter than the cut out to the radius plus all of the light beyond it, each
+    /// node's light reddened by the call's dust. A ray outside the cone (`reach`) is complete
+    /// nowhere, so each of its slots holds all of its layer's light.
+    ///
+    /// Within a layer the light fainter than the cut is summed from the first node, and each
+    /// radius's light beyond it from the radius out, interval by interval in distance order, so a
+    /// radius's slot is the bits a march keeping it alone takes over the same nodes.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one ray's inputs: the galaxy, the job's context, the query, the direction, the \
+                  radii, the ray's reach, the band's resolution and its slots"
+    )]
+    fn march(
         &mut self,
         galaxy: &Galaxy,
         ctx: &mut SkyContext<'_>,
         query: &SkyQuery,
         direction: UnitVector,
-        radii_ly: &[f64; BAND_LAYERS],
+        edges: &Edges,
+        reach: Reach,
         spec: BandSpec,
-    ) -> Sums {
+        out: &mut [Sums],
+    ) {
+        // The radii this ray keeps per layer, and the radii its nodes take.
+        let (kept, node_radii): ([&[f64]; BAND_LAYERS], &[f64]) = match reach {
+            Reach::Inside => (
+                std::array::from_fn(|l| edges.kept[l].as_slice()),
+                &edges.nodes,
+            ),
+            Reach::Outside => ([NOWHERE_LY.as_slice(); BAND_LAYERS], &[]),
+        };
+        let starts = slot_starts(&kept);
+        self.within.clear();
+        self.within.resize(starts[BAND_LAYERS], [0.0; 5]);
+        self.beyond.clear();
+        self.beyond.resize(starts[BAND_LAYERS], [0.0; 5]);
+        self.march_slots(galaxy, ctx, query, direction, &kept, node_radii, spec);
+        let ours = slot_starts(&edges.kept);
+        for l in 0..BAND_LAYERS {
+            let theirs = &mut out[ours[l]..ours[l + 1]];
+            let slots = starts[l]..starts[l + 1];
+            let mut totals = self.within[slots.clone()]
+                .iter()
+                .zip(&self.beyond[slots])
+                .map(|(within, beyond)| std::array::from_fn(|k| within[k] + beyond[k]));
+            match reach {
+                Reach::Inside => {
+                    for (slot, total) in theirs.iter_mut().zip(totals) {
+                        *slot = total;
+                    }
+                }
+                Reach::Outside => {
+                    let nowhere: Sums = totals.next().expect("a layer keeps one radius");
+                    theirs.fill(nowhere);
+                }
+            }
+        }
+    }
+
+    /// The node-by-node march of one ray into [`Rays::within`] and [`Rays::beyond`], whose slots
+    /// are each layer's `kept` radii in turn and start at zero; `node_radii` are the radii taken
+    /// as nodes. Each interval lies within or beyond each radius, since a radius is a node, or
+    /// nearer than the first, or past the last. A radius's slot stops taking the fainter light,
+    /// and starts taking all of it, at the first interval beyond it.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one ray's inputs: the galaxy, the job's context, the query, the direction, the \
+                  radii kept and taken as nodes, and the band's resolution"
+    )]
+    fn march_slots(
+        &mut self,
+        galaxy: &Galaxy,
+        ctx: &mut SkyContext<'_>,
+        query: &SkyQuery,
+        direction: UnitVector,
+        kept: &[&[f64]; BAND_LAYERS],
+        node_radii: &[f64],
+        spec: BandSpec,
+    ) {
         let observer = query.observer();
         let origin = observer.position();
         let from = origin.to_light_years_f64();
         let along = direction.components();
         let edge_ly = distance_to_edge_ly(from, along);
         if edge_ly <= FIRST_NODE_LY {
-            return [0.0; 5];
+            return;
         }
-        self.place_nodes(edge_ly, radii_ly, spec.nodes_per_decade());
+        self.place_nodes(edge_ly, node_radii, spec.nodes_per_decade());
         let end = origin
             .translated(GalacticDisplacement::new(
                 along.map(|c| c * edge_ly * METRES_PER_LIGHT_YEAR),
@@ -764,10 +1045,14 @@ impl Rays {
         );
         let tables = ctx.tables;
         let cut = query.cut().value();
+        let starts = slot_starts(kept);
         let mut densities = [0.0; MAX_COMPONENTS];
-        let mut sums = [0.0; 5];
-        // Each layer's dimmed light at the previous node, on the side its next interval takes.
-        let mut before = [[0.0; 5]; BAND_LAYERS];
+        // Per layer: the fainter light run from the first node, how many of its radii the intervals
+        // so far have passed (each slot holding the fainter light as it stood there), and the
+        // dimmed light at the previous node.
+        let mut fainter = [[0.0; 5]; BAND_LAYERS];
+        let mut passed = [0_usize; BAND_LAYERS];
+        let mut before = [([0.0; 5], [0.0; 5]); BAND_LAYERS];
         let mut previous: Option<f64> = None;
         for (node, extinction) in self.nodes.iter().zip(&self.a_v) {
             let distance = node.value();
@@ -786,31 +1071,264 @@ impl Rays {
             // The census cuts each star's own V; the band, the solar point's (R06.T8.k).
             let limit =
                 Magnitudes::new(cut - distance_modulus(distance) - through.v_extinction().value());
-            for (l, &radius) in radii_ly.iter().enumerate() {
-                let side = Side::of(distance, radius);
-                let light = self.layer_light(tables, l, &point, &densities, limit, ago, side);
-                let (ending, starting) = match side {
-                    Side::Within => (light.fainter, None),
-                    Side::At => (light.fainter, Some(light.all)),
-                    Side::Beyond => (light.all, None),
-                };
-                let ending = dimmed(ending, &through);
+            for (l, radii) in kept.iter().enumerate() {
+                let needs = Needs::of(distance, radii);
+                let light = self.layer_light(tables, l, &point, &densities, limit, ago, needs);
+                let here = (
+                    if needs.fainter {
+                        dimmed(light.fainter, &through)
+                    } else {
+                        [0.0; 5]
+                    },
+                    if needs.all {
+                        dimmed(light.all, &through)
+                    } else {
+                        [0.0; 5]
+                    },
+                );
                 if let Some(last) = previous {
                     let width = distance - last;
-                    for ((sum, left), right) in sums.iter_mut().zip(before[l]).zip(ending) {
-                        *sum += f64::midpoint(left, right) * width;
+                    let slots = starts[l]..starts[l + 1];
+                    // The radii this interval lies beyond take the fainter light as it stands.
+                    while passed[l] < radii.len() && radii[passed[l]] < distance {
+                        self.within[slots.start + passed[l]] = fainter[l];
+                        passed[l] += 1;
+                    }
+                    if needs.fainter {
+                        add_to(&mut fainter[l], trapezoid(before[l].0, here.0, width));
+                    }
+                    if passed[l] > 0 {
+                        let all = trapezoid(before[l].1, here.1, width);
+                        for beyond in &mut self.beyond[slots.start..slots.start + passed[l]] {
+                            add_to(beyond, all);
+                        }
                     }
                 }
-                before[l] = starting.map_or(ending, |all| dimmed(all, &through));
+                before[l] = here;
             }
             previous = Some(distance);
         }
-        sums
+        // The radii at or past the ray's last node take all of the fainter light.
+        for (l, radii) in kept.iter().enumerate() {
+            for slot in &mut self.within[starts[l] + passed[l]..starts[l] + radii.len()] {
+                *slot = fainter[l];
+            }
+        }
     }
 }
 
+/// Marches rows `rows` (from the top) of `face` once, keeping each reply of `replies` (R06.T9.f;
+/// see the [module](self) documentation): every radius to which a reply is complete, in any layer,
+/// is a node of each ray, and each layer's sums are kept at each of its radii, so that
+/// [`sum_rows`] gives any of the replies' texels from the march alone.
+///
+/// The light is that of [`band_rows`]: within a layer's radius, the light fainter than `query`'s
+/// cut at M<sub>V</sub> = cut − DM − v☉ A<sub>V</sub> (R06.T8.k), beyond it all of the layer's
+/// light, each node's light reddened by the solar point's curves (R06.T9.e). A query with a cone is
+/// complete only within it: every ray outside the cone holds all of the light, whatever a reply's
+/// radii. `ctx` supplies the luminosity tables, the gas modifiers and the noise cache of the rays'
+/// profiles; its other fields are not read.
+///
+/// Each ray is a function of its own direction, so the marches of any split of a face's rows, each
+/// summed, give the texels of one march over the face, bit for bit; the noise cache changes the
+/// cost, never a value.
+///
+/// # Panics
+///
+/// If `replies` is empty, or `rows` reaches past the face's last row.
+///
+/// # Examples
+///
+/// A request's replies, nearest first, are each complete to a further radius: one march serves
+/// them all (`no_run`: the tables take a minute or more to build).
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::band::{BandSpec, CompleteTo, CubeFace, march_rows, sum_rows};
+/// use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap};
+/// use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyCensus, SkyContext, SkyQuery};
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::{LightYears, Magnitudes};
+///
+/// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?;
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let offsets = CellOffsets::build(&galaxy);
+/// let mut ctx = SkyContext {
+///     tables: &tables,
+///     envelope: &envelope,
+///     offsets: &offsets,
+///     noise: NoiseCache::with_capacity(1 << 16),
+///     cells: &NoSkyCellCache,
+///     sources: &[],
+///     modifiers: &NoModifiers,
+/// };
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let query = SkyQuery::builder(Observer::new(sun, UniverseTime::EPOCH)?, Magnitudes::new(8.0))
+///     .build()?;
+/// // Two replies: complete to 500 ly, then to 1,000 ly, in every layer.
+/// let within = |ly: f64| {
+///     let caps: Vec<LayerCap> =
+///         CAPPED_LAYERS.iter().map(|&l| LayerCap::forced(l, LightYears::new(ly))).collect();
+///     CompleteTo::of_caps(&caps)
+/// };
+/// let (first, last) = (within(500.0), within(1_000.0));
+/// let spec = BandSpec::STANDARD;
+/// let march = march_rows(&galaxy, &mut ctx, &query, [first, last], &spec, CubeFace::PosZ, 0..64);
+/// assert!(march.holds(&first) && march.holds(&last));
+/// // Each reply's band from the one march, with that reply's census (empty here).
+/// for reply in [first, last] {
+///     let mut face = Vec::new();
+///     sum_rows(&march, &SkyCensus::empty(), &reply, &mut face);
+///     assert_eq!(face.len(), 64 * 64);
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn march_rows(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    query: &SkyQuery,
+    replies: impl IntoIterator<Item = CompleteTo>,
+    spec: &BandSpec,
+    face: CubeFace,
+    rows: Range<u16>,
+) -> BandMarch {
+    march_rows_through(
+        galaxy,
+        ctx,
+        query,
+        Edges::of_replies(replies),
+        *spec,
+        face,
+        rows,
+        &solar_colour().reddening(),
+    )
+}
+
+/// [`march_rows`] at `edges`, with each node's light reddened by the curves `dust`: the solar
+/// point's for the band, a grey dust's for the tests' unreddened march.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "march_rows' inputs, its radii resolved, and the dust's ratios"
+)]
+fn march_rows_through(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    query: &SkyQuery,
+    edges: Edges,
+    spec: BandSpec,
+    face: CubeFace,
+    rows: Range<u16>,
+    dust: &Reddening,
+) -> BandMarch {
+    let side = spec.face_texels();
+    assert!(
+        rows.end <= side,
+        "rows {rows:?} reach past a face of {side} rows"
+    );
+    debug_assert!(
+        edges.kept.iter().flatten().all(|radius| edges
+            .nodes
+            .binary_search_by(|r| r.total_cmp(radius))
+            .is_ok()),
+        "every radius a march keeps is a node of its rays: {edges:?}"
+    );
+    let slots = slot_starts(&edges.kept)[BAND_LAYERS];
+    let mut sums = vec![[0.0; 5]; rows.len() * usize::from(side) * slots];
+    if !sums.is_empty() {
+        let region = query
+            .cone()
+            .map(|cone| (cone.axis(), cone.cos_half_angle()));
+        let mut rays = Rays::new(galaxy, dust);
+        let texels = rows
+            .clone()
+            .flat_map(|row| (0..side).map(move |column| (row, column)));
+        for ((row, column), out) in texels.zip(sums.chunks_exact_mut(slots)) {
+            let direction = spec.texel_direction(face, row, column);
+            let reach = Reach::of(region, direction);
+            rays.march(galaxy, ctx, query, direction, &edges, reach, spec, out);
+        }
+    }
+    BandMarch {
+        spec,
+        face,
+        rows,
+        origin: *query.observer().position(),
+        kept: edges.kept,
+        sums,
+    }
+}
+
+/// The texels of a reply complete to `complete_to`, from `march`, appended to `out` row by row,
+/// each row from its left (R06.T9.f; see the [module](self) documentation): each ray's sums at
+/// each layer's radius, over the layers, then `census`'s overflow, the stars it kept past `n_max`,
+/// as points in their texels, each reddened by its own colour (R06.T9.e). It reads no profile and
+/// no luminosity table.
+///
+/// `census` is the reply's census, of the march's query, and `complete_to` the radii to which it is
+/// complete. A march of any split of a face's rows, each summed, gives one march's texels over the
+/// face, bit for bit, and a reply's texels are those of a march that keeps that reply alone over
+/// the same nodes.
+///
+/// # Panics
+///
+/// If the march does not keep a layer's radius of `complete_to` ([`BandMarch::holds`]).
+pub fn sum_rows(
+    march: &BandMarch,
+    census: &SkyCensus,
+    complete_to: &CompleteTo,
+    out: &mut Vec<BandTexel>,
+) {
+    let slots = march.slots_of(complete_to);
+    if march.sums.is_empty() {
+        return;
+    }
+    let (spec, face, rows) = (march.spec, march.face, &march.rows);
+    let width = usize::from(spec.face_texels());
+    let to_luminance = light_to_lux_ly2();
+    let mut texels: Vec<Sums> = march
+        .sums
+        .chunks_exact(march.slots())
+        .map(|ray| {
+            let mut light = [0.0; 5];
+            for &slot in &slots {
+                add_to(&mut light, ray[slot]);
+            }
+            light.map(|v| v * to_luminance)
+        })
+        .collect();
+    // The overflow, as points: each star's five sums over its texel's solid angle, reddened by its
+    // own colour, added in the census's order, whatever the split of the rows.
+    for star in census.overflow() {
+        let Some((on, row, column)) =
+            spec.texel_of(march.origin.displacement_to(star.apparent()).metres())
+        else {
+            continue;
+        };
+        if on != face || !rows.contains(&row) {
+            continue;
+        }
+        let omega = spec.texel_solid_angle_sr(row, column);
+        let at = usize::from(row - rows.start) * width + usize::from(column);
+        let light = point_lux(star.colour(), star.v(), star.a_v());
+        for (sum, lux) in texels[at].iter_mut().zip(light) {
+            *sum += lux / omega;
+        }
+    }
+    out.extend(texels.into_iter().map(BandTexel::of_sums));
+}
+
 /// The band's texels of rows `rows` (from the top) of `face`, appended to `out` row by row, each
-/// row from its left (Design notes 14 and 15; see the [module](self) documentation).
+/// row from its left (Design notes 14 and 15; see the [module](self) documentation): the march of
+/// those rows at `complete_to`'s radii ([`march_rows`]), then its sum ([`sum_rows`]).
 ///
 /// `census` is the census the band completes and `complete_to` the radii to which it is complete:
 /// within them the band holds the light fainter than `query`'s cut, beyond them all of the light,
@@ -926,54 +1444,17 @@ fn band_rows_through(
     dust: &Reddening,
     out: &mut Vec<BandTexel>,
 ) {
-    let side = spec.face_texels();
-    assert!(
-        rows.end <= side,
-        "rows {rows:?} reach past a face of {side} rows"
+    let march = march_rows_through(
+        galaxy,
+        ctx,
+        query,
+        Edges::of_replies([*complete_to]),
+        spec,
+        face,
+        rows,
+        dust,
     );
-    if rows.is_empty() {
-        return;
-    }
-    let width = usize::from(side);
-    let to_luminance = light_to_lux_ly2();
-    let cone = query
-        .cone()
-        .map(|cone| (cone.axis(), cone.cos_half_angle()));
-    let mut rays = Rays::new(galaxy, dust);
-    let mut texels: Vec<Sums> = Vec::with_capacity(rows.len() * width);
-    for row in rows.clone() {
-        for column in 0..side {
-            let direction = spec.texel_direction(face, row, column);
-            let outside_cone = cone.is_some_and(|(axis, cos)| direction.dot(&axis) < cos);
-            let radii = if outside_cone {
-                CompleteTo::nowhere().radii_ly
-            } else {
-                complete_to.radii_ly
-            };
-            let light = rays.light_along(galaxy, ctx, query, direction, &radii, spec);
-            texels.push(light.map(|v| v * to_luminance));
-        }
-    }
-    // The overflow, as points: each star's five sums over its texel's solid angle, reddened by its
-    // own colour, added in the census's order, whatever the split of the rows.
-    let origin = query.observer().position();
-    for star in census.overflow() {
-        let Some((on, row, column)) =
-            spec.texel_of(origin.displacement_to(star.apparent()).metres())
-        else {
-            continue;
-        };
-        if on != face || !rows.contains(&row) {
-            continue;
-        }
-        let omega = spec.texel_solid_angle_sr(row, column);
-        let at = usize::from(row - rows.start) * width + usize::from(column);
-        let light = point_lux(star.colour(), star.v(), star.a_v());
-        for (sum, lux) in texels[at].iter_mut().zip(light) {
-            *sum += lux / omega;
-        }
-    }
-    out.extend(texels.into_iter().map(BandTexel::of_sums));
+    sum_rows(&march, census, complete_to, out);
 }
 
 #[cfg(test)]
@@ -1506,6 +1987,9 @@ mod tests {
             assert_eq!(complete.radius(layer), LightYears::ZERO, "{layer:?}");
         }
         assert_eq!(CompleteTo::of_caps(&[]), CompleteTo::nowhere());
+        // A radius at zero of either sign is +0, so a march finds it by its bits (R06.T9.f).
+        let signed = CompleteTo::of_caps(&[LayerCap::forced(Layer::B, LightYears::new(-0.0))]);
+        assert_eq!(bits(signed.radius(Layer::B).value()), bits(0.0));
         for layer in CAPPED_LAYERS {
             assert!(CompleteTo::everywhere().radius(layer).value().is_infinite());
         }
@@ -1943,6 +2427,299 @@ mod tests {
             totals[1],
             totals[0]
         );
+    }
+
+    /// Replies a march near the Sun keeps: complete nowhere; to 50, 100 and 400 ly in every layer;
+    /// to a final reply's caps, each layer its own (A's, B's and the brown dwarfs' within 400 ly,
+    /// and E's 50,000 ly beyond the root cube's edge on the rays towards +Y, which end 39,536 ly
+    /// out); and everywhere.
+    fn replies_near_the_sun() -> [CompleteTo; 6] {
+        let caps: Vec<LayerCap> = [
+            (Layer::A, 70.0),
+            (Layer::B, 150.0),
+            (Layer::C, 3_000.0),
+            (Layer::D, 4_300.0),
+            (Layer::E, 50_000.0),
+            (Layer::BrownDwarf, 30.0),
+        ]
+        .into_iter()
+        .map(|(layer, radius)| LayerCap::forced(layer, LightYears::new(radius)))
+        .collect();
+        [
+            CompleteTo::nowhere(),
+            complete_within(50.0),
+            complete_within(100.0),
+            complete_within(400.0),
+            CompleteTo::of_caps(&caps),
+            CompleteTo::everywhere(),
+        ]
+    }
+
+    /// `sum_rows` at every radius a march keeps equals `band_rows` with the march's radii as nodes,
+    /// bit for bit (R06.T9.f): each reply's texels, with a census's overflow among them, are those
+    /// of a march that keeps that reply alone over the same nodes. The replies' light falls as the
+    /// census is complete further out, and the march refuses no reply it keeps. Summed from the
+    /// request's march, a reply differs from its own `band_rows`, whose rays lack the other
+    /// replies' nodes, by the quadrature alone: at twelve nodes a decade by up to 2.0% in a texel
+    /// and 0.14% over the band, on two rays 5–7° below the plane towards the inner Galaxy (the −Y
+    /// face), nearly all of it from the node at 4,300 ly that splits the 3,831–4,642 ly interval
+    /// and the rest from 3,000 ly (at 48 a decade 0.05% and 0.003%). Twelve a decade lie within
+    /// 1.1–2.4% of 48 in a texel here, and 0.5–0.7% over the band.
+    #[test]
+    fn a_march_sums_each_reply_as_band_rows_with_the_same_nodes() {
+        let galaxy = milky_way_galaxy();
+        let spec = spec(8);
+        let query = query_at(SUN, CENSUS_CUT);
+        let census = census_to(CENSUS_CUT, 50.0, n(20), Eye::NotAsked);
+        assert!(!census.overflow().is_empty());
+        let replies = replies_near_the_sun();
+        let nodes = Edges::of_replies(replies).nodes;
+        let dust = solar_colour().reddening();
+        let mut ctx = context();
+        let mut bands: Vec<Vec<BandTexel>> = vec![Vec::new(); replies.len()];
+        let mut owns: Vec<Vec<BandTexel>> = vec![Vec::new(); replies.len()];
+        let mut quadrature = 0.0_f64;
+        for face in CubeFace::ALL {
+            let march = march_rows(galaxy, &mut ctx, &query, replies, &spec, face, 0..8);
+            assert_eq!(
+                (march.spec(), march.face(), march.rows()),
+                (spec, face, 0..8)
+            );
+            assert!(!march.holds(&complete_within(200.0)));
+            // Six slots a ray for the radii every layer shares, one more for each layer's cap.
+            assert_eq!(march.slots(), 6 * 5 + 6);
+            assert!(march.heap_bytes() >= 64 * march.slots() * size_of::<Sums>());
+            for (k, reply) in replies.iter().enumerate() {
+                assert!(march.holds(reply), "reply {k}");
+                let mut kept = Vec::new();
+                sum_rows(&march, &census, reply, &mut kept);
+                // `band_rows` of the reply, with the march's radii as nodes.
+                let alone = Edges {
+                    kept: reply.radii_ly.map(|radius| vec![radius]),
+                    nodes: nodes.clone(),
+                };
+                let mut fresh = Vec::new();
+                sum_rows(
+                    &march_rows_through(galaxy, &mut ctx, &query, alone, spec, face, 0..8, &dust),
+                    &census,
+                    reply,
+                    &mut fresh,
+                );
+                assert_eq!(texel_bits(&kept), texel_bits(&fresh), "{face:?}, reply {k}");
+                let mut own = Vec::new();
+                band_rows(
+                    galaxy,
+                    &mut ctx,
+                    &query,
+                    &census,
+                    reply,
+                    &spec,
+                    face,
+                    0..8,
+                    &mut own,
+                );
+                for (from_march, from_own) in kept.iter().zip(&own) {
+                    let (a, b) = (from_march.luminance().value(), from_own.luminance().value());
+                    quadrature = quadrature.max((a / b - 1.0).abs());
+                }
+                bands[k].extend(kept);
+                owns[k].extend(own);
+            }
+        }
+        let light: Vec<f64> = bands.iter().map(|band| band_lux(band, spec)).collect();
+        let whole = light
+            .iter()
+            .zip(&owns)
+            .map(|(&l, own)| (l / band_lux(own, spec) - 1.0).abs())
+            .fold(0.0, f64::max);
+        let printed: Vec<String> = light.iter().map(|l| format!("{l:.5e}")).collect();
+        eprintln!(
+            "one march, six replies: band light {} lx; a reply from the march against its own \
+             band_rows, at most {quadrature:.2e} relative in a texel's luminance and {whole:.2e} \
+             over the band",
+            printed.join(", ")
+        );
+        for pair in light[..4].windows(2) {
+            assert!(pair[1] < pair[0], "{light:?}");
+        }
+        assert!(light[..5].iter().all(|&l| light[5] < l), "{light:?}");
+        assert!(quadrature < 0.03 && whole < 0.002, "{quadrature}, {whole}");
+    }
+
+    /// Rows marched in any split, in any order and through a warm or a cold noise cache, each
+    /// summed, give one march's texels over the face for every reply it keeps, bit for bit, the
+    /// overflow's points split with them (R06.T9.f); and so does a march of the replies in reverse
+    /// order with one of them twice.
+    #[test]
+    fn a_march_in_any_split_of_the_rows_sums_to_the_same_bits() {
+        let galaxy = milky_way_galaxy();
+        let spec = spec(8);
+        let query = query_at(SUN, CENSUS_CUT);
+        let census = census_to(CENSUS_CUT, 50.0, n(20), Eye::NotAsked);
+        let replies = replies_near_the_sun();
+        let mut ctx = context();
+        let sums = |march: &BandMarch, reply: &CompleteTo| {
+            let mut out = Vec::new();
+            sum_rows(march, &census, reply, &mut out);
+            out
+        };
+        let mut reordered = replies.to_vec();
+        reordered.reverse();
+        reordered.push(replies[2]);
+        for face in CubeFace::ALL {
+            let whole = march_rows(galaxy, &mut ctx, &query, replies, &spec, face, 0..8);
+            let shuffled = march_rows(
+                galaxy,
+                &mut ctx,
+                &query,
+                reordered.clone(),
+                &spec,
+                face,
+                0..8,
+            );
+            assert_eq!(shuffled.slots(), whole.slots());
+            for reply in &replies {
+                assert_eq!(
+                    texel_bits(&sums(&shuffled, reply)),
+                    texel_bits(&sums(&whole, reply)),
+                    "{face:?}, the replies reordered"
+                );
+            }
+            let splits: [&[Range<u16>]; 4] = [
+                &[0..3, 3..5, 5..8],
+                &[0..1, 1..2, 2..3, 3..4, 4..5, 5..6, 6..7, 7..8],
+                &[0..0, 0..7, 7..7, 7..8],
+                &[0..4, 4..8],
+            ];
+            for (k, split) in splits.iter().enumerate() {
+                // Every other split through a fresh cache, and its rows run last first.
+                let mut fresh = context();
+                let ctx = if k % 2 == 0 { &mut ctx } else { &mut fresh };
+                let mut parts: Vec<BandMarch> = split
+                    .iter()
+                    .rev()
+                    .map(|rows| march_rows(galaxy, ctx, &query, replies, &spec, face, rows.clone()))
+                    .collect();
+                parts.sort_by_key(|part| part.rows().start);
+                for reply in &replies {
+                    let joined: Vec<BandTexel> =
+                        parts.iter().flat_map(|part| sums(part, reply)).collect();
+                    assert_eq!(
+                        texel_bits(&joined),
+                        texel_bits(&sums(&whole, reply)),
+                        "{face:?}, split {split:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a radius the march keeps")]
+    fn a_reply_the_march_does_not_keep_is_refused() {
+        let march = march_rows(
+            milky_way_galaxy(),
+            &mut context(),
+            &query_at(SUN, 6.5),
+            [complete_within(100.0), complete_within(400.0)],
+            &spec(2),
+            CubeFace::PosZ,
+            0..1,
+        );
+        sum_rows(
+            &march,
+            &SkyCensus::empty(),
+            &complete_within(200.0),
+            &mut Vec::new(),
+        );
+    }
+
+    /// The stars a census near the Sun lists to V [`CENSUS_CUT`] within 400 ly, every cap forced to
+    /// it, with no eye: its cells on up to four threads (one on WebAssembly, which has none), each
+    /// with its own context, merged at [`MAX_N_MAX`], whose order is total, so the threads'
+    /// timing changes no bit.
+    fn census_within_400_ly() -> Vec<SkyStar> {
+        let galaxy = milky_way_galaxy();
+        let query = query_near_the_sun(CENSUS_CUT, Eye::NotAsked)
+            .with_caps_forced(LightYears::new(400.0))
+            .expect("a forced cap");
+        let mut ctx = context();
+        let keys: Vec<crate::galaxy::placement::CellKey> =
+            census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise)
+                .cells()
+                .collect();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let job = || {
+            let mut ctx = context();
+            let mut stars = Vec::new();
+            loop {
+                let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(&key) = keys.get(k) else {
+                    return stars;
+                };
+                census_cell(galaxy, &mut ctx, key, &query, &mut stars);
+            }
+        };
+        let stars: Vec<SkyStar> = if cfg!(target_family = "wasm") {
+            job()
+        } else {
+            std::thread::scope(|scope| {
+                let threads: Vec<_> = (0..4).map(|_| scope.spawn(job)).collect();
+                threads
+                    .into_iter()
+                    .flat_map(|thread| thread.join().expect("a census thread completes"))
+                    .collect()
+            })
+        };
+        let census = merge_census([(stars, CensusTallies::default())], n(MAX_N_MAX));
+        assert!(census.overflow().is_empty());
+        census.listed().to_vec()
+    }
+
+    /// From one march near the Sun, the listed, overflow and band light of replies complete to 100,
+    /// 200 and 400 ly (every cap forced, the census listing only the stars within each radius, its
+    /// brightest 500 listed and the rest overflowing into the band) agree within 1% (R06.T9.f,
+    /// the band ruling's item 5).
+    #[test]
+    fn one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent() {
+        let galaxy = milky_way_galaxy();
+        let spec = spec(8);
+        let stars = census_within_400_ly();
+        let query = query_near_the_sun(CENSUS_CUT, Eye::NotAsked);
+        let radii = [100.0, 200.0, 400.0];
+        let replies = radii.map(complete_within);
+        let mut ctx = context();
+        let marches: Vec<BandMarch> = CubeFace::ALL
+            .iter()
+            .map(|&face| march_rows(galaxy, &mut ctx, &query, replies, &spec, face, 0..8))
+            .collect();
+        let mut totals = Vec::new();
+        for (radius, reply) in radii.iter().zip(&replies) {
+            let within: Vec<SkyStar> = stars
+                .iter()
+                .filter(|s| s.distance().value() <= *radius)
+                .copied()
+                .collect();
+            let count = within.len();
+            let census = merge_census([(within, CensusTallies::default())], n(500));
+            assert!(!census.overflow().is_empty(), "{radius} ly, {count} stars");
+            let mut band = Vec::new();
+            for march in &marches {
+                sum_rows(march, &census, reply, &mut band);
+            }
+            let (listed, band) = (stars_lux(census.listed()), band_lux(&band, spec));
+            eprintln!(
+                "complete to {radius} ly, {count} stars: listed {listed:.5e} lx, band with the \
+                 overflow {band:.5e} lx, together {:.5e} lx",
+                listed + band
+            );
+            totals.push(listed + band);
+        }
+        for (k, a) in totals.iter().enumerate() {
+            for b in &totals[k + 1..] {
+                assert!((b / a - 1.0).abs() < 0.01, "{totals:?}");
+            }
+        }
     }
 
     /// A census of a cone lists stars only inside it: inside the band is the full sky's, complete

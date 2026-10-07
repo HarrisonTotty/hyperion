@@ -192,9 +192,19 @@ pub enum CubeFace { PosX, NegX, PosY, NegY, PosZ, NegZ }   // galactic axes, Web
 pub struct BandSpec { /* face_texels: u16 (64), steps per ray */ }
 pub struct BandTexel { /* luminance: CandelasPerSquareMetre, chroma: [f32; 2],
     sp_ratio: f64, eye_limit: Option<Magnitudes> */ }
+pub struct CompleteTo { /* each layer's radius, ly: 0 nowhere, +∞ everywhere */ }  // R06.T9.b
 pub fn band_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
-    census: &SkyCensus, spec: &BandSpec, face: CubeFace, rows: Range<u16>,
-    out: &mut Vec<BandTexel>);
+    census: &SkyCensus, complete_to: &CompleteTo, spec: &BandSpec, face: CubeFace,
+    rows: Range<u16>, out: &mut Vec<BandTexel>);   // march_rows of its one reply, then sum_rows
+pub struct BandMarch { /* spec, face, rows, the observer's position, each layer's kept radii,
+    each ray's five sums per layer and radius */ }                // R06.T9.f, as built
+impl BandMarch { pub fn holds(&self, complete_to: &CompleteTo) -> bool;
+    pub fn heap_bytes(&self) -> usize; }
+pub fn march_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
+    replies: impl IntoIterator<Item = CompleteTo>, spec: &BandSpec, face: CubeFace,
+    rows: Range<u16>) -> BandMarch;              // every reply's radii a node of each ray
+pub fn sum_rows(march: &BandMarch, census: &SkyCensus, complete_to: &CompleteTo,
+    out: &mut Vec<BandTexel>);                   // one reply's texels: no profile, no table
 
 // sky::limits (Design notes 4 and 5)
 pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
@@ -1770,6 +1780,11 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   Bench: `sky/band_near_sun` split into the march and one sum. Files: `sky/band.rs`. Acceptance:
   `cargo test -p hyperion-sim sky::band`.
 
+  As built (Risks, "Deviations in T9.f, as built"): `march_rows` takes the replies a request
+  states, each a `CompleteTo`, and keeps per layer and radius one slot, the sum of a reply
+  complete to it; `band_rows`'s bits move at rounding only. The benches are
+  `sky/band_near_sun/march` and `sky/band_near_sun/sum`.
+
 - **R06.T9.j The eye's own sky under a camera's cut (new; after T9.d, T9.f and T9.i; before T11.c and T17's goldens).**
   Decided 2026-10-06 (`decision-r06-t9c-glare.md`, the finding in item 2).
   - The eye's map is the eye-only request's, whatever the request's cut.
@@ -1811,8 +1826,8 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   - it has tests against the targets;
   - it re-derives T9.c's and T9.d's references with Gaia's ISL plus the DGL.
 
-Files: `sky/band.rs`, `sky/limits.rs`. Bench: `sky/band_near_sun` (all six faces) and
-`sky/limit_map` (R06.T9.i).
+Files: `sky/band.rs`, `sky/limits.rs`. Bench: `sky/band_near_sun` (all six faces; since R06.T9.f
+`sky/band_near_sun/march` and `/sum`) and `sky/limit_map` (R06.T9.i).
 
 ### R06.T10 The protocol
 
@@ -2326,9 +2341,10 @@ bench -- sky` runs above complete.
 - **Conservation:** light moves between points, overflow and band without loss (T9, T13).
 - **Order independence** of the census over jobs and cells (T8.c) and of the band over rows (T9.b).
 - **Benches:** `sky/luminosity_tables`, `sky/census_near_sun`, `sky/census_nuclear_disc`,
-  `sky/band_near_sun`, `sky_near_sun_cold` (server). The census benches run sampled
-  (`HYPERION_SKY_BENCH_SAMPLE`), against the budget of `decision-r06-census-cost.md`, at the eye's
-  cut and beside it at the camera's (`decision-r06-census-cost-signoff.md`).
+  `sky/band_near_sun/march` and `/sum` (R06.T9.f), `sky_near_sun_cold` (server). The census
+  benches run sampled (`HYPERION_SKY_BENCH_SAMPLE`), against the budget of
+  `decision-r06-census-cost.md`, at the eye's cut and beside it at the camera's
+  (`decision-r06-census-cost-signoff.md`).
 - **By hand, recorded:** the star field's GPU time on both machines, no flicker, the band's lanes,
   the discs, several views sharing one cube.
 
@@ -4162,9 +4178,10 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     `ALL` and `layer()`.
   - **The rays.** `FIRST_NODE_LY` 0.01 ly; `BAND_PROFILE_QUALITY` `Budget(256)` (P07.T10.c's
     `SIGHTLINE_QUALITY` value), with the modifiers near each ray. The light is the trapezoid
-    rule's in distance; twelve nodes a decade agree with 48 to 0.02 mag. The light nearer than
-    0.01 ly, at most some 10⁻⁵ of a ray's, is left out. A ray outside a query's cone is complete
-    nowhere.
+    rule's in distance; twelve nodes a decade agree with 48 to 0.02 mag (_per texel, R06.T9.f
+    measured up to 0.012–0.026 mag near the Sun at 8², and 0.005–0.007 over the band; Risks,
+    "Deviations in T9.f, as built"_). The light nearer than 0.01 ly, at most some 10⁻⁵ of a ray's,
+    is left out. A ray outside a query's cone is complete nowhere.
   - **The colours** of the texels and of the overflow's points are the stars' own, before
     reddening; extinction dims the luminance in V only (reddened from R06.T9.e), which for
     starlight over-dims the photopic light by 1–2% of A_V (science check, CCM 1989 against CIE
@@ -4263,7 +4280,9 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     every layer's nodes. T11.d's one march a request, re-summed per reply (sign-off condition 5),
     needs the march split from the sums: each layer's running fainter and all-light sums at fixed
     nodes with the shell edges among them, then a cheap sum per reply. R06.T9.f builds it (decided
-    2026-10-06, `decision-r06-t9b-band.md`); T11.c and T11.d consume it.
+    2026-10-06, `decision-r06-t9b-band.md`); T11.c and T11.d consume it. _Built in R06.T9.f
+    (2026-10-07): `march_rows` keeps every reply's radii, `sum_rows` sums one reply (Risks,
+    "Deviations in T9.f, as built")._
 - **Pending rulings from T9.b.** Ruled 2026-10-06 (`decision-r06-t9b-band.md`):
   - the poles 24.3 and the plane 22.05;
   - T9.c 6.5 ± 0.20 and 7.55 ± 0.22, and T9.d 8.15 ± 0.22;
@@ -4992,6 +5011,143 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     and the walk's `BTreeSet` are order-free. Science check: the pad's fixed point,
     β(|t| + far + offset) ÷ (1 − β), and the walk's pad over the earliest emitted time are
     confirmed. Applied: the first-guess check above.
+- **Deviations in T9.f, as built (2026-10-07).** The band's march kept, as the band ruling
+  (`decision-r06-t9b-band.md`, item 7) sets it out, with these details.
+  - **The API** (`sky/band.rs`):
+    - `march_rows(galaxy, ctx, query, replies, spec, face, rows) -> BandMarch` takes the replies a
+      request states, each a `CompleteTo` (`impl IntoIterator<Item = CompleteTo>`), and not a list
+      of edges. Every radius of every reply, in any layer, is a node of each ray inside the cone,
+      and each layer keeps its own radii (private `Edges`).
+    - `sum_rows(march, census, complete_to, out)` appends one reply's texels and its overflow's
+      points. It panics on a radius the march does not keep.
+    - `BandMarch` has `spec`, `face`, `rows`, `holds(&CompleteTo)` and `heap_bytes`.
+    - `band_rows` keeps its signature. It is `march_rows` of its one reply, then `sum_rows`.
+    - `CompleteTo::of_caps` now writes a radius at or below zero as +0, not through `max`, which
+      may keep −0. A march and its sums then find one radius by its bits (determinism audit).
+  - **One slot per layer and radius.** The ruling keeps two running sums per layer and edge: the
+    light fainter than the cut and all of the light. A reply reads only their combination, so each
+    slot holds that, as five sums: the fainter light out to the radius, run from the first node,
+    plus all of the light beyond it, run from the radius out. Each is added interval by interval in
+    distance order, and the two are added once.
+    - The light beyond a radius is run from the radius, not taken as the total less the run to it.
+      So a slot holds the bits a march keeping that radius alone takes over the same nodes,
+      whatever other radii the march keeps, and nothing cancels.
+    - A slot is 40 bytes, a layer's radius on a ray. That is half of the ruling's two sums. Its 1.7
+      kB a ray and 42 MB at 64² counted four sums. With five, its layout is 2.16 kB and 53 MB
+      (science check).
+    - The fainter light and all of it are both read at the nodes between a layer's nearest and
+      farthest radius. Before, both were read only at the radius's own node.
+  - **A cone.** `Reach::of` (private) is the one place a ray's region is decided, at the cone's
+    cosine.
+    - A ray outside the cone is marched for all of its light, on the grid's nodes alone, and that
+      sum fills each slot of its layer. So `sum_rows` reads every ray alike.
+    - R06.T8.l (`decision-r06-t8k-cone.md`) widens the region to α + ρ there. The overflow's points
+      are placed by `BandSpec::texel_of`, by which T8.l's census keeps its stars.
+  - **T9.e's bits.** The task's "with T9.e's bits" cannot hold beside its bit-identity test. T9.e's
+    `band_rows` ran one sum over the layers, node by node. The march keeps each layer apart and adds
+    the layers per reply, so `band_rows`'s bits move at rounding (determinism audit):
+    - by at most 2.9 × 10⁻¹⁵ relative in a texel's luminance and ρ;
+    - the chroma (`f32`) is unchanged;
+    - measured over 3,072 texels of five bands: near the Sun at 16² with no census; at 8² with an
+      overflow, complete within 50 ly; complete nowhere; a 30° cone; and 2,000 ly above the Sun
+      (probe `.git/rm23-scratch/r06-census/t9f/probe_bits.rs`, logs `probe-before.txt` and
+      `probe-after.txt`).
+
+    Every test's printed figure is unchanged at its digits. GENERATOR_VERSION stays 20 and no golden
+    moves (`golden_diff` 0): nothing served or golden reads the band.
+
+  - **A reply's band depends on its request's other replies,** within the quadrature. Their radii
+    are nodes of every ray.
+    - Summed from the request's march, a reply differs from its own `band_rows` by up to 2.0% in a
+      texel at twelve nodes a decade, and by 0.14% over the band. That is on the 8² test band near
+      the Sun, against the six replies of `a_march_sums_each_reply_as_band_rows_with_the_same_nodes`.
+    - The worst texels are two rays 5–7° below the plane towards the inner Galaxy (the −Y face, 7°
+      and 41° from the centre).
+    - Nearly all of the difference is the node at 4,300 ly, which splits the 3,831–4,642 ly
+      interval: −1.5% and +2.0% on those two texels. Most of the rest is the node at 3,000 ly
+      (−0.4%), and every other node gives under 10⁻⁵ (probe `probe_nodes.rs`). The science check's
+      reading: the realised dust at 3,000–4,300 ly, where those rays cross the inner disc. The bulge
+      lies between unmoved nodes.
+    - At 48 nodes a decade the difference is 0.046% and 0.003%. Twelve a decade lie within 1.1–2.4%
+      of 48 in a texel and 0.5–0.7% over the band, and 96 agrees with 48. So T9.b's "0.02 mag" is
+      no per-texel bound here (science check).
+    - The test bounds the difference at 3% a texel and 0.2% over the band. These are regression
+      bounds on the fixed fixture, not error bounds.
+    - About 0.03 mag of luminance moves the eye's limit by about 0.01 mag. All of a request's
+      replies share one set of nodes, so a sky filling in is consistent with itself.
+    - So T11.d's march must take every reply the shell plan can state, not only the replies sent:
+      a warm cache that sends fewer would otherwise give other bits. T11.c's comparison of the
+      server's texels with the sim's should march the same replies, not call `band_rows`.
+    - For T17: record the largest per-texel difference at 64² between the final reply's sum from
+      the march and its own `band_rows`. Write `sky/band_face_row.golden` through `march_rows` of a
+      stated set of replies, listed in the golden, then `sum_rows` of one reply (determinism
+      audit).
+  - **Tests** (`--lib -- sky::band`, 22, four of them new):
+    - `a_march_sums_each_reply_as_band_rows_with_the_same_nodes` takes six replies:
+      - complete nowhere;
+      - 50, 100 and 400 ly;
+      - caps of A 70, B 150, C 3,000, D 4,300, E 50,000 and the brown dwarfs 30 ly (E beyond the
+        root cube's edge on the rays towards +Y, which end 39,536 ly out);
+      - everywhere.
+
+      It uses a census within 50 ly with an overflow past 20, at 8² faces, so 36 slots a ray.
+      Each reply's texels from one march equal those of a march that keeps that reply alone over
+      the same nodes, bit for bit: `band_rows` with the same edges as nodes. The band's light falls
+      from nowhere to 400 ly and is least everywhere. The quadrature figures above are measured
+      here.
+
+    - `a_march_in_any_split_of_the_rows_sums_to_the_same_bits` checks four splits, the rows run
+      last first, through warm and cold noise caches, for every reply. A march of the replies in
+      reverse, with one of them twice, gives the same bits (determinism audit).
+    - `one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent` measures near the Sun to V
+      8, with every cap forced to 400 ly and no eye. The census's cells run on four threads (one on
+      WebAssembly). Each reply lists the stars within its radius: 878, 3,514 and 9,520. The 500
+      brightest are listed and the rest overflow. The totals are 9.1927, 9.1303 and 9.1375 × 10⁻⁴
+      lx:
+      - 100 → 200 ly: −0.68%, T9.b's figure;
+      - 200 → 400 ly: +0.08%;
+      - 100 → 400 ly: −0.60%.
+
+      This is `sky::band`'s dearest test, about 100 s alone on four threads, for a census over
+      eight times the volume of the 200 ly one.
+
+    - `a_reply_the_march_does_not_keep_is_refused`, and `complete_to_reads_each_layers_cap` now
+      also holds a −0 cap to +0.
+    - T9.b's, T9.e's and T8.k's band tests pass unchanged in form through `band_rows`.
+  - **The bench** `sky/band_near_sun` is split into `/march` and `/sum`. It takes a stand-in for
+    R06.T8.i's shell plan, `shell_replies`: C, D and E complete to 500 ly, then 1,000 × 2^k ly
+    below their caps, then their caps; A, B and the brown dwarfs complete to their caps in every
+    reply. One run of each, provisional: criterion's `--test`, release, three workers at
+    `CPUQuota=400%`, unlocked at load 13–17 (logs `bench-band.txt` and
+    `bench-band-caps-alone.txt`).
+    - Near the Sun at V 7.95 with the eye, the caps are A 11, B 68, C 8,193, D 9,925, E 21,369 and
+      the brown dwarfs 1 ly. They give seven replies (the shells of 500, 1,000, 2,000, 4,000, 8,000
+      and 16,000 ly, then the caps) and 22 slots a ray.
+    - **The march's heap at 64² near the Sun is 21.8 MB** (21,774,336 bytes, 880 bytes a ray),
+      against 5.97 MB for the caps alone.
+    - The march took 22.7 CPU-s (7.6 s wall). The caps alone, the band before the split, took 18.5
+      CPU-s (6.2 s, a temporary build of the bench). So the shells' radii cost some 23% more: the
+      reads of both lights between each layer's nearest and farthest radius.
+    - One sum of the final reply took 0.002 CPU-s for its 24,576 texels.
+    - T9.b's 20.2 CPU-s ran on 15 workers under the lock.
+  - **For R06.T8.i and T11.d.** The census's shells should reach the march as the `CompleteTo` of
+    each reply, from the first shell to the final caps, in one list per request.
+  - **Gates** (2026-10-07, on the final code, capped at `CPUQuota=400%`, four jobs, load 8–21, so
+    timings are provisional; logs `.git/rm23-scratch/r06-census/t9f/final/`):
+    - fmt; clippy, workspace native and sim wasm32-wasip1 (`-D warnings`);
+    - `--lib -- sky::` 175 passed, 6 ignored (333 s, four threads), `sky::band`'s 22 among them;
+    - `--test sky_census` 6 of 6; sky doctests 23 of 23, `march_rows`' example among them;
+    - Prettier on the plan; every pre-commit hook.
+  - **Reviews.**
+    - Determinism audit: nothing must-fix. Its should-fix was this entry: the bits that moved, why
+      T9.e's cannot be kept, and a reply's dependence on its request's radii. Applied its
+      considers: the −0 radius, the test of the replies' order and repeats, and T17's golden
+      through `march_rows`.
+    - Science check: nothing must-fix. The v☉ subtraction, the slots' units and the conservation
+      figures are confirmed. Applied its should-fixes: the 2% is the 3,000–4,300 ly intervals'
+      quadrature, not the bulge's, measured node by node; and T9.b's 0.02 mag is annotated with the
+      per-texel figures. Its considers are recorded above: T11.d marches every reply the shell plan
+      can state, T17 records the 64² difference, and the ruling's memory counted four sums.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;
