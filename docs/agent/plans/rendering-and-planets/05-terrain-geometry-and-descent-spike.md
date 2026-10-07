@@ -947,6 +947,14 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     per-unit-illuminance form, never in absolute units, and the sun's disc is clamped after
     pre-exposure.
 
+    _Decided 2026-10-06 by a delegated decision (`decision-r05-high-atmosphere.md`):_ the sky view
+    and the ray march place their steps quadratically toward each ray's lowest point (the camera,
+    the ground or a limb's tangent point), not evenly, at the counts above, and each term's density
+    is evaluated once a sample (R05.T12.e). Even steps under-sample the aerosol's 1.2 km scale
+    height at the dense end. A 100 km vertical ray at 30–32 even steps undercounts its column by
+    about 24%, and an `f64` model puts the sky from the ground up to 28% off and the disc from orbit
+    up to 7%.
+
 17. **The spike's lit view is not a render style.** R07 owns the photorealistic style, its
     full-screen AgX pass, the histogram and bloom; R02 owns the AgX function itself, `toneCurve`
     and its WGSL twin `agx`. The spike draws its terrain lit by one directional light from a
@@ -1867,6 +1875,55 @@ constants. Nothing is committed before the ruling, and the task ends when the ow
 - Acceptance: the ruling is recorded with its date in this plan, and the tables are committed or
   not as it says.
 
+**R05.T12.e The per-frame marches' steps** (added 2026-10-06 by a delegated decision,
+`decision-r05-high-atmosphere.md`). In the sky view, the aerial perspective and the ray march, each
+term's density is evaluated once a sample, at the sample's height above the datum. `sourceAt` takes
+the sample's scattering, extinction and phased scattering in place of calling `mediumAt` again. The
+output is not bit-identical; the largest difference is recorded.
+
+The sky view and the ray march split each ray's segment at t\* = clamp(−o·d, t_start, t_end), the
+point nearest the centre of the body (or of the sky view's own sphere). Each side gets steps in
+proportion to its length, and at least one if it is not empty. The steps are placed at t_k = t\* ±
+L_side·(k ÷ n_side)², and each is sampled at its midpoint with the existing analytic step. One WGSL
+helper and one TypeScript twin hold the rule. Another placement may replace it only if it passes the
+gate below at no more steps. High keeps 30 sky-view and 32 march steps; low keeps 16 and 16, with
+the march at half resolution. A count rises only if a gate requires it, to the least that passes,
+and the task refers back above 45 (sky view) or 48 (march).
+
+- Files:
+  - `view/atmosphere/marchSteps.ts` and its test;
+  - `shaders/source.wgsl`, `skyView.wgsl`, `aerialPerspective.wgsl` and `rayMarch.wgsl`;
+  - `hillaire.ts` (`TABLE_SIZES`'s TSDoc);
+  - `renderer/src/smoke/atmosphere.ts`;
+  - this plan.
+- Tests:
+  - **The quadrature gate,** with no GPU:
+    - an `f64` twin of the two kernels' quadrature: Earth's terms on a sphere of WGS 84's a, single
+      scattering, and a Lambertian ground of 0.15 lit through `opticalDepth.ts`'s sun transmittance;
+    - against 4,096 placed steps, themselves within 0.05% of 8,192;
+    - over the decision's 90 march rays from 400 km (disc, R08's limb heights, and terrain beyond 32
+      km from 20 and 60 km) and its sky rays from 2 m, 1 km, 10 km and 50 km;
+    - e = max over channels of |ΔL| ÷ max(L, 10⁻³ L_max), at most 2%;
+    - at most 5% for grazing twilight rays: the sun more than 80° from the zenith at the ray's
+      reference point, and the ray within 10° of that point's horizon;
+    - the as-built even placement fails it;
+    - low's counts are recorded, and none is worse than even placement at the same count.
+  - **On SwiftShader** (`just test-render`, both variants): the march and the sky view at their
+    setting's counts agree with the same kernels at 1,024 steps, in the same run, within the gate's
+    tolerances plus 1%.
+- Acceptance:
+  - `pnpm --filter hyperion exec vitest run view/atmosphere`, `just check lint` and
+    `just test-render` pass;
+  - by hand, hidden on the RTX 3080 and recorded:
+    - **the image check.** Over the 3 captures and 14 check frames, the shipped kernels against
+      1,024 steps (2,048 confirming), through the composite: p99 of e ≤ 1% and max ≤ 5%. Even 32/30,
+      even 16 and half resolution are recorded beside them;
+    - **the timing.** Lane C's 150 s harness, high and low, before (28479b9) and after, in one
+      window. The march at matched clocks is at most 5% slower. The rest of the frame is within 6
+      and 18 ms at p95. Low's atmosphere is no higher than its 3.00 / 3.60 ms before. There is no
+      plateau.
+- Suggested subject: `fix(atmosphere): R05.T12.e Step the marches toward the dense air`.
+
 ### R05.T13 The spike
 
 **R05.T13.a The scripted descent.** `descentProfile.ts`, the path of Design note 19 as a pure
@@ -2701,7 +2758,10 @@ keeps `FaceDifferences`), the high setting's normal scale (Design note 25), the 
 thresholds and `FORCED_REGION_RESIDENCY_S` (Design note 9), the cache budgets (Design note 10, until
 R10), the worker counts (Design note 11) and, if T16 redesigned it, the low setting. The selection
 bound is not among them: both settings select by the hard ε_n plus the sagitta
-(`decision-r05-high-bound.md`). The high setting's vertex path is also read against T13.a's
+(`decision-r05-high-bound.md`). Nor are the per-frame marches' steps or the atmosphere's row.
+R05.T12.e sets the steps' placement and counts by its quadrature gate, and T18 changes them only
+through that gate. Design note 21 judges terrain and atmosphere together
+(`decision-r05-high-atmosphere.md`). The high setting's vertex path is also read against T13.a's
 effective tolerance. On the ridged planet, `FaceDifferences`' budget of 1,952 lowers τ′ from
 2.1–3.0 px to 1.0–2.3 px (probe, 2026-10-04). With ridges off, `BakedOffsets`' 981 binds over the
 late arc at τ ÷ 1.1 (decision-r05-record-tau.md, probe 2026-10-05; the re-run of 2026-10-05: 34%
@@ -4525,6 +4585,11 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
     1.6 ms at P0, still over 1 ms. Figures and the options left are in "Deviations in T12.b and
     T12.c, as built: the medium read in place".
 
+    **Ruled** (2026-10-06, `decision-r05-high-atmosphere.md`): the densities once a sample are
+    taken, with the steps placed toward the dense air, in R05.T12.e. Fewer steps and half resolution
+    are not taken on high. Design note 21's rest of the frame is judged on terrain and atmosphere
+    together (T14.l).
+
   - **A measurement caveat for T17 and T18:** a GPU row is read at the clocks the driver picks. At
     the spike's light load, this GPU runs a compute-bound pass at about 1.7 times its time at full
     clock. _Ruled_ (2026-10-06, addendum B): a row measures the pass at the clocks the driver chose,
@@ -5113,7 +5178,9 @@ medium, sizes, figure)`.
     phase in `Term.scattering.w` (0 none, 1 Rayleigh, 2 Cornette–Shanks) and its g in
     `Term.absorption.w`; a test holds the packing.
   - _The sizes_ follow Design note 16. Two steps a slice on both settings, and the ray-march step
-    counts, are this task's choices; T18 revisits them.
+    counts, are this task's choices; T18 revisits them. (For the sky view and the march,
+    superseded on 2026-10-06 by R05.T12.e: steps placed toward each ray's lowest point, with
+    counts set by its gate.)
 
     | Table              | High                       | Low                                                    |
     | ------------------ | -------------------------- | ------------------------------------------------------ |
@@ -5309,11 +5376,62 @@ medium, sizes, figure)`.
        - This canvas has 1.2 times 720p's pixels, and the march takes 32 steps.
        - The frame's GPU pass sum is 4.93 ms at p95, inside its 0.8 T row.
        - The caveat about the driver's clocks (above) applies to whichever row T18 sets.
-  - _T17:_ the plateaus are gone, so its high runs no longer measure a known failure of the
-    frame rows. The atmosphere row still fails at 1 ms, unless T18 re-rules it or an option of
-    the list above lands first.
+
+    _Ruled_ (2026-10-06, `decision-r05-high-atmosphere.md`): option 1 is taken in R05.T12.e, with
+    the steps placed toward each ray's lowest point. Options 2 and 3 are not taken on high: 16 even
+    steps err by up to 27% on the disc and 80% at the limb, and low's upsample steps 18–21% every
+    other pixel on the limb. Option 4 is decided now, not in T18: Design note 21 judges terrain and
+    atmosphere together, against 6 ms.
+
+  - _T17:_ the plateaus are gone, so its high runs no longer measure a known failure of the frame
+    rows. Ruled (2026-10-06): T17's runs wait for R05.T12.e and T14.l, and judge terrain and
+    atmosphere together against 6 ms.
   - R08.T6.b, which moves the terms into a storage buffer, edits these two chunks as well as the
     kernels it names.
+- **The per-frame marches under-sample the dense air** (found and ruled 2026-10-06,
+  `decision-r05-high-atmosphere.md`).
+  - _Found._ The sky view and the ray march space their steps evenly: Bevy's linear placement, at
+    sebh's sky-view count of 30 and the march's 32. sebh's own code places them quadratically from
+    the ray's start. A ray's dense end (the camera, the ground or a limb's tangent point) is
+    therefore under-sampled.
+    - The aerosol's 1.2 km scale height is the finest structure. A 100 km vertical ray's 3.1–3.3 km
+      steps undercount its column by about 24%: the midpoint rule's (Δh/H)² ÷ 24, as for
+      `TRANSMITTANCE_SAMPLES`.
+    - An `f64` model of the two kernels' quadrature (single scattering and a 0.15 ground, against
+      4,096 placed steps, with e floored at 10⁻³ of the brightest pixel) puts the as-built error at:
+      - the sky from the ground, up to 28% (19% at the zenith with the sun at 30°);
+      - the disc from 400 km, up to 7%;
+      - the limb, up to 17% at the terminator;
+      - terrain beyond 32 km from inside, about 1%.
+    - Sixteen even steps: 82%, 27%, 80% and 6%. sebh's 14 and Bevy's 16 per-pixel steps are
+      real-time defaults, not accuracy references.
+  - _Ruled._ R05.T12.e places the steps quadratically toward each ray's lowest point, at the same
+    counts. In the model that gives:
+    - at most 1.3% in the sky (2.4% at a sunset horizon);
+    - 0.6% on the disc;
+    - 1.6% on the daylit limb (even steps: 0.6%), 4.6% at the terminator limb;
+    - 0.3% inside.
+
+    Its gate is 2%, and 5% for grazing twilight rays. Low's 16 steps improve too: from 27/80/6/82%
+    to 5/18/1/8%.
+
+  - _The multiple-scattering kernel's_ 32 even steps have the same form. It is a second-order term
+    built once per medium; R08.T6.a's twin, which gives each kernel in `f64`, measures it against a
+    placed reference.
+  - _Half resolution, not taken on high._ Low's upsample takes the nearest-depth texel, so on the
+    limb from orbit every other pixel reads a texel 1.7 km of tangent height away, where the
+    radiance e-folds in 9–10 km: a step of 18–21%.
+- **The atmosphere's budget estimate is contradicted (a brainstorm finding, for T19 and R12).**
+  - _The measurement._ The brainstorm's 0.5–1 ms for the discrete column, for an RTX 4060-class
+    part, compares with:
+    - about 1.6 ms p50 at full clock on the RTX 3080, about twice that class's arithmetic;
+    - 2.6 / 3.8 ms p50 / p95 at the driver's light-load clocks.
+  - _The conditions:_ the spike's 1,398 × 793 px view, one sun, three terms, 32 steps.
+  - _It will grow._ A full 1080p view has 1.9 times those pixels, and R08 adds terms and suns.
+  - _How it is handled._ Design note 21 judges terrain and atmosphere together, against the 6 ms the
+    brainstorm leaves them (terrain 1.05 ms p95 at the same clocks). The atmosphere's figure against
+    its estimate is a finding: T19 drafts it for the owner, R08.T11 records it, and R12.T10 replaces
+    the estimate.
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
