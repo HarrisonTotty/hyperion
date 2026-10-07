@@ -732,9 +732,12 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     From T8.g each star takes its own mass, \[Fe/H\] and age relative to its lifetime in
     `sky_phase_envelope`, from plan 11's `hierarchy_bound`, and each pair that may have interacted
     takes plan 11's `pair_light_bound` (decided 2026-10-05, `decision-r06-census-cost.md`, under
-    decision item 2's trigger). From R06.T8.f the bound is first tested before the drift, at the
-    epoch position's distance less the cell's pad and offset and over the ages the light's travel
-    then allows, and a star already past the cut with no extinction takes no sightline. _Corrected
+    decision item 2's trigger). A pair's verdict bounds only those of its stars that depart from
+    their own single-star models, and its products. Every other star takes its own bound (decided
+    2026-10-07, `decision-p11-t16-hierarchy-bound.md`). From R06.T8.f the bound is first tested
+    before the drift, at the epoch position's distance less the cell's pad and offset and over the
+    ages the light's travel then allows, and a star already past the cut with no extinction takes no
+    sightline. _Corrected
     2026-10-03:_ the plan's premise that V rises with mass along the early phases at a fixed age,
     which an n × F₁ bound for young multiples needed, is false in V (R06.T6.b measured falls of up
     to at least 0.38 mag on the pre-main sequence, e.g. 5–6 M☉ at 0.52 Myr and \[Fe/H\] −2, the
@@ -964,9 +967,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
 T1 comes first. T2, T3 and T4 (tables) and T5 (quadrature) can then run side by side, and T6.a
 with them; T6.b needs T5.a, whose mass nodes it reads. T7 needs T5 and T6; T8 needs T2, T3, T4.b
 and T7, and within it T8.e follows T8.b. T9 needs T8; T9.c needs T9.e, T9.h needs T9.c, T9.d needs
-T9.b, T9.i needs T9.h, T9.f needs T9.e, T9.j needs T9.d, T9.f and T9.i, T8.l needs T8.k and
-T9.f, and T11.c needs T9.f and T9.j. T10 needs T9, T4.b and R03's frames; T11 needs T10, with
-T11.c after T11.a.
+T9.b, T9.i needs T9.h, T9.f needs T9.e, T9.j needs T9.d, T9.f and T9.i, T8.l needs T8.k and T9.f,
+T8.g needs T8.f, T8.m, P11.T16 and P11.T17.c, and T11.c needs T9.f and T9.j. T10 needs T9, T4.b and
+R03's frames; T11 needs T10, with T11.c after T11.a.
 The client, T12–T14, needs T10 for its types and R02's `view/`; T13's subtasks follow T12,
 T13.g follows T13.b and T13.h, and T15's draft precedes T13.f, which builds to it. T16.a is out of
 RM3's scope. It waits on P08.T12, P09.T2.c, P09.T23.b and P09.T40.a's feature part, and lands in
@@ -981,10 +984,12 @@ census and need only R01 and R02, so they can run before T12; T13.f waits on R05
 until T13.f wires them to `SETTINGS`.
 
 Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs in this order:
-T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.l; T8.g, once
-plan 11's asks A and B are on `rendering-and-planets`; T8.h; T7.b; T8.i with T11.d, after T11.a–c
-(T11.c on T9.f); T5.f and T9.g before T17's goldens; then T17 (the order amended 2026-10-06,
-`decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and `decision-r06-t8k-cone.md`).
+T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.l; T8.m, which
+needs no plan-11 task; T7.b and T8.i, which no longer wait for T8.g; T8.g, once T8.m, P11.T16 and
+P11.T17.c are on `rendering-and-planets`; T8.h; T11.d, after T8.g, T8.i and T11.a–c (T11.c on T9.f);
+T5.f and T9.g before T17's goldens; then T17 (the order amended 2026-10-06,
+`decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and `decision-r06-t8k-cone.md`, and
+2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
 advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
@@ -1277,11 +1282,13 @@ replaced by T5.d's count excess. Files: `sky/caps.rs`, `galaxy/gas/extinction.rs
 -p hyperion-sim sky::caps`, `cargo test -p hyperion-sim gas::extinction` and `just test-slow
 caps_converge_in_rays`.
 
-- **R06.T7.b Caps by direction (new; after T8.g; signed off).** Decided 2026-10-05
-  (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and adopted on
-  2026-10-05 under the owner's standing delegation (`decision-r06-census-cost-signoff.md`,
-  question 3). Design note 9's criterion is unchanged: under one expected star brighter than the
-  cut beyond the caps, per layer, summed over the sky. Its radius becomes one per ray:
+- **R06.T7.b Caps by direction (new; signed off; it may precede T8.g, decided 2026-10-07,
+  `decision-p11-t16-hierarchy-bound.md`, and its census figures are then taken sampled and re-taken
+  in T17).** Decided 2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a
+  decision agent and adopted on 2026-10-05 under the owner's standing delegation
+  (`decision-r06-census-cost-signoff.md`, question 3). Design note 9's criterion is unchanged: under
+  one expected star brighter than the cut beyond the caps, per layer, summed over the sky. Its
+  radius becomes one per ray:
   - For each of the 768 rays, the radius is the outermost radial interval whose expected listable
     stars per system are at least λ. λ is the largest value that keeps the layer's expected count
     beyond under 1.
@@ -1512,45 +1519,36 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
     region texel's stars need, not α + ρ; the ruling's (1 + ρ ÷ α)² is the region's mean area
     over axes, not its ceiling.
 
-- **R06.T8.g Census cost: a bound star by star (new; after T8.f and plan 11's asks A and B).**
-  Its landing turns the server's sky on by default: T11.c's switch, `--serve-sky` (Risks,
-  "Deviations in T11.c, as built": `SkyService`'s default becomes `Served`, and the switch takes a
-  value so that it can still be turned off).
-  Decided 2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Near the
-  Sun, the multiple-system bound left 98% of the census in generation. The per-record bound becomes
-  one per star, computed before generation. The order is:
+- **R06.T8.g Census cost: a bound star by star (new; after T8.f, T8.m, P11.T16 and
+  P11.T17.c).** Its landing turns the server's sky on by default: T11.c's switch, `--serve-sky`
+  (Risks, "Deviations in T11.c, as built": `SkyService`'s default becomes `Served`, and the switch
+  takes a value so that it can still be turned off). Decided 2026-10-05
+  (`decision-r06-census-cost.md`), under decision item 2's trigger. Its inputs and gates were
+  amended 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`).
+  Near the Sun, the multiple-system bound left 98% of the census in generation. The per-record
+  bound becomes one per star, computed before generation. The order is:
   1. the record's composition (`draw_metallicity`);
-  2. plan 11's `hierarchy_bound`: every star's initial mass and each star–star pair's least
-     periastron, over every attempt the generator can keep;
-  3. each pair's `pair_light_bound` over the record's light-time ages: `Detached`, `Remnants` or
-     `Bright(M)`;
-  4. for each single star and each star of a `Detached` pair, the new fitted table
-     `sky_phase_envelope` at the star's own mass interval and \[Fe/H\] interval, at its age
-     relative to its lifetime, and at its own η draw (read from its `StarDraws`). The relative age
-     is age ÷ `FittedFates::lifetime_bracket` (P06.T38.d) at that η, and the table is read over
-     the bracket's whole span.
+  2. plan 11's `hierarchy_bound` (P11.T16). It gives the hierarchy of every attempt the generator
+     can keep, by the generator's own draw. So each star's initial mass is exact, with its body
+     and attempt, and so is each star–star pair's drawn periastron;
+  3. each pair's `pair_light_bound` (P11.T17) over the record's light-time ages: `Detached`,
+     `Unchanged`, `Remnants`, `Bright(M)`, or none;
+  4. for each star, T8.m's `sky_phase_envelope`, read at:
+     - the star's own mass interval and \[Fe/H\] interval;
+     - its age relative to its lifetime;
+     - its own η draw, read from its `StarDraws` at its attempt (the primary's at attempt 0).
 
-  A `Bright` pair gives M for any of its stars. A `Remnants` pair gives nothing while white dwarfs
-  are dark (ask A4), and afterwards the table's white-dwarf rows. The system is generated only if
-  some star's bound is listable at the system's nearest distance. The test runs first at the epoch
-  distance less the pad and offset (T8.f's step 5), then after `retarded`. `max_star_mass`'s
-  widened envelope stays for the cell floor and for any pair plan 11 cannot bound.
-
-  `sky_phase_envelope` is a hyperion-fit task, with fit-check and sim-fingerprint, depending on no
-  galaxy:
-  - Each cell is a mass interval of the envelope's nodes × a \[Fe/H\] interval of `FE_H_NODES` ×
-    an η interval × a relative-age bin. Bins are fine (10⁻³) over 0.8–1.05 and coarse elsewhere.
-    Beyond the bracket only remnants remain, which are dark until A4.
-  - The η axis is needed: today's envelope reaches M_V −5.7 at 10 Gyr only through the η = 0 tail
-    draw, and the proxy's pass rates used each star's own η.
-  - Each cell holds the brightest V of single stars sampled densely within it: 8 masses, 3
-    \[Fe/H\] and 3 η, plus `MARGIN_MAG`.
-  - It is stored in integer millimagnitudes, rounded brighter, as `sky_envelope` is.
+  A star of a `Detached` or `Unchanged` pair, or of no pair, takes its own bound. A `Remnants` pair
+  gives nothing while white dwarfs are dark (ask A4), and afterwards the table's white-dwarf rows.
+  A `Bright(M)` pair bounds each of its living stars by the brighter of its own bound and M, and
+  its products by M. A pair that plan 11 cannot bound sends its record to generation. The primary
+  is the same star at every attempt and is bounded once. The system is generated only if some
+  star's bound, over every attempt listed, is listable at the system's nearest distance. The test
+  runs first at the epoch distance less the pad and offset (T8.f's step 5), then after
+  `retarded`. `max_star_mass`'s widened envelope stays for the cell floor, and for any record with
+  a pair that plan 11 cannot bound.
 
   Tests:
-  - (slow) `phase_envelope_bounds_dense_tracks`: over ≥ 10⁵ single stars of random mass
-    (0.0124–150 M☉), \[Fe/H\], η and age, no V is brighter than the table, within the margin.
-    Record the margin used.
   - (slow) `the_star_bound_holds_for_realised_systems`: over ≥ 10⁵ realised systems of each layer
     near the Sun and in the bulge, at two emitted times, every star of `state_at(t).stars()` is no
     brighter than its bound.
@@ -1558,22 +1556,59 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
     tests, each of B, C, D and E generates under 25% of its records.
   - The pinned mergers are listed.
 
-  Gate, from the sampled bench near the Sun at the spherical caps:
-  - at most 1% of the records past the floor are generated (98.3–99.99% in T8.f's sampled bench);
-  - the cold estimate is at most 10,000 CPU-s.
+  Gate, from the sampled bench near the Sun: the cold estimate is at most 6 × 10⁴ CPU-s at the
+  spherical caps, or at most 2.5 × 10⁴ at T7.b's caps by direction if T7.b has landed. T8.f's
+  sampled bench gave 1.83 × 10⁶. About 2.9–4.8 × 10⁴ and 1.1–1.9 × 10⁴ are expected, of which
+  P11.T16's exact bound is 1.8–3.0 × 10⁴ and 0.6–1.0 × 10⁴.
+
+  Target, recorded: at most 1% of the records past the floor are generated, C to E together
+  (98.3–99.99% in T8.f's sampled bench). With the gate met, a miss of the target is a finding for
+  P11.T17's tables. It is deferred, and does not hold T8.g.
 
   Record also the sampled cold estimate at cut 10.06, the camera's, beside the eye's 7.95
-  (`decision-r06-census-cost-signoff.md`). Record the share of pairs taking `Detached`, `Remnants`
-  and `Bright` in each layer. Record the cost of each bound step: the target is about 6 µs a record
-  in all.
+  (`decision-r06-census-cost-signoff.md`). Record:
+  - each layer's generated share;
+  - the share of pairs taking each of plan 11's verdicts, and none;
+  - the cost of each bound step: about 6 µs a record for every step but `hierarchy_bound`, whose
+    own cost is P11.T16's.
 
-  Files: `sky/census/cell.rs`, `sky/phase.rs` (new: the table's reader),
-  `crates/hyperion-fit/…/sky_phase_envelope`, `tables/sky_phase_envelope.rs`, and the fit-check
-  list. Acceptance: `cargo test -p hyperion-sim sky::census sky::phase`, `just fit-check`,
-  `just test-slow phase_envelope_bounds_dense_tracks the_star_bound_holds_for_realised_systems
+  Files: `sky/census/cell.rs`. Acceptance:
+  - `cargo test -p hyperion-sim --lib -- sky::census`;
+  - `just test-slow the_star_bound_holds_for_realised_systems
 the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
-the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, `just ci`. No generator bump: the
-  census only reads, and plan 11's functions read existing words.
+the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
+  - `just ci`.
+
+  No generator bump: the census only reads, and plan 11's functions read existing words.
+
+- **R06.T8.m The phase envelope (new; split from T8.g on 2026-10-07; it needs no plan-11 task,
+  so it may start at once).** Decided 2026-10-05 (`decision-r06-census-cost.md`) as part of T8.g,
+  and split on 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`). `sky_phase_envelope` is a
+  hyperion-fit task, with fit-check and sim-fingerprint, depending on no galaxy:
+  - Each cell is a mass interval of the envelope's nodes × a \[Fe/H\] interval of `FE_H_NODES` ×
+    an η interval × a relative-age bin. Bins are fine (10⁻³) over 0.8–1.05 and coarse elsewhere.
+    Beyond the bracket only remnants remain, which are dark until A4.
+  - The η axis is needed. Today's envelope reaches M_V −5.7 at 10 Gyr only through the η = 0 tail
+    draw, and the proxy's pass rates used each star's own η.
+  - Each cell holds the brightest V of single stars sampled densely within it, plus `MARGIN_MAG`:
+    8 masses, 3 \[Fe/H\] and 3 η.
+  - It is stored in integer millimagnitudes, rounded brighter, as `sky_envelope` is.
+  - The relative age is age ÷ `FittedFates::lifetime_bracket` (P06.T38.d) at the star's η, and
+    the table is read over the bracket's whole span. `lifetime_bracket` starts at 0.741 M☉ and
+    allocates (P11.T17's lane, 2026-10-07). So T8.m folds the bracket into the table's index, or
+    adds an allocation-free reader, so that T8.g reads no allocation per star. It states how stars
+    below the bracket's first mass are bounded.
+
+  Tests: (slow) `phase_envelope_bounds_dense_tracks`. Over ≥ 10⁵ single stars of random mass
+  (0.0124–150 M☉), \[Fe/H\], η and age, no V is brighter than the table, within the margin.
+  Record the margin used.
+
+  Files: `sky/phase.rs` (new: the table's reader), `crates/hyperion-fit/…/sky_phase_envelope`,
+  `tables/sky_phase_envelope.rs`, and the fit-check list. Acceptance:
+  - `cargo test -p hyperion-sim --lib -- sky::phase`;
+  - `just fit-check`;
+  - `just test-slow phase_envelope_bounds_dense_tracks`;
+  - `just ci`.
 
 - **R06.T8.h The cell cache keyed by magnitude (new; after T8.g).** Decided 2026-10-05
   (`decision-r06-census-cost.md`). Near the Sun every C–E floor is its band's lower edge, so Design
@@ -1595,9 +1630,9 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, `just ci`. No generat
   gives; no entry is read below its key). Acceptance: `cargo test -p hyperion-sim
 sky::census::cache` and the warm bench recorded against T17's warm budget (≤ 25% of cold).
 
-- **R06.T8.i Nearest first: the shell plan (new; after T8.g; with T11.d; signed off).** Decided
-  2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and
-  adopted on 2026-10-05 under the owner's standing delegation
+- **R06.T8.i Nearest first: the shell plan (new; signed off; it may precede T8.g, and T11.d builds
+  on it; decided 2026-10-07).** Decided 2026-10-05 (`decision-r06-census-cost.md`). The sign-off
+  was advised by a decision agent and adopted on 2026-10-05 under the owner's standing delegation
   (`decision-r06-census-cost-signoff.md`, question 2), with its amendments here. `census_plan`
   orders its cells by distance shell. The shell edges, per layer, are 500 ly, then 1,000 × 2^k ly
   up to the cap; the edges are constants, which never adapt to the machine, so every machine and
@@ -1998,7 +2033,7 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   `decision-r06-t9c-glare.md`). The wire's V is the star's own, M_V + DM + v★(A_V) A_V, which the
   census cuts, and its camera term is relative to it (addendum item 4). As built: Risks,
   "Deviations in T11.c, as built" (the switch is `--serve-sky`, `HYPERION_SERVE_SKY`, off).
-- **R06.T11.d Delivery nearest first (new; after T8.i, T10 and T11.a–c; signed off).** Decided
+- **R06.T11.d Delivery nearest first (new; after T8.g, T8.i, T10 and T11.a–c; signed off).** Decided
   2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and
   adopted on 2026-10-05 under the owner's standing delegation
   (`decision-r06-census-cost-signoff.md`, question 2), with its amendments here. The server runs a
@@ -2362,7 +2397,15 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
 `decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
 
 - the first sky in at most 150 CPU-s and 10 s wall on the dev machine's default workers;
-- the full cold census in at most 4,000 CPU-s;
+- the full cold census, at generator version 21 with T7.b's caps, in at most 2.5 × 10⁴ CPU-s.
+  About 1.1–1.9 × 10⁴ is expected (decided 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
+  The ruled 4,000 CPU-s stays the target. It is out of reach at version 21:
+  - P11.T16's exact hierarchy bound alone costs about 0.6–1.0 × 10⁴ CPU-s near the Sun at T7.b's
+    caps;
+  - generating the records that pass costs about 0.3–0.6 × 10⁴.
+
+  It is met after the deferred lever 13 (below), and re-measured then;
+
 - after a jump of up to 1,000 ly, at most 25% of cold.
 
 The budget was accepted as the eye's only. A decision agent advised that, and the advice was
@@ -2406,7 +2449,11 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
   orchestrator; R06's Risks, "Deviations in T11.b, as built").
 
 Every figure states its cut and its machine: "10 s" alone is the dev machine at the eye's cut. The
-nuclear-disc bench is recorded, with no budget. If a budget is missed, in this order:
+nuclear-disc bench is recorded, with no budget. At version 21 the full cold census's 4,000 CPU-s
+target is not a gate. Its step 1 below is taken by deferral: the asks are in
+`deferred-corrections.md` as lever 13. They are plan 11's cheaper hierarchy draw at a version bump,
+and faster post-main-sequence tracks and pair evolution. Steps 2 and 3 wait for that re-measure,
+except that T11.e's laptop trigger stands. If a budget is missed, in this order:
 
 1. ask plans 06 and 11 for faster generation (post-main-sequence tracks 0.5–0.66 ms a star, pair
    evolution 2–7 ms a pair);
@@ -2432,7 +2479,7 @@ band's pair correction with its 1σ (from `LuminosityFunction::pair_light_sigma`
 three harness points ((0, 26,000, 68), (0, 8,000, 0) and (0, 3,000, 0)) and at a halo point, (0,
 26,000, 15,000) ly (decided 2026-10-04, "T5.d gate reading"); a 1σ over 2% of the band's light at
 any of the four is a finding. The fits `sky_binary_light_c`, `_d` and `_e`, `sky_envelope` and
-T8.g's `sky_phase_envelope` join the check list (`just fit-check`). Each timing is taken on a
+T8.m's `sky_phase_envelope` join the check list (`just fit-check`). Each timing is taken on a
 quiet machine, as the
 roadmap's conventions require, or marked provisional. Acceptance: `just ci`, and the named `just test-slow` and `just
 bench -- sky` runs above complete.
@@ -2485,7 +2532,7 @@ change to skip light candidates without opening their streams; the mass-first wa
 their position and density, and the benchmark decides whether the rest is worth a bump (Risks). The
 plan reserves no tag, prefix or stream. The census's cost subtasks (decided 2026-10-05,
 `decision-r06-census-cost.md`) need no bump either. The census only reads, and
-`sky_phase_envelope` (T8.g) joins fit-check. Plan 11's `hierarchy_bound` and `pair_light_bound`
+`sky_phase_envelope` (T8.m) joins fit-check. Plan 11's `hierarchy_bound` and `pair_light_bound`
 must read the generator's existing words and add no stream or word, which their tests pin. T7.b
 changes which cells the census opens; with no golden pinning them before T17 and nothing served,
 it needs no bump.
@@ -2840,6 +2887,25 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
     direction are accepted (T7.b). The optional looser criterion is declined, and nothing is
     authorised in advance (T17's fallbacks).
   - The nuclear disc's census is bounded by generating its listed systems and is measured in T17.
+- **The hierarchy bound's cost, and the full census at version 21 (decided 2026-10-07,
+  `decision-p11-t16-hierarchy-bound.md`).**
+  - Plan 11's ask A cannot be exact at 3 µs, and it must be exact:
+    - Without the period, a companion's q is known only to a factor of about 2.
+    - Without the stability test, the kept try is unknown: every companion keeps its first try in
+      75% of D's multiples and 25% of E's.
+    - So an interval bound collapses to the running maximum over companion masses, and leaves no
+      periastron for P11.T17.
+  - P11.T16 is the generator's own draw at each attempt it can keep: about C 8.5–13, D 45 and
+    E 180 µs a record with the carve cover.
+  - **The full census.** Near the Sun at T7.b's caps, after T8.g, it is about 1.1–1.9 × 10⁴ CPU-s.
+    That is about 13–21 minutes on 15 workers, and about an hour on a 4-core laptop. The first
+    sky stays within 10 s, nearest first.
+  - The 4,000 CPU-s needs the deferred lever 13 (P11's cheaper draw at a version bump, and faster
+    generation), or a pass rate under about 0.3%.
+  - T8.g cannot leave RM3's path. Without it the census is 1.83 × 10⁶ CPU-s (about 7 × 10⁵ with
+    T7.b), and the 500 ly first shell is about 375 CPU-s.
+  - Without P11.T17.b's tables, T8.g barely bounds E: 90% of E's records hold a pair with a
+    remnant, and E is 73% of the census's CPU.
 - **The census budget is the eye's (cut 7.95; `decision-r06-census-cost-signoff.md`).** A camera
   view asks 10.06: some 4 × 10⁵ stars (Tycho-2 has 3.8 × 10⁵), beyond N_max's 3 × 10⁵, and
   plausibly 5–10× the work (an estimate), more if the caps reach the bulge. The bridge's main
