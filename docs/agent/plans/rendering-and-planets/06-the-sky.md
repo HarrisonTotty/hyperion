@@ -567,7 +567,10 @@ holds.
    map's; a camera's is `cameraLimitV` (Design note 18). The response's `cut_v` is the deepest of
    the two over the views open. The camera's part is the request's `camera_limit_v`, clamped at
    `MAX_CUT_V`, 11.0, above which a narrow zoom would ask for 10⁶ stars (research finding); a
-   deeper individual exposure asks for a cone. The eye's part cannot be the limit map's deepest
+   deeper individual exposure asks for a cone. A cone is an instrument's field stop: its census
+   and band share the band's texels that meet it, and no star outside them is listed or glares,
+   so the naked eye, which has none, cannot ask one (decided 2026-10-07,
+   `decision-r06-t8k-cone.md`; R06.T8.l). The eye's part cannot be the limit map's deepest
    texel, since the map is computed from the band and the listed stars, which are computed to the
    cut. It is set by the server before the census (researched 2026-09-29; Crumey 2014 eq. 34 as in
    Design note 2; Gaia DR3 flux sums for the integrated starlight: μ 24.3 at the galactic poles
@@ -730,11 +733,13 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     to at least 0.38 mag on the pre-main sequence, e.g. 5–6 M☉ at 0.52 Myr and \[Fe/H\] −2, the
     hotter star's larger bolometric correction); nothing depends on it since item 2. The census counts stars,
     not systems. A star is kept if its V is brighter than the cut, with or without the eye, and,
-    for a query with a cone, if it lies inside the cone. The eye's colour offset is the views' to
-    apply (Design note 20, T13.a). The eye's cut carries the largest offset already (Design note
-    5), and the band subtracts at the cut, so the listing and the band share one boundary (decided
-    2026-10-06, `decision-r06-t9b-band.md`; R06.T8.k). The observer's own system (`exclude`) is
-    left out; its stars are discs.
+    for a query with a cone, if its band texel meets the cone: its texel's centre lies within the
+    half-angle plus the band's largest texel radius, the region in which the band is complete
+    (decided 2026-10-07, `decision-r06-t8k-cone.md`; R06.T8.l). The eye's colour offset is the
+    views' to apply (Design note 20, T13.a). The eye's cut carries the largest offset already
+    (Design note 5), and the band subtracts at the cut, so the listing and the band share one
+    boundary (decided 2026-10-06, `decision-r06-t9b-band.md`; R06.T8.k). The observer's own
+    system (`exclude`) is left out; its stars are discs.
 11. **Merge, N_max and overflow.** Parts are merged by flux, then system ID, then star index, which
     is total, so the order of cells and jobs cannot change the answer. The brightest N_max are
     listed. The rest (the overflow) the server's band takes (Design note 15); the listed stars a
@@ -952,9 +957,10 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
 T1 comes first. T2, T3 and T4 (tables) and T5 (quadrature) can then run side by side, and T6.a
 with them; T6.b needs T5.a, whose mass nodes it reads. T7 needs T5 and T6; T8 needs T2, T3, T4.b
 and T7, and within it T8.e follows T8.b. T9 needs T8; T9.c needs T9.e, T9.h needs T9.c, T9.d needs
-T9.b, T9.i needs T9.h, T9.f needs T9.e, T9.j needs T9.d, T9.f and T9.i, and T11.c needs T9.f and
-T9.j. T10 needs T9, T4.b and R03's frames; T11 needs T10, with T11.c after
-T11.a. The client, T12–T14, needs T10 for its types and R02's `view/`; T13's subtasks follow T12,
+T9.b, T9.i needs T9.h, T9.f needs T9.e, T9.j needs T9.d, T9.f and T9.i, T8.l needs T8.k and
+T9.f, and T11.c needs T9.f and T9.j. T10 needs T9, T4.b and R03's frames; T11 needs T10, with
+T11.c after T11.a.
+The client, T12–T14, needs T10 for its types and R02's `view/`; T13's subtasks follow T12,
 T13.g follows T13.b and T13.h, and T15's draft precedes T13.f, which builds to it. T16.a is out of
 RM3's scope. It waits on P08.T12, P09.T2.c, P09.T23.b and P09.T40.a's feature part, and lands in
 one integration with P09.T2.c (decided 2026-10-05, `decision-r06-t16a-scope.md`). T17 closes RM3's
@@ -968,10 +974,10 @@ census and need only R01 and R02, so they can run before T12; T13.f waits on R05
 until T13.f wires them to `SETTINGS`.
 
 Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs in this order:
-T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.g, once plan
-11's asks A and B are on `rendering-and-planets`; T8.h; T7.b; T8.i with T11.d, after T11.a–c (T11.c
-on T9.f); T5.f and T9.g before T17's goldens; then T17 (the order amended 2026-10-06,
-`decision-r06-t9b-band.md` and `decision-r06-t9c-glare.md`).
+T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.l; T8.g, once
+plan 11's asks A and B are on `rendering-and-planets`; T8.h; T7.b; T8.i with T11.d, after T11.a–c
+(T11.c on T9.f); T5.f and T9.g before T17's goldens; then T17 (the order amended 2026-10-06,
+`decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and `decision-r06-t8k-cone.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
 advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
@@ -1269,6 +1275,10 @@ caps_converge_in_rays`.
   - The reply carries the radii per ray. T9's band and the client read them. The band and the
     listing share that boundary: T9.b reads the same widened per-ray radii that `plan_cells` used,
     interpolated identically.
+  - Each ray counts the stars brighter than cut − DM − v☉(A_V) A_V, the band's own boundary
+    (R06.T8.k), in place of the bare A_V, and the rule bound takes the same v☉. Decided
+    2026-10-07 (`decision-r06-t8k-cone.md`, item 3). If T7.b slips past T17's goldens, this
+    switch lands alone before them. Record the caps' move near the Sun and in the inner bulge.
 
   Measured with the lane's tables (`decision-r06-census-cost.md`):
 
@@ -1455,6 +1465,33 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
   `cargo test -p hyperion-sim --test sky_census`. The first is two commands as built,
   `cargo test -p hyperion-sim --lib -- sky::census` and `… -- sky::band`: `cargo test` takes one
   filter before `--`. As built: Risks, "Deviations in T8.k, as built".
+
+- **R06.T8.l The cone by the band's texels, and no eye with a cone (new; after T8.k and T9.f;
+  before T11.a).** Decided 2026-10-07 (`decision-r06-t8k-cone.md`, items 1 and 2).
+  - A texel is in a cone's region when its centre lies within α + ρ of the axis. Here α is the
+    half-angle, and ρ is the request's `BandSpec`'s largest texel radius (1.266° at 64²).
+  - The band's region texels are complete, and the others complete nowhere.
+  - The census keeps a star when its texel (`BandSpec::texel_of`) is in the region, and the plan
+    opens cells by the widened cone. The query carries the `BandSpec` the band uses, and the
+    census and the band read one cosine.
+  - `SkyQueryBuilder::build` refuses an eye with a cone (`BuildSkyQueryError::ConeWithEye`), and
+    `Cone`'s docs call it an instrument's field stop.
+  - Tests, near the Sun to V 8 within 200 ly (at 16², cones of 1°, 10° and 30°; at 64², 0.3°, on
+    the rows it meets):
+    - the listed stars are the full census's stars whose texels are in the region, bit for bit;
+    - each region texel's band is the full sky's, and each other texel the complete-nowhere
+      band's, bit for bit;
+    - so the listed and band light equal the full sky's in the region, texel by texel, to 10⁻¹²
+      relative;
+    - every direction of a fixed lattice of 10⁴ inside the cone lies in a region texel;
+    - the narrow cones' regions list the full census's stars inside the cone;
+    - `an_eye_with_a_cone_is_refused`.
+
+    T8.k's 30° test takes this form.
+
+  - Record the region's area against the cone's, at each test cone.
+  - Files: `sky/census/{query,cell}.rs`, `sky/band.rs`. Acceptance:
+    `cargo test -p hyperion-sim --lib -- sky::census` and `… -- sky::band`, as two commands.
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f and plan 11's asks A and B).**
   Decided 2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Near the
@@ -1880,9 +1917,10 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
 
 - **R06.T11.a Handler, validation and the census.** `requests/sky.rs`: validation (the observer in
   the cube, time within ±H, `n_max` and `camera_limit_v` in range, a known `exclude_system` through
-  `resolve`), the eye's cut by `eye_cut` and the request's cut as the deeper of it and
-  `camera_limit_v`, the census as `Priority::Bulk` jobs of a few hundred cells each under the
-  request's `CancelToken`, merged once all finish; the census never enters the interactive queue,
+  `resolve`, and no `eye` with a `cone`), the eye's cut by `eye_cut` and the request's cut as
+  the deeper of it and `camera_limit_v`, the census as `Priority::Bulk` jobs of a few hundred
+  cells each under the request's `CancelToken`, merged once all finish; the census never enters
+  the interactive queue,
   so a chart's query is never held behind it. The time check reuses `convert::query_time`
   (made `pub(crate)`), and the system check `placement::resolve` in a pool job, as
   `requests/scene.rs` does. Each job builds its own `SkyContext`, the sources not being `Sync`.
@@ -1894,11 +1932,14 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   `decision-r06-t16a-scope.md`). The doc comments were corrected with this plan text
   (2026-10-06), ahead of T11.a. Tests (integration, over the WebSocket, at a small census): a
   cancelled request stops its queued jobs and sends nothing further; a range query sent while a
-  sky's jobs run is answered first; `n_max` above the cap is `BadRequest` naming `n_max`; a sky
+  sky's jobs run is answered first; `n_max` above the cap is `BadRequest` naming `n_max`; a
+  request with both `eye` and `cone` is `BadRequest` naming `cone`; a sky
   near the Sun lists `feature_members` in `not_modelled`. Acceptance:
   `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye colour offset and camera
   band term are its `StarColour::reddened(a_v)`'s (R06.T9.e). The wire's V is the star's own, M_V + DM +
   v★(A_V) A_V, which the census cuts, and its camera term is relative to it (addendum item 4).
+  The protocol's doc comments on `SkyRequest.cone` and `ConeDto` call a cone an instrument's
+  field stop, refused with the eye (`decision-r06-t8k-cone.md`).
 - **R06.T11.b Transfer.** The response and its payload through R03's `BulkPayload::new` and
   `Answer { body, bulk }` (whose `frames` call `bulk::chunk`), the stars then the band, split by
   `stars_bytes` and `band_bytes`, with `BulkPayload`'s `expect(dead_code)` removed; the per-cell
@@ -4988,6 +5029,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     than cut − DM − A_V on each ray's bare A_V; they are an estimate, and the rule's bound takes
     the least extinction over the rays, where v★ is within about 0.01 of 1, so the gap is a few
     thousandths of a magnitude. T7.b, which counts each ray's own cap, can take each ray's v☉.
+    _Decided 2026-10-07 (`decision-r06-t8k-cone.md`, item 3): T7.b does; safe meanwhile, since
+    the census is exact within its caps._
   - **Open, for the orchestrator** (science check; not built, since each departs from the
     ruling's text):
     - The cone's edge is shared to a band texel, not exactly: the census tests each star's
@@ -4995,10 +5038,12 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       A cone narrower than a texel (about 1.4° at 64²) can hold no texel centre, and then the band
       holds all of the light there beside the listed stars, near the Sun some 0.9 mag brighter than
       the light fainter than the cut. Keeping a star by its texel's centre, at the request's
-      `BandSpec`, would share the split exactly.
+      `BandSpec`, would share the split exactly. _Decided 2026-10-07 (item 1): the band's texels
+      that meet the cone, R06.T8.l._
     - With a cone, no star outside it is listed, so none glares over the texels inside it, though
       the veil reaches 90°. That is right for an instrument's field stop and not for a naked eye;
-      the cockpit eye asks no cone.
+      the cockpit eye asks no cone. _Decided (item 2): an eye with a cone is refused, R06.T8.l
+      and T11.a._
     - In release builds a sightline's NaN A_V gives a NaN V, which `merge_census`'s release
       assertion refuses, as before (determinism audit; older than T8.k).
   - **Gates** (2026-10-07, on the code of T8.k and T8.j together, capped at `CPUQuota=400%`, load
@@ -5016,6 +5061,11 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     the 2,300 K dwarfs, which never sit at the boundary) are confirmed. Applied: `SkyStar::a_v`'s V secant at
     A_V → 0, 2 and 10 with its source, and the band test's reference integral cut and dimmed by
     the solar point's curves.
+- **A narrow cone's region (decided 2026-10-07, `decision-r06-t8k-cone.md`).** A cone's census
+  and band share the band's texels that meet it, so a cone of half-angle α lists up to
+  (1 + ρ ÷ α)² its own area: 2.3 times at 2.5°, 27 at 0.3°. A sub-degree instrument field needs a
+  band finer than 64² for its own background in any case. That band is the instrument plan's to
+  design. No RM3 view asks a cone.
 - **Deviations in T8.j, as built (2026-10-07).** The census in motion, as the pad-speed ruling
   (`decision-r06-pad-speed.md`, §4 item 6) sets it out, built with T8.k, with these details.
   - The moving galaxy is the fixture cloned and built `with_full_potential`, in a `OnceLock` that
