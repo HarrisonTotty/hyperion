@@ -1,7 +1,7 @@
 /**
  * A photorealistic view's internal resolution (plan R07, T19; Design note 14): its scene target is
- * made at its render resolution times its scale, and the tone-mapping pass presents it upscaled
- * onto the canvas (T15).
+ * made at its render resolution (the canvas's, or the setting's rows, T17) times its scale, and the
+ * tone-mapping pass presents it upscaled onto the canvas (T15).
  *
  * @remarks
  * Everything drawn into the scene target is drawn at the internal viewport: R06's sky and host
@@ -15,9 +15,31 @@ import type { Viewport } from "../camera/projection";
 import type { StarSprite } from "../wireframe/drawList";
 
 /**
- * The viewport the scene target is drawn at: the render resolution times `scale` on each axis,
- * at least one pixel; the render resolution itself at a scale of 1.
+ * A view's render resolution: its canvas's viewport, or, where the setting renders fewer rows than
+ * the canvas has, `renderHeightPx` rows at the canvas's aspect, presented upscaled by the
+ * tone-mapping pass (R07 Design note 18: 720p on the low setting; R07.T17).
  *
+ * @remarks
+ * R05's `renderSizeOf` gives the descent spike's lit view its size by it, from the same setting.
+ *
+ * @param renderHeightPx - The setting's `terrain.renderHeightPx`, device px, or `null` for the
+ *   canvas's own size.
+ */
+export function renderViewport(viewport: Viewport, renderHeightPx: number | null): Viewport {
+  if (renderHeightPx === null || renderHeightPx >= viewport.heightPx) {
+    return viewport;
+  }
+  return {
+    widthPx: Math.max(1, Math.round((viewport.widthPx * renderHeightPx) / viewport.heightPx)),
+    heightPx: renderHeightPx,
+  };
+}
+
+/**
+ * The viewport the scene target is drawn at: the render resolution ({@link renderViewport}) times
+ * `scale` on each axis, at least one pixel; the render resolution itself at a scale of 1.
+ *
+ * @param viewport - The render resolution.
  * @param scale - The budget's or the resolution controller's scale, in (0, 1].
  */
 export function internalViewport(viewport: Viewport, scale: number): Viewport {

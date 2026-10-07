@@ -377,13 +377,6 @@ export interface ViewsCheckResults {
   };
 }
 
-/**
- * What a low-setting run says of itself until R07.T17 makes `VIEW`'s quality setting reach its sky
- * and its photorealistic frame; T17 removes it.
- */
-export const LOW_BEFORE_T17 =
-  "before R07.T17 the low setting reaches VIEW's budgets and the window's size only: its sky and photorealistic frame draw at high";
-
 /** The slot a view stands in, as the operator names it. */
 export type ViewSlotName = "PRIMARY" | "INSTRUMENT 1" | "INSTRUMENT 2";
 
@@ -660,7 +653,9 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
   // Design note 27's rule as R05.T20 reads it on every platform: a Windows run keeps no load
   // average, so whether its machine was quiet is unchecked and it is always provisional.
   const quiet = quietOf(run.platform, run.machine.loadAverage);
-  const provisional = quiet.provisional || run.smoke || !run.shown || low;
+  // Since R07.T17 the low setting reaches VIEW's sky and photorealistic frame too, so a low run
+  // is provisional only as a high one is.
+  const provisional = quiet.provisional || run.smoke || !run.shown;
   const loadNote = keepsLoadAverage(run.platform)
     ? `load average ${load.toFixed(2)} at the start (under 1 asked)`
     : QUIET_RULE_UNCHECKED;
@@ -668,7 +663,6 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
     ...(quiet.provisional ? [loadNote] : []),
     ...(run.shown ? [] : ["a hidden run: no presentation and no T"]),
     ...(run.smoke ? ["a smoke run: short windows"] : []),
-    ...(low ? [LOW_BEFORE_T17] : []),
   ].join("; ");
   const verdictOf = (name: ViewsCheckPhaseName): Verdict =>
     phases.find((phase) => phase.name === name)?.criteria.overall ?? "not-measured";

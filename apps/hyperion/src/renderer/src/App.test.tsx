@@ -123,6 +123,21 @@ describe("App", () => {
     ).toHaveTextContent("GRAPHICS SAFE MODE");
   });
 
+  it.each([
+    { setting: "high", words: "HIGH" },
+    { setting: "low", words: "LOW" },
+  ] as const)(
+    "shows the launch's quality setting $setting in the graphics panel as $words (R07.T17)",
+    ({ setting, words }) => {
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, undefined, setting);
+      render(<App />);
+
+      const panel = screen.getByRole("region", { name: "Graphics" });
+      const term = within(panel).getByText("Quality", { selector: "dt" });
+      expect(term.nextElementSibling).toHaveTextContent(words);
+    },
+  );
+
   it("shows the link being established on launch", () => {
     render(<App />);
 

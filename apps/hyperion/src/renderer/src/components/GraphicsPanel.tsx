@@ -6,6 +6,7 @@ import {
   graphicsAnnunciation,
   useGraphicsStatus,
 } from "../view/engine/status";
+import { QUALITY_NAMES, type QualitySetting } from "../view/quality/qualitySetting";
 import { StatusLine } from "./StatusLine";
 
 interface ReadingProps {
@@ -110,15 +111,23 @@ function featuresOf(capabilities: GpuCapabilities | null): string | null {
   return present.length > 0 ? present.join(", ") : "NONE";
 }
 
+/** Props of {@link GraphicsPanel}. */
+interface GraphicsPanelProps {
+  /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
+  readonly setting: QualitySetting;
+}
+
 /**
  * The client's graphics on the `LINK` display: the adapter, its features, the styles it may draw,
- * the launch mode, the GPU timer, the losses and restarts, and the current annunciation.
+ * the launch mode, the quality setting, the GPU timer, the losses and restarts, and the current
+ * annunciation.
  *
  * @remarks
  * The annunciation is the console's report on itself, never an alert (R01 Design note 10): a fault
- * in `StatusLine`'s `fault` standing, a statement of condition in plain text.
+ * in `StatusLine`'s `fault` standing, a statement of condition in plain text. The quality setting
+ * is read only: the launch chose it (`--setting`), and launching again changes it (R07.T17).
  */
-export function GraphicsPanel() {
+export function GraphicsPanel({ setting }: GraphicsPanelProps) {
   const status = useGraphicsStatus();
   const summary = summaryOf(status.condition);
   const annunciation = graphicsAnnunciation(status);
@@ -138,6 +147,8 @@ export function GraphicsPanel() {
         <Reading value={stylesOf(status.condition)} />
         <dt>Mode</dt>
         <Reading value={MODE_WORDS[status.launchMode]} />
+        <dt>Quality</dt>
+        <Reading value={QUALITY_NAMES[setting]} />
         <dt>GPU Timer</dt>
         <Reading value={status.capabilities === null ? null : TIMER_WORDS[status.timer]} />
         <dt>Device Losses</dt>

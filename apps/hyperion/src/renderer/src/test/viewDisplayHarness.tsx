@@ -24,6 +24,7 @@ import type {
   ComputeBindings,
   ComputeHandle,
   FrameSubmission,
+  RenderEngine,
   RenderTarget,
   RenderTargetSpec,
   RenderView,
@@ -113,7 +114,14 @@ export interface Submission {
   readonly label: string;
   /** Its draws' materials, in order; none for a dispatch. */
   readonly materials: ReadonlyArray<string>;
+  /** Its draws' instance counts, in the materials' order (R07.T17). */
+  readonly instances: ReadonlyArray<number>;
+  /** A dispatch's workgroups (R07.T17), absent for a pass. */
+  readonly workgroups?: ComputeWorkgroups;
 }
+
+/** A dispatch's workgroup counts, or GPU-written ones. */
+type ComputeWorkgroups = Parameters<RenderEngine["dispatch"]>[2];
 
 /** A submission's view: the name `by` begins with, up to a `:` or a space. */
 export function submittedBy(submission: Submission): string {
@@ -153,6 +161,7 @@ export function timedEngineSource(): TimedEngineSource {
       by,
       label: frame.label,
       materials: frame.draws.map((draw) => draw.material.name),
+      instances: frame.draws.map((draw) => draw.instanceCount ?? 1),
     });
   };
   return {
@@ -215,13 +224,15 @@ export function timedEngineSource(): TimedEngineSource {
           dispatch: (
             kernel: ComputeHandle,
             bindings: ComputeBindings,
-            _workgroups: unknown,
+            workgroups: ComputeWorkgroups,
             pass?: string,
           ): void => {
             submissions.push({
               by: Object.values(bindings.buffers)[0]?.name ?? kernel.name,
               label: pass ?? "compute",
               materials: [],
+              instances: [],
+              workgroups,
             });
           },
         });

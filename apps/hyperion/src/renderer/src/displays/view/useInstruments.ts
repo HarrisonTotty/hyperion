@@ -40,6 +40,7 @@ import { useGraphicsStatus } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
+import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
@@ -116,6 +117,8 @@ export interface InstrumentsFrame {
   /** The primary's run as it drew this frame. */
   readonly primary: ViewRun;
   readonly budgets: ReadonlyMap<ViewId, ViewBudget>;
+  /** The quality setting `VIEW` is given, at which each instrument draws (R07.T17). */
+  readonly setting: QualitySetting;
   /** The primary view's exposure, which each instrument draws at. */
   readonly exposure: ExposureControl;
   readonly stars: ReadonlyArray<ViewStar>;
@@ -142,6 +145,8 @@ export interface InstrumentsInput {
    * camera's limit (R07.T13.e).
    */
   readonly exposure: ExposureControl;
+  /** The quality setting `VIEW` is given, whose sprite budget each slot's cull keeps (R07.T17). */
+  readonly setting: QualitySetting;
 }
 
 /** The instruments, their commands and their loop. */
@@ -264,8 +269,8 @@ function useSlotDrawer(
 }
 
 /**
- * A slot's own cull of the primary's sky, at its camera's role, field of view and canvas width,
- * remade only when one of them or the sky changes, and its `STARS` reading at the primary's
+ * A slot's own cull of the primary's sky, at its camera's role, field of view and canvas width and
+ * the setting's sprite budget, remade only when one of them or the sky changes, and its `STARS` reading at the primary's
  * exposure (R07.T13.e).
  */
 function useSlotSky(
@@ -273,6 +278,7 @@ function useSlotSky(
   exposure: ExposureControl,
   state: SlotState,
   size: ElementSize | null,
+  setting: QualitySetting,
 ): CulledViewSky | null {
   const camera = state.open ? (state.shown?.run.camera ?? null) : null;
   const role = camera?.role ?? null;
@@ -282,8 +288,8 @@ function useSlotSky(
     () =>
       sky === null || role === null || fovDeg === null || widthPx === null
         ? null
-        : cullViewSky(sky, role, fovDeg, widthPx),
-    [sky, role, fovDeg, widthPx],
+        : cullViewSky(sky, role, fovDeg, widthPx, setting),
+    [sky, role, fovDeg, widthPx, setting],
   );
   return drawn === null || role === null || fovDeg === null
     ? null
@@ -292,7 +298,16 @@ function useSlotSky(
 
 /** The instruments of a `VIEW` stage. */
 export function useInstruments(input: InstrumentsInput): Instruments {
-  const { engineState, primaryRun, removeCamera, easedMoves, reducedMotion, sky, exposure } = input;
+  const {
+    engineState,
+    primaryRun,
+    removeCamera,
+    easedMoves,
+    reducedMotion,
+    sky,
+    exposure,
+    setting,
+  } = input;
   const graphics = useGraphicsStatus();
   const [slots, setSlots] = useState<Slots>([CLOSED, CLOSED]);
   const [canvasOne, setCanvasOne] = useState<HTMLCanvasElement | null>(null);
@@ -301,8 +316,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const stageTwo = useElementSize();
   const panelOne = useElementSize();
   const panelTwo = useElementSize();
-  const skyOne = useSlotSky(sky, exposure, stateOf(slots, 1), stageOne.size);
-  const skyTwo = useSlotSky(sky, exposure, stateOf(slots, 2), stageTwo.size);
+  const skyOne = useSlotSky(sky, exposure, stateOf(slots, 1), stageOne.size, setting);
+  const skyTwo = useSlotSky(sky, exposure, stateOf(slots, 2), stageTwo.size, setting);
   // The loops read the drawn skies, which keep their identity while only the label moves.
   const drawnOne = skyOne?.drawn ?? null;
   const drawnTwo = skyTwo?.drawn ?? null;
@@ -504,6 +519,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         sky: inputs.sky,
         selection: inputs.selection,
         style: budget.style,
+        setting: each.setting,
         renderScale: budget.renderScale,
         availability: inputs.availability,
         // The primary is the exposure's source: an instrument meters nothing (Design note 11).

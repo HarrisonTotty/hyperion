@@ -38,6 +38,7 @@ import {
   type GlareSource,
 } from "../view/post/glare";
 import GLARE_WGSL from "../view/post/glare.wgsl?raw";
+import { SETTINGS } from "../view/quality/qualitySetting";
 import { type Checks, halfBits, halfTexels, halfToNumber, show } from "./harness";
 
 /** The check's frame: large enough that the chain's widest level keeps its energy inside it. */
@@ -196,7 +197,7 @@ export async function checkBloom(
     { width: SIZE.widthPx, height: SIZE.heightPx },
     frame.bits,
   );
-  const kernel = bloomKernel("high", "eye", RAD_PER_PX, EYE);
+  const kernel = bloomKernel(SETTINGS.high.photoreal.bloom, "eye", RAD_PER_PX, EYE);
   const threshold = bloomThreshold(1, 1);
   const chain = await BloomChain.create(engine, "smoke", SIZE, kernel);
   chain.run(hdr, threshold);

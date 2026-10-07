@@ -20,6 +20,7 @@ import {
   spreadPixelEE,
 } from "./bloom";
 import { glareSourceVeil, sphereIntegral, type GlareSource } from "./glare";
+import { SETTINGS } from "../quality/qualitySetting";
 
 const EYE = { ageYears: 25, pigmentation: 0.5 };
 const RAD_PER_PX_1080P = (60 * Math.PI) / 180 / 1920;
@@ -78,7 +79,7 @@ describe("bloomKernel", () => {
   it("has non-negative weights that sum to one at both settings", () => {
     for (const setting of ["high", "low"] as const) {
       for (const role of ["eye", "camera"] as const) {
-        const kernel = bloomKernel(setting, role, RAD_PER_PX_1080P, EYE);
+        const kernel = bloomKernel(SETTINGS[setting].photoreal.bloom, role, RAD_PER_PX_1080P, EYE);
         expect(kernel.weights.length).toBe(kernel.levels);
         let sum = 0;
         for (const w of kernel.weights) {
@@ -91,8 +92,8 @@ describe("bloomKernel", () => {
   });
 
   it("uses fewer levels at quarter resolution on the low setting", () => {
-    const high = bloomKernel("high", "eye", RAD_PER_PX_1080P, EYE);
-    const low = bloomKernel("low", "eye", 2 * RAD_PER_PX_1080P, EYE);
+    const high = bloomKernel(SETTINGS.high.photoreal.bloom, "eye", RAD_PER_PX_1080P, EYE);
+    const low = bloomKernel(SETTINGS.low.photoreal.bloom, "eye", 2 * RAD_PER_PX_1080P, EYE);
     expect(high.firstLevel).toBe(0);
     expect(low.firstLevel).toBe(1);
     expect(low.levels).toBeLessThan(high.levels);
@@ -103,7 +104,7 @@ describe("bloomKernel", () => {
   it("matches the spread function's encircled energy to 10% at 1, 4, 16 and 64 px", () => {
     const radii = [1, 4, 16, 64];
     for (const role of ["eye", "camera"] as const) {
-      const kernel = bloomKernel("high", role, RAD_PER_PX_1080P, EYE);
+      const kernel = bloomKernel(SETTINGS.high.photoreal.bloom, role, RAD_PER_PX_1080P, EYE);
       const side = 768;
       // Off the coarse levels' alignment, so the fit is checked away from the phase it was made at.
       const ci = 381;
@@ -150,7 +151,7 @@ describe("stored and injected glare", () => {
       excessLuminance: [trueLuminance - HALF_FLOAT_MAX, 0, 0],
     };
     for (const role of ["eye", "camera"] as const) {
-      const kernel = bloomKernel("high", role, RAD_PER_PX_1080P, EYE);
+      const kernel = bloomKernel(SETTINGS.high.photoreal.bloom, role, RAD_PER_PX_1080P, EYE);
       const bloomed = bloomChain(stored, kernel, "toward-zero");
       const injectedSrSum = sphereIntegral((t) => glareSourceVeil(source, t, role, EYE)[0]);
       const injected = injectedSrSum / (RAD_PER_PX_1080P * RAD_PER_PX_1080P);
@@ -165,7 +166,7 @@ describe("stored and injected glare", () => {
     for (let k = 0; k < 20; k += 1) {
       excess.values[(100 + k) * side + 120 + k] = 5000 + 37 * k;
     }
-    const kernel = bloomKernel("high", "eye", RAD_PER_PX_1080P, EYE);
+    const kernel = bloomKernel(SETTINGS.high.photoreal.bloom, "eye", RAD_PER_PX_1080P, EYE);
     const exact = bloomEnergy(bloomChain(excess, kernel, null));
     const truncated = bloomEnergy(bloomChain(excess, kernel, "toward-zero"));
     expect(exact / bloomEnergy(excess)).toBeCloseTo(1, 2);

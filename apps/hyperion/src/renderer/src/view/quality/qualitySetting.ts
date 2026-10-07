@@ -15,6 +15,9 @@
  */
 
 import { TABLE_SIZES, type TableSizes } from "../atmosphere/hillaire";
+import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
+import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
+import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
 import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
 import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
@@ -23,6 +26,15 @@ export type QualitySetting = "high" | "low";
 
 /** Every {@link QualitySetting}, in order from the highest, for tests and settings menus. */
 export const QUALITY_SETTINGS: ReadonlyArray<QualitySetting> = ["high", "low"];
+
+/**
+ * Each {@link QualitySetting} as the console reads it: the guide's `QUALITY` values, on `VIEW`'s
+ * label block and the `LINK` display's `Graphics` panel (R07.T17).
+ */
+export const QUALITY_NAMES = {
+  high: "HIGH",
+  low: "LOW",
+} as const satisfies Record<QualitySetting, string>;
 
 /** Where the terrain's normals are evaluated, and how its vertices are formed: in
  * `terrainKinds.ts`, which the height workers read too. */
@@ -72,6 +84,35 @@ export interface ViewSettings {
   readonly internalScaleBounds: readonly [min: number, max: number];
   /** The several views' budget: the photorealistic rate and how many such views (R07.T18). */
   readonly budget: ViewBudgetSettings;
+  /** The photorealistic style's passes: the histogram, bloom and the lit bodies (R07.T17). */
+  readonly photoreal: PhotorealSettings;
+}
+
+/**
+ * What the photorealistic style's passes read of a setting (R07 Design note 18): the low setting's
+ * forms, built beside the high ones.
+ *
+ * @remarks
+ * Design note 18's other two items are settings already: the view renders at most
+ * {@link TerrainSettings.renderHeightPx} rows (720 on low), presented upscaled by the tone-mapping
+ * pass, the render resolution that `ViewBudget.renderScale` is a fraction of; and the one
+ * photorealistic view is {@link ViewBudgetSettings.photorealisticViews}.
+ */
+export interface PhotorealSettings {
+  /**
+   * The exposure histogram's stride, px: 1 reads every pixel of the scene target, 2 every second
+   * pixel of every second row, a quarter-resolution input (R07.T12).
+   */
+  readonly histogramStride: 1 | 2;
+  /**
+   * The bloom chain's weighted mip levels (R07.T14): 7 from full resolution, or 5 from quarter
+   * resolution.
+   */
+  readonly bloom: BloomLevels;
+  /** The eclipse term's annuli K per star (R07 Design note 6): 4, or 3. */
+  readonly discAnnuli: number;
+  /** The most lit neighbours that light a body by planetshine (R07 Design note 7): 2, or 1. */
+  readonly planetshineSources: number;
 }
 
 /** What the per-view budget reads of a setting (R07 Design notes 14 and 18). */
@@ -110,7 +151,10 @@ const LOW_CACHE_BYTES = 64 * MIB;
  * body every setting draws the finest level whatever these say (R05 Design note 9). Both settings
  * hold the photorealistic view's internal scale in [0.5, 1.0]; the low setting budgets a
  * photorealistic primary view at 30 Hz and allows one photorealistic view (R07 Design notes 14 and
- * 18).
+ * 18). The low setting's photorealistic style takes its histogram at a stride of 2, blooms over 5
+ * levels from quarter resolution, eclipses with 3 annuli and lights each body by planetshine from
+ * one neighbour, against 1, 7 levels from full resolution, 4 annuli and two neighbours (R07
+ * Design note 18, R07.T17).
  */
 export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
   high: {
@@ -125,6 +169,12 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     sky: HIGH_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 60, photorealisticViews: null },
+    photoreal: {
+      histogramStride: 1,
+      bloom: BLOOM_LEVELS.high,
+      discAnnuli: DISC_ANNULI_HIGH,
+      planetshineSources: PLANETSHINE_SOURCES_HIGH,
+    },
   },
   low: {
     terrain: {
@@ -138,6 +188,12 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     sky: LOW_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 30, photorealisticViews: 1 },
+    photoreal: {
+      histogramStride: 2,
+      bloom: BLOOM_LEVELS.low,
+      discAnnuli: DISC_ANNULI_LOW,
+      planetshineSources: PLANETSHINE_SOURCES_LOW,
+    },
   },
 };
 

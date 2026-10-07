@@ -25,8 +25,11 @@ export interface GraphicsApi {
   onGpuProcessGone(listener: (event: GpuProcessGoneReport) => void): () => void;
 }
 
+/** A quality setting's name as the command line gives it (`--setting`, R05 Design note 26). */
+export type QualitySettingName = "high" | "low";
+
 /** The spike's quality setting (R05 Design note 26). */
-export type SpikeSettingName = "high" | "low";
+export type SpikeSettingName = QualitySettingName;
 
 /** The terrain's vertex path (R05 Design note 4), the T16 and T17 variants. */
 export type SpikeVertexPath = "baked-offsets" | "face-differences";
@@ -122,6 +125,11 @@ export interface HyperionApi {
   readonly serverUrl: string;
   /** The launch's graphics mode and the GPU process's crashes. */
   readonly graphics: GraphicsApi;
+  /**
+   * The quality setting `VIEW` draws at, from the launch's `--setting` (plan R07, T17): `high`
+   * unless it gave `low`; a spike's or a check's launch gives its own.
+   */
+  readonly setting: QualitySettingName;
   readonly versions: {
     readonly electron: string;
     readonly chrome: string;

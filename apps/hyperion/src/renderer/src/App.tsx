@@ -29,11 +29,10 @@ interface DisplayInputs {
   readonly serverUrl: string;
   readonly systemOpening: SystemOpening | null;
   readonly openSystem: (target: SystemTarget) => void;
-  /** `VIEW`'s engine and setting on a `--views-check` launch (R07.T20), else `null`. */
-  readonly checkedView: {
-    readonly engineSource: ViewEngineSource;
-    readonly setting: QualitySetting;
-  } | null;
+  /** `VIEW`'s engine on a `--views-check` launch (R07.T20), else `null`. */
+  readonly checkedView: { readonly engineSource: ViewEngineSource } | null;
+  /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
+  readonly setting: QualitySetting;
 }
 
 function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
@@ -47,7 +46,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
             clientVersion={__APP_VERSION__}
             connection={inputs.connection}
           />
-          <GraphicsPanel />
+          <GraphicsPanel setting={inputs.setting} />
         </>
       );
       break;
@@ -59,10 +58,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       break;
     case "view":
       content = (
-        <ViewDisplay
-          engineSource={inputs.checkedView?.engineSource}
-          setting={inputs.checkedView?.setting}
-        />
+        <ViewDisplay engineSource={inputs.checkedView?.engineSource} setting={inputs.setting} />
       );
       break;
   }
@@ -92,6 +88,9 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * chart's time (plan 14, P14.T41.a): `App` keeps the latest opening, counted so that each is a new
  * display state, and switches to the display. The callback is stable, so the memoised `GALAXY`
  * display is not rendered again for it.
+ *
+ * `VIEW` and the `LINK` display's `Graphics` panel take the launch's quality setting (`--setting`,
+ * R07.T17), which holds for the run.
  *
  * The header strip's `TRAINING` banner stands while `VIEW` is shown drawing a kept test scene, and
  * not over the server's scene (R02.T17; the guide's training banner): `ViewSceneProvider` holds the
@@ -138,10 +137,8 @@ export function App() {
     serverUrl,
     systemOpening,
     openSystem,
-    checkedView:
-      viewsCheck === undefined || probe === null
-        ? null
-        : { engineSource: probe.source, setting: viewsCheck.launch.setting },
+    checkedView: viewsCheck === undefined || probe === null ? null : { engineSource: probe.source },
+    setting: window.hyperion.setting,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>

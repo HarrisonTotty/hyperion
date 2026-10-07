@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { FrameSubmission, RenderView } from "../../view/engine/types";
-import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
+import { makeViewFrameDrawer, skyFaceSizePx, type ViewFrameDrawer } from "./viewFrameDrawer";
 
 /** A canvas view that records whether it was disposed. */
 class RecordingView implements RenderView {
@@ -75,4 +75,18 @@ describe("a view's frame drawer, made during a device loss (R07.T19.c)", () => {
     await Promise.resolve();
     expect([made.length, view.disposed]).toEqual([0, true]);
   });
+});
+
+describe("the sky cube's face size (R07.T17)", () => {
+  it.each([
+    { setting: "high", blendable: true, faceSizePx: 3_072 },
+    { setting: "low", blendable: true, faceSizePx: 1_024 },
+    { setting: "high", blendable: false, faceSizePx: 1_024 },
+    { setting: "low", blendable: false, faceSizePx: 1_024 },
+  ] as const)(
+    "is $faceSizePx² on the $setting setting where float32-blendable is $blendable",
+    ({ setting, blendable, faceSizePx }) => {
+      expect(skyFaceSizePx(setting, blendable)).toBe(faceSizePx);
+    },
+  );
 });

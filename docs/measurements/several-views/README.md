@@ -42,11 +42,10 @@ Checklist:
       dialog waits three minutes.
 - [ ] The run ends with `views check: exit 0`. Commit the two files it names.
 
-On the UHD 620, R07.T17 has not yet made `VIEW`'s quality setting reach its sky and its
-photorealistic frame: `--setting low` gives the budgets the low setting (one photorealistic view,
-the photorealistic primary at 30 Hz) and the 1280 × 720 window, but the sky and the frame draw at
-`high` until T17 lands; the record says so and is provisional. Whether to run it before T17 at
-all is pending your ruling (R07's Risks); a run before it is to be repeated after.
+On the UHD 620, `--setting low` gives `VIEW` the low setting throughout since R07.T17: the budgets
+(one photorealistic view, the photorealistic primary at 30 Hz), the 1280 × 720 window, the sky
+and both styles' frames. A low-setting record from before T17, marked provisional with "before
+R07.T17 the low setting reaches VIEW's budgets and the window's size only", is to be repeated.
 
 `--hidden` runs the same phases offscreen, with no presentation times and no question;
 `--smoke` runs them in 2 s windows, hidden, and writes under `target/views-check/`. Neither is a
@@ -129,6 +128,6 @@ How the figures are read:
   that each canvas adds, the decoding of the instruments' own commands as well as their
   presentation, which the pass timer cannot see. Which figure replaces `PER_CANVAS_OVERHEAD_MS` is
   the owner's ruling (R07's Risks, "Deviations in the T20 and T21 harnesses").
-- **A quiet machine:** a run started with the load average at or above 1, a hidden run, a smoke
-  run and, until R07.T17, a low-setting run are marked provisional; none of the first three is a
-  T20 result.
+- **A quiet machine:** a run started with the load average at or above 1, a hidden run and a
+  smoke run are marked provisional, and none of them is a T20 result (a low-setting run was too,
+  until R07.T17).

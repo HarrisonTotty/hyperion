@@ -99,7 +99,7 @@ import {
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { type DrawnSky, useViewSky } from "./useViewSky";
-import type { QualitySetting } from "../../view/quality/qualitySetting";
+import { QUALITY_NAMES, type QualitySetting } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -251,8 +251,8 @@ interface ViewDisplayProps {
   /** Where the engine comes from: R01's by default, a fake in a test. */
   readonly engineSource?: ViewEngineSource | undefined;
   /**
-   * The quality setting the views are budgeted at (R07.T19): `high` by default, until the client
-   * offers `low` (R07.T17), which also draws the sky and the photorealistic frame at it.
+   * The quality setting `VIEW` draws at (R07.T17), the launch's `--setting`: its budgets (R07.T19),
+   * its sky and its frames in either style take their forms from it; `high` by default.
    */
   readonly setting?: QualitySetting | undefined;
 }
@@ -292,7 +292,7 @@ interface ViewStageProps {
   readonly countLine: string | null;
   /** The open universe, about which the sky is asked (R06), or `null`. */
   readonly universe: UniverseIdHex | null;
-  /** The quality setting the views are budgeted at. */
+  /** The quality setting the views are budgeted at, and drawn at. */
   readonly setting: QualitySetting;
 }
 
@@ -302,6 +302,8 @@ interface BudgetInputs {
   readonly budgets: ReadonlyMap<ViewId, ViewBudget>;
   /** The GPU timer's state: `absent` feeds the resolution controller the frame interval. */
   readonly timer: GpuTimer;
+  /** The quality setting every view draws at (R07.T17). */
+  readonly setting: QualitySetting;
   /** Draws the instruments in a frame the primary draws. */
   readonly instruments: (frame: InstrumentsFrame) => void;
 }
@@ -520,6 +522,7 @@ function ViewStage({
     run: shown.run,
     exposure,
     widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
+    setting,
   });
   const skyDrawn = viewSky.drawn;
 
@@ -534,6 +537,7 @@ function ViewStage({
     reducedMotion,
     sky: viewSky.drawn?.model ?? null,
     exposure,
+    setting,
   });
   const specs: ReadonlyArray<ViewSpec> = [
     { id: VIEW_ID, slot: "primary", style: published.run.camera.style },
@@ -629,11 +633,12 @@ function ViewStage({
   const budgetRef = useRef<BudgetInputs>({
     budgets,
     timer: graphics.timer,
+    setting,
     instruments: instruments.frame,
   });
   useLayoutEffect(() => {
-    budgetRef.current = { budgets, timer: graphics.timer, instruments: instruments.frame };
-  }, [budgets, graphics.timer, instruments.frame]);
+    budgetRef.current = { budgets, timer: graphics.timer, setting, instruments: instruments.frame };
+  }, [budgets, graphics.timer, setting, instruments.frame]);
 
   // The view's camera is reported to the server's scene while the stage draws it (R03.T14).
   const removeCamera = server?.removeCamera ?? null;
@@ -763,6 +768,7 @@ function ViewStage({
           sky: inputs.sky,
           selection: inputs.selection,
           style: primaryBudget.style,
+          setting: paced.setting,
           // The scene target at the render resolution times the budget's or controller's scale.
           renderScale,
           availability: inputs.availability,
@@ -788,6 +794,7 @@ function ViewStage({
         publish,
         primary: runRef.current,
         budgets: paced.budgets,
+        setting: paced.setting,
         exposure: inputs.exposure,
         stars: inputs.stars,
         reportCamera:
@@ -1178,9 +1185,12 @@ function ViewStage({
               <ViewLabelBlock
                 id={`${legendId}-label`}
                 lines={withMeterLine(
-                  withDrawnStyle(
-                    withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
-                    shown.drawnStyle,
+                  withQualityLine(
+                    withDrawnStyle(
+                      withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
+                      shown.drawnStyle,
+                    ),
+                    setting,
                   ),
                   meterStands ? meter : null,
                 )}
@@ -1389,6 +1399,20 @@ function withDrawnStyle(
   );
 }
 
+/**
+ * The `PRIMARY` view's label block's lines with `QUALITY` after `STYLE`: the setting every view of
+ * the display draws at, the launch's `--setting`, always shown (R07.T17), on the primary's block
+ * alone since it holds for the whole display.
+ */
+function withQualityLine(
+  lines: ReadonlyArray<LabelLine>,
+  setting: QualitySetting,
+): ReadonlyArray<LabelLine> {
+  return lines.flatMap((line) =>
+    line.label === "STYLE" ? [line, { label: "QUALITY", value: QUALITY_NAMES[setting] }] : [line],
+  );
+}
+
 /** The label block's lines with the sky's `STARS` reading in place of R02's, once it has arrived. */
 function withSkyLine(
   lines: ReadonlyArray<LabelLine>,
@@ -1576,6 +1600,8 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE, setting = "high" }: 
  * view is budgeted on the quality setting (R07.T18's `viewBudgets`): paced at its rate, an
  * instrument only in the primary's frames, a photorealistic view's style held back where the
  * setting allows no more, and a photorealistic primary's scene target sized by the resolution
- * controller while instruments are open, from every view's GPU time in the primary's frame.
+ * controller while instruments are open, from every view's GPU time in the primary's frame. The
+ * setting is the launch's `--setting` (R07.T17): every view's sky, wireframe and photorealistic
+ * frame take its forms, a photorealistic scene target at most its `terrain.renderHeightPx` rows.
  */
 export const ViewDisplay = memo(ViewPanels);

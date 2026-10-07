@@ -47,7 +47,10 @@ export interface BloomLevels {
   readonly levels: number;
 }
 
-/** The chain's mip levels per setting: full resolution and 7 levels high, quarter and 5 low. */
+/**
+ * The chain's mip levels per setting: full resolution and 7 levels high, quarter and 5 low, which
+ * R05's `SETTINGS` carries as `photoreal.bloom` (R07.T17).
+ */
 export const BLOOM_LEVELS: Readonly<Record<QualitySetting, BloomLevels>> = {
   high: { firstLevel: 0, levels: 7 },
   low: { firstLevel: 1, levels: 5 },
@@ -419,8 +422,8 @@ export function spreadPixelEE(role: ViewRole, radPerPx: number, eye: EyeObserver
 const SUM_CONSTRAINT_WEIGHT = 100;
 
 /**
- * The bloom kernel for a view: its levels from `setting`, and level weights fitted by non-negative
- * least squares to the view's spread function at its angular pixel scale (Design note 12).
+ * The bloom kernel for a view: its setting's levels, and level weights fitted by non-negative least
+ * squares to the view's spread function at its angular pixel scale (Design note 12).
  *
  * @remarks
  * The fit matches the chain's encircled energy, Σ_m w_m EE_m(r), to the spread function's as its
@@ -430,15 +433,16 @@ const SUM_CONSTRAINT_WEIGHT = 100;
  * is conserved. The eye observer is an argument, as for `glareSpread`, so that this builds before
  * R06; the call sites pass R06's `DEFAULT_EYE_OBSERVER`.
  *
+ * @param bloomLevels - The setting's levels, `SETTINGS[s].photoreal.bloom` ({@link BLOOM_LEVELS}).
  * @param radPerPx - The view's angular size of one internal-resolution pixel, rad.
  */
 export function bloomKernel(
-  setting: QualitySetting,
+  bloomLevels: BloomLevels,
   role: ViewRole,
   radPerPx: number,
   eye: EyeObserver,
 ): BloomKernel {
-  const { firstLevel, levels } = BLOOM_LEVELS[setting];
+  const { firstLevel, levels } = bloomLevels;
   const responses: Array<ReadonlyArray<number>> = [];
   for (let k = 0; k < levels; k += 1) {
     responses.push(levelResponseEE(firstLevel + k));

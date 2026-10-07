@@ -4,14 +4,20 @@ import { vec3 } from "../../geometry/vec3";
 import { sphereFootprint } from "../bodies/regime";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
-import { BODY_DISC_CELLS_KERNEL, DISC_CELLS_PASS, type LitBodyInput } from "../bodies/draw";
+import {
+  BODY_DISC_CELLS_KERNEL,
+  type BodyFramePlan,
+  DISC_CELLS_PASS,
+  type LitBodyInput,
+} from "../bodies/draw";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
 import { TIMING_FRAMES_IN_FLIGHT } from "../engine/webgpu/timing";
 import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
-import { histogramParams } from "../post/histogram";
+import { histogramParams, histogramWorkgroups } from "../post/histogram";
+import type { QualitySetting } from "../quality/qualitySetting";
 import { type PhotorealFrame, PhotorealRenderer } from "./renderer";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
@@ -343,6 +349,75 @@ describe("the photorealistic renderer's histogram", () => {
     expect(renderer.takeHistogram()).toBeUndefined();
     expect(released.filter((name) => name.startsWith("test view histogram"))).toHaveLength(3);
   });
+});
+
+describe("the photorealistic renderer at each quality setting (R07.T17)", () => {
+  /** A renderer made at `setting`, and one frame drawn at it with the operator's meter. */
+  async function drawnAt(setting: QualitySetting): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly plan: BodyFramePlan | null;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const frame = { ...frameWith([]), setting };
+    await renderer.prepare(VIEWPORT, setting, "eye", frame.camera);
+    const plan = renderer.render(new RecordingView(), frame);
+    renderer.dispose();
+    return { engine, plan };
+  }
+
+  it.each([
+    { setting: "high", stride: 1 },
+    { setting: "low", stride: 2 },
+  ] as const)(
+    "takes the $setting setting's histogram at a stride of $stride",
+    async ({ setting, stride }) => {
+      const { engine } = await drawnAt(setting);
+      expect(
+        engine.dispatched
+          .filter((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram)
+          .map((d) => [Array.from(d.bindings.uniforms["params"] ?? []), d.workgroups]),
+      ).toEqual([
+        [
+          Array.from(histogramParams(VIEWPORT, "average", stride)),
+          histogramWorkgroups(VIEWPORT, stride),
+        ],
+      ]);
+    },
+  );
+
+  it.each([
+    { setting: "high", levels: [1, 2, 3, 4, 5, 6] },
+    { setting: "low", levels: [1, 2, 3, 4, 5] },
+  ] as const)(
+    "blooms over the $setting setting's mip levels $levels",
+    async ({ setting, levels }) => {
+      const { engine } = await drawnAt(setting);
+      const down = engine.textureSpecs
+        .map((spec) => /^test view:bloom down (\d+)/.exec(spec.name)?.[1])
+        .filter((level) => level !== undefined)
+        .map(Number);
+      const bloomPasses = engine.targetFrames.filter(
+        (f) => f.label === PHOTOREAL_PASS_LABELS.bloom,
+      ).length;
+      // Down to the coarsest level, then up to level 1.
+      expect([down, bloomPasses]).toEqual([levels, 2 * levels.length - 1]);
+    },
+  );
+
+  it.each([
+    { setting: "high", annuli: 4 },
+    { setting: "low", annuli: 3 },
+  ] as const)(
+    "eclipses each disc's star over the $setting setting's $annuli annuli",
+    async ({ setting, annuli }) => {
+      const { plan } = await drawnAt(setting);
+      const counts = plan?.discs.flatMap((disc) =>
+        disc.lights.flatMap((light) => light.annuli.map((set) => set.flux.length)),
+      );
+      expect(counts).toEqual([annuli, annuli, annuli]);
+    },
+  );
 });
 
 /**

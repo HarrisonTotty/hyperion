@@ -108,7 +108,8 @@ server *args:
 # The `--` tells electron-vite that the rest of the line is the client's own command line, which
 # electron-vite hands to Electron without the separator, so Chromium sees a switch there as its own:
 # `--hyperion-gpu-timing` (lift timestamp quantization, for performance runs only) is given like any
-# other client option, `just client --hyperion-gpu-timing`. A Wayland session gets
+# other client option, `just client --hyperion-gpu-timing`. `--setting low` draws VIEW at the low
+# quality setting (R07.T17; `high` without it), `just client --setting low`. A Wayland session gets
 # `--ozone-platform=x11` here, because the client's own relaunch through XWayland would end
 # `electron-vite dev` and leave the new window on a dead dev server (R01 Design note 3).
 # Run the bridge client (Electron) with hot reload, e.g. `just client --port 9000`.

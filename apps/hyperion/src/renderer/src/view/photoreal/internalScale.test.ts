@@ -6,7 +6,7 @@ import type { ColourTokens } from "../../spatial/paint";
 import { DEFAULT_FOV_DEG } from "../camera/projection";
 import { precisionScene } from "../scenes/precision";
 import { buildWireframeDrawList, type SpriteStar, viewStrokesAt } from "../wireframe/drawList";
-import { internalViewport, spritesAtScale } from "./internalScale";
+import { internalViewport, renderViewport, spritesAtScale } from "./internalScale";
 
 const CANVAS = { widthPx: 1280, heightPx: 720 };
 
@@ -55,6 +55,29 @@ function spritesAt(viewport: { readonly widthPx: number; readonly heightPx: numb
     },
   ).sprites;
 }
+
+describe("renderViewport (R07.T17)", () => {
+  it("is the canvas itself where the setting renders at the canvas's size", () => {
+    expect(renderViewport({ widthPx: 1920, heightPx: 1080 }, null)).toEqual({
+      widthPx: 1920,
+      heightPx: 1080,
+    });
+  });
+
+  it("renders a taller canvas at the setting's 720 rows, at its aspect", () => {
+    expect(renderViewport({ widthPx: 1120, heightPx: 900 }, 720)).toEqual({
+      widthPx: 896,
+      heightPx: 720,
+    });
+  });
+
+  it("never renders more rows than the canvas has", () => {
+    expect(renderViewport({ widthPx: 555, heightPx: 254 }, 720)).toEqual({
+      widthPx: 555,
+      heightPx: 254,
+    });
+  });
+});
 
 describe("internalViewport", () => {
   it("is the render resolution itself at a scale of 1", () => {

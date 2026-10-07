@@ -61,7 +61,10 @@ export const STROKE_PX = { thin: 1, heavy: 1.5, selected: 2 } as const;
  */
 export const PREDICTED_DASH_PX = { onPx: 6, offPx: 4 } as const;
 
-/** The most star sprites the low setting draws, the brightest by flux (Design note 21). */
+/**
+ * The most of the interim stars the low setting draws as sprites, the brightest by flux (Design
+ * note 21); R06's sky keeps its own selection's budget (R07.T17).
+ */
 export const LOW_SETTING_MAX_SPRITES = 2_000;
 
 /**
@@ -322,7 +325,10 @@ export interface DrawCamera {
  * pixels or under 2 of them.
  */
 export interface DrawOptions extends ViewStrokes {
-  /** The wireframe's low setting (Design note 21): graticules at 30° only, 2,000 sprites. */
+  /**
+   * The wireframe's low setting (Design note 21): graticules at 30° only, and at most 2,000 of the
+   * interim stars as sprites; the sky's sprites keep their own selection's budget (R07.T17).
+   */
   readonly lowSetting: boolean;
   /** The exposure, EV100. */
   readonly ev100: number;
@@ -851,5 +857,9 @@ function starSprites(
   const ranked = sprites.toSorted(
     (a, b) => b.illuminanceLx - a.illuminanceLx || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
-  return options.lowSetting ? ranked.slice(0, LOW_SETTING_MAX_SPRITES) : ranked;
+  // The cap is the interim field's (Design note 21). The sky's own selection already holds its
+  // setting's budget, and a sprite it chose is in no bake, so cutting one would lose its star
+  // (R06.T13.c; R07.T17).
+  const interim = options.skyStars === undefined || options.skyStars === null;
+  return options.lowSetting && interim ? ranked.slice(0, LOW_SETTING_MAX_SPRITES) : ranked;
 }

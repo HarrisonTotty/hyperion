@@ -58,7 +58,7 @@ describe("the client's command line", () => {
   });
 
   it("links to a server on this machine when given nothing", () => {
-    expect(parse([])).toEqual({ address: DEFAULT_ADDRESS, port: DEFAULT_PORT });
+    expect(parse([])).toEqual({ address: DEFAULT_ADDRESS, port: DEFAULT_PORT, setting: "high" });
     expect(url([])).toBe("ws://127.0.0.1:7878/ws");
   });
 
@@ -244,7 +244,6 @@ describe("the descent spike's options", () => {
   });
 
   it.each([
-    ["--setting", "low"],
     ["--seed", "7"],
     ["--smoke"],
     ["--out", "/data/out"],
@@ -307,6 +306,33 @@ describe("the several-views check's options", () => {
 
   it("names both runs for a shared option given without either", () => {
     expect(refusal(["--smoke"]).message).toContain("--descent-spike or --views-check");
+  });
+});
+
+describe("the quality setting VIEW draws at (R07.T17)", () => {
+  beforeEach(() => {
+    for (const stream of [process.stdout, process.stderr]) {
+      vi.spyOn(stream, "write").mockImplementation(() => true);
+    }
+  });
+
+  it.each(["high", "low"] as const)("takes --setting %s on an ordinary launch", (setting) => {
+    expect(parse(["--setting", setting])).toEqual({
+      address: DEFAULT_ADDRESS,
+      port: DEFAULT_PORT,
+      setting,
+    });
+  });
+
+  it.each([["--descent-spike"], ["--views-check"]])(
+    "gives a %s launch the run's own setting",
+    (flag) => {
+      expect(parse([flag, "--setting", "low"]).setting).toBe("low");
+    },
+  );
+
+  it("refuses a setting that is neither high nor low", () => {
+    expect(refusal(["--setting", "medium"]).exitCode).toBe(1);
   });
 });
 

@@ -11,7 +11,6 @@ import { measured, missing, type ResultsFiles } from "./results";
 import {
   buildViewsCheckResults,
   ENGINE_OWNER,
-  LOW_BEFORE_T17,
   NO_WINDOW_REASON,
   PHASE_VIEWS,
   type PhaseTraceFigures,
@@ -190,11 +189,8 @@ describe("the views check's results", () => {
     ]);
   });
 
-  it("marks a low-setting run provisional until R07.T17", () => {
-    expect(lowResults().run.quiet).toEqual({
-      provisional: true,
-      note: `provisional: ${LOW_BEFORE_T17}`,
-    });
+  it("leaves a quiet, shown run on the low setting unmarked, since R07.T17", () => {
+    expect(lowResults().run.quiet).toEqual({ provisional: false, note: null });
   });
 
   it("leaves a quiet, shown run on the high setting unmarked", () => {

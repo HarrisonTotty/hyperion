@@ -10,7 +10,7 @@ import { useMemo } from "react";
 import { barycentreAt } from "../../lib/scene/place";
 import type { SystemPlace } from "../../lib/scene/model";
 import type { ExposureControl } from "../../view/photometry/exposure";
-import { SETTINGS } from "../../view/quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import { cameraGalacticPosition } from "../../view/sky/camera";
 import type { BakeInput } from "../../view/sky/bake";
 import { cullSky } from "../../view/sky/cull";
@@ -78,19 +78,23 @@ export interface CulledViewSky {
  * @remarks
  * A camera's limit is the view camera's deepest at every exposure (R07.T13.e), so the cull, the
  * selection and the bake never depend on the exposure.
+ *
+ * @param setting - The quality setting `VIEW` is given, whose sprite budget the selection keeps
+ *   (R06 Design note 22; R07.T17).
  */
 export function cullViewSky(
   model: SkyModel,
   role: ViewRun["camera"]["role"],
   fovDeg: number,
   widthPx: number,
+  setting: QualitySetting,
 ): DrawnSky {
   const kept = cullSky(
     model.stars,
     viewSkyLimit(model, role, fovDeg),
     model.response.band.face_texels,
   );
-  const selection = selectSkySprites(model.stars, kept.kept, SETTINGS.high.sky.spriteBudget, {
+  const selection = selectSkySprites(model.stars, kept.kept, SETTINGS[setting].sky.spriteBudget, {
     fovDeg,
     widthPx,
   });
@@ -131,6 +135,8 @@ export interface ViewSkyInput {
   readonly exposure: ExposureControl;
   /** The view's width, device px, or `null` before it is measured. */
   readonly widthPx: number | null;
+  /** The quality setting `VIEW` is given, whose N_max and sprite budget the sky takes (R07.T17). */
+  readonly setting: QualitySetting;
 }
 
 /** The view's width the parallax rule reads before the view is measured: 1080p's. */
@@ -140,13 +146,13 @@ const DEFAULT_WIDTH_PX = 1_920;
  * The view's sky (plan R06, T13.c).
  *
  * @remarks
- * The high setting's N_max and sprite budget until the view takes a quality setting. Asked on the
- * published run (4 Hz), which is often enough: the request rule holds a sky for a year or until a
- * camera moves its nearest baked star by a tenth of a pixel.
+ * Asked at the setting's N_max and culled to its sprite budget (R06 Design note 22; R07.T17), on
+ * the published run (4 Hz), which is often enough: the request rule holds a sky for a year or until
+ * a camera moves its nearest baked star by a tenth of a pixel.
  */
 export function useViewSky(input: ViewSkyInput): ViewSky {
-  const { universe, place, run, exposure } = input;
-  const settings = SETTINGS.high.sky;
+  const { universe, place, run, exposure, setting } = input;
+  const settings = SETTINGS[setting].sky;
   const widthPx = input.widthPx ?? DEFAULT_WIDTH_PX;
   const time = run.scene.time;
   const observer = place === null ? null : barycentreAt(place, time);
@@ -168,12 +174,12 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
   const { model, pending } = useSky(request, cameras);
   const role = run.camera.role;
   const fovDeg = run.camera.fovDeg;
-  // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's role, field of view or size
-  // changes, so that the drawn sky keeps its identity from one published run to the next and is
-  // baked once; the exposure moves only the label (R07.T13.e).
+  // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's role, field of view, size or
+  // setting changes, so that the drawn sky keeps its identity from one published run to the next
+  // and is baked once; the exposure moves only the label (R07.T13.e).
   const drawn = useMemo(
-    () => (model === null ? null : cullViewSky(model, role, fovDeg, widthPx)),
-    [model, role, fovDeg, widthPx],
+    () => (model === null ? null : cullViewSky(model, role, fovDeg, widthPx, setting)),
+    [model, role, fovDeg, widthPx, setting],
   );
   // A sky is this view's only for the system it was asked about, whose position is known.
   const ours =

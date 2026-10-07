@@ -32,6 +32,7 @@ import type {
   ViewSize,
   WgslMaterialSpec,
 } from "../engine/types";
+import { renderViewport } from "../photoreal/internalScale";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import toneCurveWgsl from "../shaders/toneCurve.wgsl?raw";
 import { TERRAIN_PASS_LABEL } from "../terrain/gpu/material";
@@ -73,15 +74,12 @@ export const LIT_AGX_MATERIAL: WgslMaterialSpec = {
   blend: "none",
 };
 
-/** The render size for a presented `size`: `renderHeightPx` tall at its aspect, or itself. */
+/**
+ * The render size for a presented `size`: `renderHeightPx` tall at its aspect, or itself; the
+ * photorealistic view's render resolution from the same setting (`renderViewport`, R07.T17).
+ */
 export function renderSizeOf(size: ViewSize, renderHeightPx: number | null): ViewSize {
-  if (renderHeightPx === null || renderHeightPx >= size.heightPx) {
-    return size;
-  }
-  return {
-    widthPx: Math.max(1, Math.round((size.widthPx * renderHeightPx) / size.heightPx)),
-    heightPx: renderHeightPx,
-  };
+  return renderViewport(size, renderHeightPx);
 }
 
 /** What the lit view draws its display pass into: a view, or the harness's target. */

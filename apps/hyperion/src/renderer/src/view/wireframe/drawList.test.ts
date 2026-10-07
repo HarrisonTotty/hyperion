@@ -319,6 +319,16 @@ describe("buildWireframeDrawList", () => {
     }).toEqual({ all: true, low: LOW_SETTING_MAX_SPRITES, byFlux: true });
   });
 
+  it("keeps every one of the sky's sprites at the low setting, beyond the interim field's 2,000 (R07.T17)", () => {
+    // R06's low selection holds 2,048, and a star it makes a sprite is in no bake.
+    const skyStars = Array.from({ length: 2_048 }, (_, i) => ({
+      id: String(i),
+      direction: normalise(vec3(((i % 64) - 32) / 100, (Math.floor(i / 64) - 16) / 100, -1)),
+      illuminanceRgbLx: [2e-6, 3e-6, 4e-6] as const,
+    }));
+    expect(build({ lowSetting: true, skyStars }).sprites).toHaveLength(2_048);
+  });
+
   it("draws the flight path marker for the own ship's velocity", () => {
     expect(build().lines.some((line) => line.id.startsWith("mark:flight_path"))).toBe(true);
   });

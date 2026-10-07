@@ -9,12 +9,16 @@
  * | `--address` | `HYPERION_SERVER_ADDR` | `127.0.0.1` |
  * | `--port`    | `HYPERION_SERVER_PORT` | `7878`      |
  *
+ * `--setting high|low` is the quality setting `VIEW` draws at (plan R07, T17; R05 Design note 26),
+ * `high` unless given: the operator chooses it at launch, it holds for the run, and launching again
+ * changes it. The descent spike and the several-views check take it as their own setting.
+ *
  * `--descent-spike` opens the descent spike in place of the consoles (plan R05, T13.c), with its
- * own options: `--setting high|low`, `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`,
+ * `--setting` and its own options: `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`,
  * `--vertex-path baked-offsets|face-differences`, `--normals double|mesh`, `--ridged on|off`,
  * `--dawn-safety on|off`, `--capture <dir>` and `--trace-profile on|off` (T14.e: V8's CPU profiler
- * in the trace, off by default; a profiled run is a diagnostic, never judged). Each is refused
- * without the flag.
+ * in the trace, off by default; a profiled run is a diagnostic, never judged). Each of its own is
+ * refused without the flag.
  *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
@@ -27,6 +31,7 @@
 
 import { Command, InvalidArgumentError, Option } from "commander";
 
+import type { QualitySettingName } from "../preload/api";
 import { DEFAULT_SPIKE_SEED, isU64Decimal, type SpikeLaunch } from "../preload/spikeLaunch";
 import type { ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
 
@@ -49,6 +54,11 @@ export interface ClientArgs {
   readonly address: string;
   /** Port the server listens on, 1 to 65535. */
   readonly port: number;
+  /**
+   * The quality setting `VIEW` draws at (`--setting`, R07.T17): on a spike or a check launch, its
+   * own setting.
+   */
+  readonly setting: QualitySettingName;
   /** The descent spike's options when `--descent-spike` is given, else `undefined`. */
   readonly spike?: SpikeLaunch;
   /** The several-views check's options when `--views-check` is given, else `undefined`. */
@@ -172,10 +182,10 @@ export function buildCommand(version: string): Command {
       new Option("--views-check", "run the several-views check (plan R07) in the consoles' VIEW"),
     )
     .addOption(
-      new Option("--setting <SETTING>", "the spike's or the check's quality setting").choices([
-        "high",
-        "low",
-      ]),
+      new Option(
+        "--setting <SETTING>",
+        "the quality setting VIEW draws at, or the spike's or the check's (default high)",
+      ).choices(["high", "low"]),
     )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
@@ -236,24 +246,31 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     if (stray !== undefined) {
       command.error(`error: --${kebab(stray)} is an option of --descent-spike, not --views-check`);
     }
-    return { address, port, viewsCheck: viewsCheckLaunchOf(options) };
+    const viewsCheck = viewsCheckLaunchOf(options);
+    return { address, port, setting: viewsCheck.setting, viewsCheck };
   }
   if (options["descentSpike"] !== true) {
-    const stray = SPIKE_OPTIONS.find((name) => options[name] !== undefined);
+    // The setting is the consoles' too (R07.T17); the spike's other options are its own.
+    const stray = SPIKE_OPTIONS.find((name) => name !== "setting" && options[name] !== undefined);
     if (stray !== undefined) {
       const owners = VIEWS_CHECK_OPTIONS.some((each) => each === stray)
         ? "--descent-spike or --views-check, neither of which was"
         : "--descent-spike, which was not";
       command.error(`error: --${kebab(stray)} is an option of ${owners} given`);
     }
-    return { address, port };
+    return { address, port, setting: settingOf(options) };
   }
   const spike = spikeLaunchOf(options);
   if (spike.setting === "low" && spike.vertexPath === "baked-offsets") {
     // The low setting's cache does not fit `BakedOffsets` (R05 Design note 4).
     command.error("error: --vertex-path baked-offsets does not fit the low setting's cache");
   }
-  return { address, port, spike };
+  return { address, port, setting: spike.setting, spike };
+}
+
+/** The `--setting` given, `high` without one (commander has checked its choices). */
+function settingOf(options: Readonly<Record<string, unknown>>): QualitySettingName {
+  return options["setting"] === "low" ? "low" : "high";
 }
 
 /** A commander attribute name as its option: `vertexPath` is `vertex-path`. */
@@ -265,7 +282,7 @@ function kebab(name: string): string {
 function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCheckLaunch {
   const out = options["out"];
   return {
-    setting: options["setting"] === "low" ? "low" : "high",
+    setting: settingOf(options),
     smoke: options["smoke"] === true,
     out: typeof out === "string" ? out : null,
   };
@@ -278,11 +295,10 @@ function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch 
     return typeof value === "string" ? value : null;
   };
   const workers = options["workers"];
-  const setting = text("setting");
   const vertexPath = text("vertexPath");
   const normals = text("normals");
   return {
-    setting: setting === "low" ? "low" : "high",
+    setting: settingOf(options),
     seed: text("seed") ?? DEFAULT_SPIKE_SEED,
     smoke: options["smoke"] === true,
     out: text("out"),
@@ -308,7 +324,7 @@ export function userArgs(argv: readonly string[], packaged: boolean): readonly s
 }
 
 /** The WebSocket URL of the server described by `args`. */
-export function serverUrlOf({ address, port }: ClientArgs): string {
+export function serverUrlOf({ address, port }: Pick<ClientArgs, "address" | "port">): string {
   const url = new URL(`ws://${address}`);
   url.port = String(port);
   url.pathname = WS_PATH;

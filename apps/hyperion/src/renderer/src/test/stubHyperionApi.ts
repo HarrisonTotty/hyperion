@@ -3,6 +3,7 @@ import { vi } from "vitest";
 import type {
   GraphicsApi,
   HyperionApi,
+  QualitySettingName,
   SpikeApi,
   SpikeLaunch,
   ViewsCheckApi,
@@ -45,17 +46,21 @@ export const TEST_SPIKE_LAUNCH: SpikeLaunch = {
  *   as on an ordinary launch.
  * @param viewsCheck - The several-views check's functions, for a `--views-check` launch; none by
  *   default.
+ * @param setting - The launch's quality setting (`--setting`): the spike's or the check's own,
+ *   else `high`, as the main process gives it.
  */
 export function stubHyperionApi(
   serverUrl: string = TEST_SERVER_URL,
   graphics: GraphicsApi = TEST_GRAPHICS,
   spike?: SpikeApi,
   viewsCheck?: ViewsCheckApi,
+  setting: QualitySettingName = spike?.launch.setting ?? viewsCheck?.launch.setting ?? "high",
 ): void {
   const api: HyperionApi = {
     platform: "linux",
     serverUrl,
     graphics,
+    setting,
     versions: { electron: "44.4.3", chrome: "142.0.0.0", node: "22.21.1" },
     ...(spike === undefined ? {} : { spike }),
     ...(viewsCheck === undefined ? {} : { viewsCheck }),

@@ -29,7 +29,7 @@ function renderPanel(
   }
   render(
     <GraphicsStatusContext value={store}>
-      <GraphicsPanel />
+      <GraphicsPanel setting="high" />
     </GraphicsStatusContext>,
   );
   return store;
@@ -165,5 +165,19 @@ describe("GraphicsPanel", () => {
   it("reads the default mode", () => {
     renderPanel("default");
     expect(reading("Mode")).toHaveTextContent("DEFAULT");
+  });
+
+  it.each([
+    { setting: "high", words: "HIGH" },
+    { setting: "low", words: "LOW" },
+  ] as const)("reads the launch's quality setting $setting as $words", ({ setting, words }) => {
+    render(
+      <GraphicsStatusContext
+        value={new GraphicsStatusStore(initialGraphicsStatus("vulkan", false))}
+      >
+        <GraphicsPanel setting={setting} />
+      </GraphicsStatusContext>,
+    );
+    expect(reading("Quality")).toHaveTextContent(words);
   });
 });

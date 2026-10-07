@@ -54,8 +54,6 @@ import type {
   TextureHandle,
   ViewSize,
 } from "../engine/types";
-import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
-import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import type { PlacedLight } from "../lighting/hostLights";
 import { bloomKernel, bloomThreshold, levelWeight } from "../post/bloom";
 import {
@@ -69,7 +67,7 @@ import { type GlareSource, glareSpreadTerms } from "../post/glare";
 import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histogram";
 import type { MeterMode } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
-import type { QualitySetting } from "../quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
 import { toHalfArray } from "../sky/half";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
@@ -226,7 +224,7 @@ export class PhotorealRenderer {
       engine,
       this.#name,
       size,
-      bloomKernel(setting, role, radPx, DEFAULT_EYE_OBSERVER),
+      bloomKernel(SETTINGS[setting].photoreal.bloom, role, radPx, DEFAULT_EYE_OBSERVER),
     );
     let tonemap: MaterialHandle;
     let sprite: MaterialHandle;
@@ -323,7 +321,12 @@ export class PhotorealRenderer {
     const key = `${frame.role} ${frame.setting} ${String(radPx)}`;
     if (key !== resources.kernelKey) {
       resources.bloom.setKernel(
-        bloomKernel(frame.setting, frame.role, radPx, DEFAULT_EYE_OBSERVER),
+        bloomKernel(
+          SETTINGS[frame.setting].photoreal.bloom,
+          frame.role,
+          radPx,
+          DEFAULT_EYE_OBSERVER,
+        ),
       );
       resources.kernelKey = key;
     }
@@ -374,6 +377,8 @@ export class PhotorealRenderer {
     }
     this.#follow(resources, frame);
     const { camera, viewport } = frame;
+    // The setting's forms of the histogram, the eclipse term and planetshine (Design note 18).
+    const settings = SETTINGS[frame.setting].photoreal;
     const projection = perspectiveReversedInfinite(
       camera.fovXRad,
       viewport.widthPx / viewport.heightPx,
@@ -387,8 +392,8 @@ export class PhotorealRenderer {
         camera,
         viewport,
         exposureScale: frame.exposureScale,
-        annuli: frame.setting === "low" ? DISC_ANNULI_LOW : DISC_ANNULI_HIGH,
-        planetshine: frame.setting === "low" ? PLANETSHINE_SOURCES_LOW : PLANETSHINE_SOURCES_HIGH,
+        annuli: settings.discAnnuli,
+        planetshine: settings.planetshineSources,
         depthWriters: frame.depthWriters,
         setting: frame.setting,
       },
@@ -435,7 +440,7 @@ export class PhotorealRenderer {
         hdrColour: resources.target.colour,
         size: resources.size,
         mode: frame.meter,
-        stride: frame.setting === "low" ? 2 : 1,
+        stride: settings.histogramStride,
         preExposure: frame.exposureScale,
       });
     }

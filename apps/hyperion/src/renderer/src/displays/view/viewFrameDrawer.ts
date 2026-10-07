@@ -4,7 +4,9 @@
  * layers and its baked cube. Every view of `VIEW` draws through it, the primary and each
  * instrument alike (R07.T19.c), so that what one view's frame draws every view's does; only the
  * exposure's source, the primary, gives a meter, and its frames alone take the histogram that its
- * `AutoExposure` reads (R07.T8.a; Design note 11).
+ * `AutoExposure` reads (R07.T8.a; Design note 11). Each frame draws at the quality setting `VIEW`
+ * is given (R07.T17): R02's wireframe, R06's cube and R07's photorealistic frame at its forms, the
+ * scene target at most its `terrain.renderHeightPx` rows times the budget's scale.
  *
  * @remarks
  * Every handle is made again after a device loss: the photorealistic renderer itself, R06's layers
@@ -23,12 +25,16 @@ import type { StyleAvailability } from "../../view/engine/platform";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import { controlEv100, type ExposureControl, exposureScale } from "../../view/photometry/exposure";
-import { internalViewport, spritesAtScale } from "../../view/photoreal/internalScale";
+import {
+  internalViewport,
+  renderViewport,
+  spritesAtScale,
+} from "../../view/photoreal/internalScale";
 import { overlaySubmission } from "../../view/photoreal/overlay";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
 import type { Histogram } from "../../view/post/histogram";
 import type { MeterMode } from "../../view/post/meter";
-import { SETTINGS } from "../../view/quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import type { ViewScene, ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
 import type { BakedCube } from "../../view/sky/bake";
@@ -67,7 +73,15 @@ export interface ViewFrameInputs {
   readonly selection: CameraTarget | null;
   /** The style its budget draws (`ViewBudget.style`). */
   readonly style: RenderStyle;
-  /** Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`). */
+  /**
+   * The quality setting `VIEW` is given (R07.T17): the wireframe's, the sky cube's and the
+   * photorealistic frame's forms, and the render resolution its scale is a fraction of.
+   */
+  readonly setting: QualitySetting;
+  /**
+   * Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`), of the render
+   * resolution (`renderViewport`).
+   */
   readonly renderScale: number;
   /** The styles it may draw: the adapter's, and for the primary the budget's permission too. */
   readonly availability: StyleAvailability;
@@ -100,6 +114,15 @@ export function skySprites(
   const offset = cameraFromObserverM(pose, scene, sky.model.request.observer);
   // A scene that has lost its system's position draws the interim stars, which say so.
   return offset === null ? null : skySpriteStars(sky.model.stars, sky.selection.sprites, offset);
+}
+
+/**
+ * The side, texels, of the sky cube's faces a view bakes (R06 Design note 22): the setting's, but
+ * the low setting's 1,024² wherever the device cannot blend `float32`, whose bake runs on the CPU
+ * (R06.T13.f).
+ */
+export function skyFaceSizePx(setting: QualitySetting, float32Blendable: boolean): number {
+  return float32Blendable ? SETTINGS[setting].sky.faceSizePx : SETTINGS.low.sky.faceSizePx;
 }
 
 /** A view's renderers on one engine, drawing into its canvas's view. */
@@ -192,7 +215,8 @@ export class ViewFrameDrawer {
       viewport,
       tokens,
       {
-        lowSetting: false,
+        // R02's wireframe at the setting: graticules at 30° only and 2,000 sprites on low.
+        lowSetting: inputs.setting === "low",
         ev100,
         selection: inputs.selection,
         destination: null,
@@ -202,7 +226,7 @@ export class ViewFrameDrawer {
         skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
       },
     );
-    const cube = this.#cubeFor(inputs.sky);
+    const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
     if (
@@ -243,14 +267,17 @@ export class ViewFrameDrawer {
         );
         this.#bandFor = sky;
       }
-      const internal = internalViewport(viewport, inputs.renderScale);
+      const internal = internalViewport(
+        renderViewport(viewport, SETTINGS[inputs.setting].terrain.renderHeightPx),
+        inputs.renderScale,
+      );
       const plan = this.#photoreal.render(
         this.#view,
         photorealFrame({
           run,
           pose: camera.pose,
           viewport: internal,
-          setting: "high",
+          setting: inputs.setting,
           exposureScale: exposed,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
           sky,
@@ -281,7 +308,7 @@ export class ViewFrameDrawer {
     }
   }
 
-  #cubeFor(sky: DrawnSky | null): BakedCube | null {
+  #cubeFor(sky: DrawnSky | null, setting: QualitySetting): BakedCube | null {
     const cache = skyCubeCacheOf(this.#engine);
     if (sky === null || sky === this.#failedFor) {
       cache.release(this.#name);
@@ -293,12 +320,7 @@ export class ViewFrameDrawer {
         baked: sky.selection.baked,
         // Read at the bake: a restore may have brought a device without float32-blendable.
         bakeInput: () =>
-          bakeInputOf(
-            sky,
-            this.#engine.capabilities.float32Blendable
-              ? SETTINGS.high.sky.faceSizePx
-              : SETTINGS.low.sky.faceSizePx,
-          ),
+          bakeInputOf(sky, skyFaceSizePx(setting, this.#engine.capabilities.float32Blendable)),
       });
     } catch (error: unknown) {
       // A bake that fails (a lost device) leaves the sprites; tried again on another sky.

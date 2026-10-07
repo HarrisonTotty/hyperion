@@ -64,6 +64,24 @@ describe("the quality settings", () => {
     expect(SETTINGS.high.budget).toEqual({ photorealisticRateHz: 60, photorealisticViews: null });
   });
 
+  it("gives the low setting Design note 18's photorealistic forms (R07.T17)", () => {
+    expect(SETTINGS.low.photoreal).toEqual({
+      histogramStride: 2,
+      bloom: { firstLevel: 1, levels: 5 },
+      discAnnuli: 3,
+      planetshineSources: 1,
+    });
+  });
+
+  it("gives the high setting the full photorealistic forms (R07.T17)", () => {
+    expect(SETTINGS.high.photoreal).toEqual({
+      histogramStride: 1,
+      bloom: { firstLevel: 0, levels: 7 },
+      discAnnuli: 4,
+      planetshineSources: 2,
+    });
+  });
+
   it("makes TERRAIN_SETTINGS the terrain field of SETTINGS", () => {
     for (const setting of QUALITY_SETTINGS) {
       expect(TERRAIN_SETTINGS[setting]).toBe(SETTINGS[setting].terrain);

@@ -16,8 +16,9 @@ import {
   shell,
 } from "electron";
 
-import type { SpikeLaunch, ViewsCheckLaunch } from "../preload/api";
+import type { QualitySettingName, SpikeLaunch, ViewsCheckLaunch } from "../preload/api";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
+import { qualitySwitch } from "../preload/qualityLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
 import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
@@ -106,6 +107,7 @@ interface ViewsCheckWindowRun {
 function createWindow(
   serverUrl: string,
   graphics: GraphicsLaunch,
+  setting: QualitySettingName,
   spike: SpikeWindow | null,
   check: ViewsCheckWindowRun | null = null,
 ): BrowserWindow {
@@ -131,11 +133,12 @@ function createWindow(
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      // The sandboxed preload has no way to read the command line, so the URL and the graphics
-      // launch ride in its argv.
+      // The sandboxed preload has no way to read the command line, so the URL, the graphics
+      // launch and the quality setting ride in its argv.
       additionalArguments: [
         serverUrlSwitch(serverUrl),
         ...graphicsArguments(graphics.launchMode, graphics.gpuTiming),
+        qualitySwitch(setting),
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
         ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
       ],
@@ -535,22 +538,25 @@ async function main(): Promise<void> {
   const spike = args.spike;
   if (spike !== undefined) {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";
-    const window = createWindow(serverUrl, graphics, { launch: spike, hidden });
+    const window = createWindow(serverUrl, graphics, args.setting, { launch: spike, hidden });
     startSpikeSession(window, spike, graphics, switches, hidden, nvidiaBaselineBytes);
     return;
   }
   const viewsCheck = args.viewsCheck;
   if (viewsCheck !== undefined) {
     const hidden = viewsCheck.smoke || process.env[VIEWS_CHECK_HIDDEN_ENV] === "1";
-    const window = createWindow(serverUrl, graphics, null, { launch: viewsCheck, hidden });
+    const window = createWindow(serverUrl, graphics, args.setting, null, {
+      launch: viewsCheck,
+      hidden,
+    });
     startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
     return;
   }
-  createWindow(serverUrl, graphics, null);
+  createWindow(serverUrl, graphics, args.setting, null);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(serverUrl, graphics, null);
+      createWindow(serverUrl, graphics, args.setting, null);
     }
   });
 }
