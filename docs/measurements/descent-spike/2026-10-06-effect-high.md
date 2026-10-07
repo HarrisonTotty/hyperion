@@ -12,18 +12,26 @@
 
 ## The criterion (Design note 21)
 
-| Row                                               | Limit   | Value    | Verdict      | Note                     |
-| ------------------------------------------------- | ------- | -------- | ------------ | ------------------------ |
-| 50th percentile ≤ T + 0.5 ms                      | —       | 16.70 ms | not-measured | no window shown          |
-| 95th percentile ≤ T + 1 ms                        | —       | 83.30 ms | not-measured | no window shown          |
-| 99th percentile ≤ 2T                              | —       | 83.40 ms | not-measured | no window shown          |
-| ≤ 1% of intervals above 1.5 T                     | 1 %     | —        | not-measured | no window shown          |
-| none above 3 T                                    | 0       | —        | not-measured | no window shown          |
-| main thread ≤ 0.8 T at the 95th percentile        | —       | 4.60 ms  | not-measured | no window shown          |
-| GPU pass sum ≤ 0.8 T at the 95th percentile       | —       | —        | not-measured | no window shown          |
-| terrain GPU time ≤ 5 ms at the 95th percentile    | 5.00 ms | —        | not-measured | no timed terrain pass    |
-| atmosphere GPU time ≤ 1 ms at the 95th percentile | 1.00 ms | —        | not-measured | no timed atmosphere pass |
-| GPU resident ≤ 3 GB                               | 3.0 GB  | 0.719 GB | pass         |                          |
+| Row                                                                                      | Limit   | Value    | Verdict      | Note                                |
+| ---------------------------------------------------------------------------------------- | ------- | -------- | ------------ | ----------------------------------- |
+| 50th percentile ≤ T + 0.5 ms                                                             | —       | 16.70 ms | not-measured | no window shown                     |
+| 95th percentile ≤ T + 1 ms                                                               | —       | 83.30 ms | not-measured | no window shown                     |
+| 99th percentile ≤ 2T                                                                     | —       | 83.40 ms | not-measured | no window shown                     |
+| ≤ 1% of intervals above 1.5 T                                                            | 1 %     | —        | not-measured | no window shown                     |
+| none above 3 T                                                                           | 0       | —        | not-measured | no window shown                     |
+| main thread ≤ 0.8 T at the 95th percentile                                               | —       | 4.60 ms  | not-measured | no window shown                     |
+| GPU pass sum ≤ 0.8 T at the 95th percentile                                              | —       | —        | not-measured | no window shown                     |
+| terrain and atmosphere GPU time, summed per frame, ≤ 6 ms (5 + 1) at the 95th percentile | 6.00 ms | —        | not-measured | no timed terrain or atmosphere pass |
+| GPU resident ≤ 3 GB                                                                      | 3.0 GB  | 0.719 GB | pass         |                                     |
+
+## Terrain and atmosphere against their estimates
+
+Each pass row's sum in each complete frame, beside the brainstorm's estimate: findings, which no verdict reads. The criterion judges the two together.
+
+| Row        | Estimate | p50 | p95 | p99 | Finding                  |
+| ---------- | -------- | --- | --- | --- | ------------------------ |
+| terrain    | 5.00 ms  | —   | —   | —   | no timed terrain pass    |
+| atmosphere | 1.00 ms  | —   | —   | —   | no timed atmosphere pass |
 
 ## Frames by segment
 

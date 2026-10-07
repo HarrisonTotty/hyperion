@@ -29,6 +29,9 @@
  * - Incomplete frames (decision-r05-trace-windows-2.md, addendum B, ruling 1): a frame some of
  *   whose timer resolves never reported is left out of every per-frame GPU sum and counted, and a
  *   GPU row's verdict must hold whatever its times were ({@link boundedGpuRow}).
+ * - The rest of the frame (decision-r05-high-atmosphere.md): terrain and atmosphere are judged as
+ *   one row, each frame's passes of both summed, against their estimates' sum. Each pass row's own
+ *   percentiles are recorded against its estimate in `gpu.rows`, a finding that enters no verdict.
  */
 
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -88,9 +91,12 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * with the renderer's frames fails. Version 5 (the same decision's addendum B) takes the GPU rows'
  * sums over the frames whose pass times are complete, counts the others in `gpu.incompleteFrames`
  * and bounds the rows' verdicts by them, and adds `gpu.clocks`, the GPU's clocks beside the memory
- * series (R05.T14.k).
+ * series (R05.T14.k). Version 6 (decision-r05-high-atmosphere.md, R05.T14.l) replaces the
+ * `terrain` and `atmosphere` rows with one, `terrain-atmosphere`, judged on each frame's sum of
+ * both against their estimates' sum, and adds `gpu.rows`, each pass row's per-frame sum against
+ * its estimate.
  */
-export const RESULTS_VERSION = 5;
+export const RESULTS_VERSION = 6;
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -104,11 +110,36 @@ const PRETTIER_PRINT_WIDTH = 100;
 /** Dawn's timestamp quantum, 65,536 ns (`timestamp_quantization`, Design note 18), ms. */
 export const TIMESTAMP_QUANTUM_MS = 0.065_536;
 
+/** The row that judges terrain and atmosphere together (Design note 21). */
+export const TERRAIN_ATMOSPHERE_ROW = "terrain-atmosphere";
+
 /** The rows read from per-frame GPU times, whose verdicts the incomplete frames bound. */
-export const GPU_ROW_IDS: ReadonlySet<string> = new Set(["headroom-gpu", "terrain", "atmosphere"]);
+export const GPU_ROW_IDS: ReadonlySet<string> = new Set(["headroom-gpu", TERRAIN_ATMOSPHERE_ROW]);
 
 /** The percentile every GPU row reads (Design note 21). */
 const GPU_ROW_PERCENTILE = 0.95;
+
+/** The pass rows with an estimate of their own, which the rest of the frame's row sums. */
+export type EstimatedRow = Exclude<SpikePassRow, "other">;
+
+/**
+ * Each estimated row's estimate among a setting's limits ({@link LIMITS}): every
+ * {@link EstimatedRow} has one, so that a new pass row cannot be left out of the joint row.
+ */
+const ESTIMATE_OF = {
+  terrain: "terrainMs",
+  atmosphere: "atmosphereMs",
+} as const satisfies Readonly<Record<EstimatedRow, "terrainMs" | "atmosphereMs">>;
+
+function isEstimatedRow(name: string): name is EstimatedRow {
+  return Object.hasOwn(ESTIMATE_OF, name);
+}
+
+/** The pass rows the rest of the frame's row sums, in the order the file and summary give them. */
+const ESTIMATED_ROWS: ReadonlyArray<EstimatedRow> = Object.keys(ESTIMATE_OF).filter(isEstimatedRow);
+
+/** The finding a pass row over its estimate carries (decision-r05-high-atmosphere.md). */
+export const OVER_ESTIMATE_FINDING = "over its estimate: a finding for T19 and R12";
 
 /** Frame intervals summarised as Design note 21 reads them. */
 export interface FrameStats {
@@ -188,8 +219,8 @@ export interface MachineDescription {
   readonly governor: Measured<string>;
   /**
    * The 1-, 5- and 15-minute load averages when the run started. Windows keeps none, and its
-   * zeros stand in for them, since results version 5 keeps a number triple; the run's `quiet` says
-   * so (decision-cross-platform-server.md item 6).
+   * zeros stand in for them, since results versions 5 and 6 keep a number triple; the run's `quiet`
+   * says so (decision-cross-platform-server.md item 6).
    */
   readonly loadAverage: LoadAverage;
   /** Chromium's GPU description (`app.getGPUInfo("basic")`), or why it is missing. */
@@ -737,6 +768,26 @@ export interface GpuClocks {
   readonly performanceState: Measured<MemoryColumn>;
 }
 
+/**
+ * One pass row's GPU time against its estimate (decision-r05-high-atmosphere.md): a finding for
+ * T19 and R12, which no verdict reads. Design note 21 judges terrain and atmosphere together.
+ */
+export interface PassRowFigures {
+  /** The row's estimate on the run's setting, the brainstorm's upper end for it, ms. */
+  readonly estimateMs: number;
+  /** Each complete frame's sum of the row's passes, at the 50th percentile, ms. */
+  readonly p50Ms: Measured<number>;
+  /** The same at the 95th percentile, ms. */
+  readonly p95Ms: Measured<number>;
+  /** The same at the 99th percentile, ms. */
+  readonly p99Ms: Measured<number>;
+  /**
+   * Whether the 95th percentile is above the estimate, the timer's tolerance aside; `null` without
+   * a 95th percentile, whose reason is `p95Ms`'s.
+   */
+  readonly overEstimate: boolean | null;
+}
+
 /** A pass's GPU time over the run. */
 export interface PassFigures {
   readonly label: string;
@@ -809,6 +860,8 @@ export interface DescentResults {
     readonly passes: Measured<ReadonlyArray<PassFigures>>;
     /** The sum of a frame's timed passes, at the 95th percentile, over the complete frames, ms. */
     readonly sumP95Ms: Measured<number>;
+    /** Terrain's and the atmosphere's per-frame sums against their estimates: findings alone. */
+    readonly rows: Readonly<Record<EstimatedRow, PassRowFigures>>;
     /** The frames left out of every per-frame GPU sum, their pass times incomplete. */
     readonly incompleteFrames: Measured<IncompleteFrames>;
     /**
@@ -876,7 +929,10 @@ export interface ResultsInput {
   readonly memory: ReadonlyArray<MemorySample>;
 }
 
-/** The rows' limits per setting (Design note 21). */
+/**
+ * The rows' limits per setting (Design note 21). `terrainMs` and `atmosphereMs` are the two pass
+ * rows' estimates, whose sum is the rest of the frame's limit (decision-r05-high-atmosphere.md).
+ */
 const LIMITS = {
   high: { p95Ms: (t: number) => t + 1, terrainMs: 5, atmosphereMs: 1, memoryBytes: 3e9 },
   low: { p95Ms: () => 35, terrainMs: 14, atmosphereMs: 4, memoryBytes: 1e9 },
@@ -966,7 +1022,7 @@ export function incompleteFramesReason({ frames, inFlight }: IncompleteCount): s
 }
 
 /**
- * A GPU row's figure: the 95th percentile of `values`, or why there is none.
+ * A GPU figure: the `p`th percentile of `values`, the 95th by default, or why there is none.
  *
  * @param noValue - Why there is no value when there is no complete frame and no incomplete one.
  */
@@ -974,6 +1030,7 @@ function gpuPercentile(
   values: ReadonlyArray<number>,
   incomplete: IncompleteCount,
   noValue: string,
+  p = GPU_ROW_PERCENTILE,
 ): Measured<number> {
   if (values.length === 0) {
     return missing(incomplete.frames > 0 ? incompleteFramesReason(incomplete) : noValue);
@@ -981,9 +1038,33 @@ function gpuPercentile(
   return measured(
     nearestRank(
       values.toSorted((a, b) => a - b),
-      GPU_ROW_PERCENTILE,
+      p,
     ),
   );
+}
+
+/**
+ * A pass row's per-frame sums against its estimate (decision-r05-high-atmosphere.md), read as the
+ * GPU rows read their sums: over the complete frames, with the incomplete ones' count as the
+ * reason when no complete frame has the row.
+ *
+ * @param valuesMs - The row's sum in each complete frame that has one of its passes, ms.
+ * @param estimateMs - The row's estimate on the run's setting, ms.
+ */
+function passRowFigures(
+  valuesMs: ReadonlyArray<number>,
+  estimateMs: number,
+  incomplete: IncompleteCount,
+  noValue: string,
+): PassRowFigures {
+  const p95Ms = gpuPercentile(valuesMs, incomplete, noValue);
+  return {
+    estimateMs,
+    p50Ms: gpuPercentile(valuesMs, incomplete, noValue, 0.5),
+    p95Ms,
+    p99Ms: gpuPercentile(valuesMs, incomplete, noValue, 0.99),
+    overEstimate: p95Ms.value === null ? null : p95Ms.value > estimateMs,
+  };
 }
 
 /**
@@ -1195,7 +1276,10 @@ function statsOrMissing(
  * the rows are judged by {@link boundedGpuRow}; a frame whose missing reads were all still in
  * flight at the report is counted with that reason ({@link READ_IN_FLIGHT_REASON}). The GPU's
  * clocks come from the memory samples, and a GPU row measured at a median clock below 90% of the
- * maximum says so ({@link clockNote}).
+ * maximum says so ({@link clockNote}). Terrain and atmosphere are one row,
+ * {@link TERRAIN_ATMOSPHERE_ROW}: the percentile of each frame's sum of both, not the sum of their
+ * percentiles. Each one's own percentiles go to `gpu.rows` beside its estimate, and no verdict
+ * reads them.
  */
 export function buildResults(input: ResultsInput): DescentResults {
   const { run, report, memory } = input;
@@ -1307,7 +1391,11 @@ export function buildResults(input: ResultsInput): DescentResults {
               ];
         }),
       );
-  const sums = (rowFilter: SpikePassRow | null): { values: number[]; maxPasses: number } => {
+  // Each complete frame's sum of its timed passes in `rowFilter` (every pass for `null`), in the
+  // frames with one, and the most passes any of those sums added.
+  const sums = (
+    rowFilter: ReadonlySet<SpikePassRow> | null,
+  ): { values: number[]; maxPasses: number } => {
     const values: number[] = [];
     let maxPasses = 0;
     if (!timed) {
@@ -1318,7 +1406,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       let k = 0;
       for (const pass of frames.passes) {
         const ms = pass.gpuMs[i];
-        if ((rowFilter === null || pass.row === rowFilter) && ms !== undefined && ms !== null) {
+        if ((rowFilter === null || rowFilter.has(pass.row)) && ms !== undefined && ms !== null) {
           sum += ms;
           k += 1;
         }
@@ -1341,8 +1429,23 @@ export function buildResults(input: ResultsInput): DescentResults {
         );
   const allSums = sums(null);
   const sumP95Ms = gpuPercentile(allSums.values, incomplete, timed ? "no timed pass" : timerReason);
-  const terrain = sums("terrain");
-  const atmosphere = sums("atmosphere");
+  const limits = LIMITS[setting];
+  // Design note 21's rest of the frame: terrain and atmosphere summed in each frame, judged
+  // against their estimates' sum; each one's own sums are findings (decision-r05-high-atmosphere.md).
+  const restOfFrame = sums(new Set(ESTIMATED_ROWS));
+  const estimatesMs = ESTIMATED_ROWS.map((name) => limits[ESTIMATE_OF[name]]);
+  const restOfFrameLimitMs = estimatesMs.reduce((sum, ms) => sum + ms, 0);
+  const rowFigures = (name: EstimatedRow): PassRowFigures =>
+    passRowFigures(
+      sums(new Set([name])).values,
+      limits[ESTIMATE_OF[name]],
+      incomplete,
+      timed ? `no timed ${name} pass` : timerReason,
+    );
+  const rows: DescentResults["gpu"]["rows"] = {
+    terrain: rowFigures("terrain"),
+    atmosphere: rowFigures("atmosphere"),
+  };
 
   const ourCodeP95Ms = p95Of(pick(frames.ourCodeMs, warm), "no frame after the warm-up");
 
@@ -1364,7 +1467,6 @@ export function buildResults(input: ResultsInput): DescentResults {
         ? measured({ bytes: drmResidentPeakBytes.value, source: "drm-fdinfo" })
         : measured({ bytes: report.adapterPeakBytes, source: "adapter-tally" });
 
-  const limits = LIMITS[setting];
   const criterionStats = source === "presentation" ? presentationWhole : rafWhole;
   const headroomLimit = ofPeriod(periodMs, (period) => 0.8 * period);
   const memoryValue: Measured<number> =
@@ -1389,22 +1491,13 @@ export function buildResults(input: ResultsInput): DescentResults {
         timed ? "no timed pass" : timerReason,
       ),
       boundedGpuRow(
-        "terrain",
-        `terrain GPU time ≤ ${limits.terrainMs} ms at the 95th percentile`,
-        measured(limits.terrainMs),
-        terrain.values,
+        TERRAIN_ATMOSPHERE_ROW,
+        `terrain and atmosphere GPU time, summed per frame, ≤ ${restOfFrameLimitMs} ms (${estimatesMs.join(" + ")}) at the 95th percentile`,
+        measured(restOfFrameLimitMs),
+        restOfFrame.values,
         incomplete,
-        terrain.maxPasses * tolerancePerPassMs,
-        timed ? "no timed terrain pass" : timerReason,
-      ),
-      boundedGpuRow(
-        "atmosphere",
-        `atmosphere GPU time ≤ ${limits.atmosphereMs} ms at the 95th percentile`,
-        measured(limits.atmosphereMs),
-        atmosphere.values,
-        incomplete,
-        atmosphere.maxPasses * tolerancePerPassMs,
-        timed ? "no timed atmosphere pass" : timerReason,
+        restOfFrame.maxPasses * tolerancePerPassMs,
+        timed ? "no timed terrain or atmosphere pass" : timerReason,
       ),
     ].map((entry) => withNote(entry, clockMeasured)),
     row(
@@ -1465,6 +1558,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       untimedPasses: report.untimedPasses,
       passes,
       sumP95Ms,
+      rows,
       incompleteFrames,
       gpuProcess: pooled.value === null ? missing(pooled.reason) : pooled.value.gpuProcess,
       clocks,
@@ -1621,8 +1715,10 @@ const VERDICTS: ReadonlySet<string> = new Set(["pass", "fail", "marginal", "not-
  * overlap nor fall out of order and whose frames are the file's excluded frames; the memory
  * series must be whole: every column as long as the times, readings in whole KiB, -1 at its gaps'
  * samples alone, and each peak its column's maximum; the incomplete frames must be whole counts
- * within the frames after the warm-up, and no GPU row's verdict one they make impossible; and each
- * clock column must be as long as the times.
+ * within the frames after the warm-up, and no GPU row's verdict one they make impossible; each
+ * clock column must be as long as the times; and terrain and atmosphere must be one criterion row,
+ * whose limit is their estimates' sum, with each one's figures in `gpu.rows`, percentiles in
+ * order and `overEstimate` true exactly when its 95th percentile is above its estimate.
  */
 export function validateResults(value: unknown): string[] {
   const problems: string[] = [];
@@ -1684,6 +1780,7 @@ export function validateResults(value: unknown): string[] {
   checkGpuSlices(value, trace, problems);
   checkIncompleteFrames(value, problems);
   checkClocks(value, problems);
+  checkRestOfFrame(value, problems);
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
 }
@@ -2265,6 +2362,90 @@ function checkClocks(value: Readonly<Record<string, unknown>>, problems: string[
   }
 }
 
+/** The percentiles a pass row's figures hold, in ascending order. */
+const PASS_ROW_PERCENTILES = ["p50Ms", "p95Ms", "p99Ms"] as const;
+
+/**
+ * One pass row's figures in `gpu.rows`: an estimate above 0 ms, three percentiles each a value in
+ * ms or null, in order where present, and `overEstimate` whether the 95th is above the estimate.
+ *
+ * @returns The estimate, ms, or `undefined` when the figures are malformed, the problem added.
+ */
+function checkPassRow(figures: unknown, path: string, problems: string[]): number | undefined {
+  if (!isRecord(figures)) {
+    problems.push(`${path} is missing`);
+    return undefined;
+  }
+  const estimateMs = figures["estimateMs"];
+  const values = PASS_ROW_PERCENTILES.map((key) => childAt(figures, [key, "value"]));
+  if (
+    !isFiniteAtLeast(estimateMs, 0) ||
+    estimateMs === 0 ||
+    !PASS_ROW_PERCENTILES.every((key) => isRecord(figures[key])) ||
+    !values.every((ms) => ms === null || isFiniteAtLeast(ms, 0))
+  ) {
+    problems.push(`${path} is not an estimate and the percentiles of its sums`);
+    return undefined;
+  }
+  const present = values.filter((ms): ms is number => typeof ms === "number");
+  if (present.some((ms, i) => i > 0 && ms < (present[i - 1] ?? ms))) {
+    problems.push(`${path}'s percentiles are out of order`);
+  }
+  const p95 = childAt(figures, ["p95Ms", "value"]);
+  const expected = typeof p95 === "number" ? p95 > estimateMs : null;
+  if (figures["overEstimate"] !== expected) {
+    problems.push(
+      `${path}.overEstimate is not ${String(expected)}, whether its 95th percentile is above its estimate`,
+    );
+  }
+  return estimateMs;
+}
+
+/**
+ * The rest of the frame (decision-r05-high-atmosphere.md): `gpu.rows`' terrain and atmosphere
+ * figures, and one {@link TERRAIN_ATMOSPHERE_ROW} criterion in place of version 5's two rows,
+ * whose limit is the two estimates' sum.
+ */
+function checkRestOfFrame(value: Readonly<Record<string, unknown>>, problems: string[]): void {
+  const rows = childAt(value, ["gpu", "rows"]);
+  const estimatesMs: number[] = [];
+  if (isRecord(rows)) {
+    for (const name of ESTIMATED_ROWS) {
+      const estimateMs = checkPassRow(rows[name], `gpu.rows.${name}`, problems);
+      if (estimateMs !== undefined) {
+        estimatesMs.push(estimateMs);
+      }
+    }
+  } else {
+    problems.push("gpu.rows is missing");
+  }
+  const whole = childAt(value, ["criteria", "whole"]);
+  const entries = (Array.isArray(whole) ? whole : []).filter(isRecord);
+  for (const name of ESTIMATED_ROWS) {
+    if (entries.some((entry) => entry["id"] === name)) {
+      problems.push(
+        `criteria.whole holds version 5's ${name} row: terrain and atmosphere are one row, ${TERRAIN_ATMOSPHERE_ROW}`,
+      );
+    }
+  }
+  const joint = entries.filter((entry) => entry["id"] === TERRAIN_ATMOSPHERE_ROW);
+  const [entry] = joint;
+  if (joint.length !== 1 || entry === undefined) {
+    problems.push(`criteria.whole has ${joint.length} ${TERRAIN_ATMOSPHERE_ROW} rows, not one`);
+    return;
+  }
+  if (estimatesMs.length !== ESTIMATED_ROWS.length) {
+    return;
+  }
+  const sumMs = estimatesMs.reduce((sum, ms) => sum + ms, 0);
+  const limit = entry["limit"];
+  if (typeof limit !== "number" || Math.abs(limit - sumMs) > 1e-9) {
+    problems.push(
+      `the ${TERRAIN_ATMOSPHERE_ROW} row's limit is ${String(limit)}, not the estimates' sum, ${sumMs} ms`,
+    );
+  }
+}
+
 function checkCriteria(criteria: Readonly<Record<string, unknown>>, problems: string[]): void {
   const whole = criteria["whole"];
   const segments = criteria["segments"];
@@ -2482,6 +2663,34 @@ export function describeClockSamples(clocks: Measured<GpuClocks>): string {
   ].join("; ");
 }
 
+/**
+ * A pass row's finding in words: {@link OVER_ESTIMATE_FINDING} when it is over its estimate, and
+ * why any of its percentiles is missing, the percentiles named unless all three share the reason.
+ */
+function describeRowFinding(figures: PassRowFigures): string {
+  const notes: string[] = figures.overEstimate === true ? [OVER_ESTIMATE_FINDING] : [];
+  const percentiles = [
+    ["p50", figures.p50Ms],
+    ["p95", figures.p95Ms],
+    ["p99", figures.p99Ms],
+  ] as const;
+  const namesByReason = new Map<string, string[]>();
+  for (const [name, figure] of percentiles) {
+    if (figure.value === null) {
+      namesByReason.set(figure.reason, [...(namesByReason.get(figure.reason) ?? []), name]);
+    }
+  }
+  for (const [reason, names] of namesByReason) {
+    notes.push(names.length === percentiles.length ? reason : `${names.join(", ")}: ${reason}`);
+  }
+  return notes.join("; ");
+}
+
+/** A percentile of a pass row in the summary's table: `—` when it is missing. */
+function msOrDash(figure: Measured<number>): string {
+  return figure.value === null ? "—" : `${formatMs(figure.value)} ms`;
+}
+
 /** The heading of a profiled run's summary: its figures are a diagnostic's. */
 const PROFILED_HEADING =
   "**PROFILED: diagnostic, not judged; renderer and app memory include the CPU profiler's samples.**";
@@ -2517,6 +2726,17 @@ export function summaryMarkdown(results: DescentResults): string {
       (entry) =>
         `| ${entry.criterion} | ${formatLimit(entry)} | ${formatValue(entry)} | ${entry.verdict} | ${entry.note ?? ""} |`,
     ),
+    "",
+    "## Terrain and atmosphere against their estimates",
+    "",
+    "Each pass row's sum in each complete frame, beside the brainstorm's estimate: findings, which no verdict reads. The criterion judges the two together.",
+    "",
+    "| Row | Estimate | p50 | p95 | p99 | Finding |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...ESTIMATED_ROWS.map((name) => {
+      const figures = results.gpu.rows[name];
+      return `| ${name} | ${formatMs(figures.estimateMs)} ms | ${msOrDash(figures.p50Ms)} | ${msOrDash(figures.p95Ms)} | ${msOrDash(figures.p99Ms)} | ${describeRowFinding(figures)} |`;
+    }),
     "",
     "## Frames by segment",
     "",

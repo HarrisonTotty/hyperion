@@ -120,18 +120,21 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
         results["gpu"]["incompleteFrames"]["value"],
         serde_json::json!({ "dropped": 0, "partial": 0, "frames": 2 })
     );
-    // The fixture's one pass is the terrain row's (its `passRows`), and the replay times it.
-    let terrain = rows
+    // The fixture's one pass is the terrain row's (its `passRows`), and the replay times it: the
+    // rest of the frame is terrain alone, against the low setting's 14 + 4 ms.
+    let joint = rows
         .iter()
-        .find(|row| row["id"] == "terrain")
-        .expect("a terrain row");
-    assert!(terrain["value"].is_number(), "{terrain}");
-    let atmosphere = rows
-        .iter()
-        .find(|row| row["id"] == "atmosphere")
-        .expect("an atmosphere row");
-    assert_eq!(atmosphere["verdict"], "not-measured");
-    assert_eq!(atmosphere["note"], "no timed atmosphere pass");
+        .find(|row| row["id"] == "terrain-atmosphere")
+        .expect("the terrain-atmosphere row");
+    assert!(joint["value"].is_number(), "{joint}");
+    assert_eq!(joint["limit"], 18.0);
+    let parts = &results["gpu"]["rows"];
+    assert!(parts["terrain"]["p95Ms"]["value"].is_number(), "{parts}");
+    assert_eq!(
+        parts["atmosphere"]["p95Ms"]["reason"],
+        "no timed atmosphere pass"
+    );
+    assert_eq!(parts["atmosphere"]["overEstimate"], Value::Null);
     let mut problems = Vec::new();
     figure_problems(&results, "", &mut problems);
     assert_eq!(problems, Vec::<String>::new());

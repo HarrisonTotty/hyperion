@@ -1,5 +1,5 @@
 //! The replay's results file, in the descent spike's schema (`hyperion.descent-spike.results`
-//! version 5, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
+//! version 6, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
 //! same way (R05 Design notes 18, 21 and 22).
 //!
 //! A native replay has no trace, no `requestAnimationFrame`, no GPU process and no memory
@@ -16,6 +16,9 @@
 //! and the criterion's rows are Design note 21's, as the client's writer reads them. A frame whose
 //! pass times were never read back is left out of the GPU rows and counted, and bounds their
 //! verdicts as the client's incomplete frames do (decision-r05-trace-windows-2.md, addendum B).
+//! Terrain and atmosphere are judged as one row, each frame's sum of both against their estimates'
+//! sum, and each one's own per-frame sums are recorded against its estimate in `gpu.rows`, a
+//! finding no verdict reads (decision-r05-high-atmosphere.md).
 //!
 //! The machine's facts are read at the replay's start through [`MachineSources`], from `sysinfo`
 //! on every platform and the cpufreq governor from sysfs on Linux (R05.T20,
@@ -47,8 +50,11 @@ pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
 /// has no trace, so it writes `run.trace`, `mainThread.split` and `gpu.gpuProcess` as null and
 /// meets none of those checks. Version 5 (the same decision's addendum B) counts the frames whose
 /// pass times are incomplete (`gpu.incompleteFrames`), bounds the GPU rows' verdicts by them, and
-/// adds `gpu.clocks`, the GPU's clocks on the memory series' times (R05.T14.k).
-pub const RESULTS_VERSION: u64 = 5;
+/// adds `gpu.clocks`, the GPU's clocks on the memory series' times (R05.T14.k). Version 6
+/// (decision-r05-high-atmosphere.md, R05.T14.l) replaces the `terrain` and `atmosphere` rows with
+/// one, `terrain-atmosphere`, and adds `gpu.rows`, each pass row's per-frame sums against its
+/// estimate.
+pub const RESULTS_VERSION: u64 = 6;
 
 /// Why a replay with no clock sample has no clocks.
 const NO_CLOCK_SAMPLE: &str = "no clock sample";
@@ -58,7 +64,11 @@ const NO_CLOCK_SAMPLE: &str = "no clock sample";
 const CLOCK_NOTE_FRACTION: f64 = 0.9;
 
 /// The rows read from per-frame GPU times, which a clock note may sit on.
-const GPU_ROW_IDS: [&str; 3] = ["headroom-gpu", "terrain", "atmosphere"];
+const GPU_ROW_IDS: [&str; 2] = ["headroom-gpu", TERRAIN_ATMOSPHERE_ROW];
+
+/// The row that judges terrain and atmosphere together (Design note 21), the client's
+/// `TERRAIN_ATMOSPHERE_ROW`.
+const TERRAIN_ATMOSPHERE_ROW: &str = "terrain-atmosphere";
 
 /// The percentile every GPU row reads (Design note 21).
 const GPU_ROW_PERCENTILE: f64 = 0.95;
@@ -642,11 +652,6 @@ fn row(
     })
 }
 
-fn p95(values: &mut [f64]) -> Option<f64> {
-    values.sort_by(f64::total_cmp);
-    nearest_rank(values, GPU_ROW_PERCENTILE)
-}
-
 /// Why a GPU row is not measured when the frames whose pass times were not read back could carry
 /// its verdict either way.
 #[must_use]
@@ -665,17 +670,45 @@ struct PassTiming {
 }
 
 impl PassTiming {
-    /// The 95th percentile of `values`, which it sorts, or why there is none.
-    fn p95(self, values: &mut [f64], what: &str) -> Result<f64, String> {
+    /// The `p`th percentile of `sorted`, ascending, or why there is none.
+    fn percentile(self, sorted: &[f64], p: f64, what: &str) -> Result<f64, String> {
         if !self.timed {
             return Err(TIMER_REASON.to_owned());
         }
-        p95(values).ok_or_else(|| {
+        nearest_rank(sorted, p).ok_or_else(|| {
             if self.unread > 0 {
                 unread_reason(self.unread)
             } else {
                 format!("no timed {what}")
             }
+        })
+    }
+
+    /// The 95th percentile of `values`, which it sorts, or why there is none.
+    fn p95(self, values: &mut [f64], what: &str) -> Result<f64, String> {
+        values.sort_by(f64::total_cmp);
+        self.percentile(values, GPU_ROW_PERCENTILE, what)
+    }
+
+    /// One pass row's per-frame sums against its estimate, as the client's `gpu.rows` holds them
+    /// (decision-r05-high-atmosphere.md).
+    ///
+    /// It holds the 50th, 95th and 99th percentiles of `values`, which it sorts, `estimate_ms`, and
+    /// whether the 95th is above it: a finding for T19 and R12, which no verdict reads.
+    #[must_use]
+    fn pass_row(self, values: &mut [f64], estimate_ms: f64, what: &str) -> Value {
+        let p95 = self.p95(values, what);
+        // Without a 95th percentile there is nothing to compare; `p95Ms` carries its reason.
+        let over_estimate = p95.as_ref().ok().map(|ms| *ms > estimate_ms);
+        let figure = |ms: Result<f64, String>| {
+            ms.map_or_else(|reason| missing(&reason), |ms| measured(json!(ms)))
+        };
+        json!({
+            "estimateMs": estimate_ms,
+            "p50Ms": figure(self.percentile(values, 0.5, what)),
+            "p95Ms": figure(p95),
+            "p99Ms": figure(self.percentile(values, 0.99, what)),
+            "overEstimate": over_estimate,
         })
     }
 
@@ -731,9 +764,9 @@ impl PassTiming {
 /// The machine's facts as the schema records them, from `sources`.
 ///
 /// A fact that could not be read is the schema's plain value ([`MachineSources::findings`] says
-/// which), and a load average the platform keeps none of is zeros, since results version 5 keeps it
-/// a number triple (a later version makes it a `Measured`: decision-cross-platform-server.md item
-/// 6); [`quiet`] then marks the run provisional and says why.
+/// which), and a load average the platform keeps none of is zeros, since results versions 5 and 6
+/// keep it a number triple (a later version makes it a `Measured`: decision-cross-platform-server.md
+/// item 6); [`quiet`] then marks the run provisional and says why.
 #[must_use]
 fn machine(sources: &MachineSources, adapter: &wgpu::AdapterInfo) -> Value {
     let name = sources
@@ -852,23 +885,32 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
 
     let mut by_label: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     let mut sums = Vec::new();
+    let mut rest_of_frame = Vec::new();
     let mut terrain = Vec::new();
     let mut atmosphere = Vec::new();
     for frame in &figures.passes {
-        // A row's sum counts only frames with a pass of that row, as the client's writer does.
-        let (mut sum, mut t, mut a) = (0.0, None::<f64>, None::<f64>);
+        // A row's sum counts only frames with a pass of that row, as the client's writer does; the
+        // rest of the frame sums terrain's and the atmosphere's passes in the frame's order.
+        let (mut sum, mut rest, mut t, mut a) = (0.0, None::<f64>, None::<f64>, None::<f64>);
         for (label, ms) in frame {
             by_label.entry(label.as_str()).or_default().push(*ms);
             sum += ms;
             match figures.rows.get(label).copied().unwrap_or(PassRow::Other) {
-                PassRow::Terrain => t = Some(t.unwrap_or(0.0) + ms),
-                PassRow::Atmosphere => a = Some(a.unwrap_or(0.0) + ms),
+                PassRow::Terrain => {
+                    t = Some(t.unwrap_or(0.0) + ms);
+                    rest = Some(rest.unwrap_or(0.0) + ms);
+                }
+                PassRow::Atmosphere => {
+                    a = Some(a.unwrap_or(0.0) + ms);
+                    rest = Some(rest.unwrap_or(0.0) + ms);
+                }
                 PassRow::Other => {}
             }
         }
         if !frame.is_empty() {
             sums.push(sum);
         }
+        rest_of_frame.extend(rest);
         terrain.extend(t);
         atmosphere.extend(a);
     }
@@ -895,10 +937,18 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
         unread: figures.unread_frames,
     };
     let sum_p95 = timing.p95(&mut sums, "pass");
-    let (terrain_limit, atmosphere_limit, p95_limit, memory_limit) = match figures.setting {
-        Setting::High => (5.0, 1.0, period_ms.map(|t| t + 1.0), 3e9),
-        Setting::Low => (14.0, 4.0, Some(35.0), 1e9),
-    };
+    // Terrain's and the atmosphere's estimates, whose sum is the rest of the frame's limit
+    // (decision-r05-high-atmosphere.md).
+    let (terrain_estimate_ms, atmosphere_estimate_ms, p95_limit, memory_limit) =
+        match figures.setting {
+            Setting::High => (5.0, 1.0, period_ms.map(|t| t + 1.0), 3e9),
+            Setting::Low => (14.0, 4.0, Some(35.0), 1e9),
+        };
+    let rest_limit_ms = terrain_estimate_ms + atmosphere_estimate_ms;
+    let rows = json!({
+        "terrain": timing.pass_row(&mut terrain, terrain_estimate_ms, "terrain pass"),
+        "atmosphere": timing.pass_row(&mut atmosphere, atmosphere_estimate_ms, "atmosphere pass"),
+    });
     let frame_value = |pick: &dyn Fn(&FrameStats) -> Option<f64>| -> Result<f64, String> {
         let Some(stats) = &stats else {
             return Err("no frame interval".to_owned());
@@ -970,18 +1020,13 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             "pass",
         ),
         timing.row(
-            "terrain",
-            &format!("terrain GPU time ≤ {terrain_limit} ms at the 95th percentile"),
-            Some(terrain_limit),
-            &mut terrain,
-            "terrain pass",
-        ),
-        timing.row(
-            "atmosphere",
-            &format!("atmosphere GPU time ≤ {atmosphere_limit} ms at the 95th percentile"),
-            Some(atmosphere_limit),
-            &mut atmosphere,
-            "atmosphere pass",
+            TERRAIN_ATMOSPHERE_ROW,
+            &format!(
+                "terrain and atmosphere GPU time, summed per frame, ≤ {rest_limit_ms} ms ({terrain_estimate_ms} + {atmosphere_estimate_ms}) at the 95th percentile"
+            ),
+            Some(rest_limit_ms),
+            &mut rest_of_frame,
+            "terrain or atmosphere pass",
         ),
         row(
             "memory",
@@ -1071,6 +1116,7 @@ pub fn results_json(figures: &ReplayFigures) -> Value {
             "untimedPasses": figures.untimed_passes,
             "passes": if figures.timed { measured(json!(passes)) } else { missing(TIMER_REASON) },
             "sumP95Ms": sum_p95.map_or_else(|reason| missing(&reason), |v| measured(json!(v))),
+            "rows": rows,
             // A replay resolves once a frame, so a frame's pass times are whole or none.
             "incompleteFrames": if figures.timed {
                 measured(json!({
@@ -1347,7 +1393,7 @@ mod tests {
                 "note": "Windows keeps no load average: the quiet-machine rule (Design note 27) is unchecked",
             })
         );
-        // Results version 5 keeps the load average a number triple; the note says it is none.
+        // Results versions 5 and 6 keep the load average a number triple; the note says it is none.
         assert_eq!(
             results["run"]["machine"]["loadAverage"],
             json!([0.0, 0.0, 0.0])
@@ -1457,18 +1503,153 @@ mod tests {
     #[test]
     fn a_row_with_no_pass_of_its_own_is_not_measured() {
         let results = results_json(&figures(BTreeMap::new()));
-        assert_eq!(row(&results, "terrain")["verdict"], "not-measured");
-        assert_eq!(row(&results, "terrain")["note"], "no timed terrain pass");
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["verdict"], "not-measured");
+        assert_eq!(joint["note"], "no timed terrain or atmosphere pass");
+        assert_eq!(
+            results["gpu"]["rows"]["terrain"],
+            json!({
+                "estimateMs": 5.0,
+                "p50Ms": missing("no timed terrain pass"),
+                "p95Ms": missing("no timed terrain pass"),
+                "p99Ms": missing("no timed terrain pass"),
+                "overEstimate": null,
+            })
+        );
     }
 
     #[test]
     fn a_rows_passes_are_judged_against_its_limit() {
         let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
         let results = results_json(&figures(rows));
-        assert_eq!(row(&results, "terrain")["value"], 4.0);
-        assert_eq!(row(&results, "terrain")["verdict"], "pass");
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["value"], 4.0);
+        assert_eq!(joint["limit"], 6.0);
+        assert_eq!(joint["verdict"], "pass");
         assert_eq!(row(&results, "headroom-gpu")["verdict"], "not-measured");
         assert_eq!(results["gpu"]["sumP95Ms"]["value"], 4.5);
+    }
+
+    /// `figures` on the high setting with `count` frames, frame i's terrain pass taking
+    /// `terrain_ms(i)` and its two atmosphere passes `atmosphere_ms(i)` between them, and a tone
+    /// pass of neither row.
+    fn split_figures(
+        count: usize,
+        terrain_ms: impl Fn(usize) -> f64,
+        atmosphere_ms: impl Fn(usize) -> f64,
+    ) -> ReplayFigures {
+        let mut figures = figures(BTreeMap::from([
+            ("terrain".to_owned(), PassRow::Terrain),
+            ("sky".to_owned(), PassRow::Atmosphere),
+            ("march".to_owned(), PassRow::Atmosphere),
+        ]));
+        figures.passes = (0..count)
+            .map(|i| {
+                let atmosphere = atmosphere_ms(i);
+                vec![
+                    ("terrain".to_owned(), terrain_ms(i)),
+                    ("sky".to_owned(), 0.25 * atmosphere),
+                    ("march".to_owned(), 0.75 * atmosphere),
+                    ("tone".to_owned(), 0.5),
+                ]
+            })
+            .collect();
+        figures
+    }
+
+    #[test]
+    fn terrain_and_atmosphere_are_judged_as_one_row_against_their_estimates_sum() {
+        // 4.5 ms of terrain and 1.25 of atmosphere a frame, against high's 5 + 1: the atmosphere
+        // is over its estimate, a finding the row does not read.
+        let results = results_json(&split_figures(20, |_| 4.5, |_| 1.25));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(
+            joint["criterion"],
+            "terrain and atmosphere GPU time, summed per frame, ≤ 6 ms (5 + 1) at the 95th percentile"
+        );
+        assert_eq!(joint["value"], 5.75);
+        assert_eq!(joint["verdict"], "pass");
+        assert_eq!(
+            row_ids(&results),
+            [
+                "p50",
+                "p95",
+                "p99",
+                "missed",
+                "hitches",
+                "headroom-main",
+                "headroom-gpu",
+                TERRAIN_ATMOSPHERE_ROW,
+                "memory"
+            ]
+        );
+        assert_eq!(
+            results["gpu"]["rows"]["atmosphere"],
+            json!({
+                "estimateMs": 1.0,
+                "p50Ms": measured(json!(1.25)),
+                "p95Ms": measured(json!(1.25)),
+                "p99Ms": measured(json!(1.25)),
+                "overEstimate": true,
+            })
+        );
+        assert_eq!(results["gpu"]["rows"]["terrain"]["overEstimate"], false);
+    }
+
+    #[test]
+    fn six_point_two_ms_of_terrain_and_atmosphere_fails_on_high() {
+        let results = results_json(&split_figures(20, |_| 4.8, |_| 1.4));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        let value = joint["value"].as_f64().expect("a value");
+        assert!((value - 6.2).abs() < 1e-12, "{value}");
+        assert_eq!(joint["verdict"], "fail");
+    }
+
+    #[test]
+    fn the_joint_row_is_the_percentile_of_each_frames_sum() {
+        // A tenth of the frames has its terrain at 5 ms, another tenth its atmosphere at 4: each
+        // row's 95th percentile is its slow value, 9 ms together, but no frame's sum is above 5.5.
+        let results = results_json(&split_figures(
+            20,
+            |i| if i % 10 == 0 { 5.0 } else { 1.0 },
+            |i| if i % 10 == 5 { 4.0 } else { 0.5 },
+        ));
+        // Terrain's 95th percentile is its estimate, 5 ms, which is not over it.
+        assert_eq!(
+            results["gpu"]["rows"]["terrain"],
+            json!({
+                "estimateMs": 5.0,
+                "p50Ms": measured(json!(1.0)),
+                "p95Ms": measured(json!(5.0)),
+                "p99Ms": measured(json!(5.0)),
+                "overEstimate": false,
+            })
+        );
+        assert_eq!(results["gpu"]["rows"]["atmosphere"]["p95Ms"]["value"], 4.0);
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["value"], 5.5);
+        assert_eq!(joint["verdict"], "pass");
+    }
+
+    #[test]
+    fn the_low_settings_joint_limit_is_its_estimates_sum() {
+        let mut low = split_figures(4, |_| 1.0, |_| 1.0);
+        low.setting = Setting::Low;
+        let results = results_json(&low);
+        assert_eq!(row(&results, TERRAIN_ATMOSPHERE_ROW)["limit"], 18.0);
+        assert_eq!(results["gpu"]["rows"]["terrain"]["estimateMs"], 14.0);
+        assert_eq!(results["gpu"]["rows"]["atmosphere"]["estimateMs"], 4.0);
+    }
+
+    fn row_ids(results: &Value) -> Vec<String> {
+        results["criteria"]["whole"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Readings from `nvidia-smi` of a 2,115 MHz GPU at `graphics_mhz` in P2.
@@ -1523,11 +1704,9 @@ mod tests {
         // The median of 1,110, 1,320 and 1,965 MHz is 62% of the maximum: the GPU rows with a
         // value say so, the others not.
         let note = "measured at a median 1320 of 2115 MHz (the driver's choice at this load)";
-        assert_eq!(row(&results, "terrain")["note"], note);
-        assert_eq!(
-            row(&results, "atmosphere")["note"],
-            "no timed atmosphere pass"
-        );
+        assert_eq!(row(&results, TERRAIN_ATMOSPHERE_ROW)["note"], note);
+        // The pass rows' own figures are findings, with no note.
+        assert_eq!(results["gpu"]["rows"]["terrain"].get("note"), None);
         // A frame row with a value keeps its own note alone.
         assert_eq!(row(&results, "p50")["note"], "no period T");
     }
@@ -1537,7 +1716,10 @@ mod tests {
         let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
         let mut stubbed = figures(rows);
         stubbed.clocks = vec![ClockSample::new(0, Ok(nvidia_at(1965))); 3];
-        assert_eq!(row(&results_json(&stubbed), "terrain")["note"], Value::Null);
+        assert_eq!(
+            row(&results_json(&stubbed), TERRAIN_ATMOSPHERE_ROW)["note"],
+            Value::Null
+        );
     }
 
     #[test]
@@ -1557,7 +1739,7 @@ mod tests {
     fn the_memory_series_has_no_sample_and_every_reading_null_with_its_reason() {
         let results = results_json(&figures(BTreeMap::new()));
         // The client's version and column names, written out: its `validateResults` reads them.
-        assert_eq!(results["version"], 5);
+        assert_eq!(results["version"], 6);
         let none = json!({ "value": null, "reason": "the native replay does not measure memory" });
         assert_eq!(
             results["memory"]["series"],
@@ -1577,10 +1759,10 @@ mod tests {
     }
 
     #[test]
-    fn the_file_is_version_5_with_no_trace_window_and_no_engine_figure() {
+    fn the_file_is_version_6_with_no_trace_window_and_no_engine_figure() {
         let results = results_json(&figures(BTreeMap::new()));
         let no_trace = json!({ "value": null, "reason": "a native replay has no trace" });
-        assert_eq!(results["version"], 5);
+        assert_eq!(results["version"], 6);
         assert_eq!(results["run"]["trace"], no_trace);
         assert_eq!(results["mainThread"]["engine"], no_trace);
         // Version 4's split and GPU-process slices are the trace's, so a replay writes neither.
@@ -1620,31 +1802,28 @@ mod tests {
 
     #[test]
     fn a_row_its_unread_frames_could_carry_over_its_limit_is_not_measured() {
-        // Four frames at 4 ms of the high setting's 5, and a fifth unread: placed above the limit,
-        // it is the 95th percentile.
+        // Four frames at 4 ms of the high setting's 6 (5 + 1), and a fifth unread: placed above the
+        // limit, it is the 95th percentile.
         let results = results_json(&unread_figures(4, 4.0, 1));
-        let terrain = row(&results, "terrain");
-        let value = terrain["value"].as_f64().expect("a value");
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        let value = joint["value"].as_f64().expect("a value");
         assert!((value - 4.0).abs() < 1e-12, "{value}");
-        assert_eq!(terrain["verdict"], "not-measured");
-        assert_eq!(
-            terrain["note"],
-            "1 frame's pass times could not be read back"
-        );
+        assert_eq!(joint["verdict"], "not-measured");
+        assert_eq!(joint["note"], "1 frame's pass times could not be read back");
     }
 
     #[test]
     fn a_row_passes_or_fails_whatever_its_unread_frames_took() {
         let passing = results_json(&unread_figures(100, 4.0, 1));
-        assert_eq!(row(&passing, "terrain")["verdict"], "pass");
+        assert_eq!(row(&passing, TERRAIN_ATMOSPHERE_ROW)["verdict"], "pass");
         assert_eq!(
-            row(&passing, "terrain")["note"],
+            row(&passing, TERRAIN_ATMOSPHERE_ROW)["note"],
             "1 frame with incomplete pass times left out; the verdict holds whatever their times"
         );
-        let failing = results_json(&unread_figures(100, 6.0, 3));
-        assert_eq!(row(&failing, "terrain")["verdict"], "fail");
+        let failing = results_json(&unread_figures(100, 7.0, 3));
+        assert_eq!(row(&failing, TERRAIN_ATMOSPHERE_ROW)["verdict"], "fail");
         assert_eq!(
-            row(&failing, "terrain")["note"],
+            row(&failing, TERRAIN_ATMOSPHERE_ROW)["note"],
             "3 frames with incomplete pass times left out; the verdict holds whatever their times"
         );
     }
@@ -1652,10 +1831,11 @@ mod tests {
     #[test]
     fn a_row_with_only_unread_frames_states_their_count() {
         let results = results_json(&unread_figures(0, 4.0, 2));
-        let terrain = row(&results, "terrain");
-        assert_eq!(terrain["verdict"], "not-measured");
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["verdict"], "not-measured");
+        assert_eq!(joint["note"], "2 frames' pass times could not be read back");
         assert_eq!(
-            terrain["note"],
+            results["gpu"]["rows"]["terrain"]["p95Ms"]["reason"],
             "2 frames' pass times could not be read back"
         );
         assert_eq!(
@@ -1680,6 +1860,16 @@ mod tests {
         assert_eq!(
             results["gpu"]["incompleteFrames"],
             json!({ "value": null, "reason": "the adapter has no timestamp-query" })
+        );
+        assert_eq!(
+            results["gpu"]["rows"]["terrain"],
+            json!({
+                "estimateMs": 5.0,
+                "p50Ms": missing(TIMER_REASON),
+                "p95Ms": missing(TIMER_REASON),
+                "p99Ms": missing(TIMER_REASON),
+                "overEstimate": null,
+            })
         );
     }
 

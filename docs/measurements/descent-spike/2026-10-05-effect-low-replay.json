@@ -74,24 +74,14 @@
         "verdict": "not-measured"
       },
       {
-        "criterion": "terrain GPU time ≤ 14 ms at the 95th percentile",
-        "id": "terrain",
-        "limit": 14.0,
-        "note": null,
+        "criterion": "terrain and atmosphere GPU time, summed per frame, ≤ 18 ms (14 + 4) at the 95th percentile",
+        "id": "terrain-atmosphere",
+        "limit": 18.0,
+        "note": "not recorded before results version 6: the file keeps each row's 95th percentile, not each frame's sum of the two",
         "tolerance": 0,
         "unit": "ms",
-        "value": 0.084992,
-        "verdict": "pass"
-      },
-      {
-        "criterion": "atmosphere GPU time ≤ 4 ms at the 95th percentile",
-        "id": "atmosphere",
-        "limit": 4.0,
-        "note": null,
-        "tolerance": 0,
-        "unit": "ms",
-        "value": 0.165184,
-        "verdict": "pass"
+        "value": null,
+        "verdict": "not-measured"
       },
       {
         "criterion": "GPU resident ≤ 1 GB",
@@ -192,6 +182,40 @@
           "row": "other"
         }
       ]
+    },
+    "rows": {
+      "atmosphere": {
+        "estimateMs": 4.0,
+        "overEstimate": false,
+        "p50Ms": {
+          "reason": "not recorded before results version 6, whose file kept this row's 95th percentile alone",
+          "value": null
+        },
+        "p95Ms": {
+          "reason": null,
+          "value": 0.165184
+        },
+        "p99Ms": {
+          "reason": "not recorded before results version 6, whose file kept this row's 95th percentile alone",
+          "value": null
+        }
+      },
+      "terrain": {
+        "estimateMs": 14.0,
+        "overEstimate": false,
+        "p50Ms": {
+          "reason": null,
+          "value": 0.08192
+        },
+        "p95Ms": {
+          "reason": null,
+          "value": 0.084992
+        },
+        "p99Ms": {
+          "reason": null,
+          "value": 0.084992
+        }
+      }
     },
     "sumP95Ms": {
       "reason": null,
@@ -361,5 +385,5 @@
   "uploads": {
     "bytes": 8055072
   },
-  "version": 5
+  "version": 6
 }

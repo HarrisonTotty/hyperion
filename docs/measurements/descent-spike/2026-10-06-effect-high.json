@@ -1,6 +1,6 @@
 {
   "schema": "hyperion.descent-spike.results",
-  "version": 5,
+  "version": 6,
   "run": {
     "startedAt": "2026-10-06T16:55:16.682Z",
     "machine": {
@@ -556,6 +556,40 @@
     "sumP95Ms": {
       "value": null,
       "reason": "no timed pass"
+    },
+    "rows": {
+      "terrain": {
+        "estimateMs": 5,
+        "p50Ms": {
+          "value": null,
+          "reason": "no timed terrain pass"
+        },
+        "p95Ms": {
+          "value": null,
+          "reason": "no timed terrain pass"
+        },
+        "p99Ms": {
+          "value": null,
+          "reason": "no timed terrain pass"
+        },
+        "overEstimate": null
+      },
+      "atmosphere": {
+        "estimateMs": 1,
+        "p50Ms": {
+          "value": null,
+          "reason": "no timed atmosphere pass"
+        },
+        "p95Ms": {
+          "value": null,
+          "reason": "no timed atmosphere pass"
+        },
+        "p99Ms": {
+          "value": null,
+          "reason": "no timed atmosphere pass"
+        },
+        "overEstimate": null
+      }
     },
     "incompleteFrames": {
       "value": null,
@@ -1852,24 +1886,14 @@
         "note": "no window shown"
       },
       {
-        "id": "terrain",
-        "criterion": "terrain GPU time ≤ 5 ms at the 95th percentile",
-        "limit": 5,
+        "id": "terrain-atmosphere",
+        "criterion": "terrain and atmosphere GPU time, summed per frame, ≤ 6 ms (5 + 1) at the 95th percentile",
+        "limit": 6,
         "unit": "ms",
         "value": null,
         "tolerance": 0,
         "verdict": "not-measured",
-        "note": "no timed terrain pass"
-      },
-      {
-        "id": "atmosphere",
-        "criterion": "atmosphere GPU time ≤ 1 ms at the 95th percentile",
-        "limit": 1,
-        "unit": "ms",
-        "value": null,
-        "tolerance": 0,
-        "verdict": "not-measured",
-        "note": "no timed atmosphere pass"
+        "note": "no timed terrain or atmosphere pass"
       },
       {
         "id": "memory",

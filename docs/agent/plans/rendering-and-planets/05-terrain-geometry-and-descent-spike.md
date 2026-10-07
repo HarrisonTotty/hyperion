@@ -1114,28 +1114,39 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     UHD 620 run is paced to every second vsync of a 60 Hz display, since uncapped intervals
     alternate between 16.7 and 33.3 ms and their percentiles mean nothing.
 
-    | Criterion             | 1080p, RTX 3080 (T = measured vsync period, 16.68 ms)                   | 720p30, UHD 620 low (T = 33.3 ms)                                                               |
-    | --------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-    | 50th percentile       | ≤ T + 0.5 ms                                                            | ≤ T + 0.5 ms                                                                                    |
-    | 95th percentile       | ≤ T + 1 ms                                                              | ≤ 35 ms                                                                                         |
-    | 99th percentile       | ≤ 2T                                                                    | ≤ 2T                                                                                            |
-    | Missed frames         | ≤ 1% of intervals above 1.5 T                                           | ≤ 1% of intervals above 1.5 T                                                                   |
-    | Hitches               | none above 3 T                                                          | none above 3 T                                                                                  |
-    | Headroom              | main thread and GPU pass sum, each ≤ 0.8 T at the 95th percentile       | the same                                                                                        |
-    | The rest of the frame | terrain and atmosphere GPU time within their rows' upper ends: 5 + 1 ms | 14 + 4 ms                                                                                       |
-    | Memory                | GPU resident ≤ 3 GB; above 2 GB a finding                               | GPU resident ≤ 1 GB, with the 15 MB synthetic field (R09's Earth: about 12 MB) in three workers |
+    | Criterion             | 1080p, RTX 3080 (T = measured vsync period, 16.68 ms)                                                                        | 720p30, UHD 620 low (T = 33.3 ms)                                                               |
+    | --------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+    | 50th percentile       | ≤ T + 0.5 ms                                                                                                                 | ≤ T + 0.5 ms                                                                                    |
+    | 95th percentile       | ≤ T + 1 ms                                                                                                                   | ≤ 35 ms                                                                                         |
+    | 99th percentile       | ≤ 2T                                                                                                                         | ≤ 2T                                                                                            |
+    | Missed frames         | ≤ 1% of intervals above 1.5 T                                                                                                | ≤ 1% of intervals above 1.5 T                                                                   |
+    | Hitches               | none above 3 T                                                                                                               | none above 3 T                                                                                  |
+    | Headroom              | main thread and GPU pass sum, each ≤ 0.8 T at the 95th percentile                                                            | the same                                                                                        |
+    | The rest of the frame | terrain and atmosphere GPU time, summed per frame, within their rows' summed upper ends at the 95th percentile: 6 ms (5 + 1) | 18 ms (14 + 4)                                                                                  |
+    | Memory                | GPU resident ≤ 3 GB; above 2 GB a finding                                                                                    | GPU resident ≤ 1 GB, with the 15 MB synthetic field (R09's Earth: about 12 MB) in three workers |
 
     The memory row reads the brainstorm's "2 to 3 GB" as the roadmap's correction does: a finding
     above 2 GB and a failure above 3 GB. Its "three workers" is the separate memory run of Design
     note 11 on the UHD 620, whose timed runs keep the default count; on the desktop the timed runs
     pin three workers and the row is read from them (T17). The last two rows keep the gate honest
     about what the spike does not draw (Design note 17):
-    the budget's other rows must still fit beside terrain and atmosphere. Patches a second
-    sustained are recorded against the predicted demand but are not a pass criterion: where demand
-    outruns the workers, the view annunciates `TERRAIN: STREAMING`, as the budget intends, and the
-    run records how long and where. Percentile and missed-frame conventions follow frame-time
-    practice (PresentMon's `MsBetweenPresents`, Chromium's dropped-frame metric); the headroom row
-    is the defined meaning of open question 2's "fit with headroom".
+    the budget's other rows must still fit beside terrain and atmosphere.
+
+    _Decided 2026-10-06 by a delegated decision (`decision-r05-high-atmosphere.md`):_ the row is
+    judged on the two passes' per-frame sum against their summed upper ends. That sum is the share
+    the brainstorm's budget leaves them beside the passes the spike does not draw. Each pass's own
+    percentiles are recorded against its estimate as a finding for T19 and R12, never as a verdict:
+    terrain 5 ms and atmosphere 1 ms on high, 14 and 4 ms on low. The brainstorm calls every figure
+    of its table "an estimate, not a measurement" and expects the first measurements to decide which
+    pass gives, and the roadmap's conventions make a missed budget target a finding for R12. At the
+    clocks the driver chose, a 1 ms atmosphere could be met only with a march coarser than the low
+    setting's (Risks, "The per-frame marches under-sample the dense air").
+
+    Patches a second sustained are recorded against the predicted demand but are not a pass
+    criterion: where demand outruns the workers, the view annunciates `TERRAIN: STREAMING`, as the
+    budget intends, and the run records how long and where. Percentile and missed-frame conventions
+    follow frame-time practice (PresentMon's `MsBetweenPresents`, Chromium's dropped-frame metric);
+    the headroom row is the defined meaning of open question 2's "fit with headroom".
 
     _Decided 2026-10-06 by a delegated decision (`decision-r05-trace-windows-2.md`, addendum B):_ a
     GPU row's percentile is taken over the frames whose every resolve was timed. Frames with a
@@ -1268,7 +1279,9 @@ Refined on re-validation (2026-10-02), from the code each task touches:
   runs, comes last. T14.c's visible run, T16 and T17 wait for T14.f. T14.j and T14.k (the GPU rows'
   incomplete frames and clocks, 2026-10-06) follow T14.f, in that order, and T14.c's visible run,
   T16 and T17 wait for them too. They need nothing of T13.a's demand records, which take no trace,
-  and those need nothing of them.
+  and those need nothing of them. T12.e (the per-frame marches' steps) and T14.l (the rest of the
+  frame as one row), both 2026-10-06, follow T14.k and may run side by side. T14.c's visible run,
+  T16 and T17 wait for both to merge. They do not wait for T12.e's by-hand image check and timing.
 - T20 (the machine's facts on every platform, 2026-10-06) follows T14.i, since lane D owns
   `results.ts` and the replayer's results until then. Nothing waits on it, but a run or a demand
   record on macOS or Windows reads its machine honestly only after it.
@@ -2506,6 +2519,48 @@ them`.
     logged and recorded in the as-built notes.
 - Suggested subject: `feat(spike): R05.T14.k Record the GPU's clocks beside the rows`.
 
+**R05.T14.l The rest of the frame as one row** (added 2026-10-06 by a delegated decision,
+`decision-r05-high-atmosphere.md`).
+
+- **The row.**
+  - The criteria's `terrain` and `atmosphere` rows give way to one, `terrain-atmosphere`: the 95th
+    percentile, over complete frames, of each frame's passes whose row is `terrain` or `atmosphere`,
+    summed.
+  - Its limit is the two estimates' sum, 6 ms on high and 18 ms on low.
+  - It is built by `boundedGpuRow`, and the clock note applies.
+- **The parts.**
+  - `gpu.rows` holds `terrain` and `atmosphere`: each per-frame sum's p50, p95 and p99, its
+    estimate, and `overEstimate`.
+  - They enter no verdict.
+  - The summary prints each against its estimate.
+- **The rest:**
+  - `GPU_ROW_IDS` is `headroom-gpu` and `terrain-atmosphere`;
+  - results version 6, with `validateResults` refusing version 5 and refusing a joint limit that is
+    not the estimates' sum;
+  - the committed files converted (the joint row not measured, with the reason, where a file cannot
+    give it);
+  - the replayer's `results.rs`;
+  - the README's `criteria` and `gpu` rows.
+- **Files:**
+  - `main/results.ts` and its test;
+  - `tools/gpu-replay/src/results.rs`;
+  - the committed results files;
+  - `docs/measurements/descent-spike/README.md`;
+  - this plan.
+- **Tests:**
+  - terrain 4.5 and atmosphere 1.4 ms p95 pass, with the atmosphere over its estimate as a finding;
+  - 6.2 ms fails;
+  - the percentile is of per-frame sums;
+  - T14.j's bounds hold on the joint row;
+  - no verdict reads `gpu.rows`;
+  - version 5 is refused;
+  - the replayer writes version 6.
+- **Acceptance:**
+  - `pnpm --filter hyperion exec vitest run src/main/results src/main/spikeReport`;
+  - `just gpu-replay-check`;
+  - the hidden `just descent-spike --smoke` exits 0.
+- Suggested subject: `feat(spike): R05.T14.l Judge terrain and atmosphere as one row`.
+
 ### R05.T15 The capture and the native replay
 
 **R05.T15.a The capture.** A measurement-only shim on `GPUDevice`, `GPUQueue` and the encoders,
@@ -2678,7 +2733,10 @@ recorded beside it (T14.k). The verdict is the row as measured. A row that fails
 median clock was below 90% of the maximum says so, and may cite the pass's times in the samples at
 the maximum clock as evidence, never in the row's place. The replay's and the browser's pass times
 are compared with both runs' clocks stated, and a difference of more than 10% between their median
-clocks is named beside the comparison.
+clocks is named beside the comparison. The rest of the frame is judged on terrain and
+atmosphere together (Design note 21). Each pass's percentiles against its estimate are reported,
+and a pass over its estimate is among the brainstorm findings drafted for the owner. If the joint
+row fails, the verdict names the pass furthest over its estimate.
 
 - Files: this plan, `docs/measurements/descent-spike/README.md`.
 - Acceptance: the verdict names each criterion of Design note 21 with its measured value on each
@@ -4805,6 +4863,164 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   - _Files beyond the task's list._ `main/machineLoad.ts` and its test,
     `tools/gpu-replay/src/run.rs`, `window.rs` and `Cargo.lock`, `view/spike/demandRecord.ts` and
     its test, `docs/measurements/descent-spike/README.md`, and plan 12 (T0 and T4.b).
+
+- **Deviations in T14.l, as built** (2026-10-06, the rest of the frame as one row and results
+  version 6; `decision-r05-high-atmosphere.md`).
+  - _The plan text._ Lane C's T12.e agent committed the ruling's plan text on its own branch
+    (`docs(plans): R05 Add T12.e and T14.l, ruled by decision-r05-high-atmosphere`). It was not on
+    `rendering-and-planets` when this task began. This task applies that commit's four T14.l hunks
+    byte for byte, so that the two commits merge cleanly in either order: Design note 21's row and
+    its decided paragraph, the order of work, T14.l's text and T19's sentence. The rest comes with
+    lane C's commit: Design note 16's paragraph, T12.e, T12.c's sizes, T18's sentence and the Risks
+    edits. Among those is the bullet that Design note 21's paragraph cites, "The per-frame marches
+    under-sample the dense air", and the T17 sub-bullet's ruling, which replaces "The atmosphere
+    row still fails at 1 ms".
+  - _Where things are._
+    - `results.ts` adds `TERRAIN_ATMOSPHERE_ROW`, `EstimatedRow`, `PassRowFigures` and
+      `OVER_ESTIMATE_FINDING`. `GPU_ROW_IDS` is `headroom-gpu` and `terrain-atmosphere`, and
+      `gpu.rows` is a `Record<EstimatedRow, PassRowFigures>`.
+    - The private helpers are `passRowFigures`, `checkPassRow`, `checkRestOfFrame`,
+      `describeRowFinding` and `msOrDash`. `gpuPercentile` takes its percentile, and `buildResults`'
+      `sums` takes a set of pass rows. `LIMITS`' `terrainMs` and `atmosphereMs` are the two
+      estimates.
+    - `ESTIMATE_OF` names each estimated row's key among `LIMITS`. It `satisfies` a record over
+      `EstimatedRow`, so a new pass row cannot be left out of the joint row. `ESTIMATED_ROWS` is
+      taken from its keys (`isEstimatedRow`).
+    - The replayer's `results.rs` adds `TERRAIN_ATMOSPHERE_ROW`, `PassTiming::percentile` and
+      `PassTiming::pass_row`, and the per-frame `rest_of_frame` sums. The free `p95` is gone.
+  - _The joint row._ `boundedGpuRow` reads each complete frame's sum of its passes whose row is
+    terrain or atmosphere, in the frames with one, summed in the frame's pass order.
+    - Its tolerance is the per-pass tolerance times the most such passes a frame has.
+    - Its criterion is "terrain and atmosphere GPU time, summed per frame, ≤ 6 ms (5 + 1) at the
+      95th percentile", or 18 ms (14 + 4) on low. Without a value its reason is "no timed terrain
+      or atmosphere pass".
+    - It is in `GPU_ROW_IDS`, so the clock note and T14.j's schema check of a verdict against the
+      incomplete count apply to it.
+  - _The parts' form._ The ruling names the fields, not their form. Each of `gpu.rows.terrain` and
+    `gpu.rows.atmosphere` is `{ estimateMs, p50Ms, p95Ms, p99Ms, overEstimate }`:
+    - The estimate is a plain number, always present, so that the schema check can hold the joint
+      limit to the sum even where the percentiles are missing.
+    - Each percentile is its own `Measured`, so that a converted file keeps a row's 95th
+      percentile where it has no 50th or 99th.
+    - `overEstimate` is the 95th percentile above the estimate, with the timer's tolerance aside
+      since it is a finding, and `null` without a 95th percentile.
+    - The parts read the complete frames, as the joint row does. When no complete frame has the
+      row, the incomplete frames' count is the reason. They carry no clock note.
+  - _The schema check._ Version 6 only. Beyond the ruling's refusal of a joint limit that is not
+    the estimates' sum (to 10⁻⁹ ms):
+    - `gpu.rows` must hold both rows, each with an estimate above 0 and percentiles that are
+      numbers or null, in order where present.
+    - `overEstimate` must be exactly whether the 95th percentile is above the estimate.
+    - `criteria.whole` must hold one `terrain-atmosphere` row and neither of version 5's rows.
+    - The estimates are not held to the setting's values: nothing else in the check holds a limit
+      to its setting.
+  - _The summary._ A section after the criterion, "Terrain and atmosphere against their
+    estimates", gives one row each: the estimate, p50, p95, p99 and the finding. The finding is
+    "over its estimate: a finding for T19 and R12" where it applies, then why any percentile is
+    missing.
+  - _The committed files_ (`target/laneD/t14l/tov6.mts`, not committed). All six are converted, and
+    the replay's is edited as text, keeping serde's sorted keys and its `14.0` forms. A version 5
+    file allows this much:
+    - Each row's 95th percentile is its old row's value, or that row's reason.
+    - A row of one pass (terrain, in the five files with pass times; the high run's has none) sums
+      to that pass's time in each frame, over the same frames, so its 50th and 99th percentiles are
+      the pass's. The converter checks that the pass's 95th equals the row's.
+    - The atmosphere has two passes (three dispatches a frame in the replay), so its 50th and 99th
+      are "not recorded before results version 6, whose file kept this row's 95th percentile
+      alone".
+    - The joint row is not measured. Its reason is "not recorded before results version 6: the file
+      keeps each row's 95th percentile, not each frame's sum of the two" in the five files with
+      values. In the high run's, which had no timed pass, it is "no timed terrain or atmosphere
+      pass", as its version 5 rows gave it.
+
+    The conversion is lossless for the old rows: rebuilt from the new figures, each equals its
+    version 5 row. No overall verdict changed; all six were and are `not-measured`. Sizes are
+    110,401, 110,402, 9,912, 118,497, 119,676 and 120,044 B. The five summaries are regenerated,
+    and only the criterion table and the new section differ.
+
+  - _Their figures_ (hidden, provisional). On low, the atmosphere's 95th percentiles are 3.73, 3.57,
+    3.58 and 3.55 ms against 4 ms, terrain's 0.57–0.71 ms against 14 ms, and the replay's 0.17 and
+    0.08 ms. None is over its estimate. The high run has none, since its timer stopped at 9.75 s.
+  - _The smoke._ The acceptance's hidden `just descent-spike --smoke` exited 0 after 23 s, at a
+    1-minute load of 12.3 (`target/laneD/t14l/smoke-1.log`).
+    - The run: the high setting on the RTX 3080, port 7893, in an 8 G scope, under
+      `hyperion-gpu.lock` and a build slot, with Electron's DBus address `/nonexistent`.
+    - The trace: three windows of 3.2, 2.3 and 3.2 MB, at most 0.19% of the buffer, with the spans
+      of 113, 77 and 144 frames matched.
+    - The clocks: from `nvidia-smi`, 210 to 1,215 MHz in P8 to P3, of 2,115 MHz.
+    - What it proves: a smoke writes no results file and returns before `buildResults`
+      (`spikeSession.ts`), so it proves the harness, not this change.
+    - The writer's own cross-check is an offscreen replay of the fixture
+      (`gpu-replay replay tools/gpu-replay/tests/fixtures/small`, under the GPU lock). Its version
+      6 file is accepted by the client's `validateResults`. Its joint row is 0.002 ms, with the
+      clock note "measured at a median 1800 of 2115 MHz".
+  - _Files beyond the task's list._ `tools/gpu-replay/tests/replay.rs`, the replayer's GPU test,
+    which `just test-gpu-replay` runs and which is ignored by default. It looked up version 5's
+    `terrain` and `atmosphere` rows by their ids. It now reads:
+    - the joint row against low's 14 + 4 ms;
+    - terrain's 95th percentile in `gpu.rows`;
+    - the atmosphere's "no timed atmosphere pass", with `overEstimate` null.
+  - _Tests._
+    - `results.test.ts`, 13 new, in "a results file's rest of the frame":
+      - 4.5 + 1.4 ms passes on high, and the parts' figures with the atmosphere over its estimate;
+      - one criterion row and neither alone, and the summary's table;
+      - a file over its estimate validates, and 6.2 ms fails;
+      - the percentile is of the per-frame sums: 5.5 ms, where the two percentiles sum to 9;
+      - no verdict reads the split: three runs at 5.75 ms, with neither, the atmosphere or terrain
+        over its estimate, give equal criteria;
+      - the parts read the complete frames;
+      - the joint row's and a part's reasons without a timed pass, and the summary's;
+      - the reasons of percentiles that differ.
+    - `results.test.ts`, 9 new refusals in the schema check, and "refuses version 5".
+    - The tests of the setting's limits, the quantized timer, the windowed trace, T14.j's
+      incomplete frames and T14.k's clock notes now read the joint row, so T14.j's bounds are
+      tested on it.
+    - `results.rs`, 4 new:
+      - the joint row against the estimates' sum, with the atmosphere over its estimate;
+      - 6.2 ms fails;
+      - the percentile of the per-frame sums, whose terrain part sits at its estimate and is not
+        over it;
+      - low's limit of 18 ms.
+
+      Five updated tests now check `gpu.rows`, the untimed replay's among them.
+  - _Gate_ (every run capped, cargo through a build slot):
+    - the acceptance vitest, `src/main/results src/main/spikeReport`: 2 files, 212 tests, and
+      with `spikeSession` 3 files, 234;
+    - `pnpm test`: 331 and 9 files, 5,810 and 174 tests. One earlier run failed once in
+      `SystemDisplay.test.tsx`, another lane's test, which passed three times alone and in the
+      next full run;
+    - the typecheck from a clean cache, `just check lint`, Prettier and rustfmt;
+    - `just gpu-replay-check`: 58 unit tests and Clippy;
+    - the replayer's GPU test, offscreen under the GPU lock;
+    - the fixture replay, validated by the client's `validateResults`;
+    - the six converted files, validated as version 6;
+    - the hidden smoke;
+    - the commit's hooks.
+  - _Review._
+    - typescript-reviewer found no must-fix. Its two should-fix items are applied: each test now
+      has one reason to fail. So are its three considers: `ESTIMATE_OF`, the 95th percentile read
+      by its name, and `GPU_ROW_IDS` built from the constant.
+    - rust-reviewer had three must-fix items, all applied:
+      - the GPU test still read version 5's rows;
+      - an `.ok()` had no comment, and forced a clone;
+      - three names had no unit.
+
+      Its four should-fix items are applied too: the parts' percentiles and the equal-to-estimate
+      boundary are pinned, the row ids are asserted with `assert_eq!`, the doc's summary line is
+      split, and a stale comment is fixed. So is its consider, the untimed replay's parts.
+
+    - plan-conformance-reviewer found that the change conforms. The four hunks are byte-identical
+      to lane C's, and both merge orders are clean.
+      - Its must-fix, to run the smoke, is done.
+      - Its should-fix items are applied: a third run with neither row over its estimate, and this
+        record's file list.
+      - Of its considers, a stale comment and two wordings are fixed. Holding the estimates to the
+        setting is not taken, for the reason under "The schema check".
+  - _Open, for the orchestrator._ T20's ruling says "a later schema version, bumped for other
+    reasons, should make `loadAverage` a `Measured`". Version 6 is such a bump, but T14.l's text
+    does not include it, so the field stays a number triple. The docs now say "versions 5 and 6".
+    It can join version 6 before it lands, at the cost of converting the six files again, or wait
+    for the next bump.
 
 - **Deviations in T12.c, as built** (2026-10-02).
   - _The shape._ `hillaire.ts` holds `TableSizes`, `TABLE_SIZES`, `AtmosphereCamera`,

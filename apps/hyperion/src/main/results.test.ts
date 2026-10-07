@@ -38,6 +38,7 @@ import {
   type MemorySources,
   missing,
   nearestRank,
+  OVER_ESTIMATE_FINDING,
   READ_IN_FLIGHT_REASON,
   RESULTS_SCHEMA,
   RESULTS_VERSION,
@@ -46,6 +47,7 @@ import {
   type RunDescription,
   sampleMemory,
   summaryMarkdown,
+  TERRAIN_ATMOSPHERE_ROW,
   TIMESTAMP_QUANTUM_MS,
   validateResults,
   writeResults,
@@ -498,7 +500,11 @@ describe("a results file", () => {
     expect(results.gpu.tolerancePerPassMs).toBe(TIMESTAMP_QUANTUM_MS);
     // Three passes a frame at most, each ± one quantum.
     expect(rowOf(results, "headroom-gpu").tolerance).toBeCloseTo(3 * TIMESTAMP_QUANTUM_MS, 12);
-    expect(rowOf(results, "terrain").tolerance).toBeCloseTo(TIMESTAMP_QUANTUM_MS, 12);
+    // The terrain and atmosphere rows' two passes a frame.
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW).tolerance).toBeCloseTo(
+      2 * TIMESTAMP_QUANTUM_MS,
+      12,
+    );
   });
 
   it("calls a row marginal within the quantized timer's tolerance of its limit", () => {
@@ -507,7 +513,7 @@ describe("a results file", () => {
       timer: "quantized",
       frames: {
         ...frames,
-        passes: [{ label: "terrain", row: "terrain", gpuMs: frames.scriptTimesS.map(() => 14.03) }],
+        passes: [{ label: "terrain", row: "terrain", gpuMs: frames.scriptTimesS.map(() => 18.03) }],
       },
     });
     const results = buildResults({
@@ -516,26 +522,48 @@ describe("a results file", () => {
       trace: traceOf(),
       memory: MEMORY,
     });
-    expect(rowOf(results, "terrain")).toMatchObject({ limit: 14, verdict: "marginal" });
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      limit: 18,
+      verdict: "marginal",
+    });
     const exact = buildResults({
       run: runOf(),
       report: { ...atLimit, timer: "full" },
       trace: traceOf(),
       memory: MEMORY,
     });
-    expect(rowOf(exact, "terrain")).toMatchObject({ verdict: "fail" });
+    expect(rowOf(exact, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({ verdict: "fail" });
   });
 
   it("reads the GPU rows against the setting's limits", () => {
-    const results = buildResults({
+    const high = buildResults({
       run: runOf({ setting: "high" }),
       report: reportOf(),
       trace: traceOf(),
       memory: MEMORY,
     });
-    expect(rowOf(results, "terrain")).toMatchObject({ limit: 5, value: 6, verdict: "fail" });
-    expect(rowOf(results, "atmosphere")).toMatchObject({ limit: 1, value: 1.5, verdict: "fail" });
-    expect(rowOf(results, "headroom-gpu")).toMatchObject({ value: 8, verdict: "pass" });
+    // 6 ms of terrain and 1.5 of atmosphere a frame, against 5 + 1 on high and 14 + 4 on low.
+    expect(rowOf(high, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      criterion:
+        "terrain and atmosphere GPU time, summed per frame, ≤ 6 ms (5 + 1) at the 95th percentile",
+      limit: 6,
+      value: 7.5,
+      verdict: "fail",
+    });
+    expect(rowOf(high, "headroom-gpu")).toMatchObject({ value: 8, verdict: "pass" });
+    const low = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect(rowOf(low, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      criterion:
+        "terrain and atmosphere GPU time, summed per frame, ≤ 18 ms (14 + 4) at the 95th percentile",
+      limit: 18,
+      value: 7.5,
+      verdict: "pass",
+    });
   });
 
   it("records the patch counts and demand under both bounds", () => {
@@ -697,6 +725,251 @@ function sliceNames(results: DescentResults): ReadonlyArray<string> | undefined 
   return results.gpu.gpuProcess.value?.slices.map(({ name }) => name);
 }
 
+/**
+ * {@link reportOf}'s report with frame i's terrain and atmosphere times those given, its tone pass
+ * kept.
+ */
+function restOfFrameReport(
+  terrainMs: (i: number) => number,
+  atmosphereMs: (i: number) => number,
+): DescentSpikeReport {
+  const base = reportOf();
+  return {
+    ...base,
+    frames: {
+      ...base.frames,
+      passes: base.frames.passes.map((pass) => {
+        const timeAt =
+          pass.row === "terrain" ? terrainMs : pass.row === "atmosphere" ? atmosphereMs : null;
+        return timeAt === null
+          ? pass
+          : Object.assign({}, pass, { gpuMs: pass.gpuMs.map((_, i) => timeAt(i)) });
+      }),
+    },
+  };
+}
+
+/** {@link reportOf}'s report with no pass timed in any frame. */
+function untimedPassesReport(): DescentSpikeReport {
+  const base = reportOf();
+  return { ...base, frames: { ...base.frames, passes: [] } };
+}
+
+/** `report`'s results on the high setting, whose estimates are 5 ms of terrain and 1 of atmosphere. */
+function highResults(report: DescentSpikeReport): DescentResults {
+  return buildResults({
+    run: runOf({ setting: "high" }),
+    report,
+    trace: traceOf(),
+    memory: MEMORY,
+  });
+}
+
+describe("a results file's rest of the frame (decision-r05-high-atmosphere.md)", () => {
+  it("passes terrain at 4.5 and atmosphere at 1.4 ms on high", () => {
+    const results = highResults(
+      restOfFrameReport(
+        () => 4.5,
+        () => 1.4,
+      ),
+    );
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      limit: 6,
+      value: expect.closeTo(5.9, 12),
+      verdict: "pass",
+    });
+  });
+
+  it("records the atmosphere at 1.4 ms as over its 1 ms estimate, and terrain at 4.5 as within its 5", () => {
+    const results = highResults(
+      restOfFrameReport(
+        () => 4.5,
+        () => 1.4,
+      ),
+    );
+    expect(results.gpu.rows).toEqual({
+      terrain: {
+        estimateMs: 5,
+        p50Ms: measured(4.5),
+        p95Ms: measured(4.5),
+        p99Ms: measured(4.5),
+        overEstimate: false,
+      },
+      atmosphere: {
+        estimateMs: 1,
+        p50Ms: measured(1.4),
+        p95Ms: measured(1.4),
+        p99Ms: measured(1.4),
+        overEstimate: true,
+      },
+    });
+  });
+
+  it("judges terrain and atmosphere as one criterion row, with neither alone", () => {
+    const results = highResults(reportOf());
+    expect(results.criteria.whole.map(({ id }) => id)).toEqual([
+      "p50",
+      "p95",
+      "p99",
+      "missed",
+      "hitches",
+      "headroom-main",
+      "headroom-gpu",
+      TERRAIN_ATMOSPHERE_ROW,
+      "memory",
+    ]);
+  });
+
+  it("prints each pass row beside its estimate in the summary, the finding where it is over", () => {
+    const summary = summaryMarkdown(
+      highResults(
+        restOfFrameReport(
+          () => 4.5,
+          () => 1.4,
+        ),
+      ),
+    );
+    expect(summary).toContain(
+      `| atmosphere | 1.00 ms | 1.40 ms | 1.40 ms | 1.40 ms | ${OVER_ESTIMATE_FINDING} |`,
+    );
+    expect(summary).toContain("| terrain | 5.00 ms | 4.50 ms | 4.50 ms | 4.50 ms |  |");
+  });
+
+  it("validates a file whose atmosphere is over its estimate", () => {
+    const results = highResults(
+      restOfFrameReport(
+        () => 4.5,
+        () => 1.4,
+      ),
+    );
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("fails 6.2 ms of terrain and atmosphere on high", () => {
+    const results = highResults(
+      restOfFrameReport(
+        () => 4.8,
+        () => 1.4,
+      ),
+    );
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      limit: 6,
+      value: expect.closeTo(6.2, 12),
+      verdict: "fail",
+    });
+  });
+
+  it("takes the 95th percentile of each frame's sum, not the sum of the two percentiles", () => {
+    // A tenth of the frames each has its terrain at 5 ms or its atmosphere at 4, never both: each
+    // row's 95th percentile is its slow value, 9 ms between them, but no frame's sum is over 5.5.
+    const results = highResults(
+      restOfFrameReport(
+        (i) => (i % 10 === 0 ? 5 : 1),
+        (i) => (i % 10 === 5 ? 4 : 0.5),
+      ),
+    );
+    expect([results.gpu.rows.terrain.p95Ms, results.gpu.rows.atmosphere.p95Ms]).toEqual([
+      measured(5),
+      measured(4),
+    ]);
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({ value: 5.5, verdict: "pass" });
+  });
+
+  it("reads no verdict from the split between terrain and atmosphere", () => {
+    // The same 5.75 ms a frame, with the atmosphere over its estimate in one run, terrain in
+    // another, and neither in the third.
+    const neitherOver = highResults(
+      restOfFrameReport(
+        () => 4.75,
+        () => 1,
+      ),
+    );
+    const atmosphereOver = highResults(
+      restOfFrameReport(
+        () => 4.5,
+        () => 1.25,
+      ),
+    );
+    const terrainOver = highResults(
+      restOfFrameReport(
+        () => 5.25,
+        () => 0.5,
+      ),
+    );
+    expect(
+      [neitherOver, atmosphereOver, terrainOver].map(({ gpu }) => [
+        gpu.rows.terrain.overEstimate,
+        gpu.rows.atmosphere.overEstimate,
+      ]),
+    ).toEqual([
+      [false, false],
+      [false, true],
+      [true, false],
+    ]);
+    expect([atmosphereOver.criteria, terrainOver.criteria]).toEqual([
+      neitherOver.criteria,
+      neitherOver.criteria,
+    ]);
+  });
+
+  it("reads each pass row over the complete frames, as the joint row does", () => {
+    // The five partial frames' 100 ms terrain times, of 400, are in the pass's own percentiles alone.
+    const results = incompleteResults([300, 301, 302, 303, 304], []);
+    expect(results.gpu.passes.value?.find(({ label }) => label === "terrain")?.p99Ms).toBe(100);
+    expect(results.gpu.rows.terrain).toMatchObject({ p99Ms: measured(6), overEstimate: false });
+  });
+
+  it("states why the joint row is not measured with no timed pass", () => {
+    const results = highResults(untimedPassesReport());
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      verdict: "not-measured",
+      note: "no timed terrain or atmosphere pass",
+    });
+  });
+
+  it("states why a pass row has no figures", () => {
+    expect(highResults(untimedPassesReport()).gpu.rows.atmosphere).toEqual({
+      estimateMs: 1,
+      p50Ms: missing("no timed atmosphere pass"),
+      p95Ms: missing("no timed atmosphere pass"),
+      p99Ms: missing("no timed atmosphere pass"),
+      overEstimate: null,
+    });
+  });
+
+  it("prints a pass row's missing figures with their reason in the summary", () => {
+    expect(summaryMarkdown(highResults(untimedPassesReport()))).toContain(
+      "| atmosphere | 1.00 ms | — | — | — | no timed atmosphere pass |",
+    );
+  });
+
+  it("names each missing percentile with its reason when the three's reasons differ", () => {
+    const results = highResults(
+      restOfFrameReport(
+        () => 4.5,
+        () => 1.4,
+      ),
+    );
+    const converted: DescentResults = {
+      ...results,
+      gpu: {
+        ...results.gpu,
+        rows: {
+          ...results.gpu.rows,
+          atmosphere: {
+            ...results.gpu.rows.atmosphere,
+            p50Ms: missing("not recorded"),
+            p99Ms: missing("not recorded"),
+          },
+        },
+      },
+    };
+    expect(summaryMarkdown(converted)).toContain(
+      `| atmosphere | 1.00 ms | — | 1.40 ms | — | ${OVER_ESTIMATE_FINDING}; p50, p99: not recorded |`,
+    );
+  });
+});
+
 describe("a results file of a windowed trace", () => {
   it("leaves a frame in a boundary's exclusion out of every per-frame figure and counts it", () => {
     const results = twoWindowResults();
@@ -716,7 +989,8 @@ describe("a results file of a windowed trace", () => {
     expect(results.frames.segments[0]?.raf.value).toMatchObject({ count: 170, maxMs: 120 });
     // Our code's 40 ms and the terrain's 50 ms are the excluded frames' alone.
     expect(results.mainThread.ourCodeP95Ms).toEqual(measured(4));
-    expect(rowOf(results, "terrain").value).toBe(6);
+    expect(results.gpu.rows.terrain.p99Ms).toEqual(measured(6));
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW).value).toBe(7.5);
     expect(results.gpu.passes.value?.find(({ label }) => label === "terrain")).toMatchObject({
       frames: 370,
       p99Ms: 6,
@@ -1181,9 +1455,10 @@ describe("a results file's incomplete pass times", () => {
     );
     // The partial frames' 100 ms terrain times enter no sum: every complete frame's is 6 ms, and
     // its sum 7.5 or 8 ms.
-    expect(rowOf(results, "terrain").value).toBe(6);
+    expect(results.gpu.rows.terrain.p99Ms).toEqual(measured(6));
     expect(results.gpu.sumP95Ms).toEqual(measured(8));
-    expect(rowOf(results, "atmosphere").value).toBe(1.5);
+    expect(results.gpu.rows.atmosphere.p99Ms).toEqual(measured(1.5));
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW).value).toBe(7.5);
   });
 
   it("counts no incomplete frame in a boundary's exclusion, which every per-frame figure leaves out", () => {
@@ -1224,8 +1499,7 @@ describe("a results file's incomplete pass times", () => {
     );
     for (const [id, value] of [
       ["headroom-gpu", 8],
-      ["terrain", 6],
-      ["atmosphere", 1.5],
+      [TERRAIN_ATMOSPHERE_ROW, 7.5],
     ] as const) {
       expect(rowOf(results, id)).toMatchObject({ value, verdict: "not-measured", note: reason });
     }
@@ -1235,8 +1509,8 @@ describe("a results file's incomplete pass times", () => {
   it("passes a row that passes with every incomplete frame above its limit", () => {
     const results = incompleteResults([300], [400]);
     expect(results.gpu.incompleteFrames.value).toMatchObject({ dropped: 1, partial: 1 });
-    expect(rowOf(results, "terrain")).toMatchObject({
-      value: 6,
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      value: 7.5,
       verdict: "pass",
       note: "2 frames with incomplete pass times left out; the verdict holds whatever their times",
     });
@@ -1244,10 +1518,13 @@ describe("a results file's incomplete pass times", () => {
   });
 
   it("fails a row that fails with every incomplete frame below its limit", () => {
-    // The high setting's terrain limit is 5 ms, and the 370 complete frames take 6.
+    // The high setting's limit is 5 + 1 ms, and the 370 complete frames take 6 + 1.5.
     const results = incompleteResults(TWENTY_NINE, [400], "high");
-    expect(rowOf(results, "terrain")).toMatchObject({ limit: 5, value: 6, verdict: "fail" });
-    expect(rowOf(results, "atmosphere")).toMatchObject({ limit: 1, verdict: "fail" });
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      limit: 6,
+      value: 7.5,
+      verdict: "fail",
+    });
     expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
   });
 
@@ -1337,7 +1614,10 @@ describe("a results file's incomplete pass times", () => {
     expect(reason).toBe(
       "30 frames' pass times were incomplete (1 as the GPU was more than 27 frames behind, 29 read in flight at the report)",
     );
-    expect(rowOf(results, "terrain")).toMatchObject({ verdict: "not-measured", note: reason });
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
+      verdict: "not-measured",
+      note: reason,
+    });
     expect(results.gpu.incompleteFrames).toEqual(
       measured({ dropped: 1, partial: 29, frames: 400 }),
     );
@@ -1359,7 +1639,7 @@ describe("a results file's incomplete pass times", () => {
       },
     };
     const results = buildResults({ run: runOf(), report, trace: traceOf(), memory: MEMORY });
-    expect(rowOf(results, "terrain")).toMatchObject({
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
       verdict: "pass",
       note: "1 frame with incomplete pass times left out; the verdict holds whatever their times",
     });
@@ -1372,7 +1652,7 @@ describe("a results file's incomplete pass times", () => {
       frames: { ...base.frames, inFlightResolves: base.frames.missingResolves },
     };
     const results = buildResults({ run: runOf(), report, trace: traceOf(), memory: MEMORY });
-    expect(rowOf(results, "terrain").note).toBe(
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW).note).toBe(
       "1 frame with incomplete pass times left out (1 read in flight at the report); the verdict holds whatever their times",
     );
   });
@@ -1422,7 +1702,7 @@ function repeated(value: number, count: number): number[] {
 }
 
 /** The rows a GPU clock note may sit on. */
-const GPU_ROWS = ["headroom-gpu", "terrain", "atmosphere"] as const;
+const GPU_ROWS = ["headroom-gpu", TERRAIN_ATMOSPHERE_ROW] as const;
 
 /** The note of a run at a median 1,100 of 1,980 MHz. */
 const NOTE_1100 = "measured at a median 1100 of 1980 MHz (the driver's choice at this load)";
@@ -1446,7 +1726,7 @@ describe("a results file's GPU clocks", () => {
     expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
   });
 
-  it("notes a median of 1,100 of 1,980 MHz after the warm-up on the three GPU rows", () => {
+  it("notes a median of 1,100 of 1,980 MHz after the warm-up on the two GPU rows", () => {
     // The warm-up's ten samples at the maximum count for nothing.
     const results = clockedResults(clockedMemory(30, 1980, 1100));
     for (const id of GPU_ROWS) {
@@ -1469,14 +1749,14 @@ describe("a results file's GPU clocks", () => {
 
   it("adds the note after a row's own", () => {
     const results = clockedResults(clockedMemory(30, 1980, 1100), incompleteReport([300], [400]));
-    expect(rowOf(results, "terrain").note).toBe(
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW).note).toBe(
       `2 frames with incomplete pass times left out; the verdict holds whatever their times; ${NOTE_1100}`,
     );
   });
 
   it("puts no note on a row with no value", () => {
     const results = clockedResults(clockedMemory(30, 1980, 1100), reportOf({ timer: "absent" }));
-    expect(rowOf(results, "terrain")).toMatchObject({
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW)).toMatchObject({
       value: null,
       note: "the pass timer is absent (no timestamp-query)",
     });
@@ -1561,7 +1841,7 @@ describe("a results file's GPU clocks", () => {
       memoryMHz: missing("i915 gives no memory clock: the GPU shares the system's memory"),
       performanceState: missing("i915 has no performance states"),
     });
-    expect(rowOf(results, "terrain").note).toBe(
+    expect(rowOf(results, TERRAIN_ATMOSPHERE_ROW).note).toBe(
       "measured at a median 600 of 1150 MHz (the driver's choice at this load)",
     );
     expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
@@ -1855,12 +2135,12 @@ describe("the schema check", () => {
     [
       "a pass its incomplete frames make impossible",
       [[["criteria", "whole", 7, "verdict"], "pass"]],
-      "the terrain row's pass is impossible with 30 of 400 frames' pass times incomplete",
+      "the terrain-atmosphere row's pass is impossible with 30 of 400 frames' pass times incomplete",
     ],
     [
       "a marginal its incomplete frames make impossible",
       [[["criteria", "whole", 7, "verdict"], "marginal"]],
-      "the terrain row's marginal is impossible with 30 of 400 frames' pass times incomplete",
+      "the terrain-atmosphere row's marginal is impossible with 30 of 400 frames' pass times incomplete",
     ],
     [
       "a fail its incomplete frames make impossible",
@@ -1868,7 +2148,7 @@ describe("the schema check", () => {
         [["gpu", "incompleteFrames", "value", "partial"], 390],
         [["criteria", "whole", 7, "verdict"], "fail"],
       ],
-      "the terrain row's fail is impossible with 391 of 400 frames' pass times incomplete",
+      "the terrain-atmosphere row's fail is impossible with 391 of 400 frames' pass times incomplete",
     ],
     ["no clocks", [[["gpu", "clocks"], DELETE]], "gpu.clocks is missing"],
     [
@@ -1902,6 +2182,47 @@ describe("the schema check", () => {
       "a maximum clock that is not whole MHz",
       [[["gpu", "clocks"], measured(clocksOf({ maxGraphicsMHz: measured(0) }))]],
       "gpu.clocks.value.maxGraphicsMHz is not whole MHz",
+    ],
+    ["no pass rows' figures", [[["gpu", "rows"], DELETE]], "gpu.rows is missing"],
+    [
+      "a pass row without its estimate",
+      [[["gpu", "rows", "terrain", "estimateMs"], DELETE]],
+      "gpu.rows.terrain is not an estimate and the percentiles of its sums",
+    ],
+    [
+      "a pass row's percentiles out of order",
+      [[["gpu", "rows", "terrain", "p50Ms", "value"], 7]],
+      "gpu.rows.terrain's percentiles are out of order",
+    ],
+    [
+      "a pass row over its estimate that its 95th percentile is not over",
+      [[["gpu", "rows", "atmosphere", "overEstimate"], true]],
+      "gpu.rows.atmosphere.overEstimate is not false, whether its 95th percentile is above its estimate",
+    ],
+    [
+      "a joint limit other than the estimates' sum",
+      [[["criteria", "whole", 7, "limit"], 19]],
+      "the terrain-atmosphere row's limit is 19, not the estimates' sum, 18 ms",
+    ],
+    [
+      "estimates whose sum is not the joint limit",
+      [[["gpu", "rows", "atmosphere", "estimateMs"], 1]],
+      "the terrain-atmosphere row's limit is 18, not the estimates' sum, 15 ms",
+    ],
+    [
+      "version 5's terrain row",
+      [[["criteria", "whole", 7, "id"], "terrain"]],
+      "criteria.whole holds version 5's terrain row: terrain and atmosphere are one row, terrain-atmosphere",
+    ],
+    [
+      "no joint row",
+      [[["criteria", "whole", 7, "id"], "atmosphere"]],
+      "criteria.whole has 0 terrain-atmosphere rows, not one",
+    ],
+    [
+      "two joint rows",
+      [[["criteria", "whole", 8, "id"], "terrain-atmosphere"]],
+      "criteria.whole has 2 terrain-atmosphere rows, not one",
     ],
   ])("refuses %s", (_case, edits, problem) => {
     const file: unknown = JSON.parse(JSON.stringify(incompleteResults(TWENTY_NINE, [400])));
@@ -1938,11 +2259,11 @@ describe("the schema check", () => {
     expect(validateResults([])).toEqual(["the file is not an object"]);
   });
 
-  it("refuses version 4", () => {
+  it("refuses version 5", () => {
     const results = twoWindowResults();
-    expect(RESULTS_VERSION).toBe(5);
-    expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 4 })))).toEqual([
-      "version is not 5",
+    expect(RESULTS_VERSION).toBe(6);
+    expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 5 })))).toEqual([
+      "version is not 6",
     ]);
   });
 

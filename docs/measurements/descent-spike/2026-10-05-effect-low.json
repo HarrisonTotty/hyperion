@@ -1,6 +1,6 @@
 {
   "schema": "hyperion.descent-spike.results",
-  "version": 5,
+  "version": 6,
   "run": {
     "startedAt": "2026-10-05T02:16:01.868Z",
     "machine": {
@@ -398,6 +398,40 @@
     "sumP95Ms": {
       "value": 4.069856,
       "reason": null
+    },
+    "rows": {
+      "terrain": {
+        "estimateMs": 14,
+        "p50Ms": {
+          "value": 0.319808,
+          "reason": null
+        },
+        "p95Ms": {
+          "value": 0.705856,
+          "reason": null
+        },
+        "p99Ms": {
+          "value": 0.800832,
+          "reason": null
+        },
+        "overEstimate": false
+      },
+      "atmosphere": {
+        "estimateMs": 4,
+        "p50Ms": {
+          "value": null,
+          "reason": "not recorded before results version 6, whose file kept this row's 95th percentile alone"
+        },
+        "p95Ms": {
+          "value": 3.5722880000000004,
+          "reason": null
+        },
+        "p99Ms": {
+          "value": null,
+          "reason": "not recorded before results version 6, whose file kept this row's 95th percentile alone"
+        },
+        "overEstimate": false
+      }
     },
     "incompleteFrames": {
       "value": null,
@@ -1530,24 +1564,14 @@
         "note": "no window shown"
       },
       {
-        "id": "terrain",
-        "criterion": "terrain GPU time ≤ 14 ms at the 95th percentile",
-        "limit": 14,
+        "id": "terrain-atmosphere",
+        "criterion": "terrain and atmosphere GPU time, summed per frame, ≤ 18 ms (14 + 4) at the 95th percentile",
+        "limit": 18,
         "unit": "ms",
-        "value": 0.705856,
+        "value": null,
         "tolerance": 0,
-        "verdict": "pass",
-        "note": null
-      },
-      {
-        "id": "atmosphere",
-        "criterion": "atmosphere GPU time ≤ 4 ms at the 95th percentile",
-        "limit": 4,
-        "unit": "ms",
-        "value": 3.5722880000000004,
-        "tolerance": 0,
-        "verdict": "pass",
-        "note": null
+        "verdict": "not-measured",
+        "note": "not recorded before results version 6: the file keeps each row's 95th percentile, not each frame's sum of the two"
       },
       {
         "id": "memory",
