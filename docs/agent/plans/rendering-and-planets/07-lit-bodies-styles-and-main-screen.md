@@ -415,6 +415,8 @@ export interface BloomKernel {
   readonly weights: Float32Array; // NNLS, non-negative, Σ = 1
 }
 export function bloomKernel(setting: QualitySetting, role: ViewRole, radPerPx: number): BloomKernel;
+// As built: bloomKernel(bloomLevels: BloomLevels, role, radPerPx, eye: EyeObserver), the levels
+// `SETTINGS[s].photoreal.bloom` (T14.a's `eye`; T17's levels).
 ```
 
 WGSL: `post/histogram.wgsl` (shared-memory atomics; a `KernelPair` with `readback: "bit-exact"`
@@ -1035,7 +1037,8 @@ and `--port`.
     histogram 0.3–0.5 ms on the discrete part and about 1 ms on the UHD 620, bloom and tone mapping
     under 1 ms and 2–3 ms (brainstorm, Performance budget). The histogram's probe at 640 × 360,
     0.3–0.8 ms, is inside its row, provisionally, since it was measured under shared load. Each
-    target is a finding if missed, not a failure.
+    target is a finding if missed, not a failure. _T17 measured the RTX 3080's figures (Risks,
+    "Deviations in T17, as built"); the UHD 620's are the owner's._
 19. **Bodies are drawn oblate, on one datum** (researched 2026-09-29; flattenings from NASA's fact
     sheets; the Darwin–Radau relation, from memory after Murray and Dermott 1999, checked against
     six planets).
@@ -2070,6 +2073,9 @@ Tests (Vitest): `VIEW` given `low` draws its sky and its
 photorealistic frame at the low setting's values. Acceptance: `pnpm test`, `just ci`; the figures
 recorded with their settings, flags, load and dates.
 
+_As built (2026-10-07, the shading lane): see Risks, "Deviations in T17, as built". The owner's
+UHD 620 runs are pending by hand (RESUME, "Owner by hand: R07.T17 UHD 620 benchmarks")._
+
 ### Phase B: several views
 
 #### R07.T18 The view budget and resolution controller
@@ -2090,7 +2096,8 @@ and the exposure reading of the primary view; and T18's budgets wired into `VIEW
 item 1). `VIEW` builds a `ViewSpec` for the primary and for each open instrument in slot order, and
 takes `viewBudgets(views, setting)` again whenever a view opens or closes, a camera's style changes
 or the setting changes, the setting coming from one `VIEW` input (`high` until the client offers
-`low`). Each view draws its budget's `style`, its label block's `STYLE` naming the style drawn, and
+`low`; _since T17, the launch's `--setting`_). Each view draws its budget's `style`, its label
+block's `STYLE` naming the style drawn, and
 is paced at its `rateHz`: a 60 Hz view every animation frame, a 30 Hz view every second one, a 30 Hz
 primary on every second vsync as R05 Design note 21 paces the low setting, and an instrument only in
 frames the primary draws. Each view's terrain demand carries its `streamPriority` (R05). A
@@ -2298,7 +2305,8 @@ Recorded in this plan. Acceptance: the record.
   `docs/measurements/several-views/<date>-<machine>-<setting>.json` and `.md`: each check above
   with its verdict, and the per-canvas overhead's upper bound beside the provisional 0.3 ms. The
   checklist is in that directory's README. The UHD 620 run's sky and photorealistic frame stay at
-  `high` until T17 (see "Deviations in the T20 and T21 harnesses"). When the records land, each
+  `high` until T17 (see "Deviations in the T20 and T21 harnesses"; _T17 lifts it, once
+  integrated_). When the records land, each
   run's verdicts are entered here as one line. `PER_CANVAS_OVERHEAD_MS` stays at 0.3 ms until
   then (ruled 2026-10-05), and changes on the owner's ruling of which figure it takes.
 - **The small disc's cost and the second criterion** (decision-r07-small-disc-cost). Once T8.d
@@ -2477,7 +2485,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
 
 - **Provisional timings.** Every timing from the research probes (histogram, present overhead,
   quantisation's effect) was measured while other work loaded the machine; T17 and T20 re-measure
-  on a quiet one before any figure becomes "as built".
+  on a quiet one before any figure becomes "as built". _T17's RTX 3080 figures are in its
+  as-built entry._
 - **`VIEW`'s quality setting is `high` throughout** (T17, the orchestrator's assignment,
   2026-10-04). `ViewDisplay.tsx` hard-codes `"high"` for the photorealistic frame (line 510) and
   bakes the sky at the high setting's face size wherever the device blends `float32` (433), and
@@ -2486,7 +2495,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   operator chooses it is open: the lean is a launch option, as the descent spike's
   `--setting <high|low>` (R05.T13.c), since each measured run keeps one setting; a `QUALITY`
   control in `VIEW` (the guide's draft label) would change it mid-run, which T18's `retarget`
-  bears, and would add its control to the guide (for the orchestrator).
+  bears, and would add its control to the guide (for the orchestrator). _Resolved by T17
+  (2026-10-07): the launch option `--setting high|low` on every launch, stated read-only on the
+  `PRIMARY` view's label block (`QUALITY`) and the `LINK` display's `Graphics` panel; see
+  "Deviations in T17, as built"._
 - **Templates with a borrowed shape** (airless ice and snowball, the Moon's curve with q solved to
   Ganymede's and Europa's; magma, Mercury's) are provisional and labelled. Thick magma oceans take
   Venus's curve unlabelled; the q values of Jupiter and Neptune rest on phase curves extrapolated past their data (Mayorga et
@@ -2744,7 +2756,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   so that it builds before R06 (approved by the orchestrator). `BloomKernel` extends `BloomLevels { firstLevel, levels }`:
   `weights[k]` multiplies mip level `firstLevel + k`, the low setting starting at level 1, quarter
   resolution; the level counts are constants (`BLOOM_LEVELS`: 7 from level 0 high, 5 from level 1
-  low) until T17 makes them settings. **Design note 12's age factor is corrected** (science check,
+  low) until T17 makes them settings (_done: `SETTINGS[s].photoreal.bloom`, and `bloomKernel` takes
+  the levels, T17_). **Design note 12's age factor is corrected** (science check,
   2026-10-02): the CIE 135/1999 complete equation has age in both terms, [1 − 0.08 (A/70)⁴] on the
   core and [1 + 1.6 (A/70)⁴] on the wide-angle term (McCann and Vonikakis 2018, eq. 2; Vos and van
   den Berg 1997); "(A ÷ 62.5)⁴, wide term only" is CIE 146:2002's simpler equation. The code uses
@@ -2797,7 +2810,8 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   T17 builds the by-hand harness that drives `HistogramReader` and records the figures with the
   other post-processing benches (the probe's 0.3–0.8 ms stays provisional), and if per-call
   staging shows a cost T17 adds the staging ring through R01's guarded readback only (decision
-  2026-10-02, item 6).
+  2026-10-02, item 6). _T17: 0.044–0.052 M cycles at 1080p on the RTX 3080, its CPU side no
+  cost at 0.1 ms; no staging ring added ("Deviations in T17, as built")._
 - **Deviations in T13.a, as built** (2026-10-02). `post/autoExposure.ts`: `meteredLuminance(h, window)`
   (window [0, 1] by default; 0 when the window holds no counts), `smoothEv`, `programTriple`,
   `ExposureProgram` (the `AUTO` program's N and t, a constructor argument: R06's
@@ -2907,6 +2921,7 @@ DARK`; the source shows the raw view id upper-cased until T7 names views as the 
   twin to 1% at five pixels beyond the limb; a vitest emulates the WGSL rectangle in `f32`. **The
   bench is pending** (under 1 ms, and 2–3 ms with tone mapping): T17's harness, on a quiet
   machine under `--hyperion-gpu-timing`, the RTX 3080 at 1080p and the owner's UHD 620 at 720p.
+  _T17: 0.36–0.37 M cycles at 1080p on the RTX 3080 ("Deviations in T17, as built")._
 - **Deviations in T15, as built** (2026-10-02). `post/tonemap.wgsl` and `post/tonemap.ts`
   (`TONEMAP_MATERIAL` `IMAGE`, `tonemapDraw`, the twin `tonemapTexel`, `srgbEncode`, `tpdf`) and
   `post/blueNoise.ts` (`blueNoiseTile`, 64 × 64 by Ulichney's void-and-cluster from a fixed hash,
@@ -2938,6 +2953,7 @@ DARK`; the source shows the raw view id upper-cased until T7 names views as the 
   analytic AgX sigmoid or a LUT of our own could close it, provided star totals stay constant
   across sub-pixel positions. By hand, pending for the owner (needs T7's photorealistic view): a
   Sun-like star in frame with a lit planet, hues holding in the highlight. The bench is T17's.
+  _T17: 0.22 M cycles at 1080p on the RTX 3080 ("Deviations in T17, as built")._
 - **T14.b and T15 after review, as built** (2026-10-02). The tone-mapping pass's uniforms are typed
   (`TonemapUniforms`, `tonemapUniforms`); `rectangleInsideLevel` keeps its outer integral as c⁴
   times a function of ρ ÷ c at 0.05% steps, so a source whose radius changes every frame costs a
@@ -3237,7 +3253,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - **The setting in `VIEW`** is `high` throughout (`ViewDisplay.tsx` 510, `useViewSky.ts` 92):
     T19 reads it from one input so that its tests give `low`, but no task built yet lets the
     running client choose `low`, which T17's and T20's UHD 620 runs need. T17 makes it selectable
-    (the orchestrator's assignment, 2026-10-04; see "`VIEW`'s quality setting" above).
+    (the orchestrator's assignment, 2026-10-04; see "`VIEW`'s quality setting" above). _Done by
+    T17: `--setting`._
 - **Several views, stated limits (decision-r07-t19).** A photorealistic instrument is exposed by the
   primary's reading, not metered from its own image (open). At 1280×720 two open instruments cover
   most of the primary's image, the operator's choice. The spike's `ResolveCounter.runFrame` drifts
@@ -3263,7 +3280,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     and `raiseRestored`.
   - **The setting** is `ViewDisplay`'s prop `setting`, `high` by default, read by the budgets alone;
     the sky and the photorealistic frame stay at `high` until T17 (accepted by the orchestrator as
-    the smallest reversible choice, 2026-10-04).
+    the smallest reversible choice, 2026-10-04). _Since T17 the sky and both styles' frames read
+    it too._
   - **Two frame paths.** The primary keeps its own loop, which T8.a's metering shares; the
     instruments draw through `ViewFrameDrawer`, whose frame code mirrors the primary's (the
     wireframe list, R06's band, discs and cube, the photorealistic frame), so that the two lanes'
@@ -3279,7 +3297,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `spritesAtScale` (positions about the centre by k, light per point-spread weight by k²).
     `PhotorealRenderer` is unchanged: its `#follow` resizes the target and the bloom chain, and
     refits the bloom kernel at each new scale, about 35 ms (provisional; T20 records it). The render
-    resolution is the canvas's; the low setting's 720 rows are T17's. `BudgetedScale` also makes a
+    resolution is the canvas's; the low setting's 720 rows are T17's (_built by T17:
+    `renderViewport`, at most `terrain.renderHeightPx` rows_). `BudgetedScale` also makes a
     new controller should the bounds change (equal on both settings today).
   - **Grouping.** `PrimaryFrameTimes.startFrame(engine.passTimesFrame)` at the start of each primary
     frame; reports that arrive before their group ends are held until it does; at most
@@ -3848,7 +3867,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     photorealistic view, a 30 Hz photorealistic primary) and the 1280 × 720 window, but the sky and
     the photorealistic frame draw at `high` until T17 (see "`VIEW`'s quality setting is `high`
     throughout"). A low-setting record says so (`LOW_BEFORE_T17` in `viewsCheckResults.ts`, which
-    T17 removes) and is provisional.
+    T17 removes) and is provisional. _Removed by T17: a low run is provisional only as a high one
+    is._
   - **No server, and both shown runs the owner's.** The runs draw the kept `PHASE TEST` with no
     server, so the UHD 620's low cases carry none of the local server's load that decision-r07-t18
     item 4's single-player case assumes (ruled 2026-10-05: no server; see "Ruled" below). T20 puts
@@ -3916,7 +3936,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the UHD 620's low cases run without the local server: T20's cases are the views' own cost,
       and the server's share is R12's budget run;
     - the UHD 620 run waits for T17, since a low-setting record before it draws the sky and the
-      frame at high (`LOW_BEFORE_T17`).
+      frame at high (`LOW_BEFORE_T17`). _T17 has landed in its lane; the run waits for its
+      integration._
   - **Tests.** `cli.test.ts` (the flag and its options, refused with the spike's own and with
     `--descent-spike`), `viewsCheckLaunch.test.ts`, `viewsCheckApi.test.ts` (the channels equal
     the main process's), `viewsCheckRecord.test.ts`, `viewsCheckResults.test.ts` (each finding's
@@ -4849,7 +4870,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     in `--status-caution` while it lasts. The control's
     reasons follow the graphics' condition (`styleRefusals`): the adapter's styles, the software
     adapter's refusal, `GRAPHICS ACQUIRING ADAPTER` before the answer; it is shown only beside a
-    drawn view. The internal scale is 1 and the setting `high` until T17 and T18; the pre-exposure
+    drawn view. The internal scale is 1 and the setting `high` until T17 and T18 (_both built:
+    the budget's scale since T19, the setting since T17_); the pre-exposure
     is the frame's own exposure (the tone-mapping pass's exposure over it is 1).
   - **Small host discs** (R06's sprites for discs under 3 px) are drawn with the star sprites at
     depth 0 before the painter's sequence, not at their `host` entries (decision-r07-t8a, item 2
@@ -4879,6 +4901,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     shaded at up to nine points (three Gauss points in each of its profile's three pieces) after
     three limb-angle evaluations, and above 32 px the interior pixels within about 2 px of the limb
     are integrated the same way and classed by those points. The cost goes to T17's bench.
+    _T17 measured it: see "Deviations in T17, as built"._
     _Amended by R07.T8.c (decision-r07-small-disc-cost): 8 × 8 below 4 px, 4 × 4 from 4 to
     32 px._
   - **Promotion** (`promoteOverlapping`) is not called: the frame has no depth-writing geometry
@@ -5219,7 +5242,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       neighbours confirms the choice.
     - A neighbour that reflects nothing is not a source.
     - Only drawn bodies look for sources. The cost is about 2 ms a frame for 100 drawn bodies
-      under shared load: provisional, and for T17's bench.
+      under shared load: provisional, and for T17's bench. _T17 measured it: see "Deviations in
+      T17, as built"._
   - **Figures tested** (Sun-like disc, `sunLikeHostDisc`):
     - Earthshine at full Earth is 7.668 lx at the fixture's p to three places, (r, g, b) 0.210,
       0.215 and 0.263, and q 1.312; the ruling's 7.66 (7.664) is at the unrounded split, under the
@@ -5783,7 +5807,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - Where two limbs cross a pixel, the limb's blend over what is beneath keeps T8.a's
       coverage-over error: up to 0.115 of the pixel in the occultation.
     - Each mesh body runs `selectPatches` every frame, and its fragments discard under a depth
-      write, which loses early-Z on many GPUs: both for T17's bench.
+      write, which loses early-Z on many GPUs: both for T17's bench. _Not measured by T17:
+      no live view promotes before R10._
   - **Tests.**
     - `bodies/smoothMesh.test.ts`: the patches are R05's at h = 0 with origins on the datum; the
       vertices are R05's `f32` arithmetic at h = 0 to `f32`'s step; the outline at most 0.004 px
@@ -5949,7 +5974,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     At Jupiter's cloud tops the umbra is about 3,000 km across and the penumbra about 4,300 km
     (science check, 2026-10-05).
   - **Cost.** One retardation per pair of lit bodies a frame, O(n²) beside `occludersFor`'s, for
-    T17's bench.
+    T17's bench. _T17 measured it: see "Deviations in T17, as built"._
   - **Tests.** `lighting/retarded.test.ts` (24). New cases in `apparent.test.ts` (2),
     `fromServer.test.ts` (4: the local body, another body, a star, a contact), `model.test.ts`
     (2), `planetshine.test.ts` (4), `draw.test.ts` (6) and `photorealFrame.test.ts` (2).
@@ -6070,7 +6095,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     anti-solar line, so its earthshine now carries the Moon's own shadow, on the GPU and in the twin
     alike. It still meets the twin within 0.258 of the tolerance.
   - **Cost.** A call (one light, one occluder, all three channels) took 0.15–0.2 ms at a load
-    average of 36. It is made only where the occluder list is not empty. Provisional, for T17's
+    average of 36. It is made only where the occluder list is not empty. _T17 measured it: see
+    "Deviations in T17, as built"._ Provisional, for T17's
     bench.
   - **Unchanged.** The disc's starlight eclipse term, the records' layout and every shader. A
     disc's planetshine sources (`DiscRecord.secondaries`) now carry the neighbour's eclipse over its
@@ -6654,7 +6680,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       way.
     - This stands for the ruling's 3.5 px view: the harness's widest field, 120°, puts the
       planets at 4–8 px, so it has no 3.5 px case.
-  - **The figures are provisional.** The machine was shared, and T17 retakes them.
+  - **The figures are provisional.** The machine was shared, and T17 retakes them. _T17 measured
+    it: see "Deviations in T17, as built"._
   - **`just ci`** was not run, under the Day 2 protocol: the orchestrator runs it on the merge.
   - **Plan text.** The ruling's T8.c, T8.d, T17 and T20 text and its Risks bullets are inserted:
     - T8.c and T8.d after T8.b;
@@ -6776,8 +6803,262 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       285–675 MHz. The driver drops the clock under the lighter load: with every view
       photorealistic, the 60° instrument's whole GPU frame went from 0.99–1.09 ms at 645–690 MHz
       to 0.34–0.41 ms at 480–675 MHz.
-    - These figures are provisional: the machine was shared, and T17 retakes them.
+    - These figures are provisional: the machine was shared, and T17 retakes them. _T17
+      measured it: see "Deviations in T17, as built"._
   - **The ruling's figures.** T8.c's corrected near-field oracle changes no figure T8.d rests on:
     G11 compares the pass with the in-fragment draw, and the costs are measured. The ruling's
     0.54 M after T8.c was measured as 0.48–0.55 M, and here as 0.53–0.55 M.
   - **`just ci`** was not run, under the Day 2 protocol.
+- **Deviations in T17, as built** (2026-10-07; the shading lane, after T8.d).
+  - **The settings.** R05's `ViewSettings` gains `photoreal: PhotorealSettings`, Design note 18's
+    other four forms, high and low:
+    - `histogramStride`: 1, and 2 (a quarter-resolution input);
+    - `bloom`: `BLOOM_LEVELS.high` (7 levels from level 0) and `.low` (5 from level 1);
+    - `discAnnuli`: `DISC_ANNULI_HIGH` (4) and `DISC_ANNULI_LOW` (3);
+    - `planetshineSources`: `PLANETSHINE_SOURCES_HIGH` (2) and `PLANETSHINE_SOURCES_LOW` (1).
+    - The constants stay in their modules and `SETTINGS` refers to them, as it does R06's
+      `HIGH_SKY`. `PhotorealRenderer` reads `SETTINGS[setting].photoreal` in place of its
+      `setting === "low" ?` choices.
+    - `bloomKernel(bloomLevels, role, radPerPx, eye)` takes the setting's levels; it took the
+      setting. `post/bloom.ts` so reads no value from `qualitySetting.ts`, which imports
+      `BLOOM_LEVELS` from it, and the renderer passes the setting's levels as it passes the
+      atmosphere its tables (`SETTINGS[s].atmosphere`).
+    - Design note 18's "720p presented upscaled" is R05's `terrain.renderHeightPx`, 720 on low,
+      which T18's `ViewBudget.renderScale` already names as the render resolution. No second field
+      holds the same 720. `renderViewport(viewport, renderHeightPx)` (`photoreal/internalScale.ts`)
+      gives the render resolution, and R05's `renderSizeOf` now calls it.
+    - "One photorealistic view" is T18's `budget.photorealisticViews`. It and
+      `internalScaleBounds` are kept as built (decision-r07-t18, item 2).
+  - **`VIEW` at its setting.** `ViewFrameInputs.setting` sets each view's frame:
+    - the photorealistic frame at the setting (it was `"high"`);
+    - its scene target at `renderViewport` times the budget's scale, at most 720 rows on low;
+    - the cube at `skyFaceSizePx(setting, float32Blendable)`, the low setting's 1,024² wherever the
+      device cannot blend `float32`, as before;
+    - R02's wireframe at its `lowSetting`: graticules at 30° only, and at most 2,000 of the interim
+      stars as sprites.
+    - This goes beyond T17's text, which names the sky and the photorealistic frame: `VIEW` given
+      `low` draws both styles at it.
+    - **R02's 2,000-sprite cap now applies to the interim stars only** (`buildWireframeDrawList`;
+      the plan-conformance review's must-fix). Applied to R06's sky it would cut the low
+      selection's 2,048 to 2,000, and a star the selection makes a sprite is in no bake, so it
+      would vanish. With R06's sky, `selectSkySprites`' budget governs, since R06.T13.c's
+      `SkySprites` supersedes the interim's selection. Before T17 the cap never met the sky, as
+      `VIEW` drew at `lowSetting: false`. Tested in `drawList.test.ts`: 2,048 sky sprites kept at
+      the low setting.
+    - `useViewSky` asks the setting's N_max, and `cullViewSky` keeps its sprite budget, for the
+      primary and each instrument.
+  - **The operator's control is a launch option**, the smallest reversible choice, as T17 asks.
+    - `--setting high|low`, `high` without it, is taken on every launch. It was refused without
+      `--descent-spike` or `--views-check`, which take it as their own setting.
+    - `ClientArgs.setting` carries it; `serverUrlOf` now takes `Pick<ClientArgs, "address" |
+      "port">`, since `tools/placeShip.ts` passes its own options, which carry no setting. The
+      main process hands it to the sandboxed preload as
+      `--hyperion-quality=` on every window (`preload/qualityLaunch.ts`). `HyperionApi.setting`
+      carries it to `App`, which gives it to `VIEW` and to the `LINK` display's `Graphics` panel.
+      Run as `just client --setting low`.
+    - **Why.** Each measured run keeps one setting, as the spike's and the check's do. Launching
+      again undoes it. It adds no control, no command flow and no change mid-run, which would mean
+      re-asking the sky, re-baking the cube and remaking the renderers' chains.
+    - A `QUALITY` control in `VIEW` stays possible later: T18's `retarget` bears a change of
+      setting, and `viewBudgets` is retaken whenever the setting changes.
+    - **Shown.** The `PRIMARY` view's label block always reads `QUALITY HIGH` or `QUALITY LOW`,
+      after `STYLE`. This was the UX review's must-fix, under the guide's data-states rule and its
+      Colour section's "its quality setting". The `Graphics` panel gains a read-only `Quality` row
+      after `Mode`. `QUALITY_NAMES` holds the words.
+    - **Guide drafts for the owner**, in their own commit:
+      - the `QUALITY` row names the launch option and where the setting is read;
+      - the `GRAPHICS` row adds "quality setting".
+    - **Open for the owner**, from the UX review: whether every view's block should state the
+      setting (the Views bullet), and that it takes no header banner.
+  - **The views check.** `LOW_BEFORE_T17` is gone. A low-setting record is provisional only as a
+    high one is (`viewsCheckResults.ts` and its test, `docs/measurements/several-views/README.md`).
+  - **Tests (Vitest).**
+    - New `displays/view/ViewDisplaySetting.test.tsx` (15 tests): `VIEW` given `low` and given
+      `high` on a 1600 × 900 stage, against the timed fake engine.
+      - The scene target is 1280 × 720 on low against 1600 × 900.
+      - The histogram's workgroups are at stride 2 against 1.
+      - The bloom chain's down levels are 1–5 against 1–6.
+      - `PHASE TEST`'s discs take 3 annuli and one planetshine source, against 4 and two.
+      - A photorealistic instrument beside a wireframe primary blooms over the setting's levels.
+      - The label block reads `QUALITY LOW` or `QUALITY HIGH`.
+      - The wireframe draws fewer lines on low.
+      - The sky is asked at N_max 10⁵ against 3 × 10⁵.
+    - Elsewhere:
+      - `useViewSky.test.tsx`: N_max, and 2,048 of 3,000 bright stars drawn as sprites on low,
+        all 3,000 on high;
+      - `renderer.test.ts`: the stride, levels and annuli at each setting;
+      - `internalScale.test.ts` (`renderViewport`), `viewFrameDrawer.test.ts` (`skyFaceSizePx`),
+        `qualitySetting.test.ts`, `bloom.test.ts`;
+      - `cli.test.ts`, `qualityLaunch.test.ts`, `GraphicsPanel.test.tsx`, `App.test.tsx` and
+        `viewsCheckResults.test.ts`.
+    - The timed harness now records a dispatch's workgroups and each draw's instance count.
+    - **Not tested at `VIEW`'s level: the cube's face size.** The setting decides it only on a
+      device that blends `float32`, and the fakes cannot run that bake (no point splat).
+      `skyFaceSizePx` is tested alone.
+  - **The benchmarks** on the RTX 3080, hidden and offscreen, 2026-10-07 00:37:30–00:46:21.
+    - **When.** In the quiet window the orchestrator opened: both build slots held and the
+      other lanes' heavy runs paused. The run took `just _locked` and the GPU lock, holding the
+      heavy lock for 531 s.
+    - **Load.** The 1-minute load was 4.15 at the start, 0.83–2.23 between runs and 2.03 at the
+      end. That is above R05 Design note 27's 1, so the figures are provisional by that rule.
+      The crash-telemetry sampler was running (`nvidia-smi` every 2 s).
+    - **What ran.** The T17 commit with temporary counters: a scratch patch, never committed, in
+      `.git/rm23-scratch/r07-shading/t17/`.
+      - Electron runs offscreen and never maps a window, with `--disable-vulkan-surface
+        --force-device-scale-factor=1`. The client takes `--hyperion-gpu-timing` (the timer reads
+        `FULL`), and `--setting low` for the low runs.
+      - The scene is `PHASE TEST` at `MAN` EV100 −1, the default exposure. Each phase is 8 s
+        after 2.5 s of settling.
+      - Each figure is the median of every resolved frame (479 of 480 timed, and the like).
+      - Pass times are the app's own GPU timestamps: presentation and the offscreen copy fall
+        outside them.
+    - **The clock.** The driver held this light load at P5: 210–1,230 MHz graphics against a
+      2,115 MHz maximum, and memory at 405–810 MHz against 9,501 MHz (driver 615.71.09).
+      - Each pass is given in kcycles at its phase's median graphics clock (`nvidia-smi` every
+        250 ms), and in ms with that clock beside it.
+      - At P5's memory clock a pass bound by bandwidth (bloom, tone mapping) counts more cycles
+        than it would at P0.
+    - **The sizes.** "At 1080p" is the primary's canvas at 1920 × 1080, an offscreen window of
+      2720 × 1260 beside `VIEW`'s side columns (the plan-conformance review's must-fix: in a
+      1920 × 1080 window the primary is 1120 × 900, 49% of the pixels).
+      - Low's 720p is a 1280 × 720 canvas, a 2080 × 900 window.
+      - A 1920 × 1080 window, the cockpit as played, is recorded too.
+      - The instruments' canvas is 240 × 180 throughout.
+      - The offscreen window needs `enableLargerThanScreen` and its content size set again once
+        made, or it is clamped to the display.
+    - **The scene target as the histogram's input.** `PHASE TEST`'s target is black but for its
+      discs: at 1080p the 106 px planet covers 0.4% of it, so 99.6% falls in bin 0. That is in
+      effect T12's uniform dark sky, the atomics' worst case. In `ECLIPSE TEST` the planet fills
+      the view.
+
+    | The primary alone, photorealistic (the whole style) | Clock, MHz | `sky` | `disc cells` | `discs` | `histogram` (T12) | `bloom` (T14) | `tonemap` (T15) | `symbology` | GPU frame |
+    |---|---|---|---|---|---|---|---|---|---|
+    | `PHASE TEST`, high, 1920 × 1080 (23 px giant 4 × 4, 106 px planet 1 + 4 × 4), four phases | 555–645 | 28–33 k | 70–73 k | 559–562 k | 44–52 k (0.074–0.091 ms) | 362–370 k (0.57–0.66 ms) | 217–224 k (0.35–0.39 ms) | 18–20 k | 1,325–1,348 k (2.09–2.39 ms) |
+    | `ECLIPSE TEST`, high, 1920 × 1080 (its 811 px planet), two phases | 1,200–1,215 | 23–26 k | — | 5,181–5,190 k (4.27–4.32 ms) | 45–46 k (0.038 ms) | 343–348 k (0.29 ms) | 210–215 k (0.18 ms) | 36–37 k | 5,838–5,865 k (4.83–4.87 ms) |
+    | `PHASE TEST`, low, 1920 × 1080 canvas, scene target 1280 × 720 (15.5 px 4 × 4, 71 px), two phases | 210–218 | 9 k | 41–43 k | 419–434 k | 11 k (0.051–0.052 ms) | 160–166 k (0.76 ms) | 190–196 k (0.90 ms, the upscale) | 12 k | 841–873 k (4.01 ms) |
+    | `ECLIPSE TEST`, low, 1920 × 1080 canvas, 1280 × 720 target | 450 | 12 k | — | 2,484 k (5.52 ms) | 15 k | 183 k | 211 k | 32 k | 2,936 k (6.52 ms) |
+    | `PHASE TEST`, low, 1280 × 720, two phases | 210 | 10 k | 41 k | 419–449 k | 11 k (0.053 ms) | 159 k (0.76 ms) | 89 k (0.42 ms) | 12 k | 742–770 k (3.54–3.67 ms) |
+    | `ECLIPSE TEST`, low, 1280 × 720 | 390 | 14 k | — | 2,482 k (6.36 ms) | 16 k | 187 k | 111 k | 23 k | 2,851 k (7.31 ms) |
+    | `PHASE TEST`, high, as played: a 1920 × 1080 window, the primary 1120 × 900, two phases | 450 | 16 k | 57–58 k | 514–520 k | 26 k (0.057 ms) | 217–218 k (0.48 ms) | 110–113 k (0.25 ms) | 14–15 k | 959–964 k (2.13–2.14 ms) |
+    | `ECLIPSE TEST`, high, as played (473 px) | 810 | 26 k | — | 2,804 k (3.46 ms) | 31 k | 237 k | 116 k | 30 k | 3,241 k (4.00 ms) |
+
+    - **The whole style's frame.** At 1080p on high it is 1.33–1.35 M cycles, 2.09–2.39 ms at
+      555–645 MHz and about 0.63 ms at 2,115 MHz. `ECLIPSE TEST`'s planet filling the view takes
+      5.84–5.87 M cycles, 2.8 ms at 2,115 MHz. Both are well within the 13.3 ms of GPU time a
+      60 Hz frame allows (0.8 T).
+    - **Design note 18's discrete rows are met.**
+      - The histogram takes 0.074–0.091 ms against 0.3–0.5 ms, even at P5's clock.
+      - Bloom and tone mapping together take 0.92–1.05 ms at 555–645 MHz: about 0.28 ms at
+        2,115 MHz, against under 1 ms.
+      - The histogram's CPU side (its dispatch and the read-back's per-call staging) reads 0.0–0.1
+        ms a frame at the renderer's 0.1 ms timer resolution: no cost. No staging ring was added
+        to R01's guarded readback (T12's open question; `HistogramReader`'s own ring of three
+        buffers stands).
+
+    | A view whose only disc is (`INSTRUMENT 2`, 240 × 180, on the full planet) | Setting | Clock, MHz | `disc cells` | `discs` | Both |
+    |---|---|---|---|---|---|
+    | 3.646 px, 8 × 8 (flown back 41,910 km, at 120°; the giant a point at its edge) | high | 488–780 | 58–69 k (0.088–0.120 ms) | 12–16 k (0.020–0.025 ms) | 70–85 k |
+    | 13.24 px, 4 × 4 (60°) | high | 495–810 | 58–67 k (0.083–0.118 ms) | 12–16 k (0.020–0.025 ms) | 70–83 k |
+    | 43.37 px, 1 + 4 × 4 (20°) | high | 435–908 | none | 553–580 k (0.64–1.27 ms) | 553–580 k |
+    | 3.646 px, 8 × 8 | low | 210–390 | 42–52 k | 10–15 k | 52–67 k |
+    | 13.24 px, 4 × 4 | low | 210–390 | 41–52 k | 9–15 k | 50–67 k |
+    | 43.37 px, 1 + 4 × 4 | low | 240–405 | none | 442–452 k | 442–452 k |
+
+    - Each size was checked against the view's logged disc plan: the diameter at the view
+      centre's scale (`discSamples`' measure), and the cells.
+    - T8.d's bounds hold: a view with a disc under 32 px takes at most 85 k cycles against 0.2 M.
+    - The residual of a disc of 32 px or more is 0.55–0.58 M cycles (T8.d measured 0.48–0.53 M at
+      10° and 20°): 0.27 ms at 2,115 MHz, far under the 2 ms that decision-r07-small-disc-cost §6
+      sets as the trigger.
+    - **On the UHD 620, an estimate the owner's runs settle.** A pass bound by throughput scales
+      with the GPU's lanes: 8,704 FP32 lanes on the RTX 3080 against the UHD 620's 192, about
+      45×.
+      - `ECLIPSE TEST`'s 2.48 M-cycle `discs` pass at 720p would come to about 110 M cycles
+        there, of the order of 100 ms at 1.1 GHz, far over low's 33 ms.
+      - `PHASE TEST`'s 0.42–0.45 M would be about 20 M cycles, some 18 ms.
+      - If the owner's runs confirm this, a disc filling the view is the low setting's largest
+        cost: a finding for R12.
+    - **The CPU, in the running client.** Each view's draw of the photorealistic frame takes
+      6.3–7.4 ms on high and 4.5–5.0 ms on low (`ViewFrameDrawer.draw`, the renderer's 0.1 ms
+      timer). Of that, 5.2–5.4 ms and 3.5 ms are `planLitBodies`.
+      - **The finding.** A kept scene makes its host disc anew each frame (`sunLikeHostDisc` in
+        `sceneAt`). `hostAnnuli`'s cache, keyed by the disc object, therefore misses every frame,
+        and the annuli's bisection runs again: 5.1 ms at K = 4 and 3.5 ms at K = 3 for one host
+        (the CPU probe below).
+      - The instruments, which follow the primary's scene, hit the cache that frame. On low,
+        where the instrument is the only photorealistic view, it pays the cost instead.
+      - A server scene keeps its sky's host objects and pays once a sky. Without the rebuild the
+        plan takes 0.03–0.08 ms and a draw about 1.1–2.0 ms.
+      - This is not fixed in T17. For the orchestrator, either: key the cache by the disc's limb
+        laws and K, on which alone the annuli depend; or make the kept scenes' host discs once.
+    - **The CPU probe** (`.git/rm23-scratch/r07-shading/t17/probes/zzbench-t17.test.ts`).
+      - It ran under vitest in Node 26 on the Ryzen 7 3700X at 00:46, under the same locks, at a
+        load of 2.1.
+      - Each figure is the median of 40–3,000 calls after a warm-up, with the frame's host discs
+        held, as a server scene's are. The view is 1120 × 900 at 60°.
+      - The synthetic cases are `ECLIPSE TEST` at mid-eclipse with 4 to 96 more moving moons of
+        its planet.
+
+    | Lit bodies (bodies in the scene) | T10.a `lightingFramesOf` | T11 `planLitBodies`, high | low | `discEclipseVisible` calls a frame, high / low |
+    |---|---|---|---|---|
+    | 4 (5, `PHASE TEST`) | 0.020 ms | 0.080 ms | 0.044 ms | 0 / 0 |
+    | 3 (4, `ECLIPSE TEST`) | 0.014 ms | 0.029 ms | 0.025 ms | 0 / 0 |
+    | 7 (8) | 0.032 ms | 0.093 ms | 0.071 ms | 2 / 1 |
+    | 19 (20) | 0.15 ms | 0.31 ms | 0.24 ms | 8 / 5 |
+    | 49 (50) | 0.92 ms | 2.01 ms | 1.11 ms | 28 / 13 |
+    | 99 (100) | 3.13 ms | 6.44 ms | 3.95 ms | 63 / 29 |
+
+    - **T10.a's retardations** grow as about n^1.8 (O(n²) less their fixed cost). At 100 lit bodies
+      they take 3.1 ms a frame, a fifth of a 60 Hz frame on this CPU.
+    - **T10.b's `discEclipseVisible`**, one light and one occluder, all three channels:
+      - 88 µs at K = 4 and 64 µs at K = 3 in a central solar eclipse (an Earth with a Moon
+        384,400 km sunward, at full phase);
+      - 102 µs and 77 µs with the shadow's axis 3,000 km off, at 30°;
+      - 6.8 µs where the occluder's shadow misses.
+      - The earlier 0.15–0.2 ms was taken at a load of 36.
+      - It is called only where an occluder list is not empty: for points and for the planetshine
+        of neighbours in shadow. Neither kept scene makes such a call as drawn: the eclipse
+        scene's planet is a disc, whose eclipse runs in the shader.
+      - With 100 bodies, 63 calls (at about 0.09 ms) are most of `planLitBodies`' 6.4 ms.
+    - **T11's planetshine** sits inside `planLitBodies`: the running top-k over `litNeighbours`,
+      with the light's eclipses. At 100 bodies the frame's lighting on the CPU is about 9.6 ms on
+      high and 7.1 ms on low with T10.a's retardations: for R12's budget run. The laptop's
+      i5-8250U is slower.
+    - **Not measured:**
+      - T9's `selectPatches` per mesh body, since no live view promotes before R10;
+      - T8.b's per-class law evaluations, since no class map is drawn before R10;
+      - the UHD 620 (the owner's, by hand: RESUME, "Owner by hand: R07.T17 UHD 620 benchmarks",
+        with the kit in `.git/rm23-scratch/r07-shading/t17/owner-uhd620/`).
+    - **The RTX smoke run's failure** (lane C, at 0c57be5 and after). `smoke/bodies.ts`'
+      "T8.a a photorealistic frame tones a lit planet onto the canvas over a black sky" fails
+      on the hidden RTX run: "planned true; lit side 0, sky 0 (green codes)".
+      - The frame was planned, and the canvas read back zero everywhere.
+      - It does not touch these figures: the app's own frames on the RTX draw the lit planets and
+        their glare (offscreen captures, `page-r1-*.png`).
+      - The check reads the canvas back only after waiting up to 5 s for the histogram. A
+        presented canvas texture expires, so a later read may see a fresh, cleared one. This is
+        a likely cause, not verified. SwiftShader passes it.
+      - Not fixed in T17: the next shading task.
+  - **Gate.**
+    - The app's vitest: 6,082 tests in 335 files, plus the protocol's 174.
+    - `just check lint` from a clean tsc cache, and Prettier.
+    - `just test-render`, both variants: exit 0, 280 and 278 checks, none failing, no
+      uncaptured GPU error.
+      - Of the 110 captures, only R05's four spike craft frames differ from T8.d's, from the merged
+        R07.T16.e (`hull.ts`).
+      - The review's later edits reach no smoke path: the harness draws at `lowSetting: false`,
+        and `renderSizeOf` now calls an identical function.
+    - `just ci` was not run, under the Day 2 protocol.
+  - **Reviewed.**
+    - TypeScript: three should-fix items, all on tests, applied:
+      - an `App` test of the `Quality` row;
+      - `VIEW`-level cases for the wireframe and an instrument at low;
+      - the cube test that replaced `SkyCubeCache.acquire`, dropped.
+      - Its considers were applied too: `renderSizeOf` calls `renderViewport`, and the CLI's
+        comment is updated.
+    - UX: one must-fix, `QUALITY` on the label block, applied, with the guide drafts.
+    - Plan conformance: three must-fix items, all applied:
+      - this entry;
+      - R02's sprite cap;
+      - the 1080p and 720p canvases.
+      - Its should-fix items were applied too: the owner's kit, the pointers and these deviations.

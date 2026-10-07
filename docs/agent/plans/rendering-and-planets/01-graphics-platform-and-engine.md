@@ -2989,7 +2989,7 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   encoding), `FrameSubmission.colourLoad` (`"load"` keeps an earlier submission's colour and
   depth, for R07.T16's symbology) and `RenderTargetFormat` `"canvas-in-pass"`; opt-in, defaults
   unchanged. R07.T12 added no staging ring to the readback; its bench (R07.T17) decides. See R07's
-  Risks.
+  Risks. _R07.T17 measured no cost and added none._
 - **Extended by R07.T19** (decision-r07-t19, item 1): `RenderEngine.passTimesFrame`, the
   timer's latest resolve number (0 before any, and on `ResilientEngine` while it has no engine;
   from 0 again after a restore); a resolve dropped while every pair is in flight now takes its
