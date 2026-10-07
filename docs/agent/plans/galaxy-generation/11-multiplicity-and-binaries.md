@@ -164,6 +164,13 @@ pub const STAR_BODY_INDEX_END: u16 = 16;             // body indices 0..16: plan
 pub struct RedrawAttempt(/* u8, 0..MAX_REDRAWS */);
 pub const MAX_REDRAWS: u8 = 8;
 pub const DRAWS_PER_ATTEMPT: u64 = 64;               // words; equals plan 06's `ATTEMPT_WORDS`
+// R06's ask A (P11.T16; decision-r06-census-cost §7): every star's initial mass and every
+// star–star pair's least periastron over the attempts `SystemStars::generate` can keep, for the
+// sky census's bound star by star (rendering plan R06, R06.T8.g). Reads the draw's words only.
+pub struct HierarchyBound { /* stars: initial masses (bit for bit), each with its body and
+    attempt; pairs: their two stars and a periastron no larger than the drawn one */ }
+pub fn hierarchy_bound(galaxy: &Galaxy, record: &SystemRecord, composition: &Composition)
+    -> HierarchyBound;
 ```
 
 ### `stellar::binary`
@@ -1532,6 +1539,56 @@ chi-squares at the fitted tolerance, and T9's nova rate. Likewise note P15.T4.b'
 Chabrier window and P15.T5.c's verdict on `CLUSTER_MERGED_BINARY_FATE`; if only the alternative
 passes its four retention bands, change the default here with the bump. Acceptance: `just ci` and
 `just test-slow` green with no provisional entry for `binary` in `tables::MANIFEST`.
+
+### P11.T16 The census's hierarchy bound (R06's ask A)
+
+Decided 2026-10-05 (`decision-r06-census-cost.md`, §7, "Ask A"), for rendering plan R06's
+R06.T8.g, the sky census's bound star by star. Built at `GENERATOR_VERSION` 21, beside P11.T17 (ask
+B), while the 21 → 22 batch (T4.l, T4.m) waits (owner, 2026-10-07: features first).
+
+`stellar::multiplicity::hierarchy_bound(galaxy, record, composition) -> HierarchyBound` lists, for
+every redraw attempt that `SystemStars::generate` can keep:
+
+- each star's initial mass, bit for bit, with its body and attempt, so that the census can read its
+  η from its `StarDraws`;
+- each star–star pair (the pairs `run_pairs` may send to the engine) with a periastron no larger
+  than the drawn orbit's.
+
+The attempts are every one the generator can keep:
+
+- each companion's stability redraws within an attempt;
+- the carve redraws of P11.T7, attempts 1–7;
+- the single star that `after_last_attempt` keeps.
+
+The bound may list more than the generator keeps, never less. R06.T8.g reads it in this order:
+
+1. the record's composition (`draw_metallicity`);
+2. this bound;
+3. each pair's `pair_light_bound` (P11.T17) at the bound's periastron;
+4. each star's own row of `sky_phase_envelope`.
+
+It reads the generator's existing words only. It opens no stream that `draw_hierarchy` does not, and
+it adds no tag and draws no new word; tests pin this. Generated output does not move, so there is no
+bump.
+
+Cost: at most 3 µs a record in layers C–E, where `draw_hierarchy_of_composition` cost 28, 103 and
+146 µs in the ruling's probe. If 3 µs is infeasible while exact, the task reports with measurements
+and options before building. It never trades correctness for speed: the bound never misses a kept
+attempt.
+
+Tests:
+
+- (slow) `the_hierarchy_bound_holds_for_generated_systems`: for 10⁵ records of each stellar layer
+  (A–E) near the Sun and in the bulge, the generated system's stars and star–star pairs are among
+  the bound's. Each mass matches bit for bit, and no drawn periastron is smaller than the bound's.
+- The bound adds no tag (`tests/golden/rng/tags.golden` unchanged) and reads no word the draw does
+  not read.
+- The bound is a pure function: twice the same, in any order.
+- A bench, `hierarchy_bound`, per layer near the Sun.
+
+Files: `stellar/multiplicity/bound.rs` (new), `stellar/multiplicity/mod.rs`, `benches/stellar.rs`,
+and the slow test. Acceptance: `cargo nextest run -p hyperion-sim stellar::multiplicity`, the slow
+test by name, the bench (provisional under shared load). See Risks, "P11.T16's cost, measured".
 
 ## Verification
 
@@ -3839,3 +3896,82 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     3,807 of 3,808 (the fit test above fails); the doctests; the slow binary suites, 11 of 11; the
     R06 census, 187 s.
     The determinism auditor finds the bump itself clean.
+- **P11.T16's cost, measured (2026-10-07; pending a ruling, nothing built).** Before building, the
+  lane measured whether ask A can be exact at 3 µs. The probe ran on one thread in release, at a load
+  of 7–14, so every timing is provisional. It used the Milky Way fixture (seed `0x0926_0000`) and
+  4,000 records a layer from the cells nearest (0, 26,000, 68) ly, at attempt 0 and each record's
+  own `draw_metallicity`. The probe is `.git/rm23-scratch/p11-bounds/t16/probe_t16.rs` and its logs
+  are `probe1.log` and `probe2.log` there. It is not committed.
+
+  | Near the Sun                                      | A     | B     | C     | D     | E     |
+  | ------------------------------------------------- | ----- | ----- | ----- | ----- | ----- |
+  | Single at attempt 0                               | 69.5% | 60.5% | 50.2% | 37.2% | 12.7% |
+  | A single's count-only words, µs                   | 0.23  | 0.20  | 0.21  | 1.09  | 8.69  |
+  | A multiple's whole draw, µs                       | 11.8  | 10.5  | 15.1  | 53.3  | 69.6  |
+  | `draw_hierarchy_of_composition`, every record, µs | 3.6   | 4.3   | 11.3  | 48.1  | 68.7  |
+  | All eight attempts, µs                            | 22.9  | 43.9  | 85.5  | 385   | 540   |
+  | Attempt 0 holds a pair (brown dwarfs included)    | 31.8% | 37.8% | 48.0% | 62.0% | 90.8% |
+  | Attempt 0 runs a pair through the engine          | 0     | 0     | 13.5% | 58.8% | 90.5% |
+  | Redrawn, of 400 generated                         | 0     | 0     | 1     | 2     | 2     |
+
+  The bulge, at (0, 2,000, 300) ly, gives the same figures within 10% (C runs 24.8%).
+
+  The pieces:
+  - `DirectPeriods::new` takes 36–42 µs. It is 79 knots of Moe and Di Stefano's law, built once in
+    every draw of the direct construction, even with no companion.
+  - A spine companion's windowed `PeriodDistribution::quantile_in` takes 3.0–4.7 µs a try: 32 fixed
+    Newton–bisection steps on an erfc mixture.
+  - `tidal_radius` takes 0.70–0.85 µs a call. It is called for every host window and every `admits`.
+
+  Why an exact bound cannot cost 3 µs at version 21:
+  1. A companion's mass is its host's mass times q. q's law varies continuously with log P (γ_small,
+     γ_large and the twin share, Moe and Di Stefano's eqs. 9–23) from a host of 0.8 M☉ up. So the
+     mass's bits need the period's bits:
+     - for the direct construction, the 79-knot table, per primary mass;
+     - for the spine, a windowed quantile whose window holds the exact tidal cut and the orbits
+       already placed.
+  2. The kept try is the one the whole stability test admits (Mardling and Aarseth, the tidal cut,
+     the stripped band). Listing every try instead lists up to 42 masses a slot and costs more.
+  3. The carve cover. Attempt n + 1 can be kept only if attempt n carves, and that is known only from
+     the engine. Without the engine, the only exact exclusion is that attempt n holds no star–star
+     pair, and one that cannot interact and holds no remnant by +H is the next sharpest. The
+     expected count of further attempts is then p + p² + … + p⁷, with p 0.13–0.48 in C, about 0.6
+     in D and 0.9 in E. So an exact bound draws about 1.4–1.6 more attempts for D and 4.7–4.8 for E. Only
+     `DirectPeriods` is shared between attempts.
+
+  An exact bound with today's arithmetic therefore costs about:
+
+  | Per record                    | C      | D   | E   |
+  | ----------------------------- | ------ | --- | --- |
+  | Attempt 0 alone (a floor), µs | 7.6    | 34  | 62  |
+  | With the carve cover, µs      | 8.5–13 | 45  | 180 |
+
+  Bit-exact speed-ups might save up to half: the tidal radius once a record, `DirectPeriods`' knots
+  that repeat a law computed once, and the count's words alone for a system single at attempt 0.
+
+  Near the Sun the census has C 1.93 × 10⁸, D 6.44 × 10⁷ and E 1.42 × 10⁸ records past the floor.
+  The bound alone would cost about 1.2 × 10⁴ CPU-s at attempt 0 and 3 × 10⁴ with the cover. That is
+  against R06.T8.g's cold gate of 10,000 CPU-s and T17's budget of 4,000. With T7.b's caps by
+  direction (E at 25%), the bound with its cover would cost about 10⁴ CPU-s.
+
+  Options, for the orchestrator to rule:
+  - (a) Build it exact at the draw's cost. The bound is the union of the hierarchies that the
+    generator's own draw gives at each attempt it may keep. The cover stops at the first attempt that
+    holds no star–star pair, and bit-exact speed-ups are applied. The 3 µs target, R06.T8.g's gate
+    and T17's budget are re-ruled.
+  - (b) As (a), with the cover cut by a sharper exact exclusion built on P11.T17's pair bound. The
+    exclusion is for no merger, no transfer and no compact accretor beside a living star in the
+    source horizon. The cost then approaches attempt 0's.
+  - (c) A generator change in the deferred version-22 batch:
+    - the direct period law tabulated by mass node;
+    - a closed-form windowed period quantile;
+    - companions' masses kept across carve redraws, or a redraw of the carved pair alone.
+
+    An exact bound could then cost a few µs. It moves output and changes how the carve conditions.
+
+  - (d) An `Unbounded` verdict for every multiple. The bound is exact and cheap for systems single at
+    attempt 0: 0.2–1.1 µs in A–D and 8.7 µs in E. But the census would still generate 50–87% of
+    C–E's records, which fails R06.T8.g's gate of 1%.
+
+  The lane's lean: (a) now, and (b) once P11.T17 lands. The bound stays exact and its cost is
+  recorded. (c) belongs with lever 13 if T17's budget is missed.
