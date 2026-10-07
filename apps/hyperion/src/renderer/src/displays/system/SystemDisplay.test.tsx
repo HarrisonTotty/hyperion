@@ -2,11 +2,12 @@
  * Opening the `SYSTEM` display from the `GALAXY` chart, through `App` (plan 14, P14.T41.a).
  */
 import { universeTimeFromYears } from "@hyperion/protocol";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../../App";
+import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
@@ -40,9 +41,22 @@ function displayTime(): HTMLElement {
   return screen.getByRole("status", { name: "DISPLAY TIME UT" });
 }
 
-/** Renders the console, opens SURVEY 1 and charts one system 10 ly from the centre. */
-async function renderCharted() {
-  const user = userEvent.setup();
+/** Runs the next animation frame on the fake clock of {@link fakeFramesAndTimeouts}. */
+function nextFrame(): void {
+  act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+}
+
+/**
+ * Renders the console, opens SURVEY 1 and charts one system 10 ly from the centre.
+ *
+ * @param clock - `fake` runs the test on {@link fakeFramesAndTimeouts}'s clock, with `user-event`'s
+ *   own delays on it too, so that the test gives each animation frame itself with
+ *   {@link nextFrame}.
+ */
+async function renderCharted(clock: "real" | "fake" = "real") {
+  const user = userEvent.setup(clock === "fake" ? { advanceTimers: fakeFramesAndTimeouts() } : {});
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
     DOMRect.fromRect({ x: 0, y: 0, width: 800, height: 500 }),
@@ -151,7 +165,11 @@ describe("the SYSTEM display", () => {
   });
 
   it("starts afresh at the chart's time when the system is opened again", async () => {
-    const { user, socket } = await renderCharted();
+    // A step lands on the next animation frame, and a file that ran earlier in the same worker
+    // can leave the real `requestAnimationFrame` broken, so that no frame ever fires. The fake
+    // clock brings its own frame function, and the test gives the frame itself, so nothing waits
+    // on a frame that is late or never comes.
+    const { user, socket } = await renderCharted("fake");
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
     await answerSummaries(socket);
     const beforeOpening = socket.requestsOfKind("system_summary").length;
@@ -160,9 +178,8 @@ describe("the SYSTEM display", () => {
     expect(displayTime()).toHaveTextContent(opened);
 
     await user.keyboard("]");
-    await waitFor(() => {
-      expect(displayTime()).toHaveTextContent("+12 yr 183/15:00:00");
-    });
+    nextFrame();
+    expect(displayTime()).toHaveTextContent("+12 yr 183/15:00:00");
     await user.keyboard("{F2}");
     await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
 

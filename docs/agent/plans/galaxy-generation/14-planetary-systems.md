@@ -6750,3 +6750,20 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       bit for bit, and no golden that should have moved stayed put. It suggested tying each
       analogue row's `reference_bond` to its state's albedo, so that the three 0.294 literals
       could not drift apart. The follow-up above does so.
+- **P14.T41.a's "starts afresh at the chart's time", made independent of file order (test
+  reliability, 2026-10-07).** Plan R07's Risks recorded this test as a load flake (T16.f, T16.g,
+  T2.b). It pressed `]` and gave `waitFor` its default 1 s to see the step, which lands on a real
+  animation frame. Load was not the cause. The app's tests run with `isolate: false` and
+  `unstubGlobals`. `viewsCheckRun.test.tsx` (R07.T20) stubs `requestAnimationFrame` with
+  `vi.stubGlobal` while `fakeFramesAndTimeouts` has the fake clock installed, so the stub saves
+  the fake clock's frame function as the original. `vi.useRealTimers()` in `afterEach` puts
+  jsdom's back. Vitest's unstub runs later, before the next test, and puts the dead clock's
+  function back. From then on, no real frame fires in that worker, and this test failed whenever
+  it ran there after that file. Load only moved which files each worker drew, so it looked like a
+  load flake. With that file first in one worker, the test failed 40 of 40 runs, 8 copies at a
+  time beside busy loops under `CPUQuota=400%`; alone under the same load it failed 0 of 40. It
+  now runs on the fake clock (`renderCharted("fake")`) and gives the step its frame with
+  `nextFrame()`. It asserts the same day's step, now after exactly one frame, and passed 40 of 40
+  in the failing order and 40 of 40 alone, under the same load. A mutation that drops `SystemDisplay`'s `key` per
+  opening still fails it. The stub that breaks the frame function is the views lane's, reported
+  to the orchestrator: any later test that waits on a real frame in the same worker would meet it.
