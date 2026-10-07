@@ -2041,7 +2041,7 @@ src/renderer/src/lib`,
   every mark is. Their outline is one function, `destinationChevrons(apexPx, armPx)` in
   `spatial/symbols.ts`, which both drawers use. The bracket, the target's ticks and the least gap
   are unchanged. No graph marks a destination.
-  **Labels.** On every display a mark's label's text starts at least 0.125 rem outside the outer
+  **Labels.** On every display a mark's label's text starts at least 0.25 rem outside the outer
   edge (its line plus half the mark stroke) of the outermost reticle that can stand about its
   mark: the bracket, counted whether or not the mark is selected, or while it is the destination,
   the chevrons' reach (the apex distance plus an arm's length ÷ √2). One function beside
@@ -2049,8 +2049,8 @@ src/renderer/src/lib`,
   - in the view, `markLabelOffsetPx` counts the chevrons' reach in place of the destination's
     half-size. Its plate stands 0.125 rem + δ beyond the reach, with its least place of
     0.75 rem + 5δ, and its `0.25rem` padding keeps the text outside as required;
-  - on the spatial displays, `placeLabels` starts each label's box 0.125 rem beyond the outer
-    edge, R + 0.375 rem + 0.75 CSS px + 5δ for a bracket. Its parameters change as it needs, with
+  - on the spatial displays, `placeLabels` starts each label's box 0.25 rem beyond the outer
+    edge, R + 0.5 rem + 0.75 CSS px + 5δ for a bracket. Its parameters change as it needs, with
     a pointer in P05's Provides. Its flip, drop and pins are unchanged.
 
   Selecting a mark never moves its label. The destination's report moves it, in the frame that
@@ -2104,8 +2104,60 @@ src/renderer/src/displays/view src/renderer/src/spatial src/renderer/src/display
 src/renderer/src/displays/system src/renderer/src/lib src/renderer/src/smoke`, `just test-render`,
   the console-ux skill's scripts, `just ci`.
 
+- **R07.T16.h's follow-up: the destination's label off its chevron's line, and a base unit of
+  clearance** (decision-r07-quality-and-destination, addenda A and B). One `fix(view): R07.T16.h …`
+  commit, by a fresh agent, before T16.c. R02's `wireframe/symbology.ts` (`markLabelOffsetPx`
+  and the anchor's label place), `displays/view/ViewMarkLabels.tsx` (`markLabelTransform`), and
+  P05's `spatial/labels.ts` (`placeLabels`, `markLabelTransform`), with their tests.
+  - Every label's text starts at least 0.25 rem outside the selection bracket's outer edge,
+    counted whether or not the mark is selected.
+    - The view's plate offset stays as T16.g built it: its padding puts the text 0.375 rem −
+      0.75 CSS px out.
+    - P05's box moves to R + 0.5 rem + 0.75 CSS px + 5δ.
+  - While a mark is the destination, its label keeps that horizontal place and stands above the
+    whole chevron set: its box (the view's plate, P05's label box) has its bottom edge at least
+    0.25 rem above the upper chevron's ink, A + 2H ÷ (3√2) + half the mark stroke from the
+    mark's centre (`destinationLabelRisePx`).
+    - It tries the upper right, the upper left, the lower right and the lower left, mirrored,
+      each with its near edge at the bracket place.
+    - It takes the first whose box stands at least 0.5 rem clear of every other mark's symbol,
+      reticles and label (in the view, and of the chrome T16.i names). It takes the upper right
+      where none is.
+    - It is never dropped.
+  - The chevrons' reach no longer moves a label outward. The destination's report raises the
+    label, in the frame that first draws the chevrons, and it cuts. Selecting never moves it.
+
+  **Tests:**
+  - P05's box stands 0.5 rem plus 3.40, 2.00, 0.75 and 0.75 px beyond the radius at ratios
+    0.78125, 1, 2 and 3, on either side.
+  - For a craft and symbols of classes 0 to 4, at 80%, 100% and 150% and ratios 0.78125, 1 and 2,
+    alone and on the selection, in each of the four places, a destination's label box:
+    - lies wholly above (or below) the ink of all four chevrons, by at least 0.25 rem, so that it
+      shares no row with any chevron;
+    - stands at least 0.25 rem clear of the bracket.
+  - At a ratio of 1 and 100%, a craft's destination box's bottom edge stands 25.19 px above its
+    anchor (class 0 22.24, class 4 28.13). Its near edge stands at 13.25 px in the view and
+    16.00 px on the spatial displays.
+  - A neighbour's symbol, reticle or label within 0.5 rem of the upper-right box sends the label
+    to the upper left. With every place blocked it stays at the upper right.
+  - Selection never moves a label. The destination's report moves it, and the move cuts.
+
+  **By hand, hidden:** T16.h's crops retaken, on the local chart at 0.78125 at 80% and 100%, and
+  with `VIEW`'s TEST PLANET:
+  - no chevron's ink shares a device row with the label's text ink, alone, on the selection,
+    lowered or flipped. Class 0 at 80% and 0.78125 has at least 2 device px between the ∨'s top
+    row and the text's bottom row;
+  - `VIEW`'s TEST PLANET, whose upper-right place meets the selected moon above it, takes another
+    place by the neighbour rule;
+  - at 80% a whole device pixel of `--surface-0` lies between the bracket's ink and every
+    label's box, at every phase captured.
+
+  **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/wireframe
+src/renderer/src/displays/view src/renderer/src/spatial src/renderer/src/displays/galaxy
+src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
+
 - **R07.T16.c The guide's draft, for the owner.** `docs/frontend/ux-guidelines.md` alone, in one
-  `docs(guide)` commit, after T16.f and T16.h, so that it states what is built:
+  `docs(guide)` commit, after T16.f, T16.h and its follow-up, so that it states what is built:
   decision-r07-t8a-meter's "In T16" edits, fitted to the guide as T19.d signed it off (the
   data-state bullet's inhibit sentence and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row;
   the `NO IMAGE TO METER` row's added sentence; the new Status row of the three statuses with their
@@ -2124,17 +2176,25 @@ src/renderer/src/displays/system src/renderer/src/lib src/renderer/src/smoke`, `
   note's Label row; the destination's chevrons and the labels' place beyond every reticle, in the
   three-dimensional conventions, the Views bullet's kept list and a `CHEVRONS DESTINATION` Legend
   row, with the view's label sentence never shown in part (T16.i's rule)
-  (decision-r07-quality-and-destination, Q2, Q3, Q6); the Colour bullet's coverage for a stroke
-  accepted on its pair (Q4); the `QUALITY` row redrafted as a `Setting`, `QUALITY` in the Views
-  bullet's list of what stands on the primary's block alone, the `DECORATION ON` pointers, and the
-  `GRAPHICS` row as T17 drafted it (Q1), in place of b6e2203d's drafts; and the added clauses of the
-  `WIREFRAME`, `PHOTOREALISTIC` row and the `TEST HULL` row. Nothing else is new:
+  (decision-r07-quality-and-destination, Q2, Q3, Q6), its items 5 and 6 in the words of addenda A
+  and B (A6, as B5 amends it): a mark's label's text at least `0.25rem` outside the selection's
+  bracket, whether or not it is drawn, and while the chevrons are drawn, above or below all four,
+  never on a chevron's line or beside its text; the Colour bullet's coverage for
+  a stroke accepted on its pair (Q4); the `QUALITY` row redrafted as a `Setting`, `QUALITY` in the
+  Views bullet's list of what stands on the primary's block alone, the `DECORATION ON` pointers, and
+  the `GRAPHICS` row as T17 drafted it (Q1), in place of b6e2203d's drafts; and the added clauses of
+  the `WIREFRAME`, `PHOTOREALISTIC` row and the `TEST HULL` row. Nothing else is new:
   `BODY PHOTOMETRY: NOT YET MODELLED` is signed off (T19.d), and the several views' refusal adds no
   entry (decision-r07-t18, item 6). Tests: each status the draft adds is a string in the code, in
   the words T16.b built; each note it adds is a string in the code, in the words T16.e built; and
   each width and colour the text gives is the code's, `lineScale`, `markStrokeDevicePx` and
-  `CLEAR_COLOUR`'s black included (decision-r07-t16a; decision-thin-line-contrast). Acceptance:
-  `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the console-ux skill's scripts.
+  `CLEAR_COLOUR`'s black included (decision-r07-t16a; decision-thin-line-contrast); the chevrons'
+  geometry and the labels' 0.25 rem, and a destination's label above or below its whole chevron
+  set, as T16.h and its follow-up built them, and the 15/16 as `contrast.py`'s documented canvas
+  peak (decision-r07-quality-and-destination, its note on T16.c's test, as addenda A and B amend
+  it).
+  Acceptance: `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the console-ux skill's
+  scripts.
 - **R07.T16.i The view's labels clear of its chrome.** `displays/view/ViewDisplay.tsx`
   (`placeMarkLabels`) and `ViewMarkLabels.tsx`, and their tests
   (decision-r07-quality-and-destination, Q6 (a)).
@@ -2147,7 +2207,10 @@ src/renderer/src/displays/system src/renderer/src/lib src/renderer/src/smoke`, `
   - The labels are placed in order: the selection's, the destination's, then the rest by range,
     nearest first.
   - Each tries, at its own offset from its mark, the right, the left (mirrored), then below and
-    above, centred on the mark. Where none is clear it is hidden whole.
+    above, centred on the mark. A destination's label tries the upper right, the upper left, the
+    lower right and the lower left, above or below its whole chevron set, and takes the first
+    0.5 rem clear of other marks (decision-r07-quality-and-destination, addendum B). Where none is
+    clear it is hidden whole.
   - The mark stays on the canvas and in the list.
   - A label leaves a place, or comes back from hidden, only when the place it moves to is clear by
     0.25 rem. Each change cuts.
@@ -5059,8 +5122,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       covered and the ink starts 0.11 px into the next column; on the orbit map the arm's 40%
       fringe shares the ink's first column. _A ruling is asked (for the orchestrator)._ _Ruled
       (decision-r07-quality-and-destination, Q3): one rule on every display, a label's text at
-      least 0.125 rem outside the outer edge of the outermost reticle about its mark. The view
-      meets it as built; P05's labels move 0.125 rem + 0.75 CSS px out (T16.h)._
+      least 0.25 rem outside the outer edge of the outermost reticle about its mark. The view
+      meets it as built; P05's labels move 0.25 rem + 0.75 CSS px out (T16.h and its follow-up,
+      addendum A)._
     - **`VIEW`, hidden** (`.git/rm23-scratch/r07-views/t16f/page/`, T16.e's harness with its own
       flow), at a ratio of 1. At 1920 × 1080, `PRECISION TEST` from `CHASE` at 120° in the
       wireframe: TEST PLANET's plate covers the lower right of TEST MOON's limb, a disc about 15 px
@@ -5214,14 +5278,20 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         80%, and about two at 100%, so the chevron can read as a `<` set before the designation:
         `<PGG 5H0001 A-1`. The view's labels have plates, whose padding keeps their text 0.25 rem
         further out. The lean is to keep Q3's one rule, since the chevron is `--target` and the
-        text `--text`, and to show it to the owner with T16.c's draft.
+        text `--text`, and to show it to the owner with T16.c's draft. _Ruled
+        (decision-r07-quality-and-destination, addendum A): not acceptable. The chevron reads as a
+        `<` of the designation, and is the same colour as the label on a stale display. A
+        destination's label stands above its whole chevron set, at least 0.25 rem clear of the
+        upper chevron, and 0.5 rem clear of other marks (addendum B). Every label's text stands at
+        least 0.25 rem outside the bracket (T16.h's follow-up)._
       - **The selected label and the bracket** (the local chart, at 0.78125): at 100% the label's
         box starts 1.56 device px past the bracket's outer edge, and the one column between, wholly
         left of the box, reads 1.12:1 against `--surface-0`. At 80% the box starts 1.25 device px
         past it, the ruling's figure; the column between reads 1.05:1, and half of it lies under the
         box, so a whole device pixel lies between the bracket's ink and the box only where the box
         starts in a pixel's last quarter. The label's own ink, B612's `P`, starts after that column
-        at both scales.
+        at both scales. _Ruled (addendum A): the clearance becomes 0.25 rem, the layout base unit,
+        which leaves a clear pixel at every phase at 80% and 0.78125 (T16.h's follow-up)._
       - **The orbit map:** the selected bodies at the fit zoom (the second system's inner planets,
         and its outermost dwarf planet) stood among other marks and furniture (the habitable zone's
         label, other bodies' symbols and stalks, a body's disc), which confound a pixel reading of

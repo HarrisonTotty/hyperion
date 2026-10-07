@@ -146,9 +146,9 @@ interface UniverseSession {
   `destinationGapPx`._
 - `pick.ts`: `pick(anchors, pointPx, tolerancePx): string | null`.
 - `labels.ts`: `chooseLabels`, `placeLabels`. _R07.T16.f gives `placeLabels` a required fourth
-  `reticleGrowthPx`, before its optional ones._ _R07.T16.h starts every label's box 0.125 rem
+  `reticleGrowthPx`, before its optional ones._ _R07.T16.h starts every label's box 0.25 rem
   outside the outer edge of the outermost reticle about its mark, and its parameters change with
-  it (decision-r07-quality-and-destination, Q3)._ _As built:
+  it (decision-r07-quality-and-destination, Q3, and addendum A for its follow-up)._ _As built:
   `placeLabels(chosen, anchors, viewport, reticles, destinationId, pinnedIds?, obstacles?)`, with
   `reticles` `lib/strokes.ts`'s `ReticleStrokesCss` (`reticleStrokesCssPx` of the ratio) in place of
   `reticleGrowthPx`, and `markLabelTransform(label, remPx)`, which places a label by its near
@@ -1436,9 +1436,10 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
 - **Labels beside reticles (decision-r07-t16d-followups, (d)).** Until R07.T16.h a mark's label
   started on the selection bracket's centreline (`spatial/labels.ts`, `GAP_REM` 0.25 rem), and
   only B612's side bearing kept its ink off the bracket. Since T16.h its text starts at least
-  0.125 rem outside the outer edge of the outermost reticle about its mark, as the view's does
-  (decision-r07-quality-and-destination, Q3). Two cases break the view's rule, that a
-  label never overlaps its mark or a reticle about it (the guide's Views paragraph, R07.T16.c):
+  0.25 rem outside the outer edge of the outermost reticle about its mark, as the view's does
+  (decision-r07-quality-and-destination, Q3, and addendum A for T16.h's follow-up). Two cases
+  break the view's rule, that a label never overlaps its mark or a reticle about it (the guide's
+  Views paragraph, R07.T16.c):
   - a label held inside the view where neither side has room (the orchestrator's ruling 149.1)
     can stand over its own mark;
   - a destination's reticle, when one is drawn, stands 0.25 rem inside its label's box. _Mended by
