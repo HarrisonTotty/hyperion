@@ -7664,7 +7664,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       difference between the runs not isolated, R05.T12.e's prefix, and where the late read came
       from (with a pointer in part 3).
       - Its considers: T17's guessed cause is corrected at its pointer. R05's Risks record of the
-        failure gets no pointer here, since it is lane C's plan.
+        failure gets no pointer here, since it is lane C's plan. _It got one after, on the
+        orchestrator's word (2026-10-07): R05's "The run's other checks" points to 6673319f and
+        to this entry._
   - Scratch: `.git/rm23-scratch/r07-shading/t8a-rtx/`. It holds `rtx-smoke.sh`, `sw-smoke.sh`,
     `diag/` (the probe, its patch and logs) and `rtx-fix-{1,2,3}.log`.
 - **The kept scenes' annuli, fixed** (2026-10-07; the shading lane, from T17's finding, as the
