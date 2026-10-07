@@ -213,6 +213,16 @@ describe("HillaireAtmosphere", () => {
     expect(engine.textureSpecs.at(-1)?.size).toEqual([128, 64]);
   });
 
+  it("hands the smoke page the frame's sky-view table and ray-march target", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    expect(atmosphere.frameTables.rayMarch).toBeNull();
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const { skyView, rayMarch } = atmosphere.frameTables;
+    expect(skyView.name).toBe("atmosphere sky view");
+    expect(rayMarch?.name).toBe("atmosphere ray march");
+  });
+
   it("allocates the low setting's sizes under atmosphere-view and keeps its aerial perspective to the terrain", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES.low, WGS84);

@@ -5498,6 +5498,139 @@ medium, sizes, figure)`.
     brainstorm leaves them (terrain 1.05 ms p95 at the same clocks). The atmosphere's figure against
     its estimate is a finding: T19 drafts it for the owner, R08.T11 records it, and R12.T10 replaces
     the estimate.
+- **Deviations in T12.e, as built** (2026-10-06, lane C; `decision-r05-high-atmosphere.md` and its
+  addenda A and B).
+  - _The change._
+    - `source.wgsl`'s `sampleMediumAt(heightM, cosTheta)` evaluates each term's density once a
+      sample, at the sample's height above the datum, and returns `SampleMedium`: the scattering,
+      the extinction and the phased scattering. `sourceAt` takes it as `local`.
+      `phasedScatteringAt` is gone, and `mediumAt` stays for the per-planet tables. The helper list
+      in "Deviations in T12.b and T12.c, as built: the medium read in place" predates this.
+    - `source.wgsl`'s `marchSplit(tStartM, tEndM, nearestM, samples, fromCamera)` and
+      `marchStep(split, i)` hold V1's placement, twinned by `marchSteps.ts`. A step's midpoint and
+      length are in closed form, with no `pow` or `sqrt` a step and two `sqrt` a ray. The sky view
+      passes `fromCamera` as true, since it serves only cameras inside the atmosphere. The march
+      passes `shell.x <= 0`.
+    - `common.wgsl`'s `stepFactor(x)` is the step factor g. The three per-frame kernels add
+      `throughput · source · dt · stepFactor(σ_t dt)` and no longer divide by a floored σ_t.
+    - `TABLE_SIZES.high.skyViewSamples` is 75 (addendum B). Low keeps 16 and 16, and the march 32
+      on high.
+    - The kernels take at least 2 steps (`max(…, 2u)`), since each non-empty side needs one.
+      `marchSplit` refuses fewer. No shipped count is affected.
+    - The aerial perspective takes the densities once and the step factor. Its slices keep their
+      equal depths.
+  - _Outside the Files list:_
+    - `common.wgsl`, for the step factor (addendum A);
+    - `HillaireAtmosphere.frameTables`, a read-only getter of the latest frame's sky-view table and
+      ray-march target for the smoke page, with its test in `hillaire.test.ts`;
+    - the check's group in `smoke/page.ts`.
+  - _The twin_ (`marchSteps.test.ts`, about 10–17 s under the lanes' load).
+    - _The sun's transmittance_ is `opticalDepth.ts`'s integrator at 64 Simpson intervals,
+      tabulated once on a 512 × 128 grid of the transmittance table's (u, v) and read bilinearly.
+      Every scheme and the reference read the same table. Integrating each sample's sun ray afresh
+      instead, over the same 1,046 rays, passes every test as well. It moves no ray's e at high's
+      counts by more than 0.23 percentage points, and at low's by more than 3.9. Both are twilight
+      rays whose sun is on the horizon, where the grid's bilinear read is coarsest. It takes seven
+      times as long (129 s against 17 s).
+    - _L_max_ is each kernel's brightest reference pixel per channel, as in the decision's model.
+    - _The reference_ is 4,096 placed steps, confirmed against 8,192 to 0.05%. Two twilight rays
+      cross the ground's hard shadow edge, where the midpoint rule converges only as 1 ÷ n, and miss
+      that by a little. Each takes 8,192 steps, confirmed against 16,384:
+      - the band from 1 km at 0.98 of the dip, the sun at 90°/180°;
+      - the band from 20 km at 0.98 of the dip, the sun at 95°/0°.
+
+      The worst over the set is then 2.3 × 10⁻⁴.
+
+    - _The rays:_ 1,046, all gated:
+      - 40 disc, 30 limb, 20 inside and 108 near-level for the march;
+      - 120 sky, 336 band, 224 past the visible horizon, 72 high limb and 96 high band for the sky
+        view.
+
+      The band, past and high-band rays take the addenda's suns, 30/80/90/95° × 0/180° at the
+      camera. The near-level rays take the ruling's, 30/80/90/95° × 0/90/180°, at the terrain.
+
+    - _Twilight_ is judged at t\* with the 10⁻¹² rad margin, applied to the angles (addendum A,
+      4(c)). Against the ruling's list (every limb ray, sky rays beyond 80° of view zenith and disc
+      rays beyond 80° of ground zenith, each with the sun more than 80° away):
+      - 135 rays are twilight at t\* and not on the list, all with the sun at 90° or 95°;
+      - the worst of them at high's counts is 2.43%, a near-level march ray from 2 km to terrain
+        150 km away;
+      - addendum A's own figures count that family's twilight rays so.
+  - _The gate's figures._ Worst e, %, ordinary / twilight. The columns are:
+    - High: V1, the march at 32 and the sky view at 75;
+    - V1 at 30: the sky view at the ruling's count;
+    - As built: even steps at 32 / 30;
+    - Low: V1 at 16 / 16, against even steps at 16 / 16.
+
+    | Family (rays)                  | High        | V1 at 30    | As built      | Low           | Even at 16    |
+    | ------------------------------ | ----------- | ----------- | ------------- | ------------- | ------------- |
+    | Disc (40)                      | 0.55 / 0.11 | 0.55 / 0.11 | 6.93 / 0.86   | 2.66 / 2.95   | 26.96 / 6.84  |
+    | Limb (30)                      | 1.65 / 4.58 | 1.65 / 4.58 | 0.57 / 16.85  | 4.84 / 18.15  | 1.56 / 78.90  |
+    | Inside (20)                    | 0.28 / 0.04 | 0.28 / 0.04 | 1.01 / 0.10   | 1.17 / 0.17   | 5.54 / 0.37   |
+    | Near-level march (108)         | 0.42 / 2.43 | 0.42 / 2.43 | 0.12 / 0.66   | 1.63 / 9.27   | 0.48 / 2.64   |
+    | Sky (120)                      | 0.22 / 0.38 | 1.35 / 2.34 | 27.84 / 15.75 | 4.70 / 8.44   | 81.68 / 71.63 |
+    | Band (336)                     | 0.24 / 0.57 | 1.30 / 4.11 | 5.57 / 33.28  | 9.04 / 15.16  | 14.38 / 95.23 |
+    | Past the visible horizon (224) | 0.04 / 0.59 | 0.28 / 3.70 | 1.48 / 0.99   | 0.81 / 17.50  | 5.14 / 3.52   |
+    | High limb (72)                 | 0.40 / 3.19 | 2.10 / 8.19 | 0.77 / 18.31  | 11.54 / 49.48 | 3.40 / 74.33  |
+    | High band (96)                 | 0.19 / 2.66 | 1.91 / 8.96 | 1.22 / 3.84   | 9.06 / 39.01  | 2.26 / 24.42  |
+    - High passes every ray. The as-built even steps fail on the disc, at the limb and in the
+      sky, and the test checks that they do.
+    - Low's worst over the set is 49.48% (the high limb at its terminator), against even 16's
+      95.23% (addendum A, 4(a), with addendum B's families).
+    - _Low's known trades,_ where even steps do better:
+      - the daylit limb, 4.84% against 1.56%;
+      - the near-level march, 1.63% against 0.48% (ordinary) and 9.27% against 2.64% (twilight);
+      - twilight rays just past the visible horizon, 17.50% against 3.52%;
+      - the high limb, ordinary, 11.54% against 3.40%;
+      - the high band, 9.06% against 2.26% (ordinary) and 39.01% against 24.42% (twilight).
+    - _Low's bounds._ Low's worst per kernel, class and camera range, rounded up, are
+      `LOW_TWIN_WORST`:
+      - the march, 4.9% and 18.2%;
+      - the sky view from cameras up to 50 km, 9.1% and 17.5%;
+      - the sky view from 60–100 km, 11.6% and 49.5%.
+
+      The twin holds itself within them, and low's GPU check holds low to them plus 1%. Splitting
+      the sky view by camera range goes beyond addendum A's 4(b), which is per kernel and class: it
+      keeps the high cameras' figures from loosening low's bound from below 50 km to about 50%. It
+      only ever tightens.
+
+  - _The GPU agreement check_ (`checkAtmosphereSteps`; `just test-render`, both variants, with the
+    same figures on each).
+    - _What it compares._ Each kernel at its setting's counts against the same kernel at 1,024
+      steps, in the same run, texel by texel. The sky-view table is at a quarter of each dimension
+      (48 × 27 on high, 32 × 16 on low), each texel still one ray of the shipped kernel. The ray
+      march covers the 64 × 32 check frame (32 × 16 on low).
+    - _The classes._ A CPU copy of each texel's ray sets its class: the sky view's own sphere for
+      the sky view, and spheres of radius a for the march. Only rgb is compared.
+    - _The frames._
+      - The sky view is held from 2 m and 5 km, and from 80 km at the limb with the sun on its
+        horizon (addendum B). The 5 km frame lets the sky-view table span the band.
+      - The march is held from 400 km and over a surface 60 km ahead. The surface frame marches from
+        inside, beyond the aerial-perspective volume.
+      - An all-dark converged output fails.
+    - _Results._ Each row is the texel nearest its tolerance (its e ÷ tolerance the largest), and
+      its tolerance:
+
+      | Frame                                        | High                 | Low                      |
+      | -------------------------------------------- | -------------------- | ------------------------ |
+      | Sky view, 2 m, noon                          | 0.28% (3%)           | 4.34% (10.1%)            |
+      | Sky view, 2 m, sunset                        | 0.19% (3%)           | 6.92% (18.5%, twilight)  |
+      | Sky view, 5 km, sunset                       | 0.21% (6%, twilight) | 3.26% (18.5%, twilight)  |
+      | Sky view, 80 km, the limb with its sun's set | 1.69% (6%, twilight) | 28.10% (50.5%, twilight) |
+      | Ray march, 400 km, noon                      | 2.00% (3%)           | 0.99% (5.9%)             |
+      | Ray march, 400 km, terminator                | 2.03% (3%)           | 2.44% (5.9%)             |
+      | Ray march, 2 m, a surface 60 km ahead        | 0.64% (3%)           | 2.33% (5.9%)             |
+
+    - _The f32 cancellation it found_ (addendum A). Before the step factor, the 1,024-step
+      reference disagreed by up to 15%: 6.6% on the 400 km disc and limb, and 14.8% and 25.9% on
+      the sky view at the top. An f32 emulation gives −13% on a 90 km tangent ray at 1,024 steps,
+      against 0.02% at 32.
+  - _T12.c's comparison frames_ were re-rendered on SwiftShader at 75 sky-view steps, in both
+    variants, for the owner's pending look. They are in
+    `.git/rm23-orchestration/laneC-captures-t12e/`, beside the earlier `laneC-captures/`. Hillaire's
+    medium is clean, so they change little.
+  - _Still to record:_ option 1's largest difference, the image check (step 6) and the timing
+    (step 7), each in its own commit.
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's

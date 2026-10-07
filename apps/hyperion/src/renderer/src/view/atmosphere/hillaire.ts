@@ -93,19 +93,30 @@ export interface TableSizes {
  * The atmosphere's sizes per quality setting (Design note 16).
  *
  * @remarks
- * High, Hillaire's code: sky-view 192 × 108 with 30 steps (sebh's), the aerial-perspective volume
+ * High, Hillaire's code: sky-view 192 × 108 (sebh's table) with 75 steps, the aerial-perspective volume
  * 32³ reaching 32 km (Hillaire 2020, Table 2 and §5.4, and Bevy), the ray march at full resolution
  * with 32 steps. Low: sky-view 128 × 64 with 16 steps, the volume 32 × 32 × 16, the ray march at
  * half resolution with 16 steps, aerial perspective on the terrain alone. The per-planet tables are
- * full size on both (128 KB, rarely built). The per-slice and ray-march step counts are this
- * module's choices; T18 revisits them with the spike's measurements.
+ * full size on both (128 KB, rarely built).
+ *
+ * The sky view and the ray march place their steps toward each ray's lowest point, not evenly
+ * (`marchSteps.ts`), and their counts are R05.T12.e's: its quadrature gate (`marchSteps.test.ts`)
+ * holds high's within 2% of a converged march (5% for twilight rays), where even steps were up to
+ * 33% off, and low's 16 and 16 no worse over the gate than even steps at the same counts. The high
+ * sky view takes 75 steps, not Hillaire 2020's 30 (Table 2; addendum B of
+ * `decision-r05-high-atmosphere.md`): from cameras at 60–100 km a limb ray's narrow source at its
+ * tangent point needs them, where 30 erred by up to 9.0% at twilight (the band seen from them; 8.2%
+ * on their limb) and 75 by 3.2%, in the twin. A count changes only through that gate, T18's
+ * included. Two
+ * steps a slice of the aerial-perspective volume is this module's choice; T18 revisits it with the
+ * spike's measurements.
  */
 export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
   high: {
     transmittance: TRANSMITTANCE_SIZE,
     multiScattering: MULTI_SCATTERING_SIZE,
     skyView: { widthTexels: 192, heightTexels: 108 },
-    skyViewSamples: 30,
+    skyViewSamples: 75,
     aerialPerspective: { widthTexels: 32, heightTexels: 32, slices: 32 },
     aerialPerspectiveSamplesPerSlice: 2,
     aerialPerspectiveReachM: 32_000,
@@ -421,6 +432,15 @@ export class HillaireAtmosphere {
   /** The per-planet tables, rebuilt when the medium changes. */
   get tables(): AtmosphereTables {
     return this.#tables;
+  }
+
+  /**
+   * The sky-view table and the ray-march target the latest {@link HillaireAtmosphere.drawFrame}
+   * built, the target `null` before the first frame, for the smoke page's agreement check
+   * (R05.T12.e). Their kernels are presentation-only, so only a tolerance read-back reads them.
+   */
+  get frameTables(): { readonly skyView: TextureHandle; readonly rayMarch: TextureHandle | null } {
+    return { skyView: this.#frame.skyView, rayMarch: this.#frame.rayMarch };
   }
 
   /**

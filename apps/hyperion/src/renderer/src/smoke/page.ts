@@ -22,6 +22,7 @@ import {
   captureAtmosphere,
   type CapturedImage,
   checkAtmosphereFrames,
+  checkAtmosphereSteps,
   checkAtmosphereTables,
 } from "./atmosphere";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
@@ -201,6 +202,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R05.T12.c the atmosphere's frames", () =>
     checkAtmosphereFrames(engine, checks),
   );
+  await checks.group("R05.T12.e the marches' steps", () => checkAtmosphereSteps(engine, checks));
   await checks.group("R05.T11.a the terrain's resources", () =>
     checkTerrainResources(engine, checks),
   );

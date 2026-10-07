@@ -95,6 +95,19 @@ fn densityOf(profile : vec4f, heightM : f32) -> f32 {
   return max(min(rising, falling), 0.0);
 }
 
+// A march step's in-scattering factor g(x) = (1 - e^-x) / x per channel, x = sigma_t dt the step's
+// optical depth: a step of constant medium adds throughput * S * dt * g(x), the integral that
+// sebh's IntegrateScatteredLuminance takes as (S - S e^-x) / sigma_t (R05.T12.e). Below x = 0.01 it
+// is the series 1 - x (1/2 - x/6), whose truncation, x^3 / 24, is under 4.2e-8 there; from 0.01 up,
+// (1 - exp(-x)) / x, within 1.8e-5 just above the switch (WGSL's exp bound) and falling as 1 / x.
+// In f32 the old form errs by up to about 9e-8 / x of itself with a correctly rounded exp, and
+// 2.4e-7 / x within WGSL's bound: at x = 1e-6, 1.3% and up to 18% (decision-r05-high-atmosphere.md,
+// addendum A). On SwiftShader a converged march of 1,024 steps lost up to 15% that way, and in lane
+// C's f32 model a 90 km tangent ray lost 13%.
+fn stepFactor(x : vec3f) -> vec3f {
+  return select((1.0 - exp(-x)) / x, 1.0 - x * (0.5 - x / 6.0), x < vec3f(0.01));
+}
+
 // The radius at distance t along a ray from radius r at zenith cosine mu.
 fn localR(r : f32, mu : f32, t : f32) -> f32 {
   return sqrt(max(t * t + 2.0 * r * mu * t + r * r, 0.0));

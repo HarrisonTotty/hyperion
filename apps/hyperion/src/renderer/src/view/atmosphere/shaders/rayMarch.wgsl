@@ -10,7 +10,12 @@
 // a + top and c + top for the atmosphere and a and c for the ground, not spheres; each sample's
 // height is its height above the spheroid along the radius and its sun cosine is taken against the
 // spheroid's normal, and the tables are read at that height; the ground's bounce reads the sun's
-// transmittance at the ground (Bevy reads it at radius 0); each step is sampled at its midpoint.
+// transmittance at the ground (Bevy reads it at radius 0); the steps are placed toward the ray's
+// lowest point, the point nearest the body's centre, or, for the camera side of a two-sided ray
+// from inside the atmosphere, toward the camera (`marchSplit` in source.wgsl, R05.T12.e), where
+// Bevy spaces them evenly, and each is sampled at its midpoint; each term's density is evaluated
+// once a sample; a step's in-scattering is taken without f32's cancellation (`stepFactor` in
+// common.wgsl). The placement takes the centre alone: it needs no spheroid.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<uniform> view : AtmosphereView;
@@ -89,20 +94,22 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     textureStore(rayMarchOut, id.xy, vec4f(0.0, 0.0, 0.0, 1.0));
     return;
   }
-  let samples = max(u32(view.figure.w), 1u);
-  let dt = (tEnd - tStart) / f32(samples);
+  let samples = max(u32(view.figure.w), 2u);
+  let split = marchSplit(tStart, tEnd, -dot(origin, dir), samples, shell.x <= 0.0);
   let cosTheta = dot(dir, view.sun.xyz);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
   for (var i = 0u; i < samples; i++) {
-    let p = origin + (tStart + (f32(i) + 0.5) * dt) * dir;
+    let stepAt = marchStep(split, i);
+    let dt = stepAt.dtM;
+    let p = origin + stepAt.tM * dir;
     let heightM = heightAbove(p, a, c);
     let muSun = dot(view.sun.xyz, normalAt(p, a, c));
-    let local = mediumAt(medium.bottomRadiusM + heightM);
-    let extinction = max(local.extinction, vec3f(1e-12));
-    let stepTransmittance = exp(-local.extinction * dt);
-    let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, cosTheta);
-    luminance += throughput * (source - source * stepTransmittance) / extinction;
+    let local = sampleMediumAt(heightM, cosTheta);
+    let stepDepth = local.extinction * dt;
+    let stepTransmittance = exp(-stepDepth);
+    let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, local);
+    luminance += throughput * source * dt * stepFactor(stepDepth);
     throughput *= stepTransmittance;
   }
   // The bare ground under the atmosphere, seen from above it where nothing is drawn.

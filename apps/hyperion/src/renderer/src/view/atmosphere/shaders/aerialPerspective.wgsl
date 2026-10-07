@@ -7,7 +7,10 @@
 // Ported from Bevy 0.19.1's aerial_view_lut.wgsl (MIT; the notice is in common.wgsl), marching once
 // through the slices and storing each slice's running integral. Changes: the integral is stored
 // linear, with sebh's mean transmittance in alpha, rather than as Bevy's logarithm; each step is
-// sampled at its midpoint; the sphere is the camera's own (Design note 16).
+// sampled at its midpoint; the sphere is the camera's own (Design note 16); each term's density is
+// evaluated once a sample, and a step's in-scattering is taken without f32's cancellation
+// (`stepFactor` in common.wgsl; R05.T12.e). The slices keep their equal depths, so the steps are
+// even.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<uniform> view : AtmosphereView;
@@ -29,6 +32,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let slices = size.z;
   let perSlice = max(u32(view.tables.w), 1u);
   let dt = view.tables.y / f32(slices * perSlice);
+  let cosTheta = dot(dir, view.sun.xyz);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
   for (var slice = 0u; slice < slices; slice++) {
@@ -38,18 +42,18 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let rP = length(p);
       let up = p / rP;
       let heightM = rP - bottom;
-      let local = mediumAt(rP);
-      let extinction = max(local.extinction, vec3f(1e-12));
-      let stepTransmittance = exp(-local.extinction * dt);
+      let local = sampleMediumAt(heightM, cosTheta);
+      let stepDepth = local.extinction * dt;
+      let stepTransmittance = exp(-stepDepth);
       let source = sourceAt(
         transmittance,
         multiScattering,
         view.tables.x,
         heightM,
         dot(view.sun.xyz, up),
-        dot(dir, view.sun.xyz),
+        local,
       );
-      luminance += throughput * (source - source * stepTransmittance) / extinction;
+      luminance += throughput * source * dt * stepFactor(stepDepth);
       throughput *= stepTransmittance;
     }
     let meanTransmittance = (throughput.r + throughput.g + throughput.b) / 3.0;

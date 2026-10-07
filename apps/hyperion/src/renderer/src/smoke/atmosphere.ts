@@ -9,19 +9,29 @@
  * multiple scattering non-negative. R05.T12.c adds whole frames of the atmosphere on both settings
  * (`checkAtmosphereFrames`) and, when the run is asked for them, the comparison frames of
  * Hillaire's reference medium that a person sets beside his published images
- * (`captureAtmosphere`).
+ * (`captureAtmosphere`). R05.T12.e holds the sky view and the ray march at their settings' step
+ * counts to the same kernels at 1,024 steps (`checkAtmosphereSteps`).
  */
 
-import { quaternion, quaternionFromRows } from "../view/camera/quaternion";
+import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
+import { quaternion, quaternionFromRows, rotate } from "../view/camera/quaternion";
 import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "../view/atmosphere/earth";
 import {
   type AtmosphereCamera,
+  atmosphereInputs,
   HillaireAtmosphere,
   type SpheroidFigure,
   type SunState,
   TABLE_SIZES,
+  type TableSizes,
 } from "../view/atmosphere/hillaire";
-import { opticalDepth, transmittanceUvToRMu } from "../view/atmosphere/opticalDepth";
+import {
+  grazingTwilight,
+  LOW_TWIN_WORST,
+  MARCH_TOLERANCE,
+  TWILIGHT_TOLERANCE,
+} from "../view/atmosphere/marchSteps";
+import { maxDistanceM, opticalDepth, transmittanceUvToRMu } from "../view/atmosphere/opticalDepth";
 import {
   AtmosphereTables,
   MULTI_SCATTERING_SIZE,
@@ -35,6 +45,7 @@ import {
   type ViewSize,
 } from "../view/engine/types";
 import { exposureScale } from "../view/photometry/exposure";
+import type { QualitySetting } from "../view/quality/qualitySetting";
 import { HALF_FLOAT_MAX, toneCurve } from "../view/photometry/toneCurve";
 import {
   type Checks,
@@ -312,6 +323,402 @@ export async function checkAtmosphereFrames(engine: RenderEngine, checks: Checks
       );
     } finally {
       atmosphere.dispose();
+    }
+  }
+}
+
+// --- R05.T12.e: the marches' steps against 1,024 -------------------------------------------------
+
+/** The steps the agreement check's converged kernels take (`decision-r05-high-atmosphere.md`). */
+const CONVERGED_STEPS = 1_024;
+
+/** The f32 and rgba16float margin the agreement check adds to the quadrature gate's tolerances. */
+const F32_MARGIN = 0.01;
+
+/** The floor of e's denominator, as a fraction of the converged output's brightest texel. */
+const ERROR_FLOOR = 1e-3;
+
+/** The least height of addendum B's high cameras, m, whose sky view low holds to its own bound. */
+const HIGH_CAMERA_M = 60_000;
+
+/** A ray of a kernel's output, its origin from the centre of the sphere it is marched about. */
+interface CheckRay {
+  readonly originM: Vec3;
+  readonly direction: Vec3;
+  readonly sun: Vec3;
+  readonly tStartM: number;
+  readonly tEndM: number;
+}
+
+/** The sub-texel remapping of `common.wgsl`'s `subUvsToUnit` on one axis, clamped to [0, 1]. */
+function subUvToUnit(uv: number, size: number): number {
+  return Math.min(Math.max((uv - 0.5 / size) * (size / (size - 1)), 0), 1);
+}
+
+/**
+ * The ray of the sky-view texel (x, y), as `skyView.wgsl` marches it: `skyViewUvToParams` in
+ * `view.wgsl`, on the camera's own sphere, in the frame whose x points to the sun's azimuth.
+ */
+function skyViewRay(
+  x: number,
+  y: number,
+  size: { readonly widthTexels: number; readonly heightTexels: number },
+  camera: AtmosphereCamera,
+  sun: SunState,
+): CheckRay {
+  const inputs = atmosphereInputs(camera, WGS84);
+  const bottomM = inputs.radiusM - inputs.heightM;
+  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + EARTH_REFERENCE.topHeightM };
+  const heightM = Math.min(Math.max(inputs.heightM, 1), EARTH_REFERENCE.topHeightM - 1);
+  const rM = bottomM + heightM;
+  const u = subUvToUnit((x + 0.5) / size.widthTexels, size.widthTexels);
+  const v = subUvToUnit((y + 0.5) / size.heightTexels, size.heightTexels);
+  const beta = Math.acos(Math.sqrt(Math.max(heightM * (2 * bottomM + heightM), 0)) / rM);
+  const zenithHorizon = Math.PI - beta;
+  const zenith =
+    v < 0.5 ? zenithHorizon * (1 - (1 - 2 * v) ** 2) : zenithHorizon + beta * (2 * v - 1) ** 2;
+  const lightViewCos = -(u * u * 2 - 1);
+  const sinZenith = Math.sin(zenith);
+  const direction = {
+    x: sinZenith * lightViewCos,
+    y: sinZenith * Math.sqrt(Math.max(1 - lightViewCos * lightViewCos, 0)),
+    z: Math.cos(zenith),
+  };
+  const n = inputs.normal;
+  const s = sun.directionBodyFixed;
+  const muSun = n.x * s.x + n.y * s.y + n.z * s.z;
+  return {
+    originM: { x: 0, y: 0, z: rM },
+    direction,
+    sun: { x: Math.sqrt(Math.max(1 - muSun * muSun, 0)), y: 0, z: muSun },
+    tStartM: 0,
+    tEndM: maxDistanceM(shell, rM, direction.z),
+  };
+}
+
+/** The near and far distances along a ray to a sphere about the centre, or null if missed. */
+function sphereHits(o: Vec3, d: Vec3, radiusM: number): readonly [number, number] | null {
+  const b = o.x * d.x + o.y * d.y + o.z * d.z;
+  const disc = b * b - (o.x * o.x + o.y * o.y + o.z * o.z - radiusM * radiusM);
+  if (disc < 0) {
+    return null;
+  }
+  return [-b - Math.sqrt(disc), -b + Math.sqrt(disc)];
+}
+
+/**
+ * The ray of the ray-march texel (x, y) of a `widthTexels` × `heightTexels` target, as `rayMarch.wgsl` takes
+ * it (`rayThrough`), ending at a surface `surfaceM` ahead if there is one, and clipped against
+ * spheres of the datum's equatorial radius: close enough on WGS 84 to say which rays graze, which
+ * is all the check asks of it. `null` where the ray misses the atmosphere, whose texel the kernel
+ * leaves dark.
+ */
+function rayMarchRay(
+  x: number,
+  y: number,
+  widthTexels: number,
+  heightTexels: number,
+  camera: AtmosphereCamera,
+  sun: SunState,
+  surfaceM: number | null,
+): CheckRay | null {
+  const tanX = Math.tan(camera.fovXRad / 2);
+  const tanY = tanX / (camera.viewport.widthPx / camera.viewport.heightPx);
+  const ndcX = ((x + 0.5) / widthTexels) * 2 - 1;
+  const ndcY = 1 - ((y + 0.5) / heightTexels) * 2;
+  const right = rotate(camera.orientation, { x: 1, y: 0, z: 0 });
+  const up = rotate(camera.orientation, { x: 0, y: 1, z: 0 });
+  const forward = rotate(camera.orientation, { x: 0, y: 0, z: -1 });
+  const unnormalised = add(forward, add(scale(right, ndcX * tanX), scale(up, ndcY * tanY)));
+  const direction = normalise(unnormalised);
+  const a = WGS84.equatorialRadiusM;
+  const shell = sphereHits(camera.positionM, direction, a + EARTH_REFERENCE.topHeightM);
+  if (shell === null || shell[1] <= 0) {
+    return null;
+  }
+  const ground = sphereHits(camera.positionM, direction, a);
+  const lengthM = Math.hypot(unnormalised.x, unnormalised.y, unnormalised.z);
+  const surfaceAtM = surfaceM === null ? Number.POSITIVE_INFINITY : surfaceM * lengthM;
+  const groundAtM = ground !== null && ground[0] > 0 ? ground[0] : Number.POSITIVE_INFINITY;
+  return {
+    originM: camera.positionM,
+    direction,
+    sun: sun.directionBodyFixed,
+    tStartM: Math.max(shell[0], 0),
+    tEndM: Math.min(shell[1], groundAtM, surfaceAtM),
+  };
+}
+
+/** One output's worst texel against the converged output. */
+interface Agreement {
+  /** The worst e as a fraction of its texel's tolerance: at most 1 where every texel agrees. */
+  readonly worst: number;
+  readonly at: string;
+  readonly texels: number;
+  readonly twilight: number;
+  /** Whether the converged output has a lit texel, without which it would compare nothing. */
+  readonly lit: boolean;
+}
+
+/** A texel's tolerance: its quadrature gate's for its ray, plus {@link F32_MARGIN}. */
+type Tolerance = (twilight: boolean) => number;
+
+/**
+ * Each texel's e = max over channels of |ΔL| ÷ max(L, 10⁻³ L_max) against the converged output,
+ * L_max its brightest texel, as a fraction of its tolerance.
+ */
+function agreement(
+  shipped: Float32Array,
+  converged: Float32Array,
+  widthTexels: number,
+  rayAt: (x: number, y: number) => CheckRay | null,
+  toleranceOf: Tolerance,
+): Agreement {
+  const floor = [0, 1, 2].map((c) => {
+    let max = 0;
+    for (let i = c; i < converged.length; i += 4) {
+      max = Math.max(max, converged[i] ?? 0);
+    }
+    return ERROR_FLOOR * max;
+  });
+  let worst = 0;
+  let at = "none";
+  let twilight = 0;
+  const texels = converged.length / 4;
+  for (let i = 0; i < texels; i += 1) {
+    const x = i % widthTexels;
+    const y = Math.floor(i / widthTexels);
+    const ray = rayAt(x, y);
+    const grazing =
+      ray !== null && grazingTwilight(ray.originM, ray.direction, ray.sun, ray.tStartM, ray.tEndM);
+    twilight += grazing ? 1 : 0;
+    const tolerance = toleranceOf(grazing);
+    for (let c = 0; c < 3; c += 1) {
+      const reference = converged[i * 4 + c] ?? Number.NaN;
+      const delta = Math.abs((shipped[i * 4 + c] ?? Number.NaN) - reference);
+      const denominator = Math.max(reference, floor[c] ?? 0);
+      let e = 0;
+      if (denominator > 0) {
+        e = delta / denominator;
+      } else if (delta !== 0) {
+        e = Number.POSITIVE_INFINITY;
+      }
+      const ratio = Number.isNaN(e) ? Number.POSITIVE_INFINITY : e / tolerance;
+      if (ratio > worst) {
+        worst = ratio;
+        const kind = grazing ? " (twilight)" : "";
+        at = `texel (${x}, ${y}) channel ${c}: e ${(e * 100).toFixed(2)}% against ${(tolerance * 100).toFixed(1)}%${kind}`;
+      }
+    }
+  }
+  return { worst, at, texels, twilight, lit: floor.some((f) => f > 0) };
+}
+
+/** The setting's sizes with the sky-view table at a quarter of its width and height. */
+function reducedSizes(sizes: TableSizes): TableSizes {
+  return {
+    ...sizes,
+    skyView: {
+      widthTexels: sizes.skyView.widthTexels / 4,
+      heightTexels: sizes.skyView.heightTexels / 4,
+    },
+  };
+}
+
+/** A frame's sky-view table and ray-march target from each of two atmospheres, read back. */
+interface FrameTables {
+  readonly skyView: Float32Array;
+  readonly rayMarch: Float32Array;
+}
+
+/** Draws one frame with each atmosphere in turn and reads its two per-frame outputs back. */
+async function readFrameTables(
+  engine: RenderEngine,
+  atmospheres: readonly HillaireAtmosphere[],
+  camera: AtmosphereCamera,
+  sun: SunState,
+  surfaceM: number | null,
+): Promise<FrameTables[]> {
+  const tables: FrameTables[] = [];
+  for (const atmosphere of atmospheres) {
+    // Each atmosphere's frame is read back before the next draws: they share the device.
+    // oxlint-disable-next-line no-await-in-loop
+    await compositeFrame(engine, atmosphere, camera, sun, surfaceM);
+    const { skyView, rayMarch } = atmosphere.frameTables;
+    if (rayMarch === null) {
+      throw new Error("the ray march drew no target");
+    }
+    tables.push({
+      // oxlint-disable-next-line no-await-in-loop
+      skyView: halfTexels(await engine.readTexture(skyView, 0, undefined, "tolerance")),
+      // oxlint-disable-next-line no-await-in-loop
+      rayMarch: halfTexels(await engine.readTexture(rayMarch, 0, undefined, "tolerance")),
+    });
+  }
+  return tables;
+}
+
+/**
+ * The agreement check's tolerance for a setting's kernel: on high, the quadrature gate's 2% (5% for
+ * twilight rays); on low, the twin's own worst e at low's counts for the kernel, the camera's range
+ * and the class (addendum A, 4(b)); each plus {@link F32_MARGIN}.
+ */
+function toleranceFor(setting: QualitySetting, bound: keyof typeof LOW_TWIN_WORST): Tolerance {
+  return (twilight) => {
+    let tolerance: number;
+    switch (setting) {
+      case "high":
+        tolerance = twilight ? TWILIGHT_TOLERANCE : MARCH_TOLERANCE;
+        break;
+      case "low": {
+        const worst = LOW_TWIN_WORST[bound];
+        tolerance = twilight ? worst.twilight : worst.ordinary;
+        break;
+      }
+    }
+    return tolerance + F32_MARGIN;
+  };
+}
+
+/**
+ * The elevation of the sun that sits on the horizon of the limb's tangent point seen straight
+ * ahead from a camera `heightM` above the equator, deg: minus the horizon's dip, on the camera's own
+ * sphere, as the sky view has it.
+ */
+function limbSunElevationDeg(heightM: number): number {
+  const inputs = atmosphereInputs(equatorCamera(heightM, FRAME_SIZE), WGS84);
+  const bottomM = inputs.radiusM - inputs.heightM;
+  return -(Math.acos(bottomM / (bottomM + heightM)) * 180) / Math.PI;
+}
+
+/** One frame of the agreement check and the kernel it holds. */
+interface StepsFrame {
+  readonly name: string;
+  readonly heightM: number;
+  readonly elevationDeg: number;
+  readonly surfaceM: number | null;
+  readonly kernel: "skyView" | "rayMarch";
+}
+
+/**
+ * R05.T12.e: the sky view and the ray march at their settings' step counts against the same
+ * kernels at 1,024 steps in the same run, on both settings, within the quadrature gate's
+ * tolerances plus 1% for f32 (on low, the twin's own worst at low's counts plus 1%).
+ *
+ * @remarks
+ * The sky view is held from 2 m at noon and at sunset, from 5 km at sunset, whose table spans the
+ * band between the local and the visible horizon (addendum A), and from 80 km looking at the limb
+ * with the sun on its horizon (addendum B); the ray march from 400 km at noon and at the
+ * terminator, and from 2 m over a surface 60 km ahead, beyond the aerial-perspective volume. The
+ * output is reduced: the sky-view table at a quarter of the setting's width and height, each texel
+ * still one ray of the shipped kernel, and the ray march over the 64 × 32 check frame. A converged
+ * output with no lit texel fails, since it would compare nothing.
+ */
+export async function checkAtmosphereSteps(engine: RenderEngine, checks: Checks): Promise<void> {
+  const frames: readonly StepsFrame[] = [
+    { name: "2 m, noon", heightM: 2, elevationDeg: 60, surfaceM: null, kernel: "skyView" },
+    { name: "2 m, sunset", heightM: 2, elevationDeg: 0, surfaceM: null, kernel: "skyView" },
+    { name: "5 km, sunset", heightM: 5_000, elevationDeg: 0, surfaceM: null, kernel: "skyView" },
+    {
+      name: "80 km, the limb with the sun on its horizon",
+      heightM: 80_000,
+      elevationDeg: limbSunElevationDeg(80_000),
+      surfaceM: null,
+      kernel: "skyView",
+    },
+    {
+      name: "400 km, noon",
+      heightM: 400_000,
+      elevationDeg: 60,
+      surfaceM: null,
+      kernel: "rayMarch",
+    },
+    {
+      name: "400 km, terminator",
+      heightM: 400_000,
+      elevationDeg: 0,
+      surfaceM: null,
+      kernel: "rayMarch",
+    },
+    {
+      name: "2 m, a surface 60 km ahead",
+      heightM: 2,
+      elevationDeg: 30,
+      surfaceM: 60_000,
+      kernel: "rayMarch",
+    },
+  ];
+  for (const setting of ["high", "low"] as const) {
+    const sizes = TABLE_SIZES[setting];
+    const reduced = reducedSizes(sizes);
+    const shipped = new HillaireAtmosphere(engine, EARTH_REFERENCE, reduced, WGS84);
+    const converged = new HillaireAtmosphere(
+      engine,
+      EARTH_REFERENCE,
+      { ...reduced, skyViewSamples: CONVERGED_STEPS, rayMarchSamples: CONVERGED_STEPS },
+      WGS84,
+    );
+    const marchWidthTexels = Math.ceil(FRAME_SIZE.widthPx * sizes.rayMarchScale);
+    const marchHeightTexels = Math.ceil(FRAME_SIZE.heightPx * sizes.rayMarchScale);
+    try {
+      for (const frame of frames) {
+        const camera = equatorCamera(frame.heightM, FRAME_SIZE);
+        const sun = sunAt(frame.elevationDeg);
+        // The harness's checks run in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const [fast, slow] = await readFrameTables(
+          engine,
+          [shipped, converged],
+          camera,
+          sun,
+          frame.surfaceM,
+        );
+        if (fast === undefined || slow === undefined) {
+          throw new Error("a frame's tables were not read back");
+        }
+        // The sky view's bound on low depends on the camera's range (addendum B's high cameras).
+        const highCamera = frame.heightM >= HIGH_CAMERA_M;
+        const tolerance = toleranceFor(
+          setting,
+          frame.kernel === "rayMarch" ? "rayMarch" : highCamera ? "skyViewHigh" : "skyView",
+        );
+        let result: Agreement;
+        let kernel: string;
+        let steps: number;
+        switch (frame.kernel) {
+          case "skyView":
+            result = agreement(
+              fast.skyView,
+              slow.skyView,
+              reduced.skyView.widthTexels,
+              (x, y) => skyViewRay(x, y, reduced.skyView, camera, sun),
+              tolerance,
+            );
+            kernel = "sky view";
+            steps = sizes.skyViewSamples;
+            break;
+          case "rayMarch":
+            result = agreement(
+              fast.rayMarch,
+              slow.rayMarch,
+              marchWidthTexels,
+              (x, y) =>
+                rayMarchRay(x, y, marchWidthTexels, marchHeightTexels, camera, sun, frame.surfaceM),
+              tolerance,
+            );
+            kernel = "ray march";
+            steps = sizes.rayMarchSamples;
+            break;
+        }
+        checks.check(
+          `R05.T12.e ${setting}: ${frame.name}, the ${kernel} at ${steps} steps agrees with ${CONVERGED_STEPS}`,
+          result.lit && result.worst <= 1,
+          `worst ${result.at}; ${result.texels} texels, ${result.twilight} twilight; lit ${String(result.lit)}`,
+        );
+      }
+    } finally {
+      shipped.dispose();
+      converged.dispose();
     }
   }
 }
