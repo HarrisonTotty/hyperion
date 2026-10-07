@@ -17,6 +17,7 @@
 
 import { hostname } from "node:os";
 
+import { keepsLoadAverage, QUIET_RULE_UNCHECKED, quietOf } from "../main/machineLoad";
 import type { MachineDescription } from "../main/results";
 
 /** The child's `window.open` target name, the one the opener's window-open handler allows. */
@@ -167,9 +168,26 @@ export interface ChildWindowRun {
   readonly childDisplayId: number;
   readonly versions: { readonly electron: string; readonly chromium: string };
   readonly switches: ReadonlyArray<string>;
+  /** `process.platform`: whether its machine keeps a load average (R05.T20). */
+  readonly platform: NodeJS.Platform;
   /** The machine as the descent spike's records describe it, read at the run's start. */
   readonly machine: MachineDescription;
   readonly exitCode: number;
+}
+
+/**
+ * The record's load-average line's text: the averages, marked provisional under Design note 27's
+ * rule as R05.T20 reads it (`quietOf`), at a load of 1 or more; on Windows, which keeps none, no
+ * averages, and always provisional, since whether its machine was quiet is unchecked.
+ */
+function loadAverageText(run: ChildWindowRun): string {
+  if (!keepsLoadAverage(run.platform)) {
+    return `none (${QUIET_RULE_UNCHECKED}): provisional`;
+  }
+  const averages = run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ");
+  return quietOf(run.platform, run.machine.loadAverage).provisional
+    ? `${averages} (provisional: under 1 asked)`
+    : averages;
 }
 
 /** The machine's name in a record's file name, as the descent spike's results take it. */
@@ -203,7 +221,7 @@ export function childWindowMarkdown(
     `- **Run:** ${run.hidden ? "hidden, offscreen, on one display: the harness's own proof, not T21's record" : "shown, the child on the second display"}; exit ${String(run.exitCode)} (${run.exitCode === 0 ? "every check passed" : "a check failed or the run could not be set up"})`,
     `- **Versions:** Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${run.machine.gpu.value === null ? `unknown (${run.machine.gpu.reason})` : `${run.machine.gpu.value.description ?? `${String(run.machine.gpu.value.vendorId)}:${String(run.machine.gpu.value.deviceId)}`}, driver ${run.machine.gpu.value.driverVersion ?? "unknown"}`}; governor ${run.machine.governor.value ?? `unknown (${run.machine.governor.reason})`}`,
-    `- **Load average at the start:** ${run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ")}${run.machine.loadAverage[0] >= 1 ? " (provisional: under 1 asked)" : ""}`,
+    `- **Load average at the start:** ${loadAverageText(run)}`,
     `- **Switches:** ${run.switches.length === 0 ? "none" : run.switches.map((each) => `\`${each}\``).join(" ")}`,
     "",
     "## Displays",

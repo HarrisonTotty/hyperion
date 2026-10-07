@@ -59,6 +59,7 @@ import {
   type SpikeSetting,
   type Verdict,
 } from "./results";
+import { keepsLoadAverage, QUIET_RULE_UNCHECKED, quietOf } from "./machineLoad";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -656,9 +657,15 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
   const untimedFrames = phases.reduce((sum, phase) => sum + phase.untimedFrames, 0);
   const load = run.machine.loadAverage[0];
   const low = run.setting === "low";
-  const provisional = load >= 1 || run.smoke || !run.shown || low;
+  // Design note 27's rule as R05.T20 reads it on every platform: a Windows run keeps no load
+  // average, so whether its machine was quiet is unchecked and it is always provisional.
+  const quiet = quietOf(run.platform, run.machine.loadAverage);
+  const provisional = quiet.provisional || run.smoke || !run.shown || low;
+  const loadNote = keepsLoadAverage(run.platform)
+    ? `load average ${load.toFixed(2)} at the start (under 1 asked)`
+    : QUIET_RULE_UNCHECKED;
   const quietNote = [
-    ...(load >= 1 ? [`load average ${load.toFixed(2)} at the start (under 1 asked)`] : []),
+    ...(quiet.provisional ? [loadNote] : []),
     ...(run.shown ? [] : ["a hidden run: no presentation and no T"]),
     ...(run.smoke ? ["a smoke run: short windows"] : []),
     ...(low ? [LOW_BEFORE_T17] : []),
@@ -830,7 +837,7 @@ export function viewsCheckMarkdown(results: ViewsCheckResults): string {
   return [
     `# Several views: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
     "",
-    `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ")}${run.quiet.note === null ? "" : ` (${run.quiet.note})`}`,
+    `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"}${run.quiet.note === null ? "" : ` (${run.quiet.note})`}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP (${String(Math.round(run.window.widthDip * run.devicePixelRatio))} × ${String(Math.round(run.window.heightDip * run.devicePixelRatio))} px at a device-pixel ratio of ${String(run.devicePixelRatio)}), vsync ${textOf(run.vsyncMs, (value) => `${ms(value)} ms`)}`,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,

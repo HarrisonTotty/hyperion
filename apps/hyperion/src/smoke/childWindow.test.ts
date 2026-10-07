@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { QUIET_RULE_UNCHECKED } from "../main/machineLoad";
 import { measured } from "../main/measured";
 import {
   CHILD_FRAME_NAME,
@@ -127,6 +128,7 @@ describe("the child window's record", () => {
     childDisplayId: SECOND.id,
     versions: { electron: "44.4.3", chromium: "152" },
     switches: ["--use-angle=vulkan"],
+    platform: "linux",
     machine: {
       name: "effect",
       cpu: "AMD Ryzen 7 3700X",
@@ -152,5 +154,26 @@ describe("the child window's record", () => {
     expect(text).toContain("(the child's)");
     expect(text).toContain("PASS T21 the child window opened: yes");
     expect(text).toContain("governor performance");
+  });
+
+  it("marks its load average provisional at a load of 1 or more, and not under it", () => {
+    const loaded = { ...run, machine: { ...run.machine, loadAverage: [1.5, 1.2, 0.9] as const } };
+    expect([
+      childWindowMarkdown(run, "effect", []).includes("0.20, 0.30, 0.40\n"),
+      childWindowMarkdown(loaded, "effect", []).includes(
+        "1.50, 1.20, 0.90 (provisional: under 1 asked)",
+      ),
+    ]).toEqual([true, true]);
+  });
+
+  it("marks a Windows run provisional, its quiet-machine rule unchecked (R05.T20)", () => {
+    const windows = {
+      ...run,
+      platform: "win32" as const,
+      machine: { ...run.machine, loadAverage: [0, 0, 0] as const },
+    };
+    expect(childWindowMarkdown(windows, "effect", [])).toContain(
+      `- **Load average at the start:** none (${QUIET_RULE_UNCHECKED}): provisional`,
+    );
   });
 });

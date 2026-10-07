@@ -337,6 +337,7 @@ void app
                       value === undefined ? `--${name}` : `--${name}=${value}`,
                     ),
                   ],
+                  platform: process.platform,
                   machine: childMachine,
                   exitCode,
                 },

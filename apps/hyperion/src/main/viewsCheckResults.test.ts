@@ -6,6 +6,7 @@ import type {
   ViewsCheckRecord,
   ViewsCheckStyle,
 } from "../preload/api";
+import { QUIET_RULE_UNCHECKED } from "./machineLoad";
 import { measured, missing, type ResultsFiles } from "./results";
 import {
   buildViewsCheckResults,
@@ -198,6 +199,49 @@ describe("the views check's results", () => {
 
   it("leaves a quiet, shown run on the high setting unmarked", () => {
     expect(buildViewsCheckResults(input()).run.quiet).toEqual({ provisional: false, note: null });
+  });
+
+  it("marks a run at a load of 1 or more provisional", () => {
+    const loaded = buildViewsCheckResults(
+      input({
+        run: { ...input().run, machine: { ...input().run.machine, loadAverage: [1.5, 1.2, 0.9] } },
+      }),
+    );
+    expect(loaded.run.quiet).toEqual({
+      provisional: true,
+      note: "provisional: load average 1.50 at the start (under 1 asked)",
+    });
+  });
+
+  it("marks every Windows run provisional, its quiet-machine rule unchecked (R05.T20)", () => {
+    const windows = buildViewsCheckResults(
+      input({
+        run: {
+          ...input().run,
+          platform: "win32",
+          machine: { ...input().run.machine, loadAverage: [0, 0, 0] },
+        },
+      }),
+    );
+    expect(windows.run.quiet).toEqual({
+      provisional: true,
+      note: `provisional: ${QUIET_RULE_UNCHECKED}`,
+    });
+  });
+
+  it("records a Windows run's load average as none, not as zeros (R05.T20)", () => {
+    const windows = buildViewsCheckResults(
+      input({
+        run: {
+          ...input().run,
+          platform: "win32",
+          machine: { ...input().run.machine, loadAverage: [0, 0, 0] },
+        },
+      }),
+    );
+    expect(viewsCheckMarkdown(windows)).toContain(
+      `load average none (provisional: ${QUIET_RULE_UNCHECKED})`,
+    );
   });
 
   it("names the second low case's consequence where it misses alone", () => {
