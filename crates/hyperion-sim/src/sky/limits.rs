@@ -2724,7 +2724,9 @@ mod tests {
             Opening::Pyramid,
             &mut evaluations,
         );
-        let exact_pairs = u64::try_from(n * band.len()).expect("under 2⁶⁴ pairs");
+        // In u64: the product (7.4 × 10⁹) overflows a 32-bit usize on wasm32.
+        let exact_pairs = u64::try_from(*n).expect("a count fits u64")
+            * u64::try_from(band.len()).expect("a count fits u64");
         #[expect(clippy::cast_precision_loss, reason = "counts under 2⁵³")]
         let (fewer, per_texel) = (
             exact_pairs as f64 / evaluations.evaluated() as f64,
