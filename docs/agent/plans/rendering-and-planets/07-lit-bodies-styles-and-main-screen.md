@@ -1271,6 +1271,25 @@ owner (delegated decision pending)". Accepted with amendments 2026-10-02 (decisi
   client's twin of `body_fixed_at` (T1, item 5) is `lib/system/rotation.ts`, and a section flagged
   `provisional` is carried as `modelled-provisional`, labelled on no view
   (decision-r07-provisional-photometry)._
+- **R07.T2.c The rotation note leaves stars out** (decision-r07-rotation-note). `labelStatements`
+  (`displays/view/viewRun.ts`) states `ROTATION: NOT YET MODELLED` while a scene body that is not
+  a star, with a radius, has no rotation
+  (`body.kind !== "star" && body.radiusM > 0 && body.rotation === null`).
+  - **Stars.** A star's graticule stays about the galactic +z (`graticuleRotation`, unchanged),
+    with no note: no plan sends a star's frame, and no view draws a star's spin.
+  - **Bodies with no radius.** Such a body is its symbol at any range, its rotation withheld with
+    its bulk.
+  - **Docs.** The TSDoc of `labelLines` and `CameraOrigins.bodyFixedRotation`
+    (`view/coords/position.ts`) says so. The guide's `ROTATION: NOT YET MODELLED` row is amended,
+    as a draft for the owner.
+  - **Tests** (`viewRun.test.ts`):
+    - a kept scene whose bodies all turn but its star states no rotation note;
+    - the same scene with an unrotated moon of radius 0 states none;
+    - the existing `unrotated(...)` cases still state it.
+  - **Acceptance:**
+    - `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`;
+    - `pnpm exec prettier --check` on the guide and this plan;
+    - `just ci`.
 
 #### R07.T3 Illuminance at a body
 
@@ -2835,6 +2854,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   (T1). Earth's albedo is resolved (decision-r07-earth-albedo). Its curve, Robinson 2026's eq. 14,
   is cut by the clamp from 139°, up to 29% at 144°, inside that phase's 38% weather spread. It is
   equal in every channel, since Robinson's per-band curves are not tabulated.
+- **Fast-rotating hosts are drawn round** (decision-r07-rotation-note). Plan 06 draws a star's
+  v ÷ v_crit (Be stars above 0.7) but no stellar figure or gravity darkening, and sends no spin
+  axis. So R06's host disc is round and radially limb-darkened at the star's radius, and the
+  picture is the generator's star. This is a correction for plans 06 and R06, deferred (FEATURES
+  FIRST), and no view labels it.
 - **The lens PSF** of camera views rests on recalled veiling-glare figures (low confidence); the
   eye's CIE function is solid. The glare threshold at AgX's top of range and the smoothing speeds
   are settled by eye (T13, T14).
@@ -8622,9 +8646,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - each template's L and range, `lawFor` recovering s to 10⁻⁶, and the `earth` block, Robinson
       2026's eq. 14.
   - **Left as they stand.**
-    - `ROTATION: NOT YET MODELLED` stays on in every server scene: the host stars carry no
-      rotation (the guide's row speaks of a graticule about the orbit normal, and stars have
-      graticules). Keep it, or leave stars out? For the owner.
+    - `ROTATION: NOT YET MODELLED` stayed on in every server scene: the host stars carry no
+      rotation. Ruled 2026-10-07 (decision-r07-rotation-note): stars, and bodies with no radius,
+      are left out of its condition, by R07.T2.c.
     - No capture moves: every capture is a kept scene's, whose lit bodies' inputs are unchanged.
   - **Tests.** `bodiesWire.test.ts` (each section `ok`, in each other state and absent; the lock's
     three kinds; 18 refusals), `rotation.test.ts` (new), `fromWire.test.ts` (the modelled law, its
@@ -8662,3 +8686,48 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       fixture's synthetic axes recorded, and the local body's lag stated in `fromServer.ts`.
   - Scratch: `.git/rm23-scratch/r07-shading/t2b/` (the probes in `probes/`, the logs, the
     test-render wrapper and its captures).
+- **Deviations in T2.c, as built** (2026-10-07; decision-r07-rotation-note, on
+  `rendering-and-planets` at fd42fad7, merged by name). No protocol change, no bump, and no capture
+  moves.
+  - **Plan text.** T2.c's code span stands on one line, since Prettier de-indents a span split
+    across lines. Its words are the ruling's. The roadmap's Plan 14 `body_fixed_at` row no longer
+    says the note stays on for host stars (plan-conformance review), in words that keep its
+    table's width.
+  - **Docs.** `bodyFixedRotation` is declared on `FrameOrigins` (`view/coords/position.ts`), which
+    `CameraOrigins` (`view/coords/relative.ts`) extends: that declaration's TSDoc is the one
+    changed. `labelStatements`' TSDoc points to `labelLines`, which states the conditions
+    (TypeScript review).
+  - **Tests** (`viewRun.test.ts`).
+    - `withBodies` maps a kept scene's bodies, and `unrotated` is built on it. `turning` keeps the
+      star's `null` and gives every other body its own rotation or `IDENTITY_ROTATION`.
+    - The ruling's two cases each check the unrotated bodies' kinds beside the statements (`star`,
+      then `star` and `moon`), so neither passes on a scene with nothing unrotated. Each fails on
+      the old predicate (checked by hand, reverted), and each pins one clause.
+    - A third case, beyond the ruling's two: each of the four kept scenes states the note
+      (TypeScript review), so a scene that drops it fails.
+    - The existing case is renamed for a planet or moon with a radius.
+  - **Who states the note.** `ViewDisplay.tsx` puts `labelStatements` on the primary's block;
+    `InstrumentView.tsx` takes only `POSITIONS AS SEEN FROM SHIP` from it. The views check
+    (`PHASE TEST`) and T19's E8 (`PRECISION TEST`) keep the note. R05's descent spike
+    (`DescentSpike.tsx`) no longer states it: its star has no rotation and its test planet turns
+    (UX review). Its captures (`smoke/spike.ts`) read back canvases only.
+  - **For the owner, with the draft row** (UX review's considers):
+    - the star graticule's `NORTH` pole is a convention stated in the guide, not on the view;
+    - the guide's nomenclature list has `ROTATION` only as the `GALAXY` display's group heading,
+      not as a star's reading, which the draft row names. Should it have its own entry?
+  - **Gate**, on the committed code (7047ea34, 486ca64f, on the merge 78b9ea26).
+    - The app's vitest: 8,009 tests in 341 files, all passing (149 s at 4 workers);
+      `src/renderer/src/displays/view` with `view/coords` beforehand, 428.
+    - `just check lint` from a clean tsc cache, Prettier on the guide, this plan and the roadmap,
+      and the console-ux scripts (`ux_lint.py` on the three files, `contrast.py`, `glyphs.py`).
+    - `just test-render`, both variants, with captures: exit 0, 610 checks, none failing, no
+      uncaptured GPU error (2026-10-07, 12:27–12:31). All 110 captures are byte-identical to
+      T2.b's.
+    - `just ci` was not run, under the Day 2 protocol.
+  - **Reviewed.** TypeScript, UX and plan conformance: no must-fix. Plan conformance's should-fix,
+    the roadmap's row, is applied. The considers applied: the kept scenes' case and the TSDoc link
+    (TypeScript), the descent spike recorded (UX). Not applied: a `DescentSpike` test for the
+    spike's block (UX), since the spike is R05's harness and `labelStatements` is tested here.
+    For the orchestrator: `plan_task.py` files T2.c's `Tests` and `Acceptance` under the whole of
+    T2, so `--acceptance R07.T2.c` prints none.
+  - Scratch: `.git/rm23-scratch/r07-t2c/` (the logs, the test-render wrapper and its captures).
