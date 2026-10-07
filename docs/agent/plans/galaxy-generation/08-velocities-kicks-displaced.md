@@ -109,6 +109,11 @@ Plan 03's `pad_speed(layer)` returns `UNBOUND_PAD_SPEED` (3,000 km/s, Design not
 the only layer whose cells hold the unbound class, and plan 03's `PAD_SPEED` for every other layer.
 New: `pub const UNBOUND_PAD_SPEED: KilometresPerSecond`.
 
+New (P08.T17): `pub const fn escape_cut_holds(layer: Layer) -> bool`. It is true exactly where
+`pad_speed(layer)` is `PAD_SPEED`, that is, where every record of the layer is drawn below the
+local escape speed. It reads `pad_speed`, so the two cannot disagree. Plan 12's lensing walk reads
+it to choose its speed bound.
+
 ### `hyperion_sim::galaxy::displaced`
 
 ```rust
@@ -288,7 +293,11 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
    draw is scaled to 0.99 of the cut. The cut never exceeds plan 03's 1,000 km/s, in layer E as in
    the others, so "no system outruns its padding" is an invariant with a test, even close to the
    black hole, where the escape speed passes 1,000 km/s. Plan 09's Kepler regime takes over there.
-   Only the fastest displaced classes are exempt (Design notes 23 and 27).
+   Only the fastest displaced classes are exempt (Design notes 23 and 27). An exempt class is
+   capped below the `pad_speed` of its record's layer: redrawn on the same stream with the next
+   draw numbers, and then scaled to 0.99 of it, as the escape cut is. It may have weight only in a
+   layer whose `pad_speed` is `UNBOUND_PAD_SPEED`. `query::escape_cut_holds(layer)` says which
+   layers hold no exempt class (decided 2026-10-05, `decision-r06-pad-speed.md`; P08.T17).
 8. **Arm streaming.** The young disc adds A × (cos ψ along the arm, −½ sin ψ across it, outward
    positive), where ψ is plan 02's arm phase with the ridge at zero and A = 5 + 10 × (the young arm
    contrast's position in its range) km/s. Its sign follows linear density-wave theory inside
@@ -465,19 +474,21 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
     the class. The flared layer's vertical integral is 2 Γ(1 + 1 ÷ β) at every radius, which checks
     the numerical result.
 27. **The unbound class's padding is 3,000 km/s, and it is this plan's figure.** The brainstorm says
-    only that "the unbound class needs more" than 1,000 km/s. The fastest object this plan places is
-    a remnant at the kick law's upper clamp, about 2,200 km/s (plan 06, P06.T19.a), launched along a
-    rotation of up to about 300 km/s, so 2,500 km/s; the reserved hypervelocity survivors move at up
-    to 2,500 km/s. 3,000 km/s covers both with a fifth to spare, and `draw_velocity` caps the exempt
-    classes at it, so the padding invariant of Design note 7 holds for every record. It applies only
-    where the unbound class is walked: a cell of layer E holds that layer's field components and
-    displaced classes together, so the finest unit plan 03's `pad_speed(layer)` offers is the layer,
-    and only layer E is raised. Layer D keeps `PAD_SPEED`: its runaways are cut at half the circular
-    speed, and the hypervelocity class has zero weight. Whoever gives that class weight (plan 09,
-    P09.T34) raises layer D's padding in the same task. Padding changes no generated output, only
-    which cells a query visits, so neither step is a version bump. The cost is small: at |t| = H the
-    pad is 10 ly against layer E's 128 ly cells, which adds a cell to a 50 ly query about one time
-    in four.
+    only that "the unbound class needs more" than 1,000 km/s. Since ruling 96.2 no kick exceeds
+    990 km/s: the law is the measured log-normal truncated at 1,000 km/s, with its rank held to
+    0.999 (plan 06, P06.T19 as built). With the progenitor's motion that is about 1,300 km/s, and
+    the ballistic bins (Design note 22) stay under it. The fastest classes' Gaussian laws have no
+    such edge, and the reserved hypervelocity survivors move at up to 2,500 km/s. 3,000 km/s covers
+    the survivors with a fifth to spare. `draw_velocity` keeps every exempt class below its layer's
+    `pad_speed` (Design note 7), so the padding invariant holds for every record (decided
+    2026-10-05, `decision-r06-pad-speed.md`). It applies only where the unbound class is walked: a
+    cell of layer E holds that layer's field components and displaced classes together, so the
+    finest unit plan 03's `pad_speed(layer)` offers is the layer, and only layer E is raised.
+    Layer D keeps `PAD_SPEED`: its runaways are cut at half the circular speed, and the
+    hypervelocity class has zero weight. Whoever gives that class weight (plan 09, P09.T34) raises
+    layer D's padding in the same task. Padding changes no generated output, only which cells a
+    query visits, so neither step is a version bump. The cost is small: at |t| = H the pad is 10 ly
+    against layer E's 128 ly cells, which adds a cell to a 50 ly query about one time in four.
 28. **What the stellar stage costs placement.** From this plan on, `galaxy::placement` calls
     `stellar` (`lifetime` and `draw_metallicity`), for layers D and E only. Layers A to C never do,
     so the brainstorm's 1–2 µs for a sparse fine cell is untouched. The 5 ms cold query is not safe
@@ -638,6 +649,47 @@ cold agree).
 **Acceptance.** Tests pass; the 50 ly cold query bench of plan 03 regresses by under 10% with
 velocities on (a finding if not). The count of layer-E cells visited by a 50 ly query at |t| = H
 rises by under a third against `PAD_SPEED` (from `QueryStats`, over 100 centres).
+
+### P08.T17 The padding invariant, layer by layer (new; after T6, before T12; no output moves)
+
+Decided 2026-10-05 (`decision-r06-pad-speed.md`). Three readers pad cells on one premise, that
+every record of a layer moves below `pad_speed(layer)`:
+
+- plan 03's range query, by `pad_speed(layer)`;
+- R06's census, by `pad_speed(layer)`;
+- plan 12's lensing walk, by `pad_speed(layer)` or a tighter escape-speed bound.
+
+Today the field draw keeps every speed below min(v_esc, `PAD_SPEED`), and
+`no_velocity_reaches_its_padding_speed` checks it. This task gives the premise one owner and one
+check, so that P08.T12.d and P09.T34.b cannot break it unseen.
+
+1. `query::escape_cut_holds(layer) -> bool`, in `galaxy/query/motion.rs` and re-exported from
+   `galaxy::query`, is true exactly where `pad_speed(layer)` is `PAD_SPEED`.
+2. `query::epoch_velocity` debug-asserts that the drawn speed is below `pad_speed(record.layer())`,
+   naming the record and the layer. Every grid velocity that the range query, the census and the
+   lensing walk read passes through it, through `position_at` and `Drift::of_record`.
+3. `lensing/walk.rs` reads the escape envelope where `escape_cut_holds(layer)` holds, and
+   `pad_speed(layer)` elsewhere. That replaces both of its matches on `Layer::E`:
+   `LensWalkPlan::beta_at`, and the pieces' radii in the plan's build. It is bit for bit the same
+   today, and when P09.T34.b raises layer D, layer D follows.
+4. The doc comments of `UNBOUND_PAD_SPEED` and `position_at` cite ruling 96.2's 990 km/s kick,
+   not 2,200 km/s. Plan 03's Design note 13 gains its sentence.
+
+Tests:
+
+- `escape_cut_holds_where_the_pad_is_plan_03s` (unit, `query::motion`), for every layer of
+  `Layer::ALL`.
+- `the_lens_speed_bound_follows_the_pad` (unit, `lensing::walk`). For each layer, at five radii,
+  the bound is the envelope's, at most `PAD_SPEED`, where `escape_cut_holds` holds, and
+  `pad_speed` elsewhere.
+- `no_velocity_reaches_its_padding_speed` also asserts each record against its own layer's
+  `pad_speed`.
+
+Files: `galaxy/query/{motion,mod}.rs`, `lensing/walk.rs`, `tests/galaxy_velocity.rs`, and
+`docs/agent/plans/galaxy-generation/{03,08}-*.md`. Acceptance: `cargo test -p hyperion-sim
+galaxy::query::motion lensing::walk`, `just test-slow no_velocity_reaches_its_padding_speed
+lensing_escape_envelope_bounds_the_draws_cut`, `just ci`. No golden moves, and no GENERATOR_VERSION
+bump.
 
 ### P08.T7 Protocol and display: velocities
 
@@ -1031,8 +1083,15 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
   notes 22 and 23. Tests: per class, sampled mean rotation and dispersions match the table × v_c;
   the slowest class co-rotates (above 0.95 v_c) and the fastest has a negative mean; in ballistic
   classes x − v s lies within 1 ly of the midplane; among first-excursion classes the share with z
-  v_z > 0 matches `outbound`; only the fastest classes exceed the escape speed, and none exceeds
-  3,000 km/s.
+  v_z > 0 matches `outbound`; an exempt class's draw at or above its record's layer's `pad_speed`
+  is redrawn and then scaled to 0.99 of it (Design note 7). `no_record_reaches_its_layers_pad_speed`
+  samples 10⁵ records of each class with weight in band D or E, or every one in the sample regions
+  where there are fewer, at `sunlike_point`, in the bulge and within 256 ly of the centre. Every
+  speed is below its layer's `pad_speed`, and only exempt classes exceed the escape speed.
+  `no_velocity_reaches_its_padding_speed` keeps `PAD_SPEED` for every record of a non-exempt class.
+  `every_exempt_class_is_padded` (fast, from the class table alone) checks that every class exempt
+  from the escape cut with weight in a band belongs to a layer where `escape_cut_holds` is false.
+  P08.T17's debug assertion holds every draw in the task's tests.
 
 **Files.** `galaxy/displaced/mod.rs`, `galaxy/shares.rs`, `galaxy/fields/mod.rs`, `galaxy/map.rs`,
 `galaxy/placement.rs`, `galaxy/query.rs`, `galaxy/kinematics/draw.rs`, `stellar/system.rs`,
@@ -1399,3 +1458,20 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   `the_threshold_is_can_interacts_boundary` asserts "just inside passes `can_interact`" and "just
   outside fails the lobe test" (`stellar::binary::lobe_reached`, crate-private, test-only). The
   stripping band does not change: the captures are late, Case C, at the giants' largest radii.
+- **Deviations in T17, as built (2026-10-05, at `GENERATOR_VERSION` 20; no output moves).**
+  - Both of the lensing walk's sites read one private
+    `EscapeEnvelope::speed_bound(layer, radius_ly) -> KilometresPerSecond`, and
+    `the_lens_speed_bound_follows_the_pad` tests that function on a synthetic table that falls
+    from 1,200 to 300 km/s, so it builds no potential.
+    The cone's pieces now take the segment's distance from the centre in every layer, layer E's
+    included, where it is unused. The cells are the same.
+  - `escape_cut_holds` compares `pad_speed(layer).value() <= PAD_SPEED.value()`, not `==`,
+    because no layer pads below `PAD_SPEED`; the unit test asserts that for every layer. It
+    carries a doctest. Its docs, like the assertion, speak of grid records only: feature members
+    move by their own laws and wait for P09.T23.b.
+  - The assertion compares the drift's speed in m/s, recomputed from the drawn components, while
+    the draw compares its km/s norm with the cut. Where the cut is exactly 1,000 km/s, in the
+    central 100 ly or so, a draw kept within a few ulps of it could trip the assertion, at about
+    10⁻¹⁶ a record. It was left so: the check is on the velocity that moves the record.
+  - `no_velocity_reaches_its_padding_speed` also passes every record through `epoch_velocity`, so
+    the debug assertion runs over its 10⁶ records. The slow-test profile keeps debug assertions.
