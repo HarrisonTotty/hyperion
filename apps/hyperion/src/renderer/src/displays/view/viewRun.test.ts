@@ -5,10 +5,12 @@ import { normalise, scale, vec3 } from "../../geometry/vec3";
 import { differenceM } from "../../view/coords/position";
 import { sceneOrigins, type ViewBody } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
+import { eclipseScene } from "../../view/scenes/eclipseScene";
 import { frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import type { SystemIdHex } from "@hyperion/protocol";
+import { aViewScene } from "../../test/viewFixtures";
 
 import {
   cameraReading,
@@ -21,9 +23,12 @@ import {
   labelStatements,
   markRows,
   rangesFromCamera,
+  SCENE_OPTIONS,
+  sceneClockReading,
   type ViewRun,
   startInstrumentRun,
   startRun,
+  startServerRun,
   stepRun,
 } from "./viewRun";
 
@@ -227,6 +232,46 @@ describe("the label block", () => {
     expect(
       grounded === undefined ? null : frameName({ kind: "craft", craft: grounded.id }, scene),
     ).toBe(`BODY ${body?.designation ?? ""}`);
+  });
+
+  it("states ECLIPSE TEST's clock rate after its name, SCENE CLOCK ×100 (R07.T16.k)", () => {
+    const lines = labelLines(startRun(eclipseScene()), DEFAULT_EXPOSURE);
+    const scene = lines.findIndex((line) => line.label === "SCENE");
+    expect(lines.slice(scene)).toEqual([
+      { label: "SCENE", value: "ECLIPSE TEST" },
+      { label: "SCENE CLOCK", value: "×100" },
+    ]);
+  });
+
+  it("states no clock rate in a kept scene that runs at one second a second, or in the server's scene (R07.T16.k)", () => {
+    const kept = [precisionScene(), frameChangeScene(), phaseScene()].map((each) => startRun(each));
+    // The server's scene with its clock at a day a second, a rate other than 1.
+    const server = startServerRun(aViewScene({ timeRate: 86_400 }));
+    expect(
+      [...kept, server].map((run) => [
+        run.scene.provenance.kind === "kept" ? run.scene.provenance.name : "SERVER",
+        labelLines(run, DEFAULT_EXPOSURE).some((line) => line.label === "SCENE CLOCK"),
+      ]),
+    ).toEqual([
+      ["PRECISION TEST", false],
+      ["FRAME CHANGE TEST", false],
+      ["PHASE TEST", false],
+      ["SERVER", false],
+    ]);
+  });
+
+  it("reads a kept scene's clock rate as a whole number, grouped from five digits (R07.T16.k)", () => {
+    expect([sceneClockReading(100), sceneClockReading(1_000), sceneClockReading(86_400)]).toEqual([
+      "×100",
+      "×1000",
+      "×86,400",
+    ]);
+  });
+
+  it("offers only kept scenes whose clock runs at a whole number of seconds a second, which its reading states exactly (R07.T16.k)", () => {
+    expect(
+      SCENE_OPTIONS.map(({ name, make }) => [name, Number.isInteger(make().sceneAt(0).timeRate)]),
+    ).toEqual(SCENE_OPTIONS.map(({ name }) => [name, true]));
   });
 
   it("names the scene only in a kept scene", () => {

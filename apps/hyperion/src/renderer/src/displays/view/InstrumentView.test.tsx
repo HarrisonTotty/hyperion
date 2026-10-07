@@ -275,6 +275,20 @@ describe("VIEW's instrument views (R07.T19)", () => {
     );
   });
 
+  it("states ECLIPSE TEST's clock rate on the primary's block alone, as its scene, not on an instrument's (R07.T16.k)", async () => {
+    const view = await setup();
+    await view.user.click(screen.getByRole("button", { name: "ECLIPSE TEST" }));
+    view.advance(100);
+    await openInstrument(view, "INSTRUMENT 1");
+    expect(canvasNamed(/PRIMARY/)).toHaveAccessibleDescription(
+      expect.stringContaining("SCENE ECLIPSE TEST SCENE CLOCK ×100"),
+    );
+    // The instrument's block is on show, with its own SOURCE line, and names no scene.
+    const instrument = screen.getByRole("region", { name: "INSTRUMENT 1" });
+    expect(instrument).toHaveTextContent(/SOURCE\s*PRIMARY/);
+    expect(instrument).not.toHaveTextContent("SCENE");
+  });
+
   it("makes a focused instrument the CONTROLS view when a key is pressed on it, and acts on it", async () => {
     const view = await setup();
     await openInstrument(view, "INSTRUMENT 1");

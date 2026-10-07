@@ -438,11 +438,39 @@ export function cameraReading(camera: CameraState): string {
 }
 
 /**
+ * A kept scene's clock rate as the label block reads it (R07.T16.k; the guide's `SCENE` row):
+ * `×` and its seconds a second as a whole number, `×100`, grouped in threes from five digits as
+ * any number is.
+ *
+ * @remarks
+ * Every kept scene's rate is a whole number of seconds a second (`ECLIPSE TEST`'s 100, the rest
+ * 1), so the reading is exact; the label block's tests hold every scene of {@link SCENE_OPTIONS}
+ * to it, so that a kept scene at 2.5 never reads `×3`. Whether the rate reads so, or as a unit rate
+ * beside the display time's `RUN 1 d/s`, is the owner's, in T16.c's draft; this is the form
+ * drafted.
+ *
+ * @param secondsPerSecond - The scene's simulation seconds a real second,
+ *   {@link ViewScene.timeRate}.
+ */
+export function sceneClockReading(secondsPerSecond: number): string {
+  return `×${formatNumber(secondsPerSecond, 0)}`;
+}
+
+/**
  * The label block's lines (Design note 16): always the frame, the time with its time system, the
  * style, the camera preset ({@link cameraReading}), the field of view and the exposure with its
  * level, and the star source;
- * the scene's name in a kept scene; `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull;
- * `ROTATION: NOT YET MODELLED` while a body's rotation is not modelled.
+ * the scene's name in a kept scene, and after it, while that scene's clock runs at other than one
+ * second a second, its rate, `SCENE CLOCK ×100` ({@link sceneClockReading}, R07.T16.k), so that a
+ * `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull and
+ * `ROTATION: NOT YET MODELLED` while a body's rotation is not modelled are statements
+ * ({@link labelStatements}).
+ *
+ * @remarks
+ * `SCENE` and `SCENE CLOCK` describe the display's scene, not one view's picture, so an
+ * instrument's block leaves both out (`InstrumentView`'s lines), as the guide's Views bullet has
+ * them stand on the `PRIMARY` view's block alone. The server's scene names neither: its time is
+ * the simulation's own, not a kept scene's script.
  *
  * @param stale - Whether the server's scene is stale (`useScene`'s `stale`): its time, held where
  *   the scene went stale, then reads as the guide's stale value.
@@ -468,6 +496,9 @@ export function labelLines(
   ];
   if (scene.provenance.kind === "kept") {
     lines.push({ label: "SCENE", value: scene.provenance.name });
+    if (scene.timeRate !== 1) {
+      lines.push({ label: "SCENE CLOCK", value: sceneClockReading(scene.timeRate) });
+    }
   }
   return lines;
 }

@@ -2233,7 +2233,7 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
   scripts.
   _As built: see Risks, "Deviations in T16.c, as built". The draft also holds T10.c's
   `ECLIPSE TEST` rows and the kept scene's clock rate, by the orchestrator's rulings carried for
-  T16.c; the clock's line is split off as R07.T16.k._
+  T16.c; the clock's line is split off as R07.T16.k, and built there._
 - **R07.T16.i The view's labels clear of its chrome.** `displays/view/ViewDisplay.tsx`
   (`placeMarkLabels`) and `ViewMarkLabels.tsx`, and their tests
   (decision-r07-quality-and-destination, Q6 (a), and addenda B and C).
@@ -2351,6 +2351,7 @@ src/renderer/src/displays/galaxy src/renderer/src/displays/system`, the console-
   has none. **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`,
   the console-ux skill's scripts (glyphs for `×`), `just ci`. Never side by side with T16.i, which
   edits `displays/view/` too.
+  _As built: see Risks, "Deviations in T16.k, as built"._
 
 #### R07.T17 The low setting and benchmarks
 
@@ -5734,7 +5735,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `NOT AVAILABLE: not yet metered` and `AUTO NOT AVAILABLE:` (`ExposurePanel.tsx`), `SELECT`,
       `CRAFT PHOTOMETRY: NOT YET MODELLED` and its composed form (`viewRun.ts`), `ECLIPSE TEST` and
       its four designations (`eclipseScene.ts`), `QUALITY HIGH` and `LOW` (`QUALITY_NAMES`);
-    - `CHEVRONS DESTINATION` (by Q2, as `TICKS TARGET`) and `SCENE CLOCK` (T16.k) are not;
+    - `CHEVRONS DESTINATION` (by Q2, as `TICKS TARGET`) and `SCENE CLOCK` (T16.k) are not
+      (_`SCENE CLOCK` is, since R07.T16.k: `viewRun.ts`'s `labelLines`_);
     - the widths are `lib/strokes.ts`'s (`lineScale` the larger of 2 and the ratio,
       `markStrokeDevicePx` the larger of 2 and 1.5 × the ratio, 2.56 at 0.78125) and
       `STROKE_PX`'s 1 and 2 px orbits; the black is `CLEAR_COLOUR`'s; the cross-section is
@@ -5927,6 +5929,69 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       T16.i. Lean: as built;
     - a hidden nearer or selected label waits for a clear place rather than taking a standing
       farther label's. Lean: as built, for stability.
+- **Deviations in T16.k, as built** (2026-10-07; the views lane; the orchestrator's ruling carried
+  for T16.c, in the form T16.c drafted).
+  - **Files and names.**
+    - `displays/view/viewRun.ts`: `labelLines` adds `SCENE CLOCK` after `SCENE` while a kept
+      scene's `timeRate` is not 1. Its value is the new `sceneClockReading(secondsPerSecond)`:
+      `×` and `formatNumber(rate, 0)`, grouped in threes from five digits as any number is
+      (`×1000`, `×86,400`).
+    - `labelLines`' doc no longer counts the two statements among its lines.
+    - `InstrumentView.tsx`: `INSTRUMENT_LINES`' doc alone. The list already left the line out.
+  - **The gate is the kept scene.** The server's scene states no clock at any rate (tested at
+    86,400 s a second), as the bullet and the `SCENE` row say. The descent spike's scene runs at 1.
+  - **Whole rates.** `formatNumber(rate, 0)` would read a kept scene at 2.5 as `×3` (the
+    TypeScript and UX reviews' consider). A test holds every scene of `SCENE_OPTIONS` to a whole
+    rate, rather than a second form or a throw on the render path.
+  - **Tests beyond the list:**
+    - the reading's grouping, and every offered kept scene's rate a whole number;
+    - in the DOM harness, the primary's canvas described with `SCENE ECLIPSE TEST SCENE CLOCK ×100`;
+    - the instrument's block on show with `SOURCE PRIMARY` and no `SCENE`.
+
+    Each test was checked by breaking the code and seeing it fail.
+  - **The label block's height** (by hand, hidden; `.git/rm23-scratch/r07-views/t16k/`, `page/run.sh`
+    with `page/hook.js`, T16.i's page harness measuring the block line by line; `base-*` is HEAD's
+    build; crops in `crops/`):
+    - the line adds one 18 px row. In `ECLIPSE TEST`, compact at 1280 × 720 (stage 816 × 540), the
+      block's foot moves from 230 to 248 px in the wireframe and from 270 to 288 px
+      photorealistic;
+    - with `INSTRUMENT 1` open, the block narrows to 232 px and its foot moves from 414 to 432 px,
+      still inside the stage;
+    - at 1920 × 1080 (stage 1120 × 900) the foot moves the same, 230 to 248 and 270 to 288 px, open
+      slot or not;
+    - `PRECISION TEST`'s block is unchanged, its foot at 230 px from `SEAT`;
+    - `ECLIPSE TEST` has no own ship, so its block has no `POSITIONS AS SEEN FROM SHIP` and stays
+      shorter than `PRECISION TEST`'s from `CHASE` (252 and 314 px, T16.i).
+  - **T16.i's placement** measures the block from the DOM every frame, so the taller block needs
+    no change to it. No mark label is shown in any captured `ECLIPSE TEST` state, before or after.
+    The one change seen is that the plate covers 18 px more of the planet's upper limb from the
+    script's camera.
+  - **The form** stays the draft's `×100`, rendered in B612 Mono (`crops/final-*`). Two choices
+    stay open for the owner with T16.c's draft: `×100` or a unit rate beside `RUN 1 d/s`, and
+    whether `SCENE CLOCK` takes a row of its own.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest (`src/renderer/src/displays/view`): 21 files, 406 tests, all pass.
+      The app's: 339 files, 7,913 tests, all pass.
+    - `just check lint` from a clean typecheck cache: exit 0. Prettier on every changed file.
+    - `just test-render`, both variants with captures, on the base (HEAD, the changes stashed) and
+      after, under one hold of the heavy lock (`t16k/render-pair.sh`): each exit 0, 610 checks,
+      all 110 captures byte-identical. The captures are canvas readbacks, so the DOM block is in
+      none of them, `ECLIPSE TEST`'s included.
+    - The final tree's bundle differs from the one rendered only in comments and a parameter's
+      name (`out-after` against `out-final`, chunk hashes aside), so it was not rendered again.
+    - The console-ux skill's glyphs (`×` in B612 and B612 Mono), lint (0 errors in the two
+      changed renderer files) and contrast (every pairing passes).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers: no must-fix.
+    - Taken: these records and their pointers (the plan's should-fix), the parameter's unit name
+      and the whole-rate test (considers), and the instrument test's positive check and
+      `INSTRUMENT_LINES`' wording (the plan's considers).
+    - Noted: the UX review reads `×100` as a dimensionless ratio, like the guide's `× HOST`, so no
+      defect against "a number without a unit"; the form is the owner's.
+  - **Open, for the orchestrator:** the server's scene takes its `timeRate` from the server's
+    clock (`view/scene/fromServer.ts`). Were that clock to run at other than one second a second,
+    `VIEW`'s `TIME` would run so with nothing on the block saying so, the gap T16.k closes for
+    kept scenes. The plan and the guide limit the line to kept scenes, so it is built as
+    specified.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the
@@ -7429,7 +7494,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       _Drafted by R07.T16.c, as written here, each tagged T10.c's (the orchestrator's ruling)._
     - The label block does not state a kept scene's clock rate: `TIME` runs a hundred times fast
       here with nothing saying so. _Ruled by the orchestrator (2026-10-06): drafted in T16.c,
-      `SCENE CLOCK ×100`; the line is split off as R07.T16.k._
+      `SCENE CLOCK ×100`; the line is split off as R07.T16.k._ _Built by R07.T16.k (2026-10-07):
+      `SCENE CLOCK ×100` after `SCENE` on the `PRIMARY` view's block._
     - Whether a free camera in the planet's frame stands for the plan's "ship in a moon's
       penumbra".
 - **The photorealistic view's per-draw cost, investigated** (2026-10-06; the shading lane, from

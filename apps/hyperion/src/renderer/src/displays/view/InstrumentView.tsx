@@ -53,8 +53,9 @@ export interface InstrumentViewProps {
 
 /**
  * The lines of an instrument's label block (decision-r07-t19, item 2b): every line of the
- * primary's but `SCENE`, which the header's `TRAINING` banner states for the display, and `METER`,
- * the primary's own (R07.T19.b), and the exposure's `SOURCE`, the primary view, before `STARS`.
+ * primary's but `SCENE` and its `SCENE CLOCK` (R07.T16.k), which describe the display's scene, for
+ * which the header shows its `TRAINING` banner, and `METER`, the primary's own (R07.T19.b); and the
+ * exposure's `SOURCE`, the primary view, before `STARS`.
  */
 const INSTRUMENT_LINES: ReadonlyArray<string> = [
   "FRAME",
