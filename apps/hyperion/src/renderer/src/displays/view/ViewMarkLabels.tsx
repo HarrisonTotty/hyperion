@@ -2,10 +2,11 @@ import { StaleMark } from "../../components/StaleMark";
 import type { ElementSize } from "../../lib/useElementSize";
 import {
   boxGapPx,
+  DESTINATION_LABEL_PLACES,
   type DestinationLabelPlace,
   destinationLabelBoxPx,
-  destinationLabelPlace,
   LABEL_NEIGHBOUR_CLEARANCE_REM,
+  LABEL_TEXT_CLEARANCE_REM,
   type ScreenBoxPx,
   type OffsetPx,
   placeIsRight,
@@ -46,11 +47,34 @@ export interface ViewMarkLabelsProps {
 }
 
 /**
- * Where a mark's label stands about its mark: on its mark's line, to its right, or for the
- * destination's label one of its four places above or below its whole chevron set
- * (decision-r07-quality-and-destination, addendum B).
+ * The places a label other than a destination's tries, in order (R07.T16.i;
+ * decision-r07-quality-and-destination, Q6 (a)): on its mark's line to the right, the side a name
+ * reads from its point, then mirrored to the left; then below and above, centred on the mark.
  */
-export type MarkLabelPlace = "line" | DestinationLabelPlace;
+export const MARK_LABEL_SIDES = ["right", "left", "below", "above"] as const;
+
+/** One of the places of {@link MARK_LABEL_SIDES}. */
+export type MarkLabelSide = (typeof MARK_LABEL_SIDES)[number];
+
+/**
+ * Where a mark's label stands after a frame's placing, or that it is hidden whole (`null`), which the
+ * next frame's placing starts from (R07.T16.i): the destination's label at one of its four places
+ * above or below its whole chevron set (decision-r07-quality-and-destination, addendum B), any other
+ * at one of its sides ({@link MARK_LABEL_SIDES}). `changesMs` holds the frame times, ms, of its
+ * latest changes of place or of whether it is shown, the last at most {@link LABEL_CHANGE_LIMIT}
+ * within {@link LABEL_CHANGE_WINDOW_MS}.
+ */
+export type MarkLabelState =
+  | {
+      readonly kind: "destination";
+      readonly place: DestinationLabelPlace | null;
+      readonly changesMs: ReadonlyArray<number>;
+    }
+  | {
+      readonly kind: "mark";
+      readonly place: MarkLabelSide | null;
+      readonly changesMs: ReadonlyArray<number>;
+    };
 
 /** A label's plate's size as laid out, CSS px. */
 export interface PlateSizePx {
@@ -59,130 +83,585 @@ export interface PlateSizePx {
 }
 
 /**
- * A label's CSS transform at its place beside its mark, in CSS px at `devicePixelRatio` (R07.T16.g):
- * its plate's near edge `anchor.labelOffsetPx` right of the anchor, both in device px, centred on
- * the anchor's line by the plate's own `translate: 0 -50%`. At a destination's place
- * (`anchor.labelRisePx`; decision-r07-quality-and-destination, addendum B) its plate stands above or
- * below the whole chevron set: its bottom edge that far above the anchor, the transform's −50% and
- * the plate's own together lifting it by its whole height, or its top edge as far below, the
- * transform's +50% undoing the plate's −50%; and at a left-hand place its right edge stands as far
- * left of the anchor, the transform's −100% moving it back by its own width.
+ * The plate's padding either side of its text, rem: `.view-marks__label`'s `padding: 0 0.25rem`. A
+ * label at its mark's right or left has its text this far inside its plate's near edge. The plate
+ * has none above and below, so a label below or above its mark stands its plate this much further
+ * out, its text as far from the mark as at the right.
+ */
+export const PLATE_SIDE_PADDING_REM = 0.25;
+
+/**
+ * How far every label's plate stands clear of the chrome over the stage, rem: one base unit
+ * (decision-r07-quality-and-destination, addendum C, C3's rule 3), so that no name 1 px under the
+ * label block reads as a line of it. A destination's label's first choice stands
+ * `LABEL_NEIGHBOUR_CLEARANCE_REM` clear.
+ */
+export const CHROME_CLEARANCE_REM = 0.25;
+
+/**
+ * How much clearer than it must be a place must stand for a label to move to it, or to come back
+ * to it from hidden, rem (R07.T16.i): one base unit, on every count, the stage's edges included.
+ * So a mark that jitters, or moves a fraction of this back and forth across an obstacle's edge,
+ * leaves its label where it is.
+ */
+export const LABEL_HYSTERESIS_REM = 0.25;
+
+/**
+ * The most changes of place, or of whether it is shown, that a label makes in any
+ * {@link LABEL_CHANGE_WINDOW_MS} (decision-r07-quality-and-destination, Q6 (a): "never more than
+ * three times a second", the guide's flash limit). A label makes one fewer by choice, moving or
+ * coming back; one that has made those keeps its place while it fits, and where its place stops
+ * fitting it is hidden, never shown in part, as the last. It comes back once the window allows.
+ */
+export const LABEL_CHANGE_LIMIT = 3;
+
+/** The window over which {@link LABEL_CHANGE_LIMIT} counts a label's changes, ms: a second. */
+export const LABEL_CHANGE_WINDOW_MS = 1000;
+
+/**
+ * A label's CSS transform at one of its sides, in CSS px at `devicePixelRatio` (R07.T16.g;
+ * R07.T16.i), the plate's own `translate: 0 -50%` centring it on the transform's line: at the right,
+ * its plate's near edge `anchor.labelOffsetPx` right of the anchor, both in device px, on the
+ * anchor's line; at the left, its right edge as far left, the transform's −100% moving it back by
+ * its own width; below and above, centred on the anchor by the transform's −50% across, its top edge
+ * `labelOffsetPx` and {@link PLATE_SIDE_PADDING_REM} below the anchor, the transform's +50% undoing
+ * the plate's −50%, or its bottom edge as far above, the two −50% lifting it by its whole height.
  *
  * @remarks
  * The draw list places it clear of the selection's bracket, whether or not the mark is selected, so
- * that selecting a mark never moves its label, and the destination's report moves it in the frame
- * in which its chevrons are first drawn, at once. A mark that is not the destination has no rise, and
- * its label stands on its line whatever place is asked.
+ * that selecting a mark never moves its label.
  */
-export function markLabelTransform(
+export function sideLabelTransform(
   anchor: DrawAnchor,
   devicePixelRatio: number,
-  place: MarkLabelPlace,
+  side: MarkLabelSide,
 ): string {
   const px = (devicePx: number): string => `${String(devicePx / devicePixelRatio)}px`;
-  if (place === "line" || anchor.labelRisePx === null) {
-    return `translate(${px(anchor.xPx + anchor.labelOffsetPx)}, ${px(anchor.yPx)})`;
+  const { xPx, yPx, labelOffsetPx: nearPx } = anchor;
+  const padding = `${String(PLATE_SIDE_PADDING_REM)}rem`;
+  let transform: string;
+  switch (side) {
+    case "right":
+      transform = `translate(${px(xPx + nearPx)}, ${px(yPx)})`;
+      break;
+    case "left":
+      transform = `translate(calc(${px(xPx - nearPx)} - 100%), ${px(yPx)})`;
+      break;
+    case "below":
+      transform = `translate(calc(${px(xPx)} - 50%), calc(${px(yPx + nearPx)} + ${padding} + 50%))`;
+      break;
+    case "above":
+      transform = `translate(calc(${px(xPx)} - 50%), calc(${px(yPx - nearPx)} - ${padding} - 50%))`;
+      break;
   }
-  const across = placeIsRight(place)
-    ? px(anchor.xPx + anchor.labelOffsetPx)
-    : `calc(${px(anchor.xPx - anchor.labelOffsetPx)} - 100%)`;
+  return transform;
+}
+
+/**
+ * A destination's label's CSS transform at one of its places, in CSS px at `devicePixelRatio`
+ * (decision-r07-quality-and-destination, addendum B): above or below the whole chevron set, its
+ * bottom edge `risePx` above the anchor, the transform's −50% and the plate's own together lifting
+ * it by its whole height, or its top edge as far below, the transform's +50% undoing the plate's
+ * −50%; at the right its near edge `anchor.labelOffsetPx` right of the anchor, at the left its right
+ * edge as far left, the transform's −100% moving it back by its own width.
+ *
+ * @remarks
+ * The destination's report moves it in the frame in which its chevrons are first drawn, at once.
+ *
+ * @param risePx - The anchor's `labelRisePx`, device px.
+ */
+export function destinationLabelTransform(
+  anchor: DrawAnchor,
+  devicePixelRatio: number,
+  place: DestinationLabelPlace,
+  risePx: number,
+): string {
+  const px = (devicePx: number): string => `${String(devicePx / devicePixelRatio)}px`;
+  const { xPx, yPx, labelOffsetPx: nearPx } = anchor;
+  const across = placeIsRight(place) ? px(xPx + nearPx) : `calc(${px(xPx - nearPx)} - 100%)`;
   const down = placeIsUpper(place)
-    ? `calc(${px(anchor.yPx - anchor.labelRisePx)} - 50%)`
-    : `calc(${px(anchor.yPx + anchor.labelRisePx)} + 50%)`;
+    ? `calc(${px(yPx - risePx)} - 50%)`
+    : `calc(${px(yPx + risePx)} + 50%)`;
   return `translate(${across}, ${down})`;
 }
 
 /**
- * Each mark's label's place (decision-r07-quality-and-destination, addendum B): every label on its
- * mark's line but the destination's, which takes the first of its four places whose plate lies
- * inside the stage and stands `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of every other mark, at its
- * reach (`DrawAnchor.markReachPx`), of every other label's plate, at its place on its line, and of
- * the chrome over the stage (`destinationLabelPlace`); or the upper right where its plate is not yet
- * laid out.
+ * A label's CSS transform for its state ({@link sideLabelTransform},
+ * {@link destinationLabelTransform}), or `null` where it is hidden whole. A destination's state on
+ * an anchor with no rise, a mark no longer the destination, is hidden too; `markLabelPlaces` never
+ * gives one, since it reads the part from the same frame's anchor.
+ */
+export function markLabelTransform(
+  anchor: DrawAnchor,
+  devicePixelRatio: number,
+  state: MarkLabelState,
+): string | null {
+  let transform: string | null = null;
+  switch (state.kind) {
+    case "mark":
+      if (state.place !== null) {
+        transform = sideLabelTransform(anchor, devicePixelRatio, state.place);
+      }
+      break;
+    case "destination":
+      if (state.place !== null && anchor.labelRisePx !== null) {
+        transform = destinationLabelTransform(
+          anchor,
+          devicePixelRatio,
+          state.place,
+          anchor.labelRisePx,
+        );
+      }
+      break;
+  }
+  return transform;
+}
+
+/** The stage as the labels are placed on it: its size, CSS px, its device-pixel ratio and its rem. */
+export type MarkLabelStage = Pick<
+  ElementSize,
+  "widthPx" | "heightPx" | "devicePixelRatio" | "remPx"
+>;
+
+/** What a frame's labels are placed among, besides their marks (R07.T16.i). */
+export interface MarkLabelSurroundings {
+  /**
+   * The chrome over the stage as laid out, CSS px from its top left: the `PRIMARY` view's label
+   * block, each open instrument slot, and any other statement or plate over the canvas.
+   */
+  readonly chrome?: ReadonlyArray<ScreenBoxPx>;
+  /** The selection's target's key, whose label is placed after the destination's and before the rest. */
+  readonly selection?: string | null;
+  /** Each label's state after the frame before, by its target's key; none for a label just mounted. */
+  readonly previous?: ReadonlyMap<string, MarkLabelState>;
+  /** The frame's time, ms, by which each label's changes are counted. */
+  readonly nowMs: number;
+}
+
+/** One place a label may take, and whether its plate fits there. */
+interface PlaceOption<Place> {
+  readonly place: Place;
+  /**
+   * Whether the plate fits at the place with `marginPx` more clearance on every count; with
+   * `standing`, also clear of where the labels not yet placed stood after the frame before.
+   */
+  readonly fits: (marginPx: number, standing: boolean) => boolean;
+}
+
+/** Whether two boxes overlap, sharing more than an edge. */
+function overlaps(a: ScreenBoxPx, b: ScreenBoxPx): boolean {
+  return (
+    a.leftPx < b.leftPx + b.widthPx &&
+    b.leftPx < a.leftPx + a.widthPx &&
+    a.topPx < b.topPx + b.heightPx &&
+    b.topPx < a.topPx + a.heightPx
+  );
+}
+
+/** Whether `box` stands at least `clearPx` from every one of `others`, overlapping none. */
+function clearOfAll(box: ScreenBoxPx, others: Iterable<ScreenBoxPx>, clearPx: number): boolean {
+  for (const other of others) {
+    if (overlaps(box, other) || boxGapPx(box, other) < clearPx) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The place a label takes among `options`, in their order of preference, from where it stood
+ * (R07.T16.i): `undefined` for a label just mounted, or just made the destination or no longer it;
+ * `null` for a label hidden.
+ *
+ * - A label keeps its place while it fits. It moves to a place before it only where that fits by
+ *   `hysteresisPx`, clear of where every label not yet placed stood, so that it takes no standing
+ *   label's place for a better one.
+ * - A label whose place no longer fits leaves it at once, for the first place that fits by the
+ *   margin, the labels after it in the order giving way; or it is hidden whole.
+ * - A label hidden comes back only to a place that fits by the margin, and a label just mounted
+ *   takes the first place that fits; each clear of where every label not yet placed stood.
+ * - A label that has made all but one of its {@link LABEL_CHANGE_LIMIT} changes in the window
+ *   (`limited`) keeps its place while it fits, or is hidden, and changes nothing else.
+ */
+function choosePlace<Place>(
+  options: ReadonlyArray<PlaceOption<Place>>,
+  previous: Place | null | undefined,
+  hysteresisPx: number,
+  limited: boolean,
+): Place | null {
+  if (previous !== undefined && previous !== null) {
+    const kept = options.findIndex((option) => option.place === previous && option.fits(0, false));
+    if (kept >= 0) {
+      const better = limited
+        ? undefined
+        : options
+            .slice(0, kept)
+            .find((option) => option.place !== previous && option.fits(hysteresisPx, true));
+      return better?.place ?? previous;
+    }
+    if (limited) {
+      return null;
+    }
+    return options.find((option) => option.fits(hysteresisPx, false))?.place ?? null;
+  }
+  if (limited) {
+    return null;
+  }
+  const marginPx = previous === undefined ? 0 : hysteresisPx;
+  return options.find((option) => option.fits(marginPx, true))?.place ?? null;
+}
+
+/** A label's place as shown, or `null` where it is hidden or has no state: what a change changes. */
+function shownPlace(state: MarkLabelState | undefined): string | null {
+  return state === undefined || state.place === null ? null : `${state.kind} ${state.place}`;
+}
+
+/**
+ * Each mark's label's place in a frame, or that it is hidden whole (R07.T16.i;
+ * decision-r07-quality-and-destination, Q6 (a) and addenda B and C). A label is never shown in
+ * part: each plate, its size as laid out, takes a place only where it lies wholly inside the stage,
+ * {@link CHROME_CLEARANCE_REM} clear of the chrome and clear of the plates placed before it.
+ *
+ * - **The order:** the destination's label first, then the selection's, then the rest by range,
+ *   nearest first.
+ * - **A destination's label** tries its four places (`DESTINATION_LABEL_PLACES`), each above or
+ *   below its whole chevron set with its near edge at the bracket place: first the first
+ *   `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the chrome and of every other mark, at its reach
+ *   (`DrawAnchor.markReachPx`), and every other label's plate at its place on its mark's line; else
+ *   the first {@link CHROME_CLEARANCE_REM} clear of the chrome; else it is hidden whole.
+ * - **Every other label** tries its sides ({@link MARK_LABEL_SIDES}) and takes the first
+ *   `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the destination's plate, `LABEL_TEXT_CLEARANCE_REM`
+ *   clear of the destination's chevron set (the square of half-size `destinationSetReachPx`),
+ *   {@link CHROME_CLEARANCE_REM} clear of the chrome, and clear of the plates placed; else it is
+ *   hidden whole.
+ * - **Hysteresis:** a label leaves a place, or comes back from hidden, only for a place clear by
+ *   {@link LABEL_HYSTERESIS_REM} more, and changes at most {@link LABEL_CHANGE_LIMIT} times in
+ *   {@link LABEL_CHANGE_WINDOW_MS} (`choosePlace`).
  *
  * @remarks
- * Every other mark is taken at its bracket's place, whether or not it is selected, so that selecting
- * a mark never moves the destination's label. The chrome is the stage's as R07.T16.i names it: the
- * `PRIMARY` view's label block and each open instrument slot. T16.i keeps every other label clear of
- * it too.
+ * The destination's place counts every other mark at its bracket's place, whether or not it is
+ * selected, and every other label at its place on its line, so that the selection is no input to
+ * it (addendum C, C1). A label moves into a place another label stood at after the frame before
+ * only where its own place has stopped fitting, and then only where that label comes after it in
+ * the order. So selecting a mark, which changes only the order, moves no label, and the order decides
+ * where labels come to meet. A label at its limit of changes is hidden, not moved, when its mark
+ * becomes or stops being the destination, until the window allows. A label whose plate is not laid
+ * out is hidden.
  *
  * @param plates - The labels' plates' sizes as laid out, by their target's key.
  * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
- * @param chrome - The chrome's boxes as laid out, CSS px from the stage's top left.
- * @returns The places by the labels' targets' keys.
+ * @returns Each labelled anchor's label's state, by its target's key.
  */
 export function markLabelPlaces(
   anchors: ReadonlyArray<DrawAnchor>,
   plates: ReadonlyMap<string, PlateSizePx>,
-  stage: Pick<ElementSize, "widthPx" | "heightPx" | "devicePixelRatio" | "remPx">,
-  chrome: ReadonlyArray<ScreenBoxPx> = [],
-): ReadonlyMap<string, MarkLabelPlace> {
-  const ratio = stage.devicePixelRatio;
-  const centreOf = (anchor: DrawAnchor): OffsetPx => ({
-    xPx: anchor.xPx / ratio,
-    yPx: anchor.yPx / ratio,
-  });
-  const places = new Map<string, MarkLabelPlace>();
-  for (const anchor of anchors) {
-    if (anchor.label === null) {
-      continue;
+  stage: MarkLabelStage,
+  { chrome = [], selection = null, previous = new Map(), nowMs }: MarkLabelSurroundings,
+): ReadonlyMap<string, MarkLabelState> {
+  const rank = (anchor: DrawAnchor): number => {
+    if (anchor.labelRisePx !== null) {
+      return 0;
     }
+    return targetKey(anchor.target) === selection ? 1 : 2;
+  };
+  const labelled = anchors.filter((anchor) => anchor.label !== null);
+  const frame: LabelFrame = {
+    stage,
+    chrome,
+    // The destination's chevron sets, drawn whether or not its label is shown.
+    sets: anchors.flatMap((anchor) =>
+      anchor.labelRisePx === null
+        ? []
+        : [
+            squareBoxPx(
+              centreCssPx(anchor, stage),
+              destinationSetReachCssPx(anchor.labelRisePx, stage),
+            ),
+          ],
+    ),
+    destinationPlates: [],
+    placed: [],
+    held: new Map(),
+  };
+  // Where each label stood after the last frame, at this frame's mark, until it is placed.
+  for (const anchor of labelled) {
     const key = targetKey(anchor.target);
     const plate = plates.get(key);
+    const was = previous.get(key);
+    const box =
+      plate === undefined || was === undefined ? null : heldBoxPx(anchor, plate, was, stage);
+    if (box !== null) {
+      frame.held.set(key, box);
+    }
+  }
+  const hysteresisPx = LABEL_HYSTERESIS_REM * stage.remPx;
+  const states = new Map<string, MarkLabelState>();
+  for (const anchor of labelled.toSorted((a, b) =>
+    rank(a) === rank(b) ? a.distanceM - b.distanceM : rank(a) - rank(b),
+  )) {
+    const key = targetKey(anchor.target);
+    frame.held.delete(key);
+    const plate = plates.get(key);
+    const was = previous.get(key);
+    const changesMs = (was?.changesMs ?? []).filter(
+      (changedMs) => changedMs > nowMs - LABEL_CHANGE_WINDOW_MS,
+    );
+    // The last change in the window is kept for hiding, which is never refused.
+    const limited = changesMs.length >= LABEL_CHANGE_LIMIT - 1;
     const risePx = anchor.labelRisePx;
-    if (risePx === null || plate === undefined) {
-      places.set(key, risePx === null ? "line" : "upper-right");
-      continue;
-    }
-    const neighbours: ScreenBoxPx[] = [...chrome];
-    for (const other of anchors) {
-      const otherKey = targetKey(other.target);
-      if (otherKey === key) {
-        continue;
+    let state: MarkLabelState;
+    if (risePx === null) {
+      const place = choosePlace(
+        plate === undefined ? [] : sideOptions(anchor, plate, frame),
+        was?.kind === "mark" ? was.place : undefined,
+        hysteresisPx,
+        limited,
+      );
+      state = { kind: "mark", place, changesMs };
+      if (place !== null && plate !== undefined) {
+        frame.placed.push(sideBoxPx(anchor, plate, place, stage));
       }
-      const centre = centreOf(other);
-      neighbours.push(squareBoxPx(centre, other.markReachPx / ratio));
-      const otherPlate = other.label === null ? undefined : plates.get(otherKey);
-      if (otherPlate !== undefined) {
-        neighbours.push({
-          leftPx: centre.xPx + other.labelOffsetPx / ratio,
-          topPx: centre.yPx - otherPlate.heightPx / 2,
-          widthPx: otherPlate.widthPx,
-          heightPx: otherPlate.heightPx,
-        });
+    } else {
+      const place = choosePlace(
+        plate === undefined
+          ? []
+          : destinationOptions(anchor, plate, risePx, anchors, plates, frame),
+        was?.kind === "destination" ? was.place : undefined,
+        hysteresisPx,
+        limited,
+      );
+      state = { kind: "destination", place, changesMs };
+      if (place !== null && plate !== undefined) {
+        frame.destinationPlates.push(destinationBoxPx(anchor, plate, place, risePx, stage));
       }
     }
-    const clearPx = LABEL_NEIGHBOUR_CLEARANCE_REM * stage.remPx;
-    places.set(
+    states.set(
       key,
-      destinationLabelPlace(
-        (place) =>
-          destinationLabelBoxPx(
-            place,
-            centreOf(anchor),
-            anchor.labelOffsetPx / ratio,
-            risePx / ratio,
-            plate.widthPx,
-            plate.heightPx,
-          ),
-        (box) =>
-          box.leftPx >= 0 &&
-          box.topPx >= 0 &&
-          box.leftPx + box.widthPx <= stage.widthPx &&
-          box.topPx + box.heightPx <= stage.heightPx,
-        (box) => neighbours.every((other) => boxGapPx(box, other) >= clearPx),
-      ),
+      shownPlace(state) === shownPlace(was)
+        ? state
+        : { ...state, changesMs: [...changesMs, nowMs].slice(-LABEL_CHANGE_LIMIT) },
     );
   }
-  return places;
+  return states;
+}
+
+/** What one frame's labels are placed against, as they are placed in turn. */
+interface LabelFrame {
+  readonly stage: MarkLabelStage;
+  readonly chrome: ReadonlyArray<ScreenBoxPx>;
+  /** The destination's chevron sets, each the square that holds it. */
+  readonly sets: ReadonlyArray<ScreenBoxPx>;
+  /** The destination's label's plate, once placed. */
+  readonly destinationPlates: ScreenBoxPx[];
+  /** Every other label's plate placed so far. */
+  readonly placed: ScreenBoxPx[];
+  /** Where each label not yet placed stood after the frame before, by its target's key. */
+  readonly held: Map<string, ScreenBoxPx>;
+}
+
+/**
+ * Where a label stood after the frame before, its plate at this frame's mark, CSS px; `null` where
+ * it was hidden, or where its mark has since become the destination or ceased to be.
+ */
+function heldBoxPx(
+  anchor: DrawAnchor,
+  plate: PlateSizePx,
+  was: MarkLabelState,
+  stage: MarkLabelStage,
+): ScreenBoxPx | null {
+  let box: ScreenBoxPx | null = null;
+  switch (was.kind) {
+    case "mark":
+      if (was.place !== null && anchor.labelRisePx === null) {
+        box = sideBoxPx(anchor, plate, was.place, stage);
+      }
+      break;
+    case "destination":
+      if (was.place !== null && anchor.labelRisePx !== null) {
+        box = destinationBoxPx(anchor, plate, was.place, anchor.labelRisePx, stage);
+      }
+      break;
+  }
+  return box;
+}
+
+/** Whether `box` lies inside the stage, at least `marginPx` in from each of its edges. */
+function insideBy(box: ScreenBoxPx, stage: MarkLabelStage, marginPx: number): boolean {
+  return (
+    box.leftPx >= marginPx &&
+    box.topPx >= marginPx &&
+    box.leftPx + box.widthPx <= stage.widthPx - marginPx &&
+    box.topPx + box.heightPx <= stage.heightPx - marginPx
+  );
+}
+
+/**
+ * A destination's label's places, in their order: each of its four places
+ * `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of the chrome, of every other mark at its reach and of every
+ * other label's plate at its place on its line; then each {@link CHROME_CLEARANCE_REM} clear of the
+ * chrome alone (decision-r07-quality-and-destination, addendum C, C3).
+ *
+ * @param risePx - The anchor's `labelRisePx`, device px.
+ */
+function destinationOptions(
+  anchor: DrawAnchor,
+  plate: PlateSizePx,
+  risePx: number,
+  anchors: ReadonlyArray<DrawAnchor>,
+  plates: ReadonlyMap<string, PlateSizePx>,
+  frame: LabelFrame,
+): ReadonlyArray<PlaceOption<DestinationLabelPlace>> {
+  const { stage, chrome } = frame;
+  const neighbourPx = LABEL_NEIGHBOUR_CLEARANCE_REM * stage.remPx;
+  const neighbours: ScreenBoxPx[] = [];
+  for (const other of anchors) {
+    const key = targetKey(other.target);
+    const otherPlate = other.label === null ? undefined : plates.get(key);
+    if (key !== targetKey(anchor.target)) {
+      neighbours.push(
+        squareBoxPx(centreCssPx(other, stage), other.markReachPx / stage.devicePixelRatio),
+      );
+      if (otherPlate !== undefined) {
+        neighbours.push(sideBoxPx(other, otherPlate, "right", stage));
+      }
+    }
+  }
+  const atEach = (clear: (box: ScreenBoxPx, marginPx: number) => boolean) =>
+    DESTINATION_LABEL_PLACES.map((place): PlaceOption<DestinationLabelPlace> => ({
+      place,
+      fits: (marginPx) => {
+        const box = destinationBoxPx(anchor, plate, place, risePx, stage);
+        return insideBy(box, stage, marginPx) && clear(box, marginPx);
+      },
+    }));
+  return [
+    ...atEach(
+      (box, marginPx) =>
+        clearOfAll(box, chrome, neighbourPx + marginPx) &&
+        clearOfAll(box, neighbours, neighbourPx + marginPx),
+    ),
+    ...atEach((box, marginPx) =>
+      clearOfAll(box, chrome, CHROME_CLEARANCE_REM * stage.remPx + marginPx),
+    ),
+  ];
+}
+
+/**
+ * Any other label's places, its sides in their order, each `LABEL_NEIGHBOUR_CLEARANCE_REM` clear of
+ * the destination's plate, `LABEL_TEXT_CLEARANCE_REM` clear of its chevron set,
+ * {@link CHROME_CLEARANCE_REM} clear of the chrome, and clear of the plates placed; and with
+ * `standing`, clear of where the labels not yet placed stood.
+ */
+function sideOptions(
+  anchor: DrawAnchor,
+  plate: PlateSizePx,
+  frame: LabelFrame,
+): ReadonlyArray<PlaceOption<MarkLabelSide>> {
+  const { stage } = frame;
+  return MARK_LABEL_SIDES.map((place): PlaceOption<MarkLabelSide> => ({
+    place,
+    fits: (marginPx, standing) => {
+      const box = sideBoxPx(anchor, plate, place, stage);
+      return (
+        insideBy(box, stage, marginPx) &&
+        clearOfAll(box, frame.chrome, CHROME_CLEARANCE_REM * stage.remPx + marginPx) &&
+        clearOfAll(
+          box,
+          frame.destinationPlates,
+          LABEL_NEIGHBOUR_CLEARANCE_REM * stage.remPx + marginPx,
+        ) &&
+        clearOfAll(box, frame.sets, LABEL_TEXT_CLEARANCE_REM * stage.remPx + marginPx) &&
+        clearOfAll(box, frame.placed, marginPx) &&
+        (!standing || clearOfAll(box, frame.held.values(), marginPx))
+      );
+    },
+  }));
+}
+
+/** An anchor's place on the stage, CSS px from its top left. */
+function centreCssPx(anchor: DrawAnchor, stage: MarkLabelStage): OffsetPx {
+  return { xPx: anchor.xPx / stage.devicePixelRatio, yPx: anchor.yPx / stage.devicePixelRatio };
+}
+
+/**
+ * A label's plate's box at one of its sides, CSS px from the stage's top left, as
+ * {@link sideLabelTransform} stands it there.
+ */
+function sideBoxPx(
+  anchor: DrawAnchor,
+  plate: PlateSizePx,
+  side: MarkLabelSide,
+  stage: MarkLabelStage,
+): ScreenBoxPx {
+  const centre = centreCssPx(anchor, stage);
+  const nearPx = anchor.labelOffsetPx / stage.devicePixelRatio;
+  const outPx = nearPx + PLATE_SIDE_PADDING_REM * stage.remPx;
+  const { widthPx, heightPx } = plate;
+  let leftPx: number;
+  let topPx: number;
+  switch (side) {
+    case "right":
+      leftPx = centre.xPx + nearPx;
+      topPx = centre.yPx - heightPx / 2;
+      break;
+    case "left":
+      leftPx = centre.xPx - nearPx - widthPx;
+      topPx = centre.yPx - heightPx / 2;
+      break;
+    case "below":
+      leftPx = centre.xPx - widthPx / 2;
+      topPx = centre.yPx + outPx;
+      break;
+    case "above":
+      leftPx = centre.xPx - widthPx / 2;
+      topPx = centre.yPx - outPx - heightPx;
+      break;
+  }
+  return { leftPx, topPx, widthPx, heightPx };
+}
+
+/**
+ * A destination's label's plate's box at one of its places, CSS px from the stage's top left, as
+ * {@link destinationLabelTransform} stands it there (`destinationLabelBoxPx`).
+ *
+ * @param risePx - The anchor's `labelRisePx`, device px.
+ */
+function destinationBoxPx(
+  anchor: DrawAnchor,
+  plate: PlateSizePx,
+  place: DestinationLabelPlace,
+  risePx: number,
+  stage: MarkLabelStage,
+): ScreenBoxPx {
+  const ratio = stage.devicePixelRatio;
+  return destinationLabelBoxPx(
+    place,
+    centreCssPx(anchor, stage),
+    anchor.labelOffsetPx / ratio,
+    risePx / ratio,
+    plate.widthPx,
+    plate.heightPx,
+  );
+}
+
+/**
+ * The half-size of the square that holds a destination's whole chevron set, CSS px
+ * (`destinationSetReachPx`): its label's rise less the 0.25 rem by which its plate clears the set,
+ * since `destinationLabelRisePx` is the reach and `LABEL_TEXT_CLEARANCE_REM`.
+ *
+ * @param risePx - The destination's anchor's `labelRisePx`, device px.
+ */
+export function destinationSetReachCssPx(risePx: number, stage: MarkLabelStage): number {
+  return risePx / stage.devicePixelRatio - LABEL_TEXT_CLEARANCE_REM * stage.remPx;
 }
 
 /**
  * The marks' DOM labels over the canvas (plan R02, R02.T15.b; T12 and T13 as built): another
  * craft's target mark with its range, `FROM CAMERA` where there is no own ship, and its closure
  * rate, `—` where a velocity is not known; and a body drawn as its symbol with its designation
- * (Design note 13), each on a `--surface-0` plate. The text is refreshed with the readouts at 4 Hz;
- * the position is the published frame's until the drawing loop moves it through `labelRef`.
+ * (Design note 13), each on a `--surface-0` plate. The text is refreshed with the readouts at 4 Hz.
+ * Each mounts hidden, at the published frame's place, until the drawing loop places it through
+ * `labelRef` ({@link markLabelPlaces}) and shows it.
  *
  * @remarks
  * Hidden from assistive technology: the list beside the view carries the same names, ranges and
@@ -217,16 +696,19 @@ export function ViewMarkLabels({
               // Placed here once, as it mounts, not through `style`: a 4 Hz render would put it
               // back where the published frame drew its mark, behind the loop's latest.
               if (node.style.transform === "") {
-                node.style.transform = markLabelTransform(
-                  anchor,
-                  devicePixelRatio,
-                  anchor.labelRisePx === null ? "line" : "upper-right",
-                );
-                // The drawing loop chooses a destination's place once the plates are laid out, and
-                // shows it there, so that it never shows a frame at a place it then leaves.
-                if (anchor.labelRisePx !== null) {
-                  node.style.visibility = "hidden";
-                }
+                node.style.transform =
+                  anchor.labelRisePx === null
+                    ? sideLabelTransform(anchor, devicePixelRatio, "right")
+                    : destinationLabelTransform(
+                        anchor,
+                        devicePixelRatio,
+                        "upper-right",
+                        anchor.labelRisePx,
+                      );
+                // The drawing loop chooses its place once its plate is laid out, and shows it there
+                // (R07.T16.i), so that it is never shown in part, nor a frame at a place it then
+                // leaves.
+                node.style.visibility = "hidden";
               }
               labelRef?.(key, node);
               return () => {

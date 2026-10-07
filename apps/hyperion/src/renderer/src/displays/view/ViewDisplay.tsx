@@ -111,6 +111,7 @@ import { ViewCanvas } from "./ViewCanvas";
 import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import {
+  type MarkLabelState,
   markLabelPlaces,
   markLabelTransform,
   type PlateSizePx,
@@ -397,75 +398,100 @@ function exposureShownChanged(shown: ExposureControl, next: ExposureControl): bo
 }
 
 /**
- * Moves each mark's label with its mark, at the frame rate; its text changes at 4 Hz (RM1 m10). A
- * label whose mark this frame did not draw is hidden until the next readout removes it. Each stands
- * at its anchor's `labelOffsetPx`, this frame's, on its mark's line; a destination's at its
- * `labelRisePx` above or below its whole chevron set, at the first of its four places 0.5 rem clear
- * of every other mark and label (`markLabelPlaces`; decision-r07-quality-and-destination, addendum
- * B), so that a reported destination moves it in the frame its chevrons are first drawn. It cuts,
- * never eased as the guide's state transitions are: an eased move would carry its opaque plate over
- * a reticle for up to 150 ms, below the 6:1 a mark's meaning needs (decision-r07-t16d-followups,
- * (d); R07.T16.g). The plates' sizes and the chrome's boxes, on which the destination's place
- * depends, are read before any label moves, and only while a destination's label is shown, so that
- * the frame forces no style or layout between its writes.
+ * The chrome over a view's stage, CSS px from its top left (R07.T16.i): every box over the canvas
+ * but the marks' labels, which is the label block with its statements, and each open instrument
+ * slot, but not the slots' column, which is empty between them.
+ */
+function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
+  const origin = overlay.getBoundingClientRect();
+  return [
+    ...overlay.querySelectorAll(
+      ":scope > :not(.view-marks):not(.view-instruments), :scope > .view-instruments > .view-instrument",
+    ),
+  ].map((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      leftPx: box.left - origin.left,
+      topPx: box.top - origin.top,
+      widthPx: box.width,
+      heightPx: box.height,
+    };
+  });
+}
+
+/**
+ * Moves each mark's label with its mark, on every animation frame, at the marks the last drawn
+ * frame placed; its text changes at 4 Hz (RM1 m10). Each takes its place by `markLabelPlaces`
+ * (R07.T16.i;
+ * decision-r07-quality-and-destination, Q6 (a) and addenda B and C): a place where its plate lies
+ * wholly inside the stage and clear of the chrome and the plates placed before it, the destination's
+ * label first, at its `labelRisePx` above or below its whole chevron set, then the selection's, then
+ * the rest by range; or it is hidden whole. A label whose mark this frame did not draw is hidden
+ * until the next readout removes it. Each change of place, or of whether it is shown, cuts, never
+ * eased as the guide's state transitions are: an eased move would carry its opaque plate over a
+ * reticle for up to 150 ms, below the 6:1 a mark's meaning needs (decision-r07-t16d-followups, (d);
+ * R07.T16.g).
+ *
+ * @remarks
+ * The plates' sizes and the chrome's boxes are measured in the DOM, unrounded, before any label
+ * moves, so that the frame forces at most one layout, before its writes. Each label's state is kept
+ * with its element between frames, for the placing's hysteresis; a label mounted again starts
+ * afresh.
  *
  * @param labels - The marks' labels by their target's key.
  * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
+ * @param states - Each label's state after the frame before, written for the next.
+ * @param nowMs - The animation frame's time, by which each label's changes are counted.
  */
 function placeMarkLabels(
   labels: ReadonlyMap<string, HTMLElement>,
   anchors: ReadonlyArray<DrawAnchor>,
   stage: ElementSize,
+  selection: CameraTarget | null,
+  states: WeakMap<HTMLElement, MarkLabelState>,
+  nowMs: number,
 ): void {
   const plates = new Map<string, PlateSizePx>();
-  const chrome: ScreenBoxPx[] = [];
-  const destination = anchors.find(
-    (anchor) => anchor.label !== null && anchor.labelRisePx !== null,
-  );
-  const destinationNode =
-    destination === undefined ? undefined : labels.get(targetKey(destination.target));
-  if (destinationNode !== undefined) {
-    for (const anchor of anchors) {
-      const key = targetKey(anchor.target);
-      const node = anchor.label === null ? undefined : labels.get(key);
-      if (node !== undefined) {
-        // Its laid-out size, unrounded; a translate leaves it as it is.
-        const box = node.getBoundingClientRect();
-        plates.set(key, { widthPx: box.width, heightPx: box.height });
-      }
-    }
-    // The chrome over the stage, as R07.T16.i names it: the label block and the open slots.
-    const overlay = destinationNode.closest(".view__overlay");
-    if (overlay !== null) {
-      const origin = overlay.getBoundingClientRect();
-      for (const element of overlay.querySelectorAll(":scope > .view-label, .view-instrument")) {
-        const box = element.getBoundingClientRect();
-        chrome.push({
-          leftPx: box.left - origin.left,
-          topPx: box.top - origin.top,
-          widthPx: box.width,
-          heightPx: box.height,
-        });
-      }
-    }
-  }
-  const places = markLabelPlaces(anchors, plates, stage, chrome);
-  const placed = new Set<string>();
+  const previous = new Map<string, MarkLabelState>();
+  let overlay: Element | null = null;
   for (const anchor of anchors) {
     const key = targetKey(anchor.target);
     const node = anchor.label === null ? undefined : labels.get(key);
     if (node !== undefined) {
-      node.style.transform = markLabelTransform(
-        anchor,
-        stage.devicePixelRatio,
-        places.get(key) ?? "line",
-      );
+      // Its laid-out size, unrounded; a translate leaves it as it is.
+      const box = node.getBoundingClientRect();
+      plates.set(key, { widthPx: box.width, heightPx: box.height });
+      const state = states.get(node);
+      if (state !== undefined) {
+        previous.set(key, state);
+      }
+      overlay ??= node.closest(".view__overlay");
+    }
+  }
+  const places = markLabelPlaces(anchors, plates, stage, {
+    chrome: overlay === null ? [] : chromeBoxesPx(overlay),
+    selection: selection === null ? null : targetKey(selection),
+    previous,
+    nowMs,
+  });
+  const shown = new Set<string>();
+  for (const anchor of anchors) {
+    const key = targetKey(anchor.target);
+    const node = anchor.label === null ? undefined : labels.get(key);
+    const state = places.get(key);
+    const transform =
+      state === undefined ? null : markLabelTransform(anchor, stage.devicePixelRatio, state);
+    if (node !== undefined && state !== undefined) {
+      states.set(node, state);
+    }
+    if (node !== undefined && transform !== null) {
+      node.style.transform = transform;
       node.style.visibility = "";
-      placed.add(key);
+      shown.add(key);
     }
   }
   for (const [key, node] of labels) {
-    if (!placed.has(key)) {
+    if (!shown.has(key)) {
       node.style.visibility = "hidden";
     }
   }
@@ -755,13 +781,29 @@ function ViewStage({
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let anchors: ReadonlyArray<DrawAnchor> = [];
+    // Where each mark's label stood after the last frame, kept with its element (R07.T16.i).
+    const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
     let frame = 0;
     const tick = (nowMs: number): void => {
       animationFrame += 1;
       const paced = budgetRef.current;
       const primaryBudget = budgetOf(paced.budgets, VIEW_ID);
-      // A 30 Hz primary draws on every second vsync, and its instruments only in its frames.
+      // A 30 Hz primary draws on every second vsync, and its instruments only in its frames. Its
+      // labels are placed on every vsync, at the last drawn frame's marks, so that a readout's
+      // commit between two drawn frames, which can widen a plate or the chrome, is never painted
+      // with a label in part (R07.T16.i).
       if (!drawsInFrame(animationFrame, primaryBudget.rateHz)) {
+        const between = inputsRef.current;
+        if (between.size !== null) {
+          placeMarkLabels(
+            labelsRef.current,
+            anchors,
+            between.size,
+            between.selection,
+            labelStates,
+            nowMs,
+          );
+        }
         frame = requestAnimationFrame(tick);
         return;
       }
@@ -828,7 +870,14 @@ function ViewStage({
           anchors = drawn.anchors;
           // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
           drawnStyle = drawn.drawnStyle;
-          placeMarkLabels(labelsRef.current, anchors, inputs.size);
+          placeMarkLabels(
+            labelsRef.current,
+            anchors,
+            inputs.size,
+            inputs.selection,
+            labelStates,
+            nowMs,
+          );
         }
       }
       // What the meter says is true of the frame just drawn: an image coming to be drawn opens

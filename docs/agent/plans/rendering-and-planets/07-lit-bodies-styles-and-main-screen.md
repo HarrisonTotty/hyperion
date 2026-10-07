@@ -524,6 +524,11 @@ destination label's one place in `spatial/symbols.ts` (`LABEL_TEXT_CLEARANCE_REM
 parameter and `markLabelRisePx` is new; `DrawAnchor` gains `labelRisePx` and `markReachPx`; and
 `ViewMarkLabels.tsx` gains `MarkLabelPlace`, `PlateSizePx` and `markLabelPlaces`, with
 `markLabelTransform(anchor, devicePixelRatio, place)` (see "Deviations in T16.h's follow-up, as
+built")._ _As built by T16.i: `MarkLabelPlace` gives way to `MarkLabelState` (`kind` `destination`
+or `mark`, its place or `null` for hidden, its `changesMs`) and `MARK_LABEL_SIDES`;
+`markLabelPlaces(anchors, plates, stage, { chrome?, selection?, previous?, nowMs? })` returns each
+label's state; `markLabelTransform(anchor, devicePixelRatio, state)` returns a transform or `null`,
+with `sideLabelTransform` and `destinationLabelTransform` beside it (see "Deviations in T16.i, as
 built")._
 
 ### Main screen (Phase C)
@@ -2267,6 +2272,8 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
   no fragment of TEST PLANET's label beside the block.
   **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`, the
   console-ux skill's scripts, `just ci`.
+  _As built: see Risks, "Deviations in T16.i, as built". The first test's left is built at an
+  instrument slot's left edge, the mirror; Q6 (a)'s limit of three changes a second is built too._
 
 - **R07.T16.j P05's furniture text clear of marks and stalks.** P05's `spatial/furniture.ts`
   (`triadLayout`, `coreArrowLayout`, `placeCurveLabels`), `spatial/labels.ts` (`placeLabels`) and
@@ -5386,7 +5393,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - No kept scene brings a craft other than the own ship into view, from any camera or `CHASE`
         target (explored), so the view's chevrons about a craft rest on the draw list's tests.
       - At a ratio of 2 a 1280 × 720 window is clamped to 1024 × 640 CSS px, the compact layout,
-        where the label block covers TEST PLANET's label and its marks: T16.i's defect.
+        where the label block covers TEST PLANET's label and its marks: T16.i's defect. _Built by
+        T16.i: the label is hidden whole there, or takes another side._
   - **The acceptance's vitest paths** take every changed test.
   - **Captures.** `just test-render --captures`, both variants, on the merged base (70044d83's tree,
     T16.h's changes stashed) and after: all 110 byte-identical. No capture holds a destination or is
@@ -5488,16 +5496,19 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     chart at class 4, 80% and 0.78125: `PFF 0B0Z0Z E-20` across the set). A lesser label is now
     dropped within 0.25 rem of the destination's chevron set (the square of half-size
     `destinationSetReachPx`) or within 0.5 rem of its label. The view never drops a label: there
-    another mark's plate may still cover the chevrons, for T16.i's obstacle list.
+    another mark's plate may still cover the chevrons, for T16.i's obstacle list. _Built by T16.i:
+    in the view every other label stands 0.25 rem clear of the set and 0.5 rem of the destination's
+    plate, or takes its next side, or is hidden whole._
   - **The view measures in the DOM**, reading every plate's and the chrome's rects, unrounded,
     before the loop writes any label in the frame, and only while a destination's label is shown. A
     destination's plate mounts hidden at the upper right and the loop shows it at its place, so that
-    it never shows a frame at a place it then leaves.
+    it never shows a frame at a place it then leaves. _As built by T16.i: every plate is measured on
+    every animation frame, and every label mounts hidden._
   - _Stated limits_ (confirmed by addendum C, C3, but for the third, which C1 and C3 replace;
     T16.i adds the view's hysteresis, and P05's labels take none, re-placing only as the camera
     moves):
     - no hysteresis between places until T16.i: a mark moving across a threshold cuts its label
-      from place to place;
+      from place to place; _built by T16.i (0.25 rem, and three changes a second)_;
     - a disc is taken as its bounding square, about 0.41 r beyond its outline at the corners, and a
       craft's hull larger than its bracket is not counted;
     - P05: the selection's label, pinned, is never dropped, and can run through a neighbouring
@@ -5591,7 +5602,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       chevrons, was taken, and so were its two should-fixes: P05 takes every chosen label at its
       line place, and the fallback is recorded. Of its considers, the hidden mount was taken, a
       disc's circle and a hull's extent are recorded as limits, and the destination's set as an
-      obstacle in the view is for T16.i.
+      obstacle in the view is for T16.i (built by T16.i).
     - **Plan conformance:** no must-fix either time. Its should-fixes were taken: the Provides
       pointers, P05's "stands beyond them", the by-hand counts as measured, labels out of view not
       counted, and the pending items. Its considers were taken: the stylesheet's padding test, the
@@ -5745,6 +5756,156 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       note no longer fits;
     - T16.h's crops for the chevrons and raised labels (`.git/rm23-scratch/r07-views/t16h/` and
       `t16h-fu/crops/`) and T16.e's silhouettes (`t16e/`), for the look the drafts describe.
+- **Deviations in T16.i, as built** (2026-10-07; the views lane; decision-r07-quality-and-destination,
+  Q6 (a) and addenda B and C).
+  - **Files.** Those the bullet lists, and:
+    - `test/viewDisplayHarness.tsx`: `stubViewLayout` lays each mark's plate out at
+      `MARK_LABEL_PX` (108 × 18 CSS px, TEST PLANET's at 100%) and the primary's label block at an
+      optional `blockPx`, by default nothing at the stage's top left; `renderViewDisplay` takes it
+      too, and `LaidOutBoxPx` is new;
+    - `view/wireframe/drawList.ts` (`DrawAnchor.labelOffsetPx`, `labelRisePx`) and
+      `spatial/symbols.ts` (`destinationLabelPlace`, `destinationSetReachPx`): their docs alone.
+  - **Signatures.**
+    - `MarkLabelPlace` gives way to `MarkLabelState`, a union on `kind`: `destination` with a
+      `DestinationLabelPlace`, or `mark` with one of `MARK_LABEL_SIDES` (`right`, `left`, `below`,
+      `above`; `"line"` is `right`), its place `null` where the label is hidden, and `changesMs`.
+    - `markLabelPlaces(anchors, plates, stage, { chrome?, selection?, previous?, nowMs })` returns
+      each label's state; `MarkLabelStage` and `MarkLabelSurroundings` are new.
+    - `markLabelTransform(anchor, devicePixelRatio, state)` returns the plate's transform, or `null`
+      where the label is hidden; `sideLabelTransform(anchor, ratio, side)` and
+      `destinationLabelTransform(anchor, ratio, place, risePx)` are the two it chooses between.
+    - `PLATE_SIDE_PADDING_REM`, `CHROME_CLEARANCE_REM` and `LABEL_HYSTERESIS_REM` (each 0.25),
+      `LABEL_CHANGE_LIMIT` (3), `LABEL_CHANGE_WINDOW_MS` (1,000) and
+      `destinationSetReachCssPx(risePx, stage)` are new.
+    - `ViewDisplay.tsx`'s `placeMarkLabels(labels, anchors, stage, selection, states, nowMs)` keeps
+      each label's state in a `WeakMap` keyed by its element, so that a label mounted again starts
+      afresh; `chromeBoxesPx` reads the chrome.
+    - The view no longer calls `destinationLabelPlace`; P05's `placeLabels` still does.
+  - **Below and above, a padding further out.** The plate stands `labelOffsetPx` and 0.25 rem
+    (`PLATE_SIDE_PADDING_REM`, its side padding) from its mark, against the bullet's "at its own
+    offset from its mark". The plate has no padding above and below, so its text then stands as far
+    from the mark as at the right, 0.25 rem or more outside the bracket's outer edge as the guide
+    asks, and not by the line box's leading.
+  - **The compact-layout test.** "A mark under the label block's right edge takes its label to the
+    left" cannot hold with the block at the stage's top left: the left of such a mark lies under the
+    block too. Built as four tests, against the block as T16.i's captures measured it (its foot at
+    252 px, its right edge at 492.27 px in the wireframe):
+    - a mark at the block's foot takes the place below;
+    - a mark under the block's right edge keeps the right, past the block;
+    - a mark under an instrument slot's left edge takes the left, the mirror;
+    - a mark wholly under the block has its label hidden whole.
+  - **The hysteresis**, as built in `choosePlace`:
+    - a label keeps its place while it fits, and moves to an earlier place only where that place is
+      clear by a further 0.25 rem on every count, the stage's edges included, and clear of where
+      every label not yet placed stood after the frame before;
+    - a label whose place no longer fits leaves it at once for the first place clear by the margin,
+      a label after it in the order giving way where it stood there (the plan-conformance review's
+      consider), or it is hidden whole;
+    - a label hidden comes back only to a place clear by the margin, and a label just mounted takes
+      the first place that fits; each keeps clear of where every label not yet placed stood;
+    - a label whose mark has just become or stopped being the destination starts afresh, with no
+      margin, so that the destination's report moves it in the frame that first draws the
+      chevrons.
+    - So selecting, which changes only the order, moves no label, and the order decides where
+      labels come to meet. A hidden nearer or selected label waits for a clear place rather than
+      taking a standing farther label's (open, below).
+  - **Three changes a second** (the plan-conformance review's must-fix, the UX review's
+    should-fix). Q6 (a)'s "never more than three times a second" (`G` 940's flash limit), which
+    C4's text does not repeat, is built: a label changes its place, or whether it is shown, at
+    most `LABEL_CHANGE_LIMIT` times in any `LABEL_CHANGE_WINDOW_MS`, counted from the frame's time,
+    its first showing counted. It makes one fewer by choice, moving or coming back. One that has
+    made those keeps its place while it fits, and where its place stops fitting it is hidden whole
+    as the last change, never shown in part. It comes back once the window allows. A label at its
+    limit is hidden, not moved, when its mark becomes or stops being the destination, for up to a
+    second, against addendum B's "in the frame that first draws the chevrons" (the UX re-review:
+    the chevrons and the list still mark the destination). _For the orchestrator: kept unless C4's
+    text is ruled to drop it._
+  - **Placed on every animation frame** (the UX review's must-fix). On a 30 Hz primary (`QUALITY
+    LOW`'s photorealistic view) the labels are placed on every vsync, at the last drawn frame's
+    marks, so that a readout's commit between two drawn frames (a wider range, a stale `S`, a new
+    statement on the block) is never painted with a plate in part.
+  - **Measured every frame.** Every plate and the chrome are read, unrounded, before any label is
+    written, not only while a destination's label is shown (T16.h's follow-up): one forced layout a
+    frame at most. Every label mounts hidden, and the loop shows it at its place.
+  - **"By range"** is `DrawAnchor.distanceM`, the camera's, nearest first.
+  - **"Clear of the plates placed"** is no overlap; two plates may touch (open, below).
+  - **The chrome** is every direct child of `.view__overlay` but the marks' labels and the slots'
+    column, which is empty between its slots, and each open slot: today the label block, with its
+    statements, and the slots.
+  - **The destination's chevron set** is the square of half-size `labelRisePx` less 0.25 rem
+    (`destinationSetReachCssPx`), which is `destinationSetReachPx` exactly, since
+    `destinationLabelRisePx` is that reach and `LABEL_TEXT_CLEARANCE_REM`. No `DrawAnchor` field is
+    added. The set counts whether or not the destination's label is shown.
+  - **Tests.** `ViewMarkLabels`: the four side transforms at ratios 1 and 2 and the padding; the
+    destination's places, tiers and last resort (first inside and 0.25 rem clear of the chrome,
+    else hidden, never past the stage's edge); the compact layout's four cases; a slot's edge, the
+    stage's right edge, foot and corner; two labels meeting, nearer first, and the selection's
+    first; selecting moving no label; the destination's label unmoved by the selection's, which
+    yields; another label near the destination's plate or within 0.25 rem of its set; the
+    0.25 rem from the block and a slot; the 0.2 rem back and forth, from a place and from hidden;
+    leaving a place at once; the destination's report; a forced move taking a farther label's
+    place; the limit of three changes. `ViewDisplay`: a label clear of and under the block as the
+    DOM lays them out, under an open slot, its state carried from frame to frame, and placed on
+    every vsync of a 30 Hz primary. Each of the hysteresis, held-place, forced-move, limit,
+    every-vsync and kept-state rules was checked by breaking it and seeing its test fail.
+  - **By hand, hidden** (`.git/rm23-scratch/r07-views/t16i/`; `page/run.sh` with `page/hook.js`,
+    T16.f's page harness with a measure of every label against the block, the slots, the stage and
+    each other, and a per-frame sampler; `base-*`, the same runs on HEAD's build):
+    - **Compact, 1280 × 720** (stage 816 × 540; the block, which has gained its `QUALITY` line since
+      T16.f, down to 252 px in the wireframe and 314 photorealistic): `PRECISION TEST` from `CHASE`
+      at 60°, 90° and 120°, both styles. TEST PLANET's mark lies under the block, and its label is
+      hidden whole in all six; the base shows it overlapping the block in all six, `ANET` beside the
+      block's last line at 120° (`crops/base-compact720-02-…` against `crops/compact720-02-…`).
+    - **Turning in `FREE`** from `CHASE` at 120°, eight steps, every frame sampled (about 70 frames a
+      step at 60 fps): hidden, then below as the mark leaves the block's foot, then right once it is
+      clear by 0.25 rem, then left at the stage's right edge, then hidden and gone as the mark
+      leaves; one change at a time, and no flicker. The base: the label under the block's foot, its
+      `T` cut (`crops/base-turn720-02-…`), and past the stage's right edge (`-06`).
+    - **Full, 1920 × 1080** (stage 1120 × 900): the label at its right in all six states, 4.24 to
+      9.83 rem clear of the block, as the base.
+    - No after state has a shown plate past the stage's edge, within 0.25 rem of the chrome or over
+      another plate; every base state at 1280 × 720 but none at 1920 × 1080 has one.
+    - **Seen:** below its mark, TEST PLANET's plate covers the top of the own ship's hull outline for
+      one step of the turn (`crops/turn720-02-…`), as a plate at the right may cover a neighbouring
+      mark (T16.g). Open, below.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest (`src/renderer/src/displays/view`): 21 files, 401 tests, all pass.
+      The app's: 339 files, 7,908 tests, all pass.
+    - `just check lint` from a clean typecheck cache: exit 0. Prettier on every changed file.
+    - `just test-render`, both variants with captures, on the base (HEAD, the changes stashed) and
+      after, under one hold of the heavy lock (`t16i/render-pair.sh`): each exit 0, 610 checks (305
+      a variant), and all 110 captures byte-identical. It ran before the reviews' fixes (the state's
+      union, the limit, forced moves, placing on every vsync), which change only the DOM labels; on
+      the final tree (`t16i/render-final.sh`) both variants again exit 0, 610 checks, and all 110
+      captures byte-identical to the base's.
+    - The console-ux skill's lint (0 errors in the four changed renderer files), contrast (every
+      pairing passes) and glyphs (no new character). No WGSL changed, so naga was not run.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, each twice.
+    - **TypeScript:** no must-fix. Its should-fixes were taken: the state a union on `kind` with the
+      transforms split, the sort's ternary, `DrawAnchor`'s docs, this entry for the compact test;
+      then `nowMs` required and a test split. Its considers were taken: a display test that carries
+      state between frames, and `toBeVisible`. Not taken: letting a label at its limit move on the
+      destination's report (above, as the UX re-review accepts).
+    - **UX:** one must-fix, placing on every vsync of a 30 Hz primary, and one should-fix, the
+      limit of three changes, both taken and confirmed on re-review. Its considers are open, below.
+    - **Plan conformance:** one must-fix, the limit (built, then made strict on re-review: a forced
+      hide is at most the third change), and its should-fixes: these records, the fixture's source.
+      Of its considers, the fixture was taken and a forced move's priority half taken (above).
+  - **Open, for the orchestrator or the owner:**
+    - the limit of three changes a second, built from Q6 (a) though C4's text does not repeat it;
+    - other marks under a lesser label's plate: the plan's rule counts no marks for labels other
+      than the destination's, so a plate below or above its mark may cover a neighbouring mark or
+      the own ship's hull, as at the right. Lean: as built; the UX review's consider was to prefer a
+      side clear of every other mark's reach, else the first that fits;
+    - a mark whose centre lies just past the stage's edge (up to its label's offset, about 13 px at
+      the right) can show its label flipped inside, beside nothing drawn; P05 drops a label whose
+      mark is out of view. Lean: hide the view's the same way;
+    - two plates may touch, and stacked with no gap could read as one two-line label. Lean: as
+      built, "clear of the plates placed";
+    - a plate may lie flush with the stage's edge, over the canvas's 2 px focus ring, as before
+      T16.i. Lean: as built;
+    - a hidden nearer or selected label waits for a clear place rather than taking a standing
+      farther label's. Lean: as built, for stability.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

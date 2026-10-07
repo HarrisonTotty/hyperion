@@ -29,7 +29,14 @@ import {
 } from "../../test/sceneFixture";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { stylesheetRule } from "../../test/stylesheet";
-import { FULL_VIEW_PX, renderViewDisplay, stubViewLayout } from "../../test/viewDisplayHarness";
+import {
+  FULL_VIEW_PX,
+  type LaidOutBoxPx,
+  renderViewDisplay,
+  STAGE_HEIGHT_PX,
+  STAGE_WIDTH_PX,
+  stubViewLayout,
+} from "../../test/viewDisplayHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { rotate } from "../../view/camera/quaternion";
@@ -62,9 +69,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Lays the stage out at {@link WIDTH_PX} by {@link HEIGHT_PX}, in VIEW's full layout. */
-function stubLayout(): void {
-  stubViewLayout({ widthPx: WIDTH_PX, heightPx: HEIGHT_PX }, () => FULL_VIEW_PX);
+/**
+ * Lays the stage out at {@link WIDTH_PX} by {@link HEIGHT_PX}, in VIEW's full layout, and the
+ * label block at `blockPx`, by default nothing.
+ */
+function stubLayout(blockPx?: () => LaidOutBoxPx): void {
+  stubViewLayout({ widthPx: WIDTH_PX, heightPx: HEIGHT_PX }, () => FULL_VIEW_PX, blockPx);
 }
 
 interface Setup {
@@ -82,10 +92,15 @@ interface Setup {
 
 /** Renders the display in a provider, with fake frames, layout and engine. */
 function setup(
-  options: { readonly store?: GraphicsStatusStore; readonly source?: ViewEngineSource } = {},
+  options: {
+    readonly store?: GraphicsStatusStore;
+    readonly source?: ViewEngineSource;
+    /** The label block's laid-out box, CSS px from the stage's top left, each time it is measured. */
+    readonly blockPx?: () => LaidOutBoxPx;
+  } = {},
 ): Setup {
   const advanceTimers = fakeFramesAndTimeouts();
-  stubLayout();
+  stubLayout(options.blockPx);
   const fake = fakeViewEngineSource();
   const store = options.store ?? new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
   const source = options.source ?? fake.source;
@@ -131,6 +146,29 @@ function setup(
     },
     unmount: view.unmount,
   };
+}
+
+/** A label block laid out as nothing, and one over the whole stage, CSS px. */
+const NO_BLOCK: LaidOutBoxPx = { leftPx: 0, topPx: 0, widthPx: 0, heightPx: 0 };
+const WHOLE_STAGE: LaidOutBoxPx = { leftPx: 0, topPx: 0, widthPx: WIDTH_PX, heightPx: HEIGHT_PX };
+
+/** TEST PLANET's label, found by its name: the labels are hidden from assistive technology. */
+function planetLabel(): HTMLElement | undefined {
+  return screen
+    .getAllByText("TEST PLANET", { exact: false })
+    .find((each) => each.classList.contains("view-marks__label"));
+}
+
+/** The first listed mark's label from the free camera, once the frames after its readout place it. */
+async function freeCameraLabel({ user, advance }: Setup): Promise<HTMLElement | undefined> {
+  await settle();
+  advance(300);
+  await user.keyboard("3");
+  advance(300);
+  const name = screen.getAllByRole("option")[0]?.querySelector(".view-list__name")?.textContent;
+  return screen
+    .getAllByText(name ?? "", { exact: false })
+    .find((each) => each.classList.contains("view-marks__label"));
 }
 
 /** Lets the engine's promises settle. */
@@ -563,6 +601,105 @@ describe("the VIEW display", () => {
     expect([label?.isConnected, before !== undefined && label?.style.transform !== before]).toEqual(
       [true, true],
     );
+  });
+
+  it("shows a mark's label clear of a label block laid out as nothing (R07.T16.i)", async () => {
+    stubMatchMedia(true);
+    const view = setup();
+    expect(await freeCameraLabel(view)).toBeVisible();
+  });
+
+  it("hides a mark's label whole under a label block laid out over the whole stage (R07.T16.i)", async () => {
+    stubMatchMedia(true);
+    const view = setup({ blockPx: () => WHOLE_STAGE });
+    expect(await freeCameraLabel(view)).not.toBeVisible();
+  });
+
+  it("keeps a hidden label hidden until a place is clear by 0.25 rem, from frame to frame (R07.T16.i)", async () => {
+    // The block over the whole stage, then ending 6 px left of the label's place at its mark's
+    // right, where it fits but not by the margin, then 10 px left of it; every other place lies
+    // under the block.
+    stubMatchMedia(true);
+    let block = NO_BLOCK;
+    const view = setup({ blockPx: () => block });
+    const label = await freeCameraLabel(view);
+    const nearPx = Number(/^translate\(([\d.]+)px, /u.exec(label?.style.transform ?? "")?.[1]);
+    // Its first showing out of the window of its changes (`LABEL_CHANGE_LIMIT`).
+    view.advance(1_100);
+    const shown = (box: LaidOutBoxPx): boolean => {
+      block = box;
+      view.advance(50);
+      return label?.style.visibility === "";
+    };
+    expect([
+      shown(WHOLE_STAGE),
+      shown({ ...WHOLE_STAGE, widthPx: nearPx - 6 }),
+      shown({ ...WHOLE_STAGE, widthPx: nearPx - 10 }),
+    ]).toEqual([false, false, true]);
+  });
+
+  it("hides a mark's label whole under an open instrument slot laid out over it (R07.T16.i)", async () => {
+    // A stage of 1000 × 280 CSS px, room for one slot, which the harness lays out over its top left
+    // 555 × 254 px, where TEST PLANET's every place lies.
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+      source: fake.source,
+      engines: fake.engines,
+      stagePx: { widthPx: 1000, heightPx: 280 },
+    });
+    await settle();
+    view.advance(300);
+    // The readout mounts the label hidden as the frames' act ends; the next frames place it.
+    view.advance(100);
+    const label = planetLabel();
+    const before = label?.style.visibility;
+    await view.user.click(
+      within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
+        name: "OPEN",
+      }),
+    );
+    view.advance(300);
+    expect([before, label?.isConnected]).toEqual(["", true]);
+    expect(label).not.toBeVisible();
+  });
+
+  it("places a mark's label on every vsync of a 30 Hz primary, between the frames it draws (R07.T16.i)", async () => {
+    // QUALITY LOW's photorealistic primary draws on every second vsync. The block covers the stage,
+    // then nothing, then the stage again, a vsync at a time: one of the three vsyncs draws nothing.
+    let block = NO_BLOCK;
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      setting: "low",
+      blockPx: () => block,
+    });
+    await settle();
+    view.advance(100);
+    await view.user.keyboard("4");
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    view.advance(100);
+    const label = planetLabel();
+    const before = label?.style.visibility;
+    // Its first showing out of the window of its changes (`LABEL_CHANGE_LIMIT`).
+    view.advance(1_100);
+    const shown = (box: LaidOutBoxPx): boolean => {
+      block = box;
+      view.advance(16);
+      return label?.style.visibility === "";
+    };
+    const whole = { leftPx: 0, topPx: 0, widthPx: STAGE_WIDTH_PX, heightPx: STAGE_HEIGHT_PX };
+    expect([
+      before,
+      screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC, PRIMARY/ }).isConnected,
+      shown(whole),
+      shown(NO_BLOCK),
+      shown(whole),
+    ]).toEqual(["", true, false, true, false]);
   });
 
   it("stops flying when its canvas loses focus", async () => {

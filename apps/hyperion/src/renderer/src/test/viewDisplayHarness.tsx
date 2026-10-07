@@ -72,21 +72,51 @@ export interface LaidOutPx {
   readonly heightPx: number;
 }
 
+/**
+ * A mark's label's plate as the tests lay it out, CSS px: `TEST PLANET`'s at 100%, as measured on
+ * the development machine in the compact layout (R07.T16.f's hidden captures).
+ */
+export const MARK_LABEL_PX = { widthPx: 108, heightPx: 18 } as const;
+
+/** A laid-out box, CSS px from the page's top left, at which the stage stands. */
+export interface LaidOutBoxPx extends LaidOutPx {
+  readonly leftPx: number;
+  readonly topPx: number;
+}
+
 /** A box laid out at the origin. */
 function rect({ widthPx, heightPx }: LaidOutPx): DOMRect {
   return DOMRect.fromRect({ x: 0, y: 0, width: widthPx, height: heightPx });
 }
 
 /**
- * Lays every element out at `stagePx`, but for the `.view` box, at `viewPx()`, and each open
- * instrument slot, at {@link SLOT_WIDTH_PX} by {@link SLOT_HEIGHT_PX}.
+ * Lays every element out at `stagePx`, but for the `.view` box, at `viewPx()`; each open
+ * instrument slot, at {@link SLOT_WIDTH_PX} by {@link SLOT_HEIGHT_PX}; each mark's label, at
+ * {@link MARK_LABEL_PX}; and the primary's label block, at `blockPx()`, by default nothing at the
+ * stage's top left, so that a label is placed clear of it wherever its mark stands (R07.T16.i).
  */
-export function stubViewLayout(stagePx: LaidOutPx, viewPx: () => LaidOutPx): void {
+export function stubViewLayout(
+  stagePx: LaidOutPx,
+  viewPx: () => LaidOutPx,
+  blockPx: () => LaidOutBoxPx = () => ({ leftPx: 0, topPx: 0, widthPx: 0, heightPx: 0 }),
+): void {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function laidOut(
     this: HTMLElement,
   ) {
     if (this.classList.contains("view")) {
       return rect(viewPx());
+    }
+    if (this.classList.contains("view-marks__label")) {
+      return rect(MARK_LABEL_PX);
+    }
+    if (this.matches(".view__overlay > .view-label")) {
+      const block = blockPx();
+      return DOMRect.fromRect({
+        x: block.leftPx,
+        y: block.topPx,
+        width: block.widthPx,
+        height: block.heightPx,
+      });
     }
     return this.classList.contains("view-instrument")
       ? rect({ widthPx: SLOT_WIDTH_PX, heightPx: SLOT_HEIGHT_PX })
@@ -276,12 +306,15 @@ export function renderViewDisplay(options: {
   readonly stagePx?: LaidOutPx;
   /** The `.view` box's laid-out size, CSS px: {@link FULL_VIEW_PX}, the full layout. */
   readonly viewPx?: LaidOutPx;
+  /** The primary's label block's laid-out box, each time it is measured: nothing by default. */
+  readonly blockPx?: () => LaidOutBoxPx;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
   stubViewLayout(
     options.stagePx ?? { widthPx: STAGE_WIDTH_PX, heightPx: STAGE_HEIGHT_PX },
     () => viewPx,
+    options.blockPx,
   );
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const user = userEvent.setup({ advanceTimers });

@@ -251,18 +251,19 @@ export interface DrawAnchor {
    */
   readonly label: AnchorLabel | null;
   /**
-   * The device px from the anchor to its label's `--surface-0` plate's near edge, to its right, or
-   * to its left at a destination's left-hand places: clear of the selection's bracket, whether or
-   * not the mark is selected or the destination (`markLabelOffsetPx`, R07.T16.g;
-   * decision-r07-quality-and-destination, addendum A).
+   * The device px from the anchor to its label's `--surface-0` plate's near edge, at its right or
+   * its left, and with the plate's side padding below or above it (`MARK_LABEL_SIDES`, R07.T16.i),
+   * or at a destination's places: clear of the selection's bracket, whether or not the mark is
+   * selected or the destination (`markLabelOffsetPx`, R07.T16.g; decision-r07-quality-and-destination,
+   * addendum A).
    */
   readonly labelOffsetPx: number;
   /**
    * While the mark is the destination, the device px from the anchor to its label plate's near
    * horizontal edge, above or below the whole chevron set (`markLabelRisePx`;
-   * decision-r07-quality-and-destination, addendum B); `null` while it is not, where the plate is
-   * centred on the anchor's line. It is the list's, so that the label moves in the frame in which
-   * the destination's chevrons are first drawn, and cuts.
+   * decision-r07-quality-and-destination, addendum B); `null` while it is not, where the label takes
+   * one of its sides (R07.T16.i). It is the list's, so that the label moves in the frame in which the
+   * destination's chevrons are first drawn, and cuts.
    */
   readonly labelRisePx: number | null;
   /**

@@ -273,7 +273,8 @@ export function destinationLabelRisePx(
  * How far along a screen axis from a mark's centre the destination's chevron set's ink reaches, px:
  * the apex distance, an arm's run outward and half the mark stroke, the half-size of the square that
  * holds the whole set (decision-r07-quality-and-destination, addendum B). Another mark's label stands
- * clear of it on the spatial displays, as the destination's own label stands 0.25 rem beyond it.
+ * clear of it on the spatial displays and in the view (R07.T16.i), as the destination's own label
+ * stands 0.25 rem beyond it.
  *
  * @param bracketHalfSizePx - The selection's bracket's half-size about the mark, as drawn.
  * @param destinationApexPx - The chevrons' apices' distance from the mark's centre, as drawn.
@@ -378,10 +379,12 @@ export function boxGapPx(a: ScreenBoxPx, b: ScreenBoxPx): number {
  * display; else the upper right. The label is never dropped.
  *
  * @remarks
- * Both drawers take it with their own boxes and neighbours: the spatial displays' `placeLabels`,
- * with estimated boxes, and the view's `markLabelPlaces`, with its plates as laid out. A place out
- * of the display is no place, so that where the upper right runs past the display's right or top
- * edge the label takes the upper left or the lower right, as a label flips at the edge.
+ * The spatial displays' `placeLabels` takes it, with estimated boxes. The view's `markLabelPlaces`
+ * places its destination's label by addendum C's order instead, with its plates as laid out and its
+ * hysteresis: the first place 0.5 rem clear, else the first inside and 0.25 rem clear of the chrome,
+ * else hidden whole (R07.T16.i). A place out of the display is no place, so that where the upper
+ * right runs past the display's right or top edge the label takes the upper left or the lower
+ * right, as a label flips at the edge.
  *
  * @param boxOf - The label's box at a place.
  * @param inside - Whether a box lies wholly inside the display.
