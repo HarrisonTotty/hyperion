@@ -5667,38 +5667,62 @@ medium, sizes, figure)`.
     - _The result._ 37 of 4.7 million stored values differ, each by one rgba16float step. The
       largest e is 9.7 × 10⁻⁴, one half-float step. That fits the ruling's "at most about
       2 × 10⁻⁴" before the output's rounding.
-  - _The timing (step 7) is pending: there was no quiet window._
-    - _What was tried._ From 23:24 to 00:27 the harness waited for its gate: load at most 5, no
-      cargo or nextest, no other spike, GPU or Electron run, and 6 GB free.
-      - The load stayed at 7–29, with other lanes' nextest and cargo.
-      - The gate passed once, at 00:15:55, but the orchestrator's `just ci` held the heavy-test lock
-        and another lane's timed run was queued for it.
-      - The run was stopped at 62 minutes, as the brief directs.
-    - _The harness_ (`.git/rm23-scratch/laneC/t12e/timing/`), ready:
-      - `window.sh` runs the four runs in one window: high and low before, from 28479b9's
-        instrumented build (`laneC/t14diag/out-instrumented/`), then high and low after, from the
-        head's (`t12e/out-after/`, built with lane D's two instruments).
-      - Each run is lane C's m1 protocol: hidden, seed 7, the first 150 s, under `just _locked`
-        and, inside it, the NVIDIA-GPU lock (`locked.sh`), with `nvidia-smi` at 100 ms. The
-        telemetry sampler's state is logged beside each run.
-      - `analyse2.py` gives each pass and the joint row at p50 and p95, each atmosphere pass by clock
-        bin, rAF p99 and the long intervals against the P-state changes.
-    - _To run it_ (once the orchestrator clears a window):
-      1. Check that the release server is built: `target/release/hyperion-server`, built at 23:19.
-      2. Run
-         `systemd-run --user --scope --quiet --slice=agents.slice -p MemoryMax=2G -p MemorySwapMax=0 -p TasksMax=4096 -E HEAVY_SLICE=agents.slice -- timeout 9000 bash .git/rm23-scratch/laneC/t12e/timing/window.sh 60`.
-      3. For each of `t12e-{before,after}-{high,low}`, run
-         `python3 -I .git/rm23-scratch/laneC/t12e/timing/analyse2.py .git/rm23-scratch/laneC/t12e/timing <name>`.
-      4. Rebuild `apps/hyperion/out` clean with `pnpm --filter hyperion build`.
-    - _The bounds:_
-      - (a) The march's p50 after is at most 5% above before, at matched clocks: the 1,000–1,399
-        MHz bin, and ≥ 1,800 MHz where it has 100 frames.
-      - The sky view's p95 at matched clocks is at most 2.6 times its before (addendum B).
-      - (b) Terrain + atmosphere is at most 6 ms p95 on high and 18 ms on low.
-      - (c) rAF p99 is at most 16.8 ms after the warm-up, and every interval over 40 ms falls within
-        0.15 s of a P-state change.
-      - (d) Low's atmosphere row is at most 3.00 / 3.60 ms p50 / p95.
-      - High's atmosphere row is recorded against its 1 ms estimate, as a finding.
+  - _The timing_ (step 7; 2026-10-07, 00:46–00:57, in one window the orchestrator cleared).
+    - _The runs._ Lane C's m1 protocol: hidden, seed 7, the first 150 s, under `just _locked` and,
+      inside it, the NVIDIA-GPU lock, with `nvidia-smi` at 100 ms. Each run passed the quiet gate
+      inside both locks, at a load of 2.0–2.7 (at most 3.2 during a run) with 28–29 GB free. The
+      telemetry sampler (`crash-telemetry`, every 2 s) was active throughout.
+    - _The builds._ Before is 28479b9's instrumented build (`laneC/t14diag/out-instrumented/`).
+      After is the head's (12023f3), with lane D's two instruments (`t12e/out-after/`). The order
+      was high and low before, then high and low after. Figures are after the 10 s warm-up, from
+      `t12e/timing/analyse2.py`.
+
+    | ms, p50 / p95        | High, before  | High, after   | Low, before   | Low, after    |
+    | -------------------- | ------------- | ------------- | ------------- | ------------- |
+    | Sky view             | 0.111 / 0.168 | 0.200 / 0.230 | 0.284 / 0.302 | 0.205 / 0.213 |
+    | Aerial perspective   | 0.186 / 0.244 | 0.118 / 0.139 | 1.436 / 1.554 | 0.325 / 0.433 |
+    | Ray march            | 2.299 / 3.072 | 1.900 / 2.582 | 0.628 / 1.921 | 0.514 / 1.162 |
+    | Composite            | 0.061 / 0.402 | 0.398 / 0.402 | 0.122 / 0.208 | 0.124 / 0.226 |
+    | Atmosphere row       | 2.657 / 3.865 | 2.619 / 3.370 | 2.475 / 2.879 | 1.179 / 2.205 |
+    | Terrain              | 0.336 / 1.081 | 0.992 / 1.183 | 0.379 / 0.431 | 0.398 / 0.465 |
+    | Terrain + atmosphere | 2.989 / 4.894 | 3.622 / 4.395 | 2.860 / 3.262 | 1.578 / 2.681 |
+    | rAF p99, ms          | 16.80         | 16.80         | 33.30         | 33.30         |
+    | Intervals over 40 ms | 0             | 0             | 3             | 0             |
+    - _The clocks_ (graphics / memory, MHz, p50):
+      - high before: P3 68%, P5 29%, 1,110 / 5,001;
+      - high after: P3 26%, P5 71%, 1,065 / 810;
+      - low: P8 93% before and 96% after, 255 / 405 before and 225 / 405 after.
+
+      The driver chose the clocks, as Design note 21 has it. High's after ran mostly at P5's 810
+      MHz memory clock. That, not T12.e, is the likely cause of its slower terrain (p50 0.34 → 0.99
+      ms) and composite (0.06 → 0.40 ms), which this task did not touch. The after build also
+      carries the lanes' work merged since 28479b9.
+
+    - _The bounds._
+      - **(a) The march at matched clocks: met, 18% faster.** In the 1,000–1,399 MHz bin, before
+        is 2.294 ms p50 (7,245 frames, 1,110 MHz) and after 1.875 ms (6,598 frames, 1,080 MHz).
+        Neither run has 100 frames at ≥ 1,800 MHz. On low every frame was below 1,000 MHz:
+        0.628 → 0.514 ms at 255 → 225 MHz.
+      - **The sky view at matched clocks: met.** Its p95 in the 1,000–1,399 MHz bin goes from 0.168
+        to 0.232 ms, 1.38 times its before against addendum B's 2.6. Its p50 goes from 0.111 to
+        0.198 ms, 1.78 times, for 2.5 times the steps. Addendum B's fallbacks are not needed.
+      - **(b) Terrain + atmosphere: met.** 4.40 ms p95 on high (limit 6 ms) and 2.68 ms on low
+        (limit 18 ms).
+      - **(c) No plateau: met on high; low's p99 as before.**
+        - High: rAF p99 16.80 ms before and after, and no interval over 40 ms.
+        - Low: rAF p99 33.30 ms before and after. Its long intervals are single missed vsyncs (1.65%
+          before and 1.84% after), spread evenly through the run at about 10 every 10 s. The GPU's
+          pass sum in those frames is 1.8–3.1 ms p50.
+        - Lane D's six hidden low runs of T14.f gave the same p99 of 33.30 ms. So this is how the
+          hidden low run paces at P8, not a plateau and not this task's. Low's three intervals
+          over 40 ms before, none near a P-state change, are gone after.
+        - The literal "rAF p99 ≤ 16.8 ms" is therefore not met on low, before or after. It is
+          recorded as a finding, not acted on.
+      - **(d) Low's atmosphere row: met.** 1.18 / 2.21 ms p50 / p95, against its 3.00 / 3.60 before
+        (2.48 / 2.88 in this window).
+    - _High's atmosphere row against its 1 ms estimate_ (a finding for T19 and R12): 2.62 / 3.37
+      ms p50 / p95 at the driver's clocks, against 2.66 / 3.87 before. The march's 18% saving pays
+      for the sky view's 2.5 times the steps.
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
