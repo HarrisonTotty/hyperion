@@ -5,7 +5,7 @@ import { type OutlinePoint, SIZE_CLASS_REM, symbolOutline } from "../../spatial/
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
 import type { BodyMarkSymbol } from "../scene/model";
-import { bodyRegime } from "./bodies";
+import { isSymbolSized } from "./bodies";
 
 /** A point on the view, px from the top left. */
 export interface ScreenPx {
@@ -45,6 +45,20 @@ const BRACKET_ARM_SHARE = 1 / 3;
  * (`spatial/drawList.ts`, half of its 0.5 rem margin).
  */
 export const BRACKET_MARGIN_REM = 0.25;
+
+/**
+ * A mark's label's place beside it as R02.T15 built it, rem, before the reticles' growth: its
+ * `--surface-0` plate's near edge 0.75 rem from the mark's anchor, beyond the selection's bracket
+ * about a craft.
+ */
+export const LABEL_PLACE_REM = 0.75;
+
+/**
+ * How far a label's plate stands beyond the half-size of the outermost reticle about its mark,
+ * rem, before the outline's shift: 0.125, a craft's label beyond its bracket's centreline as
+ * R02.T15 built it (0.75 rem less the bracket's 0.375 + 0.25).
+ */
+export const LABEL_CLEARANCE_REM = 0.125;
 
 /**
  * The flight path marker's circle radius, wing length and fin height, rem. A choice of this plan,
@@ -113,8 +127,81 @@ export function reticleGrowthPx(shiftPx: number): number {
 }
 
 /**
+ * The selection's bracket's half-size about a mark, device px: the mark's radius and a margin,
+ * moved out by four times the outlines' shift.
+ *
+ * @param markRadiusPx - The radius of the mark it encloses, px.
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
+ */
+export function bracketHalfSizePx(markRadiusPx: number, remPx: number, shiftPx: number): number {
+  return markRadiusPx + BRACKET_MARGIN_REM * remPx + RETICLE_SHIFTS * shiftPx;
+}
+
+/**
+ * The destination's reticle's half-size about a mark, device px: a margin outside the selection's
+ * bracket's place, and at least `minGapPx` outside it, whether or not the destination is also the
+ * selection, so that the two reticles show together and a destination alone is never told from a
+ * selection by its colour alone (the guide's Colour rule; R07.T16.g, after the UX review).
+ *
+ * @remarks
+ * The least gap is a reticle's outline and one casing (`minReticleGapDevicePx`, R07.T16.d and
+ * T16.g): the destination is drawn after the selection, so that its casing would otherwise cover
+ * the bracket's full-coverage core below a ratio of 4/3, where 0.25 rem is under 4 device px.
+ *
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
+ * @param minGapPx - The least space between the two reticles' centrelines, device px.
+ */
+export function destinationHalfSizePx(
+  markRadiusPx: number,
+  remPx: number,
+  shiftPx: number,
+  minGapPx: number,
+): number {
+  return (
+    bracketHalfSizePx(markRadiusPx, remPx, shiftPx) + Math.max(BRACKET_MARGIN_REM * remPx, minGapPx)
+  );
+}
+
+/**
+ * The device px from a mark's anchor to its label's `--surface-0` plate (R07.T16.g;
+ * decision-r07-t16d-followups, items 1 and (d)): the larger of {@link LABEL_PLACE_REM} and the
+ * reticles' growth, 5δ (T16.d's place), and {@link LABEL_CLEARANCE_REM} and δ beyond the half-size
+ * of the outermost reticle that can stand about the mark.
+ *
+ * @remarks
+ * The reticles counted are the selection's bracket, whether or not the mark is selected, and while
+ * the mark is the destination, the destination's reticle, which stands in one place selected or
+ * not ({@link destinationHalfSizePx}): so selecting a mark never moves its label, and the plate's
+ * near edge stands 0.125 rem less 0.75 CSS px beyond every reticle's outer edge, the
+ * clearance of a craft's label from its bracket as built, at every size class and ratio. Every mark
+ * up to size class 2 keeps T16.d's place; a class-3 or class-4 symbol's label stands 0.0625 or
+ * 0.125 rem further out.
+ *
+ * @param markRadiusPx - The radius of the mark, px: its symbol's, or a craft's contact's.
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
+ * @param destinationGapPx - While the mark is the destination, the destination's least gap outside
+ *   the selection's bracket (`ViewStrokes.minReticleGapPx`); `null` while it is not.
+ */
+export function markLabelOffsetPx(
+  markRadiusPx: number,
+  remPx: number,
+  shiftPx: number,
+  destinationGapPx: number | null,
+): number {
+  const outermostPx =
+    destinationGapPx === null
+      ? bracketHalfSizePx(markRadiusPx, remPx, shiftPx)
+      : destinationHalfSizePx(markRadiusPx, remPx, shiftPx, destinationGapPx);
+  return Math.max(
+    LABEL_PLACE_REM * remPx + reticleGrowthPx(shiftPx),
+    outermostPx + LABEL_CLEARANCE_REM * remPx + shiftPx,
+  );
+}
+
+/**
  * The bracket reticle about the selection, in `--accent`, as the spatial view's: its half-size the
- * marked symbol's radius and a margin, moved out by four times the outlines' shift.
+ * marked symbol's radius and a margin, moved out by four times the outlines' shift
+ * ({@link bracketHalfSizePx}).
  *
  * @param markRadiusPx - The radius of the mark it encloses, px.
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
@@ -130,19 +217,15 @@ export function bracketReticle(
     kind: "selection",
     target,
     token: "accent",
-    segments: corners(at, markRadiusPx + BRACKET_MARGIN_REM * remPx + RETICLE_SHIFTS * shiftPx),
+    segments: corners(at, bracketHalfSizePx(markRadiusPx, remPx, shiftPx)),
     anchor: at,
   };
 }
 
 /**
- * The destination reticle, in `--target`, a margin outside the selection's brackets, so that both
- * show where the destination is also the selection; moved out as the brackets are.
- *
- * @remarks
- * The margin is at least `minGapPx`, a reticle's outline and one casing (R07.T16.d): the
- * destination is drawn after the selection, so that its casing would otherwise cover the
- * brackets' full-coverage core below a ratio of 4/3, where 0.25 rem is under 4 device px.
+ * The destination reticle, in `--target`, a margin outside the selection's brackets' place
+ * ({@link destinationHalfSizePx}), so that both show where the destination is also the selection;
+ * moved out as the brackets are.
  *
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
  * @param minGapPx - The least space between the two reticles' centrelines, device px.
@@ -155,15 +238,11 @@ export function destinationReticle(
   shiftPx: number,
   minGapPx: number,
 ): ScreenMark {
-  const marginPx = BRACKET_MARGIN_REM * remPx;
   return {
     kind: "destination",
     target,
     token: "target",
-    segments: corners(
-      at,
-      markRadiusPx + marginPx + Math.max(marginPx, minGapPx) + RETICLE_SHIFTS * shiftPx,
-    ),
+    segments: corners(at, destinationHalfSizePx(markRadiusPx, remPx, shiftPx, minGapPx)),
     anchor: at,
   };
 }
@@ -315,8 +394,8 @@ function unitInradius(points: ReadonlyArray<OutlinePoint>): number {
 }
 
 /**
- * A body's mark from the ship-wide set where it is under 3 px across (Design note 13), in `--text`,
- * or `null` where it is drawn as a sphere.
+ * A body's mark from the ship-wide set where it is under 3 device px across (Design note 13), in
+ * `--text`, or `null` where it is drawn as a sphere.
  *
  * @remarks
  * Its outline moves out by the outlines' shift δ, so that its inner edge stays where a 1.5 CSS px
@@ -335,7 +414,7 @@ export function bodySymbolMark(
   remPx: number,
   shiftPx: number,
 ): ScreenMark | null {
-  if (bodyRegime(diameterPx) !== "symbol") {
+  if (!isSymbolSized(diameterPx)) {
     return null;
   }
   const radiusPx = symbolRadiusPx(symbol, remPx);
@@ -389,13 +468,21 @@ export function contactRadiusPx(remPx: number): number {
   return (SIZE_CLASS_REM[CONTACT_SIZE_CLASS] * remPx) / 2;
 }
 
+/**
+ * The radius of the mark its reticles and its label stand about, px: a body's symbol's, or a
+ * craft's contact's.
+ */
+export function anchorRadiusPx(anchor: Pick<SymbologyAnchor, "body">, remPx: number): number {
+  return anchor.body === null ? contactRadiusPx(remPx) : symbolRadiusPx(anchor.body.symbol, remPx);
+}
+
 /** What the symbology marks beyond the anchors themselves. */
 export interface SymbologyInput {
   /** The marks in sight, each once. */
   readonly anchors: ReadonlyArray<SymbologyAnchor>;
   /** The selected target, or `null`. */
   readonly selection: CameraTarget | null;
-  /** The commanded destination, or `null`. */
+  /** The destination as the server last reported it, or `null` (`DrawOptions.destination`). */
   readonly destination: CameraTarget | null;
   /** The own ship's velocity along the camera frame's axes, m/s, or `null`. */
   readonly ownVelocityMPerS: Vec3 | null;
@@ -404,8 +491,9 @@ export interface SymbologyInput {
   /** The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`). */
   readonly markShiftPx: number;
   /**
-   * The least space between the selection's reticle and the destination's, device px: a reticle's
-   * outline and one casing ({@link destinationReticle}).
+   * The least space between the selection's reticle and the destination's about one mark, device
+   * px: a reticle's outline and one casing (`ViewStrokes.minReticleGapPx`,
+   * {@link destinationHalfSizePx}).
    */
   readonly minReticleGapPx: number;
 }
@@ -432,10 +520,7 @@ export function symbologyMarks(
 ): ScreenMark[] {
   const marks: ScreenMark[] = [];
   for (const anchor of input.anchors) {
-    const markRadiusPx =
-      anchor.body === null
-        ? contactRadiusPx(input.remPx)
-        : symbolRadiusPx(anchor.body.symbol, input.remPx);
+    const markRadiusPx = anchorRadiusPx(anchor, input.remPx);
     if (anchor.craft !== null) {
       marks.push(
         targetMark(

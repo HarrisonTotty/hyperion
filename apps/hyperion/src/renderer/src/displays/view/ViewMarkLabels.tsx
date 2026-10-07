@@ -1,7 +1,5 @@
 import { StaleMark } from "../../components/StaleMark";
-import { markShiftDevicePx } from "../../lib/strokes";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
-import { reticleGrowthPx } from "../../view/wireframe/symbology";
 import {
   type ClosureReading,
   MISSING_READING,
@@ -34,25 +32,14 @@ export interface ViewMarkLabelsProps {
   readonly labelRef?: ((key: string, node: HTMLElement | null) => void) | undefined;
 }
 
-/** The space between a mark and its label, rem, beyond the selection's reticle as built. */
-export const LABEL_OFFSET_REM = 0.75;
-
 /**
- * How much further a label stands off its mark below a device-pixel ratio of 4/3, CSS px: the
- * selection's reticle's growth there ({@link reticleGrowthPx}), so that the reticle clears the
- * label's `--surface-0` plate by what it did as built (R07.T16.d; decision-thin-line-contrast). It is
- * 2.65 px at a ratio of 0.78125, 1.25 at 1, and 0 from 4/3 up.
+ * A label's CSS transform beside its mark: its plate's near edge `anchor.labelOffsetPx` right of the
+ * anchor, both in device px, at `devicePixelRatio` (R07.T16.g). The draw list places it clear of
+ * every reticle that can stand about the mark, so that selecting a mark never moves its label, and
+ * a reported destination moves it in the frame in which its reticle is first drawn, at once.
  */
-export function markLabelShiftPx(devicePixelRatio: number): number {
-  const ratio = devicePixelRatio > 0 && Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1;
-  return reticleGrowthPx(markShiftDevicePx(ratio)) / ratio;
-}
-
-/** A label's CSS transform beside its mark: `anchor` in device px, at `devicePixelRatio`. */
 export function markLabelTransform(anchor: DrawAnchor, devicePixelRatio: number): string {
-  const shiftPx = markLabelShiftPx(devicePixelRatio);
-  const shift = shiftPx > 0 ? ` + ${String(shiftPx)}px` : "";
-  return `translate(calc(${String(anchor.xPx / devicePixelRatio)}px + ${String(LABEL_OFFSET_REM)}rem${shift}), ${String(anchor.yPx / devicePixelRatio)}px)`;
+  return `translate(${String((anchor.xPx + anchor.labelOffsetPx) / devicePixelRatio)}px, ${String(anchor.yPx / devicePixelRatio)}px)`;
 }
 
 /**

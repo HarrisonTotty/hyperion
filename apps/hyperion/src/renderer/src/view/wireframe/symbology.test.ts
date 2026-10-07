@@ -10,9 +10,12 @@ import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { bodyKindSymbol } from "../scene/model";
 import {
   bodySymbolMark,
+  bracketHalfSizePx,
   bracketReticle,
+  destinationHalfSizePx,
   destinationReticle,
   flightPathMarker,
+  markLabelOffsetPx,
   type ScreenMark,
   symbologyMarks,
   symbolRadiusPx,
@@ -70,6 +73,36 @@ describe("the destination reticle", () => {
       destination.token,
       bounds(destination).left < bounds(bracketReticle(PLANET, at, 5, REM_PX, 0)).left,
     ]).toEqual(["target", true]);
+  });
+
+  it("stands the larger of a margin and the least gap outside the selection's bracket", () => {
+    expect([
+      destinationHalfSizePx(5, REM_PX, 0, 0) - bracketHalfSizePx(5, REM_PX, 0),
+      destinationHalfSizePx(5, 10, 0, 4) - bracketHalfSizePx(5, 10, 0),
+    ]).toEqual([0.25 * REM_PX, 4]);
+  });
+});
+
+describe("a mark's label's offset (R07.T16.g; decision-r07-t16d-followups, item 1)", () => {
+  // At a ratio of 1 and 100%: δ = 0.25 px, the least gap 4 px.
+  const shift = markShiftDevicePx(1);
+
+  it("stands a craft's label at T16.d's place, 0.75 rem and five shifts", () => {
+    expect(markLabelOffsetPx(0.375 * REM_PX, REM_PX, shift, null)).toBe(0.75 * REM_PX + 5 * shift);
+  });
+
+  it("stands a class-4 symbol's label 0.125 rem and a shift beyond its bracket", () => {
+    const radius = 0.5 * REM_PX;
+    expect(markLabelOffsetPx(radius, REM_PX, shift, null)).toBe(
+      bracketHalfSizePx(radius, REM_PX, shift) + 0.125 * REM_PX + shift,
+    );
+  });
+
+  it("stands a destination's label beyond its reticle about the selection", () => {
+    const radius = 0.375 * REM_PX;
+    expect(markLabelOffsetPx(radius, REM_PX, shift, 4)).toBe(
+      destinationHalfSizePx(radius, REM_PX, shift, 4) + 0.125 * REM_PX + shift,
+    );
   });
 });
 
@@ -160,7 +193,49 @@ describe("a body's symbol", () => {
   });
 });
 
+/** The symbology of one small body, selected or not, and the destination or not. */
+function marksOf(selection: CameraTarget | null, destination: CameraTarget | null): ScreenMark[] {
+  return symbologyMarks(
+    {
+      anchors: [
+        {
+          target: MOON,
+          at: { xPx: 300, yPx: 300 },
+          body: { symbol: bodyKindSymbol("moon"), diameterPx: 1 },
+          craft: null,
+        },
+      ],
+      selection,
+      destination,
+      ownVelocityMPerS: null,
+      remPx: 10,
+      markShiftPx: 0,
+      minReticleGapPx: 4,
+    },
+    { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+    VIEWPORT,
+  );
+}
+
 describe("symbologyMarks", () => {
+  it("stands a destination that is not the selection the least gap outside a bracket's place", () => {
+    const left = (marks: ScreenMark[], kind: ScreenMark["kind"]): number[] =>
+      marks.filter((mark) => mark.kind === kind).map((mark) => bounds(mark).left);
+    // The moon's bracket at 10 px to the rem stands its radius and 2.5 px out; the destination 4 px
+    // beyond, the least gap, more than a margin.
+    const bracketPx = symbolRadiusPx(bodyKindSymbol("moon"), 10) + 2.5;
+    expect([
+      left(marksOf(null, MOON), "destination"),
+      left(marksOf(MOON, null), "selection"),
+    ]).toEqual([[300 - bracketPx - 4], [300 - bracketPx]]);
+  });
+
+  it("stands the destination in one place whether or not it is the selection", () => {
+    const destination = (marks: ScreenMark[]): unknown[] =>
+      marks.filter((mark) => mark.kind === "destination").map(bounds);
+    expect(destination(marksOf(null, MOON))).toEqual(destination(marksOf(MOON, MOON)));
+  });
+
   it("marks a small body, brackets the selection, the destination and a craft, and adds the flight path marker", () => {
     const marks = symbologyMarks(
       {

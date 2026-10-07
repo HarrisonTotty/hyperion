@@ -1,29 +1,38 @@
 /**
- * The smoke page's check of the view's strokes as drawn (plan R07, R07.T16.d;
- * decision-thin-line-contrast, items 1 and 4): R02's draw list, built by `buildWireframeDrawList`
- * at the strokes of display ratios 0.78125, 1 and 2, drawn by R02's renderer and read back.
+ * The smoke page's check of the view's strokes as drawn (plan R07, R07.T16.d and T16.g;
+ * decision-thin-line-contrast, items 1 and 4; decision-r07-t16d-followups, items 2 and (b)): R02's
+ * draw list, built by `buildWireframeDrawList` at the strokes of display ratios 0.78125, 1 and 2,
+ * drawn by R02's renderer and read back.
  *
  * @remarks
  * At every pixel of length along each stroke, the brightest texel of its cross-section must reach
  * 6.0:1 against `--surface-0`, by WCAG's formula on the 8-bit sRGB texel the canvas would hold:
  * in the wireframe, over a `--surface-0` target, and through the photorealistic overlay over a
- * target loaded with `--text`, where each stroke stands on its casing. Three scenes hold the
- * strokes the ruling names, each on a 256 px square:
+ * target loaded with `--text`, where each stroke stands on its casing. Four scenes hold the
+ * strokes the rulings name, each on a 256 px square:
  * - a ring seen face-on from a camera rolled 0°, 3° and 45°: its 1 px `--text-muted` edges, and
  *   its radial ticks, which then lie at 0°, 3° and 45° and at every 10° on from each;
  * - a planet seen pole-on, rolled the same, its limb 110 px from the centre: its 1 px limb and
  *   meridians and its 1.5 px prime meridian, read clear of the pole and of the limb's bound;
  * - two open circle symbols in `--text`, the selection with its `--accent` reticle and the
  *   destination with its `--target` reticle, another craft's dashed `--text` path, and a third
- *   craft's `--text` target ticks.
+ *   craft's `--text` target ticks;
+ * - an open circle symbol that is both the selection and the destination, its `--target` reticle
+ *   at the least gap outside its `--accent` one, at interface scales of 100% and 80% (T16.g).
  *
- * A cross-section that another batch's stroke or casing reaches is not read: a later batch's
- * casing cuts an earlier stroke where they cross, by design (a casing covers what lies beneath
- * it). A control, the ring as built before R07.T16.d (1 device px per CSS px, outlines 1.5 px),
- * must read under 6 on its 1 px edges, so that the check is seen to bite.
+ * What another batch does to a stroke's pixels is left out of its reading (T16.g). Where another
+ * batch crosses the stroke, the points about the crossing that it reaches are not read: a later
+ * batch's casing cuts an earlier stroke there by design (a casing covers what lies beneath it).
+ * Elsewhere only the texels another batch lights, or a later batch covers, are left out, and the
+ * rest of the cross-section is read, so that a parallel neighbour's light never stands in for a
+ * stroke's own and its casing's cover counts against it. Two controls must read under 6, so that
+ * the check is seen to bite: the ring as built before R07.T16.d (1 device px per CSS px, outlines
+ * 1.5 px) on its 1 px edges, and the pair of reticles with no least gap at 80% and a ratio of
+ * 0.78125, on its bracket.
  */
 
 import { type Vec3, vec3 } from "../geometry/vec3";
+import type { ColourToken } from "../spatial/drawList";
 import { type ColourTokens, readTokens } from "../spatial/paint";
 import { SYMBOL_STROKE_PX } from "../spatial/symbols";
 import {
@@ -43,6 +52,7 @@ import type { CraftPose, ViewBody, ViewScene } from "../view/scene/model";
 import {
   buildWireframeDrawList,
   type DrawCamera,
+  type DrawOptions,
   emptyDrawList,
   type LineBatch,
   type ViewStrokes,
@@ -54,6 +64,13 @@ import { type Checks, halfTexels, texel } from "./harness";
 
 /** The guide's least contrast for a stroke that carries meaning, against its surface. */
 const REQUIRED_RATIO = 6;
+
+/**
+ * How far under its colour pair's ratio a stroke that must read its pair may read: 1%, within which
+ * a stroke of 2 device px scores its pair (decision-thin-line-contrast, item 2), and which covers
+ * the half float's rounding before the 8-bit code.
+ */
+const PAIR_TOLERANCE = 0.01;
 
 /** The square target the checks draw into, device px. */
 const SIDE_PX = 256;
@@ -85,21 +102,47 @@ const RATIOS = [0.78125, 1, 2] as const;
 /** The rolls of the ring's camera: its ticks then lie at 0°, 3° and 45°, and 10° on from each. */
 const ROLLS_DEG = [0, 3, 45] as const;
 
+/** The interface's rem at 100%, CSS px. */
+const REM_CSS_PX = 16;
+
+/**
+ * The interface scale of the pair's second frame and of its control: 80%, where 0.25 rem is least
+ * at a ratio of 0.78125 (2.5 device px, under the least gap's 4).
+ */
+const SMALL_INTERFACE = 0.8;
+
 /** The least points a kind must read over its frames, so that no reading passes empty. */
 const MIN_SAMPLES = 20;
 
 /**
  * The least points the target's ticks must read: four ticks about 3 px long each at a ratio of
- * 0.78125, which read a dozen points there over the image, the craft's own cased hull reaching
- * their inner ends.
+ * 0.78125.
  */
 const MIN_TICK_SAMPLES = 8;
 
 /** A dash's margin, px: a sample this near a dash's end is not read. */
 const DASH_MARGIN_PX = 1;
 
-/** The strokes as built before R07.T16.d: device px, the outlines 1.5 px and not moved out. */
-const AS_BUILT: ViewStrokes = { strokeScale: 1, markStrokePx: SYMBOL_STROKE_PX, markShiftPx: 0 };
+/**
+ * A cut end's margin, px, for a reading that keeps clear of its segments' ends: within a pixel of
+ * one, a stroke's round cap falls off from its full coverage, so a cut end is not where it falls
+ * between pixels (as a dash's ends, {@link DASH_MARGIN_PX}).
+ */
+const CUT_END_MARGIN_PX = 1;
+
+/**
+ * How far a stroke lights a texel beyond its half-width, px: `lines.wgsl`'s coverage,
+ * clamp(w ÷ 2 + 0.5 − d, 0, 1), is above zero only at a texel centre nearer than w ÷ 2 + 0.5.
+ */
+const ANTIALIAS_EDGE_PX = 0.5;
+
+/** The strokes as built before R07.T16.d: device px, the outlines 1.5 px, not moved, no least gap. */
+const AS_BUILT: ViewStrokes = {
+  strokeScale: 1,
+  markStrokePx: SYMBOL_STROKE_PX,
+  markShiftPx: 0,
+  minReticleGapPx: 0,
+};
 
 /** A point on the target, px from its top left. */
 export interface PointPx {
@@ -138,6 +181,17 @@ export interface StrokeReading {
   readonly worst: number;
   /** Where the least was read, or `null`. */
   readonly at: PointPx | null;
+}
+
+/**
+ * Another batch of a frame as a stroke's reading takes it: its strokes, and the texels whose
+ * pixels it changes for that stroke ({@link neighbourOf}).
+ */
+export interface Neighbour {
+  /** Its strokes on the target. */
+  readonly stroke: ScreenStroke;
+  /** One byte a texel of the image, row by row: 1 where it lights or covers the texel. */
+  readonly region: Uint8Array;
 }
 
 /** The 8-bit sRGB code a canvas stores for a linear value (IEC 61966-2-1), clamped to [0, 1]. */
@@ -185,93 +239,196 @@ function distanceToSegment(p: PointPx, a: PointPx, b: PointPx): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
-/**
- * How many of `strokes` reach each texel of an image: its centre within a stroke's half-width,
- * its casing and the antialiasing fringe of a segment, and a texel's half-diagonal more, so that
- * a texel any of them touches is counted. Each stroke counts once a texel.
- */
-export function reachCounts(
-  strokes: ReadonlyArray<ScreenStroke>,
-  widthPx: number,
-  heightPx: number,
-): { readonly counts: Uint16Array; readonly masks: ReadonlyArray<Uint8Array> } {
-  const counts = new Uint16Array(widthPx * heightPx);
-  const masks = strokes.map((stroke) => {
-    const mask = new Uint8Array(widthPx * heightPx);
-    const reachPx = stroke.widthPx / 2 + stroke.casingWidthPx + 0.5 + Math.SQRT1_2;
-    for (const [a, b] of stroke.segments) {
-      const left = Math.max(0, Math.floor(Math.min(a.x, b.x) - reachPx));
-      const right = Math.min(widthPx - 1, Math.ceil(Math.max(a.x, b.x) + reachPx));
-      const top = Math.max(0, Math.floor(Math.min(a.y, b.y) - reachPx));
-      const bottom = Math.min(heightPx - 1, Math.ceil(Math.max(a.y, b.y) + reachPx));
-      for (let row = top; row <= bottom; row += 1) {
-        for (let column = left; column <= right; column += 1) {
-          const at = row * widthPx + column;
-          if (
-            mask[at] === 0 &&
-            distanceToSegment({ x: column + 0.5, y: row + 0.5 }, a, b) < reachPx
-          ) {
-            mask[at] = 1;
-            counts[at] = (counts[at] ?? 0) + 1;
-          }
-        }
-      }
-    }
-    return mask;
-  });
-  return { counts, masks };
+/** The distance from `p` to the nearest of a stroke's segments, px; ∞ with none. */
+function distanceToStroke(p: PointPx, stroke: ScreenStroke): number {
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const [a, b] of stroke.segments) {
+    nearest = Math.min(nearest, distanceToSegment(p, a, b));
+  }
+  return nearest;
 }
 
 /**
- * A stroke as drawn: at every pixel of its length (on a dash, away from its ends; and where
- * `keep` holds, if given), the brightest texel of its cross-section ({@link CROSS_SECTION_ALONG_PX}),
- * scored against the surface's luminance. A cross-section that another batch reaches (`blocked`),
- * or that leaves the image, is not read.
+ * Another batch as a stroke's reading takes it: the texels whose centres lie within its
+ * antialiased edge, where it lights them, and, where it is drawn after the stroke (`later`),
+ * within its casing's antialiased edge, where it covers them. Its dash's gaps are counted as lit,
+ * which can only leave more out.
  */
-export function readStroke(
+export function neighbourOf(
+  stroke: ScreenStroke,
+  later: boolean,
+  widthPx: number,
+  heightPx: number,
+): Neighbour {
+  const region = new Uint8Array(widthPx * heightPx);
+  const reachPx = stroke.widthPx / 2 + (later ? stroke.casingWidthPx : 0) + ANTIALIAS_EDGE_PX;
+  for (const [a, b] of stroke.segments) {
+    const left = Math.max(0, Math.floor(Math.min(a.x, b.x) - reachPx));
+    const right = Math.min(widthPx - 1, Math.ceil(Math.max(a.x, b.x) + reachPx));
+    const top = Math.max(0, Math.floor(Math.min(a.y, b.y) - reachPx));
+    const bottom = Math.min(heightPx - 1, Math.ceil(Math.max(a.y, b.y) + reachPx));
+    for (let row = top; row <= bottom; row += 1) {
+      for (let column = left; column <= right; column += 1) {
+        const at = row * widthPx + column;
+        if (
+          region[at] === 0 &&
+          distanceToSegment({ x: column + 0.5, y: row + 0.5 }, a, b) < reachPx
+        ) {
+          region[at] = 1;
+        }
+      }
+    }
+  }
+  return { stroke, region };
+}
+
+/** A point of a stroke's length, with its cross-section and whether it joins the point before. */
+interface SectionPoint {
+  readonly p: PointPx;
+  /** The texels of its cross-section, or `null` where it reaches off the image. */
+  readonly section: ReadonlyArray<readonly [number, number]> | null;
+  /** Whether it is read: on a dash away from its ends, and kept. */
+  readonly read: boolean;
+  /** Whether it runs on from the point before it, along one segment or across a joint. */
+  readonly joined: boolean;
+}
+
+/**
+ * The points of a stroke's length, a pixel apart along each segment, with their cross-sections;
+ * those within `endMarginPx` of a segment's end are not read.
+ */
+function sectionPoints(
   image: ReadImage,
   stroke: ScreenStroke,
-  blocked: (column: number, row: number) => boolean,
-  surfaceLuminance: number,
   keep: ((p: PointPx) => boolean) | null,
-): StrokeReading {
-  const halfPx = stroke.widthPx / 2 + 0.5;
-  let samples = 0;
-  let worst = Number.POSITIVE_INFINITY;
-  let at: PointPx | null = null;
+  endMarginPx: number,
+): SectionPoint[] {
+  const halfPx = stroke.widthPx / 2 + ANTIALIAS_EDGE_PX;
+  const points: SectionPoint[] = [];
+  let lastEnd: PointPx | null = null;
   stroke.segments.forEach(([a, b], index) => {
     const lengthPx = Math.hypot(b.x - a.x, b.y - a.y);
     if (!(lengthPx > 0)) {
       return;
     }
+    const continues = lastEnd !== null && lastEnd.x === a.x && lastEnd.y === a.y;
+    lastEnd = b;
     const u = { x: (b.x - a.x) / lengthPx, y: (b.y - a.y) / lengthPx };
     const steps = Math.max(1, Math.floor(lengthPx));
     for (let i = 0; i <= steps; i += 1) {
       const s = (lengthPx * i) / steps;
       const p = { x: a.x + u.x * s, y: a.y + u.y * s };
+      let onDash = true;
       if (stroke.dash !== null) {
         const period = stroke.dash.onPx + stroke.dash.offPx;
         const phase = ((((stroke.phases[index] ?? 0) + s) % period) + period) % period;
-        if (phase < DASH_MARGIN_PX || phase > stroke.dash.onPx - DASH_MARGIN_PX) {
-          continue;
-        }
+        onDash = phase >= DASH_MARGIN_PX && phase <= stroke.dash.onPx - DASH_MARGIN_PX;
       }
-      if (keep !== null && !keep(p)) {
-        continue;
-      }
-      const section = crossSection(p, u, halfPx, image);
-      if (section === null || section.some(([column, row]) => blocked(column, row))) {
-        continue;
-      }
-      const brightest = Math.max(
-        ...section.map(([column, row]) => texelLuminance(image, column, row)),
-      );
-      samples += 1;
-      const ratio = contrastRatio(brightest, surfaceLuminance);
-      if (ratio < worst) {
-        worst = ratio;
-        at = p;
-      }
+      points.push({
+        p,
+        section: crossSection(p, u, halfPx, image),
+        read:
+          onDash && s >= endMarginPx && s <= lengthPx - endMarginPx && (keep === null || keep(p)),
+        joined: i > 0 || continues,
+      });
+    }
+  });
+  return points;
+}
+
+/** Whether a neighbour lights or covers any texel of a cross-section. */
+function touches(
+  neighbour: Neighbour,
+  section: ReadonlyArray<readonly [number, number]> | null,
+  widthPx: number,
+): boolean {
+  return (
+    section !== null &&
+    section.some(([column, row]) => neighbour.region[row * widthPx + column] === 1)
+  );
+}
+
+/**
+ * Which of a stroke's points lie at a crossing with a neighbour: from each point where the
+ * neighbour's centreline comes within the stroke's half-width of the stroke's (it crosses it, or
+ * ends on it), the run of joined points on either side whose cross-sections the neighbour touches.
+ */
+function crossingPoints(
+  points: ReadonlyArray<SectionPoint>,
+  stroke: ScreenStroke,
+  neighbour: Neighbour,
+  widthPx: number,
+): Uint8Array {
+  const touched = points.map((point) => touches(neighbour, point.section, widthPx));
+  const crossing = new Uint8Array(points.length);
+  points.forEach((point, i) => {
+    if (
+      crossing[i] === 1 ||
+      touched[i] !== true ||
+      !(distanceToStroke(point.p, neighbour.stroke) < stroke.widthPx / 2)
+    ) {
+      return;
+    }
+    crossing[i] = 1;
+    for (
+      let j = i + 1;
+      j < points.length && points[j]?.joined === true && touched[j] === true;
+      j += 1
+    ) {
+      crossing[j] = 1;
+    }
+    for (let j = i; j > 0 && points[j]?.joined === true && touched[j - 1] === true; j -= 1) {
+      crossing[j - 1] = 1;
+    }
+  });
+  return crossing;
+}
+
+/**
+ * A stroke as drawn (R07.T16.g): at every pixel of its length (on a dash, away from its ends; and
+ * where `keep` holds, if given), the brightest texel of its cross-section
+ * ({@link CROSS_SECTION_ALONG_PX}), scored against the surface's luminance.
+ *
+ * @remarks
+ * A point where a neighbour crosses the stroke, or a run of points about it that the neighbour
+ * touches, is not read. Elsewhere the texels a neighbour lights or covers are left out of the
+ * cross-section, and the rest are read. A cross-section left with no texel, or one that leaves the
+ * image, is not read.
+ *
+ * @param neighbours - The frame's other batches, as {@link neighbourOf} takes each for this one.
+ * @param endMarginPx - How near a segment's end a point is not read, px: none by default.
+ */
+export function readStroke(
+  image: ReadImage,
+  stroke: ScreenStroke,
+  neighbours: ReadonlyArray<Neighbour>,
+  surfaceLuminance: number,
+  keep: ((p: PointPx) => boolean) | null,
+  endMarginPx = 0,
+): StrokeReading {
+  const points = sectionPoints(image, stroke, keep, endMarginPx);
+  const crossings = neighbours.map((neighbour) =>
+    crossingPoints(points, stroke, neighbour, image.widthPx),
+  );
+  let samples = 0;
+  let worst = Number.POSITIVE_INFINITY;
+  let at: PointPx | null = null;
+  points.forEach((point, i) => {
+    if (!point.read || point.section === null || crossings.some((each) => each[i] === 1)) {
+      return;
+    }
+    const own = point.section.filter(([column, row]) =>
+      neighbours.every((neighbour) => neighbour.region[row * image.widthPx + column] === 0),
+    );
+    if (own.length === 0) {
+      return;
+    }
+    const brightest = Math.max(...own.map(([column, row]) => texelLuminance(image, column, row)));
+    samples += 1;
+    const ratio = contrastRatio(brightest, surfaceLuminance);
+    if (ratio < worst) {
+      worst = ratio;
+      at = point.p;
     }
   });
   return { samples, worst, at };
@@ -486,6 +643,15 @@ function marksScene(): ViewScene {
   });
 }
 
+/**
+ * The pair's scene: one small body drawn as an open circle, a whole number of pixels from the
+ * target's centre, so that at 80% and a ratio of 0.78125 every arm of its bracket keeps a texel of
+ * its inner edge that the control's destination does not cover.
+ */
+function pairScene(): ViewScene {
+  return sceneOf({ bodies: [smallBody(FIXTURE_MOON, -20, 10)] });
+}
+
 /** Renders a list into a fresh target first filled with `fill`, and reads its colour. */
 async function drawOver(
   engine: RenderEngine,
@@ -534,6 +700,13 @@ interface Reading {
   readonly keep: ((p: PointPx) => boolean) | null;
   /** The least points it must read over its frames, if not {@link MIN_SAMPLES}. */
   readonly minSamples?: number;
+  /**
+   * The token whose pair with `--surface-0` it must read, to within {@link PAIR_TOLERANCE}, where
+   * 6:1 is not enough: the pair of reticles, whose least gap keeps each one's full-coverage core
+   * (decision-r07-t16d-followups, item 2). Such a reading keeps {@link CUT_END_MARGIN_PX} clear of
+   * its segments' ends.
+   */
+  readonly pair?: ColourToken;
 }
 
 /** The distance of `p` from the target's centre, px. */
@@ -581,6 +754,26 @@ const MARK_READINGS: ReadonlyArray<Reading> = [
   },
 ];
 
+/** The bracket about the destination on the selection. */
+const PAIR_BRACKET: Reading = {
+  kind: "--accent reticle, the destination about it",
+  of: (name) => name.startsWith("mark:selection:"),
+  keep: null,
+  pair: "accent",
+};
+
+/** The pair's readings: its symbol, its bracket, and the destination's reticle about it. */
+const PAIR_READINGS: ReadonlyArray<Reading> = [
+  { kind: "body symbols", of: (name) => name.startsWith("mark:body_symbol:"), keep: null },
+  PAIR_BRACKET,
+  {
+    kind: "--target reticle about the selection",
+    of: (name) => name.startsWith("mark:destination:"),
+    keep: null,
+    pair: "target",
+  },
+];
+
 /** One kind's least contrast over a frame's batches of that kind, and its samples. */
 interface KindReading {
   readonly kind: string;
@@ -589,14 +782,22 @@ interface KindReading {
   readonly at: PointPx | null;
 }
 
-/** Reads every kind of `readings` in a drawn frame, each batch clear of every other batch. */
+/**
+ * Reads every kind of `readings` in a drawn frame, each batch with every other batch as its
+ * neighbour: lighting it, and covering it where drawn after it, in the list's order.
+ */
 function readFrame(
   image: ReadImage,
   strokes: ReadonlyArray<ScreenStroke>,
   readings: ReadonlyArray<Reading>,
   surfaceLuminance: number,
 ): KindReading[] {
-  const { counts, masks } = reachCounts(strokes, image.widthPx, image.heightPx);
+  const lighting = strokes.map((stroke) =>
+    neighbourOf(stroke, false, image.widthPx, image.heightPx),
+  );
+  const covering = strokes.map((stroke) =>
+    neighbourOf(stroke, true, image.widthPx, image.heightPx),
+  );
   return readings.map((reading) => {
     let samples = 0;
     let worst = Number.POSITIVE_INFINITY;
@@ -605,13 +806,20 @@ function readFrame(
       if (!reading.of(stroke.name)) {
         return;
       }
-      const own = masks[index];
-      // A texel another batch reaches: counted by more batches than this one's own reach.
-      const blocked = (column: number, row: number): boolean => {
-        const texelAt = row * image.widthPx + column;
-        return (counts[texelAt] ?? 0) - (own?.[texelAt] ?? 0) > 0;
-      };
-      const read = readStroke(image, stroke, blocked, surfaceLuminance, reading.keep);
+      // A batch drawn before this one lights it; one drawn after covers it with its casing too.
+      const neighbours = strokes.flatMap((_, other) => {
+        const neighbour = other < index ? lighting[other] : covering[other];
+        return other === index || neighbour === undefined ? [] : [neighbour];
+      });
+      // A reading held to its pair keeps clear of its arms' cut ends, whose caps fall off.
+      const read = readStroke(
+        image,
+        stroke,
+        neighbours,
+        surfaceLuminance,
+        reading.keep,
+        reading.pair === undefined ? 0 : CUT_END_MARGIN_PX,
+      );
       samples += read.samples;
       if (read.worst < worst) {
         ({ worst, at } = read);
@@ -628,12 +836,17 @@ function shown(reading: KindReading): string {
   return `${reading.kind} ${reading.worst.toFixed(2)}:1${where}, ${String(reading.samples)} points`;
 }
 
-/** A frame of the check: its scene, camera, readings, and whether it marks its two bodies. */
+/** What a frame of the check marks: nothing, two bodies, or one body as both. */
+type FrameMarks = "none" | "apart" | "pair";
+
+/** A frame of the check: its scene, camera, readings, marks and interface scale. */
 interface CheckFrame {
   readonly scene: ViewScene;
   readonly camera: DrawCamera;
   readonly readings: ReadonlyArray<Reading>;
-  readonly marked: boolean;
+  readonly marks: FrameMarks;
+  /** The interface scale, which the rem follows: 1 at 100%. */
+  readonly interfaceScale: number;
 }
 
 /** Every frame the check draws at each ratio, in each style. */
@@ -642,26 +855,49 @@ const FRAMES: ReadonlyArray<CheckFrame> = [
     scene: ringScene(),
     camera: cameraRolled(roll),
     readings: RING_READINGS,
-    marked: false,
+    marks: "none" as const,
+    interfaceScale: 1,
   })),
   ...ROLLS_DEG.map((roll) => ({
     scene: planetScene(),
     camera: cameraRolled(roll),
     readings: PLANET_READINGS,
-    marked: false,
+    marks: "none" as const,
+    interfaceScale: 1,
   })),
-  { scene: marksScene(), camera: cameraRolled(0), readings: MARK_READINGS, marked: true },
+  {
+    scene: marksScene(),
+    camera: cameraRolled(0),
+    readings: MARK_READINGS,
+    marks: "apart",
+    interfaceScale: 1,
+  },
+  ...[1, SMALL_INTERFACE].map((interfaceScale) => ({
+    scene: pairScene(),
+    camera: cameraRolled(0),
+    readings: PAIR_READINGS,
+    marks: "pair" as const,
+    interfaceScale,
+  })),
 ];
 
-/** Every kind a style's frames read, once, with the least points it must read. */
+/** Every kind a style's frames read, once, with the reading that names it. */
 const KINDS = new Map(
   FRAMES.flatMap((frame) =>
-    frame.readings.map((reading): [string, number] => [
-      reading.kind,
-      reading.minSamples ?? MIN_SAMPLES,
-    ]),
+    frame.readings.map((reading): [string, Reading] => [reading.kind, reading]),
   ),
 );
+
+/** The least contrast a kind must read: its token's pair, less the tolerance, or 6:1. */
+function requiredRatio(
+  reading: Reading | undefined,
+  tokens: ColourTokens,
+  surface: number,
+): number {
+  return reading?.pair === undefined
+    ? REQUIRED_RATIO
+    : contrastRatio(tokenLuminance(tokens[reading.pair]), surface) * (1 - PAIR_TOLERANCE);
+}
 
 /** Each kind's least over the frames it was read in, and its points summed. */
 function byKind(readings: ReadonlyArray<KindReading>): KindReading[] {
@@ -679,9 +915,23 @@ function byKind(readings: ReadonlyArray<KindReading>): KindReading[] {
   return [...kinds.values()];
 }
 
+/** The selection and the destination each kind of frame marks. */
+const MARKED: Readonly<Record<FrameMarks, Pick<DrawOptions, "selection" | "destination">>> = {
+  none: { selection: null, destination: null },
+  apart: {
+    selection: { kind: "body", body: FIXTURE_MOON },
+    destination: { kind: "body", body: SECOND_MOON },
+  },
+  pair: {
+    selection: { kind: "body", body: FIXTURE_MOON },
+    destination: { kind: "body", body: FIXTURE_MOON },
+  },
+};
+
 /**
- * R07.T16.d: the view's strokes reach 6:1 as drawn at ratios of 0.78125, 1 and 2, in the
- * wireframe and over the image; the control, as built, does not.
+ * R07.T16.d and T16.g: the view's strokes reach 6:1 as drawn at ratios of 0.78125, 1 and 2, in
+ * the wireframe and over the image, the destination's reticle on the selection's among them; the
+ * controls, as built, do not.
  */
 export async function checkStrokeContrast(engine: RenderEngine, checks: Checks): Promise<void> {
   const tokens: ColourTokens = readTokens(document.documentElement);
@@ -689,7 +939,7 @@ export async function checkStrokeContrast(engine: RenderEngine, checks: Checks):
   const renderer = new WireframeRenderer(engine);
   for (const ratio of RATIOS) {
     const strokes = viewStrokesAt(ratio);
-    const base = { lowSetting: false, ev100: 0, remPx: 16 * ratio } as const;
+    const base = { lowSetting: false, ev100: 0 } as const;
     for (const style of ["wireframe", "overlay"] as const) {
       const fill = style === "wireframe" ? tokens.surface0 : tokens.text;
       const readings: KindReading[] = [];
@@ -697,8 +947,8 @@ export async function checkStrokeContrast(engine: RenderEngine, checks: Checks):
         const built = buildWireframeDrawList(frame.scene, frame.camera, VIEWPORT, tokens, {
           ...base,
           ...strokes,
-          selection: frame.marked ? { kind: "body", body: FIXTURE_MOON } : null,
-          destination: frame.marked ? { kind: "body", body: SECOND_MOON } : null,
+          ...MARKED[frame.marks],
+          remPx: REM_CSS_PX * frame.interfaceScale * ratio,
         });
         const list = style === "overlay" ? overlayDrawList(built, tokens) : built;
         // The checks run in order: each reads the GPU back before the next draws.
@@ -716,22 +966,57 @@ export async function checkStrokeContrast(engine: RenderEngine, checks: Checks):
       }
       const kinds = byKind(readings);
       checks.check(
-        `R07.T16.d every stroke reaches 6:1 as drawn at a ratio of ${String(ratio)}, ${style === "wireframe" ? "in the wireframe" : "over the image"} (lines ${String(strokes.strokeScale)} px per CSS px, outlines ${String(strokes.markStrokePx)} px)`,
+        `R07.T16.d every stroke reaches 6:1 as drawn, and the pair of reticles its tokens' ratios (T16.g), at a ratio of ${String(ratio)}, ${style === "wireframe" ? "in the wireframe" : "over the image"} (lines ${String(strokes.strokeScale)} px per CSS px, outlines ${String(strokes.markStrokePx)} px, reticles ${String(strokes.minReticleGapPx)} px apart at least)`,
         kinds.length === KINDS.size &&
           kinds.every(
             (kind) =>
-              kind.samples >= (KINDS.get(kind.kind) ?? MIN_SAMPLES) && kind.worst >= REQUIRED_RATIO,
+              kind.samples >= (KINDS.get(kind.kind)?.minSamples ?? MIN_SAMPLES) &&
+              kind.worst >= requiredRatio(KINDS.get(kind.kind), tokens, surface),
           ),
         kinds.map(shown).join("; "),
       );
+      if (ratio === RATIOS[0]) {
+        // The pair's control: the destination a bare 0.25 rem outside the bracket, as built
+        // before R07.T16.d, its casing over the bracket's core at 80%.
+        const camera = cameraRolled(0);
+        const tight = buildWireframeDrawList(pairScene(), camera, VIEWPORT, tokens, {
+          ...base,
+          ...strokes,
+          ...MARKED.pair,
+          minReticleGapPx: 0,
+          remPx: REM_CSS_PX * SMALL_INTERFACE * ratio,
+        });
+        const list = style === "overlay" ? overlayDrawList(tight, tokens) : tight;
+        // The checks run in order: each reads the GPU back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const image = await drawOver(
+          engine,
+          renderer,
+          "R07 stroke contrast pair control",
+          fill,
+          list,
+          camera,
+        );
+        const [control] = readFrame(
+          image,
+          screenStrokes(list, camera, VIEWPORT),
+          [PAIR_BRACKET],
+          surface,
+        );
+        checks.check(
+          `R07.T16.g the pair's control, the destination 0.25 rem outside the bracket at 80% and a ratio of ${String(ratio)}, ${style === "wireframe" ? "in the wireframe" : "over the image"}, reads the bracket under 6:1`,
+          control !== undefined && control.samples >= MIN_SAMPLES && control.worst < REQUIRED_RATIO,
+          control === undefined ? "no reading" : shown(control),
+        );
+      }
     }
     // The control: the ring as built before R07.T16.d, its 1 px edges under 6:1.
     const camera = cameraRolled(0);
     const asBuilt = buildWireframeDrawList(ringScene(), camera, VIEWPORT, tokens, {
       ...base,
       ...AS_BUILT,
-      selection: null,
-      destination: null,
+      ...MARKED.none,
+      remPx: REM_CSS_PX * ratio,
     });
     // The checks run in order: each reads the GPU back before the next draws.
     // oxlint-disable-next-line no-await-in-loop

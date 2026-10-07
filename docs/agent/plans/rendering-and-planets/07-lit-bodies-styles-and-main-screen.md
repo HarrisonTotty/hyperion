@@ -492,7 +492,12 @@ R02's `view/wireframe/drawList.ts` gains `ViewStrokes { strokeScale, markStrokeP
 `viewStrokesAt(devicePixelRatio)`, `occluderSlopePxAt(strokeScale)`, `emptyDrawList(strokes)` and
 `HULL_OCCLUDER_DEPTH_FRACTION`; `displays/view/ViewMarkLabels.tsx` gains
 `markLabelShiftPx(devicePixelRatio)`; _R07.T16.g replaces it with `DrawAnchor.labelOffsetPx`, its
-label plate's offset in device px (decision-r07-t16d-followups)._
+label plate's offset in device px (decision-r07-t16d-followups)._ _As built by T16.g:
+`lib/strokes.ts` also holds `CASING_PX`, which `drawList.ts` re-exports; `ViewStrokes` gains
+`minReticleGapPx` (`minReticleGapDevicePx` of the ratio); `emptyDrawList` takes the two of its
+fields it reads; `wireframe/symbology.ts` gains `markLabelOffsetPx`, `bracketHalfSizePx`,
+`destinationHalfSizePx` and `anchorRadiusPx`; and `wireframe/bodies.ts`'s `bodyRegime` and
+`graticule` take `strokeScale` (see "Deviations in T16.g, as built")._
 
 ### Main screen (Phase C)
 
@@ -1691,9 +1696,9 @@ Acceptance: `just ci`; the guide edit is one commit for the owner.
 T16 is built as seven subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.g, T16.f, T16.c (a
 ruled split, under the orchestrator's pre-authorisation of 2026-10-06, when T16 moved to the views
 lane; T16.d and T16.e were added after T16.a by decision-r07-t16a, T16.f by
-decision-thin-line-contrast and T16.g by decision-r07-t16d-followups, before the guide's draft, so that the draft states what they build). The paragraph above stays the
-task's whole specification: each subtask builds its share of it, and each runs the console-ux
-skill's scripts.
+decision-thin-line-contrast and T16.g by decision-r07-t16d-followups, before the guide's draft, so
+that the draft states what they build). The paragraph above stays the task's whole specification:
+each subtask builds its share of it, and each runs the console-ux skill's scripts.
 
 - **R07.T16.a The overlay, cased, and the hull faces' bias.** `photoreal/overlay.ts` (new),
   `displays/view/viewFrameDrawer.ts`, R02's `wireframe/drawList.ts` and `shaders/occluder.wgsl`,
@@ -1988,7 +1993,10 @@ src/renderer/src/displays/view src/renderer/src/smoke src/renderer/src/lib`, `ju
   **By hand, hidden:** `GALAXY`'s local chart and the orbit map, captured at 1920 × 1080 at a
   forced device scale factor of 0.78125, for the owner's look at the guide's draft, with a
   selected mark's label measured at 0.78125: the space between its first letter's ink and the
-  bracket's right arms, or a ruling asked for where they touch.
+  bracket's right arms, or a ruling asked for where they touch. _With them (the orchestrator, after
+  T16.g):_ `VIEW`'s page captures, as T16.e's at 1920 × 1080 and 1280 × 720, with a mark's label
+  plate over a neighbouring mark, for what of that mark shows beside the plate's edge, which no
+  capture check reads (T16.g's stated limit).
   **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/spatial
 src/renderer/src/displays/galaxy src/renderer/src/displays/system src/renderer/src/components
 src/renderer/src/lib`,
@@ -2004,14 +2012,15 @@ src/renderer/src/lib`,
   meter's `SELECT` legend, left "for T16's draft" by T13 after review (a `Label` row, or the reason
   a group's legend needs none), and the data-state bullet's "offers `MAN` only", which reads against
   E5 (T19.d's open points, for the owner's next guide edit). It also drafts decision-r07-t16a's
-  guide text, as T16.d, T16.e, T16.g and T16.f built it: the unit of a width and the floor of 2 device
-  pixels, a Layout bullet; a stroke's contrast as drawn, a Colour bullet, with its cross-section
-  and what it leaves out named (decision-thin-line-contrast; decision-r07-t16d-followups, (b)); a
-  view's strokes as Layout gives them, and its black ground, in the Views bullet's paragraph on
-  both styles (decision-r07-t16d-followups, (e)); a view's mark labels clear of their marks and
-  reticles, in the same paragraph (decision-r07-t16d-followups, item 1 and (d)); the craft's silhouette, as the one exception in "Outlines for
-  symbology"; the craft note's Label row; and the added clauses of the `WIREFRAME`, `PHOTOREALISTIC`
-  row and the `TEST HULL` row. Nothing else is new: `BODY PHOTOMETRY: NOT YET MODELLED` is signed
+  guide text, as T16.d, T16.e, T16.g and T16.f built it: the unit of a width and the floor of 2
+  device pixels, a Layout bullet; a stroke's contrast as drawn, a Colour bullet, with its
+  cross-section and what it leaves out named (decision-thin-line-contrast;
+  decision-r07-t16d-followups, (b)); a view's strokes as Layout gives them, and its black ground,
+  in the Views bullet's paragraph on both styles (decision-r07-t16d-followups, (e)); a view's mark
+  labels clear of their marks and reticles, in the same paragraph (decision-r07-t16d-followups,
+  item 1 and (d)); the craft's silhouette, as the one exception in "Outlines for symbology"; the
+  craft note's Label row; and the added clauses of the `WIREFRAME`, `PHOTOREALISTIC` row and the
+  `TEST HULL` row. Nothing else is new: `BODY PHOTOMETRY: NOT YET MODELLED` is signed
   off (T19.d), and the several views' refusal adds no entry (decision-r07-t18, item 6). Tests: each
   status the draft adds is a string in the code, in the words T16.b built; each note it adds is a
   string in the code, in the words T16.e built; and each width and colour the text gives is the
@@ -4337,13 +4346,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     cross-section the ruling's figures take: a stroke up to 2 px wide then peaks at w ÷ 2 of its
     colour at its worst position, and a 2 px one at all of it. With half a pixel along instead, a
     2 px line at 45° finds no texel within 0.71 px of its centreline at a corner of the grid
-    (5.9:1).
+    (5.9:1). _T16.c's draft names it. T16.g narrows "Crossings are not read" to texels another
+    batch lights or covers, so that parallel neighbours are read, and T16.f's canvas check takes the
+    same rule (decision-r07-t16d-followups, (b))._
 
     **Crossings are not read.** A cross-section that another batch's stroke or casing reaches is
     left out, because a later batch's casing covers an earlier stroke where they cross, by design
-    (a stated limit). _T16.c's draft names it. T16.g narrows "Crossings are not read" to texels
-    another batch lights or covers, so that parallel neighbours are read, and T16.f's canvas check
-    takes the same rule (decision-r07-t16d-followups, (b))._
+    (a stated limit).
 
     **The readings.** Every kind reads its pair's ratio at every ratio, in both styles:
     - the ring's edges and ticks, the limb and meridians (1 px), and the prime meridian (1.5 px),
@@ -4589,6 +4598,151 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       ride-along (`src/main/`, `src/smoke/`) kept to its own commit. So are its considers: the
       README's ask, and the silhouette check's doc. The subtask's bold title runs over two lines,
       so `plan_task.py` cannot find R07.T16.e; it is left as ruled, for the orchestrator.
+- **Deviations in T16.g, as built** (2026-10-06; the views lane; decision-r07-t16d-followups,
+  items 1, 2, (b), (c) and (d), with the orchestrator's rulings on its "Seen, not ruled").
+  - **Files.** Those the subtask lists, and:
+    - `smoke/wireframe.ts` (`nothingAt`, for `emptyDrawList`'s narrower argument);
+    - `test/stylesheet.ts`, new: `stylesheetRule`, a stylesheet rule's text, which throws where the
+      rule is missing, so that a renamed or grouped rule fails a test rather than reads nothing.
+      `ViewMarkLabels.test.tsx` and `ViewDisplay.test.tsx` take it in place of their own copies;
+    - the tests of `bodies`, `drawList`, `symbology`, `strokes`, `ViewMarkLabels` and
+      `strokeContrast`.
+
+    `ViewDisplay.tsx` changes in its doc alone: `placeMarkLabels` already places each label from
+    its frame's anchors, so `labelOffsetPx` reaches it as it is. The subtask's title is kept on one
+    line, so that `plan_task.py` finds R07.T16.g, as it cannot find T16.e.
+  - **Graticules.** `bodyRegime(diameterPx, strokeScale)` and
+    `graticule(body, camera, viewport, strokeScale, lowSetting)` replace R02's
+    `bodyRegime(diameterPx)` and `graticule(body, camera, viewport, lowSetting)`. New are
+    `isSymbolSized(diameterPx)`, the 3 device px test that the symbols and their labels take, and
+    `graticuleStepDeg`. `GRATICULE_FROM_PX` and `FINE_GRATICULE_FROM_PX` keep their names and are
+    CSS px, drawn at the line scale as `STROKE_PX` and `CASING_PX` are. `SYMBOL_BELOW_PX`'s doc
+    says device px. The TypeScript review's should-fix, to rename the two, is not taken: the plan
+    names them, and the view's other `_PX` widths multiplied by `strokeScale` are CSS px too.
+  - **The least gap.** `CASING_PX` moves to `lib/strokes.ts`, since `minReticleGapDevicePx` needs
+    it and `lib/` cannot import the draw list, which imports `lib/`. `drawList.ts` re-exports it.
+    `ViewStrokes` gains `minReticleGapPx`, which `viewStrokesAt` fills, since the list never sees
+    the ratio. `emptyDrawList` takes `Pick<ViewStrokes, "strokeScale" | "markStrokePx">`, the two
+    it reads.
+  - **The destination's place (the orchestrator, after the UX review).**
+    - The orchestrator first adopted the ruling's lean: a destination that is not the selection
+      one margin out, where a bracket would stand, as `spatial/drawList.ts` draws it.
+    - The UX review found that a must-fix. Such a reticle has a bracket's shape, half-size and
+      width, and only `--target` against `--accent` tells it from a selection. The guide's Colour
+      rule forbids that ("Never signal state by colour alone"), and the nomenclature says "corner
+      brackets mean the selection only".
+    - The orchestrator withdrew the lean. The view keeps the destination where T16.d drew it,
+      whether or not it is the selection: a margin outside the bracket's place, and at least
+      `minReticleGapPx` outside it, a size and position cue. `destinationReticle` and
+      `destinationHalfSizePx` take that least gap, as before T16.g.
+    - The label rule and the four-state tests are unchanged by it. The destination's reticle stands
+      in one place, selected or not, so a destination's label never moves on selection.
+    - **Open, for a decision advisor or the owner, before the first task that commands a
+      destination** (also in P05's Risks, "Labels beside reticles"):
+      - the ship-wide reticle convention leaves the destination's own cue unstated, beyond its
+        colour;
+      - P05's `spatial/drawList.ts` draws a lone destination one margin out with a bracket's shape,
+        told from the selection by colour alone. It is latent: nothing draws a destination yet;
+      - whether a reticle 0.25 rem larger, or the least gap at 80%, is cue enough.
+  - **Labels.** `markLabelOffsetPx` (`wireframe/symbology.ts`) gives each anchor's `labelOffsetPx`,
+    with `LABEL_PLACE_REM` (0.75), `LABEL_CLEARANCE_REM` (0.125), `bracketHalfSizePx`,
+    `destinationHalfSizePx` and `anchorRadiusPx`, which `symbologyMarks` takes too.
+    `markLabelTransform` is `translate((x + labelOffsetPx) ÷ ratio px, y ÷ ratio px)`. A label is
+    now placed from the list's rem, the stage's times the ratio, as the reticles are, in place of
+    CSS `rem`.
+    - Tested through the draw list for a craft and for symbols of classes 0 to 4, at 80%, 100% and
+      150% and ratios 0.78125, 1 and 2, in the four states. In each, the plate clears every reticle
+      drawn by 0.125 rem less 0.75 CSS px. Every transition by selection, each way, leaves the label
+      where it was. Every transition by the destination's report, each way, moves it out or back.
+      Up to class 2 an unselected mark stands at T16.d's place, and classes 3 and 4 stand 0.0625
+      and 0.125 rem further out. The label moves in the list that first draws the destination's
+      reticle.
+    - The move cuts: `.view-marks__label` has no transition or animation (tested), and
+      `placeMarkLabels`' doc gives the reason: an eased move would carry the opaque plate over the
+      reticle for up to 150 ms.
+  - **A plate over a neighbouring mark (the orchestrator's addition).** Tested in the stylesheet: a
+    label's plate over a mark that crowds its own is opaque `--surface-0`, with no opacity, filter,
+    blend or translucent colour on it or its container, and its `--text` and stale `--text-muted`
+    reach 6:1 against it. _Stated limit:_ what of the covered mark shows beside the plate's edge is
+    not captured, since `just test-render` reads no DOM over the canvas. T16.f's by-hand page
+    captures look at it (its by-hand item, amended).
+  - **The check's exclusion.** `neighbourOf` replaces `reachCounts`. A batch drawn before a stroke
+    lights texels whose centres lie within w ÷ 2 + 0.5 px of it, where `lines.wgsl`'s coverage is
+    above zero. One drawn after covers to w ÷ 2 + its casing + 0.5. A crossing is left out as a
+    run: from each point where another batch's centreline comes within the stroke's half-width (it
+    crosses it, or ends on it, as the prime meridian ends on the limb), the joined points on either
+    side whose cross-sections that batch touches. That is T16.d's rule, kept about the crossing.
+    Elsewhere only the texels lit or covered are left out. Synthetic tests:
+    - a crossing drawn after, and one drawn before;
+    - a crossing that ends on the line;
+    - a parallel neighbour's light;
+    - a later neighbour's casing leaving the line's faint edge, which then reads;
+    - a cross-section wholly covered, not read;
+    - a pixel at each end of a segment kept clear when asked.
+  - **The pair.** `pairScene` holds one open circle, a whole number of pixels off the target's
+    centre, so that each arm of the control's bracket keeps an inner texel that its destination
+    does not cover. It is the selection and the destination, at 100% and 80%, in both styles at the
+    three ratios.
+    - Its reticles are kinds of their own, held to their pairs within 1% (`PAIR_TOLERANCE`), after
+      the plan-conformance review's must-fix: at 6:1 alone a partly covered core would pass.
+    - They keep a pixel clear of their arms' cut ends (`CUT_END_MARGIN_PX`). A round cap falls off
+      there: a free arm end read 10.07:1 at a ratio of 1, its cap's texel 0.17 px past the end. The
+      apart frame's `--accent` reticle, held to 6:1 as T16.d held it, still reads its caps.
+    - The control draws the pair with no least gap at 80% and 0.78125, in both styles.
+  - **The readings** (`just test-render`, both variants alike):
+    - every kind T16.d reads still reads its pair at every ratio, in both styles, above its floor:
+      `--text-muted` 7.22:1, `--text` 13.57:1, the target's ticks 12.81:1 on 16 to 20 points (13.57
+      on 36 at 2), `--accent` 10.37:1 and `--target` 8.15:1. The apart frame's `--accent` reticle
+      reads 10.07:1 at a ratio of 1, where T16.d read 10.37: the narrower exclusion now reads its
+      arms' free ends, at their caps;
+    - the pair reads its pairs at every ratio and both scales, in both styles: the bracket 10.37:1
+      on 72, 88 and 168 points and the destination's reticle 8.15:1 on 104, 128 and 240, at
+      0.78125, 1 and 2;
+    - the pair's control reads 2.17:1 on its bracket, on 32 points, in both styles;
+    - the as-built ring's control still reads 4.20:1;
+    - with the narrower exclusion more of each stroke is read: the target's ticks 16 points at
+      0.78125 where T16.d read 12, now that the craft's hull no longer blocks their inner ends.
+  - **Captures.**
+    - **`just test-render --captures`**, on the merged base (65fdb004) and after: all 110 are
+      byte-identical. No capture holds a planet at a graticule threshold, or a destination.
+    - **Hidden captures of `VIEW`'s canvas** (`.git/rm23-scratch/r07-views/t16g/canvas/`, T16.d's
+      harness with its own flow), at 0.78125 and 2:
+      - `PRECISION TEST` from `CHASE` at 60°, its planet about 29 and 35 device px across:
+        byte-identical, as the rule leaves it;
+      - at 120°, the planet about 11 and 14 px across, its limb alone: 217 and 204 px move, in its
+        box, nearly all darker, the graticule gone;
+      - `PHASE TEST` at 45°, its planet about 70 and 90 px across: 3,444 and 3,199 px move, in its
+        box, its graticule at 30° in place of 15°, its cells open again;
+      - `PHASE TEST` at 30°: about 107 px across at 0.78125, which moves the same way (6,513 px),
+        and about 134 px at 2, from 128 up, byte-identical.
+    - **The two builds the subtask names** are stood in for, not built: the merged base (T16.d and
+      T16.e as built, 924b06a's graticule rule), and the base with the view's strokes at 1 CSS px
+      in `viewFrameDrawer.ts` (f57f2b1's lines and thresholds). T16.e changes only the craft, not
+      the planets these captures compare. Against the second, every capture moves at its strokes,
+      0.14% to 1.43% of the pixels, as T16.d's did.
+  - **For T16.c** (the UX review's considers): the view-label sentence could say that a view's
+    marks and their labels cut, never eased; and the destination's cue above waits on its ruling.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest: 62 files, 1,449 tests.
+    - The app's vitest: 332 files, 6,171 tests. An earlier run under load failed
+      `SystemDisplay.test.tsx`'s "starts afresh at the chart's time" once (a day's difference in
+      the chart time), and it passed alone and in the final run. It is not T16.g's.
+    - `just check lint` from a clean typecheck cache, and Prettier.
+    - `just test-render`: both variants exit 0, 556 checks (278 a variant, 276 on the base: the
+      pair's two controls), with no uncaptured GPU error.
+    - No WGSL changed, so naga was not run.
+    - The console-ux skill's lint (no new error; its two predate T16.g: `smoke/wireframe.ts`'s test
+      colours), contrast and glyph scripts.
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers.
+    - **UX:** one must-fix, the lone destination's cue (above), applied as the orchestrator ruled,
+      and confirmed by the reviewer. Its considers are taken: the cut's reason in the code, and the
+      plate test's limit stated in it.
+    - **Plan conformance:** its must-fix, the pair held to its pairs, is applied. Its should-fix is
+      this entry. Its consider is taken: the cross-section note moved to the cross-section
+      paragraph, and the plan text's long lines rewrapped.
+    - **TypeScript:** both should-fixes are answered. A test now holds a lone destination's place,
+      and the threshold rename is declined, as above. Both considers are taken: the test symbol
+      typed, and one `stylesheetRule` that throws, with the WCAG helpers imported, not copied.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

@@ -9,29 +9,71 @@ import {
 import { cosineWindows, type Polyline, sampleCurve } from "./curve";
 
 /**
- * How a body is drawn at its size on screen (plan R02, Design note 13): below 3 px its symbol, from
- * 3 to 8 px its limb circle alone, at 8 px and above its limb and graticule.
+ * How a body is drawn at its size on screen (plan R02, Design note 13): below 3 device px its
+ * symbol, from there to {@link GRATICULE_FROM_PX} at the line scale its limb circle alone, and from
+ * there its limb and graticule.
  */
 export type BodyRegime = "symbol" | "limb" | "graticule";
 
-/** The apparent diameter below which a body is its symbol, px: 3, the brainstorm's point regime. */
+/**
+ * The apparent diameter below which a body is its symbol, device px: 3, the brainstorm's point
+ * regime. It is the image's, not a line's, and stays in device px at every line scale, as the
+ * photorealistic style's `POINT_BELOW_PX` does, so that both styles agree on which bodies are
+ * points (decision-r07-t16d-followups, (c)).
+ */
 export const SYMBOL_BELOW_PX = 3;
 
-/** The apparent diameter from which a body has its graticule, px: 8, where 12 lines stop being lines. */
+/**
+ * The apparent diameter from which a body has its graticule, CSS px: 8, where 12 lines stop being
+ * lines, eight widths of the guide's 1 px line (Design note 13). Like the strokes' widths
+ * (`STROKE_PX`, `CASING_PX`), it is drawn at the view's line scale, `strokeScale` device px for each
+ * (R07.T16.d), so that the graticule's gaps stand to its lines as R02 built them: 8 device px at a
+ * scale of 1, and 16 up to a ratio of 2 (decision-r07-t16d-followups, (c)).
+ */
 export const GRATICULE_FROM_PX = 8;
 
-/** The apparent diameter from which the graticule is drawn at 15° rather than 30°, px: 64. */
+/**
+ * The apparent diameter from which the graticule is drawn at 15° rather than 30°, CSS px: 64, at
+ * the line scale as {@link GRATICULE_FROM_PX} is (128 device px up to a ratio of 2).
+ */
 export const FINE_GRATICULE_FROM_PX = 64;
 
 /** The graticule's step, degrees, on a large body and on a small one (and at the low setting). */
 export const GRATICULE_STEP_DEG = { fine: 15, coarse: 30 } as const;
 
-/** A body's regime by its apparent diameter. */
-export function bodyRegime(diameterPx: number): BodyRegime {
-  if (diameterPx < SYMBOL_BELOW_PX) {
+/**
+ * Whether a body of this apparent diameter, device px, is drawn as its symbol: under
+ * {@link SYMBOL_BELOW_PX}, at every line scale.
+ */
+export function isSymbolSized(diameterPx: number): boolean {
+  return diameterPx < SYMBOL_BELOW_PX;
+}
+
+/**
+ * A body's regime by its apparent diameter, device px, at the view's line scale (`strokeScale`, the
+ * device px drawn for each CSS px of a line): its graticule from {@link GRATICULE_FROM_PX} ×
+ * the scale across.
+ */
+export function bodyRegime(diameterPx: number, strokeScale: number): BodyRegime {
+  if (isSymbolSized(diameterPx)) {
     return "symbol";
   }
-  return diameterPx < GRATICULE_FROM_PX ? "limb" : "graticule";
+  return diameterPx < GRATICULE_FROM_PX * strokeScale ? "limb" : "graticule";
+}
+
+/**
+ * The step of a body's graticule, degrees, by its apparent diameter, device px, at the view's line
+ * scale: 15° from {@link FINE_GRATICULE_FROM_PX} × the scale across, else 30°, and 30° at the low
+ * setting.
+ */
+export function graticuleStepDeg(
+  diameterPx: number,
+  strokeScale: number,
+  lowSetting: boolean,
+): number {
+  return lowSetting || diameterPx < FINE_GRATICULE_FROM_PX * strokeScale
+    ? GRATICULE_STEP_DEG.coarse
+    : GRATICULE_STEP_DEG.fine;
 }
 
 /**
@@ -156,8 +198,9 @@ function limb(body: GraticuleBody, camera: ProjectionCamera, viewport: Viewport)
 
 /**
  * A body's wireframe (plan R02, Design note 13): by its apparent size, nothing (its symbol is the
- * symbology's), its limb circle, or its limb and a graticule at 15° (30° below 64 px, and at the
- * low setting), the equator and prime meridian a step heavier.
+ * symbology's), its limb circle, or its limb and a graticule at 15° (30° below 64 CSS px, and at
+ * the low setting), the equator and prime meridian a step heavier; the thresholds but the symbol's
+ * at the line scale, `strokeScale` device px for each CSS px (R07.T16.g).
  *
  * @remarks
  * Every point is generated in `f64`, camera-relative, as c + r · R · n, and subdivided until each
@@ -167,16 +210,18 @@ function limb(body: GraticuleBody, camera: ProjectionCamera, viewport: Viewport)
  * short visible arc near the limb is never missed. The graticule turns with the body through its
  * rotation; with none it is drawn about the orbit normal and does not turn (Design note 14).
  *
+ * @param strokeScale - The device px drawn for each CSS px of a line (`ViewStrokes.strokeScale`).
  * @param lowSetting - The wireframe's low setting, which draws graticules at 30° only.
  */
 export function graticule(
   body: GraticuleBody,
   camera: ProjectionCamera,
   viewport: Viewport,
+  strokeScale: number,
   lowSetting = false,
 ): BodyWireframe {
   const diameterPx = angularDiameterPx(body.centreM, body.radiusM, camera, viewport);
-  const regime = bodyRegime(diameterPx);
+  const regime = bodyRegime(diameterPx, strokeScale);
   if (regime === "symbol") {
     return { regime, diameterPx, lines: [] };
   }
@@ -198,10 +243,7 @@ export function graticule(
   const facingY = fy ?? 0;
   const facingZ = fz ?? 0;
   const pointOf = (n: Vec3): Vec3 => add(body.centreM, scale(n, body.radiusM));
-  const stepDeg =
-    lowSetting || diameterPx < FINE_GRATICULE_FROM_PX
-      ? GRATICULE_STEP_DEG.coarse
-      : GRATICULE_STEP_DEG.fine;
+  const stepDeg = graticuleStepDeg(diameterPx, strokeScale, lowSetting);
   const stepRad = (stepDeg * Math.PI) / 180;
   const count = Math.round(360 / stepDeg);
   for (let k = 0; k < count; k += 1) {

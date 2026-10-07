@@ -1,21 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { markStrokeDevicePx, markShiftDevicePx } from "../../lib/strokes";
-import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
+import { contrastRatio, tokenLuminance } from "../../smoke/strokeContrast";
+import { stylesheetRule } from "../../test/stylesheet";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
-import {
-  BRACKET_MARGIN_REM,
-  contactRadiusPx,
-  reticleGrowthPx,
-} from "../../view/wireframe/symbology";
 import type { MarkRow } from "./viewRun";
-import {
-  LABEL_OFFSET_REM,
-  markLabelShiftPx,
-  markLabelTransform,
-  ViewMarkLabels,
-} from "./ViewMarkLabels";
+import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
 
 const ANCHOR: DrawAnchor = {
   target: { kind: "craft", craft: "other" },
@@ -23,6 +13,7 @@ const ANCHOR: DrawAnchor = {
   yPx: 100,
   distanceM: 5_000,
   label: { kind: "target", rangeM: 5_000, closureMPerS: null },
+  labelOffsetPx: 24,
 };
 
 function aRow(overrides: Partial<MarkRow> = {}): MarkRow {
@@ -76,47 +67,70 @@ describe("a mark's label", () => {
     );
     expect([labelRef.mock.calls[0]?.[0], labelRef.mock.calls[0]?.[1]?.style.transform]).toEqual([
       "craft:other",
-      "translate(calc(100px + 0.75rem), 50px)",
+      "translate(112px, 50px)",
     ]);
     unmount();
     expect(labelRef).toHaveBeenLastCalledWith("craft:other", null);
   });
 });
 
-/** The ratios and interface scales the label's place is tested at. */
-const PLACES = [0.78125, 1, 2].flatMap((ratio) =>
-  [0.8, 1, 1.5].map((scale) => [ratio, scale] as const),
-);
-
-describe("a label's place beside its mark (R07.T16.d)", () => {
-  it("stands off by the selection's reticle's growth below a ratio of 4/3, and no more from it", () => {
-    expect([
-      [0.78125, 1, 2].map(markLabelShiftPx),
-      markLabelTransform(ANCHOR, 1),
-      markLabelTransform(ANCHOR, 2),
-    ]).toEqual([
-      [2.65, 1.25, 0],
-      "translate(calc(200px + 0.75rem + 1.25px), 100px)",
-      "translate(calc(100px + 0.75rem), 50px)",
+describe("a label's place beside its mark (R07.T16.g)", () => {
+  it("stands its plate the draw list's offset right of its mark, in CSS px", () => {
+    expect([markLabelTransform(ANCHOR, 1), markLabelTransform(ANCHOR, 2)]).toEqual([
+      "translate(224px, 100px)",
+      "translate(112px, 50px)",
     ]);
   });
+});
 
-  it.each(PLACES)(
-    "keeps a selected craft's bracket clear of the plate, as a 1.5 px outline was, at %s and %s",
-    (ratio, scale) => {
-      const remPx = 16 * scale * ratio;
-      const shift = markShiftDevicePx(ratio);
-      // The bracket's half-size, device px, as built and as drawn now; and its outer reach.
-      const asBuilt = contactRadiusPx(remPx) + BRACKET_MARGIN_REM * remPx;
-      const nowReach =
-        asBuilt + reticleGrowthPx(shift) - shift + markStrokeDevicePx(ratio) / 2 + 0.5;
-      const thenReach = asBuilt + (SYMBOL_STROKE_PX * ratio) / 2 + 0.5;
-      const plate = (LABEL_OFFSET_REM * 16 * scale + markLabelShiftPx(ratio)) * ratio;
-      const clearance = plate - nowReach;
-      expect([
-        clearance >= 0,
-        Math.abs(clearance - (LABEL_OFFSET_REM * remPx - thenReach)) < 1e-9,
-      ]).toEqual([true, true]);
-    },
+/** A colour token's value, as the stylesheet's `:root` rule declares it. */
+function tokenOf(name: string): string {
+  return (
+    new RegExp("--" + name + ": (#[0-9a-f]{6});", "u").exec(stylesheetRule(":root"))?.[1] ?? ""
   );
+}
+
+// The plate over a neighbouring mark is checked in the stylesheet, not in pixels: the DOM over the
+// canvas is not captured by `just test-render`, so what of the covered mark shows beside the plate's
+// edge is a stated limit, looked at in the by-hand page captures (R07.T16.g, T16.f).
+describe("a label's plate over a neighbouring mark (R07.T16.g; decision-r07-t16d-followups)", () => {
+  it("is opaque --surface-0 where it lies over a mark that crowds its own", () => {
+    // A second craft 2 rem to the right of the first, at a ratio of 1: beyond the first one's
+    // plate's near edge, under the plate, which runs on for the label's text.
+    const neighbour: DrawAnchor = {
+      ...ANCHOR,
+      target: { kind: "craft", craft: "neighbour" },
+      xPx: ANCHOR.xPx + 32,
+    };
+    render(
+      <ViewMarkLabels
+        anchors={[ANCHOR, neighbour]}
+        devicePixelRatio={1}
+        rows={[aRow(), aRow({ key: "craft:neighbour", name: "NEIGHBOUR · TEST HULL" })]}
+      />,
+    );
+    const plate = screen.getByText("OTHER · TEST HULL", { exact: false });
+    const rules = [stylesheetRule(".view-marks"), stylesheetRule(".view-marks__label")].join("\n");
+    expect({
+      over: neighbour.xPx > ANCHOR.xPx + ANCHOR.labelOffsetPx,
+      plated: plate.classList.contains("view-marks__label"),
+      paints: stylesheetRule(".view-marks__label").includes("background: var(--surface-0);"),
+      surface: /^#[0-9a-f]{6}$/u.test(tokenOf("surface-0")),
+      seeThrough: /opacity|filter|mix-blend-mode|rgba|hsla|transparent|color-mix/u.test(rules),
+    }).toEqual({ over: true, plated: true, paints: true, surface: true, seeThrough: false });
+  });
+
+  it("holds its text and its stale readings at 6:1 against the plate", () => {
+    const surface = tokenLuminance(tokenOf("surface-0"));
+    expect(
+      ["text", "text-muted"].map(
+        (token) => contrastRatio(tokenLuminance(tokenOf(token)), surface) >= 6,
+      ),
+    ).toEqual([true, true]);
+  });
+
+  it("cuts to its place, with no transition or animation", () => {
+    // An eased move would carry the plate over a reported destination's reticle for up to 150 ms.
+    expect(/transition|animation/u.test(stylesheetRule(".view-marks__label"))).toBe(false);
+  });
 });

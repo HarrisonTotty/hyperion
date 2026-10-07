@@ -5,7 +5,7 @@ import { vec3 } from "../geometry/vec3";
 import { emptyDrawList, type LineBatch, viewStrokesAt } from "../view/wireframe/drawList";
 import {
   contrastRatio,
-  reachCounts,
+  neighbourOf,
   type ReadImage,
   readStroke,
   type ScreenStroke,
@@ -46,8 +46,29 @@ function across(yPx: number, widthPx: number, dash: LineBatch["dash"] = null): S
 
 const BLACK = wcagLuminance(0, 0, 0);
 
-/** Nothing else reaches the stroke. */
-const CLEAR = (): boolean => false;
+/** No other batch in the frame. */
+const CLEAR = [] as const;
+
+/** A vertical stroke down the image at `xPx`, `widthPx` wide, cased `casingPx` each side. */
+function down(xPx: number, widthPx: number, casingPx: number): ScreenStroke {
+  return {
+    ...across(0, widthPx),
+    name: "other",
+    segments: [
+      [
+        { x: xPx, y: 0 },
+        { x: xPx, y: 16 },
+      ],
+    ],
+    casingWidthPx: casingPx,
+  };
+}
+
+/** The contrast of a linear grey against black, through its 8-bit code. */
+function greyOnBlack(grey: number): number {
+  const code = srgb8(grey);
+  return contrastRatio(wcagLuminance(code, code, code), BLACK);
+}
 
 describe("the stroke check's arithmetic", () => {
   it("stores a linear value as the canvas's 8-bit sRGB code", () => {
@@ -97,30 +118,84 @@ describe("readStroke", () => {
     expect(reading.samples).toBe(6);
   });
 
-  it("leaves out the points another batch's stroke or casing can reach", () => {
-    const other: ScreenStroke = {
-      ...across(8.5, 2),
-      name: "other",
+  it("leaves out the points about a crossing that the crossing batch reaches", () => {
+    // Drawn after the line, its casing covers it within 1 + 2 + 0.5 px of x = 8: columns 5 to 10.
+    // A cross-section at x holds columns x − 1 and x, so the points at x = 5 to 11 are not read.
+    const later = neighbourOf(down(8, 2, 2), true, 16, 16);
+    const reading = readStroke(rows({ 8: 1 }), across(8.5, 1), [later], BLACK, null);
+    expect([
+      Array.from({ length: 16 }, (_, column) => later.region[column]).join(""),
+      reading.samples,
+    ]).toEqual(["0000011111100000", 13 - 7]);
+  });
+
+  it("leaves out a crossing batch drawn before it only where it lights the line", () => {
+    // Drawn before, it lights the line within 1 + 0.5 px of x = 8: columns 7 and 8, so the points
+    // at x = 7 to 9 are not read.
+    const earlier = neighbourOf(down(8, 2, 2), false, 16, 16);
+    const reading = readStroke(rows({ 8: 1 }), across(8.5, 1), [earlier], BLACK, null);
+    expect(reading.samples).toBe(13 - 3);
+  });
+
+  it("leaves out a crossing that ends on the line, within its half-width", () => {
+    const ending: ScreenStroke = {
+      ...down(8, 2, 2),
       segments: [
         [
           { x: 8, y: 0 },
-          { x: 8, y: 16 },
+          { x: 8, y: 8.3 },
         ],
       ],
-      casingWidthPx: 2,
     };
-    // Its reach, 1 + 2 + 0.5 and a texel's half-diagonal: columns 4 to 11. A cross-section at x
-    // holds columns x − 1 and x, so the points at x = 4 to 12 are not read.
-    const line = across(8.5, 1);
-    const { counts, masks } = reachCounts([line, other], 16, 16);
-    const blocked = (column: number, row: number): boolean =>
-      (counts[row * 16 + column] ?? 0) - (masks[0]?.[row * 16 + column] ?? 0) > 0;
-    const reading = readStroke(rows({ 8: 1 }), line, blocked, BLACK, null);
-    expect([
-      // Its first row's texels, which the vertical stroke reaches.
-      Array.from({ length: 16 }, (_, column) => masks[1]?.[column]).join(""),
-      reading.samples,
-    ]).toEqual(["0000111111110000", 13 - 9]);
+    const reading = readStroke(
+      rows({ 8: 1 }),
+      across(8.5, 1),
+      [neighbourOf(ending, true, 16, 16)],
+      BLACK,
+      null,
+    );
+    expect(reading.samples).toBe(13 - 7);
+  });
+
+  it("leaves out the texels a parallel neighbour lights, and reads the rest of the section", () => {
+    // The line's 2 px lights rows 7 and 8 at half its colour; a neighbour 2.5 px below, drawn
+    // before it, lights rows 9 to 11 fully. The line's cross-section holds rows 6 to 9, and row 9,
+    // the neighbour's light, would read 21:1.
+    const neighbour = neighbourOf(across(10.5, 2), false, 16, 16);
+    const reading = readStroke(
+      rows({ 7: 0.5, 8: 0.5, 9: 1, 10: 1, 11: 1 }),
+      across(8, 2),
+      [neighbour],
+      BLACK,
+      null,
+    );
+    expect([reading.samples, reading.worst]).toEqual([13, greyOnBlack(0.5)]);
+  });
+
+  it("counts a later neighbour's casing against the line, leaving its own faint edge", () => {
+    // A neighbour 2.5 px below, drawn after with a 2 px casing, covers rows 7 to 13: of the line's
+    // 2 px, only row 6, its faint edge, is left to read.
+    const neighbour = neighbourOf({ ...across(10.5, 2), casingWidthPx: 2 }, true, 16, 16);
+    const reading = readStroke(
+      rows({ 6: 0.1, 7: 1, 8: 1 }),
+      across(8, 2),
+      [neighbour],
+      BLACK,
+      null,
+    );
+    expect([reading.samples, reading.worst]).toEqual([13, greyOnBlack(0.1)]);
+  });
+
+  it("does not read a cross-section the neighbour wholly covers", () => {
+    // A neighbour 1 px below the 1 px line, not crossing it, covers rows 6 to 12 with its casing.
+    const neighbour = neighbourOf({ ...across(9.5, 2), casingWidthPx: 2 }, true, 16, 16);
+    const reading = readStroke(rows({ 8: 1 }), across(8.5, 1), [neighbour], BLACK, null);
+    expect([reading.samples, reading.worst]).toEqual([0, Number.POSITIVE_INFINITY]);
+  });
+
+  it("keeps clear of a segment's ends when asked: a pixel at each end", () => {
+    const reading = readStroke(rows({ 8: 1 }), across(8.5, 1), CLEAR, BLACK, null, 1);
+    expect(reading.samples).toBe(13 - 2);
   });
 
   it("reads only the points it is asked to keep", () => {

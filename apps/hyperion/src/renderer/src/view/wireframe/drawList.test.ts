@@ -12,6 +12,7 @@ import {
 } from "../../test/viewFixtures";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
+import type { CameraTarget } from "../camera/state";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
 import { MIN_STROKE_DEVICE_PX } from "../../lib/strokes";
@@ -19,7 +20,7 @@ import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
 import { occluderRadius } from "../depth/depth";
 import { narrow } from "../coords/narrow";
 import { TEST_HULL } from "../scene/hull";
-import { sceneOrigins, type ViewScene } from "../scene/model";
+import { type BodyMarkSymbol, sceneOrigins, type ViewScene } from "../scene/model";
 import {
   buildWireframeDrawList,
   CASING_PX,
@@ -44,8 +45,13 @@ const TOKENS: ColourTokens = {
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 
-/** Strokes at a scale of 1: each width as the guide gives it, the outlines not moved. */
-const UNSCALED: ViewStrokes = { strokeScale: 1, markStrokePx: SYMBOL_STROKE_PX, markShiftPx: 0 };
+/** Strokes at a scale of 1: each width as the guide gives it, the outlines not moved, no least gap. */
+const UNSCALED: ViewStrokes = {
+  strokeScale: 1,
+  markStrokePx: SYMBOL_STROKE_PX,
+  markShiftPx: 0,
+  minReticleGapPx: 0,
+};
 
 const OPTIONS: DrawOptions = {
   lowSetting: false,
@@ -476,4 +482,232 @@ describe("the selection's and the destination's reticles on one target (R07.T16.
       expect([gap - reach >= core - 1e-4, gap >= 0.25 * remPx - 1e-4]).toEqual([true, true]);
     },
   );
+});
+
+/** The mark whose label the label tests place: the planet drawn as its symbol, or the other craft. */
+type LabelledMark = "craft" | 0 | 1 | 2 | 3 | 4;
+
+/** The fixture scene, its planet shrunk below 3 px, drawn as an open circle of `mark`'s class. */
+function labelScene(mark: LabelledMark): ViewScene {
+  const base = aMarkedViewScene();
+  const symbol: BodyMarkSymbol = { shape: "circle", sizeClass: mark === "craft" ? 2 : mark };
+  return {
+    ...base,
+    bodies: base.bodies.map((body) =>
+      body.id === FIXTURE_PLANET ? Object.assign({}, body, { radiusM: 1, symbol }) : body,
+    ),
+  };
+}
+
+/** The target of a labelled mark. */
+function labelTarget(mark: LabelledMark): CameraTarget {
+  return mark === "craft"
+    ? { kind: "craft", craft: "other" }
+    : { kind: "body", body: FIXTURE_PLANET };
+}
+
+/** The four states a mark is taken in: neither, selected, the destination alone, and both. */
+const STATES = ["none", "selected", "destination", "both"] as const;
+
+/** A mark's state. */
+type MarkState = (typeof STATES)[number];
+
+/** A mark's label's place and the reticles about it, device px, in each state, at a place. */
+function labelPlaces(
+  mark: LabelledMark,
+  ratio: number,
+  interfaceScale: number,
+): Record<MarkState, { offsetPx: number; reticleEdgesPx: number[] }> {
+  const target = labelTarget(mark);
+  const strokes = viewStrokesAt(ratio);
+  const remPx = 16 * interfaceScale * ratio;
+  const placed = (state: MarkState): { offsetPx: number; reticleEdgesPx: number[] } => {
+    const list = build(
+      {
+        selection: state === "selected" || state === "both" ? target : null,
+        destination: state === "destination" || state === "both" ? target : null,
+        remPx,
+        ...strokes,
+      },
+      labelScene(mark),
+    );
+    const anchor = list.anchors.find(
+      (each) => JSON.stringify(each.target) === JSON.stringify(target),
+    );
+    if (anchor === undefined) {
+      throw new Error("the label tests' mark is not in view");
+    }
+    // Each reticle's outer edge to the mark's right: its corners' farthest reach along x, and half
+    // its outline.
+    const reticleEdgesPx = list.lines
+      .filter(
+        (line) => line.id.startsWith("mark:selection:") || line.id.startsWith("mark:destination:"),
+      )
+      .map(
+        (line) =>
+          Math.max(
+            ...Array.from({ length: line.segments.length / 3 }, (_, i) =>
+              Math.abs((line.segments[i * 3] ?? 0) - anchor.xPx),
+            ),
+          ) +
+          line.widthPx / 2,
+      );
+    return { offsetPx: anchor.labelOffsetPx, reticleEdgesPx };
+  };
+  return {
+    none: placed("none"),
+    selected: placed("selected"),
+    destination: placed("destination"),
+    both: placed("both"),
+  };
+}
+
+/** The craft's label's offset in a list, device px. */
+function craftLabelOffset(list: WireframeDrawList): number | undefined {
+  return list.anchors.find((anchor) => anchor.target.kind === "craft")?.labelOffsetPx;
+}
+
+/** How many destination reticles a list draws. */
+function destinationReticles(list: WireframeDrawList): number {
+  return list.lines.filter((line) => line.id.startsWith("mark:destination:")).length;
+}
+
+/** The marks, ratios and interface scales the labels' places are tested at. */
+const LABEL_PLACES = (["craft", 0, 1, 2, 3, 4] as const).flatMap((mark) =>
+  [0.78125, 1, 2].flatMap((ratio) =>
+    [0.8, 1, 1.5].map((interfaceScale) => [mark, ratio, interfaceScale] as const),
+  ),
+);
+
+/**
+ * The label's transitions by selection, each way: selecting or deselecting a mark, whether or not it
+ * is the destination.
+ */
+const SELECTING: ReadonlyArray<readonly [MarkState, MarkState]> = [
+  ["none", "selected"],
+  ["selected", "none"],
+  ["destination", "both"],
+  ["both", "destination"],
+];
+
+/** The label's transitions by the destination's report, each way. */
+const REPORTED: ReadonlyArray<readonly [MarkState, MarkState]> = [
+  ["none", "destination"],
+  ["destination", "none"],
+  ["selected", "both"],
+  ["both", "selected"],
+];
+
+describe("a mark's label beside its reticles (R07.T16.g; decision-r07-t16d-followups, items 1 and (d))", () => {
+  it.each(LABEL_PLACES)(
+    "stands %s's plate 0.125 rem less 0.75 px clear of every reticle about it, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const places = labelPlaces(mark, ratio, interfaceScale);
+      const leastPx = (0.125 * 16 * interfaceScale - 0.75) * ratio;
+      // The segments are `f32`: within 1e-4 px.
+      const clear = STATES.map((state) =>
+        places[state].reticleEdgesPx.every(
+          (edgePx) => places[state].offsetPx - edgePx >= leastPx - 1e-4,
+        ),
+      );
+      const drawn = STATES.map((state) => places[state].reticleEdgesPx.length);
+      expect([clear, drawn]).toEqual([
+        [true, true, true, true],
+        [0, 1, 1, 2],
+      ]);
+    },
+  );
+
+  it.each(LABEL_PLACES)(
+    "never moves %s's label when it is selected or deselected, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const places = labelPlaces(mark, ratio, interfaceScale);
+      expect(SELECTING.map(([from, to]) => places[to].offsetPx - places[from].offsetPx)).toEqual([
+        0, 0, 0, 0,
+      ]);
+    },
+  );
+
+  it.each(LABEL_PLACES)(
+    "moves %s's label out on the destination's report and back when it ends, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const places = labelPlaces(mark, ratio, interfaceScale);
+      expect(
+        REPORTED.map(([from, to]) => Math.sign(places[to].offsetPx - places[from].offsetPx)),
+      ).toEqual([1, -1, 1, -1]);
+    },
+  );
+
+  it.each(
+    (["craft", 0, 1, 2] as const).flatMap((mark) =>
+      [
+        [0.78125, 2.65],
+        [1, 1.25],
+        [2, 0],
+      ].map(([ratio = 1, shiftCssPx = 0]) => [mark, ratio, shiftCssPx] as const),
+    ),
+  )(
+    "stands %s's label at T16.d's place at a ratio of %s: 0.75 rem and %s px",
+    (mark, ratio, shiftCssPx) => {
+      const offsets = [0.8, 1, 1.5].map(
+        (interfaceScale) =>
+          labelPlaces(mark, ratio, interfaceScale).none.offsetPx / ratio -
+          0.75 * 16 * interfaceScale,
+      );
+      expect(offsets.map((cssPx) => Math.abs(cssPx - shiftCssPx) < 1e-9)).toEqual([
+        true,
+        true,
+        true,
+      ]);
+    },
+  );
+
+  it.each([
+    ["craft", 0.78125, 0.8],
+    [4, 0.78125, 0.8],
+    ["craft", 2, 1.5],
+    [0, 1, 1],
+  ] as const)(
+    "stands %s's destination reticle in one place, selected or not, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const places = labelPlaces(mark, ratio, interfaceScale);
+      // Alone, its one reticle; on the selection, the second, drawn after the bracket.
+      const [alone] = places.destination.reticleEdgesPx;
+      const [bracket, onSelection] = places.both.reticleEdgesPx;
+      expect([
+        Math.abs((alone ?? 0) - (onSelection ?? Number.NaN)) < 1e-4,
+        (alone ?? 0) > (bracket ?? Number.POSITIVE_INFINITY),
+      ]).toEqual([true, true]);
+    },
+  );
+
+  it("stands a giant's and a class-4 symbol's label 0.0625 and 0.125 rem further out", () => {
+    const further = ([3, 4] as const).map(
+      (mark) => (labelPlaces(mark, 1, 1).none.offsetPx - labelPlaces(2, 1, 1).none.offsetPx) / 16,
+    );
+    expect(further.map((rem) => Math.round(rem * 1e9) / 1e9)).toEqual([0.0625, 0.125]);
+  });
+
+  it("moves the label in the list that first draws the destination's reticle", () => {
+    const target = labelTarget("craft");
+    const strokes = viewStrokesAt(1);
+    const before = build({ ...strokes, selection: target }, labelScene("craft"));
+    const reported = build(
+      { ...strokes, selection: target, destination: target },
+      labelScene("craft"),
+    );
+    expect([
+      destinationReticles(before),
+      destinationReticles(reported),
+      (craftLabelOffset(reported) ?? 0) > (craftLabelOffset(before) ?? Number.POSITIVE_INFINITY),
+    ]).toEqual([0, 1, true]);
+  });
+});
+
+describe("the destination's least gap (R07.T16.g)", () => {
+  it("is lib/strokes.ts's outline and casing at each ratio: 4, 4, 5 and 7.5 px", () => {
+    expect([0.78125, 1, 2, 3].map((ratio) => viewStrokesAt(ratio).minReticleGapPx)).toEqual([
+      4, 4, 5, 7.5,
+    ]);
+  });
 });

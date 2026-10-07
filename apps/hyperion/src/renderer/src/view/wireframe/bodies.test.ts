@@ -8,6 +8,8 @@ import {
   bodyRegime,
   type GraticuleBody,
   graticule,
+  graticuleStepDeg,
+  isSymbolSized,
   perpendicularPair,
   ringEllipse,
   SYMBOL_BELOW_PX,
@@ -17,6 +19,9 @@ import type { Polyline } from "./curve";
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const FOV_X_RAD = Math.PI / 3;
 const EARTH_RADIUS_M = 6.371e6;
+
+/** The line scale R02 built the wireframe at: a device px for each CSS px of a line. */
+const AS_BUILT_SCALE = 1;
 
 /** The distance from `(x, y)` to the screen segment from `a` to `b`, px. */
 function toSegmentPx(
@@ -34,11 +39,78 @@ function toSegmentPx(
 
 describe("bodyRegime", () => {
   it("draws a body under 3 px as its symbol", () => {
-    expect([bodyRegime(2.99), bodyRegime(SYMBOL_BELOW_PX)]).toEqual(["symbol", "limb"]);
+    expect([bodyRegime(2.99, AS_BUILT_SCALE), bodyRegime(SYMBOL_BELOW_PX, AS_BUILT_SCALE)]).toEqual(
+      ["symbol", "limb"],
+    );
   });
 
   it("draws a body from 8 px with its graticule", () => {
-    expect([bodyRegime(7.99), bodyRegime(8)]).toEqual(["limb", "graticule"]);
+    expect([bodyRegime(7.99, AS_BUILT_SCALE), bodyRegime(8, AS_BUILT_SCALE)]).toEqual([
+      "limb",
+      "graticule",
+    ]);
+  });
+});
+
+/** The view's line scales: 2 at every ratio up to 2, 3 at 3, and R02's 1 as built. */
+const LINE_SCALES = [
+  [1, 8, 64],
+  [2, 16, 128],
+  [3, 24, 192],
+] as const;
+
+describe("a body's regime at the view's line scale (R07.T16.g; decision-r07-t16d-followups, (c))", () => {
+  it.each(LINE_SCALES)(
+    "at a line scale of %s has its limb alone below %s px and its graticule from it",
+    (strokeScale, fromPx) => {
+      expect([bodyRegime(fromPx - 0.1, strokeScale), bodyRegime(fromPx, strokeScale)]).toEqual([
+        "limb",
+        "graticule",
+      ]);
+    },
+  );
+
+  it.each(LINE_SCALES)(
+    "at a line scale of %s draws its graticule at 30° below %s px and at 15° from it",
+    (strokeScale, _, finePx) => {
+      expect([
+        graticuleStepDeg(finePx - 0.1, strokeScale, false),
+        graticuleStepDeg(finePx, strokeScale, false),
+        graticuleStepDeg(finePx, strokeScale, true),
+      ]).toEqual([30, 15, 30]);
+    },
+  );
+
+  it("is a body's symbol under 3 px at every line scale, the image's point regime", () => {
+    expect(
+      LINE_SCALES.map(([strokeScale]) => [
+        bodyRegime(2.9, strokeScale),
+        bodyRegime(SYMBOL_BELOW_PX, strokeScale),
+        isSymbolSized(2.9),
+      ]),
+    ).toEqual(LINE_SCALES.map(() => ["symbol", "limb", true]));
+  });
+
+  it("draws a body's lines by the regime at the scale it is given", () => {
+    const camera: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: FOV_X_RAD };
+    const pxPerRad = VIEWPORT.widthPx / (2 * Math.tan(FOV_X_RAD / 2));
+    // A body straight ahead, its apparent diameter `diameterPx`.
+    const at = (diameterPx: number): GraticuleBody => ({
+      centreM: vec3(0, 0, -EARTH_RADIUS_M / Math.sin(diameterPx / pxPerRad / 2)),
+      radiusM: EARTH_RADIUS_M,
+      rotation: null,
+      unmodelledPole: null,
+    });
+    const drawn = (diameterPx: number): [string, number] => {
+      const wireframe = graticule(at(diameterPx), camera, VIEWPORT, 2);
+      return [wireframe.regime, meridians(wireframe.lines)];
+    };
+    expect([drawn(15.9), drawn(16.1), drawn(127.9), drawn(128.1)]).toEqual([
+      ["limb", 0],
+      ["graticule", 12],
+      ["graticule", 12],
+      ["graticule", 24],
+    ]);
   });
 });
 
@@ -56,7 +128,9 @@ describe("a body 400 km below the camera", () => {
     rotation: null,
     unmodelledPole: null,
   };
-  const limb = graticule(body, camera, VIEWPORT).lines.find((line) => line.kind === "limb");
+  const limb = graticule(body, camera, VIEWPORT, AS_BUILT_SCALE).lines.find(
+    (line) => line.kind === "limb",
+  );
   const runs: readonly Polyline[] = limb?.runs ?? [];
 
   it("has its limb on the true horizon: every point on the sphere, its line of sight tangent", () => {
@@ -134,6 +208,7 @@ describe("a graticule", () => {
       { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: null },
       camera,
       VIEWPORT,
+      AS_BUILT_SCALE,
     );
     const lines = wireframe.lines.filter((line) => line.kind !== "limb");
     const facing = lines.flatMap((line) =>
@@ -163,6 +238,7 @@ describe("a graticule", () => {
       { centreM: facingCentre, radiusM: EARTH_RADIUS_M, rotation, unmodelledPole: null },
       looking,
       VIEWPORT,
+      AS_BUILT_SCALE,
     ).lines.find((line) => line.kind === "meridian" && line.major);
     const planeNormal = rotateToBody(rotation, vec3(0, 1, 0));
     const offPlane = (prime?.runs.flat() ?? []).map(
@@ -184,11 +260,13 @@ describe("a graticule", () => {
       },
       camera,
       VIEWPORT,
+      AS_BUILT_SCALE,
     );
     const low = graticule(
       { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: null },
       camera,
       VIEWPORT,
+      AS_BUILT_SCALE,
       true,
     );
     expect([meridians(small.lines), meridians(low.lines)]).toEqual([12, 12]);
@@ -234,7 +312,7 @@ describe("a graticule seen from low altitude", () => {
 
   it.each([4e5, 1e4])("draws every meridian with a facing arc from %d m", (altitudeM) => {
     const { body, camera } = fromAbove(altitudeM);
-    const drawn = graticule(body, camera, VIEWPORT).lines.filter(
+    const drawn = graticule(body, camera, VIEWPORT, AS_BUILT_SCALE).lines.filter(
       (line) => line.kind === "meridian" && line.runs.length > 0,
     ).length;
     expect(drawn).toBe(meridiansFacing(body));
@@ -249,6 +327,7 @@ describe("an unrotated body's graticule", () => {
       { centreM, radiusM: EARTH_RADIUS_M, rotation: null, unmodelledPole: pole },
       { orientation: IDENTITY_QUATERNION, fovXRad: FOV_X_RAD },
       VIEWPORT,
+      AS_BUILT_SCALE,
     ).lines.find((line) => line.kind === "parallel" && line.major);
     const offEquator = (equator?.runs.flat() ?? []).map(
       (p) => Math.abs(dot(sub(p, centreM), pole)) / EARTH_RADIUS_M,

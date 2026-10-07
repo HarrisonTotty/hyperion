@@ -139,15 +139,11 @@ function batch(
 }
 
 /**
- * An empty draw list at a stroke scale, its outlines unmoved: its `occluderSlopePx` is what the
- * occluders read (3 at a scale of 1, 5 at 2).
+ * An empty draw list at a stroke scale: its `occluderSlopePx` is what the occluders read (3 at a
+ * scale of 1, 5 at 2).
  */
 function nothingAt(strokeScale: number): WireframeDrawList {
-  return emptyDrawList({
-    strokeScale,
-    markStrokePx: SYMBOL_STROKE_PX * strokeScale,
-    markShiftPx: 0,
-  });
+  return emptyDrawList({ strokeScale, markStrokePx: SYMBOL_STROKE_PX * strokeScale });
 }
 
 /** An empty draw list, as a view at a ratio of 1 draws: lines at 2 device px per CSS px. */

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { lineScale, markShiftDevicePx, markStrokeDevicePx, MIN_STROKE_DEVICE_PX } from "./strokes";
+import {
+  lineScale,
+  markShiftDevicePx,
+  markStrokeDevicePx,
+  minReticleGapDevicePx,
+  MIN_STROKE_DEVICE_PX,
+} from "./strokes";
 
 /** The ratios in use: the development machine's and the UHD 620's, 100%, a Retina display, and 3. */
 const RATIOS = [0.78125, 1, 2, 3] as const;
@@ -30,13 +36,18 @@ describe("the console's stroke widths (decision-thin-line-contrast, item 2)", ()
     ]).toEqual([0.0625, true, 0]);
   });
 
+  it("stands two reticles about one mark an outline and a casing apart: 4, 4, 5 and 7.5 px", () => {
+    expect(RATIOS.map(minReticleGapDevicePx)).toEqual([4, 4, 5, 7.5]);
+  });
+
   it("takes a ratio that is not a positive number as 1", () => {
     expect(
       [Number.NaN, 0, -2, Number.POSITIVE_INFINITY].map((ratio) => [
         lineScale(ratio),
         markStrokeDevicePx(ratio),
         markShiftDevicePx(ratio),
+        minReticleGapDevicePx(ratio),
       ]),
-    ).toEqual(Array.from({ length: 4 }, () => [2, 2, 0.25]));
+    ).toEqual(Array.from({ length: 4 }, () => [2, 2, 0.25, 4]));
   });
 });

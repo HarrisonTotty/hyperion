@@ -28,6 +28,7 @@ import {
   sliceSceneSystem,
 } from "../../test/sceneFixture";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { stylesheetRule } from "../../test/stylesheet";
 import { FULL_VIEW_PX, renderViewDisplay, stubViewLayout } from "../../test/viewDisplayHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
@@ -45,7 +46,6 @@ import {
 import type { FrameSubmission } from "../../view/engine/types";
 import { METER_CLASS } from "../../view/post/meter";
 import { precisionScene } from "../../view/scenes/precision";
-import STYLES from "../../styles.css?raw";
 import { lineScale } from "../../lib/strokes";
 import { buildWireframeDrawList, CASING_PX, viewStrokesAt } from "../../view/wireframe/drawList";
 import { linearColour } from "../../view/wireframe/submit";
@@ -1075,11 +1075,6 @@ function casedInPairs(frame: FrameSubmission | undefined): boolean {
 /** The classes of the `--surface-0` plates that DOM text over a view's image sits on. */
 const PLATE_CLASSES = ["view-label", "view-marks__label"] as const;
 
-/** The declarations of `.<name> { … }`, the stylesheet's rule for exactly that class. */
-function ruleOf(css: string, name: string): string {
-  return new RegExp(`(?:^|\\n)\\.${name} \\{([^}]*)\\}`, "u").exec(css)?.[1] ?? "";
-}
-
 /** Switches the default `PRECISION TEST` to the photorealistic style and lets it draw. */
 async function drawPrecisionPhotoreal(view: Setup): Promise<void> {
   await settle();
@@ -1209,7 +1204,7 @@ describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
       plated: [...plated].toSorted(),
       slotText: inSlot > 0,
       paints: PLATE_CLASSES.map((name) =>
-        ruleOf(STYLES, name).includes("background: var(--surface-0)"),
+        stylesheetRule(`.${name}`).includes("background: var(--surface-0)"),
       ),
     }).toEqual({
       unplated: [],

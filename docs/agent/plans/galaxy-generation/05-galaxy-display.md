@@ -1430,3 +1430,15 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   The first task that commands a destination (`SpatialScene.destinationId`) stands the label
   outside every reticle drawn about its mark, as R07.T16.g does in the view, and asks for a
   ruling on 149.1's hold.
+
+  _Open, from R07.T16.g's UX review (the orchestrator, 2026-10-06), to be ruled by a decision
+  advisor or the owner before the first task that commands a destination:_
+  - the ship-wide reticle convention leaves the destination's own cue unstated: the guide gives
+    the `--target` reticle to a commanded destination, and its nomenclature says "corner brackets
+    mean the selection only", but names nothing beyond colour that tells a lone destination's
+    reticle from a bracket;
+  - `spatial/drawList.ts`'s `reticleOps` draws a destination that is not the selection one margin
+    out, a bracket's shape at a bracket's place, so that only `--target` against `--accent` tells it
+    from a selection, which the guide's Colour rule forbids. It is latent: nothing draws a
+    destination yet. The view keeps its destination at its place about the selection, selected or
+    not, a size and position cue (R07.T16.g).

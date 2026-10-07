@@ -1,5 +1,11 @@
 import { norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import { lineScale, markShiftDevicePx, markStrokeDevicePx } from "../../lib/strokes";
+import {
+  CASING_PX,
+  lineScale,
+  markShiftDevicePx,
+  markStrokeDevicePx,
+  minReticleGapDevicePx,
+} from "../../lib/strokes";
 import type { ColourToken } from "../../spatial/drawList";
 import type { ColourTokens } from "../../spatial/paint";
 import type { CameraPose } from "../camera/pose";
@@ -20,20 +26,27 @@ import { starColour } from "../photometry/starColour";
 import { REC709_LUMA } from "../sky/photometry";
 import type { Rgb } from "../photometry/toneCurve";
 import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
-import { angularDiameterPx, bodyRegime, graticule, ringEllipse } from "./bodies";
+import { angularDiameterPx, graticule, isSymbolSized, ringEllipse } from "./bodies";
 import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
 import { hullEdges, hullFaces } from "./hulls";
 import { orbitPath } from "./orbits";
-import { type ScreenPx, type SymbologyAnchor, symbologyMarks, targetMark } from "./symbology";
+import {
+  anchorRadiusPx,
+  markLabelOffsetPx,
+  type ScreenPx,
+  type SymbologyAnchor,
+  symbologyMarks,
+  targetMark,
+} from "./symbology";
 
 /**
- * The width of the `--surface-0` casing on each side of every stroke, CSS px: 1, the guide's
- * casing over a raster, which every mark over the image takes (the guide's drafted "Outlines for
- * symbology", R02.T2.b item 3; Design note 9). Drawn at {@link ViewStrokes.strokeScale} device px
- * for each, as every line width and dash here is (R07.T16.d).
+ * The width of the `--surface-0` casing on each side of every stroke, CSS px: `lib/strokes.ts`'s,
+ * drawn at {@link ViewStrokes.strokeScale} device px for each, as every line width and dash here is
+ * (R07.T16.d). Kept here for the view's callers; `lib/strokes.ts` holds it since R07.T16.g, so that
+ * the least gap between two reticles (`minReticleGapDevicePx`) takes the same casing.
  */
-export const CASING_PX = 1;
+export { CASING_PX };
 
 /**
  * A stroke's widths, CSS px: the thin reference lines (the guide's 1 px orbit), a step heavier
@@ -71,18 +84,25 @@ export interface ViewStrokes {
    * that what it encloses stays as built.
    */
   readonly markShiftPx: number;
+  /**
+   * The least space between the selection's bracket and the destination's reticle about one mark,
+   * device px: `minReticleGapDevicePx` of the ratio, an outline and one casing, so that the
+   * destination's casing never reaches the bracket's full-coverage core (R07.T16.d, T16.g).
+   */
+  readonly minReticleGapPx: number;
 }
 
 /**
  * A view's strokes at a display's device-pixel ratio, from `lib/strokes.ts`: at 0.78125 and 1, 2
- * device px per CSS px and outlines of 2 device px, moved out 0.41 and 0.25 px; at 2, 2 and 3 px,
- * not moved.
+ * device px per CSS px and outlines of 2 device px, moved out 0.41 and 0.25 px, with reticles at
+ * least 4 px apart; at 2, 2 and 3 px, not moved, at least 5 px apart.
  */
 export function viewStrokesAt(devicePixelRatio: number): ViewStrokes {
   return {
     strokeScale: lineScale(devicePixelRatio),
     markStrokePx: markStrokeDevicePx(devicePixelRatio),
     markShiftPx: markShiftDevicePx(devicePixelRatio),
+    minReticleGapPx: minReticleGapDevicePx(devicePixelRatio),
   };
 }
 
@@ -224,6 +244,12 @@ export interface DrawAnchor {
    * its target mark, a body drawn as its symbol named as a mark (Design note 13); `null` for none.
    */
   readonly label: AnchorLabel | null;
+  /**
+   * The device px from the anchor to its label's `--surface-0` plate, to its right: clear of every
+   * reticle that can stand about the mark (`markLabelOffsetPx`, R07.T16.g). It is the list's, so
+   * that the label moves in the frame in which a destination's reticle is first drawn, and cuts.
+   */
+  readonly labelOffsetPx: number;
 }
 
 /** What a mark's DOM label says. */
@@ -267,7 +293,9 @@ export interface WireframeDrawList {
 }
 
 /** A list that draws nothing, with a view's strokes: for a frame whose symbology is not drawn. */
-export function emptyDrawList(strokes: ViewStrokes): WireframeDrawList {
+export function emptyDrawList(
+  strokes: Pick<ViewStrokes, "strokeScale" | "markStrokePx">,
+): WireframeDrawList {
   return {
     occluderSpheres: [],
     occluderMeshes: [],
@@ -300,7 +328,11 @@ export interface DrawOptions extends ViewStrokes {
   readonly ev100: number;
   /** The selected target, bracketed, whose orbit is drawn heavier; or `null`. */
   readonly selection: CameraTarget | null;
-  /** The commanded destination, with its `--target` reticle; or `null`. */
+  /**
+   * The destination as the server last reported it, with its `--target` reticle, its label moved
+   * clear of it in the same list; or `null`. Never a destination only commanded: the reticle and
+   * the label's move wait for the report (the guide's commanding rule; R07.T16.g).
+   */
   readonly destination: CameraTarget | null;
   /** The interface's rem, device px, which symbol sizes follow. */
   readonly remPx: number;
@@ -397,7 +429,9 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * the brightest 2,000 at the low setting. Every stroke is cased in `--surface-0`, since every mark
  * may lie over a star. Every line's width, casing and dash is the guide's CSS pixels times
  * `options.strokeScale`, and every symbology outline is `options.markStrokePx` wide, moved out by
- * `options.markShiftPx` (R07.T16.d). Colours come from `tokens` (plan 05's `readTokens`), never
+ * `options.markShiftPx` (R07.T16.d). A body's graticule thresholds are in line widths, at
+ * `options.strokeScale` device px each, and each anchor's label stands clear of every reticle that
+ * can stand about its mark (R07.T16.g). Colours come from `tokens` (plan 05's `readTokens`), never
  * literals. Every position is differenced in `f64` and narrowed once. The list is a function of
  * its arguments alone.
  */
@@ -463,6 +497,7 @@ export function buildWireframeDrawList(
       },
       projection,
       viewport,
+      strokeScale,
       options.lowSetting,
     );
     if (wireframe.regime !== "symbol") {
@@ -653,7 +688,7 @@ export function buildWireframeDrawList(
         0,
       );
       label = { kind: "target", rangeM: mark.rangeM, closureMPerS: mark.closureMPerS };
-    } else if (anchor.body !== null && bodyRegime(anchor.body.diameterPx) === "symbol") {
+    } else if (anchor.body !== null && isSymbolSized(anchor.body.diameterPx)) {
       label = { kind: "symbol" };
     }
     // Only a mark within the view, or within a mark's reach of its edge, gets a DOM label and is
@@ -665,7 +700,19 @@ export function buildWireframeDrawList(
       at.yPx >= -marginPx &&
       at.yPx <= viewport.heightPx + marginPx
     ) {
-      anchors.push({ target, xPx: at.xPx, yPx: at.yPx, distanceM: norm(pointM), label });
+      anchors.push({
+        target,
+        xPx: at.xPx,
+        yPx: at.yPx,
+        distanceM: norm(pointM),
+        label,
+        labelOffsetPx: markLabelOffsetPx(
+          anchorRadiusPx(anchor, options.remPx),
+          options.remPx,
+          options.markShiftPx,
+          sameTarget(options.destination, target) ? options.minReticleGapPx : null,
+        ),
+      });
     }
   }
   const marks = symbologyMarks(
@@ -676,8 +723,9 @@ export function buildWireframeDrawList(
       ownVelocityMPerS: own?.velocityMPerS ?? null,
       remPx: options.remPx,
       markShiftPx: options.markShiftPx,
-      // An outline and one casing, so that the destination's casing clears the brackets' core.
-      minReticleGapPx: markStrokePx + drawnPx(CASING_PX),
+      // An outline and one casing (`minReticleGapDevicePx`), so that the destination's casing
+      // clears the brackets' core.
+      minReticleGapPx: options.minReticleGapPx,
     },
     projection,
     viewport,

@@ -390,7 +390,11 @@ function exposureShownChanged(shown: ExposureControl, next: ExposureControl): bo
 
 /**
  * Moves each mark's label with its mark, at the frame rate; its text changes at 4 Hz (RM1 m10). A
- * label whose mark this frame did not draw is hidden until the next readout removes it.
+ * label whose mark this frame did not draw is hidden until the next readout removes it. Each stands
+ * at its anchor's `labelOffsetPx`, this frame's, so that a reported destination moves it out in the
+ * frame its reticle is first drawn. It cuts, never eased as the guide's state transitions are: an
+ * eased move would carry its opaque plate over the reticle for up to 150 ms, below the 6:1 a mark's
+ * meaning needs (decision-r07-t16d-followups, (d); R07.T16.g).
  *
  * @param labels - The marks' labels by their target's key.
  */

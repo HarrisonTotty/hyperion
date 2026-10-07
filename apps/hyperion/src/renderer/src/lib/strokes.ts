@@ -19,6 +19,14 @@ import { SYMBOL_STROKE_PX } from "../spatial/symbols";
 /** The least width of a line, casing or outline that a canvas, an SVG or a view draws, device px. */
 export const MIN_STROKE_DEVICE_PX = 2;
 
+/**
+ * The width of the `--surface-0` casing on each side of a stroke, CSS px: 1, the guide's casing
+ * over a raster, which every mark over the image takes (the guide's drafted "Outlines for
+ * symbology", R02.T2.b item 3; R02 Design note 9). Drawn at {@link lineScale} device px for each,
+ * as every line width and dash is (R07.T16.d).
+ */
+export const CASING_PX = 1;
+
 /** A ratio fit to scale by: one that is not a positive number is taken as 1. */
 function ratioOf(devicePixelRatio: number): number {
   return devicePixelRatio > 0 && Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1;
@@ -54,4 +62,20 @@ export function markStrokeDevicePx(devicePixelRatio: number): number {
 export function markShiftDevicePx(devicePixelRatio: number): number {
   const ratio = ratioOf(devicePixelRatio);
   return (markStrokeDevicePx(ratio) - SYMBOL_STROKE_PX * ratio) / 2;
+}
+
+/**
+ * The least space between the centrelines of two reticles drawn about one mark, the destination's
+ * outside the selection's, device px: a mark's outline and one casing, {@link markStrokeDevicePx}
+ * + {@link CASING_PX} × {@link lineScale} (decision-r07-t16d-followups, item 2). It is 4 at ratios
+ * of 0.78125 and 1, 5 at 2 and 7.5 at 3.
+ *
+ * @remarks
+ * The least gap that keeps the outer reticle's casing, drawn after the inner one, off the inner
+ * one's full-coverage core: the casing reaches m ÷ 2 + casing + 0.5 px from its centreline, and the
+ * core lies within m ÷ 2 − 0.5 px of the inner one's. The view's draw list and the spatial displays
+ * both take it, so that one pair of reticles is drawn ship-wide and is never told by colour alone.
+ */
+export function minReticleGapDevicePx(devicePixelRatio: number): number {
+  return markStrokeDevicePx(devicePixelRatio) + CASING_PX * lineScale(devicePixelRatio);
 }
