@@ -140,7 +140,9 @@ interface UniverseSession {
   `buildDrawList(scene, camera, viewport, minReticleGapPx)`._
 - `pick.ts`: `pick(anchors, pointPx, tolerancePx): string | null`.
 - `labels.ts`: `chooseLabels`, `placeLabels`. _R07.T16.f gives `placeLabels` a required fourth
-  `reticleGrowthPx`, before its optional ones._
+  `reticleGrowthPx`, before its optional ones._ _R07.T16.h starts every label's box 0.125 rem
+  outside the outer edge of the outermost reticle about its mark, and its parameters change with
+  it (decision-r07-quality-and-destination, Q3)._
 - `transition.ts`: `easeOut`, `tweenCamera`, `TRANSITION_MS`.
 - `redraw.ts`: `createRedrawScheduler(requestFrame, cancelFrame)`.
 - `paint.ts`: `paint(context, drawList, tokens)`, `readTokens(element): ColourTokens`.
@@ -1421,27 +1423,25 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   R07.T13.d's two follow-ups).** `CURSOR`'s `X`, `Y` and `Z` and the chart's `DRIVE RANGE` and
   `CHART TIME` take `Escape`, which drops what was typed and any refusal and shows the value again,
   selected, and enter an emptied field as nothing, never refused (the guide's data-entry bullet).
-- **Labels beside reticles (decision-r07-t16d-followups, (d)).** A mark's label starts on the
-  selection bracket's centreline (`spatial/labels.ts`, `GAP_REM` 0.25 rem, the reticle margin),
-  and only B612's side bearing keeps its ink off the bracket. Since R07.T16.f the gap gains the
-  bracket's growth, 5δ, so that this stands as built. Two cases break the view's rule, that a
+- **Labels beside reticles (decision-r07-t16d-followups, (d)).** Until R07.T16.h a mark's label
+  started on the selection bracket's centreline (`spatial/labels.ts`, `GAP_REM` 0.25 rem), and
+  only B612's side bearing kept its ink off the bracket. Since T16.h its text starts at least
+  0.125 rem outside the outer edge of the outermost reticle about its mark, as the view's does
+  (decision-r07-quality-and-destination, Q3). Two cases break the view's rule, that a
   label never overlaps its mark or a reticle about it (the guide's Views paragraph, R07.T16.c):
   - a label held inside the view where neither side has room (the orchestrator's ruling 149.1)
     can stand over its own mark;
-  - a destination's reticle, when one is drawn, stands 0.25 rem inside its label's box.
+  - a destination's reticle, when one is drawn, stands 0.25 rem inside its label's box. _Mended by
+    R07.T16.h: the destination is four chevrons, and its label stands beyond them._
 
-  The first task that commands a destination (`SpatialScene.destinationId`) stands the label
-  outside every reticle drawn about its mark, as R07.T16.g does in the view, and asks for a
-  ruling on 149.1's hold.
+  The first task that commands a destination (`SpatialScene.destinationId`) asks for a ruling on
+  149.1's hold. It also adds `CHEVRONS DESTINATION` to the legend of each display that then marks
+  a destination, with its sample beside `LegendReticle`, and names the destination in words in
+  each list and readout, with its nomenclature row (decision-r07-quality-and-destination, Q2).
 
-  _Open, from R07.T16.g's UX review (the orchestrator, 2026-10-06), to be ruled by a decision
-  advisor or the owner before the first task that commands a destination:_
-  - the ship-wide reticle convention leaves the destination's own cue unstated: the guide gives
-    the `--target` reticle to a commanded destination, and its nomenclature says "corner brackets
-    mean the selection only", but names nothing beyond colour that tells a lone destination's
-    reticle from a bracket;
-  - `spatial/drawList.ts`'s `reticleOps` draws a destination that is not the selection one margin
-    out, a bracket's shape at a bracket's place, so that only `--target` against `--accent` tells it
-    from a selection, which the guide's Colour rule forbids. It is latent: nothing draws a
-    destination yet. The view keeps its destination at its place about the selection, selected or
-    not, a size and position cue (R07.T16.g).
+  _Ruled (decision-r07-quality-and-destination, Q2): a commanded destination is four open
+  chevrons in `--target`, one on each screen axis of the mark, each pointing at it, its arms as
+  long as the bracket's. Their apices stand the least gap outside the bracket's place, whether
+  or not the mark is selected, in the view and here. `reticleOps`' lone destination at a
+  bracket's place goes. No graph, the HR diagram among them, marks a destination. Built by
+  R07.T16.h._

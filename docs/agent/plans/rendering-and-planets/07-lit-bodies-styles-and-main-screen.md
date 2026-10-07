@@ -502,7 +502,10 @@ fields it reads; `wireframe/symbology.ts` gains `markLabelOffsetPx`, `bracketHal
 `graticule` take `strokeScale` (see "Deviations in T16.g, as built")._ _As built by T16.f:
 `lib/strokes.ts` also holds `RING_SHIFTS` (3), `RETICLE_SHIFTS` (4), `StrokeProperties` and
 `StrokeMetrics`; P05's `buildDrawList` and `placeLabels` take the reticles' least gap and growth;
-and `unitInradius` is `spatial/symbols.ts`'s (see "Deviations in T16.f, as built")._
+and `unitInradius` is `spatial/symbols.ts`'s (see "Deviations in T16.f, as built")._ _R07.T16.h
+adds `destinationChevrons(apexPx, armPx)` and one label place for both drawers in P05's
+`spatial/symbols.ts`; `placeLabels`' parameters change with it
+(decision-r07-quality-and-destination)._
 
 ### Main screen (Phase C)
 
@@ -1699,11 +1702,13 @@ tone-mapped image is a following canvas pass with `FrameSubmission.colourLoad` `
 sRGB view, in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6).
 Acceptance: `just ci`; the guide edit is one commit for the owner.
 
-T16 is built as seven subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.g, T16.f, T16.c (a
-ruled split, under the orchestrator's pre-authorisation of 2026-10-06, when T16 moved to the views
-lane; T16.d and T16.e were added after T16.a by decision-r07-t16a, T16.f by
-decision-thin-line-contrast and T16.g by decision-r07-t16d-followups, before the guide's draft, so
-that the draft states what they build). The paragraph above stays the task's whole specification:
+T16 is built as ten subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.g, T16.f, T16.h, T16.c,
+T16.i, T16.j (a ruled split, under the orchestrator's pre-authorisation of 2026-10-06, when T16
+moved to the views lane; T16.d and T16.e were added after T16.a by decision-r07-t16a, T16.f by
+decision-thin-line-contrast, T16.g by decision-r07-t16d-followups, and T16.h, T16.i and T16.j by
+decision-r07-quality-and-destination, before the guide's draft, so that the draft states what they
+build) (T16.i and T16.j follow it: T16.j adds no guide text, and the draft states T16.i's one clause
+ahead of it). The paragraph above stays the task's whole specification:
 each subtask builds its share of it, and each runs the console-ux skill's scripts.
 
 - **R07.T16.a The overlay, cased, and the hull faces' bias.** `photoreal/overlay.ts` (new),
@@ -2008,32 +2013,178 @@ src/renderer/src/displays/galaxy src/renderer/src/displays/system src/renderer/s
 src/renderer/src/lib`,
   `just test-render`, the console-ux skill's scripts, `just ci`.
 
+- **R07.T16.h The destination's chevrons, labels clear of every reticle, and the off-scale mark's stroke.**
+  R02's `wireframe/symbology.ts`; P05's `spatial/symbols.ts`, `spatial/drawList.ts`'s
+  reticles, `spatial/paint.ts`, `spatial/labels.ts` and `spatial/SpatialView.tsx`;
+  `lib/galaxy/hrProjection.ts`; `smoke/strokeContrast.ts` and `smoke/spatial.ts`; and their tests
+  (decision-r07-quality-and-destination, Q2, Q3 and Q5).
+  **The destination.** A commanded destination is marked by four open chevrons in `--target`,
+  one on each screen axis of the mark, above, below, left and right. Each has its apex on the
+  axis, points at the mark, and runs its two arms away from it at 45° either side. Each arm is as
+  long as an arm of the selection's bracket about the same mark, a third of the bracket's side.
+  The apices stand at the destination's half-size, whether or not the mark is selected:
+  - in the view, `destinationHalfSizePx` as built;
+  - on the spatial displays, the bracket's half-size and the larger of 0.25 rem and
+    `minReticleGapDevicePx` ÷ the ratio, for a lone destination as for the pair, in place of
+    `reticleOps`' bracket place.
+
+  They are drawn at the reticles' outline width, after the bracket, and over the image cased as
+  every mark is. Their outline is one function, `destinationChevrons(apexPx, armPx)` in
+  `spatial/symbols.ts`, which both drawers use. The bracket, the target's ticks and the least gap
+  are unchanged. No graph marks a destination.
+  **Labels.** On every display a mark's label's text starts at least 0.125 rem outside the outer
+  edge (its line plus half the mark stroke) of the outermost reticle that can stand about its
+  mark: the bracket, counted whether or not the mark is selected, or while it is the destination,
+  the chevrons' reach (the apex distance plus an arm's length ÷ √2). One function beside
+  `destinationChevrons` gives each display its reticle's reach:
+  - in the view, `markLabelOffsetPx` counts the chevrons' reach in place of the destination's
+    half-size. Its plate stands 0.125 rem + δ beyond the reach, with its least place of
+    0.75 rem + 5δ, and its `0.25rem` padding keeps the text outside as required;
+  - on the spatial displays, `placeLabels` starts each label's box 0.125 rem beyond the outer
+    edge, R + 0.375 rem + 0.75 CSS px + 5δ for a bracket. Its parameters change as it needs, with
+    a pointer in P05's Provides. Its flip, drop and pins are unchanged.
+
+  Selecting a mark never moves its label. The destination's report moves it, in the frame that
+  first draws the chevrons, and it cuts.
+  **The off-scale peg.** `pegOp`'s arrowhead is a mark: `paint` draws it at
+  `markStrokeDevicePx` ÷ the ratio, as it draws a reticle, not widened outward. The `ticks` op
+  says which it is. Its legend sample is unchanged.
+  **Tests.**
+  - For a craft and for symbols of classes 0 to 4, at 80%, 100% and 150% and ratios 0.78125, 1
+    and 2, each alone and on the selection:
+    - the four apices lie on the mark's axes at the destination's half-size;
+    - each arm runs at 45° from its axis, as long as the bracket's arm;
+    - no point of a chevron lies nearer the bracket than the least gap;
+    - the spatial view's lone destination stands where its pair does.
+  - T16.g's four-state label tests, with the chevrons' reach. A craft's label at a ratio of 1 and
+    100% stands 22.44 px from its anchor while it is the destination (17.25 before T16.h).
+    Selection never moves a label.
+  - On the spatial displays, at ratios 0.78125, 1, 2 and 3:
+    - a label's box stands 0.375 rem plus 3.40, 2.00, 0.75 and 0.75 px beyond its symbol's
+      radius, on either side;
+    - a destination's label's box stands 0.125 rem beyond its chevrons' reach plus half the mark
+      stroke.
+  - The peg's `lineWidth` is 2.56, 2, 1.5 and 1.5 at ratios 0.78125, 1, 2 and 3, and other ticks'
+    keep the line scale.
+
+  **In `just test-render`:**
+  - `checkStrokeContrast` draws its destinations as chevrons: the apart frame's lone destination
+    and `pairScene`'s. `checkSpatialStrokeContrast` draws its pair's and its lone `--target`
+    reticle as chevrons.
+  - Each reads at its sample floor: `--target` 8.15:1, within `PAIR_TOLERANCE` in the view, a
+    pixel clear of each arm's cut end; the bracket 10.37:1.
+  - T16.g's pair control stays as it is, a corner reticle 0.25 rem outside the bracket. It shows
+    that the check sees a covered core, whatever the destination's form.
+  - No capture holds a destination or is drawn by `paint`, so `just test-render --captures` stays
+    byte-identical.
+
+  **By hand, hidden**, at 0.78125 and 2, through T16.g's `VIEW` harness and T16.f's `GALAXY`
+  harness with a destination set through the harness:
+  - the chevrons alone and on the selection, about a craft and about class-0 and class-4 symbols,
+    for the owner's look at T16.c's draft;
+  - at class 0, 80% and 0.78125, whether a chevron reads as a triangle symbol, or a ruling is
+    asked;
+  - a selected mark's label on the local chart and the orbit map at 80% and 100%, with at least
+    one device pixel of `--surface-0` between the bracket's ink and the label's box, whatever its
+    first letter;
+  - on the RTX 3080, the orbit map legend's `--text-muted` SVG strokes on `--surface-1`, at least
+    6:1 at their worst pixel, or a ruling is asked.
+
+  **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/wireframe
+src/renderer/src/displays/view src/renderer/src/spatial src/renderer/src/displays/galaxy
+src/renderer/src/displays/system src/renderer/src/lib src/renderer/src/smoke`, `just test-render`,
+  the console-ux skill's scripts, `just ci`.
+
 - **R07.T16.c The guide's draft, for the owner.** `docs/frontend/ux-guidelines.md` alone, in one
-  `docs(guide)` commit, after T16.f, so that it states what is built: decision-r07-t8a-meter's "In
-  T16" edits, fitted to the guide as T19.d signed it off (the data-state bullet's inhibit sentence
-  and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row; the `NO IMAGE TO METER` row's added
-  sentence; the new Status row of the three statuses with their remedy clauses), and a pointer to
-  that row from the `METER` row (decision-r07-t19b-exposure-fit, item 4), each tagged as T16's
-  draft, ending in "the owner signs off". It also takes the two points left for the guide: the
-  meter's `SELECT` legend, left "for T16's draft" by T13 after review (a `Label` row, or the reason
-  a group's legend needs none), and the data-state bullet's "offers `MAN` only", which reads against
-  E5 (T19.d's open points, for the owner's next guide edit). It also drafts decision-r07-t16a's
-  guide text, as T16.d, T16.e, T16.g and T16.f built it: the unit of a width and the floor of 2
-  device pixels, a Layout bullet; a stroke's contrast as drawn, a Colour bullet, with its
-  cross-section and what it leaves out named (decision-thin-line-contrast;
-  decision-r07-t16d-followups, (b)); a view's strokes as Layout gives them, and its black ground,
-  in the Views bullet's paragraph on both styles (decision-r07-t16d-followups, (e)); a view's mark
-  labels clear of their marks and reticles, in the same paragraph (decision-r07-t16d-followups,
-  item 1 and (d)); the craft's silhouette, as the one exception in "Outlines for symbology"; the
-  craft note's Label row; and the added clauses of the `WIREFRAME`, `PHOTOREALISTIC` row and the
-  `TEST HULL` row. Nothing else is new: `BODY PHOTOMETRY: NOT YET MODELLED` is signed
-  off (T19.d), and the several views' refusal adds no entry (decision-r07-t18, item 6). Tests: each
-  status the draft adds is a string in the code, in the words T16.b built; each note it adds is a
-  string in the code, in the words T16.e built; and each width and colour the text gives is the
-  code's, `lineScale`, `markStrokeDevicePx` and `CLEAR_COLOUR`'s black included
-  (decision-r07-t16a;
-  decision-thin-line-contrast). Acceptance:
+  `docs(guide)` commit, after T16.f and T16.h, so that it states what is built:
+  decision-r07-t8a-meter's "In T16" edits, fitted to the guide as T19.d signed it off (the
+  data-state bullet's inhibit sentence and its last sentence; the `AUTO`, `MAN`, `INHIBITED` row;
+  the `NO IMAGE TO METER` row's added sentence; the new Status row of the three statuses with their
+  remedy clauses), and a pointer to that row from the `METER` row (decision-r07-t19b-exposure-fit,
+  item 4), each tagged as T16's draft, ending in "the owner signs off". It also takes the two points
+  left for the guide: the meter's `SELECT` legend, left "for T16's draft" by T13 after review (a
+  `Label` row, or the reason a group's legend needs none), and the data-state bullet's "offers `MAN`
+  only", which reads against E5 (T19.d's open points, for the owner's next guide edit). It also
+  drafts decision-r07-t16a's guide text, as T16.d, T16.e, T16.g, T16.f and T16.h built it: the unit
+  of a width and the floor of 2 device pixels, a Layout bullet; a stroke's contrast as drawn, a
+  Colour bullet, with its cross-section and what it leaves out named (decision-thin-line-contrast;
+  decision-r07-t16d-followups, (b)); a view's strokes as Layout gives them, and its black ground, in
+  the Views bullet's paragraph on both styles (decision-r07-t16d-followups, (e)); a view's mark
+  labels clear of their marks and reticles, in the same paragraph (decision-r07-t16d-followups, item
+  1 and (d)); the craft's silhouette, as the one exception in "Outlines for symbology"; the craft
+  note's Label row; the destination's chevrons and the labels' place beyond every reticle, in the
+  three-dimensional conventions, the Views bullet's kept list and a `CHEVRONS DESTINATION` Legend
+  row, with the view's label sentence never shown in part (T16.i's rule)
+  (decision-r07-quality-and-destination, Q2, Q3, Q6); the Colour bullet's coverage for a stroke
+  accepted on its pair (Q4); the `QUALITY` row redrafted as a `Setting`, `QUALITY` in the Views
+  bullet's list of what stands on the primary's block alone, the `DECORATION ON` pointers, and the
+  `GRAPHICS` row as T17 drafted it (Q1), in place of b6e2203d's drafts; and the added clauses of the
+  `WIREFRAME`, `PHOTOREALISTIC` row and the `TEST HULL` row. Nothing else is new:
+  `BODY PHOTOMETRY: NOT YET MODELLED` is signed off (T19.d), and the several views' refusal adds no
+  entry (decision-r07-t18, item 6). Tests: each status the draft adds is a string in the code, in
+  the words T16.b built; each note it adds is a string in the code, in the words T16.e built; and
+  each width and colour the text gives is the code's, `lineScale`, `markStrokeDevicePx` and
+  `CLEAR_COLOUR`'s black included (decision-r07-t16a; decision-thin-line-contrast). Acceptance:
   `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the console-ux skill's scripts.
+- **R07.T16.i The view's labels clear of its chrome.** `displays/view/ViewDisplay.tsx`
+  (`placeMarkLabels`) and `ViewMarkLabels.tsx`, and their tests
+  (decision-r07-quality-and-destination, Q6 (a)).
+  - A label is never shown in part. `placeMarkLabels` tests each plate, its size measured from
+    the DOM, against:
+    - the chrome over the stage: the `PRIMARY` view's label block, each open instrument slot, and
+      any statement or plate over the canvas;
+    - the stage's edges;
+    - the plates already placed.
+  - The labels are placed in order: the selection's, the destination's, then the rest by range,
+    nearest first.
+  - Each tries, at its own offset from its mark, the right, the left (mirrored), then below and
+    above, centred on the mark. Where none is clear it is hidden whole.
+  - The mark stays on the canvas and in the list.
+  - A label leaves a place, or comes back from hidden, only when the place it moves to is clear by
+    0.25 rem. Each change cuts.
+
+  **Tests:**
+  - in the compact layout, a mark under the label block's right edge takes its label to the left,
+    and one wholly under it hides its label whole;
+  - a label never stands in part under an instrument slot, past the stage's edge or under another
+    label, and the selection's label wins over a neighbour's;
+  - a mark that moves 0.2 rem back and forth across an obstacle's edge leaves its label where it
+    is.
+
+  **By hand, hidden:** T16.f's `PRECISION TEST` from `CHASE` at 60° to 120° at 1280 × 720, with
+  no fragment of TEST PLANET's label beside the block.
+  **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`, the
+  console-ux skill's scripts, `just ci`.
+
+- **R07.T16.j P05's furniture text clear of marks and stalks.** P05's `spatial/furniture.ts`
+  (`triadLayout`, `coreArrowLayout`, `placeCurveLabels`) and `spatial/SpatialView.tsx`, and
+  their tests (decision-r07-quality-and-destination, Q6 (b) to (d)).
+  - **The triad.** `triadLayout` tests each label candidate, by 0.125 rem, against every axis's
+    end symbol (its circle, `TRIAD_MARKER_REM` + δ, or its arrowhead), every axis line and the
+    labels placed. Where none clears all three, the first that clears the symbols and the labels
+    is taken, crossing a line; where none does, the label stands as built. No label is dropped.
+  - **The core arrow.** `coreArrowLayout` tests each label candidate against the arrow itself, at
+    least `CORE_HEAD_REM` + `CORE_GAP_REM` from its shaft and head, measured from the arrow's
+    segment, as well as the furniture. A candidate clamped into the view onto the arrow is passed
+    over. Where none clears both, the first that clears the arrow is taken.
+  - **Curve labels.** `placeCurveLabels`' search also refuses a box that a mark's stalk or symbol
+    comes within 0.125 rem of, `SpatialView` passing it the marks' stalks and symbols. A ring's
+    label also tries points along its ring either way from its coreward point, after its four
+    boxes. Where no candidate clears the stalks, the first that clears everything else is taken,
+    so no label is dropped for a stalk's sake. No stalk is cut, and no plate is drawn.
+
+  **Tests:**
+  - the tilted local chart's triad, with `COREWARD` 0.125 rem clear of `NORTH`'s symbol;
+  - an orbit-map arrow near the view's edge, whose label is clear of its shaft and head;
+  - a ring label with a stalk through its place, moved along the ring and clear of it;
+  - a ring label hemmed in by stalks on every candidate, kept at its first place clear of all but
+    them.
+
+  **By hand, hidden:** T16.f's `GALAXY` harness, the tilted local chart and the orbit map at
+  0.78125.
+  **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/spatial
+src/renderer/src/displays/galaxy src/renderer/src/displays/system`, the console-ux skill's
+  scripts, `just ci`.
 
 #### R07.T17 The low setting and benchmarks
 
@@ -2348,7 +2499,10 @@ is available. Acceptance: the record.
   comes first drops it, and the other does nothing. R01's T13 as-built notes hold the rule as it
   stands. It is built as `holdChildView` in this task's scene (`renderer/src/smoke/childWindow.ts`),
   the one place it lives while the client opens no window; R07's `InstrumentView` in a child window,
-  when it is built, takes the rule from there. See "Deviations in T21's release at the close".
+  when it is built, takes the rule from there. Its label block then states `QUALITY`, after its
+  `STYLE`, and `EASED CAMERA MOVES` while it applies, since the `PRIMARY` view's block does not
+  stand beside it (decision-r07-quality-and-destination, Q1). See "Deviations in T21's release at
+  the close".
 
 ### Phase C: the main screen (gated on the sessions plan)
 
@@ -2419,10 +2573,11 @@ AlertAnnunciator}.tsx` (Design notes 22–23, guide item 9): full screen, no con
   state; the mode banner; the alert annunciator (counts of active and unacknowledged emergency,
   warning and caution alerts and the newest unacknowledged emergency or warning in full, under the
   guide's flash and reverse-video rules, never a border or overlay) with text at least 30′; the
-  label block with who commands the camera; the DOM list kept; on link loss the last frame held, the
-  time stale with `S`, `NO CARRIER`. Tests: the annunciator's counts exclude advisories; link loss;
-  under `prefers-reduced-motion` flashing is reduced and the camera's corrections are applied at
-  once (T25). Acceptance: `pnpm test`, `just ci`.
+  label block with who commands the camera and its `QUALITY` line, since the main-screen client
+  has no `LINK` display (decision-r07-quality-and-destination, Q1); the DOM list kept; on link
+  loss the last frame held, the time stale with `S`, `NO CARRIER`. Tests: the annunciator's counts
+  exclude advisories; link loss; under `prefers-reduced-motion` flashing is reduced and the
+  camera's corrections are applied at once (T25). Acceptance: `pnpm test`, `just ci`.
 - **R07.T27.b Text sized for the room.** `mainScreen/{roomTextSize.ts,DisplaySetup.tsx}` and the
   command-line options `--screen-diagonal-in` and `--viewing-distance-m`: the diagonal, the
   distance, the 100 mm check bar, the 2–10 ratio warning and the game-mode statement, saved on the
@@ -4111,7 +4266,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 - **Thin lines and the 6:1 (decision-thin-line-contrast).** The guide's 6:1 binds a line or an
   outline as drawn: the brightest device pixel across it, at its worst position on the grid. No
   line or outline that a canvas, an SVG or a view draws is under 2 device pixels (T16.d, T16.f).
-  At that width it scores within 1% of its pair. Below a ratio of 2 every line is wider than its
+  At that width it scores within 1% of its pair in a view. On a canvas or in an SVG its brightest
+  pixel is covered to about 15/16 at worst, so there a pair is relied on only where it reaches its
+  ratio at that coverage (T16.f; decision-r07-quality-and-destination, Q4). Below a ratio of 2
+  every line is wider than its
   CSS width: 2.56 times at 0.78125, the development machine's and the UHD 620's ratio. A ringed
   circle grows up to 2δ more than other marks, so that the gap round its disc stays. Stated
   limits:
@@ -4668,6 +4826,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - P05's `spatial/drawList.ts` draws a lone destination one margin out with a bracket's shape,
         told from the selection by colour alone. It is latent: nothing draws a destination yet;
       - whether a reticle 0.25 rem larger, or the least gap at 80%, is cue enough.
+
+      _Ruled (decision-r07-quality-and-destination, Q2): four `--target` chevrons, one on each
+      screen axis, pointing at the mark, at the destination's half-size selected or not, on the
+      views and the spatial displays; never on a graph; the label beyond them. Size was not cue
+      enough: a class-0 destination is a class-4 bracket's size. Built by T16.h._
   - **Labels.** `markLabelOffsetPx` (`wireframe/symbology.ts`) gives each anchor's `labelOffsetPx`,
     with `LABEL_PLACE_REM` (0.75), `LABEL_CLEARANCE_REM` (0.125), `bracketHalfSizePx`,
     `destinationHalfSizePx` and `anchorRadiusPx`, which `symbologyMarks` takes too.
@@ -4823,7 +4986,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `.symbol-legend__mark`, a mark at `--mark-stroke` (2 device px), as the ruling's two lists put
     them. At 2 and above both are 3 device px. _Open, for the orchestrator (the UX review's
     consider): whether the sample, which stands for a line op, takes `calc(1.5px *
-    var(--line-scale))`._
+    var(--line-scale))`._ _Ruled (decision-r07-quality-and-destination, Q5): the peg is a mark,
+    drawn at the mark stroke, so the sample matches it as it stands (T16.h)._
   - **`contrast.py`** cuts a ratio within 1% of its minimum to three decimals, after the UX review,
     so that `text-muted surface-2 --coverage 0.996` prints 5.999:1 FAIL, not 6.00:1 FAIL.
   - **The canvas check** (`smoke/spatial.ts`, group "R07.T16.f spatial strokes").
@@ -4862,7 +5026,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       stated limit); at that coverage the legends' `--text-muted` on `--surface-1` would read
       6.07:1, and `--text-muted` on `--surface-2`, where no changed stroke stands, 5.47:1.
       `contrast.py`'s and `lib/strokes.ts`'s docs say so. The guide's Colour text drafted for T16.c
-      ("within 1% of its pair") would then hold for the view alone.
+      ("within 1% of its pair") would then hold for the view alone. _Ruled
+      (decision-r07-quality-and-destination, Q4): 6:1 as drawn stands. A stroke is accepted on its
+      pair only where the pair reaches its ratio blended at 15/16 coverage on a canvas or in an
+      SVG, and clears it by 1% in a view. `--text-muted`, `--status-advisory` and
+      `--status-warning` on `--surface-2` do not. T16.c's Colour text says so. T16.h reads the
+      legends' SVG strokes on the RTX by hand._
   - **By hand.**
     - `contrast.py text-muted surface-0 --coverage 0.5 --blend linear` prints 4.11:1 FAIL, and
       `--coverage 0.39` prints 1.97:1 FAIL.
@@ -4879,7 +5048,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       bracket's edge: 0.195 device px at 0.78125, 0.25 at 1 and 0.5 at 2, as built before T16.f. In
       pixels they touch at 0.78125: on the local chart from `TOP` the arm's outer column is 88%
       covered and the ink starts 0.11 px into the next column; on the orbit map the arm's 40%
-      fringe shares the ink's first column. _A ruling is asked (for the orchestrator)._
+      fringe shares the ink's first column. _A ruling is asked (for the orchestrator)._ _Ruled
+      (decision-r07-quality-and-destination, Q3): one rule on every display, a label's text at
+      least 0.125 rem outside the outer edge of the outermost reticle about its mark. The view
+      meets it as built; P05's labels move 0.125 rem + 0.75 CSS px out (T16.h)._
     - **`VIEW`, hidden** (`.git/rm23-scratch/r07-views/t16f/page/`, T16.e's harness with its own
       flow), at a ratio of 1. At 1920 × 1080, `PRECISION TEST` from `CHASE` at 120° in the
       wireframe: TEST PLANET's plate covers the lower right of TEST MOON's limb, a disc about 15 px
@@ -4899,6 +5071,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         `CORE 25,997.4 ly` (P05's core-arrow label, held inside the view);
       - stalks run through the curve labels `RANGE 0.01 ly SET` and `PLANE 0.01 ly SET`, which they
         now cross at 2 device px (P05's curve-label placement).
+
+      _Ruled (decision-r07-quality-and-destination, Q6): the view's labels clear its chrome
+      (T16.i); the triad's labels, the core arrow's label and the curve labels clear the marks and
+      stalks (T16.j)._
   - **The acceptance's vitest paths** leave out `smoke/spatial.test.ts`, `smoke/strokeContrast.test.ts`
     and `view/wireframe`, whose `symbology.ts` changed. They run in the app's whole suite and in
     `just ci`.
@@ -7033,7 +7209,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - the `QUALITY` row names the launch option and where the setting is read;
       - the `GRAPHICS` row adds "quality setting".
     - **Open for the owner**, from the UX review: whether every view's block should state the
-      setting (the Views bullet), and that it takes no header banner.
+      setting (the Views bullet), and that it takes no header banner. _Ruled
+      (decision-r07-quality-and-destination, Q1): the `PRIMARY` view's block alone, as built; an
+      instrument in a window of its own and the main screen's view state it on their own blocks;
+      no banner. The `QUALITY` row is redrafted as a `Setting` and the `GRAPHICS` row adopted, for
+      T16.c._
   - **The views check.** `LOW_BEFORE_T17` is gone. A low-setting record is provisional only as a
     high one is (`viewsCheckResults.ts` and its test, `docs/measurements/several-views/README.md`).
   - **Tests (Vitest).**
