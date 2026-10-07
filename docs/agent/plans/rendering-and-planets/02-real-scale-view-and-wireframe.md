@@ -540,7 +540,10 @@ the call sites here change.
     graticule at 15° (30° below 64 px), its equator and prime meridian a step heavier; 3 to 8 px:
     its limb circle only; below 3 px: its symbol from the ship-wide set (planet, moon or star),
     labelled as a mark. The 3 px boundary is the brainstorm's point regime; the 8 px one is where 12
-    graticule lines stop being lines. Graticule and limb are generated in `f64`, camera-relative,
+    graticule lines stop being lines. _Since R07.T16.g the 8 and 64 px thresholds are multiplied by
+    the view's line scale, 16 and 128 device px up to a ratio of 2, so that the gaps stand to the
+    2 px lines as built; the 3 px one stays in device px, the image's point regime
+    (decision-r07-t16d-followups)._ Graticule and limb are generated in `f64`, camera-relative,
     subdivided until each chord's sagitta is under 0.25 px, so a body 400 km below the camera has a
     true horizon rather than a polygon's. Rings are their ellipses, inner and outer edge with radial
     ticks every 10°, as the orbit map draws them.
@@ -989,8 +992,8 @@ this scene.
 sagitta in `f64`, analytic hemisphere visibility, the limb), `ringEllipse`.
 
 - Tests: a body 400 km below the camera has a limb within 0.25 px of the true horizon circle; no
-  graticule point on the far hemisphere is emitted; the regime changes at 3 and 8 px; a rotated
-  body's prime meridian follows its rotation.
+  graticule point on the far hemisphere is emitted; the regime changes at 3 and 8 px (8 × the line
+  scale since R07.T16.g); a rotated body's prime meridian follows its rotation.
 
 **R02.T12.b Orbits, hulls and culling.** `orbitPath` from `lib/orbit.ts`'s propagation, sampled by
 screen-space error rather than a fixed count; `hullEdges`; the frustum and limb culling predicates

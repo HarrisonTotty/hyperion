@@ -484,13 +484,15 @@ export const MIN_STROKE_DEVICE_PX = 2;
 export function lineScale(devicePixelRatio: number): number; // max(2, ratio), px per CSS px
 export function markStrokeDevicePx(devicePixelRatio: number): number; // max(2, 1.5 × ratio)
 export function markShiftDevicePx(devicePixelRatio: number): number; // δ, an outline's move out
-// T16.f adds strokeProperties, watchStrokeProperties and useStrokeMetrics.
+// T16.g adds minReticleGapDevicePx; T16.f adds strokeProperties,
+// watchStrokeProperties, useStrokeMetrics and reticleGrowthCssPx.
 ```
 
 R02's `view/wireframe/drawList.ts` gains `ViewStrokes { strokeScale, markStrokePx, markShiftPx }`,
 `viewStrokesAt(devicePixelRatio)`, `occluderSlopePxAt(strokeScale)`, `emptyDrawList(strokes)` and
 `HULL_OCCLUDER_DEPTH_FRACTION`; `displays/view/ViewMarkLabels.tsx` gains
-`markLabelShiftPx(devicePixelRatio)`.
+`markLabelShiftPx(devicePixelRatio)`; _R07.T16.g replaces it with `DrawAnchor.labelOffsetPx`, its
+label plate's offset in device px (decision-r07-t16d-followups)._
 
 ### Main screen (Phase C)
 
@@ -1686,10 +1688,10 @@ tone-mapped image is a following canvas pass with `FrameSubmission.colourLoad` `
 sRGB view, in the same task as T15's pass (built by T15 under decision 2026-10-02, item 6).
 Acceptance: `just ci`; the guide edit is one commit for the owner.
 
-T16 is built as six subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.f, T16.c (a ruled split,
-under the orchestrator's pre-authorisation of 2026-10-06, when T16 moved to the views lane; T16.d
-and T16.e were added after T16.a by decision-r07-t16a, and T16.f by decision-thin-line-contrast,
-before the guide's draft, so that the draft states what they build). The paragraph above stays the
+T16 is built as seven subtasks, in the order T16.a, T16.b, T16.d, T16.e, T16.g, T16.f, T16.c (a
+ruled split, under the orchestrator's pre-authorisation of 2026-10-06, when T16 moved to the views
+lane; T16.d and T16.e were added after T16.a by decision-r07-t16a, T16.f by
+decision-thin-line-contrast and T16.g by decision-r07-t16d-followups, before the guide's draft, so that the draft states what they build). The paragraph above stays the
 task's whole specification: each subtask builds its share of it, and each runs the console-ux
 skill's scripts.
 
@@ -1825,23 +1827,95 @@ src/renderer/src/displays/view src/renderer/src/lib`,
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene src/renderer/src/view/scenes
 src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src/displays/view`,
   `just test-render`, the console-ux skill's scripts, `just ci`.
+- **R07.T16.g The view's marks after T16.d: graticules for 2 px lines, and labels clear of their reticles.**
+  R02's `wireframe/bodies.ts`, `wireframe/drawList.ts` and `wireframe/symbology.ts`,
+  `displays/view/ViewMarkLabels.tsx` and `ViewDisplay.tsx`, `lib/strokes.ts`, and
+  `smoke/strokeContrast.ts` (decision-r07-t16d-followups, items 1, 2, (b), (c) and (d)).
+  **Graticules.** A body's graticule is drawn from `GRATICULE_FROM_PX` × the list's
+  `strokeScale` across, and at 15° from `FINE_GRATICULE_FROM_PX` × `strokeScale`: 16 and 128
+  device px up to a ratio of 2, and 8 and 64 × the ratio above it (24 and 192 at 3), so that
+  its gaps stand to its lines as R02 built them. `SYMBOL_BELOW_PX` stays 3 device px, the image's
+  point regime (`POINT_BELOW_PX` in `bodies/regime.ts`), so that both styles agree on which bodies
+  are points. The low setting still draws 30° only.
+  **Labels.** `DrawAnchor` gains `labelOffsetPx`: the device px from its anchor to its label's
+  plate. It is the larger of two offsets:
+  - 0.75 rem + 5δ, T16.d's place;
+  - 0.125 rem + δ beyond the half-size of the outermost reticle that can stand about the mark.
+    That reticle is the selection's bracket, counted whether or not the mark is selected, or the
+    destination's reticle while the mark is the destination.
+
+  So every mark up to size class 2 keeps T16.d's place. A class-3 or class-4 symbol's label
+  stands 0.0625 or 0.125 rem further out, and a destination's label moves out to clear its
+  reticle. The label moves in the frame in which the destination's reticle is first drawn, from
+  the server's report, and it cuts. `markLabelTransform` places the plate at `labelOffsetPx` ÷
+  the ratio. `LABEL_OFFSET_REM` and `markLabelShiftPx` go, their values kept in the draw list's.
+  The destination's least gap is `minReticleGapDevicePx(ratio)`, new in `lib/strokes.ts`
+  (m + `CASING_PX` × s), in place of the draw list's own sum.
+  **The check's exclusion.** `checkStrokeContrast` no longer drops a whole cross-section that
+  another batch reaches. Where another batch crosses the stroke, the point is still left out.
+  Elsewhere a texel is left out where another batch's stroke lights it (its half-width and
+  fringe) or a batch drawn later covers it (its stroke's or casing's antialiased edge), and the
+  rest of the cross-section is read. A cross-section left with no texel is not read.
+  **Tests.**
+  - At a `strokeScale` of 2, a body 15.9 px across has its limb alone, and one 16 px across has
+    its 30° graticule. At 127.9 and 128 px the graticule goes from 30° to 15°. At 3 these are 24
+    and 192 px, and at 1 they are 8 and 64 px, as built. A body 2.9 px across is its symbol at
+    every scale.
+  - For size classes 0 to 4, at interface scales 80%, 100% and 150% and ratios 0.78125, 1 and 2,
+    a mark is taken unselected, selected, as the destination alone, and as the destination on
+    the selection. In each case:
+    - its plate's left edge stands at least 0.125 rem − 0.75 CSS px beyond the outer edge of every
+      reticle drawn about it, the clearance of a craft's label from its bracket as built;
+    - an unselected mark up to class 2 stands at 0.75 rem + 2.65, 1.25 and 0 CSS px, as T16.d
+      built it;
+    - selecting or deselecting a mark never moves its label.
+  - `minReticleGapDevicePx` is 4, 4, 5 and 7.5 at ratios 0.78125, 1, 2 and 3.
+  - The check's exclusion, on synthetic strokes: a texel lit by a parallel neighbour is left
+    out and the rest of its cross-section read; a crossing is left out; a cross-section
+    wholly covered is not read.
+
+  **In `just test-render`,** `checkStrokeContrast` adds a destination on the selection, about a
+  body symbol, in both styles at its three ratios. Each reticle's arms give at least the sample
+  floor, and each reads its pair: `--accent` 10.37:1 and `--target` 8.15:1. A control, the
+  destination 0.25 rem out with no least margin at 80% and 0.78125, reads the bracket under 6.
+  Every kind T16.d reads still passes at its floor.
+  **By hand, hidden:** T16.d's `VIEW` harness (`.git/rm23-scratch/r07-views/t16d/shots/`) at
+  0.78125 and 2, the field of view set so that a planet stands 8 to 16 device px across (its limb
+  alone) and 64 to 128 px across (its 30° graticule), against f57f2b1 and 924b06a.
+  **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/wireframe
+src/renderer/src/displays/view src/renderer/src/smoke src/renderer/src/lib`, `just test-render`,
+  the console-ux skill's scripts, `just ci`.
+
 - **R07.T16.f Strokes of 2 device pixels on the spatial displays and the galaxy map.**
-  **Files:** P05's `spatial/paint.ts` and `spatial/LegendSymbol.tsx`, `styles.css`,
+  **Files:** P05's `spatial/paint.ts` and `spatial/LegendSymbol.tsx`, `spatial/symbols.ts`,
+  `spatial/labels.ts`, `spatial/drawList.ts`'s reticles, `spatial/SpatialView.tsx`, R02's
+  `wireframe/symbology.ts` (its `unitInradius`, moved), `styles.css`,
   `displays/galaxy/DensityLegend.tsx`, `lib/strokes.ts`, `main.tsx`, a new `smoke/spatial.ts`
   (registered in `smoke/page.ts`), and the console-ux skill's `scripts/contrast.py`
-  (decision-thin-line-contrast, items 2 to 4).
+  (decision-thin-line-contrast, items 2 to 4; decision-r07-t16d-followups, items 1, 2, (a) and
+  (b)).
   **The canvas.**
   - `paint` draws every op but a symbol and a reticle with `lineWidth` set to its `widthPx` ×
     `lineScale(pixelRatio)` ÷ `pixelRatio`.
   - It draws a symbol's and a reticle's outline at `markStrokeDevicePx(pixelRatio)` ÷
     `pixelRatio`.
   - With δ = `markShiftDevicePx(pixelRatio)` ÷ `pixelRatio`, it moves outlines out: a symbol's
-    path radius by δ, a ringed circle's disc by δ and its ring by 3δ, and a reticle's half-size by
-    4δ.
+    outline by δ on every side (a circle's radius by δ, and a polygon's corners by δ over its unit
+    inradius, cos π/n, through `unitInradius`, moved from R02's `wireframe/symbology.ts` to
+    `spatial/symbols.ts` and used by both drawers, as the view's `bodySymbolMark` does), a ringed
+    circle's disc by δ and its ring by 3δ, and a reticle's half-size by 4δ.
+  - A destination's reticle over the selection stands at least `minReticleGapDevicePx` ÷
+    `pixelRatio` outside the selection's (an outline and a casing, from `lib/strokes.ts`, as
+    the view's since T16.g), or 0.25 rem where that is more, so that the pair is never told by
+    colour alone. `reticleOps` takes that least gap from its caller.
+  - `placeLabels`' gap gains a reticle's growth, 5δ, so that a label keeps its as-built
+    clearance from the bracket about its mark, as the view's labels do. It is
+    `reticleGrowthCssPx` (new in `lib/strokes.ts`, which then holds the shift multiples, 3 for a
+    ring and 4 for a reticle, that both drawers use).
 
   So a 1 px line is 2 device px below a ratio of 2, and an outline widens outward, keeping every
-  hole and the ringed circle's gap. Nothing in `spatial/drawList.ts` or
-  `lib/galaxy/hrProjection.ts` changes.
+  hole and the ringed circle's gap. Nothing else in `spatial/drawList.ts` changes, and nothing in
+  `lib/galaxy/hrProjection.ts`.
   **The DOM's SVG strokes.** `lib/strokes.ts` gains `strokeProperties(devicePixelRatio)`, with two
   properties:
   - `--line-scale`: `lineScale` ÷ the ratio;
@@ -1860,7 +1934,8 @@ src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src
   - the disclosure chevron (`.glyph--disclosure polyline`), `vector-effect: non-scaling-stroke`
     and `stroke-width: max(var(--mark-stroke), 0.105em)`.
 
-  `LegendSymbol` widens its outline outward as `paint` does: δ, and for a ringed circle δ and 3δ,
+  `LegendSymbol` widens its outline outward as `paint` does: δ on every side, and for a ringed
+  circle δ and 3δ,
   converted to its box's units with the ratio and the root's rem from `useStrokeMetrics` (new in
   `lib/strokes.ts`, updated on a change of either). `SunGlyph` and `EarthGlyph` are text and stay
   as they are.
@@ -1873,9 +1948,15 @@ src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src
     - a line op's `lineWidth` is 2.56, 2, 1 and 1 times its `widthPx`;
     - a symbol's and a reticle's `lineWidth` is 2.56, 2, 1.5 and 1.5;
     - an open circle's arc radius is its as-built radius plus 0.53, 0.25, 0 and 0;
+    - an open inverted triangle's corners lie at its as-built radius plus 1.06, 0.5, 0 and 0, so
+      that each side lies 0.53, 0.25, 0 and 0 further out, and every other polygon's sides
+      likewise;
     - a ringed circle's disc arc is its as-built radius plus the same, and its ring plus 1.59,
       0.75, 0 and 0;
     - a reticle's half-size is its as-built size plus 2.12, 1, 0 and 0.
+    - a destination's reticle over the selection stands outside the selection's by the larger
+      of 0.25 rem and 5.12, 4, 2.5 and 2.5 px;
+    - a mark's label stands 0.25 rem plus 2.65, 1.25, 0 and 0 px beyond its symbol's radius;
   - A class-2 open ringed circle at 0.78125 keeps the hole and the gap round its disc that it has
     as built: 1.56 device px at 100% and 0.94 at 80%.
   - `LegendSymbol`'s outline radius moves out by the same shifts in its box's units.
@@ -1893,15 +1974,21 @@ src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src
   uses `paint` to draw a draw list on a 2D canvas whose backing store stands for the device, at
   ratios 0.78125, 1 and 2. The list holds: a 1 px `--text-muted` circle; 1 px lines at 0°, 3° and
   45°; a 1 px `--text` circle with its ticks; a 2 px `--text` polyline; an open class-0 circle
-  and an open class-2 ringed circle in `--accent`; an `--accent` reticle and a `--target`
-  reticle; and all of these again in the stale tokens. The check asserts:
-  - at every device pixel of length along each stroke, the brightest pixel across it reaches
-    6.0:1 against `--surface-0` by WCAG's formula;
+  and an open class-2 ringed circle in `--accent`; an `--accent` reticle with a `--target`
+  reticle about the same mark at the least gap, and a `--target` reticle alone; and all of these
+  again in the stale tokens. The check asserts:
+  - at every device pixel of length along each stroke, the brightest pixel of its cross-section
+    reaches 6.0:1. The cross-section is taken as `checkStrokeContrast` takes it since T16.g: the
+    pixels whose centres lie within half a pixel's diagonal along the stroke and within its
+    half-width and fringe across it, less those another stroke lights, with crossings and a
+    dash's ends left out;
   - the open circle's centre pixel and the ringed circle's disc centre read `--surface-0`;
   - a control, a 1 CSS px circle stroked directly at 0.78125, reads under 6.
 
   **By hand, hidden:** `GALAXY`'s local chart and the orbit map, captured at 1920 × 1080 at a
-  forced device scale factor of 0.78125, for the owner's look at the guide's draft.
+  forced device scale factor of 0.78125, for the owner's look at the guide's draft, with a
+  selected mark's label measured at 0.78125: the space between its first letter's ink and the
+  bracket's right arms, or a ruling asked for where they touch.
   **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/spatial
 src/renderer/src/displays/galaxy src/renderer/src/displays/system src/renderer/src/components
 src/renderer/src/lib`,
@@ -1917,16 +2004,19 @@ src/renderer/src/lib`,
   meter's `SELECT` legend, left "for T16's draft" by T13 after review (a `Label` row, or the reason
   a group's legend needs none), and the data-state bullet's "offers `MAN` only", which reads against
   E5 (T19.d's open points, for the owner's next guide edit). It also drafts decision-r07-t16a's
-  guide text, as T16.d, T16.e and T16.f built it: the unit of a width and the floor of 2 device
-  pixels, a Layout bullet; a stroke's contrast as drawn, a Colour bullet (both
-  decision-thin-line-contrast); a view's strokes as Layout gives them, in the Views bullet's
-  paragraph on both styles; the craft's silhouette, as the one exception in "Outlines for
+  guide text, as T16.d, T16.e, T16.g and T16.f built it: the unit of a width and the floor of 2 device
+  pixels, a Layout bullet; a stroke's contrast as drawn, a Colour bullet, with its cross-section
+  and what it leaves out named (decision-thin-line-contrast; decision-r07-t16d-followups, (b)); a
+  view's strokes as Layout gives them, and its black ground, in the Views bullet's paragraph on
+  both styles (decision-r07-t16d-followups, (e)); a view's mark labels clear of their marks and
+  reticles, in the same paragraph (decision-r07-t16d-followups, item 1 and (d)); the craft's silhouette, as the one exception in "Outlines for
   symbology"; the craft note's Label row; and the added clauses of the `WIREFRAME`, `PHOTOREALISTIC`
   row and the `TEST HULL` row. Nothing else is new: `BODY PHOTOMETRY: NOT YET MODELLED` is signed
   off (T19.d), and the several views' refusal adds no entry (decision-r07-t18, item 6). Tests: each
   status the draft adds is a string in the code, in the words T16.b built; each note it adds is a
   string in the code, in the words T16.e built; and each width and colour the text gives is the
-  code's, `lineScale` and `markStrokeDevicePx` included (decision-r07-t16a;
+  code's, `lineScale`, `markStrokeDevicePx` and `CLEAR_COLOUR`'s black included
+  (decision-r07-t16a;
   decision-thin-line-contrast). Acceptance:
   `pnpm exec prettier --check docs/frontend/ux-guidelines.md`, the console-ux skill's scripts.
 
@@ -4203,10 +4293,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - **A polygon symbol.** Each side moves out by δ, and its corners by δ over the unit polygon's
       inradius (cos π/n), so that its inner edge stays where a 1.5 CSS px outline's would be.
       T16.f's "a symbol's path radius by δ" means the same for a circle, but would move a polygon's
-      sides out by only δ cos(π/n): T16.f should match the view.
+      sides out by only δ cos(π/n): T16.f should match the view. _Ruled
+      (decision-r07-t16d-followups, (a)): T16.f matches the view, each side moved by δ, through one
+      `unitInradius` in `spatial/symbols.ts`._
     - **Two marks the ruling does not list.** A target's ticks, the view's contact mark for a
       craft, move out by δ, as a symbol's line does. The flight path marker's circle moves out by
       δ, and its wings and fin start from it, so that both keep their open centres as built.
+      _Adopted (decision-r07-t16d-followups, (a))._
   - **The slope term.** As ruled, `occluderSlopePx` is 5 at every ratio up to 2 and 7 at 3, so 5
     device px of slope show through behind a slanted hull face, where decision-r07-t16a expected 3
     at a ratio of 1 or below (decision-thin-line-contrast).
@@ -4248,7 +4341,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 
     **Crossings are not read.** A cross-section that another batch's stroke or casing reaches is
     left out, because a later batch's casing covers an earlier stroke where they cross, by design
-    (a stated limit).
+    (a stated limit). _T16.c's draft names it. T16.g narrows "Crossings are not read" to texels
+    another batch lights or covers, so that parallel neighbours are read, and T16.f's canvas check
+    takes the same rule (decision-r07-t16d-followups, (b))._
 
     **The readings.** Every kind reads its pair's ratio at every ratio, in both styles:
     - the ring's edges and ticks, the limb and meridians (1 px), and the prime meridian (1.5 px),
@@ -4281,9 +4376,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - **Graticule thresholds.** A body's graticule steps (drawn from 8 px across, and at 15° from
       64 px) are still device px, chosen for 1 px lines. With 2 px lines, a planet some 28 px across
       has its 30° cells nearly filled (`after-a-precision-chase-wireframe.png`). Scaling both
-      thresholds by the line scale would keep the gaps as built.
+      thresholds by the line scale would keep the gaps as built. _Ruled
+      (decision-r07-t16d-followups, (c)): both thresholds are multiplied by `strokeScale`.
+      `SYMBOL_BELOW_PX` stays 3 device px, the image's point regime (T16.g)._
     - **The view's clear colour.** `CLEAR_COLOUR` (`view/engine/webgpu/drawing.ts`) is black, not
-      `--surface-0`. This predates T16.
+      `--surface-0`. This predates T16. _Ruled (decision-r07-t16d-followups, (e)): right as built,
+      in both styles. A view's ground is black, the absence of light, and the plates, casings and
+      silhouettes over it are `--surface-0`. T16.c's draft says so._
   - **By hand, not committed** (`.git/rm23-scratch/r07-views/t16d/byhand/`). The hull's hardware
     slope term was put back (`depthBiasAway { constant: 128, slopeScale: 3 }`, the fragment writing
     no depth) and the default variant run on SwiftShader:
@@ -4308,16 +4407,23 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       1.5 CSS px bracket at its as-built place, at every interface scale (tested at 80%, 100% and
       150%, at ratios 0.78125, 1 and 2). A selected body of size class 3 or 4 has run under its
       label's plate since R02.T15 (its bracket's half-size is 0.69 to 0.75 rem); it is no worse.
+      _Ruled (decision-r07-t16d-followups, item 1): adopted, and generalised by T16.g. Each label
+      stands 0.125 rem + δ beyond the outermost reticle that can stand about its mark, and never
+      nearer than 0.75 rem + 5δ, so that no size class's bracket comes nearer its plate than a
+      craft's. T16.f gives the spatial displays' labels the same 5δ._
     - **The destination's reticle on the selection.** It stood 0.25 rem outside the bracket: 3.1
       device px at 0.78125, and 2.5 at 80%. Its casing, drawn after the bracket, reaches 3.5 px, so
       it covered the bracket's full-coverage core (about 6.3:1 at 100% and 3.4:1 at 80%, from the
       ramp). The margin is now at least an outline and one casing, 4 device px below 4/3, so that
       the destination's casing never reaches the bracket's core. That is tested at 80%, 100% and
       150%, at ratios 0.78125, 1 and 2. No view draws a destination yet: `viewFrameDrawer.ts` and
-      `spikeRun.ts` pass `null`.
+      `spikeRun.ts` pass `null`. _Ruled (decision-r07-t16d-followups, item 2): adopted. T16.f
+      gives the spatial displays' pair the same least gap, and T16.g's capture check draws the
+      destination on the selection._
     - **Seen, not changed.** About a craft, the destination reticle's right arms stand 0.875 rem
       out, and have run under the label's plate at every ratio since R02.T15. That too is latent
-      until a destination is drawn.
+      until a destination is drawn. _Ruled (decision-r07-t16d-followups, (d)): mended by T16.g's
+      label offset._
   - **Gate.** No `just ci` (the Day 2 protocol).
     - The acceptance's vitest: 87 files, 1,520 tests.
     - The app's vitest: 327 files, 5,581 tests.

@@ -426,7 +426,8 @@ it is recorded, and stays here so that the owner can review it.
   `BODY PHOTOMETRY: NOT YET MODELLED` and the `METER` and `AVG` rows were signed off by R07.T19.d),
   and decision-r07-t16a's and decision-thin-line-contrast's guide text: the unit of a width and the
   floor of 2 device pixels, a stroke's contrast as drawn, a view's strokes as Layout gives them,
-  the craft's silhouette and `CRAFT PHOTOMETRY: NOT YET MODELLED`;
+  the craft's silhouette and `CRAFT PHOTOMETRY: NOT YET MODELLED`, a stroke's cross-section, a
+  view's black ground, and a view's labels clear of their marks' reticles;
   R08.T2's five atmosphere labels
   (`ATMOSPHERE: NOT RESOLVED`, `ATMOSPHERE: NOT YET MODELLED`, `AEROSOLS: NOT YET MODELLED`,
   `ATMOSPHERE: COMPUTING`, `ATMOSPHERE: APPROXIMATE`); R10.T13's readout notation

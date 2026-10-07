@@ -1418,3 +1418,15 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   R07.T13.d's two follow-ups).** `CURSOR`'s `X`, `Y` and `Z` and the chart's `DRIVE RANGE` and
   `CHART TIME` take `Escape`, which drops what was typed and any refusal and shows the value again,
   selected, and enter an emptied field as nothing, never refused (the guide's data-entry bullet).
+- **Labels beside reticles (decision-r07-t16d-followups, (d)).** A mark's label starts on the
+  selection bracket's centreline (`spatial/labels.ts`, `GAP_REM` 0.25 rem, the reticle margin),
+  and only B612's side bearing keeps its ink off the bracket. Since R07.T16.f the gap gains the
+  bracket's growth, 5δ, so that this stands as built. Two cases break the view's rule, that a
+  label never overlaps its mark or a reticle about it (the guide's Views paragraph, R07.T16.c):
+  - a label held inside the view where neither side has room (the orchestrator's ruling 149.1)
+    can stand over its own mark;
+  - a destination's reticle, when one is drawn, stands 0.25 rem inside its label's box.
+
+  The first task that commands a destination (`SpatialScene.destinationId`) stands the label
+  outside every reticle drawn about its mark, as R07.T16.g does in the view, and asks for a
+  ruling on 149.1's hold.
