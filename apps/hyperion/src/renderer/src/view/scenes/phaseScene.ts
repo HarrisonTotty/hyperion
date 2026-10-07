@@ -10,10 +10,12 @@
  * `sunLikeHostDisc`, the scene's own host disc (decision-r07-t8a, item 1). The camera starts on the
  * half planet; the target keys step to the others. Static: nothing moves.
  */
+import type { HostDiscDto } from "@hyperion/protocol";
+
 import { add, scale, vec3, type Vec3 } from "../../geometry/vec3";
 import type { CameraPose } from "../camera/pose";
 import { lookAlong } from "../camera/quaternion";
-import { SUN_RADIUS_M, sunLikeHostDisc } from "../lighting/hostDisc";
+import { frozenHostDisc, SUN_RADIUS_M, sunLikeHostDisc } from "../lighting/hostDisc";
 import { bodyKindSymbol, staticRetarded, type ViewBody, type ViewScene } from "../scene/model";
 import {
   AU_M,
@@ -104,6 +106,14 @@ function cameraPose(): CameraPose {
   };
 }
 
+/**
+ * The scene's host disc, a Sun at the star, made once and held by every frame, as a server scene's
+ * held sky holds its hosts; frozen, since every frame shares it.
+ */
+const PHASE_HOST_DISCS: ReadonlyArray<HostDiscDto> = Object.freeze([
+  frozenHostDisc(sunLikeHostDisc({ star: 0 })),
+]);
+
 function phaseSceneAt(tS: number): ViewScene {
   const starCentreM = vec3(0, 0, 0);
   const giantCentreM = add(
@@ -152,7 +162,7 @@ function phaseSceneAt(tS: number): ViewScene {
     stars: [],
     ownShip: null,
     defaultPose: cameraPose(),
-    hostDiscs: [sunLikeHostDisc({ star: 0 })],
+    hostDiscs: PHASE_HOST_DISCS,
   };
 }
 

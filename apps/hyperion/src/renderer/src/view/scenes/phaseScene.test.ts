@@ -151,6 +151,10 @@ describe("the phase scene", () => {
     expect(lights.map((light) => light.body)).toEqual([PHASE_STAR]);
   });
 
+  it("holds one host disc through every frame, as a server scene's sky holds its hosts", () => {
+    expect(phaseScene().sceneAt(5).hostDiscs).toBe(scene.hostDiscs);
+  });
+
   for (const [index, phaseDeg] of PHASE_SCENE_PHASES_DEG.entries()) {
     it(`draws the ${String(phaseDeg)}° planet's limbs where the oracle puts them, to half a pixel`, () => {
       const { first, last, leftLimb, rightLimb } = drawPlanet(index);

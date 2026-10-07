@@ -7520,6 +7520,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         plan takes 0.03–0.08 ms and a draw about 1.1–2.0 ms.
       - This is not fixed in T17. For the orchestrator, either: key the cache by the disc's limb
         laws and K, on which alone the annuli depend; or make the kept scenes' host discs once.
+        _Fixed after T17, both ways: see "The kept scenes' annuli, fixed"._
     - **The CPU probe** (`.git/rm23-scratch/r07-shading/t17/probes/zzbench-t17.test.ts`).
       - It ran under vitest in Node 26 on the Ryzen 7 3700X at 00:46, under the same locks, at a
         load of 2.1.
@@ -7651,3 +7652,128 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         failure gets no pointer here, since it is lane C's plan.
   - Scratch: `.git/rm23-scratch/r07-shading/t8a-rtx/`. It holds `rtx-smoke.sh`, `sw-smoke.sh`,
     `diag/` (the probe, its patch and logs) and `rtx-fix-{1,2,3}.log`.
+- **The kept scenes' annuli, fixed** (2026-10-07; the shading lane, from T17's finding, as the
+  orchestrator ruled: the value-keyed cache required, the scenes' held hosts if equally simple).
+  - **The cache.** `hostAnnuli` (`lighting/hostLights.ts`) keys its annuli by the values of the
+    host's limb laws and K, no longer by the disc object.
+    - The key is K, then c and α of the B, V and R laws, each number as its shortest round-trip
+      decimal. Equal laws share a key, and +0 and −0 share one too, since their annuli are equal.
+    - A caller that makes an equal disc anew each frame makes the annuli once. A disc whose laws
+      change, even in place, gets annuli of its new laws, where the `WeakMap` kept the old ones.
+    - The `WeakMap` let a disc's annuli go with the disc. The cache now keeps the
+      `HOST_ANNULI_KEPT` (16) laws used most recently: a hit makes its laws the newest, and a new
+      law past 16 drops the least recently used. A scene lights by a system's few stars at both K,
+      so a law it uses each frame stays (the TypeScript review's consider, applied).
+    - A lookup of a held host costs 0.56 µs, against the `WeakMap`'s 0.04 µs (the probe's fourth
+      round, below, at a load of 17). At T17's 100 lit bodies, about 70 lookups a frame, that is
+      under 0.04 ms.
+  - **The scenes.** `PHASE TEST` and `ECLIPSE TEST` make their host disc once and hold it in every
+    frame, as a server scene's held sky holds its hosts.
+    - The held disc is frozen through, its arrays and laws with it (`frozenHostDisc`,
+      `lighting/hostDisc.ts`; the TypeScript review's consider). An edit in place throws rather
+      than reach every frame after it, and every test after it in a worker (vitest runs with
+      `isolate: false`).
+    - Others still make a host on each call, and the value key serves them:
+      `view/scenes/occultationScene.ts`' `occultationFrame`, which the smoke page draws;
+      `smoke/bodies.ts` and `smoke/meshBodies.ts`; and the test fixtures.
+  - **Tests.**
+    - `hostLights.test.ts`:
+      - equal hosts made apart share their annuli;
+      - another host's laws, or a disc's laws changed in place, give annuli of those laws;
+      - each K is kept apart;
+      - the last 16 laws are kept;
+      - a law is dropped once 16 others are used after it;
+      - a law used each frame stays through 16 new ones.
+    - `draw.test.ts`: each frame's plan of a scene that makes its host anew carries the first
+      frame's annuli.
+    - `phaseScene.test.ts` and `eclipseScene.test.ts`: one host disc through every frame.
+    - `hostDisc.test.ts` (new): a frozen disc refuses an edit of a law or a luminance in place.
+    - Seven of the cache's and scenes' tests fail on the code before the fix. The frozen disc's
+      tests are of new code.
+  - **The CPU, measured.** Provisional (R05 Design note 27): the machine was shared, the load is
+    beside each figure.
+    - **The forms measured.** The first rounds of both measures ran on the cache's first form,
+      which dropped the oldest law made, before the review. The last round of each ran on the
+      code as committed, on the merge of `rendering-and-planets` at 6d21c22e: the probe's fourth
+      round and the client's third.
+    - **The CPU probe.** This is T17's probe, with three cases added:
+      - `ECLIPSE TEST` at mid-eclipse;
+      - each scene with its host forced anew each frame, the value key alone;
+      - a lookup's cost, in batches of 1,000 (rounds 3 and 4 only).
+
+      It ran under vitest in Node 26 on the Ryzen 7 3700X, on 2026-10-07 between 04:33 and
+      05:07, before and after the fix back to back, four rounds. The figures are medians of 100
+      frames, ms:
+
+      | Frame | before | after |
+      |---|---|---|
+      | `PHASE TEST`, its scene made each frame, high | 5.19–6.48 | 0.071–0.116 |
+      | the same, low | 3.53–4.38 | 0.068–0.102 |
+      | `PHASE TEST`, its host forced anew, high / low | 5.19–6.33 / 3.53–4.34 | 0.071–0.109 / 0.068–0.100 |
+      | `ECLIPSE TEST`, its scene made each frame, high / low | 5.17–6.34 / 3.51–4.27 | 0.053–0.077 / 0.048–0.071 |
+      | `ECLIPSE TEST`, its host forced anew, high / low | 5.17–6.29 / 3.51–4.27 | 0.048–0.071 / 0.047–0.069 |
+      | one new equal host's annuli, K = 4 / K = 3 | 5.11–6.34 / 3.46–4.27 | 0.0014–0.0021 |
+
+      - The loads were 10.6 to 15.7 in rounds 1 and 2, 6.3 to 6.6 in round 3 and 17.0 to 17.1 in
+        round 4.
+      - Round 3's before figures, 5.19 ms and 3.53 ms, are T17's own (5.20 ms and 3.54 ms on
+        2026-10-07 at 00:46, at a load of 2.1).
+      - The lookup of a held host: 0.029 µs (the `WeakMap`) against 0.27 µs (the first form) in
+        round 3; 0.041 µs against 0.56 µs (as committed) in round 4. The refresh on each hit is
+        the difference between the forms.
+      - The plans with their hosts held, T17's table, are unchanged within the rounds' spread:
+        `PHASE TEST` high 0.078–0.135 ms before and 0.086–0.138 ms after.
+    - **The running client.** These runs used T17's instrumented build (its patch, on this
+      branch's head) and its hook, cut to the primary alone (`ANNULI_SKIP_INSTRUMENTS`).
+      - The window was 1920 × 1080, the cockpit as built, with the primary at 1120 × 900 and 60°.
+      - They ran hidden on the RTX 3080 under the GPU lock only, not the heavy lock T17's runs
+        also held. Before and after were interleaved, in three rounds on 2026-10-07:
+        - rounds 1 and 2 (the first form, at e4dbb4e4) between 04:36 and 04:43. The load was 9.6
+          to 13.2 in round 1. In round 2 it was 10.7 at the start, then 26 to 49 (another lane's
+          job);
+        - round 3 (as committed, at 6d21c22e) between 05:07 and 05:10, at a load of 15.7 to 17.3.
+      - The figures are medians of 480 draws on high and 240 on low, ms, at the renderer's 0.1 ms
+        timer. Each pair gives `ViewFrameDrawer.draw`, then `planLitBodies` within it:
+
+      | Primary | before | after |
+      |---|---|---|
+      | `PHASE TEST`, high | 7.5–8.75 / 5.7–6.45 | 1.6–1.8 / 0.1 |
+      | `ECLIPSE TEST`, high | 8.3–10.1 / 6.1–6.9 | 2.4–2.5 / 0.1 |
+      | `PHASE TEST`, low | 5.7–6.35 / 4.2–4.3 | 1.2–1.8 / 0.1 |
+      | `ECLIPSE TEST`, low | 5.9–6.8 / 4.1–4.3 | 1.4–1.8 / 0.1 |
+
+      - The primary's CPU draw falls by about 4 to 8 ms a frame.
+      - What is left is 1.2–2.5 ms, the draw without the rebuild. T17 estimated it at 1.1–2.0 ms,
+        at a load of 2.1 and under both locks. These runs' before figures are likewise above
+        T17's 6.3–7.4 ms.
+      - The instruments, which hit the cache after the primary, and low's lone photorealistic
+        instrument, which paid the rebuild itself, are covered by the same key. They were not
+        timed apart.
+  - **Gate**, on the final tree with the read-back change beside it (the merge 6d21c22e and the
+    three commits' code).
+    - The app's vitest: 6,863 tests in 339 files, plus the protocol's 174. The five directories
+      touched (`view/lighting`, `view/bodies`, `view/scenes`, `view/engine`, `displays/view`):
+      1,208 tests in 71 files.
+    - `just check lint` from a clean tsc cache, and Prettier.
+    - `just test-render`, both variants, without captures: exit 0, with 288 and 286 checks, none
+      failing and no uncaptured GPU error (06:40–06:42, after 85 minutes' wait for the heavy
+      lock).
+    - `just ci` was not run, under the Day 2 protocol.
+  - **Reviewed.**
+    - TypeScript: no must-fix or should-fix items. Its three considers were applied: the cache
+      made least recently used, the held discs frozen, and a `{@link}` in the read-back's error.
+    - Plan conformance: no must-fix items. Its five should-fix items were applied:
+      - this entry rewritten for the cache as committed, with the rounds re-taken on it;
+      - the lookup's round and load, and the probe's three cases;
+      - R05's pointer naming the integration branch's hash;
+      - these Gate and Reviewed records;
+      - the read-back's record, with R01's sketch marked.
+      - Its three considers were applied too: equal terms with T17's figures, where
+        `occultationFrame` lives, and the read-back's error scope closed in a `finally`.
+  - Scratch: `.git/rm23-scratch/r07-shading/annuli/`. It holds:
+    - the probe (`probes/zzbench-annuli.test.ts`, run by `run-cpu.sh`), its figures
+      (`cpu-{before,after}{1,2,3,4}.json` and `.meta`) and the table (`compare-cpu.js`,
+      `compare-cpu-r1234.txt`);
+    - the client's runs (`build-variants.sh`, `hook-annuli.js`, `run-app.sh`, `run-app-all.sh`),
+      their logs (`run-r{1,2,3}-*.log`, `meta-*`, `clocks-*`) and the table (`analyse-app.js`,
+      `app-r1r2r3.txt`).

@@ -625,6 +625,20 @@ describe("the records", () => {
     // The bluer law darkens more, so its innermost annulus is the brighter share of its flux.
     expect(b.flux[0] ?? 0).toBeGreaterThan(r.flux[0] ?? 0);
   });
+
+  it("plans each frame of a scene that makes its host anew with the first frame's annuli", () => {
+    // `scene` makes its host disc anew on each call, as a frame of such a scene does.
+    const frameAnnuli = () => {
+      const { body, hosts } = scene(6.371e6 / Math.sin(40 / PX_PER_RAD), 0);
+      const plan = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+      const annuli = plan.discs[0]?.lights[0]?.annuli;
+      if (annuli === undefined) {
+        throw new Error("no lit disc");
+      }
+      return annuli;
+    };
+    expect(frameAnnuli()).toBe(frameAnnuli());
+  });
 });
 
 describe("an eclipse", () => {

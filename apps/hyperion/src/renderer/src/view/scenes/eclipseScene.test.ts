@@ -297,6 +297,12 @@ describe("the eclipse scene", () => {
     expect(option?.make().name).toBe(ECLIPSE_SCENE_NAME);
   });
 
+  it("holds one host disc through every frame, as a server scene's sky holds its hosts", () => {
+    expect(eclipseScene().sceneAt(ECLIPSE_MID_S / ECLIPSE_TIME_RATE).hostDiscs).toBe(
+      eclipseSceneAt(0).hostDiscs,
+    );
+  });
+
   it("runs its clock a hundred times the script's", () => {
     const at = eclipseScene().sceneAt(ECLIPSE_MID_S / ECLIPSE_TIME_RATE);
     expect([at.time.seconds, at.timeRate, at.provenance]).toEqual([

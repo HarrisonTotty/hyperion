@@ -147,24 +147,49 @@ export function lightsAt(
     .slice(0, max);
 }
 
-/** Each host's annuli per channel and K, made once per disc: the construction bisects. */
-const ANNULI = new WeakMap<
-  HostDiscDto,
-  Map<number, readonly [AnnulusSet, AnnulusSet, AnnulusSet]>
->();
+/**
+ * The most hosts' annuli kept: a system's few stars at both settings' K, several times over. The
+ * least recently used go first, so the laws a scene is lit by stay while those of systems left
+ * behind go.
+ */
+export const HOST_ANNULI_KEPT = 16;
 
-/** A host's annuli in display order (r, g, b) from R06's B, V, R limb laws. */
+/**
+ * Each host's annuli by the values of its limb laws and K, least recently used first, at most
+ * {@link HOST_ANNULI_KEPT}: the construction bisects, about 5 ms a host at K = 4 (R07.T17).
+ *
+ * @remarks
+ * Keyed by value, not by the disc object, so that a caller that makes an equal disc anew each
+ * frame (a smoke check, a test, any scene that rebuilds its hosts) makes them once, and a disc
+ * whose laws change, even in place, gets annuli of its new laws.
+ */
+const ANNULI = new Map<string, readonly [AnnulusSet, AnnulusSet, AnnulusSet]>();
+
+/**
+ * The key of a host's annuli: K, then c and α of its B, V and R laws. Each number is written as
+ * its shortest round-trip decimal, so equal laws share a key and unequal ones never do (but for
+ * +0 and −0, whose annuli are equal).
+ */
+function annuliKey(limb: HostDiscDto["limb"], k: number): string {
+  const [b, v, r] = limb;
+  return [k, b.c, b.alpha, v.c, v.alpha, r.c, r.alpha].join(" ");
+}
+
+/**
+ * A host's annuli in display order (r, g, b) from R06's B, V, R limb laws, made once for each
+ * set of laws and K.
+ */
 export function hostAnnuli(
   disc: HostDiscDto,
   k: number,
 ): readonly [AnnulusSet, AnnulusSet, AnnulusSet] {
-  let byK = ANNULI.get(disc);
-  if (byK === undefined) {
-    byK = new Map();
-    ANNULI.set(disc, byK);
-  }
-  const cached = byK.get(k);
+  const key = annuliKey(disc.limb, k);
+  const cached = ANNULI.get(key);
+  // A Map iterates in insertion order, so a key set again is the most recently used, and the first
+  // key the least.
   if (cached !== undefined) {
+    ANNULI.delete(key);
+    ANNULI.set(key, cached);
     return cached;
   }
   const [b, v, r] = disc.limb;
@@ -173,6 +198,12 @@ export function hostAnnuli(
     annulusEdges(v.c, v.alpha, k),
     annulusEdges(b.c, b.alpha, k),
   ] as const;
-  byK.set(k, sets);
+  if (ANNULI.size >= HOST_ANNULI_KEPT) {
+    const unused = ANNULI.keys().next();
+    if (unused.done !== true) {
+      ANNULI.delete(unused.value);
+    }
+  }
+  ANNULI.set(key, sets);
   return sets;
 }

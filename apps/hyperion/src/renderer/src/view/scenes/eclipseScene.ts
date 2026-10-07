@@ -27,12 +27,12 @@
  * time would cast it, the distance the moon moves in its 1.21 s light time to the planet. The
  * planet does not turn, and its reflex about the planet–moon barycentre (4,414 km) is left out.
  */
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
 
 import { add, scale, vec3, type Vec3 } from "../../geometry/vec3";
 import type { CameraPose } from "../camera/pose";
 import { lookAlong } from "../camera/quaternion";
-import { SUN_RADIUS_M, sunLikeHostDisc } from "../lighting/hostDisc";
+import { frozenHostDisc, SUN_RADIUS_M, sunLikeHostDisc } from "../lighting/hostDisc";
 import {
   bodyKindSymbol,
   type RetardedCentre,
@@ -265,6 +265,14 @@ function bodyAt(
   };
 }
 
+/**
+ * The scene's host disc, a Sun at the star, made once and held by every frame, as a server scene's
+ * held sky holds its hosts; frozen, since every frame shares it.
+ */
+const ECLIPSE_HOST_DISCS: ReadonlyArray<HostDiscDto> = Object.freeze([
+  frozenHostDisc(sunLikeHostDisc({ star: 0 })),
+]);
+
 /** The scene at scene time `sceneS`, s since the script's start ({@link ECLIPSE_TIME_RATE} × its s). */
 export function eclipseSceneAt(sceneS: number): ViewScene {
   return {
@@ -310,7 +318,7 @@ export function eclipseSceneAt(sceneS: number): ViewScene {
     stars: [],
     ownShip: null,
     defaultPose: ECLIPSE_CAMERA_POSE,
-    hostDiscs: [sunLikeHostDisc({ star: 0 })],
+    hostDiscs: ECLIPSE_HOST_DISCS,
   };
 }
 

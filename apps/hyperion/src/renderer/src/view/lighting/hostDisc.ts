@@ -57,3 +57,21 @@ export function sunLikeHostDisc(
     ...dto,
   };
 }
+
+/**
+ * A host disc frozen through, its arrays and limb laws with it, for a kept scene that holds one
+ * disc in every frame: an edit in place, which would reach every frame after it, throws instead.
+ *
+ * @returns `disc` itself, frozen.
+ */
+export function frozenHostDisc(disc: HostDiscDto): HostDiscDto {
+  for (const law of disc.limb) {
+    Object.freeze(law);
+  }
+  for (const value of Object.values(disc)) {
+    if (Array.isArray(value)) {
+      Object.freeze(value);
+    }
+  }
+  return Object.freeze(disc);
+}
