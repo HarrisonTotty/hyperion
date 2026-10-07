@@ -88,9 +88,10 @@ export interface ViewStrokes {
    */
   readonly markShiftPx: number;
   /**
-   * The least space between the selection's bracket and the destination's reticle about one mark,
-   * device px: `minReticleGapDevicePx` of the ratio, an outline and one casing, so that the
-   * destination's casing never reaches the bracket's full-coverage core (R07.T16.d, T16.g).
+   * The least space between the selection's bracket and the destination's chevrons' apices about
+   * one mark, device px: `minReticleGapDevicePx` of the ratio, an outline and one casing, so that
+   * the destination's casing never reaches the bracket's full-coverage core (R07.T16.d, T16.g and
+   * T16.h).
    */
   readonly minReticleGapPx: number;
 }
@@ -249,8 +250,9 @@ export interface DrawAnchor {
   readonly label: AnchorLabel | null;
   /**
    * The device px from the anchor to its label's `--surface-0` plate, to its right: clear of every
-   * reticle that can stand about the mark (`markLabelOffsetPx`, R07.T16.g). It is the list's, so
-   * that the label moves in the frame in which a destination's reticle is first drawn, and cuts.
+   * reticle that can stand about the mark, the destination's chevrons included
+   * (`markLabelOffsetPx`, R07.T16.g and T16.h). It is the list's, so that the label moves in the
+   * frame in which a destination's chevrons are first drawn, and cuts.
    */
   readonly labelOffsetPx: number;
 }
@@ -335,9 +337,9 @@ export interface DrawOptions extends ViewStrokes {
   /** The selected target, bracketed, whose orbit is drawn heavier; or `null`. */
   readonly selection: CameraTarget | null;
   /**
-   * The destination as the server last reported it, with its `--target` reticle, its label moved
-   * clear of it in the same list; or `null`. Never a destination only commanded: the reticle and
-   * the label's move wait for the report (the guide's commanding rule; R07.T16.g).
+   * The destination as the server last reported it, with its `--target` chevrons, its label moved
+   * clear of them in the same list; or `null`. Never a destination only commanded: the chevrons
+   * and the label's move wait for the report (the guide's commanding rule; R07.T16.g and T16.h).
    */
   readonly destination: CameraTarget | null;
   /** The interface's rem, device px, which symbol sizes follow. */
@@ -430,8 +432,8 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * 2 px; hulls their edges, their windows' included, over their two-sided opaque faces, depth
  * only, pushed away in the fragment by {@link WireframeDrawList.occluderSlopePx}, a window
  * hiding nothing (R07.T16.e); a craft's predicted path the
- * only dashed batch; the selection's bracket reticle in `--accent`, the destination's in
- * `--target` and the own ship's flight path marker; stars as sprites pre-exposed at the exposure,
+ * only dashed batch; the selection's bracket reticle in `--accent`, the destination's chevrons in
+ * `--target` (R07.T16.h) and the own ship's flight path marker; stars as sprites pre-exposed at the exposure,
  * the brightest 2,000 at the low setting. Every stroke is cased in `--surface-0`, since every mark
  * may lie over a star. Every line's width, casing and dash is the guide's CSS pixels times
  * `options.strokeScale`, and every symbology outline is `options.markStrokePx` wide, moved out by

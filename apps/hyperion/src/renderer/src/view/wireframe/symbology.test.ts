@@ -31,6 +31,14 @@ const REM_PX = 16;
 const PLANET: CameraTarget = { kind: "body", body: FIXTURE_PLANET };
 const MOON: CameraTarget = { kind: "body", body: FIXTURE_MOON };
 
+/**
+ * The apices of the destination's chevrons, in their order (above, below, left, right): each
+ * chevron is two segments, an arm's outer end to the apex and the apex to the other arm's end.
+ */
+function apices(mark: ScreenMark): Array<{ xPx: number; yPx: number }> {
+  return mark.segments.filter((_, i) => i % 2 === 0).map(([, apex]) => apex);
+}
+
 /** The mark's strokes' bounding box. */
 function bounds(mark: ScreenMark): { left: number; right: number; top: number; bottom: number } {
   const xs = mark.segments.flatMap(([a, b]) => [a.xPx, b.xPx]);
@@ -65,14 +73,41 @@ describe("the bracket reticle", () => {
   });
 });
 
-describe("the destination reticle", () => {
-  it("is drawn in --target, outside the selection's brackets", () => {
+describe("the destination's chevrons (R07.T16.h; decision-r07-quality-and-destination, Q2)", () => {
+  it("is drawn in --target as four chevrons on the mark's axes, pointing at it, outside the selection's bracket", () => {
     const at = { xPx: 100, yPx: 100 };
     const destination = destinationReticle(PLANET, at, 5, REM_PX, 0, 0);
-    expect([
-      destination.token,
-      bounds(destination).left < bounds(bracketReticle(PLANET, at, 5, REM_PX, 0)).left,
-    ]).toEqual(["target", true]);
+    // The bracket's half-size 9 px, the apices 4 px, a margin, outside it; each arm the bracket's,
+    // 6 px, run out from its apex at 45°.
+    const run = 6 * Math.SQRT1_2;
+    const arms = destination.segments.map(([a, b]) => [
+      px(Math.hypot(b.xPx - a.xPx, b.yPx - a.yPx)),
+      px(Math.abs(b.xPx - a.xPx)),
+    ]);
+    expect([destination.token, destination.segments.length, apices(destination), arms]).toEqual([
+      "target",
+      8,
+      [
+        { xPx: 100, yPx: 87 },
+        { xPx: 100, yPx: 113 },
+        { xPx: 87, yPx: 100 },
+        { xPx: 113, yPx: 100 },
+      ],
+      Array.from({ length: 8 }, () => [6, px(run)]),
+    ]);
+  });
+
+  it("runs each arm away from the mark, so that every chevron points at it", () => {
+    const at = { xPx: 100, yPx: 100 };
+    const destination = destinationReticle(PLANET, at, 5, REM_PX, 0, 0);
+    const fromMark = (p: { xPx: number; yPx: number }): number =>
+      Math.hypot(p.xPx - at.xPx, p.yPx - at.yPx);
+    // An arm's outer end lies farther from the mark than its apex, on both arms of each chevron.
+    expect(
+      destination.segments.map(([a, b], i) =>
+        i % 2 === 0 ? fromMark(a) > fromMark(b) : fromMark(b) > fromMark(a),
+      ),
+    ).toEqual(Array.from({ length: 8 }, () => true));
   });
 
   it("stands the larger of a margin and the least gap outside the selection's bracket", () => {
@@ -98,11 +133,22 @@ describe("a mark's label's offset (R07.T16.g; decision-r07-t16d-followups, item 
     );
   });
 
-  it("stands a destination's label beyond its reticle about the selection", () => {
+  it("stands a destination's label 0.125 rem and a shift beyond its chevrons' reach", () => {
     const radius = 0.375 * REM_PX;
-    expect(markLabelOffsetPx(radius, REM_PX, shift, 4)).toBe(
-      destinationHalfSizePx(radius, REM_PX, shift, 4) + 0.125 * REM_PX + shift,
+    // The reach: the apex distance and an arm's run outward, the bracket's arm over √2.
+    const armPx = (2 * bracketHalfSizePx(radius, REM_PX, shift)) / 3;
+    expect(markLabelOffsetPx(radius, REM_PX, shift, 4)).toBeCloseTo(
+      destinationHalfSizePx(radius, REM_PX, shift, 4) +
+        armPx * Math.SQRT1_2 +
+        0.125 * REM_PX +
+        shift,
+      9,
     );
+  });
+
+  it("stands a craft's label 22.44 px from its anchor while it is the destination, at a ratio of 1 and 100%", () => {
+    // The bracket 11 px out, the apices 15, the reach 15 + 7.33 ÷ √2; the plate 2.25 px beyond.
+    expect(Math.round(markLabelOffsetPx(0.375 * REM_PX, REM_PX, shift, 4) * 100) / 100).toBe(22.44);
   });
 });
 
@@ -219,14 +265,15 @@ function marksOf(selection: CameraTarget | null, destination: CameraTarget | nul
 
 describe("symbologyMarks", () => {
   it("stands a destination that is not the selection the least gap outside a bracket's place", () => {
-    const left = (marks: ScreenMark[], kind: ScreenMark["kind"]): number[] =>
-      marks.filter((mark) => mark.kind === kind).map((mark) => bounds(mark).left);
-    // The moon's bracket at 10 px to the rem stands its radius and 2.5 px out; the destination 4 px
-    // beyond, the least gap, more than a margin.
+    // The moon's bracket at 10 px to the rem stands its radius and 2.5 px out; the destination's
+    // left apex 4 px beyond, the least gap, more than a margin.
     const bracketPx = symbolRadiusPx(bodyKindSymbol("moon"), 10) + 2.5;
+    const destination = marksOf(null, MOON).filter((mark) => mark.kind === "destination");
     expect([
-      left(marksOf(null, MOON), "destination"),
-      left(marksOf(MOON, null), "selection"),
+      destination.map((mark) => apices(mark)[2]?.xPx),
+      marksOf(MOON, null)
+        .filter((mark) => mark.kind === "selection")
+        .map((mark) => bounds(mark).left),
     ]).toEqual([[300 - bracketPx - 4], [300 - bracketPx]]);
   });
 
@@ -338,7 +385,7 @@ describe("the outlines' outward shift (R07.T16.d; decision-thin-line-contrast, i
         px(at.xPx - bounds(bracketReticle(PLANET, at, 5, remPx, shift)).left - (5 + 0.25 * remPx)),
         px(
           at.xPx -
-            bounds(destinationReticle(PLANET, at, 5, remPx, shift, 0)).left -
+            (apices(destinationReticle(PLANET, at, 5, remPx, shift, 0))[2]?.xPx ?? Number.NaN) -
             (5 + 0.5 * remPx),
         ),
       ];

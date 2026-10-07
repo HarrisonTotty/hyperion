@@ -2,7 +2,15 @@ import { norm, normalise, scale, type Vec3 } from "../../geometry/vec3";
 import type { ColourToken } from "../../spatial/drawList";
 import { RETICLE_SHIFTS, RING_SHIFTS } from "../../lib/strokes";
 import { CONTACT_SIZE_CLASS } from "../../lib/system/bodySymbols";
-import { SIZE_CLASS_REM, symbolOutline, unitInradius } from "../../spatial/symbols";
+import {
+  bracketArmPx,
+  destinationChevrons,
+  type OffsetPx,
+  reticleReachPx,
+  SIZE_CLASS_REM,
+  symbolOutline,
+  unitInradius,
+} from "../../spatial/symbols";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
 import type { BodyMarkSymbol } from "../scene/model";
@@ -37,13 +45,10 @@ export interface ScreenMark {
   readonly anchor: ScreenPx;
 }
 
-/** How much of each side of its square a bracket's corner arm covers: a third, as the spatial view's. */
-const BRACKET_ARM_SHARE = 1 / 3;
-
 /**
  * The margin between a mark and the brackets about it, and between the selection's brackets and
- * the destination's outside them, rem: 0.25 each, as the spatial view's reticles are placed
- * (`spatial/drawList.ts`, half of its 0.5 rem margin).
+ * the destination's chevrons' apices outside them, rem: 0.25 each, as the spatial view's reticles
+ * are placed (`spatial/drawList.ts`, half of its 0.5 rem margin).
  */
 export const BRACKET_MARGIN_REM = 0.25;
 
@@ -55,9 +60,10 @@ export const BRACKET_MARGIN_REM = 0.25;
 export const LABEL_PLACE_REM = 0.75;
 
 /**
- * How far a label's plate stands beyond the half-size of the outermost reticle about its mark,
- * rem, before the outline's shift: 0.125, a craft's label beyond its bracket's centreline as
- * R02.T15 built it (0.75 rem less the bracket's 0.375 + 0.25).
+ * How far a label's plate stands beyond the reach of the outermost reticle about its mark (the
+ * bracket's half-size, or the destination's chevrons' reach, `reticleReachPx`), rem, before the
+ * outline's shift: 0.125, a craft's label beyond its bracket's centreline as R02.T15 built it
+ * (0.75 rem less the bracket's 0.375 + 0.25).
  */
 export const LABEL_CLEARANCE_REM = 0.125;
 
@@ -70,7 +76,7 @@ export const FLIGHT_PATH_MARKER_REM = { radius: 0.375, wing: 0.5, fin: 0.3125 } 
 
 /** Four corner brackets of the square of half-width `halfPx` about `at`. */
 function corners(at: ScreenPx, halfPx: number): ScreenSegment[] {
-  const arm = 2 * halfPx * BRACKET_ARM_SHARE;
+  const arm = bracketArmPx(halfPx);
   const segments: ScreenSegment[] = [];
   for (const sx of [-1, 1] as const) {
     for (const sy of [-1, 1] as const) {
@@ -130,18 +136,21 @@ export function bracketHalfSizePx(markRadiusPx: number, remPx: number, shiftPx: 
 }
 
 /**
- * The destination's reticle's half-size about a mark, device px: a margin outside the selection's
- * bracket's place, and at least `minGapPx` outside it, whether or not the destination is also the
- * selection, so that the two reticles show together and a destination alone is never told from a
- * selection by its colour alone (the guide's Colour rule; R07.T16.g, after the UX review).
+ * The destination's half-size about a mark, device px, where its chevrons' apices stand: a margin
+ * outside the selection's bracket's place, and at least `minGapPx` outside it, whether or not the
+ * destination is also the selection, so that the two marks show together (R07.T16.g;
+ * decision-r07-quality-and-destination, Q2).
  *
  * @remarks
  * The least gap is a reticle's outline and one casing (`minReticleGapDevicePx`, R07.T16.d and
  * T16.g): the destination is drawn after the selection, so that its casing would otherwise cover
- * the bracket's full-coverage core below a ratio of 4/3, where 0.25 rem is under 4 device px.
+ * the bracket's full-coverage core below a ratio of 4/3, where 0.25 rem is under 4 device px. The
+ * chevrons come nearest the bracket near its arms' inner ends, at (H ÷ 3 + the gap) ÷ √2 with H the
+ * bracket's half-size, which is the gap or more wherever H is at least 1.25 times it.
  *
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
- * @param minGapPx - The least space between the two reticles' centrelines, device px.
+ * @param minGapPx - The least space between the bracket's centreline and the chevrons' apices,
+ *   device px.
  */
 export function destinationHalfSizePx(
   markRadiusPx: number,
@@ -157,17 +166,20 @@ export function destinationHalfSizePx(
 /**
  * The device px from a mark's anchor to its label's `--surface-0` plate (R07.T16.g;
  * decision-r07-t16d-followups, items 1 and (d)): the larger of {@link LABEL_PLACE_REM} and the
- * reticles' growth, 5δ (T16.d's place), and {@link LABEL_CLEARANCE_REM} and δ beyond the half-size
- * of the outermost reticle that can stand about the mark.
+ * reticles' growth, 5δ (T16.d's place), and {@link LABEL_CLEARANCE_REM} and δ beyond the reach of
+ * the outermost reticle that can stand about the mark (`reticleReachPx`, R07.T16.h).
  *
  * @remarks
  * The reticles counted are the selection's bracket, whether or not the mark is selected, and while
- * the mark is the destination, the destination's reticle, which stands in one place selected or
- * not ({@link destinationHalfSizePx}): so selecting a mark never moves its label, and the plate's
- * near edge stands 0.125 rem less 0.75 CSS px beyond every reticle's outer edge, the
- * clearance of a craft's label from its bracket as built, at every size class and ratio. Every mark
- * up to size class 2 keeps T16.d's place; a class-3 or class-4 symbol's label stands 0.0625 or
- * 0.125 rem further out.
+ * the mark is the destination, its chevrons, which stand in one place selected or not
+ * ({@link destinationHalfSizePx}), their reach the apex distance and an arm's run outward
+ * (decision-r07-quality-and-destination, Q2 and Q3): so selecting a mark never moves its label, and
+ * the plate's near edge stands 0.125 rem less 0.75 CSS px beyond every reticle's outer edge, the
+ * clearance of a craft's label from its bracket as built, at every size class and ratio. The
+ * plate's `0.25rem` padding then starts its text 0.375 rem less 0.75 CSS px outside that edge, past
+ * the 0.125 rem every display's labels keep. Every mark up to size class 2 keeps T16.d's place; a
+ * class-3 or class-4 symbol's label stands 0.0625 or 0.125 rem further out. A craft's label at a
+ * ratio of 1 and 100% stands 22.44 px from its anchor while it is the destination.
  *
  * @param markRadiusPx - The radius of the mark, px: its symbol's, or a craft's contact's.
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
@@ -180,10 +192,12 @@ export function markLabelOffsetPx(
   shiftPx: number,
   destinationGapPx: number | null,
 ): number {
-  const outermostPx =
+  const outermostPx = reticleReachPx(
+    bracketHalfSizePx(markRadiusPx, remPx, shiftPx),
     destinationGapPx === null
-      ? bracketHalfSizePx(markRadiusPx, remPx, shiftPx)
-      : destinationHalfSizePx(markRadiusPx, remPx, shiftPx, destinationGapPx);
+      ? null
+      : destinationHalfSizePx(markRadiusPx, remPx, shiftPx, destinationGapPx),
+  );
   return Math.max(
     LABEL_PLACE_REM * remPx + reticleGrowthPx(shiftPx),
     outermostPx + LABEL_CLEARANCE_REM * remPx + shiftPx,
@@ -215,12 +229,15 @@ export function bracketReticle(
 }
 
 /**
- * The destination reticle, in `--target`, a margin outside the selection's brackets' place
- * ({@link destinationHalfSizePx}), so that both show where the destination is also the selection;
- * moved out as the brackets are.
+ * The mark of a commanded destination, in `--target`: four open chevrons, one on each screen axis of
+ * the mark, each pointing at it (`destinationChevrons`; decision-r07-quality-and-destination, Q2;
+ * R07.T16.h). Their apices stand at the destination's half-size ({@link destinationHalfSizePx}),
+ * selected or not, and each arm is as long as the bracket's arm about the same mark, so that where
+ * the destination is also the selection the bracket keeps the corners and the apices stand over the
+ * open middle of its sides. Both move out with the bracket, by four times the outlines' shift.
  *
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
- * @param minGapPx - The least space between the two reticles' centrelines, device px.
+ * @param minGapPx - The least space between the bracket's centreline and the apices, device px.
  */
 export function destinationReticle(
   target: CameraTarget,
@@ -230,13 +247,19 @@ export function destinationReticle(
   shiftPx: number,
   minGapPx: number,
 ): ScreenMark {
-  return {
-    kind: "destination",
-    target,
-    token: "target",
-    segments: corners(at, destinationHalfSizePx(markRadiusPx, remPx, shiftPx, minGapPx)),
-    anchor: at,
-  };
+  const point = (offset: OffsetPx): ScreenPx => ({
+    xPx: at.xPx + offset.xPx,
+    yPx: at.yPx + offset.yPx,
+  });
+  const chevrons = destinationChevrons(
+    destinationHalfSizePx(markRadiusPx, remPx, shiftPx, minGapPx),
+    bracketArmPx(bracketHalfSizePx(markRadiusPx, remPx, shiftPx)),
+  );
+  const segments = chevrons.flatMap(([end, apex, other]): ScreenSegment[] => [
+    [point(end), point(apex)],
+    [point(apex), point(other)],
+  ]);
+  return { kind: "destination", target, token: "target", segments, anchor: at };
 }
 
 /** A target's mark, with its range and closure rate for the DOM label beside it. */
@@ -293,7 +316,7 @@ export function targetMark(
     kind: "target",
     target,
     token: "text",
-    segments: cardinalTicks(at, markRadiusPx + shiftPx, 2 * markRadiusPx * BRACKET_ARM_SHARE),
+    segments: cardinalTicks(at, markRadiusPx + shiftPx, bracketArmPx(markRadiusPx)),
     anchor: at,
     rangeM,
     closureMPerS,
@@ -483,8 +506,8 @@ function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
 /**
  * The view's symbology (plan R02, R02.T12.c): each body under 3 px its symbol, each craft its target
  * mark (four ticks) with range and closure (for the DOM label beside it), the selection's
- * bracket reticle in `--accent`, the destination's in `--target` outside it, and the own ship's
- * flight path marker, in that order.
+ * bracket reticle in `--accent`, the destination's chevrons in `--target` outside it
+ * ({@link destinationReticle}), and the own ship's flight path marker, in that order.
  */
 export function symbologyMarks(
   input: SymbologyInput,

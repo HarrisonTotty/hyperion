@@ -14,11 +14,15 @@
  *   its radial ticks, which then lie at 0°, 3° and 45° and at every 10° on from each;
  * - a planet seen pole-on, rolled the same, its limb 110 px from the centre: its 1 px limb and
  *   meridians and its 1.5 px prime meridian, read clear of the pole and of the limb's bound;
- * - two open circle symbols in `--text`, the selection with its `--accent` reticle and the
- *   destination with its `--target` reticle, another craft's dashed `--text` path, and a third
+ * - two open circle symbols in `--text`, the selection with its `--accent` bracket and the
+ *   destination with its `--target` chevrons, another craft's dashed `--text` path, and a third
  *   craft's `--text` target ticks;
- * - an open circle symbol that is both the selection and the destination, its `--target` reticle
- *   at the least gap outside its `--accent` one, at interface scales of 100% and 80% (T16.g).
+ * - an open circle symbol that is both the selection and the destination, its `--target` chevrons'
+ *   apices at the least gap outside its `--accent` bracket, at interface scales of 100% and 80%
+ *   (T16.g; the chevrons since T16.h).
+ *
+ * The destination's chevrons, alone and about the selection, and the bracket about which they
+ * stand, must read their tokens' pairs, within 1%, a pixel clear of each arm's cut end.
  *
  * What another batch does to a stroke's pixels is left out of its reading (T16.g). Where another
  * batch crosses the stroke, the points about the crossing that it reaches are not read: a later
@@ -28,13 +32,16 @@
  * stroke's own and its casing's cover counts against it. Two controls must read under 6, so that
  * the check is seen to bite: the ring as built before R07.T16.d (1 device px per CSS px, outlines
  * 1.5 px) on its 1 px edges, and the pair of reticles with no least gap at 80% and a ratio of
- * 0.78125, on its bracket.
+ * 0.78125, on its bracket: the destination drawn there as T16.g drew it, a second corner reticle
+ * 0.25 rem outside the bracket, which shows that the check sees a covered core whatever the
+ * destination's form (R07.T16.h).
  */
 
 import { type Vec3, vec3 } from "../geometry/vec3";
 import type { ColourToken } from "../spatial/drawList";
+import { CASING_PX } from "../lib/strokes";
 import { type ColourTokens, readTokens } from "../spatial/paint";
-import { SYMBOL_STROKE_PX } from "../spatial/symbols";
+import { bracketArmPx, SYMBOL_STROKE_PX } from "../spatial/symbols";
 import {
   aBody,
   aViewCraft,
@@ -48,7 +55,7 @@ import { project, type ProjectionCamera, type Viewport } from "../view/camera/pr
 import { quaternionFromAxisAngle } from "../view/camera/quaternion";
 import type { RenderEngine } from "../view/engine/types";
 import { overlayDrawList } from "../view/photoreal/overlay";
-import type { CraftPose, ViewBody, ViewScene } from "../view/scene/model";
+import type { BodyMarkSymbol, CraftPose, ViewBody, ViewScene } from "../view/scene/model";
 import {
   buildWireframeDrawList,
   type DrawCamera,
@@ -60,6 +67,7 @@ import {
   type WireframeDrawList,
 } from "../view/wireframe/drawList";
 import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
+import { destinationHalfSizePx, symbolRadiusPx } from "../view/wireframe/symbology";
 import { type Checks, halfTexels, texel } from "./harness";
 
 /** The guide's least contrast for a stroke that carries meaning, against its surface. */
@@ -568,7 +576,10 @@ function cameraRolled(rollDeg: number): DrawCamera {
 /** A second small body's ID, for the destination. */
 const SECOND_MOON = `${FIXTURE_SYSTEM}.0105`;
 
-/** A small body, under 3 px across, so that it is drawn as its symbol: an open circle, class 2. */
+/** The small bodies' symbol: an open circle of size class 2, which the pair's control's corners take. */
+const SMALL_BODY_SYMBOL: BodyMarkSymbol = { shape: "circle", sizeClass: 2 };
+
+/** A small body, under 3 px across, so that it is drawn as its symbol ({@link SMALL_BODY_SYMBOL}). */
 function smallBody(id: string, xPx: number, yPx: number): ViewBody {
   return aBody({
     id,
@@ -577,7 +588,7 @@ function smallBody(id: string, xPx: number, yPx: number): ViewBody {
     centreM: aheadAt(xPx, yPx),
     radiusM: 1e3,
     hillRadiusM: 1e6,
-    symbol: { shape: "circle", sizeClass: 2 },
+    symbol: SMALL_BODY_SYMBOL,
   });
 }
 
@@ -634,7 +645,7 @@ function craftAt(xPx: number, yPx: number): CraftPose {
 
 /**
  * The marks scene: two small bodies drawn as open circles in `--text`, the first the selection
- * (its `--accent` reticle) and the second the destination (its `--target` reticle); another
+ * (its `--accent` bracket) and the second the destination (its `--target` chevrons); another
  * craft whose dashed `--text` predicted path crosses the right of the target, the craft itself
  * beyond the target's edge; and a third craft, in view, with its target's ticks in `--text`.
  */
@@ -713,10 +724,31 @@ interface Reading {
   /**
    * The token whose pair with `--surface-0` it must read, to within {@link PAIR_TOLERANCE}, where
    * 6:1 is not enough: the pair of reticles, whose least gap keeps each one's full-coverage core
-   * (decision-r07-t16d-followups, item 2). Such a reading keeps {@link CUT_END_MARGIN_PX} clear of
-   * its segments' ends.
+   * (decision-r07-t16d-followups, item 2), and the destination's chevrons (R07.T16.h). Such a
+   * reading keeps {@link CUT_END_MARGIN_PX} clear of its arms' open ends ({@link openEnds}), and
+   * reads through a joint: a bracket's corner, a chevron's apex.
    */
   readonly pair?: ColourToken;
+}
+
+/**
+ * A stroke's open ends: the ends of its segments that no other of its segments shares, such as a
+ * bracket's or a chevron's free arm ends, and not the corner or the apex where two arms meet.
+ */
+export function openEnds(stroke: ScreenStroke): PointPx[] {
+  const ends = stroke.segments.flat();
+  return ends.filter((p) => ends.filter((q) => q.x === p.x && q.y === p.y).length === 1);
+}
+
+/** `keep`, or every point, but none within {@link CUT_END_MARGIN_PX} of an open end of `stroke`. */
+function clearOfOpenEnds(
+  stroke: ScreenStroke,
+  keep: ((p: PointPx) => boolean) | null,
+): (p: PointPx) => boolean {
+  const ends = openEnds(stroke);
+  return (p) =>
+    ends.every((end) => Math.hypot(p.x - end.x, p.y - end.y) >= CUT_END_MARGIN_PX) &&
+    (keep === null || keep(p));
 }
 
 /** The distance of `p` from the target's centre, px. */
@@ -750,11 +782,19 @@ const PLANET_READINGS: ReadonlyArray<Reading> = [
   },
 ];
 
-/** The marks' readings: the symbols, the two reticles and the dashed path. */
+/**
+ * The marks' readings: the symbols, the bracket, the destination's chevrons and the dashed path. The
+ * chevrons alone are held to their pair, as about the selection (R07.T16.h).
+ */
 const MARK_READINGS: ReadonlyArray<Reading> = [
   { kind: "body symbols", of: (name) => name.startsWith("mark:body_symbol:"), keep: null },
   { kind: "--accent reticle", of: (name) => name.startsWith("mark:selection:"), keep: null },
-  { kind: "--target reticle", of: (name) => name.startsWith("mark:destination:"), keep: null },
+  {
+    kind: "--target chevrons alone",
+    of: (name) => name.startsWith("mark:destination:"),
+    keep: null,
+    pair: "target",
+  },
   { kind: "predicted path, dashed", of: (name) => name.startsWith("predicted:"), keep: null },
   {
     kind: "target ticks",
@@ -766,18 +806,18 @@ const MARK_READINGS: ReadonlyArray<Reading> = [
 
 /** The bracket about the destination on the selection. */
 const PAIR_BRACKET: Reading = {
-  kind: "--accent reticle, the destination about it",
+  kind: "--accent bracket, the destination about it",
   of: (name) => name.startsWith("mark:selection:"),
   keep: null,
   pair: "accent",
 };
 
-/** The pair's readings: its symbol, its bracket, and the destination's reticle about it. */
+/** The pair's readings: its symbol, its bracket, and the destination's chevrons about it. */
 const PAIR_READINGS: ReadonlyArray<Reading> = [
   { kind: "body symbols", of: (name) => name.startsWith("mark:body_symbol:"), keep: null },
   PAIR_BRACKET,
   {
-    kind: "--target reticle about the selection",
+    kind: "--target chevrons about the selection",
     of: (name) => name.startsWith("mark:destination:"),
     keep: null,
     pair: "target",
@@ -821,14 +861,13 @@ function readFrame(
         const neighbour = other < index ? lighting[other] : covering[other];
         return other === index || neighbour === undefined ? [] : [neighbour];
       });
-      // A reading held to its pair keeps clear of its arms' cut ends, whose caps fall off.
+      // A reading held to its pair keeps clear of its arms' open ends, whose caps fall off.
       const read = readStroke(
         image,
         stroke,
         neighbours,
         surfaceLuminance,
-        reading.keep,
-        reading.pair === undefined ? 0 : CUT_END_MARGIN_PX,
+        reading.pair === undefined ? reading.keep : clearOfOpenEnds(stroke, reading.keep),
       );
       samples += read.samples;
       if (read.worst < worst) {
@@ -925,6 +964,54 @@ function byKind(readings: ReadonlyArray<KindReading>): KindReading[] {
   return [...kinds.values()];
 }
 
+/**
+ * The destination about the pair's mark as T16.g drew it, for the pair's control: a second corner
+ * reticle in `--target`, its half-size `destinationHalfSizePx` with no least gap, 0.25 rem outside
+ * the bracket, cased as every mark is. R07.T16.h draws the destination as chevrons and keeps the
+ * control in this form, which shows that the check sees a covered core whatever the destination's
+ * form.
+ */
+function asBuiltDestination(
+  list: WireframeDrawList,
+  tokens: ColourTokens,
+  strokes: ViewStrokes,
+  remPx: number,
+): LineBatch {
+  const anchor = list.anchors.find(
+    (each) => each.target.kind === "body" && each.target.body === FIXTURE_MOON,
+  );
+  if (anchor === undefined) {
+    throw new Error("the pair's control has no mark in view");
+  }
+  const halfPx = destinationHalfSizePx(
+    symbolRadiusPx(SMALL_BODY_SYMBOL, remPx),
+    remPx,
+    strokes.markShiftPx,
+    0,
+  );
+  const armPx = bracketArmPx(halfPx);
+  const segments: number[] = [];
+  for (const sx of [-1, 1] as const) {
+    for (const sy of [-1, 1] as const) {
+      const x = anchor.xPx + sx * halfPx;
+      const y = anchor.yPx + sy * halfPx;
+      segments.push(x, y, 0, x - sx * armPx, y, 0, x, y, 0, x, y - sy * armPx, 0);
+    }
+  }
+  return {
+    id: "mark:destination:as-built",
+    space: "screen",
+    originF32: new Float32Array(3),
+    segments: new Float32Array(segments),
+    token: "target",
+    colour: tokens.target,
+    widthPx: strokes.markStrokePx,
+    casingWidthPx: CASING_PX * strokes.strokeScale,
+    casingColour: tokens.surface0,
+    dash: null,
+  };
+}
+
 /** The selection and the destination each kind of frame marks. */
 const MARKED: Readonly<Record<FrameMarks, Pick<DrawOptions, "selection" | "destination">>> = {
   none: { selection: null, destination: null },
@@ -939,9 +1026,9 @@ const MARKED: Readonly<Record<FrameMarks, Pick<DrawOptions, "selection" | "desti
 };
 
 /**
- * R07.T16.d and T16.g: the view's strokes reach 6:1 as drawn at ratios of 0.78125, 1 and 2, in
- * the wireframe and over the image, the destination's reticle on the selection's among them; the
- * controls, as built, do not.
+ * R07.T16.d, T16.g and T16.h: the view's strokes reach 6:1 as drawn at ratios of 0.78125, 1 and 2,
+ * in the wireframe and over the image, the destination's chevrons alone and on the selection's
+ * bracket among them, held to their pairs; the controls, as built, do not.
  */
 export async function checkStrokeContrast(engine: RenderEngine, checks: Checks): Promise<void> {
   const tokens: ColourTokens = readTokens(document.documentElement);
@@ -986,16 +1073,22 @@ export async function checkStrokeContrast(engine: RenderEngine, checks: Checks):
         kinds.map(shown).join("; "),
       );
       if (ratio === RATIOS[0]) {
-        // The pair's control: the destination a bare 0.25 rem outside the bracket, as built
-        // before R07.T16.d, its casing over the bracket's core at 80%.
+        // The pair's control: the destination a corner reticle a bare 0.25 rem outside the
+        // bracket, as built before R07.T16.d and drawn until T16.h, its casing over the bracket's
+        // core at 80%.
         const camera = cameraRolled(0);
-        const tight = buildWireframeDrawList(pairScene(), camera, VIEWPORT, tokens, {
+        const remPx = REM_CSS_PX * SMALL_INTERFACE * ratio;
+        const selected = buildWireframeDrawList(pairScene(), camera, VIEWPORT, tokens, {
           ...base,
           ...strokes,
           ...MARKED.pair,
-          minReticleGapPx: 0,
-          remPx: REM_CSS_PX * SMALL_INTERFACE * ratio,
+          destination: null,
+          remPx,
         });
+        const tight: WireframeDrawList = {
+          ...selected,
+          lines: [...selected.lines, asBuiltDestination(selected, tokens, strokes, remPx)],
+        };
         const list = style === "overlay" ? overlayDrawList(tight, tokens) : tight;
         // The checks run in order: each reads the GPU back before the next draws.
         // oxlint-disable-next-line no-await-in-loop
@@ -1014,7 +1107,7 @@ export async function checkStrokeContrast(engine: RenderEngine, checks: Checks):
           surface,
         );
         checks.check(
-          `R07.T16.g the pair's control, the destination 0.25 rem outside the bracket at 80% and a ratio of ${String(ratio)}, ${style === "wireframe" ? "in the wireframe" : "over the image"}, reads the bracket under 6:1`,
+          `R07.T16.g the pair's control, the destination a corner reticle 0.25 rem outside the bracket at 80% and a ratio of ${String(ratio)}, ${style === "wireframe" ? "in the wireframe" : "over the image"}, reads the bracket under 6:1`,
           control !== undefined && control.samples >= MIN_SAMPLES && control.worst < REQUIRED_RATIO,
           control === undefined ? "no reading" : shown(control),
         );

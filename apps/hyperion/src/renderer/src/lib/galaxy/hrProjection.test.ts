@@ -212,6 +212,21 @@ describe("hrDrawList", () => {
     }
   });
 
+  it("draws the off-scale arrowhead as a mark and the class boundaries' ticks as lines", () => {
+    const list = hrDrawList(projectHr(SYSTEMS, AREA, 50), AREA, null, REM_PX);
+
+    // The arrowhead is a state of the symbol beside it, drawn at the mark stroke as its legend's
+    // OFF SCALE sample is (R07.T16.h); the ticks under the top axis are lines.
+    const ticks = list.ops.flatMap((op) =>
+      op.kind === "ticks" ? [[op.stroke, op.segments.length, op.weight] as const] : [],
+    );
+    expect(ticks).toEqual([
+      ["textMuted", HR_SPECTRAL_BANDS.length - 1, "line"],
+      ...ticks.slice(1).map(([stroke, segments]) => [stroke, segments, "mark"]),
+    ]);
+    expect(ticks.length).toBeGreaterThan(1);
+  });
+
   it("brackets the selected point with the chart's reticle, drawn last", () => {
     const id = SYSTEMS[0]?.id ?? "";
 

@@ -154,3 +154,91 @@ export function unitInradius(points: ReadonlyArray<OutlinePoint>): number {
   }
   return nearest;
 }
+
+/** How much of each side of its square the selection's bracket's corner arm covers: a third. */
+export const BRACKET_ARM_SHARE = 1 / 3;
+
+/**
+ * The length of each corner arm of a bracket of half-size `halfSizePx`, px: a third of its side.
+ * The view's bracket and the spatial displays' both take it, and so do the destination's chevrons,
+ * whose arms are as long as the bracket's about the same mark.
+ */
+export function bracketArmPx(halfSizePx: number): number {
+  return 2 * halfSizePx * BRACKET_ARM_SHARE;
+}
+
+/** A point px from a mark's centre, in screen orientation: +x right, +y down. */
+export interface OffsetPx {
+  readonly xPx: number;
+  readonly yPx: number;
+}
+
+/**
+ * One of the destination's chevrons: the outer end of one arm, the apex, and the outer end of the
+ * other arm, from the mark's centre, traced in that order as one open stroke.
+ */
+export type Chevron = readonly [OffsetPx, OffsetPx, OffsetPx];
+
+/** The screen axes from a mark outward, in the order the chevrons are given: up, down, left, right. */
+const CHEVRON_AXES: ReadonlyArray<OutlinePoint> = [
+  { x: 0, y: -1 },
+  { x: 0, y: 1 },
+  { x: -1, y: 0 },
+  { x: 1, y: 0 },
+];
+
+/**
+ * The mark of a commanded destination: four open chevrons, one on each screen axis of the mark,
+ * above, below, left and right, each pointing at it (decision-r07-quality-and-destination, Q2;
+ * plan R07, R07.T16.h).
+ *
+ * @remarks
+ * Each chevron's apex lies on its axis `apexPx` from the mark's centre, and its two arms run away
+ * from the mark at 45° either side of the axis, each `armPx` long, so that it points in at what the
+ * ship is to reach. The arms are open strokes, never filled, closed or dashed. They stand on the
+ * cardinal points outside the selection's bracket, where its corners leave the middle of each side
+ * open, so that the destination is told from the selection by its shape, in every colour state.
+ * Both drawers take it: the view's symbology and the spatial displays' painter.
+ *
+ * @param apexPx - The apices' distance from the mark's centre: the destination's half-size, the
+ *   least gap outside the bracket's place.
+ * @param armPx - Each arm's length: the bracket's arm about the same mark ({@link bracketArmPx}).
+ */
+export function destinationChevrons(apexPx: number, armPx: number): ReadonlyArray<Chevron> {
+  const run = armPx * Math.SQRT1_2;
+  return CHEVRON_AXES.map((axis): Chevron => {
+    // The axis turned a quarter, across it; each arm runs out along the axis and across it equally.
+    const across = { x: -axis.y, y: axis.x };
+    const apex = { xPx: axis.x * apexPx, yPx: axis.y * apexPx };
+    const end = (side: number): OffsetPx => ({
+      xPx: apex.xPx + (axis.x + side * across.x) * run,
+      yPx: apex.yPx + (axis.y + side * across.y) * run,
+    });
+    return [end(-1), apex, end(1)];
+  });
+}
+
+/**
+ * How far along a screen axis from a mark's centre the outermost reticle that can stand about it
+ * reaches, to the reticle's line, px: the selection's bracket's half-size, or while the mark is the
+ * destination, its chevrons' reach, the apex distance and an arm's run outward, `armPx` ÷ √2
+ * (decision-r07-quality-and-destination, Q3).
+ *
+ * @remarks
+ * The bracket is counted whether or not the mark is selected, so that selecting a mark never moves
+ * its label. Each display stands its labels clear of it: a label's text starts at least 0.125 rem
+ * outside the reticle's outer edge, its line plus half the mark stroke. The view's
+ * `markLabelOffsetPx` and the spatial displays' `placeLabels` both take it.
+ *
+ * @param bracketHalfSizePx - The selection's bracket's half-size about the mark, as drawn.
+ * @param destinationApexPx - While the mark is the destination, its chevrons' apex distance, as
+ *   drawn; `null` while it is not.
+ */
+export function reticleReachPx(
+  bracketHalfSizePx: number,
+  destinationApexPx: number | null,
+): number {
+  return destinationApexPx === null
+    ? bracketHalfSizePx
+    : destinationApexPx + bracketArmPx(bracketHalfSizePx) * Math.SQRT1_2;
+}

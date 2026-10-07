@@ -16,7 +16,7 @@ import type { CameraTarget } from "../camera/state";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
 import { MIN_STROKE_DEVICE_PX } from "../../lib/strokes";
-import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
+import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "../../spatial/symbols";
 import { occluderRadius } from "../depth/depth";
 import { narrow } from "../coords/narrow";
 import { TEST_HULL } from "../scene/hull";
@@ -26,6 +26,7 @@ import {
   CASING_PX,
   type DrawCamera,
   type DrawOptions,
+  type LineBatch,
   LOW_SETTING_MAX_SPRITES,
   occluderSlopePxAt,
   type ViewStrokes,
@@ -333,7 +334,7 @@ describe("buildWireframeDrawList", () => {
     expect(build().lines.some((line) => line.id.startsWith("mark:flight_path"))).toBe(true);
   });
 
-  it("brackets the selection in --accent and the destination in --target", () => {
+  it("brackets the selection in --accent and marks the destination with --target chevrons", () => {
     const list = build({
       selection: { kind: "body", body: FIXTURE_PLANET },
       destination: { kind: "body", body: FIXTURE_PLANET },
@@ -458,40 +459,6 @@ describe("buildWireframeDrawList's strokes (R07.T16.d; decision-thin-line-contra
   it("takes the slope term as the heavy cased edge's half-width and its fringe, rounded up", () => {
     expect([1, 1.25, 1.5, 2, 3].map(occluderSlopePxAt)).toEqual([3, 4, 4, 5, 7]);
   });
-});
-
-describe("the selection's and the destination's reticles on one target (R07.T16.d)", () => {
-  it.each(
-    [0.78125, 1, 2].flatMap((ratio) => [0.8, 1, 1.5].map((scale) => [ratio, scale] as const)),
-  )(
-    "keep the destination's casing off the brackets' full-coverage core at %s and %s",
-    (ratio, scale) => {
-      const craft = { kind: "craft", craft: "other" } as const;
-      const strokes = viewStrokesAt(ratio);
-      const remPx = 16 * scale * ratio;
-      const list = build({ selection: craft, destination: craft, remPx, ...strokes });
-      const anchor = list.anchors.find((each) => each.target.kind === "craft");
-      // A reticle's half-size: its corners' farthest reach from the mark along x.
-      const half = (kind: string): number =>
-        Math.max(
-          ...list.lines
-            .flatMap((line) =>
-              line.id.startsWith(`mark:${kind}:`)
-                ? [line.segments[0] ?? 0, line.segments[3] ?? 0]
-                : [],
-            )
-            .map((x) => Math.abs(x - (anchor?.xPx ?? Number.NaN))),
-        );
-      const gap = half("destination") - half("selection");
-      const casingPx = CASING_PX * strokes.strokeScale;
-      // The destination's casing reaches w ÷ 2 + casing + 0.5 from its line; the brackets' core,
-      // where they cover a texel wholly, is w ÷ 2 − 0.5 either side of theirs.
-      const reach = strokes.markStrokePx / 2 + casingPx + 0.5;
-      const core = strokes.markStrokePx / 2 - 0.5;
-      // The segments are `f32`: within 1e-4 px.
-      expect([gap - reach >= core - 1e-4, gap >= 0.25 * remPx - 1e-4]).toEqual([true, true]);
-    },
-  );
 });
 
 /** The mark whose label the label tests place: the planet drawn as its symbol, or the other craft. */
@@ -691,6 +658,16 @@ describe("a mark's label beside its reticles (R07.T16.g; decision-r07-t16d-follo
     },
   );
 
+  it("stands a craft's label 22.44 px from its anchor while it is the destination, at a ratio of 1 and 100%", () => {
+    const places = labelPlaces("craft", 1, 1);
+    // The bracket 11 px out, the apices 15, the reach 15 + 7.33 ÷ √2; the plate 2.25 px beyond.
+    expect(
+      [places.destination.offsetPx, places.both.offsetPx].map(
+        (offsetPx) => Math.round(offsetPx * 100) / 100,
+      ),
+    ).toEqual([22.44, 22.44]);
+  });
+
   it("stands a giant's and a class-4 symbol's label 0.0625 and 0.125 rem further out", () => {
     const further = ([3, 4] as const).map(
       (mark) => (labelPlaces(mark, 1, 1).none.offsetPx - labelPlaces(2, 1, 1).none.offsetPx) / 16,
@@ -720,4 +697,173 @@ describe("the destination's least gap (R07.T16.g)", () => {
       4, 4, 5, 7.5,
     ]);
   });
+});
+
+/** A point on the target, device px. */
+interface PointPx {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** A screen batch's segments, device px. */
+function screenSegments(line: LineBatch | undefined): Array<readonly [PointPx, PointPx]> {
+  const packed = line?.segments ?? new Float32Array(0);
+  return Array.from({ length: packed.length / 6 }, (_, i) => [
+    { x: packed[i * 6] ?? 0, y: packed[i * 6 + 1] ?? 0 },
+    { x: packed[i * 6 + 3] ?? 0, y: packed[i * 6 + 4] ?? 0 },
+  ]);
+}
+
+/** The distance from `p` to the segment from `a` to `b`. */
+function toSegment(p: PointPx, a: PointPx, b: PointPx): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const t = Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Which side of the line through `a` and `b` the point `p` lies on. */
+function sideOf(a: PointPx, b: PointPx, p: PointPx): number {
+  return Math.sign((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x));
+}
+
+/** The least distance between two segments: none where they cross, else from an end to the other. */
+function betweenSegments(
+  [a, b]: readonly [PointPx, PointPx],
+  [c, d]: readonly [PointPx, PointPx],
+): number {
+  if (sideOf(a, b, c) * sideOf(a, b, d) < 0 && sideOf(c, d, a) * sideOf(c, d, b) < 0) {
+    return 0;
+  }
+  return Math.min(toSegment(a, c, d), toSegment(b, c, d), toSegment(c, a, b), toSegment(d, a, b));
+}
+
+/** A list's batch of a symbology mark of `kind` (`selection`, `destination`, …), the first. */
+function markBatch(list: WireframeDrawList, kind: string): LineBatch | undefined {
+  return list.lines.find((line) => line.id.startsWith(`mark:${kind}:`));
+}
+
+/** The screen axes from a mark outward, in the chevrons' order: up, down, left, right. */
+const CHEVRON_AXES = [
+  [0, -1],
+  [0, 1],
+  [-1, 0],
+  [1, 0],
+] as const;
+
+/** Whether two lengths agree to within the `f32` segments' precision here, a thousandth of a px. */
+function nearPx(a: number, b: number): boolean {
+  return Math.abs(a - b) < 1e-3;
+}
+
+describe("the destination's chevrons (R07.T16.h; decision-r07-quality-and-destination, Q2)", () => {
+  /**
+   * The chevrons and the bracket a list draws about a labelled mark at a ratio and an interface
+   * scale, and the places they are meant to stand, device px.
+   */
+  function drawn(mark: LabelledMark, ratio: number, interfaceScale: number) {
+    const target = labelTarget(mark);
+    const strokes = viewStrokesAt(ratio);
+    const remPx = 16 * interfaceScale * ratio;
+    const listOf = (selection: CameraTarget | null): WireframeDrawList =>
+      build({ selection, destination: target, remPx, ...strokes }, labelScene(mark));
+    const both = listOf(target);
+    const anchor = both.anchors.find(
+      (each) => JSON.stringify(each.target) === JSON.stringify(target),
+    );
+    // A craft's reticles stand about its contact, size class 2.
+    const radiusPx = (SIZE_CLASS_REM[mark === "craft" ? 2 : mark] * remPx) / 2;
+    const bracketPx = radiusPx + 0.25 * remPx + 4 * strokes.markShiftPx;
+    const gapPx = Math.max(0.25 * remPx, strokes.minReticleGapPx);
+    return {
+      strokes,
+      at: { x: anchor?.xPx ?? Number.NaN, y: anchor?.yPx ?? Number.NaN },
+      bracket: screenSegments(markBatch(both, "selection")),
+      chevrons: screenSegments(markBatch(both, "destination")),
+      alone: screenSegments(markBatch(listOf(null), "destination")),
+      gapPx,
+      apexPx: bracketPx + gapPx,
+      armPx: (2 * bracketPx) / 3,
+    };
+  }
+
+  /** The least distance between the chevrons' and the bracket's centrelines, device px. */
+  function nearest(
+    chevrons: ReturnType<typeof drawn>["chevrons"],
+    bracket: typeof chevrons,
+  ): number {
+    return Math.min(
+      ...chevrons.flatMap((arm) => bracket.map((corner) => betweenSegments(arm, corner))),
+    );
+  }
+
+  it.each(LABEL_PLACES)(
+    "stands %s's chevrons' apices on its axes at the destination's half-size, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const { at, chevrons, apexPx } = drawn(mark, ratio, interfaceScale);
+
+      // Each chevron is two segments: an arm's outer end to the apex, and the apex to the other's.
+      expect(
+        CHEVRON_AXES.map(([ax, ay], i) => {
+          const apex = chevrons[2 * i]?.[1];
+          return (
+            apex !== undefined &&
+            nearPx(apex.x - at.x, ax * apexPx) &&
+            nearPx(apex.y - at.y, ay * apexPx)
+          );
+        }),
+      ).toEqual([true, true, true, true]);
+    },
+  );
+
+  it.each(LABEL_PLACES)(
+    "runs %s's chevrons' arms away from the mark at 45°, each the bracket's arm, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const { chevrons, armPx } = drawn(mark, ratio, interfaceScale);
+
+      expect(
+        chevrons.map(([a, b], i) => {
+          const [ax, ay] = CHEVRON_AXES[Math.floor(i / 2)] ?? [0, 0];
+          // From the apex outward: away from the mark along its axis as far as across it.
+          const [apex, end] = i % 2 === 0 ? [b, a] : [a, b];
+          const dx = end.x - apex.x;
+          const dy = end.y - apex.y;
+          return (
+            nearPx(Math.hypot(dx, dy), armPx) && nearPx(dx * ax + dy * ay, armPx * Math.SQRT1_2)
+          );
+        }),
+      ).toEqual(Array.from({ length: 8 }, () => true));
+    },
+  );
+
+  it.each(LABEL_PLACES)(
+    "keeps every point of %s's chevrons the least gap clear of its bracket, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const { chevrons, bracket, gapPx } = drawn(mark, ratio, interfaceScale);
+
+      expect(nearest(chevrons, bracket)).toBeGreaterThanOrEqual(gapPx - 1e-3);
+    },
+  );
+
+  it.each(LABEL_PLACES)(
+    "keeps %s's chevrons' casing off its bracket's full-coverage core, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const { chevrons, bracket, strokes } = drawn(mark, ratio, interfaceScale);
+      // The chevrons' casing reaches w ÷ 2 + casing + 0.5 from their line; the bracket's core,
+      // where it covers a texel wholly, is w ÷ 2 − 0.5 either side of its own.
+      const casingReach = strokes.markStrokePx / 2 + CASING_PX * strokes.strokeScale + 0.5;
+      const core = strokes.markStrokePx / 2 - 0.5;
+
+      expect(nearest(chevrons, bracket) - casingReach).toBeGreaterThanOrEqual(core - 1e-3);
+    },
+  );
+
+  it.each(LABEL_PLACES)(
+    "stands %s's lone destination where its pair does, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const { chevrons, alone } = drawn(mark, ratio, interfaceScale);
+
+      expect(alone).toEqual(chevrons);
+    },
+  );
 });

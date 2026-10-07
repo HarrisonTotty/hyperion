@@ -270,7 +270,12 @@ describe("buildDrawList marks", () => {
   });
 
   it("carries no opacity or depth shading on any op", () => {
-    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX);
+    const { ops } = buildDrawList(
+      { ...MIXED, destinationId: "c-high" },
+      cameraAt(30),
+      VIEWPORT,
+      GAP_PX,
+    );
     const allowed = new Set([
       "kind",
       "from",
@@ -279,10 +284,13 @@ describe("buildDrawList marks", () => {
       "centre",
       "radiusPx",
       "halfSizePx",
+      "bracketHalfSizePx",
+      "gapPx",
       "segments",
       "stroke",
       "fill",
       "widthPx",
+      "weight",
       "markId",
       "id",
       "shape",
@@ -421,16 +429,22 @@ describe("buildDrawList annotations", () => {
     ]);
   });
 
-  it("draws the destination in target, outside the selection when a mark is both", () => {
+  it("draws the destination as target chevrons outside the selection's bracket when a mark is both", () => {
     const scene = { ...MIXED, destinationId: "c-high" };
 
-    const reticles = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).ops.filter(
-      (op) => op.kind === "reticle",
+    const marks = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).ops.filter(
+      (op) => op.kind === "reticle" || op.kind === "chevrons",
     );
 
-    expect(reticles).toEqual([
-      expect.objectContaining({ stroke: "accent", halfSizePx: 10 }),
-      expect.objectContaining({ stroke: "target", halfSizePx: 14 }),
+    expect(marks).toEqual([
+      expect.objectContaining({ kind: "reticle", stroke: "accent", halfSizePx: 10 }),
+      expect.objectContaining({
+        kind: "chevrons",
+        id: "c-high",
+        stroke: "target",
+        bracketHalfSizePx: 10,
+        gapPx: 4,
+      }),
     ]);
   });
 
@@ -438,37 +452,48 @@ describe("buildDrawList annotations", () => {
     [1, [5.12, 4, 4, 4]],
     [0.8, [5.12, 4, 3.2, 3.2]],
   ] as const)(
-    "stands the destination on the selection outside its bracket by the larger of 0.25 rem and 5.12, 4, 2.5 and 2.5 px: at %s, %s px",
+    "stands the destination's apices outside the bracket's place by the larger of 0.25 rem and 5.12, 4, 2.5 and 2.5 px: at %s, %s px",
     (interfaceScale, expected) => {
-      const scene = { ...MIXED, destinationId: "c-high" };
       const viewport = { ...VIEWPORT, remPx: 16 * interfaceScale };
       const gaps = [0.78125, 1, 2, 3].map((ratio) => {
-        const [bracket, destination] = buildDrawList(
-          scene,
+        const chevrons = buildDrawList(
+          { ...MIXED, destinationId: "c-high" },
           cameraAt(30),
           viewport,
           minReticleGapDevicePx(ratio) / ratio,
-        ).ops.filter((op) => op.kind === "reticle");
-        return (
-          Math.round(((destination?.halfSizePx ?? 0) - (bracket?.halfSizePx ?? 0)) * 100) / 100
-        );
+        ).ops.find((op) => op.kind === "chevrons");
+        return Math.round((chevrons?.kind === "chevrons" ? chevrons.gapPx : 0) * 100) / 100;
       });
 
       expect(gaps).toEqual(expected);
     },
   );
 
-  it("keeps a lone destination one margin out, where the bracket would stand, at the least gap", () => {
-    const scene = { ...MIXED, selectedId: null, destinationId: "c-high" };
+  it("stands a lone destination where its pair does, never at the bracket's place", () => {
+    const gapPx = minReticleGapDevicePx(0.78125) / 0.78125;
+    const chevronsOf = (selectedId: string | null): unknown =>
+      buildDrawList(
+        { ...MIXED, selectedId, destinationId: "c-high" },
+        cameraAt(30),
+        VIEWPORT,
+        gapPx,
+      ).ops.find((op) => op.kind === "chevrons");
 
-    const reticles = buildDrawList(
-      scene,
+    expect(chevronsOf(null)).toEqual(chevronsOf("c-high"));
+    expect(chevronsOf(null)).toEqual(
+      expect.objectContaining({ bracketHalfSizePx: 10, gapPx: Math.max(4, gapPx) }),
+    );
+  });
+
+  it("draws no reticle in the target colour: corner brackets mean the selection only", () => {
+    const ops = buildDrawList(
+      { ...MIXED, selectedId: null, destinationId: "c-high" },
       cameraAt(30),
       VIEWPORT,
-      minReticleGapDevicePx(0.78125) / 0.78125,
-    ).ops.filter((op) => op.kind === "reticle");
+      GAP_PX,
+    ).ops;
 
-    expect(reticles).toEqual([expect.objectContaining({ stroke: "target", halfSizePx: 10 })]);
+    expect(ops.filter((op) => op.kind === "reticle")).toEqual([]);
   });
 
   it("draws the reticles after the spheres, last of all", () => {

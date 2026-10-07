@@ -323,6 +323,10 @@ export function hrSpectralLetters(area: PlotAreaPx): ReadonlyArray<SpectralLette
 const GRID_WIDTH_PX = 1;
 const FRAME_WIDTH_PX = 1;
 const RETICLE_WIDTH_PX = 1.5;
+/**
+ * The off-scale arrowhead's outline, the guide's 1.5 CSS px: a mark's, which `paint` draws at the
+ * mark stroke as it draws the symbol the arrowhead qualifies (R07.T16.h).
+ */
 const PEG_WIDTH_PX = 1.5;
 /** How much larger than its symbol the reticle is, in `rem`, as on the chart. */
 const RETICLE_MARGIN_REM = 0.5;
@@ -352,7 +356,15 @@ function pegDirections(point: HrPoint): ReadonlyArray<ScreenPoint> {
   return directions;
 }
 
-/** The off-scale mark: an arrowhead beyond the symbol's rim, pointing off each scale it runs off. */
+/**
+ * The off-scale mark: an arrowhead beyond the symbol's rim, pointing off each scale it runs off.
+ *
+ * @remarks
+ * It is a mark, a state of the point beside it, so its `ticks` op is drawn at the mark stroke, as
+ * the symbol's and the reticle's outlines are, and its legend's `OFF SCALE` sample, a mark at
+ * `--mark-stroke`, matches it at every ratio (decision-r07-quality-and-destination, Q5; R07.T16.h).
+ * It is not moved out: an arrowhead holds nothing to keep.
+ */
 function pegOp(point: HrPoint, remPx: number): TicksOp | null {
   const directions = pegDirections(point);
   if (directions.length === 0) {
@@ -380,6 +392,7 @@ function pegOp(point: HrPoint, remPx: number): TicksOp | null {
     segments,
     stroke: point.status === "available" ? "accent" : "text",
     widthPx: PEG_WIDTH_PX,
+    weight: "mark",
   };
 }
 
@@ -449,6 +462,7 @@ export function hrDrawList(
     }),
     stroke: "textMuted",
     widthPx: FRAME_WIDTH_PX,
+    weight: "line",
   });
   ops.push({
     kind: "polyline",

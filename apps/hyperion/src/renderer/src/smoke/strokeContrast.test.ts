@@ -6,6 +6,7 @@ import { emptyDrawList, type LineBatch, viewStrokesAt } from "../view/wireframe/
 import {
   contrastRatio,
   neighbourOf,
+  openEnds,
   type ReadImage,
   readStroke,
   type ScreenStroke,
@@ -201,6 +202,49 @@ describe("readStroke", () => {
   it("reads only the points it is asked to keep", () => {
     const reading = readStroke(rows({ 8: 1 }), across(8.5, 1), CLEAR, BLACK, (p) => p.x < 6);
     expect(reading.samples).toBe(4);
+  });
+});
+
+/** A solid mark's stroke of these segments, 2 px wide and cased. */
+function markStroke(segments: ScreenStroke["segments"]): ScreenStroke {
+  return {
+    name: "mark",
+    segments,
+    phases: segments.map(() => 0),
+    widthPx: 2,
+    casingWidthPx: 2,
+    dash: null,
+  };
+}
+
+describe("openEnds", () => {
+  it("gives a chevron's two arm ends and not its apex, and a bracket corner's two arm ends and not its corner", () => {
+    const apex = { x: 8, y: 4 };
+    const corner = { x: 2, y: 2 };
+
+    expect([
+      openEnds(
+        markStroke([
+          [{ x: 5, y: 1 }, apex],
+          [apex, { x: 11, y: 1 }],
+        ]),
+      ),
+      openEnds(
+        markStroke([
+          [corner, { x: 6, y: 2 }],
+          [corner, { x: 2, y: 6 }],
+        ]),
+      ),
+    ]).toEqual([
+      [
+        { x: 5, y: 1 },
+        { x: 11, y: 1 },
+      ],
+      [
+        { x: 6, y: 2 },
+        { x: 2, y: 6 },
+      ],
+    ]);
   });
 });
 

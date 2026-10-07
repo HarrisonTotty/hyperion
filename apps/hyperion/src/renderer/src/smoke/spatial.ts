@@ -15,7 +15,9 @@
  * stroke crosses it left out. Canvas 2D's coverage is a pixel's area, so its edge reaches half a
  * pixel's diagonal ({@link CANVAS_FRINGE_PX}), and since `paint` draws no casing, lighting is all a
  * neighbour does. Its strokes end flat (butt caps), so a cut end, which is not where a stroke falls
- * between pixels, is kept a pixel clear, as a dash's ends are.
+ * between pixels, is kept a pixel clear, as a dash's ends are: a pixel's length along the stroke,
+ * which along the destination's chevrons' arms, at 45°, is a pixel's diagonal
+ * ({@link cutEndMarginPx}).
  *
  * What it reads is what `paint` drew: the canvas's path calls are recorded as they are made, so the
  * widths and the outlines' outward shifts are the painter's own. Three frames hold the strokes the
@@ -24,11 +26,12 @@
  *   polyline, a selected orbit;
  * - 1 px `--text-muted` lines at 0°, 3° and 45°;
  * - an open class-0 circle in `--accent`, the selection and the destination, with its `--accent`
- *   bracket and the `--target` reticle at the least gap outside it, and an open class-2 ringed
- *   circle in `--accent`, the destination alone, with its `--target` reticle; each mark centred on
- *   a device pixel, whose pixel must read `--surface-0`, the hole kept. Between the pair's arms a
- *   pixel must read `--surface-0` too, since on a canvas, which draws no casing, the least gap is
- *   there for separation (decision-r07-t16d-followups, item 2).
+ *   bracket and the destination's `--target` chevrons, their apices at the least gap outside it,
+ *   and an open class-2 ringed circle in `--accent`, the destination alone, with its `--target`
+ *   chevrons (R07.T16.h); each mark centred on a device pixel, whose pixel must read `--surface-0`,
+ *   the hole kept. Between the bracket and the chevrons a pixel must read `--surface-0` too, since
+ *   on a canvas, which draws no casing, the least gap is there for separation
+ *   (decision-r07-t16d-followups, item 2).
  *
  * The data edge's ticks are a kind of their own, since the rule leaves little of them: below a ratio
  * of 1 a 0.25 rem tick lies mostly in its crossing with the circle and its cut end's margin, so
@@ -44,6 +47,7 @@ import { lineScale, markStrokeDevicePx, minReticleGapDevicePx } from "../lib/str
 import type { Camera, Viewport } from "../spatial/camera";
 import {
   buildDrawList,
+  type ChevronsOp,
   type DrawOp,
   type ReticleOp,
   type ScreenPoint,
@@ -83,6 +87,17 @@ export const CANVAS_FRINGE_PX = Math.SQRT1_2;
 
 /** The least points a kind must read over its frames, so that no reading passes empty. */
 const MIN_SAMPLES = 20;
+
+/**
+ * How far from a stroke's cut end its reading keeps, device px: a pixel's length along the stroke
+ * there. A flat end at 45° cuts the pixels it crosses up to half a pixel's diagonal back along the
+ * stroke, and a cross-section reaches another half, so along the destination's chevrons' arms, which
+ * all run at 45°, it is a pixel's diagonal (R07.T16.h: at a ratio of 1 a point 1.05 px from an arm's
+ * end read 4.92:1). Every other stroke keeps T16.f's pixel ({@link CUT_END_MARGIN_PX}).
+ */
+export function cutEndMarginPx(op: DrawOp): number {
+  return op.kind === "chevrons" ? Math.SQRT2 * CUT_END_MARGIN_PX : CUT_END_MARGIN_PX;
+}
 
 /**
  * The least points the data edge's ticks must read at a ratio: 8 below a ratio of 1, as T16.d's
@@ -135,9 +150,9 @@ export const SPATIAL_KINDS = {
   lines: "1 px lines at 0°, 3° and 45°, --text-muted",
   openCircle: "open class-0 circle, --accent",
   ringedCircle: "open class-2 ringed circle, --accent",
-  pairBracket: "--accent reticle, the destination about it",
-  pairDestination: "--target reticle about the selection",
-  loneDestination: "--target reticle alone",
+  pairBracket: "--accent bracket, the destination's chevrons about it",
+  pairDestination: "--target chevrons about the selection",
+  loneDestination: "--target chevrons alone",
 } as const;
 
 /** A scene of nothing but these marks and spheres, its plane bare. */
@@ -178,12 +193,12 @@ function onPixelCentre(at: ScreenPoint, ratio: number): ScreenPoint {
   };
 }
 
-/** Whether an op is a mark's symbol or reticle, which a mark's centre places. */
-function isMarkOp(op: DrawOp): op is SymbolOp | ReticleOp {
-  return op.kind === "symbol" || op.kind === "reticle";
+/** Whether an op is a mark's symbol, bracket or chevrons, which a mark's centre places. */
+function isMarkOp(op: DrawOp): op is SymbolOp | ReticleOp | ChevronsOp {
+  return op.kind === "symbol" || op.kind === "reticle" || op.kind === "chevrons";
 }
 
-/** A mark's symbol and reticles from a draw list, centred on `at`. */
+/** A mark's symbol, bracket and chevrons from a draw list, centred on `at`. */
 function marksAt(ops: ReadonlyArray<DrawOp>, at: ScreenPoint): DrawOp[] {
   const marks: DrawOp[] = [];
   for (const op of ops) {
@@ -194,12 +209,12 @@ function marksAt(ops: ReadonlyArray<DrawOp>, at: ScreenPoint): DrawOp[] {
   return marks;
 }
 
-/** The kind a mark's symbol or reticle is read as. */
+/** The kind a mark's symbol, bracket or chevrons are read as. */
 function markKind(op: DrawOp, alone: boolean): string {
   if (op.kind === "symbol") {
     return op.shape === "ringed-circle" ? SPATIAL_KINDS.ringedCircle : SPATIAL_KINDS.openCircle;
   }
-  if (op.kind === "reticle" && op.stroke === "accent") {
+  if (op.kind === "reticle") {
     return SPATIAL_KINDS.pairBracket;
   }
   return alone ? SPATIAL_KINDS.loneDestination : SPATIAL_KINDS.pairDestination;
@@ -509,7 +524,7 @@ function fold(
 
 /**
  * Reads each painted stroke of a frame, with every other stroke as its neighbour and its cut ends
- * kept a pixel clear, into `kinds`.
+ * kept `marginOf` its index clear, into `kinds`.
  */
 function readPainted(
   image: ReadImage,
@@ -517,6 +532,7 @@ function readPainted(
   kindOf: (index: number) => string,
   surfaceLuminance: number,
   kinds: Map<string, KindReading>,
+  marginOf: (index: number) => number,
 ): void {
   const strokes = painted.map((stroke, index) => screenStrokeOf(`stroke ${String(index)}`, stroke));
   const lighting = strokes.map(({ stroke }) =>
@@ -524,8 +540,9 @@ function readPainted(
   );
   strokes.forEach(({ stroke, cutEnds }, index) => {
     const neighbours = lighting.filter((_, other) => other !== index);
+    const marginPx = marginOf(index);
     const clearOfEnds = (p: PointPx): boolean =>
-      cutEnds.every((end) => Math.hypot(p.x - end.x, p.y - end.y) >= CUT_END_MARGIN_PX);
+      cutEnds.every((end) => Math.hypot(p.x - end.x, p.y - end.y) >= marginPx);
     fold(
       kinds,
       kindOf(index),
@@ -601,6 +618,10 @@ export function checkSpatialStrokeContrast(checks: Checks): void {
           (index) => `${frame.ops[index]?.kind ?? "?"}${style}`,
           surface,
           kinds,
+          (index) => {
+            const entry = frame.ops[index];
+            return entry === undefined ? CUT_END_MARGIN_PX : cutEndMarginPx(entry.op);
+          },
         );
         for (const hole of frame.holes) {
           const clear = pixelLuminance(image, hole, ratio) === surface;
@@ -641,7 +662,7 @@ export function checkSpatialStrokeContrast(checks: Checks): void {
       holes.join("; "),
     );
     checks.check(
-      `R07.T16.f the destination's reticle about the selection stands apart from the bracket, --surface-0 between their arms, at a ratio of ${String(ratio)}`,
+      `R07.T16.h the destination's chevrons about the selection stand apart from the bracket, --surface-0 between them, at a ratio of ${String(ratio)}`,
       apart.length === 2 && apart.every(({ clear }) => clear >= 1),
       apart.map(({ style, clear }) => `${String(clear)} px clear${style}`).join("; "),
     );
@@ -649,33 +670,55 @@ export function checkSpatialStrokeContrast(checks: Checks): void {
   checkControl(checks, tokens, surface);
 }
 
+/** How far about the point midway between the bracket and the chevrons the clear pixels are sought, device px. */
+const CLEAR_REACH_PX = 1.5;
+
 /**
- * The pixels reading `--surface-0` between the pair's left arms, along the row through the middle
- * of the bracket's upper left arm (decision-r07-t16d-followups, item 2): the least gap is there
- * for separation, so that the two reticles never read as one two-coloured bracket.
+ * The pixels reading `--surface-0` about the point midway between the bracket and the chevrons
+ * where they come nearest (decision-r07-t16d-followups, item 2; R07.T16.h): the least gap is there
+ * for separation, so that the two marks never read as one two-coloured mark.
  *
  * @remarks
- * Each reticle's first traced subpath is its upper left corner: the arm's free end below the
- * corner, the corner, the other arm's end. The destination's arm, a third of a larger side, spans
- * the bracket's arm's middle row.
+ * The bracket's first traced subpath is its upper left corner: the arm's free end below the
+ * corner, the corner, and the upper arm's inner end, which the chevrons come nearest. The
+ * chevrons' first is the upper chevron: its left arm's outer end, then its apex. The pixels counted
+ * are those whose centres lie within {@link CLEAR_REACH_PX} of the point midway between the upper
+ * arm's inner end and the nearest point of the chevron's left arm.
  */
 function clearBetween(
   image: ReadImage,
   bracket: PaintedStroke,
-  destination: PaintedStroke,
+  chevrons: PaintedStroke,
   surface: number,
 ): number {
-  const [armEnd, corner] = bracket.subpaths[0]?.points ?? [];
-  const outer = destination.subpaths[0]?.points[1];
-  if (armEnd === undefined || corner === undefined || outer === undefined) {
+  const inner = bracket.subpaths[0]?.points[2];
+  const [outer, apex] = chevrons.subpaths[0]?.points ?? [];
+  if (inner === undefined || outer === undefined || apex === undefined) {
     return 0;
   }
-  const row = Math.floor((armEnd.y + corner.y) / 2);
+  const dx = apex.x - outer.x;
+  const dy = apex.y - outer.y;
+  const t = Math.min(
+    1,
+    Math.max(0, ((inner.x - outer.x) * dx + (inner.y - outer.y) * dy) / (dx * dx + dy * dy)),
+  );
+  const mid = { x: (inner.x + outer.x + t * dx) / 2, y: (inner.y + outer.y + t * dy) / 2 };
   let clear = 0;
-  for (let column = Math.floor(outer.x); column <= Math.floor(corner.x); column += 1) {
-    const [r, g, b] = texel(image.colour, image.widthPx, column, row);
-    if (wcagLuminance(srgb8(r), srgb8(g), srgb8(b)) === surface) {
-      clear += 1;
+  for (
+    let row = Math.floor(mid.y - CLEAR_REACH_PX);
+    row <= Math.ceil(mid.y + CLEAR_REACH_PX);
+    row += 1
+  ) {
+    for (
+      let column = Math.floor(mid.x - CLEAR_REACH_PX);
+      column <= Math.ceil(mid.x + CLEAR_REACH_PX);
+      column += 1
+    ) {
+      const near = Math.hypot(column + 0.5 - mid.x, row + 0.5 - mid.y) <= CLEAR_REACH_PX;
+      const [r, g, b] = texel(image.colour, image.widthPx, column, row);
+      if (near && wcagLuminance(srgb8(r), srgb8(g), srgb8(b)) === surface) {
+        clear += 1;
+      }
     }
   }
   return clear;
@@ -698,7 +741,14 @@ function checkControl(checks: Checks, tokens: ColourTokens, surface: number): vo
   recorder.stroke();
   const kinds = new Map<string, KindReading>();
   const kind = "1 CSS px circle as built, --text-muted";
-  readPainted(canvasImage(context), strokes, () => kind, surface, kinds);
+  readPainted(
+    canvasImage(context),
+    strokes,
+    () => kind,
+    surface,
+    kinds,
+    () => CUT_END_MARGIN_PX,
+  );
   const control = kinds.get(kind);
   checks.check(
     `R07.T16.f the control, a 1 CSS px circle stroked directly at a ratio of ${String(ratio)} (0.78 device px), reads under 6:1`,

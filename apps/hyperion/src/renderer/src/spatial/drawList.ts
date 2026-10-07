@@ -95,16 +95,48 @@ export interface ReticleOp {
   readonly widthPx: number;
 }
 
+/**
+ * The mark of a commanded destination: four open chevrons about a mark, one on each screen axis,
+ * pointing at it (`destinationChevrons`; decision-r07-quality-and-destination, Q2; R07.T16.h).
+ *
+ * @remarks
+ * Its apices stand `gapPx` outside the selection's bracket's place about the same mark, whether or
+ * not the mark is selected, and each arm is as long as the bracket's arm there. `paint` moves both
+ * out with the bracket, by four times the outline shift.
+ */
+export interface ChevronsOp {
+  readonly kind: "chevrons";
+  readonly id: string;
+  readonly centre: ScreenPoint;
+  /** The half-size of the selection's bracket about the mark, as a {@link ReticleOp} gives it. */
+  readonly bracketHalfSizePx: number;
+  /** How far outside the bracket's place the apices stand: {@link destinationGapPx}. */
+  readonly gapPx: number;
+  readonly stroke: ColourToken;
+  /**
+   * The guide's outline, 1.5 CSS px. `paint` draws the chevrons at `markStrokeDevicePx` of the
+   * ratio whatever this says, as it draws a reticle.
+   */
+  readonly widthPx: number;
+}
+
 /** Short straight ticks, such as those along the edge of fetched data. */
 export interface TicksOp {
   readonly kind: "ticks";
   readonly segments: ReadonlyArray<{ readonly from: ScreenPoint; readonly to: ScreenPoint }>;
   readonly stroke: ColourToken;
   readonly widthPx: number;
+  /**
+   * Which the ticks are: `line`, drawn at the line scale as every line is, such as a data edge's or
+   * an annulus's ticks; or `mark`, drawn at the mark stroke as a symbol's outline is and not moved
+   * out, such as the HR diagram's off-scale arrowhead, a state of the symbol beside it
+   * (decision-r07-quality-and-destination, Q5; R07.T16.h).
+   */
+  readonly weight: "line" | "mark";
 }
 
 /** One drawing instruction, in the order the painter executes them. */
-export type DrawOp = LineOp | PolylineOp | CircleOp | SymbolOp | ReticleOp | TicksOp;
+export type DrawOp = LineOp | PolylineOp | CircleOp | SymbolOp | ReticleOp | ChevronsOp | TicksOp;
 
 /** Where a mark ended up on the screen, for picking and labels. */
 export interface Anchor {
@@ -433,13 +465,13 @@ function annulusOps(
         to: toScreen(onPlaneAt(scene, centre, outerRadius, angleDeg)),
       });
     }
-    ops.push({ kind: "ticks", segments, stroke, widthPx });
+    ops.push({ kind: "ticks", segments, stroke, widthPx, weight: "line" });
   }
   if (annulus.edgeTicks === true) {
     const edges = radii.filter((edge) => edge > 0);
     const segments = edgeTickSegments(scene, centre, edges, toScreen, TICK_LENGTH_REM * remPx);
     if (segments.length > 0) {
-      ops.push({ kind: "ticks", segments, stroke, widthPx });
+      ops.push({ kind: "ticks", segments, stroke, widthPx, weight: "line" });
     }
   }
   return ops;
@@ -546,6 +578,7 @@ function sphereOps(
         segments: ticks(centre, radiusPx, TICK_LENGTH_REM * viewport.remPx),
         stroke: "text",
         widthPx: DATA_EDGE_WIDTH_PX,
+        weight: "line",
       });
     }
     for (const [stack, text] of group.labels.entries()) {
@@ -565,26 +598,46 @@ function sphereOps(
 }
 
 /**
- * The selection's bracket, one margin larger than its mark (its half-size the mark's radius and
- * half a margin), and the destination's reticle: where the bracket would stand when it stands
- * alone, and when the destination is also the selection, outside the bracket by half a margin, or
- * by `minGapPx` where that is more, so that the pair is never told by colour alone (R07.T16.f;
- * decision-r07-t16d-followups, item 2).
+ * The selection's bracket's half-size about a mark of radius `markRadiusPx`, CSS px, before `paint`
+ * moves it out: the mark's radius and half a margin, 0.25 rem. The bracket stands there whether or
+ * not the mark is selected, so a label counts it either way (`placeLabels`).
+ */
+export function reticleHalfSizePx(markRadiusPx: number, remPx: number): number {
+  return markRadiusPx + (RETICLE_MARGIN_REM * remPx) / 2;
+}
+
+/**
+ * How far outside the selection's bracket's place the destination's chevrons' apices stand, CSS px:
+ * half a margin, 0.25 rem, or the reticles' least gap where that is more, whether or not the
+ * destination is also the selection (R07.T16.f and T16.h; decision-r07-t16d-followups, item 2;
+ * decision-r07-quality-and-destination, Q2).
+ *
+ * @param minGapPx - The reticles' least gap, CSS px: `minReticleGapDevicePx` ÷ the ratio.
+ */
+export function destinationGapPx(remPx: number, minGapPx: number): number {
+  return Math.max((RETICLE_MARGIN_REM * remPx) / 2, minGapPx);
+}
+
+/**
+ * The selection's bracket, one margin larger than its mark ({@link reticleHalfSizePx}), and the
+ * destination's chevrons, their apices {@link destinationGapPx} outside the bracket's place,
+ * selected or not, so that a destination is told from the selection by its shape and the pair is
+ * never told by colour alone (R07.T16.h; decision-r07-quality-and-destination, Q2).
  *
  * @remarks
- * A lone destination keeps its as-built place, where the bracket would stand (an open finding in
- * plan 05's Risks, "Labels beside reticles", for the first task that commands a destination).
+ * The chevrons replace the as-built lone destination, a bracket in `--target` at the bracket's
+ * place, and the pair's second bracket outside the first. Where the destination is also the
+ * selection, the bracket keeps the corners and the apices stand over the open middle of its sides.
  *
- * @param minGapPx - The least space between the two reticles' centrelines about one mark, CSS px.
+ * @param minGapPx - The least space between the bracket's centreline and the apices, CSS px.
  */
 function reticleOps(
   placed: ReadonlyArray<PlacedMark>,
   scene: SpatialScene,
   viewport: Viewport,
   minGapPx: number,
-): ReticleOp[] {
-  const ops: ReticleOp[] = [];
-  const marginPx = RETICLE_MARGIN_REM * viewport.remPx;
+): Array<ReticleOp | ChevronsOp> {
+  const ops: Array<ReticleOp | ChevronsOp> = [];
   const find = (id: string | null): PlacedMark | undefined =>
     id === null ? undefined : placed.find((candidate) => candidate.mark.id === id);
   const selected = find(scene.selectedId);
@@ -593,21 +646,22 @@ function reticleOps(
       kind: "reticle",
       id: selected.mark.id,
       centre: screen(selected.at),
-      halfSizePx: outerRadiusPx(selected.mark, viewport) + marginPx / 2,
+      halfSizePx: reticleHalfSizePx(outerRadiusPx(selected.mark, viewport), viewport.remPx),
       stroke: "accent",
       widthPx: RETICLE_WIDTH_PX,
     });
   }
   const destination = find(scene.destinationId);
   if (destination !== undefined) {
-    const bracketPx = outerRadiusPx(destination.mark, viewport) + marginPx / 2;
-    // Outside the selection's reticle when the destination is also the selection.
     ops.push({
-      kind: "reticle",
+      kind: "chevrons",
       id: destination.mark.id,
       centre: screen(destination.at),
-      halfSizePx:
-        destination === selected ? bracketPx + Math.max(marginPx / 2, minGapPx) : bracketPx,
+      bracketHalfSizePx: reticleHalfSizePx(
+        outerRadiusPx(destination.mark, viewport),
+        viewport.remPx,
+      ),
+      gapPx: destinationGapPx(viewport.remPx, minGapPx),
       stroke: "target",
       widthPx: RETICLE_WIDTH_PX,
     });
@@ -696,13 +750,14 @@ function markCurveLabels(
  * the plane's rings (the orchestrator's ruling 35).
  *
  * The list holds the guide's CSS widths; `paint` draws them at no less than 2 device px
- * (R07.T16.f). A destination that is also the selection stands at least `minReticleGapPx` outside
- * the selection's bracket, or 0.25 rem where that is more.
+ * (R07.T16.f). A destination is four chevrons pointing at its mark, their apices at least
+ * `minReticleGapPx` outside the selection's bracket's place, or 0.25 rem where that is more,
+ * whether or not it is the selection (R07.T16.h).
  *
- * @param minReticleGapPx - The least space between the centrelines of the selection's bracket and
- *   the destination's reticle about one mark, CSS px: `minReticleGapDevicePx` of the device-pixel
- *   ratio ÷ the ratio, an outline and a casing (5.12, 4, 2.5 and 2.5 px at 0.78125, 1, 2 and 3), so
- *   that the pair is the view's.
+ * @param minReticleGapPx - The least space between the selection's bracket's centreline and the
+ *   destination's chevrons' apices about one mark, CSS px: `minReticleGapDevicePx` of the
+ *   device-pixel ratio ÷ the ratio, an outline and a casing (5.12, 4, 2.5 and 2.5 px at 0.78125, 1,
+ *   2 and 3), so that the pair is the view's.
  */
 export function buildDrawList(
   scene: SpatialScene,

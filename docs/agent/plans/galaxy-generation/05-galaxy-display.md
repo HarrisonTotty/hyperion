@@ -133,16 +133,26 @@ interface UniverseSession {
 - `marks.ts`: `SpatialScene`, `PointMark`, `SphereMark`, `PlaneSpec`, `SymbolShape`, `SizeClass`,
   `MarkStatus`.
 - `symbols.ts`: `symbolOutline(shape)`, `SIZE_CLASS_REM`. _R07.T16.f adds `unitInradius`, moved
-  from R02's `wireframe/symbology.ts`._
+  from R02's `wireframe/symbology.ts`._ _R07.T16.h adds `BRACKET_ARM_SHARE`, `bracketArmPx`,
+  `OffsetPx`, `Chevron`, `destinationChevrons(apexPx, armPx)`, the destination's four chevrons, and
+  `reticleReachPx(bracketHalfSizePx, destinationApexPx)`, the outermost reticle's reach, which
+  both the view's labels and these stand clear of._
 - `plane.ts`: `gridLines`, `ringPolyline`.
 - `drawList.ts`: `buildDrawList(scene, camera, viewport): DrawList`, `DrawOp` (discriminated union),
   `Anchor`. _R07.T16.f adds a required `minReticleGapPx`, the reticles' least gap in CSS px:
-  `buildDrawList(scene, camera, viewport, minReticleGapPx)`._
+  `buildDrawList(scene, camera, viewport, minReticleGapPx)`._ _R07.T16.h adds `ChevronsOp`
+  (`kind: "chevrons"`, the destination, in place of its `--target` reticle), `TicksOp.weight`
+  (`line`, or `mark` for the HR diagram's off-scale arrowhead), `reticleHalfSizePx` and
+  `destinationGapPx`._
 - `pick.ts`: `pick(anchors, pointPx, tolerancePx): string | null`.
 - `labels.ts`: `chooseLabels`, `placeLabels`. _R07.T16.f gives `placeLabels` a required fourth
   `reticleGrowthPx`, before its optional ones._ _R07.T16.h starts every label's box 0.125 rem
   outside the outer edge of the outermost reticle about its mark, and its parameters change with
-  it (decision-r07-quality-and-destination, Q3)._
+  it (decision-r07-quality-and-destination, Q3)._ _As built:
+  `placeLabels(chosen, anchors, viewport, reticles, destinationId, pinnedIds?, obstacles?)`, with
+  `reticles` `lib/strokes.ts`'s `ReticleStrokesCss` (`reticleStrokesCssPx` of the ratio) in place of
+  `reticleGrowthPx`, and `markLabelTransform(label, remPx)`, which places a label by its near
+  edge._
 - `transition.ts`: `easeOut`, `tweenCamera`, `TRANSITION_MS`.
 - `redraw.ts`: `createRedrawScheduler(requestFrame, cancelFrame)`.
 - `paint.ts`: `paint(context, drawList, tokens)`, `readTokens(element): ColourTokens`.

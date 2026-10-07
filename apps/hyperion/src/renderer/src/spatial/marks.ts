@@ -156,7 +156,7 @@ export interface SpatialScene {
   readonly annuli?: ReadonlyArray<AnnulusMark> | undefined;
   /** The selected mark, drawn with the `--accent` bracket reticle. */
   readonly selectedId: string | null;
-  /** The commanded destination, drawn with the `--target` reticle. */
+  /** The commanded destination, drawn with the `--target` chevrons (R07.T16.h). */
   readonly destinationId: string | null;
 }
 

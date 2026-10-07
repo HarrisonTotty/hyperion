@@ -487,7 +487,8 @@ export function lineScale(devicePixelRatio: number): number; // max(2, ratio), p
 export function markStrokeDevicePx(devicePixelRatio: number): number; // max(2, 1.5 × ratio)
 export function markShiftDevicePx(devicePixelRatio: number): number; // δ, an outline's move out
 // T16.g adds minReticleGapDevicePx; T16.f adds strokeProperties,
-// watchStrokeProperties, useStrokeMetrics and reticleGrowthCssPx.
+// watchStrokeProperties, useStrokeMetrics and reticleGrowthCssPx; T16.h replaces
+// reticleGrowthCssPx with reticleStrokesCssPx (ReticleStrokesCss).
 ```
 
 R02's `view/wireframe/drawList.ts` gains `ViewStrokes { strokeScale, markStrokePx, markShiftPx }`,
@@ -505,7 +506,15 @@ fields it reads; `wireframe/symbology.ts` gains `markLabelOffsetPx`, `bracketHal
 and `unitInradius` is `spatial/symbols.ts`'s (see "Deviations in T16.f, as built")._ _R07.T16.h
 adds `destinationChevrons(apexPx, armPx)` and one label place for both drawers in P05's
 `spatial/symbols.ts`; `placeLabels`' parameters change with it
-(decision-r07-quality-and-destination)._
+(decision-r07-quality-and-destination)._ _As built by T16.h: `spatial/symbols.ts` holds
+`BRACKET_ARM_SHARE`, `bracketArmPx(halfSizePx)`, `OffsetPx`, `Chevron`,
+`destinationChevrons(apexPx, armPx)` and `reticleReachPx(bracketHalfSizePx, destinationApexPx)`,
+the one reach both displays' labels stand clear of; `lib/strokes.ts`'s `reticleGrowthCssPx` gives
+way to `ReticleStrokesCss { shiftPx, markStrokePx, minGapPx }` and `reticleStrokesCssPx(ratio)`;
+P05's `drawList.ts` gains `ChevronsOp`, `TicksOp.weight` (`line` or `mark`), `reticleHalfSizePx`
+and `destinationGapPx`, and `labels.ts` gains `markLabelTransform` and takes
+`placeLabels(chosen, anchors, viewport, reticles, destinationId, pinnedIds?, obstacles?)` (see
+"Deviations in T16.h, as built")._
 
 ### Main screen (Phase C)
 
@@ -5104,6 +5113,174 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       taken: the ticks' kind and stated limit, this entry with the Provides pointers, and the
       acceptance paths recorded. Its considers are taken: `reticleOps`' doc, the projector's size,
       and the pair's separation read.
+- **Deviations in T16.h, as built** (2026-10-07; the views lane;
+  decision-r07-quality-and-destination, Q2, Q3 and Q5, with Q4's reading).
+  - **Files.** Those the subtask lists, and:
+    - `lib/strokes.ts`: `reticleGrowthCssPx`, whose one caller moved, gives way to
+      `ReticleStrokesCss { shiftPx, markStrokePx, minGapPx }` and `reticleStrokesCssPx(ratio)`, the
+      marks' strokes in CSS px that a spatial label stands clear of;
+    - `view/wireframe/drawList.ts`, `spatial/marks.ts` and `lib/strokes.ts`: docs that called the
+      destination a reticle (the UX review's consider);
+    - the tests of `paint`, `labels`, `drawList` (both), `symbology`, `SpatialView`, `strokes`,
+      `hrProjection`, `smoke/spatial` and `smoke/strokeContrast`.
+  - **Signatures.**
+    - `spatial/symbols.ts` holds `BRACKET_ARM_SHARE` and `bracketArmPx(halfSizePx)`, the bracket's
+      arm, which the view's bracket, the target's ticks, `paint`'s bracket and the chevrons all take
+      in place of two local copies; `OffsetPx` and `Chevron`, an arm's end, the apex and the other
+      arm's end from the mark's centre; `destinationChevrons(apexPx, armPx)`, above, below, left and
+      right in that order; and `reticleReachPx(bracketHalfSizePx, destinationApexPx)`.
+    - "One label place for both drawers" is built as one reach, `reticleReachPx`: the bracket's
+      half-size, or the chevrons' apex distance and an arm's run, `armPx` ÷ √2. Each display adds
+      its own clearance to it: the view's plate 0.125 rem + δ (`markLabelOffsetPx`), the spatial
+      displays' box half the mark stroke + 0.125 rem (`labels.ts`).
+    - P05's destination is a `DrawOp` of its own, `ChevronsOp { kind: "chevrons", id, centre,
+      bracketHalfSizePx, gapPx, stroke, widthPx }`, not a form of `ReticleOp`, so that every
+      exhaustive `switch` over an op meets it. `paint` moves it out with the bracket by 4δ: the
+      apices at the moved bracket's half-size + `gapPx`, each arm the moved bracket's.
+      `spatial/drawList.ts` exports `reticleHalfSizePx(markRadiusPx, remPx)` and
+      `destinationGapPx(remPx, minGapPx)`, which `reticleOps` and `labels.ts` both take.
+    - `TicksOp` gains a required `weight: "line" | "mark"`, the field that "says which it is"; only
+      `pegOp`'s is `mark`. `paint` strokes a `mark` at `markStrokeDevicePx` ÷ the ratio, not moved
+      out, through an exhaustive `switch`.
+    - `placeLabels(chosen, anchors, viewport, reticles, destinationId, pinnedIds?, obstacles?)`:
+      the fourth is `ReticleStrokesCss` and the fifth the destination, whose label stands beyond
+      its chevrons. Pointers in P05's Provides and above.
+  - **A label flipped to the left (after the UX review's must-fix).** `placeLabels` estimates a
+    label's width from its length, at 0.62 em a character, and B612's digits and capitals run wider:
+    by the UX review's measure about 1 designation in 20 is wider by more than 0.125 rem, so a
+    flipped one placed by its left edge would have its text run in onto the bracket or the
+    chevrons, which Q3 forbids. `labels.ts` gains `markLabelTransform(label, remPx)`, which
+    `SpatialView` takes: a label on the right stands by its left edge as before, one on the left by
+    its right edge, `translate(calc(… rem - 100%), … rem)`, so that its text keeps its clearance
+    whatever its width. The estimate still flips, drops and pins as built. _Stated limit:_ a
+    flipped label held inside the view (ruling 149.1) and wider than its estimate can run past the
+    view's left edge, where the overlay clips it.
+  - **The view's check** (`smoke/strokeContrast.ts`).
+    - The apart frame's lone destination and `pairScene`'s are chevrons, drawn by the draw list, and
+      both are held to `--target`'s pair within `PAIR_TOLERANCE`, as the pair's bracket is to
+      `--accent`'s.
+    - A reading held to its pair keeps `CUT_END_MARGIN_PX` clear of its arms' open ends
+      (`openEnds`), and reads through a joint: a chevron's apex and a bracket's corner (the
+      plan-conformance review's consider). T16.g's margin cut every segment's ends.
+    - T16.g's pair control stays a corner reticle 0.25 rem outside the bracket, as ruled. The draw
+      list no longer draws one, so `asBuiltDestination` builds it by hand, about the fixtures'
+      `SMALL_BODY_SYMBOL`, cased as every mark is.
+  - **The canvas check** (`smoke/spatial.ts`). Both destinations are chevrons, held to 6:1 as drawn
+    as T16.f held the reticles. The pair's separation is read where the chevrons come nearest the
+    bracket: at least one `--surface-0` pixel within `CLEAR_REACH_PX` (1.5 device px) of the point
+    midway between the bracket's upper right arm's inner end and the upper chevron's left arm, in
+    place of T16.f's row between the left arms.
+    - **A pixel clear of a chevron's cut end is a pixel's diagonal** (`cutEndMarginPx`). `paint`'s
+      ends are flat, and a flat end at 45° cuts the pixels it crosses up to half a diagonal back
+      along the arm, where a cross-section reaches another half. The first run read the pair's
+      chevrons at 4.92:1 (4.45 stale) at a ratio of 1, at a point 1.05 px from an arm's end, inside
+      that reach. "A pixel of length along a diagonal stroke is a pixel's diagonal"
+      (decision-r07-t16d-followups, (b)), so the chevrons keep √2 px from their ends. Every other
+      kind keeps T16.f's pixel, the data edge's ticks among them, whose floor of 8 points a wider
+      margin could not be shown to keep.
+  - **Q4 where T16.h's checks read strokes.** No stroke T16.h adds is accepted on its pair alone:
+    the view's chevrons are read as drawn and held to their pair within 1%; the canvas's are read
+    as drawn at 6:1, in the tokens and the stale tokens; the legend's stroke is read by hand
+    (below). The peg, which no capture reads, is accepted on its pairs by Q4's canvas rule: on the
+    HR diagram's `--surface-0`, blended at 15/16, `--text` 11.93:1, `--accent` 9.16:1 and, stale,
+    `--text-muted` 6.43:1.
+  - **Tests.** As the subtask lists them, each property its own test over a shared setup (the
+    TypeScript review's should-fix): the chevrons' apices, arms, least gap and lone place for the
+    craft and classes 0 to 4 in the view, and for classes 0 to 4 on the spatial displays, at 80%,
+    100% and 150% and ratios 0.78125, 1 and 2, with the view's casing kept off the bracket's core
+    (T16.d's test, now over the chevrons); a craft's label at 22.44 px; the spatial label's box on
+    either side, the destination's, and `SpatialView`'s label against the painted chevrons' right
+    ends; the peg at 2.56, 2, 1.5 and 1.5 and a line's ticks at the line scale.
+  - **By hand, hidden** (`.git/rm23-scratch/r07-views/t16h/`). No code path commands a
+    destination, so the harness sets one: `patch-out.py` patches the built bundle in `out/`, never
+    the source, so that the local chart, the orbit map and `VIEW` ask the harness for their
+    destination, which it sets to the selection and then holds as another mark is selected.
+    - **`GALAXY`** (`galaxy/`, T16.f's harness): at 0.78125 in a 2458 × 1382 CSS px window, the
+      projector's own 1920 × 1080 device px, and at 2 in a 1920 × 1080 CSS window. The measuring
+      passes draw `--line` in `--surface-0`, since the grid's blue passes for `--accent`'s fringe;
+      the look passes keep it.
+      - Class 0: PGG 5H0001 A-1, an M dwarf of the 10 ly sphere. Class 4: PFG 0B0Z00 E-37, a white
+        dwarf of the top initial-mass layer, found with `MIN MASS` 8 in a 100 ly sphere. Each alone
+        and on the selection, at 100% and 80% (the root's font size), found and confirmed by its
+        bracket's width.
+      - **A chevron is not read as a triangle.** At class 0, 80% and 0.78125 each chevron is two
+        2 px arms with no base, about the size of the filled circle beside it, and the four point in
+        at the mark from its four sides. No triangle symbol is open at its base, and none points
+        sideways. With the selection, the bracket's corners and the chevrons interleave as ruled.
+        No ruling is asked.
+      - **Seen, for a ruling (for the orchestrator):** the label's text now stands 0.125 rem past
+        the right chevron's arm ends, as ruled, and the right chevron's open side faces it. At
+        0.78125 one near-ground column (1.05:1) separates the chevron's ink from the label's at
+        80%, and about two at 100%, so the chevron can read as a `<` set before the designation:
+        `<PGG 5H0001 A-1`. The view's labels have plates, whose padding keeps their text 0.25 rem
+        further out. The lean is to keep Q3's one rule, since the chevron is `--target` and the
+        text `--text`, and to show it to the owner with T16.c's draft.
+      - **The selected label and the bracket** (the local chart, at 0.78125): at 100% the label's
+        box starts 1.56 device px past the bracket's outer edge, and the one column between, wholly
+        left of the box, reads 1.12:1 against `--surface-0`. At 80% the box starts 1.25 device px
+        past it, the ruling's figure; the column between reads 1.05:1, and half of it lies under the
+        box, so a whole device pixel lies between the bracket's ink and the box only where the box
+        starts in a pixel's last quarter. The label's own ink, B612's `P`, starts after that column
+        at both scales.
+      - **The orbit map:** the selected bodies at the fit zoom (the second system's inner planets,
+        and its outermost dwarf planet) stood among other marks and furniture (the habitable zone's
+        label, other bodies' symbols and stalks, a body's disc), which confound a pixel reading of
+        the label's clearance there. Its labels are placed by the same `placeLabels` and painted by
+        the same `paint` as the chart's, and the box measured stood at R + 0.375 rem + 3.40 px.
+      - **Q4's SVG reading on the RTX 3080:** the orbit legend's reference path sample, a
+        `--text-muted` line 2 device px wide (non-scaling) on `--surface-1`, reads 6.60:1 at its
+        worst column at 100% and 6.27:1 at 80%, a pixel clear of its cut ends, against its pair's
+        6.76:1. It holds 6:1, so no ruling is asked. At 80% its brightest pixel is about 95%
+        covered, near Q4's 15/16.
+    - **`VIEW`** (`view/`, T16.g's harness with the DOM shown): `PRECISION TEST` from `CHASE`,
+      TEST PLANET drawn as its symbol the destination, on the selection and alone (TEST MOON
+      selected), at 0.78125 (1920 × 1080) and 2 (a 1920 × 1080 CSS window). The chevrons stand about
+      the bracket as ruled, and the label's plate beyond them: TEST PLANET's label stands at 590 CSS
+      px on the destination's report against 581 without, and selection does not move it.
+      - No kept scene brings a craft other than the own ship into view, from any camera or `CHASE`
+        target (explored), so the view's chevrons about a craft rest on the draw list's tests.
+      - At a ratio of 2 a 1280 × 720 window is clamped to 1024 × 640 CSS px, the compact layout,
+        where the label block covers TEST PLANET's label and its marks: T16.i's defect.
+  - **The acceptance's vitest paths** take every changed test.
+  - **Captures.** `just test-render --captures`, both variants, on the merged base (70044d83's tree,
+    T16.h's changes stashed) and after: all 110 byte-identical. No capture holds a destination or is
+    drawn by `paint`.
+  - **The readings** (`just test-render`, both variants alike):
+    - the view: the chevrons, alone and about the selection, read `--target`'s 8.15:1 at every ratio
+      in both styles (on 37 to 184 points), and the bracket under them `--accent`'s 10.37:1; the
+      pair's control, the corner reticle 0.25 rem out, reads the bracket at 2.17:1 on 32 points;
+    - the canvas: the chevrons read 8.15:1, and 7.22:1 stale, at every ratio, and the bracket
+      10.37:1 and 7.22:1; between them 6, 8 and 7 `--surface-0` pixels stand within 1.5 px of the
+      point where they come nearest, at 0.78125, 1 and 2.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest: 117 files, 3,417 tests, 1 failure, not T16.h's (below).
+    - The app's vitest: 338 files, 6,846 tests, 2 failures, neither T16.h's:
+      - `ViewDisplaySetting.test.tsx`'s "draws R02's low wireframe on low, PHASE TEST's graticules
+        at 30° only and so fewer lines" (T17's) fails on the merged base too, with T16.h's changes
+        stashed, whose tree is `rendering-and-planets` 70044d83's: `atLow < atHigh` is false. For
+        the orchestrator;
+      - `SystemDisplay.test.tsx`'s "starts afresh at the chart's time", under load, as T16.g and
+        T16.f saw; it passes alone.
+    - `just check lint` from a clean typecheck cache, then after the cut-end margin's change the
+      typecheck from a clean cache and oxlint again, and Prettier.
+    - `just test-render`: both variants exit 0, 610 checks (305 a variant), after the cut-end
+      margin (above); the run before it failed the canvas check at a ratio of 1.
+    - No WGSL changed, so naga was not run.
+    - The console-ux skill's lint (no error or check in the 12 files changed), contrast (every
+      pairing passes; at 15/16, `--target` 7.23, `--text-muted` 6.43, `--text` 11.93 and `--accent`
+      9.16 on `--surface-0`, `--text-muted` 6.07 on `--surface-1`) and glyph scripts (no new
+      character reaches the screen).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers.
+    - **TypeScript:** no must-fix. Its three should-fixes are taken: the chevrons' own px point
+      (`OffsetPx`), each property its own test, and the 17.25 that rebuilt the old formula dropped
+      from the test (it stays here: a craft's destination label stood 17.25 px out before T16.h).
+      Its considers are taken: an exhaustive `switch` on the weight, and one fixture symbol for the
+      pair's control.
+    - **UX:** one must-fix, the flipped label (above), taken. Its consider is taken: the docs that
+      called the destination a reticle.
+    - **Plan conformance:** no must-fix. Its should-fix, the as-built names in both Provides, is
+      taken. Its considers are taken: the apex read through, `SpatialView`'s label tied to the
+      painted chevrons, and the pair control's symbol shared.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

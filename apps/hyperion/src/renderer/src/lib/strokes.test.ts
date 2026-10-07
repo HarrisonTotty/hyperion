@@ -10,7 +10,7 @@ import {
   minReticleGapDevicePx,
   MIN_STROKE_DEVICE_PX,
   RETICLE_SHIFTS,
-  reticleGrowthCssPx,
+  reticleStrokesCssPx,
   RING_SHIFTS,
   strokeProperties,
   useStrokeMetrics,
@@ -62,9 +62,17 @@ describe("the console's stroke widths (decision-thin-line-contrast, item 2)", ()
         markStrokeDevicePx(ratio),
         markShiftDevicePx(ratio),
         minReticleGapDevicePx(ratio),
-        reticleGrowthCssPx(ratio),
+        reticleStrokesCssPx(ratio),
       ]),
-    ).toEqual(Array.from({ length: 4 }, () => [2, 2, 0.25, 4, 1.25]));
+    ).toEqual(
+      Array.from({ length: 4 }, () => [
+        2,
+        2,
+        0.25,
+        4,
+        { shiftPx: 0.25, markStrokePx: 2, minGapPx: 4 },
+      ]),
+    );
   });
 });
 
@@ -73,9 +81,17 @@ describe("the outlines' shift multiples (R07.T16.f)", () => {
     expect([RING_SHIFTS, RETICLE_SHIFTS]).toEqual([3, 4]);
   });
 
-  it("grows a reticle's outer edge by 5δ: 2.65, 1.25, 0 and 0 CSS px", () => {
-    expect(RATIOS.map((ratio) => hundredths(reticleGrowthCssPx(ratio)))).toEqual([
-      2.65, 1.25, 0, 0,
+  it("gives a spatial display's marks' strokes in CSS px: δ, the outline and the least gap", () => {
+    expect(
+      RATIOS.map((ratio) => {
+        const { shiftPx, markStrokePx, minGapPx } = reticleStrokesCssPx(ratio);
+        return [shiftPx, markStrokePx, minGapPx].map(hundredths);
+      }),
+    ).toEqual([
+      [0.53, 2.56, 5.12],
+      [0.25, 2, 4],
+      [0, 1.5, 2.5],
+      [0, 1.5, 2.5],
     ]);
   });
 });

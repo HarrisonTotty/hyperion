@@ -6,6 +6,7 @@ import { paint } from "../spatial/paint";
 import { stubCanvas } from "../test/RecordingContext2D";
 import {
   arcPoints,
+  cutEndMarginPx,
   linearOfCode,
   type PaintedStroke,
   recordingContext,
@@ -148,6 +149,48 @@ describe("the painted strokes", () => {
     expect(ringed?.cutEnds).toHaveLength(0);
   });
 
+  it("keeps each chevron's two arm ends a pixel clear, and reads through its apex", () => {
+    const [chevrons] = painted(
+      [
+        {
+          kind: "chevrons",
+          id: "a",
+          centre: { xPx: 50, yPx: 50 },
+          bracketHalfSizePx: 9,
+          gapPx: 4,
+          stroke: "target",
+          widthPx: 1.5,
+        },
+      ],
+      1,
+    ).map((stroke) => screenStrokeOf("chevrons", stroke));
+
+    // Four open subpaths, an arm, the apex and an arm each: eight cut ends, eight segments.
+    expect([chevrons?.cutEnds.length, chevrons?.stroke.segments.length]).toEqual([8, 8]);
+  });
+
+  it("keeps a chevron's 45° arms a pixel's diagonal clear of their cut ends, and a reticle's arms a pixel", () => {
+    const chevrons: DrawOp = {
+      kind: "chevrons",
+      id: "a",
+      centre: { xPx: 50, yPx: 50 },
+      bracketHalfSizePx: 9,
+      gapPx: 4,
+      stroke: "target",
+      widthPx: 1.5,
+    };
+    const reticle: DrawOp = {
+      kind: "reticle",
+      id: "a",
+      centre: { xPx: 50, yPx: 50 },
+      halfSizePx: 9,
+      stroke: "accent",
+      widthPx: 1.5,
+    };
+
+    expect([cutEndMarginPx(chevrons), cutEndMarginPx(reticle)]).toEqual([Math.SQRT2, 1]);
+  });
+
   it("traces a polygon symbol closed, with no cut end", () => {
     const [triangle] = painted(
       [
@@ -180,17 +223,39 @@ describe("spatialFrames", () => {
   });
 
   it.each(SPATIAL_RATIOS)(
-    "stands the destination on the selection the least gap outside its bracket at %s",
+    "stands the destination's chevrons on the selection the least gap outside its bracket at %s",
     (ratio) => {
       const marks = spatialFrames(ratio).find((frame) => frame.name === "marks");
-      const halfSize = (kind: string): number => {
-        const op = marks?.ops.find((entry) => entry.kind === kind)?.op;
-        return op?.kind === "reticle" ? op.halfSizePx : Number.NaN;
-      };
+      const op = (kind: string): DrawOp | undefined =>
+        marks?.ops.find((entry) => entry.kind === kind)?.op;
+      const bracket = op(SPATIAL_KINDS.pairBracket);
+      const chevrons = op(SPATIAL_KINDS.pairDestination);
+
+      expect([
+        bracket?.kind === "reticle" ? bracket.halfSizePx : Number.NaN,
+        chevrons?.kind === "chevrons" ? chevrons.bracketHalfSizePx : Number.NaN,
+      ]).toEqual([8, 8]);
+      expect(chevrons?.kind === "chevrons" ? chevrons.gapPx : Number.NaN).toBeCloseTo(
+        Math.max(4, minReticleGapDevicePx(ratio) / ratio),
+        9,
+      );
+    },
+  );
+
+  it.each(SPATIAL_RATIOS)(
+    "draws both destinations as chevrons, and no reticle but the bracket, at %s",
+    (ratio) => {
+      const marks = spatialFrames(ratio).find((frame) => frame.name === "marks");
 
       expect(
-        halfSize(SPATIAL_KINDS.pairDestination) - halfSize(SPATIAL_KINDS.pairBracket),
-      ).toBeCloseTo(Math.max(4, minReticleGapDevicePx(ratio) / ratio), 9);
+        marks?.ops.flatMap(({ op, kind }) =>
+          op.kind === "reticle" || op.kind === "chevrons" ? [[kind, op.kind, op.stroke]] : [],
+        ),
+      ).toEqual([
+        [SPATIAL_KINDS.pairBracket, "reticle", "accent"],
+        [SPATIAL_KINDS.pairDestination, "chevrons", "target"],
+        [SPATIAL_KINDS.loneDestination, "chevrons", "target"],
+      ]);
     },
   );
 

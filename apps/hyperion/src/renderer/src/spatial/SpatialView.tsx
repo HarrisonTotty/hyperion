@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import { formatBearingDeg, formatSignedDeg } from "../lib/format";
-import { minReticleGapDevicePx, reticleGrowthCssPx } from "../lib/strokes";
+import { minReticleGapDevicePx, reticleStrokesCssPx } from "../lib/strokes";
 import { isTextEntry } from "../lib/textEntry";
 import { useElementSize } from "../lib/useElementSize";
 import { usePrefersReducedMotion } from "../lib/usePrefersReducedMotion";
@@ -39,7 +39,7 @@ import {
   triadFootprintPx,
   triadLayout,
 } from "./furniture";
-import { chooseLabels, placeLabels } from "./labels";
+import { chooseLabels, markLabelTransform, placeLabels } from "./labels";
 import type { LocalFrame } from "../geometry/frame";
 import type { SpatialScene } from "./marks";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
@@ -319,8 +319,9 @@ export function SpatialView({
     };
   }, [cameraState, fittedPxPerUnit]);
 
-  // The pair of reticles about one mark stands an outline and a casing apart at least, as the
-  // view's does, and labels stand clear of the bracket's growth (R07.T16.f): both at the ratio.
+  // The destination's chevrons stand an outline and a casing outside the bracket's place at least,
+  // as the view's do, and each label's text starts 0.125 rem outside the outermost reticle about
+  // its mark (R07.T16.f and T16.h): both at the ratio.
   const minReticleGapPx = minReticleGapDevicePx(pixelRatio) / pixelRatio;
   const drawList = useMemo(
     () =>
@@ -378,7 +379,8 @@ export function SpatialView({
           chosenMarks,
           drawList.anchors,
           viewport,
-          reticleGrowthCssPx(pixelRatio),
+          reticleStrokesCssPx(pixelRatio),
+          scene.destinationId,
           pinnedIds,
           [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx), ...curveLabels],
         );
@@ -548,12 +550,7 @@ export function SpatialView({
                         ? "spatial-label spatial-label--available"
                         : "spatial-label"
                     }
-                    style={{
-                      transform: translateRem(
-                        label.leftPx / viewport.remPx,
-                        label.topPx / viewport.remPx,
-                      ),
-                    }}
+                    style={{ transform: markLabelTransform(label, viewport.remPx) }}
                   >
                     {label.text}
                   </span>

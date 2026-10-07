@@ -73,16 +73,19 @@ export function markShiftDevicePx(devicePixelRatio: number): number {
 }
 
 /**
- * The least space between the centrelines of two reticles drawn about one mark, the destination's
- * outside the selection's, device px: a mark's outline and one casing, {@link markStrokeDevicePx}
- * + {@link CASING_PX} × {@link lineScale} (decision-r07-t16d-followups, item 2). It is 4 at ratios
- * of 0.78125 and 1, 5 at 2 and 7.5 at 3.
+ * The least space between the selection's bracket's centreline and the destination's chevrons'
+ * apices about one mark, device px: a mark's outline and one casing, {@link markStrokeDevicePx}
+ * + {@link CASING_PX} × {@link lineScale} (decision-r07-t16d-followups, item 2;
+ * decision-r07-quality-and-destination, Q2). It is 4 at ratios of 0.78125 and 1, 5 at 2 and 7.5
+ * at 3.
  *
  * @remarks
- * The least gap that keeps the outer reticle's casing, drawn after the inner one, off the inner
- * one's full-coverage core: the casing reaches m ÷ 2 + casing + 0.5 px from its centreline, and the
- * core lies within m ÷ 2 − 0.5 px of the inner one's. The view's draw list and the spatial displays
- * both take it, so that one pair of reticles is drawn ship-wide and is never told by colour alone.
+ * The least gap that keeps the chevrons' casing, drawn after the bracket, off the bracket's
+ * full-coverage core: the casing reaches m ÷ 2 + casing + 0.5 px from its centreline, and the core
+ * lies within m ÷ 2 − 0.5 px of the bracket's. The chevrons come nearest the bracket near its arms'
+ * inner ends, at (H ÷ 3 + the gap) ÷ √2 for a bracket of half-size H, which is the gap or more
+ * wherever H is at least 1.25 times it. The view's draw list and the spatial displays both take
+ * it, so that one pair of marks is drawn ship-wide.
  */
 export function minReticleGapDevicePx(devicePixelRatio: number): number {
   return markStrokeDevicePx(devicePixelRatio) + CASING_PX * lineScale(devicePixelRatio);
@@ -103,18 +106,35 @@ export const RING_SHIFTS = 3;
 export const RETICLE_SHIFTS = 4;
 
 /**
- * How far a reticle's outer edge moves out at a device-pixel ratio, CSS px: the
- * {@link RETICLE_SHIFTS} δ it moves and the δ its half-width gains, 5δ ÷ the ratio. It is 2.65 at
- * 0.78125, 1.25 at 1, and 0 from 4/3 up.
+ * A spatial display's marks' strokes at a device-pixel ratio, CSS px, which its reticles and the
+ * labels beside them are placed by (R07.T16.f and T16.h).
+ */
+export interface ReticleStrokesCss {
+  /** The outline shift δ: {@link markShiftDevicePx} ÷ the ratio. */
+  readonly shiftPx: number;
+  /** A mark's outline width: {@link markStrokeDevicePx} ÷ the ratio. */
+  readonly markStrokePx: number;
+  /** The reticles' least gap about one mark: {@link minReticleGapDevicePx} ÷ the ratio. */
+  readonly minGapPx: number;
+}
+
+/**
+ * The marks' strokes at a device-pixel ratio, CSS px: δ 0.53, 0.25, 0 and 0, the outline 2.56, 2,
+ * 1.5 and 1.5, and the least gap 5.12, 4, 2.5 and 2.5, at 0.78125, 1, 2 and 3.
  *
  * @remarks
- * A spatial display's mark label stands that much further out, so that it keeps the clearance from
- * the bracket about its mark that it had as built (R07.T16.f; decision-r07-t16d-followups, item
- * 1), as the view's labels do.
+ * `SpatialView` gives the least gap to its draw list, so that its destination's chevrons stand
+ * where the view's do, and all three to `placeLabels`, so that a label's text starts 0.125 rem
+ * outside the outer edge of the outermost reticle about its mark, as on every display
+ * (decision-r07-quality-and-destination, Q3).
  */
-export function reticleGrowthCssPx(devicePixelRatio: number): number {
+export function reticleStrokesCssPx(devicePixelRatio: number): ReticleStrokesCss {
   const ratio = ratioOf(devicePixelRatio);
-  return ((RETICLE_SHIFTS + 1) * markShiftDevicePx(ratio)) / ratio;
+  return {
+    shiftPx: markShiftDevicePx(ratio) / ratio,
+    markStrokePx: markStrokeDevicePx(ratio) / ratio,
+    minGapPx: minReticleGapDevicePx(ratio) / ratio,
+  };
 }
 
 /**

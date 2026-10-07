@@ -1661,24 +1661,72 @@ function Selecting({ destinationId }: SelectingProps) {
   return viewOf({ scene: aScene({ selectedId, destinationId }), onSelect: setSelectedId });
 }
 
-/** The half-size of each reticle the last paint drew, in order: half its first two corners' span. */
-function reticleHalfSizes(recorder: RecordingContext2D): number[] {
-  const halves: number[] = [];
+/**
+ * The places of the marks about a mark that the last paint drew, in order, CSS px: a bracket's
+ * half-size, half the span of its first two corners; or the destination's chevrons' apex distance,
+ * half the span of the upper and lower apices, each its subpath's first `lineTo`.
+ */
+function reticlePlaces(recorder: RecordingContext2D): Array<{ stroke: string; placePx: number }> {
+  const places: Array<{ stroke: string; placePx: number }> = [];
   const records = recorder.records;
   const lastClear = records.findLastIndex(
     (record) => record.type === "call" && record.name === "fillRect",
   );
+  let stroke = "";
   let moves: number[] = [];
+  let apices: number[] = [];
   for (const record of records.slice(lastClear)) {
-    if (record.type === "call" && record.name === "beginPath") {
+    if (record.type === "set" && record.name === "strokeStyle") {
+      stroke = String(record.value);
+    } else if (record.type === "call" && record.name === "beginPath") {
       moves = [];
+      apices = [];
     } else if (record.type === "call" && record.name === "moveTo") {
       moves.push(Number(record.args[0]));
+    } else if (record.type === "call" && record.name === "lineTo" && apices.length < moves.length) {
+      apices.push(Number(record.args[1]));
     } else if (record.type === "call" && record.name === "stroke" && moves.length === 4) {
-      halves.push(((moves[1] ?? 0) - (moves[0] ?? 0)) / 2);
+      places.push({
+        stroke,
+        placePx:
+          stroke === "#e879f9"
+            ? ((apices[1] ?? 0) - (apices[0] ?? 0)) / 2
+            : ((moves[1] ?? 0) - (moves[0] ?? 0)) / 2,
+      });
     }
   }
-  return halves;
+  return places;
+}
+
+/** The farthest right point the last paint traced for the destination's chevrons, CSS px. */
+function chevronsRightPx(recorder: RecordingContext2D): number {
+  const records = recorder.records;
+  const lastClear = records.findLastIndex(
+    (record) => record.type === "call" && record.name === "fillRect",
+  );
+  let stroke = "";
+  let xs: number[] = [];
+  let right = Number.NaN;
+  for (const record of records.slice(lastClear)) {
+    if (record.type === "set" && record.name === "strokeStyle") {
+      stroke = String(record.value);
+    } else if (record.type === "call" && record.name === "beginPath") {
+      xs = [];
+    } else if (record.type === "call" && (record.name === "moveTo" || record.name === "lineTo")) {
+      xs.push(Number(record.args[0]));
+    } else if (record.type === "call" && record.name === "stroke" && stroke === "#e879f9") {
+      right = Math.max(...xs);
+    }
+  }
+  return right;
+}
+
+/** The left edge of mark "a"'s label, CSS px, in a view of the scene with `overrides`. */
+function labelLeftIn(overrides: Partial<SpatialScene>): number {
+  const { unmount } = renderView({ scene: aScene(overrides) });
+  const leftPx = labelLeftPx("A");
+  unmount();
+  return leftPx;
 }
 
 /** A label's left edge, CSS px, from its transform in `rem` at a rem of 16 px. */
@@ -1692,12 +1740,39 @@ describe("SpatialView at the display's ratio (R07.T16.f)", () => {
     stubLayout(1200, 900);
   });
 
-  it("stands a destination on the selection the least gap outside its bracket: 5.12 px at 0.78125", () => {
+  it("stands the destination's chevrons the least gap outside the bracket, selected or not: 5.12 px at 0.78125", () => {
     vi.stubGlobal("devicePixelRatio", 0.78125);
-    const { recorder } = renderView({ scene: aScene({ selectedId: "a", destinationId: "a" }) });
+    const { recorder, unmount } = renderView({
+      scene: aScene({ selectedId: "a", destinationId: "a" }),
+    });
+    const [bracket, destination] = reticlePlaces(recorder);
+    unmount();
+    const lone = renderView({ scene: aScene({ destinationId: "a" }) });
 
-    const [bracket = 0, destination = 0] = reticleHalfSizes(recorder);
-    expect(Math.round((destination - bracket) * 100) / 100).toBe(5.12);
+    expect([
+      bracket?.stroke,
+      destination?.stroke,
+      Math.round(((destination?.placePx ?? 0) - (bracket?.placePx ?? 0)) * 100) / 100,
+      reticlePlaces(lone.recorder),
+    ]).toEqual(["#5cc8e6", "#e879f9", 5.12, [destination]]);
+  });
+
+  it("never moves a mark's label when it is selected or deselected, the destination or not", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+
+    expect([
+      labelLeftIn({ selectedId: "a" }) - labelLeftIn({}),
+      labelLeftIn({ selectedId: "a", destinationId: "a" }) - labelLeftIn({ destinationId: "a" }),
+    ]).toEqual([0, 0]);
+  });
+
+  it("starts the destination's label 0.125 rem beyond its painted chevrons' reach and half their stroke", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+    const { recorder } = renderView({ scene: aScene({ destinationId: "a" }) });
+
+    // The right chevron's arm ends, the farthest right of the chevrons' painted points, and half
+    // their 2.56 CSS px stroke at this ratio; then 0.125 rem at a rem of 16 px.
+    expect(labelLeftPx("A")).toBeCloseTo(chevronsRightPx(recorder) + 2.56 / 2 + 2, 6);
   });
 
   it("stands a mark's label the bracket's growth further out at 1 than at 2: 1.25 px", () => {
@@ -1772,7 +1847,7 @@ describe("SpatialView picking", () => {
     expect(reticleColours(recorder)).toEqual(["#5cc8e6"]);
   });
 
-  it("paints the target reticle about the destination, outside the selection's", async () => {
+  it("paints the target chevrons about the destination, outside the selection's bracket", async () => {
     const user = userEvent.setup();
     const recorder = stubCanvas();
     render(<Selecting destinationId="a" />);

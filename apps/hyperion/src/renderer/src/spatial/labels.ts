@@ -1,6 +1,8 @@
+import { RETICLE_SHIFTS, type ReticleStrokesCss } from "../lib/strokes";
 import type { Viewport } from "./camera";
-import type { Anchor } from "./drawList";
+import { type Anchor, destinationGapPx, reticleHalfSizePx } from "./drawList";
 import type { PointMark } from "./marks";
+import { reticleReachPx } from "./symbols";
 
 /** A box on the screen, in CSS pixels from the view's top left. */
 export interface BoxPx {
@@ -29,11 +31,11 @@ export const LABEL_FONT_REM = 0.875;
 const CHARACTER_EM = 0.62;
 const LINE_EM = 1.25;
 /**
- * The gap between a mark's symbol and its label as built, rem: the reticles' margin, so that a
- * label starts on the selection bracket's centreline and only B612's side bearing keeps its ink off
- * the bracket (plan 05's Risks, "Labels beside reticles").
+ * How far outside the outer edge of the outermost reticle about its mark a label's text starts,
+ * rem: 0.125, on every display (decision-r07-quality-and-destination, Q3; R07.T16.h). A spatial
+ * display's label has no plate, so its box is where its text starts.
  */
-const GAP_REM = 0.25;
+const LABEL_TEXT_CLEARANCE_REM = 0.125;
 
 /** The estimated size of a line of text over a spatial view. */
 export interface TextSizeRem {
@@ -128,6 +130,48 @@ function clampInto(startPx: number, sizePx: number, extentPx: number): number {
   return Math.max(0, Math.min(startPx, extentPx - sizePx));
 }
 
+/**
+ * How far from its mark's centre a label's box starts, CSS px: {@link LABEL_TEXT_CLEARANCE_REM}
+ * beyond the outer edge, the line and half the mark stroke, of the outermost reticle that can stand
+ * about the mark (`reticleReachPx`): the selection's bracket, moved out by four times the outline
+ * shift, whether or not the mark is selected, or while it is the destination, its chevrons.
+ *
+ * @remarks
+ * For a bracket it is the mark's radius, 0.375 rem and 0.75 CSS px + 5δ: 3.40, 2.00, 0.75 and 0.75
+ * px past 0.375 rem at ratios 0.78125, 1, 2 and 3.
+ */
+function labelOffsetPx(
+  anchor: Anchor,
+  remPx: number,
+  reticles: ReticleStrokesCss,
+  isDestination: boolean,
+): number {
+  const bracketPx = reticleHalfSizePx(anchor.radiusPx, remPx) + RETICLE_SHIFTS * reticles.shiftPx;
+  const reachPx = reticleReachPx(
+    bracketPx,
+    isDestination ? bracketPx + destinationGapPx(remPx, reticles.minGapPx) : null,
+  );
+  return reachPx + reticles.markStrokePx / 2 + LABEL_TEXT_CLEARANCE_REM * remPx;
+}
+
+/**
+ * The CSS transform that places a mark's label, from the view's top left, by its near edge, the one
+ * towards its mark: its left edge where it stands to the right, and its right edge where it is
+ * flipped to the left, moved back by its own rendered width.
+ *
+ * @remarks
+ * {@link placeLabels} estimates a label's width from its length. A flipped label placed by its left
+ * edge would, where its text is wider than the estimate, run in towards its mark past the 0.125 rem
+ * its text keeps from every reticle about it (decision-r07-quality-and-destination, Q3; R07.T16.h,
+ * after the UX review). Placed by its near edge, its text keeps that clearance whatever its width.
+ */
+export function markLabelTransform(label: PlacedLabel, remPx: number): string {
+  const top = `${String(label.topPx / remPx)}rem`;
+  return label.side === "right"
+    ? `translate(${String(label.leftPx / remPx)}rem, ${top})`
+    : `translate(calc(${String((label.leftPx + label.widthPx) / remPx)}rem - 100%), ${top})`;
+}
+
 function inView(anchor: Anchor, viewport: Viewport): boolean {
   return (
     anchor.xPx >= 0 &&
@@ -147,12 +191,14 @@ function inView(anchor: Anchor, viewport: Viewport): boolean {
  * furniture, or whose mark is out of view, is dropped. The selection's and the destination's
  * labels, which {@link chooseLabels} puts first, are never dropped.
  *
- * A label stands 0.25 rem beyond its symbol's radius, and further by `reticleGrowthPx`, the
- * bracket's growth at the display's ratio, so that it keeps the clearance from the bracket about its
- * mark that it had as built (R07.T16.f; decision-r07-t16d-followups, item 1).
+ * A label's text starts 0.125 rem outside the outer edge of the outermost reticle that can stand
+ * about its mark, as on every display ({@link labelOffsetPx}; decision-r07-quality-and-destination,
+ * Q3; R07.T16.h): the selection's bracket, counted whether or not the mark is selected, so that
+ * selecting a mark never moves its label, and while the mark is the destination, its chevrons, so
+ * that the destination's report moves it out.
  *
- * @param reticleGrowthPx - How far a reticle's outer edge has moved out, CSS px:
- *   `reticleGrowthCssPx` of the device-pixel ratio (2.65, 1.25, 0 and 0 at 0.78125, 1, 2 and 3).
+ * @param reticles - The marks' strokes at the display's ratio, CSS px (`reticleStrokesCssPx`).
+ * @param destinationId - The destination, whose label stands beyond its chevrons, or `null`.
  * @param pinnedIds - Marks whose labels are never dropped: the selection and the destination.
  * @param obstacles - Other text and furniture over the view that labels must not cover.
  */
@@ -160,11 +206,11 @@ export function placeLabels(
   chosen: ReadonlyArray<PointMark>,
   anchors: ReadonlyArray<Anchor>,
   viewport: Viewport,
-  reticleGrowthPx: number,
+  reticles: ReticleStrokesCss,
+  destinationId: string | null,
   pinnedIds: ReadonlyArray<string> = [],
   obstacles: ReadonlyArray<BoxPx> = [],
 ): ReadonlyArray<PlacedLabel> {
-  const gapPx = GAP_REM * viewport.remPx + reticleGrowthPx;
   const anchorOf = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const placed: PlacedLabel[] = [];
   for (const mark of chosen) {
@@ -176,9 +222,10 @@ export function placeLabels(
     const size = textSizeRem(mark.label);
     const widthPx = size.widthRem * viewport.remPx;
     const heightPx = size.heightRem * viewport.remPx;
-    const rightLeftPx = anchor.xPx + anchor.radiusPx + gapPx;
+    const offsetPx = labelOffsetPx(anchor, viewport.remPx, reticles, mark.id === destinationId);
+    const rightLeftPx = anchor.xPx + offsetPx;
     const flips = rightLeftPx + widthPx > viewport.widthPx;
-    const sideLeftPx = flips ? anchor.xPx - anchor.radiusPx - gapPx - widthPx : rightLeftPx;
+    const sideLeftPx = flips ? anchor.xPx - offsetPx - widthPx : rightLeftPx;
     const label: PlacedLabel = {
       id: mark.id,
       text: mark.label,
