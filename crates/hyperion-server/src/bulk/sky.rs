@@ -56,10 +56,6 @@ pub(crate) struct EncodedSky {
 }
 
 /// The stars, then the texels, as one payload.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "R06.T11.b sends the sky's payload")
-)]
 #[must_use]
 pub(crate) fn encode_sky_payload(stars: &[SkyStarWire], texels: &[SkyTexelWire]) -> EncodedSky {
     let stars_len = stars.len() * SKY_STAR_BYTES;

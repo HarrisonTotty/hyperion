@@ -15,6 +15,7 @@
 //! | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | 128 (MiB)                                    |
 //! | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | 128 (MiB)                                    |
 //! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
+//! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 64 (MiB)                                     |
 //! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
 //!
 //! `--stop-on-stdin-close` is a switch. Its variable takes clap's boolish values, in any case:
@@ -56,6 +57,8 @@ pub const ENV_SYSTEM_CACHE_MB: &str = "HYPERION_SYSTEM_CACHE_MB";
 pub const ENV_BODY_CACHE_MB: &str = "HYPERION_BODY_CACHE_MB";
 /// The variable giving the brief cache's budget in MiB, for `--brief-cache`.
 pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
+/// The variable giving the sky's cell cache's budget in MiB, for `--sky-cache`.
+pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
 pub const ENV_STOP_ON_STDIN_CLOSE: &str = "HYPERION_STOP_ON_STDIN_CLOSE";
 
@@ -73,6 +76,12 @@ pub const DEFAULT_BODY_CACHE_MIB: usize = 128;
 /// 25,000 main-sequence rows at about 2.5 kB each, or 2,000–2,500 dead ones, whose model holds a
 /// full track, at 25–35 kB (P06.T38.e's measurement).
 pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
+/// The sky's cell cache's budget when `--sky-cache` is not given, in MiB (rendering plan R06,
+/// Design note 12).
+///
+/// Provisional: R06.T8.h sets it from one near-Sun sky's entry bytes. A sky forced to 200 ly near
+/// the Sun at V 11 kept 25.5 MB of entries (R06's Risks, "Deviations in T11.b, as built").
+pub const DEFAULT_SKY_CACHE_MIB: usize = 64;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -91,6 +100,9 @@ const DEFAULT_BODY_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_BRIEF_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_BRIEF_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_SKY_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_SKY_CACHE_MIB * BYTES_PER_MIB,
 };
 
 /// The server's command line.
@@ -136,6 +148,10 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
     brief_cache: CacheBudget,
 
+    /// Budget of the cache of the sky census's cells, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_SKY_CACHE_MB, default_value_t = DEFAULT_SKY_CACHE)]
+    sky_cache: CacheBudget,
+
     /// Stop gracefully when standard input closes, for a server run as another program's child
     #[arg(
         long,
@@ -168,6 +184,7 @@ impl From<ServerArgs> for ServerConfig {
             system_cache,
             body_cache,
             brief_cache,
+            sky_cache,
             stop_on_stdin_close,
         } = args;
         Self::builder()
@@ -179,6 +196,7 @@ impl From<ServerArgs> for ServerConfig {
             .system_cache_bytes(system_cache.bytes)
             .body_cache_bytes(body_cache.bytes)
             .brief_cache_bytes(brief_cache.bytes)
+            .sky_cache_bytes(sky_cache.bytes)
             .stdin_stop(stop_on_stdin_close)
             .build()
     }
@@ -241,6 +259,7 @@ pub struct ServerConfig {
     system_cache_bytes: usize,
     body_cache_bytes: usize,
     brief_cache_bytes: usize,
+    sky_cache_bytes: usize,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
@@ -303,6 +322,12 @@ impl ServerConfig {
         self.brief_cache_bytes
     }
 
+    /// The sky's cell cache's budget, in bytes (rendering plan R06, Design note 12).
+    #[must_use]
+    pub fn sky_cache_bytes(&self) -> usize {
+        self.sky_cache_bytes
+    }
+
     /// Whether the end of standard input stops the server.
     ///
     /// The binary's `main` reads this, for [`StopRequests::listen`](crate::stop::StopRequests::listen);
@@ -355,6 +380,7 @@ impl Default for ServerConfigBuilder {
                 system_cache_bytes: DEFAULT_SYSTEM_CACHE.bytes,
                 body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
+                sky_cache_bytes: DEFAULT_SKY_CACHE.bytes,
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
@@ -421,6 +447,15 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn brief_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.brief_cache_bytes = bytes;
+        self
+    }
+
+    /// The sky's cell cache's budget, in bytes.
+    ///
+    /// Zero caches nothing: every census cell is generated, served and dropped.
+    #[must_use]
+    pub fn sky_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.sky_cache_bytes = bytes;
         self
     }
 
@@ -519,6 +554,7 @@ mod tests {
         usize,
         usize,
         usize,
+        usize,
         StdinStop,
     );
 
@@ -532,6 +568,7 @@ mod tests {
             config.system_cache_bytes(),
             config.body_cache_bytes(),
             config.brief_cache_bytes(),
+            config.sky_cache_bytes(),
             config.stdin_stop(),
         )
     }
@@ -556,6 +593,7 @@ mod tests {
                 64 * 1024 * 1024,
                 128 * 1024 * 1024,
                 128 * 1024 * 1024,
+                64 * 1024 * 1024,
                 64 * 1024 * 1024,
                 StdinStop::Ignore,
             )
@@ -583,6 +621,8 @@ mod tests {
             "5",
             "--brief-cache",
             "7",
+            "--sky-cache",
+            "11",
             "--stop-on-stdin-close",
         ]);
         assert_eq!(
@@ -596,6 +636,7 @@ mod tests {
                 2 << 20,
                 5 << 20,
                 7 << 20,
+                11 << 20,
                 StdinStop::Watch,
             )
         );
@@ -636,6 +677,7 @@ mod tests {
                 (Some("system-cache"), Some("HYPERION_SYSTEM_CACHE_MB")),
                 (Some("body-cache"), Some("HYPERION_BODY_CACHE_MB")),
                 (Some("brief-cache"), Some("HYPERION_BRIEF_CACHE_MB")),
+                (Some("sky-cache"), Some("HYPERION_SKY_CACHE_MB")),
                 (
                     Some("stop-on-stdin-close"),
                     Some("HYPERION_STOP_ON_STDIN_CLOSE")
@@ -725,6 +767,7 @@ mod tests {
         assert_eq!(DEFAULT_SYSTEM_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
+        assert_eq!(DEFAULT_SKY_CACHE.to_string(), "64");
     }
 
     #[test]
@@ -773,6 +816,7 @@ mod tests {
             .system_cache_bytes(30)
             .body_cache_bytes(40)
             .brief_cache_bytes(50)
+            .sky_cache_bytes(60)
             .stdin_stop(StdinStop::Watch)
             .build();
         assert_eq!(
@@ -786,6 +830,7 @@ mod tests {
                 30,
                 40,
                 50,
+                60,
                 StdinStop::Watch,
             )
         );

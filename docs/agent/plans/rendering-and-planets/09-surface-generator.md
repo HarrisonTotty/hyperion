@@ -1286,3 +1286,7 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
   figures without the coarse field, so that clouds are drawn over unsurveyed ground (R11 Design note
   8), and whether `ClimateCell.wind`'s four entries are seasonal, since its cloud advection and sea
   state want the month's.
+- **R03.T15's 15 MiB (61-chunk) transfer check is this plan's, after RM3** (decided 2026-10-07 by
+  the orchestrator). The coarse field, about 15 MiB, is the first bulk kind of that size: no sky
+  reaches it (R06's largest is 7.5 MB, 29 chunks; R06.T11.b ran the check at 4 chunks, recorded in
+  R06's Risks, "Deviations in T11.b, as built", and R03's T15 note).

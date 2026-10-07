@@ -1,5 +1,5 @@
-//! The sky's handler (rendering plan R06, R06.T11.a; Design notes 5 and 9–13): `sky`, every star
-//! brighter than a view's limit as seen from a point at a time.
+//! The sky's handler (rendering plan R06, R06.T11.a and T11.b; Design notes 5 and 9–17): `sky`,
+//! every star brighter than a view's limit as seen from a point at a time.
 //!
 //! The request is checked field by field, as every handler's is: the universe, then `time`,
 //! `observer`, `eye`, `camera_limit_v`, `n_max`, `cone` and `exclude_system`, whose ID plan 03's
@@ -7,22 +7,24 @@
 //! pre-pass, and the request's cut is the deeper of it and the camera's limit. Everything the sky
 //! computes runs as bulk jobs on the CPU pool, never in the interactive queue
 //! ([`compute::sky`](crate::compute::sky)): the tables, the eye's cut, the census's plan, the
-//! census itself a few hundred cells to a job, and the merge.
+//! census itself a few hundred cells to a job over the server's cell cache, the merge, and the
+//! payload.
 //!
-//! The answer is the census's JSON alone until R06.T11.b and T11.c: the cut, each layer's cap and
-//! tallies, the listed and overflow counts, `valid_until` and what is not modelled. It carries no
-//! payload (an empty manifest, with no star or band bytes), no host disc and no band texel; the
-//! band's shape is the server's, 64² a face. T11.b sends the stars and the band through R03's
-//! frames ([`wire_star`] is the stars' wire form), and T11.c computes the band, the limits and the
-//! discs.
+//! The answer is the census's JSON (the cut, each layer's cap and tallies, the listed and overflow
+//! counts, `valid_until` and what is not modelled) and its bulk payload, in R03's binary frames
+//! before it (R06.T11.b): each listed star in the census's order in its wire form ([`wire_star`]),
+//! then the band's texels, the response's `stars_bytes` and `band_bytes` splitting it and its
+//! manifest stating the whole. Until R06.T11.c computes the band, the limits and the discs, the
+//! band's part is empty (`band_bytes` 0) and the reply has no host disc; the band's shape is the
+//! server's, 64² a face.
 
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use hyperion_protocol::{
-    BandSpecDto, BulkManifestDto, ConeDto, ErrorCode, EyeDto, MAX_CUT_V, MAX_SKY_STARS,
-    RequestError, ResponseBody, SkyGapDto, SkyLayerCensusDto, SkyRequest, SkyResponse, SystemIdHex,
+    BandSpecDto, ConeDto, ErrorCode, EyeDto, MAX_CUT_V, MAX_SKY_STARS, RequestError, ResponseBody,
+    SkyGapDto, SkyLayerCensusDto, SkyRequest, SkyResponse, SystemIdHex,
 };
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
@@ -45,7 +47,9 @@ use hyperion_sim::units::{CandelasPerSquareMetre, Degrees, LightYears, Magnitude
 
 use super::universe::openable_universe;
 use crate::AppState;
-use crate::bulk::sky::SkyStarWire;
+use crate::bulk::sky::{EncodedSky, SkyStarWire, encode_sky_payload};
+use crate::bulk::{Answer, BulkPayload};
+use crate::compute::sky::CensusInputs;
 use crate::compute::{self, CancelToken, JobError, Priority, SkyCaps};
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 
@@ -62,12 +66,13 @@ const NEAR_STAR_LY: f64 = 1.0;
 /// How far a cone's axis may be from unit length and still be taken as the unit vector it names.
 const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 
-/// Every star brighter than the request's cut as seen from its observer at its time, as the
-/// census's JSON (R06.T11.a; the payload, the band and the discs are T11.b's and T11.c's).
+/// Every star brighter than the request's cut as seen from its observer at its time: the census's
+/// JSON, and its stars as the bulk payload before it (R06.T11.a and T11.b; the band and the discs
+/// are T11.c's).
 ///
-/// The tables, the eye's cut, the plan, the census and its merge each run as bulk jobs under
-/// `token`, the census a few hundred cells to a job, so a cancelled request's queued jobs are
-/// skipped and a running census job stops at its next cell.
+/// The tables, the eye's cut, the plan, the census, its merge and the payload each run as bulk
+/// jobs under `token`, the census a few hundred cells to a job, so a cancelled request's queued
+/// jobs are skipped and a running census job stops at its next cell.
 ///
 /// # Errors
 ///
@@ -82,7 +87,7 @@ pub(crate) async fn answer(
     state: Arc<AppState>,
     request: SkyRequest,
     token: CancelToken,
-) -> Result<ResponseBody, RequestError> {
+) -> Result<Answer, RequestError> {
     let universe = openable_universe(&state, &request.universe)?;
     let asked = SkyAsk::try_from(&request)?;
     let galaxy = state.galaxies.get(universe.key()).await?;
@@ -100,19 +105,48 @@ pub(crate) async fn answer(
     };
     let query = Arc::new(asked.query(eye, state.sky_caps));
     let plan = compute::sky::plan(pool, &galaxy, &tables, &query, &token).await?;
-    let census = compute::sky::census(pool, &galaxy, &tables, &query, &plan, &token).await?;
+    let inputs = CensusInputs {
+        galaxy,
+        key: universe.key(),
+        tables,
+        cells: Arc::clone(&state.sky_cells),
+        query: Arc::clone(&query),
+    };
+    let census = Arc::new(compute::sky::census(pool, &inputs, &plan, &token).await?);
     tracing::debug!(
         cut = query.cut().value(),
         listed = census.listed().len(),
         overflow = census.overflow().len(),
         "sky censused"
     );
-    Ok(ResponseBody::Sky(Box::new(response(
-        request,
-        &query,
-        plan.caps(),
-        &census,
-    ))))
+    let (observer, listed) = (*query.observer(), Arc::clone(&census));
+    let encoded = compute::sky::bulk(pool, &token, move |_: &CancelToken| {
+        payload(&observer, &listed)
+    })
+    .await?;
+    let bulk = BulkPayload::new(encoded.bytes.clone()).expect(
+        "a sky's payload, at most N_max's 3 × 10⁵ stars and six faces of texels (7.5 MB), has far \
+         fewer chunks than a u32 counts",
+    );
+    let body = response(request, &query, plan.caps(), &census, &bulk, &encoded);
+    Ok(Answer {
+        body: ResponseBody::Sky(Box::new(body)),
+        bulk: Some(bulk),
+    })
+}
+
+/// The sky's bulk payload (Design note 17): each listed star of `census` as the wire carries it,
+/// seen from `observer`, in the census's order, then the band's texels.
+///
+/// The band is empty until R06.T11.c computes it, so the payload is the stars alone.
+#[must_use]
+fn payload(observer: &Observer, census: &SkyCensus) -> EncodedSky {
+    let stars: Vec<SkyStarWire> = census
+        .listed()
+        .iter()
+        .map(|star| wire_star(observer, star))
+        .collect();
+    encode_sky_payload(&stars, &[])
 }
 
 /// A `sky` request, checked: the observer, what is asked of the eye and the camera, the count
@@ -307,14 +341,17 @@ async fn check_exclude(
 }
 
 /// The census's answer (R06.T11.a): the cut, each layer's cap and tallies, the counts, the time it
-/// holds to and what is not modelled. The payload's manifest is empty and the hosts are none until
-/// T11.b and T11.c.
+/// holds to and what is not modelled, with the manifest of `bulk` and where `encoded` splits.
+///
+/// The hosts are none until T11.c.
 #[must_use]
 fn response(
     request: SkyRequest,
     query: &SkyQuery,
     caps: &[LayerCap],
     census: &SkyCensus,
+    bulk: &BulkPayload,
+    encoded: &EncodedSky,
 ) -> SkyResponse {
     let tallies = census.tallies();
     SkyResponse {
@@ -331,12 +368,9 @@ fn response(
         },
         hosts: Vec::new(),
         not_modelled: not_modelled(tallies),
-        bulk: BulkManifestDto {
-            chunks: 0,
-            bytes: 0,
-        },
-        stars_bytes: 0,
-        band_bytes: 0,
+        bulk: bulk.manifest(),
+        stars_bytes: encoded.stars_bytes,
+        band_bytes: encoded.band_bytes,
     }
 }
 
@@ -420,11 +454,12 @@ fn valid_until_of(
         .expect("a time in the clock window a year on is on the clock")
 }
 
-/// A listed star as the wire carries it (Design note 17; R06.T11.a): its unit direction from
-/// `observer` and its distance, its own V, M<sub>V</sub> + DM + v★(A<sub>V</sub>) A<sub>V</sub>,
-/// which the census cuts, and its chroma, eye offset and camera band term after its own
-/// reddening, [`StarColour::reddened`] at its A<sub>V</sub> (R06.T9.e), the camera term relative
-/// to that V.
+/// A listed star as the wire carries it (Design note 17; R06.T11.a, sent from T11.b).
+///
+/// It holds its unit direction from `observer` and its distance, its own V, M<sub>V</sub> + DM +
+/// v★(A<sub>V</sub>) A<sub>V</sub>, which the census cuts, and its chroma, eye offset and camera
+/// band term after its own reddening, [`StarColour::reddened`] at its A<sub>V</sub> (R06.T9.e), the
+/// camera term relative to that V.
 ///
 /// Until R06.T11.c builds the limit map, its eye offset is its colour offset alone, against a
 /// scotopic background: 2.5 log₁₀(ρ★ ÷ 2.297) at its reddened S/P ratio ρ★ (Crumey 2014, eq. 15;
@@ -433,10 +468,6 @@ fn valid_until_of(
 /// lists, would be given no direction.
 ///
 /// [`StarColour::reddened`]: hyperion_sim::sky::colour::StarColour::reddened
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "R06.T11.b sends the listed stars")
-)]
 #[must_use]
 pub(crate) fn wire_star(observer: &Observer, star: &SkyStar) -> SkyStarWire {
     let reddened = star.colour().reddened(star.a_v());
@@ -467,10 +498,6 @@ pub(crate) fn wire_star(observer: &Observer, star: &SkyStar) -> SkyStarWire {
 /// The eye colour offset of light of S/P ratio `sp_ratio` against a background of no light,
 /// where every offset is its scotopic 2.5 log₁₀(ρ★ ÷ 2.297) (`sky::eye::star_colour_offset`).
 /// The ratio is held within [`SpRatio`]'s 0.01–100, which no starlight leaves.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "R06.T11.b sends the listed stars")
-)]
 #[must_use]
 fn scotopic_colour_offset(sp_ratio: f64) -> Magnitudes {
     let ratio = SpRatio::new(sp_ratio.clamp(SpRatio::MIN.value(), SpRatio::MAX.value()))
@@ -485,10 +512,6 @@ fn scotopic_colour_offset(sp_ratio: f64) -> Magnitudes {
 /// Risks, "Deviations in T10, as built"). Blue is the luminance's remainder,
 /// (1 − Y<sub>r</sub> r − Y<sub>g</sub> g) ÷ Y<sub>b</sub> (ITU-R BT.709-6's Y row). Light of no
 /// channel sum, which no colour in gamut has, is white's.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "R06.T11.b sends the listed stars")
-)]
 #[must_use]
 fn chromaticity([r, g]: [f64; 2]) -> [f64; 2] {
     let [yr, yg, yb] = LUMINANCE_RGB;

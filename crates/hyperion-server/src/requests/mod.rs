@@ -106,11 +106,12 @@ fn open_topic(
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
 /// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and rendering plan R06's `sky`
-/// (R06.T11.a, as the census's JSON until T11.b and T11.c). A later plan's kind that
-/// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
-/// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
-/// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
-/// 15): `body_events` until plan 14's P14.T31. Each handler that names a universe starts from
+/// (R06.T11.a and T11.b: the census's JSON and its stars in bulk, the band and the discs from
+/// T11.c), the one kind answered in bulk. A later plan's kind that this server's
+/// [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`. A kind the
+/// protocol already defines but whose handler has not landed is answered `unsupported` here, under
+/// its own ID, as an older server would answer it (plan 04, design note 15): `body_events` until
+/// plan 14's P14.T31. Each handler that names a universe starts from
 /// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
@@ -155,7 +156,7 @@ impl Handler for Handlers {
             // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
             // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
-            RequestBody::Sky(request) => Box::pin(sky::answer(state, request, token).map(answered)),
+            RequestBody::Sky(request) => Box::pin(sky::answer(state, request, token)),
         }
     }
 

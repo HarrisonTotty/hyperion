@@ -39,7 +39,7 @@ use axum::{Router, routing::get};
 
 use crate::compute::{
     CpuPool, DensityMapService, GalaxyCache, SharedBodyCache, SharedBriefCache, SharedCellCache,
-    SharedSystemCache, ShutDownPoolError, SkyCaps, StartPoolError,
+    SharedSkyCellCache, SharedSystemCache, ShutDownPoolError, SkyCaps, StartPoolError,
 };
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -112,6 +112,9 @@ pub(crate) struct AppState {
     pub(crate) scene: SceneService,
     /// How far a sky's census looks (rendering plan R06, R06.T11.a).
     pub(crate) sky_caps: SkyCaps,
+    /// The census cells' bright subsets built so far, in the configured byte budget: what a sky's
+    /// census jobs read and share (rendering plan R06, R06.T11.b; Design note 12).
+    pub(crate) sky_cells: Arc<SharedSkyCellCache>,
 }
 
 impl Server {
@@ -167,6 +170,7 @@ impl Server {
         let systems = SharedSystemCache::new(config.system_cache_bytes());
         let briefs = SharedBriefCache::new(config.brief_cache_bytes());
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
+        let sky_cells = Arc::new(SharedSkyCellCache::new(config.sky_cache_bytes()));
         tracing::info!(
             data_dir = %config.data_dir().display(),
             workers = config.workers().get(),
@@ -175,6 +179,7 @@ impl Server {
             system_cache_mib = config.system_cache_bytes() / (1 << 20),
             body_cache_mib = config.body_cache_bytes() / (1 << 20),
             brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
+            sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
             "server started"
         );
         Ok(Self {
@@ -197,6 +202,7 @@ impl Server {
                     Arc::clone(config.craft_source()),
                 ),
                 sky_caps: config.sky_caps(),
+                sky_cells,
             }),
         })
     }
@@ -423,6 +429,7 @@ mod tests {
             (fresh.cells(), defaults.cell_cache_bytes()),
             (fresh.systems(), defaults.system_cache_bytes()),
             (fresh.briefs(), defaults.brief_cache_bytes()),
+            (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
         ] {
             assert_eq!(
                 (
@@ -437,6 +444,7 @@ mod tests {
                 (0, 0, 0, 0, 0, 0, budget)
             );
         }
+        assert_eq!(fresh.sky_cells().rebuilt(), 0);
         let mut client = harness.connect().await;
         assert_eq!(stats().connections(), 1);
         client.hello().await;

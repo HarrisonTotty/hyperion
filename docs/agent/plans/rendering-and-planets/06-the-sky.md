@@ -1977,7 +1977,11 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   nothing to build), and the caps as ray-chunk pool jobs (decided 2026-10-03,
   `decision-r06-tables.md`). Tests: a sky near the Sun returns the stars, texels and host discs the
   sim returns for the same query; a second identical request shares the tables' build; a second
-  sky in another time bucket shares the build. Acceptance:
+  sky in another time bucket shares the build. **The landing switch** (decided 2026-10-07 by the
+  orchestrator): T11.a, T11.b and T11.c land together after T11.c, behind a server switch that
+  T11.c adds. It is off by default, and the server then answers `sky` as it did before T11.a
+  (`unsupported`, T10's interim), until T8.g lands and turns it on. Tests turn it on. Test: with the
+  switch off, `sky` is answered `unsupported` and no job reaches the pool. Acceptance:
   `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye offset and camera band
   term are its `StarColour::reddened(a_v)`'s (R06.T9.e). Its eye offset is
   `sky::limits::eye_offsets`', its own eye limit less its texel's (R06.T9.h; decided 2026-10-06,
@@ -2379,7 +2383,12 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
   (`decision-r06-t9c-glare.md`, addendum 2). Where a whole camera census runs, the realised count,
   and how many of those stars the eye sees;
 - the delivery time of the final reply's stars brighter than V 3.0, against 25% of the full
-  census's wall time.
+  census's wall time;
+- R03.T15's transfer check at the sky's largest payload: a real sky near the Sun at N_max
+  (3 × 10⁵ stars with the band; 7,494,912 bytes, 29 chunks), with T11.c's switch on, asked in the
+  real renderer, hidden. Its chunks arrive in order before the response, and its bytes are the
+  server's. T11.b ran the check at 4 chunks, which closes T11.b's part (decided 2026-10-07 by the
+  orchestrator; R06's Risks, "Deviations in T11.b, as built").
 
 Every figure states its cut and its machine: "10 s" alone is the dev machine at the eye's cut. The
 nuclear-disc bench is recorded, with no budget. If a budget is missed, in this order:
@@ -5906,7 +5915,7 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       out on the request's task, and at most `BULK_QUEUE_CAPACITY` (256) jobs are outstanding.
       Sizing by cost, about 50 ms a job, is T11.d's.
     - Each job builds its own `SkyContext`: 2¹⁴ noise slots, `NoSkyCellCache` (T11.b brings the
-      server's), no sources and `NoModifiers`.
+      server's), no sources and `NoModifiers`. _Since T11.b: the server's `SharedSkyCellCache`._
     - Each job checks, before each cell, the request's token and a census-scoped token that a
       `CancelOnDrop` raises when the census ends early (a failed job, a dropped future).
     - The parts are joined as they arrive: the stars concatenated and the tallies summed from the
@@ -5939,12 +5948,14 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     - no `hosts`, and the query's band shape, 64² a face.
 
     `listed` counts the census's stars though the payload carries none yet. `sky` is no longer
-    answered `unsupported` (T10's interim).
+    answered `unsupported` (T10's interim). _Since T11.b: the stars in bulk, with the manifest and
+    the split; the band and the discs from T11.c._
 
   - **`valid_until`.** Design note 13's rule, with each listed star within 1 ly taken at its
     layer's `pad_speed` (1,000 km/s; 3,000 for E), since a `SkyStar` carries no velocity. The sky
     is then asked again early, never late: a star 0.5 ly off holds it 5.3 days, or 1.8 in E.
-  - **The wire's star** (`wire_star`, `expect(dead_code)` until T11.b sends it):
+  - **The wire's star** (`wire_star`, `expect(dead_code)` until T11.b sends it; _since T11.b,
+    sent_):
     - its V is `SkyStar::v`;
     - its chroma is the chromaticity of `reddened(a_v).red_green()` (T10's conversion);
     - its camera term is the reddened one, relative to that V;
@@ -5968,9 +5979,140 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
        published run (`useViewSky`). With T11.a merged it holds a sky with no stars and no
        texels. `view/sky/band.ts`'s `bandTexels` then throws "a band of 0 texels is not six faces
        of 64²", and R02's interim field is gone. Land T11.a with T11.b and T11.c, or keep the
-       client from asking until then.
+       client from asking until then. _Decided 2026-10-07 by the orchestrator: T11.a–c land
+       together after T11.c, behind T11.c's server switch, off until T8.g (T11.c)._
     2. **The cost of a real sky.** Until T8.g, a sky to the derived caps near the Sun is some
        10⁵–10⁶ CPU-s of bulk work (T8.f's sampled 1.64 × 10⁶), after a table build of minutes, and
        the client's request starts one whenever a view asks for a sky. Its jobs never block a
        chart, and closing the view cancels it, but they fill every worker meanwhile, against the
-       2026-10-06 load limits.
+       2026-10-06 load limits. _Decided 2026-10-07 with item 1: the switch stays off until T8.g._
+- **Deviations in T11.b, as built (2026-10-07).** The payload through R03's frames and the per-cell
+  cache, as the task sets them out, with these details.
+  - **Landing (decided 2026-10-07 by the orchestrator; closes T11.a's open items 1 and 2).** T11.a,
+    T11.b and T11.c land together after T11.c, behind a server switch that T11.c adds. It is off
+    by default, so the server answers `sky` as before T11.a (`unsupported`), until T8.g lands and
+    turns it on. Tests turn it on. The plan text is in T11.c's task. Until then T11.a and T11.b are
+    held on the server lane.
+  - **The payload.**
+    - `requests/sky.rs`'s `answer` returns R03's `Answer { body, bulk: Some(payload) }`, so
+      `requests/mod.rs`'s `Sky` arm no longer goes through `answered`.
+    - After the census, one more bulk job (`payload`) takes each listed star, in the census's
+      order, through `wire_star`, and then `encode_sky_payload`. It runs on the pool, since it
+      walks up to 3 × 10⁵ stars. The census is shared with it through an `Arc`.
+    - `BulkPayload::new` takes the bytes. Its refusal, a chunk count past a `u32`, cannot happen
+      to a payload of at most 7.5 MB, so it is an `expect` that states the bound.
+    - The response's `bulk`, `stars_bytes` and `band_bytes` are the payload's, set once in
+      `response`.
+    - The `expect(dead_code)`s on `BulkPayload::new`, `BuildBulkPayloadError`,
+      `encode_sky_payload`, `wire_star`, `chromaticity` and `scotopic_colour_offset` are gone.
+      `SkyTexelWire` needs none: the encoder's signature uses it.
+  - **The band's part is empty until T11.c.** The payload is the stars alone: `band_bytes` is 0,
+    and `band.face_texels` still states 64. The client's `bandTexels` would throw on this reply,
+    which is one reason for the switch above.
+  - **The cache** (`compute/sky_cells.rs`, new; Design note 12).
+    - `SharedSkyCellCache` is a `SharedByteLru` over `(GalaxyKey, CellKey)`. Its entry,
+      `SkyCellEntry`, holds the floor it was built at and the cell's records at or above it, in
+      candidate order. An entry is charged `cell_heap_bytes` of its records (kept at their length)
+      plus its size and `ENTRY_OVERHEAD_BYTES`.
+    - `SkyCellCacheHandle` is the sim's `SkyCellCache`. It serves only through
+      `serve_from_entry`, so it never changes a reply. A floor below the entry's rebuilds the cell
+      outside the lock and replaces the entry with the one that serves more. A NaN floor's cell is
+      served and not kept. The handle asserts the galaxy's seed, as `CellCacheHandle` does.
+    - Two requests may build one cell at once, and the later insert wins. Either entry serves by
+      the rule, so this costs only a rebuild that a single flight would save, as with
+      `SharedByteLru`'s other caches. Two census jobs never share a cell.
+    - The budget is `HYPERION_SKY_CACHE_MB`, or `--sky-cache` (default 64 MiB, a whole MiB, 0
+      caches nothing), in `config.rs`, with `ServerConfigBuilder::sky_cache_bytes`, the server's
+      start log (`sky_cache_mib`) and the README's options table.
+    - It is held on `AppState::sky_cells` as an `Arc`. The census jobs take it through
+      `compute::sky::CensusInputs` (new: the galaxy, its key, the tables, the cache and the query),
+      which keeps `census` at four arguments. Each job builds its `SkyContext` over its own handle.
+      The eye's pre-pass and the plan read no cell and keep `NoSkyCellCache`.
+    - **Counters, beyond the plan:** `ServerStats::sky_cells()` gives `SkyCellCounters`, the
+      cache's `LruCounters` and `rebuilt`. A hit is a lookup that found its cell's entry, and
+      `rebuilt` counts the hits whose entry was built above the floor asked, which rebuilt the cell.
+      So the lookups served are the hits less `rebuilt`.
+  - **Tests.**
+    - `--test sky`:
+      - `a_skys_manifest_matches_what_was_sent`, named so that the task's acceptance filter
+        (`sky`) runs it. It reads every frame with `TestClient::next_frame` (new in
+        `tests/common/mod.rs`) rather than the task's `next_binary`. The chunk count arrives only
+        in the terminal response, after the chunks, and `next_binary` panics on a text frame, so
+        the reader must take either kind. The chunks come in order, for the request, before the
+        response, each a frame of at most 262,144 bytes. Their count and bytes are the manifest's,
+        and `stars_bytes + band_bytes` is the manifest's bytes, with `stars_bytes` = 24 × `listed`
+        and `band_bytes` 0. Each star's wire V and distance are the sim's one-pass census's, star
+        for star in its order, through no cache. The same sky asked again gives the same bytes,
+        and every cell the first census looked up is served from the cache: no new miss, no
+        rebuild, no eviction.
+      - `served` now reads the frames before the response. The near-Sun test asserts the payload's
+        split in place of the stub's empty manifest.
+    - `tests/cli.rs`'s `the_sky_caches_budget_falls_back_to_its_variable`. It starts the binary with
+      `HYPERION_SKY_CACHE_MB=3`, reads its log up to `listening` and kills it. Its log's
+      `server started` line states `sky_cache_mib=3`. The process harness `tests/stop.rs` had
+      (`Running`, `Stopped`, the binary with every option's variable cleared, read from the parser)
+      moved to `tests/common/process.rs`, shared by both files. `stop.rs` keeps its own requests
+      to the server (`/healthz`, stdin, signals) as an `impl` of its own.
+    - `config.rs`'s tests take the option and variable throughout. `lib.rs`'s fresh-stats test
+      takes the new counters.
+    - Unit tests, `compute::sky_cells`, 7, which pass T8.d's scenarios as its record asks:
+      - looser, then tighter, then lower, with each hit, miss and rebuild counted;
+      - a planted entry served, filtered, at or above its floor, and rebuilt below it;
+      - `assert_order_independent` over a cell of each of A–E about the Sun at three floors each,
+        through a warm cache, a fresh cache per call and a cache whose budget evicts (and holds);
+      - entries kept per galaxy, a budget of 0, a NaN floor, and another galaxy's cells refused.
+    - `compute::sky`'s jobs test now runs the census twice through one cache: cold and warm both
+      equal the one-pass census with no cache, and the warm one is served wholly from the cache.
+  - **R03.T15's transfer check, run (2026-10-07; R03's Risks, T15's pending item).** The 4-chunk
+    run below closes T11.b's part (decided 2026-10-07 by the orchestrator). The sky's largest
+    payload runs in R06.T17, on a real sky with the switch on (T17's list).
+    - **Out of reach at 15 MiB.** No sky's payload reaches R03's 15 MiB (61 chunks). The largest
+      is N_max's 3 × 10⁵ stars × 24 bytes plus 24,576 texels × 12 bytes: 7,494,912 bytes, 29
+      chunks. The 61-chunk check belongs to R09's coarse field, about 15 MiB, after RM3 (decided
+      2026-10-07 by the orchestrator; a pointer in R09's Risks).
+    - **The setup.** The check ran with this kind, in the real renderer, hidden. It is a scratch
+      harness, not committed, in `.git/rm23-scratch/r06-server/t11b/transfer/`:
+      - The server was started in a test binary with T11.a's seam, `SkyCaps::forced(200 ly)`, 4
+        workers, the default 64 MiB sky cache and the seed `0x4d2`. The server binary has no option
+        for forced caps, and a derived-caps sky near the Sun is not to be run.
+      - Electron 44.4.3 (Chromium 152) ran headless: Ozone headless, SwiftShader, an offscreen
+        window that was never shown, a fresh profile and no D-Bus session, under the GPU lock in a
+        capped scope. Nothing on the path (the socket, the assembly, the decode) uses the GPU, so
+        R03's "on this machine (RTX 3080)" asks nothing of the graphics adapter here.
+      - Its page asked `sky` near the Sun at V 11 (a camera's limit, no eye) through
+        `@hyperion/protocol`'s `RequestClient.requestBulk` over a real WebSocket. It read each
+        frame's header as it arrived and decoded the payload with the app's own
+        `decodeSkyPayload`, on the page itself, not in the app's decode worker
+        (`decode.worker.ts`, which only hands each request to that function).
+    - **What was sent:** 36,177 stars listed, none overflowing, and no band. 868,248 bytes in 4
+      chunks: three of 262,120 bytes and one of 81,888 (frames of at most 262,144 bytes).
+    - **The result: passed.**
+      - The 4 chunks arrived for the one request, in order, and the terminal response after the
+        last.
+      - The assembled 868,248 bytes are the manifest's and `stars_bytes`'. Their FNV-1a,
+        `f56690fe`, equals the server's own over the same sky, asked by its test client. Two runs
+        with the server's test client alone gave the same.
+      - The decode gave 36,177 stars and 0 band texels.
+      - Provisional, under load 10–40: the census took about 87 s, cold, on 4 workers of a test
+        build, and the transfer, first chunk to response, about 1 ms on loopback.
+      - The harness's own startup: the page's socket was welcomed 19.6 s after the page loaded,
+        before any request. It is probably Chromium's network service without a D-Bus session,
+        and was not looked into; it is no part of the transfer.
+    - **Not run:** the sky at N_max (about 420 ly at V 11, some 2,500 CPU-s of census before T8.g)
+      and the integrated app's `VIEW`, whose band would throw (above). The first is T17's (above);
+      the second waits for T11.c and the switch.
+  - **Not built: the server bench `sky_near_sun_cold`** (T11's Files, `benches/sky.rs`). T11.a and
+    T11.b leave it, since a cold sky to the derived caps near the Sun is 10⁵–10⁶ CPU-s before
+    T8.g. T11.d, the first server task after T8.g, builds it.
+  - **Found: a warm repeat costs as much as cold (a measurement, not fixed; FEATURES FIRST).** On
+    that server, the same 200 ly sky asked again found all 93,440 cells built (25.5 MB of entries;
+    no miss, no rebuild), yet took 90 s against the cold 87 s, under load 27–43 against the cold
+    census's 10–40. Provisional, under load.
+    - The census's cost is generating each candidate system's stars (`SystemStars::generate`, 98%
+      of it, `decision-r06-census-cost.md`), and an entry holds the records, not the stars.
+    - **A question for R06.T8.h** (recorded 2026-10-07 at the orchestrator's direction; the cache
+      is not changed here): must Design note 12's cache hold the generated stars, not only the
+      records, for the warm budget of at most 25% of cold? The hierarchy-bound ruling's Risks
+      already flag it (`decision-p11-t16-hierarchy-bound.md`, "The warm budget": with records
+      alone a warm census still generates the survivors, about 20–35% of cold after T8.g). T8.h
+      measures it.

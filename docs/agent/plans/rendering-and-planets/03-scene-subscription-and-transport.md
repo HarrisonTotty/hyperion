@@ -1775,6 +1775,13 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
     request, the first real bulk kind, on this machine (RTX 3080) under the target-hardware rule.
     Until then, the client's reassembly is held by T11's tests over `FakeWebSocket` and the
     server's streaming by T10.b's tests over real sockets.
+    _Run 2026-10-07 with R06's sky (R06.T11.b; R06's Risks, "Deviations in T11.b, as built"):
+    passed at 4 chunks (868,248 bytes), hidden, in Electron 44.4.3 headless on SwiftShader, through
+    `RequestClient.requestBulk` over a real socket. The chunks arrived in order before the
+    response, and their bytes matched the server's. That closes R06.T11.b's part; the sky's
+    largest payload runs in R06.T17. No sky reaches 15 MiB: its largest payload is 7,494,912 bytes
+    (29 chunks). The 61-chunk check is R09's coarse field's, after RM3 (R09's Risks; decided
+    2026-10-07 by the orchestrator)._
   - **The envelope against P12.T9**, for plan 12's writer. As P12.T9 designs it: `subscribe`,
     `unsubscribe`, `Subscribed { subscription, state }`, `SubscriptionTopic`, `SubscriptionState`,
     `ServerMessage::Notification { subscription, body }`, `NotificationBody`, the unknown

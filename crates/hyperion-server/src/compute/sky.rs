@@ -7,10 +7,12 @@
 //! at most one census job on a busy worker. The tables, the eye's cut and the plan are one job each
 //! until R06.T11.c splits the tables and the caps into staged jobs, and a query may wait behind one
 //! of them. Every job runs under the request's [`CancelToken`]: a cancelled request's queued jobs
-//! are skipped, and a running census job stops at its next cell. The parts are merged once every job has
-//! finished, in one more bulk job ([`merge_census`]'s order is total, so the split cannot change
-//! the answer). Neither a census's sources nor its noise cache can be shared between threads, so
-//! each job builds its own [`SkyContext`] over the [`SkyTables`] they all read.
+//! are skipped, and a running census job stops at its next cell. The parts are merged once every
+//! job has finished, in one more bulk job ([`merge_census`]'s order is total, so the split cannot
+//! change the answer). Neither a census's sources nor its noise cache can be shared between
+//! threads, so each job builds its own [`SkyContext`] over the [`SkyTables`] they all read, and
+//! over the server's [`SharedSkyCellCache`], which every job and request shares (R06.T11.b; Design
+//! note 12).
 //!
 //! [`SkyCaps`] says how far the census looks: each layer's derived cap (Design note 9), or one
 //! forced radius, which keeps a test's census small.
@@ -28,8 +30,8 @@ use hyperion_sim::galaxy::placement::CellKey;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::census::{
-    CellOffsets, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY, NoSkyCellCache, SkyCensus,
-    SkyContext, SkyQuery, SkyStar, census_cell, census_plan, merge_census,
+    CellOffsets, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY, NoSkyCellCache, SkyCellCache,
+    SkyCensus, SkyContext, SkyQuery, SkyStar, census_cell, census_plan, merge_census,
 };
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::limits;
@@ -37,7 +39,10 @@ use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::units::{LightYears, Magnitudes};
 use tokio::sync::oneshot::error::RecvError;
 
-use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, JobError, Priority};
+use super::{
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Priority,
+    SharedSkyCellCache,
+};
 use crate::limits::BULK_QUEUE_CAPACITY;
 
 /// The cells one census job takes: a few hundred (R06.T11.a).
@@ -139,26 +144,28 @@ impl SkyTables {
         }
     }
 
-    /// A job's own context over these tables, with a noise cache of `noise_slots`, no cell cache
-    /// (R06.T11.b brings the server's), no sources beyond the grid and no gas modifiers (plan 09's
+    /// A job's own context over these tables, with a noise cache of `noise_slots`, the cells'
+    /// bright subsets from `cells`, no sources beyond the grid and no gas modifiers (plan 09's
     /// feature members and their gas, from R06.T16.a).
     #[must_use]
-    fn context(&self, noise_slots: usize) -> SkyContext<'_> {
+    fn context<'a>(&'a self, noise_slots: usize, cells: &'a dyn SkyCellCache) -> SkyContext<'a> {
         SkyContext {
             tables: &self.tables,
             envelope: &self.envelope,
             offsets: &self.offsets,
             noise: NoiseCache::with_capacity(noise_slots),
-            cells: &NoSkyCellCache,
+            cells,
             sources: &[],
             modifiers: &NoModifiers,
         }
     }
 
     /// A context for a job that marches many rays: the eye's pre-pass and the plan's caps.
+    ///
+    /// They read no cell, so it has no cell cache.
     #[must_use]
     pub(crate) fn march_context(&self) -> SkyContext<'_> {
-        self.context(MARCH_NOISE_SLOTS)
+        self.context(MARCH_NOISE_SLOTS, &NoSkyCellCache)
     }
 }
 
@@ -262,16 +269,17 @@ fn add_tallies(sum: &mut Option<CensusTallies>, tallies: &CensusTallies) {
     }
 }
 
-/// The census of `query` over `plan`'s cells, as bulk jobs of [`CENSUS_JOB_CELLS`] cells under
-/// `token`, merged once every job has finished (Design notes 10 and 11).
+/// The census of the inputs' query over `plan`'s cells, as bulk jobs of [`CENSUS_JOB_CELLS`] cells
+/// under `token`, merged once every job has finished (Design notes 10 and 11).
 ///
 /// The cells are handed out in the plan's canonical order, and at most [`BULK_QUEUE_CAPACITY`] jobs
 /// are outstanding at once, so the parts held while the census runs stay bounded. Each job builds
-/// its own [`SkyContext`] over `tables`. A job stops at its next cell once `token` is cancelled,
-/// and the pool skips those still queued. A census that ends early, because a job failed or this
-/// future was dropped, abandons its other jobs too: each stops before its next cell. The parts are
-/// joined as they arrive and merged in one more bulk job, which is the same census as merging them
-/// part by part: the merge's order is total, and its tallies are sums.
+/// its own [`SkyContext`] over the inputs' tables, and reads each cell's bright subset through
+/// their cell cache, which never changes the census (Design note 12). A job stops at its next cell
+/// once `token` is cancelled, and the pool skips those still queued. A census that ends early,
+/// because a job failed or this future was dropped, abandons its other jobs too: each stops before
+/// its next cell. The parts are joined as they arrive and merged in one more bulk job, which is the
+/// same census as merging them part by part: the merge's order is total, and its tallies are sums.
 ///
 /// # Errors
 ///
@@ -279,15 +287,13 @@ fn add_tallies(sum: &mut Option<CensusTallies>, tallies: &CensusTallies) {
 /// job was cancelled, panicked or was dropped with the pool.
 pub(crate) async fn census(
     pool: &CpuPool,
-    galaxy: &Arc<Galaxy>,
-    tables: &Arc<SkyTables>,
-    query: &Arc<SkyQuery>,
+    inputs: &CensusInputs,
     plan: &CensusPlan,
     token: &CancelToken,
 ) -> Result<SkyCensus, ComputeError> {
     // Raised when this census ends, however it ends: its jobs still outstanding then are of no use.
     let abandoned = CancelOnDrop::new(CancelToken::new());
-    let mut cells = plan.cells();
+    let mut planned = plan.cells();
     let mut pending = FuturesUnordered::new();
     let mut stars = Vec::new();
     let mut tallies = None;
@@ -299,7 +305,7 @@ pub(crate) async fn census(
         }
     };
     loop {
-        let chunk: Vec<CellKey> = cells.by_ref().take(CENSUS_JOB_CELLS).collect();
+        let chunk: Vec<CellKey> = planned.by_ref().take(CENSUS_JOB_CELLS).collect();
         if chunk.is_empty() {
             break;
         }
@@ -309,19 +315,13 @@ pub(crate) async fn census(
                 done.expect("it waits only while jobs are outstanding"),
             )?);
         }
-        let job = census_job(
-            Arc::clone(galaxy),
-            Arc::clone(tables),
-            Arc::clone(query),
-            chunk,
-            abandoned.token().clone(),
-        );
+        let job = census_job(inputs.clone(), chunk, abandoned.token().clone());
         pending.push(pool.submit(Priority::Bulk, token.clone(), job).await?);
     }
     while let Some(done) = pending.next().await {
         absorb(finished(done)?);
     }
-    let n_max = query.n_max();
+    let n_max = inputs.query.n_max();
     bulk(pool, token, move |_: &CancelToken| {
         merge_census(tallies.map(|tallies| (stars, tallies)), n_max)
     })
@@ -334,25 +334,47 @@ fn finished(done: Result<Result<Option<Part>, JobError>, RecvError>) -> Result<P
     Ok(part.ok_or(JobError::Cancelled)?)
 }
 
-/// One census job: `cells`, in order, each with [`census_cell`], in a context of its own. `None`
-/// if the job stopped early because its request's token was cancelled or its census `abandoned`
-/// it.
+/// What every job of one census reads, each shared: the galaxy and its key, the tables, the cell
+/// cache and the query.
+#[derive(Debug, Clone)]
+pub(crate) struct CensusInputs {
+    /// The galaxy censused.
+    pub(crate) galaxy: Arc<Galaxy>,
+    /// The key of `galaxy`, under which its cells are cached.
+    pub(crate) key: GalaxyKey,
+    /// The tables the census reads.
+    pub(crate) tables: Arc<SkyTables>,
+    /// The cells' bright subsets every request shares (Design note 12).
+    pub(crate) cells: Arc<SharedSkyCellCache>,
+    /// The query censused.
+    pub(crate) query: Arc<SkyQuery>,
+}
+
+/// One census job: `chunk`'s cells, in order, each with [`census_cell`], in a context of its own
+/// over the shared cell cache. `None` if the job stopped early because its request's token was
+/// cancelled or its census `abandoned` it.
 fn census_job(
-    galaxy: Arc<Galaxy>,
-    tables: Arc<SkyTables>,
-    query: Arc<SkyQuery>,
-    cells: Vec<CellKey>,
+    inputs: CensusInputs,
+    chunk: Vec<CellKey>,
     abandoned: CancelToken,
 ) -> impl FnOnce(&CancelToken) -> Option<Part> + Send + 'static {
     move |token: &CancelToken| {
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS);
+        let CensusInputs {
+            galaxy,
+            key,
+            tables,
+            cells,
+            query,
+        } = inputs;
+        let handle = cells.handle(key);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &handle);
         let mut stars = Vec::new();
         let mut tallies = None;
-        for key in cells {
+        for cell in chunk {
             if token.is_cancelled() || abandoned.is_cancelled() {
                 return None;
             }
-            let cell = census_cell(&galaxy, &mut ctx, key, &query, &mut stars);
+            let cell = census_cell(&galaxy, &mut ctx, cell, &query, &mut stars);
             add_tallies(&mut tallies, &cell);
         }
         Some((stars, tallies))
@@ -363,17 +385,18 @@ fn census_job(
 mod tests {
     use std::num::NonZeroUsize;
 
-    use hyperion_sim::Seed;
     use hyperion_sim::coords::GalacticPosition;
     use hyperion_sim::time::UniverseTime;
+    use hyperion_sim::{GENERATOR_VERSION, Seed};
     use tokio::time::timeout;
 
     use super::*;
     use crate::limits::INTERACTIVE_QUEUE_CAPACITY;
     use crate::testing::WAIT;
 
-    /// The census its jobs merge is the sim's one pass over the same plan, star for star and
-    /// tally for tally: the split into jobs, their order and the joined parts change nothing.
+    /// The census its jobs merge is the sim's one pass over the same plan with no cell cache, star
+    /// for star and tally for tally, cold and warm: the split into jobs, their order, the joined
+    /// parts and the cache change nothing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_jobs_census_is_the_one_pass_census_star_for_star() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
@@ -398,16 +421,41 @@ mod tests {
             .await
             .expect("timed out planning")
             .unwrap();
-        let jobs = timeout(WAIT, census(&pool, &galaxy, &tables, &query, &plan, &token))
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key: GalaxyKey::new(0x4d2, GENERATOR_VERSION),
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(256 << 20)),
+            query: Arc::clone(&query),
+        };
+        let cold = timeout(WAIT, census(&pool, &inputs, &plan, &token))
             .await
             .expect("timed out censusing")
             .unwrap();
+        let after_cold = inputs.cells.counters();
+        let warm = timeout(WAIT, census(&pool, &inputs, &plan, &token))
+            .await
+            .expect("timed out censusing again")
+            .unwrap();
+        let after_warm = inputs.cells.counters();
         assert!(
             usize::try_from(plan.cell_count()).unwrap() > 2 * CENSUS_JOB_CELLS,
             "the census is split into several jobs"
         );
+        // Every cell the cold census looked up, the warm one found built at its own floor.
+        let lookups = after_cold.cache().hits() + after_cold.cache().misses();
+        assert!(lookups > 0);
+        assert_eq!(
+            (
+                after_warm.cache().hits() - after_cold.cache().hits(),
+                after_warm.cache().misses() - after_cold.cache().misses(),
+                after_warm.rebuilt()
+            ),
+            (lookups, 0, 0),
+            "the warm census is served from the cache: {after_cold:?}, then {after_warm:?}"
+        );
 
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache);
         let mut stars = Vec::new();
         let mut tallies = None;
         for key in plan.cells() {
@@ -418,7 +466,8 @@ mod tests {
         }
         let one_pass = merge_census(tallies.map(|tallies| (stars, tallies)), query.n_max());
         assert!(!one_pass.listed().is_empty());
-        assert_eq!(jobs, one_pass);
+        assert_eq!(cold, one_pass);
+        assert_eq!(warm, one_pass);
         pool.shutdown().await.unwrap();
     }
 

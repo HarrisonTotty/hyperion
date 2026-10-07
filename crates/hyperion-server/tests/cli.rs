@@ -2,21 +2,19 @@
 //! environment variables, and that an option given wins over its variable.
 //!
 //! Each run listens on port 0 and is killed if it does not exit within [`EXIT_TIMEOUT`], so a
-//! regression that starts the server fails the test instead of hanging the suite.
+//! regression that starts the server fails the test instead of hanging the suite. The one test
+//! that lets it start reads its log up to its `listening` line and kills it ([`common::process`]).
+
+mod common;
 
 use std::path::Path;
 use std::process::Output;
-use std::time::Duration;
 
+use common::process::{EXIT_TIMEOUT, Running, server_binary};
 use hyperion_server::config::{
-    ENV_ADDR, ENV_CELL_CACHE_MB, ENV_DATA_DIR, ENV_MAP_CACHE_MB, ENV_PORT, ENV_STOP_ON_STDIN_CLOSE,
-    ENV_WORKERS,
+    ENV_DATA_DIR, ENV_SKY_CACHE_MB, ENV_STOP_ON_STDIN_CLOSE, ENV_WORKERS,
 };
-use tokio::process::Command;
 use tokio::time::timeout;
-
-/// Upper bound on a run of the binary, which exits before serving in every test here.
-const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The exit code for a command line clap refuses.
 const USAGE_ERROR: i32 = 2;
@@ -27,17 +25,7 @@ const FAILURE: i32 = 1;
 /// Runs the server in `dir` with `args` and `vars`, and none of the variables it reads inherited
 /// from the test's environment.
 async fn run(dir: &Path, args: &[&str], vars: &[(&str, &Path)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_hyperion-server"));
-    for name in [
-        ENV_ADDR,
-        ENV_PORT,
-        ENV_DATA_DIR,
-        ENV_WORKERS,
-        ENV_CELL_CACHE_MB,
-        ENV_MAP_CACHE_MB,
-    ] {
-        command.env_remove(name);
-    }
+    let mut command = server_binary();
     command
         .current_dir(dir)
         .args(["--port", "0"])
@@ -142,5 +130,24 @@ async fn an_option_wins_over_its_variable() {
         stderr(&output).contains("is not a directory"),
         "{}",
         stderr(&output)
+    );
+}
+
+/// The sky's cell cache takes its budget from `HYPERION_SKY_CACHE_MB` when `--sky-cache` is not
+/// given (rendering plan R06, R06.T11.b): the server states it in MiB as it starts.
+#[tokio::test]
+async fn the_sky_caches_budget_falls_back_to_its_variable() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Running::start(dir.path(), |command| {
+        command.env(ENV_SKY_CACHE_MB, "3");
+    })
+    .await;
+    let stopped = server.kill().await;
+    let started = stopped
+        .line_with(&["server started"])
+        .unwrap_or_else(|| panic!("the server logs its start: {stopped}"));
+    assert!(
+        stopped.lines[started].contains("sky_cache_mib=3"),
+        "the start states the variable's budget: {stopped}"
     );
 }

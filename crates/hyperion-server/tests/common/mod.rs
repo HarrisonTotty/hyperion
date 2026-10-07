@@ -6,6 +6,7 @@
     reason = "each test binary compiles this module and uses its own subset of the helpers"
 )]
 
+pub mod process;
 pub mod scene;
 
 use std::future::IntoFuture;
@@ -434,6 +435,15 @@ impl BinaryHeader {
     }
 }
 
+/// A frame from the server, of either kind.
+#[derive(Debug)]
+pub enum Frame {
+    /// A text frame's message.
+    Message(ServerMessage),
+    /// A bulk frame (rendering plan R03, R03.T10.b): its header, read and checked, and its payload.
+    Binary(BinaryHeader, Vec<u8>),
+}
+
 /// A WebSocket client speaking `hyperion-protocol`.
 #[derive(Debug)]
 pub struct TestClient {
@@ -509,6 +519,31 @@ impl TestClient {
                 Message::Binary(bytes) => return BinaryHeader::split(&bytes),
                 Message::Ping(_) | Message::Pong(_) => {}
                 other => panic!("expected a binary frame, got {other:?}"),
+            }
+        }
+    }
+
+    /// The next frame from the server, a message or a bulk frame, skipping WebSocket pings and
+    /// pongs: for a test that reads a bulk answer's chunks and then its terminal response.
+    pub async fn next_frame(&mut self) -> Frame {
+        loop {
+            let frame = patiently("waiting for a frame", self.socket.next())
+                .await
+                .expect("the server closed the connection")
+                .expect("the connection is healthy");
+            match frame {
+                Message::Text(text) => {
+                    return Frame::Message(
+                        serde_json::from_str(text.as_str())
+                            .expect("the server sends valid messages"),
+                    );
+                }
+                Message::Binary(bytes) => {
+                    let (header, payload) = BinaryHeader::split(&bytes);
+                    return Frame::Binary(header, payload);
+                }
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("unexpected frame {other:?}"),
             }
         }
     }

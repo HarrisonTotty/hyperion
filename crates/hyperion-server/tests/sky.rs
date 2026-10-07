@@ -1,6 +1,7 @@
-//! The sky over a real socket (rendering plan R06, R06.T11.a): the census as bulk jobs, which a
-//! range query overtakes and a cancel stops, its answer against the sim's own census, and the
-//! fields a request it cannot serve names.
+//! The sky over a real socket (rendering plan R06, R06.T11.a and T11.b): the census as bulk jobs,
+//! which a range query overtakes and a cancel stops, its answer against the sim's own census, its
+//! stars in R03's bulk frames as the manifest states them, its census's cells served again from
+//! the server's cache, and the fields a request it cannot serve names.
 //!
 //! Every server here forces its sky's caps to a small radius ([`SkyCaps::forced`]), so that a
 //! census near the Sun takes seconds in a test build rather than the thousands of CPU-seconds of
@@ -14,14 +15,15 @@ mod common;
 use std::num::NonZeroUsize;
 use std::sync::OnceLock;
 
-use common::{TestClient, TestServer};
+use common::{BinaryHeader, Frame, TestClient, TestServer};
 use hyperion_protocol::{
     ConeDto, ErrorCode, EyeDto, GalacticPosition, MAX_SKY_STARS, MassLayer, OpenUniverseRequest,
-    RequestBody, RequestError, RequestId, ResponseBody, ServerMessage, SkyGapDto, SkyRequest,
-    SkyResponse, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+    RequestBody, RequestError, RequestId, ResponseBody, SKY_STAR_BYTES, ServerMessage, SkyGapDto,
+    SkyRequest, SkyResponse, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::ServerStats;
 use hyperion_server::compute::SkyCaps;
+use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition as SimPosition;
 use hyperion_sim::galaxy::Galaxy;
@@ -115,11 +117,45 @@ fn eye() -> EyeDto {
     }
 }
 
-/// The answer to a sky that must be served.
-async fn served(client: &mut TestClient, request: SkyRequest) -> SkyResponse {
-    match client.request(RequestBody::Sky(request)).await {
-        Ok(ResponseBody::Sky(response)) => *response,
-        other => panic!("expected a sky, got {other:?}"),
+/// A sky's answer as the server sent it: the request's ID, its bulk frames in the order they
+/// arrived, and the terminal response after them.
+struct Sent {
+    id: RequestId,
+    frames: Vec<(BinaryHeader, Vec<u8>)>,
+    response: SkyResponse,
+}
+
+impl Sent {
+    /// The payload, the frames' payloads joined in the order they arrived.
+    fn payload(&self) -> Vec<u8> {
+        self.frames
+            .iter()
+            .flat_map(|(_, payload)| payload.iter().copied())
+            .collect()
+    }
+}
+
+/// The answer to a sky that must be served: its chunks, then its response.
+async fn served(client: &mut TestClient, request: SkyRequest) -> Sent {
+    let id = client.send_request(RequestBody::Sky(request)).await;
+    let mut frames = Vec::new();
+    loop {
+        match client.next_frame().await {
+            Frame::Binary(header, payload) => frames.push((header, payload)),
+            Frame::Message(ServerMessage::Response {
+                id: answered,
+                body: ResponseBody::Sky(response),
+            }) if answered == id => {
+                return Sent {
+                    id,
+                    frames,
+                    response: *response,
+                };
+            }
+            Frame::Message(other) => {
+                panic!("expected the sky's chunks and then its response, got {other:?}")
+            }
+        }
     }
 }
 
@@ -201,7 +237,7 @@ const CAPPED: [(Layer, MassLayer); 6] = [
 async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
     let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
     let (mut client, universe) = opened(&server).await;
-    let response = served(&mut client, sky(&universe)).await;
+    let response = served(&mut client, sky(&universe)).await.response;
 
     assert_eq!(
         response.not_modelled.first(),
@@ -273,9 +309,11 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
         response.listed
     );
 
-    // The census's JSON alone until R06.T11.b and T11.c: no payload, band or disc.
-    assert_eq!((response.bulk.chunks, response.bulk.bytes), (0, 0));
-    assert_eq!((response.stars_bytes, response.band_bytes), (0, 0));
+    // The stars in bulk (R06.T11.b), and no band texel or disc until R06.T11.c.
+    assert_eq!(
+        (response.stars_bytes, response.band_bytes),
+        (u64::from(response.listed) * star_bytes(), 0)
+    );
     assert_eq!(response.band.face_texels, 64);
     assert!(response.hosts.is_empty());
     assert_eq!(response.observer, sky(&universe).observer);
@@ -304,7 +342,8 @@ async fn the_cut_is_the_eyes_under_a_shallower_camera() {
             ..sky(&universe)
         },
     )
-    .await;
+    .await
+    .response;
     let expected = eye_cut(
         galaxy(),
         &mut context(),
@@ -317,6 +356,100 @@ async fn the_cut_is_the_eyes_under_a_shallower_camera() {
         "Crumey's darkest limit, 7.99, plus 0.553: {}",
         response.cut_v
     );
+    client.close().await;
+    server.stop().await;
+}
+
+/// The bytes of one listed star on the wire (Design note 17).
+fn star_bytes() -> u64 {
+    u64::try_from(SKY_STAR_BYTES).expect("24 bytes")
+}
+
+/// A listed star's apparent V and distance as the wire carries them (Design note 17): bytes 16–17
+/// as millimagnitudes and 12–15 as light-years.
+fn wire_v_and_distance(star: &[u8; SKY_STAR_BYTES]) -> (i16, f32) {
+    (
+        i16::from_le_bytes([star[16], star[17]]),
+        f32::from_le_bytes(star[12..16].try_into().expect("4 bytes")),
+    )
+}
+
+/// A sky's manifest is what was sent: its chunks in order before the response, each a frame of at
+/// most 256 KiB for the request, their bytes the manifest's, split into the listed stars and the
+/// band (empty until R06.T11.c), the stars the sim's census in its order. The same sky asked
+/// again is served from the cell cache, with the same bytes (Design note 12).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_skys_manifest_matches_what_was_sent() {
+    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
+    let (mut client, universe) = opened(&server).await;
+    let sent = served(&mut client, sky(&universe)).await;
+    let response = &sent.response;
+
+    let manifest = &response.bulk;
+    assert!(manifest.chunks > 0, "the Sun's neighbours are sent");
+    assert_eq!(sent.frames.len(), usize::try_from(manifest.chunks).unwrap());
+    for (index, (header, payload)) in sent.frames.iter().enumerate() {
+        assert_eq!(
+            (header.request, header.index, header.count),
+            (sent.id.0, u32::try_from(index).unwrap(), manifest.chunks),
+            "frame {index}"
+        );
+        assert!(
+            payload.len() + 24 <= MAX_BINARY_FRAME_BYTES,
+            "frame {index}: {}",
+            payload.len()
+        );
+    }
+    let payload = sent.payload();
+    assert_eq!(u64::try_from(payload.len()).unwrap(), manifest.bytes);
+    assert_eq!(response.stars_bytes + response.band_bytes, manifest.bytes);
+    assert_eq!(
+        (response.stars_bytes, response.band_bytes),
+        (u64::from(response.listed) * star_bytes(), 0),
+        "the stars, and no band until R06.T11.c"
+    );
+
+    // The stars are the sim's census's listed stars, in its order.
+    let query = SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
+        .build()
+        .expect("a query")
+        .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a forced cap");
+    let sim = sim_census(&query);
+    let (stars, rest) = payload.as_chunks::<SKY_STAR_BYTES>();
+    assert!(rest.is_empty(), "whole stars");
+    assert_eq!(sim.listed().len(), stars.len());
+    for (index, (star, bytes)) in sim.listed().iter().zip(stars).enumerate() {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the wire's V and distance, as Design note 17 rounds them"
+        )]
+        let expected = (
+            (star.v().value() * 1_000.0).round() as i16,
+            star.distance().value() as f32,
+        );
+        assert_eq!(wire_v_and_distance(bytes), expected, "star {index}");
+    }
+
+    // Asked again, every cell the census looked up is served from the cache, with the same bytes.
+    let cold = server.stats().sky_cells();
+    let lookups = cold.cache().hits() + cold.cache().misses();
+    assert!(lookups > 0, "{cold:?}");
+    let again = served(&mut client, sky(&universe)).await;
+    let warm = server.stats().sky_cells();
+    assert_eq!(again.payload(), payload);
+    assert_eq!(again.response.bulk, response.bulk);
+    assert_eq!(
+        (
+            warm.cache().hits() - cold.cache().hits(),
+            warm.cache().misses() - cold.cache().misses(),
+            warm.rebuilt(),
+            warm.cache().evictions()
+        ),
+        (lookups, 0, 0, 0),
+        "the second census's cells are the first's: {cold:?}, then {warm:?}"
+    );
+
     client.close().await;
     server.stop().await;
 }
