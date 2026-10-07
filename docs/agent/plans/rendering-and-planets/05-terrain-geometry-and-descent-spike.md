@@ -5667,7 +5667,38 @@ medium, sizes, figure)`.
     - _The result._ 37 of 4.7 million stored values differ, each by one rgba16float step. The
       largest e is 9.7 × 10⁻⁴, one half-float step. That fits the ruling's "at most about
       2 × 10⁻⁴" before the output's rounding.
-  - _Still to record:_ the timing (step 7), in its own commit.
+  - _The timing (step 7) is pending: there was no quiet window._
+    - _What was tried._ From 23:24 to 00:27 the harness waited for its gate: load at most 5, no
+      cargo or nextest, no other spike, GPU or Electron run, and 6 GB free.
+      - The load stayed at 7–29, with other lanes' nextest and cargo.
+      - The gate passed once, at 00:15:55, but the orchestrator's `just ci` held the heavy-test lock
+        and another lane's timed run was queued for it.
+      - The run was stopped at 62 minutes, as the brief directs.
+    - _The harness_ (`.git/rm23-scratch/laneC/t12e/timing/`), ready:
+      - `window.sh` runs the four runs in one window: high and low before, from 28479b9's
+        instrumented build (`laneC/t14diag/out-instrumented/`), then high and low after, from the
+        head's (`t12e/out-after/`, built with lane D's two instruments).
+      - Each run is lane C's m1 protocol: hidden, seed 7, the first 150 s, under `just _locked`
+        and, inside it, the NVIDIA-GPU lock (`locked.sh`), with `nvidia-smi` at 100 ms. The
+        telemetry sampler's state is logged beside each run.
+      - `analyse2.py` gives each pass and the joint row at p50 and p95, each atmosphere pass by clock
+        bin, rAF p99 and the long intervals against the P-state changes.
+    - _To run it_ (once the orchestrator clears a window):
+      1. Check that the release server is built: `target/release/hyperion-server`, built at 23:19.
+      2. Run
+         `systemd-run --user --scope --quiet --slice=agents.slice -p MemoryMax=2G -p MemorySwapMax=0 -p TasksMax=4096 -E HEAVY_SLICE=agents.slice -- timeout 9000 bash .git/rm23-scratch/laneC/t12e/timing/window.sh 60`.
+      3. For each of `t12e-{before,after}-{high,low}`, run
+         `python3 -I .git/rm23-scratch/laneC/t12e/timing/analyse2.py .git/rm23-scratch/laneC/t12e/timing <name>`.
+      4. Rebuild `apps/hyperion/out` clean with `pnpm --filter hyperion build`.
+    - _The bounds:_
+      - (a) The march's p50 after is at most 5% above before, at matched clocks: the 1,000–1,399
+        MHz bin, and ≥ 1,800 MHz where it has 100 frames.
+      - The sky view's p95 at matched clocks is at most 2.6 times its before (addendum B).
+      - (b) Terrain + atmosphere is at most 6 ms p95 on high and 18 ms on low.
+      - (c) rAF p99 is at most 16.8 ms after the warm-up, and every interval over 40 ms falls within
+        0.15 s of a P-state change.
+      - (d) Low's atmosphere row is at most 3.00 / 3.60 ms p50 / p95.
+      - High's atmosphere row is recorded against its 1 ms estimate, as a finding.
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
