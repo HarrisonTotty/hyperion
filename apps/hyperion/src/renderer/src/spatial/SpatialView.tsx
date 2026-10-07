@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { formatBearingDeg, formatSignedDeg } from "../lib/format";
+import { minReticleGapDevicePx, reticleGrowthCssPx } from "../lib/strokes";
 import { isTextEntry } from "../lib/textEntry";
 import { useElementSize } from "../lib/useElementSize";
 import { usePrefersReducedMotion } from "../lib/usePrefersReducedMotion";
@@ -318,9 +319,15 @@ export function SpatialView({
     };
   }, [cameraState, fittedPxPerUnit]);
 
+  // The pair of reticles about one mark stands an outline and a casing apart at least, as the
+  // view's does, and labels stand clear of the bracket's growth (R07.T16.f): both at the ratio.
+  const minReticleGapPx = minReticleGapDevicePx(pixelRatio) / pixelRatio;
   const drawList = useMemo(
-    () => (camera === null || viewport === null ? null : buildDrawList(scene, camera, viewport)),
-    [scene, camera, viewport],
+    () =>
+      camera === null || viewport === null
+        ? null
+        : buildDrawList(scene, camera, viewport, minReticleGapPx),
+    [scene, camera, viewport, minReticleGapPx],
   );
   const shownAngles = useThrottledValue(cameraState.angles, READOUT_INTERVAL_MS);
 
@@ -367,11 +374,14 @@ export function SpatialView({
   const markLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
-      : placeLabels(chosenMarks, drawList.anchors, viewport, pinnedIds, [
-          triadBox,
-          ...coreArrowBoxes(coreArrow, viewport.remPx),
-          ...curveLabels,
-        ]);
+      : placeLabels(
+          chosenMarks,
+          drawList.anchors,
+          viewport,
+          reticleGrowthCssPx(pixelRatio),
+          pinnedIds,
+          [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx), ...curveLabels],
+        );
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tokens, setTokens] = useState<ColourTokens | null>(null);

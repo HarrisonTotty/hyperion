@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { markShiftDevicePx, useStrokeMetrics } from "../lib/strokes";
 import type { Viewport } from "./camera";
 import { CORE_HEAD_REM, CORE_SYMBOL_REM, type CoreArrowLayout } from "./furniture";
 import type { SpatialQuantity } from "./Reading";
@@ -21,11 +22,16 @@ export const AXIS_FALLBACK_MESSAGE = "DIRECTIONS UNDEFINED: grid aligned to -X";
 interface CoreMarkProps {
   readonly layout: CoreArrowLayout;
   readonly remPx: number;
+  /**
+   * How far the away and towards symbols' circles move out, CSS px: the outline shift δ, so that
+   * the dot or the cross inside keeps its room as built where the outline is wider than 1.5 px.
+   */
+  readonly shiftPx: number;
 }
 
 /** The arrow, or the away or towards symbol, in the view's CSS pixels. */
-function CoreMark({ layout, remPx }: CoreMarkProps) {
-  const symbolR = CORE_SYMBOL_REM * remPx;
+function CoreMark({ layout, remPx, shiftPx }: CoreMarkProps) {
+  const symbolR = CORE_SYMBOL_REM * remPx + shiftPx;
   const cross = symbolR * Math.SQRT1_2;
   let shape: ReactNode;
   switch (layout.kind) {
@@ -94,15 +100,19 @@ export interface CoreArrowProps {
  * The arrow points along the projected coreward direction, its head where that direction leaves
  * the view or meets other furniture. When coreward lies within 5° of the line of sight it becomes
  * the away symbol (an open circle with a cross) or the towards symbol (a circle with a dot) at the
- * top of the view, larger than any mark's symbol. The label is DOM text, the distance in
- * monospaced figures. On the galactic axis there is no coreward and nothing is drawn: the view
- * says why ({@link AXIS_FALLBACK_MESSAGE}).
+ * top of the view, larger than any mark's symbol; its circle moves out by the outline shift δ, as a
+ * mark's does, so that its cross or dot keeps its room (R07.T16.f). The label is DOM text, the
+ * distance in monospaced figures. On the galactic axis there is no coreward and nothing is drawn:
+ * the view says why ({@link AXIS_FALLBACK_MESSAGE}).
  */
 export function CoreArrow({ layout, viewport, distance }: CoreArrowProps) {
+  // A mark's outline, at `--mark-stroke`, widens outward by δ (R07.T16.f).
+  const { devicePixelRatio } = useStrokeMetrics();
   if (layout.kind === "undefined") {
     return null;
   }
   const remPx = viewport.remPx;
+  const shiftPx = markShiftDevicePx(devicePixelRatio) / devicePixelRatio;
   return (
     <div className="core-arrow">
       <svg
@@ -111,7 +121,7 @@ export function CoreArrow({ layout, viewport, distance }: CoreArrowProps) {
         aria-hidden="true"
         focusable="false"
       >
-        <CoreMark layout={layout} remPx={remPx} />
+        <CoreMark layout={layout} remPx={remPx} shiftPx={shiftPx} />
       </svg>
       <span
         className="core-arrow__label"

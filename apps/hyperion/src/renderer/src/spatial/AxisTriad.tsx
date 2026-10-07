@@ -1,3 +1,4 @@
+import { markShiftDevicePx, useStrokeMetrics } from "../lib/strokes";
 import type { CameraAngles } from "./camera";
 import type { LocalFrame } from "../geometry/frame";
 import { TRIAD_MARKER_REM, type TriadAxis, type TriadBoxRem, triadLayout } from "./furniture";
@@ -19,17 +20,23 @@ function units(rem: number): number {
 
 interface AxisMarkProps {
   readonly axis: TriadAxis;
+  /**
+   * How far the away and towards symbols' circles move out, `rem`: the outline shift δ, so that
+   * the dot or the cross inside keeps its room as built where the outline is wider than 1.5 px.
+   */
+  readonly shiftRem: number;
 }
 
 /** An axis: a line from the origin, ended by the away or towards symbol or by an arrowhead. */
-function AxisMark({ axis }: AxisMarkProps) {
+function AxisMark({ axis, shiftRem }: AxisMarkProps) {
   // The axis's own geometry is in `rem`; what the SVG is given is in user units.
   const tipXUnits = units(axis.tip.x);
   const tipYUnits = units(axis.tip.y);
   const reachRem = length(axis.tip);
-  const markerUnits = units(TRIAD_MARKER_REM);
+  const markerRem = TRIAD_MARKER_REM + shiftRem;
+  const markerUnits = units(markerRem);
   // The line stops at the symbol's circle, so that it never runs into the cross or the dot.
-  const lineReachRem = axis.end === "across" ? reachRem : reachRem - TRIAD_MARKER_REM;
+  const lineReachRem = axis.end === "across" ? reachRem : reachRem - markerRem;
   const direction =
     reachRem > 0 ? { x: axis.tip.x / reachRem, y: axis.tip.y / reachRem } : { x: 0, y: 0 };
   const lineEndRem = {
@@ -98,6 +105,9 @@ export interface AxisTriadProps {
  */
 export function AxisTriad({ frame, angles, boxRem, axes: shown }: AxisTriadProps) {
   const axes = triadLayout(frame, angles, boxRem, shown ?? frame);
+  // A mark's outline, at `--mark-stroke`, widens outward by δ (R07.T16.f): δ in `rem`.
+  const { devicePixelRatio, remPx } = useStrokeMetrics();
+  const shiftRem = markShiftDevicePx(devicePixelRatio) / devicePixelRatio / remPx;
   const halfWidth = units(boxRem.width / 2);
   const halfHeight = units(boxRem.height / 2);
   return (
@@ -117,7 +127,7 @@ export function AxisTriad({ frame, angles, boxRem, axes: shown }: AxisTriadProps
         focusable="false"
       >
         {axes.map((axis) => (
-          <AxisMark key={axis.name} axis={axis} />
+          <AxisMark key={axis.name} axis={axis} shiftRem={shiftRem} />
         ))}
       </svg>
       {axes.map((axis) => (

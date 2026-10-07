@@ -14,6 +14,14 @@
   --status-caution: #fbbf24;
   --status-warning: #f87171;
   --target: #e879f9;
+  /*
+   * The SVG strokes' widths at the display's device-pixel ratio, so that none is under 2 device
+   * px (decision-thin-line-contrast, item 2): CSS px drawn for each CSS px of a line, and a mark's
+   * outline. main.tsx sets both from lib/strokes.ts before the first render and on each change of
+   * ratio; these are their values at a ratio of 2 and above, where every width is as written.
+   */
+  --line-scale: 1;
+  --mark-stroke: 1.5px;
   /* B612 is bundled through @fontsource in main.tsx; the rest are fallbacks. */
   --font-sans: "B612", system-ui, sans-serif;
   --font-mono: "B612 Mono", ui-monospace, Menlo, monospace;
@@ -282,6 +290,11 @@ body {
   width: 100%;
   height: 1rem;
   color: var(--text-muted);
+}
+
+/* The bar's decade ticks: 1 px lines at the line scale, never under 2 device px (R07.T16.f). */
+.density-legend__tick-mark {
+  stroke-width: calc(1px * var(--line-scale));
 }
 
 .density-legend__ticks {
@@ -743,6 +756,15 @@ body {
 
 .glyph--disclosure {
   vertical-align: baseline;
+}
+
+/*
+ * The chevron is a mark, since its shape carries the control's state: its own 1.5 units of the
+ * 0.7em box at the text's size, and never under --mark-stroke, 2 device px (R07.T16.f).
+ */
+.glyph--disclosure polyline {
+  vector-effect: non-scaling-stroke;
+  stroke-width: max(var(--mark-stroke), 0.105em);
 }
 
 .form-field {
@@ -1226,7 +1248,8 @@ body {
  * A mark over a map, centred on its point and clear of the pointer: the cursor's upright cross in
  * --accent and the chart centre's small diagonal cross in --text. The ramp runs up to --text, over
  * which either colour falls below 6:1, so each stroke is cased in --surface-0 (10.4:1 against
- * --accent, 13.6:1 against --text): a solid edge, not a glow.
+ * --accent, 13.6:1 against --text): a solid edge, not a glow. The stroke is a mark's outline,
+ * --mark-stroke, and the casing a line's, 1 px a side at the line scale (R07.T16.f).
  */
 .map-view__mark {
   position: absolute;
@@ -1244,11 +1267,11 @@ body {
 
 .map-view__mark-casing {
   stroke: var(--surface-0);
-  stroke-width: 3.5px;
+  stroke-width: calc(var(--mark-stroke) + 2px * var(--line-scale));
 }
 
 .map-view__mark-line {
-  stroke-width: 1.5px;
+  stroke-width: var(--mark-stroke);
 }
 
 .map-view__mark--cursor .map-view__mark-line {
@@ -1758,13 +1781,16 @@ body {
   white-space: normal;
 }
 
-/* A sample mark, drawn at the size class it stands for, its outline 1.5 px at every scale. */
+/*
+ * A sample mark, drawn at the size class it stands for, its outline a mark's at every scale, 1.5 px
+ * and never under 2 device px, as the painter draws it (R07.T16.f).
+ */
 .symbol-legend__mark {
   flex: none;
   overflow: visible;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: var(--mark-stroke);
   vector-effect: non-scaling-stroke;
 }
 
@@ -2567,14 +2593,16 @@ body {
   overflow: visible;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: var(--mark-stroke);
 }
 
 /*
- * Every stroke of the triad and the arrow stays 1.5 CSS pixels at every interface scale, as the
- * canvas's own lines do (design notes D13 and D14 give sizes in `rem` and line weights in pixels).
- * The triad's user units are a sixteenth of a `rem`, so without this its axes would reach 2.25 px at
- * 150% beside a 1.5 px range circle. `vector-effect` is not inherited, so it goes on the shapes.
+ * Every stroke of the triad and the arrow stays 1.5 CSS pixels at every interface scale (design
+ * notes D13 and D14 give sizes in `rem` and line weights in pixels), and never under 2 device px:
+ * a mark's outline, --mark-stroke, since its end symbols are marks 0.5rem across that a line's
+ * scale would close (R07.T16.f; decision-thin-line-contrast, item 2). The triad's user units are a
+ * sixteenth of a `rem`, so without this its axes would reach 2.25 px at 150%. `vector-effect` is
+ * not inherited, so it goes on the shapes.
  */
 .axis-triad__axes :is(line, polyline, circle, path),
 .core-arrow__mark :is(line, polyline, circle, path) {
@@ -2764,18 +2792,21 @@ body {
   color: var(--text-muted);
 }
 
-/* A path sample in the legend, 1 px for an orbit and 2 px for the selected one, as the map draws. */
+/*
+ * A path sample in the legend, 1 px for an orbit and 2 px for the selected one at the line scale, as
+ * the map draws them (R07.T16.f).
+ */
 .orbit-legend__path {
   width: 1rem;
   height: 0.25rem;
 }
 
 .orbit-legend__path--reference path {
-  stroke-width: 1;
+  stroke-width: calc(1px * var(--line-scale));
 }
 
 .orbit-legend__path--selected path {
-  stroke-width: 2;
+  stroke-width: calc(2px * var(--line-scale));
 }
 
 /* The display time, and the controls that step it, on as few lines as they fit. */

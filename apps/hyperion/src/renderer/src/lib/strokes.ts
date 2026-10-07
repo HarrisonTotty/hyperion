@@ -11,10 +11,18 @@
  * outward by {@link markShiftDevicePx}, so that every hole it encloses stays as built. Below 2 device
  * pixels an antialiased stroke's brightest pixel covers as little as half its width at its worst
  * position on the grid, and a `--text-muted` orbit then falls below 6:1 (4.11:1 at 1 device px in
- * the view). At 2 or more a stroke scores within 1% of its pair. Nothing changes at a ratio of 2 or
- * more.
+ * the view). At 2 or more a stroke scores within 1% of its pair under exact area coverage, as the
+ * view's ramp gives it; Chromium's 2D canvas peaks at about 15/16 for a 2 px line at 45° (6.45:1 for
+ * `--text-muted`, as R07.T16.f's capture check reads it), still above 6:1 on `--surface-0`. Nothing
+ * changes at a ratio of 2 or more.
+ *
+ * The view's draw list (R07.T16.d), the spatial displays' painter and the DOM's SVG strokes
+ * (R07.T16.f, through {@link strokeProperties}) all take their widths from here.
  */
+import { useSyncExternalStore } from "react";
+
 import { SYMBOL_STROKE_PX } from "../spatial/symbols";
+import { rootRemPx } from "./useElementSize";
 
 /** The least width of a line, casing or outline that a canvas, an SVG or a view draws, device px. */
 export const MIN_STROKE_DEVICE_PX = 2;
@@ -78,4 +86,135 @@ export function markShiftDevicePx(devicePixelRatio: number): number {
  */
 export function minReticleGapDevicePx(devicePixelRatio: number): number {
   return markStrokeDevicePx(devicePixelRatio) + CASING_PX * lineScale(devicePixelRatio);
+}
+
+/**
+ * How many outline shifts δ ({@link markShiftDevicePx}) a ringed circle's ring moves out: 3, its
+ * disc moving one, so that the disc's hole and the gap round it both stay (decision-thin-line-
+ * contrast, item 2). The view's symbology and the spatial displays' painter both take it.
+ */
+export const RING_SHIFTS = 3;
+
+/**
+ * How many outline shifts δ a reticle moves out: 4, a ringed circle's growth, its ring moved out by
+ * {@link RING_SHIFTS} δ and widened by δ (decision-thin-line-contrast, item 2). The view's symbology
+ * and the spatial displays' painter both take it.
+ */
+export const RETICLE_SHIFTS = 4;
+
+/**
+ * How far a reticle's outer edge moves out at a device-pixel ratio, CSS px: the
+ * {@link RETICLE_SHIFTS} δ it moves and the δ its half-width gains, 5δ ÷ the ratio. It is 2.65 at
+ * 0.78125, 1.25 at 1, and 0 from 4/3 up.
+ *
+ * @remarks
+ * A spatial display's mark label stands that much further out, so that it keeps the clearance from
+ * the bracket about its mark that it had as built (R07.T16.f; decision-r07-t16d-followups, item
+ * 1), as the view's labels do.
+ */
+export function reticleGrowthCssPx(devicePixelRatio: number): number {
+  const ratio = ratioOf(devicePixelRatio);
+  return ((RETICLE_SHIFTS + 1) * markShiftDevicePx(ratio)) / ratio;
+}
+
+/**
+ * The root's custom properties that size the DOM's SVG strokes at a device-pixel ratio (R07.T16.f):
+ * the line scale and the mark stroke, each as CSS px, since a stylesheet's widths are CSS px.
+ */
+export interface StrokeProperties {
+  /** CSS px drawn for each CSS px of a line's width: {@link lineScale} ÷ the ratio, unitless. */
+  readonly "--line-scale": string;
+  /** A mark's outline, CSS px: {@link markStrokeDevicePx} ÷ the ratio, with its `px`. */
+  readonly "--mark-stroke": string;
+}
+
+/**
+ * The stroke properties at a device-pixel ratio: `2.56` and `2.56px` at 0.78125, `2` and `2px` at
+ * 1, and `1` and `1.5px` at 2 and 3, the values `styles.css`'s `:root` holds.
+ */
+export function strokeProperties(devicePixelRatio: number): StrokeProperties {
+  const ratio = ratioOf(devicePixelRatio);
+  return {
+    "--line-scale": String(lineScale(ratio) / ratio),
+    "--mark-stroke": `${String(markStrokeDevicePx(ratio) / ratio)}px`,
+  };
+}
+
+/**
+ * Calls `onChange` each time the window's device-pixel ratio changes, as when the window moves to
+ * another display or the page is zoomed, until the returned function is called.
+ *
+ * @remarks
+ * A `matchMedia` query for the ratio in force fires once when the ratio leaves it, so each change
+ * arms a query for the new ratio.
+ */
+function watchDevicePixelRatio(onChange: () => void): () => void {
+  let disarm: (() => void) | null = null;
+  function arm(): void {
+    const list = window.matchMedia(`(resolution: ${String(window.devicePixelRatio)}dppx)`);
+    const changed = (): void => {
+      list.removeEventListener("change", changed);
+      arm();
+      onChange();
+    };
+    list.addEventListener("change", changed);
+    disarm = () => {
+      list.removeEventListener("change", changed);
+    };
+  }
+  arm();
+  return () => {
+    disarm?.();
+  };
+}
+
+/**
+ * Sets {@link strokeProperties} of the window's device-pixel ratio on `root`, now and each time the
+ * ratio changes, until the returned function is called.
+ *
+ * @remarks
+ * `main.tsx` calls it on the document's root before the first render, so that the stylesheet's SVG
+ * strokes are never drawn under 2 device px.
+ */
+export function watchStrokeProperties(root: HTMLElement): () => void {
+  const apply = (): void => {
+    for (const [name, value] of Object.entries(strokeProperties(window.devicePixelRatio))) {
+      root.style.setProperty(name, value);
+    }
+  };
+  apply();
+  return watchDevicePixelRatio(apply);
+}
+
+/** What a drawing in a stroke's own units needs to place an outline in device px. */
+export interface StrokeMetrics {
+  /** Device px in one CSS px. */
+  readonly devicePixelRatio: number;
+  /** CSS px in one `rem` at the current interface scale. */
+  readonly remPx: number;
+}
+
+function windowRatio(): number {
+  return window.devicePixelRatio;
+}
+
+function subscribeRem(onChange: () => void): () => void {
+  window.addEventListener("resize", onChange);
+  return () => {
+    window.removeEventListener("resize", onChange);
+  };
+}
+
+/**
+ * The device-pixel ratio and the root's rem, kept current as either changes, for a drawing that
+ * converts δ ({@link markShiftDevicePx}) into its own units, as `LegendSymbol` does.
+ *
+ * @remarks
+ * The ratio is watched through a `matchMedia` resolution query, and the rem on each window resize,
+ * which is what a change of interface scale fires (as `useElementSize` measures it).
+ */
+export function useStrokeMetrics(): StrokeMetrics {
+  const devicePixelRatio = useSyncExternalStore(watchDevicePixelRatio, windowRatio);
+  const remPx = useSyncExternalStore(subscribeRem, rootRemPx);
+  return { devicePixelRatio, remPx };
 }

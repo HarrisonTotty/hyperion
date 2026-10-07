@@ -134,8 +134,8 @@ export function DensityLegend({ ramp, floorLog10PerLy2, ceilingLog10PerLy2 }: De
               x2={position(decade) * BAR_WIDTH}
               y1={BAR_HEIGHT}
               y2={labelled(decade) ? TICK_BOTTOM : MINOR_TICK_BOTTOM}
+              className="density-legend__tick-mark"
               stroke="currentColor"
-              strokeWidth={1}
               vectorEffect="non-scaling-stroke"
             />
           ))}

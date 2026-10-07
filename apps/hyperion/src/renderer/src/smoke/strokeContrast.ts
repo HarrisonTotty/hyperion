@@ -63,7 +63,7 @@ import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
 import { type Checks, halfTexels, texel } from "./harness";
 
 /** The guide's least contrast for a stroke that carries meaning, against its surface. */
-const REQUIRED_RATIO = 6;
+export const REQUIRED_RATIO = 6;
 
 /**
  * How far under its colour pair's ratio a stroke that must read its pair may read: 1%, within which
@@ -128,11 +128,12 @@ const DASH_MARGIN_PX = 1;
  * one, a stroke's round cap falls off from its full coverage, so a cut end is not where it falls
  * between pixels (as a dash's ends, {@link DASH_MARGIN_PX}).
  */
-const CUT_END_MARGIN_PX = 1;
+export const CUT_END_MARGIN_PX = 1;
 
 /**
  * How far a stroke lights a texel beyond its half-width, px: `lines.wgsl`'s coverage,
- * clamp(w ÷ 2 + 0.5 − d, 0, 1), is above zero only at a texel centre nearer than w ÷ 2 + 0.5.
+ * clamp(w ÷ 2 + 0.5 − d, 0, 1), is above zero only at a texel centre nearer than w ÷ 2 + 0.5. The
+ * canvas's check passes its own (R07.T16.f).
  */
 const ANTIALIAS_EDGE_PX = 0.5;
 
@@ -253,15 +254,19 @@ function distanceToStroke(p: PointPx, stroke: ScreenStroke): number {
  * antialiased edge, where it lights them, and, where it is drawn after the stroke (`later`),
  * within its casing's antialiased edge, where it covers them. Its dash's gaps are counted as lit,
  * which can only leave more out.
+ *
+ * @param fringePx - How far beyond its half-width the drawer's antialiasing lights a texel's
+ *   centre, px: half a texel under the view's ramp, by default.
  */
 export function neighbourOf(
   stroke: ScreenStroke,
   later: boolean,
   widthPx: number,
   heightPx: number,
+  fringePx = ANTIALIAS_EDGE_PX,
 ): Neighbour {
   const region = new Uint8Array(widthPx * heightPx);
-  const reachPx = stroke.widthPx / 2 + (later ? stroke.casingWidthPx : 0) + ANTIALIAS_EDGE_PX;
+  const reachPx = stroke.widthPx / 2 + (later ? stroke.casingWidthPx : 0) + fringePx;
   for (const [a, b] of stroke.segments) {
     const left = Math.max(0, Math.floor(Math.min(a.x, b.x) - reachPx));
     const right = Math.min(widthPx - 1, Math.ceil(Math.max(a.x, b.x) + reachPx));
@@ -294,16 +299,18 @@ interface SectionPoint {
 }
 
 /**
- * The points of a stroke's length, a pixel apart along each segment, with their cross-sections;
- * those within `endMarginPx` of a segment's end are not read.
+ * The points of a stroke's length, a pixel apart along each segment, with their cross-sections,
+ * which reach `fringePx` beyond its half-width; those within `endMarginPx` of a segment's end are
+ * not read.
  */
 function sectionPoints(
   image: ReadImage,
   stroke: ScreenStroke,
   keep: ((p: PointPx) => boolean) | null,
   endMarginPx: number,
+  fringePx: number,
 ): SectionPoint[] {
-  const halfPx = stroke.widthPx / 2 + ANTIALIAS_EDGE_PX;
+  const halfPx = stroke.widthPx / 2 + fringePx;
   const points: SectionPoint[] = [];
   let lastEnd: PointPx | null = null;
   stroke.segments.forEach(([a, b], index) => {
@@ -397,6 +404,8 @@ function crossingPoints(
  *
  * @param neighbours - The frame's other batches, as {@link neighbourOf} takes each for this one.
  * @param endMarginPx - How near a segment's end a point is not read, px: none by default.
+ * @param fringePx - How far beyond its half-width the cross-section reaches, px: the drawer's
+ *   antialiased edge, half a texel under the view's ramp by default.
  */
 export function readStroke(
   image: ReadImage,
@@ -405,8 +414,9 @@ export function readStroke(
   surfaceLuminance: number,
   keep: ((p: PointPx) => boolean) | null,
   endMarginPx = 0,
+  fringePx = ANTIALIAS_EDGE_PX,
 ): StrokeReading {
-  const points = sectionPoints(image, stroke, keep, endMarginPx);
+  const points = sectionPoints(image, stroke, keep, endMarginPx, fringePx);
   const crossings = neighbours.map((neighbour) =>
     crossingPoints(points, stroke, neighbour, image.widthPx),
   );

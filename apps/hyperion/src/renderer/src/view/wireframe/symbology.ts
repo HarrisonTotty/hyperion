@@ -1,7 +1,8 @@
 import { norm, normalise, scale, type Vec3 } from "../../geometry/vec3";
 import type { ColourToken } from "../../spatial/drawList";
+import { RETICLE_SHIFTS, RING_SHIFTS } from "../../lib/strokes";
 import { CONTACT_SIZE_CLASS } from "../../lib/system/bodySymbols";
-import { type OutlinePoint, SIZE_CLASS_REM, symbolOutline } from "../../spatial/symbols";
+import { SIZE_CLASS_REM, symbolOutline, unitInradius } from "../../spatial/symbols";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
 import type { BodyMarkSymbol } from "../scene/model";
@@ -107,15 +108,6 @@ function cardinalTicks(at: ScreenPx, innerPx: number, lengthPx: number): ScreenS
     ],
   ];
 }
-
-/**
- * How far a reticle moves out for a mark's outline shift δ (`markShiftDevicePx`): 4δ, a ringed
- * circle's growth, its ring moved out by 3δ and widened by δ (decision-thin-line-contrast, item 2).
- */
-const RETICLE_SHIFTS = 4;
-
-/** How far a ringed circle's ring moves out for an outline shift δ: 3δ, its disc moving δ. */
-const RING_SHIFTS = 3;
 
 /**
  * How far a reticle's outer edge moves out for an outline shift δ, device px: the 4δ it moves and
@@ -372,25 +364,6 @@ export function flightPathMarker(
 /** A body symbol's radius on the view, px: half its size class's diameter. */
 export function symbolRadiusPx(symbol: BodyMarkSymbol, remPx: number): number {
   return (SIZE_CLASS_REM[symbol.sizeClass] * remPx) / 2;
-}
-
-/**
- * The distance from the centre of a closed unit outline to its nearest side: the unit polygon's
- * inradius, `cos(π ÷ n)` for a regular n-gon.
- */
-function unitInradius(points: ReadonlyArray<OutlinePoint>): number {
-  let nearest = Infinity;
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1];
-    const b = points[i];
-    if (a !== undefined && b !== undefined) {
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      if (length > 0) {
-        nearest = Math.min(nearest, Math.abs(a.x * b.y - a.y * b.x) / length);
-      }
-    }
-  }
-  return nearest;
 }
 
 /**

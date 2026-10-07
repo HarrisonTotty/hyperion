@@ -44,6 +44,7 @@ import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
+import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
 import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
@@ -178,6 +179,11 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("R07.T16.d the view's strokes as drawn", () =>
     checkStrokeContrast(engine, checks),
   );
+  // A 2D canvas's, which draws and reads back at once.
+  await checks.group("R07.T16.f spatial strokes", () => {
+    checkSpatialStrokeContrast(checks);
+    return Promise.resolve();
+  });
 
   await checks.group("R05.T10.b the height worker", () => checkHeightWorker(checks));
 

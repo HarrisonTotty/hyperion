@@ -499,7 +499,10 @@ label plate's offset in device px (decision-r07-t16d-followups)._ _As built by T
 `minReticleGapPx` (`minReticleGapDevicePx` of the ratio); `emptyDrawList` takes the two of its
 fields it reads; `wireframe/symbology.ts` gains `markLabelOffsetPx`, `bracketHalfSizePx`,
 `destinationHalfSizePx` and `anchorRadiusPx`; and `wireframe/bodies.ts`'s `bodyRegime` and
-`graticule` take `strokeScale` (see "Deviations in T16.g, as built")._
+`graticule` take `strokeScale` (see "Deviations in T16.g, as built")._ _As built by T16.f:
+`lib/strokes.ts` also holds `RING_SHIFTS` (3), `RETICLE_SHIFTS` (4), `StrokeProperties` and
+`StrokeMetrics`; P05's `buildDrawList` and `placeLabels` take the reticles' least gap and growth;
+and `unitInradius` is `spatial/symbols.ts`'s (see "Deviations in T16.f, as built")._
 
 ### Main screen (Phase C)
 
@@ -4764,6 +4767,167 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - **TypeScript:** both should-fixes are answered. A test now holds a lone destination's place,
       and the threshold rename is declined, as above. Both considers are taken: the test symbol
       typed, and one `stylesheetRule` that throws, with the WCAG helpers imported, not copied.
+- **Deviations in T16.f, as built** (2026-10-07; the views lane; decision-thin-line-contrast, items
+  2 to 4; decision-r07-t16d-followups, items 1, 2, (a) and (b), as the orchestrator amended them
+  after T16.g).
+  - **Files.** Those the subtask lists, and:
+    - `smoke/strokeContrast.ts`: it exports `REQUIRED_RATIO` and `CUT_END_MARGIN_PX`, and
+      `neighbourOf` and `readStroke` take an optional `fringePx`, half a texel by default (the
+      view's ramp). The canvas check passes half a pixel's diagonal (`CANVAS_FRINGE_PX`), since
+      Canvas 2D's coverage is a pixel's area, which reaches a pixel's corner;
+    - `lib/useElementSize.ts`: `rootRemPx` is exported, so that `useStrokeMetrics` reads the rem
+      as `useElementSize` does;
+    - `spatial/AxisTriad.tsx` and `spatial/CoreArrow.tsx` and their tests (below);
+    - `vitest.config.mts`: `lib/strokes.test.ts` and `smoke/spatial.test.ts` run under jsdom;
+    - the tests of `DensityLegend`, `SystemView`, `SpatialView`, `labels`, `drawList`, `paint` and
+      `strokes`; `LegendSymbol.test.tsx` and `smoke/spatial.test.ts` are new.
+
+    `DisclosureGlyph.tsx` keeps its `strokeWidth="1.5"`, which the stylesheet's new rule
+    overrides.
+  - **Signatures.** `reticleOps` takes the least gap from its caller, so P05's
+    `buildDrawList(scene, camera, viewport, minReticleGapPx)` takes it, in CSS px, and
+    `placeLabels(chosen, anchors, viewport, reticleGrowthPx, pinnedIds?, obstacles?)` takes the
+    bracket's growth, both required, so that no caller leaves them out. `SpatialView` passes
+    `minReticleGapDevicePx(r) ÷ r` and `reticleGrowthCssPx(r)` (pointers in P05's Provides).
+    `lib/strokes.ts` also exports `StrokeProperties`, `StrokeMetrics`, `RING_SHIFTS` (3) and
+    `RETICLE_SHIFTS` (4), the shift multiples, which `wireframe/symbology.ts` now imports in place
+    of its own. `unitInradius` is exported from `spatial/symbols.ts`, its TSDoc saying that it is
+    exact only for an outline whose sides all lie as far from its centre. A symbol's and a
+    reticle's `widthPx` say that `paint` draws the mark stroke whatever they hold.
+  - **What `paint` draws.** As ruled: lines at `widthPx` × `lineScale(r)` ÷ r, outlines at
+    `markStrokeDevicePx(r)` ÷ r, moved out by δ (a polygon's corners by δ ÷ its unit inradius), a
+    ringed circle's ring by 3δ and a reticle by 4δ. The ring's `moveTo` is the moved ring's start,
+    so that no line joins it to the disc. A lone destination keeps its as-built place, where the
+    bracket would stand, as the orchestrator ruled after T16.g.
+  - **The axis triad's and the core arrow's symbols (after the UX review).** The subtask gives them
+    `--mark-stroke` alone, and widened about its line the stroke ate into what their circles hold:
+    at 0.78125 the towards dot's gap to its ring fell from 1.41 to 1.0 device px at 100% and from
+    1.01 to 0.6 at 80%, and the away cross's quadrants closed alike. The ruling lists both among
+    the marks whose outline "widens outward, so that what lies inside it stays as built"
+    (decision-thin-line-contrast, item 2), so each away and towards circle moves out by δ (the
+    triad in its user units, a sixteenth of a rem, through `useStrokeMetrics`), the cross reaches
+    the moved circle, and an axis's line stops at it. The arrowheads widen about their lines, as
+    ruled. A triad label's gap to its symbol's outer edge narrows by 2δ, 1.06 CSS px of 4 at 0.78125.
+  - **Where two tests sit.** The pair's gap is tested through the draw list (at 100%, 5.12, 4, 4
+    and 4 px; at 80%, 5.12, 4, 3.2 and 3.2), through the recording context, and through
+    `SpatialView` at 0.78125. The label's stand-off is tested through `placeLabels`, on both sides,
+    and through `SpatialView` (1.25 px further out at 1 than at 2).
+  - **`--surface-2`.** Tested by the list of the stylesheet's rules that paint it (hovered or
+    selected tabs, controls and rows, and inputs), and by the one changed stroke that can stand
+    under one: the chevron in a `.control`, `--accent` (8.68:1) when hovered, and with no surface
+    painted while it is held back in `--text-muted`. Every other changed stroke stands on
+    `--surface-0`, `--surface-1` (the legends' panels, `--text-muted` 6.76:1) or the map's raster on
+    its casing. No stylesheet stroke width is left in plain px (tested).
+  - **The legend and the picture below a ratio of 4/3.** HR DIAGRAM's off-scale pegs are a `ticks`
+    op, so a line at the line scale (1.5 px, 3 device px), and its legend's `OFF SCALE` sample is a
+    `.symbol-legend__mark`, a mark at `--mark-stroke` (2 device px), as the ruling's two lists put
+    them. At 2 and above both are 3 device px. _Open, for the orchestrator (the UX review's
+    consider): whether the sample, which stands for a line op, takes `calc(1.5px *
+    var(--line-scale))`._
+  - **`contrast.py`** cuts a ratio within 1% of its minimum to three decimals, after the UX review,
+    so that `text-muted surface-2 --coverage 0.996` prints 5.999:1 FAIL, not 6.00:1 FAIL.
+  - **The canvas check** (`smoke/spatial.ts`, group "R07.T16.f spatial strokes").
+    - Three frames (curves, lines, marks), painted by `paint` in the tokens and the stale tokens at
+      0.78125, 1 and 2, on a 240 CSS px square backed at the ratio.
+    - The 1 px circle and lines are `--text-muted`; the data edge and its ticks come from
+      `buildDrawList`'s `data_edge` sphere; the marks are built by `buildDrawList` (the class-0
+      circle the selection and the destination, the class-2 ringed circle the destination alone)
+      and moved onto device-pixel centres, whose pixels are read for the holes.
+    - What is read is what `paint` drew: its path calls are recorded through a `Proxy` over the
+      real context.
+    - Cut ends (butt caps: lines, ticks, reticle arms) are kept 1 px clear (`CUT_END_MARGIN_PX`).
+    - Every kind must read 6.0:1 on at least 20 points. The pair is held to 6:1 as the subtask says,
+      not to its pairs as T16.g's check holds the view's, since `paint` draws no casing and neither
+      reticle covers the other. In its place, after the plan-conformance review, a pixel between
+      the pair's arms must read `--surface-0`: on a canvas the least gap is for separation.
+    - The data edge's ticks are a kind of their own, after the plan-conformance review: a 0.25 rem
+      tick, 3.1 device px at 0.78125, lies mostly in its crossing with the circle it starts on (up
+      to 2.4 px) and its cut end's margin, so below a ratio of 1 they must read 8 points, as T16.d's
+      target ticks must, and 20 from 1 up. The floor of 8 was set after the run below read 10.
+    - **The readings** (`just test-render`, both variants alike, in the tokens and the stale tokens
+      alike but for the stale `--text-muted` 7.22:1):
+      - the 1 px circle 7.22:1, the data edge and the selected orbit 13.57:1, the open circle, the
+        ringed circle and the bracket 10.37:1, and the `--target` reticles 8.15:1, at every ratio;
+      - the data edge's ticks 13.57:1 on 10, 26 and 156 points at 0.78125, 1 and 2;
+      - the 1 px `--text-muted` lines 6.45:1, 7.13:1 and 6.87:1 at 0.78125, 1 and 2, the least on
+        the 45° line;
+      - the holes read `--surface-0`, and the pair stands 1, 1 and 5 px clear between its arms;
+      - the control, the circle stroked at 1 CSS px at 0.78125, reads 1.46:1.
+    - **A 2 px line on Chromium's canvas** (for the orchestrator and T16.c's draft). The lines'
+      6.45:1 is a peak coverage of about 15/16 (`contrast.py text-muted surface-0 --coverage 0.9375`
+      prints 6.43:1), where the ruling's exact area coverage gives 99.6% at the worst phase of a
+      45° line. So Chromium's 2D canvas (SwiftShader here) leaves a 2 px stroke within about 11% of
+      its pair, not 1%. Every changed stroke still clears 6:1: those on a canvas stand on
+      `--surface-0`. The DOM's SVG strokes are rasterised by the same Skia and not captured (a
+      stated limit); at that coverage the legends' `--text-muted` on `--surface-1` would read
+      6.07:1, and `--text-muted` on `--surface-2`, where no changed stroke stands, 5.47:1.
+      `contrast.py`'s and `lib/strokes.ts`'s docs say so. The guide's Colour text drafted for T16.c
+      ("within 1% of its pair") would then hold for the view alone.
+  - **By hand.**
+    - `contrast.py text-muted surface-0 --coverage 0.5 --blend linear` prints 4.11:1 FAIL, and
+      `--coverage 0.39` prints 1.97:1 FAIL.
+    - **`GALAXY`, hidden** (`.git/rm23-scratch/r07-views/t16f/galaxy/`, a server of the run's own):
+      the galaxy map, the local chart (oblique and from `TOP`, a 10 ly query and the least drive
+      range, so that the bracket is the one `--accent` stroke) and `SYSTEM`'s orbit map, at a device
+      scale factor of 0.78125: a 2458 × 1382 CSS px window, the projector's own 1920 × 1080 device
+      px (1924 × 1082 as captured), after the plan-conformance review's consider, and a 1920 × 1080
+      CSS window (1505 × 848) before it.
+    - **The label measured.** A label's box starts on the bracket's centreline as built, and the
+      bracket's half-width is 0.75 CSS px plus δ, which the 5δ stand-off answers, so the bracket's
+      outer edge lies 0.75 CSS px inside the box at every ratio. B612's `P`, at 0.875 rem, has a left
+      side bearing of 1.0 CSS px, so the first letter's ink stands 0.25 CSS px clear of the
+      bracket's edge: 0.195 device px at 0.78125, 0.25 at 1 and 0.5 at 2, as built before T16.f. In
+      pixels they touch at 0.78125: on the local chart from `TOP` the arm's outer column is 88%
+      covered and the ink starts 0.11 px into the next column; on the orbit map the arm's 40%
+      fringe shares the ink's first column. _A ruling is asked (for the orchestrator)._
+    - **`VIEW`, hidden** (`.git/rm23-scratch/r07-views/t16f/page/`, T16.e's harness with its own
+      flow), at a ratio of 1. At 1920 × 1080, `PRECISION TEST` from `CHASE` at 120° in the
+      wireframe: TEST PLANET's plate covers the lower right of TEST MOON's limb, a disc about 15 px
+      across, cut clean at the plate's top edge; above and left of the plate the limb shows whole.
+      At 1280 × 720 the pair stands under the label block from `CHASE` (below), so it is taken
+      from `FREE`, turned left and up from `CHASE`'s place at 120° (after the plan-conformance
+      review's must-fix; `turn720-01` and `-02`): the plate covers the moon's limb as at
+      1920 × 1080, clear of the block.
+    - **Seen in the captures, not T16.f's (for the orchestrator):**
+      - in the compact layout at 1280 × 720 the primary's label block covers TEST PLANET's label
+        and the top of its symbol from `CHASE` at 60° to 120°: only `NET` shows, reading on from the
+        block's `NO EXTINCTION`. The view's mark labels do not avoid the label block (R02's and
+        T16.g's `ViewMarkLabels`);
+      - on the local chart, tilted, the triad's `COREWARD` label stands over `NORTH`'s end symbol
+        (P05's `triadLayout`);
+      - on the orbit map the core arrow's head and shaft cross the first digits of its own
+        `CORE 25,997.4 ly` (P05's core-arrow label, held inside the view);
+      - stalks run through the curve labels `RANGE 0.01 ly SET` and `PLANE 0.01 ly SET`, which they
+        now cross at 2 device px (P05's curve-label placement).
+  - **The acceptance's vitest paths** leave out `smoke/spatial.test.ts`, `smoke/strokeContrast.test.ts`
+    and `view/wireframe`, whose `symbology.ts` changed. They run in the app's whole suite and in
+    `just ci`.
+  - **Captures.** `just test-render --captures`: all 110 byte-identical to T16.g's (on the merged
+    base, which T16.g's match). No capture is drawn by `paint`.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest: 94 files, 2,276 tests.
+    - The app's vitest: 335 files, 6,306 tests. Two earlier runs, under load (one while the
+      orchestrator's `just ci` ran), failed `SystemDisplay.test.tsx`'s "starts afresh at the
+      chart's time", a `waitFor` of the 4 Hz display time timing out after `]`, as T16.g saw; it
+      passed alone and in the final run.
+    - `just check lint` from a clean typecheck cache, and Prettier.
+    - `just test-render`: both variants exit 0, 582 checks (291 a variant: T16.f's ten, three
+      ratios of three checks and the control).
+    - No WGSL changed, so naga was not run.
+    - The console-ux skill's lint (no error; its ten checks predate T16.f), contrast (all pairings
+      pass) and glyph scripts (no new character reaches the screen).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers.
+    - **TypeScript:** no must-fix. Its two should-fixes are fixed: `SpatialView`'s side tested (the
+      pair's gap and the labels' stand-off at the ratio), and `LegendSymbol`'s test queried through
+      its named role. Its three considers are taken: `shiftUnits`, one `rootRemPx`, and the
+      `widthPx` docs. It confirmed the changes after its review.
+    - **UX:** no must-fix or should-fix. Its considers: the triad's and core arrow's circles moved
+      out (above); the `OFF SCALE` sample left as ruled, and asked (above); `contrast.py`'s near-limit
+      digits (above). The defects it saw in the captures are listed above, for the orchestrator.
+    - **Plan conformance:** its must-fix, the 1280 × 720 capture, is retaken. Its should-fixes are
+      taken: the ticks' kind and stated limit, this entry with the Provides pointers, and the
+      acceptance paths recorded. Its considers are taken: `reticleOps`' doc, the projector's size,
+      and the pair's separation read.
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

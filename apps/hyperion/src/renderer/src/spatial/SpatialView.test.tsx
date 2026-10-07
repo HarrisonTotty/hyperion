@@ -253,12 +253,18 @@ function markAt(angles: CameraAngles, pxPerUnit = FITTED_PX_PER_LY): unknown[] {
   return [expect.closeTo(projected.xPx, 9), expect.closeTo(projected.yPx, 9)];
 }
 
-/** The centre of the default mark's symbol (5.25 px in radius) as last painted. */
+/**
+ * The default mark's symbol's radius as painted at jsdom's ratio of 1: 5.25 px, moved out 0.25 px
+ * by its outline's shift (R07.T16.f).
+ */
+const MARK_ARC_PX = 5.5;
+
+/** The centre of the default mark's symbol as last painted. */
 function markCentre(recorder: RecordingContext2D): ReadonlyArray<unknown> {
   return (
     recorder
       .calls("arc")
-      .findLast(({ args }) => args[2] === 5.25)
+      .findLast(({ args }) => args[2] === MARK_ARC_PX)
       ?.args.slice(0, 2) ?? []
   );
 }
@@ -267,7 +273,7 @@ function markCentre(recorder: RecordingContext2D): ReadonlyArray<unknown> {
 function edgeRadius(recorder: RecordingContext2D): unknown {
   return recorder
     .calls("arc")
-    .findLast(({ args }) => args[0] === 200 && args[1] === 150 && args[2] !== 5.25)?.args[2];
+    .findLast(({ args }) => args[0] === 200 && args[1] === 150 && args[2] !== MARK_ARC_PX)?.args[2];
 }
 
 /** Lets the frame that input asked for run. */
@@ -1654,6 +1660,57 @@ function Selecting({ destinationId }: SelectingProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   return viewOf({ scene: aScene({ selectedId, destinationId }), onSelect: setSelectedId });
 }
+
+/** The half-size of each reticle the last paint drew, in order: half its first two corners' span. */
+function reticleHalfSizes(recorder: RecordingContext2D): number[] {
+  const halves: number[] = [];
+  const records = recorder.records;
+  const lastClear = records.findLastIndex(
+    (record) => record.type === "call" && record.name === "fillRect",
+  );
+  let moves: number[] = [];
+  for (const record of records.slice(lastClear)) {
+    if (record.type === "call" && record.name === "beginPath") {
+      moves = [];
+    } else if (record.type === "call" && record.name === "moveTo") {
+      moves.push(Number(record.args[0]));
+    } else if (record.type === "call" && record.name === "stroke" && moves.length === 4) {
+      halves.push(((moves[1] ?? 0) - (moves[0] ?? 0)) / 2);
+    }
+  }
+  return halves;
+}
+
+/** A label's left edge, CSS px, from its transform in `rem` at a rem of 16 px. */
+function labelLeftPx(text: string): number {
+  const transform = screen.getByText(text).style.transform;
+  return 16 * Number(/^translate\(([-\d.e]+)rem/u.exec(transform)?.[1]);
+}
+
+describe("SpatialView at the display's ratio (R07.T16.f)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("stands a destination on the selection the least gap outside its bracket: 5.12 px at 0.78125", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+    const { recorder } = renderView({ scene: aScene({ selectedId: "a", destinationId: "a" }) });
+
+    const [bracket = 0, destination = 0] = reticleHalfSizes(recorder);
+    expect(Math.round((destination - bracket) * 100) / 100).toBe(5.12);
+  });
+
+  it("stands a mark's label the bracket's growth further out at 1 than at 2: 1.25 px", () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    const { unmount } = renderView({ scene: aScene({ selectedId: "a" }) });
+    const atTwo = labelLeftPx("A");
+    unmount();
+    vi.stubGlobal("devicePixelRatio", 1);
+    renderView({ scene: aScene({ selectedId: "a" }) });
+
+    expect(labelLeftPx("A") - atTwo).toBeCloseTo(1.25, 9);
+  });
+});
 
 describe("SpatialView picking", () => {
   beforeEach(() => {

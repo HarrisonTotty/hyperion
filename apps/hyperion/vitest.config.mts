@@ -14,6 +14,8 @@ const DOM_TESTS = [
   "src/**/*.test.tsx",
   "src/renderer/src/displays/view/check/viewsProbe.test.ts",
   "src/renderer/src/lib/connection.test.ts",
+  "src/renderer/src/lib/strokes.test.ts",
+  "src/renderer/src/smoke/spatial.test.ts",
   "src/renderer/src/spatial/paint.test.ts",
   "src/renderer/src/spatial/useThrottledValue.test.ts",
   "src/renderer/src/view/camera/keys.test.ts",

@@ -73,6 +73,10 @@ export interface SymbolOp {
   readonly stroke: ColourToken;
   /** The fill above the reference plane; `null` below it, where the symbol is open. */
   readonly fill: ColourToken | null;
+  /**
+   * The guide's outline, 1.5 CSS px. `paint` draws a mark's outline at `markStrokeDevicePx` of the
+   * ratio whatever this says (R07.T16.f), so that it matches the view's.
+   */
   readonly widthPx: number;
 }
 
@@ -84,6 +88,10 @@ export interface ReticleOp {
   /** Half the width of the square the corners mark. */
   readonly halfSizePx: number;
   readonly stroke: ColourToken;
+  /**
+   * The guide's outline, 1.5 CSS px. `paint` draws a reticle at `markStrokeDevicePx` of the ratio
+   * whatever this says (R07.T16.f), as it draws a symbol's outline.
+   */
   readonly widthPx: number;
 }
 
@@ -556,10 +564,24 @@ function sphereOps(
   return { ops, labels };
 }
 
+/**
+ * The selection's bracket, one margin larger than its mark (its half-size the mark's radius and
+ * half a margin), and the destination's reticle: where the bracket would stand when it stands
+ * alone, and when the destination is also the selection, outside the bracket by half a margin, or
+ * by `minGapPx` where that is more, so that the pair is never told by colour alone (R07.T16.f;
+ * decision-r07-t16d-followups, item 2).
+ *
+ * @remarks
+ * A lone destination keeps its as-built place, where the bracket would stand (an open finding in
+ * plan 05's Risks, "Labels beside reticles", for the first task that commands a destination).
+ *
+ * @param minGapPx - The least space between the two reticles' centrelines about one mark, CSS px.
+ */
 function reticleOps(
   placed: ReadonlyArray<PlacedMark>,
   scene: SpatialScene,
   viewport: Viewport,
+  minGapPx: number,
 ): ReticleOp[] {
   const ops: ReticleOp[] = [];
   const marginPx = RETICLE_MARGIN_REM * viewport.remPx;
@@ -578,13 +600,14 @@ function reticleOps(
   }
   const destination = find(scene.destinationId);
   if (destination !== undefined) {
+    const bracketPx = outerRadiusPx(destination.mark, viewport) + marginPx / 2;
     // Outside the selection's reticle when the destination is also the selection.
-    const margins = destination === selected ? 2 : 1;
     ops.push({
       kind: "reticle",
       id: destination.mark.id,
       centre: screen(destination.at),
-      halfSizePx: outerRadiusPx(destination.mark, viewport) + (margins * marginPx) / 2,
+      halfSizePx:
+        destination === selected ? bracketPx + Math.max(marginPx / 2, minGapPx) : bracketPx,
       stroke: "target",
       widthPx: RETICLE_WIDTH_PX,
     });
@@ -671,8 +694,22 @@ function markCurveLabels(
  * then one `ticks` op of short ticks from each edge into the band. Neither a path nor an annulus gives an anchor, so neither is
  * picked, and their labels follow the rings' in the curve labels. `--line` is left to the grid and
  * the plane's rings (the orchestrator's ruling 35).
+ *
+ * The list holds the guide's CSS widths; `paint` draws them at no less than 2 device px
+ * (R07.T16.f). A destination that is also the selection stands at least `minReticleGapPx` outside
+ * the selection's bracket, or 0.25 rem where that is more.
+ *
+ * @param minReticleGapPx - The least space between the centrelines of the selection's bracket and
+ *   the destination's reticle about one mark, CSS px: `minReticleGapDevicePx` of the device-pixel
+ *   ratio ÷ the ratio, an outline and a casing (5.12, 4, 2.5 and 2.5 px at 0.78125, 1, 2 and 3), so
+ *   that the pair is the view's.
  */
-export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Viewport): DrawList {
+export function buildDrawList(
+  scene: SpatialScene,
+  camera: Camera,
+  viewport: Viewport,
+  minReticleGapPx: number,
+): DrawList {
   const basis = viewBasis(scene.frame, camera);
   const placed: PlacedMark[] = scene.points.map((mark) => ({
     mark,
@@ -703,7 +740,7 @@ export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Vie
     ops.push(...markOps(entry, scene, basis, camera, viewport));
   }
   const spheres = sphereOps(scene, camera, viewport);
-  ops.push(...spheres.ops, ...reticleOps(placed, scene, viewport));
+  ops.push(...spheres.ops, ...reticleOps(placed, scene, viewport, minReticleGapPx));
 
   const anchors: Anchor[] = [...farHalf, ...nearHalf].map((entry) => ({
     id: entry.mark.id,

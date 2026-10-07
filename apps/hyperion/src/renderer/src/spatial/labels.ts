@@ -28,6 +28,11 @@ export const LABEL_FONT_REM = 0.875;
 // 0.62 em a character in upper case, and a line is about 1.25 em tall.
 const CHARACTER_EM = 0.62;
 const LINE_EM = 1.25;
+/**
+ * The gap between a mark's symbol and its label as built, rem: the reticles' margin, so that a
+ * label starts on the selection bracket's centreline and only B612's side bearing keeps its ink off
+ * the bracket (plan 05's Risks, "Labels beside reticles").
+ */
 const GAP_REM = 0.25;
 
 /** The estimated size of a line of text over a spatial view. */
@@ -142,6 +147,12 @@ function inView(anchor: Anchor, viewport: Viewport): boolean {
  * furniture, or whose mark is out of view, is dropped. The selection's and the destination's
  * labels, which {@link chooseLabels} puts first, are never dropped.
  *
+ * A label stands 0.25 rem beyond its symbol's radius, and further by `reticleGrowthPx`, the
+ * bracket's growth at the display's ratio, so that it keeps the clearance from the bracket about its
+ * mark that it had as built (R07.T16.f; decision-r07-t16d-followups, item 1).
+ *
+ * @param reticleGrowthPx - How far a reticle's outer edge has moved out, CSS px:
+ *   `reticleGrowthCssPx` of the device-pixel ratio (2.65, 1.25, 0 and 0 at 0.78125, 1, 2 and 3).
  * @param pinnedIds - Marks whose labels are never dropped: the selection and the destination.
  * @param obstacles - Other text and furniture over the view that labels must not cover.
  */
@@ -149,10 +160,11 @@ export function placeLabels(
   chosen: ReadonlyArray<PointMark>,
   anchors: ReadonlyArray<Anchor>,
   viewport: Viewport,
+  reticleGrowthPx: number,
   pinnedIds: ReadonlyArray<string> = [],
   obstacles: ReadonlyArray<BoxPx> = [],
 ): ReadonlyArray<PlacedLabel> {
-  const gapPx = GAP_REM * viewport.remPx;
+  const gapPx = GAP_REM * viewport.remPx + reticleGrowthPx;
   const anchorOf = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const placed: PlacedLabel[] = [];
   for (const mark of chosen) {

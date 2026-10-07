@@ -126,3 +126,31 @@ const OUTLINES: Readonly<Record<SymbolShape, SymbolOutline>> = {
 export function symbolOutline(shape: SymbolShape): SymbolOutline {
   return OUTLINES[shape];
 }
+
+/**
+ * The distance from the centre of a closed unit outline to its nearest side: the unit polygon's
+ * inradius, `cos(π ÷ n)` for a regular n-gon (0.5 for the triangles, 0.707 for the square and the
+ * diamond, 0.809 for the pentagon and 0.866 for the hexagon).
+ *
+ * @remarks
+ * Both drawers move a polygon's outline out by an outline shift δ on every side by moving its
+ * corners δ over this (decision-r07-t16d-followups, (a)): the view's `bodySymbolMark` and the
+ * spatial displays' `paint`, so that the legend, the picture and the view agree. That is exact only
+ * for an outline whose sides all lie this far from its centre, as every polygon here does (each is
+ * regular about its centre, the triangles about their centroids). An outline added later whose
+ * sides do not, such as a four-point star, needs each side offset instead.
+ */
+export function unitInradius(points: ReadonlyArray<OutlinePoint>): number {
+  let nearest = Infinity;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (a !== undefined && b !== undefined) {
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      if (length > 0) {
+        nearest = Math.min(nearest, Math.abs(a.x * b.y - a.y * b.x) / length);
+      }
+    }
+  }
+  return nearest;
+}

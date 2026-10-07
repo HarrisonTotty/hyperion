@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import type { Viewport } from "./camera";
 import type { Anchor } from "./drawList";
+import { reticleGrowthCssPx } from "../lib/strokes";
 import { chooseLabels, placeLabels } from "./labels";
 import type { PointMark } from "./marks";
 import { vec3 } from "../geometry/vec3";
 
 const VIEWPORT: Viewport = { widthPx: 400, heightPx: 300, remPx: 16 };
+
+/** The ratios in use: the development machine's and the UHD 620's, 100%, a Retina display, and 3. */
+const RATIOS = [0.78125, 1, 2, 3] as const;
+
+/** No bracket growth, as at a ratio of 2: each label where P05 built it. */
+const AS_BUILT_PX = reticleGrowthCssPx(2);
 
 function mark(id: string, labelPriority: number, label = id.toUpperCase()): PointMark {
   return {
@@ -71,7 +78,12 @@ describe("chooseLabels", () => {
 
 describe("placeLabels", () => {
   it("puts a label to the right of its symbol, centred on it", () => {
-    const [label] = placeLabels([mark("a", 1, "SOL-1")], [anchor("a", 100, 100)], VIEWPORT);
+    const [label] = placeLabels(
+      [mark("a", 1, "SOL-1")],
+      [anchor("a", 100, 100)],
+      VIEWPORT,
+      AS_BUILT_PX,
+    );
 
     expect(label).toMatchObject({ id: "a", text: "SOL-1", side: "right", leftPx: 100 + 6 + 4 });
     expect((label?.topPx ?? 0) + (label?.heightPx ?? 0) / 2).toBeCloseTo(100, 9);
@@ -79,7 +91,12 @@ describe("placeLabels", () => {
   });
 
   it("flips a label to the left at the right edge", () => {
-    const [label] = placeLabels([mark("a", 1, "HD 140283")], [anchor("a", 380, 100)], VIEWPORT);
+    const [label] = placeLabels(
+      [mark("a", 1, "HD 140283")],
+      [anchor("a", 380, 100)],
+      VIEWPORT,
+      AS_BUILT_PX,
+    );
 
     expect(label?.side).toBe("left");
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(380 - 6 - 4, 9);
@@ -87,7 +104,12 @@ describe("placeLabels", () => {
 
   it("keeps a label whole inside a view too narrow for it on either side of its mark", () => {
     const narrow: Viewport = { widthPx: 160, heightPx: 100, remPx: 16 };
-    const [label] = placeLabels([mark("a", 1, "9FG 567Z04 B-3")], [anchor("a", 80, 4)], narrow);
+    const [label] = placeLabels(
+      [mark("a", 1, "9FG 567Z04 B-3")],
+      [anchor("a", 80, 4)],
+      narrow,
+      AS_BUILT_PX,
+    );
 
     expect(label?.leftPx).toBeGreaterThanOrEqual(0);
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeLessThanOrEqual(160);
@@ -98,7 +120,7 @@ describe("placeLabels", () => {
     const chosen = [mark("big", 9), mark("small", 1), mark("apart", 0)];
     const anchors = [anchor("big", 100, 100), anchor("small", 104, 104), anchor("apart", 100, 200)];
 
-    expect(placeLabels(chosen, anchors, VIEWPORT).map((label) => label.id)).toEqual([
+    expect(placeLabels(chosen, anchors, VIEWPORT, AS_BUILT_PX).map((label) => label.id)).toEqual([
       "big",
       "apart",
     ]);
@@ -113,7 +135,7 @@ describe("placeLabels", () => {
     ];
     const furniture = { leftPx: 0, topPx: 40, widthPx: 400, heightPx: 70 };
 
-    const placed = placeLabels(chosen, anchors, VIEWPORT, ["picked"], [furniture]);
+    const placed = placeLabels(chosen, anchors, VIEWPORT, AS_BUILT_PX, ["picked"], [furniture]);
 
     expect(placed.map((label) => label.id)).toEqual(["picked", "clear"]);
   });
@@ -122,29 +144,71 @@ describe("placeLabels", () => {
     const chosen = chooseLabels([mark("heavy", 9), mark("picked", 1)], "picked", null);
     const anchors = [anchor("heavy", 100, 100), anchor("picked", 102, 101)];
 
-    const placed = placeLabels(chosen, anchors, VIEWPORT, ["picked"]);
+    const placed = placeLabels(chosen, anchors, VIEWPORT, AS_BUILT_PX, ["picked"]);
 
     expect(placed.map((label) => label.id)).toEqual(["picked"]);
   });
 
   it("keeps the selected label even when its mark is out of view", () => {
-    const placed = placeLabels([mark("picked", 1)], [anchor("picked", -50, 100)], VIEWPORT, [
-      "picked",
-    ]);
+    const placed = placeLabels(
+      [mark("picked", 1)],
+      [anchor("picked", -50, 100)],
+      VIEWPORT,
+      AS_BUILT_PX,
+      ["picked"],
+    );
 
     expect(placed).toHaveLength(1);
   });
 
   it("drops the label of a mark out of view", () => {
-    expect(placeLabels([mark("a", 1)], [anchor("a", 100, 900)], VIEWPORT)).toHaveLength(0);
+    expect(
+      placeLabels([mark("a", 1)], [anchor("a", 100, 900)], VIEWPORT, AS_BUILT_PX),
+    ).toHaveLength(0);
+  });
+
+  it("stands a label 0.25 rem and the bracket's growth beyond its symbol: 2.65, 1.25, 0 and 0 px", () => {
+    const gaps = RATIOS.map((ratio) => {
+      const [label] = placeLabels(
+        [mark("a", 1)],
+        [anchor("a", 100, 100)],
+        VIEWPORT,
+        reticleGrowthCssPx(ratio),
+      );
+      return (label?.leftPx ?? 0) - (100 + 6) - 0.25 * VIEWPORT.remPx;
+    });
+
+    expect(gaps.map((gap) => Math.round(gap * 100) / 100)).toEqual([2.65, 1.25, 0, 0]);
+  });
+
+  it("stands a label flipped to the left as far beyond its symbol", () => {
+    const [label] = placeLabels(
+      [mark("a", 1, "HD 140283")],
+      [anchor("a", 380, 100)],
+      VIEWPORT,
+      reticleGrowthCssPx(0.78125),
+    );
+
+    expect(label?.side).toBe("left");
+    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(380 - 6 - 4 - 2.65, 9);
   });
 
   it("scales the estimated box with the interface", () => {
-    const [small] = placeLabels([mark("a", 1, "ABCD")], [anchor("a", 10, 10)], VIEWPORT);
-    const [large] = placeLabels([mark("a", 1, "ABCD")], [anchor("a", 10, 10)], {
-      ...VIEWPORT,
-      remPx: 24,
-    });
+    const [small] = placeLabels(
+      [mark("a", 1, "ABCD")],
+      [anchor("a", 10, 10)],
+      VIEWPORT,
+      AS_BUILT_PX,
+    );
+    const [large] = placeLabels(
+      [mark("a", 1, "ABCD")],
+      [anchor("a", 10, 10)],
+      {
+        ...VIEWPORT,
+        remPx: 24,
+      },
+      AS_BUILT_PX,
+    );
 
     expect(large?.widthPx).toBeCloseTo((small?.widthPx ?? 0) * 1.5, 9);
   });

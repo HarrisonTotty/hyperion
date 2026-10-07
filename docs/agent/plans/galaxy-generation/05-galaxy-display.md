@@ -132,12 +132,15 @@ interface UniverseSession {
 - `scale.ts`: `floor125`, `ceil125`, `scaleBar`, `gridSpacing`, `RADIUS_STEPS_LY`.
 - `marks.ts`: `SpatialScene`, `PointMark`, `SphereMark`, `PlaneSpec`, `SymbolShape`, `SizeClass`,
   `MarkStatus`.
-- `symbols.ts`: `symbolOutline(shape)`, `SIZE_CLASS_REM`.
+- `symbols.ts`: `symbolOutline(shape)`, `SIZE_CLASS_REM`. _R07.T16.f adds `unitInradius`, moved
+  from R02's `wireframe/symbology.ts`._
 - `plane.ts`: `gridLines`, `ringPolyline`.
 - `drawList.ts`: `buildDrawList(scene, camera, viewport): DrawList`, `DrawOp` (discriminated union),
-  `Anchor`.
+  `Anchor`. _R07.T16.f adds a required `minReticleGapPx`, the reticles' least gap in CSS px:
+  `buildDrawList(scene, camera, viewport, minReticleGapPx)`._
 - `pick.ts`: `pick(anchors, pointPx, tolerancePx): string | null`.
-- `labels.ts`: `chooseLabels`, `placeLabels`.
+- `labels.ts`: `chooseLabels`, `placeLabels`. _R07.T16.f gives `placeLabels` a required fourth
+  `reticleGrowthPx`, before its optional ones._
 - `transition.ts`: `easeOut`, `tweenCamera`, `TRANSITION_MS`.
 - `redraw.ts`: `createRedrawScheduler(requestFrame, cancelFrame)`.
 - `paint.ts`: `paint(context, drawList, tokens)`, `readTokens(element): ColourTokens`.

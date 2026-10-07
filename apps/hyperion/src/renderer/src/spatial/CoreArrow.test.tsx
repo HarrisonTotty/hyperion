@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type CameraAngles, PRESETS, type Viewport } from "./camera";
 import { CoreArrow } from "./CoreArrow";
@@ -84,9 +84,25 @@ describe("CoreArrow", () => {
   });
 
   it("draws its symbol larger than any mark's, 1.25 rem across", () => {
+    // From a ratio of 4/3 up, where the outline is 1.5 px and nothing moves.
+    vi.stubGlobal("devicePixelRatio", 2);
     const container = renderArrow(PRESETS.side);
 
     expect(Number(drawn(container).querySelector("circle")?.getAttribute("r"))).toBe(10);
+  });
+
+  it("moves the away symbol's circle and its cross out by the outline's shift, 0.53 px at 0.78125", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+    const away = drawn(renderArrow(PRESETS.side));
+    const radius = Number(away.querySelector("circle")?.getAttribute("r"));
+    // The cross runs corner to corner of the circle's inscribed square.
+    const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = (away.querySelector("path")?.getAttribute("d") ?? "")
+      .split(/[ML ]/u)
+      .filter((part) => part.length > 0)
+      .map(Number);
+
+    expect(Math.round((radius - 10) * 100) / 100).toBe(0.53);
+    expect(Math.hypot(x1 - x0, y1 - y0) / 2).toBeCloseTo(radius, 9);
   });
 
   it("stays an arrow when coreward is more than 5° off the line of sight", () => {

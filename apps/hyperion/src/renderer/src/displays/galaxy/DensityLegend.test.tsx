@@ -110,6 +110,17 @@ describe("DensityLegend", () => {
     }
   });
 
+  it("draws each decade's tick through the class that sets its width at the line scale", () => {
+    renderLegend(-4, 2.3);
+
+    const ticks = screen.getByRole("img").querySelectorAll("line");
+    expect(ticks).toHaveLength(7);
+    for (const tick of ticks) {
+      expect(tick).toHaveClass("density-legend__tick-mark");
+      expect(tick).not.toHaveAttribute("stroke-width");
+    }
+  });
+
   it("says so when the map holds no systems", () => {
     renderLegend(0, 0);
 
