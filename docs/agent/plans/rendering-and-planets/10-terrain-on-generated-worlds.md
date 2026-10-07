@@ -1341,3 +1341,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _Memory (item 5):_ the ceilings are unchanged: about 400 MB for the high setting's height
     cache (Design note 15) inside the 2–3 GB discrete ceiling. Only the context changes: the RTX
     3080's 10 GiB is shared with the local LLM.
+- **Class-map discs and R07's cell pass** (R07.T8.d, 2026-10-06). R07's `disc cells` pass binds
+  one class map a dispatch, so a class-map disc under 32 px sums its own cells in its draws, the
+  serial chain T8.d removes from uniform discs (about 2.0 M cycles under 4 px). T10.d is to bring
+  such discs into the pass: the frame's maps as one array texture with each record's layer in its
+  record, or one dispatch a map. Open, for the orchestrator (R07's "Deviations in T8.d, as built").

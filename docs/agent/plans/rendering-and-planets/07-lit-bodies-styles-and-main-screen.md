@@ -353,6 +353,7 @@ export function photorealisticPasses(setting: QualitySetting): PassList; // Desi
  * chosen so that the derived label is the one recorded in `PassList`.
  */
 export const PHOTOREAL_PASS_LABELS = {
+  discCells: "disc cells", // R07.T8.d: the small discs' cells, a dispatch before `bodies`
   bodies: "bodies", // mesh bodies, opaque with depth
   discs: "discs", // host discs, disc bodies and point bodies in painter order
   histogram: "histogram",
@@ -855,8 +856,8 @@ and `--port`.
 8. **The photorealistic style is a pass list over R02's scene and camera and a per-view HDR target
    that R07.T7 creates with R01's `createRenderTarget` in R02's `HDR_COLOUR_FORMAT` (R02 DN12: the
    wireframe has none; decisions-r06-r07, item 1).** In order:
-   R06's sky; mesh bodies (opaque, depth); host discs, disc bodies and point bodies in one painter
-   order (Design note 2); R08's,
+   R06's sky; the small discs' cells (a compute pass, R07.T8.d); mesh bodies (opaque, depth); host
+   discs, disc bodies and point bodies in one painter order (Design note 2); R08's,
    R10's and R11's passes in their places when they exist; the histogram; bloom of the light above
    the display's range; the tone-mapping pass with the analytic glare, upscale, encoding and
    dither; symbology cased over the result; DOM readouts on plates. A style owns no scene, camera or
@@ -1435,6 +1436,7 @@ src/renderer/src/view/scenes src/renderer/src/view/lighting`.
       - The primary recorded as limited by its discs of 32 px or more (about 0.47–0.54 M).
     - A bound missed is recorded and goes to the orchestrator for a ruling. It does not fail
       silently.
+  - _As built (2026-10-06, the shading lane): see Risks, "Deviations in T8.d, as built"._
 
 #### R07.T9 Mesh bodies
 
@@ -6409,3 +6411,113 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - The inserted text keeps the ruling's figures. The corrections above are for the ruling's
       author, and so is "the only cells" of the "Ruled" bullet: of the counts measured (4, 5, 6
       and 8 per axis), 7 × 7 untried.
+- **Deviations in T8.d, as built** (2026-10-06; the shading lane, after T8.c). Built as
+  decision-r07-small-disc-cost §1.2 rules it: one invocation a cell, each pixel's cells summed by
+  invocation 0 in `pixel_sum`'s order, row 51, `DISC_ROWS` 52, one dispatch a photorealistic view
+  a frame and none without a small disc. `shade` and `cell_sum` are unchanged, and so is the twin.
+  - **The kernel.** `BODY_DISC_CELLS_KERNEL` (`bodies/draw.ts`) composes `frame.wgsl`,
+    `litBody.wgsl`, `bodyDisc.wgsl` and the new `bodyDiscCells.wgsl`.
+    - Its name is `BODY DISC CELLS`: a `KernelPair` has no display name, so the name carries
+      the ruling's. `subgroup` is `null`, so its one source serves both capability paths, as
+      every kernel's does. `readback` is `bit-exact`, though nothing reads it back.
+    - Its own bindings are in `@group(1)`: `cell_pass` (the jobs J, a uniform) at 0 and
+      `cell_jobs` at 1. Its `draw` is private, so its own bindings take group 1, the per-pass
+      group, as a draw's do. (An empty group would need no bind group: since gpuweb PR #4946,
+      2024, a pipeline layout, `auto` included, holds an empty group as null and a dispatch does
+      not check it.) `cell_sums` is read-write at `@group(2) @binding(5)`, where both includers
+      declare it read-only.
+    - A job is a `vec4i` (record, x, y, 0), and job j's sums are the j-th, so row 51's index is
+      the job's. One workgroup takes one job, so 48 of a 4 × 4 pixel's 64 invocations idle. The
+      ruling allows packing four such pixels a workgroup; the bounds are met without it.
+  - **Which records.** `drawnThroughCells(record)` (`bodies/discShading.ts`) takes equal
+    interior and limb counts, a whole number from 1 to 8, on a uniform surface: every disc under
+    32 px of one law. It departs from "every disc record drawn below 32 px" in two ways:
+    - **A class-map disc sums its own cells.** A dispatch binds one class map, and none is live
+      before R10. Such a disc under 4 px would keep the 2.0 M-cycle chain. For R10.T10.d, open
+      for the orchestrator: the frame's maps as one array texture with each record's layer, or a
+      dispatch a map, which breaks "one dispatch a view" (R10's Risks, "Class-map discs and
+      R07's cell pass").
+    - **The jobs' limit** (TypeScript review). `discCellJobs(records, maxJobs)` takes no record
+      whose pixels would pass `maxJobs`, and that record sums its own cells. The limit is
+      `MAX_CELL_JOBS` (2²⁴, below which row 51's `f32` holds every index), or what one storage
+      binding holds, `maxStorageBufferBindingSize ÷ 32` (4,194,304 pixels at WebGPU's default),
+      which `dispatchCells` passes.
+  - **The dispatch.** `LitBodyRenderer.dispatchCells(plan, kernel, frame): boolean`.
+    - `PhotorealRenderer` makes the kernel in `#make` with its other pipelines, and again after
+      a restore. The `LitBodyRenderer` owns the buffers, `bodies:disc cell jobs` and
+      `bodies:disc cell sums` (category `other`, 4,096 bytes, doubling, remade after a loss).
+    - Its frame is the `discs` pass's own (`DiscCellFrame`), packed by `discCellFrameBlock`,
+      which is tested equal to the adapter's `packFrame`. Its workgroups are `cellWorkgroups(J)`.
+    - It is called for a plan before `meshDraws` and `draws`, and writes the records with row
+      51. A plan whose records those wrote first is drawn in-fragment, and nothing is
+      dispatched. That is how a test asks for the in-fragment path: the smoke harness's earlier
+      disc checks and T9's and T10.c's draw so, with no flag on the record.
+  - **The pass's place.** `PHOTOREAL_PASS_LABELS.discCells` (`DISC_CELLS_PASS`, `disc cells`)
+    stands after `sky` and before `bodies`, since the mesh figures read the sums as well. Design
+    note 8 and the Provides sketch name it. R12's `PASS_ROWS` needs a row for it.
+  - **`noClassMap` has two layers** (1 × 1 × 2), so that it is a `2d-array` by its own dimension.
+    R01's kernel path takes a texture's view from its layers (`viewDimensionOf`), and no file
+    under `view/engine/` changed but the catalogue.
+  - **Beyond the ruling** (TypeScript review). `LitBodyRenderer.dispose` releases every buffer
+    and texture it made, not only the pass's two; before, a closed view held them until the
+    engine went. `#reserve` caps a buffer's growth at one storage binding where the bytes fit in
+    one.
+  - **Files.** Beyond the plan's list:
+    - `engine/catalogue.ts` and its test, and R10's Risks;
+    - `bodies/discCells.test.ts` (new: the jobs, row 51, the dispatch, its limits and buffers);
+    - `bodies/draw.test.ts` (the mesh draw's buffers, 832-byte records, the release);
+    - `photoreal/renderer.test.ts` (the pass's tests; the histogram's tests pick their dispatch
+      by its pass now) and `photoreal/photoreal.test.ts`;
+    - `smoke/harness.ts` (`halfUlpsApart`) and `smoke/meshBodies.ts`.
+    - `test/countingRenderEngine.ts`' `RecordedDispatch` gains `framesBefore`, which orders a
+      dispatch among the frames; `test/fakeViewEngine.ts` is unchanged.
+  - **`TIMING_FRAMES_IN_FLIGHT` is unchanged.** The dispatch is a timed pass, but its times
+    resolve with the next render's, so a frame resolves as often as before. The test draws a
+    1920 × 1080 primary and two 480 × 360 instruments, each with its symbology, and holds three
+    such frames within 135.
+  - **G11** (SwiftShader, both variants). Every disc was drawn through the pass and in-fragment
+    in one run, and every channel was 0 ulp apart (equal, ±0 counted equal), every alpha equal:
+    - discs of 3.5 px (8 × 8), 13 and 20 px (4 × 4) at 80°, off the grid by (0.3, −0.2) px, on
+      48 × 48: 17, 162 and 365 pixels, the pass's texels within 0.080, 0.164 and 0.241 of G10's
+      tolerance of the twin, with the twin's classes;
+    - an Earth promoted to a mesh at 20 px (4 × 4) and at 3.6 px (8 × 8), six patches each.
+    - T8.a's 3 px flux check against the point now draws through the pass too: within 0.42% of
+      the point (150°), as in-fragment at T8.c.
+  - **`just test-render`**: both variants exit 0 with no uncaptured error, 276 and 274 checks
+    on the merged base, in two runs (the second on the final tree, its captures identical to the
+    first's). T8.d adds three a variant: the catalogue's `BODY DISC CELLS` and the two G11
+    checks.
+  - **No capture moved for T8.d.** Of the 110 captures (55 a variant), only R05's twelve spike
+    frames differ from T8.c's, which the merge of `rendering-and-planets` brought (R05's lane;
+    they hold no lit body). `ECLIPSE TEST`'s 3.91 px giant now goes through the pass, and its
+    frames are byte-identical.
+  - **naga 30.0.1** takes the disc's, the mesh's and the kernel's compositions to SPIR-V, MSL and
+    HLSL. The mesh's MSL needs `--metal-version 2.1` for its `instance_index`, as the base's does.
+  - **The cost, measured** (hidden and offscreen on the RTX 3080, 2026-10-06 22:04–22:12).
+    - The method was T8.c's: two instrumented builds of the merged head, without and with T8.d's
+      edits to the app's sources (`t8d-base`, T8.c's sampling, and `t8d`), the `var`, `fov` and
+      `var` plans in turn, under `just _locked` and the GPU lock.
+    - Load was 2.8–7.9, with the crash-telemetry sampler running (`nvidia-smi` every 2 s).
+    - The figures are medians of each pass, in cycles at the phase's median graphics clock.
+
+    | View (`PHASE TEST`, the view photorealistic) | Before (`discs`) | After (`disc cells` + `discs`) |
+    |---|---|---|
+    | An instrument, 240 × 180 at 60°, its 13 px planet (4 × 4) | 0.53–0.55 M (0.77–1.24 ms at 435–690 MHz) | 0.062–0.075 M (0.051–0.058 + 0.011–0.017 M) |
+    | The same at 30°, 45°, 90° and 120° (two 4 × 4 discs at 120°) | 0.52–0.59 M | 0.066–0.086 M |
+    | An instrument with the ~3 px giant (8 × 8) and the planet | 2.17–2.25 M (2.0–5.0 ms at 435–1,065 MHz) | 0.069–0.076 M (0.058–0.063 + 0.011–0.013 M) |
+    | The primary, 1120 × 900: the 62 px half planet and the 14 px giant (4 × 4) | 0.59–0.61 M | 0.57–0.60 M (0.058–0.063 + 0.51–0.53 M) |
+    | An instrument at 10° or 20°, a disc of 32 px or more only | 0.47–0.54 M | 0.48–0.53 M, no dispatch |
+
+    - Both bounds are met: an instrument's `disc cells` and `discs` take at most 0.086 M cycles
+      against 0.2 M, and a view with a disc under 4 px at most 0.076 M against 0.2 M.
+    - The primary is limited by its 62 px disc's limb, 0.51–0.53 M, the residual the ruling
+      names (about 0.47–0.54 M).
+    - After, an instrument's `disc cells` takes 0.081–0.206 ms and its `discs` 0.020–0.043 ms, at
+      285–675 MHz. The driver drops the clock under the lighter load: with every view
+      photorealistic, the 60° instrument's whole GPU frame went from 0.99–1.09 ms at 645–690 MHz
+      to 0.34–0.41 ms at 480–675 MHz.
+    - These figures are provisional: the machine was shared, and T17 retakes them.
+  - **The ruling's figures.** T8.c's corrected near-field oracle changes no figure T8.d rests on:
+    G11 compares the pass with the in-fragment draw, and the costs are measured. The ruling's
+    0.54 M after T8.c was measured as 0.48–0.55 M, and here as 0.53–0.55 M.
+  - **`just ci`** was not run, under the Day 2 protocol.

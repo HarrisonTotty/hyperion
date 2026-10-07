@@ -6,7 +6,9 @@
  * @remarks
  * Into the scene target, pre-exposed: R06's band, then its baked star cube (each at infinity,
  * additive, keeping the meter class), the star sprites through R06's `POINT SPRITES HDR` (stars,
- * and host discs under three pixels), then the mesh bodies' figures, opaque with depth, as the
+ * and host discs under three pixels); then the `disc cells` dispatch, which shades every cell of
+ * the discs under 32 px at once for the draws after it to read (R07.T8.d), where the frame has
+ * such a disc; then the mesh bodies' figures, opaque with depth, as the
  * `bodies` pass where the frame has any (T9), then the painter's sequence of Design note 2: host
  * discs (R06's pass, meter class 0), disc bodies, mesh bodies' limbs and point bodies, back to
  * front by power. Then the bloom
@@ -23,6 +25,7 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import {
+  BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
   type LitBodyInput,
   LitBodyRenderer,
@@ -133,6 +136,8 @@ interface Resources {
   readonly blueNoise: TextureHandle;
   /** The scene target's exposure histogram, read back one to three frames late (R07.T12). */
   readonly histograms: HistogramReader;
+  /** The `disc cells` kernel, which shades the small discs' cells in parallel (R07.T8.d). */
+  readonly discCells: ComputeHandle;
   glare: BufferHandle;
   glareCapacity: number;
   stars: BufferHandle;
@@ -226,11 +231,13 @@ export class PhotorealRenderer {
     let tonemap: MaterialHandle;
     let sprite: MaterialHandle;
     let kernel: ComputeHandle;
+    let discCells: ComputeHandle;
     try {
-      [tonemap, sprite, kernel] = await Promise.all([
+      [tonemap, sprite, kernel, discCells] = await Promise.all([
         engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
         engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
         engine.createComputeAsync(HISTOGRAM_KERNEL),
+        engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it.
@@ -276,6 +283,7 @@ export class PhotorealRenderer {
           this.#histogram = histogram;
         }
       }),
+      discCells,
       glare: this.#glareBuffer(GLARE_CAPACITY),
       glareCapacity: GLARE_CAPACITY,
       stars: this.#spriteBuffer(MIN_SPRITE_BYTES),
@@ -394,6 +402,13 @@ export class PhotorealRenderer {
       projection,
       draws: [...frame.sky, ...(stars === null ? [] : [stars])],
       postProcesses: [],
+    });
+    // The small discs' cells, all at once, before any draw reads their sums (R07.T8.d); in the
+    // frame the `discs` pass draws in, the scene target's.
+    this.#bodies.dispatchCells(plan, resources.discCells, {
+      viewRotation,
+      projection,
+      size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
     });
     // The mesh bodies' figures, with depth, before the sequence; no pass where there are none.
     const meshes = this.#bodies.meshDraws(plan);

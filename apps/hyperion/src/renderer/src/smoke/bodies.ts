@@ -1,8 +1,9 @@
 /**
- * The smoke page's lit-body checks (plan R07, T8.a, T8.b and T8.c): `shaders/bodyDisc.wgsl`'s two
+ * The smoke page's lit-body checks (plan R07, T8.a–d): `shaders/bodyDisc.wgsl`'s two
  * draws into an `rgba16float` target the test makes, against `bodies/discShading.ts`' CPU rasteriser
  * of the same arithmetic: a disc's texels and meter classes; a crescent at each sampling level
- * (8 × 8, 4 × 4, and one inside with 4 × 4 on the limb); its summed flux against the point's at
+ * (8 × 8, 4 × 4, and one inside with 4 × 4 on the limb); small discs drawn through the `disc
+ * cells` pass against their in-fragment draws (T8.d's G11); its summed flux against the point's at
  * the 3 px switch, over phases and sub-pixel placements; a Saturn-like f = 0.098 disc's extents at
  * 100 px; a disc under a half-surveyed two-class map, and under a map of one class equal to the
  * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11).
@@ -19,7 +20,13 @@ import {
   viewRay,
 } from "../view/bodies/discShading";
 import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
-import { LitBodyRenderer, type LitBodyInput, planLitBodies, pointFlux } from "../view/bodies/draw";
+import {
+  BODY_DISC_CELLS_KERNEL,
+  LitBodyRenderer,
+  type LitBodyInput,
+  planLitBodies,
+  pointFlux,
+} from "../view/bodies/draw";
 import { type Rotation3, rotateToBody, rotation3FromRows } from "../view/coords/rotation";
 import {
   NEAR_PLANE_M,
@@ -31,7 +38,7 @@ import {
 } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
 import type { BodyFigure } from "../view/terrain/planet";
-import type { RenderEngine } from "../view/engine/types";
+import type { ComputeHandle, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import type { PlacedLight } from "../view/lighting/hostLights";
@@ -52,6 +59,7 @@ import {
   frameOf,
   fullScreenMesh,
   halfTexels,
+  halfUlpsApart,
   NEAR_M,
   pause,
 } from "./harness";
@@ -87,6 +95,11 @@ interface DrawExtras {
   readonly exposure?: number;
   /** A neighbour on the body's anti-solar side, full from it: its radius and distance, m. */
   readonly shine?: { readonly radiusM: number; readonly distanceM: number };
+  /**
+   * The `disc cells` kernel, dispatched before the draws so that a small disc reads its pixels'
+   * sums (R07.T8.d); absent, every disc sums its own cells in its draws.
+   */
+  readonly cells?: ComputeHandle;
 }
 
 /** One drawn disc: the GPU's texels and the CPU's composite. */
@@ -94,6 +107,10 @@ interface Drawn {
   readonly viewport: Viewport;
   readonly camera: ProjectionCamera;
   readonly texels: Float32Array;
+  /** The read-back's `rgba16float` bytes. */
+  readonly bytes: ArrayBuffer;
+  /** Whether the `disc cells` pass ran for the draws. */
+  readonly throughCells: boolean;
   readonly expected: ReadonlyArray<CompositePixel>;
   readonly body: LitBodyInput;
   readonly hosts: ReadonlyArray<PlacedLight>;
@@ -168,18 +185,24 @@ async function drawDisc(
   const plan = planLitBodies([body, ...others], hosts, options, new Map([[body.id, "disc"]]));
   const target = createSceneTarget(engine, "smoke bodies", viewport);
   try {
+    const viewRotation = viewRotation4(camera.orientation);
+    const projection = perspectiveReversedInfinite(
+      camera.fovXRad,
+      viewport.widthPx / viewport.heightPx,
+      NEAR_PLANE_M,
+    );
+    const throughCells =
+      extras.cells !== undefined &&
+      renderer.dispatchCells(plan, extras.cells, { viewRotation, projection, size: viewport });
     target.render({
       label: PHOTOREAL_PASS_LABELS.discs,
-      viewRotation: viewRotation4(camera.orientation),
-      projection: perspectiveReversedInfinite(
-        camera.fovXRad,
-        viewport.widthPx / viewport.heightPx,
-        NEAR_PLANE_M,
-      ),
+      viewRotation,
+      projection,
       draws: renderer.draws(plan),
       postProcesses: [],
     });
-    const texels = halfTexels(await engine.readTexture(target.colour));
+    const bytes = await engine.readTexture(target.colour);
+    const texels = halfTexels(bytes);
     const record = plan.discs.find((each) => each.body === body.id);
     const expected =
       record === undefined
@@ -187,7 +210,7 @@ async function drawDisc(
         : compositeDiscPixels(rasteriseDisc(record, camera, viewport, mapped?.texels ?? null));
     const samples =
       record === undefined ? null : ([record.interiorSamples, record.limbSamples] as const);
-    return { viewport, camera, texels, expected, body, hosts, samples };
+    return { viewport, camera, texels, bytes, throughCells, expected, body, hosts, samples };
   } finally {
     target.dispose();
   }
@@ -253,6 +276,7 @@ export async function checkBodies(engine: RenderEngine, checks: Checks): Promise
   try {
     await checkTexels(engine, renderer, checks);
     await checkSamplingLevels(engine, renderer, checks);
+    await checkCellPass(engine, renderer, checks);
     await checkFlux(engine, renderer, checks);
     await checkExtents(engine, renderer, checks);
     await checkPlanetshine(engine, renderer, checks);
@@ -382,12 +406,84 @@ async function checkSamplingLevels(
   );
 }
 
+/**
+ * R07.T8.d's G11: a 3.5 px disc (8 × 8) and a 13 px and a 20 px disc (4 × 4), off the pixel grid
+ * at 80° of phase, each drawn through the `disc cells` pass and in-fragment in the same run, agree
+ * within one `rgba16float` ulp in every channel, alpha included, with the interior's classes
+ * identical; the pass's texels against the CPU rasteriser (G10).
+ */
+async function checkCellPass(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+): Promise<void> {
+  const kernel = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+  const viewport = { widthPx: 48, heightPx: 48 };
+  let pass = true;
+  const cases: string[] = [];
+  for (const [diameterPx, cells] of [
+    [3.5, 8],
+    [13, 4],
+    [20, 4],
+  ] as const) {
+    const draw = (extras: DrawExtras): Promise<Drawn> =>
+      drawDisc(
+        engine,
+        renderer,
+        viewport,
+        diameterPx,
+        80,
+        SPHERE,
+        [0.3, -0.2],
+        CAMERA,
+        null,
+        null,
+        extras,
+      );
+    // The harness's checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const parallel = await draw({ cells: kernel });
+    // The in-fragment draw reads back after the pass's, before the next case draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const inFragment = await draw({});
+    const {
+      ulps,
+      differing,
+      alphasEqual: classes,
+    } = halfUlpsApart(parallel.bytes, inFragment.bytes);
+    const twin = texelAgreement(parallel);
+    const [interior, limb] = parallel.samples ?? [0, 0];
+    const ok =
+      parallel.throughCells &&
+      !inFragment.throughCells &&
+      interior === cells &&
+      limb === cells &&
+      ulps <= 1 &&
+      classes &&
+      twin.worst <= 1 &&
+      twin.classes &&
+      parallel.expected.length > 0;
+    pass &&= ok;
+    cases.push(
+      `${String(diameterPx)} px at ${String(interior)} × ${String(limb)}: through the pass ${String(parallel.throughCells)}; within ${String(ulps)} ulp of the in-fragment draw (${String(differing)} of ${String(parallel.texels.length)} channels differ); classes equal ${String(classes)}; ${String(parallel.expected.length)} pixels within ${twin.worst.toFixed(3)} of the twin's tolerance, its classes ${String(twin.classes)}`,
+    );
+  }
+  checks.check(
+    "R07.T8.d G11 a small disc drawn through the disc cells pass equals its in-fragment draw within one rgba16float ulp, and the twin",
+    pass,
+    cases.join("; "),
+  );
+}
+
 async function checkFlux(
   engine: RenderEngine,
   renderer: LitBodyRenderer,
   checks: Checks,
 ): Promise<void> {
+  // Drawn as the view draws a disc under 32 px: its cells shaded by the `disc cells` pass (T8.d).
+  const kernel = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
   let worst = 0;
+  let throughCells = true;
   const cases: string[] = [];
   for (const phaseDeg of [0, 90, 150]) {
     for (const offset of [
@@ -407,7 +503,11 @@ async function checkFlux(
         SPHERE,
         offset,
         SWITCH_CAMERA,
+        null,
+        null,
+        { cells: kernel },
       );
+      throughCells &&= drawn.throughCells;
       const point = pointFlux(drawn.body, drawn.hosts, [], DISC_ANNULI_HIGH)[1];
       const error = Math.abs(texelFlux(drawn) / point - 1);
       worst = Math.max(worst, error);
@@ -430,8 +530,8 @@ async function checkFlux(
   }
   checks.check(
     "T8.a at the 3 px switch the disc's summed flux equals the point's to 1%",
-    worst < 0.01,
-    cases.join("; "),
+    worst < 0.01 && throughCells,
+    `through the disc cells pass ${String(throughCells)}; ${cases.join("; ")}`,
   );
 }
 

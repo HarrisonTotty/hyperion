@@ -6,8 +6,10 @@
 // the weights leave. The TypeScript twin is `view/bodies/discShading.ts`.
 //
 // A library composed by concatenation after frame.wgsl and litBody.wgsl, with no entry point of its
-// own: its includer declares `draw` at `@group(1) @binding(0)`, a `Draw` whose `disc` is the body's
-// record in `discs`. Two includers draw it (`disc_pixel`):
+// own: its includer declares `draw`, a `Draw` whose `disc` is the body's record in `discs`, and
+// `cell_sums` at `@group(2) @binding(5)`, the pixels' sums of the `disc cells` pass (R07.T8.d),
+// which a disc under 32 px reads in place of summing its own cells (`pixel_cells`). Two includers
+// draw it (`disc_pixel`), each with `draw` at `@group(1) @binding(0)` and `cell_sums` read-only:
 //   - bodyDiscDraw.wgsl, the disc regime: one screen rectangle the CPU bounds, in two draws the CPU
 //     orders together in the painter's sequence, `edgePass` 0 for the pixels the body covers
 //     wholly, opaque, writing the meter class in alpha (Design note 10), and `edgePass` 1 for the
@@ -17,6 +19,8 @@
 //   - smoothMesh.wgsl, the mesh regime (T9): R05's patches of the spheroid at zero height, writing
 //     depth, which draw the wholly covered pixels as the disc's first draw does; the limb is the
 //     disc's second draw, at the limb's depth.
+// A third, bodyDiscCells.wgsl, is the `disc cells` kernel: one invocation a cell of a small disc's
+// pixel (`cell_sum`), its `draw` private and set from the job, writing `cell_sums`.
 //
 // Every length reaches the GPU already divided: the body's centre as a unit direction with its
 // radii over its distance D, and every light and occluder relative to the body's centre over its
@@ -40,7 +44,10 @@
 //   42 to 45  the classes' rows of `phase_factor_table`, four a row;
 //   46  the planetshine sources (x);
 //   47 + 2j, source j: the neighbour's unit direction from the body's centre, w its distance ÷ a;
-//      its illuminance face-on at the body's centre per channel (lx), w its radius ÷ a.
+//      its illuminance face-on at the body's centre per channel (lx), w its radius ÷ a;
+//   51  where the `disc cells` pass left the pixels' sums (T8.d): the first sum's index in
+//      `cell_sums`, the left and top of the rectangle summed, px, and its width, px; x −1 for a
+//      disc whose draws sum their own cells.
 @group(2) @binding(0) var<storage, read> discs : array<vec4f>;
 
 // The phase factors of the frame's laws, one row each (`litBody.wgsl`).
@@ -51,7 +58,7 @@
 // surface is uniform, unread.
 @group(2) @binding(2) var class_weights : texture_2d_array<f32>;
 
-const DISC_ROWS : u32 = 51u;
+const DISC_ROWS : u32 = 52u;
 const FIRST_LIGHT_ROW : u32 = 6u;
 const LIGHT_ROWS : u32 = 8u;
 const FIRST_OCCLUDER_ROW : u32 = 22u;
@@ -61,6 +68,7 @@ const FIRST_CLASS_TABLE_ROW : u32 = 42u;
 const SECONDARY_COUNT_ROW : u32 = 46u;
 const FIRST_SECONDARY_ROW : u32 = 47u;
 const SECONDARY_ROWS : u32 = 2u;
+const CELL_SUMS_ROW : u32 = 51u;
 const MAX_DISC_LIGHTS : u32 = 2u;
 const MAX_DISC_OCCLUDERS : u32 = 2u;
 const MAX_DISC_SECONDARIES : u32 = 2u;
@@ -523,6 +531,28 @@ fn pixel_sum(body : Body, centre_px : vec2f, n : u32) -> CellSum {
   return sum;
 }
 
+// The pixel whose centre is `centre_px`, its n × n cells summed: as the `disc cells` pass left it in
+// `cell_sums` where row 51 holds its sums (two `vec4f` a pixel: the light and the coverage as
+// means, then the lit and shaded points), else by `pixel_sum` here. The pass sums each pixel's cells
+// in `pixel_sum`'s order with the same functions, so the two differ by no more than the compilers'
+// own rounding.
+fn pixel_cells(body : Body, centre_px : vec2f, n : u32) -> CellSum {
+  let sums = disc_row(CELL_SUMS_ROW);
+  if (sums.x < 0.0) {
+    return pixel_sum(body, centre_px, n);
+  }
+  let pixel = floor(centre_px);
+  let index = u32(sums.x) + u32(pixel.y - sums.z) * u32(sums.w) + u32(pixel.x - sums.y);
+  let light = cell_sums[2u * index];
+  let points = cell_sums[2u * index + 1u];
+  var sum : CellSum;
+  sum.radiance = light.xyz;
+  sum.coverage = light.w;
+  sum.lit = u32(points.x);
+  sum.shaded = u32(points.y);
+  return sum;
+}
+
 // A pixel as one of the disc's two draws leaves it, and whether that draw draws it.
 struct DiscPixel {
   colour : vec4f,
@@ -561,7 +591,7 @@ fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
     if (!interior) {
       return none;
     }
-    let sum = pixel_sum(body, position, u32(counts.x));
+    let sum = pixel_cells(body, position, u32(counts.x));
     let light = select(vec3f(0.0), sum.radiance / sum.coverage, sum.coverage > 0.0);
     // The pure-pixel class: lit where every shaded point is, unlit where none is, `other` where
     // they are mixed or no star lights the body.
@@ -579,7 +609,7 @@ fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
   if (!limb) {
     return none;
   }
-  let sum = pixel_sum(body, position, u32(counts.y));
+  let sum = pixel_cells(body, position, u32(counts.y));
   if (sum.coverage <= 0.0) {
     return none;
   }

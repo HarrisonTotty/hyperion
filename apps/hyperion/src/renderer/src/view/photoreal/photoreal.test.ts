@@ -29,6 +29,12 @@ describe("photorealisticPasses", () => {
     expect(labels.slice(-4)).toEqual(["histogram", "bloom", "tonemap", "symbology"]);
   });
 
+  it("puts the disc cells between the sky and the discs, before the mesh bodies that read them (R07.T8.d)", () => {
+    const labels = photorealisticPasses("high").passes.map((pass) => pass.label);
+    expect(labels.slice(0, 3)).toEqual(["sky", "disc cells", "bodies"]);
+    expect(labels.indexOf("disc cells")).toBeLessThan(labels.indexOf("discs"));
+  });
+
   it("leaves the slots of plans not yet built empty, R06's sky built (R07.T8.a)", () => {
     const empty = photorealisticPasses("high").passes.filter((pass) => !pass.built);
     expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R08", "R11"]));

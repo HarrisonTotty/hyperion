@@ -4,7 +4,10 @@ import { vec3 } from "../../geometry/vec3";
 import { sphereFootprint } from "../bodies/regime";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
+import { BODY_DISC_CELLS_KERNEL, DISC_CELLS_PASS, type LitBodyInput } from "../bodies/draw";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
+import type { Viewport } from "../camera/projection";
+import { TIMING_FRAMES_IN_FLIGHT } from "../engine/webgpu/timing";
 import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
@@ -290,7 +293,9 @@ describe("the photorealistic renderer's histogram", () => {
     const { engine, renderer } = await ready();
     renderer.render(new RecordingView(), { ...frameWith([]), meter: "lit" });
     expect(
-      engine.dispatched.map((d) => [d.pass, Array.from(d.bindings.uniforms["params"] ?? [])]),
+      engine.dispatched
+        .filter((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram)
+        .map((d) => [d.pass, Array.from(d.bindings.uniforms["params"] ?? [])]),
     ).toEqual([["histogram", Array.from(histogramParams(VIEWPORT, "lit", 1))]]);
     renderer.dispose();
   });
@@ -299,7 +304,8 @@ describe("the photorealistic renderer's histogram", () => {
     const { engine, renderer } = await ready();
     renderer.render(new RecordingView(), { ...frameWith([]), meter: null });
     await settled();
-    expect([engine.dispatched.length, renderer.takeHistogram()]).toEqual([0, undefined]);
+    const histograms = engine.dispatched.filter((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram);
+    expect([histograms.length, renderer.takeHistogram()]).toEqual([0, undefined]);
     renderer.dispose();
   });
 
@@ -336,5 +342,155 @@ describe("the photorealistic renderer's histogram", () => {
     await settled();
     expect(renderer.takeHistogram()).toBeUndefined();
     expect(released.filter((name) => name.startsWith("test view histogram"))).toHaveLength(3);
+  });
+});
+
+/**
+ * An Earth-sized body `diameterPx` across on a view of `viewport` at 60°, `xPx` right of its
+ * centre.
+ */
+function bodyAcross(
+  diameterPx: number,
+  xPx: number,
+  id: string,
+  viewport: Viewport = VIEWPORT,
+): LitBodyInput {
+  const lit = aLitBody();
+  const pxPerRad = viewport.widthPx / (2 * Math.tan(Math.PI / 6));
+  const distanceM = lit.figure.equatorialRadiusM / Math.sin(diameterPx / 2 / pxPerRad);
+  return {
+    id,
+    centreM: vec3((xPx * distanceM) / pxPerRad, 0, -distanceM),
+    figure: lit.figure,
+    photometry: lit.photometry,
+    lighting: undefined,
+  };
+}
+
+/** A frame of `frameWith`'s sky and lights with these bodies, drawn as discs. */
+function frameOfDiscs(bodies: ReadonlyArray<LitBodyInput>, viewport = VIEWPORT): PhotorealFrame {
+  return {
+    ...frameWith([]),
+    viewport,
+    bodies,
+    previousRegimes: new Map(bodies.map((body) => [body.id, "disc"])),
+  };
+}
+
+/** A 3.5 px disc (8 × 8) and a 13 px one (4 × 4) on `viewport`. */
+function smallDiscs(viewport: Viewport = VIEWPORT): LitBodyInput[] {
+  const third = viewport.widthPx / 4;
+  return [
+    bodyAcross(3.5, third, "0200080020000000.0401", viewport),
+    bodyAcross(13, -third, "0200080020000000.0402", viewport),
+  ];
+}
+
+describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
+  it("shades the small discs' cells once, after the sky and before the discs", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const plan = renderer.render(new RecordingView(), frameOfDiscs(smallDiscs()));
+    expect(plan?.discs.map((disc) => disc.interiorSamples)).toEqual([8, 4]);
+    const cells = engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS);
+    expect(cells.map((d) => [d.kernel, engine.targetFrames[d.framesBefore - 1]?.label])).toEqual([
+      [BODY_DISC_CELLS_KERNEL.name, SKY_PASS_LABEL],
+    ]);
+    expect(engine.targetFrames[cells[0]?.framesBefore ?? -1]?.label).toBe(
+      PHOTOREAL_PASS_LABELS.discs,
+    );
+    renderer.dispose();
+  });
+
+  it("dispatches nothing where every disc is 32 px or more", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const plan = renderer.render(
+      new RecordingView(),
+      frameOfDiscs([bodyAcross(34, 0, "0200080020000000.0403")]),
+    );
+    expect([
+      plan?.discs.length,
+      engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS).length,
+    ]).toEqual([1, 0]);
+    renderer.dispose();
+  });
+
+  it("dispatches once in each of three photorealistic views", async () => {
+    const engine = await countingRenderEngine();
+    const renderers = ["primary", "instrument 1", "instrument 2"].map(
+      (name) => new PhotorealRenderer(engine, name),
+    );
+    await Promise.all(
+      renderers.map((renderer) => renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera)),
+    );
+    for (const renderer of renderers) {
+      renderer.render(new RecordingView(), frameOfDiscs(smallDiscs()));
+    }
+    const cells = engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS);
+    expect([cells.length, new Set(cells.map((d) => d.bindings.buffers["cell_jobs"])).size]).toEqual(
+      [3, 3],
+    );
+    for (const renderer of renderers) {
+      renderer.dispose();
+    }
+  });
+
+  it("makes the cell kernel again after a device restore, and dispatches it", async () => {
+    const engine = await countingRenderEngine();
+    const made = vi.spyOn(engine, "createComputeAsync");
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = frameWith([]).camera;
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    engine.restore();
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    renderer.render(new RecordingView(), frameOfDiscs(smallDiscs()));
+    expect([
+      made.mock.calls.filter(([pair]) => pair === BODY_DISC_CELLS_KERNEL).length,
+      engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS).length,
+    ]).toEqual([2, 1]);
+    renderer.dispose();
+  });
+
+  it("keeps three frames of a photorealistic primary and two instruments in the timer's resolves", async () => {
+    // Each render resolves its own pass times; a dispatch's wait for the next render's.
+    const engine = await countingRenderEngine();
+    const views = [
+      { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
+      { name: "instrument 1", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+      { name: "instrument 2", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+    ];
+    const camera = frameWith([]).camera;
+    const drawn = await Promise.all(
+      views.map(async ({ name, viewport, role }) => {
+        const renderer = new PhotorealRenderer(engine, name);
+        await renderer.prepare(viewport, "high", role, camera);
+        return { viewport, role, renderer, canvas: new RecordingView() };
+      }),
+    );
+    const overlay = {
+      label: PHOTOREAL_PASS_LABELS.symbology,
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [],
+      postProcesses: [],
+    };
+    for (const view of drawn) {
+      view.renderer.render(view.canvas, {
+        ...frameOfDiscs(smallDiscs(view.viewport), view.viewport),
+        role: view.role,
+        meter: view.role === "eye" ? "average" : null,
+        overlay,
+      });
+    }
+    const resolves =
+      engine.targetFrames.length + drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+    expect(engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS)).toHaveLength(3);
+    expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
+    for (const view of drawn) {
+      view.renderer.dispose();
+    }
   });
 });

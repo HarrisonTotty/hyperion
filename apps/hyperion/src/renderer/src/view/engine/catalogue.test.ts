@@ -81,4 +81,11 @@ describe("the catalogue's compute kernels", () => {
       expect.arrayContaining(["atmosphere transmittance", "atmosphere multiple scattering"]),
     );
   });
+
+  it("registers R07.T8.d's cell pass as BODY DISC CELLS", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec.name] : [],
+    );
+    expect(names).toContain("BODY DISC CELLS");
+  });
 });

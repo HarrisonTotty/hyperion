@@ -20,6 +20,9 @@
  * meet the body is drawn opaque with its meter class; one on the limb premultiplied by its
  * coverage, keeping the class beneath (decision-r07-t8a, item 3). Near the limb a cell's light is
  * integrated across its profile in √δ, the depth inside the limb (see {@link rasteriseDisc}).
+ * Under {@link SMALL_DISC_PX} a pixel's cells are shaded at once by the `disc cells` pass, one
+ * invocation a cell, and summed there in the draws' order ({@link discCellJobs}, R07.T8.d); the
+ * draws read the pixel's sums through row 51. The arithmetic is the draws' own.
  * {@link rasteriseDisc} runs the shader's arithmetic in `f64`.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
@@ -54,7 +57,7 @@ import { oblateAlbedoScale } from "./oblate";
 export const LIT_IRRADIANCE = 1e-5;
 
 /** `vec4f` rows per disc in the shader's `discs` buffer. */
-export const DISC_ROWS = 51;
+export const DISC_ROWS = 52;
 
 /** The stars that light one disc at most: the brightest two, `MAX_BODY_LIGHTS`. */
 export const MAX_DISC_LIGHTS = MAX_BODY_LIGHTS;
@@ -138,6 +141,107 @@ const FIRST_CLASS_TABLE_ROW = FIRST_CLASS_ROW + MAX_DISC_CLASSES;
 const SECONDARY_COUNT_ROW = 46;
 const FIRST_SECONDARY_ROW = 47;
 const SECONDARY_ROWS = 2;
+const CELL_SUMS_ROW = 51;
+
+/**
+ * Whether a record's pixels can take their sums from the `disc cells` pass (R07.T8.d): every pixel
+ * of it takes the same cells, at most {@link FINE_DISC_SAMPLES} per axis, as {@link discSamples}
+ * gives every disc under {@link SMALL_DISC_PX}, and its surface is one law.
+ *
+ * @remarks
+ * A class map's disc sums its own cells: the pass binds one class map for all its records, and none
+ * is live before R10.
+ */
+export function drawnThroughCells(record: DiscRecord): boolean {
+  const n = record.interiorSamples;
+  return (
+    n === record.limbSamples &&
+    Number.isInteger(n) &&
+    n >= 1 &&
+    n <= FINE_DISC_SAMPLES &&
+    record.surface.kind === "uniform"
+  );
+}
+
+/** Where the `disc cells` pass leaves one record's pixels' sums. */
+export interface DiscCellRange {
+  /** The index in `cell_sums` of its first pixel's sums, two `vec4f` a pixel. */
+  readonly first: number;
+  /** The rectangle summed, ⌊left⌋ and ⌊top⌋, px. */
+  readonly leftPx: number;
+  readonly topPx: number;
+  /** Its width and height, ⌈right⌉ − ⌊left⌋ and ⌈bottom⌉ − ⌊top⌋, px. */
+  readonly widthPx: number;
+  readonly heightPx: number;
+}
+
+/** A frame's jobs for the `disc cells` pass: one a pixel of each small disc's rectangle. */
+export interface DiscCellJobs {
+  /**
+   * Four `i32` a job, the shader's `vec4i`: the record's index, the pixel's x and y, px, and 0; the
+   * records in their order, each rectangle's pixels in row order.
+   */
+  readonly jobs: Int32Array;
+  /** The jobs J, the pixels whose sums the pass leaves, in the jobs' order. */
+  readonly count: number;
+  /** Each record's sums, by index; `null` for a record whose draws sum their own cells. */
+  readonly ranges: ReadonlyArray<DiscCellRange | null>;
+}
+
+/** The jobs a frame takes at most: 2²⁴, past which row 51's `f32` would lose a first index. */
+export const MAX_CELL_JOBS = 2 ** 24;
+
+/**
+ * The `disc cells` pass's jobs for a frame's records (R07.T8.d, decision-r07-small-disc-cost §1.2).
+ *
+ * @remarks
+ * Each record {@link drawnThroughCells} takes one job a pixel of [⌊left⌋, ⌈right⌉) ×
+ * [⌊top⌋, ⌈bottom⌉), the rectangle {@link rasteriseDisc} walks: a superset of the pixels either of
+ * its draws shades. Job j's sums are the j-th in `cell_sums`, so a record's pixel (x, y) finds its
+ * own at first + (y − top) w + (x − left), which row 51 carries. A record whose pixels would take
+ * the jobs past `maxJobs` takes none, and its draws sum their own cells, as before the pass.
+ *
+ * @param maxJobs - The jobs at most: {@link MAX_CELL_JOBS}, or fewer where the device's buffers
+ *   hold fewer pixels' sums.
+ */
+export function discCellJobs(
+  records: ReadonlyArray<DiscRecord>,
+  maxJobs: number = MAX_CELL_JOBS,
+): DiscCellJobs {
+  const most = Math.min(maxJobs, MAX_CELL_JOBS);
+  let count = 0;
+  const ranges = records.map((record): DiscCellRange | null => {
+    if (!drawnThroughCells(record)) {
+      return null;
+    }
+    const { rect } = record;
+    const leftPx = Math.floor(rect.leftPx);
+    const topPx = Math.floor(rect.topPx);
+    const widthPx = Math.max(0, Math.ceil(rect.rightPx) - leftPx);
+    const heightPx = Math.max(0, Math.ceil(rect.bottomPx) - topPx);
+    if (count + widthPx * heightPx > most) {
+      return null;
+    }
+    const range = { first: count, leftPx, topPx, widthPx, heightPx };
+    count += widthPx * heightPx;
+    return range;
+  });
+  const jobs = new Int32Array(count * 4);
+  ranges.forEach((range, index) => {
+    if (range === null) {
+      return;
+    }
+    for (let row = 0; row < range.heightPx; row += 1) {
+      for (let column = 0; column < range.widthPx; column += 1) {
+        jobs.set(
+          [index, range.leftPx + column, range.topPx + row, 0],
+          (range.first + row * range.widthPx + column) * 4,
+        );
+      }
+    }
+  });
+  return { jobs, count, ranges };
+}
 
 /** One star lighting a disc, relative to the body's centre. */
 export interface DiscLight {
@@ -263,8 +367,22 @@ function bodyAxesOf(rotation: Rotation3): readonly [Vec3, Vec3] {
   return [rotateToBody(rotation, vec3(1, 0, 0)), rotateToBody(rotation, vec3(0, 1, 0))];
 }
 
-/** Packs the frame's discs as the shader's `array<vec4f>`, {@link DISC_ROWS} rows each. */
-export function packDiscRecords(records: ReadonlyArray<DiscRecord>): Float32Array {
+/**
+ * Packs the frame's discs as the shader's `array<vec4f>`, {@link DISC_ROWS} rows each.
+ *
+ * @param cells - The `disc cells` pass's jobs for these records, whose ranges row 51 carries; `null`
+ *   where no pass runs, when every record's row 51 says its draws sum their own cells.
+ * @throws Error if `cells` was made for another number of records.
+ */
+export function packDiscRecords(
+  records: ReadonlyArray<DiscRecord>,
+  cells: DiscCellJobs | null = null,
+): Float32Array {
+  if (cells !== null && cells.ranges.length !== records.length) {
+    throw new Error(
+      `the cell pass's jobs are for ${cells.ranges.length} records, not ${records.length}`,
+    );
+  }
   const out = new Float32Array(records.length * DISC_ROWS * 4);
   records.forEach((record, index) => {
     const base = index * DISC_ROWS * 4;
@@ -323,6 +441,11 @@ export function packDiscRecords(records: ReadonlyArray<DiscRecord>): Float32Arra
       put(first, [d.x, d.y, d.z, source.distance]);
       put(first + 1, [...source.illuminance, source.radius]);
     });
+    const range = cells?.ranges[index] ?? null;
+    put(
+      CELL_SUMS_ROW,
+      range === null ? [-1, 0, 0, 0] : [range.first, range.leftPx, range.topPx, range.widthPx],
+    );
   });
   return out;
 }

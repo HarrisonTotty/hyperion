@@ -74,6 +74,11 @@ export interface RecordedDispatch {
   readonly bindings: ComputeBindings;
   readonly workgroups: readonly [number, number, number] | IndirectArgs;
   readonly pass: string | undefined;
+  /**
+   * The frames submitted to render targets before it ({@link CountingRenderEngine.targetFrames}'
+   * length then), which orders it among them as the queue does (R07.T8.d).
+   */
+  readonly framesBefore: number;
 }
 
 /** One recorded buffer write. */
@@ -352,7 +357,13 @@ export class CountingRenderEngine implements RenderEngine {
     pass?: string,
   ): void {
     this.counts.dispatches += 1;
-    this.dispatched.push({ kernel: kernel.name, bindings, workgroups, pass });
+    this.dispatched.push({
+      kernel: kernel.name,
+      bindings,
+      workgroups,
+      pass,
+      framesBefore: this.targetFrames.length,
+    });
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {

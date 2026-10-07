@@ -15,7 +15,7 @@ import {
   SKY_VIEW_KERNEL,
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
-import { BODY_DISC_MATERIALS, SMOOTH_MESH_MATERIAL } from "../bodies/draw";
+import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS, SMOOTH_MESH_MATERIAL } from "../bodies/draw";
 import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
@@ -136,6 +136,8 @@ const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: BODY_DISC_MATERIALS.limb },
   // R07.T9's mesh regime: a body's smooth figure on R05's patches, shaded as the disc is.
   { kind: "material", spec: SMOOTH_MESH_MATERIAL },
+  // R07.T8.d's cell pass: the small discs' cells shaded in parallel for both regimes' draws.
+  { kind: "compute", spec: BODY_DISC_CELLS_KERNEL },
 ];
 
 /** Every shader the engine can create; later plans add theirs here. */

@@ -45,6 +45,9 @@ struct PatchInstance {
 
 @group(2) @binding(4) var<storage, read> instances : array<PatchInstance>;
 
+// The `disc cells` pass's sums, which a small body's figure reads (R07.T8.d; `pixel_cells`).
+@group(2) @binding(5) var<storage, read> cell_sums : array<vec4f>;
+
 struct MeshVarying {
   @builtin(position) position : vec4f,
 }

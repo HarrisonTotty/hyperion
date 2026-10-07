@@ -19,7 +19,9 @@
  * place in the order, where R06.T13.e's pass draws them (decision-r07-t8a, R06 coordination (d),
  * 2026-10-03): a host's step places R06's disc draw. {@link LitBodyRenderer} binds the plan to the
  * engine: one draw per disc for its wholly covered pixels and one for its limb, one sprite draw per
- * run of consecutive points through R06's HDR sprite (`POINT SPRITES HDR`). A disc shades from its
+ * run of consecutive points through R06's HDR sprite (`POINT SPRITES HDR`), and before them one
+ * dispatch of the `disc cells` pass, which shades every cell of the discs under 32 px at once for
+ * their draws to read (R07.T8.d, {@link BODY_DISC_CELLS_KERNEL}). A disc shades from its
  * `DiscSurface` (T8.b): its photometry's uniform law, or R10's class map with a law per class; a
  * point keeps the photometry's law.
  *
@@ -41,13 +43,16 @@ import patchVertexWgsl from "../terrain/shaders/patchVertex.wgsl?raw";
 import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
+import type { KernelPair } from "../engine/kernels";
 import type {
   BufferHandle,
+  ComputeHandle,
   DrawItem,
   MaterialHandle,
   MeshHandle,
   RenderEngine,
   TextureHandle,
+  ViewSize,
   WgslMaterialSpec,
 } from "../engine/types";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
@@ -68,10 +73,13 @@ import type { Rgb } from "../photometry/toneCurve";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import bodyDiscCellsWgsl from "../shaders/bodyDiscCells.wgsl?raw";
 import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
 import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
 import { sphereOutsideView, sphereScreenRect, WIREFRAME_MESHES } from "../wireframe/submit";
 import {
+  type DiscCellJobs,
+  discCellJobs,
   type DiscLight,
   type DiscOccluder,
   type DiscRecord,
@@ -558,6 +566,15 @@ const DISC_UNIFORMS = [
   { name: "depths", type: "vec4f" },
 ] as const;
 
+/**
+ * The disc draws' storage: the records, and the `disc cells` pass's sums (R07.T8.d), which a disc
+ * under 32 px reads in place of summing its own cells.
+ */
+const DISC_STORAGE = [
+  { name: "discs", binding: 0 },
+  { name: "cellSums", binding: 5 },
+] as const;
+
 /** The disc's two materials: its wholly covered pixels, opaque, and its limb, premultiplied. */
 export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> = {
   interior: {
@@ -568,7 +585,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     uniforms: DISC_UNIFORMS,
     samplers: [],
     textures: DISC_TEXTURES,
-    storageBuffers: [{ name: "discs", binding: 0 }],
+    storageBuffers: DISC_STORAGE,
     cullMode: "none",
     depthWrite: false,
     colourWrites: true,
@@ -582,7 +599,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     uniforms: DISC_UNIFORMS,
     samplers: [],
     textures: DISC_TEXTURES,
-    storageBuffers: [{ name: "discs", binding: 0 }],
+    storageBuffers: DISC_STORAGE,
     cullMode: "none",
     depthWrite: false,
     colourWrites: true,
@@ -614,12 +631,76 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
     { name: "discs", binding: 0 },
     { name: "slots", binding: 3 },
     { name: "instances", binding: 4 },
+    { name: "cellSums", binding: 5 },
   ],
   cullMode: "back",
   depthWrite: true,
   colourWrites: true,
   blend: "none",
 };
+
+/**
+ * The `disc cells` pass's label (R07.T8.d), between R06's sky and the mesh bodies' figures, which
+ * read its sums as the `discs` pass does (`PHOTOREAL_PASS_LABELS.discCells`).
+ */
+export const DISC_CELLS_PASS = "disc cells";
+
+/**
+ * The `disc cells` kernel (R07.T8.d, decision-r07-small-disc-cost §1.2; `shaders/bodyDiscCells.wgsl`):
+ * every cell of every pixel of the frame's small discs shaded at once, one invocation a cell, and
+ * summed in each pixel's order for the draws to read.
+ *
+ * @remarks
+ * Its one source serves both capability paths: it has no subgroup variant. Its sums are a pure
+ * function of its inputs, so its readback is `bit-exact`, though nothing reads them back.
+ */
+export const BODY_DISC_CELLS_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS",
+  reference: frameWgsl + litBodyWgsl + bodyDiscWgsl + bodyDiscCellsWgsl,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** The workgroups a dispatch lays along x at most, the kernel's `JOBS_PER_ROW`. */
+const CELL_JOBS_PER_ROW = 65_535;
+
+/**
+ * The `disc cells` dispatch's workgroups for `jobs` jobs, one a job: (min(J, 65,535),
+ * ⌈J ÷ 65,535⌉, 1), within WebGPU's 65,535 a dimension; the kernel leaves the last row's excess.
+ */
+export function cellWorkgroups(jobs: number): readonly [number, number, number] {
+  return [Math.min(jobs, CELL_JOBS_PER_ROW), Math.ceil(jobs / CELL_JOBS_PER_ROW), 1];
+}
+
+/** Bytes of one pixel's sums in `cell_sums`: two `vec4f`. */
+const CELL_SUM_BYTES = 32;
+
+/**
+ * What the `disc cells` pass takes of the `discs` pass it serves (R07.T8.d): that pass's frame,
+ * packed as the engine packs a submission's (`frame.wgsl`), so that each cell is the one the
+ * pixel's draw would shade.
+ */
+export interface DiscCellFrame {
+  /** The submission's `viewRotation`, column-major. */
+  readonly viewRotation: Float32Array;
+  /** The submission's `projection`, column-major. */
+  readonly projection: Float32Array;
+  /** The scene target's size, px: the `discs` pass's output. */
+  readonly size: ViewSize;
+}
+
+/**
+ * The `Frame` block of `frame.wgsl` for a {@link DiscCellFrame}: two `mat4x4f`, then the output's
+ * width and height and their reciprocals.
+ */
+export function discCellFrameBlock(frame: DiscCellFrame): Float32Array {
+  const block = new Float32Array(36);
+  block.set(frame.viewRotation.subarray(0, 16), 0);
+  block.set(frame.projection.subarray(0, 16), 16);
+  const { widthPx, heightPx } = frame.size;
+  block.set([widthPx, heightPx, 1 / widthPx, 1 / heightPx], 32);
+  return block;
+}
 
 /** The smallest buffer made, bytes; each grows by doubling. */
 const MIN_BUFFER_BYTES = 4_096;
@@ -635,7 +716,9 @@ export type LitBodyEngine = Pick<
   | "writeTexture"
   | "releaseBuffer"
   | "releaseTexture"
+  | "dispatch"
   | "onRestored"
+  | "capabilities"
 >;
 
 interface DeviceResources {
@@ -656,6 +739,9 @@ interface DeviceResources {
   /** The frame's smooth figures' slot and instance records. */
   slots: BufferHandle;
   instances: BufferHandle;
+  /** The `disc cells` pass's jobs and the pixels' sums it leaves (R07.T8.d). */
+  cellJobs: BufferHandle;
+  cellSums: BufferHandle;
 }
 
 /**
@@ -667,8 +753,12 @@ interface DeviceResources {
  * draws, its wholly covered pixels and then its limb; each run of points one draw of
  * `spriteMaterial`, an HDR twin of R02's star sprite reading `sprites` at binding 0. A mesh body is
  * one instanced draw of its figure ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass) and
- * its limb's draw in the sequence. A plan's records are written once, by whichever of the two is
- * called first for it, so both must be called for a plan before its passes are submitted.
+ * its limb's draw in the sequence. The small discs' cells are shaded first by the `disc cells`
+ * pass ({@link LitBodyRenderer.dispatchCells}, R07.T8.d), whose sums their draws read. A plan's
+ * records are written once, by whichever of the three is called first for it, so all three must
+ * be called for a plan before its passes are submitted, {@link LitBodyRenderer.dispatchCells}
+ * first: a plan whose records were written by the others first sums every disc's cells in its
+ * draws, as before the pass.
  */
 export class LitBodyRenderer {
   readonly #engine: LitBodyEngine;
@@ -702,9 +792,11 @@ export class LitBodyRenderer {
       sprites: [],
       table: this.#table(1),
       tableRows: 1,
+      // Two layers, so that it is a `2d-array` by its own dimension wherever it binds: the cell
+      // kernel's layout takes a texture's view as the texture is (R07.T8.d).
       noClassMap: engine.createTexture({
         name: "bodies:no class map",
-        size: { width: 1, height: 1 },
+        size: { width: 1, height: 1, depthOrArrayLayers: 2 },
         dimension: "2d",
         format: CLASS_MAP_FORMAT,
         mips: 1,
@@ -720,6 +812,8 @@ export class LitBodyRenderer {
       }),
       slots: this.#buffer("bodies:mesh slots", MIN_BUFFER_BYTES),
       instances: this.#buffer("bodies:mesh instances", MIN_BUFFER_BYTES),
+      cellJobs: this.#buffer("bodies:disc cell jobs", MIN_BUFFER_BYTES),
+      cellSums: this.#buffer("bodies:disc cell sums", MIN_BUFFER_BYTES),
     };
   }
 
@@ -744,17 +838,26 @@ export class LitBodyRenderer {
     });
   }
 
-  /** Writes `data` into a buffer, replacing it by a doubled one if it is too small. */
-  #write(handle: BufferHandle, data: Float32Array): BufferHandle {
-    let target = handle;
-    if (data.byteLength > handle.bytes) {
-      let bytes = handle.bytes;
-      while (bytes < data.byteLength) {
-        bytes *= 2;
-      }
-      this.#engine.releaseBuffer(handle);
-      target = this.#buffer(handle.name, bytes);
+  /**
+   * A buffer of at least `bytes`: `handle`, or a doubled one in its place, no larger than one
+   * storage binding of the device holds where `bytes` fits in one.
+   */
+  #reserve(handle: BufferHandle, bytes: number): BufferHandle {
+    if (bytes <= handle.bytes) {
+      return handle;
     }
+    let size = handle.bytes;
+    while (size < bytes) {
+      size *= 2;
+    }
+    const binding = this.#engine.capabilities.maxStorageBufferBindingSize;
+    this.#engine.releaseBuffer(handle);
+    return this.#buffer(handle.name, bytes <= binding ? Math.min(size, binding) : size);
+  }
+
+  /** Writes `data` into a buffer, replacing it by a doubled one if it is too small. */
+  #write(handle: BufferHandle, data: Float32Array | Int32Array): BufferHandle {
+    const target = this.#reserve(handle, data.byteLength);
     if (data.byteLength > 0) {
       this.#engine.writeBuffer(target, 0, data);
     }
@@ -805,23 +908,81 @@ export class LitBodyRenderer {
         depths: new Float32Array(depths),
       },
       textures: { phaseFactorTable: resources.table, classWeights: this.#classWeights(surface) },
-      storageBuffers: { discs: resources.discs },
+      storageBuffers: { discs: resources.discs, cellSums: resources.cellSums },
     };
   }
 
-  /** Writes a plan's phase table, records and smooth figures, once per plan. */
-  #upload(plan: BodyFramePlan): ReadonlyArray<number> {
+  /**
+   * Writes a plan's phase table, records and smooth figures, once per plan.
+   *
+   * @param cells - The `disc cells` pass's jobs whose sums the records point at (row 51); `null`
+   *   where no pass runs for the plan, when every disc sums its own cells.
+   */
+  #upload(plan: BodyFramePlan, cells: DiscCellJobs | null = null): ReadonlyArray<number> {
     if (this.#written?.plan === plan) {
       return this.#written.firstInstance;
     }
     const resources = this.#resources;
     this.#writeTable(plan.laws);
-    resources.discs = this.#write(resources.discs, packDiscRecords(plan.discs));
+    resources.discs = this.#write(resources.discs, packDiscRecords(plan.discs, cells));
     const records = packSmoothMeshes(plan.meshes.map(({ mesh }) => mesh));
     resources.slots = this.#write(resources.slots, records.slots);
     resources.instances = this.#write(resources.instances, records.instances);
     this.#written = { plan, firstInstance: records.firstInstance };
     return records.firstInstance;
+  }
+
+  /**
+   * Shades a plan's small discs' cells in parallel: the `disc cells` pass (R07.T8.d,
+   * decision-r07-small-disc-cost §1.2), one dispatch of `kernel` ({@link BODY_DISC_CELLS_KERNEL})
+   * for every disc whose pixels all take the same cells (`drawnThroughCells`: every disc under 32
+   * px of one law), and none where the plan has no such disc.
+   *
+   * @remarks
+   * It writes the plan's records with each such disc's sums in row 51, and is called for a plan
+   * before {@link LitBodyRenderer.meshDraws} and {@link LitBodyRenderer.draws}, whose submissions
+   * then follow the dispatch's, after the sky's: each `render` and `dispatch` is its own queue
+   * submission, in call order. A plan already written by either of those is left to sum its own
+   * cells, and nothing is dispatched. Its workgroups are {@link cellWorkgroups}' for its jobs, one
+   * a pixel.
+   *
+   * @param frame - The `discs` pass's own frame, which the kernel shades in.
+   * @returns Whether it dispatched.
+   */
+  dispatchCells(plan: BodyFramePlan, kernel: ComputeHandle, frame: DiscCellFrame): boolean {
+    if (this.#written?.plan === plan) {
+      return false;
+    }
+    // As many pixels' sums as one storage binding holds; a disc past them sums its own cells.
+    const fits = Math.floor(this.#engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
+    const cells = discCellJobs(plan.discs, fits);
+    if (cells.count === 0) {
+      this.#upload(plan);
+      return false;
+    }
+    this.#upload(plan, cells);
+    const resources = this.#resources;
+    resources.cellJobs = this.#write(resources.cellJobs, cells.jobs);
+    resources.cellSums = this.#reserve(resources.cellSums, cells.count * CELL_SUM_BYTES);
+    this.#engine.dispatch(
+      kernel,
+      {
+        uniforms: {
+          frame: discCellFrameBlock(frame),
+          cell_pass: new Uint32Array([cells.count, 0, 0, 0]),
+        },
+        buffers: {
+          discs: resources.discs,
+          cell_jobs: resources.cellJobs,
+          cell_sums: resources.cellSums,
+        },
+        sampled: { phase_factor_table: resources.table, class_weights: resources.noClassMap },
+        storage: {},
+      },
+      cellWorkgroups(cells.count),
+      DISC_CELLS_PASS,
+    );
+    return true;
   }
 
   /**
@@ -861,6 +1022,7 @@ export class LitBodyRenderer {
             discs: resources.discs,
             slots: resources.slots,
             instances: resources.instances,
+            cellSums: resources.cellSums,
           },
           instanceCount: body.mesh.patches.length,
         },
@@ -939,8 +1101,26 @@ export class LitBodyRenderer {
     return draws;
   }
 
-  /** Stops following device restores. The engine owns its resources' release. */
+  /**
+   * Stops following device restores and releases the buffers and textures it made, the `disc
+   * cells` pass's among them (R07.T8.d). Its materials and meshes stay the engine's, which has no
+   * release for them; a class map's texture stays its surface's.
+   */
   dispose(): void {
     this.#unsubscribe();
+    const resources = this.#resources;
+    const buffers = [
+      resources.discs,
+      ...resources.sprites,
+      resources.slots,
+      resources.instances,
+      resources.cellJobs,
+      resources.cellSums,
+    ];
+    for (const buffer of buffers) {
+      this.#engine.releaseBuffer(buffer);
+    }
+    this.#engine.releaseTexture(resources.table);
+    this.#engine.releaseTexture(resources.noClassMap);
   }
 }

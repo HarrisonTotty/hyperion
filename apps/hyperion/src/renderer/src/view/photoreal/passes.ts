@@ -3,7 +3,8 @@
  * target, in order, and the labels R12's `PASS_ROWS` keys on.
  *
  * @remarks
- * In order: R06's sky; mesh bodies (opaque, depth); R10's terrain; host discs, disc bodies and
+ * In order: R06's sky; the small discs' cells (R07.T8.d, a compute pass whose sums the bodies'
+ * draws read); mesh bodies (opaque, depth); R10's terrain; host discs, disc bodies and
  * point bodies in one painter order (Design note 2); R08's atmosphere; R11's rings, clouds and
  * oceans; the histogram; bloom of the light above the display's range; the tone-mapping pass; the
  * symbology cased over the result. A style owns no scene, camera or projection, so switching style
@@ -12,6 +13,7 @@
  * marked `built: false` until those plans fill them (R06's sky, drawn by R07.T8.a's frame, is); the settings share one order today, their
  * differences being each pass's parameters (Design note 18).
  */
+import { DISC_CELLS_PASS } from "../bodies/draw";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { TERRAIN_PASS_LABEL } from "../terrain/gpu/material";
 import { BLOOM_PASS } from "../post/bloomChain";
@@ -23,6 +25,8 @@ import { TONEMAP_PASS } from "../post/tonemap";
  * them (each the `FrameSubmission.label` or `dispatch` pass of its own submission).
  */
 export const PHOTOREAL_PASS_LABELS = {
+  /** The small discs' cells, shaded in parallel for the draws that read them (R07.T8.d). */
+  discCells: DISC_CELLS_PASS,
   bodies: "bodies",
   discs: "discs",
   histogram: HISTOGRAM_PASS,
@@ -78,6 +82,8 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
   return {
     passes: [
       slot(SKY_PASS_LABEL, "R06", true),
+      // Before the mesh bodies' figures, which read its sums as the discs' draws do.
+      own(PHOTOREAL_PASS_LABELS.discCells),
       own(PHOTOREAL_PASS_LABELS.bodies),
       slot(TERRAIN_PASS_LABEL, "R10", true),
       own(PHOTOREAL_PASS_LABELS.discs),

@@ -3,7 +3,8 @@
  * depth, and the disc's limb draw on the limb's plane, into a scene target, against
  * `bodies/frameTwin.ts`' CPU twin of the same passes. A promoted disc and its mesh (an Earth 20 px
  * across at 80° of phase, a Saturn-like giant 64 px across, its pole tilted, and an Earth from
- * 400 km, its horizon in view) draw the same texels, classes and flux. Over the scripted
+ * 400 km, its horizon in view) draw the same texels, classes and flux; a small promoted body draws
+ * the same texels through the `disc cells` pass as in-fragment (R07.T8.d's G11). Over the scripted
  * occultation (`view/scenes/occultationScene.ts`), every step equals the twin and the painter's
  * frame, and the moon is hidden where the first-hit oracle says. The captures draw the
  * occultation through the photorealistic frame onto a canvas, as meshes and as discs, for the
@@ -16,6 +17,7 @@ import { add, normalise, scale, type Vec3, vec3 } from "../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import { viewRay } from "../view/bodies/discShading";
 import {
+  BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
   type BodyFrameOptions,
   type LitBodyInput,
@@ -33,7 +35,7 @@ import {
   viewRotation4,
 } from "../view/camera/projection";
 import { IDENTITY_QUATERNION, lookAlong } from "../view/camera/quaternion";
-import type { RenderEngine } from "../view/engine/types";
+import type { ComputeHandle, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
@@ -53,7 +55,7 @@ import type { BodyFigure } from "../view/terrain/planet";
 import { WIREFRAME_MATERIALS } from "../view/wireframe/submit";
 import { base64Of, type CapturedImage } from "./atmosphere";
 import { addCanvas } from "./frames";
-import { type Checks, halfTexels } from "./harness";
+import { type Checks, halfTexels, halfUlpsApart } from "./harness";
 
 const EXPOSURE = 1e-4;
 const RAD = Math.PI / 180;
@@ -62,14 +64,18 @@ const RAD = Math.PI / 180;
 const TEXEL_RELATIVE = 4e-3;
 const TEXEL_ABSOLUTE = 1e-4;
 
-/** A plan drawn into a scene target, read back. */
-async function drawPlan(
+/**
+ * A plan drawn into a scene target, read back as its `rgba16float` bytes, and whether the `disc
+ * cells` pass ran for it (dispatched with `cells`, R07.T8.d).
+ */
+async function drawPlanBytes(
   engine: RenderEngine,
   renderer: LitBodyRenderer,
   plan: BodyFramePlan,
   camera: ProjectionCamera,
   viewport: Viewport,
-): Promise<Float32Array> {
+  cells: ComputeHandle | null,
+): Promise<{ readonly bytes: ArrayBuffer; readonly throughCells: boolean }> {
   const target = createSceneTarget(engine, "smoke mesh bodies", viewport);
   try {
     const viewRotation = viewRotation4(camera.orientation);
@@ -78,6 +84,10 @@ async function drawPlan(
       viewport.widthPx / viewport.heightPx,
       NEAR_PLANE_M,
     );
+    // The small discs' cells, shaded at once, before the figures and limbs that read them (T8.d).
+    const throughCells =
+      cells !== null &&
+      renderer.dispatchCells(plan, cells, { viewRotation, projection, size: viewport });
     target.render({
       label: PHOTOREAL_PASS_LABELS.bodies,
       viewRotation,
@@ -93,10 +103,22 @@ async function drawPlan(
       postProcesses: [],
       colourLoad: "load",
     });
-    return halfTexels(await engine.readTexture(target.colour));
+    return { bytes: await engine.readTexture(target.colour), throughCells };
   } finally {
     target.dispose();
   }
+}
+
+/** A plan drawn into a scene target, each disc summing its own cells, read back. */
+async function drawPlan(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  plan: BodyFramePlan,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): Promise<Float32Array> {
+  const { bytes } = await drawPlanBytes(engine, renderer, plan, camera, viewport, null);
+  return halfTexels(bytes);
 }
 
 /** Plans drawn and read back one after another, each before the next draws. */
@@ -232,10 +254,65 @@ export async function checkMeshBodies(engine: RenderEngine, checks: Checks): Pro
   const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
   try {
     await checkPromoted(engine, renderer, checks);
+    await checkPromotedCells(engine, renderer, checks);
     await checkOccultation(engine, renderer, checks);
   } finally {
     renderer.dispose();
   }
+}
+
+/**
+ * R07.T8.d's G11 for the mesh regime: an Earth promoted to a mesh at 20 px (4 × 4) and at 3.6 px
+ * (8 × 8), lit at 80°, its figure and limb drawn through the `disc cells` pass and in-fragment in
+ * the same run, agree within one `rgba16float` ulp in every channel, with the classes identical.
+ */
+async function checkPromotedCells(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+): Promise<void> {
+  const kernel = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+  const camera: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+  const viewport: Viewport = { widthPx: 96, heightPx: 80 };
+  const earth: BodyFigure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6, pole: null };
+  const towards = vec3(Math.sin(80 * RAD), 0, Math.cos(80 * RAD));
+  let pass = true;
+  const results: string[] = [];
+  for (const diameterPx of [20, 3.6]) {
+    const centreM = ahead(earth, diameterPx, camera, viewport);
+    const plan = (): BodyFramePlan => planOfOne(earth, centreM, towards, true, camera, viewport);
+    const parallelPlan = plan();
+    // The harness reads its targets back in order: through the pass, then in-fragment.
+    // oxlint-disable-next-line no-await-in-loop
+    const parallel = await drawPlanBytes(engine, renderer, parallelPlan, camera, viewport, kernel);
+    // The in-fragment draw reads back after the pass's, before the next case draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const inFragment = await drawPlanBytes(engine, renderer, plan(), camera, viewport, null);
+    const {
+      ulps,
+      differing,
+      alphasEqual: classes,
+    } = halfUlpsApart(parallel.bytes, inFragment.bytes);
+    const meshes = parallelPlan.meshes.length;
+    const patches = parallelPlan.meshes[0]?.mesh.patches.length ?? 0;
+    const cells = parallelPlan.discs[0]?.interiorSamples ?? 0;
+    pass &&=
+      meshes === 1 &&
+      patches > 0 &&
+      cells === (diameterPx < 4 ? 8 : 4) &&
+      parallel.throughCells &&
+      !inFragment.throughCells &&
+      ulps <= 1 &&
+      classes;
+    results.push(
+      `${String(diameterPx)} px as ${String(meshes)} mesh of ${String(patches)} patches at ${String(cells)} × ${String(cells)}: through the pass ${String(parallel.throughCells)}; within ${String(ulps)} ulp of the in-fragment draw (${String(differing)} channels differ); classes equal ${String(classes)}`,
+    );
+  }
+  checks.check(
+    "R07.T8.d G11 a small body promoted to a mesh draws through the disc cells pass its in-fragment texels within one rgba16float ulp",
+    pass,
+    results.join("; "),
+  );
 }
 
 async function checkPromoted(

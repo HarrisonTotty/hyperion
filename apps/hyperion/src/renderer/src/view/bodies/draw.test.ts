@@ -1170,12 +1170,38 @@ describe("the renderer", () => {
         released.push(event.name);
       }
     });
-    // Sixteen discs need 16 × 736 bytes, past the first 4,096.
+    // Sixteen discs need 16 × 832 bytes, past the first 4,096.
     const many = planOf(16);
     expect(many.discs).toHaveLength(16);
     renderer.draws(many);
     expect(released).toContain("bodies:discs");
     renderer.dispose();
+  });
+
+  it("releases the buffers and textures it made when disposed", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    renderer.draws(planOf());
+    const released: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        released.push(event.name);
+      }
+    });
+    renderer.dispose();
+    expect(released.toSorted()).toEqual(
+      [
+        "bodies:discs",
+        "bodies:sprites 0",
+        "bodies:sprites 1",
+        "bodies:mesh slots",
+        "bodies:mesh instances",
+        "bodies:disc cell jobs",
+        "bodies:disc cell sums",
+        "bodies:phase table",
+        "bodies:no class map",
+      ].toSorted(),
+    );
   });
 
   it("makes its resources again after a device loss and rewrites the table", async () => {
@@ -1308,7 +1334,7 @@ describe("mesh bodies (T9)", () => {
         disc: body.index,
         firstInstance: first,
         rotation: Array.from(rotationColumns(body.mesh.axes)),
-        buffers: ["discs", "slots", "instances"],
+        buffers: ["discs", "slots", "instances", "cellSums"],
       };
       first += body.mesh.patches.length;
       return shape;
