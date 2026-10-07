@@ -463,8 +463,8 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * the scene's name in a kept scene, and after it, while that scene's clock runs at other than one
  * second a second, its rate, `SCENE CLOCK ×100` ({@link sceneClockReading}, R07.T16.k), so that a
  * `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull and
- * `ROTATION: NOT YET MODELLED` while a body's rotation is not modelled are statements
- * ({@link labelStatements}).
+ * `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no rotation
+ * (decision-r07-rotation-note) are statements ({@link labelStatements}).
  *
  * @remarks
  * `SCENE` and `SCENE CLOCK` describe the display's scene, not one view's picture, so an
@@ -514,7 +514,8 @@ export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
 export const EASED_MOVES_STATEMENT = "EASED CAMERA MOVES";
 
 /**
- * The steady statements under the label block's lines, each while its condition holds.
+ * The steady statements under the label block's lines, each while its condition holds, as
+ * {@link labelLines} states them.
  *
  * @param terrain - The view's debounced terrain annunciation (plan R05, T9), or `null` while
  *   neither condition holds or the view draws no terrain.
@@ -527,7 +528,11 @@ export function labelStatements(
   if (run.camera.preset !== "seat" && run.scene.ownShip !== null) {
     statements.push(POSITIONS_FROM_SHIP);
   }
-  if (run.scene.bodies.some((body) => body.rotation === null)) {
+  if (
+    run.scene.bodies.some(
+      (body) => body.kind !== "star" && body.radiusM > 0 && body.rotation === null,
+    )
+  ) {
     statements.push("ROTATION: NOT YET MODELLED");
   }
   if (terrain !== null) {

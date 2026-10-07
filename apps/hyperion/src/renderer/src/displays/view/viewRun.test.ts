@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { normalise, scale, vec3 } from "../../geometry/vec3";
 import { differenceM } from "../../view/coords/position";
-import { sceneOrigins, type ViewBody } from "../../view/scene/model";
+import { IDENTITY_ROTATION } from "../../view/coords/rotation";
+import { sceneOrigins, type ViewBody, type ViewBodyKind } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { eclipseScene } from "../../view/scenes/eclipseScene";
-import { frameChangeScene } from "../../view/scenes/frameChange";
+import { FRAME_CHANGE_MOON, frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import type { SystemIdHex } from "@hyperion/protocol";
@@ -47,19 +48,32 @@ function offHull(run: ViewRun): boolean {
   return labelStatements(run).includes("POSITIONS AS SEEN FROM SHIP");
 }
 
-/** A kept scene whose bodies' rotation is not modelled. */
-function unrotated(kept: KeptScene): KeptScene {
+/** A kept scene with each of its bodies as `change` makes it. */
+function withBodies(kept: KeptScene, change: (body: ViewBody) => ViewBody): KeptScene {
   return {
     ...kept,
     sceneAt: (tS) => {
       const scene = kept.sceneAt(tS);
-      const bodies: ViewBody[] = [];
-      for (const body of scene.bodies) {
-        bodies.push({ ...body, rotation: null });
-      }
-      return { ...scene, bodies };
+      return { ...scene, bodies: scene.bodies.map(change) };
     },
   };
+}
+
+/** A kept scene whose bodies' rotation is not modelled. */
+function unrotated(kept: KeptScene): KeptScene {
+  return withBodies(kept, (body) => ({ ...body, rotation: null }));
+}
+
+/** A kept scene whose bodies other than its star all turn, by their own rotation or the identity. */
+function turning(kept: KeptScene): KeptScene {
+  return withBodies(kept, (body) =>
+    body.kind === "star" ? body : { ...body, rotation: body.rotation ?? IDENTITY_ROTATION },
+  );
+}
+
+/** The kinds of a run's scene bodies that have no rotation, in the scene's order. */
+function unrotatedKinds(run: ViewRun): ReadonlyArray<ViewBodyKind> {
+  return run.scene.bodies.filter((body) => body.rotation === null).map((body) => body.kind);
 }
 
 describe("a view's run", () => {
@@ -198,10 +212,31 @@ describe("the label block", () => {
     expect([offHull(seat), offHull(chase)]).toEqual([false, true]);
   });
 
-  it("says ROTATION: NOT YET MODELLED while a body's rotation is not modelled", () => {
+  it("says ROTATION: NOT YET MODELLED while a planet or moon with a radius has no rotation", () => {
     expect(labelStatements(startRun(unrotated(frameChangeScene())))).toEqual([
       "ROTATION: NOT YET MODELLED",
     ]);
+  });
+
+  it("says ROTATION: NOT YET MODELLED in each kept scene, whose planets or moons have none", () => {
+    const kept = [precisionScene(), phaseScene(), eclipseScene(), frameChangeScene()];
+    expect(
+      kept.map((scene) => labelStatements(startRun(scene)).includes("ROTATION: NOT YET MODELLED")),
+    ).toEqual([true, true, true, true]);
+  });
+
+  it("states no rotation note for a scene whose bodies all turn but its star", () => {
+    const run = startRun(turning(frameChangeScene()));
+    expect([unrotatedKinds(run), labelStatements(run)]).toEqual([["star"], []]);
+  });
+
+  it("states no rotation note for an unrotated moon with no radius", () => {
+    const run = startRun(
+      withBodies(turning(frameChangeScene()), (body) =>
+        body.id === FRAME_CHANGE_MOON ? { ...body, radiusM: 0, rotation: null } : body,
+      ),
+    );
+    expect([unrotatedKinds(run), labelStatements(run)]).toEqual([["star", "moon"], []]);
   });
 
   it("adds the terrain annunciation after the other statements while it is shown", () => {
