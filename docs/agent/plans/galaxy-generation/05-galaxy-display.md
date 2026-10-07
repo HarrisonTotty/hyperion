@@ -136,7 +136,15 @@ interface UniverseSession {
   from R02's `wireframe/symbology.ts`._ _R07.T16.h adds `BRACKET_ARM_SHARE`, `bracketArmPx`,
   `OffsetPx`, `Chevron`, `destinationChevrons(apexPx, armPx)`, the destination's four chevrons, and
   `reticleReachPx(bracketHalfSizePx, destinationApexPx)`, the outermost reticle's reach, which
-  both the view's labels and these stand clear of._
+  both the view's labels and these stand clear of._ _R07.T16.h's follow-up
+  (decision-r07-quality-and-destination, addenda A and B) removes `reticleReachPx` and adds the
+  one place both drawers' destination labels take: `LABEL_TEXT_CLEARANCE_REM` (0.25),
+  `LABEL_NEIGHBOUR_CLEARANCE_REM` (0.5),
+  `destinationLabelRisePx(bracketHalfSizePx, destinationApexPx, markStrokePx, remPx)`,
+  `destinationSetReachPx(bracketHalfSizePx, destinationApexPx, markStrokePx)`,
+  `DESTINATION_LABEL_PLACES` and `DestinationLabelPlace`, `placeIsRight`, `placeIsUpper`,
+  `ScreenBoxPx`, `destinationLabelBoxPx`, `squareBoxPx`, `boxGapPx` and
+  `destinationLabelPlace(boxOf, inside, clear)`._
 - `plane.ts`: `gridLines`, `ringPolyline`.
 - `drawList.ts`: `buildDrawList(scene, camera, viewport): DrawList`, `DrawOp` (discriminated union),
   `Anchor`. _R07.T16.f adds a required `minReticleGapPx`, the reticles' least gap in CSS px:
@@ -152,7 +160,10 @@ interface UniverseSession {
   `placeLabels(chosen, anchors, viewport, reticles, destinationId, pinnedIds?, obstacles?)`, with
   `reticles` `lib/strokes.ts`'s `ReticleStrokesCss` (`reticleStrokesCssPx` of the ratio) in place of
   `reticleGrowthPx`, and `markLabelTransform(label, remPx)`, which places a label by its near
-  edge._
+  edge._ _T16.h's follow-up keeps `placeLabels`' signature: each box starts 0.25 rem beyond the
+  bracket's outer edge, and a destination's label stands above or below its whole chevron set, at
+  the first of four places 0.5 rem clear of other marks (see "Labels beside reticles"). `BoxPx` is
+  now an alias of `symbols.ts`'s `ScreenBoxPx`._
 - `transition.ts`: `easeOut`, `tweenCamera`, `TRANSITION_MS`.
 - `redraw.ts`: `createRedrawScheduler(requestFrame, cancelFrame)`.
 - `paint.ts`: `paint(context, drawList, tokens)`, `readTokens(element): ColourTokens`.
@@ -1443,7 +1454,8 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   - a label held inside the view where neither side has room (the orchestrator's ruling 149.1)
     can stand over its own mark;
   - a destination's reticle, when one is drawn, stands 0.25 rem inside its label's box. _Mended by
-    R07.T16.h: the destination is four chevrons, and its label stands beyond them._
+    R07.T16.h: the destination is four chevrons, and its label stands beyond them._ _Since
+    T16.h's follow-up (addendum B) it stands above or below the whole set instead._
 
   The first task that commands a destination (`SpatialScene.destinationId`) asks for a ruling on
   149.1's hold. It also adds `CHEVRONS DESTINATION` to the legend of each display that then marks
@@ -1456,3 +1468,26 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
   or not the mark is selected, in the view and here. `reticleOps`' lone destination at a
   bracket's place goes. No graph, the HR diagram among them, marks a destination. Built by
   R07.T16.h._
+
+  _As built by R07.T16.h's follow-up (decision-r07-quality-and-destination, addenda A and B; R07's
+  Risks, "Deviations in T16.h's follow-up, as built"):_
+  - _A label's box starts at R + 0.5 rem + 0.75 CSS px + 5δ, its text 0.25 rem outside the
+    bracket's outer edge, whether or not its mark is selected or the destination. The chevrons no
+    longer move it out._
+  - _A destination's label keeps that place beside the bracket and stands above or below the
+    whole chevron set, its box's near horizontal edge A + 2H ÷ (3√2) + half the stroke + 0.25 rem
+    from the centre (25.19 px for a class-2 mark at a ratio of 1 and 100%). It takes the first of
+    the upper right, the upper left, the lower right and the lower left that lies inside the view
+    and stands 0.5 rem clear of every other mark, at its bracket's place, and of every other chosen
+    label that can be drawn (its mark in view, or pinned), at its place on its line, and covers no
+    furniture; else the first inside the view; else
+    the upper right, held inside it (ruling 149.1), where it can stand on the chevrons: a third case
+    for the 149.1 ruling._
+  - _A lesser label within 0.5 rem of the destination's, or within 0.25 rem of its chevron set, is
+    dropped, so that no other name stands nearer the destination's label than its own set, or runs
+    through its chevrons (the follow-up's UX review)._
+  - _Pending a ruling: selecting a mark outside `chooseLabels`' count gives it a label, which can
+    send a nearby destination's label to another place. Addendum B's "clear of every other label"
+    and "selecting never moves a label" cannot both hold there._
+  - _The selection's label, pinned, is never dropped, and can run through a neighbouring
+    destination's chevrons (a stated limit)._

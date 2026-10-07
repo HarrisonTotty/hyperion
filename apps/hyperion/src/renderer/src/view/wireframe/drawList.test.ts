@@ -16,7 +16,14 @@ import type { CameraTarget } from "../camera/state";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
 import { MIN_STROKE_DEVICE_PX } from "../../lib/strokes";
-import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "../../spatial/symbols";
+import {
+  DESTINATION_LABEL_PLACES,
+  type DestinationLabelPlace,
+  placeIsRight,
+  placeIsUpper,
+  SIZE_CLASS_REM,
+  SYMBOL_STROKE_PX,
+} from "../../spatial/symbols";
 import { occluderRadius } from "../depth/depth";
 import { narrow } from "../coords/narrow";
 import { TEST_HULL } from "../scene/hull";
@@ -483,22 +490,68 @@ function labelTarget(mark: LabelledMark): CameraTarget {
     : { kind: "body", body: FIXTURE_PLANET };
 }
 
+/** A stroke of a reticle about a mark, device px from the view's top left. */
+interface ReticleStroke {
+  /** The reticle it is part of: the selection's bracket or the destination's chevrons. */
+  readonly kind: "selection" | "destination";
+  readonly from: { readonly xPx: number; readonly yPx: number };
+  readonly to: { readonly xPx: number; readonly yPx: number };
+  /** Half its drawn width, px: its ink stands this far either side of the segment. */
+  readonly halfWidthPx: number;
+}
+
+/** A mark's label's place, and the reticles about it, device px. */
+interface LabelPlace {
+  /** The anchor's position. */
+  readonly xPx: number;
+  readonly yPx: number;
+  /** The list's offset of the label's plate to the anchor's right. */
+  readonly offsetPx: number;
+  /** The list's rise of a destination's label off its chevrons' line, or `null`. */
+  readonly risePx: number | null;
+  /** Each reticle's outer edge to the mark's right: its farthest reach along x, and half its outline. */
+  readonly reticleEdgesPx: ReadonlyArray<number>;
+  /** Every stroke of the reticles drawn about the mark. */
+  readonly strokes: ReadonlyArray<ReticleStroke>;
+}
+
 /** The four states a mark is taken in: neither, selected, the destination alone, and both. */
 const STATES = ["none", "selected", "destination", "both"] as const;
 
 /** A mark's state. */
 type MarkState = (typeof STATES)[number];
 
+/** The strokes of the reticle batches of a list, `kind` from each batch's ID. */
+function reticleStrokes(list: WireframeDrawList): ReticleStroke[] {
+  return list.lines.flatMap((line): ReticleStroke[] => {
+    const kind = line.id.startsWith("mark:selection:")
+      ? "selection"
+      : line.id.startsWith("mark:destination:")
+        ? "destination"
+        : null;
+    if (kind === null) {
+      return [];
+    }
+    // Six `f32` a segment: its two ends' x, y and 0.
+    return Array.from({ length: line.segments.length / 6 }, (_, i) => ({
+      kind,
+      from: { xPx: line.segments[i * 6] ?? 0, yPx: line.segments[i * 6 + 1] ?? 0 },
+      to: { xPx: line.segments[i * 6 + 3] ?? 0, yPx: line.segments[i * 6 + 4] ?? 0 },
+      halfWidthPx: line.widthPx / 2,
+    }));
+  });
+}
+
 /** A mark's label's place and the reticles about it, device px, in each state, at a place. */
 function labelPlaces(
   mark: LabelledMark,
   ratio: number,
   interfaceScale: number,
-): Record<MarkState, { offsetPx: number; reticleEdgesPx: number[] }> {
+): Record<MarkState, LabelPlace> {
   const target = labelTarget(mark);
   const strokes = viewStrokesAt(ratio);
   const remPx = 16 * interfaceScale * ratio;
-  const placed = (state: MarkState): { offsetPx: number; reticleEdgesPx: number[] } => {
+  const placed = (state: MarkState): LabelPlace => {
     const list = build(
       {
         selection: state === "selected" || state === "both" ? target : null,
@@ -514,22 +567,28 @@ function labelPlaces(
     if (anchor === undefined) {
       throw new Error("the label tests' mark is not in view");
     }
-    // Each reticle's outer edge to the mark's right: its corners' farthest reach along x, and half
-    // its outline.
-    const reticleEdgesPx = list.lines
-      .filter(
-        (line) => line.id.startsWith("mark:selection:") || line.id.startsWith("mark:destination:"),
-      )
-      .map(
-        (line) =>
-          Math.max(
-            ...Array.from({ length: line.segments.length / 3 }, (_, i) =>
-              Math.abs((line.segments[i * 3] ?? 0) - anchor.xPx),
-            ),
-          ) +
-          line.widthPx / 2,
-      );
-    return { offsetPx: anchor.labelOffsetPx, reticleEdgesPx };
+    const reticles = reticleStrokes(list);
+    const reticleEdgesPx = (["selection", "destination"] as const).flatMap((kind) => {
+      const of = reticles.filter((stroke) => stroke.kind === kind);
+      return of.length === 0
+        ? []
+        : [
+            Math.max(
+              ...of.flatMap((stroke) => [
+                Math.abs(stroke.from.xPx - anchor.xPx),
+                Math.abs(stroke.to.xPx - anchor.xPx),
+              ]),
+            ) + (of[0]?.halfWidthPx ?? 0),
+          ];
+    });
+    return {
+      xPx: anchor.xPx,
+      yPx: anchor.yPx,
+      offsetPx: anchor.labelOffsetPx,
+      risePx: anchor.labelRisePx,
+      reticleEdgesPx,
+      strokes: reticles,
+    };
   };
   return {
     none: placed("none"),
@@ -539,20 +598,91 @@ function labelPlaces(
   };
 }
 
-/** The craft's label's offset in a list, device px. */
-function craftLabelOffset(list: WireframeDrawList): number | undefined {
-  return list.anchors.find((anchor) => anchor.target.kind === "craft")?.labelOffsetPx;
+/** The craft's label's place in a list, device px. */
+function craftLabelPlace(list: WireframeDrawList): [number | undefined, number | null | undefined] {
+  const anchor = list.anchors.find((each) => each.target.kind === "craft");
+  return [anchor?.labelOffsetPx, anchor?.labelRisePx];
 }
 
-/** How many destination reticles a list draws. */
-function destinationReticles(list: WireframeDrawList): number {
+/** How many destination chevron batches a list draws. */
+function destinationChevronBatches(list: WireframeDrawList): number {
   return list.lines.filter((line) => line.id.startsWith("mark:destination:")).length;
+}
+
+/**
+ * The region a destination's label's plate may take at one of its places, device px: beyond its near
+ * edge, right or left of the mark at its bracket place, and beyond its near horizontal edge, above or
+ * below the whole chevron set; unbounded beyond, so that a stroke clear of it is clear of the plate
+ * whatever its width and height.
+ */
+interface PlateRegion {
+  /** The plate's near vertical edge: its left at a right-hand place, its right at a left-hand one. */
+  readonly nearXPx: number;
+  /** The plate's near horizontal edge: its bottom at an upper place, its top at a lower one. */
+  readonly nearYPx: number;
+  readonly right: boolean;
+  readonly upper: boolean;
+}
+
+/** The plate's region at `place` about a destination's mark. */
+function plateRegion(place: LabelPlace, at: DestinationLabelPlace): PlateRegion {
+  const right = placeIsRight(at);
+  const upper = placeIsUpper(at);
+  const risePx = place.risePx ?? Number.NaN;
+  return {
+    nearXPx: right ? place.xPx + place.offsetPx : place.xPx - place.offsetPx,
+    nearYPx: upper ? place.yPx - risePx : place.yPx + risePx,
+    right,
+    upper,
+  };
+}
+
+/** The least distance from a reticle stroke's ink, its segment and half its width, to a region. */
+function inkDistancePx(stroke: ReticleStroke, region: PlateRegion): number {
+  const at = (t: number): number => {
+    const xPx = stroke.from.xPx + (stroke.to.xPx - stroke.from.xPx) * t;
+    const yPx = stroke.from.yPx + (stroke.to.yPx - stroke.from.yPx) * t;
+    return Math.hypot(
+      Math.max(0, region.right ? region.nearXPx - xPx : xPx - region.nearXPx),
+      Math.max(0, region.upper ? yPx - region.nearYPx : region.nearYPx - yPx),
+    );
+  };
+  // A distance to a convex region is convex along a segment, so a ternary search finds its least.
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 100; step += 1) {
+    const a = low + (high - low) / 3;
+    const b = high - (high - low) / 3;
+    if (at(a) <= at(b)) {
+      high = b;
+    } else {
+      low = a;
+    }
+  }
+  return Math.min(at(0), at(1), at((low + high) / 2)) - stroke.halfWidthPx;
+}
+
+/** The rows the destination's chevrons' ink takes, device px: their ends and half their outline. */
+function chevronInkRows(place: LabelPlace): { topPx: number; bottomPx: number } {
+  const chevrons = place.strokes.filter((stroke) => stroke.kind === "destination");
+  const ys = chevrons.flatMap((stroke) => [stroke.from.yPx, stroke.to.yPx]);
+  const halfWidthPx = chevrons[0]?.halfWidthPx ?? Number.NaN;
+  return { topPx: Math.min(...ys) - halfWidthPx, bottomPx: Math.max(...ys) + halfWidthPx };
 }
 
 /** The marks, ratios and interface scales the labels' places are tested at. */
 const LABEL_PLACES = (["craft", 0, 1, 2, 3, 4] as const).flatMap((mark) =>
   [0.78125, 1, 2].flatMap((ratio) =>
     [0.8, 1, 1.5].map((interfaceScale) => [mark, ratio, interfaceScale] as const),
+  ),
+);
+
+/** {@link LABEL_PLACES} at each of a destination's label's four places. */
+const DESTINATION_PLACES = (["craft", 0, 1, 2, 3, 4] as const).flatMap((mark) =>
+  [0.78125, 1, 2].flatMap((ratio) =>
+    [0.8, 1, 1.5].flatMap((interfaceScale) =>
+      DESTINATION_LABEL_PLACES.map((at) => [mark, ratio, interfaceScale, at] as const),
+    ),
   ),
 );
 
@@ -577,16 +707,14 @@ const REPORTED: ReadonlyArray<readonly [MarkState, MarkState]> = [
 
 describe("a mark's label beside its reticles (R07.T16.g; decision-r07-t16d-followups, items 1 and (d))", () => {
   it.each(LABEL_PLACES)(
-    "stands %s's plate 0.125 rem less 0.75 px clear of every reticle about it, at %s and %s",
+    "stands %s's plate 0.125 rem less 0.75 px beyond the bracket's outer edge, drawn or not, at %s and %s",
     (mark, ratio, interfaceScale) => {
       const places = labelPlaces(mark, ratio, interfaceScale);
       const leastPx = (0.125 * 16 * interfaceScale - 0.75) * ratio;
+      // The bracket stands in one place whether or not it is drawn: where the selection draws it.
+      const [bracketPx = Number.NaN] = places.selected.reticleEdgesPx;
       // The segments are `f32`: within 1e-4 px.
-      const clear = STATES.map((state) =>
-        places[state].reticleEdgesPx.every(
-          (edgePx) => places[state].offsetPx - edgePx >= leastPx - 1e-4,
-        ),
-      );
+      const clear = STATES.map((state) => places[state].offsetPx - bracketPx >= leastPx - 1e-4);
       const drawn = STATES.map((state) => places[state].reticleEdgesPx.length);
       expect([clear, drawn]).toEqual([
         [true, true, true, true],
@@ -596,22 +724,53 @@ describe("a mark's label beside its reticles (R07.T16.g; decision-r07-t16d-follo
   );
 
   it.each(LABEL_PLACES)(
+    "starts %s's label's text 0.25 rem outside the bracket's outer edge, drawn or not, at %s and %s",
+    (mark, ratio, interfaceScale) => {
+      const places = labelPlaces(mark, ratio, interfaceScale);
+      const remPx = 16 * interfaceScale * ratio;
+      const [bracketPx = Number.NaN] = places.selected.reticleEdgesPx;
+      // The plate's `0.25rem` padding starts its text.
+      expect(
+        STATES.map(
+          (state) => places[state].offsetPx + 0.25 * remPx - bracketPx >= 0.25 * remPx - 1e-4,
+        ),
+      ).toEqual([true, true, true, true]);
+    },
+  );
+
+  it.each(LABEL_PLACES)(
     "never moves %s's label when it is selected or deselected, at %s and %s",
     (mark, ratio, interfaceScale) => {
       const places = labelPlaces(mark, ratio, interfaceScale);
-      expect(SELECTING.map(([from, to]) => places[to].offsetPx - places[from].offsetPx)).toEqual([
-        0, 0, 0, 0,
+      expect(
+        SELECTING.map(([from, to]) => [
+          places[to].offsetPx - places[from].offsetPx,
+          places[to].risePx === places[from].risePx,
+        ]),
+      ).toEqual([
+        [0, true],
+        [0, true],
+        [0, true],
+        [0, true],
       ]);
     },
   );
 
   it.each(LABEL_PLACES)(
-    "moves %s's label out on the destination's report and back when it ends, at %s and %s",
+    "raises %s's label on the destination's report and returns it to its line when it ends, never moving it outward, at %s and %s",
     (mark, ratio, interfaceScale) => {
       const places = labelPlaces(mark, ratio, interfaceScale);
       expect(
-        REPORTED.map(([from, to]) => Math.sign(places[to].offsetPx - places[from].offsetPx)),
-      ).toEqual([1, -1, 1, -1]);
+        REPORTED.map(([from, to]) => [
+          places[to].offsetPx - places[from].offsetPx,
+          places[to].risePx !== null,
+        ]),
+      ).toEqual([
+        [0, true],
+        [0, false],
+        [0, true],
+        [0, false],
+      ]);
     },
   );
 
@@ -645,7 +804,7 @@ describe("a mark's label beside its reticles (R07.T16.g; decision-r07-t16d-follo
     ["craft", 2, 1.5],
     [0, 1, 1],
   ] as const)(
-    "stands %s's destination reticle in one place, selected or not, at %s and %s",
+    "stands %s's destination chevrons in one place, selected or not, at %s and %s",
     (mark, ratio, interfaceScale) => {
       const places = labelPlaces(mark, ratio, interfaceScale);
       // Alone, its one reticle; on the selection, the second, drawn after the bracket.
@@ -658,24 +817,78 @@ describe("a mark's label beside its reticles (R07.T16.g; decision-r07-t16d-follo
     },
   );
 
-  it("stands a craft's label 22.44 px from its anchor while it is the destination, at a ratio of 1 and 100%", () => {
-    const places = labelPlaces("craft", 1, 1);
-    // The bracket 11 px out, the apices 15, the reach 15 + 7.33 ÷ √2; the plate 2.25 px beyond.
-    expect(
-      [places.destination.offsetPx, places.both.offsetPx].map(
-        (offsetPx) => Math.round(offsetPx * 100) / 100,
-      ),
-    ).toEqual([22.44, 22.44]);
-  });
-
   it("stands a giant's and a class-4 symbol's label 0.0625 and 0.125 rem further out", () => {
     const further = ([3, 4] as const).map(
       (mark) => (labelPlaces(mark, 1, 1).none.offsetPx - labelPlaces(2, 1, 1).none.offsetPx) / 16,
     );
     expect(further.map((rem) => Math.round(rem * 1e9) / 1e9)).toEqual([0.0625, 0.125]);
   });
+});
 
-  it("moves the label in the list that first draws the destination's reticle", () => {
+describe("a destination's label above its chevron set (R07.T16.h's follow-up; decision-r07-quality-and-destination, addenda A and B)", () => {
+  it.each(DESTINATION_PLACES)(
+    "stands %s's destination plate wholly beyond all four chevrons' ink by 0.25 rem, at %s and %s, %s",
+    (mark, ratio, interfaceScale, at) => {
+      const places = labelPlaces(mark, ratio, interfaceScale);
+      const remPx = 16 * interfaceScale * ratio;
+      // A plate at an upper place lies wholly above its near edge, at a lower one wholly below it.
+      const gaps = (["destination", "both"] as const).map((state) => {
+        const region = plateRegion(places[state], at);
+        const ink = chevronInkRows(places[state]);
+        return region.upper ? ink.topPx - region.nearYPx : region.nearYPx - ink.bottomPx;
+      });
+      expect(gaps.map((gapPx) => gapPx >= 0.25 * remPx - 1e-4)).toEqual([true, true]);
+    },
+  );
+
+  it.each(DESTINATION_PLACES)(
+    "stands %s's destination plate 0.25 rem clear of the selection's bracket, at %s and %s, %s",
+    (mark, ratio, interfaceScale, at) => {
+      // The bracket stands in one place whether or not it is drawn: where the selection draws it,
+      // and the label stands in one place selected or not.
+      const both = labelPlaces(mark, ratio, interfaceScale).both;
+      const remPx = 16 * interfaceScale * ratio;
+      const region = plateRegion(both, at);
+      const bracket = both.strokes.filter((stroke) => stroke.kind === "selection");
+      expect([
+        bracket.length,
+        bracket.every((stroke) => inkDistancePx(stroke, region) >= 0.25 * remPx - 1e-4),
+      ]).toEqual([8, true]);
+    },
+  );
+
+  it.each([
+    [0, 13.25, 22.24],
+    ["craft", 13.25, 25.19],
+    [4, 15.25, 28.13],
+  ] as const)(
+    "stands %s's destination plate's near edge at %s px and its near horizontal edge %s px from the anchor, at a ratio of 1 and 100%",
+    (mark, nearEdgePx, nearRisePx) => {
+      const places = labelPlaces(mark, 1, 1);
+      // A craft: the bracket 11 px out, the apices 15, the upper chevron's arm ends 7.33 ÷ √2 above
+      // them, its ink 1 px more, and the plate 4 px above that.
+      expect(
+        [places.destination, places.both].map((place) => [
+          Math.round(place.offsetPx * 100) / 100,
+          Math.round((place.risePx ?? Number.NaN) * 100) / 100,
+        ]),
+      ).toEqual([
+        [nearEdgePx, nearRisePx],
+        [nearEdgePx, nearRisePx],
+      ]);
+    },
+  );
+
+  it("gives each mark its reach: its bracket place's outer edge, whether or not it is drawn", () => {
+    const strokes = viewStrokesAt(1);
+    const list = build({ ...strokes, remPx: 16 }, labelScene(0));
+    const reach = (kind: CameraTarget["kind"]): number | undefined =>
+      list.anchors.find((anchor) => anchor.target.kind === kind)?.markReachPx;
+    // A class-0 symbol: 4 + 4 + 1 px and half its 2 px outline; a craft's contact, class 2, 6 px.
+    expect([reach("body"), reach("craft")]).toEqual([10, 12]);
+  });
+
+  it("moves the label in the list that first draws the destination's chevrons", () => {
     const target = labelTarget("craft");
     const strokes = viewStrokesAt(1);
     const before = build({ ...strokes, selection: target }, labelScene("craft"));
@@ -683,11 +896,15 @@ describe("a mark's label beside its reticles (R07.T16.g; decision-r07-t16d-follo
       { ...strokes, selection: target, destination: target },
       labelScene("craft"),
     );
+    const [offsetBefore, riseBefore] = craftLabelPlace(before);
+    const [offsetReported, riseReported] = craftLabelPlace(reported);
     expect([
-      destinationReticles(before),
-      destinationReticles(reported),
-      (craftLabelOffset(reported) ?? 0) > (craftLabelOffset(before) ?? Number.POSITIVE_INFINITY),
-    ]).toEqual([0, 1, true]);
+      destinationChevronBatches(before),
+      destinationChevronBatches(reported),
+      offsetReported === offsetBefore,
+      riseBefore,
+      typeof riseReported,
+    ]).toEqual([0, 1, true, null, "number"]);
   });
 });
 

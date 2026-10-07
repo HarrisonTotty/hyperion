@@ -25,6 +25,7 @@ import { usePrefersReducedMotion } from "../../lib/usePrefersReducedMotion";
 import type { Anchor } from "../../spatial/drawList";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { pick } from "../../spatial/pick";
+import type { ScreenBoxPx } from "../../spatial/symbols";
 import { useThrottledValue } from "../../spatial/useThrottledValue";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import { BudgetedScale, drawsInFrame, PrimaryFrameTimes } from "../../view/budget/framePacing";
@@ -109,7 +110,12 @@ import {
 import { ViewCanvas } from "./ViewCanvas";
 import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
-import { markLabelTransform, ViewMarkLabels } from "./ViewMarkLabels";
+import {
+  markLabelPlaces,
+  markLabelTransform,
+  type PlateSizePx,
+  ViewMarkLabels,
+} from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
@@ -393,24 +399,67 @@ function exposureShownChanged(shown: ExposureControl, next: ExposureControl): bo
 /**
  * Moves each mark's label with its mark, at the frame rate; its text changes at 4 Hz (RM1 m10). A
  * label whose mark this frame did not draw is hidden until the next readout removes it. Each stands
- * at its anchor's `labelOffsetPx`, this frame's, so that a reported destination moves it out in the
- * frame its reticle is first drawn. It cuts, never eased as the guide's state transitions are: an
- * eased move would carry its opaque plate over the reticle for up to 150 ms, below the 6:1 a mark's
- * meaning needs (decision-r07-t16d-followups, (d); R07.T16.g).
+ * at its anchor's `labelOffsetPx`, this frame's, on its mark's line; a destination's at its
+ * `labelRisePx` above or below its whole chevron set, at the first of its four places 0.5 rem clear
+ * of every other mark and label (`markLabelPlaces`; decision-r07-quality-and-destination, addendum
+ * B), so that a reported destination moves it in the frame its chevrons are first drawn. It cuts,
+ * never eased as the guide's state transitions are: an eased move would carry its opaque plate over
+ * a reticle for up to 150 ms, below the 6:1 a mark's meaning needs (decision-r07-t16d-followups,
+ * (d); R07.T16.g). The plates' sizes and the chrome's boxes, on which the destination's place
+ * depends, are read before any label moves, and only while a destination's label is shown, so that
+ * the frame forces no style or layout between its writes.
  *
  * @param labels - The marks' labels by their target's key.
+ * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
  */
 function placeMarkLabels(
   labels: ReadonlyMap<string, HTMLElement>,
   anchors: ReadonlyArray<DrawAnchor>,
-  devicePixelRatio: number,
+  stage: ElementSize,
 ): void {
+  const plates = new Map<string, PlateSizePx>();
+  const chrome: ScreenBoxPx[] = [];
+  const destination = anchors.find(
+    (anchor) => anchor.label !== null && anchor.labelRisePx !== null,
+  );
+  const destinationNode =
+    destination === undefined ? undefined : labels.get(targetKey(destination.target));
+  if (destinationNode !== undefined) {
+    for (const anchor of anchors) {
+      const key = targetKey(anchor.target);
+      const node = anchor.label === null ? undefined : labels.get(key);
+      if (node !== undefined) {
+        // Its laid-out size, unrounded; a translate leaves it as it is.
+        const box = node.getBoundingClientRect();
+        plates.set(key, { widthPx: box.width, heightPx: box.height });
+      }
+    }
+    // The chrome over the stage, as R07.T16.i names it: the label block and the open slots.
+    const overlay = destinationNode.closest(".view__overlay");
+    if (overlay !== null) {
+      const origin = overlay.getBoundingClientRect();
+      for (const element of overlay.querySelectorAll(":scope > .view-label, .view-instrument")) {
+        const box = element.getBoundingClientRect();
+        chrome.push({
+          leftPx: box.left - origin.left,
+          topPx: box.top - origin.top,
+          widthPx: box.width,
+          heightPx: box.height,
+        });
+      }
+    }
+  }
+  const places = markLabelPlaces(anchors, plates, stage, chrome);
   const placed = new Set<string>();
   for (const anchor of anchors) {
     const key = targetKey(anchor.target);
     const node = anchor.label === null ? undefined : labels.get(key);
     if (node !== undefined) {
-      node.style.transform = markLabelTransform(anchor, devicePixelRatio);
+      node.style.transform = markLabelTransform(
+        anchor,
+        stage.devicePixelRatio,
+        places.get(key) ?? "line",
+      );
       node.style.visibility = "";
       placed.add(key);
     }
@@ -779,7 +828,7 @@ function ViewStage({
           anchors = drawn.anchors;
           // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
           drawnStyle = drawn.drawnStyle;
-          placeMarkLabels(labelsRef.current, anchors, inputs.size.devicePixelRatio);
+          placeMarkLabels(labelsRef.current, anchors, inputs.size);
         }
       }
       // What the meter says is true of the frame just drawn: an image coming to be drawn opens

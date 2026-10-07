@@ -320,8 +320,9 @@ export function SpatialView({
   }, [cameraState, fittedPxPerUnit]);
 
   // The destination's chevrons stand an outline and a casing outside the bracket's place at least,
-  // as the view's do, and each label's text starts 0.125 rem outside the outermost reticle about
-  // its mark (R07.T16.f and T16.h): both at the ratio.
+  // as the view's do, and each label's text starts 0.25 rem outside the bracket about its mark, a
+  // destination's 0.25 rem above or below its whole chevron set (R07.T16.f and T16.h, and addenda A
+  // and B): both at the ratio.
   const minReticleGapPx = minReticleGapDevicePx(pixelRatio) / pixelRatio;
   const drawList = useMemo(
     () =>

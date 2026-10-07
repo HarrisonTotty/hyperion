@@ -514,7 +514,17 @@ way to `ReticleStrokesCss { shiftPx, markStrokePx, minGapPx }` and `reticleStrok
 P05's `drawList.ts` gains `ChevronsOp`, `TicksOp.weight` (`line` or `mark`), `reticleHalfSizePx`
 and `destinationGapPx`, and `labels.ts` gains `markLabelTransform` and takes
 `placeLabels(chosen, anchors, viewport, reticles, destinationId, pinnedIds?, obstacles?)` (see
-"Deviations in T16.h, as built")._
+"Deviations in T16.h, as built")._ _As built by T16.h's follow-up
+(decision-r07-quality-and-destination, addenda A and B): `reticleReachPx` gives way to the
+destination label's one place in `spatial/symbols.ts` (`LABEL_TEXT_CLEARANCE_REM`,
+`LABEL_NEIGHBOUR_CLEARANCE_REM`,
+`destinationLabelRisePx`, `destinationSetReachPx`, `DESTINATION_LABEL_PLACES`,
+`DestinationLabelPlace`, `placeIsRight`, `placeIsUpper`, `ScreenBoxPx`, `destinationLabelBoxPx`,
+`squareBoxPx`, `boxGapPx`, `destinationLabelPlace`); `markLabelOffsetPx` loses its fourth
+parameter and `markLabelRisePx` is new; `DrawAnchor` gains `labelRisePx` and `markReachPx`; and
+`ViewMarkLabels.tsx` gains `MarkLabelPlace`, `PlateSizePx` and `markLabelPlaces`, with
+`markLabelTransform(anchor, devicePixelRatio, place)` (see "Deviations in T16.h's follow-up, as
+built")._
 
 ### Main screen (Phase C)
 
@@ -2052,6 +2062,9 @@ src/renderer/src/lib`,
   - on the spatial displays, `placeLabels` starts each label's box 0.25 rem beyond the outer
     edge, R + 0.5 rem + 0.75 CSS px + 5δ for a bracket. Its parameters change as it needs, with
     a pointer in P05's Provides. Its flip, drop and pins are unchanged.
+
+  _T16.h built 0.125 rem, R + 0.375 rem and the chevrons' reach, as its tests below state; its
+  follow-up builds 0.25 rem and the destination's label above the whole set (addenda A and B)._
 
   Selecting a mark never moves its label. The destination's report moves it, in the frame that
   first draws the chevrons, and it cuts.
@@ -5351,6 +5364,178 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - **Plan conformance:** no must-fix. Its should-fix, the as-built names in both Provides, is
       taken. Its considers are taken: the apex read through, `SpatialView`'s label tied to the
       painted chevrons, and the pair control's symbol shared.
+- **Deviations in T16.h's follow-up, as built** (2026-10-07; the views lane;
+  decision-r07-quality-and-destination, addenda A and B).
+  - **Addendum B came during the build.** The first build followed A3, the box 0.25 rem above the
+    ink of the chevron on its side, 10.19 px for a craft at a ratio of 1 and 100%. Its hidden crops
+    (`.git/rm23-scratch/r07-views/t16h-fu/crops/`, `m078-00` to `-03`, `v078-00` and `-01`) showed
+    the upper chevron, a ∨, in the raised label's text rows, 7 to 8 device px before its first
+    letter at 0.78125 (∨ ink rows 253–258 against text rows 250–258 at 100%, 282–287 against
+    280–286 at 80%): `v PGG 5H0001 A-1` on the chart, `v TEST PLANET` in `VIEW`. The UX review
+    found the same from the geometry. Addendum B ruled the lean: the label above the whole set,
+    with a rule for neighbours. The code is B's; A's 10.19 px and the side chevron's band are gone
+    from the tests.
+  - **Files.** Those the bullet lists, and:
+    - `spatial/symbols.ts`: `reticleReachPx`, with no caller left, gives way to the one place both
+      drawers' destination labels take: `LABEL_TEXT_CLEARANCE_REM` (0.25, moved from `labels.ts`,
+      where it was private at 0.125), `LABEL_NEIGHBOUR_CLEARANCE_REM` (0.5),
+      `destinationLabelRisePx(bracketHalfSizePx, destinationApexPx, markStrokePx, remPx)`,
+      `destinationSetReachPx`, `DESTINATION_LABEL_PLACES` and `DestinationLabelPlace` (a `Record`
+      over the places, so that a new place is a compile error until placed), `placeIsRight`,
+      `placeIsUpper`, `ScreenBoxPx` (P05's `BoxPx` is now its alias), `destinationLabelBoxPx`,
+      `squareBoxPx`, `boxGapPx` and `destinationLabelPlace(boxOf, inside, clear)`;
+    - `view/wireframe/drawList.ts`: `DrawAnchor.labelRisePx` and `DrawAnchor.markReachPx`;
+    - `displays/view/ViewDisplay.tsx`'s `placeMarkLabels` (T16.i's file): it measures the plates
+      and the chrome, then places;
+    - `lib/strokes.ts` and `spatial/SpatialView.tsx`: docs;
+    - the tests of `symbology`, the view's `drawList`, `ViewMarkLabels`, `labels` and `SpatialView`.
+  - **Signatures.**
+    - `markLabelOffsetPx(markRadiusPx, remPx, shiftPx)` loses the destination's gap.
+    - `markLabelRisePx(markRadiusPx, remPx, shiftPx, minGapPx, markStrokePx)` is new.
+    - `ViewMarkLabels.tsx`: `MarkLabelPlace` (`"line"` or a `DestinationLabelPlace`), `PlateSizePx`,
+      `markLabelPlaces(anchors, plates, stage, chrome?)` and
+      `markLabelTransform(anchor, devicePixelRatio, place)`.
+    - `placeLabels` keeps its signature; `destinationLabel` and `lineLabel` are its own.
+  - **The fallback where the upper right is out of the display.** B2: "Where no place is clear, it
+    takes the upper right all the same." A place out of the display is no place: with none clear,
+    the label takes the first place inside the display, the upper right wherever that is inside;
+    with none inside, the upper right, held inside the view on P05 (ruling 149.1), unclipped in
+    the view, whose overlay hides what passes its edge. So at a right edge it takes the upper left,
+    as a label flips, and at the top the lower right. _For T16.c's B5 wording, which names only the
+    0.5 rem._
+  - **The neighbours.**
+    - Every other mark at its bracket place's outer edge, drawn or not: P05's
+      `reticleHalfSizePx` + 4δ + half the stroke, and the view's `DrawAnchor.markReachPx`, the same
+      or a body's drawn disc where that is larger. Selection is no input, so selecting never moves
+      the destination's label.
+    - Every other label: P05 takes every chosen label that can be drawn (its mark in view, or
+      pinned) at its place on its line, placed before the destination's or not, and the view every
+      other plate at its place on its line, as laid out.
+    - P05's furniture blocks a place it overlaps, as it blocks every label.
+    - The view's chrome, held 0.5 rem off as marks are: the `PRIMARY` view's label block and each
+      open instrument slot, measured in the DOM. The hidden pass without it put TEST PLANET's plate
+      at the upper left, 1 device px under the label block, both `--surface-0`, so that the name
+      read as a line of the block.
+  - **Two rules for other labels on P05, after the UX re-review's must-fix.** With the destination's
+    label raised, a lesser label on its line ran through the destination's chevrons and symbol (the
+    chart at class 4, 80% and 0.78125: `PFF 0B0Z0Z E-20` across the set). A lesser label is now
+    dropped within 0.25 rem of the destination's chevron set (the square of half-size
+    `destinationSetReachPx`) or within 0.5 rem of its label. The view never drops a label: there
+    another mark's plate may still cover the chevrons, for T16.i's obstacle list.
+  - **The view measures in the DOM**, reading every plate's and the chrome's rects, unrounded,
+    before the loop writes any label in the frame, and only while a destination's label is shown. A
+    destination's plate mounts hidden at the upper right and the loop shows it at its place, so that
+    it never shows a frame at a place it then leaves.
+  - _Stated limits:_
+    - no hysteresis between places until T16.i: a mark moving across a threshold cuts its label
+      from place to place;
+    - a disc is taken as its bounding square, about 0.41 r beyond its outline at the corners, and a
+      craft's hull larger than its bracket is not counted;
+    - P05: the selection's label, pinned, is never dropped, and can run through a neighbouring
+      destination's chevrons; and where no place fits inside the view, the held upper right can
+      stand on the chevrons (P05's Risks, "Labels beside reticles");
+    - no code path commands a destination yet (`viewFrameDrawer.ts`, `useLocalChart.ts`,
+      `orbitMap.ts` and `bodyFrame.ts` pass none), so the live view never reaches this path; the
+      harness sets one.
+  - **Tests.**
+    - The view: for a craft and classes 0 to 4, at ratios 0.78125, 1 and 2 and at 80%, 100% and
+      150%, in each of the four places, alone and on the selection, the plate wholly beyond all four
+      chevrons' ink by 0.25 rem and 0.25 rem clear of the bracket; every label's text 0.25 rem
+      outside the bracket; the near edges and rises, 13.25 and 22.24, 13.25 and 25.19, 15.25 and
+      28.13 px at a ratio of 1 and 100%; selection and the report's moves; the reach.
+    - `ViewMarkLabels`: the four transforms at ratios 1 and 2; the neighbour rule (a mark, a label,
+      the chrome, every place blocked, the stage's right and top edges, an unmeasured plate); the
+      hidden mount; the stylesheet's `translate` and padding.
+    - P05: classes 0 to 4 at 80%, 100% and 150% and ratios 0.78125, 1, 2 and 3, in each place, the
+      box wholly beyond all four chevrons' ink by 0.25 rem and 0.25 rem clear of the bracket; the
+      near edges 14, 16 and 18 px and the rises 22.24, 25.19 and 28.13 px at a ratio of 1 and
+      100%; the box's bottom 0.25 rem above the upper chevron's ink; the neighbour rule (a mark,
+      the selection's label, furniture, every place blocked, both left places blocked at the right
+      edge, a label out of view not counted); a lesser label dropped near the destination's label
+      and near its set; the place unchanged by selecting a labelled neighbour; the stylesheet's
+      `.spatial-label` line. Selection is no input to `placeLabels`, so "alone and on the
+      selection" is one case there; `SpatialView`'s test takes it at 0.78125.
+    - `SpatialView`: the painted chevrons' top 0.25 rem below the label's bottom edge.
+  - **By hand, hidden** (`.git/rm23-scratch/r07-views/t16h-fu/`): T16.h's `GALAXY` and `VIEW`
+    harnesses, the chart at 0.78125 in a 2458 × 1382 CSS px window at 100% and 80%, measured with
+    `--line` drawn in `--surface-0`; `VIEW`'s `PRECISION TEST` from `CHASE` at 0.78125 and 2. The
+    chart's reading (`rows.py`, `clear.py`):
+    - **No chevron's ink shares a device row with the label's text ink**, in any state captured
+      (`rows-em078.txt`, the final code's pass; `rows-dm078.txt` the same): class 0
+      (PGG 5H0001 A-1) and class 4 (PFG 0B0Z00 E-37), alone and on the selection, at the upper
+      right; flipped to the upper left at the view's right edge (PGG 5H0001 A-0); and lowered to
+      the lower right where neighbours block both upper places (PGG 5J0001 A-0), each at 100% and
+      80%. No `--target` pixel stands in the text's rows within 60 columns
+      of the label but one, 28 px past a class-4 label's end at 80%: a neighbour label's colour
+      fringe.
+    - **Between the ∨'s top row and the text's bottom row** there are 6 device rows at class 0 at
+      80% (2 asked), and 3 to 6 in every other state, the lower chevron's bottom and the text's top
+      likewise.
+    - **The bracket and the labels beside it** (`clear-em078.txt`, columns wholly outside the box
+      at 1.05:1 or less against `--surface-0`, in the box's rows): in the five 80% states with a
+      bracket beside a label, one such column in three (`em078-09`, `-13`, `-17`) and none in two
+      (`-03`, `-04`, PGG 5J0001 A-0), where the one whole column between reads 1.05:1 by two
+      decimals, just over the cut, and the next lies partly under the box. At 100%, one or two
+      (`-01`, `-05`, `-11`, `-15`); `-07`'s 0 is another mark's ink, at 14 to 15:1, standing
+      between.
+      So at 80% the criterion holds only where a column at about 1.05:1, the stroke's antialiased
+      tail, is read as `--surface-0`, as T16.h read it (pending, below). A destination's own label
+      no longer stands beside the bracket's ink at all.
+    - **`VIEW`'s TEST PLANET**, at 0.78125: its upper-right place meets the selected moon, its
+      upper-left the label block, so it takes the lower right, below the set (`crops/d-v078-01`).
+      At 2, in a 1920 × 1080 CSS window, the block stands further off and it takes the upper left.
+      A pass before the chrome was counted put it at the upper left 1 device px under the block
+      (`crops/b-v078-01-alone.png`).
+    - **The class-4 chart at 80%**, crowded: a neighbour's label ran through the destination's
+      chevrons in the pass before the lesser-label rule (`galaxy/bm078-08`); it is dropped since
+      (`crops/d-m078-08-large-80-both.png`).
+    - The crops: `crops/b-*` and `crops/d-*`; the first pass's, which addendum B cites, kept as
+      they were.
+  - **Gate.** No `just ci` (the Day 2 protocol).
+    - The acceptance's vitest (the bullet's paths): 82 files, 3,609 tests, 1 failure, not the
+      follow-up's: `ViewDisplaySetting.test.tsx`'s "draws R02's low wireframe on low, PHASE TEST's
+      graticules at 30° only and so fewer lines" (T17's), as T16.h recorded;
+      `rendering-and-planets` fixes it in e60a8731, which this branch's base predates.
+    - The app's vitest: 338 files, 7,853 tests, the same 1 failure.
+    - `just check lint` from a clean typecheck cache: exit 0. After the last changes, the
+      typecheck from a clean cache, oxlint on the changed files and Prettier again.
+    - `just test-render`, both variants, with captures, on the base (HEAD's tree, the changes
+      stashed) and after (`render-pair.sh`): each exit 0, 610 checks (305 a variant), and all 110
+      captures byte-identical. It ran before the last two changes (labels out of view, plates read
+      unrounded), which no check draws.
+    - No WGSL changed, so naga was not run.
+    - The console-ux skill's lint (0 errors, 0 checks in the 8 renderer files), contrast (every
+      pairing passes) and glyphs (no new character reaches the screen).
+  - **Reviewed** by the TypeScript, UX and plan-conformance reviewers, each before and after
+    addendum B.
+    - **TypeScript:** no must-fix either time. Before B, its should-fix (a readonly tuple) went
+      with B's rewrite, and its considers were taken: the stylesheet's `.spatial-label` test, and
+      plates read before any write. After B, its four should-fixes were taken: P05's furniture and
+      first-inside branches tested, a test title, P05's full size-class and scale set, and one
+      reason to fail a test. Its considers were taken too: lesser labels give way, two comments, one
+      box type.
+    - **UX:** before B, one must-fix needing the ruling's owner, the ∨ on the raised label's line,
+      which addendum B ruled. After B, one must-fix, a lesser label through the destination's
+      chevrons, was taken, and so were its two should-fixes: P05 takes every chosen label at its
+      line place, and the fallback is recorded. Of its considers, the hidden mount was taken, a
+      disc's circle and a hull's extent are recorded as limits, and the destination's set as an
+      obstacle in the view is for T16.i.
+    - **Plan conformance:** no must-fix either time. Its should-fixes were taken: the Provides
+      pointers, P05's "stands beyond them", the by-hand counts as measured, labels out of view not
+      counted, and the pending items. Its considers were taken: the stylesheet's padding test, the
+      plate against every chevron, T16.h's bullet annotated, the selection's label as a limit, and
+      plates read unrounded.
+  - **Pending, for the orchestrator or the owner:**
+    - P05: may selecting a mark outside `chooseLabels`' count move the destination's label?
+      Addendum B's "clear of every other label" and "selecting never moves a label" cannot both
+      hold there.
+    - Does a column at about 1.05:1 against `--surface-0` count as "a whole device pixel of
+      `--surface-0`" at 80%? Two 80% states depend on it.
+    - T16.i: its "Where none is clear it is hidden whole" now follows the destination's sentence
+      and meets addendum B's "never dropped". And where no place fits inside the stage, this
+      build's upper right can pass the stage's edge, which T16.i's "never shown in part" forbids.
+    - Seen, not this task's: on a crowded chart other marks' symbols lie inside the destination's
+      chevron set (class 4, 80%, `crops/d-m078-08-large-80-both.png`).
 - **Deviations in T8.a, as built (part 1: the disc regime, the lights and the phase scene).**
   - **Files.** `bodies/draw.ts` (`planLitBodies`, `pointFlux`, `hostAnnuli` (_moved to
     `lighting/hostLights.ts` by R07.T10.b_), `LitBodyRenderer`, `BODY_DISC_MATERIALS`), with the

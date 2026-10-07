@@ -1698,41 +1698,52 @@ function reticlePlaces(recorder: RecordingContext2D): Array<{ stroke: string; pl
   return places;
 }
 
-/** The farthest right point the last paint traced for the destination's chevrons, CSS px. */
-function chevronsRightPx(recorder: RecordingContext2D): number {
+/**
+ * The highest point the last paint traced for the destination's chevrons, CSS px: the upper
+ * chevron's arm ends. The chevrons are one path of four subpaths, above, below, left and right.
+ */
+function chevronsTopPx(recorder: RecordingContext2D): number {
   const records = recorder.records;
   const lastClear = records.findLastIndex(
     (record) => record.type === "call" && record.name === "fillRect",
   );
   let stroke = "";
-  let xs: number[] = [];
-  let right = Number.NaN;
+  let subpaths: number[][] = [];
+  let top = Number.NaN;
   for (const record of records.slice(lastClear)) {
     if (record.type === "set" && record.name === "strokeStyle") {
       stroke = String(record.value);
     } else if (record.type === "call" && record.name === "beginPath") {
-      xs = [];
-    } else if (record.type === "call" && (record.name === "moveTo" || record.name === "lineTo")) {
-      xs.push(Number(record.args[0]));
+      subpaths = [];
+    } else if (record.type === "call" && record.name === "moveTo") {
+      subpaths.push([Number(record.args[1])]);
+    } else if (record.type === "call" && record.name === "lineTo") {
+      subpaths.at(-1)?.push(Number(record.args[1]));
     } else if (record.type === "call" && record.name === "stroke" && stroke === "#e879f9") {
-      right = Math.max(...xs);
+      top = Math.min(...subpaths.flat());
     }
   }
-  return right;
+  return top;
 }
 
-/** The left edge of mark "a"'s label, CSS px, in a view of the scene with `overrides`. */
-function labelLeftIn(overrides: Partial<SpatialScene>): number {
+/** Mark "a"'s label's place, CSS px from the view's top left, in a view of the scene with `overrides`. */
+function labelPlaceIn(overrides: Partial<SpatialScene>): [number, number] {
   const { unmount } = renderView({ scene: aScene(overrides) });
-  const leftPx = labelLeftPx("A");
+  const place: [number, number] = [labelLeftPx("A"), labelTopPx("A")];
   unmount();
-  return leftPx;
+  return place;
 }
 
 /** A label's left edge, CSS px, from its transform in `rem` at a rem of 16 px. */
 function labelLeftPx(text: string): number {
   const transform = screen.getByText(text).style.transform;
   return 16 * Number(/^translate\(([-\d.e]+)rem/u.exec(transform)?.[1]);
+}
+
+/** A label's top edge, CSS px, from its transform in `rem` at a rem of 16 px. */
+function labelTopPx(text: string): number {
+  const transform = screen.getByText(text).style.transform;
+  return 16 * Number(/, ([-\d.e]+)rem\)$/u.exec(transform)?.[1]);
 }
 
 describe("SpatialView at the display's ratio (R07.T16.f)", () => {
@@ -1761,18 +1772,26 @@ describe("SpatialView at the display's ratio (R07.T16.f)", () => {
     vi.stubGlobal("devicePixelRatio", 0.78125);
 
     expect([
-      labelLeftIn({ selectedId: "a" }) - labelLeftIn({}),
-      labelLeftIn({ selectedId: "a", destinationId: "a" }) - labelLeftIn({ destinationId: "a" }),
-    ]).toEqual([0, 0]);
+      labelPlaceIn({ selectedId: "a" }),
+      labelPlaceIn({ selectedId: "a", destinationId: "a" }),
+    ]).toEqual([labelPlaceIn({}), labelPlaceIn({ destinationId: "a" })]);
   });
 
-  it("starts the destination's label 0.125 rem beyond its painted chevrons' reach and half their stroke", () => {
+  it("keeps the destination's label beside the bracket", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+    const [besideLeftPx] = labelPlaceIn({});
+    renderView({ scene: aScene({ destinationId: "a" }) });
+
+    expect(labelLeftPx("A")).toBe(besideLeftPx);
+  });
+
+  it("stands the destination's label 0.25 rem above its painted chevrons' ink", () => {
     vi.stubGlobal("devicePixelRatio", 0.78125);
     const { recorder } = renderView({ scene: aScene({ destinationId: "a" }) });
 
-    // The right chevron's arm ends, the farthest right of the chevrons' painted points, and half
-    // their 2.56 CSS px stroke at this ratio; then 0.125 rem at a rem of 16 px.
-    expect(labelLeftPx("A")).toBeCloseTo(chevronsRightPx(recorder) + 2.56 / 2 + 2, 6);
+    // The upper chevron's arm ends, less half its 2.56 CSS px stroke at this ratio, less the label's
+    // bottom edge, its top and one line of 1.25 × 0.875 rem: 0.25 rem at a rem of 16 px.
+    expect(chevronsTopPx(recorder) - 2.56 / 2 - (labelTopPx("A") + 17.5)).toBeCloseTo(4, 6);
   });
 
   it("stands a mark's label the bracket's growth further out at 1 than at 2: 1.25 px", () => {

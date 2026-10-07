@@ -5,8 +5,8 @@ import { CONTACT_SIZE_CLASS } from "../../lib/system/bodySymbols";
 import {
   bracketArmPx,
   destinationChevrons,
+  destinationLabelRisePx,
   type OffsetPx,
-  reticleReachPx,
   SIZE_CLASS_REM,
   symbolOutline,
   unitInradius,
@@ -60,10 +60,11 @@ export const BRACKET_MARGIN_REM = 0.25;
 export const LABEL_PLACE_REM = 0.75;
 
 /**
- * How far a label's plate stands beyond the reach of the outermost reticle about its mark (the
- * bracket's half-size, or the destination's chevrons' reach, `reticleReachPx`), rem, before the
- * outline's shift: 0.125, a craft's label beyond its bracket's centreline as R02.T15 built it
- * (0.75 rem less the bracket's 0.375 + 0.25).
+ * How far a label's plate stands beyond the selection's bracket's line about its mark, rem, before
+ * the outline's shift: 0.125, a craft's label beyond its bracket's centreline as R02.T15 built it
+ * (0.75 rem less the bracket's 0.375 + 0.25). The plate's `0.25rem` padding then starts its text
+ * 0.375 rem less 0.75 CSS px outside the bracket's outer edge, past the 0.25 rem every display's
+ * labels keep (`LABEL_TEXT_CLEARANCE_REM`; decision-r07-quality-and-destination, addendum A).
  */
 export const LABEL_CLEARANCE_REM = 0.125;
 
@@ -164,43 +165,64 @@ export function destinationHalfSizePx(
 }
 
 /**
- * The device px from a mark's anchor to its label's `--surface-0` plate (R07.T16.g;
+ * The device px from a mark's anchor to its label's `--surface-0` plate, to its right (R07.T16.g;
  * decision-r07-t16d-followups, items 1 and (d)): the larger of {@link LABEL_PLACE_REM} and the
- * reticles' growth, 5δ (T16.d's place), and {@link LABEL_CLEARANCE_REM} and δ beyond the reach of
- * the outermost reticle that can stand about the mark (`reticleReachPx`, R07.T16.h).
+ * reticles' growth, 5δ (T16.d's place), and {@link LABEL_CLEARANCE_REM} and δ beyond the line of
+ * the selection's bracket about the mark.
  *
  * @remarks
- * The reticles counted are the selection's bracket, whether or not the mark is selected, and while
- * the mark is the destination, its chevrons, which stand in one place selected or not
- * ({@link destinationHalfSizePx}), their reach the apex distance and an arm's run outward
- * (decision-r07-quality-and-destination, Q2 and Q3): so selecting a mark never moves its label, and
- * the plate's near edge stands 0.125 rem less 0.75 CSS px beyond every reticle's outer edge, the
- * clearance of a craft's label from its bracket as built, at every size class and ratio. The
- * plate's `0.25rem` padding then starts its text 0.375 rem less 0.75 CSS px outside that edge, past
- * the 0.125 rem every display's labels keep. Every mark up to size class 2 keeps T16.d's place; a
- * class-3 or class-4 symbol's label stands 0.0625 or 0.125 rem further out. A craft's label at a
- * ratio of 1 and 100% stands 22.44 px from its anchor while it is the destination.
+ * The bracket is counted whether or not the mark is selected, so that selecting a mark never moves
+ * its label, and the plate's near edge stands 0.125 rem less 0.75 CSS px beyond its outer edge, the
+ * clearance of a craft's label from its bracket as built, at every size class and ratio; its
+ * `0.25rem` padding then starts its text 0.375 rem less 0.75 CSS px outside that edge, past the
+ * 0.25 rem every display's labels keep. Every mark up to size class 2 keeps T16.d's place; a
+ * class-3 or class-4 symbol's label stands 0.0625 or 0.125 rem further out. The destination's
+ * chevrons never move a label outward: its label keeps this place and stands above or below the
+ * whole chevron set ({@link markLabelRisePx}; decision-r07-quality-and-destination, addendum B). A
+ * craft's label at a ratio of 1 and 100% stands 13.25 px from its anchor, the destination or not.
  *
  * @param markRadiusPx - The radius of the mark, px: its symbol's, or a craft's contact's.
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
- * @param destinationGapPx - While the mark is the destination, the destination's least gap outside
- *   the selection's bracket (`ViewStrokes.minReticleGapPx`); `null` while it is not.
  */
-export function markLabelOffsetPx(
+export function markLabelOffsetPx(markRadiusPx: number, remPx: number, shiftPx: number): number {
+  return Math.max(
+    LABEL_PLACE_REM * remPx + reticleGrowthPx(shiftPx),
+    bracketHalfSizePx(markRadiusPx, remPx, shiftPx) + LABEL_CLEARANCE_REM * remPx + shiftPx,
+  );
+}
+
+/**
+ * How far above its anchor a destination's label's plate stands, device px, its bottom edge above
+ * the whole chevron set, or how far below it its top edge stands at a lower place
+ * (decision-r07-quality-and-destination, addendum B): the upper chevron's apex distance
+ * ({@link destinationHalfSizePx}), its arm ends' run outward, half the mark stroke and 0.25 rem
+ * (`destinationLabelRisePx`), the arms the bracket's about the mark.
+ *
+ * @remarks
+ * The label keeps its place beside the bracket ({@link markLabelOffsetPx}) and stands above or below
+ * all four chevrons, so that none stands on its line or beside its text. The view's
+ * `markLabelPlaces` chooses its place among the four. At a ratio of 1 and 100% the plate's near
+ * horizontal edge stands 22.24, 25.19 and 28.13 px from the anchor of a class-0 mark, a craft and a
+ * class-4 mark: for a craft, 15 + 5.19 + 1 + 4.
+ *
+ * @param markRadiusPx - The radius of the mark, px: its symbol's, or a craft's contact's.
+ * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
+ * @param minGapPx - The least space between the bracket's centreline and the chevrons' apices,
+ *   device px (`ViewStrokes.minReticleGapPx`).
+ * @param markStrokePx - The marks' outline width, device px (`ViewStrokes.markStrokePx`).
+ */
+export function markLabelRisePx(
   markRadiusPx: number,
   remPx: number,
   shiftPx: number,
-  destinationGapPx: number | null,
+  minGapPx: number,
+  markStrokePx: number,
 ): number {
-  const outermostPx = reticleReachPx(
+  return destinationLabelRisePx(
     bracketHalfSizePx(markRadiusPx, remPx, shiftPx),
-    destinationGapPx === null
-      ? null
-      : destinationHalfSizePx(markRadiusPx, remPx, shiftPx, destinationGapPx),
-  );
-  return Math.max(
-    LABEL_PLACE_REM * remPx + reticleGrowthPx(shiftPx),
-    outermostPx + LABEL_CLEARANCE_REM * remPx + shiftPx,
+    destinationHalfSizePx(markRadiusPx, remPx, shiftPx, minGapPx),
+    markStrokePx,
+    remPx,
   );
 }
 

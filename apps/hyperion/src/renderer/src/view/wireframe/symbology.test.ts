@@ -16,6 +16,7 @@ import {
   destinationReticle,
   flightPathMarker,
   markLabelOffsetPx,
+  markLabelRisePx,
   type ScreenMark,
   symbologyMarks,
   symbolRadiusPx,
@@ -123,33 +124,51 @@ describe("a mark's label's offset (R07.T16.g; decision-r07-t16d-followups, item 
   const shift = markShiftDevicePx(1);
 
   it("stands a craft's label at T16.d's place, 0.75 rem and five shifts", () => {
-    expect(markLabelOffsetPx(0.375 * REM_PX, REM_PX, shift, null)).toBe(0.75 * REM_PX + 5 * shift);
+    expect(markLabelOffsetPx(0.375 * REM_PX, REM_PX, shift)).toBe(0.75 * REM_PX + 5 * shift);
   });
 
   it("stands a class-4 symbol's label 0.125 rem and a shift beyond its bracket", () => {
     const radius = 0.5 * REM_PX;
-    expect(markLabelOffsetPx(radius, REM_PX, shift, null)).toBe(
+    expect(markLabelOffsetPx(radius, REM_PX, shift)).toBe(
       bracketHalfSizePx(radius, REM_PX, shift) + 0.125 * REM_PX + shift,
     );
   });
+});
 
-  it("stands a destination's label 0.125 rem and a shift beyond its chevrons' reach", () => {
-    const radius = 0.375 * REM_PX;
-    // The reach: the apex distance and an arm's run outward, the bracket's arm over √2.
-    const armPx = (2 * bracketHalfSizePx(radius, REM_PX, shift)) / 3;
-    expect(markLabelOffsetPx(radius, REM_PX, shift, 4)).toBeCloseTo(
-      destinationHalfSizePx(radius, REM_PX, shift, 4) +
-        armPx * Math.SQRT1_2 +
-        0.125 * REM_PX +
-        shift,
+describe("a destination's label above its chevron set (R07.T16.h's follow-up; decision-r07-quality-and-destination, addenda A and B)", () => {
+  // At a ratio of 1 and 100%: δ = 0.25 px, the least gap 4 px, the mark stroke 2 px.
+  const shift = markShiftDevicePx(1);
+  const gapPx = 4;
+  const strokePx = 2;
+
+  it("stands its plate 0.25 rem above the upper chevron's ink: its apex, an arm's run and half the mark stroke", () => {
+    const radius = 0.5 * REM_PX;
+    // The chevrons' arms are the bracket's, a third of its side, run out at 45°.
+    const runPx = ((2 * bracketHalfSizePx(radius, REM_PX, shift)) / 3) * Math.SQRT1_2;
+    expect(markLabelRisePx(radius, REM_PX, shift, gapPx, strokePx)).toBeCloseTo(
+      destinationHalfSizePx(radius, REM_PX, shift, gapPx) + runPx + strokePx / 2 + 0.25 * REM_PX,
       9,
     );
   });
 
-  it("stands a craft's label 22.44 px from its anchor while it is the destination, at a ratio of 1 and 100%", () => {
-    // The bracket 11 px out, the apices 15, the reach 15 + 7.33 ÷ √2; the plate 2.25 px beyond.
-    expect(Math.round(markLabelOffsetPx(0.375 * REM_PX, REM_PX, shift, 4) * 100) / 100).toBe(22.44);
-  });
+  it.each([
+    ["class 0", 0.25, 13.25, 22.24],
+    ["a craft", 0.375, 13.25, 25.19],
+    ["class 4", 0.5, 15.25, 28.13],
+  ] as const)(
+    "stands %s's destination plate's near edge at its bracket place and its bottom edge above the set, at a ratio of 1 and 100%: %s rem, %s and %s px",
+    (_, radiusRem, nearPx, risePx) => {
+      // A craft: the bracket 11 px out, the apices 15, the upper chevron's arm ends 7.33 ÷ √2 = 5.19
+      // px above them, its ink 1 px more; the plate 4 px above that.
+      const radius = radiusRem * REM_PX;
+      expect(
+        [
+          markLabelOffsetPx(radius, REM_PX, shift),
+          markLabelRisePx(radius, REM_PX, shift, gapPx, strokePx),
+        ].map((valuePx) => Math.round(valuePx * 100) / 100),
+      ).toEqual([nearPx, risePx]);
+    },
+  );
 });
 
 describe("a target's mark", () => {

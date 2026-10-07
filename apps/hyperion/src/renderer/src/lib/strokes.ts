@@ -124,9 +124,10 @@ export interface ReticleStrokesCss {
  *
  * @remarks
  * `SpatialView` gives the least gap to its draw list, so that its destination's chevrons stand
- * where the view's do, and all three to `placeLabels`, so that a label's text starts 0.125 rem
- * outside the outer edge of the outermost reticle about its mark, as on every display
- * (decision-r07-quality-and-destination, Q3).
+ * where the view's do, and the set to `placeLabels`, whose δ and outline place a label: its text
+ * starts 0.25 rem outside the outer edge of the selection's bracket about its mark, and a
+ * destination's label stands 0.25 rem above or below its whole chevron set, as on every display
+ * (decision-r07-quality-and-destination, Q3 and addenda A and B).
  */
 export function reticleStrokesCssPx(devicePixelRatio: number): ReticleStrokesCss {
   const ratio = ratioOf(devicePixelRatio);

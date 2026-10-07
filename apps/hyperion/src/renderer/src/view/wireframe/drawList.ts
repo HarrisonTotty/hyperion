@@ -33,7 +33,9 @@ import { hullEdges, hullFaces } from "./hulls";
 import { orbitPath } from "./orbits";
 import {
   anchorRadiusPx,
+  bracketHalfSizePx,
   markLabelOffsetPx,
+  markLabelRisePx,
   type ScreenPx,
   type SymbologyAnchor,
   symbologyMarks,
@@ -249,12 +251,27 @@ export interface DrawAnchor {
    */
   readonly label: AnchorLabel | null;
   /**
-   * The device px from the anchor to its label's `--surface-0` plate, to its right: clear of every
-   * reticle that can stand about the mark, the destination's chevrons included
-   * (`markLabelOffsetPx`, R07.T16.g and T16.h). It is the list's, so that the label moves in the
-   * frame in which a destination's chevrons are first drawn, and cuts.
+   * The device px from the anchor to its label's `--surface-0` plate's near edge, to its right, or
+   * to its left at a destination's left-hand places: clear of the selection's bracket, whether or
+   * not the mark is selected or the destination (`markLabelOffsetPx`, R07.T16.g;
+   * decision-r07-quality-and-destination, addendum A).
    */
   readonly labelOffsetPx: number;
+  /**
+   * While the mark is the destination, the device px from the anchor to its label plate's near
+   * horizontal edge, above or below the whole chevron set (`markLabelRisePx`;
+   * decision-r07-quality-and-destination, addendum B); `null` while it is not, where the plate is
+   * centred on the anchor's line. It is the list's, so that the label moves in the frame in which
+   * the destination's chevrons are first drawn, and cuts.
+   */
+  readonly labelRisePx: number | null;
+  /**
+   * How far about the anchor the mark stands, device px, the half-size of a square that holds it:
+   * the outer edge of its selection's bracket's place, whether or not it is drawn, which holds its
+   * symbol and its reticles, or a body's drawn disc where that is larger. A destination's label
+   * stands 0.5 rem clear of every other mark's (decision-r07-quality-and-destination, addendum B).
+   */
+  readonly markReachPx: number;
 }
 
 /** What a mark's DOM label says. */
@@ -718,7 +735,24 @@ export function buildWireframeDrawList(
           anchorRadiusPx(anchor, options.remPx),
           options.remPx,
           options.markShiftPx,
-          sameTarget(options.destination, target) ? options.minReticleGapPx : null,
+        ),
+        labelRisePx: sameTarget(options.destination, target)
+          ? markLabelRisePx(
+              anchorRadiusPx(anchor, options.remPx),
+              options.remPx,
+              options.markShiftPx,
+              options.minReticleGapPx,
+              markStrokePx,
+            )
+          : null,
+        markReachPx: Math.max(
+          bracketHalfSizePx(
+            anchorRadiusPx(anchor, options.remPx),
+            options.remPx,
+            options.markShiftPx,
+          ) +
+            markStrokePx / 2,
+          anchor.body === null ? 0 : anchor.body.diameterPx / 2,
         ),
       });
     }
