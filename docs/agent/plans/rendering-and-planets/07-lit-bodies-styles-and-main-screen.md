@@ -1764,7 +1764,8 @@ decision-r07-quality-and-destination, before the guide's draft, so that the draf
 build) (T16.i and T16.j follow it: T16.j adds no guide text, and the draft states T16.i's one clause
 ahead of it). T16.k, the kept scene's clock rate on the label block, is split off from T16.c under
 the orchestrator's ruling carried for it, and follows where the orchestrator places it, never beside
-T16.i. The paragraph above stays the task's whole specification:
+T16.i. R07.T16.i's follow-up (decision-r07-quality-and-destination, addendum D) follows T16.k, never
+beside it. The paragraph above stays the task's whole specification:
 each subtask builds its share of it, and each runs the console-ux skill's scripts.
 
 - **R07.T16.a The overlay, cased, and the hull faces' bias.** `photoreal/overlay.ts` (new),
@@ -2283,7 +2284,9 @@ src/renderer/src/displays/system`, the console-ux skill's scripts, `just ci`.
 
   - The mark stays on the canvas and in the list.
   - A label leaves a place, or comes back from hidden, only when the place it moves to is clear by
-    0.25 rem. Each change cuts.
+    0.25 rem. A label changes its place, or whether it is shown, at most three times in any second,
+    its first showing counted, and the third only ever a hide (Q6 (a); addendum D, D1). Each change
+    cuts.
 
   **Tests:**
   - in the compact layout, a mark under the label block's right edge takes its label to the left,
@@ -2371,6 +2374,47 @@ src/renderer/src/displays/galaxy src/renderer/src/displays/system`, the console-
   the console-ux skill's scripts (glyphs for `×`), `just ci`. Never side by side with T16.i, which
   edits `displays/view/` too.
   _As built: see Risks, "Deviations in T16.k, as built"._
+
+- **R07.T16.i's follow-up: view labels inside the picture, apart, and off the edges**
+  (decision-r07-quality-and-destination, addendum D, D3 to D5). One `fix(view): R07.T16.i …`
+  commit, by a fresh agent, after T16.k and never beside it. `displays/view/ViewMarkLabels.tsx`
+  (`markLabelPlaces`) and its tests.
+  - **A mark outside the picture has no label.** Every place fits only while its mark's centre
+    lies inside the stage, by the place's margin. A label is hidden whole when its mark's centre
+    leaves the stage, and comes back once the centre is 0.25 rem inside. This holds for the
+    selection's and the destination's labels too.
+  - **Labels stand apart.** Every plate stands at least 0.5 rem (`LABEL_NEIGHBOUR_CLEARANCE_REM`)
+    from every plate placed, and from where every label not yet placed stood, as every plate
+    already does from the destination's.
+  - **Labels stand off the edges.** Every plate stands at least 0.25 rem (`EDGE_CLEARANCE_REM`,
+    new) inside each edge of the stage, the destination's tiers included, so that none covers
+    the canvas's inset focus ring.
+
+  **Tests:**
+  - a mark 0.5 rem past the stage's right edge has its label hidden whole, though its left place
+    lies inside; 0.5 rem inside, it takes the left;
+  - a mark moved 0.125 rem out and back keeps its label hidden until its centre is 0.25 rem
+    inside;
+  - a destination past the top edge has its label hidden, and its set still counted;
+  - two plates that would stand 0.375 rem apart, stacked or end to end: the farther takes its next
+    place; 0.625 rem apart, both stand;
+  - a plate that would end 0.125 rem inside the right edge, or the foot, takes its next place;
+    0.375 rem inside, it stands;
+  - a destination's label takes the first place 0.25 rem inside the stage, else it is hidden
+    whole.
+
+  **By hand, hidden:** T16.i's `page/run.sh`, its compact and turn runs at 1280 × 720 retaken
+  into `.git/rm23-scratch/r07-views/t16i-fu/`:
+  - no plate shown within 0.25 rem of the stage's edges, or within 0.5 rem of another plate;
+  - TEST PLANET's label hidden in every frame in which its mark's centre lies past the right edge;
+  - one capture with the canvas focused from the keyboard, its ring whole beside a label at the
+    edge.
+
+  **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`, the
+  console-ux skill's scripts, `just ci`.
+  _P05's share of D4 and D5 is R07.T16.j's. If T16.j is committed before that share reaches its
+  agent, the share joins this commit (`spatial/labels.ts` and its tests), which then also follows
+  T16.j._
 
 #### R07.T17 The low setting and benchmarks
 
@@ -5865,8 +5909,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     as the last change, never shown in part. It comes back once the window allows. A label at its
     limit is hidden, not moved, when its mark becomes or stops being the destination, for up to a
     second, against addendum B's "in the frame that first draws the chevrons" (the UX re-review:
-    the chevrons and the list still mark the destination). _For the orchestrator: kept unless C4's
-    text is ruled to drop it._
+    the chevrons and the list still mark the destination). _Ruled
+    (decision-r07-quality-and-destination, addendum D, D1): kept. Q6 (a) ruled it, and C4 had only
+    copied the plan's text, which dropped it._
   - **Placed on every animation frame** (the UX review's must-fix). On a 30 Hz primary (`QUALITY
     LOW`'s photorealistic view) the labels are placed on every vsync, at the last drawn frame's
     marks, so that a readout's commit between two drawn frames (a wider range, a stale `S`, a new
@@ -5953,6 +5998,25 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       T16.i. Lean: as built;
     - a hidden nearer or selected label waits for a clear place rather than taking a standing
       farther label's. Lean: as built, for stability.
+
+    _Ruled (decision-r07-quality-and-destination, addendum D):_
+
+    - _The limit of three changes a second stays (D1)._
+    - _A plate below or above its mark may cover another mark or the hull, as at the right. That
+      is a stated limit (D2)._
+    - _A mark whose centre lies outside the stage has no label, as on P05 (D3)._
+    - _Labels stand 0.5 rem apart, the destination's clearance, since touching labels read as one
+      (D4)._
+    - _Labels stand 0.25 rem inside the stage's edges, as the chrome does, off the canvas's focus
+      ring (D5)._
+    - _R07.T16.i's follow-up builds D3 to D5 in the view, and R07.T16.j builds P05's share._
+    - _A waiting label (D6), and a label at its limit hidden for up to a second on the
+      destination's report (D7), stand as built._
+    - _For T16.j:_
+      - _the triad's base place stands its clearance from its own symbol by true distance, and
+        every axis is tested (D8);_
+      - _the core arrow's place beyond the tail stands 0.625 rem from the tail (D9);_
+      - _on P05 the selection's label yields to the destination's whatever the count (D10)._
 - **Deviations in T16.k, as built** (2026-10-07; the views lane; the orchestrator's ruling carried
   for T16.c, in the form T16.c drafted).
   - **Files and names.**
