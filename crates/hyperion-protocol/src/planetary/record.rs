@@ -655,9 +655,9 @@ pub(crate) mod tests {
     /// sidereal day and never locking. Every number is its `f64` in full.
     pub(crate) fn earth_rotation() -> BodyRotationDto {
         BodyRotationDto {
-            pole: [0.0, -0.397_740_291_376_376_3, 0.917_498_356_048_534_5],
+            pole: [0.0, -0.397_692_008_009_812_36, 0.917_518_973_517_781_4],
             equator_node: [1.0, 0.0, 0.0],
-            equator_quarter: [0.0, 0.917_498_356_048_534_5, 0.397_740_291_376_376_3],
+            equator_quarter: [0.0, 0.917_518_973_517_781_4, 0.397_692_008_009_812_36],
             obliquity_rad: 0.409,
             initial_rate_rad_s: 7.292_115e-5,
             locked_rate_rad_s: 1.990_986_6e-7,
@@ -675,9 +675,9 @@ pub(crate) mod tests {
 
     pub(crate) fn earth_rotation_json() -> Value {
         json!({
-            "pole": [0.0, -0.397_740_291_376_376_3, 0.917_498_356_048_534_5],
+            "pole": [0.0, -0.397_692_008_009_812_36, 0.917_518_973_517_781_4],
             "equator_node": [1.0, 0.0, 0.0],
-            "equator_quarter": [0.0, 0.917_498_356_048_534_5, 0.397_740_291_376_376_3],
+            "equator_quarter": [0.0, 0.917_518_973_517_781_4, 0.397_692_008_009_812_36],
             "obliquity_rad": 0.409,
             "initial_rate_rad_s": 7.292_115e-5,
             "locked_rate_rad_s": 1.990_986_6e-7,
@@ -711,7 +711,7 @@ pub(crate) mod tests {
             "equatorial_radius_m": 6_378_137.0,
             "polar_radius_m": 6_356_752.314_245_179,
             "flattening": 0.003_352_810_664_747_480_5,
-            "pole": [0.0, -0.397_740_291_376_376_3, 0.917_498_356_048_534_5],
+            "pole": [0.0, -0.397_692_008_009_812_36, 0.917_518_973_517_781_4],
             "moment_of_inertia_factor": 0.33,
             "law": "rotational",
             "datum": "solid_surface",
