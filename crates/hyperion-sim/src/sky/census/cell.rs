@@ -4,12 +4,13 @@
 //! For each record the mass skip keeps
 //! ([`SkyCellCache::bright_subset`](super::cache::SkyCellCache::bright_subset) above the cell's
 //! floor, [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; its light is
-//! bounded by [`flux_bound`] before its motion is built, at its epoch position's distance less the
-//! cell's pad and offset and over the ages the light's travel then allows (R06.T8.f); a member of
-//! the galactic centre, whose orbit is not built ([`TraceMotionError`]), is tallied and left out
-//! before anything else is built; the system is found at its retarded time ([`retarded`] on
-//! [`Drift::of_record`]); its light is bounded again at the emitted time and the apparent
-//! position; and only if the bound can pass the cut is the system generated
+//! bounded by [`flux_bound`], then star by star ([`StarBounds`], R06.T8.g), before its motion is
+//! built, at its epoch position's distance less the cell's pad and offset and over the ages the
+//! light's travel then allows (R06.T8.f); a member of the galactic centre, whose orbit is not
+//! built ([`TraceMotionError`]), is tallied and left out before anything else is built; the
+//! system is found at its retarded time ([`retarded`] on [`Drift::of_record`]); its light is
+//! bounded again, both ways, at the emitted time and the apparent position; and only if both
+//! bounds can pass the cut is the system generated
 //! ([`SystemStars::generate`]), each star read from the pair-evolved [`SystemStars::state_at`]'s
 //! stars at the emitted time, placed by [`star_positions_at`] about the system's apparent position,
 //! left out if it lies outside the region of the query's cone, dimmed by its distance and, unless
@@ -42,6 +43,16 @@
 //! read the envelope at [`max_star_mass`] of the primary over ages from zero (R06.T16.b; see
 //! [`flux_bound`]).
 //!
+//! That widened bound passes nearly every record of layers C to E near the Sun, so since R06.T8.g
+//! each record that passes it is bounded again star by star, before its system is generated
+//! ([`StarBounds`]; decided 2026-10-05, `decision-r06-census-cost.md`, and amended 2026-10-07,
+//! `decision-p11-t16-hierarchy-bound.md`): plan 11's [`hierarchy_bound`] gives every star of
+//! every attempt the generator can keep, exactly, plan 11's [`pair_light_bound`] says what each
+//! pair of two stars can hold, and R06.T8.m's phase envelope ([`PhaseEnvelope`]) bounds each star
+//! at its own mass, \[Fe/H\], η and age relative to its lifetime. A record with a pair that plan
+//! 11 cannot bound keeps the widened bound alone. Both bounds are bounds, so a record either
+//! rejects is skipped: the widened one stays first, since it costs least, and for the cell's floor.
+//!
 //! A star of a multiple system is not at its system's barycentre: plan 11 keeps every apocentre
 //! inside half the system's tidal radius ([`TIDAL_CUT_SHARE`]), which near the Sun is some light
 //! years. Both the flux bound and the cell's floor take a star as near the observer as the cell's
@@ -65,18 +76,22 @@ use crate::galaxy::query::{pad_for, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, Layer, SystemId};
 use crate::math;
-use crate::observe::{Drift, TraceMotionError, retarded};
-use crate::stellar::Phase;
+use crate::observe::{Drift, Retardation, TraceMotionError, retarded};
+use crate::stellar::binary::{PairLight, pair_light_bound};
+use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::multiplicity::{
-    MAX_COMPANIONS, MultiplicityContext, StarIndex, TIDAL_CUT_SHARE, star_positions_at,
+    HierarchyBound, MAX_COMPANIONS, MultiplicityContext, RedrawAttempt, StarIndex, TIDAL_CUT_SHARE,
+    hierarchy_bound, star_positions_at,
 };
-use crate::stellar::system::{SystemStars, grid_multiplicity};
+use crate::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity, primary_eta};
+use crate::stellar::{Composition, Phase};
 use crate::time::{Span, UniverseTime};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{LightYears, Magnitudes, SolarMasses, Years};
+use crate::units::{LightYears, Magnitudes, Metres, SolarMasses, Years};
 
 use super::super::colour::StarColour;
 use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, always_single, max_star_mass};
+use super::super::phase::PhaseEnvelope;
 use super::super::photometry::{absolute_v_of_state, colour_of_state};
 use super::query::{SkyContext, SkyQuery};
 
@@ -196,6 +211,9 @@ impl SkyStar {
 pub struct LayerTally {
     cells: u64,
     candidates: u64,
+    star_bounded: u64,
+    unbounded: u64,
+    pairs: PairTally,
     generated: u64,
     accepted: u64,
     listed: u64,
@@ -214,6 +232,27 @@ impl LayerTally {
     #[must_use]
     pub const fn candidates(&self) -> u64 {
         self.candidates
+    }
+
+    /// Records bounded star by star ([`StarBounds`], R06.T8.g): those whose widened envelope's
+    /// bound before their drift passed.
+    #[must_use]
+    pub const fn star_bounded(&self) -> u64 {
+        self.star_bounded
+    }
+
+    /// Of the records bounded star by star, those holding a pair that plan 11 cannot bound, which
+    /// keep the widened envelope's bound alone ([`RecordLight::Unbounded`]).
+    #[must_use]
+    pub const fn unbounded_records(&self) -> u64 {
+        self.unbounded
+    }
+
+    /// The pairs of the records bounded star by star, over every attempt each lists, by plan 11's
+    /// verdict.
+    #[must_use]
+    pub const fn pairs(&self) -> &PairTally {
+        &self.pairs
     }
 
     /// Systems generated, their flux bound passing.
@@ -251,6 +290,9 @@ impl LayerTally {
     fn add(&mut self, other: &Self) {
         self.cells += other.cells;
         self.candidates += other.candidates;
+        self.star_bounded += other.star_bounded;
+        self.unbounded += other.unbounded;
+        self.pairs.add(&other.pairs);
         self.generated += other.generated;
         self.accepted += other.accepted;
         self.listed += other.listed;
@@ -607,6 +649,474 @@ fn flux_bound_over(
     envelope.brightest(record.layer(), component, mass, ages)
 }
 
+/// What a star's pair leaves of the star's own bound (R06.T8.g): plan 11's
+/// [`pair_light_bound`] verdict, read for one of the pair's two stars
+/// (`decision-p11-t16-hierarchy-bound.md` §5).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StarLight {
+    /// The star is its own single-star model and takes its own bound: a star of no pair the
+    /// binary engine may run, or of a [`PairLight::Detached`] or [`PairLight::Unchanged`] pair.
+    Own,
+    /// The brighter of the star's own bound and this absolute V, margin included: a star of a
+    /// [`PairLight::Bright`] pair, which may depart from its own model or leave a product of the
+    /// pair in its place.
+    OwnOr(Magnitudes),
+    /// Nothing: a star of a [`PairLight::Remnants`] pair, none of whose stars or products lives in
+    /// the window, while white dwarfs are dark in V (ask A4).
+    Dark,
+}
+
+impl StarLight {
+    /// The light each star of a pair answered `verdict` takes.
+    #[must_use]
+    pub(crate) const fn of(verdict: PairLight) -> Self {
+        match verdict {
+            PairLight::Detached | PairLight::Unchanged => Self::Own,
+            PairLight::Remnants => Self::Dark,
+            PairLight::Bright(m) => Self::OwnOr(m),
+        }
+    }
+
+    /// The light of a star that takes `self` at one attempt and `other` at another: the least
+    /// light that bounds both.
+    #[must_use]
+    const fn either(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Dark, light) | (light, Self::Dark) => light,
+            (Self::Own, Self::Own) => Self::Own,
+            (Self::Own, Self::OwnOr(m)) | (Self::OwnOr(m), Self::Own) => Self::OwnOr(m),
+            (Self::OwnOr(a), Self::OwnOr(b)) => Self::OwnOr(brighter(a, b)),
+        }
+    }
+}
+
+/// The brighter of two magnitudes, `a` where they tie.
+#[must_use]
+const fn brighter(a: Magnitudes, b: Magnitudes) -> Magnitudes {
+    if b.value() < a.value() { b } else { a }
+}
+
+/// One star of a [`StarBounds`]: the redraw attempt it was drawn at, its index there, its initial
+/// mass and its Reimers η draw, each the generator's bit for bit, and the light its pair leaves it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoundStar {
+    attempt: RedrawAttempt,
+    index: StarIndex,
+    mass: SolarMasses,
+    eta: StandardNormal,
+    light: StarLight,
+}
+
+impl BoundStar {
+    /// The attempt the star was drawn at: [`RedrawAttempt::FIRST`] for the primary, which is the
+    /// same star at every attempt.
+    #[must_use]
+    pub const fn attempt(&self) -> RedrawAttempt {
+        self.attempt
+    }
+
+    /// Its index in its attempt's hierarchy, which is also its body index.
+    #[must_use]
+    pub const fn index(&self) -> StarIndex {
+        self.index
+    }
+
+    /// Its initial mass, as [`hierarchy_bound`] lists it.
+    #[must_use]
+    pub const fn mass(&self) -> SolarMasses {
+        self.mass
+    }
+
+    /// Its η draw: its body's [`StarDraws`] at its attempt, the primary's own draws at attempt 0
+    /// (the generator's `primary_eta`).
+    #[must_use]
+    pub const fn eta(&self) -> StandardNormal {
+        self.eta
+    }
+
+    /// The light its pair leaves it; for the primary, the least that bounds it at every attempt.
+    #[must_use]
+    pub const fn light(&self) -> StarLight {
+        self.light
+    }
+
+    /// The brightest absolute V the star can have at an age within `ages` (years, inclusive),
+    /// margin included, of `composition`, its system's: its own phase-envelope bound
+    /// ([`PhaseEnvelope::brightest`]), the brighter of that and its pair's, or `None` where it can
+    /// shine at none of them. A star of a [`StarLight::OwnOr`] pair takes the pair's magnitude
+    /// even where its own model is dark: a departing star can outlive its own model.
+    #[must_use]
+    pub fn brightest(
+        &self,
+        phase: &PhaseEnvelope,
+        composition: &Composition,
+        ages: (Years, Years),
+    ) -> Option<Magnitudes> {
+        let own = || phase.brightest(self.mass, composition, self.eta, ages);
+        match self.light {
+            StarLight::Own => own(),
+            StarLight::OwnOr(m) => Some(own().map_or(m, |own| brighter(own, m))),
+            StarLight::Dark => None,
+        }
+    }
+}
+
+/// Pairs bounded star by star, by plan 11's verdict (R06.T8.g's record of the shares).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct PairTally {
+    detached: u64,
+    unchanged: u64,
+    remnants: u64,
+    bright: u64,
+    unbounded: u64,
+}
+
+impl PairTally {
+    /// Pairs answered [`PairLight::Detached`].
+    #[must_use]
+    pub const fn detached(&self) -> u64 {
+        self.detached
+    }
+
+    /// Pairs answered [`PairLight::Unchanged`].
+    #[must_use]
+    pub const fn unchanged(&self) -> u64 {
+        self.unchanged
+    }
+
+    /// Pairs answered [`PairLight::Remnants`].
+    #[must_use]
+    pub const fn remnants(&self) -> u64 {
+        self.remnants
+    }
+
+    /// Pairs answered [`PairLight::Bright`].
+    #[must_use]
+    pub const fn bright(&self) -> u64 {
+        self.bright
+    }
+
+    /// Pairs that plan 11 cannot bound, which leave their records to the widened envelope.
+    #[must_use]
+    pub const fn unbounded(&self) -> u64 {
+        self.unbounded
+    }
+
+    /// Every pair counted.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.detached + self.unchanged + self.remnants + self.bright + self.unbounded
+    }
+
+    /// Adds `other`'s counts to these.
+    pub(crate) const fn add(&mut self, other: &Self) {
+        self.detached += other.detached;
+        self.unchanged += other.unchanged;
+        self.remnants += other.remnants;
+        self.bright += other.bright;
+        self.unbounded += other.unbounded;
+    }
+
+    /// Counts one pair answered `verdict`.
+    const fn count(&mut self, verdict: Option<PairLight>) {
+        match verdict {
+            Some(PairLight::Detached) => self.detached += 1,
+            Some(PairLight::Unchanged) => self.unchanged += 1,
+            Some(PairLight::Remnants) => self.remnants += 1,
+            Some(PairLight::Bright(_)) => self.bright += 1,
+            None => self.unbounded += 1,
+        }
+    }
+}
+
+/// What a record's stars, bounded one by one, can hold at some ages ([`StarBounds::brightest`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RecordLight {
+    /// The record holds a pair that plan 11 cannot bound, so its stars have no bound of their own
+    /// and the record keeps the widened envelope's ([`flux_bound`]) alone.
+    Unbounded,
+    /// No star of the system can shine in V then.
+    Dark,
+    /// The brightest absolute V any star of the system can have then, margin included.
+    Brightest(Magnitudes),
+}
+
+impl RecordLight {
+    /// Whether a star of this light could be listed where `faintest_listable` is the faintest
+    /// absolute V listable: always for an unbounded record, which the widened envelope alone
+    /// bounds, and never for a dark one.
+    #[must_use]
+    pub fn may_list(self, faintest_listable: Magnitudes) -> bool {
+        match self {
+            Self::Unbounded => true,
+            Self::Dark => false,
+            Self::Brightest(m) => m.value() <= faintest_listable.value(),
+        }
+    }
+}
+
+/// A record's light bounded star by star, before its system is generated (R06.T8.g; Design note
+/// 10; decided 2026-10-05, `decision-r06-census-cost.md`, and amended 2026-10-07,
+/// `decision-p11-t16-hierarchy-bound.md`).
+///
+/// It is built in the order the plan fixes:
+/// 1. the record's composition ([`draw_metallicity`]);
+/// 2. plan 11's [`hierarchy_bound`], the generator's own draw at every redraw attempt it can keep,
+///    so each star's initial mass is exact, with its body and attempt, and so is each star–star
+///    pair's drawn periastron;
+/// 3. each such pair's [`pair_light_bound`] over the record's light-time ages;
+/// 4. for each star, R06.T8.m's phase envelope ([`PhaseEnvelope::brightest`]) at its own mass,
+///    \[Fe/H\], η and age relative to its lifetime, read by [`brightest`](Self::brightest).
+///
+/// A star of a [`Detached`](PairLight::Detached) or [`Unchanged`](PairLight::Unchanged) pair, or
+/// of no pair the engine may run, takes its own bound; a [`Remnants`](PairLight::Remnants) pair
+/// gives nothing while white dwarfs are dark (ask A4); a [`Bright`](PairLight::Bright) pair bounds
+/// each of its stars by the brighter of its own bound and the pair's magnitude, which also bounds
+/// the pair's products ([`StarLight`]). A pair that plan 11 cannot bound leaves the record
+/// [`Unbounded`](RecordLight::Unbounded): the widened envelope at `max_star_mass` alone bounds
+/// it. The primary is the same star at every attempt and is bounded once, by the least light that
+/// bounds it at all of them, and by its own bound where the generator may keep it alone after its
+/// last attempt ([`HierarchyBound::fallback`]).
+///
+/// Each η is its body's [`StarDraws`] at its attempt, and the primary's its record's own (the
+/// generator's `primary_eta`). The bound reads the generator's existing words only, through the
+/// generator's own functions, so nothing generated moves.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StarBounds {
+    composition: Composition,
+    /// The light-time ages, years, inclusive, the pairs' verdicts hold over.
+    ages: (Years, Years),
+    primary: BoundStar,
+    companions: Vec<BoundStar>,
+    pairs: PairTally,
+}
+
+impl StarBounds {
+    /// The bounds of the stars of `record`'s system in `galaxy`, its pairs' verdicts taken over
+    /// the window of its light-time ages `ages` (years, inclusive): steps 1 to 3 of the order (see
+    /// the [type](Self) documentation), each star's own bound left for
+    /// [`brightest`](Self::brightest) to read at any ages within the window.
+    ///
+    /// # Panics
+    ///
+    /// As [`draw_metallicity`] and [`hierarchy_bound`] do, for a record of another galaxy.
+    ///
+    /// # Examples
+    ///
+    /// The census bounds a record's stars before it generates the system, and the generated
+    /// stars lie within the bound:
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::sky::census::{RecordLight, StarBounds};
+    /// use hyperion_sim::sky::phase::PhaseEnvelope;
+    /// use hyperion_sim::sky::photometry::absolute_v_of_state;
+    /// use hyperion_sim::stellar::system::SystemStars;
+    /// use hyperion_sim::time::UniverseTime;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(11));
+    /// let mut cell = Vec::new();
+    /// generate_cell(&galaxy, CellKey::new(Layer::D, [0, 406, 0])?, &mut cell);
+    /// let record = cell.first().ok_or("the cell has systems")?;
+    /// let age = record.age_at(UniverseTime::EPOCH);
+    /// let bounds = StarBounds::of(&galaxy, record, (age, age));
+    /// let light = bounds.brightest(PhaseEnvelope::shared(), (age, age));
+    /// let state = SystemStars::generate(&galaxy, record)
+    ///     .state_at(UniverseTime::EPOCH)
+    ///     .ok_or("born")?;
+    /// for m_v in state.stars().iter().filter_map(absolute_v_of_state) {
+    ///     match light {
+    ///         // A pair plan 11 cannot bound: the widened envelope bounds the record instead.
+    ///         RecordLight::Unbounded => {}
+    ///         RecordLight::Brightest(bound) => assert!(m_v >= bound),
+    ///         RecordLight::Dark => panic!("a star shines where its bound says none can"),
+    ///     }
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn of(galaxy: &Galaxy, record: &SystemRecord, ages: (Years, Years)) -> Self {
+        let composition = draw_metallicity(galaxy, record);
+        let hierarchy = hierarchy_bound(galaxy, record, &composition);
+        Self::from_hierarchy(galaxy, record, composition, &hierarchy, ages)
+    }
+
+    /// [`of`](Self::of) from the record's `composition` and its `hierarchy`, steps 1 and 2 taken
+    /// already: each pair's verdict over `ages`, and each star's η.
+    ///
+    /// They must be `record`'s own, [`draw_metallicity`]'s and [`hierarchy_bound`]'s, or the bound
+    /// is not its system's: the masses are read from `hierarchy` and the primary's η from
+    /// `record`. Debug builds check that the hierarchy's primary is the record's.
+    #[must_use]
+    pub fn from_hierarchy(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        composition: Composition,
+        hierarchy: &HierarchyBound,
+        ages: (Years, Years),
+    ) -> Self {
+        Self::with_verdicts(
+            galaxy,
+            record,
+            (composition, ages),
+            hierarchy,
+            |a, b, periastron| pair_light_bound(a, b, periastron, &composition, ages.0..=ages.1),
+        )
+    }
+
+    /// [`from_hierarchy`](Self::from_hierarchy) over `ages`, of `composition`, with each pair's
+    /// verdict from `verdict`, given the pair's two initial masses and its drawn periastron: plan
+    /// 11's for the census, any for the tests of the verdicts that P11.T17.c brings.
+    #[must_use]
+    fn with_verdicts(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        (composition, ages): (Composition, (Years, Years)),
+        hierarchy: &HierarchyBound,
+        mut verdict: impl FnMut(SolarMasses, SolarMasses, Metres) -> Option<PairLight>,
+    ) -> Self {
+        debug_assert_eq!(
+            hierarchy.primary().body(),
+            BodyId::new(record.id(), 0),
+            "another record's hierarchy"
+        );
+        let seed = galaxy.seed();
+        let mut pairs = PairTally::default();
+        // The generator keeps the primary alone after a last attempt that carves.
+        let mut primary_light = if hierarchy.fallback().is_some() {
+            StarLight::Own
+        } else {
+            StarLight::Dark
+        };
+        let mut companions = Vec::with_capacity(
+            hierarchy
+                .attempts()
+                .iter()
+                .map(|listed| listed.stars().len().saturating_sub(1))
+                .sum(),
+        );
+        let mut each = [StarLight::Own; MAX_COMPANIONS + 2];
+        for listed in hierarchy.attempts() {
+            let stars = listed.stars();
+            let lights = each
+                .get_mut(..stars.len())
+                .expect("a hierarchy holds at most GRID_STAR_BOUND stars");
+            lights.fill(StarLight::Own);
+            for pair in listed.pairs() {
+                let [a, b] = pair.stars().map(|s| usize::from(s.get()));
+                let answer = verdict(
+                    stars[a].initial_mass(),
+                    stars[b].initial_mass(),
+                    pair.periastron(),
+                );
+                pairs.count(answer);
+                if let Some(answer) = answer {
+                    let light = StarLight::of(answer);
+                    lights[a] = light;
+                    lights[b] = light;
+                }
+            }
+            primary_light = primary_light.either(lights[0]);
+            let attempt = listed.attempt();
+            companions.extend(stars.iter().zip(&*lights).skip(1).map(|(slot, &light)| {
+                BoundStar {
+                    attempt,
+                    index: u8::try_from(slot.body().body_index())
+                        .ok()
+                        .and_then(StarIndex::from_body)
+                        .expect("a hierarchy's bodies are its stars, at most five"),
+                    mass: slot.initial_mass(),
+                    eta: StarDraws::eta_for_attempt(seed, slot.body(), u32::from(attempt.get())),
+                    light,
+                }
+            }));
+        }
+        Self {
+            composition,
+            ages,
+            primary: BoundStar {
+                attempt: RedrawAttempt::FIRST,
+                index: StarIndex::PRIMARY,
+                mass: hierarchy.primary().initial_mass(),
+                eta: primary_eta(galaxy, record),
+                light: primary_light,
+            },
+            companions,
+            pairs,
+        }
+    }
+
+    /// The system's composition, every star's.
+    #[must_use]
+    pub const fn composition(&self) -> &Composition {
+        &self.composition
+    }
+
+    /// The light-time ages, years, inclusive, over which the pairs' verdicts hold, and within
+    /// which [`brightest`](Self::brightest) reads.
+    #[must_use]
+    pub const fn ages(&self) -> (Years, Years) {
+        self.ages
+    }
+
+    /// The primary, bounded once for every attempt.
+    #[must_use]
+    pub const fn primary(&self) -> &BoundStar {
+        &self.primary
+    }
+
+    /// Every companion of every attempt listed, attempt by attempt, each by its index.
+    #[must_use]
+    pub fn companions(&self) -> &[BoundStar] {
+        &self.companions
+    }
+
+    /// Star `index` of attempt `attempt` as bounded: the primary at any attempt, a companion only
+    /// at an attempt listed. For the tests, which hold each realised star to its own bound.
+    #[cfg(test)]
+    #[must_use]
+    fn star(&self, attempt: RedrawAttempt, index: StarIndex) -> Option<&BoundStar> {
+        if index == StarIndex::PRIMARY {
+            return Some(&self.primary);
+        }
+        self.companions
+            .iter()
+            .find(|s| s.attempt == attempt && s.index == index)
+    }
+
+    /// The record's pairs, over every attempt listed, by plan 11's verdict.
+    #[must_use]
+    pub const fn pairs(&self) -> &PairTally {
+        &self.pairs
+    }
+
+    /// What the system's stars can hold at an age within `ages` (years, inclusive): step 4 of the
+    /// order, each star's [`BoundStar::brightest`] read from `phase` and the brightest kept. It
+    /// allocates nothing.
+    ///
+    /// The pairs' verdicts hold within [`ages`](Self::ages) only, so `ages` must lie within it;
+    /// debug builds check it.
+    #[must_use]
+    pub fn brightest(&self, phase: &PhaseEnvelope, ages: (Years, Years)) -> RecordLight {
+        debug_assert!(
+            self.ages.0 <= ages.0 && ages.1 <= self.ages.1,
+            "ages {ages:?} outside the window {:?} the pairs were bounded over",
+            self.ages
+        );
+        if self.pairs.unbounded > 0 {
+            return RecordLight::Unbounded;
+        }
+        core::iter::once(&self.primary)
+            .chain(&self.companions)
+            .filter_map(|star| star.brightest(phase, &self.composition, ages))
+            .reduce(brighter)
+            .map_or(RecordLight::Dark, RecordLight::Brightest)
+    }
+}
+
 /// How far the light of a cell's stars can have come, for one query: what the cell's floor and its
 /// records' bounds before and after their drift read, computed once per cell (R06.T8.f).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -681,13 +1191,61 @@ const BEFORE_DRIFT_SLACK_YEARS: f64 = 1.0;
 /// 10⁻¹⁶ of them), so that its distance is never beyond the one the bound after the drift reads.
 const BEFORE_DRIFT_SLACK_SHARE: f64 = 1e-9;
 
+/// What the bounds before a record's drift read (R06.T8.f's step 5): the system's ages across
+/// every light time its epoch distance allows, years, inclusive, and that distance less the
+/// cell's pad and offset, ly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BeforeDrift {
+    ages: (Years, Years),
+    nearest_ly: f64,
+}
+
+impl BeforeDrift {
+    /// Where and when `record`'s light can have left it, for `query` from a cell of `reach`.
+    ///
+    /// A record that fails a bound here would fail it after its retardation too, where
+    /// [`census_record`] tests the bound at the emitted time and the apparent position: its pad
+    /// bounds how far the record moves by the emitted time and by the retardation's first guess,
+    /// so its light's age lies within the pad of its epoch distance and its apparent position is
+    /// no nearer than that distance less the pad.
+    #[must_use]
+    fn of(record: &SystemRecord, query: &SkyQuery, reach: &CellReach) -> Self {
+        let observer = query.observer();
+        let d_epoch = observer
+            .position()
+            .distance_to(record.epoch_position())
+            .value()
+            / METRES_PER_LIGHT_YEAR;
+        // A light-year is a Julian year of light, so the light's age in years is its distance in
+        // ly.
+        let now = record.age_at(observer.time()).value();
+        Self {
+            ages: (
+                Years::new(now - (d_epoch + reach.pad) - BEFORE_DRIFT_SLACK_YEARS),
+                Years::new(now - (d_epoch - reach.pad).max(0.0) + BEFORE_DRIFT_SLACK_YEARS),
+            ),
+            nearest_ly: d_epoch * (1.0 - BEFORE_DRIFT_SLACK_SHARE) - reach.pad - reach.offset,
+        }
+    }
+
+    /// Whether the widened envelope's bound ([`flux_bound_over`]) can pass the cut here.
+    #[must_use]
+    fn passes(
+        self,
+        envelope: &BrightnessEnvelope,
+        record: &SystemRecord,
+        query: &SkyQuery,
+    ) -> bool {
+        flux_bound_over(envelope, record, self.ages)
+            .is_some_and(|m| m.value() <= faintest_listable(query, self.nearest_ly))
+    }
+}
+
 /// Whether `record`'s flux bound can pass the cut before its drift is built (R06.T8.f): the bound
 /// over the system's ages across every light time its distance allows, at its epoch position's
-/// distance less the cell's pad and offset. A record that fails would fail after its retardation
-/// too, where [`census_record`] tests the bound at the emitted time and the apparent position:
-/// its pad bounds how far the record moves by the emitted time and by the retardation's first
-/// guess, so its light's age lies within the pad of its epoch distance and its apparent position
-/// is no nearer than that distance less the pad.
+/// distance less the cell's pad and offset. The tests' wrapper of [`BeforeDrift::passes`], which
+/// the census asks first in [`star_bounds_before_drift`].
+#[cfg(test)]
 #[must_use]
 fn passes_before_drift(
     envelope: &BrightnessEnvelope,
@@ -695,23 +1253,69 @@ fn passes_before_drift(
     query: &SkyQuery,
     reach: &CellReach,
 ) -> bool {
-    let observer = query.observer();
-    let d_epoch = observer
-        .position()
-        .distance_to(record.epoch_position())
-        .value()
-        / METRES_PER_LIGHT_YEAR;
-    // A light-year is a Julian year of light, so the light's age in years is its distance in ly.
-    let now = record.age_at(observer.time()).value();
-    let ages = (
-        Years::new(now - (d_epoch + reach.pad) - BEFORE_DRIFT_SLACK_YEARS),
-        Years::new(now - (d_epoch - reach.pad).max(0.0) + BEFORE_DRIFT_SLACK_YEARS),
-    );
-    let Some(m) = flux_bound_over(envelope, record, ages) else {
+    BeforeDrift::of(record, query, reach).passes(envelope, record, query)
+}
+
+/// `record`'s stars bounded one by one before its drift is built (R06.T8.g), if one of them can
+/// be listed; `None` if none can, or if the widened envelope's bound before the drift
+/// ([`BeforeDrift::passes`]), which is asked first and costs least, cannot pass.
+///
+/// The stars are bounded over the light-time ages and at the distance of [`BeforeDrift`], so each
+/// pair's verdict holds at every age the bound after the drift can read, and a record rejected
+/// here would be rejected there. The records bounded and their pairs' verdicts are counted in
+/// `tally`.
+fn star_bounds_before_drift(
+    galaxy: &Galaxy,
+    envelope: &BrightnessEnvelope,
+    record: &SystemRecord,
+    query: &SkyQuery,
+    reach: &CellReach,
+    tally: &mut LayerTally,
+) -> Option<StarBounds> {
+    let before = BeforeDrift::of(record, query, reach);
+    if !before.passes(envelope, record, query) {
+        return None;
+    }
+    let bounds = StarBounds::of(galaxy, record, before.ages);
+    tally.star_bounded += 1;
+    tally.pairs.add(bounds.pairs());
+    let light = bounds.brightest(PhaseEnvelope::shared(), before.ages);
+    if light == RecordLight::Unbounded {
+        tally.unbounded += 1;
+    }
+    light
+        .may_list(Magnitudes::new(faintest_listable(query, before.nearest_ly)))
+        .then_some(bounds)
+}
+
+/// Whether `record`'s light can pass the cut after its retardation, at the emitted time
+/// `emitted`, where `faintest` is the faintest absolute V listable: the widened envelope's bound
+/// at the system's age then, and its stars' `bounds` (R06.T8.g), whose pairs' verdicts were taken
+/// over the ages before the drift, which hold that age.
+#[must_use]
+fn passes_after_drift(
+    envelope: &BrightnessEnvelope,
+    record: &SystemRecord,
+    bounds: &StarBounds,
+    emitted: UniverseTime,
+    faintest: Magnitudes,
+) -> bool {
+    if !flux_bound(envelope, record, emitted).is_some_and(|m| m.value() <= faintest.value()) {
         return false;
-    };
-    let nearest = d_epoch * (1.0 - BEFORE_DRIFT_SLACK_SHARE) - reach.pad - reach.offset;
-    m.value() <= faintest_listable(query, nearest)
+    }
+    let age = record.age_at(emitted);
+    let (young, old) = bounds.ages();
+    let within = young <= age && age <= old;
+    debug_assert!(
+        within,
+        "{record:?}: its age {age:?} at the emitted time lies outside the ages ({young:?}, \
+         {old:?}) its pairs were bounded over"
+    );
+    // Outside that window the pairs' verdicts say nothing, so the record is generated.
+    !within
+        || bounds
+            .brightest(PhaseEnvelope::shared(), (age, age))
+            .may_list(faintest)
 }
 
 /// The extinction in V from a star at `apparent` to the observer at `observer_at`: one
@@ -835,6 +1439,60 @@ pub fn census_record(
     );
 }
 
+/// `record` at its retarded time for `query`, if its light can pass the cut: `None` if a bound
+/// rejects it, or if it is a member of the galactic centre, whose orbit is not built, which is
+/// counted in `tally`.
+///
+/// Given its cell's `reach`, and if a density component placed it, its light is bounded before
+/// its drift (R06.T8.f), by the widened envelope and then star by star (R06.T8.g), and again
+/// after its retardation, at the emitted time and the apparent position. A record no density
+/// component placed (a feature member's, once T16.a brings them) has no envelope bound here and
+/// is always generated, so the census and the brute force agree.
+fn bright_retarded(
+    galaxy: &Galaxy,
+    envelope: &BrightnessEnvelope,
+    record: &SystemRecord,
+    query: &SkyQuery,
+    reach: Option<&CellReach>,
+    tally: &mut LayerTally,
+) -> Option<Retardation> {
+    let reach = reach.filter(|_| record.component().is_some());
+    let star_bounds = match reach {
+        Some(reach) => Some(star_bounds_before_drift(
+            galaxy, envelope, record, query, reach, tally,
+        )?),
+        None => None,
+    };
+    let drift = match Drift::of_record(galaxy, record) {
+        Ok(drift) => drift,
+        Err(TraceMotionError::CentreOrbitNotBuilt(_)) => {
+            tally.centre_members += 1;
+            return None;
+        }
+    };
+    let observer = query.observer();
+    let r = retarded(observer, &drift);
+    // The distance to the apparent position, from which each star's own is measured, so that the
+    // offset bound holds by the triangle inequality (the light age is the first guess's).
+    let d_system = observer
+        .position()
+        .distance_to(r.apparent_position())
+        .value()
+        / METRES_PER_LIGHT_YEAR;
+    if let (Some(reach), Some(bounds)) = (reach, &star_bounds)
+        && !passes_after_drift(
+            envelope,
+            record,
+            bounds,
+            r.emitted(),
+            Magnitudes::new(faintest_listable(query, d_system - reach.offset)),
+        )
+    {
+        return None;
+    }
+    Some(r)
+}
+
 /// [`census_record`] with its cell's reach, which bounds the record's light when given and the
 /// record has a density component.
 fn record_stars(
@@ -849,40 +1507,19 @@ fn record_stars(
     if query.exclude() == Some(record.id()) || record.kind() == SystemKind::RoguePlanet {
         return;
     }
-    // A record no density component placed (a feature member's, once T16.a brings them) has no
-    // envelope bound here and is always generated, so both modes agree.
-    let reach = reach.filter(|_| record.component().is_some());
-    if let Some(reach) = reach
-        && !passes_before_drift(ctx.envelope, record, query, reach)
-    {
-        return;
-    }
     let layer = record.layer();
-    let drift = match Drift::of_record(galaxy, record) {
-        Ok(drift) => drift,
-        Err(TraceMotionError::CentreOrbitNotBuilt(_)) => {
-            tally.layer_mut(layer).centre_members += 1;
-            return;
-        }
+    let Some(r) = bright_retarded(
+        galaxy,
+        ctx.envelope,
+        record,
+        query,
+        reach,
+        tally.layer_mut(layer),
+    ) else {
+        return;
     };
     let observer = query.observer();
-    let r = retarded(observer, &drift);
     let emitted = r.emitted();
-    // The distance to the apparent position, from which each star's own is measured, so that the
-    // offset bound holds by the triangle inequality (the light age is the first guess's).
-    let d_system = observer
-        .position()
-        .distance_to(r.apparent_position())
-        .value()
-        / METRES_PER_LIGHT_YEAR;
-    if let Some(reach) = reach {
-        let Some(m) = flux_bound(ctx.envelope, record, emitted) else {
-            return;
-        };
-        if m.value() > faintest_listable(query, d_system - reach.offset) {
-            return;
-        }
-    }
     let stars = SystemStars::generate(galaxy, record);
     let Some(state) = stars.state_at(emitted) else {
         return;
@@ -1601,6 +2238,17 @@ mod tests {
         b.layer_mut(Layer::E).generated = 3;
         b.layer_mut(Layer::E).without_photometry = 1;
         b.layer_mut(Layer::A).centre_members = 4;
+        b.layer_mut(Layer::E).star_bounded = 6;
+        b.layer_mut(Layer::E).unbounded = 2;
+        b.layer_mut(Layer::E).pairs.count(Some(PairLight::Detached));
+        b.layer_mut(Layer::E).pairs.count(None);
+        a.layer_mut(Layer::E).pairs.count(Some(PairLight::Remnants));
+        a.layer_mut(Layer::E)
+            .pairs
+            .count(Some(PairLight::Unchanged));
+        a.layer_mut(Layer::E)
+            .pairs
+            .count(Some(PairLight::Bright(Magnitudes::new(1.0))));
         a.add(&b);
         let c = a.layer(Layer::C);
         assert_eq!(
@@ -1611,6 +2259,19 @@ mod tests {
         assert_eq!(
             (e.candidates(), e.generated(), e.without_photometry()),
             (7, 3, 1)
+        );
+        assert_eq!((e.star_bounded(), e.unbounded_records()), (6, 2));
+        let pairs = e.pairs();
+        assert_eq!(
+            (
+                pairs.detached(),
+                pairs.unchanged(),
+                pairs.remnants(),
+                pairs.bright(),
+                pairs.unbounded(),
+                pairs.total()
+            ),
+            (1, 1, 1, 1, 1, 5)
         );
         assert_eq!(a.layer(Layer::A).centre_members(), 4);
         assert!(a.feature_members_absent());
@@ -1719,7 +2380,9 @@ mod tests {
 
     /// The bound before the drift never rejects a record whose bound after its retardation
     /// passes, over some 10⁴ records of every layer seen by observers at, near and 250 ly from the
-    /// Sun, at the epoch and up to 900 years from it, in a galaxy whose systems move (R06.T8.f).
+    /// Sun, at the epoch and up to 900 years from it, in a galaxy whose systems move (R06.T8.f):
+    /// the widened envelope's bound, and the bound star by star after it (R06.T8.g), whose pairs'
+    /// verdicts are taken over the ages before the drift, which hold the age at the emitted time.
     #[test]
     fn the_bound_before_the_drift_never_rejects_what_the_bound_after_it_passes() {
         let moving = moving_galaxy();
@@ -1747,6 +2410,7 @@ mod tests {
             records.extend(records_near(layer, SUN, n));
         }
         let (mut checked, mut rejected, mut passed) = (0_u32, 0_u32, 0_u32);
+        let (mut by_stars, mut passed_stars) = (0_u32, 0_u32);
         for observer in observers {
             let query = SkyQuery::builder(observer, Magnitudes::new(7.95))
                 .eye(crate::sky::eye::EyeObserver::default())
@@ -1756,6 +2420,10 @@ mod tests {
                 let key = CellKey::of(record.id()).expect("a grid record");
                 let reach = CellReach::of(&offsets, key, &query);
                 let before = passes_before_drift(envelope, record, &query, &reach);
+                let mut tally = LayerTally::default();
+                let before_stars =
+                    star_bounds_before_drift(moving, envelope, record, &query, &reach, &mut tally)
+                        .is_some();
                 let drift = Drift::of_record(moving, record).expect("a grid record moves");
                 let r = retarded(query.observer(), &drift);
                 let d = query
@@ -1764,18 +2432,46 @@ mod tests {
                     .distance_to(r.apparent_position())
                     .value()
                     / METRES_PER_LIGHT_YEAR;
+                let faintest = Magnitudes::new(faintest_listable(&query, d - reach.offset));
                 let after = flux_bound(envelope, record, r.emitted())
-                    .is_some_and(|m| m.value() <= faintest_listable(&query, d - reach.offset));
+                    .is_some_and(|m| m.value() <= faintest.value());
                 assert!(before || !after, "{record:?} for {observer:?}");
+                // The bound star by star after the drift, from the pairs' verdicts over the ages
+                // before it, as the census reads it.
+                let window = BeforeDrift::of(record, &query, &reach).ages;
+                let age = record.age_at(r.emitted());
+                assert!(
+                    window.0 <= age && age <= window.1,
+                    "{record:?} for {observer:?}: {age:?} outside {window:?}"
+                );
+                let after_stars = after
+                    && StarBounds::of(moving, record, window)
+                        .brightest(PhaseEnvelope::shared(), (age, age))
+                        .may_list(faintest);
+                assert!(
+                    before_stars || !after_stars,
+                    "{record:?} for {observer:?}: star by star"
+                );
                 checked += 1;
                 rejected += u32::from(!before);
                 passed += u32::from(after);
+                by_stars += u32::from(before && !before_stars);
+                passed_stars += u32::from(after_stars);
             }
         }
+        eprintln!(
+            "{checked} records: {rejected} rejected before the drift by the widened envelope and \
+             {by_stars} more star by star; {passed} pass the widened envelope after it and \
+             {passed_stars} both"
+        );
         assert!(checked >= 10_000, "{checked}");
         assert!(
             rejected > 500 && passed > 500,
             "{rejected} rejected, {passed} passed"
+        );
+        assert!(
+            by_stars > 500 && passed_stars > 10,
+            "{by_stars} rejected star by star, {passed_stars} passed"
         );
     }
 
@@ -2158,5 +2854,625 @@ mod tests {
             }
         }
         cells
+    }
+
+    /// The bound a star of `slot`, drawn at `attempt` of `record`'s system of `composition`, takes
+    /// as its own: the phase envelope at its mass and its η, read from its full draws (the
+    /// primary's own, a companion's at its attempt) rather than the census's η alone.
+    fn own_bound(
+        record: &SystemRecord,
+        composition: &Composition,
+        slot: &crate::stellar::multiplicity::StarSlot,
+        attempt: RedrawAttempt,
+        ages: (Years, Years),
+    ) -> Option<Magnitudes> {
+        let seed = milky_way_galaxy().seed();
+        let draws = if slot.body().body_index() == 0 {
+            assert_eq!(slot.body(), BodyId::new(record.id(), 0));
+            StarDraws::for_star(seed, slot.body())
+        } else {
+            StarDraws::for_attempt(seed, slot.body(), u32::from(attempt.get()))
+        };
+        PhaseEnvelope::shared().brightest(slot.initial_mass(), composition, draws.eta(), ages)
+    }
+
+    /// What the ruling gives a record whose every pair is answered `verdict`, by a reading apart
+    /// from [`StarBounds`]': each star of each attempt by its own bound, or by its pair's verdict,
+    /// the primary at every attempt and again after the last where the fallback is listed.
+    fn ruled_light(
+        record: &SystemRecord,
+        composition: &Composition,
+        hierarchy: &HierarchyBound,
+        verdict: Option<PairLight>,
+        ages: (Years, Years),
+    ) -> RecordLight {
+        let Some(verdict) = verdict else {
+            return if hierarchy
+                .attempts()
+                .iter()
+                .any(crate::stellar::multiplicity::AttemptBound::may_carve)
+            {
+                RecordLight::Unbounded
+            } else {
+                ruled_light(
+                    record,
+                    composition,
+                    hierarchy,
+                    Some(PairLight::Detached),
+                    ages,
+                )
+            };
+        };
+        let mut best: Option<f64> = None;
+        let mut take = |m: Option<Magnitudes>| {
+            if let Some(m) = m {
+                best = Some(best.map_or(m.value(), |b| if m.value() < b { m.value() } else { b }));
+            }
+        };
+        for listed in hierarchy.attempts() {
+            let attempt = listed.attempt();
+            for (i, slot) in listed.stars().iter().enumerate() {
+                let own = own_bound(record, composition, slot, attempt, ages);
+                let paired = listed
+                    .pairs()
+                    .iter()
+                    .any(|p| p.stars().iter().any(|s| usize::from(s.get()) == i));
+                take(match (paired, verdict) {
+                    (false, _) | (true, PairLight::Detached | PairLight::Unchanged) => own,
+                    (true, PairLight::Remnants) => None,
+                    (true, PairLight::Bright(m)) => {
+                        Some(own.map_or(m, |o| if o.value() < m.value() { o } else { m }))
+                    }
+                });
+            }
+        }
+        if hierarchy.fallback().is_some() {
+            take(own_bound(
+                record,
+                composition,
+                hierarchy.primary(),
+                RedrawAttempt::FIRST,
+                ages,
+            ));
+        }
+        best.map_or(RecordLight::Dark, |b| {
+            RecordLight::Brightest(Magnitudes::new(b))
+        })
+    }
+
+    /// The record, composition and hierarchy bound of the first of `layer`'s records near `at`
+    /// born by the epoch that `pick` accepts.
+    fn find_bound(
+        layer: Layer,
+        at: [f64; 3],
+        n: usize,
+        pick: impl Fn(&HierarchyBound) -> bool,
+    ) -> (SystemRecord, Composition, HierarchyBound) {
+        let galaxy = milky_way_galaxy();
+        records_near(layer, at, n)
+            .into_iter()
+            .filter(|r| r.age_at(UniverseTime::EPOCH).value() > 0.0)
+            .find_map(|record| {
+                let composition = draw_metallicity(galaxy, &record);
+                let hierarchy = hierarchy_bound(galaxy, &record, &composition);
+                pick(&hierarchy).then_some((record, composition, hierarchy))
+            })
+            .unwrap_or_else(|| panic!("no record of {layer:?} near {at:?} found"))
+    }
+
+    /// Every verdict plan 11's pairs can take leaves each star the light the ruling gives it
+    /// (`decision-p11-t16-hierarchy-bound.md` §§5–6), on synthetic answers for the verdicts that
+    /// P11.T17.c brings: `Detached` and `Unchanged` each star's own bound, `Remnants` nothing,
+    /// `Bright(M)` the brighter of each star's own and M, and none an unbounded record. The
+    /// records are a triple of D near the Sun whose first attempt holds one pair the engine may
+    /// run and a star of none, and a binary of C. Each star's mass and η are the generator's, bit
+    /// for bit.
+    #[test]
+    fn each_verdict_leaves_the_stars_the_light_the_ruling_gives() {
+        let galaxy = milky_way_galaxy();
+        let phase = PhaseEnvelope::shared();
+        let triple = find_bound(Layer::D, SUN, 4_000, |h| {
+            let first = &h.attempts()[0];
+            first.pairs().len() == 1 && first.stars().len() > 2
+        });
+        let binary = find_bound(Layer::C, SUN, 4_000, |h| {
+            let first = &h.attempts()[0];
+            first.pairs().len() == 1 && first.stars().len() == 2
+        });
+        let verdicts = [
+            Some(PairLight::Detached),
+            Some(PairLight::Unchanged),
+            Some(PairLight::Remnants),
+            Some(PairLight::Bright(Magnitudes::new(-30.0))),
+            Some(PairLight::Bright(Magnitudes::new(4.0))),
+            Some(PairLight::Bright(Magnitudes::new(50.0))),
+            None,
+        ];
+        for (record, composition, hierarchy) in [&triple, &binary] {
+            let age = record.age_at(UniverseTime::EPOCH);
+            let ages = (age, age);
+            let pairs: u64 = hierarchy
+                .attempts()
+                .iter()
+                .map(|a| u64::try_from(a.pairs().len()).expect("few"))
+                .sum();
+            for verdict in verdicts {
+                let bounds = StarBounds::with_verdicts(
+                    galaxy,
+                    record,
+                    (*composition, ages),
+                    hierarchy,
+                    |_, _, _| verdict,
+                );
+                let read = bounds.brightest(phase, ages);
+                let ruled = ruled_light(record, composition, hierarchy, verdict, ages);
+                match (read, ruled) {
+                    (RecordLight::Brightest(a), RecordLight::Brightest(b)) => {
+                        hyperion_testkit::float::assert_same_bits(a.value(), b.value());
+                    }
+                    _ => assert_eq!(read, ruled, "{record:?}: {verdict:?}"),
+                }
+                assert_eq!(bounds.pairs().total(), pairs, "{record:?}");
+                let counted = match verdict {
+                    Some(PairLight::Detached) => bounds.pairs().detached(),
+                    Some(PairLight::Unchanged) => bounds.pairs().unchanged(),
+                    Some(PairLight::Remnants) => bounds.pairs().remnants(),
+                    Some(PairLight::Bright(_)) => bounds.pairs().bright(),
+                    None => bounds.pairs().unbounded(),
+                };
+                assert_eq!(counted, pairs, "{record:?}: {verdict:?}");
+            }
+        }
+        // In the triple, a Remnants pair still leaves the star of no pair its own bound, and a
+        // pair as bright as M −30 bounds the record by it.
+        let (record, composition, hierarchy) = &triple;
+        let age = record.age_at(UniverseTime::EPOCH);
+        let remnants = StarBounds::with_verdicts(
+            galaxy,
+            record,
+            (*composition, (age, age)),
+            hierarchy,
+            |_, _, _| Some(PairLight::Remnants),
+        );
+        assert_ne!(
+            remnants.brightest(phase, (age, age)),
+            RecordLight::Dark,
+            "{record:?}"
+        );
+        let bright = StarBounds::with_verdicts(
+            galaxy,
+            record,
+            (*composition, (age, age)),
+            hierarchy,
+            |_, _, _| Some(PairLight::Bright(Magnitudes::new(-30.0))),
+        );
+        assert_eq!(
+            bright.brightest(phase, (age, age)),
+            RecordLight::Brightest(Magnitudes::new(-30.0))
+        );
+    }
+
+    /// Each star a record's bounds list is the generator's: its initial mass, bit for bit, and its
+    /// η from its full draws at its attempt, the primary's its own at attempt 0 (R06.T8.g's
+    /// step 4), over a triple of D and a binary of C near the Sun.
+    #[test]
+    fn each_bound_star_is_the_generators_star() {
+        let galaxy = milky_way_galaxy();
+        let triple = find_bound(Layer::D, SUN, 4_000, |h| {
+            let first = &h.attempts()[0];
+            first.pairs().len() == 1 && first.stars().len() > 2
+        });
+        let binary = find_bound(Layer::C, SUN, 4_000, |h| {
+            let first = &h.attempts()[0];
+            first.pairs().len() == 1 && first.stars().len() == 2
+        });
+        for (record, composition, hierarchy) in [&triple, &binary] {
+            let age = record.age_at(UniverseTime::EPOCH);
+            let ages = (age, age);
+            let bounds = StarBounds::of(galaxy, record, ages);
+            assert_eq!(bounds.composition(), composition);
+            for listed in hierarchy.attempts() {
+                for (i, slot) in listed.stars().iter().enumerate() {
+                    let index =
+                        StarIndex::from_body(u8::try_from(i).expect("few")).expect("a star");
+                    let star = bounds.star(listed.attempt(), index).expect("listed");
+                    let draws = if i == 0 {
+                        StarDraws::for_star(galaxy.seed(), slot.body())
+                    } else {
+                        StarDraws::for_attempt(
+                            galaxy.seed(),
+                            slot.body(),
+                            u32::from(listed.attempt().get()),
+                        )
+                    };
+                    hyperion_testkit::float::assert_same_bits(
+                        star.mass().value(),
+                        slot.initial_mass().value(),
+                    );
+                    hyperion_testkit::float::assert_same_bits(
+                        star.eta().value(),
+                        draws.eta().value(),
+                    );
+                    assert_eq!(star.index(), index);
+                }
+            }
+            assert_eq!(
+                bounds.companions().len(),
+                hierarchy
+                    .attempts()
+                    .iter()
+                    .map(|a| a.stars().len() - 1)
+                    .sum::<usize>()
+            );
+        }
+    }
+
+    /// The primary is bounded once, by the least light that bounds it at every attempt. A `Bright`
+    /// verdict at the first attempt and `Detached` after it leave it the brighter of its own bound
+    /// and the first's magnitude. `Remnants` everywhere still leaves it its own bound: the cover
+    /// ends at an attempt with no pair the engine may run, where the primary is its own model, or
+    /// lists the fallback, where the generator keeps it alone. The records are a binary of C near
+    /// the Sun, redrawn once at least, and one of E whose eight attempts all may carve.
+    #[test]
+    fn the_primary_is_bounded_once_by_the_least_light_that_bounds_it_at_every_attempt() {
+        let galaxy = milky_way_galaxy();
+        let m = |v: f64| Magnitudes::new(v);
+        // The union of the lights, each pair of them.
+        for (a, b, both) in [
+            (StarLight::Dark, StarLight::Dark, StarLight::Dark),
+            (StarLight::Dark, StarLight::Own, StarLight::Own),
+            (StarLight::Own, StarLight::Own, StarLight::Own),
+            (
+                StarLight::Own,
+                StarLight::OwnOr(m(2.0)),
+                StarLight::OwnOr(m(2.0)),
+            ),
+            (
+                StarLight::Dark,
+                StarLight::OwnOr(m(2.0)),
+                StarLight::OwnOr(m(2.0)),
+            ),
+            (
+                StarLight::OwnOr(m(2.0)),
+                StarLight::OwnOr(m(-1.0)),
+                StarLight::OwnOr(m(-1.0)),
+            ),
+        ] {
+            assert_eq!(a.either(b), both, "{a:?} with {b:?}");
+            assert_eq!(b.either(a), both, "{b:?} with {a:?}");
+        }
+        let binary = find_bound(Layer::C, SUN, 8_000, |h| {
+            h.attempts().len() > 1
+                && h.attempts()[0].pairs()[0]
+                    .stars()
+                    .contains(&StarIndex::PRIMARY)
+        });
+        let fallback = find_bound(Layer::E, SUN, 2_000, |h| h.fallback().is_some());
+        assert_eq!(
+            fallback.2.attempts().len(),
+            usize::from(crate::stellar::multiplicity::MAX_REDRAWS)
+        );
+        for (record, composition, hierarchy) in [&binary, &fallback] {
+            let age = record.age_at(UniverseTime::EPOCH);
+            let with = |verdict: &mut dyn FnMut() -> PairLight| {
+                StarBounds::with_verdicts(
+                    galaxy,
+                    record,
+                    (*composition, (age, age)),
+                    hierarchy,
+                    |_, _, _| Some(verdict()),
+                )
+            };
+            let remnants = with(&mut || PairLight::Remnants);
+            assert_eq!(remnants.primary().light(), StarLight::Own, "{record:?}");
+            let bright = with(&mut || PairLight::Bright(m(-1.0)));
+            assert_eq!(
+                bright.primary().light(),
+                StarLight::OwnOr(m(-1.0)),
+                "{record:?}"
+            );
+            let mut calls = 0_u32;
+            let mixed = with(&mut || {
+                calls += 1;
+                if calls == 1 {
+                    PairLight::Bright(m(-1.0))
+                } else {
+                    PairLight::Detached
+                }
+            });
+            if hierarchy.attempts()[0].pairs()[0]
+                .stars()
+                .contains(&StarIndex::PRIMARY)
+            {
+                assert_eq!(
+                    mixed.primary().light(),
+                    StarLight::OwnOr(m(-1.0)),
+                    "{record:?}"
+                );
+            }
+            // It is the same star at every attempt.
+            for attempt in hierarchy.attempts() {
+                assert_eq!(
+                    remnants.star(attempt.attempt(), StarIndex::PRIMARY),
+                    Some(remnants.primary())
+                );
+            }
+            let ruled = ruled_light(
+                record,
+                composition,
+                hierarchy,
+                Some(PairLight::Remnants),
+                (age, age),
+            );
+            assert_eq!(
+                remnants.brightest(PhaseEnvelope::shared(), (age, age)),
+                ruled
+            );
+        }
+    }
+
+    /// A census of the cells by the Sun counts the records it bounds star by star and their
+    /// pairs' verdicts: every record generated in C to E was bounded star by star, and some
+    /// records so bounded are skipped.
+    #[test]
+    fn the_census_counts_the_records_it_bounds_star_by_star() {
+        let galaxy = milky_way_galaxy();
+        let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(7.95))
+            .eye(crate::sky::eye::EyeObserver::default())
+            .build()
+            .expect("a valid query");
+        let mut ctx = context();
+        let mut tallies = CensusTallies::default();
+        let mut stars = Vec::new();
+        for key in cells_by_the_sun() {
+            tallies.add(&census_cell(galaxy, &mut ctx, key, &query, &mut stars));
+        }
+        let (mut bounded, mut generated, mut pairs) = (0, 0, PairTally::default());
+        for layer in [Layer::C, Layer::D, Layer::E] {
+            let t = tallies.layer(layer);
+            eprintln!(
+                "{layer:?}: {} records past the floor, {} bounded star by star ({} unbounded), \
+                 {} generated; pairs {:?}",
+                t.candidates(),
+                t.star_bounded(),
+                t.unbounded_records(),
+                t.generated(),
+                t.pairs()
+            );
+            assert!(t.star_bounded() <= t.candidates(), "{layer:?}");
+            assert!(t.unbounded_records() <= t.star_bounded(), "{layer:?}");
+            assert!(t.generated() <= t.star_bounded(), "{layer:?}");
+            bounded += t.star_bounded();
+            generated += t.generated();
+            pairs.add(t.pairs());
+        }
+        assert!(
+            generated < bounded && pairs.detached() > 0 && pairs.unbounded() > 0,
+            "{generated} generated of {bounded} bounded; {pairs:?}"
+        );
+    }
+
+    /// What [`check_realised_of`] found among some records of one layer at one place.
+    #[derive(Debug, Clone, Copy, Default)]
+    struct RealisedCheck {
+        /// Systems born at one of the times at least.
+        systems: u64,
+        /// Shining stars checked against their own bound star by star, or the pair's.
+        own: u64,
+        /// Shining stars of an unbounded record, checked against the widened envelope.
+        widened: u64,
+        /// Records with a pair plan 11 cannot bound, at each time.
+        unbounded: u64,
+        /// The pairs' verdicts, at each time.
+        pairs: PairTally,
+        /// The least of M<sub>V</sub> less its bound over the stars checked star by star, mag.
+        least_margin: f64,
+    }
+
+    impl RealisedCheck {
+        fn add(&mut self, other: &Self) {
+            self.systems += other.systems;
+            self.own += other.own;
+            self.widened += other.widened;
+            self.unbounded += other.unbounded;
+            self.pairs.add(&other.pairs);
+            self.least_margin = self.least_margin.min(other.least_margin);
+        }
+    }
+
+    /// Holds every shining star of `records`' realised systems at the epoch and 900 years before
+    /// it no brighter than its bound: its own [`BoundStar`]'s at the attempt the generator kept,
+    /// its pairs' verdicts taken at the system's age then, or the widened envelope's
+    /// ([`flux_bound`]) where a pair of the record has none.
+    fn check_realised_of(records: &[SystemRecord]) -> RealisedCheck {
+        let galaxy = milky_way_galaxy();
+        let phase = PhaseEnvelope::shared();
+        let envelope = milky_way_envelope();
+        let earlier = UniverseTime::EPOCH
+            .checked_sub(Span::from_julian_years(900).expect("a span"))
+            .expect("in the window");
+        let mut check = RealisedCheck {
+            least_margin: f64::INFINITY,
+            ..RealisedCheck::default()
+        };
+        for record in records {
+            let stars = SystemStars::generate(galaxy, record);
+            let composition = draw_metallicity(galaxy, record);
+            let hierarchy = hierarchy_bound(galaxy, record, &composition);
+            let mut born = false;
+            for t in [UniverseTime::EPOCH, earlier] {
+                let Some(state) = stars.state_at(t) else {
+                    continue;
+                };
+                born = true;
+                let age = record.age_at(t);
+                let ages = (age, age);
+                let bounds =
+                    StarBounds::from_hierarchy(galaxy, record, composition, &hierarchy, ages);
+                check.pairs.add(bounds.pairs());
+                let unbounded = bounds.brightest(phase, ages) == RecordLight::Unbounded;
+                check.unbounded += u64::from(unbounded);
+                for (i, star) in state.stars().iter().enumerate() {
+                    let Some(m_v) = absolute_v_of_state(star) else {
+                        continue;
+                    };
+                    let what = || format!("{record:?} at {t:?}: star {i}, {:?}", star.phase());
+                    if unbounded {
+                        let bound = flux_bound(envelope, record, t)
+                            .unwrap_or_else(|| panic!("{}: unbounded where it shines", what()));
+                        assert!(
+                            m_v.value() >= bound.value(),
+                            "{}: M_V {} over the widened bound {}",
+                            what(),
+                            m_v.value(),
+                            bound.value()
+                        );
+                        check.widened += 1;
+                        continue;
+                    }
+                    let index = StarIndex::from_body(u8::try_from(i).expect("few"))
+                        .expect("a star of the system");
+                    let listed = bounds
+                        .star(stars.attempt(), index)
+                        .unwrap_or_else(|| panic!("{}: its attempt is not listed", what()));
+                    hyperion_testkit::float::assert_same_bits(
+                        listed.mass().value(),
+                        stars.stars()[i].initial_mass().value(),
+                    );
+                    let bound = listed
+                        .brightest(phase, &composition, ages)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{}: shines at M_V {} where its bound, {:?}, says it cannot",
+                                what(),
+                                m_v.value(),
+                                listed.light()
+                            )
+                        });
+                    let margin = m_v.value() - bound.value();
+                    assert!(
+                        margin >= 0.0,
+                        "{}: M_V {} over its bound {} ({:?})",
+                        what(),
+                        m_v.value(),
+                        bound.value(),
+                        listed.light()
+                    );
+                    check.least_margin = check.least_margin.min(margin);
+                    check.own += 1;
+                }
+            }
+            check.systems += u64::from(born);
+        }
+        check
+    }
+
+    /// [`check_realised_of`] over `per_place` records of each layer near the Sun and in the
+    /// bulge, in four shares; prints each layer's figures and returns them all, with the systems
+    /// born of each layer at both places together, by [`Layer::value`].
+    fn check_realised(per_place: usize) -> (RealisedCheck, [u64; Layer::ALL.len()]) {
+        let mut all = RealisedCheck {
+            least_margin: f64::INFINITY,
+            ..RealisedCheck::default()
+        };
+        let mut per_layer = [0_u64; Layer::ALL.len()];
+        for (place, at) in [("near the Sun", SUN), ("in the bulge", BULGE)] {
+            for layer in [
+                Layer::A,
+                Layer::B,
+                Layer::C,
+                Layer::D,
+                Layer::E,
+                Layer::BrownDwarf,
+            ] {
+                let records = records_near(layer, at, per_place);
+                let records = &records[..per_place];
+                // Four shares, share k the records k, k + 4, …, on threads of their own, or one
+                // after another on wasm32-wasip1, which has none: the figures are the same.
+                let share = |k: usize| {
+                    let mine: Vec<SystemRecord> =
+                        records.iter().skip(k).step_by(4).copied().collect();
+                    check_realised_of(&mine)
+                };
+                #[cfg(not(target_family = "wasm"))]
+                let parts: Vec<RealisedCheck> = std::thread::scope(|scope| {
+                    let handles: Vec<_> = (0..4)
+                        .map(|k| {
+                            let share = &share;
+                            scope.spawn(move || share(k))
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|h| h.join().expect("a share's thread"))
+                        .collect()
+                });
+                #[cfg(target_family = "wasm")]
+                let parts: Vec<RealisedCheck> = (0..4).map(share).collect();
+                let mut found = RealisedCheck {
+                    least_margin: f64::INFINITY,
+                    ..RealisedCheck::default()
+                };
+                for part in &parts {
+                    found.add(part);
+                }
+                let p = found.pairs;
+                eprintln!(
+                    "{layer:?} {place}: {} systems; stars checked {} star by star (least margin \
+                     {:.4} mag), {} against the widened envelope; records unbounded {}; pairs \
+                     {} (detached {}, unchanged {}, remnants {}, bright {}, none {})",
+                    found.systems,
+                    found.own,
+                    found.least_margin,
+                    found.widened,
+                    found.unbounded,
+                    p.total(),
+                    p.detached(),
+                    p.unchanged(),
+                    p.remnants(),
+                    p.bright(),
+                    p.unbounded()
+                );
+                per_layer[usize::from(layer.value())] += found.systems;
+                all.add(&found);
+            }
+        }
+        (all, per_layer)
+    }
+
+    /// The bound star by star holds for realised systems (R06.T8.g): 300 records of each layer
+    /// near the Sun and in the bulge, at two emitted times.
+    #[test]
+    fn the_star_bound_holds_for_some_realised_systems() {
+        let (all, _) = check_realised(300);
+        assert!(all.own > 3_000 && all.pairs.detached() > 50, "{all:?}");
+    }
+
+    /// R06.T8.g's slow test: over 10⁵ records of each layer near the Sun and again in the bulge, at
+    /// least 10⁵ realised systems of each layer, at the epoch and 900 years before it, every star
+    /// of `state_at(t).stars()` is no
+    /// brighter than its bound, star by star or, for a record with a pair plan 11 cannot bound,
+    /// the widened envelope's. Each pair's verdict is taken at the system's age at that time, the
+    /// tightest window the census asks. The figures, with the shares of plan 11's verdicts, are
+    /// recorded in R06's Risks.
+    #[test]
+    #[ignore = "slow: generates 1.2 × 10⁶ systems, their pairs run through the binary engine"]
+    fn the_star_bound_holds_for_realised_systems() {
+        let (all, per_layer) = check_realised(100_000);
+        eprintln!("all: {all:?}");
+        for layer in [
+            Layer::A,
+            Layer::B,
+            Layer::C,
+            Layer::D,
+            Layer::E,
+            Layer::BrownDwarf,
+        ] {
+            let systems = per_layer[usize::from(layer.value())];
+            assert!(
+                systems >= 100_000,
+                "{layer:?}: {systems} realised systems, under 10⁵"
+            );
+        }
     }
 }

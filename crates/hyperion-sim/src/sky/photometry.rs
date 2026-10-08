@@ -19,7 +19,11 @@
 //!   note).
 //!
 //! When plan 06 answers A3 and A4, these two functions switch to its photometry and nothing else
-//! here changes.
+//! here changes. Two of the census's bounds rest on A4's interim, and must change with it: the
+//! phase envelope's bins beyond a star's lifetime hold only remnants, which it keeps dark
+//! ([`PhaseEnvelope`](super::phase::PhaseEnvelope), R06.T8.m), and a pair that plan 11 answers
+//! `Remnants` gives the census nothing ([`StarBounds`](super::census::StarBounds), R06.T8.g).
+//! Both then take white-dwarf rows.
 
 use super::colour::{StarColour, star_colour, surface_gravity};
 use super::disc::grid_of;

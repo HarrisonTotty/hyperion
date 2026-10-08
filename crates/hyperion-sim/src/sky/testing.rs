@@ -29,11 +29,10 @@ pub(crate) fn milky_way_envelope() -> &'static BrightnessEnvelope {
     ENVELOPE.get_or_init(BrightnessEnvelope::fitted)
 }
 
-/// The phase envelope: the fitted table, which depends on no galaxy, so it costs a copy of the
-/// table.
+/// The phase envelope: the fitted table, which depends on no galaxy, as the census reads it
+/// ([`PhaseEnvelope::shared`]).
 pub(crate) fn phase_envelope() -> &'static PhaseEnvelope {
-    static ENVELOPE: OnceLock<PhaseEnvelope> = OnceLock::new();
-    ENVELOPE.get_or_init(PhaseEnvelope::fitted)
+    PhaseEnvelope::shared()
 }
 
 /// The fixture's bounds on how far a cell's stars lie from their barycentres.

@@ -27,8 +27,11 @@
 //! to 124,000 (R06's Risks). Layers C and the brown dwarfs are compared near the Sun only. The slow
 //! A/B check is the one where identity needs the envelope to bound every M and K dwarf. There
 //! the census skipped nearly all of them until R06.T16.b. Its bound at twice the primary's mass
-//! over ages from zero now skips some 40% of A's and none of B's, and B's skips are printed rather
-//! than asserted (decision-r06-census-cost, 2026-10-05), as the nuclear disc's fast test's are.
+//! over ages from zero skipped some 40% of A's and none of B's, so B's skips were printed rather
+//! than asserted (decision-r06-census-cost, 2026-10-05), as the nuclear disc's fast test's still
+//! are. R06.T8.g's bound star by star restores B's check, and in the slow near-Sun tests each of
+//! B, C, D and E must generate under a quarter of its records. D's and E's quarter waits for plan
+//! 11's P11.T17.c, whose verdicts bound the pairs that P11.T17.a cannot: until then it is printed.
 //!
 //! Three merger products are pinned (R06.T16.b): the two first-giant-branch stars of K-dwarf
 //! primaries with M-dwarf companions, in systems 5–7 Gyr old, that T8.e's oracle found the census
@@ -67,10 +70,12 @@ use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::CAPPED_LAYERS;
 use hyperion_sim::sky::census::{
-    CensusTallies, GRID_STAR_BOUND, SkyQuery, flux_bound, merge_census, star_offset_bound,
+    CensusTallies, GRID_STAR_BOUND, RecordLight, SkyQuery, StarBounds, flux_bound, merge_census,
+    star_offset_bound,
 };
 use hyperion_sim::sky::envelope::{BrightnessEnvelope, max_star_mass};
 use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
+use hyperion_sim::sky::phase::PhaseEnvelope;
 use hyperion_sim::sky::photometry::absolute_v_of_state;
 use hyperion_sim::stellar::Phase;
 use hyperion_sim::stellar::system::SystemStars;
@@ -186,6 +191,34 @@ fn agree_in(
     generated
 }
 
+/// R06.T8.g's share: of each layer of `asserted` in `generated`, the census generates under a
+/// quarter of the systems its oracle generates; each layer of `printed` is printed only, its
+/// quarter waiting for plan 11's P11.T17.c. Only the slow near-Sun tests, which wasm32-wasip1
+/// leaves out, ask it.
+#[cfg(not(target_family = "wasm"))]
+fn generates_under_a_quarter(
+    what: &str,
+    generated: &[(Layer, u64, u64)],
+    asserted: &[Layer],
+    printed: &[Layer],
+) {
+    for &(layer, census, brute) in generated {
+        let quarter = census.saturating_mul(4) < brute;
+        if asserted.contains(&layer) {
+            assert!(
+                quarter,
+                "{what}: {layer:?} generates {census} of {brute} systems, not under a quarter"
+            );
+        } else if printed.contains(&layer) {
+            eprintln!(
+                "{what}: {layer:?} generates {census} of {brute} systems ({}under a quarter; \
+                 asserted from P11.T17.c)",
+                if quarter { "" } else { "not " }
+            );
+        }
+    }
+}
+
 /// Each listed layer within its radius in light-years.
 fn within_ly(radii: &[(Layer, f64)]) -> Vec<(Layer, LightYears)> {
     radii
@@ -258,6 +291,18 @@ fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
     );
     let bound = flux_bound(&envelope, record, star.emitted()).expect("a bound");
     assert!(bound.value() <= m_v, "{what}: {} over {m_v}", bound.value());
+    // R06.T8.g's bound star by star holds it too: its pair is one plan 11 cannot bound, so the
+    // widened bound above alone holds the record, or one whose verdict bounds the product.
+    let ages = (age, age);
+    let light = StarBounds::of(g, record, ages).brightest(PhaseEnvelope::shared(), ages);
+    eprintln!("{what}: M_V {m_v}, bound star by star {light:?}");
+    match light {
+        RecordLight::Unbounded => {}
+        RecordLight::Brightest(m) => {
+            assert!(m.value() <= m_v, "{what}: {} over {m_v}", m.value());
+        }
+        RecordLight::Dark => panic!("{what}: M_V {m_v} where its bound says none can shine"),
+    }
 }
 
 /// T8.e's two merged giants near the Sun, which its oracle found the census missing (R06's Risks,
@@ -422,18 +467,18 @@ fn the_census_is_its_oracle_for_the_dwarfs_near_the_sun() {
         &within_ly(&[(Layer::A, 300.0), (Layer::B, 500.0)]),
         Skips::Asserted,
     );
-    for (layer, census, brute) in generated {
-        match layer {
-            Layer::A => assert!(
+    for &(layer, census, brute) in &generated {
+        // B's check was printed, not asserted, from R06.T16.b's bound at twice the primary's
+        // mass over ages from zero until R06.T8.g's bound star by star (decision-r06-census-cost,
+        // 2026-10-05), which restores it.
+        if matches!(layer, Layer::A | Layer::B) {
+            assert!(
                 census < brute,
                 "{layer:?}: the census generates {census} of {brute} systems"
-            ),
-            // Recorded, not asserted (decision-r06-census-cost, 2026-10-05): since R06.T16.b's
-            // bound at twice the primary's mass over ages from zero, B skips none here.
-            Layer::B => eprintln!("{layer:?}: the census generates {census} of {brute} systems"),
-            _ => {}
+            );
         }
     }
+    generates_under_a_quarter("the dwarfs near the Sun", &generated, &[Layer::B], &[]);
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -441,7 +486,7 @@ fn the_census_is_its_oracle_for_the_dwarfs_near_the_sun() {
 #[ignore = "slow: generates every system of layers C to E within 1,000 ly of the Sun"]
 fn the_census_is_its_oracle_1000_ly_from_the_sun() {
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
-    agree(
+    let generated = agree(
         "C to E within 1,000 ly of the Sun",
         query,
         &within_ly(&[
@@ -450,6 +495,12 @@ fn the_census_is_its_oracle_1000_ly_from_the_sun() {
             (Layer::E, 1_000.0),
         ]),
         Skips::Asserted,
+    );
+    generates_under_a_quarter(
+        "C to E near the Sun",
+        &generated,
+        &[Layer::C],
+        &[Layer::D, Layer::E],
     );
 }
 

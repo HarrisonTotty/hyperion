@@ -1618,6 +1618,11 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
 
   No generator bump: the census only reads, and plan 11's functions read existing words.
 
+  As built so far (Risks, "Deviations in T8.g, as built"): written against P11.T17.a's interface
+  and committed before its gates, which a fresh agent takes once P11.T17.c lands, with the
+  `--serve-sky` default; the phase envelope read process-wide; the widened envelope kept as a
+  first tier for every record; the pairs' verdicts taken once, over the ages before the drift.
+
 - **R06.T8.m The phase envelope (new; split from T8.g on 2026-10-07; it needs no plan-11 task,
   so it may start at once).** Decided 2026-10-05 (`decision-r06-census-cost.md`) as part of T8.g,
   and split on 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`). `sky_phase_envelope` is a
@@ -2460,7 +2465,8 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read
 standard_nodes_match_the_full_build_where_the_tables_are_read
 the_census_is_its_oracle_for_the_dwarfs_near_the_sun the_census_is_its_oracle_1000_ly_from_the_sun
 the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc
-the_census_is_its_oracle_150_ly_from_the_sun_in_motion phase_envelope_bounds_dense_tracks`,
+the_census_is_its_oracle_150_ly_from_the_sun_in_motion phase_envelope_bounds_dense_tracks
+the_star_bound_holds_for_realised_systems`,
 `just bench -- sky`) and record the
 figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
@@ -5782,6 +5788,194 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **Open, for T8.g.** The share of records the table lets T8.g reject is unmeasured until T8.g.
     The widened cells (28%), the 0.2 mag merging, the three η intervals and the deferred
     looseness above all loosen it against the ruled design, which could not be stored.
+- **Deviations in T8.g, as built (2026-10-07; written against P11.T17.a, its gates taken after
+  P11.T17.c).** The bound star by star, as the hierarchy-bound ruling sets it out (§§5–7). The
+  ruling's §9.2 let it be written against P11.T17.a's interface before P11.T17.b and T17.c land.
+  So it is committed with every `PairLight` verdict handled, and its final gates wait for T17.c:
+  the cold estimate, the 1% target, D's and E's quarter, the camera's figure and the
+  `--serve-sky` default. A fresh agent takes them (the census handoff's T8.g section).
+  - **What is built** (`sky/census/cell.rs`). `StarBounds` is a record's light bounded star by
+    star, in the plan's order:
+    - `draw_metallicity`;
+    - `hierarchy_bound`;
+    - `pair_light_bound` per pair of two stars over the record's light-time ages;
+    - then `PhaseEnvelope::brightest` per star, at its mass, \[Fe/H\], η and age.
+
+    Each star's light is a `StarLight`:
+    - `Own`, for no pair, or a `Detached` or `Unchanged` one;
+    - `OwnOr(M)`, for a `Bright(M)` pair: the brighter of its own bound and M, and M where its own
+      model is dark;
+    - `Dark`, for a `Remnants` pair.
+
+    A pair plan 11 cannot bound makes the whole record `RecordLight::Unbounded`. Each η is the
+    star's own: `StarDraws::eta_for_attempt` at its attempt, and the primary's `primary_eta`.
+    The primary is bounded once, by the least light that bounds it at every attempt, and by its
+    own bound where the fallback is listed. For a grid record the primary is never `Dark`: the
+    cover ends at an attempt with no pair the engine may run, where the primary is its own model,
+    or lists the fallback.
+
+  - **Two tiers, before and after the drift.** The widened envelope's bound at `max_star_mass`
+    over ages from zero (T16.b) stays first for every record, not only those with a pair plan 11
+    cannot bound, since it costs one read. The star bound is taken only for records it passes.
+    Both are bounds, so a record that either rejects is skipped. A record with an unbounded pair
+    is generated whenever the widened bound passes, before the drift and after `retarded`.
+  - **The verdicts are taken once.** Each pair's verdict is taken over the light-time ages before
+    the drift (T8.f's step 5: the pad, plus a year of slack), and reused after `retarded`. There
+    each star's own bound is read at the exact emitted age. `StarBounds` keeps that window.
+    `brightest` debug-asserts its ages lie within it. The census generates the record if the
+    emitted age ever falls outside it, which costs one comparison. Over 10⁴ records in a moving
+    galaxy, the window always holds the emitted age, and the star bound before the drift never
+    rejects what it passes after (`the_bound_before_the_drift_never_rejects_what_the_bound_after_it_passes`).
+  - **The phase envelope is read process-wide**, through `PhaseEnvelope::shared()`, a `OnceLock`
+    of `fitted()`. It is not a `SkyContext` field: `query.rs` is T7.b's in parallel, and the table
+    depends on no galaxy. A process decodes it once, about 0.5 MB. The server's `SkyTables`
+    budget does not count it. `the_shared_envelope_is_the_fitted_table` pins it. It takes the
+    sim-determinism skill's lazy-value exception, as `LifetimeBracket::shared` does. The
+    determinism audit asks that the skill name a static of a constant table explicitly.
+  - **The tallies.** `LayerTally` gains `star_bounded`, `unbounded_records` and `pairs`, a
+    `PairTally` of the verdicts. The sampled bench prints each layer's shares.
+  - **The wasm32 golden** asked by T8.m's determinism audit: `sky/phase_envelope`, blessed at 21.
+    It holds:
+    - the reader's lifetimes as bits, at 22 masses on and between nodes × 4 \[Fe/H\] × 5 η;
+    - its readings at 13 relative ages and over 4 ranges, each held bit for bit to its integer
+      millimagnitude ÷ 1,000, with the bins of each end;
+    - 256 random queries.
+
+    It passes on wasm32-wasip1 under wasmtime.
+
+  - **Files beyond `cell.rs`:**
+    - `sky/census/mod.rs`, the re-exports;
+    - `sky/phase.rs`, for `shared()` and the golden;
+    - `sky/testing.rs`;
+    - `sky/photometry.rs`, whose A4 note names both bounds that rest on dark white dwarfs;
+    - `tests/sky_census.rs`;
+    - `benches/sky.rs`: `sky/star_bound/*`, `census_near_sun/cold_camera` and the printed
+      shares;
+    - `.config/nextest.toml`, four slots for the realised-systems tests.
+  - **Tests.**
+    - The synthetic verdicts: `each_verdict_leaves_the_stars_the_light_the_ruling_gives` feeds
+      every `PairLight`, and none, through a test-only seam (`with_verdicts`), against
+      `ruled_light`, a separate reading of the ruling, on a triple of D and a binary of C.
+      `the_primary_is_bounded_once_by_the_least_light_that_bounds_it_at_every_attempt` takes a
+      fallback record of E. `each_bound_star_is_the_generators_star` holds masses and η bit for
+      bit.
+    - The fast `the_star_bound_holds_for_some_realised_systems` takes 300 records of each layer
+      at each place. The census's tallies are counted, and its fast oracle tests pass unchanged.
+      Within 150 ly the census now generates 13,430 of 39,943 systems, and 47,314 of 49,534 for
+      A and B within 1.5 ly in the nuclear disc.
+    - The slow `the_star_bound_holds_for_realised_systems` (in `cell.rs`) takes 10⁵ records of
+      each of A–E and the brown dwarfs, near the Sun and in the bulge, at the epoch and 900 years
+      before. Each pair's verdict is taken at the system's exact age, the tightest window the
+      census asks. Every star of the kept attempt is held to its own bound, or to the widened
+      envelope for a record with an unbounded pair, and at least 10⁵ systems of each layer are
+      realised.
+      - It passed in 825 s on four threads (slow-test profile, under the heavy-test lock, load
+        about 6–13). It realised 1.2 × 10⁶ systems and found no violation.
+      - It checked 1.60 × 10⁶ shining stars against their own bounds and 2.6 × 10⁵, of records
+        with a pair plan 11 cannot bound, against the widened envelope.
+      - No star used any of the phase envelope's 0.3 mag margin. The least slack, M<sub>V</sub>
+        less its bound, is 0.3045 mag, in B in the bulge.
+      - Of the pairs, plan 11 bounds 99.7% in A, 98% in B, 75% (Sun) and 69% (bulge) in C, 24%
+        and 23% in D, and 0.7% and 0.5% in E. So the stars E checked by their own bounds are only
+        336 near the Sun and 334 in the bulge.
+    - `tests/sky_census.rs`:
+      - B's skip check is restored.
+      - B's and C's quarter shares are asserted against the oracle's generated count. D's and E's
+        are printed until T17.c: under P11.T17.a, D's and E's pairs are mostly `None`.
+      - The pinned mergers are also held to the star bound; all three are `Unbounded` under
+        T17.a.
+      - The slow identity tests pass by name (2026-10-08, under the heavy-test lock, eight
+        workers each, load 3–15):
+        - `the_census_is_its_oracle_1000_ly_from_the_sun`, in 781 s. The census generates
+          455,965 of 1,411,018 systems: C 254,273 of 1,097,274 (23.2%), D 137,122 of 238,967
+          (57.4%) and E 64,570 of 74,777 (86.4%). It accepts C 20,103, D 7,112 and E 1,158
+          stars, the oracle's, at version 21. T16.b's run generated 1,411,002.
+        - `the_census_is_its_oracle_for_the_dwarfs_near_the_sun`, in 4.6 s. It generates 2,720 of
+          249,096 systems (189,189 under T16.b): A 788 of 138,945 and B 1,932 of 110,151 (1.75%).
+          It accepts A 4 and B 48 stars.
+        - `the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, in 2,584 s. It generates
+          655,481 of 878,168 systems: D 227,812 of 383,439 (59.4%) and E 427,669 of 494,729
+          (86.4%).
+  - **The provisional figures, at P11.T17.a's answers.** Unlocked, inside a 400% CPU quota, at load
+    7–10, so provisional:
+    - **A record's cost** (`sky/star_bound`, the 400 records of each layer nearest the Sun), µs,
+      in A–E:
+
+      | Step                      | A    | B    | C    | D    | E     |
+      | ------------------------- | ---- | ---- | ---- | ---- | ----- |
+      | `draw_metallicity`        | 0.06 | 0.06 | 0.06 | 0.06 | 0.06  |
+      | `hierarchy_bound`         | 4.8  | 6.9  | 17.8 | 51.9 | 143   |
+      | the pairs' verdicts and η | 0.33 | 0.44 | 0.81 | 1.39 | 2.04  |
+      | the phase reads           | 0.33 | 0.34 | 0.30 | 0.09 | 0.015 |
+      | the whole                 | 5.1  | 7.7  | 16.9 | 53.2 | 159   |
+
+      Every step but `hierarchy_bound` is well inside its 6 µs. The phase reads in D and E are
+      few, because a record with a pair plan 11 cannot bound reads none. `hierarchy_bound` is
+      P11.T16's own: 4.7, 7.1, 14.8, 50.2 and 142.9 µs in its bench.
+
+    - **The sampled cold census** (`HYPERION_SKY_BENCH_SAMPLE` 1,000, criterion's `--test`, three
+      workers, 486 s wall for the sample): **1.44 × 10⁶ CPU-s estimated**, against T8.f's
+      1.83 × 10⁶. The ruling expected about 1.2 × 10⁶ with P11.T17.a alone. The caps are the
+      spherical ones: C 8,193, D 9,925 and E 21,369 ly. Near the Sun:
+
+      | Near the Sun, estimated                    | C          | D          | E          |
+      | ------------------------------------------ | ---------- | ---------- | ---------- |
+      | Records past the floor                     | 1.99 × 10⁸ | 6.51 × 10⁷ | 1.34 × 10⁸ |
+      | Bounded star by star                       | 98.2%      | 99.9%      | 99.99%     |
+      | Of those, with a pair plan 11 cannot bound | 17.8%      | 55.7%      | 86.0%      |
+      | Pairs `Detached`                           | 72.4%      | 22.9%      | 0.59%      |
+      | Pairs none                                 | 27.6%      | 77.1%      | 99.4%      |
+      | Generated                                  | 20.8%      | 55.9%      | 86.3%      |
+      | (T8.f's sampled bench)                     | (98.3%)    | (99.9%)    | (99.99%)   |
+
+      C to E together generate 48.6% of their records past the floor. `Unchanged`, `Remnants`
+      and `Bright` are 0%, since T17.a answers none of them.
+
+    - **A finding for the 1% target (reported to main; deferred, it does not hold T8.g).** The
+      records whose every pair is bounded are generated at about 3.3% in C, at least 6.6 × 10⁶
+      of its 1.99 × 10⁸ (the generated less every unbounded record), and at least 0.3% in D and
+      in E. The ruling's proxy expected 0.24%, 0.15% and 0.014%. The sample's C census accepts
+      some 25,000 stars from those 4.1 × 10⁷ systems.
+      - So C's own bounds alone generate about 1.7% of the records of C to E, beyond the 1%
+        target, whatever P11.T17.c's tables give.
+      - The likely cause is T8.m's recorded looseness, all deferred corrections:
+        - stars of 1.9–3.3 M☉ bounded 1.5–2 mag too bright over a third of their main sequence;
+        - a spread widening a whole coarse bin;
+        - the merging and the three η intervals.
+      - It is unmeasured by cause. The cold estimate is not at risk: with every pair as tight as
+        its stars' own bounds, these figures give about 3.7 × 10⁴ CPU-s at the spherical caps.
+        That is about 2.6 × 10⁴ of hierarchy bounds, 1.0 × 10⁴ of generation and the rest,
+        inside the 6 × 10⁴ gate and R06's re-quoted 3.6–4.4 × 10⁴.
+  - **Reviews (2026-10-07).**
+    - The Rust review's must-fix is applied: magnitudes are typed, `Magnitudes` in `may_list`.
+      So are its should-fixes:
+      - the window kept in `StarBounds`;
+      - the hierarchy's primary debug-checked against the record;
+      - no heap buffer per attempt;
+      - `shared()`'s `# Panics`;
+      - `pub(crate)` internals;
+      - `unbounded_records`.
+    - The determinism audit found nothing that moves output. Its should-fix is applied: the
+      golden's readings are pinned bit for bit, with their bins.
+    - The plan-conformance review found no must-fix. Its should-fixes, a per-layer count in the
+      slow test and this record, are applied, and so are its considers: the release guard on the
+      window, and the A4 note.
+    - The science check found no must-fix in the composition.
+  - **A finding for P11.T17 (the science check; reported to main, not fixed).** `Detached` says
+    each star is its own single-star model. But a member below 0.1 M☉ is a cooling member that
+    carries mass. `run_pairs` runs a pair with a remnant by +H, or that can interact by +H,
+    which may lie after the window's end, so in such a run pair that member accretes its
+    companion's wind (BSE equation 6). That is about 10⁻³ M☉, perhaps 0.05–0.1 mag in V. It is
+    probably inside the phase envelope's 0.3 mag margin, and such a star (M<sub>V</sub> 15.5–18)
+    is listable only within about a light-year, but nothing proves it. The lean for T17.c:
+    - `Detached` for such a pair only if it cannot be run by +H either;
+    - `light.rs`'s "accrete no wind" stated for stars of at least 0.1 M☉;
+    - such pairs added to T17's slow test.
+  - **`Remnants` gives nothing** only while white dwarfs are dark in V (ask A4), as T8.m's bins
+    past the lifetime are. A4 must bring white-dwarf rows to both: `sky::photometry`'s module doc
+    says so.
+  - **Not changed.** No generated output moves. `GENERATOR_VERSION` stays 21, and no existing
+    golden moves (`golden_diff.py`: one new golden).
 - **Deviations in T9.f, as built (2026-10-07).** The band's march kept, as the band ruling
   (`decision-r06-t9b-band.md`, item 7) sets it out, with these details.
   - **The API** (`sky/band.rs`):

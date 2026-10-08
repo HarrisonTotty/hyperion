@@ -781,8 +781,8 @@ impl PhaseEnvelope {
     ///
     /// The table is [`tables::sky_phase_envelope`](crate::tables::sky_phase_envelope), on the
     /// brightness envelope's mass nodes
-    /// ([`tables::sky_envelope::MASSES`](crate::tables::sky_envelope::MASSES)). A census holds one
-    /// for every query.
+    /// ([`tables::sky_envelope::MASSES`](crate::tables::sky_envelope::MASSES)). The census reads
+    /// the process's one copy, [`shared`](Self::shared).
     ///
     /// # Panics
     ///
@@ -824,6 +824,24 @@ impl PhaseEnvelope {
             ends,
             mmag,
         )
+    }
+
+    /// The process's one envelope of the fitted table, decoded lazily on its first read.
+    ///
+    /// It is [`fitted`](Self::fitted), bit for bit, whoever reads it first: the table depends on no
+    /// galaxy, its decoding draws nothing and never reads this, and it never changes afterwards
+    /// (the sim-determinism skill's lazy-value exception; the test
+    /// `the_shared_envelope_is_the_fitted_table` pins it). The census bounds every star of every
+    /// record with it (R06.T8.g), so a process decodes the table once, about 0.5 MB, rather than
+    /// once per census job, and the census's context carries nothing more for it.
+    ///
+    /// # Panics
+    ///
+    /// As [`fitted`](Self::fitted), on the first read.
+    #[must_use]
+    pub fn shared() -> &'static Self {
+        static SHARED: std::sync::OnceLock<PhaseEnvelope> = std::sync::OnceLock::new();
+        SHARED.get_or_init(Self::fitted)
     }
 
     /// The envelope of `frame` from each cell's brightest V per bin, `rows[cell]`, before the
@@ -1856,5 +1874,95 @@ mod tests {
     #[should_panic(expected = "the last row is whole")]
     fn a_row_cut_short_is_refused() {
         let _ = unpack_rows("//9/");
+    }
+
+    /// The census's reader is the fitted table's, bit for bit, whoever decodes it first.
+    #[test]
+    fn the_shared_envelope_is_the_fitted_table() {
+        assert_eq!(*PhaseEnvelope::shared(), PhaseEnvelope::fitted());
+        assert!(core::ptr::eq(PhaseEnvelope::shared(), phase_envelope()));
+    }
+
+    /// One reading of the golden's: the brightest V at `ages`, in millimagnitudes, or `dark`,
+    /// each value held bit for bit to its integer's ÷ 1,000 first, so that the integer pins the
+    /// value's bits; and the bins of the range's ends, read as the reader reads them, against
+    /// the lifetime it reads.
+    fn reading(e: &PhaseEnvelope, m: f64, comp: &Composition, z: f64, ages: (f64, f64)) -> String {
+        let (mass, eta) = (SolarMasses::new(m), draw(z));
+        let read = e.brightest(mass, comp, eta, (Years::new(ages.0), Years::new(ages.1)));
+        let life = e.lifetime(mass, comp, eta).value();
+        let bins = format!(
+            "{}-{}",
+            relative_age_bin(ages.0.max(0.0) / life),
+            relative_age_bin(ages.1 / life)
+        );
+        read.map_or_else(
+            || format!("dark@{bins}"),
+            |v| {
+                let k = (v.value() * 1000.0).round();
+                hyperion_testkit::float::assert_same_bits(v.value(), k / 1000.0);
+                format!("{k:.0}@{bins}")
+            },
+        )
+    }
+
+    /// The reader's arithmetic, pinned for every target (the determinism audit of R06.T8.m, before
+    /// R06.T8.g serves it): the lifetime it reads each star against, as bits, and what it reads at
+    /// relative ages about the fine bins' edges and over ranges, at masses on and between the mass
+    /// nodes, \[Fe/H\] on and between its nodes and beyond the tracks' clamps, and η draws in each
+    /// interval and beyond the axis; then 256 random stars and ranges. `just test-wasm-fast`
+    /// compares it on wasm32-wasip1, whose `usize` is 32 bits.
+    #[test]
+    fn the_readers_arithmetic_is_pinned() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        let table = phase_envelope();
+        let masses = &table.frame().masses;
+        let mut out = GoldenWriter::new();
+        out.header(crate::GENERATOR_VERSION.get());
+        let relative = [
+            1e-8, 1e-4, 0.1, 0.5, 0.79, 0.8, 0.85, 0.95, 0.999, 1.0, 1.0005, 1.03, 1.06,
+        ];
+        for k in (0..masses.len() - 1).step_by(18) {
+            let between = math::exp(f64::midpoint(math::ln(masses[k]), math::ln(masses[k + 1])));
+            for m in [masses[k], between] {
+                for fe_h in [-3.0, -1.7, 0.0, 0.5] {
+                    let comp = composition(fe_h);
+                    for z in [-8.0, -5.0, -1.0, 2.5, 9.0] {
+                        let label = format!("{m:.6} M☉ [Fe/H] {fe_h} z {z}");
+                        let life = table.lifetime(SolarMasses::new(m), &comp, draw(z)).value();
+                        out.f64(&format!("{label} lifetime"), life);
+                        let points: Vec<String> = relative
+                            .iter()
+                            .map(|&r| reading(table, m, &comp, z, (r * life, r * life)))
+                            .collect();
+                        let ranges = [(0.0, 0.5), (0.5, 0.9), (0.9, 1.02), (0.0, 1.2)]
+                            .map(|(lo, hi)| reading(table, m, &comp, z, (lo * life, hi * life)));
+                        out.line(&format!(
+                            "  at {}; over {}",
+                            points.join(" "),
+                            ranges.join(" ")
+                        ));
+                    }
+                }
+            }
+        }
+        let mut u = crate::sky::testing::uniforms(0x0007_8a5e);
+        let mut next = || u.next().expect("endless");
+        for i in 0..256_u32 {
+            let m = 0.0124 * math::exp(next() * math::ln(150.0 / 0.0124));
+            let fe_h = -2.8 + 3.2 * next();
+            let z = -9.0 + 18.0 * next();
+            let age = 1e5 * math::exp(next() * math::ln(1.4e10 / 1e5));
+            let width = age * next() * 0.05;
+            let comp = composition(fe_h);
+            out.line(&format!(
+                "query {i:03}: {m:.6} M☉ [Fe/H] {fe_h:.4} z {z:.4} age {age:.6e} yr +{width:.4e}: \
+                 {}",
+                reading(table, m, &comp, z, (age, age + width))
+            ));
+        }
+        golden!("sky/phase_envelope", out.as_str());
     }
 }

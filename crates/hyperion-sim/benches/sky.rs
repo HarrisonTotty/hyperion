@@ -1,8 +1,9 @@
 //! Benchmarks of the sky (rendering plan R06): the luminosity tables' build, the census near the
-//! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), the
-//! illumination of the diffuse galactic light (R06.T9.g), the band near the Sun, marched with and
-//! without that light and summed (R06.T9.b, T9.f, T9.g) and under a camera's cut (R06.T9.j), and
-//! the limit map (R06.T9.i).
+//! Sun with a cold and a warm cell cache and under a camera's cut, the census in the nuclear disc
+//! (R06.T8), the census's bound star by star, step by step (R06.T8.g), the illumination of the
+//! diffuse galactic light (R06.T9.g), the band near the Sun, marched with and without that light
+//! and summed (R06.T9.b, T9.f, T9.g) and under a camera's cut (R06.T9.j), and the limit map
+//! (R06.T9.i).
 //!
 //! They run on `GalaxyParams::milky_way_like()` with a fixed seed. A miss is a finding to record,
 //! not a CI failure: CI compiles these and never runs them. Every figure below is provisional
@@ -35,8 +36,10 @@
 //! | Bench | Target | Figure |
 //! | ----- | ------ | ------ |
 //! | `sky/luminosity_tables` | ≤ 30 CPU-s (T17) | pending a quiet machine |
-//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17) | 1.8 × 10⁶ CPU-s, sampled |
+//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17); ≤ 6 × 10⁴ (T8.g) | 1.44 × 10⁶ CPU-s, sampled, at P11.T17.a |
+//! | `sky/census_near_sun/cold_camera` | none: recorded beside the eye's (T8.g) | pending P11.T17.c |
 //! | `sky/census_near_sun/warm` | ≤ 25% of cold (T17) | not yet run |
+//! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | provisional (below) |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 0.947 CPU-s, provisional |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 16.11 CPU-s with the diffuse light, provisional |
@@ -57,6 +60,29 @@
 //!
 //! The brainstorm's 400–800 CPU-s and 5 × 10⁹ candidates are the inner bulge's under the near-Sun
 //! caps held fixed; the nuclear disc's bench takes its own caps, which are far smaller.
+//!
+//! Since R06.T8.g each census also prints, per layer, its bound star by star: the records it
+//! bounded (those the widened envelope's bound before the drift passed), those holding a pair
+//! plan 11 cannot bound, and their pairs' shares by plan 11's verdict. `census_near_sun/
+//! cold_camera` is the cold census of a camera at V 10.06 with the eye asked at 7.95, whose figure
+//! T8.g records beside the eye's (`decision-r06-census-cost-signoff.md`). `sky/star_bound` times
+//! the bound's steps one by one over the 400 records of each stellar layer nearest the Sun, plan
+//! 11's P11.T16 bench's sample: `draw_metallicity`, `hierarchy_bound`, the pairs' verdicts and η
+//! draws, the phase envelope's reads, and the whole; it prints each layer's stars bounded, pairs
+//! and records unbounded.
+//!
+//! R06.T8.g's provisional runs (2026-10-07, written against P11.T17.a, whose `pair_light_bound`
+//! answers only `Detached` or none; unlocked, inside a 400% CPU quota, load 7–10):
+//! - `sky/star_bound`, a record's cost, µs, in A–E: `draw_metallicity` 0.06 in each;
+//!   `hierarchy_bound` 4.8, 6.9, 17.8, 51.9 and 143; the pairs and η 0.33, 0.44, 0.81, 1.39 and
+//!   2.04; the phase reads 0.33, 0.34, 0.30, 0.09 and 0.015 (a record with a pair plan 11 cannot
+//!   bound reads none); the whole 5.1, 7.7, 16.9, 53.2 and 159.
+//! - `census_near_sun/cold`, `HYPERION_SKY_BENCH_SAMPLE` 1,000, criterion's `--test`, three
+//!   workers: 1.44 × 10⁶ CPU-s estimated (486 s wall for the sample), against T8.f's 1.83 × 10⁶.
+//!   C generates 20.8% of its records past the floor, D 55.9% and E 86.3% (98.3%, 99.9% and
+//!   99.99% before). Plan 11 cannot bound 27.7% of C's pairs, 77.1% of D's and 99.4% of E's, so
+//!   17.8%, 55.7% and 86.0% of their records keep the widened bound alone. T8.g's gates wait for
+//!   P11.T17.c's verdicts (R06's Risks, "Deviations in T8.g, as built").
 //!
 //! The band benches (R06.T9.f) split the band of a near-Sun request at the eye's cut as the server
 //! runs it (R06.T11.c, T11.d), one face row a job over all six faces of `BandSpec::STANDARD` (64²
@@ -128,7 +154,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::params::GalaxyParams;
-use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, cell_heap_bytes};
+use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, cell_heap_bytes, generate_cell};
 use hyperion_sim::id::Layer;
 use hyperion_sim::math;
 use hyperion_sim::observe::Observer;
@@ -139,7 +165,7 @@ use hyperion_sim::sky::band::{
 use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap, layer_caps};
 use hyperion_sim::sky::census::{
     CellOffsets, CellSlab, CensusTallies, MAX_N_MAX, NoSkyCellCache, Served, SkyCellCache,
-    SkyCensus, SkyContext, SkyQuery, SkyStar, census_cell, census_plan, merge_census,
+    SkyCensus, SkyContext, SkyQuery, SkyStar, StarBounds, census_cell, census_plan, merge_census,
     serve_from_entry,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
@@ -147,9 +173,13 @@ use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude};
 use hyperion_sim::sky::limits::{Glare, limit_rows};
 use hyperion_sim::sky::luminosity::{BinSums, LuminosityTables};
+use hyperion_sim::sky::phase::PhaseEnvelope;
+use hyperion_sim::stellar::Composition;
+use hyperion_sim::stellar::multiplicity::{HierarchyBound, hierarchy_bound};
+use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::consts::RADIANS_PER_DEGREE;
-use hyperion_sim::units::{LightYears, Lux, Magnitudes, SolarMasses};
+use hyperion_sim::units::{LightYears, Lux, Magnitudes, SolarMasses, Years};
 use hyperion_testkit::golden::f64_digest;
 
 /// The fixture's seed, the sim's sky tests' own.
@@ -180,6 +210,7 @@ const DEFAULT_CACHE_MB: usize = 64;
 
 /// Whether each census bench has printed its first census.
 static PRINTED_COLD: AtomicBool = AtomicBool::new(false);
+static PRINTED_COLD_CAMERA: AtomicBool = AtomicBool::new(false);
 static PRINTED_FILL: AtomicBool = AtomicBool::new(false);
 static PRINTED_WARM: AtomicBool = AtomicBool::new(false);
 static PRINTED_NUCLEAR: AtomicBool = AtomicBool::new(false);
@@ -555,6 +586,32 @@ fn report_once(printed: &AtomicBool, name: &str, run: &Run, cache: Option<&Bench
             l.accepted() * scale,
             l.listed(),
         );
+        // R06.T8.g's bound star by star: the records it bounded, those holding a pair plan 11
+        // cannot bound, and their pairs by plan 11's verdict, each share of the pairs counted.
+        let p = l.pairs();
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a share of counts under 2⁵³, for printing"
+        )]
+        let of_pairs = |n: u64| {
+            if p.total() == 0 {
+                0.0
+            } else {
+                100.0 * n as f64 / p.total() as f64
+            }
+        };
+        eprintln!(
+            "    star by star: {} records bounded, {} unbounded; {} pairs: detached {:.2}%, \
+             unchanged {:.2}%, remnants {:.2}%, bright {:.2}%, none {:.2}%",
+            l.star_bounded() * scale,
+            l.unbounded_records() * scale,
+            p.total() * scale,
+            of_pairs(p.detached()),
+            of_pairs(p.unchanged()),
+            of_pairs(p.remnants()),
+            of_pairs(p.bright()),
+            of_pairs(p.unbounded()),
+        );
     }
     if let Some(cache) = cache {
         let kept = cache.lock();
@@ -739,6 +796,27 @@ fn census_near_sun(c: &mut Criterion) {
             cpu
         });
     });
+    // The camera's cut beside the eye's (R06.T8.g's record, `decision-r06-census-cost-signoff.md`):
+    // a camera at V 10.06 with the eye asked at 7.95.
+    let camera = camera_query(SUN_LY, true);
+    group.bench_function("census_near_sun/cold_camera", |b| {
+        let sky = sky();
+        b.iter_custom(|iters| {
+            let mut cpu = Duration::ZERO;
+            for _ in 0..iters {
+                let cache = BenchCellCache::new(&sky.galaxy);
+                let run = census(sky, black_box(&camera), &cache, workers, sample);
+                report_once(
+                    &PRINTED_COLD_CAMERA,
+                    "census_near_sun/cold_camera",
+                    &run,
+                    Some(&cache),
+                );
+                cpu += run.cpu();
+            }
+            cpu
+        });
+    });
     let warm: OnceCell<BenchCellCache<'static>> = OnceCell::new();
     group.bench_function("census_near_sun/warm", |b| {
         let sky = sky();
@@ -780,6 +858,157 @@ fn census_nuclear_disc(c: &mut Criterion) {
             cpu
         });
     });
+    group.finish();
+}
+
+/// The first `n` records of `layer` in the cells nearest the Sun, shell by shell of cells about
+/// the cell holding it: a neighbourhood's systems as placement makes them (plan 11's P11.T16
+/// bench's sample).
+fn records_nearest_sun(galaxy: &Galaxy, layer: Layer, n: usize) -> Vec<SystemRecord> {
+    let sun = GalacticPosition::from_light_years(SUN_LY).expect("in the root cube");
+    let centre = CellKey::containing(layer, &sun)
+        .expect("the Sun is in the root cube")
+        .gen_cell()
+        .to_array();
+    let mut records = Vec::with_capacity(n);
+    let mut cell = Vec::new();
+    for r in 0_i32..40 {
+        for i in -r..=r {
+            for j in -r..=r {
+                for k in -r..=r {
+                    if i.abs().max(j.abs()).max(k.abs()) != r {
+                        continue;
+                    }
+                    let Ok(key) =
+                        CellKey::new(layer, [centre[0] + i, centre[1] + j, centre[2] + k])
+                    else {
+                        continue;
+                    };
+                    generate_cell(galaxy, key, &mut cell);
+                    records.extend(cell.iter().take(n - records.len()));
+                    if records.len() == n {
+                        return records;
+                    }
+                }
+            }
+        }
+    }
+    records
+}
+
+/// One layer's records for [`star_bound`], with their compositions, hierarchy bounds and star
+/// bounds over [`star_bound_window`].
+struct StarBoundFixture {
+    records: Vec<SystemRecord>,
+    parts: Vec<(SystemRecord, Composition, HierarchyBound)>,
+    bounds: Vec<StarBounds>,
+}
+
+/// The pairs' window of [`star_bound`]: the 300 years before `record`'s epoch age.
+fn star_bound_window(record: &SystemRecord) -> (Years, Years) {
+    let age = record.age_at(UniverseTime::EPOCH);
+    (Years::new(age.value() - 300.0), age)
+}
+
+/// The fixture of [`star_bound`] for `layer`, made on first use and printed: a filtered run
+/// builds nothing it does not time.
+fn star_bound_fixture(galaxy: &Galaxy, layer: Layer) -> StarBoundFixture {
+    let records = records_nearest_sun(galaxy, layer, 400);
+    let parts: Vec<(SystemRecord, Composition, HierarchyBound)> = records
+        .iter()
+        .map(|r| {
+            let composition = draw_metallicity(galaxy, r);
+            let hierarchy = hierarchy_bound(galaxy, r, &composition);
+            (*r, composition, hierarchy)
+        })
+        .collect();
+    let bounds: Vec<StarBounds> = parts
+        .iter()
+        .map(|(r, composition, hierarchy)| {
+            StarBounds::from_hierarchy(galaxy, r, *composition, hierarchy, star_bound_window(r))
+        })
+        .collect();
+    let listed: usize = bounds.iter().map(|b| 1 + b.companions().len()).sum();
+    let pairs: u64 = bounds.iter().map(|b| b.pairs().total()).sum();
+    let unbounded = bounds.iter().filter(|b| b.pairs().unbounded() > 0).count();
+    eprintln!(
+        "sky/star_bound {layer:?}, {} records: {listed} stars bounded, {pairs} pairs, {unbounded} \
+         records unbounded",
+        records.len()
+    );
+    StarBoundFixture {
+        records,
+        parts,
+        bounds,
+    }
+}
+
+/// R06.T8.g's bound star by star, step by step, per stellar layer near the Sun: the composition
+/// (`draw_metallicity`), plan 11's `hierarchy_bound`, the pairs' verdicts and η draws
+/// (`StarBounds::from_hierarchy`), and the phase envelope's reads (`StarBounds::brightest`), each
+/// over the same 400 records; then the whole. The pairs are bounded over the 300 years before
+/// each record's epoch age, about a light-time window far out, and the stars read at that age.
+/// The target is about 6 µs a record for every step but `hierarchy_bound`, whose own cost is
+/// P11.T16's (`decision-p11-t16-hierarchy-bound.md` §7).
+fn star_bound(c: &mut Criterion) {
+    let galaxy = galaxy();
+    let phase = PhaseEnvelope::shared();
+    let mut group = c.benchmark_group("sky/star_bound");
+    group.sample_size(10);
+    for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+        let fixture: OnceCell<StarBoundFixture> = OnceCell::new();
+        let get = || fixture.get_or_init(|| star_bound_fixture(&galaxy, layer));
+        let name = format!("{layer:?}, 400 records");
+        group.bench_function(format!("draw_metallicity ({name})"), |b| {
+            let f = get();
+            b.iter(|| {
+                for r in &f.records {
+                    black_box(draw_metallicity(&galaxy, black_box(r)));
+                }
+            });
+        });
+        group.bench_function(format!("hierarchy_bound ({name})"), |b| {
+            let f = get();
+            b.iter(|| {
+                for (r, composition, _) in &f.parts {
+                    black_box(hierarchy_bound(&galaxy, black_box(r), composition));
+                }
+            });
+        });
+        group.bench_function(format!("pairs and eta ({name})"), |b| {
+            let f = get();
+            b.iter(|| {
+                for (r, composition, hierarchy) in &f.parts {
+                    black_box(StarBounds::from_hierarchy(
+                        &galaxy,
+                        black_box(r),
+                        *composition,
+                        hierarchy,
+                        star_bound_window(r),
+                    ));
+                }
+            });
+        });
+        group.bench_function(format!("phase reads ({name})"), |b| {
+            let f = get();
+            b.iter(|| {
+                for (r, bound) in f.records.iter().zip(&f.bounds) {
+                    let age = r.age_at(UniverseTime::EPOCH);
+                    black_box(bound.brightest(phase, black_box((age, age))));
+                }
+            });
+        });
+        group.bench_function(format!("the whole ({name})"), |b| {
+            let f = get();
+            b.iter(|| {
+                for r in &f.records {
+                    let age = r.age_at(UniverseTime::EPOCH);
+                    let bound = StarBounds::of(&galaxy, black_box(r), star_bound_window(r));
+                    black_box(bound.brightest(phase, (age, age)));
+                }
+            });
+        });
+    }
     group.finish();
 }
 
@@ -1235,6 +1464,7 @@ criterion_group!(
     luminosity_tables,
     census_near_sun,
     census_nuclear_disc,
+    star_bound,
     illumination,
     band_near_sun,
     limit_map
