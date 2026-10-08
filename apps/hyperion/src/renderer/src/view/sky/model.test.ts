@@ -51,6 +51,15 @@ describe("skyRequestReason", () => {
     ).toBe("arrival");
   });
 
+  it("asks again for a sky held at a reply that is not final", () => {
+    const held = heldSky(0, [100]);
+    const partial = { ...held, response: { ...held.response, final: false } };
+    expect(skyRequestReason(partial, { request: skyRequest(0), cameras: [CAMERA] })).toBe(
+      "partial",
+    );
+    expect(skyRequestReason(held, { request: skyRequest(0), cameras: [CAMERA] })).toBeNull();
+  });
+
   it("holds the sky within its validity and asks again past it", () => {
     const held = heldSky(0, [100]);
     expect(skyRequestReason(held, { request: skyRequest(0.5), cameras: [CAMERA] })).toBeNull();

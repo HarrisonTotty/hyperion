@@ -29,5 +29,5 @@ pub use merge::{SkyCensus, merge_census, merge_shells, sky_order};
 pub use query::{
     BuildSkyQueryError, CellSlab, CensusPlan, Completeness, Cone, ConeRegion, MAX_FORCED_CAP_LY,
     MAX_N_MAX, SHELL_EDGES_LY, SHELLED_LAYERS, Shell, SkyContext, SkyQuery, SkyQueryBuilder,
-    census_plan, census_plan_of, plan_cells,
+    census_plan, census_plan_of, census_plan_with_edges, plan_cells,
 };

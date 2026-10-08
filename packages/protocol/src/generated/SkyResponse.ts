@@ -69,4 +69,9 @@ stars_bytes: number,
 /**
  * The payload's band bytes, after the stars: six faces of texels × [`SKY_TEXEL_BYTES`].
  */
-band_bytes: number, };
+band_bytes: number, 
+/**
+ * Whether this is the sky's last answer, every layer's census complete to its cap: the
+ * terminal `response` (rendering plan R06, R06.T11.d). A `partial_response`'s is false.
+ */
+final: boolean, };

@@ -1,9 +1,11 @@
-//! The sky over a real socket (rendering plan R06, R06.T11.a–c): the census as bulk jobs, which a
-//! range query overtakes and a cancel stops, its answer against the sim's own census, its stars
-//! and band in R03's bulk frames as the manifest states them, the stars, texels and host discs
-//! against the sim's for the same query, its census's cells served again from the server's cache,
-//! the galaxy's tables built once for every sky of it, the fields a request it cannot serve names,
-//! and the landing switch, off by default, under which `sky` is `unsupported`.
+//! The sky over a real socket (rendering plan R06, R06.T11.a–d): the census as bulk jobs, which a
+//! range query overtakes within a bounded wait and a cancel stops, its answer against the sim's own
+//! census, its stars and band in R03's bulk frames as the manifest states them, the stars, texels
+//! and host discs against the sim's for the same query, its census's cells served again from the
+//! server's cache, the galaxy's tables built once for every sky of it, the fields a request it
+//! cannot serve names, the landing switch, off by default, under which `sky` is `unsupported`, and
+//! a sky arriving nearest first, each reply the census to its stated radii and the last the
+//! one-shot census.
 //!
 //! Every server here turns the sky on ([`SkyService::Served`]) but the switch's own test, and
 //! forces its sky's caps to a small radius ([`SkyCaps::forced`]), so that a census near the Sun
@@ -18,7 +20,7 @@
 mod common;
 
 use std::num::NonZeroUsize;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use common::{BinaryHeader, Frame, TestClient, TestServer};
 use hyperion_protocol::{
@@ -39,13 +41,18 @@ use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use hyperion_sim::id::Layer;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
-use hyperion_sim::sky::band::{BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows};
-use hyperion_sim::sky::census::{
-    CellOffsets, CensusPlan, CensusTallies, NoSkyCellCache, SkyCensus, SkyContext, SkyQuery,
-    SkyStar, census_cell, census_plan, merge_census,
+use hyperion_sim::sky::band::{
+    BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows,
 };
+use hyperion_sim::sky::census::{
+    CellOffsets, CensusPlan, CensusTallies, Completeness, NoSkyCellCache, Shell, SkyCensus,
+    SkyContext, SkyQuery, SkyStar, census_cell, census_plan, census_plan_with_edges, merge_census,
+    merge_shells,
+};
+use hyperion_sim::sky::dgl::Illumination;
 use hyperion_sim::sky::disc::{HostDisc, host_discs};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
+use hyperion_sim::sky::eye::{SkyBackground, SpRatio, star_colour_offset};
 use hyperion_sim::sky::limits::{Glare, eye_cut, eye_offsets, limit_map};
 use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::stellar::system::SystemStars;
@@ -137,7 +144,7 @@ fn eye() -> EyeDto {
 }
 
 /// A sky's answer as the server sent it: the request's ID, its bulk frames in the order they
-/// arrived, and the terminal response after them.
+/// arrived, and the `partial_response` or terminal response after them.
 struct Sent {
     id: RequestId,
     frames: Vec<(BinaryHeader, Vec<u8>)>,
@@ -154,31 +161,54 @@ impl Sent {
     }
 }
 
-/// The answer to a sky that must be served: its chunks, then its response.
+/// The last answer to a sky that must be served: its chunks, then its response.
 async fn served(client: &mut TestClient, request: SkyRequest) -> Sent {
     let id = client.send_request(RequestBody::Sky(request)).await;
     answer_to(client, id).await
 }
 
-/// The answer to the sky `id`, which the client sent and must be served: its chunks, then its
-/// response.
+/// The last answer to the sky `id`, which the client sent and must be served: its chunks, then its
+/// response, after any answers before it.
 async fn answer_to(client: &mut TestClient, id: RequestId) -> Sent {
+    replies_to(client, id)
+        .await
+        .pop()
+        .expect("a sky ends in its response")
+}
+
+/// Every answer to the sky `id`, which the client sent and must be served, in the order sent: each
+/// `partial_response` with its chunks, not final, then the terminal response, final (R06.T11.d).
+async fn replies_to(client: &mut TestClient, id: RequestId) -> Vec<Sent> {
+    let mut replies = Vec::new();
     let mut frames = Vec::new();
     loop {
         match client.next_frame().await {
             Frame::Binary(header, payload) => frames.push((header, payload)),
+            Frame::Message(ServerMessage::PartialResponse {
+                id: answered,
+                body: ResponseBody::Sky(response),
+            }) if answered == id => {
+                assert!(!response.is_final, "a partial response is not final");
+                replies.push(Sent {
+                    id,
+                    frames: std::mem::take(&mut frames),
+                    response: *response,
+                });
+            }
             Frame::Message(ServerMessage::Response {
                 id: answered,
                 body: ResponseBody::Sky(response),
             }) if answered == id => {
-                return Sent {
+                assert!(response.is_final, "the terminal response is final");
+                replies.push(Sent {
                     id,
                     frames,
                     response: *response,
-                };
+                });
+                return replies;
             }
             Frame::Message(other) => {
-                panic!("expected the sky's chunks and then its response, got {other:?}")
+                panic!("expected the sky's chunks and then its responses, got {other:?}")
             }
         }
     }
@@ -234,6 +264,16 @@ fn context_over(tables: &Tables) -> SkyContext<'_> {
         sources: &[],
         modifiers: &NoModifiers,
     }
+}
+
+/// The request's illumination over `tables`, as the server states it on every sky's query
+/// (R06.T9.g).
+fn illumination_over(tables: &Tables) -> Arc<Illumination> {
+    Arc::new(Illumination::march(
+        galaxy(),
+        &mut context_over(tables),
+        &observer(),
+    ))
 }
 
 /// The sim's own census of `query` in one pass over its plan's cells, merged as one part.
@@ -386,12 +426,13 @@ async fn the_cut_is_the_eyes_under_a_shallower_camera() {
     )
     .await
     .response;
+    let light = illumination_over(dark_tables());
     let expected = eye_cut(
         galaxy(),
         &mut context(),
         &observer(),
         &EyeObserver::default(),
-        None,
+        Some(&light),
     );
     assert_eq!(response.cut_v.to_bits(), expected.value().to_bits());
     assert!(
@@ -563,40 +604,66 @@ async fn census_under_way(server: &TestServer) -> ServerStats {
     stats
 }
 
-/// A range query sent while a sky's census runs is answered before the sky: the census is bulk
-/// work, and the pool's workers take interactive work first.
+/// A range query near the Sun, which the tests send while a sky's census runs.
+fn range_query(universe: &UniverseIdHex) -> RequestBody {
+    RequestBody::SystemsInRange(SystemsInRangeRequest {
+        universe: universe.clone(),
+        centre: GalacticPosition {
+            cell_ly: SUN_LY,
+            offset_m: [0.0; 3],
+        },
+        radius_ly: 10.0,
+        time: UniverseTime::default(),
+        min_layer: MassLayer::A,
+        limit: 100,
+        include_stellar: false,
+    })
+}
+
+/// Reads the next message, which must be the range query `id`'s answer.
+async fn expect_range_answer(client: &mut TestClient, id: RequestId) {
+    match client.next_message().await {
+        ServerMessage::Response {
+            id: answered,
+            body: ResponseBody::SystemsInRange(_),
+        } => assert_eq!(answered, id),
+        other => panic!("expected the range query's answer before the sky's, got {other:?}"),
+    }
+}
+
+/// A range query sent while a sky's census runs is answered before the sky, and within a bounded
+/// wait: the census is bulk work, the pool's workers take interactive work first, and a census job
+/// runs for about 50 ms before it hands the rest of its cells back (R06.T11.d).
+///
+/// The wait is counted in jobs, not timed: from the query's sending to its answer, the one worker
+/// completes the query's own jobs, as many as on an idle pool, and between them at most one bulk
+/// job each, the census job or band march it has in hand when the query's next job is queued.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_range_query_sent_while_a_skys_jobs_run_is_answered_first() {
     let (server, _data_dir) = sky_server(LONG_CAP_LY, 1).await;
     let (mut client, universe) = opened(&server).await;
+    // The query's own jobs, on an idle pool.
+    let idle = server.stats().pool().completed();
+    let alone = client.send_request(range_query(&universe)).await;
+    expect_range_answer(&mut client, alone).await;
+    let own = server.stats().pool().completed() - idle;
+    assert!(own > 0, "the range query runs on the pool");
+
     let sky_id = client.send_request(RequestBody::Sky(sky(&universe))).await;
     census_under_way(&server).await;
-
-    let query_id = client
-        .send_request(RequestBody::SystemsInRange(SystemsInRangeRequest {
-            universe: universe.clone(),
-            centre: GalacticPosition {
-                cell_ly: SUN_LY,
-                offset_m: [0.0; 3],
-            },
-            radius_ly: 10.0,
-            time: UniverseTime::default(),
-            min_layer: MassLayer::A,
-            limit: 100,
-            include_stellar: false,
-        }))
-        .await;
-    match client.next_message().await {
-        ServerMessage::Response {
-            id,
-            body: ResponseBody::SystemsInRange(_),
-        } => assert_eq!(id, query_id),
-        other => panic!("expected the range query's answer before the sky's, got {other:?}"),
-    }
+    let before = server.stats().pool().completed();
+    let query_id = client.send_request(range_query(&universe)).await;
+    expect_range_answer(&mut client, query_id).await;
     let pool = server.stats().pool();
     assert!(
         pool.running() + pool.queued_bulk() > 0,
         "the sky was still being censused when the query was answered: {pool:?}"
+    );
+    let waited = pool.completed() - before;
+    assert!(
+        waited <= 2 * own + 1,
+        "the query waited for at most a bulk job before each of its {own} jobs, and one more as \
+         it arrived: {waited} jobs completed meanwhile"
     );
 
     // The sky is given up rather than waited for.
@@ -841,19 +908,12 @@ fn texel_wire(texel: &BandTexel) -> Vec<u8> {
     bytes
 }
 
-/// The band of `query`'s census `census`, complete to `complete_to`, at the server's band, its six
-/// faces marched on threads of their own, then its limit map and eye offsets: the sim's own, as
-/// R06.T9.f's `march_rows` of the server's one reply and `sum_rows`, T9.c's `limit_map` and T9.h's
-/// `eye_offsets` give them. It marches the replies the server marches, as T9.f's record asks of
-/// this comparison, so that T11.d's several replies change only the replies given.
-fn sim_band(
-    tables: &Tables,
-    query: &SkyQuery,
-    census: &SkyCensus,
-    complete_to: &CompleteTo,
-) -> (Vec<BandTexel>, Vec<Magnitudes>) {
+/// The sim's march of the server's band for `query`, its six faces on threads of their own, for
+/// every reply `plan`'s shells can state, as the server marches it once a request (R06.T9.f's
+/// record asks this comparison to march the server's replies).
+fn sim_marches(tables: &Tables, query: &SkyQuery, plan: &CensusPlan) -> Vec<BandMarch> {
     let spec = BandSpec::STANDARD;
-    let faces: Vec<Vec<BandTexel>> = std::thread::scope(|scope| {
+    std::thread::scope(|scope| {
         let marching: Vec<_> = CubeFace::ALL
             .chunks(2)
             .map(|faces| {
@@ -862,18 +922,15 @@ fn sim_band(
                     faces
                         .iter()
                         .map(|&face| {
-                            let march = march_rows(
+                            march_rows(
                                 galaxy(),
                                 &mut ctx,
                                 query,
-                                [complete_to.clone()],
+                                plan.replies(),
                                 &spec,
                                 face,
                                 0..spec.face_texels(),
-                            );
-                            let mut texels = Vec::new();
-                            sum_rows(&march, census, complete_to, &mut texels);
-                            texels
+                            )
                         })
                         .collect::<Vec<_>>()
                 })
@@ -883,14 +940,64 @@ fn sim_band(
             .into_iter()
             .flat_map(|faces| faces.join().expect("a face's march"))
             .collect()
-    });
-    let mut band: Vec<BandTexel> = faces.into_iter().flatten().collect();
-    let eye = *query.eye().expect("the eye was asked");
-    let eye_cut = query.eye_cut().expect("the eye's cut");
+    })
+}
+
+/// The band of `query`'s census `census`, complete to `complete_to`, summed from `marches`
+/// ([`sim_marches`]'), then where the eye is asked its limit map and eye offsets: the sim's own,
+/// as R06.T9.f's `sum_rows`, T9.c's `limit_map` and T9.h's `eye_offsets` give them.
+fn sim_band(
+    marches: &[BandMarch],
+    query: &SkyQuery,
+    census: &SkyCensus,
+    complete_to: &CompleteTo,
+) -> (Vec<BandTexel>, Vec<Magnitudes>) {
+    let spec = BandSpec::STANDARD;
+    let mut band = Vec::with_capacity(BAND_TEXELS);
+    for march in marches {
+        sum_rows(march, census, complete_to, &mut band);
+    }
+    let (Some(&eye), Some(eye_cut)) = (query.eye(), query.eye_cut()) else {
+        return (band, Vec::new());
+    };
     let glare = Glare::of_listed(query.observer(), census.listed(), &spec, eye_cut);
     limit_map(&eye, &spec, &glare, &mut band);
     let offsets = eye_offsets(&eye, &spec, &glare, &band);
     (band, offsets)
+}
+
+/// Asserts that `response` is a sky's final reply, every layer complete to its cap of `cap_ly` in
+/// every direction (R06.T11.d).
+fn assert_final_to(response: &SkyResponse, cap_ly: f64) {
+    assert!(response.is_final);
+    for layer in &response.census {
+        assert_eq!(
+            (
+                layer.complete_to_ly,
+                layer.complete_to_rays_ly.len(),
+                layer.is_final
+            ),
+            (cap_ly, 0, true),
+            "{:?}",
+            layer.layer
+        );
+    }
+}
+
+/// Asserts that `sent`, a payload's band bytes, are `band`'s texels as the wire carries them, of
+/// the reply `what`.
+fn assert_band_sent(band: &[BandTexel], sent: &[u8], what: &str) {
+    assert_eq!(band.len(), BAND_TEXELS);
+    let (texels, rest) = sent.as_chunks::<SKY_TEXEL_BYTES>();
+    assert!(rest.is_empty());
+    assert_eq!(texels.len(), BAND_TEXELS);
+    for (index, (texel, bytes)) in band.iter().zip(texels).enumerate() {
+        assert_eq!(
+            bytes.as_slice(),
+            texel_wire(texel).as_slice(),
+            "{what}, texel {index}"
+        );
+    }
 }
 
 /// The host disc `disc` as the reply should carry it.
@@ -946,15 +1053,17 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
     let tables = building.join().expect("the sim's tables");
     assert_eq!(server.stats().sky_tables().builds(), 1);
 
-    // The same query in the sim: the eye's cut, then the cut, the census, the band and the discs.
+    // The same query in the sim: the illumination, the eye's cut, then the cut, the census, the
+    // band and the discs.
     let observer = observer();
     let eye_observer = EyeObserver::default();
+    let light = illumination_over(&tables);
     let eye_cut = eye_cut(
         galaxy(),
         &mut context_over(&tables),
         &observer,
         &eye_observer,
-        None,
+        Some(&light),
     );
     let cut = eye_cut.value().max(CAMERA_LIMIT_V);
     assert_eq!(response.cut_v.to_bits(), cut.to_bits());
@@ -963,6 +1072,7 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
         .eye_cut(eye_cut)
         .n_max(std::num::NonZeroU32::new(n_max).expect("not zero"))
         .exclude(host.id())
+        .illumination(light)
         .build()
         .expect("a query")
         .with_caps_forced(LightYears::new(SMALL_CAP_LY))
@@ -980,7 +1090,10 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
             u32::try_from(census.overflow().len()).unwrap()
         )
     );
-    let (band, offsets) = sim_band(&tables, &query, &census, &CompleteTo::of_caps(plan.caps()));
+    // To 30 ly every layer is one shell, so the sky is one reply, final, complete to its caps.
+    assert_final_to(response, SMALL_CAP_LY);
+    let marches = sim_marches(&tables, &query, &plan);
+    let (band, offsets) = sim_band(&marches, &query, &census, &CompleteTo::of_caps(plan.caps()));
     assert!(
         band.iter().all(|texel| texel.luminance().value() > 0.0),
         "the galaxy's light beyond the caps fills every texel"
@@ -1003,19 +1116,8 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
         let expected = star_wire(&observer, star, *offset);
         assert_eq!(bytes.as_slice(), expected.as_slice(), "star {index}");
     }
-    assert_eq!(band.len(), BAND_TEXELS);
-    for (index, (texel, bytes)) in band
-        .iter()
-        .zip(texels.as_chunks::<SKY_TEXEL_BYTES>().0)
-        .enumerate()
-    {
-        assert!(texel.eye_limit().is_some(), "texel {index} has its limit");
-        assert_eq!(
-            bytes.as_slice(),
-            texel_wire(texel).as_slice(),
-            "texel {index}"
-        );
-    }
+    assert!(band.iter().all(|texel| texel.eye_limit().is_some()));
+    assert_band_sent(&band, texels, "the sky");
 
     // The host's discs at the request's time.
     let stars = SystemStars::generate(galaxy(), &host);
@@ -1089,6 +1191,258 @@ async fn a_second_sky_in_another_time_bucket_shares_the_build() {
         built.cache().hits() + 1,
         "the second sky found the first's tables: {built:?}, then {shared:?}"
     );
+    client.close().await;
+    server.stop().await;
+}
+
+/// The shell edges of the nearest-first test, ly: four below its caps of [`SMALL_CAP_LY`], so that
+/// C, D and E are censused in five shells each, and C's fourth and fifth, beyond the third edge,
+/// come a step late, as C's beyond 2,000 ly do near the Sun.
+const TEST_SHELL_EDGES_LY: [u32; 4] = [10, 15, 20, 25];
+
+/// The steps a sky of `plan` arrives in (R06.T11.d): each layer's shells rank by rank, nearest
+/// first, but C's from its fourth on a step late.
+fn delivery(plan: &CensusPlan) -> Vec<Vec<Shell>> {
+    let mut steps: Vec<Vec<Shell>> = Vec::new();
+    for shell in plan.shells() {
+        let late = shell.layer() == Layer::C && shell.index() >= 3;
+        let step = usize::from(shell.index()) + usize::from(late);
+        if steps.len() <= step {
+            steps.resize_with(step + 1, Vec::new);
+        }
+        steps[step].push(shell);
+    }
+    steps.retain(|step| !step.is_empty());
+    steps
+}
+
+/// The sim's census of `plan`'s shells `done`, serially in their order over [`dark_tables`],
+/// merged to their completeness (R06.T8.i's `merge_shells`).
+fn sim_shells_census(query: &SkyQuery, plan: &CensusPlan, done: &[Shell]) -> SkyCensus {
+    let galaxy = galaxy();
+    let mut ctx = context();
+    let mut stars = Vec::new();
+    let mut tallies: Option<CensusTallies> = None;
+    for &shell in done {
+        for key in plan.shell_slabs(shell).flat_map(|slab| slab.cells()) {
+            let cell = census_cell(galaxy, &mut ctx, key, query, &mut stars);
+            match &mut tallies {
+                Some(sum) => sum.add(&cell),
+                None => tallies = Some(cell),
+            }
+        }
+    }
+    merge_shells(
+        tallies.map(|tallies| (stars, tallies)),
+        query.n_max(),
+        plan.completeness(done.iter().copied()),
+    )
+}
+
+/// Each listed star's bytes on the wire, in the census's order, of a sky that asks no eye: its eye
+/// offset its colour offset alone against a scotopic background (Design note 17; R06.T11.a).
+fn listed_on_the_wire(census: &SkyCensus) -> Vec<Vec<u8>> {
+    let dark = SkyBackground::new(CandelasPerSquareMetre::ZERO, SpRatio::REFERENCE)
+        .expect("no light is a background");
+    census
+        .listed()
+        .iter()
+        .map(|star| {
+            let ratio = star.colour().reddened(star.a_v()).sp_ratio();
+            let ratio = SpRatio::new(ratio.clamp(SpRatio::MIN.value(), SpRatio::MAX.value()))
+                .expect("a ratio held within the accepted range");
+            star_wire(&observer(), star, star_colour_offset(ratio, &dark))
+        })
+        .collect()
+}
+
+/// Asserts that `reply`, the `k`th of request `id`, is a whole sky's frames, its chunks numbered
+/// from 0 as its manifest counts them, and returns its payload.
+fn whole_payload(reply: &Sent, id: RequestId, k: usize) -> Vec<u8> {
+    let manifest = &reply.response.bulk;
+    assert_eq!(
+        reply.frames.len(),
+        usize::try_from(manifest.chunks).unwrap()
+    );
+    for (index, (header, _)) in reply.frames.iter().enumerate() {
+        assert_eq!(
+            (header.request, header.index, header.count),
+            (id.0, u32::try_from(index).unwrap(), manifest.chunks),
+            "reply {k}, frame {index}"
+        );
+    }
+    let payload = reply.payload();
+    assert_eq!(u64::try_from(payload.len()).unwrap(), manifest.bytes);
+    payload
+}
+
+/// Each layer's radius and finality as `response`, the `k`th reply, states them, asserted against
+/// `completeness`: one radius in every direction, the caps being forced, of `cap_ly` once final.
+fn stated_radii(
+    response: &SkyResponse,
+    completeness: &Completeness,
+    cap_ly: f64,
+    k: usize,
+) -> Vec<(Layer, LightYears, bool)> {
+    response
+        .census
+        .iter()
+        .zip(CAPPED)
+        .map(|(dto, (layer, wire))| {
+            let edge = completeness.edge(layer);
+            assert_eq!(dto.layer, wire);
+            assert_eq!(
+                (dto.complete_to_ly, dto.is_final),
+                (edge.map_or(cap_ly, LightYears::value), edge.is_none()),
+                "reply {k}, {layer:?}"
+            );
+            assert!(dto.complete_to_rays_ly.is_empty());
+            (layer, LightYears::new(dto.complete_to_ly), dto.is_final)
+        })
+        .collect()
+}
+
+/// The census near the Sun at [`CAMERA_LIMIT_V`] with each layer's cap forced to its radius in
+/// `radii`, less its stars at or beyond the radius in a layer not final, cut at `n_max`.
+fn census_to(radii: &[(Layer, LightYears, bool)], n_max: std::num::NonZeroU32) -> SkyCensus {
+    let to_radii: Vec<(Layer, LightYears)> = radii.iter().map(|&(l, r, _)| (l, r)).collect();
+    let query = SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
+        .n_max(n_max)
+        .build()
+        .expect("a query")
+        .with_caps_forced_per_layer(&to_radii)
+        .expect("forced caps");
+    let forced = sim_census(&query);
+    let within: Vec<SkyStar> = forced
+        .listed()
+        .iter()
+        .chain(forced.overflow())
+        .filter(|star| {
+            radii.iter().any(|&(layer, radius, is_final)| {
+                layer == star.layer() && (is_final || star.distance() < radius)
+            })
+        })
+        .copied()
+        .collect();
+    merge_census([(within, *forced.tallies())], n_max)
+}
+
+/// The listed stars' bytes in `payload`, a reply's whose response is `response`, each star's own.
+fn stars_sent(response: &SkyResponse, payload: &[u8]) -> Vec<Vec<u8>> {
+    let stars_bytes = usize::try_from(response.stars_bytes).unwrap();
+    let (stars, rest) = payload[..stars_bytes].as_chunks::<SKY_STAR_BYTES>();
+    assert!(rest.is_empty());
+    stars.iter().map(|star| star.to_vec()).collect()
+}
+
+/// A sky arrives nearest first (R06.T11.d): a reply after each step of shells, each a whole sky
+/// with its chunks numbered from 0, the last alone final. Each reply's stars are the census to the
+/// radii it states, layer by layer, and the census with every cap forced to those radii, less its
+/// stars at or beyond them, lists the same; its band is the one march's sum at those radii; and the
+/// last reply is the one-shot census, star for star.
+///
+/// The caps are forced to 30 ly with nearer shell edges than the fixed ones (the server's test
+/// seam), so that the census takes seconds: a census of the fixed edges' first shell, C, D and E
+/// to 500 ly, is minutes of a worker in a test build.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii() {
+    let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a small forced cap")
+        .with_shell_edges(&TEST_SHELL_EDGES_LY);
+    let (server, _data_dir) = sky_server_with(caps, 3).await;
+    let (mut client, universe) = opened(&server).await;
+    let n_max = std::num::NonZeroU32::new(24).expect("not zero");
+    let id = client
+        .send_request(RequestBody::Sky(SkyRequest {
+            n_max: Some(n_max.get()),
+            ..sky(&universe)
+        }))
+        .await;
+    let replies = replies_to(&mut client, id).await;
+
+    // The same sky in the sim.
+    let query = SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
+        .n_max(n_max)
+        .illumination(illumination_over(dark_tables()))
+        .build()
+        .expect("a query")
+        .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a forced cap");
+    let forced = query.forced_caps().expect("forced caps").to_vec();
+    let plan = census_plan_with_edges(&query, forced, &TEST_SHELL_EDGES_LY);
+    let steps = delivery(&plan);
+    assert_eq!(steps.len(), 6, "{steps:?}");
+    assert_eq!(replies.len(), steps.len(), "a reply a step");
+    let marches = sim_marches(dark_tables(), &query, &plan);
+
+    let mut done: Vec<Shell> = Vec::new();
+    let mut least_edges = Vec::new();
+    for (k, (reply, step)) in replies.iter().zip(&steps).enumerate() {
+        done.extend_from_slice(step);
+        let completeness = plan.completeness(done.iter().copied());
+        let response = &reply.response;
+        let last = k + 1 == steps.len();
+        assert_eq!((response.is_final, completeness.is_final()), (last, last));
+        least_edges.push(completeness.least_edge().map(LightYears::value));
+        let payload = whole_payload(reply, id, k);
+        let radii = stated_radii(response, &completeness, SMALL_CAP_LY, k);
+
+        // The stars are the census of the shells done, in its order, and the census forced to the
+        // reply's radii, less its stars beyond them, lists the same.
+        let census = sim_shells_census(&query, &plan, &done);
+        let sent = stars_sent(response, &payload);
+        assert_eq!(sent, listed_on_the_wire(&census), "reply {k}'s stars");
+        assert_eq!(
+            (response.listed, response.overflow),
+            (
+                u32::try_from(census.listed().len()).unwrap(),
+                u32::try_from(census.overflow().len()).unwrap()
+            )
+        );
+        assert_eq!(
+            sent,
+            listed_on_the_wire(&census_to(&radii, n_max)),
+            "reply {k} against the census forced to its radii"
+        );
+
+        // The band: the one march's sum at the reply's radii, texel for texel.
+        let (band, _) = sim_band(&marches, &query, &census, completeness.complete_to());
+        let stars_bytes = usize::try_from(response.stars_bytes).unwrap();
+        assert_band_sent(&band, &payload[stars_bytes..], &format!("reply {k}"));
+    }
+    // Nearest first: the least edge reached never falls, and the last reply has none.
+    assert_eq!(
+        least_edges,
+        [
+            Some(10.0),
+            Some(15.0),
+            Some(20.0),
+            Some(20.0),
+            Some(25.0),
+            None
+        ]
+    );
+
+    // The last reply is the one-shot census, star for star and tally for tally.
+    let one_shot = sim_census(&query);
+    let last = replies.last().expect("a reply");
+    assert_eq!(
+        stars_sent(&last.response, &last.payload()),
+        listed_on_the_wire(&one_shot)
+    );
+    assert_eq!(
+        last.response.overflow,
+        u32::try_from(one_shot.overflow().len()).unwrap()
+    );
+    for (dto, (layer, _)) in last.response.census.iter().zip(CAPPED) {
+        let tally = one_shot.tallies().layer(layer);
+        assert_eq!(
+            (u64::from(dto.cells), dto.accepted, u64::from(dto.listed)),
+            (tally.cells(), tally.accepted(), tally.listed()),
+            "{layer:?}"
+        );
+    }
+
     client.close().await;
     server.stop().await;
 }

@@ -183,6 +183,7 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
             console.error("server rejected message:", message.message);
             break;
           case "response":
+          case "partial_response":
           case "request_error":
           case "notification":
           case "subscription_ended":

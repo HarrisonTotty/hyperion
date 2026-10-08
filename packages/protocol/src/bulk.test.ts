@@ -143,6 +143,112 @@ describe("RequestClient with bulk answers", () => {
     ]);
   });
 
+  it("hands over each partial answer whole, its chunks from 0 again, before the last", async () => {
+    const { client } = recordingClient();
+    const manifests: BulkManifestDto[] = [
+      { chunks: 1, bytes: 2 },
+      { chunks: 2, bytes: 3 },
+      { chunks: 1, bytes: 1 },
+    ];
+    let read = 0;
+    const partials: number[][][] = [];
+    const pending = client.requestBulk(
+      { kind: "list_universes" },
+      () => {
+        const manifest = manifests[read];
+        read += 1;
+        return manifest ?? null;
+      },
+      {
+        onPartial: (answer) => {
+          partials.push(bytesOf(answer.chunks));
+        },
+      },
+    );
+
+    client.handleBinaryFrame(frame(1, 0, 1, [1, 2]));
+    client.handleServerMessage({ type: "partial_response", id: 1, body: ANSWER });
+    client.handleBinaryFrame(frame(1, 0, 2, [3, 4]));
+    client.handleBinaryFrame(frame(1, 1, 2, [5]));
+    client.handleServerMessage({ type: "partial_response", id: 1, body: ANSWER });
+    client.handleBinaryFrame(frame(1, 0, 1, [6]));
+    expect(partials).toEqual([[[1, 2]], [[3, 4], [5]]]);
+    client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+
+    const outcome = await pending.outcome;
+    if (!outcome.ok) {
+      throw new Error(outcome.error.message);
+    }
+    expect(bytesOf(outcome.chunks)).toEqual([[6]]);
+  });
+
+  it("fails the request as internal and cancels it when a partial answer lacks its chunks", async () => {
+    const { client, sent } = recordingClient();
+    let partials = 0;
+    const pending = client.requestBulk(
+      { kind: "list_universes" },
+      () => ({ chunks: 2, bytes: 4 }),
+      {
+        onPartial: () => {
+          partials += 1;
+        },
+      },
+    );
+
+    client.handleBinaryFrame(frame(1, 0, 2, [1, 2]));
+    client.handleServerMessage({ type: "partial_response", id: 1, body: ANSWER });
+
+    await expect(pending.outcome).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal", message: expect.stringMatching(/received 1 chunks/) },
+    });
+    expect(partials).toBe(0);
+    expect(sent).toContainEqual({ type: "cancel", id: 1 });
+  });
+
+  it("fails a request answered in part with another kind as a protocol violation", async () => {
+    const { client, sent } = recordingClient();
+    const pending = client.requestBulk(
+      { kind: "open_universe", universe: "000000000000002a" },
+      () => null,
+    );
+
+    client.handleServerMessage({ type: "partial_response", id: 1, body: ANSWER });
+
+    await expect(pending.outcome).resolves.toMatchObject({
+      ok: false,
+      error: { code: "protocol_violation" },
+    });
+    expect(sent).toContainEqual({ type: "cancel", id: 1 });
+  });
+
+  it("drops a partial answer's chunks for a request that takes no partial answers", async () => {
+    const { client } = recordingClient();
+    let read = 0;
+    const pending = client.requestBulk({ kind: "list_universes" }, () => {
+      read += 1;
+      return read === 1 ? { chunks: 1, bytes: 2 } : { chunks: 1, bytes: 1 };
+    });
+
+    client.handleBinaryFrame(frame(1, 0, 1, [1, 2]));
+    client.handleServerMessage({ type: "partial_response", id: 1, body: ANSWER });
+    client.handleBinaryFrame(frame(1, 0, 1, [3]));
+    client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+
+    const outcome = await pending.outcome;
+    if (!outcome.ok) {
+      throw new Error(outcome.error.message);
+    }
+    expect(bytesOf(outcome.chunks)).toEqual([[3]]);
+  });
+
+  it("drops a partial answer for a request that is not in flight", () => {
+    const { client } = recordingClient();
+    expect(client.handleServerMessage({ type: "partial_response", id: 9, body: ANSWER })).toBe(
+      true,
+    );
+  });
+
   it("resolves a response with no bulk and no chunks", async () => {
     const { client } = recordingClient();
     const pending = bulkRequest(client, null);

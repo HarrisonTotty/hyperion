@@ -1452,6 +1452,29 @@ pub fn census_plan_of(query: &SkyQuery, caps: Vec<LayerCap>) -> CensusPlan {
     plan_with_edges(query, caps, &SHELL_EDGES_LY)
 }
 
+/// [`census_plan_of`] with the shells' edges `edges_ly`, ascending, in place of
+/// [`SHELL_EDGES_LY`]: a test's nearer edges, so that a census a test can afford still has several
+/// shells. The server's tests reach it through their own seam (R06.T11.d); no sky a client asks
+/// takes other edges than [`SHELL_EDGES_LY`], which are constants.
+///
+/// # Panics
+///
+/// Unless every edge is above nought and they ascend, and as [`census_plan_of`].
+#[doc(hidden)]
+#[must_use]
+pub fn census_plan_with_edges(
+    query: &SkyQuery,
+    caps: Vec<LayerCap>,
+    edges_ly: &[u32],
+) -> CensusPlan {
+    assert!(
+        edges_ly.first().is_none_or(|&first| first > 0)
+            && edges_ly.windows(2).all(|pair| pair[0] < pair[1]),
+        "shell edges are above nought and ascend: {edges_ly:?}"
+    );
+    plan_with_edges(query, caps, edges_ly)
+}
+
 /// [`census_plan_of`] with the shells' edges `edges_ly`, ascending: [`SHELL_EDGES_LY`], or a test's
 /// nearer ones, so that a test's census can afford shells.
 #[must_use]

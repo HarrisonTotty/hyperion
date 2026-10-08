@@ -7,6 +7,17 @@
 //! split by [`SkyResponse::stars_bytes`] and [`SkyResponse::band_bytes`], whose sum is the
 //! manifest's `bytes`. The client decodes the payload only once it is complete.
 //!
+//! # Nearest first
+//!
+//! A sky arrives as several answers, nearest first (rendering plan R06, R06.T11.d; Design notes 11
+//! and 13): the server censuses each layer shell by shell to fixed edges (500 ly, then 1,000 × 2^k
+//! ly) and sends a whole sky after each step, `partial_response`s, then the last as the terminal
+//! `response`, [`SkyResponse::is_final`]. Each is the exact census to the radii it states, layer by
+//! layer ([`SkyLayerCensusDto::complete_to_ly`] and its per-ray table), with the band holding the
+//! light beyond them; each replaces the one before whole. Every machine sends the same answers, in
+//! the same order, only at its own pace. A consumer of the sky's list reads `final` and
+//! `complete_to_ly`: a star missing from an answer that is not final may lie beyond its radii.
+//!
 //! # The payload
 //!
 //! Every value is little-endian. A star is [`SKY_STAR_BYTES`], 24 (Design note 17):
@@ -168,15 +179,21 @@ pub struct SkyResponse {
     /// The payload's band bytes, after the stars: six faces of texels × [`SKY_TEXEL_BYTES`].
     #[ts(type = "number")]
     pub band_bytes: u64,
+    /// Whether this is the sky's last answer, every layer's census complete to its cap: the
+    /// terminal `response` (rendering plan R06, R06.T11.d). A `partial_response`'s is false.
+    #[serde(rename = "final")]
+    pub is_final: bool,
 }
 
-/// One layer's census: its cap, what the census opened and kept, and what it could not model.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+/// One layer's census: its cap, what the census opened and kept, how far it is complete, and what it
+/// could not model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SkyLayerCensusDto {
     /// The mass layer.
     pub layer: MassLayer,
-    /// The radius the census searched to, ly (Design note 9).
+    /// The radius the census searches to, ly (Design note 9): since rendering plan R06.T7.b, its
+    /// farthest ray's, the cap being one radius a ray of the caps' lattice.
     pub cap_ly: f64,
     /// The rule's bound on that radius, ly: no star of the layer beyond it can pass the cut.
     pub rule_bound_ly: f64,
@@ -196,6 +213,25 @@ pub struct SkyLayerCensusDto {
     pub without_photometry: u32,
     /// Whether the layer's feature members (clusters, the galactic centre) are absent.
     pub feature_members_absent: bool,
+    /// How far this answer's census of the layer is complete, ly, in its farthest direction
+    /// (rendering plan R06, R06.T11.d): the fixed shell edge its shells reach, 500 ly or
+    /// 1,000 × 2^k ly, while it is not [`final`](Self::is_final), and `cap_ly` once it is. Towards
+    /// each ray of the caps' lattice it is complete to that ray's radius in
+    /// [`complete_to_rays_ly`](Self::complete_to_rays_ly), the edge held within the cap. It lists
+    /// a star, until it is final, only where the star lies nearer than that radius towards the
+    /// centre of its band texel, whose ray the band holds all of the layer's light beyond.
+    pub complete_to_ly: f64,
+    /// The radius to which the layer is complete along each ray of the caps' lattice, ly, in the
+    /// lattice's order: the sim's `sky::caps::CapLattice` of as many rays as the table holds
+    /// (1,536), each ray's cap radius held within the shell edge reached. Empty where the layer is
+    /// complete to one radius in every direction, `complete_to_ly`. Towards a direction it is
+    /// complete to the largest of these over the rays within the lattice's spacing of it.
+    pub complete_to_rays_ly: Vec<f64>,
+    /// Whether the layer's last shell is censused: it lists every star of the cells it opens, as a
+    /// one-shot census does, and is complete to its cap. Layers A and B and the brown dwarfs, one
+    /// shell each, are final from the first answer.
+    #[serde(rename = "final")]
+    pub is_final: bool,
 }
 
 /// The band map's shape: a cube on the galactic axes.
@@ -351,6 +387,9 @@ mod tests {
                 listed: 79,
                 without_photometry: 0,
                 feature_members_absent: true,
+                complete_to_ly: 4_000.0,
+                complete_to_rays_ly: vec![3_500.0, 4_000.0],
+                is_final: false,
             }],
             listed: 2,
             overflow: 1,
@@ -363,6 +402,7 @@ mod tests {
             },
             stars_bytes: 48,
             band_bytes: 294_912,
+            is_final: false,
         };
         assert_eq!(
             response.stars_bytes + response.band_bytes,
@@ -407,6 +447,9 @@ mod tests {
                     "listed": 79,
                     "without_photometry": 0,
                     "feature_members_absent": true,
+                    "complete_to_ly": 4_000.0,
+                    "complete_to_rays_ly": [3_500.0, 4_000.0],
+                    "final": false,
                 }],
                 "listed": 2,
                 "overflow": 1,
@@ -416,6 +459,7 @@ mod tests {
                 "bulk": { "chunks": 2, "bytes": 294_960 },
                 "stars_bytes": 48,
                 "band_bytes": 294_912,
+                "final": false,
             }),
         );
     }

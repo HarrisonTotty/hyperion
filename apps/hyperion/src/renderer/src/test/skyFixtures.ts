@@ -91,6 +91,7 @@ export function skyResponse(
     bulk: { chunks, bytes: payload.byteLength },
     stars_bytes: starsBytes,
     band_bytes: payload.byteLength - starsBytes,
+    final: true,
   };
 }
 

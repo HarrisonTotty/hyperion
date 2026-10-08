@@ -2,7 +2,8 @@
 import type { MassLayer } from "./MassLayer";
 
 /**
- * One layer's census: its cap, what the census opened and kept, and what it could not model.
+ * One layer's census: its cap, what the census opened and kept, how far it is complete, and what it
+ * could not model.
  */
 export type SkyLayerCensusDto = { 
 /**
@@ -10,7 +11,8 @@ export type SkyLayerCensusDto = {
  */
 layer: MassLayer, 
 /**
- * The radius the census searched to, ly (Design note 9).
+ * The radius the census searches to, ly (Design note 9): since rendering plan R06.T7.b, its
+ * farthest ray's, the cap being one radius a ray of the caps' lattice.
  */
 cap_ly: number, 
 /**
@@ -44,4 +46,28 @@ without_photometry: number,
 /**
  * Whether the layer's feature members (clusters, the galactic centre) are absent.
  */
-feature_members_absent: boolean, };
+feature_members_absent: boolean, 
+/**
+ * How far this answer's census of the layer is complete, ly, in its farthest direction
+ * (rendering plan R06, R06.T11.d): the fixed shell edge its shells reach, 500 ly or
+ * 1,000 × 2^k ly, while it is not [`final`](Self::is_final), and `cap_ly` once it is. Towards
+ * each ray of the caps' lattice it is complete to that ray's radius in
+ * [`complete_to_rays_ly`](Self::complete_to_rays_ly), the edge held within the cap. It lists
+ * a star, until it is final, only where the star lies nearer than that radius towards the
+ * centre of its band texel, whose ray the band holds all of the layer's light beyond.
+ */
+complete_to_ly: number, 
+/**
+ * The radius to which the layer is complete along each ray of the caps' lattice, ly, in the
+ * lattice's order: the sim's `sky::caps::CapLattice` of as many rays as the table holds
+ * (1,536), each ray's cap radius held within the shell edge reached. Empty where the layer is
+ * complete to one radius in every direction, `complete_to_ly`. Towards a direction it is
+ * complete to the largest of these over the rays within the lattice's spacing of it.
+ */
+complete_to_rays_ly: Array<number>, 
+/**
+ * Whether the layer's last shell is censused: it lists every star of the cells it opens, as a
+ * one-shot census does, and is complete to its cap. Layers A and B and the brown dwarfs, one
+ * shell each, are final from the first answer.
+ */
+final: boolean, };

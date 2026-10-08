@@ -464,7 +464,7 @@ mod tests {
     };
     use hyperion_sim::id::BodyId;
 
-    use crate::requests::{Handler, HandlerFuture, SubscribeFuture};
+    use crate::requests::{Handler, HandlerFuture, Replies, SubscribeFuture};
     use crate::scene::{CraftSource, CraftState, SceneKnowledge};
     use crate::testing::{Client, Harness, NEVER, Scripted, WAIT};
     use crate::ws::ConnectionLimits;
@@ -636,8 +636,9 @@ mod tests {
             state: Arc<AppState>,
             body: RequestBody,
             token: CancelToken,
+            replies: Replies,
         ) -> HandlerFuture {
-            self.0.handle(state, body, token)
+            self.0.handle(state, body, token, replies)
         }
 
         fn subscribe(

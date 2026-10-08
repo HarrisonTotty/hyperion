@@ -232,6 +232,8 @@ pub struct Completeness; impl CensusPlan { pub fn shells(&self); pub fn shell_sl
     -> Vec<CompleteTo>; } impl CellSlab { pub fn shell(&self) -> Shell; }
 pub fn merge_shells(parts, n_max: NonZeroU32, completeness: Completeness) -> SkyCensus;
 impl SkyCensus { pub fn completeness(&self) -> Option<&Completeness>; }  // R06.T8.i, as built
+#[doc(hidden)] pub fn census_plan_with_edges(query: &SkyQuery, caps: Vec<LayerCap>,
+    edges_ly: &[u32]) -> CensusPlan;      // R06.T11.d, as built: a test's nearer shell edges
 pub struct CensusTallies { /* per layer: cells, candidates opened, accepted, listed,
     without_photometry, feature_members_absent: bool */ }
 
@@ -242,6 +244,7 @@ pub struct BandTexel { /* luminance: CandelasPerSquareMetre, chroma: [f32; 2],
     sp_ratio: f64, eye_limit: Option<Magnitudes> */ }
 pub struct CompleteTo { /* each layer's radius, ly: 0 nowhere, +∞ everywhere; per ray since
     R06.T7.b, `radius_toward(layer, direction)` */ }  // R06.T9.b; Clone, not Copy, since R06.T7.b
+impl CompleteTo { pub fn rays_ly(&self, layer: Layer) -> Option<&[f64]>; } // R06.T11.d: the wire's
 pub fn band_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
     census: &SkyCensus, complete_to: &CompleteTo, spec: &BandSpec, face: CubeFace,
     rows: Range<u16>, out: &mut Vec<BandTexel>);   // march_rows of its one reply, then sum_rows
@@ -344,6 +347,13 @@ chroma: [f32; 2], lux_per_v0: f64, bake_spectrum: [f64; 15] }` with `PowerTwoDto
 alpha: f64 }`, each array in the order B, V, R for the display's b, g, r.
 - `@hyperion/protocol`: `decodeSkyStars`, `decodeSkyBand`, the payload types, `SKY_STAR_BYTES`,
   `SKY_TEXEL_BYTES`.
+- Since R06.T11.d, as built: `ServerMessage::PartialResponse { id, body }` (`partial_response`),
+  each answer of a `sky` before its last, its own chunks before it numbered from 0, and the
+  terminal `response` the last; `SkyResponse.final` (`is_final` in Rust); `SkyLayerCensusDto`'s
+  `complete_to_ly`, `complete_to_rays_ly` (1,536 a layer where it is complete to one radius a ray,
+  empty otherwise) and `final`. In `@hyperion/protocol`, `RequestClient.requestBulk` takes a third
+  argument, `{ onPartial }`, which is handed each partial answer whole (`PartialBulkAnswer`,
+  `BulkRequestOptions`).
 
 ### Client (`apps/hyperion/src/renderer/src/view/sky/`)
 
@@ -7532,6 +7542,185 @@ CensusCost)`.
        the Sun it opens 37% fewer systems than the uniform caps at the eye's cut.
     4. The near-Sun test marches one reply; T11.d's several replies change the replies it gives.
     5. The server bench `sky_near_sun_cold`, T11.d's since T11.b.
+- **Deviations in T11.d, as built (2026-10-08).** Delivery nearest first, as the census-cost
+  ruling, its sign-off (question 2), the listing ruling (`decision-r06-t8i-listing.md`) and the
+  brackets ruling (`decision-r06-t7b-brackets.md`) set it out, with T11.c's "Not done here" items
+  1–5. The label and its guide rows are split off as R06.T11.f. No golden moves and no bump
+  (determinism audit, `golden_diff` 0; GENERATOR_VERSION 21). `PROTOCOL_VERSION` stays 2.
+  - **The hookups.**
+    - The illumination (R06.T9.g): its 16² rows two to a job (`ILLUMINATION_JOB_ROWS`, 48 jobs),
+      then `Illumination::assemble` in one, which gives `Illumination::march`'s bits (tested). It
+      is stated on the query, and `eye_cut` and `eye_visibility` take it.
+    - The eye's visibility (R06.T7.b): one job, only for a request with the eye and no camera part
+      (`SkyAsk::counts_by_visibility`, tested), never by comparing cuts. `camera_limit_v` is taken
+      as asked.
+    - The per-ray radii on the wire, below. The near-Sun test marches the plan's replies and sums
+      at the census's radii; to 30 ly it is one reply, final.
+    - The bench `sky_near_sun_cold`, below.
+  - **The order** (`compute::sky::delivery_steps`). Step k holds every layer's k-th shell, as
+    `CensusPlan::shells` ranks them, except C's from its fourth (2,000–4,000 ly) on, a step later.
+    So D's and E's shells to 4,000 ly run before C's beyond 2,000 ly. Near the Sun (caps C 14,563,
+    D 13,232, E 61,341 ly) that is 8 steps, and 8 replies. The first step holds every layer's
+    first shell, so A, B and the brown dwarfs are final from the first reply, and the march needs
+    no `nowhere()`. A plan of no shell is one step of none. The order is the plan's alone. Later
+    steps' jobs may run while an earlier step's last ones do; the replies go out in order. T17's
+    V 3.0 gate is not measured (T17's).
+  - **The census in steps** (`census_in_steps`).
+    - **Jobs by time, not by expected work (deviation).** A cell's cost is unknown until its
+      records' bounds are read: most are skipped in microseconds, a few generated for seconds. So
+      a census job runs its cells until 50 ms (`CENSUS_JOB_SLICE`) are spent, and at least one
+      cell, then hands back the rest of the slab it was in, walked to its end and split in two
+      halves (`CellWork::split`), and the slabs it had not begun. They go back in the queue ahead
+      of every later step's work, so a slab of dear cells spreads over the workers. Which job
+      holds which cells changes no census (the merge is total, the tallies are integer sums and
+      flags; determinism audit). A job takes one slab's cells, or a part of them: jobs of up to 32
+      slabs, built first, held the slabs a job had not begun until its slice was spent, so the
+      first step ran on about one worker at a time (below).
+    - At most 2 census jobs a worker are outstanding (`CENSUS_JOBS_PER_WORKER`; T11.a had 256), so
+      a later step's jobs, each reply's own jobs and other requests' bulk jobs wait behind few.
+      `CpuPool::workers()` is new (crate).
+    - The cell cache is the server's shared one, so a cancelled or superseded census keeps every
+      cell it built (not tested apart: T11.b's warm test holds the sharing).
+    - **On R06.T8.h's block cache** (merged 2026-10-08, after T8.h landed): each census job reads
+      and keeps its cells through T8.h's blocks keyed by magnitude, by the same `census_cell`
+      through its context's handle, the stored bound a pre-filter only. Jobs of one step filling
+      one block side by side all land (`insert_if_unchanged`). The steps' unit test takes T8.h's
+      counters (every cell missed cold and served warm) and compares each step's stars with the
+      sim's serial census by their bits, as T8.h's jobs test did. After the merge: the server's
+      suite 480 passed, 5 skipped; workspace clippy and the sim's wasm32-wasip1 clippy clean; the
+      bindings check clean.
+    - **Single jobs of seconds remain (deviation; T11.c's list).** The tables' plan and assembly,
+      the eye's cut and visibility, and each reply's merge, glare, eye offsets and payload. Not
+      split here.
+  - **Each reply** (`requests::sky::Reply`). The march is one per request over `plan.replies()`
+    (R06.T9.f), as `Vec<Arc<BandMarch>>`, awaited before the first reply. After each step,
+    `merge_step` (one job) merges every step's parts with `merge_shells` at
+    `plan.completeness(done)`; `band` sums each march at the census's own `complete_to()`
+    (`sum_rows` keeps its argument; T8.i's "not taken"), then the glare, limits and offsets; one
+    job encodes the payload. The discs are made once, before the first reply, and every reply
+    carries them. Every reply but the last goes through `Replies::send`; the last is the
+    terminal response. The final reply's stars, overflow and tallies are the one-shot census's.
+    Its band is not the T11.c band's bit for bit: the march keeps every shell edge as a node,
+    within T9.f's quadrature (up to 2.0% a texel at 12 nodes a decade, measured there;
+    determinism audit), which no golden reads.
+  - **The wire.**
+    - `ServerMessage::PartialResponse { id, body }` (`partial_response`, new): each answer but the
+      last, after its own chunks, numbered from 0 again. Sent only for `sky`, so a version 2
+      client that asks none never receives one, as the `notification` ruling has it; R03's Risks
+      has a pointer. Plan 04's reserved `response_part` (parts of one payload) is not reused for
+      it: an answer in parts is a whole answer that a later one replaces.
+    - `SkyResponse.final` (`is_final` in Rust); `SkyLayerCensusDto` gains `complete_to_ly` (the
+      fixed edge reached while not final, `cap_ly` once final), `complete_to_rays_ly` and `final`,
+      and is no longer `Copy`.
+    - **The per-ray table (deviation from T8.i's "none once final").** `complete_to_rays_ly` is
+      the census's `CompleteTo::rays_ly` (new, sim): the cap's rays held within the edge, and the
+      cap's rays themselves once final, as T7.b's "Open" asks; empty where the layer is complete to
+      one radius every way (forced caps, or all rays reaching the edge). Its length is the ray
+      count; there is no field of its own. No client reads it yet. A final layer's table is
+      1,536 numbers of JSON, so a reply near the Sun carries A's, B's and the brown dwarfs' from
+      the first (some 100 KB).
+    - The server: `Handler::handle` takes `Replies` (each request's ID and serial, and the
+      connection's channel of `PARTIALS_QUEUED`, 2). The connection takes partials only while
+      fewer than 2 stream, drains the channel before a request's end so that no terminal frame
+      overtakes its last partial, drops a partial whose request has ended (`Requests::is_current`,
+      by serial), and queues a partial frame after its chunks under the frame-count limit, not
+      held for byte room as a terminal frame is (consider, Rust review). A large partial body is
+      serialised on the pool as a response's is (`serialise`, shared).
+    - The client: `RequestClient.requestBulk(body, manifestOf, { onPartial })` checks each partial
+      answer against its own manifest and restarts the assembler; a partial of another kind is a
+      protocol violation.
+  - **The client** (`view/sky/useSky.ts`). Replies are decoded one at a time; each is held whole in
+    place of the one before, in one render, so the model is never empty between replies and
+    `SkyCubeCache.acquire` bakes the new cube before the frame draws it (unchanged). A partial
+    reply still waiting when a later one arrives is passed over; the final is always held.
+    `pending` is now true until the request's first reply is held, so R07's `LIGHTING: PENDING`
+    clears at the first reply, whose discs are the final ones. `skyRequestReason` gains
+    `"partial"`: a held reply that is not final is asked again once no request is in flight (a
+    lost link mid-sky). `connection.ts` lists `partial_response`.
+  - **Test seams (beyond the plan).** `SkyCaps::forced_per_layer` (crate), `forced_radii` (test),
+    `on`, and `with_shell_edges` / `shell_edges_ly`: a test's nearer shell edges. The sim's
+    `census_plan_with_edges` is `#[doc(hidden)] pub` (it asserts the edges ascend from above
+    nought) and is the server's plan path, with `SHELL_EDGES_LY` for every sky a client asks.
+  - **Tests.**
+    - `--test sky`, 12: `a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii`
+      (new): caps forced to 30 ly, test edges 10, 15, 20 and 25 ly, 6 replies. Each is a whole
+      sky's frames; each layer states its radius and finality; its stars, byte for byte, are the
+      sim's census of the shells done and the census forced to the reply's radii less its stars
+      beyond them; its band is the sim's one march's sum at those radii, byte for byte; the least
+      edge runs 10, 15, 20, 20, 25 ly and then none; the last is the one-shot census. Uniform caps
+      only: caps by ray are the sim's tests' (T8.i).
+    - The range query's wait is bounded in jobs, not timed: between its sending and its answer the
+      one worker completes at most twice its own jobs plus one. Each census job is bounded by its
+      slice and one cell; a march job (0.1 s) is the longest bulk job a query waits behind.
+    - The first-sky budget is the bench's, below, not a test: no test build affords a census to
+      500 ly.
+    - Unit tests: `compute::sky` 8 (each step's census against the sim's serial census at slices of
+      0 and 50 ms over three workers, cold and warm; the delivery's order; one march holding every
+      step's radii; the illumination, cut and visibility in jobs; the forced caps); `ws` (answers
+      in parts in order, a cancel between them, a failure after them); `requests` (an answer sent
+      before a cancel is not the next request's under its ID); `requests::sky` (the visibility
+      rule); `sky::band::a_layers_rays_are_its_caps_held_within_its_edge`; the protocol's wire
+      form of `partial_response`; `bulk.test.ts` (5), `useSky.test.tsx` (4), `model.test.ts` (1).
+  - **The bench** `sky_near_sun_cold/first_reply` (`benches/sky.rs`): a fresh server with the
+    default workers (15), the server's own galaxy for seed 0x4d2, the default eye near the Sun at
+    the epoch, eye-only, timed from sending to the first reply. Criterion's 10 samples are hours,
+    so it runs with `--test`, one iteration.
+    - **Measured (2026-10-08, one iteration under the heavy lock, release; other lanes' unlocked
+      work kept the load at 17–21; provisional):** the first reply in **922 s wall and 12,594
+      CPU-s** of the server's process, against T17's 10 s and 150 CPU-s. Cut V 7.766 (with the
+      diffuse light); 28,549 listed and none overflowing; A (to 11.0 ly), B (56.0 ly) and the
+      brown dwarfs final, C, D and E to 500 ly. That was with jobs of up to 32 slabs.
+    - **Attributed** (the handler's phase log, the bench's `RUST_LOG`; unlocked at
+      `CPUQuota=400%`, so four cores' worth of 15 workers; provisional). With jobs of 32 slabs: the
+      first reply in 875 s and 2,592 CPU-s, the first step's census jobs 852 s in all, so it ran on
+      about one worker at a time, and the locked run's other cores ran later steps' jobs. With one
+      slab a job (as built): the first reply in **286 s wall and 837 CPU-s**. Its phases, from the
+      request: the tables 18.2 s (cold), the illumination 0.4 s, the eye's cut and visibility 2.2
+      s, the caps and plan 4.7 s, the march done at 31.0 s; then the first step's census, **764
+      job-seconds** (C, D and E to 500 ly, with A, B and the brown dwarfs), and its reply 0.6 s.
+      So some 100 CPU-s before the census and some 760 in it: on 15 workers about 60 s wall.
+    - **As built, under the heavy lock** (2026-10-08, one iteration, release, 15 workers, load
+      about 5 at the start; provisional): the first reply in **100.5 s wall and 1,084 CPU-s**,
+      about 10 and 7 times T17's 10 s and 150 CPU-s. The tables 12.3 s (cold), the illumination
+      0.3 s, the eye's cut and visibility 2.4 s, the caps and plan 2.3 s, the march done at
+      19.6 s; the first step's census 1,183 job-seconds on 15 workers (about 80 s wall), and its
+      reply 1.4 s. An earlier locked run of the same code, its close then mishandled, read the
+      reply at 86.4 s.
+    - **A finding, not fixed (FEATURES FIRST; for the orchestrator and T17).** The sign-off
+      estimated the 500 ly first shell at some 30 CPU-s; it is some 760 CPU-s here (seed 0x4d2's
+      galaxy at the eye's cut V 7.77, before T8.g's final landing). A sky near the Sun is not
+      served within T17's first-sky budget until T8.g and T17 re-take it. The cold tables are in
+      the figure (some 12 s wall); whether they count inside the budget is T17's reading.
+  - **Not measured** (T17's): the time to each later reply, the per-reply cost of the band and
+    limit map, the V 3.0 gate, a cancelled census's cells kept, and the visibility caps' safety
+    margin with the illumination (T7.b's "Open").
+  - **Files beyond T11's list.** The protocol's `envelope.rs`, `lib.rs` and `sky.rs`; the server's
+    `ws.rs`, `bulk.rs`, `compute/pool.rs`, `scene/topic.rs`, `testing.rs`, `Cargo.toml` and
+    `benches/sky.rs`; the sim's `sky/band.rs` and `sky/census/{mod,query}.rs`;
+    `@hyperion/protocol`'s `requests.ts`, `index.ts`, `bulk.test.ts` and generated types; the
+    client's `connection.ts`,
+    `view/sky/{model,useSky}.ts`, their tests and `test/{FakeWebSocket,skyFixtures}.ts`. Not
+    touched: `config.rs` and `stats.rs`.
+  - **Gates** (capped, build-slot, 4 jobs, `CPUQuota=400%`): fmt; clippy `-D warnings` on the
+    server, the sim and the protocol (all targets) and on the sim for wasm32-wasip1;
+    `cargo nextest run -p hyperion-server` 480 passed, 5 skipped (397 s); `--test sky` 12/12; the
+    sim's `sky::band` tests; `just gen-protocol` and the bindings check; `pnpm typecheck`, `lint`
+    (oxlint `--deny-warnings`) and Prettier; vitest over the protocol package and the client's
+    `view`, `lib` and `displays/view`.
+  - **Reviews.** Rust: two must-fixes (a step and the request's universe taken by value; the
+    edges' unit in their names) and its should-fixes applied (the partials bounded and drained
+    before a request's end; tests of a failure after partials and of a reused ID; the sim's edges
+    checked once; crate visibility; the docs' section order; the query taking the illumination);
+    its considers on `Replies::detached` and a shared serialiser applied, the partial frame's byte
+    room recorded above. TypeScript: its must-fix (`void` on the discarded promises) and
+    should-fixes (no second copy of the held request; a test that the reply held stays while the
+    next decodes) applied, and its considers. Determinism audit: nothing must-fix or should-fix;
+    its considers applied (the final band's bits recorded above; each reply's stars compared byte
+    for byte). Plan conformance: its must-fix, the first reply's miss unattributed, applied (the
+    phase log; the attribution found the jobs of 32 slabs, now one); its should-fixes applied (this
+    entry, R03's pointer, the jobs of seconds and the job-counted bound recorded) and its considers
+    (the visibility rule's test; the bench run with `--test`), but a test that a cancelled census
+    keeps its cells, recorded above.
 - **R06.T5.f's measurements, as built (2026-10-07, generator version 21; `decision-r06-t9b-band.md`,
   item 8).** The tables against the realised sky, as the task sets it out: a record that gates only
   its own sample. Seed 0x0926_0000 (the fixture), at the epoch, on the shipped tables (T5.d's

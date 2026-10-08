@@ -8,7 +8,9 @@
  * that the nearest baked star would shift by a tenth of a pixel (its parallax, Design note 13).
  * Stars near enough to shift by more as the camera crosses the system are sprites, placed every
  * frame (Design note 20), and never baked, so they do not count here. A view that asks for more
- * than the held sky's request (a deeper camera limit, a larger N_max, the eye, a cone) asks again.
+ * than the held sky's request (a deeper camera limit, a larger N_max, the eye, a cone) asks again,
+ * and so does one holding a reply that is not final once no request is in flight: its request
+ * ended before its last reply, as when the link dropped (R06.T11.d).
  */
 
 import {
@@ -59,7 +61,7 @@ export interface SkyCamera {
 }
 
 /** Why a sky is asked again, or `null` while the one held stands. */
-export type SkyRequestReason = "arrival" | "expired" | "jump" | "limits" | "parallax";
+export type SkyRequestReason = "arrival" | "partial" | "expired" | "jump" | "limits" | "parallax";
 
 /** One pixel's angle across a camera, rad: its field of view over its width. */
 export function pixelAngleRad(camera: Pick<SkyCamera, "fovDeg" | "widthPx">): number {
@@ -143,6 +145,10 @@ export function skyRequestReason(held: SkyModel | null, now: SkyNow): SkyRequest
     held.request.exclude_system !== now.request.exclude_system
   ) {
     return "arrival";
+  }
+  // A sky arriving nearest first whose request ended before its final reply (R06.T11.d).
+  if (!held.response.final) {
+    return "partial";
   }
   const time = now.request.time;
   if (earlier(held.response.valid_until, time)) {

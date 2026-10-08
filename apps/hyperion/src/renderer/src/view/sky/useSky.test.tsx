@@ -7,7 +7,7 @@ import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
+import { type FixtureStar, skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
 import { galacticTranslated } from "../coords/position";
 import { decodeSkyPayload } from "./decodePayload";
 import type { SkyCamera } from "./model";
@@ -67,6 +67,55 @@ async function answerSky(socket: FakeWebSocket): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+/** The latest sky request the socket carried. */
+function latestSky(socket: FakeWebSocket): { readonly id: number; readonly body: SkyRequest } {
+  const sent = socket.requestsOfKind("sky").at(-1);
+  if (sent === undefined) {
+    throw new Error("no sky was asked");
+  }
+  return sent;
+}
+
+/** Plays one reply to sky `id` of `stars`: its payload's frame, then its message. */
+async function reply(
+  socket: FakeWebSocket,
+  id: number,
+  stars: ReadonlyArray<FixtureStar>,
+  final: boolean,
+): Promise<void> {
+  const request = latestSky(socket).body;
+  const payload = skyPayload(stars, 2, 6.6);
+  const body = { kind: "sky" as const, ...skyResponse(request, payload, stars.length, 2), final };
+  await act(async () => {
+    socket.serverSendsBinary(binaryFrame(id, 0, 1, [...payload]));
+    if (final) {
+      socket.serverResponds(id, body);
+    } else {
+      socket.serverAnswersInPart(id, body);
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+/** Plays a reply before the last to sky `id` (R06.T11.d). */
+async function answerInPart(
+  socket: FakeWebSocket,
+  id: number,
+  stars: ReadonlyArray<FixtureStar>,
+): Promise<void> {
+  await reply(socket, id, stars, false);
+}
+
+/** Plays the last reply to sky `id`. */
+async function answerSkyWith(
+  socket: FakeWebSocket,
+  id: number,
+  stars: ReadonlyArray<FixtureStar>,
+): Promise<void> {
+  await reply(socket, id, stars, true);
 }
 
 describe("useSky", () => {
@@ -172,6 +221,138 @@ describe("useSky", () => {
     rerender({ request: skyRequest(0), cameras: [moved] });
     rerender({ request: skyRequest(0), cameras: [moved] });
     expect(socket.requestsOfKind("sky")).toHaveLength(2);
+  });
+
+  it("holds each reply of a sky arriving nearest first whole, in place of the one before", async () => {
+    const { result, socket } = renderSky(skyRequest(0));
+    const seen: Array<number | null> = [];
+    const record = (): void => {
+      seen.push(result.current.model?.stars.count ?? null);
+    };
+    const sent = latestSky(socket);
+    await answerInPart(socket, sent.id, STARS.slice(0, 1));
+    record();
+    expect(result.current.pending).toBe(false);
+    expect(result.current.model?.response.final).toBe(false);
+    await answerInPart(socket, sent.id, [...STARS, ...STARS]);
+    record();
+    // The request is still in flight: no other is asked while its replies arrive.
+    expect(socket.requestsOfKind("sky")).toHaveLength(1);
+    await answerSkyWith(socket, sent.id, [...STARS, ...STARS, ...STARS]);
+    record();
+    expect(seen).toEqual([1, 2, 3]);
+    expect(result.current.model?.response.final).toBe(true);
+    expect(result.current.pending).toBe(false);
+  });
+
+  it("passes over a partial reply still waiting for a later one, and always holds the final", async () => {
+    let decodes = 0;
+    let release: (() => void) | null = null;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The first decode waits for the test; the rest decode at once.
+    const slow: SkyDecoder = {
+      decode: async (job) => {
+        decodes += 1;
+        if (decodes === 1) {
+          await held;
+        }
+        return decodeSkyPayload({ ...job, id: decodes });
+      },
+      dispose: () => undefined,
+    };
+    // Stable in identity, as `useSky` asks of its options.
+    const options = { createDecoder: () => slow };
+    const hook = renderHook(
+      ({ request }: { readonly request: SkyRequest }) => useSky(request, CAMERAS, options),
+      {
+        initialProps: { request: skyRequest(0) },
+        wrapper: ServerLinkHarness,
+      },
+    );
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.serverWelcomes();
+    });
+    const sent = latestSky(socket);
+    await answerInPart(socket, sent.id, STARS.slice(0, 1));
+    await answerInPart(socket, sent.id, [...STARS, ...STARS]);
+    await answerSkyWith(socket, sent.id, [...STARS, ...STARS, ...STARS]);
+    expect(hook.result.current.model).toBeNull();
+    await act(async () => {
+      release?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(decodes).toBe(2);
+    expect(hook.result.current.model?.stars.count).toBe(3);
+    expect(hook.result.current.model?.response.final).toBe(true);
+  });
+
+  it("keeps the reply held while the next one decodes, then swaps it in whole", async () => {
+    let decodes = 0;
+    let release: (() => void) | null = null;
+    const second = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The second decode waits for the test; the others decode at once.
+    const gated: SkyDecoder = {
+      decode: async (job) => {
+        decodes += 1;
+        if (decodes === 2) {
+          await second;
+        }
+        return decodeSkyPayload({ ...job, id: decodes });
+      },
+      dispose: () => undefined,
+    };
+    // Stable in identity, as `useSky` asks of its options.
+    const options = { createDecoder: () => gated };
+    const hook = renderHook(
+      ({ request }: { readonly request: SkyRequest }) => useSky(request, CAMERAS, options),
+      { initialProps: { request: skyRequest(0) }, wrapper: ServerLinkHarness },
+    );
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.serverWelcomes();
+    });
+    const sent = latestSky(socket);
+    await answerInPart(socket, sent.id, STARS.slice(0, 1));
+    expect(hook.result.current.model?.stars.count).toBe(1);
+    await answerInPart(socket, sent.id, [...STARS, ...STARS]);
+    // The second reply is decoding: the first stays held, whole, and the sky is not pending.
+    expect(decodes).toBe(2);
+    expect(hook.result.current.model?.stars.count).toBe(1);
+    expect(hook.result.current.pending).toBe(false);
+    await act(async () => {
+      release?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(hook.result.current.model?.stars.count).toBe(2);
+  });
+
+  it("asks again once the link returns when it cut a sky off before its final reply", async () => {
+    vi.useFakeTimers();
+    const { result, socket } = renderSky(skyRequest(0));
+    await answerInPart(socket, latestSky(socket).id, STARS.slice(0, 1));
+    await act(async () => {
+      socket.close();
+      await Promise.resolve();
+    });
+    expect(result.current.model?.stale).toBe(true);
+    expect(result.current.model?.stars.count).toBe(1);
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    const next = FakeWebSocket.latest();
+    act(() => {
+      next.serverWelcomes();
+    });
+    expect(next.requestsOfKind("sky")).toHaveLength(1);
+    expect(result.current.model?.stars.count).toBe(1);
   });
 
   it("holds a refusal without asking again until the next arrival", async () => {

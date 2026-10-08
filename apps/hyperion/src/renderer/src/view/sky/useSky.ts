@@ -3,7 +3,7 @@
  * thread, and held, marked stale while the link is down (plan R06, T12; Design note 13).
  */
 
-import type { RequestFailure, ResponseFor, SkyRequest } from "@hyperion/protocol";
+import type { PartialBulkAnswer, RequestFailure, SkyRequest } from "@hyperion/protocol";
 import { useEffect, useMemo, useState } from "react";
 
 import { useServerLink } from "../../lib/serverLink";
@@ -107,7 +107,10 @@ export interface SkyView {
   readonly model: SkyModel | null;
   /** Why the last request of this arrival failed, or `null`. */
   readonly failure: string | null;
-  /** Whether a request is in flight. */
+  /**
+   * Whether a request is in flight and none of its replies is held yet: once its first reply is,
+   * the sky arriving nearest first is held, and its later replies replace it (R06.T11.d).
+   */
   readonly pending: boolean;
 }
 
@@ -143,12 +146,15 @@ function sameArrival(a: SkyRequest, b: SkyRequest): boolean {
 
 /** What a settled request leaves. */
 type Settled =
-  | { readonly kind: "held"; readonly held: Held }
+  | { readonly kind: "held" }
   | { readonly kind: "failed"; readonly failure: Failure }
   | { readonly kind: "transient" };
 
+/** One reply of a sky request, as it arrived: its response and its payload's chunks. */
+type Reply = PartialBulkAnswer<"sky">;
+
 /**
- * The view's sky (plan R06, T12).
+ * The view's sky (plan R06, T12; R06.T11.d).
  *
  * @param request - The request as it would be sent now (observer, time, limits, N_max), or `null`
  *   where none can be asked (no universe, or the system's position unknown): nothing is asked.
@@ -158,6 +164,13 @@ type Settled =
  * for another arrival supersedes one in flight, which is cancelled. A refusal is held and not
  * retried until the next arrival; a request the link cut off is asked again when it returns. The
  * sky held is kept through a lost link and marked stale.
+ *
+ * A sky arrives nearest first, as several replies, the last final (R06.T11.d). Each reply is
+ * decoded off the render thread and then held in place of the one before, whole: the model
+ * changes from one reply's to the next's in one render, never through an empty or half-decoded
+ * sky, so the view bakes the new cube before it draws it. Replies are decoded one at a time; a
+ * reply that is not final, still waiting when a later one arrives, is passed over for it, and the
+ * final reply is always held.
  */
 export function useSky(
   request: SkyRequest | null,
@@ -193,16 +206,17 @@ export function useSky(
       return undefined;
     }
     let live = true;
-    // Made once the payload is in hand, so that a request never answered starts no worker.
+    // Made once a payload is in hand, so that a request never answered starts no worker.
     let decoder: SkyDecoder | null = null;
-    const pending = requests.requestBulk<"sky">({ kind: "sky", ...asked }, (r) => r.bulk);
+    let draining = false;
+    // The latest reply not yet decoded: a partial one waiting is passed over for a later one.
+    let waiting: Reply | null = null;
     const settle = (settled: Settled): void => {
       if (!live) {
         return;
       }
       switch (settled.kind) {
         case "held":
-          setHeld(settled.held);
           setFailure(null);
           break;
         case "failed":
@@ -213,41 +227,73 @@ export function useSky(
       }
       setAsked(null);
     };
-    pending.outcome
-      .then(async (outcome): Promise<Settled> => {
-        if (!outcome.ok) {
-          return isTransient(outcome.error)
-            ? { kind: "transient" }
-            : { kind: "failed", failure: { request: asked, message: outcome.error.message } };
-        }
-        const response: ResponseFor<"sky"> = outcome.response;
-        if (!live) {
-          // Cleaned up while the payload arrived: start no worker that nothing would stop.
-          return { kind: "transient" };
-        }
+    const failed = (error: unknown): void => {
+      const message = error instanceof Error ? error.message : "the sky could not be read";
+      settle({ kind: "failed", failure: { request: asked, message } });
+    };
+    // Decodes the reply waiting and holds it whole in place of the one before, then the next, until
+    // none waits, the final is held, or the request has ended.
+    const drain = async (): Promise<void> => {
+      const reply = waiting;
+      if (reply === null) {
+        draining = false;
+        return;
+      }
+      waiting = null;
+      if (decoder === null) {
         decoder = createDecoder();
-        const reply = await decoder.decode({
-          chunks: outcome.chunks,
-          starsBytes: response.stars_bytes,
-          bandBytes: response.band_bytes,
-        });
-        return reply.ok
-          ? {
-              kind: "held",
-              held: { request: asked, response, stars: reply.stars, band: reply.band },
-            }
-          : { kind: "failed", failure: { request: asked, message: reply.message } };
-      })
-      .then(settle)
-      .catch((error: unknown) => {
-        settle({
-          kind: "failed",
-          failure: {
-            request: asked,
-            message: error instanceof Error ? error.message : "the sky could not be read",
-          },
-        });
+      }
+      const decoded = await decoder.decode({
+        chunks: reply.chunks,
+        starsBytes: reply.response.stars_bytes,
+        bandBytes: reply.response.band_bytes,
       });
+      if (!live) {
+        return;
+      }
+      if (!decoded.ok) {
+        draining = false;
+        failed(new Error(decoded.message));
+        return;
+      }
+      setHeld({
+        request: asked,
+        response: reply.response,
+        stars: decoded.stars,
+        band: decoded.band,
+      });
+      if (reply.response.final) {
+        draining = false;
+        settle({ kind: "held" });
+        return;
+      }
+      await drain();
+    };
+    const offer = (reply: Reply): void => {
+      // Cleaned up while the payload arrived: start no worker that nothing would stop.
+      if (!live) {
+        return;
+      }
+      waiting = reply;
+      if (!draining) {
+        draining = true;
+        void drain().catch(failed);
+      }
+    };
+    const pending = requests.requestBulk<"sky">({ kind: "sky", ...asked }, (r) => r.bulk, {
+      onPartial: offer,
+    });
+    const finish = async (): Promise<void> => {
+      const outcome = await pending.outcome;
+      if (outcome.ok) {
+        offer({ response: outcome.response, chunks: outcome.chunks });
+      } else if (isTransient(outcome.error)) {
+        settle({ kind: "transient" });
+      } else {
+        settle({ kind: "failed", failure: { request: asked, message: outcome.error.message } });
+      }
+    };
+    void finish().catch(failed);
     return () => {
       live = false;
       pending.cancel();
@@ -264,5 +310,7 @@ export function useSky(
     failure !== null && (current === null || sameArrival(failure.request, current))
       ? failure.message
       : null;
-  return { model, failure: failed, pending: asked !== null };
+  // Pending until a reply of the request in flight is held: a sky arriving nearest first is held
+  // from its first.
+  return { model, failure: failed, pending: asked !== null && held?.request !== asked };
 }

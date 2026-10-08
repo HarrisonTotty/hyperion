@@ -43,5 +43,9 @@ harness = false
 name = "range_query"
 harness = false
 
+[[bench]]
+name = "sky"
+harness = false
+
 [lints]
 workspace = true

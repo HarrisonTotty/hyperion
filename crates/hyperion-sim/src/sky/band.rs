@@ -546,6 +546,21 @@ impl CompleteTo {
             })
     }
 
+    /// The radius to which `layer` is complete along each ray of the caps' lattice, ly, in the
+    /// lattice's order, or `None` where it is one radius in every direction,
+    /// [`radius`](Self::radius) (R06.T11.d: the reply's per-ray table).
+    ///
+    /// Towards a direction the layer is complete to the largest of these radii over the rays whose
+    /// cones hold it ([`RayRadii::toward`](super::caps::RayRadii::toward)).
+    #[must_use]
+    pub fn rays_ly(&self, layer: Layer) -> Option<&[f64]> {
+        let i = CAPPED_LAYERS.iter().position(|&l| l == layer)?;
+        match &self.radii[i] {
+            Boundary::Uniform(_) => None,
+            Boundary::ByRay(rays) => Some(rays.radii_ly()),
+        }
+    }
+
     /// Whether the two are the same radii in every layer, by their bits, as a march finds a reply's
     /// slots by them.
     #[must_use]
@@ -2771,6 +2786,41 @@ mod tests {
             complete.radius_toward(Layer::RoguePlanet, UnitVector::NORTH),
             LightYears::ZERO
         );
+    }
+
+    /// The per-ray table a reply states (R06.T11.d) is each cap's rays as they are, then held
+    /// within a shell's edge, and none where the layer is one radius in every direction.
+    #[test]
+    fn a_layers_rays_are_its_caps_held_within_its_edge() {
+        let caps = caps_by_ray(0x7b_0500);
+        let complete = CompleteTo::of_caps(&caps);
+        for cap in &caps {
+            let rays = cap.rays().expect("a cap by ray").radii_ly();
+            assert_eq!(
+                complete.rays_ly(cap.layer()).map(<[f64]>::len),
+                Some(CAP_RAYS)
+            );
+            let stated = complete.rays_ly(cap.layer()).expect("by ray");
+            assert!(stated.iter().zip(rays).all(|(a, b)| bits(*a) == bits(*b)));
+        }
+        // Held within 100 ly: each ray the lesser of its radius and the edge, and B's, its rays
+        // all reaching 15 ly, one radius.
+        let mut within = [None; BAND_LAYERS];
+        within[1] = Some(15.0);
+        within[2] = Some(100.0);
+        let held = CompleteTo::of_caps_within(&caps, within);
+        assert_eq!(held.rays_ly(Layer::B), None);
+        assert_eq!(held.radius(Layer::B), LightYears::new(15.0));
+        let rays = caps[2].rays().expect("C by ray").radii_ly();
+        let stated = held.rays_ly(Layer::C).expect("C by ray, some under 100 ly");
+        assert!(
+            stated
+                .iter()
+                .zip(rays)
+                .all(|(a, b)| bits(*a) == bits(b.min(100.0)))
+        );
+        assert_eq!(CompleteTo::nowhere().rays_ly(Layer::C), None);
+        assert_eq!(complete.rays_ly(Layer::RoguePlanet), None);
     }
 
     /// A reply complete to caps of one radius a ray (R06.T7.b) gives each texel the band of a

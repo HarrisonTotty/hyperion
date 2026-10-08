@@ -27,7 +27,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::compute::CancelToken;
-use crate::requests::{Handler, HandlerFuture, SubscribeFuture, to_frame};
+use crate::requests::{Handler, HandlerFuture, Replies, SubscribeFuture, to_frame};
 use crate::stats::{OutboundCounters, RequestCounters};
 use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
@@ -604,6 +604,7 @@ impl Handler for Scripted {
         _state: Arc<AppState>,
         body: RequestBody,
         token: CancelToken,
+        _replies: Replies,
     ) -> HandlerFuture {
         let calls = self.calls.clone();
         Box::pin(async move {

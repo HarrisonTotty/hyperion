@@ -9,7 +9,10 @@
 //! holds finished requests back while the connection reads on, and a full count of queued frames
 //! stops it reading until the queue drains; a frame not written within the write timeout closes
 //! the connection with a policy violation. Closing the connection, for whatever reason, cancels
-//! every request it has in flight.
+//! every request it has in flight. A request answered in parts (`sky`, rendering plan R06,
+//! R06.T11.d) hands each answer before its last to the connection, which streams it as a bulk
+//! answer is streamed, its chunks and then its `partial_response`, in order with the request's
+//! later answers and its terminal message.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -27,7 +30,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
-use hyperion_protocol::{ClientMessage, PROTOCOL_VERSION, RequestBody, ServerMessage};
+use hyperion_protocol::{ClientMessage, PROTOCOL_VERSION, RequestBody, RequestId, ServerMessage};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::Instrument;
@@ -40,7 +43,9 @@ use crate::limits::{
     WRITE_TIMEOUT,
 };
 use crate::outbound::{self, Held, Outbound, WriterStopped};
-use crate::requests::{self, Handshake, Inbound, Requests, Settled, Tally, to_frame};
+use crate::requests::{
+    self, Handshake, Inbound, PARTIALS_QUEUED, Partial, Requests, Settled, Tally, to_frame,
+};
 use crate::subscriptions::{Large, Offered, Ready, Step, Subscriptions};
 
 /// The limits a connection enforces on writing to its client.
@@ -187,6 +192,8 @@ enum Event {
     Pushes,
     /// A large notification is serialised.
     Serialised(Ready),
+    /// A request answered in parts has an answer before its last to stream.
+    Partial(Partial),
     Finished(Result<(tokio::task::Id, requests::Finished), tokio::task::JoinError>),
     /// The streaming request's next chunk, or its terminal frame, may be queued.
     Chunk,
@@ -201,6 +208,8 @@ struct Connection {
     /// The server's state, whose pool serialises a large notification.
     state: Arc<AppState>,
     requests: Requests,
+    /// The answers before their last that requests answered in parts hand over (R06.T11.d).
+    partials: tokio::sync::mpsc::Receiver<Partial>,
     /// The connection's subscriptions, which end with it (rendering plan R03, R03.T5.b).
     subscriptions: Subscriptions,
     /// The smallest pending push that found no room in `outbound`, in bytes, if one did.
@@ -211,8 +220,9 @@ struct Connection {
     outbound: Outbound,
     /// Finished requests waiting for room in `outbound`.
     held: Held,
-    /// Requests answered in bulk, in the order they finished, each streaming its chunks before
-    /// its terminal frame; the first streams now (rendering plan R03, R03.T10.b).
+    /// Answers in bulk, in the order they came, each streaming its chunks before its frame, a
+    /// request's terminal frame or a `partial_response`; the first streams now (rendering plan
+    /// R03, R03.T10.b; R06.T11.d).
     streams: VecDeque<Stream>,
     closing: Closing,
     handshake: Handshake,
@@ -231,9 +241,11 @@ impl Connection {
             limits.write_timeout,
         );
         let mut writer = tokio::spawn(writer.run(sink).in_current_span());
+        let (to_stream, partials) = tokio::sync::mpsc::channel(PARTIALS_QUEUED);
         let mut connection = Self {
             state: Arc::clone(&state),
-            requests: Requests::new(Arc::clone(&state)),
+            requests: Requests::new(Arc::clone(&state), to_stream),
+            partials,
             subscriptions: Subscriptions::new(),
             push_waits_for: None,
             serialising: None,
@@ -294,6 +306,8 @@ impl Connection {
             let push_room = self.outbound.room_for(push_waits_for.unwrap_or_default());
             let next_chunk = self.streams.front_mut().map(Stream::next_len);
             let chunk_room = self.outbound.bulk_room_for(next_chunk.unwrap_or_default());
+            // The answers in parts the connection holds are few: a request with more waits.
+            let partials_room = self.partials_streaming() < PARTIALS_QUEUED;
             let event = tokio::select! {
                 biased;
                 () = self.closing.wait() => return End::ShuttingDown,
@@ -302,6 +316,8 @@ impl Connection {
                 // as long as the queue has room for them. Frames are read on regardless, so that
                 // `ping` and `cancel` are answered while it has none.
                 () = room, if next_held.is_some() => Event::Room,
+                // A request's answers in parts before its end, which was sent after them.
+                Some(partial) = self.partials.recv(), if partials_room => Event::Partial(partial),
                 Some(joined) = self.requests.join_next(), if self.requests.has_tasks() => {
                     Event::Finished(joined)
                 }
@@ -328,18 +344,37 @@ impl Connection {
                 Event::Pushes => self.flush_pushes().await,
                 Event::Serialised(ready) => self.on_serialised(ready).await,
                 Event::Chunk => self.stream_chunk().await,
-                Event::Finished(joined) => match self.requests.settle(joined) {
-                    Some(mut settled) => match settled.take_bulk() {
-                        // An answer in bulk streams its chunks first, after any streaming before
-                        // it, and its terminal frame then joins the others.
-                        Some(bulk) => {
-                            self.streams.push_back(Stream::new(settled, &bulk));
-                            Ok(())
-                        }
-                        None => self.queue_terminal(settled).await,
-                    },
-                    None => Ok(()),
-                },
+                Event::Partial(partial) => {
+                    self.stream_partial(partial);
+                    Ok(())
+                }
+                Event::Finished(joined) => {
+                    // The request's last answers in parts, sent before it ended, go first.
+                    while let Ok(partial) = self.partials.try_recv() {
+                        self.stream_partial(partial);
+                    }
+                    match self.requests.settle(joined) {
+                        Some(mut settled) => match settled.take_bulk() {
+                            // An answer in bulk streams its chunks first, after any streaming before
+                            // it, and its terminal frame then joins the others.
+                            Some(bulk) => {
+                                self.streams.push_back(Stream::new(settled, Some(&bulk)));
+                                Ok(())
+                            }
+                            // A request whose earlier answers are still streaming ends after them.
+                            None if self
+                                .streams
+                                .iter()
+                                .any(|stream| stream.id() == settled.id()) =>
+                            {
+                                self.streams.push_back(Stream::new(settled, None));
+                                Ok(())
+                            }
+                            None => self.queue_terminal(settled).await,
+                        },
+                        None => Ok(()),
+                    }
+                }
                 Event::Frame(None | Some(Ok(Message::Close(_)))) => Err(End::ClientClosed),
                 Event::Frame(Some(Err(error))) => Err(End::ReadFailed(error)),
                 Event::Frame(Some(Ok(Message::Text(text)))) => {
@@ -436,7 +471,7 @@ impl Connection {
                 self.held
                     .retain(|settled| self.requests.is_in_flight(settled));
                 self.streams
-                    .retain(|stream| self.requests.is_in_flight(&stream.settled));
+                    .retain(|stream| stream.is_current(&self.requests));
                 cancelled
             }
         }
@@ -459,8 +494,25 @@ impl Connection {
         Ok(())
     }
 
-    /// Queues the streaming request's next chunk, or, once all are queued, its terminal frame,
-    /// which ends the request (Design note 10).
+    /// Streams `partial` after the answers before it, unless its request has ended since it was
+    /// sent: an answer sent before a cancel is not sent.
+    fn stream_partial(&mut self, partial: Partial) {
+        if self.requests.is_current(partial.id, partial.serial) {
+            self.streams.push_back(Stream::partial(partial));
+        }
+    }
+
+    /// The answers in parts streaming or queued to stream (R06.T11.d).
+    fn partials_streaming(&self) -> usize {
+        self.streams
+            .iter()
+            .filter(|stream| matches!(stream.ending, StreamEnd::Partial { .. }))
+            .count()
+    }
+
+    /// Queues the streaming answer's next chunk, or, once all are queued, its frame: a terminal
+    /// frame, which ends the request (Design note 10), or a `partial_response`, queued at once so
+    /// that it precedes the request's next answer (R06.T11.d).
     async fn stream_chunk(&mut self) -> Result<(), End> {
         let Some(stream) = self.streams.front_mut() else {
             return Ok(());
@@ -472,7 +524,15 @@ impl Connection {
             .streams
             .pop_front()
             .expect("the front stream was read just above");
-        self.queue_terminal(stream.settled).await
+        match stream.ending {
+            StreamEnd::Terminal(settled) => self.queue_terminal(settled).await,
+            StreamEnd::Partial { id, serial, frame } => {
+                if self.requests.is_current(id, serial) {
+                    self.push(Message::Text(frame.into())).await?;
+                }
+                Ok(())
+            }
+        }
     }
 
     /// Queues a finished request's terminal frame at once if nothing is held before it and the
@@ -580,21 +640,72 @@ impl Connection {
     }
 }
 
-/// A request answered in bulk: its chunks not yet queued, then its terminal frame.
+/// An answer in bulk: its chunks not yet queued, then its frame.
 struct Stream {
-    /// The request, in flight until its terminal frame is queued.
-    settled: Settled,
+    ending: StreamEnd,
     chunks: std::iter::Peekable<Box<dyn Iterator<Item = Bytes> + Send>>,
 }
 
+/// What follows a streamed answer's chunks.
+enum StreamEnd {
+    /// The request's terminal frame: the request is in flight until it is queued.
+    Terminal(Settled),
+    /// A `partial_response` of the request `id`, the connection's `serial`th (R06.T11.d).
+    Partial {
+        id: RequestId,
+        serial: u64,
+        frame: String,
+    },
+}
+
 impl Stream {
-    /// The stream of `settled`'s answer, whose payload is `bulk`.
+    /// The stream of `settled`'s answer, whose payload is `bulk`; no chunk for none.
     #[must_use]
-    fn new(settled: Settled, bulk: &BulkPayload) -> Self {
-        let chunks: Box<dyn Iterator<Item = Bytes> + Send> = Box::new(bulk.frames(settled.id()));
+    fn new(settled: Settled, bulk: Option<&BulkPayload>) -> Self {
+        let chunks: Box<dyn Iterator<Item = Bytes> + Send> = match bulk {
+            Some(bulk) => Box::new(bulk.frames(settled.id())),
+            None => Box::new(std::iter::empty()),
+        };
         Self {
-            settled,
+            ending: StreamEnd::Terminal(settled),
             chunks: chunks.peekable(),
+        }
+    }
+
+    /// The stream of an answer before its request's last: its chunks, then its frame.
+    #[must_use]
+    fn partial(partial: Partial) -> Self {
+        let Partial {
+            id,
+            serial,
+            frame,
+            bulk,
+        } = partial;
+        let chunks: Box<dyn Iterator<Item = Bytes> + Send> = match bulk {
+            Some(bulk) => Box::new(bulk.frames(id)),
+            None => Box::new(std::iter::empty()),
+        };
+        Self {
+            ending: StreamEnd::Partial { id, serial, frame },
+            chunks: chunks.peekable(),
+        }
+    }
+
+    /// The request the answer is of.
+    #[must_use]
+    fn id(&self) -> RequestId {
+        match &self.ending {
+            StreamEnd::Terminal(settled) => settled.id(),
+            StreamEnd::Partial { id, .. } => *id,
+        }
+    }
+
+    /// Whether its request is still in flight, so that the rest of the answer is still to send.
+    #[must_use]
+    fn is_current(&self, requests: &Requests) -> bool {
+        match &self.ending {
+            StreamEnd::Terminal(settled) => requests.is_in_flight(settled),
+            StreamEnd::Partial { id, serial, .. } => requests.is_current(*id, *serial),
         }
     }
 
@@ -638,8 +749,8 @@ mod tests {
     use super::*;
     use crate::limits::OUTBOUND_QUEUE_FRAMES;
     use crate::testing::{
-        CLOGGING_BYTES, Call, Calls, Client, Harness, NEVER, Scripted, body, bulky_response,
-        small_response,
+        CLOGGING_BYTES, Call, Calls, Client, Harness, NEVER, Received, Scripted, body,
+        bulky_response, small_response,
     };
     use crate::{Server, ServerConfig};
 
@@ -878,6 +989,187 @@ mod tests {
             state.connections.open().is_none(),
             "no connection opens after shutdown"
         );
+    }
+
+    /// A handler that answers every request in parts (R06.T11.d): `parts` answers before its last,
+    /// each a small body after a payload of two chunks whose bytes are the answer's number, then
+    /// as `ends` says.
+    #[derive(Debug)]
+    struct InParts {
+        parts: u8,
+        ends: Ending,
+    }
+
+    /// How an [`InParts`] request ends.
+    #[derive(Debug, Clone, Copy)]
+    enum Ending {
+        /// With a last answer as the others, in a response.
+        Answered,
+        /// Never.
+        Hangs,
+        /// With an error, which no chunk precedes.
+        Fails,
+    }
+
+    /// Answer `n`'s payload: just over one chunk, every byte `n`.
+    fn payload_of(n: u8) -> BulkPayload {
+        BulkPayload::new(Bytes::from(vec![n; crate::bulk::CHUNK_PAYLOAD_BYTES + 7]))
+            .expect("a payload of two chunks")
+    }
+
+    impl crate::requests::Handler for InParts {
+        fn handle(
+            &self,
+            state: Arc<AppState>,
+            _body: RequestBody,
+            token: crate::compute::CancelToken,
+            replies: crate::requests::Replies,
+        ) -> crate::requests::HandlerFuture {
+            let Self { parts, ends } = *self;
+            Box::pin(async move {
+                for n in 0..parts {
+                    let answer = crate::bulk::Answer {
+                        body: small_response(),
+                        bulk: Some(payload_of(n)),
+                    };
+                    replies.send(&state.pool, &token, answer).await?;
+                }
+                match ends {
+                    Ending::Answered => Ok(crate::bulk::Answer {
+                        body: small_response(),
+                        bulk: Some(payload_of(parts)),
+                    }),
+                    Ending::Hangs => std::future::pending().await,
+                    Ending::Fails => Err(crate::requests::request_error(
+                        ErrorCode::Internal,
+                        "a deliberate failure after the answers in parts",
+                    )),
+                }
+            })
+        }
+    }
+
+    /// The frames of one answer in parts: each chunk's request, index, count and first byte, and
+    /// then the message after them.
+    async fn answer_in_parts(client: &mut Client) -> (Vec<[u32; 4]>, ServerMessage) {
+        let mut chunks = Vec::new();
+        loop {
+            match client.next_frame().await {
+                Received::Binary(bytes) => {
+                    let field = |at: usize| {
+                        u32::from_le_bytes(bytes[at..at + 4].try_into().expect("four bytes"))
+                    };
+                    chunks.push([
+                        field(8),
+                        field(12),
+                        field(16),
+                        u32::from(bytes[crate::bulk::HEADER_BYTES]),
+                    ]);
+                }
+                Received::Message(message) => return (chunks, message),
+            }
+        }
+    }
+
+    /// A request answered in parts sends each answer's chunks, numbered from 0, then its
+    /// `partial_response`, in order, then its last answer's chunks and the terminal response
+    /// (R06.T11.d).
+    #[tokio::test]
+    async fn answers_in_parts_stream_in_order_before_the_terminal_response() {
+        let harness = Harness::start(InParts {
+            parts: 2,
+            ends: Ending::Answered,
+        })
+        .await;
+        let mut client = harness.connect().await;
+        client.hello().await;
+        client.request(7, body(7)).await;
+        for n in 0..3_u32 {
+            let (chunks, message) = answer_in_parts(&mut client).await;
+            assert_eq!(chunks, [[7, 0, 2, n], [7, 1, 2, n]], "answer {n}");
+            match message {
+                ServerMessage::PartialResponse { id, body } if n < 2 => {
+                    assert_eq!((id, body), (RequestId(7), small_response()));
+                }
+                ServerMessage::Response { id, body } if n == 2 => {
+                    assert_eq!((id, body), (RequestId(7), small_response()));
+                }
+                other => panic!("answer {n} ended with {other:?}"),
+            }
+        }
+        // Nothing follows the terminal response.
+        assert_eq!(client.ping(1).await, []);
+        harness.stop().await;
+    }
+
+    /// A request that fails after its answers in parts ends with its error after all of them, its
+    /// error waiting behind their chunks (R06.T11.d).
+    #[tokio::test]
+    async fn a_request_failing_after_its_answers_in_parts_ends_after_them() {
+        let harness = Harness::start(InParts {
+            parts: 2,
+            ends: Ending::Fails,
+        })
+        .await;
+        let mut client = harness.connect().await;
+        client.hello().await;
+        client.request(4, body(4)).await;
+        for n in 0..2_u32 {
+            let (chunks, message) = answer_in_parts(&mut client).await;
+            assert_eq!(chunks, [[4, 0, 2, n], [4, 1, 2, n]], "answer {n}");
+            assert!(
+                matches!(
+                    message,
+                    ServerMessage::PartialResponse {
+                        id: RequestId(4),
+                        ..
+                    }
+                ),
+                "answer {n} ended with {message:?}"
+            );
+        }
+        match client.next_frame().await {
+            Received::Message(ServerMessage::RequestError { id, error }) => {
+                assert_eq!((id, error.code), (RequestId(4), ErrorCode::Internal));
+            }
+            other => panic!("expected the request's error, got {other:?}"),
+        }
+        assert_eq!(client.ping(1).await, []);
+        harness.stop().await;
+    }
+
+    /// A request cancelled after an answer in parts sends nothing more for it but `cancelled`.
+    #[tokio::test]
+    async fn a_request_cancelled_between_its_answers_sends_nothing_more() {
+        let harness = Harness::start(InParts {
+            parts: 1,
+            ends: Ending::Hangs,
+        })
+        .await;
+        let mut client = harness.connect().await;
+        client.hello().await;
+        client.request(3, body(3)).await;
+        let (chunks, message) = answer_in_parts(&mut client).await;
+        assert_eq!(chunks.len(), 2);
+        assert!(
+            matches!(
+                message,
+                ServerMessage::PartialResponse {
+                    id: RequestId(3),
+                    ..
+                }
+            ),
+            "{message:?}"
+        );
+        client.cancel(3).await;
+        match client.next_message().await {
+            ServerMessage::RequestError { id, error } => {
+                assert_eq!((id, error.code), (RequestId(3), ErrorCode::Cancelled));
+            }
+            other => panic!("expected the cancel's answer, got {other:?}"),
+        }
+        assert_eq!(client.ping(2).await, []);
+        harness.stop().await;
     }
 
     #[tokio::test]

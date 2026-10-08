@@ -270,6 +270,8 @@ pub struct CpuPool {
     /// Shared with the blocking task that joins them, which holds the lock until every worker has
     /// exited.
     workers: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    /// How many workers it started.
+    worker_count: NonZeroUsize,
 }
 
 impl CpuPool {
@@ -365,7 +367,14 @@ impl CpuPool {
             interactive: Arc::new(Semaphore::new(interactive_capacity.get())),
             bulk: Arc::new(Semaphore::new(bulk_capacity.get())),
             workers: Arc::new(Mutex::new(handles)),
+            worker_count: workers,
         })
+    }
+
+    /// How many worker threads the pool runs.
+    #[must_use]
+    pub(crate) fn workers(&self) -> NonZeroUsize {
+        self.worker_count
     }
 
     /// Queues `job` if its queue has room, without waiting.

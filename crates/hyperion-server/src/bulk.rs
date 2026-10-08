@@ -1001,8 +1001,9 @@ mod tests {
                 state: std::sync::Arc<crate::AppState>,
                 body: hyperion_protocol::RequestBody,
                 token: crate::compute::CancelToken,
+                replies: crate::requests::Replies,
             ) -> crate::requests::HandlerFuture {
-                self.0.handle(state, body, token)
+                self.0.handle(state, body, token, replies)
             }
 
             fn subscribe(

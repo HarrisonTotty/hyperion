@@ -1,24 +1,31 @@
-//! The sky's handler (rendering plan R06, R06.T11.a–c; Design notes 5 and 9–17): `sky`, every star
+//! The sky's handler (rendering plan R06, R06.T11.a–d; Design notes 5 and 9–17): `sky`, every star
 //! brighter than a view's limit as seen from a point at a time, the light of the rest as a band, the
-//! eye's limit in every direction, and the observer's own stars as discs.
+//! eye's limit in every direction, and the observer's own stars as discs, nearest first.
 //!
 //! The request is checked field by field, as every handler's is: the universe, then `time`,
 //! `observer`, `eye`, `camera_limit_v`, `n_max`, `cone` and `exclude_system`, whose ID plan 03's
-//! `resolve` looks up in a pool job, as the scene's frames are. The eye's cut is then the eye cut's
-//! pre-pass, and the request's cut is the deeper of it and the camera's limit. Everything the sky
-//! computes runs as bulk jobs on the CPU pool, never in the interactive queue
-//! ([`compute::sky`](crate::compute::sky)): the galaxy's tables, built once and kept; the eye's
-//! cut; the caps' rays, a few dozen to a job, and the census's plan; the census itself a few hundred
-//! cells to a job over the server's cell cache, while the band's rays are marched a face's two rows
-//! to a job; the merge; the band's sums and the eye's limits a job a march, and the eye offsets; the
-//! host discs of `exclude_system` at the request's time; and the payload.
+//! `resolve` looks up in a pool job, as the scene's frames are. The request's illumination comes
+//! first (R06.T9.g), then the eye's cut, the eye cut's pre-pass with it, and the request's cut is
+//! the deeper of it and the camera's limit, which is taken as asked, neither deepened nor padded;
+//! an eye-only request also takes the eye's visibility, by which its caps count each ray (R06.T7.b;
+//! `decision-r06-t7b-brackets.md`). Everything the sky computes runs as bulk jobs on the CPU pool,
+//! never in the interactive queue ([`compute::sky`](crate::compute::sky)): the galaxy's tables,
+//! built once and kept; the illumination; the eye's cut and visibility; the caps' rays, a few to a
+//! job, and the census's plan; the host discs of `exclude_system` at the request's time; the census
+//! itself, shell by shell nearest first, in jobs of about 50 ms over the server's cell cache,
+//! while the band's rays are marched a face's two rows to a job, once for every reply; and after
+//! each step of shells its merge, the band's sums and the eye's limits a job a march, the eye
+//! offsets, and the payload (R06.T11.d).
 //!
-//! The answer is the census's JSON (the cut, each layer's cap and tallies, the listed and overflow
-//! counts, `valid_until`, the band's shape, the host discs and what is not modelled) and its bulk
-//! payload, in R03's binary frames before it (R06.T11.b): each listed star in the census's order in
-//! its wire form ([`wire_star`]), then the band's texels in the cube's face order ([`wire_texel`]),
-//! the response's `stars_bytes` and `band_bytes` splitting it and its manifest stating the whole.
-//! The band's shape is the query's, 64² a face.
+//! Each step's answer is the census's JSON (the cut, each layer's cap, tallies and the radius it is
+//! complete to, the listed and overflow counts, `valid_until`, the band's shape, the host discs,
+//! what is not modelled, and whether it is final) and its bulk payload, in R03's binary frames
+//! before it (R06.T11.b): each listed star in the census's order in its wire form
+//! ([`wire_star`]), then the band's texels in the cube's face order ([`wire_texel`]), the
+//! response's `stars_bytes` and `band_bytes` splitting it and its manifest stating the whole. Every
+//! answer but the last is a `partial_response`, sent through the request's [`Replies`] as soon as
+//! it is made; the last, final, is the terminal `response`. The band's shape is the query's, 64² a
+//! face.
 //!
 //! The server answers `sky` only behind its landing switch, `--serve-sky` (R06.T11.c); off, as it
 //! is by default until R06.T8.g, the request never reaches this handler.
@@ -26,11 +33,14 @@
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Instant;
 
+use futures_util::TryFutureExt;
 use futures_util::future::try_join;
 use hyperion_protocol::{
-    BandSpecDto, ConeDto, ErrorCode, EyeDto, HostDiscDto, MAX_CUT_V, MAX_SKY_STARS, PowerTwoDto,
-    RequestError, ResponseBody, SkyGapDto, SkyLayerCensusDto, SkyRequest, SkyResponse, SystemIdHex,
+    BandSpecDto, ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, MAX_CUT_V,
+    MAX_SKY_STARS, PowerTwoDto, RequestError, ResponseBody, SkyGapDto, SkyLayerCensusDto,
+    SkyRequest, SkyResponse, SystemIdHex, UniverseIdHex,
 };
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
@@ -39,25 +49,30 @@ use hyperion_sim::galaxy::query::pad_speed;
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
-use hyperion_sim::sky::band::{BandTexel, CompleteTo};
+use hyperion_sim::sky::band::{BandMarch, BandTexel};
 use hyperion_sim::sky::caps::LayerCap;
 use hyperion_sim::sky::census::{
-    BuildSkyQueryError, CensusTallies, Cone, LayerTally, SkyCensus, SkyQuery, SkyStar,
+    BuildSkyQueryError, CensusPlan, CensusTallies, Completeness, Cone, LayerTally, SkyCensus,
+    SkyQuery, SkyStar,
 };
+use hyperion_sim::sky::dgl::Illumination;
 use hyperion_sim::sky::disc::{HostDisc, host_discs};
 use hyperion_sim::sky::eye::{BuildEyeError, SkyBackground, SpRatio, star_colour_offset};
+use hyperion_sim::sky::limits::EyeVisibility;
 use hyperion_sim::tables::star_colour::LUMINANCE_RGB;
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::consts::{
     METRES_PER_LIGHT_YEAR, RADIANS_PER_DEGREE, SECONDS_PER_JULIAN_YEAR,
 };
 use hyperion_sim::units::{CandelasPerSquareMetre, Degrees, LightYears, Magnitudes};
+use tokio::sync::mpsc;
 
 use super::universe::openable_universe;
+use super::{Replies, request_error};
 use crate::AppState;
 use crate::bulk::sky::{EncodedSky, SkyStarWire, SkyTexelWire, encode_sky_payload};
 use crate::bulk::{Answer, BulkPayload};
-use crate::compute::sky::{CensusInputs, SkyBand};
+use crate::compute::sky::{CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand};
 use crate::compute::{self, CancelToken, ComputeError, GalaxyKey, JobError, Priority, SkyCaps};
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 
@@ -74,13 +89,17 @@ const NEAR_STAR_LY: f64 = 1.0;
 /// How far a cone's axis may be from unit length and still be taken as the unit vector it names.
 const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 
-/// Every star brighter than the request's cut as seen from its observer at its time: the census's
-/// JSON with the host discs, and its stars and band as the bulk payload before it (R06.T11.a–c).
+/// Every star brighter than the request's cut as seen from its observer at its time, nearest
+/// first (R06.T11.a–d): after each step of the census's shells, the census so far with the host
+/// discs as JSON, and its stars and band as the bulk payload before it, each but the last sent to
+/// `replies` as a `partial_response`, the last, final, returned.
 ///
-/// The tables, the eye's cut, the caps and plan, the census and the band's march, the merge, the
-/// band's sums and limits, the eye offsets, the discs and the payload each run as bulk jobs under
-/// `token`, so a cancelled request's queued jobs are skipped and a running census job stops at its
-/// next cell. The galaxy's tables are built once, shared by every sky of the galaxy at any time.
+/// The tables, the illumination, the eye's cut and visibility, the caps and plan, the census and
+/// the band's march, each reply's merge, the band's sums and limits, the eye offsets, the discs and
+/// the payloads each run as bulk jobs under `token`, so a cancelled request's queued jobs are
+/// skipped and a running census job stops at its next cell. The galaxy's tables are built once,
+/// shared by every sky of the galaxy at any time. A reply waits for the connection to take the one
+/// before it, and the census runs on meanwhile.
 ///
 /// # Errors
 ///
@@ -89,13 +108,15 @@ const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 /// (also for a request that asks neither the eye nor a camera), `n_max` and `cone` (also for an
 /// eye with a cone, `decision-r06-t8k-cone.md`); `unknown_system` naming `exclude_system` for an
 /// ID whose bits are not a system ID or that `resolve` refuses; those of the galaxy cache;
-/// `queue_full` if the interactive queue has no room for the lookup of `exclude_system`; and
-/// `cancelled` or `internal` from any job.
+/// `queue_full` if the interactive queue has no room for the lookup of `exclude_system`;
+/// `cancelled` or `internal` from any job; and `cancelled` once the request's connection has gone.
 pub(crate) async fn answer(
     state: Arc<AppState>,
     request: SkyRequest,
     token: CancelToken,
+    replies: Replies,
 ) -> Result<Answer, RequestError> {
+    let started = Instant::now();
     let universe = openable_universe(&state, &request.universe)?;
     let asked = SkyAsk::try_from(&request)?;
     let galaxy = state.galaxies.get(universe.key()).await?;
@@ -103,17 +124,37 @@ pub(crate) async fn answer(
         check_exclude(&state, &galaxy, system, named, token.clone()).await?;
     }
     let pool = &state.pool;
-    let caps = state.sky_caps;
     let tables = state.sky_tables.get(universe.key(), &galaxy).await?;
-    let eye = match asked.eye {
-        Some(eye) => Some((
-            eye,
-            compute::sky::eye_cut(pool, &galaxy, &tables, asked.observer, eye, &token).await?,
-        )),
+    phase("tables", started);
+    // The request's illumination first: the eye's cut, its visibility and every reply's band read
+    // it (decision-r06-t9g-dgl.md, §3.4).
+    let light = compute::sky::illumination(pool, &galaxy, &tables, asked.observer, &token).await?;
+    phase("illumination", started);
+    let seen = match asked.eye {
+        Some(eye) => {
+            let at = (asked.observer, eye);
+            let cut = compute::sky::eye_cut(pool, &galaxy, &tables, at, &light, &token).await?;
+            let visibility = if asked.counts_by_visibility() {
+                Some(
+                    compute::sky::eye_visibility(pool, &galaxy, &tables, at, cut, &light, &token)
+                        .await?,
+                )
+            } else {
+                None
+            };
+            Some(Seen {
+                eye,
+                cut,
+                visibility,
+            })
+        }
         None => None,
     };
-    let query = Arc::new(asked.query(eye, caps));
-    let plan = compute::sky::plan(pool, &galaxy, &tables, &query, &token).await?;
+    phase("eye", started);
+    let query = Arc::new(asked.query(seen, light, state.sky_caps));
+    let edges = state.sky_caps.shell_edges_ly();
+    let plan = Arc::new(compute::sky::plan(pool, &galaxy, &tables, &query, edges, &token).await?);
+    phase("plan", started);
     let inputs = CensusInputs {
         galaxy,
         key: universe.key(),
@@ -121,21 +162,7 @@ pub(crate) async fn answer(
         cells: Arc::clone(&state.sky_cells),
         query: Arc::clone(&query),
     };
-    // The band's rays read no census, so they are marched while it runs.
-    let complete_to = CompleteTo::of_caps(plan.caps());
-    let (census, marches) = try_join(
-        compute::sky::census(pool, &inputs, &plan, &token),
-        compute::sky::march(pool, &inputs, complete_to.clone(), &token),
-    )
-    .await?;
-    let census = Arc::new(census);
-    tracing::debug!(
-        cut = query.cut().value(),
-        listed = census.listed().len(),
-        overflow = census.overflow().len(),
-        "sky censused"
-    );
-    let band = compute::sky::band(pool, &query, marches, &census, complete_to, &token).await?;
+    // Every reply carries the discs, which read no census.
     let hosts = match asked.exclude {
         Some(system) => {
             discs(
@@ -150,28 +177,136 @@ pub(crate) async fn answer(
         }
         None => Vec::new(),
     };
-    let (observer, listed) = (*query.observer(), Arc::clone(&census));
-    let encoded = compute::sky::bulk(pool, &token, move |_: &CancelToken| {
-        payload(&observer, &listed, &band)
-    })
-    .await?;
-    let bulk = BulkPayload::new(encoded.bytes.clone()).expect(
-        "a sky's payload, at most N_max's 3 × 10⁵ stars and six faces of texels (7.5 MB), has far \
-         fewer chunks than a u32 counts",
-    );
-    let body = response(
-        request,
-        &query,
-        plan.caps(),
-        &census,
-        hosts,
-        &bulk,
-        &encoded,
-    );
-    Ok(Answer {
-        body: ResponseBody::Sky(Box::new(body)),
-        bulk: Some(bulk),
-    })
+    let steps = compute::sky::delivery_steps(&plan);
+    // Every step's progress fits, so the census never waits for a reply to be made.
+    let (sink, mut censused) = mpsc::channel(steps.len());
+    let census =
+        compute::sky::census_in_steps(pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE, sink, &token)
+            .map_err(RequestError::from);
+    let reply = Reply {
+        state: &state,
+        request: &request,
+        inputs: &inputs,
+        plan: &plan,
+        hosts: &hosts,
+        token: &token,
+        started,
+    };
+    let ((), answer) = try_join(census, reply.each(&mut censused, &replies)).await?;
+    Ok(answer)
+}
+
+/// The milliseconds since `started`, for the log.
+fn millis(started: Instant) -> f64 {
+    started.elapsed().as_secs_f64() * 1e3
+}
+
+/// Logs that a sky's `step` is done, `started` being when its request began: what T17 times.
+fn phase(step: &'static str, started: Instant) {
+    tracing::debug!(step, elapsed_ms = millis(started), "sky phase done");
+}
+
+/// What every reply of one sky is made from.
+struct Reply<'a> {
+    state: &'a AppState,
+    request: &'a SkyRequest,
+    inputs: &'a CensusInputs,
+    plan: &'a Arc<CensusPlan>,
+    hosts: &'a [HostDiscDto],
+    token: &'a CancelToken,
+    /// When the request began, for the log's times.
+    started: Instant,
+}
+
+impl Reply<'_> {
+    /// The sky's band marched, then a reply after each step `censused` gives, each but the last
+    /// sent to `replies`, and the last returned (R06.T11.d).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Reply::of`] and of [`Replies::send`], and `internal` if the census ends before
+    /// its last step.
+    async fn each(
+        &self,
+        censused: &mut mpsc::Receiver<CensusStep>,
+        replies: &Replies,
+    ) -> Result<Answer, RequestError> {
+        let pool = &self.state.pool;
+        // The band's rays read no census, so they are marched while it runs, once for every reply
+        // the plan's shells can state (R06.T9.f).
+        let marches =
+            compute::sky::march(pool, self.inputs, self.plan.replies(), self.token).await?;
+        phase("march", self.started);
+        while let Some(step) = censused.recv().await {
+            let last = step.last;
+            let answer = self.of(step, &marches).await?;
+            if last {
+                return Ok(answer);
+            }
+            replies.send(pool, self.token, answer).await?;
+        }
+        Err(request_error(
+            ErrorCode::Internal,
+            "the sky's census ended before its last step",
+        ))
+    }
+
+    /// The sky's answer after `step` (R06.T11.d): the census of the shells done, its band summed
+    /// from the request's one march at that census's radii, with the eye's limits and offsets
+    /// where the eye is asked, and the payload, each as bulk jobs.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`compute::sky::bulk`] and the band's jobs.
+    async fn of(
+        &self,
+        step: CensusStep,
+        marches: &[Arc<BandMarch>],
+    ) -> Result<Answer, ComputeError> {
+        let (pool, query, last, worked) =
+            (&self.state.pool, &self.inputs.query, step.last, step.worked);
+        let census =
+            compute::sky::merge_step(pool, self.plan, step, query.n_max(), self.token).await?;
+        let census = Arc::new(census);
+        let completeness = census
+            .completeness()
+            .expect("a step's census is a census of shells");
+        tracing::debug!(
+            cut = query.cut().value(),
+            listed = census.listed().len(),
+            overflow = census.overflow().len(),
+            least_edge_ly = completeness.least_edge().map(LightYears::value),
+            last,
+            census_job_s = worked.as_secs_f64(),
+            elapsed_ms = millis(self.started),
+            "sky censused to a step"
+        );
+        debug_assert_eq!(completeness.is_final(), last, "the last step is final");
+        let band = compute::sky::band(pool, query, marches, &census, self.token).await?;
+        let (observer, listed) = (*query.observer(), Arc::clone(&census));
+        let encoded = compute::sky::bulk(pool, self.token, move |_: &CancelToken| {
+            payload(&observer, &listed, &band)
+        })
+        .await?;
+        phase("reply", self.started);
+        let bulk = BulkPayload::new(encoded.bytes.clone()).expect(
+            "a sky's payload, at most N_max's 3 × 10⁵ stars and six faces of texels (7.5 MB), has \
+             far fewer chunks than a u32 counts",
+        );
+        let body = response(
+            (self.request.universe.clone(), self.request.observer),
+            query,
+            self.plan.caps(),
+            &census,
+            self.hosts.to_vec(),
+            &bulk,
+            &encoded,
+        );
+        Ok(Answer {
+            body: ResponseBody::Sky(Box::new(body)),
+            bulk: Some(bulk),
+        })
+    }
 }
 
 /// The sky's bulk payload (Design note 17): each listed star of `census` as the wire carries it,
@@ -328,34 +463,67 @@ impl TryFrom<&SkyRequest> for SkyAsk {
     }
 }
 
+/// The eye a request asks, as the server has seen it: its cut, the eye cut's pre-pass, and for a
+/// request with no camera part its visibility (R06.T7.b).
+#[derive(Debug, Clone, PartialEq)]
+struct Seen {
+    eye: EyeObserver,
+    cut: Magnitudes,
+    visibility: Option<EyeVisibility>,
+}
+
 impl SkyAsk {
+    /// Whether the census's caps count each ray to the eye's own limit about it, its visibility
+    /// (R06.T7.b): for a request of the eye with no camera part alone, never by comparing cuts. A
+    /// camera's cull is its own, and at 120° shallower than the eye's cut, so the eye's visibility
+    /// caps would not cover it (decided 2026-10-08, `decision-r06-t7b-brackets.md`).
+    #[must_use]
+    fn counts_by_visibility(&self) -> bool {
+        self.eye.is_some() && self.camera_limit.is_none()
+    }
+
     /// The census's query, once the eye's cut is known: to the deeper of the eye's cut and the
-    /// camera's limit, with the eye at its own cut if a camera's is deeper (R06.T9.j), and every
-    /// cap forced if `caps` forces them. `eye` is the request's eye with its cut, the eye cut's
-    /// pre-pass, or `None` where the request does not ask the eye.
+    /// camera's limit, as asked, with the eye at its own cut if a camera's is deeper (R06.T9.j),
+    /// its caps counted by the eye's visibility where `seen` has it, the request's `illumination`
+    /// (R06.T9.g), and every cap forced where `caps` forces them. `seen` is the request's eye with
+    /// its cut, or `None` where the request does not ask the eye.
     ///
     /// # Panics
     ///
-    /// If `eye` is `None` and the request asks no camera's limit either. A checked request asks the
-    /// eye, a camera or both, and the handler passes the eye with its cut whenever the request asks
-    /// it.
+    /// If `seen` is `None` and the request asks no camera's limit either. A checked request asks
+    /// the eye, a camera or both, and the handler passes the eye with its cut whenever the request
+    /// asks it, and its visibility and illumination for the request's observer.
     #[must_use]
-    fn query(&self, eye: Option<(EyeObserver, Magnitudes)>, caps: SkyCaps) -> SkyQuery {
-        let cut = match (eye, self.camera_limit) {
-            (Some((_, eye_cut)), Some(camera)) => {
+    fn query(
+        &self,
+        seen: Option<Seen>,
+        illumination: Arc<Illumination>,
+        caps: SkyCaps,
+    ) -> SkyQuery {
+        let cut = match (seen.as_ref().map(|seen| seen.cut), self.camera_limit) {
+            (Some(eye_cut), Some(camera)) => {
                 if camera.value() > eye_cut.value() {
                     camera
                 } else {
                     eye_cut
                 }
             }
-            (Some((_, cut)), None) | (None, Some(cut)) => cut,
+            (Some(cut), None) | (None, Some(cut)) => cut,
             (None, None) => panic!("a sky's query is asked for the eye, a camera or both"),
         };
         let mut builder = SkyQuery::builder(self.observer, cut).n_max(self.n_max);
-        if let Some((eye, eye_cut)) = eye {
-            builder = builder.eye(eye).eye_cut(eye_cut);
+        if let Some(Seen {
+            eye,
+            cut,
+            visibility,
+        }) = seen
+        {
+            builder = builder.eye(eye).eye_cut(cut);
+            if let Some(visibility) = visibility {
+                builder = builder.eye_visibility(visibility);
+            }
         }
+        builder = builder.illumination(illumination);
         if let Some(cone) = self.cone {
             builder = builder.cone(cone);
         }
@@ -363,14 +531,10 @@ impl SkyAsk {
             builder = builder.exclude(system);
         }
         let query = builder.build().expect(
-            "a checked request's cut, n_max and cone build, and the eye's cut is the cut or under it",
+            "a checked request's cut, n_max and cone build, the eye's cut is the cut or under it, \
+             and its visibility and illumination are the request's observer's",
         );
-        match caps.forced_radius() {
-            Some(radius) => query
-                .with_caps_forced(radius)
-                .expect("a forced sky cap is checked when it is made"),
-            None => query,
-        }
+        caps.on(query)
     }
 }
 
@@ -460,12 +624,17 @@ async fn check_exclude(
         .map_err(|error| unknown_exclude(named, error))
 }
 
-/// The census's answer (R06.T11.a–c): the cut, each layer's cap and tallies, the counts, the time it
-/// holds to, the band's shape, the host discs `hosts` and what is not modelled, with the manifest
+/// The census's answer (R06.T11.a–d) for the universe and observer `asked`: the cut, each layer's
+/// cap, tallies and the radii it is complete to, the counts, the time it holds to, the band's
+/// shape, the host discs `hosts`, what is not modelled and whether it is final, with the manifest
 /// of `bulk` and where `encoded` splits.
+///
+/// # Panics
+///
+/// If `census` is not a census of shells, which every reply's is ([`compute::sky::merge_step`]).
 #[must_use]
 fn response(
-    request: SkyRequest,
+    asked: (UniverseIdHex, GalacticPosition),
     query: &SkyQuery,
     caps: &[LayerCap],
     census: &SkyCensus,
@@ -474,13 +643,20 @@ fn response(
     encoded: &EncodedSky,
 ) -> SkyResponse {
     let tallies = census.tallies();
+    let completeness = census
+        .completeness()
+        .expect("a reply's census is a census of shells");
+    let (universe, observer) = asked;
     SkyResponse {
-        universe: request.universe,
+        universe,
         time: wire_time(query.observer().time()),
-        observer: request.observer,
+        observer,
         valid_until: wire_time(valid_until(query.observer().time(), census.listed())),
         cut_v: query.cut().value(),
-        census: caps.iter().map(|cap| layer_census(cap, tallies)).collect(),
+        census: caps
+            .iter()
+            .map(|cap| layer_census(cap, tallies, completeness))
+            .collect(),
         listed: narrow(census.listed().len()),
         overflow: narrow(census.overflow().len()),
         band: BandSpecDto {
@@ -491,16 +667,24 @@ fn response(
         bulk: bulk.manifest(),
         stars_bytes: encoded.stars_bytes,
         band_bytes: encoded.band_bytes,
+        is_final: completeness.is_final(),
     }
 }
 
-/// One layer's census as the wire states it (R06's Risks, T8.c's mapping): its cap, and its
-/// tallies, each count narrowed to the wire's width.
+/// One layer's census as the wire states it (R06's Risks, T8.c's mapping): its cap, its tallies,
+/// each count narrowed to the wire's width, and how far `completeness` says it is complete
+/// (R06.T11.d): its farthest radius, its radius per ray of the caps' lattice where it has one a
+/// ray, and whether its last shell is done.
 #[must_use]
-fn layer_census(cap: &LayerCap, tallies: &CensusTallies) -> SkyLayerCensusDto {
-    let tally = tallies.layer(cap.layer());
+fn layer_census(
+    cap: &LayerCap,
+    tallies: &CensusTallies,
+    completeness: &Completeness,
+) -> SkyLayerCensusDto {
+    let (layer, complete_to) = (cap.layer(), completeness.complete_to());
+    let tally = tallies.layer(layer);
     SkyLayerCensusDto {
-        layer: mass_layer(cap.layer()),
+        layer: mass_layer(layer),
         cap_ly: cap.radius().value(),
         rule_bound_ly: cap.rule_bound().value(),
         expected_beyond: cap.expected_beyond(),
@@ -510,6 +694,11 @@ fn layer_census(cap: &LayerCap, tallies: &CensusTallies) -> SkyLayerCensusDto {
         listed: narrow(tally.listed()),
         without_photometry: narrow(tally.without_photometry()),
         feature_members_absent: tallies.feature_members_absent(),
+        complete_to_ly: complete_to.radius(layer).value(),
+        complete_to_rays_ly: complete_to
+            .rays_ly(layer)
+            .map_or_else(Vec::new, <[f64]>::to_vec),
+        is_final: completeness.edge(layer).is_none(),
     }
 }
 
@@ -677,7 +866,7 @@ mod tests {
     use hyperion_sim::galaxy::placement::CellKey;
     use hyperion_sim::sky::MAX_CUT_V as SIM_MAX_CUT_V;
     use hyperion_sim::sky::REFERENCE_SP_RATIO;
-    use hyperion_sim::sky::band::BandSpec;
+    use hyperion_sim::sky::band::{BandSpec, CompleteTo};
     use hyperion_sim::sky::census::{MAX_N_MAX, merge_census};
     use tokio::time::timeout;
 
@@ -720,6 +909,22 @@ mod tests {
             age_years: 25.0,
             pigmentation: 0.5,
         }
+    }
+
+    /// The illumination at [`request`]'s observer over tables that hold no star, as a sky's query
+    /// states it (R06.T9.g), marched once for the tests.
+    fn light() -> Arc<Illumination> {
+        static LIGHT: std::sync::OnceLock<Arc<Illumination>> = std::sync::OnceLock::new();
+        Arc::clone(LIGHT.get_or_init(|| {
+            let galaxy = Galaxy::new(Seed::new(SEED));
+            let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
+            let observer = SkyAsk::try_from(&request()).unwrap().observer;
+            Arc::new(Illumination::march(
+                &galaxy,
+                &mut tables.march_context(),
+                &observer,
+            ))
+        }))
     }
 
     fn cone(axis: [f64; 3], half_angle_deg: f64) -> ConeDto {
@@ -855,27 +1060,58 @@ mod tests {
             .unwrap()
         };
         let cuts = |query: &SkyQuery| (query.cut().value(), query.eye_cut().map(Magnitudes::value));
-        let seen = Some((EyeObserver::default(), Magnitudes::new(8.5)));
+        let seen = || {
+            Some(Seen {
+                eye: EyeObserver::default(),
+                cut: Magnitudes::new(8.5),
+                visibility: None,
+            })
+        };
         let caps = SkyCaps::DERIVED;
         assert_eq!(
-            cuts(&ask(Some(eye()), Some(10.0)).query(seen, caps)),
+            cuts(&ask(Some(eye()), Some(10.0)).query(seen(), light(), caps)),
             (10.0, Some(8.5)),
             "a camera's deeper cut"
         );
         assert_eq!(
-            cuts(&ask(Some(eye()), Some(7.0)).query(seen, caps)),
+            cuts(&ask(Some(eye()), Some(7.0)).query(seen(), light(), caps)),
             (8.5, Some(8.5)),
             "a camera's shallower cut"
         );
         assert_eq!(
-            cuts(&ask(Some(eye()), None).query(seen, caps)),
+            cuts(&ask(Some(eye()), None).query(seen(), light(), caps)),
             (8.5, Some(8.5))
         );
-        assert_eq!(cuts(&ask(None, Some(9.0)).query(None, caps)), (9.0, None));
+        assert_eq!(
+            cuts(&ask(None, Some(9.0)).query(None, light(), caps)),
+            (9.0, None)
+        );
         let ask = ask(None, Some(9.0));
         let forced = SkyCaps::forced(LightYears::new(30.0)).unwrap();
-        assert_eq!(cuts(&ask.query(None, forced)), (9.0, None));
-        assert_eq!(ask.query(None, caps).n_max().get(), MAX_SKY_STARS);
+        assert_eq!(cuts(&ask.query(None, light(), forced)), (9.0, None));
+        assert_eq!(ask.query(None, light(), caps).n_max().get(), MAX_SKY_STARS);
+    }
+
+    /// Only an eye-only request counts its caps by the eye's visibility, whatever the camera's
+    /// limit, deeper or shallower than the eye's cut (`decision-r06-t7b-brackets.md`).
+    #[test]
+    fn only_a_request_with_no_camera_part_takes_the_eyes_visibility() {
+        let ask = |eye: Option<EyeDto>, camera: Option<f64>| {
+            SkyAsk::try_from(&SkyRequest {
+                eye,
+                camera_limit_v: camera,
+                ..request()
+            })
+            .unwrap()
+        };
+        assert!(ask(Some(eye()), None).counts_by_visibility());
+        for camera in [5.0, 9.0, MAX_CUT_V] {
+            assert!(
+                !ask(Some(eye()), Some(camera)).counts_by_visibility(),
+                "{camera}"
+            );
+            assert!(!ask(None, Some(camera)).counts_by_visibility(), "{camera}");
+        }
     }
 
     #[test]
@@ -942,7 +1178,7 @@ mod tests {
         let caps = SkyCaps::forced(LightYears::new(25.0)).unwrap();
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
         let asked = SkyAsk::try_from(&request()).unwrap();
-        let query = asked.query(None, caps);
+        let query = asked.query(None, light(), caps);
         let mut ctx = tables.march_context();
         let plan = hyperion_sim::sky::census::census_plan(
             &galaxy,
@@ -1003,7 +1239,7 @@ mod tests {
         let galaxy = Galaxy::new(Seed::new(SEED));
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
         let asked = SkyAsk::try_from(&request()).unwrap();
-        let query = asked.query(None, SkyCaps::forced(LightYears::ZERO).unwrap());
+        let query = asked.query(None, light(), SkyCaps::forced(LightYears::ZERO).unwrap());
         let spec = BandSpec::new(4, 12).unwrap();
         let mut texels = Vec::new();
         hyperion_sim::sky::band::band_rows(
@@ -1131,7 +1367,7 @@ mod tests {
         let key = GalaxyKey::new(SEED, hyperion_sim::GENERATOR_VERSION);
         let query = SkyAsk::try_from(&request())
             .unwrap()
-            .query(None, SkyCaps::DERIVED);
+            .query(None, light(), SkyCaps::DERIVED);
         let t = query.observer().time();
         let lit = |record: &SystemRecord| {
             !host_discs(&galaxy, &SystemStars::generate(&galaxy, record), t).is_empty()
@@ -1198,7 +1434,12 @@ mod tests {
             };
             // The server's caps are derived, so a table build would take minutes: the refusal
             // comes before it.
-            let answering = answer(Arc::clone(harness.state()), request, CancelToken::new());
+            let answering = answer(
+                Arc::clone(harness.state()),
+                request,
+                CancelToken::new(),
+                Replies::detached(),
+            );
             let error = timeout(WAIT, answering)
                 .await
                 .expect("the refusal comes before any table is built")

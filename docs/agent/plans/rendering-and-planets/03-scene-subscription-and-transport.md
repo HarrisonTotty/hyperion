@@ -1978,3 +1978,14 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
   while stuck and no later than the push's clock. No server change. Afterwards, twice 80 runs as
   20 concurrent copies beside twelve busy loops (load 21–31) and 84 as 14 copies (load 5–15): no
   failure.
+- **Answers in parts on the frames (a pointer from R06.T11.d, 2026-10-08).** A `sky` is answered
+  nearest first: before its terminal `response`, a `partial_response` for each answer but the
+  last, each a whole answer whose own chunks precede it, numbered from chunk 0 again, its manifest
+  stating them. Design note 10's "the chunks come in order before the terminal response" holds
+  for each answer. The connection streams each answer's chunks and frame in order with the
+  request's later answers and its terminal frame, and holds at most two such answers, two more
+  waiting in their channel (`PARTIALS_QUEUED`). A partial frame is queued after its chunks under
+  the frame-count limit, not held for byte room as a terminal frame is. The client's
+  `BulkAssembler` checks each answer against its own manifest and starts again from chunk 0.
+  `PROTOCOL_VERSION` stays 2: only a client that asks `sky` receives one. R06's Risks,
+  "Deviations in T11.d, as built", have the rest.

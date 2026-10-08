@@ -335,6 +335,8 @@ export {
   RequestClient,
   type BinaryFrameReceipt,
   type BulkOutcome,
+  type BulkRequestOptions,
+  type PartialBulkAnswer,
   type PendingBulkRequest,
   type PendingRequest,
   type PendingSubscription,

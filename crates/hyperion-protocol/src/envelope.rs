@@ -6,6 +6,10 @@
 //! with the same ID, a `response` whose body has the request's `kind`, or a `request_error`, and
 //! that holds for a cancelled request too. The client may reuse an ID once its terminal message has
 //! arrived.
+//!
+//! A request of a kind that is answered in parts, `sky` alone (rendering plan R06, R06.T11.d), may
+//! be answered first by `partial_response`s with its ID, each a whole answer that a later one
+//! replaces, before its terminal message. A request of any other kind never receives one.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -95,6 +99,20 @@ pub enum ServerMessage {
         /// The request's ID.
         id: RequestId,
         /// The answer, whose `kind` is the request's.
+        body: ResponseBody,
+    },
+    /// An answer to a request that is answered in parts, before its last, which a later
+    /// `partial_response` or the terminal `response` replaces whole (rendering plan R06, R06.T11.d:
+    /// a sky arriving nearest first). It ends nothing: the request is still in flight, and still
+    /// ends in exactly one terminal message.
+    ///
+    /// Only `sky` is answered so, so a client that never asks one never receives this. Like a
+    /// `response` in bulk, its binary frames come before it, numbered from chunk 0 for each answer,
+    /// and its body's manifest states them (the crate docs lay the frames out).
+    PartialResponse {
+        /// The request's ID.
+        id: RequestId,
+        /// The answer so far, whose `kind` is the request's.
         body: ResponseBody,
     },
     /// The unsuccessful end of a request.
@@ -432,6 +450,7 @@ mod tests {
             },
             stars_bytes: 0,
             band_bytes: 0,
+            is_final: true,
         }
     }
 
@@ -780,6 +799,21 @@ mod tests {
                     "universes": [],
                     "server_generator_version": 2,
                 },
+            }),
+        );
+    }
+
+    #[test]
+    fn partial_response_wire_form() {
+        assert_wire_form(
+            &ServerMessage::PartialResponse {
+                id: RequestId(7),
+                body: ResponseBody::Unsubscribe,
+            },
+            json!({
+                "type": "partial_response",
+                "id": 7,
+                "body": { "kind": "unsubscribe" },
             }),
         );
     }
