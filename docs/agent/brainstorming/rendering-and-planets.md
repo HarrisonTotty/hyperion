@@ -1759,6 +1759,50 @@ The practical form:
   the model says so_, and dust lanes appear when the dust field does. No other game can do this,
   because no other game generates the galaxy it is standing in.
 
+### The hybrid sky: the census near, synthetic stars far
+
+_Draft (plan R13, 2026-10-08; `.git/rm23-orchestration/feasibility-hybrid-sky.md`): the owner
+signs off._
+
+An exact census to the eye's cut costs too much at generator version 21. Near the Sun the census
+must generate most old massive systems to prove their remnants dark, about 0.4–1.0 × 10⁶
+CPU-seconds, eight to eighteen hours on the development machine, and a camera's cut five to ten
+times that (`decision-p11-t17c-bright.md`). Its cost is far away and its stars are near: within
+1,000 ly lie about 0.35% of the records and over half the listed stars. So the owner ruled on
+2026-10-08 for a hybrid. The closest stars are shown as they are today, and a second pass draws
+points of light from the galaxy's own density and star formation for the rest:
+
+- **Where the census ends.** For each heavy layer (C, D and E) and direction, the census is exact
+  out to the radius beyond which fewer than one star brighter than a ceiling V_P is expected: the
+  caps' own rule ([open question 13](#open-questions)), applied at the ceiling instead of at the
+  cut. So **every star brighter than V_P, and every star nearer than that boundary, is the
+  galaxy's own**. Layers A and B, and the brown dwarfs, are real throughout. At a ceiling of
+  V 4.5, near the Sun, the boundary lies some 800 ly out in C, 1,200 in D and 2,400 in E
+  (estimates, leaning low), and the census costs some thousands of CPU-seconds.
+- **Beyond it, synthetic stars.** Between V_P and the cut, the stars are drawn statistically from
+  the generated galaxy's own density, star formation history, luminosity functions and dust: the
+  tables the band already integrates, never a catalogue of the Milky Way. They are drawn in fixed
+  cells of the galaxy, by exact thinning in order of brightness, so each has a fixed place, shows
+  true parallax, and is the same star for every observer, client and machine, never reshuffled as
+  the camera moves. The band keeps only the light fainter than the cut (and the less than one
+  star a layer brighter than V_P beyond the boundary), so nothing is counted twice. Population
+  synthesis makes the same kind of catalogue of the Milky Way from its models (the Besançon model,
+  Robin et al. 2003; TRILEGAL, Girardi et al. 2005; Galaxia, Sharma et al. 2011); here the model
+  is the generated galaxy itself, and the test of the synthetic stars is the real census of that
+  galaxy, against which they must agree in counts, light, colour and extinction.
+- **What a synthetic star is.** A drawing, labelled, like the integrated starlight: drawn singly
+  but not at any system's position, so it cannot be selected, targeted or counted, and the view's
+  label and list say so. When the ship comes nearer, the census takes its region over and the
+  synthetic stars there give way to the real ones, which differ. So the promise above, that a star
+  the player jumps to is the star they were looking at, holds for every star brighter than V_P and
+  every star within the boundary, and the faint distant field is the galaxy's statistics rather
+  than its systems. At V 4.5 about nine in ten naked-eye stars stay real near the Sun, and most of
+  a camera's faint stars are synthetic.
+
+The ceiling is the owner's, with the measured boundary and costs; this is the
+[statistical layer of unresolved stars](#the-star-field-is-the-galaxy-not-a-photograph) the faint
+majority was always going to need, made of points rather than of light alone.
+
 ### The local star as a disc
 
 Close to, the star is a disc with structure, and two details do most of the work. **Limb darkening** —
