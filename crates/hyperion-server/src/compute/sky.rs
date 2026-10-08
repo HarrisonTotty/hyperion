@@ -9,7 +9,8 @@
 //!
 //! - the galaxy's tables are built once and kept ([`SkyTablesService`](super::SkyTablesService));
 //! - the eye's cut is one job, two coarse pre-passes of the band;
-//! - the caps' 768 rays are measured [`CAP_JOB_RAYS`] to a job, each with its own noise cache,
+//! - the caps' 1,536 rays, each through its three sub-rays (R06.T7.b), are measured
+//!   [`CAP_JOB_RAYS`] to a job, each with its own noise cache,
 //!   then counted in ray order in one more job, which makes the census's plan (decided
 //!   2026-10-03, `decision-r06-tables.md`, item B.4);
 //! - the census runs its plan's cells a few hundred to a job ([`CENSUS_JOB_CELLS`]);
@@ -48,7 +49,9 @@ use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{
     BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows,
 };
-use hyperion_sim::sky::caps::{CAP_RAYS, RayExtinctions, layer_caps_over};
+use hyperion_sim::sky::caps::{
+    CAP_RAYS, CapLattice, RayExtinctions, SUB_RAYS, layer_caps_by_visibility_over, layer_caps_over,
+};
 use hyperion_sim::sky::census::{
     CellOffsets, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY, NoSkyCellCache, SkyCellCache,
     SkyCensus, SkyContext, SkyQuery, SkyStar, census_cell, census_plan, census_plan_of,
@@ -74,9 +77,10 @@ use crate::limits::BULK_QUEUE_CAPACITY;
 /// (`decision-r06-census-cost-signoff.md`, item 3).
 pub(crate) const CENSUS_JOB_CELLS: usize = 256;
 
-/// The caps' rays one job measures: 24 of the 768, 32 jobs of some 70 ms each (R06.T7's 2.5 s for
-/// every ray's realised profile and the count, on one thread).
-pub(crate) const CAP_JOB_RAYS: usize = 24;
+/// The caps' rays one job measures: 8 of the 1,536, 192 jobs, each ray the clearest of its three
+/// sub-rays' realised profiles (R06.T7.b), some 24 profiles a job, as R06.T7's 24 rays a job of
+/// 768 were.
+pub(crate) const CAP_JOB_RAYS: usize = 8;
 
 /// The rows of a face one band job marches, then sums and maps: two of the server's 64, 128 rays,
 /// some 0.1 s of a worker, 192 jobs for the band (R06.T9.f's bench: about 0.8 ms a ray in release
@@ -351,10 +355,12 @@ pub(crate) async fn eye_cut(
 /// The census's plan for `query` (Design notes 9 and 10): each layer's cap and the cells they open.
 ///
 /// The query's forced caps are the plan's at once, in one bulk job. Derived caps count the galaxy's
-/// stars along [`CAP_RAYS`] rays, whose extinction profiles are measured [`CAP_JOB_RAYS`] to a bulk
-/// job, each with its own noise cache, and joined in ray order; one more job counts them, serially
-/// in ray order, and makes the plan (decided 2026-10-03, `decision-r06-tables.md`, item B.4). The
-/// caps are so `layer_caps`' bit for bit.
+/// stars along [`CAP_RAYS`] rays, each through the clearest of its [`SUB_RAYS`] sub-rays, whose
+/// extinction profiles are measured [`CAP_JOB_RAYS`] to a bulk job after one job sets the rays'
+/// lattice, each with its own noise cache, and joined in ray order; one more job counts them,
+/// serially in ray order, by the eye's visibility where the query asks it, and makes the plan
+/// (decided 2026-10-03, `decision-r06-tables.md`, item B.4; R06.T7.b). The caps are so
+/// `layer_caps`' (or `layer_caps_by_visibility`'s) bit for bit.
 ///
 /// # Errors
 ///
@@ -382,12 +388,19 @@ pub(crate) async fn plan(
         .await;
     }
     let origin = *query.observer().position();
+    // The lattice's spacing, which sets each ray's sub-rays, is some 0.1 s: one job, shared.
+    let lattice = bulk(pool, token, |_: &CancelToken| {
+        Arc::new(CapLattice::new(CAP_RAYS))
+    })
+    .await?;
     let shares = (0..CAP_RAYS).step_by(CAP_JOB_RAYS).map(|first| {
         let which = first..(first + CAP_JOB_RAYS).min(CAP_RAYS);
-        let galaxy = Arc::clone(&galaxy);
+        let (galaxy, lattice) = (Arc::clone(&galaxy), Arc::clone(&lattice));
         move || {
             let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
-            RayExtinctions::measure_rays(&galaxy, &origin, CAP_RAYS, which, &mut noise)
+            RayExtinctions::measure_clearest_rays(
+                &galaxy, &origin, lattice, SUB_RAYS, which, &mut noise,
+            )
         }
     });
     let shares = BulkJobs::submit(pool, token, shares)
@@ -396,14 +409,13 @@ pub(crate) async fn plan(
         .await?;
     bulk(pool, token, move |_: &CancelToken| {
         let rays = RayExtinctions::join(shares);
-        let caps = layer_caps_over(
-            &galaxy,
-            &tables.tables,
-            &tables.envelope,
-            query.observer(),
-            query.cut(),
-            &rays,
-        );
+        let (tables, envelope, observer) = (&tables.tables, &tables.envelope, query.observer());
+        let caps = match query.eye_visibility() {
+            Some(visibility) => layer_caps_by_visibility_over(
+                &galaxy, tables, envelope, observer, visibility, &rays,
+            ),
+            None => layer_caps_over(&galaxy, tables, envelope, observer, query.cut(), &rays),
+        };
         census_plan_of(&query, caps)
     })
     .await
@@ -563,10 +575,11 @@ pub(crate) async fn march(
 ) -> Result<Vec<BandMarch>, ComputeError> {
     let spec = inputs.query.band_spec();
     let jobs = band_jobs(spec).map(|(face, rows)| {
-        let (galaxy, tables, query) = (
+        let (galaxy, tables, query, complete_to) = (
             Arc::clone(&inputs.galaxy),
             Arc::clone(&inputs.tables),
             Arc::clone(&inputs.query),
+            complete_to.clone(),
         );
         move || {
             let mut ctx = tables.march_context();
@@ -637,7 +650,7 @@ pub(crate) async fn band(
         _ => None,
     };
     let jobs = marches.into_iter().map(|march| {
-        let (census, eye) = (Arc::clone(census), eye.clone());
+        let (census, eye, complete_to) = (Arc::clone(census), eye.clone(), complete_to.clone());
         move || {
             let mut texels =
                 Vec::with_capacity(march.rows().len() * usize::from(spec.face_texels()));
@@ -772,8 +785,9 @@ mod tests {
 
     /// The derived caps, their rays measured in jobs and counted in ray order, are `layer_caps`'
     /// bit for bit, and so is the plan they make (decided 2026-10-03, `decision-r06-tables.md`,
-    /// item B.4). Over tables that hold no star every count is nought, so each cap is the count's
-    /// nearest radius, but each rule bound reads every ray's extinction.
+    /// item B.4), with the eye's visibility as without (R06.T7.b). Over tables that hold no star
+    /// every count is nought, so each cap is the count's nearest radius, but each rule bound reads
+    /// every ray's extinction.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_caps_rays_measured_in_jobs_are_the_sims_caps() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
@@ -804,6 +818,25 @@ mod tests {
             "a rule bound reads the rays: {caps:?}"
         );
         assert_eq!(planned, census_plan_of(&query, caps));
+        // An eye-only request capped by the eye's visibility (R06.T7.b) takes the sim's caps by
+        // it, bit for bit.
+        let eye = EyeObserver::default();
+        let mut ctx = tables.march_context();
+        let cut = limits::eye_cut(&galaxy, &mut ctx, &sun(), &eye, None);
+        let visibility = limits::eye_visibility(&galaxy, &mut ctx, &sun(), &eye, cut, None);
+        let seen = Arc::new(
+            SkyQuery::builder(sun(), cut)
+                .eye(eye)
+                .eye_visibility(visibility)
+                .build()
+                .unwrap(),
+        );
+        let planned = timeout(WAIT, plan(&pool, &galaxy, &tables, &seen, &token))
+            .await
+            .expect("timed out planning")
+            .unwrap();
+        let sims = census_plan(&galaxy, &tables.tables, &tables.envelope, &seen, &mut noise);
+        assert_eq!(planned, sims);
         pool.shutdown().await.unwrap();
     }
 

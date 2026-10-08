@@ -781,7 +781,15 @@ impl Illumination {
             .build()
             .expect("an observer's query at V 11 with nothing else asked is a query");
         let nowhere = CompleteTo::nowhere();
-        let march = march_rows(galaxy, ctx, &query, [nowhere], &spec, face, rows.clone());
+        let march = march_rows(
+            galaxy,
+            ctx,
+            &query,
+            [nowhere.clone()],
+            &spec,
+            face,
+            rows.clone(),
+        );
         IlluminationRows {
             observer: *observer,
             spec,
@@ -1641,7 +1649,7 @@ mod tests {
                 milky_way_galaxy(),
                 &mut milky_way_context(),
                 &query,
-                replies,
+                replies.clone(),
                 &spec,
                 face,
                 0..spec.face_texels(),

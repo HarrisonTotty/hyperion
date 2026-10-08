@@ -23,10 +23,11 @@ use crate::units::consts::{RADIANS_PER_DEGREE, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{Degrees, LightYears, Magnitudes, Radians};
 
 use super::super::band::{BandSpec, CubeFace};
-use super::super::caps::{CAPPED_LAYERS, LayerCap, layer_caps};
+use super::super::caps::{CAPPED_LAYERS, LayerCap, RayRadii, layer_caps, layer_caps_by_visibility};
 use super::super::dgl::Illumination;
 use super::super::envelope::BrightnessEnvelope;
 use super::super::eye::{EyeObserver, MAX_CUT_V};
+use super::super::limits::EyeVisibility;
 use super::super::luminosity::LuminosityTables;
 use super::cache::SkyCellCache;
 use super::cell::CellOffsets;
@@ -59,6 +60,10 @@ pub enum BuildSkyQueryError {
     /// The illumination was marched for another observer, or at another time: the diffuse light
     /// is the observer's own sky scattered (R06.T9.g).
     Illumination,
+    /// The eye's visibility is asked without the eye, or for a request whose cut is not the eye's
+    /// own, or was taken for another observer, eye or cut than the request's (R06.T7.b): it caps
+    /// an eye-only request.
+    EyeVisibility,
 }
 
 impl fmt::Display for BuildSkyQueryError {
@@ -73,6 +78,9 @@ impl fmt::Display for BuildSkyQueryError {
             }
             Self::ConeWithEye => "the naked eye cannot ask a cone: it has no field stop",
             Self::Illumination => "the illumination was marched for another observer or time",
+            Self::EyeVisibility => {
+                "the eye's visibility caps an eye-only request of its observer, eye and cut"
+            }
         })
     }
 }
@@ -350,6 +358,8 @@ pub struct SkyQuery {
     forced_caps: Option<Vec<LayerCap>>,
     /// The request's illumination, of the query's observer once built (R06.T9.g).
     illumination: Option<Arc<Illumination>>,
+    /// The eye's visibility, if an eye-only request asks its caps by it (R06.T7.b).
+    eye_visibility: Option<Arc<EyeVisibility>>,
 }
 
 /// Builds a [`SkyQuery`].
@@ -403,6 +413,7 @@ impl SkyQuery {
                 exclude: None,
                 forced_caps: None,
                 illumination: None,
+                eye_visibility: None,
             },
         }
     }
@@ -499,6 +510,13 @@ impl SkyQuery {
     #[must_use]
     pub fn illumination(&self) -> Option<&Illumination> {
         self.illumination.as_deref()
+    }
+
+    /// The eye's visibility, if the request caps its census by it
+    /// ([`SkyQueryBuilder::eye_visibility`]; R06.T7.b).
+    #[must_use]
+    pub fn eye_visibility(&self) -> Option<&EyeVisibility> {
+        self.eye_visibility.as_deref()
     }
 
     /// The same query with every layer's cap forced to `radius`: the census the brute force is
@@ -651,6 +669,22 @@ impl SkyQueryBuilder {
         self
     }
 
+    /// Caps an eye-only request's census by the eye's visibility (R06.T7.b).
+    ///
+    /// The visibility is the limit across the sky that the eye cut's pre-pass gives at the eye's
+    /// cut, for the request's observer and eye
+    /// ([`eye_visibility`](super::super::limits::eye_visibility)). Each ray of the caps counts the
+    /// stars brighter than the eye's deepest limit about its cone, rather than the uniform cut, so
+    /// the caps reach less far where the sky is brighter and the eye sees less
+    /// ([`layer_caps_by_visibility`], whose example shows the flow). The census still lists every
+    /// star of the cells it opens to the cut. A request with a camera's deeper cut asks none: its
+    /// caps are the camera's.
+    #[must_use]
+    pub fn eye_visibility(mut self, visibility: EyeVisibility) -> Self {
+        self.query.eye_visibility = Some(Arc::new(visibility));
+        self
+    }
+
     /// The query.
     ///
     /// # Errors
@@ -659,8 +693,10 @@ impl SkyQueryBuilder {
     /// [`BuildSkyQueryError::NMax`] if `n_max` is above [`MAX_N_MAX`],
     /// [`BuildSkyQueryError::EyeCut`] if the eye's cut is asked without the eye, or is not finite
     /// or is deeper than the cut, [`BuildSkyQueryError::ConeWithEye`] if the eye is asked with a
-    /// cone, and [`BuildSkyQueryError::Illumination`] if the illumination was marched for another
-    /// observer or at another time.
+    /// cone, [`BuildSkyQueryError::Illumination`] if the illumination was marched for another
+    /// observer or at another time, and [`BuildSkyQueryError::EyeVisibility`] if the eye's
+    /// visibility is asked without the eye, with an eye's cut shallower than the cut, or was taken
+    /// for another observer, eye or cut.
     pub fn build(mut self) -> Result<SkyQuery, BuildSkyQueryError> {
         let cut = self.query.cut.value();
         if !(cut.is_finite() && cut <= MAX_CUT_V) {
@@ -687,6 +723,18 @@ impl SkyQueryBuilder {
             .is_some_and(|light| light.observer() != &self.query.observer)
         {
             return Err(BuildSkyQueryError::Illumination);
+        }
+        if let Some(visibility) = &self.query.eye_visibility {
+            let at = visibility.cut().value();
+            let eye_only = self
+                .query
+                .eye_cut
+                .is_some_and(|eye| eye.value().total_cmp(&cut).is_eq());
+            let theirs = visibility.observer() == &self.query.observer
+                && self.query.eye.as_ref() == Some(visibility.eye());
+            if !(eye_only && theirs && at.total_cmp(&cut).is_eq()) {
+                return Err(BuildSkyQueryError::EyeVisibility);
+            }
         }
         Ok(self.query)
     }
@@ -730,7 +778,10 @@ impl fmt::Debug for SkyContext<'_> {
 ///
 /// It keeps each layer's padded sphere and streams the cells from it (R06.T8.f): near the Sun at
 /// the eye's caps they number some 1.1 × 10⁸, which held as keys would take 2.2 GB. A server's
-/// jobs take them slab by slab ([`slabs`](Self::slabs)), each an x slab of one layer's walk.
+/// jobs take them slab by slab ([`slabs`](Self::slabs)), each an x slab of one layer's walk. Where
+/// a layer's cap is one radius a ray (R06.T7.b), its sphere is its farthest ray's, and the walk
+/// keeps only the cells whose padded ball meets some ray's cone within that ray's radius, the
+/// region of [`LayerCap::radius_toward`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct CensusPlan {
     caps: Vec<LayerCap>,
@@ -752,43 +803,54 @@ impl CensusPlan {
     }
 
     /// How many cells [`cells`](Self::cells) yields: counted column by column without visiting a
-    /// cell, or, for a cone, by walking them.
+    /// cell for a layer of one radius, and by walking them for a cone or a layer of one radius a
+    /// ray.
     #[must_use]
     pub fn cell_count(&self) -> u64 {
-        if self.region.is_some() {
-            return self.cells().map(|_| 1_u64).sum();
-        }
         self.walks
             .iter()
-            .map(|walk| count_cells_in_sphere(walk.layer, &walk.sphere))
+            .map(|walk| {
+                if self.region.is_none() && walk.rays.is_none() {
+                    count_cells_in_sphere(walk.layer, &walk.sphere)
+                } else {
+                    self.slabs_of(walk)
+                        .map(|slab| slab.cells().map(|_| 1_u64).sum::<u64>())
+                        .sum()
+                }
+            })
             .sum()
     }
 
     /// The plan's jobs: every x slab of each layer's walk, in canonical order, whose cells in turn
     /// are [`cells`](Self::cells). A slab may hold no cell.
     pub fn slabs(&self) -> impl Iterator<Item = CellSlab> + '_ {
-        self.walks.iter().flat_map(move |&walk| {
-            sphere_slabs(walk.layer, &walk.sphere).map(move |x| CellSlab {
-                walk,
-                x,
-                region: self.region,
-                apex: self.apex,
-            })
+        self.walks.iter().flat_map(move |walk| self.slabs_of(walk))
+    }
+
+    /// The slabs of `walk`, one of the plan's.
+    fn slabs_of<'a>(&'a self, walk: &'a LayerWalk) -> impl Iterator<Item = CellSlab> + 'a {
+        sphere_slabs(walk.layer, &walk.sphere).map(move |x| CellSlab {
+            walk: walk.clone(),
+            x,
+            region: self.region,
+            apex: self.apex,
         })
     }
 }
 
-/// One layer's walk in a [`CensusPlan`]: the sphere of its cap, padded, and the pad.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// One layer's walk in a [`CensusPlan`]: the sphere of its cap, padded, the pad, and the cap's
+/// radius per ray, if it has one a ray.
+#[derive(Debug, Clone, PartialEq)]
 struct LayerWalk {
     layer: Layer,
     sphere: QuerySphere,
     pad: LightYears,
+    rays: Option<RayRadii>,
 }
 
 /// One x slab of one layer's walk in a [`CensusPlan`]: a census job's share of the plan, which
-/// streams its own cells.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// streams its own cells. Cloning shares the cap's radii per ray.
+#[derive(Debug, Clone, PartialEq)]
 pub struct CellSlab {
     walk: LayerWalk,
     x: i32,
@@ -811,20 +873,24 @@ impl CellSlab {
 
     /// The slab's cells, in canonical order.
     pub fn cells(&self) -> impl Iterator<Item = CellKey> + use<> {
-        let slab = *self;
-        cells_in_sphere_slab(slab.walk.layer, &slab.walk.sphere, slab.x)
-            .filter(move |&key| meets_cone(slab.region.as_ref(), slab.apex, key, slab.walk.pad))
+        let slab = self.clone();
+        let (layer, sphere, x) = (slab.walk.layer, slab.walk.sphere, slab.x);
+        cells_in_sphere_slab(layer, &sphere, x).filter(move |&key| {
+            opens(
+                slab.region.as_ref(),
+                slab.walk.rays.as_ref(),
+                slab.apex,
+                key,
+                slab.walk.pad,
+            )
+        })
     }
 }
 
-/// Whether `key`'s padded bounding ball meets the cone a plan opens cells by for `region`, about
-/// `apex` (ly), or there is no cone: the cone widened to hold every texel of its region
-/// ([`ConeRegion::meets_ball`]).
+/// The offset of `key`'s centre from `apex` and the radius of its bounding ball padded by `pad`,
+/// both in light-years.
 #[must_use]
-fn meets_cone(region: Option<&ConeRegion>, apex: [f64; 3], key: CellKey, pad: LightYears) -> bool {
-    let Some(region) = region else {
-        return true;
-    };
+fn padded_ball(apex: [f64; 3], key: CellKey, pad: LightYears) -> ([f64; 3], f64) {
     let size = f64::from(key.layer().cell_size_ly());
     let half_diagonal = 0.5 * size * 3.0_f64.sqrt();
     let o = key.origin_ly();
@@ -833,7 +899,27 @@ fn meets_cone(region: Option<&ConeRegion>, apex: [f64; 3], key: CellKey, pad: Li
         f64::from(o[1]) + 0.5 * size - apex[1],
         f64::from(o[2]) + 0.5 * size - apex[2],
     ];
-    region.meets_ball(offset, half_diagonal + pad.value())
+    (offset, half_diagonal + pad.value())
+}
+
+/// Whether a plan opens `key`, a cell of its layer's sphere, about `apex` (ly): its bounding ball,
+/// padded by `pad`, meets the cone it opens cells by for `region`, if any (the cone widened to hold
+/// every texel of its region, [`ConeRegion::meets_ball`]), and, for a cap of one radius a ray
+/// (`rays`), some ray's cone nearer than the ray's radius (R06.T7.b).
+#[must_use]
+fn opens(
+    region: Option<&ConeRegion>,
+    rays: Option<&RayRadii>,
+    apex: [f64; 3],
+    key: CellKey,
+    pad: LightYears,
+) -> bool {
+    if region.is_none() && rays.is_none() {
+        return true;
+    }
+    let (offset, radius) = padded_ball(apex, key, pad);
+    region.is_none_or(|region| region.meets_ball(offset, radius))
+        && rays.is_none_or(|rays| rays.meets_ball(offset, radius))
 }
 
 /// The years light takes to cross `d` ly, as a span.
@@ -847,10 +933,13 @@ fn light_time(d: f64) -> Span {
         .expect("a cap under the root cube's diagonal is a representable span")
 }
 
-/// The census's plan for `query` (Design notes 9 and 10): each layer's cap, then the cells of
-/// [`cells_in_sphere`] to the cap, padded as the range query pads at the earliest emitted time the
-/// cap allows, and, for a cone, only the cells whose padded bounding ball meets the cone widened to
-/// hold every texel of its region, α + 2ρ ([`ConeRegion`]; R06.T8.l).
+/// The census's plan for `query` (Design notes 9 and 10): each layer's cap, one radius a ray
+/// ([`layer_caps`], or [`layer_caps_by_visibility`] for an eye-only request that asks it; R06.T7.b)
+/// unless forced, then the cells of [`cells_in_sphere`] to the cap's
+/// farthest radius, padded as the range query pads at the earliest emitted time that radius
+/// allows; for a cap of one radius a ray, only the cells whose padded bounding ball meets some
+/// ray's cone within that ray's radius; and, for a cone, only the cells whose padded bounding ball
+/// meets the cone widened to hold every texel of its region, α + 2ρ ([`ConeRegion`]; R06.T8.l).
 ///
 /// # Panics
 ///
@@ -863,16 +952,13 @@ pub fn census_plan(
     query: &SkyQuery,
     cache: &mut NoiseCache,
 ) -> CensusPlan {
-    let caps = match &query.forced_caps {
-        Some(caps) => caps.clone(),
-        None => layer_caps(
-            galaxy,
-            tables,
-            envelope,
-            query.observer(),
-            query.cut(),
-            cache,
-        ),
+    let observer = query.observer();
+    let caps = match (&query.forced_caps, query.eye_visibility()) {
+        (Some(caps), _) => caps.clone(),
+        (None, Some(visibility)) => {
+            layer_caps_by_visibility(galaxy, tables, envelope, observer, visibility, cache)
+        }
+        (None, None) => layer_caps(galaxy, tables, envelope, observer, query.cut(), cache),
     };
     census_plan_of(query, caps)
 }
@@ -900,8 +986,9 @@ pub fn census_plan_of(query: &SkyQuery, caps: Vec<LayerCap>) -> CensusPlan {
     }
 }
 
-/// The walk of `cap`'s layer for `query`: [`cells_in_sphere`] to the cap, padded as the range query
-/// pads at the earliest emitted time the cap allows; `None` for a cap of no radius.
+/// The walk of `cap`'s layer for `query`: [`cells_in_sphere`] to the cap's farthest radius, padded as
+/// the range query pads at the earliest emitted time that radius allows, with the cap's radius per
+/// ray if it has one; `None` for a cap of no radius.
 ///
 /// # Panics
 ///
@@ -928,14 +1015,23 @@ fn layer_walk(query: &SkyQuery, cap: &LayerCap) -> Option<LayerWalk> {
     );
     let sphere = QuerySphere::new(*observer.position(), radius, t, pad)
         .expect("a positive finite cap and pad make a sphere");
-    Some(LayerWalk { layer, sphere, pad })
+    Some(LayerWalk {
+        layer,
+        sphere,
+        pad,
+        rays: cap.rays().cloned(),
+    })
 }
 
 /// The cells a census of `query` opens for `caps`, in canonical order: each layer's cells of
-/// [`cells_in_sphere`] to its cap, padded as the range query pads at the earliest emitted time
-/// the cap allows, and for a cone only those whose padded bounding ball meets the cone widened to
-/// hold every texel of its region (R06.T8.l). A cap of no radius opens nothing. Held, for a caller
-/// whose cells are few: a [`CensusPlan`] streams the same cells ([`CensusPlan::cells`]).
+/// [`cells_in_sphere`] to its cap's farthest radius, padded as the range query pads at the earliest
+/// emitted time that radius allows; for a cap of one radius a ray only those whose padded bounding
+/// ball meets some ray's cone, of half-angle the lattice's spacing, nearer than the ray's radius
+/// (R06.T7.b), so that the census is complete towards each direction to the cap's radius towards
+/// it ([`LayerCap::radius_toward`]); and for a cone only those whose padded bounding ball meets the
+/// cone widened to hold every texel of its region (R06.T8.l). A cap of no radius opens nothing.
+/// Held, for a caller whose cells are few: a [`CensusPlan`] streams the same cells
+/// ([`CensusPlan::cells`]).
 ///
 /// # Panics
 ///
@@ -945,19 +1041,29 @@ pub fn plan_cells(query: &SkyQuery, caps: &[LayerCap]) -> Vec<CellKey> {
     let apex = query.observer().position().to_light_years_f64();
     let mut cells = Vec::new();
     for walk in caps.iter().filter_map(|cap| layer_walk(query, cap)) {
-        cells.extend(
-            cells_in_sphere(walk.layer, &walk.sphere)
-                .filter(|&key| meets_cone(query.cone_region(), apex, key, walk.pad)),
-        );
+        cells
+            .extend(cells_in_sphere(walk.layer, &walk.sphere).filter(|&key| {
+                opens(query.cone_region(), walk.rays.as_ref(), apex, key, walk.pad)
+            }));
     }
     cells
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::Arc;
+
+    use hyperion_testkit::float::bits;
+
     use super::*;
     use crate::coords::GalacticPosition;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
+    use crate::galaxy::gas::modifiers::NoModifiers;
+    use crate::sky::caps::{CAP_RAYS, CapLattice};
+    use crate::sky::census::cache::NoSkyCellCache;
+    use crate::sky::census::cell::{SkyStar, census_cell};
+    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
     use crate::time::UniverseTime;
 
     fn observer() -> Observer {
@@ -1048,6 +1154,7 @@ mod tests {
             BuildSkyQueryError::EyeCut,
             BuildSkyQueryError::ConeWithEye,
             BuildSkyQueryError::Illumination,
+            BuildSkyQueryError::EyeVisibility,
         ] {
             let text = error.to_string();
             let field = match error {
@@ -1058,6 +1165,7 @@ mod tests {
                 BuildSkyQueryError::EyeCut => "eye's cut",
                 BuildSkyQueryError::ConeWithEye => "cone",
                 BuildSkyQueryError::Illumination => "illumination",
+                BuildSkyQueryError::EyeVisibility => "visibility",
             };
             assert!(text.contains(field), "{text}");
         }
@@ -1091,6 +1199,74 @@ mod tests {
         assert_eq!(
             BuildSkyQueryError::ConeWithEye.to_string(),
             "the naked eye cannot ask a cone: it has no field stop"
+        );
+    }
+
+    /// The eye's visibility caps an eye-only request of its observer and eye at the cut it was
+    /// taken at (R06.T7.b): asked without the eye, with a camera's deeper cut, at another cut, or
+    /// for another observer or eye, it is refused.
+    #[test]
+    fn the_eyes_visibility_is_an_eye_only_requests_at_its_cut() {
+        let at = |cut: f64| {
+            EyeVisibility::uniform(observer(), EyeObserver::default(), Magnitudes::new(cut))
+        };
+        let builder = |cut: f64| SkyQuery::builder(observer(), Magnitudes::new(cut));
+        let eye = EyeObserver::default();
+        let eye_only = builder(8.28)
+            .eye(eye)
+            .eye_visibility(at(8.28))
+            .build()
+            .expect("an eye-only request at its cut");
+        assert_eq!(eye_only.eye_visibility(), Some(&at(8.28)));
+        assert_eq!(
+            builder(8.28)
+                .eye(eye)
+                .eye_cut(Magnitudes::new(8.28))
+                .eye_visibility(at(8.28))
+                .build()
+                .map(|query| query.eye_visibility().is_some()),
+            Ok(true)
+        );
+        for refused in [
+            builder(8.28).eye_visibility(at(8.28)),
+            builder(10.06)
+                .eye(eye)
+                .eye_cut(Magnitudes::new(8.28))
+                .eye_visibility(at(8.28)),
+            builder(10.06)
+                .eye(eye)
+                .eye_cut(Magnitudes::new(8.28))
+                .eye_visibility(at(10.06)),
+            builder(8.28).eye(eye).eye_visibility(at(8.15)),
+            // Another observer's, or another eye's.
+            builder(8.28)
+                .eye(eye)
+                .eye_visibility(EyeVisibility::uniform(
+                    Observer::new(
+                        GalacticPosition::from_light_years([0.0, 26_001.0, 0.0])
+                            .expect("in the cube"),
+                        UniverseTime::EPOCH,
+                    )
+                    .expect("an observer"),
+                    eye,
+                    Magnitudes::new(8.28),
+                )),
+            builder(8.28)
+                .eye(eye)
+                .eye_visibility(EyeVisibility::uniform(
+                    observer(),
+                    EyeObserver::new(EyeObserver::DEFAULT_FIELD_FACTOR, 70.0, 0.5).expect("an eye"),
+                    Magnitudes::new(8.28),
+                )),
+        ] {
+            assert_eq!(refused.build(), Err(BuildSkyQueryError::EyeVisibility));
+        }
+        assert_eq!(
+            builder(8.28)
+                .eye(eye)
+                .build()
+                .map(|q| q.eye_visibility().is_none()),
+            Ok(true)
         );
     }
 
@@ -1312,5 +1488,211 @@ mod tests {
             }
             assert_eq!(by_slab, held);
         }
+    }
+
+    /// Radii a ray of the standard lattice between `lo` and `hi` ly, varying from ray to ray and
+    /// over the sky: a jagged region, whose cones each hold a different reach.
+    fn jagged_radii(seed: u64, lo: f64, hi: f64) -> RayRadii {
+        let lattice = Arc::new(CapLattice::new(CAP_RAYS));
+        let radii = lattice
+            .directions()
+            .iter()
+            .zip(crate::sky::testing::uniforms(seed))
+            .map(|(d, u)| {
+                let [x, y, z] = d.components();
+                let wave = 0.5 + 0.25 * math::sin(3.0 * x + 2.0 * y) + 0.25 * math::cos(5.0 * z);
+                lo + (hi - lo) * (0.5 * wave + 0.5 * u)
+            })
+            .collect();
+        RayRadii::new(lattice, radii)
+    }
+
+    /// A query near the Sun-like point at `cut` whose every layer's cap is one radius a ray,
+    /// jagged between `lo` and `hi` ly, each layer's of its own seed.
+    fn query_by_ray(cut: f64, lo: f64, hi: f64) -> SkyQuery {
+        let mut query = SkyQuery::builder(observer(), Magnitudes::new(cut))
+            .build()
+            .expect("a valid query");
+        query.forced_caps = Some(
+            CAPPED_LAYERS
+                .iter()
+                .zip(0_u64..)
+                .map(|(&layer, k)| {
+                    LayerCap::forced_by_ray(layer, jagged_radii(0x7b_0100 + k, lo, hi))
+                })
+                .collect(),
+        );
+        query
+    }
+
+    /// A plan whose caps are one radius a ray (R06.T7.b) opens, in each layer, every cell that
+    /// holds a point within the cap's radius towards it, at 2 × 10⁴ random points, and only cells
+    /// of the sphere of its farthest ray; streamed, slab by slab, and counted, its cells are
+    /// [`plan_cells`]'.
+    #[test]
+    fn a_plan_by_ray_opens_every_cell_within_each_directions_radius() {
+        let query = query_by_ray(7.0, 60.0, 400.0);
+        let caps = query.forced_caps.clone().expect("forced caps");
+        let held = plan_cells(&query, &caps);
+        let opened: BTreeSet<CellKey> = held.iter().copied().collect();
+        let spheres: Vec<LayerCap> = caps
+            .iter()
+            .map(|cap| LayerCap::forced(cap.layer(), cap.radius()))
+            .collect();
+        let round: BTreeSet<CellKey> = plan_cells(&query, &spheres).into_iter().collect();
+        assert!(opened.is_subset(&round));
+        assert!(
+            opened.len() < round.len() / 2,
+            "{} of {}",
+            opened.len(),
+            round.len()
+        );
+        let apex = observer().position().to_light_years_f64();
+        let mut uniforms = crate::sky::testing::uniforms(0x7b_0200);
+        let (mut inside, mut outside) = (0_u32, 0_u32);
+        for _ in 0..20_000 {
+            let mut next = || uniforms.next().expect("endless");
+            let u = UnitVector::from_components(std::array::from_fn(|_| 2.0 * next() - 1.0))
+                .expect("a direction");
+            let d = 450.0 * next();
+            let p = u.components().map(|c| c * d);
+            for cap in &caps {
+                let size = f64::from(cap.layer().cell_size_ly());
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "cell indices near the Sun-like point, far inside i32"
+                )]
+                let index = |k: usize| ((apex[k] + p[k]) / size).floor() as i32;
+                let key =
+                    CellKey::new(cap.layer(), [index(0), index(1), index(2)]).expect("in the cube");
+                if d < cap.radius_toward(u).value() {
+                    inside += 1;
+                    assert!(
+                        opened.contains(&key),
+                        "{key:?} holds {p:?}, within its radius"
+                    );
+                } else {
+                    outside += 1;
+                }
+            }
+        }
+        assert!(inside > 10_000 && outside > 10_000, "{inside}, {outside}");
+        let plan = CensusPlan {
+            caps: caps.clone(),
+            walks: caps
+                .iter()
+                .filter_map(|cap| layer_walk(&query, cap))
+                .collect(),
+            region: None,
+            apex,
+        };
+        let streamed: Vec<CellKey> = plan.cells().collect();
+        assert_eq!(streamed, held);
+        let by_slab: Vec<CellKey> = plan.slabs().flat_map(|slab| slab.cells()).collect();
+        assert_eq!(by_slab, held);
+        assert_eq!(plan.cell_count(), u64::try_from(held.len()).expect("few"));
+    }
+
+    /// The census by ray (R06.T7.b) near the Sun to V 8, every layer's cap jagged between 40 and
+    /// 150 ly: it lists every star of a census with every cap forced to 160 ly that lies within
+    /// its layer's radius towards it, so no direction is left without cells; each star it lists
+    /// is that census's, bit for bit; and no star it lists lies beyond its own rays' radii by more
+    /// than the cells' overshoot the final reply already allows, a cell's diagonal and twice its
+    /// pad and 10 ly of the stars' offsets from their barycentres, in distance and in the angle
+    /// that subtends.
+    #[test]
+    fn a_census_by_ray_lists_every_star_within_its_radii_and_none_beyond_its_cells() {
+        let galaxy = milky_way_galaxy();
+        let by_ray = query_by_ray(8.0, 40.0, 150.0);
+        let full = by_ray
+            .clone()
+            .with_caps_forced(LightYears::new(160.0))
+            .expect("a forced cap");
+        let census = |query: &SkyQuery| {
+            let mut ctx = SkyContext {
+                tables: milky_way_dark_tables(),
+                envelope: milky_way_envelope(),
+                offsets: milky_way_offsets(),
+                noise: NoiseCache::with_capacity(1 << 16),
+                cells: &NoSkyCellCache,
+                sources: &[],
+                modifiers: &NoModifiers,
+            };
+            let plan = census_plan(galaxy, ctx.tables, ctx.envelope, query, &mut ctx.noise);
+            let mut stars = Vec::new();
+            for key in plan.cells() {
+                census_cell(galaxy, &mut ctx, key, query, &mut stars);
+            }
+            let walks = plan.walks;
+            (stars, walks)
+        };
+        let key = |s: &SkyStar| (s.system(), s.star());
+        let (theirs, _) = census(&full);
+        let (ours, walks) = census(&by_ray);
+        let all: BTreeMap<_, &SkyStar> = theirs.iter().map(|s| (key(s), s)).collect();
+        let listed: BTreeMap<_, &SkyStar> = ours.iter().map(|s| (key(s), s)).collect();
+        let caps = by_ray.forced_caps.as_ref().expect("forced caps");
+        let cap_of = |layer: Layer| caps.iter().find(|c| c.layer() == layer).expect("capped");
+        let origin = observer().position().to_light_years_f64();
+        let direction = |s: &SkyStar| {
+            let at = s.apparent().to_light_years_f64();
+            UnitVector::from_components(std::array::from_fn(|k| at[k] - origin[k]))
+                .expect("a star away from its observer")
+        };
+        let mut within = 0_u32;
+        for (k, star) in &all {
+            if star.distance() < cap_of(star.layer()).radius_toward(direction(star)) {
+                within += 1;
+                assert!(
+                    listed.contains_key(k),
+                    "{star:?} lies within its radius, unlisted"
+                );
+            }
+        }
+        let mut beyond = 0_u32;
+        for (k, star) in &listed {
+            let theirs = all.get(k).expect("a star of the full census");
+            assert_eq!(
+                (bits(star.v().value()), bits(star.distance().value())),
+                (bits(theirs.v().value()), bits(theirs.distance().value()))
+            );
+            let cap = cap_of(star.layer());
+            let walk = walks
+                .iter()
+                .find(|w| w.layer == star.layer())
+                .expect("a walk of the star's layer");
+            let rays = cap.rays().expect("one radius a ray");
+            let size = f64::from(star.layer().cell_size_ly());
+            let overshoot = 3.0_f64.sqrt() * size + 2.0 * walk.pad.value() + 10.0;
+            let d = star.distance().value();
+            let u = direction(star);
+            if d >= cap.radius_toward(u).value() {
+                beyond += 1;
+            }
+            let opening = rays.lattice().spacing().value() + math::asin((overshoot / d).min(1.0));
+            let reached =
+                rays.lattice()
+                    .directions()
+                    .iter()
+                    .zip(rays.radii_ly())
+                    .any(|(ray, &r)| {
+                        r > d - overshoot && math::acos(ray.dot(&u).clamp(-1.0, 1.0)) <= opening
+                    });
+            assert!(
+                reached,
+                "{star:?} lies beyond its rays' radii and the cells' overshoot"
+            );
+        }
+        eprintln!(
+            "by ray: {} listed of the full census's {}; {within} of those within their radii, all \
+             listed; {beyond} listed beyond their radii, within the cells' overshoot",
+            listed.len(),
+            all.len()
+        );
+        assert!(
+            within > 200 && listed.len() < all.len(),
+            "{within}, {}",
+            listed.len()
+        );
     }
 }

@@ -826,7 +826,7 @@ fn sim_band(
                                 galaxy(),
                                 &mut ctx,
                                 query,
-                                [*complete_to],
+                                [complete_to.clone()],
                                 &spec,
                                 face,
                                 0..spec.face_texels(),

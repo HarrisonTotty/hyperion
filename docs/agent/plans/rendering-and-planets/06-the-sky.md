@@ -153,16 +153,33 @@ pub fn max_star_mass(primary_initial: SolarMasses) -> SolarMasses;  // min(2 m�
                                                                     // R06.T16.b (m₁ before)
 
 // sky::caps (Design note 9)
-pub struct LayerCap { /* layer, radius: LightYears, rule_bound: LightYears,
-    expected_beyond: f64 */ }
+pub struct LayerCap { /* layer, radius: LightYears (the farthest ray's since R06.T7.b),
+    rule_bound: LightYears, expected_beyond: f64, rays: Option<RayRadii> */ }  // Clone, not Copy
+impl LayerCap { pub fn radius_toward(&self, direction: UnitVector) -> LightYears;
+    pub fn rays(&self) -> Option<&RayRadii>; }                      // R06.T7.b, as built
+pub struct CapLattice;      // the rays: a Fibonacci lattice, its spacing (covering radius), index
+pub struct RayRadii;        // one layer's radius a ray; `toward(direction)`: the largest radius
+                            // of the rays whose cones, of half-angle the spacing, hold it
+pub struct CapCount;        // the per-ray count; `caps()`, `spheres()`, `stars_beyond(cap)`,
+                            // `systems_within(cap)`, `stars_within_and_beyond(a, b)`
 pub fn layer_caps(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
     observer: &Observer, cut: Magnitudes, cache: &mut NoiseCache) -> Vec<LayerCap>;
-pub const CAP_RAYS: usize;                                          // 48
+pub fn layer_caps_by_visibility(galaxy: &Galaxy, tables: &LuminosityTables,
+    envelope: &BrightnessEnvelope, observer: &Observer, visibility: &EyeVisibility,
+    cache: &mut NoiseCache) -> Vec<LayerCap>;                       // R06.T7.b, as built
+pub const CAP_RAYS: usize;                       // 48; 768 in R06.T7; 1,536 since R06.T7.b
+pub const SUB_RAYS: usize;                       // 3 since R06.T7.b: each ray the clearest of them
 impl RayExtinctions { pub fn measure_rays(galaxy: &Galaxy, origin: &GalacticPosition,
     rays: usize, which: Range<usize>, cache: &mut NoiseCache) -> Self;  // one share of the rays
+    pub fn measure_clearest_rays(galaxy: &Galaxy, origin: &GalacticPosition,
+        lattice: Arc<CapLattice>, sub_rays: usize, which: Range<usize>,
+        cache: &mut NoiseCache) -> Self;              // R06.T7.b: the caps' rays, one share
     pub fn join(shares: impl IntoIterator<Item = Self>) -> Self; }     // R06.T11.c, as built
 pub fn layer_caps_over(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
     observer: &Observer, cut: Magnitudes, rays: &RayExtinctions) -> Vec<LayerCap>; // the server's
+pub fn layer_caps_by_visibility_over(galaxy: &Galaxy, tables: &LuminosityTables,
+    envelope: &BrightnessEnvelope, observer: &Observer, visibility: &EyeVisibility,
+    rays: &RayExtinctions) -> Vec<LayerCap>;                        // R06.T7.b, as built
 
 // sky::census (Design notes 10–13)
 pub struct SkyQuery { /* observer: Observer, cut: Magnitudes, eye: Option<EyeObserver>,
@@ -188,6 +205,8 @@ pub fn census_plan(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &Bright
     query: &SkyQuery, cache: &mut NoiseCache) -> CensusPlan;
 pub fn census_plan_of(query: &SkyQuery, caps: Vec<LayerCap>) -> CensusPlan; // R06.T11.c, as built
 impl SkyQuery { pub fn forced_caps(&self) -> Option<&[LayerCap]>; }        // R06.T11.c, as built
+impl SkyQueryBuilder { pub fn eye_visibility(self, visibility: EyeVisibility) -> Self; }
+                            // R06.T7.b: an eye-only request's caps by the eye's visibility
 pub fn census_cell(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, key: CellKey, query: &SkyQuery,
     out: &mut Vec<SkyStar>);
 pub struct SkyCensus { /* listed: Vec<SkyStar> (by flux, then system, then star),
@@ -202,7 +221,8 @@ pub enum CubeFace { PosX, NegX, PosY, NegY, PosZ, NegZ }   // galactic axes, Web
 pub struct BandSpec { /* face_texels: u16 (64), steps per ray */ }
 pub struct BandTexel { /* luminance: CandelasPerSquareMetre, chroma: [f32; 2],
     sp_ratio: f64, eye_limit: Option<Magnitudes> */ }
-pub struct CompleteTo { /* each layer's radius, ly: 0 nowhere, +∞ everywhere */ }  // R06.T9.b
+pub struct CompleteTo { /* each layer's radius, ly: 0 nowhere, +∞ everywhere; per ray since
+    R06.T7.b, `radius_toward(layer, direction)` */ }  // R06.T9.b; Clone, not Copy, since R06.T7.b
 pub fn band_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, query: &SkyQuery,
     census: &SkyCensus, complete_to: &CompleteTo, spec: &BandSpec, face: CubeFace,
     rows: Range<u16>, out: &mut Vec<BandTexel>);   // march_rows of its one reply, then sum_rows
@@ -222,6 +242,10 @@ pub fn sum_rows(march: &BandMarch, census: &SkyCensus, complete_to: &CompleteTo,
 pub fn eye_cut(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
     eye: &EyeObserver, illumination: Option<&Illumination>)
     -> Magnitudes;                                 // coarse pre-pass, darkest texel, +0.453 +0.1
+pub struct EyeVisibility;   // R06.T7.b: the pre-pass's 16² limits +0.453 +0.1, of one observer and eye
+pub fn eye_visibility(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
+    eye: &EyeObserver, cut: Magnitudes, illumination: Option<&Illumination>)
+    -> EyeVisibility;                              // R06.T7.b, as built
 pub struct Glare { /* each listed star's direction, photopic and scotopic illuminance at the eye
     after its own reddening, and their pyramid over the band's texels */ } // R06.T9.c and T9.i, as built
 impl Glare { pub fn of_listed(observer: &Observer, listed: &[SkyStar],
@@ -727,7 +751,8 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    brighter than the cut falls below one, from its luminosity function (whose counts take
    R06.T5.d's pair-evolved excess only, never its deficit, so the caps stay a conservative
    estimate), the density field and
-   each of `CAP_RAYS` (768) rays dimming the stars of its own solid angle by its own extinction
+   each of `CAP_RAYS` (768; 1,536 since R06.T7.b, each through the clearest of three sub-rays)
+   rays dimming the stars of its own solid angle by its own extinction
    profile (`extinction::profile`, `Realised`, `Quality::Full`; the census lists the realised
    field's stars, and a mean field undercounts where dust is patchy), and the rule's bound by the
    least extinction over those rays (decision 2026-10-03, `decision-r06-t7-caps.md`), never beyond
@@ -738,7 +763,10 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    for A and B with protostars dark) are the benchmark's to confirm at the current generator version (19 at re-validation) (open question
    19). From R06.T7.b each layer's radius is one per ray, with the criterion summed over the rays
    (decided 2026-10-05, `decision-r06-census-cost.md`; adopted under the owner's delegation,
-   `decision-r06-census-cost-signoff.md`).
+   `decision-r06-census-cost-signoff.md`); each ray counts the stars brighter than
+   cut − DM − v☉(A_V) A_V, the band's boundary (decided 2026-10-07, `decision-r06-t8k-cone.md`);
+   and an eye-only request may count each ray to the eye's own limit about it, the eye-cut
+   pre-pass's, rather than the uniform cut (R06.T7.b's visibility-based caps).
 10. **The census, per cell.** Cells are those of `cells_in_sphere` to each cap, padded by
     `pad_for(|t_emit − epoch|, pad_speed(layer))` as the range query pads, in canonical order. For
     each record the skip keeps: `retarded` on `Drift::of_record` (a centre member's
@@ -1376,6 +1404,14 @@ caps_converge_in_rays`.
 
   Files: `sky/caps.rs`, `sky/census/query.rs`. Acceptance: `cargo test -p hyperion-sim sky::caps
 sky::census::query`, `just test-slow caps_converge_in_rays`.
+
+  As built (Risks, "Deviations in T7.b, as built"): the ray spacing is the lattice's covering
+  radius, so that every direction lies in a ray's cone; `CAP_RAYS` is 1,536 and each ray counts
+  through the clearest of three sub-rays, since 768 rays failed `caps_converge_in_rays` above the
+  Sun and a wider widening broke the 75% gate; the test also holds uniform caps at 8.54 and
+  10.06; T7's brackets hold on each layer's median ray; the eye's visibility-based caps pass and
+  are adopted, opt-in on an eye-only request (`SkyQueryBuilder::eye_visibility`), each ray taking
+  the deepest limit of its cone's 16² texels and their neighbours.
 
 ### R06.T8 The census
 
@@ -2473,8 +2509,9 @@ figures in the doc comments that own them and in this plan: the caps (at the six
 "a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
 and post-AGB crossings, D post-AGB and bright giants through clear windows, E supergiants; handed
 to the brainstorm's sky section and open question 19, with C's post-AGB re-derivation and D's
-post-AGB count; and `layer_caps`'s CPU time per call near the Sun and in the inner bulge, 768
-`Full` realised profiles: above 10% of the census's CPU time in either bench, propose fewer rays
+post-AGB count; and `layer_caps`'s CPU time per call near the Sun and in the inner bulge, 4,608
+`Full` realised profiles since R06.T7.b (1,536 rays, three sub-rays each): above 10% of the
+census's CPU time in either bench, propose fewer rays
 with a finer convergence proof or a coarser quality the slow test still passes), candidates opened, CPU-seconds and listed stars near the Sun and in the inner
 bulge, re-deriving open question 19's counts at the current version and explaining why candidates exceed the
 systems layers C to E hold; the candidates the binary rule of T16.b costs; check the per-layer
@@ -6279,6 +6316,183 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       - the module doc's "all of the light beyond it" (should-fix);
       - the "same census radius" qualifier, Design note 4's boundary wording, and an assertion on
         the poles' step (considers).
+- **Deviations in T7.b, as built (2026-10-07).** Caps by direction, as the census-cost ruling
+  (`decision-r06-census-cost.md`), its sign-off (question 3) and the cone ruling's item 3 set them.
+  T7.b was built before T8.g (`decision-p11-t16-hierarchy-bound.md`), so its census figures are
+  sampled, and T17 re-takes them.
+  - **Built.**
+    - `sky::caps`: `CapLattice`, `RayRadii`, `CapCount`, `WIDENING_SPACINGS`, `SUB_RAYS`,
+      `layer_caps_by_visibility`, `layer_caps_by_visibility_over` and
+      `expected_beyond_caps_by_visibility`.
+    - Also `LayerCap::{radius_toward, rays}`,
+      `CapResolution::{rays, steps_per_decade, sub_rays}` and
+      `RayExtinctions::{measure_clearest, measure_clearest_rays}`, beside R06.T11.c's
+      `measure_rays` and `join`.
+    - `sky::limits::{EyeVisibility, eye_visibility}`, `SkyQueryBuilder::eye_visibility`,
+      `SkyQuery::eye_visibility`, `BuildSkyQueryError::EyeVisibility` and
+      `CompleteTo::radius_toward`.
+    - `LayerCap`, `CompleteTo` and `CellSlab` are `Clone`, no longer `Copy`: they share a cap's radii
+      by `Arc`.
+    - λ is found exactly among the yields (stars per system of each ray's intervals), the largest
+      that keeps the layer's count beyond under 1. Each radius is then widened to the largest
+      within twice the spacing.
+    - The census's radius towards a direction is the largest widened radius of the rays whose
+      cones, of half-angle the spacing, hold it. `plan_cells` opens a cell whose padded bounding
+      ball meets such a cone nearer than its ray's radius. A 32² cube map indexes the rays by
+      direction, and most far cells are rejected by one lookup.
+    - The band takes the same radius towards each texel's centre. A texel of a reply by ray is that
+      of a uniform reply at its radius, bit for bit (test), and so is `BandMarch::ray_light`, the
+      illumination's (R06.T9.g).
+    - Each ray counts the stars brighter than cut − DM − v☉(A_V) A_V. The rule bound takes v☉ at
+      the least extinction.
+    - For caps by ray, `CensusPlan::cell_count` walks the cells, with no column count. The walk's
+      sphere is the farthest ray's.
+    - The server (R06.T11.c): its caps' ray jobs now measure each ray through its sub-rays, on a
+      lattice one job builds, 8 rays a job (192 jobs). They take the eye's visibility where a query
+      asks it, and stay `layer_caps`' bit for bit (`the_caps_rays_measured_in_jobs_are_the_sims_caps`).
+  - **The ray spacing (deviation; the coordinator's instruction).** The plan does not define it.
+    - The census-cost probe took a ray's own cap of equal area, 4.14° at 768 rays. A cone of that
+      leaves directions up to 5.64° from any ray (5.49° the farthest of 10⁵ sampled), so it would
+      leave gaps.
+    - The spacing is the lattice's covering radius, bounded from above by measurement: a 256² cube
+      map's texel centres, plus their largest radius. It is 5.81° at 768 rays and 4.20° at 1,536.
+    - The cones and the widening (twice the spacing) both use it.
+  - **`CAP_RAYS` 1,536 and three sub-rays a ray (deviation; approved by the coordinator).**
+    - **768 rays at widening 2 failed** `caps_converge_in_rays` above the Sun, at (0, 26,000, 2,000):
+      E 1.53 at 7.95, and 3.85 for the eye's visibility caps at 8.54. Fine rays 4–7° below the
+      horizon see E supergiants of the inner disc through edge-on windows.
+    - **Widening alone, at 768 rays:** 3 spacings left E at 1.13 there. 4 passed (0.80), but opened
+      85.3% of the spheres' systems near the Sun (E 38.9%), against the ruling's 75% and 35%.
+    - **1,536 rays at widening 2** passed at 7.95 (1.46). Uniform caps at deeper cuts still failed
+      above the Sun: E 2.5 at 8.2, 3.5 at 8.54, 4.2 at 8.8 and 4.1 at 9.1. They passed again from
+      9.3 (1.11 at 10.06). E alone would need 5–12 spacings; no other layer passed 1.5 at any cut.
+    - **The fix: each ray counts through the clearest of three sub-rays at each distance.** These
+      are the ray and two more a quarter of the spacing (1.05°) to either side, across the ray from
+      galactic north. It passes everywhere: worst 0.998 over the six points at 7.95, 8.2, 8.54, 8.8,
+      9.1 and 10.06, with no table by cut.
+    - **Variants measured** also converged, but cost more near the Sun at 7.95:
+      - 5–9 sub-rays 0.7 spacing out opened 102–109% of the spheres' systems;
+      - 3 at 0.35 opened 75.8%;
+      - 3 offset in latitude opened 79–84% at 0.25–0.35.
+    - **Cost:** `layer_caps` takes about 12 s a call in the test profile, against 2.5 s in T7 and
+      5–7 s for 1,536 rays of one profile each. In the release bench it is about 12 s a call: two
+      plans' caps took 23.7 s, against 2.2 s for R06.T7's 768 rays of one profile each
+      (2026-10-08, after another lane's locked run, so provisional). That is some 0.1% of the
+      census near the Sun, far under R06.T17's 10% trigger.
+  - **T7's tests per ray (deviation, pending the owner's reading).**
+    - On every ray: each within its rule bound, A and B under 100 ly, C at least 1,000 ly, and in
+      the nuclear disc E under 1,500 ly (its largest ray is 555 ly).
+    - On the median ray: D and E near the Sun within a factor of three of 4,300 and 10,000 ly, and
+      each of C–E nearer in the nuclear disc than near the Sun. Their largest rays reach far past the
+      brackets through the clear windows (E's to 61,341 ly towards the poles), so a bracket on every
+      ray would fail by design.
+  - **The stated count beyond** is counted at the caps' own rays, beyond each ray's radius towards
+    its centre. Near the Sun at 7.95: A 0.99, B 0.97, C 0.42, D 0.33 and E 0.29 (the spheres: 0.75,
+    0.80, 0.75, 0.63 and 0.42). λ fills the budget of 1 before the widening, so A and B, whose rays
+    the widening hardly moves, sit just under 1.
+  - **Measured near the Sun at 7.95**, on a recount of 3,072 rays and 48 steps a decade, against
+    R06.T7's spheres (768 rays, one profile a ray, v☉):
+    - Systems opened: A 76.4%, B 93.3%, C 99.9%, D 80.9%, E 32.9%, and 74.2% in all. The gates are
+      75%, and 35% for E, so both pass, narrowly. The ruling's table (the lane's tables, the
+      probe's 8.3° widening, one profile a ray) had 86%, 72% and 25%.
+    - Expected stars the spheres list that the rays drop, and that the rays gain: A 0.248 and 0,
+      B 0.160 and 0, C 0.094 and 0.429, D 0.119 and 0.281, E 0.149 and 0.508.
+    - Expected count beyond, by ray and by sphere: C 0.290 and 0.625, D 0.196 and 0.359, E 0.185
+      and 0.544.
+    - The rays' radii, median (10th–90th percentile) and largest: C 8,193 (6,764–9,018) and 14,563;
+      D 6,764 (6,146–9,925) and 13,232; E 4,610 (4,188–14,563) and 61,341. In the nuclear disc
+      E is 235 (145–417) and 555. `layer_caps`' doc comment has the table.
+  - **The eye's visibility-based caps are adopted** (the sign-off's alternative 1).
+    - At T9.d's eye cut near the Sun, 8.282: the rays' cuts run 7.206–8.282 (median 8.010).
+    - They open 62.7% of the systems of the uniform caps at that cut, 37% fewer.
+    - Safety test (the final 64² map with no glare, plus 0.453, against the cut of every ray whose
+      cone meets a texel): least margin +0.094 mag over 85,772 pairs.
+    - Recount at 3,072 rays: at most 0.935 (A). At every point's own eye cut it is at most 0.94.
+    - Each ray takes the deepest limit of the 16² texels whose centres lie within the spacing plus
+      twice the 16² texel radius (approved): every texel its cone meets and more about it. Within
+      the spacing plus once, at 1,536 rays, the margin was −0.042 mag: a 64² texel darker than its
+      parent by more than the pad.
+    - Opt-in: a request asks it by `SkyQueryBuilder::eye_visibility`, only for an eye-only request
+      at its own cut. **T11 should set it on every eye-only request.** Without it the census takes
+      the uniform caps, which are also complete, at about 1.6 times the systems.
+    - **Not adopted at the camera's 10.06.** The harness's camera limit (`cameraLimit.ts`' at f/1.4,
+      1/30 s, ISO 409,600 and 60°) runs 9.68–10.13 over the 16² pre-pass. So the per-ray cut is the
+      request's 10.06 nearly everywhere, and the saving is 0.2%.
+    - **A finding, not fixed:** the camera's limit at the darkest pre-pass texel, 10.13, is deeper
+      than the 10.06 a camera request asks. That is for the camera-budget ruling.
+  - **The caps' move from v☉** (R06.T7's spheres): none near the Sun (A 11, B 68, C 8,193, D 9,925,
+    E 21,369 ly). In the nuclear disc B–E stay on the same radial nodes. Every radius there moves
+    about 3% (17 → 18, 127 → 131, 225 → 232, 362 → 374 ly), because the farthest rule bound, which
+    sets the count's radial grid, moves out under v☉. A move smaller than one radial step, about
+    10%, is not resolved; near the Sun the grid ends at 120,000 ly and cannot move.
+  - **At 10.06 near the Sun** (for the camera-budget ruling, with no gate): the uniform caps by ray
+    open 36.8% of R06.T7's spheres' systems (E 12.2%). The spheres hold 2.8 × 10⁹ systems there,
+    against 3.5 × 10⁸ at 7.95.
+  - **Realised drops and gains** (the bench, `sky/caps_by_ray_near_sun`, at 7.95; 2026-10-08,
+    sampled 1 in 1,000, under the heavy lock, `CPUQuota=400%`, three workers; provisional):
+    - The union of the three plans' sampled cells, 134,535 of them, was censused in 1,475 CPU-s.
+      It listed 40 stars, scaled to C 25,000, D 6,000 and E 9,000, the same for every plan.
+    - None was dropped and none gained in the sample. The expected figures are under one a layer,
+      by ray C 0.09 and 0.43, D 0.12 and 0.28, E 0.15 and 0.51. By the eye's visibility at 7.95
+      they are A 0.47 and 0, B 0.59 and 0, C 0.48 and 0.25, D 0.80 and 0.10, E 0.46 and 0.36. A
+      sample this sparse cannot see them, and R06.T17 re-takes them on the final census.
+    - The plans open 1.08 × 10⁸ cells (the spheres), 1.04 × 10⁸ (by ray) and 8.7 × 10⁷ (by the eye's
+      visibility at 7.95, which opens 60–79% of the spheres' systems layer by layer, 25% in E).
+      Far cells of few systems make up the by-ray plan's. Walking all three took 184 s on one
+      thread; a server walks them slab by slab on its pool.
+  - **Gates** (2026-10-08, capped, build-slot, 4 jobs, `CPUQuota=400%`):
+    - fmt, and clippy `-D warnings` over the workspace natively and on the sim for wasm32-wasip1;
+    - `--lib -- sky::`: 248 passed;
+    - `--test sky_census` 6/6, and the sky doctests 31/31;
+    - the server's `--test sky` 11/11 and `compute::sky` 17/17;
+    - `just test-slow caps_converge_in_rays` passed (644 s) before the final merge, on the same caps
+      code. Its run on the committed tree, with each point's figures, is pending a follow-up
+      records commit.
+  - **Reviews.**
+    - Rust review: its must-fix (the lattice taken by value) is applied, and so are its
+      should-fixes (units in the names, the visibility's observer and eye, the per-ray clone, a
+      server test of the visibility branch, the summaries and an example).
+    - Determinism audit: no must-fix. Its should-fix (by-ray replies in the row-split test) and
+      considers (the server's visibility test, the spacing's bits pinned) are applied.
+    - Science check: no must-fix. Its doc corrections are applied.
+    - Plan conformance: no must-fix. Its should-fixes are applied.
+  - **Files (deviation).** Beyond `sky/caps.rs` and `sky/census/query.rs`, T7.b touches:
+    - `sky/band.rs`: `CompleteTo` by ray, and the band's and `ray_light`'s reading of it;
+    - `sky/limits.rs`: `EyeVisibility` and `eye_visibility`;
+    - `sky/dgl.rs`: two clones;
+    - `benches/sky.rs` (`sky/caps_by_ray_near_sun`) and `tests/sky_caps.rs`;
+    - the server's `compute/sky.rs`, `requests/sky.rs` and `tests/sky.rs`: its ray jobs take the
+      sub-rays and the visibility, and `CompleteTo` is cloned into each job.
+  - **The cell test (deviation).** `plan_cells` tests each cell's padded bounding ball against the
+    cones, not its padded box, as R06.T8.l's cone does. It is a superset: it opens a few more cells,
+    never fewer.
+  - **Measured outside the harness.** The camera's visibility caps at 10.06, the 3- and 4-spacing
+    widenings, the widening by cut and the sub-ray variants came from scratch probes that are not
+    kept. Their logs are in `.git/rm23-scratch/r06-census/t7b/logs/` (`vis1`, `conv1`–`3`, `widen1`–`3`,
+    `sub1`–`4`).
+  - **Acceptance as built:**
+    - `cargo test -p hyperion-sim --lib -- sky::caps sky::census::query sky::band sky::limits`
+      (libtest ORs its filters; the plan's two filters before `--` are refused);
+    - `cargo test -p hyperion-sim --test sky_census` and the sky doctests;
+    - `just test-slow caps_converge_in_rays`;
+    - the server's `cargo nextest run -p hyperion-server --test sky` and its `compute::sky` tests.
+  - **A finding for plan 07 and R06.T9.a (not fixed).** `extinction::profile`'s last node does not
+    always equal `sightline` to 10⁻¹²: two rays of a 12-ray lattice from the Sun differ by
+    1.8 × 10⁻⁴ and 2.6 × 10⁻⁴ relative at 120,000 ly, while their neighbours agree to 10⁻¹⁵. R06.T9.a's
+    test checks the 8 rays of an 8-ray lattice. T7.b's sub-ray test checks each ray against its
+    sub-rays' own profiles, bit for bit.
+  - **Open.**
+    - T11 carries each layer's radii per ray (1,536 × 6) on the wire, with the lattice's ray count,
+      and the client reads them (DN9; R06.T11.d). The wire's `cap_ly` is now each layer's farthest
+      ray.
+    - T11 also computes `eye_visibility` with the request's illumination for every eye-only
+      request. The safety test ran without an illumination; the diffuse light's effect on the gap
+      between the 16² and 64² maps is not measured.
+    - T5.e's slow `band_gate` reads `CAP_RAYS`, so it now takes 1,536 rays of one profile each.
+    - The visibility caps were safety-tested near the Sun alone, and recounted at all six points.
+    - The cost estimates "at T7.b's caps" elsewhere in this plan assumed the ruling's 25% for E. As
+      built E opens 32.9% and all layers 74.2%, within the gates by 2.1 and 0.8 points; T8.g and T17
+      re-derive them.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;
@@ -6795,12 +7009,13 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
        signatures unchanged; `eye_cut` gains an `Option<&Illumination>` (`decision-r06-t9g-dgl.md`,
        §3.4 and §5). The server calls `march_rows` once (`compute::sky::march`) and `eye_cut` once
        (`compute::sky::eye_cut`).
-    2. R06.T7.b's per-ray radii, which the reply carries. `CompleteTo` is `Copy` today, and
-       `compute::sky::march` and `band` copy it into each job; the near-Sun test's sim side copies
-       it too.
+    2. R06.T7.b's per-ray radii, which the reply carries. Since R06.T7.b `CompleteTo` is `Clone`,
+       no longer `Copy`, and `compute::sky::march` and `band` clone it into each job; the wire's
+       `cap_ly` is each layer's farthest ray.
     3. R06.T7.b's eye visibility map (`sky::limits::eye_visibility`, the eye-cut pre-pass's 16²
-       limits, set on `SkyQueryBuilder`), which the server sets on eye-only requests. T7.b's lane,
-       not yet landed, reports 41% fewer systems opened near the Sun.
+       limits, set on `SkyQueryBuilder`), which the server sets on eye-only requests, with the
+       request's illumination. `compute::sky::plan` already takes it where a query asks it; near
+       the Sun it opens 37% fewer systems than the uniform caps at the eye's cut.
     4. The near-Sun test marches one reply; T11.d's several replies change the replies it gives.
     5. The server bench `sky_near_sun_cold`, T11.d's since T11.b.
 - **R06.T5.f's measurements, as built (2026-10-07, generator version 21; `decision-r06-t9b-band.md`,

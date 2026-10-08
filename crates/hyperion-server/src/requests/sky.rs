@@ -125,7 +125,7 @@ pub(crate) async fn answer(
     let complete_to = CompleteTo::of_caps(plan.caps());
     let (census, marches) = try_join(
         compute::sky::census(pool, &inputs, &plan, &token),
-        compute::sky::march(pool, &inputs, complete_to, &token),
+        compute::sky::march(pool, &inputs, complete_to.clone(), &token),
     )
     .await?;
     let census = Arc::new(census);

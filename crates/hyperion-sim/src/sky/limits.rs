@@ -1227,7 +1227,7 @@ const CUT_PAD_MAG: f64 = 0.1;
 /// which the orchestrator ruled on 2026-10-06 (T9.h's open question 1). Design note 5 first
 /// gave it as 0.43, and the cut as +0.45.
 #[must_use]
-fn largest_colour_offset() -> Magnitudes {
+pub(crate) fn largest_colour_offset() -> Magnitudes {
     star_colour_offset(held_ratio(largest_sp_ratio()), &scotopic_sky())
 }
 
@@ -1457,6 +1457,123 @@ pub fn eye_cut(
     illumination: Option<&Illumination>,
 ) -> Magnitudes {
     eye_cut_passes(galaxy, ctx, observer, eye, illumination).cut()
+}
+
+/// The eye's limit across the sky from the eye cut's pre-pass, as the caps count it (R06.T7.b;
+/// `decision-r06-census-cost-signoff.md`, alternative 1).
+///
+/// Each texel of the pre-pass's 16² band at the eye's cut, with no glare, holds its limit plus the
+/// largest colour offset and the cut's pad, held at the cut. It is built by [`eye_visibility`] for
+/// one observer and eye, and handed to their eye-only request
+/// ([`SkyQueryBuilder::eye_visibility`](super::census::SkyQueryBuilder::eye_visibility)), whose
+/// caps then count each ray's stars to the deepest of these limits about its cone, rather than to
+/// the uniform cut ([`layer_caps_by_visibility`](super::caps::layer_caps_by_visibility)).
+///
+/// A texel's value does not by itself bound the final limit map's finer texels: a 64² texel may be
+/// darker than the 16² texel it lies in by more than the pad. The caps take each ray's deepest
+/// value over its cone's texels and those about it, which the safety test holds against the 64²
+/// map with no glare (least margin +0.094 mag near the Sun; R06's Risks, "Deviations in T7.b, as
+/// built"). Glare, left out here, only makes limits shallower.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EyeVisibility {
+    /// The observer and the eye whose sky it is.
+    observer: Observer,
+    eye: EyeObserver,
+    cut: Magnitudes,
+    /// Each pre-pass texel's limit plus the offset and the pad, held at the cut, V, in the band's
+    /// order (faces in [`CubeFace::ALL`]'s, then rows from the top, each from its left).
+    limits: Vec<f64>,
+}
+
+impl EyeVisibility {
+    /// The observer whose sky it is.
+    #[must_use]
+    pub const fn observer(&self) -> &Observer {
+        &self.observer
+    }
+
+    /// The eye whose limits it holds.
+    #[must_use]
+    pub const fn eye(&self) -> &EyeObserver {
+        &self.eye
+    }
+
+    /// The cut it was taken at: the eye's, V.
+    #[must_use]
+    pub const fn cut(&self) -> Magnitudes {
+        self.cut
+    }
+
+    /// The band whose texels it holds, the eye cut's pre-pass's: 16² a face.
+    #[must_use]
+    pub const fn spec(&self) -> BandSpec {
+        PRE_PASS_SPEC
+    }
+
+    /// A visibility of `cut` in every direction for `observer` and `eye`: a test's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn uniform(observer: Observer, eye: EyeObserver, cut: Magnitudes) -> Self {
+        let side = usize::from(PRE_PASS_SPEC.face_texels());
+        Self {
+            observer,
+            eye,
+            cut,
+            limits: vec![cut.value(); CubeFace::ALL.len() * side * side],
+        }
+    }
+
+    /// Each texel's centre and the faintest V counted towards it, in the band's order.
+    pub fn texels(&self) -> impl Iterator<Item = (UnitVector, Magnitudes)> + '_ {
+        let side = PRE_PASS_SPEC.face_texels();
+        CubeFace::ALL
+            .into_iter()
+            .flat_map(move |face| {
+                (0..side).flat_map(move |row| {
+                    (0..side).map(move |column| PRE_PASS_SPEC.texel_direction(face, row, column))
+                })
+            })
+            .zip(&self.limits)
+            .map(|(centre, &limit)| (centre, Magnitudes::new(limit)))
+    }
+}
+
+/// The eye's limit across the sky for `observer` and `eye` at `cut`, the eye's ([`eye_cut`]'s;
+/// [`EyeVisibility`], R06.T7.b).
+///
+/// It is the eye cut's pre-pass band at the cut, with no glare, each texel's limit plus the largest
+/// colour offset (+0.453) and the cut's pad (0.1), held at the cut. It marches one band of 1,536 rays, under the request's `illumination` as
+/// [`eye_cut`] takes it, whose diffuse light brightens the eye's background (R06.T9.g).
+///
+/// # Panics
+///
+/// As [`limit_rows`] panics on a texel's light that is not finite, which no band gives.
+#[must_use]
+pub fn eye_visibility(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    observer: &Observer,
+    eye: &EyeObserver,
+    cut: Magnitudes,
+    illumination: Option<&Illumination>,
+) -> EyeVisibility {
+    let offset = largest_colour_offset().value();
+    let limits = pre_pass_band(galaxy, ctx, observer, eye, cut, illumination)
+        .iter()
+        .map(|texel| {
+            let limit = texel
+                .eye_limit()
+                .expect("the limit map sets every texel's limit")
+                .value();
+            (limit + offset + CUT_PAD_MAG).min(cut.value())
+        })
+        .collect();
+    EyeVisibility {
+        observer: *observer,
+        eye: *eye,
+        cut,
+        limits,
+    }
 }
 
 #[cfg(test)]
@@ -3449,7 +3566,7 @@ mod tests {
     fn a_request_whose_cut_is_the_eyes_gives_t9is_bits() {
         let spec = spec(16);
         let eye = EyeObserver::default();
-        let reply = camera_replies()[0];
+        let [reply, _] = camera_replies();
         let census = merge_census(
             [(within_the_radius(nearby_stars()), CensusTallies::default())],
             NonZeroU32::new(MAX_N_MAX).expect("not zero"),

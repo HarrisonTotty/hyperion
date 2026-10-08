@@ -41,6 +41,7 @@
 //! | `sky/census_near_sun/warm` | ≤ 25% of cold (T17) | not yet run |
 //! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | provisional (below) |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
+//! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 0.947 CPU-s, provisional |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 16.11 CPU-s with the diffuse light, provisional |
 //! | `sky/band_near_sun/march_no_dgl` | none (the lit march's reference, R06.T9.g) | 15.73 CPU-s, provisional |
@@ -57,6 +58,14 @@
 //! systems. The census-cost ruling (`decision-r06-census-cost.md`) retires the brainstorm's 5–10
 //! CPU-s and orders the levers, of which R06.T8.g's bound star by star is the one that moves it.
 //! The warm and nuclear-disc benches are left for R06.T17 or the owner, on a quiet machine.
+//!
+//! `sky/caps_by_ray_near_sun` (R06.T7.b) censuses the union of three plans near the Sun at 7.95,
+//! sampled: R06.T7's spheres, the caps by ray, and the caps by the eye's visibility, sorting each
+//! star by the plans that open its cell. Its one run (2026-10-08, sampled 1 in 1,000, under the
+//! heavy-test lock, three workers at `CPUQuota=400%`, so provisional): 134,535 cells in 1,475
+//! CPU-s and 40 stars, none dropped or gained by either per-ray plan in the sample (under one is
+//! expected a layer); the plans open 1.08 × 10⁸, 1.04 × 10⁸ and 8.7 × 10⁷ cells, walked in 184 s
+//! on one thread; the caps by ray took about 12 s a plan.
 //!
 //! The brainstorm's 400–800 CPU-s and 5 × 10⁹ candidates are the inner bulge's under the near-Sun
 //! caps held fixed; the nuclear disc's bench takes its own caps, which are far smaller.
@@ -162,7 +171,9 @@ use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{
     BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, band_rows, march_rows, sum_rows,
 };
-use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap, layer_caps};
+use hyperion_sim::sky::caps::{
+    CAPPED_LAYERS, CapCount, CapResolution, LayerCap, RADIAL_STEPS_PER_DECADE, layer_caps,
+};
 use hyperion_sim::sky::census::{
     CellOffsets, CellSlab, CensusTallies, MAX_N_MAX, NoSkyCellCache, Served, SkyCellCache,
     SkyCensus, SkyContext, SkyQuery, SkyStar, StarBounds, census_cell, census_plan, merge_census,
@@ -171,7 +182,7 @@ use hyperion_sim::sky::census::{
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude};
-use hyperion_sim::sky::limits::{Glare, limit_rows};
+use hyperion_sim::sky::limits::{Glare, eye_visibility, limit_rows};
 use hyperion_sim::sky::luminosity::{BinSums, LuminosityTables};
 use hyperion_sim::sky::phase::PhaseEnvelope;
 use hyperion_sim::stellar::Composition;
@@ -1012,6 +1023,184 @@ fn star_bound(c: &mut Criterion) {
     group.finish();
 }
 
+/// R06.T7.b's record near the Sun at V 7.95, the eye's cut of R06.T7's tests: the stars R06.T7's
+/// spherical caps (768 rays, one profile a ray) list that the caps by ray drop, and those the rays
+/// gain, realised, beside their expected counts (`decision-r06-census-cost-signoff.md`, question
+/// 3's condition 3; no gate), for the caps by ray at the uniform cut and by the eye's visibility at
+/// the same cut.
+///
+/// It censuses the sampled cells of the three plans' union once (`HYPERION_SKY_BENCH_SAMPLE`; every
+/// cell when unset) and sorts each star by the plans whose cells hold it. A sampled run's realised
+/// counts are those of its sample times the sample: estimates, labelled so, which R06.T17 re-takes
+/// on the final census. Its time is the union's census.
+fn caps_by_ray_near_sun(c: &mut Criterion) {
+    let workers = workers();
+    let sample = sample();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    group.bench_function("caps_by_ray_near_sun", |b| {
+        let sky = sky();
+        b.iter_custom(|iters| {
+            let mut cpu = Duration::ZERO;
+            for _ in 0..iters {
+                cpu += caps_record(sky, workers, sample);
+            }
+            cpu
+        });
+    });
+    group.finish();
+}
+
+/// A star of [`caps_by_ray_near_sun`]'s union, with whether each plan (the spheres, by ray, by
+/// visibility) opens its cell.
+type Sorted = (SkyStar, [bool; 3]);
+
+/// One run of [`caps_by_ray_near_sun`]: prints its record the first time, and returns the union's
+/// census time, scaled by the sample.
+fn caps_record(sky: &Sky, workers: usize, sample: u64) -> Duration {
+    static PRINTED: AtomicBool = AtomicBool::new(false);
+    let eye = EyeObserver::default();
+    let query = eye_query(SUN_LY);
+    let observer = *query.observer();
+    let cut = query.cut();
+    let mut ctx = job_context(sky);
+    let visibility = eye_visibility(&sky.galaxy, &mut ctx, &observer, &eye, cut, None);
+    let seen_query = SkyQuery::builder(observer, cut)
+        .eye(eye)
+        .eye_visibility(visibility)
+        .build()
+        .expect("an eye-only request at its cut");
+    let mut noise = NoiseCache::with_capacity(NOISE_SLOTS);
+    let counted = Instant::now();
+    let spheres = CapCount::measure(
+        &sky.galaxy,
+        &sky.tables,
+        &sky.envelope,
+        &observer,
+        cut,
+        CapResolution::new(768, RADIAL_STEPS_PER_DECADE).expect("non-zero"),
+        &mut noise,
+    )
+    .spheres();
+    let count_time = counted.elapsed();
+    let radii: Vec<(Layer, LightYears)> = spheres.iter().map(|c| (c.layer(), c.radius())).collect();
+    let sphere_query = query
+        .clone()
+        .with_caps_forced_per_layer(&radii)
+        .expect("the spheres are caps");
+    let planned = Instant::now();
+    let plans = [&sphere_query, &query, &seen_query]
+        .map(|q| census_plan(&sky.galaxy, &sky.tables, &sky.envelope, q, &mut noise));
+    let plan_time = planned.elapsed();
+    // The sampled cells of each plan, and the union's, each cell with the plans that open it.
+    let walked = Instant::now();
+    let mut opened: BTreeMap<CellKey, [bool; 3]> = BTreeMap::new();
+    let mut counts = [0_u64; 3];
+    for (k, plan) in plans.iter().enumerate() {
+        for key in plan.cells() {
+            counts[k] += 1;
+            if sample > 1 && !sample_hash(key).is_multiple_of(sample) {
+                continue;
+            }
+            opened.entry(key).or_default()[k] = true;
+        }
+    }
+    let walk = walked.elapsed();
+    let cells: Vec<(CellKey, [bool; 3])> = opened.into_iter().collect();
+    let jobs: Vec<&[(CellKey, [bool; 3])]> = cells.chunks(64).collect();
+    let (parts, busy) = on_pool(&jobs, workers, &|job: &&[(CellKey, [bool; 3])]| {
+        let mut ctx = job_context(sky);
+        let mut found: Vec<Sorted> = Vec::new();
+        for &(key, by) in *job {
+            let mut stars = Vec::new();
+            census_cell(&sky.galaxy, &mut ctx, key, &query, &mut stars);
+            found.extend(stars.into_iter().map(|star| (star, by)));
+        }
+        found
+    });
+    if !PRINTED.swap(true, Ordering::Relaxed) {
+        let stars: Vec<Sorted> = parts.into_iter().flat_map(|(_, p)| p).collect();
+        eprintln!(
+            "caps_by_ray_near_sun: one count of the caps {:.1} s; the three plans {:.1} s (the \
+             spheres' forced, two counts); {} cells of the three plans' union censused in {:.1} \
+             CPU-s ({:.1} s walking the plans' {}, {} and {} cells, one thread), {} stars",
+            count_time.as_secs_f64(),
+            plan_time.as_secs_f64(),
+            cells.len(),
+            busy.as_secs_f64(),
+            walk.as_secs_f64(),
+            counts[0],
+            counts[1],
+            counts[2],
+            stars.len(),
+        );
+        let caps = [spheres.as_slice(), plans[1].caps(), plans[2].caps()];
+        print_caps_record(sky, &observer, cut, sample, &caps, &stars);
+    }
+    busy * u32::try_from(sample).expect("a sample of under 2³² cells")
+}
+
+/// Prints [`caps_by_ray_near_sun`]'s record: per layer, the stars each plan of `caps` (the
+/// spheres, by ray, by visibility) lists among `stars`, and those the spheres list that each of
+/// the others drops and those it gains, scaled by `sample`, beside their expected counts and each
+/// one's systems from a count at 3,072 rays and twice the radial steps.
+fn print_caps_record(
+    sky: &Sky,
+    observer: &Observer,
+    cut: Magnitudes,
+    sample: u64,
+    caps: &[&[LayerCap]; 3],
+    stars: &[Sorted],
+) {
+    use std::fmt::Write as _;
+    let mut noise = NoiseCache::with_capacity(NOISE_SLOTS);
+    let fine = CapCount::measure(
+        &sky.galaxy,
+        &sky.tables,
+        &sky.envelope,
+        observer,
+        cut,
+        CapResolution::new(3_072, 48).expect("non-zero"),
+        &mut noise,
+    );
+    if sample > 1 {
+        eprintln!("  realised counts are an ESTIMATE from 1 cell in {sample}, scaled by {sample}");
+    }
+    for (l, &layer) in CAPPED_LAYERS.iter().enumerate() {
+        // The stars of `layer` whose cells plan `a` opens and plan `b`, if any, does not, scaled
+        // by the sample.
+        let only = |a: usize, b: Option<usize>| {
+            let n = stars
+                .iter()
+                .filter(|(star, by)| star.layer() == layer && by[a] && b.is_none_or(|b| !by[b]))
+                .count();
+            u64::try_from(n).expect("fewer stars than 2⁶⁴") * sample
+        };
+        let mut line = format!(
+            "  {layer:?}: listed {} (sphere), {} (by ray), {} (by visibility)",
+            only(0, None),
+            only(1, None),
+            only(2, None),
+        );
+        for (shape, by) in [(1, "by ray"), (2, "by visibility")] {
+            let (sphere, other) = (&caps[0][l], &caps[shape][l]);
+            write!(
+                line,
+                "; {by}: drops {} (expected {:.3}), gains {} (expected {:.3}), systems {:.1}% of \
+                 the sphere's",
+                only(0, Some(shape)),
+                fine.stars_within_and_beyond(sphere, other),
+                only(shape, Some(0)),
+                fine.stars_within_and_beyond(other, sphere),
+                100.0 * fine.systems_within(other)
+                    / fine.systems_within(sphere).max(f64::MIN_POSITIVE),
+            )
+            .expect("a string takes any text");
+        }
+        eprintln!("{line}");
+    }
+}
+
 fn luminosity_tables(c: &mut Criterion) {
     let galaxy = galaxy();
     let mut group = c.benchmark_group("sky");
@@ -1135,7 +1324,7 @@ fn march_all(
             &sky.galaxy,
             &mut job_context(sky),
             black_box(query),
-            replies.iter().copied(),
+            replies.iter().cloned(),
             &spec,
             face,
             row..row + 1,
@@ -1466,6 +1655,7 @@ criterion_group!(
     census_nuclear_disc,
     star_bound,
     illumination,
+    caps_by_ray_near_sun,
     band_near_sun,
     limit_map
 );
