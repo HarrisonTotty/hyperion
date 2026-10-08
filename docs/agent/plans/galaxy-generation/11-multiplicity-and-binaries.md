@@ -1849,6 +1849,33 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
     - `None` for an undersampled cell, or one with a departing star or product within the
       margin of its verdict's boundary (the threshold is set and recorded);
     - `Bright` wherever a sample is equally consistent with `Unchanged` and `Bright`.
+  - **The sub-0.1 M☉ `Detached` rule** (R06.T8.g's science check, adopted 2026-10-08).
+    - T17.a's `Detached` takes each star as its own single-star model. But a member below
+      0.1 M☉ is a cooling-fit member that carries mass, and in a pair that `run_pairs` still runs
+      it accretes its companion's wind (BSE equation 6): about 10⁻³ M☉, some 0.05–0.1 mag in V.
+      `run_pairs` runs a pair that holds a remnant by +H, or that can interact by +H, which may
+      lie after the window's end.
+    - So a pair with a member below 0.1 M☉ is `Detached` only if it also cannot be run by +H, or
+      if the accretion's brightening is bounded inside the margin. Otherwise the answer is safe:
+      the tables (`Bright` from the accretion, which their walk counts as a departure and the
+      cooling floor bounds), or `None`.
+    - `light.rs`'s "its stars accrete no wind on their own tracks" (module docs, item 3) is
+      corrected to say so of stars of at least 0.1 M☉.
+    - The slow test takes such pairs too. T17.b's slow test counted, with those holding a changed
+      star at some age: sampled C 927 (610), D 429 (392), E 419 (402); realised near the Sun
+      C 155 (43), D 6 (2), E 0.
+  - **T17.b's read-side widenings stand at version 21** (the orchestrator, 2026-10-08): the
+    cooling floor below 0.1 M☉, E's 0.7 mag margin and E's ±0.3 dex age smear. They satisfy "a
+    violation widens the table", and are stored at the version-22 refit. A pair is read through
+    the floor-applying accessors `living_cmag_for` and `changed_cmag_for`, never the plain
+    `living_cmag` and `changed_cmag`.
+  - **Inclusion monotonicity** (R06.T8.h's ruling, `decision-r06-t8h-warm.md` §5). T8.h's warm
+    cache serves a window from an entry over a wider one, and its bit-identical reply rests on
+    each verdict only loosening as the window widens: for windows A ⊆ A′, the verdict over A′ is
+    no tighter than over A, in the census's order `Remnants` < `Detached` = `Unchanged` <
+    `Bright(M)` (looser as M brightens) < `None`. A fast test beside T17.a's `Detached` test holds
+    it over random nested windows. T8.n runs T8.h's test again on T17.c's verdicts; a violation
+    is fixed at the verdict's source, never in the test.
   - **Tests** (slow, against `evolve`, over ≥ 10⁵ pairs of each layer drawn from realised
     systems, P11.T16's lists at the attempts kept, near the Sun and in the bulge, at random ages
     in the window, on a seed independent of the fit's):
