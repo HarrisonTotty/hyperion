@@ -82,6 +82,7 @@ import type { MeterMode } from "../../view/post/meter";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
 import { placeLines, useCameraPlace } from "./cameraPlace";
 import { KeyLegend } from "./KeyLegend";
+import { type DragKind, dragKindOf } from "./useViewDrag";
 import { litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import {
@@ -1082,6 +1083,7 @@ function ViewStage({
     turnRef.current = addTurns(turnRef.current, turn);
   };
   const fovDeg = (): number => runRef.current.camera.fovDeg;
+  const dragKind = (): DragKind => dragKindOf(runRef.current.camera.preset);
   // Where the primary's camera is, at the readouts' rate, for its label block and camera panel.
   const place = useCameraPlace(shown.run);
 
@@ -1308,6 +1310,7 @@ function ViewStage({
               onKeyUp={onCanvasKeyUp}
               onBlur={onCanvasBlur}
               fovDeg={fovDeg}
+              dragKind={dragKind}
               remPx={remPx}
               onPress={onPress}
               onTurn={onTurn}
@@ -1366,6 +1369,7 @@ function ViewStage({
                         instruments.releaseKeys(slot.slot);
                       }}
                       fovDeg={() => instruments.fovDeg(slot.slot)}
+                      dragKind={() => instruments.dragKind(slot.slot)}
                       onPress={() => {
                         setOperated(slot.id);
                       }}
@@ -1450,6 +1454,7 @@ function ViewStage({
                 maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
                 place={place}
                 sceneStale={stale}
+                modifier={modifier}
                 easedMoves={easedMoves}
                 reducedMotion={reducedMotion}
                 onAction={command}
@@ -1476,6 +1481,7 @@ function ViewStage({
                 instruments.select(operatedView.slot.slot, target);
               }}
               folds={sideFolds}
+              modifier={modifier}
             />
           )}
         </div>

@@ -10,6 +10,7 @@ import type { ExposureControl } from "../../view/photometry/exposure";
 import { styleName } from "../../view/photoreal/style";
 import { cameraSceneOf } from "../../view/scene/model";
 import type { Instrument } from "./useInstruments";
+import type { DragKind } from "./useViewDrag";
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
@@ -50,6 +51,8 @@ export interface InstrumentViewProps {
   readonly onBlur: () => void;
   /** Its horizontal field of view as it is drawn now, degrees, by which a drag turns it (T19.f). */
   readonly fovDeg: () => number;
+  /** How a drag turns its camera now: an orbit in `CHASE`, else a look. */
+  readonly dragKind: () => DragKind;
   /** Called at a press on its canvas, before it picks or turns: the view is the one acted on. */
   readonly onPress: () => void;
   /** Gathers a drag's turn of its camera for its next frame (R07.T19.f). */
@@ -134,6 +137,7 @@ export function InstrumentView({
   onKeyUp,
   onBlur,
   fovDeg,
+  dragKind,
   onPress,
   onTurn,
   onPick,
@@ -224,6 +228,7 @@ export function InstrumentView({
             onKeyUp={onKeyUp}
             onBlur={onBlur}
             fovDeg={fovDeg}
+            dragKind={dragKind}
             remPx={instrument.size?.remPx ?? 16}
             onPress={onPress}
             onTurn={onTurn}

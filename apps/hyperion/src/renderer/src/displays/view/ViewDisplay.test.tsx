@@ -603,9 +603,7 @@ describe("the VIEW display", () => {
     }
     advance(300);
     expect(rate).toHaveTextContent("RATE 1.00 m/s");
-    expect(
-      screen.getByText("NOT AVAILABLE: PAGE DOWN, RATE at its lowest step"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("NOT AVAILABLE: CTRL+↓, RATE at its lowest step")).toBeInTheDocument();
   });
 
   it("moves a mark's label with its mark every frame, between readouts", async () => {
@@ -1790,6 +1788,31 @@ describe("the VIEW display's camera under the pointer and the rate's chord (R07.
     advance(300);
     expect(blockText()).not.toContain("LOOK");
     expect(angleBetween(seat, sightOf(lastFrame()))).toBeLessThan(1e-3);
+  });
+
+  it("orbits the chase camera like a turntable on a drag right, LOOK's bearing rising", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("2");
+    advance(300);
+    // 100 px at 16 px a rem, 8° a rem: 50° right.
+    await dragCanvas(user, [270, 180], [370, 180]);
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*CHASE · LOOK 050° \+00°/u);
+  });
+
+  it("orbits the chase camera the same way on ArrowRight", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("2");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowRight>}");
+    advance(300);
+    await user.keyboard("{/ArrowRight}");
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*CHASE · LOOK 0[1-9]\d° \+00°/u);
   });
 
   it("turns the seat's look by the arrows held on its canvas, as a drag does", async () => {

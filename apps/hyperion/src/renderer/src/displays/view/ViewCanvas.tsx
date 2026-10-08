@@ -1,7 +1,7 @@
 import type { FocusEvent, KeyboardEvent, ReactNode } from "react";
 
 import type { ViewTurn } from "../../view/camera/look";
-import { useViewDrag } from "./useViewDrag";
+import { type DragKind, useViewDrag } from "./useViewDrag";
 
 /** Props of {@link ViewCanvas}. */
 export interface ViewCanvasProps {
@@ -22,6 +22,11 @@ export interface ViewCanvasProps {
    * turned into the camera's (R07.T19.f).
    */
   readonly fovDeg: () => number;
+  /**
+   * How a drag turns the view's camera now: an orbit about the own ship in `CHASE`, else a look
+   * (decision-r07-t19f-position, item 4).
+   */
+  readonly dragKind: () => DragKind;
   /** CSS px in a `rem` at the interface scale, which sizes the click slop (R07.T19.f). */
   readonly remPx: number;
   /** Called at a press on the canvas, before it picks or turns: the view is the one acted on. */
@@ -53,13 +58,14 @@ export function ViewCanvas({
   onKeyUp,
   onBlur,
   fovDeg,
+  dragKind,
   remPx,
   onPress,
   onTurn,
   onPick,
   children,
 }: ViewCanvasProps) {
-  const drag = useViewDrag({ fovDeg, remPx, onPress, onTurn, onPick });
+  const drag = useViewDrag({ fovDeg, dragKind, remPx, onPress, onTurn, onPick });
   const onCanvasBlur = (event: FocusEvent<HTMLCanvasElement>): void => {
     drag.end(event.currentTarget);
     onBlur();

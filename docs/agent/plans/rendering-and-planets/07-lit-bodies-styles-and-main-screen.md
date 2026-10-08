@@ -2718,17 +2718,21 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
     - The turn carries the direction under the press point to the pointer. With x and y in CSS
       px from the canvas's centre, W its CSS width and f = (W ÷ 2) ÷ tan(FOV ÷ 2), the yaw is
       atan(x₂ ÷ f) − atan(x₁ ÷ f) and the pitch atan(y₂ ÷ f) − atan(y₁ ÷ f). That is exact on the
-      centre lines and right to first order elsewhere. A drag right turns the line of sight left,
-      and a drag down pitches it up, so that the far scene follows the pointer in every preset.
+      centre lines and right to first order elsewhere. In `FREE` and `SEAT` a drag right turns the
+      line of sight left, and a drag down pitches it up, so that the far scene follows the
+      pointer.
     - In `FREE` a drag turns the free camera itself about its own axes, as the arrows do: a yaw
       about its +y, then a pitch about its +x, with no roll.
     - In `SEAT` it turns a look offset from the seat's orientation, forward, aft or at the target:
       an azimuth about the hull's up, then an elevation about the turned right axis, so that the
       camera stays right way up. The elevation is held where the line of sight would pass the
       vertical, ±90° from the hull's plane, and the azimuth wraps.
-    - In `CHASE` the same offset turns the line of sight, and the camera swings about the own ship
-      at the chase distance to keep it at the centre: an orbit, held at ±90° from the hull's plane
-      as `SEAT`'s is.
+    - In `CHASE` a drag orbits, as a spatial display's camera does (decision-r07-t19f-position,
+      item 4). The camera swings about the own ship at the chase distance to keep it at the centre.
+      The ship turns with the pointer, at the spatial displays' 8° per rem (`DRAG_DEG_PER_REM`),
+      whatever the field of view. A drag right turns the line of sight right, and a drag down
+      raises the camera. It is held at ±90° from the hull's plane, as `SEAT`'s is. The arrows turn
+      it the same way.
     - Every cut clears the offset: the preset's key (`1`, `2`) or button pressed again, a target
       step, or `3`. `EASED CAMERA MOVES` eases that return as it eases any cut.
     - In `SEAT` and `CHASE` the arrows turn the same offset at the free camera's 45°/s, without its
@@ -2758,29 +2762,39 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
       never held as a flight key, and the modifier's own press releases every held arrow. On
       macOS it releases every held flight key, since macOS reports no key's release while ⌘ is
       held.
-  - **Where the camera is.**
+  - **Where the camera is** (decision-r07-t19f-position).
     - `POSITION`: the camera's range from the centre of the frame its `FRAME` line names, and its
-      direction from that centre, `26,371 km 047° +12°`. The range is in `km`, `Mm`, `Gm` and `AU`
-      to three figures, with hysteresis (`formatBodyDistance`). The direction takes the guide's
-      form for a direction from the ship: the azimuth from `COREWARD` through `SPINWARD` at the
-      system's barycentre, and the elevation positive `NORTH`. Where the system's place is not
-      known, or lies on the galactic axis, the azimuth runs from +x and the reading says
-      `FROM +X`. In the `GALACTIC` frame the reading is the frame's own `RADIUS`, `ANGLE` and
-      `HEIGHT`.
-    - `POINTING`: the line of sight's direction, in the same form, `210° -05°`.
-    - They stand on the `PRIMARY` view's label block after `CAMERA`, and in the `Camera` panel
-      beside `RATE`, for whichever view `CONTROLS` names, a primary or an instrument. An
-      instrument's block does not carry them. At 1280 × 720 two slots fit only while their blocks
-      keep the lines they have (decision-r07-owner-ux-signoff), and T20's UHD 620 runs need both
-      open there. A ruling is asked.
-    - They change with the readouts, at 4 Hz, from the camera's own state, with no new server
-      data. They describe the client's own camera, so they are never stale with the scene.
+      direction from that centre, `26.4 Mm 047° +12°`. The range is in `km`, `Mm`, `Gm` and `AU`
+      to three figures, with hysteresis (`formatBodyDistance`), as the list's ranges are. The
+      direction takes the guide's form for a direction from the ship, in whole degrees: the
+      azimuth from `COREWARD` through `SPINWARD` at the system's barycentre, and the elevation
+      positive `NORTH`. Where the system's place is not known, or the barycentre lies within a
+      light-year of the galactic axis, the azimuth runs from +x through −y and the reading says
+      `FROM +X`. At the vertical the azimuth is the missing `—`. In the `GALACTIC` frame the
+      reading is the frame's own `RADIUS`, `ANGLE` and `HEIGHT`, to one decimal.
+    - `POINTING`: the line of sight's direction, in the same form, `210° -05°`, taken at the
+      camera in `GALACTIC`.
+    - On the `PRIMARY` view's label block after `CAMERA`. In the `Camera` panel, for whichever
+      view `CONTROLS` names, `POSITION` stands on its own line, then `RATE` with `POINTING` beside
+      it, then the rate's limit reason. An instrument's block does not carry them, since at
+      1280 × 720 two slots fit only while their blocks keep the lines they have. In the compact
+      layout an instrument's fold with the `Camera` panel, an exception stated in the guide. So
+      that the camera's worst state fits with the 0.5 rem probe, two spacing rules apply. In both
+      layouts the note beside `EASED CAMERA MOVES` takes no margin and, wrapped, no row gap. In the
+      compact layout the panel's button rows stand 0.25 rem above what follows them, and the
+      rate's limit reason 0.25 rem under its line.
+    - They change with the readouts, at 4 Hz, from the camera's state, with no new server data.
+      `POSITION` is muted with its `S` while the server's scene is stale and the camera is held to
+      a craft, and `POINTING` while it is stale in `SEAT` and `CHASE`, whose line of sight follows
+      the hull.
   - **The legend.**
     - `FOCUSED VIEW: DRAG ARROWS TURN · FREE: W/S A/D R/F MOVE · Q/E ROLL · CTRL+↑/↓ RATE` on Linux
       and Windows, and the same with `⌘↑/↓` on macOS. B612 has no `⌘`, so it is drawn, as `☉` is.
       The legend stays one line on 1280 × 720's 816 px stage, so that the stage keeps the height
-      two slots need. `PAGE UP` and `PAGE DOWN` stay bound, and the camera panel's limit reason
-      still names them.
+      two slots need. `PAGE UP` and `PAGE DOWN` stay bound, and are named only in the guide's
+      legend row. The camera panel's limit reason names the chord as the platform reads it,
+      `NOT AVAILABLE: CTRL+↑, RATE at its highest step` (`⌘↑`, drawn, on macOS), and `↓` at the
+      lowest (decision-r07-t19f-position, item 5).
     - The canvas shows its focus ring whenever it holds the focus (`:focus`, not only
       `:focus-visible`), so that a press marks the view whose keys are live (the guide's "Focus is
       always visible"). Its cursor is `grab`, and `grabbing` while pressed, and `touch-action:
@@ -2822,7 +2836,11 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
     never shown, driven by `webContents.sendInputEvent`'s mouse events. In `FREE`, `SEAT` and
     `CHASE`, a drag across the primary turns the camera, read from `POINTING` and `LOOK` before and
     after, with captures. A drag outside the canvas keeps turning, and a click picks. At 1280 × 720
-    the legend is one line, and both instruments still open.
+    the legend is one line, and both instruments still open. The camera's worst state (`PHASE TEST`,
+    `FOV` at its narrowest, the rate at its lowest, reduced motion), with `CONTROLS` on `PRIMARY` and
+    on `INSTRUMENT 1`, at 1280 × 720 and 1920 × 1080 at 150%: the column's `scrollHeight` equal to
+    its `clientHeight` with the 0.5 rem probe. At the full layout's least height, a 732 px box,
+    column A's worst fits with the list at two rows.
   - **Acceptance.** `pnpm --filter hyperion` lint, typecheck and tests; the console-ux skill's
     scripts; `just ci`.
   - _As built (2026-10-08, the views lane): see Risks, "Deviations in T19.f, as built"._
@@ -9263,23 +9281,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 
 - **Deviations in T19.f, as built** (2026-10-08; the views lane; the owner's requests of
   2026-10-08 through the orchestrator).
-  - **Pending a ruling** (decision-r07-t19f-position, being taken): where an instrument's
-    `POSITION` stands, and whether the camera panel may cost a line.
-    - The fit at 1280 × 720 is exact. Two slots fit there with 8 px to spare (2 × 254 px + the
-      insets ≤ the 540 px stage), so one more line in an instrument's block takes away the
-      second `OPEN`. T20's 720p runs need both slots open.
-    - As built, the readings stand on the `PRIMARY` view's label block and in the `CAMERA` panel
-      for the `CONTROLS` view. `POINTING` shares `RATE`'s line at no cost; `POSITION` takes one
-      18 px line.
-    - In the panel's worst state, measured hidden at 1280 × 720 compact, the side column overflows
-      by 18 px: `PHASE TEST`, which has no own ship, with the field of view at its narrowest, the
-      rate at its lowest and reduced motion. The column's `scrollHeight` is 580 px against a
-      `clientHeight` of 562 px; without this change it fitted with no spare. Every other state
-      measured fits. In the full layout, column A's least height is 640 px at worst, under the
-      840 px bound.
-    - The readings' form is `cameraPlace.ts`. Their places are `placeLines` (the label block) and
-      `CameraReadings.tsx` with `.view-camera__rate` and `.view-camera__position` (the panel), so
-      that the ruling changes one component and its rules.
+  - **Ruled (decision-r07-t19f-position).** The 18 px clip was not accepted. The panel puts
+    `POSITION` above `RATE` and `POINTING`, and the rate's reason directly under its line. The
+    reduced-motion note loses its margin and row gap, and in compact the button rows and the
+    rate's reason stand 0.25 rem apart. The worst state is reckoned at 14 px spare. `FROM +X`
+    holds within 1 ly of the axis, and `POINTING` goes stale only in `SEAT` and `CHASE`. Stated
+    exception: in compact an instrument's readings fold with the `Camera` panel, drafted into the
+    guide's "Layout" and Views bullet for the owner.
   - **The behaviour per preset.**
     - In `FREE` a drag turns the camera itself, a yaw about its +y and then a pitch about its +x.
     - In `SEAT` it turns a look offset where the seat stands.
@@ -9287,7 +9295,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - Every preset turns the line of sight the same way, so that the far scene follows the
       pointer. In `CHASE` that means the ship's near side moves against the pointer, where a
       turntable would move it with the pointer. The choice keeps one rule for every preset and the
-      task's "a point stays under the cursor". It is the owner's to reverse.
+      task's "a point stays under the cursor". Ruled (decision-r07-t19f-position, item 4): `CHASE`
+      orbits as a turntable, the ship with the pointer at 8° per rem, and the arrows agree.
     - The offset's elevation is held so that the line of sight stays within 90° of the hull's
       plane and within 90° of the preset's own line of sight. From `CHASE`'s line of sight, 9.5°
       down, it turns 80.5° down, to the nadir, and 90° up, which keeps `LOOK` within ±90° and the
@@ -9314,8 +9323,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     to the slash. The commas mark what `FREE:` covers.
     - It is one line at 1280 × 720, measured 18 px tall.
     - It lists only the chord for `RATE`, so that it fits. `PAGE UP` and `PAGE DOWN` stay bound,
-      and the camera panel's limit reason still names them. The UX review noted the mismatch as a
-      nit, which is not applied: changing that reason's text would touch T19.b's ruled wording.
+      and appear nowhere on screen. Ruled (decision-r07-t19f-position, item 5): the limit reason
+      names the platform's chord.
     - The `⌘` is drawn (`CommandGlyph`). Assistive technology reads hidden text, `Command+`, in
       its place: jsdom's description computation dropped a `role="img"` name inside a description.
       This finding came from writing the test.
@@ -9329,7 +9338,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `ANGLE` as missing on the galactic axis.
     - A camera held to a craft, at the seat or chasing, takes the craft's place, so its readings
       go stale with the server's scene, muted with their `S`. A free camera's place is the
-      console's own and stays live. The plan's "never stale" holds for `FREE` only.
+      console's own and stays live. The plan's "never stale" holds for `FREE` only. (Ruled since:
+      `POINTING` goes stale in `SEAT` and `CHASE` only; see the follow-up below.)
     - Seat and chase directions run against the galactic axes, so the precision scene's seat, whose
       hull looks down galactic −z, reads `POINTING — -90°`.
   - **The canvas.** The ring shows on `:focus`. In the offscreen harness `:focus` never matches,
@@ -9368,3 +9378,68 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the legend row, now `FOCUSED VIEW`, `MOVE`, `TURN`, `ROLL`, `RATE`.
   - Scratch: `.git/rm23-scratch/r07-views/t19f/` (the page harness, its logs and captures, and
     `tools/textwidth.py`, which estimates a string's width in B612 from the shipped font).
+- **Deviations in T19.f's follow-up, as built** (2026-10-08; the views lane;
+  decision-r07-t19f-position, items 1–5).
+  - **The fit, measured by T19.b's probe**, hidden and offscreen at 1280 × 720 compact (a 562 px
+    box). The probe is a block put after the open panel and grown a pixel at a time until the
+    column overflows; the probe passes at 8 px. Each figure is the probe's largest height. The
+    column's 4 px row gap comes on top of it.
+    - In the worst state (`PHASE TEST`, `FOV` 10°, the rate at its lowest, reduced motion), with
+      `CONTROLS` on `PRIMARY` and on `INSTRUMENT 1` alike, the probe reaches 10 px. That is 14 px of
+      room with the gap, as the ruling reckoned, and it passes. At 1920 × 1080 at 150% it reaches
+      15 px. The column's `scrollHeight` equals its `clientHeight` in every state measured.
+    - The camera panel stands 315 px in the worst state (329.5 px before T19.f). Its parts, height
+      and the margin under each:
+      - title 17.5 + 4;
+      - presets 32 + 4;
+      - `NO OWN SHIP` 17.5 + 8;
+      - targets 32 + 4;
+      - `FOV` row 32 + 4;
+      - `FOV`'s reason 17.5 + 8;
+      - `POSITION` 17.5 + 0;
+      - `RATE` with `POINTING` 20 + 4;
+      - the rate's reason 17.5 + 8;
+      - the setting 49.5;
+      - padding and hairlines 18.
+    - A typical state (`PRECISION TEST` at the seat) reaches 103 px, against 92 before T19.f.
+    - T19.b's other captures, re-taken in the same worst state, reach the probe's 120 px cap:
+      1920 × 1080 at 125% (compact, a 708 px box), the 53.5 rem box (856 px, full) and
+      1920 × 1080 at 100% (922 px, full).
+  - **The base was 0 px, not T19.b's 21 px.** The base is HEAD before T19.f, ee206055, built into
+    `t19f/out-base`. In the same worst state its probe reached 0 px, at 720p for either `CONTROLS`
+    view, and 1 px at 150%: it failed the probe before T19.f. The column's parts account for it:
+    - Instruments 34;
+    - Targets 133, its floor;
+    - the fold row 32;
+    - the standing line `AUTO NOT AVAILABLE: NO IMAGE TO METER` 17.5;
+    - the camera panel 329.5;
+    - four 4 px gaps.
+
+    The standing line and its gap, 21.5 px, are what took T19.b's 21 px, as the ruling supposed.
+    T19.f's ruled spacing leaves 14 px in their place.
+  - **The full layout at its least height**, a 1920 × 890 window with a 732 px box:
+    - In the worst state, column A fits with `Targets` 175 px, the list at two rows. The probe
+      reaches 6 px (8 px in the base). The camera panel is 339 px: R1's 16 px saved, less
+      `POSITION`'s 17.5 px line.
+    - With `CONTROLS` on `INSTRUMENT 1` the probe reaches 24 px.
+    - Column A's tallest state with the list at two rows is therefore 726 px, under the 732 px that
+      `FULL_MIN_HEIGHT_REM` (45.75 rem) gives. It stands unchanged.
+  - **`CHASE`**: `orbitTurn` in `view/camera/drag.ts`, at `DRAG_DEG_PER_REM`. The gesture takes a
+    `DragKind` per move, so that a preset changed mid-drag takes effect at the next move. Measured
+    hidden, a drag right of 204 px with 54 px up at 16 px a rem reads `CHASE · LOOK 102° +27°`.
+    The capture pair `drag720-04`/`05` shows the hull's near edge moved right with the drag.
+  - **The reason and the legend** take the chord from one component, `RateChord.tsx`. The reason
+    is `NOT AVAILABLE: CTRL+↓, RATE at its lowest step`, and on macOS the drawn `⌘` with
+    "Command+" read in its place.
+  - **`FROM +X`** holds within 1 ly of the axis (`FROM_PLUS_X_WITHIN_LY`). `ANGLE`'s dash on
+    the axis keeps the system readout's 1E-6 ly.
+  - **Tests** (18 more cases than T19.f's 8,189; the app's 8,207 in 348 files pass):
+    - 0.5 ly against 1.5 ly from the axis;
+    - the staleness per preset, a free camera held to the ship taking `POSITION` stale and
+      `POINTING` live;
+    - the panel's order;
+    - the reason at each end on each platform;
+    - the orbit's 8° a rem at 60° and 10° of field of view, its signs and its rem scaling;
+    - the turntable on a drag and on `ArrowRight` in the DOM harness.
+  - Scratch: `t19f/page/` (`SHOT_FLOW=worst|measure`, `SHOT_CONTROLS=instrument`, `SHOT_OUT` for
+    the base), `t19f/tools/probes.py <run-logs>`.

@@ -46,14 +46,34 @@ export interface CameraPlace {
   /** The range's unit, which the next reading keeps within its hysteresis; `null` in `GALACTIC`. */
   readonly unit: BodyDistanceUnit | null;
   /**
-   * Whether the camera is held to a craft, the own ship at its seat or chasing it: its place is
-   * then the craft's, which the server's scene gives, and goes stale with it.
+   * Whether the camera is held to a craft, the own ship at its seat, chasing it or flown free from
+   * either: its position is then the craft's, which the server's scene gives, and goes stale with
+   * it.
    */
   readonly heldToCraft: boolean;
+  /**
+   * Whether its line of sight follows the hull, in `SEAT` and `CHASE`, so that its pointing goes
+   * stale with the scene too; a free camera's orientation is the console's own.
+   */
+  readonly followsHull: boolean;
 }
 
 /** The suffix of a direction whose azimuth runs from +x, where `COREWARD` is not defined. */
 export const FROM_PLUS_X = "FROM +X";
+
+/**
+ * The distance from the galactic axis within which a direction's azimuth runs from +x, ly: one,
+ * as the guide's "Numbers, units and time" gives it (decision-r07-t19f-position, item 3).
+ */
+export const FROM_PLUS_X_WITHIN_LY = 1;
+
+/**
+ * The directions at a galactic place as a direction's reading takes them, or `null` within
+ * {@link FROM_PLUS_X_WITHIN_LY} of the axis, where its azimuth runs from +x.
+ */
+function readingFrameAt(atLy: Vec3): LocalFrame | null {
+  return Math.hypot(atLy.x, atLy.y) > FROM_PLUS_X_WITHIN_LY ? localFrameAt(atLy) : null;
+}
 
 const ORIGIN = galacticPositionFromLy([0, 0, 0]);
 const FORWARD = vec3(0, 0, -1);
@@ -61,7 +81,8 @@ const FORWARD = vec3(0, 0, -1);
 /**
  * A direction in the guide's form for a direction from the ship (its "Numbers, units and time"):
  * an azimuth from `COREWARD` through `SPINWARD`, `000°` to `359°`, and a signed elevation, positive
- * `NORTH`, `047° +12°`. Without a local frame, or on the galactic axis, the azimuth runs from +x the
+ * `NORTH`, `047° +12°`. Without a local frame (`null` within a light-year of the galactic axis, or
+ * where the place is not known), or on the galactic axis, the azimuth runs from +x the
  * same way round (from +x through −y, clockwise seen from the north, as `COREWARD` through
  * `SPINWARD` runs) and the reading says so, `047° +12° FROM +X`. A direction that reads `+90°` or
  * `-90°` has no azimuth, which is the missing value's em dash, `— -90°`, with no reference to state.
@@ -143,6 +164,7 @@ export function cameraPlace(run: ViewRun, previous: BodyDistanceUnit | null): Ca
   const { scene } = run;
   const drawn = runPose(run);
   const heldToCraft = drawn.frame.kind === "craft";
+  const followsHull = run.camera.preset !== "free";
   const pose = rebase(drawn, readingFrame(drawn.frame, scene), sceneOrigins(scene)).pose;
   const pointingAlong = rotate(pose.orientation, FORWARD);
   if (pose.frame.kind === "galactic") {
@@ -150,15 +172,16 @@ export function cameraPlace(run: ViewRun, previous: BodyDistanceUnit | null): Ca
     const atLy = add(vec3(x, y, z), lyOf(pose.positionM));
     return {
       position: galacticReading(atLy),
-      pointing: directionReading(pointingAlong, localFrameAt(atLy)),
+      pointing: directionReading(pointingAlong, readingFrameAt(atLy)),
       unit: null,
       heldToCraft,
+      followsHull,
     };
   }
   let local: LocalFrame | null = null;
   if (scene.barycentre !== null) {
     const [x, y, z] = galacticDeltaLy(ORIGIN, scene.barycentre);
-    local = localFrameAt(vec3(x, y, z));
+    local = readingFrameAt(vec3(x, y, z));
   }
   const rangeM = norm(pose.positionM);
   const range = formatBodyDistance(rangeM / 1000, previous);
@@ -168,33 +191,46 @@ export function cameraPlace(run: ViewRun, previous: BodyDistanceUnit | null): Ca
     pointing: directionReading(pointingAlong, local),
     unit: range.unit,
     heldToCraft,
+    followsHull,
   };
 }
 
-/**
- * Whether a camera's place reads as stale: it is held to a craft, whose place the server's scene
- * gives, while that scene is stale (the guide's "Data states"). A free camera's place is the
- * client's own and never goes stale.
- *
- * @param sceneStale - Whether the server's scene is stale (`useScene`'s `stale`).
- */
-export function placeStale(place: CameraPlace, sceneStale: boolean): boolean {
-  return sceneStale && place.heldToCraft;
+/** Which of a camera's place's readings read as stale. */
+export interface PlaceStaleness {
+  readonly position: boolean;
+  readonly pointing: boolean;
 }
 
 /**
- * The label block's lines for a camera's place, `POSITION` and `POINTING`, muted with their `S`
- * while {@link placeStale}.
+ * Which of a camera's place's readings read as stale while the server's scene is (the guide's
+ * "Data states"; decision-r07-t19f-position, item 3): `POSITION` while the camera is held to a
+ * craft, whose place the scene gives, and `POINTING` in `SEAT` and `CHASE` alone, whose line of
+ * sight follows the hull. A free camera's orientation, and its position where it is held to no
+ * craft, are the console's own.
+ *
+ * @param sceneStale - Whether the server's scene is stale (`useScene`'s `stale`).
+ */
+export function placeStale(place: CameraPlace, sceneStale: boolean): PlaceStaleness {
+  return {
+    position: sceneStale && place.heldToCraft,
+    pointing: sceneStale && place.followsHull,
+  };
+}
+
+/** A label line, muted with its `S` where `stale`. */
+function line(label: string, value: string, stale: boolean): LabelLine {
+  return stale ? { label, value, stale: true } : { label, value };
+}
+
+/**
+ * The label block's lines for a camera's place, `POSITION` and `POINTING`, each muted with its `S`
+ * while {@link placeStale} says so.
  */
 export function placeLines(place: CameraPlace, sceneStale: boolean): ReadonlyArray<LabelLine> {
   const stale = placeStale(place, sceneStale);
   return [
-    stale
-      ? { label: "POSITION", value: place.position, stale: true }
-      : { label: "POSITION", value: place.position },
-    stale
-      ? { label: "POINTING", value: place.pointing, stale: true }
-      : { label: "POINTING", value: place.pointing },
+    line("POSITION", place.position, stale.position),
+    line("POINTING", place.pointing, stale.pointing),
   ];
 }
 

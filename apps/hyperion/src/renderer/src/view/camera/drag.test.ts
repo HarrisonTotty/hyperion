@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
-import { type CanvasPointPx, type CanvasSizePx, dragTurn } from "./drag";
+import { type CanvasPointPx, type CanvasSizePx, dragTurn, orbitTurn } from "./drag";
 import type { ViewTurn } from "./look";
 import { conjugate, multiply, quaternionFromAxisAngle, rotate } from "./quaternion";
 
@@ -116,5 +116,24 @@ describe("a drag's turn", () => {
       yawRad: 0,
       pitchRad: 0,
     });
+  });
+});
+
+describe("an orbit's turn (decision-r07-t19f-position, item 4)", () => {
+  const DEG = Math.PI / 180;
+
+  it("turns the line of sight right for a drag right, 8° a rem at 16 px a rem", () => {
+    const turn = orbitTurn({ xPx: 100, yPx: 100 }, { xPx: 116, yPx: 100 }, 16, 8);
+    expect([turn.yawRad, turn.pitchRad]).toEqual([-8 * DEG, -0]);
+  });
+
+  it("pitches the line of sight down for a drag down, raising the camera", () => {
+    const turn = orbitTurn({ xPx: 100, yPx: 100 }, { xPx: 100, yPx: 132 }, 16, 8);
+    expect(turn.pitchRad).toBeCloseTo(-16 * DEG, 12);
+  });
+
+  it("scales with the rem, not with the field of view", () => {
+    const at20 = orbitTurn({ xPx: 0, yPx: 0 }, { xPx: 20, yPx: 0 }, 20, 8);
+    expect(at20.yawRad).toBeCloseTo(-8 * DEG, 12);
   });
 });

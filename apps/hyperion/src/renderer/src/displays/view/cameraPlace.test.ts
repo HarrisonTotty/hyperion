@@ -95,8 +95,24 @@ describe("where a view's camera is (R07.T19.f)", () => {
       pointing: "— -90°",
       unit: "AU",
       heldToCraft: false,
+      followsHull: false,
     });
   });
+
+  it.each([
+    [0.5, "1.00 AU 090° +00° FROM +X"],
+    [1.5, "1.00 AU 270° +00°"],
+  ])(
+    "reads FROM +X with the barycentre %f ly from the galactic axis, within 1 ly",
+    (ly, position) => {
+      const run = freeAt({});
+      const near: ViewRun = {
+        ...run,
+        scene: { ...run.scene, barycentre: galacticPositionFromLy([ly, 0, 0]) },
+      };
+      expect(cameraPlace(near, null).position).toBe(position);
+    },
+  );
 
   it("reads a camera at its frame's centre with no direction there", () => {
     expect(cameraPlace(freeAt({ positionM: vec3(0, 0, 0) }), null).position).toBe("0.00 km —");
@@ -125,14 +141,34 @@ describe("where a view's camera is (R07.T19.f)", () => {
 });
 
 describe("a camera's place going stale (R07.T19.f)", () => {
-  it("goes stale with the server's scene while held to the own ship, never when free", () => {
-    const seat = cameraPlace(startRun(precisionScene()), null);
-    const free = cameraPlace(freeAt({}), null);
-    expect([placeStale(seat, true), placeStale(seat, false), placeStale(free, true)]).toEqual([
-      true,
-      false,
-      false,
+  it("goes stale with the server's scene in SEAT and CHASE, POSITION and POINTING both", () => {
+    const seat = startRun(precisionScene());
+    const chase = { ...seat, camera: { ...seat.camera, preset: "chase" as const } };
+    expect([
+      placeStale(cameraPlace(seat, null), true),
+      placeStale(cameraPlace(chase, null), true),
+      placeStale(cameraPlace(seat, null), false),
+    ]).toEqual([
+      { position: true, pointing: true },
+      { position: true, pointing: true },
+      { position: false, pointing: false },
     ]);
+  });
+
+  it("takes POSITION stale and POINTING live for a free camera held to the own ship", () => {
+    const seat = startRun(precisionScene());
+    const heldFree = { ...seat, camera: { ...seat.camera, preset: "free" as const } };
+    expect(placeStale(cameraPlace(heldFree, null), true)).toEqual({
+      position: true,
+      pointing: false,
+    });
+  });
+
+  it("never goes stale for a free camera held to no craft", () => {
+    expect(placeStale(cameraPlace(freeAt({}), null), true)).toEqual({
+      position: false,
+      pointing: false,
+    });
   });
 
   it("marks the label block's POSITION and POINTING stale while it is", () => {

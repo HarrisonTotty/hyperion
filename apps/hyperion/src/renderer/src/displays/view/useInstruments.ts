@@ -52,6 +52,7 @@ import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
 import { type CulledViewSky, cullViewSky, type DrawnSky, viewSkyLabel } from "./useViewSky";
 import type { ViewEngineState } from "./useViewEngine";
+import { type DragKind, dragKindOf } from "./useViewDrag";
 import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
 import {
   INSTRUMENT_SLOTS,
@@ -187,6 +188,8 @@ export interface Instruments {
   readonly turn: (slot: InstrumentSlot, turn: ViewTurn) => void;
   /** A slot's horizontal field of view as it is drawn now, degrees, by which a drag is turned. */
   readonly fovDeg: (slot: InstrumentSlot) => number;
+  /** How a drag turns a slot's camera now: an orbit in `CHASE`, else a look. */
+  readonly dragKind: (slot: InstrumentSlot) => DragKind;
   /** Draws each open instrument whose budget's rate falls in this frame; the primary calls it. */
   readonly frame: (input: InstrumentsFrame) => void;
 }
@@ -509,6 +512,11 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     [],
   );
 
+  const dragKind = useCallback(
+    (slot: InstrumentSlot): DragKind => dragKindOf(runs.current.get(slot)?.camera.preset ?? "free"),
+    [],
+  );
+
   const frame = useCallback((each: InstrumentsFrame): void => {
     for (const slot of INSTRUMENT_SLOTS) {
       const loop = loopsRef.current.get(slot);
@@ -615,6 +623,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     releaseKeys,
     turn,
     fovDeg,
+    dragKind,
     frame,
   };
 }

@@ -1,10 +1,12 @@
 import { useId } from "react";
 
+import type { PrimaryModifier } from "../../lib/platform";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { FOV_STEPS_DEG } from "../../view/camera/projection";
 import type { CameraPreset } from "../../view/camera/state";
 import type { CameraPlace } from "./cameraPlace";
 import { CameraReadings } from "./CameraReadings";
+import { RateChord } from "./RateChord";
 import { PRESET_NAMES } from "./viewRun";
 
 /** Props of {@link CameraControls}. */
@@ -34,6 +36,11 @@ export interface CameraControlsProps {
   readonly place: CameraPlace;
   /** Whether the server's scene is stale: a place held to a craft is muted with its `S`. */
   readonly sceneStale: boolean;
+  /**
+   * The platform's primary modifier, whose chord with the arrows the rate's limit reason names
+   * (decision-r07-t19f-position, item 5).
+   */
+  readonly modifier: PrimaryModifier;
   /** The `EASED CAMERA MOVES` setting. */
   readonly easedMoves: boolean;
   /** Whether the operator asked for reduced motion, under which eased moves are not applied. */
@@ -60,11 +67,13 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
  * The view's camera controls (plan R02, R02.T15.c): the presets `SEAT`, `CHASE` and `FREE`, the
  * previous and next target, the field of view a step narrower or wider with its reading, and the
  * `EASED CAMERA MOVES` setting, each a button reachable by keyboard and showing its key; the field
- * of view's buttons are held back at the ends of its steps, the free camera's rate
- * (stepped by `PAGE UP` and `PAGE DOWN` on the canvas, in `FREE` only) with a statement at either end of its steps,
- * and the setting says when reduced motion stops it applying. Beside the rate stand where the
- * camera looks and where it is, `POINTING` and `POSITION` (R07.T19.f), so that an instrument's
- * place, which its slot has no room to state, is on show while `CONTROLS` names it.
+ * of view's buttons are held back at the ends of its steps, the free camera's rate (stepped on the
+ * canvas, in `FREE` only) with a statement at either end of its steps that names the platform's
+ * chord, `NOT AVAILABLE: CTRL+↑, RATE at its highest step` (`⌘↑` on macOS;
+ * decision-r07-t19f-position, item 5), and the setting says when reduced motion stops it applying.
+ * Above and beside the rate stand where the camera is and where it looks, `POSITION` and
+ * `POINTING` (R07.T19.f; `CameraReadings`), so that an instrument's place, which its slot has no
+ * room to state, is on show while `CONTROLS` names it.
  *
  * @remarks
  * Display controls, which change only what the view shows (`.control`). A preset the scene does not
@@ -78,6 +87,7 @@ export function CameraControls({
   maxRateStep,
   place,
   sceneStale,
+  modifier,
   easedMoves,
   reducedMotion,
   onAction,
@@ -200,8 +210,8 @@ export function CameraControls({
       <CameraReadings rateStep={rateStep} place={place} sceneStale={sceneStale} />
       {slowest || fastest ? (
         <p className="view-camera__reason">
-          NOT AVAILABLE:{" "}
-          {fastest ? "PAGE UP, RATE at its highest" : "PAGE DOWN, RATE at its lowest"} step
+          NOT AVAILABLE: <RateChord modifier={modifier} arrows={fastest ? "↑" : "↓"} />, RATE at its{" "}
+          {fastest ? "highest" : "lowest"} step
         </p>
       ) : null}
       <div className="view-camera__setting">

@@ -16,23 +16,34 @@ describe("a press on a view", () => {
     const mouse = pressAt(1, { xPx: 100, yPx: 100 }, "mouse", REM_PX);
     const finger = pressAt(1, { xPx: 100, yPx: 100 }, "touch", REM_PX);
     expect([mouse.slopPx, finger.slopPx]).toEqual([4, 8]);
-    expect(pressMoved(mouse, { xPx: 103, yPx: 102 }, SIZE, 60).turn).toBeNull();
-    expect(pressMoved(finger, { xPx: 106, yPx: 104 }, SIZE, 60).turn).toBeNull();
-    expect(pressMoved(mouse, { xPx: 104, yPx: 100 }, SIZE, 60).press.dragging).toBe(true);
+    expect(pressMoved(mouse, { xPx: 103, yPx: 102 }, SIZE, 60, "look").turn).toBeNull();
+    expect(pressMoved(finger, { xPx: 106, yPx: 104 }, SIZE, 60, "look").turn).toBeNull();
+    expect(pressMoved(mouse, { xPx: 104, yPx: 100 }, SIZE, 60, "look").press.dragging).toBe(true);
   });
 
   it("turns from where it went down once it strays past the slop, then from move to move", () => {
     const press = pressAt(1, { xPx: 100, yPx: 100 }, "pen", REM_PX);
-    const first = pressMoved(press, { xPx: 110, yPx: 100 }, SIZE, 60);
-    const second = pressMoved(first.press, { xPx: 130, yPx: 90 }, SIZE, 60);
+    const first = pressMoved(press, { xPx: 110, yPx: 100 }, SIZE, 60, "look");
+    const second = pressMoved(first.press, { xPx: 130, yPx: 90 }, SIZE, 60, "look");
     expect(first.turn).toEqual(dragTurn({ xPx: 100, yPx: 100 }, { xPx: 110, yPx: 100 }, SIZE, 60));
     expect(second.turn).toEqual(dragTurn({ xPx: 110, yPx: 100 }, { xPx: 130, yPx: 90 }, SIZE, 60));
   });
 
+  it("orbits 8° a rem in CHASE, whatever the field of view, the ship turning with the pointer", () => {
+    const press = pressAt(1, { xPx: 100, yPx: 100 }, "mouse", REM_PX);
+    const deg = Math.PI / 180;
+    for (const fovXDeg of [60, 10]) {
+      const right = pressMoved(press, { xPx: 116, yPx: 100 }, SIZE, fovXDeg, "orbit").turn;
+      const down = pressMoved(press, { xPx: 100, yPx: 116 }, SIZE, fovXDeg, "orbit").turn;
+      expect(right?.yawRad).toBeCloseTo(-8 * deg, 12);
+      expect(down?.pitchRad).toBeCloseTo(-8 * deg, 12);
+    }
+  });
+
   it("keeps dragging once it has, back inside the slop too", () => {
     const press = pressAt(1, { xPx: 100, yPx: 100 }, "mouse", REM_PX);
-    const out = pressMoved(press, { xPx: 120, yPx: 100 }, SIZE, 60);
-    expect(pressMoved(out.press, { xPx: 101, yPx: 100 }, SIZE, 60).turn).not.toBeNull();
+    const out = pressMoved(press, { xPx: 120, yPx: 100 }, SIZE, 60, "look");
+    expect(pressMoved(out.press, { xPx: 101, yPx: 100 }, SIZE, 60, "look").turn).not.toBeNull();
   });
 });
 
@@ -54,6 +65,7 @@ function setup() {
         onKeyUp={() => undefined}
         onBlur={onBlur}
         fovDeg={() => 60}
+        dragKind={() => "look"}
         remPx={REM_PX}
         onPress={onPress}
         onTurn={(turn) => {

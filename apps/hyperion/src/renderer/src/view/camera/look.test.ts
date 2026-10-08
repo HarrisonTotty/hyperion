@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { aCameraScene, anOwnShip } from "../../test/viewFixtures";
+import { orbitTurn } from "./drag";
 import { turnFreeCamera } from "./freeCamera";
 import { hasLookOffset, NO_LOOK_OFFSET, NO_TURN, type ViewTurn } from "./look";
 import type { CameraPose } from "./pose";
@@ -141,13 +142,21 @@ describe("a CHASE camera's orbit", () => {
     }
   });
 
-  it("turns the line of sight as the seat's does, so that the far scene follows the drag", () => {
+  it("turns like a turntable for a drag right: the line of sight right, the camera swung to port", () => {
     const chase = inPreset("chase");
-    const left = turned(chase, { yawRad: 20 * DEG, pitchRad: 0 });
-    // The line of sight turns left about the hull's up; the camera swings to starboard.
-    const swung = dot(forwardOf(left.pose), rotate(ATTITUDE, vec3(-1, 0, 0)));
-    expect(swung).toBeGreaterThan(0);
-    expect(dot(left.pose.positionM, rotate(ATTITUDE, vec3(1, 0, 0)))).toBeGreaterThan(0);
+    // A 1 rem drag right at 16 px a rem, the spatial displays' 8°.
+    const right = turned(chase, orbitTurn({ xPx: 0, yPx: 0 }, { xPx: 16, yPx: 0 }, 16, 8));
+    const hullRight = rotate(ATTITUDE, vec3(1, 0, 0));
+    expect(right.offset.azimuthRad).toBeCloseTo(-8 * DEG, 12);
+    expect(dot(forwardOf(right.pose), hullRight)).toBeGreaterThan(0);
+    expect(dot(right.pose.positionM, hullRight)).toBeLessThan(0);
+  });
+
+  it("raises the camera above the ship for a drag down, LOOK's elevation going negative", () => {
+    const chase = inPreset("chase");
+    const down = turned(chase, orbitTurn({ xPx: 0, yPx: 0 }, { xPx: 0, yPx: 32 }, 16, 8));
+    expect(down.offset.elevationRad).toBeCloseTo(-16 * DEG, 12);
+    expect(dot(down.pose.positionM, HULL_UP)).toBeGreaterThan(dot(chase.pose.positionM, HULL_UP));
   });
 
   it("holds the camera at the vertical over the ship, right way up", () => {

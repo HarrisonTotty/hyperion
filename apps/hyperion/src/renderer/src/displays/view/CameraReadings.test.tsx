@@ -13,6 +13,7 @@ const HELD: CameraPlace = {
   pointing: "— -90°",
   unit: "AU",
   heldToCraft: true,
+  followsHull: true,
 };
 
 describe("the camera panel's readings (R07.T19.f)", () => {

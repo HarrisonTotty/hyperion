@@ -5,9 +5,14 @@
 
 import { type PointerEvent as ReactPointerEvent, useRef } from "react";
 
-import { CLICK_SLOP_REM, TOUCH_CLICK_SLOP_REM } from "../../spatial/usePointerOrbit";
-import { type CanvasPointPx, type CanvasSizePx, dragTurn } from "../../view/camera/drag";
+import {
+  CLICK_SLOP_REM,
+  DRAG_DEG_PER_REM,
+  TOUCH_CLICK_SLOP_REM,
+} from "../../spatial/usePointerOrbit";
+import { type CanvasPointPx, type CanvasSizePx, dragTurn, orbitTurn } from "../../view/camera/drag";
 import type { ViewTurn } from "../../view/camera/look";
+import type { CameraPreset } from "../../view/camera/state";
 
 /** One press on a view's canvas, and what it has become. */
 export interface ViewPress {
@@ -21,6 +26,8 @@ export interface ViewPress {
   readonly dragging: boolean;
   /** How far it may stray and still be a click, CSS px. */
   readonly slopPx: number;
+  /** CSS px in a `rem` at the press, which sizes an orbit's turn. */
+  readonly remPx: number;
 }
 
 /**
@@ -37,7 +44,22 @@ export function pressAt(
   remPx: number,
 ): ViewPress {
   const slopRem = pointerType === "touch" ? TOUCH_CLICK_SLOP_REM : CLICK_SLOP_REM;
-  return { pointerId, start: point, last: point, dragging: false, slopPx: slopRem * remPx };
+  return {
+    pointerId,
+    start: point,
+    last: point,
+    dragging: false,
+    slopPx: slopRem * remPx,
+    remPx,
+  };
+}
+
+/** How a drag turns a view's camera: as a look, or as an orbit about what it chases. */
+export type DragKind = "look" | "orbit";
+
+/** How a drag turns a camera in `preset`: an orbit in `CHASE`, a look in `FREE` and `SEAT`. */
+export function dragKindOf(preset: CameraPreset): DragKind {
+  return preset === "chase" ? "orbit" : "look";
 }
 
 /**
@@ -46,8 +68,10 @@ export function pressAt(
  *
  * @remarks
  * As the spatial displays' drag does, a press that comes as far as its slop from where it went down
- * becomes a drag, whose first turn runs from the press point, so that nothing of the drag is lost
- * and the direction under the press follows the pointer; each later move turns from the last.
+ * becomes a drag, whose first turn runs from the press point, so that nothing of the drag is lost;
+ * each later move turns from the last. A look (`FREE`, `SEAT`) carries the direction under the
+ * press with the pointer (`dragTurn`); an orbit (`CHASE`) turns the ship at the centre with the
+ * pointer at the spatial displays' 8° a `rem` (`orbitTurn`; decision-r07-t19f-position, item 4).
  *
  * @param sizePx - The canvas's laid-out size, CSS px.
  * @param fovXDeg - The view's horizontal field of view, degrees.
@@ -57,6 +81,7 @@ export function pressMoved(
   point: CanvasPointPx,
   sizePx: CanvasSizePx,
   fovXDeg: number,
+  kind: DragKind,
 ): { readonly press: ViewPress; readonly turn: ViewTurn | null } {
   if (!press.dragging) {
     const strayPx = Math.hypot(point.xPx - press.start.xPx, point.yPx - press.start.yPx);
@@ -67,7 +92,10 @@ export function pressMoved(
   const from = press.dragging ? press.last : press.start;
   return {
     press: { ...press, last: point, dragging: true },
-    turn: dragTurn(from, point, sizePx, fovXDeg),
+    turn:
+      kind === "orbit"
+        ? orbitTurn(from, point, press.remPx, DRAG_DEG_PER_REM)
+        : dragTurn(from, point, sizePx, fovXDeg),
   };
 }
 
@@ -75,6 +103,8 @@ export function pressMoved(
 export interface ViewDragInput {
   /** The view's horizontal field of view as it is drawn now, degrees. */
   readonly fovDeg: () => number;
+  /** How a drag turns the view's camera now: an orbit in `CHASE`, else a look. */
+  readonly dragKind: () => DragKind;
   /** CSS px in a `rem`, which sizes the click slop. */
   readonly remPx: number;
   /** Called at a press, before anything else: the view becomes the `CONTROLS` view. */
@@ -109,8 +139,9 @@ function pointOn(event: ReactPointerEvent<HTMLCanvasElement>): CanvasPointPx {
  * A press of the primary button, a finger or a pen captures its pointer, so that a drag leaving
  * the canvas keeps turning until it is released, and makes the view the `CONTROLS` view. Once it
  * comes as far as the click slop from where it went down it is a drag ({@link pressMoved}): each
- * move gathers the turn that carries the direction under the pointer with it (`dragTurn`, at the
- * view's field of view and the canvas's laid-out size), which the view's next frame applies. A
+ * move gathers its turn, a look's that carries the direction under the pointer with it
+ * (`dragTurn`, at the view's field of view and the canvas's laid-out size) or an orbit's that turns
+ * the chased ship with it (`orbitTurn`), which the view's next frame applies. A
  * press released inside the slop is a click, reported with its press point. `pointercancel`, a
  * capture lost without a `pointerup`, and the canvas's `blur` ({@link ViewDragHandlers.end}) end a
  * press without a click. A second pointer while one is down is ignored. Nothing depends on hover or
@@ -157,6 +188,7 @@ export function useViewDrag(input: ViewDragInput): ViewDragHandlers {
         pointOn(event),
         { widthPx: box.width, heightPx: box.height },
         input.fovDeg(),
+        input.dragKind(),
       );
       pressRef.current = moved.press;
       if (moved.turn !== null) {

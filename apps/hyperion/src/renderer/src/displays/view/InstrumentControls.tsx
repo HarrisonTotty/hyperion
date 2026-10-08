@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 
 import { StaleMark } from "../../components/StaleMark";
 import type { BodyDistanceUnit } from "../../lib/format";
+import type { PrimaryModifier } from "../../lib/platform";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { type CameraTarget, offeredPresets } from "../../view/camera/state";
@@ -29,6 +30,8 @@ export interface InstrumentControlsProps {
   readonly onSelect: (target: CameraTarget) => void;
   /** How the camera panel stands in the side column's layout. */
   readonly folds: SideFolds;
+  /** The platform's primary modifier, whose chord the rate's limit reason names (R07.T19.f). */
+  readonly modifier: PrimaryModifier;
 }
 
 /** The rows of the list, with the units they were last shown in kept for their hysteresis. */
@@ -65,6 +68,7 @@ export function InstrumentControls({
   onEasedMovesChange,
   onSelect,
   folds,
+  modifier,
 }: InstrumentControlsProps) {
   const titleId = useId();
   const { run } = shown;
@@ -103,6 +107,7 @@ export function InstrumentControls({
         maxRateStep={maxFreeRateStep(cameraScene)}
         place={place}
         sceneStale={stale}
+        modifier={modifier}
         easedMoves={easedMoves}
         reducedMotion={reducedMotion}
         onAction={onAction}

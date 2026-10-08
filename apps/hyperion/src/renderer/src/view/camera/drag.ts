@@ -49,3 +49,31 @@ export function dragTurn(
     pitchRad: angle(toPx.yPx - centreY) - angle(fromPx.yPx - centreY),
   };
 }
+
+/**
+ * The turn a drag's travel gives an orbiting camera, `CHASE`'s about the own ship (plan R07,
+ * T19.f; decision-r07-t19f-position, item 4): `degPerRem` for each `rem` of travel, whatever the
+ * field of view, as the spatial displays' orbit turns, so that the ship at the centre turns with
+ * the pointer like a turntable.
+ *
+ * @remarks
+ * A drag right turns the line of sight right, a negative yaw, which swings the camera clockwise
+ * about the ship seen from the hull's up and carries the ship's near side with the pointer; a drag
+ * down pitches the line of sight down at the ship, which raises the camera. The far scene, behind
+ * the ship, moves against the pointer, as it does on a spatial display.
+ *
+ * @param remPx - CSS px in a `rem`, positive.
+ * @param degPerRem - Degrees of turn for each `rem` of travel (`DRAG_DEG_PER_REM`).
+ */
+export function orbitTurn(
+  fromPx: CanvasPointPx,
+  toPx: CanvasPointPx,
+  remPx: number,
+  degPerRem: number,
+): ViewTurn {
+  const radPerPx = (degPerRem * Math.PI) / 180 / remPx;
+  return {
+    yawRad: -(toPx.xPx - fromPx.xPx) * radPerPx,
+    pitchRad: -(toPx.yPx - fromPx.yPx) * radPerPx,
+  };
+}
