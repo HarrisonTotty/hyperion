@@ -1667,9 +1667,9 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
     over axes, not its ceiling.
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f, T8.m, P11.T16 and
-  P11.T17.c).** Its landing turns the server's sky on by default: T11.c's switch, `--serve-sky`
-  (Risks, "Deviations in T11.c, as built": `SkyService`'s default becomes `Served`, and the switch
-  takes a value so that it can still be turned off). Decided 2026-10-05
+  P11.T17.c).** Its landing leaves the server's sky off by default. R06.T11.d turns T11.c's switch
+  on (decided 2026-10-08, `decision-p11-t17c-bright.md`): at P11.T17.c's verdicts the cold census
+  stays near 10⁶ CPU-s, and only T11.d delivers it nearest first. Decided 2026-10-05
   (`decision-r06-census-cost.md`), under decision item 2's trigger. Its inputs and gates were
   amended 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`).
   Near the Sun, the multiple-system bound left 98% of the census in generation. The per-record
@@ -1700,17 +1700,33 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
     near the Sun and in the bulge, at two emitted times, every star of `state_at(t).stars()` is no
     brighter than its bound.
   - T8.e's identity tests pass unchanged, with T16.b's B skip check restored. In the slow near-Sun
-    tests, each of B, C, D and E generates under 25% of its records.
+    tests, B and C each generate under 25% of their records. D's and E's shares are recorded:
+    about 45–50% and 80–85% are expected at P11.T17.c's verdicts (decided 2026-10-08,
+    `decision-p11-t17c-bright.md`).
   - The pinned mergers are listed.
 
-  Gate, from the sampled bench near the Sun: the cold estimate is at most 6 × 10⁴ CPU-s at the
-  spherical caps, or at most 2.5 × 10⁴ at T7.b's caps by direction if T7.b has landed. T8.f's
-  sampled bench gave 1.83 × 10⁶. About 2.9–4.8 × 10⁴ and 1.1–1.9 × 10⁴ are expected, of which
-  P11.T16's exact bound is 1.8–3.0 × 10⁴ and 0.6–1.0 × 10⁴.
+  Cold cost, from the sampled bench near the Sun (re-stated 2026-10-08,
+  `decision-p11-t17c-bright.md`): recorded, not gated, at the caps the bench uses (named) and at
+  the spherical caps, at the eye's cut and at 7.95.
+  - The gates first set, 6 × 10⁴ CPU-s at the spherical caps and 2.5 × 10⁴ at T7.b's caps, assumed
+    P11.T17.c's `Bright` and `Unchanged` about as tight as each pair's own evolution.
+  - P11.T17.c's tables bound a cell and its neighbours. So `Bright`'s M is the brightest product
+    of a neighbourhood: median M<sub>V</sub> −6.4, −7.3 and −5.0 in C, D and E. And a record is
+    generated if any pair of any attempt listed is unbounded or listably bright: E lists 5.6
+    attempts.
+  - About 0.8–1.3 × 10⁶ CPU-s is expected at the spherical caps and 0.4–1.0 × 10⁶ at T7.b's,
+    against 1.44 × 10⁶ at P11.T17.a's answers. E is about 80% of it. Pairs bound as tight as their
+    own truth would give about 5.5 × 10⁴ and 2.6–4.2 × 10⁴.
+  - The gates are structural:
+    - the slow realised-systems test and T8.e's identity tests, as above;
+    - each layer's generated share recorded beside T8.g's 20.8%, 55.9% and 86.3% at P11.T17.a's
+      answers. P11.T17.c's verdicts are never looser than T17.a's, so a rise beyond the sampling
+      is a finding for P11.T17.c.
+  - The miss is reported with R06.T17's full-cold gate (`decision-p11-t17c-bright.md` §4).
 
   Target, recorded: at most 1% of the records past the floor are generated, C to E together
-  (98.3–99.99% in T8.f's sampled bench). With the gate met, a miss of the target is a finding for
-  P11.T17's tables. It is deferred, and does not hold T8.g.
+  (98.3–99.99% in T8.f's sampled bench). It is missed at version 21: C's own bounds alone give about
+  1.7% of C–E. Its levers are deferred (`deferred-corrections.md`, "Census cost").
 
   Record also the sampled cold estimate at cut 10.06, the camera's, beside the eye's 7.95
   (`decision-r06-census-cost-signoff.md`). Record:
@@ -1729,9 +1745,10 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   No generator bump: the census only reads, and plan 11's functions read existing words.
 
   As built so far (Risks, "Deviations in T8.g, as built"): written against P11.T17.a's interface
-  and committed before its gates, which a fresh agent takes once P11.T17.c lands, with the
-  `--serve-sky` default; the phase envelope read process-wide; the widened envelope kept as a
-  first tier for every record; the pairs' verdicts taken once, over the ages before the drift.
+  and committed before its gates, which a fresh agent takes once P11.T17.c lands (the
+  `--serve-sky` default moved to T11.d, 2026-10-08); the phase envelope read process-wide; the
+  widened envelope kept as a first tier for every record; the pairs' verdicts taken once, over
+  the ages before the drift.
 
 - **R06.T8.m The phase envelope (new; split from T8.g on 2026-10-07; it needs no plan-11 task,
   so it may start at once).** Decided 2026-10-05 (`decision-r06-census-cost.md`) as part of T8.g,
@@ -2342,7 +2359,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   sky in another time bucket shares the build. **The landing switch** (decided 2026-10-07 by the
   orchestrator): T11.a, T11.b and T11.c land together after T11.c, behind a server switch that
   T11.c adds. It is off by default, and the server then answers `sky` as it did before T11.a
-  (`unsupported`, T10's interim), until T8.g lands and turns it on. Tests turn it on. Test: with the
+  (`unsupported`, T10's interim), until R06.T11.d turns it on (decided 2026-10-08,
+  `decision-p11-t17c-bright.md`; first ruled to turn on with T8.g). Tests turn it on. Test: with the
   switch off, `sky` is answered `unsupported` and no job reaches the pool. Acceptance:
   `cargo test -p hyperion-server --test sky`. Each star's wire chroma, eye offset and camera band
   term are its `StarColour::reddened(a_v)`'s (R06.T9.e). Its eye offset is
@@ -2357,6 +2375,19 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   sky request's census shell by shell as bulk jobs. After each shell it sends a sky reply with that
   census and the band for that completeness, and it marks the last reply final. The client
   replaces its sky with each reply (T12, T13).
+  - **The default** (decided 2026-10-08, `decision-p11-t17c-bright.md`). T11.d's landing turns
+    T11.c's switch on by default if two things hold:
+    - near the Sun, its first reply meets T17's first-sky budget on the dev machine (the test
+      below);
+    - the owner has accepted the full sky's time at version 21 (`decision-p11-t17c-bright.md` §4).
+
+    Turning it on means three things. `SkyService`'s default becomes `Served`. `--serve-sky` takes
+    a value (`--serve-sky=false`), so that it can still be turned off. And the README and
+    `config`'s tests follow (Risks, "Deviations in T11.c, as built"). Otherwise the switch stays
+    off, and the shortfall goes to the orchestrator. If the first reply misses its budget, a
+    decision agent rules from the measured figure. Its levers are the order of the first reply's
+    layers and the first shell's edge.
+
   - **The order.** Within a layer, nearest first. Across layers, D's and E's shells to 4,000 ly run
     before C's beyond 2,000 ly, or any order that passes T17's V 3.0 gate. The order changes no
     reply's contents: each reply is still the exact census to its radii.
@@ -7355,8 +7386,8 @@ CensusCost)`.
   - **Landing (decided 2026-10-07 by the orchestrator; closes T11.a's open items 1 and 2).** T11.a,
     T11.b and T11.c land together after T11.c, behind a server switch that T11.c adds. It is off
     by default, so the server answers `sky` as before T11.a (`unsupported`), until T8.g lands and
-    turns it on. Tests turn it on. The plan text is in T11.c's task. Until then T11.a and T11.b are
-    held on the server lane.
+    turns it on (moved to R06.T11.d on 2026-10-08, `decision-p11-t17c-bright.md`). Tests turn it
+    on. The plan text is in T11.c's task. Until then T11.a and T11.b are held on the server lane.
   - **The payload.**
     - `requests/sky.rs`'s `answer` returns R03's `Answer { body, bulk: Some(payload) }`, so
       `requests/mod.rs`'s `Sky` arm no longer goes through `answered`.
@@ -7499,7 +7530,8 @@ CensusCost)`.
       `with_the_switch_off_a_sky_is_unsupported_and_no_job_reaches_the_pool`, in which the pool's
       counters, the tables' and the cells' are unchanged by the request. Every other server in
       `tests/sky.rs` turns the switch on.
-    - **For R06.T8.g's landing** (a pointer in T8.g): `SkyService`'s default becomes `Served`. A
+    - **For R06.T11.d's landing** (first ruled for T8.g's; moved 2026-10-08,
+      `decision-p11-t17c-bright.md`, a pointer in T11.d): `SkyService`'s default becomes `Served`. A
       clap `SetTrue` switch cannot then be turned off on the command line, so the option takes a
       value too (for example `--serve-sky=false`); the variable already takes `0` or `false`.
   - **The tables** (`compute/sky_tables.rs`, new).

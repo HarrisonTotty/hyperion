@@ -1840,30 +1840,42 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
   _As built (2026-10-08): see Risks, "P11.T17.b as built"._
 
 - **P11.T17.c `Unchanged`, `Remnants` and `Bright`, against `evolve`.**
-  - **The function.** `Detached` (T17.a) first. Otherwise read T17.b's cell over the window's
-    age bins:
-    - `Remnants` where neither star's own model nor any departing star or product lives in any of
-      them;
-    - `Unchanged` where no departing star or product lives in any of them;
-    - otherwise `Bright(M)`, with M the brightest of the departing stars and products over them;
-    - `None` for an undersampled cell, or one with a departing star or product within the
-      margin of its verdict's boundary (the threshold is set and recorded);
-    - `Bright` wherever a sample is equally consistent with `Unchanged` and `Bright`.
-  - **The sub-0.1 M☉ `Detached` rule** (R06.T8.g's science check, adopted 2026-10-08).
-    - T17.a's `Detached` takes each star as its own single-star model. But a member below
-      0.1 M☉ is a cooling-fit member that carries mass, and in a pair that `run_pairs` still runs
-      it accretes its companion's wind (BSE equation 6): about 10⁻³ M☉, some 0.05–0.1 mag in V.
-      `run_pairs` runs a pair that holds a remnant by +H, or that can interact by +H, which may
-      lie after the window's end.
-    - So a pair with a member below 0.1 M☉ is `Detached` only if it also cannot be run by +H, or
-      if the accretion's brightening is bounded inside the margin. Otherwise the answer is safe:
-      the tables (`Bright` from the accretion, which their walk counts as a departure and the
-      cooling floor bounds), or `None`.
+  - **The function** (the order as built, confirmed 2026-10-08, `decision-p11-t17c-bright.md` §1).
+    T17.b's cell is read over the window's age bins:
+    - first `Remnants`, where neither star's own model nor any departing star or product lives in
+      any of them. It is asked before `Detached`, so that a wider window never answers tighter;
+    - then `Detached` (T17.a);
+    - then `Unchanged`, where no departing star or product lives in any of them;
+    - `None` for a bin whose changed value is not DARK and whose cell's own samples hold one to
+      three departing stars or products there (count class at most 2, `THIN_DEPARTING_CLASS`): a
+      rare channel, poorly sampled, within the margin of `Unchanged`'s boundary. Every cell holds
+      72 samples, so none is undersampled;
+    - otherwise `Bright(M)`, with M the brightest of the departing stars and products over them. A
+      bin whose changed value comes from the cell's neighbours alone is as consistent with
+      `Unchanged` as with `Bright`, and reads `Bright`.
+  - **The sub-0.1 M☉ `Detached` rule** (R06.T8.g's science check, adopted 2026-10-08; its reading
+    confirmed the same day, `decision-p11-t17c-bright.md` §1).
+    - T17.a's `Detached` takes each star as its own single-star model. But a member below 0.1 M☉
+      is a cooling-fit member that carries mass. In a pair the engine steps, it accretes its
+      companion's wind (BSE equation 6): about 10⁻³ M☉. At 0.08–0.1 M☉ that is some 0.15–0.2 mag
+      in V (Baraffe et al. 2015 at 5 Gyr, with Pecaut and Mamajek 2013's BC<sub>V</sub>), and
+      more just above the hydrogen-burning limit.
+    - The engine steps a pair only if it can interact by +H. `run_pair`'s pre-test gate leaves a
+      pair that `run_pairs` sends for its remnant alone as one detached segment of its own models.
+    - So a pair with a member below 0.1 M☉ is `Detached` only if T17.a's items 1–3 also hold
+      `RUN_HORIZON_PAST_WINDOW_YEARS` (2H + L) past the window's end, the latest its +H can lie.
+      Such a pair is never stepped, and its member accretes nothing.
+    - Otherwise the tables answer. Their walk counts the accretion as a departure. Their cooling
+      floor bounds the member's V, since the engine evaluates a cooling member at no more than
+      0.1 M☉.
+    - The ruling's other branch, the brightening bounded inside the margin, is withdrawn. 0.15–0.2
+      mag leaves at most 0.1–0.15 mag of the 0.3 mag margin, unproven.
     - `light.rs`'s "its stars accrete no wind on their own tracks" (module docs, item 3) is
       corrected to say so of stars of at least 0.1 M☉.
-    - The slow test takes such pairs too. T17.b's slow test counted, with those holding a changed
-      star at some age: sampled C 927 (610), D 429 (392), E 419 (402); realised near the Sun
-      C 155 (43), D 6 (2), E 0.
+    - The slow test takes such pairs too. T17.b's slow test counted these, with those holding a
+      changed star at some age in brackets:
+      - sampled: C 927 (610), D 429 (392), E 419 (402);
+      - realised near the Sun: C 155 (43), D 6 (2), E 0.
   - **T17.b's read-side widenings stand at version 21** (the orchestrator, 2026-10-08): the
     cooling floor below 0.1 M☉, E's 0.7 mag margin and E's ±0.3 dex age smear. They satisfy "a
     violation widens the table", and are stored at the version-22 refit. A pair is read through
@@ -4881,14 +4893,14 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       - Asked first, `Remnants` over a window holds over every window inside it.
       - The cost is none: pairs the closed form calls `Detached` read `Remnants` where the tables
         find nothing living, which is tighter.
-      - It awaits the orchestrator's confirmation (reported).
+      - Confirmed 2026-10-08 (`decision-p11-t17c-bright.md` §1).
     - **The thin rule** (the task's "undersampled or borderline"). Every cell holds 72 samples, so
       none is undersampled. A bin whose changed value is not DARK and whose cell's own samples
       hold one to three departing stars or products there (count class ≤ 2) is within the margin
       of `Unchanged`'s boundary: `None`. A bin whose changed value comes from the neighbours alone
       (own count 0) is as consistent with `Unchanged` as with `Bright`, and reads `Bright`.
     - **The sub-0.1 M☉ rule, as built.** The ruling's "cannot be run by +H" is read as "cannot
-      interact by +H"; it awaits the orchestrator's confirmation (reported).
+      interact by +H". Confirmed 2026-10-08 (`decision-p11-t17c-bright.md` §1).
       - A pair that `run_pairs` runs only because it holds a remnant is still one detached
         segment of its own models (`run_pair`'s pre-test gate), so its cooling member accretes
         nothing. The engine steps a pair, and the member accretes, only if it can interact by +H.
@@ -4970,6 +4982,14 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       - The lever, for the refit: drop each sample's departures before its pre-test's
         interaction age less 2H + L, which the gate makes exact. Most of these `Bright` pairs
         would become `Unchanged`. The rest is the dilation over each cell's neighbours.
+
+        _Ruled 2026-10-08 (`decision-p11-t17c-bright.md` §3.1): by the code, only members below
+        0.1 M☉ depart before an interaction. A star of at least 0.1 M☉ stays on its own track,
+        keeping plan 06's mass and accreting no wind, until Roche-lobe overflow or a common
+        envelope. So the lever acts on the light-member cells alone, and is folded, narrowed, into
+        the version-22 refit after a probe. `Bright`'s looseness is the tables' aggregation: each
+        value is cumulative over every wider periastron, dilated, merged, and smeared in E. Its
+        levers are deferred (`deferred-corrections.md`, "Census cost")._
     - **The core-inertia column** (T17.b's open option), like for like. Over the census's old
       windows near the Sun, the pre-test passes over 81.7%, 29.0% and 7.0% of C's, D's and E's
       pairs, and `Detached` takes 75.2%, 21.8% and 0.7%. Of the pairs it misses, these go to
@@ -4982,6 +5002,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       The young windows lose under 1.5% in C and D. So the loss matters most in C, where it is
       some 6% of pairs, and the column would recover part of it. It is not built: the
       orchestrator decides.
+
+      _Ruled 2026-10-08: not built in RM3. It is at most 1–2% of the cold census
+      (`decision-p11-t17c-bright.md` §3.2)._
 
     - **The accretion's brightening** (the science check). 10⁻³ M☉ moves V by about 0.15–0.2 mag
       at 0.08–0.1 M☉ (Baraffe et al. 2015 at 5 Gyr, with Pecaut and Mamajek 2013's BC<sub>V</sub>),
