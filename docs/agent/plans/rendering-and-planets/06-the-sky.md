@@ -1403,7 +1403,12 @@ caps_converge_in_rays`.
   - `caps_converge_in_rays` at all six points with the per-ray caps: the expected count beyond
     them, recounted with 3,072 rays and twice the radial steps, is under 1.5. If it fails, the
     neighbour widening grows, never the gate.
-  - T7's tests per layer, on each ray's radius.
+  - T7's tests on the per-ray caps (decided 2026-10-08, `decision-r06-t7b-brackets.md`): on every
+    ray, the rule bound, A and B under 100 ly near the Sun, C at least 1,000 ly near the Sun and E
+    under 1,500 ly in the nuclear disc; on each layer's median ray, D and E near the Sun within a
+    factor of three of 4,300 and 10,000 ly, and C, D and E nearer in the nuclear disc than near the
+    Sun. The far rays are held by the criterion's own gates (the rule bound, the stated count
+    beyond, `caps_converge_in_rays`) and the systems-opened gates below, not by a radius bracket.
   - The identity tests, with forced caps, are unchanged.
   - No listed star lies beyond its own ray's widened radius, beyond the cell overshoot the final
     reply already allows.
@@ -1420,9 +1425,10 @@ sky::census::query`, `just test-slow caps_converge_in_rays`.
   radius, so that every direction lies in a ray's cone; `CAP_RAYS` is 1,536 and each ray counts
   through the clearest of three sub-rays, since 768 rays failed `caps_converge_in_rays` above the
   Sun and a wider widening broke the 75% gate; the test also holds uniform caps at 8.54 and
-  10.06; T7's brackets hold on each layer's median ray; the eye's visibility-based caps pass and
-  are adopted, opt-in on an eye-only request (`SkyQueryBuilder::eye_visibility`), each ray taking
-  the deepest limit of its cone's 16² texels and their neighbours.
+  10.06; T7's brackets hold on every ray, and D's and E's near the Sun on the median ray, as ruled
+  (`decision-r06-t7b-brackets.md`); the eye's visibility-based caps pass and are adopted, opt-in on
+  an eye-only request (`SkyQueryBuilder::eye_visibility`), each ray taking the deepest limit of its
+  cone's 16² texels and their neighbours.
 
 ### R06.T8 The census
 
@@ -2275,6 +2281,11 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   here"): R06.T9.g's illumination, R06.T7.b's per-ray radii and its eye visibility map, the near-Sun
   test's replies, and the bench `sky_near_sun_cold`.
 
+  The server passes `camera_limit_v` as asked, neither deepening nor padding it. It sets
+  `eye_visibility` only on a request with no camera part, never by comparing cuts: a camera at
+  120° is shallower than the eye's cut, and the eye's visibility caps would not cover its cull
+  (`decision-r06-t7b-brackets.md`).
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -2550,7 +2561,12 @@ the_star_bound_holds_for_realised_systems`,
 figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
 "a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
-and post-AGB crossings, D post-AGB and bright giants through clear windows, E supergiants; handed
+and post-AGB crossings, D post-AGB and bright giants through clear windows, E supergiants; since
+R06.T7.b, for each layer, the sphere at the same count (`CapCount::spheres`, the radius the
+brainstorm's figures describe), the rays' median, 10th and 90th percentiles and largest, the median
+of the rays within 10° of the plane, and the largest ray's galactic longitude and latitude
+(`decision-r06-t7b-brackets.md`; a D or E ray beyond 10,000 ly at |b| above 30° is a finding for the
+discs' vertical profiles or the tables, deferred, not for the caps); handed
 to the brainstorm's sky section and open question 19, with C's post-AGB re-derivation and D's
 post-AGB count; and `layer_caps`'s CPU time per call near the Sun and in the inner bulge, 4,608
 `Full` realised profiles since R06.T7.b (1,536 rays, three sub-rays each): above 10% of the
@@ -2616,7 +2632,11 @@ question 1). A decision agent rules the camera's budget from the cut-10.06 bench
 the owner, before T17 closes and before any bridge play-test.
 
 Run the census benches sampled (`HYPERION_SKY_BENCH_SAMPLE`), at the eye's cut as T9.d computes it
-and at 7.95 (`decision-r06-t9b-band.md`), and beside them at 10.06, and once whole if the sampled
+and at 7.95 (`decision-r06-t9b-band.md`), and beside them at 10.06, with, near the Sun, the caps by
+ray at the camera's black-sky limit, 10.15 at 60°, and the systems they open, from `layer_caps`
+alone, and Design note 18's camera limit over the final 64² band at the camera's cut with the
+illumination, for the camera-budget ruling (`decision-r06-t7b-brackets.md`); and once whole if the
+sampled
 estimate is under an hour on the machine. The census benches, and the 1,000 ly identity test once,
 run on a galaxy built `with_full_potential`, as the server's galaxies are. The fixture has no
 kinematic tables, so its records stand still and `Drift::of_record` costs 0.05–0.08 µs. A drawn
@@ -2912,17 +2932,19 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   while R02's interim field and labels stand until then; `ViewSky.pending` (added in T13.e for
   R07's lighting label) says a sky is asked and not answered. The `VIEW` display's role is `eye`, so
   it asks the eye's limits and states their deepest; a camera view asks its noise-floor limit at
-  a dark sky of μ 24 (`DARK_SKY_CD_M2`) until the band layer (T13.d) gives a texel's background,
-  and at a manual exposure's triple or else R02's default `MAN` triple until R07 states the
-  metered triple (R07.T13.e replaced `limitTriple`: the request and the cull take the view
-  camera's deepest triple at every exposure, `deepestTriple`, and the label the shown exposure's,
-  `viewSkyLabelV`). Until T13.g bakes the cube, the stars beyond the sprite budget are not drawn,
-  and the high setting's N_max and sprite budget are used (_since R07.T17 the setting's own, and
-  its cube's face size where the device blends `float32`_), the view not yet taking a quality
-  setting. `useSky` makes its decoder only once a payload is in hand (and the effect still live),
-  so that a request never answered starts no worker. A sky is drawn and labelled only for the
-  system it was asked about while that system's position is known; otherwise the interim field and
-  its labels stand. `just test-render` compiles `STAR SPRITES HDR` (2026-10-03, exit 0).
+  a dark sky of μ 24 (`DARK_SKY_CD_M2`) until the band layer (T13.d) gives a texel's background (not
+  wired as of R06.T7.b; when the cull reads it, the request must ask the black-sky limit in the same
+  change, `decision-r06-t7b-brackets.md`), and at a manual exposure's triple or else R02's default
+  `MAN` triple until R07 states the metered triple (R07.T13.e replaced `limitTriple`: the request
+  and the cull take the view camera's deepest triple at every exposure, `deepestTriple`, and the
+  label the shown exposure's, `viewSkyLabelV`). Until T13.g bakes the cube, the stars beyond the
+  sprite budget are not drawn, and the high setting's N_max and sprite budget are used (_since
+  R07.T17 the setting's own, and its cube's face size where the device blends `float32`_), the view
+  not yet taking a quality setting. `useSky` makes its decoder only once a payload is in hand (and
+  the effect still live), so that a request never answered starts no worker. A sky is drawn and
+  labelled only for the system it was asked about while that system's position is known; otherwise
+  the interim field and its labels stand. `just test-render` compiles `STAR SPRITES HDR`
+  (2026-10-03, exit 0).
 - **Deviations in T13.d, as built (2026-10-03).** `view/sky/band.ts` exports `BAND_MATERIAL`
   (`STAR BAND`: a full-screen triangle at infinity whose fragment turns its view ray back to the
   galactic axes by the transpose of `frame.viewRotation` and samples the band cube, bilinear,
@@ -6422,13 +6444,19 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       plans' caps took 23.7 s, against 2.2 s for R06.T7's 768 rays of one profile each
       (2026-10-08, after another lane's locked run, so provisional). That is some 0.1% of the
       census near the Sun, far under R06.T17's 10% trigger.
-  - **T7's tests per ray (deviation, pending the owner's reading).**
+  - **T7's tests per ray (deviation; ruled 2026-10-08, `decision-r06-t7b-brackets.md`).**
     - On every ray: each within its rule bound, A and B under 100 ly, C at least 1,000 ly, and in
       the nuclear disc E under 1,500 ly (its largest ray is 555 ly).
     - On the median ray: D and E near the Sun within a factor of three of 4,300 and 10,000 ly, and
-      each of C–E nearer in the nuclear disc than near the Sun. Their largest rays reach far past the
-      brackets through the clear windows (E's to 61,341 ly towards the poles), so a bracket on every
-      ray would fail by design.
+      each of C–E nearer in the nuclear disc than near the Sun. Their largest rays reach far past
+      the brackets through the clear windows (E's largest to 61,341 ly; its direction is not
+      measured, and T17 records it), so a bracket on every ray would fail by design.
+    - The ruling: the brackets were a sanity check against the least-ray and mean-field regressions,
+      set on one radius a layer, as the brainstorm's figures are. Caps that follow the dust spread
+      wider than the bracket by design, so D and E read the median ray. The systems gates (75%, E
+      35%) fail a least-ray regression and the nuclear disc's per-ray E a mean-field one. No far-ray
+      or pole-ward bracket is added: a ray's radius follows its yield per system, so the scale
+      height enters through the yield, and a ray over empty volume costs cells and hides no star.
   - **The stated count beyond** is counted at the caps' own rays, beyond each ray's radius towards
     its centre. Near the Sun at 7.95: A 0.99, B 0.97, C 0.42, D 0.33 and E 0.29 (the spheres: 0.75,
     0.80, 0.75, 0.63 and 0.42). λ fills the budget of 1 before the widening, so A and B, whose rays
@@ -6461,8 +6489,21 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     - **Not adopted at the camera's 10.06.** The harness's camera limit (`cameraLimit.ts`' at f/1.4,
       1/30 s, ISO 409,600 and 60°) runs 9.68–10.13 over the 16² pre-pass. So the per-ray cut is the
       request's 10.06 nearly everywhere, and the saving is 0.2%.
-    - **A finding, not fixed:** the camera's limit at the darkest pre-pass texel, 10.13, is deeper
-      than the 10.06 a camera request asks. That is for the camera-budget ruling.
+    - **A finding, not fixed (ruled 2026-10-08, `decision-r06-t7b-brackets.md`; deferred).** A
+      camera's request and cull both read Design note 18's limit over a uniform μ 24 sky
+      (`viewSky.ts`' `DARK_SKY_CD_M2`), so they agree and the census is complete to the cull. The
+      modelled sky at the camera's cut is darker than μ 24 over about two-thirds of the sky near the
+      Sun. There the per-texel limit reaches 10.13 at 60° (darkest texel about μ 25.5), and in the
+      band's brightest texels it is 9.68. The bound is the black-sky limit, read noise alone: 10.15
+      at 60°, 0.095 mag deeper than μ 24's at every field of view, reached only by fields wider
+      than about 41°. The correction is the client's, both together:
+      - the cull reads each texel's background;
+      - the request asks the black-sky limit, so that no cull is deeper than its census.
+
+      Near the Sun its extra stars are N_max overflow, and it costs about 9–14% more of a camera
+      census. The camera-budget ruling adopts or defers it with T17's figures. Until then the
+      request and the cull stay at μ 24 together. Nothing changes in T7.b, the census or the
+      server.
   - **The caps' move from v☉** (R06.T7's spheres): none near the Sun (A 11, B 68, C 8,193, D 9,925,
     E 21,369 ly). In the nuclear disc B–E stay on the same radial nodes. Every radius there moves
     about 3% (17 → 18, 127 → 131, 225 → 232, 362 → 374 ly), because the farthest rule bound, which
