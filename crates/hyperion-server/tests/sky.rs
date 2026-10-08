@@ -391,6 +391,7 @@ async fn the_cut_is_the_eyes_under_a_shallower_camera() {
         &mut context(),
         &observer(),
         &EyeObserver::default(),
+        None,
     );
     assert_eq!(response.cut_v.to_bits(), expected.value().to_bits());
     assert!(
@@ -913,6 +914,7 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
         &mut context_over(&tables),
         &observer,
         &eye_observer,
+        None,
     );
     let cut = eye_cut.value().max(CAMERA_LIMIT_V);
     assert_eq!(response.cut_v.to_bits(), cut.to_bits());

@@ -243,6 +243,13 @@ pub struct Illumination { /* the observer's own sky of all starlight at ILLUMINA
 impl Illumination { pub fn march(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer)
         -> Self;                            // or by rows for the server's jobs, then assembled
     pub fn observer(&self) -> &Observer; pub fn heap_bytes(&self) -> usize; }
+impl Illumination { pub fn march_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>,
+        observer: &Observer, face: CubeFace, rows: Range<u16>) -> IlluminationRows;
+    pub fn assemble(observer: &Observer, parts: impl IntoIterator<Item = IlluminationRows>)
+        -> Self;                            // any order and split; R06.T9.g, as built
+    pub fn iterations(&self) -> u32; }      // the scattered field's steps
+pub struct IlluminationRows;                // one job's rows: face, rows, sums and A_∞
+// BuildSkyQueryError::Illumination: one marched for another observer or time (as built)
 impl SkyQueryBuilder { pub fn illumination(self, illumination: Arc<Illumination>) -> Self; }
 impl SkyQuery { pub fn illumination(&self) -> Option<&Illumination>; }
 impl BandTexel { pub fn diffuse_luminance(&self) -> CandelasPerSquareMetre; }
@@ -2038,6 +2045,12 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
   - Files: `sky/{dgl,band,limits,mod}.rs`, `sky/census/query.rs`, `benches/sky.rs`. Acceptance:
     `cargo test -p hyperion-sim sky::dgl`, `cargo test -p hyperion-sim sky::band` and
     `cargo test -p hyperion-sim sky::limits`, as three commands.
+  - As built (Risks, "Deviations in T9.g, as built"): the illumination is marched by rows as a
+    request's jobs and assembled (`Illumination::march_rows`, `Illumination::assemble`); the
+    scattered field stops on the bounded rule, its change × L ÷ (1 − L) under 10⁻⁴; Toller's bins
+    are tested at his 440 nm within ×/÷ 1.5 of his 1σ range, and in V within 5% of the ruling's
+    figures; and the fixture gives 6.35, 7.47 and a cut of 8.18, since its darkest polar texels
+    hold little dust. Also `sky/colour.rs`, `sky/testing.rs` and `.config/nextest.toml`.
 
 Files: `sky/band.rs`, `sky/limits.rs`. Bench: `sky/band_near_sun` (all six faces; since R06.T9.f
 `sky/band_near_sun/march` and `/sum`) and `sky/limit_map` (R06.T9.i).
@@ -2493,7 +2506,8 @@ When T16.a lands, it re-benches the census with members against this budget.
 
 The census budget, decided 2026-10-05 (`decision-r06-census-cost.md`), applies near the Sun at the
 eye's cut as T9.d computes it (about 8.0 on the fixture with the diffuse light, R06.T9.g; 8.28
-before it), benched also at 7.95, its estimate when
+before it; 8.18 as built, Risks, "Deviations in T9.g, as built"), benched also at 7.95, its
+estimate when
 the budget was set (decided 2026-10-06, `decision-r06-t9b-band.md`; the eye's cut; the camera's
 cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
 `decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
@@ -4613,7 +4627,10 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     field's series is 19–49% high at high latitude, and single scattering alone 18–31% low in the
     band.
   - **Against the measurements,** on a realistic layer: Toller's ratios within a factor 1.5 in
-    every latitude bin (0.62–1.36); the year-mean zenith at 40° N within 1.6 (0.20, against
+    every latitude bin (0.62–1.36; _as built, 0.62 is a factor of 1.61: in V the model is 1.5–1.6
+    times low of his central values at 5–15° and 20–30°, and at his 440 nm within ×/÷ 1.5 of
+    his 1σ range in every bin, 0.78–1.17 of his central values but 1.75 in the plane's; Risks,
+    "Deviations in T9.g, as built"_); the year-mean zenith at 40° N within 1.6 (0.20, against
     Masana et al.'s modelled 0.13); and the measured slopes per magnitude of dust at the top of
     their spread. Those slopes are 1.3–1.8 times their geometric mean at |b| 30–90°, within
     1.3 of Kawara et al.'s and Pioneer's, and about twice New Horizons'.
@@ -4645,11 +4662,169 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     - the Sun lies in the low-density Local Bubble, which the fixture lacks.
   - **The diffuse light:** the fixture's is about 2–3 times Toller's ratios by latitude (0.59 to
     0.30, against 0.21–0.34 to 0.12). At the poles it is about 0.7 of the eye's background,
-    against about 0.09 for the real sky.
+    against about 0.09 for the real sky. _As built: 0.43 to 0.24 by bin, 0.41 over the sky, and
+    0.54 of the eye's background at the poles (Risks, "Deviations in T9.g, as built")._
   - **The limits:** the fixture's polar eye limits move by about −0.27 mag, against −0.04, and
-    its eye's cut falls to about 8.0.
+    its eye's cut falls to about 8.0. _As built: −0.23 at the poles (7.693 to 7.468, the band alone)
+    and −0.20 in the band (6.545 to 6.347), and the cut to 8.18, since the darkest polar texels
+    hold little dust._
   - R06's references are the real sky's; the fixture's offset is recorded and routed. The same
     column reddens the band's poles and every nearby star's sightline.
+- **Deviations in T9.g, as built (2026-10-07).** `sky::dgl`, the diffuse galactic light, as
+  `decision-r06-t9g-dgl.md` and its plan text set it out, with these details.
+  - **The signatures.**
+    - `Illumination::march(galaxy, ctx, observer)`, and by rows for the server's jobs:
+      `Illumination::march_rows(galaxy, ctx, observer, face, rows) -> IlluminationRows`, then
+      `Illumination::assemble(observer, parts)`. The parts may come in any order and any split. It
+      panics unless each texel comes once, for the observer.
+    - `observer()`, `iterations()`, `heap_bytes()`; `ILLUMINATION_SPEC`, which the eye cut's
+      pre-pass now takes as its own.
+    - `SkyQueryBuilder::illumination(Arc<Illumination>)` and `SkyQuery::illumination()`. The new
+      `BuildSkyQueryError::Illumination` refuses one marched for another place or time.
+    - `eye_cut(galaxy, ctx, observer, eye, illumination: Option<&Illumination>)`. Its pre-pass
+      holds the illumination by reference, so it calls a crate `band_rows_lit`, not `band_rows`.
+    - `BandTexel::diffuse_luminance()`. `march_rows` asserts, in release builds too, that an
+      illumination's observer is the query's.
+  - **The scattered field's stop (main's ruling, 2026-10-07).**
+    - The ruling's literal stop, the change under 10⁻⁴ of the largest photopic S, leaves about
+      2 × 10⁻⁴ behind thick dust, where the ratio is ω. That fails its own test 3.
+    - Each sum stops instead when its largest change times L ÷ (1 − L) is under 10⁻⁴ of the
+      largest photopic S, with L = ω × the largest |D|. So the error left is bounded by 10⁻⁴.
+    - Each sum is iterated on its own kernel matrix, the photopic first: 1,536² weights, 19 MB
+      while that sum runs, each cosine taken once a pair. Iterating all five together, as the
+      ruling words it, recomputed the kernel every step and took 0.69 CPU-s, not 0.2.
+    - Steps: 11 near the Sun, 7 on the plane-parallel sky, and 24 behind A 100, which leaves
+      8.9 × 10⁻⁵.
+  - **Toller's bins (main's rulings, 2026-10-07).**
+    - The ruling's "within a factor 1.5 (0.62–1.36)" is an arithmetic slip: 0.62 is a factor of
+      1.61.
+    - Toller's ratios are at λ ≈ 440 nm (Leinert et al. 1998, §11 and Table 39, Pioneer 10's blue),
+      but the ruling's model and its figures are V's (science check).
+    - Test 9 so compares the plane-parallel sky at 440 nm with Toller, within ×/÷ 1.5 of his 1σ
+      range (Table 39's ± values). The dust is × 1.3245 by the sim's law there, and Draine's ω
+      0.666 and g 0.566 at 0.44 µm; the stars keep their V layers. In V it holds the ruling's own
+      figures within 5%, a regression on the implementation.
+    - In V the model is 1.5–1.6 times low against Toller's central values at 5–15° and 20–30°.
+      At 440 nm it is 0.78–1.17 of them in seven bins, and 1.75 in the plane's (0–5°), still within
+      ×/÷ 1.5 of his 1σ range there (0.368 against (0.21 + 0.05) × 1.5 = 0.39). So most of the
+      gap was the band. What remains is the plane's bin, 1.75 high at 440 nm, which the stars'
+      bluer light, lower in the disc than the V layers taken here, may move. Deferred
+      (`deferred-corrections.md`), not tuned.
+    - Scaling Toller's 0.21 to V by the model's own V-to-440 ratio in that bin (0.775) would move
+      T9.c's band reference from 6.408 to 6.427, well inside its ±0.20. T9.c is unchanged.
+    - The plane-parallel sky, as built (the ruling's figures beside the V row):
+
+      | \|b\|           | 0–5°        | 5–10°       | 10–15°      | 15–20°      | 20–30°      | 30–40°      | 40–60°      | 60–90°      |
+      | --------------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- |
+      | At 440 nm       | 0.368       | 0.272       | 0.241       | 0.223       | 0.202       | 0.178       | 0.155       | 0.135       |
+      | Toller ± 1σ     | 0.21 ± 0.05 | 0.34 ± 0.07 | 0.31 ± 0.03 | 0.19 ± 0.04 | 0.25 ± 0.04 | 0.17 ± 0.04 | 0.17 ± 0.02 | 0.12 ± 0.02 |
+      | In V            | 0.285       | 0.214       | 0.194       | 0.181       | 0.166       | 0.149       | 0.130       | 0.114       |
+      | The ruling's, V | 0.286       | 0.213       | 0.192       | 0.180       | 0.165       | 0.147       | 0.129       | 0.113       |
+
+      The year-mean zenith at 40° N in V is 0.205 (the ruling 0.20; Masana et al. 0.13, modelled).
+
+    - **The sky's dust layer** (main's ruling, 2026-10-07): an exponential of scale height 125 pc,
+      as the ruling took it, documented as the ruling's assumption. Marshall et al. 2006 (A&A 453,
+      635, §5.5.1) give 125 (+17, −7) pc for a sech² profile and 134 (+44, −11) pc for an
+      exponential, which moves the V bins by +4% to +7.5%, past the 5% regression; sech² at 125
+      pc moves them by +6% in the plane's bin and −1% to −2% elsewhere (science check). Toller's
+      check passes in every variant. The sky's real dust is the galaxy's, not this test sky's.
+    - The light's split, 41% at 100 pc and 59% at 300 pc, makes the column Flynn et al.'s
+      Σ<sub>L</sub> of 24.4 L☉ pc⁻²; the two heights and the observer's 20.8 pc are the ruling's.
+  - **The scatterers.** Each sum's (λ; ω; g):
+    - photopic 0.5536 µm, 0.6774, 0.5360;
+    - red 0.6432, 0.6735, 0.5019;
+    - green 0.5444, 0.6773, 0.5391;
+    - blue 0.4430, 0.6668, 0.5651;
+    - scotopic 0.4981, 0.6750, 0.5529.
+
+    The red channel's moment, 0.838, falls at 0.643 µm, not the ruling's about 0.62, so its g is
+    0.502, not about 0.51. The scotopic ω is 0.675, against the ruling's about 0.676. Test 1 holds
+    the ruling's "about" figures to 0.002 in ω and 0.003 in g, and the channels within 0.666–0.678
+    in ω and 0.495–0.570 in g: the blue's ω 0.6668 and the green's 0.6773 lie just past the plan's
+    0.667–0.677, which are "about".
+    - Draine's rows take the data file's own wavelengths (0.398107, 0.446684, 0.501187, 0.602560
+      and 0.707946 µm, which the ruling rounded); over the band's wavelengths the twelve rows give
+      the full table's ω and g within 1.5 × 10⁻⁴ (science check).
+    - The kernel's half width at half maximum is about 28° at g 0.54, not the ruling's 23°; the
+      16² illumination's own measure is the 8² comparison below.
+
+  - **The tests' details.**
+    - **Test 4** holds the linear law at A<sub>∞</sub> 10⁻³ (6.0 × 10⁻⁴). At 2 × 10⁻³ the blue's
+      second-order term is 1.2 × 10⁻³, which the doubling's ratio (within 6.0 × 10⁻⁴) holds.
+    - **Test 5** takes the kernel's ratio on the single-scattered light, since the higher orders
+      add about 10⁻⁶ of it. Forward over 90° is 14.6; forward over backward is 35.9.
+    - **Test 6.** A signed channel whose two parts the dust dims apart passes zero behind thick
+      dust and comes back towards it, so its depth rises a hair past 1 and falls back. The blue's
+      reaches 1 + 8.5 × 10⁻⁶; the green's reaches 1 + 1.06 × 10⁻¹⁰ past A 20, falling 8 × 10⁻¹²
+      a step. The test holds the photopic, red, green and scotopic depths monotone within 10⁻⁹,
+      and the blue's within 10⁻³ of 1.
+    - **The midpoint sum** of the unrenormalised kernel is within 5.2 × 10⁻⁴ of 1 at 16² and 64²
+      targets. The renormalised weights sum to 1 within 7.8 × 10⁻¹⁵. Test 2's J = F, exact, also
+      reads the production means toward the 8² and 64² bands' texels.
+    - **Test 10** reads the illumination's own 16² texels, their directions and A<sub>∞</sub>,
+      which are the pre-pass's, rather than a lit 16² band, whose rays have the same bits.
+    - **Added** (reviews): the scattered field's kernel against the direct phase-weighted means,
+      bit for bit, on a 4² grid; `assemble`'s refusals of a texel marched twice and of one not
+      marched; an illumination's bits whatever was marched before it on a warm context
+      (`assert_order_independent`, the Sun and 1,000 ly above it), and the Sun's against a cold
+      context's; and `eye_cut` without an illumination, the starlight's alone, 8.2819 with its
+      repeat of +0.0425, against 8.1787 and +0.0274 with it.
+  - **Near the Sun.**
+    - The slope (test 10): μ<sub>V</sub> + 2.5 log₁₀ A<sub>∞</sub> is 23.633 over |b| > 40°,
+      against 23.82 ± 0.44; the ruling's model gave about 24.0. Its fall from 30–40° to above 70°
+      is 1.240 (1.1–1.8; the ruling 1.29). The light per magnitude of dust is about 1.4 times the
+      ruling's model's because the field is: the fixture's all-sky mean starlight is μ<sub>V</sub>
+      22.89, 591 nW m⁻² sr⁻¹ by the ruling's conversion, against its plane-parallel fixture's 433
+      (the realistic sky's 762).
+    - T9.c's medians with the light: 6.347 in the band and 7.468 at the poles from the band alone,
+      and 6.347 and 7.378 with the glare of the 1,514 stars within 100 ly. The references are
+      6.41 ± 0.20 and 7.51 ± 0.22; the ruling's fixture estimate was 6.29 and 7.41.
+    - T9.d: the first pass gives 8.1513 and the repeat 8.1787 (+0.0274, under 0.05), against
+      8.10 ± 0.22. The ruling expected about 8.0 and +0.01; T17's "about 8.0" and the T9.d
+      record's "about +0.01" are its estimates, and T17 benches the census at the 8.18 the fixture
+      computes.
+    - The darkest 16² texel moved from |b| 78.8° (μ 24.916) to 75.1° (μ 24.740 with the light).
+      There the diffuse light is about 18% of the background, not the ruling's 57–70%.
+    - The reason: the darkest texel is the least dusty. The 16² rays at |b| over 60° hold
+      A<sub>∞</sub> 0.054 to 0.472 (median 0.191). The ruling's plane-parallel fixture took 0.25
+      everywhere. So the cut and the repeat stay nearer their unlit values.
+    - The pad has 0.0956 to spare (0.0935 before).
+    - Records (the ignored `record_the_fixtures_diffuse_light_near_the_sun`, 64², complete
+      nowhere for the starlight). The diffuse light over the fixture's starlight by Toller's bins
+      is 0.429, 0.481, 0.495, 0.468, 0.403, 0.319, 0.291 and 0.236; the ruling's plane-parallel
+      fixture gave 0.587 to 0.301. It is 0.410 over the whole sky (the ruling 0.47) and 0.337 in
+      the zenith mean at 40° N (the ruling 0.48; l = 90° along +X).
+    - Over the eye's background (the starlight fainter than V 8.15) it is 0.540 at the poles and
+      0.588 in the band; in a single 64² texel it reaches 2.17 (|b| 51.4°, behind a cloud).
+    - The 8² illumination against the 16²: within 4.0% in a texel, 2.0% of the light over the
+      sky, and −2.3% over the band (the ruling: within 3%).
+  - **The cost** (criterion's medians of ten samples each, in one run, release: three workers
+    at `CPUQuota=400%`, without the heavy-test lock, which the orchestrator's `just ci` held,
+    load about 4–8, so provisional).
+    - `sky/illumination` 0.947 CPU-s: its 1,536 rays and its scattered field, about 0.15 of it.
+    - `sky/band_near_sun/march` 16.11 CPU-s, against 15.73 for `/march_no_dgl`.
+    - So the illumination and the march's increase are 1.33 CPU-s, **8.4% of the march**, under
+      the 10% gate (the ruling 6–9%).
+    - Earlier single runs at load 7–17 gave 9.7% and noise either way: the march alone moves by
+      up to 2 CPU-s between runs.
+    - The phase-weighted means run four texels a step, their partial sums in four lanes joined
+      ((0 + 1) + (2 + 3)), a fixed order. The march's heap at 64² grows by 0.98 MB, from 21.97 MB
+      to 22.95 MB.
+    - The pre-pass's own diffuse light (two 16² bands) adds about 2 × 1,536² kernel pairs to
+      `eye_cut`; T17 times it with the first sky.
+  - **Bits.**
+    - A query with no illumination keeps today's bits: a probe's digests of the band, a march's
+      two replies with a census's overflow, a camera's eye limits and the eye's cut are identical
+      before and after (`.git/rm23-scratch/r06-sky/t9g/probe/`).
+    - The march's heap grows by each ray's A<sub>∞</sub>, 8 bytes, lit or not.
+    - The sim's own API keeps the units: A<sub>∞</sub> as `Magnitudes`, the texels' solid angles
+      in sr, and each ray's direction as a `UnitVector` (Rust review).
+    - GENERATOR_VERSION stays 21, and no golden moves.
+  - **Files** beyond the plan's:
+    - `sky/colour.rs`: `Reddening::sum_moments`, crate;
+    - `sky/testing.rs`: the Sun's illumination, shared by the tests;
+    - `.config/nextest.toml`: `sky::dgl` in the sky-tables group.
 - **Deviations in T9.e, as built (2026-10-06; amended the same day to the band ruling's
   addendum).** `StarColour::reddened` and the band's five reddened sums, as
   `decision-r06-t9b-band.md`'s item 3 and its addendum rule them, with these differences. T9.e's
@@ -5081,7 +5256,8 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     - T9.c's and T9.h's tests, and T9.i's and T9.j's, keep the ruled 8.15, the real sky's figure.
       T17 benches the census at the computed 8.28, beside 7.95. _With the diffuse light (R06.T9.g,
       `decision-r06-t9g-dgl.md`) the fixture's cut is about 8.0 and the repeat about +0.01: a light
-      no cut changes dilutes the step._
+      no cut changes dilutes the step. As built, 8.18 and +0.027 (Risks, "Deviations in T9.g, as
+      built")._
     - The probe's source and the logs are in `.git/rm23-scratch/r06-census/t9d/`.
   - **The pad rests on a smooth sky (science check; for the orchestrator).** The clamp alone keeps
     the 64² map within the pad only where the darkest 16² texel sees to 7.89 or deeper (μ about

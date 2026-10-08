@@ -96,9 +96,10 @@ use crate::observe::Observer;
 use crate::units::consts::RADIANS_PER_DEGREE;
 use crate::units::{CandelasPerSquareMetre, Degrees, Lux, Magnitudes};
 
-use super::band::{BandSpec, BandTexel, CompleteTo, CubeFace, band_rows, unextinguished_lux};
+use super::band::{BandSpec, BandTexel, CompleteTo, CubeFace, band_rows_lit, unextinguished_lux};
 use super::census::{SkyCensus, SkyContext, SkyQuery, SkyStar, sky_order};
 use super::colour::largest_sp_ratio;
+use super::dgl::{ILLUMINATION_SPEC, Illumination};
 use super::eye::{
     EyeObserver, MAX_CUT_V, SkyBackground, SpRatio, naked_eye_limit, star_colour_offset,
     veiling_luminance,
@@ -1204,9 +1205,9 @@ pub fn eye_offsets(
 }
 
 /// The eye cut's pre-pass band (Design note 5): 16² texels a face, 7.1° wide at the faces' centres
-/// and 5.2° on average, on the server's nodes a decade.
-const PRE_PASS_SPEC: BandSpec = BandSpec::new(16, BandSpec::STANDARD.nodes_per_decade())
-    .expect("16² faces on the standard nodes are a band");
+/// and 5.2° on average, on the server's nodes a decade: the illumination's (R06.T9.g), so the
+/// pre-pass's rays share its directions and its rays' dust.
+const PRE_PASS_SPEC: BandSpec = ILLUMINATION_SPEC;
 
 /// The pre-pass's provisional cut, V 7.85 (Design note 5): its band holds the light of the stars
 /// fainter than it, until the cut it gives is known.
@@ -1257,8 +1258,9 @@ impl EyeCutPasses {
 }
 
 /// The pre-pass's band for `observer` and `eye` at `band_cut`, its six faces in
-/// [`CubeFace::ALL`]'s order, with their limits against no glare: [`band_rows`] at
-/// [`PRE_PASS_SPEC`] with no census and complete everywhere, then [`limit_map`].
+/// [`CubeFace::ALL`]'s order, with the diffuse galactic light of `illumination` (R06.T9.g) and
+/// their limits against no glare: [`band_rows`](super::band::band_rows) at [`PRE_PASS_SPEC`] with
+/// no census and complete everywhere, then [`limit_map`].
 #[must_use]
 fn pre_pass_band(
     galaxy: &Galaxy,
@@ -1266,6 +1268,7 @@ fn pre_pass_band(
     observer: &Observer,
     eye: &EyeObserver,
     band_cut: Magnitudes,
+    illumination: Option<&Illumination>,
 ) -> Vec<BandTexel> {
     let query = SkyQuery::builder(*observer, band_cut)
         .build()
@@ -1273,15 +1276,16 @@ fn pre_pass_band(
     let side = PRE_PASS_SPEC.face_texels();
     let mut band = Vec::with_capacity(CubeFace::ALL.len() * usize::from(side) * usize::from(side));
     for face in CubeFace::ALL {
-        band_rows(
+        band_rows_lit(
             galaxy,
             ctx,
             &query,
             &SkyCensus::empty(),
             &CompleteTo::everywhere(),
-            &PRE_PASS_SPEC,
+            PRE_PASS_SPEC,
             face,
             0..side,
+            illumination,
             &mut band,
         );
     }
@@ -1289,8 +1293,9 @@ fn pre_pass_band(
     band
 }
 
-/// One run of the pre-pass whose band holds the light fainter than `band_cut`
-/// ([`pre_pass_band`]), its cut taking `offset`, the largest colour offset.
+/// One run of the pre-pass whose band holds the light fainter than `band_cut` and the diffuse
+/// light of `illumination` ([`pre_pass_band`]), its cut taking `offset`, the largest colour
+/// offset.
 #[must_use]
 fn pre_pass(
     galaxy: &Galaxy,
@@ -1299,8 +1304,9 @@ fn pre_pass(
     eye: &EyeObserver,
     band_cut: Magnitudes,
     offset: Magnitudes,
+    illumination: Option<&Illumination>,
 ) -> PrePass {
-    let darkest = pre_pass_band(galaxy, ctx, observer, eye, band_cut)
+    let darkest = pre_pass_band(galaxy, ctx, observer, eye, band_cut, illumination)
         .iter()
         .map(|texel| {
             texel
@@ -1324,14 +1330,24 @@ fn eye_cut_passes(
     ctx: &mut SkyContext<'_>,
     observer: &Observer,
     eye: &EyeObserver,
+    illumination: Option<&Illumination>,
 ) -> EyeCutPasses {
     let offset = largest_colour_offset();
     let provisional = Magnitudes::new(PROVISIONAL_CUT_V);
-    let first = pre_pass(galaxy, ctx, observer, eye, provisional, offset);
+    let first = pre_pass(
+        galaxy,
+        ctx,
+        observer,
+        eye,
+        provisional,
+        offset,
+        illumination,
+    );
     let repeat = (first.cut > provisional).then(|| {
-        let repeat = pre_pass(galaxy, ctx, observer, eye, first.cut, offset);
+        let repeat = pre_pass(galaxy, ctx, observer, eye, first.cut, offset, illumination);
         // A deeper cut only takes light from the band, which only deepens its limits (to a
-        // rounding), so what one repeat leaves lies on the side the pad covers.
+        // rounding), so what one repeat leaves lies on the side the pad covers. The diffuse
+        // light has the same bits in both passes, since no cut moves it (R06.T9.g).
         debug_assert!(
             repeat.darkest.value() >= first.darkest.value() - 1e-9,
             "a deeper cut leaves the band darker: {first:?}, then {repeat:?}"
@@ -1345,11 +1361,12 @@ fn eye_cut_passes(
 /// 5; R06.T9.d).
 ///
 /// The server sets it before the census, since the limit map is computed from the census. A coarse
-/// pre-pass of the band, [`band_rows`] from the luminosity tables alone at 16² texels a face, with
-/// no census and complete everywhere, holds the light of the stars fainter than a provisional cut
-/// of V 7.85. [`limit_map`] with no glare then gives each texel its limit, Crumey's threshold at
-/// the texel's own light and ρ ([`naked_eye_limit`], which holds it at his darkest background:
-/// 7.99 at F 1.4). The cut is:
+/// pre-pass of the band, [`band_rows`](super::band::band_rows) from the luminosity tables alone at
+/// 16² texels a face, with no census and complete everywhere, holds the light of the stars fainter
+/// than a provisional cut of V 7.85, and the diffuse galactic light of `illumination`, the
+/// request's (R06.T9.g; [`Illumination`]), whose directions the pre-pass's rays share. [`limit_map`]
+/// with no glare then gives each texel its limit, Crumey's threshold at the texel's own light and
+/// ρ ([`naked_eye_limit`], which holds it at his darkest background: 7.99 at F 1.4). The cut is:
 ///
 /// - the darkest texel's limit;
 /// - plus the largest eye colour offset any star has: +0.453, the colour table's 500,000 K
@@ -1357,9 +1374,11 @@ fn eye_cut_passes(
 /// - plus a pad of 0.1 mag.
 ///
 /// If that is deeper than V 7.85, the pre-pass runs once more at it, and the repeat gives the cut.
-/// A deeper cut takes little light from the band, so one repeat suffices. Near the Sun the repeat
-/// moves the cut by about 0.04 mag. The darkest limit moves about 0.11 mag per magnitude of cut, so
-/// what is left, about 0.005, makes the final band darker, the side the pad covers.
+/// A deeper cut takes little light from the band, so one repeat suffices. The diffuse light, which
+/// no cut changes, makes the step smaller still: near the Sun the repeat moves the fixture's cut by
+/// about 0.04 mag without it and 0.03 with it (the ruling's estimate for the real sky with it is
+/// about 0.01). The darkest limit moves about 0.11 mag per magnitude of cut without it, so what is
+/// left makes the final band darker, the side the pad covers.
 ///
 /// So every star an eye view can see is listed, in the eye-only request's map, which is also the
 /// eye's map under a camera's deeper cut (R06.T9.j). A star's own limit is its texel's limit in the
@@ -1374,12 +1393,14 @@ fn eye_cut_passes(
 /// any observer (Crumey's 1.4–2.4), would pass it.
 ///
 /// It reads the tables, the noise and the modifiers of `ctx`, and marches two bands of 1,536 rays
-/// near the Sun (one where the first cut is no deeper than V 7.85).
+/// near the Sun (one where the first cut is no deeper than V 7.85). Without an illumination the
+/// bands hold the starlight alone, as before R06.T9.g.
 ///
 /// # Panics
 ///
-/// In debug builds, if the repeat's darkest limit is shallower than the first pass's, or as
-/// [`limit_rows`] panics on a texel's light that is not finite; no band gives either.
+/// If `illumination` was marched for another observer than `observer`. In debug builds, if the
+/// repeat's darkest limit is shallower than the first pass's, or as [`limit_rows`] panics on a
+/// texel's light that is not finite; no band gives either.
 ///
 /// # Examples
 ///
@@ -1387,6 +1408,8 @@ fn eye_cut_passes(
 /// tables take a minute or more to build):
 ///
 /// ```no_run
+/// use std::sync::Arc;
+///
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::coords::GalacticPosition;
 /// use hyperion_sim::galaxy::Galaxy;
@@ -1395,6 +1418,7 @@ fn eye_cut_passes(
 /// use hyperion_sim::galaxy::params::GalaxyParams;
 /// use hyperion_sim::observe::Observer;
 /// use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext, SkyQuery};
+/// use hyperion_sim::sky::dgl::Illumination;
 /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
 /// use hyperion_sim::sky::eye::EyeObserver;
 /// use hyperion_sim::sky::limits::eye_cut;
@@ -1416,9 +1440,11 @@ fn eye_cut_passes(
 /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
 /// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
 /// let eye = EyeObserver::default();
-/// let cut = eye_cut(&galaxy, &mut ctx, &observer, &eye);
+/// // The request's illumination, its sky of all starlight, whose light the dust scatters.
+/// let light = Arc::new(Illumination::march(&galaxy, &mut ctx, &observer));
+/// let cut = eye_cut(&galaxy, &mut ctx, &observer, &eye, Some(&light));
 /// assert!(cut.value() > 7.85, "the darkest sky near the Sun deepens the provisional cut");
-/// let query = SkyQuery::builder(observer, cut).eye(eye).build()?;
+/// let query = SkyQuery::builder(observer, cut).eye(eye).illumination(light).build()?;
 /// # let _ = query;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -1428,8 +1454,9 @@ pub fn eye_cut(
     ctx: &mut SkyContext<'_>,
     observer: &Observer,
     eye: &EyeObserver,
+    illumination: Option<&Illumination>,
 ) -> Magnitudes {
-    eye_cut_passes(galaxy, ctx, observer, eye).cut()
+    eye_cut_passes(galaxy, ctx, observer, eye, illumination).cut()
 }
 
 #[cfg(test)]
@@ -1457,7 +1484,9 @@ mod tests {
         BLACKWELL_SP_RATIO, DARKEST_BACKGROUND, PhotopicWeight, REFERENCE_SP_RATIO,
         illuminance_of_magnitude, luminance, mesopic_weight, surface_brightness,
     };
-    use crate::sky::testing::{milky_way_envelope, milky_way_offsets, milky_way_tables, uniforms};
+    use crate::sky::testing::{
+        milky_way_envelope, milky_way_offsets, milky_way_tables, sun_illumination, uniforms,
+    };
     use crate::time::UniverseTime;
     use crate::units::{Kelvin, LightYears, MagnitudesPerArcsec2};
 
@@ -1473,10 +1502,23 @@ mod tests {
     const GLARE_RADIUS_LY: f64 = 100.0;
 
     /// The ruled medians near the Sun, V, and their tolerances (`decision-r06-t9b-band.md`, items 1
-    /// and 2): Crumey's limit at Gaia DR3's light fainter than the cut, μ 22.18 in the band and
-    /// 24.62 at the poles, and T9.b's 0.5 mag of μ through Crumey's slope there.
-    const BAND_MEDIAN: (f64, f64) = (6.5, 0.20);
-    const POLES_MEDIAN: (f64, f64) = (7.55, 0.22);
+    /// and 2; re-derived with the diffuse light, `decision-r06-t9g-dgl.md`, §3.2): Crumey's limit
+    /// at Gaia DR3's light fainter than the cut plus the diffuse galactic light, μ 21.95 in the band
+    /// (Toller's 0.21 of the light fainter than V 6.5, Leinert et al. 1998, A&AS 127, 1, Table 39)
+    /// and 24.53 at the poles (250 nW m⁻² sr⁻¹ per magnitude of Schlafly and Finkbeiner's `A_V` of
+    /// about 0.04), and T9.b's 0.5 mag of μ through Crumey's slope there. The 250 nW is the
+    /// geometric mean of the measured DGL–100 µm slopes in V (Kawara et al. 2017; Ienaka et al.
+    /// 2013; Matsuoka et al. 2011; Brandt and Draine 2012; Postman et al. 2024) through Schlafly and
+    /// Finkbeiner 2011's 0.0505 mag of `A_V` per `MJy` sr⁻¹. Without the diffuse light they were 6.5
+    /// and 7.55.
+    const BAND_MEDIAN: (f64, f64) = (6.41, 0.20);
+    const POLES_MEDIAN: (f64, f64) = (7.51, 0.22);
+
+    /// The eye's cut near the Sun, V, and its tolerance (`decision-r06-t9b-band.md`; re-derived
+    /// with the diffuse light, `decision-r06-t9g-dgl.md`, §3.2): Crumey's limit at the darkest 16²
+    /// texel of Gaia DR3's light fainter than the cut plus the diffuse light (μ about
+    /// 24.60–24.65), plus 0.553. Without the diffuse light it was 8.15.
+    const EYE_CUT_NEAR_THE_SUN: (f64, f64) = (8.10, 0.22);
 
     /// The eye offsets the wire holds, mag: `i8` centimagnitudes, saturating (Design note 17).
     const WIRE_MIN_EYE_OFFSET_MAG: f64 = -1.28;
@@ -1505,19 +1547,28 @@ mod tests {
             .expect("a valid query")
     }
 
+    /// [`query`] lit by the Sun's illumination, so that its band holds the diffuse galactic light
+    /// (R06.T9.g).
+    fn lit_query(cut: f64) -> SkyQuery {
+        SkyQuery::builder(observer(), Magnitudes::new(cut))
+            .illumination(std::sync::Arc::clone(sun_illumination()))
+            .build()
+            .expect("a valid query")
+    }
+
     fn spec(face_texels: u16) -> BandSpec {
         BandSpec::new(face_texels, BandSpec::STANDARD.nodes_per_decade()).expect("a spec")
     }
 
     /// Rows `rows` of `face` of the band near the Sun at the eye's cut with no census, complete
     /// everywhere: the light of the stars fainter than the cut, as the final reply's band holds it
-    /// to the caps.
+    /// to the caps, and the diffuse galactic light (R06.T9.g).
     fn band_near_the_sun(spec: BandSpec, face: CubeFace, rows: Range<u16>) -> Vec<BandTexel> {
         let mut out = Vec::new();
         band_rows(
             milky_way_galaxy(),
             &mut context(),
-            &query(EYE_CUT),
+            &lit_query(EYE_CUT),
             &SkyCensus::empty(),
             &CompleteTo::everywhere(),
             &spec,
@@ -1855,10 +1906,12 @@ mod tests {
         assert!(mesopic > 0, "the V −9 star's texel is mesopic");
     }
 
-    /// Near the Sun, with the band at the eye's cut there (8.15), the median texel limit is 6.5 ±
-    /// 0.20 in the band (|b| under 5°) and 7.55 ± 0.22 at the poles (|b| over 80°)
-    /// (`decision-r06-t9b-band.md`): against the band alone, as the ruling's reference is, and with
-    /// the glare of the census's nearest stars.
+    /// Near the Sun, with the band at cut 8.15 and the diffuse galactic light (R06.T9.g), the
+    /// median texel limit is 6.41 ± 0.20 in the band (|b| under 5°) and 7.51 ± 0.22 at the poles
+    /// (|b| over 80°) (`decision-r06-t9b-band.md`, re-derived in `decision-r06-t9g-dgl.md`):
+    /// against the band alone, as the ruling's reference is, and with the glare of the census's
+    /// nearest stars. The ruling's model of the fixture gives about 6.29 and 7.41: its dust is
+    /// thicker than the sky's (R06's Risks, "The fixture's dust is thick for the diffuse light").
     #[test]
     fn near_the_sun_the_median_limits_are_crumeys_at_gaias_light_fainter_than_the_cut() {
         let spec = spec(16);
@@ -3505,7 +3558,8 @@ mod tests {
         limit_map(&EyeObserver::default(), &spec, &glare, &mut band);
     }
 
-    /// The eye cut's passes for the default eye near the Sun: built once.
+    /// The eye cut's passes for the default eye near the Sun, lit by its illumination (R06.T9.g):
+    /// built once.
     fn eye_cut_near_the_sun() -> &'static EyeCutPasses {
         static PASSES: OnceLock<EyeCutPasses> = OnceLock::new();
         PASSES.get_or_init(|| {
@@ -3514,7 +3568,19 @@ mod tests {
                 &mut context(),
                 &observer(),
                 &EyeObserver::default(),
+                Some(sun_illumination()),
             )
+        })
+    }
+
+    /// The nuclear disc's observer, at (0, 150, 0) ly, and its illumination (R06.T9.g): built once.
+    fn nuclear_disc() -> &'static (Observer, Illumination) {
+        static NUCLEAR: OnceLock<(Observer, Illumination)> = OnceLock::new();
+        NUCLEAR.get_or_init(|| {
+            let at = GalacticPosition::from_light_years([0.0, 150.0, 0.0]).expect("in the cube");
+            let observer = Observer::new(at, UniverseTime::EPOCH).expect("an observer");
+            let light = Illumination::march(milky_way_galaxy(), &mut context(), &observer);
+            (observer, light)
         })
     }
 
@@ -3538,10 +3604,10 @@ mod tests {
             .fold(f64::NEG_INFINITY, f64::max)
     }
 
-    /// The band near the Sun at `cut` with no census, complete everywhere, at `spec`'s faces: six
-    /// faces in [`CubeFace::ALL`]'s order, without limits.
+    /// The band near the Sun at `cut` with no census, complete everywhere, at `spec`'s faces, lit by
+    /// the Sun's illumination (R06.T9.g): six faces in [`CubeFace::ALL`]'s order, without limits.
     fn band_at(cut: f64, spec: BandSpec) -> Vec<BandTexel> {
-        let query = query(cut);
+        let query = lit_query(cut);
         let side = spec.face_texels();
         let mut band = Vec::new();
         for face in CubeFace::ALL {
@@ -3628,13 +3694,20 @@ mod tests {
                 bits(darkest + largest_colour_offset().value() + CUT_PAD_MAG)
             );
         }
-        let cut = eye_cut(milky_way_galaxy(), &mut context(), &observer(), &eye);
+        let light = sun_illumination();
+        let cut = eye_cut(
+            milky_way_galaxy(),
+            &mut context(),
+            &observer(),
+            &eye,
+            Some(light),
+        );
         assert_eq!(bits(cut.value()), bits(repeat.cut.value()));
     }
 
     /// The cut depends on nothing a server's job has asked before: on one context whose noise
-    /// cache stays warm, near the Sun and in the nuclear disc in any order, each observer's cut
-    /// has the same bits, and the Sun's are those of a cold context's.
+    /// cache stays warm, near the Sun and in the nuclear disc in any order, each observer's cut,
+    /// lit by its own illumination, has the same bits, and the Sun's are those of a cold context's.
     #[test]
     fn the_eye_cut_is_the_same_whatever_was_asked_before_it() {
         use std::cell::RefCell;
@@ -3642,16 +3715,26 @@ mod tests {
         use hyperion_testkit::order::assert_order_independent;
 
         let eye = EyeObserver::default();
-        let nuclear = Observer::new(
-            GalacticPosition::from_light_years([0.0, 150.0, 0.0]).expect("in the cube"),
-            UniverseTime::EPOCH,
-        )
-        .expect("an observer");
+        let (nuclear, nuclear_light) = nuclear_disc();
         let ctx = RefCell::new(context());
         let cut = |at: &Observer| {
-            bits(eye_cut(milky_way_galaxy(), &mut ctx.borrow_mut(), at, &eye).value())
+            let light: &Illumination = if at == nuclear {
+                nuclear_light
+            } else {
+                sun_illumination()
+            };
+            bits(
+                eye_cut(
+                    milky_way_galaxy(),
+                    &mut ctx.borrow_mut(),
+                    at,
+                    &eye,
+                    Some(light),
+                )
+                .value(),
+            )
         };
-        assert_order_independent(&[observer(), nuclear], cut);
+        assert_order_independent(&[observer(), *nuclear], cut);
         assert_eq!(cut(&observer()), bits(eye_cut_near_the_sun().cut().value()));
     }
 
@@ -3674,19 +3757,26 @@ mod tests {
         );
     }
 
-    /// Near the Sun the cut is 8.15 ± 0.22 (`decision-r06-t9b-band.md`, item 1): Crumey's limit at
-    /// the darkest 16² texel of Gaia DR3's light fainter than the cut (μ 24.73–24.77), plus
-    /// 0.553, with T9.b's 0.5 mag of μ through Crumey's slope there. The fixture, whose poles are about
-    /// 0.3 mag faint (R06's Risks, "The galaxy's local light is low"), gives about 8.27.
+    /// Near the Sun, with the diffuse galactic light (R06.T9.g), the cut is 8.10 ± 0.22
+    /// (`decision-r06-t9b-band.md`, item 1, re-derived in `decision-r06-t9g-dgl.md`): Crumey's limit
+    /// at the darkest 16² texel of Gaia DR3's light fainter than the cut plus the diffuse light (μ
+    /// about 24.60–24.65), plus 0.553, with T9.b's 0.5 mag of μ through Crumey's slope there. The
+    /// fixture, whose poles are about 0.3 mag faint (R06's Risks, "The galaxy's local light is
+    /// low"), gives 8.18 with the diffuse light and 8.28 without it; the ruling's estimate was about
+    /// 8.0, but the fixture's darkest polar texels hold little dust (R06's Risks, "Deviations in
+    /// T9.g, as built").
     #[test]
-    fn near_the_sun_the_eye_cut_is_8_15_within_0_22() {
+    fn near_the_sun_the_eye_cut_is_8_10_within_0_22() {
         let cut = eye_cut_near_the_sun().cut().value();
         eprintln!("near the Sun the eye's cut is V {cut:.4}");
-        assert!((cut - 8.15).abs() <= 0.22, "{cut}");
+        let (reference, tolerance) = EYE_CUT_NEAR_THE_SUN;
+        assert!((cut - reference).abs() <= tolerance, "{cut}");
     }
 
     /// The pre-pass's one repeat changes the cut by under 0.05 mag near the Sun, and only deepens
-    /// it: a deeper cut takes light from the band.
+    /// it: a deeper cut takes light from the band. With the diffuse light, which no cut changes,
+    /// the step is smaller: +0.027 on the fixture, against +0.0425 without it (the ruling's
+    /// estimate: about 0.01).
     #[test]
     fn the_repeat_moves_the_cut_by_under_0_05_mag() {
         let passes = eye_cut_near_the_sun();
@@ -3698,6 +3788,33 @@ mod tests {
             repeat.cut.value()
         );
         assert!((0.0..0.05).contains(&moved), "{moved}");
+    }
+
+    /// The diffuse light, which no cut changes, makes the eye's cut near the Sun shallower and its
+    /// repeat's step smaller, and an eye cut with no illumination is the starlight's alone: the
+    /// cut before R06.T9.g, 8.2811 with its repeat of +0.0425 (R06's Risks, "Deviations in T9.d, as
+    /// built").
+    #[test]
+    fn the_diffuse_light_makes_the_eye_cut_shallower_and_its_repeat_smaller() {
+        let eye = EyeObserver::default();
+        let unlit = eye_cut_passes(milky_way_galaxy(), &mut context(), &observer(), &eye, None);
+        let lit = eye_cut_near_the_sun();
+        let step = |passes: &EyeCutPasses| {
+            let repeat = passes.repeat.expect("the pre-pass repeats near the Sun");
+            (repeat.cut - passes.first.cut).value()
+        };
+        eprintln!(
+            "near the Sun the eye's cut is {:.4} with the diffuse light (repeat {:+.4}) and {:.4} \
+             without it (repeat {:+.4})",
+            lit.cut().value(),
+            step(lit),
+            unlit.cut().value(),
+            step(&unlit)
+        );
+        assert!(lit.cut() < unlit.cut(), "{lit:?} against {unlit:?}");
+        assert!(step(lit) < step(&unlit), "{lit:?} against {unlit:?}");
+        let cut = eye_cut(milky_way_galaxy(), &mut context(), &observer(), &eye, None);
+        assert_eq!(bits(cut.value()), bits(unlit.cut().value()));
     }
 
     /// No texel of the full limit map with no glare is deeper than the cut less the largest colour
@@ -3762,13 +3879,19 @@ mod tests {
     }
 
     /// Where the first cut is no deeper than the provisional 7.85, as in the nuclear disc's bright
-    /// sky, the pre-pass does not repeat and its first cut is the eye's.
+    /// sky, lit by its own illumination, the pre-pass does not repeat and its first cut is the
+    /// eye's.
     #[test]
     fn in_a_bright_sky_the_pre_pass_does_not_repeat() {
         let eye = EyeObserver::default();
-        let at = GalacticPosition::from_light_years([0.0, 150.0, 0.0]).expect("in the cube");
-        let nuclear = Observer::new(at, UniverseTime::EPOCH).expect("an observer");
-        let passes = eye_cut_passes(milky_way_galaxy(), &mut context(), &nuclear, &eye);
+        let (nuclear, light) = nuclear_disc();
+        let passes = eye_cut_passes(
+            milky_way_galaxy(),
+            &mut context(),
+            nuclear,
+            &eye,
+            Some(light),
+        );
         eprintln!(
             "in the nuclear disc the darkest 16² texel sees to {:.4}, so the cut is {:.4}",
             passes.first.darkest.value(),
@@ -3796,7 +3919,14 @@ mod tests {
     #[test]
     fn a_cut_past_v_11_is_held_there() {
         let keen = EyeObserver::new(0.1, 25.0, 0.5).expect("an eye");
-        let passes = eye_cut_passes(milky_way_galaxy(), &mut context(), &observer(), &keen);
+        let light = sun_illumination();
+        let passes = eye_cut_passes(
+            milky_way_galaxy(),
+            &mut context(),
+            &observer(),
+            &keen,
+            Some(light),
+        );
         assert!(passes.repeat.is_some(), "a repeat at V 11");
         assert!(
             passes.first.darkest.value() + largest_colour_offset().value() + 0.1 > MAX_CUT_V,

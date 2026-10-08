@@ -98,6 +98,18 @@
 //! which the eye-only request holds as expected light: accepted as the truer sky, since those
 //! stars take the place of their expected light in the eye's background, in expectation, not star
 //! by star (decided 2026-10-07, `decision-r06-t9c-glare.md`, addendum 2).
+//!
+//! **The diffuse galactic light** (R06.T9.g; decided 2026-10-07, `decision-r06-t9g-dgl.md`). Where
+//! the query states the request's illumination ([`SkyQuery::illumination`]), the observer's own sky
+//! of all starlight, each ray also holds the starlight its dust scatters towards the observer
+//! ([`super::dgl`]): five sums, in cd m⁻², from the ray's direction and its A<sub>V</sub> to the
+//! root cube's edge alone, the profile's last node, whose bits no radius taken as a node moves.
+//! [`march_rows`] keeps them beside the ray's slots, and [`sum_rows`] adds them to the texel's light
+//! and to the eye's, before the overflow. So the diffuse light is the same in every reply and
+//! under any cut, census or cone; the eye's light under a camera's cut keeps the eye-only
+//! request's bits; and, being no star's light, it leaves the boundary the listing and the band
+//! share where it is. [`BandTexel::diffuse_luminance`] gives a texel's part. A query with no
+//! illumination gives the band as before, bit for bit.
 
 use std::ops::Range;
 
@@ -122,6 +134,7 @@ use crate::units::{CandelasPerSquareMetre, LightYears, Magnitudes, Radians};
 use super::caps::{CAPPED_LAYERS, LayerCap};
 use super::census::{ConeRegion, SkyCensus, SkyContext, SkyQuery};
 use super::colour::{Reddened, Reddening, StarColour, lift_into_gamut, solar_colour};
+use super::dgl::Illumination;
 use super::eye::{REFERENCE_SP_RATIO, illuminance_of_magnitude};
 use super::luminosity::LuminosityTables;
 use crate::tables::star_colour::LUMINANCE_RGB;
@@ -448,6 +461,9 @@ pub struct BandTexel {
     luminance: CandelasPerSquareMetre,
     chroma: [f32; 2],
     sp_ratio: f64,
+    /// The diffuse galactic light's part of `luminance` (R06.T9.g): zero where the query states no
+    /// illumination. Not on the wire, whose luminance holds it.
+    diffuse: CandelasPerSquareMetre,
     eye: Option<EyeLimit>,
     /// The light fainter than the eye's cut, where a camera's deeper cut set the band's (R06.T9.j):
     /// the eye's background. `None` where the texel's own light is the eye's. Not on the wire.
@@ -517,9 +533,18 @@ impl BandTexel {
             luminance,
             chroma,
             sp_ratio,
+            diffuse: CandelasPerSquareMetre::ZERO,
             eye: None,
             eye_light: None,
         }
+    }
+
+    /// The texel with `diffuse`, the photopic part of its light that is the diffuse galactic light
+    /// (R06.T9.g), as [`diffuse_luminance`](Self::diffuse_luminance) gives it.
+    #[must_use]
+    const fn with_diffuse(mut self, diffuse: CandelasPerSquareMetre) -> Self {
+        self.diffuse = diffuse;
+        self
     }
 
     /// The texel with the light fainter than the eye's cut `cut` of the five sums `eye` ([`Sums`])
@@ -541,10 +566,22 @@ impl BandTexel {
         self
     }
 
-    /// The texel's photopic luminance: the light of every star the census did not list.
+    /// The texel's photopic luminance: the light of every star the census did not list, and the
+    /// diffuse galactic light where the query states the request's illumination (R06.T9.g).
     #[must_use]
     pub const fn luminance(&self) -> CandelasPerSquareMetre {
         self.luminance
+    }
+
+    /// The diffuse galactic light's part of the texel's [`luminance`](Self::luminance), cd m⁻².
+    ///
+    /// It is the starlight the dust along the texel's ray scatters towards the observer
+    /// (R06.T9.g; [`super::dgl`]), zero where the query states no illumination. It is the same in
+    /// every reply and under any cut, census or cone, and is no star's light: the rest of the
+    /// luminance is the band's starlight and its overflow, as before.
+    #[must_use]
+    pub const fn diffuse_luminance(&self) -> CandelasPerSquareMetre {
+        self.diffuse
     }
 
     /// The light's chroma, linear Rec. 709 red and green at unit luminance (blue follows from the
@@ -620,6 +657,7 @@ impl BandTexel {
             luminance: CandelasPerSquareMetre::new(luminance),
             chroma: [1.0, 1.0],
             sp_ratio,
+            diffuse: CandelasPerSquareMetre::ZERO,
             eye: None,
             eye_light: None,
         }
@@ -639,7 +677,7 @@ impl BandTexel {
 /// A texel's or a ray's five light sums, in order: the photopic light, the linear Rec. 709 red,
 /// green and blue light, and the scotopic light (the photopic light that ρ weights), each after
 /// the dust in front of it (R06.T9.e).
-type Sums = [f64; 5];
+pub(crate) type Sums = [f64; 5];
 
 /// The five sums ([`Sums`]) of light whose four undimmed sums are `sums` (the luminosity
 /// functions' order: the photopic light, then it times each chroma channel, then it times ρ),
@@ -814,8 +852,10 @@ const NOWHERE_LY: [f64; 1] = [0.0];
 /// query's, the same of the light fainter than the eye's cut, the eye's background (R06.T9.j).
 ///
 /// Its heap is the rays' slots, 40 bytes for each layer's radius and ray, twice that where it keeps
-/// the eye's light ([`heap_bytes`](Self::heap_bytes)): at 64² texels a face, with six layers' one
-/// radius each, some 5.9 MB for the band.
+/// the eye's light, and each ray's A<sub>V</sub> to the edge, 8 bytes, and diffuse sums, 40 bytes
+/// where the query states an illumination (R06.T9.g; [`heap_bytes`](Self::heap_bytes)): at 64²
+/// texels a face, with six layers' one radius each, some 5.9 MB for the band and 1.2 MB of the
+/// diffuse light.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BandMarch {
     spec: BandSpec,
@@ -833,6 +873,12 @@ pub struct BandMarch {
     /// layer, in L☉,V × `lux_per_v0` per ly², before K; then, where the march keeps the eye's
     /// light, the same slots of the light fainter than the eye's cut.
     sums: Vec<Sums>,
+    /// Each ray's A<sub>V</sub> to the root cube's edge, A<sub>∞</sub>, in the band's order: its
+    /// profile's last node, 0 for a ray that holds no light.
+    edge_a_v: Vec<Magnitudes>,
+    /// Each ray's five sums of the diffuse galactic light, cd m⁻², in the band's order, where the
+    /// march has an illumination (R06.T9.g); empty otherwise.
+    diffuse: Vec<Sums>,
 }
 
 impl BandMarch {
@@ -876,11 +922,48 @@ impl BandMarch {
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.sums.capacity() * size_of::<Sums>()
+            + self.edge_a_v.capacity() * size_of::<Magnitudes>()
+            + self.diffuse.capacity() * size_of::<Sums>()
             + self
                 .kept
                 .iter()
                 .map(|radii| radii.capacity() * size_of::<f64>())
                 .sum::<usize>()
+    }
+
+    /// Each ray's A<sub>V</sub> to the root cube's edge, A<sub>∞</sub>, in the band's order: its
+    /// extinction profile's last node, whose bits no other node moves (R06.T9.g).
+    #[must_use]
+    pub(crate) fn edge_a_v(&self) -> &[Magnitudes] {
+        &self.edge_a_v
+    }
+
+    /// Each ray's five sums of the diffuse galactic light, cd m⁻², in the band's order: empty
+    /// where the march had no illumination (R06.T9.g).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn diffuse(&self) -> &[Sums] {
+        &self.diffuse
+    }
+
+    /// Each ray's five sums of the band's light, cd m⁻², of a reply complete to `complete_to`, in
+    /// the band's order: its slots over the layers, as [`sum_rows`] takes them before the overflow
+    /// and the diffuse light. The illumination is the march complete nowhere (R06.T9.g).
+    ///
+    /// # Panics
+    ///
+    /// If the march does not keep a layer's radius of `complete_to`.
+    #[must_use]
+    pub(crate) fn ray_light(&self, complete_to: &CompleteTo) -> Vec<Sums> {
+        let slots = self.slots_of(complete_to);
+        let to_luminance = light_to_lux_ly2();
+        if self.sums.is_empty() {
+            return Vec::new();
+        }
+        self.sums
+            .chunks_exact(self.ray_len())
+            .map(|ray| summed_light(ray, &slots, to_luminance))
+            .collect()
     }
 
     /// The slots a ray holds of one light: the band's, and as many of the eye's where it keeps
@@ -920,6 +1003,17 @@ impl BandMarch {
     }
 }
 
+/// One ray's light of a reply, cd m⁻²: its slots `slots` of `ray` summed over the layers, in their
+/// order, then times K (`to_luminance`), as [`sum_rows`] takes each texel's before its overflow.
+#[must_use]
+fn summed_light(ray: &[Sums], slots: &[usize; BAND_LAYERS], to_luminance: f64) -> Sums {
+    let mut light = [0.0; 5];
+    for &slot in slots {
+        add_to(&mut light, ray[slot]);
+    }
+    light.map(|v| v * to_luminance)
+}
+
 /// The lights a march keeps for each ray: the band's, and the eye's where a camera's deeper cut
 /// set the query's (`eye_cut`).
 #[must_use]
@@ -939,6 +1033,9 @@ struct Rays {
     shares: [[f64; MAX_COMPONENTS]; BAND_LAYERS],
     nodes: Vec<LightYears>,
     a_v: Vec<Magnitudes>,
+    /// The last ray's A<sub>V</sub> to the root cube's edge: its profile's last node, or 0 where
+    /// the ray ends before its first node (R06.T9.g).
+    edge_a_v: Magnitudes,
     modifiers: Vec<GasModifier>,
     /// A ray's slots: the light fainter than the cut within each radius, from the first node.
     within: Vec<Sums>,
@@ -1070,6 +1167,7 @@ impl Rays {
             shares,
             nodes: Vec::new(),
             a_v: Vec::new(),
+            edge_a_v: Magnitudes::ZERO,
             modifiers: Vec::new(),
             within: Vec::new(),
             beyond: Vec::new(),
@@ -1211,8 +1309,13 @@ impl Rays {
     }
 
     /// Places the nodes of the ray from `observer` along `direction` to the root cube's edge, with
-    /// `node_radii` among them, and their extinction profile; `false` for a ray that ends before
-    /// its first node, which holds no light.
+    /// `node_radii` among them, and their extinction profile, keeping its last node as the ray's
+    /// A<sub>V</sub> to the edge; `false` for a ray that ends before its first node, which holds no
+    /// light and no dust.
+    ///
+    /// The last node's bits are the profile's to the edge alone: [`profile`] plans its steps on the
+    /// line to its last node and takes each cloud's column to it in closed form, so the radii taken
+    /// as nodes, which a reply, a cone or a census moves, never move it (R06.T9.g).
     fn trace(
         &mut self,
         galaxy: &Galaxy,
@@ -1225,6 +1328,7 @@ impl Rays {
         let origin = observer.position();
         let along = direction.components();
         let edge_ly = distance_to_edge_ly(origin.to_light_years_f64(), along);
+        self.edge_a_v = Magnitudes::ZERO;
         if edge_ly <= FIRST_NODE_LY {
             return false;
         }
@@ -1248,6 +1352,7 @@ impl Rays {
             &mut ctx.noise,
             &mut self.a_v,
         );
+        self.edge_a_v = self.a_v.last().copied().unwrap_or(Magnitudes::ZERO);
         true
     }
 
@@ -1381,6 +1486,10 @@ impl Rays {
 /// luminosity tables, the gas modifiers and the noise cache of the rays' profiles; its other fields
 /// are not read.
 ///
+/// Where the query states the request's illumination ([`SkyQuery::illumination`]), the march also
+/// keeps each ray's diffuse galactic light, from its direction and its A<sub>V</sub> to the edge
+/// alone (R06.T9.g; [`super::dgl`]): the same whatever the replies, the cut, the eye or the cone.
+///
 /// Where the query asks the eye at a cut shallower than its own ([`SkyQuery::eye_cut`], a camera's
 /// deeper cut setting the query's), the march also keeps, per layer and radius, the same sums of
 /// the light fainter than the eye's cut, the eye's background (R06.T9.j): a second set of slots,
@@ -1397,8 +1506,9 @@ impl Rays {
 /// # Panics
 ///
 /// If `replies` is empty, `rows` reaches past the face's last row, the query has a cone and
-/// `spec` is not its [`SkyQuery::band_spec`], whose texels make the cone's region, or the rays'
-/// slots number more than the address space holds.
+/// `spec` is not its [`SkyQuery::band_spec`], whose texels make the cone's region, the rays'
+/// slots number more than the address space holds, or the query's illumination was marched for
+/// another observer (which its builder refuses).
 ///
 /// # Examples
 ///
@@ -1473,14 +1583,16 @@ pub fn march_rows(
         face,
         rows,
         &solar_colour().reddening(),
+        query.illumination(),
     )
 }
 
 /// [`march_rows`] at `edges`, with each node's light reddened by the curves `dust`: the solar
-/// point's for the band, a grey dust's for the tests' unreddened march.
+/// point's for the band, a grey dust's for the tests' unreddened march; and each ray's diffuse
+/// galactic light from `illumination`, if any (R06.T9.g), which must be of the query's observer.
 #[expect(
     clippy::too_many_arguments,
-    reason = "march_rows' inputs, its radii resolved, and the dust's ratios"
+    reason = "march_rows' inputs, its radii resolved, the dust's ratios and the illumination"
 )]
 fn march_rows_through(
     galaxy: &Galaxy,
@@ -1491,6 +1603,7 @@ fn march_rows_through(
     face: CubeFace,
     rows: Range<u16>,
     dust: &Reddening,
+    illumination: Option<&Illumination>,
 ) -> BandMarch {
     let side = spec.face_texels();
     assert!(
@@ -1511,6 +1624,13 @@ fn march_rows_through(
             .is_ok()),
         "every radius a march keeps is a node of its rays: {edges:?}"
     );
+    assert!(
+        illumination.is_none_or(|light| light.observer() == query.observer()),
+        "an illumination marched for {:?} lights a band for {:?}: the diffuse light is each \
+         observer's own sky scattered",
+        illumination.map(Illumination::observer),
+        query.observer()
+    );
     // The eye's light is kept only where a camera's deeper cut set the query's: at the eye's own
     // cut the band's light is the eye's (R06.T9.j).
     let eye_cut = query
@@ -1525,6 +1645,13 @@ fn march_rows_through(
         .and_then(|texels| texels.checked_mul(ray_len))
         .expect("a march's slots number fewer than the address space holds");
     let mut sums = vec![[0.0; 5]; len];
+    let rays_count = rows.len() * usize::from(side);
+    let mut edge_a_v = Vec::with_capacity(if sums.is_empty() { 0 } else { rays_count });
+    let mut diffuse = Vec::with_capacity(if sums.is_empty() || illumination.is_none() {
+        0
+    } else {
+        rays_count
+    });
     if !sums.is_empty() {
         let mut rays = Rays::new(galaxy, dust, eye_cut);
         let texels = rows
@@ -1534,6 +1661,12 @@ fn march_rows_through(
             let direction = spec.texel_direction(face, row, column);
             let reach = Reach::of(region, face, row, column);
             rays.march(galaxy, ctx, query, direction, &edges, reach, spec, out);
+            edge_a_v.push(rays.edge_a_v);
+            // The diffuse light reads only the ray's direction and its dust to the edge, so it is
+            // the same whatever the cut, the replies, the cone or the census (R06.T9.g).
+            if let Some(light) = illumination {
+                diffuse.push(light.diffuse_toward(&direction, rays.edge_a_v));
+            }
         }
     }
     BandMarch {
@@ -1544,14 +1677,18 @@ fn march_rows_through(
         kept: edges.kept,
         eye_cut,
         sums,
+        edge_a_v,
+        diffuse,
     }
 }
 
 /// The texels of a reply complete to `complete_to`, from `march`, appended to `out` row by row,
 /// each row from its left (R06.T9.f; see the [module](self) documentation): each ray's sums at
 /// each layer's radius, over the layers, then `census`'s overflow, the stars it kept past `n_max`,
-/// as points in their texels, each reddened by its own colour (R06.T9.e). It reads no profile and
-/// no luminosity table.
+/// as points in their texels, each reddened by its own colour (R06.T9.e). Where the march holds the
+/// diffuse galactic light (R06.T9.g), each texel's and the eye's light take its ray's diffuse
+/// sums, before the overflow, and [`BandTexel::diffuse_luminance`] gives the part. It reads no
+/// profile and no luminosity table.
 ///
 /// `census` is the reply's census, of the march's query, and `complete_to` the radii to which it is
 /// complete. A march of any split of a face's rows, each summed, gives one march's texels over the
@@ -1588,20 +1725,28 @@ pub fn sum_rows(
     let width = usize::from(spec.face_texels());
     let to_luminance = light_to_lux_ly2();
     let one_light = march.slots();
-    let summed = |ray: &[Sums]| {
-        let mut light = [0.0; 5];
-        for &slot in &slots {
-            add_to(&mut light, ray[slot]);
-        }
-        light.map(|v| v * to_luminance)
-    };
-    // Each texel's light, and the eye's where the march keeps it.
-    let mut texels: Vec<(Sums, Option<Sums>)> = march
+    // Each texel's light, and the eye's where the march keeps it, each with the ray's diffuse
+    // galactic light where the march has it (R06.T9.g): the same sums in both, before the
+    // overflow, so the eye's light keeps the eye-only request's bits.
+    let mut texels: Vec<(Sums, Option<Sums>, CandelasPerSquareMetre)> = march
         .sums
         .chunks_exact(march.ray_len())
-        .map(|ray| {
+        .enumerate()
+        .map(|(i, ray)| {
             let (band, eye) = ray.split_at(one_light);
-            (summed(band), march.eye_cut.map(|_| summed(eye)))
+            let mut light = summed_light(band, &slots, to_luminance);
+            let mut eye = march
+                .eye_cut
+                .map(|_| summed_light(eye, &slots, to_luminance));
+            let mut diffuse = CandelasPerSquareMetre::ZERO;
+            if let Some(scattered) = march.diffuse.get(i) {
+                add_to(&mut light, *scattered);
+                if let Some(eye) = &mut eye {
+                    add_to(eye, *scattered);
+                }
+                diffuse = CandelasPerSquareMetre::new(scattered[0]);
+            }
+            (light, eye, diffuse)
         })
         .collect();
     // The overflow, as points: each star's five sums over its texel's solid angle, reddened by its
@@ -1618,7 +1763,7 @@ pub fn sum_rows(
         let omega = spec.texel_solid_angle_sr(row, column);
         let at = usize::from(row - rows.start) * width + usize::from(column);
         let light = point_lux(star.colour(), star.v(), star.a_v());
-        let (band, eye) = &mut texels[at];
+        let (band, eye, _) = &mut texels[at];
         for (sum, lux) in band.iter_mut().zip(light) {
             *sum += lux / omega;
         }
@@ -1631,11 +1776,11 @@ pub fn sum_rows(
             }
         }
     }
-    out.extend(
-        texels
-            .into_iter()
-            .map(|(band, eye)| BandTexel::of_sums(band).with_eye_light(eye.zip(march.eye_cut))),
-    );
+    out.extend(texels.into_iter().map(|(band, eye, diffuse)| {
+        BandTexel::of_sums(band)
+            .with_diffuse(diffuse)
+            .with_eye_light(eye.zip(march.eye_cut))
+    }));
 }
 
 /// The band's texels of rows `rows` (from the top) of `face`, appended to `out` row by row, each
@@ -1650,10 +1795,11 @@ pub fn sum_rows(
 /// is taken below M<sub>V</sub> = cut − DM − v☉ A<sub>V</sub>, the solar point's V extinction
 /// (R06.T8.k). The light is reddened by the dust in
 /// front of it, each node's by the solar point's ratios and each overflow star's by its own
-/// (R06.T9.e). Where the query asks the eye at a cut shallower than its own, each texel also holds
-/// the light fainter than the eye's cut, as the eye's background ([`march_rows`]; R06.T9.j). `ctx`
-/// supplies the luminosity tables, the gas modifiers and the noise cache of the rays' profiles; its
-/// other fields are not read.
+/// (R06.T9.e). Where the query states an illumination, each texel holds the diffuse galactic light
+/// too (R06.T9.g). Where the query asks the eye at a cut shallower than its own, each texel also
+/// holds the light fainter than the eye's cut, as the eye's background ([`march_rows`]; R06.T9.j).
+/// `ctx` supplies the luminosity tables, the gas modifiers and the noise cache of the rays'
+/// profiles; its other fields are not read.
 ///
 /// Each texel is a function of its own ray and of the overflow, so the texels of any split of a
 /// face's rows, appended in order, are one call's over the face, bit for bit; the noise cache
@@ -1738,15 +1884,54 @@ pub fn band_rows(
         face,
         rows,
         &solar_colour().reddening(),
+        query.illumination(),
+        out,
+    );
+}
+
+/// [`band_rows`] with the diffuse galactic light of `illumination` (R06.T9.g), whatever the query
+/// states: the eye cut's pre-pass, which holds the request's illumination by reference
+/// ([`eye_cut`](super::limits::eye_cut)).
+///
+/// # Panics
+///
+/// As [`band_rows`], and if `illumination` was marched for another observer than the query's.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "band_rows' inputs and the request's illumination"
+)]
+pub(crate) fn band_rows_lit(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    query: &SkyQuery,
+    census: &SkyCensus,
+    complete_to: &CompleteTo,
+    spec: BandSpec,
+    face: CubeFace,
+    rows: Range<u16>,
+    illumination: Option<&Illumination>,
+    out: &mut Vec<BandTexel>,
+) {
+    band_rows_through(
+        galaxy,
+        ctx,
+        query,
+        census,
+        complete_to,
+        spec,
+        face,
+        rows,
+        &solar_colour().reddening(),
+        illumination,
         out,
     );
 }
 
 /// [`band_rows`], with each node's light reddened by the curves `dust`: the solar point's for the
-/// band, a grey dust's for the tests' unreddened march.
+/// band, a grey dust's for the tests' unreddened march; and the diffuse light of `illumination`.
 #[expect(
     clippy::too_many_arguments,
-    reason = "band_rows' inputs and the dust's ratios"
+    reason = "band_rows' inputs, the dust's ratios and the illumination"
 )]
 fn band_rows_through(
     galaxy: &Galaxy,
@@ -1758,6 +1943,7 @@ fn band_rows_through(
     face: CubeFace,
     rows: Range<u16>,
     dust: &Reddening,
+    illumination: Option<&Illumination>,
     out: &mut Vec<BandTexel>,
 ) {
     let march = march_rows_through(
@@ -1769,6 +1955,7 @@ fn band_rows_through(
         face,
         rows,
         dust,
+        illumination,
     );
     sum_rows(&march, census, complete_to, out);
 }
@@ -1792,7 +1979,9 @@ mod tests {
         merge_census,
     };
     use crate::sky::eye::surface_brightness;
-    use crate::sky::testing::{milky_way_envelope, milky_way_offsets, milky_way_tables};
+    use crate::sky::testing::{
+        milky_way_envelope, milky_way_offsets, milky_way_tables, sun_illumination,
+    };
     use crate::time::UniverseTime;
     use crate::units::consts::RADIANS_PER_DEGREE;
     use crate::units::{Degrees, HydrogenPerCm3, MagnitudesPerArcsec2};
@@ -1884,6 +2073,7 @@ mod tests {
                 face,
                 0..spec.face_texels(),
                 dust,
+                query.illumination(),
                 &mut out,
             );
         }
@@ -2815,7 +3005,17 @@ mod tests {
                 };
                 let mut fresh = Vec::new();
                 sum_rows(
-                    &march_rows_through(galaxy, &mut ctx, &query, alone, spec, face, 0..8, &dust),
+                    &march_rows_through(
+                        galaxy,
+                        &mut ctx,
+                        &query,
+                        alone,
+                        spec,
+                        face,
+                        0..8,
+                        &dust,
+                        None,
+                    ),
                     &census,
                     reply,
                     &mut fresh,
@@ -4043,6 +4243,7 @@ mod tests {
                 face,
                 0..8,
                 dust,
+                None,
                 &mut out,
             );
             out
@@ -4137,5 +4338,314 @@ mod tests {
     #[should_panic(expected = "is not on a face of 8² texels")]
     fn a_texel_off_the_face_is_refused() {
         let _ = spec(8).texel_solid_angle_sr(8, 0);
+    }
+
+    /// A near-Sun query to `cut` lit by the Sun's 16² illumination (R06.T9.g), with the eye at
+    /// `eye_cut` if given, and `cone` with the band it is marched at if given.
+    fn lit_query(cut: f64, eye_cut: Option<f64>, cone: Option<(Cone, BandSpec)>) -> SkyQuery {
+        let mut builder = SkyQuery::builder(observer_at(SUN), Magnitudes::new(cut))
+            .illumination(std::sync::Arc::clone(sun_illumination()));
+        if let Some(eye_cut) = eye_cut {
+            builder = builder
+                .eye(crate::sky::eye::EyeObserver::default())
+                .eye_cut(Magnitudes::new(eye_cut));
+        }
+        if let Some((cone, spec)) = cone {
+            builder = builder.cone(cone).band_spec(spec);
+        }
+        builder.build().expect("a valid query")
+    }
+
+    /// Each ray's diffuse sums and A<sub>∞</sub> as bits, over every face of the 8² band, for
+    /// `query` marched keeping `replies`, each face's rows in the parts `split`, on `ctx`.
+    fn diffuse_bits(
+        ctx: &mut SkyContext<'_>,
+        query: &SkyQuery,
+        replies: &[CompleteTo],
+        split: &[Range<u16>],
+    ) -> Vec<[u64; 6]> {
+        let mut out = Vec::new();
+        for face in CubeFace::ALL {
+            for rows in split {
+                let march = march_rows(
+                    milky_way_galaxy(),
+                    ctx,
+                    query,
+                    replies.iter().copied(),
+                    &spec(8),
+                    face,
+                    rows.clone(),
+                );
+                assert_eq!(march.diffuse().len(), march.edge_a_v().len());
+                out.extend(
+                    march
+                        .diffuse()
+                        .iter()
+                        .zip(march.edge_a_v())
+                        .map(|(sums, edge)| {
+                            let [photopic, red, green, blue, scotopic] = sums.map(bits);
+                            [photopic, red, green, blue, scotopic, bits(edge.value())]
+                        }),
+                );
+            }
+        }
+        out
+    }
+
+    /// One case of the diffuse light's independence: what it varies, its query, its replies and
+    /// its split of each face's rows.
+    type DiffuseCase = (&'static str, SkyQuery, Vec<CompleteTo>, Vec<Range<u16>>);
+
+    /// Every face's texels' diffuse luminance as bits, from `query`'s march near the Sun at 8²
+    /// complete within 50 ly, summed with no census and with `census`, in that order.
+    fn texel_diffuse_bits(query: &SkyQuery, census: &SkyCensus) -> [Vec<u64>; 2] {
+        let within = complete_within(50.0);
+        let mut out: [Vec<u64>; 2] = Default::default();
+        for face in CubeFace::ALL {
+            let march = march_rows(
+                milky_way_galaxy(),
+                &mut context(),
+                query,
+                [within],
+                &spec(8),
+                face,
+                0..8,
+            );
+            for (bits_of, census) in out.iter_mut().zip([&SkyCensus::empty(), census]) {
+                let mut texels = Vec::new();
+                sum_rows(&march, census, &within, &mut texels);
+                bits_of.extend(texels.iter().map(|t| bits(t.diffuse_luminance().value())));
+            }
+        }
+        out
+    }
+
+    /// The cases of the diffuse light's independence (R06.T9.g, test 7) beside its reference, lit
+    /// and complete `everywhere`, its rows `whole`.
+    fn diffuse_cases(everywhere: &[CompleteTo], whole: &[Range<u16>]) -> [DiffuseCase; 7] {
+        let (everywhere, whole) = (everywhere.to_vec(), whole.to_vec());
+        let replies = replies_near_the_sun();
+        let cone = Cone::new(UnitVector::X, Degrees::new(30.0)).expect("a cone");
+        [
+            (
+                "cut 6.5",
+                lit_query(6.5, None, None),
+                everywhere.clone(),
+                whole.clone(),
+            ),
+            (
+                "cut 10.06 with the eye at 8.15",
+                lit_query(10.06, Some(8.15), None),
+                everywhere.clone(),
+                whole.clone(),
+            ),
+            (
+                "the eye at 8.15, complete nowhere",
+                lit_query(8.15, Some(8.15), None),
+                vec![CompleteTo::nowhere()],
+                whole.clone(),
+            ),
+            (
+                "to the caps",
+                lit_query(8.15, None, None),
+                vec![replies[4]],
+                whole.clone(),
+            ),
+            (
+                "T9.f's six replies",
+                lit_query(8.15, None, None),
+                replies.to_vec(),
+                whole.clone(),
+            ),
+            (
+                "a 30° cone",
+                lit_query(8.15, None, Some((cone, spec(8)))),
+                replies.to_vec(),
+                whole.clone(),
+            ),
+            (
+                "the rows split",
+                lit_query(8.15, None, None),
+                vec![complete_within(100.0)],
+                vec![0..3, 3..5, 5..8],
+            ),
+        ]
+    }
+
+    /// The diffuse light is the same, bit for bit, whatever the cut (6.5, 8.15, and 10.06 with the
+    /// eye at 8.15), the replies (complete nowhere, everywhere, to the caps and T9.f's six), the
+    /// census (none, and one within 50 ly with an overflow), a 30° cone, the split of the rows, a
+    /// warm or a cold noise cache and the order of the illumination's jobs: at 8², near the Sun,
+    /// lit by the 16² illumination (R06.T9.g, test 7). It reads only each ray's direction and its
+    /// dust to the edge, whose bits no reply's, cone's or census's node moves.
+    #[test]
+    fn the_diffuse_light_is_the_same_whatever_the_cut_the_census_the_replies_and_the_cone() {
+        let whole: Vec<Range<u16>> = std::iter::once(0..8).collect();
+        let everywhere = vec![CompleteTo::everywhere()];
+        let cold = |query: &SkyQuery, replies: &[CompleteTo], split: &[Range<u16>]| {
+            diffuse_bits(&mut context(), query, replies, split)
+        };
+        let reference = cold(&lit_query(8.15, None, None), &everywhere, &whole);
+        let lit = |sums: &[u64; 6]| sums[0] != bits(0.0);
+        assert!(
+            reference.iter().all(lit),
+            "every ray of the band holds diffuse light near the Sun"
+        );
+        let cases = diffuse_cases(&everywhere, &whole);
+        let mut warm = context();
+        for (what, query, replies, split) in &cases {
+            assert_eq!(&cold(query, replies, split), &reference, "{what}");
+            assert_eq!(
+                &diffuse_bits(&mut warm, query, replies, split),
+                &reference,
+                "{what}, on a warm noise cache"
+            );
+        }
+        // The census moves no diffuse light: each texel's part, with no census and with one
+        // within 50 ly whose overflow adds points, is its ray's photopic diffuse sum.
+        let query = lit_query(8.15, None, None);
+        let stars: Vec<SkyStar> = listed_with_caps_forced(&query, 50.0)
+            .into_iter()
+            .filter(|s| s.distance().value() <= 50.0)
+            .collect();
+        let census = merge_census([(stars, CensusTallies::default())], n(20));
+        assert!(
+            !census.overflow().is_empty(),
+            "the census overflows into the band"
+        );
+        let rays: Vec<u64> = reference.iter().map(|sums| sums[0]).collect();
+        let [empty, listed] = texel_diffuse_bits(&query, &census);
+        assert_eq!(empty, rays, "the texels' diffuse light with no census");
+        assert_eq!(
+            listed, rays,
+            "the texels' diffuse light with a census and its overflow"
+        );
+        // The illumination's jobs in another order and another split: the same illumination, and
+        // so the same diffuse light.
+        let observer = observer_at(SUN);
+        let mut ctx = context();
+        let mut jobs = Vec::new();
+        for face in CubeFace::ALL.into_iter().rev() {
+            for rows in [9..16, 0..4, 4..9] {
+                jobs.push(Illumination::march_rows(
+                    milky_way_galaxy(),
+                    &mut ctx,
+                    &observer,
+                    face,
+                    rows,
+                ));
+            }
+        }
+        let assembled = std::sync::Arc::new(Illumination::assemble(&observer, jobs));
+        assert_eq!(
+            assembled.bits(),
+            sun_illumination().bits(),
+            "the illumination is the same in any order"
+        );
+        let again = SkyQuery::builder(observer, Magnitudes::new(8.15))
+            .illumination(assembled)
+            .build()
+            .expect("a valid query");
+        assert_eq!(cold(&again, &everywhere, &whole), reference);
+    }
+
+    /// A texel is its starlight and its diffuse light: its luminance is the unlit march's plus its
+    /// [`BandTexel::diffuse_luminance`], to 10⁻¹⁵ relative, its chroma and ρ are those of the
+    /// summed sums, the eye's light under a camera's cut takes the same diffuse sums as the eye-only
+    /// request's, bit for bit, and a query with no illumination gives texels with none, of the
+    /// starlight's sums alone (R06.T9.g, test 8). At 8², near the Sun.
+    #[test]
+    fn the_texel_is_its_starlight_and_its_diffuse_light() {
+        let within = complete_within(100.0);
+        let unlit = query_near_the_sun(8.15, Eye::NotAsked);
+        let lit = lit_query(8.15, None, None);
+        let stars: Vec<SkyStar> = listed_with_caps_forced(&unlit, 50.0)
+            .into_iter()
+            .filter(|s| s.distance().value() <= 50.0)
+            .collect();
+        let census = merge_census([(stars, CensusTallies::default())], n(20));
+        let (mut worst, mut texels) = (0.0_f64, 0_usize);
+        for face in CubeFace::ALL {
+            let march_of = |query: &SkyQuery| {
+                march_rows(
+                    milky_way_galaxy(),
+                    &mut context(),
+                    query,
+                    [within],
+                    &spec(8),
+                    face,
+                    0..8,
+                )
+            };
+            let (dark, light) = (march_of(&unlit), march_of(&lit));
+            assert!(
+                dark.diffuse().is_empty(),
+                "no illumination, no diffuse light"
+            );
+            assert_eq!(light.diffuse().len(), 64);
+            let sum = |march: &BandMarch, census: &SkyCensus| {
+                let mut out = Vec::new();
+                sum_rows(march, census, &within, &mut out);
+                out
+            };
+            for (starlight, both) in sum(&dark, &census).iter().zip(sum(&light, &census)) {
+                let expected = starlight.luminance().value() + both.diffuse_luminance().value();
+                worst = worst.max((both.luminance().value() / expected - 1.0).abs());
+                assert_eq!(bits(starlight.diffuse_luminance().value()), bits(0.0));
+                texels += 1;
+            }
+            // With no census, each texel is the texel of its summed sums, bit for bit.
+            let rays = light.ray_light(&within);
+            for (i, texel) in sum(&light, &SkyCensus::empty()).iter().enumerate() {
+                let mut sums = rays[i];
+                add_to(&mut sums, light.diffuse()[i]);
+                let expected = BandTexel::of_sums(sums)
+                    .with_diffuse(CandelasPerSquareMetre::new(light.diffuse()[i][0]));
+                assert_eq!(
+                    texel_bits(&[*texel]),
+                    texel_bits(&[expected]),
+                    "{face:?} {i}"
+                );
+                assert_eq!(
+                    bits(texel.diffuse_luminance().value()),
+                    bits(light.diffuse()[i][0])
+                );
+            }
+            for (i, texel) in sum(&dark, &SkyCensus::empty()).iter().enumerate() {
+                assert_eq!(
+                    texel_bits(&[*texel]),
+                    texel_bits(&[BandTexel::of_sums(dark.ray_light(&within)[i])]),
+                    "{face:?} {i}: no illumination, the starlight alone"
+                );
+            }
+            // The eye's light under a camera's cut, against the eye-only request's.
+            let camera = march_of(&lit_query(10.06, Some(8.15), None));
+            let eye_only = march_of(&lit_query(8.15, Some(8.15), None));
+            assert_eq!(
+                camera
+                    .diffuse()
+                    .iter()
+                    .map(|d| d.map(bits))
+                    .collect::<Vec<_>>(),
+                eye_only
+                    .diffuse()
+                    .iter()
+                    .map(|d| d.map(bits))
+                    .collect::<Vec<_>>(),
+            );
+            for (under, alone) in sum(&camera, &SkyCensus::empty())
+                .iter()
+                .zip(sum(&eye_only, &SkyCensus::empty()))
+            {
+                let (light, rho) = under.eye_background();
+                assert_eq!(
+                    [bits(light.value()), bits(rho)],
+                    [bits(alone.luminance().value()), bits(alone.sp_ratio())],
+                    "{face:?}: the eye's light under a camera's cut"
+                );
+            }
+        }
+        eprintln!("{texels} texels: each its starlight and its diffuse light within {worst:.2e}");
+        assert!(worst <= 1e-15, "{worst}");
     }
 }

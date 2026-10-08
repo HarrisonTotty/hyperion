@@ -22,6 +22,8 @@
 //!   per-cell cache.
 //! - [`band`]: the light of the stars the census did not list, along rays from the observer: the
 //!   unresolved band.
+//! - [`dgl`]: the diffuse galactic light, the starlight the band's dust scatters into each of its
+//!   rays, from the observer's own sky (its illumination).
 //! - [`limits`]: the naked eye's limit in every direction of the band, against its light and the
 //!   listed stars' glare: the limit map.
 //!
@@ -34,6 +36,7 @@ pub mod binary_light;
 pub mod caps;
 pub mod census;
 pub mod colour;
+pub mod dgl;
 pub mod disc;
 pub mod envelope;
 pub mod eye;

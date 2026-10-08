@@ -14,7 +14,7 @@
 sky-tables = { max-threads = 6 }
 
 [[profile.default.overrides]]
-filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits)/) | binary(/^sky_/))"
+filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits|dgl)/) | binary(/^sky_/))"
 test-group = "sky-tables"
 
 # The sky census's identity tests run the census and its oracle on eight threads of their own
@@ -44,7 +44,7 @@ filter = "package(hyperion-sim) & test(/^stellar::multiplicity::bound::tests::th
 threads-required = 4
 
 [[profile.slow.overrides]]
-filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits)/) | binary(/^sky_/))"
+filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits|dgl)/) | binary(/^sky_/))"
 test-group = "sky-tables"
 
 [[profile.slow.overrides]]

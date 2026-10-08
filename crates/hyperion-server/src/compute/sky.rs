@@ -340,8 +340,10 @@ pub(crate) async fn eye_cut(
     token: &CancelToken,
 ) -> Result<Magnitudes, ComputeError> {
     let (galaxy, tables) = (Arc::clone(galaxy), Arc::clone(tables));
+    // No illumination yet: R06.T11.d states the request's (decision-r06-t9g-dgl.md §3.4), so
+    // until then the eye's cut is reckoned against the starlight alone, as before R06.T9.g.
     bulk(pool, token, move |_: &CancelToken| {
-        limits::eye_cut(&galaxy, &mut tables.march_context(), &observer, &eye)
+        limits::eye_cut(&galaxy, &mut tables.march_context(), &observer, &eye, None)
     })
     .await
 }

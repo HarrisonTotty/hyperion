@@ -4,6 +4,7 @@
 use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use crate::coords::{GalacticDisplacement, UnitVector};
 use crate::galaxy::Galaxy;
@@ -23,6 +24,7 @@ use crate::units::{Degrees, LightYears, Magnitudes, Radians};
 
 use super::super::band::{BandSpec, CubeFace};
 use super::super::caps::{CAPPED_LAYERS, LayerCap, layer_caps};
+use super::super::dgl::Illumination;
 use super::super::envelope::BrightnessEnvelope;
 use super::super::eye::{EyeObserver, MAX_CUT_V};
 use super::super::luminosity::LuminosityTables;
@@ -54,6 +56,9 @@ pub enum BuildSkyQueryError {
     /// The eye is asked with a cone: the naked eye has no field stop, and its veil reaches 90°
     /// (R06.T8.l; decided 2026-10-07, `decision-r06-t8k-cone.md`, item 2).
     ConeWithEye,
+    /// The illumination was marched for another observer, or at another time: the diffuse light
+    /// is the observer's own sky scattered (R06.T9.g).
+    Illumination,
 }
 
 impl fmt::Display for BuildSkyQueryError {
@@ -67,6 +72,7 @@ impl fmt::Display for BuildSkyQueryError {
                 "the eye's cut is asked without the eye, or is not finite or deeper than the cut"
             }
             Self::ConeWithEye => "the naked eye cannot ask a cone: it has no field stop",
+            Self::Illumination => "the illumination was marched for another observer or time",
         })
     }
 }
@@ -323,8 +329,9 @@ impl ConeRegion {
 }
 
 /// What a sky is asked for: an observer, a cut, the eye and its own cut if asked, the count
-/// budget, an optional cone with the band whose texels make its region, and the observer's own
-/// system to leave out (Design notes 5, 10 and 11). Built through [`SkyQuery::builder`].
+/// budget, an optional cone with the band whose texels make its region, the observer's own
+/// system to leave out, and the request's illumination, whose scattered light the band holds
+/// (Design notes 5, 10, 11 and 15; R06.T9.g). Built through [`SkyQuery::builder`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct SkyQuery {
     observer: Observer,
@@ -341,6 +348,8 @@ pub struct SkyQuery {
     region: Option<ConeRegion>,
     exclude: Option<SystemId>,
     forced_caps: Option<Vec<LayerCap>>,
+    /// The request's illumination, of the query's observer once built (R06.T9.g).
+    illumination: Option<Arc<Illumination>>,
 }
 
 /// Builds a [`SkyQuery`].
@@ -393,6 +402,7 @@ impl SkyQuery {
                 region: None,
                 exclude: None,
                 forced_caps: None,
+                illumination: None,
             },
         }
     }
@@ -477,6 +487,18 @@ impl SkyQuery {
     #[must_use]
     pub fn forced_caps(&self) -> Option<&[LayerCap]> {
         self.forced_caps.as_deref()
+    }
+
+    /// The request's illumination, if stated (R06.T9.g; decided 2026-10-07,
+    /// `decision-r06-t9g-dgl.md`).
+    ///
+    /// It is the observer's own sky of all starlight, whose light the band's dust scatters into
+    /// each of its rays ([`super::super::dgl`]). The band then holds that diffuse galactic light in
+    /// every texel, the same in every reply and under any cut, census or cone; without one it holds
+    /// the starlight alone, as before. The census does not read it.
+    #[must_use]
+    pub fn illumination(&self) -> Option<&Illumination> {
+        self.illumination.as_deref()
     }
 
     /// The same query with every layer's cap forced to `radius`: the census the brute force is
@@ -618,6 +640,17 @@ impl SkyQueryBuilder {
         self
     }
 
+    /// States the request's illumination, so that the band holds the diffuse galactic light
+    /// (R06.T9.g; [`SkyQuery::illumination`]).
+    ///
+    /// It is marched once a request for its observer and time ([`Illumination::march`]) and shared
+    /// by every query of the request. One marched for another observer or time is refused.
+    #[must_use]
+    pub fn illumination(mut self, illumination: Arc<Illumination>) -> Self {
+        self.query.illumination = Some(illumination);
+        self
+    }
+
     /// The query.
     ///
     /// # Errors
@@ -625,8 +658,9 @@ impl SkyQueryBuilder {
     /// [`BuildSkyQueryError::Cut`] unless the cut is finite and at most [`MAX_CUT_V`],
     /// [`BuildSkyQueryError::NMax`] if `n_max` is above [`MAX_N_MAX`],
     /// [`BuildSkyQueryError::EyeCut`] if the eye's cut is asked without the eye, or is not finite
-    /// or is deeper than the cut, and [`BuildSkyQueryError::ConeWithEye`] if the eye is asked with
-    /// a cone.
+    /// or is deeper than the cut, [`BuildSkyQueryError::ConeWithEye`] if the eye is asked with a
+    /// cone, and [`BuildSkyQueryError::Illumination`] if the illumination was marched for another
+    /// observer or at another time.
     pub fn build(mut self) -> Result<SkyQuery, BuildSkyQueryError> {
         let cut = self.query.cut.value();
         if !(cut.is_finite() && cut <= MAX_CUT_V) {
@@ -645,6 +679,14 @@ impl SkyQueryBuilder {
         };
         if self.query.eye.is_some() && self.query.region.is_some() {
             return Err(BuildSkyQueryError::ConeWithEye);
+        }
+        if self
+            .query
+            .illumination
+            .as_ref()
+            .is_some_and(|light| light.observer() != &self.query.observer)
+        {
+            return Err(BuildSkyQueryError::Illumination);
         }
         Ok(self.query)
     }
@@ -1005,6 +1047,7 @@ mod tests {
             BuildSkyQueryError::ForcedCap,
             BuildSkyQueryError::EyeCut,
             BuildSkyQueryError::ConeWithEye,
+            BuildSkyQueryError::Illumination,
         ] {
             let text = error.to_string();
             let field = match error {
@@ -1014,6 +1057,7 @@ mod tests {
                 BuildSkyQueryError::ForcedCap => "forced cap",
                 BuildSkyQueryError::EyeCut => "eye's cut",
                 BuildSkyQueryError::ConeWithEye => "cone",
+                BuildSkyQueryError::Illumination => "illumination",
             };
             assert!(text.contains(field), "{text}");
         }

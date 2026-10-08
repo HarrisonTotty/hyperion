@@ -1,11 +1,17 @@
 //! The Milky Way fixture's sky tables, built once for every test of the crate that reads them: a
 //! full build of the luminosity tables takes a minute or more.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+use crate::coords::GalacticPosition;
 use crate::galaxy::features::centre::testing::milky_way_galaxy;
+use crate::galaxy::gas::modifiers::NoModifiers;
+use crate::galaxy::gas::noise::NoiseCache;
+use crate::observe::Observer;
+use crate::time::UniverseTime;
 
-use super::census::CellOffsets;
+use super::census::{CellOffsets, NoSkyCellCache, SkyContext};
+use super::dgl::Illumination;
 use super::envelope::BrightnessEnvelope;
 use super::luminosity::LuminosityTables;
 use super::phase::PhaseEnvelope;
@@ -58,4 +64,39 @@ pub(crate) fn uniforms(seed: u64) -> impl Iterator<Item = f64> {
 pub(crate) fn milky_way_dark_tables() -> &'static LuminosityTables {
     static TABLES: OnceLock<LuminosityTables> = OnceLock::new();
     TABLES.get_or_init(|| LuminosityTables::dark(milky_way_galaxy()))
+}
+
+/// The Sun's place in the fixture, ly, as the sim's sky tests stand.
+pub(crate) const SUN_LY: [f64; 3] = [0.0, 26_000.0, 68.0];
+
+/// The observer at the Sun's place in the fixture, at the epoch.
+pub(crate) fn sun_observer() -> Observer {
+    let at = GalacticPosition::from_light_years(SUN_LY).expect("the Sun is in the cube");
+    Observer::new(at, UniverseTime::EPOCH).expect("the epoch is on the clock")
+}
+
+/// A job's context on the fixture's tables, with a fresh noise cache.
+pub(crate) fn milky_way_context() -> SkyContext<'static> {
+    SkyContext {
+        tables: milky_way_tables(),
+        envelope: milky_way_envelope(),
+        offsets: milky_way_offsets(),
+        noise: NoiseCache::with_capacity(1 << 16),
+        cells: &NoSkyCellCache,
+        sources: &[],
+        modifiers: &NoModifiers,
+    }
+}
+
+/// The illumination of the fixture's sky at the Sun's place at the epoch (R06.T9.g): built once
+/// for every test that lights a band near the Sun.
+pub(crate) fn sun_illumination() -> &'static Arc<Illumination> {
+    static ILLUMINATION: OnceLock<Arc<Illumination>> = OnceLock::new();
+    ILLUMINATION.get_or_init(|| {
+        Arc::new(Illumination::march(
+            milky_way_galaxy(),
+            &mut milky_way_context(),
+            &sun_observer(),
+        ))
+    })
 }

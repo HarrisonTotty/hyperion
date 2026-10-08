@@ -553,6 +553,13 @@ impl Reddening {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn photopic_ratio_at_zero(&self) -> f64 {
+        self.photopic_moment()
+    }
+
+    /// The photopic light's moment, `A_P ÷ A_V` as A<sub>V</sub> → 0: the parts' moments weighted
+    /// by their luminance.
+    #[must_use]
+    fn photopic_moment(&self) -> f64 {
         let p = self.parts;
         let [yr, yg, yb] = LUMINANCE_RGB;
         let weights = [yr, -yr, yg, -yg, yb, -yb];
@@ -563,6 +570,29 @@ impl Reddening {
             )
         });
         moment / luminance
+    }
+
+    /// The moments of the band's five sums, `A_X ÷ A_V` as A<sub>V</sub> → 0, in the band's order
+    /// (the photopic light, the linear Rec. 709 red, green and blue, and the scotopic light): the
+    /// photopic as the parts' luminance weighs them, each channel its two parts' (c⁺k⁺ − c⁻k⁻) ÷
+    /// (c⁺ − c⁻), with c± the parts at unit luminance and k± their moments, and the scotopic
+    /// band's own. Each is the slope of its transmission, −0.4 ln 10 times it, at A<sub>V</sub> 0
+    /// ([`through`](Self::through)), and so the rate at which thin dust takes that light: the
+    /// diffuse galactic light reads its albedo and phase function at each (R06.T9.g).
+    #[must_use]
+    pub(crate) fn sum_moments(&self) -> [f64; 5] {
+        let p = self.parts;
+        let k = |b: usize| self.secants[b][0];
+        let channel = |c: usize| {
+            (p[2 * c] * k(2 * c) - p[2 * c + 1] * k(2 * c + 1)) / (p[2 * c] - p[2 * c + 1])
+        };
+        [
+            self.photopic_moment(),
+            channel(0),
+            channel(1),
+            channel(2),
+            k(band::SCOTOPIC),
+        ]
     }
 
     /// The parts' values at unit luminance, for the tests.
@@ -576,8 +606,16 @@ impl Reddening {
     /// the band dimmed its light before R06.T9.e, for the tests' unreddened march.
     #[cfg(test)]
     #[must_use]
-    pub(crate) const fn with_grey_dust(mut self) -> Self {
-        self.secants = [[1.0; REDDENING_NODE_COUNT + 1]; band::COUNT];
+    pub(crate) const fn with_grey_dust(self) -> Self {
+        self.with_grey_dust_at(1.0)
+    }
+
+    /// These curves behind grey dust that takes `ratio` × A<sub>V</sub> of every band, as one
+    /// band's dust is: for the tests of the diffuse light at another wavelength than V (R06.T9.g).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn with_grey_dust_at(mut self, ratio: f64) -> Self {
+        self.secants = [[ratio; REDDENING_NODE_COUNT + 1]; band::COUNT];
         self
     }
 }

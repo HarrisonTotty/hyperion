@@ -1,7 +1,8 @@
 //! Benchmarks of the sky (rendering plan R06): the luminosity tables' build, the census near the
-//! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), the band
-//! near the Sun, marched and summed (R06.T9.b, T9.f) and under a camera's cut (R06.T9.j), and the
-//! limit map (R06.T9.i).
+//! Sun with a cold and a warm cell cache, and the census in the nuclear disc (R06.T8), the
+//! illumination of the diffuse galactic light (R06.T9.g), the band near the Sun, marched with and
+//! without that light and summed (R06.T9.b, T9.f, T9.g) and under a camera's cut (R06.T9.j), and
+//! the limit map (R06.T9.i).
 //!
 //! They run on `GalaxyParams::milky_way_like()` with a fixed seed. A miss is a finding to record,
 //! not a CI failure: CI compiles these and never runs them. Every figure below is provisional
@@ -37,7 +38,9 @@
 //! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17) | 1.8 × 10⁶ CPU-s, sampled |
 //! | `sky/census_near_sun/warm` | ≤ 25% of cold (T17) | not yet run |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
-//! | `sky/band_near_sun/march` | within the first sky's (T17) | 22.7 CPU-s, provisional |
+//! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 0.947 CPU-s, provisional |
+//! | `sky/band_near_sun/march` | within the first sky's (T17) | 16.11 CPU-s with the diffuse light, provisional |
+//! | `sky/band_near_sun/march_no_dgl` | none (the lit march's reference, R06.T9.g) | 15.73 CPU-s, provisional |
 //! | `sky/band_near_sun/sum` | within each reply's (T17) | 0.002 CPU-s, provisional |
 //! | `sky/band_near_sun/march_camera` | within the first sky's (T17) | 29.5 CPU-s, provisional |
 //! | `sky/band_near_sun/march_camera_no_eye` | none (the camera's march's reference) | 22.5 CPU-s, provisional |
@@ -68,6 +71,18 @@
 //! 18.5 CPU-s for one of the caps alone, the band before the split, and 0.002 CPU-s for the sum.
 //! R06.T9.b's one run of the band before the split (2026-10-05, under the heavy-test lock, load
 //! 3–5): 20.2 CPU-s on 15 workers, 1.37 s wall.
+//!
+//! The diffuse galactic light's benches (R06.T9.g): `sky/illumination` builds the near-Sun
+//! request's illumination as a server does, its 1,536 rays one face row a job, then its scattered
+//! field as one job, and prints each part's CPU time, the field's steps and the heap.
+//! `band_near_sun/march` marches the request lit by it and `band_near_sun/march_no_dgl` the same
+//! request unlit; the gate, provisional, is the illumination and the march's increase together at
+//! most 10% of the unlit march, in one run. R06.T9.g's run (2026-10-07, criterion's medians of ten
+//! samples each, three workers at `CPUQuota=400%`, without the heavy-test lock, which the
+//! orchestrator's `just ci` held, load about 4–8, so provisional): the illumination 0.947 CPU-s
+//! (its scattered field about 0.15 of it, 11 steps, 0.25 MB), the lit march 16.11 CPU-s and the
+//! unlit 15.73: 1.33 CPU-s, 8.4% of the march. The lit march's heap is 22.95 MB, the unlit
+//! 21.97 MB. The march alone moved by up to 2 CPU-s between single runs at load 7–17.
 //!
 //! `band_near_sun/march_camera` marches a camera's request at V 10.06 with the eye at 7.95 beside
 //! it, so the march keeps the light fainter than the eye's cut too (R06.T9.j), and
@@ -127,6 +142,7 @@ use hyperion_sim::sky::census::{
     SkyCensus, SkyContext, SkyQuery, SkyStar, census_cell, census_plan, merge_census,
     serve_from_entry,
 };
+use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude};
 use hyperion_sim::sky::limits::{Glare, limit_rows};
@@ -171,6 +187,8 @@ static PRINTED_BAND: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_SUM: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_CAMERA: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_CAMERA_NO_EYE: AtomicBool = AtomicBool::new(false);
+static PRINTED_BAND_NO_DGL: AtomicBool = AtomicBool::new(false);
+static PRINTED_ILLUMINATION: AtomicBool = AtomicBool::new(false);
 static PRINTED_LIMIT_MAP_NEAR_SUN: AtomicBool = AtomicBool::new(false);
 static PRINTED_LIMIT_MAP_SYNTHETIC: AtomicBool = AtomicBool::new(false);
 
@@ -322,6 +340,90 @@ fn eye_query(ly: [f64; 3]) -> SkyQuery {
         .eye(EyeObserver::default())
         .build()
         .expect("a valid query")
+}
+
+/// [`eye_query`] lit by the observer's illumination ([`sun_illumination`] near the Sun), so that
+/// its band holds the diffuse galactic light (R06.T9.g).
+fn lit_eye_query(ly: [f64; 3], illumination: &Arc<Illumination>) -> SkyQuery {
+    let at = GalacticPosition::from_light_years(ly).expect("in the root cube");
+    let observer = Observer::new(at, UniverseTime::EPOCH).expect("the epoch is on the clock");
+    SkyQuery::builder(observer, Magnitudes::new(EYE_CUT_V))
+        .eye(EyeObserver::default())
+        .illumination(Arc::clone(illumination))
+        .build()
+        .expect("a valid query")
+}
+
+/// The illumination of `observer` as a server builds it (R06.T9.g, R06.T11.a): its rays one face
+/// row a job on `workers` threads, then assembled, with its scattered field, as one job. Gives it,
+/// the rays' CPU time and the assembly's.
+fn march_illumination(observer: &Observer, workers: usize) -> (Illumination, Duration, Duration) {
+    let sky = sky();
+    let side = ILLUMINATION_SPEC.face_texels();
+    let jobs: Vec<(CubeFace, u16)> = CubeFace::ALL
+        .iter()
+        .flat_map(|&face| (0..side).map(move |row| (face, row)))
+        .collect();
+    let (parts, busy) = on_pool(&jobs, workers, &|&(face, row): &(CubeFace, u16)| {
+        Illumination::march_rows(
+            &sky.galaxy,
+            &mut job_context(sky),
+            observer,
+            face,
+            row..row + 1,
+        )
+    });
+    let began = Instant::now();
+    let parts: Vec<IlluminationRows> = parts.into_iter().map(|(_, part)| part).collect();
+    let light = Illumination::assemble(observer, black_box(parts));
+    (light, busy, began.elapsed())
+}
+
+/// The near-Sun request's illumination, marched once, outside every timing but its own bench's.
+fn sun_illumination() -> &'static Arc<Illumination> {
+    static LIGHT: OnceLock<Arc<Illumination>> = OnceLock::new();
+    LIGHT.get_or_init(|| {
+        let observer = *eye_query(SUN_LY).observer();
+        Arc::new(march_illumination(&observer, workers()).0)
+    })
+}
+
+/// The near-Sun request's illumination (R06.T9.g): its 1,536 rays one face row a job, then its
+/// scattered field as one job, as the server builds it once a request before the eye's cut.
+/// Prints, once, the rays' CPU time, the fixed point's, its steps, its heap and the wall time.
+fn illumination(c: &mut Criterion) {
+    let observer = *eye_query(SUN_LY).observer();
+    let workers = workers();
+    // The tables, built outside the timing.
+    let _ = sky();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    group.bench_function("illumination", |b| {
+        b.iter_custom(|iters| {
+            let mut cpu = Duration::ZERO;
+            for _ in 0..iters {
+                let began = Instant::now();
+                let (light, rays, field) = march_illumination(&observer, workers);
+                if !PRINTED_ILLUMINATION.swap(true, Ordering::Relaxed) {
+                    println!(
+                        "sky/illumination: {} rays at {}² a face, {:.2} CPU-s on {workers} \
+                         workers; the scattered field in {} steps, {:.3} CPU-s; heap {} bytes; \
+                         {:.2} s wall",
+                        CubeFace::ALL.len() * usize::from(ILLUMINATION_SPEC.face_texels()).pow(2),
+                        ILLUMINATION_SPEC.face_texels(),
+                        rays.as_secs_f64(),
+                        light.iterations(),
+                        field.as_secs_f64(),
+                        light.heap_bytes(),
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                cpu += rays + field;
+            }
+            cpu
+        });
+    });
+    group.finish();
 }
 
 /// One census's result and costs.
@@ -865,14 +967,15 @@ fn bench_march(
 }
 
 /// The band of a near-Sun request, split as the server runs it (R06.T9.f): `band_near_sun/march`
-/// marches all six faces once, one face row a job, keeping every reply of [`shell_replies`];
-/// `band_near_sun/sum` sums the final reply's texels from that march, one face row a job. Each
-/// prints, once, its CPU time and wall time, and the march its heap. `band_near_sun/march_camera`
+/// marches all six faces once, one face row a job, keeping every reply of [`shell_replies`], lit
+/// by the request's illumination (R06.T9.g), and `band_near_sun/march_no_dgl` the same request
+/// with none; `band_near_sun/sum` sums the final reply's texels from the lit march, one face row a
+/// job. Each prints, once, its CPU time and wall time, and the march its heap. `band_near_sun/march_camera`
 /// marches a camera's request at [`CAMERA_CUT_V`] with the eye at [`EYE_CUT_V`] beside it, keeping
 /// the eye's light too (R06.T9.j), and `band_near_sun/march_camera_no_eye` the same request with
 /// no eye: the second sums cost their difference.
 fn band_near_sun(c: &mut Criterion) {
-    let query = eye_query(SUN_LY);
+    let query = lit_eye_query(SUN_LY, sun_illumination());
     let workers = workers();
     let spec = BandSpec::STANDARD;
     let jobs: Vec<(CubeFace, u16)> = CubeFace::ALL
@@ -882,6 +985,12 @@ fn band_near_sun(c: &mut Criterion) {
     let mut group = c.benchmark_group("sky");
     group.sample_size(10);
     bench_march(&mut group, "march", &query, &PRINTED_BAND);
+    bench_march(
+        &mut group,
+        "march_no_dgl",
+        &eye_query(SUN_LY),
+        &PRINTED_BAND_NO_DGL,
+    );
     let held: OnceCell<Vec<BandMarch>> = OnceCell::new();
     let replies: Replies = OnceCell::new();
     group.bench_function("band_near_sun/sum", |b| {
@@ -1126,6 +1235,7 @@ criterion_group!(
     luminosity_tables,
     census_near_sun,
     census_nuclear_disc,
+    illumination,
     band_near_sun,
     limit_map
 );
