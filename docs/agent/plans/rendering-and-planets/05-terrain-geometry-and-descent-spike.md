@@ -641,6 +641,18 @@ re-checked against the cited source in that task, as the galaxy README's Figures
      156 kB, and the sizing rule's about 430 slots fill 64 MiB with nothing to spare; with
      `BakedOffsets` a patch is about 257 kB, and the all-round set at 100 m, about 332 patches,
      needs about 85 MB. T18 may choose `BakedOffsets` for the high setting only.
+
+   _As built (R05.T18, 2026-10-08):_ the high setting stays on `BakedOffsets`, for lack of
+   measurement. The `face-differences` run was waived by the owner, so `FaceDifferences`' vertex
+   time on high is unmeasured. GPU time is the binding resource: the joint row of terrain and
+   atmosphere measured 5.59 of 6 ms at the 95th percentile. `BakedOffsets` measured 0.636 GB
+   resident, 7,827 MiB uploaded and terrain at 2.15 ms at the 95th percentile, at a median 975 of
+   2,115 MHz (`docs/measurements/descent-spike/2026-10-07-effect-high.md`). Its consequence on the
+   default planet is recorded: `TERRAIN: DETAIL LIMITED` on 34% of the descent arc's frames and 30%
+   of the approach's, with τ′ at most 0.96 px (`2026-10-05-demand-hard-2.md`, "high, hard ε_n,
+   ridges off"). The low setting keeps `FaceDifferences` (Risks, "Defaults from the measurements
+   (R05.T18, as built)").
+
 5. **What a patch carries, on one datum.** Height is height above the body's rotational spheroid,
    R07's reference body, measured along the spheroid's normal (the coordinator's ruling of
    2026-09-29, resting on R07 Design note 19's research, high confidence; R09 and R10 measure from
@@ -728,6 +740,16 @@ re-checked against the cited source in that task, as the galaxy README's Figures
    patches, the brainstorm's "handful". The rule binds every setting and every style: the low
    setting's τ, the patch cache and every view's own tolerance are all overridden inside the
    forced region.
+
+   _As built (R05.T18, 2026-10-08):_ the thresholds stay 1 km and 30 s, and
+   `FORCED_REGION_RESIDENCY_S` stays 30 s, all provisional, for lack of a figure. The results file
+   has no figure for the time from a forced region's first request to its last patch resident, so
+   its 99th percentile was never taken. On the judged run
+   (`docs/measurements/descent-spike/2026-10-07-effect-high.json` and `.md`) the touchdown region
+   was resident before contact: `TERRAIN: STREAMING` showed for 0.45 s in the vertical descent (the
+   summary rounds it to 0.5 s) and not at all in the hover and touchdown, with 1.1 and 0 patches a
+   second requested. 30 s remains the upper bound that R11 consumes.
+
 10. **The patch cache, and who owns its layout.** Patches are cached by patch, not by view, in one
     cache per body. R10 owns the cache's sizes, formats and slot layout per setting (its Design note
     15 and T14); this plan owns the cache's behaviour, the eviction rule, the pins and the draw-set
@@ -763,6 +785,14 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     For context only (the budgets above stand): the development machine's RTX 3080 has 10 GiB of
     VRAM beside 32 GB of system RAM, and the UHD 620 has no VRAM of its own, drawing on the
     laptop's shared system memory.
+
+    _As built (R05.T18, 2026-10-08):_ both budgets stand until R10: 64 MiB on the low setting, and
+    1,962 `BakedOffsets` slots (about 400 MB) on the high. The high budget is decided by the memory
+    row of the judged run (`docs/measurements/descent-spike/2026-10-07-effect-high.md`): 0.636 GB
+    GPU resident (the adapter's tally 431 MiB), within 3 GB and under the 2 GB finding. The low
+    budget is unmeasured on the UHD 620, whose runs were waived; the RTX 3080's low run
+    (`2026-10-07-effect-low.md`) gave 0.276 GB, which is provisional and decides nothing.
+
 11. **The height-worker pool** (researched 2026-09-29). Each worker is a module worker bundled by
     electron-vite as a same-origin file, started with `new Worker(new URL(…, import.meta.url))` and
     `type: "module"`, with `worker.format: "es"` in the renderer's Vite config (set by R04.T10.c) so
@@ -798,6 +828,13 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     the policy unchanged on these findings, and R04.T10.c's module worker loads from `file://` in
     the built app and from the dev server, checked by hand. Desktop timed runs pin three workers
     (decided 2026-09-30 by a delegated decision; T17)._
+
+    _As built (R05.T18, 2026-10-08):_ the default worker counts stand as built, for lack of a
+    figure: `--workers 2` on the RTX 3080 and every UHD 620 run were waived by the owner. On the
+    judged run (`docs/measurements/descent-spike/2026-10-07-effect-high.md`, `--workers 3`) the
+    three workers saturated at 40–45 patches a second, baking 45.3, 42.3 and 40.5 a second in the
+    approach, the low fast pass and the slowdown against 89.5, 135.3 and 83.1 requested.
+
 12. **The test planet** (researched 2026-09-29). An Earth-sized (WGS 84's figure, Design note 5;
     volumetric radius 6,371 km), dry world whose height
     is a sum of 3D improved Perlin gradient noise octaves (Perlin 2002: the reference
@@ -1236,6 +1273,17 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     normals, a shading loss, never a geometric one, which the results file records. If the
     fallback becomes a default, T18 drafts its label for R02's nomenclature list, for the owner to
     sign off, and builds none until then. Reported as a brainstorm inconsistency.
+
+    _As built (R05.T18, 2026-10-08):_ the high setting's normals stay doubled, unconfirmed. Only
+    one scale was measured. On the judged run
+    (`docs/measurements/descent-spike/2026-10-07-effect-high.md`) doubled normals with three
+    workers sustained 45.3, 42.3 and 40.5 patches a second in the approach, the low fast pass and
+    the slowdown, against 89.5, 135.3 and 83.1 requested. That demand is the hard bound's, which
+    over-refines by design (decisions-r05.md item 6); min(hard, 4σ_n) predicts 46.7 a second in the
+    approach. The mesh scale's rate on high, which the rule compares against, was waived by the
+    owner. R10.T4's calibrated bound and R12.T11.b decide the scale. There is no fallback, so no
+    label (decisions-r05.md item 7).
+
 26. **The low setting, in one place.** `QualitySetting` (`"high" | "low"`) and `SETTINGS`, one
     record from it to `ViewSettings`, in `view/quality/qualitySetting.ts`, hold this plan's values
     per setting (`terrain`, and `atmosphere`, which `TABLE_SIZES` reads); later plans (R07, R08,
@@ -2999,6 +3047,20 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
       14 minutes or so. It counts towards no verdict (Design note 27), and its re-take is waived.
     - It ran on the same monitor and canvas, and presented at every vsync against T = 33.33 ms.
     - So it tests the harness, not the 720p30 column.
+- **Defaults from the measurements (R05.T18, as built).** No default changed, and no code with it:
+  under the owner's waiver one configuration was measured, and every default is that
+  configuration.
+
+  | Default                                                                   | The figure that decides it                                                                                                                                                                                                                                                                                                                                                                                                                       | Decision                                                                                                                                                                                                                                          |
+  | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | The high vertex path (Design note 4)                                      | None. The `face-differences` run was waived, so `FaceDifferences`' vertex time on high is unmeasured. GPU time is the binding resource (the joint row's 5.59 of 6 ms). `BakedOffsets` measured 0.636 GB, 7,827 MiB uploaded and terrain at 2.15 ms p95, at a median 975 of 2,115 MHz (`docs/measurements/descent-spike/2026-10-07-effect-high.md`).                                                                                              | **Stays `BakedOffsets`**, for lack of measurement. Its consequence on the default planet is recorded: `DETAIL LIMITED` on 34% of the arc's frames and 30% of the approach's, with τ′ ≤ 0.96 px (`2026-10-05-demand-hard-2.md`, high, ridges off). |
+  | The high normal scale (Design note 25)                                    | Only one scale was measured. Doubled normals with three workers sustained 45.3, 42.3 and 40.5 a second in the approach, the low pass and the slowdown, against 89.5, 135.3 and 83.1 requested (`2026-10-07-effect-high.md`). That demand is the hard bound's, which over-refines by design (decisions-r05.md item 6); min(hard, 4σ_n) predicts 46.7 in the approach. The mesh scale's rate on high, which the rule compares against, was waived. | **Stays doubled, unconfirmed.** R10.T4's calibrated bound and R12.T11.b decide it. There is no fallback, so no label (decisions-r05.md item 7).                                                                                                   |
+  | The descending thresholds and `FORCED_REGION_RESIDENCY_S` (Design note 9) | None. The results file has no figure for the time from first request to last patch resident, so its 99th percentile was never taken. On `2026-10-07-effect-high` the touchdown region was resident before contact: `STREAMING` showed 0.45 s in the vertical descent and none in the hover, with 1.1 and 0 patches a second requested.                                                                                                           | **Stay 1 km, 30 s and 30 s**, provisional. 30 s remains the upper bound that R11 consumes.                                                                                                                                                        |
+  | The cache budgets (Design note 10, until R10)                             | High is decided by the memory row of `2026-10-07-effect-high.md`: 0.636 GB (the adapter's tally 431 MiB), within 3 GB and under the 2 GB finding. Low is unmeasured on the UHD 620; `2026-10-07-effect-low.md`'s 0.276 GB is provisional and decides nothing.                                                                                                                                                                                    | **Both stand**: 64 MiB on low, and 1,962 `BakedOffsets` slots (about 400 MB) on high.                                                                                                                                                             |
+  | The worker counts (Design note 11)                                        | None. `--workers 2` and the UHD 620 runs were waived. Three workers saturated at 40–45 a second (`2026-10-07-effect-high.md`).                                                                                                                                                                                                                                                                                                                   | **Stand as built.**                                                                                                                                                                                                                               |
+  | ⌊slots ÷ 2⌋                                                               | The F4 record (`2026-10-05-demand-hard-2.md`), the only figure that measures eviction. Returns are drawn by a coarse stand-in on at most 1.3% of high's frames with ridges off (the low pass) and 8.5% with ridges on (the coast). That is the cache's capacity, not thrash (Risks, "Coarse patches evicted under load"). No visible run counts returns.                                                                                         | **Confirmed**, unchanged.                                                                                                                                                                                                                         |
+  | The low setting                                                           | T16.c was not triggered.                                                                                                                                                                                                                                                                                                                                                                                                                         | Unchanged.                                                                                                                                                                                                                                        |
+
 - **The hardware decisions, decided 2026-09-30 by a delegated decision** (the orchestration's
   hardware record), as they fall on this plan:
   - _The gate (item 1):_ retargeted to the recommended specification, the RTX 3080, with Design
@@ -3184,9 +3246,9 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   68 px). That is the cache's capacity, as T8 found, not thrash. The forced region's rate is also
   an input to T18's descending thresholds (Design note 9): the record gives 81–85 bakes a second
   over the ridged approach and 11–15 over the slowdown.
-- **The descending thresholds** (Design note 9) are provisional: 1 km and 30 s, and
-  `FORCED_REGION_RESIDENCY_S` 30 s, until T16 measures how long a forced region takes to become
-  resident and T18 sets them.
+- **The descending thresholds** (Design note 9), 1 km and 30 s, and `FORCED_REGION_RESIDENCY_S`
+  30 s, stay provisional: no run measured a forced region's time to residency (R05.T18,
+  2026-10-08).
 - **The pass criterion's reserve** (Design note 21) counts only terrain and atmosphere against
   their rows' upper ends. If later plans' passes land above their own rows, the spike's pass does
   not carry over; R12's consolidated runs are where that shows.
