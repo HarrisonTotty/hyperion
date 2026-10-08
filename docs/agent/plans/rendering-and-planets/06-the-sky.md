@@ -6445,9 +6445,21 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     - `--lib -- sky::`: 248 passed;
     - `--test sky_census` 6/6, and the sky doctests 31/31;
     - the server's `--test sky` 11/11 and `compute::sky` 17/17;
-    - `just test-slow caps_converge_in_rays` passed (644 s) before the final merge, on the same caps
-      code. Its run on the committed tree, with each point's figures, is pending a follow-up
-      records commit.
+    - `just test-slow caps_converge_in_rays` passed on 9c84ca04 (640 s, under the heavy lock;
+      2026-10-08). Every one of its 144 recounts at 3,072 rays is under 1.0, the worst 0.996 (A,
+      above the Sun at 8.54).
+  - **`caps_converge_in_rays`'s figures** (recounted at 3,072 rays and 48 steps a decade): the
+    worst layer at each point, for the uniform caps at 7.95, 8.54 and 10.06, and for the caps by
+    the eye's visibility at the point's own eye cut.
+    - Near the Sun: 0.990, 0.956 and 0.911; by visibility at 8.282, 0.935.
+    - In the nuclear disc: 0.866, 0.822 and 0.970 (the brown dwarfs); by visibility at 7.372, 0.878.
+    - At (26,000, 0, 68): 0.989, 0.962 and 0.929; by visibility at 8.403, 0.934.
+    - At (−18,385, −18,385, 68): 0.972, 0.988 and 0.952; by visibility at 8.280, 0.944.
+    - In the inner disc (0, 8,000, 0): 0.990, 0.966 and 0.854; by visibility at 7.243, 0.926.
+    - 2,000 ly above the Sun: 0.969, 0.996 and 0.959; by visibility at 8.540, 0.945. Its E, which
+      failed before the sub-rays, is 0.524, 0.239 and 0.188, and 0.571 by visibility.
+    - The worst layer is A or B nearly everywhere: λ fills their budget of one and the widening
+      hardly moves their rays.
   - **Reviews.**
     - Rust review: its must-fix (the lattice taken by value) is applied, and so are its
       should-fixes (units in the names, the visibility's observer and eye, the per-ray clone, a
