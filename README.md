@@ -158,7 +158,7 @@ An option given on the command line wins over its variable.
 | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | `128`                                        | Cache of generated systems' stars, in MiB    |
 | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | `128`                                        | Cache of generated planetary systems, in MiB |
 | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | `64`                                         | Cache of range briefs' star models, in MiB   |
-| `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `64`                                         | Cache of the sky census's cells, in MiB      |
+| `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `64`, provisional until R06.T8.n             | Cache of the sky census's cells, in MiB      |
 | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | `160`                                        | Cache of each galaxy's sky tables, in MiB    |
 | `--serve-sky`           | `HYPERION_SERVE_SKY`           | off                                          | Serve `sky` requests                         |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          | Stop gracefully when standard input closes   |

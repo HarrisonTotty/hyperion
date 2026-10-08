@@ -90,8 +90,14 @@ pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
 /// The sky's cell cache's budget when `--sky-cache` is not given, in MiB (rendering plan R06,
 /// Design note 12).
 ///
-/// Provisional: R06.T8.h sets it from one near-Sun sky's entry bytes. A sky forced to 200 ly near
-/// the Sun at V 11 kept 25.5 MB of entries (R06's Risks, "Deviations in T11.b, as built").
+/// Provisional: R06.T8.n sets it, after P11.T17.c, from the entry bytes of one near-Sun sky and a
+/// jump's new cells, at most 2,048 MiB (decided 2026-10-08, `decision-r06-t8h-warm.md`). Since
+/// R06.T8.h the cache holds blocks of cells keyed by magnitude; at P11.T17.a's verdicts a
+/// near-Sun sky's entries are 13.6 GB, and 14.4 GB with a 1,000 ly jump's (R06.T8.h's sampled
+/// bench, provisional), more than any default holds, so until T8.n a warm sky near the Sun is
+/// mostly a cold one (R06's Risks, "Deviations in T8.h, as built"). A sky forced
+/// to 200 ly near the Sun at V 11 kept 25.5 MB of entries before T8.h (R06's Risks, "Deviations
+/// in T11.b, as built").
 pub const DEFAULT_SKY_CACHE_MIB: usize = 64;
 /// The sky tables' cache's budget when `--sky-tables` is not given, in MiB: two galaxies' luminosity
 /// tables, about 55 MiB each with their snapshots (rendering plan R06, R06.T11.c; decided
@@ -166,7 +172,8 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
     brief_cache: CacheBudget,
 
-    /// Budget of the cache of the sky census's cells, in MiB; 0 caches nothing
+    /// Budget of the cache of the sky census's cells, in MiB (provisional until R06.T8.n); 0
+    /// caches nothing
     #[arg(long, value_name = "MIB", env = ENV_SKY_CACHE_MB, default_value_t = DEFAULT_SKY_CACHE)]
     sky_cache: CacheBudget,
 
@@ -530,7 +537,7 @@ impl ServerConfigBuilder {
 
     /// The sky's cell cache's budget, in bytes.
     ///
-    /// Zero caches nothing: every census cell is generated, served and dropped.
+    /// Zero caches nothing: every census cell is built, censused and dropped.
     #[must_use]
     pub fn sky_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.sky_cache_bytes = bytes;

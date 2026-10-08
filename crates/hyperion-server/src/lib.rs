@@ -119,8 +119,8 @@ pub(crate) struct AppState {
     /// Each galaxy's sky tables, built once on the pool and kept in the configured byte budget
     /// (rendering plan R06, R06.T11.c).
     pub(crate) sky_tables: SkyTablesService,
-    /// The census cells' bright subsets built so far, in the configured byte budget: what a sky's
-    /// census jobs read and share (rendering plan R06, R06.T11.b; Design note 12).
+    /// The census cells' entries built so far, in blocks, in the configured byte budget: what a
+    /// sky's census jobs read and share (rendering plan R06, R06.T11.b and T8.h; Design note 12).
     pub(crate) sky_cells: Arc<SharedSkyCellCache>,
 }
 

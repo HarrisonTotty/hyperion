@@ -194,9 +194,18 @@ pub struct Cone { /* axis: UnitVector, half_angle: Degrees */ }
 pub struct SkyStar { /* system: SystemId, star: StarIndex, apparent: GalacticPosition,
     distance: LightYears, emitted: UniverseTime, v: Magnitudes, a_v: Magnitudes,
     colour: StarColour */ }
-pub trait SkyCellCache: Sync { fn bright_subset(&self, galaxy: &Galaxy, key: CellKey,
-    floor: SolarMasses, out: &mut Vec<SystemRecord>); }   // &self: interior mutability, dyn-safe
+pub trait SkyCellCache: Sync {                  // &self: interior mutability, dyn-safe
+    fn keeps_entries(&self) -> bool;
+    fn block(&self, galaxy: &Galaxy, key: BlockKey) -> Option<Arc<SkyBlock>>;
+    fn keep(&self, galaxy: &Galaxy, cell: CellKey, params: &BlockParams,
+        records: &[HeldRecord]);
+    fn note(&self, cell: CellKey, outcome: CellOutcome) {} }
+                                          // R06.T8.h, as built (it was `bright_subset`)
 pub struct NoSkyCellCache;
+pub struct SkyBlock;   // R06.T8.h: 4³ cells of one layer, built for one BlockParams
+pub struct BlockKey;  pub struct BlockParams;  pub struct HeldRecord; // record + light, 96 B
+pub enum CellOutcome { Served, Missed, Rebuilt(Rebuild) }
+pub enum Rebuild { Key, Window, Parameters }
 pub struct SkyContext<'a> { /* tables: &'a LuminosityTables, envelope: &'a BrightnessEnvelope,
     noise: NoiseCache (the job's own), cells: &'a dyn SkyCellCache,
     sources: &'a [&'a dyn SystemSource], modifiers: &'a dyn GasModifierSource */ }
@@ -209,6 +218,9 @@ impl SkyQueryBuilder { pub fn eye_visibility(self, visibility: EyeVisibility) ->
                             // R06.T7.b: an eye-only request's caps by the eye's visibility
 pub fn census_cell(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, key: CellKey, query: &SkyQuery,
     out: &mut Vec<SkyStar>);
+pub fn census_cell_with_cost(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, key: CellKey,
+    query: &SkyQuery, out: &mut Vec<SkyStar>) -> (CensusTallies, CensusCost); // R06.T8.h, as built
+pub struct CensusCost; pub struct LayerCost;  // R06.T8.h: the path's counts, no part of a reply
 pub struct SkyCensus { /* listed: Vec<SkyStar> (by flux, then system, then star),
     overflow: Vec<SkyStar>, tallies: CensusTallies */ }
 impl SkyCensus { pub fn empty() -> Self; }                    // the eye-cut pre-pass's band
@@ -835,11 +847,21 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     caches do for `SystemSource`. It is not the server's existing cell cache
     (`HYPERION_CELL_CACHE_MB`): that holds whole cells from `generate_cell`, and the near-Sun caps
     enclose some 2.6 × 10⁷ systems in C to E (the brainstorm's count at version 14), where the sky
-    keeps only the bright subset above each floor. From R06.T8.h the cache is keyed by the
-    faintest listable magnitude at a cell's least distance, and not by a mass floor, which near the
-    Sun is every cell's band edge (decided 2026-10-05, `decision-r06-census-cost.md`). T8.h also
-    sets `HYPERION_SKY_CACHE_MB`'s default from one near-Sun sky's entry bytes, so that the warm
-    budget holds at the default (`decision-r06-census-cost-signoff.md`).
+    keeps only the bright subset above each floor. From R06.T8.h the cache holds blocks of 4³
+    cells, each built for one observer and cut (decided 2026-10-05, `decision-r06-census-cost.md`;
+    amended 2026-10-08, `decision-r06-t8h-warm.md`).
+
+    - A cell's key is the faintest absolute V listable at its least distance from any observer
+      within 1,000 ly of the builder's, and its window is every emitted time that such an observer,
+      at any time in ±H, can receive. A mass floor would not do: near the Sun the floor is every
+      cell's band edge.
+    - An entry holds the records whose star-by-star bound over its window passes at its key, and
+      serves a query whose key is no fainter and whose window it holds.
+    - The stored bound only skips records. Every record it passes takes the census's own steps, so
+      a warm census generates the same systems as a cold one, and its reply is the same bit for bit.
+    - R06.T8.n sets `HYPERION_SKY_CACHE_MB`'s default so that one near-Sun sky and a jump's new
+      cells fit (`decision-r06-census-cost-signoff.md`), at most 2,048 MiB.
+
 13. **Time.** The sky is asked at a time, like every query, within ±H. The response's
     `valid_until` is the least of one Julian year and the time at which the fastest-moving listed
     star within 1 ly would move a tenth of a pixel at 1080p across 60°. The client re-requests past
@@ -1062,10 +1084,11 @@ until T13.f wires them to `SETTINGS`.
 Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs in this order:
 T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.l; T8.m, which
 needs no plan-11 task; T7.b and T8.i, which no longer wait for T8.g; T8.g, once T8.m, P11.T16 and
-P11.T17.c are on `rendering-and-planets`; T8.h; T11.d, after T8.g, T8.i and T11.a–c (T11.c on T9.f);
-T5.f and T9.g before T17's goldens; then T17 (the order amended 2026-10-06,
-`decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and `decision-r06-t8k-cone.md`, and
-2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
+P11.T17.c are on `rendering-and-planets`; T8.h, built on T8.g as committed (decided 2026-10-08,
+`decision-r06-t8h-warm.md`); T8.g's final gates once P11.T17.c lands, then T8.n; T11.d, after
+T8.g, T8.i and T11.a–c (T11.c on T9.f); T5.f and T9.g before T17's goldens; then T17 (the order
+amended 2026-10-06, `decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and
+`decision-r06-t8k-cone.md`, and 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
 advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
@@ -1709,25 +1732,83 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   own track lifetimes, not `lifetime_bracket`; three η intervals; each cell widened in relative age
   by its own spread; runs merged within 0.2 mag; the rows packed (format 1, 375 kB).
 
-- **R06.T8.h The cell cache keyed by magnitude (new; after T8.g).** Decided 2026-10-05
-  (`decision-r06-census-cost.md`). Near the Sun every C–E floor is its band's lower edge, so Design
-  note 12's mass key makes an entry hold every record of its cell. At 64 MiB the cache then holds
-  only a few cells. After T8.g:
-  - An entry holds the records whose star-by-star bound passes at the cell's least distance, with
-    that faintest listable magnitude as its key and each record's own bound beside it.
-  - An entry serves a query whose key is no fainter than its own, by filtering each record's bound.
-    A fainter key rebuilds the cell.
-  - An entry is built with a margin, which the task chooses from the warm bench. It is fainter than
-    the cell needs, so that an approach of up to 1,000 ly is served. For a cell 8 kly out that is
-    about 0.3 mag; for one 4 kly out, about 0.6 mag.
+- **R06.T8.h The cell cache keyed by magnitude (new; after T8.g as committed; amended
+  2026-10-08).** Decided 2026-10-05 (`decision-r06-census-cost.md`), and amended 2026-10-08
+  (`decision-r06-t8h-warm.md`). Near the Sun every C–E floor is its band's lower edge, so Design
+  note 12's mass key makes an entry hold every record of its cell. And about 1.08 × 10⁸ cells
+  at about 128 B an entry are 10–14 GB, whatever the records.
+  - **Blocks.** The cache keeps blocks of 4³ cells of one layer, each built for one observer
+    position and cut. A cell's key and window are recomputed from those, so a cell stores
+    neither.
+    - Its key is the faintest absolute V listable at its least distance from any observer within
+      `CACHE_APPROACH_LY` (1,000 ly, the jump drive's range), at the cut plus
+      `CACHE_CUT_SLACK_MAG` (0.1, provisional).
+    - Its window is every emitted time such an observer, at any time in ±H, can receive.
+  - **Held records.** An entry holds the records whose star-by-star bound over that window can
+    be listed at the key, in candidate order, each with that bound: at most 96 B a record, and
+    at most 8 B an opened cell on average.
+  - **The rule.** An entry serves a query whose key is no fainter than its own and whose window
+    it holds. Any other cell is rebuilt, at the block's parameters if they serve the query,
+    otherwise at the query's.
+  - **The stored bound is a pre-filter.** Each record it passes takes the census's own steps for
+    the query, `hierarchy_bound` included, so the warm census generates the same systems as the
+    cold one. The reply is the same bit for bit, with no rebuild after a jump of up to 1,000 ly
+    within ±H.
+    - This rests on each bound only loosening as its window widens, which a test holds.
+    - The counts that depend on the path (candidates, records bounded, pairs, held,
+      pre-filtered) move out of `CensusTallies`, which keeps what the wire reads.
+  - **The default.** `HYPERION_SKY_CACHE_MB` stays 64 MiB until R06.T8.n sets it.
 
-  Record one near-Sun sky's entry bytes, margin included, and set `HYPERION_SKY_CACHE_MB`'s default
-  so that the warm budget is met at the default (`decision-r06-census-cost-signoff.md`). At today's
-  64 MiB a warm census could quietly be a cold one.
+  Tests:
+  - T8.d's, through the new rule: a query after a looser one, a tighter one, a move of 1,000 ly
+    and a time of ±H gives the stars and tallies no cache gives, and no entry is read for a
+    fainter key or a window it does not hold;
+  - each bound over an entry's window is no tighter than over any window within it, over 10⁴
+    records of each of C, D and E near the Sun and in the bulge;
+  - the pre-filter keeps every record the census without a cache generates;
+  - a census in the moving galaxy through a cache built elsewhere and earlier equals one without
+    a cache;
+  - the server's jobs census, cold and warm, equals the one-pass census.
 
-  Tests: T8.d's (a query after a looser one, a tighter one and a move gives the bits no cache
-  gives; no entry is read below its key). Acceptance: `cargo test -p hyperion-sim
-sky::census::cache` and the warm bench recorded against T17's warm budget (≤ 25% of cold).
+  Bench: `sky/census_near_sun/warm` and a new `…/warm_jump` (1,000 ly towards the centre). A
+  sampled run's cache budget is the setting ÷ k. Each prints held bytes, served and rebuilt
+  cells by cause, held, pre-filtered, records bounded, generated and generated-listable, and
+  warm ÷ cold, recorded provisionally at P11.T17.a.
+
+  Acceptance:
+  - `cargo test -p hyperion-sim --lib -- sky::census`;
+  - `cargo test -p hyperion-sim --test sky_census`;
+  - `cargo test -p hyperion-server`;
+  - `just ci`.
+
+  No `GENERATOR_VERSION` bump.
+
+  As built (Risks, "Deviations in T8.h, as built"):
+  - the rule crate-private and the trait reshaped;
+  - the windows' and keys' slack doubled;
+  - merges built outside the lock;
+  - the bench sampled by block, its `cold` on T8.g's path;
+  - the server's second sky 20 ly off.
+
+  Provisional at P11.T17.a: 13.6 GB of entries for a near-Sun sky; the repeat at 102% of cold,
+  the jump at 121%; no cell rebuilt, and the same reply.
+
+- **R06.T8.n The sky cache's default, from measured entries (new; after P11.T17.c and T8.g's
+  final gates).** Decided 2026-10-08 (`decision-r06-t8h-warm.md`).
+  1. Run T8.h's window test on P11.T17.c's verdicts. A violation is P11.T17.c's to fix.
+  2. Run the sampled `cold`, `warm` and `warm_jump` benches at the eye's cut on T7.b's caps.
+  3. Set `CACHE_CUT_SLACK_MAG` in [0, 0.25].
+  4. Set `HYPERION_SKY_CACHE_MB`'s default to the larger of 64 and 1.25 times the held bytes
+     after the Sun's census and the jump's, rounded up to 256 MiB, at most 2,048. If over, first
+     store held records as cell-local indices with their bound (about 8 B), placed again when
+     served, then re-measure. If still over, 2,048 MiB, and report.
+  5. Record T17's warm figures.
+
+  Acceptance:
+  - the benches recorded;
+  - `cargo test -p hyperion-sim --lib -- sky::census`;
+  - `cargo test -p hyperion-server`;
+  - `just ci`.
 
 - **R06.T8.i Nearest first: the shell plan (new; signed off; it may precede T8.g, and T11.d builds
   on it; decided 2026-10-07).** Decided 2026-10-05 (`decision-r06-census-cost.md`). The sign-off
@@ -2624,7 +2705,17 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
 
   It is met after the deferred lever 13 (below), and re-measured then;
 
-- after a jump of up to 1,000 ly, at most 25% of cold.
+- after a jump of up to 1,000 ly, at the default `HYPERION_SKY_CACHE_MB` (R06.T8.n):
+  - every cell both plans open is served from the cache, none rebuilt;
+  - the warm census's stars and tallies are the destination's cold census's, bit for bit;
+  - one near-Sun sky's entries and the jump's fit the default.
+
+  This is the gate (decided 2026-10-08, `decision-r06-t8h-warm.md`). Warm ÷ cold, sampled with
+  the cache budget scaled, is recorded against the target of at most 25%, with the repeat's.
+  About 30–45% is expected at version 21 after P11.T17.c, since a warm census still generates
+  every system its bound passes, and a jump's new cells are cold. A miss of the target is
+  deferred (`deferred-corrections.md`, "Census cost": lever 13, then the realised window bound)
+  and does not hold T17. Above 50%, it is reported before T17 closes.
 
 The budget was accepted as the eye's only. A decision agent advised that, and the advice was
 adopted on 2026-10-05 under the owner's standing delegation (`decision-r06-census-cost-signoff.md`,
@@ -6078,6 +6169,152 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     says so.
   - **Not changed.** No generated output moves. `GENERATOR_VERSION` stays 21, and no existing
     golden moves (`golden_diff.py`: one new golden).
+- **Deviations in T8.h, as built (2026-10-08; written against P11.T17.a).** The cell cache in
+  blocks keyed by magnitude, as the warm ruling sets it out (`decision-r06-t8h-warm.md` §2.1),
+  with these details. `HYPERION_SKY_CACHE_MB` stays 64 MiB until R06.T8.n.
+  - **What is built** (`sky/census/cache.rs`):
+    - `SkyBlock` (`with_cell`, `cell`, `built_cells`, `held`, `heap_bytes`): 4³ cells of one layer,
+      with its `BlockKey`, its `BlockParams` (the builder's position and cut), a 64-bit set of the
+      cells built, a `u16` count a cell, and the held records cell by cell;
+    - `HeldRecord`: the record and its `RecordLight`, 96 B (`a_held_record_is_96_bytes`);
+    - `CellOutcome` (`Served`, `Missed`, `Rebuilt(Rebuild)`) and `Rebuild` (`Key`, `Window`,
+      `Parameters`);
+    - the constants `CACHE_APPROACH_LY` (1,000), `CACHE_CUT_SLACK_MAG` (0.1) and
+      `BLOCK_SIDE_CELLS` (4), all `pub(crate)`.
+  - **The trait is reshaped.** `SkyCellCache::bright_subset` gives way to `keeps_entries`, `block`,
+    `keep` and `note`. The census applies the rule and builds every entry, and a cache only holds
+    blocks.
+    - `serve_from_entry` and `Served` leave the public API. The rule is `serve_from_block`, which
+      answers `Lookup::{Served, NotBuilt, Key, Window}`. It, `CellNeed`, `entry_need` and
+      `query_need` are `pub(crate)`, since no cache applies the rule now.
+    - `NoSkyCellCache` keeps no entry. Its census places each cell at the query's floor, T8.g's
+      path bit for bit, and draws each hierarchy once.
+    - No later plan reads the old names. The Provides sketch is updated.
+  - **The slack is doubled.** Windows widen by 2 × `BEFORE_DRIFT_SLACK_YEARS` (2 yr) and keys
+    bring the box nearer by 2 × `BEFORE_DRIFT_SLACK_SHARE` (2 × 10⁻⁹), entry and query alike, not
+    by one each.
+    - Each record's ages before the drift, and the magnitude its bounds there read, already carry
+      one slack. The second keeps them strictly inside the query's need against the rounding of
+      ages and distances, and so inside every entry that holds the need.
+    - So the query's key is a hair fainter than `floor_at`'s magnitude, which still sets its
+      floor. Test 4 asserts the windows' containment.
+  - **The costs.**
+    - `census_cell` keeps its signature. `census_cell_with_cost` returns `(CensusTallies,
+CensusCost)`.
+    - `LayerCost` holds the ruled counts: candidates, held, pre-filtered, `star_bounded`,
+      `unbounded_records`, pairs and `generated_listable`. It also holds each layer's cells
+      served, missed and rebuilt by cause.
+    - `LayerTally` keeps cells, generated, accepted, listed, `without_photometry` and
+      `centre_members`.
+    - `generated_listable` is counted before the cone's texel test, whatever the cone. The star's
+      distance and unextinguished V move before that test, unchanged, so no output moves.
+  - **Held records.**
+    - A rogue planet is never held, since the census lists no star of one.
+    - A record with no density component is held `Unbounded`.
+    - An empty cell is held, so its records are not bounded again.
+    - A cell whose held records exceed its `u16` count (65,535) is not kept, and the block held
+      stays.
+  - **A cell not served.**
+    - If its block's parameters hold the query's need, it is built at them and merged in. That
+      counts as `Missed`, as a cell no block holds does.
+    - Otherwise it is built at the query's parameters, which replace the block, and counts as
+      `Rebuilt(Key | Window | Parameters)`.
+    - Its records are placed at the lower of the entry's floor and the query's.
+    - One draw of the composition and `hierarchy_bound` (`Drawn`) gives both `StarBounds`, each
+      bit for bit `StarBounds::of`'s (`a_drawn_hierarchy_gives_the_star_bounds_bit_for_bit`).
+      Debug builds assert there that every record the query's census generates is held and
+      passes the pre-filter, so every debug census through a cache checks the inclusion
+      property.
+    - A query its own parameters cannot hold (none within ±H, which the builder enforces) is
+      censused with no entry, and debug builds assert that it never happens.
+  - **The server.**
+    - `SharedSkyCellCache` is a `SharedByteLru` of `SkyBlock`s over `(GalaxyKey, BlockKey)`. A
+      block is charged its held records, `size_of::<SkyBlock>()` and the 96 B overhead.
+    - A merge is built outside the lock from the new `ByteLru::peek`. The new
+      `SharedByteLru::insert_if_unchanged` stores it only over the block it was built from, and
+      the merge is built again otherwise. So jobs filling one block all land
+      (`jobs_filling_one_block_side_by_side_all_land`).
+    - `SkyCellCounters` adds `served`, `missed`, `rebuilt_for(Rebuild)` and `rebuilt()`. Its
+      cache's hits and misses are block lookups, one a cell.
+    - `requests/sky.rs` is unchanged: the wire reads `generated` and `without_photometry`, which
+      stay in `LayerTally`.
+  - **Tests.**
+    - Tests 4 and 5 are in `cell.rs`, since they read `BeforeDrift`, `CellReach` and `held_light`.
+      - Test 4 builds its entries for an observer at each place. Its three queries are that
+        place at the epoch, 900 ly along +x at +H, and 600 ly along −x at −H at the cut plus 0.1.
+        Each is read over its ages before the drift and at single ages at their ends and middle:
+        720,000 checks.
+      - Test 5 takes test 2's cells, with A and B at three places. Its entries are built at the
+        Sun at V 6 and V 9. Its queries are test 2's but the cone and the 1,500 ly move. It found
+        2,664 generated records held and passing in 251 entries and queries, and 1,340 others
+        the pre-filter skips.
+    - Beyond the ruling's list:
+      - `a_block_merges_cells_at_its_parameters_and_others_replace_it`;
+      - `a_drawn_hierarchy_gives_the_star_bounds_bit_for_bit`;
+      - in the server, `a_cells_census_does_not_depend_on_what_was_asked_before`. It runs the
+        census through the server's own cache, warm, fresh and evicting, under
+        `assert_order_independent` (determinism audit).
+    - The jobs test compares the stars' floats by their bits.
+    - `moving_galaxy` moves to `sky/testing.rs`.
+    - **The server's second sky is 20 ly along x, not 1,000 ly** (`tests/sky.rs`). The test's
+      forced cap is 30 ly, so a 1,000 ly jump would share no cell, and "none rebuilt" would hold
+      of nothing. The sim's test 2 and the bench take the 1,000 ly move.
+    - Not done (the determinism audit's "consider"): test 4 on records whose window straddles age
+      zero, under 10⁴ yr old at the epoch. They are about 10⁻⁶ of a sample, and each reader clamps
+      the ages at zero, which reads as monotone.
+  - **The bench.**
+    - It samples whole blocks (`sample_hash` of the `BlockKey`), so that the sampled bytes scale.
+      Its estimates are therefore not like for like with T8.f's and T8.g's samples by cell.
+    - `census_near_sun/cold` reads no cache, T8.g's path, so its gate reads that path. The warm
+      benches' fills are the cold census through an empty cache, the server's path, which also
+      builds each entry's second `StarBounds`.
+    - The double take, ruled at about 300–500 CPU-s, was not separated from the noise. The step
+      bench's costs (the pairs, η and phase reads, 1.1–2.1 µs a record in C–E, on some 3.3 × 10⁸
+      records bounded) give about 450 CPU-s.
+  - **The provisional figures, at P11.T17.a's answers** (2026-10-08). The run took
+    `census_near_sun/warm` and `/warm_jump`, sampled 1 block in 1,000, 15 workers, under the
+    heavy-test lock while other lanes built (load about 15), so provisional. The caps are T7.b's by
+    ray at the uniform cut: C 14,563, D 13,232 and E 46,010 ly at most, 1.04 × 10⁸ cells.
+    `HYPERION_SKY_CACHE_MB` was 65,536, so that the sampled cache held the sample. Estimated,
+    CPU-s:
+
+    | Census                                          | CPU-s            | Of cold |
+    | ----------------------------------------------- | ---------------- | ------- |
+    | The Sun, cold through an empty cache (two runs) | 1.08, 1.14 × 10⁶ |         |
+    | The Sun again, warm                             | 1.10 × 10⁶       | 102%    |
+    | 1,000 ly toward the centre, cold                | 1.06 × 10⁶       |         |
+    | The same, through the Sun's entries             | 1.28 × 10⁶       | 121%    |
+    - **S1 is met.** No cell was rebuilt. After the jump, 84,581 of the sample's 93,514 cells
+      (90.4%) were served, and 8,933 new ones merged into their blocks.
+    - **S2 is met.** Both warm replies equal their cold ones, stars and tallies, with the same
+      systems generated: 133,946 and 133,687 in the sample.
+    - **S3 fails at the shipped 64 MiB, as ruled for T17.a.** The entries hold 1.36 × 10⁸ records:
+      13.6 GB for the Sun's sky and 14.4 GB with the jump's new cells. That is 5.0 B a built
+      cell beyond its records, inside the 8 B budget, so the blocks stay 4³.
+    - **The ratios are noise about 100%, as the ruling expected (about 98%).** The jump bounds C's
+      records star by star 5.9 × 10⁷ times against 2.0 × 10⁸ cold, D's 3.1 against 5.0 × 10⁷, and
+      E's 6.3 against 7.3 × 10⁷. That saves some 5,000 CPU-s, under 1% of a census that is 98%
+      generation. The two cold fills of one query differed by 6%. No finding.
+    - Of the 1.34 × 10⁸ systems generated, 2.25 × 10⁵ have a star past the cut unextinguished
+      (`generated_listable`): what the deferred realised bound could at best leave.
+
+  - **To re-take after P11.T17.c, in R06.T8.n:**
+    - every figure above;
+    - the held bytes B, and so the default;
+    - `CACHE_CUT_SLACK_MAG`;
+    - test 4 on T17.c's verdicts;
+    - the warm ratios, at the eye's cut on T7.b's caps (`decision-r06-t8h-warm.md` §2.2–2.3).
+
+    At T17.a, B is about 14 GB. The ordinal form (about 8 B a record) would give some 1.1 GB of
+    records plus the cells, but T8.n's step 5 takes that only after measuring B on T17.c's
+    verdicts.
+
+  - **T11.b's question** ("A question for R06.T8.h") is answered: no, the cache holds records and
+    their bounds, not generated stars (ruling §2.4).
+  - **Not changed.**
+    - No generated output moves: `GENERATOR_VERSION` stays 21, and no golden or protocol type
+      moves (determinism audit, `golden_diff` 0).
+    - The ruling's `deferred-corrections.md` text (§4) is the orchestrator's to add.
 - **Deviations in T9.f, as built (2026-10-07).** The band's march kept, as the band ruling
   (`decision-r06-t9b-band.md`, item 7) sets it out, with these details.
   - **The API** (`sky/band.rs`):
@@ -7096,6 +7333,9 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       already flag it (`decision-p11-t16-hierarchy-bound.md`, "The warm budget": with records
       alone a warm census still generates the survivors, about 20–35% of cold after T8.g). T8.h
       measures it.
+      _Answered by R06.T8.h (2026-10-08, `decision-r06-t8h-warm.md` §2.4): no. The cache holds
+      records and their bounds, and the warm budget is re-stated as structural, with 25% a
+      recorded target (T17)._
 - **Deviations in T11.c, as built (2026-10-07).** The band, the limits, the discs, the tables and
   the landing switch, as the task sets them out, with these details.
   - **The landing switch.** `--serve-sky`, or `HYPERION_SERVE_SKY` (clap's boolish values), a

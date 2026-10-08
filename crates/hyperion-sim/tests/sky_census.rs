@@ -148,9 +148,8 @@ fn agree_in(
     for &layer in &CAPPED_LAYERS {
         let (cl, bl) = (c.layer(layer), b.layer(layer));
         eprintln!(
-            "{what}: {layer:?}: {} cells, {} candidates, {} generated of {}, {} accepted",
+            "{what}: {layer:?}: {} cells, {} generated of {}, {} accepted",
             cl.cells(),
-            cl.candidates(),
             cl.generated(),
             bl.generated(),
             cl.accepted(),

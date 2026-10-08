@@ -4,6 +4,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::coords::GalacticPosition;
+use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::testing::milky_way_galaxy;
 use crate::galaxy::gas::modifiers::NoModifiers;
 use crate::galaxy::gas::noise::NoiseCache;
@@ -39,6 +40,14 @@ pub(crate) fn phase_envelope() -> &'static PhaseEnvelope {
 pub(crate) fn milky_way_offsets() -> &'static CellOffsets {
     static OFFSETS: OnceLock<CellOffsets> = OnceLock::new();
     OFFSETS.get_or_init(|| CellOffsets::build(milky_way_galaxy()))
+}
+
+/// The fixture's galaxy built with its kinematic tables, so that its systems move: built once for
+/// the tests of the census in motion (R06.T8.f, R06.T8.j) and of its cell cache (R06.T8.h). Its
+/// parameters are the fixture's, so [`milky_way_offsets`] serve it.
+pub(crate) fn moving_galaxy() -> &'static Galaxy {
+    static MOVING: OnceLock<Galaxy> = OnceLock::new();
+    MOVING.get_or_init(|| milky_way_galaxy().clone().with_full_potential())
 }
 
 /// A fixed stream of uniform deviates in [0, 1), for the sky tests' random queries: `SplitMix64`

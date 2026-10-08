@@ -219,7 +219,7 @@ impl SkyTables {
     }
 
     /// A job's own context over these tables, with a noise cache of `noise_slots`, the cells'
-    /// bright subsets from `cells`, no sources beyond the grid and no gas modifiers (plan 09's
+    /// entries from `cells`, no sources beyond the grid and no gas modifiers (plan 09's
     /// feature members and their gas, from R06.T16.a).
     #[must_use]
     fn context<'a>(&'a self, noise_slots: usize, cells: &'a dyn SkyCellCache) -> SkyContext<'a> {
@@ -438,8 +438,8 @@ fn add_tallies(sum: &mut Option<CensusTallies>, tallies: &CensusTallies) {
 ///
 /// The cells are handed out in the plan's canonical order, and at most [`BULK_QUEUE_CAPACITY`] jobs
 /// are outstanding at once, so the parts held while the census runs stay bounded. Each job builds
-/// its own [`SkyContext`] over the inputs' tables, and reads each cell's bright subset through
-/// their cell cache, which never changes the census (Design note 12). A job stops at its next cell
+/// its own [`SkyContext`] over the inputs' tables, and reads and keeps each cell's entry through
+/// their cell cache, which never changes the census (Design note 12, R06.T8.h). A job stops at its next cell
 /// once `token` is cancelled, and the pool skips those still queued. A census that ends early,
 /// because a job failed or this future was dropped, abandons its other jobs too: each stops before
 /// its next cell. The parts are joined as they arrive and merged in one more bulk job, which is the
@@ -508,7 +508,7 @@ pub(crate) struct CensusInputs {
     pub(crate) key: GalaxyKey,
     /// The tables the census and the band read.
     pub(crate) tables: Arc<SkyTables>,
-    /// The cells' bright subsets every request shares (Design note 12).
+    /// The cells' entries every request shares (Design note 12, R06.T8.h).
     pub(crate) cells: Arc<SharedSkyCellCache>,
     /// The query censused.
     pub(crate) query: Arc<SkyQuery>,
@@ -754,7 +754,8 @@ mod tests {
             usize::try_from(plan.cell_count()).unwrap() > 2 * CENSUS_JOB_CELLS,
             "the census is split into several jobs"
         );
-        // Every cell the cold census looked up, the warm one found built at its own floor.
+        // Every cell the cold census looked up, the warm one found built, its entry holding the
+        // query's key and window.
         let lookups = after_cold.cache().hits() + after_cold.cache().misses();
         assert!(lookups > 0);
         assert_eq!(
@@ -765,6 +766,11 @@ mod tests {
             ),
             (lookups, 0, 0),
             "the warm census is served from the cache: {after_cold:?}, then {after_warm:?}"
+        );
+        assert_eq!(
+            (after_cold.missed(), after_warm.served()),
+            (lookups, lookups),
+            "every cell built cold and served warm: {after_cold:?}, then {after_warm:?}"
         );
 
         let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache);
@@ -780,6 +786,18 @@ mod tests {
         assert!(!one_pass.listed().is_empty());
         assert_eq!(cold, one_pass);
         assert_eq!(warm, one_pass);
+        // Bit for bit: `PartialEq` holds 0.0 and −0.0 equal.
+        let bits = |census: &SkyCensus| -> Vec<u64> {
+            census
+                .listed()
+                .iter()
+                .chain(census.overflow())
+                .flat_map(|s| [s.v().value(), s.a_v().value(), s.distance().value()])
+                .map(f64::to_bits)
+                .collect()
+        };
+        assert_eq!(bits(&cold), bits(&one_pass));
+        assert_eq!(bits(&warm), bits(&one_pass));
         pool.shutdown().await.unwrap();
     }
 

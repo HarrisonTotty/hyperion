@@ -8,18 +8,22 @@
 //!   star first ([`StarBounds`]), and the census's tallies.
 //! - [`merge`]: the parts merged in a total order and cut at `n_max`, the [`SkyCensus`], whole or
 //!   to the shells done.
-//! - [`cache`]: the per-cell cache's trait, which [`SkyContext`] holds, and its monotone rule.
+//! - [`cache`]: the cell cache's trait, which [`SkyContext`] holds, its blocks of cells keyed by
+//!   magnitude ([`SkyBlock`]), and the rule by which an entry serves a query.
 
 pub mod cache;
 pub mod cell;
 pub mod merge;
 pub mod query;
 
-pub use cache::{NoSkyCellCache, Served, SkyCellCache, serve_from_entry};
+pub use cache::{
+    BlockKey, BlockParams, CellOutcome, HeldRecord, NoSkyCellCache, Rebuild, SkyBlock, SkyCellCache,
+};
 pub use cell::{
-    Bound, BoundStar, CellOffsets, CensusTallies, GRID_STAR_BOUND, LayerTally, PairTally,
-    RecordLight, SkyStar, StarBounds, StarLight, cell_floor, cell_offset_bound, census_cell,
-    census_record, flux_bound, star_offset_bound,
+    Bound, BoundStar, CellOffsets, CensusCost, CensusTallies, GRID_STAR_BOUND, LayerCost,
+    LayerTally, PairTally, RecordLight, SkyStar, StarBounds, StarLight, cell_floor,
+    cell_offset_bound, census_cell, census_cell_with_cost, census_record, flux_bound,
+    star_offset_bound,
 };
 pub use merge::{SkyCensus, merge_census, merge_shells, sky_order};
 pub use query::{

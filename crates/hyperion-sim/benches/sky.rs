@@ -23,22 +23,32 @@
 //! takes it as a stand-in: its own eye cut will be shallower, so its figure is an upper bound.
 //!
 //! **Sampled** (R06.T8.f): with `HYPERION_SKY_BENCH_SAMPLE=k`, a census takes only the cells whose
-//! key's hash ([`sample_hash`], a fixed mixer of the layer and the cell's coordinates) is 0 modulo
-//! k, and prints its tallies and CPU time scaled by k, labelled an estimate: the plan's time and
-//! the walk of every slab's cells unscaled, the sampled cells' census times k. The time each
-//! iteration returns to criterion is that estimate. Unset, or 1, censuses every cell.
+//! cache block's hash ([`sample_hash`], a fixed mixer of the layer and the block's coordinates;
+//! since R06.T8.h whole blocks of 4³ cells, so that the cache's bytes scale) is 0 modulo k, and
+//! prints its tallies and CPU time scaled by k, labelled an estimate: the plan's time and the walk
+//! of every slab's cells unscaled, the sampled cells' census times k. The time each iteration
+//! returns to criterion is that estimate. Unset, or 1, censuses every cell.
 //!
-//! The cell cache is the benches' own, built on `serve_from_entry` as the server's will be
-//! (R06.T11.b): least recently used out, bounded by `HYPERION_SKY_CACHE_MB` (default 64 MiB), each
-//! entry weighing its records plus its own size. The cold census starts each iteration
-//! with an empty cache; the warm one with the cache one census of the same query left.
+//! The cell cache is the benches' own, built on `SkyBlock::with_cell` as the server's is
+//! (R06.T11.b, T8.h): blocks of 4³ cells, least recently used out, bounded by
+//! `HYPERION_SKY_CACHE_MB` (default 64 MiB) divided by the sample, so that a sampled warm census
+//! is the shipped size's (`decision-r06-census-cost-signoff.md`, condition 4), each block weighing
+//! its held records plus its own size. The cold census starts each iteration with an empty cache;
+//! `census_near_sun/cold` reads no cache, R06.T8.g's path, so that its gate reads it; the warm
+//! one starts with the cache one census of the same query left, whose fill is its cold figure;
+//! the warm jump
+//! (`census_near_sun/warm_jump`, R06.T8.h) with the cache the Sun's census left, for a census
+//! 1,000 ly toward the galactic centre, against that destination's cold census. Each prints, per
+//! layer, the records held and pre-filtered and the cells served and rebuilt by cause, the cache's
+//! blocks, cells built and bytes (times the sample, the sky's estimate), and the warm ratio.
 //!
 //! | Bench | Target | Figure |
 //! | ----- | ------ | ------ |
 //! | `sky/luminosity_tables` | ≤ 30 CPU-s (T17) | pending a quiet machine |
-//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17); ≤ 6 × 10⁴ (T8.g) | 1.44 × 10⁶ CPU-s, sampled, at P11.T17.a |
+//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17); ≤ 6 × 10⁴ (T8.g) | 1.44 × 10⁶ CPU-s, sampled by cell (T8.g), at P11.T17.a |
 //! | `sky/census_near_sun/cold_camera` | none: recorded beside the eye's (T8.g) | pending P11.T17.c |
-//! | `sky/census_near_sun/warm` | ≤ 25% of cold (T17) | not yet run |
+//! | `sky/census_near_sun/warm` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | provisional at P11.T17.a (below) |
+//! | `sky/census_near_sun/warm_jump` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | provisional at P11.T17.a (below) |
 //! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | provisional (below) |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
@@ -57,7 +67,8 @@
 //! floor, of which C generates 98.3%, D 99.9% and E 99.99%. Nearly all of it is generating
 //! systems. The census-cost ruling (`decision-r06-census-cost.md`) retires the brainstorm's 5–10
 //! CPU-s and orders the levers, of which R06.T8.g's bound star by star is the one that moves it.
-//! The warm and nuclear-disc benches are left for R06.T17 or the owner, on a quiet machine.
+//! The nuclear-disc bench is left for R06.T17 or the owner, on a quiet machine; the warm ones'
+//! provisional run is R06.T8.h's (below).
 //!
 //! `sky/caps_by_ray_near_sun` (R06.T7.b) censuses the union of three plans near the Sun at 7.95,
 //! sampled: R06.T7's spheres, the caps by ray, and the caps by the eye's visibility, sorting each
@@ -92,6 +103,28 @@
 //!   99.99% before). Plan 11 cannot bound 27.7% of C's pairs, 77.1% of D's and 99.4% of E's, so
 //!   17.8%, 55.7% and 86.0% of their records keep the widened bound alone. T8.g's gates wait for
 //!   P11.T17.c's verdicts (R06's Risks, "Deviations in T8.g, as built").
+//!
+//! R06.T8.h's provisional run (2026-10-08, written against P11.T17.a; `census_near_sun/warm` and
+//! `/warm_jump`, `HYPERION_SKY_BENCH_SAMPLE` 1,000 by block, criterion's `--test`, 15 workers under
+//! the heavy-test lock while other lanes built, load about 15, so provisional). The caps are
+//! T7.b's by ray at the uniform cut: C 14,563, D 13,232 and E 46,010 ly at most, 1.04 × 10⁸ cells
+//! near the Sun. `HYPERION_SKY_CACHE_MB` was 65,536, so that the sampled cache (65.5 MiB) held
+//! the sample. At the shipped 64 MiB, the 64 KiB a sampled run gets would hold under 1% of it, as
+//! the whole sky's would. Estimated, CPU-s:
+//! - the Sun's cold census (the fills) 1.08 and 1.14 × 10⁶, about 200 s wall each;
+//! - the same query again, every cell served and none rebuilt: 1.10 × 10⁶, 102% of its fill;
+//! - 1,000 ly toward the centre, the destination cold 1.06 × 10⁶; through the Sun's entries 1.28 ×
+//!   10⁶, 121%. 84,581 of the sample's 93,514 cells (90.4%) were served, 8,933 (9.6%) new ones
+//!   merged in, none rebuilt.
+//! - Both warm replies equal their cold ones, stars and tallies, with the same systems generated
+//!   (133,946 and 133,687 in the sample).
+//! - The warm jump bounds C's records star by star 5.9 × 10⁷ times against 2.0 × 10⁸ cold, D's 3.1
+//!   against 5.0 × 10⁷ and E's 6.3 against 7.3 × 10⁷: some 5,000 CPU-s saved. That is under 1% of a
+//!   census whose generation is 98% of its cost, so both ratios are the noise of a shared machine
+//!   about 100%.
+//! - The entries: 1.36 × 10⁸ records held, 13.6 GB for the Sun's sky and 14.4 GB with the jump's
+//!   new cells, 5.0 bytes a built cell beyond its records. Generated systems with a star past the
+//!   cut unextinguished, which no bound of their own stars could skip: 2.25 × 10⁵ of 1.34 × 10⁸.
 //!
 //! The band benches (R06.T9.f) split the band of a near-Sun request at the eye's cut as the server
 //! runs it (R06.T11.c, T11.d), one face row a job over all six faces of `BandSpec::STANDARD` (64²
@@ -163,7 +196,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::params::GalaxyParams;
-use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, cell_heap_bytes, generate_cell};
+use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use hyperion_sim::id::Layer;
 use hyperion_sim::math;
 use hyperion_sim::observe::Observer;
@@ -175,9 +208,9 @@ use hyperion_sim::sky::caps::{
     CAPPED_LAYERS, CapCount, CapResolution, LayerCap, RADIAL_STEPS_PER_DECADE, layer_caps,
 };
 use hyperion_sim::sky::census::{
-    CellOffsets, CellSlab, CensusTallies, MAX_N_MAX, NoSkyCellCache, Served, SkyCellCache,
-    SkyCensus, SkyContext, SkyQuery, SkyStar, StarBounds, census_cell, census_plan, merge_census,
-    serve_from_entry,
+    BlockKey, BlockParams, CellOffsets, CellSlab, CensusCost, CensusTallies, HeldRecord, LayerCost,
+    LayerTally, MAX_N_MAX, NoSkyCellCache, Rebuild, SkyBlock, SkyCellCache, SkyCensus, SkyContext,
+    SkyQuery, SkyStar, StarBounds, census_cell, census_cell_with_cost, census_plan, merge_census,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
@@ -190,7 +223,7 @@ use hyperion_sim::stellar::multiplicity::{HierarchyBound, hierarchy_bound};
 use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::consts::RADIANS_PER_DEGREE;
-use hyperion_sim::units::{LightYears, Lux, Magnitudes, SolarMasses, Years};
+use hyperion_sim::units::{LightYears, Lux, Magnitudes, Years};
 use hyperion_testkit::golden::f64_digest;
 
 /// The fixture's seed, the sim's sky tests' own.
@@ -210,6 +243,10 @@ const CAMERA_CUT_V: f64 = 10.06;
 /// Bovy 2019, MNRAS 482, 1417).
 const SUN_LY: [f64; 3] = [0.0, 26_000.0, 68.0];
 
+/// The warm jump's destination, ly: 1,000 ly from [`SUN_LY`] toward the galactic centre, the jump
+/// drive's range (R06.T8.h).
+const JUMP_LY: [f64; 3] = [0.0, 25_000.0, 68.0];
+
 /// In the nuclear disc, ly: 150 ly from Sgr A* in the plane.
 const NUCLEAR_DISC_LY: [f64; 3] = [0.0, 150.0, 0.0];
 
@@ -224,6 +261,11 @@ static PRINTED_COLD: AtomicBool = AtomicBool::new(false);
 static PRINTED_COLD_CAMERA: AtomicBool = AtomicBool::new(false);
 static PRINTED_FILL: AtomicBool = AtomicBool::new(false);
 static PRINTED_WARM: AtomicBool = AtomicBool::new(false);
+static PRINTED_WARM_RATIO: AtomicBool = AtomicBool::new(false);
+static PRINTED_JUMP_COLD: AtomicBool = AtomicBool::new(false);
+static PRINTED_JUMP_FILL: AtomicBool = AtomicBool::new(false);
+static PRINTED_JUMP: AtomicBool = AtomicBool::new(false);
+static PRINTED_JUMP_RATIO: AtomicBool = AtomicBool::new(false);
 static PRINTED_NUCLEAR: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_SUM: AtomicBool = AtomicBool::new(false);
@@ -365,12 +407,15 @@ fn mix(word: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-/// The hash a sampled bench takes `key` by: [`mix`] of its layer, then of each of its origin's
-/// coordinates in turn, so that a sample is spread over the sky and the same on every run.
+/// The hash a sampled bench takes `key` by: [`mix`] of its layer, then of each of its block's
+/// coordinates in turn ([`BlockKey`]), so that a sample is spread over the sky, the same on every
+/// run, and takes whole blocks of the cell cache, whose bytes a sample then scales (R06.T8.h).
 fn sample_hash(key: CellKey) -> u64 {
-    key.origin_ly()
+    let block = BlockKey::of(key);
+    block
+        .coords()
         .iter()
-        .fold(mix(u64::from(key.layer().value())), |h, &c| {
+        .fold(mix(u64::from(block.layer().value())), |h, &c| {
             mix(h ^ u64::from(c.cast_unsigned()))
         })
 }
@@ -471,11 +516,15 @@ fn illumination(c: &mut Criterion) {
 /// One census's result and costs.
 struct Run {
     census: SkyCensus,
+    /// Its cost, summed over the jobs: the records past the floor, held, pre-filtered and bounded
+    /// star by star, the systems generated that a realised bound could not skip, and the cells
+    /// served and rebuilt (R06.T8.h).
+    cost: CensusCost,
     /// Each capped layer's cap, ly.
     caps: Vec<LightYears>,
     /// The plan's cells, every one, sampled or not.
     cells: u64,
-    /// The sample: one cell in this many is censused.
+    /// The sample: one block of cells in this many is censused.
     sample: u64,
     plan: Duration,
     /// The jobs' time walking their slabs' cells, the sampled cells' census aside.
@@ -494,7 +543,8 @@ impl Run {
     }
 }
 
-/// The census of `query` through `cells`, as the server will run it, taking one cell in `sample`.
+/// The census of `query` through `cells`, as the server will run it, taking one block of cells in
+/// `sample`.
 fn census(
     sky: &Sky,
     query: &SkyQuery,
@@ -524,22 +574,29 @@ fn census(
             modifiers: &NoModifiers,
         };
         let mut stars = Vec::new();
-        let mut tallies = CensusTallies::default();
+        let (mut tallies, mut cost) = (CensusTallies::default(), CensusCost::default());
         let mut censusing = Duration::ZERO;
         for key in slab.cells() {
             if sample > 1 && !sample_hash(key).is_multiple_of(sample) {
                 continue;
             }
             let opened = Instant::now();
-            tallies.add(&census_cell(&sky.galaxy, &mut ctx, key, query, &mut stars));
+            let (t, c) = census_cell_with_cost(&sky.galaxy, &mut ctx, key, query, &mut stars);
+            tallies.add(&t);
+            cost.add(&c);
             censusing += opened.elapsed();
         }
-        ((stars, tallies), censusing)
+        ((stars, tallies), cost, censusing)
     });
-    let cell_census: Duration = parts.iter().map(|(_, (_, c))| *c).sum();
-    let census = merge_census(parts.into_iter().map(|(_, (p, _))| p), query.n_max());
+    let cell_census: Duration = parts.iter().map(|(_, (_, _, c))| *c).sum();
+    let mut cost = CensusCost::default();
+    for (_, (_, c, _)) in &parts {
+        cost.add(c);
+    }
+    let census = merge_census(parts.into_iter().map(|(_, (p, _, _))| p), query.n_max());
     Run {
         census,
+        cost,
         caps: plan.caps().iter().map(LayerCap::radius).collect(),
         cells: plan.cell_count(),
         sample,
@@ -550,16 +607,32 @@ fn census(
     }
 }
 
-/// Prints `run`'s tallies and costs the first time `printed` is unset.
+/// `n` as a share of `of`, percent, for printing; 0 when `of` is.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a share of counts under 2⁵³, for printing"
+)]
+fn percent(n: u64, of: u64) -> f64 {
+    if of == 0 {
+        0.0
+    } else {
+        100.0 * n as f64 / of as f64
+    }
+}
+
+/// Prints `run`'s tallies and costs the first time `printed` is unset, and the cache's blocks if
+/// it was read through one.
 fn report_once(printed: &AtomicBool, name: &str, run: &Run, cache: Option<&BenchCellCache<'_>>) {
     if printed.swap(true, Ordering::Relaxed) {
         return;
     }
-    let t = run.census.tallies();
-    let k = run.sample;
+    let sample = run.sample;
     // A sampled census's counts and time, scaled by the sample: estimates, and labelled so.
-    let (what, scale) = if k > 1 {
-        (format!("ESTIMATE from 1 cell in {k}, scaled by {k}"), k)
+    let (what, scale) = if sample > 1 {
+        (
+            format!("ESTIMATE from 1 block of cells in {sample}, scaled by {sample}"),
+            sample,
+        )
     } else {
         ("every cell".to_owned(), 1)
     };
@@ -576,101 +649,162 @@ fn report_once(printed: &AtomicBool, name: &str, run: &Run, cache: Option<&Bench
         run.census.listed().len(),
         run.census.overflow().len(),
     );
+    let mut outcomes = [0_u64; 5];
     for (cap, &layer) in run.caps.iter().zip(&CAPPED_LAYERS) {
-        let l = t.layer(layer);
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "a share of counts under 2⁵³, for printing"
-        )]
-        let share = if l.candidates() == 0 {
-            0.0
-        } else {
-            100.0 * l.generated() as f64 / l.candidates() as f64
-        };
-        eprintln!(
-            "  {layer:?}: cap {:.0} ly; {} cells, {} records past the floor, {} generated \
-             ({share:.2}% of the records), {} accepted, {} listed (sampled)",
-            cap.value(),
-            l.cells() * scale,
-            l.candidates() * scale,
-            l.generated() * scale,
-            l.accepted() * scale,
-            l.listed(),
-        );
-        // R06.T8.g's bound star by star: the records it bounded, those holding a pair plan 11
-        // cannot bound, and their pairs by plan 11's verdict, each share of the pairs counted.
-        let p = l.pairs();
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "a share of counts under 2⁵³, for printing"
-        )]
-        let of_pairs = |n: u64| {
-            if p.total() == 0 {
-                0.0
-            } else {
-                100.0 * n as f64 / p.total() as f64
-            }
-        };
-        eprintln!(
-            "    star by star: {} records bounded, {} unbounded; {} pairs: detached {:.2}%, \
-             unchanged {:.2}%, remnants {:.2}%, bright {:.2}%, none {:.2}%",
-            l.star_bounded() * scale,
-            l.unbounded_records() * scale,
-            p.total() * scale,
-            of_pairs(p.detached()),
-            of_pairs(p.unchanged()),
-            of_pairs(p.remnants()),
-            of_pairs(p.bright()),
-            of_pairs(p.unbounded()),
-        );
+        let cost = run.cost.layer(layer);
+        report_layer(layer, *cap, run.census.tallies().layer(layer), cost, scale);
+        for (sum, n) in outcomes.iter_mut().zip([
+            cost.served(),
+            cost.missed(),
+            cost.rebuilt(Rebuild::Key),
+            cost.rebuilt(Rebuild::Window),
+            cost.rebuilt(Rebuild::Parameters),
+        ]) {
+            *sum += n;
+        }
     }
+    let [served, missed, key, window, parameters] = outcomes;
+    eprintln!(
+        "  cells: {served} served, {missed} missed, rebuilt {key} for the key, {window} for the \
+         window, {parameters} for the parameters (sampled)",
+    );
     if let Some(cache) = cache {
-        let kept = cache.lock();
-        eprintln!(
-            "  cache: {} served, {} missed, {} rebuilt, {} evicted; {} entries, {} of {} bytes",
-            kept.served,
-            kept.missed,
-            kept.rebuilt,
-            kept.evicted,
-            kept.entries.len(),
-            kept.bytes,
-            cache.max_bytes,
-        );
+        report_cache(cache, scale);
     }
 }
 
-/// One cell's entry in [`BenchCellCache`]: its records shared, so that a lookup filters them
-/// outside the lock.
+/// Prints one layer's tallies and cost, scaled by `scale`.
+fn report_layer(layer: Layer, cap: LightYears, tally: &LayerTally, cost: &LayerCost, scale: u64) {
+    eprintln!(
+        "  {layer:?}: cap {:.0} ly; {} cells, {} records past the floor, {} generated ({:.2}% of \
+         the records; {} of them with a star past the cut unextinguished), {} accepted, {} listed \
+         (sampled)",
+        cap.value(),
+        tally.cells() * scale,
+        cost.candidates() * scale,
+        tally.generated() * scale,
+        percent(tally.generated(), cost.candidates()),
+        cost.generated_listable() * scale,
+        tally.accepted() * scale,
+        tally.listed(),
+    );
+    // R06.T8.g's bound star by star: the records it bounded, those holding a pair plan 11
+    // cannot bound, and their pairs by plan 11's verdict, each share of the pairs counted.
+    let pairs = cost.pairs();
+    let share = |n: u64| percent(n, pairs.total());
+    eprintln!(
+        "    star by star: {} records bounded, {} unbounded; {} pairs: detached {:.2}%, \
+         unchanged {:.2}%, remnants {:.2}%, bright {:.2}%, none {:.2}%",
+        cost.star_bounded() * scale,
+        cost.unbounded_records() * scale,
+        pairs.total() * scale,
+        share(pairs.detached()),
+        share(pairs.unchanged()),
+        share(pairs.remnants()),
+        share(pairs.bright()),
+        share(pairs.unbounded()),
+    );
+    // R06.T8.h's cache: the records its entries hold of the cells read or built, and those the
+    // pre-filter skipped.
+    eprintln!(
+        "    cache: {} records held, {} pre-filtered; cells {} served, {} missed, rebuilt {} for \
+         the key, {} for the window, {} for the parameters",
+        cost.held() * scale,
+        cost.prefiltered() * scale,
+        cost.served() * scale,
+        cost.missed() * scale,
+        cost.rebuilt(Rebuild::Key) * scale,
+        cost.rebuilt(Rebuild::Window) * scale,
+        cost.rebuilt(Rebuild::Parameters) * scale,
+    );
+}
+
+/// Prints the cache's blocks, cells built, records held and bytes, the bytes also scaled by
+/// `scale`, the sky's estimate.
+fn report_cache(cache: &BenchCellCache<'_>, scale: u64) {
+    let kept = cache.lock();
+    let built: u64 = kept
+        .blocks
+        .values()
+        .map(|e| u64::from(e.block.built_cells()))
+        .sum();
+    let records: usize = kept.blocks.values().map(|e| e.block.held().len()).sum();
+    let bytes = u64::try_from(kept.bytes).unwrap_or(u64::MAX);
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a mean of counts under 2⁵³, for printing"
+    )]
+    let per_cell = if built == 0 {
+        0.0
+    } else {
+        (bytes as f64 - (size_of::<HeldRecord>() * records) as f64) / built as f64
+    };
+    eprintln!(
+        "  cache: {} blocks, {built} cells built, {records} records held; {bytes} of {} bytes \
+         (the sky's estimate {} bytes, {per_cell:.1} bytes a cell beyond its records); {} blocks \
+         evicted, {} refused (sampled)",
+        kept.blocks.len(),
+        cache.max_bytes,
+        bytes * scale,
+        kept.evicted,
+        kept.refused,
+    );
+}
+
+/// Prints, the first time `printed` is unset, `warm`'s CPU time against `cold`'s: R06.T17's warm
+/// ratio, whose target is at most 25% (a target since R06.T8.h, `decision-r06-t8h-warm.md`).
+fn report_ratio(printed: &AtomicBool, name: &str, warm: &Run, cold: &Run) {
+    if printed.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let (w, c) = (warm.cpu().as_secs_f64(), cold.cpu().as_secs_f64());
+    let generated = |run: &Run| -> u64 {
+        CAPPED_LAYERS
+            .iter()
+            .map(|&l| run.census.tallies().layer(l).generated())
+            .sum()
+    };
+    eprintln!(
+        "{name}: warm {w:.1} CPU-s against cold {c:.1} CPU-s: {:.1}% (target at most 25%); \
+         generated {} warm, {} cold; the same reply: {}",
+        100.0 * w / c,
+        generated(warm),
+        generated(cold),
+        warm.census == cold.census,
+    );
+}
+
+/// One block's entry in [`BenchCellCache`]: the block shared, so that a lookup reads it outside
+/// the lock.
 #[derive(Debug)]
 struct Entry {
-    held: SolarMasses,
-    records: Arc<[SystemRecord]>,
+    block: Arc<SkyBlock>,
     bytes: usize,
     used: u64,
 }
 
-/// What an entry weighs beyond its records: its key twice (in both maps), itself, its place in the
-/// recency order and its records' reference counts.
+/// What a block weighs beyond its held records: its key twice (in both maps), its entry, itself,
+/// its place in the recency order and its reference counts.
 const ENTRY_OVERHEAD_BYTES: usize =
-    2 * size_of::<CellKey>() + size_of::<Entry>() + 3 * size_of::<u64>();
+    2 * size_of::<BlockKey>() + size_of::<Entry>() + size_of::<SkyBlock>() + 3 * size_of::<u64>();
 
 #[derive(Debug, Default)]
 struct Kept {
-    entries: HashMap<CellKey, Entry>,
-    by_use: BTreeMap<u64, CellKey>,
+    blocks: HashMap<BlockKey, Entry>,
+    by_use: BTreeMap<u64, BlockKey>,
     bytes: usize,
     clock: u64,
-    served: u64,
-    missed: u64,
-    rebuilt: u64,
     evicted: u64,
+    refused: u64,
 }
 
-/// The benches' cell cache, built on `serve_from_entry` as the server's will be: one galaxy's
-/// entries behind a lock, the least recently used out first, at most `max_bytes` bytes held, an
-/// entry weighing its records plus [`ENTRY_OVERHEAD_BYTES`] (the maps' nodes are not counted). The
-/// lock is held only to find, touch or store an entry: an entry is filtered, and a cell built,
-/// outside it, and a built cell is kept unless its entry already serves its floor.
+/// The benches' cell cache, built on `SkyBlock::with_cell` as the server's is (R06.T11.b, T8.h):
+/// one galaxy's blocks behind a lock, the least recently used out first, at most `max_bytes`
+/// bytes held, a block weighing its held records plus [`ENTRY_OVERHEAD_BYTES`] (the maps' nodes
+/// are not counted). A block is read outside the lock, and merged under it.
+///
+/// Its budget is `HYPERION_SKY_CACHE_MB` divided by the bench's sample, so that a sampled warm
+/// census is the shipped size's (`decision-r06-census-cost-signoff.md`, condition 4).
 #[derive(Debug)]
 struct BenchCellCache<'g> {
     galaxy: &'g Galaxy,
@@ -679,8 +813,8 @@ struct BenchCellCache<'g> {
 }
 
 impl<'g> BenchCellCache<'g> {
-    /// An empty cache for `galaxy` under `HYPERION_SKY_CACHE_MB`.
-    fn new(galaxy: &'g Galaxy) -> Self {
+    /// An empty cache for `galaxy` under `HYPERION_SKY_CACHE_MB`, divided by `sample`.
+    fn new(galaxy: &'g Galaxy, sample: u64) -> Self {
         let mb = match std::env::var("HYPERION_SKY_CACHE_MB") {
             Err(VarError::NotPresent) => DEFAULT_CACHE_MB,
             Err(VarError::NotUnicode(_)) => panic!("HYPERION_SKY_CACHE_MB is not Unicode"),
@@ -688,9 +822,10 @@ impl<'g> BenchCellCache<'g> {
                 panic!("HYPERION_SKY_CACHE_MB={v} is not a whole number of MiB: {e}")
             }),
         };
+        let sample = usize::try_from(sample).expect("a sample of under 2⁶⁴ blocks");
         Self {
             galaxy,
-            max_bytes: mb.saturating_mul(1 << 20),
+            max_bytes: mb.saturating_mul(1 << 20) / sample,
             kept: Mutex::new(Kept::default()),
         }
     }
@@ -698,29 +833,49 @@ impl<'g> BenchCellCache<'g> {
     fn lock(&self) -> MutexGuard<'_, Kept> {
         self.kept.lock().expect("a cache user does not panic")
     }
+}
 
-    fn keep(&self, key: CellKey, held: SolarMasses, records: &[SystemRecord]) {
-        if held.value().is_nan() {
-            return;
-        }
-        let bytes = cell_heap_bytes(records).saturating_add(ENTRY_OVERHEAD_BYTES);
-        if bytes > self.max_bytes {
-            return;
-        }
+impl SkyCellCache for BenchCellCache<'_> {
+    fn keeps_entries(&self) -> bool {
+        true
+    }
+
+    fn block(&self, galaxy: &Galaxy, key: BlockKey) -> Option<Arc<SkyBlock>> {
+        assert!(
+            std::ptr::eq(galaxy, self.galaxy),
+            "a cell cache is for the galaxy it was made for"
+        );
         let mut guard = self.lock();
         let kept = &mut *guard;
-        if let Some(old) = kept.entries.get(&key)
-            && old.held.value() <= held.value()
-        {
+        kept.clock += 1;
+        let clock = kept.clock;
+        let entry = kept.blocks.get_mut(&key)?;
+        kept.by_use.remove(&entry.used);
+        entry.used = clock;
+        kept.by_use.insert(clock, key);
+        Some(Arc::clone(&entry.block))
+    }
+
+    fn keep(&self, galaxy: &Galaxy, cell: CellKey, params: &BlockParams, records: &[HeldRecord]) {
+        assert!(std::ptr::eq(galaxy, self.galaxy));
+        let key = BlockKey::of(cell);
+        let mut guard = self.lock();
+        let kept = &mut *guard;
+        let old = kept.blocks.get(&key).map(|e| Arc::clone(&e.block));
+        let Some(block) = SkyBlock::with_cell(old.as_deref(), cell, params, records) else {
+            return;
+        };
+        let bytes = block.heap_bytes().saturating_add(ENTRY_OVERHEAD_BYTES);
+        if bytes > self.max_bytes {
+            kept.refused += 1;
             return;
         }
         kept.clock += 1;
         let used = kept.clock;
-        if let Some(old) = kept.entries.insert(
+        if let Some(old) = kept.blocks.insert(
             key,
             Entry {
-                held,
-                records: Arc::from(records),
+                block: Arc::new(block),
                 bytes,
                 used,
             },
@@ -735,54 +890,10 @@ impl<'g> BenchCellCache<'g> {
                 .by_use
                 .pop_first()
                 .expect("over the bound, so not empty");
-            let gone = kept.entries.remove(&oldest).expect("in both maps");
+            let gone = kept.blocks.remove(&oldest).expect("in both maps");
             kept.bytes -= gone.bytes;
             kept.evicted += 1;
         }
-    }
-}
-
-impl SkyCellCache for BenchCellCache<'_> {
-    fn bright_subset(
-        &self,
-        galaxy: &Galaxy,
-        key: CellKey,
-        floor: SolarMasses,
-        out: &mut Vec<SystemRecord>,
-    ) {
-        assert!(
-            std::ptr::eq(galaxy, self.galaxy),
-            "a cell cache is for the galaxy it was made for"
-        );
-        let found = {
-            let mut guard = self.lock();
-            let kept = &mut *guard;
-            kept.clock += 1;
-            let clock = kept.clock;
-            match kept.entries.get_mut(&key) {
-                None => {
-                    kept.missed += 1;
-                    None
-                }
-                Some(entry) => {
-                    kept.by_use.remove(&entry.used);
-                    entry.used = clock;
-                    kept.by_use.insert(clock, key);
-                    Some((entry.held, Arc::clone(&entry.records)))
-                }
-            }
-        };
-        if let Some((held, records)) = found {
-            match serve_from_entry(held, &records, floor, out) {
-                Served::Served => {
-                    self.lock().served += 1;
-                    return;
-                }
-                Served::Rebuild => self.lock().rebuilt += 1,
-            }
-        }
-        NoSkyCellCache.bright_subset(galaxy, key, floor, out);
-        self.keep(key, floor, out);
     }
 }
 
@@ -794,14 +905,15 @@ fn census_near_sun(c: &mut Criterion) {
     let sample = sample();
     let mut group = c.benchmark_group("sky");
     group.sample_size(10);
+    // R06.T8.g's path, with no cache: the cold gate's figure. The warm benches' fills are the
+    // cold census through an empty cache, which also builds each entry (R06.T8.h).
     group.bench_function("census_near_sun/cold", |b| {
         let sky = sky();
         b.iter_custom(|iters| {
             let mut cpu = Duration::ZERO;
             for _ in 0..iters {
-                let cache = BenchCellCache::new(&sky.galaxy);
-                let run = census(sky, black_box(&query), &cache, workers, sample);
-                report_once(&PRINTED_COLD, "census_near_sun/cold", &run, Some(&cache));
+                let run = census(sky, black_box(&query), &NoSkyCellCache, workers, sample);
+                report_once(&PRINTED_COLD, "census_near_sun/cold", &run, None);
                 cpu += run.cpu();
             }
             cpu
@@ -815,7 +927,7 @@ fn census_near_sun(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let mut cpu = Duration::ZERO;
             for _ in 0..iters {
-                let cache = BenchCellCache::new(&sky.galaxy);
+                let cache = BenchCellCache::new(&sky.galaxy, sample);
                 let run = census(sky, black_box(&camera), &cache, workers, sample);
                 report_once(
                     &PRINTED_COLD_CAMERA,
@@ -828,21 +940,65 @@ fn census_near_sun(c: &mut Criterion) {
             cpu
         });
     });
-    let warm: OnceCell<BenchCellCache<'static>> = OnceCell::new();
+    let warm: OnceCell<(BenchCellCache<'static>, Run)> = OnceCell::new();
     group.bench_function("census_near_sun/warm", |b| {
         let sky = sky();
-        // The warm cache is what one cold census of the same query leaves.
-        let warm = warm.get_or_init(|| {
-            let cache = BenchCellCache::new(&sky.galaxy);
+        // The warm cache is what one cold census of the same query leaves; that census is the
+        // ratio's cold.
+        let (warm, fill) = warm.get_or_init(|| {
+            let cache = BenchCellCache::new(&sky.galaxy, sample);
             let fill = census(sky, &query, &cache, workers, sample);
             report_once(&PRINTED_FILL, "census_near_sun/fill", &fill, Some(&cache));
-            cache
+            (cache, fill)
         });
         b.iter_custom(|iters| {
             let mut cpu = Duration::ZERO;
             for _ in 0..iters {
                 let run = census(sky, black_box(&query), warm, workers, sample);
                 report_once(&PRINTED_WARM, "census_near_sun/warm", &run, Some(warm));
+                report_ratio(&PRINTED_WARM_RATIO, "census_near_sun/warm", &run, fill);
+                cpu += run.cpu();
+            }
+            cpu
+        });
+    });
+    // R06.T8.h's jump: the Sun's census fills the cache, then a census 1,000 ly toward the
+    // galactic centre at the same time and cut reads it. Its reference is the destination's cold
+    // census, with an empty cache.
+    let destination = eye_query(JUMP_LY);
+    let jump_cold: OnceCell<Run> = OnceCell::new();
+    group.bench_function("census_near_sun/warm_jump", |b| {
+        let sky = sky();
+        let cold = jump_cold.get_or_init(|| {
+            let cache = BenchCellCache::new(&sky.galaxy, sample);
+            let cold = census(sky, &destination, &cache, workers, sample);
+            report_once(
+                &PRINTED_JUMP_COLD,
+                "census_near_sun/warm_jump (the destination, cold)",
+                &cold,
+                Some(&cache),
+            );
+            cold
+        });
+        b.iter_custom(|iters| {
+            let mut cpu = Duration::ZERO;
+            for _ in 0..iters {
+                let cache = BenchCellCache::new(&sky.galaxy, sample);
+                let fill = census(sky, &query, &cache, workers, sample);
+                report_once(
+                    &PRINTED_JUMP_FILL,
+                    "census_near_sun/warm_jump (the Sun's fill)",
+                    &fill,
+                    Some(&cache),
+                );
+                let run = census(sky, black_box(&destination), &cache, workers, sample);
+                report_once(
+                    &PRINTED_JUMP,
+                    "census_near_sun/warm_jump",
+                    &run,
+                    Some(&cache),
+                );
+                report_ratio(&PRINTED_JUMP_RATIO, "census_near_sun/warm_jump", &run, cold);
                 cpu += run.cpu();
             }
             cpu

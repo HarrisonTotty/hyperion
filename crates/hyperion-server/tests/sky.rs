@@ -425,10 +425,34 @@ fn wire_v_and_distance(star: &[u8; SKY_STAR_BYTES]) -> (i16, f32) {
     )
 }
 
+/// Asserts that the stars `sent` lists are the sim's census of `query`'s listed stars, in its
+/// order, by the V and distance the wire carries.
+#[track_caller]
+fn assert_stars_are_the_sims(sent: &Sent, query: &SkyQuery, what: &str) {
+    let sim = sim_census(query);
+    let payload = sent.payload();
+    let stars_bytes = usize::try_from(sent.response.stars_bytes).unwrap();
+    let (stars, rest) = payload[..stars_bytes].as_chunks::<SKY_STAR_BYTES>();
+    assert!(rest.is_empty(), "{what}: whole stars");
+    assert_eq!(sim.listed().len(), stars.len(), "{what}");
+    for (index, (star, bytes)) in sim.listed().iter().zip(stars).enumerate() {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the wire's V and distance, as Design note 17 rounds them"
+        )]
+        let expected = (
+            (star.v().value() * 1_000.0).round() as i16,
+            star.distance().value() as f32,
+        );
+        assert_eq!(wire_v_and_distance(bytes), expected, "{what}: star {index}");
+    }
+}
+
 /// A sky's manifest is what was sent: its chunks in order before the response, each a frame of at
 /// most 256 KiB for the request, their bytes the manifest's, split into the listed stars and the
 /// band, the stars the sim's census in its order. The same sky asked again is served from the cell
-/// cache, with the same bytes (Design note 12).
+/// cache, with the same bytes (Design note 12), and a sky asked from a little way off rebuilds
+/// none of the cells both censuses open, its stars the sim's census's (R06.T8.h).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_skys_manifest_matches_what_was_sent() {
     let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
@@ -466,22 +490,7 @@ async fn a_skys_manifest_matches_what_was_sent() {
         .expect("a query")
         .with_caps_forced(LightYears::new(SMALL_CAP_LY))
         .expect("a forced cap");
-    let sim = sim_census(&query);
-    let stars_bytes = usize::try_from(response.stars_bytes).unwrap();
-    let (stars, rest) = payload[..stars_bytes].as_chunks::<SKY_STAR_BYTES>();
-    assert!(rest.is_empty(), "whole stars");
-    assert_eq!(sim.listed().len(), stars.len());
-    for (index, (star, bytes)) in sim.listed().iter().zip(stars).enumerate() {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the wire's V and distance, as Design note 17 rounds them"
-        )]
-        let expected = (
-            (star.v().value() * 1_000.0).round() as i16,
-            star.distance().value() as f32,
-        );
-        assert_eq!(wire_v_and_distance(bytes), expected, "star {index}");
-    }
+    assert_stars_are_the_sims(&sent, &query, "near the Sun");
 
     // Asked again, every cell the census looked up is served from the cache, with the same bytes.
     let cold = server.stats().sky_cells();
@@ -501,6 +510,37 @@ async fn a_skys_manifest_matches_what_was_sent() {
         (lookups, 0, 0, 0),
         "the second census's cells are the first's: {cold:?}, then {warm:?}"
     );
+    assert_eq!(
+        warm.served() - cold.served(),
+        lookups,
+        "{cold:?}, then {warm:?}"
+    );
+
+    // A sky 20 ly along x, inside the forced cap so that the two plans share most of their cells
+    // (a jump of 1,000 ly would share none at this cap), reads the entries the first left: none
+    // is rebuilt, the new cells merge into their blocks, and its stars are the sim's census's of
+    // its own query, which reads no cache.
+    let moved_ly = [SUN_LY[0] + 20, SUN_LY[1], SUN_LY[2]];
+    let mut request = sky(&universe);
+    request.observer.cell_ly = moved_ly;
+    let moved = served(&mut client, request).await;
+    let after = server.stats().sky_cells();
+    assert_eq!(after.rebuilt(), 0, "{after:?}");
+    assert!(
+        after.served() > warm.served() && after.missed() > warm.missed(),
+        "shared cells served and new ones built: {warm:?}, then {after:?}"
+    );
+    let at = SimPosition::from_light_years(moved_ly.map(f64::from)).expect("in the cube");
+    let query = SkyQuery::builder(
+        Observer::new(at, hyperion_sim::time::UniverseTime::EPOCH).expect("an observer"),
+        Magnitudes::new(CAMERA_LIMIT_V),
+    )
+    .build()
+    .expect("a query")
+    .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+    .expect("a forced cap");
+    assert!(moved.response.listed > 0, "the moved sky lists stars");
+    assert_stars_are_the_sims(&moved, &query, "20 ly along x");
 
     client.close().await;
     server.stop().await;

@@ -1,9 +1,9 @@
 //! One cell of the census: its bright systems, each star placed and measured at its retarded time
 //! (rendering plan R06, R06.T8.b; Design note 10).
 //!
-//! For each record the mass skip keeps
-//! ([`SkyCellCache::bright_subset`](super::cache::SkyCellCache::bright_subset) above the cell's
-//! floor, [`BrightnessEnvelope::mass_floor`]): the observer's own system is left out; its light is
+//! For each record the mass skip keeps (above the cell's floor,
+//! [`BrightnessEnvelope::mass_floor`], from the cell's records or its cell cache's entry,
+//! [`census_cell_with_cost`]): the observer's own system is left out; its light is
 //! bounded by [`flux_bound`], then star by star ([`StarBounds`], R06.T8.g), before its motion is
 //! built, at its epoch position's distance less the cell's pad and offset and over the ages the
 //! light's travel then allows (R06.T8.f); a member of the galactic centre, whose orbit is not
@@ -71,7 +71,7 @@ use crate::galaxy::gas::extinction::{NoiseMode, Quality, sightline};
 use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::{CellKey, SystemKind, SystemRecord};
+use crate::galaxy::placement::{CellKey, SystemKind, SystemRecord, generate_cell_where};
 use crate::galaxy::query::{pad_for, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, Layer, SystemId};
@@ -85,7 +85,7 @@ use crate::stellar::multiplicity::{
 };
 use crate::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity, primary_eta};
 use crate::stellar::{Composition, Phase};
-use crate::time::{Span, UniverseTime};
+use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, Magnitudes, Metres, SolarMasses, Years};
 
@@ -93,6 +93,10 @@ use super::super::colour::StarColour;
 use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, always_single, max_star_mass};
 use super::super::phase::PhaseEnvelope;
 use super::super::photometry::{absolute_v_of_state, colour_of_state};
+use super::cache::{
+    BlockKey, BlockParams, CACHE_APPROACH_LY, CACHE_CUT_SLACK_MAG, CellNeed, CellOutcome,
+    HeldRecord, Lookup, Rebuild, serve_from_block,
+};
 use super::query::{SkyContext, SkyQuery};
 
 /// The quality of each star's sightline (Design note 10).
@@ -206,14 +210,11 @@ impl SkyStar {
 }
 
 /// What one layer's cells held (Design note 10's tallies), and how many of its stars a merge
-/// listed (Design note 11).
+/// listed (Design note 11): the counts a reply carries, the same whatever cell cache the census
+/// reads (R06.T8.h). How the census reached them is its [`LayerCost`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct LayerTally {
     cells: u64,
-    candidates: u64,
-    star_bounded: u64,
-    unbounded: u64,
-    pairs: PairTally,
     generated: u64,
     accepted: u64,
     listed: u64,
@@ -226,33 +227,6 @@ impl LayerTally {
     #[must_use]
     pub const fn cells(&self) -> u64 {
         self.cells
-    }
-
-    /// Records the mass skip kept.
-    #[must_use]
-    pub const fn candidates(&self) -> u64 {
-        self.candidates
-    }
-
-    /// Records bounded star by star ([`StarBounds`], R06.T8.g): those whose widened envelope's
-    /// bound before their drift passed.
-    #[must_use]
-    pub const fn star_bounded(&self) -> u64 {
-        self.star_bounded
-    }
-
-    /// Of the records bounded star by star, those holding a pair that plan 11 cannot bound, which
-    /// keep the widened envelope's bound alone ([`RecordLight::Unbounded`]).
-    #[must_use]
-    pub const fn unbounded_records(&self) -> u64 {
-        self.unbounded
-    }
-
-    /// The pairs of the records bounded star by star, over every attempt each lists, by plan 11's
-    /// verdict.
-    #[must_use]
-    pub const fn pairs(&self) -> &PairTally {
-        &self.pairs
     }
 
     /// Systems generated, their flux bound passing.
@@ -287,12 +261,8 @@ impl LayerTally {
         self.centre_members
     }
 
-    fn add(&mut self, other: &Self) {
+    const fn add(&mut self, other: &Self) {
         self.cells += other.cells;
-        self.candidates += other.candidates;
-        self.star_bounded += other.star_bounded;
-        self.unbounded += other.unbounded;
-        self.pairs.add(&other.pairs);
         self.generated += other.generated;
         self.accepted += other.accepted;
         self.listed += other.listed;
@@ -301,7 +271,8 @@ impl LayerTally {
     }
 }
 
-/// The census's tallies, per layer of [`Layer::ALL`].
+/// The census's tallies, per layer of [`Layer::ALL`]: what a reply states, never a count that
+/// depends on the census's path (R06.T8.h), which [`CensusCost`] keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CensusTallies {
     layers: [LayerTally; Layer::ALL.len()],
@@ -361,6 +332,164 @@ impl CensusTallies {
             self.layer_mut(star.layer).listed += 1;
         }
     }
+}
+
+/// What one layer's census cost: the counts that depend on how the census reached its cells,
+/// through a cell cache or not, and so are no part of a reply (R06.T8.h;
+/// `decision-r06-t8h-warm.md`). A warm census and a cold one give the same [`LayerTally`]; these
+/// may differ.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct LayerCost {
+    candidates: u64,
+    held: u64,
+    prefiltered: u64,
+    star_bounded: u64,
+    unbounded: u64,
+    pairs: PairTally,
+    generated_listable: u64,
+    served: u64,
+    missed: u64,
+    rebuilt_key: u64,
+    rebuilt_window: u64,
+    rebuilt_parameters: u64,
+}
+
+impl LayerCost {
+    /// Records the mass skip kept: of a built cell's records, or of a served cell's held ones.
+    #[must_use]
+    pub const fn candidates(&self) -> u64 {
+        self.candidates
+    }
+
+    /// Records the cell cache's entries hold, of the cells it served or built ([`HeldRecord`]).
+    #[must_use]
+    pub const fn held(&self) -> u64 {
+        self.held
+    }
+
+    /// Of a served cell's held records past the floor, those whose stored light the pre-filter
+    /// skipped before any bound was taken.
+    #[must_use]
+    pub const fn prefiltered(&self) -> u64 {
+        self.prefiltered
+    }
+
+    /// Records bounded star by star ([`StarBounds`], R06.T8.g) for the query: those whose widened
+    /// envelope's bound before their drift passed.
+    #[must_use]
+    pub const fn star_bounded(&self) -> u64 {
+        self.star_bounded
+    }
+
+    /// Of the records bounded star by star, those holding a pair that plan 11 cannot bound, which
+    /// keep the widened envelope's bound alone ([`RecordLight::Unbounded`]).
+    #[must_use]
+    pub const fn unbounded_records(&self) -> u64 {
+        self.unbounded
+    }
+
+    /// The pairs of the records bounded star by star, over every attempt each lists, by plan 11's
+    /// verdict.
+    #[must_use]
+    pub const fn pairs(&self) -> &PairTally {
+        &self.pairs
+    }
+
+    /// Generated systems with a star whose V with no extinction passes the cut: those that no
+    /// bound of a record's own realised stars could skip, the floor of what a cache of such
+    /// bounds could save (`decision-r06-t8h-warm.md`, option (b)).
+    #[must_use]
+    pub const fn generated_listable(&self) -> u64 {
+        self.generated_listable
+    }
+
+    /// Cells served from the cell cache.
+    #[must_use]
+    pub const fn served(&self) -> u64 {
+        self.served
+    }
+
+    /// Cells the cache held no entry for, built at their block's parameters, or a new block's.
+    #[must_use]
+    pub const fn missed(&self) -> u64 {
+        self.missed
+    }
+
+    /// Cells rebuilt at the query's parameters for `why`, each replacing its block.
+    #[must_use]
+    pub const fn rebuilt(&self, why: Rebuild) -> u64 {
+        match why {
+            Rebuild::Key => self.rebuilt_key,
+            Rebuild::Window => self.rebuilt_window,
+            Rebuild::Parameters => self.rebuilt_parameters,
+        }
+    }
+
+    /// Counts one cell's `outcome`.
+    const fn count(&mut self, outcome: CellOutcome) {
+        match outcome {
+            CellOutcome::Served => self.served += 1,
+            CellOutcome::Missed => self.missed += 1,
+            CellOutcome::Rebuilt(Rebuild::Key) => self.rebuilt_key += 1,
+            CellOutcome::Rebuilt(Rebuild::Window) => self.rebuilt_window += 1,
+            CellOutcome::Rebuilt(Rebuild::Parameters) => self.rebuilt_parameters += 1,
+        }
+    }
+
+    const fn add(&mut self, other: &Self) {
+        self.candidates += other.candidates;
+        self.held += other.held;
+        self.prefiltered += other.prefiltered;
+        self.star_bounded += other.star_bounded;
+        self.unbounded += other.unbounded;
+        self.pairs.add(&other.pairs);
+        self.generated_listable += other.generated_listable;
+        self.served += other.served;
+        self.missed += other.missed;
+        self.rebuilt_key += other.rebuilt_key;
+        self.rebuilt_window += other.rebuilt_window;
+        self.rebuilt_parameters += other.rebuilt_parameters;
+    }
+}
+
+/// The census's cost, per layer of [`Layer::ALL`] ([`LayerCost`]): no part of a reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CensusCost {
+    layers: [LayerCost; Layer::ALL.len()],
+}
+
+impl Default for CensusCost {
+    fn default() -> Self {
+        Self {
+            layers: [LayerCost::default(); Layer::ALL.len()],
+        }
+    }
+}
+
+impl CensusCost {
+    /// `layer`'s cost.
+    #[must_use]
+    pub fn layer(&self, layer: Layer) -> &LayerCost {
+        &self.layers[usize::from(layer.value())]
+    }
+
+    fn layer_mut(&mut self, layer: Layer) -> &mut LayerCost {
+        &mut self.layers[usize::from(layer.value())]
+    }
+
+    /// Adds `other`'s counts to these.
+    pub fn add(&mut self, other: &Self) {
+        for (a, b) in self.layers.iter_mut().zip(&other.layers) {
+            a.add(b);
+        }
+    }
+}
+
+/// A census's tallies and its cost, counted side by side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+struct Counts {
+    tallies: CensusTallies,
+    cost: CensusCost,
 }
 
 /// Whether a record's skips are taken: its flux bound before its system is generated, and each
@@ -1129,6 +1258,37 @@ struct CellReach {
     pad: f64,
     /// How far a star can lie from its system's barycentre, ly ([`CellOffsets::of`]).
     offset: f64,
+    /// The box's nearest and farthest points from the observer, ly.
+    near_ly: f64,
+    far_ly: f64,
+}
+
+/// The nearest and farthest points of `key`'s box from `apex`, ly.
+#[must_use]
+fn box_distances_ly(key: CellKey, apex: [f64; 3]) -> (f64, f64) {
+    let o = key.origin_ly();
+    let size = f64::from(key.size_ly());
+    let mut near_sq = 0.0;
+    let mut far_sq = 0.0;
+    for (&lo, &a) in o.iter().zip(&apex) {
+        let lo = f64::from(lo);
+        let hi = lo + size;
+        let near = a.clamp(lo, hi) - a;
+        let far = (a - lo).abs().max((hi - a).abs());
+        near_sq += near * near;
+        far_sq += far * far;
+    }
+    (near_sq.sqrt(), far_sq.sqrt())
+}
+
+/// β of `layer`'s pad: the light-years its records can move in a year of light, at its
+/// [`pad_speed`].
+#[must_use]
+fn pad_beta(layer: Layer) -> f64 {
+    let year = UniverseTime::EPOCH
+        .checked_add(Span::from_julian_years(1).expect("a year is a span"))
+        .expect("a year after the epoch is a time");
+    pad_for(year, pad_speed(layer)).value()
 }
 
 impl CellReach {
@@ -1152,31 +1312,18 @@ impl CellReach {
     #[must_use]
     fn of(offsets: &CellOffsets, key: CellKey, query: &SkyQuery) -> Self {
         let apex = query.observer().position().to_light_years_f64();
-        let o = key.origin_ly();
-        let size = f64::from(key.size_ly());
-        let mut near_sq = 0.0;
-        let mut far_sq = 0.0;
-        for (&lo, &a) in o.iter().zip(&apex) {
-            let lo = f64::from(lo);
-            let hi = lo + size;
-            let near = a.clamp(lo, hi) - a;
-            let far = (a - lo).abs().max((hi - a).abs());
-            near_sq += near * near;
-            far_sq += far * far;
-        }
+        let (near_ly, far_ly) = box_distances_ly(key, apex);
         let t = query.observer().time();
-        let speed = pad_speed(key.layer());
-        let year = UniverseTime::EPOCH
-            .checked_add(Span::from_julian_years(1).expect("a year is a span"))
-            .expect("a year after the epoch is a time");
-        let beta = pad_for(year, speed).value();
+        let beta = pad_beta(key.layer());
         let offset = offsets.of(key).value();
         let lead = t.since_epoch().as_julian_years_f64().abs();
-        let pad = beta * (lead + far_sq.sqrt() + offset) / (1.0 - beta);
+        let pad = beta * (lead + far_ly + offset) / (1.0 - beta);
         Self {
-            least: (near_sq.sqrt() - pad - offset).max(0.0),
+            least: (near_ly - pad - offset).max(0.0),
             pad,
             offset,
+            near_ly,
+            far_ly,
         }
     }
 }
@@ -1190,6 +1337,78 @@ const BEFORE_DRIFT_SLACK_YEARS: f64 = 1.0;
 /// beyond the pad: far more than the rounding of the distances (cell-integer arithmetic, some
 /// 10⁻¹⁶ of them), so that its distance is never beyond the one the bound after the drift reads.
 const BEFORE_DRIFT_SLACK_SHARE: f64 = 1e-9;
+
+/// The years by which a cell cache's windows ([`CellNeed`]) widen the light's ages beyond the
+/// pad, an entry's and a query's alike (R06.T8.h): twice [`BEFORE_DRIFT_SLACK_YEARS`], so that
+/// each record's ages before its drift lie inside the query's window with a year to spare against
+/// the rounding of distances and ages, and so inside every entry's window that holds it.
+const WINDOW_SLACK_YEARS: f64 = 2.0 * BEFORE_DRIFT_SLACK_YEARS;
+
+/// The share of a box's nearest distance by which a cell cache's keys ([`CellNeed`]) bring it
+/// nearer (R06.T8.h): twice [`BEFORE_DRIFT_SLACK_SHARE`], so that a query's key is never brighter
+/// than the magnitude its records' bounds before the drift read, which bring each system nearer
+/// by that share once.
+const KEY_SLACK_SHARE: f64 = 2.0 * BEFORE_DRIFT_SLACK_SHARE;
+
+/// What an entry built for `params` holds of `key` (R06.T8.h; `decision-r06-t8h-warm.md`
+/// §2.1), for every observer within [`CACHE_APPROACH_LY`] of the builder's at any time within
+/// ±H, at a cut at most [`CACHE_CUT_SLACK_MAG`] fainter:
+///
+/// - its **key**, the faintest absolute V listable at the box's least distance from any such
+///   observer: the cut plus the slack, less the distance modulus of the box's nearest distance
+///   less the approach, the largest pad such an observer can give the cell
+///   (β (H + far + approach + offset) ÷ (1 − β), as [`CellReach::of`]'s at the farthest such
+///   observer and time) and the offset;
+/// - its **window**, every emitted time such an observer can receive, Julian years from the
+///   epoch: from −H less the farthest light time (the box's farthest distance plus the approach,
+///   the pad and the offset) to +H less the least, each widened by [`WINDOW_SLACK_YEARS`].
+///
+/// A query is served exactly when its own [`query_need`] lies within it ([`CellNeed::holds`]):
+/// the approach and the slack only make that likely after a jump, and never decide it.
+#[must_use]
+pub(crate) fn entry_need(offsets: &CellOffsets, key: CellKey, params: &BlockParams) -> CellNeed {
+    let (near, far) = box_distances_ly(key, params.at().to_light_years_f64());
+    let h = CLOCK_WINDOW_H.as_julian_years_f64();
+    let beta = pad_beta(key.layer());
+    let offset = offsets.of(key).value();
+    let pad = beta * (h + far + CACHE_APPROACH_LY + offset) / (1.0 - beta);
+    let least = (near * (1.0 - KEY_SLACK_SHARE) - CACHE_APPROACH_LY - pad - offset).max(0.0);
+    let cut = params.cut().value() + CACHE_CUT_SLACK_MAG;
+    CellNeed::new(
+        Magnitudes::new(cut - distance_modulus(least.max(1e-6))),
+        (
+            -h - (far + CACHE_APPROACH_LY + pad + offset) - WINDOW_SLACK_YEARS,
+            h - least + WINDOW_SLACK_YEARS,
+        ),
+    )
+}
+
+/// What `query` needs of `key` (R06.T8.h): the faintest absolute V listable at the box's least
+/// distance (its nearest point, brought nearer by [`KEY_SLACK_SHARE`], less the pad and the
+/// offset), and every emitted time its records' light can have left them, Julian years from the
+/// epoch: from the query's time less the farthest light time to its time less the least, each
+/// widened by [`WINDOW_SLACK_YEARS`]. Every record's ages before its drift ([`BeforeDrift`]) lie
+/// within the window, and the magnitude its bounds there read is no fainter than the key. The
+/// census reads [`need_at`], from the reach it has already; the tests read this.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn query_need(offsets: &CellOffsets, key: CellKey, query: &SkyQuery) -> CellNeed {
+    need_at(&CellReach::of(offsets, key, query), query)
+}
+
+/// [`query_need`] at the cell's `reach`.
+#[must_use]
+fn need_at(reach: &CellReach, query: &SkyQuery) -> CellNeed {
+    let t = query.observer().time().since_epoch().as_julian_years_f64();
+    let least = (reach.near_ly * (1.0 - KEY_SLACK_SHARE) - reach.pad - reach.offset).max(0.0);
+    CellNeed::new(
+        Magnitudes::new(faintest_listable(query, least)),
+        (
+            t - (reach.far_ly + reach.pad + reach.offset) - WINDOW_SLACK_YEARS,
+            t - least + WINDOW_SLACK_YEARS,
+        ),
+    )
+}
 
 /// What the bounds before a record's drift read (R06.T8.f's step 5): the system's ages across
 /// every light time its epoch distance allows, years, inclusive, and that distance less the
@@ -1263,29 +1482,91 @@ fn passes_before_drift(
 /// The stars are bounded over the light-time ages and at the distance of [`BeforeDrift`], so each
 /// pair's verdict holds at every age the bound after the drift can read, and a record rejected
 /// here would be rejected there. The records bounded and their pairs' verdicts are counted in
-/// `tally`.
+/// `cost`. The record's composition and hierarchy come from `drawn`, drawn there if not yet.
 fn star_bounds_before_drift(
     galaxy: &Galaxy,
     envelope: &BrightnessEnvelope,
     record: &SystemRecord,
     query: &SkyQuery,
-    reach: &CellReach,
-    tally: &mut LayerTally,
+    (reach, drawn): (&CellReach, &mut Drawn),
+    cost: &mut LayerCost,
 ) -> Option<StarBounds> {
     let before = BeforeDrift::of(record, query, reach);
     if !before.passes(envelope, record, query) {
         return None;
     }
-    let bounds = StarBounds::of(galaxy, record, before.ages);
-    tally.star_bounded += 1;
-    tally.pairs.add(bounds.pairs());
+    let bounds = drawn.star_bounds(galaxy, record, before.ages);
+    cost.star_bounded += 1;
+    cost.pairs.add(bounds.pairs());
     let light = bounds.brightest(PhaseEnvelope::shared(), before.ages);
     if light == RecordLight::Unbounded {
-        tally.unbounded += 1;
+        cost.unbounded += 1;
     }
     light
         .may_list(Magnitudes::new(faintest_listable(query, before.nearest_ly)))
         .then_some(bounds)
+}
+
+/// A record's composition and hierarchy bound ([`draw_metallicity`], [`hierarchy_bound`]), drawn
+/// at most once for every [`StarBounds`] a census takes of it (R06.T8.h): a cell built for the
+/// cell cache bounds a record over its entry's window and over the query's ages before the drift
+/// from one hierarchy. Each bound is [`StarBounds::of`]'s bit for bit.
+#[derive(Debug, Default)]
+struct Drawn(Option<(Composition, HierarchyBound)>);
+
+impl Drawn {
+    /// The record's [`StarBounds`] over `ages`, drawing its composition and hierarchy first if
+    /// they are not yet drawn. `record` must be the same at every call.
+    fn star_bounds(
+        &mut self,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        ages: (Years, Years),
+    ) -> StarBounds {
+        let (composition, hierarchy) = self.0.get_or_insert_with(|| {
+            let composition = draw_metallicity(galaxy, record);
+            let hierarchy = hierarchy_bound(galaxy, record, &composition);
+            (composition, hierarchy)
+        });
+        StarBounds::from_hierarchy(galaxy, record, *composition, hierarchy, ages)
+    }
+}
+
+/// The light an entry for `need` keeps beside `record` (R06.T8.h; `decision-r06-t8h-warm.md`
+/// §2.1), or `None` if no census its entry serves could generate the system:
+///
+/// - a rogue planet is never held, since the census lists no star of one;
+/// - a record no density component placed is held [`RecordLight::Unbounded`], since the census
+///   generates it unbounded;
+/// - any other is held if its widened envelope's bound over the window's ages ([`flux_bound_over`])
+///   and then its light star by star over them ([`StarBounds`], its hierarchy from `drawn`) can be
+///   listed at the key, with that light.
+///
+/// Every bound only loosens as its ages widen, so a record the census of a query the entry serves
+/// would generate, whose ages before the drift the window holds and whose magnitude there the key
+/// bounds, is held, and its light passes the pre-filter.
+fn held_light(
+    galaxy: &Galaxy,
+    envelope: &BrightnessEnvelope,
+    record: &SystemRecord,
+    need: &CellNeed,
+    drawn: &mut Drawn,
+) -> Option<RecordLight> {
+    if record.kind() == SystemKind::RoguePlanet {
+        return None;
+    }
+    if record.component().is_none() {
+        return Some(RecordLight::Unbounded);
+    }
+    let ages = need.ages_of(record);
+    let key = need.key();
+    if !flux_bound_over(envelope, record, ages).is_some_and(|m| m.value() <= key.value()) {
+        return None;
+    }
+    let light = drawn
+        .star_bounds(galaxy, record, ages)
+        .brightest(PhaseEnvelope::shared(), ages);
+    light.may_list(key).then_some(light)
 }
 
 /// Whether `record`'s light can pass the cut after its retardation, at the emitted time
@@ -1392,15 +1673,32 @@ fn floor_at(
     query: &SkyQuery,
     reach: &CellReach,
 ) -> SolarMasses {
+    floor_for(
+        galaxy,
+        envelope,
+        key.layer(),
+        Magnitudes::new(faintest_listable(query, reach.least)),
+    )
+}
+
+/// The mass floor of `layer` where `faintest` is the faintest absolute V listable: [`floor_at`]'s
+/// at a magnitude given, as a cell cache's entry reads it at its key (R06.T8.h).
+#[must_use]
+fn floor_for(
+    galaxy: &Galaxy,
+    envelope: &BrightnessEnvelope,
+    layer: Layer,
+    faintest: Magnitudes,
+) -> SolarMasses {
     let component = galaxy
         .fields()
         .component_ids()
         .next()
         .expect("a galaxy has components");
     envelope.mass_floor(
-        key.layer(),
+        layer,
         component,
-        Magnitudes::new(faintest_listable(query, reach.least)),
+        faintest,
         (Years::ZERO, Years::new(MAX_AGE_YEARS)),
     )
 }
@@ -1428,15 +1726,20 @@ pub fn census_record(
             .map(|key| CellReach::of(ctx.offsets, key, query)),
         Bound::Ignored => None,
     };
+    let mut counts = Counts {
+        tallies: *tally,
+        cost: CensusCost::default(),
+    };
     record_stars(
         galaxy,
         ctx,
         record,
         query,
-        (bound, reach.as_ref()),
-        tally,
+        (bound, reach.as_ref(), &mut Drawn::default()),
+        &mut counts,
         out,
     );
+    *tally = counts.tallies;
 }
 
 /// `record` at its retarded time for `query`, if its light can pass the cut: `None` if a bound
@@ -1444,22 +1747,29 @@ pub fn census_record(
 /// counted in `tally`.
 ///
 /// Given its cell's `reach`, and if a density component placed it, its light is bounded before
-/// its drift (R06.T8.f), by the widened envelope and then star by star (R06.T8.g), and again
-/// after its retardation, at the emitted time and the apparent position. A record no density
-/// component placed (a feature member's, once T16.a brings them) has no envelope bound here and
-/// is always generated, so the census and the brute force agree.
+/// its drift (R06.T8.f), by the widened envelope and then star by star (R06.T8.g), its
+/// composition and hierarchy from `drawn`, and again after its retardation, at the emitted time
+/// and the apparent position. A record no density component placed (a feature member's, once
+/// T16.a brings them) has no envelope bound here and is always generated, so the census and the
+/// brute force agree. The bounds' counts go to `cost`.
 fn bright_retarded(
     galaxy: &Galaxy,
     envelope: &BrightnessEnvelope,
     record: &SystemRecord,
     query: &SkyQuery,
-    reach: Option<&CellReach>,
+    (reach, drawn): (Option<&CellReach>, &mut Drawn),
     tally: &mut LayerTally,
+    cost: &mut LayerCost,
 ) -> Option<Retardation> {
     let reach = reach.filter(|_| record.component().is_some());
     let star_bounds = match reach {
         Some(reach) => Some(star_bounds_before_drift(
-            galaxy, envelope, record, query, reach, tally,
+            galaxy,
+            envelope,
+            record,
+            query,
+            (reach, drawn),
+            cost,
         )?),
         None => None,
     };
@@ -1494,14 +1804,14 @@ fn bright_retarded(
 }
 
 /// [`census_record`] with its cell's reach, which bounds the record's light when given and the
-/// record has a density component.
+/// record has a density component, and its composition and hierarchy from `drawn`.
 fn record_stars(
     galaxy: &Galaxy,
     ctx: &mut SkyContext<'_>,
     record: &SystemRecord,
     query: &SkyQuery,
-    (bound, reach): (Bound, Option<&CellReach>),
-    tally: &mut CensusTallies,
+    (bound, reach, drawn): (Bound, Option<&CellReach>, &mut Drawn),
+    counts: &mut Counts,
     out: &mut Vec<SkyStar>,
 ) {
     if query.exclude() == Some(record.id()) || record.kind() == SystemKind::RoguePlanet {
@@ -1513,11 +1823,13 @@ fn record_stars(
         ctx.envelope,
         record,
         query,
-        reach,
-        tally.layer_mut(layer),
+        (reach, drawn),
+        counts.tallies.layer_mut(layer),
+        counts.cost.layer_mut(layer),
     ) else {
         return;
     };
+    let tally = &mut counts.tallies;
     let observer = query.observer();
     let emitted = r.emitted();
     let stars = SystemStars::generate(galaxy, record);
@@ -1531,6 +1843,7 @@ fn record_stars(
     let observer_at = observer.position();
     let cut = query.cut().value();
     let mut modifiers: Vec<GasModifier> = Vec::new();
+    let mut listable = false;
     for (body, place) in &positions {
         let index = u8::try_from(body.body_index())
             .ok()
@@ -1551,6 +1864,11 @@ fn record_stars(
         let Some(apparent) = place.to_galactic(r.apparent_position()) else {
             continue;
         };
+        let d = observer_at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
+        let unextinguished = unextinguished_v(m_v, d);
+        // What a bound of the record's own realised stars could not skip, whatever the cone
+        // (R06.T8.h's cost, `generated_listable`).
+        listable |= unextinguished <= cut;
         // A cone's census keeps only the stars of its region's texels, so that its listing and the
         // band share the region exactly (R06.T8.l): the star's texel by the band's own lookup, of
         // the same displacement the band places an overflow star by. Both modes keep to it: it is
@@ -1560,8 +1878,6 @@ fn record_stars(
         {
             continue;
         }
-        let d = observer_at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
-        let unextinguished = unextinguished_v(m_v, d);
         // The star's own V extinction is never negative (below), and adding it never lowers a
         // float: a star past the cut before it stays past it, so it takes no sightline (R06.T8.f).
         if bound == Bound::Applied && unextinguished > cut {
@@ -1586,10 +1902,12 @@ fn record_stars(
         });
         tally.layer_mut(layer).accepted += 1;
     }
+    counts.cost.layer_mut(layer).generated_listable += u64::from(listable);
 }
 
 /// The stars of `key` kept for `query`, appended to `out` (which is not cleared); its counts are
-/// returned, for the caller to add up with [`CensusTallies::add`].
+/// returned, for the caller to add up with [`CensusTallies::add`]. [`census_cell_with_cost`]
+/// returns its cost beside them.
 ///
 /// # Examples
 ///
@@ -1640,27 +1958,207 @@ pub fn census_cell(
     query: &SkyQuery,
     out: &mut Vec<SkyStar>,
 ) -> CensusTallies {
-    let mut tally = CensusTallies::default();
-    let layer = key.layer();
-    tally.layer_mut(layer).cells += 1;
+    census_cell_with_cost(galaxy, ctx, key, query, out).0
+}
+
+/// [`census_cell`], with the cell's cost beside its tallies: the counts that depend on how the
+/// census reached the cell, through `ctx`'s cell cache or not (R06.T8.h).
+///
+/// With [`NoSkyCellCache`](super::NoSkyCellCache) the cell is placed at its floor and each record
+/// censused, R06.T8.g's path. With a cache that keeps entries
+/// ([`SkyCellCache`](super::SkyCellCache)), the cell is
+/// served from its block if the block's entry holds the query's key and window, its held records
+/// taken past the floor, each skipped unless its stored light may list at its distance before the
+/// drift (the pre-filter), and the rest censused as R06.T8.g censuses them, their hierarchies
+/// taken again. Otherwise the cell is built at its block's parameters if they serve the query, or
+/// at the query's own, which then replace the block: placed at the entry's floor, each record held
+/// if its light over the entry's window can be listed at its key, and each past the query's floor
+/// censused from the same hierarchy. Either way the stars and tallies are R06.T8.g's, bit for bit.
+///
+/// # Panics
+///
+/// As [`SystemStars::generate`], for a key of another galaxy than `ctx`'s.
+pub fn census_cell_with_cost(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    key: CellKey,
+    query: &SkyQuery,
+    out: &mut Vec<SkyStar>,
+) -> (CensusTallies, CensusCost) {
+    let mut counts = Counts::default();
+    counts.tallies.layer_mut(key.layer()).cells += 1;
     debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");
     let reach = CellReach::of(ctx.offsets, key, query);
     let floor = floor_at(galaxy, ctx.envelope, key, query, &reach);
+    if ctx.cells.keeps_entries() {
+        census_through_cache(galaxy, ctx, key, query, (&reach, floor), &mut counts, out);
+    } else {
+        census_placed(galaxy, ctx, key, query, (&reach, floor), &mut counts, out);
+    }
+    (counts.tallies, counts.cost)
+}
+
+/// The census of `key` with no entry: its records placed at the query's `floor` and each
+/// censused, R06.T8.g's path.
+fn census_placed(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    key: CellKey,
+    query: &SkyQuery,
+    (reach, floor): (&CellReach, SolarMasses),
+    counts: &mut Counts,
+    out: &mut Vec<SkyStar>,
+) {
     let mut records = Vec::new();
-    ctx.cells.bright_subset(galaxy, key, floor, &mut records);
-    tally.layer_mut(layer).candidates += u64::try_from(records.len()).unwrap_or(u64::MAX);
+    generate_cell_where(galaxy, key, |m| m.value() >= floor.value(), &mut records);
+    counts.cost.layer_mut(key.layer()).candidates +=
+        u64::try_from(records.len()).unwrap_or(u64::MAX);
     for record in &records {
         record_stars(
             galaxy,
             ctx,
             record,
             query,
-            (Bound::Applied, Some(&reach)),
-            &mut tally,
+            (Bound::Applied, Some(reach), &mut Drawn::default()),
+            counts,
             out,
         );
     }
-    tally
+}
+
+/// The census of `key` through `ctx`'s cell cache (see [`census_cell_with_cost`]).
+fn census_through_cache(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    key: CellKey,
+    query: &SkyQuery,
+    (reach, floor): (&CellReach, SolarMasses),
+    counts: &mut Counts,
+    out: &mut Vec<SkyStar>,
+) {
+    let layer = key.layer();
+    let need = need_at(reach, query);
+    let mut params = BlockParams::of(query);
+    let mut outcome = CellOutcome::Missed;
+    if let Some(block) = ctx.cells.block(galaxy, BlockKey::of(key)) {
+        let held = entry_need(ctx.offsets, key, block.params());
+        let mut records = Vec::new();
+        match serve_from_block(&block, key, &held, &need, &mut records) {
+            Lookup::Served => {
+                drop(block);
+                census_served(galaxy, ctx, query, (reach, floor), &records, counts, out);
+                counts.cost.layer_mut(layer).count(CellOutcome::Served);
+                ctx.cells.note(key, CellOutcome::Served);
+                return;
+            }
+            Lookup::NotBuilt if held.holds(&need) => params = *block.params(),
+            Lookup::NotBuilt => outcome = CellOutcome::Rebuilt(Rebuild::Parameters),
+            Lookup::Key => outcome = CellOutcome::Rebuilt(Rebuild::Key),
+            Lookup::Window => outcome = CellOutcome::Rebuilt(Rebuild::Window),
+        }
+    }
+    let entry = entry_need(ctx.offsets, key, &params);
+    debug_assert!(
+        entry.holds(&need),
+        "{key:?}: the entry at {params:?} does not hold {query:?}'s need"
+    );
+    if !entry.holds(&need) {
+        // A query's own parameters hold it whenever its time lies within ±H, as every query's
+        // does (the builder refuses any other): kept for safety, the cell censused with no entry.
+        census_placed(galaxy, ctx, key, query, (reach, floor), counts, out);
+        counts.cost.layer_mut(layer).count(outcome);
+        ctx.cells.note(key, outcome);
+        return;
+    }
+    let held_floor = floor_for(galaxy, ctx.envelope, layer, entry.key());
+    // The entry's floor is at or below the query's, its key being no brighter; the lower of the
+    // two places every record either reads, should rounding ever part them.
+    let lowest = held_floor.value().min(floor.value());
+    let mut records = Vec::new();
+    generate_cell_where(galaxy, key, |m| m.value() >= lowest, &mut records);
+    let mut held = Vec::new();
+    for record in &records {
+        let mass = record.primary_initial_mass().value();
+        let mut drawn = Drawn::default();
+        if mass >= held_floor.value()
+            && let Some(light) = held_light(galaxy, ctx.envelope, record, &entry, &mut drawn)
+        {
+            held.push(HeldRecord::new(*record, light));
+        }
+        if mass >= floor.value() {
+            counts.cost.layer_mut(layer).candidates += 1;
+            let generated = counts.tallies.layer(layer).generated();
+            record_stars(
+                galaxy,
+                ctx,
+                record,
+                query,
+                (Bound::Applied, Some(reach), &mut drawn),
+                counts,
+                out,
+            );
+            // Inclusion monotonicity, checked wherever an entry is built: a record this query's
+            // census generates is held, and its light passes the pre-filter here, as it must for
+            // every query the entry serves.
+            debug_assert!(
+                counts.tallies.layer(layer).generated() == generated
+                    || held.last().is_some_and(|h| {
+                        h.record() == record
+                            && (record.component().is_none()
+                                || h.light().may_list(Magnitudes::new(faintest_listable(
+                                    query,
+                                    BeforeDrift::of(record, query, reach).nearest_ly,
+                                ))))
+                    }),
+                "{record:?}: generated for {query:?} but not held, or its light fails the \
+                 pre-filter: a bound tightened as its window widened"
+            );
+        }
+    }
+    counts.cost.layer_mut(layer).held += u64::try_from(held.len()).unwrap_or(u64::MAX);
+    counts.cost.layer_mut(layer).count(outcome);
+    ctx.cells.keep(galaxy, key, &params, &held);
+    ctx.cells.note(key, outcome);
+}
+
+/// The census of a served cell's `held` records: each past the query's `floor`, unless its stored
+/// light cannot be listed at its distance before the drift (the pre-filter, which takes no bound),
+/// censused as R06.T8.g censuses it, its hierarchy taken again (R06.T8.h).
+fn census_served(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    query: &SkyQuery,
+    (reach, floor): (&CellReach, SolarMasses),
+    held: &[HeldRecord],
+    counts: &mut Counts,
+    out: &mut Vec<SkyStar>,
+) {
+    for held in held {
+        let record = held.record();
+        let cost = counts.cost.layer_mut(record.layer());
+        cost.held += 1;
+        if record.primary_initial_mass().value() < floor.value() || floor.value().is_nan() {
+            continue;
+        }
+        cost.candidates += 1;
+        if record.component().is_some() {
+            let before = BeforeDrift::of(record, query, reach);
+            let faintest = Magnitudes::new(faintest_listable(query, before.nearest_ly));
+            if !held.light().may_list(faintest) {
+                cost.prefiltered += 1;
+                continue;
+            }
+        }
+        record_stars(
+            galaxy,
+            ctx,
+            record,
+            query,
+            (Bound::Applied, Some(reach), &mut Drawn::default()),
+            counts,
+            out,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1675,7 +2173,10 @@ mod tests {
     use crate::observe::Observer;
     use crate::sky::census::cache::NoSkyCellCache;
     use crate::sky::census::query::{Cone, census_plan, plan_cells};
-    use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
+    use crate::sky::testing::{
+        milky_way_dark_tables, milky_way_envelope, milky_way_offsets, moving_galaxy,
+    };
+    use crate::time::ClockWindow;
     use crate::units::Degrees;
 
     /// The Sun's place in the fixture, ly.
@@ -1702,14 +2203,6 @@ mod tests {
 
     fn observer_at(ly: [f64; 3]) -> Observer {
         Observer::new(position(ly), UniverseTime::EPOCH).expect("an observer")
-    }
-
-    /// The fixture's galaxy built with its kinematic tables, so that its systems move: built once
-    /// for the module's tests of the census in motion (R06.T8.f, R06.T8.j). Its parameters are the
-    /// fixture's, so [`milky_way_offsets`] serve it.
-    fn moving_galaxy() -> &'static Galaxy {
-        static MOVING: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
-        MOVING.get_or_init(|| milky_way_galaxy().clone().with_full_potential())
     }
 
     /// Every float of `stars` that a census measures, as bits, in order: `PartialEq` holds 0.0 and
@@ -2234,10 +2727,26 @@ mod tests {
         a.layer_mut(Layer::C).listed = 2;
         let mut b = CensusTallies::default();
         b.layer_mut(Layer::C).cells = 1;
-        b.layer_mut(Layer::E).candidates = 7;
         b.layer_mut(Layer::E).generated = 3;
         b.layer_mut(Layer::E).without_photometry = 1;
         b.layer_mut(Layer::A).centre_members = 4;
+        a.add(&b);
+        let c = a.layer(Layer::C);
+        assert_eq!((c.cells(), c.accepted(), c.listed()), (3, 5, 2));
+        let e = a.layer(Layer::E);
+        assert_eq!((e.generated(), e.without_photometry()), (3, 1));
+        assert_eq!(a.layer(Layer::A).centre_members(), 4);
+        assert!(a.feature_members_absent());
+    }
+
+    #[test]
+    fn costs_add_every_layers_counts() {
+        let mut a = CensusCost::default();
+        let mut b = CensusCost::default();
+        b.layer_mut(Layer::E).candidates = 7;
+        b.layer_mut(Layer::E).held = 9;
+        b.layer_mut(Layer::E).prefiltered = 2;
+        b.layer_mut(Layer::E).generated_listable = 1;
         b.layer_mut(Layer::E).star_bounded = 6;
         b.layer_mut(Layer::E).unbounded = 2;
         b.layer_mut(Layer::E).pairs.count(Some(PairLight::Detached));
@@ -2249,16 +2758,38 @@ mod tests {
         a.layer_mut(Layer::E)
             .pairs
             .count(Some(PairLight::Bright(Magnitudes::new(1.0))));
+        for outcome in [
+            CellOutcome::Served,
+            CellOutcome::Served,
+            CellOutcome::Missed,
+            CellOutcome::Rebuilt(Rebuild::Key),
+            CellOutcome::Rebuilt(Rebuild::Window),
+            CellOutcome::Rebuilt(Rebuild::Parameters),
+        ] {
+            a.layer_mut(Layer::C).count(outcome);
+        }
         a.add(&b);
         let c = a.layer(Layer::C);
         assert_eq!(
-            (c.cells(), c.accepted(), c.listed(), c.candidates()),
-            (3, 5, 2, 0)
+            (
+                c.served(),
+                c.missed(),
+                c.rebuilt(Rebuild::Key),
+                c.rebuilt(Rebuild::Window),
+                c.rebuilt(Rebuild::Parameters),
+                c.candidates()
+            ),
+            (2, 1, 1, 1, 1, 0)
         );
         let e = a.layer(Layer::E);
         assert_eq!(
-            (e.candidates(), e.generated(), e.without_photometry()),
-            (7, 3, 1)
+            (
+                e.candidates(),
+                e.held(),
+                e.prefiltered(),
+                e.generated_listable()
+            ),
+            (7, 9, 2, 1)
         );
         assert_eq!((e.star_bounded(), e.unbounded_records()), (6, 2));
         let pairs = e.pairs();
@@ -2273,8 +2804,6 @@ mod tests {
             ),
             (1, 1, 1, 1, 1, 5)
         );
-        assert_eq!(a.layer(Layer::A).centre_members(), 4);
-        assert!(a.feature_members_absent());
     }
 
     /// The census of a cell, skips and all, equals every record of the cell measured with no
@@ -2420,10 +2949,15 @@ mod tests {
                 let key = CellKey::of(record.id()).expect("a grid record");
                 let reach = CellReach::of(&offsets, key, &query);
                 let before = passes_before_drift(envelope, record, &query, &reach);
-                let mut tally = LayerTally::default();
-                let before_stars =
-                    star_bounds_before_drift(moving, envelope, record, &query, &reach, &mut tally)
-                        .is_some();
+                let before_stars = star_bounds_before_drift(
+                    moving,
+                    envelope,
+                    record,
+                    &query,
+                    (&reach, &mut Drawn::default()),
+                    &mut LayerCost::default(),
+                )
+                .is_some();
                 let drift = Drift::of_record(moving, record).expect("a grid record moves");
                 let r = retarded(query.observer(), &drift);
                 let d = query
@@ -3222,29 +3756,33 @@ mod tests {
             .build()
             .expect("a valid query");
         let mut ctx = context();
-        let mut tallies = CensusTallies::default();
+        let (mut tallies, mut cost) = (CensusTallies::default(), CensusCost::default());
         let mut stars = Vec::new();
         for key in cells_by_the_sun() {
-            tallies.add(&census_cell(galaxy, &mut ctx, key, &query, &mut stars));
+            let (t, c) = census_cell_with_cost(galaxy, &mut ctx, key, &query, &mut stars);
+            tallies.add(&t);
+            cost.add(&c);
         }
         let (mut bounded, mut generated, mut pairs) = (0, 0, PairTally::default());
         for layer in [Layer::C, Layer::D, Layer::E] {
-            let t = tallies.layer(layer);
+            let (t, c) = (tallies.layer(layer), cost.layer(layer));
             eprintln!(
                 "{layer:?}: {} records past the floor, {} bounded star by star ({} unbounded), \
-                 {} generated; pairs {:?}",
-                t.candidates(),
-                t.star_bounded(),
-                t.unbounded_records(),
+                 {} generated ({} listable); pairs {:?}",
+                c.candidates(),
+                c.star_bounded(),
+                c.unbounded_records(),
                 t.generated(),
-                t.pairs()
+                c.generated_listable(),
+                c.pairs()
             );
-            assert!(t.star_bounded() <= t.candidates(), "{layer:?}");
-            assert!(t.unbounded_records() <= t.star_bounded(), "{layer:?}");
-            assert!(t.generated() <= t.star_bounded(), "{layer:?}");
-            bounded += t.star_bounded();
+            assert!(c.star_bounded() <= c.candidates(), "{layer:?}");
+            assert!(c.unbounded_records() <= c.star_bounded(), "{layer:?}");
+            assert!(t.generated() <= c.star_bounded(), "{layer:?}");
+            assert!(c.generated_listable() <= t.generated(), "{layer:?}");
+            bounded += c.star_bounded();
             generated += t.generated();
-            pairs.add(t.pairs());
+            pairs.add(c.pairs());
         }
         assert!(
             generated < bounded && pairs.detached() > 0 && pairs.unbounded() > 0,
@@ -3474,5 +4012,235 @@ mod tests {
                 "{layer:?}: {systems} realised systems, under 10⁵"
             );
         }
+    }
+
+    /// [`Drawn`] gives [`StarBounds::of`]'s bounds, bit for bit, over each of two windows from one
+    /// draw of the record's composition and hierarchy: the census's warm and cold paths both read
+    /// it, so this holds them to the direct computation.
+    #[test]
+    fn a_drawn_hierarchy_gives_the_star_bounds_bit_for_bit() {
+        use hyperion_testkit::float::bits;
+        let galaxy = milky_way_galaxy();
+        let phase = PhaseEnvelope::shared();
+        let star_bits = |b: &StarBounds| -> Vec<u64> {
+            core::iter::once(b.primary())
+                .chain(b.companions())
+                .flat_map(|s| [bits(s.mass().value()), bits(s.eta().value())])
+                .chain([bits(b.composition().fe_h().value())])
+                .collect()
+        };
+        let light_bits = |light: RecordLight| match light {
+            RecordLight::Brightest(m) => Some(bits(m.value())),
+            RecordLight::Dark | RecordLight::Unbounded => None,
+        };
+        let mut checked = 0_u32;
+        for layer in [Layer::C, Layer::D, Layer::E] {
+            for record in records_near(layer, SUN, 300).iter().take(300) {
+                let age = record.age_at(UniverseTime::EPOCH).value();
+                let mut drawn = Drawn::default();
+                for ages in [
+                    (Years::new(age - 4_000.0), Years::new(age + 1_000.0)),
+                    (Years::new(age - 10.0), Years::new(age)),
+                ] {
+                    let got = drawn.star_bounds(galaxy, record, ages);
+                    let direct = StarBounds::of(galaxy, record, ages);
+                    assert_eq!(got, direct, "{record:?} over {ages:?}");
+                    assert_eq!(star_bits(&got), star_bits(&direct), "{record:?}");
+                    let (a, b) = (got.brightest(phase, ages), direct.brightest(phase, ages));
+                    assert_eq!(a, b, "{record:?}");
+                    assert_eq!(light_bits(a), light_bits(b), "{record:?}");
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 3 * 300 * 2);
+    }
+
+    /// Whether `wide`, a widened envelope's bound over a window, is no tighter than `narrow`, the
+    /// same over a window within it: some, and no fainter, wherever `narrow` is some.
+    fn flux_no_tighter(wide: Option<Magnitudes>, narrow: Option<Magnitudes>) -> bool {
+        match (wide, narrow) {
+            (_, None) => true,
+            (None, Some(_)) => false,
+            (Some(w), Some(n)) => w.value() <= n.value(),
+        }
+    }
+
+    /// Whether `wide`, a record's light over a window, is no tighter than `narrow`, its light over
+    /// a window within it, in the order dark, then brightest at a magnitude (looser as it falls),
+    /// then unbounded.
+    fn light_no_tighter(wide: RecordLight, narrow: RecordLight) -> bool {
+        match (wide, narrow) {
+            (RecordLight::Unbounded, _) | (_, RecordLight::Dark) => true,
+            (_, RecordLight::Unbounded) | (RecordLight::Dark, RecordLight::Brightest(_)) => false,
+            (RecordLight::Brightest(w), RecordLight::Brightest(n)) => w.value() <= n.value(),
+        }
+    }
+
+    /// Each bound an entry keeps over its window is no tighter than over any window within it, the
+    /// property on which a warm census's identity rests (R06.T8.h; `decision-r06-t8h-warm.md`):
+    /// over 10⁴ records of each of C, D and E, near the Sun and in the bulge, the widened
+    /// envelope's bound and the light star by star over each record's entry window, built for an
+    /// observer at the place, against the ages before the drift of three queries the entry holds
+    /// (from the place at the epoch, 900 ly along +x at +H, and 600 ly along −x at −H at a cut
+    /// 0.1 fainter), and single ages at each window's ends and middle. R06.T8.n runs it again on
+    /// P11.T17.c's verdicts.
+    #[test]
+    fn the_entry_light_holds_every_narrower_window() {
+        let galaxy = milky_way_galaxy();
+        let (envelope, offsets) = (milky_way_envelope(), milky_way_offsets());
+        let phase = PhaseEnvelope::shared();
+        let query = |at: [f64; 3], dx: f64, t: UniverseTime, cut: f64| {
+            let observer =
+                Observer::new(position([at[0] + dx, at[1], at[2]]), t).expect("an observer");
+            SkyQuery::builder(observer, Magnitudes::new(cut))
+                .build()
+                .expect("a valid query")
+        };
+        let mut checked = 0_u64;
+        for at in [SUN, BULGE] {
+            let builder = query(at, 0.0, UniverseTime::EPOCH, 7.95);
+            let params = BlockParams::of(&builder);
+            let asked = [
+                builder.clone(),
+                query(at, 900.0, ClockWindow::END, 7.95),
+                query(at, -600.0, ClockWindow::START, 8.05),
+            ];
+            for layer in [Layer::C, Layer::D, Layer::E] {
+                for record in records_near(layer, at, 10_000).iter().take(10_000) {
+                    let key = CellKey::of(record.id()).expect("a grid record");
+                    let entry = entry_need(offsets, key, &params);
+                    let wide = entry.ages_of(record);
+                    let mut drawn = Drawn::default();
+                    let flux = flux_bound_over(envelope, record, wide);
+                    let light = drawn
+                        .star_bounds(galaxy, record, wide)
+                        .brightest(phase, wide);
+                    for q in &asked {
+                        assert!(
+                            entry.holds(&query_need(offsets, key, q)),
+                            "{record:?}: the entry holds {q:?}"
+                        );
+                        let before = BeforeDrift::of(record, q, &CellReach::of(offsets, key, q));
+                        let (lo, hi) = before.ages;
+                        let mid = Years::new(f64::midpoint(lo.value(), hi.value()));
+                        for ages in [(lo, hi), (lo, lo), (mid, mid), (hi, hi)] {
+                            assert!(
+                                wide.0 <= ages.0 && ages.1 <= wide.1,
+                                "{record:?}: {ages:?} outside the entry's {wide:?}"
+                            );
+                            let narrow = flux_bound_over(envelope, record, ages);
+                            assert!(
+                                flux_no_tighter(flux, narrow),
+                                "{record:?} over {ages:?}: {flux:?} against {narrow:?}"
+                            );
+                            let narrow = drawn
+                                .star_bounds(galaxy, record, ages)
+                                .brightest(phase, ages);
+                            assert!(
+                                light_no_tighter(light, narrow),
+                                "{record:?} over {ages:?}: {light:?} against {narrow:?}"
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 2 * 3 * 10_000 * 3 * 4);
+    }
+
+    /// Every record the census with no cache generates is held by an entry that serves its query,
+    /// and its stored light passes the pre-filter there (R06.T8.h): over cells along x from 2,600
+    /// ly on one side to 1,600 ly on the other, entries built at the Sun at V 6 and at V 9, and
+    /// the queries each serves of a census at the Sun, 1,000 ly either way and at ±H, at V 6, and
+    /// at the Sun at V 9.
+    #[test]
+    fn the_prefilter_keeps_every_record_the_census_generates() {
+        let galaxy = milky_way_galaxy();
+        let (envelope, offsets) = (milky_way_envelope(), milky_way_offsets());
+        let along = |dx: f64| [SUN[0] + dx, SUN[1], SUN[2]];
+        let query = |dx: f64, t: UniverseTime, cut: f64| {
+            let observer = Observer::new(position(along(dx)), t).expect("an observer");
+            SkyQuery::builder(observer, Magnitudes::new(cut))
+                .build()
+                .expect("a valid query")
+        };
+        let mut cells = Vec::new();
+        for (layer, at) in [
+            (Layer::A, &[-200.0, 0.0, 100.0][..]),
+            (Layer::B, &[-200.0, 0.0, 100.0][..]),
+            (
+                Layer::C,
+                &[-1_600.0, -800.0, 0.0, 200.0, 1_600.0, 2_600.0][..],
+            ),
+            (Layer::D, &[-1_600.0, 0.0, 200.0, 1_600.0, 2_600.0][..]),
+            (Layer::E, &[-1_600.0, 0.0, 200.0, 1_600.0, 2_600.0][..]),
+        ] {
+            for &dx in at {
+                cells.push(CellKey::containing(layer, &position(along(dx))).expect("in the cube"));
+            }
+        }
+        let builders = [
+            query(0.0, UniverseTime::EPOCH, 6.0),
+            query(0.0, UniverseTime::EPOCH, 9.0),
+        ];
+        let asked = [
+            query(0.0, UniverseTime::EPOCH, 6.0),
+            query(1_000.0, UniverseTime::EPOCH, 6.0),
+            query(-1_000.0, UniverseTime::EPOCH, 6.0),
+            query(0.0, ClockWindow::END, 6.0),
+            query(0.0, ClockWindow::START, 6.0),
+            query(0.0, UniverseTime::EPOCH, 9.0),
+        ];
+        let (mut pairs, mut generated, mut prefiltered) = (0_u32, 0_u32, 0_u32);
+        let mut records = Vec::new();
+        for &key in &cells {
+            for builder in &builders {
+                let entry = entry_need(offsets, key, &BlockParams::of(builder));
+                let held_floor = floor_for(galaxy, envelope, key.layer(), entry.key());
+                for q in &asked {
+                    let reach = CellReach::of(offsets, key, q);
+                    if !entry.holds(&need_at(&reach, q)) {
+                        continue;
+                    }
+                    pairs += 1;
+                    let floor = floor_at(galaxy, envelope, key, q, &reach);
+                    assert!(held_floor.value() <= floor.value(), "{key:?}: the floors");
+                    generate_cell_where(galaxy, key, |m| m.value() >= floor.value(), &mut records);
+                    for record in &records {
+                        let cold = bright_retarded(
+                            galaxy,
+                            envelope,
+                            record,
+                            q,
+                            (Some(&reach), &mut Drawn::default()),
+                            &mut LayerTally::default(),
+                            &mut LayerCost::default(),
+                        );
+                        let held =
+                            held_light(galaxy, envelope, record, &entry, &mut Drawn::default());
+                        let passes = held.is_some_and(|light| {
+                            let before = BeforeDrift::of(record, q, &reach);
+                            light.may_list(Magnitudes::new(faintest_listable(q, before.nearest_ly)))
+                        });
+                        if cold.is_some() {
+                            generated += 1;
+                            assert!(
+                                passes,
+                                "{record:?}: generated cold, held {held:?}, for {q:?}"
+                            );
+                        } else {
+                            prefiltered += u32::from(!passes);
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "{pairs} entries and queries served, {generated} records generated, {prefiltered} \
+             others skipped by the pre-filter"
+        );
+        assert!(pairs > 100 && generated > 100 && prefiltered > 0);
     }
 }

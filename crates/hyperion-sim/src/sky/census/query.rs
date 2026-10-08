@@ -957,7 +957,8 @@ pub struct SkyContext<'a> {
     pub offsets: &'a CellOffsets,
     /// The job's own noise cache, for the caps' rays and the stars' sightlines.
     pub noise: NoiseCache,
-    /// The per-cell cache of bright subsets ([`super::cache::NoSkyCellCache`] keeps none).
+    /// The cell cache, its entries blocks of cells keyed by magnitude (R06.T8.h;
+    /// [`super::cache::NoSkyCellCache`] keeps none).
     pub cells: &'a dyn SkyCellCache,
     /// The sources of systems beyond the grid (plan 09's feature members, once P09.T40 supplies
     /// them; none until then).

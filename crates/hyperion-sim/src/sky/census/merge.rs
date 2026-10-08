@@ -423,8 +423,8 @@ mod tests {
             );
             let part = summed.layer(layer);
             assert_eq!(
-                (tally.cells(), tally.candidates(), tally.accepted()),
-                (part.cells(), part.candidates(), part.accepted())
+                (tally.cells(), tally.generated(), tally.accepted()),
+                (part.cells(), part.generated(), part.accepted())
             );
         }
     }
