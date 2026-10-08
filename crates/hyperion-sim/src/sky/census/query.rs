@@ -1,19 +1,20 @@
-//! The sky's query and the census's plan: which cells of which layers it opens (rendering plan
-//! R06, R06.T8.a; Design notes 9 and 10).
+//! The sky's query and the census's plan: which cells of which layers it opens, shell by shell
+//! nearest first, and how far a census of some of its shells is complete (rendering plan R06,
+//! R06.T8.a and R06.T8.i; Design notes 9, 10, 11 and 13).
 
 use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use crate::coords::{GalacticDisplacement, UnitVector};
+use crate::coords::{GalacticDisplacement, GalacticPosition, UnitVector};
 use crate::galaxy::Galaxy;
 use crate::galaxy::gas::modifiers::GasModifierSource;
 use crate::galaxy::gas::noise::NoiseCache;
 use crate::galaxy::placement::CellKey;
 use crate::galaxy::query::{
-    QuerySphere, SystemSource, cells_in_sphere, cells_in_sphere_slab, count_cells_in_sphere,
-    pad_for, pad_speed, sphere_slabs,
+    QuerySphere, SystemSource, cells_in_shell_slab, count_cells_in_sphere, pad_for, pad_speed,
+    sphere_slabs,
 };
 use crate::id::{Layer, SystemId};
 use crate::math;
@@ -22,7 +23,7 @@ use crate::time::Span;
 use crate::units::consts::{RADIANS_PER_DEGREE, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{Degrees, LightYears, Magnitudes, Radians};
 
-use super::super::band::{BandSpec, CubeFace};
+use super::super::band::{BandSpec, CompleteTo, CubeFace};
 use super::super::caps::{CAPPED_LAYERS, LayerCap, RayRadii, layer_caps, layer_caps_by_visibility};
 use super::super::dgl::Illumination;
 use super::super::envelope::BrightnessEnvelope;
@@ -30,7 +31,7 @@ use super::super::eye::{EyeObserver, MAX_CUT_V};
 use super::super::limits::EyeVisibility;
 use super::super::luminosity::LuminosityTables;
 use super::cache::SkyCellCache;
-use super::cell::CellOffsets;
+use super::cell::{CellOffsets, SkyStar};
 
 /// The largest count of stars a sky lists, 3 × 10⁵ (Design note 11): 7.2 MB of payload.
 pub const MAX_N_MAX: u32 = 300_000;
@@ -40,6 +41,206 @@ pub const MAX_FORCED_CAP_LY: f64 = 227_023.0;
 
 /// [`MAX_N_MAX`] as a [`NonZeroU32`], the default.
 const DEFAULT_N_MAX: NonZeroU32 = NonZeroU32::new(MAX_N_MAX).expect("300,000 is not zero");
+
+/// The edges of the census's distance shells, ly: 500 ly, then 1,000 × 2<sup>k</sup> ly.
+///
+/// They run to 128,000 ly, the last below [`MAX_FORCED_CAP_LY`], beyond which no cap reaches
+/// (R06.T8.i; decided 2026-10-05, `decision-r06-census-cost.md`, with
+/// `decision-r06-census-cost-signoff.md`'s 500 ly first shell).
+///
+/// A layer of [`SHELLED_LAYERS`] is censused in one shell for each edge below its cap's farthest
+/// radius, nearest first, then one more to its cap. The edges are constants, never fitted to the
+/// machine, so every machine and worker count gives the same sequence of replies, only at its own
+/// pace.
+pub const SHELL_EDGES_LY: [u32; 9] = [
+    500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000,
+];
+
+/// The layers censused shell by shell (R06.T8.i): C, D and E.
+///
+/// Layers A and B and the brown dwarfs, whose caps near the Sun are some 11, 68 and 1 ly, are one
+/// shell each.
+pub const SHELLED_LAYERS: [Layer; 3] = [Layer::C, Layer::D, Layer::E];
+
+/// One distance shell of one layer of a [`CensusPlan`] (R06.T8.i).
+///
+/// Its cells are those of the layer's plan whose box first meets the sphere of the shell's edge,
+/// padded as a walk to that edge pads, and not the sphere of the edge before it. A layer's last
+/// shell holds the rest of its cells, to its cap.
+///
+/// Once a layer's shells to this one are done, its census is complete to the shell's edge, held
+/// within the cap's radius towards each direction ([`CensusPlan::completeness`]). Shells order as
+/// [`CensusPlan::shells`] gives them: by their place in their layer, nearest first, then by layer
+/// as [`CAPPED_LAYERS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Shell {
+    /// The shell's place among its layer's, nearest first, from 0.
+    index: u8,
+    layer: Layer,
+    /// The edge, whole light-years, or `None` for its layer's last shell.
+    edge_ly: Option<u32>,
+}
+
+impl Shell {
+    /// The layer whose cells the shell holds.
+    #[must_use]
+    pub const fn layer(&self) -> Layer {
+        self.layer
+    }
+
+    /// The shell's place among its layer's shells, nearest first, from 0.
+    #[must_use]
+    pub const fn index(&self) -> u8 {
+        self.index
+    }
+
+    /// The fixed edge the shell completes its layer to, held within the cap's radius towards each
+    /// direction: one of [`SHELL_EDGES_LY`], or `None` for the layer's last shell, which completes
+    /// it to its cap.
+    #[must_use]
+    pub fn edge(&self) -> Option<LightYears> {
+        self.edge_ly.map(|edge| LightYears::new(f64::from(edge)))
+    }
+
+    /// Whether the shell is its layer's last, whose census lists every star of the cells it opens.
+    #[must_use]
+    pub const fn is_last(&self) -> bool {
+        self.edge_ly.is_none()
+    }
+}
+
+/// How far one layer's census has come through its shells.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Reached {
+    /// Its shells done, nearest first, reach this edge, 0 before its first: it lists only the
+    /// stars within its radius.
+    Edge(LightYears),
+    /// Its last shell is done: it lists every star of the cells it opens, as a one-shot census.
+    Final,
+}
+
+/// How far a census of some of its plan's shells is complete, layer by layer, and so which of its
+/// stars it lists (R06.T8.i).
+///
+/// Decided 2026-10-05 (`decision-r06-census-cost.md`, with the sign-off's condition 2,
+/// `decision-r06-census-cost-signoff.md`) and 2026-10-08 (`decision-r06-t8i-listing.md`). Made by
+/// [`CensusPlan::completeness`] and carried by the [`SkyCensus`](super::SkyCensus) that
+/// [`merge_shells`](super::merge_shells) makes.
+///
+/// A layer whose shells are done to an edge is complete, towards each direction, to the lesser of
+/// the edge and its cap's radius there ([`complete_to`](Self::complete_to)): its cap's rays each
+/// held within the edge, or the edge in every direction where every ray reaches it. Until its last
+/// shell is merged it lists only the stars within that radius towards their band texel
+/// ([`lists`](Self::lists)), the radius the band's ray through the texel reads, bit for bit
+/// (decided 2026-10-08, `decision-r06-t8i-listing.md`). A straddling cell's stars beyond it wait
+/// for a later shell, neither listed nor overflow, so the listing and the band, which holds all of
+/// the layer's light beyond the radius, share one boundary in every texel and no star's light is
+/// counted twice (Design note 11). A layer whose last shell is merged lists every star of the cells
+/// it opens, as the one-shot census does, in that census and every later one: beyond its cap
+/// fewer than one star is expected, within its stated count beyond. A, B and the brown dwarfs, one
+/// shell each, are final from the first.
+///
+/// Where a ray cone's edge crosses a texel, the radius towards the texel's centre can exceed the
+/// radius towards one of its stars, and if that star's cell is unopened its light is in neither
+/// the census nor the band: R06.T7.b's gap, deferred by the owner on 2026-10-08, under one star a
+/// layer by the caps' count beyond (R06's Risks, "Deviations in T8.i, as built").
+#[derive(Debug, Clone, PartialEq)]
+pub struct Completeness {
+    /// The observer, from whom each star's direction is taken.
+    observer: GalacticPosition,
+    /// The band whose texels the radii are read at.
+    band_spec: BandSpec,
+    /// Per layer of [`CAPPED_LAYERS`], how far its shells are done.
+    reached: [Reached; CAPPED_LAYERS.len()],
+    complete_to: CompleteTo,
+}
+
+impl Completeness {
+    /// The radii to which the census is complete, per layer and towards each direction: the band's
+    /// boundary for this census ([`sum_rows`](super::super::band::sum_rows)).
+    #[must_use]
+    pub const fn complete_to(&self) -> &CompleteTo {
+        &self.complete_to
+    }
+
+    /// The observer, from whom each star's band texel is found.
+    #[must_use]
+    pub const fn observer(&self) -> &GalacticPosition {
+        &self.observer
+    }
+
+    /// The band whose texels the census's radii are read towards: its query's
+    /// [`band_spec`](SkyQuery::band_spec), at which its band is marched.
+    #[must_use]
+    pub const fn band_spec(&self) -> BandSpec {
+        self.band_spec
+    }
+
+    /// Whether every layer's last shell is done: the census is the one-shot census of its plan.
+    #[must_use]
+    pub fn is_final(&self) -> bool {
+        self.reached.iter().all(|r| matches!(r, Reached::Final))
+    }
+
+    /// The fixed shell edge `layer`'s shells done reach, 0 before its first (one of
+    /// [`SHELL_EDGES_LY`] for a plan of [`census_plan`]), or `None` once its last is done and for a
+    /// layer outside [`CAPPED_LAYERS`].
+    #[must_use]
+    pub fn edge(&self, layer: Layer) -> Option<LightYears> {
+        let i = CAPPED_LAYERS.iter().position(|&l| l == layer)?;
+        match self.reached[i] {
+            Reached::Edge(edge) => Some(edge),
+            Reached::Final => None,
+        }
+    }
+
+    /// The least edge over the layers not yet final, or `None` for a final census: the figure of
+    /// the view's stars-arriving note, which is a fixed edge and not a ray's radius (R06.T11.d).
+    #[must_use]
+    pub fn least_edge(&self) -> Option<LightYears> {
+        self.reached
+            .iter()
+            .filter_map(|r| match r {
+                Reached::Edge(edge) => Some(*edge),
+                Reached::Final => None,
+            })
+            .min_by(|a, b| a.value().total_cmp(&b.value()))
+    }
+
+    /// Whether the census lists `star`: always where its layer is final, and otherwise only within
+    /// its layer's complete-to radius ([`radius_for`](Self::radius_for)).
+    #[must_use]
+    pub fn lists(&self, star: &SkyStar) -> bool {
+        let Some(i) = CAPPED_LAYERS.iter().position(|&l| l == star.layer()) else {
+            return true;
+        };
+        match self.reached[i] {
+            Reached::Final => true,
+            Reached::Edge(_) => star.distance().value() < self.radius_for(star).value(),
+        }
+    }
+
+    /// The radius `star`'s layer is complete to where the star lies, towards its band texel.
+    ///
+    /// That is towards the centre of the band's texel that [`BandSpec::texel_of`] places the star
+    /// in, at the query's [`band_spec`](SkyQuery::band_spec), from the displacement the band places
+    /// an overflow star by (R06.T8.l's lookup). It is the radius the band's ray through that texel
+    /// reads, so the
+    /// census and the band share it star by star; for uniform radii it is the radius in the star's
+    /// own direction. A star at its observer, which no census lists, takes the layer's farthest
+    /// radius.
+    #[must_use]
+    pub fn radius_for(&self, star: &SkyStar) -> LightYears {
+        let d = self.observer.displacement_to(star.apparent()).metres();
+        match self.band_spec.texel_of(d) {
+            Some((face, row, column)) => self.complete_to.radius_toward(
+                star.layer(),
+                self.band_spec.texel_direction(face, row, column),
+            ),
+            None => self.complete_to.radius(star.layer()),
+        }
+    }
+}
 
 /// A [`SkyQuery`] or a [`Cone`] could not be built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -773,21 +974,32 @@ impl fmt::Debug for SkyContext<'_> {
     }
 }
 
-/// The census's plan: each layer's cap and the cells to open, in canonical order (layers as
-/// [`CAPPED_LAYERS`], then each layer's cells as [`cells_in_sphere`] walks them).
+/// The census's plan: each layer's cap and the cells to open, shell by shell, nearest first
+/// (R06.T8.i): its [`shells`](Self::shells) in their order, then each shell's cells as
+/// [`cells_in_sphere`](crate::galaxy::query::cells_in_sphere) walks them.
 ///
 /// It keeps each layer's padded sphere and streams the cells from it (R06.T8.f): near the Sun at
 /// the eye's caps they number some 1.1 × 10⁸, which held as keys would take 2.2 GB. A server's
-/// jobs take them slab by slab ([`slabs`](Self::slabs)), each an x slab of one layer's walk. Where
-/// a layer's cap is one radius a ray (R06.T7.b), its sphere is its farthest ray's, and the walk
-/// keeps only the cells whose padded ball meets some ray's cone within that ray's radius, the
-/// region of [`LayerCap::radius_toward`].
+/// jobs take them slab by slab ([`slabs`](Self::slabs), or one shell's,
+/// [`shell_slabs`](Self::shell_slabs)), each an x slab of one shell of one layer's walk. Where a
+/// layer's cap is one radius a ray (R06.T7.b), its sphere is its farthest ray's, and the walk keeps
+/// only the cells whose padded ball meets some ray's cone within that ray's radius, the region of
+/// [`LayerCap::radius_toward`].
+///
+/// Each layer of [`SHELLED_LAYERS`] has one shell for each of [`SHELL_EDGES_LY`] below its cap's
+/// farthest radius, then one to its cap; each other layer has one. A cell belongs to the first
+/// shell whose sphere, the edge padded as a walk to that edge pads, its box meets, and to its
+/// layer's last if none: every cell of the plan is in exactly one shell. The shells change which
+/// cells the census opens not at all, so the census of every shell is the one-shot census, star
+/// for star.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CensusPlan {
     caps: Vec<LayerCap>,
     walks: Vec<LayerWalk>,
     region: Option<ConeRegion>,
     apex: [f64; 3],
+    observer: GalacticPosition,
+    band_spec: BandSpec,
 }
 
 impl CensusPlan {
@@ -797,7 +1009,8 @@ impl CensusPlan {
         &self.caps
     }
 
-    /// The cells, in canonical order: [`plan_cells`]'s for the plan's query and caps, streamed.
+    /// The cells, in canonical order: shell by shell as [`shells`](Self::shells) gives them, each
+    /// shell's slab by slab, streamed.
     pub fn cells(&self) -> impl Iterator<Item = CellKey> + '_ {
         self.slabs().flat_map(|slab| slab.cells())
     }
@@ -811,9 +1024,11 @@ impl CensusPlan {
             .iter()
             .map(|walk| {
                 if self.region.is_none() && walk.rays.is_none() {
+                    // The layer's shells partition its sphere's cells.
                     count_cells_in_sphere(walk.layer, &walk.sphere)
                 } else {
-                    self.slabs_of(walk)
+                    (0..walk.shell_count())
+                        .flat_map(|index| self.slabs_of(walk, index))
                         .map(|slab| slab.cells().map(|_| 1_u64).sum::<u64>())
                         .sum()
                 }
@@ -821,38 +1036,289 @@ impl CensusPlan {
             .sum()
     }
 
-    /// The plan's jobs: every x slab of each layer's walk, in canonical order, whose cells in turn
-    /// are [`cells`](Self::cells). A slab may hold no cell.
+    /// The plan's jobs: every x slab of each shell's walk, shell by shell in
+    /// [`shells`](Self::shells)' order, whose cells in turn are [`cells`](Self::cells). A slab may
+    /// hold no cell.
     pub fn slabs(&self) -> impl Iterator<Item = CellSlab> + '_ {
-        self.walks.iter().flat_map(move |walk| self.slabs_of(walk))
+        self.shells().flat_map(move |shell| self.shell_slabs(shell))
     }
 
-    /// The slabs of `walk`, one of the plan's.
-    fn slabs_of<'a>(&'a self, walk: &'a LayerWalk) -> impl Iterator<Item = CellSlab> + 'a {
-        sphere_slabs(walk.layer, &walk.sphere).map(move |x| CellSlab {
+    /// The plan's shells, nearest first.
+    ///
+    /// They are every layer's first, in [`CAPPED_LAYERS`]' order, then every layer's second, and
+    /// so on, each layer's last completing it to its cap. A layer whose
+    /// cap has no radius has none. A server may run them in another order, nearest first within
+    /// each layer (R06.T11.d): the census of a set of shells does not depend on their order.
+    pub fn shells(&self) -> impl Iterator<Item = Shell> + '_ {
+        let ranks = self
+            .walks
+            .iter()
+            .map(LayerWalk::shell_count)
+            .max()
+            .unwrap_or(0);
+        (0..ranks).flat_map(move |index| {
+            self.walks
+                .iter()
+                .filter(move |walk| index < walk.shell_count())
+                .map(move |walk| walk.shell(index))
+        })
+    }
+
+    /// The jobs of one of the plan's shells: every x slab of its walk.
+    ///
+    /// Each slab's cells are the shell's, in order. A slab may hold no cell.
+    ///
+    /// # Panics
+    ///
+    /// If `shell` is not one of the plan's ([`shells`](Self::shells)).
+    pub fn shell_slabs(&self, shell: Shell) -> impl Iterator<Item = CellSlab> + '_ {
+        let walk = self
+            .walks
+            .iter()
+            .find(|walk| {
+                walk.layer == shell.layer
+                    && usize::from(shell.index) < walk.shell_count()
+                    && walk.shell(usize::from(shell.index)) == shell
+            })
+            .unwrap_or_else(|| panic!("{shell:?} is not a shell of the plan"));
+        self.slabs_of(walk, usize::from(shell.index))
+    }
+
+    /// The slabs of shell `index` of `walk`, one of the plan's.
+    fn slabs_of<'a>(
+        &'a self,
+        walk: &'a LayerWalk,
+        index: usize,
+    ) -> impl Iterator<Item = CellSlab> + 'a {
+        sphere_slabs(walk.layer, walk.shell_spheres(index).0).map(move |x| CellSlab {
             walk: walk.clone(),
+            shell: index,
             x,
             region: self.region,
             apex: self.apex,
         })
     }
+
+    /// How far a census of the shells `done` is complete, and so what it lists (R06.T8.i).
+    ///
+    /// Each layer is complete to the edge of its last shell of an unbroken run from its first in
+    /// `done`, or to its cap once all of its shells are. A shell of `done` after a gap in its
+    /// layer's run adds
+    /// nothing until the gap is filled; one not of the plan is not read. A layer whose cap has no
+    /// radius is final from the start.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::observe::Observer;
+    /// use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap};
+    /// use hyperion_sim::sky::census::{SkyQuery, census_plan_of};
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::{LightYears, Magnitudes};
+    ///
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+    /// let query = SkyQuery::builder(Observer::new(sun, UniverseTime::EPOCH)?, Magnitudes::new(7.95))
+    ///     .build()?;
+    /// // Caps as the caps near the Sun put them, uniform here: C has shells to 500, 1,000, 2,000
+    /// // and 4,000 ly, then its cap.
+    /// let caps = [11.0, 68.0, 8_193.0, 9_925.0, 21_369.0, 1.0]
+    ///     .iter()
+    ///     .zip(CAPPED_LAYERS)
+    ///     .map(|(&r, layer)| LayerCap::forced(layer, LightYears::new(r)))
+    ///     .collect();
+    /// let plan = census_plan_of(&query, caps);
+    /// // The first reply: every layer's first shell, so A, B and the brown dwarfs are final.
+    /// let first = plan.completeness(plan.shells().filter(|shell| shell.index() == 0));
+    /// assert_eq!(first.edge(Layer::C), Some(LightYears::new(500.0)));
+    /// assert_eq!(first.edge(Layer::A), None);
+    /// assert_eq!(first.least_edge(), Some(LightYears::new(500.0)));
+    /// assert!(!first.is_final() && plan.completeness(plan.shells()).is_final());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn completeness(&self, done: impl IntoIterator<Item = Shell>) -> Completeness {
+        let mut marked: Vec<Vec<bool>> = self
+            .walks
+            .iter()
+            .map(|walk| vec![false; walk.shell_count()])
+            .collect();
+        for shell in done {
+            if let Some((w, walk)) = self
+                .walks
+                .iter()
+                .enumerate()
+                .find(|(_, walk)| walk.layer == shell.layer)
+            {
+                let index = usize::from(shell.index);
+                if index < walk.shell_count() && walk.shell(index) == shell {
+                    marked[w][index] = true;
+                }
+            }
+        }
+        let reached = CAPPED_LAYERS.map(|layer| {
+            let Some(w) = self.walks.iter().position(|walk| walk.layer == layer) else {
+                return Reached::Final;
+            };
+            let walk = &self.walks[w];
+            let run = marked[w].iter().take_while(|&&done| done).count();
+            if run == walk.shell_count() {
+                Reached::Final
+            } else {
+                Reached::Edge(
+                    run.checked_sub(1)
+                        .map_or(LightYears::ZERO, |last| walk.edges[last].1.radius()),
+                )
+            }
+        });
+        let within = reached.map(|r| match r {
+            Reached::Edge(edge) => Some(edge.value()),
+            Reached::Final => None,
+        });
+        Completeness {
+            observer: self.observer,
+            band_spec: self.band_spec,
+            reached,
+            complete_to: CompleteTo::of_caps_within(&self.caps, within),
+        }
+    }
+
+    /// The census's completeness once every shell is done: final, complete to the caps
+    /// ([`CompleteTo::of_caps`]).
+    #[must_use]
+    pub fn complete(&self) -> Completeness {
+        self.completeness(self.shells())
+    }
+
+    /// One reply for each place a shell can hold in its layer, nearest first, for the band's march.
+    ///
+    /// Reply k is complete in each layer to its shells to the k-th, or to its cap where it has
+    /// fewer. Each layer's every
+    /// radius a census of the plan can state at its first shell or after is among them, so a band
+    /// marched for them all ([`march_rows`](super::super::band::march_rows)) sums any such census
+    /// (R06.T9.f: one march a request, every reply's radii its nodes). A census in which some layer
+    /// has no shell done is complete nowhere in it ([`CompleteTo::nowhere`]), which the march must
+    /// then keep too.
+    ///
+    /// # Examples
+    ///
+    /// One march a request keeps every radius its census of shells can state, whichever shells are
+    /// done when a reply is summed:
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+    /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::observe::Observer;
+    /// use hyperion_sim::sky::band::{CubeFace, march_rows};
+    /// use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext, SkyQuery, census_plan};
+    /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+    /// use hyperion_sim::sky::luminosity::LuminosityTables;
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(11));
+    /// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+    /// let offsets = CellOffsets::build(&galaxy);
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+    /// let query = SkyQuery::builder(Observer::new(sun, UniverseTime::EPOCH)?, Magnitudes::new(7.95))
+    ///     .build()?;
+    /// let mut ctx = SkyContext {
+    ///     tables: &tables,
+    ///     envelope: &envelope,
+    ///     offsets: &offsets,
+    ///     noise: NoiseCache::with_capacity(1 << 16),
+    ///     cells: &NoSkyCellCache,
+    ///     sources: &[],
+    ///     modifiers: &NoModifiers,
+    /// };
+    /// let plan = census_plan(&galaxy, &tables, &envelope, &query, &mut ctx.noise);
+    /// let spec = query.band_spec();
+    /// let march = march_rows(&galaxy, &mut ctx, &query, plan.replies(), &spec, CubeFace::PosZ, 0..64);
+    /// // Every layer's first shell, and C's second: the march holds that census's radii.
+    /// let done = plan
+    ///     .shells()
+    ///     .filter(|shell| shell.index() == 0 || (shell.layer() == Layer::C && shell.index() == 1));
+    /// assert!(march.holds(plan.completeness(done).complete_to()));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn replies(&self) -> Vec<CompleteTo> {
+        let ranks = self
+            .walks
+            .iter()
+            .map(LayerWalk::shell_count)
+            .max()
+            .unwrap_or(0)
+            .max(1);
+        (0..ranks)
+            .map(|rank| {
+                let done = self
+                    .shells()
+                    .filter(|shell| usize::from(shell.index) <= rank);
+                self.completeness(done).complete_to
+            })
+            .collect()
+    }
 }
 
-/// One layer's walk in a [`CensusPlan`]: the sphere of its cap, padded, the pad, and the cap's
-/// radius per ray, if it has one a ray.
+/// One layer's walk in a [`CensusPlan`]: the sphere of its cap, padded, the pad, the cap's radius
+/// per ray, if it has one a ray, and its shells' spheres.
 #[derive(Debug, Clone, PartialEq)]
 struct LayerWalk {
     layer: Layer,
     sphere: QuerySphere,
     pad: LightYears,
     rays: Option<RayRadii>,
+    /// Each shell's but the last's edge, whole light-years, and its sphere, nearest first: the edge,
+    /// padded as a walk to that edge pads. The last shell walks `sphere`.
+    edges: Arc<[(u32, QuerySphere)]>,
 }
 
-/// One x slab of one layer's walk in a [`CensusPlan`]: a census job's share of the plan, which
-/// streams its own cells. Cloning shares the cap's radii per ray.
+impl LayerWalk {
+    /// The layer's shells: one for each edge, then its last.
+    #[must_use]
+    fn shell_count(&self) -> usize {
+        self.edges.len() + 1
+    }
+
+    /// Shell `index` of the layer, below [`shell_count`](Self::shell_count).
+    ///
+    /// # Panics
+    ///
+    /// Never for a walk's shell: a layer has at most ten shells.
+    #[must_use]
+    fn shell(&self, index: usize) -> Shell {
+        let edge_ly = self.edges.get(index).map(|&(edge, _)| edge);
+        Shell {
+            index: u8::try_from(index).expect("a layer has at most ten shells"),
+            layer: self.layer,
+            edge_ly,
+        }
+    }
+
+    /// The sphere shell `index` walks, and the one inside it whose cells are the shells' before it.
+    #[must_use]
+    fn shell_spheres(&self, index: usize) -> (&QuerySphere, Option<&QuerySphere>) {
+        let outer = self
+            .edges
+            .get(index)
+            .map_or(&self.sphere, |(_, sphere)| sphere);
+        let inner = index.checked_sub(1).map(|before| &self.edges[before].1);
+        (outer, inner)
+    }
+}
+
+/// One x slab of one shell of one layer's walk in a [`CensusPlan`]: a census job's share of the
+/// plan, which streams its own cells. Cloning shares the cap's radii per ray.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellSlab {
     walk: LayerWalk,
+    shell: usize,
     x: i32,
     region: Option<ConeRegion>,
     apex: [f64; 3],
@@ -865,6 +1331,12 @@ impl CellSlab {
         self.walk.layer
     }
 
+    /// The shell whose cells the slab holds (R06.T8.i).
+    #[must_use]
+    pub fn shell(&self) -> Shell {
+        self.walk.shell(self.shell)
+    }
+
     /// The slab's x coordinate on its layer's grid.
     #[must_use]
     pub const fn x(&self) -> i32 {
@@ -874,8 +1346,9 @@ impl CellSlab {
     /// The slab's cells, in canonical order.
     pub fn cells(&self) -> impl Iterator<Item = CellKey> + use<> {
         let slab = self.clone();
-        let (layer, sphere, x) = (slab.walk.layer, slab.walk.sphere, slab.x);
-        cells_in_sphere_slab(layer, &sphere, x).filter(move |&key| {
+        let (outer, inner) = slab.walk.shell_spheres(slab.shell);
+        let (outer, inner) = (*outer, inner.copied());
+        cells_in_shell_slab(slab.walk.layer, &outer, inner.as_ref(), slab.x).filter(move |&key| {
             opens(
                 slab.region.as_ref(),
                 slab.walk.rays.as_ref(),
@@ -935,11 +1408,13 @@ fn light_time(d: f64) -> Span {
 
 /// The census's plan for `query` (Design notes 9 and 10): each layer's cap, one radius a ray
 /// ([`layer_caps`], or [`layer_caps_by_visibility`] for an eye-only request that asks it; R06.T7.b)
-/// unless forced, then the cells of [`cells_in_sphere`] to the cap's
-/// farthest radius, padded as the range query pads at the earliest emitted time that radius
-/// allows; for a cap of one radius a ray, only the cells whose padded bounding ball meets some
-/// ray's cone within that ray's radius; and, for a cone, only the cells whose padded bounding ball
-/// meets the cone widened to hold every texel of its region, α + 2ρ ([`ConeRegion`]; R06.T8.l).
+/// unless forced, then the cells of [`cells_in_sphere`](crate::galaxy::query::cells_in_sphere) to
+/// the cap's farthest radius, padded as the range query pads at the earliest emitted time that
+/// radius allows; for a cap of one radius a ray, only the cells whose padded bounding ball meets
+/// some ray's cone within that ray's radius; and, for a cone, only the cells whose padded bounding
+/// ball meets the cone widened to hold every texel of its region, α + 2ρ ([`ConeRegion`];
+/// R06.T8.l). The cells are taken shell by shell, nearest first, to [`SHELL_EDGES_LY`]
+/// ([`CensusPlan`]; R06.T8.i).
 ///
 /// # Panics
 ///
@@ -973,35 +1448,46 @@ pub fn census_plan(
 /// If a cap's sphere cannot be built, which a positive finite cap never fails.
 #[must_use]
 pub fn census_plan_of(query: &SkyQuery, caps: Vec<LayerCap>) -> CensusPlan {
-    let observer = query.observer();
+    plan_with_edges(query, caps, &SHELL_EDGES_LY)
+}
+
+/// [`census_plan_of`] with the shells' edges `edges_ly`, ascending: [`SHELL_EDGES_LY`], or a test's
+/// nearer ones, so that a test's census can afford shells.
+#[must_use]
+pub(crate) fn plan_with_edges(
+    query: &SkyQuery,
+    caps: Vec<LayerCap>,
+    edges_ly: &[u32],
+) -> CensusPlan {
+    debug_assert!(
+        edges_ly.windows(2).all(|pair| pair[0] < pair[1]),
+        "the shells' edges ascend"
+    );
+    let observer = *query.observer().position();
     let walks = caps
         .iter()
-        .filter_map(|cap| layer_walk(query, cap))
+        .filter_map(|cap| layer_walk(query, cap, edges_ly))
         .collect();
     CensusPlan {
         caps,
         walks,
         region: query.cone_region().copied(),
-        apex: observer.position().to_light_years_f64(),
+        apex: observer.to_light_years_f64(),
+        observer,
+        band_spec: query.band_spec(),
     }
 }
 
-/// The walk of `cap`'s layer for `query`: [`cells_in_sphere`] to the cap's farthest radius, padded as
-/// the range query pads at the earliest emitted time that radius allows, with the cap's radius per
-/// ray if it has one; `None` for a cap of no radius.
+/// The sphere of `radius` about `query`'s observer for `layer`, padded as the range query pads at
+/// the earliest emitted time that radius allows, and the pad.
 ///
 /// # Panics
 ///
-/// If the cap's sphere cannot be built, which a positive finite cap never fails.
+/// If the sphere cannot be built, which a positive finite radius never fails.
 #[must_use]
-fn layer_walk(query: &SkyQuery, cap: &LayerCap) -> Option<LayerWalk> {
+fn padded_sphere(query: &SkyQuery, layer: Layer, radius: LightYears) -> (QuerySphere, LightYears) {
     let observer = query.observer();
     let t = observer.time();
-    let layer = cap.layer();
-    let radius = cap.radius();
-    if radius.value() <= 0.0 {
-        return None;
-    }
     // An observer's time is within ±1,000 years and a cap's light time within 2¹⁸ years, so
     // the subtraction never leaves the clock's range.
     let earliest = t
@@ -1015,38 +1501,63 @@ fn layer_walk(query: &SkyQuery, cap: &LayerCap) -> Option<LayerWalk> {
     );
     let sphere = QuerySphere::new(*observer.position(), radius, t, pad)
         .expect("a positive finite cap and pad make a sphere");
+    (sphere, pad)
+}
+
+/// The walk of `cap`'s layer for `query`: [`cells_in_sphere`](crate::galaxy::query::cells_in_sphere)
+/// to the cap's farthest radius, padded as the range query pads at the earliest emitted time that
+/// radius allows, with the cap's radius per ray if it has one, and, for a layer of
+/// [`SHELLED_LAYERS`], the spheres of the edges of `edges_ly` below that radius, each padded so;
+/// `None` for a cap of no radius.
+///
+/// # Panics
+///
+/// If the cap's sphere cannot be built, which a positive finite cap never fails.
+#[must_use]
+fn layer_walk(query: &SkyQuery, cap: &LayerCap, edges_ly: &[u32]) -> Option<LayerWalk> {
+    let layer = cap.layer();
+    let radius = cap.radius();
+    if radius.value() <= 0.0 {
+        return None;
+    }
+    let (sphere, pad) = padded_sphere(query, layer, radius);
+    let edges: Arc<[(u32, QuerySphere)]> = if SHELLED_LAYERS.contains(&layer) {
+        edges_ly
+            .iter()
+            .take_while(|&&edge| f64::from(edge) < radius.value())
+            .map(|&edge| {
+                let at = LightYears::new(f64::from(edge));
+                (edge, padded_sphere(query, layer, at).0)
+            })
+            .collect()
+    } else {
+        Arc::new([])
+    };
     Some(LayerWalk {
         layer,
         sphere,
         pad,
         rays: cap.rays().cloned(),
+        edges,
     })
 }
 
-/// The cells a census of `query` opens for `caps`, in canonical order: each layer's cells of
-/// [`cells_in_sphere`] to its cap's farthest radius, padded as the range query pads at the earliest
-/// emitted time that radius allows; for a cap of one radius a ray only those whose padded bounding
-/// ball meets some ray's cone, of half-angle the lattice's spacing, nearer than the ray's radius
-/// (R06.T7.b), so that the census is complete towards each direction to the cap's radius towards
-/// it ([`LayerCap::radius_toward`]); and for a cone only those whose padded bounding ball meets the
-/// cone widened to hold every texel of its region (R06.T8.l). A cap of no radius opens nothing.
-/// Held, for a caller whose cells are few: a [`CensusPlan`] streams the same cells
-/// ([`CensusPlan::cells`]).
+/// The cells a census of `query` opens for `caps`, in [`CensusPlan::cells`]' order, shell by shell:
+/// each layer's cells of [`cells_in_sphere`](crate::galaxy::query::cells_in_sphere) to its cap's
+/// farthest radius, padded as the range query pads at the earliest emitted time that radius allows;
+/// for a cap of one radius a ray only those whose padded bounding ball meets some ray's cone, of
+/// half-angle the lattice's spacing, nearer than the ray's radius (R06.T7.b), so that the census is
+/// complete towards each direction to the cap's radius towards it ([`LayerCap::radius_toward`]);
+/// and for a cone only those whose padded bounding ball meets the cone widened to hold every texel
+/// of its region (R06.T8.l). A cap of no radius opens nothing. Held, for a caller whose cells are
+/// few: a [`CensusPlan`] streams the same cells ([`CensusPlan::cells`]).
 ///
 /// # Panics
 ///
 /// If a cap's sphere cannot be built, which a positive finite cap never fails.
 #[must_use]
-pub fn plan_cells(query: &SkyQuery, caps: &[LayerCap]) -> Vec<CellKey> {
-    let apex = query.observer().position().to_light_years_f64();
-    let mut cells = Vec::new();
-    for walk in caps.iter().filter_map(|cap| layer_walk(query, cap)) {
-        cells
-            .extend(cells_in_sphere(walk.layer, &walk.sphere).filter(|&key| {
-                opens(query.cone_region(), walk.rays.as_ref(), apex, key, walk.pad)
-            }));
-    }
-    cells
+pub fn plan_cells(query: &SkyQuery, caps: Vec<LayerCap>) -> Vec<CellKey> {
+    census_plan_of(query, caps).cells().collect()
 }
 
 #[cfg(test)]
@@ -1063,6 +1574,7 @@ mod tests {
     use crate::sky::caps::{CAP_RAYS, CapLattice};
     use crate::sky::census::cache::NoSkyCellCache;
     use crate::sky::census::cell::{SkyStar, census_cell};
+    use crate::sky::census::merge::{SkyCensus, merge_census, merge_shells};
     use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
     use crate::time::UniverseTime;
 
@@ -1461,20 +1973,54 @@ mod tests {
         assert!(widened > 0, "the widened cone opens more cells");
     }
 
-    /// The plan's streamed cells are [`plan_cells`]' for the queries of the tests above, in the
-    /// same order, slab by slab, and its count is theirs (R06.T8.f).
+    /// The plan's streamed cells, slab by slab, are its shells' in order, for the queries of the
+    /// tests above: each shell's the cells of `cells_in_sphere` to its sphere that the sphere
+    /// inside it lacks, opened as the plan opens them, in the walk's order; and its count is theirs
+    /// (R06.T8.f, R06.T8.i). The held [`plan_cells`] are the same cells.
     #[test]
     fn streamed_cells_are_plan_cells() {
         let cone = Cone::new(UnitVector::NORTH, Degrees::new(10.0)).expect("a cone");
-        for (radius, cone) in [(300.0, None), (400.0, None), (400.0, Some(cone))] {
+        let cases: [(f64, Option<Cone>, &[u32]); 3] = [
+            (300.0, None, &SHELL_EDGES_LY),
+            (400.0, None, &[100, 200]),
+            (400.0, Some(cone), &[100, 200]),
+        ];
+        for (radius, cone, edges) in cases {
             let (query, plan) = forced_query_and_plan(radius, cone);
+            let plan = plan_with_edges(&query, plan.caps().to_vec(), edges);
+            let mut expected = Vec::new();
+            for shell in plan.shells() {
+                let walk = plan
+                    .walks
+                    .iter()
+                    .find(|walk| walk.layer == shell.layer())
+                    .expect("the shell's walk");
+                let (outer, inner) = walk.shell_spheres(usize::from(shell.index()));
+                let held: BTreeSet<CellKey> = inner
+                    .map(|inner| crate::galaxy::query::cells_in_sphere(walk.layer, inner).collect())
+                    .unwrap_or_default();
+                expected.extend(
+                    crate::galaxy::query::cells_in_sphere(walk.layer, outer).filter(|&key| {
+                        !held.contains(&key)
+                            && opens(
+                                query.cone_region(),
+                                walk.rays.as_ref(),
+                                plan.apex,
+                                key,
+                                walk.pad,
+                            )
+                    }),
+                );
+            }
             let streamed: Vec<CellKey> = plan.cells().collect();
-            let held = plan_cells(&query, plan.caps());
-            assert!(!held.is_empty());
-            assert_eq!(streamed, held, "{radius} ly, cone {cone:?}");
+            assert!(!streamed.is_empty());
+            assert_eq!(
+                streamed, expected,
+                "{radius} ly, cone {cone:?}, edges {edges:?}"
+            );
             assert_eq!(
                 plan.cell_count(),
-                u64::try_from(held.len()).expect("few"),
+                u64::try_from(expected.len()).expect("few"),
                 "{radius} ly, cone {cone:?}"
             );
             let mut by_slab = Vec::new();
@@ -1486,7 +2032,11 @@ mod tests {
                     by_slab.push(key);
                 }
             }
-            assert_eq!(by_slab, held);
+            assert_eq!(by_slab, expected);
+            let held: BTreeSet<CellKey> = plan_cells(&query, plan.caps().to_vec())
+                .into_iter()
+                .collect();
+            assert_eq!(held, expected.iter().copied().collect::<BTreeSet<_>>());
         }
     }
 
@@ -1533,13 +2083,13 @@ mod tests {
     fn a_plan_by_ray_opens_every_cell_within_each_directions_radius() {
         let query = query_by_ray(7.0, 60.0, 400.0);
         let caps = query.forced_caps.clone().expect("forced caps");
-        let held = plan_cells(&query, &caps);
+        let held = plan_cells(&query, caps.clone());
         let opened: BTreeSet<CellKey> = held.iter().copied().collect();
         let spheres: Vec<LayerCap> = caps
             .iter()
             .map(|cap| LayerCap::forced(cap.layer(), cap.radius()))
             .collect();
-        let round: BTreeSet<CellKey> = plan_cells(&query, &spheres).into_iter().collect();
+        let round: BTreeSet<CellKey> = plan_cells(&query, spheres).into_iter().collect();
         assert!(opened.is_subset(&round));
         assert!(
             opened.len() < round.len() / 2,
@@ -1577,15 +2127,7 @@ mod tests {
             }
         }
         assert!(inside > 10_000 && outside > 10_000, "{inside}, {outside}");
-        let plan = CensusPlan {
-            caps: caps.clone(),
-            walks: caps
-                .iter()
-                .filter_map(|cap| layer_walk(&query, cap))
-                .collect(),
-            region: None,
-            apex,
-        };
+        let plan = census_plan_of(&query, caps.clone());
         let streamed: Vec<CellKey> = plan.cells().collect();
         assert_eq!(streamed, held);
         let by_slab: Vec<CellKey> = plan.slabs().flat_map(|slab| slab.cells()).collect();
@@ -1694,5 +2236,749 @@ mod tests {
             "{within}, {}",
             listed.len()
         );
+    }
+
+    /// Caps forced near the Sun as the caps put them at the eye's cut (R06.T7's spheres), and
+    /// layer by layer the shells' edges below them.
+    fn caps_near_the_sun() -> Vec<LayerCap> {
+        [11.0, 68.0, 8_193.0, 9_925.0, 21_369.0, 1.0]
+            .iter()
+            .zip(CAPPED_LAYERS)
+            .map(|(&radius, layer)| LayerCap::forced(layer, LightYears::new(radius)))
+            .collect()
+    }
+
+    /// The shells take the fixed edges below each layer's farthest radius, then the cap: near the
+    /// Sun C has shells to 500, 1,000, 2,000 and 4,000 ly, D to 8,000 ly too, and E to 16,000 ly;
+    /// A, B and the brown dwarfs one each. They come nearest first across the layers, which is
+    /// their order as values, and each layer's last is final (R06.T8.i).
+    #[test]
+    fn the_shells_take_the_fixed_edges_below_each_cap() {
+        let query = SkyQuery::builder(observer(), Magnitudes::new(7.95))
+            .build()
+            .expect("a valid query");
+        let plan = census_plan_of(&query, caps_near_the_sun());
+        let shells: Vec<Shell> = plan.shells().collect();
+        let edges = |layer: Layer| -> Vec<Option<LightYears>> {
+            shells
+                .iter()
+                .filter(|shell| shell.layer() == layer)
+                .map(Shell::edge)
+                .collect()
+        };
+        let with_last = |n: usize| -> Vec<Option<LightYears>> {
+            SHELL_EDGES_LY[..n]
+                .iter()
+                .map(|&edge| Some(LightYears::new(f64::from(edge))))
+                .chain([None])
+                .collect()
+        };
+        assert_eq!(edges(Layer::A), [None]);
+        assert_eq!(edges(Layer::B), [None]);
+        assert_eq!(edges(Layer::BrownDwarf), [None]);
+        assert_eq!(edges(Layer::C), with_last(5));
+        assert_eq!(edges(Layer::D), with_last(5));
+        assert_eq!(edges(Layer::E), with_last(6));
+        for shell in &shells {
+            let mine: Vec<&Shell> = shells
+                .iter()
+                .filter(|s| s.layer() == shell.layer())
+                .collect();
+            assert_eq!(
+                usize::from(shell.index()),
+                mine.iter().position(|s| *s == shell).expect("its own")
+            );
+            assert_eq!(
+                shell.is_last(),
+                usize::from(shell.index()) + 1 == mine.len()
+            );
+        }
+        // Nearest first: every layer's first shell, then every second, and so on.
+        let mut sorted = shells.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, shells);
+        assert_eq!(
+            shells.iter().take(6).map(Shell::layer).collect::<Vec<_>>(),
+            CAPPED_LAYERS
+        );
+        // A cap on an edge takes no shell to it, and a cap of no radius has none.
+        let mut caps = caps_near_the_sun();
+        caps[2] = LayerCap::forced(Layer::C, LightYears::new(1_000.0));
+        caps[3] = LayerCap::forced(Layer::D, LightYears::ZERO);
+        let plan = census_plan_of(&query, caps);
+        let c: Vec<Option<LightYears>> = plan
+            .shells()
+            .filter(|s| s.layer() == Layer::C)
+            .map(|s| s.edge())
+            .collect();
+        assert_eq!(c, [Some(LightYears::new(500.0)), None]);
+        assert_eq!(plan.shells().filter(|s| s.layer() == Layer::D).count(), 0);
+        let done = plan.completeness(std::iter::empty());
+        assert_eq!(done.edge(Layer::D), None, "a layer of no radius is final");
+        assert_eq!(done.edge(Layer::C), Some(LightYears::ZERO));
+        assert_eq!(done.complete_to().radius(Layer::C), LightYears::ZERO);
+    }
+
+    /// A census of some shells is complete to each layer's edge reached, held within its cap, and
+    /// final in a layer once its last shell is done; a gap in a layer's run holds it at the shell
+    /// before the gap. The plan's replies hold every layer's every edge, rank by rank, and the last
+    /// is complete to the caps (R06.T8.i).
+    #[test]
+    fn a_census_of_some_shells_is_complete_to_the_edges_reached() {
+        let query = SkyQuery::builder(observer(), Magnitudes::new(7.95))
+            .build()
+            .expect("a valid query");
+        let plan = census_plan_of(&query, caps_near_the_sun());
+        let shells: Vec<Shell> = plan.shells().collect();
+        let of = |layer: Layer, index: u8| {
+            *shells
+                .iter()
+                .find(|s| s.layer() == layer && s.index() == index)
+                .expect("a shell")
+        };
+        // C's first three, D's first and third, E's last alone, and all of A's, B's and the brown
+        // dwarfs'.
+        let done = [
+            of(Layer::A, 0),
+            of(Layer::B, 0),
+            of(Layer::BrownDwarf, 0),
+            of(Layer::C, 2),
+            of(Layer::C, 0),
+            of(Layer::C, 1),
+            of(Layer::D, 0),
+            of(Layer::D, 2),
+            of(Layer::E, 6),
+        ];
+        let reached = plan.completeness(done);
+        let ly = |r: f64| Some(LightYears::new(r));
+        assert_eq!(reached.edge(Layer::C), ly(2_000.0));
+        assert_eq!(reached.edge(Layer::D), ly(500.0));
+        assert_eq!(reached.edge(Layer::E), ly(0.0));
+        for layer in [Layer::A, Layer::B, Layer::BrownDwarf] {
+            assert_eq!(reached.edge(layer), None, "{layer:?}");
+        }
+        assert_eq!(reached.least_edge(), ly(0.0));
+        assert!(!reached.is_final());
+        let radii = reached.complete_to();
+        for (layer, radius) in [
+            (Layer::A, 11.0),
+            (Layer::B, 68.0),
+            (Layer::C, 2_000.0),
+            (Layer::D, 500.0),
+            (Layer::E, 0.0),
+            (Layer::BrownDwarf, 1.0),
+        ] {
+            assert_eq!(bits(radii.radius(layer).value()), bits(radius), "{layer:?}");
+        }
+        let replies = plan.replies();
+        assert_eq!(replies.len(), 7);
+        for (rank, reply) in replies.iter().enumerate() {
+            for layer in SHELLED_LAYERS {
+                let edges: Vec<Shell> = shells
+                    .iter()
+                    .copied()
+                    .filter(|s| s.layer() == layer)
+                    .collect();
+                let at = edges[rank.min(edges.len() - 1)];
+                let expected = at.edge().unwrap_or_else(|| {
+                    caps_near_the_sun()
+                        .iter()
+                        .find(|c| c.layer() == layer)
+                        .expect("a cap")
+                        .radius()
+                });
+                assert_eq!(
+                    bits(reply.radius(layer).value()),
+                    bits(expected.value()),
+                    "{layer:?} at {rank}"
+                );
+            }
+        }
+        assert_eq!(replies.last(), Some(&CompleteTo::of_caps(plan.caps())));
+        assert_eq!(
+            plan.complete().complete_to(),
+            &CompleteTo::of_caps(plan.caps())
+        );
+        assert!(plan.complete().is_final());
+        assert_eq!(plan.complete().least_edge(), None);
+    }
+
+    /// For a cap of one radius a ray, a layer's census of its shells to an edge is complete towards
+    /// each direction to the lesser of the edge and the cap's radius there, bit for bit, and to the
+    /// edge alone in every direction where every ray reaches past it (R06.T8.i on R06.T7.b).
+    #[test]
+    fn by_ray_a_shells_radius_is_held_within_each_rays_cap() {
+        let query = query_by_ray(7.0, 60.0, 400.0);
+        let caps = query.forced_caps.clone().expect("forced caps");
+        let plan = plan_with_edges(&query, caps.clone(), &[50, 100, 200, 300]);
+        let shells: Vec<Shell> = plan.shells().collect();
+        let replies = plan.replies();
+        assert_eq!(
+            replies.len(),
+            5,
+            "four edges below every shelled layer's farthest ray"
+        );
+        for (rank, reply) in replies.iter().enumerate() {
+            let mut uniforms =
+                crate::sky::testing::uniforms(0x7b_0900 + u64::try_from(rank).expect("few"));
+            for _ in 0..2_000 {
+                let mut next = || uniforms.next().expect("endless");
+                let u = UnitVector::from_components(std::array::from_fn(|_| 2.0 * next() - 1.0))
+                    .expect("a direction");
+                for cap in &caps {
+                    let towards = cap.radius_toward(u).value();
+                    let mine: Vec<&Shell> =
+                        shells.iter().filter(|s| s.layer() == cap.layer()).collect();
+                    let expected = mine[rank.min(mine.len() - 1)]
+                        .edge()
+                        .map_or(towards, |edge| towards.min(edge.value()));
+                    assert_eq!(
+                        bits(reply.radius_toward(cap.layer(), u).value()),
+                        bits(expected),
+                        "{:?} at rank {rank}",
+                        cap.layer()
+                    );
+                }
+            }
+        }
+        // Every ray reaches past 50 ly, so the first reply is complete to it in every direction;
+        // the last is complete to the caps.
+        for layer in SHELLED_LAYERS {
+            assert_eq!(replies[0].radius(layer), LightYears::new(50.0), "{layer:?}");
+        }
+        assert_eq!(replies.last(), Some(&CompleteTo::of_caps(&caps)));
+    }
+
+    /// The cells of the plan's shells in order are its cells, each once, and they are the cells of
+    /// each layer's walk that the plan opens; each lies in the first shell whose sphere, the edge
+    /// padded as a walk to it pads, its box meets, and in its layer's last if none; and each slab
+    /// names its shell (R06.T8.i). Checked at the fixed edges with caps of one radius past them, at
+    /// a test's edges with caps of one radius a ray, and in a cone.
+    #[test]
+    fn every_cell_is_in_exactly_one_shell() {
+        let query = SkyQuery::builder(observer(), Magnitudes::new(7.95))
+            .build()
+            .expect("a valid query");
+        let uniform: Vec<LayerCap> = [30.0, 60.0, 1_100.0, 2_100.0, 1_100.0, 40.0]
+            .iter()
+            .zip(CAPPED_LAYERS)
+            .map(|(&radius, layer)| LayerCap::forced(layer, LightYears::new(radius)))
+            .collect();
+        let by_ray = query_by_ray(7.0, 60.0, 400.0);
+        let cone = Cone::new(UnitVector::NORTH, Degrees::new(10.0)).expect("a cone");
+        let coned = SkyQuery::builder(observer(), Magnitudes::new(7.0))
+            .cone(cone)
+            .build()
+            .expect("a valid query");
+        let forced = |radius: f64| -> Vec<LayerCap> {
+            CAPPED_LAYERS
+                .iter()
+                .map(|&layer| LayerCap::forced(layer, LightYears::new(radius)))
+                .collect()
+        };
+        let cases: [(&SkyQuery, Vec<LayerCap>, &[u32]); 3] = [
+            (&query, uniform, &SHELL_EDGES_LY),
+            (
+                &by_ray,
+                by_ray.forced_caps.clone().expect("forced caps"),
+                &[50, 100, 200, 300],
+            ),
+            (&coned, forced(400.0), &[100, 200]),
+        ];
+        for (query, caps, edges) in cases {
+            let plan = plan_with_edges(query, caps, edges);
+            let mut by_shell = Vec::new();
+            for shell in plan.shells() {
+                for slab in plan.shell_slabs(shell) {
+                    assert_eq!(slab.shell(), shell);
+                    assert_eq!(slab.layer(), shell.layer());
+                    by_shell.extend(slab.cells().map(|key| (key, shell)));
+                }
+            }
+            let cells: Vec<CellKey> = by_shell.iter().map(|&(key, _)| key).collect();
+            assert_eq!(
+                plan.cells().collect::<Vec<_>>(),
+                cells,
+                "the shells in order"
+            );
+            assert_eq!(plan.cell_count(), u64::try_from(cells.len()).expect("few"));
+            let once: BTreeSet<CellKey> = cells.iter().copied().collect();
+            assert_eq!(once.len(), cells.len(), "no cell is in two shells");
+            // The plan's cells as they were before the shells: each layer's walk, opened.
+            let walked: BTreeSet<CellKey> = plan
+                .walks
+                .iter()
+                .flat_map(|walk| {
+                    crate::galaxy::query::cells_in_sphere(walk.layer, &walk.sphere).filter(|&key| {
+                        opens(
+                            query.cone_region(),
+                            walk.rays.as_ref(),
+                            plan.apex,
+                            key,
+                            walk.pad,
+                        )
+                    })
+                })
+                .collect();
+            assert_eq!(once, walked);
+            for walk in &plan.walks {
+                let met: Vec<BTreeSet<CellKey>> = walk
+                    .edges
+                    .iter()
+                    .map(|(_, sphere)| {
+                        crate::galaxy::query::cells_in_sphere(walk.layer, sphere).collect()
+                    })
+                    .collect();
+                for &(key, shell) in by_shell.iter().filter(|(key, _)| key.layer() == walk.layer) {
+                    let first = met
+                        .iter()
+                        .position(|cells| cells.contains(&key))
+                        .unwrap_or(met.len());
+                    assert_eq!(usize::from(shell.index()), first, "{key:?} in {shell:?}");
+                }
+                if walk.layer == Layer::C || walk.layer == Layer::D {
+                    assert!(walk.edges.len() >= 2, "{:?} has shells", walk.layer);
+                }
+            }
+            eprintln!("{} cells in {} shells", cells.len(), plan.shells().count());
+        }
+    }
+
+    /// A cell's census: its stars and tallies.
+    type Part = (Vec<SkyStar>, crate::sky::census::CensusTallies);
+
+    /// The census of each of `cells` for `query`, on up to four threads (one on WebAssembly, which
+    /// has none), each with a context of its own, keyed by cell: a cell's census is a function of
+    /// the cell and the query alone, so the threads' timing changes no bit.
+    fn census_by_cell(query: &SkyQuery, cells: &[CellKey]) -> BTreeMap<CellKey, Part> {
+        let galaxy = milky_way_galaxy();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let job = || {
+            let mut ctx = SkyContext {
+                tables: milky_way_dark_tables(),
+                envelope: milky_way_envelope(),
+                offsets: milky_way_offsets(),
+                noise: NoiseCache::with_capacity(1 << 16),
+                cells: &NoSkyCellCache,
+                sources: &[],
+                modifiers: &NoModifiers,
+            };
+            let mut parts = Vec::new();
+            loop {
+                let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(&key) = cells.get(k) else {
+                    return parts;
+                };
+                let mut stars = Vec::new();
+                let tallies = census_cell(galaxy, &mut ctx, key, query, &mut stars);
+                parts.push((key, (stars, tallies)));
+            }
+        };
+        let parts: Vec<(CellKey, Part)> = if cfg!(target_family = "wasm") {
+            job()
+        } else {
+            std::thread::scope(|scope| {
+                let threads: Vec<_> = (0..4).map(|_| scope.spawn(job)).collect();
+                threads
+                    .into_iter()
+                    .flat_map(|thread| thread.join().expect("a census thread completes"))
+                    .collect()
+            })
+        };
+        parts.into_iter().collect()
+    }
+
+    /// Every float of `stars` that a census measures, with its system and star, in order:
+    /// `PartialEq` holds 0.0 and −0.0 equal.
+    fn star_bits(stars: &[SkyStar]) -> Vec<(SystemId, u64, [u64; 6])> {
+        stars
+            .iter()
+            .map(|s| {
+                let [x, y, z] = s.apparent().offset_metres();
+                (
+                    s.system(),
+                    u64::from(s.star().get()),
+                    [
+                        s.v().value(),
+                        s.a_v().value(),
+                        s.distance().value(),
+                        x,
+                        y,
+                        z,
+                    ]
+                    .map(bits),
+                )
+            })
+            .collect()
+    }
+
+    /// The shells' edges of the census tests, ly: R06.T8.i's 500 ly, 1,000 × 2<sup>k</sup> ly
+    /// scaled down twelvefold and more, so that a unit test can afford a census to its last.
+    const TEST_EDGES_LY: [u32; 2] = [40, 80];
+
+    /// The census tests' plan near the Sun, its shells and every cell's census.
+    struct ShellCensus {
+        query: SkyQuery,
+        plan: CensusPlan,
+        shells: Vec<Shell>,
+        parts: BTreeMap<CellKey, Part>,
+    }
+
+    impl ShellCensus {
+        /// Near the Sun to V 8, every cap forced to 160 ly, and C, D and E in shells to
+        /// [`TEST_EDGES_LY`].
+        fn near_the_sun() -> Self {
+            let query =
+                SkyQuery::builder(crate::sky::testing::sun_observer(), Magnitudes::new(8.0))
+                    .build()
+                    .expect("a valid query")
+                    .with_caps_forced(LightYears::new(160.0))
+                    .expect("a forced cap");
+            let caps = query.forced_caps.clone().expect("forced caps");
+            let plan = plan_with_edges(&query, caps, &TEST_EDGES_LY);
+            let cells: Vec<CellKey> = plan.cells().collect();
+            let parts = census_by_cell(&query, &cells);
+            let shells = plan.shells().collect();
+            Self {
+                query,
+                plan,
+                shells,
+                parts,
+            }
+        }
+
+        /// The parts of the cells of the shells `done`.
+        fn parts_of(&self, done: &[Shell]) -> Vec<Part> {
+            done.iter()
+                .flat_map(|&shell| self.plan.shell_slabs(shell))
+                .flat_map(|slab| slab.cells())
+                .map(|key| self.parts[&key].clone())
+                .collect()
+        }
+    }
+
+    /// The listed stars and then the overflow of `census`.
+    fn whole(census: &SkyCensus) -> Vec<SkyStar> {
+        let mut stars = census.listed().to_vec();
+        stars.extend_from_slice(census.overflow());
+        stars
+    }
+
+    /// Whether `star`'s layer is censused shell by shell.
+    fn shelled(star: &SkyStar) -> bool {
+        SHELLED_LAYERS.contains(&star.layer())
+    }
+
+    /// Checks the census of the shells of `fixture` to its k-th edge against the census with C's,
+    /// D's and E's caps forced to that edge and against the `last` census, of every shell, and
+    /// returns how many stars of its shells it holds back.
+    fn check_the_census_to_an_edge(fixture: &ShellCensus, k: usize, last: &SkyCensus) -> usize {
+        let unbounded = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let edge = f64::from(TEST_EDGES_LY[k]);
+        let done: Vec<Shell> = fixture
+            .shells
+            .iter()
+            .copied()
+            .filter(|s| usize::from(s.index()) <= k)
+            .collect();
+        let reached = fixture.plan.completeness(done.iter().copied());
+        for layer in SHELLED_LAYERS {
+            assert_eq!(
+                reached.edge(layer),
+                Some(LightYears::new(edge)),
+                "{layer:?}"
+            );
+        }
+        let census = merge_shells(fixture.parts_of(&done), unbounded, reached.clone());
+        assert_eq!(census.completeness(), Some(&reached));
+        assert!(census.overflow().is_empty());
+        // The census with C's, D's and E's caps forced to the edge, less its stars beyond it.
+        let forced = fixture
+            .query
+            .clone()
+            .with_caps_forced_per_layer(&SHELLED_LAYERS.map(|layer| (layer, LightYears::new(edge))))
+            .expect("a forced cap");
+        let caps = forced.forced_caps().expect("forced caps").to_vec();
+        let theirs_cells: Vec<CellKey> = census_plan_of(&forced, caps).cells().collect();
+        let theirs = merge_census(
+            census_by_cell(&forced, &theirs_cells).into_values(),
+            unbounded,
+        );
+        let within: Vec<SkyStar> = theirs
+            .listed()
+            .iter()
+            .filter(|s| s.distance().value() < edge)
+            .copied()
+            .collect();
+        let ours: Vec<SkyStar> = census
+            .listed()
+            .iter()
+            .filter(|s| shelled(s))
+            .copied()
+            .collect();
+        assert_eq!(
+            star_bits(&ours),
+            star_bits(&within),
+            "C, D and E to {edge} ly"
+        );
+        assert_eq!(ours, within);
+        // A's, B's and the brown dwarfs' one shell is done: they are listed whole.
+        let others: Vec<SkyStar> = census
+            .listed()
+            .iter()
+            .filter(|s| !shelled(s))
+            .copied()
+            .collect();
+        let finals: Vec<SkyStar> = last
+            .listed()
+            .iter()
+            .filter(|s| !shelled(s))
+            .copied()
+            .collect();
+        assert_eq!(
+            star_bits(&others),
+            star_bits(&finals),
+            "A, B and the brown dwarfs"
+        );
+        let waiting = check_the_stars_beyond_wait(fixture.parts_of(&done), edge, &census, last);
+        // No star of the partial census lies beyond its layer's radius, at any n_max.
+        let few = NonZeroU32::new(60).expect("not zero");
+        let cut = merge_shells(fixture.parts_of(&done), few, reached.clone());
+        assert_eq!(
+            whole(&cut),
+            census.listed(),
+            "the brightest 60 listed, the rest past n_max"
+        );
+        for star in whole(&cut).iter().filter(|s| shelled(s)) {
+            let radius = reached.radius_for(star).value();
+            assert!(
+                star.distance().value() < radius,
+                "{star:?} beyond {radius} ly"
+            );
+            assert_eq!(bits(radius), bits(edge));
+        }
+        eprintln!(
+            "to {edge} ly: C, D and E list {} stars, and {} of their shells' stars wait",
+            ours.len(),
+            waiting
+        );
+        waiting
+    }
+
+    /// Checks that the stars of `parts`, a census of shells to `edge`, that lie at or beyond the
+    /// edge are not listed by its `census` and are by the `last`, and returns how many there are.
+    fn check_the_stars_beyond_wait(
+        parts: Vec<Part>,
+        edge: f64,
+        census: &SkyCensus,
+        last: &SkyCensus,
+    ) -> usize {
+        let kept: Vec<SkyStar> = parts.into_iter().flat_map(|(stars, _)| stars).collect();
+        let waiting: Vec<&SkyStar> = kept
+            .iter()
+            .filter(|s| shelled(s) && s.distance().value() >= edge)
+            .collect();
+        assert!(
+            !waiting.is_empty(),
+            "a straddling cell holds stars beyond {edge} ly"
+        );
+        for &star in &waiting {
+            assert!(!census.listed().contains(star));
+            assert!(
+                last.listed().contains(star),
+                "{star:?} is listed by the last census"
+            );
+        }
+        waiting.len()
+    }
+
+    /// Near the Sun to V 8, every cap forced to 160 ly and C, D and E in shells to 40 and 80 ly
+    /// (R06.T8.i's tests):
+    ///
+    /// - shells 1–k merged, at any `n_max`, are the census with C's, D's and E's caps forced to
+    ///   shell k's edge, less that census's stars beyond the edge, bit for bit, and A's, B's and
+    ///   the brown dwarfs' are their whole census, their one shell done;
+    /// - no star of a partial census, listed or past `n_max`, lies beyond its layer's complete-to
+    ///   radius, and the stars a straddling cell holds beyond it are listed by a later census;
+    /// - the last, every shell merged, is [`census_plan`]'s census, star for star.
+    #[test]
+    fn shells_merged_are_the_census_to_each_edge_and_the_last_is_the_plans() {
+        let fixture = ShellCensus::near_the_sun();
+        let unbounded = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let last = merge_shells(
+            fixture.parts_of(&fixture.shells),
+            unbounded,
+            fixture.plan.complete(),
+        );
+        let held_back: usize = (0..TEST_EDGES_LY.len())
+            .map(|k| check_the_census_to_an_edge(&fixture, k, &last))
+            .sum();
+        assert!(held_back > 0);
+        // The last: every shell, the one-shot census of the plan's cells, star for star.
+        let one_shot = census_plan(
+            milky_way_galaxy(),
+            milky_way_dark_tables(),
+            milky_way_envelope(),
+            &fixture.query,
+            &mut NoiseCache::with_capacity(16),
+        );
+        let few = NonZeroU32::new(60).expect("not zero");
+        let one_shot = merge_census(one_shot.cells().map(|key| fixture.parts[&key].clone()), few);
+        let final_few = merge_shells(
+            fixture.parts_of(&fixture.shells),
+            few,
+            fixture.plan.complete(),
+        );
+        assert_eq!(final_few.listed(), one_shot.listed());
+        assert_eq!(final_few.overflow(), one_shot.overflow());
+        assert_eq!(final_few.tallies(), one_shot.tallies());
+        assert_eq!(star_bits(&whole(&final_few)), star_bits(&whole(&one_shot)));
+        assert!(final_few.completeness().is_some_and(Completeness::is_final));
+        assert_eq!(one_shot.completeness(), None);
+        eprintln!(
+            "the last lists {} and passes {} past n_max, of {}; {} cells in {} shells",
+            final_few.listed().len(),
+            final_few.overflow().len(),
+            last.listed().len(),
+            fixture.parts.len(),
+            fixture.shells.len()
+        );
+    }
+
+    /// C's, D's and E's `caps` held within `edge`, ly, each ray's radius the lesser of its own and
+    /// the edge, or the edge in every direction where every ray reaches it; A's, B's and the brown
+    /// dwarfs' forced to nothing.
+    fn caps_within(caps: &[LayerCap], edge: f64) -> Vec<LayerCap> {
+        caps.iter()
+            .map(
+                |cap| match (SHELLED_LAYERS.contains(&cap.layer()), cap.rays()) {
+                    (false, _) => LayerCap::forced(cap.layer(), LightYears::ZERO),
+                    (true, Some(rays)) if !rays.all_reach(edge) => {
+                        LayerCap::forced_by_ray(cap.layer(), rays.within(edge))
+                    }
+                    (true, _) => LayerCap::forced(cap.layer(), LightYears::new(edge)),
+                },
+            )
+            .collect()
+    }
+
+    /// A star's direction from the observer of the tests' queries by ray.
+    fn direction_of(star: &SkyStar) -> UnitVector {
+        UnitVector::from_components(
+            observer()
+                .position()
+                .displacement_to(star.apparent())
+                .metres(),
+        )
+        .expect("a star away from its observer")
+    }
+
+    /// Near the Sun to V 8 with every layer's cap one radius a ray, jagged between 40 and 150 ly,
+    /// and C, D and E in shells to 50 and 100 ly (R06.T8.i's tests, as ruled for caps by ray):
+    ///
+    /// - shells 1–k merged hold, bit for bit, every star of the census with caps forced to shell
+    ///   k's radii (each ray's held within edge k) that lies within its layer's radius towards its
+    ///   band texel;
+    /// - any other star they list lies within that radius towards its texel and at or beyond it
+    ///   towards its own direction: one of R06.T7.b's gap, whose cell the one-shot plan's padded
+    ///   ball opens and the forced census's smaller one does not;
+    /// - in a layer not yet final no listed star lies at or beyond its radius towards its texel,
+    ///   which is the radius the band's ray through that texel reads.
+    #[test]
+    fn by_ray_shells_merged_hold_the_census_to_each_shells_radii() {
+        let query = query_by_ray(8.0, 40.0, 150.0);
+        let caps = query.forced_caps.clone().expect("forced caps");
+        let edges = [50, 100];
+        let plan = plan_with_edges(&query, caps.clone(), &edges);
+        let cells: Vec<CellKey> = plan.cells().collect();
+        let parts = census_by_cell(&query, &cells);
+        let shells: Vec<Shell> = plan.shells().collect();
+        let unbounded = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let spec = query.band_spec();
+        for (k, &edge) in edges.iter().enumerate() {
+            let edge = f64::from(edge);
+            let done: Vec<Shell> = shells
+                .iter()
+                .copied()
+                .filter(|s| usize::from(s.index()) <= k)
+                .collect();
+            let reached = plan.completeness(done.iter().copied());
+            let mine: Vec<Part> = done
+                .iter()
+                .flat_map(|&shell| plan.shell_slabs(shell))
+                .flat_map(|slab| slab.cells())
+                .map(|key| parts[&key].clone())
+                .collect();
+            let census = merge_shells(mine, unbounded, reached.clone());
+            let ours: BTreeMap<(SystemId, u8), &SkyStar> = census
+                .listed()
+                .iter()
+                .filter(|s| shelled(s))
+                .map(|s| ((s.system(), s.star().get()), s))
+                .collect();
+            // The census with C's, D's and E's caps forced to shell k's radii, A's, B's and the
+            // brown dwarfs' to nothing.
+            let mut forced = query.clone();
+            let forced_caps = caps_within(&caps, edge);
+            forced.forced_caps = Some(forced_caps.clone());
+            let theirs_cells: Vec<CellKey> = census_plan_of(&forced, forced_caps).cells().collect();
+            let theirs = merge_census(
+                census_by_cell(&forced, &theirs_cells).into_values(),
+                unbounded,
+            );
+            let mut within = 0_u32;
+            for star in theirs.listed() {
+                if star.distance() < reached.radius_for(star) {
+                    within += 1;
+                    let mine = ours
+                        .get(&(star.system(), star.star().get()))
+                        .unwrap_or_else(|| {
+                            panic!("{star:?} lies within its texel's radius, unlisted")
+                        });
+                    assert_eq!(star_bits(&[**mine]), star_bits(&[*star]));
+                }
+            }
+            let mut gap = 0_u32;
+            for star in ours.values() {
+                let radius = reached.radius_for(star);
+                assert!(
+                    star.distance() < radius,
+                    "{star:?} lies beyond its texel's radius"
+                );
+                let d = observer()
+                    .position()
+                    .displacement_to(star.apparent())
+                    .metres();
+                let (face, row, column) = spec.texel_of(d).expect("a star away from its observer");
+                let band = reached
+                    .complete_to()
+                    .radius_toward(star.layer(), spec.texel_direction(face, row, column));
+                assert_eq!(
+                    bits(radius.value()),
+                    bits(band.value()),
+                    "the band's radius"
+                );
+                let theirs_too = theirs
+                    .listed()
+                    .iter()
+                    .any(|s| (s.system(), s.star()) == (star.system(), star.star()));
+                if !theirs_too {
+                    gap += 1;
+                    let own = reached
+                        .complete_to()
+                        .radius_toward(star.layer(), direction_of(star));
+                    assert!(
+                        star.distance() >= own,
+                        "{star:?}: within its own direction's radius"
+                    );
+                }
+            }
+            assert!(within > 50, "{within} stars within shell {k}'s radii");
+            eprintln!(
+                "by ray to {edge} ly: C, D and E list {} stars, {within} of the forced census's, and \
+                 {gap} of the gap",
+                ours.len()
+            );
+        }
     }
 }

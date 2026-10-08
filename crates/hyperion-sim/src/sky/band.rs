@@ -21,9 +21,17 @@
 //! - **beyond it, all of the layer's light** (decided 2026-10-05, `decision-r06-census-cost.md`):
 //!   so a sky that is still filling in is as bright as the final one, and the expected light of the
 //!   stars beyond the caps is carried rather than dropped. The boundary is the census's
-//!   (`decision-r06-census-cost-signoff.md`): until the census states its own (R06.T8.i), it is each
-//!   layer's cap, since R06.T7.b one radius a ray of the caps' lattice, which each texel's ray reads
-//!   towards its own direction as the census's plan opened its cells ([`CompleteTo`]).
+//!   (`decision-r06-census-cost-signoff.md`): each layer's complete-to radius ([`CompleteTo`]),
+//!   its cap once its census is final and, before that, the edge of its shells done held within
+//!   the cap (R06.T8.i). Since R06.T7.b a cap is one radius a ray of the caps' lattice, and each
+//!   texel's ray reads the radius towards the texel's centre. A census not yet final in a layer
+//!   lists its stars by that same radius towards each star's texel, so the two share it star by
+//!   star (decided 2026-10-08, `decision-r06-t8i-listing.md`). The census's plan opens its cells
+//!   by the rays' cones about each star's own direction, though, so where a cone's edge crosses a
+//!   texel a star within the radius towards the texel's centre may lie in a cell left closed, and
+//!   its light is in neither. That is R06.T7.b's gap, deferred by the owner: under one star a
+//!   layer by the caps' count beyond, and some 10⁻² stars over the sky near the Sun (R06's Risks,
+//!   "Deviations in T8.i, as built").
 //!
 //! The light along a ray is the trapezoid rule's in distance between nodes; the light nearer than
 //! the first node, at most some 10⁻⁵ of a ray's, is left out. Then the census's overflow, the stars it kept
@@ -397,12 +405,17 @@ impl Default for BandSpec {
 /// `decision-r06-census-cost.md`): within a layer's radius the band holds the light of its stars
 /// fainter than the cut, beyond it all of the layer's light.
 ///
-/// Until the census states its own (R06.T8.i), a census is complete to its plan's caps
-/// ([`CompleteTo::of_caps`]). Since R06.T7.b a layer's cap is one radius a ray of the caps'
-/// lattice, and the band takes, towards each of its texels, the same radius the census's plan
-/// opened its cells by ([`LayerCap::radius_toward`]): the largest radius of the rays whose cones
-/// hold the texel's centre. A forced cap is one radius in every direction. Each reply of a request
-/// states its own, and one [`march_rows`] keeps every reply's radii (R06.T9.f).
+/// A census is complete to its plan's caps once final ([`CompleteTo::of_caps`]), and before that,
+/// layer by layer, to the edge of its shells done, held within the caps (R06.T8.i; the
+/// [`Completeness`](super::census::Completeness) a census of shells carries). Since R06.T7.b a
+/// layer's cap is one radius a ray of the caps' lattice, and the band takes, towards each of its
+/// texels, the radius [`LayerCap::radius_toward`] gives at the texel's centre: the largest radius
+/// of the rays whose cones hold it. A census not yet final lists by that radius towards each
+/// star's texel. Its plan opens cells by the cones about each star's own direction, so in a texel
+/// a cone's edge crosses, the radius can exceed the one towards some of its stars, whose cells may
+/// be left closed (R06.T7.b's gap, deferred; `decision-r06-t8i-listing.md`). A forced cap is one
+/// radius in every direction. Each reply of a request states its own, and one [`march_rows`]
+/// keeps every reply's radii (R06.T9.f).
 ///
 /// Cloning shares a cap's radii per ray.
 #[derive(Debug, Clone, PartialEq)]
@@ -456,15 +469,34 @@ impl CompleteTo {
     /// not hold.
     #[must_use]
     pub fn of_caps(caps: &[LayerCap]) -> Self {
+        Self::of_caps_within(caps, [None; BAND_LAYERS])
+    }
+
+    /// Complete to each layer's cap in `caps`, held within the layer's edge in `within_ly`, ly,
+    /// where it has one.
+    ///
+    /// That is a census of some of its plan's shells (R06.T8.i). Towards each direction
+    /// a layer with an edge is complete to the lesser of its edge and its cap's radius towards it,
+    /// and one with none to its cap, as [`of_caps`](Self::of_caps). A cap one radius a ray all of
+    /// whose rays reach the edge is complete to the edge in every direction.
+    #[must_use]
+    pub(crate) fn of_caps_within(caps: &[LayerCap], within_ly: [Option<f64>; BAND_LAYERS]) -> Self {
         Self {
-            radii: CAPPED_LAYERS.map(|layer| {
+            radii: std::array::from_fn(|l| {
+                let (layer, edge) = (CAPPED_LAYERS[l], within_ly[l]);
                 caps.iter().find(|cap| cap.layer() == layer).map_or(
                     Boundary::Uniform(LightYears::ZERO),
-                    |cap| match cap.rays() {
-                        Some(rays) => Boundary::ByRay(rays.clone()),
-                        None => Boundary::Uniform(LightYears::new(above_zero_or_zero(
-                            cap.radius().value(),
-                        ))),
+                    |cap| match (cap.rays(), edge) {
+                        (Some(rays), None) => Boundary::ByRay(rays.clone()),
+                        (Some(rays), Some(edge)) if rays.all_reach(edge) => {
+                            Boundary::Uniform(LightYears::new(above_zero_or_zero(edge)))
+                        }
+                        (Some(rays), Some(edge)) => Boundary::ByRay(rays.within(edge)),
+                        (None, edge) => {
+                            let radius = cap.radius().value();
+                            let radius = edge.map_or(radius, |edge| radius.min(edge));
+                            Boundary::Uniform(LightYears::new(above_zero_or_zero(radius)))
+                        }
                     },
                 )
             }),
@@ -512,6 +544,13 @@ impl CompleteTo {
             .map_or(LightYears::ZERO, |i| {
                 LightYears::new(self.radii[i].farthest())
             })
+    }
+
+    /// Whether the two are the same radii in every layer, by their bits, as a march finds a reply's
+    /// slots by them.
+    #[must_use]
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        self.radii.iter().zip(&other.radii).all(|(a, b)| a.same(b))
     }
 
     /// The radius to which `layer` is complete towards `direction`: the band's boundary along a ray
@@ -1866,15 +1905,39 @@ fn march_rows_through(
 /// light the eye-only request holds there (decided 2026-10-07, `decision-r06-t9c-glare.md`,
 /// addendum 2).
 ///
+/// A census of some of its plan's shells ([`merge_shells`](super::census::merge_shells); R06.T8.i)
+/// lists a layer not yet final by the radius towards each star's texel at its query's
+/// [`band_spec`](SkyQuery::band_spec), the radius this band's ray through that texel reads: its
+/// band is summed at that spec and at its own radii
+/// ([`Completeness`](super::census::Completeness)), so that the two share one
+/// boundary bit for bit (decided 2026-10-08, `decision-r06-t8i-listing.md`).
+///
 /// # Panics
 ///
-/// If the march does not keep a layer's radius of `complete_to` ([`BandMarch::holds`]).
+/// - If the march does not keep a layer's radius of `complete_to` ([`BandMarch::holds`]).
+/// - For a census of shells, if `complete_to` is not the radii its completeness states, or if some
+///   layer is not yet final and the march is not at the census's band or from its observer.
 pub fn sum_rows(
     march: &BandMarch,
     census: &SkyCensus,
     complete_to: &CompleteTo,
     out: &mut Vec<BandTexel>,
 ) {
+    if let Some(completeness) = census.completeness() {
+        assert!(
+            completeness.complete_to().same(complete_to),
+            "a census of shells is summed at the radii it is complete to"
+        );
+        assert!(
+            completeness.is_final()
+                || (completeness.band_spec() == march.spec
+                    && completeness.observer().is_same_point(&march.origin)),
+            "a census of shells not yet final lists by its query's band, {:?}, from its observer, \
+             so its band is marched at it from there, not at {:?}",
+            completeness.band_spec(),
+            march.spec
+        );
+    }
     let slots = march.slots_of(complete_to);
     if march.sums.is_empty() {
         return;
@@ -2135,11 +2198,12 @@ mod tests {
     use crate::sky::caps::{CAP_RAYS, CapLattice};
     use crate::sky::census::{
         CensusTallies, Cone, MAX_N_MAX, NoSkyCellCache, SkyStar, census_cell, census_plan,
-        merge_census,
+        census_plan_of, merge_census, merge_shells,
     };
     use crate::sky::eye::surface_brightness;
     use crate::sky::testing::{
-        milky_way_envelope, milky_way_offsets, milky_way_tables, sun_illumination,
+        milky_way_dark_tables, milky_way_envelope, milky_way_offsets, milky_way_tables,
+        sun_illumination,
     };
     use crate::time::UniverseTime;
     use crate::units::consts::RADIANS_PER_DEGREE;
@@ -4946,5 +5010,71 @@ mod tests {
         }
         eprintln!("{texels} texels: each its starlight and its diffuse light within {worst:.2e}");
         assert!(worst <= 1e-15, "{worst}");
+    }
+
+    /// A census near the Sun with every cap forced to 1,000 ly, so C, D and E in shells to 500 ly
+    /// and then 1,000, its query's band at `face_texels`: the census of every layer's first shell,
+    /// of no stars, and the first face row of a march of the plan's replies at `march_texels`, on
+    /// tables of no component, whose rays hold no light.
+    fn first_shell_and_march(face_texels: u16, march_texels: u16) -> (SkyCensus, BandMarch) {
+        let galaxy = milky_way_galaxy();
+        let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .band_spec(spec(face_texels))
+            .build()
+            .expect("a valid query")
+            .with_caps_forced(LightYears::new(1_000.0))
+            .expect("a forced cap");
+        let plan = census_plan_of(&query, query.forced_caps().expect("forced caps").to_vec());
+        let first = plan.completeness(plan.shells().filter(|shell| shell.index() == 0));
+        assert!(!first.is_final());
+        let census = merge_shells(Vec::new(), n(MAX_N_MAX), first);
+        let mut ctx = SkyContext {
+            tables: milky_way_dark_tables(),
+            envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
+            noise: NoiseCache::with_capacity(1 << 12),
+            cells: &NoSkyCellCache,
+            sources: &[],
+            modifiers: &NoModifiers,
+        };
+        let replies = plan.replies();
+        let march = march_rows(
+            galaxy,
+            &mut ctx,
+            &query,
+            replies,
+            &spec(march_texels),
+            CubeFace::PosZ,
+            0..1,
+        );
+        (census, march)
+    }
+
+    /// A census of some of its plan's shells is summed at the radii it is complete to and at its
+    /// query's band, whose texels it lists by (R06.T8.i; decided 2026-10-08,
+    /// `decision-r06-t8i-listing.md`).
+    #[test]
+    fn a_census_of_shells_is_summed_at_its_querys_band_and_radii() {
+        let (census, march) = first_shell_and_march(8, 8);
+        let completeness = census.completeness().expect("a census of shells");
+        assert!(march.holds(completeness.complete_to()));
+        let mut texels = Vec::new();
+        sum_rows(&march, &census, completeness.complete_to(), &mut texels);
+        assert_eq!(texels.len(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "a census of shells not yet final lists by its query's band")]
+    fn a_census_of_shells_summed_at_another_band_is_refused() {
+        let (census, march) = first_shell_and_march(16, 8);
+        let completeness = census.completeness().expect("a census of shells");
+        sum_rows(&march, &census, completeness.complete_to(), &mut Vec::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "a census of shells is summed at the radii it is complete to")]
+    fn a_census_of_shells_summed_at_other_radii_is_refused() {
+        let (census, march) = first_shell_and_march(8, 8);
+        sum_rows(&march, &census, &complete_within(1_000.0), &mut Vec::new());
     }
 }

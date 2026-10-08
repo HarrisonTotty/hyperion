@@ -112,6 +112,18 @@ impl GalacticPosition {
         self.offset
     }
 
+    /// Whether the two are the same point bit for bit: the same light-year cell, and offsets of
+    /// the same bits, where the derived `==` holds 0.0 and −0.0 equal.
+    #[must_use]
+    pub(crate) fn is_same_point(&self, other: &Self) -> bool {
+        self.cell == other.cell
+            && self
+                .offset
+                .iter()
+                .zip(&other.offset)
+                .all(|(a, b)| a.total_cmp(b).is_eq())
+    }
+
     /// A position from float light-years, or `None` if a coordinate is not finite or its whole
     /// part does not fit in `i32`.
     ///

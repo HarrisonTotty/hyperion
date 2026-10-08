@@ -213,6 +213,13 @@ pub struct SkyCensus { /* listed: Vec<SkyStar> (by flux, then system, then star)
     overflow: Vec<SkyStar>, tallies: CensusTallies */ }
 impl SkyCensus { pub fn empty() -> Self; }                    // the eye-cut pre-pass's band
 pub fn merge_census(parts: Vec<Vec<SkyStar>>, n_max: NonZeroU32) -> SkyCensus;
+pub const SHELL_EDGES_LY: [u32; 9]; pub const SHELLED_LAYERS: [Layer; 3]; pub struct Shell;
+pub struct Completeness; impl CensusPlan { pub fn shells(&self); pub fn shell_slabs(&self,
+    shell: Shell); pub fn completeness(&self, done: impl IntoIterator<Item = Shell>)
+    -> Completeness; pub fn complete(&self) -> Completeness; pub fn replies(&self)
+    -> Vec<CompleteTo>; } impl CellSlab { pub fn shell(&self) -> Shell; }
+pub fn merge_shells(parts, n_max: NonZeroU32, completeness: Completeness) -> SkyCensus;
+impl SkyCensus { pub fn completeness(&self) -> Option<&Completeness>; }  // R06.T8.i, as built
 pub struct CensusTallies { /* per layer: cells, candidates opened, accepted, listed,
     without_photometry, feature_members_absent: bool */ }
 
@@ -812,9 +819,13 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     capped there; the client asks less on the low setting (Design note 22). From R06.T8.i and
     T11.d a reply may be partial (decided 2026-10-05, `decision-r06-census-cost.md`; adopted under
     the owner's delegation, `decision-r06-census-cost-signoff.md`). It states each layer's
-    complete-to radius, and the band carries the rest. A partial reply lists only the stars within
-    that radius in their direction, so that listing and band share one boundary and each star's
-    light is still added once.
+    complete-to radius, and the band carries the rest. Until a layer's last shell is merged, a
+    reply lists only its stars within that radius towards their band texel, read at the centre of
+    the texel `BandSpec::texel_of` places each star in at the query's `band_spec`, the radius the
+    band's ray through that texel reads; so listing and band share one boundary and each star's
+    light is still added once. Once a layer's last shell is merged, every reply lists every star of
+    its opened cells, as the one-shot census does (decided 2026-10-08,
+    `decision-r06-t8i-listing.md`).
 12. **The per-cell cache is monotone.** `SkyCellCache` keeps, per cell, the records at or above the
     mass floor it was built with, in candidate order. A later query whose floor is at or above the
     cached one filters the cached list; a lower floor rebuilds the cell. Records are epoch state, so
@@ -1721,16 +1732,48 @@ sky::census::cache` and the warm bench recorded against T17's warm budget (≤ 2
   worker count gives the same sequence of replies. A, B and the brown dwarfs are one shell each.
   - A cell belongs to the first shell its padded box meets.
   - `SkyCensus` carries, per layer, the radius to which it is complete.
-  - A partial shell's census lists only the stars within its stated radius in their direction. A
-    straddling cell's stars beyond it wait for the next shell. So listing and band share one
-    boundary, and no star's light is counted twice (Design note 11).
+  - After shell k a layer is complete, towards each direction u, to the lesser of shell k's edge
+    and `cap.radius_toward(u)`: its cap's rays each held within the edge, or the edge in every
+    direction where every ray reaches it.
+  - Until its last shell is merged, a layer lists only the stars within that radius towards
+    their band texel. That radius is read towards the centre of the texel that
+    `BandSpec::texel_of` places the star in, at the query's `band_spec`. The star is placed from
+    the same displacement the band places an overflow star by (R06.T8.l's lookup). It is the
+    radius the band's ray through that texel reads, bit for bit. A straddling cell's stars beyond
+    it wait for a later shell, and they are neither listed nor overflow. So listing and band share
+    one boundary in every texel, and no star's light is counted twice (Design note 11). For
+    uniform radii it is the radius in the star's own direction. Decided 2026-10-08
+    (`decision-r06-t8i-listing.md`).
+  - A layer whose last shell is merged lists every star of the cells it opens, as the one-shot
+    census does, in that reply and every later one.
+  - Where a ray cone's edge crosses a texel, the radius towards the texel's centre can exceed the
+    radius towards one of its stars. If that star's cell is unopened, its light is in neither the
+    census nor the band, in partial and final replies alike. This is T7.b's gap, deferred by the
+    owner on 2026-10-08. The expected count beyond the caps bounds it, under one star a layer, and
+    near the Sun it is estimated at about 10⁻² stars over the sky (R06's Risks, "Deviations in
+    T8.i, as built").
   - Merging shells 1 to k gives the census to shell k, and the last gives the one-shot census,
     which keeps today's rule of listing every star of the cells it opens.
 
-  Tests: shells 1–k merged equal the census with caps forced to shell k's edge, bit for bit, less
-  that census's stars beyond the edge; the last equals `census_plan`'s; every cell is in exactly
-  one shell; no listed star of a partial census lies beyond its complete-to radius. Acceptance:
-  `cargo test -p hyperion-sim sky::census::query`.
+  Tests:
+  - Shells 1–k merged hold, bit for bit, every star of the census with caps forced to shell k's
+    radii that lies within its layer's radius towards its band texel.
+    - Shell k's radii are each ray's radius held within edge k. For a cap of one radius, or where
+      every ray reaches the edge, they are edge k in every direction.
+    - Any other star that shells 1–k list lies within that radius towards its texel, and at or
+      beyond it towards its own direction. Such a star is one of the gap's. The one-shot plan's
+      padded ball opens its cell, and the forced census's smaller ball does not.
+    - For uniform caps the two sets are equal: the census with caps forced to edge k, less its
+      stars at or beyond the edge.
+  - The last shell merged gives `census_plan`'s one-shot census, bit for bit.
+  - The shells partition `census_plan`'s cells, each cell in exactly one.
+  - In a layer not yet final, no listed star lies at or beyond its layer's radius towards its band
+    texel. The band summed for that census reads, towards each texel's centre, the same radius bit
+    for bit.
+
+  Acceptance: `cargo test -p hyperion-sim sky::census::query`. As built (Risks, "Deviations in
+  T8.i, as built"): the shells rank by rank, `SkyCensus` carrying `Option<Completeness>`, the
+  census tests at a test's nearer edges, and the acceptance as built.
 
 Files: `sky/census/{mod,query,cell,merge,cache}.rs`. Bench: `sky/census_near_sun` (eye cut, cold
 and warm cache) and `sky/census_nuclear_disc` (eye cut, 150 ly from Sgr A*). The brainstorm's
@@ -6505,6 +6548,133 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     - The cost estimates "at T7.b's caps" elsewhere in this plan assumed the ruling's 25% for E. As
       built E opens 32.9% and all layers 74.2%, within the gates by 2.1 and 0.8 points; T8.g and T17
       re-derive them.
+- **Deviations in T8.i, as built (2026-10-08).** Nearest first, as the census-cost ruling
+  (`decision-r06-census-cost.md`), its sign-off (question 2, conditions 1 and 2) and the listing
+  ruling (`decision-r06-t8i-listing.md`, adopted 2026-10-08) set it out. No golden moves and no
+  bump: the one-shot census and its band are unchanged (determinism audit, `golden_diff` 0,
+  GENERATOR_VERSION 21).
+  - **Built** (`sky::census`):
+    - `SHELL_EDGES_LY` (`[u32; 9]`: 500 ly, then 1,000 × 2^k ly to 128,000, the last below
+      `MAX_FORCED_CAP_LY`), `SHELLED_LAYERS` (C, D, E), `Shell` (`layer`, `index`, `edge`,
+      `is_last`; it orders as `shells()` gives them) and `Completeness` (`complete_to`,
+      `observer`, `band_spec`, `is_final`, `edge`, `least_edge`, `lists`, `radius_for`);
+    - `CensusPlan::{shells, shell_slabs, completeness, complete, replies}`, `CellSlab::shell`,
+      `merge_shells` and `SkyCensus::completeness`;
+    - crate-private: `galaxy::query::cells_in_shell_slab` (plan 03's module),
+      `RayRadii::{within, all_reach}`, `CompleteTo::{of_caps_within, same}`,
+      `GalacticPosition::is_same_point` and `plan_with_edges`.
+  - **The shells.** A layer of `SHELLED_LAYERS` has one shell for each edge below its cap's
+    farthest radius, then one to its cap; A, B and the brown dwarfs one each. Shell k walks the
+    sphere of its edge, padded as a walk to that edge pads (the pad at the edge's light time), and
+    each column skips the run of cells the sphere of the edge before keeps, by the walk's own test,
+    so the shells partition the cells without visiting the inner ones. The cells are still opened
+    with the one-shot plan's pad and cones, so the shells change no cell the plan opens, and for
+    uniform caps shells 1–k are exactly the cells of the census forced to edge k.
+  - **Rank by rank (deviation).** `shells()`, `slabs()`, `cells()` and `plan_cells` give every
+    layer's first shell in `CAPPED_LAYERS`' order, then every layer's second, and so on; before,
+    layer by layer. No census moves: the merge's order is total. It is not T11.d's order (D's and E's
+    shells to 4,000 ly before C's beyond 2,000 ly), which T11.d sets from `shells()`.
+    `completeness` reads a set of shells: a shell after a gap in its layer's run adds nothing until
+    the gap is filled.
+  - **`SkyCensus` carries `Option<Completeness>` (deviation).** `merge_shells` gives `Some`;
+    `merge_census` (signature unchanged) and `empty` give `None`, a census that states no radius of
+    its own and is complete to its plan's caps (`CompleteTo::of_caps`). The server's one-shot path
+    stands unchanged until T11.d.
+  - **`plan_cells(query, caps: Vec<LayerCap>)` (deviation).** It took `&[LayerCap]`; it is now
+    `census_plan_of(query, caps).cells()`, so it takes the caps by value (Rust review: no borrow then
+    clone), and yields the cells shell by shell. Its callers are tests.
+  - **The listing: the ruling's (b).** Until its last shell is merged a layer lists a star whose
+    distance is less than the radius at the centre of its band texel (`BandSpec::texel_of` at the
+    query's `band_spec`, of `observer.displacement_to(star.apparent())`, the overflow's lookup),
+    in `Completeness::radius_for` alone. Stars at or beyond it are dropped before the `n_max` cut,
+    neither listed nor overflow; the tallies still count them as accepted. A final layer lists every
+    star of its opened cells. `CensusPlan` keeps the observer and `band_spec` for every query.
+    - Per ray, a layer done to edge e is complete to `RayRadii::within(e)` (each ray's radius held
+      within e), or to `Uniform(e)` where every ray reaches it.
+    - `sum_rows` asserts, for a census of shells, that `complete_to` is the census's own (by bits,
+      `CompleteTo::same`) and, unless it is final, that the march is at its `band_spec` and from its
+      observer (the ruling's note; the observer is the determinism audit's).
+  - **`replies()`** gives one `CompleteTo` per rank, from the first shell to the caps (7 near the
+    Sun at the eye's caps), holding every layer's every radius once that layer's first shell is
+    done. A layer with no shell done is complete nowhere, which `replies()` lacks: `nowhere` adds no
+    node (radii at or below `FIRST_NODE_LY` are not nodes) but a slot a layer and ray.
+  - **Test-only edges (deviation).** A census past 500 ly is a slow test's cost, so the census tests
+    take nearer edges through `plan_with_edges`: 40 and 80 ly with every cap forced to 160 ly, and
+    50 and 100 ly with caps by ray jagged between 40 and 150 ly. The fixed edges are tested on plans
+    and the partition.
+  - **Tests** (`sky::census::query`, 6 new; `galaxy::query::walk`, 2; `sky::band`, 3; a split and
+    order case in `sky::census::merge`; doctests of `completeness`, `merge_shells` and `replies`):
+    - uniform: to 40 ly C, D and E list 70 stars, as the census forced to 40 ly does, bit for bit,
+      and 223 of their shells' stars wait; to 80 ly 452 and 561; the last is `census_plan`'s
+      one-shot census, star for star and tally for tally, 3,159 stars over 49,152 cells in 12
+      shells;
+    - by ray: 124 and 656 listed, every star of the census forced to the clipped radii within its
+      texel's radius among them, and 0 gap stars (the gap clause is not exercised);
+    - the partition: 347,648 cells in 13 shells (`SHELL_EDGES_LY`, uniform caps C 1,100, D 2,100,
+      E 1,100 ly), 264,897 in 18 (by ray) and 11,474 in 12 (a cone), each cell in the first shell
+      whose sphere its box meets;
+    - the two census tests take 10.9 and 9.2 s on four threads under nextest (an override gives
+      them four slots).
+  - **R06.T7.b's gap and its mirror** (`decision-r06-t8i-listing.md` §2; the gap deferred by the
+    owner on 2026-10-08, in `deferred-corrections.md`, "R06 caps by direction"; not fixed):
+    - **The gap.** The band reads a texel's radius at its centre u_T; the cells are opened by the
+      rays' cones about each star's own direction u_s. A star at r with R(u_s) ≤ r < R(u_T) whose
+      cell is unopened has its light in neither the census nor the band, in partial and final
+      replies alike. The caps' count beyond bounds it, under one star a layer: ≤ 0.75 expected over
+      the sky near the Sun at 7.95, in C and D only (A's, B's and E's cells and pads are wider than
+      the texel); estimated at about 10⁻² stars, about 10⁻⁸ of the band, the same order at 10.06;
+      ≤ about 1.9 for the eye's visibility caps, estimated at a few × 10⁻².
+    - **The mirror.** A final layer lists every star of its opened cells, so the upper sliver's
+      stars, at [R(u_T), R(u_s)), are listed and in the band's light too: perhaps 10–300 stars,
+      ≲ 10⁻³ of the band, within T9.b's 1%. No layer has it before it is final.
+    - **Fixes** (i)–(v) are the decision's. (i), the plan's cones widened by ρ (5.47° at 64²), closes
+      the gap with this listing unchanged, and may need T7.b's 75% and 35% gates re-ruled by the
+      owner with measured figures.
+  - **Docs corrected in passing** (the ruling's note): `CompleteTo`'s doc and the `sky::band` and
+    `sky::caps` module docs, which said the band reads the radius the cells were opened by; caps.rs
+    now says "padded ball", as T7.b built it.
+  - **Files (deviation).** Beyond `sky/census/{mod,query,merge}.rs`: `galaxy/query/{walk,mod}.rs`,
+    `sky/band.rs` (the guard, its tests, the docs), `sky/caps.rs`, `coords/galactic.rs` (one crate
+    method), `sky/census/cell.rs` (one test's `plan_cells` call) and `.config/nextest.toml`.
+    `sky/census/cache.rs` is untouched.
+  - **Acceptance as built:**
+    `cargo test -p hyperion-sim --lib -- sky::census galaxy::query::walk sky::band::tests::a_census_of_shells`,
+    the census doctests, `--test sky_census`, and the server's `compute::sky` and `requests::sky`,
+    since it streams `plan.cells()` in the new order.
+  - **Not measured** (T17's): the first shell (500 ly) against the final caps (T9.b), each shell's
+    cost and the time to the first sky. The bench `sky/band_near_sun/march` still takes T9.f's
+    stand-in, `shell_replies` (one uniform radius a layer, the least of its farthest ray and the
+    edge), not `CensusPlan::replies`, which clips each ray: T17 re-takes the march's heap and cost
+    at the real replies.
+  - **For T11.d:**
+    - run the shells nearest first within each layer, each as its `shell_slabs`' jobs; keep every
+      part, the stars that wait among them, and make each reply with
+      `merge_shells(parts, n_max, plan.completeness(done))` over the parts so far;
+    - march once a request at `query.band_spec()` over `plan.replies()` (plus `nowhere()` if a reply
+      may come before some layer's first shell) and sum each reply at
+      `census.completeness().complete_to()`;
+    - the wire: `final` is `is_final()`; each layer's per-ray table is the cap's rays held within
+      `edge(layer)` (none once final); the label's figure is `least_edge()`.
+  - **For T17:** a golden of a partial reply near the Sun, each layer's complete-to radius bits and
+    the IDs and star indices it lists, beside `census_near_sun.golden`'s one-shot census
+    (determinism audit).
+  - **Gates** (2026-10-08, capped, build-slot, four jobs, `CPUQuota=400%`, load 3–12, so timings
+    are provisional; logs `.git/rm23-scratch/r06-census/t8i/final/`): fmt; clippy `-D warnings` on
+    the sim, the server and the fit crate natively (all targets) and on the sim for wasm32-wasip1;
+    `sky::census`, `sky::band`, `sky::caps` and `galaxy::query::walk` under nextest, 117 passed
+    (826 s); `--test sky_census` 6 of 6; the census doctests, 12; the server's `compute::sky` and
+    `requests::sky`, 28; Prettier on the plan.
+  - **Reviews.**
+    - Rust review: its must-fixes are applied (`Reached::Edge` holds `LightYears`; `plan_cells`
+      takes its caps by value), and so are its should-fixes (the guards compare by bits, the
+      `SHELL_EDGES_LY` doc, `RayRadii::within` checks its edge, one-sentence summaries, an example
+      of `replies`) and two considers (`streamed_cells_are_plan_cells` builds its cells
+      independently; each edge keeps its whole light-years, so no cast). Not taken: `sum_rows`
+      reading the census's own completeness instead of its argument, T11.d's to decide.
+    - Determinism audit: nothing must-fix or should-fix. Its considers are applied: `merge_shells`
+      in any split and order, the observer in `sum_rows`' guard, and T17's partial golden above.
+    - Plan conformance: Design note 11 amended to the ruling, the Provides line, this entry and the
+      acceptance as built; the bench's stand-in is recorded above for T17.
 - **Feature members are out of RM3's scope (decided 2026-10-05, `decision-r06-t16a-scope.md`).**
   - **Why.** R06.T16.a needs:
     - P08.T12 and P09.T2.c, two generator-version bumps of the galaxy plans;

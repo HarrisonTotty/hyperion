@@ -2715,7 +2715,7 @@ mod tests {
                 .with_caps_forced_per_layer(&radii)
                 .expect("forced caps");
             let planned: std::collections::BTreeSet<CellKey> =
-                plan_cells(&query, &forced).into_iter().collect();
+                plan_cells(&query, forced.clone()).into_iter().collect();
             for &(layer, cap) in &caps {
                 check_layer_in_motion(&query, &planned, layer, cap, &mut counts);
             }

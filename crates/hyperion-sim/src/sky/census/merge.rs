@@ -7,18 +7,26 @@
 //! strict, and neither the split of the cells into jobs nor the order the jobs ran in can change
 //! the answer. The brightest `n_max` are listed. The rest are the overflow, which the server's
 //! band takes as points (Design note 15), so that each star's light is counted once, on one side.
+//!
+//! A census may arrive nearest first, shell by shell (R06.T8.i; Design notes 11 and 13): the parts
+//! of the shells done are merged by [`merge_shells`] to the [`Completeness`] they reach, which
+//! lists only the stars within each partial layer's radius and keeps the rest for a later census of
+//! more shells. Merged once all are done, the shells give the one-shot census, star for star.
 
 use std::cmp::Ordering;
 use std::num::NonZeroU32;
 
 use super::cell::{CensusTallies, SkyStar};
+use super::query::Completeness;
 
-/// A census: the stars it lists, the stars past `n_max`, and the tallies of every cell it opened.
+/// A census: the stars it lists, the stars past `n_max`, the tallies of every cell it opened, and,
+/// for a census of shells, how far it is complete (R06.T8.i).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SkyCensus {
     listed: Vec<SkyStar>,
     overflow: Vec<SkyStar>,
     tallies: CensusTallies,
+    completeness: Option<Completeness>,
 }
 
 impl SkyCensus {
@@ -44,9 +52,22 @@ impl SkyCensus {
 
     /// Every part's tallies added up, with each layer's [`listed`](super::LayerTally::listed)
     /// counted from [`listed`](Self::listed).
+    ///
+    /// A census of shells counts every cell of its shells done, and every star they kept, among
+    /// them those it holds for a later census.
     #[must_use]
     pub const fn tallies(&self) -> &CensusTallies {
         &self.tallies
+    }
+
+    /// How far a census of shells ([`merge_shells`]) is complete, per layer and towards each
+    /// direction, as its plan's [`CensusPlan::completeness`](super::CensusPlan::completeness) gave
+    /// it; `None` for one merged whole ([`merge_census`]) and for [`empty`](Self::empty), which
+    /// state no radius of their own: a census merged whole is its plan's, complete to its caps
+    /// ([`CompleteTo::of_caps`](crate::sky::band::CompleteTo::of_caps)).
+    #[must_use]
+    pub const fn completeness(&self) -> Option<&Completeness> {
+        self.completeness.as_ref()
     }
 }
 
@@ -132,6 +153,92 @@ pub fn merge_census(
     parts: impl IntoIterator<Item = (Vec<SkyStar>, CensusTallies)>,
     n_max: NonZeroU32,
 ) -> SkyCensus {
+    merge(parts, n_max, None)
+}
+
+/// Merges the parts of a census of some of its plan's shells, listing the brightest `n_max` of the
+/// stars `completeness` lists (R06.T8.i).
+///
+/// Those are every star of a layer whose last shell is done, and of any other layer only those
+/// within its complete-to radius towards their band texel ([`Completeness::lists`]). The census
+/// carries `completeness`.
+///
+/// The parts are those of every cell of the shells done (and of no other), each cell's once, in any
+/// order and split, as for [`merge_census`]. Their stars beyond a partial layer's radius are neither
+/// listed nor in the overflow: they are in the band's light beyond the radius until a census of more
+/// shells lists them. Merged with every shell done ([`CensusPlan::complete`](super::CensusPlan::complete)),
+/// the census is [`merge_census`]'s of the same parts, star for star.
+///
+/// # Panics
+///
+/// As [`merge_census`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::sky::census::{
+///     CellOffsets, CensusTallies, NoSkyCellCache, SkyContext, SkyQuery, census_cell, census_plan,
+///     merge_shells,
+/// };
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::Magnitudes;
+///
+/// let galaxy = Galaxy::new(Seed::new(11));
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let offsets = CellOffsets::build(&galaxy);
+/// let at = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let query = SkyQuery::builder(Observer::new(at, UniverseTime::EPOCH)?, Magnitudes::new(7.95))
+///     .build()?;
+/// let mut noise = NoiseCache::with_capacity(1 << 16);
+/// let plan = census_plan(&galaxy, &tables, &envelope, &query, &mut noise);
+/// let mut ctx = SkyContext {
+///     tables: &tables,
+///     envelope: &envelope,
+///     offsets: &offsets,
+///     noise,
+///     cells: &NoSkyCellCache,
+///     sources: &[],
+///     modifiers: &NoModifiers,
+/// };
+/// // Shell by shell, nearest first, a reply after each: the census of every shell done so far.
+/// let (mut parts, mut done) = (Vec::new(), Vec::new());
+/// for shell in plan.shells() {
+///     let (mut stars, mut tallies) = (Vec::new(), CensusTallies::default());
+///     for key in plan.shell_slabs(shell).flat_map(|slab| slab.cells()) {
+///         tallies.add(&census_cell(&galaxy, &mut ctx, key, &query, &mut stars));
+///     }
+///     parts.push((stars, tallies));
+///     done.push(shell);
+///     let reply = merge_shells(parts.clone(), query.n_max(), plan.completeness(done.clone()));
+///     let completeness = reply.completeness().ok_or("a census of shells")?;
+///     // Every star listed lies within its layer's radius, until the last reply.
+///     assert!(reply.listed().iter().all(|star| completeness.lists(star)));
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn merge_shells(
+    parts: impl IntoIterator<Item = (Vec<SkyStar>, CensusTallies)>,
+    n_max: NonZeroU32,
+    completeness: Completeness,
+) -> SkyCensus {
+    merge(parts, n_max, Some(completeness))
+}
+
+/// [`merge_census`], listing only the stars `completeness` lists where it is given, and carrying it.
+fn merge(
+    parts: impl IntoIterator<Item = (Vec<SkyStar>, CensusTallies)>,
+    n_max: NonZeroU32,
+    completeness: Option<Completeness>,
+) -> SkyCensus {
     let mut stars = Vec::new();
     // The first part's tallies start the sum, so that a flag every part clears stays clear.
     let mut summed: Option<CensusTallies> = None;
@@ -155,6 +262,10 @@ pub fn merge_census(
             .all(|w| sky_order(&w[0], &w[1]) == Ordering::Less),
         "no star is in two parts"
     );
+    // A partial layer's stars beyond its radius wait for a later census; the order is kept.
+    if let Some(completeness) = &completeness {
+        stars.retain(|star| completeness.lists(star));
+    }
     // A `u32` no `usize` holds is more stars than any `Vec` can, so saturating keeps them all.
     let keep = usize::try_from(n_max.get())
         .unwrap_or(usize::MAX)
@@ -167,6 +278,7 @@ pub fn merge_census(
         listed: stars,
         overflow,
         tallies,
+        completeness,
     }
 }
 
@@ -184,13 +296,14 @@ mod tests {
     use crate::galaxy::placement::CellKey;
     use crate::id::{Layer, SystemId};
     use crate::observe::Observer;
+    use crate::sky::caps::{CAPPED_LAYERS, LayerCap};
     use crate::sky::census::cache::NoSkyCellCache;
     use crate::sky::census::cell::census_cell;
-    use crate::sky::census::query::{MAX_N_MAX, SkyContext, SkyQuery};
+    use crate::sky::census::query::{MAX_N_MAX, SkyContext, SkyQuery, plan_with_edges};
     use crate::sky::testing::{milky_way_dark_tables, milky_way_envelope, milky_way_offsets};
     use crate::stellar::multiplicity::StarIndex;
     use crate::time::UniverseTime;
-    use crate::units::Magnitudes;
+    use crate::units::{LightYears, Magnitudes};
 
     /// The Sun's place in the fixture, ly.
     const SUN: [f64; 3] = [0.0, 26_000.0, 68.0];
@@ -394,6 +507,23 @@ mod tests {
             }
             check_cut(parts, n_max);
         }
+        // A census of shells too, to C's, D's and E's first shell at 40 ly (R06.T8.i), which
+        // holds back their stars beyond it, in any split and order.
+        let caps: Vec<LayerCap> = CAPPED_LAYERS
+            .iter()
+            .map(|&layer| LayerCap::forced(layer, LightYears::new(160.0)))
+            .collect();
+        let plan = plan_with_edges(&query, caps, &[40, 80]);
+        let first = plan.completeness(plan.shells().filter(|shell| shell.index() == 0));
+        for n_max in [n(1), n(total / 3), unbounded()] {
+            let whole = merge_shells(parts.to_vec(), n_max, first.clone());
+            for split in splits(parts.len()) {
+                let census = merge_shells(joined(parts, &split), n_max, first.clone());
+                assert_eq!(census, whole);
+            }
+        }
+        let shelled = merge_shells(parts.to_vec(), unbounded(), first);
+        assert!(shelled.listed().len() < unbounded_census.listed().len());
     }
 
     #[test]

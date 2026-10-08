@@ -29,6 +29,11 @@ threads-required = 8
 filter = "package(hyperion-sim) & (test(=sky::limits::tests::the_eyes_light_is_independent_of_the_census_radius) | test(=sky::band::tests::one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent))"
 threads-required = 4
 
+# The shell plan's census tests (R06.T8.i) census their cells on four threads of their own too.
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & (test(=sky::census::query::tests::shells_merged_are_the_census_to_each_edge_and_the_last_is_the_plans) | test(=sky::census::query::tests::by_ray_shells_merged_hold_the_census_to_each_shells_radii))"
+threads-required = 4
+
 # R06.T11.c's near-Sun sky builds the galaxy's luminosity tables twice, on the server's pool and
 # serially in the test, and marches its band on three threads of its own beside the server's three
 # workers, so it takes four slots and joins the tables' group.

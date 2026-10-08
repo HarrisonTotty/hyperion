@@ -31,8 +31,14 @@
 //!   [`WIDENING_SPACINGS`] times the lattice's spacing;
 //! - the census's radius towards a direction is the largest radius of the rays whose cones, of
 //!   half-angle the lattice's spacing, hold it ([`RayRadii::toward`]). The census opens every cell
-//!   whose padded box meets one of those cones within its ray's radius, and the band reads the same
-//!   radius towards each of its texels (R06.T9.b), so the listing and the band share one boundary.
+//!   whose padded ball meets one of those cones within its ray's radius, and the band reads the
+//!   radius towards each of its texels' centres (R06.T9.b). Until a layer's census is final it
+//!   lists each star by the radius towards the star's texel (R06.T8.i), so the listing and the band
+//!   share that boundary for every star of an opened cell; a final census lists every star of the
+//!   cells it opens. Where a cone's edge crosses a texel, a star within the radius towards the
+//!   texel's centre but beyond the one towards itself may lie in a cell left closed, and its light
+//!   is in neither: a gap the count beyond bounds, under one star a layer, deferred by the owner
+//!   on 2026-10-08 (`decision-r06-t8i-listing.md`).
 //!
 //! The lattice's spacing is its covering radius, the farthest any direction lies from its nearest
 //! ray, bounded from above by measurement ([`CapLattice::spacing`]): 4.2° at 1,536 rays. So every
@@ -448,6 +454,35 @@ impl RayRadii {
             texel_bound,
             largest,
         }
+    }
+
+    /// The radii held within `edge_ly`, ly: each ray's the lesser of its own and the edge.
+    ///
+    /// They are on the same lattice (R06.T8.i, a shell's edge). Towards each direction they give
+    /// the lesser of the edge and [`toward`](Self::toward), bit for bit, since both take a ray's
+    /// radius as it is.
+    ///
+    /// # Panics
+    ///
+    /// Unless `edge_ly` is finite and positive.
+    #[must_use]
+    pub(crate) fn within(&self, edge_ly: f64) -> Self {
+        assert!(
+            edge_ly.is_finite() && edge_ly > 0.0,
+            "an edge of {edge_ly} ly holds no ray within it"
+        );
+        Self::new(
+            Arc::clone(&self.lattice),
+            self.radii.iter().map(|&r| r.min(edge_ly)).collect(),
+        )
+    }
+
+    /// Whether every ray's radius reaches `edge_ly` or beyond.
+    ///
+    /// The radii held within it are then the edge in every direction.
+    #[must_use]
+    pub(crate) fn all_reach(&self, edge_ly: f64) -> bool {
+        self.radii.iter().all(|&r| r >= edge_ly)
     }
 
     /// The lattice whose rays the radii are of.

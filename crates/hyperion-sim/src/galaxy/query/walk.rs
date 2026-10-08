@@ -184,6 +184,36 @@ pub fn cells_in_sphere_slab(
         .flat_map(move |walk| walk.slab(x))
 }
 
+/// The cells of [`cells_in_sphere_slab`] for `outer` at `x` that [`cells_in_sphere`] does not yield
+/// for `inner`, if given, in its order: one x slab of the shell between two spheres about the same
+/// centre, or of `outer` alone (rendering plan R06, R06.T8.i, the census's distance shells).
+///
+/// Each column's cells of `inner` are found by the test the walk keeps them by, on the same
+/// centre, so they are skipped without being visited, and the shells of a nest of spheres, the
+/// innermost's own cells first, partition the outermost's cells exactly.
+///
+/// # Panics
+///
+/// Unless `inner` shares `outer`'s centre and its padded radius is at most `outer`'s.
+pub(crate) fn cells_in_shell_slab(
+    layer: Layer,
+    outer: &QuerySphere,
+    inner: Option<&QuerySphere>,
+    x: i32,
+) -> impl Iterator<Item = CellKey> + use<> {
+    assert!(
+        inner.is_none_or(|inner| outer.centre().is_same_point(inner.centre())
+            && inner.padded_radius().value() <= outer.padded_radius().value()),
+        "a shell lies between two spheres about one centre, the inner the smaller"
+    );
+    let x = i64::from(x);
+    let hole = inner.and_then(|inner| Walk::new(layer, inner));
+    Walk::new(layer, outer)
+        .filter(|walk| walk.cells(0).contains(&x))
+        .into_iter()
+        .flat_map(move |walk| walk.slab_beyond(hole, x))
+}
+
 /// How many cells [`cells_in_sphere`] yields, found column by column without visiting a cell.
 #[must_use]
 pub fn count_cells_in_sphere(layer: Layer, sphere: &QuerySphere) -> u64 {
@@ -287,6 +317,36 @@ impl Walk {
             })
             .flat_map(move |(y, (z_first, z_last))| {
                 (z_first..=z_last).map(move |z| self.key([x, y, z]))
+            })
+    }
+
+    /// The kept cells whose x coordinate is `x` that `hole`, a walk about the same centre within
+    /// this one, does not keep, in ascending order of y, then z. Each column's run of `hole`'s
+    /// cells is found by `hole`'s own test, and those cells are skipped.
+    fn slab_beyond(self, hole: Option<Self>, x: i64) -> impl Iterator<Item = CellKey> {
+        let gx2_ly2 = self.gap_squared_ly2(0, x);
+        let hole = hole
+            .filter(|walk| walk.cells(0).contains(&x))
+            .map(|walk| (walk, walk.gap_squared_ly2(0, x)));
+        self.cells(1)
+            .filter_map(move |y| {
+                let (z_first, z_last) = self.column(gx2_ly2 + self.gap_squared_ly2(1, y))?;
+                let skipped = hole.and_then(|(walk, hx2_ly2)| {
+                    walk.cells(1)
+                        .contains(&y)
+                        .then(|| walk.column(hx2_ly2 + walk.gap_squared_ly2(1, y)))
+                        .flatten()
+                });
+                Some((y, z_first, z_last, skipped))
+            })
+            .flat_map(move |(y, z_first, z_last, skipped)| {
+                // The hole's run lies inside the column's, since its sphere lies inside this one;
+                // with no hole, the run above is empty.
+                let (below, above) = match skipped {
+                    Some((h_first, h_last)) => (z_first..=h_first - 1, h_last + 1..=z_last),
+                    None => (z_first..=z_last, z_last + 1..=z_last),
+                };
+                below.chain(above).map(move |z| self.key([x, y, z]))
             })
     }
 
@@ -544,6 +604,75 @@ mod tests {
             assert_walk_is_brute_force(layer, &sphere(outside, 100.0));
             assert_eq!(count_cells_in_sphere(layer, &sphere(outside, 60.0)), 0);
         }
+    }
+
+    /// The shells of a nest of spheres about one centre, the innermost's own cells first, hold
+    /// each of the outermost's cells once, and each shell exactly the cells of its sphere that the
+    /// one inside it lacks, in the walk's order (rendering plan R06, R06.T8.i).
+    #[test]
+    fn the_shells_of_nested_spheres_partition_the_outermost_walk() {
+        let centres = [
+            at([1_234, 26_000, 17], [0.37, 0.61, 0.23]),
+            at([0, 26_000, 0], [0.0, 0.0, 0.0]),
+            at([65_530, -65_530, 65_500], [0.5, 0.5, 0.5]),
+        ];
+        // Whole radii put cell faces on the spheres; the pads part the padded radii from them.
+        let radii_and_pads = [
+            (8.0, 0.0),
+            (24.0, 0.5),
+            (32.0, 1.0),
+            (32.0, 1.0),
+            (131.5, 2.25),
+        ];
+        for centre in centres {
+            let nest: Vec<QuerySphere> = radii_and_pads
+                .iter()
+                .map(|&(radius, pad)| {
+                    QuerySphere::new(
+                        centre,
+                        LightYears::new(radius),
+                        UniverseTime::EPOCH,
+                        LightYears::new(pad),
+                    )
+                    .unwrap()
+                })
+                .collect();
+            for layer in every_layer() {
+                let mut shells: Vec<CellKey> = sphere_slabs(layer, &nest[0])
+                    .flat_map(|x| cells_in_shell_slab(layer, &nest[0], None, x))
+                    .collect();
+                let innermost: Vec<CellKey> = cells_in_sphere(layer, &nest[0]).collect();
+                assert_eq!(shells, innermost, "{layer:?}: the innermost alone");
+                for pair in nest.windows(2) {
+                    let (inner, outer) = (&pair[0], &pair[1]);
+                    let shell: Vec<CellKey> = sphere_slabs(layer, outer)
+                        .flat_map(|x| cells_in_shell_slab(layer, outer, Some(inner), x))
+                        .collect();
+                    let held: std::collections::BTreeSet<CellKey> =
+                        cells_in_sphere(layer, inner).collect();
+                    let beyond: Vec<CellKey> = cells_in_sphere(layer, outer)
+                        .filter(|key| !held.contains(key))
+                        .collect();
+                    assert_eq!(shell, beyond, "{layer:?}: {outer:?} beyond {inner:?}");
+                    shells.extend(shell);
+                }
+                shells.sort_unstable();
+                let outermost: Vec<CellKey> = cells_in_sphere(layer, &nest[4]).collect();
+                assert_eq!(shells, outermost, "{layer:?} about {centre:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a shell lies between two spheres about one centre")]
+    fn a_shell_whose_inner_sphere_is_the_larger_is_refused() {
+        let centre = at([0, 26_000, 0], [0.0; 3]);
+        let _ = cells_in_shell_slab(
+            Layer::A,
+            &sphere(centre, 8.0),
+            Some(&sphere(centre, 16.0)),
+            0,
+        );
     }
 
     #[test]
