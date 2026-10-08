@@ -29,9 +29,11 @@
 //! the census skipped nearly all of them until R06.T16.b. Its bound at twice the primary's mass
 //! over ages from zero skipped some 40% of A's and none of B's, so B's skips were printed rather
 //! than asserted (decision-r06-census-cost, 2026-10-05), as the nuclear disc's fast test's still
-//! are. R06.T8.g's bound star by star restores B's check, and in the slow near-Sun tests each of
-//! B, C, D and E must generate under a quarter of its records. D's and E's quarter waits for plan
-//! 11's P11.T17.c, whose verdicts bound the pairs that P11.T17.a cannot: until then it is printed.
+//! are. R06.T8.g's bound star by star restores B's check, and in the slow near-Sun tests B and C
+//! must each generate under a quarter of their records. D's and E's shares are printed and
+//! recorded, not asserted (decided 2026-10-08, `decision-p11-t17c-bright.md`): at plan 11's
+//! P11.T17.c verdicts a `Bright` pair's light is the brightest product of a neighbourhood of
+//! cells, so about half of D's records and four fifths of E's are still generated.
 //!
 //! Three merger products are pinned (R06.T16.b): the two first-giant-branch stars of K-dwarf
 //! primaries with M-dwarf companions, in systems 5–7 Gyr old, that T8.e's oracle found the census
@@ -191,9 +193,9 @@ fn agree_in(
 }
 
 /// R06.T8.g's share: of each layer of `asserted` in `generated`, the census generates under a
-/// quarter of the systems its oracle generates; each layer of `printed` is printed only, its
-/// quarter waiting for plan 11's P11.T17.c. Only the slow near-Sun tests, which wasm32-wasip1
-/// leaves out, ask it.
+/// quarter of the systems its oracle generates; each layer of `printed` is printed only, its share
+/// recorded in R06's Risks, "Deviations in T8.g, as built" (`decision-p11-t17c-bright.md`). Only
+/// the slow near-Sun tests, which wasm32-wasip1 leaves out, ask it.
 #[cfg(not(target_family = "wasm"))]
 fn generates_under_a_quarter(
     what: &str,
@@ -211,7 +213,7 @@ fn generates_under_a_quarter(
         } else if printed.contains(&layer) {
             eprintln!(
                 "{what}: {layer:?} generates {census} of {brute} systems ({}under a quarter; \
-                 asserted from P11.T17.c)",
+                 recorded, not asserted)",
                 if quarter { "" } else { "not " }
             );
         }

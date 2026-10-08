@@ -34,7 +34,9 @@
 //! `HYPERION_SKY_CACHE_MB` (default 64 MiB) divided by the sample, so that a sampled warm census
 //! is the shipped size's (`decision-r06-census-cost-signoff.md`, condition 4), each block weighing
 //! its held records plus its own size. The cold census starts each iteration with an empty cache;
-//! `census_near_sun/cold` reads no cache, R06.T8.g's path, so that its gate reads it; the warm
+//! `census_near_sun/cold` reads no cache, R06.T8.g's path, so that its record reads it, as do
+//! `/cold_eye_visibility` and `/cold_spheres`, the same path on R06.T7.b's caps by the eye's
+//! visibility and on R06.T7's spheres (the query's own are T7.b's caps by ray); the warm
 //! one starts with the cache one census of the same query left, whose fill is its cold figure;
 //! the warm jump
 //! (`census_near_sun/warm_jump`, R06.T8.h) with the cache the Sun's census left, for a census
@@ -45,11 +47,13 @@
 //! | Bench | Target | Figure |
 //! | ----- | ------ | ------ |
 //! | `sky/luminosity_tables` | ≤ 30 CPU-s (T17) | pending a quiet machine |
-//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17); ≤ 6 × 10⁴ (T8.g) | 1.44 × 10⁶ CPU-s, sampled by cell (T8.g), at P11.T17.a |
-//! | `sky/census_near_sun/cold_camera` | none: recorded beside the eye's (T8.g) | pending P11.T17.c |
+//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17); recorded, not gated (T8.g) | 9.46 × 10⁵ CPU-s on 15 workers, 7.43 × 10⁵ on 3, at P11.T17.c (below) |
+//! | `sky/census_near_sun/cold_eye_visibility` | none: recorded (T8.g) | 7.16 × 10⁵ CPU-s on 15 workers, at P11.T17.c |
+//! | `sky/census_near_sun/cold_spheres` | none: recorded (T8.g; the first gate's 6 × 10⁴) | 1.45 × 10⁶ CPU-s on 15 workers, 1.13 × 10⁶ on 3, at P11.T17.c |
+//! | `sky/census_near_sun/cold_camera` | none: recorded beside the eye's (T8.g) | 2.80 × 10⁶ CPU-s on 15 workers, at P11.T17.c |
 //! | `sky/census_near_sun/warm` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | provisional at P11.T17.a (below) |
 //! | `sky/census_near_sun/warm_jump` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | provisional at P11.T17.a (below) |
-//! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | provisional (below) |
+//! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | at most 2.7 µs a step, at P11.T17.c (below) |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 0.947 CPU-s, provisional |
@@ -103,6 +107,29 @@
 //!   99.99% before). Plan 11 cannot bound 27.7% of C's pairs, 77.1% of D's and 99.4% of E's, so
 //!   17.8%, 55.7% and 86.0% of their records keep the widened bound alone. T8.g's gates wait for
 //!   P11.T17.c's verdicts (R06's Risks, "Deviations in T8.g, as built").
+//!
+//! R06.T8.g's final runs (2026-10-08, at P11.T17.c's answers, before its bulge fix; under the
+//! heavy-test lock, load 1–15; `HYPERION_SKY_BENCH_SAMPLE` 1,000 by block, criterion's `--test`,
+//! at 7.95). The cold census is recorded, not gated (`decision-p11-t17c-bright.md`). A census's
+//! CPU-s is its jobs' wall time summed, so 15 workers on the dev machine's 8 cores with SMT read
+//! about 1.28 times what 3 workers at `CPUQuota=400%` read, with the same tallies:
+//! - `cold`, T7.b's caps by ray at the uniform cut (1.04 × 10⁸ cells): 9.46 × 10⁵ CPU-s on 15
+//!   workers, 7.43 × 10⁵ on 3. C generates 19.7% of its records past the floor, D 49.0% and E
+//!   69.4%, 35.3% of C to E.
+//! - `cold_eye_visibility` (8.70 × 10⁷ cells): 7.16 × 10⁵ CPU-s on 15 workers; C 19.9%, D 48.9%
+//!   and E 71.3%.
+//! - `cold_spheres` (C 8,193, D 9,925 and E 21,369 ly; 1.08 × 10⁸ cells): 1.45 × 10⁶ CPU-s on 15
+//!   workers, 1.13 × 10⁶ on 3, against 1.44 × 10⁶ at P11.T17.a on 3. C 19.9%, D 48.9% and E 64.1%,
+//!   40.0% of C to E (20.8%, 55.9% and 86.3% at P11.T17.a).
+//! - `cold_camera`, at V 10.06 on T7.b's caps by ray (1.46 × 10⁹ cells, walked in 994 s on one
+//!   thread): 2.80 × 10⁶ CPU-s on 15 workers, 3.0 times the eye's. C 20.7%, D 49.7% and E 77.5%.
+//! - The pairs' verdicts on the spheres, `Detached` / `Unchanged` / `Remnants` / `Bright` / none:
+//!   C 72.0 / 0.01 / 0.45 / 25.2 / 2.3%, D 20.9 / 0.59 / 16.2 / 58.7 / 3.6% and E 0.56 / 1.07 /
+//!   33.0 / 63.2 / 2.1%.
+//! - `sky/star_bound`, a record's cost, µs, in A–E: `draw_metallicity` 0.06 in each;
+//!   `hierarchy_bound` 4.4, 6.9, 15.9, 51.9 and 138; the pairs and η 0.39, 0.45, 0.73, 1.25 and
+//!   2.72; the phase reads 0.27, 0.32, 0.38, 0.43 and 1.16; the whole 5.1, 7.7, 17.1, 55.3 and
+//!   142.
 //!
 //! R06.T8.h's provisional run (2026-10-08, written against P11.T17.a; `census_near_sun/warm` and
 //! `/warm_jump`, `HYPERION_SKY_BENCH_SAMPLE` 1,000 by block, criterion's `--test`, 15 workers under
@@ -258,6 +285,8 @@ const DEFAULT_CACHE_MB: usize = 64;
 
 /// Whether each census bench has printed its first census.
 static PRINTED_COLD: AtomicBool = AtomicBool::new(false);
+static PRINTED_COLD_SEEN: AtomicBool = AtomicBool::new(false);
+static PRINTED_COLD_SPHERES: AtomicBool = AtomicBool::new(false);
 static PRINTED_COLD_CAMERA: AtomicBool = AtomicBool::new(false);
 static PRINTED_FILL: AtomicBool = AtomicBool::new(false);
 static PRINTED_WARM: AtomicBool = AtomicBool::new(false);
@@ -897,6 +926,51 @@ impl SkyCellCache for BenchCellCache<'_> {
     }
 }
 
+/// R06.T8.g's path near the Sun, with no cache: the cold figure it records.
+///
+/// It runs on R06.T7.b's caps by ray at the uniform cut, on its caps by the eye's visibility,
+/// which the server asks of an eye-only request, and on R06.T7's spheres, at which the gate was
+/// first set (`decision-p11-t17c-bright.md`). The warm benches' fills ([`census_near_sun`]) are
+/// the cold census through an empty cache, which also builds each entry (R06.T8.h).
+fn census_near_sun_cold(c: &mut Criterion) {
+    // The tables and each plan's caps are made only when a bench that reads them is run, so that
+    // a filtered run builds nothing it does not time.
+    let query = eye_query(SUN_LY);
+    let workers = workers();
+    let sample = sample();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    let cold = [
+        ("census_near_sun/cold", &PRINTED_COLD, Caps::ByRay),
+        (
+            "census_near_sun/cold_eye_visibility",
+            &PRINTED_COLD_SEEN,
+            Caps::ByEyeVisibility,
+        ),
+        (
+            "census_near_sun/cold_spheres",
+            &PRINTED_COLD_SPHERES,
+            Caps::Spheres,
+        ),
+    ];
+    for (name, printed, caps) in cold {
+        group.bench_function(name, |b| {
+            let sky = sky();
+            let query = caps.of(sky, query.clone());
+            b.iter_custom(|iters| {
+                let mut cpu = Duration::ZERO;
+                for _ in 0..iters {
+                    let run = census(sky, black_box(&query), &NoSkyCellCache, workers, sample);
+                    report_once(printed, name, &run, None);
+                    cpu += run.cpu();
+                }
+                cpu
+            });
+        });
+    }
+    group.finish();
+}
+
 fn census_near_sun(c: &mut Criterion) {
     // The tables and the warm cache are made only when a bench that reads them is run, so that a
     // filtered run builds nothing it does not time.
@@ -905,20 +979,6 @@ fn census_near_sun(c: &mut Criterion) {
     let sample = sample();
     let mut group = c.benchmark_group("sky");
     group.sample_size(10);
-    // R06.T8.g's path, with no cache: the cold gate's figure. The warm benches' fills are the
-    // cold census through an empty cache, which also builds each entry (R06.T8.h).
-    group.bench_function("census_near_sun/cold", |b| {
-        let sky = sky();
-        b.iter_custom(|iters| {
-            let mut cpu = Duration::ZERO;
-            for _ in 0..iters {
-                let run = census(sky, black_box(&query), &NoSkyCellCache, workers, sample);
-                report_once(&PRINTED_COLD, "census_near_sun/cold", &run, None);
-                cpu += run.cpu();
-            }
-            cpu
-        });
-    });
     // The camera's cut beside the eye's (R06.T8.g's record, `decision-r06-census-cost-signoff.md`):
     // a camera at V 10.06 with the eye asked at 7.95.
     let camera = camera_query(SUN_LY, true);
@@ -1207,6 +1267,76 @@ fn caps_by_ray_near_sun(c: &mut Criterion) {
     group.finish();
 }
 
+/// The caps a cold census near the Sun is planned on (R06.T8.g's record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Caps {
+    /// R06.T7.b's caps by ray at the uniform cut: the query's own.
+    ByRay,
+    /// R06.T7.b's caps by the eye's visibility ([`by_eye_visibility`]).
+    ByEyeVisibility,
+    /// R06.T7's spheres ([`with_spheres`]).
+    Spheres,
+}
+
+impl Caps {
+    /// `query` planned on these caps.
+    ///
+    /// The caps are counted here, outside the census's time.
+    #[must_use]
+    fn of(self, sky: &Sky, query: SkyQuery) -> SkyQuery {
+        match self {
+            Self::ByRay => query,
+            Self::ByEyeVisibility => by_eye_visibility(sky, &query),
+            Self::Spheres => {
+                with_spheres(sky, query, &mut NoiseCache::with_capacity(NOISE_SLOTS)).0
+            }
+        }
+    }
+}
+
+/// `query` with R06.T7's spherical caps forced per layer, and those caps.
+///
+/// They are 768 rays, one profile a ray, counted at `query`'s cut (`CapCount::spheres` at the
+/// standard resolution are not these): the caps R06.T8.g's cold gate was first set at, before
+/// R06.T7.b.
+#[must_use]
+fn with_spheres(sky: &Sky, query: SkyQuery, noise: &mut NoiseCache) -> (SkyQuery, Vec<LayerCap>) {
+    let spheres = CapCount::measure(
+        &sky.galaxy,
+        &sky.tables,
+        &sky.envelope,
+        query.observer(),
+        query.cut(),
+        CapResolution::new(768, RADIAL_STEPS_PER_DECADE).expect("non-zero"),
+        noise,
+    )
+    .spheres();
+    let radii: Vec<(Layer, LightYears)> = spheres.iter().map(|c| (c.layer(), c.radius())).collect();
+    let forced = query
+        .with_caps_forced_per_layer(&radii)
+        .expect("the spheres are caps");
+    (forced, spheres)
+}
+
+/// The eye-only request of `query`'s observer at its cut, with R06.T7.b's caps by the eye's
+/// visibility at that cut.
+///
+/// The server asks these caps of an eye-only request. Here they take no illumination, as
+/// R06.T7.b measured them; the server passes the request's.
+#[must_use]
+fn by_eye_visibility(sky: &Sky, query: &SkyQuery) -> SkyQuery {
+    let eye = EyeObserver::default();
+    let observer = *query.observer();
+    let cut = query.cut();
+    let mut ctx = job_context(sky);
+    let visibility = eye_visibility(&sky.galaxy, &mut ctx, &observer, &eye, cut, None);
+    SkyQuery::builder(observer, cut)
+        .eye(eye)
+        .eye_visibility(visibility)
+        .build()
+        .expect("an eye-only request at its cut")
+}
+
 /// A star of [`caps_by_ray_near_sun`]'s union, with whether each plan (the spheres, by ray, by
 /// visibility) opens its cell.
 type Sorted = (SkyStar, [bool; 3]);
@@ -1215,35 +1345,14 @@ type Sorted = (SkyStar, [bool; 3]);
 /// census time, scaled by the sample.
 fn caps_record(sky: &Sky, workers: usize, sample: u64) -> Duration {
     static PRINTED: AtomicBool = AtomicBool::new(false);
-    let eye = EyeObserver::default();
     let query = eye_query(SUN_LY);
     let observer = *query.observer();
     let cut = query.cut();
-    let mut ctx = job_context(sky);
-    let visibility = eye_visibility(&sky.galaxy, &mut ctx, &observer, &eye, cut, None);
-    let seen_query = SkyQuery::builder(observer, cut)
-        .eye(eye)
-        .eye_visibility(visibility)
-        .build()
-        .expect("an eye-only request at its cut");
+    let seen_query = by_eye_visibility(sky, &query);
     let mut noise = NoiseCache::with_capacity(NOISE_SLOTS);
     let counted = Instant::now();
-    let spheres = CapCount::measure(
-        &sky.galaxy,
-        &sky.tables,
-        &sky.envelope,
-        &observer,
-        cut,
-        CapResolution::new(768, RADIAL_STEPS_PER_DECADE).expect("non-zero"),
-        &mut noise,
-    )
-    .spheres();
+    let (sphere_query, spheres) = with_spheres(sky, query.clone(), &mut noise);
     let count_time = counted.elapsed();
-    let radii: Vec<(Layer, LightYears)> = spheres.iter().map(|c| (c.layer(), c.radius())).collect();
-    let sphere_query = query
-        .clone()
-        .with_caps_forced_per_layer(&radii)
-        .expect("the spheres are caps");
     let planned = Instant::now();
     let plans = [&sphere_query, &query, &seen_query]
         .map(|q| census_plan(&sky.galaxy, &sky.tables, &sky.envelope, q, &mut noise));
@@ -1807,6 +1916,7 @@ fn limit_map(c: &mut Criterion) {
 criterion_group!(
     sky_benches,
     luminosity_tables,
+    census_near_sun_cold,
     census_near_sun,
     census_nuclear_disc,
     star_bound,

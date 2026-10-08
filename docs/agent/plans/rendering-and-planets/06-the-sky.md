@@ -1748,7 +1748,10 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   and committed before its gates, which a fresh agent takes once P11.T17.c lands (the
   `--serve-sky` default moved to T11.d, 2026-10-08); the phase envelope read process-wide; the
   widened envelope kept as a first tier for every record; the pairs' verdicts taken once, over
-  the ages before the drift.
+  the ages before the drift. Its final gates were taken on 2026-10-08 at P11.T17.c's answers. The
+  identity tests pass, and the cold census is about 7–15 × 10⁵ CPU-s, recorded as a miss. The
+  slow realised-systems test fails on one system in D in the bulge (a `Remnants` miss), and T8.g
+  lands after plan 11's fix.
 
 - **R06.T8.m The phase envelope (new; split from T8.g on 2026-10-07; it needs no plan-11 task,
   so it may start at once).** Decided 2026-10-05 (`decision-r06-census-cost.md`) as part of T8.g,
@@ -6097,7 +6100,10 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   ruling's §9.2 let it be written against P11.T17.a's interface before P11.T17.b and T17.c land.
   So it is committed with every `PairLight` verdict handled, and its final gates wait for T17.c:
   the cold estimate, the 1% target, D's and E's quarter, the camera's figure and the
-  `--serve-sky` default. A fresh agent takes them (the census handoff's T8.g section).
+  `--serve-sky` default. A fresh agent takes them (the census handoff's T8.g section). They were
+  taken on 2026-10-08, as re-stated that day (`decision-p11-t17c-bright.md`): the cold figure is
+  recorded, not gated, D's and E's shares are recorded, and the default moved to R06.T11.d (below,
+  "The final gates, at P11.T17.c's answers").
   - **What is built** (`sky/census/cell.rs`). `StarBounds` is a record's light bounded star by
     star, in the plan's order:
     - `draw_metallicity`;
@@ -6250,6 +6256,94 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
         its stars' own bounds, these figures give about 3.7 × 10⁴ CPU-s at the spherical caps.
         That is about 2.6 × 10⁴ of hierarchy bounds, 1.0 × 10⁴ of generation and the rest,
         inside the 6 × 10⁴ gate and R06's re-quoted 3.6–4.4 × 10⁴.
+  - **The final gates, at P11.T17.c's answers (2026-10-08; `decision-p11-t17c-bright.md`).**
+    `rendering-and-planets` was merged by name at b6cb51b1, with P11.T17.c (4b7c6920), T7.b, T8.h
+    and T8.i. `GENERATOR_VERSION` is still 21. No census code changed: `StarLight::of` and
+    `PairTally::count` already took every verdict. The bench gained
+    `census_near_sun/cold_eye_visibility` and `/cold_spheres`. With T7.b in, `cold` plans on T7.b's
+    caps by ray, so the spheres the gate was first set at, and the caps the server asks of an
+    eye-only request, each need a bench of their own.
+    - **The slow realised-systems test fails, on one system (reported to main; a finding for
+      P11.T17.c or plan 11's engine, not fixed here).**
+      - In D in the bulge, `SystemId(0x61fec2d802000037)` (Grid, Bulge, primary 6.286 M☉,
+        8.70 Gyr, \[Fe/H\] +0.556, attempt 0) holds two stars on the helium main sequence. They
+        were born at 6.286 and 5.588 M☉ and shine at M<sub>V</sub> 2.52 and 1.30. Star 1's pair
+        reads `Remnants`, so its bound is `Dark`, at the epoch and 900 years before.
+      - A helium star that bright lives about 1–2 Myr (Hurley, Pols and Tout 2000, eq. 79). The
+        longest helium main sequence is about 1 Gyr, near 0.32 M☉. So two such stars at 8.7 Gyr
+        look like an engine state that T17.b's tables never sampled, not only a table miss.
+      - A probe (uncommitted, kept in the worktree for the P11 lane) counts instead of panicking.
+        It finds this system alone, 2 star checks of 64,094 in D's 10⁵ bulge systems, and none
+        in E's or the brown dwarfs' there. The test checked A–E and the brown dwarfs near the Sun
+        and A–C in the bulge before it stopped. So it is 1 system of 1.2 × 10⁶, with no margin
+        used elsewhere: the least slack is 0.3045 mag, in B in the bulge.
+      - The census could therefore drop such a star from a sky within reach of it. T17.c's tables
+        widen; the test does not (the census handoff). A P11 lane diagnoses it, widens the bound
+        at version 21 and re-runs the test. T8.g lands after that fix.
+    - **The identity tests pass**, under the heavy-test lock (3,705 s for the four):
+      - `the_census_is_its_oracle_1000_ly_from_the_sun`, in 625 s. It generates 436,474 of
+        1,411,018 systems: C 247,662 of 1,097,274 (22.6%, asserted under a quarter), D 126,463 of
+        238,967 (52.9%) and E 62,349 of 74,777 (83.4%). It accepts C 20,103, D 7,112 and E 1,158,
+        as before. The ruling expected about 45–50% and 80–85%, so D lies a little above, and
+        both lie below T17.a's 57.4% and 86.4%.
+      - `the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`, in 2,536 s: D 212,950 of
+        383,439 (55.5%) and E 410,896 of 494,729 (83.1%), against 59.4% and 86.4% before.
+      - `the_census_is_its_oracle_for_the_dwarfs_near_the_sun`, in 3.4 s: as before, A 788 of
+        138,945 and B 1,932 of 110,151 (1.75%).
+    - **The cold census, recorded as a miss** (`HYPERION_SKY_BENCH_SAMPLE` 1,000 by block,
+      criterion's `--test`, at 7.95, under the heavy-test lock, load 1–15).
+      - A census's CPU-s is its jobs' wall time summed. So 15 workers on the dev machine's 8
+        cores with SMT read about 1.28 times what 3 workers at `CPUQuota=400%` read, with the same
+        tallies. The ruling's spherical estimate is calibrated on T8.g's 3-worker run. Its T7.b
+        estimate is scaled from T8.h's 15-worker run.
+
+      | Near the Sun, at 7.95           | Cells      | CPU-s, 15 workers | CPU-s, 3 workers | Ruling's estimate               | Gate first set | Miss, 15 (3) workers |
+      | ------------------------------- | ---------- | ----------------- | ---------------- | ------------------------------- | -------------- | -------------------- |
+      | T7.b's caps by ray (`cold`)     | 1.04 × 10⁸ | 9.46 × 10⁵        | 7.43 × 10⁵       | 0.4–1.0 × 10⁶ (uniform 0.83)    | 2.5 × 10⁴      | 38× (30×)            |
+      | T7.b's caps by visibility       | 8.70 × 10⁷ | 7.16 × 10⁵        | —                | (0.52 × 10⁶ at the eye's 8.282) | 2.5 × 10⁴      | 29×                  |
+      | R06.T7's spheres                | 1.08 × 10⁸ | 1.45 × 10⁶        | 1.13 × 10⁶       | 0.8–1.3 × 10⁶ (central 1.08)    | 6 × 10⁴        | 24× (19×)            |
+      | The camera's 10.06, caps by ray | 1.46 × 10⁹ | 2.80 × 10⁶        | —                | 5–10 × the eye's                | none           | —                    |
+      - Like for like, each figure lies inside the ruling's range: by ray at 15 workers near
+        its top, and the spheres at 3 workers near its centre (against 1.44 × 10⁶ at P11.T17.a).
+        The camera's census is 3.0 times the eye's, under
+        the ruling's 5–10. Its walk alone is 994 s on one thread.
+      - A generated system costs 6.4–7.1 ms at 3 workers and 8.1–9.2 ms at 15. E is
+        most of it: on the spheres E generates 9.2 × 10⁷ of the 1.6 × 10⁸ systems generated.
+      - T8.g's figures were taken before the P11 lane's bulge fix, which should move them
+        negligibly. That lane reports its effect.
+
+    - **Each layer's generated share**, beside T17.a's (the spheres): C 19.9% (20.8%), D 48.9%
+      (55.9%) and E 64.1% (86.3%). None rises, so there is no finding for P11.T17.c. The caps by
+      ray give C 19.7%, D 49.0% and E 69.4%; by visibility 19.9%, 48.9% and 71.3%; the camera
+      20.7%, 49.7% and 77.5%. Against the ruling's central 18.9%, 42.8% and 63.5%, C and D lie
+      just above its unfavourable 19.5% and 44.4%, and E is near its centre.
+    - **The pairs' verdicts** (the spheres), `Detached` / `Unchanged` / `Remnants` / `Bright` /
+      none: C 72.0 / 0.01 / 0.45 / 25.2 / 2.3%, D 20.9 / 0.59 / 16.2 / 58.7 / 3.6% and E 0.56 /
+      1.07 / 33.0 / 63.2 / 2.1%. Records holding a pair plan 11 cannot bound fall from 17.8%,
+      55.7% and 86.0% to 2.1%, 6.0% and 9.4%.
+    - **The 1% target is missed**, and recorded so: C to E generate 40.0% of their records past
+      the floor on the spheres, 35.3% by ray, and 35.7% by visibility. That is 35–40 times the
+      target, against the floor of about 1.7% from C's own bounds. Its levers are deferred
+      (`deferred-corrections.md`, "Census cost").
+    - **A record's cost** (`sky/star_bound`, under the lock, load about 1), µs:
+
+      | Step                      | A    | B    | C    | D    | E    |
+      | ------------------------- | ---- | ---- | ---- | ---- | ---- |
+      | `draw_metallicity`        | 0.06 | 0.06 | 0.06 | 0.06 | 0.06 |
+      | `hierarchy_bound`         | 4.4  | 6.9  | 15.9 | 51.9 | 138  |
+      | the pairs' verdicts and η | 0.39 | 0.45 | 0.73 | 1.25 | 2.72 |
+      | the phase reads           | 0.27 | 0.32 | 0.38 | 0.43 | 1.16 |
+      | the whole                 | 5.1  | 7.7  | 17.1 | 55.3 | 142  |
+
+      Every step but `hierarchy_bound` is at most 2.7 µs, inside its 6 µs. T17.c's table reads
+      add some 0.7 µs in E, and the phase reads grow because far fewer records are unbounded.
+      Of the 400 records nearest the Sun, 7, 33 and 54 of C, D and E are unbounded (50, 210 and
+      362 at T17.a).
+
+    - **The other gates:** fmt; clippy `-D warnings` over the sim's targets, natively and on
+      wasm32-wasip1; `--lib -- sky::census sky::phase`, 82 passed; `--test sky_census`, 6 passed.
+      A Rust review of the bench's change found one must-fix, a borrowed query cloned inside its
+      helper, and two should-fixes, `#[must_use]` and a citation; all three are applied.
   - **Reviews (2026-10-07).**
     - The Rust review's must-fix is applied: magnitudes are typed, `Magnitudes` in `may_list`.
       So are its should-fixes:
