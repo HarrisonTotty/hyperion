@@ -1216,6 +1216,10 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     LLM. The brainstorm's discrete column keeps its RTX 4060-class estimates until R12.T10 replaces
     it.
 
+    _As built (2026-10-08):_ the judged run was on a standard 1080p monitor at 60.00 Hz, so T =
+    16.67 ms, which the frame clock measured as 16.666 ms; the projector's 16.68 ms stands for
+    R12's runs on it.
+
 22. **Open question 2's rule, operationalised** (researched 2026-09-29). The verdict (T19) applies
     the brainstorm's rule in order. A failure on the UHD 620 alone redesigns the low setting and
     never triggers a native renderer. On the discrete machine:
@@ -1240,6 +1244,15 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 
     Existing tools were rejected: webgpu_recorder replays in a browser again, Dawn's wire traces
     need a Chromium build with tracing, and wgpu's own `player` records wgpu, not Dawn.
+
+    _As built (R05.T19, 2026-10-08):_ applied to the one judged run, `2026-10-07-effect-high`, on the
+    discrete machine. Steps 1 and 2 were not run, being waived by the owner, so the safety checks and
+    the transport are unpriced and the replay's clause is untested. In step 3, our CPU time (3.60 ms)
+    and the GPU's pass time (5.72 ms) meet the headroom row. But the delivered frames do not miss the
+    95th-percentile row: the measured 18.29 ms rests on presentation times that are not frame times
+    on this path. The rule does not fire, and the failure is ours, in the renderer's frame
+    production. The run cannot split it further by thread, and the fix is deferred to R12.T11.b
+    (Risks, "The gate's verdict (R05.T19, 2026-10-08)").
 
 23. **The two annunciations.** The label block (R02) shows `TERRAIN: STREAMING` while any patch the
     selection asks for is drawn by a coarser resident ancestor, and `TERRAIN: DETAIL LIMITED` while
@@ -1283,6 +1296,12 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     approach. The mesh scale's rate on high, which the rule compares against, was waived by the
     owner. R10.T4's calibrated bound and R12.T11.b decide the scale. There is no fallback, so no
     label (decisions-r05.md item 7).
+
+    _As built (R05.T19, 2026-10-08):_ the sentence "If the fallback becomes a default, T18 drafts
+    its label … and builds none until then" is superseded. Decisions-r05.md item 7 (2026-10-02)
+    ruled that the mesh-resolution fallback carries no annunciation, since it loses shading only.
+    The edit that item asked of this note was never made, so the sentence stays as written and this
+    line records the ruling.
 
 26. **The low setting, in one place.** `QualitySetting` (`"high" | "low"`) and `SETTINGS`, one
     record from it to `ViewSettings`, in `view/quality/qualitySetting.ts`, hold this plan's values
@@ -2853,6 +2872,11 @@ one commit; the plan's Design notes gain "as built" lines.
 
 ### R05.T19 The gate's verdict
 
+_Recorded 2026-10-08; see Risks and open points, "The gate's verdict (R05.T19, 2026-10-08)"
+(`decision-r05-close-without-runs.md`). Open question 2's edit was approved by that ruling and is
+applied to the brainstorm. The other brainstorm findings are drafted under "Findings for the
+brainstorm", for a decision agent's approval._
+
 Open question 2's rule applied to the recorded runs, in the order of Design note 22: whether the
 spike passes on each machine; if the discrete run fails, whether Dawn's safety checks, the
 browser's transport (from the replay) or our own code is responsible, by pass and thread; and so
@@ -3061,6 +3085,190 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   | ⌊slots ÷ 2⌋                                                               | The F4 record (`2026-10-05-demand-hard-2.md`), the only figure that measures eviction. Returns are drawn by a coarse stand-in on at most 1.3% of high's frames with ridges off (the low pass) and 8.5% with ridges on (the coast). That is the cache's capacity, not thrash (Risks, "Coarse patches evicted under load"). No visible run counts returns.                                                                                         | **Confirmed**, unchanged.                                                                                                                                                                                                                         |
   | The low setting                                                           | T16.c was not triggered.                                                                                                                                                                                                                                                                                                                                                                                                                         | Unchanged.                                                                                                                                                                                                                                        |
 
+- **The gate's verdict (R05.T19, 2026-10-08)** (`decision-r05-close-without-runs.md`, §4 and §5).
+  **The RTX 3080 half fails, and the UHD 620 half is not judged. Open question 2's rule does not
+  fire**, so the browser path stands. The failure is ours, in the renderer's frame production, and
+  its fix is deferred to R12.T11.b. RM2 closes with the verdict recorded, not passed; the roadmap
+  calls this state "half closed".
+  - _What is judged._ `2026-10-07-effect-high` alone (T17, as built), the discrete machine's only
+    judged run, on one seed of three: the high setting, seed 7, ridges off, `--workers 3`,
+    `BakedOffsets`, doubled normals, safety checks on and a warm cache. It ran visible on a quiet
+    machine, at T = 16.67 ms on a 60.00 Hz monitor (Design note 21, as built). Its canvas, 1,509 ×
+    821 px, has 12% more pixels than the hidden 1080p run's, so its GPU rows are, if anything,
+    conservative. `2026-10-07-effect-low` is T14.c's record and a second instance of the timestamp
+    finding below. It is provisional (Design note 27), not a UHD 620 run and not paced, so it enters
+    no verdict.
+  - _The rows._ The verdict is each row as measured. Beside the frame rows stands the
+    delivered-frame evidence, from the frame count and the frame clock (the first finding below),
+    as evidence and never in a row's place. Beside the GPU rows stand their clocks.
+
+  | Row (Design note 21)                                                 | RTX 3080, 1080p, T = 16.67 ms: limit | Measured | Verdict | Beside the row                                                                                                                                                                                                       | UHD 620, 720p30 low, T = 33.3 ms                                         |
+  | -------------------------------------------------------------------- | ------------------------------------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+  | 50th percentile                                                      | ≤ T + 0.5 ms: 17.17 ms               | 16.87 ms | pass    | Delivered: T. The frame clock's p50 is 16.7 ms.                                                                                                                                                                      | ≤ T + 0.5 ms; not measured: R05.T16 waived by the owner (2026-10-08)     |
+  | 95th percentile                                                      | ≤ T + 1 ms: 17.67 ms                 | 18.29 ms | fail    | Delivered: T, over the whole descent and in every segment. The frame clock's p95 is 16.7–16.8 ms in each.                                                                                                            | ≤ 35 ms; not measured: R05.T16 waived by the owner (2026-10-08)          |
+  | 99th percentile                                                      | ≤ 2T: 33.33 ms                       | 39.84 ms | fail    | Delivered: T over the whole descent (the frame clock's 16.8 ms), and 2 T, at the limit, in the four segments that fail the next row.                                                                                 | ≤ 2T; not measured: R05.T16 waived by the owner (2026-10-08)             |
+  | Missed frames                                                        | ≤ 1% of intervals above 1.5 T        | 3.06%    | fail    | Delivered: 0.28% over the whole descent, which passes. Fails in four segments near the ground: the low fast pass 1.47%, the slowdown 2.19%, the vertical descent 1.01% (6 of 594) and the hover and touchdown 1.35%. | ≤ 1% above 1.5 T; not measured: R05.T16 waived by the owner (2026-10-08) |
+  | Hitches                                                              | none above 3 T                       | 83       | fail    | Not established. The frame clock's longest interval, 50.1 ms in the hover, is 3 T within its 0.1 ms quantum, though its file counts it as one. At most about 67 of the 83 could be real.                             | None above 3 T; not measured: R05.T16 waived by the owner (2026-10-08)   |
+  | Headroom: main thread, p95                                           | ≤ 0.8 T: 13.33 ms                    | 3.60 ms  | pass    |                                                                                                                                                                                                                      | ≤ 0.8 T; not measured: R05.T16 waived by the owner (2026-10-08)          |
+  | Headroom: GPU pass sum, p95                                          | ≤ 0.8 T: 13.33 ms                    | 5.72 ms  | pass    | At a median 975 of 2,115 MHz (46%, states P3–P8)                                                                                                                                                                     | ≤ 0.8 T; not measured: R05.T16 waived by the owner (2026-10-08)          |
+  | The rest of the frame: terrain and atmosphere, summed per frame, p95 | 6.00 ms (5 + 1)                      | 5.59 ms  | pass    | The same clocks                                                                                                                                                                                                      | 18 ms (14 + 4); not measured: R05.T16 waived by the owner (2026-10-08)   |
+  | Memory: GPU resident                                                 | ≤ 3 GB, above 2 GB a finding         | 0.636 GB | pass    | No finding                                                                                                                                                                                                           | ≤ 1 GB; not measured: R05.T16 waived by the owner (2026-10-08)           |
+  - _Per segment, as measured._ Every segment passes p50 and fails p95, p99 and the missed frames.
+    Every segment but the orbit coast fails the hitch row (`2026-10-07-effect-high.md`).
+  - _So the discrete half fails on any reading._ As measured, four whole-descent frame rows fail.
+    On the delivered frames, the missed-frame row fails in four segments near the ground. The work
+    rows pass with large headroom: the main thread at 3.60 ms and the GPU's passes at 5.72 ms
+    against 13.33 ms, terrain and atmosphere at 5.59 ms against 6 ms, and memory at 0.636 GB
+    against 3 GB.
+  - _The clocks._ No GPU row failed, so none needs the rule for a row failed below 90% of the
+    maximum clock: a pass at a low clock holds at any higher one (`decision-r05-trace-windows-2.md`,
+    addendum B, ruling 2).
+  - _Terrain and the atmosphere against their estimates_ are findings, which no verdict reads:
+    - terrain at 1.16, 2.15 and 2.38 ms at p50, p95 and p99, under its 5 ms estimate;
+    - the atmosphere at 3.19, 4.07 and 4.28 ms, over its 1 ms estimate.
+
+    The joint row passes, so no pass is named as furthest over its estimate; the atmosphere is the
+    pass over it. Both are drafted for the brainstorm ("Findings for the brainstorm", drafts 1 and
+    2).
+
+  - _Streaming, beside the verdict_ (patches a second, from `2026-10-07-effect-high`):
+
+    | Segment             | Requested | Baked | `STREAMING` shown | Predicted, min(hard, 4σ_n) |
+    | ------------------- | --------- | ----- | ----------------- | -------------------------- |
+    | Approach and flare  | 89.5      | 45.3  | 108.9 of 120 s    | 46.7                       |
+    | Low fast pass       | 135.3     | 42.3  | 30.0 of 30 s      | 144.0                      |
+    | Slowdown            | 83.1      | 40.5  | 56.8 of 60 s      | 81.4                       |
+    | Vertical descent    | 1.1       | 1.6   | 0.45 s            | 83.0                       |
+    | Hover and touchdown | 0         | 0     | 0 s               | 0.1                        |
+
+  - _Design note 22's order._
+    1. _Safety checks on and off:_ not run, so the browser's safety checks are unpriced.
+    2. _Capture and native replay:_ not run, so the transport is unpriced and clause (a), the
+       replay's, is untested. No pass times are compared across the two, so no clock difference
+       between them is named.
+    3. _Clause (b):_ not met. Its first half holds: our code's 3.60 ms and the GPU's 5.72 ms both
+       meet the headroom row. Its second half fails, because delivered frames do not miss the
+       95th-percentile row. The measured 18.29 ms rests on timestamps that are not frame times (the
+       first finding below). On the delivered evidence, p95 is T over the whole descent and in every
+       segment, where the frame clock's p95 is 16.7–16.8 ms. The coast fails p95 as measured
+       (18.23 ms) with no skipped frame at all, which shows the artefact plainly.
+
+    **The rule does not fire.** By Design note 22 the failure is therefore ours, and the owner need
+    not rule on a native renderer.
+
+  - _Whose thread._ The frames were skipped before presentation: per segment, the vsyncs with no
+    new frame equal the frame clock's skips, and over the descent Chromium's 201 dropped frames. The
+    verdict therefore names the renderer's frame production: its main thread, or the back-pressure
+    that holds a main frame. It cannot split the cause further without the profiled visible run,
+    which was waived. The candidates are:
+    - our code's tail beyond its p95 of 3.60 ms;
+    - the renderer's GC pauses, the longest 52.9 ms on its main thread;
+    - back-pressure from the GPU process. Its main thread ran `GPUTask` for 350,363 ms in 1,120,073
+      slices, about 4.9 ms a frame, the longest slice 103.3 ms, and was busy for 484,023 ms.
+
+    The skips are not shown to come from streaming demand: the hover skips 1.35% of its frames with
+    no patch requested. So the selection bound's clause (decisions-r05.md item 6) does not apply.
+
+  - _The fix, deferred._ Under the owner's features-first rule (2026-10-07), the near-ground frame
+    skips (1.0–2.2% of frames in four segments, against 1%) are filed for R12.T11.b, which tunes the
+    discrete target. The orchestrator adds them to `deferred-corrections.md`.
+  - _The profile source_ is `docs/measurements/descent-spike/2026-10-06-effect-low-profiled.json`,
+    T14.f's only profiled run; no high profiled run exists. From it:
+    - the engine adapter's self time: 13,315 ms in all, about 0.19 ms over each of 69,183 frames,
+      which is 6.1% of the main thread's 218,648 ms busy time;
+    - the GPU process: `WebGPU` 422,364 ms, about 6.1 ms a frame and 98% of `GPUTask`, and
+      `VulkanQueueSubmitHook` 2,494 ms over 70,257 calls.
+
+    It is provisional on five counts: it is hidden, at 806 × 431 px; it is the low setting; it
+    predates T12.e and the `ResolveCounter` fix; it carries the `gpu` category's own cost; and it was
+    taken at its run's clocks. Beside it, the judged run's unprofiled `GPUTask` is about 4.9 ms a
+    frame.
+
+  - _Finding for R12: the presentation times are not frame times._ The proof uses the committed
+    results files alone, read by `frame_count.py` (in the orchestration's scratch,
+    `.git/rm23-scratch/r05-close/`, with its output `frame_count.out`). On a vsync-paced display
+    every delivered interval is a whole number of periods. So the periods a span covers, less its
+    presented intervals and its window starts, count the vsyncs that showed no new frame.
+    1. _The coast_ (10–60 s: 50.0 s, 3,000 periods at 60.00 Hz). The frame clock gave 3,000
+       frames, its longest interval 16.8 ms, with no skip, and 2,999 intervals were presented. That
+       leaves room for at most one interval of two periods. Yet the timestamps record 91 intervals
+       above 1.5 T (3.03%), at p50 16.867 ms, p95 18.23 ms and p99 38.92 ms.
+    2. _The whole descent's bound._ The trace's windows cover 1,194.68 s, which is 71,681 periods.
+       71,470 presented intervals and 9 window starts leave about 202 periods with no new frame
+       (0.28%). Two independent counts agree: Chromium's 201 dropped frames and the frame clock's
+       197 skips. If the timestamps were whole periods, at most about 202 intervals could reach two
+       periods, and at most about 67 could reach four, which "above 3 T" needs. The timestamps
+       record 2,188 intervals above 1.5 T and 83 above 3 T, and both counts are impossible. So at
+       most about 67 of the 83 intervals above 50 ms could be real stalls, and the frame clock has
+       none above three periods.
+    3. _Per segment_, the vsyncs with no new frame equal the frame clock's skips:
+
+       | Segment             | Vsyncs with no new frame | Frame-clock skips | Skips of intervals | Timestamps above 1.5 T |
+       | ------------------- | ------------------------ | ----------------- | ------------------ | ---------------------- |
+       | Orbit coast         | 1                        | 0                 | 0%                 | 3.03%                  |
+       | Descent arc         | ~9                       | 6                 | 0.01%              | 2.81%                  |
+       | Approach and flare  | 42                       | 42                | 0.59%              | 3.73%                  |
+       | Low fast pass       | 27                       | 26                | 1.47%              | 4.00%                  |
+       | Slowdown            | 78                       | 77                | 2.19%              | 4.17%                  |
+       | Vertical descent    | 5                        | 6                 | 1.01% (6 of 594)   | 4.03%                  |
+       | Hover and touchdown | 41                       | 40                | 1.35%              | 3.89%                  |
+
+       The frame clock's longest interval is 50.0–50.1 ms, three periods within its 0.1 ms quantum,
+       reached in the arc, the low fast pass, the slowdown and the hover. The skips and the drops
+       between them account for the whole count of vsyncs with no new frame, so the GPU process can
+       have added few gaps of its own.
+
+    4. _The frame clock's own period._ 71,485 intervals and 197 skips over 1,194.68 s give
+       16.666 ms (60.00 Hz). That agrees with the owner's `xrandr` (`60.00*+`) and with
+       `Display.displayFrequency`, so 16.87 ms is not the display's period.
+    5. _Why the timestamps are not frame times._ This is Chromium's source as read at `main` on
+       2026-10-08, not at the 152 branch:
+       - `gpu/vulkan/vulkan_swap_chain.cc` hard-codes `.presentMode = VK_PRESENT_MODE_FIFO_KHR`;
+       - the run's switches disable no vsync: `--use-angle=vulkan`,
+         `--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan`,
+         `--enable-dawn-features=enable_subgroups_intel_gen9` and
+         `--disable-dawn-features=timestamp_quantization`;
+       - `ui/ozone/platform/x11/vulkan_surface_x11.cc` passes `XrandrIntervalOnlyVSyncProvider`,
+         which reports an interval but no timebase;
+       - `gpu/vulkan/vulkan_surface.cc`'s `PostSubBufferCompleted` then falls back to
+         `timestamp = base::TimeTicks::Now()` and builds
+         `gfx::PresentationFeedback(timestamp, interval, /*flags=*/0)`, with no `kVSync` and no
+         `kHWClock`.
+
+       So on this path (X11, NVIDIA, Vulkan) a `PipelineReporter`'s presentation time is the moment
+       the GPU process's swap completed, not the vertical blank. The run did not record its present
+       mode; FIFO is inferred from that source and from the switches.
+
+    _The low run behaves the same way._ It had about 992 vsyncs with no new frame, against
+    Chromium's 990 dropped frames. Its one failing row is an artefact. In the low fast pass, 36
+    vsyncs had no new frame, which leaves room for at most 12 intervals of four periods (above
+    50 ms). Yet the timestamps record 20 of 1,764, and the frame clock's longest interval there is
+    33.5 ms.
+
+    _What remains unexplained._ The 16.87 ms median sits 0.2 ms above both the period and the mean
+    presented interval, about 16.72 ms (1,194.68 s over 71,470 intervals). So most intervals lie
+    just above the period, and a minority well below it. That is the pattern of the GPU process's
+    swap-completion latency. It cannot be resolved further: the files keep only p50, p95, p99 and
+    the maximum, and the windows were deleted after reduction (T14.e). Whether an X11 compositor
+    dropped images after Chromium presented them is outside what Chromium records. The owner's
+    judgment by eye, "they seem fine", is consistent with the frame count; it would not be with the
+    timestamps' 1.8 long intervals a second. The verdict reads the frame rows as measured, with this
+    evidence beside them.
+
+    _For R12_, which extends this machinery (R12 Non-goals): on this path, check a frame row against
+    the frame count, or take a vertical-blank source, before judging it.
+
+  - _Finding for R12: the last window's span._ In every windowed run the last window spans 1,170 s
+    for 278 s of script time (`2026-10-07-effect-high`: 952.0–1,230.0 s of script time, `spanMs`
+    1,169,990). That is consistent with the arc's `spike.segment:` measure being back-dated to 60 s.
+    It inflates `mainThread.split.wallMs` and `idleMs` by about 892 s (2,104,995 and 1,897,888 ms
+    in the high run) and weakens that window's short-span check. No criterion reads it.
+  - _Finding for R12: the low setting is not paced._ The spike's loop draws every animation frame
+    on both settings (`DescentSpike.tsx`, lines 423–462), and the low run's frame-clock p50 is
+    16.70 ms. So Design note 21's "paced to every second vsync" and T16.a's "paced to 30 fps" were
+    never built (T16, as built). R12's `cockpit-descent` paces its low run to every second vsync
+    (R12 Design note 9).
+
 - **The hardware decisions, decided 2026-09-30 by a delegated decision** (the orchestration's
   hardware record), as they fall on this plan:
   - _The gate (item 1):_ retargeted to the recommended specification, the RTX 3080, with Design
@@ -3110,6 +3318,98 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
     `'wasm-unsafe-eval'` is needed only for compilation on the render thread. Ruled 2026-09-30
     (R04.T10.a): the policy is unchanged and the render thread never compiles WebAssembly; the
     brainstorm already carries the ruling.
+  - The atmosphere per frame (R05.T19's verdict): on the judged run it took 3.19, 4.07 and 4.28 ms
+    at p50, p95 and p99, against the budget's 0.5–1 ms for the discrete target. It is over its
+    estimate (Risks, "The atmosphere's budget estimate is contradicted").
+  - Terrain (R05.T19's verdict): 1.16, 2.15 and 2.38 ms against the budget's 3–5 ms, under its
+    estimate. Together the two met the 6 ms that their rows' upper ends leave them.
+  - _R05.T19's drafts of the edits_ (2026-10-08, `decision-r05-close-without-runs.md` §4). These
+    are drafts only. A decision agent approves them, and then a fresh agent applies them to the
+    brainstorm and lists them as Decided under the roadmap README's "Awaiting the owner". "Line" is
+    a line of `docs/agent/brainstorming/rendering-and-planets.md` at 5dd075da; open question 2's
+    addition (line 2561) moves the lines after it down. Several of these corrections are already
+    rows of the roadmap README's "Brainstorm corrections"; each draft is the brainstorm text that
+    would carry its row. Open question 2's edit is not among them: the ruling approved it, and T19
+    applies it (Risks, "The gate's verdict (R05.T19, 2026-10-08)").
+    1. _The atmosphere is over its estimate_ (from the verdict). After the paragraph under the
+       budget table that ends "…which runs on a machine of its own." (line 1860), add: "The descent
+       spike's one judged run (R05, 2026-10-07: the RTX 3080 at 1,509 × 821 px, one sun and three
+       terms) measured the atmosphere per frame at 3.19, 4.07 and 4.28 ms at the 50th, 95th and
+       99th percentiles, at a median GPU clock of 975 of 2,115 MHz. That is over the discrete
+       column's 0.5–1 ms."
+    2. _Terrain is under its estimate_ (from the verdict). Following draft 1: "Terrain came in at
+       1.16, 2.15 and 2.38 ms, under its 3–5 ms, so terrain and the atmosphere together met the
+       6 ms that their rows' upper ends leave them, at 5.59 ms at the 95th percentile. These are one
+       seed's figures, at the driver's clocks for the spike's light load; R12.T10 replaces both rows
+       with measured figures."
+    3. _The finest level's spacing_ (Design note 3).
+       - Lines 1150–1151: "The terrain is sampled at 0.5 m at its finest level" becomes "The terrain
+         is sampled at its finest level at a vertex spacing of at most 0.375 m (level 19 on an
+         Earth)". After "…within about a third of its amplitude", add "on the mesh's triangles (at
+         0.5 m that holds in one dimension only)". In the clause that follows, "a 1 m wavelength at
+         that spacing" becomes "a 1 m wavelength at 0.5 m spacing", which keeps it true.
+       - Lines 1218–1219: "their 0.5 m spacing is a quarter of the 2 m band limit" becomes "their
+         spacing, at most 0.375 m and 0.277 m on average on an Earth, keeps the 2 m band limit
+         within about a third of its amplitude".
+       - Lines 1888–1889: "the finest level's 32 m patches cap the demand below about 160 m" becomes
+         "the finest level's patches, 17.7 m on an Earth at level 19, cap the demand below about
+         89 m".
+       - Line 2484: "A terrain band limit of 2 m at 0.5 m spacing" becomes "A terrain band limit of
+         2 m at a vertex spacing of at most 0.375 m".
+    4. _Patch demand, and the low setting's patch counts_ (Design note 19; it also carries the
+       finding on the low setting's counts).
+       - After "…through 200 m adds about 30 a second." (line 1886), add: "Re-derived (R05 Design
+         note 19), the horizontal constant is 8k² at k = 5, or 300 if the parents exposed at a
+         level's inner edge are no longer cached, and the vertical one about 340 (3πk² ÷ ln 2, from
+         a nadir disc of about 236 patches re-baked at each halving), within this paragraph's
+         'about'."
+       - Line 1894: "the cap as 1/_τ_" becomes "the cap as 1 ÷ (_τ_ θ_px), θ_px being a pixel's
+         angle".
+       - After "…some 10 to 35 patches a second on a low fast pass." (line 1895), add: "The ninth
+         holds while k exceeds about 3. Below that, the quadtree's floor of about 36 patches a level
+         ring makes the low setting's patch counts about a quarter of the high setting's, and its
+         demand probably above a ninth; the descent spike's fixed-step run measures the ratio
+         rather than assuming it."
+    5. _The timestamps' quantisation_ (Design note 18). Line 2829: "which the forced switches make
+       available, uncoarsened, on Linux" becomes "which the forced switches make available on
+       Linux, quantised to 65.5 µs unless Dawn's `timestamp_quantization` toggle is disabled, as
+       the measurement runs do".
+    6. _The atmosphere's tables and its reference_ (Design note 16).
+       - Line 1331, the Hillaire 2020 row: "cheap enough to rebuild whenever the atmosphere or the
+         sun changes" becomes "cheap enough to rebuild often: transmittance and multiple scattering,
+         which depend on the atmosphere alone, when it changes, and the sky-view and
+         aerial-perspective tables, per view and per sun, every frame".
+       - Line 1382: "Hillaire's tables, regenerated when the atmosphere or the sun changes" becomes
+         "Hillaire's tables, the two per-planet ones regenerated when the atmosphere changes and the
+         two per-view ones every frame".
+       - Line 1842, the budget table: "Under 0.1 ms, when the atmosphere or the sun changes" becomes
+         "Under 0.1 ms, when the atmosphere changes".
+       - Line 1384: after "the aerial-perspective volume's 32 km reach", add "(Hillaire 2020's,
+         Table 2 and §5.4, and Bevy's; sebh's reference code reaches 128 km)".
+       - Lines 2824–2825, step 3: "with Earth's reference atmosphere" becomes "with Earth's
+         atmosphere as measured, its continental aerosol at an optical depth of 0.1 at 550 nm,
+         Ångström exponent 1.3 and single-scattering albedo 0.92, and Hillaire's reference aerosol,
+         20–40 times cleaner, kept as a comparison mode".
+    7. _The aerosol asymmetry_ (decisions-r05.md item 1). Already applied on 2026-10-02 (lines
+       1346–1348). No edit.
+    8. _The Rayleigh column_ (decisions-r05.md item 3). Line 1345 says "a Rayleigh scale height
+       near 8 km". Item 3 found 8.43 km within "near 8 km", so no edit is needed. An optional
+       clarification for the decision agent: after "near 8 km", add "(8.43 km, the US Standard
+       Atmosphere's at sea level, which carries Earth's column; 8 km at the sea-level density
+       leaves it 5% short)".
+    9. _Horizon maps are sun-independent_ (R10's research, R10 Design note 10). Lines 1868–1869:
+       "it needs rebaking only as the sun moves, 15° an hour for an Earth" becomes "it depends on
+       the terrain alone, not on the sun (Max 1988), so it is baked once with its patch".
+    10. _The low setting's patch counts._ Carried by draft 4.
+    11. _Normals at twice the mesh's resolution_ (Design note 25).
+        - Line 1183: "into a normal texture at twice the mesh's resolution" becomes "into a normal
+          texture at twice the mesh's resolution on the discrete target, and at the mesh's
+          resolution on the low setting, as the memory table has it".
+        - After "…where a gradient costs two to three times a bare height." (line 1905), add:
+          "Normals at twice the mesh's resolution take 129² gradients a patch, about four times the
+          65² this figure counts."
+    12. _The worker's policy_ (Design note 11). Ruled 2026-09-30 (R04.T10.a) and already in the
+        brainstorm. No edit.
 - **Timings measured so far are provisional.** The development machine is shared with other
   agents' tests; every figure in this plan measured today, including the research agents' Threefry
   timing and the estimates built on it, is re-measured on a quiet machine (Design note 27) before it

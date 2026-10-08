@@ -50,7 +50,8 @@ reason it is missing. The writer refuses a file with a null figure that gives no
 How the figures are read:
 
 - **T** is the display's vsync period from its refresh rate (`Display.displayFrequency`): 16.68 ms
-  at 59.94 Hz on the high setting, twice the period on the low setting's 30 fps. A hidden run has
+  at the projector's 59.94 Hz on the high setting, or 16.67 ms at a 60.00 Hz monitor's, as in the
+  judged run of 2026-10-07; twice the period on the low setting's 30 fps. A hidden run has
   no window, so T, the presentation times and every row read against T are null with the reason
   "no window shown"; such a run proves the harness and the file, not the criterion.
 - **The timer** (decisions-r06-r07.md item 8): R01 lifts Dawn's 65.5 µs timestamp quantisation
@@ -119,6 +120,41 @@ How the figures are read:
   `target/descent-spike/`, on disk, where Chromium spools each window's stream before the client
   reads it.
 
+## The gate's verdict
+
+Recorded by R05.T19 on 2026-10-08, in the plan's Risks and open points ("The gate's verdict
+(R05.T19, 2026-10-08)"), under `decision-r05-close-without-runs.md`. On 2026-10-08 the owner waived
+the by-hand runs not yet made, so the gate is judged on one run. The results files are not edited.
+
+- **RTX 3080: fail.** It is judged on `2026-10-07-effect-high` alone, on one seed of three, visible
+  on a quiet machine. The display was a standard 1080p monitor at 60.00 Hz, not the projector's
+  59.94 Hz mode, so T = 16.67 ms, which the frame clock measured as 16.666 ms. The results file does
+  not carry the display. As measured, p50 passes, while p95 (18.29 ms), p99 (39.84 ms), the missed
+  frames (3.06%) and the hitches (83) fail. The work rows pass with large headroom, at a median GPU
+  clock of 975 of 2,115 MHz:
+  - the main thread at 3.60 ms and the GPU pass sum at 5.72 ms, against 13.33 ms;
+  - terrain and atmosphere at 5.59 ms against 6 ms;
+  - memory at 0.636 GB against 3 GB.
+- **The presentation times are not frame times on this path** (X11, NVIDIA, Vulkan). Chromium
+  stamps them on the CPU when the GPU process's swap completes, not at the vertical blank (its
+  source as read at `main` on 2026-10-08, not at the 152 branch). The frame count shows a new frame
+  at 99.7% of the display's refreshes: about 202 of 71,681 had none, against Chromium's 201 dropped
+  frames and the frame clock's 197 skips. On those delivered frames the whole descent passes p50,
+  p95, p99 and the missed frames, and the hitch row is not established. But 1.0–2.2% of frames were
+  skipped in four segments near the ground, against 1%:
+  the low fast pass, the slowdown, the vertical descent, and the hover and touchdown. So the
+  discrete half fails on any reading.
+- **UHD 620: not judged.** Every row is "not measured: R05.T16 waived by the owner (2026-10-08)".
+  R12.T8.b is the first planned run of the low setting on the laptop.
+- **Open question 2's rule does not fire.** The toggles and the native replay were not run, so the
+  replay's clause is untested. Our CPU and GPU time meet the headroom row, but the delivered frames
+  meet the 95th percentile. The failure is ours, in the renderer's frame production, and its fix
+  is deferred to R12.T11.b.
+- **Before judging a frame row from this path,** check it against the frame count: the periods a
+  span covers, less its presented intervals, count the vsyncs with no new frame. Or take a
+  vertical-blank source. `2026-10-07-effect-low`, which is provisional and T14.c's record, shows the
+  same artefact.
+
 ## Making a run
 
 `just descent-spike` builds the client, starts a local server with `--num-workers 2` and runs the
@@ -127,10 +163,14 @@ go (this directory by default). `just descent-spike --smoke` runs 10 s hidden an
 it checks its trace's three windows as a run's are, each decoded and its frame spans matched to the
 renderer's frames, and exits 1 with the first failed window's reason (R05.T14.i). Its log lists
 every clock sample (`descent spike: GPU clocks sampled …`), and a run's log the summary's clock
-line. The runs that count are visible, on a quiet machine:
+line. The runs that count are visible, on a quiet machine. The by-hand runs not yet made were
+waived by the owner on 2026-10-08 ([The gate's verdict](#the-gates-verdict)); their commands are
+kept for R12 and any re-run:
 
-- **The development machine's low-setting run** (R05.T14.c, by hand for the owner): with the
-  projector in its 1080p 59.94 Hz mode, nothing else running and the load average under 1:
+- **The development machine's low-setting run** (R05.T14.c, by hand for the owner; made on
+  2026-10-07 as `2026-10-07-effect-low`, which is provisional; any re-take waived by the owner,
+  2026-10-08; kept for R12 and any re-run): with the projector in its 1080p 59.94 Hz mode, nothing
+  else running and the load average under 1:
 
   ```sh
   just descent-spike --setting low
@@ -142,7 +182,8 @@ line. The runs that count are visible, on a quiet machine:
   matched frame by frame, at most 26% of a window's buffer, and 2.16% (low) and 1.36% (high) of the
   descent left out.
 
-- **The UHD 620 runs** (R05.T16, by hand for the owner, on the laptop, each on a quiet machine).
+- **The UHD 620 runs** (R05.T16, by hand for the owner, on the laptop, each on a quiet machine;
+  waived by the owner, 2026-10-08; kept for R12 and any re-run).
   The clocks come from i915's sysfs and need no privilege; on this part they also follow the
   package's shared power budget, so the CPU's load shows in them. The baseline, over three seeds,
   and one high run for comparison, not judged:
@@ -168,7 +209,10 @@ line. The runs that count are visible, on a quiet machine:
   ```
 
 - **The discrete runs** (R05.T17, by hand for the owner, on the development machine with the
-  projector in its 1080p 59.94 Hz mode). Every timed run pins `--workers 3`:
+  projector in its 1080p 59.94 Hz mode). The first was made on 2026-10-07 as
+  `2026-10-07-effect-high`, on a 60.00 Hz monitor, and is the judged run. The rest, the profiled run
+  below included, were waived by the owner, 2026-10-08; kept for R12 and any re-run. Every timed run
+  pins `--workers 3`:
 
   ```sh
   just descent-spike --setting high --workers 3 --seed 7
