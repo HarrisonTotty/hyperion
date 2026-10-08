@@ -876,11 +876,11 @@ parent's position still carries the child's height. Across the morph zone each v
 blends to the parent level's band-limited height, which the patch carries as a second channel of its
 height texture; neighbouring patches differ by at most one level; and skirts stay as a cheap guard
 against `f32` hairline cracks along cube-face edges. Precision sets two more rules. The vertex shader
-never forms (R + h)·dir in `f32`, which at an Earth's radius has a step of 0.5 m, the finest vertex
-spacing: each point is formed relative to its patch origin, either from small `f32` differences of
-face coordinates or from offsets the worker computes in `f64` and bakes with the patch, whichever
-measures cheaper. And the height texture holds height above the reference radius, not radius, so its
-`f32` step at ±20 km is about 2 mm.
+never forms (R + h)·dir in `f32`, which at an Earth's radius has a step of 0.5 m, coarser than the
+finest vertex spacing: each point is formed relative to its patch origin, either from small `f32`
+differences of face coordinates or from offsets the worker computes in `f64` and bakes with the
+patch, whichever measures cheaper. And the height texture holds height above the reference radius,
+not radius, so its `f32` step at ±20 km is about 2 mm.
 
 ### Where the height comes from: the central tension
 
@@ -1147,14 +1147,16 @@ on: _amplification_ is the authoritative local synthesis above, run on both side
 is what only the GPU draws.
 
 **Lean:** the authoritative height function — sim code, run identically on both sides — owns everything
-the ship can collide with. The terrain is sampled at 0.5 m at its finest level and band-limited at
-**2 m**, the shortest wavelength its piecewise-linear interpolant keeps to within about a third of its
-amplitude; a 1 m wavelength at that spacing sits at the Nyquist limit, where linear interpolation can
-erase it altogether. Obstacles smaller than the band limit are not terrain but rocks, below. The limit
-is one generator constant, not tied to the size of the body that touches the ground, since two bodies
-on the same spot must meet the same surface, and it changes only with the generator version. The same
-function owns the **material class** at every point, from slope, altitude, the coarse climate field
-and plan 14's ice fraction, with the physical properties that landing and the consoles read: albedo
+the ship can collide with. The terrain is band-limited at **2 m** and sampled at its finest level at
+a vertex spacing of at most 0.375 m (level 19 on an Earth, 0.18–0.32 m), so that its
+piecewise-linear interpolant keeps a 2 m wavelength to within about a third of its amplitude in any
+direction on the mesh's triangles; 0.5 m would do so only along the grid's axes, and a wavelength of
+twice the spacing sits at the Nyquist limit, where linear interpolation can erase it altogether.
+Obstacles smaller than the band limit are not terrain but rocks, below. The limit is one generator
+constant, not tied to the size of the body that touches the ground, since two bodies on the same
+spot must meet the same surface, and it changes only with the generator version. The same function
+owns the **material class** at every point, from slope, altitude, the coarse climate field and plan
+14's ice fraction, with the physical properties that landing and the consoles read: albedo
 range, friction, bearing strength. Everything finer is **GPU-only decoration**: high-frequency normal
 detail, colour variation, sand ripples and small crater scars. It never displaces geometry the
 collision query does not know about, so the surface a hull touches is always the surface both sides
@@ -1166,22 +1168,23 @@ instance **0.2 m tall or more**, whatever its footprint, is authoritative from t
 draws them: placed by hash in cells per size octave, with its abundance from a rock size–frequency
 law (Golombek and Rapp 1997), whose rock abundance comes from the surface type and age, and with an
 analytic shape, an ellipsoid or a low-order superquadric, that the server answers for at contact
-points. A 32 m patch at the rock abundance of the Viking and Pathfinder sites holds some tens of
-them, a cheap per-patch list. The threshold sits below the 0.3 m hazard that landing-hazard
-detection is specified against (Epp and Smith 2007, for NASA's ALHAT), because a rock is a hazard well
-below a gear's relief tolerance: Apollo's lunar module pad was about 0.9 m across and its gear
-tolerated 0.6 m of relief within the footprint, but its engine skirt cleared only about 0.34 m, and
-InSight tolerated rocks up to 0.45 m under a footpad. A rock drawn but not collidable would be
-exactly the geometry the rule above forbids, and the converse holds as well: an authoritative rock is
-drawn wherever it could touch a grounded or descending body, whatever the scatter setting. Smaller
-scatter is decoration, flagged as such, and culled where it intersects a grounded body
-([open question 11](#open-questions)).
+points. A finest-level patch, 17.7 m across on an Earth, at the rock abundance of the Viking and
+Pathfinder sites holds some tens of them, a cheap per-patch list. The threshold sits below the 0.3 m
+hazard that landing-hazard detection is specified against (Epp and Smith 2007, for NASA's ALHAT),
+because a rock is a hazard well below a gear's relief tolerance: Apollo's lunar module pad was about
+0.9 m across and its gear tolerated 0.6 m of relief within the footprint, but its engine skirt
+cleared only about 0.34 m, and InSight tolerated rocks up to 0.45 m under a footpad. A rock drawn
+but not collidable would be exactly the geometry the rule above forbids, and the converse holds as
+well: an authoritative rock is drawn wherever it could touch a grounded or descending body, whatever
+the scatter setting. Smaller scatter is decoration, flagged as such, and culled where it intersects
+a grounded body ([open question 11](#open-questions)).
 
 Two consequences worth stating. Normals should come from **analytic derivatives** of the height
 function rather than finite differences: there is no arbitrary epsilon to tune, and they stay stable
 across levels of detail, which is what stops shading from popping as patches subdivide. They are baked
 with each patch into a normal texture at twice the mesh's resolution, so that shading keeps detail the
-mesh does not, and an analytic gradient costs of order two to three bare height evaluations, which the
+mesh does not (at the mesh's resolution on the low setting, as the memory table has it), and an
+analytic gradient costs of order two to three bare height evaluations, which the
 [budget](#performance-budget)'s cost per point must include. And scatter placement is drawn from the
 project's `Stream` on `surface.scatter`, keyed by integer cell, which is what lets the server answer
 "is there a boulder here" without storing one.
@@ -1215,12 +1218,12 @@ worlds, the height at level _n_ and the height at level _n + k_ differ by less t
 depends only on _n_. Collision reads the piecewise-linear surface through the finest level's
 vertices, on the same triangle diagonal as the mesh, and that level is drawn, with its morph held at
 zero, within a stated radius of every grounded or descending body in view. The authoritative ground
-is therefore that interpolant: the query defines its vertices, and their 0.5 m spacing is a quarter
-of the 2 m band limit. Where anything touches the ground, collision and the picture agree to the
-`f32` step of the height texture, about 2 mm. Coarser levels serve sensors and distant views, with
-the level-_n_ bound as their stated error, and the same bound selects them: a level is drawn where
-its bound subtends no more than a stated screen-space error, as [the budget](#performance-budget)
-sets out.
+is therefore that interpolant: the query defines its vertices, and their spacing, at most 0.375 m,
+keeps the 2 m band limit within about a third of its amplitude. Where anything touches the ground,
+collision and the picture agree to the `f32` step of the height texture, about 2 mm. Coarser levels
+serve sensors and distant views, with the level-_n_ bound as their stated error, and the same bound
+selects them: a level is drawn where its bound subtends no more than a stated screen-space error, as
+[the budget](#performance-budget) sets out.
 
 ### Determinism hazards specific to terrain
 
@@ -1326,12 +1329,12 @@ The requirement is unusual and it decides the choice: HYPERION needs atmospheres
 compositions**, seen from the ground, from orbit and from outside, through the terminator, with
 correct fog on terrain at every distance.
 
-| Model                                            | Verdict                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Hillaire 2020, the production LUT approach**   | **Lean.** Four small tables — transmittance, multiple scattering, sky-view and aerial perspective — cheap enough to rebuild whenever the atmosphere or the sun changes: 0.17 ms for all four on a GTX 1080, 0.31 ms including the final sky and aerial-perspective pass at 720p, 0.5 ms with the per-pixel ray march it uses for views from space, and under a millisecond for the two per-planet tables on an iPhone 6s, which is roughly the UHD 620's class. It takes Bruneton's material model — his density profiles, ozone layer and Cornette–Shanks aerosol — and Bevy 0.19's version generalises it to any number of terms, each with its own density and phase function. RGB rather than spectral. |
-| Bruneton's precomputed scattering, 2017 revision | Multiple scattering precomputed into four-dimensional tables, inside and outside the atmosphere, with aerial perspective, and spectral at no runtime cost. But an update takes 250 ms on the same GTX 1080, about 150 ms on the discrete target and seconds on the UHD 620, and its density profiles are limited to two layers, with one aerosol and one absorbing layer. Its WebGL demo loads tables precomputed offline. The reference for spectral error in thin atmospheres, if Hillaire's RGB approximation proves visibly wrong there; not a fallback for thick ones, where its iterations diverge.                                                                                                   |
-| Nishita 1993, O'Neil (GPU Gems 2)                | Single scattering only, with the known darkening artefacts and a phase function disabled to hide them. Too approximate for a display that claims physical units.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Hosek–Wilkie and other analytic sky models       | Fitted for ground-level daylight on Earth. No use from orbit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Model                                            | Verdict                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hillaire 2020, the production LUT approach**   | **Lean.** Four small tables — transmittance, multiple scattering, sky-view and aerial perspective — cheap enough to rebuild often: transmittance and multiple scattering depend on the atmosphere alone and are rebuilt when it changes, and the sky-view and aerial-perspective tables depend on the view and the sun and are rebuilt every frame. Hillaire measured 0.17 ms for all four on a GTX 1080, 0.31 ms including the final sky and aerial-perspective pass at 720p, 0.5 ms with the per-pixel ray march it uses for views from space, and under a millisecond for the two per-planet tables on an iPhone 6s, which is roughly the UHD 620's class. It takes Bruneton's material model — his density profiles, ozone layer and Cornette–Shanks aerosol — and Bevy 0.19's version generalises it to any number of terms, each with its own density and phase function. RGB rather than spectral. |
+| Bruneton's precomputed scattering, 2017 revision | Multiple scattering precomputed into four-dimensional tables, inside and outside the atmosphere, with aerial perspective, and spectral at no runtime cost. But an update takes 250 ms on the same GTX 1080, about 150 ms on the discrete target and seconds on the UHD 620, and its density profiles are limited to two layers, with one aerosol and one absorbing layer. Its WebGL demo loads tables precomputed offline. The reference for spectral error in thin atmospheres, if Hillaire's RGB approximation proves visibly wrong there; not a fallback for thick ones, where its iterations diverge.                                                                                                                                                                                                                                                                                                 |
+| Nishita 1993, O'Neil (GPU Gems 2)                | Single scattering only, with the known darkening artefacts and a phase function disabled to hide them. Too approximate for a display that claims physical units.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Hosek–Wilkie and other analytic sky models       | Fitted for ground-level daylight on Earth. No use from orbit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **Parameterising from physics** is the part that must be built rather than borrowed, and it is
 straightforward in outline. The medium is a list of terms, each a density profile, a scattering and
@@ -1342,17 +1345,18 @@ as the inverse fourth power of wavelength, mixed by number fraction: dry air fro
 from Dalgarno's cross-sections. Each refractive index is evaluated at the density its formula states.
 The scale height follows from temperature, mean molecular mass and gravity, which plan 14 provides
 with the pressure and the gas fractions (P14.T24.a). Earth's reference values anchor the
-implementation: a Rayleigh scale height near 8 km, an aerosol scale height near 1.2 km, and an aerosol
-asymmetry (the phase function's mean cosine) near 0.65, AERONET's continental value at 550 nm; in
-Cornette–Shanks's form that is g ≈ 0.58, not Bruneton 2008's 0.76 (mean cosine 0.81) or Hillaire's
-0.8, which are kept only to compare with their images. One caution for
-whoever writes the code: **the widely copied Rayleigh coefficients are not the physical ones.**
-Derived from the formula at 288.15 K and 1013.25 hPa, Earth's are 4.85, 11.5 and 28.7 × 10⁻⁶ m⁻¹ at
-680, 550 and 440 nm, and the 550 nm cross-section matches Bucholtz 1995's 4.51 × 10⁻²⁷ cm². The set
-tutorials copy from Bruneton, 5.8, 13.5 and 33.1 × 10⁻⁶ m⁻¹, is 15–20% higher and is not used. The
-constants are derived from the formula at stated wavelengths, with a cited source, exactly as the
-project's rules already require of physical constants, and a test recomputes Bucholtz's figure to
-1%.
+implementation: a Rayleigh scale height near 8 km (8.43 km at the US Standard Atmosphere's sea
+level, which with the sea-level density carries Earth's whole column; 8 km leaves it 5% short), an
+aerosol scale height near 1.2 km, and an aerosol asymmetry (the phase function's mean cosine) near
+0.65, AERONET's continental value at 550 nm; in Cornette–Shanks's form that is g ≈ 0.58, not
+Bruneton 2008's 0.76 (mean cosine 0.81) or Hillaire's 0.8, which are kept only to compare with their
+images. One caution for whoever writes the code: **the widely copied Rayleigh coefficients are not
+the physical ones.** Derived from the formula at 288.15 K and 1013.25 hPa, Earth's are 4.85, 11.5
+and 28.7 × 10⁻⁶ m⁻¹ at 680, 550 and 440 nm, and the 550 nm cross-section matches Bucholtz 1995's
+4.51 × 10⁻²⁷ cm². The set tutorials copy from Bruneton, 5.8, 13.5 and 33.1 × 10⁻⁶ m⁻¹, is 15–20%
+higher and is not used. The constants are derived from the formula at stated wavelengths, with a
+cited source, exactly as the project's rules already require of physical constants, and a test
+recomputes Bucholtz's figure to 1%.
 
 Absorption and aerosols are where character comes from: ozone on an Earth-like world, suspended dust
 on a Mars-like one, hydrocarbon haze on a Titan-like one, and skipping them cannot be patched over by
@@ -1379,18 +1383,19 @@ coefficients, and Bruneton's table layout mishandles small bodies with thick atm
 Titan's case. Venus, at a Rayleigh optical depth near 15 and a cloud optical depth near 30, is a
 diffusion regime that neither was built for. Hillaire's tables are fully spherical, so transmittance
 and single scattering stay right; what fails is his analytic multiple-scattering term. **Lean:**
-Hillaire's tables, regenerated when the atmosphere or the sun changes, with a ray march for views
-from orbit, where the sky-view table spends its resolution on empty space; terrain beyond the
-aerial-perspective volume's 32 km reach also needs the march. Where the multiple-scattering term
-drifts from a converged reference, at Venus-class depths and for Titan-class haze, only that table
-is replaced, by one baked offline for that atmosphere with a converged solver (discrete ordinates or
-a spherical Monte Carlo, in `f64`) and cached per world. A cloud deck of optical depth above about 10
-splits the atmosphere in two: above it, Hillaire's tables run over the deck as a baked reflecting
-boundary; below it, a baked plane-parallel table of downwelling radiance by altitude, view angle and
-sun angle gives both the sky and the aerial perspective. Bruneton's iterated orders are not the
-fallback, since they diverge in exactly this regime. Every baked table is validated against a
-path-traced reference, to 5% in radiance, before Venus- and Titan-class atmospheres ship
-([open question 3](#open-questions)).
+Hillaire's tables, the two per-planet ones regenerated when the atmosphere changes and the two
+per-view ones every frame, with a ray march for views from orbit, where the sky-view table spends
+its resolution on empty space; terrain beyond the aerial-perspective volume's 32 km reach (Hillaire
+2020's, §5.4, and Bevy's; sebh's reference code reaches 128 km) also needs the march. Where the
+multiple-scattering term drifts from a converged reference, at Venus-class depths and for
+Titan-class haze, only that table is replaced, by one baked offline for that atmosphere with a
+converged solver (discrete ordinates or a spherical Monte Carlo, in `f64`) and cached per world. A
+cloud deck of optical depth above about 10 splits the atmosphere in two: above it, Hillaire's tables
+run over the deck as a baked reflecting boundary; below it, a baked plane-parallel table of
+downwelling radiance by altitude, view angle and sun angle gives both the sky and the aerial
+perspective. Bruneton's iterated orders are not the fallback, since they diverge in exactly this
+regime. Every baked table is validated against a path-traced reference, to 5% in radiance, before
+Venus- and Titan-class atmospheres ship ([open question 3](#open-questions)).
 
 ### Clouds
 
@@ -1839,7 +1844,7 @@ them with measured figures and keep them under version control.
 | ----------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Terrain geometry and patches  | 3–5 ms                                                                       | 8–14 ms, a shallower quadtree away from the camera; full depth kept under grounded bodies                                                                     |
 | Atmosphere, per frame         | 0.5–1 ms: sky-view and aerial-perspective tables, and a ray march from orbit | 2–4 ms, smaller tables, aerial perspective on terrain only                                                                                                    |
-| Atmosphere, per-planet tables | Under 0.1 ms, when the atmosphere or the sun changes                         | About 1 ms, on the same occasions                                                                                                                             |
+| Atmosphere, per-planet tables | Under 0.1 ms, when the atmosphere changes                                    | About 1 ms, on the same occasions                                                                                                                             |
 | Volumetric clouds             | 1.5–3 ms at quarter resolution                                               | **Cut.** Replaced by a two-dimensional layer at about 1 ms                                                                                                    |
 | Ocean                         | 1–2 ms, Gerstner                                                             | 2–3 ms, about 8 wave components, no refraction, glint retained                                                                                                |
 | Shadows                       | 1.5–3 ms, cascaded, with cloud shadows                                       | 0.3–0.5 ms, a horizon map baked with each patch; terrain self-shadowing only                                                                                  |
@@ -1859,15 +1864,29 @@ descent spike measures all three together. The sums leave out the rings, which a
 a ringed body, the per-planet atmosphere tables, which are not rebuilt every frame, and the station
 wireframe, which runs on a machine of its own.
 
+The descent spike's one judged run (R05, 2026-10-07: the RTX 3080 at 1,509 × 821 px, 60% of
+1080p's pixels, one sun and three terms) measured the atmosphere per frame at 3.19, 4.07 and
+4.28 ms at the 50th, 95th and 99th percentiles, over the discrete column's 0.5–1 ms. Of that, the
+sky-view table at the high setting's 75 steps, the aerial-perspective volume and the
+full-resolution ray march of the sky above the atmosphere and of terrain beyond 32 km took 3.63 ms
+at the 95th percentile, and the composite 0.58 ms. Terrain came in at 1.16, 2.15 and 2.38 ms,
+under its 3–5 ms, so terrain and the atmosphere together met the 6 ms that their rows' upper ends
+leave them, at 5.59 ms at the 95th percentile. These are one seed's figures, taken at the clocks
+the driver chose for the spike's light load: performance states P3 to P8, the graphics clock at a
+median 975 of 2,115 MHz and the memory clock at a median 810 MHz. A pass within its row stays
+within it at higher clocks; how far the atmosphere's time would fall at the clocks a full frame's
+load brings was not measured. The UHD 620 column is unmeasured, its runs waived by the owner on
+2026-10-08. R12.T10 drafts both columns' replacement from measured runs.
+
 The UHD 620 rows sit near the floor that the bandwidth ratio sets, three times the discrete figure,
 and they are credible only because each makes a real cut, which the table names: bloom at fewer
 levels and quarter resolution, which moves some 20 to 25 MB a frame, about 1 ms at the machine's
 20 to 25 GB/s; an ocean of about eight Gerstner components; and shadows from a horizon map rather
 than a cascade. A cascade re-rasterises the terrain into a depth map, which costs a large fraction
 of the terrain row itself. A horizon map is computed once per patch on the height workers, as part
-of its bake, and costs a lookup and a compare a pixel; it needs rebaking only as the sun moves,
-15° an hour for an Earth. **Lean:** the low setting's shadows are the horizon map alone, which frees
-the 2 to 3 ms that the compositing needs.
+of its bake, and costs a lookup and a compare a pixel; it depends on the terrain alone, not on the
+sun (Max 1988), so it never needs rebaking as the sun moves. **Lean:** the low setting's shadows are
+the horizon map alone, which frees the 2 to 3 ms that the compositing needs.
 
 The table is GPU time for the view alone, and two costs sit outside it. The consoles beside the view
 share the same GPU for their own canvases and for compositing, which on the UHD 620 is not free:
@@ -1885,17 +1904,32 @@ powered descent and 100 to 300 on a low fast pass. The second is the re-bake of 
 levels each time the altitude halves, about 200 patches a halving, so a vertical descent at 20 m/s
 through 200 m adds about 30 a second. Both hold for a selection that uses a patch at about five
 times its own size in distance, which at 1080p across 60° is about 5 px per vertex spacing and, for
-terrain sloped at 0.1 to 0.2, about 1 px of geometric error; at that selection the finest level's 32
-m patches cap the demand below about 160 m. The selection rule itself is stated in geometric error,
-as virtual-globe renderers state it (CesiumJS's default is 2 px): a level is drawn where the stated
-bound for its level, from [Level-of-detail
+terrain sloped at 0.1 to 0.2, about 1 px of geometric error; at that selection the finest level's
+patches, 17.7 m on an Earth at level 19, cap the demand below about 89 m. Re-derived with k that
+ratio of distance to size (R05 Design note 19), the horizontal constant is 8k², 200 at k = 5, or
+12k², 300, if the parents exposed at a level's inner edge are no longer cached; the vertical one is
+3πk² ÷ ln 2, about 340 rather than 290, since each halving re-bakes a nadir disc of 3πk², about 236
+patches: both within this paragraph's "about". The selection rule itself is stated in geometric
+error, as virtual-globe renderers state it (CesiumJS's default is 2 px): a level is drawn where the
+stated bound for its level, from [Level-of-detail
 consistency](#level-of-detail-consistency-and-why-collision-agrees), subtends at most _τ_ pixels.
-**Lean:** _τ_ = 1 px on the high setting and 2 px on the low. The constant scales as 1/_τ_² and the
-cap as 1/_τ_, and 720p's pixel is 1.5 times larger, so the low setting's demand is about a ninth of
-these figures: some 10 to 35 patches a second on a low fast pass. The present patch-to-distance
-ratio is provisional until the level-of-detail test measures that bound, which then sets it per
-body. Demand is summed over every view whose camera streams terrain, and on the UHD 620 a second
-streaming camera shares the same workers, so secondary views stream at lower priority.
+**Lean:** _τ_ = 1 px on the high setting and 2 px on the low. The constants scale as
+1 ÷ (_τ_ θ_px)² and the cap as 1 ÷ (_τ_ θ_px), θ_px being a pixel's angle, which at 720p is 1.5
+times 1080p's, so the low setting's demand is about a ninth of these figures, some 10 to 35 patches
+a second on a low fast pass, and its cap a third. That ninth holds only while the low setting's k
+exceeds about 3; at the five above it is about 1.7, and once k falls below about 2 the quadtree's
+granularity floors each level ring at about 36 patches, so the low setting draws nearer a quarter
+of the high setting's patches (R10 Design note 15). The descent spike's fixed-step records measured
+both settings (R05, 2026-10-05, seed 7, ridges off, 1080p and 720p across 60°). Under the hard
+bound, whose k is larger, the low setting's patch counts were 0.10–0.12 of the high setting's in
+orbit and on the descent arc and 0.18–0.23 from the approach to the low fast pass; under the
+calibrated bound, min(hard, 4σ), they were 0.25–0.28 from orbit to the low fast pass. On the low
+fast pass its demand was 0.23 and 0.22 of the high setting's, 85 and 23 patches a second. Below
+300 m the region forced to the finest level under the descending camera, the same on both
+settings, brings the ratio towards 1. The present patch-to-distance ratio is provisional until the
+level-of-detail test measures that bound, which then sets it per body. Demand is summed over every
+view whose camera streams terrain, and on the UHD 620 a second streaming camera shares the same
+workers, so secondary views stream at lower priority.
 
 The UHD 620 machine is an i7-8665U, four cores and eight threads. In single-player the local
 server's pool must be capped, since it defaults to every logical thread but one
@@ -1906,7 +1940,10 @@ two to three times a bare height. That sustains some 50 patches a second, which 
 a powered descent and, at the low setting's tolerance, a low fast pass; where demand outruns it,
 refinement lags and the view annunciates `TERRAIN: STREAMING` until it catches up. These are
 estimates like the table's, and [the descent test](#testing) states the measured figure as patches
-a second sustained against that demand.
+a second sustained against that demand. On the high setting, normals at twice the mesh's resolution
+take 129² gradients a patch, about four times the 65² counted here; with them, three workers on the
+development machine's Ryzen 7 3700X sustained 40 to 45 patches a second in the descent spike's
+judged run (R05, 2026-10-07).
 
 The frame-time table is also for one photorealistic view at 1080p. On a bridge that is the main
 screen's machine, and at 4K its fill-bound passes cost about four times as much, so it may render
@@ -2481,9 +2518,10 @@ Recommended here, as technical choices rather than rulings, each argued in the s
   an honest client rather than a security boundary; plan 14's `BodyHooksDto` carries `detail_seed` in
   place of `surface_seed` before P14.T23 lands
   ([Knowledge, and the surface seed](#knowledge-and-the-surface-seed)).
-- **Truth and decoration.** A terrain band limit of 2 m at 0.5 m spacing; every rigid instance 0.2 m
-  tall or more authoritative; and the material class authoritative, baked beside the height and never
-  re-decided by a shader. Local draws come from the sim's `Stream` on registered `surface.*` tags
+- **Truth and decoration.** A terrain band limit of 2 m at a vertex spacing of at most 0.375 m
+  (level 19 on an Earth); every rigid instance 0.2 m tall or more authoritative; and the material
+  class authoritative, baked beside the height and never re-decided by a shader. Local draws come
+  from the sim's `Stream` on registered `surface.*` tags
   ([The line between truth and decoration](#the-line-between-truth-and-decoration)).
 - **Knowledge.** It gates coverage for the image, and coverage and resolution for every number, so a
   readout beyond the surveyed resolution carries its uncertainty. The coverage record is a log of
@@ -2609,13 +2647,14 @@ and the rest — and their answers are leans in the body, listed under [Decision
    per patch and cached by integer cell, as [The per-query evaluation](#the-per-query-evaluation) sets
    out, and the spike measures it against an expected 1 to 3 µs a point. What remains is that
    estimate, which must be redone for stacked instances.
-6. **The collision wavelength.** **Closed:** a fixed band limit of 2 m, at the finest level's 0.5 m
-   vertex spacing, where a 1 m wavelength would sit at the Nyquist limit; it changes only with the
-   generator version and is stated in the surface crate's documentation, because both sides depend on
-   it. Obstacles below it are rocks, and every rigid instance 0.2 m tall or more is authoritative,
-   under the 0.3 m hazard that landing-hazard detection is specified against. Collision reads the
-   finest level's piecewise-linear surface, which is drawn with its morph held at zero around every
-   grounded or descending body in view
+6. **The collision wavelength.** **Closed:** a fixed band limit of 2 m, at the finest level's vertex
+   spacing of at most 0.375 m, which keeps it within about a third of its amplitude on the mesh's
+   triangles (R05 Design note 3); it changes only with the generator version and is stated in the
+   surface crate's documentation, because both sides depend on it. Obstacles below it are rocks,
+   and every rigid instance 0.2 m tall or more is authoritative, under the 0.3 m hazard that
+   landing-hazard detection is specified against. Collision reads the finest level's
+   piecewise-linear surface, which is drawn with its morph held at zero around every grounded or
+   descending body in view
    ([The line between truth and decoration](#the-line-between-truth-and-decoration)). A finer tier,
    nested inside this one, is added only if crews on foot ever touch terrain. Craters between 1 and
    2 m are left as open question 18.
@@ -2830,21 +2869,24 @@ is made to say what runs.
    Content Security Policy unchanged (ruled 2026-09-30, R04.T10.a). Nothing terrain-shaped is
    built yet, but this is the check the shared terrain rests on, so it comes before the first line of
    terrain code, spike code included.
-3. **The descent spike, which is the gate.** An Earth-sized test planet with Earth's reference
-   atmosphere, from orbit to a metre above the ground, terrain from sim code in WebAssembly workers
-   and the atmosphere drawn every frame, since after terrain it is one of the heaviest passes on the
-   Intel part. The descent is scripted and seeded, identical every run, and records frame intervals
-   at the 50th, 95th and 99th percentiles, main-thread time split between our code, the engine and
-   idle, GPU time per pass — which the forced switches make available, uncoarsened, on Linux — patches
-   a second sustained against the demand of (200 · _v_ + 290 · |_ḣ_|) ÷ _h_, the level-of-detail bound
-   per level that the selection's _τ_ rests on, upload bytes, pipeline-creation stalls,
-   garbage-collection pauses, and resident memory against the ceiling, a 15 MB coarse field posted to
-   three workers included. It passes at 1080p60 on the discrete target and at 30 fps at 720p on the
-   UHD 620's low setting. The project has no discrete GPU today, so that half of the measurement needs
-   one borrowed or rented; the UHD 620 half runs on the machine that exists, and a failure there is
-   already an answer. The single-player brainstorm's statement of the spike carries the same
-   criterion. It decides whether the browser carries the planets, and it should happen before anything
-   depends on the answer.
+3. **The descent spike, which is the gate.** An Earth-sized test planet with Earth's atmosphere as
+   measured, its continental aerosol at an optical depth of 0.1 at 550 nm, Ångström exponent 1.3 and
+   single-scattering albedo 0.92, and Hillaire's reference aerosol, at an optical depth of
+   5.3 × 10⁻³, kept as a comparison mode, from orbit to a metre above the ground, terrain from sim
+   code in WebAssembly workers and the atmosphere drawn every frame, since after terrain it is one
+   of the heaviest passes on the Intel part. The descent is scripted and seeded, identical every
+   run, and records frame intervals at the 50th, 95th and 99th percentiles, main-thread time split
+   between our code, the engine and idle, GPU time per pass — which the forced switches make
+   available on Linux, quantised to 65.5 µs unless Dawn's `timestamp_quantization` toggle is
+   disabled, as the measurement runs do — patches a second sustained against the demand of
+   (200 · _v_ + 290 · |_ḣ_|) ÷ _h_, the level-of-detail bound per level that the selection's _τ_
+   rests on, upload bytes, pipeline-creation stalls, garbage-collection pauses, and resident memory
+   against the ceiling, a 15 MB coarse field posted to three workers included. It passes at 1080p60
+   on the discrete target and at 30 fps at 720p on the UHD 620's low setting. The project has no
+   discrete GPU today, so that half of the measurement needs one borrowed or rented; the UHD 620
+   half runs on the machine that exists, and a failure there is already an answer. The
+   single-player brainstorm's statement of the spike carries the same criterion. It decides whether
+   the browser carries the planets, and it should happen before anything depends on the answer.
 4. **The sky.** The sky request, entered first in plan 04's table of reserved kinds with the large size
    class, with its census to the per-direction naked-eye limit and the camera views' limit, a count
    budget, its caps derived there and each star at its retarded time; the per-population cumulative
@@ -2983,6 +3025,9 @@ than read: its details, and the figure it supports, must be checked before eithe
   crbug.com/391680973) unless the `enable_subgroups_intel_gen9` toggle is set, documented as
   "Enables subgroups on Intel Gen9 by polyfilling subgroupBroadcast(f16)" (`Toggles.cpp:618-621`) and
   honoured in release builds (Chromium's `gpu/command_buffer/service/service_utils.cc:296-300`).
+  Its `timestamp_quantization` toggle (`Toggles.cpp:267-271`) masks the low word of each converted
+  timestamp with `kTimestampQuantizationMask`, 0xFFFF0000 (`src/dawn/common/Constants.h:110`), so
+  timestamps step by 65,536 ns unless it is disabled (read at `main`, 2026-10-08).
   <https://dawn.googlesource.com/dawn>
 - gpuweb issue 5022: a report, naming no GPU, that adding `Vulkan,VulkanFromANGLE,DefaultANGLEVulkan`
   together stopped a `vkAcquireNextImageKHR` hang. <https://github.com/gpuweb/gpuweb/issues/5022>

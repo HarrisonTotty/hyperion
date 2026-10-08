@@ -3285,44 +3285,61 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   - The display is an Optoma UHD projector (native 3840 × 2160 at 60 Hz; 1080p at 240, 120,
     59.94, 50 or 23.98 Hz, no exact 60), with `Xft.dpi` 75, so the device-pixel ratio is
     0.78125.
-- **Findings for the brainstorm, for the owner** (T19 drafts the edits):
+- **Findings for the brainstorm, for the owner** (T19 drafts the edits; ruled 2026-10-08,
+  `decision-r05-brainstorm-findings.md`, where none needs the owner's sign-off):
   - The finest level's spacing (Design note 3): "sampled at 0.5 m" and "about a third" hold in one
     dimension only; in two, the finest level's largest spacing must be at most 0.375 m, which is
     level 19 on an Earth, with 17.7 m patches rather than "32 m patches", and a demand cap near 89 m
-    rather than 160 m. "Its 0.5 m spacing is a quarter of the 2 m band limit" is a mean.
+    rather than 160 m. "Its 0.5 m spacing is a quarter of the 2 m band limit" is a mean. _Approved
+    with amendments (draft 3), with three passages more (the `f32` step's sentence, the rock count's
+    patch and closed open question 6), and applied to the brainstorm. For the owner's review only
+    (no sign-off needed)._
   - Patch demand (Design note 19): the vertical constant re-derives as about 340, not 290; and "the
     cap as 1/τ" should read 1 ÷ (τ θ_px). Below k ≈ 3 the quadtree's granularity sets a floor of
     about 36 patches a level ring (R10's count model, 2026-09-29), so the low setting's patch counts
     are about a quarter of the high setting's, not a ninth, and its demand is probably above a ninth
-    too; T13.a's fixed-step run measures the ratio rather than assuming it.
+    too; T13.a's fixed-step run measures the ratio rather than assuming it. _Approved with
+    amendments (draft 4): the fixed-step records' measured ratio replaces the promise. Applied to
+    the brainstorm._
   - Timestamps (Design note 18): the forced switches do not give uncoarsened timestamps; Chromium
     quantises them to 65.5 µs unless `timestamp_quantization` is disabled, which the measurement
-    runs do.
+    runs do. _Approved as drafted (draft 5), with a Sources line for Dawn's mask, and applied to
+    the brainstorm._
   - The atmosphere (Design note 16): the per-planet tables depend on the atmosphere alone and need
     no rebuild when the sun moves; the 32 km aerial-perspective reach is Hillaire 2020's and Bevy's
     figure, where sebh's reference code reaches 128 km; Hillaire's reference aerosol is 20–40 times
     cleaner than Earth's typical sky, so "Earth's reference atmosphere" is taken as Earth's measured
-    aerosol, with Hillaire's as a comparison mode.
+    aerosol, with Hillaire's as a comparison mode. _Approved with amendments (draft 6): the "20–40
+    times" gives way to Hillaire's optical depth, 5.3 × 10⁻³, and the reach cites §5.4 alone.
+    Applied to the brainstorm._
   - The aerosol asymmetry (decisions-r05.md item 1): Cornette–Shanks g = 0.76 is a mean cosine of
-    0.81; Earth's measured 0.65 is g ≈ 0.58. Applied to the brainstorm on 2026-10-02.
+    0.81; Earth's measured 0.65 is g ≈ 0.58. Applied to the brainstorm on 2026-10-02. _No edit
+    (draft 7)._
   - The Rayleigh column (decisions-r05.md item 3): an 8 km scale height at the sea-level density
-    leaves the column 5% short; the US Standard Atmosphere's 8.43 km carries it.
+    leaves the column 5% short; the US Standard Atmosphere's 8.43 km carries it. _The optional
+    clarification approved, shortened (draft 8), and applied to the brainstorm._
   - Horizon maps are sun-independent (R10's research), so the budget's "it needs rebaking only as
-    the sun moves" is wrong: they are baked once with each patch.
+    the sun moves" is wrong: they are baked once with each patch. _Approved with amendments
+    (draft 9, wording only) and applied to the brainstorm._
   - The low setting's patch counts are about a quarter of the high setting's, not a ninth, because
     of the quadtree's per-ring floor (R10's research); demand's "a ninth" holds only while k exceeds
-    about 3.
+    about 3. _No separate edit (draft 10): draft 4 carries it, with the measured ratio._
   - Normals at twice the mesh's resolution quadruple the gradients the bake budget counts (Design
-    note 25).
+    note 25). _Approved with amendments (draft 11): the new sentence moves to the end of the
+    budget's paragraph and records the measured 40 to 45 patches a second. Applied to the
+    brainstorm._
   - The worker's policy (Design note 11): a `file://` worker has no policy of its own, so
     `'wasm-unsafe-eval'` is needed only for compilation on the render thread. Ruled 2026-09-30
     (R04.T10.a): the policy is unchanged and the render thread never compiles WebAssembly; the
-    brainstorm already carries the ruling.
+    brainstorm already carries the ruling. _No edit (draft 12)._
   - The atmosphere per frame (R05.T19's verdict): on the judged run it took 3.19, 4.07 and 4.28 ms
     at p50, p95 and p99, against the budget's 0.5–1 ms for the discrete target. It is over its
-    estimate (Risks, "The atmosphere's budget estimate is contradicted").
+    estimate (Risks, "The atmosphere's budget estimate is contradicted"). _Approved with amendments
+    (draft 1), merged with draft 2 into one paragraph under the budget table, and applied to the
+    brainstorm._
   - Terrain (R05.T19's verdict): 1.16, 2.15 and 2.38 ms against the budget's 3–5 ms, under its
-    estimate. Together the two met the 6 ms that their rows' upper ends leave them.
+    estimate. Together the two met the 6 ms that their rows' upper ends leave them. _Approved with
+    amendments (draft 2), in draft 1's paragraph, and applied to the brainstorm._
   - _R05.T19's drafts of the edits_ (2026-10-08, `decision-r05-close-without-runs.md` §4). These
     are drafts only. A decision agent approves them, and then a fresh agent applies them to the
     brainstorm and lists them as Decided under the roadmap README's "Awaiting the owner". "Line" is
@@ -3342,7 +3359,8 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
        6 ms that their rows' upper ends leave them, at 5.59 ms at the 95th percentile. These are one
        seed's figures, at the driver's clocks for the spike's light load; R12.T10 replaces both rows
        with measured figures."
-    3. _The finest level's spacing_ (Design note 3).
+    3. _The finest level's spacing_ (Design note 3). For the owner's review only (no sign-off
+       needed).
        - Lines 1150–1151: "The terrain is sampled at 0.5 m at its finest level" becomes "The terrain
          is sampled at its finest level at a vertex spacing of at most 0.375 m (level 19 on an
          Earth)". After "…within about a third of its amplitude", add "on the mesh's triangles (at
@@ -3410,6 +3428,8 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
           65² this figure counts."
     12. _The worker's policy_ (Design note 11). Ruled 2026-09-30 (R04.T10.a) and already in the
         brainstorm. No edit.
+  - _Ruled 2026-10-08 (`decision-r05-brainstorm-findings.md`): drafts 1–6, 8, 9 and 11 approved,
+    with amendments to 1–4, 6, 8, 9 and 11; 7, 10 and 12 need no edit. Applied to the brainstorm._
 - **Timings measured so far are provisional.** The development machine is shared with other
   agents' tests; every figure in this plan measured today, including the research agents' Threefry
   timing and the estimates built on it, is re-measured on a quiet machine (Design note 27) before it
