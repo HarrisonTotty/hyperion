@@ -1837,6 +1837,8 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
   - **Acceptance.** `just fit-check`; the probe's figures and the fit's cost are recorded in the
     Risks.
 
+  _As built (2026-10-08): see Risks, "P11.T17.b as built"._
+
 - **P11.T17.c `Unchanged`, `Remnants` and `Bright`, against `evolve`.**
   - **The function.** `Detached` (T17.a) first. Otherwise read T17.b's cell over the window's
     age bins:
@@ -4482,3 +4484,300 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - re-run both slow tests;
     - refit `binary_reach` if fit-check finds it stale;
     - revisit the supernova rule when the pin fails (the task text's 22-batch note).
+- **P11.T17.b as built** (2026-10-08, at version 21; `decision-p11-t16-hierarchy-bound.md` §§5, 6
+  and 10). No generated output moves, and there is no bump: nothing generated reads the tables.
+  - **Built:**
+    - `stellar/binary/pair_light.rs`, public for `hyperion-fit` and T17.c:
+      - the grid `PairGrid`;
+      - the sampler `sample_input`;
+      - the walk `pair_rows`, which takes the caller's photometry;
+      - `CellRows`, `assemble` and the packed format 1;
+      - the reader `PairLightTable`, decoded once a layer by `PairLightTable::generator`. Its
+        `living_cmag_for` and `changed_cmag_for` apply the cooling floor themselves;
+      - E's reading and the cooling floor (below).
+    - Its tests are in `pair_light/tests.rs`. The new golden `stellar/pair_light_tables`, at 21,
+      pins the floor and a digest of each layer's decoded values.
+    - `stellar/binary/testing.rs` (test-only) holds `generated_pairs` and `Mix`, moved from
+      `light.rs`'s tests. The code is the same apart from visibility and its seed argument (the
+      caller now passes `SEED ^ salt`), so what they draw is unchanged.
+    - `Segment::members` lost its `cfg(test)`.
+    - `tables::binary_pair_light_c`, `_d` and `_e`, fitted.
+    - `hyperion-fit`'s Slow tasks `binary_pair_light_c`, `_d` and `_e`, with their manifests,
+      smoke manifests and `tables.lock` entries.
+    - Each of the three table modules carries one `#[allow(clippy::unreadable_literal)]`, for
+      D's and E's six-digit counts in `DIMENSIONS`. An `expect` would go unfulfilled on C. Writing
+      the counts with separators would change the committed bytes, so that waits for the
+      version-22 refit.
+  - **The probe** (scratch, not committed: `.git/rm23-scratch/p11-bounds/t17b/probe_t17b.rs` and
+    `probe_full.log`):
+    - It took 10⁴ generated star–star pairs a layer near the Sun, each run through `evolve` to
+      1.5 × 10¹⁰ years and walked.
+    - Cost: 647 CPU-s (0.18 CPU-h), 173 s wall on 4 threads.
+
+    |                                                | C                  | D                  | E                  |
+    | ---------------------------------------------- | ------------------ | ------------------ | ------------------ |
+    | `evolve`, ms a pair                            | 2.0                | 7.7                | 11.1               |
+    | The walk, ms a pair                            | 6.7                | 17.4               | 19.7               |
+    | A departing living star or product at some age | 22.6%              | 63.4%              | 82.1%              |
+    | One in the record's own 0.2-dex age bin        | 7.1%               | 6.7%               | 1.1%               |
+    | One alive past both stars' own deaths          | 29                 | 208                | 1,428              |
+    | Pairs with a supernova                         | 0                  | 998                | 8,314              |
+    | Widest departing periastron, R☉                | 2,068              | 3,079              | 13,656             |
+    | Heavier star below the layer's band            | 12.5%              | 7.5%               | 6.5%               |
+    | q below 0.1                                    | 2.5%               | 0.8%               | 1.1%               |
+    | The brightest departing V, and when            | −7.6 at 0.63–1 Gyr | −7.9 at 63–100 Myr | −11.6 at 2.5–4 Myr |
+    - Channels: pairs holding each at some age (alive past both own deaths, latest age alive).
+
+    | Channel                                          | C                     | D                       | E                       |
+    | ------------------------------------------------ | --------------------- | ----------------------- | ----------------------- |
+    | Mergers                                          | 1,530 (3; 1.5 × 10¹⁰) | 5,046 (46; 1.5 × 10¹⁰)  | 3,490 (10; 1.44 × 10¹⁰) |
+    | Common-envelope survivors                        | 996 (5; 1.5 × 10¹⁰)   | 1,600 (90; 1.5 × 10¹⁰)  | 1,444 (319; 1.5 × 10¹⁰) |
+    | Stripped helium stars                            | 284 (4; 1.5 × 10¹⁰)   | 2,013 (86; 1.49 × 10¹⁰) | 5,020 (993; 9.75 × 10⁹) |
+    | Eroded donors                                    | 188 (0; 1.5 × 10¹⁰)   | 1,857 (0; 1.5 × 10¹⁰)   | 4,508 (0; 5.87 × 10⁹)   |
+    | Gainers                                          | 189 (0; 1.5 × 10¹⁰)   | 1,858 (30; 1.5 × 10¹⁰)  | 4,544 (615; 1.5 × 10¹⁰) |
+    | White-dwarf mergers' products                    | 31 (17; 1.45 × 10¹⁰)  | 58 (16; 1.46 × 10¹⁰)    | 11 (5; 1.04 × 10¹⁰)     |
+    | Other (a departing star of its own model's mass) | 132 (0; 1.5 × 10¹⁰)   | 1,825 (0; 1.43 × 10¹⁰)  | 4,450 (0; 5.67 × 10⁹)   |
+    - 19% of C's departing pairs depart by less than 1 mmag only (wind accretion).
+    - 97% of the pairs have [Fe/H] of −0.5 or more, and 87% of −0.25 or more.
+
+  - **T17.a's closed form has no finite reach at 1.5 × 10¹⁰ years for extreme mass ratios.**
+    - The coarse spin reservoir, k′₃ √R̂ f_L^{3/2} (1 + q), grows with m₁ ÷ m₂.
+    - The least periastron at which every pair passes over:
+      - C: 1.7 × 10⁴ R☉ (2.5 + 0.08 M☉);
+      - D: 5.9 × 10⁵ R☉ (8 + 0.08 M☉);
+      - E: 1,673 grid points never pass over below 10⁷ R☉, from about 38 M☉ with a 0.08–0.09 M☉
+        companion up to 150 M☉ with one of up to 0.53 M☉.
+    - So the open periastron bin is sampled out to 10⁷ R☉, not taken as empty.
+  - **The grid**, set from the probe:
+    - the heavier star's mass, not the hierarchy's primary, so that `cell_of` reads either order:
+      12 intervals even in ln m over each band;
+    - q (≤ 1): [0.08 M☉ ÷ the band's top, 0.1, 0.2, 0.3, 0.45, 0.6, 0.75, 0.9, 1];
+    - log₁₀(Z_fit ÷ 0.02): [−2.301, −1, −0.5, −0.15, +0.176];
+    - the periastron: 0.25-dex bins from 1 R☉ (15 in C, 16 in D and 18 in E), then the open bin.
+      The generator's 0.1-day period floor puts its closest pairs at 0.49–0.85 R☉, in contact at
+      birth; those read `None`;
+    - age: 53 bins (one to 10⁵ years, then 0.1 dex to 10^10.1, then one to 1.5 × 10¹⁰);
+    - cells: C 6,144, D 6,528 and E 7,296.
+  - **The sampling**, 72 pairs a cell:
+    - its 16 corners, then R₄ points;
+    - eccentricities from Moe and Di Stefano's law at each pair's period, with every fourth
+      circular and every eighth at 0.9;
+    - the generator's `StarDraws::for_star` under the fit's seed, with η at ±3.5σ for two in
+      eight, and the stripped mark and low kick mode set for one in eight;
+    - isotropic orientations and uniform phases.
+  - **The walk:**
+    - Each star's own model, and every member that is not its own track at no offset, is cut at
+      its phases (32 parts each, and its knots), its paths' steps, 8 log-even parts of a segment
+      and the age bins' edges, and read at 5 points a part.
+    - A departure is a state not equal to the star's own model's at the same age, by
+      `StarState`'s derived, field-by-field equality. So wind accretion counts, a cooling-fit
+      member's included, and a near miss only brightens the bound.
+    - The living column also takes each star's own model (the orchestrator's column, for T17.c's
+      `Remnants`). So a pair the generator passes over at its +H is bounded even where the
+      1.5 × 10¹⁰-year run departs earlier.
+  - **The values:**
+    - The margin is 0.3 mag, the brightness envelope's.
+    - Each value is made cumulative over every wider periastron, then dilated by one cell on each
+      of the four axes and by one age bin. The dilation is clipped at a band's edges, not carried
+      across layers.
+    - Runs are merged at their brightest:
+      - the changed column within 0.2 mag (T8.m's rule, which grows past +10);
+      - the living column within 1 mag in C and D and 2 mag in E, since T17.c reads it only where
+        it is DARK.
+    - After the merge, which only brightens, the order is restored:
+      - a closer orbit is no fainter than a wider one;
+      - the living value is no fainter than the changed one.
+    - Values are hundredths of a magnitude, rounded brighter. DARK is 2047 and UNSEEN (alive, no
+      V) is 2046.
+    - Each cell's own departing samples are stored as a log₂ class. Every cell holds 72 samples,
+      stored once a table (`SAMPLES_PER_CELL`).
+  - **Storage, format 1:**
+    - each segment is 3 base64 characters: a 6-bit run and a 12-bit value;
+    - each cell's three row indices take 9 characters;
+    - as plain decimals a table would have been some 2 MB, and four-character segments with
+      mmag values projected 790 kB for E.
+  - **The fits:** each ran under `just _locked` at 8 threads, once the 1-minute load was under 16.
+
+    |                                                       | C                       | D                       | E                       |
+    | ----------------------------------------------------- | ----------------------- | ----------------------- | ----------------------- |
+    | Samples (64 + 8 held out a cell)                      | 442,368                 | 470,016                 | 525,312                 |
+    | Holding a changed star                                | 268,829                 | 347,005                 | 372,716                 |
+    | Held-out bins the 64-sample table does not bound      | 0                       | 0                       | 58                      |
+    | Held-out changed bins beyond their own cell's samples | 3,064 of 242,662 (1.3%) | 6,166 of 307,398 (2.0%) | 7,856 of 335,340 (2.3%) |
+    | Least room before the 0.3 mag margin, mag             | −0.095                  | −0.032                  | −0.688                  |
+    | Cells with a changed star                             | 5,168                   | 6,040                   | 6,558                   |
+    | Brightest changed value, mag                          | −8.05                   | −8.86                   | −12.85                  |
+    | Distinct rows, segments                               | 9,360, 74,933           | 13,389, 117,756         | 11,004, 109,585         |
+    | File                                                  | 287 kB                  | 420 kB                  | 402 kB                  |
+    | CPU, s                                                | 4,217                   | 6,509                   | 6,519                   |
+    | Wall                                                  | 9 min 38 s              | 14 min 50 s             | 15 min 3 s              |
+    | Peak RSS                                              | 46 MB                   | 65 MB                   | 70 MB                   |
+    | 1-minute load during the run                          | 4–16                    | 7–10                    | 8–11                    |
+    - In all: 1.44 × 10⁶ pairs at about 12 ms a pair (the plan said 6–12 × 10⁵ at 10 ms), and
+      17,245 CPU-s (4.8 CPU-h), inside the approved 2–7.
+    - The probe and the scratch cost, size and reach checks added about 1 CPU-h.
+    - All three ran before the owner's shutdown on 2026-10-07 at 21:20. None needed a rerun.
+    - The validation compares the held-out samples with the 64-sample table as stored, without the
+      reader's widenings below. The committed tables take the held-out samples too.
+
+  - **Three widenings at read time, from the slow test.** "A violation widens the table, never the
+    test."
+    - **The cooling floor.**
+      - The first run of the slow test found 41 bins past their tables in D and E. 40 of them were
+        held by pairs whose lighter star was a cooling-fit star of 0.096–0.099 M☉, up to 0.2 mag
+        past their stored values. The 41st was the 57.1 M☉ pair below.
+      - The cause: the cooling fits are brightest just below 0.1 M☉, where they meet the tracks,
+        and the sampler holds the companion at no less than 0.08 M☉. So most of q's first
+        interval at low m₁ samples 0.08 M☉ exactly.
+      - The engine evaluates a cooling member at its own age (every offset is 0) and at no more
+        than 0.1 M☉, whatever wind it accretes.
+      - So for a pair whose lighter star lies below 0.1 M☉, the reader (`living_cmag_for`,
+        `changed_cmag_for`) takes each value that is not DARK as the brighter of it and the
+        cooling fits' brightest at that age bin, 0.3 mag included.
+      - The floor is computed once, at its first call: about 10⁶ evaluations of the cooling fits,
+        about 0.5 s in a dev build.
+    - **E's read margin.**
+      - One bin in E remained after the floor: a 57.1 + 3.77 M☉ pair at a periastron of 891 R☉,
+        e 0.947, at about 2 × 10⁸ years, 0.53 mag past its widened neighbourhood.
+      - E's held-out samples had reached 0.69 mag, against C's 0.10 and D's 0.03.
+      - So E's reader brightens every finite value by a further 0.4 mag, 0.7 mag in all
+        (`E_READ_MARGIN_CMAG`).
+    - **E's read smear.**
+      - A first fresh seed (`0x1111_2222_3333_4445`) then found a realised pair of 8.38 + 1.27 M☉,
+        at [Fe/H] past the clamp, periastron 1,012 R☉ and e 0.773. At 5–6 Gyr it is at
+        M_V −7.57 against its table's −3.16.
+      - The channel:
+        - the primary's common envelope at 38 Myr leaves a 1.44 M☉ ONe white dwarf;
+        - at 5.4 Gyr the companion leaves its main sequence, and its transfer becomes a common
+          envelope and a merger;
+        - the product, a giant on the white dwarf's core, crosses its helium giant branch at
+          −7.6 for about 0.12 Myr.
+      - The cell's neighbourhood holds the channel at −8.33 in bins 39–47 (0.63–5 Gyr): its
+        samples' companions are shorter-lived, so their bright phases come earlier.
+      - The product's age is set by the companion's lifetime, which spans about a dex across E's
+        low-q cells. So 72 samples hit its brief phases at scattered bins.
+      - E's reader therefore takes each bin's brightest over 3 more bins either way, ±0.3 dex
+        (`E_READ_SMEAR_BINS`).
+    - Why read-side: all three are applied by the reader, not stored, so the 4.8 CPU-h fit stands.
+      A refit at 21 was possible (the placeholder trick, 1.2–1.8 CPU-h a layer), but would have
+      taken the CPU past the approved 7 h. The floor also needs the lighter star's exact mass,
+      which no cell holds.
+    - The version-22 refit should store E's margin and smear. This is to be added to the 22
+      batch's entry in `deferred-corrections.md`, which today says only "refit the tables".
+  - **The slow test** (`the_pair_light_tables_bound_evolved_pairs`):
+    - It takes 10⁴ pairs a layer sampled as the fit samples them, on a seed of the test's own,
+      and about 9,300–9,650 generated pairs a layer near the Sun whose heavier star lies in the
+      layer's band: 5.8 × 10⁴ pairs in all.
+    - Result: 0 violations and 0 engine panics. It fails past 5 panics a set.
+    - Cost: 157 s wall at 8 threads, about 1,250 CPU-s.
+
+    | Least room before the margin, mag | C     | D     | E              |
+    | --------------------------------- | ----- | ----- | -------------- |
+    | Sampled pairs                     | +0.12 | −0.04 | −0.30 (of 0.7) |
+    | Realised pairs                    | +0.10 | +0.06 | −0.04          |
+    - Five seeds in all: the committed one, and four more, not committed (`0x1111_2222_3333_4445`,
+      `0x5eed_0b17_dead_beef`, `0x7a1e_0017_0000_0003`, `0x2468_ace0_1357_9bdf`).
+      - With the three widenings: 0 violations in about 2.9 × 10⁵ pairs.
+      - E's least room is −0.26 to −0.33 mag of its 0.7 on sampled pairs, and −0.06 or better
+        on realised ones.
+      - C's and D's least room is no worse than −0.10 and −0.04 mag of 0.3.
+    - The widenings were set on the first three seeds. The last two, which were never looked at
+      before, also show no violation.
+    - One engine panic, on `0x7a1e_…`, was caught and counted: the same twin channel, 33.0 +
+      31.9 M☉ at [Fe/H] −2.23.
+    - Pairs with a star below 0.1 M☉ (R06.T8.g's science check, for T17.c's `Detached`), with
+      those holding a changed star at some age in the 1.5 × 10¹⁰-year run:
+      - sampled: C 927 (610 changed), D 429 (392), E 419 (402);
+      - realised: C 155 (43), D 6 (2), E 0.
+
+      The walk counts such a member's wind accretion as a departure, so the tables include it.
+
+  - **The engine finding** (deferred, not fixed; `deferred-corrections.md`, the 22 batch's engine
+    work):
+    - `rlof.rs`'s debug assertion, "a transfer step from a donor with nothing living", fires
+      for 1 in 3.9 × 10⁴ of E's samples.
+    - The pair: E's cell 3579, sample 49 under `FIT_SEED`, a 32.75 + 31.83 M☉ twin at
+      [Fe/H] −1.98, circular at 65.8 R☉.
+    - A release build (the fit's and the game's) goes on:
+      - stable transfer from the primary at 6.15 Myr;
+      - the primary's black hole at 6.74 Myr;
+      - the secondary's common envelope at 8.08 Myr, which leaves a 19.9 M☉ helium star;
+      - that star gives mass to the black hole until it dies mid-transfer at 8.5057 Myr;
+      - the engine then merges the pair into one 31.65 M☉ black hole.
+    - Nothing lives after 8.5 Myr. The table holds the changed stars to about 10⁷ years and
+      nothing after, as the release generator gives them. The light is the same however the
+      death is handled.
+    - Physically, BSE (Hurley, Tout and Pols 2002, §2.5 and appendix A1) collapses the helium
+      star with its mass loss and kick, leaving a black-hole pair or a disrupted one, not an
+      instant merger.
+    - The slow test catches such panics and counts them apart.
+  - **Deviations:**
+    - The runs went under `just _locked` at 8 threads (the orchestrator, 2026-10-07), not outside
+      the heavy lock at `CPUQuota=400%` as the task text has it.
+    - The orchestrator added a living column, beside the changed one.
+    - A cell's departing count is stored as a log₂ class, not as the share itself: class c ≥ 1
+      holds 2^(c−1) to 2^c − 1 of `SAMPLES_PER_CELL`.
+    - The committed tables take the held-out samples too. The validation is of the 64-sample
+      table.
+    - E's living column merges within 2 mag.
+    - The cooling floor and E's margin and smear are applied in the reader, not in the fit.
+  - **What the sampling leaves out, to fix at the version-22 refit** (the science check):
+    - **Eccentricities.** The law's are clamped at 0.95, and the high extreme is 0.9.
+      - At a fixed periastron the generator's law reaches e → 1, held at 0.9999
+        (`stability.rs`).
+      - A Monte Carlo of its own laws puts 9–10% of interacting pairs above 0.95.
+      - Covered today only by the slow test's realised pairs, at the generator's own e.
+      - At the refit: e = w(1 − c) ÷ (1 − wc), with w = u^(1/(1+η)) and c = (P(r_p) ÷
+        2 d)^(−2/3), capped at 0.9999.
+    - **η.** The extremes stop at ±3.5σ.
+      - The η = 0 tail (z = −0.5 ÷ 0.07), where a giant's tip is brightest, is unsampled. R06's
+        `ETA_DRAWS` and T8.m's phase envelope both sample it.
+      - It affects one star in 4,300, and T17.c's interface takes no draws.
+    - **Kicks.** The only kick extreme is the low mode, which reaches only companion-stripped
+      progenitors below the ramp. Complete fallback is never forced.
+    - **Common envelopes.** There is no common-envelope draw: `BinaryParams` fixes α_CE = 1 and
+      λ = 0.5.
+    - **The smear's case also applies to C and D**, whose low-q cells span a similar spread in
+      companion lifetimes. No seed found a violation there.
+    - **E's 0.7 mag sits at the observed maximum.** At the refit, re-measure the held-out room
+      with the smear in place, and set the margin with headroom.
+  - **White dwarfs are dark** (R06's ask A4 interim).
+    - The tables hold no remnant rows. `Remnants` (living DARK) and `Unchanged` are sound only
+      while white dwarfs have no V.
+    - A white dwarf the binary makes can be far younger and hotter than either star's own at the
+      same age.
+    - When A4 lands, the tables must be refitted with a white-dwarf column, walking the
+      `Member::Remnant` white dwarfs through the new photometry.
+  - **Reviews:**
+    - **rust-reviewer.** Its must-fixes are applied:
+      - the sampling counts are checked against overflow (`Sampling::new`, with a test);
+      - `generator` names its errors: a placeholder is `None`, and a malformed table panics;
+      - the float comparisons and the state comparison's comment are corrected;
+      - `widened` takes its rows by value;
+      - the comments say why.
+        Its should-fixes are applied too:
+      - `# Panics` notes the engine's debug assertion;
+      - `unpack` refuses count classes outside 0–32;
+      - private fields with getters (`PairRows`, `PackedPairLight`, `Sampling`);
+      - units in names;
+      - tests for the error paths;
+      - narrower visibility (`unit_point`, `rows_of`, and `light::passed_over` back to private);
+      - three doctests and `#[must_use]`.
+        Left as they are:
+      - `count_class` and `to_cmag` stay public, since the reader's public docs define the stored
+        format through them;
+      - the separators in `DIMENSIONS` wait for the refit (above);
+      - the photometry callback stays `&dyn`.
+    - **determinism-auditor.** No must-fix. The floor and the decoded readers are now pinned by
+      the golden `stellar/pair_light_tables` and a fresh-build test. Fingerprint probes of the
+      sampler's extreme branches would make the committed tables stale, so they wait for the
+      refit.
+    - **plan-conformance-reviewer.** No must-fix. This entry's figures are corrected to the logs,
+      and the deviations above added.
+    - **science-checker.** No must-fix. Its should-fixes are the sampling gaps and the white-dwarf
+      note above, and the periastron edge's comment, corrected.
+  - **Not built:** the core-inertia column (the open option), and T17.c's verdicts.
+  - **At the version-22 batch:**
+    - refit the three tables, storing E's read margin and smear and the cooling floor, and
+      sampling the gaps above;
+    - re-run the slow test.

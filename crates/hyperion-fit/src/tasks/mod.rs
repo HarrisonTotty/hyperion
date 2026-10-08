@@ -2,6 +2,7 @@
 //! that turns the result into its table's contents, and a unit struct implementing
 //! [`FitTask`](crate::task::FitTask), which [`registry`](crate::task::registry) lists.
 
+pub mod binary_pair_light;
 pub mod binary_reach;
 pub mod chabrier;
 pub mod cluster_bh;

@@ -35,6 +35,7 @@ mod detached;
 mod evolve;
 mod light;
 mod marks;
+pub mod pair_light;
 mod params;
 pub mod reach;
 mod recycling;
@@ -44,6 +45,8 @@ mod star;
 mod supernova;
 mod timeline;
 
+#[cfg(test)]
+mod testing;
 #[cfg(test)]
 mod tests;
 

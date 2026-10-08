@@ -2,6 +2,42 @@
 # `hyperion-fit check`. Do not edit.
 
 [[table]]
+name = "binary_pair_light_c"
+path = "binary_pair_light_c.rs"
+task = "binary_pair_light_c"
+revision = 0
+inputs_sha256 = "d02f5d918253a7c16ee4667d771bf06ef92b491332dbe6e29c6657c592525d15"
+body_sha256 = "dfb18fdd89b1efab86c54eeaeb8f793a8bb84923b5ec785ed84d12a503c87bda"
+fingerprint = [6144.0, 223.63731480518544, -4.256550431273945, 2.0, 7.0, 228.14022241245084, 0.0, 0.0, 7.0, 227.91912027947748, -0.5132675566501259, 2.0, 7.0, 228.23487257007756, 5.8071959810886, 1.0, 7.0, 188.84451159042453, -2.913599846621297, 1.0, 7.0, 188.85441668592873, 92.21932843609758, 9.0, 7.0, 98.37663793496192, -6.803624047229877, 2.0, 7.0, 108.05759680135931, 4.970827036125806, 4.0, 7.0, 127.69842032632818, -6.361057027529942, 3.0, 7.0, 131.13305065101875, 61.08688762412844, 9.0, 7.0, 33.08076361745287, -4.616555841884917, 3.0, 7.0, 30.205256730509028, -2.7934757012712654, 2.0, 7.0]
+since_generator_version = 21
+provisional = false
+acceptance = "6144 cells, 6144 sampled, 442368 samples (64 + 8 held out a cell), 268829 holding a changed star; held out: 3064 of 242662 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.095 mag before the 0.3 mag margin; 5168 cells with a changed star, the brightest -8.05 mag; packed 9360 rows, 74933 segments, 280095 characters"
+
+[[table]]
+name = "binary_pair_light_d"
+path = "binary_pair_light_d.rs"
+task = "binary_pair_light_d"
+revision = 0
+inputs_sha256 = "732c1e063876c4908687a3b97b483519bda1a292e898d485204a46ed3d438992"
+body_sha256 = "7d7c5576434b3a373cefdbac8619dab8953acc95a7b5fad77564cb15894cab51"
+fingerprint = [6528.0, 103.41133542917497, -8.822436033000525, 4.0, 7.0, 107.00560224992425, 28.903508008106897, 7.0, 7.0, 13.138291214694165, -5.802524812960613, 3.0, 7.0, 10.609603743522188, -5.120952228679788, 2.0, 7.0, 13.035128357086329, -9.917437674516325, 3.0, 7.0, 24.068308337101467, -3.5623942433426565, 1.0, 7.0, -32.86294737346111, -13.482889367978164, 5.0, 7.0, -28.93211683321798, -2.4984705477782154, 6.0, 7.0, -26.316891488315168, -12.948016830976552, 5.0, 7.0, -26.21631452901793, -10.088279829406574, 2.0, 7.0, -53.874598640121434, -19.26059759929002, 9.0, 7.0, -53.89967932825623, -7.194068003397632, 2.0, 7.0]
+since_generator_version = 21
+provisional = false
+acceptance = "6528 cells, 6528 sampled, 470016 samples (64 + 8 held out a cell), 347005 holding a changed star; held out: 6166 of 307398 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.032 mag before the 0.3 mag margin; 6040 cells with a changed star, the brightest -8.86 mag; packed 13389 rows, 117756 segments, 412020 characters"
+
+[[table]]
+name = "binary_pair_light_e"
+path = "binary_pair_light_e.rs"
+task = "binary_pair_light_e"
+revision = 0
+inputs_sha256 = "3562f5290d461477f352050a44bfef53a4a2cbf3e582024f4651996046ebb79d"
+body_sha256 = "d4a909e2eea381a0a0afbf16ecf264c2ded89aa7a1dfc1521b37a208e2ab20e7"
+fingerprint = [7296.0, -68.23093674264436, -61.79790929152627, 16.0, 7.0, -55.55538380454209, -2.487560714490119, 14.0, 7.0, -89.08672104175038, -64.02824827776524, 12.0, 7.0, -64.08463410154252, -15.363152902101497, 3.0, 7.0, -102.41749211779586, -68.29127425062575, 12.0, 7.0, -98.88394812111902, -33.44966484580682, 8.0, 7.0, -88.56936963513313, -79.65056625566673, 12.0, 7.0, -81.08528621759645, -26.423539923752696, 3.0, 7.0, -91.3582595083671, -70.46557000802396, 9.0, 7.0, -92.45854811116914, -33.82585436846854, 5.0, 7.0, -81.86055575359019, -70.46557000802396, 9.0, 7.0, -81.49479467369594, -23.08966982034859, 2.0, 7.0]
+since_generator_version = 21
+provisional = false
+acceptance = "7296 cells, 7296 sampled, 525312 samples (64 + 8 held out a cell), 372716 holding a changed star; held out: 7856 of 335340 changed bins beyond their own cell's samples, 58 bins not bounded by the table of the first 64, the least room -0.688 mag before the 0.3 mag margin; 6558 cells with a changed star, the brightest -12.85 mag; packed 11004 rows, 109585 segments, 394419 characters"
+
+[[table]]
 name = "binary_reach"
 path = "binary_reach.rs"
 task = "binary_reach"

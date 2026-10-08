@@ -152,8 +152,8 @@ impl Segment {
         }
     }
 
-    /// The members, for the crate's tests.
-    #[cfg(test)]
+    /// The members: how each star's state is evaluated inside the segment (the crate's tests, and
+    /// P11.T17.b's walk of a timeline, `pair_light`).
     #[must_use]
     pub(crate) const fn members(&self) -> &[Member; 2] {
         &self.members

@@ -1,0 +1,32 @@
+# The smoke run of binary_pair_light_e: one sample and one held out in every 473rd cell, the
+# others empty, a second or two.
+task = "binary_pair_light_e"
+
+[params]
+samples_per_cell = 1
+held_out_per_cell = 1
+cell_stride = 473
+mass_cells = 12
+q_edges = [0.0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0]
+lowest_companion = 0.08
+fe_h_edges = [-2.301029995663981, -1.0, -0.5, -0.15, 0.17609125905568124]
+periastron_first_rsun = 1.0
+periastron_step_dex = 0.25
+periastron_cells = 19
+open_periastron_reach_rsun = 1.0e7
+first_age_edge_years = 1.0e5
+age_step_dex = 0.1
+last_age_years = 1.5e10
+age_bins = 53
+margin_mag = 0.3
+merge_tolerance_mag = 0.2
+living_merge_tolerance_mag = 2.0
+faint_from_mag = 10.0
+faint_tolerance_slope = 0.2
+corner_samples = 16
+samples_per_phase = 32
+segment_splits = 8
+high_eccentricity = 0.9
+max_sampled_eccentricity = 0.95
+eta_extreme = 3.5
+fit_seed = 0x5eed_0017_b0b0_f17e

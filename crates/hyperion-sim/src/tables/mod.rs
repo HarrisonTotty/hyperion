@@ -14,6 +14,23 @@
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
 pub mod binary;
+// The three `binary_pair_light` tables are written whole by `hyperion-fit`, whose dimensions'
+// counts reach six digits, so their one lint allowance is on their modules.
+#[allow(
+    clippy::unreadable_literal,
+    reason = "a fitted table's counts are data, written whole"
+)]
+pub mod binary_pair_light_c;
+#[allow(
+    clippy::unreadable_literal,
+    reason = "a fitted table's counts are data, written whole"
+)]
+pub mod binary_pair_light_d;
+#[allow(
+    clippy::unreadable_literal,
+    reason = "a fitted table's counts are data, written whole"
+)]
+pub mod binary_pair_light_e;
 pub mod binary_reach;
 pub mod chabrier;
 pub mod cluster_dynamics;
@@ -76,6 +93,24 @@ pub struct TableInfo {
 /// listed.
 // @begin-manifest: written by hyperion-fit from tables.lock. Do not edit.
 pub const MANIFEST: &[TableInfo] = &[
+    TableInfo {
+        name: "binary_pair_light_c",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "binary_pair_light_d",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "binary_pair_light_e",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
     TableInfo {
         name: "binary_reach",
         revision: 0,

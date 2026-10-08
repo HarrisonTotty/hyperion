@@ -1,0 +1,39 @@
+# Plan 11's pair-light table of layer E (P11.T17.b; decision-p11-t16-hierarchy-bound.md §§5, 6 and
+# 10): per cell of the heavier star's mass, the mass ratio, the metallicity and the drawn
+# periastron, per age bin, the brightest V of any living star and of any departing star or
+# product, measured on the binary engine. The parameters besides the sampling are constants of the
+# code (`hyperion_sim::stellar::binary::pair_light`), recorded here so that the inputs hash covers
+# them; the task refuses a manifest that disagrees with the code.
+task = "binary_pair_light_e"
+
+[params]
+# 64 samples a cell make the validation table, the next 8 are held out and checked against it, and
+# the committed table takes all 72 (P11.T17.b's run plan: 64-128 a cell, 2-7 CPU-hours for C-E).
+samples_per_cell = 64
+held_out_per_cell = 8
+cell_stride = 1
+mass_cells = 12
+q_edges = [0.0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0]
+lowest_companion = 0.08
+fe_h_edges = [-2.301029995663981, -1.0, -0.5, -0.15, 0.17609125905568124]
+periastron_first_rsun = 1.0
+periastron_step_dex = 0.25
+periastron_cells = 19
+open_periastron_reach_rsun = 1.0e7
+first_age_edge_years = 1.0e5
+age_step_dex = 0.1
+last_age_years = 1.5e10
+age_bins = 53
+margin_mag = 0.3
+merge_tolerance_mag = 0.2
+# Two magnitudes in E (one in C and D), so that its table stays well under 500 kB.
+living_merge_tolerance_mag = 2.0
+faint_from_mag = 10.0
+faint_tolerance_slope = 0.2
+corner_samples = 16
+samples_per_phase = 32
+segment_splits = 8
+high_eccentricity = 0.9
+max_sampled_eccentricity = 0.95
+eta_extreme = 3.5
+fit_seed = 0x5eed_0017_b0b0_f17e
