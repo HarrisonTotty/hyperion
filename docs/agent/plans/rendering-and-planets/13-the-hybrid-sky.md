@@ -15,8 +15,9 @@
 - **Brainstorm sections covered** (by heading, in
   [the brainstorm](../../brainstorming/rendering-and-planets.md)): "The sky", its subsection "The
   star field is the galaxy, not a photograph" (the census, the band, "a statistical layer of
-  unresolved stars, labelled as such") and the drafted subsection "The hybrid sky: the census near,
-  synthetic stars far" (for the owner's sign-off); open questions 13, 16 and 19 as they touch the
+  unresolved stars, labelled as such") and the subsection "The hybrid sky: the census near,
+  synthetic stars far" (signed off by the owner on 2026-10-08, its label wording still a draft);
+  open questions 13, 16 and 19 as they touch the
   census's reach and cost. The decision it answers is the owner's of 2026-10-08 on the full sky's
   time (`decision-p11-t17c-bright.md` §4), and its feasibility study is
   `.git/rm23-orchestration/feasibility-hybrid-sky.md`.
@@ -62,8 +63,8 @@ Non-goals:
   `GENERATOR_VERSION` bump.
 - Sampling Milky Way catalogues or observed star counts. The synthetic stars sample the generated
   galaxy alone (Design note 1).
-- Making a synthetic star a real system ("lazy realisation by record"): a later refinement if the
-  owner asks for it (Risks).
+- Making a synthetic star a real system ("lazy realisation by record"): revisited after the
+  deferred census levers land (the owner, 2026-10-08; Risks).
 - Feature members (clusters, associations, the nuclear cluster). They wait on R06.T16.a; until
   then the field keeps their stars, and so does the synthetic tier.
 - Blending a system's stars before the views' cull, in either tier (R06's, recorded in Risks).
@@ -78,7 +79,7 @@ Rust paths are under `hyperion_sim` unless a crate is named. Signatures are sket
 ### `sky::synthetic` (new)
 
 ```rust
-pub const SYNTHETIC_CEILING_V: f64;      // V_P: 4.5 recommended (owner's ruling; 5.0 in RM3's interim)
+pub const SYNTHETIC_CEILING_V: f64;      // V_P: 4.5 (the owner, 2026-10-08); 5.0 in RM3's interim
 pub const SYNTHETIC_LAYERS: [Layer; 3];  // C, D, E
 pub const SYNTHETIC_CELL_LY: u32;        // the fixed grid's edge, 256–1,024 ly (R13.T5.b's bench)
 pub struct SyntheticCellKey;             // a layer and the cell's coordinates; `cell_box()`, `word()`
@@ -242,12 +243,14 @@ AtmosphereGrid, surface_gravity}` and `StarColour::reddened`.
    | 4.5 | 740–850 / 1,180–1,290 / 2,240–2,510     | 4.5–5.8 × 10³    | 8–11%                                        |
    | 5.0 | 1,050–1,180 / 1,600–1,730 / 3,110–3,420 | 1.0–1.25 × 10⁴   | 3.6–4.7%                                     |
 
-   The recommendation is 4.5: every star brighter than V 4.5 stays real (in a Sun-like sky some
-   900, the constellation-forming ones; a plausibility check from Hipparcos's 1,608 to V 5 at 0.49
-   dex a magnitude), about 90% of naked-eye stars stay real, and the real tier lands near R06.T17's
-   ruled 4,000 CPU-s target once its boundaries are by ray. The value is the owner's
-   (`feasibility-hybrid-sky.md` §11, question 1). It depends on V_P, not on the cut, so the eye and
-   every camera share one partition, and one census serves both.
+   **Decided by the owner on 2026-10-08: V_P is 4.5** (`feasibility-hybrid-sky.md` §11, question
+   1, as recommended), and 5.0 in RM3's interim (Design note 15). Every star brighter than V 4.5
+   stays real (in a Sun-like sky some 900, the constellation-forming ones; a plausibility check
+   from Hipparcos's 1,608 to V 5 at 0.49 dex a magnitude), about 90% of naked-eye stars stay real,
+   and the real tier lands near R06.T17's ruled 4,000 CPU-s target once its boundaries are by ray.
+   It depends on V_P, not on the cut, so the eye and every camera share one partition, and one
+   census serves both. If R13.T1 measures the real tier's cost at more than twice the estimate, it
+   reports that to the owner before T2 builds.
 
 5. **World-anchored synthetic cells.** The synthetic stars live in a fixed grid of cells of
    `SYNTHETIC_CELL_LY`, aligned to the galaxy's axes so that no cell straddles an axis plane, each
@@ -357,9 +360,15 @@ AtmosphereGrid, surface_gravity}` and `StarColour::reddened`.
       real position and identity with a statistical brightness) would cost a walk of every far
       record, at least about 10³ CPU-s at the eye and 10⁴ at the camera, and a new fitted table
       (Risks).
-    - The brainstorm's "a star the player jumps to is the star they were looking at" then holds for
-      every star brighter than V_P and every star within R(u) (the brainstorm draft; the owner's).
-13. **What the view says** (R13.T8; drafts for the owner, by T15's route).
+    - The brainstorm's "a star the player jumps to is the star they were looking at" holds for the
+      real stars only: every star brighter than V_P and every star within R(u). **The owner
+      amended it so on 2026-10-08** (the brainstorm's "The hybrid sky", signed off). The
+      real-record variant is revisited after the deferred census levers land
+      (`deferred-corrections.md`, "Census cost").
+    - **Synthetic stars appear in the naked-eye view as in every camera, labelled** (decided by the
+      owner on 2026-10-08, `feasibility-hybrid-sky.md` §11, question 2).
+13. **What the view says** (R13.T8; the wording is a draft for the UX decision agent, by T15's
+    route, and the owner signs off).
     - On the `STARS` line's composed-note slot, after `STREAMING` and before `NOT YET MODELLED`, in
       the annunciation form of `TERRAIN: STREAMING` (steady, `--text`, no status colour, neither a
       data state nor an alert). Draft wording: `STARS V 7.4 mag EYE · FAINT DISTANT STARS:
@@ -377,10 +386,12 @@ SYNTHETIC`.
     the server (R06 Design note 1), so every client of a server receives the same bits, and every
     server on Linux, macOS or Windows computes them. Nothing persists: a reply is recomputed, and a
     table refit or a code change moves the synthetic sky as it moves the band.
-15. **RM3's interim is R13.T2** (`feasibility-hybrid-sky.md` §10). RM3 may ship the real tier at
-    V_P = 5.0 with the band for the rest (Design note 9's reply without synthetic stars), labelled
-    by Design note 13's interim note. When R13.T7 lands, V_P moves to the owner's value and the
-    synthetic stars fill [V_P, cut); the real tier's code does not change again. _Estimate_ near the
+15. **RM3's interim is R13.T2** (`feasibility-hybrid-sky.md` §10). **Decided by the owner on
+    2026-10-08:** RM3 ships the real tier at V_P = 5.0 with the band for the rest (Design note 9's
+    reply without synthetic stars), labelled by Design note 13's interim note, and the server's
+    sky is on by default once R13.T2 and R06.T11.d have both landed (R06.T11.d, "The default switch
+    and the interim"). When R13.T7 lands, V_P moves to 4.5 and the synthetic stars fill
+    [V_P, cut); the real tier's code does not change again. _Estimate_ near the
     Sun at the eye's cut: the full sky 1.0–1.25 × 10⁴ CPU-s, 11–14 minutes on 15 workers, with about
     4–5% of the naked-eye stars in the band.
 16. **What it costs** (_estimates_, `feasibility-hybrid-sky.md` §4 and §7; T1, T5.b and T9 measure):
@@ -394,8 +405,9 @@ SYNTHETIC`.
 
 ## Tasks
 
-T1 comes first and can run before RM3 closes. T2 needs T1 and the owner's ruling on V_P; T2.a
-needs only R06 as built, and T2.b needs R06.T11.d. T4 needs nothing of R13 and can run beside T1–T3.
+T1 comes first and can run before RM3 closes. T2 needs T1 (V_P is ruled: 5.0 in RM3, 4.5 from
+T7); it is RM3's interim and lands before RM3 closes. T2.a needs only R06 as built, and T2.b needs
+R06.T11.d. T4 needs nothing of R13 and can run beside T1–T3.
 T3 needs T2.a. T5.a needs T4; T5.b needs T3, T4 and T5.a. T6 needs T5.b. T7 needs T6, T2.b and
 R06.T11.d. T8 needs T7. T9 needs T7 and T8, and its gate the tables lane's correction of R06.T5.f's
 findings.
@@ -424,7 +436,8 @@ layer's records, generated and listed, and the CPU-s.
 
 Record every figure in this plan's Risks, beside the feasibility study's estimates. A decision agent
 then rules, under the delegation: spheres or rays for R(u), and fix (i) or not, whichever is exact
-and cheaper; the owner rules V_P with these figures.
+and cheaper. V_P is the owner's ruling (Design note 4); a real-tier cost measured at more than twice
+the estimate at 4.5 or 5.0 goes back to the owner before T2 builds.
 
 Files: `crates/hyperion-sim/tests/sky_hybrid.rs` (new; the slow test
 `the_hybrid_boundary_is_recorded`, which records, and asserts only that R(u) is within the cut's caps
@@ -577,7 +590,7 @@ Files: `sky/census/{merge,mod}.rs`, `sky/band.rs`, `sky/limits.rs`. Acceptance:
 The response's `synthetic`, the payload's synthetic records after the listed ones
 (`encode_sky_payload`), and their decoding in `@hyperion/protocol` (`just gen-protocol`). The server
 runs the synthetic plan's slabs as bulk jobs after the march, merges them into every reply
-(Design note 11), and sets `SYNTHETIC_CEILING_V` to the owner's value; the switch
+(Design note 11), and sets `SYNTHETIC_CEILING_V` to 4.5, the owner's value; the switch
 `HYPERION_SKY_SYNTHETIC` (on by default, off giving T2's interim) lets T9 turn it off if it fails.
 Tests:
 
@@ -700,10 +713,20 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   Inherent to any hybrid.
 - **The first sky** stays R06.T11.d's (185–225 CPU-s at the 500 ly shell, against 150); R13 adds
   10–40 CPU-s to it.
-- **The brainstorm's principle**, "the star field is the galaxy", is amended, not kept whole: the
-  draft subsection is the owner's to sign off, with the ceiling and synthetic stars in the eye's
-  view (`feasibility-hybrid-sky.md` §11).
-- **Lazy realisation by record**, a later refinement if the owner wants every point to be a system:
+- **The brainstorm's principle**, "the star field is the galaxy", is amended, not kept whole.
+  **Decided by the owner on 2026-10-08** (`feasibility-hybrid-sky.md` §11, all as recommended):
+  - V_P is 4.5, and 5.0 in RM3's interim;
+  - RM3 ships R13.T2 with the band for the rest, and the sky is on by default once it and
+    R06.T11.d land;
+  - synthetic stars appear in the naked-eye view too, labelled;
+  - the promise covers the real stars only, and the real-record variant is revisited after the
+    deferred census levers.
+
+  The brainstorm's subsection is signed off. Its label wording, and R13.T8's and T2.b's guide rows,
+  stay drafts for the UX decision agent and the owner.
+
+- **Lazy realisation by record**, to be revisited after the deferred census levers land (the
+  owner, 2026-10-08), so that every point could be a system:
   real positions and identities with a brightness drawn from each record's mass, age and \[Fe/H\],
   exact on approach for single main-sequence stars to the table's accuracy and statistical for
   evolved stars and pairs, at a walk of every far record (at least about 10³ CPU-s at the eye and

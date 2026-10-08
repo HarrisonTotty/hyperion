@@ -510,12 +510,20 @@ it is recorded, and stays here so that the owner can review it.
   of R01's and R02's displays are the owner's.
 - **The documentation layout**: `docs/measurements/` in `.claude/CLAUDE.md`'s layout, drafted by
   R12.T1.c.
-- **The hybrid sky** (R13, the owner's ruling of 2026-10-08; `feasibility-hybrid-sky.md` in the
-  orchestration directory): the ceiling V_P (4.5 recommended for R13, 5.0 for RM3's interim),
-  synthetic stars in the naked-eye view as well as in the cameras, and the brainstorm's drafted
-  subsection "The hybrid sky", which amends "a star the player jumps to is the star they were
-  looking at" to the stars brighter than V_P and within the census's boundary. R13.T8's guide rows
-  follow T15's route.
+- **Decided: the hybrid sky** (R13; the owner, 2026-10-08, each answer as recommended in
+  `feasibility-hybrid-sky.md` in the orchestration directory, §11):
+  - V_P is 4.5 for R13;
+  - RM3 ships the interim, R13.T2 at V_P 5.0 with the band for the rest, and the server's sky is
+    on by default once it and R06.T11.d land (R06.T11.d, "The default switch and the interim");
+  - synthetic stars appear in the naked-eye view too, labelled;
+  - the brainstorm's promise, "a star the player jumps to is the star they were looking at", is
+    amended now to the real stars: every star brighter than V_P and every star within the real
+    boundary. The real-record variant is revisited after the deferred census levers land.
+
+  The brainstorm's subsection "The hybrid sky" is signed off. **Still awaiting:** the label
+  wording of R13.T2.b and T8 and their guide rows, a draft for the UX decision agent by T15's
+  route.
+
 - **Cloud shadows on the low setting** (R11 Design note 10, `cloudShadows`): built off by default,
   as the brainstorm's ladder says, though they cost under 0.1 ms; turning them on is the owner's.
 - **The floor of R08's 5% metric**, max(0.05·L_ref, 3σ_ref, 10⁻³·L_max), with 2% flux aggregates

@@ -785,7 +785,11 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    `decision-r06-census-cost-signoff.md`); each ray counts the stars brighter than
    cut − DM − v☉(A_V) A_V, the band's boundary (decided 2026-10-07, `decision-r06-t8k-cone.md`);
    and an eye-only request may count each ray to the eye's own limit about it, the eye-cut
-   pre-pass's, rather than the uniform cut (R06.T7.b's visibility-based caps).
+   pre-pass's, rather than the uniform cut (R06.T7.b's visibility-based caps). From R13.T2, RM3's
+   interim, layers C to E take their caps by ray at the synthetic ceiling V_P rather than at the
+   cut, never beyond the cut's own: V 5.0 in RM3, 4.5 from R13.T7. Beyond them the band holds all
+   of the light until R13's synthetic stars fill [V_P, cut) (decided by the owner 2026-10-08;
+   R13 Design notes 2–3, `feasibility-hybrid-sky.md`).
 10. **The census, per cell.** Cells are those of `cells_in_sphere` to each cap, padded by
     `pad_for(|t_emit − epoch|, pad_speed(layer))` as the range query pads, in canonical order. For
     each record the skip keeps: `retarded` on `Drift::of_record` (a centre member's
@@ -2344,6 +2348,15 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     link the radius takes its `S` and the note holds. There is no spinner, skeleton or progress
     bar, and stars appear by a cut, with no fade-in. Whether the composed line fits the label block
     at 1280 × 720 and in the instrument slots needs the running client.
+  - **The default switch and the interim** (decided by the owner 2026-10-08, answering
+    `decision-p11-t17c-bright.md` §4: the hybrid sky, `feasibility-hybrid-sky.md` §10–11). The
+    owner's condition for turning T11.c's switch on is met by RM3's interim, R13.T2: layers C to E
+    capped at V_P 5.0, the band for the rest, labelled. Once R13.T2 and T11.d have both landed,
+    the server's sky is on by default: `SkyService`'s default becomes `Served`, and `--serve-sky`
+    takes a value (`--serve-sky=false`) so that it can still be turned off. The README and
+    `config`'s tests follow. The first reply's time is still measured against T17's first-sky
+    budget. A miss goes to a decision agent, whose levers are the first reply's layer order and
+    the first shell's edge.
 
   The protocol (T10) gains each layer's `complete_to_ly`, a per-ray table once T7.b lands, and
   `final`. A request for a new sky supersedes the old one. Any later consumer of the sky's list
@@ -2696,14 +2709,17 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
 `decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
 
 - the first sky in at most 150 CPU-s and 10 s wall on the dev machine's default workers;
-- the full cold census, at generator version 21 with T7.b's caps, in at most 2.5 × 10⁴ CPU-s.
-  About 1.1–1.9 × 10⁴ is expected (decided 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
-  The ruled 4,000 CPU-s stays the target. It is out of reach at version 21:
-  - P11.T16's exact hierarchy bound alone costs about 0.6–1.0 × 10⁴ CPU-s near the Sun at T7.b's
-    caps;
-  - generating the records that pass costs about 0.3–0.6 × 10⁴.
-
-  It is met after the deferred lever 13 (below), and re-measured then;
+- the full cold census at the hybrid's real boundary (R13.T2, RM3's interim: layers C to E at
+  T7.b's caps by ray computed at V_P 5.0, the band for the rest; decided by the owner 2026-10-08,
+  `feasibility-hybrid-sky.md` §10–11): recorded, not gated.
+  - About 1.0–1.25 × 10⁴ CPU-s is estimated near the Sun at the eye's cut with spherical caps,
+    and less by ray.
+  - The ruled 4,000 CPU-s stays the target, for R13's V_P of 4.5 (about 4.5–5.8 × 10³
+    estimated).
+  - The exact census to the cut's caps, about 0.4–1.0 × 10⁶ CPU-s at P11.T17.c's verdicts
+    (`decision-p11-t17c-bright.md` §2), is recorded beside it, sampled, as R13.T1's reference. Its
+    first gate, 2.5 × 10⁴ CPU-s at version 21 (decided 2026-10-07,
+    `decision-p11-t16-hierarchy-bound.md`), is withdrawn: P11.T17.c's tables put it out of reach;
 
 - after a jump of up to 1,000 ly, at the default `HYPERION_SKY_CACHE_MB` (R06.T8.n):
   - every cell both plans open is served from the cache, none rebuilt;

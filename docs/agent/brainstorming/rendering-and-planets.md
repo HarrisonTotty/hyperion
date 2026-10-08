@@ -1615,7 +1615,10 @@ star is placed and described at its retarded time t − d/c and its apparent pos
 positions. The view out of the window and the chart therefore differ by the light-time and by
 nothing else: from 26,000 ly the sky still shows hundreds of supergiants the chart knows are dead,
 and a star the player jumps to is the star they were looking at, because its observed position and
-velocity, extrapolated to the present (`extrapolate_to_present`), land on it. The brief describes
+velocity, extrapolated to the present (`extrapolate_to_present`), land on it. Since the owner's
+ruling of 2026-10-08 that holds for the real stars: every star brighter than the hybrid sky's
+ceiling and every star within its real boundary
+([The hybrid sky](#the-hybrid-sky-the-census-near-synthetic-stars-far)). The brief describes
 the primary as it is now, so the sky asks for it at the emitted time, which costs what the present
 one does; but `BriefModel` (`crates/hyperion-sim/src/stellar/brief.rs`) tests its routes over the
 clock window of ±1,000 years only, and until they are tested over the retarded interval a star that
@@ -1761,8 +1764,9 @@ The practical form:
 
 ### The hybrid sky: the census near, synthetic stars far
 
-_Draft (plan R13, 2026-10-08; `.git/rm23-orchestration/feasibility-hybrid-sky.md`): the owner
-signs off._
+_Signed off by the owner on 2026-10-08 (plan R13; `.git/rm23-orchestration/feasibility-hybrid-sky.md`
+§11): the hybrid's basis, the ceiling and the amended promise. The label's wording is still a draft
+for the UX decision agent._
 
 An exact census to the eye's cut costs too much at generator version 21. Near the Sun the census
 must generate most old massive systems to prove their remnants dark, about 0.4–1.0 × 10⁶
@@ -1799,7 +1803,11 @@ points of light from the galaxy's own density and star formation for the rest:
   than its systems. At V 4.5 about nine in ten naked-eye stars stay real near the Sun, and most of
   a camera's faint stars are synthetic.
 
-The ceiling is the owner's, with the measured boundary and costs; this is the
+The owner set the ceiling at V 4.5 on 2026-10-08. RM3 ships first with the census at a ceiling of
+V 5.0 and the band for the rest, the synthetic stars following in plan R13. Synthetic stars appear
+in the naked-eye view as in every camera, labelled. The promise is amended to the real stars, and a
+variant in which every far point is a real system with an estimated brightness is revisited once
+the census's deferred levers land. This is the
 [statistical layer of unresolved stars](#the-star-field-is-the-galaxy-not-a-photograph) the faint
 majority was always going to need, made of points rather than of light alone.
 
