@@ -3,6 +3,7 @@ import { type KeyboardEvent, useId } from "react";
 import { StatusLine } from "../../components/StatusLine";
 import { pick } from "../../spatial/pick";
 import type { AppearanceLabel } from "../../view/appearance/fromWire";
+import type { ViewTurn } from "../../view/camera/look";
 import type { CameraTarget, RenderStyle } from "../../view/camera/state";
 import type { LightingState } from "../../view/lighting/hostLights";
 import type { ExposureControl } from "../../view/photometry/exposure";
@@ -47,7 +48,13 @@ export interface InstrumentViewProps {
   readonly onKeyDown: (event: KeyboardEvent<HTMLCanvasElement>) => void;
   readonly onKeyUp: (event: KeyboardEvent<HTMLCanvasElement>) => void;
   readonly onBlur: () => void;
-  /** Called with a click's mark, or `null` where it picks none; either way the view is acted on. */
+  /** Its horizontal field of view as it is drawn now, degrees, by which a drag turns it (T19.f). */
+  readonly fovDeg: () => number;
+  /** Called at a press on its canvas, before it picks or turns: the view is the one acted on. */
+  readonly onPress: () => void;
+  /** Gathers a drag's turn of its camera for its next frame (R07.T19.f). */
+  readonly onTurn: (turn: ViewTurn) => void;
+  /** Called with a click's mark, or `null` where it picks none. */
   readonly onPick: (target: CameraTarget | null) => void;
 }
 
@@ -95,7 +102,8 @@ function instrumentLines(
 /**
  * An instrument view in its slot over the primary view's right edge (plan R07, T19; Design note
  * 15; decision-r07-t19 item 2): a panel named for the slot, holding its label block beside its
- * canvas, a 4:3 picture flown by the flight keys while it has focus and picked from by a click.
+ * canvas, a 4:3 picture flown by the flight keys while it has focus, turned by a drag (R07.T19.f)
+ * and picked from by a click.
  *
  * @remarks
  * The label block is static text on the panel's own surface, before the canvas in the reading
@@ -109,7 +117,8 @@ function instrumentLines(
  * two composed, R07.T16.e) unless the primary's block shows the same line
  * (decision-r07-t19-layout, item 5). `ROTATION: NOT YET MODELLED`, about the scene's bodies, is
  * the primary's alone. Its list and its camera and style controls are the side column's while
- * `CONTROLS` points at it.
+ * `CONTROLS` points at it, and so are its `POSITION` and `POINTING` (R07.T19.f): at 1280 × 720 the
+ * slot has no room for another line.
  */
 export function InstrumentView({
   instrument,
@@ -124,6 +133,9 @@ export function InstrumentView({
   onKeyDown,
   onKeyUp,
   onBlur,
+  fovDeg,
+  onPress,
+  onTurn,
   onPick,
 }: InstrumentViewProps) {
   const titleId = useId();
@@ -211,6 +223,10 @@ export function InstrumentView({
             onKeyDown={onKeyDown}
             onKeyUp={onKeyUp}
             onBlur={onBlur}
+            fovDeg={fovDeg}
+            remPx={instrument.size?.remPx ?? 16}
+            onPress={onPress}
+            onTurn={onTurn}
             onPick={pickAt}
           >
             {null}

@@ -2,6 +2,7 @@ import { METRES_PER_LIGHT_YEAR } from "@hyperion/protocol";
 
 import { add, norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { clampToTidalRadius } from "./frames";
+import { isTurn, type ViewTurn } from "./look";
 import type { CameraPose } from "./pose";
 import { multiply, quaternionFromAxisAngle, rotate } from "./quaternion";
 import { type FrameChange, rebase } from "./rebase";
@@ -101,6 +102,30 @@ export function maxFreeRateStep(scene: CameraScene): number {
 export function changeFreeRate(state: CameraState, steps: number, scene: CameraScene): CameraState {
   const rateStep = Math.min(maxFreeRateStep(scene), Math.max(0, state.free.rateStep + steps));
   return { ...state, free: { ...state.free, rateStep } };
+}
+
+const CAMERA_UP = vec3(0, 1, 0);
+const CAMERA_RIGHT = vec3(1, 0, 0);
+
+/**
+ * A free camera turned about its own axes by a drag's turn (plan R07, T19.f): a yaw about its +y,
+ * then a pitch about its +x, as the arrows turn it, with no roll; a camera not in `free`, or no
+ * turn, is returned unchanged.
+ *
+ * @remarks
+ * The turn is the operator's own motion, applied at once: it does not ramp, coast or change the
+ * camera's rates, and reduced motion leaves it as it is. A turn moves nothing, so the camera's
+ * frame and its clamp to the tidal radius stand.
+ */
+export function turnFreeCamera(state: CameraState, turn: ViewTurn): CameraState {
+  if (state.preset !== "free" || !isTurn(turn)) {
+    return state;
+  }
+  const orientation = multiply(
+    multiply(state.pose.orientation, quaternionFromAxisAngle(CAMERA_UP, turn.yawRad)),
+    quaternionFromAxisAngle(CAMERA_RIGHT, turn.pitchRad),
+  );
+  return { ...state, pose: { ...state.pose, orientation } };
 }
 
 /** One free camera tick's result. */

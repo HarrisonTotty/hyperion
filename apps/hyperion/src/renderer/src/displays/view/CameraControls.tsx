@@ -3,7 +3,9 @@ import { useId } from "react";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { FOV_STEPS_DEG } from "../../view/camera/projection";
 import type { CameraPreset } from "../../view/camera/state";
-import { freeRateReading, PRESET_NAMES } from "./viewRun";
+import type { CameraPlace } from "./cameraPlace";
+import { CameraReadings } from "./CameraReadings";
+import { PRESET_NAMES } from "./viewRun";
 
 /** Props of {@link CameraControls}. */
 export interface CameraControlsProps {
@@ -25,6 +27,13 @@ export interface CameraControlsProps {
   readonly rateStep: number;
   /** The highest rate step the scene allows (`maxFreeRateStep`). */
   readonly maxRateStep: number;
+  /**
+   * Where the view's camera is and where it looks (R07.T19.f; `cameraPlace`): `POSITION`'s and
+   * `POINTING`'s readings.
+   */
+  readonly place: CameraPlace;
+  /** Whether the server's scene is stale: a place held to a craft is muted with its `S`. */
+  readonly sceneStale: boolean;
   /** The `EASED CAMERA MOVES` setting. */
   readonly easedMoves: boolean;
   /** Whether the operator asked for reduced motion, under which eased moves are not applied. */
@@ -53,7 +62,9 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
  * `EASED CAMERA MOVES` setting, each a button reachable by keyboard and showing its key; the field
  * of view's buttons are held back at the ends of its steps, the free camera's rate
  * (stepped by `PAGE UP` and `PAGE DOWN` on the canvas, in `FREE` only) with a statement at either end of its steps,
- * and the setting says when reduced motion stops it applying.
+ * and the setting says when reduced motion stops it applying. Beside the rate stand where the
+ * camera looks and where it is, `POINTING` and `POSITION` (R07.T19.f), so that an instrument's
+ * place, which its slot has no room to state, is on show while `CONTROLS` names it.
  *
  * @remarks
  * Display controls, which change only what the view shows (`.control`). A preset the scene does not
@@ -65,6 +76,8 @@ export function CameraControls({
   fovDeg,
   rateStep,
   maxRateStep,
+  place,
+  sceneStale,
   easedMoves,
   reducedMotion,
   onAction,
@@ -184,11 +197,7 @@ export function CameraControls({
           NOT AVAILABLE: FOV at its {narrowest ? "narrowest" : "widest"} step
         </p>
       ) : null}
-      <p className="view-camera__rate">
-        <output className="view-camera__rate-reading" aria-label="Free camera rate">
-          {freeRateReading(rateStep)}
-        </output>
-      </p>
+      <CameraReadings rateStep={rateStep} place={place} sceneStale={sceneStale} />
       {slowest || fastest ? (
         <p className="view-camera__reason">
           NOT AVAILABLE:{" "}

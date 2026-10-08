@@ -8,8 +8,10 @@ import type { BodyIdHex } from "@hyperion/protocol";
 
 import {
   type BodyDistanceUnit,
+  formatBearingDeg,
   formatBodyDistance,
   formatNumber,
+  formatSignedDeg,
   formatSignificant,
   formatUniverseTimeDhms,
 } from "../../lib/format";
@@ -17,10 +19,19 @@ import { norm, sub } from "../../geometry/vec3";
 import { flightInput, type ViewKeyAction } from "../../view/camera/keys";
 import {
   changeFreeRate,
+  FREE_ROTATION_RATE_DEG_PER_S,
   freeRateMPerS,
   MAX_FREE_STEP_S,
   stepFreeCamera,
+  turnFreeCamera,
 } from "../../view/camera/freeCamera";
+import {
+  addTurns,
+  hasLookOffset,
+  type LookOffset,
+  NO_TURN,
+  type ViewTurn,
+} from "../../view/camera/look";
 import type { CameraFrame, CameraPose } from "../../view/camera/pose";
 import {
   advanceEasedMove,
@@ -38,6 +49,7 @@ import {
   onSystemChange,
   stepFov,
   targetPosition,
+  turnLook,
 } from "../../view/camera/state";
 import type { AppearanceLabel } from "../../view/appearance/fromWire";
 import { relativeToCamera } from "../../view/coords/relative";
@@ -125,7 +137,10 @@ export function startServerRun(scene: ViewScene): ViewRun {
   };
 }
 
-/** What one display frame brings: its duration, the flight keys held and the server's scene. */
+/**
+ * What one display frame brings: its duration, the flight keys held, the turn the drags asked for
+ * and the server's scene.
+ */
 export interface FrameInput {
   /**
    * The server's scene at the frame's time (`useScene`'s `frameAt`), for a run of it; `null` for a
@@ -137,6 +152,11 @@ export interface FrameInput {
   /** The flight keys held on the focused canvas (`keys.ts`' binding names). */
   readonly held: ReadonlySet<string>;
   readonly reducedMotion: boolean;
+  /**
+   * The turn the drags on the view's canvas asked for since its last frame (plan R07, T19.f;
+   * `dragTurn`), none where absent.
+   */
+  readonly turn?: ViewTurn;
 }
 
 /** Whether every frame a camera's pose refers to is in `scene`: its system, body or craft. */
@@ -189,22 +209,38 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
   return { ...run, tS, scene, camera: flyCamera(camera, scene, dtS, input) };
 }
 
-/** A camera one frame on in `scene`: following its preset, flown by the held keys, eased. */
+/** The free camera's full rotation rate, rad/s, at which the arrows turn a look offset too. */
+const ARROW_TURN_RAD_PER_S = (FREE_ROTATION_RATE_DEG_PER_S * Math.PI) / 180;
+
+/**
+ * A camera one frame on in `scene`: turned by the frame's drag, following its preset, flown by the
+ * held keys, eased.
+ *
+ * @remarks
+ * A drag's turn turns a free camera about its own axes, and a `SEAT` or `CHASE` camera's look
+ * offset, which the arrows also turn there at the free camera's full rate, without its ramp, so
+ * that the drag has a keyboard path in every preset (plan R07, T19.f). Both are the operator's own
+ * motion, which reduced motion leaves as it is.
+ */
 function flyCamera(
   camera: CameraState,
   scene: ViewScene,
   dtS: number,
-  input: Pick<FrameInput, "held" | "reducedMotion">,
+  input: Pick<FrameInput, "held" | "reducedMotion" | "turn">,
 ): CameraState {
   const cameraScene = cameraSceneOf(scene);
-  const following = followPreset(camera, cameraScene);
-  const flown = stepFreeCamera(
-    following,
-    flightInput(input.held),
-    dtS,
-    input.reducedMotion,
-    cameraScene,
-  ).state;
+  const keys = flightInput(input.held);
+  const dragged = input.turn ?? NO_TURN;
+  const arrows: ViewTurn =
+    camera.preset === "free"
+      ? NO_TURN
+      : {
+          yawRad: keys.rotate.y * ARROW_TURN_RAD_PER_S * dtS,
+          pitchRad: keys.rotate.x * ARROW_TURN_RAD_PER_S * dtS,
+        };
+  const looked = turnLook(camera, addTurns(dragged, arrows), cameraScene);
+  const following = turnFreeCamera(followPreset(looked, cameraScene), dragged);
+  const flown = stepFreeCamera(following, keys, dtS, input.reducedMotion, cameraScene).state;
   return advanceEasedMove(flown, dtS);
 }
 
@@ -219,12 +255,12 @@ function flyCamera(
  * scene's is.
  *
  * @param input - The instrument's own frame: its time since it last drew (it draws at its own
- *   rate) and its held keys.
+ *   rate), its held keys and the turn the drags on its canvas asked for since.
  */
 export function followRun(
   run: ViewRun,
   primary: ViewRun,
-  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion">,
+  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion" | "turn">,
 ): ViewRun {
   const dtS = Math.min(Math.max(input.dtS, 0), MAX_FREE_STEP_S);
   const { scene } = primary;
@@ -428,13 +464,29 @@ export function exposureReading(exposure: ExposureControl): string {
 }
 
 /**
+ * A look offset as the view reads it (plan R07, T19.f): the line of sight's relative bearing,
+ * clockwise from the preset's own, `000°` to `359°`, and its signed elevation from it, in whole
+ * degrees, `345° +05°`.
+ */
+export function lookReading(offset: LookOffset): string {
+  const toDeg = 180 / Math.PI;
+  const bearing = formatBearingDeg(-offset.azimuthRad * toDeg);
+  return `${bearing} ${formatSignedDeg(offset.elevationRad * toDeg)}`;
+}
+
+/**
  * A camera's preset as the label block reads it: `SEAT`, `CHASE`, or in `FREE` the free camera's
  * rate after a middle dot, `FREE · RATE 1.00 km/s`, so that the rate is on show while the camera
- * panel is folded (decision-r07-t19-layout, item 1b).
+ * panel is folded (decision-r07-t19-layout, item 1b); and in `SEAT` or `CHASE`, while a drag or
+ * the arrows have turned the camera from its preset, the offset after a middle dot,
+ * `SEAT · LOOK 345° +05°` (plan R07, T19.f), which the preset's key pressed again clears.
  */
 export function cameraReading(camera: CameraState): string {
   const name = PRESET_NAMES[camera.preset];
-  return camera.preset === "free" ? `${name} · ${freeRateReading(camera.free.rateStep)}` : name;
+  if (camera.preset === "free") {
+    return `${name} · ${freeRateReading(camera.free.rateStep)}`;
+  }
+  return hasLookOffset(camera.offset) ? `${name} · LOOK ${lookReading(camera.offset)}` : name;
 }
 
 /**

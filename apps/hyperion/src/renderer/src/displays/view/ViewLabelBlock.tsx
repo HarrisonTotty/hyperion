@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
-import type { LabelLine } from "./viewRun";
+import { type LabelLine, MISSING_READING } from "./viewRun";
 
 /** Props of {@link ViewLabelBlock}. */
 export interface ViewLabelBlockProps {
@@ -27,11 +27,13 @@ const PART_SEPARATOR = " · ";
 /**
  * The runs of a reading that never break (decision-r07-t19-layout, item 2), longest first: `UT`
  * with its first group (`UT +0 yr`), a star limit with its kind (`V 9.5 mag CAM`), an exposure
- * value with its band (`EV100 -1.0`), a clock reading (`000/00:00:01`) and a number with its sign
- * and unit (`1.00 km/s`, `12,480 km`); a number with a unit it touches (`60°`) has no break in it.
+ * value with its band (`EV100 -1.0`), a direction with its elevation and any `FROM +X`
+ * (`047° +12° FROM +X`, or `— -90°` at the vertical; R07.T19.f), a clock reading
+ * (`000/00:00:01`) and a number with its sign and unit (`1.00 km/s`, `12,480 km`); a number with
+ * a unit it touches (`60°`) has no break in it.
  */
 const UNBREAKABLE =
-  /UT [+-]?\d[\d,.]* yr|V -?\d[\d.]* mag (?:EYE|CAM)|EV100 -?\d[\d.]*|\d{3}\/\d{2}:\d{2}:\d{2}|[+-]?\d[\d,.]*(?:E[+-]?\d+)? (?:km\/s|m\/s|kyr|Myr|Gyr|yr|mag|AU|Gm|Mm|km|m|ly|s)(?![\w/])/g;
+  /UT [+-]?\d[\d,.]* yr|V -?\d[\d.]* mag (?:EYE|CAM)|EV100 -?\d[\d.]*|(?:\d{3}°|—) [+-]\d{2,}°(?: FROM \+X)?|\d{3}\/\d{2}:\d{2}:\d{2}|[+-]?\d[\d,.]*(?:E[+-]?\d+)? (?:km\/s|m\/s|kyr|Myr|Gyr|yr|mag|AU|Gm|Mm|km|m|ly|s)(?![\w/])/g;
 
 /**
  * A text with each of its runs set on one line, so that it breaks only at the spaces between them
@@ -45,20 +47,47 @@ export function unbrokenRuns(text: string, runs: RegExp): ReactNode {
   let from = 0;
   for (const match of text.matchAll(runs)) {
     if (match.index > from) {
-      nodes.push(text.slice(from, match.index));
+      nodes.push(withMissing(text.slice(from, match.index), `t${String(from)}`));
     }
     nodes.push(
       <span className="view-label__run" key={match.index}>
-        {match[0]}
+        {withMissing(match[0], `r${String(match.index)}`)}
       </span>,
     );
     from = match.index + match[0].length;
   }
   if (nodes.length === 0) {
-    return text;
+    return withMissing(text, "t0");
   }
   if (from < text.length) {
-    nodes.push(text.slice(from));
+    nodes.push(withMissing(text.slice(from), `t${String(from)}`));
+  }
+  return nodes;
+}
+
+/**
+ * A text with each em dash in it set as the missing value, in `--text-muted` (the guide's "Data
+ * states"), such as a direction's azimuth at the vertical (R07.T19.f); a text without one is
+ * returned as it is.
+ *
+ * @param key - The text's key among its siblings, from which its parts' keys are made.
+ */
+function withMissing(text: string, key: string): ReactNode {
+  if (!text.includes(MISSING_READING)) {
+    return text;
+  }
+  const nodes: ReactNode[] = [];
+  for (const [index, piece] of text.split(MISSING_READING).entries()) {
+    if (index > 0) {
+      nodes.push(
+        <span className="readout__missing" key={`${key}-m${String(index)}`}>
+          {MISSING_READING}
+        </span>,
+      );
+    }
+    if (piece.length > 0) {
+      nodes.push(piece);
+    }
   }
   return nodes;
 }

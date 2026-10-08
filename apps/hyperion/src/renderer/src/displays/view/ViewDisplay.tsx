@@ -39,9 +39,12 @@ import {
   flightKey,
   flightKeyAction,
   flightKeyReleased,
+  heldAfterModifier,
   type ViewKeyAction,
   viewKeyAction,
 } from "../../view/camera/keys";
+import { addTurns, NO_TURN, type ViewTurn } from "../../view/camera/look";
+import { type PrimaryModifier, primaryModifierOf } from "../../lib/platform";
 import {
   type CameraTarget,
   offeredPresets,
@@ -77,6 +80,8 @@ import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
+import { placeLines, useCameraPlace } from "./cameraPlace";
+import { KeyLegend } from "./KeyLegend";
 import { litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import {
@@ -154,9 +159,6 @@ import {
 
 /** The shortest time between two changes of the view's readouts: 4 Hz (Design note 18). */
 const READOUT_INTERVAL_MS = 250;
-
-/** The keys of the canvas, shown beside it and describing it. */
-const KEY_LEGEND = "W/S A/D R/F MOVE · ARROWS Q/E TURN · PAGE UP/DOWN RATE";
 
 /**
  * The name the stage's primary view is created with: the engine's name for it, and the one a
@@ -263,6 +265,12 @@ interface ViewDisplayProps {
    * its sky and its frames in either style take their forms from it; `high` by default.
    */
   readonly setting?: QualitySetting | undefined;
+  /**
+   * The platform the client runs on, `window.hyperion.platform` (R07.T19.f): its primary modifier,
+   * ⌘ on macOS and Ctrl elsewhere, steps the free camera's rate with the arrows, and the key
+   * legend names it; Linux's by default.
+   */
+  readonly platform?: string | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -302,6 +310,8 @@ interface ViewStageProps {
   readonly universe: UniverseIdHex | null;
   /** The quality setting the views are budgeted at, and drawn at. */
   readonly setting: QualitySetting;
+  /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
+  readonly modifier: PrimaryModifier;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -551,6 +561,7 @@ function ViewStage({
   countLine,
   universe,
   setting,
+  modifier,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
@@ -577,6 +588,8 @@ function ViewStage({
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
   const [viewRefused, setViewRefused] = useState(false);
   const heldRef = useRef(new Set<string>());
+  // The turn the drags on the canvas have asked for since the loop's last frame (R07.T19.f).
+  const turnRef = useRef<ViewTurn>(NO_TURN);
   // The marks' labels by their target's key, which the loop moves with their marks every frame.
   const labelsRef = useRef(new Map<string, HTMLElement>());
   const inputsRef = useRef<LoopInputs>({
@@ -615,6 +628,7 @@ function ViewStage({
     sky: viewSky.drawn?.model ?? null,
     exposure,
     setting,
+    modifier,
   });
   const specs: ReadonlyArray<ViewSpec> = [
     { id: VIEW_ID, slot: "primary", style: published.run.camera.style },
@@ -829,7 +843,9 @@ function ViewStage({
         dtS,
         held: heldRef.current,
         reducedMotion: inputs.reducedMotion,
+        turn: turnRef.current,
       });
+      turnRef.current = NO_TURN;
       runRef.current = run;
       if (inputs.exposure !== seenExposure) {
         seenExposure = inputs.exposure;
@@ -1005,6 +1021,13 @@ function ViewStage({
   }, []);
 
   const onCanvasKeyDown = (event: KeyboardEvent<HTMLCanvasElement>): void => {
+    // The modifier's own press releases the held arrows, so that they never turn while the rate's
+    // chord is held (R07.T19.f); it passes through.
+    const released = heldAfterModifier(heldRef.current, event, modifier);
+    if (released !== null) {
+      heldRef.current = new Set(released);
+      return;
+    }
     const held = flightKey(event);
     if (held !== null) {
       event.preventDefault();
@@ -1012,7 +1035,7 @@ function ViewStage({
       heldRef.current.add(held);
       return;
     }
-    const action = flightKeyAction(event);
+    const action = flightKeyAction(event, modifier);
     if (action !== null) {
       event.preventDefault();
       setOperated(VIEW_ID);
@@ -1038,20 +1061,29 @@ function ViewStage({
   }, []);
 
   const ratio = size?.devicePixelRatio ?? 1;
+  const remPx = size?.remPx ?? 16;
   const onPick = (xPx: number, yPx: number): void => {
-    const remPx = size?.remPx ?? 16;
     const picked = pick(
       shown.anchors.map(pickAnchor),
       { xPx: xPx * ratio, yPx: yPx * ratio },
       PICK_REM * remPx * ratio,
     );
     const row = rows.find((each) => each.key === picked);
-    // A press on a canvas makes its view the CONTROLS view (decision-r07-t19, item 2d).
-    setOperated(VIEW_ID);
     if (row !== undefined) {
       setSelection(row.target);
     }
   };
+  // A press on a canvas makes its view the CONTROLS view (decision-r07-t19, item 2d), before it
+  // picks or turns; a drag's turns are gathered for the loop's next frame (R07.T19.f).
+  const onPress = (): void => {
+    setOperated(VIEW_ID);
+  };
+  const onTurn = (turn: ViewTurn): void => {
+    turnRef.current = addTurns(turnRef.current, turn);
+  };
+  const fovDeg = (): number => runRef.current.camera.fovDeg;
+  // Where the primary's camera is, at the readouts' rate, for its label block and camera panel.
+  const place = useCameraPlace(shown.run);
 
   // The view stands in its place only once its engine is made; until then, or where it cannot
   // be, the graphics' own annunciation (R01's), or the adapter being acquired.
@@ -1275,6 +1307,10 @@ function ViewStage({
               onKeyDown={onCanvasKeyDown}
               onKeyUp={onCanvasKeyUp}
               onBlur={onCanvasBlur}
+              fovDeg={fovDeg}
+              remPx={remPx}
+              onPress={onPress}
+              onTurn={onTurn}
               onPick={onPick}
             >
               <ViewMarkLabels
@@ -1286,15 +1322,18 @@ function ViewStage({
               />
               <ViewLabelBlock
                 id={`${legendId}-label`}
-                lines={withMeterLine(
-                  withQualityLine(
-                    withDrawnStyle(
-                      withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
-                      shown.drawnStyle,
+                lines={withPlaceLines(
+                  withMeterLine(
+                    withQualityLine(
+                      withDrawnStyle(
+                        withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
+                        shown.drawnStyle,
+                      ),
+                      setting,
                     ),
-                    setting,
+                    meterStands ? meter : null,
                   ),
-                  meterStands ? meter : null,
+                  placeLines(place, stale),
                 )}
                 statements={primaryStatements}
                 countLine={viewSky.labelValue === null ? countLine : null}
@@ -1326,8 +1365,14 @@ function ViewStage({
                       onBlur={() => {
                         instruments.releaseKeys(slot.slot);
                       }}
-                      onPick={(target) => {
+                      fovDeg={() => instruments.fovDeg(slot.slot)}
+                      onPress={() => {
                         setOperated(slot.id);
+                      }}
+                      onTurn={(turn) => {
+                        instruments.turn(slot.slot, turn);
+                      }}
+                      onPick={(target) => {
                         if (target !== null) {
                           instruments.select(slot.slot, target);
                         }
@@ -1337,9 +1382,7 @@ function ViewStage({
                 )}
               </div>
             </ViewCanvas>
-            <p className="view__keys" id={legendId}>
-              {KEY_LEGEND}
-            </p>
+            <KeyLegend id={legendId} modifier={modifier} />
           </>
         ) : (
           <div className="view__unavailable">
@@ -1405,6 +1448,8 @@ function ViewStage({
                 fovDeg={shown.run.camera.fovDeg}
                 rateStep={shown.run.camera.free.rateStep}
                 maxRateStep={maxFreeRateStep(cameraSceneOf(shown.run.scene))}
+                place={place}
+                sceneStale={stale}
                 easedMoves={easedMoves}
                 reducedMotion={reducedMotion}
                 onAction={command}
@@ -1471,6 +1516,18 @@ function ViewStage({
       </div>
     </div>
   );
+}
+
+/**
+ * The `PRIMARY` view's label block's lines with where its camera is and where it looks after
+ * `CAMERA`, `POSITION` and `POINTING` (R07.T19.f; `placeLines`). An instrument's block leaves them
+ * to the camera panel: at 1280 × 720 its slot has no room for another line.
+ */
+function withPlaceLines(
+  lines: ReadonlyArray<LabelLine>,
+  place: ReadonlyArray<LabelLine>,
+): ReadonlyArray<LabelLine> {
+  return lines.flatMap((line) => (line.label === "CAMERA" ? [line, ...place] : [line]));
 }
 
 /**
@@ -1550,7 +1607,11 @@ function interimAt(
   return input;
 }
 
-function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE, setting = "high" }: ViewDisplayProps) {
+function ViewPanels({
+  engineSource = DEFAULT_ENGINE_SOURCE,
+  setting = "high",
+  platform = "linux",
+}: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
   if (host === null) {
@@ -1652,6 +1713,7 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE, setting = "high" }: 
         countLine={interim.countLine}
         universe={universe}
         setting={setting}
+        modifier={primaryModifierOf(platform)}
       />
     </div>
   );
@@ -1688,8 +1750,10 @@ function ViewPanels({ engineSource = DEFAULT_ENGINE_SOURCE, setting = "high" }: 
  *
  * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `]` and `[` the
  * next and previous target, `+` and `-` the field of view; on the focused canvas the flight keys
- * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown). A click on the canvas, or the list, selects a
- * mark, whose bracket reticle the view then draws. Its stars are the interim field of the open
+ * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown, and the platform's primary modifier with the
+ * up and down arrows, R07.T19.f). A drag on a canvas turns its camera, the free camera itself, or
+ * a seat's or chase camera's look offset, which the arrows also turn there (R07.T19.f). A click
+ * on the canvas, or the list, selects a mark, whose bracket reticle the view then draws. Its stars are the interim field of the open
  * universe's range queries about the scene's system (R02.T16), with their count line, asked only
  * where the system's position is known; another craft's mark carries its range and closure rate,
  * and a body drawn as its symbol its designation, as DOM labels over the canvas.

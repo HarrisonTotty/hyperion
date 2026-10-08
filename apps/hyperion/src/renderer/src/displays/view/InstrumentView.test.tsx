@@ -685,3 +685,78 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     expect(await nextReport(view)).toBe(1);
   });
 });
+
+/** INSTRUMENT 1's CAMERA line in CHASE, as its block reads it. */
+function chaseCameraLine(): string | undefined {
+  const text = screen.getByRole("region", { name: "INSTRUMENT 1" }).textContent;
+  return /CAMERA(CHASE[^F]*)FOV/u.exec(text)?.[1];
+}
+
+describe("VIEW's instruments under the pointer (R07.T19.f)", () => {
+  it("turns an instrument's camera by a drag on its canvas, and makes it the CONTROLS view", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    const instrument = screen.getByRole("region", { name: "INSTRUMENT 1" });
+    expect(instrument).toHaveTextContent(/CAMERA\s*CHASE(?! ·)/);
+    await view.user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: canvasNamed(/INSTRUMENT 1/),
+        coords: { clientX: 100, clientY: 100 },
+      },
+      { coords: { clientX: 160, clientY: 100 } },
+      { keys: "[/MouseLeft]" },
+    ]);
+    view.advance(300);
+    expect(controlsView()).toBe("INSTRUMENT 1");
+    expect(instrument).toHaveTextContent(/CAMERA\s*CHASE · LOOK \d{3}° \+00°/);
+  });
+
+  it("states an instrument's place in its camera panel, which its slot has no room for", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    await view.user.click(canvasNamed(/INSTRUMENT 1/));
+    view.advance(300);
+    const camera = screen.getByRole("region", { name: /^Camera/ });
+    expect(camera).toHaveTextContent("INSTRUMENT 1");
+    expect(within(camera).getByRole("status", { name: "Camera position" })).toHaveTextContent(
+      /^[\d,.]+ (km|Mm|Gm|AU) \d{3}° [+-]\d{2}°$/,
+    );
+    expect(within(camera).getByRole("status", { name: "Camera pointing" })).toHaveTextContent(
+      /^(\d{3}°|—) [+-]\d{2}°$/,
+    );
+    // Its block keeps its lines: no POSITION line (only POSITIONS AS SEEN FROM SHIP) and no POINTING.
+    const slot = screen.getByRole("region", { name: "INSTRUMENT 1" });
+    expect([
+      slot.textContent.match(/POSITION(?!S)/),
+      slot.textContent.includes("POINTING"),
+    ]).toEqual([null, false]);
+  });
+
+  it("steps a free instrument's rate on Ctrl with an arrow on its canvas", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    canvasNamed(/INSTRUMENT 1/).focus();
+    await view.user.keyboard("3");
+    await view.user.keyboard("{Control>}{ArrowUp}{/Control}");
+    view.advance(300);
+    expect(screen.getByRole("region", { name: "INSTRUMENT 1" })).toHaveTextContent(
+      "FREE · RATE 3.16 km/s",
+    );
+  });
+
+  it("stops an arrow held on an instrument before Ctrl from turning it while Ctrl is held", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    canvasNamed(/INSTRUMENT 1/).focus();
+    await view.user.keyboard("{ArrowLeft>}");
+    view.advance(300);
+    await view.user.keyboard("{Control>}");
+    view.advance(300);
+    const turned = chaseCameraLine();
+    view.advance(600);
+    expect([turned, chaseCameraLine()]).toEqual([turned, turned]);
+    expect(turned).toMatch(/^CHASE · LOOK \d{3}° \+00°$/u);
+    await view.user.keyboard("{/Control}{/ArrowLeft}");
+  });
+});

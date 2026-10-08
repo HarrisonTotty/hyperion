@@ -31,9 +31,13 @@ import {
   flightKey,
   flightKeyAction,
   flightKeyReleased,
+  heldAfterModifier,
   type KeyPress,
   type ViewKeyAction,
 } from "../../view/camera/keys";
+import { addTurns, NO_TURN, type ViewTurn } from "../../view/camera/look";
+import { DEFAULT_FOV_DEG } from "../../view/camera/projection";
+import type { PrimaryModifier } from "../../lib/platform";
 import type { CameraTarget, RenderStyle, ViewId } from "../../view/camera/state";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { useGraphicsStatus } from "../../view/engine/status";
@@ -147,6 +151,8 @@ export interface InstrumentsInput {
   readonly exposure: ExposureControl;
   /** The quality setting `VIEW` is given, whose sprite budget each slot's cull keeps (R07.T17). */
   readonly setting: QualitySetting;
+  /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
+  readonly modifier: PrimaryModifier;
 }
 
 /** The instruments, their commands and their loop. */
@@ -177,6 +183,10 @@ export interface Instruments {
   readonly keyUp: (slot: InstrumentSlot, press: KeyPress) => void;
   /** A slot's canvas lost focus: no flight key stays held. */
   readonly releaseKeys: (slot: InstrumentSlot) => void;
+  /** Gathers a drag's turn of a slot's camera for the slot's next frame (R07.T19.f). */
+  readonly turn: (slot: InstrumentSlot, turn: ViewTurn) => void;
+  /** A slot's horizontal field of view as it is drawn now, degrees, by which a drag is turned. */
+  readonly fovDeg: (slot: InstrumentSlot) => number;
   /** Draws each open instrument whose budget's rate falls in this frame; the primary calls it. */
   readonly frame: (input: InstrumentsFrame) => void;
 }
@@ -307,6 +317,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     sky,
     exposure,
     setting,
+    modifier,
   } = input;
   const graphics = useGraphicsStatus();
   const [slots, setSlots] = useState<Slots>([CLOSED, CLOSED]);
@@ -323,6 +334,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const drawnTwo = skyTwo?.drawn ?? null;
   const runs = useRef(new Map<InstrumentSlot, ViewRun>());
   const held = useRef(new Map<InstrumentSlot, Set<string>>());
+  // Each slot's drags' turn since it last drew (R07.T19.f).
+  const turns = useRef(new Map<InstrumentSlot, ViewTurn>());
   const loopsRef = useRef(new Map<InstrumentSlot, SlotLoop>());
   const inputsRef = useRef<ReadonlyMap<InstrumentSlot, SlotInputs>>(new Map());
   const reducedMotionRef = useRef(reducedMotion);
@@ -413,6 +426,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     (slot: InstrumentSlot): void => {
       runs.current.delete(slot);
       held.current.delete(slot);
+      turns.current.delete(slot);
       removeCamera?.(instrumentViewId(slot));
       setSlots((previous) => withSlot(previous, slot, () => CLOSED));
     },
@@ -448,13 +462,20 @@ export function useInstruments(input: InstrumentsInput): Instruments {
 
   const keyDown = useCallback(
     (slot: InstrumentSlot, press: KeyPress & { preventDefault(): void }): boolean => {
+      // The modifier's own press releases the held arrows (all held keys on macOS), so that they
+      // never turn while the rate's chord is held (R07.T19.f).
+      const released = heldAfterModifier(held.current.get(slot) ?? new Set(), press, modifier);
+      if (released !== null) {
+        held.current.set(slot, new Set(released));
+        return false;
+      }
       const key = flightKey(press);
       if (key !== null) {
         press.preventDefault();
         held.current.get(slot)?.add(key);
         return true;
       }
-      const action = flightKeyAction(press);
+      const action = flightKeyAction(press, modifier);
       if (action === null) {
         return false;
       }
@@ -463,7 +484,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       command(slot, action, WIREFRAME_ONLY);
       return true;
     },
-    [command],
+    [command, modifier],
   );
 
   const keyUp = useCallback((slot: InstrumentSlot, press: KeyPress): void => {
@@ -476,6 +497,17 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const releaseKeys = useCallback((slot: InstrumentSlot): void => {
     held.current.get(slot)?.clear();
   }, []);
+
+  const turn = useCallback((slot: InstrumentSlot, each: ViewTurn): void => {
+    if (runs.current.has(slot)) {
+      turns.current.set(slot, addTurns(turns.current.get(slot) ?? NO_TURN, each));
+    }
+  }, []);
+
+  const fovDeg = useCallback(
+    (slot: InstrumentSlot): number => runs.current.get(slot)?.camera.fovDeg ?? DEFAULT_FOV_DEG,
+    [],
+  );
 
   const frame = useCallback((each: InstrumentsFrame): void => {
     for (const slot of INSTRUMENT_SLOTS) {
@@ -498,7 +530,9 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         dtS,
         held: held.current.get(slot) ?? new Set(),
         reducedMotion: reducedMotionRef.current,
+        turn: turns.current.get(slot) ?? NO_TURN,
       });
+      turns.current.delete(slot);
       // Where its pipelines could not be made, the view returns to the wireframe and its control
       // holds the style back with the reason.
       const failed =
@@ -579,6 +613,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     keyDown,
     keyUp,
     releaseKeys,
+    turn,
+    fovDeg,
     frame,
   };
 }

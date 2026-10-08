@@ -7,6 +7,7 @@ import type { ViewKeyAction } from "../../view/camera/keys";
 import { type CameraTarget, offeredPresets } from "../../view/camera/state";
 import { cameraSceneOf } from "../../view/scene/model";
 import { CameraControls } from "./CameraControls";
+import { useCameraPlace } from "./cameraPlace";
 import type { InstrumentShown } from "./useInstruments";
 import type { SideFolds } from "./viewLayout";
 import { ViewMarkList } from "./ViewMarkList";
@@ -44,8 +45,9 @@ function unitsOf(rows: ReadonlyArray<MarkRow>): ReadonlyMap<string, BodyDistance
  * An instrument view's list and camera controls (plan R07, T19), in the side column's first
  * column while the `CONTROLS` selector points at the instrument, as the primary's are while it
  * points at `PRIMARY`: its targets, each with its range, from which the keyboard selects its mark,
- * and its presets, targets and field of view. Each panel carries the instrument's name as its
- * designator.
+ * and its presets, targets and field of view, and where its camera is and looks (`POSITION`,
+ * `POINTING`; R07.T19.f), which its slot has no room to state. Each panel carries the instrument's
+ * name as its designator.
  *
  * @remarks
  * Its style control stands at the head of the second column, where `ViewDisplay` sets the
@@ -74,6 +76,7 @@ export function InstrumentControls({
     setShownRows({ run, rows });
   }
   const cameraScene = cameraSceneOf(run.scene);
+  const place = useCameraPlace(run);
   return (
     <>
       <section className="panel view-targets" aria-labelledby={titleId}>
@@ -98,6 +101,8 @@ export function InstrumentControls({
         fovDeg={run.camera.fovDeg}
         rateStep={run.camera.free.rateStep}
         maxRateStep={maxFreeRateStep(cameraScene)}
+        place={place}
+        sceneStale={stale}
         easedMoves={easedMoves}
         reducedMotion={reducedMotion}
         onAction={onAction}

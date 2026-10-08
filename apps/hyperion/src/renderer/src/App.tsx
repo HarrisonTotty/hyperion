@@ -33,6 +33,8 @@ interface DisplayInputs {
   readonly checkedView: { readonly engineSource: ViewEngineSource } | null;
   /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
   readonly setting: QualitySetting;
+  /** The platform the client runs on, whose primary modifier `VIEW`'s rate chord takes (R07.T19.f). */
+  readonly platform: string;
 }
 
 function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
@@ -58,7 +60,11 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       break;
     case "view":
       content = (
-        <ViewDisplay engineSource={inputs.checkedView?.engineSource} setting={inputs.setting} />
+        <ViewDisplay
+          engineSource={inputs.checkedView?.engineSource}
+          setting={inputs.setting}
+          platform={inputs.platform}
+        />
       );
       break;
   }
@@ -139,6 +145,7 @@ export function App() {
     openSystem,
     checkedView: viewsCheck === undefined || probe === null ? null : { engineSource: probe.source },
     setting: window.hyperion.setting,
+    platform: window.hyperion.platform,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
-import { normalise, scale, vec3 } from "../../geometry/vec3";
+import { dot, normalise, scale, vec3 } from "../../geometry/vec3";
 import { differenceM } from "../../view/coords/position";
 import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import { sceneOrigins, type ViewBody, type ViewBodyKind } from "../../view/scene/model";
@@ -13,10 +13,12 @@ import { phaseScene } from "../../view/scenes/phaseScene";
 import type { SystemIdHex } from "@hyperion/protocol";
 import { aViewScene } from "../../test/viewFixtures";
 
+import { rotate } from "../../view/camera/quaternion";
 import {
   cameraReading,
   commandRun,
   followRun,
+  lookReading,
   photorealStatements,
   frameName,
   freeRateReading,
@@ -157,6 +159,67 @@ describe("a view's run", () => {
   it("aims the camera at the next target", () => {
     const targeted = done(commandRun(startRun(precisionScene()), { kind: "target", step: 1 }, CUT));
     expect(targeted.camera.target).not.toBeNull();
+  });
+});
+
+/** A run's camera's line of sight. */
+function forward(run: ViewRun) {
+  return rotate(run.camera.pose.orientation, vec3(0, 0, -1));
+}
+
+describe("a view's run turned by a drag or the arrows (R07.T19.f)", () => {
+  const turn = { yawRad: 0.3, pitchRad: 0 };
+
+  it("turns a free camera by the frame's drag, the same with reduced motion", () => {
+    const free = done(
+      commandRun(startRun(precisionScene()), { kind: "preset", preset: "free" }, CUT),
+    );
+    const turned = stepRun(free, { ...STILL, turn });
+    const reduced = stepRun(free, { ...STILL, reducedMotion: true, turn });
+    expect(dot(forward(turned), forward(free))).toBeCloseTo(Math.cos(0.3), 9);
+    expect(reduced.camera.pose.orientation).toEqual(turned.camera.pose.orientation);
+    expect(turned.camera.offset).toEqual({ azimuthRad: 0, elevationRad: 0 });
+  });
+
+  it("turns a SEAT camera's look offset by the drag, which its CAMERA line states", () => {
+    const seat = startRun(precisionScene());
+    const turned = stepRun(seat, { ...STILL, turn });
+    expect(turned.camera.offset.azimuthRad).toBeCloseTo(0.3, 12);
+    expect(cameraReading(turned.camera)).toBe("SEAT · LOOK 343° +00°");
+    const again = done(commandRun(turned, { kind: "preset", preset: "seat" }, CUT));
+    expect(cameraReading(again.camera)).toBe("SEAT");
+  });
+
+  it("turns a SEAT or CHASE camera's offset by the held arrows at 45°/s", () => {
+    const seat = startRun(precisionScene());
+    const chase = done(commandRun(seat, { kind: "preset", preset: "chase" }, CUT));
+    const arrows = { ...STILL, dtS: 0.2, held: new Set(["ArrowLeft", "ArrowUp"]) };
+    for (const run of [seat, chase]) {
+      const turned = stepRun(run, arrows).camera.offset;
+      expect(turned.azimuthRad).toBeCloseTo((9 * Math.PI) / 180, 12);
+      expect(turned.elevationRad).toBeCloseTo((9 * Math.PI) / 180, 12);
+    }
+  });
+
+  it("reads a look offset as a bearing clockwise from the preset's line of sight and an elevation", () => {
+    const deg = Math.PI / 180;
+    expect([
+      lookReading({ azimuthRad: 15 * deg, elevationRad: 5 * deg }),
+      lookReading({ azimuthRad: -90 * deg, elevationRad: -30 * deg }),
+      lookReading({ azimuthRad: 0.1 * deg, elevationRad: -0.2 * deg }),
+    ]).toEqual(["345° +05°", "090° -30°", "000° +00°"]);
+  });
+
+  it("turns an instrument by the drags on its canvas", () => {
+    const primary = startRun(precisionScene());
+    const instrument = startInstrumentRun(primary);
+    const followed = followRun(instrument, primary, {
+      dtS: 0,
+      held: new Set(),
+      reducedMotion: false,
+      turn,
+    });
+    expect(cameraReading(followed.camera)).toBe("CHASE · LOOK 343° +00°");
   });
 });
 

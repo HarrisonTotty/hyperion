@@ -2825,6 +2825,7 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
     the legend is one line, and both instruments still open.
   - **Acceptance.** `pnpm --filter hyperion` lint, typecheck and tests; the console-ux skill's
     scripts; `just ci`.
+  - _As built (2026-10-08, the views lane): see Risks, "Deviations in T19.f, as built"._
 
 #### R07.T20 Several views, by hand
 
@@ -9259,3 +9260,111 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   (8,012 in 341 files) at 4 workers, and `just check lint` from a clean tsc cache. TypeScript
   review: no must-fix or should-fix; its consider, the comment's account of the getter and setter,
   is applied. Scratch: `.git/rm23-scratch/fix-raf-polluter/`.
+
+- **Deviations in T19.f, as built** (2026-10-08; the views lane; the owner's requests of
+  2026-10-08 through the orchestrator).
+  - **Pending a ruling** (decision-r07-t19f-position, being taken): where an instrument's
+    `POSITION` stands, and whether the camera panel may cost a line.
+    - The fit at 1280 × 720 is exact. Two slots fit there with 8 px to spare (2 × 254 px + the
+      insets ≤ the 540 px stage), so one more line in an instrument's block takes away the
+      second `OPEN`. T20's 720p runs need both slots open.
+    - As built, the readings stand on the `PRIMARY` view's label block and in the `CAMERA` panel
+      for the `CONTROLS` view. `POINTING` shares `RATE`'s line at no cost; `POSITION` takes one
+      18 px line.
+    - In the panel's worst state, measured hidden at 1280 × 720 compact, the side column overflows
+      by 18 px: `PHASE TEST`, which has no own ship, with the field of view at its narrowest, the
+      rate at its lowest and reduced motion. The column's `scrollHeight` is 580 px against a
+      `clientHeight` of 562 px; without this change it fitted with no spare. Every other state
+      measured fits. In the full layout, column A's least height is 640 px at worst, under the
+      840 px bound.
+    - The readings' form is `cameraPlace.ts`. Their places are `placeLines` (the label block) and
+      `CameraReadings.tsx` with `.view-camera__rate` and `.view-camera__position` (the panel), so
+      that the ruling changes one component and its rules.
+  - **The behaviour per preset.**
+    - In `FREE` a drag turns the camera itself, a yaw about its +y and then a pitch about its +x.
+    - In `SEAT` it turns a look offset where the seat stands.
+    - In `CHASE` the same offset swings the camera about the own ship at the chase distance.
+    - Every preset turns the line of sight the same way, so that the far scene follows the
+      pointer. In `CHASE` that means the ship's near side moves against the pointer, where a
+      turntable would move it with the pointer. The choice keeps one rule for every preset and the
+      task's "a point stays under the cursor". It is the owner's to reverse.
+    - The offset's elevation is held so that the line of sight stays within 90° of the hull's
+      plane and within 90° of the preset's own line of sight. From `CHASE`'s line of sight, 9.5°
+      down, it turns 80.5° down, to the nadir, and 90° up, which keeps `LOOK` within ±90° and the
+      camera right way up.
+    - The arrows turn the offset in `SEAT` and `CHASE` at 45°/s with no ramp. This gives the drag
+      a keyboard path in every preset. Before, the arrows did nothing outside `FREE`.
+  - **The slop.** A press becomes a drag at the click slop the spatial displays use, as far as
+    0.25 rem from the press for a mouse or pen and 0.5 rem for a finger (`usePointerOrbit`), not
+    "more than" it as the plan says. A click now picks on `pointerup`, at its press point, as the
+    spatial displays do, and the canvas has no `onClick`. `pointerup`, `pointercancel`, a lost
+    capture and the canvas's `blur` end a press.
+  - **The chord.**
+    - Meta on `darwin`, Ctrl elsewhere, from `window.hyperion.platform`. `App` passes the
+      platform; `lib/displays.ts` is untouched, since `DisplayInputs` lives in `App.tsx`.
+    - The chord takes one step a press, not key repeats (`PAGE UP` still repeats). That way an
+      arrow held before the modifier, whose repeats then carry the modifier, never runs the rate
+      up.
+    - The modifier's own press releases the held arrows. On macOS it releases every held flight
+      key, since macOS reports no key's release while ⌘ is held; a key held to move must be
+      pressed again there.
+    - `RATE` stays `FREE`-only, as the guide's legend row has it.
+  - **The legend** is `FOCUSED VIEW: DRAG/ARROWS TURN · FREE: W/S A/D R/F MOVE, Q/E ROLL,
+    CTRL+↑/↓ RATE`, with `⌘↑/↓` on macOS. The UX review's reading of "drag arrows" as a noun led
+    to the slash. The commas mark what `FREE:` covers.
+    - It is one line at 1280 × 720, measured 18 px tall.
+    - It lists only the chord for `RATE`, so that it fits. `PAGE UP` and `PAGE DOWN` stay bound,
+      and the camera panel's limit reason still names them. The UX review noted the mismatch as a
+      nit, which is not applied: changing that reason's text would touch T19.b's ruled wording.
+    - The `⌘` is drawn (`CommandGlyph`). Assistive technology reads hidden text, `Command+`, in
+      its place: jsdom's description computation dropped a `role="img"` name inside a description.
+      This finding came from writing the test.
+  - **Where the camera is.**
+    - The example `26,371 km` cannot occur: ranges read in `Mm` from 1,000 km. The examples are
+      `26.4 Mm`.
+    - A direction at the vertical reads its azimuth as the missing em dash, `— -90°`, in
+      `--text-muted`. A point at the frame's centre reads `0.00 km —`. The label block now sets
+      every em dash in a reading as the missing value.
+    - `GALACTIC` reads `RADIUS` and `HEIGHT` to one decimal, as the system readout does, and
+      `ANGLE` as missing on the galactic axis.
+    - A camera held to a craft, at the seat or chasing, takes the craft's place, so its readings
+      go stale with the server's scene, muted with their `S`. A free camera's place is the
+      console's own and stays live. The plan's "never stale" holds for `FREE` only.
+    - Seat and chase directions run against the galactic axes, so the precision scene's seat, whose
+      hull looks down galactic −z, reads `POINTING — -90°`.
+  - **The canvas.** The ring shows on `:focus`. In the offscreen harness `:focus` never matches,
+    since the window is never focused, so the ring is tested in the stylesheet's text instead. The
+    cursor is `grab`, and `grabbing` while pressed, with `touch-action: none`.
+  - **Tests** (80 new cases; the app's 8,189 in 347 files pass):
+    - unit tests of the bindings, the drag's maths, the look offset and orbit, the free turn, the
+      readings, their staleness and their hysteresis through `useCameraPlace`;
+    - the gesture on `ViewCanvas`;
+    - the DOM harness: a drag turning the primary in `FREE` by the field of view's angle, in
+      `SEAT` with `LOOK` and back on `1`, and an instrument; the chord on Linux and macOS, on and
+      off the canvas; an arrow held before Ctrl on the primary and on an instrument (both fail
+      without the release); the readings on the block and in the panel; the legend.
+  - **By hand, hidden** (`.git/rm23-scratch/r07-views/t19f/page/`, `run.sh <tag> <WxH> <zoom>`
+    with `hook.js`):
+    - an offscreen Electron window, never shown, its mouse driven by `sendInputEvent`, through the
+      GPU lock;
+    - at 1280 × 720 and 1920 × 1080, a drag turns `FREE` (`POINTING` `— -90°` to `075° -76°`),
+      `SEAT` (`LOOK 344° -04°`) and `CHASE` (`LOOK 344° -04°`);
+    - a drag run 200 px past the canvas's edge into the side column keeps turning (`LOOK 347°`);
+    - a click picks `TEST PLANET`;
+    - the legend is one line, both slots open, and the panel's worst state is as above;
+    - `SHOT_FLOW=glyph` shows the drawn `⌘` at the text's cap height.
+  - **Reviewed.**
+    - TypeScript: no must-fix. Its should-fixes are applied: `userEvent.setup()` before `render`,
+      a real blur by Tab, queries through `screen`, single-reason tests, the instrument's release
+      and the hook's hysteresis tested, and `RateChordProps`. Its considers are applied too: the
+      edge test renamed, the legend's constants made private.
+    - UX: both must-fixes (staleness and the muted dash) and its three should-fixes (the
+      vertical, `GALACTIC`'s precision, the example) are applied, and so are the nits on the
+      legend's wording and the drafts' names. The limit reason's key is left, as above.
+  - **For the owner** (drafts in the guide, each marked "Draft (plan R07, R07.T19.f)"):
+    - "Typography": `⌘` drawn;
+    - the Views bullet's `POSITION`, `POINTING` and `LOOK`;
+    - the nomenclature rows `POSITION`, `POINTING`, `LOOK`, and `CTRL`, `⌘` (a new kind, `Key`);
+    - the legend row, now `FOCUSED VIEW`, `MOVE`, `TURN`, `ROLL`, `RATE`.
+  - Scratch: `.git/rm23-scratch/r07-views/t19f/` (the page harness, its logs and captures, and
+    `tools/textwidth.py`, which estimates a string's width in B612 from the shipped font).

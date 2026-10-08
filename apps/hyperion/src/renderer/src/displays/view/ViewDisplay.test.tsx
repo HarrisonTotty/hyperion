@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { norm, vec3 } from "../../geometry/vec3";
+import { dot, norm, type Vec3, vec3 } from "../../geometry/vec3";
 import { readTokens } from "../../spatial/paint";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import type { FakeView } from "../../test/fakeRenderEngine";
@@ -103,6 +103,8 @@ function setup(
     readonly source?: ViewEngineSource;
     /** The label block's laid-out box, CSS px from the stage's top left, each time it is measured. */
     readonly blockPx?: () => LaidOutBoxPx;
+    /** The platform the client runs on (R07.T19.f): Linux's by default. */
+    readonly platform?: string;
   } = {},
 ): Setup {
   const advanceTimers = fakeFramesAndTimeouts();
@@ -119,7 +121,7 @@ function setup(
           <ViewSceneProvider active={mode === "visible"} knownSystem={null}>
             {() => (
               <Activity mode={mode}>
-                <ViewDisplay engineSource={source} />
+                <ViewDisplay engineSource={source} platform={options.platform} />
               </Activity>
             )}
           </ViewSceneProvider>
@@ -1706,5 +1708,184 @@ describe("the VIEW display's way back to MAN (R07.T13.d)", () => {
       "EV100 8.6 MAN",
       expect.stringMatching(/^EV100 -?\d+\.\d AUTO$/),
     ]);
+  });
+});
+
+/** The camera's line of sight a frame was drawn with, in its frame's axes. */
+function sightOf(frame: FrameSubmission | undefined): Vec3 {
+  const m = frame?.viewRotation;
+  return vec3(-(m?.[2] ?? 0), -(m?.[6] ?? 0), -(m?.[10] ?? 0));
+}
+
+/** The angle between two lines of sight, rad. */
+function angleBetween(a: Vec3, b: Vec3): number {
+  return Math.acos(Math.min(1, dot(a, b) / (norm(a) * norm(b))));
+}
+
+/** The primary's label block's text. */
+function blockText(): string {
+  return screen.getByText("VIEW", { selector: "p" }).parentElement?.textContent ?? "";
+}
+
+/** Drags the primary's canvas from `from` to `to`, CSS px, with the primary button. */
+async function dragCanvas(
+  user: Setup["user"],
+  from: readonly [number, number],
+  to: readonly [number, number],
+): Promise<void> {
+  await user.pointer([
+    {
+      keys: "[MouseLeft>]",
+      target: screen.getByRole("application"),
+      coords: { clientX: from[0], clientY: from[1] },
+    },
+    { coords: { clientX: (from[0] + to[0]) / 2, clientY: (from[1] + to[1]) / 2 } },
+    { coords: { clientX: to[0], clientY: to[1] } },
+    { keys: "[/MouseLeft]" },
+  ]);
+}
+
+describe("the VIEW display's camera under the pointer and the rate's chord (R07.T19.f)", () => {
+  it("turns the free camera by a drag across its canvas, sized from the field of view", async () => {
+    const { user, advance, lastFrame } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    advance(300);
+    const before = sightOf(lastFrame());
+    await dragCanvas(user, [200, 180], [400, 180]);
+    advance(50);
+    const focalPx = WIDTH_PX / 2 / Math.tan((DEFAULT_FOV_DEG * Math.PI) / 360);
+    const yawRad = Math.atan(80 / focalPx) + Math.atan(120 / focalPx);
+    expect(angleBetween(before, sightOf(lastFrame()))).toBeCloseTo(yawRad, 4);
+  });
+
+  it("selects nothing by a drag that starts on a mark", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(16);
+    const anchor = firstFrameMarks().list.anchors[0];
+    if (anchor === undefined) {
+      throw new Error("the precision scene's first frame has no mark in view");
+    }
+    advance(300);
+    await dragCanvas(user, [anchor.xPx, anchor.yPx], [anchor.xPx + 60, anchor.yPx]);
+    expect(
+      within(screen.getByRole("listbox", { name: "Marks in view" })).queryByRole("option", {
+        selected: true,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("turns the seat's look by a drag, states it on the CAMERA line, and returns on 1", async () => {
+    const { user, advance, lastFrame } = setup();
+    await settle();
+    advance(300);
+    const seat = sightOf(lastFrame());
+    await dragCanvas(user, [320, 180], [420, 180]);
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*SEAT · LOOK \d{3}° \+00°/);
+    expect(angleBetween(seat, sightOf(lastFrame()))).toBeGreaterThan(0.1);
+    await user.keyboard("1");
+    advance(300);
+    expect(blockText()).not.toContain("LOOK");
+    expect(angleBetween(seat, sightOf(lastFrame()))).toBeLessThan(1e-3);
+  });
+
+  it("turns the seat's look by the arrows held on its canvas, as a drag does", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowLeft>}");
+    advance(300);
+    await user.keyboard("{/ArrowLeft}");
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*SEAT · LOOK 3\d\d° \+00°/);
+  });
+
+  it("steps the free camera's rate on Ctrl with the up and down arrows, on its canvas", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    await user.keyboard("3");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{Control>}{ArrowUp}{ArrowUp}{ArrowDown}{/Control}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 3.16 km/s");
+  });
+
+  it("leaves the rate as it is on the chord pressed off the canvas", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    await user.click(screen.getByRole("button", { name: "3 FREE" }));
+    await user.keyboard("{Control>}{ArrowUp}{/Control}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 1.00 km/s");
+  });
+
+  it("stops an arrow held before Ctrl from turning while Ctrl is held", async () => {
+    const { user, advance, lastFrame } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowLeft>}");
+    advance(500);
+    await user.keyboard("{Control>}");
+    // The free camera coasts down from its turn without reduced motion; let it come to rest.
+    advance(3000);
+    const resting = sightOf(lastFrame());
+    advance(500);
+    expect(angleBetween(resting, sightOf(lastFrame()))).toBeLessThan(1e-6);
+    await user.keyboard("{/Control}{/ArrowLeft}");
+  });
+
+  it("states where the camera is and where it looks, on its label block and its camera panel", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    advance(300);
+    expect(blockText()).toMatch(
+      /CAMERA\s*FREE · RATE 1\.00 km\/s\s*POSITION\s*[\d,.]+ (km|Mm|Gm|AU) \d{3}° [+-]\d{2}°\s*POINTING\s*(\d{3}°|—) [+-]\d{2}°\s*FOV/,
+    );
+    const position = screen.getByRole("status", { name: "Camera position" });
+    const pointing = screen.getByRole("status", { name: "Camera pointing" });
+    expect(blockText()).toContain(position.textContent);
+    expect(blockText()).toContain(pointing.textContent);
+    const before = pointing.textContent;
+    await dragCanvas(user, [320, 180], [320, 60]);
+    advance(300);
+    expect(pointing.textContent).not.toBe(before);
+  });
+
+  it("steps the rate on Command with the arrows on macOS, and not on Ctrl", async () => {
+    const { user, advance } = setup({ platform: "darwin" });
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    await user.keyboard("3");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{Meta>}{ArrowUp}{/Meta}{Control>}{ArrowUp}{/Control}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 3.16 km/s");
+    expect(screen.getByRole("application")).toHaveAccessibleDescription(
+      expect.stringContaining("Command+↑/↓ RATE"),
+    );
+  });
+
+  it("says in its legend where and when its keys act, with the rate's chord", async () => {
+    const { advance } = setup();
+    await settle();
+    advance(300);
+    expect(screen.getByRole("application")).toHaveAccessibleDescription(
+      expect.stringContaining(
+        "FOCUSED VIEW: DRAG/ARROWS TURN · FREE: W/S A/D R/F MOVE, Q/E ROLL, CTRL+↑/↓ RATE",
+      ),
+    );
   });
 });
