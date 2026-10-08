@@ -1304,7 +1304,8 @@ Refined on re-validation (2026-10-02), from the code each task touches:
   owner's laptop), T17, and every timing that needs a quiet machine (T3.c's bench and the runs of
   Design note 27). Hidden runs (`show: false` with offscreen rendering, or SwiftShader headless,
   under `setsid timeout --kill-after=10` with a fresh `--user-data-dir`, the process group killed
-  after) are the lanes' own. T18 and T19 wait on T16 and T17.
+  after) are the lanes' own. T18 and T19 wait on T16 and T17, which closed under the owner's
+  waiver on 2026-10-08 (Risks).
 
 Rust files are under `crates/hyperion-surface/` and TypeScript files under
 `apps/hyperion/src/renderer/src/` unless a path says otherwise.
@@ -2687,6 +2688,9 @@ as the results file, in its schema.
 
 ### R05.T16 The UHD 620 runs
 
+_Closed 2026-10-08 under the owner's waiver; see Risks and open points, "R05.T16 and R05.T17,
+closed under the owner's waiver" (`decision-r05-close-without-runs.md`)._
+
 By hand on the owner's UHD 620 laptop, by the owner, recorded, each run on a quiet machine (Design
 note 27) with its results file and summary under `docs/measurements/descent-spike/`. The low
 setting's harness and results file are first proved on the development machine (T14), so that the
@@ -2738,6 +2742,9 @@ Each change is one more recorded baseline run. If nothing misses, the task recor
   row that cannot be met and why.
 
 ### R05.T17 The discrete runs
+
+_Closed 2026-10-08 under the owner's waiver; see Risks and open points, "R05.T16 and R05.T17,
+closed under the owner's waiver" (`decision-r05-close-without-runs.md`)._
 
 By hand on the development machine, by the owner, on a quiet machine (Design note 27); every run
 needs a visible window, a real vsync and the display's mode changed, which no lane does on the
@@ -2932,8 +2939,66 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   the brainstorm names, so T17's pass is a pass on a faster part; its summary records the GPU-time
   headroom so that the class can be judged. A cloud GPU's figures remain advisory and cannot sign
   off the gate (researched 2026-09-29: virtual displays have no real vertical blank, and the
-  compositor path and driver branch may differ). The UHD 620 half, T16, is the owner's by hand;
-  until it runs, the gate answers for the discrete target only.
+  compositor path and driver branch may differ). The UHD 620 half, T16, was waived by the owner on
+  2026-10-08, so the gate answers for the discrete target only; R12.T8.b's `cockpit-descent` at the
+  low setting is the first planned run of the low setting on the UHD 620.
+- **R05.T16 and R05.T17, closed under the owner's waiver** (2026-10-08,
+  `decision-r05-close-without-runs.md`). The owner, 2026-10-08: "I think we can skip the descent
+  tests - they seem fine on my end." The by-hand runs not yet made are waived. The owner's judgment
+  by eye of the two visible descents of 2026-10-07 (seed 7, ridges off) is the record of the
+  Verification's look (T13.c and T16.a) and of `decision-r05-high-bound.md`'s look at
+  `TERRAIN: DETAIL LIMITED` on the default planet. The ridged look was not taken. T12.c's comparison
+  with Hillaire's images stays the non-blocking confirmation of decisions-r05.md item 7.
+  - _T16, as built: no run._ The low setting's harness, the i915 clock reader (T14.k), the machine
+    facts on every platform (T20) and the commands in `docs/measurements/descent-spike/README.md`
+    are built, and were never run on the UHD 620. Waived by the owner:
+    - T16.a's four runs and T16.b's five;
+    - T16.b's capture and its replay, with T15.c's UHD 620 replay;
+    - both acceptances, in full.
+
+    T16.c is not triggered. It reads T16.a's and T16.b's runs, and there are none. The RTX 3080's
+    low run (T14.c) is not one of them, and only a failure on the UHD 620 redesigns the low setting
+    (Design note 22). The low values in `view/quality/qualitySetting.ts` stand as built.
+
+    Found on closing: the spike draws every animation frame on both settings (`DescentSpike.tsx`'s
+    loop), so the pacing to 30 fps that Design note 21 and T16.a ask of the UHD 620 run was never
+    built. R12's `cockpit-descent` paces its low run to every second vsync (R12 Design note 9).
+
+  - _T17, as built: one run of nine._ `2026-10-07-effect-high` is the owner's run:
+    - the high setting, seed 7, `--workers 3`, `BakedOffsets`, doubled normals, ridges off, safety
+      checks on and a warm pipeline cache;
+    - visible, on a quiet machine (load 0.17 at the start, the lanes paused);
+    - timer `full`, no incomplete pass times among 71,485 frames, and the GPU's clocks recorded.
+
+    Its windows passed T14.f's check: nine decoded, at most 24% of a buffer, and 2.08% of the
+    descent left out, none from the approach on. Waived by the owner:
+    - seeds 0 and 1;
+    - safety checks off, `face-differences` and mesh normals, each on seed 7;
+    - `--workers 2`;
+    - the capture and its presented replay, with T15.c's;
+    - the profiled run that the frame rows' miss called for.
+
+    T17's acceptance holds for that one run, except "with the replay's results file beside the
+    browser's", which is waived.
+
+  - _Deviations of the judged run._
+    - _The display._ A standard 1080p monitor at 1920 × 1080 and 60.00 Hz (the owner's `xrandr`),
+      not the Optoma projector's 59.94 Hz mode. T is 16.67 ms, from `Display.displayFrequency`, and
+      the frame clock confirms it: 71,485 intervals and 197 skips over 1,194.68 s give 16.666 ms.
+    - _The canvas._ 1,509 × 821 device pixels, sized by the window manager, where the hidden
+      1920 × 1080 run drew 1,398 × 793. That is 12% more pixels, so its GPU rows are conservative
+      for Design note 21's window.
+    - _The presentation times._ Chromium's presentation times on this path are not frame times
+      (Risks, "The gate's verdict").
+    - _Where the setup is recorded._ The results file holds the machine and driver: Ryzen 7 3700X,
+      RTX 3080, NVIDIA 615.71.09, Electron 44.4.3, Chromium 152.0.7977.130. The display is recorded
+      here, because the file does not carry it.
+  - _T14.c's visible run._ `2026-10-07-effect-low` closes T14.c. It ran the harness in a visible
+    window, with every figure present or null with its reason, and its windows passed the check.
+    - It is provisional: the load was 2.69 at the start, and integration CI overlapped its first
+      14 minutes or so. It counts towards no verdict (Design note 27), and its re-take is waived.
+    - It ran on the same monitor and canvas, and presented at every vsync against T = 33.33 ms.
+    - So it tests the harness, not the 720p30 column.
 - **The hardware decisions, decided 2026-09-30 by a delegated decision** (the orchestration's
   hardware record), as they fall on this plan:
   - _The gate (item 1):_ retargeted to the recommended specification, the RTX 3080, with Design
