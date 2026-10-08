@@ -1090,9 +1090,10 @@ T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; 
 needs no plan-11 task; T7.b and T8.i, which no longer wait for T8.g; T8.g, once T8.m, P11.T16 and
 P11.T17.c are on `rendering-and-planets`; T8.h, built on T8.g as committed (decided 2026-10-08,
 `decision-r06-t8h-warm.md`); T8.g's final gates once P11.T17.c lands, then T8.n; T11.d, after
-T8.g, T8.i and T11.a–c (T11.c on T9.f); T5.f and T9.g before T17's goldens; then T17 (the order
-amended 2026-10-06, `decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and
-`decision-r06-t8k-cone.md`, and 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
+T8.g, T8.i and T11.a–c (T11.c on T9.f); T11.f, the stars-arriving note split from T11.d
+(2026-10-08), after it; T5.f and T9.g before T17's goldens; then T17 (the order amended
+2026-10-06, `decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and `decision-r06-t8k-cone.md`,
+and 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
 advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
@@ -2347,7 +2348,9 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     reached, the least over the layers not yet final, in the guide's digit grouping. On loss of the
     link the radius takes its `S` and the note holds. There is no spinner, skeleton or progress
     bar, and stars appear by a cut, with no fade-in. Whether the composed line fits the label block
-    at 1280 × 720 and in the instrument slots needs the running client.
+    at 1280 × 720 and in the instrument slots needs the running client. _Split off on 2026-10-08
+    as R06.T11.f, below, with the guide rows' draft; T11.d builds the server, the protocol and the
+    client's whole-reply swap and coalescing._
   - **The default switch and the interim** (decided by the owner 2026-10-08, answering
     `decision-p11-t17c-bright.md` §4: the hybrid sky, `feasibility-hybrid-sky.md` §10–11). The
     owner's condition for turning T11.c's switch on is met by RM3's interim, R13.T2: layers C to E
@@ -2379,6 +2382,38 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   `eye_visibility` only on a request with no camera part, never by comparing cuts: a camera at
   120° is shallower than the eye's cut, and the eye's visibility caps would not cover its cull
   (`decision-r06-t7b-brackets.md`).
+
+- **R06.T11.f The stars-arriving note (new; split from T11.d on 2026-10-08; after T11.d).** T11.d's
+  label bullet, built on the client to the sign-off's condition 4
+  (`decision-r06-census-cost-signoff.md`, question 2). Named T11.f because R06.T17 already names a
+  possible R06.T11.e, the disk cache. T11.d delivers each reply with `final` and each layer's
+  `complete_to_ly` and `final`, and `useSky`'s model holds them; nothing reads them yet.
+  - **The line.** `view/sky/label.ts`'s `skyLabelValue` takes the streaming edge: while the held
+    reply is not final, `STARS V <m> mag EYE|CAM · BEYOND <edge> ly: STREAMING`, the note in the
+    composed-note slot before any `· CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`. Its figure is
+    the least `complete_to_ly` over the layers not yet final (the sim's `least_edge()`, a fixed
+    shell edge), in the guide's digit grouping (`2000 ly`, `16,000 ly`) in a field sized for the
+    largest edge. It is steady, in `--text`, with no status colour, and clears by itself when the
+    final reply is held. Each instrument's block carries its own (`InstrumentView`).
+  - **Before the first reply** the line reads `STARS: PENDING`, as `LIGHTING: PENDING` does, in
+    place of R02's interim reading, including after a jump. `useSky`'s `pending` (true until the
+    request's first reply is held, since T11.d) says when.
+  - **On loss of the link** the radius takes its `S` (the model's `stale`) and the note holds until
+    a final reply; T11.d's request rule asks again for a sky held at a reply that is not final
+    (`SkyRequestReason` `"partial"`).
+  - **Never** a spinner, skeleton or progress bar; stars appear by a cut, with no fade-in (the
+    bake's whole-cube swap, T11.d).
+  - **The guide rows** (`docs/frontend/ux-guidelines.md`, the `STARS` row and a `STREAMING` and
+    `PENDING` entry beside `TERRAIN: STREAMING`) are drafted here and go to the UX decision agent
+    for the owner's sign-off, as T15's rows did. Build to the draft.
+  - Tests: the line's readings (pending, streaming at each fixed edge, final, with and without the
+    not-modelled note, stale) and the label block's line in `ViewDisplay` and an instrument's.
+    Pending by hand for the owner: whether the composed line fits the label block at 1280 × 720 and
+    in the instrument slots, in the running client. R07.T19.f was editing `ViewLabelBlock.tsx` and
+    `CameraControls.tsx` when this was split: merge it first.
+  - Acceptance: the client's tests of `view/sky` and `displays/view`
+    (`pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`),
+    the UX review, and `just ci`.
 
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
