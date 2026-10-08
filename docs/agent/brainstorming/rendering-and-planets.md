@@ -2558,7 +2558,16 @@ and the rest — and their answers are leans in the body, listed under [Decision
    the browser misses it by more than a fifth, or when our CPU time and the GPU's pass time fit with
    headroom while the frames actually delivered miss it. Dawn's robustness and validation toggles are
    compared on and off, to price the browser's safety checks. A failure on the UHD 620 alone
-   redesigns the low setting rather than triggering a native renderer.
+   redesigns the low setting rather than triggering a native renderer. The spike's one judged run,
+   on the RTX 3080 (R05, 2026-10-07), fit with headroom: our main-thread time was 3.6 ms and the
+   GPU's passes 5.7 ms at the 95th percentile, against 13.3 ms. Chromium's presentation times
+   missed the frame rows, but on that path (X11, NVIDIA, Vulkan) they are taken on the CPU when the
+   swap completes, not at the vertical blank. The frame count shows a new frame at 99.7% of the
+   display's refreshes, so the delivered frames met the 95th percentile and the rule did not fire.
+   What failed is ours: 1.0–2.2% of frames skipped in four segments near the ground, against 1%.
+   The native replay, the toggles' comparison and the UHD 620 half were not run (waived by the
+   owner, 2026-10-08), so the replay's clause is untested. R12's consolidated runs measure both
+   machines again, and a discrete result that meets the condition comes back to this rule.
 3. **Whether Hillaire's model holds for thick atmospheres.** **Lean.** The per-planet precompute this
    question once asked about is gone: Hillaire's tables rebuild in under a millisecond. Neither model
    is validated at Venus's or Titan's optical depths, and no real-time method validated on either was

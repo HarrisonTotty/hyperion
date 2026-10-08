@@ -468,14 +468,20 @@ it is recorded, and stays here so that the owner can review it.
   phase becomes ∫n dt, sent as drifting elements on aligned power-of-two cells (`BodyOrbitDto`'s
   optional `drift`); built as galaxy plan 14's P14.T45, which closes R03.T13's pinned discrepancy
   (R03's Risks) and supersedes protocol item 9. Its quadrature follow-up is P14.T45.d (2026-10-02).
-- **Brainstorm revisions** drafted by the plans: R05.T19's verdict on open question 2 and its
-  findings; R11.T5's "ruled decoration" for open question 18 with corrected depths; R12.T10's
+- **Brainstorm revisions** drafted by the plans: R05.T19's findings (drafted in R05's Risks,
+  "Findings for the brainstorm", for a decision agent's approval); R11.T5's "ruled decoration" for open question 18 with corrected depths; R12.T10's
   measured budget tables; R03.T1's closure of open question 21 (no version bump, nor for
   `subscription_ended`; R03 Design note 12, decided 2026-09-30, the draft in R03's Risks); R01.T12's
   answer to open question 14 on NVIDIA (R01's Risks); and the corrections
   [below](#brainstorm-corrections). R04.T10.a's CSP ruling is already applied to the brainstorm.
+  **Decided:** R05.T19's edit to open question 2 (2026-10-08, delegated;
+  `decision-r05-close-without-runs.md` §4), applied to the brainstorm with its status kept
+  **Lean**, since the replay's clause is untested.
 - **The gate's verdict** (R05.T19): if open question 2's rule fires, the owner rules before any
-  later plan depends on the browser.
+  later plan depends on the browser. Recorded 2026-10-08 (R05's Risks, "The gate's verdict"): the
+  rule does not fire. The RTX 3080 half fails, on frame skips near the ground that are ours and
+  deferred to R12.T11.b, and the UHD 620 half is not judged, R05.T16 having been waived by the
+  owner.
 - **Decided: the target hardware and the gate** (2026-09-30, delegated decisions; the
   orchestration's hardware record, items 1–7). The gate's discrete half runs on the recommended
   specification, the RTX 3080, at the display's measured vsync period ([The gate](#the-gate));
