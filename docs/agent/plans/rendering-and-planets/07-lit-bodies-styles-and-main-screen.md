@@ -2697,6 +2697,134 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
     lands before T17. R06's lane is told of the change to its files.
   - _As built (2026-10-06, the shading lane, after R06's limb-depth follow-up): see Risks,
     "Deviations in T19.e, as built"._
+- **R07.T19.f `VIEW`'s camera: turning by drag, the rate on the primary modifier, and where the
+  camera is** (the owner, 2026-10-08, through the orchestrator). The owner's words: "One thing I
+  noticed in the VIEW panel is that there is no way to turn left/right. Since this is a test
+  rendering tool, we should make it so that clicking and dragging the mouse allows one to pan
+  around the view. Also Command+Up/Down does not work to change speed." Then: "Also there is no
+  indicator of the camera's current position". And, told that the arrows turn the free camera:
+  "Ah, I didn't know the arrow keys turn - that's good to know", a finding that the legend does
+  not say where and when the flight keys act.
+  - **Drag to turn.**
+    - A press of the primary button, a finger or a pen on any `VIEW` canvas (the primary and each
+      open instrument) captures the pointer and makes that view the `CONTROLS` view, as a press
+      does now. Once the pointer has moved more than the client's click slop from the press, it
+      is a drag, which turns that view's camera from where it went down. The slop is the spatial
+      displays' (`usePointerOrbit`): 0.25 rem for a mouse or pen, 4 CSS px at 100%, and 0.5 rem
+      for a finger. A press released inside the slop is a click and picks as now, at its press
+      point.
+    - `pointerup`, `pointercancel`, a lost capture and the canvas's `blur` end a drag. The camera
+      does not coast after it.
+    - The turn carries the direction under the press point to the pointer. With x and y in CSS
+      px from the canvas's centre, W its CSS width and f = (W ÷ 2) ÷ tan(FOV ÷ 2), the yaw is
+      atan(x₂ ÷ f) − atan(x₁ ÷ f) and the pitch atan(y₂ ÷ f) − atan(y₁ ÷ f). That is exact on the
+      centre lines and right to first order elsewhere. A drag right turns the line of sight left,
+      and a drag down pitches it up, so that the far scene follows the pointer in every preset.
+    - In `FREE` a drag turns the free camera itself about its own axes, as the arrows do: a yaw
+      about its +y, then a pitch about its +x, with no roll.
+    - In `SEAT` it turns a look offset from the seat's orientation, forward, aft or at the target:
+      an azimuth about the hull's up, then an elevation about the turned right axis, so that the
+      camera stays right way up. The elevation is held where the line of sight would pass the
+      vertical, ±90° from the hull's plane, and the azimuth wraps.
+    - In `CHASE` the same offset turns the line of sight, and the camera swings about the own ship
+      at the chase distance to keep it at the centre: an orbit, held at ±90° from the hull's plane
+      as `SEAT`'s is.
+    - Every cut clears the offset: the preset's key (`1`, `2`) or button pressed again, a target
+      step, or `3`. `EASED CAMERA MOVES` eases that return as it eases any cut.
+    - In `SEAT` and `CHASE` the arrows turn the same offset at the free camera's 45°/s, without its
+      ramp, so that the drag has a keyboard path in every preset (the guide's "fully operable from
+      the keyboard"). `Q` and `E` roll the free camera only.
+    - The drag and the arrows are the operator's own motion, so reduced motion never stops them.
+      Nothing eases or coasts after a release.
+    - The label block's `CAMERA` line states an offset while one stands, after a middle dot:
+      `SEAT · LOOK 345° +05°`, the relative bearing of the line of sight, clockwise from the
+      preset's, and its signed elevation from it, in whole degrees.
+  - **The rate on the primary modifier.**
+    - The platform's primary modifier with `ArrowUp` and `ArrowDown` steps the free camera's rate
+      as `PAGE UP` and `PAGE DOWN` do, which stay bound. That is Meta (⌘) on macOS and Ctrl on
+      Linux and Windows, from `window.hyperion.platform` (`process.platform`, which the preload
+      already exposes and no renderer code reads yet). `App` gives it to `VIEW`, and
+      `lib/platform.ts`'s `primaryModifierOf` names the modifier.
+    - The chord acts with that modifier alone, without Alt, Shift or the other modifier, on the
+      focused canvas, and in `FREE` only, as `PAGE UP` and `PAGE DOWN` do (the guide's `MOVE`,
+      `TURN`, `RATE` row). It takes one step a press, not on key repeat, so that an arrow held
+      before the modifier never runs the rate up.
+    - The chord collides with nothing. No accelerator of Electron's default menu (the console sets
+      no menu of its own) takes an arrow; the interface scale is Ctrl or ⌘ with `+`, `-` and `0`;
+      the displays' function keys and the view's single keys refuse every modifier. macOS keeps
+      Ctrl with the arrows for Mission Control, so ⌘ is the free chord there. Linux's and Windows'
+      desktops put their moves on Super, Win or Ctrl+Alt, so Ctrl with an arrow is free there.
+    - The plain arrows never pitch or yaw while the modifier is held. A press with a modifier is
+      never held as a flight key, and the modifier's own press releases every held arrow. On
+      macOS it releases every held flight key, since macOS reports no key's release while ⌘ is
+      held.
+  - **Where the camera is.**
+    - `POSITION`: the camera's range from the centre of the frame its `FRAME` line names, and its
+      direction from that centre, `26,371 km 047° +12°`. The range is in `km`, `Mm`, `Gm` and `AU`
+      to three figures, with hysteresis (`formatBodyDistance`). The direction takes the guide's
+      form for a direction from the ship: the azimuth from `COREWARD` through `SPINWARD` at the
+      system's barycentre, and the elevation positive `NORTH`. Where the system's place is not
+      known, or lies on the galactic axis, the azimuth runs from +x and the reading says
+      `FROM +X`. In the `GALACTIC` frame the reading is the frame's own `RADIUS`, `ANGLE` and
+      `HEIGHT`.
+    - `POINTING`: the line of sight's direction, in the same form, `210° -05°`.
+    - They stand on the `PRIMARY` view's label block after `CAMERA`, and in the `Camera` panel
+      beside `RATE`, for whichever view `CONTROLS` names, a primary or an instrument. An
+      instrument's block does not carry them. At 1280 × 720 two slots fit only while their blocks
+      keep the lines they have (decision-r07-owner-ux-signoff), and T20's UHD 620 runs need both
+      open there. A ruling is asked.
+    - They change with the readouts, at 4 Hz, from the camera's own state, with no new server
+      data. They describe the client's own camera, so they are never stale with the scene.
+  - **The legend.**
+    - `FOCUSED VIEW: DRAG ARROWS TURN · FREE: W/S A/D R/F MOVE · Q/E ROLL · CTRL+↑/↓ RATE` on Linux
+      and Windows, and the same with `⌘↑/↓` on macOS. B612 has no `⌘`, so it is drawn, as `☉` is.
+      The legend stays one line on 1280 × 720's 816 px stage, so that the stage keeps the height
+      two slots need. `PAGE UP` and `PAGE DOWN` stay bound, and the camera panel's limit reason
+      still names them.
+    - The canvas shows its focus ring whenever it holds the focus (`:focus`, not only
+      `:focus-visible`), so that a press marks the view whose keys are live (the guide's "Focus is
+      always visible"). Its cursor is `grab`, and `grabbing` while pressed, and `touch-action:
+      none` gives a finger's drag to the view.
+  - **The guide.** Drafts for the owner's sign-off, each marked "Draft (plan R07, R07.T19.f)":
+    - the `MOVE`, `TURN`, `RATE` row gains `ROLL`, the drag and the chord, and says where and when
+      each acts;
+    - new rows for `POSITION`, `POINTING`, `LOOK`, and the keys `CTRL` and `⌘`;
+    - "Typography" draws `⌘` as it draws `☉` and `⊕`;
+    - the Views bullet's list of what a label block states gains the camera's position and
+      pointing, on the `PRIMARY` view's block.
+  - **Files.** `view/camera/drag.ts` and `look.ts` (new), `state.ts`, `freeCamera.ts`, `keys.ts`;
+    `lib/platform.ts` (new); `components/CommandGlyph.tsx` (new); `displays/view/useViewDrag.ts`,
+    `cameraPlace.ts` and `KeyLegend.tsx` (new), `ViewCanvas.tsx`, `ViewDisplay.tsx`,
+    `viewRun.ts`, `CameraControls.tsx`, `InstrumentControls.tsx`, `InstrumentView.tsx`,
+    `useInstruments.ts`; `App.tsx`, `lib/displays.ts`; `styles.css`; the guide.
+  - **Tests.**
+    - Bindings: the chord per platform; refused with Alt, Shift or the other modifier, on repeat,
+      in a text field, and outside `FREE`; a plain arrow held and then the modifier pressed, the
+      arrow released (all held keys on macOS); `PAGE UP` unchanged.
+    - Drag maths: the pointer's delta to yaw and pitch at 60° and at another field of view, the
+      direction under the press carried to the pointer (exactly on the centre lines, to first
+      order off them), the slop for a mouse and for a finger.
+    - The gesture: capture on press, a move inside the slop no turn, the first move past it
+      turning from the press, release and `pointercancel` and a lost capture and `blur` ending it,
+      a second pointer ignored, the click on release picking at the press point and a drag's
+      release picking nothing.
+    - The camera: `FREE` turned about its own axes; `SEAT`'s offset with its elevation held at the
+      vertical and its azimuth wrapped, the camera's up never below the hull's plane; `CHASE`'s
+      orbit keeping the ship at the centre at the chase distance; every cut clearing the offset;
+      the arrows turning the offset in `SEAT` and `CHASE`; reduced motion changing neither.
+    - The readings: `POSITION` and `POINTING` in each frame kind, `FROM +X`, the hysteresis, and
+      `LOOK` on the `CAMERA` line.
+    - The DOM harness: pointer events on the primary canvas and an instrument's turn its camera
+      (the frame's `viewRotation` changes) and the click still selects; the chord steps the rate on
+      the focused canvas only; the legend per platform; the label block's and the camera panel's
+      readings.
+  - **By hand, hidden.** T16.i's page harness, with a drag flow: an offscreen Electron window,
+    never shown, driven by `webContents.sendInputEvent`'s mouse events. In `FREE`, `SEAT` and
+    `CHASE`, a drag across the primary turns the camera, read from `POINTING` and `LOOK` before and
+    after, with captures. A drag outside the canvas keeps turning, and a click picks. At 1280 × 720
+    the legend is one line, and both instruments still open.
+  - **Acceptance.** `pnpm --filter hyperion` lint, typecheck and tests; the console-ux skill's
+    scripts; `just ci`.
 
 #### R07.T20 Several views, by hand
 
