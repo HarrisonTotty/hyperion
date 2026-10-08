@@ -66,6 +66,11 @@ threads-required = 4
 filter = "package(hyperion-sim) & test(=sky::census::cell::tests::the_star_bound_holds_for_realised_systems)"
 threads-required = 4
 
+# P11.T17.c's verdicts against the engine check their pairs on eight threads of their own.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::binary::light::tests::the_pair_verdicts_hold_against_the_engine)"
+threads-required = 8
+
 # R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"

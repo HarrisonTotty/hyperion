@@ -141,6 +141,53 @@ fn the_reader_finds_no_cell_outside_the_table() {
     assert_eq!(grid.cell_parts(edge), [MASS_CELLS - 1, Q_CELLS - 1, 0, 0]);
 }
 
+/// The table's reading of a pair's cell is the grid's, bit for bit: on every edge of the mass and
+/// periastron axes, whose edges the table caches, just either side of each, and at 10⁴ random
+/// points, some outside the table.
+#[test]
+fn the_table_reads_a_pairs_cell_as_its_grid_does() {
+    let mut mix = Mix(0x7e57_0017_c0c0_ce11);
+    for grid in grids() {
+        let table = PairLightTable::generator(grid.layer()).expect("a fitted table");
+        let mut points = Vec::new();
+        let mass = (0..MASS_CELLS).flat_map(|k| {
+            let (lo, hi) = grid.mass_edges_msun(k);
+            [lo, hi]
+        });
+        let periastron = (0..grid.periastron_cells()).flat_map(|k| {
+            let (lo, hi) = grid.periastron_edges_rsun(k);
+            [lo, hi]
+        });
+        for m in mass {
+            for p in periastron.clone() {
+                for x in [m.next_down(), m, m.next_up()] {
+                    for y in [p.next_down(), p, p.next_up()] {
+                        points.push([x, 0.3 * x, -0.2, y]);
+                    }
+                }
+            }
+        }
+        for _ in 0..10_000 {
+            let heavier = 0.5 * crate::math::exp(mix.unit() * crate::math::ln(400.0));
+            let lighter = heavier * (0.01 + mix.unit());
+            points.push([
+                heavier,
+                lighter,
+                -2.5 + 2.8 * mix.unit(),
+                1.0e8 * mix.unit(),
+            ]);
+        }
+        for [heavier, lighter, fe_h, p] in points {
+            assert_eq!(
+                table.cell_of(heavier, lighter, fe_h, p),
+                grid.cell_of(heavier, lighter, fe_h, p),
+                "{:?}: {heavier} + {lighter} M_sun, {fe_h} dex, {p} R_sun",
+                grid.layer()
+            );
+        }
+    }
+}
+
 #[test]
 fn age_bins_and_their_edges_agree() {
     assert_eq!(age_bin(0.0), Some(0));

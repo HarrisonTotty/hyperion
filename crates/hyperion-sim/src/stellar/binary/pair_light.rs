@@ -492,6 +492,23 @@ impl PairGrid {
         fe_h: f64,
         periastron_rsun: f64,
     ) -> Option<usize> {
+        self.cell_with(
+            |k| self.mass_edges_msun(k).0,
+            |k| self.periastron_edges_rsun(k).0,
+            [heavier_msun, lighter_msun, fe_h, periastron_rsun],
+        )
+    }
+
+    /// [`Self::cell_of`] of `[heavier, lighter, fe_h, periastron]`, with the lower edges of mass
+    /// interval and periastron bin k ≥ 1 given by `mass_edge` and `periastron_edge`: computed for
+    /// the grid, or read from [`PairLightTable`]'s copy of the same values.
+    #[must_use]
+    fn cell_with(
+        &self,
+        mass_edge: impl Fn(usize) -> f64,
+        periastron_edge: impl Fn(usize) -> f64,
+        [heavier_msun, lighter_msun, fe_h, periastron_rsun]: [f64; 4],
+    ) -> Option<usize> {
         let in_band = heavier_msun >= self.mass_lo_msun && heavier_msun <= self.mass_hi_msun;
         let paired = lighter_msun >= LOWEST_COMPANION_MSUN && lighter_msun <= heavier_msun;
         if !in_band
@@ -503,7 +520,7 @@ impl PairGrid {
             return None;
         }
         let m = (1..MASS_CELLS)
-            .take_while(|&k| heavier_msun >= self.mass_edges_msun(k).0)
+            .take_while(|&k| heavier_msun >= mass_edge(k))
             .last()
             .unwrap_or(0);
         let q_value = lighter_msun / heavier_msun;
@@ -517,7 +534,7 @@ impl PairGrid {
             .last()
             .unwrap_or(0);
         let p = (1..self.periastron_cells)
-            .take_while(|&k| periastron_rsun >= self.periastron_edges_rsun(k).0)
+            .take_while(|&k| periastron_rsun >= periastron_edge(k))
             .last()
             .unwrap_or(0);
         Some(self.cell_index([m, q, f, p]))
@@ -938,7 +955,7 @@ fn rows_of(
 /// Whether `member` is the first segment's `first` member on its own track at no offset: the
 /// star's own single-star model bit for bit.
 #[must_use]
-fn is_own_track(member: &Member, first: &Member) -> bool {
+pub(super) fn is_own_track(member: &Member, first: &Member) -> bool {
     match (member, first) {
         (
             Member::Track { track, offset },
@@ -970,7 +987,7 @@ fn member_paths(member: &Member) -> [Option<&Path>; 2] {
 /// The ages, in rising order, that cut `member` between `start` and `end` (years): the ends, the
 /// age bins' edges, [`SEGMENT_SPLITS`] log-even parts, its track's phases' boundaries each cut into
 /// [`SAMPLES_PER_PHASE`] parts and its knots, and its paths' steps.
-fn member_cuts(member: &Member, start: f64, end: f64, cuts: &mut Vec<f64>) {
+pub(super) fn member_cuts(member: &Member, start: f64, end: f64, cuts: &mut Vec<f64>) {
     cuts.clear();
     cuts.push(start);
     cuts.push(end);
@@ -1009,7 +1026,7 @@ fn member_cuts(member: &Member, start: f64, end: f64, cuts: &mut Vec<f64>) {
 
 /// The five points at which a part `a`–`b` is read: its ends and three between, each end just
 /// inside the part.
-fn part_points(a: f64, b: f64) -> impl Iterator<Item = f64> {
+pub(super) fn part_points(a: f64, b: f64) -> impl Iterator<Item = f64> {
     [0.0, 0.25, 0.5, 0.75, 1.0]
         .into_iter()
         .map(move |f| (a + (b - a) * f).clamp(a + (b - a) * 1e-9, b - (b - a) * 1e-9))
@@ -1795,6 +1812,14 @@ pub struct PairLightTable {
     living: Vec<[i16; AGE_BINS]>,
     /// Per cell, its changed values as the reader gives them.
     changed: Vec<[i16; AGE_BINS]>,
+    /// The grid's lower edges of mass interval k ≥ 1, M☉, as [`PairGrid::mass_edges_msun`] gives
+    /// them, so that [`Self::cell_of`] computes none: computing them took some 60 `exp` calls a
+    /// query, most of P11.T17.c's 1 µs budget, and the census's bound now costs 0.55 µs a call
+    /// (plan 11's Risks, "P11.T17.c as built").
+    mass_edges_msun: [f64; MASS_CELLS],
+    /// The grid's lower edges of periastron bin k ≥ 1, R☉, as
+    /// [`PairGrid::periastron_edges_rsun`] gives them (index 0 unused).
+    periastron_edges_rsun: Vec<f64>,
 }
 
 /// A stored magnitude brightened by `margin_cmag`, DARK and UNSEEN as they are.
@@ -2008,6 +2033,10 @@ impl PairLightTable {
             rows: decoded,
             living,
             changed,
+            mass_edges_msun: core::array::from_fn(|k| grid.mass_edges_msun(k).0),
+            periastron_edges_rsun: (0..grid.periastron_cells())
+                .map(|k| grid.periastron_edges_rsun(k).0)
+                .collect(),
         })
     }
 
@@ -2036,6 +2065,23 @@ impl PairLightTable {
     #[must_use]
     pub const fn grid(&self) -> &PairGrid {
         &self.grid
+    }
+
+    /// The cell holding a pair, or `None` outside the table: [`PairGrid::cell_of`] bit for bit,
+    /// from the grid's edges as the table holds them, so that it evaluates no logarithm or power.
+    #[must_use]
+    pub fn cell_of(
+        &self,
+        heavier_msun: f64,
+        lighter_msun: f64,
+        fe_h: f64,
+        periastron_rsun: f64,
+    ) -> Option<usize> {
+        self.grid.cell_with(
+            |k| self.mass_edges_msun[k],
+            |k| self.periastron_edges_rsun[k],
+            [heavier_msun, lighter_msun, fe_h, periastron_rsun],
+        )
     }
 
     /// The samples of each cell (the least of any cell).

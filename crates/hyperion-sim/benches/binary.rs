@@ -18,7 +18,7 @@ use hyperion_sim::math;
 use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::binary::{
-    BinaryInput, BinaryParams, can_interact, evolve, pair_light_bound,
+    BinaryInput, BinaryParams, PairLight, can_interact, evolve, pair_light_bound,
 };
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::units::consts::SOLAR_RADIUS_M;
@@ -102,12 +102,22 @@ fn queries(n: usize) -> Vec<Query> {
 /// The pair bound over 1,024 queries an iteration, in queries a second.
 fn light_bound(c: &mut Criterion) {
     let sample = queries(1_024);
-    let detached = sample
-        .iter()
-        .filter(|(a, b, p, comp, age)| pair_light_bound(*a, *b, *p, comp, *age..=*age).is_some())
-        .count();
+    // Detached, Unchanged, Remnants, Bright and none (P11.T17.c).
+    let mut verdicts = [0_usize; 5];
+    for (a, b, p, comp, age) in &sample {
+        let k = match pair_light_bound(*a, *b, *p, comp, *age..=*age) {
+            Some(PairLight::Detached) => 0,
+            Some(PairLight::Unchanged) => 1,
+            Some(PairLight::Remnants) => 2,
+            Some(PairLight::Bright(_)) => 3,
+            None => 4,
+        };
+        verdicts[k] += 1;
+    }
+    let [detached, unchanged, remnants, bright, none] = verdicts;
     println!(
-        "binary/pair_light_bound: {detached} of {} queries Detached",
+        "binary/pair_light_bound: of {} queries, {detached} Detached, {unchanged} Unchanged, \
+         {remnants} Remnants, {bright} Bright and {none} none",
         sample.len()
     );
     let mut group = c.benchmark_group("binary/pair_light_bound");

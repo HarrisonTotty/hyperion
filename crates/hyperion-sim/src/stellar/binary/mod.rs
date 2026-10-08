@@ -26,7 +26,9 @@
 //! For a caller that must know what a pair can hold before the pair is generated, as rendering
 //! plan R06's census must, [`pair_light_bound`] answers from fitted tables alone (P11.T17):
 //! whether the pair is still two single stars, from the reach table ([`reach`],
-//! [`largest_radius_bound`]), which bounds the radii [`can_interact`] reads.
+//! [`largest_radius_bound`]), which bounds the radii [`can_interact`] reads; and past that, from
+//! the pair-light tables ([`pair_light`]), sampled through the engine, whether a star of the pair
+//! may depart from its own model or a product live, and how bright it can be.
 
 pub(crate) mod carve;
 mod classify;
@@ -61,7 +63,7 @@ pub use classify::{
 pub(crate) use evolve::lobe_reached;
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
 pub(crate) use evolve::{can_interact_with_tracks, evolve_with_tracks};
-pub use light::{PairLight, pair_light_bound};
+pub use light::{PairLight, RUN_HORIZON_PAST_WINDOW_YEARS, pair_light_bound};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};
 pub use params::{BinaryParams, WindSpeedFactor};
 pub use reach::{ReachBound, largest_radius_bound};

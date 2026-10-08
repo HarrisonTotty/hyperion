@@ -1895,6 +1895,8 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
     - `just fit-check`;
     - the bench, recorded.
 
+  _As built (2026-10-08): see Risks, "P11.T17.c as built"._
+
 ## Verification
 
 - `just ci` green after every task; `just test-slow` green after T12.
@@ -4808,3 +4810,195 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - refit the three tables, storing E's read margin and smear and the cooling floor, and
       sampling the gaps above;
     - re-run the slow test.
+- **P11.T17.c as built** (2026-10-08, at version 21; `decision-p11-t16-hierarchy-bound.md` §5;
+  the orchestrator's rulings of 2026-10-08; `decision-r06-t8h-warm.md` §5). No generated output
+  moves, and there is no bump: only the census reads the bound.
+  - **Built:**
+    - `stellar/binary/light.rs`: `pair_light_bound` answers all four verdicts.
+      - New public, re-exported from `stellar::binary`: `RUN_HORIZON_PAST_WINDOW_YEARS`,
+        2H + L = 264,144 years, which states the bound's input contract.
+      - Crate-private: `THIN_DEPARTING_CLASS` (2); `detached` (T17.a's items 1–3 and the new item
+        4); `tabled` (the tables' reading, which refuses an empty range of bins); `bound_with`
+        with `Tables`, so that T17.a's tests and tallies still read the closed form alone.
+      - `pair_light_bound` documents its verdicts' order, its `None` cases and a `# Panics` (a
+        committed table that cannot be read, as `PairLightTable::generator`).
+    - `stellar/binary/pair_light.rs`:
+      - `PairLightTable::cell_of`: `PairGrid::cell_of` bit for bit, from edges cached at decode,
+        through a shared `PairGrid::cell_with`. Computing the edges cost some 60 `exp` calls a
+        query, most of the 1 µs budget.
+      - `is_own_track`, `member_cuts` and `part_points` widened to `pub(super)`, for the slow
+        test's walk.
+    - `benches/binary.rs` prints each verdict's count. `.config/nextest.toml` gives the slow test
+      eight slots.
+    - The golden `stellar/pair_light`, re-blessed at 21. 103 of its 256 verdicts moved, all from
+      `None`: 89 to `Bright`, 11 to `Unchanged` and 3 to `Remnants`. Each `Bright` gained a line
+      pinning its magnitude's bits. None of its reach-table lines and no `Detached` moved. It
+      passes on wasm32-wasip1.
+    - Fast tests:
+      - `each_verdict_only_loosens_as_the_window_widens`, beside T17.a's `Detached` test;
+      - `the_bound_does_not_depend_on_what_was_asked_before`, `assert_order_independent` over 150
+        queries of C, D and E, a third with a star below 0.1 M☉;
+      - `the_tables_answer_remnants_unchanged_and_bright`, its `Bright` held to the engine's own
+        Algol-like pair;
+      - `a_thin_bin_is_not_bounded`;
+      - `a_light_members_pair_is_detached_only_if_it_cannot_interact_by_plus_h`;
+      - `the_table_reads_a_pairs_cell_as_its_grid_does`.
+
+      T17.a's tests read the closed form alone (`closed`, `Tables::Skip`) wherever they test
+      `Detached`. `a_pair_whose_star_may_have_exploded_is_not_bounded` became `…_is_not_detached`,
+      since the tables now answer such pairs.
+  - **The reading** (the module docs):
+    - The table is the layer's whose band holds the heavier star's initial mass, C's at 2.5 M☉.
+    - Every age bin from the window's start to its end is read through `living_cmag_for` and
+      `changed_cmag_for`, so the cooling floor and E's margin and smear apply.
+    - `Remnants` where the living value is DARK in every bin; `Unchanged` where the changed value
+      is; `None` for a thin bin; otherwise `Bright(M)`, M the brightest changed value.
+    - An UNSEEN changed value (a departing star with no V) gives M = +20.45, the faintest stored.
+    - `None` outside the tables: a heavier star outside 0.75–150 M☉, a periastron below 1 R☉, a
+      window ending past 1.5 × 10¹⁰ years.
+  - **Deviations:**
+    - **`Remnants` is asked before `Detached`**, not after as the task text has it.
+      - Otherwise a narrow window's `Detached`, whose stars take their own bounds (possibly not
+        dark), could be followed by a wider window's `Remnants`, which gives nothing: a tighter
+        answer over a wider window, against inclusion monotonicity.
+      - Asked first, `Remnants` over a window holds over every window inside it.
+      - The cost is none: pairs the closed form calls `Detached` read `Remnants` where the tables
+        find nothing living, which is tighter.
+      - It awaits the orchestrator's confirmation (reported).
+    - **The thin rule** (the task's "undersampled or borderline"). Every cell holds 72 samples, so
+      none is undersampled. A bin whose changed value is not DARK and whose cell's own samples
+      hold one to three departing stars or products there (count class ≤ 2) is within the margin
+      of `Unchanged`'s boundary: `None`. A bin whose changed value comes from the neighbours alone
+      (own count 0) is as consistent with `Unchanged` as with `Bright`, and reads `Bright`.
+    - **The sub-0.1 M☉ rule, as built.** The ruling's "cannot be run by +H" is read as "cannot
+      interact by +H"; it awaits the orchestrator's confirmation (reported).
+      - A pair that `run_pairs` runs only because it holds a remnant is still one detached
+        segment of its own models (`run_pair`'s pre-test gate), so its cooling member accretes
+        nothing. The engine steps a pair, and the member accretes, only if it can interact by +H.
+      - The window's ages are light-time ages, so the age at +H is at most 2H + L past the
+        window's end. Such a pair is `Detached` only if the closed form's items 1–3 also hold
+        there; otherwise the tables answer.
+      - The ruling's other branch, the accretion's brightening bounded inside the margin, is not
+        built.
+      - `light.rs`'s "accrete no wind on their own tracks" now says it of stars of at least
+        0.1 M☉.
+    - **The tables are read for exact masses only.** `pair_light_bound_over` over mass intervals
+      stays `Detached` or `None`, as T17.a's width test needs.
+    - **The slow test's pairs:**
+      - every star–star pair of every attempt `hierarchy_bound` lists, as the census asks them, not
+        only the attempt kept. Which attempt is kept is known only by generating the system, and
+        every attempt's draw follows the same laws;
+      - its light-member pairs are the near-Sun pairs with the lighter star put at 0.08–0.1 M☉ on
+        the same drawn orbit. Realised ones are too few: T17.b counted 155, 6 and 0 in C, D and E.
+    - **`Bright` is checked against M alone**, stricter than "the brighter of its own bound and
+      M": the stars that do not depart are their own models, which R06's tests bound.
+    - **The slow test ran under `just _locked` at eight threads**, on the orchestrator's
+      instruction for T17.c.
+    - **The census's counts move.** R06.T8.g's `StarBounds` reads the bound, so its pair tallies
+      and `candidates_opened` fall where the tables now answer. The stars the census lists do not
+      move.
+  - **The slow test** (`the_pair_verdicts_hold_against_the_engine`, seed `0x7e57_0017_c0c0_a11e`,
+    its own galaxy):
+    - Per layer C, D and E: 10⁵ pairs near the Sun, 2.5 × 10⁴ in the bulge and 10⁴ with a star
+      below 0.1 M☉, so 4.05 × 10⁵ pairs, 3 × 10⁴ of them not realised. Each is checked in an old
+      window, which ends up to 2H + L before the record's age at +H, and in a young one, whose +H
+      age is log-uniform over 10⁵–10⁸ years. The windows are a point, up to 1,000 years, up to
+      3 × 10⁵ years (the census's), or up to 0.5 dex (wide).
+    - The truth is `evolve` run to the +H age, whose gate is `run_pairs'`. Each state in the
+      window, read at T17.b's walk's cuts, is compared with its own model's. A `Detached` pair is
+      also held to `can_interact` at its window's end.
+    - **0 violations and 0 engine panics** in 8.1 × 10⁵ checks, in each of two runs at eight
+      threads under the heavy lock: 498 s at a 1-minute load of 2–8, and, after the reviews (with
+      the like-for-like count below), 597 s at about 10. Both gave the same verdicts.
+    - Verdicts over the census's windows near the Sun, %:
+
+    | Layer, ages | `Detached` | `Unchanged` | `Remnants` | `Bright` | `None` (of it thin) |
+    | ----------- | ---------- | ----------- | ---------- | -------- | ------------------- |
+    | C, old      | 75.17      | 0.01        | 0.34       | 22.39    | 2.10 (1.88)         |
+    | C, young    | 99.38      | 0.33        | 0          | 0.23     | 0.07 (0.02)         |
+    | D, old      | 21.75      | 0.58        | 14.44      | 59.14    | 4.08 (4.02)         |
+    | D, young    | 96.42      | 0.10        | 0          | 3.32     | 0.15 (0.14)         |
+    | E, old      | 0.68       | 1.20        | 29.65      | 65.72    | 2.76 (2.76)         |
+    | E, young    | 65.43      | 1.00        | 0.24       | 31.18    | 2.15 (2.15)         |
+    - In the bulge, old: C 66.80 / 0.02 / 0.81 / 29.40 / 2.97, D 20.14 / 0.36 / 18.50 / 57.72 /
+      3.27, E 0.39 / 0.77 / 36.51 / 60.75 / 1.58. Young, as near the Sun to within 0.6.
+    - With a star below 0.1 M☉, old: C 70.35 / 0.03 / 0 / 27.69 / 1.93, D 11.02 / 0 / 0 / 84.63 /
+      4.34, E 0.53 / 0 / 0 / 91.62 / 7.85.
+    - **The margin used.** The least room, a held departing star's V less M (margin included):
+      - C 0.61 mag and D 0.44, of their 0.3: none used;
+      - E 0.40, of its 0.7: 0.30 used;
+      - with a star below 0.1 M☉, where the cooling floor (margin 0.3) sets M: C 0.67, D 0.31 and
+        E 0.34.
+    - **The thin rule's cost and its case.** It makes 1.9%, 4.0% and 2.8% of C's, D's and E's old
+      pairs near the Sun `None`. Without it their `Bright` would have held, but nearer M. In E's
+      old pairs near the Sun there was 0.25 mag of room (0.45 of the 0.7 used), against 0.68 for
+      their other `Bright` pairs.
+
+  - **Inclusion monotonicity** (`each_verdict_only_loosens_as_the_window_widens`): over 10⁴ random
+    pairs, a fifth with a star below 0.1 M☉, and 600 generated pairs of C, D and E, each verdict
+    over a window is no tighter than over a window inside it. Every verdict occurs.
+  - **Cost** (`binary/pair_light_bound/queries`, under the heavy lock at a 1-minute load of 5;
+    provisional): 561 µs for 1,024 queries, 0.55 µs a call, against the 1 µs target. The queries
+    give 518 `Detached`, 17 `Unchanged`, 26 `Remnants`, 410 `Bright` and 53 `None`.
+  - **`just fit-check`:** 26 fresh, 6 provisional warnings (as before), 0 failures.
+  - **Findings, for R06.T8.g and the version-22 refit** (reported to main, not fixed):
+    - **`Bright`'s M is loose.** Over the census's windows its median is M<sub>V</sub> −6.4 in C,
+      −7.3 in D and −5.0 in E (old, near the Sun; 90% brighter than −3.6, −0.8 and −0.5). So nearly
+      every `Bright` pair's record stays listable and is generated. Only 21%, 8% and 1% of C's, D's
+      and E's old `Bright` pairs hold a departing star in their window.
+      - Most of it is the walk's. Every state of a pair the engine steps counts as a departure,
+        from its first arrival, wind accretion included, and every sample is run to
+        1.5 × 10¹⁰ years. The generator runs a pair only to its +H, and its gate leaves the pair
+        its own models until it can interact. This is also why `Unchanged` is near 0 in C.
+      - The lever, for the refit: drop each sample's departures before its pre-test's
+        interaction age less 2H + L, which the gate makes exact. Most of these `Bright` pairs
+        would become `Unchanged`. The rest is the dilation over each cell's neighbours.
+    - **The core-inertia column** (T17.b's open option), like for like. Over the census's old
+      windows near the Sun, the pre-test passes over 81.7%, 29.0% and 7.0% of C's, D's and E's
+      pairs, and `Detached` takes 75.2%, 21.8% and 0.7%. Of the pairs it misses, these go to
+      `Bright` or `None`, where nearly all are generated:
+      - C: 6.4% of all its pairs (5.5 `Bright` and 0.8 `None`);
+      - D: 4.5% (4.2 and 0.2);
+      - E: 3.5% (3.4 and 0.1).
+
+      The rest of those it misses are `Remnants` or `Unchanged`, and lose nothing: D 2.8%, E 2.8%.
+      The young windows lose under 1.5% in C and D. So the loss matters most in C, where it is
+      some 6% of pairs, and the column would recover part of it. It is not built: the
+      orchestrator decides.
+
+    - **The accretion's brightening** (the science check). 10⁻³ M☉ moves V by about 0.15–0.2 mag
+      at 0.08–0.1 M☉ (Baraffe et al. 2015 at 5 Gyr, with Pecaut and Mamajek 2013's BC<sub>V</sub>),
+      not R06.T8.g's 0.05–0.1, and by more just above the hydrogen-burning limit. The rule does not
+      change: such pairs are already kept out of `Detached`. `light.rs` states the figure; the task
+      text quotes the ruling's.
+    - **White dwarfs are dark** for all three tabled verdicts, not only `Remnants`. The tables
+      hold no remnant's light, and a binary-made white dwarf can be younger and hotter than either
+      star's own, or exist where the star's own model is still a star. The docs say so; the A4
+      refit adds the white-dwarf column (T17.b's note).
+    - **White-dwarf mergers in C and D** (the science check). A periastron bin of 0.25 dex spans
+      about a dex of merger ages (Peters 1964), so in C and D a verdict can fall in an empty bin
+      between sampled merger products, the case E's smear covers. The slow test bounds the miss
+      rate at 95% to about 2 × 10⁻⁴ per D `Remnants` verdict and 10⁻⁴ per E verdict, but C had
+      only 430 `Remnants`. At the refit: smear C's and D's cells that hold a product after both
+      stars' own deaths.
+    - **The truth's sampling is the fit's**: the slow test reads states at T17.b's walk's cuts and
+      five points a part, so a phase briefer than a part escapes both.
+  - **Reviews:**
+    - **rust-reviewer.** No must-fix. Applied: `THIN_DEPARTING_CLASS` crate-private;
+      `pair_light_bound`'s `# Panics`, and its docs summarising the verdicts and `None` cases;
+      the edge cache's measurement in its doc; H read from `CLOCK_WINDOW_H`; a test doc narrowed.
+    - **determinism-auditor.** No must-fix or should-fix. Applied: `tabled` refuses an empty range
+      of bins (else `Remnants`); the order-independence test; `Bright`'s magnitude pinned as bits.
+      Noted: on wasm32-wasip1 a panic aborts, so the slow tests' `catch_unwind` counts nothing
+      there (T17.b's has the same exposure).
+    - **plan-conformance-reviewer.** No must-fix. Its should-fixes: this entry's counts and
+      figures corrected, the like-for-like loss measured, the census's counts noted, and the
+      deviations above. Applied too: T17.a's tallies on the closed form, and the Algol test held
+      to the engine.
+    - **science-checker.** One must-fix, applied: `RUN_HORIZON_PAST_WINDOW_YEARS`'s doc derived
+      2H + L wrongly (the value was right). Its should-fixes are the accretion figure and the
+      white-dwarf note above; its considers, the C and D merger gaps and the cooling floor's DARK
+      bins, are recorded here and in item 4's docs.
+  - **At the version-22 batch:** re-run the slow test and the monotonicity test after the tables'
+    refit. Item 4 already checks for sudden deaths by +H, which T4.l's passed-over collapses will
+    hand to the engine.
