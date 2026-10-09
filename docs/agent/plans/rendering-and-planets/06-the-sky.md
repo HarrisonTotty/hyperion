@@ -1468,6 +1468,20 @@ sky::census::query`, `just test-slow caps_converge_in_rays`.
   an eye-only request (`SkyQueryBuilder::eye_visibility`), each ray taking the deepest limit of its
   cone's 16² texels and their neighbours.
 
+- **R06.T7.c The visibility caps' safety with the illumination (new; test only; after T11.d;
+  before the default switch serves eye-only skies by visibility; decided 2026-10-08,
+  `decision-r06-t11d-first-sky.md` §4).** T7.b's safety test (`sky::caps`'
+  `the_eyes_visibility_caps_count_what_it_sees_and_open_a_fifth_fewer_systems` and
+  `least_margin`) built the eye's cut, its visibility and the final 64² limit map without the
+  illumination, which the server now states on all three (R06.T9.g, R06.T11.d). Re-run it with
+  `Illumination::march` at each observer, stated on the cut, the visibility and the final map's
+  query, at the six points of `caps_converge_in_rays` (a slow test if it outgrows the fast
+  suite), and record each point's least margin beside T7.b's +0.094 mag near the Sun. A negative
+  margin anywhere widens `visible_cuts_v`'s reach, never the test. Until it passes, the server
+  leaves `eye_visibility` unset: T7.b's uniform caps by ray at the eye's cut, complete every way,
+  which moves the full census's cost and barely the first sky's. Acceptance: the test, by name,
+  and `cargo test -p hyperion-sim sky::caps`.
+
 ### R06.T8 The census
 
 - **R06.T8.a Query and plan.** `SkyQuery`, its builder (observer within the cube and ±H, cut finite
