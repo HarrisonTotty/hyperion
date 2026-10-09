@@ -1,7 +1,7 @@
 # Plan R13: The Hybrid Sky
 
 - **Milestone:** Rendering milestone RM7, sequenced after RM3 and beside RM4 (numbered RM7 so that
-  RM4–RM6 keep their numbers). R13.T1 may run before RM3 closes, and R13.T2 is RM3's interim
+  RM4–RM6 keep their numbers). R13.T1 and T1.b run before RM3 closes, and R13.T2 is RM3's interim
   (Design note 15).
 - **Depends on:** [R06 The sky](06-the-sky.md) as built: its luminosity tables (T5), caps by
   direction (T7.b), shell plan and texel listing (T8.i), the band's march and the eye's own sky
@@ -16,40 +16,44 @@
   [the brainstorm](../../brainstorming/rendering-and-planets.md)): "The sky", its subsection "The
   star field is the galaxy, not a photograph" (the census, the band, "a statistical layer of
   unresolved stars, labelled as such") and the subsection "The hybrid sky: the census near,
-  synthetic stars far" (signed off by the owner on 2026-10-08, its label wording still a draft);
-  open questions 13, 16 and 19 as they touch the
-  census's reach and cost. The decision it answers is the owner's of 2026-10-08 on the full sky's
-  time (`decision-p11-t17c-bright.md` §4), and its feasibility study is
-  `.git/rm23-orchestration/feasibility-hybrid-sky.md`.
+  synthetic stars far" (signed off by the owner on 2026-10-08, its label wording still a draft,
+  and its amendment for the real limit a draft for the owner since 2026-10-09); open questions 13,
+  16 and 19 as they touch the census's reach and cost. The decision it answers is the owner's of
+  2026-10-08 on the full sky's time (`decision-p11-t17c-bright.md` §4), and its feasibility study
+  is `.git/rm23-orchestration/feasibility-hybrid-sky.md`. The real limit is the owner's of
+  2026-10-09, after R13.T1's measurement (`decision-r13-guard-trip.md`).
 
 ## Goal
 
 When this plan is done, the sky's census is exact only where exactness matters and affordable: out
-to a real boundary per layer and direction, set so that under one star brighter than a fixed
-ceiling V_P is expected beyond it, every star is the galaxy's own, as R06 lists it today. Beyond
-that boundary the stars between V_P and the request's cut are **synthetic**: drawn by the server in
-fixed cells of the galaxy, by exact thinning of the generated galaxy's own density, luminosity
-functions and dust, the same tables the band and the caps read, so that they are correct in
-expectation, consistent with the band texel by texel, the same for every client, run, machine and
+to a real boundary per layer and direction: the lesser of a fixed real limit, 2,000 ly, and the
+radius beyond which under one star brighter than a fixed ceiling V_P is expected (the limit decided
+by the owner on 2026-10-09, `decision-r13-guard-trip.md`), every star is the galaxy's own, as R06
+lists it today. Beyond it every star brighter than the request's cut is **synthetic**: drawn by the
+server in fixed cells of the galaxy, by exact thinning of the generated galaxy's own density,
+luminosity functions and dust, the same tables the band and the caps read, so that they are correct
+in expectation, consistent with the band texel by texel, the same for every client, run, machine and
 observer, stable as the camera moves and true in parallax. The band holds only the remainder. The
 view draws synthetic stars as it draws listed ones and says that they are synthetic; they cannot be
-selected, targeted or counted, and on approach the real census takes their region over. Near the
-Sun the full sky then costs some thousands of CPU-seconds rather than 0.4–1.0 × 10⁶, and a camera's
-sky to V 10 becomes affordable.
+selected, targeted or counted, and on approach the real census takes their region over. Near the Sun
+the full sky then costs about 1–1.5 × 10⁴ CPU-s on the test fixture and 2.7–3.3 × 10⁴ on the
+server's galaxy (estimates; R13.T1.b measures them). That compares with 1.0–1.5 × 10⁵ at the
+ceiling's caps alone (R13.T1) and 0.4–1.0 × 10⁶ for the exact census. A camera's sky costs what the
+eye's does.
 
 ## Scope and non-goals
 
 In scope:
 
 - The measurement of the real boundary from the caps alone, and a sampled bench of the real tier
-  (T1).
-- The real tier: each layer C–E capped at T7.b's caps computed at the ceiling, listed by the band
-  texel's radius at every reply, with the T7.b gap closed (T2); RM3's interim is this task with the
-  band for the rest.
+  (T1); the same for the boundary held at the real limit, with the bright stars beyond it (T1.b).
+- The real tier: each layer C–E capped at T7.b's caps computed at the ceiling and at the real
+  limit, listed by the band texel's radius at every reply, with the T7.b gap closed (T2); RM3's
+  interim is this task with the band for the rest.
 - A colour–magnitude table in R06.T5's quadrature, and the light-consistent counts the synthetic
   tier draws from (T4).
-- The band's third pair of sums, the light fainter than the ceiling, and the march's ray profiles
-  kept for the synthetic tier (T3).
+- The march's ray profiles, kept for the synthetic tier (T3); the band needs no sums at the ceiling
+  (Design note 9).
 - `hyperion_sim::sky::synthetic`: the fixed cells, the magnitude-ordered thinning, the photometry
   and the walk (T5).
 - Merge, N_max, overflow, glare, eye offsets and conservation with synthetic stars (T6).
@@ -109,10 +113,14 @@ impl CapCount {                          // the counts towards a boundary given 
     pub fn stars_within_and_beyond_toward(&self, layer: Layer,
         inside: impl Fn(UnitVector) -> LightYears, outside: impl Fn(UnitVector) -> LightYears) -> f64;
 }
+// sky::caps (R13.T1.b; test-only, `#[cfg(any(test, feature = "testing"))]`)
+impl CapCount { pub fn cap_with_budget(&self, layer: Layer, budget: f64) -> LayerCap; }
+    // `cap`'s rule with `ray_extents`' budget for the count beyond (`cap` takes 1.0)
 // sky::caps (R13.T2)
+pub const REAL_LIMIT_LY: f64 = 2_000.0;  // the owner, 2026-10-09; one of SHELL_EDGES_LY, which a test holds
 pub fn real_boundary(at_ceiling: &CapCount, caps_at_cut: &[LayerCap]) -> Vec<LayerCap>;
-    // C–E: each ray the lesser of the ceiling's cap and the cut's (or spheres, T1's ruling);
-    // A, B and the brown dwarfs: the cut's caps
+    // C–E: each ray the least of the ceiling's cap, the cut's and `REAL_LIMIT_LY`, in cones
+    // widened by ρ (fix (i)); A, B and the brown dwarfs: the cut's caps
 // sky::census (R13.T2, T6)
 impl SkyQueryBuilder { pub fn synthetic_ceiling(self, v: Magnitudes) -> Self; }
 impl SkyQuery { pub fn synthetic_ceiling(&self) -> Option<Magnitudes>; }
@@ -143,6 +151,9 @@ impl LuminosityFunction {
   synthetic)) and `synthetic_ceiling_v: Option<f64>` (V_P, absent where the reply has no real
   boundary at a ceiling). Each `SkyLayerCensusDto` gains its real boundary, in the per-ray form
   R06.T11.d gives `complete_to_ly`, and its `expected_beyond` is stated at the cut beyond it.
+- `SkyResponse` also gains `real_limit_ly` (`REAL_LIMIT_LY`), and each `SkyLayerCensusDto`
+  `bright_beyond`, the expected count brighter than V_P beyond its real boundary; both are absent
+  where the reply states no ceiling (R13.T2).
 - No new kind, no byte of the star or texel records changes, and `PROTOCOL_VERSION` stays (an
   additive field, R03 Design note 12).
 
@@ -155,9 +166,10 @@ note `SYNTHETIC STARS` beside `INTEGRATED STARLIGHT`, in both styles.
 
 ### Test helpers
 
-`crates/hyperion-sim/tests/sky_hybrid.rs`: the boundary record (T1), the census-against-synthetic
-comparison (T9). A test-only salt (`SyntheticSalt`, `#[cfg(any(test, feature = "testing"))]`) that
-re-keys the synthetic stream, for ensembles of independent realisations.
+`crates/hyperion-sim/tests/sky_hybrid.rs`: the boundary record (T1), the capped boundary's record
+(T1.b), the census-against-synthetic comparison (T9). A test-only salt (`SyntheticSalt`,
+`#[cfg(any(test, feature = "testing"))]`) that re-keys the synthetic stream, for ensembles of
+independent realisations.
 
 ## Consumes
 
@@ -225,26 +237,34 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
 2. **Three tiers, one boundary per texel.** For each band texel and layer C–E, with R(u) the
    layer's real boundary towards the texel's centre (Design note 3):
    - **real:** stars nearer than R(u), to the request's cut, from the census, as R06 lists them;
-   - **synthetic:** stars at or beyond R(u) with V_P ≤ V < cut, drawn by Design note 5;
-   - **band:** the rest, in expectation: everything fainter than the cut, and beyond R(u) the light
-     brighter than V_P (under one star a layer by Design note 3) and, while a sky streams, the
-     pending real region (Design note 11).
+   - **synthetic:** stars at or beyond R(u) brighter than the cut, drawn by Design note 5;
+   - **band:** the rest, in expectation: everything fainter than the cut, and while a sky streams
+     the pending real region (Design note 11).
 
    A star's tier is decided by the texel `BandSpec::texel_of` places it in (R06.T8.l's lookup and
    T8.i's listing rule), so the three share one boundary texel by texel and each star's light is
    added once (R06 Design note 11). A, B and the brown dwarfs are wholly real: their caps are
    11–260 ly near the Sun at the eye's and the camera's cuts.
 
-3. **The real boundary is T7.b's cap at the ceiling.** For layers C–E, R(u) is the cap by ray that
-   `CapCount::measure` gives at cut V_P instead of the request's cut, widened as T7.b widens, and
-   never beyond the cut's own cap on any ray: R06 Design note 9's criterion applied at the ceiling.
-   So **every star brighter than V_P, and every star nearer than R(u), is the galaxy's own**, to
-   under one expected miss a layer, and each reply states it. One radius, not two cuts: a real tier
-   complete to V_P beyond R(u) would cost about what the full cut costs, since at version 21 the
-   census generates `Bright` pairs whatever its cut (E's `Bright` median is M_V −5.0; at 2 kly a
-   cut of 5 instead of 8 lowers the listable share of `Bright` pairs from about 0.85 to 0.55, read
-   from the quantiles of `decision-p11-t17c-bright.md` §2.2), and the caps at V_P are where such a
-   census ends anyway.
+3. **The real boundary is the lesser of T7.b's cap at the ceiling and a fixed real limit.** For
+   layers C–E, R(u) is, ray by ray, the least of three radii: the cap at V_P, which
+   `CapCount::measure` gives at cut V_P instead of the request's cut, widened as T7.b widens (R06
+   Design note 9's criterion applied at the ceiling); the cut's own cap; and `REAL_LIMIT_LY`,
+   2,000 ly, a fixed shell edge (`SHELL_EDGES_LY`) and twice the first drive's 1,000 ly range
+   (decided by the owner on 2026-10-09, `decision-r13-guard-trip.md`, after R13.T1 measured the cap
+   at V_P alone at 8.8–22.6 times its estimate; Design note 4). So **every star nearer than R(u) is
+   the galaxy's own**: every star brighter than V_P within 2,000 ly, and near the Sun every star
+   within the drive's range on at least nine rays in ten (R(u)'s 10th percentiles there are
+   1,146–1,597 ly on both galaxies). Beyond 2,000 ly, stars brighter than V_P are synthetic too: an
+   estimated 10–60 brighter than V 4.5 near the Sun, the brightest about V 1.5–3, which each reply
+   states (`bright_beyond`) and R13.T1.b measures. Where the cap at V_P lies within the limit, under
+   one star brighter than V_P a layer is expected beyond it, as before. The limit is one constant,
+   lifted to the cap at V_P once the census levers make that affordable (Risks). One radius, not
+   two cuts: a real tier complete to V_P beyond R(u) would cost about what the full cut costs,
+   since at version 21 the census generates `Bright` pairs whatever its cut (E's `Bright` median is
+   M_V −5.0; at 2 kly a cut of 5 instead of 8 lowers the listable share of `Bright` pairs from about
+   0.85 to 0.55, read from the quantiles of `decision-p11-t17c-bright.md` §2.2), and the caps at
+   V_P are where such a census ends anyway.
    - **The listing is by the band texel's radius at every reply**, the final one included (T8.i's
      rule (b), `decision-r06-t8i-listing.md`). With R(u) at the ceiling thousands of stars lie just
      beyond it, so the one-shot rule ("every star of the cells it opens") would count them twice,
@@ -252,28 +272,49 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
    - **No gap.** T7.b's gap, a star within R(u_T) of its texel but in a cell the cones about its own
      direction left closed, is bounded today by the count beyond the caps, under one star. Beyond a
      ceiling's cap that bound is gone (_estimate_: ten to a few tens of stars near the Sun). R13
-     closes it exactly, by fix (i) of that record (cones widened by the texel radius ρ) or by
-     spherical boundaries, whichever R13.T1 measures cheaper.
+     closes it exactly by fix (i) of that record: each ray's cone widened by ρ, the band's largest
+     texel radius. Ruled 2026-10-09 (`decision-r13-guard-trip.md` §1). Near the Sun it costs
+     0.6–8.5% more systems (E 6.2%) and closes the gap to 0 at every point, cut and ceiling R13.T1
+     measured. Spherical boundaries are neither exact (their gap reaches 0.31 stars, and in the
+     nuclear disc at V<sub>P</sub> 5.5 they leave more than one star brighter than V<sub>P</sub>
+     beyond) nor cheaper by cost (1.02–1.70 times). On rays held at `REAL_LIMIT_LY` the radii are
+     uniform, so the gap there is zero by T8.i's rule (`all_reach`); fix (i) still widens every
+     cone, at no cost where the neighbours share the limit.
 4. **The ceiling V_P** is a server constant, `SYNTHETIC_CEILING_V`, stated in every reply. It is
-   not a client setting: a bridge shares one sky and every ship takes the same rule. It sets the
-   real tier's cost and the synthetic share (_estimate_, `feasibility-hybrid-sky.md` §2.2, near the
-   Sun at the eye's cut, spherical boundaries; the boundaries and costs lean low, since the model
-   ignores extinction, and T7.b's rays lower the cost):
+   not a client setting: a bridge shares one sky and every ship takes the same rule. With the real
+   limit (Design note 3) it sets the boundary wherever the cap at V_P lies within 2,000 ly, and the
+   synthetic share. R13.T1 measured the cap at V_P near the Sun at the eye's cut, by ray on the
+   fixture, and the real tier's cost without the limit (Risks, "Deviations in T1, as built"; the
+   costs have no fix (i), which adds about 6%). The costs at the limit are
+   `decision-r13-guard-trip.md` §2.3's _estimates_, about ±30%, which R13.T1.b measures:
 
-   | V_P | R: C / D / E (ly)                       | Real tier, CPU-s | Synthetic share of stars brighter than V 6.5 |
-   | --- | --------------------------------------- | ---------------- | -------------------------------------------- |
-   | 4.0 | 520–610 / 860–960 / 1,620–1,840         | 2.0–2.7 × 10³    | 17–22%                                       |
-   | 4.5 | 740–850 / 1,180–1,290 / 2,240–2,510     | 4.5–5.8 × 10³    | 8–11%                                        |
-   | 5.0 | 1,050–1,180 / 1,600–1,730 / 3,110–3,420 | 1.0–1.25 × 10⁴   | 3.6–4.7%                                     |
+   | V_P | Cap at V_P by ray, median (10–90%): C / D / E (ly)              | Without the limit, CPU-s: fixture / server's galaxy | At 2,000 ly, CPU-s (_estimate_): fixture / server's galaxy | Stars brighter than V 6.5 beyond the cap at V_P |
+   | --- | --------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------- |
+   | 4.0 | 1,038 (944–1,038) / 1,519 (1,141–2,222) / 2,443 (1,255–5,753)   | ~6.3 × 10⁴ (_estimate_) / —                         | —                                                          | 4.85%                                           |
+   | 4.5 | 1,416 (1,287–1,416) / 2,075 (1,287–2,763) / 2,511 (1,416–7,177) | 9.49 × 10⁴ / 1.02 × 10⁵                             | 1.0–1.2 × 10⁴ / 2.7–2.9 × 10⁴                              | 2.32%                                           |
+   | 5.0 | 1,758 (1,758–1,934) / 2,343 (1,597–3,782) / 2,838 (1,597–8,139) | 1.45 × 10⁵ / 1.43 × 10⁵                             | 1.3–1.5 × 10⁴ / 3.1–3.3 × 10⁴                              | 0.71%                                           |
+
+   At 2,000 ly and V_P 4.5, about 3–8% of the stars brighter than V 6.5 near the Sun lie beyond the
+   boundary, among them an estimated 10–60 brighter than V 4.5 (`decision-r13-guard-trip.md` §2.4,
+   its weakest figures, which R13.T1.b measures).
+
+   **The guard tripped.** The feasibility study had estimated the real tier at 4.5–5.8 × 10³ CPU-s
+   at 4.5 and 1.0–1.25 × 10⁴ at 5.0, with spherical boundaries. R13.T1 measured 8.8–22.6 times
+   that, at both ceilings, for the eye and the camera, on both galaxies. E's rays reach
+   2,500–9,500 ly out of the plane, and at version 21 their cost is generation, which no cut
+   cheapens (`decision-r13-guard-trip.md` §2). **The owner answered on 2026-10-09 with the real
+   limit** (option A of that record, as recommended), for RM3's interim and for R13 alike. At the
+   limit the real tier is 2.5–8 times R06.T17's ruled 4,000 CPU-s target, recorded, not gated.
+   R13.T1.b measures it, under its own guard, before T2 builds.
 
    **Decided by the owner on 2026-10-08: V_P is 4.5** (`feasibility-hybrid-sky.md` §11, question
    1, as recommended), and 5.0 in RM3's interim (Design note 15). Every star brighter than V 4.5
-   stays real (in a Sun-like sky some 900, the constellation-forming ones; a plausibility check
-   from Hipparcos's 1,608 to V 5 at 0.49 dex a magnitude), about 90% of naked-eye stars stay real,
-   and the real tier lands near R06.T17's ruled 4,000 CPU-s target once its boundaries are by ray.
-   It depends on V_P, not on the cut, so the eye and every camera share one partition, and one
-   census serves both. If R13.T1 measures the real tier's cost at more than twice the estimate, it
-   reports that to the owner before T2 builds.
+   within 2,000 ly stays real (in a Sun-like sky some 900 are brighter than V 4.5, the
+   constellation-forming ones; a plausibility check from Hipparcos's 1,608 to V 5 at 0.49 dex a
+   magnitude; near the Sun an estimated 10–60 lie beyond the limit), and about 92–97% of naked-eye
+   stars stay real (_estimate_; 97.7% at the cap at V_P alone, measured). The boundary depends on
+   V_P and the limit, not on the cut, so the eye and every camera share one partition, and one
+   census serves both.
 
 5. **World-anchored synthetic cells.** The synthetic stars live in a fixed grid of cells of
    `SYNTHETIC_CELL_LY`, aligned to the galaxy's axes so that no cell straddles an axis plane, each
@@ -315,10 +356,13 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
    which R13.T5.a measures), so a star almost never flips. R(u) moves with the observer:
    - within a system nothing visible changes: the boundary moves by au, and a star at 500 ly shifts
      by 0.002 px over 30 au;
-   - a jump of Δ swaps about (dN/dr) Δ ÷ 2 stars at the boundary, all fainter than V_P: _estimate_
-     some 200 for 10 ly near the Sun at the eye's cut, some 40 of them brighter than the eye's
-     limit. The same jump moves a real star at 1,000 ly by up to 0.57°, and the client swaps a sky
-     whole by a cut, so the swaps hide in a change that is real.
+   - a jump of Δ swaps about (dN/dr) Δ ÷ 2 stars at the boundary, all fainter than V_P where R(u)
+     is the cap at V_P: _estimate_ some 200 for 10 ly near the Sun at the eye's cut, some 40 of
+     them brighter than the eye's limit. The same jump moves a real star at 1,000 ly by up to
+     0.57°, and the client swaps a sky whole by a cut, so the swaps hide in a change that is real;
+   - at the limit, a jump swaps stars of every brightness, including a few brighter than V_P: a
+     synthetic bright star is gone once a jump brings its region within 2,000 ly, and the real
+     stars there take over (Risks).
 
    No hysteresis: it would make a reply depend on the ship's history, and a reply is a pure
    function of its query (R06 Design note 12).
@@ -356,13 +400,12 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
    distribution of their bin, the assumption T5.d's sub-bin spread already makes. These counts are
    not the shipped counts, which take only the pair-evolved increase so that the caps stay
    conservative: the synthetic tier must be unbiased, the caps conservative.
-9. **The band with a ceiling** (R13.T3). When the query states a ceiling, `march_rows` keeps, per
-   layer and edge, a third set of the five sums, the light fainter than V_P at the band's boundary
-   (V_P − DM − v☉(A_V) A_V), beside the light fainter than the cut and all of it, and it keeps each
-   ray's A_V at its nodes. Beyond R(u), a reply with synthetic stars holds the light fainter than
-   the cut plus all the light less the light fainter than V_P; a reply without them (RM3's interim)
-   holds all the light, as R06.T9.b does. _Estimate:_ +10–30% of the march's time, as T9.j's second
-   sums added 31%, and some 8 MB of profiles at 64².
+9. **The band with a ceiling** (R13.T3). When the query states a ceiling, `march_rows` keeps only
+   the ray profiles, each ray's A_V at its nodes, and no third set of sums. Beyond R(u), a reply
+   with synthetic stars holds the light fainter than the cut, which R06's sums already give, since
+   every star brighter than the cut there is synthetic (Design note 2). RM3's reply, without
+   synthetic stars, holds all the light, as R06.T9.b does. _Estimate:_ some 8 MB of profiles at
+   64², and with no sums added, little of the march's time (T3 records it).
 10. **A synthetic star is a listed star for every purpose but its identity.** The brightest N_max of
     both kinds are sent, by flux, a real star before a synthetic one at equal flux, then by key;
     the rest are overflow, splatted into the band as points. Synthetic stars brighter than the eye's
@@ -371,7 +414,7 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
 11. **Streaming.** Synthetic stars lie only beyond the final R(u), and every reply, the first
     included, carries the same synthetic set, computed once after the march. The pending real
     region of a reply not yet final is the band's, as R06.T11.d has it. So no synthetic star swaps
-    while a sky arrives, and the first reply already shows the far faint field as points.
+    while a sky arrives, and the first reply already shows the far field as points.
 12. **What a synthetic star is to the player.** A drawing, like the band, labelled.
     - It cannot be selected, targeted or flown to. No star in the sky can: the view's list holds no
       stars (R06's non-goals), and jump targets are chosen on the `GALAXY` and `SYSTEM` displays or
@@ -384,8 +427,11 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
       record, at least about 10³ CPU-s at the eye and 10⁴ at the camera, and a new fitted table
       (Risks).
     - The brainstorm's "a star the player jumps to is the star they were looking at" holds for the
-      real stars only: every star brighter than V_P and every star within R(u). **The owner
-      amended it so on 2026-10-08** (the brainstorm's "The hybrid sky", signed off). The
+      real stars only. **The owner amended it so on 2026-10-08** (the brainstorm's "The hybrid
+      sky", signed off), to every star brighter than V_P and every star within R(u). With the
+      real limit it holds for every star within R(u), as amended by the owner on 2026-10-09
+      (`decision-r13-guard-trip.md`; the brainstorm's amendment is a draft for the owner): every
+      star brighter than V_P within 2,000 ly, and near the Sun every star within one jump. The
       real-record variant is revisited after the deferred census levers land
       (`deferred-corrections.md`, "Census cost").
     - **Synthetic stars appear in the naked-eye view as in every camera, labelled** (decided by the
@@ -394,15 +440,18 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
     route, and the owner signs off).
     - On the `STARS` line's composed-note slot, after `STREAMING` and before `NOT YET MODELLED`, in
       the annunciation form of `TERRAIN: STREAMING` (steady, `--text`, no status colour, neither a
-      data state nor an alert). Draft wording: `STARS V 7.4 mag EYE · FAINT DISTANT STARS:
-SYNTHETIC`.
+      data state nor an alert). Draft wording, naming the limit's effect
+      (`decision-r13-guard-trip.md` §3 A): `STARS V 7.4 mag EYE · DISTANT STARS: SYNTHETIC`.
     - In the view's list notes, `SYNTHETIC STARS` beside `INTEGRATED STARLIGHT`, in both styles,
       since the wireframe draws stars too: drawn singly from the galaxy's own statistics, not at any
       system's position, and never read as stars that can be selected or counted.
     - The guide's "Views" gains a third kind of star beside the two it names.
     - RM3's interim, with no synthetic stars, names what it leaves to the band in the
       `DETAIL LIMITED` form the census-cost sign-off advised for a labelled rule (its question 4),
-      for example `STARS V 7.4 mag EYE · DISTANT STARS FAINTER THAN V 5.0: DETAIL LIMITED`.
+      naming the limit: `STARS V 7.4 mag EYE · BEYOND 2000 ly: DETAIL LIMITED`, its figure
+      `REAL_LIMIT_LY` in the guide's digit grouping, as `BEYOND <edge> ly: STREAMING`'s is.
+    - The guide rows add that in dusty directions, stars fainter than V_P already leave the real
+      tier from nearer than the limit.
 14. **Determinism.** The synthetic tier follows the sim-determinism skill: one new tag, its word
     layout pinned by a test, every transcendental through `math`, sums in a fixed order, cells in
     canonical order, and any split of the cells into jobs giving the same bits. It is sim code on
@@ -412,25 +461,38 @@ SYNTHETIC`.
 15. **RM3's interim is R13.T2** (`feasibility-hybrid-sky.md` §10). **Decided by the owner on
     2026-10-08:** RM3 ships the real tier at V_P = 5.0 with the band for the rest (Design note 9's
     reply without synthetic stars), labelled by Design note 13's interim note, and the server's
-    sky is on by default once R13.T2 and R06.T11.d have both landed (R06.T11.d, "The default switch
-    and the interim"). When R13.T7 lands, V_P moves to 4.5 and the synthetic stars fill
-    [V_P, cut); the real tier's code does not change again. _Estimate_ near the
-    Sun at the eye's cut: the full sky 1.0–1.25 × 10⁴ CPU-s, 11–14 minutes on 15 workers, with about
-    4–5% of the naked-eye stars in the band.
-16. **What it costs** (_estimates_, `feasibility-hybrid-sky.md` §4 and §7; T1, T5.b and T9 measure):
-    - the real tier at V_P 4.5: 4.5–5.8 × 10³ CPU-s near the Sun at the eye's cut (spheres), against
-      0.4–1.0 × 10⁶ for the exact census; about 1.2–1.3 times that at the camera's 10.06;
+    sky is on by default once R13.T2, with its real limit of 2,000 ly (decided 2026-10-09), and
+    R06.T11.d have both landed (R06.T11.d, "The default switch and the interim"). When R13.T7
+    lands, V_P moves to 4.5 and the synthetic stars fill everything brighter than the cut beyond
+    R(u); the real tier's code does not change again. The owner's choice of the interim rested on
+    an estimate of 11–14 minutes; R13.T1 measured the real tier at V_P 5.0 without the limit at
+    1.43–1.45 × 10⁵ CPU-s, 2.7 h on 15 workers (Design note 4). _Estimate_ at the limit near the Sun
+    at the eye's cut (`decision-r13-guard-trip.md` §2.3, about ±30%; R13.T1.b measures it): the
+    full sky 1.3–1.5 × 10⁴ CPU-s on the fixture and 3.1–3.3 × 10⁴ on the server's galaxy, 15–17 and
+    34–37 minutes on 15 workers (about 1 and 2.2 h on the laptop's 4), with about 3–8% of the
+    naked-eye stars in the band.
+16. **What it costs** (_estimates_: the real tier's from `decision-r13-guard-trip.md` §2.3, about
+    ±30%, the rest from `feasibility-hybrid-sky.md` §4 and §7; T1.b, T5.b and T9 measure):
+    - the real tier at V_P 4.5, at the limit: 1.0–1.2 × 10⁴ CPU-s near the Sun at the eye's cut on
+      the fixture and 2.7–2.9 × 10⁴ on the server's galaxy (12–13 and 30–32 minutes on 15
+      workers), against 1.00–1.07 × 10⁵ at the cap at V_P alone with fix (i) (from R13.T1) and
+      0.4–1.0 × 10⁶ for the exact census. A camera's costs what the eye's does, since the boundary
+      does not depend on the cut (T1: 0.98–1.00 times). In the inner disc, about 2–3 × 10⁵ CPU-s
+      (4–6 h; a factor of two, not benched);
     - the synthetic pass: about 1–5 CPU-s at 7.95 and 5–25 at 10.06;
-    - the first sky: unchanged by R13 but for a second caps count at V_P over the same rays and the
-      synthetic pass, 10–40 CPU-s together; the first shell stays R06.T11.d's;
+    - the first sky: R06.T11.g's as built (6.96 s and 94.6 CPU-s to 125 ly), unchanged by the limit,
+      but for a second caps count at V_P over the same rays, split as T11.g splits the first, and
+      the synthetic pass, 10–40 CPU-s together;
     - warm after a jump: the real tier's warm ratio stays T8.n's (about 95–100% of cold at version
-      21), of a tier some hundred times smaller; the synthetic pass needs no cache.
+      21), so after a jump the tier costs about its cold cost again; the synthetic pass needs no
+      cache.
 
 ## Tasks
 
-T1 comes first and can run before RM3 closes. T2 needs T1 (V_P is ruled: 5.0 in RM3, 4.5 from
-T7); it is RM3's interim and lands before RM3 closes. T2.a needs only R06 as built, and T2.b needs
-R06.T11.d. T4 needs nothing of R13 and can run beside T1–T3.
+T1 comes first and can run before RM3 closes; T1.b follows it (decided 2026-10-09). T2 needs T1.b
+and its guard's verdict (V_P is ruled: 5.0 in RM3, 4.5 from T7; the real limit is ruled:
+2,000 ly); it is RM3's interim and lands before RM3 closes. T2.a needs only T1.b and R06 as built,
+and T2.b needs R06.T11.d. T4 needs nothing of R13 and can run beside T1–T3.
 T3 needs T2.a. T5.a needs T4; T5.b needs T3, T4 and T5.a. T6 needs T5.b. T7 needs T6, T2.b and
 R06.T11.d. T8 needs T7. T9 needs T7 and T8, and its gate the tables lane's correction of R06.T5.f's
 findings.
@@ -469,24 +531,68 @@ on every ray and that the expected count brighter than V_P beyond it is under on
 slow-test entry), this plan. Acceptance: `just test-slow the_hybrid_boundary_is_recorded`,
 `cargo bench -p hyperion-sim --no-run`, the bench recorded, `just ci`.
 
+### R13.T1.b The capped boundary measured
+
+New (decided 2026-10-09, `decision-r13-guard-trip.md` §6); after T1, before T2. Measure, from
+`CapCount` alone and with no census, at the six points of `caps_converge_in_rays`, at the eye's
+cut as T1 takes it, at 7.95 and at 10.06, for V_P 4.5 and 5.0 and real limits of 1,000, 2,000 and
+4,000 ly, with R(u) the cap at V_P held ray by ray within the limit (`RayRadii::lesser`, Design
+note 3):
+
+- the C–E systems within R(u), by ray, with cones widened by ρ (fix (i));
+- per layer, the expected stars beyond R(u) brighter than V 1, 2, 3, 4, V_P, 6.5 and the cut
+  (`CapCount::stars_beyond_toward`): what `bright_beyond` states and the synthetic tier takes;
+- for the record only, T7.b's rule for D and E with a budget of 3, 10 and 30 stars beyond instead
+  of one (`CapCount::cap_with_budget`, `ray_extents`' `budget`): R(u), the systems within and the
+  counts beyond, as above, for a later ruling on a yield-ordered budget (Risks).
+
+Then one sampled bench (`HYPERION_SKY_BENCH_SAMPLE`) near the Sun of the real tier at the 2,000 ly
+limit, at V_P 5.0 and 4.5, at the eye's cut, on the fixture and on the server's galaxy, its caps
+built as T1's bench builds them (`real_boundary_rule`) and held at the limit: each layer's records,
+generated and listed, and the CPU-s, scaled by T1's fix (i) factors where the bench has no widened
+cones.
+
+Record every figure in this plan's Risks, beside `decision-r13-guard-trip.md`'s estimates (§2.3,
+§2.4). **The guard.** A decision agent reports to the owner before T2 builds if, near the Sun at
+2,000 ly, any of these holds:
+
+- more than 60 stars brighter than V 4.5 lie beyond R(u), C–E together, at either ceiling;
+- more than 0.5 are expected brighter than V 1.0;
+- the capped tier costs more than twice §2.3's estimate.
+
+Files: `crates/hyperion-sim/tests/sky_hybrid.rs` (the slow test
+`the_capped_boundary_is_recorded`, which records, and asserts only that R(u) lies within the cut's
+caps and the limit on every ray, and that each count beyond it is at least the count beyond the cap
+at V_P alone), `sky/caps.rs` (`CapCount::cap_with_budget`, test-only),
+`crates/hyperion-sim/benches/sky.rs` (`sky/census_near_sun_limit/{eye,served_eye}_{4.5,5.0}`),
+`.config/nextest.toml` (its slow-test entry), this plan. Acceptance:
+`just test-slow the_capped_boundary_is_recorded`, `cargo bench -p hyperion-sim --no-run`, the bench
+recorded, the guard's verdict reported to the orchestrator, `just ci`.
+
 ### R13.T2 The real tier at the ceiling (RM3's interim)
 
 - **R13.T2.a The census.** `SkyQueryBuilder::synthetic_ceiling` (refused unless finite and brighter
   than the cut by at least 0.5 mag, naming its field), `SkyQuery::synthetic_ceiling`,
-  `sky::caps::real_boundary` (Design note 3, in T1's ruled form), and `census_plan_of` and the server
-  plan taking it for C–E when a ceiling is stated: shells to R(u), C–E listed by the band texel's
-  radius at every reply, fix (i)'s widened cones if ruled, and each layer's `expected_beyond` stated
-  at the cut beyond R(u) (`CapCount::stars_beyond` at the cut). With no ceiling every bit is R06's.
-  Tests:
+  `sky::caps::{real_boundary, REAL_LIMIT_LY}` (Design note 3, in T1's ruled form, taking the
+  limit), and `census_plan_of` and the server plan taking it for C–E when a ceiling is stated:
+  shells to R(u), C–E listed by the band texel's radius at every reply, fix (i)'s widened cones
+  (ruled 2026-10-09; the slow test's `widened_toward` is the reference scan), each layer's
+  `expected_beyond` stated at the cut beyond R(u) (`CapCount::stars_beyond` at the cut), and its
+  `bright_beyond`, the expected count brighter than V_P beyond R(u). With no ceiling every bit is
+  R06's. Tests:
   - with no ceiling, T8.e's identity tests, T8.i's shell tests and T9.b's conservation test pass
     unchanged;
   - with a ceiling, shells merged equal the census with caps forced to R(u) by the texel rule, bit
     for bit, and the last shell is the one-shot census under the same rule;
-  - no listed C–E star lies at or beyond its texel's R(u), in any reply;
+  - no listed C–E star lies at or beyond its texel's R(u), in any reply, nor at or beyond
+    2,000 ly;
   - no gap: over a small census (an observer near the Sun, forced small radii, a high cut), every
-    star `brute_force_sky` finds within its texel's R(u) is listed;
-  - R(u) is within the cut's cap on every ray, and the expected count brighter than V_P beyond it is
-    under one a layer;
+    star `brute_force_sky` finds within its texel's R(u) is listed; with fix (i), it passes over the
+    limit's uniform rays and the ceiling's varying ones;
+  - R(u) is within the cut's cap and `REAL_LIMIT_LY` on every ray; where the limit holds no ray (the
+    nuclear disc), the expected count brighter than V_P beyond it is under one a layer;
+  - each layer's `bright_beyond` equals `CapCount`'s count brighter than V_P beyond R(u);
+  - `REAL_LIMIT_LY` is one of `SHELL_EDGES_LY`;
   - the band with `CompleteTo` at R(u): listed, overflow and band light within 1% of R06's at the
     cut's caps (T9.b's conservation, at the new radii).
 
@@ -497,12 +603,14 @@ slow-test entry), this plan. Acceptance: `just test-slow the_hybrid_boundary_is_
 - **R13.T2.b The server, the reply and the interim label.** The server states the ceiling
   (`SYNTHETIC_CEILING_V`, 5.0 until R13.T7) on every request and computes both caps counts over one
   `RayExtinctions`, each count split as R06.T11.g splits the first; the response's
-  `synthetic_ceiling_v`, each layer's real boundary and its `expected_beyond` at the cut
-  (`just gen-protocol`); the client composes Design note 13's interim note; its guide row is
-  drafted for the UX decision agent and the owner. The sampled cold bench of
-  the served sky near the Sun is recorded for R06.T17's full-cold figure. Tests: a sky near the Sun
-  returns the sim's census at the ceiling bit for bit; the reply states the ceiling and each layer's
-  boundary and count beyond; the label's composition with `STREAMING` and `NOT YET MODELLED`.
+  `synthetic_ceiling_v` and `real_limit_ly`, each layer's real boundary, its `expected_beyond` at
+  the cut and its `bright_beyond` (`just gen-protocol`); the client composes Design note 13's
+  interim note, which names the limit; its guide row is drafted for the UX decision agent and the
+  owner. The sampled cold bench of the served sky near the Sun, at the limit, on the fixture and on
+  the server's galaxy, is recorded for R06.T17's full-cold figure. Tests: a sky near the Sun
+  returns the sim's census at the ceiling bit for bit; the reply states the ceiling, the limit and
+  each layer's boundary, count beyond and `bright_beyond`; the label's composition with
+  `STREAMING` and `NOT YET MODELLED`.
   Files: `crates/hyperion-protocol/src/sky.rs`, `crates/hyperion-server/src/{requests,compute}/sky.rs`,
   `crates/hyperion-server/tests/sky.rs`, `packages/protocol/src/`, generated bindings,
   `apps/hyperion/src/renderer/src/view/sky/label.ts`, `docs/frontend/ux-guidelines.md` (the draft
@@ -510,18 +618,18 @@ slow-test entry), this plan. Acceptance: `just test-slow the_hybrid_boundary_is_
   `pnpm --filter @hyperion/protocol test`, `pnpm --filter hyperion exec vitest run
 src/renderer/src/view/sky`, `just ci`.
 
-### R13.T3 The band's ceiling sums and kept profiles
+### R13.T3 The band's kept profiles
 
-Design note 9. `march_rows` keeps the third set of sums and each ray's A_V at its nodes
-(`RayProfiles`, `BandMarch::profiles`) when the query states a ceiling; `sum_rows` takes whether the
-reply carries synthetic stars, and beyond R(u) holds Design note 9's light. `RayProfiles::a_v_toward`
-reads the texel `texel_of` gives, linear in distance between nodes. Tests:
+Design note 9. `march_rows` keeps the profiles only, each ray's A_V at its nodes (`RayProfiles`,
+`BandMarch::profiles`), when the query states a ceiling, with no ceiling sums; `sum_rows` takes
+whether the reply carries synthetic stars, and beyond R(u) holds Design note 9's light.
+`RayProfiles::a_v_toward` reads the texel `texel_of` gives, linear in distance between nodes. Tests:
 
 - with no ceiling, T9.f's and T9.j's tests and bits are unchanged;
 - each kept profile equals `profile`'s value at every node, bit for bit;
 - a reply without synthetic stars equals RM3's interim band bit for bit, and one with them plus the
-  expected synthetic light (the march's slots, fainter than V_P less fainter than the cut, beyond
-  R(u)) equals it to rounding, texel by texel;
+  expected synthetic light (the march's slots beyond R(u), all the light less the light fainter
+  than the cut) equals it to rounding, texel by texel;
 - any split of the rows gives the same bits.
 
 Record the march's heap and time at 64² near the Sun with and without the ceiling. Files:
@@ -576,12 +684,12 @@ luminosity_matches_realised_cells`, `just ci`.
   `cargo test -p hyperion-sim sky::synthetic`, `just ci`.
 
 - **R13.T5.b The photometry and the walk's cost.** Design note 7: the real-boundary test by texel,
-  the profile's A_V, V, the [V_P, cut) window, the class and colour, the emitted time, and
-  `SyntheticStar` and `SyntheticTally`. Tests:
-  - no kept star is brighter than V_P, at or fainter than the cut, or nearer than its texel's R(u);
+  the profile's A_V, V, the window beyond R(u) (every star brighter than the cut), the class and
+  colour, the emitted time, and `SyntheticStar` and `SyntheticTally`. Tests:
+  - no kept star is nearer than its texel's R(u), or at or fainter than the cut;
   - its A_V is `a_v_toward`'s bit for bit, and its colour the class's `reddened` at it;
-  - over 64 salts near the Sun, the mean light of the kept stars per texel equals the march's
-    synthetic slot beyond R(u) within 3σ, and over the sky within 1%;
+  - over 64 salts near the Sun, the mean light of the kept stars per texel equals the march's light
+    beyond R(u) brighter than the cut within 3σ, and over the sky within 1%;
   - the mean counts per layer and 1-mag bin of apparent V equal `CapCount`'s expectation at the
     same boundary within 3σ.
 
@@ -657,14 +765,16 @@ The owner's test (Design note 1), run by name and recorded:
   circle, the inner-bulge point and a halo point (0, 26,000, 15,000) ly, in shells [R₁, R₂] per
   layer (C and D 300–600 ly, E 500–1,000 ly) at 10.06 and 7.95. The real side is the census forced to
   R₂ less the census forced to R₁, by star distance; the synthetic side is the tier with R(u) forced
-  to R₁ and clipped at R₂, over 64 salts. Per layer, 1-mag bin of apparent V and |b| band: counts,
+  to R₁ and clipped at R₂, over 64 salts. Per layer, 1-mag bin of apparent V (the bins reaching the
+  bright end, since stars brighter than V_P are synthetic beyond the limit) and |b| band: counts,
   light, the T_eff histogram and the shares above A_V 2, 5 and 10. Gate: each count and light ratio
   within 1 ± 3σ, once the tables lane has corrected R06.T5.f's findings; until then the ratios are
   recorded, not gated. The census's σ is its Poisson σ times √1.5, since its systems are Poisson
   but their stars come in multiples (Σk² ÷ Σk is 1.46 for D and 1.54 for E, R06 Risks, "R06.T5.f's
   measurements, as built"), combined with the tables' pair σ.
 - **`the_synthetic_seam_is_continuous`** (slow): near the Sun at 10.06, counts per magnitude in thin
-  shells either side of R(u), in the plane and above it, real against synthetic, and the scatter of
+  shells either side of R(u), in the plane and above it, on rays where R(u) is the cap at V_P and on
+  rays held at the limit, real against synthetic, and the scatter of
   those counts between neighbouring texels, real against synthetic: the texel-sized patches of
   Design note 7 are what it measures. A difference beyond 3σ is a finding; its remedies are
   per-star sightlines for candidates near the cut, or a finer band.
@@ -689,12 +799,12 @@ the_synthetic_seam_is_continuous`, `just bench -- sky/synthetic`, `just ci`.
   reply (T6).
 - **Consistent with the census of this galaxy:** counts, light, colour and extinction in shells,
   real against synthetic, at ten observers (T9), gated once R06.T5.f's tables are corrected.
-- **One boundary:** no listed star beyond its texel's R(u), no synthetic star within it, no gap
-  (T2.a, T5.b), and the band's ceiling split to rounding (T3).
+- **One boundary:** no listed star beyond its texel's R(u) or the real limit, no synthetic star
+  within it, no gap (T2.a, T5.b), and the band's light beyond R(u) to rounding (T3).
 - **Determinism and stability:** observer independence, truncation, job-split independence, the
   word layout (T5.a), the golden (T9), and every reply's identical synthetic set (T6, T7).
-- **Cost:** the boundary and the real tier (T1, T2.b), the synthetic pass (T5.b) and the served sky
-  (T9), each with its cut, its machine and whether it is provisional.
+- **Cost:** the boundary and the real tier (T1, T1.b, T2.b), the synthetic pass (T5.b) and the
+  served sky (T9), each with its cut, its machine and whether it is provisional.
 - **By hand, recorded:** the label at 1280 × 720 (T8) and the view's seam (T9).
 
 ## Generator version
@@ -715,11 +825,32 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   T2 builds. **T1 measured them (2026-10-09; "Deviations in T1, as built", below):** the spheres at
   V<sub>P</sub> lie 1.6–3.2 times as far as estimated, and the real tier costs 8.8–22.6 times the estimate at
   both ceilings, for the eye and the camera, on the fixture and on the server's galaxy. Design note
-  4's guard has tripped, and T2 waits for the owner.
+  4's guard has tripped. **The owner answered on 2026-10-09** (`decision-r13-guard-trip.md`,
+  option A): real stars to 2,000 ly (Design notes 3 and 4). The capped costs are that record's
+  estimates, about ±30%, and T1.b measures them before T2 builds.
+- **The synthetic bright stars beyond 2,000 ly** (Design note 3): an estimated 10–60 brighter than
+  V 4.5 near the Sun, the brightest about V 1.5–3, from three of T1's figures and the decision's
+  weakest numbers. T1.b counts them, and its guard returns to the owner if they are far off. A
+  synthetic bright star vanishes from the sky once the ship comes within the limit, and the real
+  stars there take over. It is labelled, unselectable and never a jump target, but a navigator
+  comparing views may notice. Lifting the limit cures it.
+- **The inner disc at the limit**: about 2–3 × 10⁵ CPU-s (4–6 h), unbenched (_estimate_, a factor
+  of two). R06.T17 benches it. The lever, if needed, is a yield-ordered budget per layer (T7.b's own
+  λ rule with an expected count of k > 1 beyond for D and E, which T1.b records), under its own
+  ruling.
+- **The server's galaxy against the fixture.** A fixed limit's cost scales with local density,
+  unlike the ceiling's rule. The server's galaxy is 2.46 times as dense locally, so the capped tier
+  costs it about 2–2.5 times the fixture's. Both are generated galaxies, and the generated galaxy is
+  the judge.
+- **The limit is lifted** to the cap at V_P when the census levers land (`deferred-corrections.md`,
+  "Census cost", "R13's real limit"): the real tier at the ceiling's caps is re-measured then, and
+  the limit moves out once that costs no more than the capped tier. It is one constant, with no
+  redesign.
 - **Realised against expected.** R06.T5.f's findings (C 0.966 ± 0.004, E 1.164 ± 0.034, realised
   over tabulated) would show as a density step at R(u): about 3.5% more synthetic C stars and 14%
   fewer E stars than the census would list. T9's gate waits for the tables lane's correction; until
-  then the ratios are recorded.
+  then the ratios are recorded. With the real limit, T5.f's E correction matters more, since more
+  of E's sky is synthetic: E's synthetic stars are 14% short until it is corrected.
 - **Dust resolution.** One profile per 1.4° texel at 64², a point sample: unbiased over the sky,
   but dust structure below 1.4°, which the real census's per-star sightlines see, becomes
   texel-sized patches of faint-star density beyond R(u), visible in a narrow camera field across a
@@ -732,14 +863,15 @@ colour table or the synthetic code moves, as R06's sky goldens are.
 - **Feature members.** When R06.T16.a lands with P09.T2.c, the field gives up φ, and features
   beyond R(u) need a rule of their own: drawn from each feature's own model, or listed by a real
   member census. A task of the T16.a integration; until then `CLUSTERS: NOT YET MODELLED`.
-- **The camera's sky** is mostly synthetic near the Sun (_estimate_ 93% of some 4.8 × 10⁵ stars to
-  V 10.06), and its N_max overflow the norm. The camera-budget ruling owed by R06.T17 rules on the
-  real tier at the ceiling (_estimate_ 6–7.5 × 10³ CPU-s at V_P 4.5), not on the exact census.
+- **The camera's sky** is about 45% synthetic near the Sun at the limit (_estimate_; 38% beyond
+  the cap at V_P 4.5 alone, R13.T1, of some 3.9 × 10⁵ stars to V 10.06), and its N_max overflow
+  the norm. The camera-budget ruling owed by R06.T17 rules on the real tier at the real boundary
+  (T1 measured the camera's at 0.98–1.00 times the eye's), not on the exact census.
 - **Multiplayer.** Two ships far apart see the same world-anchored synthetic stars, but each its own
   real boundary, so a star real for one may be absent for the other, replaced by synthetic ones.
   Inherent to any hybrid.
-- **The first sky** stays R06.T11.d's (185–225 CPU-s at the 500 ly shell, against 150); R13 adds
-  10–40 CPU-s to it.
+- **The first sky** stays R06.T11.g's (6.96 s and 94.6 CPU-s to 125 ly as built), whatever the
+  limit; R13 adds 10–40 CPU-s to it (Design note 16).
 - **The brainstorm's principle**, "the star field is the galaxy", is amended, not kept whole.
   **Decided by the owner on 2026-10-08** (`feasibility-hybrid-sky.md` §11, all as recommended):
   - V_P is 4.5, and 5.0 in RM3's interim;
@@ -749,8 +881,13 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   - the promise covers the real stars only, and the real-record variant is revisited after the
     deferred census levers.
 
+  **Decided by the owner on 2026-10-09** (`decision-r13-guard-trip.md`, option A, as
+  recommended): C–E are real to 2,000 ly at most, for RM3's interim and R13 alike, so every star
+  brighter than V_P is real within 2,000 ly only.
+
   The brainstorm's subsection is signed off. Its label wording, and R13.T8's and T2.b's guide rows,
-  stay drafts for the UX decision agent and the owner.
+  stay drafts for the UX decision agent and the owner. Its amendment for the real limit is a draft
+  for the owner, marked at the end of the subsection.
 
 - **Lazy realisation by record**, to be revisited after the deferred census levers land (the
   owner, 2026-10-08), so that every point could be a system:
@@ -758,9 +895,11 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   exact on approach for single main-sequence stars to the table's accuracy and statistical for
   evolved stars and pairs, at a walk of every far record (at least about 10³ CPU-s at the eye and
   10⁴ at the camera) and a new fitted table.
-- **Open for decision agents:** spheres or rays for R(u), and fix (i) (T1, measured below:
-  "Spheres or rays, and fix (i)"); the cell size (T5.b); texel or bilinear extinction, if T9's seam
-  test asks (T5.b, T9); the label's wording (T8).
+- **Open for decision agents:** the cell size (T5.b); texel or bilinear extinction, if T9's seam
+  test asks (T5.b, T9); the label's wording (T8); a yield-ordered budget, if the inner disc asks
+  (T1.b records it). **Ruled 2026-10-09:** spheres or rays for R(u), and fix (i): rays, with each
+  ray's cone widened by ρ, at every ceiling, point and cut (`decision-r13-guard-trip.md` §1;
+  Design note 3; T1's figures below, "Spheres or rays, and fix (i)").
 - **Deviations in T1, as built, and its measurements (2026-10-09).** Measured at
   `rendering-and-planets` 4dec82b4, so with P11.T17.c's held floor (about +18% on a cold census)
   and R06.T11.d. Then rebased onto 090d880d (R06.T11.f and T11.g). T11.g tests each of its splits
@@ -770,7 +909,8 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   Every count is the caps' count's expectation, with no census; every cost is a sampled census.
   **The owner's guard has tripped** (Design note 4). The real tier costs 8.8–22.6 times the
   feasibility study's estimate, at both ceilings, for the eye and the camera, on both galaxies.
-  T2 waits for the owner.
+  T2 waits for the owner. _Answered on 2026-10-09: the real limit of 2,000 ly (Design notes 3 and
+  4), with R13.T1.b before T2._
   - **The build.**
     - `sky::caps` gains three things (Provides, "sky::caps (R13.T1)"):
       - `RayRadii::lesser`: each ray the lesser of two radii on one lattice, which is Design note
@@ -1071,3 +1211,8 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
     - The brainstorm's signed-off "The hybrid sky" puts the census at some thousands of
       CPU-seconds, which the measurement contradicts. Its "nine in ten naked-eye stars stay real"
       is conservative: 97.7% are measured near the Sun at 4.5.
+    - **Answered by the owner on 2026-10-09** (`decision-r13-guard-trip.md`, option A): real stars
+      to 2,000 ly, for RM3 and R13 alike, with T1.b first. Design notes 3, 4, 15 and 16 take the
+      limit and its estimated cost. The brainstorm's three corrections (its cost, "within
+      2,000 ly" on its promise, and nine in ten still holding at about 92–97%) are a draft for the
+      owner, marked at the end of its subsection "The hybrid sky".

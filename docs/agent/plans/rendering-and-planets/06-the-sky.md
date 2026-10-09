@@ -820,9 +820,10 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    and an eye-only request may count each ray to the eye's own limit about it, the eye-cut
    pre-pass's, rather than the uniform cut (R06.T7.b's visibility-based caps). From R13.T2, RM3's
    interim, layers C to E take their caps by ray at the synthetic ceiling V_P rather than at the
-   cut, never beyond the cut's own: V 5.0 in RM3, 4.5 from R13.T7. Beyond them the band holds all
-   of the light until R13's synthetic stars fill [V_P, cut) (decided by the owner 2026-10-08;
-   R13 Design notes 2–3, `feasibility-hybrid-sky.md`).
+   cut, never beyond the cut's own nor beyond R13's real limit of 2,000 ly: V 5.0 in RM3, 4.5 from
+   R13.T7. Beyond them the band holds all of the light until R13's synthetic stars take every star
+   brighter than the cut (decided by the owner 2026-10-08, and the limit 2026-10-09; R13 Design
+   notes 2–3, `feasibility-hybrid-sky.md`, `decision-r13-guard-trip.md`).
 10. **The census, per cell.** Cells are those of `cells_in_sphere` to each cap, padded by
     `pad_for(|t_emit − epoch|, pad_speed(layer))` as the range query pads, in canonical order. For
     each record the skip keeps: `retarded` on `Drift::of_record` (a centre member's
@@ -2444,12 +2445,13 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   - **The default switch and the interim** (decided by the owner 2026-10-08, answering
     `decision-p11-t17c-bright.md` §4: the hybrid sky, `feasibility-hybrid-sky.md` §10–11). The
     owner's condition for turning T11.c's switch on is met by RM3's interim, R13.T2: layers C to E
-    capped at V_P 5.0, the band for the rest, labelled. Once R13.T2 and T11.d, with its follow-up
-    R06.T11.g, have landed, the server's sky is on by default: `SkyService`'s default becomes
-    `Served`, and `--serve-sky` takes a value (`--serve-sky=false`) so that it can still be turned
-    off. The README and `config`'s tests follow. The first reply's time is still measured against
-    T17's first-sky budget. Its levers were ruled on 2026-10-08 (`decision-r06-t11d-first-sky.md`):
-    R06.T11.g. A miss after T11.g is recorded as a miss and goes to T17 and a decision agent.
+    capped at V_P 5.0, the band for the rest, labelled. Once R13.T2 (with its real limit of
+    2,000 ly, decided 2026-10-09) and T11.d, with its follow-up R06.T11.g, have landed, the server's
+    sky is on by default: `SkyService`'s default becomes `Served`, and `--serve-sky` takes a value
+    (`--serve-sky=false`) so that it can still be turned off. The README and `config`'s tests
+    follow. The first reply's time is still measured against T17's first-sky budget. Its levers were
+    ruled on 2026-10-08 (`decision-r06-t11d-first-sky.md`): R06.T11.g. A miss after T11.g is
+    recorded as a miss and goes to T17 and a decision agent.
 
   The protocol (T10) gains each layer's `complete_to_ly`, a per-ray table once T7.b lands, and
   `final`. A request for a new sky supersedes the old one. Any later consumer of the sky's list
@@ -2897,17 +2899,20 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
 `decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
 
 - the first sky in at most 150 CPU-s and 10 s wall on the dev machine's default workers;
-- the full cold census at the hybrid's real boundary (R13.T2, RM3's interim: layers C to E at
-  T7.b's caps by ray computed at V_P 5.0, the band for the rest; decided by the owner 2026-10-08,
-  `feasibility-hybrid-sky.md` §10–11): recorded, not gated.
-  - About 1.0–1.25 × 10⁴ CPU-s is estimated near the Sun at the eye's cut with spherical caps,
-    and less by ray.
-  - The ruled 4,000 CPU-s stays the target, for R13's V_P of 4.5 (about 4.5–5.8 × 10³
-    estimated).
-  - The exact census to the cut's caps, about 0.4–1.0 × 10⁶ CPU-s at P11.T17.c's verdicts
-    (`decision-p11-t17c-bright.md` §2), is recorded beside it, sampled, as R13.T1's reference. Its
-    first gate, 2.5 × 10⁴ CPU-s at version 21 (decided 2026-10-07,
-    `decision-p11-t16-hierarchy-bound.md`), is withdrawn: P11.T17.c's tables put it out of reach;
+- the full cold census at the hybrid's real boundary: recorded, not gated.
+  - The boundary is R13.T2's: layers C to E within the lesser of their caps by ray at V_P 5.0 and
+    2,000 ly, and the band for the rest. Decided by the owner on 2026-10-08 and 2026-10-09
+    (`feasibility-hybrid-sky.md` §10–11, `decision-r13-guard-trip.md`).
+  - About 1.3–1.5 × 10⁴ CPU-s is estimated near the Sun on the fixture, and 3.1–3.3 × 10⁴ on the
+    server's galaxy.
+  - Recorded beside it:
+    - the real tier at the ceiling's caps without the limit (R13.T1: 1.43–1.45 × 10⁵ CPU-s at
+      5.0);
+    - the exact census (0.4–1.0 × 10⁶);
+    - and, sampled, the inner disc at the limit.
+  - The ruled 4,000 CPU-s stays the target, for the version that lands the census levers
+    (`deferred-corrections.md`, "Census cost"). At that version the limit is re-measured for
+    lifting.
 
 - after a jump of up to 1,000 ly, at the default `HYPERION_SKY_CACHE_MB` (R06.T8.n):
   - every cell both plans open is served from the cache, none rebuilt;
@@ -2958,8 +2963,9 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
   and the camera's, per layer: the bound on what a camera's census adds to the eye's sky
   (`decision-r06-t9c-glare.md`, addendum 2). Where a whole camera census runs, the realised count,
   and how many of those stars the eye sees;
-- the delivery time of the final reply's stars brighter than V 3.0, against 25% of the full
-  census's wall time;
+- the delivery time of the final reply's stars brighter than V 3.0, against 25% of the capped
+  census's wall time (R13.T2's real boundary, decided 2026-10-09). If it misses, its lever is the
+  per-layer order, E's 1,000–2,000 ly shell first (T11.d allows any order that passes);
 - R03.T15's transfer check at the sky's largest payload: a real sky near the Sun at N_max
   (3 × 10⁵ stars with the band; 7,494,912 bytes, 29 chunks), with T11.c's switch on, asked in the
   real renderer, hidden. Its chunks arrive in order before the response, and its bytes are the

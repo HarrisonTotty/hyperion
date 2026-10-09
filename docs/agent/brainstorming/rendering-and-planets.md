@@ -1811,6 +1811,27 @@ the census's deferred levers land. This is the
 [statistical layer of unresolved stars](#the-star-field-is-the-galaxy-not-a-photograph) the faint
 majority was always going to need, made of points rather than of light alone.
 
+_Draft (plan R13, R13.T1, 2026-10-09; `.git/rm23-orchestration/decision-r13-guard-trip.md` §6):
+three corrections to the signed-off text above, after R13.T1 measured the census's cost and the
+owner chose, on 2026-10-09, real stars to 2,000 ly. The text above stands as signed until the owner
+signs these off._
+
+- **The cost.** "and the census costs some thousands of CPU-seconds" becomes: and, limited to
+  2,000 ly, the census costs about 1–1.5 × 10⁴ CPU-seconds near the Sun on the test fixture and
+  2.7–3.3 × 10⁴ on the server's galaxy (estimates, which plan R13.T1.b measures), where the
+  ceiling's boundary alone costs 1.0–1.5 × 10⁵ (measured by R13.T1). The same sentence's boundary
+  is the study's estimate. R13.T1 measured it by ray, with medians of 1,416, 2,075 and 2,511 ly in
+  C, D and E, and the limit holds every ray within 2,000 ly.
+- **The promise.** "Every star brighter than V_P", in "Where the census ends" and "What a synthetic
+  star is", and "every star brighter than the hybrid sky's ceiling", in the sentence of
+  [The star field is the galaxy, not a photograph](#the-star-field-is-the-galaxy-not-a-photograph)
+  that points here, gain "within 2,000 ly". Beyond 2,000 ly the synthetic stars take every star
+  brighter than the cut, those brighter than V_P included, where "Beyond it, synthetic stars" says
+  "between V_P and the cut": an estimated 10–60 brighter than V 4.5 near the Sun, the brightest
+  about V 1.5–3, until the census's levers let the limit be lifted.
+- **Nine in ten.** "about nine in ten naked-eye stars stay real near the Sun" still holds: about
+  92–97% (an estimate; 97.7% at the ceiling's boundary alone, measured).
+
 ### The local star as a disc
 
 Close to, the star is a disc with structure, and two details do most of the work. **Limb darkening** —
