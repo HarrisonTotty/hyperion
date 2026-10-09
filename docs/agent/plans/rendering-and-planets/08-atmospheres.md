@@ -188,7 +188,8 @@ export const ATMOSPHERE_OPTICS_VERSION: number; // client caches key on it, not 
  * `BodyFigureDto`), GM = G × the record's `mass_kg` (CODATA G, the sim's
  * `hyperion_base::units::GRAVITATIONAL_CONSTANT`), ω the spin rate at the scene time of the
  * record's rotation law (`BodySummaryDto.rotation`, P14.T46.f; the client's `lib/system/rotation.ts`),
- * or R05 Design note 14's test-planet period for R05's Earth. */
+ * or R05 Design note 14's test-planet period for R05's Earth. For a figure not flattened by its
+ * spin alone, ω is Design note 17's ω_fig. */
 export interface LevelSpheroid {
   readonly equatorialRadiusM: number;
   readonly polarRadiusM: number;
@@ -211,7 +212,8 @@ export interface OblateSlicing {
 export function oblateSlicing(body: LevelSpheroid, referenceRadiusM: number): OblateSlicing;
 export const KAPPA_STEP = 0.15; // widened to 0.3 over the 2 MB row (Design note 11)
 export const BAND_STEP = 0.1; // widened to 0.15 over the 2 MB row
-export const ONE_SLICE_BELOW = 0.02; // ln(κ_max ÷ κ_min) under which one slice and one band serve
+export const ONE_SLICE_BELOW = 0.02; // ln(κ_max ÷ κ_min) under which one slice serves
+export const ONE_BAND_BELOW = 0.02; // ln(s_max ÷ s_min) under which one band serves; never widened
 ```
 
 ### Optics (`rayleigh.ts`, `absorbers.ts`, `mie.ts`, `sizeDistribution.ts`, `aggregate.ts`, `materials/`)
@@ -520,8 +522,11 @@ Names are those the owning plans give; the owning plan is authoritative.
     period, this plan's ω for R05's Earth. A body whose rotation section is not `ok` takes
     R08.T3.d's one-slice fallback.
   - The figure (built, P14.T46): `BodySummaryDto.figure` (`BodyFigureDto`: equatorial and polar
-    radii, flattening, pole, datum `solid_surface` or `one_bar`), which R07's `BodyFigure` reads
-    (`WireAppearance.figure`).
+    radii, flattening, pole, datum `solid_surface` or `one_bar`, `moment_of_inertia_factor` and
+    `law` (`FigureLawDto`)), whose radii and pole R07's `BodyFigure` reads
+    (`WireAppearance.figure`). The factor and the law, which `oblate.ts`'s ω_fig reads (Design
+    note 17), are `SystemBodyFigure.momentOfInertiaFactor` and `.law` (`lib/system/model.ts`),
+    passed in by R08.T10.a.
   - `DetailLevel::Surface`, and `Section::{NotResolved, NotModelled, NotApplicable}` (built;
     `DetailLevelDto` and `SectionDto` on the wire).
   - The asks of R08.T1: P14.T24.c–f and P14.T35.e.
@@ -1065,14 +1070,27 @@ Names are those the owning plans give; the owning plan is authoritative.
       the development machine's 10 GiB of VRAM and the UHD 620's share of its laptop's system
       memory; the 2 MB row stands.
     - **Oblate bodies** (Design note 17, the same arithmetic). The slices multiply the per-planet
-      tables, not the per-view ones. Earth and every body under `ONE_SLICE_BELOW` keep the 0.40 MB
-      above. Transmittance and its absorber alpha are per κ slice, 131 KB each. Multiple
-      scattering, irradiance, the thick J_ms table and the deck tables are per band.
+      tables, not the per-view ones. Earth and every body under `ONE_SLICE_BELOW` and
+      `ONE_BAND_BELOW` keep the 0.40 MB above. Transmittance and its absorber alpha are per κ
+      slice, 131 KB each. Multiple scattering, irradiance, the thick J_ms table and the deck tables
+      are per band.
       - A thin Saturn-class world (5 slices, 4 bands) comes to about 0.72 MB: 655 KB of
         transmittance and 64 KB of multiple scattering and irradiance. A thin Jupiter-class world
         (4 slices, 3 bands) comes to about 0.57 MB.
-      - The worst case is a thick world at Saturn's flattening: 1.77 MB with four J_ms bands (1.05
-        MB), before a second absorber table (131 KB a slice).
+      - An ice giant (2 slices, 2 bands) comes to about 0.29 MB thin and 0.82 MB with two J_ms
+        bands.
+      - At Saturn's flattening a thick world comes to 1.77 MB with four J_ms bands (1.05 MB),
+        before a second absorber table (131 KB a slice). The generator's worst case is flatter.
+        Plan 14 caps f at 0.2, and its spin law puts there 9–31% of unlocked giants (P14.T46.c;
+        science-r08-oblate). At the cap, Design note 17's ω_fig gives 9–10 slices and 6–7 bands.
+        - Thin, that is 1.3–1.4 MB.
+        - With a J_ms band per band it is 2.8–3.3 MB.
+        - After both widenings below (5–6 slices, 5 bands) it is still about 2.05–2.2 MB, if a
+          deck band costs a thick band's 278 KB.
+
+        R08.T11 records it. If it stays over 2 MB, R08.T11 reports to "main", and a decision agent
+        rules between a further widening and fewer bands at the cap.
+
       - A world whose per-planet bytes would pass 2 MB widens `KAPPA_STEP` to 0.3 (grazing
         interpolation error about 0.3%) and `BAND_STEP` to 0.15, in that order, and R08.T11
         records the step taken.
@@ -1179,8 +1197,10 @@ Names are those the owning plans give; the owning plan is authoritative.
     - **The rule, for every body.** There is no flattening switch; Earth-like bodies get one slice.
       - _Gravity-scaled height._ The medium's density, and every table lookup, use h\* = s·h with
         s = g(φ)/g_ref. Here h is the geodetic height above the datum, g(φ) is Somigliana's
-        normal gravity of the level spheroid from (GM, a, c, ω), and g_ref = √(g_e g_p) is the
-        gravity the column (R08.T3.a) is built at. Optical depth read from a table is divided by s.
+        normal gravity of the level spheroid from (GM, a, c, ω_fig), ω_fig being the spin under
+        which plan 14's figure is level ("Figures not flattened by the spin alone", below), and
+        g_ref = √(g_e g_p) is the gravity the column (R08.T3.a) is built at. Optical depth read
+        from a table is divided by s.
         This is geopotential height, the U.S. Standard Atmosphere 1976's vertical coordinate. The
         scaling is exact for optical depth: shrinking lengths by s maps the local sphere of
         radius R_α onto one of radius s·R_α carrying the reference medium, with τ multiplied by s.
@@ -1191,14 +1211,22 @@ Names are those the owning plans give; the owning plan is authoritative.
         transmittance). The count is 1 + ⌈ln(κ_max ÷ κ_min) ÷ 0.15⌉ once the range exceeds 0.02,
         and 1 below that: 1 for Earth, 2 for the ice giants, 4 for Jupiter and 5 for Saturn. That
         is 128 KB a slice at the high size, rebuilt only when the medium changes.
-      - _Latitude bands._ Multiple scattering depends non-linearly on the column, so the
+      - _Latitude bands._ Multiple scattering depends non-linearly on the column. So the
         multiple-scattering and irradiance tables, Design note 9's thick bakes, R08.T15's deck
-        tables and
-        `DiscReflectanceTable` are built per band of s. Each band is an ordinary per-planet build
-        at that band's g(φ) and √(MN). Bands are spaced Δln s ≤ 0.1 and read by linear
-        interpolation at the sample's or disc pixel's latitude: 1 band for Earth and the ice
-        giants, 3 for Jupiter and 4 for Saturn. The bake count multiplies by the band count
-        against `BAKE_CEILING_S`.
+        tables and `DiscReflectanceTable` are built per band of s.
+        - Each band is an ordinary per-planet build at that band's g(φ) and √(MN). Bands are
+          spaced Δln s ≤ 0.1 and read by linear interpolation in ln s at the sample's or disc
+          pixel's latitude.
+        - The count is 1 + ⌈ln(s_max ÷ s_min) ÷ 0.1⌉ once that span exceeds 0.02
+          (`ONE_BAND_BELOW`), and 1 below it, at s = 1. That gives 1 band for Earth, 2 for the ice
+          giants, 3 for Jupiter and 4 for Saturn.
+        - The threshold is set by the error budget (ruled 2026-10-09, science-r08-oblate). One
+          band is wrong in the column by ±½ ln(s_max ÷ s_min) at the pole and the equator. The
+          threshold holds that to ±1%, within the 1% of Design note 10's 5% kept for geometry.
+        - One band would leave the ice giants' column ±2.4–2.7% off. Two leave under 0.15%.
+        - The threshold does not widen with `BAND_STEP`.
+        - The bake count multiplies by the band count against `BAKE_CEILING_S`. The ice giants'
+          second bake is 0.1–1 s by R08.T14's operation count.
       - _Per-view marches._ Sky-view and aerial perspective march each ray in its own osculating
         sphere R_α (azimuth is a sky-view axis, so this costs a few ALU a texel column), with
         density at h\*. The orbit march keeps R05's true spheroid shells with density at h\* per
@@ -1217,6 +1245,55 @@ Names are those the owning plans give; the owning plan is authoritative.
       - the real 1-bar surface departs from the best-fit spheroid through differential rotation
         (Lindal, Sweetnam and Eshleman 1985), a datum question for plan 14;
       - T(p) varies with latitude, which is weather, and plan 14's to give.
+    - **Figures not flattened by the spin alone** (researched 2026-10-09, science-r08-oblate; a
+      physics ruling). Somigliana's γ is exact on a level spheroid for the spin it is given, at any
+      flattening and for any interior (Stokes's theorem). So it needs the spin under which the drawn
+      figure is level. Plan 14's figure laws (P14.T46.c, the wire's `FigureLawDto`) give it.
+      - **`rotational`, and every fixture:** the true ω.
+      - **`rotational_and_tidal`:** ω_fig = √2.5 ω, and g(φ) = γ(φ; ω_fig) + ω²R, R the
+        volumetric radius.
+        - _Why √2.5._ On a synchronous body the primary's static tide, ω²r²P₂(cos ψ) with n = ω,
+          averages over longitude to −½ω²r²P₂(cos θ). With the spin's −⅓ω²r²P₂(cos θ), that makes
+          a zonal forcing 2.5 times the spin's, whatever the interior. This is the factor that
+          flattens plan 14's spheroid (Dermott 1979; the hydrostatic J₂ ÷ C₂₂ = 10 ÷ 3).
+        - _Why + ω²R._ The tide has no degree-0 term, which √2.5 ω adds as
+          ⅔(ω_fig² − ω²)R = ω²R. Adding it back takes g_ref's error from about −m to under 0.01%
+          at m = 0.005.
+        - _What the true ω would cost._ It falls short of g's poleward rise by 15m ÷ 4
+          (m = ω²R³ ÷ GM), ±15m ÷ 8 in s:
+          - 0.3% on an Io or a TRAPPIST-1b;
+          - 0.8% on an HD 209458b;
+          - 1.2% on a WASP-39b;
+          - 3.4% on an inflated hot Saturn;
+          - 5.8% on a 0.28-day rocky planet.
+
+          This is against first-order hydrostatic theory, g ÷ g₀ = 1 − 2Q₀ + (k_f − 4)Q₂.
+
+        - _What ω_fig leaves._ About 0.1% at m = 0.02, and 0.3% at m = 0.03. An exact Roche
+          figure confirms it (0.04% at m = 0.01; 0.018% with ω²R in s, R08.T3.d's test).
+      - **`capped`:** ω_fig is the spin whose Darwin–Radau flattening at the record's C ÷ Ma² is the
+        drawn f, ω_fig² = (GM ÷ a³) · f[1 + (25 ÷ 4)(1 − (3 ÷ 2) C ÷ Ma²)²] ÷ 2.5, with no added
+        term.
+        - The same inversion gives ω on a `rotational` figure and √2.5 ω on a tidal one.
+        - The true ω has no level f = 0.2 spheroid below 1.27 break-up periods (γ_e ≤ 0). Plan
+          14's spin law gives that to 0.8–7% of unlocked giants. Above that period, the true ω
+          spreads s over a factor of 7, which asks for 19 slices and 21 bands.
+        - With ω_fig the cap takes 9–10 slices and 6–7 bands.
+        - Its equatorial gravity is overstated: the true spin's centrifugal term at the equator is
+          (ω² − ω_fig²)a larger, ⅔(ω² − ω_fig²)R of it uniform. That is about 0.4 γ_e at 1.4
+          break-up periods, and all of γ_e near the break-up floor, where q(a) reaches 1.25
+          (computed, R08.T3.d's follow-up). The cap is plan 14's.
+      - **`sphere`:** the true ω. A rigid sphere's g rises by m, not Somigliana's 5m ÷ 2. But no
+        sphere keeps an atmosphere under plan 14's Jeans rule (under 300 km, λ < 25 at 5 T_eq).
+      - **Not modelled, and stated: the sectoral tide.** Plan 14 draws the spheroid, not the
+        4 : 1 : 3 triaxial figure (decision-p14-phase-j, 3).
+        - The true level surface rises towards the primary by 0.6(a − c): about 0.2–2 scale heights
+          on close-in planets, for example 0.8 H on an HD 209458b and 1.4 H on a TRAPPIST-1b under
+          N₂. That rise is not drawn, and the atmosphere follows the drawn surface.
+        - So is g's longitude variation not drawn: ±¾(4 − k_f)m about the zonal mean at the
+          equator, where (4 − k_f) ÷ (1 + k_f) = (25 ÷ 4)(1 − (3 ÷ 2) C ÷ Ma²)². That is ±0.4% on
+          an Io, ±1.2% on an HD 209458b and ±5% on an inflated hot Saturn.
+        - A triaxial datum would be plan 14's to give, and every rendering plan's to read.
     - **The gate must see it.** Design note 10's tracer is spherical, so as written a spherical
       client passes against it whatever the flattening. R08.T12.d therefore adds a spheroid mode:
       delta tracking against a majorant, the spheroid shells, and density at h\*. R08.T12.b adds
@@ -1240,10 +1317,17 @@ Names are those the owning plans give; the owning plan is authoritative.
         doi:10.1086/113820), whose Voyager occultations of Jupiter and Saturn were reduced with
         the local radius of curvature and gravity by latitude;
       - Hillaire 2020, Bruneton and Neyret 2008, Bruneton 2017, sebh's code and Bevy 0.19, all
-        spherical. No oblate-atmosphere renderer is known to have precedent here.
+        spherical. No oblate-atmosphere renderer is known to have precedent here;
+      - Dermott 1979 (Icarus 37, 575) and Murray and Dermott 1999, ch. 4, as plan 14 cites them (the
+        4 : 1 : 3 synchronous figure);
+      - Iess et al. 2010 (Science 327, 1367), the hydrostatic J₂ ÷ C₂₂ = 10 ÷ 3 tested on Titan;
+      - Leconte, Lai and Chabrier 2011 (A&A 528, A41; doi:10.1051/0004-6361/201015811), close-in
+        planets' tidal and rotational ellipsoids;
+      - for the figure laws: plan 14's `figure.rs` (P14.T46.c) and `rotation.rs` (P14.T14).
 
-      The figures are computed (Somigliana at each body's GM, a, c and period, and Chapman to
-      first order in H/R), not measured. R08.T12.b's spheroid case measures them.
+      The figures are computed (Somigliana at each body's GM, a, c and period, Chapman to first
+      order in H/R, and first-order hydrostatic theory with an exact Roche-model check for the
+      tide), not measured. R08.T12.b's spheroid case measures them.
 
 ## Tasks
 
@@ -1533,24 +1617,40 @@ pins the strings. Acceptance:
 - **R08.T3.d Normal gravity and the slicing.** `oblate.ts` (Provides): `normalGravity`
   (Somigliana's closed form for the level ellipsoid, Heiskanen and Moritz 1967 §2-7 to 2-9),
   `referenceGravity`, `directionalCurvatureRadiusM` and `oblateSlicing`, with the constants
-  `KAPPA_STEP`, `BAND_STEP` and `ONE_SLICE_BELOW` (Design note 17). Its inputs are R07's
-  `BodyFigure` (`view/terrain/planet.ts`), GM from the record's `mass_kg` section times CODATA's G,
-  and ω, the spin rate at the scene time of the record's rotation law (`BodySummaryDto.rotation`,
-  read as `SystemBodyRotation`; R05 Design note 14's test-planet period for R05's Earth); with no
-  rotation section, g(φ) is taken as the bulk section's gravity and one slice results. As built,
-  `lib/system/rotation.ts` keeps the law's rate private (`rateAtAge`), so this task exports the rate
-  at a time beside `rotationAngleAt`, and G has one client copy, module-private in
-  `lib/scene/sceneWire.ts`, which this task exports from one place (with the sim's citation)
-  rather than writing a second literal. Files: `oblate.ts`, `oblate.test.ts`,
-  `lib/system/rotation.ts` and the G constant's module. Tests:
+  `KAPPA_STEP`, `BAND_STEP`, `ONE_SLICE_BELOW` and `ONE_BAND_BELOW` (Design note 17). Its inputs
+  are R07's `BodyFigure` (`view/terrain/planet.ts`), GM from the record's `mass_kg` section times
+  CODATA's G, and ω, the spin rate at the scene time of the record's rotation law
+  (`BodySummaryDto.rotation`, read as `SystemBodyRotation`; R05 Design note 14's test-planet period
+  for R05's Earth); with no rotation section, g(φ) is taken as the bulk section's gravity and one
+  slice results. A figure not flattened by its spin alone takes Design note 17's ω_fig from the
+  figure's law and C ÷ Ma², which `BodyGravityInput` carries (null for fixtures and R05's Earth,
+  read as `rotational`); R08.T10.a fills them from the record's figure section
+  (`SystemBodyFigure.law`, `.momentOfInertiaFactor`). As built, `lib/system/rotation.ts` keeps the
+  law's rate private (`rateAtAge`), so this task exports the rate at a time beside
+  `rotationAngleAt`, and G has one client copy, module-private in `lib/scene/sceneWire.ts`, which
+  this task exports from one place (with the sim's citation) rather than writing a second literal.
+  Files: `oblate.ts`, `oblate.test.ts`, `lib/system/rotation.ts` and the G constant's module.
+  Tests:
   - WGS 84's figure, GM and ω give NIMA TR8350.2's γ_e = 9.7803253359 and γ_p = 9.8321849378
     m s⁻² to 10⁻⁹ relative;
   - Saturn's (a = 60,268 km, c = 54,364 km, GM = 3.7931 × 10¹⁶ m³ s⁻², 10.656 h) give 9.08 and
     12.04 m s⁻², and Jupiter's 23.12 and 26.98, to 0.5%;
   - R_α equals M at α = 0 and N at 90°, lies between them at every α, and is a²/c for every α at
     the pole;
-  - the slice and band counts are 1 and 1 for Earth, 2 and 1 for Uranus, 4 and 3 for Jupiter and 5
-    and 4 for Saturn; a sphere with ω = 0 gives one of each with s ≡ 1.
+  - the slice and band counts are 1 and 1 for Earth, 2 and 2 for Uranus, 4 and 3 for Jupiter and 5
+    and 4 for Saturn; a sphere with ω = 0 gives one of each with s ≡ 1; a body whose
+    ln(s_max ÷ s_min) ≤ `ONE_BAND_BELOW` takes one band, with |ln s| ≤ 0.01 at every latitude;
+  - by figure law (Design note 17, "Figures not flattened by the spin alone"):
+    - `rotational` and a body with no law take the true ω (WGS 84 unchanged to 10⁻⁹);
+    - the inversion returns ω on a `rotational` figure and √2.5 ω on a `rotational_and_tidal` one,
+      each built by plan 14's iteration, to 10⁻⁹;
+    - on an HD 209458b-like synchronous figure (C ÷ Ma² = 0.25, m = 4.4 × 10⁻³), s matches
+      first-order hydrostatic theory's zonal mean to 10⁻⁴ and g_ref to 10⁻⁴; the true ω misses s
+      by at least 0.8%. The theory is
+      g ÷ g₀ = 1 − ⅔m + (k_f − 4) m(¾ cos²φ − ½ sin²φ − ⅓), with
+      k_f = (4 − η²) ÷ (1 + η²) and η = (5 ÷ 2)(1 − (3 ÷ 2) C ÷ Ma²);
+    - a `capped` Saturn-density giant at 1.1 break-up periods, where the true ω gives γ_e ≤ 0,
+      builds without a `RangeError`, with s rising poleward, at most 10 slices and at most 7 bands.
 
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/atmosphere/rayleigh view/atmosphere/oblate`.
 
@@ -1847,9 +1947,10 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   catalogue holds). This task widens R05's `atmosphereInputs(camera, figure)` in R05's
   `hillaire.ts` itself, as R08.T6 widens R05's other names: its result, R05's
   `AtmosphereInputs { radiusM, heightM, normal }`, gains the camera's geodetic latitude and
-  s = g(φ) ÷ g_ref from R08.T3.d, and R05.T12.c's tests (`hillaire.test.ts`) keep passing with
-  s ≡ 1 at a = c. `setMedium` allocates the layers under `atmosphere-tables`; Earth's one slice and
-  one band are one-layer arrays, bound through R08.T0's seam. When this lands,
+  s = g(φ) ÷ g_ref from R08.T3.d (`gravityRatio`'s, `BodyGravity.gravityOffsetMS2` included, which
+  `oblate.wgsl` takes beside γ_e, γ_p and g_ref), and R05.T12.c's tests (`hillaire.test.ts`) keep
+  passing with s ≡ 1 at a = c. `setMedium` allocates the layers under `atmosphere-tables`; Earth's
+  one slice and one band are one-layer arrays, bound through R08.T0's seam. When this lands,
   `ATMOSPHERE: APPROXIMATE` clears for oblate thin bodies. Smoke (`just test-render`): the
   readbacks agree with the twin to 10⁻³ on a Saturn-class figure and on Earth. Acceptance:
   `pnpm test` and `just test-render` pass; by hand, the Saturn-class limb from orbit over the
@@ -2027,8 +2128,11 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
 R07 `WireAppearance` (`heldAppearanceOf`, `view/scene/fromServer.ts`: the figure, the photometry
-and the labels), with the record's `mass_kg` and rotation; R07's `BodyAppearance` is not built in
-production. The surface section comes from `body_detail`, requested through
+and the labels), with the record's `mass_kg` and rotation; `BodyGravityInput` (R08.T3.d) takes the
+figure's `law` and `momentOfInertiaFactor`, read from the record's `SystemBodyFigure` since
+`WireAppearance.figure` (R07's `BodyFigure`) carries only the radii and the pole, so that
+`bodyGravity` applies Design note 17's ω_fig; R07's `BodyAppearance` is not built in production.
+The surface section comes from `body_detail`, requested through
 `toBodyDetailRequest` (`lib/system/bodiesWire.ts`), which nothing in `view/` calls yet.
 `AtmosphereCache` requests it when a photorealistic view first draws a body in the disc or mesh
 regime (R07's `litRegimes`, decided in `planLitBodies`), again when the scene's arrival or the
@@ -2077,6 +2181,8 @@ Tests (T10.a):
   it would, the scene's lit bodies are asked for on arrival, or the line is held as R05's terrain
   annunciation holds its own (`view/terrain/annunciation.ts`);
 - the same inputs give the same key and a changed inventory another;
+- a `rotational_and_tidal` record's medium is built at ω_fig = √2.5 ω (its g_ref includes ω²R),
+  and a `capped` one builds where its true ω would put γ_e ≤ 0;
 - results transfer, and the cache evicts least recently used within its stated size;
 - each fixture's optics time is recorded, on a quiet machine.
 
@@ -2101,8 +2207,10 @@ the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#pe
 - the table bytes a planet, against 2 MB, and the per-view bytes on their own line, against
   Design note 11's 0.43 MB, at one, two and four sources;
 - the slice and band counts, bytes and per-planet table time of the Jupiter- and Saturn-class
-  figures, against Design note 11's 0.57 and 0.72 MB, and any widening of `KAPPA_STEP` or
-  `BAND_STEP`.
+  figures, against Design note 11's 0.57 and 0.72 MB, of an ice giant (2 and 2), and of a giant
+  at plan 14's cap (f = 0.2, 9–10 slices and 6–7 bands, Design note 11's worst generated case),
+  and any widening of `KAPPA_STEP` or `BAND_STEP`. If the capped giant stays over 2 MB after both
+  widenings, it is reported to "main" for a decision agent's ruling (Design note 11).
 
 R05's `just descent-spike` runs with the generalised atmosphere, and its percentiles are recorded
 against R05's. Where the low setting misses, `TABLE_SIZES` changes here. Acceptance: the record is
@@ -2167,8 +2275,9 @@ here, and `pnpm test` passes.
   free paths by delta tracking against a majorant (the density at the lowest gravity-scaled
   height the path can reach), boundary crossings against the spheroid shells as quadrics, and
   density at h·g(φ)/g_ref, with h the geodetic height by Vermeille's closed form (J. Geodesy 76,
-  451, 2002) and g(φ) by Somigliana, both in Rust. Next-event estimation to each sun marches the
-  same geometry. Tests:
+  451, 2002) and g(φ) by Somigliana, both in Rust (rotational figures; a tidal case would take
+  Design note 17's ω_fig and ω²R). Next-event estimation to each sun marches the same geometry.
+  Tests:
   - a = c with ω = 0 agrees with `Shells::Sphere` to 3σ on the Earth case;
   - an absorbing-only Saturn-class medium gives Beer–Lambert against an `f64` quadrature of the
     density along the same chord to 10⁻⁶, grazing at the equator north and east and at the pole;
@@ -2264,8 +2373,11 @@ Per Design note 9, in four subtasks.
     follow once R08.T5.b's H₂SO₄ and tholin files exist (licences ruled 2026-10-09,
     `decision-r08-licences.md`).
   - The bake time on the UHD 620's host (by the owner), summed over the bands, is under
-    `BAKE_CEILING_S` on a quiet machine, or the Risks' fallback is taken and recorded. The bands
-    nearest the camera bake first, and `ATMOSPHERE: COMPUTING` clears when the last lands.
+    `BAKE_CEILING_S` on a quiet machine, for a Saturn-class figure (4 bands) and for a giant at
+    plan 14's cap (6–7 bands, or 5 after `BAND_STEP`'s widening), or the Risks' fallback is taken
+    and recorded. If the capped giant fails it, it is reported to "main" for a decision agent's
+    ruling (a further widening or fewer bands at the cap, Design note 11). The bands nearest the
+    camera bake first, and `ATMOSPHERE: COMPUTING` clears when the last lands.
   - When a regime's gates pass, `classifyRegime` routes its `thickScattering` worlds to the bake,
     and `ATMOSPHERE: APPROXIMATE` clears for them.
 
@@ -2392,12 +2504,16 @@ generator, and the reference's sampling needs no domain tag.
 
   Design note 17 therefore has every body use gravity-scaled height h·g(φ)/g_ref, with transmittance
   in curvature slices over κ = s·R_α ÷ R_ref and the multiple-scattering and baked tables in
-  latitude bands. Earth-like bodies get one of each. Three things are still open:
+  latitude bands. Earth-like bodies get one of each. Four things are still open:
   - the slice and band counts are computed, not measured, and wait on R08.T12.d's spheroid mode
     and T12.b's Saturn-class case;
-  - the extra bakes may push a Saturn-class world past `BAKE_CEILING_S`;
+  - the extra bakes may push a Saturn-class world, or a giant at plan 14's cap (6–7 bands), past
+    `BAKE_CEILING_S`, and the capped giant past 2 MB (Design note 11);
   - zonal-wind gravity (about 1.4% on Saturn), the real 1-bar surface's departure from the
-    spheroid, and T(p) varying with latitude are not modelled.
+    spheroid, and T(p) varying with latitude are not modelled;
+  - the sectoral tide of synchronous bodies (Design note 17): plan 14 draws the spheroid, so the
+    0.6(a − c) bulge towards the primary (0.2–2 H on close-in planets) and g's ±¾(4 − k_f)m in
+    longitude are not drawn; and a capped figure's equatorial gravity is overstated.
 
   Until R08.T6.f lands, a body with ln(κ_max ÷ κ_min) > 0.02 is drawn under
   `ATMOSPHERE: APPROXIMATE`. Sources: Chapman 1931; Heiskanen and Moritz 1967; Syndergaard 1998;
@@ -2409,23 +2525,23 @@ generator, and the reference's sampling needs no domain tag.
     - `BodyGravity { spheroid: LevelSpheroid | null, referenceGravityMS2, slicing }`;
     - `bodyGravity(input, referenceRadiusM)` and `gravityRatio(gravity, φ)`.
 
-    The Provides' four functions had no place for the task's inputs (GM = G × `mass_kg`, ω or
-    none) or its fallback. With no rotation section the spheroid is `null`, g_ref the bulk
-    gravity, the slicing one slice and one band, and `gravityRatio` 1. T10.a fills the input from
-    the record. `AtmosphereMedium` as sketched carries g_ref and the slicing but not the spheroid,
-    which T6.e and T6.f need for s at every latitude: T10.a puts the `BodyGravity` in the medium,
-    or T6.e takes it beside the medium.
+    (The follow-up adds `figureLaw` and `gravityOffsetMS2`, below.) The Provides' four functions
+    had no place for the task's inputs (GM = G × `mass_kg`, ω or none) or its fallback. With no
+    rotation section the spheroid is `null`, g_ref the bulk gravity, the slicing one slice and one
+    band, and `gravityRatio` 1. T10.a fills the input from the record. `AtmosphereMedium` as
+    sketched carries g_ref and the slicing but not the spheroid, which T6.e and T6.f need for s at
+    every latitude: T10.a puts the `BodyGravity` in the medium, or T6.e takes it beside the medium.
 
   - `directionalCurvatureRadiusM(figure: SpheroidFigure, …)` takes R05's radii-only figure
     (`hillaire.ts`), since R_α needs no gravity; a `LevelSpheroid` or R07's `BodyFigure` serves.
   - The single slice is at κ = 1 and the single band at s = 1, R05's per-planet tables as they
     are; Design note 17 does not place them. κ and s are ranged over 1,025 latitudes with R_α
     between M and N; where gravity rises poleward the extremes are s_e M_e and s_p a² ÷ c.
-  - Bands: one at s = 1 while ln(s_max ÷ s_min) ≤ `BAND_STEP`, otherwise 1 + ⌈ln(s_max ÷ s_min) ÷
-    `BAND_STEP`⌉ from s_min to s_max, evenly in ln s. Design note 17 gives the step and the counts
-    but no threshold; its counts (the ice giants' span 0.050 → 1, Jupiter's 0.154 → 3, Saturn's
-    0.282 → 4) put it in [0.050, 0.154). It widens with `BAND_STEP` (Jupiter's 0.154 sits just
-    above 0.15). Open, below.
+  - Bands, as first built: one at s = 1 while ln(s_max ÷ s_min) ≤ `BAND_STEP`, otherwise
+    1 + ⌈ln(s_max ÷ s_min) ÷ `BAND_STEP`⌉ from s_min to s_max, evenly in ln s. Design note 17 gave
+    the step and the counts but no threshold; its counts (the ice giants' span 0.050 → 1,
+    Jupiter's 0.154 → 3, Saturn's 0.282 → 4) put it in [0.050, 0.154), widening with `BAND_STEP`.
+    Ruled below and replaced by `ONE_BAND_BELOW` in the follow-up.
   - ω is `spinRateAt(law, time)`, exported from `lib/system/rotation.ts`: the sim's
     `RotationLaw::rate_at`, leaving out the capture's phase as it does, and held to the slope of
     `rotationAngleAt` over every law of `frame/body_rotations.golden` to 10⁻⁶ once the capture's
@@ -2449,22 +2565,22 @@ generator, and the reference's sampling needs no domain tag.
   - The shared T3 acceptance selects only `oblate.test.ts`; T3.d's other changes are gated by
     `pnpm test`, or by vitest on `lib/system/rotation`, `lib/system/bodiesWire` and
     `lib/scene/sceneWire`.
-  - Open, raised with "main", each with its lean:
-    - _The one-band span._ Design note 17's single band leaves the ice giants' column wrong at the
-      extremes by up to ±½ ln(s_max ÷ s_min), ±2.5%, an ungated zeroth-order error, where the
-      slices' budget (1% of the 5%) would put the one-band span at `ONE_SLICE_BELOW` and give them
-      two bands (a second-order error of about 3 × 10⁻⁴), at one more per-planet build each, which
-      doubles their thick bakes against `BAKE_CEILING_S`. Built to Design note 17's counts
-      meanwhile. Lean: the 0.02 span, accuracy first, amending the note's counts and T3.d's test
-      to 2 and 2 for Uranus, unless R08.T14's bake time forbids it.
-    - _Figures that are not rotational level surfaces_ (`FigureLawDto`). For
-      `rotational_and_tidal` f carries the primary's tide while m is the spin's, so Clairaut's
-      f + f\* = 5m ÷ 2 (Heiskanen and Moritz 1967, eq. 2-99) understates the poleward rise of g by
-      about 15m ÷ 4 and reverses it where C ÷ Ma² > 0.34: under 0.3% in s while m < 2 × 10⁻³,
-      about ±2.7% for a synchronous inflated hot Saturn. A spinning `sphere` is rigid, its g rising
-      by about m rather than 5m ÷ 2 (more than one slice once m ≳ 0.008), and `capped` is not level
-      for its spin. Stated in `oblate.ts`. Lean: keep Somigliana and the record; the candidate
-      correction, if a ruling wants one, is an effective ω (√2.5 ω for `rotational_and_tidal`).
+  - Ruled 2026-10-09 (science-r08-oblate), applied by a T3.d follow-up:
+    - _The one-band span._ One band only while ln(s_max ÷ s_min) ≤ `ONE_BAND_BELOW` = 0.02,
+      fixed and not widened with `BAND_STEP`.
+      - One band would leave the column ±½ ln(s_max ÷ s_min) off: ±2.52% on Uranus, ±2.39% on
+        Neptune, and ±2.66% on plan 14's own Uranus. Nothing gates it.
+      - The threshold holds it to ±1%. Uranus and Neptune take 2 slices and 2 bands; two bands
+        leave 3 × 10⁻⁴ to 1.3 × 10⁻³.
+      - The second bake is 0.1–1 s by T14's count, under Saturn's accepted four.
+    - _Figures not flattened by the spin alone._ Design note 17's ω_fig, by figure law:
+      - `rotational`: the true ω;
+      - `rotational_and_tidal`: √2.5 ω, with + ω²R;
+      - `capped`: the Darwin–Radau inversion at the record's C ÷ Ma², which also stops the
+        `RangeError` and the unbounded counts at the true ω;
+      - `sphere`: the true ω (no sphere keeps an atmosphere).
+
+      The sectoral tide is recorded as plan 14's spheroid limit.
   - Finding for plan 14 (the deferred list): `RotationLaw`'s doc (`planetary/derive/rotation.rs`)
     puts the capture's rate "under 10⁻¹⁵ rad s⁻¹ for a lock more than a year off"; 2δΔ ÷ d² is
     bounded by 2π ÷ d, 2 × 10⁻⁷ rad s⁻¹ for a lock a year off.
@@ -2566,6 +2682,89 @@ generator, and the reference's sampling needs no domain tag.
     `planetary::temperature_at` (no `it.todo`: oxlint's `vitest/warn-todo` refuses one).
   - The shared acceptance selects `column.test.ts`; `medium.test.ts` and `tables.test.ts`'s new
     tests run under `pnpm test`.
+- **Deviations in the T3.d follow-up, as built** (2026-10-09; science-r08-oblate's rulings 1 and
+  2, `oblate.ts` and `oblate.test.ts`).
+  - _Names beside the Provides:_
+    - `darwinRadauSpinRadS(figure, gmM3S2, momentOfInertiaFactor)`, the inversion, exported for
+      its test;
+    - `FigureLawInput { law: FigureLawDto, momentOfInertiaFactor }`, which a `SystemBodyFigure`
+      satisfies as it is;
+    - `BodyGravityInput.figureLaw: FigureLawInput | null`, required so that T10.a cannot leave it
+      out, `null` read as `rotational`;
+    - `BodyGravity.gravityOffsetMS2`, the added ω²R (0 unless `rotational_and_tidal`), which
+      `referenceGravityMS2`, `gravityRatio` and the slicing include.
+
+    `LevelSpheroid`, `normalGravity` and `referenceGravity` stay pure Somigliana, so a tidal body's
+    `BodyGravity.referenceGravityMS2` is not `referenceGravity(spheroid)`. `oblateSlicing` keeps
+    its signature with nothing added; `bodyGravity` slices with the offset.
+
+  - _The spins._ `rotational_and_tidal` takes √2.5 times the true ω, as ruled, rather than the
+    inversion; the two agree to 1.4 × 10⁻¹³ on plan 14's figures. R is ∛(a²c), the figure's own
+    volumetric radius, which plan 14's `Spheroid::from_volumetric` makes the record's mean radius,
+    so the bulk section's radius is not read. `capped` reads only the figure, GM and C ÷ Ma², so
+    its ω_fig is the same at every spin past the cap: for a Saturn-density giant 0.70 ω at 1.4
+    break-up periods (the ruling's "0.66–0.70 ω" was taken there) and 0.50–0.55 ω at 1.0–1.1.
+    `darwinRadauSpinRadS` refuses a C ÷ Ma² outside (0, 0.4], the wire's own range
+    (`bodiesWire.ts`).
+  - _What the wire lacks: nothing for this._ `BodyFigureDto` carries `law` and
+    `moment_of_inertia_factor`, read as `SystemBodyFigure.law` and `.momentOfInertiaFactor`
+    (`lib/system/model.ts`), so no plan-14 field is needed. R07's `WireAppearance.figure` (its
+    `BodyFigure`) carries only the radii and the pole, so T10.a reads the two from the record's
+    `SystemBodyFigure` beside the appearance (T10.a's text says so). The sectoral tide's triaxial
+    datum is not on the wire; it is plan 14's to give, and recorded, not asked
+    (decision-p14-phase-j, 3).
+  - _Tests beyond the ruling's:_
+    - an Earth-density rocky world at 12.5 h (ln s spans 0.0195) takes 2 slices and 1 band, and at
+      12 h (0.0212) 2 and 2: slices and bands are decided apart;
+    - `sphere` takes the true ω beside `rotational` and no law;
+    - the inflated hot Saturn's two bands end at its g(φ) ÷ g_ref with ω²R;
+    - an exact Roche-model figure, independent of first-order theory: a point mass (k_f = 0)
+      locked about a primary of 1,000 times its mass at m = 0.01, its level surface found by
+      bisection in the restricted three-body problem's pseudo-potential (Murray and Dermott 1999,
+      ch. 3), and drawn as the spheroid of its mean equatorial and polar radii. It is held to
+      5 × 10⁻⁴ in s and in g_ref (0.018% and 0.018% measured, against the ruling's 0.04% and
+      0.017%), and the true ω's miss in s above 1.5% (1.9% measured);
+    - the inversion refuses a C ÷ Ma² outside (0, 0.4] and a GM of 0, NaN or ∞, and
+      `bodyGravity` refuses a `capped` record at C ÷ Ma² = 0.5.
+  - _Computed_ (the bounds above are what is asserted). With the tests' figures:
+    - the HD 209458b-like giant (m 4.37 × 10⁻³, f 0.0080): s within 4.7 × 10⁻⁵ of first-order
+      theory and g_ref within 4.0 × 10⁻⁵; the true ω is 0.82% off; its span, 0.0194, is one band;
+    - the inflated hot Saturn: two bands; s within 7.3 × 10⁻⁴ (the ruling's 0.10% left ω²R out of
+      s), g_ref −0.059% (not asserted);
+    - the capped Saturn-density giant (ρ 690 kg m⁻³, C 0.21, radius 7 × 10⁷ m, 1.1 break-up
+      periods): 10 slices and 7 bands.
+
+    With the same helpers, not asserted: an Io-like body, 9 × 10⁻⁶; and capped giants at
+    Jupiter's density and C 0.25 (9 slices and 6 bands) and at an ice giant's 1,600 kg m⁻³ and 0.23
+    (9 and 7). At the cap the counts depend on f and C ÷ Ma² alone, since ω_fig²a³ ÷ GM =
+    f(1 + η²) ÷ 2.5.
+
+  - _Departures from the ruling's text._
+    - Design note 11, T11 and T14.d send a capped giant that stays over 2 MB or `BAKE_CEILING_S`
+      to "main" for a decision agent's ruling. The ruling's plan text had "the owner rules"; the
+      RM4/RM5 common rules of 2026-10-09 send nothing to the owner.
+    - Its item 8(b) edit to the old `rotational_and_tidal` sentence falls with the "Open"
+      sub-bullet that 8(b) then replaces wholesale; the corrected figures (±15m ÷ 8, 0.32% at Io's
+      m) are Design note 17's and `oblate.ts`'s.
+    - T10.a adds that the law and C ÷ Ma² are read from `SystemBodyFigure`; the Consumes' figure
+      entry names the two fields; T3.d's "Bands" bullet above is kept, as first built; T3.d's
+      constants list names `ONE_BAND_BELOW`; T6.f's s and T12.d's Somigliana name the added ω²R
+      and the rotational case.
+    - _A capped figure's overstated equatorial gravity, corrected_ (the science review; raised with
+      "main", for a science agent to confirm). The ruling put it at "up to ⅔(ω² − ω_fig²)R",
+      which is only the uniform part. At the equator the true spin's centrifugal term exceeds
+      ω_fig's by the whole (ω² − ω_fig²)a: for a Saturn-density giant 0.42 γ_e at 1.4 break-up
+      periods (the ruling's form gives 0.26) and 0.62 at 1.27, and near the floor, where q(a)
+      reaches 1.25, the drawn equator would be unbound at the true spin. Design note 17 and
+      `oblate.ts` state it so. It is a stated limit only; nothing computed changes.
+    - _The HD 209458b-like case_ is the ruling's, at 1.38 times Jupiter's volumetric radius (1.35
+      of IAU 2015 B3's equatorial R_eJ, in which published radii are quoted), so its m is 4.37 ×
+      10⁻³ against 4.5 × 10⁻³ for Torres et al. 2008's or Southworth 2010's set; the test says so,
+      and 15m ÷ 8 is 0.82–0.85% either way.
+  - _Checked:_ every formula against its source as cited. The ruling's `oblate_check.py`, re-run
+    under the capped scope, reproduces its `run1.log` exactly. The first-order theory was
+    re-derived from Q = m[(3 ÷ 2)x² − ½z²]: its zonal part, its g ÷ g₀ = 1 − 2Q₀ + (k_f − 4)Q₂,
+    its k_f from Darwin–Radau, f\* = η²f and the 15m ÷ 4.
 
 - **Plan 14 produces no CH₄, O₂ or giant composition** (Design note 16). Titan-class haze, ozone and
   giants are fixture-only until P14.T24.c, d and f land. Biotic O₂ has no owner.

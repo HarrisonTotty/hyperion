@@ -14,24 +14,47 @@
  * slice and one band.
  *
  * g(φ) is the normal gravity of the level ellipsoid of revolution (a, a, c) that carries the
- * body's GM and turns at ω, by Somigliana's closed form, which holds for any flattening (Heiskanen
- * and Moritz 1967, _Physical Geodesy_, §2-7 and 2-8; NIMA TR8350.2, Third Edition, 4 July 1997,
- * Amendment 1, 3 January 2000, eq. 4-1). Three effects are not modelled (Design note 17): zonal
- * winds' 2ωu + u²/a, the real 1-bar surface's departure from the best-fit spheroid, and T(p)
- * varying with latitude.
+ * body's GM and turns at ω, by Somigliana's closed form, which holds for any flattening and any
+ * interior (Heiskanen and Moritz 1967, _Physical Geodesy_, §2-7 and 2-8, by Stokes's theorem;
+ * NIMA TR8350.2, Third Edition, 4 July 1997, Amendment 1, 3 January 2000, eq. 4-1). Three effects
+ * are not modelled (Design note 17): zonal winds' 2ωu + u²/a, the real 1-bar surface's departure
+ * from the best-fit spheroid, and T(p) varying with latitude.
  *
- * Every figure is taken as a level surface of its rotation alone, which the wire's `FigureLawDto`
- * says is not always so:
+ * Somigliana needs the spin under which the drawn figure is level, ω_fig, which plan 14's figure
+ * law gives (the wire's `FigureLawDto`, P14.T46.c; Design note 17, "Figures not flattened by the
+ * spin alone"; ruled 2026-10-09, science-r08-oblate). {@link bodyGravity} applies it:
  *
- * - `rotational_and_tidal`: the flattening f carries the primary's tide while m is the spin's
- *   alone, so Clairaut's f + f\* = 5m ÷ 2 (Heiskanen and Moritz 1967, eq. 2-99) understates the
- *   gravity's rise to the pole by about 15m ÷ 4, and reverses it (g_p < g_e) where f > 5m ÷ 2,
- *   about C ÷ Ma² > 0.34 under Darwin–Radau. It is under 0.3% in s while m < 2 × 10⁻³, and about
- *   ±2.7% for a synchronous inflated hot Saturn;
- * - `sphere`: a spinning sphere is rigid, not level, and its gravity rises to the pole by about m,
- *   not 5m ÷ 2;
- * - `capped`: a flattening held at its cap is not the level one for its spin.
+ * - `rotational`, and a body with no law (fixtures, R05's Earth): the true ω.
+ * - `rotational_and_tidal` (locked 1:1, f 2.5 times the spin's): ω_fig = √2.5 ω, with ω²R added
+ *   to g at every latitude, R the volumetric radius. Over longitude the primary's static tide on a
+ *   synchronous body adds −½ω²r²P₂(cos θ) to the spin's −⅓ω²r²P₂(cos θ), a zonal forcing 2.5 times
+ *   the spin's whatever the interior (the addition theorem, with the primary in the equator and
+ *   GM_p ÷ d³ = ω², M ≪ M_p; Dermott 1979, Icarus 37, 575; Murray and Dermott 1999, _Solar System
+ *   Dynamics_, §4.7; the 4 : 1 : 3 figure is Leconte, Lai and Chabrier 2011, A&A 528, A41, eq. 44
+ *   as p → 0), so √2.5 ω makes the drawn spheroid level under exactly that forcing. The tide has no
+ *   degree-0 term, which √2.5 ω adds as ⅔(ω_fig² − ω²)R = ω²R; adding it back restores g_ref.
+ *   The true ω would miss the poleward rise of g by 15m ÷ 4, m = ω²R³ ÷ GM: ±15m ÷ 8 in s, 0.8% on
+ *   an HD 209458b-like giant and 3.4% on an inflated hot Saturn.
+ * - `capped` (f held at plan 14's 0.2): ω_fig is the spin whose Darwin–Radau flattening at the
+ *   record's C ÷ Ma² is the drawn f ({@link darwinRadauSpinRadS}), with no added term. The true ω
+ *   has no level f = 0.2 spheroid below 1.27 break-up periods (γ_e ≤ 0), and above that spreads s
+ *   over a factor of 7.
+ * - `sphere`: the true ω.
+ *
+ * Stated limits (Design note 17): first-order theory leaves ω_fig a second-order residual of about
+ * 4m² (0.3% at m = 0.03); a capped figure's equatorial gravity is overstated, the true spin's
+ * centrifugal term at the equator being (ω² − ω_fig²)a larger, ⅔(ω² − ω_fig²)R of it uniform (about
+ * 0.4 γ_e at 1.4 break-up periods, and all of γ_e near the break-up floor, where q(a) reaches 1.25;
+ * computed); a spinning `sphere` is rigid, not level, its
+ * gravity rising to the pole by m, not Somigliana's 5m ÷ 2, though no sphere keeps an atmosphere
+ * under plan 14's Jeans rule; and the sectoral tide is not drawn. Plan 14 draws the spheroid
+ * (a + b) ÷ 2 against c of the synchronous 4 : 1 : 3 triaxial figure, so the level surface's rise
+ * towards the primary, 0.6(a − c), and g's ±¾(4 − k_f)m in longitude about the zonal mean at the
+ * equator are left out, the atmosphere following the drawn surface. A triaxial datum would be
+ * plan 14's to give (decision-p14-phase-j, 3).
  */
+
+import type { FigureLawDto } from "@hyperion/protocol";
 
 import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../lib/system/constants";
 import type { SpheroidFigure } from "./hillaire";
@@ -45,7 +68,8 @@ import type { SpheroidFigure } from "./hillaire";
  * {@link GRAVITATIONAL_CONSTANT_M3_PER_KG_S2} times the record's `mass_kg` ({@link bodyGravity});
  * ω is the spin rate at the scene time of the record's rotation law (`lib/system/rotation.ts`'s
  * `spinRateAt`), or R05 Design note 14's test-planet rate for R05's Earth
- * (`view/spike/rotation.ts`).
+ * (`view/spike/rotation.ts`). For a figure not flattened by its spin alone, ω is Design note 17's
+ * ω_fig ({@link bodyGravity}).
  */
 export interface LevelSpheroid {
   /** a, m. */
@@ -69,22 +93,20 @@ export interface LevelSpheroid {
 export const KAPPA_STEP = 0.15;
 
 /**
- * The step of the latitude bands in ln s (Design note 17), and the span of ln s one band serves.
+ * The step of the latitude bands in ln s (Design note 17).
  *
  * @remarks
  * Computed, not measured, as {@link KAPPA_STEP} is. Widened to 0.15 over the 2 MB row, after
- * {@link KAPPA_STEP} (Design note 11), which raises the one-band span with it.
+ * {@link KAPPA_STEP} (Design note 11); {@link ONE_BAND_BELOW} does not widen with it.
  *
- * Bands between two neighbours are interpolated, with an error of second order in the step; one
- * band at s = 1 is wrong in the column at the extremes by up to ±½ ln(s_max ÷ s_min), ±2.5% on the
- * ice giants and ±5% at the span's limit, which no gate yet measures. Design note 17 gives the ice
- * giants one band; whether the one-band span should instead be {@link ONE_SLICE_BELOW}'s, giving
- * them two, is raised for a ruling (R08's Risks).
+ * Bands between two neighbours are read by linear interpolation in ln s, with an error of second
+ * order in the step: two bands over the ice giants' span of 0.05 leave 3 × 10⁻⁴ in a quantity that
+ * goes as 1 ÷ s and 1.3 × 10⁻³ in one that goes as 1 ÷ s² (science-r08-oblate).
  */
 export const BAND_STEP = 0.1;
 
 /**
- * The span of ln κ, ln(κ_max ÷ κ_min), under which one slice and one band serve (Design note 17).
+ * The span of ln κ, ln(κ_max ÷ κ_min), under which one slice serves (Design note 17).
  *
  * @remarks
  * Grazing optical depth goes as √R (Chapman 1931, Proc. Phys. Soc. 43, 483), so one slice is wrong
@@ -92,6 +114,18 @@ export const BAND_STEP = 0.1;
  * the span's centre in ln κ: within the 1% of Design note 10's 5% that geometry may take.
  */
 export const ONE_SLICE_BELOW = 0.02;
+
+/**
+ * The span of ln s, ln(s_max ÷ s_min), under which one band serves (Design note 17; ruled
+ * 2026-10-09, science-r08-oblate). It is fixed, and never widens with {@link BAND_STEP}.
+ *
+ * @remarks
+ * One band at s = 1 is wrong in the column at the pole and the equator by ±½ ln(s_max ÷ s_min), so
+ * this holds it to ±1%, within the 1% of Design note 10's 5% kept for geometry. It gives the ice
+ * giants (spans 0.047–0.053) two bands, where one would leave their column ±2.4–2.7% off, which no
+ * gate measures.
+ */
+export const ONE_BAND_BELOW = 0.02;
 
 /** The slices and bands of a body's tables (Design note 17). */
 export interface OblateSlicing {
@@ -220,6 +254,10 @@ export function normalGravity(body: LevelSpheroid, geodeticLatitudeRad: number):
  * g_ref = √(g_e g_p), m s⁻²: the gravity the column is built at (R08.T3.a), so that s = g(φ) ÷
  * g_ref spans the same factor either side of 1 from the equator to the pole (Design note 17).
  *
+ * @remarks
+ * This is the level spheroid's alone, γ_e and γ_p; a `rotational_and_tidal` body's g_ref also
+ * carries its added ω²R ({@link BodyGravity.referenceGravityMS2}).
+ *
  * @throws RangeError as {@link normalGravity}.
  */
 export function referenceGravity(body: LevelSpheroid): number {
@@ -290,36 +328,50 @@ function logSpaced(low: number, high: number, count: number): Float64Array {
  * κ = s R_α ÷ R_ref over every latitude and azimuth, and s = g(φ) ÷ g_ref over every latitude, are
  * ranged by a scan of {@link RANGE_SCAN_STEPS} latitudes from the equator to the pole, R_α taking
  * its extremes M and N along the meridian and the prime vertical. On a body whose gravity rises
- * towards the pole the extremes are the equator's s_e M_e and the pole's s_p a² ÷ c.
+ * towards the pole the extremes are the equator's s_e M_e and the pole's s_p a² ÷ c. Slices and
+ * bands are decided independently, each threshold reading its own span:
  *
- * - While ln(κ_max ÷ κ_min) ≤ {@link ONE_SLICE_BELOW}, one slice at κ = 1 and one band at s = 1,
- *   R05's per-planet tables as they are, serve.
- * - Otherwise the slices number 1 + ⌈ln(κ_max ÷ κ_min) ÷ {@link KAPPA_STEP}⌉, from κ_min to κ_max
- *   evenly in ln κ.
- * - The bands are one at s = 1 while ln(s_max ÷ s_min) ≤ {@link BAND_STEP}, and otherwise
- *   1 + ⌈ln(s_max ÷ s_min) ÷ {@link BAND_STEP}⌉ from s_min to s_max evenly in ln s.
+ * - one slice at κ = 1, R05's transmittance table as it is, while ln(κ_max ÷ κ_min) ≤
+ *   {@link ONE_SLICE_BELOW}, and otherwise 1 + ⌈ln(κ_max ÷ κ_min) ÷ {@link KAPPA_STEP}⌉ from κ_min
+ *   to κ_max, evenly in ln κ;
+ * - one band at s = 1, R05's per-planet build as it is, while ln(s_max ÷ s_min) ≤
+ *   {@link ONE_BAND_BELOW}, and otherwise 1 + ⌈ln(s_max ÷ s_min) ÷ {@link BAND_STEP}⌉ from s_min
+ *   to s_max, evenly in ln s.
  *
- * That is 1 and 1 for Earth, 2 and 1 for the ice giants, 4 and 3 for Jupiter and 5 and 4 for
- * Saturn: the counts of Design note 17. The one-band rule is this task's reading of the note,
- * which gives the step and the ice giants' single band but not the threshold between them; its
- * error is {@link BAND_STEP}'s to state.
+ * That is 1 and 1 for Earth, 2 and 2 for the ice giants, 4 and 3 for Jupiter and 5 and 4 for
+ * Saturn (Design note 17).
+ *
+ * `body` is taken as its own level spheroid, g(φ) = γ(φ) alone; {@link bodyGravity} slices a
+ * `rotational_and_tidal` figure with its added ω²R.
  *
  * @param referenceRadiusM - R_ref, m: the per-planet tables' ground, R05's `tableRadiusM(figure)`.
  * @throws RangeError as {@link normalGravity}, or for an R_ref that is not finite and positive.
  */
 export function oblateSlicing(body: LevelSpheroid, referenceRadiusM: number): OblateSlicing {
+  return slicingOf(poleAndEquator(body), 0, referenceRadiusM);
+}
+
+/** g_ref = √(g_e g_p), m s⁻², of the gravity g(φ) = γ(φ) + `offsetMS2`. */
+function offsetReferenceGravity(g: PoleAndEquator, offsetMS2: number): number {
+  return Math.sqrt((g.equatorialMS2 + offsetMS2) * (g.polarMS2 + offsetMS2));
+}
+
+/**
+ * {@link oblateSlicing} of the gravity g(φ) = γ(φ) + `offsetMS2`, γ Somigliana's from `g`'s γ_e and
+ * γ_p, with g_ref = √(g_e g_p) of that g.
+ */
+function slicingOf(g: PoleAndEquator, offsetMS2: number, referenceRadiusM: number): OblateSlicing {
   if (!(Number.isFinite(referenceRadiusM) && referenceRadiusM > 0)) {
     throw new RangeError(`R_ref must be finite and positive, got ${referenceRadiusM} m`);
   }
-  const g = poleAndEquator(body);
-  const gRef = Math.sqrt(g.equatorialMS2 * g.polarMS2);
+  const gRef = offsetReferenceGravity(g, offsetMS2);
   let kappaMin = Number.POSITIVE_INFINITY;
   let kappaMax = 0;
   let sMin = Number.POSITIVE_INFINITY;
   let sMax = 0;
   for (let i = 0; i <= RANGE_SCAN_STEPS; i += 1) {
     const latitudeRad = (i / RANGE_SCAN_STEPS) * (Math.PI / 2);
-    const s = somigliana(g, latitudeRad) / gRef;
+    const s = (somigliana(g, latitudeRad) + offsetMS2) / gRef;
     const { m, n } = principalRadii(g.a, g.c, latitudeRad);
     kappaMin = Math.min(kappaMin, (s * Math.min(m, n)) / referenceRadiusM);
     kappaMax = Math.max(kappaMax, (s * Math.max(m, n)) / referenceRadiusM);
@@ -327,17 +379,81 @@ export function oblateSlicing(body: LevelSpheroid, referenceRadiusM: number): Ob
     sMax = Math.max(sMax, s);
   }
   const kappaSpan = Math.log(kappaMax / kappaMin);
-  if (kappaSpan <= ONE_SLICE_BELOW) {
-    return oneSliceAndBand();
-  }
   const sSpan = Math.log(sMax / sMin);
   return {
-    kappa: logSpaced(kappaMin, kappaMax, 1 + Math.ceil(kappaSpan / KAPPA_STEP)),
+    kappa:
+      kappaSpan <= ONE_SLICE_BELOW
+        ? Float64Array.of(1)
+        : logSpaced(kappaMin, kappaMax, 1 + Math.ceil(kappaSpan / KAPPA_STEP)),
     bandGravityRatio:
-      sSpan <= BAND_STEP
+      sSpan <= ONE_BAND_BELOW
         ? Float64Array.of(1)
         : logSpaced(sMin, sMax, 1 + Math.ceil(sSpan / BAND_STEP)),
   };
+}
+
+/**
+ * The zonal degree-2 forcing on a synchronous body, the spin's plus the primary's static tide
+ * averaged over longitude, as a multiple of the spin's alone: (⅓ + ½) ÷ ⅓ = 2.5, whatever the
+ * interior (Design note 17, derived by the addition theorem; Dermott 1979, Icarus 37, 575). It is
+ * plan 14's `SYNCHRONOUS_TIDAL_FACTOR` (`planetary/params.rs`), the factor that flattens a
+ * `rotational_and_tidal` figure, so ω_fig = √2.5 ω.
+ *
+ * @remarks
+ * It takes GM_p ÷ d³ = ω², which holds for M ≪ M_p (exactly n² M_p ÷ (M_p + M)). A Charon-like
+ * pair, M ÷ M_p = 0.12, would take 2.34; plan 14 draws every synchronous figure at 2.5, and the
+ * spin here is the one that makes the drawn figure level.
+ */
+const SYNCHRONOUS_ZONAL_FORCING = 2.5;
+
+/**
+ * ω_fig, rad s⁻¹: the spin whose Darwin–Radau flattening at C ÷ Ma² is the figure's own,
+ * f = (a − c) ÷ a (Design note 17, "Figures not flattened by the spin alone").
+ *
+ * @remarks
+ * Plan 14 finds f = (5 ÷ 2) q ÷ (1 + η²), η² = (25 ÷ 4)(1 − (3 ÷ 2) C ÷ Ma²)², q = ω²a³ ÷ GM
+ * (`planetary/derive/figure.rs`'s `darwin_radau_flattening`, P14.T46.c: Murray and Dermott 1999,
+ * _Solar System Dynamics_, §4.6, in the form of Bourda and Capitaine 2004, A&A 428, 691, eqs.
+ * 15–18), which is the Darwin–Radau relation C ÷ Ma² = ⅔[1 − ⅖ √(5q ÷ 2f − 1)] solved for f; η²
+ * here is Bourda and Capitaine's 1 + η (their eq. 17). Inverted, ω_fig² =
+ * (GM ÷ a³) f (1 + η²) ÷ 2.5. On a figure built by plan 14's iteration this is ω for a
+ * `rotational` law and √2.5 ω for a `rotational_and_tidal` one. On a `capped` one, f held at 0.2,
+ * it is the spin under which the drawn spheroid is level, the same at any spin past the cap, and
+ * below the true ω for an unlocked body: for a Saturn-density giant 0.70 ω at 1.4 break-up periods
+ * (science-r08-oblate) and 0.50 ω at the break-up floor (computed, R08's Risks).
+ *
+ * @param momentOfInertiaFactor - C ÷ Ma², in (0, 0.4]: the record's `momentOfInertiaFactor`, the
+ *   factor plan 14 found the flattening with.
+ * @throws RangeError for radii not 0 < c ≤ a, a GM that is not finite and positive, or a factor
+ *   outside (0, 0.4].
+ */
+export function darwinRadauSpinRadS(
+  figure: SpheroidFigure,
+  gmM3S2: number,
+  momentOfInertiaFactor: number,
+): number {
+  const { a, c } = radiiOf(figure);
+  if (!(Number.isFinite(gmM3S2) && gmM3S2 > 0)) {
+    throw new RangeError(`the inversion needs GM > 0, got ${gmM3S2} m³/s²`);
+  }
+  if (!(momentOfInertiaFactor > 0 && momentOfInertiaFactor <= 0.4)) {
+    throw new RangeError(`C ÷ Ma² must lie in (0, 0.4], got ${momentOfInertiaFactor}`);
+  }
+  const x = 1 - 1.5 * momentOfInertiaFactor;
+  const eta2 = 6.25 * x * x;
+  const flattening = (a - c) / a;
+  return Math.sqrt(((gmM3S2 / (a * a * a)) * flattening * (1 + eta2)) / 2.5);
+}
+
+/**
+ * How a body's figure was found, and the moment of inertia it was found with: the record's figure
+ * section (`SystemBodyFigure.law` and `.momentOfInertiaFactor`, the wire's `BodyFigureDto`,
+ * P14.T46.c), which a `SystemBodyFigure` gives as it is.
+ */
+export interface FigureLawInput {
+  readonly law: FigureLawDto;
+  /** C ÷ Ma², in (0, 0.4]. */
+  readonly momentOfInertiaFactor: number;
 }
 
 /** What a body's record gives its gravity (Design note 17; R08.T10.a assembles it). */
@@ -353,66 +469,138 @@ export interface BodyGravityInput {
   readonly angularVelocityRadS: number | null;
   /** The bulk section's surface gravity, m s⁻²: g everywhere when ω is `null`. */
   readonly bulkGravityMS2: number;
+  /**
+   * The figure's law and C ÷ Ma², which set the spin Somigliana is taken at (Design note 17), or
+   * `null` for fixtures and R05's Earth, read as `rotational`.
+   */
+  readonly figureLaw: FigureLawInput | null;
 }
 
 /** A body's gravity as its medium is built and read at (Design note 17). */
 export interface BodyGravity {
   /**
-   * The level spheroid, or `null` for a body with no rotation section, whose gravity is taken as
-   * its bulk gravity at every latitude.
+   * The level spheroid, whose ω is the figure law's ω_fig, or `null` for a body with no rotation
+   * section, whose gravity is taken as its bulk gravity at every latitude.
    */
   readonly spheroid: LevelSpheroid | null;
-  /** g_ref, m s⁻²: {@link referenceGravity}, or the bulk gravity with no spheroid. */
+  /**
+   * The gravity added to Somigliana's γ(φ) at every latitude, m s⁻²: on a `rotational_and_tidal`
+   * figure ω²R, the degree-0 centrifugal term that ω_fig overstates (Design note 17), and 0
+   * otherwise.
+   */
+  readonly gravityOffsetMS2: number;
+  /**
+   * g_ref = √(g_e g_p), m s⁻², of g(φ) = γ(φ) + {@link BodyGravity.gravityOffsetMS2}: the
+   * spheroid's {@link referenceGravity} where nothing is added, or the bulk gravity with no
+   * spheroid.
+   */
   readonly referenceGravityMS2: number;
   readonly slicing: OblateSlicing;
 }
 
+/** The spin Somigliana is taken at, and the gravity added at every latitude. */
+interface FigureSpin {
+  readonly angularVelocityRadS: number;
+  readonly gravityOffsetMS2: number;
+}
+
+/** Design note 17's ω_fig and added term, by figure law (see the module's documentation). */
+function figureSpin(
+  figure: SpheroidFigure,
+  gmM3S2: number,
+  angularVelocityRadS: number,
+  figureLaw: FigureLawInput | null,
+): FigureSpin {
+  if (figureLaw === null) {
+    return { angularVelocityRadS, gravityOffsetMS2: 0 };
+  }
+  let spin: FigureSpin;
+  switch (figureLaw.law) {
+    case "rotational":
+    case "sphere":
+      spin = { angularVelocityRadS, gravityOffsetMS2: 0 };
+      break;
+    case "rotational_and_tidal": {
+      const { a, c } = radiiOf(figure);
+      spin = {
+        angularVelocityRadS: Math.sqrt(SYNCHRONOUS_ZONAL_FORCING) * angularVelocityRadS,
+        gravityOffsetMS2: angularVelocityRadS * angularVelocityRadS * Math.cbrt(a * a * c),
+      };
+      break;
+    }
+    case "capped":
+      spin = {
+        angularVelocityRadS: darwinRadauSpinRadS(figure, gmM3S2, figureLaw.momentOfInertiaFactor),
+        gravityOffsetMS2: 0,
+      };
+      break;
+  }
+  return spin;
+}
+
 /**
- * A body's gravity from its record: its level spheroid with GM = G × `mass_kg`, g_ref and the
- * slicing, or, with no rotation section, the bulk gravity everywhere and one slice and one band.
+ * A body's gravity from its record: its level spheroid with GM = G × `mass_kg` at its figure law's
+ * spin, g_ref and the slicing, or, with no rotation section, the bulk gravity everywhere and one
+ * slice and one band.
  *
  * @remarks
- * The wire's figure is `not_modelled` wherever its rotation is (`BodySummaryDto.figure`), so a
- * generated body with a figure has a rotation, and the fallback serves fixtures and hand-built
- * bodies. It takes no account of the figure's flattening.
+ * The spin is Design note 17's ω_fig: the true ω for `rotational`, `sphere` and no law, √2.5 ω with
+ * ω²R added to g for `rotational_and_tidal` (R the volumetric radius ∛(a²c), the record's by plan
+ * 14's figure), and {@link darwinRadauSpinRadS} for `capped`. The wire's figure is `not_modelled`
+ * wherever its rotation is (`BodySummaryDto.figure`), so a generated body with a figure has a
+ * rotation, and the fallback serves fixtures and hand-built bodies. It takes no account of the
+ * figure's flattening.
  *
  * @param referenceRadiusM - R_ref, m: R05's `tableRadiusM(figure)`.
- * @throws RangeError where ω is given, for a mass that is not finite and positive and as
- *   {@link oblateSlicing}; where ω is `null`, for a bulk gravity that is not finite and positive.
+ * @throws RangeError where ω is given, for a mass that is not finite and positive, for a `capped`
+ *   figure as {@link darwinRadauSpinRadS}, and as {@link oblateSlicing}; where ω is `null`, for a
+ *   bulk gravity that is not finite and positive.
  */
 export function bodyGravity(input: BodyGravityInput, referenceRadiusM: number): BodyGravity {
-  const omega = input.angularVelocityRadS;
-  if (omega === null) {
+  const angularVelocityRadS = input.angularVelocityRadS;
+  if (angularVelocityRadS === null) {
     const g = input.bulkGravityMS2;
     if (!(Number.isFinite(g) && g > 0)) {
       throw new RangeError(`a bulk gravity must be finite and positive, got ${g} m/s²`);
     }
-    return { spheroid: null, referenceGravityMS2: g, slicing: oneSliceAndBand() };
+    return {
+      spheroid: null,
+      gravityOffsetMS2: 0,
+      referenceGravityMS2: g,
+      slicing: oneSliceAndBand(),
+    };
   }
   if (!(Number.isFinite(input.massKg) && input.massKg > 0)) {
     throw new RangeError(`a body's mass must be finite and positive, got ${input.massKg} kg`);
   }
+  const gm = GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 * input.massKg;
+  const spin = figureSpin(input.figure, gm, angularVelocityRadS, input.figureLaw);
   const spheroid: LevelSpheroid = {
     equatorialRadiusM: input.figure.equatorialRadiusM,
     polarRadiusM: input.figure.polarRadiusM,
-    gmM3S2: GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 * input.massKg,
-    angularVelocityRadS: omega,
+    gmM3S2: gm,
+    angularVelocityRadS: spin.angularVelocityRadS,
   };
+  const g = poleAndEquator(spheroid);
+  const offset = spin.gravityOffsetMS2;
   return {
     spheroid,
-    referenceGravityMS2: referenceGravity(spheroid),
-    slicing: oblateSlicing(spheroid, referenceRadiusM),
+    gravityOffsetMS2: offset,
+    referenceGravityMS2: offsetReferenceGravity(g, offset),
+    slicing: slicingOf(g, offset, referenceRadiusM),
   };
 }
 
 /**
- * s = g(φ) ÷ g_ref at geodetic latitude φ: the factor heights are scaled by and table optical
- * depths divided by (Design note 17); 1 everywhere for a body with no spheroid.
+ * s = g(φ) ÷ g_ref at geodetic latitude φ, g(φ) = γ(φ) + {@link BodyGravity.gravityOffsetMS2}:
+ * the factor heights are scaled by and table optical depths divided by (Design note 17); 1
+ * everywhere for a body with no spheroid.
  *
  * @throws RangeError as {@link normalGravity}.
  */
 export function gravityRatio(gravity: BodyGravity, geodeticLatitudeRad: number): number {
   return gravity.spheroid === null
     ? 1
-    : normalGravity(gravity.spheroid, geodeticLatitudeRad) / gravity.referenceGravityMS2;
+    : (normalGravity(gravity.spheroid, geodeticLatitudeRad) + gravity.gravityOffsetMS2) /
+        gravity.referenceGravityMS2;
 }

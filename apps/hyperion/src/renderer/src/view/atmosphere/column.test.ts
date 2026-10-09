@@ -106,6 +106,7 @@ const SATURN_GRAVITY = bodyGravity(
     massKg: SATURN.gmM3S2 / G,
     angularVelocityRadS: SATURN.angularVelocityRadS,
     bulkGravityMS2: 10.44,
+    figureLaw: null,
   },
   tableRadiusM(SATURN),
 );
