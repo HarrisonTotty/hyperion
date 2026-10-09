@@ -473,9 +473,10 @@ slow-test entry), this plan. Acceptance: `just test-slow the_hybrid_boundary_is_
 
 - **R13.T2.b The server, the reply and the interim label.** The server states the ceiling
   (`SYNTHETIC_CEILING_V`, 5.0 until R13.T7) on every request and computes both caps counts over one
-  `RayExtinctions`; the response's `synthetic_ceiling_v`, each layer's real boundary and its
-  `expected_beyond` at the cut (`just gen-protocol`); the client composes Design note 13's interim
-  note; its guide row is drafted for the UX decision agent and the owner. The sampled cold bench of
+  `RayExtinctions`, each count split as R06.T11.g splits the first; the response's
+  `synthetic_ceiling_v`, each layer's real boundary and its `expected_beyond` at the cut
+  (`just gen-protocol`); the client composes Design note 13's interim note; its guide row is
+  drafted for the UX decision agent and the owner. The sampled cold bench of
   the served sky near the Sun is recorded for R06.T17's full-cold figure. Tests: a sky near the Sun
   returns the sim's census at the ceiling bit for bit; the reply states the ceiling and each layer's
   boundary and count beyond; the label's composition with `STREAMING` and `NOT YET MODELLED`.

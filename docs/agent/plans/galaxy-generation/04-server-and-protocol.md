@@ -440,9 +440,11 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   (P12.T9) if P12.T9 has not landed, with the scene as their first topic.
 
   Row R06 is the rendering plan R06's (the sky), drafted by R06.T1 for this plan's owner and
-  awaiting acceptance. `sky` is in the large size class: the server's `is_large` returns true for
-  it, as that rule requires before the kind is built. Its stars and band travel as one bulk
-  payload on R03's binary frames, announced by R03's `BulkManifestDto` in the terminal response.
+  accepted 2026-10-08 by a delegated decision (`decision-r06-t11d-first-sky.md`), with the server
+  message type `partial_response` below. `sky` is in the large size class: the server's
+  `is_large` returns true for it, as that rule requires before the kind is built. Its stars and
+  band travel as one bulk payload on R03's binary frames, announced by R03's `BulkManifestDto` in
+  the terminal response.
 
 - Server message type `notification`, for pushes. A subscription is opened by an ordinary request
   whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe`, the
@@ -450,6 +452,17 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   console that way, through the knowledge overlay.
 - Server message type `response_part`, should a payload outgrow one frame: parts precede the
   terminal `response`. Binary frames stay unused and reserved for bulk payloads.
+- Server message type `partial_response` (rendering plan R06, R06.T11.d; accepted 2026-10-08 by a
+  delegated decision, `decision-r06-t11d-first-sky.md`): a whole answer to a request still in
+  flight, which a later `partial_response` or the terminal `response` replaces whole, as a sky
+  arriving nearest first. It ends nothing: the request still ends in exactly one terminal
+  message. Its body has the request's kind; in bulk its binary frames precede it as a
+  `response`'s do, numbered from chunk 0 for each answer. Only a kind whose owner names it here is
+  answered so, today R06's `sky`, and only from the build that first serves that kind by default,
+  so that no client built to receive the kind whole receives a part. Making a kind that a released
+  build serves whole answer in parts changes it, and bumps `PROTOCOL_VERSION` (Design note 15).
+  It is not `response_part`, which stays reserved for the parts of one payload too large for one
+  frame.
 - Any `SystemIdHex` or body ID arriving from a client goes through the sim's `resolve` before use,
   as the brainstorm requires of IDs read from the protocol. M1 has no such inbound field.
 - `MassLayer`, `Population`, `LayerStatus`, `Unit` and `ErrorCode` will grow. TypeScript switches

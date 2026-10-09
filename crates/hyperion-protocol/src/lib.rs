@@ -111,10 +111,14 @@ pub use universe::{
 /// server sends a notification only on a subscription the client opened, and binary frames only in
 /// answer to a request whose kind asks for bulk, so a version 2 client that sends neither receives
 /// neither, and a newer client asking an older server gets `unsupported`. The same holds for
-/// `subscription_ended`, sent only on a subscription the client opened, and for
-/// `partial_response`, sent only in answer to a `sky`, which a client that does not know it never
-/// asks (rendering plan R06, R06.T11.d). The ruling holds only while none of them is ever sent
-/// unasked; `crates/hyperion-server/tests/websocket.rs`'s
+/// `subscription_ended`, sent only on a subscription the client opened. `partial_response` is sent
+/// only in answer to a `sky` (rendering plan R06, R06.T11.d), and a client that does not know it
+/// may still ask one, as the clients built before R06.T11.d do: it leaves the version at 2 because
+/// no server answered `sky` by default before the build that sends partials, so no released pairing
+/// ever received a whole sky that a partial now precedes (decided 2026-10-08,
+/// `decision-r06-t11d-first-sky.md` §3; galaxy plan 04's reserved list). Making a kind that a
+/// released build serves whole answer in parts would bump it. The ruling holds only while none of
+/// them is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
 /// `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` pins it (open
 /// question 21, closed 2026-09-30 by a delegated decision).
 pub const PROTOCOL_VERSION: u32 = 2;

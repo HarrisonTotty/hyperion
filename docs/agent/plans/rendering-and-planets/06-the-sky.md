@@ -1101,9 +1101,11 @@ needs no plan-11 task; T7.b and T8.i, which no longer wait for T8.g; T8.g, once 
 P11.T17.c are on `rendering-and-planets`; T8.h, built on T8.g as committed (decided 2026-10-08,
 `decision-r06-t8h-warm.md`); T8.g's final gates once P11.T17.c lands, then T8.n; T11.d, after
 T8.g, T8.i and T11.a–c (T11.c on T9.f); T11.f, the stars-arriving note split from T11.d
-(2026-10-08), after it; T5.f and T9.g before T17's goldens; then T17 (the order amended
-2026-10-06, `decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and `decision-r06-t8k-cone.md`,
-and 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
+(2026-10-08), after it; T11.g, the first sky within its budget, after T11.d, beside R13.T2; T7.c,
+the visibility caps' safety with the illumination, before the default switch (both decided
+2026-10-08, `decision-r06-t11d-first-sky.md`); T5.f and T9.g before T17's goldens; then T17
+(the order amended 2026-10-06, `decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and
+`decision-r06-t8k-cone.md`, and 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
 advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
@@ -1868,9 +1870,11 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   on it; decided 2026-10-07).** Decided 2026-10-05 (`decision-r06-census-cost.md`). The sign-off
   was advised by a decision agent and adopted on 2026-10-05 under the owner's standing delegation
   (`decision-r06-census-cost-signoff.md`, question 2), with its amendments here. `census_plan`
-  orders its cells by distance shell. The shell edges, per layer, are 500 ly, then 1,000 × 2^k ly
-  up to the cap; the edges are constants, which never adapt to the machine, so every machine and
-  worker count gives the same sequence of replies. A, B and the brown dwarfs are one shell each.
+  orders its cells by distance shell. The shell edges, per layer, are 125, 250 and 500 ly, then
+  1,000 × 2^k ly up to the cap (125 and 250 added 2026-10-08 by R06.T11.g,
+  `decision-r06-t11d-first-sky.md`); the edges are constants, which never adapt to the machine, so
+  every machine and worker count gives the same sequence of replies. A, B and the brown dwarfs are
+  one shell each.
   - A cell belongs to the first shell its padded box meets.
   - `SkyCensus` carries, per layer, the radius to which it is complete.
   - After shell k a layer is complete, towards each direction u, to the lesser of shell k's edge
@@ -1951,7 +1955,7 @@ systems. The budget is T17's.
   overflow and band light together are independent of the complete-to radius, within 1%. The
   radii are those a reply can state, from the first shell's edge to the final caps, not zero,
   which no reply has (decided 2026-10-06, `decision-r06-t9b-band.md`). T9.f re-sums one march at
-  several radii; T17 measures the first shell (500 ly) against the final caps. Acceptance:
+  several radii; T17 measures the first shell (125 ly) against the final caps. Acceptance:
   `cargo test -p hyperion-sim sky::band`.
 - **R06.T9.e Reddening (new; after T9.b, before T9.c).** Decided 2026-10-06
   (`decision-r06-t9b-band.md`). The colour table gains a companion's 78 columns per row from T3's
@@ -2417,12 +2421,12 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   - **The default switch and the interim** (decided by the owner 2026-10-08, answering
     `decision-p11-t17c-bright.md` §4: the hybrid sky, `feasibility-hybrid-sky.md` §10–11). The
     owner's condition for turning T11.c's switch on is met by RM3's interim, R13.T2: layers C to E
-    capped at V_P 5.0, the band for the rest, labelled. Once R13.T2 and T11.d have both landed,
-    the server's sky is on by default: `SkyService`'s default becomes `Served`, and `--serve-sky`
-    takes a value (`--serve-sky=false`) so that it can still be turned off. The README and
-    `config`'s tests follow. The first reply's time is still measured against T17's first-sky
-    budget. A miss goes to a decision agent, whose levers are the first reply's layer order and
-    the first shell's edge.
+    capped at V_P 5.0, the band for the rest, labelled. Once R13.T2 and T11.d, with its follow-up
+    R06.T11.g, have landed, the server's sky is on by default: `SkyService`'s default becomes
+    `Served`, and `--serve-sky` takes a value (`--serve-sky=false`) so that it can still be turned
+    off. The README and `config`'s tests follow. The first reply's time is still measured against
+    T17's first-sky budget. Its levers were ruled on 2026-10-08 (`decision-r06-t11d-first-sky.md`):
+    R06.T11.g. A miss after T11.g is recorded as a miss and goes to T17 and a decision agent.
 
   The protocol (T10) gains each layer's `complete_to_ly`, a per-ray table once T7.b lands, and
   `final`. A request for a new sky supersedes the old one. Any later consumer of the sky's list
@@ -2492,6 +2496,43 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   - Acceptance: the client's tests of `view/sky` and `displays/view`
     (`pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`),
     the UX review, and `just ci`.
+
+- **R06.T11.g The first sky within its budget (new; T11.d's follow-up; after T11.d; decided
+  2026-10-08, `decision-r06-t11d-first-sky.md`).** T11.d's first reply near the Sun took 100.5 s
+  and 1,084 CPU-s on the dev machine's 15 workers, against T17's 10 s and 150 CPU-s (Risks,
+  "Deviations in T11.d, as built"). At P11.T17.c's verdicts the 500 ly first shell generates
+  about a quarter of C's records, half of D's and five-sixths of E's, at 1–10 ms a system, and
+  the server's galaxy at the bench's eye lists about twice the fixture's stars within 500 ly.
+  Three changes, each keeping every reply the exact census to its stated radii:
+  1. **Two inner shells.** `SHELL_EDGES_LY` is 125, 250 and 500 ly, then 1,000 × 2^k ly to
+     128,000, one list for C, D and E; A, B and the brown dwarfs keep one shell each. The edges
+     are constants. `delivery_steps` defers C's shells beyond 2,000 ly by their edge, not by
+     their place. So the first reply holds every star within 125 ly.
+  2. **The tables at the open.** With the sky served, `open_universe` starts its galaxy's tables
+     on the pool at bulk priority through `SkyTablesService`'s single flight, and answers without
+     waiting; a sky joins the flight. An open whose galaxy's tables are held, or with the sky
+     off, starts nothing.
+  3. **No single job of seconds on the first reply's path.** The eye's cut and visibility run as
+     jobs of rows, as the march's do; the caps' count one job a layer (split by rays, joined in
+     ray order, where a layer's runs over about 0.3 s), R13.T2's count at the ceiling with them;
+     each reply's band sum, glare, limits, eye offsets and payload as jobs of at most about
+     0.3 s. Each split gives its one-job form's bits. The request's path outside the census and
+     the march is at most 2.5 s at 15 workers, by the phase log.
+
+  The bench `sky_near_sun_cold/first_reply` starts its clock once the server holds the galaxy's
+  tables (never after a warm-up sky, which would warm the cell cache), and prints, step by step,
+  each layer's records, generated systems and job-seconds beside the phases;
+  `sky_near_sun_cold/session_first_reply` times from the open's answer with the sky asked at once
+  and prints the tables' build, CPU and wall. Expected (estimates): the first reply in about
+  8–8.5 s and 85–95 CPU-s, some 3,000 stars; the 250 ly reply about 10 s later; the 500 ly reply
+  about a minute after the request. Tests: T8.i's shell tests at the new edges; the delivery
+  order with C's deferral by edge; each split job against its one-job form, bit for bit; an open
+  with the sky served starts one tables build, which a sky then joins (`ServerStats::sky_tables()`),
+  and with the sky off none. The protocol crate's version note is corrected (§3 of the
+  decision). Acceptance: `cargo test -p hyperion-sim sky::census::query`, the server's
+  `--test sky` and `compute::sky` tests, the bench recorded against T17's first-sky budget,
+  `just ci`. If the bench misses, the phases are measured before any edge moves, and a decision
+  agent rules from its per-layer figures.
 
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
@@ -2803,7 +2844,12 @@ measurements (open question 16) and record them. Record the tables' build in CPU
 heap and the cold first sky against the budget decided 2026-10-03 (`decision-r06-tables.md`): the
 per-galaxy tables at most 30 CPU-s on a quiet machine, and the cold first sky near the Sun at most
 10 s wall on the dev machine with the default workers; if either fails, propose the disk cache
-(keyed by `GalaxyKey` and a sim fingerprint) or deeper node cuts. The build measured is
+(keyed by `GalaxyKey` and a sim fingerprint) or deeper node cuts. The first-sky budget is a sky
+request's, timed from the request with its galaxy's tables held: they are built per galaxy when
+the server opens the universe (R06.T11.g), under their own 30 CPU-s (decided 2026-10-08,
+`decision-r06-t11d-first-sky.md` §2). Recorded beside it: the session's first sky, from the open's
+answer with the sky asked at once, and the tables' wall at 15 workers against the 2–4 s estimated;
+above 5 s, the stage chain's schedule is measured, as below. The build measured is
 `BuildOptions::STANDARD`'s, T5.e's panels and nodes (decided 2026-10-05,
 `decision-r06-t5e-gate-2.md`), whose own timing is provisional; deeper node cuts must pass
 T5.e's two slow tests. If the cold first sky fails, the stage chain's schedule (T11.c's
