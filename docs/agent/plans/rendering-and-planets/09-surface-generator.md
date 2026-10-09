@@ -1442,6 +1442,25 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
   as P14.T48.a–e). The ice belt needs plan 14's cold- or warm-start history, which it has no
   classifier to hold yet. The server's tests run on the reference worlds through `InputsSource`
   until then, and no task of this plan waits on them.
+- **Reconciled with R08.T1's asks** (2026-10-09). R08.T1 wrote rendering plan R08's asks into plan
+  14 beside Phase K (P14.T24.c–f under Phase E, P14.T35.e under Phase H) and reconciled them with
+  this plan's five, so that no field is defined twice (plan 14's Risks, "The rendering plans' asks
+  of the surface section"; the order is plan 14's Tasks, "Order and parallelism"). For this plan:
+  - P14.T48.e stays the one task that defines `record::Surface`, which `for_body` reads. R08's
+    vertical structure and aerosol inventory (P14.T24.e, T24.c) join it later as members and
+    change nothing `for_body` reads.
+  - The mean surface temperature and the surface pressure are P14.T24.a's; T48.c's screening reads
+    the pressure as P ÷ g, and its g is the bulk section's. Neither has a second field.
+  - T48.d's condensable is also what R08's lapse rate reads (P14.T24.e's α), so T48.d is built
+    before T24.e.
+  - P14.T24.f (methane on cold worlds, abiotic O₂) is built first, so that T48.d's condensable on a
+    Titan is methane and the gases `CoarseInputs` reads carry it.
+  - A gas-envelope body, a sub-Neptune included, has its surface section `NotApplicable` (T48.e's
+    test, amended), which `for_body` already answers as `NoSolidSurface`.
+  - P14.T24.c's dust reads plan 14's own figures, never this plan's coarse wind field, so that no
+    cycle runs through the coarse pass.
+  - The wire, P14.T35.e, is not this plan's to read: the coarse pass reads the record on the
+    server. R10 reads the same section from the wire (its Consumes).
 - **Physics leans still to rule** (research of 2026-09-29, low to medium confidence):
   - _The transport cap._ No published cap on the energy-balance model's D exists; the lean is to
     cap the rotation factor at (Ω⊕ ÷ Ω)² ≤ 64, since Hadley cells are near-global by Ω⊕ ÷ 8

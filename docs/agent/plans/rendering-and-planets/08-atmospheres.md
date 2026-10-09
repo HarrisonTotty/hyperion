@@ -469,7 +469,10 @@ Names are those the owning plans give; the owning plan is authoritative.
     `not_applicable` for a giant. P14.T24.a and T24.b are not built (`planetary/hooks/` holds only
     `mod.rs` and `seed.rs`), and **no plan-14 task gives the section its fields**: P14.T35.b only
     tags it `not_modelled`. R08.T1's amendment P14.T35.e asks for them with T24.c–f's (P14.T35.d is
-    taken, "Body-state times beyond 2⁵³ s").
+    taken, "Body-state times beyond 2⁵³ s"). As written into plan 14 and reconciled with R09.T0.a's
+    asks, P14.T48.e gives the record's section its contents and P14.T35.e puts all of it on the
+    wire, with an `envelope` section for every gas-envelope body (Risks, "R08.T1's asks, as
+    written into plan 14").
   - The `body_detail` request (`BodyDetailRequest { universe, body, time, detail }`) and its
     `BodyDetailDto { universe, time, granted, record: BodyRecordDto }` (P14.T35.b–c, built:
     `crates/hyperion-protocol/src/{envelope.rs, planetary/requests.rs, planetary/record.rs}`),
@@ -1189,7 +1192,10 @@ Some tasks wait on the owner or on another plan, and say so where they do:
   those temperatures.
 - **Galaxy plan 14.** No generated body has an atmosphere on the wire until P14.T24.a–b and R08.T1's
   P14.T24.c–f and P14.T35.e are built (none is). Every task here runs on the fixtures of Design
-  note 16 meanwhile, and generated bodies show `ATMOSPHERE: NOT YET MODELLED`.
+  note 16 meanwhile, and generated bodies show `ATMOSPHERE: NOT YET MODELLED`. In plan 14's order
+  a thin atmosphere's gases, pressure and temperature arrive first (P14.T24.f, T24.a–b, T48.e and
+  T35.e), drawn on the isothermal seam with `AEROSOLS: NOT YET MODELLED`; the vertical structure
+  (T24.e), the inventory (T24.c) and the gas envelopes (T24.d) follow.
 - **Drafts for the owner.** R08.T1's amendments and R08.T2's labels are committed marked drafted
   for the owner, and the client is built to them meanwhile; the acceptance and the sign-off are
   the owner's, recorded here when given.
@@ -1215,9 +1221,11 @@ Write five amendment tasks into [galaxy plan 14](../galaxy-generation/14-planeta
 four beside P14.T24.a and one in P14.T35, as R04 amends it for the detail seed. The physics below
 was researched on 2026-09-29 (Design notes 3, 6 and 16, and the sources cited there). The amendment
 cites it, and any rule marked "from memory" is checked against its paper by the agent who builds
-it. The letters follow the README's asks table; the build order they state is e, f, c, d, then
-T35.e, since T24.c's rules read T24.e's profile and T24.f's gases. The wire amendment is P14.T35.e:
-P14.T35.d is taken ("Body-state times beyond 2⁵³ s", 2026-09-30).
+it. The letters follow the README's asks table. The build order, reconciled with R09.T0.a's asks
+(plan 14's Phase K), is f first, then P14.T24.a–b with P14.T48.a–e, then T35.e, then e, c and d:
+T24.c's rules read T24.e's profile and T24.f's gases, and T24.e's α reads P14.T48.d's condensable
+(plan 14's Tasks, "Order and parallelism"). The wire amendment is P14.T35.e: P14.T35.d is taken
+("Body-state times beyond 2⁵³ s", 2026-09-30).
 
 - **P14.T24.c The aerosol and absorber inventory.**
   - Per mode: a material from a closed enum with a shape class (sphere, non-spherical mineral,
@@ -1282,6 +1290,12 @@ P14.T35.e. Acceptance:
 
 This is a brainstorm-driven plan edit. It is committed marked drafted for the owner (the RM4/RM5
 rule for galaxy-plan amendments), and plan 14's owner accepts it; the acceptance is recorded here.
+
+_Done 2026-10-09, drafted for the owner and awaiting the sign-off: the five tasks are plan 14's
+P14.T24.c–f under Phase E and P14.T35.e under Phase H, reconciled with R09.T0.a's Phase K. The
+record, with what departs from the bullets above, is Risks' "R08.T1's asks, as written into plan
+14". The prettier check ran as `pnpm exec prettier --check`, the same tool, since this machine has
+no `npx`._
 
 ### R08.T2 The atmosphere labels, drafted for the owner
 
@@ -2133,7 +2147,10 @@ generator, and the reference's sampling needs no domain tag.
 - **Titan's skin temperature.** Design note 3's Titan check takes T_skin = 64 K. A T_eq of
   83.5 K, from a Bond albedo of 0.265, would give T_skin 70 K and a tropopause at 0.40 bar,
   outside P14.T24.e's test. Where plan 14's Titan T_eq comes from is to be re-checked when
-  P14.T24.e is built.
+  P14.T24.e is built. _Checked by R08.T1 (2026-10-09), computed:_ plan 14's Titan is a snowball,
+  Bond albedo 0.50, placed at 9.583 au with e 0.0565 (its Solar System table), so its T_eq is
+  about 75.6 K and T_skin 63.6 K, which puts the tropopause near 0.24 bar inside the test. A change
+  of the snowball's albedo moves it, and P14.T24.e's test says so.
 - **The summed sky-view** (Design note 7) is a research lean of medium confidence, not checked
   against Hillaire's parameterisation. R08.T7 tests it, and the per-sun fallback costs 0.43 MB a
   sun a view.
@@ -2146,6 +2163,59 @@ generator, and the reference's sampling needs no domain tag.
   decisions, item 3). `BAKE_CEILING_S`, 5 s a world, stays the UHD 620 laptop's figure, the
   minimum specification. The development machine (Ryzen 7 3700X) records its own bake time beside
   it and fails only if it is over the laptop's ceiling; no separate desktop ceiling is set.
+- **R08.T1's asks, as written into plan 14** (2026-10-09, at `62c196c3`). P14.T24.c–f sit under
+  plan 14's Phase E and P14.T35.e under Phase H, each marked drafted for the owner. **The owner's
+  sign-off is pending**: the orchestrator has a decision agent rule on them, the acceptance is
+  recorded here when given, and the client is built to the drafts meanwhile. They were reconciled
+  with R09.T0.a's five asks (plan 14's Phase K, P14.T48.a–e), and the reconciliation is in plan
+  14's Risks too ("The rendering plans' asks of the surface section"). What departs from T1's
+  bullets:
+  - _One record section, one wire task._ P14.T48.e (R09's) defines the record's surface section;
+    T24.e and T24.c add their members to it. P14.T35.e is "The surface section and the gas envelope
+    on the wire": the whole section mirrored member for member, which R10 and R11 also read, not
+    only the atmosphere's fields. Its members for T24.c–e and T24.d are declared
+    from the start and absent until their tasks land (plan 14's T34 rule), which this plan reads as
+    not modelled: `AEROSOLS: NOT YET MODELLED` and the isothermal seam.
+  - _Field by field, where the two plans' asks met:_
+    - T_s and p_s are P14.T24.a's, read by T24.e's profile and by T48.c's crater screening. The
+      wire's vertical structure carries β and T_skin alone, so R08.T3.a's `radiativeConvective`
+      takes `surfaceK` and `surfacePa` from the conditions.
+    - The gravity is the bulk section's, which T24.a and T48.c both read; nothing repeats it.
+    - The gases are T24.a's mole fractions, a list largest first summing to 1 to 10⁻⁹, which
+      R08.T3.c's refusal assumes; T24.f fills CH₄ and O₂ and defines no field. Methane as an
+      absorber is its gas fraction, so R08.T10.a builds methane's absorber term from that fraction
+      and the column, and ozone's from T24.c's absorbers. That still draws methane only from plan
+      14's inventory (Design note 12).
+    - The condensing species is P14.T48.d's condensable, which T24.e's α reads (water 0.6, methane
+      0.77, CO₂ or none 0.8), so the picture's lapse rate and R09's climate model agree.
+    - T24.c's decks lie on T13.c's one saturation curve per species, with the vapour set at the
+      ground by a surface relative humidity (from memory, for the builder), and each deck gives
+      its vapour's cold-trap fraction above it, which R08.T10.a reads for the vapour's column there.
+    - T24.c's dust reads plan 14's own figures, never R09's coarse wind, which reads the section (a
+      cycle otherwise); R10's `Dust` class still follows R09's winds locally.
+  - _The order:_ T24.f; then T24.a–b with P14.T48.a–e; then T35.e; then T24.e, then T24.c; T24.d
+    beside any of them.
+  - _The gas envelope_ (decision-r08-giant-label, finding F1). T24.d serves every body in the
+    gas-envelope state, giants and sub-Neptunes alike (every sub-Neptune is one by construction),
+    and such a body's surface section is `not_applicable` (P14.T48.e as reconciled). Design note
+    13's "Giants inside 10⁹ m" and R08.T16 are written for giants alone. Once P14.T24.d lands they
+    read every gas-envelope body, a sub-Neptune's visible atmosphere being its envelope and its
+    deck the surface; the labels hold either way (that ruling). The envelope's profile is the
+    `Envelope` variant of plan 14's `VerticalStructure`, so R08.T16.a gives `TemperatureProfile` a
+    matching variant. T24.d gains H₂O for its deck; H₂S is the envelope's own species.
+  - _Findings for this plan._ Plan 14 tracks no sulphur, so no rule forms an H₂SO₄ deck: a
+    generated Venus classifies `thickScattering`, not `cloudDeck`, until plan 14 adds one (its
+    open question 2, a science question for "main"; R11's deck boundary is affected alike). CO₂
+    ice is in the inventory's material enum but has no refractive-index file in R08.T5.b, so a
+    CO₂-ice deck has no optics until one is added (from memory, Warren 1986 is the usual source).
+    The Titan check of Design note 3 holds on plan 14's albedo (the Titan bullet above).
+  - _Marked "from memory" in plan 14_, for the builder: the surface relative humidity, Ackerman and
+    Marley's closed form, Mars's background dust, Niemann et al.'s 5.65%, the protosolar He/H₂, a
+    sub-Neptune's metallicity, Sudarsky's class temperatures and Venus's trace of O₂.
+  - _For "main", each with its lean:_ whether P14.T35.e bumps `PROTOCOL_VERSION` (lean: no, since
+    an older client passes an `ok` surface through unread); a sub-Neptune's surface section turned
+    `not_applicable` (lean: accept); a sulphur rule for a Venus deck (lean: a science agent drafts
+    it before P14.T24.c).
 - **Re-validated at bce2aef5** (2026-10-09, RM4's start: `rendering-and-planets` is `main` at
   3e3dbb80, R01–R07 merged by PR #3, plus R13's plan; `GENERATOR_VERSION` 21, `PROTOCOL_VERSION`
   2). Swept every Consumes item against the code, and folded in R05's, R06's and R07's as-built
