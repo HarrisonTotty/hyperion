@@ -69,21 +69,16 @@ use crate::cube::PatchKey;
 use crate::geometry::vertex_spacing;
 use crate::noise::{NOISE_BOUND, NOISE_RMS, Octave, gradient_noise};
 
+/// The height at a point and its gradient, which lives in [`crate::height`] (moved there by R09.T4,
+/// so that R10's retirement of the test planet leaves it in place); re-exported here, where R05's
+/// Provides place it.
+pub use crate::height::HeightSample;
 /// The per-bake cache of lattice gradients, which lives in [`crate::noise`]; re-exported here as
-/// the plan's Provides place it, the path R09.T4 moves it from.
+/// R05's Provides place it.
 pub use crate::noise::LatticeCache;
 use crate::num::assert_finite;
 
 pub use crate::spheroid::Spheroid;
-
-/// The height at a point and its gradient.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct HeightSample {
-    /// The height above the spheroid along its normal, metres.
-    pub height_m: f64,
-    /// The height field's gradient in body-fixed space at the spheroid point, metres per metre.
-    pub gradient: [f64; 3],
-}
 
 /// Whether octaves 8 to 12 are ridged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

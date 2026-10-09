@@ -4,8 +4,8 @@ use std::cell::RefCell;
 
 use super::HeightSource;
 use crate::cube::PatchKey;
+use crate::height::HeightSample;
 use crate::spheroid::Spheroid;
-use crate::test_planet::HeightSample;
 
 /// A smooth height of the spheroid point P, `base + amp (x y + 0.3 z²) ÷ a²`, metres, the same
 /// at every level unless `per_level` adds `level` metres; it can refuse a direction and records

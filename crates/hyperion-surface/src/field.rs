@@ -268,6 +268,26 @@ const fn compact(x: u32) -> u32 {
     (x | (x >> 8)) & 0x0000_ffff
 }
 
+/// The margin of held cells about every surveyed cell, in steps between cells of the field's level
+/// (plan R09, Design note 15): the synthesis at any point of a surveyed cell reads no cell farther
+/// than this from the point's own cell, so a client that holds every cell within it of its
+/// surveyed cells can synthesise every surveyed point.
+///
+/// A step is a king's move on the cube sphere: from a cell to any of its four edge neighbours or
+/// four corner neighbours at the same level, across a face edge by the cube's own neighbour rule
+/// ([`PatchKey::edge_neighbour`], [`PatchKey::corner_neighbours`]), so that a cell at a cube corner
+/// has seven neighbours, not eight. The margin's dilation of a survey and every read-set test count
+/// the same way.
+///
+/// It is 5 (Design note 15, researched 2026-09-29): the base elevation's interpolant reads up to
+/// four cells past a face edge and about five at a cube corner (ghost cells three deep, each
+/// bilinear in one more cell, under the warp's 1.44× distortion); the channel network's first
+/// level reads flow directions up to four cells away; and the largest local crater, just under the
+/// boundary diameter `D_b`, reaches 2.54 rim radii, 1.27 `D_b`, ⌈1.27 × 84.9 km ÷ 23.5 km⌉ = 5
+/// cells of an Earth's largest edge, and the same on a Mars, the Moon and Ceres, whose `D_b` scales
+/// with the edge. At level 8 that is about 180 km of margin about a survey.
+pub const SYNTHESIS_MARGIN_CELLS: u8 = 5;
+
 /// What the synthesis reads of a coarse field: the server's whole [`CoarseField`], or the part of
 /// one a client holds (R09.T3's `PartialField`).
 ///

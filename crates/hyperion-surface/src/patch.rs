@@ -38,9 +38,9 @@ pub mod normals;
 pub mod vertex;
 
 use crate::cube::{PATCH_QUADS, PatchKey};
+use crate::height::HeightSample;
 use crate::num;
 use crate::spheroid::Spheroid;
-use crate::test_planet::HeightSample;
 
 /// Vertices along a patch's side.
 pub const PATCH_VERTICES: usize = 65;

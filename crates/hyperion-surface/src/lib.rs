@@ -8,8 +8,9 @@
 //! function (the rendering plans' R05 writes a provisional one for a hand-made test planet, R09 the
 //! real one), the material classes (R10) and the rocks (R11). Today it holds R05's: the cube
 //! sphere ([`cube`], [`geometry`]), the provisional [`test_planet`] and its noise basis
-//! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), and the datum heights
-//! are measured from, the reference [`spheroid`] (plan 14's P14.T46.e); and the first of R09's:
+//! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), what every height source
+//! returns ([`height`]), and the datum heights are measured from, the reference [`spheroid`] (plan
+//! 14's P14.T46.e); and the first of R09's:
 //! the coarse field's types ([`field`]), with the header's spectrum ([`synth`]) and crater contract
 //! ([`craters`]), which R09's later tasks give their behaviour, and, for tests, synthetic fields
 //! (`testing`, feature `testing`).
@@ -50,6 +51,7 @@ pub mod craters;
 pub mod cube;
 pub mod field;
 pub mod geometry;
+pub mod height;
 pub mod noise;
 pub mod num;
 pub mod patch;
