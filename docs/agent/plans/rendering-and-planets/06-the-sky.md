@@ -6280,6 +6280,16 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       - The census could therefore drop such a star from a sky within reach of it. T17.c's tables
         widen; the test does not (the census handoff). A P11 lane diagnoses it, widens the bound
         at version 21 and re-runs the test. T8.g lands after that fix.
+      - _Resolved 2026-10-08 by P11.T17.c's fix (66c59b29, plan 11's T17.c as built)._ The pair
+        is F15's: it reaches the engine's 64-segment cap at 78 Myr, and its last segment holds
+        both helium stars alive at every later age. The fix is a read-side floor, the brightest
+        hydrogen or helium main-sequence star of at most the pair's mass, for any pair that may
+        have interacted by the window's end. It keeps inclusion monotonicity and moves no
+        generated system. With it, `the_star_bound_holds_for_realised_systems` passes over
+        1.2 × 10⁶ systems, the bulge D case included, under the heavy-test lock. The floor costs
+        generation near the Sun: D 48.98% → 52.55% and E 69.37% → 84.06% of records, C
+        unchanged, about 18% more cold CPU-s, almost all in E. The cold figures below were taken
+        before the fix.
     - **The identity tests pass**, under the heavy-test lock (3,705 s for the four):
       - `the_census_is_its_oracle_1000_ly_from_the_sun`, in 625 s. It generates 436,474 of
         1,411,018 systems: C 247,662 of 1,097,274 (22.6%, asserted under a quarter), D 126,463 of
