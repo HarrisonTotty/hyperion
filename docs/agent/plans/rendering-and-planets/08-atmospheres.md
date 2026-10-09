@@ -17,9 +17,11 @@
   [the single-player brainstorm](../../brainstorming/single-player-experience.md), the density
   sentences of "Gravity" (the same air the flight model will drag through).
 
-The names consumed from R01, R03, R05, R06 and R07 are those in their plans as written on
-2026-09-29. They are reconciled with the code by the `revalidate-plan` skill before the first task
-runs, as the galaxy plans are when their turn comes.
+The names consumed from R01, R03, R05, R06 and R07 were those in their plans as written on
+2026-09-29. They were reconciled with the code as built by the `revalidate-plan` skill on
+2026-10-09, before the first task ran (Risks, "Re-validated at bce2aef5"): the names below are the
+code's, and where R05's as built differs from this plan's first sketch, R05's shape is kept and
+widened.
 
 ## Goal
 
@@ -101,24 +103,36 @@ widens them rather than adding parallel ones.
 ### The medium (`medium.ts`, `column.ts`), widening R05's
 
 ```ts
-/** The render channels' wavelengths for smooth terms, nm: fitted, provisional (Design note 5). */
-export const CHANNEL_WAVELENGTHS_NM: readonly [number, number, number]; // 620, 540, 445 until R08.T4 refits
+/** The render channels' wavelengths for smooth terms, nm (Design note 5). R05's constant, `Rgb`,
+ * is (680, 550, 440) as built, the wavelengths R05's Earth constants are evaluated at. R08.T4.a
+ * fits the triple from (620, 540, 445) into `channels.json`; R08.T6.d, which rebuilds Earth at it,
+ * makes this constant read it. */
+export const CHANNEL_WAVELENGTHS_NM: Rgb; // R05's, in `medium.ts`
 /** The 15 bins every off-frame bake is solved in, nm: centres 392.67 + 25.33 k, k = 0..14, each
- * 25.33 nm wide over 380–760 (Design note 5); R06's `sky::colour::BAKE_WAVELENGTHS_NM` mirrors it. */
+ * 25.33 nm wide over 380–760 (Design note 5). R06's `sky::colour::BAKE_WAVELENGTHS_NM` mirrors
+ * it, and both are tested against `packages/protocol/fixtures/bake_wavelengths_nm.json`. */
 export const BAKE_WAVELENGTHS_NM: ReadonlyArray<number>;
-// `Rgb` is the one type R05, R07 and this plan share.
+// `Rgb` is the one type R05, R07 and this plan share (`view/photometry/toneCurve.ts`).
 
 export type DensityProfile =
   // R05's union, which gains `tabulated`
-  | R05ExponentialOrTent
+  | { readonly kind: "exponential"; readonly scaleHeightM: number } // R05's
+  | {
+      readonly kind: "tent";
+      readonly bottomM: number;
+      readonly peakM: number;
+      readonly topM: number;
+    } // R05's
   | {
       readonly kind: "tabulated";
       readonly altitudesM: Float64Array;
       readonly relative: Float64Array;
     };
 export type PhaseFunction =
+  // R05's union, whose `rayleigh` gains ρ and which gains `tabulated`
   | { readonly kind: "rayleigh"; readonly depolarisation: Rgb } // ρ per channel, Design note 4
-  | { readonly kind: "cornetteShanks"; readonly asymmetry: number } // R05's Earth reference only
+  | { readonly kind: "cornette-shanks"; readonly asymmetry: number } // R05's Earth reference only
+  | { readonly kind: "none" } // R05's: an absorption-only term (an absorber, Design note 5)
   | { readonly kind: "tabulated"; readonly table: PhaseTable }; // Mie, literature, aggregate
 export interface PhaseTable {
   readonly u: Float64Array; // u = √(θ/π), 256 entries, dense near forward
@@ -135,11 +149,13 @@ export interface MediumTerm {
   readonly spectral: SpectralTerm | undefined; // the same term at BAKE_WAVELENGTHS_NM, for bakes
 }
 export interface AtmosphereMedium {
-  // R05's, widened
-  readonly referenceRadiusM: number;
+  // R05's `{ name, topHeightM, groundAlbedo, terms }`, widened. As R05 built it, the medium carries
+  // no radius: the tables take the figure, and R_ref (Design note 17) is R05's
+  // `tableRadiusM(figure)`, the mean radius (2a + c) ÷ 3 the per-planet tables are built on.
+  readonly name: string;
   readonly referenceGravityMS2: number; // g_ref = √(g_e g_p), the column's gravity (Design note 17)
   readonly slicing: OblateSlicing; // κ slices and latitude bands; one of each for Earth
-  readonly topAltitudeM: number;
+  readonly topHeightM: number; // R05's: geodetic height of the top
   readonly groundAlbedo: Rgb; // or the deck's, under a split
   readonly terms: ReadonlyArray<MediumTerm>;
   readonly regime: AtmosphereRegime;
@@ -167,8 +183,11 @@ export const ATMOSPHERE_OPTICS_VERSION: number; // client caches key on it, not 
 ### Oblate bodies (`oblate.ts`)
 
 ```ts
-/** The level spheroid: R07's `BodyFigure` (a, c), GM = G × the record's `mass_kg` (CODATA G), ω
- * from P14.T14.c's `BodyFixedFrame` rate (R05 Design note 14's test-planet period until then). */
+/** The level spheroid: R07's `BodyFigure` (a, c; `view/terrain/planet.ts`, from the wire's
+ * `BodyFigureDto`), GM = G × the record's `mass_kg` (CODATA G, the sim's
+ * `hyperion_base::units::GRAVITATIONAL_CONSTANT`), ω the spin rate at the scene time of the
+ * record's rotation law (`BodySummaryDto.rotation`, P14.T46.f; the client's `lib/system/rotation.ts`),
+ * or R05 Design note 14's test-planet period for R05's Earth. */
 export interface LevelSpheroid {
   readonly equatorialRadiusM: number;
   readonly polarRadiusM: number;
@@ -197,7 +216,8 @@ export const ONE_SLICE_BELOW = 0.02; // ln(κ_max ÷ κ_min) under which one sli
 ### Optics (`rayleigh.ts`, `absorbers.ts`, `mie.ts`, `sizeDistribution.ts`, `aggregate.ts`, `materials/`)
 
 ```ts
-export type Gas = "H2" | "He" | "H2O" | "CH4" | "NH3" | "N2" | "O2" | "CO2" | "Ar"; // plan 14's `Gas`
+// plan 14's `Gas` (`Hydrogen` … `Argon`, in `Gas::ALL`'s order), by formula
+export type Gas = "H2" | "He" | "H2O" | "CH4" | "NH3" | "N2" | "O2" | "CO2" | "Ar";
 export interface Dispersion {
   readonly nMinusOne: (wavelengthNm: number) => number;
   readonly referenceK: number;
@@ -232,9 +252,18 @@ export function aerosolTerm(mode: AerosolModeSpec, column: AtmosphereColumn): Me
 Beside them: `channels.json` (the fitted triple and its objective, R08.T4.a),
 `absorbers/crossSections.json` (R08.T4.b), and `bless.ts`, the client's bless helper, which
 rewrites a committed table only under `HYPERION_BLESS=1`, the variable the Rust testkit already
-reads (R08.T4.a).
+reads (R08.T4.a). As built, renderer code, tests included, reads no files through `node:fs`
+(R04.T10.c; `tsconfig.web.json` carries no Node types), and no TypeScript bless path exists: a
+committed table is read as a JSON import, and `bless.ts` rewrites it through vitest's
+`toMatchFileSnapshot`, whose update mode `HYPERION_BLESS=1` turns on in `vitest.config.mts`. The
+raw inputs that are fetched and never committed (the CIE matching functions, the cross-sections;
+R05.T12.d's ruling) are reduced by a Node tool in `apps/hyperion/src/tools/`, run by a script under
+`apps/hyperion/scripts/`, as R05's `solarFactors.ts` and `solarFactors.mjs` are.
 
-### Assembly, workers and cache (`assemble.ts`, `opticsWorker.ts`, `AtmosphereCache.ts`)
+### Assembly, workers and cache (`assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts`)
+
+The worker is `optics.worker.ts`, by the client's rule that worker files are `*.worker.ts` under
+`tsconfig.worker.json`.
 
 ```ts
 export function assembleMedium(input: BodyAtmosphereInput): AssembledMedium;
@@ -250,7 +279,9 @@ export type AtmosphereLabel =
   | "atmosphereApproximate"; // a thick world whose gate has not passed, or an oblate body drawn
 // with one slice before R08.T6.f (Design note 17)
 export class AtmosphereCache {
-  /* per body and inventory hash; requests `body_detail`; posts work to the optics workers */
+  /* per body and inventory hash; requests `body_detail` (`toBodyDetailRequest`,
+     `lib/system/bodiesWire.ts`); posts work to the optics workers; one per device, holding each
+     body's per-planet tables (R05's `AtmosphereTables`) for every view */
 }
 ```
 
@@ -267,25 +298,40 @@ type, the values it contributes, and named projections of them, as R05's `TERRAI
 export interface AtmosphereViewSettings {
   /** How many suns' skies a photorealistic view draws, brightest first (Design note 7). */
   readonly skySunCap: number; // high 4, low 2; R08.T7
-  /** Where aerial perspective applies (Design note 11). */
-  readonly aerialPerspectiveScope: "opaque" | "terrain"; // high "opaque", low "terrain"; R08.T9.a
   /** The quality limits this plan lists for R12's audit, one string each. */
   readonly qualityLimits: ReadonlyArray<string>;
 }
 // R05's `ViewSettings` gains `atmosphereView: AtmosphereViewSettings`; `SETTINGS[s].atmosphereView`
 export const ATMOSPHERE_VIEW_SETTINGS: Readonly<Record<QualitySetting, AtmosphereViewSettings>>;
 export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>>; // SETTINGS[s].atmosphereView.skySunCap
-export const AERIAL_PERSPECTIVE_SCOPE: Readonly<Record<QualitySetting, "opaque" | "terrain">>;
+/** Where aerial perspective applies (Design note 11): R05's `TableSizes.aerialPerspectiveScope`,
+ * `SETTINGS[s].atmosphere.aerialPerspectiveScope`, projected here rather than held twice. "scene"
+ * (high) applies it to everything opaque and publishes the volume; "terrain" (low) to terrain
+ * alone, in R05's one deferred composite. */
+export const AERIAL_PERSPECTIVE_SCOPE: Readonly<Record<QualitySetting, "scene" | "terrain">>;
 export const ATMOSPHERE_QUALITY_LIMITS: Readonly<Record<QualitySetting, ReadonlyArray<string>>>;
 ```
 
-R05's `TABLE_SIZES`, which is `SETTINGS[s].atmosphere`, stays in R05's module and gains the thick
-table's size (R08.T14.c). `settings.ts` is the module R12 reads for this plan's ladder entries.
+R05's `TABLE_SIZES` (`hillaire.ts`), which is `SETTINGS[s].atmosphere`, stays in R05's module and
+gains the thick table's size (R08.T14.c). As built it holds the transmittance (256 × 64) and
+multiple-scattering (32²) sizes, the sky view (192 × 108 at 75 steps on high, 128 × 64 at 16 on
+low), the aerial-perspective volume (32³ and 32 × 32 × 16, 2 steps a slice, to 32 km), the march
+(full resolution at 32 steps, half at 16) and `aerialPerspectiveScope`. `ViewSettings` also holds
+R06's `sky` and R07's `internalScaleBounds`, `budget` and `photoreal` today. `settings.ts` is the
+module R12 reads for this plan's ladder entries.
 
 ### Tables and passes (`shaders/`, `hillaire.ts`), widening R05's `HillaireAtmosphere`
 
-- R05's WGSL compute kernels, widened to read a storage buffer of N terms, a 2D array texture of
-  density tables (one layer a term) and one of phase tables:
+- R05's WGSL compute kernels, widened to read a storage buffer of N terms (in place of R05's
+  `Medium` uniform of at most `MAX_TERMS` = 8 terms, packed by `tables.ts`'s `packMedium`), a 2D
+  array texture of density tables (one layer a term) and one of phase tables. R05's kernels are
+  assembled from the libraries `common.wgsl`, `medium.wgsl`, `view.wgsl` and `source.wgsl` (R05's
+  Risks, "the medium read in place"), which these tasks widen as well. Two engine facts bind them
+  (R01 as built): a compute pass binds no sampler (`ComputeBindings` has none), so the tables are
+  read by `textureLoad` with R05's hand filtering (`common.wgsl`'s `bilinear`, which gains a
+  `texture_2d_array` overload); and a texture of one layer is viewed as `2d`, not `2d-array`, in a
+  compute binding (`viewDimensionOf`), so a one-slice or one-term array needs that seam settled
+  first (Risks, "Re-validated at bce2aef5"). The kernels:
   - `transmittance.wgsl`, which stores optical depth, curves of growth included (Design note 8),
     in a 2D array texture of one layer a κ slice (Design note 17);
   - `multiScattering.wgsl`, Hillaire's isotropic 32² table for `thin` worlds, one layer a latitude
@@ -293,8 +339,10 @@ table's size (R08.T14.c). `settings.ts` is the module R12 reads for this plan's 
   - `skyView.wgsl`;
   - `aerialPerspective.wgsl`.
 
-  Beside them, `rayMarch.wgsl` is the fragment pass for views from outside and for terrain beyond
-  the aerial-perspective reach, and `composite.wgsl` is R05's composite, widened to several suns.
+  Beside them, `rayMarch.wgsl` is R05's compute kernel for views from outside and for terrain
+  beyond the aerial-perspective reach, writing a ray-march target at the setting's scale, and
+  `composite.wgsl` is R05's composite, a full-screen material draw that `drawFrame` returns as a
+  `DrawItem` (it reads the scene's colour and depth), widened to several suns.
   New: `irradiance.wgsl`, a per-planet table of the sky's diffuse irradiance on a horizontal
   surface by altitude and sun zenith, one layer a latitude band, and `surfaceLighting.wgsl`, which
   exports `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad)` and
@@ -302,23 +350,35 @@ table's size (R08.T14.c). `settings.ts` is the module R12 reads for this plan's 
   passes of R07, R10 and R11 (R08.T9.b). The latitude and azimuth arguments are Design note 17's;
   `altitude_m` is the geodetic height, scaled inside. `oblate.wgsl` holds the shared WGSL: normal
   gravity, R_α, κ and the slice and band reads. Every kernel is registered in R01's
-  `WGSL_CATALOGUE` and created through `RenderEngine.createCompute(KernelPair)`, with no subgroup
-  variant.
+  `WGSL_CATALOGUE` (`view/engine/catalogue.ts`; R05's are `ATMOSPHERE_TABLE_ENTRIES` and
+  `ATMOSPHERE_VIEW_ENTRIES`; a compute entry carries no `displayName`, a material such as the
+  composite's `"ATMOSPHERE"` does) and created through `RenderEngine.createCompute(KernelPair)`,
+  `presentation-only`, with no subgroup variant.
 
-- `tablesCpu.ts` is a CPU twin of every kernel in `f64`, built on R05's `opticalDepth.ts` oracle,
-  which it extends rather than replaces. It is the test oracle and the smoke harness's comparison.
-- `HillaireAtmosphere` in `hillaire.ts` is R05's class, widened:
+- `tablesCpu.ts` is a CPU twin of every kernel in `f64`, built on R05's `opticalDepth.ts` oracle
+  and `marchSteps.ts` (the twin of R05.T12.e's step placement), which it extends rather than
+  replaces. It is the test oracle and the smoke harness's comparison.
+- `HillaireAtmosphere` in `hillaire.ts` is R05's class, widened. As built it is
+  `new HillaireAtmosphere(engine, medium, tables: TableSizes, figure: SpheroidFigure)`, owns its
+  per-planet `AtmosphereTables` (`tables.ts`; `setMedium(medium, bottomRadiusM): boolean`, built at
+  `tableRadiusM(figure)`), and has `setMedium(medium): void`,
+  `drawFrame(view: AtmosphereCamera, sun: SunState, scene: AtmosphereScene): DrawItem`,
+  `aerialPerspectiveVolume()`, the smoke page's `frameTables` getter and `dispose()`. `SunState` is
+  `{ directionBodyFixed, distanceAu, angularRadiusRad }`, its light R05's `solar.ts`. Widened:
   - `setMedium(medium)` builds the per-planet tables, shared by every view on the device, one
     transmittance layer per κ slice and one multiple-scattering and irradiance layer per band of
-    `medium.slicing`;
-  - `drawFrame(view, suns: ReadonlyArray<SunState>)` builds the per-view tables, summed over the
-    drawn suns (Design note 7);
-  - `aerialPerspective(view)` exposes the volume and the transmittance table to R11, the table as
-    its 2D array texture of κ slices, read through `oblate.wgsl`'s slice lookup;
-  - `skyView(view): SkyViewTable` exposes the view's sky-view table, the sky's radiance by local
-    azimuth and elevation summed over the drawn suns, for R11's sky reflection in the ocean. If
-    R08.T7's check forces the per-sun fallback, it returns the per-sun tables with their suns
-    instead, in a field of the same type.
+    `medium.slicing`. Sharing moves the per-planet `AtmosphereTables` out of the per-view class
+    into `AtmosphereCache` (R08.T10.a), which hands them to each view's `HillaireAtmosphere`;
+  - `drawFrame(view, suns: ReadonlyArray<SunState>, scene)` builds the per-view tables, summed over
+    the drawn suns (Design note 7), and returns R05's composite `DrawItem`. `SunState` gains each
+    sun's per-channel illuminance, R07's `starIlluminance` (R08.T6.d);
+  - `aerialPerspective(view)`, widening R05's `aerialPerspectiveVolume()`, exposes the volume and
+    the transmittance table to R11, the table as its 2D array texture of κ slices, read through
+    `oblate.wgsl`'s slice lookup;
+  - `skyView(view): SkyViewTable` exposes the view's sky-view table (R05's `frameTables.skyView`),
+    the sky's radiance by local azimuth and elevation summed over the drawn suns, for R11's sky
+    reflection in the ocean. If R08.T7's check forces the per-sun fallback, it returns the per-sun
+    tables with their suns instead, in a field of the same type.
 - `TABLE_SIZES: Record<QualitySetting, TableSizes>` is R05's, kept. The thick table's size is
   added.
 
@@ -352,10 +412,13 @@ Files: `thick/regime.ts` (R08.T13), `thick/discreteOrdinates.ts` and `thick/bake
 `bakeDiscReflectance(medium, appearance: BodyAppearance) -> DiscReflectanceTable` is this plan's
 name; `DiscReflectanceTable` is the name R07 consumes. It gives the reflectance by phase angle and
 disc position per channel, baked spectrally, one layer a latitude band of the medium's slicing,
-read at each disc pixel's geodetic latitude (Design note 17). R07's `shaders/bodyDisc.wgsl` reads
-it beyond
-`GAS_GIANT_FULL_PASS_BOUNDARY_M` for a body with an atmosphere, in place of its albedo-only
-shading; R08.T16.b adds that read path to R07's shader.
+read at each disc pixel's geodetic latitude (Design note 17). R07's `view/shaders/bodyDisc.wgsl`
+reads it beyond `GAS_GIANT_FULL_PASS_BOUNDARY_M` (`view/bodies/regime.ts`, 10⁹ m) for a body with
+an atmosphere, in place of its albedo-only shading; R08.T16.b adds that read path to R07's shader,
+which as built has no placeholder for it. `bodyDisc.wgsl` is a library since R07.T9: the disc's
+entry points are in `bodyDiscDraw.wgsl`, and the materials `bodies:disc` and `bodies:discLimb`, the
+smooth mesh and the `disc cells` kernel share its source and `view/bodies/draw.ts`'s
+`DISC_TEXTURES`, with group 2's bindings 0–5 taken.
 
 ### Offline reference (`crates/hyperion-fit`)
 
@@ -376,9 +439,15 @@ pub fn trace_reference(case: &AtmosphereCase, polarisation: Polarisation, sample
 ```
 
 Command: `hyperion-fit atmosphere-reference <case.json> --out <reference.json> [--samples N]
-[--threads N] [--stokes]`. Fixtures:
+[--threads N] [--stokes]`, a clap variant of `cli.rs`'s `Command` dispatched in `run_in`, as
+`orbits` is; it is not a `FitTask`, so `tables.lock` and `just fit-check` do not cover its output.
+`--threads` is the crate's `Option<NonZeroUsize>`, and the output is the same for any number by the
+crate's convention (`parallel::map_reduce_chunks`, with counter-based draws keyed per item as
+`tasks/displaced_forms/births.rs`'s `Draws` are). Fixtures:
 `view/atmosphere/reference/{earth,earth-ozone,mars,venus-92bar,venus-58bar,titan-class,giant-deck,saturn-oblate}.case.json`
-and their `.reference.json`. The metric is `gate.ts` (R08.T12.b).
+and their `.reference.json`, formatted so that `prettier --check .` (in `just ci`) passes, or
+listed in `.prettierignore` as written data, and each under the repository's 500 kB added-file
+hook. The metric is `gate.ts` (R08.T12.b).
 
 ## Consumes
 
@@ -387,93 +456,175 @@ Names are those the owning plans give; the owning plan is authoritative.
 - **Galaxy plan 14:**
   - P14.T13's `derive::atmosphere::{Atmosphere, Gas, PartialPressures, SurfaceState}` (built:
     `crates/hyperion-sim/src/planetary/derive/atmosphere.rs`). As built it fills only H₂O, CO₂,
-    N₂ and Ar, and gives its Venus 58 bar (Design note 16).
+    N₂ and Ar (H₂, He, CH₄, NH₃ and O₂ stay 0, read only for Jeans retention), and gives its Venus
+    58 bar and its Titan 1.4 bar with no methane (Design note 16). `Atmosphere` holds the state,
+    surface temperature, surface pressure (`None` for a gas envelope), partial pressures, grey
+    optical depth, Bond albedo and cloud fraction, in the sim only. `Gas::molar_mass_g_per_mol` is
+    IUPAC 2021's (H₂ 2.016 … Ar 39.95).
   - These reach the client through P14.T24.a's `SurfaceConditions` in the record's surface
-    section. That section is today the sim's empty `record::Surface`
-    (`crates/hyperion-sim/src/planetary/record.rs`) and the wire's empty `BodySurfaceDto`
-    (`crates/hyperion-protocol/src/planetary/record.rs`), filled by P14.T35 when T13, T14 and T24
-    land, and by the amendment P14.T35.d of R08.T1 for T24.c–f.
-  - The `body_detail` request and its `BodyDetailDto` (P14.T35.b–c, built:
-    `crates/hyperion-protocol/src/envelope.rs`), which is the only message carrying the surface
-    section: the scene's `BodySummaryDto` carries the `orbit`, `bulk`, `moons` and `rings`
-    sections alone. The section's state (`ok`, `not_resolved`, `not_modelled`, `not_applicable`)
-    is how this plan learns the granted detail for a body. `body_events` (P14.T35.c, after T31)
-    says when a body's figures change with time.
-  - P14.T24.b's cloud fraction, for `classifyRegime`'s per-body rule (Design note 9).
+    section. That section is today the sim's uninhabited `record::Surface {}`
+    (`crates/hyperion-sim/src/planetary/record.rs`) and the wire's `BodySurfaceDto {}`
+    (`crates/hyperion-protocol/src/planetary/record.rs`; TypeScript `never`), on `BodyRecordDto`
+    only, so the server answers `not_modelled` for every planet and moon with a surface and
+    `not_applicable` for a giant. P14.T24.a and T24.b are not built (`planetary/hooks/` holds only
+    `mod.rs` and `seed.rs`), and **no plan-14 task gives the section its fields**: P14.T35.b only
+    tags it `not_modelled`. R08.T1's amendment P14.T35.e asks for them with T24.c–f's (P14.T35.d is
+    taken, "Body-state times beyond 2⁵³ s").
+  - The `body_detail` request (`BodyDetailRequest { universe, body, time, detail }`) and its
+    `BodyDetailDto { universe, time, granted, record: BodyRecordDto }` (P14.T35.b–c, built:
+    `crates/hyperion-protocol/src/{envelope.rs, planetary/requests.rs, planetary/record.rs}`),
+    which is the only message carrying the surface section: the scene's `BodySummaryDto` carries
+    `mass_kg`, `orbit`, `moons`, `rings`, `population`, `bulk` and, at `bulk`, the optional
+    `rotation`, `figure` and `photometry` sections. The client's request is `toBodyDetailRequest(universe, body, time)`
+    (`lib/system/bodiesWire.ts`), which only the `SYSTEM` display uses today (`useBodyDetail`).
+    The section's state (`ok`, `not_resolved`, `not_modelled`, `not_applicable`) is how this plan
+    learns the granted detail for a body. `body_events` (P14.T35.c, after T31) says when a body's
+    figures change with time; it answers `unsupported` until P14.T31.
+  - P14.T24.b's cloud fraction, for `classifyRegime`'s per-body rule (Design note 9). Not on the
+    wire: the sim's is `SurfaceState::cloud_fraction`, a constant of the state (1 for a gas envelope
+    or a runaway greenhouse, 0.67 temperate, 0 otherwise), and the photometry section carries
+    neither it nor the surface pressure.
   - The bulk section's radius and surface gravity (built: `BulkPropertiesDto.radius_m` and
     `surface_gravity_m_s2`).
   - The body's mass, for `oblate.ts`'s GM = G·M (built). It is not in the bulk section: ruling 53
     of 2026-09-22 shows it at the `mass_and_orbit` level in a section of its own,
     `BodySummaryDto.mass_kg` and `BodyRecordDto.mass_kg` (`SectionDto<f64>`, kg), the sim's
-    `BodyRecord` mass section.
-  - The body's rotation rate, for `oblate.ts`'s ω (not built): P14.T14.a–b's spin and
-    P14.T14.c's `BodyFixedFrame { pole, w0, rate }` (`planetary/frames.rs`), the rotation of the
-    record's surface section, which reaches the client with it through `body_detail` (P14.T35).
-    R05 Design note 14 reads no rotation from plan 14: until P14.T14.c exists R05's test planet
-    carries its own fixed pole and 86,164.0905 s sidereal period, which is this plan's ω for R05's
-    Earth. A body with no rotation yet takes R08.T3.d's one-slice fallback.
-  - `DetailLevel::Surface`, and `Section::{NotResolved, NotModelled, NotApplicable}` (built).
-  - The asks of R08.T1: P14.T24.c–f and P14.T35.d.
+    `BodyRecord` mass section. G is `hyperion_base::units::GRAVITATIONAL_CONSTANT`,
+    6.674 30 × 10⁻¹¹ (CODATA 2018, unchanged in 2022); the client's one copy is module-private in
+    `lib/scene/sceneWire.ts`.
+  - The body's rotation rate, for `oblate.ts`'s ω (built: P14.T14.a–c, and on the wire by
+    P14.T46.f). `BodySummaryDto.rotation` (`BodyRotationDto`, at `bulk`) carries the rotation law,
+    whose rate moves from `initial_rate_rad_s` to `locked_rate_rad_s` over the locking age; the
+    client reads it as `SystemBodyRotation` (`lib/system/bodiesWire.ts`) and turns it with
+    `lib/system/rotation.ts`'s `rotationAngleAt` and `bodyFixedAxesAt`, whose rate at an age is
+    private (`rateAtAge`). R05's test planet carries its own fixed pole and 86,164.0905 s sidereal
+    period, this plan's ω for R05's Earth. A body whose rotation section is not `ok` takes
+    R08.T3.d's one-slice fallback.
+  - The figure (built, P14.T46): `BodySummaryDto.figure` (`BodyFigureDto`: equatorial and polar
+    radii, flattening, pole, datum `solid_surface` or `one_bar`), which R07's `BodyFigure` reads
+    (`WireAppearance.figure`).
+  - `DetailLevel::Surface`, and `Section::{NotResolved, NotModelled, NotApplicable}` (built;
+    `DetailLevelDto` and `SectionDto` on the wire).
+  - The asks of R08.T1: P14.T24.c–f and P14.T35.e.
 - **R01:**
-  - `RenderEngine.createCompute(KernelPair)`;
+  - `RenderEngine.createCompute(pair: KernelPair): ComputeHandle` (and `createComputeAsync`), and
+    `dispatch(kernel, bindings: ComputeBindings, workgroups, pass?)`, where `ComputeBindings` holds
+    `uniforms`, `buffers`, `sampled` and `storage` and no samplers; a 2D array texture is
+    `TextureSpec.dimension: "2d"` with `depthOrArrayLayers` > 1, and one layer is viewed as `2d` in a
+    compute binding; `readTexture(texture, level?, rect?, access?)` reads every layer;
   - `WGSL_CATALOGUE` in `view/engine/catalogue.ts`;
-  - the headless SwiftShader smoke harness (`src/smoke/`, `just test-render`), with its no-f16
-    run. It stays outside `just ci` (R01.T9.e), so every task that adds or changes a catalogued
-    kernel runs `just test-render` as part of its own gate.
+  - the headless SwiftShader smoke harness (`renderer/src/smoke/`, `just test-render`), on its two
+    variants, `default` and `no-subgroups` (`smoke/page.ts`'s `VARIANTS`); there is no `no-f16`
+    variant, and no WGSL enables `f16`. It stays outside `just ci` (R01.T9.e), so every task that
+    adds or changes a catalogued kernel runs `just test-render` as part of its own gate.
 - **R02:**
   - camera-relative `f64` differencing and the rotation-only view matrix;
   - reversed-Z and the transparent-layer order: the atmosphere tests depth and writes none;
-  - the photometric pipeline: V = 0 at 2.54 µlx, pre-exposure, `rgba16float` targets;
-  - `ViewLabelBlock`, and the nine guide items it drafted, of which items 2 and 7 bear on this
-    plan.
-- **R03:** `sceneAt(model, observer, time) -> SceneFrame`, with each body's `geometricM`,
-  `apparentM` and `level` (its granted `DetailLevelDto`, per body since R03 Design note 13), and
-  the ship's local body named. A change of `level` triggers a rebuild (Design note 14). The scene's
-  `SceneBodyDto.record` is a `BodySummaryDto`, so the surface section itself still comes from
-  `body_detail`, and its section state decides the label.
+  - the photometric pipeline: V = 0 at 2.54 µlx (`V0_ILLUMINANCE_LX`,
+    `view/photometry/magnitude.ts`), pre-exposure, `rgba16float` targets;
+  - `ViewLabelBlock` (`displays/view/ViewLabelBlock.tsx`), and the nine guide items it drafted, of
+    which items 2 and 7 bear on this plan. A photorealistic view's statements are built by
+    `photorealStatements(run, lighting, drawn, labels)` (`displays/view/viewRun.ts`), the lit
+    bodies' labels gathered by `litLabelsOf(scene)` (`displays/view/photorealFrame.ts`): this
+    plan's labels join them there.
+- **R03:** `sceneAt(model, observer, time, previous): SceneFrame | null` (`lib/scene/apparent.ts`).
+  A `placed` body has `geometricM`, `apparentM` and `level` (its granted `DetailLevelDto`, per body
+  since R03 Design note 13); a `contact` body has no `geometricM` and draws no atmosphere; the
+  ship's local body is `SceneFrame.localBody`. A change of `level` triggers a rebuild (Design note
+  14). The scene's `SceneBodyDto.record` is a `BodySummaryDto`, so the surface section itself still
+  comes from `body_detail`, and its section state decides the label.
 - **R05:** `view/atmosphere/` as its Design note 16 builds it:
-  - `MediumTerm`, `DensityProfile`, `EARTH_REFERENCE`, `HillaireAtmosphere` (Bevy 0.19's WGSL
-    port, with sebh's reference) and `TABLE_SIZES: Record<QualitySetting, TableSizes>`, which is
-    `SETTINGS[s].atmosphere` of R05's one settings list (R05 Design note 26). This
-    includes its low sizes: sky-view 128 × 64, aerial perspective 32 × 32 × 16, the march at
-    half resolution, and aerial perspective in one deferred pass on terrain alone.
+  - `medium.ts`'s `MediumTerm`, `DensityProfile`, `PhaseFunction`, `AtmosphereMedium` and
+    `CHANNEL_WAVELENGTHS_NM` (the shapes in Provides), with `densityAt`, `columnLengthM`,
+    `extinction` and `termNamed`; `earth.ts`'s `EARTH_REFERENCE` (Rayleigh, exponential at the US
+    Standard Atmosphere's 8,434.5 m, 4.848, 11.487 and 28.71 × 10⁻⁶ m⁻¹; a continental aerosol,
+    exponential at 1.2 km, τ(550) 0.1, Ångström 1.3, ω 0.92, Cornette–Shanks g 0.584; ozone, an
+    absorption-only tent at 10, 25 and 40 km with phase `none`, the module-private `OZONE_TERM`)
+    and `HILLAIRE_REFERENCE` (sebh's Earth, for comparison); `HillaireAtmosphere` (Bevy 0.19's WGSL
+    port, with sebh's reference) in `hillaire.ts`; `AtmosphereTables` and `packMedium` in
+    `tables.ts`; the `f64` oracle `opticalDepth.ts`; `marchSteps.ts`, the twin of R05.T12.e's
+    step placement with its gate in `marchSteps.test.ts`; `solar.ts`'s `sunIlluminanceRgb()` and
+    `skyLuminanceScale()`; the smoke checks `checkAtmosphereTables`, `checkAtmosphereFrames`,
+    `checkAtmosphereSteps` and `captureAtmosphere` (`renderer/src/smoke/atmosphere.ts`).
+  - `TABLE_SIZES: Record<QualitySetting, TableSizes>`, which is `SETTINGS[s].atmosphere` of R05's
+    one settings list (`view/quality/qualitySetting.ts`, R05 Design note 26). This includes its
+    low sizes: sky-view 128 × 64, aerial perspective 32 × 32 × 16, the march at half resolution,
+    and aerial perspective in one deferred pass on terrain alone (`aerialPerspectiveScope`
+    `"terrain"`).
+  - The transmittance table stores e^(−τ) in `rgba16float`, read as transmittance in four places
+    (`source.wgsl`'s `tableTransmittance`, `multiScattering.wgsl`'s `transmittanceToSun`,
+    `composite.wgsl`'s `transmittanceToSpace` and `rayMarch.wgsl`'s ground hit), and the smoke check
+    "R05.T12.b every transmittance texel is finite and within [0, 1]" holds it there.
   - Design note 16's lookups over the rotational spheroid: r = √(MN) + h with h the geodetic
     height, μ against the spheroid normal, and the march clipped against the spheroid shells
-    (researched 2026-09-29), which this plan's widened tables keep.
-  - `atmosphereInputs(camera, figure)` in `hillaire.ts` (R05.T12.c), Design note 16's inputs at
-    the camera, which R08.T6.f widens in R05's file with the camera's latitude and s.
+    (researched 2026-09-29), which this plan's widened tables keep. The per-planet tables are
+    built on `tableRadiusM(figure)`, (2a + c) ÷ 3; the per-view tables on the camera's √(MN).
+  - `atmosphereInputs(camera: Pick<AtmosphereCamera, "positionM">, figure: SpheroidFigure)` in
+    `hillaire.ts` (R05.T12.c), Design note 16's inputs at the camera (`AtmosphereInputs`, the
+    radius, height and normal), which R08.T6.f widens in R05's file with the camera's latitude
+    and s;
+    `geodeticOf(p, figure)`, a fixed-point iteration that fails to converge above a flattening of
+    about 0.04 (R05's Risks), which R08.T6.e replaces.
+  - Where it is drawn: only by the spike (`view/spike/spikeRun.ts`) and the smoke page. R07's
+    `PhotorealRenderer` draws no atmosphere yet (R07, below).
   - The `MemoryCategory` members `atmosphere-tables` and `atmosphere-view` that R05.T12.b and T12.c
     add under R12's names. This plan allocates every per-planet table under the first, the gated
     thick bakes included, and every per-view table, summed over suns, under the second (R12
     Design note 6).
-  - The terrain pass (`view/terrain/terrainPass.ts`).
-  - `HeightWorkerPool`'s module-worker and transfer pattern.
-  - The spike's `metrics.ts` and `just descent-spike`.
+  - The terrain pass (`view/terrain/terrainPass.ts`'s `TerrainPass`).
+  - `HeightWorkerPool`'s module-worker and transfer pattern (`view/terrain/workers/pool.ts`).
+  - The spike's `metrics.ts` (`view/spike/metrics.ts`, `SpikeMetrics`) and `just descent-spike`.
 - **R06:**
-  - `HostDiscDto` (R06's wire form of `HostDisc`), carrying each host star's `StarColour` fields
-    (`chroma`, `lux_per_v0`) and `bake_spectrum: [f64; 15]`. The last is built by R06.T3.c and
-    T10: the colour row's spectrum averaged over each bin of `BAKE_WAVELENGTHS_NM` and normalised
-    to unit photopic illuminance by the 15-bin sum (Σ 683 ȳᵢ Sᵢ Δλ = 1 lx), so a bake's luminance
-    scales by the star's lux. R06 has no TypeScript `StarColour`; this plan reads the fields off
-    `HostDiscDto`.
-  - The sky layers (`SkySprites`, `BandLayer`, `HostDiscLayer`), which this plan dims by
-    transmittance.
+  - `HostDiscDto` (R06's wire form of `HostDisc`; `crates/hyperion-protocol/src/sky.rs`,
+    generated in `packages/protocol/src/generated/`), carrying each host star's `StarColour`
+    fields (`chroma`, `lux_per_v0`) and `bake_spectrum: [f64; 15]` (`SKY_BAKE_BINS`); its luminance
+    triples are in B, V, R order. The last is built by R06.T3.c and T10: the colour row's spectrum
+    averaged over each bin of `BAKE_WAVELENGTHS_NM` and normalised to unit photopic illuminance by
+    the 15-bin sum (Σ 683 ȳᵢ Sᵢ Δλ = 1 lx), so a bake's luminance scales by the star's lux. R06 has
+    no TypeScript `StarColour`; this plan reads the fields off `HostDiscDto`. R06 pins the bins in
+    `packages/protocol/fixtures/bake_wavelengths_nm.json`, which no TypeScript reads yet.
+  - The sky layers, which this plan dims by transmittance: the sprites (`skySpriteStars` and
+    `SKY_SPRITE_HDR_MATERIAL`, `view/sky/sprites.ts` and `spriteHdr.ts`), `BandLayer`,
+    `SkyCubeLayer` (the baked cube, which holds most stars) and `HostDiscLayer`, built in
+    `displays/view/viewFrameDrawer.ts`. As built, none takes a per-direction factor: each takes one
+    scalar `exposureScale`. They are drawn into the scene target before the atmosphere (R07's pass
+    order).
   - **Asked of R06 (open, outside R06's scope):** a 1 nm model spectrum per colour-table row for M
     stars, for the curves of growth (Design note 5, Risks).
 - **R07:**
-  - `starIlluminance(disc: HostDiscDto, distanceM: number): Rgb`, with `Rgb` from R02's
-    `view/photometry`, the one per-channel type R05, R07 and this plan share;
-  - `BodyAppearance` (with `BodyPhotometry`), which R08 reads per body;
-  - `litRegimes` with `GAS_GIANT_FULL_PASS_BOUNDARY_M`;
-  - `shaders/bodyDisc.wgsl`, which consumes `DiscReflectanceTable`, and into which R08.T16.b adds
-    the read path;
-  - `shaders/litBody.wgsl`, which calls R08.T9.b's `surfaceLighting.wgsl` through stubs returning
-    1 and 0 until this plan lands, for each sun's transmittance and the sky's irradiance;
-  - `METER_CLASS` (R07 Design note 10): every translucent pass of this plan into the HDR target
-    blends its alpha with source factor zero and destination factor one, so that R07's meter class
-    survives, through R01's `blend` modes `"premultiplied"` and `"additive"`, both of which do so
-    (R01 Design note 21, R01.T8.i);
-  - `photorealisticPasses`, with its empty slot for R08, and `viewBudgets`;
+  - `starIlluminance(disc: HostDiscDto, distanceM: number): Rgb` (`view/lighting/illuminance.ts`),
+    with `Rgb` from R02's `view/photometry/toneCurve.ts`, the one per-channel type R05, R07 and this
+    plan share; `shiningStars` and `lightsAt(pointM, hosts, max)` (`view/lighting/hostLights.ts`),
+    the latter brightest first, which R07 calls with `MAX_BODY_LIGHTS` = 2: a lit body takes at
+    most two stars (`MAX_DISC_LIGHTS` = 2 in `bodyDisc.wgsl`);
+  - the body's appearance. `BodyAppearance` (with `BodyPhotometry`, `view/appearance/`) exists,
+    but as built no production code builds it: the scene carries R07's `WireAppearance`
+    (`heldAppearanceOf`, `view/scene/fromServer.ts`; its `figure: BodyFigure | null`, photometry
+    and labels), and the view builds `LitBodyInput` (`litBodiesOf`,
+    `displays/view/photorealFrame.ts`). This plan reads the `WireAppearance` per body, with the
+    regime its caller decides;
+  - `litRegimes(bodies: LitSphere[], camera, viewport, previous)` (`view/bodies/regime.ts`, called
+    from `planLitBodies` in `view/bodies/draw.ts`) and `GAS_GIANT_FULL_PASS_BOUNDARY_M` (10⁹ m),
+    to which nothing yet applies hysteresis: R07 leaves it to this plan's caller
+    (`REGIME_HYSTERESIS` = 0.1 is beside it);
+  - `view/shaders/bodyDisc.wgsl`, into which R08.T16.b adds the `DiscReflectanceTable` read path
+    (Provides, "For R07's analytic disc");
+  - `view/shaders/litBody.wgsl`, whose stubs `atmosphere_sun_transmittance` (returning 1) and
+    `atmosphere_sky_irradiance` (returning 0) take R08.T9.b's signatures (Provides, "Tables and
+    passes"). Their callers in `bodyDisc.wgsl` pass altitude 0,
+    latitude 0 and azimuth 0, call the sky term once at the first light's μ₀ times the shares'
+    mean A, and send planetshine through `atmosphere_sun_transmittance` too (R07's, for this plan
+    to keep or refuse); `view/appearance/litBodyProbe.ts` and its smoke check pin the stubs' 1, 1
+    and 0;
+  - `METER_CLASS` (R07 Design note 10; `view/post/meter.ts`): every translucent pass of this plan
+    into the HDR target blends its alpha with source factor zero and destination factor one, so
+    that R07's meter class survives, through R01's `blend` modes `"premultiplied"` and
+    `"additive"`, both of which do so (R01 Design note 21, R01.T8.i);
+  - `photorealisticPasses` (`view/photoreal/passes.ts`), with its slot `"atmosphere"` (owner R08,
+    `built: false`, after the discs and before R11's rings), which is metadata only:
+    `PhotorealRenderer.render` (`view/photoreal/renderer.ts`) hard-codes the passes it draws and
+    draws no atmosphere, so filling the slot means adding the passes there (R08.T10.b);
+    `viewBudgets(views, setting)` (`view/budget/viewBudget.ts`);
   - `STAR_CUT_RELATIVE` (1e-4, R07 Design note 4), the cut of a star under 10⁻⁴ of the brightest,
     applied here as the same constant.
 - **R10 and R11 (consumers):** R10's `terrainLit.wgsl` (R10.T10.b) takes the direct sun through
@@ -850,7 +1001,8 @@ Names are those the owning plans give; the owning plan is authoritative.
     - `ATMOSPHERE: NOT RESOLVED` when the surface section is withheld. No atmosphere is drawn then,
       since drawing Earth's instead would be invention.
     - `ATMOSPHERE: NOT YET MODELLED` while the surface section is `not_modelled`, which is every
-      generated body until P14.T24.a is on the wire. No atmosphere is drawn.
+      generated body until P14.T24.a's figures are on the wire (R08.T1's P14.T35.e). No
+      atmosphere is drawn.
     - `AEROSOLS: NOT YET MODELLED` while plan 14 publishes no aerosol or absorber inventory. It
       covers the absorbers too: ozone and methane are drawn only from the inventory.
     - `ATMOSPHERE: COMPUTING` while a gated thick bake runs.
@@ -996,33 +1148,57 @@ Names are those the owning plans give; the owning plan is authoritative.
 The order:
 
 - T1 and T2 are documents and can start at once. T1 must land in plan 14 before plan 14 builds
-  P14.T24.
-- T3–T5 build the optics, in order. T6 generalises R05's tables over N terms and needs T3 and T4
-  (the ozone curve of growth and the fitted channels).
-- T7 (several suns, the sky's extinction), T8 (other bodies from outside) and T9 (aerial
-  perspective and surface lighting) follow T6.
-- T10 assembles the medium from a body and needs T2–T6. T11 records the thin benchmarks and needs
+  P14.T24 (unbuilt). R09.T0.a also writes asks into plan 14, so the two are committed one after the
+  other, not in parallel.
+- T3.b (dispersion and King factors) and T3.d (normal gravity and the slicing) need nothing and can
+  start at once. T3.a (the column) follows T3.d, at whose g_ref it is built and whose normal
+  gravity its spheroid test reads. T3.c (the molecular term) follows T3.a and T3.b.
+- T4.a follows T3, since its Earth cases need the molecular term, and builds `bless.ts`; T4.b
+  follows T4.a.
+- T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
+  T5.b.
+- T6 generalises R05's tables over N terms. T6.a needs T3.a's `tabulated` density; T6.b follows
+  T6.a; T6.c follows T6.b and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c and T4.a
+  (the fitted channels); T6.e follows T6.d and T3.d; T6.f follows T6.e.
+- T7 (several suns, the sky's extinction), T8 (other bodies from outside) and T9.a (aerial
+  perspective) follow T6.d; T9.b (surface lighting, by band) follows T6.f.
+- T10.a assembles the medium from a body and needs T2–T6 (T5 for the aerosol terms); T10.b draws
+  it in the photorealistic view and follows T10.a and T7. T11 records the thin benchmarks and needs
   T7–T10.
-- T12.a (the tracer) needs nothing of this plan and can start at once, and T12.c (its benchmarks)
-  follows it. T12.b (the cases and references) needs T5, T10's fixtures and T12.c.
-- T13 needs T6 and T12. T14 follows T13, and T15 follows T14, whose solver it uses.
+- T12.a (the tracer) needs nothing of this plan and can start at once. T12.c (its benchmarks) and
+  T12.d (the spheroid mode) follow it. T12.b (the cases and references) needs T5, T10's fixtures,
+  T12.c and T12.d.
+- T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13, and T15 follows T14, whose
+  solver it uses.
 - T16 needs T8 and T15. It runs on the hand giant fixture, and re-runs on plan 14's envelope when
   P14.T24.d is on the wire. T17 closes.
 
 Some tasks wait on the owner or on another plan, and say so where they do:
 
-- **Licences.** The files held in R08.T5.b (H₂SO₄, Mars dust, tholin) wait on the owner's
-  licence ruling. So do the cases that use them: the Venus-class, Mars and Titan-class
+- **Licences.** The files held in R08.T5.b (H₂SO₄, Mars dust, tholin, and NH₄SH's missing index)
+  wait on the owner's licence ruling, as do Karkoschka and Tomasko's methane coefficients
+  (Elsevier) in R08.T4.b. So do the cases that use them: the Venus-class, Mars and Titan-class
   fixtures of R08.T10, their cases and references in R08.T12.b, and their gates in R08.T13–T15.
   Until the ruling, those cases are not committed, and the gates run on the licence-free cases:
   Earth, Earth with ozone, the Rayleigh-only Venus columns and the giant deck. The regimes they
-  cannot yet gate stay `ATMOSPHERE: APPROXIMATE` (Design note 9).
+  cannot yet gate stay `ATMOSPHERE: APPROXIMATE` (Design note 9). Serdyuchenko's ozone was ruled
+  on 2026-10-02 (`decisions-r05.md` item 4): the reduced 1 nm table may be committed with its
+  citation, and the raw table may not.
 - **Star spectra.** Every spectral bake and fit reads the star's `bake_spectrum` from R06's
   `HostDiscDto` (R06.T3.c and T10). The channel fit's non-solar suns are R06's colour-table rows at
   those temperatures.
+- **Galaxy plan 14.** No generated body has an atmosphere on the wire until P14.T24.a–b and R08.T1's
+  P14.T24.c–f and P14.T35.e are built (none is). Every task here runs on the fixtures of Design
+  note 16 meanwhile, and generated bodies show `ATMOSPHERE: NOT YET MODELLED`.
+- **Drafts for the owner.** R08.T1's amendments and R08.T2's labels are committed marked drafted
+  for the owner, and the client is built to them meanwhile; the acceptance and the sign-off are
+  the owner's, recorded here when given.
+- **The UHD 620.** Its runs (R08.T7, T11, T14.d's bake time, T17) are the owner's, on the owner's
+  laptop; the development machine's figures are recorded beside them.
 
 TypeScript paths are under `apps/hyperion/src/renderer/src/view/atmosphere/` unless a path says
-otherwise.
+otherwise; a path that starts `view/`, `lib/`, `displays/`, `smoke/` or `test/` is under
+`apps/hyperion/src/renderer/src/`.
 
 - Tests that need no GPU run under `pnpm test`, and so in `just ci`.
 - Every task that adds or changes a catalogued kernel also passes `just test-render` (R01.T9.e).
@@ -1040,7 +1216,8 @@ four beside P14.T24.a and one in P14.T35, as R04 amends it for the detail seed. 
 was researched on 2026-09-29 (Design notes 3, 6 and 16, and the sources cited there). The amendment
 cites it, and any rule marked "from memory" is checked against its paper by the agent who builds
 it. The letters follow the README's asks table; the build order they state is e, f, c, d, then
-T35.d, since T24.c's rules read T24.e's profile and T24.f's gases.
+T35.e, since T24.c's rules read T24.e's profile and T24.f's gases. The wire amendment is P14.T35.e:
+P14.T35.d is taken ("Body-state times beyond 2⁵³ s", 2026-09-30).
 
 - **P14.T24.c The aerosol and absorber inventory.**
   - Per mode: a material from a closed enum with a shape class (sphere, non-spherical mineral,
@@ -1079,22 +1256,32 @@ T35.d, since T24.c's rules read T24.e's profile and T24.f's gases.
     calibrated on Titan's 5.65%.
   - Abiotic O₂ comes from water loss in the runaway state (Luger and Barnes 2015).
   - Biotic O₂ is a gap for the owner.
-- **P14.T35.d The atmosphere on the wire.** `BodySurfaceDto` gains the fields of T24.c, T24.e and
-  T24.f: the inventory's modes and absorbers, the vertical structure's (T_s, p_s, β, T_skin), and
-  the gas fractions with CH₄ and O₂. A giant gains an `envelope` section of its own, holding
-  T24.d's figures, since its `surface` stays `not_applicable`. Each field's name carries its SI
-  unit; `just gen-protocol` follows. Its test pins the wire form of an Earth, a Venus and a
-  Jupiter, one test per section state.
+- **P14.T35.e The atmosphere on the wire.** As built, the sim's `record::Surface` and the wire's
+  `BodySurfaceDto` are uninhabited enums, and no plan-14 task gives them fields (P14.T35.b only
+  tags the section `not_modelled`). So `BodySurfaceDto` gains, with the record's `Surface`, first
+  P14.T24.a's and T24.b's figures that this plan reads: the surface state and material, the
+  surface temperature and pressure, the gravity, the ordered gas fractions and the cloud fraction.
+  Then the fields of T24.c, T24.e and T24.f: the inventory's modes and absorbers, the vertical
+  structure's (T_s, p_s, β, T_skin), and the gas fractions with CH₄ and O₂. A giant gains an
+  `envelope` section of its own on `BodyRecordDto`, holding T24.d's figures, since its `surface`
+  stays `not_applicable`. Each field's name carries its SI unit; `just gen-protocol` follows. A
+  change of the wire's form is coordinated through "main" (`PROTOCOL_VERSION` is 2). R09–R11 read
+  the same section (the ocean, ice and cloud fractions, surface age and crater density; the
+  roadmap's asks table), so the task is written to serve them too, with R09.T0.a's asks. Its test
+  pins the wire form of an Earth, a Venus and a Jupiter, one test per section state.
 
-Files: `docs/agent/plans/galaxy-generation/14-planetary-systems.md`. Acceptance:
+Files: `docs/agent/plans/galaxy-generation/14-planetary-systems.md`, and the two P14.T35.d
+mentions in the roadmap's asks tables (`README.md`), which this re-validation renamed to
+P14.T35.e. Acceptance:
 
 - `npx prettier --check docs/agent/plans/galaxy-generation/14-planetary-systems.md` passes;
-- the four P14.T24 tasks appear under Phase E and P14.T35.d under Phase H, with their tests and
+- the four P14.T24 tasks appear under Phase E and P14.T35.e under Phase H, with their tests and
   sources;
 - plan 14's Risks name this plan as their consumer, and record its Venus at 58 bar against the
   real 92.
 
-This is a brainstorm-driven plan edit, so it is shown to the owner before it is committed.
+This is a brainstorm-driven plan edit. It is committed marked drafted for the owner (the RM4/RM5
+rule for galaxy-plan amendments), and plan 14's owner accepts it; the acceptance is recorded here.
 
 ### R08.T2 The atmosphere labels, drafted for the owner
 
@@ -1109,15 +1296,21 @@ with its meaning and when it clears:
 
 None uses a status colour or the word "degraded" (item 7 of
 [What the guide must gain](../../brainstorming/rendering-and-planets.md#what-the-guide-must-gain)).
-The client is built to the draft, and the task ends when **the owner signs off**.
+The client is built to the draft. The task is committed with the draft marked for the owner, and
+**the owner signs off** later; the sign-off is recorded here.
 
-Files: the draft beside R02's in `docs/frontend/ux-guidelines.md` as a proposed edit, and
-`labels.ts`, which feeds R02's `ViewLabelBlock`. Tests: `labels.test.ts` pins the strings.
-Acceptance:
+Files: the five entries as rows of the guide's nomenclature table in
+`docs/frontend/ux-guidelines.md` (as `BODY PHOTOMETRY: NOT YET MODELLED`, a `Label`, and
+`TERRAIN: STREAMING`, an `Annunciation`, are), each marked
+`_Draft (plan R08, R08.T2): the owner signs off._`, and `labels.ts`, the strings and the
+`AtmosphereLabel` keys. R08.T10.b feeds them to R02's `ViewLabelBlock` through
+`photorealStatements` (`displays/view/viewRun.ts`), beside `litLabelsOf`. Tests: `labels.test.ts`
+pins the strings. Acceptance:
 
 - `pnpm --filter hyperion exec vitest run view/atmosphere/labels` passes;
-- the console-ux lint passes;
-- the sign-off is recorded here.
+- the console-ux lint passes (`python3 .claude/skills/console-ux/scripts/ux_lint.py` on the
+  changed files);
+- the draft markers are in the guide, and the sign-off is recorded here when given.
 
 ### R08.T3 The column and Rayleigh scattering per gas
 
@@ -1125,7 +1318,9 @@ Acceptance:
   `radiativeConvective`, `temperatureAt`, and `hydrostaticColumn` (Design note 3), with molar
   masses from plan 14's `Gas::molar_mass_g_per_mol` (IUPAC 2021), each naming its Rust source.
   The column is built at g_ref = √(g_e g_p) from R08.T3.d, not at the bulk section's single
-  gravity, and its altitudes are gravity-scaled heights (Design note 17). Tests:
+  gravity, and its altitudes are gravity-scaled heights (Design note 17). R05's `DensityProfile`
+  gains its `tabulated` variant here, in `medium.ts`, with `densityAt` and `columnLengthM`; the WGSL
+  side (`common.wgsl`'s `densityOf`, which reads any kind above 0.5 as a tent) is R08.T6.b's. Tests:
   - an isothermal scale height equals kT/(μ m_u g_ref) to 10⁻⁶;
   - on a level spheroid, the column mass above the datum at latitude φ, read through the gravity
     scaling, is p_s/g(φ) to 0.5%, at the equator, 45° and the pole of a Saturn-class figure;
@@ -1164,9 +1359,15 @@ Acceptance:
   (Somigliana's closed form for the level ellipsoid, Heiskanen and Moritz 1967 §2-7 to 2-9),
   `referenceGravity`, `directionalCurvatureRadiusM` and `oblateSlicing`, with the constants
   `KAPPA_STEP`, `BAND_STEP` and `ONE_SLICE_BELOW` (Design note 17). Its inputs are R07's
-  `BodyFigure`, GM from the record's `mass_kg` section times CODATA's G, and ω from P14.T14.c's
-  `BodyFixedFrame` rate (R05 Design note 14's test-planet period for R05's Earth until then); with
-  no rotation, g(φ) is taken as the bulk section's gravity and one slice results. Tests:
+  `BodyFigure` (`view/terrain/planet.ts`), GM from the record's `mass_kg` section times CODATA's G,
+  and ω, the spin rate at the scene time of the record's rotation law (`BodySummaryDto.rotation`,
+  read as `SystemBodyRotation`; R05 Design note 14's test-planet period for R05's Earth); with no
+  rotation section, g(φ) is taken as the bulk section's gravity and one slice results. As built,
+  `lib/system/rotation.ts` keeps the law's rate private (`rateAtAge`), so this task exports the rate
+  at a time beside `rotationAngleAt`, and G has one client copy, module-private in
+  `lib/scene/sceneWire.ts`, which this task exports from one place (with the sim's citation)
+  rather than writing a second literal. Files: `oblate.ts`, `oblate.test.ts`,
+  `lib/system/rotation.ts` and the G constant's module. Tests:
   - WGS 84's figure, GM and ω give NIMA TR8350.2's γ_e = 9.7803253359 and γ_p = 9.8321849378
     m s⁻² to 10⁻⁹ relative;
   - Saturn's (a = 60,268 km, c = 54,364 km, GM = 3.7931 × 10¹⁶ m³ s⁻², 10.656 h) give 9.08 and
@@ -1182,16 +1383,28 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
 
 - **R08.T4.a The fitted triple.** First `bless.ts`, the client's bless helper: under
   `HYPERION_BLESS=1`, the variable the Rust testkit already reads
-  (`crates/hyperion-testkit/src/golden.rs`), a vitest rewrites its committed table. Otherwise it
-  compares, and on a mismatch fails naming the command,
-  `HYPERION_BLESS=1 pnpm --filter hyperion exec vitest run <file>`. `BAKE_WAVELENGTHS_NM` (15 over
-  380–760 nm) is written here. A bless-style vitest then refits `CHANNEL_WAVELENGTHS_NM` by minimax
-  Δu′v′ over a stated case family: Earth at several suns (3,200 K, solar and 9,000 K), and Mars with
-  dust. The two non-solar spectra are R06's colour-table rows at those temperatures, read through
-  the table's `bake_spectrum` (R06.T3.c). It writes the triple and the objective's value into
-  `channels.json`, and is checked unchanged otherwise. Mars's dust case waits on the licence ruling
-  for Wolff et al.'s data (R08.T5.b), and until then the family is Earth's alone, recorded as such.
+  (`crates/hyperion-testkit/src/golden.rs`, which also refuses a bless under `CI`), a vitest
+  rewrites its committed table. Otherwise it compares, and on a mismatch fails naming the command,
+  `HYPERION_BLESS=1 pnpm --filter hyperion exec vitest run <file>`. As built, renderer tests read
+  no files through `node:fs` and have no Node types (Provides), so the helper reads the table as a
+  JSON import and rewrites it through vitest's `toMatchFileSnapshot`, `vitest.config.mts` turning
+  the update mode on under `HYPERION_BLESS=1` (and never under `CI`). `BAKE_WAVELENGTHS_NM` (15
+  over 380–760 nm) is written here, tested against R06's
+  `packages/protocol/fixtures/bake_wavelengths_nm.json`. A bless-style vitest then fits the
+  channel triple by minimax Δu′v′ over a stated case family: Earth at several suns (3,200 K, solar
+  and 9,000 K), and Mars with dust. The two non-solar spectra are R06's colour-table rows at those
+  temperatures, read through the table's `bake_spectrum` (R06.T3.c). It writes the triple and the
+  objective's value into `channels.json`, and is checked unchanged otherwise. R05's
+  `CHANNEL_WAVELENGTHS_NM` stays (680, 550, 440), the wavelengths of R05's Earth constants, until
+  R08.T6.d rebuilds Earth at the fitted triple. Mars's dust case waits on the licence ruling for
+  Wolff et al.'s data (R08.T5.b), and until then the family is Earth's alone, recorded as such.
   It uses CIE 1931 2° colour-matching functions reduced to linear Rec. 709, the primaries R06 uses.
+  The CIE table (CC BY-SA 4.0) is fetched with its checksum and not committed; a Node tool in
+  `apps/hyperion/src/tools/`, run by a script under `apps/hyperion/scripts/` (R05's
+  `solarFactors` precedent), reduces it to the committed values the fit reads, with the CIE's
+  required citation in `NOTICE`'s Data section (R05.T12.d's ruling, `decisions-r05.md` item 4).
+  Files: `bless.ts`, `medium.ts` (`BAKE_WAVELENGTHS_NM`), `channels.ts`, `channels.json`,
+  `channels.test.ts`, `apps/hyperion/vitest.config.mts`, the tool and its script, `NOTICE`.
   Tests:
   - the refit starts from (620, 540, 445) and does not worsen the recorded objective;
   - at Earth the fitted triple beats 680/550/440 at a sun zenith of 85°.
@@ -1200,12 +1413,17 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   of 1 nm or finer, with S interpolated from the sun's 15 `bake_spectrum` bin averages. It runs in
   the optics worker at arrival, once per sun. The reduced cross-sections, ozone binned to 1 nm and
   methane's coefficients as published, are written to `absorbers/crossSections.json` by the same
-  bless step.
+  reduction step (T4.a's Node tool, since a renderer test fetches and reads no raw file). Ozone's
+  1 nm bins are centred, on [λ − 0.5, λ + 0.5) nm (`decisions-r05.md` item 2), unlike R05's
+  three upward 10 nm bins, which R05 keeps for parity with Bruneton and sebh.
   - Sources: ozone from Serdyuchenko et al. 2014 (AMT 7, 625; the articles CC BY 3.0, the data
     page's terms unstated) and methane from Karkoschka and Tomasko 2010 (Icarus 205, 674;
     Elsevier's terms).
-  - Only the reduced values are committed, with attribution. The bless step fetches the raw
-    tables, and whether a raw table may be committed is asked of the owner.
+  - Only the reduced values are committed, with attribution in `NOTICE`'s Data section. The raw
+    tables are fetched with their checksums. Ruled for ozone on 2026-10-02 (`decisions-r05.md`
+    item 4): the reduced 1 nm table may be committed with its citation, the raw table may not. The
+    methane coefficients wait on the owner (Elsevier's terms need a decision record of their own);
+    until then no methane table is committed, and the tests run on ozone and synthetic bands.
 
   Tests:
   - a flat spectrum's curve is e^(−σu);
@@ -1281,12 +1499,14 @@ Design note 2, in six subtasks. The first three change no picture: R05's constan
 the widened code, reproduce R05. The fourth changes Earth's picture by amounts it records. The
 fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (Design note 17).
 
-- **R08.T6.a The CPU twin over N terms.** `tablesCpu.ts`, built on R05's `opticalDepth.ts`, gives
-  each of R05's kernels in `f64` at R05's sizes over a list of terms, with tabulated density and
-  phase. Tests (no GPU):
+- **R08.T6.a The CPU twin over N terms.** `tablesCpu.ts`, built on R05's `opticalDepth.ts` and
+  `marchSteps.ts`, gives each of R05's kernels in `f64` at R05's sizes over a list of terms, with
+  tabulated density and phase (`PhaseFunction`'s `tabulated` variant is added here, in
+  `medium.ts`, if R08.T5.c has not yet added it). Tests (no GPU):
   - R05's constants as a medium give R05's oracle values to 10⁻⁶;
   - the sky view's and the march's twins place their steps as R05.T12.e does, and pass its
-    quadrature gate (its rays, metric and tolerances), with the multiple-scattering term included;
+    quadrature gate (`marchSteps.test.ts`'s 1,046 rays, metric and tolerances, `LOW_TWIN_WORST`
+    on low), with the multiple-scattering term included;
     the multiple-scattering kernel's even steps are measured against a placed reference and
     recorded;
   - the multiple-scattering kernel takes R05.T12.e's stable step factor from `common.wgsl`, and its
@@ -1296,30 +1516,51 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
 
   Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/tablesCpu`.
 
-- **R08.T6.b The kernels over N terms.** Terms travel in a storage buffer, and density and phase
-  tables in 2D array textures, one layer a term. The `thin` multiple-scattering table keeps
-  Hillaire's isotropic 32². Every changed kernel stays registered in `WGSL_CATALOGUE`. Files: R05's
-  `shaders/{transmittance,multiScattering,skyView,aerialPerspective,rayMarch,composite}.wgsl`,
-  `hillaire.ts`, `tables.ts`, `medium.ts`. Smoke (`just test-render`): every kernel compiles, and
-  the readbacks agree with the twin to 10⁻³ relative above 10⁻⁶ of the table's maximum, on the
-  no-f16 run. Acceptance: `pnpm test` and `just test-render` pass.
+- **R08.T6.b The kernels over N terms.** Terms travel in a storage buffer in place of R05's
+  `Medium` uniform (`MAX_TERMS` = 8, 416 B, packed by `packMedium`), and density and phase tables
+  in 2D array textures, one layer a term. The `tabulated` density and phase get their own codes in
+  WGSL, whose `densityOf` today reads any profile kind above 0.5 as a tent. The `thin`
+  multiple-scattering table keeps Hillaire's isotropic 32². The kernels read the tables by
+  `textureLoad` with hand filtering (a compute pass binds no sampler), and a one-layer array is
+  bound as R01's seam allows (Risks, "Re-validated at bce2aef5"). Every changed kernel stays
+  registered in `WGSL_CATALOGUE`. Files: R05's
+  `shaders/{transmittance,multiScattering,skyView,aerialPerspective,rayMarch,composite}.wgsl` and
+  the libraries `shaders/{common,medium,view,source}.wgsl` they are assembled from, `hillaire.ts`,
+  `tables.ts`, `medium.ts`, `tables.test.ts` (which pins `packMedium`'s length and its "at most 8"
+  refusal) and `hillaire.test.ts` (which checks that no assembled module takes a `Medium` by value),
+  and the smoke page's checks (`smoke/atmosphere.ts`). Smoke (`just test-render`): every kernel
+  compiles, and the readbacks agree with the twin to 10⁻³ relative above 10⁻⁶ of the table's
+  maximum, on both variants (`default` and `no-subgroups`). Acceptance: `pnpm test` and
+  `just test-render` pass.
 
 - **R08.T6.c Optical depth and curves of growth.** Transmittance stores optical depth in RGB and
   the accumulated absorber column in alpha, with a second table for further absorbers. Each sun's
-  −ln T_c(u) is added on read (Design notes 5 and 8), in the twin and the kernels. R05.T12.b's smoke
-  assertion that every transmittance texel lies within [0, 1] is rewritten as: every stored
-  optical depth is finite and non-negative. Tests: a Venus-class transmittance is finite with no
-  underflow, and R05's Earth, with its ozone as an absorber curve reduced to the linear regime,
-  reproduces R05's transmittance to 10⁻³. Acceptance: `pnpm test` and `just test-render` pass.
+  −ln T_c(u) is added on read (Design notes 5 and 8), in the twin and the kernels: at R05's four
+  read sites, `source.wgsl`'s `tableTransmittance`, `multiScattering.wgsl`'s `transmittanceToSun`,
+  `composite.wgsl`'s `transmittanceToSpace` and `rayMarch.wgsl`'s ground hit. R05.T12.b's smoke
+  assertion "every transmittance texel is finite and within [0, 1]" (`checkAtmosphereTables`) is
+  rewritten as: every stored optical depth is finite and non-negative; its 20 oracle texels are
+  compared in optical depth, not as e^(−τ) under the half-float floor. Tests: a Venus-class
+  transmittance is finite with no underflow, and R05's Earth, with its ozone as an absorber curve
+  reduced to the linear regime, reproduces R05's transmittance to 10⁻³. That regression feeds the
+  curve R05's own three ozone coefficients (`OZONE_ABSORPTION_PER_M`, Bruneton's and sebh's upward
+  10 nm bins), not T4.b's centred 1 nm bins, which differ by +10%, −6% and −19% at the three
+  channels (`decisions-r05.md` item 2). Acceptance: `pnpm test` and `just test-render` pass.
 
-- **R08.T6.d Earth rebuilt.** `EARTH_REFERENCE` is rebuilt from R08.T3's column and molecular
-  term (tabulated, about 8.4 km in scale height, in place of R05's 8 km exponential), R05's
-  aerosol, the ozone curve of growth (R08.T4.b) and the fitted channels (R08.T4.a).
+- **R08.T6.d Earth rebuilt.** `EARTH_REFERENCE` (`earth.ts`) is rebuilt from R08.T3's column and
+  molecular term (tabulated, about 8.4 km in scale height, in place of R05's exponential at the US
+  Standard Atmosphere's 8,434.5 m; `HILLAIRE_REFERENCE` keeps sebh's 8 km), R05's aerosol, the
+  ozone curve of growth (R08.T4.b) and the fitted channels (R08.T4.a), to which
+  `CHANNEL_WAVELENGTHS_NM` moves here.
   - The Sun's per-channel illuminance comes from R07's `starIlluminance`, through R06's colour
-    (Design note 5), in place of R05's spectral-to-luminance factors in `solar.ts`.
+    (Design note 5), carried on each `SunState`, in place of R05's spectral-to-luminance factors in
+    `solar.ts` (`sunIlluminanceRgb()`, `skyLuminanceScale()`).
   - `solar.ts` is kept as a check: the two agree in luminance to 1%, and their chromaticity
     difference is recorded.
-  - R05's constants stay as a second medium for comparison.
+  - R05's constants stay as a second medium for comparison, beside `HILLAIRE_REFERENCE`.
+  - Earth's tabulated profile reproduces Bodhaine et al. 1999's τ_R(550) = 0.097 to 1%, as R05's
+    exponential does (`decisions-r05.md` item 3), so that the comparison with R05 differs in
+    vertical distribution, not in column.
   - The differences from R05 are recorded here, in the sky's zenith radiance at noon and at a sun
     zenith of 85°, and in u′v′.
 
@@ -1332,8 +1573,13 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   azimuth and optical depth divided by s; multiple scattering and irradiance per band, each an
   ordinary build at the band's g(φ) and √(MN). The sky-view and aerial-perspective marches march
   each ray in its own osculating sphere R_α, and the orbit march keeps R05's spheroid shells with
-  density at h\*. Tests (no GPU):
+  density at h\*. R05's `geodeticOf` (`hillaire.ts`), a fixed-point iteration that does not
+  converge above a flattening of about 0.04, is replaced here, keeping its signature, by a closed
+  form (Vermeille 2002, as R08.T12.d's Rust takes, or Bowring 1976), since Saturn's f = 0.098 needs
+  it; R05.T12.c's tests keep passing. Tests (no GPU):
   - a sphere with ω = 0 reproduces T6.d's tables to 10⁻¹²;
+  - the geodetic conversion round-trips on a Saturn-class figure to 10⁻⁶ m from the datum to 10
+    scale heights;
   - on a Saturn-class figure, an `f64` brute-force march of the sun's path on the true spheroid,
     density at h\*, gives the sliced lookup's optical depth within 0.5% at grazing and 0.1% at μ
     ≥ 0.2: at the equator looking north and east, at 45° and at the pole;
@@ -1342,15 +1588,18 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   - Earth's slicing is one slice and one band, and Earth's differences from T6.d (s within ±0.26%)
     are recorded here.
 
-  Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/tablesCpu`.
+  Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/tablesCpu view/atmosphere/hillaire`.
 
 - **R08.T6.f Slices and bands, the kernels.** `transmittance.wgsl`, `multiScattering.wgsl`,
   `skyView.wgsl`, `aerialPerspective.wgsl` and `rayMarch.wgsl` gain T6.e's slicing through
-  2D array textures, one layer a slice or band, and a shared `oblate.wgsl` (catalogued). This task
-  widens R05's `atmosphereInputs(camera, figure)` in R05's `hillaire.ts` itself, as R08.T6 widens
-  R05's other names: its result gains the camera's geodetic latitude and s = g(φ) ÷ g_ref from
-  R08.T3.d, and R05.T12.c's tests keep passing with s ≡ 1 at a = c. `setMedium` allocates the
-  layers under `atmosphere-tables`. When this lands, `ATMOSPHERE: APPROXIMATE` clears for oblate
+  2D array textures, one layer a slice or band, and a shared `oblate.wgsl`, a library prepended to
+  each kernel as R05's `common.wgsl` and `medium.wgsl` are (the kernels it joins are what the
+  catalogue holds). This task widens R05's `atmosphereInputs(camera, figure)` in R05's
+  `hillaire.ts` itself, as R08.T6 widens R05's other names: its result, R05's
+  `AtmosphereInputs { radiusM, heightM, normal }`, gains the camera's geodetic latitude and
+  s = g(φ) ÷ g_ref from R08.T3.d, and R05.T12.c's tests (`hillaire.test.ts`) keep passing with
+  s ≡ 1 at a = c. `setMedium` allocates the layers under `atmosphere-tables`; Earth's one slice and
+  one band are bound as R01's one-layer seam allows (Risks, "Re-validated at bce2aef5"). When this lands, `ATMOSPHERE: APPROXIMATE` clears for oblate
   thin bodies. Smoke (`just test-render`): the readbacks agree with the twin to 10⁻³ on a
   Saturn-class figure and on Earth. Acceptance: `pnpm test` and `just test-render` pass; by hand,
   the Saturn-class limb from orbit over the equator and the pole is recorded here.
@@ -1358,17 +1607,29 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
 ### R08.T7 Several suns, and the sky through the air
 
 Sky-view and aerial perspective per photorealistic view, summed over the drawn suns in one march
-(Design note 7), in `drawFrame(view, suns)`:
+(Design note 7), in `drawFrame(view, suns, scene)`. As built, R05's kernels carry one sun:
+`view.wgsl`'s `AtmosphereView` has one `sun`, `skyScale` and `sunDisc`, `source.wgsl`'s
+`sampleMediumAt` folds the phase into one cos θ, and `sourceAt` takes one μ_sun; this task widens
+them. Files: `settings.ts`, `view/quality/qualitySetting.ts`, `hillaire.ts`,
+`shaders/{view,source,skyView,aerialPerspective,rayMarch,composite}.wgsl`, `tablesCpu.ts` and the
+smoke checks.
 
 - suns are ranked by R07's `starIlluminance`, with R07's `STAR_CUT_RELATIVE` and the setting's
-  cap, `SKY_SUN_CAP`. This task writes `settings.ts`, adds `atmosphereView` to R05's
-  `ViewSettings` with its values in `SETTINGS`, and fills the cap's entry in
-  `ATMOSPHERE_QUALITY_LIMITS`;
+  cap, `SKY_SUN_CAP`, through R07's `lightsAt(pointM, hosts, max)` (`view/lighting/hostLights.ts`,
+  brightest first) at the camera with `max` the cap. This task writes `settings.ts`, adds
+  `atmosphereView` to R05's `ViewSettings` with its values in `SETTINGS`, and fills the cap's
+  entry in `ATMOSPHERE_QUALITY_LIMITS`. R07 lights a body with at most two stars
+  (`MAX_BODY_LIGHTS`), so on the high setting a third or fourth sun lights the sky but not the
+  surface: that limit is listed there too (Risks, "Re-validated at bce2aef5");
 - the sky-view, aerial-perspective and composite passes blend alpha with source zero and
   destination one, keeping R07's `METER_CLASS` in the HDR target;
 - a sun below the horizon still feeds the sky through the planet's shadow in the tables;
-- R06's sprites, band and host discs are multiplied by the transmittance from the camera along
-  their direction.
+- R06's sprites, band, cube and host discs are multiplied by the transmittance from the camera
+  along their direction. As built none of R06's layers takes a per-direction factor (each takes one
+  scalar `exposureScale`), and they are drawn into the scene target before the atmosphere, whose
+  composite reads that colour (`AtmosphereScene.colour`). So the composite applies the
+  transmittance to space along each sky pixel's ray, and R06's shaders (`view/sky/shaders/`) are
+  edited only if that cannot serve, recorded here.
 
 Tests (no GPU, CPU twin):
 
@@ -1384,14 +1645,17 @@ Tests (no GPU, CPU twin):
 
 Acceptance: `pnpm test` and `just test-render` pass, and by hand a binary sky on an Earth fixture
 shows both twilights, recorded here with the development machine's timings and, from the owner,
-the UHD 620's.
+the UHD 620's. Until R08.T10.b draws the atmosphere in the photorealistic view, the binary sky is
+looked at through the smoke harness's hidden captures (`just test-render --captures=DIR`,
+R05.T12.c's) with two suns, and its timings are taken with T11's.
 
 ### R08.T8 Views from outside and other bodies
 
 Widen R05's ray march to N terms and several suns. The march draws any body's atmosphere other
-than the ship's local body at its `apparentM` from R03's `sceneAt` (Design note 13), with the limb,
-the terminator and the planet's shadow in its own air. The switch to the sky-view table is by
-altitude, with a blend band. Tests (no GPU):
+than the ship's local body (`SceneFrame.localBody`) at its `apparentM` from R03's
+`sceneAt(model, observer, time, previous)` (Design note 13), with the limb, the terminator and the
+planet's shadow in its own air; a `contact` body, which has no position, draws none. The switch to
+the sky-view table is by altitude, with a blend band. Tests (no GPU):
 
 - the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges;
 - R05.T12.e's quadrature gate holds for the widened march, at one sun and at `SKY_SUN_CAP`;
@@ -1408,10 +1672,12 @@ to 10⁸ m shows no step at the switch, recorded here.
 
 - **R08.T9.a Aerial perspective.**
   - On the low setting, R05's deferred aerial perspective applies to terrain alone. On the high
-    setting it applies to everything opaque (`AERIAL_PERSPECTIVE_SCOPE` in `settings.ts`).
+    setting it applies to everything opaque (`AERIAL_PERSPECTIVE_SCOPE` in `settings.ts`, the
+    projection of R05's `TableSizes.aerialPerspectiveScope`, `"terrain"` and `"scene"`).
   - Beyond the volume's 32 km reach (Hillaire 2020 §5.4, confirmed) the march takes over.
-  - `aerialPerspective(view)` exposes the volume and transmittance, and `skyView(view)` the
-    view's summed sky-view table, to R11.
+  - `aerialPerspective(view)`, widening R05's `aerialPerspectiveVolume()` (which returns `null` on
+    `"terrain"`), exposes the volume and transmittance, and `skyView(view)` the view's summed
+    sky-view table, to R11.
 
   Tests (no GPU):
   - a point at the volume's far edge takes the same in-scattering from volume and march to 2%;
@@ -1427,7 +1693,22 @@ to 10⁸ m shows no step at the switch, recorded here.
   and has a CPU twin in `tablesCpu.ts`. `surfaceLighting.wgsl` exports
   `atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`, with the latitude and sun
   azimuth arguments of the Provides, for R07's `litBody.wgsl` callers, R10's `terrainLit.wgsl`
-  and R11's lit passes. Both are catalogued.
+  and R11's lit passes. Both are catalogued. As built, the two names are R07's stubs in
+  `view/shaders/litBody.wgsl` (1 and 0), so this task:
+  - removes the stubs there, the modules that include `litBody.wgsl` joining
+    `surfaceLighting.wgsl` in their place (WGSL resolves every name in a module);
+  - binds the body's transmittance and irradiance tables to the disc materials, the smooth mesh and
+    the `disc cells` kernel through `view/bodies/draw.ts`'s `DISC_TEXTURES`, at group 2 bindings 6
+    and above (0–5 are taken);
+  - has the callers in `bodyDisc.wgsl` pass the geodetic height and latitude from the spheroid
+    normal and the sun's azimuth from local north, in place of R07's zeros, and take the sky term
+    per light rather than once at the first light's μ₀;
+  - keeps planetshine through `atmosphere_sun_transmittance` along its source's direction (R07
+    left it for this plan to keep or refuse; the lean is to keep it, Risks);
+  - rewrites `view/appearance/litBodyProbe.ts`'s and its smoke check's pins of the stubs' 1, 1
+    and 0 against the tables' twin.
+
+  A body without an atmosphere binds R07's one-texel defaults and reads 1 and 0, as the stubs did.
 
   Tests (no GPU, twin):
   - at the top of the atmosphere the sun's transmittance is 1 and the sky's irradiance is 0;
@@ -1442,24 +1723,51 @@ to 10⁸ m shows no step at the switch, recorded here.
 
 ### R08.T10 The medium of a body
 
-`assemble.ts`, `opticsWorker.ts`, `AtmosphereCache.ts` build, from `BodyAppearance` and the body's
-surface section, in a module worker, cached as Design note 14 says. The surface section comes from
-`body_detail`. `AtmosphereCache` requests it when a photorealistic view first draws a body in the
-disc or mesh regime (R07's `litRegimes`), again when the scene's arrival or the granted detail
-changes, and again when `body_events` reports an event on the body (P14.T31, once it exists). The
-section's state decides the label. The build produces:
+In two subtasks (split on re-validation, since as built the atmosphere is not yet drawn in the
+photorealistic view at all): T10.a assembles and caches the medium, and T10.b draws it in the view.
+
+- **R08.T10.a The medium and its cache.** Described below, with its tests. Acceptance:
+  `pnpm --filter hyperion exec vitest run view/atmosphere/assemble view/atmosphere/AtmosphereCache`
+  and `pnpm test` pass.
+- **R08.T10.b In the photorealistic view.** It needs T10.a and T7. The paragraph "This task also
+  draws" below. Tests: `photorealisticPasses`' `atmosphere` entry is built and carries the passes'
+  labels; `PhotorealRenderer` submits them after the discs and before R11's slots, and none for a
+  view whose bodies have no medium (R05's counting fake, `test/countingRenderEngine.ts`); a
+  withheld, unmodelled or approximate body's label reaches `photorealStatements`. Acceptance:
+  `pnpm test` and `just test-render` pass, and by hand a flight past every fixture, on a kept test
+  scene that carries them (`view/scenes/`), is recorded here.
+
+`assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
+surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
+R07 `WireAppearance` (`heldAppearanceOf`, `view/scene/fromServer.ts`: the figure, the photometry
+and the labels), with the record's `mass_kg` and rotation; R07's `BodyAppearance` is not built in
+production. The surface section comes from `body_detail`, requested through
+`toBodyDetailRequest` (`lib/system/bodiesWire.ts`), which nothing in `view/` calls yet.
+`AtmosphereCache` requests it when a photorealistic view first draws a body in the disc or mesh
+regime (R07's `litRegimes`, decided in `planLitBodies`), again when the scene's arrival or the
+granted detail changes, and again when `body_events` reports an event on the body (P14.T31, once
+it exists; today it answers `unsupported`). The section's state decides the label. The build
+produces:
 
 - the column;
 - the molecular, absorber and aerosol terms;
 - the labels of Design note 12.
 
-An airless body (`SurfaceState::Airless`) draws no atmosphere and no label. Until P14.T24.a is on
-the wire, generated bodies draw no atmosphere and show `ATMOSPHERE: NOT YET MODELLED`. The task
-runs on the fixtures of Design note 16: Earth, Earth with ozone, Mars with hand dust, Venus at 92
-and at 58 bar, a hand Titan, and a hand giant. Those that need held data wait on the licence
-ruling (the task order's list).
+This task also draws the atmosphere in the photorealistic view (T10.b), where it is not drawn today:
+`PhotorealRenderer.render` (`view/photoreal/renderer.ts`, which hard-codes its passes) gains the
+atmosphere's passes after the discs, R07's `photorealisticPasses` slot `"atmosphere"` becomes
+built with the labels those passes submit under (R12's `PASS_ROWS` keys on them), and the labels
+of Design note 12 join `photorealStatements` (`displays/view/viewRun.ts`) beside `litLabelsOf`
+(`displays/view/photorealFrame.ts`).
 
-Tests:
+An airless body (`SurfaceState::Airless`) draws no atmosphere and no label. Until the surface
+section carries P14.T24.a's figures (R08.T1's P14.T35.e), generated bodies draw no atmosphere and
+show `ATMOSPHERE: NOT YET MODELLED`, and a giant's section is `not_applicable` until its
+`envelope` section exists. The task runs on the fixtures of Design note 16: Earth, Earth with
+ozone, Mars with hand dust, Venus at 92 and at 58 bar, a hand Titan, and a hand giant. Those that
+need held data wait on the licence ruling (the task order's list).
+
+Tests (T10.a):
 
 - a withheld section gives no medium and `atmosphereNotResolved`, and a `not_modelled` one
   `atmosphereNotYetModelled`;
@@ -1469,7 +1777,7 @@ Tests:
 - results transfer, and the cache evicts least recently used within its stated size;
 - each fixture's optics time is recorded, on a quiet machine.
 
-Acceptance: `pnpm test` passes, and by hand a flight past every fixture is recorded here.
+Acceptance: T10.a's and T10.b's, above.
 
 ### R08.T11 The thin benchmarks
 
@@ -1479,8 +1787,12 @@ the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#pe
 
 - the per-frame atmosphere time, against 2–4 ms low and 0.5–1 ms discrete, at one sun and at the
   setting's `SKY_SUN_CAP`. These are estimates, recorded as findings: R05's gate judges terrain and
-  atmosphere together (R05 Design note 21, decided 2026-10-06), and R05 measured about 1.6 ms at
-  full clock on the RTX 3080 at one sun (R05's Risks);
+  atmosphere together (R05 Design note 21, decided 2026-10-06). R05 measured, at one sun and three
+  terms on the RTX 3080, about 1.6 ms p50 at full clock, 2.62 / 3.37 ms p50 / p95 at the driver's
+  light-load clocks after R05.T12.e, and 3.19, 4.07 and 4.28 ms at the 50th, 95th and 99th
+  percentiles on the gate's judged run (1,509 × 821 px; R05's Risks, "The gate's verdict"), the
+  figures the brainstorm's budget section has carried since 2026-10-08; R12.T10 replaces the
+  estimate;
 - the per-planet table time, against about 1 ms and under 0.1 ms;
 - the table bytes a planet, against 2 MB, and the per-view bytes on their own line, against
   Design note 11's 0.43 MB, at one, two and four suns;
@@ -1495,12 +1807,21 @@ here, and `pnpm test` passes.
 ### R08.T12 The reference path tracer
 
 - **R08.T12.a The tracer.** `crates/hyperion-fit/src/atmosphere/` holds a spherical backward
-  Monte Carlo in `f64` (`Shells::Sphere`; R08.T12.d adds the spheroid). It reads a spectral case
-  (`serde_json`, a workspace dependency, added to the crate) and has:
+  Monte Carlo in `f64` (`Shells::Sphere`; R08.T12.d adds the spheroid), with its unit tests in the
+  module, so that the filter `atmosphere` selects them. It reads a spectral case (`serde_json`, a
+  workspace dependency, added to the crate's `Cargo.toml` as `serde_json.workspace = true`, with
+  the comment there that lists the crate's allowed dependencies extended) and has:
   - next-event estimation to each sun, and Russian roulette;
   - an explicit detector cone;
   - an optional Stokes mode for Rayleigh;
-  - reproducible results for any thread count.
+  - reproducible results for any thread count, by the crate's convention: an
+    `Option<NonZeroUsize>` thread count, `parallel::map_reduce_chunks`, and counter-based draws
+    keyed per sample, as `tasks/displaced_forms/births.rs`'s `Draws` are; arithmetic through
+    `hyperion_sim::math`, as the crate's `clippy.toml` requires.
+
+  The command `atmosphere-reference` is a variant of `cli.rs`'s `Command`, dispatched in `run_in`
+  and listed in the module's documentation, with any new `RunFitError` variant in `lib.rs`'s
+  `exit_code`.
 
   Tests:
   - an absorbing-only medium gives Beer–Lambert to 10⁻⁹;
@@ -1511,13 +1832,17 @@ here, and `pnpm test` passes.
   al. 2009 and recorded as a finding for the owner. Acceptance:
   `cargo test -p hyperion-fit atmosphere`.
 
-- **R08.T12.c The tracer's benchmarks.** Slow tests (`just test-slow`) run the benchmarks of Design
-  note 10, and the tracer's references (R08.T12.b) are committed only once these pass:
+- **R08.T12.c The tracer's benchmarks.** Slow tests run the benchmarks of Design note 10, and the
+  tracer's references (R08.T12.b) are committed only once these pass. They are the workspace's
+  slow tests, `#[ignore = "slow: …"]` (run by `just test-slow` under its `slow-test` profile), in a
+  module `atmosphere::benchmarks`:
   - Garcia and Siewert's Haze L and Cloud C1, Natraj et al.'s Rayleigh tables (Stokes),
     Kokhanovsky et al. 2010 and IPRT Phase A, each to 3σ with σ ≤ 0.3%;
   - Loughman et al. 2004 within its 2–4% spread.
 
-  Acceptance: `cargo test -p hyperion-fit atmosphere` and `just test-slow`.
+  The benchmarks' published values are committed only as the values each test asserts, with their
+  citations, pending a ruling on the tables themselves (Risks, "Re-validated at bce2aef5").
+  Acceptance: `cargo test -p hyperion-fit atmosphere` and `just test-slow atmosphere::benchmarks`.
 
 - **R08.T12.d The spheroid mode** (Design note 17). It needs R08.T12.a. `Shells::Spheroid`:
   free paths by delta tracking against a majorant (the density at the lowest gravity-scaled
@@ -1539,8 +1864,10 @@ here, and `pnpm test` passes.
   Saturn-class case under `Shells::Spheroid` (H₂–He Rayleigh over a Lambertian 1-bar boundary;
   ground views at the equator looking north and east, at 60° and at the pole; the limb at 0.3, 1
   and 3 H over the equator and the pole). R08.T13's gate covers it with the thin cases. The
-  command `hyperion-fit atmosphere-reference`
-  traces them, and the references are committed with sample counts, times and load average.
+  command `hyperion-fit atmosphere-reference` traces them, and the references are committed with
+  sample counts, times and load average. The cases are written through `bless.ts`'s
+  `toMatchFileSnapshot` and read as JSON imports; both kinds of file pass `prettier --check` or are
+  listed in `.prettierignore`, and each stays under the 500 kB added-file hook.
   - A vitest asserts that every case equals what the optics produce now, and names the commands to
     regenerate both files.
   - The metric of Design note 10 is written once as `gate.ts`, with its own tests on synthetic
@@ -1552,7 +1879,8 @@ here, and `pnpm test` passes.
     - the Titan-class case's is 5–15% (Tomasko et al. 2008, marked to be re-read);
     - Earth's and Mars's aggregates are recorded.
 
-  Acceptance: `pnpm test` passes and `just fit-check` is unaffected.
+  Acceptance: `pnpm test` passes and `just fit-check` is unaffected (the subcommand is not a
+  `FitTask`, so its outputs are outside `tables.lock`).
 
 ### R08.T13 Where the analytic term drifts
 
@@ -1560,7 +1888,9 @@ A vitest applies `gate.ts` to the CPU twin's thin tables with the analytic term 
 subcommand `hyperion-fit atmosphere-sweep --out <sweep.json> [--smoke]` traces single-layer media
 over vertical extinction optical depth, single-scattering albedo and asymmetry. Beside each point
 it writes the twin's analytic radiances, which a bless-style vitest supplies as a case file. The
-full sweep is run by hand and its output committed as `reference/ms-sweep.json`. From it,
+full sweep is run by hand and its output committed as `reference/ms-sweep.json`, kept under the
+500 kB added-file hook (the grid is sized for it, or the file is split by ω). `atmosphere-sweep` is
+a `cli.rs` variant like `atmosphere-reference`. From it,
 `thick/regime.ts` sets `THICK_MS_BOUNDARY`, the τ*(ω, g) table of Design note 9, and
 `classifyRegime(medium, cover)` routes by that table and by the per-body deck rule (τ above 10,
 cloud fraction 1). Tests:
@@ -1646,19 +1976,26 @@ Acceptance: `pnpm test`.
 - **R08.T16.a Giants.** The giant's medium is drawn inside 10⁹ m through R08.T15's split, with
   the deck as its surface and the limb by the march. It is built on the hand giant fixture, which
   carries Jupiter's figure and rotation (f = 0.065), so that Design note 17's slicing runs on it.
-  When P14.T24.d and P14.T35.d are on the wire, the medium comes from the giant's `envelope`
+  When P14.T24.d and P14.T35.e are on the wire, the medium comes from the giant's `envelope`
   section, and the tests re-run on it. Tests:
   - the medium has no ground, and its deck lies at the pressure its input states;
   - once the envelope section exists, a generated Jupiter-class giant's medium places its NH₃
     deck at 0.5–1 bar, as P14.T24.d's own test requires;
-  - its limb shell of about ten scale heights is resolved at 2.5 × 10⁸ m (the brainstorm's
-    figure, under
-    [The scales the view spans](../../brainstorming/rendering-and-planets.md#the-scales-the-view-spans)).
+  - its limb shell of about ten scale heights is resolved at 2.2 × 10⁸ m, at R02's centre-pixel
+    scale, which R07 adopted on 2026-10-03 (R07's Risks, T5 as built); the brainstorm's 2.5 × 10⁸ m,
+    under
+    [The scales the view spans](../../brainstorming/rendering-and-planets.md#the-scales-the-view-spans),
+    is the same figure at width ÷ field.
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17). This task adds its read path to R07's
-  `shaders/bodyDisc.wgsl`, read at each disc pixel's geodetic latitude, beyond
+  `view/shaders/bodyDisc.wgsl`, read at each disc pixel's geodetic latitude, beyond
   `GAS_GIANT_FULL_PASS_BOUNDARY_M` for a body with an atmosphere, keeping the albedo-only shading
-  for airless bodies, and updates the shader's catalogue entry. Tests:
+  for airless bodies, and updates the catalogue entries that compose the library (`bodies:disc`,
+  `bodies:discLimb`, the smooth mesh and the `disc cells` kernel). The table binds through
+  `view/bodies/draw.ts`'s `DISC_TEXTURES` at a free group 2 binding (6 or above, after R08.T9.b's),
+  and R07's CPU twin `view/bodies/discShading.ts` gains the same read. The boundary's hysteresis,
+  which R07 leaves to this plan's caller, is applied here in `planLitBodies` (`view/bodies/draw.ts`),
+  with R07's `REGIME_HYSTERESIS`. Tests:
   - at 10⁹ m the disc's integrated radiance agrees with the full passes' to 5% for the Jupiter and
     Earth fixtures, and for a Saturn-class figure at a phase angle of 0° and 90°;
   - a one-band body's table has one layer and reads as before;
@@ -1716,7 +2053,8 @@ records are here.
 ## Generator version
 
 No change to generated output and no bump. The atmosphere is presentation computed in the client
-from figures plan 14 generates. The asks of R08.T1 are plan 14's tasks, with plan 14's bumps.
+from figures plan 14 generates. The asks of R08.T1 are plan 14's tasks, with plan 14's bumps and
+P14.T35.e's change of the wire (`PROTOCOL_VERSION` is 2), each coordinated through "main".
 Client caches key on `ATMOSPHERE_OPTICS_VERSION` instead. The plan reserves nothing in the
 generator, and the reference's sampling needs no domain tag.
 
@@ -1762,8 +2100,12 @@ generator, and the reference's sampling needs no domain tag.
   and the scalar error for Rayleigh can reach about 10%. R08.T12.a measures it and reports it as a
   finding.
 - **Data licences.** Before these data are committed, the owner must decide on the Karkoschka and
-  Tomasko coefficients (Elsevier), Serdyuchenko's data files (terms unstated), Wolff's Mars dust
-  and Khare's tholin, and NH₄SH, which has no visible index at all.
+  Tomasko coefficients (Elsevier), Wolff's Mars dust and Khare's tholin, Palmer and Williams's
+  H₂SO₄, and NH₄SH, which has no visible index at all. Serdyuchenko's data files (terms unstated)
+  were ruled on 2026-10-02 (delegated, `decisions-r05.md` item 4): no raw table is committed, and
+  R08.T4.b's reduced 1 nm table may be, with its citation in `NOTICE`'s Data section. The same
+  ruling's rule covers the CIE matching functions (CC BY-SA 4.0): fetched with a checksum, derived
+  values committed with the CIE's citation.
 - **The sun cap on the low setting** (Design note 7) drops the scattered sky of the third and later
   suns. Whether it needs an annunciation is for R12's audit.
 - **Refraction and scintillation are not drawn.** On Venus, refraction near the surface raises the
@@ -1785,7 +2127,9 @@ generator, and the reference's sampling needs no domain tag.
   stars, but not for M dwarfs. Their TiO bands at 590–630 and 705–760 nm overlap Chappuis and
   methane's 727 nm band, so the weight correlates with σ (Design note 5). This is a recorded
   limitation. The lean is that R06 supply a model spectrum at 1 nm for M stars (for example
-  PHOENIX, Husser et al. 2013, A&A 553, A6), an ask not yet made.
+  PHOENIX, Husser et al. 2013, A&A 553, A6). The ask is made and open (the roadmap's between-plans
+  table; R06's Risks), outside R06's scope and waiting on the stellar libraries' licence ruling;
+  until then the 15-bin interpolation stands for M stars and the limitation is recorded with them.
 - **Titan's skin temperature.** Design note 3's Titan check takes T_skin = 64 K. A T_eq of
   83.5 K, from a Bond albedo of 0.265, would give T_skin 70 K and a tropopause at 0.40 bar,
   outside P14.T24.e's test. Where plan 14's Titan T_eq comes from is to be re-checked when
@@ -1802,3 +2146,71 @@ generator, and the reference's sampling needs no domain tag.
   decisions, item 3). `BAKE_CEILING_S`, 5 s a world, stays the UHD 620 laptop's figure, the
   minimum specification. The development machine (Ryzen 7 3700X) records its own bake time beside
   it and fails only if it is over the laptop's ceiling; no separate desktop ceiling is set.
+- **Re-validated at bce2aef5** (2026-10-09, RM4's start: `rendering-and-planets` is `main` at
+  3e3dbb80, R01–R07 merged by PR #3, plus R13's plan; `GENERATOR_VERSION` 21, `PROTOCOL_VERSION`
+  2). Swept every Consumes item against the code, and folded in R05's, R06's and R07's as-built
+  records and the decisions that name this plan (`decisions-r05.md` items 1–4,
+  `decision-r05-high-atmosphere.md`, R07's centre-pixel scale of 2026-10-03). Nothing built
+  changes. What changed here:
+  - _R05's names, as built_ (R05's T12.a note asked for them): `cornette-shanks` with `asymmetry`,
+    `none` kept for absorption-only terms, `topHeightM`, and a medium carrying no radius (R_ref is
+    `tableRadiusM(figure)`); `CHANNEL_WAVELENGTHS_NM` stays (680, 550, 440) until T6.d;
+    `HillaireAtmosphere`'s four-argument constructor and `drawFrame(view, suns, scene)` returning
+    the composite `DrawItem`; `SunState` gaining its illuminance; the per-planet `AtmosphereTables`
+    moving to `AtmosphereCache`; `aerialPerspective(view)` widening `aerialPerspectiveVolume()`;
+    `AERIAL_PERSPECTIVE_SCOPE` projecting R05's `TableSizes.aerialPerspectiveScope` (`"scene"` and
+    `"terrain"`, not a second field with `"opaque"`); the WGSL libraries, the `Medium` uniform and
+    the four transmittance read sites (T6.b, T6.c); `rayMarch.wgsl` a compute kernel; `geodeticOf`
+    replaced in T6.e.
+  - _R01:_ the smoke harness has no `no-f16` variant (it runs `default` and `no-subgroups`); a
+    compute pass binds no sampler; a one-layer array is viewed as `2d` in a compute binding (open,
+    below); compute catalogue entries carry no `displayName`.
+  - _R02 and R03:_ the label path (`photorealStatements`, `litLabelsOf`); `sceneAt`'s fourth
+    argument and `null`, `SceneFrame.localBody`, and `contact` bodies, which draw no atmosphere.
+  - _R06:_ the sky layers' real names (`skySpriteStars`, `BandLayer`, `SkyCubeLayer`,
+    `HostDiscLayer`), none with a per-direction factor, so T7 dims them in the composite.
+  - _R07:_ the scene's `WireAppearance` in place of `BodyAppearance`, which production never
+    builds; `lightsAt` and `MAX_BODY_LIGHTS` = 2; `PhotorealRenderer` draws no atmosphere, so T10 is
+    split into T10.a (the medium and its cache) and T10.b (the view's passes, the pass slot and the
+    labels); `bodyDisc.wgsl` a library with group 2's bindings 0–5 taken; the stubs' callers and
+    probe (T9.b); the 10⁹ m boundary's hysteresis (T16.b); the limb's 2.2 × 10⁸ m (T16.a).
+  - _Galaxy plan 14:_ rotation and figure are built and on the wire (P14.T46.f), so ω comes from
+    `BodyRotationDto`; P14.T35.d is taken, so R08.T1's wire amendment is P14.T35.e (the roadmap's
+    two mentions renamed with it); no plan-14 task gives the surface section fields, so P14.T35.e
+    also asks for P14.T24.a's and T24.b's; the cloud fraction and surface pressure are not on the
+    wire; G has one module-private client copy.
+  - _Tooling:_ `bless.ts` under R04.T10.c's rule that renderer code reads no files through
+    `node:fs` (`toMatchFileSnapshot`, `vitest.config.mts`); raw data reduced by a Node tool in
+    `apps/hyperion/src/tools/` (R05's `solarFactors` precedent); `optics.worker.ts`; `serde_json`
+    added to `hyperion-fit`; the subcommands as `cli.rs` variants outside `tables.lock`; slow tests
+    `#[ignore]` under `just test-slow atmosphere::benchmarks` rather than the whole slow suite;
+    committed JSON under `prettier --check` and the 500 kB hook.
+  - _Decisions folded in:_ centred 1 nm ozone bins in T4.b, and R05's own coefficients in T6.c's
+    regression (`decisions-r05.md` item 2); Bodhaine's τ_R(550) = 0.097 in T6.d (item 3); the
+    reduced ozone table ruled committable (item 4); R05's measured per-frame figures in T11.
+  - _Task order:_ T3.b, T3.d, T5.a and T12.a start at once beside T1 and T2; T3.a follows T3.d;
+    T6's subtasks name their own predecessors; T1 and R09.T0.a are committed to plan 14 one after
+    the other.
+  - _The brainstorm_, since this plan was written (576bd1ee): its atmosphere passages changed on
+    2026-10-02 and 2026-10-08 (R05.T12.a's and R05.T19's findings: the per-planet tables rebuilt
+    only when the atmosphere changes, Earth's aerosol mean cosine 0.65 and Rayleigh scale height
+    8.43 km, the 32 km reach's sources, the measured per-frame atmosphere). Each agrees with this
+    plan's design notes; nothing here contradicts the brainstorm.
+  - _Pending re-validation:_ none. Every task's inputs are in the code, in this plan or in a
+    fixture; generated bodies' atmospheres wait on P14.T24.a–b and R08.T1's asks (Tasks).
+  - _Open, raised with "main", each with its lean:_
+    - the one-layer array in a compute binding (T6.b, T6.f, T9.b): lean, a compute `sampled`
+      binding states its view dimension, as a material's `TextureBindingSpec.viewDimension` does,
+      a small R01 change approved before T6.b; the fallback, two layers for a one-slice body, would
+      add about 0.15 MB (a second transmittance, multiple-scattering and irradiance layer) to
+      Earth's 0.40 MB;
+    - P14.T35.e's scope (the surface section's base fields beside T24.c–f's) and its wire change,
+      written with R09.T0.a's asks: lean, one wire task for every rendering plan that reads the
+      section;
+    - whether the published benchmark tables (Garcia and Siewert 1985, Natraj et al. 2009 and 2012,
+      Kokhanovsky et al. 2010, IPRT Phase A, Loughman et al. 2004) may be committed whole: lean,
+      only the values each test asserts, with citations, as R05.T12.d's rule has it;
+    - planetshine through the receiving body's air (R07's stub, kept or refused here): lean, keep,
+      since a neighbour's light crosses the air as sunlight does;
+    - R07's two-star surface cap against `SKY_SUN_CAP`'s four on high: lean, keep both, and list
+      the third and fourth suns' unlit surface in `ATMOSPHERE_QUALITY_LIMITS` for R12's audit.
