@@ -332,12 +332,12 @@ describe("the label block", () => {
     ).toBe(`BODY ${body?.designation ?? ""}`);
   });
 
-  it("states ECLIPSE TEST's clock rate after its name, SCENE CLOCK ×100 (R07.T16.k)", () => {
+  it("states ECLIPSE TEST's clock rate after its name, SCENE CLOCK 100 s/s (R07.T16.k)", () => {
     const lines = labelLines(startRun(eclipseScene()), DEFAULT_EXPOSURE);
     const scene = lines.findIndex((line) => line.label === "SCENE");
     expect(lines.slice(scene)).toEqual([
       { label: "SCENE", value: "ECLIPSE TEST" },
-      { label: "SCENE CLOCK", value: "×100" },
+      { label: "SCENE CLOCK", value: "100 s/s" },
     ]);
   });
 
@@ -360,9 +360,9 @@ describe("the label block", () => {
 
   it("reads a kept scene's clock rate as a whole number, grouped from five digits (R07.T16.k)", () => {
     expect([sceneClockReading(100), sceneClockReading(1_000), sceneClockReading(86_400)]).toEqual([
-      "×100",
-      "×1000",
-      "×86,400",
+      "100 s/s",
+      "1000 s/s",
+      "86,400 s/s",
     ]);
   });
 

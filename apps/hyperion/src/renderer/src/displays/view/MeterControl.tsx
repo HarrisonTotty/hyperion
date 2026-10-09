@@ -36,7 +36,10 @@ export interface MeterControlProps {
   readonly onMeter: (mode: MeterMode) => void;
 }
 
-/** The meters in Design note 10's order, with their labels, for T16's guide draft (`METER AVG`, …). */
+/**
+ * The meters in Design note 10's order, with their labels, as the guide's `METER` row names them
+ * (`METER AVG`, …).
+ */
 const METERS: ReadonlyArray<{ readonly mode: MeterMode; readonly label: string }> = [
   { mode: "average", label: "AVG" },
   { mode: "lit", label: "LIT" },

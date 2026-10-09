@@ -47,7 +47,10 @@ export interface BodyPhotometry {
   readonly provenance: "modelled" | "modelled-provisional" | "provisional";
 }
 
-/** The label a body without a photometric section carries (a phrase for the owner, R07.T16). */
+/**
+ * The label a body without a photometric section carries (the guide's
+ * `BODY PHOTOMETRY: NOT YET MODELLED` row).
+ */
 export type AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLED";
 
 /** The provisional photometry's geometric albedo, every channel (Design note 5). */

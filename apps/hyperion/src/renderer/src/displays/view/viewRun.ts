@@ -506,22 +506,20 @@ export function cameraReading(camera: CameraState): string {
 }
 
 /**
- * A kept scene's clock rate as the label block reads it (R07.T16.k; the guide's `SCENE` row):
- * `×` and its seconds a second as a whole number, `×100`, grouped in threes from five digits as
- * any number is.
+ * A kept scene's clock rate as the label block reads it (R07.T16.k; the guide's `SCENE CLOCK`
+ * row): its seconds a second as a whole number with the unit `s/s`, `100 s/s`, a unit rate as the
+ * display time's `RUN 1 d/s` is, grouped in threes from five digits as any number is.
  *
  * @remarks
  * Every kept scene's rate is a whole number of seconds a second (`ECLIPSE TEST`'s 100, the rest
  * 1), so the reading is exact; the label block's tests hold every scene of {@link SCENE_OPTIONS}
- * to it, so that a kept scene at 2.5 never reads `×3`. Whether the rate reads so, or as a unit rate
- * beside the display time's `RUN 1 d/s`, is the owner's, in T16.c's draft; this is the form
- * drafted.
+ * to it, so that a kept scene at 2.5 never reads `3 s/s`.
  *
  * @param secondsPerSecond - The scene's simulation seconds a real second,
  *   {@link ViewScene.timeRate}.
  */
 export function sceneClockReading(secondsPerSecond: number): string {
-  return `×${formatNumber(secondsPerSecond, 0)}`;
+  return `${formatNumber(secondsPerSecond, 0)} s/s`;
 }
 
 /**
@@ -529,10 +527,10 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * style, the camera preset ({@link cameraReading}), the field of view and the exposure with its
  * level, and the star source;
  * the scene's name in a kept scene, and after it, while that scene's clock runs at other than one
- * second a second, its rate, `SCENE CLOCK ×100` ({@link sceneClockReading}, R07.T16.k), so that a
- * `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull and
- * `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no rotation
- * (decision-r07-rotation-note) are statements ({@link labelStatements}).
+ * second a second, its rate, `SCENE CLOCK 100 s/s` ({@link sceneClockReading}, R07.T16.k), so
+ * that a `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the
+ * hull and `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no
+ * rotation (decision-r07-rotation-note) are statements ({@link labelStatements}).
  *
  * @remarks
  * `SCENE` and `SCENE CLOCK` describe the display's scene, not one view's picture, so an

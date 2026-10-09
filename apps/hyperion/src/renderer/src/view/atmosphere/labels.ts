@@ -1,8 +1,7 @@
 /**
  * What a photorealistic view says about the atmospheres it draws (plan R08, Design note 12): six
- * statements for its label block, drafted for the owner (R08.T2) as rows of the guide's
- * nomenclature list (`docs/frontend/ux-guidelines.md`, each marked
- * `_Draft (plan R08, R08.T2): the owner signs off._`).
+ * statements for its label block, rows of the guide's nomenclature list
+ * (`docs/frontend/ux-guidelines.md`; drafted by R08.T2, signed off 2026-10-09).
  *
  * @remarks
  * The three labels follow the guide's grammar for a withheld or unmodelled section, as
@@ -23,17 +22,17 @@
  * - `atmosphereNotResolved`: the section the body's atmosphere comes from is withheld by the
  *   detail level granted: its surface section, a giant's included, which the server withholds below
  *   the `surface` level although it is `not_applicable`; or, once P14.T35.e puts it on the wire, a
- *   gas envelope's `envelope` section. No atmosphere is drawn, since drawing another world's would
- *   be invention.
+ *   gas envelope's `envelope` section. No atmosphere is drawn, since any atmosphere drawn in its
+ *   place would be invented.
  * - `atmosphereNotYetModelled`: the surface section is `not_modelled`, every generated body's until
  *   P14.T24.a's figures are on the wire (R08.T1's P14.T35.e); or the body's atmosphere is a gas
  *   envelope (a gas or ice giant, whose surface section is `not_applicable`, or a sub-Neptune) and
  *   its envelope (P14.T24.d) is absent from the wire, which reads `not_modelled` as every absent
- *   section does (`lib/system/bodiesWire.ts`); or a kept scene sets the body none. No atmosphere is
- *   drawn (decision-r08-giant-label).
+ *   section does (`lib/system/bodiesWire.ts`); or a kept scene leaves the body's atmosphere unset.
+ *   No atmosphere is drawn (decision-r08-giant-label).
  * - `aerosolsNotYetModelled`: plan 14 publishes no aerosol or absorber inventory, so the air is
- *   drawn with its gases' scattering alone. It covers the absorbers too: ozone and methane are
- *   drawn only from the inventory.
+ *   drawn with its gases' scattering alone. Its statement names the absorbers too: ozone and
+ *   methane, like the aerosols, are drawn only from the inventory.
  * - `atmospherePending`: the body's surface or envelope section has been asked of the server
  *   (`body_detail`) and its reply is not yet drawn. No atmosphere is drawn meanwhile, and the note
  *   clears by itself (decision-r08-giant-label).
@@ -49,7 +48,7 @@
  * `atmosphereNotResolved` and `atmosphereNotYetModelled`, the withheld section first, since the
  * client cannot see past it; no `aerosolsNotYetModelled` under either, since none of the body's air
  * is drawn; and at most one of `atmosphereComputing` and `atmosphereApproximate`, the first while a
- * gated bake runs (decision-r08-giant-label; the guide's draft rows).
+ * gated bake runs (decision-r08-giant-label; the guide's rows).
  */
 export type AtmosphereLabel =
   | "atmosphereNotResolved"
@@ -59,11 +58,11 @@ export type AtmosphereLabel =
   | "atmosphereComputing"
   | "atmosphereApproximate";
 
-/** Each label's statement on the label block, as the guide's draft rows spell them. */
+/** Each label's statement on the label block, as the guide's rows spell them. */
 export const ATMOSPHERE_STATEMENTS: Readonly<Record<AtmosphereLabel, string>> = {
   atmosphereNotResolved: "ATMOSPHERE: NOT RESOLVED",
   atmosphereNotYetModelled: "ATMOSPHERE: NOT YET MODELLED",
-  aerosolsNotYetModelled: "AEROSOLS: NOT YET MODELLED",
+  aerosolsNotYetModelled: "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
   atmospherePending: "ATMOSPHERE: PENDING",
   atmosphereComputing: "ATMOSPHERE: COMPUTING",
   atmosphereApproximate: "ATMOSPHERE: APPROXIMATE",

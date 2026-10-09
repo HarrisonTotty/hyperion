@@ -6459,6 +6459,14 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `VIEW`'s `TIME` would run so with nothing on the block saying so, the gap T16.k closes for
     kept scenes. The plan and the guide limit the line to kept scenes, so it is built as
     specified.
+  - **The reading after the sign-off** (2026-10-09; `signoff-ux-guide.md`, C1 and C2):
+    `sceneClockReading` reads `formatNumber(rate, 0)` with the unit `s/s` (`100 s/s`, `1000 s/s`,
+    `86,400 s/s`), a unit rate as `RUN 1 d/s` is, and `ViewLabelBlock`'s `UNBREAKABLE` keeps `s/s`
+    with its number, so the line never breaks inside `100 s/s`. The tests above follow, and
+    `ViewLabelBlock.test.tsx` gains the unbroken case. The block's height was not measured again.
+    By the faces' advance widths the line is about 187 px (`SCENE CLOCK` in B612 with its letter
+    spacing, the 0.5 rem gap, `100 s/s` in B612 Mono 64 px wide against `×100`'s 36 px), inside the
+    narrowest block's 208 px (232 px less its padding), so it stays one line, as `×100` was.
 - **Deviations in T16.i's follow-up, as built** (2026-10-07; the views lane;
   decision-r07-quality-and-destination, addendum D, D3 to D5).
   - **Files.** Those the bullet lists, and:

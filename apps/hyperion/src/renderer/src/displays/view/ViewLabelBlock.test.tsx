@@ -64,6 +64,19 @@ describe("the view's label block's line breaks (R07.T19.b)", () => {
     const runs = [...block().querySelectorAll(".view-label__run")].map((run) => run.textContent);
     expect(runs).toEqual(["UT +0 yr", "000/00:00:01", "1.00 km/s", "EV100 -1.0", "V 9.5 mag CAM"]);
   });
+
+  it("never breaks a kept scene's clock rate between its number and its unit, s/s", () => {
+    const { container } = render(
+      <ViewLabelBlock
+        lines={[{ label: "SCENE CLOCK", value: "86,400 s/s" }]}
+        statements={[]}
+        countLine={null}
+        fault={null}
+      />,
+    );
+    const runs = [...container.querySelectorAll(".view-label__run")].map((run) => run.textContent);
+    expect(runs).toEqual(["86,400 s/s"]);
+  });
 });
 
 describe("the view's label block's field (R06.T11.f)", () => {

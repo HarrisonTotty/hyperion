@@ -29,11 +29,11 @@ const PART_SEPARATOR = " · ";
  * with its first group (`UT +0 yr`), a star limit with its kind (`V 9.5 mag CAM`), an exposure
  * value with its band (`EV100 -1.0`), a direction with its elevation and any `FROM +X`
  * (`047° +12° FROM +X`, or `— -90°` at the vertical; R07.T19.f), a clock reading
- * (`000/00:00:01`) and a number with its sign and unit (`1.00 km/s`, `12,480 km`); a number with
- * a unit it touches (`60°`) has no break in it.
+ * (`000/00:00:01`) and a number with its sign and unit (`1.00 km/s`, `12,480 km`, `100 s/s`); a
+ * number with a unit it touches (`60°`) has no break in it.
  */
 const UNBREAKABLE =
-  /UT [+-]?\d[\d,.]* yr|V -?\d[\d.]* mag (?:EYE|CAM)|EV100 -?\d[\d.]*|(?:\d{3}°|—) [+-]\d{2,}°(?: FROM \+X)?|\d{3}\/\d{2}:\d{2}:\d{2}|[+-]?\d[\d,.]*(?:E[+-]?\d+)? (?:km\/s|m\/s|kyr|Myr|Gyr|yr|mag|AU|Gm|Mm|km|m|ly|s)(?![\w/])/g;
+  /UT [+-]?\d[\d,.]* yr|V -?\d[\d.]* mag (?:EYE|CAM)|EV100 -?\d[\d.]*|(?:\d{3}°|—) [+-]\d{2,}°(?: FROM \+X)?|\d{3}\/\d{2}:\d{2}:\d{2}|[+-]?\d[\d,.]*(?:E[+-]?\d+)? (?:km\/s|m\/s|s\/s|kyr|Myr|Gyr|yr|mag|AU|Gm|Mm|km|m|ly|s)(?![\w/])/g;
 
 /**
  * A text with each of its runs set on one line, so that it breaks only at the spaces between them

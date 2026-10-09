@@ -3355,6 +3355,14 @@ generator, and the reference's sampling needs no domain tag.
       - after a done computation, `COMPUTING` gives way to an `APPROXIMATE` that something else
         still holds;
       - the NH₄SH clause follows the clearing sentence, with its own clearing condition.
+    - Applied in `labels.ts` and its test on 2026-10-09 (the sign-off's C3).
+      `atmosphereApproximate`'s TSDoc gains its NH₄SH clause with R08.T5.b (C4), not here.
+    - _For R08.T10.b:_ the renamed note is about 424 px wide at 0.875rem, against the old one's
+      275 px (the UX review, from B612's advance widths). In the primary's narrowest block (208 px
+      inside its padding, both slots open at 1280 × 720) it takes about three lines. Measure it
+      with the block's other notes when `atmosphereStatements` is wired, beside the sign-off's own
+      item ("For later tasks"): kept-scene bodies left unset gain `ATMOSPHERE: NOT YET MODELLED`,
+      and there `PRECISION TEST` had 6 px to spare (R06.T11.f's table).
 - **Deviations in T5.a, as built** (2026-10-09; `view/atmosphere/mie.ts`, `mie.test.ts`). Wiscombe
   1980's structure as the task gives it, in double precision. What differs:
   - _Names beyond the sketch:_ `ComplexIndex` is `{ n, k }`, m = n + ik with k ≥ 0 absorbing,

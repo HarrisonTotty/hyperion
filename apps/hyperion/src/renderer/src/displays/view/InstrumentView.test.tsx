@@ -290,7 +290,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     view.advance(100);
     await openInstrument(view, "INSTRUMENT 1");
     expect(canvasNamed(/PRIMARY/)).toHaveAccessibleDescription(
-      expect.stringContaining("SCENE ECLIPSE TEST SCENE CLOCK ×100"),
+      expect.stringContaining("SCENE ECLIPSE TEST SCENE CLOCK 100 s/s"),
     );
     // The instrument's block is on show, with its own SOURCE line, and names no scene.
     const instrument = screen.getByRole("region", { name: "INSTRUMENT 1" });
