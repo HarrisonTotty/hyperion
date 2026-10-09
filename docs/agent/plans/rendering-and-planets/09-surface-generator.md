@@ -456,7 +456,8 @@ Interrupted}`. As built, nothing holds a `PersistedKnowledge` in `AppState` (P12
   R07.T1 asked of plan 14, now built (P14.T46): the record's `figure()` section holds a
   `BodyFigure` whose `spheroid()` is R05's `Spheroid`, so the datum is the spheroid from the start.
 - **Galaxy plan 14.** `BodyRecord` (its sections `bulk`, `figure`, `rotation`, `photometry`,
-  `surface` and `hooks` among them) and `Section`, `RecordSection` (twelve sections),
+  `surface` and `hooks` among them) and `Section`, `RecordSection` (twelve sections; thirteen once
+  P14.T48.e's gas-envelope split adds `Envelope`),
   `SystemContext`, the `body.surface` tag and P14.T23's `hooks::{surface_seed, SurfaceSeed,
 BodyHooks, BulkComposition}` with `PlanetarySystem::{surface_seed, hooks_at}`; P14.T13.c's
   `SurfaceState` (`GasEnvelope`, `MagmaOcean`, `Airless`, `RunawayGreenhouse`, `Temperate`,
@@ -1295,7 +1296,9 @@ differenced over the corners, through `math::atan2`), the quantiser, `coarse_pas
 as no-ops, and `reference::{earth_like, mars_like, moon_like, ceres_like}`. `for_body` reads the
 record's `bulk`, `figure`, `rotation` and `orbit` sections and the context's stars (Provides), and
 answers `NotModelled(RecordSection::Surface)` while `record::Surface` is uninhabited; a test pins
-that on a generated rocky body.
+that on a generated rocky body. `for_body` answers `NoSolidSurface` for a `NotApplicable` surface,
+from the tag alone. A test pins it on a generated gas giant, and whichever of this task and
+P14.T48.e lands second adds a generated sub-Neptune (decision-p14-t35e-wire).
 
 Tests: a no-op pass yields a valid field twice with identical bytes; solid angles sum to 2π ÷ 3 a
 face to 10⁻¹²; edge-neighbour lists are symmetric, every cell has four and a corner cell three
@@ -1487,7 +1490,8 @@ After T8, T17 and T18.
   walk), `SurfaceFieldDto` with its `NotModelled` arm, `CellRangeDto`, `CoverDto` and
   `MAX_SURVEY_RANGES` in `limits.rs`; the `survey_pass` handler recording through
   `SurveyLog::record`. An unknown body is `unknown_body` and one with no solid surface
-  `bad_request`, each naming `body` (a malformed index and an unresolved system as `body_detail`
+  (`for_body`'s `NoSolidSurface`, from the record's `NotApplicable` surface) `bad_request`, each
+  naming `body` (a malformed index and an unresolved system as `body_detail`
   refuses them, through `convert::planetary::body_refusal`, the body ID going through the sim's
   `resolve` as plan 04 requires); more than `MAX_SURVEY_RANGES` ranges is `bad_request` naming
   `cells`. As built, a new kind touches seven places: `RequestBody` and `ResponseBody`,
@@ -1607,8 +1611,13 @@ coarse goldens in that commit.
     before T24.e.
   - P14.T24.f (methane on cold worlds, abiotic O₂) is built first, so that T48.d's condensable on a
     Titan is methane and the gases `CoarseInputs` reads carry it.
-  - A gas-envelope body, a sub-Neptune included, has its surface section `NotApplicable` (T48.e's
-    test, amended), which `for_body` already answers as `NoSolidSurface`.
+  - A gas-envelope body, a sub-Neptune included, has its surface section `NotApplicable` from
+    P14.T48.e (decision-p14-t35e-wire). `for_body` maps the surface section's tag alone:
+    `NotApplicable` is `NoSolidSurface`, which `surface_field` and `survey_pass` refuse as
+    `bad_request` naming `body`, and `NotModelled` is `NotModelled(RecordSection::Surface)`. It
+    never decides from the class or a `PlanetClass` predicate; `has_surface` is gone, split into
+    `is_giant` and `has_solid_surface`. Before P14.T48.e a sub-Neptune's surface is `NotModelled`,
+    so it answers `NotModelled` as every body does then.
   - P14.T24.c's dust reads plan 14's own figures, never this plan's coarse wind field, so that no
     cycle runs through the coarse pass.
   - The wire, P14.T35.e, is not this plan's to read: the coarse pass reads the record on the

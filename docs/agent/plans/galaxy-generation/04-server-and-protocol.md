@@ -346,8 +346,16 @@ Each is a decision the brainstorm leaves open.
     behaviour the protocol crate gains.
 15. **`PROTOCOL_VERSION` goes to 2** although the change is additive, because a version 1 server
     cannot serve this client at all. From here on, adding a request kind or an optional field does
-    not bump it, since an older server answers `unsupported`; removing or changing one does. The
-    client compares the welcome's version with its own and shows `incompatible`.
+    not bump it, since an older server answers `unsupported`; removing or changing one does. A wire
+    type's shape is frozen from the first build that sends a value of it. Until then its task may
+    give it a shape, or reshape it, without a bump: filling an uninhabited section type, as
+    P14.T35.e fills `BodySurfaceDto`, adds an `ok` arm that no older server can produce and that an
+    older client passes through unread (decision-p14-t35e-wire), as `partial_response` was first
+    sent only to clients built to receive it. This holds because both readers ignore what they do
+    not know: no wire type is `deny_unknown_fields`, and the client's decoder trusts the generated
+    types while its adapters read named fields only. Making a wire type refuse unknown fields, or
+    adding a client check that refuses an unknown key, would end it, and so bumps. The client
+    compares the welcome's version with its own and shows `incompatible`.
 
 ### Universes
 

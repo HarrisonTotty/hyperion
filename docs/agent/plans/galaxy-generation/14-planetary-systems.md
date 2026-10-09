@@ -649,18 +649,31 @@ Order and parallelism:
      contract (T48.c also waits on R09.T7.a);
   4. T48.d, the climate regime classifier, which reads T24.a and T48.b; T24.b's ice fraction then
      reads it;
-  5. T48.e, the record's surface section, holding 1–4, from which R09's `for_body` reads;
+  5. T48.e, the record's surface section, holding 1–4, with the gas-envelope split (the envelope's
+     slot and the sub-Neptune's `NotApplicable` surface), from which R09's `for_body` reads;
   6. T35.e, the wire: the whole surface section and the envelope's shape, the members of 7–9
      absent until they land, from which R08 (thin atmospheres), R10's classifier and R11 read;
+     built directly after 5, since 5 sends an `Ok` surface as `not_modelled` until 6;
   7. T24.e, the vertical structure, which reads T24.a's T_s, p_s and gases and T48.d's
      condensable;
   8. T24.c, the aerosol and absorber inventory, which reads T24.e's profile, T24.f's gases and
      T24.a–b's figures;
   9. T24.d, the envelope's visible atmosphere, which needs only T11.d, T12 and T13 and may be
-     built beside any of 1–8; its member is on the wire once T35.e is.
+     built beside any of 1–8; its member is on the wire once T35.e is; built before 5, it brings
+     the split itself.
 
   Nothing in 1–9 reads R09's coarse field, which reads this section. 1–5 share T24's version
   bump; 6 changes the wire, not the output; 7, 8 and 9 each move output (Generator version).
+
+  _The bump plan_ (ruled by "main", 2026-10-09). Steps 1–5 (T24.f; T24.a with T48.e's contrasts;
+  T24.b with T48.a–c; T48.d; T48.e) and rendering plan R09's R09.T1.b (the detail seed in the
+  hooks section) form one `GENERATOR_VERSION` batch, 21 → 22, built serially in one lane. Each
+  task keeps `just ci` green on its own. A task whose output moves generated records before the
+  batch's last task holds the new figures off the record, or behind the batch's wiring, so that
+  the goldens move once, at the bump; a task that cannot says so to "main" before bumping. T35.e
+  follows T48.e directly in the same lane. Steps 7–9 (T24.e, T24.c, T24.d) each move output and
+  take their own bump, or are batched later as "main" decides. The deferred P11.T4.l and T4.m
+  batch (plan 11) takes the bump after this one.
 
 - **The vertical slice** (README, "The vertical slice to the `SYSTEM` display", ruling 33 of
   2026-09-22) builds the first working `SYSTEM` display before plans 09, 11 and 13 are complete.
@@ -2032,9 +2045,11 @@ parallelism"; Risks, "The rendering plans' asks of the surface section").
   so it may be built beside any of the others). `hooks/envelope_atmosphere.rs`:
   `EnvelopeAtmosphere`, for every body in `SurfaceState::GasEnvelope`: the giants, and every
   sub-Neptune, which is one by construction (`PlanetClass::of` and `derive::atmosphere` share
-  `THIN_ENVELOPE_FRACTION`). It is a section of its own, `envelope`, a thirteenth `RecordSection`
-  at `DetailLevel::Surface`, `NotApplicable` for every other body. A gas-envelope body's surface
-  section is `NotApplicable` (T48.e), so that exactly one of the two applies at any time.
+  `THIN_ENVELOPE_FRACTION`). It fills the record's `envelope` section, `RecordSection::Envelope` at
+  `DetailLevel::Surface`, which T48.e's gas-envelope split adds: `NotModelled` for every
+  gas-envelope body until this task, and `NotApplicable` for every other body. If this task is
+  built before T48.e, it builds the split itself (decision-p14-t35e-wire). A gas-envelope body's
+  surface section is `NotApplicable` (T48.e), so that exactly one of the two applies at any time.
   - T_int and T_irr: a giant's internal heat by ruling 112.7's split (the record's effective and
     equilibrium temperatures) and T12's flux. A sub-Neptune has no internal heat in the record
     today; the builder states one (its envelope's cooling, or none) and records it.
@@ -2065,7 +2080,8 @@ parallelism"; Risks, "The rendering plans' asks of the surface section").
     a rocky body's envelope is `NotApplicable`; the figures are continuous in time, and a body
     that loses its envelope changes section at its recorded state change.
   - _Files:_ `planetary/hooks/{envelope_atmosphere, mod}.rs`, `planetary/record.rs`
-    (`RecordSection::Envelope`, `degrade`).
+    (`record::Envelope`'s contents; the slot and `degrade` are the split's), and
+    `crates/hyperion-server/src/convert/planetary.rs` if built after T35.e.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::envelope_atmosphere` and
     `cargo test -p hyperion-sim planetary::record`.
 
@@ -2550,32 +2566,76 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
     and T_irr, the Guillot profile's parameters with the adiabat's β and join pressure, the
     composition as `{ species, mole_fraction }`, the decks as T24.c's modes, and the haze τ. It is
     `not_applicable` for every body not in the gas-envelope state, whose surface section is the
-    applicable one; a giant's and a sub-Neptune's surface is `not_applicable`.
+    applicable one; a giant's and a sub-Neptune's surface is `not_applicable`. The server always
+    sends it, from the record's `envelope` section (T48.e's gas-envelope split): `not_modelled` for
+    a gas-envelope body until T24.d, and `not_applicable` for every other body. It is optional only
+    so that an older server's record, which lacks it, still reads.
   - Every member is declared here. Those of T24.c, T24.e and T24.d, built after this subtask, are
     absent until their task lands, by T34's rule for a value a modelled section does not yet
     compute, which R08 reads as not modelled; each of those tasks fills its member in the server's
     conversion, so no later task changes the wire's shape (T35.b's slice gave `BodyKindDto` every
     variant from the start for the same reason).
-  - `PROTOCOL_VERSION`: whether filling the uninhabited type is the change that plan 04's Design
-    note 15 bumps ("removing or changing one does") is coordinated through "main". The lean is no
-    bump: the field stays, an older server never sends `ok`, and an older client, whose type is
-    `never`, passes an `ok` value through unread (`lib/system/bodiesWire.ts` and
-    `displays/system/BodyRecordReadings.tsx` as built). `envelope` is optional, so it is additive.
+  - `PROTOCOL_VERSION` stays 2 (decision-p14-t35e-wire). Filling the uninhabited `BodySurfaceDto` is
+    not a change under plan 04's Design note 15: no build ever sent an `ok` surface, which was
+    unrepresentable, so the first build that sends one sets its shape, and `not_resolved`,
+    `not_modelled` and `not_applicable` keep their bytes and meanings. An older server never sends
+    `ok`. An older client passes it through unread and shows no `SURFACE` row
+    (`lib/system/bodiesWire.ts`, `displays/system/BodyRecordReadings.tsx` as built), as it shows no
+    `ROTATION`; until this subtask, no client code gives meaning to an `ok` surface. `envelope` is
+    an optional field, read absent as `not_modelled`. The reasoning holds because both readers
+    ignore what they do not know: serde ignores an unknown field (no wire type is
+    `deny_unknown_fields`), and the client's decoder trusts the generated types while its adapters
+    read named fields. `PROTOCOL_VERSION`'s doc comment in `crates/hyperion-protocol/src/lib.rs`
+    gains a sentence saying so.
+  - A surface member whose task lands after this subtask is a `Modelled<T>` field
+    (`crates/hyperion-protocol/src/modelled.rs`: absent is not modelled, `null` is computed and
+    none, otherwise the value). Today that is T24.e's `vertical_structure` and T24.c's `aerosols`.
+    The envelope's members are plain fields, since the whole section is `not_modelled` until T24.d.
+    A body with no internal heat, which T24.d states, has a T_int of 0 K, not an absent member. Each
+    closed enum declared here carries every variant the drafted tasks name. A task may reshape its
+    own member's type without a bump while no build has sent a value of it, and records the
+    deviation. Once a build has sent a value, a change bumps.
   - The client reads the section in `lib/system/bodiesWire.ts`, checking the fractions and ranges
     as it checks the photometry. The `SYSTEM` readout's rows of an `ok` section are T43.b's.
-  - _Tests:_ the wire form of an Earth (`ok` surface, `not_applicable` envelope), a Venus (`ok`
-    surface) and a Jupiter (`not_applicable` surface, `ok` envelope), and a surface
-    `not_resolved` and `not_modelled`, one test per section state, in `hyperion-protocol`'s
-    `planetary/record.rs`; the shared fixture `packages/protocol/fixtures/planetary.json` gains the
-    Earth's surface and the Jupiter's envelope, which the TypeScript decode test reads; `gases`
-    sums to 1 to 10⁻⁹ and descends; a `mass_and_orbit` record carries neither section; every
-    quantity's name carries its unit.
+    `model.ts`'s `surface` becomes `Section<BodySurface>`, and the record gains
+    `envelope: Section<BodyEnvelope>` through `toOptionalSection`. T43.b as built gives an `ok`
+    surface no rows (`sectionRows("SURFACE", whole.surface, () => null)` in
+    `BodyRecordReadings.tsx`), so its amendment (T43.b's _Amended for T35.e_) lands with this
+    subtask or directly after it (decision-p14-t35e-wire, finding F2).
+  - _Tests:_ in `hyperion-protocol`'s `planetary/record.rs`, one wire-form test per section state of
+    each section: an Earth (`ok` surface, `not_applicable` envelope), a Venus (`ok` surface), a
+    Jupiter and a sub-Neptune (`not_applicable` surface, `ok` envelope), a surface `not_resolved`
+    and `not_modelled`, and an envelope `not_modelled` and `not_resolved`. The three non-`ok` states
+    keep today's bytes, and these tests replace `a_surface_section_cannot_claim_a_value_yet`.
+    Compatibility is pinned on both sides (decision-p14-t35e-wire):
+    - a record with no `envelope` key, an older server's, reads `envelope: None` in Rust and
+      `not_modelled` in `bodiesWire.ts`, and `None` is written with no key;
+    - a record with an unknown key, and an `ok` surface with an unknown member, decode in Rust and
+      pass `toBodyDetail` without a fault;
+    - each `Modelled` member round-trips absent, `null` and a value, and the server sends T24.c's
+      and T24.e's absent until their tasks land;
+    - `assert_wire_strings` pins every closed enum declared here, with every variant;
+    - `PROTOCOL_VERSION` is 2 (`lib.rs`'s test, kept), and `just gen-protocol-check` leaves
+      `ProtocolVersion.ts` unchanged.
+
+    A `bulk`-level and a `mass_and_orbit` record carry both sections `not_resolved`, a rocky body's
+    envelope included, and no key of either value. `gases` sums to 1 to 10⁻⁹ and descends, and
+    every quantity's name carries its unit. The shared fixture
+    `packages/protocol/fixtures/planetary.json` gains the Earth's surface and the Jupiter's
+    envelope, which the TypeScript decode test reads, and keeps one record as an older server wrote
+    it, with no `envelope` key. In `crates/hyperion-server/src/convert/planetary.rs`, over the
+    golden systems at `full`:
+    - every present planet has exactly one of the two sections other than `not_applicable`;
+    - a sub-Neptune's and a giant's surface is `not_applicable`;
+    - T48.e's stopgap (an `Ok` surface sent as `not_modelled`) is gone.
+
   - _Files:_ `crates/hyperion-protocol/src/planetary/record.rs`,
+    `crates/hyperion-protocol/src/lib.rs` (the doc comment),
     `crates/hyperion-server/src/convert/planetary.rs`, `packages/protocol/fixtures/planetary.json`,
-    the generated bindings (`just gen-protocol`) and
-    `apps/hyperion/src/renderer/src/lib/system/bodiesWire.ts`.
-  - _Accept:_ `cargo test -p hyperion-protocol`; `just gen-protocol-check`;
-    `pnpm --filter hyperion exec vitest run src/renderer/src/lib/system`.
+    `packages/protocol/src/planetary.test.ts`, the generated bindings (`just gen-protocol`) and
+    `apps/hyperion/src/renderer/src/lib/system/{bodiesWire.ts, model.ts, bodiesWire.test.ts}`.
+  - _Accept:_ `cargo test -p hyperion-protocol`; `cargo test -p hyperion-server convert`;
+    `just gen-protocol-check`; `pnpm --filter hyperion exec vitest run src/renderer/src/lib/system`.
 
 #### P14.T36 Server handlers
 
@@ -3024,6 +3084,13 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
   white dwarf and in km for a neutron star or a black hole (ruling 36, point 5), and each zone that
   holds a host with both habitable-zone pairs (`HABITABLE ZONE` and `OPTIMISTIC`, ruling 65.4), with the guide's em dash for
   what plan 06 does not model yet (variability, rotation, activity, spins, kicks, binary class).
+  - _Amended for T35.e_ (decision-p14-t35e-wire, finding F2; adopted 2026-10-09). As built, an
+    `ok` surface section renders no rows (`sectionRows("SURFACE", whole.surface, () => null)` in
+    `BodyRecordReadings.tsx`), which holds while no build sends one. From T35.e on it would leave
+    the current client without a `SURFACE` row for a modelled world, so this amendment lands with
+    T35.e or directly after it: the rows of an `ok` surface section, the surface state, the mean
+    surface temperature, the pressure and the gases, in the guide's units. It is built with the
+    console-ux skill and a UX review, which settle its rows.
 - **P14.T43.c Events.** A list of the body events of the century around the display time, from a
   `body_events` request, each with its time in the chart's time system and a countdown in the
   guide's `T-` form.
@@ -3801,12 +3868,40 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   and absorber inventory, when they land. A body in the gas-envelope state, a giant or a
   sub-Neptune, has its surface section `NotApplicable` and its figures in T24.d's `envelope`
   section, so that no surface section is `Ok` with no surface behind it (as built a sub-Neptune's
-  is `NotModelled`, by `PlanetClass::has_surface`, which stays as it is for the class's tides).
+  is `NotModelled`, by `PlanetClass::has_surface`).
+  _The gas-envelope split_ (decision-p14-t35e-wire):
+  - `PlanetClass::has_surface` goes, since it answered two questions that part at a sub-Neptune.
+  - `PlanetClass::is_giant` (`IceGiant`, `GasGiant`) takes the readers that concern a body's
+    mechanics, the tides (`tides`, `SpinningBody::of_class`) and the spin family (`SpinFamily::of`),
+    so nothing of them moves.
+  - `PlanetClass::has_solid_surface` (`Rocky`, `Icy`) takes the record's reader, and `Datum::of` is
+    written with it.
+  - A body without a solid surface, which by the shared envelope fraction and
+    `THIN_ENVELOPE_FRACTION` is exactly one in `SurfaceState::GasEnvelope`, has its surface section
+    `NotApplicable`.
+  - The record gains the `envelope` section, `RecordSection::Envelope` at `DetailLevel::Surface`, the
+    thirteenth. It is `NotModelled` for such a body until T24.d fills `record::Envelope`, which is
+    uninhabited until then, and `NotApplicable` for every other body. From here on, exactly one of
+    the two sections applies to a present body with a bulk section.
+  - Nothing outside the record decides from the class whether a body has a surface. R09's
+    `for_body` reads the tag.
+  - Until T35.e, which follows this subtask directly, `convert/planetary.rs` sends an `Ok` surface
+    as `not_modelled`, since the wire has no form for it yet. It is one line, which T35.e replaces.
+  - If T24.d is built first, T24.d builds the split, and this subtask finds it done.
   - _Tests:_ a 90°-obliquity world's equator–pole contrast is negative; a locked airless body's
     day–night contrast exceeds 300 K and Venus's is under 10 K (T24.a's, kept); every present rocky
     body's surface section is `Ok` from `DetailLevel::Surface`, and a gas-envelope body's, a
-    giant's or a sub-Neptune's, `NotApplicable`.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`.
+    giant's or a sub-Neptune's, `NotApplicable`. `is_giant()` equals the old `!has_surface()` for
+    every class, and `has_solid_surface()` holds exactly when `Datum::of` is `SolidSurface`. On the
+    golden systems: a present planet's surface is `Ok` iff `has_solid_surface()`; no `Ok` surface
+    has the state `GasEnvelope`; its envelope is `NotModelled` iff it has no solid surface and
+    `NotApplicable` otherwise; and `degrade` withholds the envelope below `Surface`.
+  - _Files:_ `planetary/hooks/surface.rs`, `planetary/record.rs`,
+    `planetary/derive/{mod, rotation, figure}.rs`, `planetary/system/tests.rs` and
+    `crates/hyperion-server/src/convert/planetary.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`;
+    `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-sim planetary::derive`;
+    `cargo test -p hyperion-server convert`.
 
 #### Open questions of Phase K, for the owner (R09's leans)
 
@@ -3896,11 +3991,12 @@ it:
 - Drafted for the owner (R08.T1 and R09.T0.a, 2026-10-09): P14.T24.a–f and T48.a–e fill the
   record's surface section and add an `envelope` section, and every one moves output. T24.f moves
   the existing goldens (a cold body's carbon becomes methane, a runaway world gains O₂); the rest
-  fill sections the goldens hold as `NotModelled`, and T48.e turns a sub-Neptune's surface to
-  `NotApplicable`. T24.f, T24.a–b and T48.a–e take one bump, T24's; T24.e, T24.c and T24.d take
-  one each, or one between them if built together; each is coordinated through "main". None adds
-  a draw or a domain tag as drafted. P14.T35.e changes the wire, not the output (its own
-  `PROTOCOL_VERSION` question).
+  fill sections the goldens hold as `NotModelled`, and T48.e's gas-envelope split turns a
+  sub-Neptune's surface to `NotApplicable` and adds each planet's `envelope` section (its renaming
+  of `has_surface` moves nothing). T24.f, T24.a–b and T48.a–e take one bump, T24's; T24.e, T24.c
+  and T24.d take one each, or one between them if built together; each is coordinated through
+  "main". None adds a draw or a domain tag as drafted. P14.T35.e changes the wire, not the output,
+  and leaves `PROTOCOL_VERSION` at 2 (decision-p14-t35e-wire).
 - P14.T47.e (Earth after Robinson 2026) took version 21 in the 20 → 21 bump with P11.T4.h and
   plan 11's protostar and build-age fix (decision-r07-earth-albedo), and with P11.T4.i–k. Its
   goldens were blessed at 20 until that bump, which only flipped the version (Phase J lane,
@@ -4853,7 +4949,10 @@ IceGiant, GasGiant }`, in `derive`, with its thresholds in `params.rs`: an envel
     (`GAS_GIANT_ENVELOPE_FRACTION`); without one, water from 10% (`ICY_WATER_FRACTION`) is icy.
     `has_surface()` is false for the two giants only, so a sub-Neptune's surface is T13.c's "gas
     envelope" state. T15's moon limit takes T14.b's k₂ and Q (0.3 and 100 for classes with a
-    surface, 0.4 and 10⁵ for giants), also in `params.rs`.
+    surface, 0.4 and 10⁵ for giants), also in `params.rs`. _Superseded for the record by
+    P14.T48.e's gas-envelope split (decision-p14-t35e-wire): `is_giant()` keeps the tides and spin
+    family as they are, and `has_solid_surface()`, false for a sub-Neptune, sets the record's
+    surface section._
   - _T16.a, the Solar System_, each planet at the rank that keeps its radius, about the present
     Sun (1 L☉) in the zero-age Sun's disc (snow line 2.26 au) at 4.57 Gyr: core mass fractions
     Mercury 0.708, Venus 0.288, Earth 0.323, Mars 0.216; envelopes Saturn 71.4% (9.145 R⊕ against
@@ -7233,11 +7332,21 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
      enum and no rule produces it.
   3. **A sub-Neptune's sections.** T48.e as reconciled makes a sub-Neptune's surface
      `NotApplicable`, a change from the as-built `NotModelled`. Lean: accept, since nothing can
-     stand on it, and R09's `for_body` already answers `NoSolidSurface`.
-  4. **`PROTOCOL_VERSION` for T35.e.** Lean: no bump (T35.e's reasons); for "main".
+     stand on it, and R09's `for_body` already answers `NoSolidSurface`. **Decided**
+     (decision-p14-t35e-wire): accepted. Within the model a sub-Neptune has no surface (no surface
+     pressure, the 1-bar datum, an envelope base at kilobars). `has_surface` is split into
+     `is_giant` and `has_solid_surface`, and the record gains the `envelope` slot, both in T48.e.
+     R09's `for_body` reads the tag.
+  4. **`PROTOCOL_VERSION` for T35.e.** Lean: no bump (T35.e's reasons); for "main". **Decided**
+     (decision-p14-t35e-wire): no bump. A shape is frozen from the first build that sends a value
+     of it. T35.e pins the premises on both sides.
   5. **The envelope's species and heat.** H₂S and H₂O are T24.d's own species, outside T13's
      `Gas`, and a sub-Neptune has no internal heat in the record. Lean: as drafted, the builder
      stating the heat.
+
+- **A sub-Neptune's tides** (decision-p14-t35e-wire, not ruled). `is_giant()` keeps a rocky body's
+  k₂ 0.3 and Q 100 for a sub-Neptune, as built. Whether its fluid envelope makes them a giant's is a
+  physics question for the owner, with a bump of its own if taken.
 
 - **This plan's Venus at 58 bar against the real 92 (R08).** T13.c's grey fit gives Venus 735 K at
   58 bar, 37% under the real surface pressure. R08 gates both: its Venus-class fixture uses the

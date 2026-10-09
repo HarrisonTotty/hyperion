@@ -1093,12 +1093,10 @@ Names are those the owning plans give; the owning plan is authoritative.
     - `ATMOSPHERE: NOT YET MODELLED` while the surface section is `not_modelled`, which is every
       generated body until P14.T24.a's figures are on the wire (R08.T1's P14.T35.e). No
       atmosphere is drawn. A body whose atmosphere is a gas envelope takes it from its envelope
-      instead: a giant, whose surface section is `not_applicable`, while its `envelope` section
-      (P14.T24.d, on the wire by P14.T35.e) is absent, which reads `not_modelled`; a sub-Neptune
-      likewise, whose surface section R08.T1's reconciliation also makes `not_applicable` (a lean
-      open with "main"; were the section kept, while it states a gas envelope without the
-      envelope's figures). A kept scene's body with no atmosphere set shows it too
-      (decision-r08-giant-label).
+      instead: a giant or a sub-Neptune, whose surface section is `not_applicable`, while its
+      `envelope` section (P14.T24.d, on the wire by P14.T35.e) is `not_modelled` or absent
+      (decision-p14-t35e-wire; a sub-Neptune's surface from P14.T48.e). A kept scene's body with no
+      atmosphere set shows it too (decision-r08-giant-label).
     - `AEROSOLS: NOT YET MODELLED` while plan 14 publishes no aerosol or absorber inventory. It
       covers the absorbers too: ozone and methane are drawn only from the inventory.
     - `ATMOSPHERE: PENDING` from a body's `body_detail` request until its reply is drawn. No
@@ -1980,6 +1978,8 @@ Tests (T10.a):
 - an absent inventory gives no aerosol term and `aerosolsNotYetModelled`;
 - a giant's record (surface `not_applicable`, no envelope) gives no medium and
   `atmosphereNotYetModelled`;
+- a sub-Neptune's record (surface `not_applicable`, envelope `not_modelled`) gives no medium and
+  `atmosphereNotYetModelled`, as a giant's does;
 - an airless body gives no medium and no label;
 - a body whose request is in flight gives `atmospherePending`, and none on a re-request while its
   previous state is drawn;
@@ -2521,7 +2521,9 @@ generator, and the reference's sampling needs no domain tag.
     sub-Neptune's metallicity, Sudarsky's class temperatures and Venus's trace of O₂.
   - _For "main", each with its lean:_ whether P14.T35.e bumps `PROTOCOL_VERSION` (lean: no, since
     an older client passes an `ok` surface through unread); a sub-Neptune's surface section turned
-    `not_applicable` (lean: accept); a sulphur rule for a Venus deck (lean: a science agent drafts
+    `not_applicable` (lean: accept). **Decided** (decision-p14-t35e-wire): no bump, and the
+    `not_applicable` sub-Neptune accepted, with `has_surface` split and the `envelope` slot added
+    in P14.T48.e. The third asks for a sulphur rule for a Venus deck (lean: a science agent drafts
     it before P14.T24.c).
 - **Re-validated at bce2aef5** (2026-10-09, RM4's start: `rendering-and-planets` is `main` at
   3e3dbb80, R01–R07 merged by PR #3, plus R13's plan; `GENERATOR_VERSION` 21, `PROTOCOL_VERSION`
