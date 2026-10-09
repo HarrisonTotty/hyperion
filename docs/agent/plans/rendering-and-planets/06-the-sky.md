@@ -2457,7 +2457,14 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     the least `complete_to_ly` over the layers not yet final (the sim's `least_edge()`, a fixed
     shell edge), in the guide's digit grouping (`2000 ly`, `16,000 ly`) in a field sized for the
     largest edge. It is steady, in `--text`, with no status colour, and clears by itself when the
-    final reply is held. Each instrument's block carries its own (`InstrumentView`).
+    final reply is held. It stands on the `PRIMARY` view's block alone, since the display's views
+    draw one sky (the instruments cull the primary's); an instrument's line is its own limit and
+    the not-modelled note, `STARS V 10.0 mag CAM · CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`, in
+    every state but pending. While an instrument is open, in either layout, the primary's line is
+    its limit and one note: the stars-arriving note while the held reply is not final, else the
+    not-modelled note, which it gives up only while an open instrument's line shows it. With none
+    open it carries both. So no block's line has more lines than its final reading
+    (decision-r06-t11f-stars-line).
   - **Before the first reply** the line reads `STARS: PENDING`, as `LIGHTING: PENDING` does, in
     place of R02's interim reading, including after a jump. `useSky`'s `pending` (true until the
     request's first reply is held, since T11.d) says when.
@@ -2469,11 +2476,19 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   - **The guide rows** (`docs/frontend/ux-guidelines.md`, the `STARS` row and a `STREAMING` and
     `PENDING` entry beside `TERRAIN: STREAMING`) are drafted here and go to the UX decision agent
     for the owner's sign-off, as T15's rows did. Build to the draft.
-  - Tests: the line's readings (pending, streaming at each fixed edge, final, with and without the
-    not-modelled note, stale) and the label block's line in `ViewDisplay` and an instrument's.
-    Pending by hand for the owner: whether the composed line fits the label block at 1280 × 720 and
-    in the instrument slots, in the running client. R07.T19.f was editing `ViewLabelBlock.tsx` and
-    `CameraControls.tsx` when this was split: merge it first.
+  - Tests (decision-r06-t11f-stars-line, 1e). `label.ts`: every reading, pending, the note at each
+    fixed edge with its grouping and its 12ch field, the primary's composition with no instrument
+    open and with one open, an instrument's, final and stale. `displays/view`: in `ViewDisplay`,
+    the primary's line with none, one and two instruments open, before and after the final reply;
+    each instrument's limit and not-modelled note throughout, and `STARS: PENDING` on every block;
+    the guard, the primary keeping the not-modelled note while no open instrument's line shows it.
+    By hand, hidden, never on `:0`, with the lane's `page/run.sh` (capped, through the GPU lock): at
+    1280 × 720, none, one and two instruments, `PRECISION TEST` and `PHASE TEST`, wireframe and
+    photorealistic; at 1920 × 1080 and at the full layout's least box (98.5 × 45.75rem), two
+    instruments; in each, every block's line in each state as composed, passing when no block runs
+    past the stage and nothing overflows, each block's spare recorded beside the final's; and a
+    server-scene capture, if the harness can reach one. R07.T19.f was editing `ViewLabelBlock.tsx`
+    and `CameraControls.tsx` when this was split: merge it first.
   - Acceptance: the client's tests of `view/sky` and `displays/view`
     (`pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`),
     the UX review, and `just ci`.
@@ -7944,6 +7959,105 @@ CensusCost)`.
     entry, R03's pointer, the jobs of seconds and the job-counted bound recorded) and its considers
     (the visibility rule's test; the bench run with `--test`), but a test that a cancelled census
     keeps its cells, recorded above.
+- **Ruled (decision-r06-t11f-stars-line).**
+  - At the primary's least block two notes never fit (66 px over at 1280 × 720 with two
+    instruments, photorealistic). So the stars-arriving note stands on the primary alone, and the
+    primary holds one note while an instrument is open. The instruments keep
+    `L · NOT YET MODELLED`.
+  - Stated exception, for the owner: the primary's line gives up `NOT YET MODELLED` while the note
+    stands and an instrument is open.
+  - The lone `·` is a views-lane follow-up.
+- **Deviations in T11.f, as built (2026-10-09).** The stars-arriving note and `STARS: PENDING`, to
+  the ruling's 1d. No golden, protocol or generator change; client only.
+  - **The line** (`view/sky/label.ts`). `skyLabelValue(limitV, kind, gaps, notes)` takes
+    `SkyLineNotes`: the line's place (`SkyLinePlace`, `alone`, `beside`, `beside-unshown` or
+    `instrument`) and the edge reached. `skyLineNotes` composes the notes as a `SkyNote` union, the
+    annunciation first and the not-modelled note last, so that R13.T2.b's interim note goes
+    between them. `alone` holds every note; `beside` the first that holds; `beside-unshown` (the
+    guard) the not-modelled note, else the annunciation; `instrument` the not-modelled note alone.
+    `streamingEdgeLy(response)` is the least `complete_to_ly` over the layers not final, `null` for
+    a final reply (and for one whose every layer is final, which the server never sends).
+    `skyEdgeReading` writes the edge with `formatNumber` (`2000 ly`, `16,000 ly`, as ruled).
+    `SKY_EDGE_FIELD_CH` is 12, the length of `128,000 ly S`; `SKY_PENDING` is `PENDING`.
+  - **The place** (`useViewSky.ts`). `ViewSky.labelValue` becomes `label(place)`, with `awaiting`
+    (asked, and no reply of this arrival held). `primarySkyPlace(slots)` is `beside` only while an
+    open instrument has drawn (`shown`) and culled the sky (`skyLabel`), so that its line shows
+    the not-modelled note; an open slot not yet laid out, whose line is still R02's, gives
+    `beside-unshown`. An instrument whose canvas the engine refused still shows its block and its
+    cull's line, so the primary gives the note up beside it. `useSlotSky` asks for `instrument`.
+  - **The field** (`viewRun.ts`'s `LabelField`, `LabelLine.field`; `ViewLabelBlock`'s
+    `FieldRun`). The edge is a run in `.view-label__field`: inline-block, right-aligned, at a
+    `min-width` of 12ch set inline from `SKY_EDGE_FIELD_CH`. While the sky's model is stale the
+    edge alone is muted with its `S` inside the field; the reading is not marked stale. A line
+    whose one note is the not-modelled note carries no field.
+  - **`PENDING`** stands in R02's interim reading's place on the primary's line and on every open
+    instrument's (`InstrumentView`'s `skyAwaiting`) from the request until its first reply, after
+    a jump too. A re-ask in the same arrival keeps the held reply's line. After a failed request,
+    `useSky`'s `pending` clears and the line returns to R02's reading (unchanged, not T11.f's).
+    The interim field's count line still stands beside `PENDING` while the interim stars are
+    drawn, as it did beside R02's reading (it stands while no sky is drawn).
+  - **Tests.** `label.test.ts` 23: the limits, the gaps, `PENDING`, the note at each fixed edge
+    from 500 to 128,000 ly with its grouping, the field's 12ch, the composition at each place, the
+    final, and `streamingEdgeLy`. `useViewSky.test.tsx` 19: `PENDING` on every place, the field
+    while not final and none once final, the field given up at `beside-unshown`, the edge stale on
+    link loss with the note held, and `primarySkyPlace`'s three places. `ViewLabelBlock.test.tsx`:
+    the field's width and run, and the edge stale alone. `InstrumentView.test.tsx`, in the server
+    scene: `PENDING` on all three blocks; the primary's line with none, one and two instruments
+    open before and after the final reply, each instrument's `L · N` throughout; the edge muted
+    alone on link loss, its `S` inside the field; and the guard (an open slot not yet laid out).
+    Two `ViewDisplay.test.tsx` tests now read `PENDING` before the first reply, where they read
+    R02's reading.
+  - **Measured by hand, hidden** (2026-10-09; `.git/rm23-scratch/r06-client/t11f/page/`,
+    `run-ruled.sh` and `hook-ruled.js`: an offscreen window, capped, through the GPU lock, no
+    session bus; logs `run-ruled-{w720,w1080,least}.log` and their `ruled-*` PNGs). The readings
+    are set into kept scenes' `STARS` lines in the block's own markup, the primary's and the
+    instruments' apart as composed, at the worst limit (`V 10.0 mag CAM`) and edge
+    (`128,000 ly S`). Every state fits: no block runs past the stage, nothing overflows across.
+    The primary's spare at 1280 × 720 compact, px (the instruments' lines are the final's
+    throughout; with two open the slots' gap is 16.8 px in `PRECISION TEST`, 8.8 px over the
+    inset, and 58.4 px in `PHASE TEST`):
+
+    | Scene, style                     | None open: final / streaming | One open: final / streaming | Two open: final / streaming |
+    | -------------------------------- | ---------------------------- | --------------------------- | --------------------------- |
+    | `PRECISION TEST`, wireframe      | 266 / 248                    | 122 / 122                   | 122 / 122                   |
+    | `PRECISION TEST`, photorealistic | 204 / 186                    | 6 / 6                       | 6 / 6                       |
+    | `PHASE TEST`, wireframe          | 266 / 248                    | 104 / 104                   | 104 / 104                   |
+    | `PHASE TEST`, photorealistic     | 226 / 208                    | 46 / 46                     | 46 / 46                     |
+
+    With two open and the primary `FREE`, 64 px (`PRECISION TEST`) and 104 px (`PHASE TEST`),
+    final and streaming alike. With none open the streaming line takes two lines against the
+    final's one; with an instrument open it takes the final's four. `PENDING` is one line
+    everywhere. At 1920 × 1080 (full) with two open the primary has 546–626 px spare (final two
+    lines, streaming one). At the full layout's least box (a 1608 × 890 window, `.view`
+    98.5 × 45.75rem) with two open it has 140–346 px (final six lines, streaming five). There the
+    limit's `·` stands on a line of its own in the final reading and the streaming one alike, as
+    the ruling's 3 has it: the follow-up's, not fixed here.
+
+  - **Not measured.** A server-scene capture: the harness reaches only the kept scenes, and a
+    served sky needs a running server and an open universe, not started beside the integration
+    CI. The kept scenes' injected readings stand in, and the ruled form fits by construction.
+  - **The guide's drafts** (`docs/frontend/ux-guidelines.md`, for the owner). The ruling's 4
+    verbatim: the star-limit bullet in "Views" with the stated exception, the `STARS` row, a new
+    `BEYOND <edge> ly: STREAMING`, `STARS: PENDING` row after `TERRAIN: STREAMING`, and the
+    `CLUSTERS` row's sentence. One more, beyond the ruling's text (UX review), so that the guide
+    does not contradict itself: the `STARS: RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION` row,
+    "withdrawn once the sky has arrived", gains that `STARS: PENDING` stands in its place from the
+    request until the first reply while the interim field is still drawn under its count line.
+  - **Gates** (capped, `CPUQuota=400%`, 4 vitest workers): vitest over `view/sky` and
+    `displays/view`, 718 passed; `pnpm typecheck` from a clean tsc cache; `pnpm lint` (oxlint
+    `--type-aware --deny-warnings`); Prettier. Not run: `just ci` (the orchestrator's).
+  - **Reviews.** TypeScript: no must-fix; its should-fixes applied (a display-level test of the
+    stale edge in its field, `FieldRunProps`, and the `STARS` lines found by role through shared
+    harness helpers, `primaryLabelBlock`, `starsOutput` and `starsReading`) and its considers
+    (`SkyLineStanding` for the line's place and edge; the `PENDING` wording test renamed). UX: no
+    must-fix; the drafts match the ruling's 4 word for word. Its should-fix on the interim source
+    row applied as the draft above. Its other should-fix is left for the orchestrator: the
+    star-limit bullet's text (the ruling's, verbatim) does not state the guard, under which the
+    primary's one note is the not-modelled note and `STREAMING` stands on no line. The guard
+    holds only until an open slot is first laid out; an instrument whose canvas the engine
+    refuses still shows its cull's line (a trial of the display test with a refused canvas, not
+    kept). Its consider not applied, deferred as polish: with the `S` inside the right-aligned
+    field, the edge's digits move two characters left while stale; the line itself does not move.
 - **R06.T5.f's measurements, as built (2026-10-07, generator version 21; `decision-r06-t9b-band.md`,
   item 8).** The tables against the realised sky, as the task sets it out: a record that gates only
   its own sample. Seed 0x0926_0000 (the fixture), at the epoch, on the shipped tables (T5.d's
