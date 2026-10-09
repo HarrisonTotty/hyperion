@@ -106,7 +106,7 @@ import {
   viewProvenance,
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
-import { type DrawnSky, useViewSky } from "./useViewSky";
+import { type DrawnSky, primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
 import { QUALITY_NAMES, type QualitySetting } from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
@@ -1123,6 +1123,9 @@ function ViewStage({
     viewSky.pending,
   );
   const litLabels = litLabelsOf(shown.run.scene);
+  // The primary's STARS line, whose notes depend on the instruments open beside it
+  // (decision-r06-t11f-stars-line): the sky's annunciations stand on it alone.
+  const skyLine = viewSky.label(primarySkyPlace(instruments.slots));
   const stale = server?.stale === true;
   // The meter's control stands beside a drawn photorealistic image only, and the primary's block
   // states the meter while it does (decision-r07-t19-layout, item 1b).
@@ -1329,7 +1332,7 @@ function ViewStage({
                   withMeterLine(
                     withQualityLine(
                       withDrawnStyle(
-                        withSkyLine(labelLines(shown.run, exposure, stale), viewSky.labelValue),
+                        withSkyLine(labelLines(shown.run, exposure, stale), skyLine),
                         shown.drawnStyle,
                       ),
                       setting,
@@ -1339,7 +1342,7 @@ function ViewStage({
                   placeLines(place, stale),
                 )}
                 statements={primaryStatements}
-                countLine={viewSky.labelValue === null ? countLine : null}
+                countLine={viewSky.drawn === null ? countLine : null}
                 fault={fault}
               />
               <div className="view-instruments">
@@ -1354,6 +1357,7 @@ function ViewStage({
                       lighting={lighting}
                       litLabels={litLabels}
                       primaryPhotorealStatements={primaryPhotoreal}
+                      skyAwaiting={viewSky.awaiting}
                       fault={slotFault}
                       legendId={legendId}
                       onKeyDown={(event) => {
@@ -1578,14 +1582,17 @@ function withQualityLine(
   );
 }
 
-/** The label block's lines with the sky's `STARS` reading in place of R02's, once it has arrived. */
+/**
+ * The label block's lines with the sky's `STARS` reading in place of R02's, once the sky is asked:
+ * `PENDING`, then the held reply's, with the edge's field while its note stands.
+ */
 function withSkyLine(
   lines: ReadonlyArray<LabelLine>,
-  skyValue: string | null,
+  sky: SkyLineReading | null,
 ): ReadonlyArray<LabelLine> {
-  return skyValue === null
+  return sky === null
     ? lines
-    : lines.map((line) => (line.label === "STARS" ? { ...line, value: skyValue } : line));
+    : lines.map((line) => (line.label === "STARS" ? { ...line, ...sky } : line));
 }
 
 /**

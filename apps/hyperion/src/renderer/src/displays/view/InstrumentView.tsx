@@ -9,6 +9,7 @@ import type { LightingState } from "../../view/lighting/hostLights";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import { styleName } from "../../view/photoreal/style";
 import { cameraSceneOf } from "../../view/scene/model";
+import { SKY_PENDING } from "../../view/sky/label";
 import type { Instrument } from "./useInstruments";
 import type { DragKind } from "./useViewDrag";
 import { ViewCanvas } from "./ViewCanvas";
@@ -42,6 +43,11 @@ export interface InstrumentViewProps {
    * does not repeat (decision-r07-t19-layout, item 5).
    */
   readonly primaryPhotorealStatements: ReadonlyArray<string>;
+  /**
+   * Whether the display's sky is asked and none of its replies is held, so that the `STARS` line
+   * reads `PENDING` until its first (R06.T11.f), as the primary's does.
+   */
+  readonly skyAwaiting: boolean;
   /** A graphics fault standing for this view (its own `GRAPHICS VIEW REFUSED`), or `null`. */
   readonly fault: string | null;
   /** The ID of the text describing the canvases' keys. */
@@ -113,8 +119,11 @@ function instrumentLines(
  * order, since a plate over so small a picture would hide most of it. It states the drawn style,
  * the camera and field of view, the primary's exposure with its `SOURCE`, since an instrument
  * meters no image of its own (Design note 11), and the stars of its own cull of the sky, at its
- * camera's limit; and its graphics fault (decision-r07-t19, item 2b). Its statements run the slot's
- * width under its label block and canvas, while they hold: `POSITIONS AS SEEN FROM SHIP`,
+ * camera's limit, with what the sky leaves out, or `PENDING` until the sky's first reply; never
+ * the stars-arriving note, which stands on the primary's line alone, since the display's views
+ * draw one sky (decision-r06-t11f-stars-line); and its graphics fault (decision-r07-t19, item
+ * 2b). Its statements run the slot's width under its label block and canvas, while they hold:
+ * `POSITIONS AS SEEN FROM SHIP`,
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
  * two composed, R07.T16.e) unless the primary's block shows the same line
@@ -131,6 +140,7 @@ export function InstrumentView({
   lighting,
   litLabels,
   primaryPhotorealStatements,
+  skyAwaiting,
   fault,
   legendId,
   onKeyDown,
@@ -205,7 +215,11 @@ export function InstrumentView({
           {run === null ? null : (
             <ViewLabelBlock
               id={labelId}
-              lines={instrumentLines(labelLines(run, exposure, stale), drawn, instrument.skyLabel)}
+              lines={instrumentLines(
+                labelLines(run, exposure, stale),
+                drawn,
+                instrument.skyLabel ?? (skyAwaiting ? SKY_PENDING : null),
+              )}
               statements={[]}
               countLine={null}
               fault={fault}

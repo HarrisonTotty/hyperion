@@ -9,13 +9,14 @@ import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import {
   type FixtureStar,
   InThreadSkyWorker,
+  nearestFirstCensus,
   skyPayload,
   skyResponse,
 } from "../../test/skyFixtures";
 import { aViewScene, FIXTURE_SYSTEM } from "../../test/viewFixtures";
 import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/exposure";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
-import { useViewSky } from "./useViewSky";
+import { primarySkyPlace, useViewSky } from "./useViewSky";
 import { startInstrumentRun, startServerRun, type ViewRun } from "./viewRun";
 
 const UNIVERSE = "000000000000002a";
@@ -165,12 +166,133 @@ describe("a camera view's sky", () => {
   it("labels the camera's limit at the exposure shown: V 10.1 at MAN −1, V 2.6 at AUTO 15", async () => {
     const { result, rerender, socket } = renderViewSky(DEFAULT_EXPOSURE);
     await answerSky(socket);
-    const atDefault = result.current.labelValue;
+    const atDefault = result.current.label("alone")?.value;
     rerender({ exposure: autoAt(15) });
-    expect([atDefault, result.current.labelValue]).toEqual([
+    expect([atDefault, result.current.label("alone")?.value]).toEqual([
       "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED",
       "V 2.6 mag CAM · CLUSTERS: NOT YET MODELLED",
     ]);
+  });
+});
+
+describe("a view's sky arriving nearest first (R06.T11.f)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Plays a reply to the latest sky request whose census has reached `edgesLy`. */
+  async function replyAt(
+    socket: FakeWebSocket,
+    edgesLy: readonly [number | null, number | null, number | null],
+    final: boolean,
+  ): Promise<void> {
+    const sent = socket.requestsOfKind("sky").at(-1);
+    if (sent === undefined) {
+      throw new Error("no sky was asked");
+    }
+    const payload = skyPayload(ONE_STAR, 2, null);
+    const body = {
+      kind: "sky" as const,
+      ...skyResponse(sent.body, payload, ONE_STAR.length, 2),
+      census: nearestFirstCensus(edgesLy),
+      final,
+    };
+    await act(async () => {
+      socket.serverSendsBinary(binaryFrame(sent.id, 0, 1, [...payload]));
+      if (final) {
+        socket.serverResponds(sent.id, body);
+      } else {
+        socket.serverAnswersInPart(sent.id, body);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+
+  it("reads PENDING from the request until its first reply, on every block", () => {
+    const { result } = renderViewSky(DEFAULT_EXPOSURE);
+    expect([
+      result.current.awaiting,
+      result.current.label("alone"),
+      result.current.label("instrument"),
+    ]).toEqual([true, { value: "PENDING" }, { value: "PENDING" }]);
+  });
+
+  it("sets the edge in its field while the reply is not final, and clears it on the final", async () => {
+    const { result, socket } = renderViewSky(DEFAULT_EXPOSURE);
+    await replyAt(socket, [500, 500, 500], false);
+    const streaming = result.current.label("alone");
+    await replyAt(socket, [null, null, null], true);
+    expect([result.current.awaiting, streaming, result.current.label("alone")]).toEqual([
+      false,
+      {
+        value: "V 10.1 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+        field: { text: "500 ly", widthCh: 12, stale: false },
+      },
+      { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" },
+    ]);
+  });
+
+  it("gives the field up where the line's one note is what the sky leaves out", async () => {
+    const { result, socket } = renderViewSky(DEFAULT_EXPOSURE);
+    await replyAt(socket, [2_000, 4_000, 4_000], false);
+    expect([result.current.label("beside"), result.current.label("beside-unshown")]).toEqual([
+      {
+        value: "V 10.1 mag CAM · BEYOND 2000 ly: STREAMING",
+        field: { text: "2000 ly", widthCh: 12, stale: false },
+      },
+      { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" },
+    ]);
+  });
+
+  it("marks the edge stale while the link is down, and holds the note", async () => {
+    const { result, socket } = renderViewSky(DEFAULT_EXPOSURE);
+    await replyAt(socket, [2_000, 4_000, 4_000], false);
+    act(() => {
+      socket.close();
+    });
+    expect(result.current.label("alone")).toEqual({
+      value: "V 10.1 mag CAM · BEYOND 2000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+      field: { text: "2000 ly", widthCh: 12, stale: true },
+    });
+  });
+});
+
+describe("where the primary's sky line stands (decision-r06-t11f-stars-line)", () => {
+  const SHOWN = {};
+
+  it("stands alone with no instrument open", () => {
+    expect(
+      primarySkyPlace([
+        { open: false, shown: null, skyLabel: null },
+        { open: false, shown: null, skyLabel: null },
+      ]),
+    ).toBe("alone");
+  });
+
+  it("stands beside an open instrument whose line shows the sky's reading", () => {
+    expect(
+      primarySkyPlace([
+        { open: true, shown: SHOWN, skyLabel: "V 10.0 mag CAM" },
+        { open: true, shown: null, skyLabel: null },
+      ]),
+    ).toBe("beside");
+  });
+
+  it("keeps what the sky leaves out while no open instrument's line shows the sky", () => {
+    expect(
+      primarySkyPlace([
+        { open: true, shown: SHOWN, skyLabel: null },
+        { open: true, shown: null, skyLabel: "V 10.0 mag CAM" },
+        { open: false, shown: SHOWN, skyLabel: "V 10.0 mag CAM" },
+      ]),
+    ).toBe("beside-unshown");
   });
 });
 

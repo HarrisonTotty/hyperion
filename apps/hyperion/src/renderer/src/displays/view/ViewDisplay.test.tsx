@@ -32,10 +32,12 @@ import { stylesheetRule } from "../../test/stylesheet";
 import {
   FULL_VIEW_PX,
   type LaidOutBoxPx,
+  primaryLabelBlock,
   renderViewDisplay,
   shownMarkLabelPx,
   STAGE_HEIGHT_PX,
   STAGE_WIDTH_PX,
+  starsReading,
   stubViewLayout,
 } from "../../test/viewDisplayHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
@@ -1083,7 +1085,8 @@ describe("the VIEW display's server scene", () => {
     const asked = view.socket.requestsOfKind("systems_in_range").slice(keptQueries);
     expect([
       screen.getAllByText(new RegExp(`^${SCENE_DESIGNATION} /`)).length > 0,
-      labelBlock().includes(STAR_SOURCE),
+      // Its sky is asked too, so the line reads PENDING in the interim reading's place (R06.T11.f).
+      starsReading(primaryLabelBlock()),
       labelBlock().includes(STARS_WITHOUT_POSITION),
       asked.length,
       asked.every(
@@ -1091,10 +1094,10 @@ describe("the VIEW display's server scene", () => {
           JSON.stringify(request.body.centre) === JSON.stringify(place.barycentre) &&
           JSON.stringify(request.body.time) === JSON.stringify(place.time),
       ),
-    ]).toEqual([true, true, false, 4, true]);
+    ]).toEqual([true, "PENDING", false, 4, true]);
   });
 
-  it("labels the sky once it arrives, in the interim field's place", async () => {
+  it("reads PENDING until the sky's first reply, then labels the sky in the interim field's place", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const view = setup();
     await openUniverse(view);
@@ -1102,7 +1105,7 @@ describe("the VIEW display's server scene", () => {
     await settle();
     view.advance(300);
     await settle();
-    const before = labelBlock();
+    const before = starsReading(primaryLabelBlock());
     const sky = view.socket.requestsOfKind("sky").at(-1);
     if (sky === undefined) {
       throw new Error("the view asks no sky");
@@ -1117,12 +1120,12 @@ describe("the VIEW display's server scene", () => {
     await settle();
     const after = labelBlock();
     expect([
-      before.includes(STAR_SOURCE),
+      before,
       sky.body.eye?.field_factor,
       sky.body.exclude_system,
       after.includes("V 7.4 mag EYE · CLUSTERS: NOT YET MODELLED"),
       after.includes(STAR_SOURCE),
-    ]).toEqual([true, 1.4, ELSEWHERE, true, false]);
+    ]).toEqual(["PENDING", 1.4, ELSEWHERE, true, false]);
   });
 
   it("names a system from a server that states no place by its ID, with no stars", async () => {

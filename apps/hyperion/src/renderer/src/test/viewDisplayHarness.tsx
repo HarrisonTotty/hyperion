@@ -4,7 +4,7 @@
  * do, so that a test reports each one's pass times.
  */
 import type { ResponseBody } from "@hyperion/protocol";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { vi } from "vitest";
@@ -495,4 +495,32 @@ export async function settle(): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+}
+
+/** The primary view's label block: the `VIEW` block in no instrument's slot. */
+export function primaryLabelBlock(): HTMLElement {
+  const slots = screen.queryAllByRole("region", { name: /^INSTRUMENT / });
+  const block = screen
+    .getAllByText("VIEW", { selector: "p" })
+    .map((title) => title.parentElement)
+    .find((each) => each !== null && !slots.some((slot) => slot.contains(each)));
+  if (block === undefined || block === null) {
+    throw new Error("the display shows no primary label block");
+  }
+  return block;
+}
+
+/** A label block's `STARS` reading, its `output`, which a missing line fails to find. */
+export function starsOutput(block: HTMLElement): HTMLElement {
+  const label = within(block).getByText("STARS", { selector: "dt" });
+  const line = label.parentElement;
+  if (line === null) {
+    throw new Error("the STARS label stands in no line");
+  }
+  return within(line).getByRole("status");
+}
+
+/** A label block's `STARS` reading, as it reads. */
+export function starsReading(block: HTMLElement): string | null {
+  return starsOutput(block).textContent;
 }

@@ -2,13 +2,21 @@ import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { binaryFrame } from "../../test/binaryFrames";
-import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
+import {
+  InThreadSkyWorker,
+  nearestFirstCensus,
+  skyPayload,
+  skyResponse,
+} from "../../test/skyFixtures";
 import {
   nominalStore,
   openUniverse,
+  primaryLabelBlock,
   renderViewDisplay,
   sceneArrives,
   settle,
+  starsOutput,
+  starsReading,
   STAGE_HEIGHT_PX,
   STAGE_WIDTH_PX,
   submittedBy,
@@ -29,6 +37,7 @@ import { HISTOGRAM_PASS } from "../../view/post/histogram";
 import { TONEMAP_PASS } from "../../view/post/tonemap";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import type { ViewEngineSource } from "./useViewEngine";
+import { STAR_SOURCE } from "./viewRun";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -683,6 +692,140 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     await nextReport(view);
     await closeInstrument(view, "INSTRUMENT 1");
     expect(await nextReport(view)).toBe(1);
+  });
+});
+
+/**
+ * Plays a reply to the primary's latest sky request whose census has reached `edgesLy` for C, D
+ * and E (final where `null`), and lets the decode settle.
+ */
+async function skyReplyAt(
+  view: Setup,
+  edgesLy: readonly [number | null, number | null, number | null],
+  final: boolean,
+): Promise<void> {
+  const sky = view.socket.requestsOfKind("sky").at(-1);
+  if (sky === undefined) {
+    throw new Error("the view asks no sky");
+  }
+  const payload = skyPayload([{ direction: [0, 0, -1], distanceLy: 100, vMag: 1 }], 2, 7.4);
+  const body = {
+    kind: "sky" as const,
+    ...skyResponse(sky.body, payload, 1, 2),
+    census: nearestFirstCensus(edgesLy),
+    final,
+  };
+  await act(async () => {
+    view.socket.serverSendsBinary(binaryFrame(sky.id, 0, 1, [...payload]));
+    if (final) {
+      view.socket.serverResponds(sky.id, body);
+    } else {
+      view.socket.serverAnswersInPart(sky.id, body);
+    }
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  view.advance(300);
+  await settle();
+}
+
+/** The `STARS` readings of the primary's block, then of each named instrument's. */
+function starsLines(instruments: ReadonlyArray<string>): Array<string | null> {
+  return [
+    starsReading(primaryLabelBlock()),
+    ...instruments.map((name) => starsReading(screen.getByRole("region", { name }))),
+  ];
+}
+
+/** The primary eye's and an instrument camera's limits at the default exposure. */
+const EYE = "V 7.4 mag EYE";
+const CAM = "V 10.1 mag CAM";
+/** The fixture reply's one gap, as the line names it. */
+const LEFT_OUT = "CLUSTERS: NOT YET MODELLED";
+
+describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", () => {
+  it("reads PENDING on every block from the sky's request until its first reply", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await openInstrument(view, "INSTRUMENT 1");
+    await openInstrument(view, "INSTRUMENT 2");
+    await settle();
+    expect(starsLines(["INSTRUMENT 1", "INSTRUMENT 2"])).toEqual(["PENDING", "PENDING", "PENDING"]);
+  });
+
+  it("states the edge and what the sky leaves out on the primary's line with no instrument open", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await skyReplyAt(view, [2_000, 4_000, 4_000], false);
+    const streaming = starsLines([]);
+    await skyReplyAt(view, [null, null, null], true);
+    expect([streaming, starsLines([])]).toEqual([
+      [`${EYE} · BEYOND 2000 ly: STREAMING · ${LEFT_OUT}`],
+      [`${EYE} · ${LEFT_OUT}`],
+    ]);
+  });
+
+  it("mutes the edge alone on the primary's line while the link is down, its S in the field", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await skyReplyAt(view, [2_000, 4_000, 4_000], false);
+    act(() => {
+      view.socket.close();
+    });
+    await settle();
+    const reading = starsOutput(primaryLabelBlock());
+    const field = within(reading).getByText("2000 ly").parentElement;
+    expect([
+      reading.textContent,
+      field?.classList.contains("view-label__field"),
+      within(reading).getByText("2000 ly").classList.contains("stale"),
+      field?.querySelector(".stale-mark")?.textContent,
+      reading.classList.contains("stale"),
+    ]).toEqual([`${EYE} · BEYOND 2000 ly Sstale: STREAMING · ${LEFT_OUT}`, true, true, "S", false]);
+  });
+
+  it.each([[["INSTRUMENT 1"]], [["INSTRUMENT 1", "INSTRUMENT 2"]]])(
+    "holds one note on the primary's line beside %j, each instrument's its limit and what the sky leaves out",
+    async (instruments) => {
+      vi.stubGlobal("Worker", InThreadSkyWorker);
+      const view = await serverScene();
+      await openInstrument(view, "INSTRUMENT 1");
+      if (instruments.includes("INSTRUMENT 2")) {
+        await openInstrument(view, "INSTRUMENT 2");
+      }
+      await skyReplyAt(view, [16_000, null, null], false);
+      const streaming = starsLines(instruments);
+      await skyReplyAt(view, [null, null, null], true);
+      const each = instruments.map(() => `${CAM} · ${LEFT_OUT}`);
+      expect([streaming, starsLines(instruments)]).toEqual([
+        [`${EYE} · BEYOND 16,000 ly: STREAMING`, ...each],
+        [`${EYE} · ${LEFT_OUT}`, ...each],
+      ]);
+    },
+  );
+
+  it("keeps what the sky leaves out on the primary's line until an open instrument's line shows the sky", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await skyReplyAt(view, [2_000, 4_000, 4_000], false);
+    // INSTRUMENT 1's stage not laid out yet, so that it has not culled the sky. The harness's
+    // layout is a spy already, which spying again returns.
+    const layout = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    const laidOut = layout.getMockImplementation();
+    if (laidOut === undefined) {
+      throw new Error("the harness lays no element out");
+    }
+    layout.mockImplementation(function notYetLaidOut(this: HTMLElement) {
+      return this.matches(".view-instrument *") ? new DOMRect() : laidOut.call(this);
+    });
+    await openInstrument(view, "INSTRUMENT 1");
+    const unsized = starsLines(["INSTRUMENT 1"]);
+    layout.mockImplementation(laidOut);
+    view.advance(300);
+    await settle();
+    expect([unsized, starsLines(["INSTRUMENT 1"])]).toEqual([
+      [`${EYE} · ${LEFT_OUT}`, STAR_SOURCE],
+      [`${EYE} · BEYOND 2000 ly: STREAMING`, `${CAM} · ${LEFT_OUT}`],
+    ]);
   });
 });
 

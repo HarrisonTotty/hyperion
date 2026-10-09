@@ -284,7 +284,8 @@ function useSlotDrawer(
 /**
  * A slot's own cull of the primary's sky, at its camera's role, field of view and canvas width and
  * the setting's sprite budget, remade only when one of them or the sky changes, and its `STARS` reading at the primary's
- * exposure (R07.T13.e).
+ * exposure (R07.T13.e): its limit and what the sky leaves out, never the stars-arriving note, which
+ * stands on the primary's line alone (decision-r06-t11f-stars-line).
  */
 function useSlotSky(
   sky: SkyModel | null,
@@ -306,7 +307,7 @@ function useSlotSky(
   );
   return drawn === null || role === null || fovDeg === null
     ? null
-    : { drawn, labelValue: viewSkyLabel(drawn.model, role, exposure, fovDeg) };
+    : { drawn, labelValue: viewSkyLabel(drawn.model, role, exposure, fovDeg, "instrument").value };
 }
 
 /** The instruments of a `VIEW` stage. */

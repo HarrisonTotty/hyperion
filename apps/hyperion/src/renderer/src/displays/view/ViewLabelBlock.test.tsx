@@ -65,3 +65,43 @@ describe("the view's label block's line breaks (R07.T19.b)", () => {
     expect(runs).toEqual(["UT +0 yr", "000/00:00:01", "1.00 km/s", "EV100 -1.0", "V 9.5 mag CAM"]);
   });
 });
+
+describe("the view's label block's field (R06.T11.f)", () => {
+  const VALUE = "V 10.0 mag CAM · BEYOND 2000 ly: STREAMING";
+
+  /** The block with the sky's edge in its field, and the field's element. */
+  function fieldOf(stale: boolean): HTMLElement {
+    const { container } = render(
+      <ViewLabelBlock
+        lines={[{ label: "STARS", value: VALUE, field: { text: "2000 ly", widthCh: 12, stale } }]}
+        statements={[]}
+        countLine={null}
+        fault={null}
+      />,
+    );
+    const field = container.querySelector<HTMLElement>(".view-label__field");
+    if (field === null) {
+      throw new Error("the block sets no field");
+    }
+    return field;
+  }
+
+  it("sets the edge as a run in its fixed width, the reading's text unchanged", () => {
+    const field = fieldOf(false);
+    expect([
+      field.textContent,
+      field.classList.contains("view-label__run"),
+      field.style.minWidth,
+      screen.getByRole("status").textContent,
+    ]).toEqual(["2000 ly", true, "12ch", VALUE]);
+  });
+
+  it("mutes the edge alone while it is stale, its S inside the field", () => {
+    const field = fieldOf(true);
+    expect([
+      field.querySelector(".stale")?.textContent,
+      field.querySelector(".stale-mark")?.textContent,
+      screen.getByRole("status").classList.contains("stale"),
+    ]).toEqual(["2000 ly", "S", false]);
+  });
+});

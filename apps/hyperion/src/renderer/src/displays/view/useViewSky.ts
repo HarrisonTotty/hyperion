@@ -15,12 +15,20 @@ import { cameraGalacticPosition } from "../../view/sky/camera";
 import type { BakeInput } from "../../view/sky/bake";
 import { cullSky } from "../../view/sky/cull";
 import { starIlluminanceRgbLx } from "../../view/sky/photometry";
-import { skyLabelValue } from "../../view/sky/label";
+import {
+  SKY_EDGE_FIELD_CH,
+  SKY_PENDING,
+  skyEdgeReading,
+  skyLabelValue,
+  skyLineNotes,
+  type SkyLinePlace,
+  streamingEdgeLy,
+} from "../../view/sky/label";
 import type { SkyCamera, SkyModel } from "../../view/sky/model";
 import { selectSkySprites, type SkySelection } from "../../view/sky/select";
 import { useSky } from "../../view/sky/useSky";
 import { viewSkyLabelV, viewSkyLimit, viewSkyRequest } from "../../view/sky/viewSky";
-import { runPose, type ViewRun } from "./viewRun";
+import { type LabelLine, runPose, type ViewRun } from "./viewRun";
 
 /** The sky as the drawing loop draws it: the model and which of its stars are sprites. */
 export interface DrawnSky {
@@ -33,12 +41,24 @@ export interface DrawnSky {
   readonly bandIlluminanceLx: Float64Array;
 }
 
+/** A `STARS` line's reading of the sky: its value, and the edge's field while it streams. */
+export type SkyLineReading = Pick<LabelLine, "value" | "field">;
+
 /** The view's sky, or `null` while R02's interim field stands in. */
 export interface ViewSky {
   /** What the loop draws, or `null` before the sky arrives. */
   readonly drawn: DrawnSky | null;
-  /** The label block's `STARS` reading, or `null` while the interim field's stands. */
-  readonly labelValue: string | null;
+  /**
+   * The primary's `STARS` reading at its place on the display ({@link primarySkyPlace}), or `null`
+   * while the interim field's stands: {@link SKY_PENDING} from the request until its first reply,
+   * then the held reply's limit and notes ({@link viewSkyLabel}).
+   */
+  readonly label: (place: SkyLinePlace) => SkyLineReading | null;
+  /**
+   * Whether the view's sky is asked and none of its replies is held yet, so that every view's
+   * `STARS` line reads {@link SKY_PENDING} (R06.T11.f).
+   */
+  readonly awaiting: boolean;
   /** Whether a sky has been asked and not yet answered (R07's lighting label reads it). */
   readonly pending: boolean;
 }
@@ -67,6 +87,34 @@ export function bakeInputOf(sky: DrawnSky, faceSizePx: number): BakeInput {
 export interface CulledViewSky {
   readonly drawn: DrawnSky;
   readonly labelValue: string;
+}
+
+/**
+ * Where the `PRIMARY` view's `STARS` line stands among the instruments
+ * (decision-r06-t11f-stars-line, 1d): alone with none open; beside them, holding one note, while
+ * one is; and holding what the sky leaves out while no open instrument's line shows the sky's
+ * reading (the guard), since no other line on the display would say it then.
+ *
+ * @remarks
+ * An open instrument's line shows the sky's reading once it has drawn (`shown`) and culled the
+ * sky (`skyLabel`), and with it what the sky leaves out, in every state but pending.
+ *
+ * @param instruments - The display's slots, `useInstruments`' `Instrument`s.
+ */
+export function primarySkyPlace(
+  instruments: ReadonlyArray<{
+    readonly open: boolean;
+    readonly shown: object | null;
+    readonly skyLabel: string | null;
+  }>,
+): SkyLinePlace {
+  const open = instruments.filter((instrument) => instrument.open);
+  if (open.length === 0) {
+    return "alone";
+  }
+  return open.some((instrument) => instrument.shown !== null && instrument.skyLabel !== null)
+    ? "beside"
+    : "beside-unshown";
 }
 
 /**
@@ -103,7 +151,9 @@ export function cullViewSky(
 
 /**
  * A view's label block's `STARS` reading of a sky it holds: its role's limit, a camera's at the
- * exposure shown (R07.T13.e), then what the sky leaves out.
+ * exposure shown (R07.T13.e), then the notes its place holds: while the reply held is not final,
+ * the stars-arriving note, its edge in its field and stale with the sky (R06.T11.f); and what the
+ * sky leaves out.
  *
  * @param exposure - The control as the readout shows it (4 Hz, EV100 to 0.1).
  */
@@ -112,12 +162,23 @@ export function viewSkyLabel(
   role: ViewRun["camera"]["role"],
   exposure: ExposureControl,
   fovDeg: number,
-): string {
-  return skyLabelValue(
-    viewSkyLabelV(model, role, exposure, fovDeg),
-    role,
-    model.response.not_modelled,
-  );
+  place: SkyLinePlace,
+): SkyLineReading {
+  const gaps = model.response.not_modelled;
+  const standing = { place, streamingEdgeLy: streamingEdgeLy(model.response) };
+  const value = skyLabelValue(viewSkyLabelV(model, role, exposure, fovDeg), role, gaps, standing);
+  // The edge's field only where its note stands: a line holding one note may have given it up.
+  const streaming = skyLineNotes(gaps, standing).find((note) => note.kind === "streaming");
+  return streaming === undefined
+    ? { value }
+    : {
+        value,
+        field: {
+          text: skyEdgeReading(streaming.edgeLy),
+          widthCh: SKY_EDGE_FIELD_CH,
+          stale: model.stale,
+        },
+      };
 }
 
 /** What the view's sky is made from. */
@@ -148,7 +209,9 @@ const DEFAULT_WIDTH_PX = 1_920;
  * @remarks
  * Asked at the setting's N_max and culled to its sprite budget (R06 Design note 22; R07.T17), on
  * the published run (4 Hz), which is often enough: the request rule holds a sky for a year or until
- * a camera moves its nearest baked star by a tenth of a pixel.
+ * a camera moves its nearest baked star by a tenth of a pixel. A sky arriving nearest first is
+ * labelled as its replies are held (R06.T11.f): `PENDING` until the first, then the held reply's
+ * limit and notes, which the display places among its instruments (`label`).
  */
 export function useViewSky(input: ViewSkyInput): ViewSky {
   const { universe, place, run, exposure, setting } = input;
@@ -186,7 +249,20 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
     drawn !== null &&
     request !== null &&
     drawn.model.request.exclude_system === request.exclude_system;
-  return ours
-    ? { drawn, labelValue: viewSkyLabel(drawn.model, role, exposure, fovDeg), pending }
-    : { drawn: null, labelValue: null, pending };
+  if (ours) {
+    return {
+      drawn,
+      label: (at) => viewSkyLabel(drawn.model, role, exposure, fovDeg, at),
+      awaiting: false,
+      pending,
+    };
+  }
+  // Asked and not yet answered, after a jump too: no reply of this arrival is held.
+  const awaiting = request !== null && pending;
+  return {
+    drawn: null,
+    label: () => (awaiting ? { value: SKY_PENDING } : null),
+    awaiting,
+    pending,
+  };
 }

@@ -3832,6 +3832,16 @@ body {
 }
 
 /*
+ * A value in a field of its own within a reading, right-aligned in the fixed width its line sets
+ * for its longest reading and its stale mark: the sky's edge, `BEYOND 2000 ly: STREAMING`
+ * (R06.T11.f; the guide's "Numbers").
+ */
+.view-label__field {
+  display: inline-block;
+  text-align: right;
+}
+
+/*
  * The instrument views' fixed slots over the primary view's right edge (R07 Design note 15,
  * decision-r07-t19 item 2a): INSTRUMENT 1 at the stage's top right and INSTRUMENT 2 at its foot,
  * each inset 0.5rem, so that neither moves when the other opens or closes

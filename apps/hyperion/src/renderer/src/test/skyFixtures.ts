@@ -6,7 +6,9 @@
 import {
   decodeSkyBand,
   decodeSkyStars,
+  type MassLayer,
   type SkyBand,
+  type SkyLayerCensusDto,
   type SkyRequest,
   type SkyResponse,
   type SkyStars,
@@ -93,6 +95,50 @@ export function skyResponse(
     band_bytes: payload.byteLength - starsBytes,
     final: true,
   };
+}
+
+/**
+ * A layer's census as a reply of a sky arriving nearest first states it (R06.T11.d): complete to
+ * `completeToLy`, a fixed shell edge while it is not final and its cap once it is.
+ */
+export function skyLayerCensus(
+  layer: MassLayer,
+  completeToLy: number,
+  final: boolean,
+): SkyLayerCensusDto {
+  return {
+    layer,
+    cap_ly: final ? completeToLy : 20_000,
+    rule_bound_ly: 20_000,
+    expected_beyond: 0,
+    cells: 0,
+    candidates_opened: 0,
+    accepted: 0,
+    listed: 0,
+    without_photometry: 0,
+    feature_members_absent: true,
+    complete_to_ly: completeToLy,
+    complete_to_rays_ly: [],
+    final,
+  };
+}
+
+/**
+ * A reply's census near the Sun, as its replies run: A, B and the brown dwarfs final from the
+ * first; C, D and E complete to `edgesLy`, or final where it is `null`.
+ */
+export function nearestFirstCensus(
+  edgesLy: readonly [number | null, number | null, number | null],
+): SkyLayerCensusDto[] {
+  const [c, d, e] = edgesLy;
+  return [
+    skyLayerCensus("a", 11, true),
+    skyLayerCensus("b", 56, true),
+    skyLayerCensus("c", c ?? 14_563, c === null),
+    skyLayerCensus("d", d ?? 13_232, d === null),
+    skyLayerCensus("e", e ?? 61_341, e === null),
+    skyLayerCensus("brown_dwarf", 1, true),
+  ];
 }
 
 /** The decoded stars and band of a payload, through the protocol's decoders. */

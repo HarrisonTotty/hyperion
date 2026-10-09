@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
-import { type LabelLine, MISSING_READING } from "./viewRun";
+import { type LabelField, type LabelLine, MISSING_READING } from "./viewRun";
 
 /** Props of {@link ViewLabelBlock}. */
 export interface ViewLabelBlockProps {
@@ -41,8 +41,9 @@ const UNBREAKABLE =
  * its notes (decision-r07-owner-ux-signoff, item 1). Its text is unchanged.
  *
  * @param runs - The runs that never break, a global pattern.
+ * @param field - A value of the text set in a field of its own: the run that reads its text.
  */
-export function unbrokenRuns(text: string, runs: RegExp): ReactNode {
+export function unbrokenRuns(text: string, runs: RegExp, field?: LabelField): ReactNode {
   const nodes: ReactNode[] = [];
   let from = 0;
   for (const match of text.matchAll(runs)) {
@@ -50,9 +51,13 @@ export function unbrokenRuns(text: string, runs: RegExp): ReactNode {
       nodes.push(withMissing(text.slice(from, match.index), `t${String(from)}`));
     }
     nodes.push(
-      <span className="view-label__run" key={match.index}>
-        {withMissing(match[0], `r${String(match.index)}`)}
-      </span>,
+      field !== undefined && match[0] === field.text ? (
+        <FieldRun field={field} key={match.index} />
+      ) : (
+        <span className="view-label__run" key={match.index}>
+          {withMissing(match[0], `r${String(match.index)}`)}
+        </span>
+      ),
     );
     from = match.index + match[0].length;
   }
@@ -63,6 +68,35 @@ export function unbrokenRuns(text: string, runs: RegExp): ReactNode {
     nodes.push(withMissing(text.slice(from), `t${String(from)}`));
   }
   return nodes;
+}
+
+/** Props of {@link FieldRun}. */
+interface FieldRunProps {
+  /** The value and its field: its text, width and staleness. */
+  readonly field: LabelField;
+}
+
+/**
+ * A value set in its field: a run right-aligned in its fixed width, and while it is stale muted
+ * with its trailing `S` inside that width, so that neither its growth nor the mark moves the line
+ * (the guide's "Numbers" and "Data states"; R06.T11.f).
+ */
+function FieldRun({ field }: FieldRunProps) {
+  return (
+    <span
+      className="view-label__run view-label__field"
+      style={{ minWidth: `${String(field.widthCh)}ch` }}
+    >
+      {field.stale ? (
+        <>
+          <span className="stale">{field.text}</span>
+          <StaleMark />
+        </>
+      ) : (
+        field.text
+      )}
+    </span>
+  );
 }
 
 /**
@@ -103,8 +137,10 @@ function withMissing(text: string, key: string): ReactNode {
  * breaks by the same rules wherever it stands: `EV100 11.7 INHIBITED ·` | `NO IMAGE TO METER`,
  * never inside a status phrase (decision-r07-t19b-exposure-fit, item 1(c)). Its text is the
  * reading's, unchanged.
+ *
+ * @param field - A value of the reading set in a field of its own (`LabelLine.field`), or none.
  */
-export function readingParts(value: string): ReactNode {
+export function readingParts(value: string, field?: LabelField): ReactNode {
   const seen = new Map<string, number>();
   const nodes: ReactNode[] = [];
   for (const part of value.split(PART_SEPARATOR)) {
@@ -115,7 +151,7 @@ export function readingParts(value: string): ReactNode {
     seen.set(part, count + 1);
     nodes.push(
       <span className="view-label__part" key={`${part}:${String(count)}`}>
-        {unbrokenRuns(part, UNBREAKABLE)}
+        {unbrokenRuns(part, UNBREAKABLE, field)}
       </span>,
     );
   }
@@ -132,7 +168,8 @@ export function readingParts(value: string): ReactNode {
  * star limit and its kind, after `UT` or inside a clock reading, and its continuation lines hang
  * under the value (decision-r07-t19-layout, item 2).
  * Each reading is an `output`; none is announced as it changes, since they change continuously. A
- * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"). A
+ * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"); a
+ * line's field, the sky's edge, is set in its fixed width and goes stale alone (R06.T11.f). A
  * graphics fault is set as `StatusLine`'s fault, in `--status-caution`, apart from the steady
  * statements (the guide's "Alerts": a console's report on its own graphics is never an alert). The
  * stars' count line is a reading of numbers, so an `output` in B612 Mono (the guide's
@@ -148,7 +185,7 @@ export function ViewLabelBlock({ lines, statements, countLine, fault, id }: View
             <dt className="field__label">{line.label}</dt>
             <dd>
               <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
-                {readingParts(line.value)}
+                {readingParts(line.value, line.field)}
               </output>
               {line.stale === true ? <StaleMark /> : null}
             </dd>
