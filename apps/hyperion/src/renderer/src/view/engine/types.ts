@@ -66,8 +66,11 @@ export interface TextureHandle {
   readonly name: string;
 }
 
-/** A render target's colour format, or a view's canvas. */
-export type RenderTargetFormat = ColourTargetFormat | "canvas";
+/**
+ * A render target's colour format, or a view's canvas: `canvas` through its `-srgb` view, and
+ * `canvas-in-pass` through its own format, for a submission with `encoding` `"in-pass"` (R07.T15).
+ */
+export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass";
 
 /** An offscreen colour target to create. */
 export interface RenderTargetSpec {
@@ -171,7 +174,8 @@ export interface TextureBindingSpec {
   readonly sampleType?: "float" | "unfilterable-float" | "depth" | "uint" | "sint";
   /**
    * `2d` by default; `2d-array` for layers, `3d` or `cube`. It must be the bound texture's own
-   * dimension, which the adapter checks at each bind.
+   * dimension, which the adapter checks at each bind, except that a `2d-array` binding also takes
+   * a single-layer 2D texture as a one-layer array (R05.T11.a).
    */
   readonly viewDimension?: "2d" | "2d-array" | "3d" | "cube";
 }
@@ -250,7 +254,19 @@ export interface RenderView {
   /** Resizes this view's attachments only. */
   resize(size: ViewSize): void;
   render(frame: FrameSubmission): void;
-  /** The harness's copy of the canvas texture, by `copyTextureToBuffer`. */
+  /**
+   * The harness's copy of the canvas texture, by `copyTextureToBuffer`.
+   *
+   * @remarks
+   * Call it in the task that drew the canvas: after `render`, before any `await` that lets the
+   * task end, such as a timer or another read-back's mapping. WebGPU destroys a canvas's current
+   * texture at the next rendering update, when the canvas is presented, and refuses a copy of it
+   * after that. SwiftShader keeps the texture, so only a hardware run shows a late read
+   * (R07.T8.a's canvas check on the RTX 3080).
+   *
+   * @throws {@link CanvasReadBackRefused} (the promise rejects) when the device refuses the copy,
+   *   as it does a late read's.
+   */
   readBack(): Promise<Float32Array | Uint8Array>;
   dispose(): void;
 }
@@ -280,6 +296,21 @@ export interface FrameSubmission {
   readonly projection: Float32Array;
   readonly draws: ReadonlyArray<DrawItem>;
   readonly postProcesses: ReadonlyArray<PostProcessItem>;
+  /**
+   * How a view's canvas is written: `srgb-view`, the default, through its `-srgb` view, so that
+   * the store encodes; `in-pass` through the canvas's own format, the pass writing encoded values
+   * itself (R07's tone-mapping pass, which dithers after encoding; R07.T15, decision 2026-10-02,
+   * item 6). Offscreen targets ignore it.
+   */
+  readonly encoding?: "srgb-view" | "in-pass";
+  /**
+   * `clear`, the default, clears colour and depth before the draws; `load` keeps the colour and
+   * depth an earlier submission to the same output drew, so that cased symbology follows the
+   * tone-mapping pass (R07.T16). Ignored where the frame has post-processes, whose chain always
+   * starts clear. On a view, the earlier submission must be in the same task: a canvas's texture
+   * expires once the task yields.
+   */
+  readonly colourLoad?: "clear" | "load";
 }
 
 /** One post-process in a frame, with its per-frame values, shaped like a {@link DrawItem}. */
@@ -427,11 +458,31 @@ export interface RenderEngine {
   createBuffer(spec: BufferSpec): BufferHandle;
   /** 2D, 3D or a cube; sampled and/or storage. */
   createTexture(spec: TextureSpec): TextureHandle;
-  /** R06's packed star cube: `rgb9e5ufloat`, every mip written by `copyBufferToTexture`. */
-  createPackedCube(sizePx: number, mips: number, category: MemoryCategory): TextureHandle;
+  /**
+   * R06's packed star cube: `rgb9e5ufloat`, every mip written by `copyBufferToTexture`.
+   *
+   * @param name - Its name in allocation events and faults; `packed star cube` when absent, so that
+   *   several views' cubes (R06.T14) report their own (R06.T13.h).
+   */
+  createPackedCube(
+    sizePx: number,
+    mips: number,
+    category: MemoryCategory,
+    name?: string,
+  ): TextureHandle;
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void;
-  /** The same level written from a GPU buffer a kernel filled, with no readback (R06's bake). */
-  writePackedCubeLevelFromBuffer(cube: TextureHandle, level: number, packed: BufferHandle): void;
+  /**
+   * The same level written from a GPU buffer a kernel filled, with no readback (R06's bake).
+   *
+   * @param face - One face, 0–5, which the buffer then holds alone (R06.T13.g, so that the bake's
+   *   staging is one face of one level); all six, face after face, when absent.
+   */
+  writePackedCubeLevelFromBuffer(
+    cube: TextureHandle,
+    level: number,
+    packed: BufferHandle,
+    face?: number,
+  ): void;
   /**
    * An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat).
    *
@@ -439,6 +490,32 @@ export interface RenderEngine {
    * compute splat (R01 Design note 21).
    */
   createPointSplat(spec: PointSplatSpec): PointSplatHandle;
+  /**
+   * The same splat, resolving once its pipeline is compiled, so that the harness's catalogue check
+   * sees a WGSL error as a rejection (R06.T13.h).
+   *
+   * @throws {@link Float32BlendUnavailable} without `float32-blendable`; Error, as a rejection,
+   *   naming the splat when its WGSL does not compile.
+   */
+  createPointSplatAsync(spec: PointSplatSpec): Promise<PointSplatHandle>;
+  /**
+   * Destroys a buffer this engine made, at once, raising its `destroyed` allocation event with the
+   * bytes it was made with (R06.T13.h: the bake's transient scratch, Design note 21).
+   *
+   * @remarks
+   * The handle is refused by every later call. A caller must not release a buffer a submitted
+   * frame still reads; WebGPU defers the destruction until the queue's work that uses it is done.
+   * `ResilientEngine` drops the release of a handle made by a lost engine, which died with it.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseBuffer(buffer: BufferHandle): void;
+  /**
+   * Destroys a texture this engine made through `createTexture` or `createPackedCube`, as
+   * {@link RenderEngine.releaseBuffer} does a buffer (R06.T14: a view's cube).
+   *
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseTexture(texture: TextureHandle): void;
   /**
    * Dispatches a kernel.
    *
@@ -470,11 +547,31 @@ export interface RenderEngine {
   /**
    * CPU readback of a texture level or a region of it, colour or depth.
    *
+   * @param access - `tolerance` lifts the refusal for the smoke harness's tolerance checks, as
+   * {@link RenderEngine.readBuffer}'s does (R05.T12.b's transmittance table).
    * @throws {@link PresentationOnlyReadback} as {@link RenderEngine.readBuffer} does.
    */
-  readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer>;
+  readTexture(
+    texture: TextureHandle,
+    level?: number,
+    rect?: TexelRect,
+    access?: "cpu" | "tolerance",
+  ): Promise<ArrayBuffer>;
   /** Per-pass GPU time for each frame, once its query set resolves; silent without the feature. */
   onPassTimes(listener: (times: PassTimes) => void): () => void;
+  /**
+   * The `PassTimes.frame` of the timer's latest resolve, 0 before any and without the feature
+   * (plan R07, T19).
+   *
+   * @remarks
+   * Each submission resolves its own timestamps, numbered from 1, as it is made; a caller that
+   * reads this between its submissions knows which of the times reported later are its own (VIEW
+   * groups every view's by the primary view's frame). A resolve dropped while every buffer is
+   * still being read takes its number too, and is never reported: a gap. `ResilientEngine`
+   * reports the current engine's, and 0 while it has none, so the count starts again from 0 at a
+   * restore.
+   */
+  readonly passTimesFrame: number;
   /** Every creation, destruction and upload, with its byte size and category. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
   /**
@@ -547,6 +644,25 @@ export class ColourSelfSample extends Error {
     this.name = "ColourSelfSample";
     this.targetName = targetName;
     this.ownerName = ownerName;
+  }
+}
+
+/**
+ * Thrown by {@link RenderView.readBack} when the device refused the copy of the canvas, as it refuses a
+ * read made after the rendering update that destroyed the canvas's texture. Without it the read
+ * would give the staging buffer's zeros, a black canvas (R07.T8.a's canvas check on the RTX 3080).
+ */
+export class CanvasReadBackRefused extends Error {
+  readonly viewName: string;
+
+  /** @param refusal - The device's validation error, kept as the `cause`. */
+  constructor(viewName: string, refusal: GPUError) {
+    super(
+      `the copy of view ${viewName}'s canvas was refused (read after the rendering update?): ${refusal.message}`,
+      { cause: refusal },
+    );
+    this.name = "CanvasReadBackRefused";
+    this.viewName = viewName;
   }
 }
 

@@ -8,15 +8,19 @@
 //! messages: a request's task produces its terminal frame and hands it back through a
 //! [`JoinSet`], and the connection pushes it to the writer, unless the request was cancelled
 //! first, in which case the frame is dropped. A request refused on arrival is answered at once and
-//! never runs.
+//! never runs. A request of a kind answered in parts (`sky`, rendering plan R06, R06.T11.d) also
+//! hands the connection each answer before its last through its [`Replies`], which the connection
+//! sends as a `partial_response` after that answer's chunks, in order, before the next answer and
+//! the terminal message.
 //!
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
-//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], and the
-//! scene's in [`scene`].
+//! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], the
+//! scene's in [`scene`], and the sky's in [`sky`].
 
 mod galaxy;
 mod scene;
+mod sky;
 mod system;
 mod universe;
 
@@ -37,18 +41,18 @@ use hyperion_protocol::{
     SubscriptionTopic, UnsubscribeRequest,
 };
 use serde_json::Value;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, Id as TaskId, JoinError, JoinSet};
 use tracing::Instrument;
 
-use crate::AppState;
 use crate::bulk::{Answer, BulkPayload};
 use crate::compute::{
-    CancelToken, ComputeError, JobError, Priority, SubmitJobError, panic_message,
+    CancelToken, ComputeError, CpuPool, JobError, Priority, SubmitJobError, panic_message,
 };
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
 use crate::subscriptions::{Pusher, SubscriptionCommand, Subscriptions};
+use crate::{AppState, SkyService};
 
 /// What a handler returns: its answer, the response's body with any bulk payload, or why there is
 /// none.
@@ -56,6 +60,85 @@ pub(crate) type HandlerFuture = BoxFuture<'static, Result<Answer, RequestError>>
 
 /// What a topic's opening returns: the topic's whole state, or why the subscription failed.
 pub(crate) type SubscribeFuture = BoxFuture<'static, Result<SubscriptionState, RequestError>>;
+
+/// One answer of a request answered in parts, before its last, on its way to the connection: the
+/// frame of its `partial_response` and the payload whose chunks precede it (rendering plan R06,
+/// R06.T11.d).
+#[derive(Debug)]
+pub(crate) struct Partial {
+    /// The request's ID.
+    pub(crate) id: RequestId,
+    /// Which request under that ID: an ID is reused once its request has ended.
+    pub(crate) serial: u64,
+    /// The `partial_response`'s frame.
+    pub(crate) frame: String,
+    /// The payload whose chunks precede the frame, if the answer has one.
+    pub(crate) bulk: Option<BulkPayload>,
+}
+
+/// The answers before their last a connection holds, queued to it or streaming: few, since each
+/// may hold a sky's 7.5 MB payload (R06.T11.d). The connection takes no more from its requests
+/// while this many stream, and as many more wait in its channel; a request whose answer finds both
+/// full waits, and so does the work behind it, the census's next reply among it.
+pub(crate) const PARTIALS_QUEUED: usize = 2;
+
+/// Where a request answered in parts sends each answer before its last (rendering plan R06,
+/// R06.T11.d): the connection sends it as a `partial_response` after its chunks, in the order sent,
+/// before the request's later answers and its terminal message.
+///
+/// A handler of any other kind ignores it. One made outside a connection
+/// ([`Replies::detached`]) refuses every answer.
+#[derive(Debug, Clone)]
+pub(crate) struct Replies {
+    id: RequestId,
+    serial: u64,
+    sender: mpsc::Sender<Partial>,
+}
+
+impl Replies {
+    /// The replies of request `id`, the `serial`th of its connection, sent to `sender`.
+    #[must_use]
+    fn new(id: RequestId, serial: u64, sender: mpsc::Sender<Partial>) -> Self {
+        Self { id, serial, sender }
+    }
+
+    /// Replies that reach no connection, a channel whose receiver has gone: a handler called
+    /// directly, in a test.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn detached() -> Self {
+        let (sender, _) = mpsc::channel(1);
+        Self::new(RequestId(0), 0, sender)
+    }
+
+    /// Sends `answer` as the request's next `partial_response`, its frame serialised on `pool`
+    /// for a large body, as a terminal response's is, and waits for the connection to take it.
+    ///
+    /// # Errors
+    ///
+    /// `cancelled` if the request's connection has gone or these replies reach none, and the
+    /// pool's errors from serialising, as `respond`'s.
+    pub(crate) async fn send(
+        &self,
+        pool: &CpuPool,
+        token: &CancelToken,
+        answer: Answer,
+    ) -> Result<(), RequestError> {
+        let Answer { body, bulk } = answer;
+        let message = ServerMessage::PartialResponse { id: self.id, body };
+        let frame = serialise(pool, token.clone(), message).await?;
+        let partial = Partial {
+            id: self.id,
+            serial: self.serial,
+            frame,
+            bulk,
+        };
+        self.sender
+            .send(partial)
+            .await
+            .map_err(|_| request_error(ErrorCode::Cancelled, "the request's connection has gone"))
+    }
+}
 
 /// Answers requests.
 pub(crate) trait Handler: fmt::Debug + Send + Sync {
@@ -65,8 +148,15 @@ pub(crate) trait Handler: fmt::Debug + Send + Sync {
     /// the request or its connection closes; `token` is cancelled first. Work handed to the CPU
     /// pool should carry `token`, so that a job still queued when the request is cancelled is
     /// skipped. A panic costs this request alone, which is answered `internal`. `subscribe` and
-    /// `unsubscribe` never reach it: the connection routes them ([`Handler::subscribe`]).
-    fn handle(&self, state: Arc<AppState>, body: RequestBody, token: CancelToken) -> HandlerFuture;
+    /// `unsubscribe` never reach it: the connection routes them ([`Handler::subscribe`]). A kind
+    /// answered in parts sends each answer before its last to `replies`, and returns its last.
+    fn handle(
+        &self,
+        state: Arc<AppState>,
+        body: RequestBody,
+        token: CancelToken,
+        replies: Replies,
+    ) -> HandlerFuture;
 
     /// Opens a subscription to `request`'s topic (rendering plan R03, R03.T5.b): the topic's
     /// whole state, which answers `subscribe`, with every later change merged into `pusher`.
@@ -104,17 +194,27 @@ fn open_topic(
 /// The server's handlers: every request kind, and the code that answers it.
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
-/// (P06.T34), and plan 14's `system_bodies` and `body_detail` (P14.T36). A later plan's kind that
-/// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
-/// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
-/// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
-/// 15): `body_events` until plan 14's P14.T31. Each handler that names a universe starts from
+/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and rendering plan R06's `sky`
+/// (R06.T11.a–c: the census's JSON, its stars and band in bulk, and the host discs), the one kind
+/// answered in bulk, behind its landing switch ([`SkyService`](crate::SkyService)): until R06.T8.g
+/// turns it on by default, `sky` is answered `unsupported` unless the server is started with
+/// `--serve-sky`. A later plan's kind that this server's
+/// [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`. A kind the
+/// protocol already defines but whose handler has not landed is answered `unsupported` here, under
+/// its own ID, as an older server would answer it (plan 04, design note 15): `body_events` until
+/// plan 14's P14.T31. Each handler that names a universe starts from
 /// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
 
 impl Handler for Handlers {
-    fn handle(&self, state: Arc<AppState>, body: RequestBody, token: CancelToken) -> HandlerFuture {
+    fn handle(
+        &self,
+        state: Arc<AppState>,
+        body: RequestBody,
+        token: CancelToken,
+        replies: Replies,
+    ) -> HandlerFuture {
         match body {
             RequestBody::CreateUniverse(request) => {
                 Box::pin(universe::create(state, request).map(answered))
@@ -153,6 +253,11 @@ impl Handler for Handlers {
             // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
             // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
+            RequestBody::Sky(request) => match state.sky_service {
+                SkyService::Served => Box::pin(sky::answer(state, request, token, replies)),
+                // The landing switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
+                SkyService::Unsupported => Box::pin(ready(Err(not_served_yet("sky")))),
+            },
         }
     }
 
@@ -201,6 +306,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::Unsubscribe(_) => "unsubscribe",
         RequestBody::SceneShip(_) => "scene_ship",
         RequestBody::SceneCameras(_) => "scene_cameras",
+        RequestBody::Sky(_) => "sky",
     }
 }
 
@@ -211,13 +317,15 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
 /// record cannot. A subscription's answer is as large as its topic's state: the scene's holds a
 /// whole system's bodies (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and
-/// `unsubscribe` are small.
+/// `unsubscribe` are small. The sky's JSON is small but its census and hosts grow with the request,
+/// and rendering plan R06 classes it large (`is_large`; Design note 17's size class).
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::SystemBodies(_)
-        | ResponseBody::BodyEvents(_) => true,
+        | ResponseBody::BodyEvents(_)
+        | ResponseBody::Sky(_) => true,
         ResponseBody::Subscribe(subscribed) => match subscribed.state {
             SubscriptionState::Scene(_) => true,
         },
@@ -468,6 +576,9 @@ struct InFlight {
     token: CancelToken,
     task: AbortHandle,
     accepted: Instant,
+    /// Which request of the connection this is, so that an answer in parts sent before a cancel
+    /// is never taken for a later request's under the same ID.
+    serial: u64,
 }
 
 /// One connection's requests in flight, each run by a task in a [`JoinSet`].
@@ -481,15 +592,39 @@ pub(crate) struct Requests {
     state: Arc<AppState>,
     in_flight: HashMap<RequestId, InFlight>,
     tasks: JoinSet<Finished>,
+    /// Where requests answered in parts send their answers before their last, which the
+    /// connection holding the receiver streams.
+    partials: mpsc::Sender<Partial>,
+    /// The serial the next request accepted takes.
+    next_serial: u64,
 }
 
 impl Requests {
-    pub(crate) fn new(state: Arc<AppState>) -> Self {
+    /// A connection's requests, whose answers in parts go to `partials`.
+    pub(crate) fn new(state: Arc<AppState>, partials: mpsc::Sender<Partial>) -> Self {
         Self {
             state,
             in_flight: HashMap::with_capacity(MAX_IN_FLIGHT_REQUESTS),
             tasks: JoinSet::new(),
+            partials,
+            next_serial: 0,
         }
+    }
+
+    /// The serial of the next request to start.
+    fn take_serial(&mut self) -> u64 {
+        let serial = self.next_serial;
+        self.next_serial = self.next_serial.wrapping_add(1);
+        serial
+    }
+
+    /// Whether `id` is in flight as the `serial`th request: an answer in parts it sent is still
+    /// to be sent.
+    #[must_use]
+    pub(crate) fn is_current(&self, id: RequestId, serial: u64) -> bool {
+        self.in_flight
+            .get(&id)
+            .is_some_and(|entry| entry.serial == serial)
     }
 
     /// Accepts a request and starts its task, or refuses it and returns the answer: the
@@ -506,11 +641,13 @@ impl Requests {
             return Some(refusal);
         }
         let token = CancelToken::new();
-        let handled = self
-            .state
-            .handler
-            .handle(Arc::clone(&self.state), body, token.clone());
-        self.start(id, kind, token, handled);
+        let serial = self.take_serial();
+        let replies = Replies::new(id, serial, self.partials.clone());
+        let handled =
+            self.state
+                .handler
+                .handle(Arc::clone(&self.state), body, token.clone(), replies);
+        self.start(id, serial, kind, token, handled);
         None
     }
 
@@ -551,7 +688,8 @@ impl Requests {
             }))
             .into())
         });
-        self.start(id, kind, token, handled);
+        let serial = self.take_serial();
+        self.start(id, serial, kind, token, handled);
         None
     }
 
@@ -587,7 +725,8 @@ impl Requests {
                 )),
             }
         });
-        self.start(id, kind, CancelToken::new(), handled);
+        let serial = self.take_serial();
+        self.start(id, serial, kind, CancelToken::new(), handled);
         None
     }
 
@@ -641,10 +780,12 @@ impl Requests {
         })
     }
 
-    /// Starts an accepted request's task, which awaits `handled` and makes its terminal frame.
+    /// Starts an accepted request's task, the connection's `serial`th, which awaits `handled` and
+    /// makes its terminal frame.
     fn start(
         &mut self,
         id: RequestId,
+        serial: u64,
         kind: &'static str,
         token: CancelToken,
         handled: HandlerFuture,
@@ -662,6 +803,7 @@ impl Requests {
                 token,
                 task,
                 accepted: Instant::now(),
+                serial,
             },
         );
     }
@@ -906,13 +1048,31 @@ async fn respond(
     body: ResponseBody,
     token: CancelToken,
 ) -> Result<String, RequestError> {
-    let large = is_large(&body);
-    let message = ServerMessage::Response { id, body };
+    serialise(&state.pool, token, ServerMessage::Response { id, body }).await
+}
+
+/// The frame of `message`, serialised on `pool` where its body is large (design note 22), waiting
+/// for a place in the interactive queue: a response's, or a partial answer's (R06.T11.d).
+async fn serialise(
+    pool: &CpuPool,
+    token: CancelToken,
+    message: ServerMessage,
+) -> Result<String, RequestError> {
+    let large = match &message {
+        ServerMessage::Response { body, .. } | ServerMessage::PartialResponse { body, .. } => {
+            is_large(body)
+        }
+        ServerMessage::Welcome { .. }
+        | ServerMessage::Pong { .. }
+        | ServerMessage::Error { .. }
+        | ServerMessage::RequestError { .. }
+        | ServerMessage::Notification { .. }
+        | ServerMessage::SubscriptionEnded { .. } => false,
+    };
     if !large {
         return Ok(to_frame(&message));
     }
-    let receiver = state
-        .pool
+    let receiver = pool
         .submit(Priority::Interactive, token, move |_| to_frame(&message))
         .await?;
     let frame = receiver
@@ -935,14 +1095,17 @@ mod tests {
         DensityMapRequest, DetailLevelDto, FramePositionDto, GalacticPosition,
         GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
         OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
-        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SubscribeRequest,
-        Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
-        SystemsInRangeRequest, UniverseIdHex, UniverseTime, UnsubscribeRequest,
+        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
+        SubscribeRequest, Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex,
+        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+        UnsubscribeRequest,
     };
+
+    use tokio::time::timeout;
 
     use super::*;
     use crate::compute::SingleFlight;
-    use crate::testing::{Call, Harness, Scripted, body, small_response};
+    use crate::testing::{Call, Harness, Scripted, WAIT, body, small_response};
 
     /// A request body of every kind.
     fn every_body() -> Vec<RequestBody> {
@@ -1014,6 +1177,16 @@ mod tests {
             RequestBody::SceneCameras(SceneCamerasRequest {
                 subscription: 1,
                 cameras: Vec::new(),
+            }),
+            RequestBody::Sky(SkyRequest {
+                universe: UniverseIdHex::from_u64(42),
+                observer: GalacticPosition::default(),
+                time: UniverseTime::default(),
+                eye: None,
+                camera_limit_v: Some(9.5),
+                n_max: None,
+                cone: None,
+                exclude_system: None,
             }),
         ]
     }
@@ -1182,7 +1355,8 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, and `scene_cameras` until R03.T8 serves it.
+        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and R06's `sky`
+        // while its landing switch is off, as it is by default until R06.T8.g (R06.T11.c).
         let harness = Harness::start(Handlers).await;
         let events = every_body()
             .into_iter()
@@ -1193,14 +1367,20 @@ mod tests {
                         | RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
+                        | RequestBody::Sky(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 5);
         for body in events {
             let name = kind(&body);
             let answer = Handlers
-                .handle(Arc::clone(harness.state()), body, CancelToken::new())
+                .handle(
+                    Arc::clone(harness.state()),
+                    body,
+                    CancelToken::new(),
+                    Replies::detached(),
+                )
                 .await;
             assert_eq!(answer, Err(not_served_yet(name)), "{name}");
         }
@@ -1713,6 +1893,7 @@ mod tests {
             _state: Arc<AppState>,
             _body: RequestBody,
             _token: CancelToken,
+            _replies: Replies,
         ) -> HandlerFuture {
             let flight = self.flights.run(0, || async { explode() });
             Box::pin(async move { flight.await.map(|_: Arc<()>| small_response().into()) })
@@ -1740,6 +1921,7 @@ mod tests {
             state: Arc<AppState>,
             body: RequestBody,
             token: CancelToken,
+            replies: Replies,
         ) -> HandlerFuture {
             let first = self.first.lock().unwrap().take();
             match first {
@@ -1751,9 +1933,59 @@ mod tests {
                     });
                     Ok(small_response().into())
                 }),
-                None => self.later.handle(state, body, token),
+                None => self.later.handle(state, body, token, replies),
             }
         }
+    }
+
+    /// A handler that answers every request once in part, then never ends (R06.T11.d).
+    #[derive(Debug)]
+    struct OnePartThenWaits;
+
+    impl Handler for OnePartThenWaits {
+        fn handle(
+            &self,
+            state: Arc<AppState>,
+            _body: RequestBody,
+            token: CancelToken,
+            replies: Replies,
+        ) -> HandlerFuture {
+            Box::pin(async move {
+                replies
+                    .send(&state.pool, &token, small_response().into())
+                    .await?;
+                std::future::pending().await
+            })
+        }
+    }
+
+    /// An answer in parts sent before its request was cancelled is never taken for a later
+    /// request's under the same ID: each request is numbered apart (R06.T11.d).
+    #[tokio::test]
+    async fn an_answer_sent_before_a_cancel_is_not_the_next_requests_under_its_id() {
+        let harness = Harness::start(OnePartThenWaits).await;
+        let (sender, mut partials) = mpsc::channel(PARTIALS_QUEUED);
+        let mut requests = Requests::new(Arc::clone(harness.state()), sender);
+        let id = RequestId(5);
+        assert_eq!(requests.submit(id, body(5), Handshake::Done), None);
+        let first = timeout(WAIT, partials.recv())
+            .await
+            .expect("timed out on the first answer")
+            .expect("an answer");
+        assert!(requests.is_current(first.id, first.serial));
+        assert!(requests.cancel(id).is_some());
+        assert!(!requests.is_current(first.id, first.serial));
+        assert_eq!(requests.submit(id, body(5), Handshake::Done), None);
+        let second = timeout(WAIT, partials.recv())
+            .await
+            .expect("timed out on the second answer")
+            .expect("an answer");
+        assert_eq!(second.id, id);
+        assert_ne!(second.serial, first.serial);
+        assert!(!requests.is_current(first.id, first.serial));
+        assert!(requests.is_current(second.id, second.serial));
+        requests.close().await;
+        harness.stop().await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

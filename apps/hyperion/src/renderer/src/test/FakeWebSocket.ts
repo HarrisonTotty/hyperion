@@ -117,6 +117,11 @@ export class FakeWebSocket extends EventTarget {
     this.serverSends({ type: "response", id, body });
   }
 
+  /** Answers the request with this ID in part, before its last answer (rendering plan R06.T11.d). */
+  serverAnswersInPart(id: RequestId, body: ResponseBody): void {
+    this.serverSends({ type: "partial_response", id, body });
+  }
+
   /** Ends the request with this ID with an error. */
   serverRejects(id: RequestId, error: RequestError): void {
     this.serverSends({ type: "request_error", id, error });

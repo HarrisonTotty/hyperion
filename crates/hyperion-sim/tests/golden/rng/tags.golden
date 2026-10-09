@@ -1,5 +1,6 @@
-# generator_version = 19
+# generator_version = 21
 selftest.stream (SelfTest) = 0xe8e7b5915e249927
+selftest.surface.test_planet (SelfTest) = 0x4d98fe2531b47f3b
 event.selftest (Event) = 0x9442133d71ca154d
 galaxy.params.stellar_mass (Galaxy) = 0x7d41a975d717b0a1
 galaxy.params.share.thick (Galaxy) = 0x769eb76fa6291d05

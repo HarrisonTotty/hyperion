@@ -259,7 +259,8 @@ fn companion_range(m: f64) -> (f64, f64) {
 
 /// The panel edges for the quadratures of this module: the stellar range's ends, the given
 /// breaks inside it, ascending and without repeats.
-fn panel_edges<'a>(breaks: impl IntoIterator<Item = &'a f64>) -> Vec<f64> {
+#[must_use]
+pub(crate) fn panel_edges<'a>(breaks: impl IntoIterator<Item = &'a f64>) -> Vec<f64> {
     let mut edges: Vec<f64> = breaks
         .into_iter()
         .copied()
@@ -274,7 +275,8 @@ fn panel_edges<'a>(breaks: impl IntoIterator<Item = &'a f64>) -> Vec<f64> {
 }
 
 /// The mass whose lifetime is `age`, if one inside the stellar range has it.
-fn mass_with_lifetime(fates: &(impl StellarFates + ?Sized), age: f64) -> Option<f64> {
+#[must_use]
+pub(crate) fn mass_with_lifetime(fates: &(impl StellarFates + ?Sized), age: f64) -> Option<f64> {
     let longest = fates.lifetime(MASS_LIMIT_LO).value();
     let shortest = fates.lifetime(MASS_LIMIT_HI).value();
     if !(shortest < age && age < longest) {
@@ -291,7 +293,8 @@ fn mass_with_lifetime(fates: &(impl StellarFates + ?Sized), age: f64) -> Option<
 
 /// The panels of the quadrature in `u = ln m`: the intervals between consecutive edges, each split
 /// into equal parts no wider than [`MAX_PANEL_LN_MASS`].
-fn ln_mass_panels(edges: &[f64]) -> Vec<(f64, f64)> {
+#[must_use]
+pub(crate) fn ln_mass_panels(edges: &[f64]) -> Vec<(f64, f64)> {
     let mut panels = Vec::with_capacity(4 * edges.len());
     for pair in edges.windows(2) {
         let (start, end) = (math::ln(pair[0]), math::ln(pair[1]));
@@ -471,7 +474,7 @@ impl CompanionMasses {
 /// The share of a primary of `m1`'s stellar companions whose mass is below `c`: its mass-ratio
 /// distribution at `c ÷ m1`, taken relative to its value at the lightest companion.
 #[must_use]
-fn companion_share_below(fates: &(impl StellarFates + ?Sized), m1: f64, c: f64) -> f64 {
+pub(crate) fn companion_share_below(fates: &(impl StellarFates + ?Sized), m1: f64, c: f64) -> f64 {
     let q = c / m1;
     let cdf = if q >= 1.0 {
         1.0

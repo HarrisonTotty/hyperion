@@ -273,16 +273,23 @@ fn push_line(text: &mut String, line: &impl Serialize) {
     text.push('\n');
 }
 
-/// Makes the entries of `dir` durable.
-#[cfg(unix)]
+/// Makes the entries of `dir` durable on Unix, and does nothing elsewhere.
+///
+/// On Windows std's `File::open` cannot open a directory, and flushing a directory handle is
+/// undocumented, as [`UniverseStore::write`] explains (plan 04, P04.T17.b). There the new
+/// `knowledge/` directory and the contacts file's name are left to NTFS, which logs metadata
+/// changes in one sequential log. Each append's own `sync_data`, a `FlushFileBuffers` of the file,
+/// is expected to carry them with it, but Microsoft documents no such guarantee. On FAT, exFAT and
+/// network shares nothing is promised beyond the file's own data.
+///
+/// On macOS std's `sync_all` and `sync_data` are `fcntl(F_FULLFSYNC)`. This sync and every
+/// append's therefore flush the drive's cache.
 fn sync_directory(dir: &Path) -> io::Result<()> {
-    File::open(dir).and_then(|handle| handle.sync_all())
-}
-
-/// Makes the entries of `dir` durable. Other platforms cannot open a directory as a file.
-#[cfg(not(unix))]
-fn sync_directory(_dir: &Path) -> io::Result<()> {
-    Ok(())
+    if cfg!(unix) {
+        File::open(dir).and_then(|handle| handle.sync_all())
+    } else {
+        Ok(())
+    }
 }
 
 /// Reads the store in `dir` (module documentation).

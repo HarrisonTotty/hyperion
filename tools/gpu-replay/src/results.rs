@@ -1,0 +1,1904 @@
+//! The replay's results file, in the descent spike's schema (`hyperion.descent-spike.results`
+//! version 6, `apps/hyperion/src/main/results.ts`), so that a replay and a browser run read the
+//! same way (R05 Design notes 18, 21 and 22).
+//!
+//! A native replay has no trace, no `requestAnimationFrame`, no GPU process and no memory
+//! readings: those figures are null with the reason. The GPU's clocks are read before the first
+//! frame, once a second and after the last (`clocks.rs`), on the memory series' times, whose
+//! memory readings are all null; a GPU row measured at a median clock below 90% of the maximum
+//! says so, as the client's do (decision-r05-trace-windows-2.md, addendum B). With no trace there
+//! are no trace windows, so
+//! no frame is left out at their boundaries (`frames.excludedFrames` is 0) and the engine's
+//! sampled time (`mainThread.engine`) is null (decision-r05-trace-windows.md). A replay's frame
+//! intervals are the presentation intervals of a presented replay, or, offscreen, the intervals
+//! between the GPU's completions of successive frames (`frames.gpuCompletion`, a replay-only
+//! field), which say what the GPU sustains with nothing presented. Percentiles are by nearest rank
+//! and the criterion's rows are Design note 21's, as the client's writer reads them. A frame whose
+//! pass times were never read back is left out of the GPU rows and counted, and bounds their
+//! verdicts as the client's incomplete frames do (decision-r05-trace-windows-2.md, addendum B).
+//! Terrain and atmosphere are judged as one row, each frame's sum of both against their estimates'
+//! sum, and each one's own per-frame sums are recorded against its estimate in `gpu.rows`, a
+//! finding no verdict reads (decision-r05-high-atmosphere.md).
+//!
+//! The machine's facts are read at the replay's start through [`MachineSources`], from `sysinfo`
+//! on every platform and the cpufreq governor from sysfs on Linux (R05.T20,
+//! decision-cross-platform-server.md item 6). Windows keeps no load average, so a replay there is
+//! always provisional: whether its machine was quiet (Design note 27) is unchecked.
+
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::{Value, json};
+use sysinfo::{CpuRefreshKind, LoadAvg, MemoryRefreshKind, RefreshKind, System};
+
+use crate::clocks::{ClockReadings, ClockSample, Reading};
+
+/// The schema name the client's results files carry.
+pub const RESULTS_SCHEMA: &str = "hyperion.descent-spike.results";
+
+/// The schema's version, the client's `RESULTS_VERSION`.
+///
+/// Version 2 stores the memory series as columns of whole KiB (decision-r05-results-size.md),
+/// version 3 takes the client's trace in windows (decision-r05-trace-windows.md), and version 4
+/// (decision-r05-trace-windows-2.md) adds the trace's format, counts `mainThread.split`'s our code
+/// by the per-frame `spike.frame` spans, lists only the GPU-process slices of the recorded
+/// categories, and fails a window whose frame spans disagree with the renderer's frames. A replay
+/// has no trace, so it writes `run.trace`, `mainThread.split` and `gpu.gpuProcess` as null and
+/// meets none of those checks. Version 5 (the same decision's addendum B) counts the frames whose
+/// pass times are incomplete (`gpu.incompleteFrames`), bounds the GPU rows' verdicts by them, and
+/// adds `gpu.clocks`, the GPU's clocks on the memory series' times (R05.T14.k). Version 6
+/// (decision-r05-high-atmosphere.md, R05.T14.l) replaces the `terrain` and `atmosphere` rows with
+/// one, `terrain-atmosphere`, and adds `gpu.rows`, each pass row's per-frame sums against its
+/// estimate. It also records `run.machine.loadAverage` as a value with its reason, none where the
+/// platform keeps none (Windows) or where `sysinfo` has no backend, where version 5 wrote zeros
+/// (R05.T20, decision-cross-platform-server.md item 6).
+pub const RESULTS_VERSION: u64 = 6;
+
+/// Why a replay with no clock sample has no clocks.
+const NO_CLOCK_SAMPLE: &str = "no clock sample";
+
+/// The fraction of the maximum graphics clock below which a GPU row says what it was measured at,
+/// the client's `CLOCK_NOTE_FRACTION`.
+const CLOCK_NOTE_FRACTION: f64 = 0.9;
+
+/// The rows read from per-frame GPU times, which a clock note may sit on.
+const GPU_ROW_IDS: [&str; 2] = ["headroom-gpu", TERRAIN_ATMOSPHERE_ROW];
+
+/// The row that judges terrain and atmosphere together (Design note 21), the client's
+/// `TERRAIN_ATMOSPHERE_ROW`.
+const TERRAIN_ATMOSPHERE_ROW: &str = "terrain-atmosphere";
+
+/// The percentile every GPU row reads (Design note 21).
+const GPU_ROW_PERCENTILE: f64 = 0.95;
+
+/// Why a native replay has no memory figure.
+const NO_MEMORY: &str = "the native replay does not measure memory";
+
+/// Why a native replay has no figure read from a trace.
+const NO_TRACE: &str = "a native replay has no trace";
+
+/// Why a replay on an adapter without `TIMESTAMP_QUERY` has no pass time.
+const TIMER_REASON: &str = "the adapter has no timestamp-query";
+
+/// The first CPU's cpufreq governor on Linux, which the run records (Design note 27).
+const GOVERNOR_PATH: &str = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor";
+
+/// Why a Windows machine has no load average, as the client words it.
+const NO_WINDOWS_LOAD_AVERAGE: &str = "Windows keeps no load average";
+
+/// The platform a replay runs on, which decides which of the machine's facts exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Platform {
+    /// Linux, the one platform with a cpufreq governor.
+    Linux,
+    /// macOS.
+    MacOs,
+    /// Windows, which keeps no load average.
+    Windows,
+    /// Another, by `std::env::consts::OS`'s name.
+    Other(&'static str),
+}
+
+impl Platform {
+    /// The platform this binary was built for.
+    #[must_use]
+    fn current() -> Self {
+        match std::env::consts::OS {
+            "linux" => Self::Linux,
+            "macos" => Self::MacOs,
+            "windows" => Self::Windows,
+            other => Self::Other(other),
+        }
+    }
+
+    /// `std::env::consts::OS`'s name for it, which `run.platform` records.
+    #[must_use]
+    fn name(self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::MacOs => "macos",
+            Self::Windows => "windows",
+            Self::Other(name) => name,
+        }
+    }
+
+    /// Its name in a reason.
+    #[must_use]
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Linux => "Linux",
+            Self::MacOs => "macOS",
+            Self::Windows => "Windows",
+            Self::Other(name) => name,
+        }
+    }
+}
+
+/// The machine's facts as a replay read them at its start, which the results file records.
+///
+/// It is the seam through which every platform's facts are tested on any (R05.T20): [`read`]
+/// fills it from `sysinfo`, and the per-platform rules are [`load_average_on`] and
+/// [`governor_on`].
+///
+/// [`read`]: MachineSources::read
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MachineSources {
+    /// The platform.
+    platform: Platform,
+    /// The host name as the platform gives it, before the file name's normalisation.
+    host_name: Option<String>,
+    /// The first CPU's brand.
+    cpu_brand: Option<String>,
+    /// The threads the replay may run on.
+    logical_cores: Option<usize>,
+    /// The machine's memory, bytes.
+    memory_bytes: Option<u64>,
+    /// The 1-, 5- and 15-minute load averages, or why there are none.
+    load_average: Result<[f64; 3], String>,
+    /// The first CPU's cpufreq governor, or why there is none.
+    governor: Result<String, String>,
+}
+
+/// The load average on `platform`, from `read`, which gives `sysinfo`'s or `None` where `sysinfo`
+/// has no backend; or why there is none.
+///
+/// Windows keeps no load average: `sysinfo` emulates one from the processor queue's length,
+/// sampled every 5 s from its first call, so at a replay's start it would read 0, which is not a
+/// reading. `read` is not called there. Elsewhere `sysinfo` gives zeros where the platform's call
+/// fails (an unreadable `/proc/loadavg`, a failed `getloadavg`), which cannot be told from a
+/// reading; the replayer before it did the same on Linux.
+fn load_average_on(
+    platform: Platform,
+    read: impl FnOnce() -> Option<LoadAvg>,
+) -> Result<[f64; 3], String> {
+    match platform {
+        Platform::Windows => Err(NO_WINDOWS_LOAD_AVERAGE.to_owned()),
+        Platform::Linux | Platform::MacOs | Platform::Other(_) => read()
+            .map(|load| [load.one, load.five, load.fifteen])
+            .ok_or_else(|| format!("no load average on {}", platform.display_name())),
+    }
+}
+
+/// The first CPU's cpufreq governor on `platform`, from `read`, which reads [`GOVERNOR_PATH`]; or
+/// why there is none. Only Linux has one, so `read` is called there alone.
+fn governor_on(
+    platform: Platform,
+    read: impl FnOnce() -> io::Result<String>,
+) -> Result<String, String> {
+    match platform {
+        // The reason leaves out the error, as the client's does, so that the two read alike.
+        Platform::Linux => read()
+            .map(|text| text.trim().to_owned())
+            .map_err(|_| format!("{GOVERNOR_PATH} could not be read")),
+        Platform::MacOs | Platform::Windows | Platform::Other(_) => Err(format!(
+            "no cpufreq governor on {}",
+            platform.display_name()
+        )),
+    }
+}
+
+impl MachineSources {
+    /// This machine's facts now: the host name, CPU, memory and load average from `sysinfo`, which
+    /// reads `/proc` on Linux as the replayer did before, and the governor from sysfs on Linux.
+    #[must_use]
+    pub(crate) fn read() -> Self {
+        let platform = Platform::current();
+        let system = System::new_with_specifics(
+            RefreshKind::nothing()
+                .with_cpu(CpuRefreshKind::nothing())
+                .with_memory(MemoryRefreshKind::nothing().with_ram()),
+        );
+        Self {
+            platform,
+            host_name: System::host_name(),
+            cpu_brand: system
+                .cpus()
+                .first()
+                .map(|cpu| cpu.brand().trim().to_owned())
+                .filter(|brand| !brand.is_empty()),
+            // An error here is the platform's refusal to say, which the findings report.
+            logical_cores: std::thread::available_parallelism()
+                .ok()
+                .map(std::num::NonZero::get),
+            memory_bytes: Some(system.total_memory()).filter(|bytes| *bytes > 0),
+            load_average: load_average_on(platform, || {
+                sysinfo::IS_SUPPORTED_SYSTEM.then(System::load_average)
+            }),
+            governor: governor_on(platform, || fs::read_to_string(GOVERNOR_PATH)),
+        }
+    }
+
+    /// The facts that could not be read, as findings that say what the file holds instead, since
+    /// the schema keeps them plain values.
+    #[must_use]
+    pub(crate) fn findings(&self) -> Vec<String> {
+        let unread = |what: &str, written: &str| {
+            format!("the machine's {what} could not be read: run.machine.{written}")
+        };
+        let mut findings = Vec::new();
+        if self
+            .host_name
+            .as_deref()
+            .is_none_or(|name| normalised(name).is_empty())
+        {
+            findings.push(unread("host name", "name is \"machine\""));
+        }
+        if self.cpu_brand.is_none() {
+            findings.push(unread("CPU", "cpu is \"unknown\""));
+        }
+        if self.logical_cores.is_none() {
+            findings.push(unread("thread count", "logicalCores is 0"));
+        }
+        if self.memory_bytes.is_none() {
+            findings.push(unread("memory", "memoryBytes is 0"));
+        }
+        findings
+    }
+}
+
+/// A host name as the file name and `run.machine.name` take it, as the client's: lower-cased,
+/// with everything but ASCII letters, digits and `-` dropped.
+#[must_use]
+fn normalised(host_name: &str) -> String {
+    host_name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect()
+}
+
+/// The memory series' reading columns (the client's `MemorySeries`), each null all run here.
+const MEMORY_COLUMNS: [&str; 8] = [
+    "appKiB",
+    "gpuProcessKiB",
+    "tracingKiB",
+    "rendererPrivateKiB",
+    "drmResidentKiB",
+    "drmTotalKiB",
+    "nvidiaDeviceKiB",
+    "nvidiaGpuProcessKiB",
+];
+
+/// A native replay's memory series: the clock samples' times, and every memory reading null with
+/// the reason.
+#[must_use]
+fn memory_series(clocks: &[ClockSample]) -> Value {
+    let mut series = serde_json::Map::new();
+    let t_ms: Vec<u64> = clocks.iter().map(|sample| sample.t_ms).collect();
+    series.insert("tMs".to_owned(), json!(t_ms));
+    for column in MEMORY_COLUMNS {
+        series.insert(column.to_owned(), missing(NO_MEMORY));
+    }
+    Value::Object(series)
+}
+
+/// The distinct reasons of `reasons`, in their first order, joined.
+#[must_use]
+fn joined<'a>(reasons: impl IntoIterator<Item = &'a str>) -> String {
+    let mut distinct: Vec<&str> = Vec::new();
+    for reason in reasons {
+        if !distinct.contains(&reason) {
+            distinct.push(reason);
+        }
+    }
+    distinct.join("; ")
+}
+
+/// A column of readings in the client's `MemoryColumn` form: each reading, -1 within its gaps,
+/// and the gaps, consecutive samples of one reason being one; null with every reason when no
+/// sample has a reading. `readings` is not empty.
+#[must_use]
+fn reading_column(readings: impl IntoIterator<Item = Reading>) -> Value {
+    let mut samples: Vec<i64> = Vec::new();
+    let mut gaps: Vec<(usize, usize, String)> = Vec::new();
+    for (i, reading) in readings.into_iter().enumerate() {
+        match reading {
+            Ok(value) => samples.push(i64::from(value)),
+            Err(reason) => {
+                samples.push(-1);
+                match gaps.last_mut() {
+                    Some((_, to, last)) if *to + 1 == i && *last == reason => *to = i,
+                    _ => gaps.push((i, i, reason)),
+                }
+            }
+        }
+    }
+    if samples.iter().all(|reading| *reading == -1) {
+        return missing(&joined(gaps.iter().map(|(_, _, reason)| reason.as_str())));
+    }
+    let gaps: Vec<Value> = gaps
+        .into_iter()
+        .map(|(from, to, reason)| json!({ "from": from, "to": to, "reason": reason }))
+        .collect();
+    measured(json!({ "samples": samples, "gaps": gaps }))
+}
+
+/// The readings of the first sample that has any, and their source's maximum: the largest any of
+/// its samples read.
+#[must_use]
+fn source_readings(clocks: &[ClockSample]) -> Option<(&ClockReadings, Option<u32>)> {
+    let first = clocks
+        .iter()
+        .find_map(|sample| sample.readings.as_ref().ok())?;
+    let max = clocks
+        .iter()
+        .filter_map(|sample| sample.readings.as_ref().ok())
+        .filter(|readings| readings.source == first.source)
+        .filter_map(|readings| readings.max_graphics_mhz.as_ref().ok().copied())
+        .max();
+    Some((first, max))
+}
+
+/// The replay's `gpu.clocks`, as the client's `gpuClocksOf` builds it from its samples: the first
+/// reading's source, a column a reading on the samples' times, and the largest maximum read;
+/// without a graphics clock at any sample, null with that reason.
+#[must_use]
+fn clocks_json(clocks: &[ClockSample]) -> Value {
+    if clocks.is_empty() {
+        return missing(NO_CLOCK_SAMPLE);
+    }
+    let Some((first, max)) = source_readings(clocks) else {
+        return missing(&joined(clocks.iter().filter_map(|sample| {
+            sample.readings.as_ref().err().map(String::as_str)
+        })));
+    };
+    let source = first.source;
+    let column = |pick: fn(&ClockReadings) -> &Reading| {
+        reading_column(clocks.iter().map(|sample| match &sample.readings {
+            Ok(readings) if readings.source == source => pick(readings).clone(),
+            Ok(readings) => Err(format!(
+                "read from {}, not the replay's {}",
+                readings.source.name(),
+                source.name()
+            )),
+            Err(reason) => Err(reason.clone()),
+        }))
+    };
+    let graphics = column(|readings| &readings.graphics_mhz);
+    if graphics["value"].is_null() {
+        return graphics;
+    }
+    let max_graphics = max.map_or_else(
+        || {
+            missing(
+                first
+                    .max_graphics_mhz
+                    .as_ref()
+                    .err()
+                    .map_or("no maximum", String::as_str),
+            )
+        },
+        |mhz| measured(json!(mhz)),
+    );
+    measured(json!({
+        "source": source.name(),
+        "maxGraphicsMHz": max_graphics,
+        "graphicsMHz": graphics,
+        "memoryMHz": column(|readings| &readings.memory_mhz),
+        "performanceState": column(|readings| &readings.performance_state),
+    }))
+}
+
+/// The note a GPU row carries when the replay's median graphics clock was below
+/// [`CLOCK_NOTE_FRACTION`] of the maximum, as the client's `clockNote` words it; a replay has no
+/// warm-up, so every sample counts.
+#[must_use]
+fn clock_note(clocks: &[ClockSample]) -> Option<String> {
+    let (first, max) = source_readings(clocks)?;
+    let max = max?;
+    let mut graphics: Vec<u32> = clocks
+        .iter()
+        .filter_map(|sample| sample.readings.as_ref().ok())
+        .filter(|readings| readings.source == first.source)
+        .filter_map(|readings| readings.graphics_mhz.as_ref().ok().copied())
+        .collect();
+    graphics.sort_unstable();
+    let median = *graphics.get(rank_index(graphics.len(), 0.5))?;
+    (f64::from(median) < CLOCK_NOTE_FRACTION * f64::from(max)).then(|| {
+        format!("measured at a median {median} of {max} MHz (the driver's choice at this load)")
+    })
+}
+
+/// A figure, or `null` with the reason, as the schema writes it.
+#[must_use]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "every caller builds the value for this figure alone"
+)]
+pub fn measured(value: Value) -> Value {
+    json!({ "value": value, "reason": null })
+}
+
+/// A missing figure and why.
+#[must_use]
+pub fn missing(reason: &str) -> Value {
+    json!({ "value": null, "reason": reason })
+}
+
+/// Frame intervals summarised as Design note 21 reads them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrameStats {
+    /// Intervals.
+    pub(crate) count: usize,
+    /// The 50th, 95th and 99th percentiles by nearest rank, and the largest, ms.
+    pub(crate) p50_ms: f64,
+    /// See `p50_ms`.
+    pub(crate) p95_ms: f64,
+    /// See `p50_ms`.
+    pub(crate) p99_ms: f64,
+    /// See `p50_ms`.
+    pub(crate) max_ms: f64,
+    /// Intervals above 1.5 T, `None` without T.
+    pub(crate) missed: Option<usize>,
+    /// Intervals above 3 T, `None` without T.
+    pub(crate) hitches: Option<usize>,
+}
+
+/// The index [`nearest_rank`] reads among `len` ascending values at percentile `p`, from 0; the
+/// GPU rows' bounds read the same, as the client's `rankIndex` does. `len` is at least 1.
+#[must_use]
+fn rank_index(len: usize, p: f64) -> usize {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "a rank within a list's length, which is far below 2^52"
+    )]
+    let rank = (p * len as f64).ceil() as usize;
+    rank.clamp(1, len.max(1)) - 1
+}
+
+/// The `p`th percentile of ascending `sorted` by nearest rank, or `None` for no values.
+#[must_use]
+pub fn nearest_rank(sorted: &[f64], p: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.get(rank_index(sorted.len(), p)).copied()
+}
+
+/// Summarises `intervals_ms` against the period T, or `None` for no intervals.
+#[must_use]
+pub fn frame_stats(intervals_ms: &[f64], period_ms: Option<f64>) -> Option<FrameStats> {
+    let mut sorted = intervals_ms.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    Some(FrameStats {
+        count: sorted.len(),
+        p50_ms: nearest_rank(&sorted, 0.5)?,
+        p95_ms: nearest_rank(&sorted, 0.95)?,
+        p99_ms: nearest_rank(&sorted, 0.99)?,
+        max_ms: *sorted.last()?,
+        missed: period_ms.map(|t| sorted.iter().filter(|ms| **ms > 1.5 * t).count()),
+        hitches: period_ms.map(|t| sorted.iter().filter(|ms| **ms > 3.0 * t).count()),
+    })
+}
+
+fn stats_json(stats: &FrameStats) -> Value {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "frame counts are far below 2^52"
+    )]
+    let fraction = stats
+        .missed
+        .map(|missed| missed as f64 / stats.count as f64);
+    json!({
+        "count": stats.count,
+        "p50Ms": stats.p50_ms,
+        "p95Ms": stats.p95_ms,
+        "p99Ms": stats.p99_ms,
+        "maxMs": stats.max_ms,
+        "missed": stats.missed,
+        "missedFraction": fraction,
+        "hitches": stats.hitches,
+    })
+}
+
+/// The quality setting a run is judged at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Setting {
+    /// 1080p, T the vsync period.
+    High,
+    /// 720p30, T twice the vsync period.
+    Low,
+}
+
+impl Setting {
+    fn name(self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Low => "low",
+        }
+    }
+}
+
+/// Which of Design note 21's GPU rows a pass counts towards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassRow {
+    /// The terrain row.
+    Terrain,
+    /// The atmosphere row.
+    Atmosphere,
+    /// Neither.
+    Other,
+}
+
+/// What a replay measured and how it ran.
+#[derive(Debug, Clone)]
+pub struct ReplayFigures {
+    /// When the replay started.
+    pub(crate) started_at: SystemTime,
+    /// The capture's directory.
+    pub(crate) capture: PathBuf,
+    /// The setting the capture was taken at.
+    pub(crate) setting: Setting,
+    /// The capture's seed, as it recorded it, or `"unknown"`.
+    pub(crate) seed: String,
+    /// Whether frames were presented in a window (FIFO) or replayed offscreen.
+    pub(crate) presented: bool,
+    /// The display's refresh rate, Hz, for a presented replay.
+    pub(crate) display_hz: Option<f64>,
+    /// The adapter replayed on.
+    pub(crate) adapter: wgpu::AdapterInfo,
+    /// Whether passes were timed (`TIMESTAMP_QUERY`).
+    pub(crate) timed: bool,
+    /// The main canvas's size, pixels.
+    pub(crate) canvas: (u32, u32),
+    /// Intervals between presentations (presented) or GPU completions (offscreen), ms.
+    pub(crate) intervals_ms: Vec<f64>,
+    /// Frames whose resolved pass times were never read back, which `passes` leaves out.
+    pub(crate) unread_frames: usize,
+    /// Frames that timed no pass, which `passes` leaves out too.
+    pub(crate) untimed_frames: usize,
+    /// Each read-back frame's passes, label and GPU time, ms.
+    pub(crate) passes: Vec<Vec<(String, f64)>>,
+    /// The row of each pass label, from the capture.
+    pub(crate) rows: BTreeMap<String, PassRow>,
+    /// Passes beyond the timer's capacity.
+    pub(crate) untimed_passes: usize,
+    /// Bytes written by the span's uploads.
+    pub(crate) upload_bytes: u64,
+    /// Validation errors wgpu reported during the replay.
+    pub(crate) errors: Vec<String>,
+    /// What the replay could not do as captured: the capture's own problems, features the
+    /// adapter lacks, a canvas format the window cannot present, the machine's facts it could not
+    /// read.
+    pub(crate) findings: Vec<String>,
+    /// The GPU's clocks, read before the first frame, once a second and after the last.
+    pub(crate) clocks: Vec<ClockSample>,
+    /// The machine's facts, read at the replay's start.
+    pub(crate) machine: MachineSources,
+}
+
+impl ReplayFigures {
+    /// Every frame replayed: those read back, those never read back and those that timed no pass,
+    /// so that the unread are never more than the frames.
+    #[must_use]
+    pub fn frames(&self) -> usize {
+        self.passes.len() + self.unread_frames + self.untimed_frames
+    }
+
+    /// Whether frames were presented in a window.
+    #[must_use]
+    pub fn presented(&self) -> bool {
+        self.presented
+    }
+
+    /// wgpu's validation errors during the replay.
+    #[must_use]
+    pub fn errors(&self) -> &[String] {
+        &self.errors
+    }
+
+    /// What the replay could not do as captured, and the machine's facts it could not read.
+    #[must_use]
+    pub fn findings(&self) -> &[String] {
+        &self.findings
+    }
+}
+
+/// One row of the criterion.
+fn row(
+    id: &str,
+    criterion: &str,
+    limit: Option<f64>,
+    unit: &str,
+    value: Result<f64, String>,
+    note: Option<&str>,
+) -> Value {
+    let (value, reason) = match value {
+        Ok(value) => (
+            Some(value),
+            limit.is_none().then(|| "no period T".to_owned()),
+        ),
+        Err(reason) => (None, Some(reason)),
+    };
+    let verdict = match (value, limit) {
+        (Some(value), Some(limit)) if value <= limit => "pass",
+        (Some(_), Some(_)) => "fail",
+        _ => "not-measured",
+    };
+    json!({
+        "id": id,
+        "criterion": criterion,
+        "limit": limit,
+        "unit": unit,
+        "value": value,
+        "tolerance": 0,
+        "verdict": verdict,
+        "note": reason.or(note.map(str::to_owned)),
+    })
+}
+
+/// Why a GPU row is not measured when the frames whose pass times were not read back could carry
+/// its verdict either way.
+#[must_use]
+fn unread_reason(count: usize) -> String {
+    let frames = if count == 1 { "frame's" } else { "frames'" };
+    format!("{count} {frames} pass times could not be read back")
+}
+
+/// How a replay timed its passes, which its GPU rows read.
+#[derive(Debug, Clone, Copy)]
+struct PassTiming {
+    /// Whether the adapter timed passes (`TIMESTAMP_QUERY`).
+    timed: bool,
+    /// Frames whose resolved pass times were never read back.
+    unread: usize,
+}
+
+impl PassTiming {
+    /// The `p`th percentile of `sorted`, ascending, or why there is none.
+    fn percentile(self, sorted: &[f64], p: f64, what: &str) -> Result<f64, String> {
+        if !self.timed {
+            return Err(TIMER_REASON.to_owned());
+        }
+        nearest_rank(sorted, p).ok_or_else(|| {
+            if self.unread > 0 {
+                unread_reason(self.unread)
+            } else {
+                format!("no timed {what}")
+            }
+        })
+    }
+
+    /// The 95th percentile of `values`, which it sorts, or why there is none.
+    fn p95(self, values: &mut [f64], what: &str) -> Result<f64, String> {
+        values.sort_by(f64::total_cmp);
+        self.percentile(values, GPU_ROW_PERCENTILE, what)
+    }
+
+    /// One pass row's per-frame sums against its estimate, as the client's `gpu.rows` holds them
+    /// (decision-r05-high-atmosphere.md).
+    ///
+    /// It holds the 50th, 95th and 99th percentiles of `values`, which it sorts, `estimate_ms`, and
+    /// whether the 95th is above it: a finding for T19 and R12, which no verdict reads.
+    #[must_use]
+    fn pass_row(self, values: &mut [f64], estimate_ms: f64, what: &str) -> Value {
+        let p95 = self.p95(values, what);
+        // Without a 95th percentile there is nothing to compare; `p95Ms` carries its reason.
+        let over_estimate = p95.as_ref().ok().map(|ms| *ms > estimate_ms);
+        let figure = |ms: Result<f64, String>| {
+            ms.map_or_else(|reason| missing(&reason), |ms| measured(json!(ms)))
+        };
+        json!({
+            "estimateMs": estimate_ms,
+            "p50Ms": figure(self.percentile(values, 0.5, what)),
+            "p95Ms": figure(p95),
+            "p99Ms": figure(self.percentile(values, 0.99, what)),
+            "overEstimate": over_estimate,
+        })
+    }
+
+    /// A GPU row: the 95th percentile of `values`, its frames read back, against `limit`, judged
+    /// so that its verdict holds whatever times the unread frames had, as the client's
+    /// `boundedGpuRow` does (decision-r05-trace-windows-2.md, addendum B, ruling 1).
+    ///
+    /// The row passes only if it still passes with every unread frame placed above its limit, and
+    /// fails only if it still fails with every one placed below it; otherwise it is not measured,
+    /// with their count as its reason. With no unread frame it is [`row`]'s.
+    #[must_use]
+    fn row(
+        self,
+        id: &str,
+        criterion: &str,
+        limit: Option<f64>,
+        values: &mut [f64],
+        what: &str,
+    ) -> Value {
+        let value = self.p95(values, what);
+        let mut judged = row(id, criterion, limit, "ms", value.clone(), None);
+        let (Some(limit), Ok(_), true) = (limit, &value, self.unread > 0) else {
+            return judged;
+        };
+        // The percentile's index among the read values and the unread placed after them (above)
+        // or before them (below); `values` is sorted now.
+        let rank = rank_index(values.len() + self.unread, GPU_ROW_PERCENTILE);
+        let above = values.get(rank).copied().unwrap_or(f64::INFINITY);
+        let below = rank
+            .checked_sub(self.unread)
+            .and_then(|i| values.get(i))
+            .copied()
+            .unwrap_or(f64::NEG_INFINITY);
+        let judge = |ms: f64| if ms <= limit { "pass" } else { "fail" };
+        let (verdict, note) = if judge(above) == judge(below) {
+            let frames = if self.unread == 1 { "frame" } else { "frames" };
+            (
+                judge(above),
+                format!(
+                    "{} {frames} with incomplete pass times left out; the verdict holds whatever their times",
+                    self.unread
+                ),
+            )
+        } else {
+            ("not-measured", unread_reason(self.unread))
+        };
+        judged["verdict"] = json!(verdict);
+        judged["note"] = json!(note);
+        judged
+    }
+}
+
+/// The machine's facts as the schema records them, from `sources`.
+///
+/// A fact that could not be read is the schema's plain value ([`MachineSources::findings`] says
+/// which). The load average is a value with its reason (results version 6, R05.T20;
+/// decision-cross-platform-server.md item 6): null where the platform keeps none, as Windows does,
+/// or where `sysinfo` has no backend, with that reason; [`quiet`] then marks the run provisional
+/// and says why.
+#[must_use]
+fn machine(sources: &MachineSources, adapter: &wgpu::AdapterInfo) -> Value {
+    let name = sources
+        .host_name
+        .as_deref()
+        .map(normalised)
+        .unwrap_or_default();
+    json!({
+        "name": if name.is_empty() { "machine".to_owned() } else { name },
+        "cpu": sources.cpu_brand.as_deref().unwrap_or("unknown"),
+        "logicalCores": sources.logical_cores.unwrap_or(0),
+        "memoryBytes": sources.memory_bytes.unwrap_or(0),
+        "governor": sources
+            .governor
+            .as_ref()
+            .map_or_else(|reason| missing(reason), |governor| measured(json!(governor))),
+        "loadAverage": sources
+            .load_average
+            .as_ref()
+            .map_or_else(|reason| missing(reason), |load| measured(json!(load))),
+        "gpu": measured(json!({
+            "vendorId": adapter.vendor,
+            "deviceId": adapter.device,
+            "driverVersion": format!("{} {}", adapter.driver, adapter.driver_info),
+            "description": adapter.name,
+        })),
+    })
+}
+
+/// Design note 27's rule for a replay started at `load_average`: provisional at a 1-minute load of
+/// 1 or more, and always without a load average (Windows keeps none), when whether the machine was
+/// quiet is unchecked; the client's `quietOf` words it alike.
+#[must_use]
+fn quiet(load_average: &Result<[f64; 3], String>) -> Value {
+    match load_average {
+        Ok([one, ..]) if *one >= 1.0 => json!({
+            "provisional": true,
+            "note": format!("load average {one:.2} at the start (Design note 27 asks under 1): provisional"),
+        }),
+        Ok(_) => json!({ "provisional": false, "note": null }),
+        Err(reason) => json!({
+            "provisional": true,
+            "note": format!("{reason}: the quiet-machine rule (Design note 27) is unchecked"),
+        }),
+    }
+}
+
+/// The date and time of `time` as ISO 8601 in UTC, to the second.
+fn iso8601(time: SystemTime) -> String {
+    let seconds = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let days = i64::try_from(seconds / 86_400).unwrap_or(0);
+    let rest = seconds % 86_400;
+    // Howard Hinnant's civil-from-days algorithm.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000Z",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
+}
+
+/// The results file of a replay, as JSON in the client's schema.
+#[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the schema's parts, written in its order"
+)]
+pub fn results_json(figures: &ReplayFigures) -> Value {
+    let vsync_ms = figures
+        .display_hz
+        .filter(|hz| *hz > 0.0)
+        .map(|hz| 1000.0 / hz);
+    let period_ms = if figures.presented {
+        vsync_ms.map(|t| {
+            if figures.setting == Setting::Low {
+                2.0 * t
+            } else {
+                t
+            }
+        })
+    } else {
+        None
+    };
+    let period_reason = if figures.presented {
+        "the display reports no refresh rate"
+    } else {
+        "an offscreen replay presents nothing"
+    };
+    let stats = frame_stats(&figures.intervals_ms, period_ms);
+    let no_interval = if figures.presented || figures.timed {
+        "no frame interval"
+    } else {
+        "an offscreen replay times frames by timestamp-query, which the adapter lacks"
+    };
+    let stats_figure = stats
+        .as_ref()
+        .map_or_else(|| missing(no_interval), |s| measured(stats_json(s)));
+    let (presentation, completion) = if figures.presented {
+        (
+            stats_figure.clone(),
+            missing("a presented replay times presentations"),
+        )
+    } else {
+        (
+            missing("an offscreen replay presents nothing"),
+            stats_figure.clone(),
+        )
+    };
+
+    let mut by_label: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+    let mut sums = Vec::new();
+    let mut rest_of_frame = Vec::new();
+    let mut terrain = Vec::new();
+    let mut atmosphere = Vec::new();
+    for frame in &figures.passes {
+        // A row's sum counts only frames with a pass of that row, as the client's writer does; the
+        // rest of the frame sums terrain's and the atmosphere's passes in the frame's order.
+        let (mut sum, mut rest, mut t, mut a) = (0.0, None::<f64>, None::<f64>, None::<f64>);
+        for (label, ms) in frame {
+            by_label.entry(label.as_str()).or_default().push(*ms);
+            sum += ms;
+            match figures.rows.get(label).copied().unwrap_or(PassRow::Other) {
+                PassRow::Terrain => {
+                    t = Some(t.unwrap_or(0.0) + ms);
+                    rest = Some(rest.unwrap_or(0.0) + ms);
+                }
+                PassRow::Atmosphere => {
+                    a = Some(a.unwrap_or(0.0) + ms);
+                    rest = Some(rest.unwrap_or(0.0) + ms);
+                }
+                PassRow::Other => {}
+            }
+        }
+        if !frame.is_empty() {
+            sums.push(sum);
+        }
+        rest_of_frame.extend(rest);
+        terrain.extend(t);
+        atmosphere.extend(a);
+    }
+    let passes: Vec<Value> = by_label
+        .iter_mut()
+        .map(|(label, times)| {
+            times.sort_by(f64::total_cmp);
+            json!({
+                "label": label,
+                "row": match figures.rows.get(*label).copied().unwrap_or(PassRow::Other) {
+                    PassRow::Terrain => "terrain",
+                    PassRow::Atmosphere => "atmosphere",
+                    PassRow::Other => "other",
+                },
+                "frames": times.len(),
+                "p50Ms": nearest_rank(times, 0.5),
+                "p95Ms": nearest_rank(times, 0.95),
+                "p99Ms": nearest_rank(times, 0.99),
+            })
+        })
+        .collect();
+    let timing = PassTiming {
+        timed: figures.timed,
+        unread: figures.unread_frames,
+    };
+    let sum_p95 = timing.p95(&mut sums, "pass");
+    // Terrain's and the atmosphere's estimates, whose sum is the rest of the frame's limit
+    // (decision-r05-high-atmosphere.md).
+    let (terrain_estimate_ms, atmosphere_estimate_ms, p95_limit, memory_limit) =
+        match figures.setting {
+            Setting::High => (5.0, 1.0, period_ms.map(|t| t + 1.0), 3e9),
+            Setting::Low => (14.0, 4.0, Some(35.0), 1e9),
+        };
+    let rest_limit_ms = terrain_estimate_ms + atmosphere_estimate_ms;
+    let rows = json!({
+        "terrain": timing.pass_row(&mut terrain, terrain_estimate_ms, "terrain pass"),
+        "atmosphere": timing.pass_row(&mut atmosphere, atmosphere_estimate_ms, "atmosphere pass"),
+    });
+    let frame_value = |pick: &dyn Fn(&FrameStats) -> Option<f64>| -> Result<f64, String> {
+        let Some(stats) = &stats else {
+            return Err("no frame interval".to_owned());
+        };
+        pick(stats).ok_or_else(|| period_reason.to_owned())
+    };
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "frame counts are far below 2^52"
+    )]
+    let whole = vec![
+        row(
+            "p50",
+            "50th percentile ≤ T + 0.5 ms",
+            period_ms.map(|t| t + 0.5),
+            "ms",
+            frame_value(&|s| Some(s.p50_ms)),
+            None,
+        ),
+        row(
+            "p95",
+            if figures.setting == Setting::High {
+                "95th percentile ≤ T + 1 ms"
+            } else {
+                "95th percentile ≤ 35 ms"
+            },
+            if period_ms.is_some() { p95_limit } else { None },
+            "ms",
+            frame_value(&|s| Some(s.p95_ms)),
+            None,
+        ),
+        row(
+            "p99",
+            "99th percentile ≤ 2T",
+            period_ms.map(|t| 2.0 * t),
+            "ms",
+            frame_value(&|s| Some(s.p99_ms)),
+            None,
+        ),
+        row(
+            "missed",
+            "≤ 1% of intervals above 1.5 T",
+            Some(0.01),
+            "fraction",
+            frame_value(&|s| s.missed.map(|m| m as f64 / s.count as f64)),
+            None,
+        ),
+        row(
+            "hitches",
+            "none above 3 T",
+            Some(0.0),
+            "count",
+            frame_value(&|s| s.hitches.map(|h| h as f64)),
+            None,
+        ),
+        row(
+            "headroom-main",
+            "main thread ≤ 0.8 T at the 95th percentile",
+            period_ms.map(|t| 0.8 * t),
+            "ms",
+            Err("a native replay has no main-thread figure".to_owned()),
+            None,
+        ),
+        timing.row(
+            "headroom-gpu",
+            "GPU pass sum ≤ 0.8 T at the 95th percentile",
+            period_ms.map(|t| 0.8 * t),
+            &mut sums,
+            "pass",
+        ),
+        timing.row(
+            TERRAIN_ATMOSPHERE_ROW,
+            &format!(
+                "terrain and atmosphere GPU time, summed per frame, ≤ {rest_limit_ms} ms ({terrain_estimate_ms} + {atmosphere_estimate_ms}) at the 95th percentile"
+            ),
+            Some(rest_limit_ms),
+            &mut rest_of_frame,
+            "terrain or atmosphere pass",
+        ),
+        row(
+            "memory",
+            if figures.setting == Setting::High {
+                "GPU resident ≤ 3 GB"
+            } else {
+                "GPU resident ≤ 1 GB"
+            },
+            Some(memory_limit),
+            "bytes",
+            Err(NO_MEMORY.to_owned()),
+            None,
+        ),
+    ];
+    let mut whole = whole;
+    if let Some(note) = clock_note(&figures.clocks) {
+        for entry in &mut whole {
+            let gpu_row = entry["id"]
+                .as_str()
+                .is_some_and(|id| GPU_ROW_IDS.contains(&id));
+            if gpu_row && !entry["value"].is_null() {
+                entry["note"] = json!(match entry["note"].as_str() {
+                    Some(own) => format!("{own}; {note}"),
+                    None => note.clone(),
+                });
+            }
+        }
+    }
+    let overall = {
+        let verdicts: Vec<&str> = whole
+            .iter()
+            .filter_map(|r| r.get("verdict").and_then(Value::as_str))
+            .collect();
+        if verdicts.contains(&"fail") {
+            "fail"
+        } else if verdicts.contains(&"not-measured") {
+            "not-measured"
+        } else {
+            "pass"
+        }
+    };
+    json!({
+        "schema": RESULTS_SCHEMA,
+        "version": RESULTS_VERSION,
+        "run": {
+            "startedAt": iso8601(figures.started_at),
+            "machine": machine(&figures.machine, &figures.adapter),
+            "versions": {
+                "app": format!("gpu-replay {}", env!("CARGO_PKG_VERSION")),
+                "electron": "none (native replay)",
+                "chromium": "none (native replay)",
+                "node": "none (native replay)",
+                "v8": "none (native replay)",
+            },
+            "platform": figures.machine.platform.name(),
+            "launchMode": "native-replay",
+            "setting": figures.setting.name(),
+            "seed": figures.seed,
+            "options": {
+                "capture": figures.capture.display().to_string(),
+                "presented": figures.presented,
+                "backend": format!("{:?}", figures.adapter.backend).to_lowercase(),
+                "validationErrors": figures.errors.len(),
+            },
+            "switches": [],
+            "timer": if figures.timed { "full" } else { "absent" },
+            "shown": figures.presented,
+            "periodMs": period_ms.map_or_else(|| missing(period_reason), |t| measured(json!(t))),
+            "warmupS": 0,
+            "canvas": { "widthPx": figures.canvas.0, "heightPx": figures.canvas.1 },
+            "quiet": quiet(&figures.machine.load_average),
+            "trace": missing(NO_TRACE),
+        },
+        "levels": [],
+        "frames": {
+            "source": if figures.presented { "presentation" } else { "gpu-completion" },
+            "presentation": presentation,
+            "raf": missing("a native replay has no requestAnimationFrame"),
+            "gpuCompletion": completion,
+            "segments": [],
+            "dropped": missing(NO_TRACE),
+            "excludedFrames": 0,
+        },
+        "gpu": {
+            "timer": if figures.timed { "full" } else { "absent" },
+            "tolerancePerPassMs": 0,
+            "untimedPasses": figures.untimed_passes,
+            "passes": if figures.timed { measured(json!(passes)) } else { missing(TIMER_REASON) },
+            "sumP95Ms": sum_p95.map_or_else(|reason| missing(&reason), |v| measured(json!(v))),
+            "rows": rows,
+            // A replay resolves once a frame, so a frame's pass times are whole or none.
+            "incompleteFrames": if figures.timed {
+                measured(json!({
+                    "dropped": figures.unread_frames,
+                    "partial": 0,
+                    "frames": figures.frames(),
+                }))
+            } else {
+                missing(TIMER_REASON)
+            },
+            "gpuProcess": missing("a native replay has no GPU process"),
+            "clocks": clocks_json(&figures.clocks),
+        },
+        "mainThread": {
+            "ourCodeP95Ms": missing("a native replay has no main-thread figure"),
+            "split": missing(NO_TRACE),
+            "engine": missing(NO_TRACE),
+            "gc": missing(NO_TRACE),
+        },
+        "streaming": [],
+        "uploads": { "bytes": figures.upload_bytes },
+        "pipelines": { "late": [] },
+        "memory": {
+            "series": memory_series(&figures.clocks),
+            "gpuHeadline": missing(NO_MEMORY),
+            "peakAppBytes": missing(NO_MEMORY),
+            "peakTracingBytes": missing(NO_TRACE),
+            "peakRendererPrivateBytes": missing("a native replay has no renderer"),
+            "peakDrmResidentBytes": missing(NO_MEMORY),
+            "peakNvidiaDeviceLessBaselineBytes": missing(NO_MEMORY),
+            "peakNvidiaGpuProcessBytes": missing(NO_MEMORY),
+            "adapterPeakBytes": 0,
+        },
+        "criteria": { "whole": whole, "segments": [], "overall": overall },
+        "replay": {
+            "validationErrors": figures.errors,
+            "findings": figures.findings,
+        },
+    })
+}
+
+/// Writes a replay's results into `dir` as `<date>-<machine>-<setting>-replay.json`, numbered
+/// `-2`, `-3` and so on beside an earlier one, and returns the path.
+///
+/// # Errors
+///
+/// When the directory cannot be made or the file cannot be written.
+pub fn write_results(dir: &Path, figures: &ReplayFigures) -> std::io::Result<PathBuf> {
+    let results = results_json(figures);
+    fs::create_dir_all(dir)?;
+    let date = iso8601(figures.started_at);
+    let machine = results
+        .pointer("/run/machine/name")
+        .and_then(Value::as_str)
+        .unwrap_or("machine")
+        .to_owned();
+    let stem = format!(
+        "{}-{machine}-{}-replay",
+        &date[..10],
+        figures.setting.name()
+    );
+    let mut name = format!("{stem}.json");
+    let mut n = 2;
+    while dir.join(&name).exists() {
+        name.clear();
+        let _ = write!(name, "{stem}-{n}.json");
+        n += 1;
+    }
+    let path = dir.join(name);
+    let mut text = serde_json::to_string_pretty(&results).map_err(std::io::Error::other)?;
+    text.push('\n');
+    fs::write(&path, text)?;
+    Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nearest_rank_matches_the_clients() {
+        let values = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        assert_eq!(nearest_rank(&values, 0.5), Some(5.0));
+        assert_eq!(nearest_rank(&values, 0.95), Some(10.0));
+        assert_eq!(nearest_rank(&values, 0.1), Some(1.0));
+        assert_eq!(nearest_rank(&[], 0.5), None);
+    }
+
+    #[test]
+    fn frame_stats_count_missed_frames_and_hitches() {
+        let stats = frame_stats(
+            &[16.7, 16.7, 16.7, 26.0, 30.0, 51.0, 16.6, 16.7],
+            Some(16.68),
+        )
+        .expect("stats");
+        assert_eq!((stats.missed, stats.hitches), (Some(3), Some(1)));
+        assert!((stats.p50_ms - 16.7).abs() < 1e-12);
+    }
+
+    fn figures(rows: BTreeMap<String, PassRow>) -> ReplayFigures {
+        ReplayFigures {
+            started_at: UNIX_EPOCH,
+            capture: PathBuf::from("capture"),
+            setting: Setting::High,
+            seed: "7".to_owned(),
+            presented: false,
+            display_hz: None,
+            adapter: wgpu::AdapterInfo {
+                name: "test".to_owned(),
+                vendor: 0,
+                device: 0,
+                device_type: wgpu::DeviceType::Other,
+                device_pci_bus_id: String::new(),
+                driver: String::new(),
+                driver_info: String::new(),
+                backend: wgpu::Backend::Noop,
+                subgroup_min_size: 0,
+                subgroup_max_size: 0,
+                transient_saves_memory: None,
+                limit_bucket: None,
+            },
+            timed: true,
+            canvas: (1920, 1080),
+            intervals_ms: vec![16.7, 16.7],
+            unread_frames: 0,
+            untimed_frames: 0,
+            passes: vec![vec![("terrain".to_owned(), 4.0), ("tone".to_owned(), 0.5)]; 4],
+            rows,
+            untimed_passes: 0,
+            upload_bytes: 0,
+            errors: Vec::new(),
+            findings: Vec::new(),
+            clocks: Vec::new(),
+            machine: sources(Platform::Linux),
+        }
+    }
+
+    /// `sysinfo`'s reading of a quiet machine's load average.
+    const QUIET_LOAD: LoadAvg = LoadAvg {
+        one: 0.5,
+        five: 0.4,
+        fifteen: 0.3,
+    };
+
+    /// The facts of a quiet machine on `platform`, through the per-platform rules that
+    /// [`MachineSources::read`] applies.
+    fn sources(platform: Platform) -> MachineSources {
+        MachineSources {
+            platform,
+            host_name: Some("Dev.Box_1 ".to_owned()),
+            cpu_brand: Some("AMD Ryzen 7 3700X 8-Core Processor".to_owned()),
+            logical_cores: Some(16),
+            memory_bytes: Some(33_554_432_000),
+            load_average: load_average_on(platform, || Some(QUIET_LOAD)),
+            governor: governor_on(platform, || Ok("schedutil\n".to_owned())),
+        }
+    }
+
+    #[test]
+    fn the_load_average_is_sysinfos_on_linux_and_macos() {
+        for platform in [Platform::Linux, Platform::MacOs] {
+            assert_eq!(
+                load_average_on(platform, || Some(QUIET_LOAD)),
+                Ok([0.5, 0.4, 0.3]),
+                "{platform:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_has_no_load_average_and_is_never_asked_for_one() {
+        assert_eq!(
+            load_average_on(Platform::Windows, || panic!("read on Windows")),
+            Err("Windows keeps no load average".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_platform_sysinfo_does_not_support_has_no_load_average() {
+        assert_eq!(
+            load_average_on(Platform::Other("haiku"), || None),
+            Err("no load average on haiku".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_load_average_not_read_is_written_with_its_reason() {
+        let mut unsupported = sources(Platform::Other("haiku"));
+        unsupported.load_average = load_average_on(Platform::Other("haiku"), || None);
+        let results = on(unsupported);
+        assert_eq!(
+            results["run"]["machine"]["loadAverage"],
+            missing("no load average on haiku")
+        );
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({
+                "provisional": true,
+                "note": "no load average on haiku: the quiet-machine rule (Design note 27) is unchecked",
+            })
+        );
+    }
+
+    #[test]
+    fn the_governor_is_read_on_linux_alone() {
+        assert_eq!(
+            governor_on(Platform::Linux, || Ok("schedutil\n".to_owned())),
+            Ok("schedutil".to_owned())
+        );
+        for (platform, name) in [(Platform::MacOs, "macOS"), (Platform::Windows, "Windows")] {
+            assert_eq!(
+                governor_on(platform, || panic!("read on {name}")),
+                Err(format!("no cpufreq governor on {name}"))
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreadable_governor_on_linux_names_its_file() {
+        assert_eq!(
+            governor_on(Platform::Linux, || Err(io::ErrorKind::NotFound.into())),
+            Err(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor could not be read"
+                    .to_owned()
+            )
+        );
+    }
+
+    /// The results of a replay on a machine of `sources`.
+    fn on(sources: MachineSources) -> Value {
+        let mut replay = figures(BTreeMap::new());
+        replay.machine = sources;
+        results_json(&replay)
+    }
+
+    #[test]
+    fn a_linux_replay_records_its_facts_and_governor() {
+        let results = on(sources(Platform::Linux));
+        assert_eq!(results["run"]["platform"], "linux");
+        let machine = &results["run"]["machine"];
+        assert_eq!(machine["name"], "devbox1", "normalised as the client's");
+        assert_eq!(machine["cpu"], "AMD Ryzen 7 3700X 8-Core Processor");
+        assert_eq!(machine["logicalCores"], 16);
+        assert_eq!(machine["memoryBytes"], 33_554_432_000_u64);
+        assert_eq!(machine["governor"], measured(json!("schedutil")));
+        assert_eq!(machine["loadAverage"], measured(json!([0.5, 0.4, 0.3])));
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({ "provisional": false, "note": null })
+        );
+    }
+
+    #[test]
+    fn a_busy_machine_makes_the_replay_provisional() {
+        let mut busy = sources(Platform::Linux);
+        busy.load_average = Ok([1.5, 0.9, 0.4]);
+        assert_eq!(
+            on(busy)["run"]["quiet"],
+            json!({
+                "provisional": true,
+                "note": "load average 1.50 at the start (Design note 27 asks under 1): provisional",
+            })
+        );
+    }
+
+    #[test]
+    fn a_macos_replay_at_a_load_of_a_half_is_not_provisional() {
+        let results = on(sources(Platform::MacOs));
+        assert_eq!(results["run"]["platform"], "macos");
+        assert_eq!(
+            results["run"]["machine"]["governor"],
+            missing("no cpufreq governor on macOS")
+        );
+        assert_eq!(
+            results["run"]["machine"]["loadAverage"],
+            measured(json!([0.5, 0.4, 0.3]))
+        );
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({ "provisional": false, "note": null })
+        );
+    }
+
+    #[test]
+    fn a_windows_replay_is_provisional_with_its_note() {
+        let results = on(sources(Platform::Windows));
+        assert_eq!(results["run"]["platform"], "windows");
+        assert_eq!(
+            results["run"]["quiet"],
+            json!({
+                "provisional": true,
+                "note": "Windows keeps no load average: the quiet-machine rule (Design note 27) is unchecked",
+            })
+        );
+        // No zeros that could pass for a reading: none, with Windows' reason.
+        assert_eq!(
+            results["run"]["machine"]["loadAverage"],
+            missing("Windows keeps no load average")
+        );
+        assert_eq!(
+            results["run"]["machine"]["governor"],
+            missing("no cpufreq governor on Windows")
+        );
+    }
+
+    #[test]
+    fn a_host_name_with_nothing_left_after_normalising_is_machine() {
+        let mut unnamed = sources(Platform::Linux);
+        unnamed.host_name = Some("__.".to_owned());
+        assert_eq!(on(unnamed.clone())["run"]["machine"]["name"], "machine");
+        unnamed.host_name = None;
+        assert_eq!(on(unnamed)["run"]["machine"]["name"], "machine");
+    }
+
+    #[test]
+    fn a_cpu_not_read_is_unknown() {
+        let mut unread = sources(Platform::MacOs);
+        unread.cpu_brand = None;
+        assert_eq!(on(unread)["run"]["machine"]["cpu"], "unknown");
+    }
+
+    #[test]
+    fn facts_not_read_are_findings_that_say_what_the_file_holds() {
+        assert_eq!(sources(Platform::Windows).findings(), Vec::<String>::new());
+        let unread = MachineSources {
+            host_name: None,
+            cpu_brand: None,
+            logical_cores: None,
+            memory_bytes: None,
+            ..sources(Platform::Windows)
+        };
+        assert_eq!(
+            unread.findings(),
+            [
+                "the machine's host name could not be read: run.machine.name is \"machine\"",
+                "the machine's CPU could not be read: run.machine.cpu is \"unknown\"",
+                "the machine's thread count could not be read: run.machine.logicalCores is 0",
+                "the machine's memory could not be read: run.machine.memoryBytes is 0",
+            ]
+        );
+        let results = on(unread);
+        assert_eq!(results["run"]["machine"]["memoryBytes"], 0);
+        assert_eq!(results["run"]["machine"]["logicalCores"], 0);
+    }
+
+    #[test]
+    fn this_machines_facts_are_read() {
+        let read = MachineSources::read();
+        assert_eq!(read.platform, Platform::current());
+        assert_eq!(read.findings(), Vec::<String>::new(), "{read:?}");
+        match read.platform {
+            Platform::Windows => {
+                assert_eq!(read.load_average, Err(NO_WINDOWS_LOAD_AVERAGE.to_owned()));
+            }
+            Platform::Linux | Platform::MacOs | Platform::Other(_) => {
+                assert!(read.load_average.is_ok(), "{read:?}");
+            }
+        }
+    }
+
+    /// `sysinfo` reads Linux's facts from the files the replayer read before it, so a Linux
+    /// replay's facts are unchanged by R05.T20, except on an Arm machine whose cpuinfo names its
+    /// CPU part, which `sysinfo` takes for the brand over the model name. Elsewhere there are no
+    /// such files, and `this_machines_facts_are_read` alone runs.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_facts_are_those_proc_gives() {
+        let read = MachineSources::read();
+        let proc = |path: &str| fs::read_to_string(path).expect("a Linux machine has /proc");
+        assert_eq!(
+            read.host_name.as_deref(),
+            Some(proc("/proc/sys/kernel/hostname").trim())
+        );
+        // On Arm, `sysinfo` names the CPU by its part where cpuinfo gives one.
+        let cpuinfo = proc("/proc/cpuinfo");
+        let model = cpuinfo
+            .lines()
+            .find(|line| line.starts_with("model name"))
+            .and_then(|line| line.split(':').nth(1));
+        if let (Some(model), false) = (model, cpuinfo.contains("CPU part")) {
+            assert_eq!(read.cpu_brand.as_deref(), Some(model.trim()));
+        }
+        let mem_total_kib: Option<u64> = proc("/proc/meminfo")
+            .lines()
+            .find(|line| line.starts_with("MemTotal:"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|kib| kib.parse().ok());
+        assert_eq!(read.memory_bytes, mem_total_kib.map(|kib| kib * 1024));
+        assert_eq!(
+            read.governor.is_ok(),
+            fs::read_to_string(GOVERNOR_PATH).is_ok()
+        );
+    }
+
+    fn row<'a>(results: &'a Value, id: &str) -> &'a Value {
+        results["criteria"]["whole"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["id"] == id))
+            .expect("the row")
+    }
+
+    #[test]
+    fn a_row_with_no_pass_of_its_own_is_not_measured() {
+        let results = results_json(&figures(BTreeMap::new()));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["verdict"], "not-measured");
+        assert_eq!(joint["note"], "no timed terrain or atmosphere pass");
+        assert_eq!(
+            results["gpu"]["rows"]["terrain"],
+            json!({
+                "estimateMs": 5.0,
+                "p50Ms": missing("no timed terrain pass"),
+                "p95Ms": missing("no timed terrain pass"),
+                "p99Ms": missing("no timed terrain pass"),
+                "overEstimate": null,
+            })
+        );
+    }
+
+    #[test]
+    fn a_rows_passes_are_judged_against_its_limit() {
+        let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
+        let results = results_json(&figures(rows));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["value"], 4.0);
+        assert_eq!(joint["limit"], 6.0);
+        assert_eq!(joint["verdict"], "pass");
+        assert_eq!(row(&results, "headroom-gpu")["verdict"], "not-measured");
+        assert_eq!(results["gpu"]["sumP95Ms"]["value"], 4.5);
+    }
+
+    /// `figures` on the high setting with `count` frames, frame i's terrain pass taking
+    /// `terrain_ms(i)` and its two atmosphere passes `atmosphere_ms(i)` between them, and a tone
+    /// pass of neither row.
+    fn split_figures(
+        count: usize,
+        terrain_ms: impl Fn(usize) -> f64,
+        atmosphere_ms: impl Fn(usize) -> f64,
+    ) -> ReplayFigures {
+        let mut figures = figures(BTreeMap::from([
+            ("terrain".to_owned(), PassRow::Terrain),
+            ("sky".to_owned(), PassRow::Atmosphere),
+            ("march".to_owned(), PassRow::Atmosphere),
+        ]));
+        figures.passes = (0..count)
+            .map(|i| {
+                let atmosphere = atmosphere_ms(i);
+                vec![
+                    ("terrain".to_owned(), terrain_ms(i)),
+                    ("sky".to_owned(), 0.25 * atmosphere),
+                    ("march".to_owned(), 0.75 * atmosphere),
+                    ("tone".to_owned(), 0.5),
+                ]
+            })
+            .collect();
+        figures
+    }
+
+    #[test]
+    fn terrain_and_atmosphere_are_judged_as_one_row_against_their_estimates_sum() {
+        // 4.5 ms of terrain and 1.25 of atmosphere a frame, against high's 5 + 1: the atmosphere
+        // is over its estimate, a finding the row does not read.
+        let results = results_json(&split_figures(20, |_| 4.5, |_| 1.25));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(
+            joint["criterion"],
+            "terrain and atmosphere GPU time, summed per frame, ≤ 6 ms (5 + 1) at the 95th percentile"
+        );
+        assert_eq!(joint["value"], 5.75);
+        assert_eq!(joint["verdict"], "pass");
+        assert_eq!(
+            row_ids(&results),
+            [
+                "p50",
+                "p95",
+                "p99",
+                "missed",
+                "hitches",
+                "headroom-main",
+                "headroom-gpu",
+                TERRAIN_ATMOSPHERE_ROW,
+                "memory"
+            ]
+        );
+        assert_eq!(
+            results["gpu"]["rows"]["atmosphere"],
+            json!({
+                "estimateMs": 1.0,
+                "p50Ms": measured(json!(1.25)),
+                "p95Ms": measured(json!(1.25)),
+                "p99Ms": measured(json!(1.25)),
+                "overEstimate": true,
+            })
+        );
+        assert_eq!(results["gpu"]["rows"]["terrain"]["overEstimate"], false);
+    }
+
+    #[test]
+    fn six_point_two_ms_of_terrain_and_atmosphere_fails_on_high() {
+        let results = results_json(&split_figures(20, |_| 4.8, |_| 1.4));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        let value = joint["value"].as_f64().expect("a value");
+        assert!((value - 6.2).abs() < 1e-12, "{value}");
+        assert_eq!(joint["verdict"], "fail");
+    }
+
+    #[test]
+    fn the_joint_row_is_the_percentile_of_each_frames_sum() {
+        // A tenth of the frames has its terrain at 5 ms, another tenth its atmosphere at 4: each
+        // row's 95th percentile is its slow value, 9 ms together, but no frame's sum is above 5.5.
+        let results = results_json(&split_figures(
+            20,
+            |i| if i % 10 == 0 { 5.0 } else { 1.0 },
+            |i| if i % 10 == 5 { 4.0 } else { 0.5 },
+        ));
+        // Terrain's 95th percentile is its estimate, 5 ms, which is not over it.
+        assert_eq!(
+            results["gpu"]["rows"]["terrain"],
+            json!({
+                "estimateMs": 5.0,
+                "p50Ms": measured(json!(1.0)),
+                "p95Ms": measured(json!(5.0)),
+                "p99Ms": measured(json!(5.0)),
+                "overEstimate": false,
+            })
+        );
+        assert_eq!(results["gpu"]["rows"]["atmosphere"]["p95Ms"]["value"], 4.0);
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["value"], 5.5);
+        assert_eq!(joint["verdict"], "pass");
+    }
+
+    #[test]
+    fn the_low_settings_joint_limit_is_its_estimates_sum() {
+        let mut low = split_figures(4, |_| 1.0, |_| 1.0);
+        low.setting = Setting::Low;
+        let results = results_json(&low);
+        assert_eq!(row(&results, TERRAIN_ATMOSPHERE_ROW)["limit"], 18.0);
+        assert_eq!(results["gpu"]["rows"]["terrain"]["estimateMs"], 14.0);
+        assert_eq!(results["gpu"]["rows"]["atmosphere"]["estimateMs"], 4.0);
+    }
+
+    fn row_ids(results: &Value) -> Vec<String> {
+        results["criteria"]["whole"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Readings from `nvidia-smi` of a 2,115 MHz GPU at `graphics_mhz` in P2.
+    fn nvidia_at(graphics_mhz: u32) -> ClockReadings {
+        ClockReadings {
+            source: crate::clocks::ClockSourceKind::NvidiaSmi,
+            max_graphics_mhz: Ok(2115),
+            graphics_mhz: Ok(graphics_mhz),
+            memory_mhz: Ok(9501),
+            performance_state: Ok(2),
+        }
+    }
+
+    #[test]
+    fn the_clocks_are_written_from_their_samples_on_the_memory_series_times() {
+        let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
+        let mut stubbed = figures(rows);
+        stubbed.clocks = vec![
+            ClockSample::new(12, Ok(nvidia_at(1110))),
+            ClockSample::new(1013, Err("nvidia-smi failed: timed out".to_owned())),
+            ClockSample::new(2014, Ok(nvidia_at(1320))),
+            ClockSample::new(2400, Ok(nvidia_at(1965))),
+        ];
+        let results = results_json(&stubbed);
+        assert_eq!(
+            results["memory"]["series"]["tMs"],
+            json!([12, 1013, 2014, 2400])
+        );
+        let gap = json!([{ "from": 1, "to": 1, "reason": "nvidia-smi failed: timed out" }]);
+        assert_eq!(
+            results["gpu"]["clocks"],
+            json!({
+                "value": {
+                    "source": "nvidia-smi",
+                    "maxGraphicsMHz": { "value": 2115, "reason": null },
+                    "graphicsMHz": {
+                        "value": { "samples": [1110, -1, 1320, 1965], "gaps": gap },
+                        "reason": null,
+                    },
+                    "memoryMHz": {
+                        "value": { "samples": [9501, -1, 9501, 9501], "gaps": gap },
+                        "reason": null,
+                    },
+                    "performanceState": {
+                        "value": { "samples": [2, -1, 2, 2], "gaps": gap },
+                        "reason": null,
+                    },
+                },
+                "reason": null,
+            })
+        );
+        // The median of 1,110, 1,320 and 1,965 MHz is 62% of the maximum: the GPU rows with a
+        // value say so, the others not.
+        let note = "measured at a median 1320 of 2115 MHz (the driver's choice at this load)";
+        assert_eq!(row(&results, TERRAIN_ATMOSPHERE_ROW)["note"], note);
+        // The pass rows' own figures are findings, with no note.
+        assert_eq!(results["gpu"]["rows"]["terrain"].get("note"), None);
+        // A frame row with a value keeps its own note alone.
+        assert_eq!(row(&results, "p50")["note"], "no period T");
+    }
+
+    #[test]
+    fn a_median_clock_near_the_maximum_puts_no_note() {
+        let rows = BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]);
+        let mut stubbed = figures(rows);
+        stubbed.clocks = vec![ClockSample::new(0, Ok(nvidia_at(1965))); 3];
+        assert_eq!(
+            row(&results_json(&stubbed), TERRAIN_ATMOSPHERE_ROW)["note"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn clocks_with_no_reading_are_null_with_the_reason() {
+        let mut stubbed = figures(BTreeMap::new());
+        let reason = "no unprivileged GPU clock reading on macos; powermetrics needs root";
+        stubbed.clocks = vec![ClockSample::new(0, Err(reason.to_owned())); 2];
+        assert_eq!(results_json(&stubbed)["gpu"]["clocks"], missing(reason));
+        stubbed.clocks.clear();
+        assert_eq!(
+            results_json(&stubbed)["gpu"]["clocks"],
+            missing("no clock sample")
+        );
+    }
+
+    #[test]
+    fn the_memory_series_has_no_sample_and_every_reading_null_with_its_reason() {
+        let results = results_json(&figures(BTreeMap::new()));
+        // The client's version and column names, written out: its `validateResults` reads them.
+        assert_eq!(results["version"], 6);
+        let none = json!({ "value": null, "reason": "the native replay does not measure memory" });
+        assert_eq!(
+            results["memory"]["series"],
+            json!({
+                "tMs": [],
+                "appKiB": none,
+                "gpuProcessKiB": none,
+                "tracingKiB": none,
+                "rendererPrivateKiB": none,
+                "drmResidentKiB": none,
+                "drmTotalKiB": none,
+                "nvidiaDeviceKiB": none,
+                "nvidiaGpuProcessKiB": none,
+            })
+        );
+        assert_eq!(results["memory"].get("samples"), None);
+    }
+
+    #[test]
+    fn the_file_is_version_6_with_no_trace_window_and_no_engine_figure() {
+        let results = results_json(&figures(BTreeMap::new()));
+        let no_trace = json!({ "value": null, "reason": "a native replay has no trace" });
+        assert_eq!(results["version"], 6);
+        assert_eq!(results["run"]["trace"], no_trace);
+        assert_eq!(results["mainThread"]["engine"], no_trace);
+        // Version 4's split and GPU-process slices are the trace's, so a replay writes neither.
+        assert_eq!(results["mainThread"]["split"], no_trace);
+        assert_eq!(
+            results["gpu"]["gpuProcess"],
+            json!({ "value": null, "reason": "a native replay has no GPU process" })
+        );
+        assert_eq!(results["frames"]["excludedFrames"], 0);
+        assert_eq!(
+            results["gpu"]["incompleteFrames"],
+            json!({ "value": { "dropped": 0, "partial": 0, "frames": 4 }, "reason": null })
+        );
+        assert_eq!(
+            results["gpu"]["clocks"],
+            json!({ "value": null, "reason": "no clock sample" })
+        );
+    }
+
+    /// `figures` with `count` frames of a terrain pass taking `terrain_ms`, `unread` more of them
+    /// never read back.
+    fn unread_figures(count: usize, terrain_ms: f64, unread: usize) -> ReplayFigures {
+        let mut figures = figures(BTreeMap::from([("terrain".to_owned(), PassRow::Terrain)]));
+        figures.passes = vec![vec![("terrain".to_owned(), terrain_ms)]; count];
+        figures.unread_frames = unread;
+        figures
+    }
+
+    #[test]
+    fn frames_never_read_back_are_counted_as_dropped() {
+        let results = results_json(&unread_figures(4, 4.0, 1));
+        assert_eq!(
+            results["gpu"]["incompleteFrames"]["value"],
+            json!({ "dropped": 1, "partial": 0, "frames": 5 })
+        );
+    }
+
+    #[test]
+    fn a_row_its_unread_frames_could_carry_over_its_limit_is_not_measured() {
+        // Four frames at 4 ms of the high setting's 6 (5 + 1), and a fifth unread: placed above the
+        // limit, it is the 95th percentile.
+        let results = results_json(&unread_figures(4, 4.0, 1));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        let value = joint["value"].as_f64().expect("a value");
+        assert!((value - 4.0).abs() < 1e-12, "{value}");
+        assert_eq!(joint["verdict"], "not-measured");
+        assert_eq!(joint["note"], "1 frame's pass times could not be read back");
+    }
+
+    #[test]
+    fn a_row_passes_or_fails_whatever_its_unread_frames_took() {
+        let passing = results_json(&unread_figures(100, 4.0, 1));
+        assert_eq!(row(&passing, TERRAIN_ATMOSPHERE_ROW)["verdict"], "pass");
+        assert_eq!(
+            row(&passing, TERRAIN_ATMOSPHERE_ROW)["note"],
+            "1 frame with incomplete pass times left out; the verdict holds whatever their times"
+        );
+        let failing = results_json(&unread_figures(100, 7.0, 3));
+        assert_eq!(row(&failing, TERRAIN_ATMOSPHERE_ROW)["verdict"], "fail");
+        assert_eq!(
+            row(&failing, TERRAIN_ATMOSPHERE_ROW)["note"],
+            "3 frames with incomplete pass times left out; the verdict holds whatever their times"
+        );
+    }
+
+    #[test]
+    fn a_row_with_only_unread_frames_states_their_count() {
+        let results = results_json(&unread_figures(0, 4.0, 2));
+        let joint = row(&results, TERRAIN_ATMOSPHERE_ROW);
+        assert_eq!(joint["verdict"], "not-measured");
+        assert_eq!(joint["note"], "2 frames' pass times could not be read back");
+        assert_eq!(
+            results["gpu"]["rows"]["terrain"]["p95Ms"]["reason"],
+            "2 frames' pass times could not be read back"
+        );
+        assert_eq!(
+            results["gpu"]["sumP95Ms"]["reason"],
+            "2 frames' pass times could not be read back"
+        );
+        assert_eq!(results["gpu"]["incompleteFrames"]["value"]["frames"], 2);
+    }
+
+    #[test]
+    fn frames_are_those_read_back_unread_and_untimed() {
+        let mut figures = unread_figures(3, 4.0, 1);
+        figures.untimed_frames = 2;
+        assert_eq!(figures.frames(), 6);
+    }
+
+    #[test]
+    fn a_replay_without_a_timer_states_why_it_counts_no_frame() {
+        let mut untimed = unread_figures(4, 4.0, 0);
+        untimed.timed = false;
+        let results = results_json(&untimed);
+        assert_eq!(
+            results["gpu"]["incompleteFrames"],
+            json!({ "value": null, "reason": "the adapter has no timestamp-query" })
+        );
+        assert_eq!(
+            results["gpu"]["rows"]["terrain"],
+            json!({
+                "estimateMs": 5.0,
+                "p50Ms": missing(TIMER_REASON),
+                "p95Ms": missing(TIMER_REASON),
+                "p99Ms": missing(TIMER_REASON),
+                "overEstimate": null,
+            })
+        );
+    }
+
+    #[test]
+    fn dates_are_iso_8601() {
+        let time = UNIX_EPOCH + std::time::Duration::from_hours(497_490);
+        assert_eq!(iso8601(time), "2026-10-02T18:00:00.000Z");
+    }
+}

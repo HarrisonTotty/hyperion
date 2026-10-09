@@ -336,10 +336,12 @@ fn the_table_s_surface_temperatures_are_within_eight_per_cent() {
             "{name} at {t} K against {kelvin}"
         );
     }
-    // The albedo each takes is its state's, and the equilibrium temperature is at it.
+    // The albedo each takes is its state's, and the equilibrium temperature is at it: Earth's
+    // 0.294 gives 255 K (254 K at the 0.306 before decision-p11-t4k-faults).
     let earth = found(&table, "Earth");
-    assert_same_bits(earth.albedo().value(), 0.306);
-    assert!((earth.equilibrium_temperature().value() - 254.0).abs() < 1.0);
+    assert_same_bits(earth.albedo().value(), 0.294);
+    let earth_eq = earth.equilibrium_temperature().value();
+    assert!((earth_eq - 255.0).abs() < 1.0, "Earth's T_eq {earth_eq} K");
     let venus = found(&table, "Venus");
     assert_same_bits(venus.albedo().value(), 0.76);
     assert!((venus.equilibrium_temperature().value() - 229.0).abs() < 1.0);

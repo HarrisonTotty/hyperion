@@ -1,7 +1,13 @@
 import { norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import {
+  CASING_PX,
+  lineScale,
+  markShiftDevicePx,
+  markStrokeDevicePx,
+  minReticleGapDevicePx,
+} from "../../lib/strokes";
 import type { ColourToken } from "../../spatial/drawList";
 import type { ColourTokens } from "../../spatial/paint";
-import { SYMBOL_STROKE_PX } from "../../spatial/symbols";
 import type { CameraPose } from "../camera/pose";
 import {
   pixelSolidAngle,
@@ -17,47 +23,125 @@ import { occluderRadius } from "../depth/depth";
 import { exposureScale } from "../photometry/exposure";
 import { apparentV, illuminanceLx, PSF_QUAD_PX } from "../photometry/magnitude";
 import { starColour } from "../photometry/starColour";
+import { REC709_LUMA } from "../sky/photometry";
 import type { Rgb } from "../photometry/toneCurve";
 import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
-import { angularDiameterPx, bodyRegime, graticule, ringEllipse } from "./bodies";
+import { angularDiameterPx, graticule, isSymbolSized, ringEllipse } from "./bodies";
 import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
 import { hullEdges, hullFaces } from "./hulls";
 import { orbitPath } from "./orbits";
-import { type ScreenPx, type SymbologyAnchor, symbologyMarks, targetMark } from "./symbology";
+import {
+  anchorRadiusPx,
+  bracketHalfSizePx,
+  markLabelOffsetPx,
+  markLabelRisePx,
+  type ScreenPx,
+  type SymbologyAnchor,
+  symbologyMarks,
+  targetMark,
+} from "./symbology";
 
 /**
- * The width of the `--surface-0` casing on each side of every stroke, px: 1, the guide's casing
- * over a raster, which every mark over the image takes (the guide's drafted "Outlines for
- * symbology", R02.T2.b item 3; Design note 9).
+ * The width of the `--surface-0` casing on each side of every stroke, CSS px: `lib/strokes.ts`'s,
+ * drawn at {@link ViewStrokes.strokeScale} device px for each, as every line width and dash here is
+ * (R07.T16.d). Kept here for the view's callers; `lib/strokes.ts` holds it since R07.T16.g, so that
+ * the least gap between two reticles (`minReticleGapDevicePx`) takes the same casing.
  */
-export const CASING_PX = 1;
+export { CASING_PX };
 
 /**
- * A stroke's widths, px: the thin reference lines (the guide's 1 px orbit), a step heavier (the
- * equator, the prime meridian and hull edges: 1.5 px, a choice of this plan, the symbols' own
+ * A stroke's widths, CSS px: the thin reference lines (the guide's 1 px orbit), a step heavier
+ * (the equator, the prime meridian and hull edges: 1.5 px, a choice of this plan, the symbols' own
  * stroke), and the selected orbit's 2 px (the guide's).
  */
 export const STROKE_PX = { thin: 1, heavy: 1.5, selected: 2 } as const;
 
 /**
- * The dash of a predicted path, px on and off, in screen space so that it does not crawl: 6 and 4,
- * a choice of this plan.
+ * The dash of a predicted path, CSS px on and off, in screen space so that it does not crawl: 6
+ * and 4, a choice of this plan.
  */
 export const PREDICTED_DASH_PX = { onPx: 6, offPx: 4 } as const;
 
-/** The most star sprites the low setting draws, the brightest by flux (Design note 21). */
+/**
+ * The most of the interim stars the low setting draws as sprites, the brightest by flux (Design
+ * note 21); R06's sky keeps its own selection's budget (R07.T17).
+ */
 export const LOW_SETTING_MAX_SPRITES = 2_000;
 
 /**
- * The depth bias of a hull's occluder faces, pushing them away from the camera (Design note 5):
- * positive meaning away, mapped once by R01's adapter.
+ * How a view draws its strokes on a display (decision-thin-line-contrast, item 2; R07.T16.d): the
+ * guide's widths are CSS pixels, drawn at no less than 2 device pixels.
  */
-export const HULL_OCCLUDER_BIAS = { constant: 128, slopeScale: 2 } as const;
+export interface ViewStrokes {
+  /**
+   * The device pixels drawn for each CSS pixel of every line's and casing's width and every dash's
+   * length: `lineScale` of the display's ratio, the larger of the ratio and 2.
+   */
+  readonly strokeScale: number;
+  /**
+   * The width of every symbology outline (body symbols, reticles, target marks, the flight path
+   * marker), device px: `markStrokeDevicePx` of the ratio, the larger of 1.5 × the ratio and 2.
+   */
+  readonly markStrokePx: number;
+  /**
+   * How far each symbology outline moves out, device px: `markShiftDevicePx` of the ratio (δ), so
+   * that what it encloses stays as built.
+   */
+  readonly markShiftPx: number;
+  /**
+   * The least space between the selection's bracket and the destination's chevrons' apices about
+   * one mark, device px: `minReticleGapDevicePx` of the ratio, an outline and one casing, so that
+   * the destination's casing never reaches the bracket's full-coverage core (R07.T16.d, T16.g and
+   * T16.h).
+   */
+  readonly minReticleGapPx: number;
+}
 
 /**
- * How far outside the view a mark may fall and still be anchored (labelled and pickable), rem: 2,
- * the guide's touch target, so that a mark at the edge keeps its label. A choice of RM1 validation.
+ * A view's strokes at a display's device-pixel ratio, from `lib/strokes.ts`: at 0.78125 and 1, 2
+ * device px per CSS px and outlines of 2 device px, moved out 0.41 and 0.25 px, with reticles at
+ * least 4 px apart; at 2, 2 and 3 px, not moved, at least 5 px apart.
+ */
+export function viewStrokesAt(devicePixelRatio: number): ViewStrokes {
+  return {
+    strokeScale: lineScale(devicePixelRatio),
+    markStrokePx: markStrokeDevicePx(devicePixelRatio),
+    markShiftPx: markShiftDevicePx(devicePixelRatio),
+    minReticleGapPx: minReticleGapDevicePx(devicePixelRatio),
+  };
+}
+
+/**
+ * The occluders' slope term at a stroke scale, device px: half the widest cased stroke over an
+ * occluder, the heavy stroke with a casing each side, and the one-pixel antialiasing fringe,
+ * w_max ÷ 2 + 1, rounded up (Design note 5; decision-r07-t16a, item 1). It is 3 at a scale of 1, 5
+ * at 2, every ratio's up to 2 (decision-thin-line-contrast), and 7 at 3.
+ *
+ * @remarks
+ * Both occluders push their depth away by this many pixels of the depth's screen slope, its
+ * magnitude, in their fragments: the sphere from its tangent plane, the hull faces from the
+ * derivatives of their rasterised depth. A uniform, not pipeline state, so that it follows the
+ * display's ratio with no pipeline made again.
+ */
+export function occluderSlopePxAt(strokeScale: number): number {
+  return Math.ceil(((STROKE_PX.heavy + 2 * CASING_PX) * strokeScale) / 2 + 1);
+}
+
+/**
+ * The constant part of a hull face's push away from the camera, a fraction of its depth: 2⁻¹⁶,
+ * Design note 5's 128 units at the larger of `depth32float`'s units, 2⁻²³ of the depth, now the
+ * same on every backend (decision-r07-t16a, item 1). `occluder.wgsl` writes the face's depth times
+ * 1 − this, less the slope term ({@link occluderSlopePxAt}); no hardware depth bias is set.
+ */
+export const HULL_OCCLUDER_DEPTH_FRACTION = 2 ** -16;
+
+/**
+ * How far outside the view a mark may fall and still be anchored, rem: 2, the guide's touch
+ * target, so that a mark at the edge stays pickable. A choice of RM1 validation. Its DOM label is
+ * shown only while its centre lies inside the view (the view's `markLabelPlaces`;
+ * decision-r07-quality-and-destination, addendum D, D3): a mark past the edge stays pickable but
+ * has no label.
  */
 export const ANCHOR_MARGIN_REM = 2;
 
@@ -80,13 +164,16 @@ export interface LineBatch {
   readonly token: ColourToken;
   /** The token's colour, as `readTokens` read it. */
   readonly colour: string;
-  /** The stroke's width, px. */
+  /** The stroke's width, device px: its CSS width times the list's stroke scale. */
   readonly widthPx: number;
-  /** The casing's width on each side, px, drawn beneath the stroke in {@link LineBatch.casingColour}. */
+  /**
+   * The casing's width on each side, device px, drawn beneath the stroke in
+   * {@link LineBatch.casingColour}.
+   */
   readonly casingWidthPx: number;
   /** The casing's colour: `--surface-0`. */
   readonly casingColour: string;
-  /** The dash, for predicted paths only, or `null` for a solid stroke. */
+  /** The dash, device px on and off, for predicted paths only, or `null` for a solid stroke. */
   readonly dash: { readonly onPx: number; readonly offPx: number } | null;
 }
 
@@ -105,7 +192,16 @@ export interface OccluderSphere {
   readonly altitudeM: number;
 }
 
-/** A hull's depth-only faces, two-sided, pushed away by the occluder pass's bias. */
+/**
+ * A hull's opaque faces, two-sided, each pushed away from the camera in its fragment by the list's
+ * {@link WireframeDrawList.occluderSlopePx} of its depth's screen slope and by
+ * {@link HULL_OCCLUDER_DEPTH_FRACTION} of its depth: depth only in the wireframe, and over the
+ * photorealistic image a silhouette filled in {@link OccluderMesh.fill} (R07.T16.e).
+ *
+ * @remarks
+ * Its windows are in no mesh, so that they hide nothing in either style (decision-r07-t16a, item
+ * 3).
+ */
 export interface OccluderMesh {
   /** The craft. */
   readonly id: string;
@@ -113,10 +209,14 @@ export interface OccluderMesh {
   readonly originF32: Float32Array;
   /** The triangles' corners, nine `f32` per triangle, m from the origin. */
   readonly triangles: Float32Array;
-  /** The pass's depth bias, positive meaning away from the camera. */
-  readonly depthBiasAway: typeof HULL_OCCLUDER_BIAS;
   /** Drawn two-sided, so that a winding flip cannot unhide every hidden line. */
   readonly twoSided: true;
+  /**
+   * The colour its faces are filled in, opaque, as `readTokens` read it, or `null` for faces that
+   * write depth alone: `null` in the wireframe's list, whose faces hide by depth; `--surface-0`
+   * over the photorealistic image (`overlayDrawList`), so that nothing behind them shows through.
+   */
+  readonly fill: string | null;
 }
 
 /** A star as a sprite: where it falls on the view and its pre-exposed colour. */
@@ -153,6 +253,29 @@ export interface DrawAnchor {
    * its target mark, a body drawn as its symbol named as a mark (Design note 13); `null` for none.
    */
   readonly label: AnchorLabel | null;
+  /**
+   * The device px from the anchor to its label's `--surface-0` plate's near edge, at its right or
+   * its left, and with the plate's side padding below or above it (`MARK_LABEL_SIDES`, R07.T16.i),
+   * or at a destination's places: clear of the selection's bracket, whether or not the mark is
+   * selected or the destination (`markLabelOffsetPx`, R07.T16.g; decision-r07-quality-and-destination,
+   * addendum A).
+   */
+  readonly labelOffsetPx: number;
+  /**
+   * While the mark is the destination, the device px from the anchor to its label plate's near
+   * horizontal edge, above or below the whole chevron set (`markLabelRisePx`;
+   * decision-r07-quality-and-destination, addendum B); `null` while it is not, where the label takes
+   * one of its sides (R07.T16.i). It is the list's, so that the label moves in the frame in which the
+   * destination's chevrons are first drawn, and cuts.
+   */
+  readonly labelRisePx: number | null;
+  /**
+   * How far about the anchor the mark stands, device px, the half-size of a square that holds it:
+   * the outer edge of its selection's bracket's place, whether or not it is drawn, which holds its
+   * symbol and its reticles, or a body's drawn disc where that is larger. A destination's label
+   * stands 0.5 rem clear of every other mark's (decision-r07-quality-and-destination, addendum B).
+   */
+  readonly markReachPx: number;
 }
 
 /** What a mark's DOM label says. */
@@ -176,7 +299,10 @@ export type AnchorLabel =
 export interface WireframeDrawList {
   /** The bodies' occluder spheres. */
   readonly occluderSpheres: ReadonlyArray<OccluderSphere>;
-  /** The hulls' occluder faces. */
+  /**
+   * The hulls' opaque faces: depth only in the wireframe's own list (`fill` `null`), filled in
+   * `--surface-0` by `overlayDrawList` over the photorealistic image (R07.T16.e).
+   */
   readonly occluderMeshes: ReadonlyArray<OccluderMesh>;
   /** The line batches, view-space first, then screen-space symbology. */
   readonly lines: ReadonlyArray<LineBatch>;
@@ -184,6 +310,28 @@ export interface WireframeDrawList {
   readonly sprites: ReadonlyArray<StarSprite>;
   /** The pickable marks, those in the view or within {@link ANCHOR_MARGIN_REM} of its edge. */
   readonly anchors: ReadonlyArray<DrawAnchor>;
+  /** The device pixels drawn for each CSS pixel of its lines ({@link ViewStrokes.strokeScale}). */
+  readonly strokeScale: number;
+  /** Its symbology outlines' width, device px ({@link ViewStrokes.markStrokePx}). */
+  readonly markStrokePx: number;
+  /** Both occluders' slope term, device px: {@link occluderSlopePxAt} the stroke scale. */
+  readonly occluderSlopePx: number;
+}
+
+/** A list that draws nothing, with a view's strokes: for a frame whose symbology is not drawn. */
+export function emptyDrawList(
+  strokes: Pick<ViewStrokes, "strokeScale" | "markStrokePx">,
+): WireframeDrawList {
+  return {
+    occluderSpheres: [],
+    occluderMeshes: [],
+    lines: [],
+    sprites: [],
+    anchors: [],
+    strokeScale: strokes.strokeScale,
+    markStrokePx: strokes.markStrokePx,
+    occluderSlopePx: occluderSlopePxAt(strokes.strokeScale),
+  };
 }
 
 /** The camera the list is built for: its pose and horizontal field of view. */
@@ -194,18 +342,60 @@ export interface DrawCamera {
   readonly fovXRad: number;
 }
 
-/** What the list draws beyond the scene itself. */
-export interface DrawOptions {
-  /** The wireframe's low setting (Design note 21): graticules at 30° only, 2,000 sprites. */
+/**
+ * What the list draws beyond the scene itself, and how it strokes it: the view's strokes at the
+ * display's ratio ({@link viewStrokesAt}), required, so that no caller leaves a stroke in device
+ * pixels or under 2 of them.
+ */
+export interface DrawOptions extends ViewStrokes {
+  /**
+   * The wireframe's low setting (Design note 21): graticules at 30° only, and at most 2,000 of the
+   * interim stars as sprites; the sky's sprites keep their own selection's budget (R07.T17).
+   */
   readonly lowSetting: boolean;
   /** The exposure, EV100. */
   readonly ev100: number;
   /** The selected target, bracketed, whose orbit is drawn heavier; or `null`. */
   readonly selection: CameraTarget | null;
-  /** The commanded destination, with its `--target` reticle; or `null`. */
+  /**
+   * The destination as the server last reported it, with its `--target` chevrons, its label moved
+   * clear of them in the same list; or `null`. Never a destination only commanded: the chevrons
+   * and the label's move wait for the report (the guide's commanding rule; R07.T16.g and T16.h).
+   */
   readonly destination: CameraTarget | null;
-  /** The interface's rem, px, which symbol sizes follow. */
+  /** The interface's rem, device px, which symbol sizes follow. */
   readonly remPx: number;
+  /**
+   * The sky's sprites (R06.T13.c), drawn in place of the scene's interim stars once the sky has
+   * arrived; `undefined` or `null` draws the scene's stars.
+   */
+  readonly skyStars?: ReadonlyArray<SpriteStar> | null;
+}
+
+/** A star as the sprite path takes it: its direction from the camera and its light per channel. */
+export interface SpriteStar {
+  /** A stable name, for ranking ties. */
+  readonly id: string;
+  /** Its unit direction from the camera, along the galactic axes. */
+  readonly direction: Vec3;
+  /** Its illuminance per linear Rec. 709 channel, lx. */
+  readonly illuminanceRgbLx: Rgb;
+}
+
+/**
+ * The scene's interim stars as sprite stars: each one's V from its absolute V and distance, its
+ * colour of unit luminance from its temperature (R02.T16).
+ */
+function interimSpriteStars(scene: ViewScene): SpriteStar[] {
+  return scene.stars.map((star) => {
+    const e = illuminanceLx(apparentV(star.absoluteV, star.distanceM));
+    const colour = starColour(star.tEffK);
+    return {
+      id: star.id,
+      direction: star.direction,
+      illuminanceRgbLx: [colour[0] * e, colour[1] * e, colour[2] * e],
+    };
+  });
 }
 
 function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
@@ -260,12 +450,19 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * Bodies are culled by the frustum in `f64` (Design note 8) and drawn by their regime (Design note
  * 13): occluder spheres of `occluderRadius`, limb and graticule lines, and below 3 px their symbol;
  * rings are their ellipses; orbits solid `--text-muted` at 1 px, the selected one's `--text` at
- * 2 px; hulls their edges over their two-sided, biased occluder faces; a craft's predicted path the
- * only dashed batch; the selection's bracket reticle in `--accent`, the destination's in
- * `--target` and the own ship's flight path marker; stars as sprites pre-exposed at the exposure,
+ * 2 px; hulls their edges, their windows' included, over their two-sided opaque faces, depth
+ * only, pushed away in the fragment by {@link WireframeDrawList.occluderSlopePx}, a window
+ * hiding nothing (R07.T16.e); a craft's predicted path the
+ * only dashed batch; the selection's bracket reticle in `--accent`, the destination's chevrons in
+ * `--target` (R07.T16.h) and the own ship's flight path marker; stars as sprites pre-exposed at the exposure,
  * the brightest 2,000 at the low setting. Every stroke is cased in `--surface-0`, since every mark
- * may lie over a star. Colours come from `tokens` (plan 05's `readTokens`), never literals. Every
- * position is differenced in `f64` and narrowed once. The list is a function of its arguments alone.
+ * may lie over a star. Every line's width, casing and dash is the guide's CSS pixels times
+ * `options.strokeScale`, and every symbology outline is `options.markStrokePx` wide, moved out by
+ * `options.markShiftPx` (R07.T16.d). A body's graticule thresholds are in line widths, at
+ * `options.strokeScale` device px each, and each anchor's label stands clear of every reticle that
+ * can stand about its mark (R07.T16.g). Colours come from `tokens` (plan 05's `readTokens`), never
+ * literals. Every position is differenced in `f64` and narrowed once. The list is a function of
+ * its arguments alone.
  */
 export function buildWireframeDrawList(
   scene: ViewScene,
@@ -282,6 +479,9 @@ export function buildWireframeDrawList(
   const fromCamera = (p: ViewPosition): Vec3 => relativeToCamera(p, camera.pose, origins);
   const bodyCentre = (body: ViewBody): Vec3 =>
     fromCamera({ kind: "body", body: body.id, m: vec3(0, 0, 0) });
+  const { strokeScale, markStrokePx } = options;
+  // A line's width, or a dash's length, given in the guide's CSS pixels, as the view draws it.
+  const drawnPx = (cssPx: number): number => cssPx * strokeScale;
   const batch = (
     id: string,
     space: LineBatch["space"],
@@ -290,7 +490,7 @@ export function buildWireframeDrawList(
     widthPx: number,
     dash: LineBatch["dash"] = null,
     originF32: Float32Array = new Float32Array(3),
-    casingWidthPx: number = CASING_PX,
+    casingWidthPx: number = drawnPx(CASING_PX),
   ): LineBatch => ({
     id,
     space,
@@ -326,6 +526,7 @@ export function buildWireframeDrawList(
       },
       projection,
       viewport,
+      strokeScale,
       options.lowSetting,
     );
     if (wireframe.regime !== "symbol") {
@@ -343,7 +544,13 @@ export function buildWireframeDrawList(
     const minor = wireframe.lines.filter((line) => !line.major).flatMap((line) => line.runs);
     if (major.length > 0) {
       lines.push(
-        batch(`body:${body.id}:major`, "view", packPolylines(major), "textMuted", STROKE_PX.heavy),
+        batch(
+          `body:${body.id}:major`,
+          "view",
+          packPolylines(major),
+          "textMuted",
+          drawnPx(STROKE_PX.heavy),
+        ),
       );
     }
     if (minor.length > 0) {
@@ -353,7 +560,7 @@ export function buildWireframeDrawList(
           "view",
           packPolylines(minor),
           "textMuted",
-          STROKE_PX.thin,
+          drawnPx(STROKE_PX.thin),
         ),
       );
     }
@@ -371,7 +578,7 @@ export function buildWireframeDrawList(
         "view",
         packPolylines(ringEllipse({ ...ring, centreM }, projection, viewport)),
         selected ? "text" : "textMuted",
-        selected ? STROKE_PX.selected : STROKE_PX.thin,
+        drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin),
       ),
     );
   }
@@ -392,7 +599,7 @@ export function buildWireframeDrawList(
         "view",
         packPolylines(orbitPath(orbit.orbit, parentM, projection, viewport)),
         selected ? "text" : "textMuted",
-        selected ? STROKE_PX.selected : STROKE_PX.thin,
+        drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin),
       ),
     );
   }
@@ -415,11 +622,11 @@ export function buildWireframeDrawList(
         "view",
         packPolylines(edges.map(([a, b]) => [a, b])),
         "text",
-        STROKE_PX.heavy,
+        drawnPx(STROKE_PX.heavy),
         null,
         originF32,
-        // Uncased: a casing would widen the stroke past the 2 px the hull occluder's slope bias
-        // covers (Design note 5), and the hull's own faces hide the stars behind it.
+        // Uncased in the wireframe: the hull's own faces hide the stars behind it. Over the
+        // photorealistic image the overlay cases it (R07.T16.a), within the faces' slope term.
         0,
       ),
     );
@@ -430,13 +637,9 @@ export function buildWireframeDrawList(
         triangles.set(narrow(corner), i * 9 + j * 3);
       });
     });
-    occluderMeshes.push({
-      id: craft.id,
-      originF32,
-      triangles,
-      depthBiasAway: HULL_OCCLUDER_BIAS,
-      twoSided: true,
-    });
+    // Its opaque faces alone, its windows hiding nothing; depth only, the wireframe's faces filling
+    // nothing (R07.T16.e).
+    occluderMeshes.push({ id: craft.id, originF32, triangles, twoSided: true, fill: null });
   }
 
   for (const craft of scene.craft) {
@@ -450,8 +653,11 @@ export function buildWireframeDrawList(
         "view",
         packPolylines([path]),
         "text",
-        STROKE_PX.thin,
-        PREDICTED_DASH_PX,
+        drawnPx(STROKE_PX.thin),
+        {
+          onPx: drawnPx(PREDICTED_DASH_PX.onPx),
+          offPx: drawnPx(PREDICTED_DASH_PX.offPx),
+        },
       ),
     );
   }
@@ -501,15 +707,17 @@ export function buildWireframeDrawList(
     symbologyAnchors.push(anchor);
     let label: AnchorLabel | null = null;
     if (anchor.craft !== null) {
+      // Its range and closure rate alone, for the label: the strokes are drawn below.
       const mark = targetMark(
         target,
         at,
         0,
         anchor.craft.relativeM,
         anchor.craft.relativeVelocityMPerS,
+        0,
       );
       label = { kind: "target", rangeM: mark.rangeM, closureMPerS: mark.closureMPerS };
-    } else if (anchor.body !== null && bodyRegime(anchor.body.diameterPx) === "symbol") {
+    } else if (anchor.body !== null && isSymbolSized(anchor.body.diameterPx)) {
       label = { kind: "symbol" };
     }
     // Only a mark within the view, or within a mark's reach of its edge, gets a DOM label and is
@@ -521,7 +729,36 @@ export function buildWireframeDrawList(
       at.yPx >= -marginPx &&
       at.yPx <= viewport.heightPx + marginPx
     ) {
-      anchors.push({ target, xPx: at.xPx, yPx: at.yPx, distanceM: norm(pointM), label });
+      anchors.push({
+        target,
+        xPx: at.xPx,
+        yPx: at.yPx,
+        distanceM: norm(pointM),
+        label,
+        labelOffsetPx: markLabelOffsetPx(
+          anchorRadiusPx(anchor, options.remPx),
+          options.remPx,
+          options.markShiftPx,
+        ),
+        labelRisePx: sameTarget(options.destination, target)
+          ? markLabelRisePx(
+              anchorRadiusPx(anchor, options.remPx),
+              options.remPx,
+              options.markShiftPx,
+              options.minReticleGapPx,
+              markStrokePx,
+            )
+          : null,
+        markReachPx: Math.max(
+          bracketHalfSizePx(
+            anchorRadiusPx(anchor, options.remPx),
+            options.remPx,
+            options.markShiftPx,
+          ) +
+            markStrokePx / 2,
+          anchor.body === null ? 0 : anchor.body.diameterPx / 2,
+        ),
+      });
     }
   }
   const marks = symbologyMarks(
@@ -531,18 +768,24 @@ export function buildWireframeDrawList(
       destination: options.destination,
       ownVelocityMPerS: own?.velocityMPerS ?? null,
       remPx: options.remPx,
+      markShiftPx: options.markShiftPx,
+      // An outline and one casing (`minReticleGapDevicePx`), so that the destination's casing
+      // clears the brackets' core.
+      minReticleGapPx: options.minReticleGapPx,
     },
     projection,
     viewport,
   );
   for (const [i, mark] of marks.entries()) {
+    // An outline at the marks' width, not the line scale's, so that it keeps its hole; its casing
+    // is a line's.
     lines.push(
       batch(
         `mark:${mark.kind}:${String(i)}`,
         "screen",
         packScreen(mark.segments),
         mark.token,
-        SYMBOL_STROKE_PX,
+        markStrokePx,
       ),
     );
   }
@@ -553,13 +796,63 @@ export function buildWireframeDrawList(
     lines,
     sprites: starSprites(scene, projection, viewport, options),
     anchors,
+    strokeScale,
+    markStrokePx,
+    occluderSlopePx: occluderSlopePxAt(strokeScale),
   };
 }
 
 /** How far outside the view a sprite's star may fall and still light it: half its quad, px. */
 const SPRITE_MARGIN_PX = Math.ceil(PSF_QUAD_PX / 2);
 
-/** The scene's stars as sprites, the brightest first, capped at the low setting. */
+/** Where a sprite falls: px from the view's top left, and its reversed-Z depth (0 for a star). */
+export interface SpritePlace {
+  readonly xPx: number;
+  readonly yPx: number;
+  readonly depth: number;
+}
+
+/** A sprite's two `vec4f` as `starSprite.wgsl` reads them. */
+export type SpriteRecord = readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
+/**
+ * A sprite's record (decision-r07-t8a, item 2): its place and depth, then its pre-exposed light
+ * per unit of point-spread weight, E × the exposure scale ÷ Ω, Ω the solid angle of the pixel its
+ * direction falls in. R02's stars and R07's point bodies are packed by it alike.
+ *
+ * @param illuminanceRgbLx - Its illuminance per linear Rec. 709 channel, lx.
+ * @param exposure - The exposure scale (`exposureScale`), 1 ÷ (cd/m²).
+ * @param direction - Its direction from the camera, along the camera frame's axes; any length.
+ */
+export function spriteRecord(
+  place: SpritePlace,
+  illuminanceRgbLx: Rgb,
+  exposure: number,
+  direction: Vec3,
+  projection: ProjectionCamera,
+  viewport: Viewport,
+): SpriteRecord {
+  const perWeight = exposure / pixelSolidAngle(direction, projection, viewport);
+  const [r, g, b] = illuminanceRgbLx;
+  return exposedSpriteRecord(place, [r * perWeight, g * perWeight, b * perWeight]);
+}
+
+/** A sprite's record from its place and its pre-exposed light per unit of point-spread weight. */
+export function exposedSpriteRecord(place: SpritePlace, exposedRgb: Rgb): SpriteRecord {
+  const [r, g, b] = exposedRgb;
+  return [place.xPx, place.yPx, place.depth, 0, r, g, b, 0];
+}
+
+/** The scene's stars, or the sky's, as sprites, the brightest first, capped at the low setting. */
 function starSprites(
   scene: ViewScene,
   projection: ProjectionCamera,
@@ -568,9 +861,9 @@ function starSprites(
 ): StarSprite[] {
   const exposure = exposureScale(options.ev100);
   const sprites: StarSprite[] = [];
-  for (const star of scene.stars) {
-    // Stars are far enough that the direction from the barycentre is the direction from the camera
-    // (parallax across a system is under a tenth of a pixel beyond about 9 ly; Design note 19).
+  for (const star of options.skyStars ?? interimSpriteStars(scene)) {
+    // Interim stars are far enough that the direction from the barycentre is the direction from
+    // the camera (Design note 19); the sky's sprites come already placed from the camera.
     const direction = star.direction;
     const p = project(scale(direction, 1e3), projection, viewport);
     if (
@@ -582,20 +875,31 @@ function starSprites(
     ) {
       continue;
     }
-    const e = illuminanceLx(apparentV(star.absoluteV, star.distanceM));
-    const perWeight = (e / pixelSolidAngle(direction, projection, viewport)) * exposure;
-    const colour = starColour(star.tEffK);
+    const [r, g, b] = star.illuminanceRgbLx;
+    const record = spriteRecord(
+      { xPx: p.xPx, yPx: p.yPx, depth: 0 },
+      star.illuminanceRgbLx,
+      exposure,
+      direction,
+      projection,
+      viewport,
+    );
     sprites.push({
       id: star.id,
       directionF32: narrow(direction),
       xPx: p.xPx,
       yPx: p.yPx,
-      exposedRgb: [colour[0] * perWeight, colour[1] * perWeight, colour[2] * perWeight],
-      illuminanceLx: e,
+      exposedRgb: [record[4], record[5], record[6]],
+      // Rec. 709's luminance weights: the photopic illuminance the ranking keeps the brightest by.
+      illuminanceLx: REC709_LUMA[0] * r + REC709_LUMA[1] * g + REC709_LUMA[2] * b,
     });
   }
   const ranked = sprites.toSorted(
     (a, b) => b.illuminanceLx - a.illuminanceLx || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
-  return options.lowSetting ? ranked.slice(0, LOW_SETTING_MAX_SPRITES) : ranked;
+  // The cap is the interim field's (Design note 21). The sky's own selection already holds its
+  // setting's budget, and a sprite it chose is in no bake, so cutting one would lose its star
+  // (R06.T13.c; R07.T17).
+  const interim = options.skyStars === undefined || options.skyStars === null;
+  return options.lowSetting && interim ? ranked.slice(0, LOW_SETTING_MAX_SPRITES) : ranked;
 }

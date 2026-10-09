@@ -1,4 +1,4 @@
-# generator_version = 19
+# generator_version = 21
 {
   "type": "response",
   "id": 3,
@@ -6,7 +6,7 @@
     "kind": "galaxy_parameters",
     "universe": "5eed000000000001",
     "seed": "00000000000004d2",
-    "generator_version": 19,
+    "generator_version": 21,
     "groups": [
       {
         "key": "identity",
@@ -24,7 +24,7 @@
             "origin": "fixed",
             "value": {
               "type": "number",
-              "value": 19.0,
+              "value": 21.0,
               "unit": "count"
             }
           },
@@ -55,7 +55,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 105866012993.75874,
+              "value": 105866012993.75002,
               "unit": "count"
             }
           },
@@ -64,7 +64,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.5979257851351787,
+              "value": 0.597925785135228,
               "unit": "msun"
             }
           },
@@ -82,7 +82,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 9070044914.94751,
+              "value": 9070044914.946762,
               "unit": "msun"
             }
           },
@@ -91,7 +91,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 84173629.87499472,
+              "value": 84173629.87498371,
               "unit": "msun"
             }
           },
@@ -100,7 +100,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 38040514.463783935,
+              "value": 38040514.46378081,
               "unit": "msun"
             }
           },
@@ -218,7 +218,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 181551660.22225544,
+              "value": 181551660.22224048,
               "unit": "msun"
             }
           },
@@ -227,7 +227,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 36033059816.70992,
+              "value": 36033059816.70695,
               "unit": "msun"
             }
           },
@@ -236,7 +236,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 8732703080.102425,
+              "value": 8732703080.103659,
               "unit": "msun"
             }
           },
@@ -245,7 +245,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 10775943933.253616,
+              "value": 10775943933.252728,
               "unit": "msun"
             }
           },
@@ -254,7 +254,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 5258444521.796525,
+              "value": 5258444521.796091,
               "unit": "msun"
             }
           },
@@ -263,7 +263,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 1489967270.6235836,
+              "value": 1489967270.6234612,
               "unit": "msun"
             }
           },
@@ -272,7 +272,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 828348655.715912,
+              "value": 828348655.7191094,
               "unit": "msun"
             }
           }
@@ -304,7 +304,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.5948644907152525,
+              "value": 0.5948644907153856,
               "unit": "msun"
             }
           },
@@ -331,7 +331,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.5850917042727128,
+              "value": 0.585091704272713,
               "unit": "msun"
             }
           },
@@ -340,7 +340,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.6058188467646275,
+              "value": 0.6058188467670158,
               "unit": "msun"
             }
           }
@@ -354,7 +354,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 7111.735994710872,
+              "value": 7111.735994710674,
               "unit": "ly"
             }
           },
@@ -372,7 +372,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 7111.735994710872,
+              "value": 7111.735994710674,
               "unit": "ly"
             }
           },
@@ -390,7 +390,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 5016.145462011137,
+              "value": 5016.145462010998,
               "unit": "ly"
             }
           },
@@ -408,7 +408,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 13295.057480216623,
+              "value": 13295.057480216254,
               "unit": "ly"
             }
           }
@@ -422,7 +422,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 2002.1520724910022,
+              "value": 2002.1520724909474,
               "unit": "ly"
             }
           },
@@ -431,7 +431,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 1197.2955861243324,
+              "value": 1197.2955861242997,
               "unit": "ly"
             }
           },
@@ -440,7 +440,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 716.2025157092925,
+              "value": 716.2025157092728,
               "unit": "ly"
             }
           },
@@ -512,7 +512,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 2.2632458557052706,
+              "value": 2.2632458557052386,
               "unit": "deg_per_myr"
             }
           }
@@ -526,7 +526,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 382.38118583663413,
+              "value": 382.3811858366237,
               "unit": "ly"
             }
           },
@@ -535,7 +535,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 162.08160148708285,
+              "value": 162.08160148707842,
               "unit": "ly"
             }
           }
@@ -771,7 +771,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 242.28723775014856,
+              "value": 242.28723775014475,
               "unit": "km_per_s"
             }
           },
@@ -780,7 +780,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 574.0160483642111,
+              "value": 574.0160483642072,
               "unit": "km_per_s"
             }
           }
@@ -812,7 +812,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 23.00860934135971,
+              "value": 23.008609341359918,
               "unit": "none"
             }
           },

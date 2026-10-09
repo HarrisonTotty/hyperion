@@ -1,0 +1,22 @@
+# generator_version = 21
+system = 0x81fd865fd000000f
+[0] NeutronStar
+[0] mass = 0x3ff7c21e7638e5d8  # 1.4848923318917198
+[0] core mass = 0x3ff7c21e7638e5d8  # 1.4848923318917198
+[0] luminosity = 0x3ded951171ebf8ae  # 2.1523954230128072e-10
+[0] radius = 0x3ef2635cf9422719  # 1.753629437976139e-5
+[1] NeutronStar
+[1] mass = 0x3ff5f2564d1bbbaa  # 1.371664334492133
+[1] core mass = 0x3ff5f2564d1bbbaa  # 1.371664334492133
+[1] luminosity = 0x3dec14cb9d9200c6  # 2.0431785324837907e-10
+[1] radius = 0x3ef2635cf9422719  # 1.753629437976139e-5
+[2] CarbonOxygenWhiteDwarf
+[2] mass = 0x3fe5e26a5cde68ea  # 0.6838886083453677
+[2] core mass = 0x3fe5e26a5cde68ea  # 0.6838886083453677
+[2] luminosity = 0x3f094af597a74baa  # 4.824220646395341e-5
+[2] radius = 0x3f87fb82ed32eb3d  # 0.011710188735710165
+[3] NeutronStar
+[3] mass = 0x3ff33b2dea46e589  # 1.2019480849688498
+[3] core mass = 0x3ff33b2dea46e589  # 1.2019480849688498
+[3] luminosity = 0x3de9cd575209ed97  # 1.877350853067828e-10
+[3] radius = 0x3ef2635cf9422719  # 1.753629437976139e-5

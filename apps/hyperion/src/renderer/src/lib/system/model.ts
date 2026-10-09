@@ -19,13 +19,17 @@ import type {
   BodyIdHex,
   DestructionCauseDto,
   DetailLevelDto,
+  FigureDatumDto,
+  FigureLawDto,
   KickModeDto,
   MoonOriginDto,
   ObjectKindDto,
   PhaseDto,
+  PhaseTemplateDto,
   PlanetClassDto,
   RingKindDto,
   RingMaterialDto,
+  SpinResonanceDto,
   StarEventKindDto,
   SystemIdHex,
   UniverseIdHex,
@@ -270,6 +274,99 @@ export interface BulkProperties {
   readonly effectiveTemperatureK: number | null;
 }
 
+/**
+ * Whether and when a body's tides lock its spin (the protocol's `locking_age_s` and `locks_at`):
+ * never; at a system age τ, from the system's birth, whose instant lies outside the clock's range;
+ * or at τ, at an instant within it.
+ */
+export type RotationLock =
+  | { readonly kind: "never" }
+  | { readonly kind: "outside_clock"; readonly lockingAgeS: number }
+  | { readonly kind: "in_clock"; readonly lockingAgeS: number; readonly locksAt: UniverseTime };
+
+/**
+ * A body's body-fixed frame and rotation law (the protocol's `BodyRotationDto`, plan 14's
+ * P14.T46.f): its pole and equator's axes along the galactic axes, and every parameter of the
+ * rotation angle W(t), which `rotation.ts` evaluates at any time in the clock window.
+ */
+export interface SystemBodyRotation {
+  /** The spin axis, a unit vector along the galactic axes, by the right-hand rule. */
+  readonly pole: Vec3;
+  /** The equator's ascending node on the orbital plane, a unit vector: where W is 0. */
+  readonly equatorNode: Vec3;
+  /** The equator's axis a quarter-turn east of the node, pole × node: where W is π ÷ 2. */
+  readonly equatorQuarter: Vec3;
+  /** The angle between the pole and the orbit's normal, in `[0, π]`. */
+  readonly obliquityRad: number;
+  /** The primordial spin rate ω₀, positive: prograde about the pole. */
+  readonly initialRateRadPerS: number;
+  /** The spin rate after the lock, `ω_L`: the mean motion, or 1.5 times it in the 3:2 state. */
+  readonly lockedRateRadPerS: number;
+  /** The system's age at the epoch, positive. */
+  readonly ageAtEpochS: number;
+  /** Whether and when the body locks. */
+  readonly lock: RotationLock;
+  /** The state the body locks into. */
+  readonly resonance: SpinResonanceDto;
+  /** The locked angle's clock's period: the orbit's, or two orbits' for a 3:2 body. */
+  readonly clockPeriodS: number;
+  /** The clock's mean anomaly at the epoch. */
+  readonly clockMeanAnomalyAtEpochRad: number;
+  /** `W_p`, the angle at which the prime meridian faces the primary at pericentre. */
+  readonly subPrimaryAngleRad: number;
+  /** W at the epoch. */
+  readonly phaseAtEpochRad: number;
+  /** δ, the phase the capture into the resonance takes up before the lock. */
+  readonly capturePhaseRad: number;
+}
+
+/**
+ * A body's figure (the protocol's `BodyFigureDto`, plan 14's P14.T46.d–f): the reference spheroid
+ * (a, a, c) about its pole that every height is measured from, of its bulk's volume.
+ */
+export interface SystemBodyFigure {
+  /** a. */
+  readonly equatorialRadiusM: number;
+  /** c, at most a. */
+  readonly polarRadiusM: number;
+  /** (a − c) ÷ a, dimensionless. */
+  readonly flattening: number;
+  /** The rotation's pole, the spheroid's symmetry axis, a unit vector along the galactic axes. */
+  readonly pole: Vec3;
+  /** C ÷ M a², the factor the flattening was found with. */
+  readonly momentOfInertiaFactor: number;
+  readonly law: FigureLawDto;
+  /** What heights are measured from. */
+  readonly datum: FigureDatumDto;
+}
+
+/** A quantity in each of the Johnson B, V and R bands. */
+export interface JohnsonBands {
+  readonly b: number;
+  readonly v: number;
+  readonly r: number;
+}
+
+/**
+ * A body's photometry (the protocol's `BodyPhotometryDto`, plan 14's P14.T47): the law its disc and
+ * point are shaded with, per band, against π a c (R07 Design note 5).
+ */
+export interface SystemBodyPhotometry {
+  /** The geometric albedo p per band, dimensionless. */
+  readonly geometricAlbedo: JohnsonBands;
+  readonly phaseTemplate: PhaseTemplateDto;
+  /** The template's exponent s per band. */
+  readonly phaseExponent: JohnsonBands;
+  /** The law's Lommel–Seeliger share L, in `[0, 1]`. */
+  readonly lunarLambertShare: number;
+  /** The Bond albedo of the body's surface state, in `[0, 1)` (P14.T13.c). */
+  readonly bondAlbedo: number;
+  /** p_V q_V ÷ A_Bond as plan 14 states it: a check only, never an input. */
+  readonly bondRatio: number;
+  /** Whether the curve is borrowed (magma, airless ice, a snowball) or the body a hot giant. */
+  readonly provisional: boolean;
+}
+
 /** A gap a moon's resonance clears in a massive ring. */
 export interface RingGap {
   /** The moon whose resonance clears it. */
@@ -384,6 +481,15 @@ export interface SystemBody {
   /** What a ring, a belt or the halo is and where it lies; `not_applicable` for any other body. */
   readonly population: Section<Population>;
   readonly bulk: Section<BulkProperties>;
+  /**
+   * Its body-fixed frame and rotation law (`bulk`); `not_modelled` where an older server leaves
+   * the field out.
+   */
+  readonly rotation: Section<SystemBodyRotation>;
+  /** Its figure (`bulk`); `not_modelled` where an older server leaves the field out. */
+  readonly figure: Section<SystemBodyFigure>;
+  /** Its photometry (`bulk`); `not_modelled` where an older server leaves the field out. */
+  readonly photometry: Section<SystemBodyPhotometry>;
 }
 
 /** A body's hooks: what the generators of surfaces, life and civilisations read. */

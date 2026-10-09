@@ -105,6 +105,19 @@ describe("a device loss", () => {
     expect(status.getSnapshot().capabilities).toEqual(nth(module, 1).capabilities);
   });
 
+  it("reports the current engine's timing frame, from 0 again after the restore (R07.T19)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    nth(module, 0).passTimesFrame = 7;
+    const before = engine.passTimesFrame;
+    const restored = vi.fn<() => void>();
+    engine.onRestored(restored);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(restored).toHaveBeenCalledOnce();
+    });
+    expect([before, engine.passTimesFrame]).toEqual([7, 0]);
+  });
+
   it("tells the caller once the engine is restored", async () => {
     const { engine, module } = await load([adapter(), adapter()]);
     const restored = vi.fn<() => void>();
@@ -319,6 +332,44 @@ describe("a device loss", () => {
       expect(module.engines).toHaveLength(2);
     });
     expect(events).toHaveBeenCalledWith({ kind: "destroyed", ...FAKE_ENGINE_MEMORY });
+  });
+
+  it("forwards a release to the engine that made the handle (R06.T13.h)", async () => {
+    const { engine, module } = await load([adapter()]);
+    const buffer = engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" });
+    engine.releaseBuffer(buffer);
+    expect(nth(module, 0).released).toEqual([buffer]);
+  });
+
+  it("drops the release of a handle a lost engine made (R06.T13.h)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const buffer = engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" });
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    engine.releaseBuffer(buffer);
+    expect(nth(module, 0).released).toEqual([]);
+    expect(nth(module, 1).released).toEqual([]);
+  });
+
+  it("refuses the release of a handle it did not make (R06.T13.h)", async () => {
+    const { engine } = await load([adapter()]);
+    const stranger = { kind: "buffer", name: "stranger", bytes: 4 } as const;
+    expect(() => {
+      engine.releaseBuffer(stranger);
+    }).toThrow(/stranger was not made through this engine/u);
+  });
+
+  it("forwards the release of a handle made after a restore to the new engine (R06.T13.h)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    const buffer = engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" });
+    engine.releaseBuffer(buffer);
+    expect(nth(module, 1).released).toEqual([buffer]);
   });
 
   it("drops writes and refuses creations while there is no device", async () => {

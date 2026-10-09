@@ -524,7 +524,8 @@ Acceptance: `just ci`.
   directory plan 04 reserved, through its `UniverseStore`: append on change, load on open, an
   unknown version is `LoadKnowledgeError::UnsupportedFormat`, a torn last line is dropped with a
   `tracing::warn!`. Writes go through `spawn_blocking`. Tests: round trip; reopening a universe
-  restores contacts and acknowledgements.
+  restores contacts and acknowledgements. How durable the directory and the appends are on each
+  platform is plan 04's P04.T17.b.
 
 Files: `crates/hyperion-server/src/knowledge/{mod,record,store,persist}.rs`. Acceptance:
 `cargo test -p hyperion-server knowledge`.
@@ -619,14 +620,15 @@ the owner to read, as plan 05 does for its own.
 ### P12.T11 Client: mode and observed readout
 
 `SegmentMark` in plan 05's `spatial/marks.ts`, `drawList.ts` and `paint.ts` (solid or dashed,
-clipped to the viewport, not pickable). `ModeControl` (`NOW` / `OBSERVED`, a display control and not
-a ship command, single-key binding shown), `ObserverMark` on the chart with a "set observer to chart
-centre" control and its coordinates in the readout. In observed mode the chart still draws present
-positions; the selected system, and any system whose apparent offset exceeds four pixels, gets the
-apparent tick and dashed joiner from the pure helper `apparentOffset`. The readout shows state
-`AS OBSERVED`, light age, emitted time, the present position with `~` and the stated error, and an
-em dash for present state, which the crew cannot know. The mode label sits beside the frame and the
-time.
+clipped to the viewport, not pickable) (its width and dash in CSS px, drawn by `paint.ts` at
+R07.T16.f's line scale; decision-thin-line-contrast). `ModeControl` (`NOW` / `OBSERVED`, a display
+control and not a ship command, single-key binding shown), `ObserverMark` on the chart with a "set
+observer to chart centre" control and its coordinates in the readout. In observed mode the chart
+still draws present positions; the selected system, and any system whose apparent offset exceeds
+four pixels, gets the apparent tick and dashed joiner from the pure helper `apparentOffset`. The
+readout shows state `AS OBSERVED`, light age, emitted time, the present position with `~` and the
+stated error, and an em dash for present state, which the crew cannot know. The mode label sits
+beside the frame and the time.
 
 Files: under `apps/hyperion/src/renderer/src/`: `spatial/{marks,drawList,paint}.ts`,
 `displays/galaxy/{LocalChartPanel,ChartControls,SystemReadout,useRangeQuery}.ts(x)`,
@@ -715,6 +717,11 @@ under plan 04's convention: a defaulted `mode`, new request kinds, and the first
   wants soft and hard bands replaces the constant with a function of energy; nothing else changes.
 - **FU Orionis outbursts** are treated as local events. The research notes route them through
   star-forming-region features; if plan 09 lists them at feature level they join T5.d instead.
+- **The alert service's appends on macOS (P12.T8; plan 04, P04.T17.b).** Each Knowledge change is
+  appended and synced before it is applied (T7.b). std's `sync_data` on Apple is
+  `fcntl(F_FULLFSYNC)`, which flushes the drive's cache, so each line costs one full flush. If the
+  service's sighting bursts make that visible, batch several lines per sync, still synced before
+  any of them is applied. Measure on the Mac when T8 lands.
 - **T0, T1, T2 and T4 as built (lane `obs12a`, 2026-09-29, at `GENERATOR_VERSION` 14).** Done;
   T3 is held until the v15 commit. No generated output moves and no golden changes: observation
   and lensing only read. Names and shapes that differ from the sketches:

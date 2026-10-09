@@ -28,21 +28,30 @@ export function hullEdges(hull: HullOutline, attitude: Quaternion): HullSegment[
 }
 
 /**
- * A hull's faces as triangles offset from the craft, turned by its attitude: the depth-only
- * occluder that hides the hull's hidden lines (Design note 5).
+ * A hull's opaque faces as triangles offset from the craft, turned by its attitude: the occluder
+ * that hides the hull's hidden lines (Design note 5), and over the photorealistic image its
+ * silhouette (R07.T16.e).
+ *
+ * @remarks
+ * Its windows ({@link HullOutline.windows}) are left out: glass hides nothing, in either style
+ * (decision-r07-t16a, item 3). Their edges are among {@link hullEdges}.
  */
 export function hullFaces(
   hull: HullOutline,
   attitude: Quaternion,
 ): ReadonlyArray<readonly [Vec3, Vec3, Vec3]> {
   const turned = hull.vertices.map((v) => rotate(attitude, v));
-  return hull.faces.map(([i, j, k]) => {
+  const glazed = new Set(hull.windows);
+  return hull.faces.flatMap(([i, j, k], index) => {
+    if (glazed.has(index)) {
+      return [];
+    }
     const a = turned[i];
     const b = turned[j];
     const c = turned[k];
     if (a === undefined || b === undefined || c === undefined) {
       throw new Error(`hull ${hull.name} has a face on a vertex it lacks`);
     }
-    return [a, b, c] as const;
+    return [[a, b, c] as const];
   });
 }

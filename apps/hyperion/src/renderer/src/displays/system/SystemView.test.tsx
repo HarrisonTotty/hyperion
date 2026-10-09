@@ -7,6 +7,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { minReticleGapDevicePx } from "../../lib/strokes";
 import { layoutHierarchy } from "../../lib/system/hierarchy";
 import { toSystemModel } from "../../lib/system/wire";
 import { fitPxPerUnit, PRESETS, project, viewBasis } from "../../spatial/camera";
@@ -37,6 +38,8 @@ import { SystemView } from "./SystemView";
 const WIDTH_PX = 400;
 const HEIGHT_PX = 300;
 const REM_PX = 16;
+/** The reticles' least gap at jsdom's ratio of 1, as the map draws it. */
+const GAP_PX = minReticleGapDevicePx(1);
 
 const STAR_0 = `${PIN_SYSTEM}.0000`;
 const STAR_1 = `${PIN_SYSTEM}.0001`;
@@ -123,7 +126,7 @@ function anchorsOfPinnedBinary() {
   };
   const basis = viewBasis(scene.frame, camera);
   return {
-    drawList: buildDrawList(scene, camera, viewport),
+    drawList: buildDrawList(scene, camera, viewport, GAP_PX),
     scene,
     toScreen: (point: Vec3) => project(point, basis, camera, viewport),
   };

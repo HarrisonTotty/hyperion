@@ -7,7 +7,7 @@
 //! | ----- | -------- |
 //! | `contact` | none: the ID, the parent, the state and the position only, with the kind `unresolved` |
 //! | `mass_and_orbit` | `label`, `mass_kg`, `orbit`, `moons`, `rings`, and the kind |
-//! | `bulk` | `bulk`: radius, density, surface gravity, class, mass fractions, equilibrium temperature |
+//! | `bulk` | `bulk`: radius, density, surface gravity, class, mass fractions, equilibrium temperature; `rotation`, `figure`, `photometry` |
 //! | `surface` | `surface` |
 //! | `full` | `hooks` |
 //!
@@ -203,10 +203,10 @@ pub struct BulkPropertiesDto {
     pub effective_temperature_k: Option<f64>,
 }
 
-/// A body's surface section: atmosphere, surface conditions, rotation and global figures (design
-/// note 16), which P14.T13, T14 and T24 compute.
+/// A body's surface section: atmosphere and surface conditions (design note 16), which P14.T13
+/// and T24 compute; the rotation and the figure are sections of their own at `bulk` (P14.T46.f).
 ///
-/// None of them is computed yet, so the type has no value, as the simulation's `record::Surface`
+/// None of them is on the wire yet, so the type has no value, as the simulation's `record::Surface`
 /// has none, and no record can carry a surface section that is `ok`: every surface is
 /// `not_modelled`, or `not_applicable` for a giant. The tasks that compute it give it its fields.
 /// TypeScript sees it as `never`. It derives only what a type of floats and lists can keep once it
@@ -231,6 +231,193 @@ pub struct BodyHooksDto {
     /// The seed of the client's local terrain synthesis, derived on `body.surface.detail` (R09);
     /// `not_modelled` until R09 computes it.
     pub detail_seed: SectionDto<DetailSeedHex>,
+}
+
+/// The spin–orbit state a body's tides lock it into (plan 14's `SpinOrbitResonance`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SpinResonanceDto {
+    /// One rotation per orbit, as the Moon.
+    Synchronous,
+    /// Three rotations per two orbits, as Mercury.
+    ThreeToTwo,
+}
+
+/// A body's body-fixed frame and its rotation law (plan 14, P14.T14.c and P14.T46.f; design note
+/// 23): the pole and the equator's axes, and every parameter of the rotation angle W(t), so that
+/// a client evaluates the orientation at any time in the clock window with no re-request.
+///
+/// With s the seconds from the epoch to t, d = `locking_age_s` − `age_at_epoch_s` and
+/// Δ = max(s, 0), W is reduced into `[0, 2π)` and is:
+///
+/// - **locked**, at or after `locks_at`: `sub_primary_angle_rad` + p M(t), with p 1 for a
+///   synchronous body and 3 for a 3:2 one, and M(t) = `clock_mean_anomaly_at_epoch_rad` +
+///   2π s ÷ `clock_period_s`;
+/// - **with no lock in the clock's range** (`locks_at` `null`): `phase_at_epoch_rad` + the angle
+///   swept from 0 to s;
+/// - **before the lock**, d > 0: `phase_at_epoch_rad` + the angle swept from 0 to s +
+///   `capture_phase_rad` (Δ ÷ d)²;
+/// - **before the lock**, d ≤ 0: the locked angle at `locks_at` less the angle swept from s to d.
+///
+/// The angle swept from a to b is ω(`age_at_epoch_s` + a) (b − a) + (`ω_L` − ω₀) (b − a)² ÷ 2τ, with
+/// ω(x) = ω₀ + (`ω_L` − ω₀) clamp(x ÷ τ, 0, 1), ω₀ the initial and `ω_L` the locked rate and τ the
+/// locking age; ω₀ (b − a) for a body that never locks. The body-fixed axes at t are the prime
+/// meridian cos W node + sin W quarter, the axis a quarter-turn east of it, and the pole.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BodyRotationDto {
+    /// The pole, the spin axis's unit vector along the galactic axes, by the right-hand rule.
+    pub pole: [f64; 3],
+    /// The ascending node of the equator on the orbital plane, a unit vector along the galactic
+    /// axes, which W is measured from about the pole.
+    pub equator_node: [f64; 3],
+    /// The equator's axis a quarter-turn east of the node, pole × node, a unit vector along the
+    /// galactic axes: where W is π ÷ 2.
+    pub equator_quarter: [f64; 3],
+    /// The obliquity, rad, in `[0, π]`: the angle between the pole and the orbit's normal.
+    pub obliquity_rad: f64,
+    /// The primordial spin rate ω₀, rad s⁻¹, positive: prograde about the pole.
+    pub initial_rate_rad_s: f64,
+    /// The spin rate after the lock, `ω_L`, rad s⁻¹, positive: the mean motion n, or 1.5 n in the
+    /// 3:2 state.
+    pub locked_rate_rad_s: f64,
+    /// The system's age at the epoch, s, positive.
+    pub age_at_epoch_s: f64,
+    /// The system age at which the body locks, τ, s from the system's birth, positive; `null` for
+    /// a body that never locks. Never `null` where `locks_at` is set.
+    pub locking_age_s: Option<f64>,
+    /// When the body locks; `null` when that is not within the clock's range.
+    pub locks_at: Option<UniverseTime>,
+    /// The state the body locks into.
+    pub resonance: SpinResonanceDto,
+    /// The period of the locked angle's clock, s, positive: the orbit's for a synchronous body,
+    /// two orbits for a 3:2 one.
+    pub clock_period_s: f64,
+    /// The clock's mean anomaly at the epoch, rad, in `[0, 2π)`.
+    pub clock_mean_anomaly_at_epoch_rad: f64,
+    /// `W_p`, the rotation angle at which the prime meridian faces the primary at pericentre, rad,
+    /// in `[−π, π]`: measured as W is, from the equator's node about the pole.
+    pub sub_primary_angle_rad: f64,
+    /// The drawn rotation angle at the epoch, rad, in `[0, 2π)`.
+    pub phase_at_epoch_rad: f64,
+    /// δ, the phase the capture into the resonance takes up before the lock, rad, in `[−π, π)`.
+    pub capture_phase_rad: f64,
+}
+
+/// How a body's figure was found (plan 14's `FigureLaw`, P14.T46.c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FigureLawDto {
+    /// Below the hydrostatic size: a sphere of the mean radius.
+    Sphere,
+    /// The spin's Darwin–Radau flattening.
+    Rotational,
+    /// A synchronous body's: the spin's flattening times the synchronous tidal factor, 2.5.
+    RotationalAndTidal,
+    /// Held at the flattening cap, 0.2.
+    Capped,
+}
+
+/// What a body's heights are measured from (plan 14's `Datum`, P14.T46.e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FigureDatumDto {
+    /// The solid or liquid surface.
+    SolidSurface,
+    /// The 1-bar level of a hydrogen and helium envelope, which its radius is quoted at.
+    OneBar,
+}
+
+/// A body's figure (plan 14, P14.T46.d–f): the reference spheroid (a, a, c) about its pole that
+/// every height is measured along the normal of, of the volume of the bulk section's mean radius.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BodyFigureDto {
+    /// The equatorial radius a, m, positive.
+    pub equatorial_radius_m: f64,
+    /// The polar radius c, m, positive, at most a.
+    pub polar_radius_m: f64,
+    /// The flattening (a − c) ÷ a, in `[0, 0.2]`.
+    pub flattening: f64,
+    /// The rotation's pole, the spheroid's symmetry axis, a unit vector along the galactic axes.
+    pub pole: [f64; 3],
+    /// The moment of inertia factor C ÷ M a² the flattening was found with, in `(0, 0.4]` (0.4 a
+    /// uniform sphere).
+    pub moment_of_inertia_factor: f64,
+    /// How the figure was found.
+    pub law: FigureLawDto,
+    /// What heights are measured from.
+    pub datum: FigureDatumDto,
+}
+
+/// A quantity in the Johnson B, V and R bands.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BandsDto {
+    /// B.
+    pub b: f64,
+    /// V.
+    pub v: f64,
+    /// R.
+    pub r: f64,
+}
+
+/// Which measured phase curve a body's law is fitted to (plan 14's `PhaseTemplate`, P14.T47.a;
+/// rendering plan R07's `PhaseTemplateId`, in its order).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PhaseTemplateDto {
+    /// The Moon's curve (a test analogue: airless rock takes Mercury's).
+    Moon,
+    /// Mercury's.
+    Mercury,
+    /// Mars's.
+    Mars,
+    /// Venus's.
+    Venus,
+    /// Earth's.
+    Earth,
+    /// Jupiter's.
+    Jupiter,
+    /// Saturn's globe.
+    Saturn,
+    /// Uranus's (a test analogue: an ice giant takes Neptune's).
+    Uranus,
+    /// Neptune's.
+    Neptune,
+    /// Airless ice: the Moon's curve, q from Ganymede's (provisional).
+    AirlessIce,
+    /// A snowball: the Moon's curve, q from Europa's (provisional).
+    Snowball,
+    /// A thin magma ocean: Mercury's curve (provisional).
+    Magma,
+}
+
+/// A body's photometry (plan 14, P14.T47): the disc-integrated brightness law a client draws it
+/// with, per band, `Φ_c` = `Φ_t`^s blended with the Lommel–Seeliger share L, against π a c.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BodyPhotometryDto {
+    /// The geometric albedo p per band, against π a c, positive, with p q ≤ 1.
+    pub geometric_albedo: BandsDto,
+    /// The phase-curve template.
+    pub phase_template: PhaseTemplateDto,
+    /// The template's exponent s per band, positive.
+    pub phase_exponent: BandsDto,
+    /// The law's Lommel–Seeliger share L, in `[0, 1]`.
+    pub lunar_lambert_share: f64,
+    /// The Bond albedo of the body's surface state, in `[0, 1)` (P14.T13.c).
+    pub bond_albedo: f64,
+    /// `p_V` `q_V` ÷ `A_Bond`, a check only, positive: 1 for a law whose spherical albedo is the
+    /// Bond albedo.
+    pub bond_ratio: f64,
+    /// Whether the curve is borrowed (magma, airless ice, a snowball) or the body a hot giant with
+    /// no Solar System analogue.
+    pub provisional: bool,
 }
 
 /// One body as a system's list carries it: its identity and state, and the sections the list and
@@ -278,6 +465,23 @@ pub struct BodySummaryDto {
     pub population: SectionDto<PopulationDto>,
     /// Its bulk properties (`bulk`).
     pub bulk: SectionDto<BulkPropertiesDto>,
+    /// Its body-fixed frame and rotation law (`bulk`): `not_applicable` for a ring, a belt or the
+    /// halo. The server always sends it; it is optional only so that adding it left
+    /// [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) at 2, and a client reads it absent as an older
+    /// server's `not_modelled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rotation: Option<SectionDto<BodyRotationDto>>,
+    /// Its figure (`bulk`): `not_applicable` for a ring, a belt or the halo, and `not_modelled`
+    /// where the bulk or the rotation is. Optional on the wire, as `rotation` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub figure: Option<SectionDto<BodyFigureDto>>,
+    /// Its photometry (`bulk`): `not_applicable` for a ring, a belt or the halo, and
+    /// `not_modelled` where the bulk is. Optional on the wire, as `rotation` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub photometry: Option<SectionDto<BodyPhotometryDto>>,
 }
 
 /// One body's whole record at one time: every section of a [`BodySummaryDto`], and the surface and
@@ -318,6 +522,23 @@ pub struct BodyRecordDto {
     pub population: SectionDto<PopulationDto>,
     /// Its bulk properties (`bulk`).
     pub bulk: SectionDto<BulkPropertiesDto>,
+    /// Its body-fixed frame and rotation law (`bulk`): `not_applicable` for a ring, a belt or the
+    /// halo. The server always sends it; it is optional only so that adding it left
+    /// [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) at 2, and a client reads it absent as an older
+    /// server's `not_modelled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rotation: Option<SectionDto<BodyRotationDto>>,
+    /// Its figure (`bulk`): `not_applicable` for a ring, a belt or the halo, and `not_modelled`
+    /// where the bulk or the rotation is. Optional on the wire, as `rotation` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub figure: Option<SectionDto<BodyFigureDto>>,
+    /// Its photometry (`bulk`): `not_applicable` for a ring, a belt or the halo, and
+    /// `not_modelled` where the bulk is. Optional on the wire, as `rotation` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub photometry: Option<SectionDto<BodyPhotometryDto>>,
     /// Its surface (`surface`): `not_applicable` for a giant, which has none, and `not_modelled`
     /// for every other body in this generator version.
     pub surface: SectionDto<BodySurfaceDto>,
@@ -430,6 +651,107 @@ pub(crate) mod tests {
         })
     }
 
+    /// An Earth's frame: its pole tilted 0.409 rad from an orbit normal along +z, spinning once a
+    /// sidereal day and never locking. Every number is its `f64` in full.
+    pub(crate) fn earth_rotation() -> BodyRotationDto {
+        BodyRotationDto {
+            pole: [0.0, -0.397_692_008_009_812_36, 0.917_518_973_517_781_4],
+            equator_node: [1.0, 0.0, 0.0],
+            equator_quarter: [0.0, 0.917_518_973_517_781_4, 0.397_692_008_009_812_36],
+            obliquity_rad: 0.409,
+            initial_rate_rad_s: 7.292_115e-5,
+            locked_rate_rad_s: 1.990_986_6e-7,
+            age_at_epoch_s: 1.44e17,
+            locking_age_s: None,
+            locks_at: None,
+            resonance: SpinResonanceDto::Synchronous,
+            clock_period_s: 31_558_148.628_135_167,
+            clock_mean_anomaly_at_epoch_rad: 0.5,
+            sub_primary_angle_rad: 1.25,
+            phase_at_epoch_rad: 4.894_961_212_735_792,
+            capture_phase_rad: -0.75,
+        }
+    }
+
+    pub(crate) fn earth_rotation_json() -> Value {
+        json!({
+            "pole": [0.0, -0.397_692_008_009_812_36, 0.917_518_973_517_781_4],
+            "equator_node": [1.0, 0.0, 0.0],
+            "equator_quarter": [0.0, 0.917_518_973_517_781_4, 0.397_692_008_009_812_36],
+            "obliquity_rad": 0.409,
+            "initial_rate_rad_s": 7.292_115e-5,
+            "locked_rate_rad_s": 1.990_986_6e-7,
+            "age_at_epoch_s": 1.44e17,
+            "locking_age_s": null,
+            "locks_at": null,
+            "resonance": "synchronous",
+            "clock_period_s": 31_558_148.628_135_167,
+            "clock_mean_anomaly_at_epoch_rad": 0.5,
+            "sub_primary_angle_rad": 1.25,
+            "phase_at_epoch_rad": 4.894_961_212_735_792,
+            "capture_phase_rad": -0.75,
+        })
+    }
+
+    /// An Earth's figure: WGS 84's a and c (NIMA TR8350.2) about [`earth_rotation`]'s pole.
+    pub(crate) fn earth_figure() -> BodyFigureDto {
+        BodyFigureDto {
+            equatorial_radius_m: 6_378_137.0,
+            polar_radius_m: 6_356_752.314_245_179,
+            flattening: 0.003_352_810_664_747_480_5,
+            pole: earth_rotation().pole,
+            moment_of_inertia_factor: 0.33,
+            law: FigureLawDto::Rotational,
+            datum: FigureDatumDto::SolidSurface,
+        }
+    }
+
+    pub(crate) fn earth_figure_json() -> Value {
+        json!({
+            "equatorial_radius_m": 6_378_137.0,
+            "polar_radius_m": 6_356_752.314_245_179,
+            "flattening": 0.003_352_810_664_747_480_5,
+            "pole": [0.0, -0.397_692_008_009_812_36, 0.917_518_973_517_781_4],
+            "moment_of_inertia_factor": 0.33,
+            "law": "rotational",
+            "datum": "solid_surface",
+        })
+    }
+
+    /// An Earth's photometry, illustrative: Earth's template, Robinson 2026's p (P14.T47.e) and the
+    /// generator's temperate Bond albedo of 0.294.
+    pub(crate) fn earth_photometry() -> BodyPhotometryDto {
+        BodyPhotometryDto {
+            geometric_albedo: BandsDto {
+                b: 0.263,
+                v: 0.215,
+                r: 0.21,
+            },
+            phase_template: PhaseTemplateDto::Earth,
+            phase_exponent: BandsDto {
+                b: 1.0,
+                v: 1.0,
+                r: 1.0,
+            },
+            lunar_lambert_share: 0.0,
+            bond_albedo: 0.294,
+            bond_ratio: 0.959_14,
+            provisional: false,
+        }
+    }
+
+    pub(crate) fn earth_photometry_json() -> Value {
+        json!({
+            "geometric_albedo": { "b": 0.263, "v": 0.215, "r": 0.21 },
+            "phase_template": "earth",
+            "phase_exponent": { "b": 1.0, "v": 1.0, "r": 1.0 },
+            "lunar_lambert_share": 0.0,
+            "bond_albedo": 0.294,
+            "bond_ratio": 0.959_14,
+            "provisional": false,
+        })
+    }
+
     /// The slice's record of an Earth, body `0x0300` about star 0, at the epoch.
     pub(crate) fn planet_summary() -> BodySummaryDto {
         BodySummaryDto {
@@ -445,6 +767,9 @@ pub(crate) mod tests {
             rings: SectionDto::NotModelled,
             population: SectionDto::NotApplicable,
             bulk: SectionDto::Ok(earth_bulk()),
+            rotation: Some(SectionDto::Ok(earth_rotation())),
+            figure: Some(SectionDto::Ok(earth_figure())),
+            photometry: Some(SectionDto::Ok(earth_photometry())),
         }
     }
 
@@ -462,6 +787,9 @@ pub(crate) mod tests {
             "rings": { "state": "not_modelled" },
             "population": { "state": "not_applicable" },
             "bulk": { "state": "ok", "value": earth_bulk_json() },
+            "rotation": { "state": "ok", "value": earth_rotation_json() },
+            "figure": { "state": "ok", "value": earth_figure_json() },
+            "photometry": { "state": "ok", "value": earth_photometry_json() },
         })
     }
 
@@ -481,6 +809,9 @@ pub(crate) mod tests {
             rings: summary.rings,
             population: summary.population,
             bulk: summary.bulk,
+            rotation: summary.rotation,
+            figure: summary.figure,
+            photometry: summary.photometry,
             surface: SectionDto::NotModelled,
             hooks: SectionDto::NotModelled,
         }
@@ -617,6 +948,9 @@ pub(crate) mod tests {
             rings: SectionDto::NotResolved,
             population: SectionDto::NotResolved,
             bulk: SectionDto::NotResolved,
+            rotation: Some(SectionDto::NotResolved),
+            figure: Some(SectionDto::NotResolved),
+            photometry: Some(SectionDto::NotResolved),
             ..planet_summary()
         };
         let withheld = json!({ "state": "not_resolved" });
@@ -635,6 +969,9 @@ pub(crate) mod tests {
                 "rings": withheld,
                 "population": withheld,
                 "bulk": withheld,
+                "rotation": withheld,
+                "figure": withheld,
+                "photometry": withheld,
             }),
         );
     }
@@ -883,5 +1220,159 @@ pub(crate) mod tests {
             error.to_string().contains("unknown variant `comet`"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn body_rotation_wire_form() {
+        assert_wire_form(&earth_rotation(), earth_rotation_json());
+    }
+
+    #[test]
+    fn a_rotation_that_locks_in_the_window_carries_its_lock() {
+        let locking = BodyRotationDto {
+            locking_age_s: Some(1.5e17),
+            locks_at: Some(UniverseTime {
+                seconds: 6_000_000_000_000_000,
+                nanos: 250,
+            }),
+            resonance: SpinResonanceDto::ThreeToTwo,
+            ..earth_rotation()
+        };
+        let mut expected = earth_rotation_json();
+        expected["locking_age_s"] = json!(1.5e17);
+        expected["locks_at"] = json!({ "seconds": 6_000_000_000_000_000_i64, "nanos": 250 });
+        expected["resonance"] = json!("three_to_two");
+        assert_wire_form(&locking, expected);
+    }
+
+    #[test]
+    fn spin_resonance_strings() {
+        assert_wire_strings(&[
+            (SpinResonanceDto::Synchronous, "synchronous"),
+            (SpinResonanceDto::ThreeToTwo, "three_to_two"),
+        ]);
+    }
+
+    #[test]
+    fn body_figure_wire_form() {
+        assert_wire_form(&earth_figure(), earth_figure_json());
+    }
+
+    #[test]
+    fn figure_law_strings() {
+        assert_wire_strings(&[
+            (FigureLawDto::Sphere, "sphere"),
+            (FigureLawDto::Rotational, "rotational"),
+            (FigureLawDto::RotationalAndTidal, "rotational_and_tidal"),
+            (FigureLawDto::Capped, "capped"),
+        ]);
+    }
+
+    #[test]
+    fn figure_datum_strings() {
+        assert_wire_strings(&[
+            (FigureDatumDto::SolidSurface, "solid_surface"),
+            (FigureDatumDto::OneBar, "one_bar"),
+        ]);
+    }
+
+    #[test]
+    fn bands_wire_form() {
+        assert_wire_form(
+            &BandsDto {
+                b: 0.25,
+                v: 0.5,
+                r: 0.75,
+            },
+            json!({ "b": 0.25, "v": 0.5, "r": 0.75 }),
+        );
+    }
+
+    #[test]
+    fn phase_template_strings() {
+        assert_wire_strings(&[
+            (PhaseTemplateDto::Moon, "moon"),
+            (PhaseTemplateDto::Mercury, "mercury"),
+            (PhaseTemplateDto::Mars, "mars"),
+            (PhaseTemplateDto::Venus, "venus"),
+            (PhaseTemplateDto::Earth, "earth"),
+            (PhaseTemplateDto::Jupiter, "jupiter"),
+            (PhaseTemplateDto::Saturn, "saturn"),
+            (PhaseTemplateDto::Uranus, "uranus"),
+            (PhaseTemplateDto::Neptune, "neptune"),
+            (PhaseTemplateDto::AirlessIce, "airless_ice"),
+            (PhaseTemplateDto::Snowball, "snowball"),
+            (PhaseTemplateDto::Magma, "magma"),
+        ]);
+    }
+
+    #[test]
+    fn body_photometry_wire_form() {
+        assert_wire_form(&earth_photometry(), earth_photometry_json());
+    }
+
+    /// Each new field in each section state, on a summary and on a record: `ok` is the fixture's;
+    /// the three others carry their tag alone.
+    #[test]
+    fn the_rotation_figure_and_photometry_sections_in_every_state() {
+        fn withheld<T>(tag: &str) -> SectionDto<T> {
+            match tag {
+                "not_resolved" => SectionDto::NotResolved,
+                "not_modelled" => SectionDto::NotModelled,
+                _ => SectionDto::NotApplicable,
+            }
+        }
+        for tag in ["not_resolved", "not_modelled", "not_applicable"] {
+            let tagged = json!({ "state": tag });
+            let summary = BodySummaryDto {
+                rotation: Some(withheld(tag)),
+                figure: Some(withheld(tag)),
+                photometry: Some(withheld(tag)),
+                ..planet_summary()
+            };
+            let mut expected = planet_summary_json();
+            for field in ["rotation", "figure", "photometry"] {
+                expected[field] = tagged.clone();
+            }
+            assert_wire_form(&summary, expected);
+            let record = BodyRecordDto {
+                rotation: summary.rotation,
+                figure: summary.figure,
+                photometry: summary.photometry,
+                ..planet_record()
+            };
+            let mut expected = planet_record_json();
+            for field in ["rotation", "figure", "photometry"] {
+                expected[field] = tagged.clone();
+            }
+            assert_wire_form(&record, expected);
+        }
+    }
+
+    /// An older server's summary and record, with none of the three fields, still deserialise,
+    /// as absent; and absent fields are not written.
+    #[test]
+    fn a_summary_without_the_rotation_figure_and_photometry_still_deserialises() {
+        let older = |mut wire: Value| {
+            let fields = wire.as_object_mut().unwrap();
+            for field in ["rotation", "figure", "photometry"] {
+                fields.remove(field);
+            }
+            wire
+        };
+        let summary = BodySummaryDto {
+            rotation: None,
+            figure: None,
+            photometry: None,
+            ..planet_summary()
+        };
+        assert_wire_form(&summary, older(planet_summary_json()));
+        let record = BodyRecordDto {
+            rotation: None,
+            figure: None,
+            photometry: None,
+            ..planet_record()
+        };
+        assert_wire_form(&record, older(planet_record_json()));
     }
 }

@@ -73,6 +73,10 @@ export interface SymbolOp {
   readonly stroke: ColourToken;
   /** The fill above the reference plane; `null` below it, where the symbol is open. */
   readonly fill: ColourToken | null;
+  /**
+   * The guide's outline, 1.5 CSS px. `paint` draws a mark's outline at `markStrokeDevicePx` of the
+   * ratio whatever this says (R07.T16.f), so that it matches the view's.
+   */
   readonly widthPx: number;
 }
 
@@ -84,6 +88,35 @@ export interface ReticleOp {
   /** Half the width of the square the corners mark. */
   readonly halfSizePx: number;
   readonly stroke: ColourToken;
+  /**
+   * The guide's outline, 1.5 CSS px. `paint` draws a reticle at `markStrokeDevicePx` of the ratio
+   * whatever this says (R07.T16.f), as it draws a symbol's outline.
+   */
+  readonly widthPx: number;
+}
+
+/**
+ * The mark of a commanded destination: four open chevrons about a mark, one on each screen axis,
+ * pointing at it (`destinationChevrons`; decision-r07-quality-and-destination, Q2; R07.T16.h).
+ *
+ * @remarks
+ * Its apices stand `gapPx` outside the selection's bracket's place about the same mark, whether or
+ * not the mark is selected, and each arm is as long as the bracket's arm there. `paint` moves both
+ * out with the bracket, by four times the outline shift.
+ */
+export interface ChevronsOp {
+  readonly kind: "chevrons";
+  readonly id: string;
+  readonly centre: ScreenPoint;
+  /** The half-size of the selection's bracket about the mark, as a {@link ReticleOp} gives it. */
+  readonly bracketHalfSizePx: number;
+  /** How far outside the bracket's place the apices stand: {@link destinationGapPx}. */
+  readonly gapPx: number;
+  readonly stroke: ColourToken;
+  /**
+   * The guide's outline, 1.5 CSS px. `paint` draws the chevrons at `markStrokeDevicePx` of the
+   * ratio whatever this says, as it draws a reticle.
+   */
   readonly widthPx: number;
 }
 
@@ -93,10 +126,17 @@ export interface TicksOp {
   readonly segments: ReadonlyArray<{ readonly from: ScreenPoint; readonly to: ScreenPoint }>;
   readonly stroke: ColourToken;
   readonly widthPx: number;
+  /**
+   * Which the ticks are: `line`, drawn at the line scale as every line is, such as a data edge's or
+   * an annulus's ticks; or `mark`, drawn at the mark stroke as a symbol's outline is and not moved
+   * out, such as the HR diagram's off-scale arrowhead, a state of the symbol beside it
+   * (decision-r07-quality-and-destination, Q5; R07.T16.h).
+   */
+  readonly weight: "line" | "mark";
 }
 
 /** One drawing instruction, in the order the painter executes them. */
-export type DrawOp = LineOp | PolylineOp | CircleOp | SymbolOp | ReticleOp | TicksOp;
+export type DrawOp = LineOp | PolylineOp | CircleOp | SymbolOp | ReticleOp | ChevronsOp | TicksOp;
 
 /** Where a mark ended up on the screen, for picking and labels. */
 export interface Anchor {
@@ -136,6 +176,13 @@ export interface CircleLabel extends CurveLabelBase {
  */
 export interface RingLabel extends CurveLabelBase {
   readonly placement: "ring";
+  /**
+   * Further points of its ring the label may stand beside where its own point has no room, as a
+   * sphere's label moves round its circle: every 15° round the ring either way from its point, the
+   * nearest first, out to the far side (R07.T16.j). A ring's and an annulus's outer edge's; absent
+   * for a path's.
+   */
+  readonly alongPx?: ReadonlyArray<ScreenPoint>;
 }
 
 /** Where to put the DOM label of a sphere, a ring, an annulus or a path. */
@@ -425,13 +472,13 @@ function annulusOps(
         to: toScreen(onPlaneAt(scene, centre, outerRadius, angleDeg)),
       });
     }
-    ops.push({ kind: "ticks", segments, stroke, widthPx });
+    ops.push({ kind: "ticks", segments, stroke, widthPx, weight: "line" });
   }
   if (annulus.edgeTicks === true) {
     const edges = radii.filter((edge) => edge > 0);
     const segments = edgeTickSegments(scene, centre, edges, toScreen, TICK_LENGTH_REM * remPx);
     if (segments.length > 0) {
-      ops.push({ kind: "ticks", segments, stroke, widthPx });
+      ops.push({ kind: "ticks", segments, stroke, widthPx, weight: "line" });
     }
   }
   return ops;
@@ -538,6 +585,7 @@ function sphereOps(
         segments: ticks(centre, radiusPx, TICK_LENGTH_REM * viewport.remPx),
         stroke: "text",
         widthPx: DATA_EDGE_WIDTH_PX,
+        weight: "line",
       });
     }
     for (const [stack, text] of group.labels.entries()) {
@@ -556,13 +604,47 @@ function sphereOps(
   return { ops, labels };
 }
 
+/**
+ * The selection's bracket's half-size about a mark of radius `markRadiusPx`, CSS px, before `paint`
+ * moves it out: the mark's radius and half a margin, 0.25 rem. The bracket stands there whether or
+ * not the mark is selected, so a label counts it either way (`placeLabels`).
+ */
+export function reticleHalfSizePx(markRadiusPx: number, remPx: number): number {
+  return markRadiusPx + (RETICLE_MARGIN_REM * remPx) / 2;
+}
+
+/**
+ * How far outside the selection's bracket's place the destination's chevrons' apices stand, CSS px:
+ * half a margin, 0.25 rem, or the reticles' least gap where that is more, whether or not the
+ * destination is also the selection (R07.T16.f and T16.h; decision-r07-t16d-followups, item 2;
+ * decision-r07-quality-and-destination, Q2).
+ *
+ * @param minGapPx - The reticles' least gap, CSS px: `minReticleGapDevicePx` ÷ the ratio.
+ */
+export function destinationGapPx(remPx: number, minGapPx: number): number {
+  return Math.max((RETICLE_MARGIN_REM * remPx) / 2, minGapPx);
+}
+
+/**
+ * The selection's bracket, one margin larger than its mark ({@link reticleHalfSizePx}), and the
+ * destination's chevrons, their apices {@link destinationGapPx} outside the bracket's place,
+ * selected or not, so that a destination is told from the selection by its shape and the pair is
+ * never told by colour alone (R07.T16.h; decision-r07-quality-and-destination, Q2).
+ *
+ * @remarks
+ * The chevrons replace the as-built lone destination, a bracket in `--target` at the bracket's
+ * place, and the pair's second bracket outside the first. Where the destination is also the
+ * selection, the bracket keeps the corners and the apices stand over the open middle of its sides.
+ *
+ * @param minGapPx - The least space between the bracket's centreline and the apices, CSS px.
+ */
 function reticleOps(
   placed: ReadonlyArray<PlacedMark>,
   scene: SpatialScene,
   viewport: Viewport,
-): ReticleOp[] {
-  const ops: ReticleOp[] = [];
-  const marginPx = RETICLE_MARGIN_REM * viewport.remPx;
+  minGapPx: number,
+): Array<ReticleOp | ChevronsOp> {
+  const ops: Array<ReticleOp | ChevronsOp> = [];
   const find = (id: string | null): PlacedMark | undefined =>
     id === null ? undefined : placed.find((candidate) => candidate.mark.id === id);
   const selected = find(scene.selectedId);
@@ -571,25 +653,55 @@ function reticleOps(
       kind: "reticle",
       id: selected.mark.id,
       centre: screen(selected.at),
-      halfSizePx: outerRadiusPx(selected.mark, viewport) + marginPx / 2,
+      halfSizePx: reticleHalfSizePx(outerRadiusPx(selected.mark, viewport), viewport.remPx),
       stroke: "accent",
       widthPx: RETICLE_WIDTH_PX,
     });
   }
   const destination = find(scene.destinationId);
   if (destination !== undefined) {
-    // Outside the selection's reticle when the destination is also the selection.
-    const margins = destination === selected ? 2 : 1;
     ops.push({
-      kind: "reticle",
+      kind: "chevrons",
       id: destination.mark.id,
       centre: screen(destination.at),
-      halfSizePx: outerRadiusPx(destination.mark, viewport) + (margins * marginPx) / 2,
+      bracketHalfSizePx: reticleHalfSizePx(
+        outerRadiusPx(destination.mark, viewport),
+        viewport.remPx,
+      ),
+      gapPx: destinationGapPx(viewport.remPx, minGapPx),
       stroke: "target",
       widthPx: RETICLE_WIDTH_PX,
     });
   }
   return ops;
+}
+
+/** How far apart the points along a ring that its label tries stand, in degrees round it. */
+const RING_LABEL_STEP_DEG = 15;
+
+/**
+ * The angles from a ring label's own point at which it also tries the ring, nearest first: every
+ * {@link RING_LABEL_STEP_DEG} either way, the far side last.
+ */
+const RING_LABEL_TURNS_DEG: ReadonlyArray<number> = Array.from(
+  { length: 180 / RING_LABEL_STEP_DEG },
+  (_, index) => (index + 1) * RING_LABEL_STEP_DEG,
+).flatMap((turnDeg) => (turnDeg === 180 ? [180] : [turnDeg, -turnDeg]));
+
+/**
+ * The points along a ring of `radius` about `centre` on the reference plane that a label at
+ * `fromDeg` (from coreward, towards spinward) also tries, on the screen (R07.T16.j).
+ */
+function ringPointsPx(
+  scene: SpatialScene,
+  centre: Vec3,
+  radius: number,
+  fromDeg: number,
+  toScreen: (point: Vec3) => ScreenPoint,
+): ReadonlyArray<ScreenPoint> {
+  return RING_LABEL_TURNS_DEG.map((turnDeg) =>
+    toScreen(onPlaneAt(scene, centre, radius, fromDeg + turnDeg)),
+  );
 }
 
 function ringLabels(
@@ -599,6 +711,8 @@ function ringLabels(
   viewport: Viewport,
 ): CurveLabel[] {
   const labels: CurveLabel[] = [];
+  const toScreen = (point: Vec3): ScreenPoint => screen(project(point, basis, camera, viewport));
+  const origin = { x: 0, y: 0, z: 0 };
   for (const [index, ring] of scene.plane.rings.entries()) {
     if (ring.label.length === 0) {
       continue;
@@ -611,6 +725,7 @@ function ringLabels(
       xPx: at.xPx,
       yPx: at.yPx,
       stack: 0,
+      alongPx: ringPointsPx(scene, origin, ring.radius, 0, toScreen),
     });
   }
   return labels;
@@ -628,23 +743,37 @@ function markCurveLabels(
   viewport: Viewport,
 ): CurveLabel[] {
   const labels: CurveLabel[] = [];
-  const pointLabel = (key: string, text: string, point: Vec3): void => {
-    if (text.length === 0) {
-      return;
-    }
-    const at = project(point, basis, camera, viewport);
-    labels.push({ key, text, placement: "ring", xPx: at.xPx, yPx: at.yPx, stack: 0 });
-  };
+  const toScreen = (point: Vec3): ScreenPoint => screen(project(point, basis, camera, viewport));
   for (const annulus of scene.annuli ?? []) {
+    if (annulus.label.length === 0) {
+      continue;
+    }
     const centre = footOnPlane(annulus, scene.frame.north);
-    pointLabel(
-      `annulus:${annulus.id}`,
-      annulus.label,
-      onPlaneAt(scene, centre, annulus.outerRadius, annulus.labelSpinward === true ? 90 : 180),
-    );
+    const fromDeg = annulus.labelSpinward === true ? 90 : 180;
+    const at = toScreen(onPlaneAt(scene, centre, annulus.outerRadius, fromDeg));
+    labels.push({
+      key: `annulus:${annulus.id}`,
+      text: annulus.label,
+      placement: "ring",
+      xPx: at.xPx,
+      yPx: at.yPx,
+      stack: 0,
+      alongPx: ringPointsPx(scene, centre, annulus.outerRadius, fromDeg, toScreen),
+    });
   }
   for (const path of scene.paths ?? []) {
-    pointLabel(`path:${path.id}`, path.label, path.labelAt);
+    if (path.label.length === 0) {
+      continue;
+    }
+    const at = toScreen(path.labelAt);
+    labels.push({
+      key: `path:${path.id}`,
+      text: path.label,
+      placement: "ring",
+      xPx: at.xPx,
+      yPx: at.yPx,
+      stack: 0,
+    });
   }
   return labels;
 }
@@ -671,8 +800,23 @@ function markCurveLabels(
  * then one `ticks` op of short ticks from each edge into the band. Neither a path nor an annulus gives an anchor, so neither is
  * picked, and their labels follow the rings' in the curve labels. `--line` is left to the grid and
  * the plane's rings (the orchestrator's ruling 35).
+ *
+ * The list holds the guide's CSS widths; `paint` draws them at no less than 2 device px
+ * (R07.T16.f). A destination is four chevrons pointing at its mark, their apices at least
+ * `minReticleGapPx` outside the selection's bracket's place, or 0.25 rem where that is more,
+ * whether or not it is the selection (R07.T16.h).
+ *
+ * @param minReticleGapPx - The least space between the selection's bracket's centreline and the
+ *   destination's chevrons' apices about one mark, CSS px: `minReticleGapDevicePx` of the
+ *   device-pixel ratio ÷ the ratio, an outline and a casing (5.12, 4, 2.5 and 2.5 px at 0.78125, 1,
+ *   2 and 3), so that the pair is the view's.
  */
-export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Viewport): DrawList {
+export function buildDrawList(
+  scene: SpatialScene,
+  camera: Camera,
+  viewport: Viewport,
+  minReticleGapPx: number,
+): DrawList {
   const basis = viewBasis(scene.frame, camera);
   const placed: PlacedMark[] = scene.points.map((mark) => ({
     mark,
@@ -703,7 +847,7 @@ export function buildDrawList(scene: SpatialScene, camera: Camera, viewport: Vie
     ops.push(...markOps(entry, scene, basis, camera, viewport));
   }
   const spheres = sphereOps(scene, camera, viewport);
-  ops.push(...spheres.ops, ...reticleOps(placed, scene, viewport));
+  ops.push(...spheres.ops, ...reticleOps(placed, scene, viewport, minReticleGapPx));
 
   const anchors: Anchor[] = [...farHalf, ...nearHalf].map((entry) => ({
     id: entry.mark.id,

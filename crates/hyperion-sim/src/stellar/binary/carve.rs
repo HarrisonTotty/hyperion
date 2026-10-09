@@ -23,27 +23,26 @@ pub(crate) fn grid_redraws(record: &SystemRecord, ctx: MultiplicityContext) -> b
     matches!(record.origin(), SystemOrigin::Grid(_)) && matches!(ctx, MultiplicityContext::Free)
 }
 
+/// The carve's test record, shared with the census's hierarchy bound (P11.T16).
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod testing {
     use crate::Seed;
     use crate::coords::GalacticPosition;
     use crate::galaxy::params::GalaxyParams;
-    use crate::galaxy::placement::CellKey;
+    use crate::galaxy::placement::{CellKey, SystemOrigin, SystemRecord};
     use crate::galaxy::{Galaxy, Population};
     use crate::id::Layer;
-    use crate::stellar::multiplicity::RedrawAttempt;
-    use crate::stellar::system::SystemStars;
     use crate::units::{SolarMasses, Years};
 
-    fn galaxy() -> Galaxy {
+    /// The carve tests' galaxy, the Milky Way fixture under a seed of their own.
+    pub(crate) fn galaxy() -> Galaxy {
         Galaxy::from_params(Seed::new(0x0b17_0007), GalaxyParams::milky_way_like())
             .expect("the Milky Way fixture builds")
     }
 
     /// A young-disc grid record at the Sun-like point: candidate `index` of one cell, with a
     /// primary of `mass` M☉ formed `age` years ago.
-    fn record(galaxy: &Galaxy, index: u32, mass: f64, age: f64) -> SystemRecord {
+    pub(crate) fn record(galaxy: &Galaxy, index: u32, mass: f64, age: f64) -> SystemRecord {
         let key = CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the root cube");
         SystemRecord::from_parts(
             key.candidate_id(index).expect("a candidate of the cell"),
@@ -57,7 +56,16 @@ mod tests {
 
     /// Candidate 21 of the test cell, a 12 M☉ primary 30 Myr old, whose first attempt holds an
     /// X-ray binary (found by searching 300 candidates of 12 M☉ at 30 Myr; 4 of them carve).
-    const CARVED: (u32, f64, f64) = (21, 12.0, 3.0e7);
+    pub(crate) const CARVED: (u32, f64, f64) = (21, 12.0, 3.0e7);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::{CARVED, galaxy, record};
+    use super::*;
+    use crate::galaxy::Galaxy;
+    use crate::stellar::multiplicity::RedrawAttempt;
+    use crate::stellar::system::SystemStars;
 
     fn primary_of(galaxy: &Galaxy, record: &SystemRecord) -> crate::stellar::system::StarModel {
         SystemStars::generate_in(galaxy, record, MultiplicityContext::ForcedSingle)

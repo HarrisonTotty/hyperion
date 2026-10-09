@@ -302,7 +302,9 @@ impl Path {
 /// How a member's state is evaluated inside a segment.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Member {
-    /// A star on its own single-star track, at the track's age `age − offset`: plan 06's state.
+    /// A star on its own single-star track, at the track's age `age − offset`: plan 06's state,
+    /// contracting until its arrival on the main sequence, where the engine reads it as its
+    /// zero-age main-sequence star ([`engine_track_age_years`]).
     Track { track: Arc<Track>, offset: f64 },
     /// A star on its track's closed forms at `age − offset` whose mass the binary sets.
     Shaped {
@@ -316,8 +318,12 @@ pub(crate) enum Member {
     /// A star below 0.1 M☉ on P06.T13's cooling fits, at age `age − offset`.
     Cooling { offset: f64, mass: Path },
     /// A star held at its last living state (plan 11, design note 16: a massive primary whose own
-    /// track would die before plan 06's death age waits for it).
-    Frozen { state: StarState },
+    /// track would die before plan 06's death age waits for it), with the core radius of the
+    /// structure it was held from (P11.T4.g: sse's rule, HPT section 6.3 after eq. 105, SSE/BSE `hrdiag`).
+    Frozen {
+        state: StarState,
+        core_radius: SolarRadii,
+    },
     /// A white dwarf, neutron star or black hole the binary made or feeds, formed at `birth`,
     /// whose white dwarf's cooling law starts at `origin` of its own clock.
     Remnant {
@@ -336,7 +342,7 @@ impl Member {
     pub(crate) fn state_at(&self, ctx: &Context, slot: usize, age: f64) -> StarState {
         match self {
             Self::Track { track, offset } => track.state_at(Years::new((age - offset).max(0.0))),
-            Self::Frozen { state } => *state,
+            Self::Frozen { state, .. } => *state,
             Self::Gone => nothing(age),
             Self::Shaped { mass, .. }
             | Self::MainSequence { mass, .. }
@@ -354,6 +360,10 @@ impl Member {
 
     /// The member's structure at `age` with the mass and τ the binary gives it (ignored by a star
     /// on its own track, a frozen one and nothing), or `None` for nothing.
+    ///
+    /// A star on its own track that has not yet arrived on its main sequence is its zero-age main
+    /// sequence star here ([`engine_track_age_years`], P11.T4.i), as it is to every test the engine
+    /// makes; [`Member::state_at`] still shows it contracting.
     #[must_use]
     pub(crate) fn evaluate(
         &self,
@@ -364,7 +374,9 @@ impl Member {
         tau: f64,
     ) -> Option<Structure> {
         match self {
-            Self::Track { track, offset } => track.own_structure_at((age - offset).max(0.0)),
+            Self::Track { track, offset } => {
+                track.own_structure_at(engine_track_age_years(track, *offset, age))
+            }
             Self::Shaped { track, offset, .. } => {
                 Some(track.structure_at(shaped_track_age(track, age, *offset), mass.max(1e-6)))
             }
@@ -398,7 +410,7 @@ impl Member {
                     phase_end: f64::INFINITY,
                 })
             }
-            Self::Frozen { state } => Some(frozen_structure(*state)),
+            Self::Frozen { state, core_radius } => Some(frozen_structure(*state, *core_radius)),
             Self::Remnant {
                 phase,
                 birth,
@@ -438,16 +450,19 @@ impl Member {
         }
     }
 
-    /// The member's mass at `age`, M☉.
+    /// The member's mass at `age`, M☉, as the engine reads it: a star on its own track that has
+    /// not yet arrived has its zero-age main-sequence mass ([`engine_track_age_years`]).
     #[must_use]
     pub(crate) fn mass_at(&self, age: f64) -> f64 {
         match self {
-            Self::Track { track, offset } => track.mass_at((age - offset).max(0.0)),
+            Self::Track { track, offset } => {
+                track.mass_at(engine_track_age_years(track, *offset, age))
+            }
             Self::Shaped { mass, .. }
             | Self::MainSequence { mass, .. }
             | Self::Cooling { mass, .. }
             | Self::Remnant { mass, .. } => mass.at(age),
-            Self::Frozen { state } => state.mass().value(),
+            Self::Frozen { state, .. } => state.mass().value(),
             Self::Gone => 0.0,
         }
     }
@@ -572,6 +587,43 @@ impl Member {
     }
 }
 
+/// The arrival on its main sequence, as a track age (years), of a star on its own `track` placed
+/// at `offset_years`, if the star has not yet arrived there at the engine's age `age_years`
+/// ([`Track::main_sequence_arrival`], which does not depend on how far the track is built).
+#[must_use]
+pub(crate) fn arrival_ahead_years(track: &Track, offset_years: f64, age_years: f64) -> Option<f64> {
+    let own = (age_years - offset_years).max(0.0);
+    track
+        .main_sequence_arrival()
+        .map(Years::value)
+        .filter(|&arrival| own < arrival)
+}
+
+/// The track age, years, at which the engine reads a star on its own `track` placed at
+/// `offset_years`, at the engine's age `age_years`: `age_years − offset_years`, from zero, held to
+/// no less than the star's arrival on its main sequence ([`arrival_ahead_years`]; P11.T4.i, ruling
+/// p11-channels of 2026-10-06).
+///
+/// The engine starts at the first star's arrival (`evolve.rs`'s `arrival`). A star still
+/// contracting then is carried as its own zero-age main-sequence star, at τ = 0 until its own
+/// arrival, for every test the engine makes: the Roche lobe, a collision, a common envelope,
+/// tides, magnetic braking and a supernova's orbit. Its structure is its track's at the arrival,
+/// bit for bit. Binary codes start both stars so (Hurley, Tout and Pols 2002, section 2.8; COMPAS,
+/// Riley et al. 2022, section 3.2; SEVN, Iorio et al. 2023, section 2.1), and the drawn orbits are
+/// a zero-age population's. The star's own contracting radius would re-run the embedded phase the
+/// drawn orbits already hold. The star is shown on its own pre-main-sequence track
+/// ([`Member::state_at`]) until the pair touches it. Its true radius as its primary leaves the
+/// main sequence is 1.0–4.5 times this one (Baraffe et al. 2015, against Tout et al. 1996's
+/// zero-age radius): 1.2–2 for the 0.5–1.4 M☉ companions of 10–20 M☉ primaries, the progenitors of
+/// low-mass X-ray binaries, and up to 3.4 for 0.1–0.4 M☉ beside 15–20 M☉. So the proxy understates
+/// coalescence at the exit of a common envelope for the tightest post-envelope orbits, most for the
+/// lightest companions.
+#[must_use]
+pub(crate) fn engine_track_age_years(track: &Track, offset_years: f64, age_years: f64) -> f64 {
+    arrival_ahead_years(track, offset_years, age_years)
+        .unwrap_or_else(|| (age_years - offset_years).max(0.0))
+}
+
 /// The state of nothing at `age`: plan 06's `NoRemnant`.
 #[must_use]
 pub(crate) fn nothing(age: f64) -> StarState {
@@ -587,9 +639,11 @@ pub(crate) fn nothing(age: f64) -> StarState {
     })
 }
 
-/// The structure of a star held at `state`: no wind and no envelope to speak of.
+/// The structure of a star held at `state` with the core radius `core_radius` of the structure
+/// it was held from (P11.T4.g; HPT section 6.3, SSE/BSE `hrdiag`), held no larger than the star: no wind and no
+/// envelope to speak of.
 #[must_use]
-fn frozen_structure(state: StarState) -> Structure {
+fn frozen_structure(state: StarState, core_radius: SolarRadii) -> Structure {
     let state = StarState::new(StarStateParts {
         phase: state.phase(),
         age: state.age(),
@@ -602,7 +656,7 @@ fn frozen_structure(state: StarState) -> Structure {
     });
     Structure {
         state,
-        core_radius: SolarRadii::new(state.radius().value().min(0.1 * state.radius().value())),
+        core_radius: SolarRadii::new(core_radius.value().min(state.radius().value())),
         envelope: ConvectiveEnvelope {
             mass: 0.0,
             depth: 0.0,

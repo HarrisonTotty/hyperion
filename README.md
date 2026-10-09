@@ -89,6 +89,22 @@ just client    # run the Electron client with hot reload (`just client --help` f
 
 Options to `just client` reach the client: `just client --address 10.0.0.5 --port 9100`.
 
+### Platforms
+
+HYPERION builds and runs on Linux, macOS and Windows. The recipes are bash scripts.
+
+- **Linux** is the reference: the checks and every recorded measurement run there. Where
+  `systemd-run --user` works, the heavy test runs are capped in memory.
+- **macOS** needs the Xcode Command Line Tools (`xcode-select --install`, for clang, git and
+  Python 3) and the prerequisites above, all of which Homebrew has. The recipes run on macOS's own
+  bash 3.2 and BSD tools. Where macOS lacks a util-linux or coreutils tool that a recipe uses
+  (`flock`, `setsid`, `timeout`), the justfile puts a stand-in from `tools/portable/`, written in
+  the system Perl, last on `PATH`. The heavy-test lock works as on Linux, but with no systemd the
+  runs are not capped in memory. `just seed-target` clones with APFS's clonefile(2).
+- **Windows**: run the recipes from WSL 2, a Linux system where they run as on Linux, or from Git
+  Bash. PowerShell and `cmd.exe` cannot run them. `just cross-clippy`, and so `just ci`, needs WSL,
+  since its stand-in C compiler is a bash script. Neither has been tried on Windows yet.
+
 ### Seeing a generated system in `VIEW`
 
 Until sessions exist, the ship is a stand-in that the server starts at the galactic centre, in no
@@ -131,17 +147,34 @@ scene of every client of that universe.
 The server takes these options, each of which can instead be set by its environment variable.
 An option given on the command line wins over its variable.
 
-| Option           | Variable                   | Default                                      | What                                         |
-| ---------------- | -------------------------- | -------------------------------------------- | -------------------------------------------- |
-| `--address`      | `HYPERION_ADDR`            | `127.0.0.1`                                  | IP address to listen on                      |
-| `--port`         | `HYPERION_PORT`            | `7878`                                       | Port to listen on                            |
-| `--data-dir`     | `HYPERION_DATA_DIR`        | `./hyperion-data`                            | Where universes are saved                    |
-| `--num-workers`  | `HYPERION_WORKERS`         | available parallelism less one, at least one | Generation worker threads                    |
-| `--cell-cache`   | `HYPERION_CELL_CACHE_MB`   | `256`                                        | Cache of generated cells, in MiB             |
-| `--map-cache`    | `HYPERION_MAP_CACHE_MB`    | `64`                                         | Cache of galaxy density maps, in MiB         |
-| `--system-cache` | `HYPERION_SYSTEM_CACHE_MB` | `128`                                        | Cache of generated systems' stars, in MiB    |
-| `--body-cache`   | `HYPERION_BODY_CACHE_MB`   | `128`                                        | Cache of generated planetary systems, in MiB |
-| `--brief-cache`  | `HYPERION_BRIEF_CACHE_MB`  | `64`                                         | Cache of range briefs' star models, in MiB   |
+| Option                  | Variable                       | Default                                      | What                                         |
+| ----------------------- | ------------------------------ | -------------------------------------------- | -------------------------------------------- |
+| `--address`             | `HYPERION_ADDR`                | `127.0.0.1`                                  | IP address to listen on                      |
+| `--port`                | `HYPERION_PORT`                | `7878`                                       | Port to listen on                            |
+| `--data-dir`            | `HYPERION_DATA_DIR`            | `./hyperion-data`                            | Where universes are saved                    |
+| `--num-workers`         | `HYPERION_WORKERS`             | available parallelism less one, at least one | Generation worker threads                    |
+| `--cell-cache`          | `HYPERION_CELL_CACHE_MB`       | `256`                                        | Cache of generated cells, in MiB             |
+| `--map-cache`           | `HYPERION_MAP_CACHE_MB`        | `64`                                         | Cache of galaxy density maps, in MiB         |
+| `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | `128`                                        | Cache of generated systems' stars, in MiB    |
+| `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | `128`                                        | Cache of generated planetary systems, in MiB |
+| `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | `64`                                         | Cache of range briefs' star models, in MiB   |
+| `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `64`, provisional until R06.T8.n             | Cache of the sky census's cells, in MiB      |
+| `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | `160`                                        | Cache of each galaxy's sky tables, in MiB    |
+| `--serve-sky`           | `HYPERION_SERVE_SKY`           | off                                          | Serve `sky` requests                         |
+| `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          | Stop gracefully when standard input closes   |
+
+`--stop-on-stdin-close` is for a server run as another program's child. The parent stops it by
+closing its standard input, which on Windows is the only graceful stop a parent has, and if the
+parent dies the pipe closes, so the server never outlives it. It is off by default: with it, a
+server started from a terminal stops at an end of input typed there (Ctrl-D on Unix, Ctrl-Z and
+Enter on Windows), and one started with standard input closed, as systemd starts it, stops at once.
+Its variable takes `y`, `yes`, `t`, `true`, `on` or `1`, or `n`, `no`, `f`, `false`, `off` or `0`,
+in any case, and refuses anything else.
+
+`--serve-sky` turns on the `sky` request, the stars, band and limits a view's sky is drawn from.
+It is off by default until the sky's census near the Sun is fast enough to serve (rendering plan
+R06, R06.T8.g), and the server then answers `sky` as `unsupported`, as before the sky was served.
+Its variable takes the same values as `--stop-on-stdin-close`'s.
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;
@@ -172,10 +205,19 @@ somewhere else, and the `LINK` display shows the endpoint in use.
 | `just test`  | `cargo test`              | `vitest`                      |
 
 `just ci` is the gate before a commit: the four checks above, a check that the fitted tables are
-fresh, a check that the generated protocol bindings are up to date, and `just test-wasm-fast`, the
-fast suites on WebAssembly. Without the WebAssembly suites it took about three minutes on a quiet
-machine; they add about two more (measured under shared load, to be re-timed quiet).
+fresh, a check that the generated protocol bindings are up to date, `just cross-clippy`, and
+`just test-wasm-fast`, the fast suites on WebAssembly. Without the WebAssembly suites it took about
+three minutes on a quiet machine; they add about two more (measured under shared load, to be
+re-timed quiet).
 
+- `just cross-clippy`, part of `just ci`, runs Clippy over every target of the workspace and of
+  `tools/gpu-replay` for the other two platforms, of Linux (x86-64), macOS (Apple silicon) and
+  Windows (x86-64, MSVC): macOS and Windows from Linux, Windows and Linux from a Mac. Code gated
+  to one platform (`cfg(unix)`, `target_os = "linux"`) can leave an import or a helper unused on
+  another, which only that platform's Clippy sees. Clippy never links, so it needs no SDK: only the
+  platforms' standard libraries, which rustup installs from `rust-toolchain.toml`, and a stand-in
+  C compiler that it writes under `target/cross/`. It builds in `target/cross` and
+  `target/tools-cross` and runs beside the other builds; on a warm tree it takes about a second.
 - `just ci-slow` is `just ci` plus `just test-slow` and `just test-wasm-slow`. The slow tests take
   far longer than the rest, so run it before a push that changes the sim, and after a
   `GENERATOR_VERSION` bump.

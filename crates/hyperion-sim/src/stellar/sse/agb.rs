@@ -50,6 +50,17 @@ const SUPERNOVA_CORE_GROWTH: f64 = 1.05;
 /// The Chandrasekhar mass, 1.44 M☉, which HPT use at all times (section 6.2.1).
 pub(crate) const CHANDRASEKHAR_MSUN: f64 = 1.44;
 
+/// The factor in the fractional age τ = 3 (t − `t_BAGB`) ÷ (`t_n` − `t_BAGB`) of the early AGB's
+/// core remnant (the published SSE code's `hrdiag`, stellar type 5; see
+/// [`EarlyAgb::remnant_tau`]): its luminosity reaches the helium giants' relation a third of the
+/// way from the base of the AGB to the star's nuclear end.
+const REMNANT_TAU_FACTOR: f64 = 3.0;
+
+/// The initial mass, M☉, from which the published SSE code's `star` puts the nuclear end at helium
+/// ignition (`tn` = `tscls(2)`), which leaves the early AGB's remnant τ at 0 (`hrdiag` holds the
+/// formulae's mass there too).
+const SSE_NUCLEAR_MASS_LIMIT: f64 = 100.0;
+
 /// The core mass after the second dredge-up, `Mc,DU`, at which the thermal pulses begin (HPT
 /// section 5.4): 0.44 `Mc,BAGB` + 0.448 for 0.8 ≤ `Mc,BAGB` < 2.25, and `Mc,BAGB` itself outside,
 /// where there is no dredge-up (the two meet at 0.8; above 2.25 the star never reaches the thermal
@@ -78,6 +89,13 @@ pub(crate) fn mc_du(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
 #[must_use]
 pub(crate) fn mc_sn(m: SolarMasses, c: &ZCoeffs) -> SolarMasses {
     SolarMasses::new(CHANDRASEKHAR_MSUN.max(0.773 * gb::mc_bagb(m, c).value() - 0.35))
+}
+
+/// The fraction of the core's growth that third dredge-up returns to the envelope on the thermally
+/// pulsing AGB of a star of initial mass `m`, λ = min(0.9, 0.3 + 0.001 M⁵) (HPT equation 73).
+#[must_use]
+fn dredge_up_fraction(m: SolarMasses) -> f64 {
+    0.9_f64.min(0.3 + 0.001 * math::powi(m.value(), 5))
 }
 
 /// How the early AGB ends at constant mass.
@@ -121,6 +139,13 @@ pub(crate) struct EarlyAgb {
     mc_du: SolarMasses,
     mc_sn: SolarMasses,
     asymptotic: RadiusLaw,
+    /// The times of the thermally pulsing AGB's relation ([`EarlyAgb::pulses`]) from the second
+    /// dredge-up, as SSE's `star` sets `tscls(10–12)`: the clock of the nuclear end `t_n`
+    /// ([`EarlyAgb::nuclear_end`]).
+    pulse_times: GiantTimes,
+    /// When the core reaches `Mc,SN` on the AGB, no earlier than `t_BAGB` (SSE's `tscls(14)`),
+    /// which caps `t_n`.
+    t_mc_max: Megayears,
 }
 
 impl EarlyAgb {
@@ -153,6 +178,22 @@ impl EarlyAgb {
             (mc_du, EarlyAgbEnd::ThermalPulses)
         };
         let t_target = relation.time_of_luminosity(&times, relation.luminosity(target));
+        // SSE's `star`: the thermal pulses' clock from `tscls(13)`, where the early AGB's
+        // relation reaches `Mc,DU` (unclamped, and whether or not the star gets there), and
+        // `tscls(14)`, where the core reaches `Mcmax` (`Mc,SN` here): on the early AGB's relation
+        // if it is no more than `Mc,DU`, otherwise on the pulses' relation at the core before
+        // third dredge-up, (`Mc,SN` − λ `Mc,DU`) ÷ (1 − λ) (HPT equation 73).
+        let l_du = relation.luminosity(mc_du);
+        let t_du = relation.time_of_luminosity(&times, l_du);
+        let pulses = relation.with_rate(COMBINED_RATE_MSUN_PER_LSUN_MYR);
+        let pulse_times = pulses.times_from(t_du, l_du);
+        let t_mc_max = if mc_sn.value() <= mc_du.value() {
+            relation.time_of_luminosity(&times, relation.luminosity(mc_sn))
+        } else {
+            let lambda = dredge_up_fraction(m);
+            let undredged = (mc_sn.value() - lambda * mc_du.value()) / (1.0 - lambda);
+            pulses.time_of_luminosity(&pulse_times, pulses.luminosity(SolarMasses::new(undredged)))
+        };
         Self {
             mass: m,
             zeta: c.zeta(),
@@ -165,6 +206,64 @@ impl EarlyAgb {
             mc_du,
             mc_sn,
             asymptotic: RadiusLaw::asymptotic(m, c),
+            pulse_times,
+            t_mc_max: if t_mc_max < t_bagb { t_bagb } else { t_mc_max },
+        }
+    }
+
+    /// The star's nuclear end `t_n` at current mass `mt` as the published SSE code's `star` sets
+    /// it on the early AGB (stellar type 5), Myr from the zero-age main sequence: when the core
+    /// would reach `mt` on the thermally pulsing AGB's relation (HPT equations 37, 39–42 and 70–72,
+    /// rate `A_H,He`, from `t_DU` and `L_DU`; for type 5 SSE takes `mt` itself, without the third
+    /// dredge-up of equation 73), held to when the core reaches `Mc,SN` on the AGB (`tscls(14)`).
+    ///
+    /// SSE's `tn` spans the thermally pulsing AGB, so it is later than the early AGB's end, and it
+    /// comes earlier as the star loses mass. Where SSE's `tn` falls at or before `t_BAGB` (an
+    /// initial mass of 100 M☉ or more), this returns `t_BAGB`.
+    ///
+    /// SSE's type 5 always has `mt` above `Mc,BAGB`: `hrdiag` makes a star at or below its helium
+    /// core a naked helium star first (lines 393–396). The track evaluates a star there only on
+    /// its way to the envelope's loss, so `mt` is held to at least `Mc,BAGB` (≥ `Mc,DU`), where
+    /// `t_n` is continuous. Taken as written, `star` would put `tn` at or before `t_BAGB` below
+    /// `Mc,DU`: τ would fall from at least 1 to 0 at the envelope's loss, and the luminosity with
+    /// it, which the mass-loss integrator cannot step across.
+    #[must_use]
+    pub(crate) fn nuclear_end(&self, mt: SolarMasses) -> Megayears {
+        if self.mass.value() >= SSE_NUCLEAR_MASS_LIMIT {
+            return self.t_bagb;
+        }
+        let mt = if mt < self.mc_bagb { self.mc_bagb } else { mt };
+        let pulses = self.pulses();
+        let t_n = pulses.time_of_luminosity(&self.pulse_times, pulses.luminosity(mt));
+        if t_n > self.t_mc_max {
+            self.t_mc_max
+        } else if t_n < self.t_bagb {
+            self.t_bagb
+        } else {
+            t_n
+        }
+    }
+
+    /// The thermally pulsing AGB's relation: the early AGB's with the rate `A_H,He` (HPT equation
+    /// 71).
+    #[must_use]
+    const fn pulses(&self) -> GiantBranch {
+        self.relation.with_rate(COMBINED_RATE_MSUN_PER_LSUN_MYR)
+    }
+
+    /// The fractional age τ of the early AGB's core remnant at `t` for current mass `mt`, as the
+    /// published SSE code's `hrdiag` has it for stellar type 5: τ = 3 (t − `t_BAGB`) ÷
+    /// (`t_n` − `t_BAGB`) with `t_n` [`EarlyAgb::nuclear_end`], and 0 where `t_n` is not after
+    /// `t_BAGB`. The remnant's luminosity passes from `L_THe` to the helium giants' relation as
+    /// `L_THe` (L ÷ `L_THe`)^τ while τ < 1 (HPT print only the relation, section 6.3).
+    #[must_use]
+    pub(crate) fn remnant_tau(&self, t: Megayears, mt: SolarMasses) -> f64 {
+        let t_n = self.nuclear_end(mt);
+        if t_n > self.t_bagb {
+            REMNANT_TAU_FACTOR * (t.value() - self.t_bagb.value())
+                / (t_n.value() - self.t_bagb.value())
+        } else {
+            0.0
         }
     }
 
@@ -317,7 +416,7 @@ impl ThermallyPulsingAgb {
             relation,
             times,
             mc_du: early.mc_du,
-            dredge_up: 0.9_f64.min(0.3 + 0.001 * math::powi(early.mass.value(), 5)),
+            dredge_up: dredge_up_fraction(early.mass),
             asymptotic: early.asymptotic,
             zeta: early.zeta,
         };
@@ -758,6 +857,131 @@ mod tests {
                 t_sn_sse,
                 1e-12,
             );
+        }
+    }
+
+    /// SSE's nuclear end on the early AGB (`star`'s `tn`, stellar type 5): at constant mass it is
+    /// when the core reaches `Mc,SN` on the thermally pulsing AGB (`tscls(14)`), to 10⁻¹² against
+    /// the published code's landmarks, so the remnant's τ ([`EarlyAgb::remnant_tau`]) is 0 at
+    /// `t_BAGB` and 3 (`t_DU` − `t_BAGB`) ÷ (`tscls(14)` − `t_BAGB`) at `t_DU`. As the star loses
+    /// mass, `tn` is when the pulses' relation, without third dredge-up, would bring the core to
+    /// the current mass, which comes earlier. At or below `Mc,BAGB`, which SSE's type 5 never
+    /// reaches, it is held at `Mc,BAGB`'s, so that τ has no step at the envelope's loss (a step
+    /// there once hung the mass-loss integrator of a 0.84 M☉ star stripped on its early AGB).
+    #[test]
+    fn the_nuclear_end_is_sses() {
+        for &(z, m, t_du_sse, t_sn_sse, _) in SSE_AGB_LANDMARKS {
+            let (c, m) = (coeffs(z), mass(m));
+            let what = format!("Z = {z}, {m:?}");
+            let early = EarlyAgb::new(m, &c);
+            let t_bagb = early.t_start().value();
+            assert_close(
+                &format!("t_n at {what}"),
+                early.nuclear_end(m).value(),
+                t_sn_sse,
+                1e-12,
+            );
+            let tau = early.remnant_tau(early.t_start(), m);
+            assert!(tau.total_cmp(&0.0).is_eq(), "{what}: τ = {tau} at t_BAGB");
+            assert_close(
+                &format!("τ at t_DU at {what}"),
+                early.remnant_tau(early.t_end(), m),
+                3.0 * (t_du_sse - t_bagb) / (t_sn_sse - t_bagb),
+                1e-9,
+            );
+            let (mc_du, mc_bagb) = (early.mc_du().value(), early.mc_bagb().value());
+            let mut last = early.t_start().value();
+            for i in 0..=200 {
+                let mt = 0.9 * mc_du + (m.value() - 0.9 * mc_du) * f64::from(i) / 200.0;
+                let t_n = early.nuclear_end(mass(mt)).value();
+                assert!(t_n >= last, "t_n falls with the mass at {what}, {mt} M☉");
+                assert!(t_n <= t_sn_sse * (1.0 + 1e-12), "{what}, {mt} M☉: {t_n}");
+                if t_n < early.t_mc_max.value() && t_n > t_bagb {
+                    // The pulses' relation brings the core to the current mass, held to at least
+                    // `Mc,BAGB`, at t_n.
+                    let core = early
+                        .pulses()
+                        .core_mass_at(&early.pulse_times, Megayears::new(t_n));
+                    assert_close(
+                        &format!("core at t_n, {what}, {mt} M☉"),
+                        core.value(),
+                        mt.max(mc_bagb),
+                        1e-9,
+                    );
+                }
+                last = t_n;
+            }
+            // No step at the envelope's loss: below the helium core t_n and τ are the core's own.
+            let (at, below) = (mass(mc_bagb), mass(mc_bagb * (1.0 - 1e-9)));
+            let (t_at, t_below) = (
+                early.nuclear_end(at).value(),
+                early.nuclear_end(below).value(),
+            );
+            assert!(
+                t_below.total_cmp(&t_at).is_eq() && t_at > t_bagb,
+                "{what}: t_n = {t_below} below Mc,BAGB against {t_at} at it"
+            );
+            let (tau_at, tau_below) = (
+                early.remnant_tau(early.t_end(), at),
+                early.remnant_tau(early.t_end(), below),
+            );
+            assert!(
+                tau_below.total_cmp(&tau_at).is_eq() && tau_at > 0.0,
+                "{what}: τ = {tau_below} below Mc,BAGB against {tau_at} at it"
+            );
+        }
+    }
+
+    /// An early AGB that ends in a supernova at `Mc,SN` (a core at its base above 2.25 M☉, 10–25
+    /// M☉ here) has its nuclear end there: SSE's `tscls(14)` is then on the early AGB's own
+    /// relation, and τ reaches 3 at the phase's end. Where the 1.05 floor lifts `Mc,SN` above
+    /// `Mc,DU` (60 M☉ at Z ≤ 10⁻³, see [`EarlyAgb::new`]) SSE's `tscls(14)` is on the pulses'
+    /// relation instead, after the early AGB's end here, and τ stays below 3. From 100 M☉ SSE's
+    /// nuclear end is helium ignition, and τ is 0.
+    #[test]
+    fn a_supernova_early_agb_ends_at_its_nuclear_end() {
+        for z in REFERENCE_Z {
+            let c = coeffs(z);
+            for m in [10.0, 15.0, 25.0] {
+                let early = EarlyAgb::new(mass(m), &c);
+                let what = format!("Z = {z}, {m} M☉");
+                assert_eq!(early.end(), EarlyAgbEnd::Supernova, "{what}");
+                assert!(
+                    early.t_end() > early.t_start(),
+                    "{what}: the floor gives a span"
+                );
+                let (t_n, t_end) = (early.nuclear_end(mass(m)).value(), early.t_end().value());
+                assert!(
+                    t_n.total_cmp(&t_end).is_eq(),
+                    "{what}: t_n = {t_n} against the end, {t_end}"
+                );
+                assert_close(
+                    &format!("τ at the end, {what}"),
+                    early.remnant_tau(early.t_end(), mass(m)),
+                    3.0,
+                    1e-12,
+                );
+            }
+        }
+        for z in [1e-4, 1e-3] {
+            let early = EarlyAgb::new(mass(60.0), &coeffs(z));
+            let what = format!("Z = {z}, 60 M☉");
+            assert_eq!(early.end(), EarlyAgbEnd::Supernova, "{what}");
+            assert!(
+                early.mc_sn() > early.mc_du(),
+                "{what}: the floor lifts Mc,SN"
+            );
+            let t_n = early.nuclear_end(mass(60.0));
+            assert!(t_n > early.t_end(), "{what}: t_n = {t_n:?}");
+            let tau = early.remnant_tau(early.t_end(), mass(60.0));
+            assert!(tau > 0.0 && tau < 3.0, "{what}: τ = {tau} at the end");
+        }
+        for z in REFERENCE_Z {
+            for m in [100.0, 150.0] {
+                let early = EarlyAgb::new(mass(m), &coeffs(z));
+                let tau = early.remnant_tau(early.t_end(), mass(m));
+                assert!(tau.total_cmp(&0.0).is_eq(), "Z = {z}, {m} M☉: τ = {tau}");
+            }
         }
     }
 

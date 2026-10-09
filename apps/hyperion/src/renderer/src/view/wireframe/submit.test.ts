@@ -1,20 +1,31 @@
 import { describe, expect, it } from "vitest";
 
-import { add, cross, norm, normalise, scale, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { centresJustBeyond, limbPastRightEdge } from "../../test/beyondView";
 import { aCameraPose, NO_TURN } from "../../test/viewFixtures";
 import type { BufferHandle, MaterialHandle, MeshHandle, WgslMaterialSpec } from "../engine/types";
 import {
   perspectiveReversedInfinite,
   project,
+  toViewAxes,
   type Viewport,
   viewRotation4,
 } from "../camera/projection";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
 import { PSF_QUAD_PX, PSF_SIGMA_PX } from "../photometry/magnitude";
-import type { DrawCamera, LineBatch, WireframeDrawList } from "./drawList";
+import {
+  type DrawCamera,
+  emptyDrawList,
+  HULL_OCCLUDER_DEPTH_FRACTION,
+  type LineBatch,
+  viewStrokesAt,
+  type WireframeDrawList,
+} from "./drawList";
 import {
   linearColour,
   MATERIAL_BUFFER,
+  OUTSIDE_VIEW_MARGIN_PX,
+  type PackedDraw,
   packWireframe,
   sphereScreenRect,
   WIREFRAME_MATERIALS,
@@ -30,16 +41,11 @@ const MATERIALS: ReadonlyArray<WireframeMaterial> = [
   "lines",
   "occluderSphere",
   "occluderHull",
+  "hullSilhouette",
   "starSprite",
 ];
 
-const EMPTY: WireframeDrawList = {
-  occluderSpheres: [],
-  occluderMeshes: [],
-  lines: [],
-  sprites: [],
-  anchors: [],
-};
+const EMPTY: WireframeDrawList = emptyDrawList(viewStrokesAt(1));
 
 function aBatch(overrides: Partial<LineBatch> = {}): LineBatch {
   return {
@@ -57,10 +63,10 @@ function aBatch(overrides: Partial<LineBatch> = {}): LineBatch {
   };
 }
 
-/** The value of `const <name> = <number>;` in the sprite shader. */
-function spriteConstant(name: string): number {
+/** The value of `const <name> = <number>;` in a material's shader, the sprite's by default. */
+function wgslConstant(name: string, material: WireframeMaterial = "starSprite"): number {
   const found = new RegExp(`const ${name} = ([\\d.]+);`).exec(
-    WIREFRAME_MATERIALS.starSprite.vertexWgsl,
+    WIREFRAME_MATERIALS[material].vertexWgsl,
   );
   return Number(found?.[1]);
 }
@@ -112,10 +118,41 @@ describe("the wireframe's shaders", () => {
   });
 
   it("carries the point-spread constants of the photometry in the sprite shader", () => {
-    expect([spriteConstant("PSF_SIGMA_PX"), spriteConstant("PSF_QUAD_PX")]).toEqual([
+    expect([wgslConstant("PSF_SIGMA_PX"), wgslConstant("PSF_QUAD_PX")]).toEqual([
       PSF_SIGMA_PX,
       PSF_QUAD_PX,
     ]);
+  });
+
+  it("push a hull face away in its fragment by the draw list's constant, as its own depth", () => {
+    const source = WIREFRAME_MATERIALS.occluderHull.fragmentWgsl;
+    expect([
+      wgslConstant("DEPTH_FRACTION", "occluderHull"),
+      /@builtin\(frag_depth\)/.test(source),
+      /dpdxFine\(depth\), dpdyFine\(depth\)/.test(source),
+    ]).toEqual([HULL_OCCLUDER_DEPTH_FRACTION, true, true]);
+  });
+
+  it("take both occluders' slope term from the draw's uniform, not a constant", () => {
+    expect([
+      WIREFRAME_MATERIALS.occluderSphere.uniforms.map((u) => u.name),
+      WIREFRAME_MATERIALS.occluderHull.uniforms.map((u) => u.name),
+      /SLOPE_SCALE/.test(WIREFRAME_MATERIALS.occluderSphere.fragmentWgsl),
+    ]).toEqual([["occluderSlopePx"], ["firstTriangle", "occluderSlopePx", "fill"], false]);
+  });
+
+  it("draw a hull's silhouette from its occluder's source, its colour the draw's fill (R07.T16.e)", () => {
+    const silhouette = WIREFRAME_MATERIALS.hullSilhouette;
+    const fragment = silhouette.fragmentWgsl.slice(
+      silhouette.fragmentWgsl.indexOf("fn fragmentMain"),
+    );
+    expect([
+      silhouette.vertexWgsl === WIREFRAME_MATERIALS.occluderHull.vertexWgsl,
+      silhouette.uniforms,
+      /out\.colour = draw\.fill;/.test(fragment),
+      // No colour literal: the fill is the token's, through the uniform.
+      /vec4f\(\s*[\d.]/.test(fragment),
+    ]).toEqual([true, WIREFRAME_MATERIALS.occluderHull.uniforms, true, false]);
   });
 
   it("are composed of ASCII alone", () => {
@@ -137,13 +174,14 @@ function state(spec: WgslMaterialSpec): unknown[] {
 }
 
 describe("the wireframe's materials", () => {
-  it("write depth only from the occluders, and bias only the hull's faces", () => {
+  it("write depth only from the occluders, and set no hardware depth bias", () => {
     expect(
       Object.fromEntries(MATERIALS.map((name) => [name, state(WIREFRAME_MATERIALS[name])])),
     ).toEqual({
       lines: [false, true, "premultiplied", "none", null],
       occluderSphere: [true, false, "none", "none", null],
-      occluderHull: [true, false, "none", "none", { constant: 128, slopeScale: 2 }],
+      occluderHull: [true, false, "none", "none", null],
+      hullSilhouette: [true, true, "none", "none", null],
       starSprite: [false, true, "additive", "none", null],
     });
   });
@@ -205,6 +243,12 @@ describe("sphereScreenRect", () => {
   });
 });
 
+/** A packed draw's `fill` uniform, or `null` where it has none. */
+function fillOf(draw: PackedDraw): number[] | null {
+  const value = draw.uniforms["fill"];
+  return value === undefined ? null : [...value];
+}
+
 describe("packWireframe", () => {
   const list: WireframeDrawList = {
     occluderSpheres: [
@@ -215,8 +259,9 @@ describe("packWireframe", () => {
       id: `hull${String(n)}`,
       originF32: new Float32Array([0, 0, -n]),
       triangles: new Float32Array(9 * n).fill(n),
-      depthBiasAway: { constant: 128, slopeScale: 2 } as const,
       twoSided: true as const,
+      // The first depth only, as the wireframe draws a hull; the second filled, as the overlay does.
+      fill: n === 2 ? "#05080d" : null,
     })),
     lines: [
       aBatch({ id: "cased" }),
@@ -238,6 +283,9 @@ describe("packWireframe", () => {
       },
     ],
     anchors: [],
+    strokeScale: 2,
+    markStrokePx: 2,
+    occluderSlopePx: 5,
   };
   const packed = packWireframe(list, CAMERA, VIEWPORT);
   const summary = packed.draws.map((d) => [
@@ -251,7 +299,7 @@ describe("packWireframe", () => {
     expect(summary).toEqual([
       ["occluderSphere", 1, null, null],
       ["occluderHull", 1, null, 0],
-      ["occluderHull", 2, null, 1],
+      ["hullSilhouette", 2, null, 1],
       ["starSprite", 1, null, null],
       ["lines", 1, 3, 0],
       ["lines", 1, 1, 0],
@@ -277,6 +325,27 @@ describe("packWireframe", () => {
     expect(phases).toEqual([0, 10, 0]);
   });
 
+  it("gives both occluders the list's slope term", () => {
+    const occluders = packed.draws.filter(
+      (d) => d.material !== "lines" && d.material !== "starSprite",
+    );
+    expect(occluders.map((d) => [d.material, d.uniforms["occluderSlopePx"]?.[0]])).toEqual([
+      ["occluderSphere", 5],
+      ["occluderHull", 5],
+      ["hullSilhouette", 5],
+    ]);
+  });
+
+  it("fills a silhouette in its mesh's colour, linear, and gives depth-only faces none (R07.T16.e)", () => {
+    const hulls = packed.draws.filter(
+      (d) => d.material === "occluderHull" || d.material === "hullSilhouette",
+    );
+    expect(hulls.map((d) => [d.material, fillOf(d)])).toEqual([
+      ["occluderHull", null],
+      ["hullSilhouette", [...linearColour("#05080d")]],
+    ]);
+  });
+
   it("packs a sphere's centre, radius and altitude", () => {
     expect([...packed.spheres].slice(4, 12)).toEqual([0, 0, -1e7, 1e6, 9e6, 0, 0, 0]);
   });
@@ -291,6 +360,113 @@ describe("packWireframe", () => {
 
   it("packs nothing for an empty list", () => {
     expect(packWireframe(EMPTY, CAMERA, VIEWPORT).draws).toEqual([]);
+  });
+});
+
+/**
+ * A body's occluder sphere, as the draw list gives it (taken from the list's own type here, which
+ * leaves the `./drawList` import as it was).
+ */
+type OccluderSphere = WireframeDrawList["occluderSpheres"][number];
+
+/**
+ * How many pixels' depth `occluderSphere.wgsl` writes, in `f64`: those whose centre's ray meets
+ * the sphere ahead of a camera outside it.
+ */
+function writtenPixelCount(sphere: OccluderSphere, camera: DrawCamera, viewport: Viewport): number {
+  const c = sphere.centreF32;
+  const centre = toViewAxes(vec3(c[0] ?? 0, c[1] ?? 0, c[2] ?? 0), camera.pose.orientation);
+  const s = 1 / Math.tan(camera.fovXRad / 2);
+  const aspect = viewport.widthPx / viewport.heightPx;
+  let written = 0;
+  for (let y = 0; y < viewport.heightPx; y += 1) {
+    for (let x = 0; x < viewport.widthPx; x += 1) {
+      const ndcX = ((x + 0.5) / viewport.widthPx) * 2 - 1;
+      const ndcY = 1 - ((y + 0.5) / viewport.heightPx) * 2;
+      const ray = normalise(vec3(ndcX / s, ndcY / (s * aspect), -1));
+      const along = dot(centre, ray);
+      const perp = norm(sub(centre, scale(ray, along)));
+      const h2 = sphere.radiusM ** 2 - perp ** 2;
+      written += along > 0 && h2 >= 0 && sphere.altitudeM > 0 ? 1 : 0;
+    }
+  }
+  return written;
+}
+
+describe("an occluder sphere wholly off the view (R07.T19.e)", () => {
+  // Small, so that the twin tests every pixel quickly; the margin is in pixels. The tall view's
+  // height spans 144° at a 120° width.
+  const SMALL: Viewport = { widthPx: 72, heightPx: 40 };
+  const TALL: Viewport = { widthPx: 40, heightPx: 72 };
+  const RADIUS_M = 6.371e6;
+
+  /** A sphere at `centreM` from the camera, as the draw list gives it. */
+  function sphereAt(centreM: Vec3): OccluderSphere {
+    return {
+      id: "body",
+      centreF32: new Float32Array([centreM.x, centreM.y, centreM.z]),
+      radiusM: RADIUS_M,
+      altitudeM: norm(centreM) - RADIUS_M,
+    };
+  }
+
+  const cases = [SMALL, TALL].flatMap((viewport) =>
+    [10, 60, 120].flatMap((fovDeg) =>
+      [3, 300].map((distanceRadii) => ({
+        view: `${viewport.widthPx} × ${viewport.heightPx}`,
+        viewport,
+        fovDeg,
+        distanceRadii,
+      })),
+    ),
+  );
+
+  /** Spheres just beyond each widened side plane, `distanceRadii` radii away. */
+  function justBeyond(camera: DrawCamera, viewport: Viewport, distanceRadii: number) {
+    // A thousandth of a radius beyond, past the centre's rounding to f32.
+    return centresJustBeyond(
+      camera.fovXRad,
+      viewport,
+      OUTSIDE_VIEW_MARGIN_PX,
+      distanceRadii * RADIUS_M,
+      RADIUS_M * (1 + 1e-3),
+    ).map(sphereAt);
+  }
+
+  it.each(cases)(
+    "packs none beside, level with a corner, across or behind: $distanceRadii radii, $fovDeg° across $view",
+    ({ viewport, fovDeg, distanceRadii }) => {
+      const camera: DrawCamera = { pose: CAMERA.pose, fovXRad: (fovDeg * Math.PI) / 180 };
+      const spheres = justBeyond(camera, viewport, distanceRadii);
+      const packed = packWireframe({ ...EMPTY, occluderSpheres: spheres }, camera, viewport);
+      expect(packed.spheres.length).toBe(0);
+    },
+  );
+
+  it.each(cases)(
+    "writes no pixel there by its twin: $distanceRadii radii, $fovDeg° across $view",
+    ({ viewport, fovDeg, distanceRadii }) => {
+      const camera: DrawCamera = { pose: CAMERA.pose, fovXRad: (fovDeg * Math.PI) / 180 };
+      const written = justBeyond(camera, viewport, distanceRadii).reduce(
+        (sum, sphere) => sum + writtenPixelCount(sphere, camera, viewport),
+        0,
+      );
+      expect(written).toBe(0);
+    },
+  );
+
+  it("keeps a sphere the view's edge cuts", () => {
+    const onEdge = sphereAt(
+      scale(normalise(vec3(Math.tan(CAMERA.fovXRad / 2), 0, -1)), 30 * RADIUS_M),
+    );
+    const packed = packWireframe({ ...EMPTY, occluderSpheres: [onEdge] }, CAMERA, SMALL);
+    expect(packed.spheres.length).toBe(12);
+  });
+
+  it("keeps a sphere whose limb is a pixel past the edge", () => {
+    const pastEdge = sphereAt(limbPastRightEdge(CAMERA.fovXRad, SMALL, 30 * RADIUS_M, RADIUS_M, 1));
+    const packed = packWireframe({ ...EMPTY, occluderSpheres: [pastEdge] }, CAMERA, SMALL);
+    expect(packed.spheres.length).toBe(12);
   });
 });
 
@@ -347,6 +523,39 @@ describe("WireframeRenderer", () => {
     ]);
   });
 
+  it("encodes the background after the occluders and before the sprites (R06.T13.g)", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const list: WireframeDrawList = {
+      ...EMPTY,
+      occluderSpheres: [
+        { id: "near", centreF32: new Float32Array([0, 0, -1e7]), radiusM: 1e6, altitudeM: 9e6 },
+      ],
+      sprites: [
+        {
+          id: "star",
+          directionF32: new Float32Array([0, 0, -1]),
+          xPx: 960,
+          yPx: 540,
+          exposedRgb: [1, 1, 1],
+          illuminanceLx: 1e-6,
+        },
+      ],
+    };
+    const cube = {
+      mesh: { kind: "mesh", name: "sky cube triangle" },
+      material: { kind: "material", name: "sky:cubeDisplay" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    } as const;
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [cube]);
+    expect(frame.draws.map((d) => d.material.name)).toEqual([
+      "wireframe:occluderSphere",
+      "sky:cubeDisplay",
+      "wireframe:starSprite",
+    ]);
+  });
+
   it("grows a buffer by doubling when a frame outgrows it", () => {
     const engine = new RecordingEngine();
     const renderer = new WireframeRenderer(engine);
@@ -358,18 +567,53 @@ describe("WireframeRenderer", () => {
     ).toEqual([4_096, 16_384]);
   });
 
+  it("draws the spheres, then the silhouettes, before the background and every line (R07.T16.e)", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const list: WireframeDrawList = {
+      ...EMPTY,
+      occluderSpheres: [
+        { id: "near", centreF32: new Float32Array([0, 0, -1e7]), radiusM: 1e6, altitudeM: 9e6 },
+      ],
+      occluderMeshes: [
+        {
+          id: "hull",
+          originF32: new Float32Array([0, 0, -1]),
+          triangles: new Float32Array(9).fill(1),
+          twoSided: true,
+          fill: "#05080d",
+        },
+      ],
+      lines: [aBatch()],
+    };
+    const cube = {
+      mesh: { kind: "mesh", name: "sky cube triangle" },
+      material: { kind: "material", name: "sky:cubeDisplay" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    } as const;
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [cube]);
+    expect(frame.draws.map((d) => d.material.name)).toEqual([
+      "wireframe:occluderSphere",
+      "wireframe:hullSilhouette",
+      "sky:cubeDisplay",
+      "wireframe:lines",
+      "wireframe:lines",
+    ]);
+  });
+
   it("makes its materials again when the engine restores its device", () => {
     const engine = new RecordingEngine();
     const renderer = new WireframeRenderer(engine);
     engine.restore();
     renderer.dispose();
-    expect(engine.materials.length).toBe(8);
+    expect(engine.materials.length).toBe(10);
   });
 
   it("stops following the engine's restores once disposed", () => {
     const engine = new RecordingEngine();
     new WireframeRenderer(engine).dispose();
     engine.restore();
-    expect(engine.materials.length).toBe(4);
+    expect(engine.materials.length).toBe(5);
   });
 });

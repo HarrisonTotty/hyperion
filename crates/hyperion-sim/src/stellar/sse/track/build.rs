@@ -14,11 +14,14 @@
 //! segment depends only on those before it, so [`Track::to_age`](super::Track::to_age)'s segments
 //! are bit for bit [`Track::full`](super::Track::full)'s.
 
+use std::error::Error;
+use std::fmt;
+
 use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
-use crate::stellar::{Composition, StarState};
-use crate::units::{Megayears, SolarLuminosities, SolarMasses};
+use crate::stellar::{Composition, Phase, StarState};
+use crate::units::{Megayears, SolarLuminosities, SolarMasses, Years};
 
 use super::super::PhasePoint;
 use super::super::agb::ThermallyPulsingAgb;
@@ -47,6 +50,44 @@ pub(crate) const NEGLIGIBLE_LOSS: f64 = 1e-6;
 /// The most knots a phase with an envelope takes, as a multiple of its grid: past it, the next
 /// knot is the span's end.
 const MAX_KNOT_FACTOR: usize = 2;
+
+/// The most knots the envelope integrator takes past its grid ([`Builder::envelope_knots`])
+/// where the age's steps resolve the phase's laws. Past them a phase may go on for the stall
+/// allowance, [`EnvelopeClock::still_years`] of age, for the rounding of the age. One that goes further
+/// has stalled, and its build panics ([`IntegrateEnvelopeError`]).
+///
+/// Past the grid each knot goes to twice the envelope's remaining life at its present rate of
+/// loss, so the phase ends in one interval unless the rate's mean over it is under half its rate
+/// at the start. In the R06 census of 10⁵ systems, about 1 in 4,000 envelope phases takes more
+/// than one knot past the grid, and none takes more than 5. The longest are the rounding that
+/// [`EnvelopeClock::still_years`] allows for.
+///
+/// This bound is for the worst wind whose rate falls no faster than the envelope: a rate in
+/// proportion to it. Over one interval of s = [`STEPS_PER_KNOT`] midpoint steps that wind leaves
+/// (1 − 2/s + 2/s²)^s of the envelope, 0.153 at s = 4 (0.139 at the convergence test's 8).
+/// - It starts from an envelope of at most [`MAX_INITIAL_MASS`], 150 M☉.
+/// - It must reach the rounding of a core of at least [`MIN_EVALUATED_MASS`], 10⁻³ M☉: half a
+///   unit in the core's last place, at least 2⁻⁵⁴ of the core.
+/// - That takes at most ⌈ln(150 ÷ (2⁻⁵⁴ × 10⁻³)) ÷ ln(1 ÷ 0.153)⌉ = 27 intervals that fall short.
+/// - There a step can no longer shorten the envelope, so one interval more is the last that can
+///   end the phase: 28 in all.
+///
+/// No wind here falls faster than the envelope, which would then never run out: as it runs out,
+/// its rate of loss tends to the bare core's wind, which is not zero.
+///
+/// The grid takes at most `n` knots, since each interval passes at least one more of its values.
+/// So an envelope segment holds at most `n` + 29 knots and one more for each unit in the age's last
+/// place within the stall allowance, whatever its laws do.
+///
+/// P11.T4.h's work in progress stalled for good (plan 06's Risks). Its wind dropped where the mass
+/// passed the core, so each midpoint saw a weaker wind than its knot, and the mass never moved.
+/// The envelope stuck at 3 × 10⁻¹⁵ M☉ on a core that cannot grow, each knot moved the age by one
+/// unit in its last place, and the span's end was some 4 × 10¹⁰ knots away. With P11.T4.h's
+/// discontinuous wind restored, the guard stops record 0x61f85aa800000001 of the census's galaxy
+/// at 45 knots: 28, and 17 more within the stall allowance.
+///
+/// [`MAX_INITIAL_MASS`]: super::MAX_INITIAL_MASS
+const MAX_KNOTS_PAST_GRID: u32 = 28;
 
 /// Bisections of a knot interval for the loss of the envelope.
 const BISECTIONS: u32 = 40;
@@ -208,6 +249,28 @@ pub(super) enum Entry {
     Dead(Fate),
 }
 
+impl Entry {
+    /// The mass the star enters the phase with: none for the post-AGB crossing and a death, which
+    /// carry their fate instead.
+    #[must_use]
+    fn mass(&self) -> Option<SolarMasses> {
+        match self {
+            Self::Protostar { mass }
+            | Self::PreMainSequence { mass, .. }
+            | Self::MainSequence { mass, .. }
+            | Self::HertzsprungGap { mass, .. }
+            | Self::FirstGiantBranch { mass, .. }
+            | Self::Flash { mass }
+            | Self::CoreHeliumBurning { mass, .. }
+            | Self::EarlyAgb { mass, .. }
+            | Self::ThermallyPulsingAgb { mass, .. }
+            | Self::HeliumMainSequence { mass, .. }
+            | Self::HeliumShellBurning { mass, .. } => Some(SolarMasses::new(*mass)),
+            Self::PostAgb(_) | Self::Dead(_) => None,
+        }
+    }
+}
+
 /// One phase built: its segment (none for a phase of no duration), what follows, and the state it
 /// ends in.
 pub(super) struct Step {
@@ -304,6 +367,10 @@ impl<'a> Builder<'a> {
 
     /// The track of a star of initial mass `m0` (M☉), built to the segment that holds `age_max`,
     /// or to the remnant.
+    ///
+    /// # Panics
+    ///
+    /// As [`Builder::run_from`].
     #[must_use]
     pub(crate) fn run(&self, m0: f64, age_max: Option<f64>) -> Outcome {
         self.run_from(Entry::Protostar { mass: m0 }, age_max)
@@ -312,8 +379,17 @@ impl<'a> Builder<'a> {
     /// The track of a star that enters its life at `entry`, at age zero: [`Builder::run`] from the
     /// zero-age main sequence, and plan 11's naked helium stars from a helium-star entry (ruling 34
     /// of 2026-09-22, `track/binary.rs`).
+    ///
+    /// # Panics
+    ///
+    /// If a phase's envelope cannot be integrated to its end ([`IntegrateEnvelopeError`]), which
+    /// is a bug in that phase's laws. The message names the star by the mass it enters its life
+    /// with, its composition, its Reimers η, the options, the resolution and the companion-stripped
+    /// mark, and says where the phase stalled.
     #[must_use]
     pub(super) fn run_from(&self, entry: Entry, age_max: Option<f64>) -> Outcome {
+        // What a stalled phase's panic names the star by.
+        let entry_mass = entry.mass();
         let mut segments: Vec<Segment> = Vec::new();
         let mut entry = entry;
         let mut start = 0.0;
@@ -333,7 +409,19 @@ impl<'a> Builder<'a> {
                 };
             }
             bridged = matches!(entry, Entry::PostAgb(_));
-            let step = self.phase(entry, start, previous);
+            let step = self.phase(entry, start, previous).unwrap_or_else(|error| {
+                let with =
+                    entry_mass.map_or_else(String::new, |m| format!(" with {} M☉", m.value()));
+                panic!(
+                    "the track of a star entering its life{with} ({:?}, {:?}, {:?}, {:?}, \
+                     companion-stripped mark {}) stalled: {error}",
+                    self.composition,
+                    self.eta,
+                    self.options,
+                    self.resolution,
+                    self.companion_stripped
+                )
+            });
             if let Some(mut segment) = step.segment
                 && self.keep == Keep::Track
             {
@@ -360,8 +448,17 @@ impl<'a> Builder<'a> {
     }
 
     /// Builds the phase `entry` from age `start`, continuing from `previous`.
-    fn phase(&self, entry: Entry, start: f64, previous: Option<[f64; 3]>) -> Step {
-        match entry {
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::envelope_segment`], for the phases with an envelope.
+    fn phase(
+        &self,
+        entry: Entry,
+        start: f64,
+        previous: Option<[f64; 3]>,
+    ) -> Result<Step, IntegrateEnvelopeError> {
+        Ok(match entry {
             Entry::Protostar { mass } => self.protostar(mass),
             Entry::PreMainSequence { mass, arrival } => {
                 self.pre_main_sequence(start, mass, arrival)
@@ -369,24 +466,26 @@ impl<'a> Builder<'a> {
             Entry::MainSequence { mass, tau0, built } => {
                 self.main_sequence(start, mass, tau0, built)
             }
-            Entry::HertzsprungGap { m0, mass } => self.hertzsprung_gap(start, m0, mass, previous),
-            Entry::FirstGiantBranch { m0, mass } => self.giant_branch(start, m0, mass, previous),
+            Entry::HertzsprungGap { m0, mass } => {
+                self.hertzsprung_gap(start, m0, mass, previous)?
+            }
+            Entry::FirstGiantBranch { m0, mass } => self.giant_branch(start, m0, mass, previous)?,
             Entry::Flash { mass } => self.flash(start, mass, previous),
             Entry::CoreHeliumBurning { m0, mass } => {
-                self.core_helium_burning(start, m0, mass, previous)
+                self.core_helium_burning(start, m0, mass, previous)?
             }
-            Entry::EarlyAgb { m0, mass } => self.early_agb(start, m0, mass, previous),
+            Entry::EarlyAgb { m0, mass } => self.early_agb(start, m0, mass, previous)?,
             Entry::ThermallyPulsingAgb {
                 phase,
                 m0,
                 mc_bagb,
                 mass,
-            } => self.pulsing_agb(start, &phase, m0, mc_bagb, mass, previous),
+            } => self.pulsing_agb(start, &phase, m0, mc_bagb, mass, previous)?,
             Entry::HeliumMainSequence { mass, tau0 } => {
                 self.helium_main_sequence(start, mass, tau0, previous)
             }
             Entry::HeliumShellBurning { star, clock0, mass } => {
-                self.helium_shell_burning(start, &star, clock0, mass, previous)
+                self.helium_shell_burning(start, &star, clock0, mass, previous)?
             }
             Entry::PostAgb(fate) => self.post_agb(start, fate, previous),
             Entry::Dead(fate) => Step {
@@ -395,7 +494,7 @@ impl<'a> Builder<'a> {
                 end: start,
                 end_state: None,
             },
-        }
+        })
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -509,6 +608,11 @@ impl<'a> Builder<'a> {
     /// `pulse_period`(Mc, `M_env`), where it is given, is the interpulse period in years at the
     /// core and the envelope of the moment, whose inverse the knots integrate (the thermally
     /// pulsing AGB).
+    ///
+    /// # Errors
+    ///
+    /// [`IntegrateEnvelopeError::Stalled`] if the knots cannot end the phase
+    /// ([`Builder::envelope_knots`]).
     #[expect(
         clippy::too_many_arguments,
         reason = "a phase's model, span, entry state, knot count and its laws"
@@ -523,7 +627,7 @@ impl<'a> Builder<'a> {
         knots: usize,
         laws: &EnvelopeLaws<impl Fn(f64) -> f64, impl Fn(f64) -> f64, impl Fn(f64, f64) -> f64>,
         pulse_period: Option<&dyn Fn(f64, f64) -> f64>,
-    ) -> EnvelopeBuilt {
+    ) -> Result<EnvelopeBuilt, IntegrateEnvelopeError> {
         let nominal_end = start + span.years();
         let mut segment = Segment {
             model,
@@ -541,12 +645,12 @@ impl<'a> Builder<'a> {
         // Written so that a NaN envelope, like a negative one, ends the phase at once.
         let has_envelope = envelope0 > 0.0;
         if !has_envelope {
-            return EnvelopeBuilt {
+            return Ok(EnvelopeBuilt {
                 ending: Ending::Envelope,
                 end: start,
                 end_mass: mass,
                 segment: None,
-            };
+            });
         }
         let rates = [0.0, 0.5, 1.0].map(|x| {
             let age = (1.0 - x) * start + x * nominal_end;
@@ -556,27 +660,21 @@ impl<'a> Builder<'a> {
             // Constant mass: the phase ends at its span's end, or where its core reaches the mass.
             if laws.envelope(nominal_end, mass) <= 0.0 {
                 segment.end = bisect(start, nominal_end, |age| laws.envelope(age, mass));
-                return EnvelopeBuilt {
+                return Ok(EnvelopeBuilt {
                     ending: Ending::Envelope,
                     end: segment.end,
                     end_mass: mass,
                     segment: Some(segment),
-                };
+                });
             }
-            return EnvelopeBuilt {
+            return Ok(EnvelopeBuilt {
                 ending: Ending::Nominal,
                 end: nominal_end,
                 end_mass: mass,
                 segment: Some(segment),
-            };
+            });
         }
-        let clock = EnvelopeClock {
-            nominal_end,
-            years: span.years(),
-            // A step in age for the progress's and the envelope's rates of change, small against
-            // the phase.
-            delta: 1e-7 * span.years(),
-        };
+        let clock = EnvelopeClock::of(span, nominal_end);
         let delta = clock.delta;
         // The derivative of the mass and the pulses in age at (age, M), the knot there, u and du ÷
         // dt there, and the envelope's probes there. Each core mass is evaluated once, at the
@@ -619,15 +717,16 @@ impl<'a> Builder<'a> {
             Derived {
                 rates: [-rate, pulse_rate],
                 knot,
+                phase: evaluated.point.phase,
                 u,
                 du_dt,
                 envelope,
                 fall,
             }
         };
-        let (built, last_envelope) = self.envelope_knots(&derive, [start, mass], clock, knots);
+        let (built, last_envelope) = self.envelope_knots(&derive, [start, mass], clock, knots)?;
         segment.knots = built;
-        envelope_ending(segment, laws, last_envelope, nominal_end)
+        Ok(envelope_ending(segment, laws, last_envelope, nominal_end))
     }
 
     /// The knots of an envelope segment ([`Builder::envelope_segment`]) entered at `entry` = (age,
@@ -639,17 +738,24 @@ impl<'a> Builder<'a> {
     /// Each interval is integrated in u from the state reached, with [`Resolution::steps`]
     /// midpoint steps, so no error in u builds up. Past the grid, or where u stalls, the interval
     /// is integrated in age instead (see the comments within).
+    ///
+    /// # Errors
+    ///
+    /// [`IntegrateEnvelopeError::Stalled`] if the phase has an envelope left before its span's end
+    /// after [`MAX_KNOTS_PAST_GRID`] knots past the grid, at an age past the stall allowance
+    /// ([`EnvelopeClock::still_years`]) beyond the last of them.
     fn envelope_knots(
         &self,
         derive: &impl Fn(f64, f64, f64) -> Derived,
         entry: [f64; 2],
         clock: EnvelopeClock,
         n: usize,
-    ) -> (Vec<Knot>, f64) {
+    ) -> Result<(Vec<Knot>, f64), IntegrateEnvelopeError> {
         let EnvelopeClock {
             nominal_end,
             years,
             delta,
+            ..
         } = clock;
         let grid = clustered_grid(n);
         let steps = self.resolution.steps;
@@ -671,6 +777,9 @@ impl<'a> Builder<'a> {
         let mut last = derive(entry[0], entry[1], 0.0);
         built.push(last.knot);
         let mut target = 1;
+        let mut past_grid: u32 = 0;
+        // Past `MAX_KNOTS_PAST_GRID` knots, the end of the stall allowance in age.
+        let mut stall_end = f64::NAN;
         // The envelope at the last knot is its derivative's own, at the knot's age and mass.
         while !(last.envelope <= 0.0 || last.knot.age >= nominal_end) {
             let knot = last.knot;
@@ -691,6 +800,23 @@ impl<'a> Builder<'a> {
                 // rate of loss, or to the span's end if that is sooner, so that the phase ends in
                 // one interval. The knot's derivative already holds the envelope and its fall
                 // over ± δ at the knot's age and mass.
+                if past_grid == MAX_KNOTS_PAST_GRID {
+                    stall_end = knot.age + clock.still_years;
+                } else if past_grid > MAX_KNOTS_PAST_GRID
+                    && (knot.age > stall_end || stall_end.is_nan())
+                {
+                    return Err(IntegrateEnvelopeError::Stalled {
+                        knots: past_grid,
+                        phase: last.phase,
+                        start: Years::new(entry[0]),
+                        entry_mass: SolarMasses::new(entry[1]),
+                        age: Years::new(knot.age),
+                        mass: SolarMasses::new(knot.mass),
+                        envelope: SolarMasses::new(last.envelope),
+                        nominal_end: Years::new(nominal_end),
+                    });
+                }
+                past_grid = past_grid.saturating_add(1);
                 let age = knot.age;
                 let falling = last.fall / (2.0 * delta);
                 let reach = if falling > 0.0 {
@@ -732,7 +858,7 @@ impl<'a> Builder<'a> {
             built.push(last.knot);
             target += 1;
         }
-        (built, last.envelope)
+        Ok((built, last.envelope))
     }
 
     /// The state (age, M, pulses) after [`Resolution::steps`] midpoint steps in age from `state`,
@@ -1102,12 +1228,53 @@ pub(super) struct FractionBuilt {
 }
 
 /// The clock of an envelope segment: the end of its span (years since the onset of collapse), the
-/// span's length in years, and the step in age for rates of change.
+/// span's length in years, the step in age for rates of change, and the stall allowance.
 #[derive(Debug, Clone, Copy)]
 struct EnvelopeClock {
     nominal_end: f64,
     years: f64,
     delta: f64,
+    /// The stall allowance: how far the age may go past the last of [`MAX_KNOTS_PAST_GRID`]
+    /// knots beyond the grid, years. It is the longest the phase's clock can stand still while the
+    /// age moves.
+    ///
+    /// Where the envelope's remaining life comes to a few units in the age's last place, each knot
+    /// moves the age by one or two of them. A wind continuous over that step moves the mass by
+    /// more than the envelope and ends the phase, so only a core can hold it up. The phase's laws
+    /// read the core through its clock, which runs on the track of the star's effective initial
+    /// mass and can run ahead of its age. One unit in the clock's last place then spans several of
+    /// the age's, and the core stands still over them. The R06 census's longest such stall, 5
+    /// knots in core helium burning, is on a clock 5.5 times the age at the phase's start.
+    ///
+    /// The clock, (1 − x) start + x end in Myr ([`Span::at`]), rounds to within a unit in the last
+    /// place of its larger end, at most 2⁻⁵² of it, so it stands still for at most two such units.
+    /// That makes 2 × 2⁻⁵² × 10⁶ years of age per Myr of that end, times the span's stretch. Once
+    /// the clock moves, the core catches up its growth over the standstill. That is more than the
+    /// envelope left, which was under what the core grows in a step. So a phase that has not ended
+    /// within this much age has stalled.
+    ///
+    /// Each knot moves the age by at least one unit in its last place, since a shorter step goes to
+    /// the span's end. This allows at most 1 + `still_years` ÷ (2⁻⁵³ t) knots more at age t: 23 at
+    /// a clock 5.5 times the age. The stall of plan 06's Risks took 17 more: its age's unit, 2⁻¹⁸
+    /// yr, is coarser than 2⁻⁵³ of its age.
+    still_years: f64,
+}
+
+impl EnvelopeClock {
+    /// The clock of a segment whose phase runs over `span` and ends at `nominal_end`, years since
+    /// the onset of collapse.
+    #[must_use]
+    fn of(span: Span, nominal_end: f64) -> Self {
+        let largest = span.start.value().abs().max(span.end.value().abs());
+        Self {
+            nominal_end,
+            years: span.years(),
+            // A step in age for the progress's and the envelope's rates of change, small against
+            // the phase.
+            delta: 1e-7 * span.years(),
+            still_years: 2.0 * f64::EPSILON * largest * 1e6 * span.stretch,
+        }
+    }
 }
 
 /// The laws of a phase that ends by the loss of its envelope ([`Builder::envelope_segment`]).
@@ -1141,6 +1308,8 @@ struct Derived {
     rates: [f64; 2],
     /// The knot at the state.
     knot: Knot,
+    /// The phase the state evaluates to, which an [`IntegrateEnvelopeError`] names.
+    phase: Phase,
     /// The coordinate u and du ÷ d age.
     u: f64,
     du_dt: f64,
@@ -1150,6 +1319,66 @@ struct Derived {
     /// δ after it, without the mass it has removed: 2δ times the envelope's rate of loss, M☉.
     fall: f64,
 }
+
+/// The envelope integrator could not end a phase ([`Builder::envelope_knots`]).
+///
+/// This is a bug in the phase's laws, never a property of a star, so the build that meets it
+/// panics with it ([`Builder::run_from`]). Plan 06's Risks record the one case known: a wind that
+/// drops where the mass passes the core.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum IntegrateEnvelopeError {
+    /// The phase took [`MAX_KNOTS_PAST_GRID`] knots past its grid, and more past the stall
+    /// allowance of age beyond them ([`EnvelopeClock::still_years`]), and still had an envelope before
+    /// the end of its span.
+    Stalled {
+        /// The knots it took past its grid.
+        knots: u32,
+        /// The phase the last knot evaluates to.
+        phase: Phase,
+        /// When it started, since the onset of collapse.
+        start: Years,
+        /// The mass it started with.
+        entry_mass: SolarMasses,
+        /// The last knot's age, since the onset of collapse.
+        age: Years,
+        /// The last knot's mass.
+        mass: SolarMasses,
+        /// The envelope left at the last knot.
+        envelope: SolarMasses,
+        /// The end of the phase's span, since the onset of collapse.
+        nominal_end: Years,
+    },
+}
+
+impl fmt::Display for IntegrateEnvelopeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stalled {
+                knots,
+                phase,
+                start,
+                entry_mass,
+                age,
+                mass,
+                envelope,
+                nominal_end,
+            } => write!(
+                f,
+                "the {phase:?} phase entered at {:e} yr with {} M☉ still had an envelope after \
+                 {knots} knots past its grid: {:e} M☉ of {} M☉ at {:e} yr, {:e} yr before its \
+                 span's end",
+                start.value(),
+                entry_mass.value(),
+                envelope.value(),
+                mass.value(),
+                age.value(),
+                nominal_end.value() - age.value()
+            ),
+        }
+    }
+}
+
+impl Error for IntegrateEnvelopeError {}
 
 /// A phase built on its clock.
 pub(super) struct EnvelopeBuilt {
@@ -1273,4 +1502,299 @@ fn bisect(a: f64, b: f64, f: impl Fn(f64) -> f64) -> f64 {
         }
     }
     hi
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cell::Cell;
+
+    use hyperion_testkit::float::bits;
+
+    use super::*;
+    use crate::stellar::draws::StarDraws;
+
+    /// The laws of an envelope phase for [`Builder::envelope_knots`] alone: a core of `core`(age)
+    /// M☉ under a shell of the mass itself, and a wind of `rate`(M) M☉ per year. `u`, du ÷ dt and
+    /// the fall are [`Builder::envelope_segment`]'s, with the phase's progress linear in age from
+    /// `phase_start` over the clock's span. `calls` counts the derivative's evaluations.
+    struct Laws<'a, C, R> {
+        core: C,
+        rate: R,
+        phase_start: f64,
+        envelope0: f64,
+        clock: EnvelopeClock,
+        calls: &'a Cell<usize>,
+    }
+
+    impl<C: Fn(f64) -> f64, R: Fn(f64) -> f64> Laws<'_, C, R> {
+        fn derive(&self, age: f64, m: f64, pulses: f64) -> Derived {
+            self.calls.set(self.calls.get() + 1);
+            // The most any test here needs is some 360: a guard that failed would otherwise push
+            // knots until the machine ran out of memory, as the stall once did.
+            assert!(
+                self.calls.get() <= 10_000,
+                "the envelope integrator ran past its guard"
+            );
+            let EnvelopeClock { years, delta, .. } = self.clock;
+            let rate = (self.rate)(m);
+            let envelope = m - (self.core)(age);
+            let x = ((age - self.phase_start) / years).clamp(0.0, 1.0);
+            let y = (1.0 - envelope / self.envelope0).clamp(0.0, 1.0);
+            let fall = ((m + rate * delta) - (self.core)(age - delta))
+                - ((m - rate * delta) - (self.core)(age + delta));
+            let lost = fall / (2.0 * delta * self.envelope0);
+            Derived {
+                rates: [-rate, 0.0],
+                knot: Knot {
+                    age,
+                    mass: m,
+                    mass_rate: -rate,
+                    tau: 0.0,
+                    tau_rate: 0.0,
+                    pulses,
+                    pulse_rate: 0.0,
+                    luminosity: 1.0,
+                    radius: 1.0,
+                },
+                phase: Phase::EarlyAgb,
+                u: 1.0 - (1.0 - x) * (1.0 - y),
+                du_dt: (1.0 - y) / years + (1.0 - x) * lost.max(0.0),
+                envelope,
+                fall,
+            }
+        }
+
+        /// The knots from `entry` = (age, M) on a grid of one knot (u = 1), so that every
+        /// interval is past it.
+        fn knots(&self, entry: [f64; 2]) -> Result<(Vec<Knot>, f64), IntegrateEnvelopeError> {
+            let comp = Composition::SOLAR;
+            let coeffs = ZCoeffs::new(comp.z_fit());
+            let builder = Builder::new(
+                &coeffs,
+                &comp,
+                TrackOptions::default(),
+                ReimersEta::new(0.5),
+                RemnantDraws::of(&StarDraws::median()),
+                Resolution::GENERATOR,
+                Keep::Lifetime,
+            );
+            builder.envelope_knots(&|t, m, p| self.derive(t, m, p), entry, self.clock, 1)
+        }
+    }
+
+    /// 1.5 × 2³⁴ yr (2.6 × 10¹⁰), the age of the stalled star of plan 06's Risks to its order of
+    /// magnitude, where a unit in the age's last place is [`AGE_UNIT`].
+    const AGE: f64 = 25_769_803_776.0;
+
+    /// A unit in the last place of [`AGE`] and of the ages just past it, 2⁻¹⁸ yr.
+    const AGE_UNIT: f64 = 1.0 / 262_144.0;
+
+    /// The clock of a phase 10⁷ yr long that ends 10⁵ yr after [`AGE`], on a clock that runs
+    /// `ahead` times the age at its end.
+    fn clock_ahead(ahead: f64) -> EnvelopeClock {
+        let nominal_end = AGE + 1e5;
+        let end = ahead * nominal_end / 1e6;
+        EnvelopeClock::of(
+            Span::new(Megayears::new(end - 10.0), Megayears::new(end)),
+            nominal_end,
+        )
+    }
+
+    /// The stall of plan 06's Risks (found by P11.T4.h), to its orders of magnitude: 2⁻⁴⁸ M☉
+    /// (3.6 × 10⁻¹⁵) of envelope on a core of 0.5 M☉ at [`AGE`], on a clock 5 times the age. Above
+    /// the core the wind is 2.7 × 10⁻⁹ M☉ per year, which would take the envelope in 0.35 of a unit
+    /// in the age's last place; below it the wind is a millionth of that. So the midpoint of each
+    /// step past the grid sees the weak wind while its knot sees the strong one: the mass never
+    /// moves, each knot moves the age by one unit, and without the guard the loop would push some
+    /// 10¹⁰ knots before the span's end. The guard stops it after [`MAX_KNOTS_PAST_GRID`] knots
+    /// and the stall allowance, at 8 evaluations of the derivative per knot.
+    #[test]
+    fn a_wind_that_drops_at_the_core_stalls_and_trips_the_guard() {
+        let core = 0.5;
+        let envelope = 1.0 / 281_474_976_710_656.0;
+        let above = 2.0 * envelope / (0.7 * AGE_UNIT);
+        let clock = clock_ahead(5.0);
+        let calls = Cell::new(0);
+        let laws = Laws {
+            core: |_| core,
+            rate: |m: f64| if m >= core { above } else { 1e-6 * above },
+            phase_start: clock.nominal_end - clock.years,
+            envelope0: envelope,
+            clock,
+            calls: &calls,
+        };
+        let entry_mass = core + envelope;
+        let error = laws
+            .knots([AGE, entry_mass])
+            .expect_err("the stall trips the guard");
+        let IntegrateEnvelopeError::Stalled {
+            knots,
+            phase,
+            start,
+            entry_mass: reported_mass,
+            age,
+            mass,
+            envelope: left,
+            nominal_end,
+        } = error;
+        assert_eq!(phase, Phase::EarlyAgb);
+        let (age, nominal_end) = (age.value(), nominal_end.value());
+        assert_eq!(bits(start.value()), bits(AGE));
+        assert_eq!(bits(reported_mass.value()), bits(entry_mass));
+        assert_eq!(bits(mass.value()), bits(entry_mass), "the mass never moves");
+        assert_eq!(bits(left.value()), bits(envelope));
+        assert_eq!(
+            bits(age - AGE),
+            bits(f64::from(knots) * AGE_UNIT),
+            "one unit a knot"
+        );
+        // The first knot past the allowance, one unit a knot from the last of the 28.
+        let allowance = clock.still_years / AGE_UNIT;
+        assert!((14.9..15.1).contains(&allowance), "{allowance} units");
+        assert_eq!(
+            bits(f64::from(knots - MAX_KNOTS_PAST_GRID - 1)),
+            bits(allowance.floor()),
+            "{knots} knots"
+        );
+        assert!(
+            (nominal_end - age) / AGE_UNIT > 1e10,
+            "the span's end is {} knots away",
+            (nominal_end - age) / AGE_UNIT
+        );
+        let calls_per_knot = 2 * STEPS_PER_KNOT;
+        let knots = usize::try_from(knots).expect("a few knots");
+        assert_eq!(calls.get(), 1 + knots * calls_per_knot);
+        let text = error.to_string();
+        assert!(
+            text.starts_with("the EarlyAgb phase entered at ")
+                && text.contains(&format!(
+                    " still had an envelope after {knots} knots past its"
+                )),
+            "{text}"
+        );
+    }
+
+    /// The same star with a wind continuous at the core ends its phase in one knot past the
+    /// grid, as almost every current star does.
+    #[test]
+    fn a_wind_continuous_at_the_core_ends_the_phase_in_one_knot() {
+        let core = 0.5;
+        let envelope = 1.0 / 281_474_976_710_656.0;
+        let above = 2.0 * envelope / (0.7 * AGE_UNIT);
+        let clock = clock_ahead(5.0);
+        let calls = Cell::new(0);
+        let laws = Laws {
+            core: |_| core,
+            rate: |_| above,
+            phase_start: clock.nominal_end - clock.years,
+            envelope0: envelope,
+            clock,
+            calls: &calls,
+        };
+        let (knots, left) = laws.knots([AGE, core + envelope]).expect("the phase ends");
+        assert_eq!(knots.len(), 2);
+        assert!(left <= 0.0, "{left}");
+    }
+
+    /// The rounding the allowance is for, as in the R06 census's core-helium-burning stalls but
+    /// longer: no wind to speak of, and a core that grows at 2 × 10⁻¹⁰ M☉ per year but is read
+    /// through a clock 13.5 times the age, which stands still for 40 units in the age's last
+    /// place. On 7 units of its last place of envelope the core stands still for some 40 knots
+    /// past the grid, more than [`MAX_KNOTS_PAST_GRID`], and then ends the phase within the
+    /// allowance.
+    #[test]
+    fn a_core_read_through_a_coarse_clock_stalls_and_ends_within_the_allowance() {
+        let growth = 2e-10;
+        let quantum = 40.0 * AGE_UNIT;
+        let clock = clock_ahead(13.5);
+        assert!(
+            clock.still_years >= quantum,
+            "{} against {quantum}",
+            clock.still_years
+        );
+        let core = |age: f64| 0.48 + growth * ((age - AGE) / quantum).floor() * quantum;
+        let envelope = 7.0 / 18_014_398_509_481_984.0;
+        let calls = Cell::new(0);
+        let laws = Laws {
+            core,
+            rate: |_| 1e-14,
+            phase_start: clock.nominal_end - clock.years,
+            envelope0: envelope,
+            clock,
+            calls: &calls,
+        };
+        let (knots, left) = laws
+            .knots([AGE, core(AGE) + envelope])
+            .expect("the phase ends");
+        let past = u32::try_from(knots.len() - 1).expect("a few knots");
+        assert!(past > MAX_KNOTS_PAST_GRID, "{past} knots past the grid");
+        assert!(left <= 0.0, "{left}");
+    }
+
+    /// The intervals that fall short which a wind in proportion to the envelope takes, at
+    /// `steps` midpoint steps an interval, from an envelope of [`MAX_INITIAL_MASS`] to 2⁻⁵⁴ of a
+    /// core of [`MIN_EVALUATED_MASS`]: [`MAX_KNOTS_PAST_GRID`]'s derivation.
+    ///
+    /// [`MAX_INITIAL_MASS`]: super::super::MAX_INITIAL_MASS
+    fn proportional_intervals(steps: usize) -> u32 {
+        let s = f64::from(u32::try_from(steps).expect("a few steps"));
+        let one = 1.0 - 2.0 / s + 2.0 / (s * s);
+        let share: f64 = (0..steps).map(|_| one).product();
+        let rounding = 0.25 * f64::EPSILON * MIN_EVALUATED_MASS;
+        let mut envelope = super::super::MAX_INITIAL_MASS.value();
+        let mut intervals = 0;
+        while envelope > rounding {
+            envelope *= share;
+            intervals += 1;
+        }
+        intervals
+    }
+
+    #[test]
+    fn the_past_grid_bound_is_a_proportional_wind_s_way_to_the_rounding_and_one_more() {
+        assert_eq!(proportional_intervals(STEPS_PER_KNOT), 27);
+        assert!(
+            proportional_intervals(Resolution::GENERATOR.doubled().steps)
+                <= proportional_intervals(STEPS_PER_KNOT)
+        );
+        assert_eq!(
+            MAX_KNOTS_PAST_GRID,
+            proportional_intervals(STEPS_PER_KNOT) + 1
+        );
+    }
+
+    /// The bound's own case: a wind in proportion to the envelope, from 150 M☉ on a core of
+    /// 10⁻³ M☉, on a clock that never stands still, ends its phase within
+    /// [`MAX_KNOTS_PAST_GRID`] knots past the grid. It takes 26, where the mass rounds to the core,
+    /// so the bound is within two of tight.
+    #[test]
+    fn a_wind_in_proportion_to_the_envelope_ends_within_the_bound() {
+        let core = MIN_EVALUATED_MASS;
+        let mass = super::super::MAX_INITIAL_MASS.value();
+        // An e-folding time of 2 yr, so that the fall's probes, ± 1 yr, resolve the envelope down
+        // to the core's rounding.
+        let per_year = 0.5;
+        let clock = EnvelopeClock {
+            nominal_end: 1e6 + 1e7,
+            years: 1e7,
+            delta: 1.0,
+            still_years: 0.0,
+        };
+        let calls = Cell::new(0);
+        let laws = Laws {
+            core: |_| core,
+            rate: |m: f64| per_year * (m - core),
+            phase_start: 1e6,
+            envelope0: mass - core,
+            clock,
+            calls: &calls,
+        };
+        let (knots, left) = laws.knots([1e6, mass]).expect("the phase ends");
+        let past = u32::try_from(knots.len() - 1).expect("a few knots");
+        assert!(
+            (MAX_KNOTS_PAST_GRID - 2..=MAX_KNOTS_PAST_GRID).contains(&past),
+            "{past} knots past the grid"
+        );
+        assert!(left <= 0.0, "{left}");
+    }
 }

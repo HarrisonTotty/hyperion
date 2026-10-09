@@ -6,6 +6,10 @@
 struct Draw {
   // Unused: each sphere carries its own centre.
   offsetFromCameraM: vec3f,
+  // The slope term's scale, px: the draw list's `occluderSlopePx`, half the widest cased stroke
+  // over a body (the heavy stroke with a casing each side, at the strokes' scale) and the
+  // one-pixel fringe, w_max / 2 + 1, rounded up: 3 at a scale of 1, 5 at 2 (R07.T16.d).
+  occluderSlopePx: f32,
 }
 
 @group(1) @binding(0) var<uniform> draw: Draw;
@@ -14,10 +18,6 @@ struct Draw {
 // camera, m, along the camera frame's axes, and its radius, m (`occluderRadius`); its altitude, the
 // centre's distance less the radius, m, differenced in f64 on the CPU, then 0, 0, 0.
 @group(2) @binding(0) var<storage, read> spheres: array<vec4f>;
-
-// The slope term's scale, px: half the widest cased stroke over a body (1.5 px plus a 1 px casing
-// each side) and the one-pixel fringe, w_max / 2 + 1 = 2.75, rounded up.
-const SLOPE_SCALE = 3.0;
 
 struct SphereVarying {
   @builtin(position) position: vec4f,
@@ -80,10 +80,10 @@ fn fragmentMain(v: SphereVarying) -> SphereDepth {
   let slopeY = n * abs(normal.y) * 2.0 / (frame.viewport.y * frame.clipProjection[1][1] * facing);
   var out: SphereDepth;
   out.colour = vec4f(0.0);
-  // Pushed away by the slope over a cased stroke's half-width and its fringe, as the hull faces'
-  // bias is (Design note 5), so that the whole width of the body's own graticule stays in front:
+  // Pushed away by the slope over a cased stroke's half-width and its fringe, as the hull faces
+  // are (Design note 5), so that the whole width of the body's own graticule stays in front:
   // the 4e-6 margin alone holds only the stroke's centreline. The slope's magnitude, not its larger
   // component, which falls up to sqrt(2) short where the gradient runs diagonally across the screen.
-  out.depth = clamp(depth - SLOPE_SCALE * length(vec2f(slopeX, slopeY)), 0.0, 1.0);
+  out.depth = clamp(depth - draw.occluderSlopePx * length(vec2f(slopeX, slopeY)), 0.0, 1.0);
   return out;
 }

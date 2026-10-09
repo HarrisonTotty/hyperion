@@ -162,6 +162,23 @@ where
         self.entries.contains_key(key)
     }
 
+    /// The value for `key`, without counting a lookup or marking a use: for a caller that builds
+    /// its replacement from it ([`SharedByteLru::insert_if_unchanged`]).
+    #[must_use]
+    pub fn peek(&self, key: &K) -> Option<Arc<V>> {
+        self.entries.get(key).map(|entry| Arc::clone(&entry.value))
+    }
+
+    /// Whether `key` holds `expected`: the same `Arc`, or nothing for `None`.
+    #[must_use]
+    fn holds(&self, key: &K, expected: Option<&Arc<V>>) -> bool {
+        match (self.entries.get(key), expected) {
+            (None, None) => true,
+            (Some(entry), Some(expected)) => Arc::ptr_eq(&entry.value, expected),
+            (None, Some(_)) | (Some(_), None) => false,
+        }
+    }
+
     /// Stores `value` under `key` as the most recently used entry, replacing any entry of that
     /// key and evicting the least recently used others until the total fits the budget.
     pub fn insert(&mut self, key: K, value: Arc<V>) -> Insertion<V> {
@@ -302,6 +319,38 @@ where
         self.lock().contains_key(key)
     }
 
+    /// See [`ByteLru::peek`].
+    #[must_use]
+    pub fn peek(&self, key: &K) -> Option<Arc<V>> {
+        self.lock().peek(key)
+    }
+
+    /// [`SharedByteLru::insert`], only if `key` still holds `expected` (the same `Arc`, or
+    /// nothing for `None`), as a value built from it outside the lock must: `None`, with the
+    /// cache unchanged and `value` dropped, if another thread replaced it meanwhile, so that the
+    /// caller builds again from what is held now.
+    pub fn insert_if_unchanged(
+        &self,
+        key: K,
+        expected: Option<&Arc<V>>,
+        value: Arc<V>,
+    ) -> Option<Insertion<V>> {
+        let charge = ByteLru::<K, V>::charge(&value);
+        let mut displaced = Vec::new();
+        let insertion = {
+            let mut cache = self.lock();
+            if !cache.holds(&key, expected) {
+                drop(cache);
+                drop(value);
+                return None;
+            }
+            cache.insert_charged(key, value, charge, &mut displaced)
+        };
+        // Dropped with the lock released, as [`SharedByteLru::insert`]'s are.
+        drop(displaced);
+        Some(insertion)
+    }
+
     /// See [`ByteLru::insert`].
     pub fn insert(&self, key: K, value: Arc<V>) -> Insertion<V> {
         let charge = ByteLru::<K, V>::charge(&value);
@@ -377,6 +426,42 @@ mod tests {
         for (tick, key) in &cache.by_use {
             assert_eq!(cache.entries[key].tick, *tick);
         }
+    }
+
+    #[test]
+    fn an_insert_if_unchanged_lands_only_on_the_value_it_was_built_from() {
+        let cache = SharedByteLru::new(4 * EMPTY);
+        let first = blob(0);
+        assert!(matches!(
+            cache.insert_if_unchanged(1, None, Arc::clone(&first)),
+            Some(Insertion::Stored { evicted: 0 })
+        ));
+        assert!(
+            cache.insert_if_unchanged(1, None, blob(0)).is_none(),
+            "held now, so not absent"
+        );
+        let held = cache.peek(&1).expect("held");
+        assert!(Arc::ptr_eq(&held, &first));
+        let second = blob(0);
+        assert!(
+            cache
+                .insert_if_unchanged(1, Some(&first), Arc::clone(&second))
+                .is_some()
+        );
+        assert!(
+            cache
+                .insert_if_unchanged(1, Some(&first), blob(0))
+                .is_none(),
+            "replaced meanwhile"
+        );
+        assert!(Arc::ptr_eq(&cache.peek(&1).expect("held"), &second));
+        assert!(cache.peek(&2).is_none());
+        // A peek counts no lookup.
+        let counters = cache.counters();
+        assert_eq!(
+            (counters.hits(), counters.misses(), counters.entries()),
+            (0, 0, 1)
+        );
     }
 
     #[test]

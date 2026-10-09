@@ -12,16 +12,20 @@ use std::sync::OnceLock;
 
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    BodyDetailDto, BodyDetailRequest, BodyIdHex, BodyKindDto, BodyStateDto, DetailLevelDto,
-    ErrorCode, OrbitHostDto, RequestBody, RequestError, ResponseBody, SectionDto, SystemBodiesDto,
+    BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyIdHex, BodyKindDto, BodyPhotometryDto,
+    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, DetailLevelDto, ErrorCode,
+    OrbitHostDto, RequestBody, RequestError, ResponseBody, SectionDto, SystemBodiesDto,
     SystemBodiesRequest, SystemIdHex, SystemSummaryRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, candidate_count};
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::HostMultiplicity;
+use hyperion_sim::planetary::derive::figure::BodyFigure;
+use hyperion_sim::planetary::derive::photometry::BodyPhotometry;
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::BodyState;
+use hyperion_sim::planetary::frames::BodyFixedFrame;
 use hyperion_sim::planetary::placement::{OrbitHost, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{BodyKind, BodyRecord, Population, Section};
 use hyperion_sim::planetary::{PlanetaryHost, PlanetarySystem, SystemContext, generate};
@@ -344,6 +348,196 @@ fn assert_bulk_is_the_sims(
     }
 }
 
+/// The sections a body's list entry and its record both carry at the `bulk` level beside `bulk`
+/// itself (P14.T46.f, T47.d).
+trait BulkLevel {
+    fn rotation(&self) -> Option<&SectionDto<BodyRotationDto>>;
+    fn figure(&self) -> Option<&SectionDto<BodyFigureDto>>;
+    fn photometry(&self) -> Option<&SectionDto<BodyPhotometryDto>>;
+}
+
+impl BulkLevel for BodySummaryDto {
+    fn rotation(&self) -> Option<&SectionDto<BodyRotationDto>> {
+        self.rotation.as_ref()
+    }
+    fn figure(&self) -> Option<&SectionDto<BodyFigureDto>> {
+        self.figure.as_ref()
+    }
+    fn photometry(&self) -> Option<&SectionDto<BodyPhotometryDto>> {
+        self.photometry.as_ref()
+    }
+}
+
+impl BulkLevel for BodyRecordDto {
+    fn rotation(&self) -> Option<&SectionDto<BodyRotationDto>> {
+        self.rotation.as_ref()
+    }
+    fn figure(&self) -> Option<&SectionDto<BodyFigureDto>> {
+        self.figure.as_ref()
+    }
+    fn photometry(&self) -> Option<&SectionDto<BodyPhotometryDto>> {
+        self.photometry.as_ref()
+    }
+}
+
+/// Asserts each of `pairs`' wire values is its sim value bit for bit.
+fn assert_bits(what: &str, label: &str, pairs: &[(f64, f64)]) {
+    for (n, (wire, sim)) in pairs.iter().enumerate() {
+        assert_eq!(wire.to_bits(), sim.to_bits(), "{what}: {label} [{n}]");
+    }
+}
+
+/// A vector's wire and sim components, paired.
+fn paired(wire: [f64; 3], sim: [f64; 3]) -> [(f64, f64); 3] {
+    [(wire[0], sim[0]), (wire[1], sim[1]), (wire[2], sim[2])]
+}
+
+/// Holds a body's rotation, figure and photometry on the wire (P14.T46.f, T47.d) to the sim's
+/// record, bit for bit, field by field; the server always sends the three.
+fn assert_bulk_level_is_the_sims(sim: &BodyRecord, wire: &impl BulkLevel) {
+    let what = format!("{:04x}", sim.index().get());
+    assert_rotation_is_the_sims(
+        &what,
+        wire.rotation().expect("the server sends the rotation"),
+        sim.rotation(),
+    );
+    assert_figure_is_the_sims(
+        &what,
+        wire.figure().expect("the server sends the figure"),
+        sim.figure(),
+    );
+    assert_photometry_is_the_sims(
+        &what,
+        wire.photometry().expect("the server sends the photometry"),
+        sim.photometry(),
+    );
+}
+
+fn assert_rotation_is_the_sims(
+    what: &str,
+    rotation: &SectionDto<BodyRotationDto>,
+    sim: &Section<BodyFixedFrame>,
+) {
+    match (rotation, sim) {
+        (SectionDto::Ok(wire), Section::Ok(frame)) => {
+            let law = frame.rate().parts();
+            assert_bits(what, "pole", &paired(wire.pole, frame.pole()));
+            assert_bits(
+                what,
+                "equator_node",
+                &paired(wire.equator_node, frame.equator_node()),
+            );
+            assert_bits(
+                what,
+                "equator_quarter",
+                &paired(wire.equator_quarter, frame.equator_quarter()),
+            );
+            assert_bits(
+                what,
+                "law",
+                &[
+                    (wire.obliquity_rad, frame.obliquity().value()),
+                    (wire.initial_rate_rad_s, law.initial_rate),
+                    (wire.locked_rate_rad_s, law.locked_rate),
+                    (wire.age_at_epoch_s, law.age_at_epoch.value()),
+                    (wire.clock_period_s, law.clock_period.value()),
+                    (
+                        wire.clock_mean_anomaly_at_epoch_rad,
+                        law.clock_mean_anomaly_at_epoch.value(),
+                    ),
+                    (wire.sub_primary_angle_rad, law.sub_primary_angle.value()),
+                    (wire.phase_at_epoch_rad, law.phase_at_epoch.value()),
+                    (wire.capture_phase_rad, law.capture_phase.value()),
+                ],
+            );
+            assert_eq!(
+                wire.locking_age_s.map(f64::to_bits),
+                law.locking_age.map(|age| age.value().to_bits()),
+                "{what}: locking age"
+            );
+            assert_eq!(
+                wire.locks_at.map(sim_time),
+                law.locks_at,
+                "{what}: locks at"
+            );
+            assert_eq!(
+                serde_json::to_value(wire.resonance).unwrap(),
+                snake_case(&format!("{:?}", law.resonance)),
+                "{what}: resonance"
+            );
+        }
+        (wire, sim) => assert_same_state(what, wire, sim),
+    }
+}
+
+fn assert_figure_is_the_sims(
+    what: &str,
+    figure: &SectionDto<BodyFigureDto>,
+    sim: &Section<BodyFigure>,
+) {
+    match (figure, sim) {
+        (SectionDto::Ok(wire), Section::Ok(sim)) => {
+            let spheroid = sim.spheroid();
+            assert_bits(
+                what,
+                "figure",
+                &[
+                    (wire.equatorial_radius_m, spheroid.equatorial_radius_m),
+                    (wire.polar_radius_m, spheroid.polar_radius_m),
+                    (wire.flattening, spheroid.flattening()),
+                    (wire.moment_of_inertia_factor, sim.moment_factor()),
+                ],
+            );
+            assert_bits(what, "figure pole", &paired(wire.pole, sim.pole()));
+            assert_eq!(
+                serde_json::to_value(wire.law).unwrap(),
+                snake_case(&format!("{:?}", sim.law())),
+                "{what}: figure law"
+            );
+            assert_eq!(
+                serde_json::to_value(wire.datum).unwrap(),
+                snake_case(&format!("{:?}", sim.datum())),
+                "{what}: datum"
+            );
+        }
+        (wire, sim) => assert_same_state(what, wire, sim),
+    }
+}
+
+fn assert_photometry_is_the_sims(
+    what: &str,
+    photometry: &SectionDto<BodyPhotometryDto>,
+    sim: &Section<BodyPhotometry>,
+) {
+    match (photometry, sim) {
+        (SectionDto::Ok(wire), Section::Ok(sim)) => {
+            let (p, s) = (sim.geometric_albedo(), sim.exponents());
+            assert_bits(
+                what,
+                "photometry",
+                &[
+                    (wire.geometric_albedo.b, p.b),
+                    (wire.geometric_albedo.v, p.v),
+                    (wire.geometric_albedo.r, p.r),
+                    (wire.phase_exponent.b, s.b),
+                    (wire.phase_exponent.v, s.v),
+                    (wire.phase_exponent.r, s.r),
+                    (wire.lunar_lambert_share, sim.lunar_lambert_share()),
+                    (wire.bond_albedo, sim.bond_albedo().value()),
+                    (wire.bond_ratio, sim.bond_ratio()),
+                ],
+            );
+            assert_eq!(wire.provisional, sim.provisional(), "{what}: provisional");
+            assert_eq!(
+                serde_json::to_value(wire.phase_template).unwrap(),
+                snake_case(&format!("{:?}", sim.template())),
+                "{what}: template"
+            );
+        }
+        (wire, sim) => assert_same_state(what, wire, sim),
+    }
+}
+
 /// The system part of a body ID's text, `what`.
 fn wire_system(what: &str) -> u64 {
     BodyIdHex::try_from(what.to_owned())
@@ -386,6 +580,7 @@ fn assert_bodies_are_the_sims(
             &wire.orbit,
             &wire.bulk,
         );
+        assert_bulk_level_is_the_sims(sim, wire);
         assert_same_state(wire.id.as_str(), &wire.moons, sim.moons());
         assert_same_state(wire.id.as_str(), &wire.rings, sim.rings());
         assert_same_state(wire.id.as_str(), &wire.population, sim.population());
@@ -670,6 +865,7 @@ async fn a_pinned_system_with_moons_returns_them() {
         &record.orbit,
         &record.bulk,
     );
+    assert_bulk_level_is_the_sims(&sim, &record);
     client.close().await;
     server.stop().await;
 }
@@ -774,6 +970,7 @@ async fn belts_withhold_their_members_below_bulk_and_list_them_at_it() {
                 &record.orbit,
                 &record.bulk,
             );
+            assert_bulk_level_is_the_sims(&sim, &record);
             member_moons += 1;
         }
     }
@@ -920,6 +1117,7 @@ async fn each_bodys_record_is_the_sims_and_the_lists() {
             &record.orbit,
             &record.bulk,
         );
+        assert_bulk_level_is_the_sims(&sim, record);
         assert_same_state(record.id.as_str(), &record.surface, sim.surface());
         assert_same_state(record.id.as_str(), &record.hooks, sim.hooks());
         // Every hooks section is not modelled; a population's is not applicable.
@@ -1112,6 +1310,9 @@ async fn mass_and_orbit_gives_no_bulk_section() {
         "equilibrium_temperature_k",
         "effective_temperature_k",
         "mass_fractions",
+        "obliquity_rad",
+        "equatorial_radius_m",
+        "geometric_albedo",
     ] {
         assert!(
             !frame.contains(key),
@@ -1129,6 +1330,13 @@ async fn mass_and_orbit_gives_no_bulk_section() {
     assert!(!answer.bodies.is_empty());
     for body in &answer.bodies {
         assert_eq!(body.bulk, SectionDto::NotResolved, "{}", body.id);
+        assert!(
+            matches!(body.rotation, Some(SectionDto::NotResolved))
+                && matches!(body.figure, Some(SectionDto::NotResolved))
+                && matches!(body.photometry, Some(SectionDto::NotResolved)),
+            "{}: the bulk level's sections are sent withheld",
+            body.id
+        );
         assert!(matches!(body.mass_kg, SectionDto::Ok(_)), "{}", body.id);
         assert!(matches!(body.label, SectionDto::Ok(_)), "{}", body.id);
     }
@@ -1146,6 +1354,12 @@ async fn mass_and_orbit_gives_no_bulk_section() {
     .await;
     assert_eq!(record.granted, DetailLevelDto::MassAndOrbit);
     assert_eq!(record.record.bulk, SectionDto::NotResolved);
+    assert!(
+        matches!(record.record.rotation, Some(SectionDto::NotResolved))
+            && matches!(record.record.figure, Some(SectionDto::NotResolved))
+            && matches!(record.record.photometry, Some(SectionDto::NotResolved)),
+        "the bulk level's sections are sent withheld"
+    );
     assert_eq!(record.record.surface, SectionDto::NotResolved);
     assert_eq!(record.record.hooks, SectionDto::NotResolved);
 

@@ -6,6 +6,10 @@
 //! with the same ID, a `response` whose body has the request's `kind`, or a `request_error`, and
 //! that holds for a cancelled request too. The client may reuse an ID once its terminal message has
 //! arrived.
+//!
+//! A request of a kind that is answered in parts, `sky` alone (rendering plan R06, R06.T11.d), may
+//! be answered first by `partial_response`s with its ID, each a whole answer that a later one
+//! replaces, before its terminal message. A request of any other kind never receives one.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -23,6 +27,7 @@ use crate::scene::{
     SceneCamerasRequest, SceneNotificationDto, SceneShipRequest, SceneShipSet, SceneStateDto,
     SceneSubscribeRequest,
 };
+use crate::sky::{SkyRequest, SkyResponse};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
 
@@ -94,6 +99,20 @@ pub enum ServerMessage {
         /// The request's ID.
         id: RequestId,
         /// The answer, whose `kind` is the request's.
+        body: ResponseBody,
+    },
+    /// An answer to a request that is answered in parts, before its last, which a later
+    /// `partial_response` or the terminal `response` replaces whole (rendering plan R06, R06.T11.d:
+    /// a sky arriving nearest first). It ends nothing: the request is still in flight, and still
+    /// ends in exactly one terminal message.
+    ///
+    /// Only `sky` is answered so, so a client that never asks one never receives this. Like a
+    /// `response` in bulk, its binary frames come before it, numbered from chunk 0 for each answer,
+    /// and its body's manifest states them (the crate docs lay the frames out).
+    PartialResponse {
+        /// The request's ID.
+        id: RequestId,
+        /// The answer so far, whose `kind` is the request's.
         body: ResponseBody,
     },
     /// The unsuccessful end of a request.
@@ -271,6 +290,8 @@ pub enum RequestBody {
     SceneShip(SceneShipRequest),
     /// Replace a scene subscription's cameras (rendering plan R03).
     SceneCameras(SceneCamerasRequest),
+    /// The stars and the band seen from a point at a time, answered in bulk (rendering plan R06).
+    Sky(SkyRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -309,6 +330,9 @@ pub enum ResponseBody {
     SceneShip(SceneShipSet),
     /// The cameras replaced.
     SceneCameras,
+    // Boxed: the hosts' discs make it the largest answer but one.
+    /// The sky computed, its stars and band in the binary frames before it.
+    Sky(Box<SkyResponse>),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -331,6 +355,7 @@ pub const REQUEST_KINDS: &[&str] = &[
     "unsubscribe",
     "scene_ship",
     "scene_cameras",
+    "sky",
 ];
 
 #[cfg(test)]
@@ -340,6 +365,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::bulk::BulkManifestDto;
     use crate::galaxy::{
         Census, MapPopulation, MapView, MassLayer, ParameterGroup, SystemsInRange,
     };
@@ -353,6 +379,7 @@ mod tests {
     use crate::scene::{
         CameraReportDto, FramePositionDto, KinematicsDto, SceneClockDto, SceneClockStateDto,
     };
+    use crate::sky::BandSpecDto;
     use crate::stellar::SystemExistenceDto;
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
@@ -386,6 +413,44 @@ mod tests {
             seed: SeedHex::from_u64(1234),
             generator_version: 2,
             status: UniverseStatus::Compatible,
+        }
+    }
+
+    /// A small sky request, for the walk.
+    fn sky_request() -> SkyRequest {
+        SkyRequest {
+            universe: universe(),
+            observer: GalacticPosition::default(),
+            time: UniverseTime::default(),
+            eye: None,
+            camera_limit_v: Some(9.5),
+            n_max: Some(1_000),
+            cone: None,
+            exclude_system: None,
+        }
+    }
+
+    /// An empty sky, for the walk.
+    fn sky_response() -> SkyResponse {
+        SkyResponse {
+            universe: universe(),
+            time: UniverseTime::default(),
+            observer: GalacticPosition::default(),
+            valid_until: UniverseTime::default(),
+            cut_v: 9.5,
+            census: Vec::new(),
+            listed: 0,
+            overflow: 0,
+            band: BandSpecDto { face_texels: 64 },
+            hosts: Vec::new(),
+            not_modelled: Vec::new(),
+            bulk: BulkManifestDto {
+                chunks: 0,
+                bytes: 0,
+            },
+            stars_bytes: 0,
+            band_bytes: 0,
+            is_final: true,
         }
     }
 
@@ -484,7 +549,8 @@ mod tests {
                     }],
                 }))
             }
-            Some(RequestBody::SceneCameras(_)) => None,
+            Some(RequestBody::SceneCameras(_)) => Some(RequestBody::Sky(sky_request())),
+            Some(RequestBody::Sky(_)) => None,
         }
     }
 
@@ -508,6 +574,9 @@ mod tests {
                 rings: SectionDto::NotResolved,
                 population: SectionDto::NotResolved,
                 bulk: SectionDto::NotResolved,
+                rotation: Some(SectionDto::NotResolved),
+                figure: Some(SectionDto::NotResolved),
+                photometry: Some(SectionDto::NotResolved),
                 surface: SectionDto::NotResolved,
                 hooks: SectionDto::NotResolved,
             },
@@ -598,7 +667,8 @@ mod tests {
                 clock: scene_clock(),
             })),
             Some(ResponseBody::SceneShip(_)) => Some(ResponseBody::SceneCameras),
-            Some(ResponseBody::SceneCameras) => None,
+            Some(ResponseBody::SceneCameras) => Some(ResponseBody::Sky(Box::new(sky_response()))),
+            Some(ResponseBody::Sky(_)) => None,
         }
     }
 
@@ -729,6 +799,21 @@ mod tests {
                     "universes": [],
                     "server_generator_version": 2,
                 },
+            }),
+        );
+    }
+
+    #[test]
+    fn partial_response_wire_form() {
+        assert_wire_form(
+            &ServerMessage::PartialResponse {
+                id: RequestId(7),
+                body: ResponseBody::Unsubscribe,
+            },
+            json!({
+                "type": "partial_response",
+                "id": 7,
+                "body": { "kind": "unsubscribe" },
             }),
         );
     }
@@ -868,6 +953,7 @@ mod tests {
                 "unsubscribe",
                 "scene_ship",
                 "scene_cameras",
+                "sky",
             ]
         );
     }

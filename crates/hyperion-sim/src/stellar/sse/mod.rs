@@ -57,6 +57,8 @@ pub(crate) use track::{
     giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,
     main_sequence_structure, new_star_mass,
 };
+#[cfg(test)]
+pub(crate) use track::{early_agb_core_radius_bound, helium_zams_radius};
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.
 #[cfg_attr(

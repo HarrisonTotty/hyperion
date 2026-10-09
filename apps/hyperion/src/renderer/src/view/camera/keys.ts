@@ -1,7 +1,9 @@
 import { vec3 } from "../../geometry/vec3";
+import { MODIFIER_KEY, type PrimaryModifier } from "../../lib/platform";
 import { isTextEntry } from "../../lib/textEntry";
 import type { FreeCameraInput } from "./freeCamera";
-import type { CameraPreset } from "./state";
+import { STYLE_TOGGLE_KEY } from "../photoreal/style";
+import type { CameraPreset, RenderStyle } from "./state";
 
 /**
  * What the view's keys ask of its camera (plan R02, R02.T9.c).
@@ -14,7 +16,9 @@ export type ViewKeyAction =
   | { readonly kind: "preset"; readonly preset: CameraPreset }
   | { readonly kind: "target"; readonly step: -1 | 1 }
   | { readonly kind: "fov"; readonly step: -1 | 1 }
-  | { readonly kind: "rate"; readonly step: -1 | 1 };
+  | { readonly kind: "rate"; readonly step: -1 | 1 }
+  /** The view's style: one of R07's styles, or `toggle` to the other (the key `4`). */
+  | { readonly kind: "style"; readonly style: RenderStyle | "toggle" };
 
 /** The parts of a `KeyboardEvent` the bindings read. */
 export interface KeyPress {
@@ -36,8 +40,8 @@ export interface KeyPress {
 
 /**
  * The view's single keys, which act while `VIEW` is visible from any focus but a text field: `1`
- * `SEAT`, `2` `CHASE`, `3` `FREE`, `]` and `[` the next and previous target, `+` (or `=`) a
- * narrower field of view and `-` a wider one.
+ * `SEAT`, `2` `CHASE`, `3` `FREE`, `4` the other style (R07.T8.a, `STYLE_TOGGLE_KEY`), `]` and
+ * `[` the next and previous target, `+` (or `=`) a narrower field of view and `-` a wider one.
  *
  * @remarks
  * Split as plan 05's design note D3 splits the chart's. Digits and brackets leave the letters to
@@ -47,6 +51,7 @@ export const VIEW_SINGLE_KEYS: Readonly<Record<string, ViewKeyAction>> = {
   "1": { kind: "preset", preset: "seat" },
   "2": { kind: "preset", preset: "chase" },
   "3": { kind: "preset", preset: "free" },
+  [STYLE_TOGGLE_KEY]: { kind: "style", style: "toggle" },
   "]": { kind: "target", step: 1 },
   "[": { kind: "target", step: -1 },
   "+": { kind: "fov", step: -1 },
@@ -60,6 +65,15 @@ export const FLIGHT_ACTION_KEYS: Readonly<Record<string, ViewKeyAction>> = {
   PageDown: { kind: "rate", step: -1 },
 };
 
+/**
+ * The rate's chord on the focused canvas: the platform's primary modifier with `ArrowUp` or
+ * `ArrowDown` steps the rate up or down, as `PageUp` and `PageDown` do (plan R07, T19.f).
+ */
+export const RATE_CHORD_KEYS: Readonly<Record<string, ViewKeyAction>> = {
+  ArrowUp: { kind: "rate", step: 1 },
+  ArrowDown: { kind: "rate", step: -1 },
+};
+
 /** One held flight key's command: an axis of translation or rotation and its sense. */
 interface FlightAxis {
   readonly motion: "translate" | "rotate";
@@ -70,6 +84,10 @@ interface FlightAxis {
 /**
  * The held flight keys, on the focused canvas: `W` and `S` forward and back, `A` and `D` left and
  * right, `R` and `F` up and down; the arrows pitch and yaw; `Q` and `E` roll left and right.
+ *
+ * @remarks
+ * In `FREE` every one flies the free camera. In `SEAT` and `CHASE` the arrows turn the look offset
+ * from the preset, as a drag does, and the rest do nothing (plan R07, T19.f).
  */
 export const FLIGHT_AXIS_KEYS: Readonly<Record<string, FlightAxis>> = {
   w: { motion: "translate", axis: "z", sense: -1 },
@@ -144,20 +162,65 @@ export function flightKeyReleased(press: Pick<KeyPress, "key">): string | null {
   return Object.hasOwn(FLIGHT_AXIS_KEYS, key) ? key : null;
 }
 
-/** The discrete flight action of a press on the focused canvas (the rate keys), or `null`. */
-export function flightKeyAction(press: KeyPress): ViewKeyAction | null {
-  if (
-    press.ctrlKey ||
-    press.altKey ||
-    press.metaKey ||
-    press.shiftKey ||
-    isTextEntry(press.target)
-  ) {
+/** Whether a press holds the primary modifier alone: not the other, nor Alt or Shift. */
+function primaryModifierAlone(press: KeyPress, modifier: PrimaryModifier): boolean {
+  const meta = modifier === "meta";
+  return press.metaKey === meta && press.ctrlKey === !meta && !press.altKey && !press.shiftKey;
+}
+
+/**
+ * The discrete flight action of a press on the focused canvas, or `null`: `PageUp` and `PageDown`
+ * alone, or `ArrowUp` and `ArrowDown` with the platform's primary modifier alone (plan R07,
+ * T19.f), each a step of the rate.
+ *
+ * @remarks
+ * The chord takes one step a press and none on a key repeat, so that an arrow held before the
+ * modifier, whose repeats then carry it, never runs the rate up; `PageUp` and `PageDown` step on
+ * repeats as before. Nothing acts in a text field.
+ *
+ * @param modifier - The platform's primary modifier (`primaryModifierOf`).
+ */
+export function flightKeyAction(press: KeyPress, modifier: PrimaryModifier): ViewKeyAction | null {
+  if (isTextEntry(press.target)) {
+    return null;
+  }
+  if (primaryModifierAlone(press, modifier)) {
+    return !press.repeat && Object.hasOwn(RATE_CHORD_KEYS, press.key)
+      ? (RATE_CHORD_KEYS[press.key] ?? null)
+      : null;
+  }
+  if (press.ctrlKey || press.altKey || press.metaKey || press.shiftKey) {
     return null;
   }
   return Object.hasOwn(FLIGHT_ACTION_KEYS, press.key)
     ? (FLIGHT_ACTION_KEYS[press.key] ?? null)
     : null;
+}
+
+/** The held flight keys that turn: the arrows. */
+const TURN_KEYS: ReadonlySet<string> = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+
+/**
+ * The held flight keys after a press of the platform's primary modifier's own key on the focused
+ * canvas, or `null` where the press is not that key and nothing is released (plan R07, T19.f).
+ *
+ * @remarks
+ * The modifier's press releases every held arrow, so that the plain arrows never pitch or yaw
+ * while the modifier is held for the rate's chord. On macOS (`meta`) it releases every held flight
+ * key: macOS reports no key's release while ⌘ is held, so a key let go then would stay held. On
+ * Linux and Windows a key held to move keeps moving, so that the rate can be stepped in flight.
+ */
+export function heldAfterModifier(
+  held: ReadonlySet<string>,
+  press: Pick<KeyPress, "key">,
+  modifier: PrimaryModifier,
+): ReadonlySet<string> | null {
+  if (press.key !== MODIFIER_KEY[modifier]) {
+    return null;
+  }
+  return modifier === "meta"
+    ? new Set<string>()
+    : new Set([...held].filter((key) => !TURN_KEYS.has(key)));
 }
 
 /**

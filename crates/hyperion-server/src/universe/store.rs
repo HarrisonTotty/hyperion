@@ -11,6 +11,9 @@
 //! [`UniverseStore::knowledge_dir`] names the Knowledge overlay's (plan 12, P12.T7.b), which
 //! [`crate::knowledge`] creates when it first writes.
 //!
+//! A save is written the way PostgreSQL's `durable_rename` writes a file. How durable it is on
+//! each platform is set out under [`UniverseStore::write`] (plan 04, P04.T17.b).
+//!
 //! Everything here is blocking file I/O. The registry calls it through
 //! [`tokio::task::spawn_blocking`], never on the async runtime.
 
@@ -238,10 +241,33 @@ impl UniverseStore {
 
     /// Writes a new save.
     ///
-    /// The file is written to a temporary name, synced, renamed into place, and the directories
-    /// are synced, so that a crash leaves either the whole save or none of it. A save is never
-    /// rewritten: if the universe's directory exists already, nothing is touched. When a step
-    /// fails, what was written is removed again.
+    /// A save is never rewritten: if the universe's directory exists already, nothing is touched.
+    /// When a step fails, what was written is removed again.
+    ///
+    /// The file is written the way PostgreSQL's `durable_rename` writes one
+    /// (`src/backend/storage/file/fd.c`). It goes to a temporary name and is synced, is renamed
+    /// into place, and is synced again under its new name. The universe's directory, and the
+    /// directory of universes that holds its entry, are then synced where the platform allows it.
+    /// The file appears only through the rename, so a crash leaves either the whole save or none
+    /// of it. How durable a save is once this returns depends on the platform (plan 04,
+    /// P04.T17.b):
+    ///
+    /// - **Linux:** every sync is an `fsync`.
+    /// - **macOS:** std's `sync_all` is `fcntl(F_FULLFSYNC)`, which flushes the drive's cache as
+    ///   well. A write therefore costs four full flushes, which the creation of a universe, a rare
+    ///   event, can afford. XNU passes `F_FULLFSYNC` to the file system for a directory too
+    ///   (`kern_descrip.c`). That APFS honours it on a directory is still to be checked once on
+    ///   the Mac.
+    /// - **Windows:** the directories are not synced. std's `File::open` cannot open a directory
+    ///   there, since that takes `FILE_FLAG_BACKUP_SEMANTICS`, and `FlushFileBuffers` is
+    ///   documented for files and volumes, not directories. The new universe's directory and the
+    ///   file's name are left to NTFS, which logs metadata changes in one sequential log. The
+    ///   flush of the file under its new name is expected to carry the rename with it, and
+    ///   PostgreSQL relies on the same there, but Microsoft documents no such guarantee. On FAT,
+    ///   exFAT and network shares nothing is promised beyond the file's own data.
+    ///
+    /// The first save may also create the data directory and the directory of universes in it.
+    /// Their own entries are not synced on any platform, and are left to the file system.
     ///
     /// # Errors
     ///
@@ -368,8 +394,12 @@ impl fmt::Display for ReadSaveError {
     }
 }
 
-/// Writes `universe.json` in `dir` by way of a synced temporary file and a rename, then syncs
-/// `dir` so that the rename is durable.
+/// Writes `universe.json` in `dir` the way PostgreSQL's `durable_rename` does.
+///
+/// The file is written to a temporary name and synced, renamed into place, and synced again under
+/// its new name. Then `dir` is synced. The sync under the new name is what Windows has in place of
+/// the directory's sync ([`UniverseStore::write`]). It runs on every platform, so every platform's
+/// tests run it.
 fn write_file_durably(dir: &Path, contents: &str) -> Result<(), WriteSaveError> {
     let temp = dir.join(TEMP_FILE);
     let target = dir.join(SAVE_FILE);
@@ -383,22 +413,32 @@ fn write_file_durably(dir: &Path, contents: &str) -> Result<(), WriteSaveError> 
     file.sync_all().map_err(io_error("sync", &temp))?;
     drop(file);
     fs::rename(&temp, &target).map_err(io_error("rename", &temp))?;
+    // Opened for writing, since `sync_all` on Windows is `FlushFileBuffers`, which needs
+    // `GENERIC_WRITE`.
+    OpenOptions::new()
+        .write(true)
+        .open(&target)
+        .and_then(|renamed| renamed.sync_all())
+        .map_err(io_error("sync renamed file", &target))?;
     sync_directory(dir)
 }
 
-/// Makes the entries of `dir` durable.
-#[cfg(unix)]
+/// Makes the entries of `dir` durable on Unix, and does nothing elsewhere.
+///
+/// On Windows std's `File::open` cannot open a directory. Flushing a directory handle, opened with
+/// `FILE_FLAG_BACKUP_SEMANTICS`, is undocumented there, and it could make writes fail on file
+/// systems that refuse it, so it is not tried. PostgreSQL's `fsync_fname_ext` skips directories on
+/// Windows too. There the entries are left to the file system, and [`write_file_durably`]'s sync
+/// of the renamed file is expected to carry them ([`UniverseStore::write`]). On macOS this is an
+/// `F_FULLFSYNC` of the directory.
 fn sync_directory(dir: &Path) -> Result<(), WriteSaveError> {
-    File::open(dir)
-        .and_then(|handle| handle.sync_all())
-        .map_err(io_error("sync directory", dir))
-}
-
-/// Makes the entries of `dir` durable. Other platforms cannot open a directory as a file; their
-/// file systems journal the rename.
-#[cfg(not(unix))]
-fn sync_directory(_dir: &Path) -> Result<(), WriteSaveError> {
-    Ok(())
+    if cfg!(unix) {
+        File::open(dir)
+            .and_then(|handle| handle.sync_all())
+            .map_err(io_error("sync directory", dir))
+    } else {
+        Ok(())
+    }
 }
 
 /// Removes what a failed write left in `dir`, and `dir` itself. Best effort: a failure is logged,
@@ -463,7 +503,8 @@ pub enum WriteSaveError {
     },
     /// A step of the write failed, and what it had written was removed.
     Io {
-        /// What was being done: `"create directory"`, `"write"`, `"sync"`, `"rename"` and so on.
+        /// What was being done: `"create directory"`, `"write"`, `"sync"`, `"rename"`,
+        /// `"sync renamed file"` and so on.
         operation: &'static str,
         /// The file or directory it was done to.
         path: PathBuf,

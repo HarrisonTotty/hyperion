@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AxisTriad } from "./AxisTriad";
 import { type CameraAngles, PRESETS } from "./camera";
@@ -67,6 +67,23 @@ describe("AxisTriad", () => {
     expect(away).toHaveAttribute("data-end", "away");
     expect(away.querySelectorAll("circle")).toHaveLength(1);
     expect(away.querySelectorAll("path")).toHaveLength(1);
+  });
+
+  it("moves a symbol's circle out by the outline's shift below a ratio of 4/3: 4.53 units at 0.78125", () => {
+    // A user unit is a sixteenth of a rem: a CSS px at 100%. The circle is 0.25 rem across as built.
+    const radii = [0.78125, 2].map((ratio) => {
+      vi.stubGlobal("devicePixelRatio", ratio);
+      const { unmount } = render(
+        <AxisTriad frame={FRAME} angles={PRESETS.top} boxRem={TRIAD_BOX_REM} />,
+      );
+      const towards = axis(screen.getByRole("img", { name: "Axis triad" }), "north");
+      const ring = towards.querySelector("circle:not(.axis-triad__dot)");
+      const radius = Number(ring?.getAttribute("r"));
+      unmount();
+      return Math.round(radius * 100) / 100;
+    });
+
+    expect(radii).toEqual([4.53, 4]);
   });
 
   it("ends an axis across the screen in an arrowhead", () => {

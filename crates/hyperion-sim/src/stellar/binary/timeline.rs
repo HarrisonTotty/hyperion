@@ -89,9 +89,11 @@ pub enum SegmentKind {
     /// One star, or nothing: the pair has coalesced (their sections 2.6.4, 2.6.5, 2.7.2 and
     /// 2.7.3), and the other member is gone.
     Merged,
-    /// Two single stars no longer bound, after `by`'s supernova (their section 2.5).
+    /// Two single stars no longer bound, after `by`'s supernova (their section 2.5) or the mass
+    /// its white dwarf's birth shed at once (appendix A1; P11.T4.j, finding F1 of ruling
+    /// p11-channels).
     Disrupted {
-        /// The star whose supernova unbound the pair.
+        /// The star whose death unbound the pair.
         by: Component,
     },
     /// Both stars fill their Roche lobes (their section 2.6.6), before the pair coalesces.
@@ -150,8 +152,8 @@ impl Segment {
         }
     }
 
-    /// The members, for the crate's tests.
-    #[cfg(test)]
+    /// The members: how each star's state is evaluated inside the segment (the crate's tests, and
+    /// P11.T17.b's walk of a timeline, `pair_light`).
     #[must_use]
     pub(crate) const fn members(&self) -> &[Member; 2] {
         &self.members
@@ -185,9 +187,31 @@ pub(crate) struct OrbitPath {
     pub(crate) mean_anomaly: Radians,
     pub(crate) axis: Path,
     pub(crate) eccentricity: Path,
-    /// The drawn orbit itself, for a pair that never interacts: two single stars on their orbit
-    /// (plan 11, design note 7), whose elements do not change.
-    pub(crate) fixed: Option<KeplerElements>,
+    /// The drawn orbit itself, up to an age: for a pair that never interacts, two single stars on
+    /// their orbit (plan 11, design note 7), and for a pair the engine runs, its orbit before the
+    /// first star has arrived on the main sequence (`evolve.rs`, `arrival`; P11.T4.i).
+    pub(crate) fixed: Option<FixedOrbit>,
+}
+
+/// A drawn orbit, whose elements do not change, and the last age at which it holds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FixedOrbit {
+    /// The drawn elements.
+    pub(crate) elements: KeplerElements,
+    /// The last age at which they hold: infinite for a pair that never interacts, and the
+    /// engine's start for one it runs, after which the orbit is the engine's.
+    pub(crate) until: Years,
+}
+
+impl FixedOrbit {
+    /// `elements` at every age.
+    #[must_use]
+    pub(crate) const fn always(elements: KeplerElements) -> Self {
+        Self {
+            elements,
+            until: Years::new(f64::INFINITY),
+        }
+    }
 }
 
 /// The largest eccentricity a bound orbit is reported with: plan 14 carries bound orbits from
@@ -199,8 +223,10 @@ impl OrbitPath {
     /// built (a pair of no mass).
     #[must_use]
     fn elements_at(&self, age: f64, total: f64) -> Option<KeplerElements> {
-        if let Some(fixed) = self.fixed {
-            return Some(fixed);
+        if let Some(fixed) = self.fixed
+            && age <= fixed.until.value()
+        {
+            return Some(fixed.elements);
         }
         let a = self.axis.at(age) * SOLAR_RADIUS_M;
         let e = self

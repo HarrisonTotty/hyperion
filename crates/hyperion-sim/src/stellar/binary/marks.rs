@@ -24,11 +24,11 @@ use crate::stellar::draws::StarDraws;
 use crate::stellar::{Composition, StarState};
 use crate::time::CLOCK_WINDOW_H;
 use crate::units::consts::SOLAR_RADIUS_M;
-use crate::units::{SolarMassesPerYear, Years};
+use crate::units::{SolarMassesPerYear, SolarRadii, Years};
 
 use super::params::BinaryParams;
 use super::star::{Member, Path};
-use super::timeline::{BinaryTimeline, Context, OrbitPath, Segment, SegmentKind};
+use super::timeline::{BinaryTimeline, Context, FixedOrbit, OrbitPath, Segment, SegmentKind};
 
 /// The phase a pair is in at its marked age: its kind, the ages it runs between, each star's
 /// state and the orbit then, and during stable transfer the donor's rate.
@@ -224,14 +224,18 @@ fn fixed_orbit(orbit: KeplerElements) -> OrbitPath {
         mean_anomaly: orbit.mean_anomaly_at_epoch(),
         axis: Path::starting(0.0, orbit.semi_major_axis().value() / SOLAR_RADIUS_M),
         eccentricity: Path::starting(0.0, orbit.eccentricity().value()),
-        fixed: Some(orbit),
+        fixed: Some(FixedOrbit::always(orbit)),
     }
 }
 
-/// Both stars held at their marked states.
+/// Both stars held at their marked states. A marked star is never evolved, so nothing reads its
+/// core radius, which is held at zero (P11.T4.g).
 #[must_use]
 fn frozen(stars: [StarState; 2]) -> [Member; 2] {
-    stars.map(|state| Member::Frozen { state })
+    stars.map(|state| Member::Frozen {
+        state,
+        core_radius: SolarRadii::ZERO,
+    })
 }
 
 /// A segment of `kind` over `span` (its first and last ages) holding `members` on `orbit`, at
@@ -376,6 +380,7 @@ impl BinaryTimeline {
                     [
                         Member::Frozen {
                             state: merger.product,
+                            core_radius: SolarRadii::ZERO,
                         },
                         Member::Gone,
                     ],

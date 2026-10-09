@@ -372,7 +372,10 @@ the call sites here change.
    through it, which at hull sizes reaches only the face's own edges. The slope term covers a
    stroke's half-width and its one-pixel antialiasing fringe. Bias is valid only on triangle
    topologies and is never set on a line pass. The adapter carries it as
-   `depthBiasAway { constant: 128, slopeScale: 2 }`, positive meaning away, in one place, because
+   `depthBiasAway { constant: 128, slopeScale: 2 }` (raised to 3 by R07.T16.a; R07.T16.d moves the
+   slope term into the hull's fragment as the sphere's, its magnitude at `occluderSlopePx`, with a
+   constant of 2⁻¹⁶ of the depth and no hardware bias, decision-r07-t16a), positive meaning
+   away, in one place, because
    Babylon's `zOffset` and `zOffsetUnits` are already negated under `useReverseDepthBuffer` and a
    double negation is the likely bug. The occluder is drawn two-sided, so that a winding flip
    between our right-handed matrix and a left-handed engine cannot unhide every hidden line. The
@@ -383,6 +386,8 @@ the call sites here change.
 
    A body's occluder sphere, which writes its own depth (`occluderSphere.wgsl`), takes the same
    slope term in the fragment: its exact ray-sphere depth is pushed away by `SLOPE_SCALE` = 3 px
+   (`occluderSlopePx` since R07.T16.d, which follows the strokes' scale: 3 px at 1, 5 at 2, the
+   scale being at least 2 by decision-thin-line-contrast)
    (w_max ÷ 2 + 1 for a 1.5 px stroke with 1 px casings, rounded up) of the depth's screen slope,
    taken from the tangent plane at the hit point, its magnitude (the gradient's length, not its larger
    component, which falls up to √2 short where the gradient runs diagonally; corrected in RM1
@@ -443,8 +448,11 @@ the call sites here change.
    antialiasing. Every stroke is a segment instance expanded to a screen-space quad in `lines.wgsl`,
    with coverage computed analytically in the fragment shader over the stroke's width plus a pixel,
    depth-tested against the occluders and never writing depth. A cased mark is two strokes of one
-   instance: the casing at the guide's width in `--surface-0`, then the coloured stroke, so that the
-   casing is a solid outline, never a blur (guide, "Graphs, schematics and spatial displays").
+   instance: the casing at the guide's width (the guide's CSS pixels, drawn at the larger of the
+   ratio and 2 device pixels each since R07.T16.d, and a symbology outline at the larger of 1.5 ×
+   the ratio and 2, widened outward; decision-r07-t16a, decision-thin-line-contrast) in
+   `--surface-0`, then the coloured stroke, so that the casing is a solid outline, never a blur
+   (guide, "Graphs, schematics and spatial displays").
    Babylon's GreasedLine has WGSL shaders (checked on its main branch, 2026-09-29), so it would not
    trigger the GLSL fetch, but its widths, casings and dashes would then be the engine's; ours keeps
    them engine-agnostic and testable on the CPU through the draw list. Dashes are reserved for
@@ -532,7 +540,10 @@ the call sites here change.
     graticule at 15° (30° below 64 px), its equator and prime meridian a step heavier; 3 to 8 px:
     its limb circle only; below 3 px: its symbol from the ship-wide set (planet, moon or star),
     labelled as a mark. The 3 px boundary is the brainstorm's point regime; the 8 px one is where 12
-    graticule lines stop being lines. Graticule and limb are generated in `f64`, camera-relative,
+    graticule lines stop being lines. _Since R07.T16.g the 8 and 64 px thresholds are multiplied by
+    the view's line scale, 16 and 128 device px up to a ratio of 2, so that the gaps stand to the
+    2 px lines as built; the 3 px one stays in device px, the image's point regime
+    (decision-r07-t16d-followups)._ Graticule and limb are generated in `f64`, camera-relative,
     subdivided until each chord's sagitta is under 0.25 px, so a body 400 km below the camera has a
     true horizon rather than a polygon's. Rings are their ellipses, inner and outer edge with radial
     ticks every 10°, as the orbit map draws them.
@@ -962,7 +973,8 @@ point, a moon at 10⁸ m and a planet at 1 au in one frame, with a scripted came
 translates and rotates. Tests: along the path every mark's projection moves smoothly, with no step
 larger than 0.1 px beyond the path's own motion between consecutive frames; the plate, the moon and
 the planet are pairwise separable in depth by Design note 5; the plate's hidden edges are hidden by
-its faces.
+its faces. _R07.T16.e makes the plate a window, which hides nothing; these tests move to the hull's
+opaque faces (decision-r07-t16a, item 3)._
 
 **R02.T11.c The frame-change scene.** `frameChangeScene()`: a planet with a hand-set rotation, a
 moon inside its Hill sphere, a landmark on the planet and a grounded test craft, with a camera path
@@ -980,8 +992,8 @@ this scene.
 sagitta in `f64`, analytic hemisphere visibility, the limb), `ringEllipse`.
 
 - Tests: a body 400 km below the camera has a limb within 0.25 px of the true horizon circle; no
-  graticule point on the far hemisphere is emitted; the regime changes at 3 and 8 px; a rotated
-  body's prime meridian follows its rotation.
+  graticule point on the far hemisphere is emitted; the regime changes at 3 and 8 px (8 × the line
+  scale since R07.T16.g); a rotated body's prime meridian follows its rotation.
 
 **R02.T12.b Orbits, hulls and culling.** `orbitPath` from `lib/orbit.ts`'s propagation, sampled by
 screen-space error rather than a fixed count; `hullEdges`; the frustum and limb culling predicates
@@ -1025,9 +1037,10 @@ camera-relative. It reads colours through plan 05's `readTokens` names, never li
 with the depth state of Design note 4 (`greater-equal`, no write).
 
 **R02.T14.b Occluders and sprites.** `occluder.wgsl` (depth-only, colour writes off, two-sided; the
-hull variant with `depthBiasAway { constant: 128, slopeScale: 2 }` of Design note 5, never on a line
-pass) and `starSprite.wgsl` (PSF weights and `agx`, additive in linear light through the sRGB view
-R01 provides, depth-tested, no write).
+hull variant with `depthBiasAway { constant: 128, slopeScale: 2 }` of Design note 5 (raised to 3 by
+R07.T16.a, then moved into the fragment by R07.T16.d), never on a line pass) and `starSprite.wgsl`
+(PSF weights and `agx`, additive in linear light through the sRGB view R01 provides, depth-tested,
+no write).
 
 **R02.T14.c Smoke on SwiftShader.** In R01's headless harness, render the first frame of each kept
 scene, the precision scene and the frame-change scene, and read each back: every texel finite; the
@@ -1348,6 +1361,13 @@ current)` over `CameraFrameCandidate { id, parent, distanceM, hillRadiusM }` (bu
   line, written `STARS <n> DRAWN · <m> WITHOUT V · RADII <e>/<d>/<c>/<a>` with the list's
   placeholder convention; the `SYSTEM BARYCENTRIC`, `BODY` and `GALACTIC` frame rows gain the
   view's use, marked `(R02.T2.f draft)`. Design notes 6, 7 and 11 carry decisions 16, 13 and 15.
+  These rows, with R02.T15's and R02.T17's, were signed off with amendments on 2026-10-05 under
+  the owner's delegation (decision-r07-owner-ux-signoff; built by R07.T19.d). The amendments:
+  `INHIBIT` held back under the operator's own inhibit, and `ENABLE` "sets" `AUTO`;
+  `NO IMAGE TO METER`'s meaning since the instrument views, and "who inhibited it, or why";
+  `ROTATION: NOT YET MODELLED`, in the composed form; `CAMERA REPORT REJECTED` and
+  `CAMERA REPORT TIMED OUT`, the ship's request outcomes; the count line's `ly`; the scene rows'
+  "the ship's system"; `STYLES`; and the test designations in one row.
 - **Deviations in R02.T7.a, as built.** `Quaternion` operations are in `view/camera/quaternion.ts`
   (`quaternion`, `IDENTITY_QUATERNION`, `quaternionFromAxisAngle`, `multiply`, `conjugate`,
   `rotate`, `rotationRows`). Matrices are `Float32Array`s in WGSL's column-major order:
@@ -1414,7 +1434,10 @@ reducedMotion, scene)` returns `{ state, change }`: it integrates whole ticks of
   commands are functions returning `ExposureCommandResult` (`setManual`, refused with
   `invalid_triple`; `setAuto`, refused with `no_image_to_meter`; `inhibit`, refused under `MAN`
   with `not_automatic`; `enable`, refused outside `INHIBITED`), and `onMetering(control, ev100 |
-null)` applies a source's report. An operator's `INHIBIT` also takes over a system inhibit, which
+null)` applies a source's report (_R07.T16.b changes these: a second system inhibit,
+  `nothing_weighed` with its meter, `setAuto`'s refusal `not_metered`, and `onMetering` taking
+  `number | SystemInhibitCause`; see R07's "Deviations in T16.b, as built"_). An operator's
+  `INHIBIT` also takes over a system inhibit, which
   then no longer resumes by itself (Design note 11 does not cover the case; the lean is the
   operator's intent). Decided 2026-09-30 (delegated decision): as built, now in Design note 11 and
   the guide. `controlEv100` and `exposureLevelReading` go with them. `ExposureTriple` keeps the
@@ -1438,9 +1461,13 @@ null)` applies a source's report. An operator's `INHIBIT` also takes over a syst
   a non-finite vertex or an index that is not an integer within the vertices. `TEST_HULL` (in
   `view/scene/hull.ts`) is a 20 m wedge with its eye point above the forward section, outside the
   faces as an open cockpit's is, so that the hull's occluder never encloses the seat camera; its
-  1 m plate is a windscreen `TEST_PLATE_DISTANCE_M` = 1 m forward of the eye, facing it. In
+  1 m plate is a windscreen `TEST_PLATE_DISTANCE_M` = 1 m forward of the eye, facing it.
+  _R07.T16.e makes the plate `TEST_HULL`'s one window (`HullOutline.windows`), left out of the
+  occluder in both styles (decision-r07-t16a, item 3)._ In
   `view/scene/model.ts`: `ViewBody` also carries `kind` (`star`, `planet`, `moon`, for Design note
-  13's symbol), `designation` and `centreM` (system-frame metres); `ViewRing` carries its plane's
+  13's symbol), `designation` and `centreM` (system-frame metres; _R07.T10.a adds `retarded`, its
+  `RetardedCentre` for lighting, `staticRetarded(centreM)` in a kept scene, `null` for a
+  contact_); `ViewRing` carries its plane's
   `normal`, so that a ring does not hang on a rotation that may be `null`; `ViewOrbit` is
   `{ body, parent, orbit: KeplerOrbit }`; `ViewCraft` has `designation`, `pose: CraftPose
 { position, attitude }`, `predictedPath` and `velocityMPerS` (the own ship's flight path marker,
@@ -1544,7 +1571,9 @@ lowSetting, ev100, selection, destination, remPx }`, carries what the tests and 
   `exposureScale(ev100)` × `starColour`, per unit of point-spread weight) and `illuminanceLx`;
   sprites are sorted by flux (ties by ID), culled half a quad outside the view and capped at 2,000
   at the low setting; `preExpose` is not used, the wireframe having no half-float target.
-  `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts`. Bodies are culled by `sphereInFrustum` on
+  `HULL_OCCLUDER_BIAS` (128, 2) lives in `drawList.ts` (raised to (128, 3) by R07.T16.a, which
+  cases hull edges over the photorealistic image; replaced by `occluderSlopePx` and the shader's
+  constant in R07.T16.d). Bodies are culled by `sphereInFrustum` on
   their radius, orbits on a(1 + e) about their focus, craft on their hull's length. A ring counts as
   selected when its planet is (`ViewRing` has no identity of its own).
 - **R02.T13's follow-up, target marks (decided 2026-09-30, delegated decision 11).** Other craft's
@@ -1924,3 +1953,11 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   `just place-ship` (R03.T6's note) places the stand-in so that the nose has a body ahead: by
   default at rest in the first planet's frame, 0.01 au behind it along its orbital velocity, which
   live put planet `/256` of FPF 1Z0P1Z D-35 at 1.50 Gm in the centre of the frame.
+- **Off-view occluder spheres, and the off-view test at R02's level (R07.T19.e, 2026-10-06; a
+  pointer from R07).** `packWireframe` now packs no occluder sphere wholly beyond a side plane of
+  the view widened by `OUTSIDE_VIEW_MARGIN_PX`, 8 px (`sphereOutsideView`), where
+  `sphereScreenRect` gave a sphere behind the camera or across its plane the whole view, each
+  fragment rejecting itself. The sphere writes depth only where a pixel centre's ray meets it, so
+  nothing it wrote is lost. `sphereOutsideView` and `OUTSIDE_VIEW_MARGIN_PX` moved from R07's
+  `bodies/regime.ts` into `wireframe/submit.ts`, beside `sphereScreenRect`, for R06's host discs
+  and R07's lit bodies as well. Recorded in R07's Risks, "Deviations in T19.e, as built".

@@ -21,7 +21,7 @@ use std::fmt;
 pub struct GeneratorVersion(u32);
 
 /// The version of the generator in this build. Starts at 1.
-pub const GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new(19);
+pub const GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new(21);
 
 impl GeneratorVersion {
     /// Wraps a version number, for instance one read from a save.
@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn the_current_version_is_supported_and_others_are_not() {
         assert!(GENERATOR_VERSION.is_supported());
-        assert_eq!(GENERATOR_VERSION.get(), 19);
+        assert_eq!(GENERATOR_VERSION.get(), 21);
         assert!(!GeneratorVersion::new(0).is_supported());
         assert!(!GeneratorVersion::new(GENERATOR_VERSION.get() + 1).is_supported());
     }

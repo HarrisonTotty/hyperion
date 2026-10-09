@@ -2385,3 +2385,34 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     saturates in place (ruling 125's device; plan 09's "The joint revision as built" for the
     over-seed figures). The centre's projected isophote ratio still misses beyond 6 ly (144.7's
     optional k(E) is not built), and under Kroupa's function 3.4 systems lie inside 10⁻³ ly.
+- **P02.T8.a's tightness check at its rounding floor (P11.T4.h, 2026-10-04).**
+  `envelopes_never_exceed_their_bounds` allows the exponent's rounding (4 |ln corner| ε) and, for a
+  disc, 2⌈n0⌉ subnormal units in its tightness half; safety stays exact and `bounds.rs` is
+  untouched. See plan 09's and plan 11's Risks ("P11.T4.h as built").
+- **The local V light is low (a pointer from rendering plan R06, 2026-10-06,
+  `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Nothing in the
+  model is fitted to light, so the local V light is a prediction. This plan fits number and mass,
+  both without brown dwarfs: n☉ is 0.00205 per ly³, against Kirkpatrick et al.'s 0.00193; ρ★ is
+  0.0417 M☉ pc⁻³, against McKee et al.'s 0.0415; Σ★ is 30.5 M☉ pc⁻², against McKee's 32.2 and
+  Flynn's 33.2, chosen low by P02.T11 for the inner galaxy. R06's probe of the fixture near the Sun
+  (R06's Risks, "The galaxy's local light is low"):
+  - The local V light is 0.0417 L☉ pc⁻³, against Flynn et al. 2006 (MNRAS 372, 1149, §2.3)'s
+    0.056 ± 10%: −26%. The deficit is uniform across magnitudes: in both, the stars brighter than
+    M_V −1 carry 20%. So it is not a missing young bright end. It is light per unit mass in the
+    turnoff stars and clump giants (M_V 4 to 0), which Flynn finds dominant. The volume's (M/L)_V
+    is 1.00, against 0.75 ± 15%.
+  - The column's light is 19.2 against 24.4 L☉ pc⁻²: −21%, 0.26 mag. About 8 points of that are
+    Σ★ and about 14 the light per unit mass ((M/L)_V 1.59 against 1.36, both without brown
+    dwarfs). It accounts for R06's band being 0.29 mag fainter than Gaia DR3 at the galactic
+    poles.
+
+  A calibration finding for plans 02 and 06 (and plan 11 for the pair light). For their owner:
+  - Compare the fixture's local luminosity function Φ(M_V), main sequence and giants separately,
+    with Hipparcos/CNS (Flynn et al.'s Fig. 2; Golovin et al. 2023's CNS5). That finds which of
+    these is low: the SFH (a 7 Gyr timescale, with the present rate half the past average); the
+    young disc's height; Chabrier's scale; the tracks' turnoff and clump light.
+  - Add a local V light row to T11's brackets: 0.056 ± 0.006 L☉ pc⁻³ and 24.4 L☉ pc⁻² (or (M/L)_V
+    0.75 and 1.4–1.5, ±15%), so that light is calibrated as number and mass are.
+
+  A fix is a `GENERATOR_VERSION` change here. R06's near-Sun tests carry the offset meanwhile, and
+  if the light is raised they recentre towards their references, with nothing to re-rule.

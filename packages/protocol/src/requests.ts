@@ -74,6 +74,24 @@ export type BulkOutcome<K extends RequestKind> =
     }
   | { readonly ok: false; readonly error: RequestFailure };
 
+/**
+ * One answer before the last of a request answered in parts: a whole answer, its response with its
+ * payload's chunks in order, which a later answer replaces (rendering plan R06, R06.T11.d).
+ */
+export interface PartialBulkAnswer<K extends RequestKind> {
+  readonly response: ResponseFor<K>;
+  readonly chunks: ReadonlyArray<Uint8Array>;
+}
+
+/** How {@link RequestClient.requestBulk} hands over a request's answers before its last. */
+export interface BulkRequestOptions<K extends RequestKind> {
+  /**
+   * Sees each `partial_response` with its chunks, in the order sent, before the outcome settles
+   * with the last answer. Without it, answers before the last are dropped.
+   */
+  readonly onPartial?: (answer: PartialBulkAnswer<K>) => void;
+}
+
 /** A request answered in bulk, in flight. */
 export interface PendingBulkRequest<K extends RequestKind> {
   /** Settles exactly once with the request's outcome, and never rejects. */
@@ -126,6 +144,8 @@ type CancelReason = "aborted" | "superseded";
 interface InFlight {
   /** Settles the outcome with the server's response, checking its kind first. */
   readonly respond: (response: ResponseBody) => void;
+  /** Takes an answer before the last, for a request answered in parts. */
+  readonly partial: ((response: ResponseBody) => void) | undefined;
   /** Settles the outcome with a failure. */
   readonly fail: (failure: RequestFailure) => void;
   /** What to do with a response that arrives after the request was cancelled. */
@@ -138,6 +158,8 @@ interface StartOptions {
   readonly onAnswer?: (response: ResponseBody) => void;
   /** Sees a response that arrives after the request was cancelled. */
   readonly onLateAnswer?: (response: ResponseBody) => void;
+  /** Sees each `partial_response` while the request is in flight. */
+  readonly onPartial?: (response: ResponseBody) => void;
   /** Whether binary chunks answering the request are collected until its response. */
   readonly bulk?: boolean;
 }
@@ -258,16 +280,48 @@ export class RequestClient {
    * manifest that disagrees with what arrived fails it as `internal` too. A failure or
    * cancellation drops every chunk the request had.
    *
+   * A request answered in parts (`sky`, rendering plan R06, R06.T11.d) gets each answer before its
+   * last as a `partial_response`, its chunks before it, numbered from 0 for each answer. Each is
+   * checked against its own manifest as the last is and handed to `options.onPartial` whole; one
+   * that disagrees with its chunks, or answers with another kind, fails the request as the last
+   * would and cancels it on the server.
+   *
    * @param manifestOf - Reads the manifest from the response, or `null` for a response that
    *   carries no bulk (such as R09's `not_modelled`), which must then have had no chunks.
    */
   requestBulk<K extends RequestKind>(
     body: RequestOf<K>,
     manifestOf: (response: ResponseFor<K>) => BulkManifestDto | null,
+    options: BulkRequestOptions<K> = {},
   ): PendingBulkRequest<K> {
     let assembled: AssembledBulk | undefined;
     const started: StartedRequest<K> = this[startRequest](body, {
       bulk: true,
+      onPartial: (response) => {
+        if (!answers(body, response)) {
+          this.#abandon(started.id, {
+            code: "protocol_violation",
+            message: `the server answered a ${body.kind} request in part with ${response.kind}`,
+          });
+          return;
+        }
+        let partial: AssembledBulk;
+        try {
+          partial = this.#bulk.finish(started.id, manifestOf(response));
+        } catch (error: unknown) {
+          partial = {
+            ok: false,
+            message: `the ${body.kind} partial response's manifest could not be read: ${String(error)}`,
+          };
+        }
+        if (!partial.ok) {
+          this.#abandon(started.id, { code: "internal", message: partial.message, field: null });
+          return;
+        }
+        // The next answer's chunks are numbered from 0 again.
+        this.#bulk.expect(started.id);
+        options.onPartial?.({ response, chunks: partial.chunks });
+      },
       onAnswer: (response) => {
         try {
           assembled = answers(body, response)
@@ -379,11 +433,12 @@ export class RequestClient {
   }
 
   /**
-   * Settles the request a `response` or `request_error` ends, and routes a `notification` to its
-   * subscription.
+   * Settles the request a `response` or `request_error` ends, hands a `partial_response` to its
+   * request, and routes a `notification` to its subscription.
    *
    * @remarks
    * An answer to an unknown or cancelled ID is dropped: a cancelled request has already settled.
+   * So is a `partial_response` for a request that takes none.
    * So is a notification or a `subscription_ended` for a subscription this client does not have,
    * whether it has ended or was never opened (rendering plan R03, Design note 1).
    *
@@ -402,6 +457,9 @@ export class RequestClient {
         }
         break;
       }
+      case "partial_response":
+        this.#inFlight.get(message.id)?.partial?.(message.body);
+        break;
       case "request_error":
         this.#bulk.discard(message.id);
         this.#take(message.id)?.fail(message.error);
@@ -470,7 +528,7 @@ export class RequestClient {
     body: RequestOf<K>,
     options: StartOptions = {},
   ): StartedRequest<K> {
-    const { onAnswer, onLateAnswer, bulk = false } = options;
+    const { onAnswer, onLateAnswer, onPartial, bulk = false } = options;
     const id = this.#allocateId();
     if (bulk) {
       this.#bulk.expect(id);
@@ -491,6 +549,7 @@ export class RequestClient {
                 },
           );
         },
+        partial: onPartial,
         fail: (error) => {
           resolve({ ok: false, error });
         },

@@ -1,0 +1,26 @@
+# One of the colour table's five reddening tables (rendering plan R06, R06.T9.e; decided
+# 2026-10-06, `decision-r06-t9b-band.md`, item 3 and its addendum): every band's secant at A_V
+# 7.5, the node ruled the same day for the camera term between 5 and 10,
+# from the same model spectra on the same grids as `star_colour`. The parameters are constants of
+# `src/tasks/star_colour/mod.rs` and `columns.rs` and the sim's `REDDENING_A_V_NODES`, recorded
+# here so that the inputs hash covers them; the task refuses a manifest that disagrees with its
+# code.
+task = "star_colour_reddening_av07p5"
+datasets = [
+    "atlas9_ck04",
+    "bessell_murphy_2012",
+    "cie_cmf",
+    "green2008_si",
+    "phoenix_husser2013",
+    "tlusty_ostar2002",
+    "tmap",
+    "wd_koester_da",
+]
+
+[params]
+spectra = "models"
+v_band = "bessell_murphy_2012"
+bins_nm = [360, 1100]
+normal_log_g = [0.0, 6.0]
+white_dwarf_log_g = [6.5, 9.5]
+a_v_nodes = [2.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0]

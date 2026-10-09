@@ -19,9 +19,10 @@ pub use population::{
     PopulationDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto,
 };
 pub use record::{
-    BeltKindDto, BodyDetailDto, BodyHooksDto, BodyKindDto, BodyRecordDto, BodyStateDto,
-    BodySummaryDto, BodySurfaceDto, BulkPropertiesDto, DestructionCauseDto, MassFractionsDto,
-    MoonOriginDto, PlanetClassDto,
+    BandsDto, BeltKindDto, BodyDetailDto, BodyFigureDto, BodyHooksDto, BodyKindDto,
+    BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
+    BodySurfaceDto, BulkPropertiesDto, DestructionCauseDto, FigureDatumDto, FigureLawDto,
+    MassFractionsDto, MoonOriginDto, PhaseTemplateDto, PlanetClassDto, SpinResonanceDto,
 };
 pub use requests::{
     BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
@@ -51,9 +52,10 @@ pub enum DetailLevelDto {
     Contact,
     /// Its mass and orbit only.
     MassAndOrbit,
-    /// Its bulk: radius, density, class and equilibrium temperature.
+    /// Its bulk: radius, density, class and equilibrium temperature, and its rotation, figure and
+    /// photometry (P14.T46.f, T47.d).
     Bulk,
-    /// Its surface: atmosphere, surface conditions, rotation and global figures.
+    /// Its surface: atmosphere and surface conditions.
     Surface,
     /// Everything, the hooks included: detail seed, composition, habitability and resources.
     Full,

@@ -248,7 +248,46 @@ describe("body_detail", () => {
       rings: asListed.rings,
       population: asListed.population,
       bulk: asListed.bulk,
+      rotation: asListed.rotation,
+      figure: asListed.figure,
+      photometry: asListed.photometry,
     });
+  });
+
+  it("decodes a body's frame, figure and photometry", () => {
+    const [earth] = response("system_bodies_response", "system_bodies").bodies;
+    if (earth?.rotation === undefined || earth.figure === undefined) {
+      throw new Error("the slice's Earth lost its frame or figure");
+    }
+    if (earth.photometry === undefined) {
+      throw new Error("the slice's Earth lost its photometry");
+    }
+    const rotation = okValue(earth.rotation);
+    const figure = okValue(earth.figure);
+    const photometry = okValue(earth.photometry);
+
+    expect(rotation.equator_node).toEqual([1, 0, 0]);
+    expect(rotation.locking_age_s).toBeNull();
+    expect(rotation.locks_at).toBeNull();
+    expect(rotation.resonance).toBe("synchronous");
+    expect(figure.pole).toEqual(rotation.pole);
+    expect(figure.equatorial_radius_m).toBe(6_378_137);
+    expect(figure.law).toBe("rotational");
+    expect(figure.datum).toBe("solid_surface");
+    expect(photometry.phase_template).toBe("earth");
+    expect(photometry.geometric_albedo.b).toBe(0.263);
+    expect(photometry.provisional).toBe(false);
+  });
+
+  it("decodes a body from an older server, which sends no frame, figure or photometry", () => {
+    // The slice's giant keeps the form a server before P14.T46.f sent.
+    const [, giant] = response("system_bodies_response", "system_bodies").bodies;
+    if (giant === undefined) {
+      throw new Error("the slice's system lost its giant");
+    }
+
+    expect("rotation" in giant || "figure" in giant || "photometry" in giant).toBe(false);
+    expect(okValue(giant.bulk).class).toBe("gas_giant");
   });
 
   it("withholds the bulk of a mass-and-orbit record, and carries no value of it", () => {
@@ -257,8 +296,20 @@ describe("body_detail", () => {
 
     expect(detail.granted).toBe("mass_and_orbit");
     expect(detail.record.bulk).toEqual({ state: "not_resolved" });
+    expect([detail.record.rotation, detail.record.figure, detail.record.photometry]).toEqual([
+      { state: "not_resolved" },
+      { state: "not_resolved" },
+      { state: "not_resolved" },
+    ]);
     expect(okValue(detail.record.mass_kg)).toBeGreaterThan(0);
-    for (const key of ["radius_m", "equilibrium_temperature_k", "mass_fractions"]) {
+    for (const key of [
+      "radius_m",
+      "equilibrium_temperature_k",
+      "mass_fractions",
+      "pole",
+      "obliquity_rad",
+      "geometric_albedo",
+    ]) {
       expect(text).not.toContain(key);
     }
   });
@@ -279,6 +330,11 @@ describe("body_detail", () => {
     expect(granted).toBe("contact");
     expect(record.kind).toEqual({ type: "unresolved" });
     expect(new Set(sections.map((section) => section.state))).toEqual(new Set(["not_resolved"]));
+    expect([record.rotation, record.figure, record.photometry]).toEqual([
+      { state: "not_resolved" },
+      { state: "not_resolved" },
+      { state: "not_resolved" },
+    ]);
     expect(record.parent).toEqual({ type: "star", body_index: 0 });
     expect(record.state).toEqual({ type: "present" });
     expect(record.position_m).toHaveLength(3);

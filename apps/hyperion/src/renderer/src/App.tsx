@@ -9,6 +9,9 @@ import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
 import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
+import { ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { ViewsProbe } from "./displays/view/check/viewsProbe";
+import type { ViewEngineSource } from "./displays/view/useViewEngine";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
 import type { SystemPlace } from "./lib/scene/model";
@@ -17,6 +20,7 @@ import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
+import type { QualitySetting } from "./view/quality/qualitySetting";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -25,6 +29,12 @@ interface DisplayInputs {
   readonly serverUrl: string;
   readonly systemOpening: SystemOpening | null;
   readonly openSystem: (target: SystemTarget) => void;
+  /** `VIEW`'s engine on a `--views-check` launch (R07.T20), else `null`. */
+  readonly checkedView: { readonly engineSource: ViewEngineSource } | null;
+  /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
+  readonly setting: QualitySetting;
+  /** The platform the client runs on, whose primary modifier `VIEW`'s rate chord takes (R07.T19.f). */
+  readonly platform: string;
 }
 
 function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
@@ -38,7 +48,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
             clientVersion={__APP_VERSION__}
             connection={inputs.connection}
           />
-          <GraphicsPanel />
+          <GraphicsPanel setting={inputs.setting} />
         </>
       );
       break;
@@ -49,7 +59,13 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       content = <SystemDisplay opening={inputs.systemOpening} />;
       break;
     case "view":
-      content = <ViewDisplay />;
+      content = (
+        <ViewDisplay
+          engineSource={inputs.checkedView?.engineSource}
+          setting={inputs.setting}
+          platform={inputs.platform}
+        />
+      );
       break;
   }
   return content;
@@ -79,6 +95,9 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * display state, and switches to the display. The callback is stable, so the memoised `GALAXY`
  * display is not rendered again for it.
  *
+ * `VIEW` and the `LINK` display's `Graphics` panel take the launch's quality setting (`--setting`,
+ * R07.T17), which holds for the run.
+ *
  * The header strip's `TRAINING` banner stands while `VIEW` is shown drawing a kept test scene, and
  * not over the server's scene (R02.T17; the guide's training banner): `ViewSceneProvider` holds the
  * display's scene and its `SCENE` choice above the frame, so the banner is computed during render
@@ -90,7 +109,12 @@ export function App() {
   const connection = useServerConnection(serverUrl, __APP_VERSION__);
   useSurfaceModuleCheck(connection.serverGeneratorVersion);
   const link = useServerLinkValue(connection);
-  const [activeDisplay, setActiveDisplay] = useState<DisplayId>("link");
+  const viewsCheck = window.hyperion.viewsCheck;
+  // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20).
+  const [probe] = useState(() => (viewsCheck === undefined ? null : new ViewsProbe()));
+  const [activeDisplay, setActiveDisplay] = useState<DisplayId>(
+    viewsCheck === undefined ? "link" : "view",
+  );
   const [systemOpening, setSystemOpening] = useState<SystemOpening | null>(null);
   useDisplayKeys(DISPLAYS, setActiveDisplay);
   const openSystem = useCallback((target: SystemTarget): void => {
@@ -119,9 +143,15 @@ export function App() {
     serverUrl,
     systemOpening,
     openSystem,
+    checkedView: viewsCheck === undefined || probe === null ? null : { engineSource: probe.source },
+    setting: window.hyperion.setting,
+    platform: window.hyperion.platform,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
+      {viewsCheck === undefined || probe === null ? null : (
+        <ViewsCheckRunner api={viewsCheck} probe={probe} />
+      )}
       <ServerLinkContext value={link}>
         <UniverseProvider>
           <ViewSceneProvider active={activeDisplay === "view"} knownSystem={knownSystem}>

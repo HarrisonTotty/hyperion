@@ -2,5 +2,15 @@
 channel = "1.98.1"
 components = ["rustfmt", "clippy"]
 # The two WebAssembly targets the determinism checks run (`just test-wasm-fast`): wasm32-wasip1
-# under wasmtime, and wasm32-unknown-unknown, the client's, under wasm-bindgen-test.
-targets = ["wasm32-wasip1", "wasm32-unknown-unknown"]
+# under wasmtime, and wasm32-unknown-unknown, the client's, under wasm-bindgen-test. Then the three
+# platforms HYPERION runs on, Linux, macOS on Apple silicon and Windows, for `just cross-clippy`
+# (part of `just ci`), which runs Clippy for those other than the host, so that code gated to one
+# platform is linted on every platform from any of them. Clippy needs only their standard
+# libraries, which rustup installs from this list; the host's own is installed already.
+targets = [
+    "wasm32-wasip1",
+    "wasm32-unknown-unknown",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]

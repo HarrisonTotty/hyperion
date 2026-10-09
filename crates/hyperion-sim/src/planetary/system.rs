@@ -98,7 +98,11 @@ use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
 use crate::planetary::context::{SystemContext, XuvHistory};
-use crate::planetary::derive::atmosphere::{VolatileDraws, VolatileInventory};
+use crate::planetary::derive::atmosphere::{
+    Atmosphere, SurfaceMaterial, VolatileDraws, VolatileInventory,
+};
+use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
+use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
 use crate::planetary::derive::rotation::{BodyRotation, ObliquityLaw, SpinDraws, SpinInputs};
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, HabitableZone, HostLight, Illumination, MassFractions, PlacedBody,
@@ -108,6 +112,7 @@ use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
 use crate::planetary::error::ResolveBodyError;
 use crate::planetary::fate::{BodyFate, BodyState, FateBody, FateHost, ScatterDraws};
+use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
@@ -259,6 +264,9 @@ pub struct Body {
     index: BodyIndex,
     host: OrbitHost,
     part: Part,
+    /// The rotation law, derived once by [`generate`] and held (P14.T46.b); `None` for a ring,
+    /// for a body not present at [`parent_time`], and for every body [`generate_planets`] makes.
+    rotation: Option<BodyRotation>,
 }
 
 /// What a [`Body`] is, with the primordial state of its kind.
@@ -355,6 +363,7 @@ impl Body {
                 volatiles: VolatileDraws::for_body(seed, id),
                 fate,
             }),
+            rotation: None,
         }
     }
 
@@ -380,6 +389,7 @@ impl Body {
                 belt: belt.index(),
                 fate,
             }),
+            rotation: None,
         }
     }
 
@@ -394,6 +404,7 @@ impl Body {
                 parent: *parent,
                 orbit: satellite.orbit_at(parent, Years::new(0.0)),
             }),
+            rotation: None,
         }
     }
 
@@ -404,6 +415,7 @@ impl Body {
             index: ring.index(),
             host: OrbitHost::Body(planet),
             part: Part::Ring(ring),
+            rotation: None,
         }
     }
 
@@ -546,6 +558,42 @@ impl Body {
         }
     }
 
+    /// The record's rotation section (P14.T46.b): the held law's frame, or
+    /// [`Section::NotModelled`] where none is held. The caller gives a body not present, a ring,
+    /// a belt and the halo [`Section::NotApplicable`].
+    #[must_use]
+    fn rotation_section(&self) -> Section<BodyFixedFrame> {
+        self.rotation.map_or(Section::NotModelled, |rotation| {
+            Section::Ok(*rotation.frame())
+        })
+    }
+
+    /// The record's figure section at `t` (P14.T46.d): the figure of the body's held rotation at
+    /// `t` on its bulk `bulk` and mass `mass` then, or [`Section::NotModelled`] where either is
+    /// missing. The caller gives a body not present, a ring, a belt and the halo
+    /// [`Section::NotApplicable`].
+    #[must_use]
+    fn figure_section(
+        &self,
+        bulk: Option<&BulkProperties>,
+        mass: EarthMasses,
+        t: UniverseTime,
+    ) -> Section<BodyFigure> {
+        let (Some(rotation), Some(bulk)) = (self.rotation, bulk) else {
+            return Section::NotModelled;
+        };
+        let frame = rotation.frame();
+        Section::Ok(BodyFigure::derive(&FigureInputs {
+            radius: Metres::from(bulk.radius()),
+            mass: Kilograms::from(mass),
+            class: bulk.class(),
+            fractions: bulk.fractions(),
+            rate: frame.rate().rate_at(t),
+            state: frame.state_at(t),
+            pole: frame.pole(),
+        }))
+    }
+
     /// The bytes the body owns on the heap: a ring's gaps.
     #[must_use]
     fn heap_bytes(&self) -> usize {
@@ -554,6 +602,29 @@ impl Body {
             Part::Planet(_) | Part::Moon(_) | Part::Member(_) => 0,
         }
     }
+}
+
+/// The photometry of a present body whose bulk is `bulk` and whose last atmosphere pass is
+/// `atmosphere` (P14.T47.c): its surface state with the material of its record's composition,
+/// whose albedo is the state's on that material (P14.T13.c). A moon's and an icy member's
+/// composition is their record's, not the one their derivation assumed.
+#[must_use]
+fn photometry_of(atmosphere: &Atmosphere, bulk: &BulkProperties) -> BodyPhotometry {
+    let fractions = bulk.fractions();
+    let material = SurfaceMaterial::of(&fractions);
+    let state = atmosphere.state();
+    BodyPhotometry::derive(&PhotometryInputs {
+        state,
+        material,
+        surface_pressure: atmosphere.surface_pressure(),
+        cloud_fraction: atmosphere.cloud_fraction(),
+        surface_temperature: atmosphere.surface_temperature(),
+        equilibrium_temperature: bulk.equilibrium_temperature(),
+        surface_gravity: bulk.surface_gravity(),
+        class: bulk.class(),
+        fractions,
+        bond: state.albedo(material),
+    })
 }
 
 /// The density of a sphere of `mass` and `radius`.
@@ -894,6 +965,27 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
     }
     system.satellites = satellites;
     system.bodies.sort_by_key(Body::index);
+
+    // P14.T46.b: each body's rotation law, derived once and held, so that it is the same at every
+    // record time. The pass reads only each body's mass, orbit and bulk at `parent_time` and its
+    // elements then; the records it builds have no rotation yet, which is attached after
+    // (decision-p14-phase-j A2). Each body's law is a pure function of the system without any
+    // law, so the order of the pass changes nothing. The records are one snapshot's, which equals
+    // `body_at` body by body and derives each parent once (decision-p14-phase-j A3).
+    let snapshot = system.snapshot_at(ctx, parent_time(ctx));
+    let rotations: Vec<Option<BodyRotation>> = system
+        .bodies
+        .iter()
+        .map(|body| {
+            let record = snapshot
+                .body(body.index)
+                .expect("a snapshot holds every body of its system");
+            system.derive_rotation(ctx, body, record)
+        })
+        .collect();
+    for (body, rotation) in system.bodies.iter_mut().zip(rotations) {
+        body.rotation = rotation;
+    }
     system
 }
 
@@ -1835,14 +1927,16 @@ impl PlanetarySystem {
         Ok(Some(BodyHooks::new(seed, bulk)))
     }
 
-    /// The rotation of body `index` (P14.T14): its spin, drawn on its own `planet.spin` stream,
-    /// against its orbit, mass, radius and class at the epoch (or, for a system not yet born
-    /// then, at the end of the clock window), about its primary: its host's mass for a planet or a
-    /// dwarf planet, its planet's for a moon.
+    /// The rotation of body `index` (P14.T14), as [`generate`] derived and holds it (P14.T46.b):
+    /// its spin, drawn on its own `planet.spin` stream, against its orbit, mass, radius, class and
+    /// mass fractions at the epoch (or, for a system not yet born then, at the end of the clock
+    /// window), about its primary: its host's mass for a planet or a dwarf planet, its planet's
+    /// for a moon.
     ///
     /// A planet or dwarf planet with a giant-impact moon (P14.T18) takes the isotropic obliquity,
-    /// every other body the Rayleigh one. `None` for a ring, a belt or the halo, and for a body
-    /// not present at that time, such as one destroyed before the epoch.
+    /// every other body the Rayleigh one. `None` for a ring, a belt or the halo, for a body not
+    /// present at that time, such as one destroyed before the epoch, and for every body of a
+    /// system [`generate_planets`] made, which holds no law.
     ///
     /// # Errors
     ///
@@ -1856,12 +1950,27 @@ impl PlanetarySystem {
         ctx: &SystemContext,
         index: BodyIndex,
     ) -> Result<Option<BodyRotation>, ResolveBodyError> {
-        let record = self.body_at(ctx, index, parent_time(ctx))?;
-        let Some(body) = self.body(index) else {
-            return Ok(None);
-        };
+        assert_eq!(
+            ctx.id(),
+            self.system,
+            "a system is queried with the context it was generated from"
+        );
+        label::label(self, index).ok_or(ResolveBodyError::NoSuchBody)?;
+        Ok(self.body(index).and_then(|body| body.rotation))
+    }
+
+    /// The rotation of `body` as [`rotation_of`](Self::rotation_of) describes it, derived from its
+    /// record at [`parent_time`], `record` (P14.T14, P14.T46.b): what [`generate`] holds.
+    #[must_use]
+    fn derive_rotation(
+        &self,
+        ctx: &SystemContext,
+        body: &Body,
+        record: &BodyRecord,
+    ) -> Option<BodyRotation> {
+        let index = body.index;
         let obliquity_law = match body.part {
-            Part::Ring(_) => return Ok(None),
+            Part::Ring(_) => return None,
             Part::Planet(_) | Part::Member(_) if self.had_giant_impact(index) => {
                 ObliquityLaw::Isotropic
             }
@@ -1870,7 +1979,7 @@ impl PlanetarySystem {
         let (Section::Ok(orbit), Section::Ok(bulk), Section::Ok(mass)) =
             (record.orbit(), record.bulk(), record.mass())
         else {
-            return Ok(None);
+            return None;
         };
         // The elements at the time itself, as the derivation reads them, and not the record's,
         // which an evolving orbit states at its drift cell's start (P14.T45.a).
@@ -1893,6 +2002,7 @@ impl PlanetarySystem {
             draws: SpinDraws::for_body(self.seed, index.body_id(self.system)),
             obliquity_law,
             class: bulk.class(),
+            fractions: bulk.fractions(),
             mass,
             radius: Metres::from(bulk.radius()),
             orbit: elements,
@@ -1902,7 +2012,7 @@ impl PlanetarySystem {
         // A present body's record has a positive mass and radius and an orbit about a primary of
         // positive mass, so the derivation refuses nothing the generator makes; a refusal would
         // be a record without a rotation to give, which `None` says.
-        Ok(BodyRotation::derive(&inputs).ok())
+        BodyRotation::derive(&inputs).ok()
     }
 
     /// Whether the planet or dwarf planet `index` has a giant-impact moon (P14.T18).
@@ -2021,18 +2131,25 @@ impl PlanetarySystem {
                 now.derived = Some(derived);
                 now.sky = sky;
                 now.nursery = self.nursery(epoch.ctx, body);
-                let builder = builder.derived(&derived);
-                let builder = match icy_member_bulk(body, &derived) {
-                    Some(bulk) => builder.bulk(Section::Ok(bulk)),
-                    None => builder,
-                };
-                builder.orbit(Section::Ok(section)).position(position)
+                let bulk = icy_member_bulk(body, &derived)
+                    .unwrap_or_else(|| BulkProperties::from(&derived));
+                builder
+                    .derived(&derived)
+                    .bulk(Section::Ok(bulk))
+                    .photometry(Section::Ok(photometry_of(derived.atmosphere(), &bulk)))
+                    .figure(body.figure_section(Some(&bulk), derived.mass(), epoch.t))
+                    .orbit(Section::Ok(section))
+                    .position(position)
+                    .rotation(body.rotation_section())
             }
             BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
                 builder
                     .orbit(Section::NotApplicable)
                     .bulk(Section::NotApplicable)
                     .surface(Section::NotApplicable)
+                    .photometry(Section::NotApplicable)
+                    .figure(Section::NotApplicable)
+                    .rotation(Section::NotApplicable)
             }
         };
         let record = builder
@@ -2102,31 +2219,50 @@ impl PlanetarySystem {
                 .orbit(Section::NotApplicable)
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
-                .hooks(Section::NotApplicable),
+                .hooks(Section::NotApplicable)
+                .photometry(Section::NotApplicable)
+                .figure(Section::NotApplicable)
+                .rotation(Section::NotApplicable),
             (Part::Moon(moon), true, Some(centre)) => {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
                 let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, parent.changes_at);
-                let bulk = Self::moon_bulk(epoch, moon, &orbit, parent);
+                let derived = Self::moon_derived(epoch, moon, &orbit, parent);
+                let bulk = derived
+                    .as_ref()
+                    .map(|derived| (Self::moon_bulk_of(moon, derived, parent), derived));
+                let photometry = bulk.map_or(Section::NotModelled, |(bulk, derived)| {
+                    Section::Ok(photometry_of(derived.atmosphere(), &bulk))
+                });
+                let bulk = bulk.map_or(Section::NotModelled, |(bulk, _)| Section::Ok(bulk));
                 builder
                     .orbit(Section::Ok(
                         BodyOrbit::new(*trajectory.elements(), valid_until)
                             .with_drift(trajectory.drift().copied()),
                     ))
                     .position(centre.translated(trajectory.relative_state_at(t).0))
+                    .figure(body.figure_section(bulk.ok(), body.mass(), t))
+                    .photometry(photometry)
                     .bulk(bulk)
                     .population(Section::NotApplicable)
+                    .rotation(body.rotation_section())
             }
             (Part::Ring(_), _, _) => builder
                 .population(Section::NotApplicable)
                 .orbit(Section::NotApplicable)
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
-                .hooks(Section::NotApplicable),
+                .hooks(Section::NotApplicable)
+                .photometry(Section::NotApplicable)
+                .figure(Section::NotApplicable)
+                .rotation(Section::NotApplicable),
             (Part::Moon(_), _, _) => builder
                 .population(Section::NotApplicable)
                 .orbit(Section::NotApplicable)
                 .bulk(Section::NotApplicable)
-                .surface(Section::NotApplicable),
+                .surface(Section::NotApplicable)
+                .photometry(Section::NotApplicable)
+                .figure(Section::NotApplicable)
+                .rotation(Section::NotApplicable),
             (Part::Planet(_) | Part::Member(_), _, _) => {
                 unreachable!("a satellite is a moon or a ring")
             }
@@ -2134,22 +2270,6 @@ impl PlanetarySystem {
         builder
             .build()
             .expect("a generated record withholds no section and has a known kind")
-    }
-
-    /// The bulk of the present moon `moon` on `orbit` at the epoch's time, whose parent is as
-    /// `parent` says (P14.T17.b): a regular moon's from its own derivation, a giant-impact moon's
-    /// of its own density and a capture's of its own radius, each with the flux and temperature
-    /// of the derivation.
-    #[must_use]
-    fn moon_bulk(
-        epoch: &Epoch<'_>,
-        moon: &MoonPart,
-        orbit: &KeplerElements,
-        parent: &ParentNow,
-    ) -> Section<BulkProperties> {
-        Self::moon_derived(epoch, moon, orbit, parent).map_or(Section::NotModelled, |derived| {
-            Section::Ok(Self::moon_bulk_of(moon, &derived, parent))
-        })
     }
 
     /// The derivation of the present moon `moon` on `orbit` at the epoch's time, whose parent is
@@ -2285,7 +2405,10 @@ impl PlanetarySystem {
             .rings(Section::NotApplicable)
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
-            .hooks(Section::NotApplicable);
+            .hooks(Section::NotApplicable)
+            .photometry(Section::NotApplicable)
+            .figure(Section::NotApplicable)
+            .rotation(Section::NotApplicable);
         let builder = match (at.state(), at.orbit()) {
             (BodyState::Present, Some(now)) => {
                 let expansion = now.semi_major_axis().value() / middle.value();
@@ -2380,6 +2503,9 @@ impl PlanetarySystem {
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
             .hooks(Section::NotApplicable)
+            .photometry(Section::NotApplicable)
+            .figure(Section::NotApplicable)
+            .rotation(Section::NotApplicable)
             .population(now.map_or(Section::NotApplicable, |halo| {
                 Section::Ok(Population::CometaryHalo(halo))
             }))

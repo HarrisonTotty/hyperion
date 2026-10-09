@@ -1,16 +1,18 @@
-import type { ResponseBody, SystemIdHex } from "@hyperion/protocol";
+import type { ResponseBody, SceneSystemDto, SystemIdHex } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { norm, vec3 } from "../../geometry/vec3";
+import { dot, norm, type Vec3, vec3 } from "../../geometry/vec3";
 import { readTokens } from "../../spatial/paint";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import type { FakeView } from "../../test/fakeRenderEngine";
 import { FakeResizeObserver } from "../../test/FakeResizeObserver";
+import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { FIXTURE_SYSTEM } from "../../test/planetaryFixture";
+import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
+import { FIXTURE_EARTH, FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import {
   anOpenedUniverse,
   aStellarBrief,
@@ -26,10 +28,24 @@ import {
   sliceSceneSystem,
 } from "../../test/sceneFixture";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { stylesheetRule } from "../../test/stylesheet";
+import {
+  FULL_VIEW_PX,
+  type LaidOutBoxPx,
+  primaryLabelBlock,
+  renderViewDisplay,
+  shownMarkLabelPx,
+  STAGE_HEIGHT_PX,
+  STAGE_WIDTH_PX,
+  starsReading,
+  stubViewLayout,
+} from "../../test/viewDisplayHarness";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { rotate } from "../../view/camera/quaternion";
-import { fakeViewEngineSource } from "../../test/fakeViewEngine";
+import { type FakeMeteredImage, fakeViewEngineSource } from "../../test/fakeViewEngine";
+import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
+import { requestAdapterOutcome } from "../../view/engine/platform";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
 import { DEFAULT_FOV_DEG } from "../../view/camera/projection";
 import {
@@ -38,10 +54,19 @@ import {
   initialGraphicsStatus,
 } from "../../view/engine/status";
 import type { FrameSubmission } from "../../view/engine/types";
+import { METER_CLASS } from "../../view/post/meter";
 import { precisionScene } from "../../view/scenes/precision";
-import { buildWireframeDrawList } from "../../view/wireframe/drawList";
+import { lineScale } from "../../lib/strokes";
+import {
+  buildWireframeDrawList,
+  CASING_PX,
+  type DrawAnchor,
+  viewStrokesAt,
+} from "../../view/wireframe/drawList";
+import { linearColour } from "../../view/wireframe/submit";
 import type { ViewEngineSource } from "./useViewEngine";
 import { ViewDisplay } from "./ViewDisplay";
+import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
 
@@ -52,10 +77,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function stubLayout(): void {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-    DOMRect.fromRect({ x: 0, y: 0, width: WIDTH_PX, height: HEIGHT_PX }),
-  );
+/**
+ * Lays the stage out at {@link WIDTH_PX} by {@link HEIGHT_PX}, in VIEW's full layout, and the
+ * label block at `blockPx`, by default nothing.
+ */
+function stubLayout(blockPx?: () => LaidOutBoxPx): void {
+  stubViewLayout({ widthPx: WIDTH_PX, heightPx: HEIGHT_PX }, () => FULL_VIEW_PX, blockPx);
 }
 
 interface Setup {
@@ -64,6 +91,8 @@ interface Setup {
   readonly views: () => FakeView[];
   readonly lastFrame: () => FrameSubmission | undefined;
   readonly engines: ReturnType<typeof fakeViewEngineSource>["engines"];
+  /** What the fake engines' photorealistic image holds, as the meter weighs it. */
+  readonly image: FakeMeteredImage;
   readonly socket: FakeWebSocket;
   readonly rerender: (mode: "visible" | "hidden") => void;
   readonly unmount: () => void;
@@ -71,10 +100,17 @@ interface Setup {
 
 /** Renders the display in a provider, with fake frames, layout and engine. */
 function setup(
-  options: { readonly store?: GraphicsStatusStore; readonly source?: ViewEngineSource } = {},
+  options: {
+    readonly store?: GraphicsStatusStore;
+    readonly source?: ViewEngineSource;
+    /** The label block's laid-out box, CSS px from the stage's top left, each time it is measured. */
+    readonly blockPx?: () => LaidOutBoxPx;
+    /** The platform the client runs on (R07.T19.f): Linux's by default. */
+    readonly platform?: string;
+  } = {},
 ): Setup {
   const advanceTimers = fakeFramesAndTimeouts();
-  stubLayout();
+  stubLayout(options.blockPx);
   const fake = fakeViewEngineSource();
   const store = options.store ?? new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
   const source = options.source ?? fake.source;
@@ -87,7 +123,7 @@ function setup(
           <ViewSceneProvider active={mode === "visible"} knownSystem={null}>
             {() => (
               <Activity mode={mode}>
-                <ViewDisplay engineSource={source} />
+                <ViewDisplay engineSource={source} platform={options.platform} />
               </Activity>
             )}
           </ViewSceneProvider>
@@ -113,12 +149,76 @@ function setup(
     views,
     lastFrame: () => views().at(-1)?.frames.at(-1),
     engines: fake.engines,
+    image: fake.image,
     socket,
     rerender: (mode) => {
       view.rerender(tree(mode));
     },
     unmount: view.unmount,
   };
+}
+
+/** A label block laid out as nothing, and one over the whole stage, CSS px. */
+const NO_BLOCK: LaidOutBoxPx = { leftPx: 0, topPx: 0, widthPx: 0, heightPx: 0 };
+const WHOLE_STAGE: LaidOutBoxPx = { leftPx: 0, topPx: 0, widthPx: WIDTH_PX, heightPx: HEIGHT_PX };
+
+/** TEST PLANET's label, found by its name: the labels are hidden from assistive technology. */
+function planetLabel(): HTMLElement | undefined {
+  return screen
+    .getAllByText("TEST PLANET", { exact: false })
+    .find((each) => each.classList.contains("view-marks__label"));
+}
+
+/** The first listed mark's label from the free camera, once the frames after its readout place it. */
+async function freeCameraLabel({ user, advance }: Setup): Promise<HTMLElement | undefined> {
+  await settle();
+  advance(300);
+  await user.keyboard("3");
+  advance(300);
+  const name = screen.getAllByRole("option")[0]?.querySelector(".view-list__name")?.textContent;
+  return screen
+    .getAllByText(name ?? "", { exact: false })
+    .find((each) => each.classList.contains("view-marks__label"));
+}
+
+/**
+ * The display's first frame, the precision scene at its start, and its marks where the draw list
+ * puts them for the same camera and stage.
+ */
+function firstFrameMarks() {
+  const run = stepRun(startRun(precisionScene()), {
+    serverScene: null,
+    dtS: 0,
+    held: new Set(),
+    reducedMotion: false,
+  });
+  const list = buildWireframeDrawList(
+    run.scene,
+    { pose: runPose(run), fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180 },
+    { widthPx: WIDTH_PX, heightPx: HEIGHT_PX },
+    readTokens(document.documentElement),
+    {
+      lowSetting: false,
+      ev100: -1,
+      selection: null,
+      destination: null,
+      remPx: 16,
+      ...viewStrokesAt(1),
+    },
+  );
+  return { run, list };
+}
+
+/** TEST PLANET's mark among a frame's. */
+function planetAnchor({ run, list }: ReturnType<typeof firstFrameMarks>): DrawAnchor {
+  const id = run.scene.bodies.find((body) => body.designation === "TEST PLANET")?.id;
+  const anchor = list.anchors.find(
+    (each) => each.target.kind === "body" && each.target.body === id,
+  );
+  if (anchor === undefined) {
+    throw new Error("TEST PLANET has no mark in the precision scene's first frame");
+  }
+  return anchor;
 }
 
 /** Lets the engine's promises settle. */
@@ -135,10 +235,128 @@ function hullDistanceM(frame: FrameSubmission | undefined): number {
   return o === undefined ? Number.NaN : norm(vec3(o[0] ?? 0, o[1] ?? 0, o[2] ?? 0));
 }
 
+/** The materials of a frame's draws, in their order. */
+function materialNames(frame: FrameSubmission | undefined): string[] {
+  return (frame?.draws ?? []).map((draw) => draw.material.name);
+}
+
+/** A frame's draws of hull faces, each its material and its `fill` uniform (empty for none). */
+function hullFaceDraws(frame: FrameSubmission | undefined): Array<[string, number[]]> {
+  return (frame?.draws ?? [])
+    .filter((draw) => /^wireframe:(occluderHull|hullSilhouette)$/.test(draw.material.name))
+    .map((draw) => [draw.material.name, [...(draw.uniforms["fill"] ?? [])]]);
+}
+
 /** The number of line draws in a frame. */
 function lineDraws(frame: FrameSubmission | undefined): number {
   return frame?.draws.filter((draw) => draw.material.name === "wireframe:lines").length ?? 0;
 }
+
+/** The style panel's buttons: each one's name, whether it is held back and whether it is pressed. */
+function styleButtons(): Array<[string, string | null, string | null]> {
+  return within(screen.getByRole("region", { name: "Style PRIMARY" }))
+    .getAllByRole("button")
+    .map((button) => [
+      button.textContent,
+      button.getAttribute("aria-disabled"),
+      button.getAttribute("aria-pressed"),
+    ]);
+}
+
+/** An engine source whose engine refuses the stage's canvas: the views cannot be made. */
+function refusingViewSource(): ViewEngineSource {
+  const fake = fakeViewEngineSource();
+  return {
+    ...fake.source,
+    load: async (outcome, status) => {
+      const engine = await fake.source.load(outcome, status);
+      engine.createView = () => {
+        throw new Error("the canvas gave no context");
+      };
+      return engine;
+    },
+  };
+}
+
+/** The side column's panels, each by its region's name, in the ruled order. */
+const SIDE_PANELS = [
+  "Instruments",
+  "Targets PRIMARY",
+  "Camera PRIMARY",
+  "Style PRIMARY",
+  "Exposure PRIMARY",
+];
+
+/** Whether each of {@link SIDE_PANELS} stands, and after the one before it in the document. */
+function sidePanelsInOrder(): boolean {
+  const panels = SIDE_PANELS.map((name) => screen.getByRole("region", { name }));
+  return panels.every(
+    (panel, index) =>
+      index === 0 ||
+      ((panels[index - 1]?.compareDocumentPosition(panel) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+  );
+}
+
+const HELD_BACK = [
+  ["WIREFRAME", "true", "true"],
+  ["PHOTOREALISTIC", "true", "false"],
+];
+
+/** Whether both style buttons are described by why no view is drawn. */
+function bothHeldBackByNoView(): boolean {
+  return within(screen.getByRole("region", { name: "Style PRIMARY" }))
+    .getAllByRole("button")
+    .every((button) => {
+      const ids = button.getAttribute("aria-describedby")?.split(" ") ?? [];
+      return ids.some((id) => document.getElementById(id)?.textContent === NO_VIEW_DRAWN);
+    });
+}
+
+describe("VIEW's style panel while no view is drawn (R07.T19.b's follow-up)", () => {
+  it("stands while the engine is made, the camera's style pressed and both held back", () => {
+    setup();
+    expect([styleButtons(), bothHeldBackByNoView()]).toEqual([HELD_BACK, true]);
+  });
+
+  it("stands where the views could not be made, held back with no view drawn", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setup({
+      source: refusingViewSource(),
+    });
+    await settle();
+    expect([screen.queryByRole("application"), styleButtons(), bothHeldBackByNoView()]).toEqual([
+      null,
+      HELD_BACK,
+      true,
+    ]);
+  });
+
+  it("refuses the key 4 where the views could not be made, as its panel says", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { user, advance } = setup({
+      store: await nominalStore(),
+      source: refusingViewSource(),
+    });
+    await settle();
+    await user.keyboard("4");
+    advance(100);
+    expect(styleButtons()).toEqual(HELD_BACK);
+  });
+
+  it("moves no panel when the engine is made", async () => {
+    const { advance } = setup();
+    const pending = sidePanelsInOrder();
+    await settle();
+    advance(100);
+    expect(screen.getByRole("application")).toBeInTheDocument();
+    expect([pending, sidePanelsInOrder()]).toEqual([true, true]);
+    expect(
+      within(screen.getByRole("region", { name: "Style PRIMARY" })).queryByText(NO_VIEW_DRAWN),
+    ).toBeNull();
+  });
+});
 
 describe("the VIEW display", () => {
   it("reads GRAPHICS ACQUIRING ADAPTER in the view's place until its engine is made", () => {
@@ -199,19 +417,9 @@ describe("the VIEW display", () => {
   });
 
   it("says the view could not be made where the engine refuses its canvas", async () => {
-    const fake = fakeViewEngineSource();
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     setup({
-      source: {
-        ...fake.source,
-        load: async (outcome, status) => {
-          const engine = await fake.source.load(outcome, status);
-          engine.createView = () => {
-            throw new Error("the canvas gave no context");
-          };
-          return engine;
-        },
-      },
+      source: refusingViewSource(),
     });
     await settle();
     expect([
@@ -253,9 +461,9 @@ describe("the VIEW display", () => {
     const { advance } = setup();
     await settle();
     advance(100);
-    expect(screen.getByRole("application", { name: "VIEW, WIREFRAME, SEAT" }).tagName).toBe(
-      "CANVAS",
-    );
+    expect(
+      screen.getByRole("application", { name: "VIEW, WIREFRAME, PRIMARY, SEAT" }).tagName,
+    ).toBe("CANVAS");
   });
 
   it("draws no text into its canvas", async () => {
@@ -270,7 +478,7 @@ describe("the VIEW display", () => {
     const { advance } = setup();
     await settle();
     advance(300);
-    const block = screen.getByText("VIEW").parentElement;
+    const block = screen.getByText("VIEW", { selector: "p" }).parentElement;
     expect(block === null ? "" : block.textContent).toMatch(
       /FRAME.*TIME.*UT .*STYLE.*WIREFRAME.*CAMERA.*SEAT.*FOV.*60°.*EXPOSURE.*EV100 -1\.0 MAN.*STARS.*RANGE QUERY.*SCENE.*PRECISION TEST/,
     );
@@ -280,21 +488,7 @@ describe("the VIEW display", () => {
     const { user, advance } = setup();
     await settle();
     advance(16);
-    // The display's first frame is the scene at its start; its marks are where the draw list puts
-    // them for the same camera and viewport.
-    const run = stepRun(startRun(precisionScene()), {
-      serverScene: null,
-      dtS: 0,
-      held: new Set(),
-      reducedMotion: false,
-    });
-    const list = buildWireframeDrawList(
-      run.scene,
-      { pose: runPose(run), fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180 },
-      { widthPx: WIDTH_PX, heightPx: HEIGHT_PX },
-      readTokens(document.documentElement),
-      { lowSetting: false, ev100: -1, selection: null, destination: null, remPx: 16 },
-    );
+    const { run, list } = firstFrameMarks();
     const anchor = list.anchors[0];
     if (anchor === undefined) {
       throw new Error("the precision scene's first frame has no mark in view");
@@ -399,6 +593,7 @@ describe("the VIEW display", () => {
     const rate = screen.getByRole("status", { name: "Free camera rate" });
     expect(rate).toHaveTextContent("RATE 1.00 km/s");
     await user.click(screen.getByRole("application"));
+    await user.keyboard("3");
     await user.keyboard("{PageUp}");
     advance(300);
     expect(rate).toHaveTextContent("RATE 3.16 km/s");
@@ -410,9 +605,7 @@ describe("the VIEW display", () => {
     }
     advance(300);
     expect(rate).toHaveTextContent("RATE 1.00 m/s");
-    expect(
-      screen.getByText("NOT AVAILABLE: PAGE DOWN, RATE at its lowest step"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("NOT AVAILABLE: CTRL+↓, RATE at its lowest step")).toBeInTheDocument();
   });
 
   it("moves a mark's label with its mark every frame, between readouts", async () => {
@@ -436,6 +629,159 @@ describe("the VIEW display", () => {
       [true, true],
     );
   });
+
+  it("shows a mark's label clear of a label block laid out as nothing (R07.T16.i)", async () => {
+    stubMatchMedia(true);
+    const view = setup();
+    expect(await freeCameraLabel(view)).toBeVisible();
+  });
+
+  it("hides a mark's label whole under a label block laid out over the whole stage (R07.T16.i)", async () => {
+    stubMatchMedia(true);
+    const view = setup({ blockPx: () => WHOLE_STAGE });
+    expect(await freeCameraLabel(view)).not.toBeVisible();
+  });
+
+  it("keeps a hidden label hidden until a place is clear by 0.25 rem, from frame to frame (R07.T16.i)", async () => {
+    // The block over the whole stage, then ending 6 px left of the label's place at its mark's
+    // right, where it fits but not by the margin, then 10 px left of it; every other place lies
+    // under the block.
+    stubMatchMedia(true);
+    let block = NO_BLOCK;
+    const view = setup({ blockPx: () => block });
+    const label = await freeCameraLabel(view);
+    const nearPx = Number(/^translate\(([\d.]+)px, /u.exec(label?.style.transform ?? "")?.[1]);
+    // Its first showing out of the window of its changes (`LABEL_CHANGE_LIMIT`).
+    view.advance(1_100);
+    const shown = (box: LaidOutBoxPx): boolean => {
+      block = box;
+      view.advance(50);
+      return label?.style.visibility === "";
+    };
+    expect([
+      shown(WHOLE_STAGE),
+      shown({ ...WHOLE_STAGE, widthPx: nearPx - 6 }),
+      shown({ ...WHOLE_STAGE, widthPx: nearPx - 10 }),
+    ]).toEqual([false, false, true]);
+  });
+
+  it("hides a mark's label whole under an open instrument slot laid out over it (R07.T16.i)", async () => {
+    // A stage of 1000 × 280 CSS px, room for one slot, which the harness lays out over its top left
+    // 555 × 254 px, where TEST PLANET's every place lies.
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+      source: fake.source,
+      engines: fake.engines,
+      stagePx: { widthPx: 1000, heightPx: 280 },
+    });
+    await settle();
+    view.advance(300);
+    // The readout mounts the label hidden as the frames' act ends; the next frames place it.
+    view.advance(100);
+    const label = planetLabel();
+    const before = label?.style.visibility;
+    await view.user.click(
+      within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
+        name: "OPEN",
+      }),
+    );
+    view.advance(300);
+    expect([before, label?.isConnected]).toEqual(["", true]);
+    expect(label).not.toBeVisible();
+  });
+
+  it("places a mark's label on every vsync of a 30 Hz primary, between the frames it draws (R07.T16.i)", async () => {
+    // QUALITY LOW's photorealistic primary draws on every second vsync. The block covers the stage,
+    // then nothing, then the stage again, a vsync at a time: one of the three vsyncs draws nothing.
+    let block = NO_BLOCK;
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      setting: "low",
+      blockPx: () => block,
+    });
+    await settle();
+    view.advance(100);
+    await view.user.keyboard("4");
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    view.advance(100);
+    const label = planetLabel();
+    const before = label?.style.visibility;
+    // Its first showing out of the window of its changes (`LABEL_CHANGE_LIMIT`).
+    view.advance(1_100);
+    const shown = (box: LaidOutBoxPx): boolean => {
+      block = box;
+      view.advance(16);
+      return label?.style.visibility === "";
+    };
+    const whole = { leftPx: 0, topPx: 0, widthPx: STAGE_WIDTH_PX, heightPx: STAGE_HEIGHT_PX };
+    expect([
+      before,
+      screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC, PRIMARY/ }).isConnected,
+      shown(whole),
+      shown(NO_BLOCK),
+      shown(whole),
+    ]).toEqual(["", true, false, true, false]);
+  });
+
+  it.each([
+    ["ArrowLeft", "right edge", ["right", "left", "hidden", "gone"]],
+    ["ArrowRight", "left edge", ["right", "hidden", "gone"]],
+    ["ArrowUp", "foot", ["right", "above", "hidden", "gone"]],
+    ["ArrowDown", "top edge", ["right", "below", "hidden", "gone"]],
+  ] as const)(
+    "turning a free camera by %s past the stage's %s, shows TEST PLANET's label only 0.25 rem inside the stage and while its mark's centre lies inside it (R07.T16.i's follow-up)",
+    async (key, _, changes) => {
+      // Every frame of the turn, about 7 to 9 px of the mark's motion each: the label's side, or
+      // that it is hidden or gone with its mark, and any frame that shows it too near an edge or
+      // beside a mark whose centre has left the stage (addendum D, D3 and D5).
+      stubMatchMedia(true);
+      const view = setup();
+      const offsetPx = planetAnchor(firstFrameMarks()).labelOffsetPx;
+      // D5's 0.25 rem at the harness's rem of 16 px, as ruled, not as the code holds it.
+      const edgePx = 0.25 * 16;
+      await freeCameraLabel(view);
+      await view.user.click(screen.getByRole("application"));
+      await view.user.keyboard(`{${key}>}`);
+      const seen: string[] = [];
+      const faults: string[] = [];
+      for (let frame = 0; frame < 80; frame += 1) {
+        view.advance(16);
+        const label = screen
+          .queryAllByText("TEST PLANET", { exact: false })
+          .find((each) => each.classList.contains("view-marks__label"));
+        const shown = label === undefined ? null : shownMarkLabelPx(label, offsetPx, 16);
+        const now = label === undefined ? "gone" : (shown?.side ?? "hidden");
+        if (seen.at(-1) !== now) {
+          seen.push(now);
+        }
+        const box = shown?.box;
+        const centre = shown?.centrePx;
+        if (
+          box !== undefined &&
+          centre !== undefined &&
+          !(
+            box.leftPx >= edgePx &&
+            box.topPx >= edgePx &&
+            box.leftPx + box.widthPx <= WIDTH_PX - edgePx &&
+            box.topPx + box.heightPx <= HEIGHT_PX - edgePx &&
+            centre.xPx >= 0 &&
+            centre.yPx >= 0 &&
+            centre.xPx <= WIDTH_PX &&
+            centre.yPx <= HEIGHT_PX
+          )
+        ) {
+          faults.push(`${String(frame)}: ${JSON.stringify(shown)}`);
+        }
+      }
+      expect({ seen, faults }).toEqual({ seen: changes, faults: [] });
+    },
+  );
 
   it("stops flying when its canvas loses focus", async () => {
     stubMatchMedia(true);
@@ -464,7 +810,9 @@ describe("the VIEW display", () => {
     await user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
     await settle();
     advance(300);
-    expect(screen.getByText("VIEW").parentElement?.textContent).toMatch(/FRAME CHANGE TEST/);
+    expect(screen.getByText("VIEW", { selector: "p" }).parentElement?.textContent).toMatch(
+      /FRAME CHANGE TEST/,
+    );
   });
 
   it("keeps its engine across a change of scene, asking for no new adapter", async () => {
@@ -474,13 +822,21 @@ describe("the VIEW display", () => {
     await user.click(screen.getByRole("button", { name: "FRAME CHANGE TEST" }));
     await settle();
     advance(300);
-    expect([engines.length, screen.queryByText("GRAPHICS ACQUIRING ADAPTER")]).toEqual([1, null]);
+    expect(engines.length).toBe(1);
+    // The view stands in its place (the style control may still say the adapter is acquired).
+    expect(screen.getByRole("application", { name: /^VIEW,/ }).tagName).toBe("CANVAS");
   });
 
   it("says AUTO is not available while there is no image to meter", async () => {
     setup();
     await settle();
-    expect(screen.getByText("AUTO NOT AVAILABLE: NO IMAGE TO METER")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "AUTO NOT AVAILABLE: NO IMAGE TO METER",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("offers its exposure's congruent pair in the guide's order, ENABLE then INHIBIT", async () => {
@@ -620,8 +976,9 @@ async function sceneArrives(
   socket: FakeWebSocket,
   system: SystemIdHex = FIXTURE_SYSTEM,
   stated: "place" | "no_place" = "place",
+  sceneSystem: SceneSystemDto = sliceSceneSystem(),
 ): Promise<void> {
-  const { place: _place, ...withoutPlace } = sliceSceneSystem();
+  const { place: _place, ...withoutPlace } = sceneSystem;
   const answer: ResponseBody = {
     kind: "subscribe",
     subscription: 5,
@@ -630,7 +987,7 @@ async function sceneArrives(
       sequence: 0,
       clock: sceneClock(3_000),
       ship: shipInSystem(3_000),
-      system: stated === "place" ? sliceSceneSystem() : withoutPlace,
+      system: stated === "place" ? sceneSystem : withoutPlace,
       tidal_radius_m: SCENE_TIDAL_RADIUS_M,
       craft: [],
     },
@@ -650,7 +1007,7 @@ async function sceneArrives(
 }
 
 function labelBlock(): string {
-  return screen.getByText("VIEW").parentElement?.textContent ?? "";
+  return screen.getByText("VIEW", { selector: "p" }).parentElement?.textContent ?? "";
 }
 
 describe("the VIEW display's server scene", () => {
@@ -663,6 +1020,38 @@ describe("the VIEW display's server scene", () => {
       screen.getByText("SCENE NOT AVAILABLE: no universe open"),
       labelBlock(),
     ]).toEqual(["true", expect.anything(), expect.stringMatching(/SCENE.*PRECISION TEST/)]);
+  });
+
+  it("reports a body whose stated photometric ratio departs from its law's, from its drawing loop", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const slice = sliceSceneSystem();
+    const earth = slice.system.bodies.find((body) => body.id === FIXTURE_EARTH);
+    if (earth?.photometry?.state !== "ok") {
+      throw new Error("the fixture's Earth has a photometric section");
+    }
+    // A ratio four times the Earth's, which no law of its section reaches.
+    const misstated = {
+      ...earth,
+      photometry: { state: "ok" as const, value: { ...earth.photometry.value, bond_ratio: 4 } },
+    };
+    const sceneSystem: SceneSystemDto = {
+      ...slice,
+      system: {
+        ...slice.system,
+        bodies: slice.system.bodies.map((body) => (body.id === FIXTURE_EARTH ? misstated : body)),
+      },
+    };
+    const findings = () =>
+      warn.mock.calls.filter(([message]) => String(message).includes("plan 14's owner"));
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket, FIXTURE_SYSTEM, "place", sceneSystem);
+    await settle();
+    view.advance(300);
+    await settle();
+    view.advance(300);
+    expect(findings()).toHaveLength(1);
+    expect(String(findings()[0]?.[0])).toMatch(/^body H7K 4C0RFZ D-7 \/768: /);
   });
 
   it("draws the server's scene once it arrives, and reports its camera", async () => {
@@ -696,7 +1085,8 @@ describe("the VIEW display's server scene", () => {
     const asked = view.socket.requestsOfKind("systems_in_range").slice(keptQueries);
     expect([
       screen.getAllByText(new RegExp(`^${SCENE_DESIGNATION} /`)).length > 0,
-      labelBlock().includes(STAR_SOURCE),
+      // Its sky is asked too, so the line reads PENDING in the interim reading's place (R06.T11.f).
+      starsReading(primaryLabelBlock()),
       labelBlock().includes(STARS_WITHOUT_POSITION),
       asked.length,
       asked.every(
@@ -704,7 +1094,38 @@ describe("the VIEW display's server scene", () => {
           JSON.stringify(request.body.centre) === JSON.stringify(place.barycentre) &&
           JSON.stringify(request.body.time) === JSON.stringify(place.time),
       ),
-    ]).toEqual([true, true, false, 4, true]);
+    ]).toEqual([true, "PENDING", false, 4, true]);
+  });
+
+  it("reads PENDING until the sky's first reply, then labels the sky in the interim field's place", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket, ELSEWHERE);
+    await settle();
+    view.advance(300);
+    await settle();
+    const before = starsReading(primaryLabelBlock());
+    const sky = view.socket.requestsOfKind("sky").at(-1);
+    if (sky === undefined) {
+      throw new Error("the view asks no sky");
+    }
+    const payload = skyPayload([{ direction: [0, 0, -1], distanceLy: 100, vMag: 1 }], 2, 7.4);
+    await act(async () => {
+      view.socket.serverSendsBinary(binaryFrame(sky.id, 0, 1, [...payload]));
+      view.socket.serverResponds(sky.id, { kind: "sky", ...skyResponse(sky.body, payload, 1, 2) });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    view.advance(300);
+    await settle();
+    const after = labelBlock();
+    expect([
+      before,
+      sky.body.eye?.field_factor,
+      sky.body.exclude_system,
+      after.includes("V 7.4 mag EYE · CLUSTERS: NOT YET MODELLED"),
+      after.includes(STAR_SOURCE),
+    ]).toEqual(["PENDING", 1.4, ELSEWHERE, true, false]);
   });
 
   it("names a system from a server that states no place by its ID, with no stars", async () => {
@@ -719,7 +1140,8 @@ describe("the VIEW display's server scene", () => {
       screen.getAllByText(new RegExp(`^${ELSEWHERE} /`)).length > 0,
       labelBlock().includes(STARS_WITHOUT_POSITION),
       view.socket.requestsOfKind("systems_in_range").length - keptQueries,
-    ]).toEqual([true, true, 0]);
+      view.socket.requestsOfKind("sky").length,
+    ]).toEqual([true, true, 0, 0]);
   });
 
   it("shows a scene the server ended as stale while it is reopened", async () => {
@@ -739,8 +1161,13 @@ describe("the VIEW display's server scene", () => {
     view.advance(300);
     expect([
       screen.getByText("SCENE STALE: reopening the scene"),
-      screen.getByText(/^UT /).classList.contains("stale"),
-      screen.getByRole("heading", { name: "Targets stale" }),
+      // The time reading, its runs each in a span of its own (R07.T19.b).
+      screen
+        .getByText(
+          (_, element) => element?.tagName === "OUTPUT" && element.textContent.startsWith("UT "),
+        )
+        .classList.contains("stale"),
+      screen.getByRole("heading", { name: "Targets stale PRIMARY" }),
       labelBlock().includes("PRECISION TEST"),
       screen
         .getAllByRole("option")
@@ -748,7 +1175,7 @@ describe("the VIEW display's server scene", () => {
     ]).toEqual([expect.anything(), true, expect.anything(), false, true]);
   });
 
-  it("says a camera report was refused, with the server's reason", async () => {
+  it("says a camera report was rejected, with the server's reason", async () => {
     const view = setup();
     await openUniverse(view);
     await sceneArrives(view.socket);
@@ -768,7 +1195,7 @@ describe("the VIEW display's server scene", () => {
     await settle();
     view.advance(300);
     expect(
-      screen.getByText("CAMERA REPORT REFUSED: a camera is outside the scene's reach"),
+      screen.getByText("CAMERA REPORT REJECTED: a camera is outside the scene's reach"),
     ).toBeInTheDocument();
   });
 
@@ -794,5 +1221,697 @@ describe("the VIEW display's server scene", () => {
       view.socket.requestsOfKind("subscribe").length,
       screen.getByText("SCENE PENDING"),
     ]).toEqual([2, expect.anything()]);
+  });
+});
+
+/** A status store whose adapter has answered: a hardware adapter, both styles offered. */
+async function nominalStore(): Promise<GraphicsStatusStore> {
+  const store = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
+  const outcome = await requestAdapterOutcome(
+    new FakeGpu([new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] })]),
+  );
+  store.dispatch({ kind: "adapter-outcome", outcome });
+  return store;
+}
+
+describe("the VIEW display's style (R07.T8.a)", () => {
+  it("shows the style control, the photorealistic style held back while the adapter offers only the wireframe", async () => {
+    const { advance } = setup();
+    await settle();
+    advance(100);
+    const panel = screen.getByRole("region", { name: "Style PRIMARY" });
+    expect([
+      within(panel).getByRole("button", { name: "WIREFRAME" }).getAttribute("aria-pressed"),
+      within(panel).getByRole("button", { name: "PHOTOREALISTIC" }).getAttribute("aria-disabled"),
+    ]).toEqual(["true", "true"]);
+  });
+
+  it("switches to the photorealistic style on 4, and states the provisional albedo", async () => {
+    const { user, advance, lastFrame } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
+    advance(100);
+    await settle();
+    advance(300);
+    expect([
+      screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC/ }).tagName,
+      labelBlock().includes("BODY PHOTOMETRY: NOT YET MODELLED"),
+      labelBlock().includes("LIGHTING:"),
+      lastFrame()?.label,
+    ]).toEqual(["CANVAS", true, false, "symbology"]);
+  });
+
+  it("switches to the photorealistic style from its control", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    expect(screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC/ }).tagName).toBe(
+      "CANVAS",
+    );
+  });
+
+  it("states the lighting is not received for a kept scene without host discs", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PRECISION TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
+    advance(100);
+    await settle();
+    advance(300);
+    expect(labelBlock().includes("LIGHTING: NOT RECEIVED")).toBe(true);
+  });
+});
+
+/** The widths of the line draws of a frame that stroke a hull's edges, at its non-zero origin. */
+function hullLineWidths(frame: FrameSubmission | undefined): ReadonlyArray<number> {
+  return (frame?.draws ?? [])
+    .filter(
+      (draw) =>
+        draw.material.name === "wireframe:lines" &&
+        Array.from(draw.offsetFromCameraM).some((value) => value !== 0),
+    )
+    .map((draw) => draw.uniforms["widthPx"]?.[0] ?? Number.NaN);
+}
+
+/**
+ * Whether a frame's line draws come in pairs, each a `--surface-0` casing two casings wider than
+ * the stroke drawn after it: every batch cased, its casing beneath it, at the display's ratio.
+ */
+function casedInPairs(frame: FrameSubmission | undefined): boolean {
+  const casingPx = CASING_PX * lineScale(window.devicePixelRatio);
+  const lines = (frame?.draws ?? []).filter((draw) => draw.material.name === "wireframe:lines");
+  const casing = [...linearColour(readTokens(document.documentElement).surface0)];
+  const width = (index: number): number => lines[index]?.uniforms["widthPx"]?.[0] ?? Number.NaN;
+  return (
+    lines.length > 0 &&
+    lines.length % 2 === 0 &&
+    lines.every((draw, index) =>
+      index % 2 === 1
+        ? width(index - 1) - width(index) === 2 * casingPx
+        : [...(draw.uniforms["colour"] ?? [])].every((value, c) => value === casing[c]),
+    )
+  );
+}
+
+/** The classes of the `--surface-0` plates that DOM text over a view's image sits on. */
+const PLATE_CLASSES = ["view-label", "view-marks__label"] as const;
+
+/** Switches the default `PRECISION TEST` to the photorealistic style and lets it draw. */
+async function drawPrecisionPhotoreal(view: Setup): Promise<void> {
+  await settle();
+  view.advance(100);
+  await view.user.keyboard("4");
+  // The first photorealistic frame starts the pipelines' compile; once made, the view draws it.
+  view.advance(100);
+  await settle();
+  view.advance(300);
+}
+
+describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
+  it("cases every mark over the photorealistic image, the hull's edges too, as the wireframe does not", async () => {
+    const view = setup({ store: await nominalStore() });
+    await settle();
+    view.advance(300);
+    const wireframe = [hullLineWidths(view.lastFrame()), casedInPairs(view.lastFrame())];
+    await drawPrecisionPhotoreal(view);
+    expect([
+      wireframe,
+      view.lastFrame()?.label,
+      hullLineWidths(view.lastFrame()),
+      casedInPairs(view.lastFrame()),
+    ]).toEqual([[[3], false], "symbology", [7, 3], true]);
+  });
+
+  it.each([
+    [0.78125, [7, 3]],
+    [1, [7, 3]],
+    [2, [7, 3]],
+    [3, [10.5, 4.5]],
+  ] as const)(
+    "draws the hull's cased edge at a ratio of %s as %j device px, never under 2 (R07.T16.d)",
+    async (ratio, widths) => {
+      vi.stubGlobal("devicePixelRatio", ratio);
+      const view = setup({ store: await nominalStore() });
+      await drawPrecisionPhotoreal(view);
+      expect([view.lastFrame()?.label, hullLineWidths(view.lastFrame())]).toEqual([
+        "symbology",
+        widths,
+      ]);
+    },
+  );
+
+  it("draws the bodies' occluders, then the craft's silhouettes, then every line, under symbology (R07.T16.e)", async () => {
+    const view = setup({ store: await nominalStore() });
+    await drawPrecisionPhotoreal(view);
+    const drawn = materialNames(view.lastFrame());
+    const lastSphere = drawn.lastIndexOf("wireframe:occluderSphere");
+    const firstSilhouette = drawn.indexOf("wireframe:hullSilhouette");
+    expect([
+      view.lastFrame()?.label,
+      lastSphere >= 0 && lastSphere < firstSilhouette,
+      drawn.lastIndexOf("wireframe:hullSilhouette") < drawn.indexOf("wireframe:lines"),
+    ]).toEqual(["symbology", true, true]);
+  });
+
+  it("fills the craft's silhouettes in --surface-0 over the image, and none in the wireframe (R07.T16.e)", async () => {
+    const view = setup({ store: await nominalStore() });
+    await settle();
+    view.advance(300);
+    const wireframe = hullFaceDraws(view.lastFrame());
+    await drawPrecisionPhotoreal(view);
+    const surface = [...linearColour(readTokens(document.documentElement).surface0)];
+    expect({
+      wireframe: [...new Set(wireframe.map(([name]) => name))],
+      overlay: [...new Set(hullFaceDraws(view.lastFrame()).map((draw) => JSON.stringify(draw)))],
+    }).toEqual({
+      wireframe: ["wireframe:occluderHull"],
+      overlay: [JSON.stringify(["wireframe:hullSilhouette", surface])],
+    });
+  });
+
+  it("says BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED over the image of a scene with a craft (R07.T16.e)", async () => {
+    const view = setup({ store: await nominalStore() });
+    await drawPrecisionPhotoreal(view);
+    expect([
+      labelBlock().includes("BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"),
+      labelBlock().includes("BODY PHOTOMETRY: NOT YET MODELLED"),
+    ]).toEqual([true, false]);
+  });
+
+  it("sets every text over the photorealistic image on a --surface-0 plate, beside an instrument", async () => {
+    // On the harness's 1280 × 720 stage, where a slot has room, with INSTRUMENT 1 open over the
+    // primary's image: a panel of its own, its label block on it, not text on the image.
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+    });
+    await settle();
+    view.advance(100);
+    await view.user.click(
+      within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
+        name: "OPEN",
+      }),
+    );
+    view.advance(300);
+    await view.user.keyboard("4");
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    const overlay =
+      screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC, PRIMARY/ })
+        .nextElementSibling ?? document.createElement("div");
+    const walker = document.createTreeWalker(overlay, NodeFilter.SHOW_TEXT);
+    const unplated: string[] = [];
+    const plated = new Set<string>();
+    let inSlot = 0;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const text = node.textContent?.trim() ?? "";
+      const plate = PLATE_CLASSES.find((name) => node.parentElement?.closest(`.${name}`) !== null);
+      if (text.length === 0) {
+        continue;
+      }
+      if (node.parentElement?.closest(".view-instrument.panel") !== null) {
+        inSlot += 1;
+      } else if (plate === undefined) {
+        unplated.push(text);
+      } else {
+        plated.add(plate);
+      }
+    }
+    expect({
+      unplated,
+      plated: [...plated].toSorted(),
+      slotText: inSlot > 0,
+      paints: PLATE_CLASSES.map((name) =>
+        stylesheetRule(`.${name}`).includes("background: var(--surface-0)"),
+      ),
+    }).toEqual({
+      unplated: [],
+      plated: [...PLATE_CLASSES].toSorted(),
+      slotText: true,
+      paints: [true, true],
+    });
+  });
+});
+
+describe("the VIEW display's photorealistic style when its pipelines fail (R07.T8.a)", () => {
+  it("returns to the wireframe and holds the style back with the fault", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fake = fakeViewEngineSource();
+    const source: ViewEngineSource = {
+      ...fake.source,
+      load: async (outcome, status) => {
+        const engine = await fake.source.load(outcome, status);
+        return Object.assign(engine, {
+          createMaterialAsync: (): Promise<never> => Promise.reject(new Error("refused")),
+        });
+      },
+    };
+    const { user, advance } = setup({ store: await nominalStore(), source });
+    await settle();
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    expect([
+      screen.getByRole("application", { name: /^VIEW, WIREFRAME/ }).tagName,
+      screen.getByRole("button", { name: "PHOTOREALISTIC" }).getAttribute("aria-disabled"),
+      screen.getByText(PHOTOREAL_NOT_CREATED).tagName,
+    ]).toEqual(["CANVAS", "true", "P"]);
+  });
+});
+
+describe("the VIEW display's exposure meter (R07.T8.a)", () => {
+  it("mounts the meter beside the exposure only while the photorealistic image is drawn", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    expect(screen.queryByRole("region", { name: "Exposure meter PRIMARY" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    // Beside a drawn image the meter never says there is no image: it reads the exposure.
+    const meter = within(screen.getByRole("region", { name: "Exposure meter PRIMARY" }));
+    expect([
+      meter.queryByText(/NO IMAGE TO METER/u),
+      meter.getByRole("status", { name: "SOURCE" }).textContent,
+    ]).toEqual([null, "PRIMARY"]);
+  });
+});
+
+/** The exposure panel's reading. */
+function exposureReadout(): string {
+  return (
+    within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getAllByRole("status")[0]
+      ?.textContent ?? ""
+  );
+}
+
+describe("the VIEW display's AUTO exposure (R07.T8.a)", () => {
+  it("enters AUTO on ENABLE once the image is metered, and keeps an operator's INHIBIT", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    expect(exposureReadout()).toMatch(/^EV100 -?\d+\.\d AUTO$/);
+    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    advance(1000);
+    await settle();
+    advance(1000);
+    expect(exposureReadout()).toMatch(/INHIBITED · OPERATOR$/);
+  });
+});
+
+/** The exposure meter's panel. */
+function meterPanel(): ReturnType<typeof within> {
+  return within(screen.getByRole("region", { name: "Exposure meter PRIMARY" }));
+}
+
+/** The exposure meter's status with what to do, by its whole text, or `null` where none stands. */
+function meterStatusShown(): string | null {
+  const line = within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).queryByText(
+    (_, element) =>
+      element?.tagName === "P" && /: (?:choose AVG|widen the view)/u.test(element.textContent),
+  );
+  return line?.textContent ?? null;
+}
+
+/** The statuses of a meter, or of the want of an image, that any text on the display names. */
+function statusesShown(): string[] {
+  return ["NO IMAGE TO METER", "NO LIT SIDE", "NO DARK SIDE", "STAR DISC ONLY"].filter(
+    (status) => screen.queryAllByText(new RegExp(status, "u")).length > 0,
+  );
+}
+
+/**
+ * Advances the frames by `ms` in steps of 50 ms, letting the histograms' reads settle after each,
+ * as they would between real frames.
+ */
+async function advanceReading(view: Setup, ms: number): Promise<void> {
+  for (let elapsed = 0; elapsed < ms; elapsed += 50) {
+    view.advance(50);
+    // Each step's reads settle before the next step's frames.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+}
+
+describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
+  /** PHASE TEST drawn photorealistic, its image metered under AVG and the exposure at AUTO. */
+  async function meteredAuto(): Promise<Setup> {
+    const view = setup({ store: await nominalStore() });
+    await settle();
+    view.advance(100);
+    await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    view.advance(100);
+    await view.user.keyboard("4");
+    view.advance(100);
+    await settle();
+    view.advance(300);
+    await settle();
+    view.advance(300);
+    await view.user.click(screen.getByRole("button", { name: "ENABLE" }));
+    view.advance(600);
+    return view;
+  }
+
+  const NO_LIT_SIDE = "NO LIT SIDE: choose AVG, or bring a sunlit body into view";
+
+  it("reads NO LIT SIDE under LIT with no lit body after 0.5 s and not before, never NO IMAGE TO METER", async () => {
+    const view = await meteredAuto();
+    const auto = exposureReadout();
+    await view.user.click(meterPanel().getByRole("button", { name: "LIT" }));
+    await advanceReading(view, 300);
+    const before = [statusesShown(), exposureReadout()];
+    await advanceReading(view, 700);
+    expect([auto, before, statusesShown()]).toEqual([
+      expect.stringMatching(/AUTO$/u),
+      [[], expect.stringMatching(/AUTO$/u)],
+      ["NO LIT SIDE"],
+    ]);
+    expect(meterPanel().getByRole("button", { name: "LIT" })).toHaveAccessibleDescription(
+      NO_LIT_SIDE,
+    );
+    expect(exposureReadout()).toMatch(/INHIBITED · NO LIT SIDE$/u);
+    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+      "NO LIT SIDE",
+    );
+  });
+
+  it("clears the status at once on a change of meter, and gives the new meter its own after its window", async () => {
+    const view = await meteredAuto();
+    await view.user.click(meterPanel().getByRole("button", { name: "LIT" }));
+    await advanceReading(view, 1000);
+    await view.user.click(meterPanel().getByRole("button", { name: "DARK" }));
+    // In the click's own render, with no frame since: the status goes with the meter that found
+    // nothing, beside ENABLE and under AUTO NOT AVAILABLE too, and the reading stands as it is.
+    const atOnce = [
+      meterStatusShown(),
+      screen.queryByText(/^AUTO NOT AVAILABLE/u),
+      exposureReadout(),
+    ];
+    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+      "NOT AVAILABLE: not yet metered",
+    );
+    await advanceReading(view, 300);
+    const changed = [meterStatusShown(), exposureReadout()];
+    await advanceReading(view, 700);
+    expect([atOnce, changed, meterStatusShown()]).toEqual([
+      [null, null, expect.stringMatching(/INHIBITED · NO LIT SIDE$/u)],
+      [null, expect.stringMatching(/INHIBITED · NO LIT SIDE$/u)],
+      "NO DARK SIDE: choose AVG, or bring a night side into view",
+    ]);
+    expect(meterPanel().getByRole("button", { name: "DARK" })).toHaveAccessibleDescription(
+      "NO DARK SIDE: choose AVG, or bring a night side into view",
+    );
+    expect(exposureReadout()).toMatch(/INHIBITED · NO DARK SIDE$/u);
+  });
+
+  it("resumes AUTO by itself when a lit body is metered", async () => {
+    const view = await meteredAuto();
+    await view.user.click(meterPanel().getByRole("button", { name: "LIT" }));
+    await advanceReading(view, 1000);
+    const inhibited = exposureReadout();
+    view.image.pixels = [
+      ...view.image.pixels,
+      { meterClass: METER_CLASS.litBody, bin: 150, count: 200 },
+    ];
+    await advanceReading(view, 600);
+    expect([inhibited, exposureReadout(), statusesShown()]).toEqual([
+      expect.stringMatching(/INHIBITED · NO LIT SIDE$/u),
+      expect.stringMatching(/^EV100 -?\d+\.\d AUTO$/u),
+      [],
+    ]);
+  });
+});
+
+describe("the VIEW display's way back to MAN (R07.T13.d)", () => {
+  it("sets MAN in the wireframe after the photorealistic style, and ENABLE takes AUTO once metered", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    await user.click(screen.getByRole("button", { name: "WIREFRAME" }));
+    // The wireframe draws no image to meter: the system inhibits AUTO once the meter times out.
+    advance(1000);
+    await settle();
+    advance(1000);
+    const trapped = exposureReadout();
+    await user.click(screen.getByRole("textbox", { name: "MAN" }));
+    await user.keyboard("8.6{Enter}");
+    advance(300);
+    const manual = exposureReadout();
+    await user.click(screen.getByRole("button", { name: "PHOTOREALISTIC" }));
+    advance(100);
+    await settle();
+    advance(300);
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    advance(600);
+    expect([trapped, manual, exposureReadout()]).toEqual([
+      expect.stringMatching(/INHIBITED · NO IMAGE TO METER$/),
+      "EV100 8.6 MAN",
+      expect.stringMatching(/^EV100 -?\d+\.\d AUTO$/),
+    ]);
+  });
+});
+
+/** The camera's line of sight a frame was drawn with, in its frame's axes. */
+function sightOf(frame: FrameSubmission | undefined): Vec3 {
+  const m = frame?.viewRotation;
+  return vec3(-(m?.[2] ?? 0), -(m?.[6] ?? 0), -(m?.[10] ?? 0));
+}
+
+/** The angle between two lines of sight, rad. */
+function angleBetween(a: Vec3, b: Vec3): number {
+  return Math.acos(Math.min(1, dot(a, b) / (norm(a) * norm(b))));
+}
+
+/** The primary's label block's text. */
+function blockText(): string {
+  return screen.getByText("VIEW", { selector: "p" }).parentElement?.textContent ?? "";
+}
+
+/** Drags the primary's canvas from `from` to `to`, CSS px, with the primary button. */
+async function dragCanvas(
+  user: Setup["user"],
+  from: readonly [number, number],
+  to: readonly [number, number],
+): Promise<void> {
+  await user.pointer([
+    {
+      keys: "[MouseLeft>]",
+      target: screen.getByRole("application"),
+      coords: { clientX: from[0], clientY: from[1] },
+    },
+    { coords: { clientX: (from[0] + to[0]) / 2, clientY: (from[1] + to[1]) / 2 } },
+    { coords: { clientX: to[0], clientY: to[1] } },
+    { keys: "[/MouseLeft]" },
+  ]);
+}
+
+describe("the VIEW display's camera under the pointer and the rate's chord (R07.T19.f)", () => {
+  it("turns the free camera by a drag across its canvas, sized from the field of view", async () => {
+    const { user, advance, lastFrame } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    advance(300);
+    const before = sightOf(lastFrame());
+    await dragCanvas(user, [200, 180], [400, 180]);
+    advance(50);
+    const focalPx = WIDTH_PX / 2 / Math.tan((DEFAULT_FOV_DEG * Math.PI) / 360);
+    const yawRad = Math.atan(80 / focalPx) + Math.atan(120 / focalPx);
+    expect(angleBetween(before, sightOf(lastFrame()))).toBeCloseTo(yawRad, 4);
+  });
+
+  it("selects nothing by a drag that starts on a mark", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(16);
+    const anchor = firstFrameMarks().list.anchors[0];
+    if (anchor === undefined) {
+      throw new Error("the precision scene's first frame has no mark in view");
+    }
+    advance(300);
+    await dragCanvas(user, [anchor.xPx, anchor.yPx], [anchor.xPx + 60, anchor.yPx]);
+    expect(
+      within(screen.getByRole("listbox", { name: "Marks in view" })).queryByRole("option", {
+        selected: true,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("turns the seat's look by a drag, states it on the CAMERA line, and returns on 1", async () => {
+    const { user, advance, lastFrame } = setup();
+    await settle();
+    advance(300);
+    const seat = sightOf(lastFrame());
+    await dragCanvas(user, [320, 180], [420, 180]);
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*SEAT · LOOK \d{3}° \+00°/);
+    expect(angleBetween(seat, sightOf(lastFrame()))).toBeGreaterThan(0.1);
+    await user.keyboard("1");
+    advance(300);
+    expect(blockText()).not.toContain("LOOK");
+    expect(angleBetween(seat, sightOf(lastFrame()))).toBeLessThan(1e-3);
+  });
+
+  it("orbits the chase camera like a turntable on a drag right, LOOK's bearing rising", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("2");
+    advance(300);
+    // 100 px at 16 px a rem, 8° a rem: 50° right.
+    await dragCanvas(user, [270, 180], [370, 180]);
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*CHASE · LOOK 050° \+00°/u);
+  });
+
+  it("orbits the chase camera the same way on ArrowRight", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("2");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowRight>}");
+    advance(300);
+    await user.keyboard("{/ArrowRight}");
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*CHASE · LOOK 0[1-9]\d° \+00°/u);
+  });
+
+  it("turns the seat's look by the arrows held on its canvas, as a drag does", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowLeft>}");
+    advance(300);
+    await user.keyboard("{/ArrowLeft}");
+    advance(300);
+    expect(blockText()).toMatch(/CAMERA\s*SEAT · LOOK 3\d\d° \+00°/);
+  });
+
+  it("steps the free camera's rate on Ctrl with the up and down arrows, on its canvas", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    await user.keyboard("3");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{Control>}{ArrowUp}{ArrowUp}{ArrowDown}{/Control}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 3.16 km/s");
+  });
+
+  it("leaves the rate as it is on the chord pressed off the canvas", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    await user.click(screen.getByRole("button", { name: "3 FREE" }));
+    await user.keyboard("{Control>}{ArrowUp}{/Control}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 1.00 km/s");
+  });
+
+  it("stops an arrow held before Ctrl from turning while Ctrl is held", async () => {
+    const { user, advance, lastFrame } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{ArrowLeft>}");
+    advance(500);
+    await user.keyboard("{Control>}");
+    // The free camera coasts down from its turn without reduced motion; let it come to rest.
+    advance(3000);
+    const resting = sightOf(lastFrame());
+    advance(500);
+    expect(angleBetween(resting, sightOf(lastFrame()))).toBeLessThan(1e-6);
+    await user.keyboard("{/Control}{/ArrowLeft}");
+  });
+
+  it("states where the camera is and where it looks, on its label block and its camera panel", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.keyboard("3");
+    advance(300);
+    expect(blockText()).toMatch(
+      /CAMERA\s*FREE · RATE 1\.00 km\/s\s*POSITION\s*[\d,.]+ (km|Mm|Gm|AU) \d{3}° [+-]\d{2}°\s*POINTING\s*(\d{3}°|—) [+-]\d{2}°\s*FOV/,
+    );
+    const position = screen.getByRole("status", { name: "Camera position" });
+    const pointing = screen.getByRole("status", { name: "Camera pointing" });
+    expect(blockText()).toContain(position.textContent);
+    expect(blockText()).toContain(pointing.textContent);
+    const before = pointing.textContent;
+    await dragCanvas(user, [320, 180], [320, 60]);
+    advance(300);
+    expect(pointing.textContent).not.toBe(before);
+  });
+
+  it("steps the rate on Command with the arrows on macOS, and not on Ctrl", async () => {
+    const { user, advance } = setup({ platform: "darwin" });
+    await settle();
+    advance(300);
+    const rate = screen.getByRole("status", { name: "Free camera rate" });
+    await user.keyboard("3");
+    await user.click(screen.getByRole("application"));
+    await user.keyboard("{Meta>}{ArrowUp}{/Meta}{Control>}{ArrowUp}{/Control}");
+    advance(300);
+    expect(rate).toHaveTextContent("RATE 3.16 km/s");
+    expect(screen.getByRole("application")).toHaveAccessibleDescription(
+      expect.stringContaining("Command+↑/↓ RATE"),
+    );
+  });
+
+  it("says in its legend where and when its keys act, with the rate's chord", async () => {
+    const { advance } = setup();
+    await settle();
+    advance(300);
+    expect(screen.getByRole("application")).toHaveAccessibleDescription(
+      expect.stringContaining(
+        "FOCUSED VIEW: DRAG/ARROWS TURN · FREE: W/S A/D R/F MOVE, Q/E ROLL, CTRL+↑/↓ RATE",
+      ),
+    );
   });
 });

@@ -1,0 +1,6 @@
+{
+  "description": "The default eye observer: Crumey's (2014) field factor F and the CIE 146:2002 glare's age and pigmentation (rendering plan R06, Design notes 2-4). crates/hyperion-sim/src/sky/eye.rs's EyeObserver::default() and the client's DEFAULT_EYE_OBSERVER (apps/hyperion/src/renderer/src/view/sky/eye.ts) both read this file in their tests.",
+  "field_factor": 1.4,
+  "age_years": 25,
+  "pigmentation": 0.5
+}

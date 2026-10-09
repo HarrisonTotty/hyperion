@@ -1,4 +1,4 @@
-# generator_version = 19
+# generator_version = 21
 
 A system = 0x02002b2ca0000000
 initial mass = 0x3fc661acd1c0cd9e  # 0.17485580674984375
@@ -308,14 +308,14 @@ death at T-28758927533536900.000000000 s by EnvelopeLoss
 t = -500 yr: Exists
   CarbonOxygenWhiteDwarf WhiteDwarf DA5.5
   age = 0x41ed5a733e7129ca  # 3939736051.536351
-  mass = 0x3fe3d3890ec424d5  # 0.6195721901323404
-  core = 0x3fe3d3890ec424d5  # 0.6195721901323404
-  L = 0x3f503d1c7326a30d  # 0.000991132529273911
-  R = 0x3f89a27d2a7fbf2d  # 0.012516954287974247
-  Teff = 0x40c1e0fd56d13fa7  # 9153.9792119561
+  mass = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  core = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  L = 0x3f503d21ee605502  # 0.0009911376341780746
+  R = 0x3f89a27a74d6b806  # 0.012516934099803489
+  Teff = 0x40c1e0ffcaf39b9a  # 9153.998381091096
   M_V none
-  B-V = 0x3fa70d42d1f4013f  # 0.04502304852394667
-  remnant WhiteDwarf = 0x3fe3d3890ec424d5  # 0.6195721901323404
+  B-V = 0x3fa70d16517a3db8  # 0.04502172226522866
+  remnant WhiteDwarf = 0x3fe3d38c43047fa6  # 0.6195737179696053
   no death in the window
   binary class None
   rotation none
@@ -325,14 +325,14 @@ t = -500 yr: Exists
 t = 0 yr: Exists
   CarbonOxygenWhiteDwarf WhiteDwarf DA5.5
   age = 0x41ed5a737cf129ca  # 3939736551.536351
-  mass = 0x3fe3d3890ec424d5  # 0.6195721901323404
-  core = 0x3fe3d3890ec424d5  # 0.6195721901323404
-  L = 0x3f503d1b70ded9ec  # 0.0009911315896552432
-  R = 0x3f89a27d2a7fbf2d  # 0.012516954287974247
-  Teff = 0x40c1e0fd0fb9bafc  # 9153.977042404462
+  mass = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  core = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  L = 0x3f503d20ec181d86  # 0.0009911366945532809
+  R = 0x3f89a27a74d6b806  # 0.012516934099803489
+  Teff = 0x40c1e0ff83dc06cc  # 9153.996211531943
   M_V none
-  B-V = 0x3fa70d47db5934e6  # 0.04502319862931774
-  remnant WhiteDwarf = 0x3fe3d3890ec424d5  # 0.6195721901323404
+  B-V = 0x3fa70d1b5adfe54e  # 0.04502187237080567
+  remnant WhiteDwarf = 0x3fe3d38c43047fa6  # 0.6195737179696053
   no death in the window
   binary class None
   rotation none
@@ -342,14 +342,14 @@ t = 0 yr: Exists
 t = 500 yr: Exists
   CarbonOxygenWhiteDwarf WhiteDwarf DA5.5
   age = 0x41ed5a73bb7129ca  # 3939737051.536351
-  mass = 0x3fe3d3890ec424d5  # 0.6195721901323404
-  core = 0x3fe3d3890ec424d5  # 0.6195721901323404
-  L = 0x3f503d1a6e972b14  # 0.0009911306500380345
-  R = 0x3f89a27d2a7fbf2d  # 0.012516954287974247
-  Teff = 0x40c1e0fcc8a23a3d  # 9153.97487285465
+  mass = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  core = 0x3fe3d38c43047fa6  # 0.6195737179696053
+  L = 0x3f503d1fe9d00055  # 0.0009911357549299467
+  R = 0x3f89a27a74d6b806  # 0.012516934099803489
+  Teff = 0x40c1e0ff3cc475ed  # 9153.994041974622
   M_V none
-  B-V = 0x3fa70d4ce4be3582  # 0.04502334873459814
-  remnant WhiteDwarf = 0x3fe3d3890ec424d5  # 0.6195721901323404
+  B-V = 0x3fa70d206445597d  # 0.04502202247629137
+  remnant WhiteDwarf = 0x3fe3d38c43047fa6  # 0.6195737179696053
   no death in the window
   binary class None
   rotation none
@@ -361,7 +361,7 @@ C system = 0x42002cb200000001
 initial mass = 0x3feb75dc9c6a088f  # 0.8581374220814427
 age at epoch = 0x42017e63101ca8b5  # 9391858179.582376
 [Fe/H] = 0xbfb340ad2729858c  # -0.07520563322170498
-death at T+372176599851067904.000000000 s by EnvelopeLoss
+death at T+372176599851078656.000000000 s by EnvelopeLoss
 t = -500 yr: Exists
   MainSequence Dwarf G9.5V
   age = 0x42017e63007ca8b5  # 9391857679.582376
@@ -677,14 +677,14 @@ death at T-9747680549465404.000000000 s by DirectCollapse
 t = -500 yr: Exists
   BlackHole BlackHole BH
   age = 0x41b2b1a948e5b250  # 313633096.8972521
-  mass = 0x40228cc2c6410594  # 9.274923510968428
-  core = 0x40228cc2c6410594  # 9.274923510968428
+  mass = 0x40228cc2c6410593  # 9.274923510968426
+  core = 0x40228cc2c6410593  # 9.274923510968426
   L = 0x0000000000000000  # 0.0
-  R = 0x3f04a46efc4f749a  # 3.9372097979864173e-5
+  R = 0x3f04a46efc4f7499  # 3.937209797986417e-5
   Teff = 0x0000000000000000  # 0.0
   M_V none
   B-V none
-  remnant BlackHole = 0x40228cc2c6410594  # 9.274923510968428
+  remnant BlackHole = 0x40228cc2c6410593  # 9.274923510968426
   no death in the window
   binary class None
   black hole spin = 0x3f809efc7dab8d1b  # 0.00811574228777672
@@ -1333,14 +1333,14 @@ companions at t = 0 yr: Exists
   [1] not variable
   [2] BlackHole BlackHole BH
   [2] age = 0x41b2b1ab3ce5b250  # 313633596.8972521
-  [2] mass = 0x4017dd358abf9bd8  # 5.966024558968421
-  [2] core = 0x4017dd358abf9bd8  # 5.966024558968421
+  [2] mass = 0x4017dd358abf9bd7  # 5.96602455896842
+  [2] core = 0x4017dd358abf9bd7  # 5.96602455896842
   [2] L = 0x0000000000000000  # 0.0
-  [2] R = 0x3efa8e580fe0377c  # 2.5325804919921588e-5
+  [2] R = 0x3efa8e580fe0377b  # 2.5325804919921584e-5
   [2] Teff = 0x0000000000000000  # 0.0
   [2] M_V none
   [2] B-V none
-  [2] remnant BlackHole = 0x4017dd358abf9bd8  # 5.966024558968421
+  [2] remnant BlackHole = 0x4017dd358abf9bd7  # 5.96602455896842
   [2] no death in the window
   [2] binary class None
   [2] black hole spin = 0x3facd928ebb759b4  # 0.0563442981471555

@@ -9,6 +9,7 @@ use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, gener
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::stellar::Phase;
+use hyperion_sim::stellar::binary::SegmentKind;
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::multiplicity::{
     MAX_COMPANIONS, MultiplicityContext, MultiplicityModel, RedrawAttempt, StarSlot,
@@ -605,4 +606,288 @@ fn living_stars_are_younger_than_their_lifetimes_and_remnants_older() {
 #[ignore = "slow: 10⁵ random systems, each built with its whole life"]
 fn a_hundred_thousand_systems_live_and_die_in_order() {
     check_life_and_death(0x0629_b000_0000_0002, 100_000);
+}
+
+/// Regression (P11.T4.h): record 0x61f85aa800000001 of the census's galaxy. Its 0.84 M☉
+/// companion loses its envelope to its wind on the early AGB. The early AGB's remnant τ once fell
+/// from at least 1 to 0 as the mass passed the helium core, where SSE's type 5 never goes, and the
+/// mass-loss integrator stepped towards the envelope's loss without end, a knot at each pass, until
+/// the machine ran out of memory. Each star's fate is found, and the companion dies when its
+/// envelope is gone, its carbon–oxygen core inside its helium core.
+#[test]
+fn a_companion_stripped_by_its_wind_on_the_early_agb_has_a_fate() {
+    use hyperion_sim::stellar::remnant::{DeathKind, Stripping};
+
+    let galaxy = milky_way();
+    let id = hyperion_sim::id::SystemId::from_raw(0x61f8_5aa8_0000_0001).expect("a grid ID");
+    let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
+    let stars = SystemStars::generate(&galaxy, &record);
+    assert_eq!(stars.star_count(), 3);
+    let deaths: Vec<_> = stars
+        .stars()
+        .iter()
+        .map(|model| model.death().expect("a star dies"))
+        .collect();
+    let stripped = deaths
+        .iter()
+        .find(|death| death.progenitor().co_core_mass() < death.progenitor().helium_core_mass())
+        .expect("the companion loses its envelope on its early AGB");
+    assert_eq!(stripped.kind(), DeathKind::EnvelopeLoss, "{stripped:?}");
+    assert_eq!(
+        stripped.progenitor().stripping(),
+        Stripping::Wind,
+        "{stripped:?}"
+    );
+    assert!(stripped.age().value() > 1e10, "{stripped:?}");
+}
+
+/// Regression (found by rendering plan R06.T5.c), then P11.T4.g: record 0x81fd865fd000000f of
+/// seed `0x0926_0000` (15.05 + 12.65 M☉, bulge, layer E). A common envelope strips the primary to a
+/// 4.93 M☉ helium star at 15.457 Myr, and from 15.688 Myr the main-sequence star feeds it. Its
+/// held state was once an early-AGB supergiant of 1,054 R☉ with no envelope (M = Mc), which
+/// touched its companion and recursed through the common envelope and the merger. Now a star with
+/// no envelope is a helium star from that step (HPT section 6; BSE `hrdiag`): the primary stays
+/// compact (under 3 R☉) to its pinned collapse at 15.896 Myr, no living hydrogen giant has
+/// M ≤ Mc, and the pair meets no common envelope, contact or merger after 15.69 Myr. Between
+/// 15.69 Myr and the collapse `swell` (BSE's rule for a helium star fed hydrogen) still makes the
+/// accretor a core-helium-burning giant with a thin envelope again and again, each stripped back
+/// at once: `swell`'s core is the open finding of P11.T4.g, outside it.
+#[test]
+fn a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star() {
+    let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
+        .expect("the Milky Way-like parameters are valid");
+    let id = hyperion_sim::id::SystemId::from_raw(0x81fd_865f_d000_000f).expect("a grid ID");
+    let record = hyperion_sim::galaxy::placement::resolve(&galaxy, id).expect("it resolves");
+    let stars = SystemStars::generate(&galaxy, &record);
+    assert_eq!(stars.star_count(), 4);
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|pair| {
+            let first = pair.timeline().state_at(Years::new(1.0e7));
+            (first.stars()[0].mass().value() - 15.0).abs() < 0.1
+        })
+        .expect("the 15 M☉ pair");
+    let timeline = pair.timeline();
+    let collapse = timeline
+        .supernovae()
+        .first()
+        .expect("the primary's collapse")
+        .age()
+        .value();
+    assert!((collapse / 15.896e6 - 1.0).abs() < 1e-4, "{collapse}");
+    let helium_from = 15.457e6;
+    let giant = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::HertzsprungGap
+                | Phase::FirstGiantBranch
+                | Phase::CoreHeliumBurning
+                | Phase::EarlyAgb
+                | Phase::ThermallyPulsingAgb
+        )
+    };
+    let mut checked = 0;
+    for segment in timeline.segments() {
+        let (from, to) = (segment.start().value(), segment.end().value());
+        if from > 15.69e6 && from < collapse {
+            assert!(
+                matches!(
+                    segment.kind(),
+                    SegmentKind::Detached | SegmentKind::StableTransfer { .. }
+                ),
+                "{:?} at {from} yr",
+                segment.kind()
+            );
+        }
+        for k in 0..=4_u32 {
+            let t = from + (to - from) * f64::from(k) / 4.0;
+            if !(helium_from..collapse).contains(&t) {
+                continue;
+            }
+            let primary = timeline.state_at(Years::new(t)).stars()[0];
+            assert!(
+                primary.radius().value() < 3.0,
+                "{:?} of {} R☉ at {t} yr",
+                primary.phase(),
+                primary.radius().value()
+            );
+            if giant(primary.phase()) {
+                assert_eq!(primary.phase(), Phase::CoreHeliumBurning, "at {t} yr");
+                // At the segment's start, a step; inside a step the core may outgrow the mass
+                // until the next one strips it.
+                if k == 0 {
+                    assert!(
+                        primary.mass().value() > primary.core_mass().value(),
+                        "at {t} yr"
+                    );
+                }
+            } else {
+                assert!(
+                    matches!(
+                        primary.phase(),
+                        Phase::HeliumMainSequence
+                            | Phase::HeliumHertzsprungGap
+                            | Phase::HeliumGiantBranch
+                    ),
+                    "{:?} at {t} yr",
+                    primary.phase()
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
+    let state = stars
+        .state_at(UniverseTime::EPOCH)
+        .expect("the system exists");
+    assert_eq!(state.stars().len(), 4);
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    w.u64_hex("system", id.raw());
+    for (k, star) in state.stars().iter().enumerate() {
+        w.line(&format!("[{k}] {:?}", star.phase()));
+        w.f64(&format!("[{k}] mass"), star.mass().value());
+        w.f64(&format!("[{k}] core mass"), star.core_mass().value());
+        w.f64(&format!("[{k}] luminosity"), star.luminosity().value());
+        w.f64(&format!("[{k}] radius"), star.radius().value());
+    }
+    golden!("stellar/held_bare_core_helium_star", w.as_str());
+}
+
+/// Regression (P11's protostar mergers, 2026-10-05; rendering plan R06's tables): three young
+/// systems of the R06 luminosity fit's galaxy (`sky::binary_light`'s seed, `0x5b1a_0005_0000_5eed`;
+/// layer D, [Fe/H] 0, ages 0.30–0.39 Myr), whose pairs' protostars overfill their orbits. Built to
+/// their own ages, each such pair was merged at age zero into a 0.01 M☉ cooling star beside
+/// nothing, which broke mass conservation and lit a dark protostar at an absolute V magnitude of
+/// 17.5; built to a later age and read back, the same pairs were two protostars. Now no star
+/// interacts before the first of a pair has arrived on the main sequence (P11.T4.i; before it,
+/// before both had): every star is its own model's protostar, no pair is run, and each pair run to
+/// an age past its arrival reads back the same two stars.
+#[test]
+fn young_pairs_whose_protostars_overfill_their_orbits_stay_protostars() {
+    use hyperion_sim::id::SystemId;
+    use hyperion_sim::orbit::roche_lobe_radius;
+    use hyperion_sim::stellar::Composition;
+    use hyperion_sim::stellar::binary::{can_interact, evolve};
+    use hyperion_sim::units::consts::SOLAR_RADIUS_M;
+    use hyperion_sim::units::{Dex, HeliumExcess};
+
+    let galaxy = Galaxy::from_params(
+        Seed::new(0x5b1a_0005_0000_5eed),
+        GalaxyParams::milky_way_like(),
+    )
+    .expect("the Milky Way-like gas is mostly neutral");
+    let component = galaxy
+        .fields()
+        .component_id(0)
+        .expect("a galaxy has components");
+    let at = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the root cube");
+    let composition = Composition::from_fe_h(Dex::new(0.0), HeliumExcess::ZERO);
+    let mut overfilled = 0;
+    for (raw, mass, age) in [
+        (
+            0x6214_5968_0000_005c,
+            5.019_768_120_424_701,
+            351_800.520_694_040_17,
+        ),
+        (
+            0x6214_5968_0000_0090,
+            2.527_505_005_945_29,
+            296_917.301_111_903_4,
+        ),
+        (
+            0x6214_5968_0000_0091,
+            5.084_150_481_054_733,
+            386_014.450_187_192_36,
+        ),
+    ] {
+        let record = SystemRecord::from_parts(
+            SystemId::from_raw(raw).expect("a grid ID"),
+            at,
+            SystemOrigin::Grid(component),
+            galaxy.fields().component(component).population(),
+            SolarMasses::new(mass),
+            Years::new(age),
+        );
+        let stars =
+            SystemStars::generate_with(&galaxy, &record, &composition, MultiplicityContext::Free);
+        assert!(stars.pairs().is_empty(), "{raw:#x}: no pair is run yet");
+        let state = stars
+            .state_at(UniverseTime::EPOCH)
+            .expect("the system exists");
+        for (star, model) in state.stars().iter().zip(stars.stars()) {
+            assert_eq!(
+                Some(*star),
+                model.state_at(UniverseTime::EPOCH),
+                "{raw:#x}: each star is its own"
+            );
+            if model.initial_mass().value() >= 0.08 {
+                assert_eq!(star.phase(), Phase::Protostar, "{raw:#x}: {star:?}");
+            }
+        }
+        for (i, j, orbit, input) in star_pairs(&stars) {
+            let until = Years::new(age + 1.0e3);
+            assert!(!can_interact(&input, until), "{raw:#x}: before the arrival");
+            let later = evolve(&input, Years::new(1.0e8)).state_at(Years::new(age));
+            assert_eq!(
+                later.stars(),
+                &[state.stars()[i], state.stars()[j]],
+                "{raw:#x}"
+            );
+            let [r0, r1] = later.stars().map(|s| s.radius().value());
+            let [m0, m1] = later.stars().map(|s| s.mass().value());
+            let periastron = orbit.periapsis();
+            if r0 >= roche_lobe_radius(m0 / m1, periastron).value() / SOLAR_RADIUS_M
+                || r1 >= roche_lobe_radius(m1 / m0, periastron).value() / SOLAR_RADIUS_M
+            {
+                overfilled += 1;
+            }
+        }
+    }
+    assert!(overfilled > 0, "a pair's protostars overfill their orbit");
+}
+
+/// Each pair of two stars of `stars` above 0.08 M☉: the stars' indices, the pair's orbit and the
+/// binary engine's input for it, as plan 11's system stage builds it.
+fn star_pairs(
+    stars: &SystemStars,
+) -> Vec<(
+    usize,
+    usize,
+    hyperion_sim::orbit::KeplerElements,
+    hyperion_sim::stellar::binary::BinaryInput,
+)> {
+    use hyperion_sim::stellar::binary::BinaryInput;
+    use hyperion_sim::stellar::multiplicity::HierarchyNode;
+
+    let hierarchy = stars.hierarchy();
+    hierarchy
+        .pairs()
+        .filter_map(|(node, orbit)| {
+            let HierarchyNode::Pair { inner, outer, .. } = *hierarchy.node(node) else {
+                unreachable!("pairs are pairs");
+            };
+            let (HierarchyNode::Star(a), HierarchyNode::Star(b)) =
+                (*hierarchy.node(inner), *hierarchy.node(outer))
+            else {
+                return None;
+            };
+            let [i, j] = [a, b].map(|s| usize::from(s.get()));
+            let [first, second] = [&stars.stars()[i], &stars.stars()[j]];
+            if second.initial_mass().value() < 0.08 {
+                return None;
+            }
+            let input = BinaryInput::new(
+                first.initial_mass(),
+                second.initial_mass(),
+                *first.composition(),
+                *orbit,
+                [first.draws().clone(), second.draws().clone()],
+                first.age_at_epoch(),
+            )
+            .expect("a pair of stars");
+            Some((i, j, *orbit, input))
+        })
+        .collect()
 }

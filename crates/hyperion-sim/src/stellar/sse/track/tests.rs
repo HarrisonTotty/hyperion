@@ -304,7 +304,9 @@ fn a_light_helium_star_leaves_a_white_dwarf_of_its_whole_mass() {
     let fate = loop {
         match step.next {
             build::Entry::HeliumShellBurning { star, clock0, mass } => {
-                step = builder.helium_shell_burning(step.end, &star, clock0, mass, step.end_state);
+                step = builder
+                    .helium_shell_burning(step.end, &star, clock0, mass, step.end_state)
+                    .expect("the helium star's shell burning ends");
             }
             build::Entry::Dead(fate) => break fate,
             other => panic!("a helium star of 0.5 M☉ does not enter {other:?}"),
@@ -342,7 +344,9 @@ fn light_helium_star_hand_over(options: TrackOptions) -> ([f64; 3], StarState) {
     let (fate, last) = loop {
         match step.next {
             build::Entry::HeliumShellBurning { star, clock0, mass } => {
-                step = builder.helium_shell_burning(step.end, &star, clock0, mass, step.end_state);
+                step = builder
+                    .helium_shell_burning(step.end, &star, clock0, mass, step.end_state)
+                    .expect("the helium star's shell burning ends");
             }
             build::Entry::Dead(fate) => break (fate, step.end_state),
             other => panic!("a helium star of 0.5 M☉ does not enter {other:?}"),
@@ -1168,5 +1172,47 @@ fn the_main_sequence_fast_path_refuses_outside_its_range() {
             .is_none(),
             "{m} M☉ at {age} yr"
         );
+    }
+}
+
+/// P11's protostar mergers (2026-10-05): a track built short of its main sequence knows where its
+/// main sequence starts, bit for bit as the track built in full has it, and a track with no main
+/// sequence has none. Plan 11's engine starts where the first star has arrived (where both had,
+/// before P11.T4.i), and read from the built segments alone a star built to an age before its
+/// arrival had no arrival. The arrival is also `sse::main_sequence_start`'s, bit for bit, which the
+/// engine builds a late star's track to (P11.T4.i).
+#[test]
+fn a_track_built_short_of_its_main_sequence_knows_its_arrival() {
+    for z in [0.02, 0.001] {
+        let comp = composition(z);
+        for m in [0.1, 0.3, 1.0, 2.27, 5.0, 6.5, 10.0, 40.0, 150.0] {
+            let m = SolarMasses::new(m);
+            let full = Track::full(m, &comp, &StarDraws::median());
+            let start = full
+                .main_sequence_start()
+                .expect("a hydrogen star has a main sequence");
+            let arrival = |track: &Track| track.main_sequence_arrival().map(|t| bits(t.value()));
+            assert_eq!(arrival(&full), Some(bits(start)));
+            assert_eq!(
+                bits(crate::stellar::sse::main_sequence_start(m, &comp)),
+                bits(start),
+                "{m:?} at Z = {z}: the closed form the engine builds a late star's track to"
+            );
+            for age in [0.0, 1.0e4, 0.5 * start, 0.999 * start] {
+                let short = Track::to_age(m, &comp, &StarDraws::median(), Years::new(age));
+                assert_eq!(
+                    arrival(&short),
+                    Some(bits(start)),
+                    "{m:?} at Z = {z} built to {age} yr, arriving at {start} yr"
+                );
+            }
+        }
+        let helium = Track::helium_star(
+            SolarMasses::new(3.0),
+            &comp,
+            &StarDraws::median(),
+            Years::new(1.0e4),
+        );
+        assert_eq!(helium.main_sequence_arrival(), None);
     }
 }

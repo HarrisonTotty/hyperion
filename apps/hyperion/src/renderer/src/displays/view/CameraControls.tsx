@@ -1,12 +1,25 @@
 import { useId } from "react";
 
+import type { PrimaryModifier } from "../../lib/platform";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { FOV_STEPS_DEG } from "../../view/camera/projection";
 import type { CameraPreset } from "../../view/camera/state";
-import { freeRateReading, PRESET_NAMES } from "./viewRun";
+import type { CameraPlace } from "./cameraPlace";
+import { CameraReadings } from "./CameraReadings";
+import { RateChord } from "./RateChord";
+import { PRESET_NAMES } from "./viewRun";
 
 /** Props of {@link CameraControls}. */
 export interface CameraControlsProps {
+  /** The panel's ID, by which a disclosure button controls it (R07.T19.b), or none. */
+  readonly id?: string | undefined;
+  /** Whether the panel is folded behind its disclosure button in the compact layout (R07.T19.b). */
+  readonly hidden?: boolean | undefined;
+  /**
+   * The view the panel acts on, its system designator on the title row (`PRIMARY`,
+   * `INSTRUMENT 1`; R07.T19), or none.
+   */
+  readonly designator?: string | undefined;
   readonly preset: CameraPreset;
   /** The presets the scene offers: `FREE` alone where it has no own ship. */
   readonly offered: ReadonlyArray<CameraPreset>;
@@ -16,6 +29,18 @@ export interface CameraControlsProps {
   readonly rateStep: number;
   /** The highest rate step the scene allows (`maxFreeRateStep`). */
   readonly maxRateStep: number;
+  /**
+   * Where the view's camera is and where it looks (R07.T19.f; `cameraPlace`): `POSITION`'s and
+   * `POINTING`'s readings.
+   */
+  readonly place: CameraPlace;
+  /** Whether the server's scene is stale: a place held to a craft is muted with its `S`. */
+  readonly sceneStale: boolean;
+  /**
+   * The platform's primary modifier, whose chord with the arrows the rate's limit reason names
+   * (decision-r07-t19f-position, item 5).
+   */
+  readonly modifier: PrimaryModifier;
   /** The `EASED CAMERA MOVES` setting. */
   readonly easedMoves: boolean;
   /** Whether the operator asked for reduced motion, under which eased moves are not applied. */
@@ -24,6 +49,12 @@ export interface CameraControlsProps {
   readonly onAction: (action: ViewKeyAction) => void;
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
 }
+
+/**
+ * Why `SEAT` and `CHASE` are held back where the scene has no own ship; it stands under the compact
+ * layout's row while this panel is folded (R07.T19.b).
+ */
+export const NO_OWN_SHIP = "NO OWN SHIP: SEAT and CHASE need one";
 
 /** The presets in their order, each with its single key (`keys.ts`' `VIEW_SINGLE_KEYS`). */
 const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: string }> = [
@@ -36,9 +67,13 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
  * The view's camera controls (plan R02, R02.T15.c): the presets `SEAT`, `CHASE` and `FREE`, the
  * previous and next target, the field of view a step narrower or wider with its reading, and the
  * `EASED CAMERA MOVES` setting, each a button reachable by keyboard and showing its key; the field
- * of view's buttons are held back at the ends of its steps, the free camera's rate
- * (stepped by `PAGE UP` and `PAGE DOWN` on the canvas) with a statement at either end of its steps,
- * and the setting says when reduced motion stops it applying.
+ * of view's buttons are held back at the ends of its steps, the free camera's rate (stepped on the
+ * canvas, in `FREE` only) with a statement at either end of its steps that names the platform's
+ * chord, `NOT AVAILABLE: CTRL+↑, RATE at its highest step` (`⌘↑` on macOS;
+ * decision-r07-t19f-position, item 5), and the setting says when reduced motion stops it applying.
+ * Above and beside the rate stand where the camera is and where it looks, `POSITION` and
+ * `POINTING` (R07.T19.f; `CameraReadings`), so that an instrument's place, which its slot has no
+ * room to state, is on show while `CONTROLS` names it.
  *
  * @remarks
  * Display controls, which change only what the view shows (`.control`). A preset the scene does not
@@ -50,10 +85,16 @@ export function CameraControls({
   fovDeg,
   rateStep,
   maxRateStep,
+  place,
+  sceneStale,
+  modifier,
   easedMoves,
   reducedMotion,
   onAction,
   onEasedMovesChange,
+  designator,
+  id,
+  hidden,
 }: CameraControlsProps) {
   const titleId = useId();
   const noShipId = useId();
@@ -65,9 +106,15 @@ export function CameraControls({
   const fastest = rateStep >= maxRateStep;
   const anyHeldBack = PRESET_KEYS.some(({ preset: each }) => !offered.includes(each));
   return (
-    <section className="panel view-camera" aria-labelledby={titleId}>
+    <section className="panel view-camera" aria-labelledby={titleId} id={id} hidden={hidden}>
       <h2 className="panel__title" id={titleId}>
         Camera
+        {designator === undefined ? null : (
+          <>
+            {" "}
+            <span className="panel__designator">{designator}</span>
+          </>
+        )}
       </h2>
       <fieldset className="preset-buttons" aria-label="Camera presets">
         {PRESET_KEYS.map(({ preset: each, key }) => {
@@ -94,7 +141,7 @@ export function CameraControls({
       </fieldset>
       {anyHeldBack ? (
         <p className="view-camera__reason" id={noShipId}>
-          NO OWN SHIP: SEAT and CHASE need one
+          {NO_OWN_SHIP}
         </p>
       ) : null}
       <fieldset className="preset-buttons" aria-label="Target">
@@ -160,15 +207,11 @@ export function CameraControls({
           NOT AVAILABLE: FOV at its {narrowest ? "narrowest" : "widest"} step
         </p>
       ) : null}
-      <p className="view-camera__rate">
-        <output className="view-camera__rate-reading" aria-label="Free camera rate">
-          {freeRateReading(rateStep)}
-        </output>
-      </p>
+      <CameraReadings rateStep={rateStep} place={place} sceneStale={sceneStale} />
       {slowest || fastest ? (
         <p className="view-camera__reason">
-          NOT AVAILABLE:{" "}
-          {fastest ? "PAGE UP, RATE at its highest" : "PAGE DOWN, RATE at its lowest"} step
+          NOT AVAILABLE: <RateChord modifier={modifier} arrows={fastest ? "↑" : "↓"} />, RATE at its{" "}
+          {fastest ? "highest" : "lowest"} step
         </p>
       ) : null}
       <div className="view-camera__setting">

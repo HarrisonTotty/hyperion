@@ -17,6 +17,12 @@
 //! made of, and the briefs of every row of `range_query.rs`'s 50 ly query through today's exact
 //! path. Plan 06's budget for those briefs is 15 ms per 1,600 rows; the results are recorded
 //! under P06.T38.a.
+//!
+//! The `stellar/hierarchy_bound` group is plan 11's P11.T16 bench: per stellar layer near the
+//! Sun, the census's `hierarchy_bound` beside `draw_hierarchy_of_composition` over the same
+//! attempts the bound lists, the draws it repeats. Its gate is relative: the bound costs at most
+//! 1.25 times those draws in every layer (`decision-p11-t16-hierarchy-bound.md` §4). The results
+//! are recorded in plan 11's Risks, "Deviations in P11.T16, as built".
 
 use std::hint::black_box;
 
@@ -25,7 +31,7 @@ use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
-use hyperion_sim::galaxy::placement::{NoCache, SystemRecord};
+use hyperion_sim::galaxy::placement::{CellKey, NoCache, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, range_query};
 use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::math;
@@ -34,10 +40,11 @@ use hyperion_sim::stellar::classify::{ClassExtras, classify};
 use hyperion_sim::stellar::draws::{StandardNormal, StarDraws};
 use hyperion_sim::stellar::fates::FittedFates;
 use hyperion_sim::stellar::multiplicity::{
-    MultiplicityContext, RedrawAttempt, draw_hierarchy, draw_star_count,
+    AttemptBound, MultiplicityContext, RedrawAttempt, draw_hierarchy,
+    draw_hierarchy_of_composition, draw_star_count, hierarchy_bound,
 };
 use hyperion_sim::stellar::sse::{Track, ZCoeffs, main_sequence_state, zams};
-use hyperion_sim::stellar::system::{SystemStars, draw_metallicity};
+use hyperion_sim::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity};
 use hyperion_sim::stellar::{Composition, ObjectKind, evolve, lifetime};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::{LightYears, MetalFraction, SolarMasses, Years};
@@ -424,6 +431,92 @@ fn system_full(c: &mut Criterion) {
     group.finish();
 }
 
+/// The first `n` records of `layer` in the cells nearest the Sun-like point, shell by shell of
+/// cells about the cell holding it: a neighbourhood's systems as placement makes them.
+fn records_nearest_sun(galaxy: &Galaxy, layer: Layer, n: usize) -> Vec<SystemRecord> {
+    let centre = CellKey::containing(layer, &sunlike_point())
+        .expect("the Sun-like point is in the root cube")
+        .gen_cell()
+        .to_array();
+    let mut records = Vec::with_capacity(n);
+    let mut cell = Vec::new();
+    for r in 0_i32..40 {
+        for i in -r..=r {
+            for j in -r..=r {
+                for k in -r..=r {
+                    if i.abs().max(j.abs()).max(k.abs()) != r {
+                        continue;
+                    }
+                    let Ok(key) =
+                        CellKey::new(layer, [centre[0] + i, centre[1] + j, centre[2] + k])
+                    else {
+                        continue;
+                    };
+                    generate_cell(galaxy, key, &mut cell);
+                    records.extend(cell.iter().take(n - records.len()));
+                    if records.len() == n {
+                        return records;
+                    }
+                }
+            }
+        }
+    }
+    records
+}
+
+/// Plan 11's P11.T16: the census's hierarchy bound per stellar layer near the Sun, beside the
+/// draws it repeats, `draw_hierarchy_of_composition` at each attempt the bound lists, on the same
+/// records at their own compositions. The ratio of the two is the gate (at most 1.25).
+fn hierarchy_bounds(c: &mut Criterion) {
+    let galaxy = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+        .expect("the Milky Way fixture's gas is mostly neutral");
+    let mut group = c.benchmark_group("stellar/hierarchy_bound");
+    group.sample_size(10);
+    for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+        let records = records_nearest_sun(&galaxy, layer, 400);
+        let listed: Vec<(SystemRecord, Composition, Vec<RedrawAttempt>)> = records
+            .iter()
+            .map(|record| {
+                let composition = draw_metallicity(&galaxy, record);
+                let bound = hierarchy_bound(&galaxy, record, &composition);
+                let attempts = bound.attempts().iter().map(AttemptBound::attempt).collect();
+                (*record, composition, attempts)
+            })
+            .collect();
+        let attempts: usize = listed.iter().map(|(_, _, a)| a.len()).sum();
+        let name = format!(
+            "layer {layer:?}, {} records, {attempts} attempts",
+            records.len()
+        );
+        group.bench_function(format!("hierarchy_bound ({name})"), |b| {
+            b.iter(|| {
+                for (record, composition, _) in &listed {
+                    black_box(hierarchy_bound(&galaxy, black_box(record), composition));
+                }
+            });
+        });
+        group.bench_function(
+            format!("draw_hierarchy_of_composition, the attempts listed ({name})"),
+            |b| {
+                b.iter(|| {
+                    for (record, composition, attempts) in &listed {
+                        for &attempt in attempts {
+                            black_box(draw_hierarchy_of_composition(
+                                &galaxy,
+                                black_box(record),
+                                composition,
+                                grid_multiplicity(record),
+                                attempt,
+                            ));
+                        }
+                    }
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 criterion_group!(
     stellar,
     exp_before,
@@ -433,6 +526,7 @@ criterion_group!(
     systems,
     system_full,
     routed,
+    hierarchy_bounds,
     exp_after
 );
 criterion_main!(stellar);

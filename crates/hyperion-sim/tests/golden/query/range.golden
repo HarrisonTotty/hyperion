@@ -1,12 +1,12 @@
-# generator_version = 19
+# generator_version = 21
 # sun_20ly: R = 20 ly at (0, 26000, 0) ly, t = T+0.000000000 s, floor LayerA
 sun_20ly.complete_down_to = A
 sun_20ly.stopped_by = MassFloor
-sun_20ly.expected.A = 0x4043f1bc9e1137b1  # 39.88856864777279
-sun_20ly.expected.B = 0x401c314d40a03705  # 7.048146257189505
-sun_20ly.expected.C = 0x4023d4325bed4f91  # 9.914446709364514
-sun_20ly.expected.D = 0x4000455d13884533  # 2.033868935199871
-sun_20ly.expected.E = 0x3fe1ff590b0436ff  # 0.5624203887143436
+sun_20ly.expected.A = 0x4043f1bc9e1136a8  # 39.88856864777091
+sun_20ly.expected.B = 0x401c314d40a0358d  # 7.048146257189171
+sun_20ly.expected.C = 0x4023d4325bed4e8c  # 9.91444670936405
+sun_20ly.expected.D = 0x4000455d1388445c  # 2.0338689351997754
+sun_20ly.expected.E = 0x3fe1ff590b043611  # 0.5624203887143172
 sun_20ly.expected.F = 0x0000000000000000  # 0.0
 sun_20ly.expected.G = 0x0000000000000000  # 0.0
 sun_20ly.cells_visited = 220
@@ -154,11 +154,11 @@ sun_20ly.hit68.distance_ly = 0x4033eaa15ce7890a  # 19.916524702574897
 # bulge_12ly_floor_c_t500: R = 12 ly at (2262.741699796952, 2262.741699796952, 0) ly, t = T+15778800000.000000000 s, floor LayerC
 bulge_12ly_floor_c_t500.complete_down_to = C
 bulge_12ly_floor_c_t500.stopped_by = MassFloor
-bulge_12ly_floor_c_t500.expected.A = 0x407a268ff00695a4  # 418.41014101574024
-bulge_12ly_floor_c_t500.expected.B = 0x40527b9b4bb79125  # 73.93135350157225
-bulge_12ly_floor_c_t500.expected.C = 0x4059ffd46c337640  # 103.99734025025919
-bulge_12ly_floor_c_t500.expected.D = 0x4035558f426e600b  # 21.334217216441214
-bulge_12ly_floor_c_t500.expected.E = 0x401799151ac867a4  # 5.8994945702378665
+bulge_12ly_floor_c_t500.expected.A = 0x407a268ff0069449  # 418.4101410157205
+bulge_12ly_floor_c_t500.expected.B = 0x40527b9b4bb79030  # 73.93135350156876
+bulge_12ly_floor_c_t500.expected.C = 0x4059ffd46c3374e7  # 103.99734025025428
+bulge_12ly_floor_c_t500.expected.D = 0x4035558f426e5ef1  # 21.334217216440212
+bulge_12ly_floor_c_t500.expected.E = 0x401799151ac8666c  # 5.899494570237589
 bulge_12ly_floor_c_t500.expected.F = 0x0000000000000000  # 0.0
 bulge_12ly_floor_c_t500.expected.G = 0x0000000000000000  # 0.0
 bulge_12ly_floor_c_t500.cells_visited = 12

@@ -31,6 +31,14 @@ import type { BodyStateDto } from "./generated/BodyStateDto";
 import type { BodySummaryDto } from "./generated/BodySummaryDto";
 import type { BodySurfaceDto } from "./generated/BodySurfaceDto";
 import type { BulkPropertiesDto } from "./generated/BulkPropertiesDto";
+import type { BandsDto } from "./generated/BandsDto";
+import type { BodyFigureDto } from "./generated/BodyFigureDto";
+import type { BodyPhotometryDto } from "./generated/BodyPhotometryDto";
+import type { BodyRotationDto } from "./generated/BodyRotationDto";
+import type { FigureDatumDto } from "./generated/FigureDatumDto";
+import type { FigureLawDto } from "./generated/FigureLawDto";
+import type { PhaseTemplateDto } from "./generated/PhaseTemplateDto";
+import type { SpinResonanceDto } from "./generated/SpinResonanceDto";
 import type { Census } from "./generated/Census";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { CreateUniverseRequest } from "./generated/CreateUniverseRequest";
@@ -101,6 +109,16 @@ import type { SceneStateDto } from "./generated/SceneStateDto";
 import type { SceneSubscribeRequest } from "./generated/SceneSubscribeRequest";
 import type { SceneSystemDto } from "./generated/SceneSystemDto";
 import type { SeenPositionDto } from "./generated/SeenPositionDto";
+// The sky (rendering plan R06, R06.T10).
+import type { BandSpecDto } from "./generated/BandSpecDto";
+import type { ConeDto } from "./generated/ConeDto";
+import type { EyeDto } from "./generated/EyeDto";
+import type { HostDiscDto } from "./generated/HostDiscDto";
+import type { PowerTwoDto } from "./generated/PowerTwoDto";
+import type { SkyGapDto } from "./generated/SkyGapDto";
+import type { SkyLayerCensusDto } from "./generated/SkyLayerCensusDto";
+import type { SkyRequest } from "./generated/SkyRequest";
+import type { SkyResponse } from "./generated/SkyResponse";
 import type { SectionDto } from "./generated/SectionDto";
 import type { SeedHex } from "./generated/SeedHex";
 import type { ServerMessage } from "./generated/ServerMessage";
@@ -158,6 +176,14 @@ export type {
   BodySummaryDto,
   BodySurfaceDto,
   BulkPropertiesDto,
+  BandsDto,
+  BodyFigureDto,
+  BodyPhotometryDto,
+  BodyRotationDto,
+  FigureDatumDto,
+  FigureLawDto,
+  PhaseTemplateDto,
+  SpinResonanceDto,
   CataclysmicKindDto,
   Census,
   ClientMessage,
@@ -228,6 +254,15 @@ export type {
   SceneSystemDto,
   SeenPositionDto,
   SectionDto,
+  BandSpecDto,
+  ConeDto,
+  EyeDto,
+  HostDiscDto,
+  PowerTwoDto,
+  SkyGapDto,
+  SkyLayerCensusDto,
+  SkyRequest,
+  SkyResponse,
   SeedHex,
   ServerMessage,
   StarEventDto,
@@ -273,6 +308,19 @@ export {
 } from "./bulk";
 export { decodeDensityMap, type DecodedDensityMap } from "./densityMap";
 export {
+  decodeSkyBand,
+  decodeSkyStars,
+  MAX_CUT_V,
+  MAX_SKY_STARS,
+  SKY_STAR_BYTES,
+  SKY_TEXEL_BYTES,
+  type SkyBand,
+  type SkyDecoded,
+  type SkyPayloadParts,
+  type SkyStars,
+  splitSkyPayload,
+} from "./sky";
+export {
   type BodyIdParts,
   formatBodyId,
   hexToU64,
@@ -287,6 +335,8 @@ export {
   RequestClient,
   type BinaryFrameReceipt,
   type BulkOutcome,
+  type BulkRequestOptions,
+  type PartialBulkAnswer,
   type PendingBulkRequest,
   type PendingRequest,
   type PendingSubscription,

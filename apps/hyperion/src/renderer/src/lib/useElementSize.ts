@@ -15,7 +15,8 @@ export interface ElementSize {
 /** The browser's default root font size, used when none can be read. */
 const DEFAULT_REM_PX = 16;
 
-function rootRemPx(): number {
+/** CSS pixels in one `rem`, the root's font size, or the browser's default where none can be read. */
+export function rootRemPx(): number {
   const remPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
   return Number.isFinite(remPx) && remPx > 0 ? remPx : DEFAULT_REM_PX;
 }

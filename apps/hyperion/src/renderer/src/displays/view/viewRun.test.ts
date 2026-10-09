@@ -1,21 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
-import { normalise, scale, vec3 } from "../../geometry/vec3";
+import { dot, normalise, scale, vec3 } from "../../geometry/vec3";
 import { differenceM } from "../../view/coords/position";
-import { sceneOrigins, type ViewBody } from "../../view/scene/model";
+import { IDENTITY_ROTATION } from "../../view/coords/rotation";
+import { sceneOrigins, type ViewBody, type ViewBodyKind } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
-import { frameChangeScene } from "../../view/scenes/frameChange";
+import { eclipseScene } from "../../view/scenes/eclipseScene";
+import { FRAME_CHANGE_MOON, frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
+import { phaseScene } from "../../view/scenes/phaseScene";
+import type { SystemIdHex } from "@hyperion/protocol";
+import { aViewScene } from "../../test/viewFixtures";
+
+import { rotate } from "../../view/camera/quaternion";
 import {
+  cameraReading,
   commandRun,
+  followRun,
+  lookReading,
+  photorealStatements,
   frameName,
   freeRateReading,
   labelLines,
   labelStatements,
   markRows,
+  rangesFromCamera,
+  SCENE_OPTIONS,
+  sceneClockReading,
   type ViewRun,
+  startInstrumentRun,
   startRun,
+  startServerRun,
   stepRun,
 } from "./viewRun";
 
@@ -34,19 +50,32 @@ function offHull(run: ViewRun): boolean {
   return labelStatements(run).includes("POSITIONS AS SEEN FROM SHIP");
 }
 
-/** A kept scene whose bodies' rotation is not modelled. */
-function unrotated(kept: KeptScene): KeptScene {
+/** A kept scene with each of its bodies as `change` makes it. */
+function withBodies(kept: KeptScene, change: (body: ViewBody) => ViewBody): KeptScene {
   return {
     ...kept,
     sceneAt: (tS) => {
       const scene = kept.sceneAt(tS);
-      const bodies: ViewBody[] = [];
-      for (const body of scene.bodies) {
-        bodies.push({ ...body, rotation: null });
-      }
-      return { ...scene, bodies };
+      return { ...scene, bodies: scene.bodies.map(change) };
     },
   };
+}
+
+/** A kept scene whose bodies' rotation is not modelled. */
+function unrotated(kept: KeptScene): KeptScene {
+  return withBodies(kept, (body) => ({ ...body, rotation: null }));
+}
+
+/** A kept scene whose bodies other than its star all turn, by their own rotation or the identity. */
+function turning(kept: KeptScene): KeptScene {
+  return withBodies(kept, (body) =>
+    body.kind === "star" ? body : { ...body, rotation: body.rotation ?? IDENTITY_ROTATION },
+  );
+}
+
+/** The kinds of a run's scene bodies that have no rotation, in the scene's order. */
+function unrotatedKinds(run: ViewRun): ReadonlyArray<ViewBodyKind> {
+  return run.scene.bodies.filter((body) => body.rotation === null).map((body) => body.kind);
 }
 
 describe("a view's run", () => {
@@ -108,9 +137,89 @@ describe("a view's run", () => {
     expect(freeRateReading(7)).toBe("RATE 3.16 km/s");
   });
 
+  it("steps the free camera's rate in FREE (R07.T19.b)", () => {
+    const free = done(
+      commandRun(startRun(precisionScene()), { kind: "preset", preset: "free" }, CUT),
+    );
+    const faster = done(commandRun(free, { kind: "rate", step: 1 }, CUT));
+    expect(faster.camera.free.rateStep).toBe(free.camera.free.rateStep + 1);
+  });
+
+  it("refuses PAGE UP and PAGE DOWN outside FREE, so that the rate never changes unseen", () => {
+    const run = startRun(precisionScene());
+    expect([
+      commandRun(run, { kind: "rate", step: 1 }, CUT),
+      commandRun(run, { kind: "rate", step: -1 }, CUT),
+    ]).toEqual([
+      { kind: "refused", reason: "not_free" },
+      { kind: "refused", reason: "not_free" },
+    ]);
+  });
+
   it("aims the camera at the next target", () => {
     const targeted = done(commandRun(startRun(precisionScene()), { kind: "target", step: 1 }, CUT));
     expect(targeted.camera.target).not.toBeNull();
+  });
+});
+
+/** A run's camera's line of sight. */
+function forward(run: ViewRun) {
+  return rotate(run.camera.pose.orientation, vec3(0, 0, -1));
+}
+
+describe("a view's run turned by a drag or the arrows (R07.T19.f)", () => {
+  const turn = { yawRad: 0.3, pitchRad: 0 };
+
+  it("turns a free camera by the frame's drag, the same with reduced motion", () => {
+    const free = done(
+      commandRun(startRun(precisionScene()), { kind: "preset", preset: "free" }, CUT),
+    );
+    const turned = stepRun(free, { ...STILL, turn });
+    const reduced = stepRun(free, { ...STILL, reducedMotion: true, turn });
+    expect(dot(forward(turned), forward(free))).toBeCloseTo(Math.cos(0.3), 9);
+    expect(reduced.camera.pose.orientation).toEqual(turned.camera.pose.orientation);
+    expect(turned.camera.offset).toEqual({ azimuthRad: 0, elevationRad: 0 });
+  });
+
+  it("turns a SEAT camera's look offset by the drag, which its CAMERA line states", () => {
+    const seat = startRun(precisionScene());
+    const turned = stepRun(seat, { ...STILL, turn });
+    expect(turned.camera.offset.azimuthRad).toBeCloseTo(0.3, 12);
+    expect(cameraReading(turned.camera)).toBe("SEAT · LOOK 343° +00°");
+    const again = done(commandRun(turned, { kind: "preset", preset: "seat" }, CUT));
+    expect(cameraReading(again.camera)).toBe("SEAT");
+  });
+
+  it("turns a SEAT or CHASE camera's offset by the held arrows at 45°/s", () => {
+    const seat = startRun(precisionScene());
+    const chase = done(commandRun(seat, { kind: "preset", preset: "chase" }, CUT));
+    const arrows = { ...STILL, dtS: 0.2, held: new Set(["ArrowLeft", "ArrowUp"]) };
+    for (const run of [seat, chase]) {
+      const turned = stepRun(run, arrows).camera.offset;
+      expect(turned.azimuthRad).toBeCloseTo((9 * Math.PI) / 180, 12);
+      expect(turned.elevationRad).toBeCloseTo((9 * Math.PI) / 180, 12);
+    }
+  });
+
+  it("reads a look offset as a bearing clockwise from the preset's line of sight and an elevation", () => {
+    const deg = Math.PI / 180;
+    expect([
+      lookReading({ azimuthRad: 15 * deg, elevationRad: 5 * deg }),
+      lookReading({ azimuthRad: -90 * deg, elevationRad: -30 * deg }),
+      lookReading({ azimuthRad: 0.1 * deg, elevationRad: -0.2 * deg }),
+    ]).toEqual(["345° +05°", "090° -30°", "000° +00°"]);
+  });
+
+  it("turns an instrument by the drags on its canvas", () => {
+    const primary = startRun(precisionScene());
+    const instrument = startInstrumentRun(primary);
+    const followed = followRun(instrument, primary, {
+      dtS: 0,
+      held: new Set(),
+      reducedMotion: false,
+      turn,
+    });
+    expect(cameraReading(followed.camera)).toBe("CHASE · LOOK 343° +00°");
   });
 });
 
@@ -129,6 +238,15 @@ describe("the label block", () => {
     ]);
   });
 
+  it("reads the camera's preset, and in FREE its rate after a middle dot (R07.T19.b)", () => {
+    const seat = startRun(precisionScene());
+    const free = done(commandRun(seat, { kind: "preset", preset: "free" }, CUT));
+    expect([
+      cameraReading(seat.camera),
+      labelLines(free, DEFAULT_EXPOSURE).find((line) => line.label === "CAMERA")?.value,
+    ]).toEqual(["SEAT", "FREE · RATE 1.00 km/s"]);
+  });
+
   it("reads the exposure as EV100 -1.0 MAN and the field of view in degrees", () => {
     const lines = labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE);
     expect(
@@ -142,16 +260,55 @@ describe("the label block", () => {
     ]);
   });
 
+  it("reads the view's style from its camera (R07.T7)", () => {
+    const run = startRun(precisionScene());
+    const photorealistic = { ...run, camera: { ...run.camera, style: "photorealistic" as const } };
+    expect(labelLines(photorealistic, DEFAULT_EXPOSURE)).toContainEqual({
+      label: "STYLE",
+      value: "PHOTOREALISTIC",
+    });
+  });
+
   it("says POSITIONS AS SEEN FROM SHIP while the camera is off the hull, not at the seat", () => {
     const seat = startRun(precisionScene());
     const chase = done(commandRun(seat, { kind: "preset", preset: "chase" }, CUT));
     expect([offHull(seat), offHull(chase)]).toEqual([false, true]);
   });
 
-  it("says ROTATION NOT YET MODELLED while a body's rotation is not modelled", () => {
+  it("says ROTATION: NOT YET MODELLED while a planet or moon with a radius has no rotation", () => {
     expect(labelStatements(startRun(unrotated(frameChangeScene())))).toEqual([
-      "ROTATION NOT YET MODELLED",
+      "ROTATION: NOT YET MODELLED",
     ]);
+  });
+
+  it("says ROTATION: NOT YET MODELLED in each kept scene, whose planets or moons have none", () => {
+    const kept = [precisionScene(), phaseScene(), eclipseScene(), frameChangeScene()];
+    expect(
+      kept.map((scene) => labelStatements(startRun(scene)).includes("ROTATION: NOT YET MODELLED")),
+    ).toEqual([true, true, true, true]);
+  });
+
+  it("states no rotation note for a scene whose bodies all turn but its star", () => {
+    const run = startRun(turning(frameChangeScene()));
+    expect([unrotatedKinds(run), labelStatements(run)]).toEqual([["star"], []]);
+  });
+
+  it("states no rotation note for an unrotated moon with no radius", () => {
+    const run = startRun(
+      withBodies(turning(frameChangeScene()), (body) =>
+        body.id === FRAME_CHANGE_MOON ? { ...body, radiusM: 0, rotation: null } : body,
+      ),
+    );
+    expect([unrotatedKinds(run), labelStatements(run)]).toEqual([["star", "moon"], []]);
+  });
+
+  it("adds the terrain annunciation after the other statements while it is shown", () => {
+    const run = startRun(unrotated(frameChangeScene()));
+    expect(labelStatements(run, "TERRAIN: STREAMING")).toEqual([
+      "ROTATION: NOT YET MODELLED",
+      "TERRAIN: STREAMING",
+    ]);
+    expect(labelStatements(run, null)).toEqual(["ROTATION: NOT YET MODELLED"]);
   });
 
   it("names the system and galactic frames", () => {
@@ -173,6 +330,46 @@ describe("the label block", () => {
     expect(
       grounded === undefined ? null : frameName({ kind: "craft", craft: grounded.id }, scene),
     ).toBe(`BODY ${body?.designation ?? ""}`);
+  });
+
+  it("states ECLIPSE TEST's clock rate after its name, SCENE CLOCK ×100 (R07.T16.k)", () => {
+    const lines = labelLines(startRun(eclipseScene()), DEFAULT_EXPOSURE);
+    const scene = lines.findIndex((line) => line.label === "SCENE");
+    expect(lines.slice(scene)).toEqual([
+      { label: "SCENE", value: "ECLIPSE TEST" },
+      { label: "SCENE CLOCK", value: "×100" },
+    ]);
+  });
+
+  it("states no clock rate in a kept scene that runs at one second a second, or in the server's scene (R07.T16.k)", () => {
+    const kept = [precisionScene(), frameChangeScene(), phaseScene()].map((each) => startRun(each));
+    // The server's scene with its clock at a day a second, a rate other than 1.
+    const server = startServerRun(aViewScene({ timeRate: 86_400 }));
+    expect(
+      [...kept, server].map((run) => [
+        run.scene.provenance.kind === "kept" ? run.scene.provenance.name : "SERVER",
+        labelLines(run, DEFAULT_EXPOSURE).some((line) => line.label === "SCENE CLOCK"),
+      ]),
+    ).toEqual([
+      ["PRECISION TEST", false],
+      ["FRAME CHANGE TEST", false],
+      ["PHASE TEST", false],
+      ["SERVER", false],
+    ]);
+  });
+
+  it("reads a kept scene's clock rate as a whole number, grouped from five digits (R07.T16.k)", () => {
+    expect([sceneClockReading(100), sceneClockReading(1_000), sceneClockReading(86_400)]).toEqual([
+      "×100",
+      "×1000",
+      "×86,400",
+    ]);
+  });
+
+  it("offers only kept scenes whose clock runs at a whole number of seconds a second, which its reading states exactly (R07.T16.k)", () => {
+    expect(
+      SCENE_OPTIONS.map(({ name, make }) => [name, Number.isInteger(make().sceneAt(0).timeRate)]),
+    ).toEqual(SCENE_OPTIONS.map(({ name }) => [name, true]));
   });
 
   it("names the scene only in a kept scene", () => {
@@ -298,6 +495,135 @@ describe("the list", () => {
         return { ...scene, ownShip: null };
       },
     };
-    expect(markRows(startRun(shipless)).every((row) => row.fromCamera)).toBe(true);
+    expect([
+      rangesFromCamera(startRun(shipless).scene),
+      markRows(startRun(shipless)).every((row) => row.fromCamera),
+      rangesFromCamera(startRun(kept).scene),
+    ]).toEqual([true, true, false]);
+  });
+});
+
+describe("the style", () => {
+  const BOTH = { wireframe: true, photorealistic: true };
+
+  it("toggles to the photorealistic style and back where the adapter offers it", () => {
+    const run = startRun(phaseScene());
+    const photoreal = done(commandRun(run, { kind: "style", style: "toggle" }, CUT, BOTH));
+    expect(photoreal.camera.style).toBe("photorealistic");
+    expect(photoreal.camera.pose).toEqual(run.camera.pose);
+    const back = done(commandRun(photoreal, { kind: "style", style: "toggle" }, CUT, BOTH));
+    expect(back.camera.style).toBe("wireframe");
+  });
+
+  it("stays in the wireframe on a software adapter", () => {
+    const run = startRun(phaseScene());
+    const refused = done(
+      commandRun(run, { kind: "style", style: "photorealistic" }, CUT, {
+        wireframe: true,
+        photorealistic: false,
+      }),
+    );
+    expect(refused.camera.style).toBe("wireframe");
+  });
+
+  it("states the lighting and the bodies' labels in the photorealistic style only", () => {
+    const run = startRun(phaseScene());
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    expect(photorealStatements(run, "hosts-not-received", "wireframe", albedo)).toEqual([]);
+    const photoreal = done(commandRun(run, { kind: "style", style: "toggle" }, CUT, BOTH));
+    expect(photorealStatements(photoreal, "lit", "photorealistic", albedo)).toEqual(albedo);
+    expect(photorealStatements(photoreal, "pending", "photorealistic", albedo)).toEqual([
+      "LIGHTING: PENDING",
+      ...albedo,
+    ]);
+    expect(photorealStatements(photoreal, "hosts-not-received", "photorealistic", [])).toEqual([
+      "LIGHTING: NOT RECEIVED",
+    ]);
+  });
+
+  it("states the craft's photometry with a craft, composed with the bodies' note (R07.T16.e)", () => {
+    // PRECISION TEST: a planet and its moon, and the own ship.
+    const wireframe = startRun(precisionScene());
+    const photoreal = done(commandRun(wireframe, { kind: "style", style: "toggle" }, CUT, BOTH));
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    expect([
+      photorealStatements(photoreal, "lit", "photorealistic", albedo),
+      photorealStatements(photoreal, "pending", "photorealistic", albedo),
+      photorealStatements(photoreal, "lit", "photorealistic", []),
+      photorealStatements(photoreal, "lit", "wireframe", albedo),
+      photorealStatements(wireframe, "lit", "wireframe", albedo),
+    ]).toEqual([
+      ["BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      ["LIGHTING: PENDING", "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      ["CRAFT PHOTOMETRY: NOT YET MODELLED"],
+      ["PHOTOREALISTIC: PREPARING"],
+      [],
+    ]);
+  });
+
+  it("states the craft's photometry with a craft and no lit body, and no note with neither (R07.T16.e)", () => {
+    const photoreal = done(
+      commandRun(startRun(precisionScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const unlit = { ...photoreal, scene: { ...photoreal.scene, bodies: [] } };
+    const empty = { ...unlit, scene: { ...unlit.scene, craft: [], ownShip: null } };
+    expect([
+      photorealStatements(unlit, "hosts-not-received", "photorealistic", []),
+      photorealStatements(empty, "hosts-not-received", "photorealistic", []),
+    ]).toEqual([["CRAFT PHOTOMETRY: NOT YET MODELLED"], []]);
+  });
+
+  it("states no craft's photometry for a scene with none (R07.T16.e)", () => {
+    // PHASE TEST: lit bodies and no craft.
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    expect([
+      photoreal.scene.craft.length,
+      photorealStatements(photoreal, "lit", "photorealistic", albedo),
+    ]).toEqual([0, albedo]);
+  });
+
+  it("says the photorealistic style is pending while the view still draws its wireframe", () => {
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    expect(photorealStatements(photoreal, "lit", "wireframe", [])).toEqual([
+      "PHOTOREALISTIC: PREPARING",
+    ]);
+  });
+});
+
+describe("an instrument's run (R07.T19)", () => {
+  it("opens as a camera at the chase preset of the primary's scene", () => {
+    const run = startInstrumentRun(startRun(precisionScene()));
+    expect([run.camera.role, run.camera.preset]).toEqual(["camera", "chase"]);
+  });
+
+  it("follows the scene its primary drew, at the primary's time", () => {
+    const primary = startRun(precisionScene());
+    const instrument = startInstrumentRun(primary);
+    const stepped = stepRun(primary, { ...STILL, dtS: 0.5 });
+    const followed = followRun(instrument, stepped, {
+      dtS: 0.5,
+      held: new Set(),
+      reducedMotion: true,
+    });
+    expect([followed.scene === stepped.scene, followed.tS]).toEqual([true, stepped.tS]);
+  });
+
+  it("moves a free instrument as on a jump when its primary's scene is in another system", () => {
+    const primary = startRun(precisionScene());
+    const free = done(
+      commandRun(startInstrumentRun(primary), { kind: "preset", preset: "free" }, CUT),
+    );
+    const elsewhere: SystemIdHex = "0200080020000005";
+    const moved = followRun(
+      free,
+      { ...primary, scene: { ...primary.scene, system: elsewhere } },
+      { dtS: 0, held: new Set(), reducedMotion: true },
+    );
+    expect([moved.camera.preset, moved.camera.target]).toEqual(["chase", null]);
   });
 });

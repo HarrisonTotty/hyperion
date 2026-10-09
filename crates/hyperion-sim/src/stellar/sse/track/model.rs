@@ -30,10 +30,6 @@ use super::Bridges;
 use super::excess::HeliumHook;
 use super::post_agb::PostAgb;
 
-/// The share of the early AGB over which its core's remnant passes from the end of the helium
-/// main sequence to the helium giants' relation (see [`Model::point`]).
-const EARLY_AGB_REMNANT_BLEND: f64 = 1.0 / 3.0;
-
 /// Everything a model reads that is fixed for the whole track.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Physics<'a> {
@@ -203,12 +199,11 @@ impl Model {
     /// The helium star that the early AGB's core would become (HPT section 6.3) has its core on
     /// the helium giants' relation (equation 84) at the early AGB's carbon–oxygen core, and the
     /// luminosity at the end of its main sequence at the start of the early AGB, which is where
-    /// core helium burning leaves the core's remnant. The published SSE code passes from the second
-    /// to the first geometrically over the first third of the time from the base of the AGB to the
-    /// star's nuclear end (`hrdiag`, stellar type 5), so that the perturbed luminosity is
-    /// continuous there; HPT print only the relation. The track does the same over the first third
-    /// of the early AGB's own span, which, unlike SSE's nuclear time, does not change with the
-    /// current mass.
+    /// core helium burning leaves the core's remnant. As in the published SSE code (`hrdiag`,
+    /// stellar type 5), it passes from the second to the first geometrically over the first third
+    /// of the time from the base of the AGB to the star's nuclear end at its current mass, so that
+    /// the perturbed luminosity is continuous there ([`early_agb_core`]); HPT print only the
+    /// relation.
     #[must_use]
     pub(super) fn point(&self, phys: &Physics<'_>, coord: f64, mt: SolarMasses, age: f64) -> Point {
         let c = phys.coeffs;
@@ -435,8 +430,7 @@ fn core_helium_burning(
 }
 
 /// The early AGB at the fraction `coord` of its `span` for current mass `mt`, perturbed towards
-/// the naked helium star `helium` of its helium core as its envelope thins (see [`Model::point`]
-/// for the remnant's luminosity).
+/// the naked helium star `helium` of its helium core as its envelope thins ([`early_agb_core`]).
 #[must_use]
 fn early_agb(
     phase: &EarlyAgb,
@@ -453,19 +447,54 @@ fn early_agb(
     if !thin {
         return point;
     }
+    envelope::perturb(point, mt, mu, early_agb_core(phase, helium, clock, mt))
+}
+
+/// The core of the early AGB at its clock `clock` for current mass `mt`: the naked helium star
+/// `helium` of its helium core, `Mc,He`, at luminosity `Lc`, with radius `R_HeGB`(`Mc,He`, `Lc`) =
+/// min(R₁, R₂) (HPT section 6.3 after equation 105, equations 84–88, R₁ and R₂ of equations 86 and
+/// 88; the published SSE code's `hrdiag`, stellar type 5, `rx` = min(`rhehgf`, `rhegbf`), which is
+/// also its core radius).
+///
+/// `Lc` passes from the end of the helium main sequence, `L_THe`, where core helium burning leaves
+/// the core's remnant, to the helium giants' relation (equation 84) at the early AGB's
+/// carbon–oxygen core, geometrically: `Lc` = `L_THe` (L ÷ `L_THe`)^τ while τ < 1, then the
+/// relation. τ is SSE's, 3 (t − `t_BAGB`) ÷ (`t_n` − `t_BAGB`) with `t_n` the star's nuclear end
+/// at its current mass, which spans the thermally pulsing AGB ([`EarlyAgb::remnant_tau`]); HPT
+/// print only the relation.
+///
+/// Both the small-envelope remnant ([`early_agb`]) and the core radius of the binary's structure
+/// (`binary::core_radius`; BSE section 2.7.1) read it, unconditionally of the envelope's mass, so
+/// that the two never disagree.
+#[must_use]
+pub(super) fn early_agb_core(
+    phase: &EarlyAgb,
+    helium: &HeliumStar,
+    clock: Megayears,
+    mt: SolarMasses,
+) -> CoreRemnant {
+    early_agb_core_at_tau(phase, helium, clock, phase.remnant_tau(clock, mt))
+}
+
+/// [`early_agb_core`] at the remnant's fractional age `tau`.
+#[must_use]
+pub(super) fn early_agb_core_at_tau(
+    phase: &EarlyAgb,
+    helium: &HeliumStar,
+    clock: Megayears,
+    tau: f64,
+) -> CoreRemnant {
     let relation = helium.relation().luminosity(phase.co_core_mass(clock));
-    let blend = coord / EARLY_AGB_REMNANT_BLEND;
-    let luminosity = if blend < 1.0 {
+    let luminosity = if tau < 1.0 {
         let l_tms = helium.l_tms().value();
-        SolarLuminosities::new(l_tms * crate::math::powf_positive(relation.value() / l_tms, blend))
+        SolarLuminosities::new(l_tms * crate::math::powf_positive(relation.value() / l_tms, tau))
     } else {
         relation
     };
-    let remnant = CoreRemnant {
+    CoreRemnant {
         luminosity,
         radius: helium.shell_radius(luminosity),
-    };
-    envelope::perturb(point, mt, mu, remnant)
+    }
 }
 
 /// A giant on the Hertzsprung gap or the first giant branch, perturbed towards a naked helium

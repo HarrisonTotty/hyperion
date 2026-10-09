@@ -2,7 +2,7 @@
 # Run `just hooks` to install, or `just pre-commit` to run against every file.
 #
 # Fast checks run on commit; tests run on push. `just ci-slow` remains the full gate.
-default_install_hook_types: [pre-commit, pre-push]
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
 
 repos:
@@ -23,6 +23,8 @@ repos:
         exclude: ^packages/protocol/src/generated/
       - id: mixed-line-ending
         args: [--fix=lf]
+        # The CIE's tables are committed unmodified (CRLF), hashed by their PROVENANCE.toml.
+        exclude: ^crates/hyperion-fit/data/cie_cmf/
       - id: trailing-whitespace
         exclude: ^packages/protocol/src/generated/
 
@@ -30,6 +32,19 @@ repos:
   # so hooks call them directly instead of using pre-commit-managed copies.
   - repo: local
     hooks:
+      # Owner's rule: no Claude Code session links in commit messages or files.
+      - id: no-session-links-msg
+        name: no Claude session links in the commit message
+        entry: '(?i)claude\.ai/code/session|^Claude-Session:'
+        language: pygrep
+        stages: [commit-msg]
+
+      - id: no-session-links-files
+        name: no Claude session links in files
+        entry: '(?i)claude\.ai/code/session'
+        language: pygrep
+        types: [text]
+
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all --
@@ -72,17 +87,12 @@ repos:
         files: ^(crates/hyperion-protocol/|packages/protocol/src/generated/)
         pass_filenames: false
 
-      - id: cargo-test
-        name: cargo test
-        entry: cargo test --workspace
-        language: system
-        stages: [pre-push]
-        pass_filenames: false
-        always_run: true
-
-      - id: vitest
-        name: vitest
-        entry: just _with-surface pnpm test
+      # `just test`: the native suites under nextest, the doctests and vitest, built first and then
+      # run under the heavy-test lock that every worktree's test runs share, so that a push does
+      # not run a full suite beside another lane's and fail its timing-sensitive tests.
+      - id: just-test
+        name: just test (cargo nextest, doctests, vitest)
+        entry: just test
         language: system
         stages: [pre-push]
         pass_filenames: false

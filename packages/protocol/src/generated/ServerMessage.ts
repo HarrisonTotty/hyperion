@@ -36,6 +36,14 @@ id: RequestId,
 /**
  * The answer, whose `kind` is the request's.
  */
+body: ResponseBody, } | { "type": "partial_response", 
+/**
+ * The request's ID.
+ */
+id: RequestId, 
+/**
+ * The answer so far, whose `kind` is the request's.
+ */
 body: ResponseBody, } | { "type": "request_error", 
 /**
  * The request's ID.

@@ -18,12 +18,34 @@ import {
   styleAvailability,
 } from "../view/engine/platform";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/status";
+import {
+  captureAtmosphere,
+  type CapturedImage,
+  checkAtmosphereFrames,
+  checkAtmosphereSteps,
+  checkAtmosphereTables,
+} from "./atmosphere";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
+import { checkBloom } from "./bloom";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
+import { captureEclipse, checkEclipse } from "./eclipse";
 import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvases } from "./frames";
 import { Checks } from "./harness";
+import { checkHeightWorker } from "./heightWorker";
+import { checkHistogram } from "./histogram";
+import { checkLitBody } from "./litBody";
+import { captureOccultation, checkMeshBodies } from "./meshBodies";
+import { checkSkyBake, checkSkyBand, checkSkyDisc } from "./sky";
+import { checkPhotoreal } from "./photoreal";
+import { checkBodies, checkClassMap, checkPhotorealFrame, checkSpriteDepth } from "./bodies";
+import { runChildWindow } from "./childWindow";
 import { runSoak } from "./soak";
+import { captureSpike } from "./spike";
+import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
+import { checkTonemap } from "./tonemap";
 import { checkTwins } from "./twins";
+import { checkSpatialStrokeContrast } from "./spatial";
+import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
 import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
 
@@ -34,6 +56,8 @@ interface Report {
   readonly capabilities: string | null;
   readonly checks: Checks["list"];
   readonly setupError: string | null;
+  /** R05.T12.c's comparison frames, when the run was asked for them. */
+  readonly images?: ReadonlyArray<CapturedImage>;
 }
 
 /** The page's variants and the capabilities each withholds. */
@@ -152,6 +176,93 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
 
   await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
+  await checks.group("R07.T16.d the view's strokes as drawn", () =>
+    checkStrokeContrast(engine, checks),
+  );
+  // A 2D canvas's, which draws and reads back at once.
+  await checks.group("R07.T16.f spatial strokes", () => {
+    checkSpatialStrokeContrast(checks);
+    return Promise.resolve();
+  });
+
+  await checks.group("R05.T10.b the height worker", () => checkHeightWorker(checks));
+
+  await checks.group("R05.T12.b the atmosphere's tables", () =>
+    checkAtmosphereTables(engine, checks),
+  );
+  await checks.group("R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
+  await checks.group("R07.T14.b bloom and glare", () =>
+    checkBloom(engine, status.getSnapshot().targetRounding.rgba16float, checks),
+  );
+  await checks.group("R07.T15 tone mapping and output", () => checkTonemap(engine, checks));
+  await checks.group("R07.T4.c the lit-body BRDF", () => checkLitBody(engine, checks));
+  await checks.group("R07.T7 the photorealistic style", () => checkPhotoreal(engine, checks));
+  await checks.group("R07.T8.a point and disc bodies", () => checkBodies(engine, checks));
+  await checks.group("R07.T8.a sprite depth", () => checkSpriteDepth(engine, checks));
+  await checks.group("R07.T8.b the class-map hook", () => checkClassMap(engine, checks));
+  await checks.group("R07.T9 mesh bodies", () => checkMeshBodies(engine, checks));
+  await checks.group("R07.T10.c the eclipse scene", () => checkEclipse(engine, checks));
+  await checks.group("R07.T8.a the photorealistic frame", () =>
+    checkPhotorealFrame(engine, checks),
+  );
+  await checks.group("R05.T12.c the atmosphere's frames", () =>
+    checkAtmosphereFrames(engine, checks),
+  );
+  await checks.group("R05.T12.e the marches' steps", () => checkAtmosphereSteps(engine, checks));
+  await checks.group("R05.T11.a the terrain's resources", () =>
+    checkTerrainResources(engine, checks),
+  );
+  await checks.group("R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
+  await checks.group("R06.T13.d the sky's band", () => checkSkyBand(engine, checks));
+  await checks.group("R06.T13.e the host discs", () => checkSkyDisc(engine, checks));
+  await checks.group("R06.T13.g the sky's bake", () => checkSkyBake(engine, checks));
+  let images: CapturedImage[] = [];
+  if (captures) {
+    await checks.group("R05.T12.c the comparison captures", async () => {
+      images = await captureAtmosphere(engine);
+      checks.check(
+        "R05.T12.c the comparison captures",
+        images.length > 0,
+        `${images.length} frames`,
+      );
+    });
+  }
+
+  if (captures) {
+    await checks.group("R05.T11.c the terrain captures", async () => {
+      images = [...images, ...(await captureTerrain(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await checks.group("R05.T13.b the spike captures", async () => {
+      images = [...images, ...(await captureSpike(engine, checks))];
+    });
+  }
+
+  if (captures) {
+    await checks.group("R07.T9 the occultation captures", async () => {
+      const frames = await captureOccultation(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R07.T9 the occultation captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
+    });
+  }
+
+  if (captures) {
+    await checks.group("R07.T10.c the eclipse captures", async () => {
+      const frames = await captureEclipse(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R07.T10.c the eclipse captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
+    });
+  }
 
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await checks.group("T9.i splat refused", async () => {
@@ -188,6 +299,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     capabilities,
     checks: checks.list,
     setupError: null,
+    images,
   };
 }
 
@@ -208,6 +320,8 @@ const variant = parameters.get("variant") ?? "default";
 const fixtureName = parameters.get("fixture") ?? "none";
 /** Whether the run lifted timestamp quantization, so that pass times read `full`. */
 const gpuTiming = parameters.get("gpuTiming") === "1";
+/** Whether the run renders R05.T12.c's comparison frames for the main process to save. */
+const captures = parameters.get("captures") === "1";
 const report = smokeReport();
 const fixture: SmokeFixture = isFixture(fixtureName) ? fixtureName : "none";
 /** The by-hand soak of T11 and T12 instead of the checks, for `seconds`. */
@@ -227,7 +341,29 @@ async function soak(): Promise<Report> {
   };
 }
 
-void (soakSeconds > 0 ? soak() : run(variant, fixture))
+/** R07.T21's child window instead of the checks, for `seconds`. */
+const childSeconds = Number(parameters.get("child") ?? "0");
+
+/** Runs the child-window scene and reports its figures. */
+async function childWindow(): Promise<Report> {
+  const checks = new Checks();
+  const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", gpuTiming));
+  await runChildWindow(status, checks, childSeconds, {
+    frameName: parameters.get("childFrame") ?? "",
+    mainHz: Number(parameters.get("mainHz") ?? "0"),
+    childHz: Number(parameters.get("childHz") ?? "0"),
+    hidden: parameters.get("childHidden") === "1",
+  });
+  return {
+    variant: "child-window",
+    adapter: null,
+    capabilities: null,
+    checks: checks.list,
+    setupError: null,
+  };
+}
+
+void (soakSeconds > 0 ? soak() : childSeconds > 0 ? childWindow() : run(variant, fixture))
   .catch((error: unknown): Report => ({
     variant,
     adapter: null,

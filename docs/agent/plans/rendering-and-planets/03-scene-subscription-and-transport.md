@@ -1551,7 +1551,9 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   not change the system (a heartbeat, a craft push), so `sceneAt`'s placements, kept per system
   model, are laid out once per change and not once per push. The acceptance command should read
   `pnpm --filter hyperion exec vitest run src/renderer/src/lib/scene`, which also runs
-  `lightTime.test.ts`.
+  `lightTime.test.ts`. _R07.T10.a adds `emittedM` (`apparentPosition`'s `geometricThenM`) and
+  `emittedVelocityMPerS` (the composed orbits' velocity at `emitted`) to `placed` entries and to
+  `SceneStarFrame`, the retarded centres lighting takes; fields only._
 - **Deviations in T8.a, as built.** The topic is `scene/topic.rs`: `open` (reached through
   `Handlers::subscribe`) builds the core on the pool at `Priority::Interactive`, re-running the
   job after fetching each system it asks for (`FetchSystemError`) from the body cache, and spawns
@@ -1773,6 +1775,13 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
     request, the first real bulk kind, on this machine (RTX 3080) under the target-hardware rule.
     Until then, the client's reassembly is held by T11's tests over `FakeWebSocket` and the
     server's streaming by T10.b's tests over real sockets.
+    _Run 2026-10-07 with R06's sky (R06.T11.b; R06's Risks, "Deviations in T11.b, as built"):
+    passed at 4 chunks (868,248 bytes), hidden, in Electron 44.4.3 headless on SwiftShader, through
+    `RequestClient.requestBulk` over a real socket. The chunks arrived in order before the
+    response, and their bytes matched the server's. That closes R06.T11.b's part; the sky's
+    largest payload runs in R06.T17. No sky reaches 15 MiB: its largest payload is 7,494,912 bytes
+    (29 chunks). The 61-chunk check is R09's coarse field's, after RM3 (R09's Risks; decided
+    2026-10-07 by the orchestrator)._
   - **The envelope against P12.T9**, for plan 12's writer. As P12.T9 designs it: `subscribe`,
     `unsubscribe`, `Subscribed { subscription, state }`, `SubscriptionTopic`, `SubscriptionState`,
     `ServerMessage::Notification { subscription, body }`, `NotificationBody`, the unknown
@@ -1948,3 +1957,35 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
 - **Fixed in RM1 validation (2026-10-02): cleanups.** `#[must_use]` on `Ready::empty`, `welcome`,
   `End::close_frame` and `Stream::new`; `ScenePush::merge` indexes the earlier bodies by ID once
   instead of searching them for each later body; a stray TSDoc line above `CLOCK_WINDOW_S` removed.
+- **T8.b's slow-reader test, made deterministic (2026-10-07).**
+  `a_stuck_writer_gets_one_notification_with_the_latest_craft_and_the_second_s_changes` failed in
+  integration CI-55 at a load near 25 ("a notification after the clogging response"), and in 4 of
+  56 runs as 14 concurrent copies beside eight busy loops (load 21–31). The test sent `subscribe`
+  and the clogging request together, and under load the scene's opening, on the harness's one
+  pool worker, finished after the clogging response was queued, so its `subscribed` answer was
+  held behind it (as designed: terminal frames are queued in the order their requests finish) and
+  came where the merged notification was expected. Two more waits leaned on timing or on the
+  sockets: the stuck second's `sleep` stood in for the heartbeat's push having merged, and the
+  frames queued before the clogging response had to fit the kernel's buffers, or the response,
+  queued only into an empty queue, would wait behind them for good. The test now reads the
+  `subscribed` answer before it sticks the writer, `Harness::stick_writer_reading` reads on until
+  the clogging response is queued, and the stuck second is counted rather than timed: the test's
+  knowledge and craft source count what they are asked, and the client reads once 64 craft ticks
+  have passed and an advance has been followed by a tick, by which its push has merged; the advance
+  is a heartbeat, since the test checks first that no body's `valid_until` falls within a day of
+  the start (the first is at 33,554,432 s for its seed). The craft check is exact rather than
+  "within a second before the clock": the merged craft are stated no earlier than the last asked
+  while stuck and no later than the push's clock. No server change. Afterwards, twice 80 runs as
+  20 concurrent copies beside twelve busy loops (load 21–31) and 84 as 14 copies (load 5–15): no
+  failure.
+- **Answers in parts on the frames (a pointer from R06.T11.d, 2026-10-08).** A `sky` is answered
+  nearest first: before its terminal `response`, a `partial_response` for each answer but the
+  last, each a whole answer whose own chunks precede it, numbered from chunk 0 again, its manifest
+  stating them. Design note 10's "the chunks come in order before the terminal response" holds
+  for each answer. The connection streams each answer's chunks and frame in order with the
+  request's later answers and its terminal frame, and holds at most two such answers, two more
+  waiting in their channel (`PARTIALS_QUEUED`). A partial frame is queued after its chunks under
+  the frame-count limit, not held for byte room as a terminal frame is. The client's
+  `BulkAssembler` checks each answer against its own manifest and starts again from chunk 0.
+  `PROTOCOL_VERSION` stays 2: only a client that asks `sky` receives one. R06's Risks,
+  "Deviations in T11.d, as built", have the rest.

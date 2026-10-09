@@ -1,7 +1,14 @@
-import type { BodyIdHex, GalacticPosition, SystemIdHex, UniverseTime } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  GalacticPosition,
+  HostDiscDto,
+  SystemIdHex,
+  UniverseTime,
+} from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
+import type { WireAppearance } from "../appearance/fromWire";
 import {
   BODY_MIN_SIZE_CLASS,
   CONTACT_SIZE_CLASS,
@@ -23,6 +30,35 @@ import type { HullOutline } from "./hull";
 export type ViewBodyKind = "star" | "planet" | "dwarf_planet" | "moon" | "unresolved";
 
 /**
+ * Where a body was when the light the camera sees left it: its retarded geometric centre in the
+ * system frame, without aberration, which lighting takes where drawing takes the apparent place
+ * (plan R07, T10.a; decision-r07-t8a, follow-up (a)).
+ *
+ * @remarks
+ * The ship's local body is drawn at the present but lit at this retarded time too, as every
+ * time-varying state is drawn (the brainstorm's "the local body's included"; ruled for T10.a).
+ */
+export interface RetardedCentre {
+  /**
+   * Where the body was when the light the camera sees left it, m from the barycentre, galactic
+   * axes.
+   */
+  readonly centreM: Vec3;
+  /** Its velocity relative to the barycentre then, m/s along the galactic axes. */
+  readonly velocityMPerS: Vec3;
+  /**
+   * Light time from the body to the camera, s: the time it is lit at is the scene's less it. It is
+   * 0 in a kept scene.
+   */
+  readonly lightTimeS: number;
+}
+
+/** A body at rest in a kept scene, where it is drawn: no light time and no motion (R07.T10.a). */
+export function staticRetarded(centreM: Vec3): RetardedCentre {
+  return { centreM, velocityMPerS: { x: 0, y: 0, z: 0 }, lightTimeS: 0 };
+}
+
+/**
  * A body of the view's scene at the scene's time.
  *
  * @remarks
@@ -39,14 +75,36 @@ export interface ViewBody {
   readonly kind: ViewBodyKind;
   /** Its designation as the view labels it. */
   readonly designation: string;
-  /** Its (equatorial) radius, m. */
+  /**
+   * Its equatorial radius, m: a server body's figure's a where plan 14 sends a figure, its mean
+   * radius where it sends only the bulk (a sphere), and 0 where no radius is granted.
+   */
   readonly radiusM: number;
   /** Its Hill radius at pericentre, m, or `null` where it is not known. */
   readonly hillRadiusM: number | null;
   /** Its centre as drawn, m from the system's barycentre along the galactic axes. */
   readonly centreM: Vec3;
-  /** Its rotation from body-fixed to body axes, or `null` where rotation is not modelled. */
+  /**
+   * Its retarded centre, which lighting takes (R07.T10.a): a kept scene's is its drawn centre with
+   * no light time, at rest ({@link staticRetarded}) or with its velocity where the scene moves it
+   * (R07.T10.c's eclipse scene); `null` only for a contact, which never lights, occludes or is
+   * eclipsed.
+   */
+  readonly retarded: RetardedCentre | null;
+  /**
+   * Its rotation from body-fixed to body axes at the time it is drawn at, or `null` where rotation
+   * is not modelled: a server body's from its rotation section (plan R07, T2.b), at the frame's
+   * time for the ship's local body, drawn at the present, and at its light's emission for every
+   * other, drawn where it is seen.
+   */
   readonly rotation: Rotation3 | null;
+  /**
+   * How it is shaded where the photorealistic style lights it (plan R07, T2.b): a server body's
+   * figure, photometry and labels from plan 14's sections (`heldAppearanceOf`), or `null`, as for
+   * a star and a kept scene's body, when a lit body is a sphere of {@link ViewBody.radiusM} with the
+   * provisional photometry, labelled (Design note 5).
+   */
+  readonly appearance: WireAppearance | null;
   /**
    * The unit normal of its orbit, along the galactic axes, which stands for its pole while its
    * rotation is not modelled (Design note 14); `null` where it has no orbit drawn from elements,
@@ -55,6 +113,23 @@ export interface ViewBody {
   readonly orbitNormal: Vec3 | null;
   /** Its mark from the ship-wide symbol set, drawn below 3 px (`lib/system/bodySymbols.ts`). */
   readonly symbol: BodyMarkSymbol;
+}
+
+/** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */
+export function isLitKind(kind: ViewBodyKind): boolean {
+  let lit: boolean;
+  switch (kind) {
+    case "planet":
+    case "dwarf_planet":
+    case "moon":
+      lit = true;
+      break;
+    case "star":
+    case "unresolved":
+      lit = false;
+      break;
+  }
+  return lit;
 }
 
 /** A body's mark in the ship-wide symbol set: its shape and its size class. */
@@ -200,6 +275,11 @@ export interface ViewScene {
   readonly ownShip: CraftId | null;
   /** The pose a camera with no own ship starts at. */
   readonly defaultPose: CameraPose;
+  /**
+   * A kept scene's host discs, standing in for the sky's (R07.T8.a, decision-r07-t8a); a server
+   * scene leaves it unset and is lit by its held sky's `hosts`.
+   */
+  readonly hostDiscs?: ReadonlyArray<HostDiscDto>;
 }
 
 /**

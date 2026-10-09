@@ -24,7 +24,12 @@
 //! [`SystemStars`](crate::stellar::system::SystemStars) calls it for every system (P11.T2.c).
 //! Periods are in [`Days`](crate::units::Days) and, for densities and cumulative
 //! distributions, in x = log₁₀(P ÷ 1 d); masses in [`SolarMasses`](crate::units::SolarMasses).
+//!
+//! [`hierarchy_bound`] lists, for the sky census (rendering plan R06, R06.T8.g), the hierarchy of
+//! every redraw attempt that `SystemStars::generate` can keep, by the draw's own functions
+//! (P11.T16): it opens no stream of its own.
 
+mod bound;
 mod direct;
 mod dist;
 mod fates;
@@ -38,6 +43,7 @@ mod substellar;
 #[cfg(test)]
 pub(crate) mod testing;
 
+pub use bound::{AttemptBound, BoundPair, HierarchyBound, hierarchy_bound};
 pub use dist::{
     CIRCULARISATION_PERIOD, ECCENTRICITY_ENVELOPE_PERIOD, EccentricityDistribution, LOG_PERIOD_MAX,
     LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS, MassRatioDistribution,

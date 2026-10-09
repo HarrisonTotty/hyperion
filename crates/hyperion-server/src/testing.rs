@@ -8,6 +8,7 @@ use std::future::IntoFuture;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -26,7 +27,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::compute::CancelToken;
-use crate::requests::{Handler, HandlerFuture, SubscribeFuture, to_frame};
+use crate::requests::{Handler, HandlerFuture, Replies, SubscribeFuture, to_frame};
 use crate::stats::{OutboundCounters, RequestCounters};
 use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
@@ -54,22 +55,19 @@ pub(crate) struct Harness {
     server: Server,
     stop_serving: oneshot::Sender<()>,
     serving: JoinHandle<io::Result<()>>,
-    /// The low-water mark of the socket accepted last.
+    /// The low-water mark of the socket accepted last, on Linux and Android, where
+    /// [`tap_socket`](crate::tap_socket) sets it.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     lowat: Arc<AtomicU32>,
     _data_dir: TempDir,
 }
 
-/// A socket's `TCP_NOTSENT_LOWAT`, 0 where the option does not exist.
+/// A socket's `TCP_NOTSENT_LOWAT`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn read_lowat(tcp: &TcpStream) -> u32 {
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    return socket2::SockRef::from(tcp)
+    socket2::SockRef::from(tcp)
         .tcp_notsent_lowat()
-        .expect("the option can be read");
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    {
-        let _ = tcp;
-        0
-    }
+        .expect("the option can be read")
 }
 
 impl Harness {
@@ -123,13 +121,16 @@ impl Harness {
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let lowat = Arc::new(AtomicU32::new(0));
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let tapped = Arc::clone(&lowat);
         let listener = listener.tap_io(move |tcp| {
             match tap {
                 Tap::LowWaterMark => crate::tap_socket(tcp),
                 Tap::Kernel => {}
             }
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             tapped.store(read_lowat(tcp), Ordering::Release);
         });
         let (stop_serving, stopped) = oneshot::channel::<()>();
@@ -152,13 +153,16 @@ impl Harness {
             server,
             stop_serving,
             serving,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             lowat,
             _data_dir: data_dir,
         }
     }
 
-    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any
-    /// or where the option does not exist (rendering plan R03, R03.T10.a).
+    /// The `TCP_NOTSENT_LOWAT` read back from the socket the server accepted last, 0 before any.
+    ///
+    /// Linux and Android only, where socket2 exposes the option (rendering plan R03, R03.T10.a).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub(crate) fn accepted_lowat(&self) -> u32 {
         self.lowat.load(Ordering::Acquire)
     }
@@ -253,6 +257,51 @@ impl Harness {
         self.requests_until(|counters| counters.responded() > responded)
             .await;
         clogging_frame_len(id)
+    }
+
+    /// [`Harness::stick_writer`] for a client its subscriptions push to, which reads on until the
+    /// clogging response is queued.
+    ///
+    /// Each message read is handed to `read`; the client stops reading once the response is
+    /// queued. Returns the bytes queued then, the response's alone.
+    ///
+    /// The response is larger than any budget a test sets, so it is queued only into an empty
+    /// queue. A client that stopped reading first could leave a push queued behind a writer the
+    /// sockets' buffers had already stopped, and the response held behind it for good; how much
+    /// those buffers take differs from one platform to another. Reading until the response is
+    /// queued leaves nothing before it, whatever they take.
+    pub(crate) async fn stick_writer_reading(
+        &self,
+        calls: &mut Calls,
+        client: &mut Client,
+        id: u32,
+        mut read: impl FnMut(ServerMessage),
+    ) -> usize {
+        client.request(id, body(id)).await;
+        let call = calls.next().await;
+        assert_eq!(call.id(), id, "the request that sticks the writer");
+        assert!(call.respond(bulky_response(CLOGGING_BYTES)));
+        let clogging = clogging_frame_len(id);
+        let mut counters = self.state().outbound_stats.subscribe();
+        let mut queued =
+            std::pin::pin!(counters.wait_for(|counters| counters.queued_bytes() >= clogging));
+        timeout(WAIT, async {
+            loop {
+                tokio::select! {
+                    biased;
+                    counters = &mut queued => {
+                        break counters
+                            .expect("the counters live as long as the server")
+                            .queued_bytes();
+                    }
+                    // Dropped in the middle of a frame, this loses nothing: the part read stays in
+                    // the client's WebSocket, which finishes the frame at its next read.
+                    message = client.next_message() => read(message),
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the clogging response to be queued")
     }
 
     /// Waits until `count` connections are open.
@@ -555,6 +604,7 @@ impl Handler for Scripted {
         _state: Arc<AppState>,
         body: RequestBody,
         token: CancelToken,
+        _replies: Replies,
     ) -> HandlerFuture {
         let calls = self.calls.clone();
         Box::pin(async move {

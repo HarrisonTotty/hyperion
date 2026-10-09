@@ -9,12 +9,31 @@
  * | `--address` | `HYPERION_SERVER_ADDR` | `127.0.0.1` |
  * | `--port`    | `HYPERION_SERVER_PORT` | `7878`      |
  *
+ * `--setting high|low` is the quality setting `VIEW` draws at (plan R07, T17; R05 Design note 26),
+ * `high` unless given: the operator chooses it at launch, it holds for the run, and launching again
+ * changes it. The descent spike and the several-views check take it as their own setting.
+ *
+ * `--descent-spike` opens the descent spike in place of the consoles (plan R05, T13.c), with its
+ * `--setting` and its own options: `--seed <u64>`, `--smoke`, `--out <dir>`, `--workers <n>`,
+ * `--vertex-path baked-offsets|face-differences`, `--normals double|mesh`, `--ridged on|off`,
+ * `--dawn-safety on|off`, `--capture <dir>` and `--trace-profile on|off` (T14.e: V8's CPU profiler
+ * in the trace, off by default; a profiled run is a diagnostic, never judged). Each of its own is
+ * refused without the flag.
+ *
+ * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
+ * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
+ * so is `--descent-spike`.
+ *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
  * not the same thing.
  */
 
 import { Command, InvalidArgumentError, Option } from "commander";
+
+import type { QualitySettingName } from "../preload/api";
+import { DEFAULT_SPIKE_SEED, isU64Decimal, type SpikeLaunch } from "../preload/spikeLaunch";
+import type { ViewsCheckLaunch } from "../preload/viewsCheckLaunch";
 
 /** The variable giving the address of the server to link to, for `--address`. */
 export const ENV_SERVER_ADDR = "HYPERION_SERVER_ADDR";
@@ -35,6 +54,58 @@ export interface ClientArgs {
   readonly address: string;
   /** Port the server listens on, 1 to 65535. */
   readonly port: number;
+  /**
+   * The quality setting `VIEW` draws at (`--setting`, R07.T17): on a spike or a check launch, its
+   * own setting.
+   */
+  readonly setting: QualitySettingName;
+  /** The descent spike's options when `--descent-spike` is given, else `undefined`. */
+  readonly spike?: SpikeLaunch;
+  /** The several-views check's options when `--views-check` is given, else `undefined`. */
+  readonly viewsCheck?: ViewsCheckLaunch;
+}
+
+/** The spike's options other than the flag itself, by their commander attribute names. */
+const SPIKE_OPTIONS = [
+  "setting",
+  "seed",
+  "smoke",
+  "out",
+  "workers",
+  "vertexPath",
+  "normals",
+  "ridged",
+  "dawnSafety",
+  "capture",
+  "traceProfile",
+] as const;
+
+/** The spike's options that `--views-check` takes too. */
+const VIEWS_CHECK_OPTIONS = ["setting", "smoke", "out"] as const;
+
+/** Reads a `--seed` value: a u64 in decimal. */
+export function parseSeed(value: string): string {
+  if (!isU64Decimal(value)) {
+    throw new InvalidArgumentError("expected an unsigned 64-bit integer in decimal");
+  }
+  return value;
+}
+
+/** Reads a `--workers` value: 1 to 64 height workers. */
+export function parseWorkers(value: string): number {
+  const workers = /^\d{1,2}$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(workers) || workers < 1 || workers > 64) {
+    throw new InvalidArgumentError("expected a worker count from 1 to 64");
+  }
+  return workers;
+}
+
+/** Reads a directory argument: any non-empty path. */
+function parseDirectory(value: string): string {
+  if (value.length === 0) {
+    throw new InvalidArgumentError("expected a directory");
+  }
+  return value;
 }
 
 /**
@@ -104,6 +175,46 @@ export function buildCommand(version: string): Command {
         .env(ENV_SERVER_PORT)
         .argParser(parsePort),
     )
+    .addOption(
+      new Option("--descent-spike", "run the descent spike (plan R05) in place of the consoles"),
+    )
+    .addOption(
+      new Option("--views-check", "run the several-views check (plan R07) in the consoles' VIEW"),
+    )
+    .addOption(
+      new Option(
+        "--setting <SETTING>",
+        "the quality setting VIEW draws at, or the spike's or the check's (default high)",
+      ).choices(["high", "low"]),
+    )
+    .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
+    .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
+    .addOption(
+      new Option("--out <DIR>", "where the spike's or the check's results file goes").argParser(
+        parseDirectory,
+      ),
+    )
+    .addOption(
+      new Option("--workers <N>", "the spike's height-worker count").argParser(parseWorkers),
+    )
+    .addOption(
+      new Option("--vertex-path <PATH>", "the terrain's vertex path").choices([
+        "baked-offsets",
+        "face-differences",
+      ]),
+    )
+    .addOption(new Option("--normals <RES>", "the terrain's normals").choices(["double", "mesh"]))
+    .addOption(new Option("--ridged <ON>", "the test planet's ridges").choices(["on", "off"]))
+    .addOption(new Option("--dawn-safety <ON>", "Dawn's safety checks").choices(["on", "off"]))
+    .addOption(
+      new Option("--capture <DIR>", "capture the GPU calls of a span").argParser(parseDirectory),
+    )
+    .addOption(
+      new Option("--trace-profile <ON>", "V8's CPU profiler in the spike's trace").choices([
+        "on",
+        "off",
+      ]),
+    )
     .exitOverride();
 }
 
@@ -116,16 +227,90 @@ export function buildCommand(version: string): Command {
  * asked for and has been written; its `exitCode` is the code to end the process with.
  */
 export function parseClientArgs(args: readonly string[], version: string): ClientArgs {
-  const options = buildCommand(version)
-    .parse([...args], { from: "user" })
-    .opts();
+  const command = buildCommand(version).parse([...args], { from: "user" });
+  const options = command.opts();
   // Both options have a default and a parser, so commander cannot yield another type here.
   const address: unknown = options["address"];
   const port: unknown = options["port"];
   if (typeof address !== "string" || typeof port !== "number") {
     throw new Error("the command line yielded no address and port");
   }
-  return { address, port };
+  if (options["viewsCheck"] === true) {
+    // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
+    if (options["descentSpike"] === true) {
+      command.error("error: --views-check and --descent-spike are separate runs; give one");
+    }
+    const stray = SPIKE_OPTIONS.find(
+      (name) => options[name] !== undefined && !VIEWS_CHECK_OPTIONS.some((each) => each === name),
+    );
+    if (stray !== undefined) {
+      command.error(`error: --${kebab(stray)} is an option of --descent-spike, not --views-check`);
+    }
+    const viewsCheck = viewsCheckLaunchOf(options);
+    return { address, port, setting: viewsCheck.setting, viewsCheck };
+  }
+  if (options["descentSpike"] !== true) {
+    // The setting is the consoles' too (R07.T17); the spike's other options are its own.
+    const stray = SPIKE_OPTIONS.find((name) => name !== "setting" && options[name] !== undefined);
+    if (stray !== undefined) {
+      const owners = VIEWS_CHECK_OPTIONS.some((each) => each === stray)
+        ? "--descent-spike or --views-check, neither of which was"
+        : "--descent-spike, which was not";
+      command.error(`error: --${kebab(stray)} is an option of ${owners} given`);
+    }
+    return { address, port, setting: settingOf(options) };
+  }
+  const spike = spikeLaunchOf(options);
+  if (spike.setting === "low" && spike.vertexPath === "baked-offsets") {
+    // The low setting's cache does not fit `BakedOffsets` (R05 Design note 4).
+    command.error("error: --vertex-path baked-offsets does not fit the low setting's cache");
+  }
+  return { address, port, setting: spike.setting, spike };
+}
+
+/** The `--setting` given, `high` without one (commander has checked its choices). */
+function settingOf(options: Readonly<Record<string, unknown>>): QualitySettingName {
+  return options["setting"] === "low" ? "low" : "high";
+}
+
+/** A commander attribute name as its option: `vertexPath` is `vertex-path`. */
+function kebab(name: string): string {
+  return name.replaceAll(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
+
+/** The several-views check's options, each parsed and checked by commander, with their defaults. */
+function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCheckLaunch {
+  const out = options["out"];
+  return {
+    setting: settingOf(options),
+    smoke: options["smoke"] === true,
+    out: typeof out === "string" ? out : null,
+  };
+}
+
+/** The spike's options, each parsed and checked by commander, with their defaults. */
+function spikeLaunchOf(options: Readonly<Record<string, unknown>>): SpikeLaunch {
+  const text = (name: string): string | null => {
+    const value = options[name];
+    return typeof value === "string" ? value : null;
+  };
+  const workers = options["workers"];
+  const vertexPath = text("vertexPath");
+  const normals = text("normals");
+  return {
+    setting: settingOf(options),
+    seed: text("seed") ?? DEFAULT_SPIKE_SEED,
+    smoke: options["smoke"] === true,
+    out: text("out"),
+    workers: typeof workers === "number" ? workers : null,
+    vertexPath:
+      vertexPath === "baked-offsets" || vertexPath === "face-differences" ? vertexPath : null,
+    normals: normals === "double" || normals === "mesh" ? normals : null,
+    ridged: text("ridged") === "on" ? "on" : "off",
+    dawnSafety: text("dawnSafety") === "off" ? "off" : "on",
+    capture: text("capture"),
+    traceProfile: text("traceProfile") === "on" ? "on" : "off",
+  };
 }
 
 /**
@@ -139,7 +324,7 @@ export function userArgs(argv: readonly string[], packaged: boolean): readonly s
 }
 
 /** The WebSocket URL of the server described by `args`. */
-export function serverUrlOf({ address, port }: ClientArgs): string {
+export function serverUrlOf({ address, port }: Pick<ClientArgs, "address" | "port">): string {
   const url = new URL(`ws://${address}`);
   url.port = String(port);
   url.pathname = WS_PATH;

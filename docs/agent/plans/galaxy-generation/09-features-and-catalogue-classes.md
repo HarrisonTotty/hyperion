@@ -532,7 +532,11 @@ cell; registry golden. Acceptance:
   goldens. Tests: the young field's age histogram against (1 − φ) × budget by chi-square; the map
   unchanged bit for bit. Acceptance: `just ci` green with regenerated goldens, and the diff of
   goldens reviewed to touch only counts, never the layout of an unaffected cell's survivors
-  (candidates keep their streams).
+  (candidates keep their streams). **It lands with rendering plan R06's R06.T16.a**, in one
+  integration at this task's version (decided 2026-10-05, `decision-r06-t16a-scope.md`). R06's sky
+  census, caps and band read the field alone. So the field gives up φ only when the sky takes the
+  members in. Otherwise the sky loses φ of each population: about nine in ten of the young disc's
+  O and early-B stars, and at least a quarter of its B stars.
 
 #### P09.T3 The feature catalogue grid
 
@@ -966,6 +970,47 @@ member counts in the layer of its band. Tests: a 50 ly query in a globular's cor
 brute-force enumeration of the whole cluster; census decisions are independent of cache state;
 bench: that query cold, target under 20 ms.
 
+#### P09.T23.b Each feature padded by its own speed bound (new; no output moves; before R06.T16.a)
+
+Decided 2026-10-05 (`decision-r06-pad-speed.md`). A member moves at its feature's bulk velocity
+plus its own internal velocity (P09.T10).
+
+- The bulk is below min(v_esc, 1,000 km/s). The internal part can add up to the cluster's
+  central escape speed for a core member (164 km/s at most over P09.T14's 50 seeds), and
+  12.12 times the tidal radius's σ for an uncut tail member.
+- So a member can outrun plan 03's `PAD_SPEED` only where its feature's bulk lies within that of
+  1,000 km/s. That needs the galaxy's escape speed near 1,000 km/s, which only the central few
+  hundred light-years allow.
+- No member is known to outrun it, but nothing proves none can.
+
+1. `FeatureInterior::member_speed_bound() -> KilometresPerSecond` is |bulk| plus the largest
+   internal speed any member can take, which is the larger of:
+   - the cluster's central escape speed: a core member is cut at its local escape speed, which is
+     greatest at the centre;
+   - for tail members, √(212 ln 2) = 12.1222 times the largest σ a tail class takes at the tidal
+     radius, its equipartition factor included. Box–Muller's largest normal is √(106 ln 2) =
+     8.5717 (`rng::sample::normal`), an internal velocity is one pair of normals and one more,
+     and the maximum can be reached. Compute the factor in code, or round it up (8.58 √2), as
+     `galaxy/params/draws.rs` rounds its cap.
+2. `FeatureMemberSource::systems_in_sphere` pads each feature, band by band, by `pad_for(t,
+max(pad_speed(layer), member_speed_bound))`. Where the bound is under `pad_speed`, the cells
+   are today's.
+3. `interiors_near` is asked with the sphere padded at `UNBOUND_PAD_SPEED`. A debug assertion
+   holds every bound below that.
+
+Tests:
+
+- over the members of 200 features of the fixture, including every feature within 2,000 ly of the
+  centre, every member's speed is below its feature's bound;
+- P09.T23's brute-force test at t = ±H, for 20 centres, one of them the fixture's feature with
+  the largest bound;
+- the fixture's features with a bound at or above `PAD_SPEED` are counted and recorded (none
+  expected).
+
+Files: `galaxy/features/members/source.rs`, `galaxy/features/members/placement.rs`. Acceptance:
+`cargo test -p hyperion-sim features::members`, `just ci`. No GENERATOR_VERSION bump: padding
+chooses cells, not output.
+
 ### Phase 6: the galactic centre
 
 _Status (lane `centre09a`, 2026-09-29): T24.a–c, T25, T26 and T27 are built; see Risks, "Phase 6,
@@ -1166,7 +1211,14 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
   10⁴–10⁵; none younger than the interval's start, where the entries take over; `pad_speed(D)` is
   `UNBOUND_PAD_SPEED`; at t = ±H a 50 ly query equals the brute-force enumeration for 100 centres
   chosen to have a survivor within 15 ly outside the sphere at the epoch; the count of layer-D cells
-  visited at |t| = H rises by under a third.
+  visited at |t| = H rises by under a third. Through P08.T17's `escape_cut_holds`, the raise needs
+  no change of its own anywhere else:
+  - plan 12's lensing walk moves layer D off the escape envelope, to `UNBOUND_PAD_SPEED`;
+  - R06's census pads layer D's cells, and its bound before the drift, at 3,000 km/s.
+
+  Tests, added: `escape_cut_holds(Layer::D)` is false; P08.T12.d's `every_exempt_class_is_padded`
+  passes with the class's weight; and P08.T17's debug assertion holds over the 100 query centres'
+  survivors (decided 2026-10-05, `decision-r06-pad-speed.md`).
 
 #### P09.T43 The luminous blue variables
 
@@ -1277,7 +1329,11 @@ for `hello`.
   with interior mutability because `SystemSource` takes `&self`. The `SystemsInRange` handler
   registers `FeatureMemberSource`, `CentreMemberSource` and `CatalogueClassSource`, and passes
   `FeatureGas` wherever it passed `NoModifiers`. Tests: eviction never changes a reply; a range
-  query over the WebSocket inside a globular returns members with their origin.
+  query over the WebSocket inside a globular returns members with their origin. Rendering plan
+  R06's R06.T16.a reads only the features' part: `FeatureCellCache`, `ClusterModelCache`,
+  `FeatureMemberSource` registered, and `FeatureGas` passed. That part may be built ahead of the
+  centre's and the catalogue classes' sources, which wait on P09.T29 and T37 (decided 2026-10-05,
+  `decision-r06-t16a-scope.md`).
 - **P09.T40.b Handlers.** `FeaturesInRange`, `FeatureDetail` and `BlackHoleState` on the CPU pool;
   `GalaxyFeatures` computed in the background and cached per universe, like the density map. Tests:
   integration tests over the WebSocket for each message, including an unknown feature ID and a
@@ -2477,3 +2533,15 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     brown dwarfs' fullest cell rises from some 20,000 to 74,036 of 2¹⁹. By ruling 125 those cells
     saturate in place and nothing else moves, but the brainstorm's "the Milky Way's does not reach
     it" no longer holds; the tests are pinned provisionally to the measured state.
+- **The monopole's density check beyond 10⁵ ly (P11.T4.h, 2026-10-04).**
+  `the_table_holds_the_gaussians_mass_and_density` takes its finite difference beyond 10⁵ ly
+  Richardson-extrapolated at h = 4 × 10⁻³, with the 10⁻⁵ tolerance kept: at h = 10⁻⁴ it sat at its
+  rounding floor and failed on P11.T4.h's last-bit change to the galaxy's parameters. See plan 11's
+  Risks, "P11.T4.h as built".
+- **The envelope bounds' tightness check at its rounding floor (P11.T4.h, 2026-10-04).**
+  `envelopes_never_exceed_their_bounds` (`tests/galaxy_bounds.rs`, plan 02's P02.T8.a) allows the
+  exponent's rounding, 4 |ln corner| ε, beyond its 10⁻¹² in the normal range, and a disc's
+  2⌈n0⌉ subnormal units beyond its 64 in the subnormal range, in the tightness half only (safety
+  stays exact; `bounds.rs` is untouched). The same change to the galaxy's parameters took it to
+  1.08 × 10⁻¹² at ln corner = −634 and to 81 units for the nuclear disc at 3.5 × 10⁻³¹¹. See plan
+  11's Risks, "P11.T4.h as built".

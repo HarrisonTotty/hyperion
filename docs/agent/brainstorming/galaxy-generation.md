@@ -921,8 +921,8 @@ tenth of the main-sequence lifetime after it starts (their AR) gives temporary c
 accretor overfills its lobe by up to 10%: the accretor regains thermal equilibrium and shrinks back
 inside its lobe (de Mink, Pols and Hilditch 2007), and the pair returns to semi-detached transfer.
 Deeper contact merges on the lighter star's thermal timescale. Slower contact is the W UMa
-channel, and contact pairs should number 1/1000–1/250 of main-sequence stars fainter than
-M_V = +1.5 (Rucinski 2002: about 1/500).
+channel, and contact pairs should number 1/1000–1/250 of main-sequence stars of the same absolute
+magnitude over +1.5 < M_V < +5.5 (Rucinski 2002, Table 3; 2006, §1 and §5: about 1/500).
 
 Three of the rows are pinned more closely:
 

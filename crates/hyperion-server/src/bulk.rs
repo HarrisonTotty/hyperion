@@ -30,6 +30,8 @@ use hyperion_protocol::{BulkManifestDto, RequestId, ResponseBody};
 
 use crate::limits::MAX_BINARY_FRAME_BYTES;
 
+pub(crate) mod sky;
+
 /// The first four bytes of every binary frame.
 pub(crate) const MAGIC: [u8; 4] = *b"HYPB";
 
@@ -74,10 +76,6 @@ pub(crate) fn encode_header(header: &BinaryFrameHeader) -> [u8; HEADER_BYTES] {
 
 /// A payload too large for its chunks to be counted in the header's `u32`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "R06 and R09 add the first kinds answered in bulk")
-)]
 pub(crate) struct BuildBulkPayloadError {
     bytes: usize,
 }
@@ -107,10 +105,6 @@ impl BulkPayload {
     /// # Errors
     ///
     /// [`BuildBulkPayloadError`] if its chunks cannot be counted in a `u32`, about a petabyte.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "R06 and R09 add the first kinds answered in bulk")
-    )]
     pub(crate) fn new(bytes: Bytes) -> Result<Self, BuildBulkPayloadError> {
         let chunks = u32::try_from(bytes.len().div_ceil(CHUNK_PAYLOAD_BYTES))
             .map_err(|_| BuildBulkPayloadError { bytes: bytes.len() })?;
@@ -179,7 +173,6 @@ impl From<ResponseBody> for Answer {
 mod tests {
     use super::*;
     use crate::limits::BULK_QUEUED_BYTES;
-    use crate::limits::TCP_NOTSENT_LOWAT_BYTES;
     use crate::requests::Handlers;
     use crate::testing::Harness;
 
@@ -277,7 +270,10 @@ mod tests {
         let harness = Harness::start(Handlers).await;
         let mut client = harness.connect().await;
         client.hello().await;
-        assert_eq!(harness.accepted_lowat(), TCP_NOTSENT_LOWAT_BYTES);
+        assert_eq!(
+            harness.accepted_lowat(),
+            crate::limits::TCP_NOTSENT_LOWAT_BYTES
+        );
         client.close().await;
         harness.stop().await;
     }
@@ -1005,8 +1001,9 @@ mod tests {
                 state: std::sync::Arc<crate::AppState>,
                 body: hyperion_protocol::RequestBody,
                 token: crate::compute::CancelToken,
+                replies: crate::requests::Replies,
             ) -> crate::requests::HandlerFuture {
-                self.0.handle(state, body, token)
+                self.0.handle(state, body, token, replies)
             }
 
             fn subscribe(

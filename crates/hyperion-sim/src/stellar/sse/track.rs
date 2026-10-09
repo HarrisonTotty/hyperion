@@ -104,6 +104,8 @@ pub(crate) use binary::{
     giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,
     main_sequence_structure, new_star_mass,
 };
+#[cfg(test)]
+pub(crate) use binary::{early_agb_core_radius_bound, helium_zams_radius};
 use build::Builder;
 pub(crate) use build::Resolution;
 pub(crate) use excess::{HeliumHook, HeliumTable};
@@ -782,6 +784,21 @@ impl Track {
             .filter(move |&age| age.is_finite() && from_age < age && age < to_age)
     }
 
+    /// Each segment's start and end age, years (the remnant's end infinite), with its knots' ages,
+    /// in the segments' order: the phases rendering plan R06's luminosity function cuts a life
+    /// into (its Design note 7).
+    pub(crate) fn segment_ages(
+        &self,
+    ) -> impl Iterator<Item = (f64, f64, impl Iterator<Item = f64> + '_)> + '_ {
+        self.segments.iter().map(|segment| {
+            (
+                segment.start,
+                segment.end,
+                segment.knots.iter().map(|knot| knot.age),
+            )
+        })
+    }
+
     /// The age at which the main sequence ends, if the track has been built past it: the start
     /// of the first segment after the last main-sequence one (the rotation of an evolved star
     /// reads the star there, P06.T25).
@@ -815,6 +832,34 @@ impl Track {
             .iter()
             .find(|segment| matches!(segment.model, Model::MainSequence { .. }))
             .map(|segment| segment.start)
+    }
+
+    /// The age at which a hydrogen star's main sequence starts, whether or not the track is built
+    /// that far, or `None` for a track with no main sequence (a naked helium star's, a remnant's).
+    ///
+    /// It is [`Track::main_sequence_start`]'s where the main sequence is built, and the same age
+    /// from the build's own law where the track ends before it, in its protostar or contraction
+    /// (P06.T15.b). Plan 11's engine starts where the first star has arrived (`binary::evolve`'s
+    /// `arrival`, P11.T4.i; where both had, before) and reads a later star as its own zero-age
+    /// main-sequence star until its arrival: read from the segments alone, a pair run to an age
+    /// before a star's arrival lost that star's arrival and was stepped from age zero, as
+    /// protostars, which merged at once (P11's protostar mergers, 2026-10-05).
+    #[must_use]
+    pub(crate) fn main_sequence_arrival(&self) -> Option<Years> {
+        self.main_sequence_start()
+            .or_else(|| {
+                self.segments
+                    .first()
+                    .filter(|segment| segment.model.is_before_main_sequence())
+                    .map(|_| {
+                        phases::main_sequence_start_years(
+                            self.initial_mass.value(),
+                            &self.coeffs,
+                            self.options.bridges(),
+                        )
+                    })
+            })
+            .map(Years::new)
     }
 
     /// The initial mass the track was built for, M☉ (clamped into the covered range).

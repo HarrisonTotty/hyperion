@@ -4,9 +4,11 @@
  *
  * @remarks
  * The draw list (R02.T13) is packed into four storage buffers, one per shader, and drawn in this
- * order: the bodies' occluder spheres and the hulls' occluder faces (depth only), the star sprites
- * (additive), then each line batch, its `--surface-0` casing first and its stroke over it, both
- * premultiplied over what is beneath. Sprites go before the lines, where the draw list lists them
+ * order: the bodies' occluder spheres and the hulls' opaque faces (each pushed away in its
+ * fragment by the list's `occluderSlopePx`, R07.T16.d; depth only, or over the photorealistic image
+ * a silhouette filled opaque in its mesh's `fill`, R07.T16.e), the star sprites (additive), then
+ * each line batch, its `--surface-0` casing first and its stroke over it, both premultiplied over
+ * what is beneath. Sprites go before the lines, where the draw list lists them
  * after, so that a mark's casing covers a star beneath it, as the guide's casing rule wants of every
  * mark over the image. The shaders are standard WGSL in R01's convention (its Design note 23):
  * `frame.wgsl`'s `Frame` at `@group(0)`, each material's `Draw` at `@group(1)` (the draw's offset
@@ -33,6 +35,7 @@ import {
   perspectiveReversedInfinite,
   type ProjectionCamera,
   project,
+  toViewAxes,
   type Viewport,
   viewRotation4,
 } from "../camera/projection";
@@ -42,16 +45,14 @@ import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import occluderSphereWgsl from "../shaders/occluderSphere.wgsl?raw";
 import starSpriteWgsl from "../shaders/starSprite.wgsl?raw";
 import toneCurveWgsl from "../shaders/toneCurve.wgsl?raw";
-import {
-  type DrawCamera,
-  HULL_OCCLUDER_BIAS,
-  type LineBatch,
-  type OccluderSphere,
-  type WireframeDrawList,
-} from "./drawList";
+import type { DrawCamera, LineBatch, OccluderSphere, WireframeDrawList } from "./drawList";
 
-/** The wireframe's materials, by name. */
-export type WireframeMaterial = "lines" | "occluderSphere" | "occluderHull" | "starSprite";
+/**
+ * The wireframe's materials, by name: `occluderHull` a hull's faces as depth alone, and
+ * `hullSilhouette` the same faces filled opaque over the photorealistic image (R07.T16.e).
+ */
+export type WireframeMaterial =
+  "lines" | "occluderSphere" | "occluderHull" | "hullSilhouette" | "starSprite";
 
 /** The meshes the wireframe instances: a unit quad's two triangles, and one triangle. */
 export type WireframeMesh = "quad" | "triangle";
@@ -67,6 +68,7 @@ const SOURCES: Readonly<Record<WireframeMaterial, string>> = {
   lines: frameWgsl + linesWgsl,
   occluderSphere: frameWgsl + occluderSphereWgsl,
   occluderHull: frameWgsl + occluderWgsl,
+  hullSilhouette: frameWgsl + occluderWgsl,
   starSprite: frameWgsl + toneCurveWgsl + starSpriteWgsl,
 };
 
@@ -75,6 +77,7 @@ export const MATERIAL_BUFFER: Readonly<Record<WireframeMaterial, WireframeBuffer
   lines: "segments",
   occluderSphere: "spheres",
   occluderHull: "corners",
+  hullSilhouette: "corners",
   starSprite: "sprites",
 };
 
@@ -86,15 +89,13 @@ const DISPLAY_NAMES: Readonly<Record<WireframeMaterial, string>> = {
   lines: "WIREFRAME LINES",
   occluderSphere: "BODY OCCLUDER",
   occluderHull: "HULL OCCLUDER",
+  hullSilhouette: "HULL SILHOUETTE",
   starSprite: "STAR SPRITES",
 };
 
 function spec(
   name: WireframeMaterial,
-  state: Pick<
-    WgslMaterialSpec,
-    "uniforms" | "depthWrite" | "colourWrites" | "blend" | "depthBiasAway"
-  >,
+  state: Pick<WgslMaterialSpec, "uniforms" | "depthWrite" | "colourWrites" | "blend">,
 ): WgslMaterialSpec {
   return {
     name: `wireframe:${name}`,
@@ -111,12 +112,35 @@ function spec(
 }
 
 /**
- * The wireframe's four materials (Design notes 5, 9 and 12).
+ * Whether each material writes the depth that hides what follows it, so that its draws go before
+ * the background and every line (R06.T13.g; R07.T16.e): the occluders and the hulls' silhouettes.
+ */
+const IS_OCCLUDER: Readonly<Record<WireframeMaterial, boolean>> = {
+  lines: false,
+  occluderSphere: true,
+  occluderHull: true,
+  hullSilhouette: true,
+  starSprite: false,
+};
+
+/** A hull face's uniforms, for both of its materials, which share one source. */
+const HULL_UNIFORMS: WgslMaterialSpec["uniforms"] = [
+  { name: "firstTriangle", type: "f32" },
+  { name: "occluderSlopePx", type: "f32" },
+  { name: "fill", type: "vec4f" },
+];
+
+/**
+ * The wireframe's five materials (Design notes 5, 9 and 12).
  *
  * @remarks
- * Lines and sprites are depth-tested and write no depth; the occluders write depth and no colour;
- * only the hull's occluder faces carry the depth bias, never a line pass. The uniforms are listed
- * in the order of each shader's `Draw` struct, after its `offsetFromCameraM`.
+ * Lines and sprites are depth-tested and write no depth; the occluders write depth and no colour,
+ * each its own depth from its fragment, pushed away by `occluderSlopePx` pixels of the depth's
+ * screen slope (Design note 5; R07.T16.d). The hull's silhouette is its occluder with colour
+ * writes on: opaque, its colour the draw's `fill` (R07.T16.e; decision-r07-t16a, item 3). No
+ * material sets a hardware depth bias: it is pipeline state, which could not follow the display's
+ * ratio. The uniforms are listed in the order of each shader's `Draw` struct, after its
+ * `offsetFromCameraM`.
  */
 export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMaterialSpec>> = {
   lines: spec("lines", {
@@ -133,17 +157,22 @@ export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMateria
     blend: "premultiplied",
   }),
   occluderSphere: spec("occluderSphere", {
-    uniforms: [],
+    uniforms: [{ name: "occluderSlopePx", type: "f32" }],
     depthWrite: true,
     colourWrites: false,
     blend: "none",
   }),
   occluderHull: spec("occluderHull", {
-    uniforms: [{ name: "firstTriangle", type: "f32" }],
+    uniforms: HULL_UNIFORMS,
     depthWrite: true,
     colourWrites: false,
     blend: "none",
-    depthBiasAway: HULL_OCCLUDER_BIAS,
+  }),
+  hullSilhouette: spec("hullSilhouette", {
+    uniforms: HULL_UNIFORMS,
+    depthWrite: true,
+    colourWrites: true,
+    blend: "none",
   }),
   starSprite: spec("starSprite", {
     uniforms: [],
@@ -307,6 +336,59 @@ export function sphereScreenRect(
   return rect.leftPx < rect.rightPx && rect.topPx < rect.bottomPx ? rect : null;
 }
 
+/**
+ * How far past each side of the view {@link sphereOutsideView} looks, px on the image plane.
+ *
+ * @remarks
+ * A disc draws a pixel only where its corners' mean limb angle is at most 0.75 times their gradient
+ * (`OUTSIDE_PX`, `bodyDisc.wgsl`). The gradient is at most √2 times the larger angle a pixel's side
+ * subtends there, so a drawn pixel lies within 1.06 of those angles of the limb. A ray through the
+ * view stands at least m cos(φ′ ÷ 2) of them off a side plane widened by m pixels to a field φ′ on
+ * that axis: 3.35 for 8 px on a 64 px side at 120°. An oblate body's scaled space may shrink the one
+ * angle and grow the other by a ÷ c each, 1.56 together at the record's cap of f = 0.2. So on sides
+ * of 64 px or more, up to 120° on each axis, 8 px clears the 1.06 three times over for a sphere and
+ * twice over at f = 0.2. A side whose field passes 120°, a tall view's height, is outside this
+ * bound; the disc's twin draws no pixel there either, with fields to 144° and f = 0.2
+ * (`regime.test.ts`).
+ *
+ * R06's host disc and the occluder sphere light or write a pixel only where the ray through the
+ * pixel's centre meets the sphere, and the outermost centres lie half a pixel inside each side, so
+ * they need no margin but for their shaders' `f32` (under 10⁻⁶ rad, a pixel at 4K across 10° being
+ * 4.5 × 10⁻⁵ rad). This one serves them with room to spare (`disc.test.ts`, `submit.test.ts`).
+ */
+export const OUTSIDE_VIEW_MARGIN_PX = 8;
+
+/**
+ * Whether a sphere stands wholly beyond one of a view's four side planes, each widened by
+ * {@link OUTSIDE_VIEW_MARGIN_PX}: no ray through the view then meets it or passes near enough its
+ * limb to draw a pixel, wherever it stands. It holds behind the camera and across the camera's
+ * plane, where {@link sphereScreenRect} gives the whole view.
+ *
+ * @remarks
+ * Nothing is drawn for such a sphere: no occluder sphere ({@link packWireframe}), no lit body's
+ * disc and no footprint for promotion (R07's `bodies/draw.ts` and `bodies/regime.ts`), and no host
+ * disc (R06's `sky/disc.ts`; R07.T19.e).
+ *
+ * @param centreM - The sphere's centre from the camera, m (`f64`).
+ */
+export function sphereOutsideView(
+  centreM: Vec3,
+  radiusM: number,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): boolean {
+  const view = toViewAxes(centreM, camera.orientation);
+  const tanHalf = Math.tan(camera.fovXRad / 2);
+  const marginTan = (OUTSIDE_VIEW_MARGIN_PX * 2 * tanHalf) / viewport.widthPx;
+  const tanX = tanHalf + marginTan;
+  const tanY = (tanHalf * viewport.heightPx) / viewport.widthPx + marginTan;
+  // The view looks down −z: inside the side planes |x| ≤ tanX (−z) and |y| ≤ tanY (−z). Each is the
+  // centre's signed distance beyond the plane of its pair on the centre's side, the larger.
+  const beyondSideM = (Math.abs(view.x) + tanX * view.z) / Math.hypot(1, tanX);
+  const beyondTopM = (Math.abs(view.y) + tanY * view.z) / Math.hypot(1, tanY);
+  return Math.max(beyondSideM, beyondTopM) > radiusM;
+}
+
 /** Where a batch's point lands, px: projected for a view batch, as given for a screen batch. */
 function screenPoint(
   batch: LineBatch,
@@ -373,11 +455,18 @@ export function packWireframe(
     fovXRad: camera.fovXRad,
   };
   const draws: PackedDraw[] = [];
+  const occluderSlopePx = new Float32Array([list.occluderSlopePx]);
 
   const sphereRows: number[] = [];
   let sphereCount = 0;
   for (const sphere of list.occluderSpheres) {
-    const rect = sphereScreenRect(centreOf(sphere), sphere.radiusM, projection, viewport);
+    const centre = centreOf(sphere);
+    // Behind the camera or across its plane the rectangle is the whole view, each fragment
+    // rejecting itself (R07.T19.e).
+    if (sphereOutsideView(centre, sphere.radiusM, projection, viewport)) {
+      continue;
+    }
+    const rect = sphereScreenRect(centre, sphere.radiusM, projection, viewport);
     if (rect === null) {
       continue;
     }
@@ -393,7 +482,7 @@ export function packWireframe(
       mesh: "quad",
       instanceCount: sphereCount,
       offsetFromCameraM: ZERO_OFFSET,
-      uniforms: {},
+      uniforms: { occluderSlopePx },
     });
   }
 
@@ -412,14 +501,26 @@ export function packWireframe(
         0,
       );
     }
-    // Each hull is its own draw at its own origin, reading its range of the one buffer.
-    draws.push({
-      material: "occluderHull",
-      mesh: "triangle",
-      instanceCount: triangles,
-      offsetFromCameraM: mesh.originF32,
-      uniforms: { firstTriangle: new Float32Array([firstTriangle]) },
-    });
+    // Each hull is its own draw at its own origin, reading its range of the one buffer: depth
+    // alone, or a silhouette filled opaque in its colour (R07.T16.e).
+    const first = new Float32Array([firstTriangle]);
+    draws.push(
+      mesh.fill === null
+        ? {
+            material: "occluderHull",
+            mesh: "triangle",
+            instanceCount: triangles,
+            offsetFromCameraM: mesh.originF32,
+            uniforms: { firstTriangle: first, occluderSlopePx },
+          }
+        : {
+            material: "hullSilhouette",
+            mesh: "triangle",
+            instanceCount: triangles,
+            offsetFromCameraM: mesh.originF32,
+            uniforms: { firstTriangle: first, occluderSlopePx, fill: linearColour(mesh.fill) },
+          },
+    );
   }
 
   const spriteRows: number[] = [];
@@ -531,6 +632,7 @@ export class WireframeRenderer {
         lines: material("lines"),
         occluderSphere: material("occluderSphere"),
         occluderHull: material("occluderHull"),
+        hullSilhouette: material("hullSilhouette"),
         starSprite: material("starSprite"),
       },
       meshes: {
@@ -576,8 +678,15 @@ export class WireframeRenderer {
    * The frame for a draw list: the list packed, its buffers written, its draws bound.
    *
    * @param viewport - The view's size, px, which the projection's aspect follows.
+   * @param background - Draws at infinity, such as R06's baked star cube, encoded after the
+   *   occluders (so that they hide them) and before the lines and sprites.
    */
-  frame(list: WireframeDrawList, camera: DrawCamera, viewport: Viewport): FrameSubmission {
+  frame(
+    list: WireframeDrawList,
+    camera: DrawCamera,
+    viewport: Viewport,
+    background: ReadonlyArray<DrawItem> = [],
+  ): FrameSubmission {
     const packed = packWireframe(list, camera, viewport);
     const buffers: Record<WireframeBuffer, BufferHandle> = {
       segments: this.#write("segments", packed.segments),
@@ -586,7 +695,7 @@ export class WireframeRenderer {
       sprites: this.#write("sprites", packed.sprites),
     };
     const { materials, meshes } = this.#resources;
-    const draws: DrawItem[] = packed.draws.map((draw) => {
+    const bound: DrawItem[] = packed.draws.map((draw) => {
       const bufferName = MATERIAL_BUFFER[draw.material];
       return {
         mesh: meshes[draw.mesh],
@@ -598,6 +707,17 @@ export class WireframeRenderer {
         storageBuffers: { [bufferName]: buffers[bufferName] },
       };
     });
+    // The occluders, then the background they hide, then everything else in its packed order: the
+    // spheres before the hulls' faces, a silhouette's included, and every line after them.
+    const isOccluder = (index: number): boolean => {
+      const material = packed.draws[index]?.material;
+      return material !== undefined && IS_OCCLUDER[material];
+    };
+    const draws = [
+      ...bound.filter((_, index) => isOccluder(index)),
+      ...background,
+      ...bound.filter((_, index) => !isOccluder(index)),
+    ];
     return {
       label: WIREFRAME_PASS_LABEL,
       viewRotation: viewRotation4(camera.pose.orientation),
@@ -612,8 +732,14 @@ export class WireframeRenderer {
   }
 
   /** Packs, writes and renders one frame into `view`. */
-  render(view: RenderView, list: WireframeDrawList, camera: DrawCamera, viewport: Viewport): void {
-    view.render(this.frame(list, camera, viewport));
+  render(
+    view: RenderView,
+    list: WireframeDrawList,
+    camera: DrawCamera,
+    viewport: Viewport,
+    background: ReadonlyArray<DrawItem> = [],
+  ): void {
+    view.render(this.frame(list, camera, viewport, background));
   }
 
   /** Stops following the engine's restores; the engine owns and frees the handles. */

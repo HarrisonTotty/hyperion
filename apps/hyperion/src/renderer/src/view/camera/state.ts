@@ -5,6 +5,14 @@ import { easeOut } from "../../spatial/transition";
 import { expressIn, type ViewPosition } from "../coords/position";
 import { type CameraOrigins, frameOrigin, relativeToCamera } from "../coords/relative";
 import { cameraFrameCandidate, selectCameraFrame } from "./frames";
+import {
+  isTurn,
+  type LookOffset,
+  NO_LOOK_OFFSET,
+  offsetPose,
+  turnedOffset,
+  type ViewTurn,
+} from "./look";
 import type { CameraFrame, CameraPose, CraftId, Quaternion } from "./pose";
 import { DEFAULT_FOV_DEG, FOV_STEPS_DEG } from "./projection";
 import { lookAlong, multiply, quaternionFromAxisAngle, rotate, slerp } from "./quaternion";
@@ -21,10 +29,10 @@ import { type FrameChange, rebase, sameCameraFrame } from "./rebase";
 export type CameraPreset = "seat" | "chase" | "free";
 
 /**
- * How a view draws: `wireframe` only here; R07 adds `photorealistic`. A style chooses passes and
- * strokes and owns no scene, camera or projection (brainstorm, "Two styles of one renderer").
+ * How a view draws: R02's `wireframe`, or R07's `photorealistic` (R07.T7). A style chooses passes
+ * and strokes and owns no scene, camera or projection (brainstorm, "Two styles of one renderer").
  */
-export type RenderStyle = "wireframe";
+export type RenderStyle = "wireframe" | "photorealistic";
 
 /**
  * What a view stands for: `eye` for the single-player cockpit view, whose star limits are a human
@@ -162,6 +170,12 @@ export interface CameraState {
   readonly fovDeg: number;
   /** The free camera's motion. */
   readonly free: FreeFlight;
+  /**
+   * The look offset a drag or the arrows turn a `SEAT` or `CHASE` camera by from its preset's
+   * line of sight (plan R07, T19.f), which every cut clears; none in `free`, whose turns turn the
+   * camera itself.
+   */
+  readonly offset: LookOffset;
   /** An eased move in progress, or `null`. */
   readonly move: EasedMove | null;
 }
@@ -366,6 +380,7 @@ export function newCameraState(scene: CameraScene, role: ViewRole): CameraState 
     pose: seat ?? scene.defaultPose,
     fovDeg: DEFAULT_FOV_DEG,
     free: STILL,
+    offset: NO_LOOK_OFFSET,
     move: null,
   };
 }
@@ -402,7 +417,8 @@ export type CutResult =
  * from the pose on screen, which {@link displayPose} blends and {@link advanceEasedMove} runs out.
  * A free camera slewed to a target turns in place to look at it; one given a craft as its target
  * is held in that craft's frame, where it orbits it (Design note 22). The free camera's motion
- * stops at a cut.
+ * stops at a cut, and a look offset is cleared (plan R07, T19.f), so that the preset's key pressed
+ * again returns its camera to the preset's own line of sight.
  */
 export function cutTo(
   state: CameraState,
@@ -456,6 +472,7 @@ export function cutTo(
       look,
       pose,
       free: { ...STILL, rateStep: state.free.rateStep },
+      offset: NO_LOOK_OFFSET,
       move: eased ? { from: rebase(onScreen, pose.frame, scene.origins).pose, elapsedS: 0 } : null,
     },
   };
@@ -463,14 +480,35 @@ export function cutTo(
 
 /**
  * The camera with its seat or chase pose recomputed from the own ship's attitude, as each frame
- * needs; a free camera is returned as it was.
+ * needs, and turned by its look offset: the seat turning where it stands, the chase camera
+ * swinging about the ship (`offsetPose`); a free camera is returned as it was.
  */
 export function followPreset(state: CameraState, scene: CameraScene): CameraState {
-  if (state.preset === "free") {
+  const ship = scene.ownShip;
+  if (state.preset === "free" || ship === null) {
     return state;
   }
   const pose = presetPose(state.preset, state.look, state.target, scene, state.pose);
-  return pose === null ? state : { ...state, pose };
+  return pose === null
+    ? state
+    : { ...state, pose: offsetPose(pose, ship.attitude, state.offset, state.preset === "chase") };
+}
+
+/**
+ * A `SEAT` or `CHASE` camera with its look offset turned by a drag's or the arrows' turn (plan
+ * R07, T19.f), its elevation held where the line of sight would pass the vertical; its pose
+ * follows at {@link followPreset}. A free camera, one with no own ship, or no turn, is returned as
+ * it was: a free camera turns itself (`turnFreeCamera`).
+ */
+export function turnLook(state: CameraState, turn: ViewTurn, scene: CameraScene): CameraState {
+  const ship = scene.ownShip;
+  if (state.preset === "free" || ship === null || !isTurn(turn)) {
+    return state;
+  }
+  const base = presetPose(state.preset, state.look, state.target, scene, state.pose);
+  return base === null
+    ? state
+    : { ...state, offset: turnedOffset(state.offset, turn, base.orientation, ship.attitude) };
 }
 
 /** The camera with its eased move advanced by `dtS` seconds, and dropped once it has run out. */
@@ -551,6 +589,7 @@ export function onSystemChange(state: CameraState, scene: CameraScene): CameraSt
     look: "forward",
     pose: ship === null ? scene.defaultPose : chasePose(ship),
     free: { ...STILL, rateStep: state.free.rateStep },
+    offset: NO_LOOK_OFFSET,
     move: null,
   };
 }

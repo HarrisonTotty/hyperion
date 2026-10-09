@@ -1285,6 +1285,12 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   each of R05's kernels in `f64` at R05's sizes over a list of terms, with tabulated density and
   phase. Tests (no GPU):
   - R05's constants as a medium give R05's oracle values to 10⁻⁶;
+  - the sky view's and the march's twins place their steps as R05.T12.e does, and pass its
+    quadrature gate (its rays, metric and tolerances), with the multiple-scattering term included;
+    the multiple-scattering kernel's even steps are measured against a placed reference and
+    recorded;
+  - the multiple-scattering kernel takes R05.T12.e's stable step factor from `common.wgsl`, and its
+    twin records the change;
   - two identical half-density terms equal one;
   - optical depth adds across terms.
 
@@ -1388,6 +1394,9 @@ the terminator and the planet's shadow in its own air. The switch to the sky-vie
 altitude, with a blend band. Tests (no GPU):
 
 - the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges;
+- R05.T12.e's quadrature gate holds for the widened march, at one sun and at `SKY_SUN_CAP`;
+- the sky-view table's interpolation across the limb, from cameras at 60–100 km, against the march
+  at the same pixels, recorded with the blend band's altitudes;
 - the limb falls to zero outside the top;
 - a body's atmosphere is drawn at `apparentM`, and only the ship's local body at `geometricM`,
   including when a free camera sits inside another body's Hill sphere.
@@ -1469,7 +1478,9 @@ the UHD 620 at 720p (low), against
 the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#performance-budget)):
 
 - the per-frame atmosphere time, against 2–4 ms low and 0.5–1 ms discrete, at one sun and at the
-  setting's `SKY_SUN_CAP`;
+  setting's `SKY_SUN_CAP`. These are estimates, recorded as findings: R05's gate judges terrain and
+  atmosphere together (R05 Design note 21, decided 2026-10-06), and R05 measured about 1.6 ms at
+  full clock on the RTX 3080 at one sun (R05's Risks);
 - the per-planet table time, against about 1 ms and under 0.1 ms;
 - the table bytes a planet, against 2 MB, and the per-view bytes on their own line, against
   Design note 11's 0.43 MB, at one, two and four suns;

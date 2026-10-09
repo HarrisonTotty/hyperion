@@ -176,6 +176,45 @@ export function halfTexels(bytes: ArrayBuffer): Float32Array {
   return Float32Array.from(new Uint16Array(bytes), halfToNumber);
 }
 
+/** A half's place on the number line, so that neighbouring halves differ by 1 and ±0 is 0. */
+function halfOrdinal(bits: number): number {
+  return (bits & 0x8000) === 0 ? bits : -(bits & 0x7fff);
+}
+
+/**
+ * How far apart two `rgba16float` read-backs of one size lie: the most units in the last place
+ * between a texel's channel in one and in the other, every channel and alpha included (R07.T8.d's
+ * G11), the channels that differ at all, and whether every alpha (a scene target's meter class) is
+ * equal.
+ *
+ * @returns An `ulps` of +∞ where the sizes differ or a channel is NaN in either.
+ */
+export function halfUlpsApart(
+  a: ArrayBuffer,
+  b: ArrayBuffer,
+): { readonly ulps: number; readonly differing: number; readonly alphasEqual: boolean } {
+  const x = new Uint16Array(a);
+  const y = new Uint16Array(b);
+  if (x.length !== y.length) {
+    return { ulps: Number.POSITIVE_INFINITY, differing: x.length, alphasEqual: false };
+  }
+  let ulps = 0;
+  let differing = 0;
+  let alphasEqual = true;
+  for (let i = 0; i < x.length; i += 1) {
+    const p = x[i] ?? 0;
+    const q = y[i] ?? 0;
+    if (Number.isNaN(halfToNumber(p)) || Number.isNaN(halfToNumber(q))) {
+      return { ulps: Number.POSITIVE_INFINITY, differing: differing + 1, alphasEqual: false };
+    }
+    const apart = Math.abs(halfOrdinal(p) - halfOrdinal(q));
+    ulps = Math.max(ulps, apart);
+    differing += apart > 0 ? 1 : 0;
+    alphasEqual &&= i % 4 !== 3 || apart === 0;
+  }
+  return { ulps, differing, alphasEqual };
+}
+
 /** The four channels of texel (x, y) of an image `widthTexels` wide. */
 export function texel(
   texels: ArrayLike<number>,
@@ -214,4 +253,20 @@ export function pause(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/**
+ * The 16 bits of the half float at or just below a non-negative `value`: 0 for zero, a subnormal
+ * below 2⁻¹⁴.
+ */
+export function halfBits(value: number): number {
+  if (!(value > 0)) {
+    return 0;
+  }
+  if (value < 2 ** -14) {
+    return Math.floor(value / 2 ** -24);
+  }
+  const exponent = Math.floor(Math.log2(value));
+  const mantissa = Math.floor((value / 2 ** exponent - 1) * 1024);
+  return ((exponent + 15) << 10) | mantissa;
 }

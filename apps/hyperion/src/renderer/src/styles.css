@@ -14,6 +14,14 @@
   --status-caution: #fbbf24;
   --status-warning: #f87171;
   --target: #e879f9;
+  /*
+   * The SVG strokes' widths at the display's device-pixel ratio, so that none is under 2 device
+   * px (decision-thin-line-contrast, item 2): CSS px drawn for each CSS px of a line, and a mark's
+   * outline. main.tsx sets both from lib/strokes.ts before the first render and on each change of
+   * ratio; these are their values at a ratio of 2 and above, where every width is as written.
+   */
+  --line-scale: 1;
+  --mark-stroke: 1.5px;
   /* B612 is bundled through @fontsource in main.tsx; the rest are fallbacks. */
   --font-sans: "B612", system-ui, sans-serif;
   --font-mono: "B612 Mono", ui-monospace, Menlo, monospace;
@@ -282,6 +290,11 @@ body {
   width: 100%;
   height: 1rem;
   color: var(--text-muted);
+}
+
+/* The bar's decade ticks: 1 px lines at the line scale, never under 2 device px (R07.T16.f). */
+.density-legend__tick-mark {
+  stroke-width: calc(1px * var(--line-scale));
 }
 
 .density-legend__ticks {
@@ -745,6 +758,22 @@ body {
   vertical-align: baseline;
 }
 
+/* The Command key's drawn sign, a cap-high mark on the baseline as a key cap prints it (T19.f). */
+.glyph--command {
+  width: 0.75em;
+  height: 0.75em;
+  vertical-align: baseline;
+}
+
+/*
+ * The chevron is a mark, since its shape carries the control's state: its own 1.5 units of the
+ * 0.7em box at the text's size, and never under --mark-stroke, 2 device px (R07.T16.f).
+ */
+.glyph--disclosure polyline {
+  vector-effect: non-scaling-stroke;
+  stroke-width: max(var(--mark-stroke), 0.105em);
+}
+
 .form-field {
   margin-bottom: 0.5rem;
   font-size: 0.875rem;
@@ -812,6 +841,15 @@ body {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/*
+ * Text selected in a field, as the `MAN` field selects its fill on focus: `--accent`, the guide's
+ * selected, under `--surface-0` text (10.37:1), not the platform's highlight.
+ */
+.form-field__input::selection {
+  background: var(--accent);
+  color: var(--surface-0);
 }
 
 .form-field__input:focus-visible {
@@ -1217,7 +1255,8 @@ body {
  * A mark over a map, centred on its point and clear of the pointer: the cursor's upright cross in
  * --accent and the chart centre's small diagonal cross in --text. The ramp runs up to --text, over
  * which either colour falls below 6:1, so each stroke is cased in --surface-0 (10.4:1 against
- * --accent, 13.6:1 against --text): a solid edge, not a glow.
+ * --accent, 13.6:1 against --text): a solid edge, not a glow. The stroke is a mark's outline,
+ * --mark-stroke, and the casing a line's, 1 px a side at the line scale (R07.T16.f).
  */
 .map-view__mark {
   position: absolute;
@@ -1235,11 +1274,11 @@ body {
 
 .map-view__mark-casing {
   stroke: var(--surface-0);
-  stroke-width: 3.5px;
+  stroke-width: calc(var(--mark-stroke) + 2px * var(--line-scale));
 }
 
 .map-view__mark-line {
-  stroke-width: 1.5px;
+  stroke-width: var(--mark-stroke);
 }
 
 .map-view__mark--cursor .map-view__mark-line {
@@ -1749,13 +1788,16 @@ body {
   white-space: normal;
 }
 
-/* A sample mark, drawn at the size class it stands for, its outline 1.5 px at every scale. */
+/*
+ * A sample mark, drawn at the size class it stands for, its outline a mark's at every scale, 1.5 px
+ * and never under 2 device px, as the painter draws it (R07.T16.f).
+ */
 .symbol-legend__mark {
   flex: none;
   overflow: visible;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: var(--mark-stroke);
   vector-effect: non-scaling-stroke;
 }
 
@@ -2558,14 +2600,16 @@ body {
   overflow: visible;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: var(--mark-stroke);
 }
 
 /*
- * Every stroke of the triad and the arrow stays 1.5 CSS pixels at every interface scale, as the
- * canvas's own lines do (design notes D13 and D14 give sizes in `rem` and line weights in pixels).
- * The triad's user units are a sixteenth of a `rem`, so without this its axes would reach 2.25 px at
- * 150% beside a 1.5 px range circle. `vector-effect` is not inherited, so it goes on the shapes.
+ * Every stroke of the triad and the arrow stays 1.5 CSS pixels at every interface scale (design
+ * notes D13 and D14 give sizes in `rem` and line weights in pixels), and never under 2 device px:
+ * a mark's outline, --mark-stroke, since its end symbols are marks 0.5rem across that a line's
+ * scale would close (R07.T16.f; decision-thin-line-contrast, item 2). The triad's user units are a
+ * sixteenth of a `rem`, so without this its axes would reach 2.25 px at 150%. `vector-effect` is
+ * not inherited, so it goes on the shapes.
  */
 .axis-triad__axes :is(line, polyline, circle, path),
 .core-arrow__mark :is(line, polyline, circle, path) {
@@ -2755,18 +2799,21 @@ body {
   color: var(--text-muted);
 }
 
-/* A path sample in the legend, 1 px for an orbit and 2 px for the selected one, as the map draws. */
+/*
+ * A path sample in the legend, 1 px for an orbit and 2 px for the selected one at the line scale, as
+ * the map draws them (R07.T16.f).
+ */
 .orbit-legend__path {
   width: 1rem;
   height: 0.25rem;
 }
 
 .orbit-legend__path--reference path {
-  stroke-width: 1;
+  stroke-width: calc(1px * var(--line-scale));
 }
 
 .orbit-legend__path--selected path {
-  stroke-width: 2;
+  stroke-width: calc(2px * var(--line-scale));
 }
 
 /* The display time, and the controls that step it, on as few lines as they fit. */
@@ -3017,13 +3064,15 @@ body {
 }
 
 /*
- * The VIEW display (plan R02, R02.T15): the scene bar over the view and its side column, the view
- * taking what the side column's 24rem leaves.
+ * The VIEW display (plan R02, R02.T15): the scene bar over the view and its side columns, the view
+ * taking what they leave. Clipped, never scrolled: a control focused below the foot of a column
+ * too long for a window under the least size cannot move the console frame (R07.T19.b).
  */
 .console__work--view {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   align-content: stretch;
+  overflow: clip;
 }
 
 .view-display {
@@ -3056,10 +3105,15 @@ body {
   gap: 0.25rem 1rem;
 }
 
+/*
+ * The stage beside its side column (R07.T19.b; decision-r07-t19-layout, item 1): in the full
+ * layout two columns, 26rem and 20rem; in the compact one a single 26rem column.
+ */
 .view {
   display: grid;
   flex: 1 1 0;
-  grid-template-columns: minmax(0, 1fr) minmax(24rem, auto);
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   gap: 1rem;
   min-height: 0;
 }
@@ -3078,6 +3132,10 @@ body {
   outline: 1px solid var(--line);
 }
 
+/*
+ * A drag turns a view's camera, so its canvas takes the grab cursor, and a finger's drag is the
+ * view's, never the page's (R07.T19.f).
+ */
 .view__canvas {
   position: absolute;
   inset: 0;
@@ -3085,9 +3143,19 @@ body {
   width: 100%;
   height: 100%;
   background: var(--surface-0);
+  cursor: grab;
+  touch-action: none;
 }
 
-.view__canvas:focus-visible {
+.view__canvas:active {
+  cursor: grabbing;
+}
+
+/*
+ * A view's ring stands whenever its canvas holds the focus, after a press too, since its flight
+ * keys act only then (R07.T19.f; the guide's "Focus is always visible").
+ */
+.view__canvas:focus {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -3107,11 +3175,138 @@ body {
   letter-spacing: 0.1em;
 }
 
-/* The list takes what the controls leave, and scrolls within itself; the column never does. */
+/*
+ * The list takes what the controls leave, and scrolls within itself; the column never does, and is
+ * clipped rather than scrolled, so that no focused control can scroll it. It sets its own line box,
+ * 17.5 px at 0.875rem and 20 px at 1rem, the same on every platform and at every scale, so that the
+ * heights measured for its fit hold where they were not measured; buttons and fields inherit it
+ * (decision-r07-t19b-exposure-fit, item 1(f)).
+ */
 .view__side {
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+  width: 26rem;
+  min-height: 0;
+  overflow: clip;
+  /* Room for the focus ring of a control at the column's edge. */
+  overflow-clip-margin: 0.25rem;
+  line-height: 1.25;
+}
+
+/*
+ * The compact column's parts stand 0.25rem apart: every boundary between them is a panel's
+ * hairline or a 2rem button row's own padding (decision-r07-t19b-exposure-fit, item 1(d)).
+ */
+.view--compact .view__side {
+  gap: 0.25rem;
+}
+
+/*
+ * The full layout: the first column (`Instruments`, `Targets`, `Camera`), then the second (the
+ * `CONTROLS` view's `Style`, then the primary's exposure; decision-r07-t19b-exposure-fit, item 2).
+ */
+.view--full .view__side {
+  display: grid;
+  grid-template-columns: 26rem 20rem;
+  grid-template-rows: minmax(0, 1fr);
   gap: 1rem;
+  width: auto;
+}
+
+.view__column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+/* The compact layout: both columns' panels in one, in the same order. */
+.view--compact .view__column {
+  display: contents;
+}
+
+/* The descent spike fills the window and never scrolls: its lists scroll within themselves. */
+.spike {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.spike__work {
+  padding: 1rem;
+}
+
+/* The side column is bounded, so that at 1280 × 720 the main view and both instruments keep room. */
+.spike .view {
+  grid-template-columns: minmax(0, 1fr) clamp(27rem, 25vw, 30rem);
+}
+
+/* The two wireframe instruments, side by side under the main view, each beside its label block. */
+.spike__instruments {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  height: 13rem;
+}
+
+.spike-instrument {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.spike-instrument__body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(5rem, 1fr) auto;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+.spike-instrument__stage {
+  min-height: 0;
+}
+
+/* The instrument's label block stands beside its canvas, not over it, each value on one line. */
+.spike-instrument__label .view-label {
+  position: static;
+  max-width: none;
+}
+
+.spike-instrument__label dd {
+  white-space: nowrap;
+}
+
+/* The patch counts, one a line, four lines whatever the counts. */
+.spike__patches output {
+  display: flex;
+  flex-direction: column;
+}
+
+.spike__panel {
+  flex: none;
+}
+
+/* Each reading holds its longest value (`HOVER AND TOUCHDOWN`, `-999.99 m/s`) without moving. */
+.spike__panel .readout dd {
+  min-width: 19ch;
+  text-align: right;
+}
+
+.spike__targets {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.spike__list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
 }
 
@@ -3158,10 +3353,20 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* At its least two rows, its head and its position, so that VIEW's side column fits (R07.T19). */
 .view-list {
   display: flex;
   flex-direction: column;
-  min-height: 8rem;
+  min-height: 6.5rem;
+}
+
+/* In VIEW's compact layout, at its least its head, one row and its position (R07.T19.b). */
+.view--compact .view-list {
+  min-height: 4.5rem;
+}
+
+.view--compact .view-list__scroll {
+  min-height: 2rem;
 }
 
 .view-list__head,
@@ -3178,9 +3383,30 @@ body {
   letter-spacing: 0.15em;
 }
 
+.view-list__range-head {
+  grid-column: 3;
+  text-align: right;
+}
+
+/* In VIEW's 26rem column the list's columns stand closer, so that its designations keep room. */
+.view__column .view-list__head,
+.view__column .view-list__row {
+  column-gap: 0.25rem;
+}
+
+/*
+ * With no own ship the range column's head reads RANGE FROM CAMERA, its second line under RANGE
+ * and running back under KIND's empty head, so that the rows' designations keep their width.
+ */
+.view-list__range-head--from {
+  grid-row: 2;
+  grid-column: 2 / 4;
+  justify-self: end;
+}
+
 .view-list__scroll {
   flex: 1 1 0;
-  min-height: 6rem;
+  min-height: 4rem;
   overflow-y: auto;
 }
 
@@ -3241,6 +3467,15 @@ body {
   padding: 0;
 }
 
+/*
+ * In the compact layout the camera panel's button rows stand 0.25rem above what follows them, a
+ * 2rem row's own padding the rest, as the compact column's parts and the exposure's command rows
+ * do (decision-r07-t19f-position, item 2, R2).
+ */
+.view--compact .view-camera .preset-buttons {
+  margin-bottom: 0.25rem;
+}
+
 .view-camera__fov,
 .view-camera__rate-reading,
 .view-exposure__reading {
@@ -3259,17 +3494,90 @@ body {
   margin: 0 0 0.5rem;
 }
 
+/*
+ * The camera's setting (`.readout`): one member per row, its value right of its label, each value
+ * wide enough for the longest, `1.25E-4 s`, `409,600 ↑` and `28.1 EV ↑`, so that nothing beside it
+ * moves. Its rows stand 0.25rem apart, not `.readout`'s 0.5rem, to spare the side column's height.
+ */
 .view-exposure__triple {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 1rem;
+  gap: 0.25rem 1.5rem;
   margin: 0 0 0.5rem;
 }
 
 .view-exposure__triple dd {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  min-width: 9ch;
+}
+
+/* In the full layout a member is no box, so that the readout's two-column grid is unchanged. */
+.view-exposure__member {
+  display: contents;
+}
+
+/*
+ * In the compact layout, two members a row, `APERTURE` and `SHUTTER`, then `ND` and `ISO`: each
+ * label 0.75rem from its own value and the members 1.5rem apart, so that a label never stands
+ * nearer another member's value than its own (decision-r07-t19b-exposure-fit, item 1(a)).
+ */
+.view--compact .view-exposure__triple {
+  grid-template-columns: repeat(2, max-content);
+  gap: 0.25rem 1.5rem;
+}
+
+.view--compact .view-exposure__member {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.view--compact .view-exposure__triple dd {
+  white-space: nowrap;
+}
+
+/*
+ * The `MAN` field (plan R07, T13.d), a `.form-field`: its label, value and unit on one line with the
+ * format hint, as the chart's number fields are, and under it the consequence and any refusal.
+ */
+.view-exposure__man-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
+}
+
+.view-exposure__man-field > .form-field__label {
+  white-space: nowrap;
+}
+
+/* Room for the longest value, -14.0, in the field's own monospaced figures. */
+.view-exposure__man-input {
+  width: calc(5ch + 1rem + 2px);
+}
+
+/* No operator value at another level: the guide's missing value, `—` in `--text-muted`. */
+.view-exposure__man-input--missing {
+  color: var(--text-muted);
+}
+
+.view-exposure__man-unit {
+  color: var(--text-muted);
+}
+
+.view-exposure__man-hint {
+  text-align: left;
+}
+
+/*
+ * The consequence and the refusal are sentences: they wrap inside the panel and never lend the
+ * side column their unwrapped width.
+ */
+.view-exposure__consequence,
+.view-exposure__man-error {
+  contain: inline-size;
+  margin: 0.25rem 0 0;
+}
+
+.view-exposure__consequence {
+  color: var(--text-muted);
 }
 
 .view-exposure__commands {
@@ -3278,10 +3586,91 @@ body {
   gap: 0.25rem;
 }
 
+/*
+ * In the full layout's 20rem column both notes beside the buttons can wrap: the rows stand 0.75rem
+ * apart, so that the two notes never read as one block (decision-r07-t19b-exposure-fit, item 5).
+ */
+.view--full .view-exposure__commands {
+  gap: 0.75rem;
+}
+
 .view-exposure__command {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/*
+ * The button keeps its label's width: a held-back reason wider than the room beside it wraps there
+ * rather than squeeze the button under its label (`.control`'s 2rem least width lets it shrink).
+ */
+.view-exposure__command > .control {
+  flex: none;
+}
+
+/*
+ * A held-back reason or `INHIBIT`'s consequence beside its button has no bottom margin, so that its
+ * text centres on the button's label (decision-r07-t19b-exposure-fit, item 5); the standing line
+ * above the commands keeps its 0.5rem.
+ */
+.view-exposure__command > .view-exposure__reason {
+  margin: 0;
+}
+
+/*
+ * `INHIBIT`'s consequence (plan R07, T13.d's follow-up), in a held-back reason's place and look: it
+ * takes the row's room beside the button and wraps there, never lending the side column its width.
+ */
+.view-exposure__reason--consequence {
+  flex: 1 1 0;
+  contain: inline-size;
+}
+
+/* The exposure meter beside the exposure panel (plan R07, T13.b). */
+.view-meter__reading,
+.view-meter__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Room for the longest metered value, `EV100 -13.6`, so that the field keeps its width. */
+.view-meter__metered {
+  display: inline-block;
+  min-width: 11ch;
+}
+
+.view-meter__reading,
+.view-meter__reason {
+  margin: 0 0 0.5rem;
+}
+
+.view-meter__reason {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.view-meter__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0.5rem 0 0;
+  border: 0;
+  padding: 0;
+}
+
+.view-meter__modes > legend {
+  padding: 0;
+}
+
+/* The chosen meter is underlined, as the time control's step is: by shape, not colour alone. */
+.view-meter__modes > .control {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.view-meter__modes > .control[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
 }
 
 /* Where the view would be, while its engine is made or cannot be. */
@@ -3317,9 +3706,27 @@ body {
   text-align: right;
 }
 
-/* The free camera's rate on a line of its own, under the field of view's buttons. */
+/*
+ * Under the field of view's buttons, where the camera is, then the free camera's rate with where
+ * the camera looks beside it: one group of readings, with no space inside it, 0.5rem above what
+ * follows (R07.T19.f; decision-r07-t19f-position, item 2). In the compact layout the rate's limit
+ * reason stands 0.25rem under the rate's line, as a held-back reason stands under its buttons
+ * (R3).
+ */
+.view-camera__position {
+  margin: 0;
+}
+
 .view-camera__rate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 1rem;
   margin: 0 0 0.5rem;
+}
+
+.view--compact .view-camera__rate:has(+ .view-camera__reason) {
+  margin-bottom: 0.25rem;
 }
 
 /* Wide enough for `RATE 3.16E11 km/s`, the galactic scene's top step. */
@@ -3328,11 +3735,20 @@ body {
   min-width: 17ch;
 }
 
+/*
+ * The setting's row: its note beside the button takes no margin and, wrapped under it, no row gap,
+ * the 2rem button's own padding standing between them, as the notes beside ENABLE and INHIBIT do
+ * (decision-r07-t19f-position, item 2, R1).
+ */
 .view-camera__setting {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0 0.5rem;
+}
+
+.view-camera__setting .view-camera__reason {
+  margin: 0;
 }
 
 .view-targets {
@@ -3340,4 +3756,233 @@ body {
   flex: 1 1 0;
   flex-direction: column;
   min-height: 10rem;
+}
+
+/* In the compact layout the list keeps at least its head, a row and its position (above). */
+.view--compact .view-targets {
+  min-height: auto;
+}
+
+/*
+ * The compact layout's row of disclosure buttons under the list (decision-r07-t19-layout, item 1b):
+ * display controls, each naming its panel, the open one's chevron pointing down. Set a little
+ * tighter than other controls, at the guide's least letter spacing, so that the four names stand
+ * on one line in the 26rem column, `EXPOSURE METER` included (about 407 px of 416, measured).
+ */
+.view-folds {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 0.25rem;
+}
+
+.view-folds > .view-folds__button {
+  gap: 0.25rem;
+  padding-right: 0;
+  letter-spacing: 0.1em;
+}
+
+/* A folded panel's fault or status, standing under the row while its panel is folded. */
+.view__side .view-folds__standing {
+  flex: none;
+  margin: 0;
+}
+
+/* A view's style switch (plan R07, T7): its buttons are the presets' (`.preset-buttons`). */
+.view-style__reason {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* A fault of the console's own graphics, while it lasts: caution, never an alert. */
+.view-style__reason--fault {
+  color: var(--status-caution);
+}
+
+/*
+ * A panel's system designator on its title row (the guide's "Layout"): the view a VIEW panel acts
+ * on, PRIMARY or INSTRUMENT 1 (R07.T19), at the row's end.
+ */
+.panel__designator {
+  float: inline-end;
+  margin-inline-start: 1rem;
+  color: var(--text);
+}
+
+/*
+ * A reading's parts each stay on one line where they fit, so a narrow block breaks at its dots.
+ * Set at the line's top, so that a part broken within itself keeps its label beside its first line
+ * (an inline block's baseline is its last line's).
+ */
+.view-label__part {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+/*
+ * A run of a reading that never breaks: a quantity with its sign, unit, band or prefix, a star
+ * limit with its kind, `UT` with its first group, a clock reading (decision-r07-t19-layout, 2);
+ * and in an exposure note, a status phrase, `INHIBITED · OPERATOR`, `NO IMAGE TO METER` or a
+ * meter's own, `NO LIT SIDE` and its twins (decision-r07-owner-ux-signoff, item 1; R07.T16.b).
+ */
+.view-label__run {
+  white-space: nowrap;
+}
+
+/*
+ * A value in a field of its own within a reading, right-aligned in the fixed width its line sets
+ * for its longest reading and its stale mark: the sky's edge, `BEYOND 2000 ly: STREAMING`
+ * (R06.T11.f; the guide's "Numbers").
+ */
+.view-label__field {
+  display: inline-block;
+  text-align: right;
+}
+
+/*
+ * The instrument views' fixed slots over the primary view's right edge (R07 Design note 15,
+ * decision-r07-t19 item 2a): INSTRUMENT 1 at the stage's top right and INSTRUMENT 2 at its foot,
+ * each inset 0.5rem, so that neither moves when the other opens or closes
+ * (decision-r07-t19-layout, item 3); a closed slot takes no room. Where the stage cannot hold both
+ * corners, INSTRUMENT 2 stands directly under INSTRUMENT 1, never over it.
+ */
+.view-instruments {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+/* An open slot: an opaque panel, which takes the pointer that the overlay it stands in does not. */
+.view-instrument {
+  flex: none;
+  padding: 0.5rem;
+  pointer-events: auto;
+}
+
+.view-instrument--slot-2 {
+  margin-top: auto;
+}
+
+/*
+ * An instrument's statements run the slot's width under its label block and canvas, wrapping
+ * within it rather than widening it (decision-r07-t19-layout, item 5).
+ */
+.view-instrument__statements {
+  contain: inline-size;
+  font-size: 0.875rem;
+  line-height: 1.2;
+}
+
+.view-instrument__statements > .view-label__statement {
+  margin-top: 0.25rem;
+}
+
+.view-instrument__title {
+  margin-bottom: 0.5rem;
+}
+
+/* Its label block on the left, before its canvas in the reading order; its canvas on the right. */
+.view-instrument__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+/* The label block is static text on the panel's own surface, as wide as its longest line. */
+.view-instrument__label {
+  max-width: 18rem;
+}
+
+.view-instrument__label .view-label {
+  position: static;
+  max-width: none;
+  background: none;
+  padding: 0;
+  line-height: 1.2;
+}
+
+/* The instrument's 4:3 canvas, 15 × 11.25 rem, the spike's 240 × 180 instrument. */
+.view-instrument .view__stage,
+.view-instrument__unavailable {
+  flex: none;
+  width: 15rem;
+  height: 11.25rem;
+  min-height: 0;
+}
+
+/*
+ * With instruments open, the primary's label block takes the width left of them: a slot is at
+ * most 18 + 0.5 + 15 rem inside its 0.5 rem padding and border, inset 0.5 rem from the stage.
+ */
+.view__overlay:has(.view-instrument) > .view-label {
+  max-width: calc(100% - 36.5rem);
+}
+
+/*
+ * VIEW's side panels sit a little tighter than the default (R07.T19), and in the compact layout
+ * tighter still (R07.T19.b). Each takes its column's width and never widens it: a wide line wraps
+ * within its panel rather than lending the column its unwrapped width.
+ */
+.view__column > .panel {
+  contain: inline-size;
+  padding: 0.75rem;
+}
+
+.view--compact .view__column > .panel {
+  padding-block: 0.5rem;
+}
+
+.view__side .panel__title {
+  margin-bottom: 0.25rem;
+}
+
+/* The instruments panel sits tighter still: the column is full at 1920 × 1080. */
+.view__column > .view-instruments-panel {
+  padding-block: 0.5rem;
+}
+
+/* Folded, in the compact layout, the instruments panel is its title row: a 2rem disclosure. */
+.view--compact .view__column > .view-instruments-panel--folded {
+  padding-block: 0;
+}
+
+.view-instruments-panel--folded .view-instruments-panel__title {
+  margin: 0;
+}
+
+/* Upper case as every panel title is; the text stays mixed case for the accessible name. */
+.view-instruments-panel__title .control {
+  text-transform: inherit;
+}
+
+/* The instruments panel's rows: each label on the left of its buttons, which may wrap. */
+.view-instruments-panel__row {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
+}
+
+/*
+ * Floated, so that each row's legend sits beside its buttons, as a form's choice does; wide enough
+ * for `INSTRUMENT 2`, so that the rows' buttons line up.
+ */
+.view-instruments-panel__label {
+  float: left;
+  min-width: 9rem;
+  padding: 0;
+  line-height: 2rem;
+}
+
+/* Why a button of the panel is held back, under its rows, while it holds. */
+.view-instruments-panel__reason {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }

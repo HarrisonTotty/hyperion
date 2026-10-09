@@ -294,14 +294,20 @@ mod tests {
                 (table / direct - 1.0).abs() < tolerance,
                 "M({r}) {table} against {direct}"
             );
-            let h = 1e-4;
-            let (up, down) = (
-                average.extended(r * (1.0 + h)).0,
-                average.extended(r * (1.0 - h)).0,
-            );
-            let finite = (up - down) / (2.0 * h * r) / (4.0 * core::f64::consts::PI * r * r);
-            // Beyond 10⁵ ly the central difference's own error reaches 1.7 × 10⁻⁶ at 2 × 10⁵ ly
-            // (version 16's combined potential), so it is held to 10⁻⁵ there.
+            let difference = |h: f64| {
+                let (up, down) = (
+                    average.extended(r * (1.0 + h)).0,
+                    average.extended(r * (1.0 - h)).0,
+                );
+                (up - down) / (2.0 * h * r) / (4.0 * core::f64::consts::PI * r * r)
+            };
+            // Rounding floor: ΔM ÷ M ≈ 3e-10 at 2e5 ly, so an ulp of ln M is ~2e-5 at h = 1e-4.
+            let finite = if r < 1e5 {
+                difference(1e-4)
+            } else {
+                let h = 4e-3;
+                (4.0 * difference(h / 2.0) - difference(h)) / 3.0
+            };
             let density_tolerance = if r < 1e5 { 1e-6 } else { 1e-5 };
             if density > 0.0 {
                 assert!(

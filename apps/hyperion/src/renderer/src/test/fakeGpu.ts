@@ -6,10 +6,10 @@
  * `requestDevice`, a device whose `lost` promise the test resolves, and the engine's own objects:
  * buffers, textures, samplers, shader modules (whose compile errors the test chooses), layouts,
  * pipelines and bind groups, each recording its descriptor, and command encoders whose passes
- * record every command, so that a test reads what a frame encoded. Nothing is executed, so a mapped
- * buffer reads zeros. What the engine never calls (render bundles, external textures, error scopes)
- * throws,
- * naming itself, so that a test that strays there fails loudly rather than passing on a stub.
+ * record every command, so that a test reads what a frame encoded, and error scopes, whose errors
+ * the test queues. Nothing is executed, so a mapped buffer reads zeros. What the engine never calls
+ * (render bundles, external textures) throws, naming itself, so that a test that strays there fails
+ * loudly rather than passing on a stub.
  */
 
 /**
@@ -640,11 +640,23 @@ export class FakeDevice extends EventTarget implements GPUDevice {
   importExternalTexture(): GPUExternalTexture {
     throw notFaked("importExternalTexture");
   }
+  /**
+   * The errors the next scopes popped report, first first, whatever their filters: what the
+   * device would have raised inside each. A scope popped once none are left reports none.
+   */
+  readonly scopeErrors: GPUError[] = [];
+  /** The filters of the error scopes pushed and not yet popped, innermost last. */
+  readonly errorScopes: GPUErrorFilter[] = [];
+
   popErrorScope(): Promise<GPUError | null> {
-    return Promise.reject(notFaked("popErrorScope"));
+    if (this.errorScopes.pop() === undefined) {
+      return Promise.reject(new Error("popErrorScope with no error scope pushed"));
+    }
+    return Promise.resolve(this.scopeErrors.shift() ?? null);
   }
-  pushErrorScope(): void {
-    throw notFaked("pushErrorScope");
+  pushErrorScope(filter: GPUErrorFilter): undefined {
+    this.errorScopes.push(filter);
+    return undefined;
   }
 }
 
@@ -654,6 +666,10 @@ export interface FakeAdapterOptions {
   readonly features: ReadonlyArray<GPUFeatureName>;
   /** Pixels on a side; WebGPU's default, 8192, when absent. */
   readonly maxTextureDimension2D?: number;
+  /** Bytes a storage binding may span; WebGPU's default, 128 MiB, when absent. */
+  readonly maxStorageBufferBindingSize?: number;
+  /** Bytes a buffer may hold; WebGPU's default, 256 MiB, when absent. */
+  readonly maxBufferSize?: number;
 }
 
 /**
@@ -674,6 +690,9 @@ export class FakeAdapter implements GPUAdapter {
     this.limits = {
       ...DEFAULT_LIMITS,
       maxTextureDimension2D: options.maxTextureDimension2D ?? DEFAULT_LIMITS.maxTextureDimension2D,
+      maxStorageBufferBindingSize:
+        options.maxStorageBufferBindingSize ?? DEFAULT_LIMITS.maxStorageBufferBindingSize,
+      maxBufferSize: options.maxBufferSize ?? DEFAULT_LIMITS.maxBufferSize,
     };
   }
 
@@ -684,7 +703,23 @@ export class FakeAdapter implements GPUAdapter {
         return Promise.reject(new TypeError(`the adapter lacks ${feature}`));
       }
     }
-    const device = new FakeDevice(this.info, required, this.limits);
+    // As the specification has it for the two buffer limits: the device gets WebGPU's default
+    // unless more is required, and a request beyond the adapter's rejects. (The other limits keep
+    // the adapter's, as every earlier test expects.)
+    const requiredLimits = descriptor?.requiredLimits ?? {};
+    const granted = { maxStorageBufferBindingSize: 0, maxBufferSize: 0 };
+    for (const name of ["maxStorageBufferBindingSize", "maxBufferSize"] as const) {
+      const asked = requiredLimits[name];
+      if (asked !== undefined && asked > this.limits[name]) {
+        return Promise.reject(new TypeError(`the adapter's ${name} is below ${asked}`));
+      }
+      granted[name] = asked ?? DEFAULT_LIMITS[name];
+    }
+    const device = new FakeDevice(this.info, required, {
+      ...DEFAULT_LIMITS,
+      maxTextureDimension2D: this.limits.maxTextureDimension2D,
+      ...granted,
+    });
     if (this.#consumed) {
       device.loseDevice("unknown", "the adapter was already consumed");
     }

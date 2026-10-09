@@ -8,8 +8,10 @@ import type { BodyIdHex } from "@hyperion/protocol";
 
 import {
   type BodyDistanceUnit,
+  formatBearingDeg,
   formatBodyDistance,
   formatNumber,
+  formatSignedDeg,
   formatSignificant,
   formatUniverseTimeDhms,
 } from "../../lib/format";
@@ -17,10 +19,19 @@ import { norm, sub } from "../../geometry/vec3";
 import { flightInput, type ViewKeyAction } from "../../view/camera/keys";
 import {
   changeFreeRate,
+  FREE_ROTATION_RATE_DEG_PER_S,
   freeRateMPerS,
   MAX_FREE_STEP_S,
   stepFreeCamera,
+  turnFreeCamera,
 } from "../../view/camera/freeCamera";
+import {
+  addTurns,
+  hasLookOffset,
+  type LookOffset,
+  NO_TURN,
+  type ViewTurn,
+} from "../../view/camera/look";
 import type { CameraFrame, CameraPose } from "../../view/camera/pose";
 import {
   advanceEasedMove,
@@ -30,6 +41,7 @@ import {
   type CutDestination,
   type CutOptions,
   cutTo,
+  type RenderStyle,
   displayPose,
   followPreset,
   newCameraState,
@@ -37,7 +49,9 @@ import {
   onSystemChange,
   stepFov,
   targetPosition,
+  turnLook,
 } from "../../view/camera/state";
+import type { AppearanceLabel } from "../../view/appearance/fromWire";
 import { relativeToCamera } from "../../view/coords/relative";
 import { differenceM, type ViewPosition } from "../../view/coords/position";
 import {
@@ -47,13 +61,20 @@ import {
 } from "../../view/photometry/exposure";
 import {
   cameraSceneOf,
+  isLitKind,
   sceneOrigins,
   type ViewBodyKind,
   type ViewScene,
 } from "../../view/scene/model";
+import { ECLIPSE_SCENE_NAME, eclipseScene } from "../../view/scenes/eclipseScene";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
+import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
+import type { StyleAvailability } from "../../view/engine/platform";
+import { PHASE_SCENE_NAME, phaseScene } from "../../view/scenes/phaseScene";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { type LightingState, lightingStatement } from "../../view/lighting/hostLights";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
@@ -62,10 +83,15 @@ export interface SceneOption {
   readonly make: () => KeptScene;
 }
 
-/** The kept scenes: `PRECISION TEST` and `FRAME CHANGE TEST`. */
+/**
+ * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a) and
+ * `ECLIPSE TEST` (R07.T10.c).
+ */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
   { name: FRAME_CHANGE_SCENE_NAME, make: frameChangeScene },
+  { name: PHASE_SCENE_NAME, make: phaseScene },
+  { name: ECLIPSE_SCENE_NAME, make: eclipseScene },
 ];
 
 /** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */
@@ -111,7 +137,10 @@ export function startServerRun(scene: ViewScene): ViewRun {
   };
 }
 
-/** What one display frame brings: its duration, the flight keys held and the server's scene. */
+/**
+ * What one display frame brings: its duration, the flight keys held, the turn the drags asked for
+ * and the server's scene.
+ */
 export interface FrameInput {
   /**
    * The server's scene at the frame's time (`useScene`'s `frameAt`), for a run of it; `null` for a
@@ -123,6 +152,11 @@ export interface FrameInput {
   /** The flight keys held on the focused canvas (`keys.ts`' binding names). */
   readonly held: ReadonlySet<string>;
   readonly reducedMotion: boolean;
+  /**
+   * The turn the drags on the view's canvas asked for since its last frame (plan R07, T19.f;
+   * `dragTurn`), none where absent.
+   */
+  readonly turn?: ViewTurn;
 }
 
 /** Whether every frame a camera's pose refers to is in `scene`: its system, body or craft. */
@@ -172,22 +206,106 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
       camera = onSystemChange(camera, cameraSceneOf(scene));
     }
   }
-  const cameraScene = cameraSceneOf(scene);
-  const following = followPreset(camera, cameraScene);
-  const flown = stepFreeCamera(
-    following,
-    flightInput(input.held),
-    dtS,
-    input.reducedMotion,
-    cameraScene,
-  ).state;
-  return { ...run, tS, scene, camera: advanceEasedMove(flown, dtS) };
+  return { ...run, tS, scene, camera: flyCamera(camera, scene, dtS, input) };
 }
 
-/** A command's outcome: the run after it, or why it was refused. */
+/** The free camera's full rotation rate, rad/s, at which the arrows turn a look offset too. */
+const ARROW_TURN_RAD_PER_S = (FREE_ROTATION_RATE_DEG_PER_S * Math.PI) / 180;
+
+/**
+ * A camera one frame on in `scene`: turned by the frame's drag, following its preset, flown by the
+ * held keys, eased.
+ *
+ * @remarks
+ * A drag's turn turns a free camera about its own axes, and a `SEAT` or `CHASE` camera's look
+ * offset, which the arrows also turn there at the free camera's full rate, without its ramp, so
+ * that the drag has a keyboard path in every preset (plan R07, T19.f). Both are the operator's own
+ * motion, which reduced motion leaves as it is.
+ */
+function flyCamera(
+  camera: CameraState,
+  scene: ViewScene,
+  dtS: number,
+  input: Pick<FrameInput, "held" | "reducedMotion" | "turn">,
+): CameraState {
+  const cameraScene = cameraSceneOf(scene);
+  const keys = flightInput(input.held);
+  const dragged = input.turn ?? NO_TURN;
+  const arrows: ViewTurn =
+    camera.preset === "free"
+      ? NO_TURN
+      : {
+          yawRad: keys.rotate.y * ARROW_TURN_RAD_PER_S * dtS,
+          pitchRad: keys.rotate.x * ARROW_TURN_RAD_PER_S * dtS,
+        };
+  const looked = turnLook(camera, addTurns(dragged, arrows), cameraScene);
+  const following = turnFreeCamera(followPreset(looked, cameraScene), dragged);
+  const flown = stepFreeCamera(following, keys, dtS, input.reducedMotion, cameraScene).state;
+  return advanceEasedMove(flown, dtS);
+}
+
+/**
+ * An instrument view's run one frame on (plan R07, T19): the scene its primary view drew this
+ * frame, at the primary's script time, and the instrument's own camera stepped through it as
+ * {@link stepRun} steps one, flown by the keys held on the instrument's canvas.
+ *
+ * @remarks
+ * Where the primary's scene is in another system than the instrument last drew, or no longer
+ * holds the body or craft its camera is held to, the camera is moved as on a jump, as a server
+ * scene's is.
+ *
+ * @param input - The instrument's own frame: its time since it last drew (it draws at its own
+ *   rate), its held keys and the turn the drags on its canvas asked for since.
+ */
+export function followRun(
+  run: ViewRun,
+  primary: ViewRun,
+  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion" | "turn">,
+): ViewRun {
+  const dtS = Math.min(Math.max(input.dtS, 0), MAX_FREE_STEP_S);
+  const { scene } = primary;
+  let camera = run.camera;
+  if (scene.system !== run.scene.system || !frameHeld(camera, scene)) {
+    camera = onSystemChange(camera, cameraSceneOf(scene));
+  }
+  return {
+    source: primary.source,
+    tS: primary.tS,
+    scene,
+    camera: flyCamera(camera, scene, dtS, input),
+  };
+}
+
+/**
+ * An instrument view's run as it opens (plan R07, T19): the primary's scene, a camera of R02's
+ * `camera` role, at the `CHASE` preset where the scene has an own ship (beside a primary at its
+ * seat) and else as a new camera starts.
+ */
+export function startInstrumentRun(primary: ViewRun): ViewRun {
+  const fresh: ViewRun = {
+    source: primary.source,
+    tS: primary.tS,
+    scene: primary.scene,
+    camera: newCameraState(cameraSceneOf(primary.scene), "camera"),
+  };
+  const chase = commandRun(
+    fresh,
+    { kind: "preset", preset: "chase" },
+    { easedMoves: false, reducedMotion: true },
+  );
+  return chase.kind === "done" ? chase.run : fresh;
+}
+
+/** The styles a view offers before its adapter has answered: the wireframe alone. */
+export const WIREFRAME_ONLY: StyleAvailability = { wireframe: true, photorealistic: false };
+
+/**
+ * A command's outcome: the run after it, or why it was refused: a preset that needs an own ship, or
+ * a rate step outside `FREE` (R07.T19.b).
+ */
 export type CommandResult =
   | { readonly kind: "done"; readonly run: ViewRun }
-  | { readonly kind: "refused"; readonly reason: "no_own_ship" };
+  | { readonly kind: "refused"; readonly reason: "no_own_ship" | "not_free" };
 
 function cut(run: ViewRun, to: CutDestination, options: CutOptions): CommandResult {
   const result = cutTo(run.camera, to, cameraSceneOf(run.scene), options);
@@ -196,11 +314,21 @@ function cut(run: ViewRun, to: CutDestination, options: CutOptions): CommandResu
     : { kind: "done", run: { ...run, camera: result.state } };
 }
 
-/** The run after a camera command: a key's action or a control's (Design note 18's cuts). */
+/**
+ * The run after a camera command: a key's action or a control's (Design note 18's cuts).
+ *
+ * @remarks
+ * `PAGE UP` and `PAGE DOWN` step the free camera's rate only in `FREE`, as the flight keys move
+ * only the free camera, so that the rate never changes unseen (decision-r07-t19-layout, item 1b).
+ *
+ * @param availability - The styles the adapter offers (R01's `styleAvailability`); a refused
+ *   style leaves the camera as it was (R07.T7's `withStyle`).
+ */
 export function commandRun(
   run: ViewRun,
   action: ViewKeyAction,
   options: CutOptions,
+  availability: StyleAvailability = WIREFRAME_ONLY,
 ): CommandResult {
   const cameraScene = cameraSceneOf(run.scene);
   let result: CommandResult;
@@ -222,11 +350,22 @@ export function commandRun(
       };
       break;
     case "rate":
+      result =
+        run.camera.preset === "free"
+          ? {
+              kind: "done",
+              run: { ...run, camera: changeFreeRate(run.camera, action.step, cameraScene) },
+            }
+          : { kind: "refused", reason: "not_free" };
+      break;
+    case "style": {
+      const style = action.style === "toggle" ? otherStyle(run.camera.style) : action.style;
       result = {
         kind: "done",
-        run: { ...run, camera: changeFreeRate(run.camera, action.step, cameraScene) },
+        run: { ...run, camera: withStyle(run.camera, style, availability) },
       };
       break;
+    }
   }
   return result;
 }
@@ -298,12 +437,28 @@ export const STAR_SOURCE = "RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION";
  */
 export const STARS_WITHOUT_POSITION = "NOT AVAILABLE: the system's position is not known";
 
+/**
+ * A value within a reading that is set in a field of its own: right-aligned in a fixed width, and
+ * stale apart from the rest of the reading. The sky's edge in the stars-arriving note,
+ * `BEYOND 2000 ly: STREAMING`, is one (R06.T11.f).
+ */
+export interface LabelField {
+  /** Its text as it stands in the reading, a run that never breaks: `2000 ly`. */
+  readonly text: string;
+  /** Its width, ch: its longest reading's with its stale mark, so that the line never moves. */
+  readonly widthCh: number;
+  /** Whether it is stale: muted, with its trailing `S`, while the rest of the reading is not. */
+  readonly stale: boolean;
+}
+
 /** One line of the label block: its label and its reading. */
 export interface LabelLine {
   readonly label: string;
   readonly value: string;
   /** Set on a reading of the server's scene while the scene is stale: muted, with its `S`. */
   readonly stale?: true;
+  /** A value of the reading set in a field of its own, or none. */
+  readonly field?: LabelField;
 }
 
 /**
@@ -325,10 +480,65 @@ export function exposureReading(exposure: ExposureControl): string {
 }
 
 /**
+ * A look offset as the view reads it (plan R07, T19.f): the line of sight's relative bearing,
+ * clockwise from the preset's own, `000°` to `359°`, and its signed elevation from it, in whole
+ * degrees, `345° +05°`.
+ */
+export function lookReading(offset: LookOffset): string {
+  const toDeg = 180 / Math.PI;
+  const bearing = formatBearingDeg(-offset.azimuthRad * toDeg);
+  return `${bearing} ${formatSignedDeg(offset.elevationRad * toDeg)}`;
+}
+
+/**
+ * A camera's preset as the label block reads it: `SEAT`, `CHASE`, or in `FREE` the free camera's
+ * rate after a middle dot, `FREE · RATE 1.00 km/s`, so that the rate is on show while the camera
+ * panel is folded (decision-r07-t19-layout, item 1b); and in `SEAT` or `CHASE`, while a drag or
+ * the arrows have turned the camera from its preset, the offset after a middle dot,
+ * `SEAT · LOOK 345° +05°` (plan R07, T19.f), which the preset's key pressed again clears.
+ */
+export function cameraReading(camera: CameraState): string {
+  const name = PRESET_NAMES[camera.preset];
+  if (camera.preset === "free") {
+    return `${name} · ${freeRateReading(camera.free.rateStep)}`;
+  }
+  return hasLookOffset(camera.offset) ? `${name} · LOOK ${lookReading(camera.offset)}` : name;
+}
+
+/**
+ * A kept scene's clock rate as the label block reads it (R07.T16.k; the guide's `SCENE` row):
+ * `×` and its seconds a second as a whole number, `×100`, grouped in threes from five digits as
+ * any number is.
+ *
+ * @remarks
+ * Every kept scene's rate is a whole number of seconds a second (`ECLIPSE TEST`'s 100, the rest
+ * 1), so the reading is exact; the label block's tests hold every scene of {@link SCENE_OPTIONS}
+ * to it, so that a kept scene at 2.5 never reads `×3`. Whether the rate reads so, or as a unit rate
+ * beside the display time's `RUN 1 d/s`, is the owner's, in T16.c's draft; this is the form
+ * drafted.
+ *
+ * @param secondsPerSecond - The scene's simulation seconds a real second,
+ *   {@link ViewScene.timeRate}.
+ */
+export function sceneClockReading(secondsPerSecond: number): string {
+  return `×${formatNumber(secondsPerSecond, 0)}`;
+}
+
+/**
  * The label block's lines (Design note 16): always the frame, the time with its time system, the
- * style, the camera preset, the field of view and the exposure with its level, and the star source;
- * the scene's name in a kept scene; `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull;
- * `ROTATION NOT YET MODELLED` while a body's rotation is not modelled.
+ * style, the camera preset ({@link cameraReading}), the field of view and the exposure with its
+ * level, and the star source;
+ * the scene's name in a kept scene, and after it, while that scene's clock runs at other than one
+ * second a second, its rate, `SCENE CLOCK ×100` ({@link sceneClockReading}, R07.T16.k), so that a
+ * `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull and
+ * `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no rotation
+ * (decision-r07-rotation-note) are statements ({@link labelStatements}).
+ *
+ * @remarks
+ * `SCENE` and `SCENE CLOCK` describe the display's scene, not one view's picture, so an
+ * instrument's block leaves both out (`InstrumentView`'s lines), as the guide's Views bullet has
+ * them stand on the `PRIMARY` view's block alone. The server's scene names neither: its time is
+ * the simulation's own, not a kept scene's script.
  *
  * @param stale - Whether the server's scene is stale (`useScene`'s `stale`): its time, held where
  *   the scene went stale, then reads as the guide's stale value.
@@ -343,8 +553,8 @@ export function labelLines(
   const lines: LabelLine[] = [
     { label: "FRAME", value: frameName(camera.pose.frame, scene) },
     stale ? { label: "TIME", value: time, stale: true } : { label: "TIME", value: time },
-    { label: "STYLE", value: "WIREFRAME" },
-    { label: "CAMERA", value: PRESET_NAMES[camera.preset] },
+    { label: "STYLE", value: styleName(camera.style) },
+    { label: "CAMERA", value: cameraReading(camera) },
     { label: "FOV", value: `${String(camera.fovDeg)}°` },
     { label: "EXPOSURE", value: exposureReading(exposure) },
     {
@@ -354,20 +564,113 @@ export function labelLines(
   ];
   if (scene.provenance.kind === "kept") {
     lines.push({ label: "SCENE", value: scene.provenance.name });
+    if (scene.timeRate !== 1) {
+      lines.push({ label: "SCENE CLOCK", value: sceneClockReading(scene.timeRate) });
+    }
   }
   return lines;
 }
 
-/** The steady statements under the label block's lines, each while its condition holds. */
-export function labelStatements(run: ViewRun): ReadonlyArray<string> {
+/** The statement of a view whose camera is off the hull: positions are as the ship sees them. */
+export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
+
+/**
+ * The statement the `PRIMARY` view's block carries while the `EASED CAMERA MOVES` setting is on
+ * and applied, not under reduced motion (decision-r07-t19-layout, item 1b): display-wide, so on
+ * the primary's block alone, and stated only while it is on, as `DECORATION ON` is.
+ */
+export const EASED_MOVES_STATEMENT = "EASED CAMERA MOVES";
+
+/**
+ * The steady statements under the label block's lines, each while its condition holds, as
+ * {@link labelLines} states them.
+ *
+ * @param terrain - The view's debounced terrain annunciation (plan R05, T9), or `null` while
+ *   neither condition holds or the view draws no terrain.
+ */
+export function labelStatements(
+  run: ViewRun,
+  terrain: TerrainAnnunciation | null = null,
+): ReadonlyArray<string> {
   const statements: string[] = [];
   if (run.camera.preset !== "seat" && run.scene.ownShip !== null) {
-    statements.push("POSITIONS AS SEEN FROM SHIP");
+    statements.push(POSITIONS_FROM_SHIP);
   }
-  if (run.scene.bodies.some((body) => body.rotation === null)) {
-    statements.push("ROTATION NOT YET MODELLED");
+  if (
+    run.scene.bodies.some(
+      (body) => body.kind !== "star" && body.radiusM > 0 && body.rotation === null,
+    )
+  ) {
+    statements.push("ROTATION: NOT YET MODELLED");
+  }
+  if (terrain !== null) {
+    statements.push(terrain);
   }
   return statements;
+}
+
+/** The statement while the photorealistic style is chosen and its image is not yet drawn. */
+export const PHOTOREAL_PREPARING = "PHOTOREALISTIC: PREPARING";
+
+/**
+ * The note while the photorealistic frame is drawn and its scene has a craft, the own ship
+ * included (R07.T16.e; decision-r07-t16a, item 3): no craft's light is computed, so each is drawn
+ * as its cased hull outline on a `--surface-0` silhouette, never read as its own.
+ */
+export const CRAFT_PHOTOMETRY_STATEMENT = "CRAFT PHOTOMETRY: NOT YET MODELLED";
+
+/**
+ * {@link CRAFT_PHOTOMETRY_STATEMENT} composed with `BODY PHOTOMETRY: NOT YET MODELLED` into one
+ * note, in that note's place, while both hold, as the guide composes its pairs of notes.
+ */
+export const BODY_AND_CRAFT_PHOTOMETRY_STATEMENT = "BODY AND CRAFT PHOTOMETRY: NOT YET MODELLED";
+
+/** The body note that {@link BODY_AND_CRAFT_PHOTOMETRY_STATEMENT} takes the place of. */
+const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLED";
+
+/**
+ * The photorealistic style's statements under the label block (R07.T8.a), none in the wireframe:
+ * {@link PHOTOREAL_PREPARING} while the view still draws its wireframe in its place (its pipelines
+ * compiling); then, while the scene has a body to light, the lighting line while no star lights it
+ * (decision-r07-t8a, item 1) and each label the drawn bodies carry (`BODY PHOTOMETRY: NOT YET
+ * MODELLED` for the provisional photometry, Design note 5); and, while the scene has a craft,
+ * {@link CRAFT_PHOTOMETRY_STATEMENT}, composed with the body note into
+ * {@link BODY_AND_CRAFT_PHOTOMETRY_STATEMENT} where both hold (R07.T16.e).
+ *
+ * @remarks
+ * Scene-level, as the bodies' labels are (`litLabelsOf`): a craft's note stands with the scene's
+ * craft, whether or not one is in the picture, and with no lit body as well.
+ *
+ * @param drawn - The style the view's last frame was drawn in.
+ * @param labels - The appearance labels of the bodies the photorealistic frame lights.
+ */
+export function photorealStatements(
+  run: ViewRun,
+  lighting: LightingState,
+  drawn: RenderStyle,
+  labels: ReadonlyArray<AppearanceLabel>,
+): ReadonlyArray<string> {
+  if (run.camera.style !== "photorealistic") {
+    return [];
+  }
+  if (drawn !== "photorealistic") {
+    return [PHOTOREAL_PREPARING];
+  }
+  const hasCraft = run.scene.craft.length > 0;
+  if (!run.scene.bodies.some((body) => isLitKind(body.kind))) {
+    return hasCraft ? [CRAFT_PHOTOMETRY_STATEMENT] : [];
+  }
+  const line = lightingStatement(lighting);
+  const bodyNotes: ReadonlyArray<string> = [...new Set(labels)];
+  let notes = bodyNotes;
+  if (hasCraft) {
+    notes = bodyNotes.includes(BODY_PHOTOMETRY_LABEL)
+      ? bodyNotes.map((note) =>
+          note === BODY_PHOTOMETRY_LABEL ? BODY_AND_CRAFT_PHOTOMETRY_STATEMENT : note,
+        )
+      : [...bodyNotes, CRAFT_PHOTOMETRY_STATEMENT];
+  }
+  return [...(line === null ? [] : [line]), ...notes];
 }
 
 /**
@@ -422,9 +725,18 @@ function closureText(closureMPerS: number): string {
   return `${sign}${formatSignificant(Math.abs(closureMPerS))} m/s`;
 }
 
-/** A row's range as the list and the canvas labels both read it, `FROM CAMERA` with no own ship. */
+/**
+ * A row's range as the canvas labels and the list's accessible names read it, `FROM CAMERA` with
+ * no own ship; the list's rows show the bare range under its `RANGE FROM CAMERA` head
+ * (R07.T19.b).
+ */
 export function rangeText(row: MarkRow): string {
   return row.fromCamera ? `${row.range} FROM CAMERA` : row.range;
+}
+
+/** Whether a scene's ranges are from the camera: it has no own ship to measure from. */
+export function rangesFromCamera(scene: ViewScene): boolean {
+  return !scene.craft.some((craft) => craft.id === scene.ownShip);
 }
 
 /** A target's key, stable from frame to frame. */
@@ -445,6 +757,7 @@ export function markRows(
   const origins = sceneOrigins(scene);
   const pose = runPose(run);
   const own = scene.craft.find((c) => c.id === scene.ownShip);
+  const fromCamera = rangesFromCamera(scene);
   return cameraSceneOf(scene).targets.map((target) => {
     const position = targetPosition(target, origins);
     const rangeM =
@@ -479,7 +792,7 @@ export function markRows(
       kind: body === undefined ? "CRAFT" : BODY_KIND_NAMES[body.kind],
       range: `${distance.value} ${distance.unit}`,
       unit: distance.unit,
-      fromCamera: own === undefined,
+      fromCamera,
       closure,
     };
   });

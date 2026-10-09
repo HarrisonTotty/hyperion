@@ -401,6 +401,8 @@ export interface RenderEngine {
   readBuffer(buffer: BufferHandle, access?: "cpu" | "tolerance"): Promise<ArrayBuffer>;
   readTexture(texture: TextureHandle, level?: number, rect?: TexelRect): Promise<ArrayBuffer>;
   onPassTimes(listener: (times: PassTimes) => void): () => void;
+  /** The latest resolve's `PassTimes.frame`; 0 before any; restarts at a restore (R07.T19). */
+  readonly passTimesFrame: number;
   /** Every creation, destruction and upload; R05's tally subscribes. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
   onFault(listener: (fault: GraphicsFault) => void): () => void;
@@ -499,7 +501,7 @@ export interface RenderView {
   readonly name: string;
   resize(size: ViewSize): void; // this view's attachments only
   render(frame: FrameSubmission): void;
-  readBack(): Promise<Float32Array | Uint8Array>; // harness only: copyTextureToBuffer
+  readBack(): Promise<Float32Array | Uint8Array>; // harness only: copyTextureToBuffer, in the drawing task
   dispose(): void;
 }
 export interface FrameSubmission {
@@ -578,6 +580,9 @@ export class ColourSelfSample extends Error {
 export class PresentationOnlyReadback extends Error {
   readonly kernelName: string;
 }
+export class CanvasReadBackRefused extends Error {
+  readonly viewName: string; // its cause: the device's GPUError
+} // added by R07.T8.a (2026-10-07): RenderView.readBack rejects with it for a refused (late) copy
 
 // loadEngine.ts: imports webgpu/engine dynamically and wraps it in a ResilientEngine.
 export function loadRenderEngine(
@@ -1788,7 +1793,10 @@ So this task finishes the prototype on a scratch branch, not merged: record a re
 whether it stays in the opener's process (`app.getAppMetrics()`), and, if a second display can be
 borrowed, its pacing there. It also writes down the rule a client that opens such windows must
 follow, for R07 to consume: drop the child's `RenderView` on its `pagehide` before the next frame,
-and treat that one validation error from a closing child as expected, not as a fault.
+and treat that one validation error from a closing child as expected, not as a fault. _Amended by
+R07.T21 (2026-10-06): the `pagehide` can come after the opener's next frame, so where the opener
+closes the child itself it drops the `RenderView` at its `close()`, and the `pagehide` drops it for
+every other close. The rule as it stands is in T13's as-built notes._
 
 - Acceptance: the result, with the research probe's findings above, recorded in this plan's as-built
   notes; open question 15's second half answered for the brainstorm; R07.T21 consumes the record.
@@ -2725,10 +2733,29 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     raised no error and no loss. Without it, every later submit to the closed child's context
     raised "context configuration is invalid", followed by the invalid texture, view and command
     buffer it causes: 404 uncaptured errors in 2 s at 60 frames a second. The device was not lost
-    and the opener kept drawing. **The rule for R07.T21:** drop the child's `RenderView` in the
-    child window's `pagehide` listener, before the opener's next frame; treat a "context
-    configuration is invalid" error from a closing child as expected, never as a fault; and never
-    submit to a view whose window has closed.
+    and the opener kept drawing. **The rule for R07.T21** (amended below): drop the child's
+    `RenderView` in the child window's `pagehide` listener, before the opener's next frame; treat a
+    "context configuration is invalid" error from a closing child as expected, never as a fault;
+    and never submit to a view whose window has closed.
+  - _Amended by R07.T21 (2026-10-06):_ **the rule as it stands, for every client that opens a
+    child window.** R07.T21's hidden smoke found the child's `pagehide` one of the opener's frames
+    after the opener's `close()` of it (in one run of three on 2026-10-05, and in three of nine on
+    2026-10-06), so a `pagehide` does not always come before the opener's next frame. The rule:
+    1. Where the opener closes a child itself, it drops the child's `RenderView` (its context and
+       attachments, by `dispose()`) at its `close()`, before the call, without waiting for the
+       `pagehide`.
+    2. For every other close (the user's, the child's own), the child's `pagehide` listener drops
+       it.
+    3. Whichever comes first drops the view; the other does nothing, so it is disposed of once,
+       and the `pagehide` listener goes with it.
+    4. Never submit to a view that has been dropped or whose window has closed. A close the opener
+       did not make can still leave a frame between the close and the `pagehide`, so a "context
+       configuration is invalid" error from a closing child stays expected, never a fault.
+
+    The rule is built as `holdChildView` in R07.T21's scene (`renderer/src/smoke/childWindow.ts`),
+    with its tests: the client itself opens no window (`main/index.ts` denies every one), so the
+    first client view in a child window takes the rule from there.
+
   - Under the Vulkan surface (the client's default switches), creating or resizing a hidden
     offscreen child restarted the GPU process (`vkAcquireNextImageKHR` OUT_OF_DATE, T12's
     finding), so the runs above used `--disable-vulkan-surface`. A hidden offscreen child also
@@ -2953,3 +2980,25 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
     the log line `material broken fixture (TEST FIXTURE) failed to compile`. No script compares the
     `LINK` text, so there was no expected text to change. _Awaiting the owner's sign-off
     (draft)._
+- **Changed after RM1 by R05.T12.b (2026-10-02, approved by the orchestrator).**
+  `RenderEngine.readTexture(texture, level?, rect?, access?)` gained an optional fourth parameter,
+  `access: "cpu" | "tolerance"`, which mirrors `readBuffer`'s. With `tolerance`, the smoke page can
+  read back a texture that a `presentation-only` kernel wrote last: R05's atmosphere tables, which
+  it holds to an `f64` oracle. The default stays `cpu`, so every other caller is still refused.
+  `engineBoundary.test.ts` already refuses a `tolerance` read outside `smoke/`. The change is
+  append-only, in `types.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.
+- **Extended by R07.T15** (2026-10-02, decision item 6): `FrameSubmission.encoding` (`"in-pass"`
+  writes a view through its canvas's own format, for R07's tone-mapping pass, which dithers after
+  encoding), `FrameSubmission.colourLoad` (`"load"` keeps an earlier submission's colour and
+  depth, for R07.T16's symbology) and `RenderTargetFormat` `"canvas-in-pass"`; opt-in, defaults
+  unchanged. R07.T12 added no staging ring to the readback; its bench (R07.T17) decides. See R07's
+  Risks. _R07.T17 measured no cost and added none._
+- **Extended by R07.T19** (decision-r07-t19, item 1): `RenderEngine.passTimesFrame`, the
+  timer's latest resolve number (0 before any, and on `ResilientEngine` while it has no engine;
+  from 0 again after a restore); a resolve dropped while every pair is in flight now takes its
+  number, so it reads as a gap; `TIMING_FRAMES_IN_FLIGHT` raised for R07's several views (to 135,
+  three frames of a photorealistic primary with two photorealistic instruments; see R07's Risks).
+  Append-only, in `types.ts`, `webgpu/timing.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.
+- **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged.
+- **Extended by R06** (append-only, approved 2026-10-03): `releaseBuffer`, `releaseTexture`, `createPackedCube`'s optional `name` and `createPointSplatAsync` (R06.T13.h); `writePackedCubeLevelFromBuffer`'s optional `face`, the buffer then holding that one face (R06.T13.g); `MemoryCategory` gains `sky-cube` and `sky-scratch`; `WGSL_CATALOGUE` takes a `point-splat` kind. Existing callers unchanged; recorded in R06's Risks.
+- **A `2d-array` binding takes a single-layer 2D texture** (R05.T11.a, approved by the orchestrator 2026-10-03): `drawing.ts`'s `viewDimensionBinds` lets a material declaring `viewDimension: "2d-array"` bind a 2D texture of one layer, viewed as a one-layer array, so that R05's layered normals atlas binds whatever its layer count; every other mismatch is refused as before (`engine.test.ts`). `platform.ts` gains `MAX_TEXTURE_ARRAY_LAYERS` (256, WebGPU's default, never raised). Additive.

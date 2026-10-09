@@ -268,8 +268,10 @@ impl TryFrom<&SystemsInRangeRequest> for RangeRequest {
     }
 }
 
-/// The instant to query at: a well-formed time inside the clock window.
-fn query_time(time: &hyperion_protocol::UniverseTime) -> Result<UniverseTime, ConvertRequestError> {
+/// The instant to query at: a well-formed time inside the clock window, refused naming `time`.
+pub(crate) fn query_time(
+    time: &hyperion_protocol::UniverseTime,
+) -> Result<UniverseTime, ConvertRequestError> {
     let t = UniverseTime::new(time.seconds, time.nanos)
         .map_err(|error| ConvertRequestError::new("time", error))?;
     if !ClockWindow::contains(t) {
@@ -289,15 +291,24 @@ fn query_time(time: &hyperion_protocol::UniverseTime) -> Result<UniverseTime, Co
 fn query_centre(
     centre: &hyperion_protocol::GalacticPosition,
 ) -> Result<GalacticPosition, ConvertRequestError> {
-    let position = GalacticPosition::new(LyCell::new(centre.cell_ly), centre.offset_m)
-        .map_err(|error| ConvertRequestError::new("centre", error))?;
-    if !position.in_root_cube() {
+    root_cube_position("centre", centre)
+}
+
+/// A canonical position inside the root cube, refused naming `field`: a range query's centre, a
+/// sky's observer.
+pub(crate) fn root_cube_position(
+    field: &'static str,
+    position: &hyperion_protocol::GalacticPosition,
+) -> Result<GalacticPosition, ConvertRequestError> {
+    let checked = GalacticPosition::new(LyCell::new(position.cell_ly), position.offset_m)
+        .map_err(|error| ConvertRequestError::new(field, error))?;
+    if !checked.in_root_cube() {
         return Err(ConvertRequestError::new(
-            "centre",
-            "the centre lies outside the galaxy's root cube",
+            field,
+            format!("the {field} lies outside the galaxy's root cube"),
         ));
     }
-    Ok(position)
+    Ok(checked)
 }
 
 /// The sphere's radius: finite, above zero and at most [`MAX_QUERY_RADIUS_LY`].
@@ -599,7 +610,7 @@ fn galactic_position(position: &GalacticPosition) -> hyperion_protocol::Galactic
 
 /// The wire's layer.
 #[must_use]
-fn mass_layer(layer: Layer) -> MassLayer {
+pub(crate) fn mass_layer(layer: Layer) -> MassLayer {
     match layer {
         Layer::A => MassLayer::A,
         Layer::B => MassLayer::B,

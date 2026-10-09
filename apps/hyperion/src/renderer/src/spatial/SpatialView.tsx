@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { formatBearingDeg, formatSignedDeg } from "../lib/format";
+import { minReticleGapDevicePx, reticleStrokesCssPx } from "../lib/strokes";
 import { isTextEntry } from "../lib/textEntry";
 import { useElementSize } from "../lib/useElementSize";
 import { usePrefersReducedMotion } from "../lib/usePrefersReducedMotion";
@@ -32,13 +33,15 @@ import {
   coreArrowBoxes,
   coreArrowLayout,
   coreLabelText,
+  markInksPx,
   placeCurveLabels,
   TRIAD_BOX_REM,
   triadBoxRem as triadBoxOf,
   triadFootprintPx,
   triadLayout,
+  triadShiftRem,
 } from "./furniture";
-import { chooseLabels, placeLabels } from "./labels";
+import { chooseLabels, markLabelTransform, placeLabels } from "./labels";
 import type { LocalFrame } from "../geometry/frame";
 import type { SpatialScene } from "./marks";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
@@ -318,18 +321,31 @@ export function SpatialView({
     };
   }, [cameraState, fittedPxPerUnit]);
 
+  // The destination's chevrons stand an outline and a casing outside the bracket's place at least,
+  // as the view's do, and each label's text starts 0.25 rem outside the bracket about its mark, a
+  // destination's 0.25 rem above or below its whole chevron set (R07.T16.f and T16.h, and addenda A
+  // and B): both at the ratio.
+  const minReticleGapPx = minReticleGapDevicePx(pixelRatio) / pixelRatio;
   const drawList = useMemo(
-    () => (camera === null || viewport === null ? null : buildDrawList(scene, camera, viewport)),
-    [scene, camera, viewport],
+    () =>
+      camera === null || viewport === null
+        ? null
+        : buildDrawList(scene, camera, viewport, minReticleGapPx),
+    [scene, camera, viewport, minReticleGapPx],
   );
   const shownAngles = useThrottledValue(cameraState.angles, READOUT_INTERVAL_MS);
 
   // The marks to label depend on the scene alone, and choosing them sorts every mark: a few
-  // thousand on a chart, which a drag would otherwise sort again at every frame.
-  const chosenMarks = useMemo(
-    () => chooseLabels(scene.points, scene.selectedId, scene.destinationId),
-    [scene],
-  );
+  // thousand on a chart, which a drag would otherwise sort again at every frame. Those chosen with
+  // no selection are the labels the destination's is placed against, so that the destination's
+  // label stands where it does whatever is selected (decision-r07-quality-and-destination, addendum
+  // C, C1; R07.T16.j).
+  const { chosenMarks, unselectedIds } = useMemo(() => {
+    const chosen = chooseLabels(scene.points, scene.selectedId, scene.destinationId);
+    const unselected =
+      scene.selectedId === null ? chosen : chooseLabels(scene.points, null, scene.destinationId);
+    return { chosenMarks: chosen, unselectedIds: new Set(unselected.map((mark) => mark.id)) };
+  }, [scene]);
   const pinnedIds = [scene.selectedId, scene.destinationId].filter(
     (id): id is string => id !== null,
   );
@@ -342,7 +358,15 @@ export function SpatialView({
   // clips what leaves it and the guide has a 3D view always show its triad.
   const shownAxes = axes ?? scene.frame;
   const triadBoxRem = viewport === null ? TRIAD_BOX_REM : triadBoxOf(viewport);
-  const triad = triadLayout(scene.frame, cameraState.angles, triadBoxRem, shownAxes);
+  // Laid out as `AxisTriad` lays it out, its labels clear of its circles where they are drawn
+  // (R07.T16.j).
+  const triad = triadLayout(
+    scene.frame,
+    cameraState.angles,
+    triadBoxRem,
+    shownAxes,
+    triadShiftRem(pixelRatio, remPx),
+  );
   const triadBox: BoxPx | null =
     viewport === null ? null : triadFootprintPx(triad, viewport, triadBoxRem);
   const coreArrow =
@@ -356,22 +380,38 @@ export function SpatialView({
           [triadBox],
           shownAxes,
         );
+  // The curve labels keep clear of the marks' stalks and symbols as well (R07.T16.j).
   const curveLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
-      : placeCurveLabels(drawList.curveLabels, viewport, [
-          triadBox,
-          ...coreArrowBoxes(coreArrow, viewport.remPx),
-        ]);
-  // Marks' labels, placed last, keep off the furniture and the curve labels.
+      : placeCurveLabels(
+          drawList.curveLabels,
+          viewport,
+          [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx)],
+          markInksPx(drawList.ops, pixelRatio),
+        );
+  // Marks' labels, placed last, keep off the core arrow and 0.5 rem from the other text: the triad,
+  // the core arrow's label and the curve labels (decision-r07-quality-and-destination, addendum D,
+  // D4; R07.T16.j).
+  const coreLabel = coreArrow === null || coreArrow.kind === "undefined" ? [] : [coreArrow.label];
   const markLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
-      : placeLabels(chosenMarks, drawList.anchors, viewport, pinnedIds, [
-          triadBox,
-          ...coreArrowBoxes(coreArrow, viewport.remPx),
-          ...curveLabels,
-        ]);
+      : placeLabels(
+          chosenMarks,
+          drawList.anchors,
+          viewport,
+          reticleStrokesCssPx(pixelRatio),
+          scene.destinationId,
+          {
+            pinnedIds,
+            obstacles: coreArrowBoxes(coreArrow, viewport.remPx).filter(
+              (box) => !coreLabel.includes(box),
+            ),
+            texts: [triadBox, ...coreLabel, ...curveLabels],
+            unselectedIds,
+          },
+        );
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tokens, setTokens] = useState<ColourTokens | null>(null);
@@ -538,12 +578,7 @@ export function SpatialView({
                         ? "spatial-label spatial-label--available"
                         : "spatial-label"
                     }
-                    style={{
-                      transform: translateRem(
-                        label.leftPx / viewport.remPx,
-                        label.topPx / viewport.remPx,
-                      ),
-                    }}
+                    style={{ transform: markLabelTransform(label, viewport.remPx) }}
                   >
                     {label.text}
                   </span>

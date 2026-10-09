@@ -1,0 +1,21 @@
+# Plan 11's reach table (P11.T17.a; R06's ask B, decision-r06-census-cost.md §7): the largest
+# radius any star of a mass and metallicity interval can have had by an age, as the binary
+# engine's pre-test reads it, from the generator's own tracks. The parameters are constants of
+# `hyperion_sim::stellar::binary::reach`, recorded here so that the inputs hash covers them; the
+# task refuses a manifest that disagrees with the code.
+task = "binary_reach"
+
+[params]
+mass_cells = 96
+lowest_mass = 0.08
+highest_mass = 150.0
+mass_subdivisions = 8
+fe_h_nodes = [-2.301029995663981, -2.0, -1.5, -1.0, -0.5, -0.25, 0.0, 0.17609125905568124]
+fe_h_subdivisions = 6
+eta_draws = [-7.142857142857142, -3.5, -2.5, -1.5, -0.75, 0.0, 0.75, 1.5, 2.5, 3.5, 7.0]
+first_age_edge_years = 1.0e5
+age_step_dex = 0.05
+age_bins = 105
+age_spread = 1.1
+radius_margin_dex = 0.02
+drop_allowance_max_dex = 0.1

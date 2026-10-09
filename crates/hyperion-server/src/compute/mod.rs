@@ -12,7 +12,10 @@
 //! generated cells a range query reads, [`SharedSystemCache`] the systems' stars a
 //! `system_summary` reads and [`SharedBodyCache`] the planetary systems `system_bodies` and
 //! `body_detail` read, each keyed by a [`GalaxyKey`]. A density map is computed and cached as a
-//! [`RawDensityMap`] and quantised for each response by [`quantise_map`].
+//! [`RawDensityMap`] and quantised for each response by [`quantise_map`]. A sky's caps, census,
+//! band and limit map run as bulk jobs, as far as its [`SkyCaps`] reach, each census cell's bright
+//! subset kept in the sky's own cell cache, and each galaxy's sky tables built once on the pool and
+//! kept in a cache of their own (rendering plan R06).
 
 mod bodies;
 mod cancel;
@@ -24,6 +27,9 @@ mod galaxies;
 mod key;
 mod pool;
 mod single_flight;
+pub(crate) mod sky;
+mod sky_cells;
+mod sky_tables;
 mod systems;
 
 pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};
@@ -42,6 +48,11 @@ pub use pool::{
     SubmitJobError,
 };
 pub use single_flight::{Flight, SingleFlight};
+pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};
+pub use sky_cells::SkyCellCounters;
+pub use sky_tables::SkyTablesCounters;
 pub use systems::{SharedBriefCache, SharedSystemCache};
 
 pub(crate) use pool::panic_message;
+pub(crate) use sky_cells::SharedSkyCellCache;
+pub(crate) use sky_tables::SkyTablesService;

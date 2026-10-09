@@ -10,7 +10,7 @@ import {
   formatUniverseTimeYr,
 } from "../../lib/format";
 import { CLOCK_WINDOW_YR } from "../../lib/galaxy/model";
-import { isTextEntry } from "../../lib/textEntry";
+import { isEmptyEntry, isTextEntry, showSelected } from "../../lib/textEntry";
 import { RADIUS_STEPS_LY } from "../../spatial/scale";
 import {
   formatBandMsun,
@@ -82,6 +82,12 @@ interface NumberFieldProps {
 /**
  * One number the operator sets: entered when the field is left or with `Enter`, never at each
  * keystroke, so that a chart is not queried for every digit typed on the way.
+ *
+ * @remarks
+ * Its way out enters nothing (decision-r07-t13d): `Escape` drops what was typed and any refusal and
+ * shows the value again, selected so that typing replaces it (decision-r07-t19b-exposure-fit,
+ * item 6), and `Enter` on the field emptied does the same; left emptied, it shows the value.
+ * Neither is refused.
  */
 function NumberField({
   label,
@@ -110,8 +116,22 @@ function NumberField({
     setRefused(false);
   }
 
+  // Drops what was typed and any refusal, so that the field shows the value again.
+  const drop = (): void => {
+    setDraft(null);
+    setRefused(false);
+  };
+
   const enter = (): void => {
-    if (draft === null || heldBackId !== null) {
+    if (draft === null) {
+      return;
+    }
+    // An empty field sends nothing, so it is dropped even while held back.
+    if (isEmptyEntry(draft)) {
+      drop();
+      return;
+    }
+    if (heldBackId !== null) {
       return;
     }
     const value = parseNumber(draft, decimals);
@@ -154,6 +174,13 @@ function NumberField({
           if (event.key === "Enter") {
             event.preventDefault();
             enter();
+            if (draft !== null && isEmptyEntry(draft)) {
+              showSelected(event.currentTarget, text);
+            }
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            drop();
+            showSelected(event.currentTarget, text);
           }
         }}
         onBlur={enter}

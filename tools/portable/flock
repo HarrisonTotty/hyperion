@@ -1,0 +1,29 @@
+#!/usr/bin/env perl
+# util-linux's flock(1) in the one form the justfile uses, `flock [-n] <fd>`, for systems without
+# it (stock macOS). The justfile appends this directory to PATH, so a system flock(1) always comes
+# first and Linux runs util-linux's.
+#
+# It takes an exclusive flock(2) lock on the open file behind descriptor <fd>, which the calling
+# shell holds open (`exec 9>file`), waiting for it, or under `-n` exiting 1 at once if another holder
+# has it. As with util-linux's, the lock belongs to that open file, not to this process: it stays
+# held after this exits, until the caller's descriptor and every copy that its children inherited
+# are closed, so a holder that ends for any reason, a crash included, releases it. Both use the
+# same flock(2) call, so they exclude each other.
+use strict;
+use warnings;
+use Fcntl qw(:flock);
+
+my $nonblocking = @ARGV && $ARGV[0] eq '-n';
+shift @ARGV if $nonblocking;
+if (@ARGV != 1 || $ARGV[0] !~ /\A[0-9]+\z/) {
+    print STDERR "usage: flock [-n] <fd> (this stand-in takes only a descriptor)\n";
+    exit 64;
+}
+my $fd = $ARGV[0];
+# The descriptor is opened for reading or for writing: either serves flock(2).
+my $handle;
+open($handle, '<&=', $fd) or open($handle, '>&=', $fd)
+    or die "flock: descriptor $fd is not open: $!\n";
+exit 0 if flock($handle, $nonblocking ? LOCK_EX | LOCK_NB : LOCK_EX);
+exit 1 if $nonblocking && $!{EWOULDBLOCK};
+die "flock: descriptor $fd: $!\n";

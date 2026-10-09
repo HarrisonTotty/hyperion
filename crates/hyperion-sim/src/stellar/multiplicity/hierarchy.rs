@@ -7,6 +7,7 @@
 
 use std::cmp::Ordering;
 use std::f64::consts::TAU;
+use std::fmt;
 
 use super::direct::{
     DirectPeriods, PERIOD_CORRECTION, direct_count_pmf, direct_mass_ratio_law,
@@ -214,6 +215,16 @@ impl StarIndex {
     #[must_use]
     pub const fn get(self) -> u8 {
         self.0
+    }
+
+    /// The star of body index `body`, or `None` at or past [`STAR_BODY_INDEX_END`].
+    #[must_use]
+    pub const fn from_body(body: u8) -> Option<Self> {
+        if (body as u16) < STAR_BODY_INDEX_END {
+            Some(Self(body))
+        } else {
+            None
+        }
     }
 }
 
@@ -690,38 +701,105 @@ pub(super) fn draw_hierarchy_with(
     attempt: RedrawAttempt,
     correction: &[[f64; 8]; 4],
 ) -> SystemHierarchy {
-    let model = MultiplicityModel::default_v1();
-    let draw = Draw {
-        model: &model,
-        streams: Streams::new(galaxy, record.id(), attempt),
-        limits: Limits::new(
-            galaxy.potential(),
-            PointLy::from(record.epoch_position()),
-            match ctx {
-                MultiplicityContext::ForcedMultiple { max_separation } => max_separation,
-                MultiplicityContext::Free | MultiplicityContext::ForcedSingle => None,
-            },
-            innermost(galaxy, record, composition, ctx),
-        ),
-        correction,
-    };
-    let m0 = record.primary_initial_mass();
-    if draw.is_direct(m0) {
-        return draw.direct(m0, ctx);
+    RecordDraw::new(galaxy, record, composition, ctx, correction).stars_at(attempt)
+}
+
+/// One record's draw of its stars, attempt by attempt: [`draw_hierarchy_with`] with what every
+/// attempt reads alike computed once, the seam that the draw and the census's
+/// [`hierarchy_bound`](super::hierarchy_bound) share (plan 11, P11.T16).
+///
+/// Across a record's attempts only the words differ. The limits (the tidal cut's place, a forced
+/// context's widest separation and the primary's stripped mark, which is read at the record's own
+/// attempt, never a redraw's) and the direct construction's period law ([`DirectPeriods`], 36–42
+/// µs to build, P11.T16's measurement) depend on the record, the composition and the context
+/// alone. So [`RecordDraw::stars_at`] at any attempt is `draw_hierarchy_with` at that attempt, bit
+/// for bit, whichever attempts it drew before: the law is a pure function of the primary's mass
+/// and the correction, built at the first attempt that draws the direct construction, and it
+/// draws no word.
+pub(super) struct RecordDraw<'a> {
+    galaxy: &'a Galaxy,
+    record: &'a SystemRecord,
+    ctx: MultiplicityContext,
+    model: MultiplicityModel,
+    limits: Limits<'a>,
+    correction: &'a [[f64; 8]; 4],
+    /// The direct construction's period law for the primary, once an attempt has drawn it.
+    direct_periods: Option<DirectPeriods>,
+}
+
+/// Leaves out the period law, which is built or not by the attempts drawn so far, so that what is
+/// printed does not depend on them.
+impl fmt::Debug for RecordDraw<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecordDraw")
+            .field("record", &self.record.id())
+            .field("ctx", &self.ctx)
+            .field("limits", &self.limits)
+            .finish_non_exhaustive()
     }
-    let count = draw.companion_count(&model.companion_count_pmf(m0), ctx);
-    let mut draft = Draft::single(m0);
-    let mut placed = 0;
-    for k in 1..=count {
-        match draw.place(&draft, k) {
-            Some(next) => {
-                draft = next;
-                placed = k;
-            }
-            None => break,
+}
+
+impl<'a> RecordDraw<'a> {
+    /// The draw of `record`'s stars under `ctx`, at `composition` if given and otherwise at the
+    /// record's [`draw_metallicity`], with the direct companions' period law corrected by
+    /// `correction`.
+    #[must_use]
+    pub(super) fn new(
+        galaxy: &'a Galaxy,
+        record: &'a SystemRecord,
+        composition: Option<&Composition>,
+        ctx: MultiplicityContext,
+        correction: &'a [[f64; 8]; 4],
+    ) -> Self {
+        Self {
+            galaxy,
+            record,
+            ctx,
+            model: MultiplicityModel::default_v1(),
+            limits: Limits::new(
+                galaxy.potential(),
+                PointLy::from(record.epoch_position()),
+                match ctx {
+                    MultiplicityContext::ForcedMultiple { max_separation } => max_separation,
+                    MultiplicityContext::Free | MultiplicityContext::ForcedSingle => None,
+                },
+                innermost(galaxy, record, composition, ctx),
+            ),
+            correction,
+            direct_periods: None,
         }
     }
-    draft.build(record.id(), count - placed)
+
+    /// The stars at `attempt`, without the brown-dwarf companion: [`draw_hierarchy_with`] there.
+    #[must_use]
+    pub(super) fn stars_at(&mut self, attempt: RedrawAttempt) -> SystemHierarchy {
+        let (record, ctx, correction) = (self.record, self.ctx, self.correction);
+        let draw = Draw {
+            model: &self.model,
+            streams: Streams::new(self.galaxy, record.id(), attempt),
+            limits: self.limits,
+        };
+        let m0 = record.primary_initial_mass();
+        if draw.is_direct(m0) {
+            let periods = self
+                .direct_periods
+                .get_or_insert_with(|| DirectPeriods::new(m0, correction));
+            return draw.direct(m0, ctx, periods);
+        }
+        let count = draw.companion_count(&self.model.companion_count_pmf(m0), ctx);
+        let mut draft = Draft::single(m0);
+        let mut placed = 0;
+        for k in 1..=count {
+            match draw.place(&draft, k) {
+                Some(next) => {
+                    draft = next;
+                    placed = k;
+                }
+                None => break,
+            }
+        }
+        draft.build(record.id(), count - placed)
+    }
 }
 
 /// Whether the primary of `m0` has its direct companions drawn as Moe and Di Stefano count them,
@@ -920,8 +998,6 @@ struct Draw<'a> {
     model: &'a MultiplicityModel,
     streams: Streams,
     limits: Limits<'a>,
-    /// The correction of the direct companions' period law ([`PERIOD_CORRECTION`]).
-    correction: &'a [[f64; 8]; 4],
 }
 
 /// A node the next companion may join, with its period window and the window's weight.
@@ -1242,22 +1318,35 @@ impl Draw<'_> {
     /// slot's next try, up to [`DIRECT_REDRAWS`] times, and then dropped and counted. Each
     /// direct companion then may gain one subsystem companion (`place_subsystem`) while the
     /// system holds fewer than four stars.
+    ///
+    /// `periods` is the primary's period law, [`DirectPeriods::new`] of `m0` and the period
+    /// correction, which [`RecordDraw`] builds once for all of a record's attempts.
     #[must_use]
-    fn direct(&self, m0: SolarMasses, ctx: MultiplicityContext) -> SystemHierarchy {
+    fn direct(
+        &self,
+        m0: SolarMasses,
+        ctx: MultiplicityContext,
+        periods: &DirectPeriods,
+    ) -> SystemHierarchy {
         // The stripped share is this construction's own (P11.T1.d), so a set mark holds the
         // innermost orbit in the stripping band and an unset one outside it (ruling 123.5), and
         // the count reads the mark as the spine construction does, (MF − s) ÷ (1 − s) for an
         // unset one, so that the multiple share stays Table 13's.
         let n = self.companion_count(&direct_count_pmf(m0), ctx);
-        self.direct_under_limits(m0, n)
+        self.direct_under_limits(m0, n, periods)
     }
 
-    /// [`Draw::direct`] for `n` direct companions under this draw's own limits.
+    /// [`Draw::direct`] for `n` direct companions under this draw's own limits, on the period law
+    /// `periods`.
     #[must_use]
-    fn direct_under_limits(&self, m0: SolarMasses, n: u8) -> SystemHierarchy {
-        let periods = DirectPeriods::new(m0, self.correction);
+    fn direct_under_limits(
+        &self,
+        m0: SolarMasses,
+        n: u8,
+        periods: &DirectPeriods,
+    ) -> SystemHierarchy {
         let system = self.streams.system;
-        let (chosen, dropped, _) = self.direct_set(m0, n, &periods);
+        let (chosen, dropped, _) = self.direct_set(m0, n, periods);
         // Subsystems come on top while the system holds fewer than four stars (ruling 74.2).
         let mut subsystems: Vec<Option<(SolarMasses, DraftOrbit)>> = vec![None; chosen.len()];
         for j in 0..chosen.len() {
@@ -1433,7 +1522,6 @@ pub(super) fn direct_tries(
             None,
             innermost(galaxy, record, None, ctx),
         ),
-        correction,
     };
     let m0 = record.primary_initial_mass();
     if !draw.is_direct(m0) {
@@ -2067,6 +2155,13 @@ mod tests {
     }
 
     #[test]
+    fn a_star_index_is_any_body_below_the_end() {
+        assert_eq!(StarIndex::from_body(0), Some(StarIndex::PRIMARY));
+        assert_eq!(StarIndex::from_body(15).map(StarIndex::get), Some(15));
+        assert_eq!(StarIndex::from_body(16), None);
+    }
+
+    #[test]
     fn the_same_system_draws_the_same_hierarchy_twice() {
         let galaxy = galaxy();
         for record in imf_records(&galaxy, 500, &sunlike(), 1) {
@@ -2099,6 +2194,39 @@ mod tests {
             differ > 100,
             "only {differ} of 400 systems changed between attempts"
         );
+    }
+
+    /// P11.T16: one record's [`RecordDraw`], which builds the direct construction's period law
+    /// at the first attempt that draws it, gives each attempt the draw of that attempt alone,
+    /// bit for bit, in any order of attempts: over primaries of 1.5–150 M☉, the blend of the
+    /// two constructions included.
+    #[test]
+    fn a_record_draw_gives_every_attempt_alone_in_any_order() {
+        let galaxy = galaxy();
+        let records = log_uniform_records(&galaxy, 60, &sunlike(), (1.5, 150.0), 16);
+        let attempts: Vec<RedrawAttempt> = RedrawAttempt::all().collect();
+        let ctx = MultiplicityContext::Free;
+        for record in &records {
+            let alone = |attempt| {
+                draw_hierarchy_with(&galaxy, record, None, ctx, attempt, &PERIOD_CORRECTION)
+            };
+            let shared = std::cell::RefCell::new(RecordDraw::new(
+                &galaxy,
+                record,
+                None,
+                ctx,
+                &PERIOD_CORRECTION,
+            ));
+            assert_order_independent(&attempts, |&attempt| shared.borrow_mut().stars_at(attempt));
+            for &attempt in &attempts {
+                let (a, b) = (shared.borrow_mut().stars_at(attempt), alone(attempt));
+                assert_eq!(a, b, "{:?} at attempt {}", record.id(), attempt.get());
+                for ((_, x), (_, y)) in a.pairs().zip(b.pairs()) {
+                    assert_same_bits(x.period().value(), y.period().value());
+                    assert_same_bits(x.eccentricity().value(), y.eccentricity().value());
+                }
+            }
+        }
     }
 
     /// P11.T2: the draw is order independent, through the testkit's helper, over the mass

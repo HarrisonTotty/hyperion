@@ -6,6 +6,7 @@ import {
   flightKey,
   flightKeyAction,
   flightKeyReleased,
+  heldAfterModifier,
   type KeyPress,
   viewKeyAction,
 } from "./keys";
@@ -33,6 +34,10 @@ describe("the view's single keys", () => {
     expect(viewKeyAction(press("+"))).toEqual({ kind: "fov", step: -1 });
     expect(viewKeyAction(press("="))).toEqual({ kind: "fov", step: -1 });
     expect(viewKeyAction(press("-"))).toEqual({ kind: "fov", step: 1 });
+  });
+
+  it("toggle the style on 4 (R07.T8.a)", () => {
+    expect(viewKeyAction(press("4"))).toEqual({ kind: "style", style: "toggle" });
   });
 
   it("ignore presses with a modifier", () => {
@@ -77,7 +82,7 @@ describe("the flight keys", () => {
     expect([
       flightKey(press("w", { ctrlKey: true })),
       flightKey(press("w", { shiftKey: true })),
-      flightKeyAction(press("PageUp", { altKey: true })),
+      flightKeyAction(press("PageUp", { altKey: true }), "ctrl"),
     ]).toEqual([null, null, null]);
   });
 
@@ -99,8 +104,77 @@ describe("the flight keys", () => {
   });
 
   it("step the commanded rate", () => {
-    expect(flightKeyAction(press("PageUp"))).toEqual({ kind: "rate", step: 1 });
-    expect(flightKeyAction(press("PageDown"))).toEqual({ kind: "rate", step: -1 });
+    expect(flightKeyAction(press("PageUp"), "ctrl")).toEqual({ kind: "rate", step: 1 });
+    expect(flightKeyAction(press("PageDown"), "ctrl")).toEqual({ kind: "rate", step: -1 });
+  });
+
+  it("step the rate on Ctrl with the up and down arrows off macOS (R07.T19.f)", () => {
+    expect([
+      flightKeyAction(press("ArrowUp", { ctrlKey: true }), "ctrl"),
+      flightKeyAction(press("ArrowDown", { ctrlKey: true }), "ctrl"),
+    ]).toEqual([
+      { kind: "rate", step: 1 },
+      { kind: "rate", step: -1 },
+    ]);
+  });
+
+  it("step the rate on Command with the up and down arrows on macOS (R07.T19.f)", () => {
+    expect([
+      flightKeyAction(press("ArrowUp", { metaKey: true }), "meta"),
+      flightKeyAction(press("ArrowDown", { metaKey: true }), "meta"),
+      flightKeyAction(press("ArrowUp", { ctrlKey: true }), "meta"),
+      flightKeyAction(press("ArrowUp", { metaKey: true }), "ctrl"),
+    ]).toEqual([{ kind: "rate", step: 1 }, { kind: "rate", step: -1 }, null, null]);
+  });
+
+  it("take the rate's chord with the primary modifier alone, once a press", () => {
+    expect([
+      flightKeyAction(press("ArrowUp", { ctrlKey: true, altKey: true }), "ctrl"),
+      flightKeyAction(press("ArrowUp", { ctrlKey: true, shiftKey: true }), "ctrl"),
+      flightKeyAction(press("ArrowUp", { ctrlKey: true, metaKey: true }), "ctrl"),
+      flightKeyAction(press("ArrowUp", { ctrlKey: true, repeat: true }), "ctrl"),
+      flightKeyAction(press("ArrowLeft", { ctrlKey: true }), "ctrl"),
+      flightKeyAction(press("PageUp", { ctrlKey: true }), "ctrl"),
+    ]).toEqual([null, null, null, null, null, null]);
+  });
+
+  it("step the rate on a held PAGE UP's repeats, as before", () => {
+    expect(flightKeyAction(press("PageUp", { repeat: true }), "ctrl")).toEqual({
+      kind: "rate",
+      step: 1,
+    });
+  });
+
+  it("leave the rate's chord alone in a text field", () => {
+    const field = document.createElement("input");
+    expect(flightKeyAction(press("ArrowUp", { ctrlKey: true, target: field }), "ctrl")).toBeNull();
+  });
+
+  it("never hold an arrow pressed with the primary modifier", () => {
+    expect([
+      flightKey(press("ArrowUp", { ctrlKey: true })),
+      flightKey(press("ArrowDown", { metaKey: true })),
+    ]).toEqual([null, null]);
+  });
+
+  it("release the held arrows when Ctrl goes down, keeping a key held to move", () => {
+    const held = new Set(["ArrowUp", "ArrowLeft", "w", "q"]);
+    expect([...(heldAfterModifier(held, press("Control"), "ctrl") ?? [])]).toEqual(["w", "q"]);
+  });
+
+  it("release every held flight key when Command goes down on macOS, which reports no release under it", () => {
+    const held = new Set(["ArrowUp", "w"]);
+    expect([...(heldAfterModifier(held, press("Meta"), "meta") ?? ["unchanged"])]).toEqual([]);
+  });
+
+  it("release nothing on any other key, or on the other platform's modifier", () => {
+    const held = new Set(["ArrowUp"]);
+    expect([
+      heldAfterModifier(held, press("Shift"), "ctrl"),
+      heldAfterModifier(held, press("Meta"), "ctrl"),
+      heldAfterModifier(held, press("Control"), "meta"),
+      heldAfterModifier(held, press("ArrowDown"), "ctrl"),
+    ]).toEqual([null, null, null, null]);
   });
 
   it("sum the held keys into the free camera's input, opposite keys cancelling", () => {

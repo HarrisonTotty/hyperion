@@ -14,6 +14,24 @@
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
 pub mod binary;
+// The three `binary_pair_light` tables are written whole by `hyperion-fit`, whose dimensions'
+// counts reach six digits, so their one lint allowance is on their modules.
+#[allow(
+    clippy::unreadable_literal,
+    reason = "a fitted table's counts are data, written whole"
+)]
+pub mod binary_pair_light_c;
+#[allow(
+    clippy::unreadable_literal,
+    reason = "a fitted table's counts are data, written whole"
+)]
+pub mod binary_pair_light_d;
+#[allow(
+    clippy::unreadable_literal,
+    reason = "a fitted table's counts are data, written whole"
+)]
+pub mod binary_pair_light_e;
+pub mod binary_reach;
 pub mod chabrier;
 pub mod cluster_dynamics;
 pub mod cluster_retention;
@@ -22,8 +40,34 @@ pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod helium;
 pub mod kick_rank;
+pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
+// The three `sky_binary_light` tables are written whole by `hyperion-fit`, so their one lint
+// allowance is on their modules.
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod sky_binary_light_c;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod sky_binary_light_d;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod sky_binary_light_e;
+pub mod sky_envelope;
+pub mod sky_phase_envelope;
+pub mod star_colour;
+pub mod star_colour_reddening;
+pub mod star_colour_reddening_av02_05;
+pub mod star_colour_reddening_av07p5;
+pub mod star_colour_reddening_av10_15;
+pub mod star_colour_reddening_av20_30;
 pub mod stellar_fates_high;
 pub mod stellar_fates_low;
 pub mod stellar_fates_mid;
@@ -49,6 +93,30 @@ pub struct TableInfo {
 /// listed.
 // @begin-manifest: written by hyperion-fit from tables.lock. Do not edit.
 pub const MANIFEST: &[TableInfo] = &[
+    TableInfo {
+        name: "binary_pair_light_c",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "binary_pair_light_d",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "binary_pair_light_e",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "binary_reach",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
     TableInfo {
         name: "chabrier",
         revision: 1,
@@ -92,6 +160,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: true,
     },
     TableInfo {
+        name: "limb_darkening",
+        revision: 0,
+        since_generator_version: 19,
+        provisional: false,
+    },
+    TableInfo {
         name: "mge",
         revision: 1,
         since_generator_version: 11,
@@ -110,6 +184,72 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: true,
     },
     TableInfo {
+        name: "sky_binary_light_c",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "sky_binary_light_d",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "sky_binary_light_e",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "sky_envelope",
+        revision: 0,
+        since_generator_version: 19,
+        provisional: false,
+    },
+    TableInfo {
+        name: "sky_phase_envelope",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour",
+        revision: 0,
+        since_generator_version: 19,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour_reddening",
+        revision: 1,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour_reddening_av02_05",
+        revision: 1,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour_reddening_av07p5",
+        revision: 1,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour_reddening_av10_15",
+        revision: 1,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
+        name: "star_colour_reddening_av20_30",
+        revision: 1,
+        since_generator_version: 20,
+        provisional: false,
+    },
+    TableInfo {
         name: "stellar_fates_high",
         revision: 0,
         since_generator_version: 16,
@@ -118,13 +258,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "stellar_fates_low",
         revision: 0,
-        since_generator_version: 13,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {
         name: "stellar_fates_mid",
         revision: 0,
-        since_generator_version: 13,
+        since_generator_version: 21,
         provisional: false,
     },
     TableInfo {

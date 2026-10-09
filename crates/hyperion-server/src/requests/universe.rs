@@ -9,9 +9,9 @@ use hyperion_protocol::{
     UniverseInfo,
 };
 
-use crate::AppState;
 use crate::convert::{NewUniverse, universe_list};
 use crate::universe::{Universe, UniverseId};
+use crate::{AppState, SkyService};
 
 /// Creates a universe from the name and the seed asked for, or a drawn seed, and saves it.
 ///
@@ -48,6 +48,11 @@ pub(crate) fn list(state: &AppState) -> ResponseBody {
 /// takes about 130 ms to build, which is what `open` costs the first time a universe is opened
 /// under this server.
 ///
+/// Where the server serves the sky, the open also starts the galaxy's sky tables on the pool,
+/// unless they are held, and answers without waiting for them: some 31 CPU-s that a first sky
+/// would otherwise wait 12 s for, and which a sky asked meanwhile joins (rendering plan R06,
+/// R06.T11.g; decided 2026-10-08, `decision-r06-t11d-first-sky.md` §2).
+///
 /// # Errors
 ///
 /// Those of [`openable_universe`], and those of
@@ -60,12 +65,17 @@ pub(crate) async fn open(
     request: OpenUniverseRequest,
 ) -> Result<ResponseBody, RequestError> {
     let universe = openable_universe(&state, &request.universe)?;
-    state.galaxies.get(universe.key()).await?;
+    let galaxy = state.galaxies.get(universe.key()).await?;
+    let sky_tables = match state.sky_service {
+        SkyService::Served => state.sky_tables.prefetch(universe.key(), &galaxy),
+        SkyService::Unsupported => false,
+    };
     tracing::info!(
         id = %universe.id(),
         name = %universe.name(),
         seed = %SeedHex::from_u64(universe.seed()),
         generator_version = %universe.generator_version(),
+        sky_tables_started = sky_tables,
         "opened a universe"
     );
     Ok(ResponseBody::OpenUniverse(UniverseInfo::from(

@@ -27,9 +27,15 @@
 //! - stripped means a periastron in `(a_merge, a_B]` ([`stripping_band`]), and the share is the
 //!   quadrature over that band ([`exact_stripped_share`]): exact, and drawing nothing.
 //!
-//! [`interacting_periastron`] stays P11.T4.a's [`can_interact`] boundary, either star's largest
-//! radius up to the primary's death, for the engine's gate ([`interacting_share`]); ruling 123.3
-//! checks stripped over interacting at 0.5–0.75.
+//! [`interacting_periastron`] stays P11.T4.a's [`can_interact`] lobe test, either star's largest
+//! radius up to the primary's death (a companion that has not arrived on its main sequence by then
+//! at its zero-age main-sequence radius, as the engine carries it since P11.T4.i), for the
+//! engine's gate ([`interacting_share`]); ruling 123.3 checks stripped over interacting at
+//! 0.5–0.75. It is the drawn-orbit part of [`can_interact`]'s test only: since P11.T4.j the
+//! pre-test also passes a pair whose orbit the engine's own sinks can shrink into it, giants'
+//! tidal captures beyond this periastron among them (to the 1.6 times it where the ruling
+//! p11-channels' sample of 2026-10-06 ends). Those captures are late, Case C, at the giant's
+//! largest radius, outside the stripping band.
 //!
 //! # The table
 //!
@@ -57,7 +63,7 @@ use crate::stellar::draws::{StarDraws, StarDrawsParts};
 use crate::stellar::multiplicity::{
     MultiplicityModel, band_share_as_drawn, stripped_share_as_drawn as multiplicity_share,
 };
-use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track};
+use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, main_sequence_start};
 use crate::tables::stripping;
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, SolarMasses, Years};
@@ -74,7 +80,12 @@ fn unstripped_median() -> StarDraws {
 
 /// A star's largest radius up to `until` (or its whole life), in solar radii, from its track at
 /// the median draws; zero below the tracks' lightest mass. Tracks stop at [`MAX_INITIAL_MASS`]
-/// (150 M☉ since P06.T14), so a heavier star is taken as one of that mass.
+/// (150 M☉ since P06.T14), so a heavier star is taken as one of that mass. A star that has not
+/// arrived on its main sequence by `until` takes its radius at its arrival, its zero-age
+/// main-sequence radius, as [`can_interact`] reads it (P11.T4.i). The age returned is `until`,
+/// or the star's death.
+///
+/// [`can_interact`]: crate::stellar::binary::can_interact
 fn largest_radius(m: SolarMasses, comp: &Composition, until: Option<Years>) -> (f64, Years) {
     if m < MIN_INITIAL_MASS {
         return (0.0, Years::ZERO);
@@ -86,13 +97,20 @@ fn largest_radius(m: SolarMasses, comp: &Composition, until: Option<Years>) -> (
     };
     let draws = unstripped_median();
     let track = match until {
-        Some(age) => Track::to_age(m0, comp, &draws, age),
+        Some(age) => {
+            let reach = age.value().max(main_sequence_start(m0, comp));
+            Track::to_age(m0, comp, &draws, Years::new(reach))
+        }
         None => Track::full(m0, comp, &draws),
     };
     let end = until
         .or_else(|| track.lifetime())
         .unwrap_or_else(|| track.built_until());
-    (track.max_radius_until(end).value(), end)
+    let read = match track.main_sequence_arrival() {
+        Some(arrival) if arrival > end => arrival,
+        Some(_) | None => end,
+    };
+    (track.max_radius_until(read).value(), end)
 }
 
 /// The largest periastron at which stars of `r_1` and `r_2` solar radii and masses `m1` and `m2`
@@ -110,8 +128,9 @@ fn threshold(r_1: f64, r_2: f64, m1: f64, m2: f64) -> Metres {
 }
 
 /// The largest periastron at which a pair of primary `m1`, mass ratio `q` and composition `comp`
-/// interacts before the primary's core collapse: P11.T4.a's [`can_interact`] threshold (module
-/// documentation).
+/// reaches a Roche lobe on its drawn orbit before the primary's core collapse: the lobe test of
+/// P11.T4.a's [`can_interact`] (module documentation), which since P11.T4.j also passes some pairs
+/// beyond it.
 ///
 /// # Examples
 ///
@@ -402,7 +421,9 @@ pub fn is_stripped_at(mark: Mark, share: f64) -> bool {
 
 /// The share of primaries of initial mass `m` and composition `comp` that interact with their
 /// innermost companion before they die, mergers and Case C included: plan 11's quadrature of the
-/// drawn companions at [`interacting_periastron`], the primary's track built once.
+/// drawn companions at [`interacting_periastron`], the primary's track built once. It counts the
+/// drawn orbits the lobe test passes, not the giants' tidal captures beyond it (module
+/// documentation).
 ///
 /// # Panics
 ///
@@ -762,12 +783,14 @@ mod tests {
         );
     }
 
-    /// The threshold is `can_interact`'s: a pair just inside it interacts before the primary's
-    /// death, one just outside does not.
+    /// The threshold is the boundary of `can_interact`'s lobe test: a pair just inside it can
+    /// interact before the primary's death, and one just outside does not reach a lobe on its
+    /// drawn orbit (`lobe_reached`). The decay the engine's sinks can make passes some pairs
+    /// beyond it (P11.T4.j).
     #[test]
     fn the_threshold_is_can_interacts_boundary() {
         use crate::orbit::{Eccentricity, KeplerElements, Orientation};
-        use crate::stellar::binary::{BinaryInput, can_interact};
+        use crate::stellar::binary::{BinaryInput, can_interact, lobe_reached};
         use crate::units::{GravitationalParameter, Radians};
         let comp = Composition::SOLAR;
         for (m1, q) in [(12.0, 0.6), (25.0, 0.3), (9.0, 0.95)] {
@@ -786,7 +809,7 @@ mod tests {
                     Radians::new(0.0),
                 )
                 .unwrap();
-                let input = BinaryInput::new(
+                BinaryInput::new(
                     m1,
                     m1 * q,
                     comp,
@@ -794,11 +817,20 @@ mod tests {
                     [StarDraws::median(), StarDraws::median()],
                     death,
                 )
-                .unwrap();
-                can_interact(&input, death)
+                .unwrap()
             };
-            assert!(pair(0.999), "{m1:?} q {q} just inside");
-            assert!(!pair(1.001), "{m1:?} q {q} just outside");
+            assert!(
+                can_interact(&pair(0.999), death),
+                "{m1:?} q {q} just inside"
+            );
+            assert!(
+                lobe_reached(&pair(0.999), death),
+                "{m1:?} q {q} just inside"
+            );
+            assert!(
+                !lobe_reached(&pair(1.001), death),
+                "{m1:?} q {q} just outside"
+            );
         }
     }
 

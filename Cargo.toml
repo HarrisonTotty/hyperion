@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# `tools/gpu-replay` has its own workspace (wgpu stays out of `just ci`, R05 Design note 20).
+exclude = ["tools/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -75,6 +77,16 @@ pedantic = { level = "warn", priority = -1 }
 
 [profile.release]
 lto = "thin"
+
+# Line tables only, for backtraces and panics with file and line, without the variables and types
+# of full debug info. Full debug info of some hundred test binaries, each linking the sim at
+# `opt-level = 2`, made linking most of the work: `cargo test --workspace --no-run` took 232 s from
+# scratch and 198 s after touching the sim's `lib.rs`, against 143 s and 64 s with line tables, and
+# the build directory was 15 GB against 7.8 GB (measured 2026-10-03 under shared load of about 30).
+# Debug info changes no generated code, so no output moves. For a debugger session, override it:
+# `CARGO_PROFILE_DEV_DEBUG=true cargo build`.
+[profile.dev]
+debug = "line-tables-only"
 
 # Slow statistical tests (`just test-slow`): release speed, but with the debug assertions and
 # overflow checks that the sim's bound checks rely on. Without the release build's thin LTO: the

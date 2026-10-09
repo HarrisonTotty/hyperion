@@ -30,7 +30,9 @@
 //!
 //! The payload follows the header. The chunks come in order, before the terminal response; a
 //! cancelled or failed request stops its chunks and ends in `cancelled` or its `request_error`,
-//! and the client drops what it had. There is no checksum: TCP and the WebSocket framing guard the
+//! and the client drops what it had. A request answered in parts (`sky`, rendering plan R06,
+//! R06.T11.d) sends each answer's chunks in order before its `partial_response`, numbered from 0
+//! again for each answer, and the last answer's before its terminal response. There is no checksum: TCP and the WebSocket framing guard the
 //! bytes, and the count and length checks catch the server's own bugs. The frames are not a type
 //! here, since this crate holds JSON wire types.
 
@@ -42,6 +44,7 @@ mod orbit;
 mod planetary;
 mod primitives;
 mod scene;
+mod sky;
 mod stellar;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -61,13 +64,15 @@ pub use galaxy::{
 pub use modelled::Modelled;
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
 pub use planetary::{
-    ArchitectureClassDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto,
-    BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest,
-    BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyRecordDto, BodyStateDto, BodySummaryDto,
-    BodySurfaceDto, BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto,
-    HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto, PlanetClassDto,
-    PopulationDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SectionDto, SystemBodiesDto,
-    SystemBodiesRequest, SystemPlaneDto, ZoneDto,
+    ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto,
+    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEventDto, BodyEventsDto,
+    BodyEventsRequest, BodyFigureDto, BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyPhotometryDto,
+    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
+    BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto, FigureDatumDto,
+    FigureLawDto, HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto,
+    PhaseTemplateDto, PlanetClassDto, PopulationDto, RingDto, RingGapDto, RingKindDto,
+    RingMaterialDto, SectionDto, SpinResonanceDto, SystemBodiesDto, SystemBodiesRequest,
+    SystemPlaneDto, ZoneDto,
 };
 pub use primitives::{
     BodyIdHex, DetailSeedHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex,
@@ -78,6 +83,11 @@ pub use scene::{
     SceneCamerasRequest, SceneClockDto, SceneClockStateDto, SceneCraftDto, SceneNotificationDto,
     SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SceneSystemDto,
     SeenPositionDto, SystemPlaceDto,
+};
+pub use sky::{
+    BandSpecDto, ConeDto, EyeDto, HostDiscDto, MAX_CUT_V, MAX_SKY_STARS, PowerTwoDto,
+    SKY_BAKE_BINS, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SkyGapDto, SkyLayerCensusDto, SkyRequest,
+    SkyResponse,
 };
 pub use stellar::{
     BinaryClassDto, CataclysmicKindDto, HighMassXrayBinaryKindDto, KickModeDto, NatalKickDto,
@@ -101,8 +111,14 @@ pub use universe::{
 /// server sends a notification only on a subscription the client opened, and binary frames only in
 /// answer to a request whose kind asks for bulk, so a version 2 client that sends neither receives
 /// neither, and a newer client asking an older server gets `unsupported`. The same holds for
-/// `subscription_ended`, sent only on a subscription the client opened. The ruling holds only
-/// while none of them is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
+/// `subscription_ended`, sent only on a subscription the client opened. `partial_response` is sent
+/// only in answer to a `sky` (rendering plan R06, R06.T11.d), and a client that does not know it
+/// may still ask one, as the clients built before R06.T11.d do: it leaves the version at 2 because
+/// no server answered `sky` by default before the build that sends partials, so no released pairing
+/// ever received a whole sky that a partial now precedes (decided 2026-10-08,
+/// `decision-r06-t11d-first-sky.md` §3; galaxy plan 04's reserved list). Making a kind that a
+/// released build serves whole answer in parts would bump it. The ruling holds only while none of
+/// them is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
 /// `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` pins it (open
 /// question 21, closed 2026-09-30 by a delegated decision).
 pub const PROTOCOL_VERSION: u32 = 2;

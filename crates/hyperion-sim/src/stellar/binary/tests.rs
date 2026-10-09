@@ -239,6 +239,50 @@ fn the_papers_algol_reproduces_its_sequence() {
     assert!(!timeline.hit_segment_cap());
 }
 
+/// SSE's τ of an early-AGB member's core remnant at `age`, years, its core radius, R☉, and the τ
+/// at which the remnant's radius would reach `lobe` R☉, `None` if it never does by τ = 1, where the
+/// blend ends (for the margin of BSE section 3.2's common envelope); `None` off the early AGB.
+fn early_agb_core_at(
+    member: &super::star::Member,
+    age: f64,
+    lobe: f64,
+) -> Option<(f64, f64, Option<f64>)> {
+    use super::star::Member;
+    let (track, track_age, mass) = match member {
+        Member::Track { track, offset } => {
+            let track_age = age - offset;
+            let mass = track.state_at(Years::new(track_age)).mass().value();
+            (track, track_age, mass)
+        }
+        Member::Shaped {
+            track,
+            offset,
+            mass,
+        } => (track, age - offset, mass.at(age)),
+        Member::MainSequence { .. }
+        | Member::Cooling { .. }
+        | Member::Frozen { .. }
+        | Member::Remnant { .. }
+        | Member::Gone => return None,
+    };
+    let (tau, radius) = track.early_agb_remnant(track_age, mass)?;
+    let rc = track.structure_at(track_age, mass).core_radius.value();
+    // The remnant's radius rises with τ up to 1: bisect for the τ at which it reaches the lobe.
+    let filling = (radius(1.0) >= lobe).then(|| {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..60 {
+            let mid = f64::midpoint(lo, hi);
+            if radius(mid) < lobe {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    });
+    Some((tau, rc, filling))
+}
+
 /// BSE section 3.2's cataclysmic variable (6.0 + 1.3 M☉, 630 d, `α_CE` = 1): the primary fills its
 /// lobe on the early AGB at 78 Myr, a common envelope leaves a helium giant of 1.5 M☉ that soon
 /// fills its lobe again, and a second leaves a carbon–oxygen white dwarf of 0.94 M☉ with the
@@ -263,6 +307,40 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
         (7.5e7..8.2e7).contains(&entry.age().value()),
         "{:?}",
         entry.age()
+    );
+    // The margin of the first common envelope (ruling p11-stripped-core, amendment 2): the
+    // giant's core radius, which SSE's τ sets, against the core's Roche lobe on the orbit the
+    // envelope leaves. The cores coalesce, and the sequence is lost, if it fills the lobe.
+    let ce = &timeline.segments()[first];
+    // The pair as the envelope leaves it, read from the next segment itself: the timeline's state
+    // at that age is the second envelope's, which follows at once.
+    let next = &timeline.segments()[first + 1];
+    let at = next.start().value();
+    let a_f = next
+        .paths()
+        .0
+        .expect("the cores survive the first common envelope")
+        .axis
+        .at(at);
+    let mass = |i: usize| {
+        next.members()[i]
+            .state_at(timeline.context(), i, at)
+            .mass()
+            .value()
+    };
+    let lobe = super::evolve::roche_lobe(mass(0), mass(1), a_f);
+    let (tau, rc, filling) = early_agb_core_at(&ce.members()[0], ce.start().value(), lobe)
+        .expect("the primary enters the common envelope on its early AGB");
+    eprintln!(
+        "BSE section 3.2, first common envelope at {:.3} Myr: SSE's τ = {tau:.4}, core radius \
+         {rc:.4} R☉ against the core's lobe of {lobe:.4} R☉ (a_f = {a_f:.4} R☉), which the core \
+         would fill from τ = {filling:.4?}",
+        entry.age().value() / 1e6
+    );
+    assert!(
+        rc < lobe,
+        "the core fills its lobe: {}",
+        describe(&timeline)
     );
     let second =
         find(&stages, first + 1, |k, _| *k == SegmentKind::CommonEnvelope).expect("a second one");
@@ -580,6 +658,8 @@ fn check_invariants(input: &BinaryInput, until: Years) {
     }
     check_detached_widening(&timeline, &what);
     check_no_repeated_instants(&timeline, &what);
+    check_no_bare_giant(&timeline, &what);
+    check_collapses(input, &timeline, &what);
     // Ruling 108.1: no contact pair lives below Rasio's (1995) mass ratio.
     for segment in timeline.segments() {
         if segment.kind() == SegmentKind::Contact {
@@ -609,6 +689,226 @@ fn check_invariants(input: &BinaryInput, until: Years) {
             what()
         );
         last = (total, age);
+    }
+}
+
+/// P11.T4.g: a star the binary carries with no envelope is a naked helium star or a white dwarf
+/// (HPT section 6; BSE `hrdiag`). At each segment's start and at every step inside it (the
+/// knots of a carried star's mass), no living star the binary carries in a hydrogen giant phase
+/// (HG to TPAGB) has M ≤ Mc, the engine's own test. The ruling's margin of 10⁻⁹ M☉ is not kept: a donor's wind or
+/// transfer can leave an envelope of 10⁻¹² M☉ at a step, which is not yet none. Between two steps
+/// the core may outgrow the mass, as in BSE, whose `hrdiag` acts at the next step. Every held
+/// (`Frozen`) member's core radius is no larger than its radius, and is one of sse's: zero,
+/// `R_ZHe(Mc)` or 5 `R_WD(Mc)`, each held to R (the core-helium-burning rule's τ is not kept on a held
+/// state).
+fn check_no_bare_giant(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
+    use crate::stellar::Phase;
+    use crate::stellar::remnant::RemnantRecipe;
+    use crate::stellar::remnant::structure::white_dwarf_radius;
+
+    let giant = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::HertzsprungGap
+                | Phase::FirstGiantBranch
+                | Phase::CoreHeliumBurning
+                | Phase::EarlyAgb
+                | Phase::ThermallyPulsingAgb
+        )
+    };
+    let until = timeline.until().value();
+    for segment in timeline.segments() {
+        let (start, end) = (segment.start().value(), segment.end().value().min(until));
+        let knots = segment.members().iter().flat_map(|member| match member {
+            super::star::Member::Shaped { mass, .. } => mass.knots(),
+            _ => &[],
+        });
+        let ages = core::iter::once(start).chain(
+            knots
+                .map(|knot| knot[0])
+                .filter(|&age| start <= age && age < end),
+        );
+        for t in ages {
+            let state = timeline.state_at(Years::new(t));
+            for (star, member) in state.stars().iter().zip(segment.members()) {
+                // A star on its own single-star track is plan 06's, whose last instant on the
+                // thermally pulsing AGB has M = Mc: only a star the binary carries is checked.
+                let carried = matches!(member, super::star::Member::Shaped { .. });
+                if carried && giant(star.phase()) {
+                    assert!(
+                        star.mass().value() > star.core_mass().value(),
+                        "a {:?} star of {} M☉ with a {} M☉ core at {t} yr: {}",
+                        star.phase(),
+                        star.mass().value(),
+                        star.core_mass().value(),
+                        what()
+                    );
+                }
+            }
+        }
+        for member in segment.members() {
+            let super::star::Member::Frozen { state, core_radius } = member else {
+                continue;
+            };
+            let (r, rc, mc) = (
+                state.radius().value(),
+                core_radius.value(),
+                state.core_mass().value(),
+            );
+            assert!(
+                rc <= r,
+                "a held core of {rc} R☉ in a star of {r} R☉: {}",
+                what()
+            );
+            if state.phase() == Phase::CoreHeliumBurning || mc <= 0.0 {
+                continue;
+            }
+            if state.phase() == Phase::EarlyAgb {
+                // The helium star of the helium core at the core's luminosity,
+                // R_HeGB(Mc,He, Lc) = min(R₁, R₂) (HPT section 6.3 after equation 105; `hrdiag`
+                // kw = 5), which Lc's blend at SSE's τ puts anywhere up to its brightest (ruling
+                // p11-stripped-core, amendments 1 and 2): the held state keeps no τ to check it by.
+                let bound = crate::stellar::sse::early_agb_core_radius_bound(mc).min(r);
+                assert!(
+                    rc > 0.0 && rc <= bound * (1.0 + 1e-12),
+                    "a held early-AGB star's core radius {rc} R☉ is not a helium giant's of a \
+                     {mc} M☉ core (at most {bound} R☉): {}",
+                    what()
+                );
+                continue;
+            }
+            let candidates = [
+                0.0,
+                crate::stellar::sse::helium_zams_radius(mc).min(r),
+                (5.0 * white_dwarf_radius(RemnantRecipe::default(), SolarMasses::new(mc)).value())
+                    .min(r),
+            ];
+            assert!(
+                candidates.iter().any(|c| c.total_cmp(&rc).is_eq()),
+                "a held {:?} star's core radius {rc} R☉ is none of sse's {candidates:?}: {}",
+                state.phase(),
+                what()
+            );
+        }
+    }
+}
+
+/// P11.T4.k's invariants on `timeline`, the timeline of `input` (rulings p11-supernova-pins and
+/// p11-t4k-faults, 2026-10-06: every collapse is applied once, from the star's last living mass),
+/// in a pair the engine runs and whose timeline is not capped. A pair the pre-test passes over
+/// keeps its drawn orbit through its stars' collapses with no record, the version-21 limit that
+/// P11.T4.l lifts, and a capped timeline never reaches its later deaths (P11.T4.g's finding C2,
+/// `swell`'s core, can cycle a helium accretor to the cap; the 10³ suites assert no pair reaches
+/// it); neither is checked. `what` describes the pair for the failure message.
+///
+/// - No member goes from a living phase to a neutron star or black hole without a supernova
+///   record of its component at that age (10⁻⁹ relative), but where it is the compact star its
+///   companion leaves inside it (a Thorne–Żytkow object, BSE section 2.7.3).
+/// - A pinned primary (design note 16) still living just before its pin has a record at its pin.
+/// - No member is on a track that is a remnant from its own start (a helium star stripped past
+///   its own end, finding F8) unless the engine placed it there by its death: a neutron star or
+///   black hole has its record where the track is placed. A white dwarf's birth leaves no record;
+///   `stripped_member_at`'s debug assertion keeps such a track from being placed alive.
+fn check_collapses(input: &BinaryInput, timeline: &BinaryTimeline, what: &impl Fn() -> String) {
+    use super::star::Member;
+
+    let until = timeline.until();
+    if timeline.hit_segment_cap() || !can_interact(input, until) {
+        return;
+    }
+    let compact = |phase: Phase| matches!(phase, Phase::NeutronStar | Phase::BlackHole);
+    let recorded = |slot: usize, lo: f64, hi: f64| {
+        timeline.supernovae().iter().any(|r| {
+            let age = r.age().value();
+            r.component().index() == slot && age >= lo * (1.0 - 1e-9) && age <= hi * (1.0 + 1e-9)
+        })
+    };
+    let ctx = timeline.context();
+    let end = until.value();
+    for slot in 0..2 {
+        // The member's phase just inside each segment's ends and either side of a death inside
+        // it, in age order: every change of phase lies between two of them.
+        let mut probes: Vec<(f64, Phase, Phase)> = Vec::new();
+        for segment in timeline.segments() {
+            let (start, stop) = (segment.start().value(), segment.end().value().min(end));
+            let members = segment.members();
+            let at = |age: f64| {
+                (
+                    members[slot].state_at(ctx, slot, age).phase(),
+                    members[1 - slot].state_at(ctx, 1 - slot, age).phase(),
+                )
+            };
+            // A death at the segment's end, to rounding, is the boundary's: the engine's age there
+            // puts the track at its death or an ulp past it.
+            let death = members[slot]
+                .track()
+                .and_then(|(track, offset)| track.lifetime().map(|life| offset + life.value()))
+                .filter(|&death| death > start);
+            let at_end = |death: f64| (death - stop).abs() <= 1e-9 * stop.max(1.0);
+            let mut ages = vec![start];
+            if let Some(death) = death.filter(|&death| death < stop && !at_end(death)) {
+                ages.extend([super::detached::last_living(death), death]);
+            }
+            if stop > start {
+                let last = stop - 1e-12 * stop.max(1.0);
+                ages.push(match death.filter(|&death| at_end(death)) {
+                    Some(death) => last.min(super::detached::last_living(death)),
+                    None => last,
+                });
+            }
+            for age in ages {
+                let (own, other) = at(age);
+                probes.push((age, own, other));
+            }
+        }
+        for pair in probes.windows(2) {
+            let [(a, before, other_before), (b, after, other_after)] = [pair[0], pair[1]];
+            let swallowed = compact(other_before) && other_after == Phase::NoRemnant;
+            if before.is_living() && compact(after) && !swallowed {
+                assert!(
+                    recorded(slot, a, b),
+                    "member {slot} goes from {before:?} to {after:?} between {a} and {b} yr with no \
+                     supernova record: {}",
+                    what()
+                );
+            }
+        }
+    }
+    if let Some(pin) = super::evolve::pinned_death_age_years(input).filter(|&pin| pin < end) {
+        let before = timeline.state_at(Years::new(super::detached::last_living(pin)));
+        if before.stars()[0].phase().is_living() {
+            assert!(
+                recorded(0, pin, pin),
+                "the pinned primary, {:?} just before its pin at {pin} yr, has no record there: {}",
+                before.stars()[0].phase(),
+                what()
+            );
+        }
+    }
+    for segment in timeline.segments() {
+        for (slot, member) in segment.members().iter().enumerate() {
+            let Member::Track { track, offset } = member else {
+                continue;
+            };
+            if !track.is_remnant_from_its_start() {
+                continue;
+            }
+            let remnant = track.remnant().map(|r| r.kind());
+            if matches!(
+                remnant,
+                Some(
+                    crate::stellar::remnant::RemnantKind::NeutronStar
+                        | crate::stellar::remnant::RemnantKind::BlackHole
+                )
+            ) {
+                assert!(
+                    recorded(slot, *offset, *offset),
+                    "member {slot} is a track dead from its start at {offset} yr, a {remnant:?}, \
+                     with no record there: {}",
+                    what()
+                );
+            }
+        }
     }
 }
 
@@ -926,7 +1226,8 @@ fn pinned_pair(mix: &mut Mix, i: u32) -> BinaryInput {
 }
 
 /// The engine's output is pinned bit for bit over 10³ pairs (written before the engine was sped
-/// up, and kept so that no optimisation moves a result): each line is one pair's [`digest`].
+/// up, and kept so that no optimisation moves a result): each line is one pair's [`digest`]. Every
+/// timeline also keeps P11.T4.k's invariants ([`check_collapses`]).
 #[test]
 fn a_thousand_timelines_are_pinned() {
     use hyperion_testkit::golden;
@@ -939,6 +1240,9 @@ fn a_thousand_timelines_are_pinned() {
     for i in 0..1_000_u32 {
         let input = pinned_pair(&mut mix, i);
         let timeline = evolve(&input, until);
+        check_collapses(&input, &timeline, &|| {
+            format!("pinned pair {i:04}: {}", describe(&timeline))
+        });
         let [m1, m2] = input.masses().map(SolarMasses::value);
         w.u64_hex(
             &format!(
@@ -1270,8 +1574,10 @@ fn a_held_bare_core_that_touches_its_companion_merges() {
 }
 
 /// Ruling 132.3: pair 0077 of the pinned thousand (2.23 + 1.16 M☉ at 0.56 d) feeds its companion
-/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,052.655 Myr, once,
-/// where the steps used to close in on its receding end until the segment cap.
+/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,052.889 Myr, once,
+/// where the steps used to close in on its receding end until the segment cap. (1,052.655 Myr
+/// before P11.T4.i, which starts the engine at the primary's arrival, 7 Myr before the
+/// companion's, and so moves its knots.)
 #[test]
 fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
     let mut mix = Mix(0x0b1e_0001);
@@ -1291,8 +1597,2238 @@ fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
         .map(|state| state.age().value())
         .expect("the accretor leaves its main sequence");
     assert!(
-        (left - 1.052_655e9).abs() <= 1.0e3,
+        (left - 1.052_889e9).abs() <= 1.0e3,
         "left at {left} yr: {}",
         describe(&timeline)
     );
+}
+
+/// P11.T4.g: a star the binary carries that has no envelope left on the step that lands on its
+/// phase boundary is stripped first (BSE's `hrdiag` before `evolv2`), not taken through the
+/// boundary: a 5 M☉ star carried at 10⁻⁷ M☉ above its core 10 yr before the end of its
+/// Hertzsprung gap, whose core grows by 4 × 10⁻⁷ M☉ in those 10 yr while its wind takes
+/// 10⁻¹⁰ M☉, leaves the step that lands on the boundary as a naked helium star, marked stripped.
+#[test]
+fn a_bare_star_at_its_phase_boundary_is_stripped_first() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+    use crate::stellar::sse::Track;
+
+    let input = pair(5.0, 1.0, 1.0e5, 0.0, 0.02);
+    let ctx = Arc::new(Context::of(&input));
+    let track = Arc::new(Track::full(
+        SolarMasses::new(5.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    ));
+    let gap = track
+        .age_in_phase(Phase::HertzsprungGap, 0.5)
+        .expect("a 5 M☉ star crosses the gap");
+    let (_, end) = track.phase_span(gap);
+    let t = end - 10.0;
+    let core = track.structure_at(t, 5.0).state.core_mass().value();
+    let core_at_end = track
+        .structure_at(end * (1.0 - 1e-15), 5.0)
+        .state
+        .core_mass()
+        .value();
+    assert!(
+        core_at_end > core + 1e-7,
+        "the core grows past the mass in the step"
+    );
+    let companion = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(t, 1.0),
+        tau: Path::starting(t, 0.1),
+    };
+    let bare = Member::Shaped {
+        track: Arc::clone(&track),
+        offset: 0.0,
+        mass: Path::starting(t, core + 1e-7),
+    };
+    let k = input.orbit();
+    let mut engine = Engine::new(
+        Arc::clone(&ctx),
+        t,
+        1.0e10,
+        [bare, companion],
+        LiveOrbit::new(t, 1.0e5, 0.0, *k.orientation(), k.mean_anomaly_at_epoch()),
+        None,
+    );
+    engine.detached_phase();
+    assert!(engine.stripped[0], "{}", engine.members[0].form());
+    let (m, tau) = engine.current(0);
+    let state = engine
+        .structure(0, engine.age, m, tau)
+        .expect("a helium star")
+        .state;
+    assert_eq!(state.phase(), Phase::HeliumMainSequence, "{state:?}");
+}
+
+/// Regression (P11's protostar mergers, 2026-10-05): a pair of 2.27 and 2.21 M☉ at 1 d, run to
+/// 0.4 Myr, before either star reaches the main sequence (at 5.1 and 5.5 Myr). A star's arrival
+/// was read from its track's built segments alone, so a track built short of its main sequence had
+/// none, and the engine stepped from zero age, where the protostars overfill the orbit: it merged
+/// them at once into a 0.01 M☉ cooling star beside nothing. Now the pair waits for the first
+/// arrival (`evolve.rs`, `arrival`; for both, before P11.T4.i): to 0.4 Myr it is two protostars,
+/// each its own track's and of its own accreted mass, on the drawn orbit, as a run to a later age
+/// has it.
+#[test]
+fn a_pair_run_short_of_the_main_sequence_stays_two_protostars() {
+    use crate::stellar::sse::Track;
+
+    let input = pair(2.27, 2.21, 1.0, 0.0, 0.02);
+    let until = Years::new(4.0e5);
+    let early = evolve(&input, until);
+    let later = evolve(&input, Years::new(1.0e8));
+    assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+    assert_eq!(early.segments()[0].kind(), SegmentKind::Detached);
+    assert_eq!(early.merger_age(), None);
+    let own = [0, 1].map(|i| {
+        Track::to_age(
+            input.masses()[i],
+            input.composition(),
+            &input.draws()[i],
+            until,
+        )
+    });
+    for k in 1..=40_u32 {
+        let age = Years::new(until.value() * f64::from(k) / 40.0);
+        let state = early.state_at(age);
+        assert_eq!(state, later.state_at(age), "at {age:?}");
+        assert_eq!(state.orbit(), Some(input.orbit()), "at {age:?}");
+        for (star, track) in state.stars().iter().zip(&own) {
+            assert_eq!(star.phase(), Phase::Protostar, "{star:?}");
+            assert_eq!(star, &track.state_at(age));
+        }
+    }
+}
+
+/// Regression (P11's build-age dependence, 2026-10-05): a pair of 8.26 and 7.92 M☉ at 2.31 d, run
+/// to 37.085 Myr, transferring mass on its primary's Hertzsprung gap. The track the primary was
+/// carried on from the end of its main sequence was built to a reach guessed from the closed-form
+/// lifetime, which fell short of its own gap: the pair's age lay past the track's end, the engine
+/// stopped on the track's last boundary 4,096 times, to its cap, and the stars froze. A run past
+/// the next segment had the track built further and went on. Now the track is built again from
+/// where the star is placed on it (`evolve.rs`, `track_reaching`), and the two runs agree.
+#[test]
+fn a_track_built_short_of_the_pairs_age_is_built_again() {
+    use crate::Seed;
+    use crate::coords::{CellSize, GenCell};
+    use crate::id::{BodyId, Layer, SystemId};
+
+    let (m1, m2) = (8.255_234_890_079_752, 7.924_133_480_725_55);
+    let orbit = KeplerElements::from_period(
+        Seconds::new(2.306_744_539_916_993_5 * 86_400.0),
+        GravitationalParameter::from_solar_masses(SolarMasses::new(m1 + m2)),
+        Eccentricity::CIRCULAR,
+        Orientation::new(Radians::new(0.3), Radians::new(0.1), Radians::new(0.2))
+            .expect("an orientation"),
+        Radians::new(1.0),
+    )
+    .expect("an orbit");
+    let cell = GenCell::new(CellSize::Ly8, [3_058, 9, 0]).expect("a cell");
+    let system = SystemId::from_parts(Layer::A, cell, 0).expect("a system");
+    let draws = [0, 1].map(|k| StarDraws::for_star(Seed::new(0x0b1e_5eee), BodyId::new(system, k)));
+    let input = BinaryInput::new(
+        SolarMasses::new(m1),
+        SolarMasses::new(m2),
+        Composition::from_fe_h(
+            crate::units::Dex::new(0.0),
+            crate::units::HeliumExcess::ZERO,
+        ),
+        orbit,
+        draws,
+        Years::new(1.0e9),
+    )
+    .expect("a pair");
+    let until = Years::new(37_085_007.925_425_24);
+    let early = evolve(&input, until);
+    let later = evolve(&input, Years::new(9.0e7));
+    assert!(!early.hit_segment_cap(), "{}", describe(&early));
+    assert_same_history(&early, &later, until);
+    // Just past the end of the primary's main sequence (36.704 Myr) the rebuilt track once held no
+    // gap at all, and the star was placed at its track's age zero, a protostar.
+    assert!(check_after_events(&input, Years::new(4.0e7))[0] > 20);
+}
+
+/// The ages just past each event of `input`'s run to 1.5 × 10¹⁰ years, up to `last`: each
+/// segment's start plus 10⁻³, 1, 10², 10⁴ and 10⁶ years, where a dependence on the run-to age
+/// shows if anything does (a track built short of a phase just entered).
+fn ages_after_events(later: &BinaryTimeline, last: Years) -> Vec<Years> {
+    let mut ages: Vec<f64> = later
+        .segments()
+        .iter()
+        .map(|s| s.start().value())
+        .filter(|&start| start > 0.0)
+        .flat_map(|start| [1e-3, 1.0, 1e2, 1e4, 1e6].map(|after| start + after))
+        .filter(|&age| age <= last.value())
+        .collect();
+    ages.sort_by(f64::total_cmp);
+    ages.dedup_by(|a, b| a.total_cmp(b).is_eq());
+    ages.into_iter().map(Years::new).collect()
+}
+
+/// The ages between `input`'s two arrivals on the main sequence, where its stars' arrivals differ
+/// (P11.T4.i: the engine runs from the first, with the later star its own zero-age self): the
+/// first arrival plus 10⁻³, 1, 10², 10⁴ and 10⁶ years, and halfway, each before the later one.
+fn ages_between_arrivals(input: &BinaryInput) -> Vec<Years> {
+    let Some((first, late)) = first_and_late(input) else {
+        return Vec::new();
+    };
+    [1e-3, 1.0, 1e2, 1e4, 1e6]
+        .map(|after| first + after)
+        .into_iter()
+        .chain([first + 0.5 * (late - first)])
+        .filter(|&age| age < late)
+        .map(Years::new)
+        .collect()
+}
+
+/// [`check_any_age`]'s first case at each of [`ages_after_events`] and
+/// [`ages_between_arrivals`]: every run of `input` to an age just past one of its events, or
+/// between its stars' arrivals, that the pre-test passes has the history of the run to
+/// 1.5 × 10¹⁰ years, bit for bit, and meets no cap. The number of runs compared just past events
+/// and between the arrivals.
+fn check_after_events(input: &BinaryInput, last: Years) -> [usize; 2] {
+    let later = evolve(input, Years::new(1.5e10));
+    let mut compared = [0; 2];
+    let ages = ages_after_events(&later, last)
+        .into_iter()
+        .map(|age| (0, age))
+        .chain(ages_between_arrivals(input).into_iter().map(|age| (1, age)));
+    for (kind, until) in ages {
+        if !can_interact(input, until) {
+            continue;
+        }
+        let early = evolve(input, until);
+        assert!(
+            !early.hit_segment_cap(),
+            "to {until:?}: {}",
+            describe(&early)
+        );
+        assert_same_history(&early, &later, until);
+        compared[kind] += 1;
+    }
+    compared
+}
+
+/// [`check_after_events`] over the first `n` pairs of the pinned sample of seed `seed`, summed.
+fn after_events_over(n: u32, seed: u64) -> [usize; 2] {
+    let mut mix = Mix(seed);
+    (0..n)
+        .map(|i| check_after_events(&pinned_pair(&mut mix, i), Years::new(1.2e10)))
+        .fold([0; 2], |[a, b], [c, d]| [a + c, b + d])
+}
+
+/// P11's build-age dependence (2026-10-05, the determinism audit's sweep): runs to just past each
+/// event of eight pinned-sample pairs, and between their stars' arrivals (P11.T4.i), agree with a
+/// run to 1.5 × 10¹⁰ years.
+#[test]
+fn a_timeline_run_to_just_past_an_event_is_the_same() {
+    // None of these eight pairs passes the pre-test between its arrivals
+    // (`a_late_companion_meets_its_primarys_envelope` compares such runs directly).
+    let [events, _] = after_events_over(8, 0x0b1e_00ab);
+    assert!(events > 50, "{events} runs compared just past events");
+}
+
+/// [`a_timeline_run_to_just_past_an_event_is_the_same`] over 100 pairs.
+#[test]
+#[ignore = "slow: about 10⁴ binaries run through the engine"]
+fn a_hundred_timelines_run_to_just_past_their_events_are_the_same() {
+    let [events, between] = after_events_over(100, 0x0b1e_00ac);
+    eprintln!("{events} runs compared just past events, {between} between arrivals");
+    assert!(events > 500, "{events} runs compared just past events");
+    assert!(between > 0, "{between} runs compared between arrivals");
+}
+
+/// P11's build-age dependence (2026-10-05): a track the engine rebuilds holds its star to the
+/// pair's age where the reach guessed from the closed forms falls short, at both of
+/// [`super::evolve::track_reaching`]'s call sites. A 5 M☉ star's gap starts after its closed-form
+/// main sequence ends, so a build to just past that end has no gap, which `after_boundary` once
+/// placed at track age 0; and a build that holds a main sequence at τ = 0.999 ends before a span
+/// past it, which `main_sequence_star` once left short.
+#[test]
+fn a_rebuilt_track_reaches_the_pairs_age() {
+    use hyperion_testkit::float::bits;
+
+    use super::evolve::track_reaching;
+    use crate::stellar::sse::{self, Track};
+
+    let (m, comp, draws) = (
+        SolarMasses::new(5.0),
+        Composition::SOLAR,
+        StarDraws::median(),
+    );
+    let full = Track::full(m, &comp, &draws);
+    let build = |reach: f64| Track::to_age(m, &comp, &draws, Years::new(reach));
+    let coeffs = sse::ZCoeffs::new(comp.z_fit());
+    let lifetime = sse::main_sequence_lifetime(&coeffs, false, m.value());
+    let start = sse::main_sequence_start(m, &comp);
+
+    let gap = full
+        .age_in_phase(Phase::HertzsprungGap, 0.0)
+        .expect("a 5 M☉ star crosses the gap");
+    let guess = start + lifetime;
+    assert!(
+        guess < gap,
+        "the guess {guess} yr falls short of the gap at {gap} yr"
+    );
+    let span = 0.5 * (gap - guess);
+    let gap_of = |track: &Track| track.age_in_phase(Phase::HertzsprungGap, 0.0);
+    assert_eq!(gap_of(&build(guess + span)), None, "built short of the gap");
+    let (track, placed) = track_reaching(guess, span, build, gap_of);
+    assert_eq!(placed.map(bits), Some(bits(gap)));
+    assert!(track.built_until().value() >= gap + span);
+
+    let tau = 0.999;
+    let on = full
+        .age_in_phase(Phase::MainSequence, tau)
+        .expect("a main sequence");
+    let guess = start + tau * lifetime;
+    let span = 2.0 * (gap - on);
+    let on_of = |track: &Track| track.age_in_phase(Phase::MainSequence, tau);
+    assert!(
+        build(guess + span).built_until().value() < on + span,
+        "built short of the span"
+    );
+    let (track, placed) = track_reaching(guess, span, build, on_of);
+    assert_eq!(placed.map(bits), Some(bits(on)));
+    assert!(track.built_until().value() >= on + span);
+}
+
+/// That `early` and `later`, the same pair run to `until` and past it, have the same states at
+/// every age to `until`: at 257 even ages, at each of `early`'s segments' starts and halfway
+/// through each, bit for bit.
+fn assert_same_history(early: &BinaryTimeline, later: &BinaryTimeline, until: Years) {
+    let mut ages: Vec<f64> = (0..=256_u32)
+        .map(|k| until.value() * f64::from(k) / 256.0)
+        .collect();
+    for s in early.segments() {
+        let (start, end) = (s.start().value(), s.end().value().min(until.value()));
+        ages.extend([start, start + 0.5 * (end - start)]);
+    }
+    for age in ages {
+        let age = Years::new(age);
+        assert_eq!(
+            early.state_at(age),
+            later.state_at(age),
+            "at {age:?}:\n{}\nagainst\n{}",
+            describe(early),
+            describe(later)
+        );
+    }
+}
+
+/// How a pair run to an earlier age compares with the same pair run to a later one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EarlierRun {
+    /// The engine ran the pair both times: the same history to the earlier age.
+    Same,
+    /// The pre-test passed over the pair at the earlier age (two single stars on the drawn orbit),
+    /// and the later run met no interaction before it.
+    PassedOver,
+    /// The pre-test passed over the pair at the earlier age, but the later run holds an
+    /// interaction before it ([`interaction_before`]): the pre-test failed to bound the decay.
+    MissedInteraction,
+}
+
+/// Plan 11's consistency to any age (P11's build-age dependence, 2026-10-05), for `input` run to
+/// `until` and to `later`. A pair that [`can_interact`] by `until` has the same history to `until`
+/// as the later run, bit for bit ([`assert_same_history`]). One it passes over is one detached
+/// segment of its stars' own forms on the drawn orbit, and each star on its own track is the later
+/// run's to the later run's first event (a star below 0.1 M☉ on the cooling fits takes its
+/// companion's wind in the later run).
+fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
+    use super::star::Member;
+
+    let early = evolve(input, until);
+    let late = evolve(input, later);
+    if can_interact(input, until) {
+        assert!(!early.hit_segment_cap(), "{}", describe(&early));
+        assert_same_history(&early, &late, until);
+        return EarlierRun::Same;
+    }
+    assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+    // To the later run's first event, which is not compared unless it lies past `until`.
+    let first_event = late.segments()[0].end();
+    let (horizon, last) = if first_event < until {
+        (first_event.value(), 63)
+    } else {
+        (until.value(), 64)
+    };
+    let members = late.segments()[0].members();
+    for k in 0..=last {
+        let age = Years::new(horizon * f64::from(k) / 64.0);
+        let (a, b) = (early.state_at(age), late.state_at(age));
+        for (i, member) in members.iter().enumerate() {
+            if matches!(member, Member::Track { .. }) {
+                assert_eq!(
+                    a.stars()[i],
+                    b.stars()[i],
+                    "at {age:?}:\n{}",
+                    describe(&late)
+                );
+            }
+        }
+    }
+    if interaction_before(&late, until).is_some() {
+        EarlierRun::MissedInteraction
+    } else {
+        EarlierRun::PassedOver
+    }
+}
+
+/// The first segment of `timeline` that is an interaction starting before `until` and before the
+/// pair's first supernova (ruling p11-channels of 2026-10-06, section 1.2): stable transfer, a
+/// common envelope, contact, or a merger that leaves one star. A detached or disrupted segment is
+/// none, and a supernova of a pair the pre-test passes over is not the pre-test's to foresee
+/// (finding F3: plan 11's P11.T10 decides wide pairs' supernovae).
+fn interaction_before(timeline: &BinaryTimeline, until: Years) -> Option<&Segment> {
+    let first_supernova = timeline
+        .supernovae()
+        .iter()
+        .map(|s| s.age().value())
+        .fold(f64::INFINITY, f64::min);
+    timeline.segments().iter().find(|s| {
+        let interacts = match s.kind() {
+            SegmentKind::Detached | SegmentKind::Disrupted { .. } => false,
+            SegmentKind::Merged => one_star_left(timeline, s),
+            SegmentKind::StableTransfer { .. }
+            | SegmentKind::CommonEnvelope
+            | SegmentKind::Contact => true,
+        };
+        interacts && s.start() < until && s.start().value() < first_supernova
+    })
+}
+
+/// Whether one of the pair's stars is gone at the start of `segment` of `timeline`, as a merger
+/// leaves it.
+fn one_star_left(timeline: &BinaryTimeline, segment: &Segment) -> bool {
+    timeline
+        .state_at(segment.start())
+        .stars()
+        .iter()
+        .any(|s| s.phase() == Phase::NoRemnant)
+}
+
+/// Runs `n` pinned-sample pairs ([`pinned_pair`]), each to an age log-uniform in 10⁵–1.2 × 10¹⁰
+/// years, and one whose stars' arrivals differ also to an age uniform between them (P11.T4.i), and
+/// each to 1.5 × 10¹⁰, through [`check_any_age`], and returns how many runs were the same, passed
+/// over and missed interactions, at the first ages and between the arrivals. The ages between
+/// arrivals are drawn on a stream of their own, so that the pairs and their first ages are the
+/// sample's as before.
+fn any_age_over(n: u32, seed: u64) -> [[u32; 3]; 2] {
+    let mut mix = Mix(seed);
+    let mut between = Mix(seed ^ 0x0a77_1fa1_0000_0000);
+    let mut counts = [[0_u32; 3]; 2];
+    for i in 0..n {
+        let input = pinned_pair(&mut mix, i);
+        let until =
+            crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e10 / 1.0e5));
+        let mut ages = vec![(0, until)];
+        if let Some((first, late)) = first_and_late(&input) {
+            ages.push((1, first + (late - first) * between.next()));
+        }
+        for (kind, until) in ages {
+            let outcome = check_any_age(&input, Years::new(until), Years::new(1.5e10));
+            let slot = match outcome {
+                EarlierRun::Same => 0,
+                EarlierRun::PassedOver => 1,
+                EarlierRun::MissedInteraction => 2,
+            };
+            counts[kind][slot] += 1;
+        }
+    }
+    counts
+}
+
+/// The engine's history does not depend on the age it is run to (P11's build-age dependence,
+/// 2026-10-05): [`check_any_age`] over 60 pairs, and between their stars' arrivals (P11.T4.i).
+/// No pair the pre-test passes over interacts before its age in the later run (P11.T4.j: the
+/// pre-test bounds the decay that magnetic braking, tides and gravitational radiation make).
+#[test]
+fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
+    // The runs between the arrivals are checked as the others are; none of them passes the
+    // pre-test in this sample (`a_late_companion_meets_its_primarys_envelope` compares such runs
+    // directly).
+    let [[same, passed, missed], _] = any_age_over(60, 0x0b1e_00a9);
+    assert!(same > 10 && passed > 10, "{same} run, {passed} passed over");
+    assert_eq!(missed, 0, "{missed} interactions missed");
+}
+
+/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs, with the ages between
+/// arrivals (P11.T4.i). No interaction is missed (P11.T4.j): before the decay-aware pre-test, 4 of
+/// the first ages and 9 of the 721 between the arrivals were pairs under 1.4 d that braking or
+/// tides bring into contact or a merger before the age, which the drawn-orbit test passed over.
+#[test]
+#[ignore = "slow: about 3.4 × 10³ binaries run through the engine"]
+fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
+    let [
+        [same, passed, missed],
+        [same_between, passed_between, missed_between],
+    ] = any_age_over(1_000, 0x0b1e_00aa);
+    eprintln!(
+        "{same} run at both ages, {passed} passed over, {missed} interactions missed; between \
+         arrivals {same_between} run, {passed_between} passed over, {missed_between} missed"
+    );
+    assert_eq!(missed, 0, "{missed} interactions missed at the first ages");
+    assert_eq!(
+        missed_between, 0,
+        "{missed_between} interactions missed between the arrivals"
+    );
+    assert!(same_between > 0, "{same_between} run between arrivals");
+}
+
+/// Each star's arrival on its main sequence, years ([`Track::main_sequence_arrival`], which needs
+/// no main sequence built), or `None` for a star below 0.1 M☉ on the cooling fits.
+///
+/// [`Track::main_sequence_arrival`]: crate::stellar::sse::Track::main_sequence_arrival
+fn arrivals(input: &BinaryInput) -> [Option<f64>; 2] {
+    use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+
+    [0, 1].map(|i| {
+        let m = input.masses()[i];
+        (m >= MIN_INITIAL_MASS).then(|| {
+            Track::to_age(
+                super::evolve::track_mass(m),
+                input.composition(),
+                &input.draws()[i],
+                Years::ZERO,
+            )
+            .main_sequence_arrival()
+            .expect("a hydrogen star arrives")
+            .value()
+        })
+    })
+}
+
+/// The first and the later of `input`'s two arrivals, years, where both stars have one and they
+/// differ.
+fn first_and_late(input: &BinaryInput) -> Option<(f64, f64)> {
+    let [Some(a), Some(b)] = arrivals(input) else {
+        return None;
+    };
+    let (first, late) = if a <= b { (a, b) } else { (b, a) };
+    (first < late).then_some((first, late))
+}
+
+/// Eggleton's (1983) Roche-lobe radius over the separation, `r_L ÷ a` (dimensionless), of a star of
+/// `m` beside one of `other` (M☉): a star's reach, the periastron at which it fills its lobe, is
+/// its radius over this.
+fn lobe_fraction(m: f64, other: f64) -> f64 {
+    crate::orbit::roche_lobe_radius(m / other, crate::units::Metres::new(1.0)).value()
+}
+
+/// A 1 M☉ star's track built past its arrival on the main sequence, the arrival (years) and its
+/// structure there, at solar metallicity and the median draws.
+fn one_solar_mass_late() -> (
+    std::sync::Arc<crate::stellar::sse::Track>,
+    f64,
+    crate::stellar::sse::Structure,
+) {
+    let late = std::sync::Arc::new(crate::stellar::sse::Track::to_age(
+        SolarMasses::new(1.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        Years::new(1.0e8),
+    ));
+    let arrival = late
+        .main_sequence_arrival()
+        .expect("a 1 M☉ star arrives")
+        .value();
+    let zams = late.own_structure_at(arrival).expect("a star");
+    (late, arrival, zams)
+}
+
+/// P11.T4.i (ruling p11-channels, 2026-10-06): a star that has not arrived on its main sequence is
+/// its own zero-age main-sequence star to the engine, bit for bit its track's structure at the
+/// arrival, at τ = 0 ([`engine_track_age_years`](super::star::engine_track_age_years)), while the
+/// timeline shows it contracting on its own track.
+#[test]
+fn a_late_star_is_its_zero_age_self_to_the_engine() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+    use super::timeline::Context;
+    use crate::stellar::premain::PROTOSTAR_YEARS;
+
+    let input = pair(15.0, 1.0, period_days(15.0, 1.0, 3_000.0), 0.0, 0.02);
+    let ctx = Context::of(&input);
+    let (late, arrival, zams) = one_solar_mass_late();
+    assert_eq!(zams.state.phase(), Phase::MainSequence);
+    assert_eq!(
+        late.main_sequence_fraction(arrival).map(bits),
+        Some(bits(0.0))
+    );
+    let member = Member::Track {
+        track: std::sync::Arc::clone(&late),
+        offset: 0.0,
+    };
+    for age in [
+        PROTOSTAR_YEARS,
+        1.0e6,
+        0.5 * arrival,
+        arrival * (1.0 - 1e-9),
+    ] {
+        let shown = late.state_at(Years::new(age));
+        assert_eq!(shown.phase(), Phase::PreMainSequence, "at {age} yr");
+        assert_eq!(member.state_at(&ctx, 1, age), shown, "at {age} yr");
+        let read = member.evaluate(&ctx, 1, age, 1.0, 0.0).expect("a star");
+        assert_eq!(format!("{read:?}"), format!("{zams:?}"), "at {age} yr");
+        assert_eq!(
+            member.radius(&ctx, 1, age, 1.0, 0.0).map(bits),
+            Some(bits(zams.state.radius().value())),
+            "at {age} yr"
+        );
+        assert_eq!(
+            bits(member.mass_at(age)),
+            bits(zams.state.mass().value()),
+            "at {age} yr"
+        );
+        if age <= 0.5 * arrival {
+            assert!(
+                shown.radius().value() > zams.state.radius().value(),
+                "a contracting star is larger than its zero-age self"
+            );
+        }
+    }
+    // From its arrival it is its own track's star again.
+    let later = 1.5 * arrival;
+    assert_eq!(
+        format!("{:?}", member.evaluate(&ctx, 1, later, 1.0, 0.0)),
+        format!("{:?}", late.own_structure_at(later))
+    );
+}
+
+/// P11.T4.i: a star the binary carries before its arrival on the main sequence (a 1 M☉ companion
+/// of a 15 M☉ primary past the end of its main sequence at 12.8 Myr, at 13.5 Myr) becomes a
+/// main-sequence star of its track's mass at τ = 0 (`rlof.rs`'s `carry`), and the engine starts at
+/// the primary's arrival. Before then it has its whole main sequence left
+/// (`Engine::main_sequence_left`, which a contact reads), not the time to its arrival.
+#[test]
+fn a_late_star_is_carried_at_zero_age() {
+    use std::sync::Arc;
+
+    use hyperion_testkit::float::bits;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::Member;
+    use super::timeline::Context;
+    use crate::stellar::sse::Track;
+
+    let input = pair(15.0, 1.0, period_days(15.0, 1.0, 3_000.0), 0.0, 0.02);
+    let (late, arrival, zams) = one_solar_mass_late();
+    let (_, main_sequence_end) = late.phase_span(arrival);
+    let primary = Arc::new(Track::to_age(
+        SolarMasses::new(15.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        Years::new(2.0e7),
+    ));
+    let members = [primary, late].map(|track| Member::Track { track, offset: 0.0 });
+    let start = super::evolve::arrival(&members, 2.0e7);
+    assert_eq!(
+        bits(start),
+        bits(
+            members[0]
+                .track()
+                .and_then(|(t, _)| t.main_sequence_arrival())
+                .expect("an arrival")
+                .value()
+        ),
+        "the engine starts at the primary's arrival"
+    );
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(
+        0.0,
+        k.semi_major_axis().value() / crate::units::consts::SOLAR_RADIUS_M,
+        0.0,
+        *k.orientation(),
+        k.mean_anomaly_at_epoch(),
+    );
+    let mut engine = Engine::new(
+        Arc::new(Context::of(&input)),
+        start,
+        2.0e7,
+        members,
+        orbit,
+        None,
+    );
+    engine.age = 1.35e7;
+    assert_eq!(
+        bits(engine.main_sequence_left(1)),
+        bits(main_sequence_end - arrival),
+        "a late star has its whole main sequence left"
+    );
+    engine.carry(1);
+    match &engine.members[1] {
+        Member::MainSequence {
+            helium: false,
+            mass,
+            tau,
+        } => {
+            assert_eq!(bits(mass.last()), bits(zams.state.mass().value()));
+            assert_eq!(bits(tau.last()), bits(0.0));
+        }
+        other => panic!("carried as {}", other.form()),
+    }
+}
+
+/// P11.T4.i: the engine starts at the first arrival (`evolve.rs`'s `arrival`). Run to an age
+/// between the two arrivals, a pair is tested with the later star's zero-age main-sequence radius,
+/// not its contracting one: 5 + 1 M☉ at a periastron the contracting companion overfills but its
+/// zero-age self does not is passed over. A pair on an orbit inside the companion's zero-age reach
+/// (and so the primary's, which is the larger) is stepped from the first arrival and interacts in
+/// its first steps, long before the companion's own arrival.
+#[test]
+fn the_engine_starts_at_the_first_arrival() {
+    use std::sync::Arc;
+
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+    use crate::stellar::sse::Track;
+
+    let (m1, m2) = (5.0, 1.0);
+    let base = pair(m1, m2, 10.0, 0.0, 0.02);
+    let (first, late) = first_and_late(&base).expect("two arrivals");
+    let tracks = [m1, m2].map(|m| {
+        Arc::new(Track::to_age(
+            SolarMasses::new(m),
+            &Composition::SOLAR,
+            &StarDraws::median(),
+            Years::new(late * 1.1),
+        ))
+    });
+    let members = tracks
+        .clone()
+        .map(|track| Member::Track { track, offset: 0.0 });
+    assert_eq!(
+        bits(super::evolve::arrival(&members, 1.0e10)),
+        bits(first),
+        "the first arrival"
+    );
+    assert_eq!(
+        bits(first),
+        bits(
+            tracks[0]
+                .main_sequence_arrival()
+                .expect("an arrival")
+                .value()
+        )
+    );
+
+    let until = 2.0 * first;
+    assert!(
+        until < late,
+        "{until} yr is before the companion's arrival at {late} yr"
+    );
+    let contracting = tracks[1].state_at(Years::new(until)).radius().value();
+    let zams = tracks[1]
+        .own_structure_at(late)
+        .expect("a star")
+        .state
+        .radius()
+        .value();
+    let primary = tracks[0].max_radius_until(Years::new(until)).value();
+    let reach = |r: f64, m: f64, other: f64| r / lobe_fraction(m, other);
+    let (reach_zams, reach_contracting, reach_primary) = (
+        reach(zams, m2, m1),
+        reach(contracting, m2, m1),
+        reach(primary, m1, m2),
+    );
+    let circular = |a_rsun: f64| pair(m1, m2, period_days(m1, m2, a_rsun), 0.0, 0.02);
+    let between = reach_contracting.min(reach_primary.max(reach_zams) * 1.5);
+    assert!(
+        reach_primary.max(reach_zams) < between && between < reach_contracting,
+        "a separation the contracting companion overfills alone: at {until:.4e} yr the companion \
+         reaches {reach_contracting:.3} R☉ ({contracting:.3} R☉; zero-age {reach_zams:.3}, \
+         {zams:.3} R☉), the primary {reach_primary:.3} R☉"
+    );
+    let apart = circular(between);
+    assert!(
+        !can_interact(&apart, Years::new(until)),
+        "passed over at {between} R☉"
+    );
+    let run = evolve(&apart, Years::new(until));
+    assert_eq!(run.segments().len(), 1, "{}", describe(&run));
+
+    let touching = circular(0.95 * reach_zams);
+    assert!(
+        can_interact(&touching, Years::new(until)),
+        "inside the zero-age reach"
+    );
+    let run = evolve(&touching, Years::new(until));
+    let met = run
+        .segments()
+        .iter()
+        .find(|s| s.kind() != SegmentKind::Detached)
+        .expect("an interaction");
+    assert!(
+        met.start().value() >= first && met.start().value() <= first + 1e-3 * (late - first),
+        "{:?} at {:?}, the first arrival at {first} yr: {}",
+        met.kind(),
+        met.start(),
+        describe(&run)
+    );
+}
+
+/// The primary's death as plan 06 gives it, for a pair of median draws.
+fn plan_06_death(input: &BinaryInput) -> Years {
+    plan_06_star(input)
+        .death()
+        .expect("a massive star dies")
+        .age()
+}
+
+/// The orbit of the late companion's envelope test below, R☉: about half the drawn-orbit reach of a
+/// 15 M☉ red supergiant's largest radius (1,420 R☉) beside a 1 M☉ companion.
+const LATE_COMPANION_ORBIT_RSUN: f64 = 1_200.0;
+
+/// P11.T4.i (ruling p11-channels, 2026-10-06): a 1 M☉ companion of a 15 M☉ primary arrives on its
+/// main sequence (at 37 Myr) long after the primary's death (at 14.3 Myr). On an orbit of 1,200 R☉
+/// the supergiant fills its Roche lobe: a common envelope or a merger before plan 06's pinned
+/// death, the collapse recorded at that death, and the companion shown contracting on its own
+/// track until the interaction. Before T4.i the engine waited for both arrivals, after the death,
+/// and the pair was one detached segment with no supernova record.
+#[test]
+fn a_late_companion_meets_its_primarys_envelope() {
+    let input = pair(
+        15.0,
+        1.0,
+        period_days(15.0, 1.0, LATE_COMPANION_ORBIT_RSUN),
+        0.0,
+        0.02,
+    );
+    let death = plan_06_death(&input);
+    let (first, late) = first_and_late(&input).expect("two arrivals");
+    assert!(
+        late > death.value(),
+        "the companion arrives after the death"
+    );
+    let timeline = evolve(&input, Years::new(5.0e7));
+    let met = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() != SegmentKind::Detached)
+        .expect("an interaction");
+    assert!(
+        matches!(
+            met.kind(),
+            SegmentKind::CommonEnvelope | SegmentKind::Merged
+        ) && met.start() < death
+            && met.start().value() > first,
+        "{}",
+        describe(&timeline)
+    );
+    let [primary, _] = timeline.supernova_ages();
+    let primary = primary.expect("the primary's collapse is recorded");
+    assert!(
+        (primary.value() - death.value()).abs() <= 1e-9 * death.value(),
+        "{primary:?} against plan 06's {death:?}: {}",
+        describe(&timeline)
+    );
+    for k in 0..32_u32 {
+        let age = Years::new(first + (met.start().value() - first) * f64::from(k) / 32.0);
+        let shown = timeline.state_at(age).stars()[1];
+        assert_eq!(shown.phase(), Phase::PreMainSequence, "at {age:?}");
+    }
+    // The build-age contract between the two arrivals, where the pair is run with its companion as
+    // its zero-age self: from the age the pre-test first passes (the supergiant's drawn reach) to
+    // the envelope, a run to an age there is the run to 50 Myr, bit for bit.
+    let (mut lo, mut hi) = (first, met.start().value());
+    assert!(
+        can_interact(&input, Years::new(hi)),
+        "the pre-test passes by the envelope"
+    );
+    for _ in 0..60 {
+        let mid = f64::midpoint(lo, hi);
+        if can_interact(&input, Years::new(mid)) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    assert!(
+        hi < met.start().value(),
+        "the pre-test passes before the envelope"
+    );
+    for share in [0.25, 0.5, 0.75] {
+        let until = Years::new(hi + share * (met.start().value() - hi));
+        assert_eq!(
+            check_any_age(&input, until, Years::new(5.0e7)),
+            EarlierRun::Same,
+            "to {until:?}"
+        );
+    }
+}
+
+/// The orbit after a kick-free collapse on a circular orbit of `a` (R☉), the pair's mass going
+/// from `before` to `after` M☉ at once (BSE appendix A1; Blaauw 1961): a′ = a M′ ÷ (2M′ − M) and
+/// e′ = M ÷ M′ − 1, or `None` where more than half the mass is lost and the pair unbinds.
+fn blaauw_orbit_rsun(a: f64, before: f64, after: f64) -> Option<(f64, f64)> {
+    let denominator = 2.0 * after - before;
+    positive(denominator).then(|| (a * after / denominator, before / after - 1.0))
+}
+
+/// The semi-major axis (R☉) and eccentricity of `state`'s orbit, if it has one.
+fn axis_rsun_and_e(state: &BinaryState) -> Option<(f64, f64)> {
+    state.orbit().map(|o| {
+        (
+            o.semi_major_axis().value() / crate::units::consts::SOLAR_RADIUS_M,
+            o.eccentricity().value(),
+        )
+    })
+}
+
+/// A kick's speed, m s⁻¹, zero for none.
+fn kick_speed_m_s(record: &SupernovaRecord) -> f64 {
+    record.kick().map_or(0.0, |k| k.speed().value())
+}
+
+/// The primary's supernova record in `timeline`.
+fn primary_record(timeline: &BinaryTimeline) -> SupernovaRecord {
+    *timeline
+        .supernovae()
+        .iter()
+        .find(|s| s.component() == Component::Primary)
+        .unwrap_or_else(|| panic!("the primary's collapse is recorded: {}", describe(timeline)))
+}
+
+/// P11.T4.k, finding F7 (ruling p11-supernova-pins, 2026-10-06): a 17 + 12 M☉ pair at 3,300 R☉,
+/// circular at \[Fe/H\] 0 with the median draws, passes the pre-test but never interacts. Its
+/// primary is still on its own track at its pinned death (12.06 Myr), where the pin wins the tie
+/// with the track's own death and the track already shows its remnant. The collapse takes the
+/// living star's 9.2378 M☉ (the death's progenitor mass) to plan 06's 1.4955 M☉ neutron star, and
+/// the primary goes on as its own track's remnant, bit for bit. Without natal kicks the orbit after
+/// is BSE appendix A1's: 4,396 → 10,388 R☉ and e 0 → 0.5768, bound. With them the record's
+/// `bound` is whether an orbit follows: plan 06's 518 km/s draw unbinds the pair, `Disrupted` by
+/// the primary. Before T4.k the pin read the remnant as nothing living: no record, and the pair
+/// kept its orbit through the collapse.
+#[test]
+fn an_untouched_pinned_primary_collapses_on_its_orbit() {
+    use crate::stellar::sse::Track;
+
+    let (m1, m2, a) = (17.0, 12.0, 3_300.0);
+    let until = Years::new(5.0e7);
+    let own = Track::full(
+        SolarMasses::new(m1),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    );
+    for kicks in [false, true] {
+        let input = pair(m1, m2, period_days(m1, m2, a), 0.0, 0.02).with_params(BinaryParams {
+            natal_kicks: kicks,
+            ..BinaryParams::GENERATOR
+        });
+        assert!(can_interact(&input, until), "the pre-test passes the pair");
+        let model = plan_06_star(&input);
+        let death = model.death().expect("a massive star dies");
+        let timeline = evolve(&input, until);
+        let record = primary_record(&timeline);
+        let d = death.age().value();
+        assert!(
+            (record.age().value() - d).abs() <= 1e-9 * d,
+            "{:?} against plan 06's {d} yr",
+            record.age()
+        );
+        assert!((d - 12.06e6).abs() < 1e4, "{d}");
+        assert_eq!(Some(record.remnant()), model.remnant());
+        assert!(
+            (record.remnant().mass().value() - 1.4955).abs() < 1e-4,
+            "{:?}",
+            record.remnant()
+        );
+        let progenitor = death.progenitor();
+        let living = progenitor.helium_core_mass().value() + progenitor.envelope_mass().value();
+        assert!((living - 9.2378).abs() < 1e-4, "{living}");
+        let before = timeline.state_at(Years::new(super::detached::last_living(d)));
+        let after = timeline.state_at(death.age());
+        assert!(
+            (before.stars()[0].mass().value() - living).abs() < 1e-8,
+            "the living mass before: {:?}",
+            before.stars()[0]
+        );
+        assert!(
+            timeline.segments().iter().all(|s| matches!(
+                s.kind(),
+                SegmentKind::Detached | SegmentKind::Disrupted { .. }
+            )),
+            "never interacts: {}",
+            describe(&timeline)
+        );
+        assert_eq!(
+            after.orbit().is_some(),
+            record.bound(),
+            "{}",
+            describe(&timeline)
+        );
+        let (a0, e0) = axis_rsun_and_e(&before).expect("bound before the collapse");
+        assert!(e0 < 1e-9, "circular before: e {e0}");
+        if kicks {
+            assert_eq!(record.kick(), model.natal_kick());
+            assert!(kick_speed_m_s(&record) > 5.0e5, "{:?}", record.kick());
+            assert!(!record.bound(), "{}", describe(&timeline));
+            assert_eq!(
+                after.kind(),
+                SegmentKind::Disrupted {
+                    by: Component::Primary
+                }
+            );
+        } else {
+            assert_eq!(record.kick(), None);
+            let total = living + before.stars()[1].mass().value();
+            let total_after = record.remnant().mass().value() + after.stars()[1].mass().value();
+            let (a1, e1) = blaauw_orbit_rsun(a0, total, total_after).expect("less than half lost");
+            let (a, e) = axis_rsun_and_e(&after).expect("bound after the collapse");
+            assert!(record.bound(), "{}", describe(&timeline));
+            assert!((a / a1 - 1.0).abs() < 1e-6, "a {a} R☉ against A1's {a1}");
+            assert!((e - e1).abs() < 1e-6, "e {e} against A1's {e1}");
+            assert!(
+                (a0 - 4_396.0).abs() < 1.0 && (a - 10_388.0).abs() < 1.0,
+                "{a0} → {a}"
+            );
+            assert!((e - 0.5768).abs() < 1e-4, "{e}");
+        }
+        for age in [d, d + 1.0e6, until.value()] {
+            assert_eq!(
+                timeline.state_at(Years::new(age)).stars()[0],
+                own.state_at(Years::new(age)),
+                "the primary is its own track's remnant at {age} yr"
+            );
+        }
+    }
+}
+
+/// P11.T4.k, F7: a 25 + 20 M☉ pair at 3,500 R☉ ([Fe/H] 0, median draws) whose primary its own
+/// winds strip to an 8.32 M☉ helium star, untouched by its companion, collapses directly at plan
+/// 06's death (7.84 Myr) to an 8.32 M☉ black hole: no kick and no mass lost, so the orbit is kept
+/// to 10⁻⁹, now with the record that was missing before T4.k.
+#[test]
+fn a_wind_stripped_primary_collapses_in_place() {
+    let input = pair(25.0, 20.0, period_days(25.0, 20.0, 3_500.0), 0.0, 0.02);
+    let model = plan_06_star(&input);
+    let death = model.death().expect("a massive star dies");
+    let timeline = evolve(&input, Years::new(5.0e7));
+    let record = primary_record(&timeline);
+    let d = death.age().value();
+    assert!(
+        (record.age().value() - d).abs() <= 1e-9 * d,
+        "{:?} against plan 06's {d} yr",
+        record.age()
+    );
+    assert!((d - 7.84e6).abs() < 1e4, "{d}");
+    assert_eq!(Some(record.remnant()), model.remnant());
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::BlackHole
+    );
+    let before = timeline.state_at(Years::new(super::detached::last_living(d)));
+    let after = timeline.state_at(death.age());
+    let held = before.stars()[0];
+    assert!(
+        matches!(
+            held.phase(),
+            Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+        ),
+        "{held:?}"
+    );
+    let bh = record.remnant().mass().value();
+    assert!((bh - 8.32).abs() < 5e-3, "{bh}");
+    assert!((held.mass().value() / bh - 1.0).abs() < 1e-9, "{held:?}");
+    assert!(kick_speed_m_s(&record) <= 0.0, "{:?}", record.kick());
+    assert!(record.bound(), "{}", describe(&timeline));
+    let ((a0, e0), (a1, e1)) = (
+        axis_rsun_and_e(&before).expect("bound before"),
+        axis_rsun_and_e(&after).expect("bound after"),
+    );
+    assert!((a1 / a0 - 1.0).abs() < 1e-9, "a {a0} → {a1} R☉");
+    assert!((e1 - e0).abs() < 1e-9, "e {e0} → {e1}");
+}
+
+/// The late companion's supernova orbit below, R☉: 0.9 of the drawn reach of a 20 M☉ red
+/// supergiant's largest radius (1,511 R☉ at \[Fe/H\] 0, median draws) beside a 1 M☉ companion, the
+/// periastron at which the giant would fill its Roche lobe: about 2,160 R☉.
+fn late_supernova_orbit_rsun() -> f64 {
+    let giant = crate::stellar::sse::Track::full(
+        SolarMasses::new(20.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    );
+    let death = giant.lifetime().expect("built in full");
+    0.9 * giant.max_radius_until(death).value() / lobe_fraction(20.0, 1.0)
+}
+
+/// P11.T4.i (ruling p11-channels, 2026-10-06) and P11.T4.k: a 1 M☉ companion of a 20 M☉ primary
+/// (dead at 9.87 Myr, the companion arriving at 37 Myr), at 0.9 of the drawn reach of the
+/// primary's giant (about 2,160 R☉), passes the pre-test, so the pair is run from the first
+/// arrival. The giant's wind widens the orbit faster than the giant grows, so it never touches
+/// its companion, and its collapse on its own track at plan 06's death is applied to the pair
+/// (BSE appendix A1): recorded, and the pair bound or not as the state after it shows. Without a
+/// kick that is Blaauw's criterion on the circular orbit, bound while less than half the pair's
+/// mass is lost, here a 6.81 M☉ black hole from an 8.3 M☉ supergiant, the orbit widening from about
+/// 4,670 to 5,750 R☉ and e from 0 to 0.187. Before T4.i the engine started after the death; before
+/// T4.k the collapse, read at the pin as the track's remnant, left no record and the orbit at about
+/// 4,670 R☉ (finding F7), and T4.i took the test at 1,200 R☉, an orbit the giant fills.
+#[test]
+fn a_late_companions_supernova_is_applied() {
+    let (m1, m2) = (20.0, 1.0);
+    let orbit = late_supernova_orbit_rsun();
+    assert!((2_100.0..2_200.0).contains(&orbit), "{orbit} R☉");
+    for kicks in [false, true] {
+        let params = BinaryParams {
+            natal_kicks: kicks,
+            ..BinaryParams::GENERATOR
+        };
+        let input = pair(m1, m2, period_days(m1, m2, orbit), 0.0, 0.02).with_params(params);
+        let death = plan_06_death(&input);
+        let (_, late) = first_and_late(&input).expect("two arrivals");
+        assert!(
+            late > death.value(),
+            "the companion arrives after the death"
+        );
+        assert!(
+            can_interact(&input, Years::new(5.0e7)),
+            "inside the drawn reach"
+        );
+        let timeline = evolve(&input, Years::new(5.0e7));
+        let record = primary_record(&timeline);
+        assert!(
+            (record.age().value() - death.value()).abs() <= 1e-9 * death.value(),
+            "{:?} against plan 06's {death:?}",
+            record.age()
+        );
+        let before = timeline.state_at(Years::new(super::detached::last_living(death.value())));
+        let after = timeline.state_at(death);
+        assert!(
+            before.orbit().is_some(),
+            "bound before: {}",
+            describe(&timeline)
+        );
+        assert_eq!(
+            after.orbit().is_some(),
+            record.bound(),
+            "{}",
+            describe(&timeline)
+        );
+        if !kicks {
+            let (a0, e0) = axis_rsun_and_e(&before).expect("bound before");
+            assert!(e0 < 1e-9, "circular before the collapse: e {e0}");
+            let total = before.total_mass().value();
+            let total_after = record.remnant().mass().value() + before.stars()[1].mass().value();
+            let lost = total - total_after;
+            assert!(lost > 0.0, "the collapse loses mass: {lost} M☉");
+            assert_eq!(
+                record.bound(),
+                lost < 0.5 * total,
+                "{lost} of {total} M☉ lost: {}",
+                describe(&timeline)
+            );
+            let (a1, e1) = blaauw_orbit_rsun(a0, total, total_after).expect("less than half lost");
+            let (a, e) = axis_rsun_and_e(&after).expect("bound after");
+            assert!((a / a1 - 1.0).abs() < 1e-6, "a {a} R☉ against A1's {a1}");
+            assert!((e - e1).abs() < 1e-6, "e {e} against A1's {e1}");
+        }
+    }
+}
+
+/// P11.T4.k, finding F8 (ruling p11-supernova-pins, 2026-10-06): 20 + 1 M☉ at 1,680 R☉ ([Fe/H] 0,
+/// median draws). The supergiant's envelope engulfs the companion at 9.8665 Myr, 3.6 kyr before
+/// plan 06's death at 9.8701 Myr, when the helium star of its core (HPT section 6,
+/// `HeliumStar::from_early_agb`) has no life left: its own clock is past its end. The primary is
+/// held at that helium star's last living state, a 6.81 M☉ helium Hertzsprung-gap or giant-branch
+/// star, until its pin, where it collapses to plan 06's 6.81 M☉ black hole, not the helium track's
+/// 3.93 M☉ one: direct, no kick and no mass lost, so the post-envelope orbit of 108.04 R☉ stays to
+/// 10⁻⁶. Before T4.k it was placed as the helium track's 3.93 M☉ black hole from the envelope on,
+/// and never collapsed.
+#[test]
+fn a_core_stripped_past_its_end_is_held_until_its_pin() {
+    let input = pair(20.0, 1.0, period_days(20.0, 1.0, 1_680.0), 0.0, 0.02);
+    let model = plan_06_star(&input);
+    let death = model.death().expect("a massive star dies").age().value();
+    let timeline = evolve(&input, Years::new(5.0e7));
+    let envelope = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() == SegmentKind::CommonEnvelope)
+        .unwrap_or_else(|| panic!("a common envelope: {}", describe(&timeline)))
+        .start()
+        .value();
+    assert!(
+        (envelope - 9.8665e6).abs() < 1.0e2 && envelope < death,
+        "the envelope at {envelope} yr, the pin at {death}: {}",
+        describe(&timeline)
+    );
+    let remnant = model.remnant().expect("a remnant");
+    for k in 0..8_u32 {
+        let age = envelope + (death - envelope) * f64::from(k) / 8.0;
+        let held = timeline.state_at(Years::new(age)).stars()[0];
+        assert!(
+            matches!(
+                held.phase(),
+                Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+            ),
+            "at {age} yr: {held:?}"
+        );
+        assert!(
+            (held.mass().value() / remnant.mass().value() - 1.0).abs() < 1e-6,
+            "at {age} yr: {held:?}"
+        );
+    }
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - death).abs() <= 1e-9 * death,
+        "{:?} against the pin at {death} yr",
+        record.age()
+    );
+    assert_eq!(record.remnant(), remnant);
+    assert!((remnant.mass().value() - 6.812).abs() < 1e-3, "{remnant:?}");
+    assert!(kick_speed_m_s(&record) <= 0.0, "{:?}", record.kick());
+    assert!(record.bound(), "{}", describe(&timeline));
+    let (a0, _) =
+        axis_rsun_and_e(&timeline.state_at(Years::new(super::detached::last_living(death))))
+            .expect("bound before");
+    let (a1, _) = axis_rsun_and_e(&timeline.state_at(Years::new(death))).expect("bound after");
+    assert!((a0 - 108.04).abs() < 0.01, "{a0} R☉");
+    assert!((a1 / a0 - 1.0).abs() < 1e-6, "a {a0} → {a1} R☉");
+}
+
+/// P11.T4.k, F8 for any star but a pinned primary with its pin to come: a core whose helium star
+/// has no life left at its stripping dies at once, through `Engine::die`. Two pairs of the pinned
+/// thousand ([`pinned_pair`]):
+///
+/// - **0544** (32.26 + 28.99 M☉, 1,518 d, e 0.37, Z = 0.004): the companion, grown to 35.5 M☉ by
+///   the primary's transfer, enters a common envelope around the primary's black hole at
+///   8.4807 Myr late on its early AGB, and collapses there to a 14.25 M☉ black hole: recorded,
+///   bound, kick-free (a direct collapse), with no recoil. Before T4.k it was a helium star dead
+///   from its start, with no record.
+/// - **0145** (1.22 + 0.77 M☉, 494 d, Z = 0.004): the primary's envelope at 4,377.6 Myr leaves a
+///   0.524 M☉ helium star whose carbon–oxygen core is past its shell limit, a carbon–oxygen white
+///   dwarf at once: the stripping's member dies now (before T4.k it was placed alive). The dwarf
+///   keeps the helium star's whole mass (HPT section 6.1, ruling 40), so `lose_mass` takes nothing
+///   and the orbit after is the one the envelope left.
+#[test]
+fn a_core_stripped_past_its_end_dies_at_once() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit, own_members};
+    use super::star::Member;
+    use super::timeline::Context;
+
+    let until = Years::new(1.2e10);
+    let last_envelope = |timeline: &BinaryTimeline| {
+        timeline
+            .segments()
+            .iter()
+            .rev()
+            .find(|s| s.kind() == SegmentKind::CommonEnvelope)
+            .unwrap_or_else(|| panic!("a common envelope: {}", describe(timeline)))
+            .start()
+            .value()
+    };
+
+    let collapse = evolve(&pinned_sample_pair(544), until);
+    let envelope = last_envelope(&collapse);
+    assert!((envelope / 8.4807e6 - 1.0).abs() < 1e-5, "{envelope} yr");
+    let record = *collapse
+        .supernovae()
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .unwrap_or_else(|| panic!("the companion's collapse: {}", describe(&collapse)));
+    assert!(
+        (record.age().value() - envelope).abs() <= 1e-9 * envelope,
+        "{:?} against the envelope at {envelope} yr",
+        record.age()
+    );
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::BlackHole
+    );
+    assert!(
+        (record.remnant().mass().value() - 14.253).abs() < 1e-3,
+        "{:?}",
+        record.remnant()
+    );
+    assert!(record.bound(), "{}", describe(&collapse));
+    assert!(kick_speed_m_s(&record) <= 0.0, "{:?}", record.kick());
+    let recoil = record.recoil().expect("bound").metres_per_second();
+    assert!(
+        recoil.iter().all(|v| v.abs() < 1e-6),
+        "no mass lost, no recoil: {recoil:?} m s⁻¹"
+    );
+    let after = collapse.state_at(Years::new(envelope));
+    assert_eq!(after.stars()[1].phase(), Phase::BlackHole);
+
+    let input = &pinned_sample_pair(145);
+    let dwarf = evolve(input, until);
+    let envelope = last_envelope(&dwarf);
+    assert!((envelope / 4_377.62e6 - 1.0).abs() < 1e-5, "{envelope} yr");
+    let after = dwarf.state_at(Years::new(envelope));
+    let shown = after.stars()[0];
+    assert_eq!(shown.phase(), Phase::CarbonOxygenWhiteDwarf);
+    assert!((shown.mass().value() - 0.524).abs() < 1e-3, "{shown:?}");
+    let segment = dwarf
+        .segments()
+        .iter()
+        .find(|s| s.start().value() >= envelope && s.kind() == SegmentKind::Detached)
+        .expect("detached after the envelope");
+    let Member::Track { track, offset } = &segment.members()[0] else {
+        panic!("the primary on its stripped track: {}", describe(&dwarf));
+    };
+    assert!(track.is_remnant_from_its_start(), "{}", describe(&dwarf));
+    assert!(
+        (offset - envelope).abs() <= 1e-9 * envelope,
+        "placed at {offset} yr, the envelope at {envelope} yr"
+    );
+    let p = track.death().expect("dead").progenitor();
+    let before = p.helium_core_mass().value() + p.envelope_mass().value();
+    let born = track.remnant().expect("a white dwarf").mass().value();
+    assert!(
+        (before - born).abs() < 1e-12,
+        "the dwarf keeps its helium star's {before} M☉: {born}"
+    );
+    // The stripping itself, at the envelope's age, on the primary's own track: it dies now.
+    let (a, e) = axis_rsun_and_e(&after).expect("bound after the envelope");
+    let orbit = LiveOrbit::new(
+        envelope,
+        a,
+        e,
+        *input.orbit().orientation(),
+        input.orbit().mean_anomaly_at_epoch(),
+    );
+    let engine = Engine::new(
+        Arc::new(Context::of(input)),
+        envelope,
+        until.value(),
+        own_members(input, until.value(), None),
+        orbit,
+        None,
+    );
+    let (member, dies) = engine.stripped_member(0);
+    assert!(dies, "the white dwarf is born now, through `die`");
+    let Member::Track { track, .. } = member else {
+        panic!("a stripped track: {member:?}");
+    };
+    assert!(track.is_remnant_from_its_start(), "{:?}", track.lifetime());
+    assert_eq!(
+        track.remnant().map(|r| r.kind()),
+        Some(crate::stellar::remnant::RemnantKind::WhiteDwarf)
+    );
+}
+
+/// P11.T4.j: a 1.04 + 0.45 M☉ pair at a = 3.75 R☉ (P = 0.69 d) whose stars stay inside their
+/// lobes on the drawn orbit is brought into transfer and contact by magnetic braking at about
+/// 2.2 Gyr. The pre-test passes it at 2.0 Gyr, so a run to 2.0 Gyr is the run to 3 Gyr to then,
+/// bit for bit; before P11.T4.j it was two single stars on the drawn orbit.
+#[test]
+fn a_braked_pair_is_run_before_its_contact() {
+    let input = pair(1.04, 0.45, period_days(1.04, 0.45, 3.75), 0.0, 0.004);
+    let at = Years::new(2.0e9);
+    assert!(
+        !lobe_reached(&input, at),
+        "inside the lobes on the drawn orbit"
+    );
+    assert!(can_interact(&input, at));
+    let later = evolve(&input, Years::new(3.0e9));
+    let stages = starts(&later);
+    let transfer = find(&stages, 0, |kind, _| *kind != SegmentKind::Detached)
+        .expect("braking brings the pair into contact");
+    assert!(
+        matches!(
+            stages[transfer].0,
+            SegmentKind::StableTransfer {
+                donor: Component::Primary
+            }
+        ),
+        "{}",
+        describe(&later)
+    );
+    let contact =
+        find(&stages, transfer, |kind, _| *kind == SegmentKind::Contact).expect("a contact pair");
+    let [onset, touch] = [transfer, contact].map(|k| later.segments()[k].start().value());
+    assert!(
+        (2.1e9..2.3e9).contains(&onset) && (2.15e9..2.35e9).contains(&touch),
+        "transfer at {onset} yr, contact at {touch} yr:\n{}",
+        describe(&later)
+    );
+    // The orbit shrinks by braking alone before the transfer: a third of its axis.
+    let before = later.state_at(Years::new(onset * (1.0 - 1e-9)));
+    let a = before
+        .orbit()
+        .map_or(f64::INFINITY, |o| o.semi_major_axis().value())
+        / crate::units::consts::SOLAR_RADIUS_M;
+    assert!(a < 2.5, "a = {a} R☉ at the onset");
+    assert_same_history(&evolve(&input, at), &later, at);
+}
+
+/// The full tracks of `input`'s stars, where they have tracks (not below 0.1 M☉), as
+/// [`can_interact_with_tracks`] takes them.
+fn full_tracks(input: &BinaryInput) -> [Option<std::sync::Arc<crate::stellar::sse::Track>>; 2] {
+    use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+    core::array::from_fn(|i| {
+        let m = super::evolve::track_mass(input.masses()[i]);
+        (m >= MIN_INITIAL_MASS)
+            .then(|| std::sync::Arc::new(Track::full(m, input.composition(), &input.draws()[i])))
+    })
+}
+
+/// P11.T4.j: the pre-test only widens with age, and reads the same on any build of the stars'
+/// tracks. Over the 60 pairs of [`a_timeline_is_the_same_whatever_age_it_is_run_to`] and four
+/// massive wide pairs whose primary is pinned (design note 16), at 48 ages from 10⁵ to 1.5 × 10¹⁰
+/// years, each pair's own age there and the ages between its stars' arrivals: a pair that can
+/// interact by one age can by every later one; and [`can_interact`] (tracks built to the age) is
+/// [`can_interact_with_tracks`] on full tracks, as `evolve`'s pinned primary and plan 06's
+/// `SystemStars` give them, and on tracks built to 1.5 × 10¹⁰ years.
+#[test]
+fn the_pre_test_only_widens_with_age() {
+    use crate::stellar::sse::{MIN_INITIAL_MASS, Track};
+
+    let mut mix = Mix(0x0b1e_00a9);
+    let massive = [
+        (12.0, 0.3, 2_000.0),
+        (12.0, 3.0, 4_000.0),
+        (30.0, 1.0, 3_000.0),
+        (30.0, 10.0, 6_000.0),
+    ]
+    .map(|(m1, m2, period)| (pair(m1, m2, period, 0.0, 0.02), None));
+    let pairs = (0..60)
+        .map(|i| {
+            let input = pinned_pair(&mut mix, i);
+            let own =
+                crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e5));
+            (input, Some(own))
+        })
+        .chain(massive);
+    let mut passes = 0;
+    for (i, (input, own)) in pairs.enumerate() {
+        let built = |i: usize| {
+            let m = super::evolve::track_mass(input.masses()[i]);
+            (m >= MIN_INITIAL_MASS).then(|| {
+                std::sync::Arc::new(Track::to_age(
+                    m,
+                    input.composition(),
+                    &input.draws()[i],
+                    Years::new(1.5e10),
+                ))
+            })
+        };
+        let long = [built(0), built(1)];
+        let mut ages: Vec<f64> = (0..48)
+            .map(|k| {
+                crate::math::exp(
+                    crate::math::ln(1.0e5) + f64::from(k) / 47.0 * crate::math::ln(1.5e5),
+                )
+            })
+            .chain(own)
+            .chain(ages_between_arrivals(&input).into_iter().map(Years::value))
+            .collect();
+        ages.sort_by(f64::total_cmp);
+        let tracks = full_tracks(&input);
+        let mut first_pass: Option<f64> = None;
+        for age in ages {
+            let until = Years::new(age);
+            let can = can_interact_with_tracks(&input, until, tracks.clone());
+            assert_eq!(can, can_interact(&input, until), "pair {i} at {age} yr");
+            assert_eq!(
+                can,
+                can_interact_with_tracks(&input, until, long.clone()),
+                "pair {i} at {age} yr"
+            );
+            if let Some(first) = first_pass {
+                assert!(can, "pair {i} passes at {first} yr but not at {age} yr");
+            } else if can {
+                first_pass = Some(age);
+                passes += 1;
+            }
+        }
+    }
+    assert!(passes > 10, "{passes} pairs pass at some age");
+}
+
+/// P11.T4.j: a wide pair is still two single stars. 1 + 0.8 M☉ at 10⁴ d fails at 13.8 Gyr. The
+/// bound's boundary for a circular 1 + 0.8 M☉ pair ([Fe/H] 0, median draws) lies at P₀ ≈ 0.73 d
+/// at 1 Gyr and 1.54 d at 10 Gyr, against the science check's 0.64 and 1.22 d from BSE equation
+/// 50 at a locked spin alone (plan 11's Risks): above them by the spins' reservoir and the
+/// safety factor, and over twice the lobe test's own boundary (0.30 and 0.54 d).
+#[test]
+fn a_wide_pair_is_still_passed_over() {
+    assert!(!can_interact(
+        &pair(1.0, 0.8, 1.0e4, 0.0, 0.02),
+        Years::new(1.38e10)
+    ));
+    let tracks = full_tracks(&pair(1.0, 0.8, 1.0, 0.0, 0.02));
+    let boundary = |until: f64, test: &dyn Fn(&BinaryInput, Years) -> bool| {
+        let (mut lo, mut hi) = (0.1_f64, 30.0_f64);
+        for _ in 0..40 {
+            let mid = (lo * hi).sqrt();
+            if test(&pair(1.0, 0.8, mid, 0.0, 0.02), Years::new(until)) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    };
+    let bound =
+        |input: &BinaryInput, until: Years| can_interact_with_tracks(input, until, tracks.clone());
+    let [p1, p10] = [1.0e9, 1.0e10].map(|u| boundary(u, &bound));
+    let [l1, l10] = [1.0e9, 1.0e10].map(|u| boundary(u, &lobe_reached));
+    eprintln!(
+        "1 + 0.8 M☉: the bound passes P₀ ≤ {p1:.3} d at 1 Gyr and ≤ {p10:.3} d at 10 Gyr (science \
+         check 0.64 and 1.22 d); the lobe test alone {l1:.3} and {l10:.3} d"
+    );
+    assert!((0.64..0.85).contains(&p1), "{p1} d at 1 Gyr");
+    assert!((1.22..1.8).contains(&p10), "{p10} d at 10 Gyr");
+    assert!(l1 < 0.5 * p1 && l10 < 0.5 * p10, "{l1} and {l10} d");
+}
+
+/// Finding F1 of ruling p11-channels (2026-10-06), the label: a white dwarf's birth that sheds
+/// enough at once to unbind the orbit leaves both stars, a disruption by the star that died, not a
+/// merger. Pair 0030 of the pinned thousand (8.18 + 2.36 M☉, 3,657 d, e 0.11, [Fe/H] 0): at
+/// 40.67 Myr the primary's super-AGB track goes through the post-AGB (1.37 M☉) to an oxygen–neon
+/// white dwarf, and its death sheds the envelope its progenitor still holds at once, through BSE
+/// appendix A1's instantaneous mass loss with no kick (ruling 129.4a), which unbinds the orbit. The
+/// physics, an adiabatic superwind instead, is left for its own ruling. (The ruling's own trace,
+/// 10.2 + 7.88 M☉ at 9,373 d, is now unbound earlier, by its pinned primary's collapse, which
+/// P11.T4.k's F7 applies.)
+#[test]
+fn a_white_dwarfs_birth_that_unbinds_the_orbit_disrupts_it() {
+    let input = pinned_sample_pair(30);
+    // As the pinned thousand runs it: the pre-test passes the pair by then (P11.T4.j's bound).
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let unbound = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() != SegmentKind::Detached)
+        .expect("the orbit is unbound");
+    assert_eq!(
+        unbound.kind(),
+        SegmentKind::Disrupted {
+            by: Component::Primary
+        },
+        "{}",
+        describe(&timeline)
+    );
+    let at = unbound.start().value();
+    assert!((at - 40.67e6).abs() < 1.0e4, "unbound at {at} yr");
+    let state = timeline.state_at(unbound.start());
+    assert_eq!(state.stars()[0].phase(), Phase::OxygenNeonWhiteDwarf);
+    assert!(
+        state.stars().iter().all(|s| s.phase() != Phase::NoRemnant) && state.orbit().is_none(),
+        "{}",
+        describe(&timeline)
+    );
+    assert!(timeline.supernovae().is_empty(), "{}", describe(&timeline));
+    assert!(timeline.merger_age().is_none());
+}
+
+/// A pair of `m1` and `m2` M☉ at `period_days` and `e`, of \[Fe/H\] `fe_h`, with each star's own
+/// draws (the `i`th system of a layer-A strip of cells): the pairs of ruling p11-channels' probe
+/// `bound_conservative` (section 1.2).
+fn drawn_pair(m1: f64, m2: f64, period_days: f64, e: f64, fe_h: f64, i: u32) -> BinaryInput {
+    use crate::Seed;
+    use crate::coords::{CellSize, GenCell};
+    use crate::id::{BodyId, Layer, SystemId};
+    use crate::units::{Dex, HeliumExcess};
+
+    let orbit = KeplerElements::from_period(
+        Seconds::new(period_days * 86_400.0),
+        GravitationalParameter::from_solar_masses(SolarMasses::new(m1 + m2)),
+        Eccentricity::new(e).expect("an eccentricity in [0, 1)"),
+        Orientation::new(Radians::new(0.3), Radians::new(0.1), Radians::new(0.2))
+            .expect("an orientation"),
+        Radians::new(1.0),
+    )
+    .expect("an orbit");
+    let x = i32::try_from(i % 4_000).expect("a small index") - 2_000;
+    let z = i32::try_from(i / 4_000).expect("a small index");
+    let cell = GenCell::new(CellSize::Ly8, [x, 9, z]).expect("a cell");
+    let system = SystemId::from_parts(Layer::A, cell, 0).expect("a system");
+    let draws = [0, 1].map(|k| StarDraws::for_star(Seed::new(0x0b1e_5eee), BodyId::new(system, k)));
+    BinaryInput::new(
+        SolarMasses::new(m1),
+        SolarMasses::new(m2),
+        Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO),
+        orbit,
+        draws,
+        Years::new(1.0e9),
+    )
+    .expect("a pair")
+}
+
+/// `exp(ln lo + x ln(hi ÷ lo))`: log-uniform on `lo`–`hi` at `x` in [0, 1).
+fn log_uniform(lo: f64, hi: f64, x: f64) -> f64 {
+    crate::math::exp(crate::math::ln(lo) + x * crate::math::ln(hi / lo))
+}
+
+/// The `n` pairs of sample `kind` of ruling p11-channels' check of the pre-test against the engine
+/// (section 1.2), each with the age it is run to, at \[Fe/H\] 0, −0.7 and −1.6 in turn:
+///
+/// - 0, enriched in the braking channel: 0.3–2.5 M☉ primaries, P 0.2–8 d (eccentric to 0.4 above
+///   2 d), ages 10⁷–1.38 × 10¹⁰ years, all log-uniform;
+/// - 1, the pinned sample's ranges: 0.8–40 M☉, 0.3–10⁴ d (eccentric to 0.7 above 5 d), ages
+///   10⁵–1.6 × 10¹⁰ years;
+/// - 2, giants near the drawn threshold: 1–40 M☉ at a periastron 0.98–1.6 times plan 08's
+///   [`interacting_periastron`](crate::galaxy::displaced::binarity::interacting_periastron),
+///   half of them eccentric to 0.5, run to 1.38 × 10¹⁰ years.
+///
+/// The companion takes a mass ratio uniform in 0.05–1, no lighter than 0.08 M☉.
+fn decay_sample(kind: u8, n: u32) -> Vec<(BinaryInput, Years)> {
+    let mut mix = Mix(0x0b1e_0c11 ^ u64::from(kind));
+    (0..n)
+        .map(|i| {
+            let fe_h = [0.0, -0.7, -1.6][usize::try_from(i % 3).expect("a small index")];
+            let (m1, m2, period, e, until) = match kind {
+                0 => {
+                    let m1 = log_uniform(0.3, 2.5, mix.next());
+                    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+                    let period = log_uniform(0.2, 8.0, mix.next());
+                    let e = if period > 2.0 { 0.4 * mix.next() } else { 0.0 };
+                    (m1, m2, period, e, log_uniform(1.0e7, 1.38e10, mix.next()))
+                }
+                1 => {
+                    let m1 = log_uniform(0.8, 40.0, mix.next());
+                    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+                    let period = log_uniform(0.3, 1.0e4, mix.next());
+                    let e = if period > 5.0 { 0.7 * mix.next() } else { 0.0 };
+                    let until = crate::math::exp10(5.0 + 5.2 * mix.next());
+                    (m1, m2, period, e, until)
+                }
+                _ => {
+                    use crate::galaxy::displaced::binarity::interacting_periastron;
+                    use crate::units::{Dex, HeliumExcess};
+                    let m1 = log_uniform(1.0, 40.0, mix.next());
+                    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+                    let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
+                    let threshold =
+                        interacting_periastron(SolarMasses::new(m1), m2 / m1, &comp).value();
+                    let factor = 0.98 + 0.62 * mix.next();
+                    let e = if mix.next() < 0.5 {
+                        0.0
+                    } else {
+                        0.5 * mix.next()
+                    };
+                    let a = threshold * factor / (1.0 - e);
+                    let gm = crate::units::consts::GM_SUN * (m1 + m2);
+                    let period = core::f64::consts::TAU * (a * a * a / gm).sqrt() / 86_400.0;
+                    (m1, m2, period, e, 1.38e10)
+                }
+            };
+            (drawn_pair(m1, m2, period, e, fe_h, i), Years::new(until))
+        })
+        .collect()
+}
+
+/// One sample's check of the pre-test against the engine run past it.
+#[derive(Debug, Clone, Default)]
+struct DecayTally {
+    pairs: u32,
+    /// Pairs the lobe test alone passes, the engine interacts, and the lobe test alone misses.
+    drawn: u32,
+    interacting: u32,
+    missed_by_drawn: u32,
+    /// Pairs the pre-test passes, misses, and passes that do not interact.
+    passes: u32,
+    missed: Vec<String>,
+    passes_without_interaction: u32,
+    /// Merged segments with both stars still present (finding F1): none.
+    merged_with_both: u32,
+    /// Pairs the pre-test passes at their age but not at 1.6 × 10¹⁰ years: none.
+    narrowed: u32,
+}
+
+impl DecayTally {
+    fn merge(&mut self, part: Self) {
+        self.pairs += part.pairs;
+        self.drawn += part.drawn;
+        self.interacting += part.interacting;
+        self.missed_by_drawn += part.missed_by_drawn;
+        self.passes += part.passes;
+        self.missed.extend(part.missed);
+        self.passes_without_interaction += part.passes_without_interaction;
+        self.merged_with_both += part.merged_with_both;
+        self.narrowed += part.narrowed;
+    }
+
+    /// Checks `input` run to `until`: the lobe test alone and the pre-test, on the stars' own
+    /// tracks built once, against the engine run past it.
+    fn check(&mut self, input: &BinaryInput, until: Years) {
+        use super::evolve::{
+            arrival, evolve_past_the_pre_test, interacts, largest_radii_rsun, own_members,
+            reaches_lobe,
+        };
+        let u = until.value();
+        let members = own_members(input, u, None);
+        let drawn =
+            arrival(&members, u) < u && reaches_lobe(input, largest_radii_rsun(input, &members, u));
+        let passes = interacts(input, &members, u);
+        self.narrowed += u32::from(passes && !can_interact(input, Years::new(1.6e10)));
+        let timeline = evolve_past_the_pre_test(input, until);
+        let interaction = interaction_before(&timeline, until);
+        self.pairs += 1;
+        self.drawn += u32::from(drawn);
+        self.passes += u32::from(passes);
+        self.merged_with_both += u32::try_from(
+            timeline
+                .segments()
+                .iter()
+                .filter(|s| s.kind() == SegmentKind::Merged && !one_star_left(&timeline, s))
+                .count(),
+        )
+        .expect("a few segments");
+        if let Some(segment) = interaction {
+            self.interacting += 1;
+            self.missed_by_drawn += u32::from(!drawn);
+            if !passes {
+                let [m1, m2] = input.masses().map(SolarMasses::value);
+                self.missed.push(format!(
+                    "{m1:.3} + {m2:.3} M☉ at {:.3} d, e {:.2}, to {u:.3e} yr: {:?} at {:.4e} yr",
+                    input.orbit().period().value() / 86_400.0,
+                    input.orbit().eccentricity().value(),
+                    segment.kind(),
+                    segment.start().value()
+                ));
+            }
+        } else if passes && !drawn {
+            self.passes_without_interaction += 1;
+        }
+    }
+}
+
+/// `check` over `items` in eight shares, share k taking the items k, k + 8, …, merged in share
+/// order: on threads of their own, or one after another on wasm32-wasip1, which has none.
+fn in_shares<I: Sync>(items: &[I], check: impl Fn(&mut DecayTally, &I) + Sync) -> DecayTally {
+    const SHARES: usize = 8;
+    let share = |k: usize| {
+        let mut part = DecayTally::default();
+        for item in items.iter().skip(k).step_by(SHARES) {
+            check(&mut part, item);
+        }
+        part
+    };
+    #[cfg(not(target_family = "wasm"))]
+    let parts: Vec<DecayTally> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..SHARES)
+            .map(|k| {
+                let share = &share;
+                scope.spawn(move || share(k))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a share's thread"))
+            .collect()
+    });
+    #[cfg(target_family = "wasm")]
+    let parts: Vec<DecayTally> = (0..SHARES).map(share).collect();
+    let mut total = DecayTally::default();
+    for part in parts {
+        total.merge(part);
+    }
+    total
+}
+
+/// P11.T4.j's gate (ruling p11-channels of 2026-10-06, section 3.3): over the three samples of the
+/// ruling's probe, 6,000 pairs each, every pair the pre-test passes over at its age shows no
+/// stable transfer, common envelope, contact or merger before it ([`interaction_before`]) when
+/// the engine runs it anyway. None is allowed. The lobe test alone missed 530, 36 and 160 of
+/// them (the braking channel, the pinned sample's ranges, giants' tidal captures). The passes that
+/// do not interact are recorded. No merger leaves both stars (finding F1), and every pair the
+/// pre-test passes at its age it passes at 1.6 × 10¹⁰ years too.
+#[test]
+#[ignore = "slow: 1.8 × 10⁴ binaries run through the engine"]
+fn the_decay_bound_never_passes_over_an_interaction() {
+    let mut missed = 0;
+    for kind in 0..3_u8 {
+        let sample = decay_sample(kind, 6_000);
+        let t = in_shares(&sample, |tally, (input, until)| tally.check(input, *until));
+        eprintln!(
+            "sample {kind}: {} pairs; the lobe test passes {}, the engine interacts in {}, the lobe \
+             test misses {}; the pre-test passes {}, misses {}, passes {} that do not interact",
+            t.pairs,
+            t.drawn,
+            t.interacting,
+            t.missed_by_drawn,
+            t.passes,
+            t.missed.len(),
+            t.passes_without_interaction,
+        );
+        for line in t.missed.iter().take(20) {
+            eprintln!("  missed: {line}");
+        }
+        assert_eq!(
+            t.merged_with_both, 0,
+            "sample {kind}: mergers leaving both stars"
+        );
+        assert_eq!(
+            t.narrowed, 0,
+            "sample {kind}: passes lost by 1.6 × 10¹⁰ years"
+        );
+        assert!(t.missed_by_drawn > 0, "sample {kind} tests the bound");
+        missed += t.missed.len();
+    }
+    assert_eq!(missed, 0, "interactions the pre-test passed over");
+}
+
+/// P11.T4.j: each term of the bound is the engine's, and goes with its [`BinaryParams`] switch.
+/// The braked 1.04 + 0.45 M☉ pair at 0.69 d passes at 2 Gyr only with magnetic braking and the
+/// tides that pass it to the orbit. A 0.3 + 0.3 M☉ pair at 0.2 d, below BSE's braking floor and
+/// inside its lobes on the drawn orbit, passes at 13.8 Gyr by gravitational radiation alone, which
+/// merges it in the engine at about 3.6 Gyr, and fails without it.
+#[test]
+fn the_bound_follows_the_engines_switches() {
+    let with = |params: BinaryParams| move |input: BinaryInput| input.with_params(params);
+    let generator = with(BinaryParams::GENERATOR);
+    let no_braking = with(BinaryParams {
+        magnetic_braking: false,
+        ..BinaryParams::GENERATOR
+    });
+    let no_tides = with(BinaryParams {
+        tides: false,
+        ..BinaryParams::GENERATOR
+    });
+    let no_radiation = with(BinaryParams {
+        gravitational_radiation: false,
+        ..BinaryParams::GENERATOR
+    });
+    let braked = || pair(1.04, 0.45, 0.69, 0.0, 0.02);
+    let at = Years::new(2.0e9);
+    assert!(can_interact(&generator(braked()), at));
+    assert!(can_interact(&no_radiation(braked()), at));
+    assert!(!can_interact(&no_braking(braked()), at), "without braking");
+    assert!(!can_interact(&no_tides(braked()), at), "without tides");
+    let dwarfs = || pair(0.3, 0.3, 0.2, 0.0, 0.02);
+    let until = Years::new(1.38e10);
+    assert!(!lobe_reached(&dwarfs(), until));
+    assert!(can_interact(&generator(dwarfs()), until));
+    assert!(can_interact(&no_tides(dwarfs()), until));
+    assert!(
+        !can_interact(&no_radiation(dwarfs()), until),
+        "without radiation"
+    );
+    let timeline = evolve(&dwarfs(), until);
+    let merger = timeline.merger_age().map(Years::value);
+    assert!(
+        merger.is_some_and(|age| (3.0e9..4.2e9).contains(&age)),
+        "{merger:?}:\n{}",
+        describe(&timeline)
+    );
+}
+
+/// P11.T4.j: a giant's tidal capture beyond the drawn threshold is run. A 2 + 0.2 M☉ pair at 1.2
+/// times plan 08's `interacting_periastron`, circular (P ≈ 2,000 d), never reaches a lobe on its
+/// drawn orbit, but the giant spins up at the orbit's expense (Darwin's instability) and engulfs
+/// its companion: a common envelope on the thermally pulsing asymptotic giant branch at about
+/// 1.50 Gyr, the orbit shrunk by tides before it. A run to 1.5 Gyr agrees with it
+/// ([`check_any_age`]).
+#[test]
+fn a_giants_tidal_capture_is_run() {
+    use crate::galaxy::displaced::binarity::interacting_periastron;
+
+    let (m1, q) = (2.0, 0.1);
+    let a = 1.2 * interacting_periastron(SolarMasses::new(m1), q, &Composition::SOLAR).value()
+        / crate::units::consts::SOLAR_RADIUS_M;
+    let input = pair(m1, m1 * q, period_days(m1, m1 * q, a), 0.0, 0.02);
+    let until = Years::new(1.38e10);
+    assert!(
+        !lobe_reached(&input, until),
+        "inside its lobe on the drawn orbit"
+    );
+    assert!(can_interact(&input, until));
+    let timeline = evolve(&input, until);
+    let stages = starts(&timeline);
+    let envelope = find(&stages, 0, |kind, _| *kind != SegmentKind::Detached)
+        .expect("the giant engulfs its companion");
+    let age = timeline.segments()[envelope].start().value();
+    assert_eq!(
+        stages[envelope].0,
+        SegmentKind::CommonEnvelope,
+        "{}",
+        describe(&timeline)
+    );
+    assert!((1.49e9..1.51e9).contains(&age), "at {age} yr");
+    // The envelope is a segment of no length: the giant is read just before it.
+    let before = timeline.state_at(Years::new(age * (1.0 - 1e-9)));
+    assert_eq!(
+        before.stars()[0].phase(),
+        Phase::ThermallyPulsingAgb,
+        "{}",
+        describe(&timeline)
+    );
+    let axis = before
+        .orbit()
+        .map_or(f64::INFINITY, |o| o.semi_major_axis().value());
+    let drawn = input.orbit().semi_major_axis().value();
+    assert!(
+        axis < drawn,
+        "the orbit shrinks before the envelope: {axis} m from {drawn} m"
+    );
+    assert_ne!(
+        check_any_age(&input, Years::new(1.5e9), until),
+        EarlierRun::MissedInteraction
+    );
+}
+
+/// The `i`th pair of the pinned thousand ([`pinned_pair`]).
+fn pinned_sample_pair(i: u32) -> BinaryInput {
+    let mut mix = Mix(0x0b1e_0001);
+    let mut input = pinned_pair(&mut mix, 0);
+    for k in 1..=i {
+        input = pinned_pair(&mut mix, k);
+    }
+    input
+}
+
+/// The primary's single-star model as plan 06 gives it, with the pair's own draws: its death,
+/// remnant and kick (design note 16's pin).
+fn plan_06_star(input: &BinaryInput) -> crate::stellar::system::StarModel {
+    crate::stellar::system::StarModel::new(
+        input.masses()[0],
+        *input.composition(),
+        input.draws()[0].clone(),
+        input.age_at_epoch(),
+    )
+    .expect("a star")
+}
+
+/// The segment of `timeline` that ends at `age` (years, to 10⁻⁹ of it) and has length.
+fn segment_ending_at(timeline: &BinaryTimeline, age: f64) -> &Segment {
+    timeline
+        .segments()
+        .iter()
+        .find(|s| {
+            (s.end().value() - age).abs() <= 1e-9 * age && s.end().value() > s.start().value()
+        })
+        .unwrap_or_else(|| panic!("a segment ends at {age} yr: {}", describe(timeline)))
+}
+
+/// P11.T4.k, the carried tie (ruling p11-t4k-faults, 2026-10-06, §2.2): pair 0446 of the pinned
+/// thousand (22.16 + 14.86 M☉, 147 d, e 0.04, Z = 0.0005). Its primary, which the binary carries
+/// on the pin's own track after its transfer, dies on that track exactly at its pin (9.8218 Myr).
+/// The pin wins the tie, and the star is read at its last living instant on its closed forms: an
+/// early-AGB star of 8.625 M☉, the mass the binary gives it there (the landing step's, as
+/// `Engine::die` reads a carried star's, equal to the path's at the last living instant to
+/// 10⁻¹²). It collapses to plan 06's 8.576 M☉ black hole, capped at that mass, kick-free and
+/// bound, and the orbit after is BSE appendix A1's for that mass before. Before T4.k the pin read
+/// the remnant the track shows at its death as nothing living, and wrote no record.
+#[test]
+fn a_carried_primary_collapses_at_its_pin() {
+    use super::star::Member;
+
+    let input = pinned_sample_pair(446);
+    let pin = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - pin).abs() <= 1e-9 * pin,
+        "{:?} against the pin at {pin} yr",
+        record.age()
+    );
+    let before = segment_ending_at(&timeline, pin);
+    let Member::Shaped {
+        track,
+        offset,
+        mass,
+    } = &before.members()[0]
+    else {
+        panic!("a carried primary before its pin: {}", describe(&timeline));
+    };
+    let death = offset + track.lifetime().expect("built to its death").value();
+    assert!(
+        (death - pin).abs() <= 1e-9 * pin,
+        "its own track dies at the pin"
+    );
+    let last = super::detached::last_living(pin);
+    let living = timeline.state_at(Years::new(last)).stars()[0];
+    assert_eq!(living.phase(), Phase::EarlyAgb);
+    let carried = mass.at(last);
+    assert!(
+        (living.mass().value() / carried - 1.0).abs() < 1e-12,
+        "{living:?} against the carried {carried} M☉"
+    );
+    // The engine's mass before is the landing step's carried mass, the path's at the pin, as
+    // `Engine::die` reads it: the path's at the last living instant, to the wind of 10⁻¹² of the
+    // age.
+    assert!(
+        (mass.last() / carried - 1.0).abs() < 1e-12,
+        "{} against {carried} M☉",
+        mass.last()
+    );
+    assert!((carried - 8.625).abs() < 1e-3, "{carried}");
+    let own = plan_06_star(&input).remnant().expect("a remnant");
+    let expected = if own.mass().value() > carried {
+        crate::stellar::remnant::CompactRemnant::new(own.kind(), SolarMasses::new(carried))
+    } else {
+        own
+    };
+    assert_eq!(record.remnant(), expected);
+    assert!(
+        (expected.mass().value() - 8.576).abs() < 1e-3,
+        "{expected:?}"
+    );
+    assert!(record.bound(), "{}", describe(&timeline));
+    assert!(kick_speed_m_s(&record) <= 0.0, "{:?}", record.kick());
+    // The orbit after is BSE appendix A1's for that mass before, kick-free on the circular orbit:
+    // a mass before off by 4 × 10⁻⁵ M☉ would move a′ by 10⁻⁶.
+    let shown = timeline.state_at(Years::new(last));
+    let (a0, e0) = axis_rsun_and_e(&shown).expect("bound before");
+    assert!(e0 < 1e-9, "circular before the collapse: e {e0}");
+    let companion = shown.stars()[1].mass().value();
+    let (a1, e1) = blaauw_orbit_rsun(a0, carried + companion, expected.mass().value() + companion)
+        .expect("less than half lost");
+    let (a, e) = axis_rsun_and_e(&timeline.state_at(Years::new(pin))).expect("bound after");
+    assert!((a / a1 - 1.0).abs() < 1e-6, "a {a} R☉ against A1's {a1}");
+    assert!((e - e1).abs() < 1e-6, "e {e} against A1's {e1}");
+}
+
+/// P11.T4.k, finding A (ruling p11-t4k-faults, 2026-10-06, §1.1): pair 0004 of the pinned thousand
+/// (34.94 + 19.76 M☉, 2,974 d, e 0.48, Z = 0.004). The pinned primary, a stable-transfer donor
+/// carried on its own track, dies on it exactly at its pin, 6.4576 Myr, on the transfer's last
+/// step. The step reads the dying donor inside its lobe as its remnant, but it lands on the pin, so
+/// the detachment test does not end it: the pin is acted on, a 14.13 M☉ black hole, bound, and the
+/// transfer ends with its donor. Before T4.k the "transfer is over" return came first and the pin
+/// was never seen again: no record.
+#[test]
+fn a_transfers_last_step_applies_the_pin() {
+    let input = pinned_sample_pair(4);
+    let pin = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - pin).abs() <= 1e-9 * pin,
+        "{:?} against the pin at {pin} yr",
+        record.age()
+    );
+    assert!((pin - 6.4576e6).abs() < 1.0e2, "{pin}");
+    assert_eq!(
+        segment_ending_at(&timeline, pin).kind(),
+        SegmentKind::StableTransfer {
+            donor: Component::Primary
+        }
+    );
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::BlackHole
+    );
+    assert!(
+        (record.remnant().mass().value() - 14.130).abs() < 1e-3,
+        "{:?}",
+        record.remnant()
+    );
+    assert!(record.bound(), "{}", describe(&timeline));
+    let after = timeline.state_at(Years::new(pin));
+    assert!(
+        !matches!(after.kind(), SegmentKind::StableTransfer { .. }),
+        "the transfer ends with its donor: {}",
+        describe(&timeline)
+    );
+}
+
+/// P11.T4.k, finding A: pair 0741 of the pinned thousand (14.10 + 13.53 M☉, 72.1 d, e 0.61, [Fe/H]
+/// 0). After its common envelope at 17.508 Myr the companion is a helium star, which transfers onto
+/// the primary's 2.84 M☉ black hole from 18.6279 Myr (case BB, ruling 129.4b) and dies in that
+/// transfer at 18.6316 Myr, as Tauris, Langer and Podsiadlowski (2015) find most such donors do.
+/// The transfer's last step lands on the death and acts on it: a 1.411 M☉ neutron star, bound
+/// beside the black hole. No merger follows. Before T4.k the death was never seen, the dead donor
+/// was read past its death on its closed forms, and the pair showed a merger at 985.7 Myr.
+#[test]
+fn a_transfers_last_step_applies_the_death() {
+    let input = pinned_sample_pair(741);
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let record = *timeline
+        .supernovae()
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .unwrap_or_else(|| panic!("the companion's collapse: {}", describe(&timeline)));
+    let death = record.age().value();
+    assert!((death - 18.6316e6).abs() < 1.0e2, "{death}");
+    assert_eq!(
+        segment_ending_at(&timeline, death).kind(),
+        SegmentKind::StableTransfer {
+            donor: Component::Secondary
+        }
+    );
+    let before = timeline.state_at(Years::new(super::detached::last_living(death)));
+    assert!(
+        matches!(
+            before.stars()[1].phase(),
+            Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+        ),
+        "a helium-star donor (case BB): {:?}",
+        before.stars()[1]
+    );
+    assert_eq!(before.stars()[0].phase(), Phase::BlackHole);
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::NeutronStar
+    );
+    assert!(
+        (record.remnant().mass().value() - 1.411).abs() < 1e-3,
+        "{:?}",
+        record.remnant()
+    );
+    assert!(record.bound(), "{}", describe(&timeline));
+    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
+}
+
+/// P11.T4.k, finding C (ruling p11-t4k-faults, 2026-10-06, §1.2): pair 0277 of the pinned thousand
+/// (7.68 + 3.88 M☉, 0.674 d, Z = 0.004). After its Case A transfer the pair is in contact from
+/// 19.67 Myr, and its primary, kept on its main sequence by the mass it lost, is still there at
+/// plan 06's death, 46.831 Myr. The contact's knots stop at the pin, and the primary collapses
+/// from its main sequence (design note 16): a 1.188 M☉ neutron star, which the kick unbinds. A run
+/// to 30 Myr, inside the contact and before the pin, records nothing, stays in contact, and is the
+/// full run's to 30 Myr bit for bit, as runs to 46 and 46.9 Myr are, just before the pin and just
+/// past it. Before T4.k the contact ran to its coalescence at 47.51 Myr,
+/// past the pin, and the merger's product died at 69.05 Myr.
+#[test]
+fn a_contact_stops_at_the_pin() {
+    let input = pinned_sample_pair(277);
+    let pin = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
+    assert!((pin - 46.831e6).abs() < 1.0e3, "{pin}");
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - pin).abs() <= 1e-9 * pin,
+        "{:?} against the pin at {pin} yr",
+        record.age()
+    );
+    assert_eq!(
+        segment_ending_at(&timeline, pin).kind(),
+        SegmentKind::Contact
+    );
+    let before = timeline.state_at(Years::new(super::detached::last_living(pin)));
+    assert_eq!(before.stars()[0].phase(), Phase::MainSequence);
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::NeutronStar
+    );
+    assert!(
+        (record.remnant().mass().value() - 1.188).abs() < 1e-3,
+        "{:?}",
+        record.remnant()
+    );
+    assert!(!record.bound(), "{}", describe(&timeline));
+    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
+    let early = Years::new(3.0e7);
+    let short = evolve(&input, early);
+    assert!(short.supernovae().is_empty(), "{}", describe(&short));
+    assert_eq!(
+        short.segments().last().map(Segment::kind),
+        Some(SegmentKind::Contact)
+    );
+    // The build-age contract either side of the pin: at 46 Myr, after the contact's last knot
+    // before the pin (45.8 Myr), whose next knot is clamped to the pin past that age; and at
+    // 46.9 Myr, past the collapse.
+    for until in [early, Years::new(4.6e7), Years::new(4.69e7)] {
+        assert_eq!(
+            check_any_age(&input, until, Years::new(1.2e10)),
+            EarlierRun::Same,
+            "to {until:?}"
+        );
+    }
+}
+
+/// The 17 + 12 M☉ pair at 3,300 R☉ ([Fe/H] 0, median draws) without natal kicks, and its pin's
+/// age, years.
+fn untouched_pinned_pair() -> (BinaryInput, f64) {
+    let (m1, m2) = (17.0, 12.0);
+    let input = pair(m1, m2, period_days(m1, m2, 3_300.0), 0.0, 0.02).with_params(BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    });
+    let pin = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
+    (input, pin)
+}
+
+/// An engine for `input`, started at `age_years` on a circular orbit of `a_rsun`, with its primary
+/// on the pin's own track and the pin still pending.
+fn engine_with_its_pin(input: &BinaryInput, age_years: f64, a_rsun: f64) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit, own_members, pinned_track_and_pin};
+    use super::timeline::Context;
+
+    let until = 5.0e7;
+    let (track, pin) = pinned_track_and_pin(input).expect("a pinned primary");
+    let orbit = LiveOrbit::new(
+        age_years,
+        a_rsun,
+        0.0,
+        *input.orbit().orientation(),
+        input.orbit().mean_anomaly_at_epoch(),
+    );
+    Engine::new(
+        Arc::new(Context::of(input)),
+        age_years,
+        until,
+        own_members(input, until, Some(track)),
+        orbit,
+        Some(pin),
+    )
+}
+
+/// P11.T4.k's backstop (ruling p11-t4k-faults, 2026-10-06, §2.1): a pin still pending at the
+/// engine's age, as a phase's exit before its stop leaves it (T4.g's strip winning the step that
+/// lands on the pin), is acted on before the next phase: an engine started at the pin, on the
+/// 17 + 12 M☉ pair's 4,396 R☉ orbit, records the primary's collapse there once, with plan 06's
+/// remnant.
+#[test]
+fn a_pin_due_at_the_engines_age_is_applied() {
+    let (input, at) = untouched_pinned_pair();
+    let mut engine = engine_with_its_pin(&input, at, 4_396.0);
+    let pin = engine.pin.expect("pending");
+    engine.run();
+    let timeline = engine.finish();
+    let records: Vec<_> = timeline
+        .supernovae()
+        .iter()
+        .filter(|s| s.component() == Component::Primary)
+        .collect();
+    assert_eq!(records.len(), 1, "{}", describe(&timeline));
+    assert!(
+        (records[0].age().value() - at).abs() <= 1e-9 * at,
+        "{:?} against the pin at {at} yr",
+        records[0].age()
+    );
+    assert_eq!(records[0].remnant(), pin.remnant);
+}
+
+/// P11.T4.k's backstop: no phase passes a pin it has not acted on. An engine started past its
+/// pin, which no phase can reach again, fails the debug assertion.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "lies behind the engine")]
+fn a_pin_left_behind_is_a_fault() {
+    let (input, at) = untouched_pinned_pair();
+    let mut engine = engine_with_its_pin(&input, at + 1.0e3, 4_396.0);
+    engine.run();
+}
+
+/// P11.T4.k, finding A's correction (ruling p11-t4k-faults, 2026-10-06, §2.1): a transfer whose
+/// donor a death or the pin has left with nothing living ends there, the pair going on as
+/// `quiet_kind` decides, here detached on its orbit; a living donor's transfer goes on.
+#[test]
+fn a_transfer_without_a_living_donor_ends() {
+    use super::star::{Member, Path};
+
+    let (input, at) = untouched_pinned_pair();
+    let mut engine = engine_with_its_pin(&input, 0.5 * at, 4_396.0);
+    let transfer = SegmentKind::StableTransfer {
+        donor: Component::Primary,
+    };
+    engine.kind = transfer;
+    engine.end_without_a_living_donor(0);
+    assert_eq!(engine.kind, transfer, "a living donor's transfer goes on");
+    engine.members[0] = Member::Remnant {
+        phase: Phase::NeutronStar,
+        birth: engine.age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(engine.age, 1.4),
+    };
+    engine.end_without_a_living_donor(0);
+    assert_eq!(engine.kind, SegmentKind::Detached);
 }

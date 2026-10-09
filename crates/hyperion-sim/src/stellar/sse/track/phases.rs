@@ -27,12 +27,39 @@ use super::super::hg::HertzsprungGap;
 use super::super::m_c_bagb;
 use super::super::ms::{self, MainSequence};
 use super::build::{
-    Builder, Ending, Entry, EnvelopeLaws, FLASH_YEARS, FractionBuilt, Keep, Step,
-    segment_coordinate,
+    Builder, Ending, Entry, EnvelopeLaws, FLASH_YEARS, FractionBuilt, IntegrateEnvelopeError, Keep,
+    Step, segment_coordinate,
 };
 use super::model::{HeliumCore, Model, Span};
 use super::post_agb::{self, PostAgb};
-use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment};
+use super::{Bridges, Coordinate, Fate, IronCore, Junction, Segment, ZCoeffs};
+
+/// The arrival on the zero-age main sequence of a star of `m0` M☉ under `coeffs`, years since its
+/// onset of collapse: `t_zams` (P06.T15.b), at HPT's zero-age main sequence.
+#[must_use]
+fn arrival_years(m0: f64, coeffs: &ZCoeffs) -> f64 {
+    let zams = MainSequence::new(SolarMasses::new(m0), coeffs).at(Megayears::ZERO);
+    premain::arrival_years(m0, zams.luminosity.value(), zams.radius.value())
+}
+
+/// The age, years since its onset of collapse, at which a hydrogen star of `m0` M☉ under
+/// `coeffs` and `bridges` starts its main sequence, without building anything.
+///
+/// It is the first of [`Builder::main_sequence_start`]'s three, which takes it from here. A track
+/// built short of its main sequence reads it here (`Track::main_sequence_arrival`, for plan 11's
+/// engine).
+#[must_use]
+pub(super) fn main_sequence_start_years(m0: f64, coeffs: &ZCoeffs, bridges: Bridges) -> f64 {
+    if bridges == Bridges::Instant {
+        return 0.0;
+    }
+    let arrival = arrival_years(m0, coeffs);
+    if arrival > PROTOSTAR_YEARS {
+        arrival
+    } else {
+        PROTOSTAR_YEARS
+    }
+}
 
 impl Builder<'_> {
     // ---------------------------------------------------------------------------------------------
@@ -67,16 +94,16 @@ impl Builder<'_> {
     /// at age zero: the track has neither stage before it (P06.T12.b compares so).
     #[must_use]
     pub(super) fn main_sequence_start(&self, m0: f64) -> (f64, f64, f64) {
+        let start = main_sequence_start_years(m0, self.phys.coeffs, self.options.bridges());
         if self.options.bridges() == Bridges::Instant {
-            return (0.0, 0.0, 0.0);
+            return (start, 0.0, 0.0);
         }
-        let zams = MainSequence::new(SolarMasses::new(m0), self.phys.coeffs).at(Megayears::ZERO);
-        let arrival = premain::arrival_years(m0, zams.luminosity.value(), zams.radius.value());
+        let arrival = arrival_years(m0, self.phys.coeffs);
         if arrival > PROTOSTAR_YEARS {
-            (arrival, 0.0, arrival)
+            (start, 0.0, arrival)
         } else {
             let tau0 = (PROTOSTAR_YEARS - arrival) / (self.ms_lifetime_myr(m0) * 1e6);
-            (PROTOSTAR_YEARS, tau0.min(MAX_ACCRETING_TAU), arrival)
+            (start, tau0.min(MAX_ACCRETING_TAU), arrival)
         }
     }
 
@@ -227,13 +254,17 @@ impl Builder<'_> {
     }
 
     /// The Hertzsprung gap of a star of initial mass `m0` and mass `mass`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::envelope_segment`].
     pub(super) fn hertzsprung_gap(
         &self,
         start: f64,
         m0: f64,
         mass: f64,
         previous: Option<[f64; 3]>,
-    ) -> Step {
+    ) -> Result<Step, IntegrateEnvelopeError> {
         let c = self.phys.coeffs;
         let initial = SolarMasses::new(m0);
         let gap = HertzsprungGap::new(initial, c);
@@ -260,7 +291,7 @@ impl Builder<'_> {
                 core_in_point: false,
             },
             None,
-        );
+        )?;
         let next = match built.ending {
             Ending::Nominal if m0 < c.m_fgb().value() => Entry::FirstGiantBranch {
                 m0,
@@ -274,17 +305,21 @@ impl Builder<'_> {
                 self.giant_stripped(core, built.end, core_mass(built.end).min(built.end_mass))
             }
         };
-        self.finish(built.segment, built.end, next, previous)
+        Ok(self.finish(built.segment, built.end, next, previous))
     }
 
     /// The first giant branch of a star of initial mass `m0` below `M_FGB` and mass `mass`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::envelope_segment`].
     pub(super) fn giant_branch(
         &self,
         start: f64,
         m0: f64,
         mass: f64,
         previous: Option<[f64; 3]>,
-    ) -> Step {
+    ) -> Result<Step, IntegrateEnvelopeError> {
         let c = self.phys.coeffs;
         let initial = SolarMasses::new(m0);
         let branch = FirstGiantBranch::new(initial, c);
@@ -332,7 +367,7 @@ impl Builder<'_> {
                 core_in_point: true,
             },
             None,
-        );
+        )?;
         let next = match (built.ending, core) {
             (Ending::Nominal, HeliumCore::Degenerate) => Entry::Flash {
                 mass: built.end_mass,
@@ -345,7 +380,7 @@ impl Builder<'_> {
                 self.giant_stripped(core, built.end, core_mass(built.end).min(built.end_mass))
             }
         };
-        self.finish(built.segment, built.end, next, previous)
+        Ok(self.finish(built.segment, built.end, next, previous))
     }
 
     /// A Hertzsprung-gap or giant-branch star that has lost its envelope at `age`, leaving its
@@ -425,13 +460,17 @@ impl Builder<'_> {
     }
 
     /// Core helium burning of a star of initial mass `m0` and mass `mass`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::envelope_segment`].
     pub(super) fn core_helium_burning(
         &self,
         start: f64,
         m0: f64,
         mass: f64,
         previous: Option<[f64; 3]>,
-    ) -> Step {
+    ) -> Result<Step, IntegrateEnvelopeError> {
         let phase = CoreHeliumBurning::new(SolarMasses::new(m0), self.phys.coeffs);
         let span = Span::new(phase.t_start(), phase.t_end());
         let core_mass = {
@@ -459,7 +498,7 @@ impl Builder<'_> {
                 core_in_point: false,
             },
             None,
-        );
+        )?;
         let next = match built.ending {
             Ending::Nominal => Entry::EarlyAgb {
                 m0,
@@ -471,17 +510,21 @@ impl Builder<'_> {
                 tau0: segment_coordinate(start, span, built.end),
             },
         };
-        self.finish(built.segment, built.end, next, previous)
+        Ok(self.finish(built.segment, built.end, next, previous))
     }
 
     /// The early AGB of a star of initial mass `m0` and mass `mass`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::envelope_segment`].
     pub(super) fn early_agb(
         &self,
         start: f64,
         m0: f64,
         mass: f64,
         previous: Option<[f64; 3]>,
-    ) -> Step {
+    ) -> Result<Step, IntegrateEnvelopeError> {
         let phase = EarlyAgb::new(SolarMasses::new(m0), self.phys.coeffs);
         let mc_bagb = phase.mc_bagb().value();
         // An oxygen–neon core that would pass the white dwarf's cap before the thermal pulses
@@ -497,7 +540,7 @@ impl Builder<'_> {
         );
         if span.years() <= 0.0 {
             // The carbon–oxygen core is at `Mc,SN` already (HPT equation 75, 40–80 M☉).
-            return self.early_agb_end(&phase, start, m0, mass, None, previous);
+            return Ok(self.early_agb_end(&phase, start, m0, mass, None, previous));
         }
         let progress = {
             let phase = phase.clone();
@@ -528,8 +571,8 @@ impl Builder<'_> {
                 core_in_point: false,
             },
             None,
-        );
-        match built.ending {
+        )?;
+        Ok(match built.ending {
             Ending::Nominal if let Some(cap) = cap => {
                 // The core reaches the cap at the span's end, to rounding.
                 let core = cap.min(built.end_mass);
@@ -566,7 +609,7 @@ impl Builder<'_> {
                 };
                 self.finish(built.segment, built.end, next, previous)
             }
-        }
+        })
     }
 
     /// What follows the early AGB's nominal end at `age` of a star of initial mass `m0`, with
@@ -617,6 +660,10 @@ impl Builder<'_> {
     /// [`PULSING_KNOTS`](super::build::PULSING_KNOTS) knots: it ends when the envelope is gone (a
     /// white dwarf) or the core reaches `Mc,SN` first. Each knot carries the thermal pulses since
     /// the phase began.
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::envelope_segment`].
     pub(super) fn pulsing_agb(
         &self,
         start: f64,
@@ -625,7 +672,7 @@ impl Builder<'_> {
         mc_bagb: f64,
         mass: f64,
         previous: Option<[f64; 3]>,
-    ) -> Step {
+    ) -> Result<Step, IntegrateEnvelopeError> {
         let mc_du = phase.mc_du().value();
         // An oxygen–neon core ends the pulses at the white dwarf's cap if it reaches it before
         // `Mc,SN` ([`Builder::oxygen_neon_cap`]).
@@ -640,7 +687,7 @@ impl Builder<'_> {
             }),
         );
         if span.years() <= 0.0 || mass <= mc_du {
-            return self.pulsing_agb_end(start, m0, mc_bagb, mc_du, mass, None, previous);
+            return Ok(self.pulsing_agb_end(start, m0, mc_bagb, mc_du, mass, None, previous));
         }
         let core_mass = |age: f64| {
             phase
@@ -669,10 +716,10 @@ impl Builder<'_> {
                 core_in_point: true,
             },
             Some(&period),
-        );
+        )?;
         let end = built.end;
         let mc = core_mass(end);
-        match (built.ending, phase.end()) {
+        Ok(match (built.ending, phase.end()) {
             (Ending::Nominal, CoreEnd::Supernova) if let Some(cap) = cap => {
                 // The core reaches the cap at the span's end, to rounding.
                 let core = cap.min(built.end_mass);
@@ -713,7 +760,7 @@ impl Builder<'_> {
                 );
                 self.agb_end(built.segment, end, white_dwarf, previous)
             }
-        }
+        })
     }
 
     /// The thermally pulsing AGB's end at `age` where the core of `mc` reaches `Mc,SN` with `mass`
@@ -821,6 +868,10 @@ impl Builder<'_> {
     /// A naked helium star after its main sequence, from its clock `clock0`, with `mass`: its
     /// carbon–oxygen core grows until it reaches the core limit at the current mass
     /// ([`HeliumStar::core_limit`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Builder::envelope_segment`].
     pub(super) fn helium_shell_burning(
         &self,
         start: f64,
@@ -828,11 +879,11 @@ impl Builder<'_> {
         clock0: Megayears,
         mass: f64,
         previous: Option<[f64; 3]>,
-    ) -> Step {
+    ) -> Result<Step, IntegrateEnvelopeError> {
         let span = Span::new(clock0, star.t_end());
         if span.years() <= 0.0 {
             let mc = star.core_limit(SolarMasses::new(mass)).value();
-            return self.helium_star_end(start, star, mc.min(mass), mass, None, previous);
+            return Ok(self.helium_star_end(start, star, mc.min(mass), mass, None, previous));
         }
         let core_mass = {
             let star = star.clone();
@@ -866,9 +917,9 @@ impl Builder<'_> {
                 core_in_point: false,
             },
             None,
-        );
+        )?;
         let mc = core_mass(built.end).min(limit(built.end_mass));
-        self.helium_star_end(built.end, star, mc, built.end_mass, built.segment, previous)
+        Ok(self.helium_star_end(built.end, star, mc, built.end_mass, built.segment, previous))
     }
 
     /// The end at `age` of a helium star whose core has reached its limit `mc`, with `mass` left:

@@ -15,7 +15,8 @@ import { localFrameAt, planeFrame } from "../geometry/frame";
 import type { PointMark, SpatialScene } from "./marks";
 import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
-import { add, scale, vec3 } from "../geometry/vec3";
+import { textSizeRem } from "./labels";
+import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 
@@ -253,12 +254,18 @@ function markAt(angles: CameraAngles, pxPerUnit = FITTED_PX_PER_LY): unknown[] {
   return [expect.closeTo(projected.xPx, 9), expect.closeTo(projected.yPx, 9)];
 }
 
-/** The centre of the default mark's symbol (5.25 px in radius) as last painted. */
+/**
+ * The default mark's symbol's radius as painted at jsdom's ratio of 1: 5.25 px, moved out 0.25 px
+ * by its outline's shift (R07.T16.f).
+ */
+const MARK_ARC_PX = 5.5;
+
+/** The centre of the default mark's symbol as last painted. */
 function markCentre(recorder: RecordingContext2D): ReadonlyArray<unknown> {
   return (
     recorder
       .calls("arc")
-      .findLast(({ args }) => args[2] === 5.25)
+      .findLast(({ args }) => args[2] === MARK_ARC_PX)
       ?.args.slice(0, 2) ?? []
   );
 }
@@ -267,7 +274,7 @@ function markCentre(recorder: RecordingContext2D): ReadonlyArray<unknown> {
 function edgeRadius(recorder: RecordingContext2D): unknown {
   return recorder
     .calls("arc")
-    .findLast(({ args }) => args[0] === 200 && args[1] === 150 && args[2] !== 5.25)?.args[2];
+    .findLast(({ args }) => args[0] === 200 && args[1] === 150 && args[2] !== MARK_ARC_PX)?.args[2];
 }
 
 /** Lets the frame that input asked for run. */
@@ -1655,6 +1662,264 @@ function Selecting({ destinationId }: SelectingProps) {
   return viewOf({ scene: aScene({ selectedId, destinationId }), onSelect: setSelectedId });
 }
 
+/**
+ * The places of the marks about a mark that the last paint drew, in order, CSS px: a bracket's
+ * half-size, half the span of its first two corners; or the destination's chevrons' apex distance,
+ * half the span of the upper and lower apices, each its subpath's first `lineTo`.
+ */
+function reticlePlaces(recorder: RecordingContext2D): Array<{ stroke: string; placePx: number }> {
+  const places: Array<{ stroke: string; placePx: number }> = [];
+  const records = recorder.records;
+  const lastClear = records.findLastIndex(
+    (record) => record.type === "call" && record.name === "fillRect",
+  );
+  let stroke = "";
+  let moves: number[] = [];
+  let apices: number[] = [];
+  for (const record of records.slice(lastClear)) {
+    if (record.type === "set" && record.name === "strokeStyle") {
+      stroke = String(record.value);
+    } else if (record.type === "call" && record.name === "beginPath") {
+      moves = [];
+      apices = [];
+    } else if (record.type === "call" && record.name === "moveTo") {
+      moves.push(Number(record.args[0]));
+    } else if (record.type === "call" && record.name === "lineTo" && apices.length < moves.length) {
+      apices.push(Number(record.args[1]));
+    } else if (record.type === "call" && record.name === "stroke" && moves.length === 4) {
+      places.push({
+        stroke,
+        placePx:
+          stroke === "#e879f9"
+            ? ((apices[1] ?? 0) - (apices[0] ?? 0)) / 2
+            : ((moves[1] ?? 0) - (moves[0] ?? 0)) / 2,
+      });
+    }
+  }
+  return places;
+}
+
+/**
+ * The highest point the last paint traced for the destination's chevrons, CSS px: the upper
+ * chevron's arm ends. The chevrons are one path of four subpaths, above, below, left and right.
+ */
+function chevronsTopPx(recorder: RecordingContext2D): number {
+  const records = recorder.records;
+  const lastClear = records.findLastIndex(
+    (record) => record.type === "call" && record.name === "fillRect",
+  );
+  let stroke = "";
+  let subpaths: number[][] = [];
+  let top = Number.NaN;
+  for (const record of records.slice(lastClear)) {
+    if (record.type === "set" && record.name === "strokeStyle") {
+      stroke = String(record.value);
+    } else if (record.type === "call" && record.name === "beginPath") {
+      subpaths = [];
+    } else if (record.type === "call" && record.name === "moveTo") {
+      subpaths.push([Number(record.args[1])]);
+    } else if (record.type === "call" && record.name === "lineTo") {
+      subpaths.at(-1)?.push(Number(record.args[1]));
+    } else if (record.type === "call" && record.name === "stroke" && stroke === "#e879f9") {
+      top = Math.min(...subpaths.flat());
+    }
+  }
+  return top;
+}
+
+/** Mark "a"'s label's place, CSS px from the view's top left, in a view of the scene with `overrides`. */
+function labelPlaceIn(overrides: Partial<SpatialScene>): [number, number] {
+  const { unmount } = renderView({ scene: aScene(overrides) });
+  const place: [number, number] = [labelLeftPx("A"), labelTopPx("A")];
+  unmount();
+  return place;
+}
+
+/** A label's left edge, CSS px, from its transform in `rem` at a rem of 16 px. */
+function labelLeftPx(text: string): number {
+  const transform = screen.getByText(text).style.transform;
+  return 16 * Number(/^translate\(([-\d.e]+)rem/u.exec(transform)?.[1]);
+}
+
+/** A label's top edge, CSS px, from its transform in `rem` at a rem of 16 px. */
+function labelTopPx(text: string): number {
+  const transform = screen.getByText(text).style.transform;
+  return 16 * Number(/, ([-\d.e]+)rem\)$/u.exec(transform)?.[1]);
+}
+
+describe("SpatialView at the display's ratio (R07.T16.f)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("stands the destination's chevrons the least gap outside the bracket, selected or not: 5.12 px at 0.78125", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+    const { recorder, unmount } = renderView({
+      scene: aScene({ selectedId: "a", destinationId: "a" }),
+    });
+    const [bracket, destination] = reticlePlaces(recorder);
+    unmount();
+    const lone = renderView({ scene: aScene({ destinationId: "a" }) });
+
+    expect([
+      bracket?.stroke,
+      destination?.stroke,
+      Math.round(((destination?.placePx ?? 0) - (bracket?.placePx ?? 0)) * 100) / 100,
+      reticlePlaces(lone.recorder),
+    ]).toEqual(["#5cc8e6", "#e879f9", 5.12, [destination]]);
+  });
+
+  it("never moves a mark's label when it is selected or deselected, the destination or not", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+
+    expect([
+      labelPlaceIn({ selectedId: "a" }),
+      labelPlaceIn({ selectedId: "a", destinationId: "a" }),
+    ]).toEqual([labelPlaceIn({}), labelPlaceIn({ destinationId: "a" })]);
+  });
+
+  it("keeps the destination's label beside the bracket", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+    const [besideLeftPx] = labelPlaceIn({});
+    renderView({ scene: aScene({ destinationId: "a" }) });
+
+    expect(labelLeftPx("A")).toBe(besideLeftPx);
+  });
+
+  it("stands the destination's label 0.25 rem above its painted chevrons' ink", () => {
+    vi.stubGlobal("devicePixelRatio", 0.78125);
+    const { recorder } = renderView({ scene: aScene({ destinationId: "a" }) });
+
+    // The upper chevron's arm ends, less half its 2.56 CSS px stroke at this ratio, less the label's
+    // bottom edge, its top and one line of 1.25 × 0.875 rem: 0.25 rem at a rem of 16 px.
+    expect(chevronsTopPx(recorder) - 2.56 / 2 - (labelTopPx("A") + 17.5)).toBeCloseTo(4, 6);
+  });
+
+  it("stands a mark's label the bracket's growth further out at 1 than at 2: 1.25 px", () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    const { unmount } = renderView({ scene: aScene({ selectedId: "a" }) });
+    const atTwo = labelLeftPx("A");
+    unmount();
+    vi.stubGlobal("devicePixelRatio", 1);
+    renderView({ scene: aScene({ selectedId: "a" }) });
+
+    expect(labelLeftPx("A") - atTwo).toBeCloseTo(1.25, 9);
+  });
+});
+
+/** The default camera's scale in a 1200 × 900 stage: the fit radius of 50 in its shorter side, 2 rem in. */
+const FIT_PX_PER_UNIT = (450 - 32) / 50;
+
+/** The point on the reference plane that the default camera, `OBLIQUE` at the fit, draws at a place. */
+function onPlaneAt(xPx: number, yPx: number) {
+  const basis = viewBasis(FRAME, PRESETS.oblique);
+  const across = (xPx - 600) / FIT_PX_PER_UNIT;
+  const up = (450 - yPx) / FIT_PX_PER_UNIT;
+  const rc = dot(FRAME.coreward, basis.right);
+  const rs = dot(FRAME.spinward, basis.right);
+  const uc = dot(FRAME.coreward, basis.up);
+  const us = dot(FRAME.spinward, basis.up);
+  const det = rc * us - rs * uc;
+  return add(
+    scale(FRAME.coreward, (across * us - rs * up) / det),
+    scale(FRAME.spinward, (rc * up - across * uc) / det),
+  );
+}
+
+/** Where the default camera draws a point, CSS px. */
+function drawnAt(position: Vec3) {
+  return project(
+    position,
+    viewBasis(FRAME, PRESETS.oblique),
+    { ...PRESETS.oblique, pxPerUnit: FIT_PX_PER_UNIT },
+    { widthPx: 1200, heightPx: 900, remPx: 16 },
+  );
+}
+
+describe("SpatialView's furniture text clear of the marks (R07.T16.j)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("gives the curve labels the marks' symbols to keep clear of: a ring's label leaves a mark on its first place", () => {
+    // The plane ring's label would stand from 8 px right of and 4 px below its coreward point; a
+    // mark on the plane sits 30 px right of and 12 px below it.
+    const ring = drawnAt(scale(FRAME.coreward, 20));
+    const at = onPlaneAt(ring.xPx + 30, ring.yPx + 12);
+    renderView({
+      scene: aScene({
+        points: [aMark("m", { position: at })],
+        plane: { spacing: 20, extent: 50, rings: [{ radius: 20, label: "PLANE 20 ly" }] },
+      }),
+    });
+    const [leftRem = Number.NaN, topRem = Number.NaN] = (
+      /^translate\(([-\d.e]+)rem, ([-\d.e]+)rem\)$/u.exec(placement(overlayLabel("PLANE 20 ly"))) ??
+      []
+    )
+      .slice(1)
+      .map(Number);
+    const size = textSizeRem("PLANE 20 ly", 0.1);
+    const box = {
+      leftPx: 16 * leftRem,
+      topPx: 16 * topRem,
+      widthPx: size.widthRem * 16,
+      heightPx: size.heightRem * 16,
+    };
+    const mark = drawnAt(at);
+    // The class-2 symbol's outline reaches 6.5 px from its centre at a ratio of 1.
+    const gapPx = Math.hypot(
+      Math.max(0, box.leftPx - mark.xPx, mark.xPx - box.leftPx - box.widthPx),
+      Math.max(0, box.topPx - mark.yPx, mark.yPx - box.topPx - box.heightPx),
+    );
+
+    const atFirstPlace =
+      Math.abs(box.leftPx - ring.xPx - 8) < 1e-6 && Math.abs(box.topPx - ring.yPx - 4) < 1e-6;
+
+    expect([atFirstPlace, gapPx >= 6.5 + 2 - 1e-6]).toEqual([false, true]);
+  });
+
+  it.each([
+    ["0.375 rem below the query edge's is not drawn", 40.75, false],
+    ["0.625 rem below it is drawn", 44.75, true],
+  ] as const)(
+    "gives the marks' labels the curve labels to stand 0.5 rem from: a label %s",
+    (_, yPx, drawn) => {
+      // The query edge's label stands above the top of its circle, at (600, 32), from 608 px across
+      // and 8.5 to 26 px down; a mark's label at its right, from 610 px across, centred on it.
+      renderView({ scene: aScene({ points: [aMark("m", { position: onPlaneAt(594, yPx) })] }) });
+
+      expect(screen.queryByText("M") !== null).toBe(drawn);
+    },
+  );
+
+  it("keeps the destination's label where it was on selecting a mark outside the eight labelled, and flips the selection's", () => {
+    // Eight marks of higher priority along the foot of the view; the selection, of the lowest, 20 px
+    // left of and 50 px above the destination, its long label at the right running into the
+    // destination's at the upper right.
+    const heavy = Array.from({ length: 8 }, (_, index) =>
+      aMark(`h${String(index)}`, {
+        position: onPlaneAt(150 + index * 120, 820),
+        labelPriority: 10 + index,
+      }),
+    );
+    const points = [
+      ...heavy,
+      aMark("d", { position: onPlaneAt(600, 400), label: "DEST", labelPriority: 0 }),
+      aMark("s", { position: onPlaneAt(580, 350), label: "SELECTED MARK", labelPriority: -1 }),
+    ];
+    const { unmount } = renderView({ scene: aScene({ points, destinationId: "d" }) });
+    const before = placement(overlayLabel("DEST"));
+    unmount();
+
+    renderView({ scene: aScene({ points, destinationId: "d", selectedId: "s" }) });
+
+    expect([placement(overlayLabel("DEST")), placement(overlayLabel("SELECTED MARK"))]).toEqual([
+      before,
+      expect.stringContaining("- 100%"),
+    ]);
+  });
+});
+
 describe("SpatialView picking", () => {
   beforeEach(() => {
     stubLayout(400, 300);
@@ -1715,7 +1980,7 @@ describe("SpatialView picking", () => {
     expect(reticleColours(recorder)).toEqual(["#5cc8e6"]);
   });
 
-  it("paints the target reticle about the destination, outside the selection's", async () => {
+  it("paints the target chevrons about the destination, outside the selection's bracket", async () => {
     const user = userEvent.setup();
     const recorder = stubCanvas();
     render(<Selecting destinationId="a" />);

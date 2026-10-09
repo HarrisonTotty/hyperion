@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { add, norm, scale, sub, vec3 } from "../../geometry/vec3";
+import { add, cross, norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   aBody,
   aViewScene,
@@ -11,7 +11,7 @@ import {
 import { newCameraState } from "../camera/state";
 import { rotation3FromRows } from "../coords/rotation";
 import { hullOutline, TEST_HULL, TEST_PLATE_DISTANCE_M } from "./hull";
-import { cameraSceneOf, sceneOrigins } from "./model";
+import { cameraSceneOf, sceneOrigins, staticRetarded } from "./model";
 
 describe("hullOutline", () => {
   const base = {
@@ -19,6 +19,7 @@ describe("hullOutline", () => {
     vertices: [vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0)],
     edges: [[0, 1]] as const,
     faces: [[0, 1, 2]] as const,
+    windows: [],
     eyePointM: vec3(0, 0, 0),
     lengthM: 1,
   };
@@ -41,10 +42,52 @@ describe("hullOutline", () => {
     ).toThrow(RangeError);
   });
 
+  it.each([[1], [-1], [0.5]])(
+    "refuses window %s, which is not one of its faces (R07.T16.e)",
+    (face) => {
+      expect(() => hullOutline({ ...base, windows: [face] })).toThrow(RangeError);
+    },
+  );
+
+  it("refuses a window named twice (R07.T16.e)", () => {
+    expect(() =>
+      hullOutline({
+        ...base,
+        faces: [
+          [0, 1, 2],
+          [0, 2, 1],
+        ],
+        windows: [1, 1],
+      }),
+    ).toThrow(/as a window twice/);
+  });
+
   it("accepts an outline whose indices are all its own", () => {
     expect(hullOutline(base)).toBe(base);
   });
+
+  it("accepts a window that is one of its faces (R07.T16.e)", () => {
+    const glazed = { ...base, windows: [0] };
+    expect(hullOutline(glazed)).toBe(glazed);
+  });
 });
+
+/** A side of a hull's face as its two vertex indices, in either order. */
+function sideKey(i: number, j: number): string {
+  return [Math.min(i, j), Math.max(i, j)].join("-");
+}
+
+/** One of `TEST_HULL`'s vertices, or a point that is not finite for an index it lacks. */
+function hullVertex(index: number): Vec3 {
+  return TEST_HULL.vertices[index] ?? vec3(Number.NaN, 0, 0);
+}
+
+/** The unit normal of one of `TEST_HULL`'s faces. */
+function unitNormal([i, j, k]: readonly [number, number, number]): Vec3 {
+  const a = hullVertex(i);
+  const n = cross(sub(hullVertex(j), a), sub(hullVertex(k), a));
+  return scale(n, 1 / norm(n));
+}
 
 describe("TEST_HULL", () => {
   it("is 20 m long", () => {
@@ -65,6 +108,41 @@ describe("TEST_HULL", () => {
       height: norm(sub(c, b)),
     }).toEqual({ centre: vec3(0, 0, -TEST_PLATE_DISTANCE_M), width: 1, height: 1 });
   });
+
+  it("has its plate, its last two faces, as its one window (R07.T16.e)", () => {
+    const plate = new Set([9, 10, 11, 12]);
+    expect({
+      windows: TEST_HULL.windows,
+      onThePlate: TEST_HULL.faces.flatMap((corners, index) =>
+        corners.every((corner) => plate.has(corner)) ? [index] : [],
+      ),
+    }).toEqual({ windows: [14, 15], onThePlate: [14, 15] });
+  });
+
+  it("draws every side of its opaque faces as an edge, but the diagonal of a flat quad (R07.T16.e)", () => {
+    // Over the image its silhouette's boundary then always lies under a cased outline, the mark
+    // the silhouette is the ground of (decision-r07-t16a, item 3).
+    const drawn = new Set(TEST_HULL.edges.map(([i, j]) => sideKey(i, j)));
+    const opaque = TEST_HULL.faces.filter((_, index) => !TEST_HULL.windows.includes(index));
+    const undrawn = opaque.flatMap((face) =>
+      [0, 1, 2].flatMap((side) => {
+        const i = face[side] ?? -1;
+        const j = face[(side + 1) % 3] ?? -1;
+        if (drawn.has(sideKey(i, j))) {
+          return [];
+        }
+        // A side left undrawn must be shared with one coplanar face: a flat quad's diagonal.
+        const sharing = opaque.filter(
+          (other) => other !== face && other.includes(i) && other.includes(j),
+        );
+        const flat =
+          sharing.length === 1 &&
+          sharing.every((other) => norm(cross(unitNormal(face), unitNormal(other))) < 1e-12);
+        return flat ? [] : [sideKey(i, j)];
+      }),
+    );
+    expect(undrawn).toEqual([]);
+  });
 });
 
 describe("the view fixtures", () => {
@@ -80,6 +158,24 @@ describe("the view fixtures", () => {
       ship: { kind: "body", body: FIXTURE_PLANET, m: vec3(2e7, 0, 0) },
       camera: "seat",
     });
+  });
+});
+
+describe("staticRetarded", () => {
+  it("puts a kept scene's body at rest where it is drawn, with no light time", () => {
+    const centreM = vec3(1.5e11, 0, -2);
+    expect(staticRetarded(centreM)).toEqual({
+      centreM,
+      velocityMPerS: vec3(0, 0, 0),
+      lightTimeS: 0,
+    });
+    expect(staticRetarded(centreM).centreM).toBe(centreM);
+  });
+
+  it("is every fixture body's, at its own drawn centre", () => {
+    const moved = aBody({ centreM: vec3(1, 2, 3) });
+    expect(moved.retarded).toEqual(staticRetarded(vec3(1, 2, 3)));
+    expect(aBody({ retarded: null }).retarded).toBeNull();
   });
 });
 

@@ -13,6 +13,13 @@
 //! kinematic tables (without [`Galaxy::with_full_potential`]) has no velocities, and its systems
 //! keep their epoch positions at every `t`, as every system did before plan 08. No position at the
 //! epoch moves either way.
+//!
+//! The padding rests on one premise: every grid record of a layer moves below that layer's
+//! [`pad_speed`]. The range query, R06's sky census and plan 12's lensing walk all read it.
+//! [`epoch_velocity`], which every grid velocity passes through, checks it in debug builds, and
+//! [`escape_cut_holds`] names the layers whose grid records also all stay below the local escape
+//! speed (plan 08, P08.T17). Feature members move by their own laws, and plan 09 pads each feature
+//! by its own members' bound (P09.T23.b).
 
 use super::result::SystemHit;
 use super::walk::QuerySphere;
@@ -39,18 +46,25 @@ pub const PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(1_000.0);
 /// The speed layer E's spheres are padded by, 3,000 km/s: above anything plan 08 places there
 /// (plan 08, Design note 27).
 ///
-/// The brainstorm says only that "the unbound class needs more" than [`PAD_SPEED`]. The fastest
-/// object plan 08 places is a remnant at the kick law's upper clamp, about 2,200 km/s, launched
-/// along a rotation of up to about 300 km/s, and the reserved hypervelocity survivors move at up to
-/// 2,500 km/s; 3,000 km/s covers both with a fifth to spare, and the draw caps the exempt classes
-/// at it. Padding chooses cells and changes no generated output.
+/// The brainstorm says only that "the unbound class needs more" than [`PAD_SPEED`]. No natal kick
+/// exceeds 990 km/s since plan 06's ruling 96.2. The kick law is the log-normal of Disberg and
+/// Mandel (2025, ApJ Lett. 989, L8), truncated at 1,000 km/s, with its rank held to 0.999 (P06.T19
+/// as built). With the progenitor's motion that is about 1,300 km/s. The fastest displaced
+/// classes' Gaussian laws have no such edge, and the reserved hypervelocity survivors move at up to
+/// 2,500 km/s; 3,000 km/s covers the survivors with a fifth to spare. Plan 08's P08.T12.d, which
+/// places those classes, will cap each below its layer's [`pad_speed`] (Design note 7), and
+/// [`epoch_velocity`] asserts that in debug builds (P08.T17; decided 2026-10-05,
+/// `decision-r06-pad-speed.md`). Padding chooses cells and changes no generated output.
 pub const UNBOUND_PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(3_000.0);
 
 /// The speed the sphere is padded by when walking `layer`.
 ///
 /// [`UNBOUND_PAD_SPEED`] for layer E, the only layer whose cells hold plan 08's unbound class, and
-/// [`PAD_SPEED`] for every other layer (plan 08, Design note 27). It lives behind one function so
-/// that raising one layer's moves no other layer's cells (plan 03, Design note 13).
+/// [`PAD_SPEED`] for every other layer (plan 08, Design note 27). Plan 09 raises layer D's together
+/// with the hypervelocity survivors it places there (P09.T34.b). It lives behind one function so
+/// that raising one layer's moves no other layer's cells (plan 03, Design note 13). Every grid
+/// record of a layer moves below it: [`epoch_velocity`] asserts that, and [`escape_cut_holds`] is
+/// read from it (P08.T17).
 #[must_use]
 pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
     match layer {
@@ -59,6 +73,43 @@ pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
             PAD_SPEED
         }
     }
+}
+
+/// Whether every grid record of `layer` is drawn below the local escape speed (plan 08, P08.T17).
+///
+/// It is true exactly where [`pad_speed`] is [`PAD_SPEED`]. Plan 08's escape cut holds a grid
+/// record below the lesser of the local escape speed and [`PAD_SPEED`] (Design note 7). Only a
+/// displaced class exempt from the cut will move faster, once P08.T12.d places them, and such a
+/// class may have weight only in a layer padded at [`UNBOUND_PAD_SPEED`]. So a reader that bounds
+/// a layer's grid records more tightly than its pad, by the local escape speed, may do so exactly
+/// where this holds; plan 12's lensing walk does. It is read from [`pad_speed`], so the two cannot
+/// disagree (decided 2026-10-05, `decision-r06-pad-speed.md`). It says nothing of feature members,
+/// which move at their feature's bulk plus their own internal velocity (plan 09, P09.T23.b).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::query::{PAD_SPEED, escape_cut_holds, pad_speed};
+/// use hyperion_sim::id::Layer;
+///
+/// // A speed bound for a layer's records, given the escape speed over the region they lie in.
+/// let bound = |layer, escape_km_s: f64| {
+///     if escape_cut_holds(layer) {
+///         escape_km_s.min(PAD_SPEED.value())
+///     } else {
+///         pad_speed(layer).value()
+///     }
+/// };
+/// // Near the Sun a layer-C star is bound by the escape speed there...
+/// assert!((bound(Layer::C, 574.0) - 574.0).abs() < 1e-9);
+/// // ...but layer E holds plan 08's unbound class, so only its pad bounds it.
+/// assert!((bound(Layer::E, 574.0) - 3_000.0).abs() < 1e-9);
+/// ```
+#[must_use]
+pub const fn escape_cut_holds(layer: Layer) -> bool {
+    // No layer pads below `PAD_SPEED`, which the escape cut can reach, so this is "is
+    // `PAD_SPEED`" without comparing floats for equality.
+    pad_speed(layer).value() <= PAD_SPEED.value()
 }
 
 /// How far a sphere must be padded to hold everything that could reach it by `t` at `speed`,
@@ -92,10 +143,32 @@ pub fn pad_for(t: UniverseTime, speed: KilometresPerSecond) -> LightYears {
 /// ([`Galaxy::with_full_potential`]); zero for a galaxy built without them, which has no
 /// velocities. A displaced record, once plan 08's P08.T12.d places them, has its class's law; until
 /// then every record is a field record and takes its component's.
+///
+/// Every grid velocity that the range query, R06's sky census and plan 12's lensing walk read
+/// passes through here, by [`position_at`] and
+/// [`Drift::of_record`](crate::observe::Drift::of_record). So this is where the padding's premise
+/// is checked: every grid record of a layer moves below that layer's [`pad_speed`] (P08.T17).
+///
+/// # Panics
+///
+/// - In a galaxy with kinematic tables, if `record` is not a grid record, as [`draw_velocity`].
+/// - In debug builds, if the drawn speed is not below `pad_speed(record.layer())`. Plan 08's draw
+///   prevents that: its escape cut holds every grid record below [`PAD_SPEED`], and P08.T12.d will
+///   cap each exempt class below its layer's pad (Design note 7).
 #[must_use]
 pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity {
     if galaxy.kinematics().is_some() {
-        draw_velocity(galaxy, record)
+        let velocity = draw_velocity(galaxy, record);
+        debug_assert!(
+            velocity.speed().value() < MetresPerSecond::from(pad_speed(record.layer())).value(),
+            "{:?} of layer {:?} moves at {} km/s, not below its layer's pad speed of {} km/s \
+             (plan 08, P08.T17)",
+            record.id(),
+            record.layer(),
+            velocity.speed().value() / 1e3,
+            pad_speed(record.layer()).value(),
+        );
+        velocity
     } else {
         GalacticVelocity::default()
     }
@@ -109,10 +182,15 @@ pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocit
 ///
 /// # Panics
 ///
-/// If the drift would take the position out of the addressable cube. It cannot: plan 08 cuts
-/// every velocity below [`PAD_SPEED`], and layer E's fastest below [`UNBOUND_PAD_SPEED`], which
-/// over the clock window move a position by at most 10 ly, while every grid system lies inside
-/// the root cube, 65,536 ly from the centre against the addressable range's 2³¹ ly.
+/// - If the drift would take the position out of the addressable cube. It cannot. Every grid
+///   velocity is below its layer's [`pad_speed`], at most [`UNBOUND_PAD_SPEED`], which over the
+///   clock window moves a position by at most 10.01 ly. Every grid system lies inside the root
+///   cube, 65,536 ly from the centre, against the addressable range's 2³¹ ly. Plan 08's field draw
+///   stays below [`PAD_SPEED`], and since plan 06's ruling 96.2 no natal kick exceeds 990 km/s
+///   (about 1,300 km/s with the progenitor's motion). Only plan 08's fastest displaced classes,
+///   which P08.T12.d will cap below their layer's pad, and the hypervelocity survivors, at up to
+///   2,500 km/s, will move faster.
+/// - Away from the epoch, as [`epoch_velocity`].
 #[must_use]
 pub fn position_at(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime) -> GalacticPosition {
     if t == UniverseTime::EPOCH {
@@ -129,7 +207,7 @@ fn drifted(record: &SystemRecord, velocity: GalacticVelocity, t: UniverseTime) -
         .epoch_position()
         .translated(velocity.displacement_over(elapsed))
         .expect(
-            "a speed under 3,000 km/s over the clock window moves a position by at most 10 ly, \
+            "a speed under 3,000 km/s over the clock window moves a position by at most 10.01 ly, \
              which no cell of the root cube can leave the addressable range by",
         )
 }
@@ -225,6 +303,19 @@ mod tests {
         }
         let pad = pad_for(ClockWindow::END, UNBOUND_PAD_SPEED).value();
         assert!((pad - 10.007).abs() < 1e-3, "{pad} ly");
+    }
+
+    /// Plan 08, P08.T17: the escape cut holds exactly where a layer pads at plan 03's speed, and
+    /// no layer pads below it, since the escape cut can reach it. Today that is every layer but E.
+    #[test]
+    fn escape_cut_holds_where_the_pad_is_plan_03s() {
+        for layer in Layer::ALL {
+            let pad = pad_speed(layer).value();
+            assert!(pad >= PAD_SPEED.value(), "{layer:?} pads at {pad} km/s");
+            let is_plan_03s = pad.total_cmp(&PAD_SPEED.value()).is_eq();
+            assert_eq!(escape_cut_holds(layer), is_plan_03s, "{layer:?}");
+            assert_eq!(escape_cut_holds(layer), layer != Layer::E, "{layer:?}");
+        }
     }
 
     #[test]

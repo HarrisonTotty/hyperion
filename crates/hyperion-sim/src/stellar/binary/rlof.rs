@@ -187,14 +187,17 @@ impl Engine {
 
     /// Turns member `i` into the form whose mass the binary carries: a main sequence into a
     /// carried main sequence, a later phase onto its track's closed forms, a remnant into one the
-    /// binary feeds.
+    /// binary feeds. A star that has not yet arrived on its main sequence becomes its zero-age
+    /// main-sequence star at τ = 0, which it was to the engine already
+    /// ([`engine_track_age_years`](super::star::engine_track_age_years), P11.T4.i), and ages from
+    /// there.
     pub(super) fn carry(&mut self, i: usize) {
         let age = self.age;
         let Member::Track { track, offset } = &self.members[i] else {
             return;
         };
         let (track, offset) = (Arc::clone(track), *offset);
-        let track_age = (age - offset).max(0.0);
+        let track_age = super::star::engine_track_age_years(&track, offset, age);
         let state = track.state_at(Years::new(track_age));
         let mass = state.mass().value();
         self.members[i] = if state.phase().is_remnant() {
@@ -337,6 +340,22 @@ impl Engine {
     }
 
     /// Runs stable transfer from member `d` to its next event.
+    ///
+    /// A step whose limit is a death ([`Stop::Death`]) or the primary's pin ([`Stop::Pinned`])
+    /// is never ended by the detachment test: the dying donor reads inside its lobe as its
+    /// remnant there, and the death or the pin would otherwise never be seen again. It goes
+    /// through the step's acts like any other step, T4.g's strip first, and its stop is acted on.
+    /// Where that leaves the donor with nothing living, the transfer ends there, as
+    /// [`Engine::quiet_kind`] decides (P11.T4.k, ruling p11-t4k-faults of 2026-10-06, finding A:
+    /// before it the "transfer is over" return came first, which lost the collapses of case BB
+    /// helium donors onto neutron stars and black holes, most of which still transfer when they
+    /// collapse, 39 of Tauris, Langer and Podsiadlowski's 2015 table 1's 47, and of pinned transfer
+    /// donors). The landing step reads the dying donor's overfill at its death, a remnant's radius,
+    /// so it moves no mass: the donor keeps about one step's transfer, BSE equation 92's target of
+    /// 0.5% of its mass, in its mass before (a known departure, recorded in plan 11's Risks).
+    ///
+    /// [`Stop::Death`]: super::detached::Stop::Death
+    /// [`Stop::Pinned`]: super::detached::Stop::Pinned
     #[expect(
         clippy::too_many_lines,
         reason = "one loop over BSE section 2.6's steps and their exits"
@@ -360,6 +379,15 @@ impl Engine {
                 self.collide();
                 return;
             };
+            // A transfer whose donor has died has ended (below): no step starts from one. A white
+            // dwarf gives mass as a remnant (BSE section 2.6.5).
+            debug_assert!(
+                sd.state.phase().is_living()
+                    || Kind::of(sd.state.phase(), s.masses[d]).is_white_dwarf(),
+                "a transfer step from a donor with nothing living, a {:?} at {} yr",
+                sd.state.phase(),
+                s.age
+            );
             // The structures just evaluated are the ones `stability` would evaluate again: the
             // snapshot is the pair now.
             match self.stability_of(d, s.masses[d], s.masses[a_idx], &sd, &sa) {
@@ -399,10 +427,16 @@ impl Engine {
                 self.collide();
                 return;
             };
-            if rate <= 0.0 && steps > 0 && unfed < -DETACHED_BY {
+            let lands_on_death = matches!(
+                stop,
+                Some(super::detached::Stop::Death(_) | super::detached::Stop::Pinned)
+            );
+            if rate <= 0.0 && steps > 0 && unfed < -DETACHED_BY && !lands_on_death {
                 // The donor has shrunk inside its lobe with nothing to give: the transfer is over.
                 self.accept(&next);
-                self.begin(self.quiet_kind());
+                if self.age < self.until {
+                    self.begin(self.quiet_kind());
+                }
                 return;
             }
             self.accept(&next);
@@ -416,14 +450,28 @@ impl Engine {
             } else {
                 2.0 * dt
             };
+            // The step that reaches or passes the pair's age is the last, whatever it landed on,
+            // which lies beyond the timeline (`detached::StepLimit`).
+            if self.age >= self.until {
+                return;
+            }
             if self.accretor_events(d, rate, accretion.share * rate * dt, accretion) {
                 return;
             }
             if self.donor_events(d) {
                 return;
             }
+            // A star the binary carries, donor or accretor, with no envelope left is a helium star
+            // or a white dwarf from this step, before any other stop (HPT section 6; BSE `hrdiag`
+            // as `evolv2` calls it; P11.T4.g): it is stripped, and the pair goes on as
+            // `quiet_kind` decides.
+            if let Some(i) = [d, a_idx].into_iter().find(|&i| self.bare_shaped(i)) {
+                self.strip(i);
+                return;
+            }
             if let Some(stop) = stop {
                 match stop {
+                    // No step limit is the pair's age (`detached::StepLimit`).
                     super::detached::Stop::Until => return,
                     super::detached::Stop::Boundary => {
                         self.close_segment();
@@ -432,10 +480,12 @@ impl Engine {
                     }
                     super::detached::Stop::Death(i) => {
                         self.die(i);
+                        self.end_without_a_living_donor(d);
                         return;
                     }
                     super::detached::Stop::Pinned => {
                         self.pinned_collapse();
+                        self.end_without_a_living_donor(d);
                         return;
                     }
                     super::detached::Stop::Stripped(i) => {
@@ -450,6 +500,34 @@ impl Engine {
         }
     }
 
+    /// Ends the transfer from member `d` if a death or the pin it has just acted on left that
+    /// donor with nothing living, the pair going on as [`Engine::quiet_kind`] decides: a remnant
+    /// read as the donor of a next transfer step would merge the pair ([`Engine::stability_of`]).
+    pub(super) fn end_without_a_living_donor(&mut self, d: usize) {
+        if !matches!(self.kind, SegmentKind::StableTransfer { .. }) {
+            return;
+        }
+        let (m, tau) = self.current(d);
+        let living = self
+            .structure(d, self.age, m, tau)
+            .is_some_and(|s| s.state.phase().is_living());
+        if !living {
+            self.begin(self.quiet_kind());
+        }
+    }
+
+    /// Whether member `i` is a star the binary carries ([`Member::Shaped`]) that is living with no
+    /// envelope left at the engine's age (M ≤ Mc).
+    #[must_use]
+    fn bare_shaped(&self, i: usize) -> bool {
+        if !matches!(self.members[i], Member::Shaped { .. }) {
+            return false;
+        }
+        let (m, tau) = self.current(i);
+        self.structure(i, self.age, m, tau)
+            .is_some_and(|s| s.state.envelope_mass().value() <= 0.0 && s.state.phase().is_living())
+    }
+
     /// The step's length during transfer from member `d` and the event it lands on.
     #[must_use]
     fn transfer_limit(
@@ -460,7 +538,7 @@ impl Engine {
         sa: &Structure,
     ) -> (f64, Option<super::detached::Stop>) {
         use super::detached::Stop;
-        let mut limits = super::detached::StepLimit::new(self.until - s.age);
+        let mut limits = super::detached::StepLimit::new();
         if let Some(pin) = &self.pin {
             let at = pin.death.age().value();
             if at > s.age {
@@ -508,6 +586,7 @@ impl Engine {
             1e-4 * thermal.min(phase_limit)
         };
         limits.length(start.min(phase_limit).max(1e-6));
+        limits.length(super::detached::LONGEST_STEP_YEARS);
         limits.resolve()
     }
 
@@ -903,7 +982,7 @@ impl Engine {
                     0.0,
                     self.ctx.composition(),
                     self.ctx.draws(a_idx),
-                    Some((self.until - self.age).max(0.0)),
+                    Some(self.reach_span_years(self.age)),
                 );
                 self.set_member(
                     a_idx,

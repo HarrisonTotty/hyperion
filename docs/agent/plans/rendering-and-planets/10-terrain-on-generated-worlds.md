@@ -280,17 +280,22 @@ changed by the time this plan runs only the call sites here change.
   the scripted descent, `descentProfile.ts`, `metrics.ts` and the results files under
   `docs/measurements/descent-spike/`.
 - **R07:** in `shaders/litBody.wgsl`,
-  `struct LunarLambert { a: vec3f, l: f32, s: vec3f, template: u32 }`,
+  `struct LunarLambert { a: vec3f, l: f32, s: vec3f, table_row: u32 }` (`table_row`, not `template`, a
+  WGSL reserved word: the row of `phase_factor_table` holding the law's f, R07.T4.c as built),
   `body_brdf(law: LunarLambert, mu0, mu, alpha) -> vec3f` (R07.T4.c),
   `sphere_irradiance(h, phi, horizon) -> f32` with its local-horizon argument (R07.T6.a, T6.c) and
   `eclipse_visible`; `DiscSurface` and its `class-map` case
   `{ weights: TextureHandle; laws: PhotometricLaw[]; elsewhere: PhotometricLaw }` in `bodyDisc.wgsl`
-  and `bodies/discSurface.ts` (R07.T8.b); `BodyFigure`, the reference spheroid every height here is
+  and `bodies/discSurface.ts` (R07.T8.b), as built: the map's layout (a 2D array of `rgba8unorm`,
+  N × N texels a face of R05's cube sphere under `uvToSt`, class k in channel k mod 4 of layer f +
+  6⌊k ÷ 4⌋, at most 16 classes), `packClassMap`, `classMapSurface` and `classMapTextureSpec`, and
+  `LitBodyInput`'s optional `surface` and `rotation`, which the view's `litBodiesOf` passes (T10.d);
+  `BodyFigure`, the reference spheroid every height here is
   measured from, along its normal (R07's Design note 19); `BodyAppearance`, `LitRegime`
   (`"point" | "disc" | "mesh"`) and `lawFor(p: Rgb, q: Rgb, template: PhaseTemplateId)`; the star's
   angular radius per view. R07 creates those signatures with default inputs; this plan's T8.b (the
-  horizon from the horizon map), T10.b (a `LunarLambert` built per texel) and T10.d (the class map)
-  supply the inputs through them unchanged.
+  horizon from the horizon map), T10.b (a `LunarLambert` per class, their `body_brdf` summed per
+  texel by weight) and T10.d (the class map) supply the inputs through them unchanged.
 - **R08:** aerial perspective applied to the terrain pass's output; R08.T9.b's
   `surfaceLighting.wgsl` with
   `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` and
@@ -317,7 +322,9 @@ changed by the time this plan runs only the call sites here change.
   `ring_shadow_on_body`, and `terrain_sky_factor` with a cloud deck's diffuse transmittance).
 - **Galaxy plan 14:** radius and reference surface, ocean fraction, ice fraction, `SurfaceState`
   with `SurfaceMaterial`, surface age, tectonic regime and volcanism level, `body_fixed_at`
-  (P14.T14.c), and the visual geometric albedo p that R07 asks of it.
+  (P14.T14.c), and the rotation section on the wire (P14.T46.f), which the scene body carries as
+  `rotation` once R07.T2.b reads it; without it a class map cannot be oriented and the disc shades
+  with `elsewhere`, and the visual geometric albedo p that R07 asks of it.
 - **Galaxy plan 12:** nothing directly; R09 gates coverage on P12.T7's store.
 
 ## Design notes
@@ -475,13 +482,27 @@ changed by the time this plan runs only the call sites here change.
    2026-09-29). Every class takes McEwen's lunar-Lambert law, r(i, e, α) = A_N f(α) [2 L(α) μ₀ ÷
    (μ₀ + μ) + (1 − L(α)) μ₀], with f(0) = 1, μ₀ = cos i, μ = cos e and A_N the normal albedo; L = 1
    is Lommel–Seeliger and L = 0 Lambert. For the Moon L(α) = 1 − 0.019 α + 2.42 × 10⁻⁴ α² − 1.46 ×
-   10⁻⁶ α³ in degrees (McEwen 1991, Icarus 92, 298; the form and coefficients verified in USGS
-   ISIS's `LunarLambertMcEwen.cpp`). Dark surfaces act like Lommel–Seeliger and bright ones like
-   Lambert (Buratti and Veverka 1983), so L(0) is a function of A_N, not a free number per class.
-   Hapke's full model is not used per texel: its roughness term counts relief the mesh, normals and
-   horizon map already resolve, and what it adds lies below the band limit. It is the law R07 adopts
-   (its Design note 5), so R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)` carries it and this
-   plan builds a `LunarLambert` per texel from its classes' parameters (T10.b). At zero phase a
+   10⁻⁶ α³ in degrees (McEwen 1996, LPSC XXVII, 841, Table 1, the same at 0.56 and 0.76 µm, fitted
+   to Galileo SSI images at 19.5°–101° with L(0) = 1 imposed; the coefficients are USGS ISIS's
+   `LunarLambertMcEwen.cpp`; McEwen 1991, Icarus 92, 298, is the earlier study of L(α) from Hapke's
+   model). It reaches 0 at 103.9° and L is held at 0 beyond, where the fit has no data. McEwen 1996
+   finds no difference in limb darkening between maria, highlands and bright Copernican craters, so
+   across regolith albedos L(α) does not follow A_N, and only the brightest surfaces are
+   limb-darkened at zero phase (Buratti 1984, Icarus 59, 392; decision-phase-curves; Buratti and
+   Veverka 1983, Icarus 55, 93, propose an albedo-dependent form, which McEwen 1996 rejects for the
+   Moon). The dark and moderate classes take the Moon's L(α); the bright ices' and evaporites' L(α)
+   is settled in T1.a against the primaries and the A_h ≤ 1 bound below. Hapke's full model is not
+   used per texel: its roughness term counts relief the mesh, normals and horizon map already
+   resolve, and what it adds lies below the band limit. It is the law R07 adopts (its
+   Design note 5), so R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)` carries it and this plan
+   calls it once per class, with that class's `LunarLambert` (T10.b). Each law's L(α) is tabulated
+   beside its f, in the alpha channel of its `phase_factor_table` row, and f against that L(α):
+   Φ_shape(α; L) = [L(α) Φ_LS(α) + ⅔(1 − L(α)) Φ_Lam(α)] ÷ [L(0) + ⅔(1 − L(0))], so p and q are
+   unchanged and only the limb profile moves; `body_brdf` reads L from the row and `LunarLambert.l`
+   is L(0) (decision-r07-t8b). A texel reflects its classes' `body_brdf` radiances summed by weight,
+   each law through its own row, as R07's disc sums its class map's, not one law built from weighted
+   parameters, which differs from the sum wherever classes of different A_N and L blend (1.7× at
+   μ₀ = 0.5, μ = 0.1 for an even blend of regolith at L = 1 and snow at L = 0). At zero phase a
    uniform body's geometric albedo is p = A_N [L(0) + ⅔ (1 − L(0))], and averaged over viewing
    directions a patterned sphere's p is the plain area average of each element's, so the scale c on
    the class albedos that makes the body's p is the root of Σ a_i c A_N,i [L_i + ⅔ (1 − L_i)] = p
@@ -743,12 +764,12 @@ T1–T5 are `hyperion-surface` code and run in order after R09's synthesis lands
 onto it. T7 (the client's field store) needs only R09's chunks and R05's workers and can run beside
 T1–T5, though its worker tests need T6.b's entry points. T8 (horizon maps) needs T6.a. T9 (cascades)
 is independent of T8 but lands after it, so the high setting has its horizon map to combine with.
-T10 (lit terrain) needs T2, T6 and T7, and its shadow term from T8 and T9. T11 (the wireframe) needs
-T6 and T7. T12 (readouts) needs T5, T6.b and T7. T13 (guide drafts) is docs only, can be written at
-any time, and lands before T11 and T12, which are built to the drafts; it keeps its number because
-the roadmap cites `R10.T13`. T14 (cache sizes) follows T10 and T11. T15 closes. There is no
-interface-reconciliation task: this plan is re-validated against R05 and R09 as built when its turn
-comes.
+T10 (lit terrain) needs T2, T6 and T7, and its shadow term from T8 and T9; T10.f needs T10.d. T11
+(the wireframe) needs T6 and T7. T12 (readouts) needs T5, T6.b and T7. T13 (guide drafts) is docs
+only, can be written at any time, and lands before T11 and T12, which are built to the drafts; it
+keeps its number because the roadmap cites `R10.T13`. T14 (cache sizes) follows T10 and T11. T15
+closes. There is no interface-reconciliation task: this plan is re-validated against R05 and R09 as
+built when its turn comes.
 
 Rust files are under `crates/hyperion-surface/src/` and client files under
 `apps/hyperion/src/renderer/src/view/terrain/` unless a path says otherwise. Every test in
@@ -991,22 +1012,45 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   `cargo test -p hyperion-sim --test surface_albedo_worlds` and
   `cargo test -p hyperion-server surface`.
 - **R10.T10.b The terrain shader.** `terrainMaterial.ts` and `shaders/terrainLit.wgsl`: the palette
-  and weights to `body_brdf`'s lunar-Lambert parameters (A_N × c, L(α) from A_N, f(α)), the normals
-  at the setting's resolution, the shadow term from T8 or T9, the hooks `terrain_decoration`,
-  `terrain_shadow_factor`, `terrain_ring_shadow` and `terrain_sky_factor` for R11 (each defaulting
-  to no effect), the direct sun through R08's `atmosphere_sun_transmittance` and the sky through its
-  `atmosphere_sky_irradiance`, and R08's aerial perspective on the output. Each call passes the
-  texel's geodetic height above `BodyFigure`'s spheroid, its geodetic latitude (from the spheroid
-  normal against the pole) and, for the transmittance, each sun's azimuth from local north, as
-  R08 Design note 17's signatures require. Each texel's law is a
-  `struct LunarLambert { a, l, s, template }` built from its palette and weights and passed to R07's
-  `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates and this task
-  uses unchanged. Files: `terrainMaterial.ts`, `shaders/terrainLit.wgsl`. Tests: a pure test that
-  the parameters a texel gets are the weighted sum of its palette's, and that the largest weight's
-  class is the one a readout names; a `LunarLambert` built per texel from a one-class palette equals
-  the per-body law of that class in R07.T4.c's twin; the smoke harness renders a generated world's
-  patch set on SwiftShader with every texel finite. Acceptance:
-  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the smoke run.
+  and weights to one lunar-Lambert law per class (A_N × c, L(0), and f(α) and L(α) from the class's
+  row) through `body_brdf`, summed by weight, the normals at the setting's resolution, the shadow
+  term from T8 or T9, the hooks `terrain_decoration`, `terrain_shadow_factor`, `terrain_ring_shadow`
+  and `terrain_sky_factor` for R11 (each defaulting to no effect), the direct sun through R08's
+  `atmosphere_sun_transmittance` and the sky through its `atmosphere_sky_irradiance`, and R08's
+  aerial perspective on the output. Each call passes the texel's geodetic height above
+  `BodyFigure`'s spheroid, its geodetic latitude (from the spheroid normal against the pole) and,
+  for the transmittance, each sun's azimuth from local north, as R08 Design note 17's signatures
+  require. Each class of the patch's palette has its own
+  `struct LunarLambert { a, l, s, table_row }` (a = A_N × c, l = L(0), the class's s and row),
+  passed to R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates
+  and this task uses unchanged. The texel reflects the classes' `body_brdf` radiances summed by its
+  weights, skipping zero weights, not one `LunarLambert` built from weighted parameters, which
+  differs from the sum by the covariance of A_N and L: 1.7× too bright at μ₀ = 0.5, μ = 0.1 for an
+  even blend of regolith and snow (Design note 8). One `phase_factor_table` row per class law (its
+  template, s and L(α)): f in r, g and b, L(α) in a; `body_brdf` reads L(α) from the row and
+  `LunarLambert.l` carries L(0), so no row is built per texel and no f is taken from a neighbouring
+  L (decision-r07-t8b). This task builds the channel in R07's files: `PhotometricLaw` gains an
+  optional `lommelSeeligerCurve` (absent: L constant at `lommelSeeligerShare`, which is L(0)) in
+  `appearance/law.ts`; Φ_shape with L(α) in `shapes.ts`, `phase.ts` (`lawFor`'s q) and `brdf.ts`;
+  the spheroid integral at L(α) and `oblateAlbedoScale` at L(0) in `bodies/oblate.ts` and
+  `bodies/draw.ts`; `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`. It moves R07's L = 1
+  templates (`moon`, `mercury`, `airless-ice`, `snowball`, `magma`) to McEwen 1996's L(α), which
+  changes no q, p or point flux. Files: `terrainMaterial.ts`, `shaders/terrainLit.wgsl`; R07's
+  `appearance/law.ts`, `shapes.ts`, `phase.ts`, `brdf.ts` and `templates.ts`, `bodies/oblate.ts` and
+  `bodies/draw.ts`, `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`. Tests: a pure test that a
+  texel of two classes in weights w and 1 − w reflects w r₁ + (1 − w) r₂ to 10⁻⁶, r₁ and r₂ being
+  the classes' own `body_brdf` radiances in R07.T4.c's twin, that for an even blend of regolith
+  (A_N 0.12, L 1) and snow (A_N 0.9, L 0) sharing one f(α), at μ₀ = 0.5, μ = 0.1 it is that sum and
+  not the 1.7× brighter law of the mixed parameters, that a zero weight adds nothing, and that the
+  largest weight's class is the one a readout names; a one-class palette's texel equals the per-body
+  law of that class in R07.T4.c's twin; the smoke harness renders a generated world's patch set on
+  SwiftShader with every texel finite; a law without a curve draws R07's disc and twin unchanged
+  (the row's alpha is its L); L(α) is 1 at 0°, 0.6084 at 30° and 0.1859 at 90°, and 0 from 103.9°;
+  under it, the Moon template's p, q and point flux equal the constant-L law's to 10⁻⁴, and its
+  CPU-rasterised disc flux equals its point's to 1% at 30°, 90° and 120°. Acceptance:
+  `pnpm --filter hyperion test` (the client suite: the Files reach R07's `appearance/`, `bodies/`
+  and `shaders/`, which the view's `lighting`, `photoreal`, `post` and `scenes` tests also read) and
+  `just test-render` (the WGSL).
 - **R10.T10.c The survey edge.** The survey mask's discard, the skirts at the survey edge, and the
   reference surface drawn beneath with the inverse mask from the GPU coverage mask (Design note 12),
   in `terrainLit.wgsl` and the `mesh`-regime body's material; the edge mark over the image from
@@ -1017,24 +1061,85 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   skirt heights seen at the edge on a flattened generated world, which stay within the terrain's
   local relief. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
   and the smoke run.
-- **R10.T10.d The class map on the disc.** `classMap.ts`, the per-body coarse class-weights map over
-  surveyed cells that R07's disc samples (Design note 8), under `coarse-field-gpu` with the coverage
-  mask. It fills the `class-map` case of R07's
-  `DiscSurface` (`{ weights: TextureHandle; laws: PhotometricLaw[]; elsewhere: PhotometricLaw }`,
-  created with its default by R07.T8.b and used unchanged): `weights` from this map over surveyed
-  texels, `laws` one per class from Design note 8's parameters and T10.a's scale, and `elsewhere`
-  R07's uniform `lawFor(p, q, template)`. Files: `classMap.ts`, and the `DiscSurface` construction
-  in R07's `bodies/discSurface.ts`. Tests: the class map holds no texel for an unsurveyed cell;
-  R07's disc under a class map of one uniform class equals its `lawFor` disc to 10⁻⁴; the smoke
-  harness renders a disc with a half-surveyed class map, every texel finite. Acceptance:
-  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the smoke run.
+- **R10.T10.d The class map on the disc.**
+  - **The map.** `classMap.ts` builds the per-body coarse class-weights map over surveyed cells
+    that R07's disc samples (Design note 8), under `coarse-field-gpu` with the coverage mask. It
+    goes through R07.T8.b's construction as built. `classMap.ts` supplies each texel's weights
+    to `packClassMap` and `classMapSurface` (R07's `bodies/discSurface.ts`):
+    - `weights_at` at the cell's centre, byte ÷ 255;
+    - `null` where the cell is unsurveyed;
+    - a partly surveyed cell's weights times its surveyed fraction.
+
+    `laws` are one per class, from Design note 8's parameters and T10.a's scale (at most 16,
+    `MAX_DISC_CLASSES`). `elsewhere` is R07's uniform `lawFor(p, q, template)`. `classMap.ts`
+    owns the texture: it remakes it after a device loss and releases it with the map.
+
+  - **The reconstruction.** The disc and `rasteriseDisc` read the map by a survey-masked bilinear
+    reconstruction, which replaces T8.b's nearest read (decision-r07-t8b):
+    - A sample in an unsurveyed texel takes `elsewhere` alone.
+    - A sample in a surveyed texel interpolates the full share vector (the classes and
+      `elsewhere`'s 1 − Σw) over the four nearest texel centres. It counts surveyed texels only
+      and renormalises.
+    - Each face carries a one-texel gutter from its neighbours (N + 2 texels a side, the gutter
+      corners unsurveyed), so the reconstruction is continuous across face edges.
+
+    No surveyed pattern shows past the survey's cells, and the cells show no blocks.
+
+  - **The view.** `litBodiesOf` (`displays/view/photorealFrame.ts`) passes each body's `surface`
+    from the class-map store and its `rotation` from the scene body's `rotation` (body-fixed to
+    the body frame, whose axes are the galactic ones), taken at the body's drawn time (R07.T10.a).
+    `ViewDisplay.tsx` passes the store in `PhotorealInputs`.
+  - **Until the rotation arrives.** The scene body's rotation comes from P14.T46.f's rotation
+    section, which R07.T2.b reads. Until then `rotation` is absent, and a live class map shades
+    with `elsewhere`, as R07 built it.
+  - **Files.** `classMap.ts`; R07's `bodies/discSurface.ts`, `bodies/discShading.ts` and
+    `shaders/bodyDisc.wgsl`; `displays/view/photorealFrame.ts` and `displays/view/ViewDisplay.tsx`.
+  - **Tests:**
+    - The class map holds no texel for an unsurveyed cell.
+    - R07's disc under a class map of one uniform class equals its `lawFor` disc to 10⁻⁴.
+    - At a surveyed texel's centre the shares are its own. A sample in an unsurveyed texel
+      carries no surveyed weight.
+    - A linear ramp of weights across a face edge stays linear to 10⁻⁶.
+    - The half-surveyed two-class map's disc flux equals the area-weighted fluxes to 1%.
+    - `litBodiesOf` passes a rotation where the scene body has one and none where it is `null`,
+      and such a body's disc shades with `elsewhere`.
+    - The smoke harness renders a disc with a half-surveyed class map, every texel finite, and
+      equal to `rasteriseDisc` within R07.T8.a's tolerance.
+  - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
+src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-render`.
 - **R10.T10.e The disc hands over.** R07's `disc` regime gives way to the quadtree at the range of
-  Design note 13, per view and style. Tests: the handover range as a pure function (about 1.8 × 10⁷
-  m for 10 km of relief at 1080p and 1 px, and 4.6 × 10⁶ m at the wireframe's 4 px), and a body with
-  no survey never hands over. By hand, recorded: at phase angles of about 30° and 90°, the body's
-  mean brightness across the handover changes by less than 1/3 stop on a fully surveyed generated
-  world; the residuals of T10.a against plan 14's p and q. Acceptance:
+  Design note 13, per view and style. Tests: the handover range as a pure function (about
+  1.8 × 10⁷ m for 10 km of relief at 1080p and 1 px, and 4.6 × 10⁶ m at the wireframe's 4 px), and a
+  body with no survey never hands over; per class law, the disc's and the terrain's I/F at the same
+  (μ₀, μ) agree to 10⁻⁶ at 30° and 90° of phase, one row read by both. By hand, recorded: at phase
+  angles of about 30° and 90°, the body's mean brightness across the handover changes by less than
+  1/3 stop and, averaged over each class-map texel, by less than 1/3 stop on a fully surveyed
+  generated world; the residuals of T10.a against plan 14's p and q. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the recorded check.
+- **R10.T10.f The point under a class map.**
+  - **What it does.** R07's point regime (`pointFlux` in `bodies/draw.ts`) integrates the body's
+    class map wherever its `surface` is a class map and its `rotation` is known, so that the flux
+    stays continuous at the 3 px switch (R07 Design note 5, T8.a's 1%; decision-r07-t8b).
+    Elsewhere it keeps the photometry's law, which equals `elsewhere`.
+  - **The integral.** It uses the disc's own law arithmetic in `f64`, summed over lit, visible
+    surface elements in body-fixed axes: each element's shares, as T10.d reconstructs them, times
+    each law's I/F, μ and the element's area, on the spheroid where the figure is one. Each light
+    takes its eclipse term from the centre, as now. _R07.T10.b: the point now takes each light's
+    `discEclipseVisible`, the eclipse averaged over its disc, not the centre's term, so that it
+    meets the disc at 3 px through an eclipse (R07's "Deviations in T10.b, as built")._ Texels are
+    sub-sampled as the bound needs.
+  - **Caching.** The result may be cached on the sun's and the camera's body-fixed directions
+    while it stays within 0.3% of a fresh integral.
+  - **Files.** R07's `bodies/draw.ts` and `bodies/discSurface.ts`.
+  - **Tests**, on a synthetic Iapetus (a 70° dark cap about the apex at A 0.04, the rest 0.55):
+    - Facing the leading side, the trailing side and a pole, at 0°, 60° and 120° of phase, the
+      point's flux equals the CPU rasteriser's summed disc flux at the switch to 1%.
+    - It equals an `f64` brute-force integral over 2 × 10⁵ Fibonacci directions to 0.3%.
+    - A one-class map equal to the uniform law gives the uniform point to 10⁻⁶.
+    - A class map without a rotation gives the photometry's point exactly.
+    - A cached value is within 0.3% of a fresh one.
+  - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/bodies` and
+    `just test-render`.
 
 ### R10.T11 The wireframe's terrain
 
@@ -1139,7 +1244,8 @@ every golden of this plan asserted on the three targets. Acceptance: `just ci`, 
   the finest level; coarse weights within ten points of brute force (T2); the readout names the
   class the shader draws most of (T10.b).
 - **Photometry:** the scaled classes reproduce the body's p (T10.a); the handover changes brightness
-  by under 1/3 stop at two phases (T10.e).
+  by under 1/3 stop at two phases (T10.e); a patterned body's point equals its disc at the 3 px
+  switch to 1% (T10.f).
 - **Knowledge:** unsurveyed ground has no terrain, no contours, no class-map texel and no reading; a
   readout's uncertainty matches the pooled RMS of the unsurveyed bands (T5, T12); the image is the
   same at every survey resolution that covers it (T6.a, T10.c, T10.d).
@@ -1169,6 +1275,13 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
 
 ## Risks and open points
 
+- **The local body's terrain sits ωτ ahead of its lighting (from R07.T10.a, ruled 2026-10-05).**
+  R07 lights the ship's local body at its retarded time, T − τ, as the brainstorm draws every
+  time-varying state, while its geometry, and so this plan's terrain, is drawn at the present.
+  Once rotation is drawn, the terrain sits ωτ ahead of its lighting: about 2,100 km at a Jupiter's
+  equator from its Hill sphere's edge (τ 168 s), about 38 km at τ 3 s. This plan decides whether
+  to draw rotation-dependent state (the class map's orientation, shadows on terrain) at the
+  retarded time too.
 - **The selection bound's calibration is an owner ruling.** If T4.a's 99.9th-percentile ratios fall
   at the expected 0.3–0.5, the hard bound costs four to eleven times the patches of a perfect bound;
   selection by min(hard, 4σ) recovers two to three times. The owner rules with T4.a's recorded
@@ -1197,12 +1310,16 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   carries this plan's per-patch figures (Design note 15); of R07, which lands first, `body_brdf`
   with per-texel lunar-Lambert parameters, its disc sampling this plan's class map, and
   `sphere_irradiance` taking a local horizon, are hooks R07 creates with defaults (R07.T4.c, T6.a,
-  T6.c, T8.b) and this plan fills (T8.b, T10.b, T10.d); of R08, the sun's refracted elevation for
-  the shadow test; of R11, that its cloud shadows enter through `terrain_shadow_factor`, its ring
-  shadows through `terrain_ring_shadow` and its diffuse cloud light through `terrain_sky_factor`
-  (R11's proposed names, adopted). R09's closed forms, per-cell resolution, header field and
-  spheroid datum (its Design note 17), R05's `rg16float` normals and slot layout, and R04's
-  `math::j0` are already carried and are listed under Consumes.
+  T6.c, T8.b) and this plan fills (T8.b, T10.b, T10.d); it also extends R07's files with an L(α)
+  channel in the phase table (T10.b), a masked bilinear class map (T10.d) and the point's class-map
+  integral (T10.f), and wires `surface` and `rotation` through R07's `litBodiesOf` (T10.d)
+  (decision-r07-t8b), and a disc's pattern waits on plan 14's rotation (P14.T46.f, read by
+  R07.T2.b); of R08, the sun's refracted elevation for the shadow test; of R11, that its cloud
+  shadows enter through `terrain_shadow_factor`, its ring shadows through `terrain_ring_shadow` and
+  its diffuse cloud light through `terrain_sky_factor` (R11's proposed names, adopted). R09's closed
+  forms, per-cell resolution, header field and spheroid datum (its Design note 17), R05's
+  `rg16float` normals and slot layout, and R04's `math::j0` are already carried and are listed under
+  Consumes.
 - **Shadows on the high setting** are taken here by the reading of Design note 11. If the roadmap
   gives them to R07 or R11 instead, T9 moves whole, and T8's horizon map stays here.
 - **`Dust` is placed by a simple rule** (arid, thin-aired, where R09's wind deposits); if the coarse
@@ -1224,3 +1341,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _Memory (item 5):_ the ceilings are unchanged: about 400 MB for the high setting's height
     cache (Design note 15) inside the 2–3 GB discrete ceiling. Only the context changes: the RTX
     3080's 10 GiB is shared with the local LLM.
+- **Class-map discs and R07's cell pass** (R07.T8.d, 2026-10-06). R07's `disc cells` pass binds
+  one class map a dispatch, so a class-map disc under 32 px sums its own cells in its draws, the
+  serial chain T8.d removes from uniform discs (about 2.0 M cycles under 4 px). T10.d is to bring
+  such discs into the pass: the frame's maps as one array texture with each record's layer in its
+  record, or one dispatch a map. Open, for the orchestrator (R07's "Deviations in T8.d, as built").

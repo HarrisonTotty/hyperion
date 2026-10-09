@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { minReticleGapDevicePx } from "../lib/strokes";
 import { between, seededRandom } from "../test/seededRandom";
 import { type Camera, project, viewBasis, type Viewport } from "./camera";
 import { buildDrawList, type DrawOp, type PolylineOp, type TicksOp } from "./drawList";
@@ -18,6 +19,11 @@ import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 const VIEWPORT: Viewport = { widthPx: 800, heightPx: 600, remPx: 16 };
+/**
+ * The reticles' least gap at a ratio of 2, CSS px: 2.5, under 0.25 rem at 100%, so that the pair
+ * stands as built but in the tests of the least gap.
+ */
+const GAP_PX = minReticleGapDevicePx(2) / 2;
 const CENTRE = { xPx: 400, yPx: 300 };
 const K = 5;
 
@@ -109,7 +115,7 @@ function sectionOf(op: DrawOp, scene: SpatialScene): Section {
 
 function sections(scene: SpatialScene, camera: Camera): Section[] {
   const order: Section[] = [];
-  for (const op of buildDrawList(scene, camera, VIEWPORT).ops) {
+  for (const op of buildDrawList(scene, camera, VIEWPORT, GAP_PX).ops) {
     const section = sectionOf(op, scene);
     if (order.at(-1) !== section) {
       order.push(section);
@@ -144,7 +150,7 @@ describe("buildDrawList order", () => {
       ),
     );
     const scene = sceneOf(points);
-    const { ops, anchors } = buildDrawList(scene, cameraAt(30), VIEWPORT);
+    const { ops, anchors } = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX);
     const depthOf = new Map(anchors.map((anchor) => [anchor.id, anchor.depth]));
 
     for (const half of ["below", "above"] as const) {
@@ -159,7 +165,7 @@ describe("buildDrawList order", () => {
   });
 
   it("puts each stalk immediately before its own symbol", () => {
-    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT);
+    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX);
 
     const pairs = ops.flatMap((op, index) => {
       const previous = ops[index - 1];
@@ -178,7 +184,9 @@ describe("buildDrawList order", () => {
       mark("zulu", local(5, 5, 2)),
     ]);
 
-    const ids = symbols(buildDrawList(scene, cameraAt(90, 0), VIEWPORT).ops).map((op) => op.id);
+    const ids = symbols(buildDrawList(scene, cameraAt(90, 0), VIEWPORT, GAP_PX).ops).map(
+      (op) => op.id,
+    );
 
     expect(ids).toEqual(["zulu", "mike", "alpha"]);
   });
@@ -188,7 +196,7 @@ describe("buildDrawList order", () => {
       mark("b-small", local(3, 4, 5), { sizeClass: 0 }),
       mark("a-large", local(3, 4, 5), { sizeClass: 4 }),
     ]);
-    const { ops, anchors } = buildDrawList(scene, cameraAt(30), VIEWPORT);
+    const { ops, anchors } = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX);
     const [only] = anchors;
 
     const picked = pick(anchors, { xPx: only?.xPx ?? 0, yPx: only?.yPx ?? 0 }, 16);
@@ -199,7 +207,7 @@ describe("buildDrawList order", () => {
 
 describe("buildDrawList marks", () => {
   it("fills a symbol above the plane and leaves one below it open, with the same outline", () => {
-    const ops = symbols(buildDrawList(MIXED, cameraAt(30), VIEWPORT).ops);
+    const ops = symbols(buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX).ops);
     const byId = new Map(ops.map((op) => [op.id, op]));
 
     expect(byId.get("a-high")?.fill).toBe("text");
@@ -213,7 +221,7 @@ describe("buildDrawList marks", () => {
       mark("near", local(1, 1, 1), { status: "available" }),
       mark("far", local(1, 1, -1), { status: "plain" }),
     ]);
-    const { ops } = buildDrawList(scene, cameraAt(30), VIEWPORT);
+    const { ops } = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX);
 
     const colours = ops.flatMap((op) =>
       op.kind === "symbol" || (op.kind === "line" && op.markId !== null)
@@ -235,6 +243,7 @@ describe("buildDrawList marks", () => {
       scene,
       { azimuthDeg: 0, elevationDeg: 0, pxPerUnit: K },
       VIEWPORT,
+      GAP_PX,
     );
     const stalk = ops.find((op) => op.kind === "line" && op.markId === "high");
 
@@ -250,7 +259,7 @@ describe("buildDrawList marks", () => {
       for (const azimuthDeg of [0, 100, 250]) {
         const scene = sceneOf([mark("near", local(-40, 0, 30)), mark("far", local(40, 0, -30))]);
         for (const op of symbols(
-          buildDrawList(scene, cameraAt(elevationDeg, azimuthDeg), VIEWPORT).ops,
+          buildDrawList(scene, cameraAt(elevationDeg, azimuthDeg), VIEWPORT, GAP_PX).ops,
         )) {
           sizes.add(op.radiusPx);
         }
@@ -261,7 +270,12 @@ describe("buildDrawList marks", () => {
   });
 
   it("carries no opacity or depth shading on any op", () => {
-    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT);
+    const { ops } = buildDrawList(
+      { ...MIXED, destinationId: "c-high" },
+      cameraAt(30),
+      VIEWPORT,
+      GAP_PX,
+    );
     const allowed = new Set([
       "kind",
       "from",
@@ -270,10 +284,13 @@ describe("buildDrawList marks", () => {
       "centre",
       "radiusPx",
       "halfSizePx",
+      "bracketHalfSizePx",
+      "gapPx",
       "segments",
       "stroke",
       "fill",
       "widthPx",
+      "weight",
       "markId",
       "id",
       "shape",
@@ -292,7 +309,7 @@ describe("buildDrawList marks", () => {
   ])("anchors a class-%i mark with its full radius of %f px", (sizeClass, radiusPx) => {
     const scene = sceneOf([mark("only", local(1, 2, 3), { sizeClass })]);
 
-    expect(buildDrawList(scene, cameraAt(30), VIEWPORT).anchors).toEqual([
+    expect(buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).anchors).toEqual([
       expect.objectContaining({ id: "only", radiusPx }),
     ]);
   });
@@ -308,7 +325,7 @@ describe("buildDrawList marks", () => {
       ),
     );
 
-    const list = buildDrawList(sceneOf(points), cameraAt(30), VIEWPORT);
+    const list = buildDrawList(sceneOf(points), cameraAt(30), VIEWPORT, GAP_PX);
 
     expect(list.anchors).toHaveLength(4_000);
     expect(symbols(list.ops)).toHaveLength(4_000);
@@ -320,7 +337,7 @@ describe("buildDrawList annotations", () => {
     scene: SpatialScene,
     camera: Camera,
   ): Array<Extract<DrawOp, { kind: "circle" }>> {
-    return buildDrawList(scene, camera, VIEWPORT).ops.filter(
+    return buildDrawList(scene, camera, VIEWPORT, GAP_PX).ops.filter(
       (op): op is Extract<DrawOp, { kind: "circle" }> => op.kind === "circle",
     );
   }
@@ -339,7 +356,7 @@ describe("buildDrawList annotations", () => {
   });
 
   it("ticks the edge of the data every 10°, outwards", () => {
-    const segments = buildDrawList(MIXED, cameraAt(30), VIEWPORT).ops.flatMap((op) =>
+    const segments = buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX).ops.flatMap((op) =>
       op.kind === "ticks" ? op.segments : [],
     );
     const fromCentre = (point: { xPx: number; yPx: number }): number =>
@@ -357,7 +374,7 @@ describe("buildDrawList annotations", () => {
       { radius: 50, role: "range", label: "RANGE 50 ly SET" },
       { radius: 50, role: "data_edge", label: "QUERY EDGE 50 ly" },
     ];
-    const list = buildDrawList(sceneOf([], { spheres }), cameraAt(30), VIEWPORT);
+    const list = buildDrawList(sceneOf([], { spheres }), cameraAt(30), VIEWPORT, GAP_PX);
 
     expect(list.ops.filter((op) => op.kind === "circle")).toEqual([
       expect.objectContaining({ radiusPx: 50 * K, widthPx: 1.5 }),
@@ -379,6 +396,7 @@ describe("buildDrawList annotations", () => {
       scene,
       { azimuthDeg: 0, elevationDeg: 90, pxPerUnit: K },
       VIEWPORT,
+      GAP_PX,
     ).curveLabels;
 
     expect(labels).toEqual([
@@ -395,14 +413,45 @@ describe("buildDrawList annotations", () => {
     expect(ring?.yPx).toBeCloseTo(150, 9);
   });
 
+  it("gives a ring's label the points along its ring every 15° either way from its coreward point, the far side last (R07.T16.j)", () => {
+    const scene = sceneOf([], {
+      plane: { spacing: 20, extent: 50, rings: [{ radius: 30, label: "PLANE 30 ly" }] },
+    });
+    const camera = cameraAt(30);
+
+    const [label] = buildDrawList(scene, camera, VIEWPORT, GAP_PX).curveLabels;
+    const along = label?.placement === "ring" ? (label.alongPx ?? []) : [];
+    const ringAt = (angleDeg: number) => {
+      const angle = (angleDeg * Math.PI) / 180;
+      return project(
+        local(30 * Math.cos(angle), 30 * Math.sin(angle), 0),
+        viewBasis(FRAME, camera),
+        camera,
+        VIEWPORT,
+      );
+    };
+
+    expect(along).toHaveLength(23);
+    for (const [index, angleDeg] of [
+      [0, 15],
+      [1, -15],
+      [2, 30],
+      [21, -165],
+      [22, 180],
+    ] as const) {
+      expect(along[index]?.xPx).toBeCloseTo(ringAt(angleDeg).xPx, 9);
+      expect(along[index]?.yPx).toBeCloseTo(ringAt(angleDeg).yPx, 9);
+    }
+  });
+
   it("gives no label to an unlabelled grid ring", () => {
     expect(
-      buildDrawList(MIXED, cameraAt(30), VIEWPORT).curveLabels.map((label) => label.text),
+      buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX).curveLabels.map((label) => label.text),
     ).toEqual(["RANGE 50 ly SET", "QUERY EDGE 80 ly"]);
   });
 
   it("draws the selection reticle in accent, half a rem larger than the symbol", () => {
-    const reticles = buildDrawList(MIXED, cameraAt(30), VIEWPORT).ops.filter(
+    const reticles = buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX).ops.filter(
       (op) => op.kind === "reticle",
     );
 
@@ -411,27 +460,81 @@ describe("buildDrawList annotations", () => {
     ]);
   });
 
-  it("draws the destination in target, outside the selection when a mark is both", () => {
+  it("draws the destination as target chevrons outside the selection's bracket when a mark is both", () => {
     const scene = { ...MIXED, destinationId: "c-high" };
 
-    const reticles = buildDrawList(scene, cameraAt(30), VIEWPORT).ops.filter(
-      (op) => op.kind === "reticle",
+    const marks = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).ops.filter(
+      (op) => op.kind === "reticle" || op.kind === "chevrons",
     );
 
-    expect(reticles).toEqual([
-      expect.objectContaining({ stroke: "accent", halfSizePx: 10 }),
-      expect.objectContaining({ stroke: "target", halfSizePx: 14 }),
+    expect(marks).toEqual([
+      expect.objectContaining({ kind: "reticle", stroke: "accent", halfSizePx: 10 }),
+      expect.objectContaining({
+        kind: "chevrons",
+        id: "c-high",
+        stroke: "target",
+        bracketHalfSizePx: 10,
+        gapPx: 4,
+      }),
     ]);
   });
 
+  it.each([
+    [1, [5.12, 4, 4, 4]],
+    [0.8, [5.12, 4, 3.2, 3.2]],
+  ] as const)(
+    "stands the destination's apices outside the bracket's place by the larger of 0.25 rem and 5.12, 4, 2.5 and 2.5 px: at %s, %s px",
+    (interfaceScale, expected) => {
+      const viewport = { ...VIEWPORT, remPx: 16 * interfaceScale };
+      const gaps = [0.78125, 1, 2, 3].map((ratio) => {
+        const chevrons = buildDrawList(
+          { ...MIXED, destinationId: "c-high" },
+          cameraAt(30),
+          viewport,
+          minReticleGapDevicePx(ratio) / ratio,
+        ).ops.find((op) => op.kind === "chevrons");
+        return Math.round((chevrons?.kind === "chevrons" ? chevrons.gapPx : 0) * 100) / 100;
+      });
+
+      expect(gaps).toEqual(expected);
+    },
+  );
+
+  it("stands a lone destination where its pair does, never at the bracket's place", () => {
+    const gapPx = minReticleGapDevicePx(0.78125) / 0.78125;
+    const chevronsOf = (selectedId: string | null): unknown =>
+      buildDrawList(
+        { ...MIXED, selectedId, destinationId: "c-high" },
+        cameraAt(30),
+        VIEWPORT,
+        gapPx,
+      ).ops.find((op) => op.kind === "chevrons");
+
+    expect(chevronsOf(null)).toEqual(chevronsOf("c-high"));
+    expect(chevronsOf(null)).toEqual(
+      expect.objectContaining({ bracketHalfSizePx: 10, gapPx: Math.max(4, gapPx) }),
+    );
+  });
+
+  it("draws no reticle in the target colour: corner brackets mean the selection only", () => {
+    const ops = buildDrawList(
+      { ...MIXED, selectedId: null, destinationId: "c-high" },
+      cameraAt(30),
+      VIEWPORT,
+      GAP_PX,
+    ).ops;
+
+    expect(ops.filter((op) => op.kind === "reticle")).toEqual([]);
+  });
+
   it("draws the reticles after the spheres, last of all", () => {
-    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT);
+    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX);
 
     expect(ops.at(-1)?.kind).toBe("reticle");
   });
 
   it("draws the grid and rings in the line token", () => {
-    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT);
+    const { ops } = buildDrawList(MIXED, cameraAt(30), VIEWPORT, GAP_PX);
     const plane = ops.filter((op) => sectionOf(op, MIXED) === "plane");
 
     expect(plane.filter((op) => op.kind === "polyline")).toHaveLength(2);
@@ -496,7 +599,9 @@ describe("buildDrawList paths", () => {
   it("projects a circular path tilted 60° as an ellipse with axes 1 and 0.5", () => {
     const scene = bareScene({ paths: [path("orbit", tiltedCircle(1, 60))] });
 
-    const points = polylines(buildDrawList(scene, TOP, VIEWPORT).ops).flatMap((op) => op.points);
+    const points = polylines(buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops).flatMap(
+      (op) => op.points,
+    );
 
     // From the top coreward is up and spinward right: the unit circle keeps its extent along
     // coreward and is foreshortened by cos 60° along spinward.
@@ -515,7 +620,7 @@ describe("buildDrawList paths", () => {
   it("cuts a path where it crosses the plane, at the crossing", () => {
     const scene = bareScene({ paths: [path("cross", [local(-10, 0, -5), local(10, 0, 5)])] });
 
-    const pieces = polylines(buildDrawList(scene, TOP, VIEWPORT).ops);
+    const pieces = polylines(buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops);
 
     // Seen from the top the crossing, on the plane at the centre, is the centre of the screen.
     expect(pieces).toHaveLength(2);
@@ -536,7 +641,7 @@ describe("buildDrawList paths", () => {
       });
 
       const camera = cameraAt(elevationDeg);
-      const { ops } = buildDrawList(scene, camera, VIEWPORT);
+      const { ops } = buildDrawList(scene, camera, VIEWPORT, GAP_PX);
 
       // The path is the only thing drawn in --text, and its piece below the plane starts where it
       // does; the grid and rings are --line.
@@ -560,7 +665,7 @@ describe("buildDrawList paths", () => {
     const scene = bareScene({ paths: [path("orbit", tiltedCircle(10, 30))] });
 
     // The circle starts on the plane at its coreward point, rises, and comes back from below.
-    expect(polylines(buildDrawList(scene, cameraAt(30), VIEWPORT).ops)).toHaveLength(2);
+    expect(polylines(buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).ops)).toHaveLength(2);
   });
 
   it("draws a reference path in --text-muted and the selected one in --text, after it in its half", () => {
@@ -571,7 +676,7 @@ describe("buildDrawList paths", () => {
       ],
     });
 
-    const strokes = polylines(buildDrawList(scene, cameraAt(30), VIEWPORT).ops).map(
+    const strokes = polylines(buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).ops).map(
       (op) => op.stroke,
     );
 
@@ -586,7 +691,7 @@ describe("buildDrawList paths", () => {
       paths: [path("orbit", tiltedCircle(10, 0))],
     });
 
-    const kinds = buildDrawList(scene, cameraAt(30), VIEWPORT).ops.map((op) => op.kind);
+    const kinds = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).ops.map((op) => op.kind);
 
     expect(kinds).toEqual(["polyline", "line", "symbol"]);
   });
@@ -594,7 +699,9 @@ describe("buildDrawList paths", () => {
   it("draws a reference path 1 px wide", () => {
     const scene = bareScene({ paths: [path("orbit", tiltedCircle(10, 0))] });
 
-    expect(polylines(buildDrawList(scene, TOP, VIEWPORT).ops).map((op) => op.widthPx)).toEqual([1]);
+    expect(
+      polylines(buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops).map((op) => op.widthPx),
+    ).toEqual([1]);
   });
 
   it("draws the selected path 2 px wide, so that width and not colour alone carries it", () => {
@@ -607,15 +714,15 @@ describe("buildDrawList paths", () => {
 
     // The orchestrator's ruling 44.2: --text against --text-muted is only 1.88:1, and a stale view
     // mutes both.
-    expect(polylines(buildDrawList(scene, TOP, VIEWPORT).ops).map((op) => op.widthPx)).toEqual([
-      1, 2,
-    ]);
+    expect(
+      polylines(buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops).map((op) => op.widthPx),
+    ).toEqual([1, 2]);
   });
 
   it("gives a path no anchor, so that a pick on it finds nothing", () => {
     const scene = bareScene({ paths: [path("orbit", tiltedCircle(10, 0))] });
 
-    const { ops, anchors } = buildDrawList(scene, TOP, VIEWPORT);
+    const { ops, anchors } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
 
     const onTheOrbit = polylines(ops)[0]?.points[5] ?? CENTRE;
     expect(anchors).toEqual([]);
@@ -631,7 +738,7 @@ describe("buildDrawList paths", () => {
       ],
     });
 
-    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT);
+    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
 
     // Spinward is to the right from the top; the unlabelled path has no label.
     expect(curveLabels.map((label) => label.key)).toEqual(["ring:0", "path:b"]);
@@ -654,7 +761,7 @@ function inLine(ops: ReadonlyArray<DrawOp>): DrawOp[] {
 describe("buildDrawList annuli", () => {
   it("draws an annulus as its two edges, at their radii on the plane", () => {
     const edges = polylines(
-      buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT).ops,
+      buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT, GAP_PX).ops,
     );
 
     expect(edges).toHaveLength(2);
@@ -670,7 +777,7 @@ describe("buildDrawList annuli", () => {
 
   it("draws an annulus's edges as 1 px --text-muted hairlines", () => {
     const edges = polylines(
-      buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT).ops,
+      buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT, GAP_PX).ops,
     );
 
     expect(edges.map((edge) => [edge.stroke, edge.widthPx])).toEqual([
@@ -684,7 +791,7 @@ describe("buildDrawList annuli", () => {
       annuli: [annulus("belt", 10, 12, { ticks: true, selected: true })],
     });
 
-    const { ops } = buildDrawList(scene, TOP, VIEWPORT);
+    const { ops } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
 
     expect(polylines(ops).map((edge) => [edge.stroke, edge.widthPx])).toEqual([
       ["text", 2],
@@ -697,14 +804,19 @@ describe("buildDrawList annuli", () => {
 
   it("leaves --line to the plane's grid and rings when paths and annuli are drawn", () => {
     const withRing = { spacing: 20, extent: 50, rings: [{ radius: 20, label: "20 AU" }] };
-    const furniture = buildDrawList(bareScene({ plane: withRing }), cameraAt(30), VIEWPORT).ops;
+    const furniture = buildDrawList(
+      bareScene({ plane: withRing }),
+      cameraAt(30),
+      VIEWPORT,
+      GAP_PX,
+    ).ops;
     const scene = bareScene({
       plane: withRing,
       paths: [path("orbit", tiltedCircle(10, 30))],
       annuli: [annulus("hz", 10, 20), annulus("belt", 30, 32, { ticks: true })],
     });
 
-    const { ops } = buildDrawList(scene, cameraAt(30), VIEWPORT);
+    const { ops } = buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX);
 
     // The orchestrator's ruling 35: what is drawn in --line is the plane's own furniture, the same
     // with the paths and annuli as without them.
@@ -715,7 +827,7 @@ describe("buildDrawList annuli", () => {
   it("draws an annulus with the plane, after its grid and rings and before the marks above it", () => {
     const scene = sceneOf([mark("above", local(0, 0, 5))], { annuli: [annulus("hz", 10, 20)] });
 
-    const { ops } = buildDrawList(scene, TOP, VIEWPORT);
+    const { ops } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
 
     // The grid's two rings come first among the polylines, then the annulus's two edges.
     const polylineAt = ops.flatMap((op, index) => (op.kind === "polyline" ? [index] : []));
@@ -727,7 +839,12 @@ describe("buildDrawList annuli", () => {
   });
 
   it("draws no ticks for an annulus that is not a belt", () => {
-    const { ops } = buildDrawList(bareScene({ annuli: [annulus("hz", 10, 20)] }), TOP, VIEWPORT);
+    const { ops } = buildDrawList(
+      bareScene({ annuli: [annulus("hz", 10, 20)] }),
+      TOP,
+      VIEWPORT,
+      GAP_PX,
+    );
 
     expect(ops.some((op) => op.kind === "ticks")).toBe(false);
   });
@@ -735,7 +852,7 @@ describe("buildDrawList annuli", () => {
   it("joins a belt's edges with radial ticks every 10° from coreward", () => {
     const scene = bareScene({ annuli: [annulus("belt", 10, 12, { ticks: true })] });
 
-    const ticks = buildDrawList(scene, TOP, VIEWPORT).ops.filter(
+    const ticks = buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops.filter(
       (op): op is TicksOp => op.kind === "ticks",
     );
 
@@ -765,7 +882,7 @@ describe("buildDrawList annuli", () => {
   it("ticks each edge of an annulus with edge ticks into the band, 0.25rem long", () => {
     const scene = bareScene({ annuli: [annulus("optimistic", 10, 20, { edgeTicks: true })] });
 
-    const ticks = buildDrawList(scene, TOP, VIEWPORT).ops.filter(
+    const ticks = buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops.filter(
       (op): op is TicksOp => op.kind === "ticks",
     );
 
@@ -786,7 +903,7 @@ describe("buildDrawList annuli", () => {
   it("ticks a lone edge with edge ticks outwards", () => {
     const scene = bareScene({ annuli: [annulus("from", 10, 10, { edgeTicks: true })] });
 
-    const segments = buildDrawList(scene, TOP, VIEWPORT).ops.flatMap((op) =>
+    const segments = buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops.flatMap((op) =>
       op.kind === "ticks" ? op.segments : [],
     );
 
@@ -805,7 +922,7 @@ describe("buildDrawList annuli", () => {
       annuli: [annulus("narrow", 10, 10 + 2 / K, { edgeTicks: true })],
     });
 
-    const segments = buildDrawList(scene, TOP, VIEWPORT).ops.flatMap((op) =>
+    const segments = buildDrawList(scene, TOP, VIEWPORT, GAP_PX).ops.flatMap((op) =>
       op.kind === "ticks" ? op.segments : [],
     );
 
@@ -821,7 +938,7 @@ describe("buildDrawList annuli", () => {
       annuli: [annulus("snow", 15, 15, { ticks: true }), annulus("inside", 0, 5)],
     });
 
-    const { ops } = buildDrawList(scene, TOP, VIEWPORT);
+    const { ops } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
 
     expect(polylines(ops)).toHaveLength(2);
     expect(ops.some((op) => op.kind === "ticks")).toBe(false);
@@ -830,7 +947,7 @@ describe("buildDrawList annuli", () => {
   it("draws an annulus about its own centre, on the plane beneath it", () => {
     const scene = bareScene({ annuli: [annulus("zone", 5, 5, { centre: local(10, 0, 7) })] });
 
-    const [edge] = polylines(buildDrawList(scene, cameraAt(0, 90), VIEWPORT).ops);
+    const [edge] = polylines(buildDrawList(scene, cameraAt(0, 90), VIEWPORT, GAP_PX).ops);
 
     // Seen from the front, the plane is a line across the middle of the screen.
     for (const point of edge?.points ?? []) {
@@ -843,7 +960,7 @@ describe("buildDrawList annuli", () => {
       annuli: [annulus("hz", 10, 20, { label: "HABITABLE ZONE" }), annulus("unlabelled", 3, 4)],
     });
 
-    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT);
+    const { curveLabels } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
 
     // Rimward is straight down the screen from the top.
     expect(curveLabels).toEqual([
@@ -854,7 +971,28 @@ describe("buildDrawList annuli", () => {
         xPx: expect.closeTo(CENTRE.xPx, 9),
         yPx: expect.closeTo(CENTRE.yPx + 20 * K, 9),
         stack: 0,
+        alongPx: expect.any(Array),
       },
+    ]);
+  });
+
+  it("gives an annulus's label the points along its outer edge either way from its rimward point (R07.T16.j)", () => {
+    const scene = bareScene({ annuli: [annulus("hz", 10, 20, { label: "HABITABLE ZONE" })] });
+
+    const [label] = buildDrawList(scene, TOP, VIEWPORT, GAP_PX).curveLabels;
+    const along = label?.placement === "ring" ? (label.alongPx ?? []) : [];
+    // From the top, 15° on from rimward, away from spinward, which is to the left.
+    const next = project(
+      local(20 * Math.cos((195 * Math.PI) / 180), 20 * Math.sin((195 * Math.PI) / 180), 0),
+      viewBasis(FRAME, TOP),
+      TOP,
+      VIEWPORT,
+    );
+
+    expect([along.length, along[0]?.xPx, along[0]?.yPx]).toEqual([
+      23,
+      expect.closeTo(next.xPx, 9),
+      expect.closeTo(next.yPx, 9),
     ]);
   });
 
@@ -863,7 +1001,7 @@ describe("buildDrawList annuli", () => {
       annuli: [annulus("wide", 10, 20, { label: "OPTIMISTIC", labelSpinward: true })],
     });
 
-    const label = buildDrawList(scene, TOP, VIEWPORT).curveLabels.find(
+    const label = buildDrawList(scene, TOP, VIEWPORT, GAP_PX).curveLabels.find(
       (candidate) => candidate.key === "annulus:wide",
     );
     const spinward = project(local(0, 20, 0), viewBasis(FRAME, TOP), TOP, VIEWPORT);
@@ -875,7 +1013,7 @@ describe("buildDrawList annuli", () => {
   it("gives an annulus no anchor, so that it is never picked", () => {
     const scene = bareScene({ annuli: [annulus("belt", 10, 20, { ticks: true })] });
 
-    expect(buildDrawList(scene, TOP, VIEWPORT).anchors).toEqual([]);
+    expect(buildDrawList(scene, TOP, VIEWPORT, GAP_PX).anchors).toEqual([]);
   });
 });
 
@@ -883,8 +1021,8 @@ describe("buildDrawList without paths or annuli", () => {
   it("draws a scene that leaves them out exactly as one with none", () => {
     const camera = cameraAt(30);
 
-    expect(buildDrawList({ ...MIXED, paths: [], annuli: [] }, camera, VIEWPORT)).toEqual(
-      buildDrawList(MIXED, camera, VIEWPORT),
+    expect(buildDrawList({ ...MIXED, paths: [], annuli: [] }, camera, VIEWPORT, GAP_PX)).toEqual(
+      buildDrawList(MIXED, camera, VIEWPORT, GAP_PX),
     );
   });
 });
@@ -899,7 +1037,7 @@ describe("buildDrawList with the outlines the later plans add", () => {
         mark("below", local(0, 0, -5), { shape }),
       ]);
 
-      const { ops, anchors } = buildDrawList(scene, TOP, VIEWPORT);
+      const { ops, anchors } = buildDrawList(scene, TOP, VIEWPORT, GAP_PX);
 
       const [open, filled] = symbols(ops);
       expect(open?.fill).toBeNull();
@@ -1002,10 +1140,12 @@ describe("buildDrawList on a tilted frame", () => {
     (azimuthDeg, elevationDeg) => {
       const camera: Camera = { azimuthDeg, elevationDeg, pxPerUnit: K };
 
-      const drawn = buildDrawList(TILTED_SCENE, camera, VIEWPORT);
+      const drawn = buildDrawList(TILTED_SCENE, camera, VIEWPORT, GAP_PX);
 
       // The camera's angles are the frame's own, so the picture is the same to rounding.
-      expect(departures(drawn, buildDrawList(GALACTIC_SCENE, camera, VIEWPORT), 1e-9)).toEqual([]);
+      expect(
+        departures(drawn, buildDrawList(GALACTIC_SCENE, camera, VIEWPORT, GAP_PX), 1e-9),
+      ).toEqual([]);
     },
   );
 
@@ -1022,6 +1162,6 @@ describe("buildDrawList on a tilted frame", () => {
     });
     const scene = bareScene({ frame: skew, paths: [path("in-plane", orbit)] });
 
-    expect(polylines(buildDrawList(scene, cameraAt(30), VIEWPORT).ops)).toHaveLength(1);
+    expect(polylines(buildDrawList(scene, cameraAt(30), VIEWPORT, GAP_PX).ops)).toHaveLength(1);
   });
 });

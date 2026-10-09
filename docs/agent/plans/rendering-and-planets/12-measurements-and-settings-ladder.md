@@ -700,8 +700,43 @@ names, and the benchmarks the owning plan recorded. List every pass label the ha
 the view roles that run it. Write the descent's length, from R05's script as built, into the spans
 of Design note 13.
 
+**The platform audit** (added 2026-10-06 by a delegated decision, `decision-cross-platform-server.md`
+item 7, which was a brief look and not an audit). HYPERION runs on Linux, macOS and Windows. Before
+a macOS or Windows record counts, T0 settles each item below and writes the outcome into the task
+it falls on:
+
+- _GPU memory off Linux (T3)._ DRM fdinfo (`main/fdinfo.ts`) is Linux's alone. Off Linux the
+  GPU-memory headline falls to `nvidia-smi`, then to `adapter-tally` (R05's `results.ts`). The source
+  is labelled honestly, but the tally is a different quantity from the DRM resident bytes that R05's
+  memory limits were set against. On Windows under WDDM, `nvidia-smi` reports per-process memory as
+  N/A, which parses to `null`. T3 audits this before a macOS or Windows memory verdict counts.
+- _`workingSetSize` (T3)._ Electron's process metric (R05's `results.ts`, the app's column) is the
+  resident set on Linux, Chromium's own metric on macOS and the working set on Windows, so a
+  comparison across platforms needs T3's audit.
+- _The launch mode off Linux (T4.a)._ `graphics/switches.ts`, `preload/graphicsLaunch.ts` and
+  `crashLoop.ts` launch in `default` mode off Linux. So `--safe-mode` is ignored, a crash loop is
+  left to Chromium's own fallback, and `gpuTiming` is never on, which leaves Dawn's
+  `timestamp_quantization` toggle in place: GPU-time rows carry the quantized timer's ±65.5 µs
+  band, which decisions-r06-r07.md item 8 already handles honestly. Dawn's toggles do not depend on
+  the backend, so does `--disable-dawn-features=timestamp_quantization` work on Metal and D3D12? If
+  it does, macOS runs can have full timers. This is unverified.
+- _The samplers and preconditions (T2)._ `src/main/perf/samplers.ts` and `preconditions.ts` read
+  only `/sys`: the GPU's frequency, thermal state, throttling, mains and RAPL. For macOS and
+  Windows, decide whether each records `missing` with a reason or samples through a platform tool:
+  `pmset -g therm` needs no root, and `powermetrics` does.
+- _The load average and the governor (T2's `checkQuiet`)._ Windows keeps no load average, and only
+  Linux has a cpufreq governor. R05.T20's `main/machineLoad.ts` (`readLoadAverage`, `quietOf`)
+  marks a Windows run provisional, its quiet rule unchecked; `checkQuiet` takes the same rule rather
+  than reading `os.loadavg()`'s zeros as a quiet machine.
+- _R07's quiet rules._ The views check (`main/viewsCheckResults.ts`) and the child-window check's
+  summary (`smoke/childWindow.ts`) judge `load >= 1` alone, so a Windows run would claim a quiet
+  machine. Each should take `quietOf` (found by R05.T20).
+- _Fine as they are:_ `x11RelaunchArgs` (Linux under Wayland only), macOS keeping the app alive with
+  no window and `activate` reopening it, and the handling of a missing `nvidia-smi` (`ENOENT`).
+
 Files: this plan. Acceptance: `npx prettier --check` on this plan; every Consumes name resolves by
-`grep` in the tree or is listed as missing with its owner.
+`grep` in the tree or is listed as missing with its owner; each item of the platform audit has its
+outcome in the task it falls on.
 
 ### R12.T1 The run record, the results store and the fold
 
@@ -836,6 +871,18 @@ fixtures.
   that `parsePerfRecord` accepts; samples outside a repetition's span are not in it; the server is
   restarted once per repetition; a trace that never settles ends at ten minutes as `NOT STEADY`; a
   monotone five is flagged and a four-up-one-down five is not. Acceptance: `pnpm test`, `just ci`.
+  - _The local server's launch contract_ (added 2026-10-06 by a delegated decision,
+    `decision-cross-platform-server.md` item 3, as plan 04's P04.T17.c built it):
+    - Start `hyperion-server` with `--stop-on-stdin-close` (or `HYPERION_STOP_ON_STDIN_CLOSE=1`),
+      piped stdio and an explicit `--data-dir` under `app.getPath("userData")`, a fresh one for each
+      repetition's restart. The default `./hyperion-data` is relative to the working directory,
+      which is the read-only `/` for a packaged macOS app and the install directory on Windows.
+    - Stop it by ending its stdin, waiting up to 10 s, then calling `kill()`. On Unix that sends
+      SIGTERM: a second stop request, which forces exit 1, if the shutdown that stdin began is
+      still running, and otherwise a graceful stop. On Windows `kill()` terminates the process. If
+      the client dies, the pipe closes on every platform, so the server never outlives it.
+    - How the launcher learns the port is this task's to settle: `--port 0` and the server's
+      `listening` line, or a fixed port.
 - **R12.T4.c The renderer's half.** `view/perf/runPerfScene.ts` over R05's `metrics.ts`: the
   scene from `config()`, its warm-up pose, the resets of Design note 13 before each repetition,
   the repetitions with R05's metrics, the pass times by `PASS_ROWS` keyed by view role and label,
