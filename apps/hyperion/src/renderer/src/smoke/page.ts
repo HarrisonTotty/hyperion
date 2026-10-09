@@ -47,7 +47,7 @@ import { checkTwins } from "./twins";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
-import { checkForcedLoss, checkTargetsAsyncIndirectTiming } from "./work";
+import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
 
 /** What the page reports, as `src/smoke/result.ts` reads it. */
 interface Report {
@@ -172,6 +172,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     checkTargetsAsyncIndirectTiming(engine, checks),
   );
   await checks.group("T9.i material state and the splat", () => checkMaterialState(engine, checks));
+  await checks.group("R08.T0 one-layer arrays in compute", () =>
+    checkOneLayerArrays(engine, checks),
+  );
 
   await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
 

@@ -35,15 +35,57 @@ function capabilities(
 describe("a kernel's bindings", () => {
   it("are read by name from the source's declarations", () => {
     const bindings = kernelBindings(PAIR.reference);
-    expect(Object.fromEntries(bindings)).toEqual({
-      values: { group: 0, binding: 0, kind: "storage", writable: false },
-      total: { group: 0, binding: 1, kind: "storage", writable: true },
-      params: { group: 1, binding: 0, kind: "uniform", writable: false },
-      table: { group: 2, binding: 1, kind: "texture", writable: false },
-      target: { group: 2, binding: 2, kind: "storage-texture", writable: true },
-      linear: { group: 2, binding: 3, kind: "sampler", writable: false },
-      lookup: { group: 2, binding: 4, kind: "storage-texture", writable: false },
+    expect(Object.fromEntries(bindings)).toStrictEqual({
+      values: { group: 0, binding: 0, kind: "storage", writable: false, viewDimension: undefined },
+      total: { group: 0, binding: 1, kind: "storage", writable: true, viewDimension: undefined },
+      params: { group: 1, binding: 0, kind: "uniform", writable: false, viewDimension: undefined },
+      table: { group: 2, binding: 1, kind: "texture", writable: false, viewDimension: "3d" },
+      target: {
+        group: 2,
+        binding: 2,
+        kind: "storage-texture",
+        writable: true,
+        viewDimension: "2d",
+      },
+      linear: { group: 2, binding: 3, kind: "sampler", writable: false, viewDimension: undefined },
+      lookup: {
+        group: 2,
+        binding: 4,
+        kind: "storage-texture",
+        writable: false,
+        viewDimension: "2d",
+      },
     });
+  });
+
+  it("report each texture's declared view dimension, an array's as 2d-array (R08.T0)", () => {
+    const declared = [
+      ["a", "texture_1d<f32>", "1d"],
+      ["b", "texture_storage_1d<r32float, write>", "1d"],
+      ["c", "texture_2d<f32>", "2d"],
+      ["d", "texture_depth_2d", "2d"],
+      ["e", "texture_multisampled_2d<f32>", "2d"],
+      ["f", "texture_depth_multisampled_2d", "2d"],
+      ["g", "texture_storage_2d<rgba16float, write>", "2d"],
+      ["h", "texture_2d_array<f32>", "2d-array"],
+      ["i", "texture_depth_2d_array", "2d-array"],
+      ["j", "texture_storage_2d_array<rgba16float, write>", "2d-array"],
+      ["k", "texture_3d<u32>", "3d"],
+      ["l", "texture_storage_3d<rgba16float, read_write>", "3d"],
+      ["m", "texture_cube<f32>", "cube"],
+      ["n", "texture_depth_cube", "cube"],
+      ["o", "texture_cube_array<f32>", "cube-array"],
+      ["p", "texture_depth_cube_array", "cube-array"],
+      ["q", "sampler_comparison", undefined],
+    ] as const;
+    const bindings = kernelBindings(
+      declared
+        .map(([name, type], index) => `@group(0) @binding(${index}) var ${name} : ${type};`)
+        .join("\n"),
+    );
+    expect(
+      Object.fromEntries([...bindings].map(([name, b]) => [name, b.viewDimension])),
+    ).toStrictEqual(Object.fromEntries(declared.map(([name, , dimension]) => [name, dimension])));
   });
 });
 

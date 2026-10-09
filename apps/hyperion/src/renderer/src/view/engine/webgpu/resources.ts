@@ -58,6 +58,25 @@ export function viewDimensionOf(spec: TextureSpec): GPUTextureViewDimension {
   return VIEW_DIMENSIONS[spec.dimension];
 }
 
+/**
+ * Whether a texture whose own view dimension is `own` binds where a layout declares `declared`:
+ * the one rule of the material and compute paths.
+ *
+ * @remarks
+ * The same dimension always binds. A single-layer 2D texture (`own` `2d`) also binds as a
+ * one-layer `2d-array`, a view WebGPU allows (W3C WebGPU, §6.2.1 "Texture View Creation":
+ * `"2d-array"` asks only that the texture be `"2d"`, whatever its layer count), so that a
+ * material declaring an array binds it whatever its layer count (R05.T11.a's normals atlas, whose
+ * layers depend on the device's limits), and a kernel declaring `texture_2d_array` or
+ * `texture_storage_2d_array` binds a one-layer table (R08.T0). Nothing else is reinterpreted.
+ */
+export function viewDimensionBinds(
+  declared: GPUTextureViewDimension,
+  own: GPUTextureViewDimension,
+): boolean {
+  return own === declared || (declared === "2d-array" && own === "2d");
+}
+
 /** The name a packed star cube takes when its caller names none. */
 export const PACKED_CUBE_NAME = "packed star cube";
 

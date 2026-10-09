@@ -32,7 +32,7 @@ import {
   SHADER_STAGE,
 } from "./materials";
 import type { MeshRecord } from "./meshes";
-import { viewDimensionOf } from "./resources";
+import { viewDimensionBinds, viewDimensionOf } from "./resources";
 import type { TextureBindingSpec } from "../types";
 import {
   FRAME_BYTES,
@@ -623,22 +623,6 @@ function optionalTimestamps(writes: GPURenderPassTimestampWrites | undefined): {
   readonly timestampWrites?: GPURenderPassTimestampWrites;
 } {
   return writes === undefined ? {} : { timestampWrites: writes };
-}
-
-/**
- * Whether a texture whose own view dimension is `own` binds where a layout declares `declared`.
- *
- * @remarks
- * The same dimension always binds. A single-layer 2D texture (`own` `2d`) also binds as a
- * one-layer `2d-array`, a view WebGPU allows (§6.1.4, `createView` with `arrayLayerCount` 1), so
- * that a material declaring an array binds it whatever its layer count (R05.T11.a's normals atlas,
- * whose layers depend on the device's limits). Nothing else is reinterpreted.
- */
-export function viewDimensionBinds(
-  declared: GPUTextureViewDimension,
-  own: GPUTextureViewDimension,
-): boolean {
-  return own === declared || (declared === "2d-array" && own === "2d");
 }
 
 /** Encodes one resolved draw: direct, indexed or indirect, as its mesh and item say. */

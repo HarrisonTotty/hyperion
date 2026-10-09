@@ -20,6 +20,16 @@ export interface KernelBinding {
   readonly kind: "uniform" | "storage" | "texture" | "storage-texture" | "sampler";
   /** Whether the kernel may write it: a `read_write` storage buffer, or a storage texture. */
   readonly writable: boolean;
+  /**
+   * The view dimension a texture's declaration takes under the pipeline's `auto` layout, which a
+   * dispatch views the texture at (R08.T0).
+   *
+   * @remarks
+   * `undefined` for a buffer, a sampler, a `texture_external` and a type the table of WebGPU's
+   * types does not list (an `alias`, a `binding_array`): a texture given there is viewed at its own
+   * dimension, unchecked, as before R08.T0.
+   */
+  readonly viewDimension: GPUTextureViewDimension | undefined;
 }
 
 /** WGSL without its comments, so that a commented-out declaration is not read. */
@@ -29,6 +39,31 @@ function withoutComments(wgsl: string): string {
 
 const DECLARATION =
   /@group\(\s*(\d+)\s*\)\s*@binding\(\s*(\d+)\s*\)\s*var\s*(<[^>]*>)?\s*(\w+)\s*:\s*(\w+)(<[^;]*>)?/gu;
+
+/**
+ * The view dimension of each WGSL texture type: the "Corresponding WGSL types" of
+ * `GPUTextureViewDimension` (W3C WebGPU, Candidate Recommendation, §6.2.1 "Texture View
+ * Creation", read 2026-10-09). `texture_external` binds an external texture, not a view, and has
+ * none.
+ */
+const TYPE_VIEW_DIMENSIONS: ReadonlyMap<string, GPUTextureViewDimension> = new Map([
+  ["texture_1d", "1d"],
+  ["texture_storage_1d", "1d"],
+  ["texture_2d", "2d"],
+  ["texture_storage_2d", "2d"],
+  ["texture_multisampled_2d", "2d"],
+  ["texture_depth_2d", "2d"],
+  ["texture_depth_multisampled_2d", "2d"],
+  ["texture_2d_array", "2d-array"],
+  ["texture_storage_2d_array", "2d-array"],
+  ["texture_depth_2d_array", "2d-array"],
+  ["texture_cube", "cube"],
+  ["texture_depth_cube", "cube"],
+  ["texture_cube_array", "cube-array"],
+  ["texture_depth_cube_array", "cube-array"],
+  ["texture_3d", "3d"],
+  ["texture_storage_3d", "3d"],
+]);
 
 function kindOf(addressSpace: string | undefined, type: string): KernelBinding["kind"] {
   if (addressSpace !== undefined) {
@@ -47,7 +82,8 @@ function kindOf(addressSpace: string | undefined, type: string): KernelBinding["
  * A kernel uses every binding it declares: its pipeline's layout is `auto`, which holds only the
  * bindings the entry point uses, and every declared binding goes into the bind group.
  * Reads `@group(g) @binding(b) var<space> name : type` declarations, the attributes in that order,
- * which is how every kernel in the catalogue writes them.
+ * which is how every kernel in the catalogue writes them. A texture's view dimension is its type's,
+ * which is the one its `auto` layout entry takes.
  */
 export function kernelBindings(wgsl: string): ReadonlyMap<string, KernelBinding> {
   const bindings = new Map<string, KernelBinding>();
@@ -64,6 +100,7 @@ export function kernelBindings(wgsl: string): ReadonlyMap<string, KernelBinding>
       writable:
         (kind === "storage-texture" && !/,\s*read\s*>/u.test(parameters ?? "")) ||
         (kind === "storage" && (space ?? "").includes("read_write")),
+      viewDimension: space === undefined ? TYPE_VIEW_DIMENSIONS.get(type) : undefined,
     });
   }
   return bindings;

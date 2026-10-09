@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FakeAdapter, type FakeDevice, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { AllocationEvent } from "../memory";
-import { packedCubeSpec, ResourceRegistry, viewDimensionOf } from "./resources";
+import { packedCubeSpec, ResourceRegistry, viewDimensionBinds, viewDimensionOf } from "./resources";
 
 async function device(): Promise<FakeDevice> {
   const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] });
@@ -265,6 +265,17 @@ describe("a layered 2D texture", () => {
         category: "other",
       }),
     ).toBe("2d-array");
+  });
+});
+
+describe("a texture binding's view dimension", () => {
+  it("binds a single-layer 2D texture where an array is declared, and nothing else across kinds", () => {
+    expect(viewDimensionBinds("2d", "2d")).toBe(true);
+    expect(viewDimensionBinds("2d-array", "2d-array")).toBe(true);
+    expect(viewDimensionBinds("2d-array", "2d")).toBe(true);
+    expect(viewDimensionBinds("2d", "2d-array")).toBe(false);
+    expect(viewDimensionBinds("cube", "2d")).toBe(false);
+    expect(viewDimensionBinds("3d", "2d-array")).toBe(false);
   });
 });
 

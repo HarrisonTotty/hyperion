@@ -2934,3 +2934,38 @@ generator, and the reference's sampling needs no domain tag.
   Mie or aggregate aerosol cannot be referenced yet); the Stokes mode's kinds (Rayleigh, isotropic,
   none); the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells
   (the sphere until T12.d).
+- **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
+  `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
+  `smoke/page.ts`). R01's seam as the task gives it. What differs:
+  - _The type table is all of WebGPU's §6.2.1 list._ Beyond the task's, `texture_1d` and
+    `texture_storage_1d` give `1d`, and `texture_depth_multisampled_2d` gives `2d`.
+    `texture_external` binds an external texture, not a view, and gives `undefined`, as buffers and
+    samplers do. `TextureSpec` has no 1D texture, so a `1d` declaration refuses every texture.
+  - _A name with no declared dimension._ A texture given under a name the kernel does not declare,
+    or declares as a buffer, a sampler or a type the table does not read, is viewed at its own
+    dimension (a cube's storage as the six-layer `2d-array`), unchecked, as before T0. It is refused
+    where it was before: `kernelBindGroupEntries` throws for an undeclared name inside the
+    dispatch's encoding, so `engine.test.ts`'s "leave out a dispatch whose encoding threw" still
+    exercises the timer's rollback, and WebGPU refuses a kind mismatch.
+  - _"Before any GPU call."_ `resolveKernelResources` looks up and checks every sampled and storage
+    texture before it makes or writes a uniform buffer or makes a view, and `dispatch` calls it
+    before it encodes. A mismatch now throws from `dispatch` itself, before any writer is recorded,
+    where before the call returned and WebGPU refused the submission. No caller mismatches today
+    (`tables.ts`, `hillaire.ts`, the sky's `bake.ts` and the post kernels checked by review). The
+    message also names the texture, as "kernel K declares B as D, but T is O", where O is `cube`
+    for a cube bound as storage.
+  - _`viewDimensionBinds`_ has its citation corrected from "§6.1.4" to §6.2.1 "Texture View
+    Creation" (`"2d-array"` asks only that the texture be `2d`, whatever its layer count). Its
+    unit test moves with it from `drawing.test.ts` to `resources.test.ts`.
+  - _Tests beyond the task:_ `kernelBindings` over the whole table; a refusal leaves no uniform
+    buffer, queue write or view; a cube refused where `texture_storage_2d` is declared; a texture
+    under a name declared as a uniform keeps its own dimension.
+  - _The smoke check._ `checkOneLayerArrays` runs as the group "R08.T0 one-layer arrays in
+    compute", which `smoke/page.ts` adds after T9.i's (the task's Files did not name `page.ts`, but
+    a check runs only from the page). Each channel is its index ÷ 4, at most 47.75, compared bit for
+    bit; the textures are released in a `finally`.
+  - _GPU runs._ `just test-render` (SwiftShader, at d627f1bd with T0's diff): both variants exit 0,
+    both checks pass, 578 checks in all, none failing, no uncaptured GPU error. A hidden RTX 3080
+    run (offscreen, under the GPU lock) passes both checks on `default` and `no-subgroups`, with no
+    uncaptured GPU error. That run's one failure, R07.T16.f's spatial stroke contrast, draws on a
+    2D canvas with no WebGPU and passes on SwiftShader, so it is not T0's; reported to "main".
