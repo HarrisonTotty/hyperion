@@ -2653,3 +2653,47 @@ generator, and the reference's sampling needs no domain tag.
   - _Sign-off: pending._ The owner signs off the six rows (the roadmap's "Still awaiting", which
     now lists `ATMOSPHERE: PENDING`). The client is built to them meanwhile, and the sign-off is
     recorded here when given.
+- **Deviations in T5.a, as built** (2026-10-09; `view/atmosphere/mie.ts`, `mie.test.ts`). Wiscombe
+  1980's structure as the task gives it, in double precision. What differs:
+  - _Names beyond the sketch:_ `ComplexIndex` is `{ n, k }`, m = n + ik with k ≥ 0 absorbing,
+    defined here (T5.b's `refractiveIndex` returns it); `mieTermCount(x)`;
+    `logarithmicDerivatives(zRe, zIm, nMax)` and `LogarithmicDerivatives`; `MIE_MIN_SIZE_PARAMETER`
+    10⁻⁶ and `MIE_MAX_SIZE_PARAMETER` 20,000, the top of Wiscombe's fitted range (his (50)).
+    `mieSphere` throws `RangeError` outside them, for n ≤ 0, k < 0, a non-finite index or |μ| > 1,
+    so T5.b's size grids stay inside [10⁻⁶, 20,000]. `MieResult`'s fields are readonly.
+  - _Amplitudes:_ `s1` and `s2` interleave (re, im) per cosine, in Wiscombe's and van de Hulst's
+    convention (e^(+iωt)); Bohren and Huffman's are their conjugates, and Q, g and |S|² do not
+    depend on it. No `qBack`: Q_back = 4 |S₁(180°)|² ÷ x².
+  - _Dₙ:_ the task's first option, Lentz's continued fraction at N_stop, evaluated by the modified
+    Lentz method (Thompson and Barnett 1986) to 10⁻¹⁵ in place of Wiscombe's two-term stride and
+    ε₂ = 10⁻⁸, and recurred downward at every index. MIEV0's small-particle formulas and its upward
+    Dₙ are not built. N_stop is (50)'s middle branch at every x, never fewer terms than the others.
+  - _ψ₁_ comes from its Taylor series below x = 0.1, where sin x ÷ x − cos x loses digits
+    (3 × 10⁻⁶ at x = 10⁻⁵); the Rayleigh test at x = 10⁻⁵ fails without it.
+  - _Design note 6's figure:_ BHMIE's start (D = 0 at max(x + 4x^(1/3) + 2, |mx|) + 15 = 1,515) at
+    real z = 1,500 is 38% wrong in D₁ and 27% in D₀, not 25% in D₁. The figure swings with z; over
+    1,450–1,550 neither is ever better than 5%. The note's point stands; its number is corrected
+    here, for the next revision.
+  - _Wiscombe's cases:_ MIEV0's cases 5–19 against his own stored answers (`MVTstNew.f`,
+    `BLOCK DATA CHEKMI`, the 1996 MIEV distribution, 7 significant figures) rather than miepython's
+    6-decimal copies; the science check found no mismatch in the 510 numbers. Q to 10⁻⁶ (absolute
+    at values of order one, relative below), g to 10⁻⁶ absolute, and S₁, S₂ from 0° to 180° in 30°
+    steps for every case to 10⁻⁶ of each amplitude. Case 15 (m = 1.5 − i, x = 100), which the task
+    said to omit, is kept: it agrees to 2.5 × 10⁻⁷, so miepython's relaxation is miepython's. Six
+    amplitudes are held to 5 × 10⁻⁶ where the reference falls short: S₂(90°) of cases 5 and 12
+    (MIEV0's small-particle formulas); S₂(60°, 120°) of case 6 (MIEV0 sums 2 terms where N_stop
+    sums 3); S₁ and S₂(180°) of case 11 (MIEV0 sums 10,088 terms, and the 10,089th, a resonance
+    with |aₙ|² + |bₙ|² = 2.1 × 10⁻¹³, moves S(180°) by 4.2 × 10⁻⁶; this code is 4 × 10⁻⁷ from the
+    converged series, by the science check's 40-digit evaluation).
+  - _Tests beyond the task:_ ⟨cos θ⟩ on the same Gauss–Legendre grid to 10⁻⁹; small spheres against
+    the power series of jₙ and yₙ to 10⁻⁹; case 11's backward sum against a second evaluation with
+    ψₙ from Dₙ(x) to 10⁻⁹; D₀ = cot z to 10⁻¹¹; BHMIE's start measured over 10% off; `mieTermCount`
+    against (50)'s three branches; the input ranges. The Rayleigh bounds are x² (Bohren and Huffman
+    1983, §5.1). B&H's g = 0.63314 is miepython's (`test_03_bh_dielectric`); BHMIE prints none.
+  - _Timing, provisional:_ x = 10³, m = 1.33, 256 angles, 1.0 ms median at load average 5.5 and
+    1.8 ms at 25 (Node 26.10, Ryzen 7 3700X, `schedutil`), against the research's 4.8–6.3 ms. The
+    quiet-machine run (load under 1) is pending; Design note 1's 40–800 ms a mode waits on T5.b.
+  - _Pending a ruling:_ the MIEV distribution states no licence. The test commits only the values
+    it asserts (MIEV0's answers for cases 5–19, B&H's three printed values), with citations, under
+    the open benchmark-tables lean above; if that is refused, it falls back to miepython's MIT
+    values (Q and g to 6 decimals, case 14's amplitudes).
