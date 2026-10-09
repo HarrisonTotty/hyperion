@@ -578,6 +578,68 @@ fn no_cooling_star_is_brighter_than_its_floor() {
     assert!(reads_cooling_floor(0.099) && !reads_cooling_floor(0.1));
 }
 
+/// How much of the held floor's [`MARGIN_MAG`] a state between its grid's masses, fractional ages
+/// and metallicities may take, mag: the floor is the brightest of states read on that grid, and a
+/// state between its points can be a little brighter.
+const HELD_FLOOR_GRID_SLACK_MAG: f64 = 0.05;
+
+/// The held floor bounds every main sequence, hydrogen or helium, that a pair can hold: at 2,000
+/// random masses up to the pair's, fractional ages and metallicities off its grid, the star's V
+/// (the sky's, as the census reads it) is no brighter than the floor less its margin, to within
+/// [`HELD_FLOOR_GRID_SLACK_MAG`] of that margin, and the star's own main sequence ends no sooner
+/// than the floor's first bin. The floor only brightens and starts no later as the pair's mass
+/// grows, and it refuses a mass past 300 M☉.
+#[test]
+fn the_held_floor_bounds_a_held_main_sequence() {
+    let mut mix = Mix(0x0017_c0c0_f100_4e1d);
+    let cells = u64::try_from(FE_H_CELLS).expect("a few intervals");
+    let draws = StarDraws::median();
+    for _ in 0..2_000 {
+        let total = 0.1 * crate::math::exp(mix.unit() * crate::math::ln(3_000.0));
+        let m = (0.1 * crate::math::exp(mix.unit() * crate::math::ln(total / 0.1))).min(total);
+        let tau = mix.unit();
+        let fe_cell = usize::try_from(mix.0 % cells).expect("a small index");
+        let (f_lo, f_hi) = (FE_H_EDGES[fe_cell], FE_H_EDGES[fe_cell + 1]);
+        let comp = Composition::from_fe_h(
+            Dex::new(f_lo + (f_hi - f_lo) * mix.unit()),
+            HeliumExcess::ZERO,
+        );
+        let c = ZCoeffs::new(comp.z_fit());
+        let held = held_floor(fe_cell, total).expect("a pair's mass");
+        let (first, floor) = (held.first_bin(), from_cmag(held.cmag()));
+        for helium in [false, true] {
+            let (s, _) = sse::main_sequence_structure(&c, &comp, &draws, helium, m, tau, 0.0);
+            if let Some(v) = sky(&s.state) {
+                assert!(
+                    floor <= v.value() - MARGIN_MAG + HELD_FLOOR_GRID_SLACK_MAG,
+                    "{m} of {total} M_sun at τ {tau}, helium {helium}, {comp:?}: V {} against {floor}",
+                    v.value()
+                );
+            }
+        }
+        let t_ms = sse::main_sequence_lifetime(&c, false, m);
+        assert!(
+            first == AGE_BINS || age_edge_years(first) <= t_ms,
+            "{m} of {total} M_sun: t_MS {t_ms} before bin {first}"
+        );
+    }
+    for f in 0..FE_H_CELLS {
+        let mut last = held_floor(f, 0.1).expect("the lightest");
+        for k in 1..=600 {
+            let total =
+                0.1 * crate::math::exp10(f64::from(k) / 600.0 * crate::math::log10(3_000.0));
+            let now = held_floor(f, total.min(300.0)).expect("a pair's mass");
+            assert!(
+                now.first_bin() <= last.first_bin() && now.cmag() <= last.cmag(),
+                "{f} {total}: {now:?} after {last:?}"
+            );
+            last = now;
+        }
+        assert_eq!(held_floor(f, 300.000_001), None);
+        assert_eq!(held_floor(f, f64::NAN), None);
+    }
+}
+
 /// The fitted tables have their grids' shapes (the readers' shapes): every cell sampled, the
 /// open bin of every cell no brighter than a closer one, and living wherever something changed.
 #[test]
@@ -831,6 +893,23 @@ fn the_cooling_floor_and_the_readers_are_pinned() {
             joined(&row)
         ));
     }
+    for f in 0..FE_H_CELLS {
+        let (bins, values): (Vec<usize>, Vec<i16>) = (0..HELD_FLOOR_NODES)
+            .map(|k| {
+                let held = held_floor(f, held_floor_node_msun(k)).expect("a node");
+                (held.first_bin(), held.cmag())
+            })
+            .unzip();
+        let bins: Vec<String> = bins.iter().map(usize::to_string).collect();
+        w.line(&format!(
+            "held floor, metallicity interval {f}, first bins: {}",
+            bins.join(" ")
+        ));
+        w.line(&format!(
+            "held floor, metallicity interval {f}, values: {}",
+            joined(&values)
+        ));
+    }
     for grid in grids() {
         let table = PairLightTable::generator(grid.layer()).expect("a fitted table");
         let mut digest = Fnv(0xcbf2_9ce4_8422_2325);
@@ -865,7 +944,7 @@ fn the_cooling_floor_and_the_readers_are_pinned() {
     golden!("stellar/pair_light_tables", w.as_str());
 }
 
-/// The lazily built values are what fresh builds give: the cooling floor, and each layer's
+/// The lazily built values are what fresh builds give: the cooling and held floors, and each layer's
 /// decoded table against a fresh decoding of the same fitted constants.
 #[test]
 fn the_lazy_values_are_fresh_builds() {
@@ -881,6 +960,15 @@ fn the_lazy_values_are_fresh_builds() {
                 UNSEEN_MAG
             });
             assert_eq!(Some(cooling_floor_cmag(f, k)), fresh, "{f} {k}");
+        }
+        let held = held_floor_of(f);
+        for k in 0..HELD_FLOOR_NODES {
+            let read = held_floor(f, held_floor_node_msun(k)).expect("a node");
+            assert_eq!(
+                (read.first_bin(), read.cmag()),
+                (held.first_bin[k], held.cmag[k]),
+                "{f} {k}"
+            );
         }
     }
     let fitted = [

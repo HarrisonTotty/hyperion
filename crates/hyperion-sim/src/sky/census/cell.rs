@@ -3978,6 +3978,32 @@ mod tests {
         (all, per_layer)
     }
 
+    /// The record of R06.T8.g's slow test whose star shone where its bound was dark (P11.T17.c's
+    /// follow-up): `0x61fec2d802000037`, a bulge record of layer D, 8.7 Gyr old at [Fe/H] +0.56,
+    /// whose pair of 6.29 and 5.59 M☉ reaches the engine's cap on segments at 78 Myr (finding
+    /// F15: a helium main-sequence accretor fed by a helium star at its main sequence's end). Its
+    /// stretched last segment holds both stripped stars on the helium main sequence, at
+    /// M<sub>V</sub> 2.52 and 1.30, and plan 11's tables alone read `Remnants`. Both stars, at
+    /// both of the slow test's times, are now no brighter than their bounds.
+    #[test]
+    fn the_capped_bulge_record_is_bounded_star_by_star() {
+        let galaxy = milky_way_galaxy();
+        let key =
+            CellKey::containing(Layer::D, &position([-129.0, 2_925.0, 70.0])).expect("in the cube");
+        let mut cell = Vec::new();
+        generate_cell(galaxy, key, &mut cell);
+        let record = *cell
+            .iter()
+            .find(|r| r.id().raw() == 0x61fe_c2d8_0200_0037)
+            .expect("the record in its cell");
+        let check = check_realised_of(&[record]);
+        assert_eq!(
+            (check.systems, check.own + check.widened),
+            (1, 4),
+            "{check:?}"
+        );
+    }
+
     /// The bound star by star holds for realised systems (R06.T8.g): 300 records of each layer
     /// near the Sun and in the bulge, at two emitted times.
     #[test]

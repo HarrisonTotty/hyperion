@@ -1869,6 +1869,23 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
     violation widens the table", and are stored at the version-22 refit. A pair is read through
     the floor-applying accessors `living_cmag_for` and `changed_cmag_for`, never the plain
     `living_cmag` and `changed_cmag`.
+  - **The held floor** (P11.T17.c's follow-up, 2026-10-08, after R06.T8.g's slow test found a
+    star shining where its pair's bound read `Remnants`).
+    - A timeline that reaches the engine's cap on segments (`MAX_SEGMENTS`) is left as it stands,
+      its last segment stretched to the age asked. A star the binary carries on its main sequence
+      there (`Member::MainSequence`, hydrogen or helium) is held at its last mass and fractional
+      age for ever. About 3 × 10⁻⁵ of the census's pairs are capped (Risks, "P11.T17.c's
+      follow-up"), too few for T17.b's 72 samples a cell to catch.
+    - So wherever T17.a's closed form does not call the pair `Detached` at the window's end, every
+      bin from the floor's first one reads its living and changed values as no fainter than the
+      floor: the brightest hydrogen or helium main-sequence star of at most the pair's total mass,
+      from the engine's own models (`sse::main_sequence_structure`, plan 06's photometry), margin
+      included. Its first bin is that of the least main-sequence lifetime of such a star.
+    - A pair the closed form calls `Detached` at the window's end has not been stepped by then, so
+      it reads the tables as they are. Inclusion monotonicity holds (the floor is per bin, and is
+      read only past the age where the closed form first fails).
+    - It is a read-side widening at version 21, with no refit. It goes when the version-22 batch's
+      engine work removes the cap's causes.
   - **Inclusion monotonicity** (R06.T8.h's ruling, `decision-r06-t8h-warm.md` §5). T8.h's warm
     cache serves a window from an entry over a wider one, and its bit-identical reply rests on
     each verdict only loosening as the window widens: for windows A ⊆ A′, the verdict over A′ is
@@ -5002,3 +5019,147 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - **At the version-22 batch:** re-run the slow test and the monotonicity test after the tables'
     refit. Item 4 already checks for sudden deaths by +H, which T4.l's passed-over collapses will
     hand to the engine.
+- **P11.T17.c's follow-up: capped timelines, and the held floor** (2026-10-08, at version 21;
+  R06.T8.g's final gates). No generated system moves, and there is no bump: only the census reads
+  the bound. The census generates more records, and where a capped pair's held star is listable
+  it now lists it, as its brute-force oracle always did; elsewhere it lists the same stars.
+  - **The failure.** R06.T8.g's slow test `the_star_bound_holds_for_realised_systems` found one
+    system in 1.2 × 10⁶ whose star shone where its pair's bound was dark: `SystemId(0x61fec2d802000037)`,
+    a bulge grid record of layer D (primary 6.286 M☉, 8.704 Gyr, [Fe/H] +0.556, attempt 0). At the
+    epoch and 900 years before it, both stars are on the helium main sequence, at M<sub>V</sub>
+    2.52 and 1.30, where the tables read `Remnants`.
+  - **The diagnosis** (`evolve` on its pair, 6.286 + 5.588 M☉, periastron 15.7 R☉): a known
+    deferred engine defect, **finding F15**, in a capped timeline.
+    - 61.9–62.1 Myr: the primary, in its Hertzsprung gap, transfers stably onto the secondary
+      (5.59 → 10.65 M☉), and is stripped at 62.27 Myr to a 1.17 M☉ helium star.
+    - 74.73 Myr: the rejuvenated gainer leaves its main sequence, engulfs the helium star, and the
+      common envelope strips it to a 2.20 M☉ helium star.
+    - From 75.35 Myr that helium star fills its lobe and feeds the 1.14 M☉ helium star, then at
+      τ = 0.996. Each step aims at the accretor's main-sequence end and lands short, since
+      `rejuvenated_tau` lowers a helium accretor's τ by m₀ ÷ m₁. The segments shrink
+      geometrically (2.15 Myr, 52 kyr, … 794 years) to the 64-segment cap at 77.95 Myr.
+    - The stretched last segment holds both helium stars, 1.218 M☉ at τ 0.99994 and 2.008 M☉ at
+      τ 0.78, to the age asked. Their own lives are 13 and 5 Myr (HPT equation 79).
+    - The tables did nothing wrong. Their cell (D 5359: 5.98–6.59 M☉, q 0.75–0.9, the top
+      metallicity interval, periastron 10–18 R☉) is DARK from 4 Gyr, since none of its
+      neighbourhood's samples was capped. It is neither the thin rule nor E's smear, which D does
+      not read: a rare engine state that 72 samples a cell do not reach.
+  - **How common** (scratch probes, every timeline run as `run_pairs` runs it):
+    - realised pairs, as `hierarchy_bound` lists them, 10⁵ a layer near the Sun and in the bulge
+      (a seed of the probe's own): 18 capped of 6 × 10⁵ (3.0 × 10⁻⁵), 6 in each of C, D and E;
+    - D's table cells of 5–8 M☉, q 0.45–1, the top metallicity interval and periastra of
+      1–316 R☉, 300 samples each: 6 capped of 6 × 10⁴ (10⁻⁴). Wider samples of the tables' cells
+      (`sample_input`, a seed of the probe's own): E's twins (q 0.75–1, periastra 32–3,162 R☉,
+      every metallicity) 41 of 38,400 (1.1 × 10⁻³); C's (1.4–2.5 M☉, q 0.75–1, 10–1,000 R☉) 3 of
+      38,400; D's (q 0.3–1, 3–1,000 R☉) 19 of 6 × 10⁴. None was capped during a pinned hold;
+    - three ways in, all with an accretor the binary carries on its main sequence (P11.T4.g's
+      `Member::MainSequence`), which the stretched segment holds at its last mass and τ for ever:
+      F15's helium accretor fed by a helium star; **the same for a hydrogen accretor above
+      1.25 M☉** (below); and P11.T4.g's finding C2, a helium accretor beside a hydrogen-rich or
+      white-dwarf donor, whose swell and strip repeat (now seen in C and D, not only E).
+    - What the held stars are: helium stars of 0.74–2.63 M☉ (M<sub>V</sub> 1.0–3.8);
+      main-sequence donors of 2.3–4.8 M☉ (−0.6 to +1.4); and main-sequence gainers at τ = 1, of
+      8.9 M☉ in D (−3.48) and of 16–56 M☉ in E (−4.9 to −7.6), the last four in near-Sun twins
+      of q 0.95–0.98 and periastra of 1,000–1,650 R☉.
+    - Against T17.c's verdicts, besides the bulge record: a near-Sun E pair (17.20 + 16.32 M☉)
+      whose 15.96 M☉ gainer at M<sub>V</sub> −4.94 lives from 10.8 Myr on read `Remnants` at
+      0.1–8 Gyr, and another (8.14 + 4.76 M☉) read `Bright(−0.49)` beside its held donor at
+      −0.499. T17.c's slow test and T8.g's met none of them by chance.
+  - **A new engine finding (proposed F18): F15's stall catches hydrogen accretors too.**
+    - `rejuvenated_tau` lowers τ by m₀ ÷ m₁ for any mixed accretor: a helium star, or a hydrogen
+      star outside 0.35–1.25 M☉. Fed slowly at its main sequence's end, its boundary step lands
+      short, closes a segment, and the next step is shorter: in D's sample a gainer of 8.88 M☉
+      fed by a 0.97 M☉ helium giant took steps of 2.6 years down to 0.47 years.
+    - P11.T4.m's item C drops the factor for helium accretors only, since BSE's code keeps it for
+      hydrogen ones (`evolv2.f` 1895–1897; Hurley, Tout and Pols 2002, §2.6.6, say a helium
+      accretor is rejuvenated the same way, but the code excludes kw 7). So this stall outlives
+      T4.m.
+    - BSE aims its steps at the main sequence's end too (`evolv2.f` 1458, 1957–1960). It escapes
+      the shrinking steps through its least step of 10⁻⁷ Myr, the aim's release after 1,000
+      iterations, and having no cap on segments. The engine's shortfall shrinks each step by a
+      factor of about τ Ṁ t_MS ÷ m, so its steps converge without end wherever that is below 1.
+    - The lever, for the version-22 batch: a least step, as BSE's, or a boundary step that falls
+      short only by the rejuvenation taking the boundary. With T4.m's C2 and F15 work, it should
+      leave no capped timeline. Re-run this follow-up's probes then, and drop the held floor if
+      none is capped.
+  - **The widening: the held floor**, read-side, as T17.b's widenings are. Built:
+    - `pair_light::held_floor(fe_cell, total_msun)`: for 57 nodes of the pair's total mass, even
+      in ln m from 0.1 to 300 M☉, and each metallicity interval, the brightest V of a hydrogen or
+      helium main-sequence star of at most the node's mass (`sse::main_sequence_structure`, the
+      state the engine gives such a member, through plan 06's photometry), at 33 values of τ, 5
+      masses an interval and 5 metallicities, edges included, less 0.3 mag; and the first age bin,
+      that of the least main-sequence lifetime of such a star. No star of the pair can end its main
+      sequence, or be stripped, sooner, since accretion only lowers τ. Built once (about 0.3 s).
+    - Values in the top metallicity interval, M<sub>V</sub>: +0.35 at 2 M☉ (from 1 Gyr), −2.68 at
+      5, −4.78 at 11.9 (the bulge pair's), −6.14 at 20, −7.53 at 40, −11.64 at 150 (HPT's terminal
+      main sequence, extrapolated).
+    - `light.rs`: where the closed form does not call the pair `Detached` at the window's end,
+      `tabled` reads each bin from the floor's first one as the brighter of its value and the
+      floor, DARK included. A pair the closed form calls `Detached` there has not been stepped,
+      and reads the tables as they are.
+    - So `Remnants` is answered only by pairs that cannot have interacted by the window's end, and
+      `Unchanged` only before any star of the pair can have ended its main sequence. Inclusion
+      monotonicity holds: the floor is per bin, and if the closed form fails at a wider window's
+      end and holds at a narrower one's, the narrower reads `Remnants` or `Detached`.
+    - **Narrower ones were rejected as unsafe.** Every pair that may interact can be capped, in
+      any layer, at any mass ratio seen (0.27–0.98), and a held gainer can carry nearly the pair's
+      whole mass. A helium-only floor would leave the E gainers dark; restricting it by mass ratio
+      or periastron rests on 24 capped pairs, not on the engine.
+  - **Its cost** (R06.T8.g's sampled cold bench near the Sun, `census_near_sun/cold`, T7.b's caps
+    by ray, `HYPERION_SKY_BENCH_SAMPLE` 1,000, 3 workers, unlocked, so provisional; the same tree
+    without the floor run beside it):
+
+    | Generated records, % | C     | D     | E     | C–E   |
+    | -------------------- | ----- | ----- | ----- | ----- |
+    | without the floor    | 19.66 | 48.98 | 69.37 | 35.34 |
+    | with it              | 19.67 | 52.55 | 84.06 | 39.27 |
+    - Pairs, without → with (%): C `Remnants` 0.44 → 0.22; D `Remnants` 15.94 → 2.14,
+      `Unchanged` 0.58 → 0, `Bright` 58.95 → 73.32; E `Remnants` 31.85 → 0.02, `Unchanged`
+      1.13 → 0, `Bright` 64.06 → 97.03. The listed stars are the same 51.
+    - The cold estimate rose 18% in back-to-back runs (7.5 → 8.9 × 10⁵ CPU-s, both under shared
+      load), nearly all of it E. **Not negligible**: E's `Remnants` pairs were what kept a sixth
+      of its records from being generated, and its floor, a terminal-main-sequence star of
+      8–300 M☉, is listable across E's reach.
+    - `binary/pair_light_bound` (under the heavy lock): 570 µs for 1,024 queries, 0.56 µs a call
+      (+1.5%), against the 1 µs target. The queries give 518 `Detached`, 4 `Unchanged`, 1
+      `Remnants`, 448 `Bright` and 53 `None` (17, 26 and 410 of the middle three before).
+
+  - **Tests:**
+    - `a_capped_timelines_held_stars_are_bounded` (fast): D's two capped samples, a hydrogen
+      gainer at τ = 1 (M<sub>V</sub> −3.48, cell 4817) and F15's helium pair (cell 4273), each at
+      18 windows from its cap to 1.5 × 10¹⁰ years, held to the engine as T17.c's slow test holds
+      it; never `Remnants` or `Unchanged`.
+    - `the_capped_bulge_record_is_bounded_star_by_star` (fast, `sky::census::cell`): the bulge
+      record, both stars at both of T8.g's times.
+    - `the_held_floor_bounds_a_held_main_sequence` (fast): 2,000 random stars off the grid, both
+      kinds, against the floor and its first bin; monotone in mass; `None` past 300 M☉.
+    - T17.c's verdict tests: the neutron star and white dwarf 1,000 au apart is now `Bright` at the
+      floor, not `Remnants`; `Unchanged` is shown by two B stars 0.03 au apart at 0.24 Myr. The
+      order-independence test gained four fixed queries that answer `Remnants` and `Unchanged`.
+    - The goldens, re-blessed at 21 (no output moves): `stellar/pair_light`, 35 of 256 verdicts
+      (29 `Bright` brightened to the floor, 3 `Unchanged` and 3 `Remnants` to `Bright`), no
+      `Detached` or `None` moved, no reach-table line; `stellar/pair_light_tables`, 8 lines added
+      (the floor's first bins and values per metallicity interval).
+    - The probes, with the floor: every one of 69 capped samples (D's 6, and E's 41, C's 3 and
+      D's 19 of the wider samples) holds against the engine at 14 windows from its cap to
+      1.5 × 10¹⁰ years: 0 violations.
+    - **T17.c's slow test** (`the_pair_verdicts_hold_against_the_engine`, under the heavy lock):
+      0 violations and 0 engine panics in 8.1 × 10⁵ checks, 742 s. Old near-Sun shares now
+      (`Detached` / `Unchanged` / `Remnants` / `Bright` / `None`, %): C 75.17 / 0 / 0.17 / 22.56 /
+      2.10; D 21.75 / 0 / 1.86 / 72.31 / 4.08; E 0.68 / 0 / 0.03 / 96.54 / 2.76. Least room: C
+      0.61, D 0.44, E 0.68 mag.
+    - **R06.T8.g's slow test** (`the_star_bound_holds_for_realised_systems`, in the same hold):
+      passes, the bulge record included, 998 s. 1.2 × 10⁶ systems; 1,817,014 stars checked star
+      by star, least margin 0.305 mag; 45,040 against the widened envelope; pairs 837,564
+      `Detached`, 6 `Unchanged`, 17,366 `Remnants`, 2,778,748 `Bright`, 90,958 `None`.
+    - Gates: fmt; clippy `-D warnings` native and wasm32-wasip1 (hyperion-sim, all targets);
+      `stellar::binary::` and `sky::census::` (182); the binary doctests (10); the fast tests of
+      `--test sky_census` (6); the changed tests on wasm32-wasip1 (38), goldens included.
+  - **Residual risk.** The floor's first bin rests on the cap's causes seen, each of which needs a
+    star at its main sequence's end or stripped. A cap of another cause before then, in a young
+    window, would not be covered; none of the 87 capped pairs found was. The floor's value covers
+    any carried main-sequence member. A pinned primary held (`Member::Frozen`) when its timeline
+    is capped would be held for ever too, brighter than the floor; none of the 87 was.
+  - **For `deferred-corrections.md`** (reported to main): the proposed F18 and the C2 caps in C and
+    D, with T4.m, in the version-22 batch's engine work; then the follow-up's probes again, and the
+    floor dropped if no timeline is capped, which restores D's and E's `Remnants` and the 18%.
