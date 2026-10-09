@@ -1689,6 +1689,26 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
         is named `standIn` in its file, unless T5.b's science check prefers NH₃ ice's index.
       - A body whose medium shows an NH₄SH mode carries `ATMOSPHERE: APPROXIMATE` (Design note 12).
       - No NH₄SH case is committed or gated.
+    - **CO₂ ice**, a derived file rather than a reduction of a fetched data file: no data file
+      exists, and refractiveindex.info, NASA's OCdb and ARIA hold none over 0.3–1 µm
+      (`science-r08-sulphur-co2ice.md`, 2026-10-09).
+      - The real index is n(λ) = 1.3994 + 0.004312 µm² ÷ λ², a two-term Cauchy fit to Warren 1986's
+        Table I over 0.30–1.10 µm (Appl. Opt. 25, 2650, pp. 2663–2667).
+        - Warren's index comes from Kramers–Kronig, "accurate to ±0.05", and the fit departs from
+          it by under 0.001.
+        - The fit was made by the science agent from the author's copy:
+          `https://atmos.uw.edu/~sgw/PAPERS/1986_CO2ice_mcx.pdf`, SHA-256
+          `55873a3bcb4820867112c1243b4f583fa311f995d9a56f3db26f635664a7b485`, fetched 2026-10-09.
+      - The imaginary index is k = αλ ÷ 4π with α = 10⁻² m⁻¹, Hansen 2005's estimated visible
+        absorption (JGR 110, E11003), below that paper's detection limit over 0.25–1.0 µm.
+        Warren's Egan–Spagnolo k, about 10³ larger, is the stated upper bound.
+      - The header carries both papers, the fit and its residual. It reads: "derived values: Optica
+        holds Warren's article under its pre-2017 agreement (reuse by permission only, text and
+        data mining reserved; its copyright page, 2026-10-09), and AGU's terms for Hansen 2005
+        could not be read; the data are the authors' (decision-r08-licences.md)". Its citation goes
+        in `NOTICE`'s Data section.
+      - No table of Warren's is committed.
+      - Its shape class is crystal (T24.c), so Mie supplies cross-sections only.
 
   - Until the H₂SO₄ file lands, the Venus mode-2 test below takes the single index n = 1.44 at
     550 nm that Hansen and Hovenier 1974 publish.
@@ -1701,7 +1721,11 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
   - Venus's mode-2 droplets (r_eff 1.05 µm, v_eff 0.07, n ≈ 1.44 at 550 nm; Hansen and
     Hovenier 1974) give g within that paper's figure;
   - an NH₄SH mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it gives
-    `atmosphereApproximate`, and one beneath a τ 30 deck does not.
+    `atmosphereApproximate`, and one beneath a τ 30 deck does not;
+  - CO₂ ice's real index is 1.413 ± 0.001 at 553 nm and 1.404 ± 0.001 at 1,000 nm (Warren 1986,
+    Table I, asserted values);
+  - its k lies between 0 and 2.2 × 10⁻⁶ over 380–780 nm;
+  - a 2 µm sphere's single-scattering albedo at 550 nm exceeds 0.9999.
 
 - **R08.T5.c Aggregates and phase tables.** `aggregate.ts` implements Tazaki and Tanaka 2018's MMF
   with D_f ≤ 2.5, and the phase-shift gate of Design note 6: a mode with Δφ ≥ 1 keeps its
@@ -2601,12 +2625,20 @@ generator, and the reference's sampling needs no domain tag.
     deck the surface; the labels hold either way (that ruling). The envelope's profile is the
     `Envelope` variant of plan 14's `VerticalStructure`, so R08.T16.a gives `TemperatureProfile` a
     matching variant. T24.d gains H₂O for its deck; H₂S is the envelope's own species.
-  - _Findings for this plan._ Plan 14 tracks no sulphur, so no rule forms an H₂SO₄ deck: a
-    generated Venus classifies `thickScattering`, not `cloudDeck`, until plan 14 adds one (its
-    open question 2, a science question for "main"; R11's deck boundary is affected alike). CO₂
-    ice is in the inventory's material enum but has no refractive-index file in R08.T5.b, so a
-    CO₂-ice deck has no optics until one is added (from memory, Warren 1986 is the usual source).
-    The Titan check of Design note 3 holds on plan 14's albedo (the Titan bullet above).
+  - _Findings for this plan._ Plan 14 tracked no sulphur. A science agent has since drafted
+    P14.T24.g (`science-r08-sulphur-co2ice.md`, 2026-10-09; for the owner).
+    - It gives a runaway-greenhouse world a sulphuric-acid deck of four modes. On plan 14's Venus
+      the deck lies at 1.34–0.04 bar with τ(550) 33, so this plan classifies it `cloudDeck` and
+      R11's boundary leaves it here.
+    - It gives a temperate world a stratospheric sulphate layer of τ about 0.003.
+    - It adds SO₂ as an absorber. This plan draws no SO₂ term until a cross-section is ruled: its
+      weak band near the violet edge is from memory, check at build.
+    - A deck's modes carry their deck, and Design note 9's per-body rule sums them.
+
+    CO₂ ice now has a derived index file in R08.T5.b: Warren 1986's real index as a Cauchy fit,
+    and Hansen 2005's k. The Titan check of Design note 3 holds on plan 14's albedo (the Titan
+    bullet above).
+
   - _Marked "from memory" in plan 14_, for the builder: the surface relative humidity, Ackerman and
     Marley's closed form, Mars's background dust, Niemann et al.'s 5.65%, the protosolar He/H₂, a
     sub-Neptune's metallicity, Sudarsky's class temperatures and Venus's trace of O₂.

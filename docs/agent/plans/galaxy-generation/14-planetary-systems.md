@@ -646,7 +646,7 @@ Order and parallelism:
   1. T24.f, carbon speciation and O₂ in T13.c's inventory, since every later rule reads the gases;
   2. T24.a, with T48.e's signed contrasts;
   3. T24.b, with T48.a's σ_h and continental fraction, T48.b's wet epoch and T48.c's crater
-     contract (T48.c also waits on R09.T7.a);
+     contract (T48.c also waits on R09.T7.a), and T24.g's present outgassing;
   4. T48.d, the climate regime classifier, which reads T24.a and T48.b; T24.b's ice fraction then
      reads it;
   5. T48.e, the record's surface section, holding 1–4, with the gas-envelope split (the envelope's
@@ -656,8 +656,8 @@ Order and parallelism:
      built directly after 5, since 5 sends an `Ok` surface as `not_modelled` until 6;
   7. T24.e, the vertical structure, which reads T24.a's T_s, p_s and gases and T48.d's
      condensable;
-  8. T24.c, the aerosol and absorber inventory, which reads T24.e's profile, T24.f's gases and
-     T24.a–b's figures;
+  8. T24.c with T24.g (one task, one bump): the aerosol and absorber inventory and its sulphur,
+     which read T24.e's profile, T24.f's gases, T24.a–b's figures and T24.b's present outgassing;
   9. T24.d, the envelope's visible atmosphere, which needs only T11.d, T12 and T13 and may be
      built beside any of 1–8; its member is on the wire once T35.e is; built before 5, it brings
      the split itself.
@@ -666,14 +666,14 @@ Order and parallelism:
   bump; 6 changes the wire, not the output; 7, 8 and 9 each move output (Generator version).
 
   _The bump plan_ (ruled by "main", 2026-10-09). Steps 1–5 (T24.f; T24.a with T48.e's contrasts;
-  T24.b with T48.a–c; T48.d; T48.e) and rendering plan R09's R09.T1.b (the detail seed in the
-  hooks section) form one `GENERATOR_VERSION` batch, 21 → 22, built serially in one lane. Each
-  task keeps `just ci` green on its own. A task whose output moves generated records before the
-  batch's last task holds the new figures off the record, or behind the batch's wiring, so that
-  the goldens move once, at the bump; a task that cannot says so to "main" before bumping. T35.e
-  follows T48.e directly in the same lane. Steps 7–9 (T24.e, T24.c, T24.d) each move output and
-  take their own bump, or are batched later as "main" decides. The deferred P11.T4.l and T4.m
-  batch (plan 11) takes the bump after this one.
+  T24.b with T48.a–c and the present outgassing; T48.d; T48.e) and rendering plan R09's R09.T1.b
+  (the detail seed in the hooks section) form one `GENERATOR_VERSION` batch, 21 → 22, built
+  serially in one lane. Each task keeps `just ci` green on its own. A task whose output moves
+  generated records before the batch's last task holds the new figures off the record, or behind
+  the batch's wiring, so that the goldens move once, at the bump; a task that cannot says so to
+  "main" before bumping. T35.e follows T48.e directly in the same lane. Steps 7–9 (T24.e, T24.c
+  with T24.g, T24.d) each move output and take their own bump, or are batched later as "main"
+  decides. The deferred P11.T4.l and T4.m batch (plan 11) takes the bump after this one.
 
 - **The vertical slice** (README, "The vertical slice to the `SYSTEM` display", ruling 33 of
   2026-09-22) builds the first working `SYSTEM` display before plans 09, 11 and 13 are complete.
@@ -1957,7 +1957,10 @@ of 2026-09-29, cited in each task; a figure or rule marked "from memory" was not
 the builder checks it against its paper before it becomes a constant. Each task is generated
 output (Generator version). The four are reconciled with Phase K's asks (R09's), so that no field
 is defined twice and the order across Phases E, K and H has no cycle (Tasks, "Order and
-parallelism"; Risks, "The rendering plans' asks of the surface section").
+parallelism"; Risks, "The rendering plans' asks of the surface section"). T24.g, sulphur, was
+drafted by a science agent on 2026-10-09 (`science-r08-sulphur-co2ice.md`, in the RM4
+orchestration directory) for this plan's owner, and is not yet accepted. It answers the second
+open question of R08's asks (Risks) and is built with T24.c.
 
 - **P14.T24.a `SurfaceConditions`.** Mean surface temperature from T13 with day–night and
   equator–pole contrasts from rotation state, obliquity and atmospheric column (a thick atmosphere
@@ -1975,17 +1978,32 @@ parallelism"; Risks, "The rendering plans' asks of the surface section").
   flow (withdrawn for σ_h with a continental fraction by P14.T48.a, drafted by R09.T0.a); heat flow
   from radiogenic heating (∝ rock mass × host [Fe/H] × e^(−age ÷ τ) summed over U,
   Th and K), residual formation heat and tidal heating; tectonic regime and volcanism level from
-  heat flow and mass; magnetic field class from rotation, core fraction and heat flow; surface age:
+  heat flow and mass; the present volcanic outgassing O, relative to Earth's (by P14.T24.g's
+  draft, below); magnetic field class from rotation, core fraction and heat flow; surface age:
   the smaller of the system's age and a resurfacing time that falls with heat flow, and the time
   since a giant impact; crater density N(> 1 km) per km² from surface age by the lunar chronology
   curve, 5.44 × 10⁻¹⁴ (e^(6.93T) − 1) + 8.38 × 10⁻⁴ T with T in Gyr (Neukum, Ivanov and Hartmann
   2001), scaled by the system's belt masses and zeroed under a thick atmosphere for small craters
   (screened instead by the shared crater density, by P14.T48.c, drafted by R09.T0.a).
+  - _The present outgassing_ (by P14.T24.g's draft, 2026-10-09). `GlobalFigures` gains `outgassing`,
+    O = max(0, (F − F_c) ÷ (F⊕ − F_c)), with F the heat flow above.
+    - F⊕ is the Solar System table's Earth's heat flow, so Earth's O is 1.
+    - F_c is the heat flow below which no melt reaches the surface. It is the builder's,
+      provisional, set between the table's Mars and Venus, of order 0.03 W m⁻². For comparison,
+      Earth's measured mean is 0.09 (Davies and Davies 2010), and Mars's and the Moon's are about
+      0.02 (from memory, check at build).
+    - The tectonic regime and the age enter through F and F_c. No regime factor is added, since only
+      Earth and Venus, one of each lid, constrain the sulphur per unit of heat flow.
+    - O is the present rate, which T24.g reads. It is not T48.a's volcanism level V, which builds
+      relief over the surface's history and is calibrated on Mars: Mars has old volcanic relief and
+      no outgassing now.
   - _Tests:_ Solar System table: (a) Earth has the liquid-water flag and Mars and Venus do not; a
     locked airless body has a day–night contrast over 300 K and Venus one under 10 K. (b) Earth
     ocean fraction 0.6–0.8, Mars and Venus 0, Europa flagged as subsurface ocean; the Moon's crater
     density exceeds Earth's by over 100; relief of Mars exceeds Earth's; every fraction is within
-    0–1 and continuous in time.
+    0–1 and continuous in time. Earth's present outgassing is 1, the Moon's, Mercury's and Mars's 0,
+    and Venus's between 0.3 and 3; it is continuous in time and does not rise with age where the
+    heat flow falls.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface planetary::hooks::figures`.
 - **P14.T24.c The aerosol and absorber inventory** (R08.T1's draft; after T24.e and T24.f).
   `hooks/aerosols.rs`: `AerosolInventory { modes, absorbers }`, a member of the record's surface
@@ -2001,10 +2019,12 @@ parallelism"; Risks, "The rendering plans' asks of the surface section").
     2018's model is validated (R08 Design note 6); a column optical depth τ(550); and a vertical
     profile, a base and a top pressure between which the mixing ratio goes as (p ÷ p_base)^f, with
     f the deck's f_sed (Ackerman and Marley 2001; the closed form from memory) or 0 for a
-    well-mixed layer. A deck also gives its vapour's mole fraction above it, the cold trap's, which
-    R08 reads for the vapour's column there rather than re-deriving the saturation curve.
+    well-mixed layer. A mode also names the deck it belongs to, so that a deck of several modes
+    (T24.g's sulphuric acid) is one deck to its readers, its τ(550) the sum of its modes'. A deck
+    also gives its vapour's mole fraction above it, the cold trap's, which R08 reads for the
+    vapour's column there rather than re-deriving the saturation curve.
   - _An absorber_ is a species that is not one of T24.a's gases, with its column (molecules m⁻²)
-    and its layer: ozone is the only one. A gas that absorbs, methane by T24.f, is an absorber by
+    and its layer: ozone, and SO₂ by T24.g. A gas that absorbs, methane by T24.f, is an absorber by
     its T24.a fraction and is not listed again, so its column is published once.
   - _The formation rules:_
     - condensate decks where a species' partial pressure crosses its saturation curve along
@@ -2026,8 +2046,12 @@ parallelism"; Risks, "The rendering plans' asks of the surface section").
       column is calibrated on Mars's (from memory, τ of order 0.5 in the visible; the builder
       takes a measured climatology). Once P14.T31.b exists, a `body.duststorm` phase raises the
       column while it lasts;
-    - no rule forms a sulphuric-acid deck, since this plan tracks no sulphur, so a generated Venus
-      has no cloud deck (Risks, the open questions of R08's asks).
+    - sulphuric acid by P14.T24.g:
+      - a deck of four modes on a runaway-greenhouse world (a Venus);
+      - a thin stratospheric layer of one mode on a temperate or snowball world (an Earth);
+      - SO₂ as an absorber.
+
+      It is called from here and shares this task's version bump.
   - _Tests:_ every mode's distribution and τ(550) lie in their ranges, and no aggregate exceeds
     D_f 2.5; a deck's base lies where its species saturates along T24.e's profile, to 10⁻⁶ in
     pressure, and a species unsaturated everywhere forms none; a world with no O₂ has no ozone,
@@ -2138,6 +2162,143 @@ parallelism"; Risks, "The rendering plans' asks of the surface section").
     fractions sum to 1 to 10⁻⁹; the gases are continuous in time but at a recorded state change.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/atmosphere/tests.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`.
+- **P14.T24.g Sulphur: the sulphuric-acid deck and the sulphate layer.** Drafted by a science agent
+  on 2026-10-09 (`science-r08-sulphur-co2ice.md`) for this plan's owner, and not yet accepted. It
+  is built with T24.c, in its bump.
+
+  `hooks/sulphur.rs`, called by T24.c's inventory, is a function of age + t. It adds one species,
+  SO₂, outside T13's `Gas`, as H₂S is T24.d's. SO₂ enters no escape, greenhouse or T24.a fraction:
+  T13.c's grey fit, made on Venus, already holds its warming.
+
+  It reads:
+  - T24.b's present outgassing O;
+  - T13.c's surface state;
+  - T24.e's profile;
+  - the bulk section's gravity;
+  - T24.a's mean molecular mass;
+  - the host kind.
+
+  It makes no draw.
+  - _The source._ Volcanic SO₂ is outgassed at Φ = O × Φ⊕, with Φ⊕ = 1.34 × 10¹³ molecules m⁻² s⁻¹.
+    That is Earth's passive volcanic degassing of 23 ± 2 Tg SO₂ yr⁻¹ over its surface (Carn et al.
+    2017, Sci. Rep. 7, 44095). Hu, Seager and Bains 2013 (ApJ 769, 6) take about twice that for
+    all of Earth's volcanic sulphur.
+  - _Its conversion._ SO₂ + O → SO₃ and SO₃ + H₂O → H₂SO₄, with O from photolysis below about
+    240 nm. It takes days to a month: 2.5–3.4 days photon-limited, about 30 days on Earth (Loftus,
+    Wordsworth and Morley 2019, ApJ 887, 231, §3.4).
+    - The SO₂ reaching a starlit upper atmosphere is therefore taken to become acid. A body with no
+      star as host, a rogue planet or a brown dwarf's, makes none.
+    - Water does not limit it: photochemical models find the production limited by SO₃ "because
+      H₂O is sufficient" (Dai et al. 2022, JGR Planets 127, e2021JE007060, §2.3).
+    - So a runaway world, whose water T13.c removes, is taken to keep from its outgassing the few
+      ppm the acid needs. Venus keeps 31 ± 2 ppm (Marcq et al. 2008, JGR 113, E00B07). See Risks.
+  - _Where it goes_, by T13.c's state, so that the inventory changes only at a recorded state
+    change:
+    1. **Runaway greenhouse: the sulphur cycles.**
+       - There is no surface liquid. Loftus et al. 2019 find a sustained sulphate haze
+         incompatible with more than 10⁻³ Earth oceans of it.
+       - The lower air is hot enough that the falling acid evaporates at the deck's base and
+         decomposes below it (on Venus below about 38 km; Jenkins et al. 1994, via Dai et al.
+         2022), returning its sulphur to SO₂.
+       - Only the surface removes SO₂, by reaction with calcite to anhydrite. Its column is
+         N_SO₂ = Φ t_dry.
+       - t_dry is fixed by the Solar System table: the table's Venus holds Venus's measured 130 ppm
+         below its clouds (Marcq et al. 2008, 130 ± 50 ppmv at 30–40 km). At Venus's O = 1 that is
+         2.75 Myr, beside Fegley and Prinn 1989's laboratory 1.9 Myr (Nature 337, 55).
+       - The builder recomputes t_dry from T24.b's Venus.
+    2. **Temperate or snowball: once through, a thin layer.**
+       - Where there is surface liquid, SO₂ dissolves in cloud and rain and lives about 2 days (Hu
+         et al. 2013, after Seinfeld and Pandis 2006). Where the air is dry and cold, the acid falls
+         to the ground as sulphate. The SO₂ column is Φ × 2 days on a world with the liquid-water
+         flag, and Φ × 30 days on one without.
+       - Only a stratospheric layer forms, with τ(550) = 0.1 (Φ ÷ 10¹⁵ m⁻² s⁻¹)^0.7
+         (d_p ÷ 0.1 µm)^−0.7. This is Hu et al. 2013's eq. 7 for N₂ and CO₂ atmospheres at Earth's
+         deposition velocity, at the low end of its constant (0.1–3).
+       - d_p is the layer mode's mean diameter, 0.18 µm, which puts the table's Earth at τ ≈ 0.003.
+         Earth's measured volcanic-quiet background is of order 10⁻³: Pinatubo's global 0.1–0.15
+         (Self et al. 1993) was "as much as two orders of magnitude" above it (Vernier et al. 2011).
+       - It keeps a wet world under τ 1 up to about 3,600 times Earth's outgassing.
+       - The cold, dry case applies Hu et al.'s law outside its fitted range, as does any surface
+         pressure but 1 bar (recorded extrapolations).
+    3. **Airless, magma ocean or gas envelope: none.** A magma ocean's own degassing is not
+       modelled, and a giant's sulphur is T24.d's H₂S.
+  - _The deck_ (case 1).
+    - The acid vapour below the deck is ε_v x_SO₂, with ε_v = 0.06. That gives Venus 7.8 ppm,
+      against the 5–10 ppm measured and modelled under its clouds (Dai et al. 2022; Krasnopolsky
+      2015's 8.5 ppm, via Lincowski et al. 2018; Banerjee et al. 2026, ApJ 998, 335: more than
+      10 ppm at 40–50 km).
+    - The base is the lowest level, going up from the ground, where ε_v x_SO₂ p reaches the acid's
+      saturation pressure along T24.e's profile. The curve is
+      ln p_sat (atm) = 16.259 − 10156 ÷ T₀ + 10156 [−1 ÷ T + 1 ÷ T₀ + 0.38 ÷ (T_c − T₀) (1 + ln(T₀ ÷ T) − T₀ ÷ T)],
+      with T₀ = 360 K and T_c = 905 K.
+      - This is Kulmala and Laaksonen 1990 (J. Chem. Phys. 93, 696), extending Ayers, Gillett and
+        Gras 1980's measurement over 98 wt% acid at 338–445 K (GRL 7, 433). The curve's form was
+        read via Dai et al. 2022 (their eq. 12), which writes p in bar; atm, as Ayers's fit, is
+        from memory, check at build (the two differ by 1.3%).
+      - It is the curve over concentrated acid, which the hot base holds.
+      - Akatsuki finds the vapour following saturation at cloud heights (Imamura et al. 2017, Earth
+        Planets Space 69, 137).
+    - The top is T24.e's skin level, p_top = p_s (T_skin ÷ T_s)^(1/β), where the acid is made.
+      Venus's production peaks near 66 km (Krasnopolsky 2012, via Dai et al. 2022), and Hansen and
+      Hovenier 1974 find τ = 1 "where the pressure is about 50 mb".
+    - With no base below the top there is no deck: the hot limit.
+    - τ(550) = σ_d x_SO₂ (p_base − p_top) ÷ (m̄ m_u g), the SO₂ molecules within the deck's layers
+      times σ_d = 1.27 × 10⁻²⁴ m², fixed on Venus.
+      - Venus's τ of 34.5 comes from Haus et al. 2016's standard cloud model (Icarus 272, 178) with
+        Pollack et al. 1993's sizes (Icarus 103, 1), through Mie at n = 1.44. Both were read via
+        Reyes-Guerrero et al. 2026 (arXiv:2607.22187); the primaries check at build.
+      - It lies over 130 ppm through 1.38–0.037 bar, VIRA's 48 and 70 km (from memory, check at
+        build).
+      - The deck is made from the SO₂ mixed through its layers and removed by settling, so a thicker
+        or lower-gravity column holds more. Lincowski et al. 2018's low-gravity TRAPPIST-1 d had
+        the thickest cloud.
+    - The deck's modes are sulphuric-acid spheres, log-normal, with Pollack et al. 1993's radii and
+      widths. Each is well mixed (f = 0) between fractions u of the deck's log-pressure span,
+      u = ln(p_base ÷ p) ÷ ln(p_base ÷ p_top), where Haus et al. 2016's layers sit on Venus, and
+      each carries its share of τ(550):
+
+      | Mode | r_g (µm) | ln σ_g | r_eff (µm) | v_eff | u      | Share of τ(550) |
+      | ---- | -------- | ------ | ---------- | ----- | ------ | --------------- |
+      | 1    | 0.30     | 0.44   | 0.49       | 0.21  | 0–1    | 0.15            |
+      | 2    | 1.00     | 0.25   | 1.17       | 0.064 | 0.55–1 | 0.18            |
+      | 2′   | 1.40     | 0.21   | 1.56       | 0.045 | 0–0.5  | 0.27            |
+      | 3    | 3.65     | 0.25   | 4.27       | 0.064 | 0–0.33 | 0.39            |
+
+      The shares are Mie at 550 nm over Haus et al.'s columns. Mode 2's r_eff and v_eff agree with
+      Hansen and Hovenier 1974's 1.05 ± 0.10 µm and 0.07 ± 0.02.
+
+    - The deck's vapour above it is p_sat(T_skin) ÷ p_top (T24.c).
+  - _The layer's mode_ (case 2) is one sulphuric-acid sphere mode.
+    - It is log-normal, r_g 0.08 µm and σ_g 1.65 (r_eff 0.15 µm, v_eff 0.28). This is Earth's
+      background (from memory after Deshler et al. 2003, check at build).
+    - It is well mixed from T24.e's tropopause to a fifth of its pressure: Earth's 15–25 km Junge
+      layer (from memory, check at build), into which Vernier et al. 2011 see volcanic injection at
+      18–20 km.
+  - _SO₂ is published_ as one of T24.c's absorbers, with its column and its layer: the ground to
+    the deck's top, or to the tropopause. It is not one of T24.a's fractions.
+  - _Tests:_
+    - The table's Venus carries a deck of four modes.
+      - Its base lies at 1.0–2.0 bar and 345–390 K, and its top at its skin level, 0.03–0.06 bar.
+        These are the pressures of Venus's 48–70 km cloud (Imamura et al. 2017), which T24.e's
+        closed form puts about 43 and 63 km above its 58-bar surface.
+      - Its τ(550) is 20–40, its shares are as tabled to 10⁻⁹, its SO₂ is 130 ppm to 10⁻⁶ (by
+        t_dry), and its vapour at the base is 5–10 ppm.
+      - Computed by the science agent: 1.34 bar at 366 K, 0.0415 bar at 192.6 K, 42.6 and 62.7 km,
+        τ 33.1. The builder confirms them.
+    - The table's Earth carries no deck, but a sulphate layer from 0.14 to 0.028 bar with τ(550)
+      between 10⁻³ and 10⁻². Its SO₂ is under 1 ppb (computed: τ 0.0032, 14 ppt).
+    - The Moon, Mercury, Mars and Titan carry no sulphur (O is 0, or there is no air), and neither
+      does any body with no host star.
+    - On the table's Venus, τ rises monotonically with O and tends to zero with it. Raising T_eq,
+      with T_s in proportion, thins the deck and removes it by T_eq = 400 K (Lincowski et al. 2018's
+      TRAPPIST-1 b, near 400 K, condenses no acid).
+    - No temperate or snowball world carries a deck at any O up to 10³, and its layer stays under
+      τ 1 (Loftus et al. 2019).
+    - Every τ is non-negative, and every mode's base pressure is at least its top's.
+    - The inventory is continuous in time but at T13.c's state changes, and T24.a's fractions are
+      unchanged by this task.
+  - _Files:_ `planetary/hooks/{sulphur, aerosols, mod}.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::sulphur`.
 
 #### P14.T25 Habitability assessment
 
@@ -2554,11 +2715,13 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
       liquid-water flag;
     - T48.d's climate regime (its three fields and its named coarse model);
     - T24.b's figures with T48.a–c's: the ocean, ice and cloud fractions, σ_h and the continental
-      fraction, the heat flow, the tectonic regime, the volcanism level, the magnetic field class,
-      the surface age, the crater contract (the production N(>1 km), the projectile density or the
-      crater cutoff, k_target, and the optional impact velocity) and the optional wet epoch;
+      fraction, the heat flow, the tectonic regime, the volcanism level, the present outgassing,
+      the magnetic field class, the surface age, the crater contract (the production N(>1 km), the
+      projectile density or the crater cutoff, k_target, and the optional impact velocity) and the
+      optional wet epoch;
     - T24.e's vertical structure (β and T_skin; its T_s and p_s are the fields above, sent once)
-      and T24.c's inventory (modes and absorbers, radii in metres, columns in molecules m⁻²).
+      and T24.c's inventory (modes and absorbers, radii in metres, columns in molecules m⁻²; each
+      mode with its deck, absorber species O₃ and SO₂).
   - The gravity is not repeated: it is the bulk section's `surface_gravity_m_s2`, granted at
     `bulk`, below `surface`. T24.a's and T48.c's mentions of g read it.
   - `BodyRecordDto` gains `envelope: Option<SectionDto<BodyEnvelopeDto>>`, optional as `rotation`
@@ -3879,10 +4042,10 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   - A body without a solid surface, which by the shared envelope fraction and
     `THIN_ENVELOPE_FRACTION` is exactly one in `SurfaceState::GasEnvelope`, has its surface section
     `NotApplicable`.
-  - The record gains the `envelope` section, `RecordSection::Envelope` at `DetailLevel::Surface`, the
-    thirteenth. It is `NotModelled` for such a body until T24.d fills `record::Envelope`, which is
-    uninhabited until then, and `NotApplicable` for every other body. From here on, exactly one of
-    the two sections applies to a present body with a bulk section.
+  - The record gains the `envelope` section, `RecordSection::Envelope` at `DetailLevel::Surface`,
+    the thirteenth. It is `NotModelled` for such a body until T24.d fills `record::Envelope`, which
+    is uninhabited until then, and `NotApplicable` for every other body. From here on, exactly one
+    of the two sections applies to a present body with a bulk section.
   - Nothing outside the record decides from the class whether a body has a surface. R09's
     `for_body` reads the tag.
   - Until T35.e, which follows this subtask directly, `convert/planetary.rs` sends an `Ok` surface
@@ -3994,9 +4157,10 @@ it:
   fill sections the goldens hold as `NotModelled`, and T48.e's gas-envelope split turns a
   sub-Neptune's surface to `NotApplicable` and adds each planet's `envelope` section (its renaming
   of `has_surface` moves nothing). T24.f, T24.a–b and T48.a–e take one bump, T24's; T24.e, T24.c
-  and T24.d take one each, or one between them if built together; each is coordinated through
-  "main". None adds a draw or a domain tag as drafted. P14.T35.e changes the wire, not the output,
-  and leaves `PROTOCOL_VERSION` at 2 (decision-p14-t35e-wire).
+  (with T24.g) and T24.d take one each, or one between them if built together; each is
+  coordinated through "main". None adds a draw or a domain tag as drafted. P14.T35.e changes the
+  wire, not the output, and leaves `PROTOCOL_VERSION` at 2 (decision-p14-t35e-wire). T24.g adds no
+  draw or domain tag.
 - P14.T47.e (Earth after Robinson 2026) took version 21 in the 20 → 21 bump with P11.T4.h and
   plan 11's protostar and build-age fix (decision-r07-earth-albedo), and with P11.T4.i–k. Its
   goldens were blessed at 20 until that bump, which only flipped the version (Phase J lane,
@@ -7325,11 +7489,24 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   leans:
   1. **Biotic O₂.** No plan produces life, so a generated Earth has no O₂ and no ozone. Lean: a gap
      until a biosphere plan exists; T24.f's and T24.c's tests record it.
-  2. **A sulphuric-acid deck.** This plan tracks no sulphur, so no rule forms Venus's H₂SO₄ deck,
-     and R08 classifies a generated Venus as `thickScattering`, not `cloudDeck`. Lean: a science
-     agent drafts a rule before T24.c is built (sulphur from T24.b's volcanism on a
-     runaway-greenhouse world, calibrated on Venus's deck); until then the material stays in the
-     enum and no rule produces it.
+  2. **A sulphuric-acid deck.** This plan tracked no sulphur, so no rule formed Venus's H₂SO₄ deck,
+     and R08 classed a generated Venus `thickScattering`.
+     - Drafted by a science agent on 2026-10-09: P14.T24.g. It gives a deck on a runaway-greenhouse
+       world and a thin layer elsewhere.
+     - On the table's Venus the deck lies at 1.34–0.04 bar with τ 33, so R08 classes it
+       `cloudDeck` (τ > 10, cloud fraction 1) and R11's boundary leaves it to R08.
+     - Until it is accepted and built, the material stays in the enum and no rule produces it.
+     - Its assumptions, for the owner:
+       - water is never limiting on a runaway world, though T13.c removes its water;
+       - t_dry, ε_v and σ_d are fixed on Venus;
+       - Hu et al.'s law is applied on cold, dry worlds and off 1 bar;
+       - a runaway world colder than about 430 K (rare, carbon-poor) still takes the cycling rule;
+       - a dry temperate world hot enough to cycle its acid, which T13.c's climate does not
+         produce, would take the thin layer;
+       - the UV is not modelled beyond "a star lights it";
+       - SO₂'s weak absorption reaching the violet below the deck is left to R08 (from memory,
+         check at build).
+     - "Volcanism level" is split into T48.a's V and T24.b's present O.
   3. **A sub-Neptune's sections.** T48.e as reconciled makes a sub-Neptune's surface
      `NotApplicable`, a change from the as-built `NotModelled`. Lean: accept, since nothing can
      stand on it, and R09's `for_body` already answers `NoSolidSurface`. **Decided**
@@ -7348,9 +7525,22 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   k₂ 0.3 and Q 100 for a sub-Neptune, as built. Whether its fluid envelope makes them a giant's is a
   physics question for the owner, with a bump of its own if taken.
 
+- **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
+  and scientifically authentic", able to "handle any atmosphere/surface composition one might
+  expect to exist"; noted by "main"). The drafted surface-section tasks define closed sets that
+  cover the Solar System's cases: T24.c's `AerosolMaterial` enum; the absorber list (ozone, and
+  SO₂ by T24.g); and the condensate species, T24.c's decks on T13.c's saturation curves, T24.d's
+  NH₃, NH₄SH and H₂O decks and T48.d's condensable. Each is under a composition audit, begun
+  2026-10-09, and may widen to a registry driven by data (each species with its properties and
+  their sources) before it is built. T35.e's rule that a closed enum carries every variant from the
+  start then applies to what the audit leaves; a set reshaped before any build has sent a value of
+  it needs no `PROTOCOL_VERSION` bump (decision-p14-t35e-wire). No species the generator can
+  produce is dropped or stood in for silently: what is not yet modelled is labelled.
+
 - **This plan's Venus at 58 bar against the real 92 (R08).** T13.c's grey fit gives Venus 735 K at
   58 bar, 37% under the real surface pressure. R08 gates both: its Venus-class fixture uses the
   real 92 bar (τ_R(550) ≈ 15.5) and a second case this plan's 58 bar (τ_R ≈ 9.8), so that both the
   physics and the generated world are checked (R08 Design note 16). It is a finding for T13.c's
   owner, not a correction R08 makes. T24.e's Venus test, 300–370 K at 1 bar, holds at either
-  pressure.
+  pressure. T24.g's deck on the 58-bar Venus lies at the right pressures (1.34–0.04 bar, as Venus's
+  48–70 km), about 6 km lower than Venus's, at 42.6–62.7 km, because the column is lighter.
