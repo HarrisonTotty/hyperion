@@ -1482,6 +1482,11 @@ sky::census::query`, `just test-slow caps_converge_in_rays`.
   which moves the full census's cost and barely the first sky's. Acceptance: the test, by name,
   and `cargo test -p hyperion-sim sky::caps`.
 
+  As built (Risks, "Deviations in T7.c, as built"): it passes at all six points, the least margin
+  +0.073 mag, 2,000 ly above the Sun. The six points are the slow
+  `the_eyes_visibility_caps_are_safe_with_the_illumination_at_six_points`. The fast near-Sun test
+  keeps T7.b's gates, with the illumination.
+
 ### R06.T8 The census
 
 - **R06.T8.a Query and plan.** `SkyQuery`, its builder (observer within the cube and ±H, cut finite
@@ -6901,6 +6906,74 @@ CensusCost)`.
     - The cost estimates "at T7.b's caps" elsewhere in this plan assumed the ruling's 25% for E. As
       built E opens 32.9% and all layers 74.2%, within the gates by 2.1 and 0.8 points; T8.g and T17
       re-derive them.
+- **Deviations in T7.c, as built (2026-10-08).** The visibility caps' safety with the illumination,
+  as `decision-r06-t11d-first-sky.md` §4 rules it. Test only, in `sky/caps.rs`' test module. It
+  passes at all six points, so it no longer holds back serving the eye's visibility caps by default.
+  - **Built.**
+    - `least_margin` takes the request's illumination and states it on the final 64² map's query.
+    - `the_eyes_visibility_caps_count_what_it_sees_and_open_a_fifth_fewer_systems` (fast, near the
+      Sun) states the fixture's `Illumination::march` at the Sun (`sun_illumination`) on the eye's
+      cut, its visibility and the final map. T7.b's gates are unchanged.
+    - The slow `the_eyes_visibility_caps_are_safe_with_the_illumination_at_six_points` marches its
+      own illumination at each of `caps_converge_in_rays`' six points and checks the safety alone:
+      some texel–ray pairs compared, each ray's cut at most the eye's, and no negative least
+      margin. A NaN margin now fails both tests; `f64::min` used to drop it.
+    - Its points, `CONVERGENCE_POINTS`, copy `tests/sky_caps.rs`' `POINTS`, since `least_margin`
+      and `visible_cuts_v` are private to the module. `POINTS`' doc comment says so.
+  - **The six points are a slow test (as the task allows).** Their illuminations, eye cuts and final
+    maps take 231 s in the slow profile. The rule bounds, the count beyond, the 3,072-ray recount
+    and the fifth-fewer gate stay in the fast test, near the Sun.
+  - **Near the Sun**, from the fast test, with T7.b's figures without the illumination in brackets:
+    - the eye's cut is 8.179 (8.282);
+    - the rays' cuts run 6.916–8.179, median 7.736 (7.206–8.282, median 8.010);
+    - the least margin is +0.088 mag over 85,772 pairs (+0.094);
+    - the visibility caps open 53.1% of the uniform caps' systems at that cut (62.7%);
+    - the recount at 3,072 rays is at most 0.961, in A (0.935).
+  - **The least margin at the six points**, with the illumination, run under the heavy lock in the
+    slow profile on 2026-10-08. The least is +0.073 mag, 2,000 ly above the Sun: 0.021 mag under
+    T7.b's near-Sun figure, where the ruling expected a move of hundredths. Every point compares
+    85,772 texel–ray pairs, a count set by the lattice and the map alone, and the near-Sun row
+    equals the fast test's. Each eye's cut without the illumination is in brackets, from T7.b's
+    `caps_converge_in_rays` record.
+
+    | Point                  | The eye's cut | The rays' cuts (median) | Least margin |
+    | ---------------------- | ------------- | ----------------------- | ------------ |
+    | Near the Sun           | 8.179 (8.282) | 6.916–8.179 (7.736)     | +0.088 mag   |
+    | The nuclear disc       | 5.807 (7.372) | 5.800–5.806 (5.804)     | +0.100 mag   |
+    | (26,000, 0, 68)        | 8.109 (8.403) | 6.909–8.109 (7.721)     | +0.090 mag   |
+    | (−18,385, −18,385, 68) | 7.730 (8.280) | 6.784–7.721 (7.428)     | +0.086 mag   |
+    | The inner disc         | 6.722 (7.243) | 6.051–6.684 (6.491)     | +0.076 mag   |
+    | 2,000 ly above the Sun | 8.540 (8.540) | 6.900–8.540 (8.085)     | +0.073 mag   |
+
+  - **Measured, with no gate:** the diffuse light makes the eye's cut shallower where it is bright,
+    by 0.10 mag near the Sun, 0.52 in the inner disc and 1.57 in the nuclear disc. There the rays'
+    cuts are nearly uniform (5.800–5.806). 2,000 ly above the Sun the cut is unchanged to the
+    thousandth.
+  - **The server** already sets `eye_visibility`, with the illumination, on every eye-only request
+    (R06.T11.c, R06.T11.d). Nothing changes there, and the ruling's fallback, leaving it unset, is
+    not needed.
+  - **T7.b's Open items** "the safety test ran without an illumination" and "safety-tested near the
+    Sun alone" are closed.
+  - **Open.** `caps_converge_in_rays`' visibility pass still builds its eye's cut and visibility
+    without the illumination. The visibility caps as served are therefore recounted at 3,072 rays
+    near the Sun alone (0.961), and not at the nuclear disc's 5.807 or the inner disc's 6.722, which
+    are shallower than any cut that test counts. The ruling words T7.c as the safety test alone.
+    Adding the illumination there is a test-only change for the orchestrator to assign.
+  - **Gates** (capped, build-slot, 4 jobs, `CPUQuota=400%`):
+    - fmt, and clippy `-D warnings` on the sim's targets, natively and for wasm32-wasip1;
+    - `cargo test -p hyperion-sim sky::caps`: 16 passed and 1 ignored (the slow test), 180 s;
+    - the slow test, under `just _locked`, in nextest's slow profile: passed, 231 s.
+  - **Reviews.**
+    - Rust review: its must-fix (the helper borrowed the `Arc`, then cloned it) is applied, and so
+      are its should-fix (a needless clone) and one consider (the NaN margin).
+    - Plan conformance: no must-fix beyond this record. Its considers are applied: the pairs check
+      and the points' pointer.
+    - Determinism and science reviews were skipped: the change is test only, with no generated
+      output and no new figure.
+  - **Acceptance as built:**
+    - `cargo test -p hyperion-sim sky::caps`, where the slow test is ignored;
+    - `just test-slow the_eyes_visibility_caps_are_safe_with_the_illumination_at_six_points`, run
+      here as its nextest command on the sim's lib under `just _locked`.
 - **Deviations in T8.i, as built (2026-10-08).** Nearest first, as the census-cost ruling
   (`decision-r06-census-cost.md`), its sign-off (question 2, conditions 1 and 2) and the listing
   ruling (`decision-r06-t8i-listing.md`, adopted 2026-10-08) set it out. No golden moves and no

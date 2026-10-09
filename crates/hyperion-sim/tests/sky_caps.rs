@@ -31,7 +31,8 @@ use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Magnitudes;
 
 /// The points: near the Sun, the nuclear disc, the solar circle a quarter turn round and on the
-/// far side, the inner disc, and 2,000 ly above the Sun.
+/// far side, the inner disc, and 2,000 ly above the Sun. `sky::caps`' slow safety test with the
+/// illumination (R06.T7.c) holds a copy, `CONVERGENCE_POINTS`: change both together.
 const POINTS: [[f64; 3]; 6] = [
     [0.0, 26_000.0, 68.0],
     [0.0, 150.0, 0.0],

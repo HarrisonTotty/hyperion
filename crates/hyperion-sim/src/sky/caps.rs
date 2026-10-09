@@ -2205,11 +2205,14 @@ mod tests {
     /// The safety test's least margin (R06.T7.b): over every texel of the final 64² limit map near
     /// `observer` at `cut`, with no glare, and every ray of `lattice` whose cone meets it, the ray's
     /// cut of `cuts` less the texel's limit and the largest colour offset; with the pairs taken.
+    /// The final map's query states the request's `illumination`, as the server's does (R06.T7.c;
+    /// R06.T11.d), so its band holds the diffuse galactic light beside the starlight.
     fn least_margin(
         observer: &Observer,
         cut: Magnitudes,
         lattice: &CapLattice,
         cuts: &[f64],
+        illumination: Arc<crate::sky::dgl::Illumination>,
         ctx: &mut crate::sky::census::SkyContext<'_>,
     ) -> (u64, f64) {
         use crate::sky::band::{CompleteTo, band_rows};
@@ -2217,7 +2220,10 @@ mod tests {
         use crate::sky::eye::EyeObserver;
         use crate::sky::limits::{Glare, largest_colour_offset, limit_map};
         let spec = BandSpec::STANDARD;
-        let query = SkyQuery::builder(*observer, cut).build().expect("a query");
+        let query = SkyQuery::builder(*observer, cut)
+            .illumination(illumination)
+            .build()
+            .expect("a query");
         let mut band = Vec::new();
         for face in CubeFace::ALL {
             band_rows(
@@ -2247,7 +2253,11 @@ mod tests {
                     for (ray, &ray_cut) in lattice.directions().iter().zip(cuts) {
                         if math::acos(ray.dot(&centre).clamp(-1.0, 1.0)) <= reach {
                             pairs += 1;
-                            least = least.min(ray_cut - (limit + offset));
+                            // A NaN margin is kept, so that it fails the test.
+                            let margin = ray_cut - (limit + offset);
+                            if margin.is_nan() || margin < least {
+                                least = margin;
+                            }
                         }
                     }
                 }
@@ -2262,7 +2272,12 @@ mod tests {
     /// expected count beyond under one; the safety test, that no texel of the final 64² limit map
     /// with no glare, plus the largest colour offset, is deeper than the cut of any ray whose cone
     /// meets it; and they open at least a fifth fewer systems than [`layer_caps`]' at the eye's
-    /// cut, counted at 3,072 rays and twice the radial steps. Prints the records.
+    /// cut, counted at 3,072 rays and twice the radial steps. The eye's cut, its visibility and the
+    /// final map's query all state the request's illumination ([`Illumination::march`] at the
+    /// observer), as the server's do (R06.T7.c; `decision-r06-t11d-first-sky.md` §4). Prints the
+    /// records.
+    ///
+    /// [`Illumination::march`]: crate::sky::dgl::Illumination::march
     #[test]
     fn the_eyes_visibility_caps_count_what_it_sees_and_open_a_fifth_fewer_systems() {
         use crate::sky::eye::EyeObserver;
@@ -2272,8 +2287,10 @@ mod tests {
         let observer = observer_at([0.0, 26_000.0, 68.0]);
         let eye = EyeObserver::default();
         let mut ctx = sky_context();
-        let cut = eye_cut(galaxy, &mut ctx, &observer, &eye, None);
-        let visibility = eye_visibility(galaxy, &mut ctx, &observer, &eye, cut, None);
+        // The fixture's `Illumination::march` at this observer, built once a process.
+        let light = crate::sky::testing::sun_illumination();
+        let cut = eye_cut(galaxy, &mut ctx, &observer, &eye, Some(light));
+        let visibility = eye_visibility(galaxy, &mut ctx, &observer, &eye, cut, Some(light));
         let mut cache = NoiseCache::with_capacity(1 << 16);
         let seen =
             layer_caps_by_visibility(galaxy, tables, envelope, &observer, &visibility, &mut cache);
@@ -2294,7 +2311,8 @@ mod tests {
                 cap.layer()
             );
         }
-        let (pairs, least) = least_margin(&observer, cut, lattice, &cuts, &mut ctx);
+        let (pairs, least) =
+            least_margin(&observer, cut, lattice, &cuts, Arc::clone(light), &mut ctx);
         let fine_resolution =
             CapResolution::new(3_072, 2 * RADIAL_STEPS_PER_DECADE).expect("non-zero");
         let fine = CapCount::measure(
@@ -2349,6 +2367,75 @@ mod tests {
         );
         assert!(beyond.iter().all(|&b| b < 1.5), "{beyond:?}");
         assert!(ours <= 0.8 * theirs, "{ours} against {theirs}");
+    }
+
+    /// `caps_converge_in_rays`' six points (`tests/sky_caps.rs`), ly: near the Sun, the nuclear
+    /// disc, the solar circle a quarter turn round and on the far side, the inner disc, and
+    /// 2,000 ly above the Sun.
+    const CONVERGENCE_POINTS: [[f64; 3]; 6] = [
+        [0.0, 26_000.0, 68.0],
+        [0.0, 150.0, 0.0],
+        [26_000.0, 0.0, 68.0],
+        [-18_385.0, -18_385.0, 68.0],
+        [0.0, 8_000.0, 0.0],
+        [0.0, 26_000.0, 2_000.0],
+    ];
+
+    /// The caps by the eye's visibility are safe with the request's illumination at
+    /// `caps_converge_in_rays`' six points (R06.T7.c; `decision-r06-t11d-first-sky.md` §4).
+    ///
+    /// At each point the illumination, [`Illumination::march`] at the observer, is stated on the
+    /// eye's cut, its visibility and the final 64² map's query, as the server states it
+    /// (R06.T11.d). At every point each ray's cut is at most the eye's, and no texel of the final
+    /// map with no glare, plus the largest colour offset, is deeper than the cut of any ray whose
+    /// cone meets it. The rays are the standard lattice's, which [`layer_caps_by_visibility`]
+    /// counts. Prints each point's least margin, beside T7.b's +0.094 mag near the Sun without the
+    /// illumination. A negative margin widens [`visible_cuts_v`]'s reach, never this test. Slow:
+    /// six illuminations, eye cuts and final maps.
+    ///
+    /// [`Illumination::march`]: crate::sky::dgl::Illumination::march
+    #[test]
+    #[ignore = "slow: marches the illumination, the eye's cut and the final 64² map at six points"]
+    fn the_eyes_visibility_caps_are_safe_with_the_illumination_at_six_points() {
+        use crate::sky::dgl::Illumination;
+        use crate::sky::eye::EyeObserver;
+        use crate::sky::limits::{eye_cut, eye_visibility};
+        let galaxy = milky_way_galaxy();
+        let eye = EyeObserver::default();
+        let lattice = CapLattice::new(CAP_RAYS);
+        let mut failures = Vec::new();
+        for point in CONVERGENCE_POINTS {
+            let observer = observer_at(point);
+            let mut ctx = sky_context();
+            let light = Arc::new(Illumination::march(galaxy, &mut ctx, &observer));
+            let cut = eye_cut(galaxy, &mut ctx, &observer, &eye, Some(&light));
+            let visibility = eye_visibility(galaxy, &mut ctx, &observer, &eye, cut, Some(&light));
+            let cuts = visible_cuts_v(&lattice, &visibility);
+            let (pairs, least) = least_margin(&observer, cut, &lattice, &cuts, light, &mut ctx);
+            let mut sorted = cuts;
+            sorted.sort_by(f64::total_cmp);
+            eprintln!(
+                "{point:?} with the illumination: the eye's cut {:.3}, rays' cuts {:.3}–{:.3} \
+                 (median {:.3}); {pairs} texel–ray pairs, least margin {least:+.4} mag",
+                cut.value(),
+                sorted[0],
+                sorted[sorted.len() - 1],
+                sorted[sorted.len() / 2],
+            );
+            if pairs == 0 {
+                failures.push(format!("{point:?}: no texel–ray pair compared"));
+            }
+            if sorted[sorted.len() - 1] > cut.value() {
+                failures.push(format!("{point:?}: a ray's cut deeper than the eye's"));
+            }
+            if least.is_nan() || least < 0.0 {
+                failures.push(format!(
+                    "{point:?}: a texel deeper than its rays' cut by {}",
+                    -least
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 
     /// Rays measured in shares, each with a cache of its own, and joined in order are one
