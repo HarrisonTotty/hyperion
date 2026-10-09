@@ -436,12 +436,12 @@ it is recorded, and stays here so that the owner can review it.
   destination's chevrons and the labels' place, a view's label never shown in part, the coverage a
   stroke's pair is relied on at, R07.T17's `QUALITY` and `DECORATION ON` texts, and with them
   `SELECT`, `ECLIPSE TEST` and `SCENE CLOCK`;
-  R08.T2's five atmosphere labels
+  R08.T2's six atmosphere labels
   (`ATMOSPHERE: NOT RESOLVED`, `ATMOSPHERE: NOT YET MODELLED`, `AEROSOLS: NOT YET MODELLED`,
-  `ATMOSPHERE: COMPUTING`, `ATMOSPHERE: APPROXIMATE`); R10.T13's readout notation
-  (`~2140 m ± 180 m`, `ELEVATION`, `SLANT RANGE`, `DATUM`, contours); and R11's reading of item 2,
-  that "decoration" covers terrain micro-detail and decorative scatter but not clouds and waves
-  (R11 Design note 2).
+  `ATMOSPHERE: PENDING`, `ATMOSPHERE: COMPUTING`, `ATMOSPHERE: APPROXIMATE`); R10.T13's readout
+  notation (`~2140 m ± 180 m`, `ELEVATION`, `SLANT RANGE`, `DATUM`, contours); and R11's reading
+  of item 2, that "decoration" covers terrain micro-detail and decorative scatter but not clouds
+  and waves (R11 Design note 2).
 - **Data licences** before data are committed: the Karkoschka and Tomasko methane coefficients
   (Elsevier), Serdyuchenko's ozone data files (terms unstated), and whether raw tables may be
   committed beside the reduced values (R08.T4.b); H₂SO₄ (Palmer and Williams 1975), Mars dust

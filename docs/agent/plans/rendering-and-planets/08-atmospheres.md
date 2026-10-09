@@ -272,12 +272,14 @@ export interface AssembledMedium {
   readonly labels: ReadonlyArray<AtmosphereLabel>;
 }
 export type AtmosphereLabel =
-  | "atmosphereNotResolved" // the surface section is withheld
-  | "atmosphereNotYetModelled" // the surface section is `not_modelled`
+  | "atmosphereNotResolved" // the section its atmosphere comes from is withheld
+  | "atmosphereNotYetModelled" // the section its atmosphere comes from is `not_modelled`
+  // (a giant's envelope while absent)
   | "aerosolsNotYetModelled" // no aerosol or absorber inventory
+  | "atmospherePending" // its section is asked and the reply not yet drawn
   | "atmosphereComputing" // a gated thick bake is running
   | "atmosphereApproximate"; // a thick world whose gate has not passed, or an oblate body drawn
-// with one slice before R08.T6.f (Design note 17)
+// with one slice before R08.T6.f (Design note 17); also after a failed bake, until the next lands
 export class AtmosphereCache {
   /* per body and inventory hash; requests `body_detail` (`toBodyDetailRequest`,
      `lib/system/bodiesWire.ts`); posts work to the optics workers; one per device, holding each
@@ -997,17 +999,26 @@ Names are those the owning plans give; the owning plan is authoritative.
       cost of the sun loop) and the thick table's size, and keeps both settings built together
       from R08.T6 on.
     - The thick bakes cost CPU at arrival, not frame time, so they run on both settings.
-12. **What the view says.** The atmosphere is computed physics, not decoration. Five states are
+12. **What the view says.** The atmosphere is computed physics, not decoration. Six states are
     labelled. The first three follow the guide's existing grammar for a withheld or unmodelled
-    section; the last two are new annunciations about the view's own drawing, as item 7 of "What
+    section; the last three are new annunciations about the view's own drawing, as item 7 of "What
     the guide must gain" frames them:
-    - `ATMOSPHERE: NOT RESOLVED` when the surface section is withheld. No atmosphere is drawn then,
-      since drawing Earth's instead would be invention.
+    - `ATMOSPHERE: NOT RESOLVED` when the surface section is withheld, or a gas envelope's
+      `envelope` section (decision-r08-giant-label). No atmosphere is drawn then, since drawing
+      Earth's instead would be invention.
     - `ATMOSPHERE: NOT YET MODELLED` while the surface section is `not_modelled`, which is every
       generated body until P14.T24.a's figures are on the wire (R08.T1's P14.T35.e). No
-      atmosphere is drawn.
+      atmosphere is drawn. A body whose atmosphere is a gas envelope takes it from its envelope
+      instead: a giant, whose surface section is `not_applicable`, while its `envelope` section
+      (P14.T24.d, on the wire by P14.T35.e) is absent, which reads `not_modelled`; a sub-Neptune
+      likewise, whose surface section R08.T1's reconciliation also makes `not_applicable` (a lean
+      open with "main"; were the section kept, while it states a gas envelope without the
+      envelope's figures). A kept scene's body with no atmosphere set shows it too
+      (decision-r08-giant-label).
     - `AEROSOLS: NOT YET MODELLED` while plan 14 publishes no aerosol or absorber inventory. It
       covers the absorbers too: ozone and methane are drawn only from the inventory.
+    - `ATMOSPHERE: PENDING` from a body's `body_detail` request until its reply is drawn. No
+      atmosphere is drawn meanwhile.
     - `ATMOSPHERE: COMPUTING` while a gated thick bake runs.
     - `ATMOSPHERE: APPROXIMATE` while a thick world is drawn with the analytic term because its
       regime's gate has not passed (Design note 9).
@@ -1299,12 +1310,13 @@ no `npx`._
 
 ### R08.T2 The atmosphere labels, drafted for the owner
 
-Draft the five nomenclature entries of Design note 12 in the form of R02's drafted items, each
+Draft the six nomenclature entries of Design note 12 in the form of R02's drafted items, each
 with its meaning and when it clears:
 
 - `ATMOSPHERE: NOT RESOLVED`;
 - `ATMOSPHERE: NOT YET MODELLED`;
 - `AEROSOLS: NOT YET MODELLED`, covering absorbers as well;
+- `ATMOSPHERE: PENDING`, which clears by itself;
 - `ATMOSPHERE: COMPUTING`;
 - `ATMOSPHERE: APPROXIMATE`, which clears when its regime's gate passes.
 
@@ -1313,7 +1325,7 @@ None uses a status colour or the word "degraded" (item 7 of
 The client is built to the draft. The task is committed with the draft marked for the owner, and
 **the owner signs off** later; the sign-off is recorded here.
 
-Files: the five entries as rows of the guide's nomenclature table in
+Files: the six entries as rows of the guide's nomenclature table in
 `docs/frontend/ux-guidelines.md` (as `BODY PHOTOMETRY: NOT YET MODELLED`, a `Label`, and
 `TERRAIN: STREAMING`, an `Annunciation`, are), each marked
 `_Draft (plan R08, R08.T2): the owner signs off._`, and `labels.ts`, the strings and the
@@ -1747,9 +1759,11 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
   draws" below. Tests: `photorealisticPasses`' `atmosphere` entry is built and carries the passes'
   labels; `PhotorealRenderer` submits them after the discs and before R11's slots, and none for a
   view whose bodies have no medium (R05's counting fake, `test/countingRenderEngine.ts`); a
-  withheld, unmodelled or approximate body's label reaches `photorealStatements`. Acceptance:
-  `pnpm test` and `just test-render` pass, and by hand a flight past every fixture, on a kept test
-  scene that carries them (`view/scenes/`), is recorded here.
+  withheld, unmodelled or approximate body's label reaches `photorealStatements`, after its other
+  notes (`atmosphereStatements`, `labels.ts`); a kept scene's body with no atmosphere set, such as
+  R07's `TEST GIANT`, carries `ATMOSPHERE: NOT YET MODELLED` (decision-r08-giant-label).
+  Acceptance: `pnpm test` and `just test-render` pass, and by hand a flight past every fixture, on
+  a kept test scene that carries them (`view/scenes/`), is recorded here.
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's
@@ -1776,10 +1790,11 @@ of Design note 12 join `photorealStatements` (`displays/view/viewRun.ts`) beside
 
 An airless body (`SurfaceState::Airless`) draws no atmosphere and no label. Until the surface
 section carries P14.T24.a's figures (R08.T1's P14.T35.e), generated bodies draw no atmosphere and
-show `ATMOSPHERE: NOT YET MODELLED`, and a giant's section is `not_applicable` until its
-`envelope` section exists. The task runs on the fixtures of Design note 16: Earth, Earth with
-ozone, Mars with hand dust, Venus at 92 and at 58 bar, a hand Titan, and a hand giant. Those that
-need held data wait on the licence ruling (the task order's list).
+show `ATMOSPHERE: NOT YET MODELLED`, and so does a giant, whose surface section is
+`not_applicable`, until its `envelope` section exists (decision-r08-giant-label). The task runs on
+the fixtures of Design note 16: Earth, Earth with ozone, Mars with hand dust, Venus at 92 and at
+58 bar, a hand Titan, and a hand giant. Those that need held data wait on the licence ruling (the
+task order's list).
 
 Tests (T10.a):
 
@@ -1787,6 +1802,15 @@ Tests (T10.a):
   `atmosphereNotYetModelled`;
 - a request is sent once per body per trigger, and none for a point-regime body;
 - an absent inventory gives no aerosol term and `aerosolsNotYetModelled`;
+- a giant's record (surface `not_applicable`, no envelope) gives no medium and
+  `atmosphereNotYetModelled`;
+- an airless body gives no medium and no label;
+- a body whose request is in flight gives `atmospherePending`, and none on a re-request while its
+  previous state is drawn;
+- a flyby that brings many bodies into the disc regime does not make `ATMOSPHERE: PENDING` flash
+  more than three times a second (the guide's flash threshold; decision-r08-giant-label, §4). If
+  it would, the scene's lit bodies are asked for on arrival, or the line is held as R05's terrain
+  annunciation holds its own (`view/terrain/annunciation.ts`);
 - the same inputs give the same key and a changed inventory another;
 - results transfer, and the cache evicts least recently used within its stated size;
 - each fixture's optics time is recorded, on a quiet machine.
@@ -1947,8 +1971,10 @@ Per Design note 9, in four subtasks.
 - **R08.T14.c The read path.** The sky-view, aerial-perspective and march kernels read the thick
   table in place of σ_s·Ψ_ms·p_u (catalogued), one layer a band, interpolated at the sample's
   latitude. `TABLE_SIZES` gains the thick size, and the table is cached per world.
-  `ATMOSPHERE: COMPUTING` shows while a gated bake runs. Acceptance: `pnpm test` and
-  `just test-render` pass.
+  `ATMOSPHERE: COMPUTING` shows while a gated bake runs, in `ATMOSPHERE: APPROXIMATE`'s place and
+  never beside it for one body, and `ATMOSPHERE: APPROXIMATE` takes its place if the bake fails,
+  until the body's atmosphere is next computed (the guide's draft rows, R08.T2). Acceptance:
+  `pnpm test` and `just test-render` pass.
 - **R08.T14.d The gates.**
   - The Venus-class cases (92 and 58 bar) and the Titan-class case, through the CPU twin with the
     baked table, pass `gate.ts` per geometry. Both m = 0 alone and m = 0..1 are run, and which is
@@ -2284,3 +2310,64 @@ generator, and the reference's sampling needs no domain tag.
       since a neighbour's light crosses the air as sunlight does;
     - R07's two-star surface cap against `SKY_SUN_CAP`'s four on high: lean, keep both, and list
       the third and fourth suns' unlit surface in `ATMOSPHERE_QUALITY_LIMITS` for R12's audit.
+- **Deviations in T2, as built** (2026-10-09).
+  - _A sixth label and the giant's note, decided._ T2 asked "main" whether a giant drawn without
+    its air carries a note, since its surface section is `not_applicable` and Design note 12's
+    five labels gave it none. The ruling, delegated and adopted, is
+    `decision-r08-giant-label.md` in the RM4/RM5 orchestration directory. Each note follows the
+    section the body's air comes from: the surface section, or a gas envelope's own (a giant's or a
+    sub-Neptune's), never a giant's `not_applicable` surface. A kept scene's body with no
+    atmosphere set carries `ATMOSPHERE: NOT YET MODELLED` (R07's `TEST GIANT`). Airless bodies,
+    points, marks, contacts and stars carry none. A section asked and not yet answered gets a
+    sixth label, `ATMOSPHERE: PENDING`, an annunciation in `LIGHTING: PENDING`'s form, which
+    R08.T10.a sets. T2's commit applies the ruling's plan text: Design note 12 (six states, the
+    envelope sentence, the `PENDING` bullet), T2's list, the Provides sketch, T10's giant
+    sentence and three T10.a tests. From the plan-conformance review it adds what the ruling
+    implies but did not list: the withheld `envelope` in Design note 12's `NOT RESOLVED` bullet and
+    the Provides comment; a fourth T10.a test, the ruling's §4 check that `PENDING` does not flash
+    more than three times a second on a flyby; T10.b's tests for the notes' place after the
+    block's others and for `TEST GIANT`'s note; and T14.c's rule for `COMPUTING` and
+    `APPROXIMATE` (below). Its finding F1, that P14.T35.e gave the `envelope` section to giants
+    only, went to R08.T1, which landed first: P14.T35.e now gives one to every gas-envelope body,
+    and a sub-Neptune's surface section turns `not_applicable`, a lean open with "main" (Risks,
+    "R08.T1's asks, as written into plan 14"). The labels hold either way.
+  - _The module._ `view/atmosphere/labels.ts` holds `AtmosphereLabel`, there rather than in
+    `assemble.ts` as the Provides sketch groups it (the task's Files; R08.T10.a imports it), and
+    `ATMOSPHERE_STATEMENTS`, each key's string. Two names are added. `ATMOSPHERE_LABELS` gives the
+    keys in the order the six stand among themselves: the two `NOT YET MODELLED` notes, then
+    `ATMOSPHERE: NOT RESOLVED` after them, as the guide's "Data states" places a `NOT RESOLVED`
+    note, then `PENDING`, `COMPUTING` and `APPROXIMATE`. `atmosphereStatements(labels)` gives
+    each label's string once in that order, scene-level as `litLabelsOf` is. R08.T10.b appends its
+    result after `photorealStatements`' other notes, so that `ATMOSPHERE: NOT RESOLVED` stands
+    after every `NOT YET MODELLED` note on the block, `ROTATION`'s and `BODY PHOTOMETRY`'s
+    included.
+  - _Per body._ The TSDoc states the precedence that T10.a and T14.c build. A body carries at
+    most one of `NOT RESOLVED` and `NOT YET MODELLED`, the withheld section first, and no
+    `AEROSOLS` note under either. It carries at most one of `COMPUTING` and `APPROXIMATE`:
+    `COMPUTING` while a gated bake runs, in `APPROXIMATE`'s place, and `APPROXIMATE` if the bake
+    fails, until the body's atmosphere is next computed. T14.c's text now says so, for its tests
+    to pin.
+  - _The guide's rows._ Six rows, one for each label so that each can be accepted or reverted
+    alone. They follow `PHOTOREALISTIC: PREPARING` in the nomenclature list, the three `Label`s
+    first and then the three `Annunciation`s, each marked
+    `_Draft (plan R08, R08.T2): the owner signs off._`. The `NOT YET MODELLED` and `NOT RESOLVED`
+    rows carry the ruling's clauses word for word, and `PENDING` is its row. Beyond Design note
+    12, from the reviews:
+    - the labels concern lit bodies drawn larger than a point (T10.a requests no section for a
+      point-regime body);
+    - `NOT YET MODELLED` no longer claims the body has air;
+    - both `NOT YET MODELLED` notes stand on their own lines, never composed with another
+      `NOT YET MODELLED` note. This is T2's reading, for the owner: the ruling's §4 says only that
+      the giant's clause changes no composition, and the guide composes named pairs alone;
+    - `AEROSOLS` is never read as "none";
+    - `COMPUTING` applies only to a kind whose check has passed, stands in `APPROXIMATE`'s place,
+      and gives way to `APPROXIMATE` if the computation fails, until the body's atmosphere is next
+      computed (a choice for the owner; Design note 9 does not cover a failed bake);
+    - `APPROXIMATE` concerns thick and strongly flattened bodies only, so it does not reach a thin
+      atmosphere drawn before R08.T13's check; it names the oblate case before R08.T6.f (Design
+      note 17) beside the thick one, as `AtmosphereLabel`'s sketch does, and names no 5% figure,
+      since the metric's floor is still the owner's (Risks, "The metric's floor is for the
+      owner").
+  - _Sign-off: pending._ The owner signs off the six rows (the roadmap's "Still awaiting", which
+    now lists `ATMOSPHERE: PENDING`). The client is built to them meanwhile, and the sign-off is
+    recorded here when given.
