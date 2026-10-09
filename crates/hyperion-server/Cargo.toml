@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 hyperion-protocol.workspace = true
 hyperion-sim.workspace = true
+# R09's coarse-field cells and resolution codes, for the survey coverage (R09.T18).
+hyperion-surface.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true

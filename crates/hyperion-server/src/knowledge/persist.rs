@@ -14,32 +14,32 @@
 //!
 //! Every file operation is blocking and runs on [`tokio::task::spawn_blocking`], never on the
 //! runtime; the blocking task finishes even if the future awaiting it is dropped, so the store and
-//! its file stay in step.
+//! its file stay in step. The log itself, its loading and its appends are the private `jsonl`
+//! module's, which the survey passes share (plan R09, R09.T18).
 
 use std::error::Error;
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use hyperion_sim::alerts::AlertBand;
 use hyperion_sim::coords::{GalacticPosition, LyCell};
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::id::EventId;
-use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::WattsPerSquareMetre;
 use serde::{Deserialize, Serialize};
 
+use super::jsonl::{self, KnowledgeLog, LogName, TimeLine};
 use super::record::{ContactId, KnowledgeLevel, Sighting, SightingParts};
 use super::store::{AcknowledgeContactError, KnowledgeEntry, KnowledgeStore};
 use crate::universe::{UniverseId, UniverseStore};
 
-/// The file format this build writes and the only one it reads.
+/// The contacts file's format: the one this build writes and the only one it reads.
 pub const KNOWLEDGE_FORMAT: u32 = 1;
 
-/// The contacts file's name for [`KNOWLEDGE_FORMAT`].
-const CONTACTS_FILE: &str = "contacts.v1.jsonl";
+/// The contacts file, `contacts.v1.jsonl` for [`KNOWLEDGE_FORMAT`].
+const CONTACTS: LogName = LogName::new("contacts", KNOWLEDGE_FORMAT);
 
 /// A universe's Knowledge store, kept in step with its file (plan 12, P12.T7.b).
 ///
@@ -150,7 +150,7 @@ impl Shared {
         let mut log = self.writer()?;
         let entry = lock(&self.store).sighting_entry(event, sighting);
         let contact = entry.contact();
-        log.append(&entry)?;
+        log.append(&EntryLine::from(&entry))?;
         lock(&self.store)
             .apply(entry)
             .expect("an entry the store planned under the file's lock still fits it");
@@ -167,7 +167,8 @@ impl Shared {
             Some(_) => {}
         }
         let entry = KnowledgeEntry::Acknowledged { contact };
-        log.append(&entry).map_err(AcknowledgeContactError::Save)?;
+        log.append(&EntryLine::from(&entry))
+            .map_err(AcknowledgeContactError::Save)?;
         lock(&self.store)
             .apply(entry)
             .expect("a contact the store had under the file's lock still has it");
@@ -190,223 +191,16 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The contacts file, as far as it holds good lines.
-#[derive(Debug)]
-struct KnowledgeLog {
-    dir: PathBuf,
-    path: PathBuf,
-    /// Open once the first append needs it.
-    file: Option<File>,
-    /// The length of the good lines: an append starts here, cutting off whatever a failed append
-    /// or a crash left beyond it.
-    len: u64,
-}
-
-impl KnowledgeLog {
-    /// Appends `entry`, after the header if the file holds nothing yet, and syncs it.
-    fn append(&mut self, entry: &KnowledgeEntry) -> Result<(), SaveKnowledgeError> {
-        let mut text = String::new();
-        if self.len == 0 {
-            push_line(
-                &mut text,
-                &HeaderLine {
-                    format: KNOWLEDGE_FORMAT,
-                },
-            );
-        }
-        push_line(&mut text, &EntryLine::from(entry));
-        let len = self.len;
-        let path = self.path.clone();
-        let file = self.file()?;
-        file.set_len(len).map_err(save_io("truncate", &path))?;
-        file.seek(SeekFrom::Start(len))
-            .map_err(save_io("seek", &path))?;
-        file.write_all(text.as_bytes())
-            .map_err(save_io("write", &path))?;
-        file.sync_data().map_err(save_io("sync", &path))?;
-        self.len = len + u64::try_from(text.len()).expect("a line's length fits in 64 bits");
-        Ok(())
-    }
-
-    /// The open file, created with its directory if need be. The directory is created inside the
-    /// universe's, never the universe's itself, so that no directory appears for a universe with
-    /// no save.
-    fn file(&mut self) -> Result<&mut File, SaveKnowledgeError> {
-        if self.file.is_none() {
-            let made_dir = match fs::create_dir(&self.dir) {
-                Ok(()) => true,
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
-                Err(error) => return Err(save_io("create directory", &self.dir)(error)),
-            };
-            let existed = self.path.exists();
-            let file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(&self.path)
-                .map_err(save_io("open", &self.path))?;
-            if !existed {
-                sync_directory(&self.dir).map_err(save_io("sync directory", &self.dir))?;
-            }
-            if made_dir && let Some(universe) = self.dir.parent() {
-                sync_directory(universe).map_err(save_io("sync directory", universe))?;
-            }
-            self.file = Some(file);
-        }
-        Ok(self.file.as_mut().expect("the file was opened above"))
-    }
-}
-
-/// The error of a failed step of an append.
-fn save_io(operation: &'static str, path: &Path) -> impl FnOnce(io::Error) -> SaveKnowledgeError {
-    let path = path.to_path_buf();
-    move |source| SaveKnowledgeError::Io {
-        operation,
-        path,
-        source,
-    }
-}
-
-/// Appends `line` as JSON and a newline.
-fn push_line(text: &mut String, line: &impl Serialize) {
-    text.push_str(&serde_json::to_string(line).expect("a line of strings and numbers serialises"));
-    text.push('\n');
-}
-
-/// Makes the entries of `dir` durable on Unix, and does nothing elsewhere.
-///
-/// On Windows std's `File::open` cannot open a directory, and flushing a directory handle is
-/// undocumented, as [`UniverseStore::write`] explains (plan 04, P04.T17.b). There the new
-/// `knowledge/` directory and the contacts file's name are left to NTFS, which logs metadata
-/// changes in one sequential log. Each append's own `sync_data`, a `FlushFileBuffers` of the file,
-/// is expected to carry them with it, but Microsoft documents no such guarantee. On FAT, exFAT and
-/// network shares nothing is promised beyond the file's own data.
-///
-/// On macOS std's `sync_all` and `sync_data` are `fcntl(F_FULLFSYNC)`. This sync and every
-/// append's therefore flush the drive's cache.
-fn sync_directory(dir: &Path) -> io::Result<()> {
-    if cfg!(unix) {
-        File::open(dir).and_then(|handle| handle.sync_all())
-    } else {
-        Ok(())
-    }
-}
-
 /// Reads the store in `dir` (module documentation).
 fn load(dir: PathBuf) -> Result<(KnowledgeStore, KnowledgeLog), LoadKnowledgeError> {
-    refuse_later_formats(&dir)?;
-    let path = dir.join(CONTACTS_FILE);
-    let mut log = KnowledgeLog {
-        dir,
-        path,
-        file: None,
-        len: 0,
-    };
-    let bytes = match fs::read(&log.path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok((KnowledgeStore::new(), log));
-        }
-        Err(source) => {
-            return Err(LoadKnowledgeError::Io {
-                operation: "read",
-                path: log.path,
-                source,
-            });
-        }
-    };
     let mut store = KnowledgeStore::new();
-    let mut good = 0;
-    let mut rest = bytes.as_slice();
-    let mut number = 0;
-    while !rest.is_empty() {
-        number += 1;
-        let Some(end) = rest.iter().position(|&byte| byte == b'\n') else {
-            tracing::warn!(
-                path = %log.path.display(),
-                line = number,
-                bytes = rest.len(),
-                "dropping a torn last line of a knowledge file"
-            );
-            break;
-        };
-        let line = &rest[..end];
-        let malformed = |reason, source| LoadKnowledgeError::MalformedLine {
-            path: log.path.clone(),
-            line: number,
-            reason,
-            source,
-        };
-        if number == 1 {
-            let header: HeaderLine = serde_json::from_slice(line)
-                .map_err(|error| malformed("not a header", Some(error)))?;
-            match header.format {
-                KNOWLEDGE_FORMAT => {}
-                0 => return Err(malformed("format 0 is never written", None)),
-                format => {
-                    return Err(LoadKnowledgeError::UnsupportedFormat {
-                        path: log.path,
-                        format,
-                    });
-                }
-            }
-        } else {
-            let parsed: EntryLine = serde_json::from_slice(line)
-                .map_err(|error| malformed("not an entry", Some(error)))?;
-            let entry = KnowledgeEntry::try_from(parsed).map_err(|field| malformed(field, None))?;
-            store
-                .apply(entry)
-                .map_err(|_| malformed("does not fit the contacts before it", None))?;
-        }
-        good += end + 1;
-        rest = &rest[end + 1..];
-    }
-    log.len = u64::try_from(good).expect("a file's length fits in 64 bits");
+    let log = jsonl::load(dir, CONTACTS, |line: EntryLine| {
+        let entry = KnowledgeEntry::try_from(line)?;
+        store
+            .apply(entry)
+            .map_err(|_| "does not fit the contacts before it")
+    })?;
     Ok((store, log))
-}
-
-/// Refuses a directory that holds a contacts file of a later format than this build's.
-fn refuse_later_formats(dir: &Path) -> Result<(), LoadKnowledgeError> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => {
-            return Err(LoadKnowledgeError::Io {
-                operation: "list",
-                path: dir.to_path_buf(),
-                source,
-            });
-        }
-    };
-    let mut latest = None;
-    for entry in entries {
-        let entry = entry.map_err(|source| LoadKnowledgeError::Io {
-            operation: "list",
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        let format = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.strip_prefix("contacts.v"))
-            .and_then(|name| name.strip_suffix(".jsonl"))
-            .and_then(|number| number.parse::<u32>().ok());
-        if let Some(format) = format
-            && format > KNOWLEDGE_FORMAT
-        {
-            latest = latest.max(Some((format, entry.path())));
-        }
-    }
-    match latest {
-        Some((format, path)) => Err(LoadKnowledgeError::UnsupportedFormat { path, format }),
-        None => Ok(()),
-    }
-}
-
-/// The header line.
-#[derive(Debug, Serialize, Deserialize)]
-struct HeaderLine {
-    format: u32,
 }
 
 /// One change, as a line of format 1. Field order is the order on disk.
@@ -436,13 +230,6 @@ enum EntryLine {
 struct PositionLine {
     cell_ly: [i32; 3],
     offset_m: [f64; 3],
-}
-
-/// An instant of the universe clock, exactly.
-#[derive(Debug, Serialize, Deserialize)]
-struct TimeLine {
-    seconds: i64,
-    nanos: u32,
 }
 
 /// An [`AlertBand`].
@@ -565,23 +352,6 @@ impl PositionLine {
     }
 }
 
-impl From<UniverseTime> for TimeLine {
-    fn from(time: UniverseTime) -> Self {
-        Self {
-            seconds: time.seconds(),
-            nanos: time.subsec_nanos(),
-        }
-    }
-}
-
-impl TimeLine {
-    /// The time, or `None` for nanoseconds past a second, which only damage makes; the caller
-    /// names the field.
-    fn to_time(&self) -> Option<UniverseTime> {
-        UniverseTime::new(self.seconds, self.nanos).ok()
-    }
-}
-
 impl From<AlertBand> for BandLine {
     fn from(band: AlertBand) -> Self {
         match band {
@@ -656,7 +426,8 @@ pub enum LoadKnowledgeError {
         /// The format it declares.
         format: u32,
     },
-    /// A line other than a torn last one does not parse or does not fit the contacts before it.
+    /// A line other than a torn last one does not parse or does not fit the lines before it: the
+    /// contacts, or the survey passes (R09.T18).
     MalformedLine {
         /// The file.
         path: PathBuf,
@@ -723,8 +494,8 @@ pub enum SaveKnowledgeError {
     },
     /// The blocking task that wrote the change did not finish.
     Interrupted,
-    /// An earlier change panicked, so the file and the store may disagree: nothing more is
-    /// written until the universe's Knowledge is opened again.
+    /// An earlier change panicked, so the file and what is held in memory may disagree: nothing
+    /// more is written to that log until it is opened again.
     Poisoned,
 }
 
@@ -751,9 +522,12 @@ impl Error for SaveKnowledgeError {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use hyperion_sim::GeneratorVersion;
     use hyperion_sim::coords::GalacticVelocity;
     use hyperion_sim::observe::{Drift, Observer, retarded};
+    use hyperion_sim::time::UniverseTime;
 
     use super::*;
     use crate::knowledge::testing::{event_of, host, other_host, third_host};
@@ -761,6 +535,15 @@ mod tests {
     use crate::universe::SavedUniverse;
 
     const UNIVERSE: UniverseId = UniverseId::new(0xab);
+
+    /// The contacts file's name for [`KNOWLEDGE_FORMAT`].
+    const CONTACTS_FILE: &str = "contacts.v1.jsonl";
+
+    /// The name the log is given is the one P12.T7.b wrote.
+    #[test]
+    fn knowledge_contacts_file_keeps_its_name() {
+        assert_eq!(CONTACTS.file_name(), CONTACTS_FILE);
+    }
 
     /// A data directory holding universe [`UNIVERSE`]'s save.
     fn universe() -> (tempfile::TempDir, UniverseStore) {

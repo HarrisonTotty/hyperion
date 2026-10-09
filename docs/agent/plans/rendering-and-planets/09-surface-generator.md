@@ -1944,3 +1944,61 @@ coarse goldens in that commit.
     readers) are pinned at a few points only; the determinism review asks T3's or T9's goldens to
     write every one-byte code's value and a sample of `LogArea`'s. T18 takes `CoarseLevel`,
     `cell_index` and `ResolutionCode` from here.
+- **Deviations in T18, as built** (2026-10-09).
+  - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
+    `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`
+    and `TimeLine`, with the loader `jsonl::load(dir, name, apply)`, whose `apply` takes each
+    parsed line and names the bad field when it refuses one, and
+    `refuse_later_formats(dir, name)`. The parameter is a `LogName` (stem and format,
+    `<stem>.v<format>.jsonl`; format 0 panics), so each log refuses only later files of its own
+    stem: a later `contacts` file does not refuse the surveys, nor the reverse. `persist.rs` keeps
+    its lines, reasons and torn-line warning; `CONTACTS_FILE` moved into its tests, which gain
+    `knowledge_contacts_file_keeps_its_name`, and `KNOWLEDGE_FORMAT` is documented as the contacts
+    file's format.
+  - _One behaviour change, for crash safety._ A log's first open in a process now syncs
+    `knowledge/` and the universe's directory every time, not only when that log made them or its
+    file: with two logs in `knowledge/`, one could find the directory made by the other, whose sync
+    had not finished, or left unsynced by a failed sync, and report a line saved before the names
+    leading to it were durable (P12.T7's single log had the same gap on a retry after a failed
+    sync). It costs at most two directory syncs a log a process; on macOS each is an
+    `F_FULLFSYNC`. Test: `knowledge_log_first_append_syncs_both_directories_it_did_not_make`.
+  - _No `LoadSurveysError`._ `SurveyLog::open` returns `LoadKnowledgeError`, and `record` wraps
+    `SaveKnowledgeError` in `RecordSurveyError::Save`: the loader and the appends are shared, so
+    the failures are the same, and one type lets a holder open both logs with one `?`. Both stay
+    in `persist.rs`; `MalformedLine`'s and `Poisoned`'s docs now speak of either log. No later plan
+    names `LoadSurveysError`.
+  - _Public items beyond Provides._ `SurveyPassParts` (public fields, the crate's Parts pattern),
+    which `SurveyPass::new` checks; `BuildSurveyPassError` (`Span`, `Resolution`, `NoCells`,
+    `EmptyRun`, `Unsorted`, `OutsideField`); the `SurveyPass` getters, `code` and `cell_count`
+    among them; `RecordSurveyError` (`Level`, `Revisions`, `Save`); `CoverageRevision`
+    (`NonZeroU32`, `FIRST`, `new`, `get`, `Display`); `Coverage`'s `level`, `revision`, `code`,
+    `as_bytes` and `surveyed`, with no public constructor, so that `record` stays the only way
+    coverage grows (its `Debug` shows the surveyed count, not the bytes).
+  - _The line._ Format 1 is `body` (the sim's text form), `from` and `to` (`{seconds, nanos}`),
+    `source` (`orbital`, `close_range`, `landed`), `resolution_m`, `level` and `cells`
+    (`[[start, end], …]`, half-open, sorted, non-overlapping; runs may meet), pinned by
+    `survey_lines_of_format_1_are_pinned`. The code is derived from the metres on load. The
+    field's level joins Design note 16's fields so that a line's runs are checked against its cell
+    count without the body's radius, which the log cannot see, and so that a body's passes share
+    one level (`RecordSurveyError::Level` on record, "does not fit the passes before it" on load).
+    A bad span, a resolution with no code (not finite, not positive, or coarser than about 36,000
+    km) or bad runs make a line `MalformedLine` naming `to`, `resolution_m` or `cells`.
+  - _Revisions._ `record` returns the body's `CoverageRevision`, its count of passes, and
+    `coverage(body)` an `Arc<Coverage>` snapshot whose codes and revision agree (copied on write
+    while a reader holds one); a body with no pass gives `None`, revision 0 for T19.b. The file's
+    lock is held over a whole pass, so revision n is always the fold of the body's first n lines,
+    and reopening restores it.
+  - _Dependency._ The server depends on `hyperion-surface` (for `CoarseLevel` and
+    `ResolutionCode`, and `coarse_level`, `cell_index` and `cube` in tests), since the sim does not
+    re-export the surface crate; T17 uses the same edge.
+  - _For T19.a and T19.b._ A universe's survey file has one writer, as P12.T7's is: the
+    `SurfaceService` opens each universe's `SurveyLog` once, even when two first requests race,
+    clones it, and hands it to P12.T8's holder once that exists. The log keeps only each body's
+    fold, so T19.b's `since` cover for `have_revision` needs the body's first n passes: T19.b adds
+    keeping them (or a cover per revision) to `Surveys`, and the `Coverage`-to-`Cover` conversion
+    for `encode_payload`.
+  - _Tests beyond the four._ A bad span, resolution or cells refused; a pass at another level; a
+    body past the last revision; passes after a panic refused as poisoned while the coverage still
+    reads; unknown and later formats (a later contacts file refuses nothing); the torn last line
+    written over; malformed lines naming their field; a universe with no save, where nothing is
+    written; concurrent passes reaching the file in the coverage's order; format 1's lines pinned.

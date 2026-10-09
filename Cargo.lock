@@ -729,6 +729,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hyperion-protocol",
  "hyperion-sim",
+ "hyperion-surface",
  "hyperion-testkit",
  "serde",
  "serde_json",
