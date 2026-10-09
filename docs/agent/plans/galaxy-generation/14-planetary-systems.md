@@ -3707,30 +3707,48 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     min(1, T_e ÷ 70 km), V the volcanism level and T_e ≈ k (870 K − T_s) ÷ F from the heat flow F,
     with k = 3.1 W m⁻¹ K⁻¹, the plate model's mantle value (Parsons and Sclater 1977; Stein and
     Stein 1992). 870 K is kept as a mechanical-thickness proxy, with which the 70 km normalisation
-    was calibrated; the lithosphere factor acts on this share and the edifice cap only.
+    was calibrated (ruled by R09.T0.b, 2026-10-09: it is the mechanical lithosphere's 550–600 °C
+    isotherm, and fits Venus's and Mars's T_e, where 723 K fails on Venus; R09's Design note 3);
+    T_e is zero where T_s ≥ 870 K; the lithosphere factor acts on this share and the edifice cap
+    only.
 
   Every constant calibrates on one body (Earth the mobile-lid terms, Venus the stagnant lid, the
   Moon the basin share, Mars the constructional share, Ceres k_comp and Vesta the cap), so the fit
   is labelled empirical in its doc comments. Mercury is the one out-of-sample check, over-predicted
-  by 21% (1.27 against 1.05 km). f_c is the continental fraction or, failing one, the land-plus-shelf
-  area (0.405 on Earth); a stagnant lid has none. Its law for a generated mobile-lid world is open
-  (below).
+  by 21% (1.27 against 1.05 km, relative to the geoid; R09.T0.b's masked check finds it does not
+  come from Mercury's smooth plains, and keeps the age law global, read at the surface age). f_c is
+  the continental fraction or, failing one, the land-plus-shelf area (0.405 on Earth). Its law, by
+  R09.T0.b (2026-10-09, medium-low confidence; Höning and Spohn 2023, Astrobiology 23(4),
+  372–394): on a mobile lid, f_c = f_∞ (1 − e^(−(t − t_p) ÷ τ)) after t_p = 0.5 Gyr from formation
+  and zero before, with τ = 1.1 Gyr and an asymptote f_∞ drawn once per body, uniform in
+  [0.2, 0.7], on a stream of this plan's own (a body tag such as `body.continents`, for this plan's
+  owner to name), since continental growth there is history-dependent (an ocean planet near 20%,
+  an Earth-like one near 40% and a land planet near 70% after 4.5 Gyr). f_c is zero on a stagnant
+  lid and on a world that never held surface water, and no mass dependence is modelled. Earth's
+  0.405 at 4.5 Gyr is f_∞ = 0.416; the Solar System table passes Earth's measured 0.405.
   - _Tests:_ the Solar System table gives Earth 2.51 km at f_c 0.405 and Venus, the Moon, Mars,
     Ceres and Vesta their calibrating values within 5%, and Mercury within 25%; σ_h is continuous
-    in time; no figure published is a greatest relief.
+    in time; no figure published is a greatest relief; f_c is zero before t_p, on a stagnant lid and
+    on a never-wet world, rises monotonically to f_∞, and over 10⁴ bodies its asymptotes are
+    uniform on [0.2, 0.7] (Kolmogorov–Smirnov).
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
 
 - **P14.T48.b The volatile history** (with T24.b). `GlobalFigures` gains
   `wet_epoch: Option<WetEpoch>`, `WetEpoch { start, end, effective_flow, paleo_inventory }`: the
-  span over which the surface held liquid, `effective_flow` the years at effective discharge (the
-  epoch's length times its intermittency, which is R09's stream-power solver's t), and
+  span over which the surface held liquid, `effective_flow` the epoch in Earth-equivalent years
+  (its length scaled by its flood frequency relative to an arid-to-semiarid Earth's, since R09's
+  erodibility is a long-term terrestrial calibration that already holds Earth's intermittency;
+  R09's stream-power solver's t; corrected by R09.T0.b on 2026-10-09 from "years at effective
+  discharge", which would run Mars's epoch about fifty times too short), and
   `paleo_inventory` the liquid inventory then, which R09 places as a paleo-sea by this plan's own
   logistic of inventory over basin capacity or spreads through closed basins. A world wet now has
   an epoch to the present, and one never wet has none. The history also says whether the world
   reached its present state from a colder one, which T48.d's ice belt reads. Mars's valley networks
-  formed within a few hundred million years around 3.7 Ga, from perhaps 10⁵ to 10⁷ years of active
-  flow (Hoke and Hynek 2009; Luo, Cang and Howard 2017). How the epoch is derived from T12's flux
-  and T13's inventory and escape over time is this plan's to set.
+  formed within a few hundred million years around 3.7 Ga (Hoke and Hynek 2009; Luo, Cang and Howard
+  2017), in 10⁵ to 10⁷ years "with runoff rates similar to intense storms in arid regions on Earth"
+  (Hoke, Hynek and Tucker 2011, EPSL 312, 1), which is Earth-equivalent time, against 200–5,000 yr
+  of continuous flow. How the epoch is derived from T12's flux and T13's inventory and escape over
+  time is this plan's to set.
   - _Tests:_ Earth's epoch runs to the present; Mars's ends before 3 Ga with `effective_flow` within
     10⁵–10⁷ yr; the Moon and Mercury have none.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
@@ -3794,12 +3812,22 @@ its source when it becomes a constant. Their order with T24 and with rendering p
 
 1. **Open question 20** of the rendering brainstorm (still **Open**, a physics ruling): σ_h as
    T48.a drafts it, with no gravity term in the structural share. Lean: accept, labelled empirical,
-   with Mercury's 21% as its measure; accepting T48.a rules the question.
-2. **The law of f_c** for a generated mobile-lid world, which only Earth's 0.405 calibrates. Lean:
-   a research agent proposes one before T48.a is built (R09.T0.b).
+   with Mercury's 21% as its measure; accepting T48.a rules the question. R09.T0.b's science
+   ruling (2026-10-09, R09's Risks, "Remaining checks, as researched"): yes, in substance, since
+   T48.a answers each of the question's three parts (σ_h for the greatest relief, its gravity
+   scaling, the lithosphere factor's part), on three conditions written into the ruling: f_c's law
+   is part of the model, Mercury's 21% stays its out-of-sample measure, and the age law is stated
+   as global and uncalibrated between saturation and young surfaces.
+2. **The law of f_c** for a generated mobile-lid world, which only Earth's 0.405 calibrated.
+   Researched by R09.T0.b (2026-10-09) and drafted in T48.a: a seeded asymptote uniform in
+   [0.2, 0.7] reached with τ = 1.1 Gyr from 0.5 Gyr (Höning and Spohn 2023). For the owner: the
+   draw's stream and whether f_c should depend on mass or water inventory, which no source
+   constrains yet.
 3. **The isotherm of T_e**: 870 K, the mechanical-thickness proxy the 70 km normalisation was
-   calibrated with, or the elastic 723 K (450 °C), which would re-fit it against Mars. Lean: 870 K
-   (R09.T0.b checks it).
+   calibrated with, or the elastic 723 K (450 °C). Researched by R09.T0.b (2026-10-09): 870 K
+   stands (T48.a), since 723 K lies below Venus's surface temperature and gives Venus no elastic
+   lithosphere against an observed 29 ± 6 km, and Mars's 70 km holds under either. An ice-rich
+   crust needs an isotherm of its own (R09's lean: about 170 K with ice's conductivity).
 
 ## Verification
 

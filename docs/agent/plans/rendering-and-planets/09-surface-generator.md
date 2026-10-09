@@ -536,20 +536,74 @@ every timing below is provisional and is re-measured on a quiet machine by the t
      (Parsons and Sclater 1977; Stein and Stein 1992; researched 2026-09-29, medium confidence). 870
      K (about 600 °C) is kept explicitly as a mechanical-thickness proxy, since the 70 km
      normalisation was calibrated with it; oceanic T_e follows the 450 ± 150 °C isotherm (Watts
-     2001; Watts and Burov 2003), and moving to 723 K would re-fit that constant (Risks). The
+     2001; Watts and Burov 2003), and 723 K was weighed against it (ruled below). The
      lithosphere factor acts on that share and the edifice cap only. Every body but one calibrates a
      constant: Earth the mobile-lid terms, Venus the stagnant-lid 0.9 km (0.94 km observed, with
      almost no basin or constructional share, so its −4% is the rounding and not a test), the Moon
      the basin share, Mars the constructional share, Ceres k_comp and Vesta the 0.02 R cap. Mercury
      is the only out-of-sample check, and the fit over-predicts it by 21% (1.27 against 1.05 km), so
      the fit is labelled empirical and tested once (researched 2026-09-29, high confidence). f_c is
-     the continental fraction, or failing one the land-plus-shelf area (0.405 on Earth). Greatest
-     relief, 20 km × (g⊕ ÷ g), is withdrawn as a published figure (it is Johnson and McGetchin
-     1973's 1/g envelope, 53 km for Mars against 29.4 observed); the field reports the realised
-     relief, which lies at 7–15 σ_h on every body measured.
+     the continental fraction, or failing one the land-plus-shelf area (0.405 on Earth; its law for
+     generated worlds is below). Greatest relief, 20 km × (g⊕ ÷ g), is withdrawn as a published
+     figure (it is Johnson and McGetchin 1973's 1/g envelope, 53 km for Mars against 29.4
+     observed); the field reports the realised relief, which lies at 7–15 σ_h on every body
+     measured.
+
+     Three checks of the fit (researched 2026-10-09, by R09.T0.b). _The age law_
+     √min(1, N(>1 km) ÷ 0.018 km⁻²) is kept as a global factor, read at plan 14's surface age (the
+     time since the last global resurfacing) and never weighted over a surface's geological units.
+     The same pyshtools computation, masked, finds no age signal in Mercury's units: Maia 2024's
+     stereo shape model to degree 719 (Zenodo, doi:10.5281/zenodo.10809345) over Giuri, van der
+     Bogert and Hiesinger 2025's global smooth-plains map (Icarus 441, 116699; data
+     doi:10.5281/zenodo.14913540; 19.3% of the surface, 23.9% with the smooth crater floors), plains
+     dated at about 3.7 Ga (Wang et al. 2021's 262 dated sites, area-weighted 3.71 Ga; data
+     doi:10.5281/zenodo.5155070), gives them band-passed relief at 0.95–0.98 of the older
+     intercrater plains' and cratered terrain's at every band from above degree 5 to above degree
+     160, where the law predicts 0.79 for the basin share (N(>1 km) = 0.011 km⁻² at 3.71 Ga by the
+     lunar chronology, saturated from 3.8 Ga) and 0.90 for the whole. Mars's partly resurfaced
+     northern lowlands (north of 50° N) err the other way, at 0.23–0.34 of the southern highlands'
+     relief from above degree 20 to above degree 320 (MOLA's shape to degree 719, the same
+     script), against the law's 0.6 at 3.6 Ga. Partial resurfacing thus follows no law in N, so the
+     factor stays uncalibrated between saturation and the young surfaces where the basin share is
+     negligible (no Solar System body lies between), and Mercury's over-prediction is not its
+     smooth plains: weighting its two units by the law would lower 1.27 km by 3% only. Mercury's
+     1.05 km is confirmed as 1.048 km relative to the geoid (JGMESS160A's degrees 2–100, first
+     order), against 1.090 km for the shape alone and 0.98 km on GTMES_150 (degree 150). T10's
+     reference worlds may take σ_h from the fit, which gives each of their analogues within 5%.
+     _The isotherm of T_e_ is 870 K (ruled): it is the mechanical lithosphere's isotherm, "near
+     550–600 °C, depending on strain rate [McNutt, 1984]", the conversion McGovern et al. 2002 use
+     for Mars (JGR 107(E12), 5136, §4.2, ¶68), so the 70 km normalisation and T_e = k (870 K −
+     T_s) ÷ F are a mechanical-thickness proxy by design. At Venus's ambient heat flow of 10–30
+     mW m⁻² (Maia and Wieczorek 2022, JGR Planets 127, e2021JE007004, after Solomatov and Moresi
+     1996, Phillips et al. 1997 and O'Rourke and Korenaga 2015) and T_s = 737 K it gives 14–41 km,
+     against a global mean of 29 ± 6 km from the gravity of volcanic structures (Barnett, Nimmo and
+     McKenzie 2002, JGR 107(E2), 5007) and 15 km under the crustal plateaus (Maia and Wieczorek);
+     the elastic 723 K lies below Venus's surface temperature and gives none. On Mars (14–25 mW m⁻²,
+     mean 19, Parro et al. 2017, Sci. Rep. 7, 45629; T_s about 210 K) it gives 108 km and 723 K
+     84 km, both above 70 km, matching Olympus Mons's > 70 km (McGovern et al. 2004's correction)
+     and 93 ± 40 km (Belleguic, Lognonné and Wieczorek 2005, JGR 110, E11005), so 723 K would need
+     no re-fit there unless F exceeded 22.7 mW m⁻². Where T_s ≥ 870 K, T_e is zero: no
+     constructional share, and Airy compensation (α = 0) about T12.c's loads. An ice-rich crust is
+     not described by a silicate isotherm (Risks). _The continental fraction_ (medium-low
+     confidence): continental growth on an Earth-sized plate-tectonic planet depends on its history.
+     In Höning and Spohn 2023 (Astrobiology 23(4), 372–394, arXiv:2211.09473; after Höning, Tosi,
+     Hansen-Goos and Spohn 2019, PEPI 287, 37–50), the positive feedback between continental crust
+     and mantle water leaves, after 4.5 Gyr, an ocean planet with about 20% continental crust, an
+     Earth-like one with 40% or a land planet with about 70%, from initial mantle temperatures 150
+     K apart (their Figs. 4–5 and §5). Plan 14 therefore draws an asymptote f_∞, uniform in
+     [0.2, 0.7], once per body on a stream of its own, and grows f_c = f_∞ (1 − e^(−(t − t_p) ÷ τ))
+     after t_p = 0.5 Gyr from formation (their onset of continental growth), zero before, with τ =
+     1.1 Gyr, fitted by eye to their Fig. 5's Earth-like curve (0.15, 0.25, 0.31 and 0.37 of
+     coverage at 1, 1.5, 2 and 3 Gyr; 0.405 at 4.5 Gyr for f_∞ = 0.416). f_c is zero on a stagnant
+     lid and on a world that never held surface water, since their continents grow only by the
+     melting of hydrated crust at subduction zones. No mass dependence is modelled, since they treat
+     Earth-sized planets alone, and the Solar System table gives Earth its measured 0.405. The
+     structural share then spans 2.11–2.55 km over the draw's range.
+
    - **The volatile history**, `WetEpoch { start, end, effective_flow, paleo_inventory }`, with
-     `effective_flow` defined as years at effective discharge (the epoch's length times its
-     intermittency), which is the solver's t (Design note 9).
+     `effective_flow` defined in Earth-equivalent years (the epoch's length scaled by its flood
+     frequency relative to an arid-to-semiarid Earth's), which is the solver's t (Design note 9;
+     corrected 2026-10-09 by T0.b from "years at effective discharge").
    - **The crater contract**: N(>1 km) with its belt scaling, the screening inputs (surface
      pressure over gravity and a projectile density, or a crater cutoff), g, a target factor
      k_target (1 rock, 0.12 ice-rich), and optionally a mean impact velocity; the surface crate
@@ -648,10 +702,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    do (Earth's D = 1.16 × 10⁶ m² s⁻¹); heat capacities of land 5.25 × 10⁶ J m⁻² K⁻¹, ocean 40× and
    ice 9.2× or 2× by temperature (Williams and Kasting 1997, after Spiegel et al.); gray outgoing
    radiation σT⁴ ÷ (1 + ¾τ) with τ solved once so that the mean matches plan 14's; albedo 0.525 −
-   0.245 tanh((T − 268 K) ÷ 5 K), both shifted to the condensable's freezing point; D scaling as Ω⁻²
-   and with pressure, heat capacity and molar mass, capped at 30 D⊕ (provisional; no published cap
-   exists, and Risks carries the research's lean) and halved on dry worlds; locked worlds in tidally
-   locked coordinates about P14.T14's substellar axis, with no seasons. It steps **implicitly**
+   0.245 tanh((T − 268 K) ÷ 5 K), both shifted to the condensable's freezing point; D scaling with
+   rotation and pressure as an idealised moist GCM gives them (the transport law, below), with heat
+   capacity and molar mass as Williams and Kasting 1997 scale them, under an overall cap of 30 D⊕,
+   and halved on dry worlds; locked worlds in tidally locked coordinates about P14.T14's
+   substellar axis, with no seasons. It steps **implicitly**
    (backward Euler, a tridiagonal solve in latitude and a periodic one in longitude, split in a
    fixed order) at the brainstorm's six hours, since the explicit limit is about 11 h on Earth and
    fails for any slower rotator, and runs a fixed maximum of orbits until the annual mean moves
@@ -677,6 +732,32 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    rescaled so that global precipitation equals global evaporation. Prevailing winds are the
    three-cell pattern scaled by the Hadley width, converging on the substellar point for slow and
    locked rotators. The offline check against ExoPlaSim is a recorded task, never run on arrival.
+
+   _The transport law_ (researched 2026-10-09, by R09.T0.b; medium confidence). The FILLET ensemble
+   cannot test a cap. Its protocol (Deitrick et al. 2023, arXiv:2302.04980, and its v1.1,
+   arXiv:2511.11957) runs Earth-like 1 bar aquaplanets at Earth's rotation with one prescribed D,
+   0.5 W m⁻² K⁻¹ in its D = κ ÷ R² (its Table 4), across obliquity, instellation and CO₂, and its
+   results paper is not yet out. It bears only on D⊕, which for Siler et al.'s 1.16 × 10⁶ m² s⁻¹ is
+   about 0.3 W m⁻² K⁻¹ dry and 0.7 moist at 288 K and 80% relative humidity, bracketing FILLET's
+   0.5 and North, Cahalan and Coakley 1981's 0.649, and on T13.d's ice-edge states. The Ω⁻² law
+   itself fails. In Kaspi and Showman 2015's idealised moist GCM (ApJ 804, 60, arXiv:1407.6349;
+   aquaplanet, no seasons, no ice, gray radiation), the equator–pole surface contrast is about 23 K
+   at Ω⊕ ÷ 24, 28 K at Ω⊕ ÷ 8, 36 K at Ω⊕ ÷ 4 and ÷ 2, 40 K at Ω⊕, 48 K at 2 Ω⊕, 58 K at 4 Ω⊕, 70
+   K at 8 Ω⊕ and 77 K at 12 Ω⊕ (their Fig. 8a, read to ±1 K), and "the total energy transport is
+   rather insensitive to rotation rate when Ω < Ωe" (§3.1): Ω⁻² would raise D 64-fold by Ω⊕ ÷ 8,
+   where the contrast has fallen by 30%. Inverting a linear model (ΔT ∝ 1 ÷ (B + 6D′), with B = 2.09
+   and D′⊕ = 0.649 W m⁻² K⁻¹) gives D ÷ D⊕ ≈ 1.2 at Ω⊕ ÷ 4, 1.7 at Ω⊕ ÷ 8 and 2.1 at Ω⊕ ÷ 24, and
+   0.74, 0.52, 0.34 and 0.26 at 2, 4, 8 and 12 Ω⊕: about (Ω ÷ Ω⊕)^−¼ below Earth's rotation and
+   (Ω ÷ Ω⊕)^−½ above. Pressure saturates likewise: the contrast is 47 K at 0.2 bar, 42 K at 1, 37 K
+   at 3, 30.5 K at 10, 24 K at 30 and 22 K at 50 bar (their Fig. 15c; the eddy flux levels off
+   beyond 10 bar, §3.3), about (p ÷ p⊕)^0.2 (0.84 at 0.2 bar, 1.6 at 10 and 2.4 at 50) where D ∝ p
+   gives 50. So the rotation and pressure factors are tabulated from those two figures, T13.a
+   fitting the tables with the EBM itself so that its contrast ratios match the GCM's to 2 K over
+   Ω⊕ ÷ 24 to 12 Ω⊕ and 0.2 to 50 bar, and holding each at its end value beyond that range (the
+   lean of 2026-09-29, (Ω⊕ ÷ Ω)² ≤ 64 under about 100 D⊕, is withdrawn). The cap of 30 D⊕ stays as
+   a guard that only the unverified heat-capacity and molar-mass factors can reach, as in an
+   H₂-rich air (low confidence).
+
 9. **Erosion** (researched 2026-09-29: Tzathas et al. 2024, CGF 43(2), from the authors' PDF;
    Barnes, Lehman and Mulla 2014; Barnes, Callaghan and Wickert 2021; Hack 1957; Luo, Cang and
    Howard 2017). Where the world has or had surface liquid, the stream-power law ∂z/∂t = u − k A^m
@@ -695,12 +776,49 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    through the depression hierarchy after the paleo-sea is placed by plan 14's own logistic. A world
    wet now runs to steady state; one dry now runs for t = `effective_flow`, only where the surface
    is older than the epoch's end; one with no wet epoch skips the step. m = θ = 0.45 (Kirby and
-   Whipple 2012, from memory); K scales from Tzathas et al.'s 2 × 10⁻⁵ m^(1−2m) a⁻¹ by fluid density
-   and gravity, runoff to the m, and a bedrock factor, with the drainage area replaced by Hergarten
-   2021's runoff-weighted equivalent area from the climate step (low confidence, stated in the doc
-   comment). Both the paper's code (Inria research-only licence) and Dendry's (GPL-3.0) are
+   Whipple 2012, from memory), with the drainage area replaced by Hergarten 2021's runoff-weighted
+   equivalent area from the climate step, normalised by a reference runoff of 1 m a⁻¹, which is the
+   only place runoff enters (the first draft also multiplied K by runoff to the m, counting it
+   twice). Both the paper's code (Inria research-only licence) and Dendry's (GPL-3.0) are
    implemented from the papers alone. Outputs: final elevation, flow direction, drainage area, a
    steepness index k_s, and water surfaces.
+
+   _Erodibility_ (researched 2026-10-09, by R09.T0.b; low to medium-low confidence, stated in the
+   doc comment): K = K⊕ (g ÷ g⊕)(ρ_f ÷ ρ_water) B. K⊕ = 6.3 × 10⁻⁶ m^0.1 a⁻¹: Tzathas et al.'s 2 ×
+   10⁻⁵ m^(1−2m) a⁻¹ is for m = 0.4 (their Table 1, with a precipitation of 1 m a⁻¹), not 0.45, and
+   converts at n = 1 as K A_ref^(0.4 − 0.45) at A_ref = 10¹⁰ m² (7.1 × 10⁻⁶ at 10⁹ m², 5.6 × 10⁻⁶ at
+   10¹¹), which used unconverted would erode about three times too fast; it lies at the
+   volcaniclastic end of Stock and Montgomery 1999's field values for m = 0.4 and n = 1 (JGR 104,
+   4983: 10⁻⁷–10⁻⁶ for granite and metamorphic rock, 10⁻⁵–10⁻⁴ for volcaniclastics, 10⁻⁴–10⁻²
+   for mudstones). K goes as gⁿ in both the shear-stress and the unit-stream-power forms, and as
+   ρ_f^(1.5n) and ρ_f^n respectively (Whipple and Tucker 1999, JGR 104, 17661, eqs. 8–10), so at
+   n = 1 g enters linearly and ρ_f is taken linearly. B is the bed's factor: 1 for rock; 10 for
+   impact-brecciated regolith such as Mars's Noachian highlands, taken where the surface is
+   crater-saturated (Barnhart, Howard and Moore 2009, JGR 114, E01003, ¶78, regolith ten times the
+   bedrock's erodibility, in a model that is "essentially the DELIM model as reported by Howard
+   [1994a, 1997, 2007]", ¶71, whose bedrock erodibility is set from long-term terrestrial rates in
+   weak sedimentary rock); and 8 for water-ice bedrock under liquid methane, a combined
+   bed-and-fluid factor that puts Titan's K at about half of Earth's at equal runoff. Collins 2005
+   (GRL 32, L22202, ¶18) finds Titan's incision rates "likely to be surprisingly similar to
+   terrestrial rates, given similar stream conditions" (by saltation abrasion after Sklar and
+   Dietrich 2004, cold ice being about 53 times as erodible per unit impact energy as sandstone,
+   offset by grains that strike with about 50 times less energy), and Litwin et al. 2012 (JGR 117,
+   E08013) find ice strengthening by 7 kPa K⁻¹ from 260 K down to 110 K, about twice as strong at
+   Titan's 94 K by extrapolation. That gives K ≈ 2.4 × 10⁻⁵ m^0.1 a⁻¹ on an ancient Mars and 3.1 ×
+   10⁻⁶ on a Titan. _The solver's time_ is in Earth-equivalent years: each K is a long-term
+   terrestrial calibration that already holds Earth's flood intermittency (Barnhart et al., ¶70:
+   the mean annual flood flows about 2% of the year), so `effective_flow` is the epoch's length
+   scaled by its flood frequency relative to an arid-to-semiarid Earth. That is how Hoke, Hynek
+   and Tucker 2011 (EPSL 312, 1) state Mars's 10⁵–10⁷ yr, "with runoff rates similar to intense
+   storms in arid regions on Earth", against 200–5,000 yr of continuous flow; the first draft's
+   "years at effective discharge" would have run Mars's epoch about fifty times too short. As a
+   cross-check, Black et al. 2017's supplement (Science 356, 727; Table S2: K = 10⁻⁸ m^(1−2m) a⁻¹
+   at m = 0.5 over 60 Myr) matches Mars's 50–350 m of trunk-valley incision with K t ≈ 1.9 m^0.1 at
+   m = 0.45, which the Mars K above reaches in about 2 × 10⁵ Earth-equivalent years at 0.1 m a⁻¹
+   of runoff. These readings were made from the papers by a research sub-agent of T0.b; Howard 2007
+   itself (Geomorphology 91, 332) was read only in abstract, and Barnhart et al. stand in for its
+   constants.
+
 10. **Coarse craters** (researched 2026-09-29). Craters of D_b and wider are drawn on
     `surface.coarse.crater`: the expected count over the body's area is min(production,
     saturation) per octave, which on an old surface is the saturation cap (the reference Moon's
@@ -744,11 +862,26 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     production is under saturation, and T × N_sat(D) ÷ N_prod(D) where it is capped.
     Screening is a projectile scale, d\* = 1.5 (P ÷ g) ÷ ρ_p (5.2 m for Earth, 0.52 km for Venus,
     8.2 cm for Mars, which are the brainstorm's figures and are projectile sizes), giving a crater
-    cutoff D_c = 20 d\* (about 100 m, 10 km, 1.6 m) and a taper f(D) = 1 ÷ (1 + (D_c ÷ D)²); above 1
-    MPa break-up adds D_c = 20 km, exponent 1.5 and a floor at 1.5 km (Venus's parameters, low
-    confidence). The transition is D_t = 19 km × (1.62 ÷ g) × k_target (Pike's four bodies give
-    g^−1.01), a zone: bowls below 0.8 D_t, transitional to 1.5 D_t, central peaks above, peak rings
-    from about 9 D_t, multi-ring basins above about 16 D_t. Depth is 0.2 D for simple craters and
+    cutoff D_c = 20 d\* (about 100 m, 10.4 km, 1.6 m) and a taper on the differential production,
+    f(D) = 1 ÷ (1 + (D_c ÷ D)^4.5), one rule for every body (researched 2026-10-09, by R09.T0.b;
+    the first draft's exponent 2 and its break-up branch above 1 MPa, D_c = 20 km with exponent 1.5
+    and a floor at 1.5 km, are withdrawn). The check is against Venus's crater catalogue itself, the
+    population Herrick and Phillips 1994 (Icarus 112, 253–281) model, whose text could not be
+    reached (publisher paywall): the 881 named craters of the IAU's Gazetteer of Planetary
+    Nomenclature (USGS, retrieved 2026-10-09; 2.0–270 km, of about 940 that Magellan mapped, from
+    memory), binned in 23 logarithmic bins from 1.5 to 300 km and fitted by Poisson likelihood with
+    Neukum's polynomial (Craterstats' coefficients) and a free N(>1 km). The best taper is D_c =
+    9.0 km with exponent 5.4; 20 d\* = 10.4 km with exponent 4.5 lies 8 below it in ln L (exponent
+    4 lies 28, 5 lies 11), while the first draft's exponent 2 lies 714, its break-up branch 846 and
+    the two multiplied 116. The adopted taper passes 0.4% of the production at 3 km, 4% at 5 km,
+    23% at 8 km, 46% at 10 km and 95% at 20 km, so it needs no floor; its cumulative counts lie
+    within 7% of the catalogue's from 1.5 to 95 km, and its N(>1 km) of 3.1 × 10⁻⁴ km⁻² is a
+    lunar-chronology age of 0.37 Ga, inside the few hundred Myr to about 0.75 Gyr published for
+    Venus's mean surface (from memory). The exponent is measured on Venus alone, so it is low
+    confidence for thinner atmospheres, whose cutoffs keep their projectile scales. The transition
+    is D_t = 19 km × (1.62 ÷ g) × k_target (Pike's four bodies give g^−1.01), a zone: bowls below
+    0.8 D_t, transitional to 1.5 D_t, central peaks above, peak rings from about 9 D_t, multi-ring
+    basins above about 16 D_t. Depth is 0.2 D for simple craters and
     0.84 (D_t ÷ 19 km) D^0.33 km for complex ones, which reproduces the Moon and Earth. 1–2 m
     craters are typically 0.05–0.1 m deep, and 0.2 m only when fresh, a few per cent of them under
     the saturation rule, so they stay decoration (the input to open question 18, R11's).
@@ -938,7 +1071,12 @@ runs; the governor recorded), since the research's figures were taken under load
   re-validation of 2026-10-09 the law of the continental fraction f_c, which P14.T48.a asks plan 14
   to publish and Design note 3 calibrates on Earth alone (0.405), before P14.T48.a. Acceptance:
   `grep -n "researched"` on this plan shows each item in its design note, or the item stays in
-  Risks with the agent's lean.
+  Risks with the agent's lean. _Done 2026-10-09, each item "researched 2026-10-09" in its note:
+  the age law, the isotherm of T_e (870 K) and f_c's law in Design note 3; the FILLET check and
+  the transport law in Design note 8; erodibility in Design note 9; Venus's screening in Design
+  note 12. The residuals and the ruling asked on open question 20 are in Risks ("Remaining checks,
+  as researched"). T7.a, T12.c, T13.a, T14.b and P14.T48.a no longer wait on T0.b. Plan 14's Phase
+  K draft is amended to match (f_c's law, the isotherm, `effective_flow`'s definition)._
 
 ### R09.T1 Seeds, scopes and tags
 
@@ -1078,13 +1216,16 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
 - **R09.T7.a The density.** After T0.b's Venus item. `craters.rs`: `CraterParams` (T2's type, in
   `PerSquareKilometre`); `cumulative_density` from Neukum et al.'s
   a1…a11 with a0 = log₁₀ N(>1 km) (the misprint recorded in the doc comment), the end slopes outside
-  10 m–300 km, the optional diameter map, the screening taper and Venus's break-up rule;
+  10 m–300 km, the optional diameter map, and the screening taper on the differential production
+  with exponent 4.5 (Design note 12; T0.b withdrew the break-up rule);
   `saturation`; `transition_diameter`; `diameter_in_octave` by bisection in log D with a fixed
   iteration count. Tests: N(>1 km) is the parameter exactly; the function is monotone; the
   inversion lands in its octave and its quantiles agree with the density (Kolmogorov–Smirnov over
   10⁵ draws); the projectile scale d\* is 5.2 m, 0.52 km and 8.2 cm for Earth, Venus and Mars, and
-  the crater cutoffs 20 d\*; the map at Mars's ratios reproduces Ivanov 2001's Mars function within
-  ×1.5 in N over 1–100 km; D_t gives Pike's Moon and Earth within 10%.
+  the crater cutoffs 20 d\*; Venus's screened counts over its area at N(>1 km) = 3.07 × 10⁻⁴ km⁻²
+  lie within 10% of the Gazetteer's at 3, 5, 10, 20 and 40 km (878, 850, 642, 335 and 104 named
+  craters at or above each, Design note 12); the map at Mars's ratios reproduces Ivanov 2001's
+  Mars function within ×1.5 in N over 1–100 km; D_t gives Pike's Moon and Earth within 10%.
 - **R09.T7.b Small craters.** `synth/craters.rs`: octave levels, the 3 × 3 search across face edges,
   counts from the header's density at the canonical point by true area capped at saturation with
   ages from τ(D) (Design note 12), morphology by
@@ -1185,8 +1326,10 @@ trench; a stagnant-lid world has none. Acceptance:
   2–4 km below the neighbouring sea floor and arcs 100–200 km behind them.
 - **R09.T12.c Stagnant-lid provinces and flexure.** After T0.b's isotherm item. Volcanic provinces
   sized by the volcanism level
-  and the flexural moat and bulge about each load. Tests: a line load's bulge crest lies at πα with
-  height 0.043 w₀; α at T_e = 70 km under Mars's gravity is 180 km ± 10.
+  and the flexural moat and bulge about each load, with T_e = k (870 K − T_s) ÷ F (T0.b's ruling,
+  Design note 3). Tests: a line load's bulge crest lies at πα with height 0.043 w₀; α at T_e = 70
+  km under Mars's gravity is 180 km ± 10; T_e is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and
+  zero where T_s ≥ 870 K, where each load is compensated locally (α = 0).
 - **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.a. Tests:
   counts over the reference Moon match min(production, saturation) above D_b (Poisson interval),
   about 300 above 100 km with N(1 km) at 4.4 Gyr; ages split before and after the wet epoch on the
@@ -1206,10 +1349,13 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
 - **R09.T13.a The zonal model.** After T0.b's transport-cap items. `steps/climate/ebm.rs`: Design
   note 8's implicit seasonal moist
   energy-balance model in latitude, with its heat capacities, gray outgoing radiation, albedo and D
-  scaling, on the grid Design note 8 names. Tests: an Earth-like input converges within the fixed
+  scaling, on the grid Design note 8 names, the rotation and pressure factors tabulated from Kaspi
+  and Showman 2015 (T0.b's transport law). Tests: an Earth-like input converges within the fixed
   orbit count and its annual-mean zonal temperature lies within 5 K of Siler et al.'s Fig. 2b
-  (ERA-Interim); the scheme is stable at Venus's rotation and at a six-hour step for every rotation
-  in the reference set.
+  (ERA-Interim); with seasons off, the equator–pole contrast, scaled so that the 1 Ω⊕, 1 bar run
+  reads their 40 K (Fig. 8a) or 42 K (Fig. 15c), matches Kaspi and Showman's figures to 2 K over
+  Ω⊕ ÷ 24 to 12 Ω⊕ and 0.2–50 bar; the scheme is stable at Venus's rotation and
+  at a six-hour step for every rotation in the reference set.
 - **R09.T13.b Longitude and locked coordinates.** The periodic longitude solve split after the
   latitude one in a fixed order, and the tidally locked coordinates about P14.T14's substellar
   axis. Tests: with no land–sea contrast the zonal model's answer is reproduced to 0.01 K; a locked
@@ -1244,9 +1390,12 @@ of the same inputs, with the differences written into this plan. Acceptance:
 - **R09.T14.b The solver.** After T0.b's erodibility item. Tzathas et al.'s recursion with n = 1,
   the fixed point with its moving
   average, multigrid to level 4 at six iterations a level with the upsample through T4's
-  interpolant; K scaled as Design note 9 says with m = 0.45 and the runoff-weighted area. Tests: a
-  ridge-to-sea profile matches the closed-form steady state; the fixed point's residual falls
-  monotonically over the multigrid levels on the reference Earth.
+  interpolant; K scaled as Design note 9 says with m = 0.45 and the runoff-weighted area (T0.b's
+  erodibility: K⊕ converted from Tzathas et al.'s m = 0.4, linear in g and ρ_f, the bed factor B,
+  runoff once). Tests: a ridge-to-sea profile matches the closed-form steady state; the fixed
+  point's residual falls monotonically over the multigrid levels on the reference Earth; K is 6.3
+  × 10⁻⁶, 2.4 × 10⁻⁵ and 3.1 × 10⁻⁶ m^0.1 a⁻¹ (to 2%) for an Earth's rock under water, a
+  saturated Mars's regolith and a Titan's ice under methane.
 - **R09.T14.c The branches and the Mars check.** The wet-now, dry-now and never-wet branches, after
   T6.b. Tests: the dry-now branch leaves surfaces younger than the epoch's end untouched; a
   never-wet world's elevation is unchanged by the step; on the reference Mars the coarse erosion
@@ -1425,8 +1574,9 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
 - **Low-confidence constants.** The σ_h fit rests on one body per constant (0.9 km, 0.16, the √N
   age law, the 70 km lithosphere normalisation); stream-power erodibility across fluids and
   gravities; the energy-balance transport cap; Venus's crater screening; the complex-crater floor
-  and peak dimensions. Each is a named constant with its source and confidence in its doc comment,
-  and T0.b's remaining checks cover the first four.
+  and peak dimensions. Each is a named constant with its source and confidence in its doc comment.
+  T0.b's checks (2026-10-09) covered the first four; what they left open is under "Remaining
+  checks, as researched" below.
 - **Several tasks are near a day.** T8 (assembly, the bound, the patch and the read set) and T6.b
   are the largest left unsplit; if either runs over, T8's read-set test and T6.b's bench split
   off as their own subtasks.
@@ -1462,17 +1612,69 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
   - The wire, P14.T35.e, is not this plan's to read: the coarse pass reads the record on the
     server. R10 reads the same section from the wire (its Consumes).
 - **Physics leans still to rule** (research of 2026-09-29, low to medium confidence):
-  - _The transport cap._ No published cap on the energy-balance model's D exists; the lean is to
-    cap the rotation factor at (Ω⊕ ÷ Ω)² ≤ 64, since Hadley cells are near-global by Ω⊕ ÷ 8
-    (Kaspi and Showman 2015), then apply the pressure, heat-capacity and molar-mass factors under
-    an overall cap of about 100 D⊕ for stiffness. The provisional 30 D⊕ saturates at Ω⊕ ÷ 5.5.
-  - _The isotherm of T_e._ 870 K is a mechanical-thickness proxy; the elastic 723 K (450 °C) would
-    need the 70 km normalisation re-fitted against Mars.
+  - _The transport cap_ and _the isotherm of T_e_: ruled by T0.b (researched 2026-10-09). The cap's
+    lean, (Ω⊕ ÷ Ω)² ≤ 64 under about 100 D⊕, is withdrawn with the Ω⁻² law itself, for rotation and
+    pressure factors tabulated from Kaspi and Showman 2015 (Design note 8); the isotherm stays 870
+    K (Design note 3).
   - _Small-crater density per cell._ Design note 13 reads the body's density, which keeps the
     margin at five cells but gives a Mars no dichotomy in its small craters. A per-cell density
     read at an octave cell's canonical point would reach 6–8 coarse cells, beyond the margin. Lean:
     keep the body's density; if regional ages are wanted, modulate by the crater's own centre cell
     only for octaves whose search stays inside the margin.
+- **Remaining checks, as researched** (R09.T0.b, 2026-10-09). Each item is settled in its design
+  note; what stays open, with the lean and what would settle it:
+  - _Open question 20, a science ruling for the owner_ (asked by T0.a: does accepting P14.T48.a's
+    σ_h model, labelled empirical, rule the rendering brainstorm's open question 20?). Finding: yes,
+    in substance. The question asks for three things, and T48.a answers each from this plan's
+    research: σ_h published in place of the greatest relief, which the field reports as its
+    realised relief instead; σ_h's gravity scaling, none in the structural share and 1/g in the
+    basin and constructional shares (g^−0.22 overall with a 2.5× scatter over seven bodies, so not
+    a function of gravity alone); and the lithosphere factor's part, min(1, T_e ÷ 70 km) on the
+    constructional share and the edifice cap only, with T_e's isotherm now ruled (870 K). Lean:
+    accept T48.a, and record open question 20 as ruled by that acceptance with three conditions
+    written into the ruling: f_c's law (Design note 3) is part of the model, since the structural
+    share is a function of f_c; Mercury's 21% over-prediction stays the out-of-sample measure,
+    shown by T0.b not to come from its smooth plains, so T48.a's 25% tolerance on Mercury stays; and
+    the age law is stated as global and uncalibrated in its middle (below). What would reopen it is
+    a second out-of-sample body, such as Ganymede's σ_h from JUICE's laser altimeter. The brainstorm
+    is not edited here; its revision is the owner's.
+  - _The age law's middle._ No body tests √min(1, N ÷ 0.018) between saturation (3.8 Ga by the
+    lunar chronology) and the young surfaces where the basin share is negligible, and partly
+    resurfaced units follow no law in N (Mercury's smooth plains as rough as its older terrain,
+    Mars's lowlands far smoother than the law). Lean: keep it, labelled; a globally resurfaced body
+    3.0–3.8 Ga old would settle it, and the Solar System has none.
+  - _An ice-rich crust's T_e._ The 870 K silicate isotherm, with k = 3.1 W m⁻¹ K⁻¹, does not
+    describe an ice lithosphere. Lean: T_e = (651 W m⁻¹ ÷ F) ln(T_iso ÷ T_s), from ice's
+    conductivity k = 651 ÷ T W m⁻¹ K⁻¹ (Petrenko and Whitworth 1999, from memory), with T_iso ≈
+    170 K, this check's inversion of Giese et al. 2008's Enceladus (GRL 35(24),
+    doi:10.1029/2008GL036149: an elastic 0.3 km and a mechanical 2.5 km at 200–270 mW m⁻², which
+    give 150–200 K at T_s ≈ 70 K). A pass over icy-satellite flexure (Europa, Ganymede) would
+    settle it before T12.c's provinces reach an icy world; until then T12.c applies the lean,
+    labelled low confidence.
+  - _f_c's distribution and mass._ Höning and Spohn 2023 treat Earth-sized planets only; the
+    uniform [0.2, 0.7] draw spans their three outcomes without weighting them, and no mass or
+    water-inventory dependence is modelled. Lean: as drafted in P14.T48.a; a continental-growth
+    model run over planet mass would settle it. The draw needs a stream of plan 14's own (a body
+    tag such as `body.continents`, proposed for its owner).
+  - _The transport law beyond its range._ Kaspi and Showman's GCM has no seasons, ice, ocean
+    transport or diurnal cycle, and spans Ω⊕ ÷ 24 to 12 Ω⊕ and 0.2–50 bar; beyond that the factors
+    are held, and slower rotators lean on P14.T48.d's slow-rotator and locked regimes. FILLET's
+    results paper, when published, re-checks D⊕ and T13.d's ice-edge states. The heat-capacity and
+    molar-mass factors (Williams and Kasting 1997) are unverified; the 30 D⊕ guard bounds them.
+  - _Venus's exponent elsewhere._ The taper's exponent 4.5 is fitted on Venus's named craters alone
+    (the Gazetteer omits some small craters and the crater fields). Lean: one exponent for every
+    body; Earth's small-crater record (Bland and Artemieva 2006) or Mars's catalogue of new impacts
+    would test it under thin atmospheres, and Herrick and Phillips 1994's own fits remain unread.
+  - _Erosion at the coarse cell._ At 36–40 km every cell carries a trunk channel (A ≥ 1.3 × 10⁹
+    m²), so the transient solver lowers a whole cell at the trunk's rate, and T14.c's Mars volume
+    (at least 1.2 m of global layer) could pass by over-erosion (about 100 m a cell at K t ≈ 1.7,
+    the sub-agent's estimate). Lean: T14.c also bounds the coarse volume from valley cross-sections
+    (incision × valley width ÷ cell width), and records the cell-mean lowering against a fine-grid
+    run of one basin. Howard 2007, Hergarten 2021 and Burr et al. 2006 were not read in full;
+    Barnhart et al. 2009 stand in for Howard's constants.
+  - _Plan 14's wet epoch._ P14.T48.b's "10⁵ to 10⁷ years of active flow (Hoke and Hynek 2009; …)"
+    was Hoke, Hynek and Tucker 2011's elapsed time at Earth-like arid runoff; T0.b corrected the
+    Phase K draft with `effective_flow`'s definition (Design note 9).
 - **The survey stand-in.** `survey_pass` lets a client grant its ship coverage, as the server
   grants detail levels today. It is a discipline for an honest client, and the sensors plan
   replaces the caller, not the core.
