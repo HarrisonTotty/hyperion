@@ -6,6 +6,9 @@ pnpm-lock.yaml
 Cargo.lock
 /target/
 /.claude/
+# package.json's format scripts also exclude these two on the command line: Prettier walks an
+# ignored directory before it filters, and .claude/worktrees/ holds whole checkouts with their
+# targets, which ran Prettier out of heap (2026-10-09).
 
 # Built by `just gen-surface` from crates/hyperion-surface
 apps/hyperion/src/renderer/src/generated/
