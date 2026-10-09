@@ -21,13 +21,19 @@
 //!
 //! | Word           | Contents                                                                                                                         |
 //! | -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-//! | Key word 0     | The universe seed                                                                                                                |
+//! | Key word 0     | The universe seed, or for a surface tag the body's surface or detail seed                                                        |
 //! | Key word 1     | The domain tag's hash                                                                                                            |
-//! | Counter word 0 | The object's word: a system's raw ID, a body's system's raw ID, a cell word (an ID with its index zeroed), a feature word, or 0 or an item number for the galaxy |
-//! | Counter word 1 | `sub << 48 \| block`: `sub` is 0, or the body index for a body; `block` is the 48-bit draw number                                |
+//! | Counter word 0 | The object's word: a system's raw ID, a body's system's raw ID, a cell word (an ID with its index zeroed), a feature word, 0 or an item number for the galaxy, a surface cell's packed face, level, `i` and `j`, or a surface item's number |
+//! | Counter word 1 | `sub << 48 \| block`: `sub` is 0, or the body index for a body, or a surface cell's instance; `block` is the 48-bit draw number   |
 //!
 //! Word `n` of a stream is output `n & 1` of block `n >> 1`. The generator version is not in the
 //! key.
+//!
+//! A surface tag, of scope [`TagScope::SurfaceCoarse`] or [`TagScope::SurfaceDetail`], is opened
+//! by [`SurfaceSeed::stream`] or [`DetailSeed::stream`], each its own scope's alone, and never by
+//! [`Stream::open`], so the body's seed takes the universe seed's place and the key names a cell
+//! or an item of that body's surface ([`ObjectKey::surface_cell`], [`ObjectKey::surface_item`];
+//! plan R09, Design note 2).
 //!
 //! # Samplers
 //!
@@ -67,6 +73,7 @@ mod key;
 mod raw_event;
 mod sample;
 mod stream;
+mod surface;
 pub mod tags;
 mod threefry;
 
@@ -75,11 +82,12 @@ pub use domain_tag::{
     DomainTag, TagScope, assert_registries_disjoint, assert_tag_names, hash_tag_name,
     is_valid_tag_name,
 };
-pub use key::{ObjectKey, ParseSeedError, Seed};
+pub use key::{ObjectKey, ParseSeedError, Seed, SurfaceCellKeyError};
 pub use raw_event::RawEventKey;
 pub use sample::{
     BuildPiecewiseError, BuildPowerLawError, POISSON_MAX_MEAN, POISSON_PTRS_MIN_MEAN,
     PiecewiseLinear, PiecewisePowerLaw, PowerLaw,
 };
 pub use stream::Stream;
+pub use surface::{DetailSeed, SurfaceSeed};
 pub use threefry::threefry2x64_20;

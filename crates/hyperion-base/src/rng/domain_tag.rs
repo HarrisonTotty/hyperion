@@ -6,6 +6,11 @@
 /// scope. That is what makes it safe for a cell's word (an ID with its index zeroed) to equal the
 /// ID of the cell's candidate 0, and for body index 0 to share its system's word: the two are
 /// never opened under the same tag.
+///
+/// The two surface scopes are different: their tags are opened from a body's surface or detail
+/// seed, never from the universe seed, so [`Stream::open`](super::Stream::open) refuses them, and
+/// only [`SurfaceSeed::stream`](super::SurfaceSeed::stream) and
+/// [`DetailSeed::stream`](super::DetailSeed::stream) open them (plan R09, Design note 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TagScope {
     /// The galaxy as a whole, or a numbered item of a galaxy-wide list.
@@ -22,6 +27,12 @@ pub enum TagScope {
     Event,
     /// Tests and golden files only; never opened by a generator.
     SelfTest,
+    /// The server's coarse surface pass: opened only from a body's
+    /// [`SurfaceSeed`](super::SurfaceSeed), on a cube-sphere cell or a numbered item.
+    SurfaceCoarse,
+    /// The local surface synthesis, which clients run too: opened only from a body's
+    /// [`DetailSeed`](super::DetailSeed), on a cube-sphere cell or a numbered item.
+    SurfaceDetail,
 }
 
 /// A domain tag: a registered name, its 64-bit hash, and the scope of the objects it keys.

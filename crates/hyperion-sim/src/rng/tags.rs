@@ -772,6 +772,18 @@ domain_tags! {
     /// and the mean anomaly at the epoch, one uniform each
     /// (`stellar::multiplicity::draw_hierarchy`).
     SYSTEM_SUBSTELLAR: System = "system.substellar";
+
+    // Rendering plan R09: the surface generator (R09.T1.a). Its `surface.*` tags are the surface
+    // crate's (`hyperion_surface::tags`); this one sits beside plan 14's `body.surface` in name and
+    // scope, and is appended here, after plan 11's entries, because the macro's order fixes `ALL`.
+
+    /// A body's detail seed (R09.T1.b's `planetary::hooks::detail_seed`), keyed by the body:
+    /// word 0, the seed itself, which no other property reads. Sent to clients in the surface
+    /// seed's place, it opens only the local synthesis's tags
+    /// ([`DetailSeed::stream`](crate::rng::DetailSeed::stream)), and shares
+    /// nothing with the surface seed but the universe seed (the rendering brainstorm's
+    /// "Knowledge, and the surface seed"; R09, Design note 2).
+    BODY_SURFACE_DETAIL: Body = "body.surface.detail";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -808,6 +820,36 @@ mod tests {
             }
         }
         assert!(hyperion_base::rng::tags::ALL.contains(&SELFTEST_STREAM));
+    }
+
+    /// R09's names are in the registries the disjointness assertion above lists, so it covers
+    /// them: the eight `surface.*` tags in the surface crate's, `body.surface.detail` in this one.
+    #[test]
+    fn the_disjointness_check_covers_r09_s_names() {
+        use hyperion_surface::tags as surface;
+        let surface_tags = [
+            surface::SURFACE_COARSE_PLATES,
+            surface::SURFACE_COARSE_WARP,
+            surface::SURFACE_COARSE_RELIEF,
+            surface::SURFACE_COARSE_CRATER,
+            surface::SURFACE_COARSE_EROSION,
+            surface::SURFACE_RELIEF,
+            surface::SURFACE_CHANNEL,
+            surface::SURFACE_CRATER,
+        ];
+        for tag in surface_tags {
+            assert!(surface::ALL.contains(&tag), "{}", tag.name());
+            assert!(
+                ALL.iter()
+                    .all(|t| t.name() != tag.name() && t.hash() != tag.hash()),
+                "{} clashes with a tag of this registry",
+                tag.name()
+            );
+        }
+        assert!(ALL.contains(&BODY_SURFACE_DETAIL));
+        assert_eq!(BODY_SURFACE_DETAIL.name(), "body.surface.detail");
+        assert_eq!(BODY_SURFACE_DETAIL.scope(), crate::rng::TagScope::Body);
+        assert_ne!(BODY_SURFACE_DETAIL.hash(), BODY_SURFACE.hash());
     }
 
     #[test]

@@ -13,8 +13,8 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 use hyperion_base::Seed;
 use hyperion_base::math::normal_quantile;
 use hyperion_base::rng::{
-    DomainTag, Mark, ObjectKey, RawEventKey, Stream, TagScope, Threshold, Thresholds,
-    assert_registries_disjoint, assert_tag_names, tags,
+    DetailSeed, DomainTag, Mark, ObjectKey, RawEventKey, Stream, SurfaceSeed, TagScope, Threshold,
+    Thresholds, assert_registries_disjoint, assert_tag_names, tags,
 };
 
 /// A stream of `seed` under the self-test tag, for item `n` of the galaxy's lists.
@@ -73,6 +73,80 @@ fn a_scope_mismatch_panics() {
 fn an_event_tag_is_never_opened_as_a_stream() {
     const EVENT_TAG: DomainTag = DomainTag::registered("selftest.event_tag", TagScope::Event);
     let _ = Stream::open(Seed::new(STREAM_SEED), EVENT_TAG, ObjectKey::galaxy());
+}
+
+/// Tags of the two surface scopes, minted here: the surface crate's registry holds the real ones,
+/// which this crate cannot see (plan R09.T1.a).
+const COARSE_TAG: DomainTag =
+    DomainTag::registered("selftest.surface_coarse", TagScope::SurfaceCoarse);
+const DETAIL_TAG: DomainTag =
+    DomainTag::registered("selftest.surface_detail", TagScope::SurfaceDetail);
+
+#[test]
+#[should_panic(
+    expected = "has scope SurfaceCoarse, which only a body's surface or detail seed opens"
+)]
+fn a_coarse_surface_tag_is_never_opened_from_the_universe_seed() {
+    let _ = Stream::open(
+        Seed::new(STREAM_SEED),
+        COARSE_TAG,
+        ObjectKey::surface_item(0),
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "has scope SurfaceDetail, which only a body's surface or detail seed opens"
+)]
+fn a_detail_surface_tag_is_never_opened_from_the_universe_seed() {
+    let _ = Stream::open(
+        Seed::new(STREAM_SEED),
+        DETAIL_TAG,
+        ObjectKey::surface_cell(0, 0, 0, 0, 0).unwrap(),
+    );
+}
+
+/// A surface key's own scope keeps it from every tag but a self-test one, so a surface item's
+/// stream never aliases the galaxy item of the same word.
+#[test]
+#[should_panic(expected = "but the object key has scope SurfaceCoarse")]
+fn a_surface_key_is_never_opened_under_a_tag_of_another_scope() {
+    const GALAXY_TAG: DomainTag = DomainTag::registered("selftest.galaxy", TagScope::Galaxy);
+    let _ = Stream::open(
+        Seed::new(STREAM_SEED),
+        GALAXY_TAG,
+        ObjectKey::surface_item(0),
+    );
+}
+
+// `rng/surface.rs`.
+
+#[test]
+#[should_panic(
+    expected = "has scope SurfaceDetail, but a surface seed opens only SurfaceCoarse tags"
+)]
+fn a_surface_seed_never_opens_a_detail_tag() {
+    let _ = SurfaceSeed::new(STREAM_SEED).stream(DETAIL_TAG, ObjectKey::surface_item(0));
+}
+
+#[test]
+#[should_panic(expected = "has scope SelfTest, but a surface seed opens only SurfaceCoarse tags")]
+fn a_surface_seed_never_opens_a_tag_of_another_scope() {
+    let _ = SurfaceSeed::new(STREAM_SEED).stream(tags::SELFTEST_STREAM, ObjectKey::galaxy());
+}
+
+#[test]
+#[should_panic(
+    expected = "has scope SurfaceCoarse, but a detail seed opens only SurfaceDetail tags"
+)]
+fn a_detail_seed_never_opens_a_coarse_tag() {
+    let _ = DetailSeed::new(STREAM_SEED).stream(COARSE_TAG, ObjectKey::surface_item(0));
+}
+
+#[test]
+#[should_panic(expected = "has scope SelfTest, but a detail seed opens only SurfaceDetail tags")]
+fn a_detail_seed_never_opens_a_tag_of_another_scope() {
+    let _ = DetailSeed::new(STREAM_SEED).stream(tags::SELFTEST_STREAM, ObjectKey::galaxy());
 }
 
 // `rng/raw_event.rs`.

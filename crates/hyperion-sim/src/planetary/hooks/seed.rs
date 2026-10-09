@@ -9,31 +9,16 @@
 //! The seed is the server's: the rendering plans' R04 amends plan 14 so that the client is given a
 //! detail seed on its own tag in its place, and no wire type carries this one (the
 //! [`hooks`](super) module documentation).
-
-use std::fmt;
+//!
+//! The type itself is the foundation's, [`hyperion_base::rng::SurfaceSeed`], since the streams it
+//! opens must be built where `Stream` is (the rendering plans' R09.T1.a); it is re-exported here
+//! at its old path, and its value is unchanged.
 
 use crate::Seed;
 use crate::id::BodyId;
 use crate::rng::{ObjectKey, Stream, tags};
 
-/// A body's surface seed (P14.T23): 64 bits, which a map generator seeds its own streams from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SurfaceSeed(u64);
-
-impl SurfaceSeed {
-    /// The seed's 64 bits.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-}
-
-impl fmt::Display for SurfaceSeed {
-    /// Sixteen lowercase hexadecimal digits, as the crate prints other 64-bit identifiers.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}", self.0)
-    }
-}
+pub use crate::rng::SurfaceSeed;
 
 /// The surface seed of `body` in the universe of `seed`: word 0 of its [`tags::BODY_SURFACE`]
 /// stream (P14.T23).
@@ -56,7 +41,7 @@ impl fmt::Display for SurfaceSeed {
 /// ```
 #[must_use]
 pub fn surface_seed(seed: Seed, body: BodyId) -> SurfaceSeed {
-    SurfaceSeed(Stream::open(seed, tags::BODY_SURFACE, ObjectKey::from(body)).word_at(0))
+    SurfaceSeed::new(Stream::open(seed, tags::BODY_SURFACE, ObjectKey::from(body)).word_at(0))
 }
 
 #[cfg(test)]
@@ -125,6 +110,6 @@ mod tests {
 
     #[test]
     fn a_seed_prints_as_sixteen_hex_digits() {
-        assert_eq!(SurfaceSeed(0xab).to_string(), "00000000000000ab");
+        assert_eq!(SurfaceSeed::new(0xab).to_string(), "00000000000000ab");
     }
 }

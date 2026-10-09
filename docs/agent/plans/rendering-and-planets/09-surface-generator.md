@@ -1769,3 +1769,48 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
     after T19.b; T20 last. No task waits on an owner's sign-off or on an unbuilt galaxy-plan task;
     what waits on P14.T24 and P14.T48 is a generated world's surface (`for_body`) and the 61-chunk
     check, not a task.
+- **Deviations in T1.a, as built** (2026-10-09).
+  - _Key scope._ `ObjectKey::surface_cell` and `surface_item` both give their keys
+    `TagScope::SurfaceCoarse`. The seeds' `stream` reads only the tag's scope, so the key's scope
+    only keeps a surface key from every tag but a self-test one under `Stream::open`, which refuses
+    both surface scopes before its own check (`tests/panics.rs` holds both).
+  - _Face refusal._ `surface_cell` also refuses a face of 6 or more (`SurfaceCellKeyError::Face`,
+    beside `Level` above 28 and `Coordinate` at 2^level or more), since the 3-bit field could hold 6
+    and 7. The error keeps the Provides name, which R11 consumes.
+  - _Seeds._ Both live in base's `rng/surface.rs`, with `new`, `get`, `stream` and a 16-hex-digit
+    `Display` (P14.T23's on `SurfaceSeed`; `DetailSeed`'s matches the wire's `DetailSeedHex`). Their
+    `stream` panics, in release builds too, on a tag of any other scope, `SelfTest` included. The
+    sim's `hooks/seed.rs` re-exports the type, so `planetary::hooks::SurfaceSeed` and
+    `planetary::hooks::seed::SurfaceSeed` both hold; P14.T23's display test changed one token,
+    `SurfaceSeed(0xab)` to `SurfaceSeed::new(0xab)`, since the tuple field is private to base.
+  - _The key-form rule's test._ The table (Tag, Scope, Key, Draws) is `hyperion_surface::tags`'s
+    module documentation. `every_surface_tag_has_one_documented_key_form` holds it to the registry:
+    one row per tag but the self-test ones, scope and declaration matched, and `surface.coarse.*`
+    exactly the `SurfaceCoarse` tags.
+    `native_only::each_surface_tag_s_call_sites_use_its_documented_key_form` reads every `.rs`
+    file under `crates/` but the registry's own: each `.stream(` or `::stream(` call naming a
+    surface tag's constant (its name upper-cased, dots to underscores) must name that tag's key
+    constructor and not the other, and no `Stream::open(` may name one. So T5–T7 and
+    T10–T14 name the tag's constant and the key constructor in the one `stream` call. A key built
+    before the call fails the test, and a tag passed in by value (the likely shape of T5's
+    generalised `Octave`) or held under another name is not seen, so T5 keeps the constant at the
+    call or extends the test.
+  - _Goldens added_ (new files, header 21, so extensions only): base's `rng/surface_streams`
+    (`surface_streams_are_pinned`: the packing of six cell keys, and the first words of each seed's
+    stream for cell and item keys under test-minted tags of each scope), and the sim's
+    `planetary/surface_seed` (`surface_seeds_are_pinned` in `planetary_golden.rs`: six bodies'
+    seeds in four universes, which nothing pinned before, checked against P14.T23's own `seed.rs`
+    before the move, so the seed's value did not move). The tag golden gained nine lines, the eight
+    `surface.*` after R05's entry and `body.surface.detail` last; `golden_diff.py` reports
+    "Extended only", and `GENERATOR_VERSION` stays 21.
+  - _The detail seed's word._ `body.surface.detail`'s doc comment fixes T1.b's `detail_seed` as word
+    0 of the body's stream, as `surface_seed` is of `body.surface`.
+  - _Acceptance._ The four commands build none of the sim's unit tests, so T1.a also ran
+    `cargo test -p hyperion-sim --lib -- planetary::hooks rng::` and
+    `cargo test -p hyperion-sim --doc hooks` (P14.T23's tests, `registries_are_disjoint` and
+    `the_disjointness_check_covers_r09_s_names`).
+  - _Found for R11._ R11's `RockCellKey::object_key(&self, instance: u32)` cannot pass a `u32` to
+    `surface_cell`, whose `instance` is `sub`, 16 bits wide; R11's re-validation narrows it to
+    `u16` or checks it. And since the body is in a 64-bit seed rather than the key, bodies whose
+    seeds collide (about n² ÷ 2⁶⁵ pairs among n bodies, as for P14.T23's seed already) share their
+    noise, though not their coarse inputs.

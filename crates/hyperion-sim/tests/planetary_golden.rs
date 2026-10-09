@@ -19,7 +19,7 @@ use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
 use hyperion_sim::galaxy::{Galaxy, Population};
-use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::id::{BodyId, Layer, SystemId};
 use hyperion_sim::planetary::architecture::CLOSE_BINARY_CUTOFF_AU;
 use hyperion_sim::planetary::architecture::template::{
     CountLaw, EARLY_M_DWARF_FIRST_PERIOD_SCALE, EccentricityLaw, Location, MassLaw, PeriodLaw,
@@ -40,6 +40,7 @@ use hyperion_sim::planetary::derive::{
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
+use hyperion_sim::planetary::hooks::surface_seed;
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
     Neighbour, PlacedPlanet, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
@@ -379,6 +380,33 @@ fn write_eccentricity(w: &mut GoldenWriter, name: &str, law: EccentricityLaw) {
             w.f64(&format!("{name} e long beta b"), long_b);
         }
     }
+}
+
+/// The surface seeds of a few bodies (P14.T23): a function of the universe seed and the body's ID
+/// alone, which no change to the derivation may move. Pinned when R09.T1.a moved the type into the
+/// base crate, at the values the sim's own type gave.
+#[test]
+fn surface_seeds_are_pinned() {
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let bodies = [
+        (0x0200_0800_2000_0000, 0x0000),
+        (0x0200_0800_2000_0000, 0x0001),
+        (0x0200_0800_2000_0000, 0x0300),
+        (0x0200_0800_2000_0001, 0x0000),
+        (0x0200_0800_2000_0031, 0x0101),
+        (0x0200_0800_2000_0031, 0xffff),
+    ];
+    for seed in [0, 7, 0x0014_0023, u64::MAX] {
+        for (raw, index) in bodies {
+            let body = BodyId::new(SystemId::from_raw(raw).unwrap(), index);
+            w.u64_hex(
+                &format!("seed {seed:016x} body {body}"),
+                surface_seed(Seed::new(seed), body).get(),
+            );
+        }
+    }
+    golden!("planetary/surface_seed", w.as_str());
 }
 
 #[test]
