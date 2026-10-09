@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import bodyRotations from "../../../../../../../crates/hyperion-sim/tests/golden/frame/body_rotations.golden?raw";
 import { cross, dot, vec3, type Vec3 } from "../../geometry/vec3";
 import type { RotationLock, SystemBodyRotation } from "./model";
-import { bodyFixedAxesAt, rotationAngleAt } from "./rotation";
+import { bodyFixedAxesAt, rotationAngleAt, spinRateAt } from "./rotation";
 
 /** P14.T46.f's tolerance for the client's twin of `angle_at` (R07.T1, item 5). */
 const TWIN_TOLERANCE_RAD = 1e-9;
@@ -216,5 +216,74 @@ describe("bodyFixedAxesAt", () => {
         expect.closeTo(0, 14),
       ]);
     }
+  });
+});
+
+describe("spinRateAt", () => {
+  const law = LAWS[0]?.law;
+  if (law === undefined) {
+    throw new Error("the golden has a law");
+  }
+
+  /** The rate of the capture's phase δ (Δ ÷ d)², which `rate_at` leaves out, at `time`. */
+  function captureRate(each: SystemBodyRotation, time: UniverseTime): number {
+    const { lock } = each;
+    if (lock.kind !== "in_clock" || !isBefore(time, lock.locksAt)) {
+      return 0;
+    }
+    const d = lock.lockingAgeS - each.ageAtEpochS;
+    return d > 0 ? (2 * each.capturePhaseRad * Math.max(time.seconds, 0)) / (d * d) : 0;
+  }
+
+  it("is the rate every golden law's W turns at, less the capture's phase", () => {
+    let worst = 0;
+    for (const { law: each, angles } of LAWS) {
+      for (const { time } of angles) {
+        const later = { seconds: time.seconds + 1, nanos: time.nanos };
+        const earlier = { seconds: time.seconds - 1, nanos: time.nanos };
+        const slope =
+          angleBetween(rotationAngleAt(each, later), rotationAngleAt(each, earlier)) / 2;
+        const rate = spinRateAt(each, time) + captureRate(each, time);
+        worst = Math.max(worst, Math.abs(slope - rate) / rate);
+      }
+    }
+    expect(worst).toBeLessThan(1e-6);
+  });
+
+  it("is the locked rate at and after a lock in the clock", () => {
+    const locked = LAWS.find(({ law: each }) => each.lock.kind === "in_clock")?.law;
+    if (locked === undefined || locked.lock.kind !== "in_clock") {
+      throw new Error("the golden has a law that locks in the clock");
+    }
+    const at = locked.lock.locksAt;
+    expect(spinRateAt(locked, at)).toBe(locked.lockedRateRadPerS);
+    expect(spinRateAt(locked, { seconds: at.seconds + 86_400, nanos: 0 })).toBe(
+      locked.lockedRateRadPerS,
+    );
+  });
+
+  it("is the initial rate for a body that never locks", () => {
+    const never: SystemBodyRotation = { ...law, lock: { kind: "never" } };
+    expect(spinRateAt(never, { seconds: 31_557_600, nanos: 0 })).toBe(law.initialRateRadPerS);
+  });
+
+  it("is halfway between the initial and locked rates halfway through the locking age", () => {
+    const despinning: SystemBodyRotation = {
+      ...law,
+      lock: { kind: "outside_clock", lockingAgeS: 2 * law.ageAtEpochS },
+    };
+    expect(spinRateAt(despinning, { seconds: 0, nanos: 0 })).toBeCloseTo(
+      (law.initialRateRadPerS + law.lockedRateRadPerS) / 2,
+      15,
+    );
+  });
+
+  it("holds the locked rate once the locking age has passed", () => {
+    const past: SystemBodyRotation = {
+      ...law,
+      lock: { kind: "outside_clock", lockingAgeS: law.ageAtEpochS / 2 },
+    };
+    // ω₀ + (ω_L − ω₀) × 1, the simulation's arithmetic, which rounds.
+    expect(spinRateAt(past, { seconds: 0, nanos: 0 }) / law.lockedRateRadPerS).toBeCloseTo(1, 12);
   });
 });

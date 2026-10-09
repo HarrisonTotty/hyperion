@@ -42,6 +42,7 @@ import {
 import { cross, dot, vec3, type Vec3 } from "../../geometry/vec3";
 import { ROTATION_ORTHONORMAL_TOLERANCE } from "../../view/coords/rotation";
 import { NEAR_PARABOLIC_ECCENTRICITY, type OrbitDrift } from "../orbit";
+import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "./constants";
 import type {
   BodyDetail,
   BodyKind,
@@ -69,10 +70,10 @@ import { bodyDesignation, toKeplerOrbit, toSystemModel } from "./wire";
 
 /**
  * The simulation's Earth mass, in kilograms: GM⊕ ÷ G, 3.986 004 × 10¹⁴ m³ s⁻² over
- * 6.674 30 × 10⁻¹¹ m³ kg⁻¹ s⁻², `units::consts::EARTH_MASS_KG` in `hyperion-sim`, the same quotient
- * to the bit (the orchestrator's ruling 64.3).
+ * {@link GRAVITATIONAL_CONSTANT_M3_PER_KG_S2}, `units::consts::EARTH_MASS_KG` in `hyperion-sim`, the
+ * same quotient to the bit (the orchestrator's ruling 64.3).
  */
-export const EARTH_MASS_KG = 3.986_004e14 / 6.674_3e-11;
+export const EARTH_MASS_KG = 3.986_004e14 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2;
 
 /** The detail level the display asks for: everything, which the server grants until P14's overlay. */
 const DETAIL_ASKED = "full";

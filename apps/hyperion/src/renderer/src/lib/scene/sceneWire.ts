@@ -31,6 +31,7 @@ import { METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR } from "@hyperion/protoc
 import { norm, vec3, type Vec3 } from "../../geometry/vec3";
 import { CLOCK_WINDOW_YR } from "../galaxy/model";
 import { toSystemBodiesModel } from "../system/bodiesWire";
+import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../system/constants";
 import { SPEED_OF_LIGHT_M_PER_S } from "./lightTime";
 import type {
   BodyGrant,
@@ -272,19 +273,14 @@ function toSystem(
 }
 
 /**
- * The simulation's constant of gravitation, m³ kg⁻¹ s⁻² (CODATA 2018,
- * `units::consts::GRAVITATIONAL_CONSTANT`), by which a primary's mass is read from an orbit's μ.
- */
-const GRAVITATIONAL_CONSTANT = 6.674_3e-11;
-
-/**
  * Every body's Hill radius at pericentre, m, where its record holds its mass and a bound orbit:
  * plan 14's `hill_radius`, a (1 − e) (m ÷ 3M)^⅓, operation for operation.
  *
  * @remarks
- * The primary's mass M is the orbit's μ ÷ G less the body's own, since μ = G (M + m); the kilograms
- * are the wire's, not the model's Earth masses, so that no conversion stands between the two sides.
- * A body below `mass_and_orbit`, whose mass and orbit are withheld, has none.
+ * The primary's mass M is the orbit's μ ÷ G less the body's own, since μ = G (M + m), G being the
+ * simulation's ({@link GRAVITATIONAL_CONSTANT_M3_PER_KG_S2}); the kilograms are the wire's, not the
+ * model's Earth masses, so that no conversion stands between the two sides. A body below
+ * `mass_and_orbit`, whose mass and orbit are withheld, has none.
  */
 function hillRadii(bodies: ReadonlyArray<BodySummaryDto>): ReadonlyMap<BodyIdHex, number> {
   const radii = new Map<BodyIdHex, number>();
@@ -294,7 +290,7 @@ function hillRadii(bodies: ReadonlyArray<BodySummaryDto>): ReadonlyMap<BodyIdHex
     }
     const massKg = body.mass_kg.value;
     const orbit = body.orbit.value.orbit;
-    const primaryKg = orbit.mu_m3_s2 / GRAVITATIONAL_CONSTANT - massKg;
+    const primaryKg = orbit.mu_m3_s2 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 - massKg;
     const e = orbit.eccentricity;
     if (massKg > 0 && primaryKg > 0 && e >= 0 && e < 1) {
       radii.set(body.id, orbit.semi_major_axis_m * (1 - e) * Math.cbrt(massKg / (3 * primaryKg)));
