@@ -455,7 +455,11 @@ it is recorded, and stays here so that the owner can review it.
   (CC BY-SA 4.0) beside R05's `solarFactors.ts`: **Decided** for R05.T12.d and Serdyuchenko's
   data (2026-10-02, delegated; `decisions-r05.md` item 4): no raw table is committed, the
   derived constants are, with attributions in `NOTICE`; R08.T4.b's reduced 1 nm ozone table may
-  be committed with citation. Filament's AgX is Apache-2.0 and gains a `NOTICE` entry in
+  be committed with citation. **Decided** for R08 (2026-10-09, delegated;
+  `decision-r08-licences.md`): the methane, H₂SO₄, Mars-dust and tholin values are committed
+  reduced, with citation, never as raw tables; NH₄SH takes a stated stand-in under
+  `ATMOSPHERE: APPROXIMATE`; the benchmark tables are committed only as the values each test
+  asserts. Filament's AgX is Apache-2.0 and gains a `NOTICE` entry in
   R02.T10.c, which R07 includes (R02 Design note 12).
 - **The level-of-detail selection bound** (R10.T4): whether selection takes the hard bound or
   min(hard, 4σ), ruled with T4.a's recorded ratios and the patch counts under both rules that

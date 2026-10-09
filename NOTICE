@@ -173,8 +173,9 @@ apps/hyperion/src/renderer/src/view/atmosphere/earth.ts. Master branch, fetched 
 ================================================================================
 Data
 
-Values derived from the following data sets are committed as constants with their citations; the
-data sets themselves are not committed (plan R05, R05.T12.d, ruled 2026-10-02).
+Values derived from the following data sets are committed as constants or reduced tables with
+their citations; the data sets themselves are not committed (plan R05, R05.T12.d, ruled
+2026-10-02; plan R08, ruled 2026-10-09).
 
 - Solar spectral irradiance values derived from ASTM E490-00a(2019), obtained from the U.S. DOE
   National Laboratory of the Rockies (NLR, formerly NREL); credit DOE/NLR/Alliance. In
@@ -188,4 +189,60 @@ data sets themselves are not committed (plan R05, R05.T12.d, ruled 2026-10-02).
 
 - Ozone absorption cross-sections at 233 K: Serdyuchenko et al., Atmos. Meas. Tech. 7 (2014) 625;
   Gorshelev et al., Atmos. Meas. Tech. 7 (2014) 609 (IUP Bremen), as binned by Bruneton 2017. In
-  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts.
+  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts; binned to 1 nm in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+
+- Methane absorption cross-sections at 100, 198 and 296 K: E. Karkoschka and M. G. Tomasko,
+  "Methane absorption coefficients for the jovian planets from laboratory, Huygens, and HST
+  data", Icarus 205 (2010) 674-694, DOI: 10.1016/j.icarus.2009.07.044, as converted to
+  cross-sections by NASA's Planetary Spectrum Generator (G. L. Villanueva et al., J. Quant.
+  Spectrosc. Radiat. Transfer 217 (2018) 86-104; https://psg.gsfc.nasa.gov, file
+  data/linelists/xuv/data/ch4.txt, fetched 2026-10-09). Resampled values in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+
+- Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,
+  "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14
+  (1975) 208-219, DOI: 10.1364/AO.14.000208, as distributed by the Aerosol Refractive Index
+  Archive (ARIA), University of Oxford, https://eodg.atm.ox.ac.uk/ARIA/. Reduced to the visible
+  in apps/hyperion/src/renderer/src/view/atmosphere/materials/.
+
+- Refractive indices of Martian dust: M. J. Wolff et al., "Wavelength dependence of dust
+  aerosol single scattering albedo as observed by the Compact Reconnaissance Imaging
+  Spectrometer", J. Geophys. Res. 114 (2009) E00D04, DOI: 10.1029/2009JE003350, as
+  distributed by NASA Ames's Mars Climate Modeling Group (Dust_Refractive_Indicies.txt) and
+  kept in S. Ranjan's ranjanwordsworthsasselov2017b repository (commit 1e67a481). Reduced to the
+  visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/.
+
+- Refractive indices of Titan tholin: B. N. Khare et al., "Optical constants of organic tholins
+  produced in a simulated Titanian atmosphere: From soft x-ray to microwave frequencies",
+  Icarus 60 (1984) 127-137, DOI: 10.1016/0019-1035(84)90142-8, as distributed in the HITRAN2024
+  aerosol compilation (I. E. Gordon et al., J. Quant. Spectrosc. Radiat. Transfer 353 (2026)
+  109807; https://hitran.org/aerosols/). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/.
+
+================================================================================
+Test data (not shipped)
+
+Values quoted from the following benchmarks are committed in tests, each with its table or figure
+cited; the benchmark tables themselves are not committed (plan R08, R08.T12.c, ruled 2026-10-09).
+
+- R. D. M. Garcia and C. E. Siewert, "Benchmark results in radiative transfer", Transport
+  Theory Stat. Phys. 14 (1985) 437-483, DOI: 10.1080/00411458508211687.
+
+- V. Natraj, K.-F. Li and Y. L. Yung, Astrophys. J. 691 (2009) 1909-1920,
+  DOI: 10.1088/0004-637X/691/2/1909; V. Natraj and J. W. Hovenier, Astrophys. J. 748 (2012) 28,
+  DOI: 10.1088/0004-637X/748/1/28; tables at
+  https://web.gps.caltech.edu/~vijay/Rayleigh_Scattering_Tables/.
+
+- A. A. Kokhanovsky et al., "Benchmark results in vector atmospheric radiative transfer",
+  J. Quant. Spectrosc. Radiat. Transfer 111 (2010) 1931-1946, DOI: 10.1016/j.jqsrt.2010.03.005.
+
+- R. P. Loughman et al., "Comparison of radiative transfer models for limb-viewing scattered
+  sunlight measurements", J. Geophys. Res. 109 (2004) D06303, DOI: 10.1029/2003JD003854.
+
+- IPRT polarized radiative transfer model intercomparison, Phase A (C. Emde et al., J. Quant.
+  Spectrosc. Radiat. Transfer 164 (2015) 8-36, DOI: 10.1016/j.jqsrt.2015.05.007), results from
+  https://www.libradtran.org/iprt/, licensed under CC BY-SA 3.0
+  (https://creativecommons.org/licenses/by-sa/3.0/). The values in
+  crates/hyperion-fit/data/iprt_phase_a/ are selected rows of those results, reformatted; that
+  adapted material is offered under CC BY-SA 3.0.

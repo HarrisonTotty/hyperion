@@ -803,8 +803,10 @@ Names are those the owning plans give; the owning plan is authoritative.
        T_B > 1 (1.003 for the Sun, 1.19–1.50 for a 2,500 K star). The clipped weights' small colour
        error in the direct beam is recorded by the spectral check.
      - **Resolution.** The integral runs on σ's own grid, 1 nm or finer. Ozone's cross-sections
-       are binned to 1 nm, and Karkoschka and Tomasko's methane coefficients are used as
-       published, since they are band-model values for e^(−ku) at their stated resolution.
+       are binned to 1 nm, and Karkoschka and Tomasko's methane coefficients are used at their own
+       resolution, never binned coarser, since they are band-model values for e^(−ku) at their
+       stated resolution (10 cm⁻¹ below 19,300 cm⁻¹). R08.T4.b takes them from NASA PSG's
+       conversion (`decision-r08-licences.md` row 1).
        Interpolating S from the 15 bin averages is adequate for FGK, A and B stars (under
        3 × 10⁻³ in T_c at 2,500 K, under 10⁻⁴ for the Sun). It is not adequate for M dwarfs, whose
        TiO bands overlap Chappuis and methane's 727 nm band; that is a recorded limitation (Risks).
@@ -1103,7 +1105,11 @@ Names are those the owning plans give; the owning plan is authoritative.
       atmosphere is drawn meanwhile.
     - `ATMOSPHERE: COMPUTING` while a gated thick bake runs.
     - `ATMOSPHERE: APPROXIMATE` while a thick world is drawn with the analytic term because its
-      regime's gate has not passed (Design note 9).
+      regime's gate has not passed (Design note 9). It is also shown while a body's medium holds an
+      ammonium hydrosulphide (NH₄SH) mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` of
+      optical depth above it at 550 nm: no visible optical constants for NH₄SH are published, and
+      its index is a stated stand-in (R08.T5.b; `decision-r08-licences.md` row 5). That note clears
+      only when measured constants replace the stand-in, not when a gate passes.
 
     The provisional profile is recorded in the plan and the code, not on the display. The phrases
     are drafted for the owner (R08.T2).
@@ -1273,15 +1279,22 @@ The order:
 
 Some tasks wait on the owner or on another plan, and say so where they do:
 
-- **Licences.** The files held in R08.T5.b (H₂SO₄, Mars dust, tholin, and NH₄SH's missing index)
-  wait on the owner's licence ruling, as do Karkoschka and Tomasko's methane coefficients
-  (Elsevier) in R08.T4.b. So do the cases that use them: the Venus-class, Mars and Titan-class
-  fixtures of R08.T10, their cases and references in R08.T12.b, and their gates in R08.T13–T15.
-  Until the ruling, those cases are not committed, and the gates run on the licence-free cases:
-  Earth, Earth with ozone, the Rayleigh-only Venus columns and the giant deck. The regimes they
-  cannot yet gate stay `ATMOSPHERE: APPROXIMATE` (Design note 9). Serdyuchenko's ozone was ruled
-  on 2026-10-02 (`decisions-r05.md` item 4): the reduced 1 nm table may be committed with its
-  citation, and the raw table may not.
+- **Licences** (ruled 2026-10-09, delegated; `decision-r08-licences.md`, after `decisions-r05.md`
+  item 4). No raw table is committed except under an explicit permissive licence. The values R08
+  uses are committed reduced, with their citations in `NOTICE`, and their sources are fetched by
+  URL and SHA-256:
+  - methane (R08.T4.b) from NASA PSG's conversion of Karkoschka and Tomasko 2010;
+  - H₂SO₄, Mars dust and tholin (R08.T5.b) from ARIA's, NASA Ames's and HITRAN's copies of Palmer
+    and Williams 1975, Wolff et al. 2009 and Khare et al. 1984.
+
+  So the Venus-class, Mars and Titan-class fixtures of R08.T10, their cases and references in
+  R08.T12.b, and their gates in R08.T13–T15 wait only on R08.T5.b's files. NH₄SH has no visible
+  optical constants: R08.T5.b gives it a stated stand-in, a body that shows it is labelled
+  `ATMOSPHERE: APPROXIMATE` (Design note 12), and no NH₄SH case is committed or gated. The
+  benchmark tables of R08.T12.c and R08.T14.a are committed only as the values each test asserts.
+  Serdyuchenko's ozone was ruled on 2026-10-02 (`decisions-r05.md` item 4): the reduced 1 nm
+  table may be committed with its citation, and the raw table may not.
+
 - **Star spectra.** Every spectral bake and fit reads the star's `bake_spectrum` from R06's
   `HostDiscDto` (R06.T3.c and T10). The channel fit's non-solar suns are R06's colour-table rows at
   those temperatures.
@@ -1453,7 +1466,8 @@ with its meaning and when it clears:
 - `AEROSOLS: NOT YET MODELLED`, covering absorbers as well;
 - `ATMOSPHERE: PENDING`, which clears by itself;
 - `ATMOSPHERE: COMPUTING`;
-- `ATMOSPHERE: APPROXIMATE`, which clears when its regime's gate passes.
+- `ATMOSPHERE: APPROXIMATE`, which clears when its regime's gate passes, or, for an NH₄SH
+  stand-in, when measured constants replace it (`decision-r08-licences.md` row 5).
 
 None uses a status colour or the word "degraded" (item 7 of
 [What the guide must gain](../../brainstorming/rendering-and-planets.md#what-the-guide-must-gain)).
@@ -1557,8 +1571,9 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   temperatures, read through the table's `bake_spectrum` (R06.T3.c). It writes the triple and the
   objective's value into `channels.json`, and is checked unchanged otherwise. R05's
   `CHANNEL_WAVELENGTHS_NM` stays (680, 550, 440), the wavelengths of R05's Earth constants, until
-  R08.T6.d rebuilds Earth at the fitted triple. Mars's dust case waits on the licence ruling for
-  Wolff et al.'s data (R08.T5.b), and until then the family is Earth's alone, recorded as such.
+  R08.T6.d rebuilds Earth at the fitted triple. Mars's dust case reads R08.T5.b's dust file
+  (licence ruled 2026-10-09, `decision-r08-licences.md` row 3). Until that file lands, the family
+  is Earth's alone, recorded as such.
   It uses CIE 1931 2° colour-matching functions reduced to linear Rec. 709, the primaries R06 uses.
   The CIE table (CC BY-SA 4.0) is fetched with its checksum and not committed; a Node tool in
   `apps/hyperion/src/tools/`, run by a script under `apps/hyperion/scripts/` (R05's
@@ -1578,13 +1593,27 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   1 nm bins are centred, on [λ − 0.5, λ + 0.5) nm (`decisions-r05.md` item 2), unlike R05's
   three upward 10 nm bins, which R05 keeps for parity with Bruneton and sebh.
   - Sources: ozone from Serdyuchenko et al. 2014 (AMT 7, 625; the articles CC BY 3.0, the data
-    page's terms unstated) and methane from Karkoschka and Tomasko 2010 (Icarus 205, 674;
-    Elsevier's terms).
+    page's terms unstated). Methane from Karkoschka and Tomasko 2010 (Icarus 205, 674), as NASA's
+    Planetary Spectrum Generator converts them to cross-sections at 100, 198 and 296 K:
+    <https://psg.gsfc.nasa.gov/data/linelists/xuv/data/ch4.txt>, SHA-256
+    `cf7f7195a9ceadad1480b436d1657b722d1bb6264a603618faead3dd8aa4a3ef`, fetched 2026-10-09, 4,949
+    points to 0.836 µm, with no terms stated. Elsevier's supplementary Table 4 is not an input: its
+    table is images, and Elsevier reserves text and data mining on it.
   - Only the reduced values are committed, with attribution in `NOTICE`'s Data section. The raw
-    tables are fetched with their checksums. Ruled for ozone on 2026-10-02 (`decisions-r05.md`
-    item 4): the reduced 1 nm table may be committed with its citation, the raw table may not. The
-    methane coefficients wait on the owner (Elsevier's terms need a decision record of their own);
-    until then no methane table is committed, and the tests run on ozone and synthetic bands.
+    files are fetched with their checksums and never committed.
+    - Ozone: the reduced 1 nm table (ruled 2026-10-02, `decisions-r05.md` item 4).
+    - Methane (ruled 2026-10-09, `decision-r08-licences.md` row 1): σ at the three temperatures
+      over 380–800 nm, interpolated onto the tool's own uniform grid of 0.25 nm or finer, so that
+      no band-model value is averaged.
+    - T4.b's science check confirms from the paper:
+      - that PSG's columns are Table 4's infinite-pressure coefficients;
+      - the finite-pressure correction (Eqs. 2–4, the caption's constant 150 K^½) and Eq. 8's
+        temperature law, or records their omission;
+      - PSG's wavelength convention;
+      - where its MPI-Mainz ultraviolet completion begins. Any value used from it also cites
+        Keller-Rudek et al. 2013.
+    - Karkoschka 1998 (PDS GBAT_0001, DOI 10.17189/2bp8-k793, CC0) is the open fallback and a
+      cross-check. It has no temperature dependence, so using it is a recorded deviation.
 
   Tests:
   - a flat spectrum's curve is e^(−σu);
@@ -1624,12 +1653,45 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     copy in a header: water (Hale and Querry 1973), ice (Warren and Brandt 2008), NH₃ ice
     (Martonchik et al. 1984), CH₄ (Martonchik and Orton 1994), silicates (Dorschner et al. 1995),
     soot, iron.
-  - Held until their licences are checked with the owner: H₂SO₄ (Palmer and Williams 1975), Mars
-    dust (Wolff et al. 2009) and tholin (Khare et al. 1984). The owner's ruling is a precondition
-    of each held file and of the fixtures, cases and gates that use it (the task order's list).
-    Until then, the Venus mode-2 test below takes the single index n = 1.44 at 550 nm that Hansen
-    and Hovenier 1974 publish, and no spectral H₂SO₄ table is committed.
-  - NH₄SH has no visible data and waits on an owner ruling.
+  - Ruled 2026-10-09 (`decision-r08-licences.md` rows 2–5). Each file is reduced by T4.a's Node
+    tool from a source fetched by URL and SHA-256 and never committed. Its header carries:
+    - its paper, its source, the checksum and the date fetched;
+    - "reduced values; the source states no terms".
+
+    The citation goes in `NOTICE`'s Data section. The files:
+    - **H₂SO₄**, 75 and 84.5 wt% at 300 K, from Palmer and Williams 1975 (Appl. Opt. 14, 208) as
+      ARIA distributes them:
+      - `https://eodg.atm.ox.ac.uk/ARIA/data_files/Acids/Sulphuric/70%25_to_79%25/Sulphuric_acid_75%25_300K_(Palmer_and_Williams_1975)/original/H2SO4_75%25_300K_R_Palmer_1975.ri`
+        (SHA-256 `ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe`);
+      - the `80%25_to_100%25/…84.5%25…` file
+        (`6ae3eceb2c3895ec367f9b86e8e082445f1473413d224c2b625d85baaf452dc3`).
+
+      In the visible they give n only, at 359.7, 408.2, 449.4, 555.6 and 701.8 nm, with k `NaN`.
+      The file states how k is set there, and checks n against Hansen and Hovenier 1974's
+      1.44 ± 0.015 at 550 nm.
+
+    - **Mars dust** from Wolff et al. 2009 (JGR 114, E00D04): NASA Ames's
+      `Dust_Refractive_Indicies.txt`, as kept at
+      `https://raw.githubusercontent.com/sukritranjan/ranjanwordsworthsasselov2017b/1e67a4819255ff907df2a97eb8cecd9eee32c928/Raw_Data/ComplexRefractionIndices/Dust_Refractive_Indicies.txt`
+      (SHA-256 `bf6069ad22fbfbbef7bf957d386a8177647c87fd98ed6574b5c5f8d6c8016769`). The
+      repository's MIT licence covers its code, not these data. The dust's literature
+      single-scattering albedo and phase function follow the same rule: values with citation, no
+      figure or file copied.
+    - **Tholin** from Khare et al. 1984 (Icarus 60, 127), as HITRAN2024's aerosol compilation
+      distributes it, inside <https://hitran.org/data/Aerosols/Aerosols-2024/hitran_ri.tar>
+      (207,422,976 bytes). Its SHA-256 is recorded at the first fetch. Only Khare's ASCII file is
+      read, and none of the archive's code is run. He et al. 2022 (PSJ 3, 25; CC BY 4.0) is the open
+      alternative, and T5.b's science check picks between them.
+    - **NH₄SH** has no measured visible optical constants (Howett et al. 2007 cover 1,300–12,000
+      cm⁻¹).
+      - Its stand-in is a non-absorbing particle of real index 1.80, constant over 380–780 nm
+        (Sromovsky et al. 2017, Icarus 291, 232, §IV.3, after Sato et al. 2013's fitted 1.85). It
+        is named `standIn` in its file, unless T5.b's science check prefers NH₃ ice's index.
+      - A body whose medium shows an NH₄SH mode carries `ATMOSPHERE: APPROXIMATE` (Design note 12).
+      - No NH₄SH case is committed or gated.
+
+  - Until the H₂SO₄ file lands, the Venus mode-2 test below takes the single index n = 1.44 at
+    550 nm that Hansen and Hovenier 1974 publish.
   - The non-spherical materials' literature phase functions sit beside their indices.
 
   Tests:
@@ -1637,7 +1699,9 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
   - every file covers 380–780 nm;
   - a narrow distribution equals the single sphere;
   - Venus's mode-2 droplets (r_eff 1.05 µm, v_eff 0.07, n ≈ 1.44 at 550 nm; Hansen and
-    Hovenier 1974) give g within that paper's figure.
+    Hovenier 1974) give g within that paper's figure;
+  - an NH₄SH mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it gives
+    `atmosphereApproximate`, and one beneath a τ 30 deck does not.
 
 - **R08.T5.c Aggregates and phase tables.** `aggregate.ts` implements Tazaki and Tanaka 2018's MMF
   with D_f ≤ 2.5, and the phase-shift gate of Design note 6: a mode with Δφ ≥ 1 keeps its
@@ -1967,8 +2031,9 @@ section carries P14.T24.a's figures (R08.T1's P14.T35.e), generated bodies draw 
 show `ATMOSPHERE: NOT YET MODELLED`, and so does a giant, whose surface section is
 `not_applicable`, until its `envelope` section exists (decision-r08-giant-label). The task runs on
 the fixtures of Design note 16: Earth, Earth with ozone, Mars with hand dust, Venus at 92 and at
-58 bar, a hand Titan, and a hand giant. Those that need held data wait on the licence ruling (the
-task order's list).
+58 bar, a hand Titan, and a hand giant. Those that need R08.T5.b's files (Venus's clouds, Mars's
+dust, Titan's haze) wait on those files. Their licences were ruled on 2026-10-09
+(`decision-r08-licences.md`).
 
 Tests (T10.a):
 
@@ -2055,8 +2120,23 @@ here, and `pnpm test` passes.
     Kokhanovsky et al. 2010 and IPRT Phase A, each to 3σ with σ ≤ 0.3%;
   - Loughman et al. 2004 within its 2–4% spread.
 
-  The benchmarks' published values are committed only as the values each test asserts, with their
-  citations, pending a ruling on the tables themselves (Risks, "Re-validated at bce2aef5").
+  The benchmarks' published values are committed only as the values each test asserts, in the
+  test's own layout, each with its paper and table or figure cited. No table is committed whole,
+  and none is shipped (ruled 2026-10-09, `decision-r08-licences.md` row 6). The sources:
+  - **Natraj's tables** from <https://web.gps.caltech.edu/~vijay/Rayleigh_Scattering_Tables/>
+    by SHA-256 (`CDS/CDS.tar.gz`:
+    `49b01e4dbd7ba7aba928b2489b9901c69de05ae8d636f366d8ca5cb11da37134`). The host omits its
+    intermediate certificate, which is supplied, never bypassed.
+  - **IPRT Phase A's results** from <https://www.libradtran.org/iprt/> (CC BY-SA 3.0). The
+    selected rows go in `crates/hyperion-fit/data/iprt_phase_a/`, with a sibling licence note,
+    never inline in Rust.
+  - **Kokhanovsky et al. 2010 and Loughman et al. 2004** from their free copies
+    (<https://elib.dlr.de/65941/1/kokhanovsky2010a.pdf>, SHA-256
+    `93888e0be3d8e9f3e10be5fa994438b5a2ad0cf713c0186da993fed777d05905`; the publisher's PDF).
+  - **Garcia and Siewert 1985** from a lawfully held copy.
+
+  The papers are kept in an untracked local directory. Without a copy of Garcia and Siewert, its
+  assertions here and in R08.T14.a are recorded as pending for the owner, for access.
   Acceptance: `cargo test -p hyperion-fit atmosphere` and `just test-slow atmosphere::benchmarks`.
 
 - **R08.T12.d The spheroid mode** (Design note 17). It needs R08.T12.a. `Shells::Spheroid`:
@@ -2134,8 +2214,9 @@ Per Design note 9, in four subtasks.
 - **R08.T14.a The plane-parallel solver.** `thick/discreteOrdinates.ts`: discrete ordinates in
   `f64`, 16 streams, about 64 layers, with all μ₀ solved on one factorisation. It is ported from
   Stamnes et al. 1988, never from GPL cdisort. Tests: Garcia and Siewert's Haze L and Cloud C1 to
-  their published digits at 10⁻³; energy is conserved to 10⁻⁶ for ω = 1. A PythonicDISORT
-  plane-parallel cross-check is run once by hand and recorded. Acceptance:
+  their published digits at 10⁻³ (the values asserted only, as in R08.T12.c); energy is conserved
+  to 10⁻⁶ for ω = 1. A PythonicDISORT plane-parallel cross-check is run once by hand and recorded.
+  Acceptance:
   `pnpm --filter hyperion exec vitest run view/atmosphere/thick/discreteOrdinates`.
 - **R08.T14.b The bake.** `thick/bake.ts`: Dahlback and Stamnes's pseudo-spherical beam, delta-M
   with Nakajima and Tanaka's corrections, and the source function J_ms(h, μ₀, μ_v, m) for
@@ -2155,8 +2236,9 @@ Per Design note 9, in four subtasks.
 - **R08.T14.d The gates.**
   - The Venus-class cases (92 and 58 bar) and the Titan-class case, through the CPU twin with the
     baked table, pass `gate.ts` per geometry. Both m = 0 alone and m = 0..1 are run, and which is
-    needed is recorded. The Rayleigh-only Venus columns gate before the licence ruling, the
-    cloudy and hazy cases after it.
+    needed is recorded. The Rayleigh-only Venus columns gate first. The cloudy and hazy cases
+    follow once R08.T5.b's H₂SO₄ and tholin files exist (licences ruled 2026-10-09,
+    `decision-r08-licences.md`).
   - The bake time on the UHD 620's host (by the owner), summed over the bands, is under
     `BAKE_CEILING_S` on a quiet machine, or the Risks' fallback is taken and recorded. The bands
     nearest the camera bake first, and `ATMOSPHERE: COMPUTING` clears when the last lands.
@@ -2383,13 +2465,20 @@ generator, and the reference's sampling needs no domain tag.
   and the scalar error for Rayleigh can reach about 10%. R08.T12.a measures it and reports it as a
   finding. Measured: −11.8% to +10.7% on Natraj et al. 2009's τ = 0.5 case (below, "The scalar
   against the vector Rayleigh radiance, measured in R08.T12.a").
-- **Data licences.** Before these data are committed, the owner must decide on the Karkoschka and
-  Tomasko coefficients (Elsevier), Wolff's Mars dust and Khare's tholin, Palmer and Williams's
-  H₂SO₄, and NH₄SH, which has no visible index at all. Serdyuchenko's data files (terms unstated)
-  were ruled on 2026-10-02 (delegated, `decisions-r05.md` item 4): no raw table is committed, and
-  R08.T4.b's reduced 1 nm table may be, with its citation in `NOTICE`'s Data section. The same
-  ruling's rule covers the CIE matching functions (CC BY-SA 4.0): fetched with a checksum, derived
-  values committed with the CIE's citation.
+- **Data licences: decided 2026-10-09** (delegated, `decision-r08-licences.md`, after
+  `decisions-r05.md` item 4). No raw table is committed; the values R08 uses are committed
+  reduced, with their citations in `NOTICE`:
+  - methane from NASA PSG's conversion of Karkoschka and Tomasko 2010 (Elsevier's own image table
+    is not used);
+  - H₂SO₄, Mars dust and tholin from ARIA's, NASA Ames's and HITRAN's copies.
+
+  NH₄SH takes a stated stand-in under `ATMOSPHERE: APPROXIMATE`. Benchmarks are committed as
+  asserted values only. Serdyuchenko's data files (terms unstated) were ruled on 2026-10-02
+  (`decisions-r05.md` item 4): no raw table, and R08.T4.b's reduced 1 nm table with its citation.
+  The same rule covers the CIE matching functions (CC BY-SA 4.0): fetched with a checksum, and
+  derived values committed with the CIE's citation. `NOTICE` must ship in the app once packaging
+  exists (`decisions-r05.md` item 4's packaging ask).
+
 - **Stars beyond the body's two** (decided 2026-10-09, `decision-r08-design.md` item 3). The sky
   takes the body's own list (Design note 7), so it agrees with the surfaces by construction. A
   third or fourth star past `STAR_CUT_RELATIVE` lights neither: it is unseen by day, and it is a
@@ -2439,11 +2528,13 @@ generator, and the reference's sampling needs no domain tag.
   floor relaxes the 5% only at radiances under 10⁻³ of the case's brightest, and where the
   reference's own noise is larger. The owner may tighten or loosen it, and the gate's tests take
   the floor as one named constant, so that a ruling changes one line.
-- **Licences block the cloudy gates.** Until the owner rules on H₂SO₄, Mars dust and tholin, the
-  Venus-class cloudy case, Mars and the Titan-class haze cannot be gated. Those regimes are drawn
-  `ATMOSPHERE: APPROXIMATE` meanwhile. If a licence is refused, the lean is a published
-  parameterisation cited without copying the table: a constant index with a published Cauchy
-  slope, or a Henyey–Greenstein pair fitted in the paper. That lean needs its own physics check.
+- **Licences no longer block the cloudy gates** (decided 2026-10-09, `decision-r08-licences.md`).
+  The Venus-class cloudy case, Mars and the Titan-class haze gate as R08.T5.b's files land, and
+  are drawn `ATMOSPHERE: APPROXIMATE` only until their gates pass. NH₄SH alone stays ungated: a
+  stand-in index, the label, and no committed case, until visible optical constants are
+  published. If a source is withdrawn, the earlier lean stands, with its own physics check: a
+  published parameterisation cited without copying the table, that is a constant index with a
+  published Cauchy slope, or a Henyey–Greenstein pair fitted in the paper.
 - **M-dwarf suns.** A curve of growth weighted by a 15-sample spectrum is adequate for FGK, A and B
   stars, but not for M dwarfs. Their TiO bands at 590–630 and 705–760 nm overlap Chappuis and
   methane's 727 nm band, so the weight correlates with σ (Design note 5). This is a recorded
@@ -2586,7 +2677,8 @@ generator, and the reference's sampling needs no domain tag.
       section;
     - whether the published benchmark tables (Garcia and Siewert 1985, Natraj et al. 2009 and 2012,
       Kokhanovsky et al. 2010, IPRT Phase A, Loughman et al. 2004) may be committed whole: lean,
-      only the values each test asserts, with citations, as R05.T12.d's rule has it;
+      only the values each test asserts, with citations, as R05.T12.d's rule has it. Decided
+      2026-10-09 (`decision-r08-licences.md` row 6): the lean is upheld;
     - _Decided 2026-10-09 (`decision-r08-design.md` item 2):_ planetshine through the receiving
       body's air is kept and taken as far as starlight: its transmittance (a three-node disc rule)
       and its sky term on surfaces (T9.b), and the drawn sky through the body's one list of sources
