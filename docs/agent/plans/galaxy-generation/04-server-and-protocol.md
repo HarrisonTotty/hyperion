@@ -428,6 +428,7 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   | 14   | `system_bodies`, `body_detail`, `body_events`                                         |
   | R03  | `scene_ship`, `scene_cameras`                                                         |
   | R06  | `sky` (size class large, `is_large`)                                                  |
+  | R09  | `surface_field` (size class large, `is_large`), `survey_pass`                         |
 
   Plans 08, 11 and 13 add fields to existing kinds and no kind of their own. `galaxy_features` (plan
   09: the features drawn on the galaxy map) and `global_features` (plan 10: the entries of the
@@ -445,6 +446,18 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   `is_large` returns true for it, as that rule requires before the kind is built. Its stars and
   band travel as one bulk payload on R03's binary frames, announced by R03's `BulkManifestDto` in
   the terminal response.
+
+  Row R09 is the rendering plan R09's (the surface generator), drafted by R09.T0.a (2026-10-09)
+  for this plan's owner; not yet accepted. `surface_field` answers a body's coarse field, the
+  surveyed cells with their margin, as one bulk payload on R03's binary frames, about 12–15 MB for
+  an Earth, announced by R03's `BulkManifestDto` in the terminal response's `Ready` arm (a
+  `NotModelled` answer carries no bulk), so it is in the large size class and `is_large` returns
+  true for it before the kind is built; it is answered whole, never in parts. `survey_pass` records
+  one survey pass and answers small; its cell ranges are capped at R09's `MAX_SURVEY_RANGES` (256)
+  so that the request stays under `MAX_INBOUND_FRAME_BYTES`, a longer pass being sent as several
+  requests. Both name a body by `BodyIdHex`, which goes through the sim's `resolve` before use, as
+  the rule below requires, and both refuse as `body_detail` does (`unknown_system`,
+  `unknown_body` or `bad_request`, naming `body`). Neither moves `PROTOCOL_VERSION`.
 
 - Server message type `notification`, for pushes. A subscription is opened by an ordinary request
   whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe`, the

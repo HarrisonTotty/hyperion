@@ -1910,20 +1910,24 @@ the resource model and later generators need.
 
 - **P14.T24.a `SurfaceConditions`.** Mean surface temperature from T13 with day–night and
   equator–pole contrasts from rotation state, obliquity and atmospheric column (a thick atmosphere
-  or an ocean flattens them); surface pressure and gravity; atmosphere as ordered gas fractions;
+  or an ocean flattens them; signed, and a locked world's about its substellar axis, by P14.T48.e,
+  drafted by R09.T0.a); surface pressure and gravity; atmosphere as ordered gas fractions;
   stellar flux; the host's activity level as a radiation class; liquid-water flag from pressure and
   temperature range against water's phase diagram.
 - **P14.T24.b `GlobalFigures`.** Ocean fraction: a logistic function of the water inventory over the
   basin capacity, where capacity ∝ surface area × relief, reaching 1 (an ocean world) above it; ice
-  fraction from the latitude at which the zonal temperature crosses freezing; cloud fraction by
+  fraction from the latitude at which the zonal temperature crosses freezing (reading the climate
+  regime, by P14.T48.d, drafted by R09.T0.a); cloud fraction by
   surface state; relief: greatest relief 20 km × (g⊕ ÷ g) scaled by a lithosphere factor from heat
-  flow; heat flow from radiogenic heating (∝ rock mass × host [Fe/H] × e^(−age ÷ τ) summed over U,
+  flow (withdrawn for σ_h with a continental fraction by P14.T48.a, drafted by R09.T0.a); heat flow
+  from radiogenic heating (∝ rock mass × host [Fe/H] × e^(−age ÷ τ) summed over U,
   Th and K), residual formation heat and tidal heating; tectonic regime and volcanism level from
   heat flow and mass; magnetic field class from rotation, core fraction and heat flow; surface age:
   the smaller of the system's age and a resurfacing time that falls with heat flow, and the time
   since a giant impact; crater density N(> 1 km) per km² from surface age by the lunar chronology
   curve, 5.44 × 10⁻¹⁴ (e^(6.93T) − 1) + 8.38 × 10⁻⁴ T with T in Gyr (Neukum, Ivanov and Hartmann
-  2001), scaled by the system's belt masses and zeroed under a thick atmosphere for small craters.
+  2001), scaled by the system's belt masses and zeroed under a thick atmosphere for small craters
+  (screened instead by the shared crater density, by P14.T48.c, drafted by R09.T0.a).
   - _Tests:_ Solar System table: (a) Earth has the liquid-water flag and Mars and Venus do not; a
     locked airless body has a day–night contrast over 300 K and Venus one under 10 K. (b) Earth
     ocean fraction 0.6–0.8, Mars and Venus 0, Europa flagged as subsurface ocean; the Moon's crater
@@ -3406,6 +3410,142 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
    Solar System analogue and leaves the scale to bodies that differ from theirs). Lean: the ruling,
    with the state table's departures reported to P14.T13.c's owner. Decided: A_ref is the
    generator's albedo for the analogue (Europa's measured 0.68 for the snowball).
+
+### Phase K: the coarse surface's inputs (asked by rendering plan R09)
+
+**Drafted by R09.T0.a (2026-10-09) for this plan's owner; not yet accepted.** From rendering plan
+R09 ([The surface generator](../rendering-and-planets/09-surface-generator.md), Design note 3 and
+task R09.T0.a) against this plan as built at `bce2aef5` (`GENERATOR_VERSION` 21, `PROTOCOL_VERSION`
+2). R09's coarse pass (`planetary::surface`, run on the server only) is constrained to this plan's
+figures and reads five that this plan as written does not provide: T24.a's contrasts are unsigned;
+there is no continental fraction; T24.b's greatest relief is an extreme-value statistic that no
+finite realisation can match, and its 1/g scaling gives about 53 km for Mars and 121 km for the
+Moon against some 29 and 20 km observed (the rendering brainstorm's open question 20); T24.b's
+crater density is zeroed under a thick atmosphere rather than screened; and there is no climate
+regime classifier (the rendering brainstorm's open question 9, which assigns it to this plan).
+Nothing here is built or changes output until the owner accepts it; the orchestrator has a decision
+agent rule on it and then assigns the building. Until it lands R09 runs on inputs given by hand,
+and its `CoarseInputs::for_body` answers `NotModelled(RecordSection::Surface)`.
+
+What exists, checked in the code: T24 is not built (`hooks/` holds `mod.rs` and `seed.rs`); the
+record's `Surface` and the wire's `BodySurfaceDto` are empty enums; `SurfaceState`,
+`SurfaceMaterial` and `Atmosphere` (surface temperature, pressure and partial pressures) exist in
+`derive/atmosphere.rs`, reachable only through the private `DerivedBody`; nothing computes a heat
+flow, a tectonic regime, a surface age, a crater density, an ocean fraction or a continental
+fraction, but for regular moons' tidal heat flux, `Volcanism` and ice fraction (`moons/regular.rs`);
+T14's `BodyFixedFrame` (pole, obliquity, `RotationLaw`) and T46's figure are in the record.
+
+One task of five subtasks, each built with T24 or after it and amending T24 where it says so: T48.a
+to T48.c in `hooks/figures.rs`, T48.d and T48.e in `hooks/surface.rs` (T48.e also in `record.rs`).
+Each is generated output and joins T24's bump, one task, one bump. Formulas and constants are R09's
+research of 2026-09-29 (its Design note 3, with the sources named there), each re-checked against
+its source when it becomes a constant.
+
+#### P14.T48 The coarse surface's inputs (R09's five asks)
+
+- **P14.T48.a σ_h, with the continental fraction** (amends T24.b's relief). `GlobalFigures`
+  publishes σ_h, the hypsometric standard deviation (the area-weighted RMS elevation about the
+  mean, relative to the reference equipotential with degree 1 included), and f_c, the continental
+  fraction, in place of "greatest relief 20 km × (g⊕ ÷ g) scaled by a lithosphere factor", which is
+  withdrawn as a published figure (it is Johnson and McGetchin 1973's 1/g envelope; R09's field
+  reports its realised relief, which lies at 7–15 σ_h on every body measured). σ_h² = σ_struct² +
+  σ_crat² + σ_volc²:
+  - _structural_, with no gravity term: on a mobile lid f_c (1 − f_c) Δ² + f_c σ_c² + (1 − f_c)
+    σ_o², with Δ = 4.69 km, σ_c = 1.08 km and σ_o = 0.93 km from Earth2014's two crustal
+    populations (2.51 km at f_c = 0.405); on a stagnant lid 0.9 km (Venus's);
+  - _basin_, ∝ 1/g: 2.05 km × (1.62 m s⁻² ÷ g) × k_comp × √min(1, N(>1 km) ÷ 0.018 km⁻²), with
+    k_comp 1 for rock and 0.16 for ice-rich crusts, the share capped at 0.02 R;
+  - _constructional_, ∝ 1/g and gated by the lithosphere: 2.76 km × (3.71 m s⁻² ÷ g) × V ×
+    min(1, T_e ÷ 70 km), V the volcanism level and T_e ≈ k (870 K − T_s) ÷ F from the heat flow F,
+    with k = 3.1 W m⁻¹ K⁻¹, the plate model's mantle value (Parsons and Sclater 1977; Stein and
+    Stein 1992). 870 K is kept as a mechanical-thickness proxy, with which the 70 km normalisation
+    was calibrated; the lithosphere factor acts on this share and the edifice cap only.
+
+  Every constant calibrates on one body (Earth the mobile-lid terms, Venus the stagnant lid, the
+  Moon the basin share, Mars the constructional share, Ceres k_comp and Vesta the cap), so the fit
+  is labelled empirical in its doc comments. Mercury is the one out-of-sample check, over-predicted
+  by 21% (1.27 against 1.05 km). f_c is the continental fraction or, failing one, the land-plus-shelf
+  area (0.405 on Earth); a stagnant lid has none. Its law for a generated mobile-lid world is open
+  (below).
+  - _Tests:_ the Solar System table gives Earth 2.51 km at f_c 0.405 and Venus, the Moon, Mars,
+    Ceres and Vesta their calibrating values within 5%, and Mercury within 25%; σ_h is continuous
+    in time; no figure published is a greatest relief.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
+
+- **P14.T48.b The volatile history** (with T24.b). `GlobalFigures` gains
+  `wet_epoch: Option<WetEpoch>`, `WetEpoch { start, end, effective_flow, paleo_inventory }`: the
+  span over which the surface held liquid, `effective_flow` the years at effective discharge (the
+  epoch's length times its intermittency, which is R09's stream-power solver's t), and
+  `paleo_inventory` the liquid inventory then, which R09 places as a paleo-sea by this plan's own
+  logistic of inventory over basin capacity or spreads through closed basins. A world wet now has
+  an epoch to the present, and one never wet has none. The history also says whether the world
+  reached its present state from a colder one, which T48.d's ice belt reads. Mars's valley networks
+  formed within a few hundred million years around 3.7 Ga, from perhaps 10⁵ to 10⁷ years of active
+  flow (Hoke and Hynek 2009; Luo, Cang and Howard 2017). How the epoch is derived from T12's flux
+  and T13's inventory and escape over time is this plan's to set.
+  - _Tests:_ Earth's epoch runs to the present; Mars's ends before 3 Ga with `effective_flow` within
+    10⁵–10⁷ yr; the Moon and Mercury have none.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
+- **P14.T48.c The crater contract** (amends T24.b's crater density). T24.b's N(>1 km) per km², by
+  the lunar chronology with its belt scaling, is published as the production at the surface age
+  before any screening, with the screening inputs beside it: the surface pressure over gravity and a
+  projectile density, or a crater cutoff; g; a target factor k_target (1 for rock, 0.12 for
+  ice-rich crusts); and optionally a mean impact velocity. "Zeroed under a thick atmosphere for
+  small craters" is replaced by the screening taper of the one shared density, which this plan calls
+  rather than re-implements: `hyperion_surface::craters::{CraterParams, cumulative_density}`
+  (R09.T7.a; Neukum, Ivanov and Hartmann 2001's polynomial with a0 = log₁₀ N(>1 km), the projectile
+  scale d\* = 1.5 (P ÷ g) ÷ ρ_p and the crater cutoff 20 d\*), a new edge from the sim to the
+  surface crate that R04's split allows. The surface crate derives the rest (R09's Design note 12).
+  Waits on R09.T7.a.
+  - _Tests:_ the Moon's N(>1 km) exceeds Earth's by over 100 (T24.b's, kept); the shared function
+    returns the published N(>1 km) at 1 km on an unscreened body; Venus's screened density at 1 km
+    is far below its production.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
+- **P14.T48.d The climate regime classifier** (the rendering brainstorm's open question 9; with
+  T24.a). `SurfaceConditions` gains a `ClimateRegime` of three fields and the regime's named coarse
+  model: radiative equilibrium with thermal inertia for airless and thin-atmosphere worlds, a
+  seasonal or body-fixed energy-balance model for the rest, and an isothermal surface for a Venus.
+  - _Thermal regime_, from Koll's (2022) redistribution factor f = 2/3 − (5/12) X ÷ (k + X) at
+    k = 2, airless-like below X < 0.087 k and efficient above 15.7 k, for locked and slow rotators
+    only, with Wordsworth's (2015, his eq. 43) CO₂ collapse pressure as its thin end, for pure CO₂
+    between 1 and 10 M⊕ only.
+  - _Forcing_, from the locking state, the solar day and the obliquity: the slow-rotator onset rises
+    with flux, a solar day of 16 d at 1.4 S⊕ to 48 d at 1.9 S⊕ (Yang et al. 2014, Table 1), not one
+    number; an equatorial ice belt at obliquities of 54–126° (53.9°, recomputed) is decided with
+    T48.b's history, since Kilic et al. 2018's belt is reached only from a colder state.
+  - _Condensable_, from the retained species against their phase diagrams.
+
+  T24.b's ice fraction then reads the regime (a locked nightside, an equatorial belt, water ice as
+  bedrock on a Titan or a Pluto), as open question 9 requires, rather than the latitude at which the
+  zonal temperature crosses freezing alone.
+  - _Tests:_ Earth takes the seasonal energy-balance model with water, Venus the isothermal surface
+    and the Moon radiative equilibrium; a locked temperate world takes the body-fixed model; the
+    slow-rotator onset follows Yang et al.'s Table 1 at 1.4 and 1.9 S⊕; a 90°-obliquity world
+    started cold has an equatorial belt and one started warm has none.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`.
+
+- **P14.T48.e Signed contrasts and the surface section** (amends T24.a; with T35). T24.a's
+  equator–pole contrast carries its sign (a warm pole is negative), and a locked world's day–night
+  contrast is stated about T14's substellar axis. The record's surface section, `record::Surface`,
+  carries `SurfaceState`, `SurfaceMaterial`, T24's `SurfaceConditions` and `GlobalFigures` and
+  T48.a–d's figures, so that R09's `CoarseInputs::for_body` reads one section. What the wire carries
+  of it is T35's (rendering plan R08 drafts the atmosphere's fields); R09 reads the record on the
+  server alone.
+  - _Tests:_ a 90°-obliquity world's equator–pole contrast is negative; a locked airless body's
+    day–night contrast exceeds 300 K and Venus's is under 10 K (T24.a's, kept); every present rocky
+    body's surface section is `Ok` from `DetailLevel::Surface`, and a giant's `NotApplicable`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`.
+
+#### Open questions of Phase K, for the owner (R09's leans)
+
+1. **Open question 20** of the rendering brainstorm (still **Open**, a physics ruling): σ_h as
+   T48.a drafts it, with no gravity term in the structural share. Lean: accept, labelled empirical,
+   with Mercury's 21% as its measure; accepting T48.a rules the question.
+2. **The law of f_c** for a generated mobile-lid world, which only Earth's 0.405 calibrates. Lean:
+   a research agent proposes one before T48.a is built (R09.T0.b).
+3. **The isotherm of T_e**: 870 K, the mechanical-thickness proxy the 70 km normalisation was
+   calibrated with, or the elastic 723 K (450 °C), which would re-fit it against Mars. Lean: 870 K
+   (R09.T0.b checks it).
 
 ## Verification
 

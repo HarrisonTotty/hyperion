@@ -182,7 +182,9 @@ pub struct SceneStateDto { sequence: u64, clock: SceneClockDto, ship: Kinematics
 pub struct SceneNotificationDto { sequence: u64, clock: SceneClockDto,
     ship: Option<KinematicsDto>, arrival: Option<SceneArrivalDto>,
     bodies: Vec<SceneBodyDto>, craft: Option<Vec<SceneCraftDto>> }
-// later optional fields: R07's `main_screen`, R09's `surface_revisions` (Design note 4)
+// later optional fields: R07's `main_screen`, R09's `surface_revisions:
+// Option<Vec<SurfaceRevisionDto { body: BodyIdHex, revision: u32 }>>` (Design note 4; drafted by
+// R09.T0.a)
 pub enum SceneArrivalDto { System { system: Box<SceneSystemDto>, tidal_radius_m: f64 }, NoSystem }
 // tidal_radius_m: the system's FrameCandidate::tidal_radius at the arrival time (R02's ask)
 pub struct SceneCraftDto { craft: String, hull: String, state: KinematicsDto,
@@ -369,7 +371,14 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    perhaps 700–900 bytes, which changes the arrival's size and not the rate, since bodies are pushed
    only on change. The state leaves room for R07's camera field (`main_screen`) and R09's
    `surface_revisions` (a revision per body), each an optional field added by its plan, which moves
-   no version. `SceneCraftDto` is a draft, the least a renderer needs of a craft (a hull
+   no version. _R09's field, drafted by R09.T0.a (2026-10-09) for this plan's owner, not yet
+   accepted:_ `surface_revisions: Option<Vec<SurfaceRevisionDto>>` on `SceneNotificationDto`, with
+   `SurfaceRevisionDto { body: BodyIdHex, revision: u32 }`, each a body whose surveyed cover grew
+   (a `survey_pass` raises its revision), declared `#[serde(default, skip_serializing_if =
+"Option::is_none")]` and `#[ts(optional)]` as `tidal_radius_m` is, so that `PROTOCOL_VERSION`
+   stays 2; a merged pending push (Design note 5) merges it by body, the latest revision winning,
+   as bodies are; a client re-asks R09's `surface_field` with `have_revision` for the new cells.
+   R09.T19.b builds it. `SceneCraftDto` is a draft, the least a renderer needs of a craft (a hull
    definition's key, a pose and its rates), and belongs to the sessions plan, which may reshape it
    freely while nothing sends it. Its optional `planned_path` is the flight computer's predicted
    path as poses at stated times, which the sessions plan and the flight model fill; R11's
@@ -399,7 +408,8 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    or in a frame of another system or of a body not in the scene; in the galactic frame, one in any
    system's frame, since the ship is in none), and will use them to bound what cannot all be sent,
    which will be the contacts drawn as hulls; R09 sends every surveyed cell (at most about 12 MB)
-   and does not bound them by camera (R09 Design note 19). Poses are
+   and does not bound them by camera (R09 Design note 19; R09's ask, carried here since this plan
+   was written, as R09.T0.a confirmed on 2026-10-09). Poses are
    neither saved nor echoed to other subscriptions.
 7. **Drawn positions are the ship's apparent positions, computed on the client from the elements**
    (researched 2026-09-29). The observer enters only at reception: τ solves |x_B(t − τ) − x_o(t)| =

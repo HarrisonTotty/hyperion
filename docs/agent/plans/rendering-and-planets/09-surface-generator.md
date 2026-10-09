@@ -128,31 +128,53 @@ is therefore used with one key form and never both, as `ObjectKey::galaxy()` and
 are today (the Key column below), and T1.a tests the rule over the registry, because a
 `surface_item(n)` word and a low `surface_cell` word can coincide.
 
-Domain tags, under a "Rendering plan R09" heading: `body.surface.detail` in the sim's registry, and
-the rest in `hyperion_surface::tags`, the registry R04 gives the surface crate for `surface.*` names
-(R04's Design note 4):
+As built before this plan (re-validated at `bce2aef5`): P14.T23's `SurfaceSeed` is the sim's
+(`planetary/hooks/seed.rs`, with `get` and a 16-hex-digit `Display`), so T1.a moves it into base's
+`rng` beside `DetailSeed`, adds `new` and `stream`, and leaves the sim re-exporting it at
+`planetary::hooks::SurfaceSeed`, where `hooks::surface_seed` now builds it with `SurfaceSeed::new`;
+its value does not move. The seeds' `stream` methods must live in base's `rng`, since
+`Stream::from_words` is `pub(super)` and `ObjectKey::new` `pub(crate)`. `Stream::open` asserts only
+that the tag's scope is the key's or `SelfTest` (`rng/stream.rs`), so T1.a adds the explicit refusal
+of both surface scopes there. Every `ObjectKey` carries a scope: the two surface constructors give
+their keys one of the two surface scopes (T1.a records which), which the seed streams do not read.
+The keying tables in `rng/key.rs` and `rng/mod.rs` gain the two forms.
 
-| Tag                      | Scope           | Key            | Draws                                                   |
-| ------------------------ | --------------- | -------------- | ------------------------------------------------------- |
-| `body.surface.detail`    | `Body`          | `BodyId`       | the detail seed, one block output keyed by `BodyId`     |
-| `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, crust type per plate   |
-| `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency boundary warp's lattice               |
-| `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces               |
-| `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of D_b and wider: count, place, age, morphology |
-| `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter             |
-| `surface.relief`         | `SurfaceDetail` | `surface_cell` | structural noise lattices                               |
-| `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                    |
-| `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below D_b per octave cell                       |
+Domain tags: `body.surface.detail` in the sim's registry (`crates/hyperion-sim/src/rng/tags.rs`,
+appended at the end under a "Rendering plan R09" comment, since the macro's order fixes `ALL`; plan
+14's `body.surface` sits under its "Plan 14, phase C and E" comment), and the rest in
+`hyperion_surface::tags`, the registry R04 gives the surface crate for `surface.*` names (R04's
+Design note 4), which holds R05's `selftest.surface.test_planet` and tests the `surface.` prefix
+(`surface_tags_carry_the_surface_prefix`), under a "Plan R09" comment after R05's:
+
+| Tag                      | Scope           | Key            | Draws                                                                  |
+| ------------------------ | --------------- | -------------- | ---------------------------------------------------------------------- |
+| `body.surface.detail`    | `Body`          | `BodyId`       | the detail seed, one block output keyed by `BodyId`                    |
+| `surface.coarse.plates`  | `SurfaceCoarse` | `surface_item` | plate count, seeds, Euler poles, crust type per plate                  |
+| `surface.coarse.warp`    | `SurfaceCoarse` | `surface_cell` | the low-frequency boundary warp's lattice                              |
+| `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces                              |
+| `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of D_b and wider: count, place, age, morphology                |
+| `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                            |
+| `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's `noise` keys it |
+| `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                                   |
+| `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below D_b per octave cell                                      |
+
+`surface.relief` is keyed as R05's noise keys its lattice corners (`noise::Octave`'s corner
+gradient: object word i << 32 | j of the corner's 32-bit two's complements, draw number
+octave << 32 | k), with `surface_item` in place of R05's `galaxy_item`: a cube-sphere cell key cannot
+name a corner of R05's 3D lattice (corrected at re-validation; the plan had `surface_cell`). The
+coarse tags' lattices are on the cube's own cells, as the coarse pass's grid is.
 
 `body.surface` (plan 14's) is the surface seed's own tag. `surface.scatter` is named by the
 brainstorm and reserved here for R11 (Generator version).
 
 ### `hyperion-surface`
 
-Cells are R05's `cube::PatchKey` at the field's level; `HeightSample`, `LatticeCache`,
-`FINEST_SPACING_M`, `BAND_LIMIT_M`, `finest_level` and `num::{min, max}` are R05's. R05 defines
-`HeightSample` and `LatticeCache` in its provisional `test_planet` module, which R10 retires, so T4
-moves them to `hyperion_surface::height` and leaves `test_planet` re-exporting them.
+Cells are R05's `cube::PatchKey` at the field's level; `test_planet::HeightSample`,
+`noise::LatticeCache`, `geometry::{FINEST_SPACING_M, BAND_LIMIT_M, finest_level}`,
+`spheroid::Spheroid` and `num::{min, max, assert_finite}` are R05's. R05 defines `HeightSample` in
+its provisional `test_planet` module, which R10 retires, so T4 moves it to
+`hyperion_surface::height` and leaves `test_planet` re-exporting it; `LatticeCache` already lives in
+`noise` (R05's review fixes), which `test_planet` re-exports, and stays there.
 
 ```rust
 pub mod field {
@@ -161,11 +183,11 @@ pub mod field {
     pub fn boundary_diameter(level: CoarseLevel, radius: Metres) -> Metres;  // D_b
     pub fn cell_index(cell: PatchKey) -> u32;              // face-major Morton order at the level
     pub struct FieldHeader { /* format, generator_version, body, radius,
-        figure: (equatorial a, polar c) (the height datum, Design note 17), level, D_b,
+        figure: Spheroid (equatorial a, polar c: the height datum, Design note 17), level, D_b,
         sea_level, lapse_rate, spectrum: BandSpectrum, craters: CraterParams,
         climate_model: ClimateModelKind, precipitation: PrecipitationSource (always Heuristic),
         realised_sigma_h, realised_relief, months: u8,
-        anomaly_step: u8 (0.25 K × 2ⁿ, per body, Design note 17), surface_age: Gyr,
+        anomaly_step: u8 (0.25 K × 2ⁿ, per body, Design note 17), surface_age: Gigayears,
         surface_pressure: Pascals, albedo_scale: Option<f64> (R10's) */ }
     pub struct SynthesisCell { /* elevation_mm: i32,
         boundary_distance: i16 (1 km, saturating),
@@ -248,10 +270,20 @@ pub mod testing {                                          // feature `testing`
 `SurfaceClass` is one `u8`: the Köppen–Geiger classes for seasonal water-cycle regimes and the
 surface-state classes of the other regimes (Design note 11).
 
+As built before this plan: base's `units` has `Metres`, `Pascals`, `Kelvin`, `Gigayears` (not
+`Gyr`) and `MetresPerSecondSquared`, but no `PerSquareKilometre` or `SquareMetres`; T2 adds the two
+with base's `unit!` macro, new types only. `FieldHeader` holds `BandSpectrum` and `CraterParams`, so
+T2 defines the header's data types (`synth::{BandLevel, BandSpectrum}`, `craters::CraterParams`,
+`ClimateModelKind`, `PrecipitationSource`) and T5 and T7.a give them their behaviour.
+`QueryHeightError` implements `std::error::Error + Send + Sync`, the bound R05's
+`patch::HeightSource::Error` sets, since R10.T3 implements `HeightSource` for `Synthesiser`. The
+surface crate has no `[features]` yet: T2 adds `testing`, which the sim's own `testing` feature
+enables.
+
 ### `hyperion-sim` (`planetary::surface`, and plan 14's hooks)
 
 ```rust
-// in `planetary::hooks`, beside P14.T23's seed (hooks/mod.rs):
+// in `planetary::hooks`, beside P14.T23's seed (hooks/seed.rs, built; re-exported by hooks/mod.rs):
 pub fn surface_seed(seed: Seed, body: BodyId) -> SurfaceSeed;  // P14.T23's, on `body.surface`
 pub fn detail_seed(seed: Seed, body: BodyId) -> DetailSeed;    // R09's, on `body.surface.detail`
 // in `planetary::surface`:
@@ -265,6 +297,15 @@ pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField;
 pub mod steps { plates, relief, craters, climate, erosion, classes }   // each pub for tests
 pub mod reference { earth_like, mars_like, moon_like, ceres_like }     // feature `testing`
 ```
+
+`for_body` reads what the record now carries: `bulk()` (radius, gravity, class, fractions),
+`figure()` (P14.T46's `BodyFigure`, whose `spheroid()` gives a, c and f), `rotation()` (P14.T14's
+`BodyFixedFrame`: pole, obliquity and `RotationLaw`), `orbit()`, and the context's stars for the host
+flux over the orbit (P14.T12's `Illumination` gives only its orbit average). The record's `surface`
+section is uninhabited (`record::Surface` is an empty enum), and the atmosphere (`SurfaceState`,
+`SurfaceMaterial`, pressure and gases, in `derive::atmosphere`) is reachable only through the
+private `DerivedBody`, so `for_body` answers `NotModelled(RecordSection::Surface)` until plan 14's
+surface section is inhabited (P14.T24 and the asks drafted as P14.T48).
 
 ### Server (`hyperion_server`)
 
@@ -281,7 +322,11 @@ which calls `CoarseInputs::for_body`; the server's tests use one built from
 `reference::{earth_like, …}` (feature `testing`), so that the service and the wire are tested
 before plan 14's asks land.
 
-Environment: `HYPERION_SURFACE_CACHE_MB` (default 128), with `--surface-cache`.
+Environment: `HYPERION_SURFACE_CACHE_MB` (default 128), with `--surface-cache`, declared in
+`config.rs` as the sky's cache is (`ENV_SKY_CACHE_MB`, `DEFAULT_SKY_CACHE_MIB`, the private
+`CacheBudget` argument, `ServerConfig::sky_cache_bytes` and its builder). `knowledge::surveys` sits
+beside P12.T7's `knowledge::{KnowledgeStore, PersistedKnowledge}` (built), and the service is an
+`AppState` field, as the sky's services are.
 
 ### Protocol (`hyperion-protocol`, mirrored in `@hyperion/protocol`)
 
@@ -291,7 +336,8 @@ Environment: `HYPERION_SURFACE_CACHE_MB` (default 128), with `--surface-cache`.
 bulk: BulkManifestDto }` or, with no bulk, `NotModelled { section }` for a body whose plan 14
   sections the pass needs are not yet modelled (the record's own `not_modelled` convention). An
   unknown body is `unknown_body` and a body with no solid surface `bad_request`, each naming
-  `body`.
+  `body`; a malformed index (`bad_request`) and a system that does not resolve (`unknown_system`)
+  name `body` too, through `convert::planetary::body_refusal`, as `body_detail` refuses them.
 - `survey_pass`: `SurveyPassRequest { universe, body, from, to, source: SurveySourceDto,
 resolution_m, cells: Vec<CellRangeDto> }` answered by `SurveyPassDto { revision }`, where
   `CellRangeDto` is `{ start: u32, end: u32 }` and `cells` holds at most `MAX_SURVEY_RANGES` (256)
@@ -300,17 +346,24 @@ resolution_m, cells: Vec<CellRangeDto> }` answered by `SurveyPassDto { revision 
 - `CoverDto`: `ranges: Vec<CoverRangeDto>`, each `{ start: u32, end: u32, resolution: u8 }`, a
   half-open range of `cell_index` values with its `ResolutionCode`, so that R10's readouts know the
   resolution per cell. It travels server to client only.
-- On R03's scene topic, the optional field `surface_revisions: Vec<SurfaceRevisionDto>` of
-  `{ body: BodyIdHex, revision: u32 }`, which R03 leaves room for.
+- On R03's scene topic, the optional field `surface_revisions: Option<Vec<SurfaceRevisionDto>>` of
+  `{ body: BodyIdHex, revision: u32 }` on `SceneNotificationDto`, which R03 leaves room for (its
+  Design note 4, where T0.a drafted the field): `#[serde(default, skip_serializing_if =
+"Option::is_none")]` and `#[ts(optional)]`, as `tidal_radius_m` is, so `PROTOCOL_VERSION` stays 2;
+  a merged pending push (R03's Design note 5, `subscriptions::ScenePush::merge`) merges it by body,
+  the latest revision winning.
 
 ### Test helpers
 
 `hyperion_surface::testing::{synthetic_field, SyntheticWorld, FieldBuilder}`,
 `hyperion_sim::planetary::surface::reference::*`,
 `crates/hyperion-server/tests/common/surface.rs::{field_via_wire, decode_all, reference_inputs}`
-over R03's `TestClient::next_binary()`, and `crates/hyperion-sim/examples/surface_map.rs`, which
-writes a field's elevation, class and flow as equirectangular PPM images under `target/` for the
-check by eye. R10's reference-world tests live beside this plan's `surface_coarse_golden.rs` in
+over R03's `TestClient::next_binary() -> (BinaryHeader, Vec<u8>)` (the server's dev-dependencies
+gain `hyperion-sim`'s `testing` feature for `reference_inputs`, T17), and
+`crates/hyperion-sim/examples/surface_map.rs` (the sim's first example: T15 creates the directory and
+an `[[example]]` entry with `required-features = ["testing"]`), which writes a field's elevation,
+class and flow as equirectangular PPM images under `target/` for the check by eye. R10's
+reference-world tests live beside this plan's `surface_coarse_golden.rs` in
 `crates/hyperion-sim/tests/` (`surface_material_worlds`, `surface_weights_worlds`,
 `surface_ground_worlds`, `level_bound_worlds`, `surface_reading_worlds`, `surface_albedo_worlds`),
 over a shared `tests/common/surface_worlds.rs` that runs `reference::*` through the pass once per
@@ -318,59 +371,110 @@ binary; T16 creates that file with its own goldens so that R10 extends it.
 
 ## Consumes
 
-Names are those of the owning plans' Provides as they stand; R09.T0 reconciles them with the code.
+Names are as built, reconciled with the code at `bce2aef5` by R09.T0.a; where a dependency's
+Provides sketch differs, the as-built name is given.
 
-- **R04.** `hyperion-base` with `math`, `rng`, `units`, `version` and `ObjectKey::{system, body}`;
-  `domain_tags!` exported from base with `DomainTag::registered` `#[doc(hidden)] pub`, and the three
-  registries with `assert_registries_disjoint`; the `hyperion-surface` skeleton with
-  `hyperion_surface::tags`, its self-contained `clippy.toml` and relaxed-SIMD `compile_error!`;
+- **R04.** `hyperion-base` with `math` (`atan2`, `j0`, `mul_add` on the pinned libm), `rng`,
+  `units`, `version` (`GENERATOR_VERSION` 21) and `ObjectKey::{system, body}`; `domain_tags!`
+  exported from base with `DomainTag::registered` `#[doc(hidden)] pub`, and the three registries
+  with `assert_registries_disjoint`, called once in the sim's `rng/tags.rs`; the `hyperion-surface`
+  crate with `hyperion_surface::tags` (holding R05's `selftest.surface.test_planet`), its
+  self-contained `clippy.toml`, its relaxed-SIMD `compile_error!` and `generator_version()`;
   `just test-wasm-fast` (both wasm targets, in `just ci`) and `just test-wasm-slow`; the testkit's
-  embedded `golden!` arm and `golden::check_embedded`; `compute::probe_flush_to_zero`,
+  embedded `golden!` arm, which `include_str!`s `tests/golden/<name>.golden` on the browser target,
+  so every golden name is a literal, and `golden::check_embedded`; `compute::probe_flush_to_zero`,
   `CpuPool::with_probe` and `JobError::FloatingPointMode`; `BodyHooksDto.detail_seed:
-SectionDto<DetailSeedHex>`, `not_modelled` until this plan fills it, and the client's
-  `BodyHooks.detailSeed`. R04's test conventions for the surface crate and base (R04 Design note
-  12): every test module carries the `wasm_bindgen_test as test` import; a test that cannot run on
-  `wasm32-unknown-unknown` sits in a module named `native_only`; and every `should_panic` test
-  states `expected` and lives in the crate's own `tests/panics.rs` binary.
-- **R05.** `hyperion_surface::cube` (`Face`, `FaceUv`, `st_to_uv`, `uv_to_st`, `face_uv_to_xyz`,
-  `xyz_to_face_uv` with its canonical-face rule, `PatchKey` with `edge_neighbour` and
-  `corner_neighbours`, `vertex_dir`), `FINEST_SPACING_M`, `BAND_LIMIT_M`, `finest_level` (Earth →
-  19); `test_planet`'s `HeightSample` and `LatticeCache`, `hyperion_surface::num`'s `min`, `max` and
-  `assert_finite`, and `hyperion_surface::noise`'s `gradient_noise`, `NOISE_BOUND` (B) and
-  `NOISE_RMS` (σ_noise), 3D improved Perlin noise with Perlin 2002's 16-entry gradient table (R05's
-  Design notes 12 and 15); the `patch` module's `PatchBake` layout and `finest_surface_height`,
-  which R10 moves onto this plan's `Synthesiser`. The client's workers, `HeightWorkerPool.postField`
-  and R04's `wasm/` loader are R10's to use, not this plan's.
-- **R03.** `bulk::{Answer, BulkPayload}` with the handler seam's `Answer { body, bulk }`,
-  `BulkManifestDto`, `MAX_BINARY_FRAME_BYTES` (262,144) and `BULK_QUEUED_BYTES`, chunks before the
-  terminal response, `cancel` stopping them; the scene topic's `SceneNotificationDto` with room for
-  `surface_revisions`; `TestClient::next_binary()`; the Knowledge-bound scene test, which T19
-  extends to surveyed cells. R03's camera reports are not used to bound the field (Design note 19).
+SectionDto<DetailSeedHex>` and the client's `BodyHooks.detailSeed`. As built, the whole hooks
+  section is `not_modelled` (or `not_applicable`): the sim's `record::Hooks` is an empty enum and the
+  server's `convert::planetary::hooks` an empty match, so T1.b inhabits it. R04's test conventions
+  for the surface crate and base (R04 Design note 12): every test module carries the
+  `wasm_bindgen_test as test` import (behind the browser target's `cfg`, as the crates' modules have
+  it); a test that cannot run on `wasm32-unknown-unknown` sits in a module named `native_only`; and
+  every `should_panic` test states `expected` and lives in the crate's own `tests/panics.rs` binary
+  (both crates have one).
+- **R05.** `hyperion_surface::cube` (`Face` with `TryFrom<u8>`, `FaceUv`, `st_to_uv`, `uv_to_st`,
+  `face_uv_to_xyz`, `xyz_to_face_uv` with its canonical-face rule (ties to the lowest face index),
+  `unit_dir`, `PatchKey` (private fields; `new`, the getters `face`, `level`, `i` and `j`,
+  `to_u64`, `parent`, `children`) with `edge_neighbour`, `edge_neighbour_and_back` and
+  `corner_neighbours`, `vertex_dir`, `sample_dir` with `SampleGrid`, `Edge`, `MAX_LEVEL` 24);
+  `hyperion_surface::geometry`'s `FINEST_SPACING_M` (0.5 m), `MAX_FINEST_SPACING_M` (0.375 m),
+  `BAND_LIMIT_M` (2 m) and `finest_level` (Earth → 19); `test_planet::HeightSample`;
+  `noise::LatticeCache` (re-exported by `test_planet`); `hyperion_surface::num`'s `min`, `max` (both
+  refusing NaN) and `assert_finite`; and `hyperion_surface::noise`'s
+  `gradient_noise(p_m, &Octave, &mut LatticeCache)`, `Octave::new`, `NOISE_BOUND` (B = 1.0681) and
+  `NOISE_RMS` (σ_noise = 0.2701), 3D improved Perlin noise with Perlin 2002's 16-entry gradient table
+  (R05's Design notes 12 and 15). As built, an `Octave` holds a `Seed` and opens its corners on
+  R05's `selftest.surface.test_planet` tag alone, and `LatticeCache` keys its octave table and
+  corner boxes by that `Seed`, so T5 generalises both. `spheroid::Spheroid` (`from_volumetric`,
+  `flattening`, `normal`, `surface_point`), R07's datum; the `patch` module's `PatchBake` layout
+  (`heights` 65 × 65 × 2, own level then morph target), `bake_patch` and `HeightSource` (with
+  `prepare_cache` and `Error: std::error::Error + Send + Sync + 'static`), and
+  `patch::collision::finest_surface_height`, which R10 moves onto this plan's `Synthesiser`.
+  `TEST_PLANET_VERSION` (2, at the crate root) heads every surface golden today, held by
+  `cube_golden.rs`'s `native_only::every_golden_file_carries_the_test_planet_version` (a flat
+  `read_dir` of `tests/golden/`) and by `golden_diff.py`'s `TEST_PLANET_PREFIX`, which matches the
+  whole directory; T9 narrows both. The surface crate's one bench is `benches/test_planet.rs`
+  (Criterion, off the browser target). The client's workers, `HeightWorkerPool.postField` and R04's
+  `wasm/` loader are R10's to use, not this plan's; the wasm module's exports serve the test planet
+  only, and the export that copies a field into the module, which R05's T10.b record assigns to this
+  plan, is R10's, with its client (R10 Design note 16).
+- **R03.** The server's `pub(crate) mod bulk`: `Answer { body: ResponseBody, bulk:
+Option<BulkPayload> }`, `BulkPayload::new(Bytes) -> Result<_, BuildBulkPayloadError>` and
+  `manifest()`; `BulkManifestDto { chunks, bytes }`; `MAX_BINARY_FRAME_BYTES` (262,144) and
+  `BULK_QUEUED_BYTES` in `limits.rs`; chunks before the terminal response, `cancel` stopping them;
+  R06's `requests/sky.rs::answer` as the model of a bulk handler (its jobs through
+  `compute::sky::bulk` at `Priority::Bulk`, its cache and `SingleFlight` inside services that
+  `AppState` holds); the scene topic's `SceneNotificationDto`, which has no `surface_revisions` yet
+  (T19.b adds it); `TestClient::next_binary()`; the Knowledge-bound scene test,
+  `tests/scene_knowledge.rs`, whose restrictive `SceneKnowledge` is given through
+  `ServerConfigBuilder::scene_knowledge`, and which T19 extends to surveyed cells; the client's
+  `requestBulk(body, manifestOf, options)`, whose `manifestOf` returns `null` for a response with no
+  bulk, such as `NotModelled`, and its limits `MAX_BULK_CHUNKS` (257) and `MAX_BULK_PAYLOAD_BYTES`
+  (64 MiB), above this plan's 15 MB. R03's camera reports are not used to bound the field (Design
+  note 19), as R03 already records (its Design note 6 and Risks).
 - **Galaxy plan 04.** The reserved-kinds table in
   [its "Extending the convention"](../galaxy-generation/04-server-and-protocol.md#extending-the-convention),
-  which new kinds enter first; `RequestBody`, `ResponseBody` and `REQUEST_KINDS` in
-  `crates/hyperion-protocol/src/envelope.rs`, and `kind` (`pub(crate)`), `is_large` and the
-  `every_body` walk in `crates/hyperion-server/src/requests/mod.rs`; `MAX_INBOUND_FRAME_BYTES`
-  (16 KiB) in `crates/hyperion-server/src/limits.rs`;
-  `compute::{CpuPool, Priority::Bulk, CancelToken, SingleFlight, GalaxyKey}`;
+  which new kinds enter first; `RequestBody`, `ResponseBody`, `REQUEST_KINDS` and the
+  compile-forced `next_request` and `next_response` walk in `crates/hyperion-protocol/src/envelope.rs`;
+  `kind` (`pub(crate)`), `is_large` (`pub(crate)`, an exhaustive match), the `Handlers` match and the
+  test helper `every_body` in `crates/hyperion-server/src/requests/mod.rs`; `MAX_INBOUND_FRAME_BYTES`
+  (16 KiB) in `crates/hyperion-server/src/limits.rs`, where `every_limit_is_the_plans` pins every
+  limit; `compute::{CpuPool, Priority::Bulk, CancelToken, SingleFlight, GalaxyKey}`;
   `cache::{ByteLru, SharedByteLru, HeapBytes}`; the `knowledge/` directory reserved in
-  `crates/hyperion-server/src/universe/store.rs`; `TestServer`, `TestClient`.
-- **Galaxy plan 12.** P12.T7's `KnowledgeStore`, its `knowledge/contacts.v1.jsonl` persistence
-  through `UniverseStore`, `spawn_blocking` writes, the torn-line rule and
-  `LoadKnowledgeError::UnsupportedFormat`. P12.T7 is not built; T18 waits for it.
-- **R07.** Design note 19's single height datum, the rotational spheroid, and the flattening f
-  that R07.T1 asks of plan 14; until plan 14 sends f the spheroid is a sphere.
-- **Galaxy plan 14.** `BodyRecord` and `Section`, `SystemContext`, the `body.surface` tag and
-  P14.T23's surface seed; P14.T13.c's `SurfaceState` and `SurfaceMaterial`, surface pressure and
-  gases; P14.T14's rotation and `BodyFixedFrame` with `body_fixed_at` (P14.T14.c), for seasons and
-  a locked world's substellar axis; P14.T24.a's `SurfaceConditions` and P14.T24.b's
-  `GlobalFigures` (ocean and ice fractions, tectonic regime, volcanism, heat flow, surface age,
-  crater density); and the asks of Design note 3. None of T14, T23 or T24 is built at the time of
-  writing (`crates/hyperion-sim/src/planetary/` has no `hooks` or `frames.rs`, and `record.rs`'s
-  `Surface` and `Hooks` have no value).
+  `crates/hyperion-server/src/universe/store.rs`, with `UniverseStore::knowledge_dir(id)`;
+  `ErrorCode::{BadRequest, UnknownSystem, UnknownBody, Internal}`; `TestServer`, `TestClient`.
+- **Galaxy plan 12.** P12.T7, built (T7.a–b): `knowledge::{KnowledgeStore, PersistedKnowledge,
+LoadKnowledgeError, SaveKnowledgeError, KNOWLEDGE_FORMAT}` in `knowledge/{mod,persist,record,
+store}.rs`; `PersistedKnowledge::open(&UniverseStore, UniverseId)` over
+  `knowledge/contacts.v1.jsonl`, a `{"format":1}` header and then one change a line, appended and
+  synced before it is applied, every file operation under `spawn_blocking`, a torn last line
+  dropped with a warning, and `LoadKnowledgeError::{Io, UnsupportedFormat, MalformedLine,
+Interrupted}`. As built, nothing holds a `PersistedKnowledge` in `AppState` (P12.T8 will), and its
+  log helpers (`KnowledgeLog`, `push_line`, `sync_directory`, and `refuse_later_formats`, which
+  names `contacts.v`) are private to `persist.rs`.
+- **R07.** Design note 19's single height datum, the rotational spheroid, and the flattening f that
+  R07.T1 asked of plan 14, now built (P14.T46): the record's `figure()` section holds a
+  `BodyFigure` whose `spheroid()` is R05's `Spheroid`, so the datum is the spheroid from the start.
+- **Galaxy plan 14.** `BodyRecord` (its sections `bulk`, `figure`, `rotation`, `photometry`,
+  `surface` and `hooks` among them) and `Section`, `RecordSection` (twelve sections),
+  `SystemContext`, the `body.surface` tag and P14.T23's `hooks::{surface_seed, SurfaceSeed,
+BodyHooks, BulkComposition}` with `PlanetarySystem::{surface_seed, hooks_at}`; P14.T13.c's
+  `SurfaceState` (`GasEnvelope`, `MagmaOcean`, `Airless`, `RunawayGreenhouse`, `Temperate`,
+  `Snowball`) and `SurfaceMaterial` (`Rock`, `Ice`), surface pressure and gases, in
+  `derive::atmosphere`; P14.T14's rotation, `frames::{BodyFixedFrame, body_fixed_at}` returning
+  `FrameRotation`, and `PlanetarySystem::rotation_of`, for seasons and a locked world's substellar
+  axis; P14.T24.a's `SurfaceConditions` and P14.T24.b's `GlobalFigures` (ocean and ice fractions,
+  tectonic regime, volcanism, heat flow, surface age, crater density); and the asks of Design note
+  3, drafted in plan 14 as P14.T48. As built: P14.T14.a–c, T23, T35, T46 and T47 are built; T24 is
+  not (`hooks/` holds `mod.rs` and `seed.rs` alone, and nothing computes heat flow, a tectonic
+  regime, a surface age, a crater density or an ocean fraction, but for regular moons' tidal heat
+  and volcanism); the record's `Surface` and the wire's `BodySurfaceDto` are empty enums; and no
+  public method gives a body's atmosphere at a time, which only the private `DerivedBody` holds.
 - **Plan 01's discipline**, through R04's base crate: `Stream::open`, `domain_tags!`, the tag
-  golden `tests/golden/rng/tags.golden` and `domain_tags_are_pinned`, `hyperion-testkit`'s
-  `golden!` and `GoldenWriter` (`crates/hyperion-testkit/src/golden.rs`),
+  golden `crates/hyperion-sim/tests/golden/rng/tags.golden` and `domain_tags_are_pinned`
+  (`crates/hyperion-sim/tests/foundation_golden.rs`, which prints base's, the surface crate's and
+  the sim's registries), `hyperion-testkit`'s `golden!` and `GoldenWriter`
+  (`crates/hyperion-testkit/src/golden.rs`) with `f64_digest` and `f32_digest`,
   `order::assert_order_independent`, slow tests marked `#[ignore = "slow: …"]`.
 
 ## Design notes
@@ -415,9 +519,9 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    contrasts, obliquity, rotation and the body-fixed frame, the host flux over the orbit, surface
    pressure and gases, `SurfaceState`, `SurfaceMaterial`, tectonic regime and continental fraction,
    volcanism level, heat flow, surface age, `CraterParams`, an optional `WetEpoch`, and the
-   `ClimateRegime`. Five asks go to plan 14 (R09.T0.a), because plan 14 as written does not provide
-   them (its P14.T24.a contrasts are unsigned, it has no continental fraction, and it has no regime
-   classifier at all):
+   `ClimateRegime`. Five asks go to plan 14 (R09.T0.a drafted them there as P14.T48.a–e, its
+   "Phase K", for its owner), because plan 14 as written does not provide them (its P14.T24.a
+   contrasts are unsigned, it has no continental fraction, and it has no regime classifier at all):
    - **σ_h, by open question 20's ruling, with the continental fraction f_c it needs.** σ_h is not a
      function of gravity: over seven bodies it scales as g^−0.22 with a scatter of 2.5×, and at
      equal gravity it differs 2.7× (Earth 2.51 km against Venus 0.94) and 2.8× (Mars 2.90 against
@@ -758,9 +862,9 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     at level 8, 3 MB for a Mars at 7 and under 1 MB for the Moon, inside the brainstorm's "roughly 2
     to 15 MB". Heights, elevations and sea level are measured along the normal of the body's
     rotational spheroid, R07's reference body (a = R_vol (1 − f)^(−⅓), c = a (1 − f), with plan 14's
-    flattening f; a sphere of R_vol until plan 14 sends f), the one datum R07's Design note 19 sets
-    for R05's vertices, R07's discs and R10's terrain (researched there, high confidence); the
-    header carries a and c. The payload is a sequence of self-contained blocks of at most
+    flattening f, which P14.T46 sends in the record's `figure()`), the one datum R07's Design note
+    19 sets for R05's vertices, R07's discs and R10's terrain (researched there, high confidence);
+    the header carries a and c. The payload is a sequence of self-contained blocks of at most
     `MAX_BLOCK_BYTES`, in `cell_index` order, so a worker can be posted one block at a time; block 0
     of every payload, delta or whole, carries the whole `FieldHeader`, so that a worker can build
     its `PartialField` from the first block that arrives, and `SurfaceFieldDto`'s header is the same
@@ -787,20 +891,23 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     until the terminal response. A client that holds revision n asks with `have_revision`, and
     receives only the cells surveyed since. Every surveyed cell is sent, since at most about 12 MB
     they need no bounding by R03's camera reports; R03's Design note 6 expected them to bound the
-    field's cells, and T0.a notes in R03 that this plan declines that input, so the reports bound
-    only the sensors plan's contacts. Tests reach the service through its `InputsSource` seam with
-    the reference worlds, because `for_body` answers `NotModelled` until plan 14's asks land; the
-    wire then answers `SurfaceFieldDto::NotModelled { section }`.
+    field's cells, and R03 records that this plan declines that input (its Design note 6 and its
+    Risks, "Cameras bound little"), so the reports bound only the sensors plan's contacts. Tests
+    reach the service through its `InputsSource` seam with the reference worlds, because
+    `for_body` answers `NotModelled` until plan 14's asks land; the wire then answers
+    `SurfaceFieldDto::NotModelled { section }`.
 
 ## Tasks
 
-T0 first. T1–T3 are the base: seeds, then types and codec. T4–T9 build the synthesis on T2;
-T10–T16, the coarse pass, need T1–T2 and may run beside the synthesis only up to the points where
-they read it: T12.d (coarse craters) needs T7.a's density; T12.e (σ_h on the reconstructed field)
-needs T4's interpolant and T5's `local_variance`; T14.b (the multigrid's upsample) needs T4; and
-T14.c (the Mars volume check) needs T6.b's closed-form incision. T17–T19 are the server: T17 needs
-T3 and T10, T18 needs P12.T7, and T19 needs T8, T17 and T18. T20 closes. Every task ends with
-`just ci` green.
+T0 first. T1–T3 are the base: seeds, then types and codec; T2 needs nothing of T1 and may run
+beside T1.a. T4–T9 build the synthesis on T2 (T5, T6 and T7.b open their streams from T1.a's
+`DetailSeed`); T10–T16, the coarse pass, need T1.a and T2 and may run beside the synthesis only up
+to the points where they read it: T12.d (coarse craters) needs T7.a's density; T12.e (σ_h on the
+reconstructed field) needs T4's interpolant and T5's `local_variance`; T14.b (the multigrid's
+upsample) needs T4; and T14.c (the Mars volume check) needs T6.b's closed-form incision. T17–T19 are
+the server: T17 needs T3 and T10, T18 needs T2 (P12.T7 is built), and T19 needs T8, T17 and T18.
+T20 closes. T0.b's research items gate T7.a, T12.c, T13.a and T14.b. Every task ends with `just ci`
+green, which the orchestrator runs on integration; a lane runs its targeted checks.
 
 Paths are under `crates/hyperion-surface/src/` or `crates/hyperion-sim/src/` as the task says.
 Every figure a task turns into a constant is re-checked against the source its design note names
@@ -817,15 +924,21 @@ runs; the governor recorded), since the research's figures were taken under load
   reserved-kinds table, each for its owner to accept. Acceptance: `npx prettier --check` on the
   edited plans; `grep -c "R09.T0.a" docs/agent/plans/galaxy-generation/14-planetary-systems.md`
   finds the block; each ask in this plan's Risks carries its state word (drafted, carried or open).
+  _Done 2026-10-09: the record is Risks' "Re-validated at `bce2aef5`"; the block is plan 14's
+  "Phase K" (P14.T48.a–e). The check ran as `pnpm exec prettier --check`, the same tool, since this
+  machine has no `npx`._
 - **R09.T0.b Remaining checks.** The research of 2026-09-29 answered the plan's questions; what it
   left open goes to a research agent before the constant it concerns is committed: the σ_h fit's
-  age law against Mercury's smooth and intercrater plains (the same pyshtools script, masked); the
-  energy-balance transport cap against the FILLET ensemble; a geomorphology pass on erodibility for
-  Titan and Mars (Collins 2005; Howard 2007) before T14.b; Venus's screening parameters against
-  Herrick and Phillips 1994's size–frequency distribution before T7.a. The review of 2026-09-29
-  added the transport cap's rule (Risks) before T13.a and the isotherm of T_e (Risks) before
-  T12.c. Acceptance: `grep -n "researched" ` on this plan shows each item in
-  its design note, or the item stays in Risks with the agent's lean.
+  age law against Mercury's smooth and intercrater plains (the same pyshtools script, masked), before
+  P14.T48.a and before T10's reference worlds take a σ_h from the fit; the energy-balance transport
+  cap against the FILLET ensemble, before T13.a; a geomorphology pass on erodibility for Titan and
+  Mars (Collins 2005; Howard 2007) before T14.b; Venus's screening parameters against Herrick and
+  Phillips 1994's size–frequency distribution before T7.a. The review of 2026-09-29 added the
+  transport cap's rule (Risks) before T13.a and the isotherm of T_e (Risks) before T12.c, and the
+  re-validation of 2026-10-09 the law of the continental fraction f_c, which P14.T48.a asks plan 14
+  to publish and Design note 3 calibrates on Earth alone (0.405), before P14.T48.a. Acceptance:
+  `grep -n "researched"` on this plan shows each item in its design note, or the item stays in
+  Risks with the agent's lean.
 
 ### R09.T1 Seeds, scopes and tags
 
@@ -838,16 +951,33 @@ runs; the governor recorded), since the research's figures were taken under load
   round-trips and refuses a level above 28 or a coordinate past 2^level; two cells never share a
   key; each surface tag's documented key form is the only one its call sites use (a test over the
   registry's doc table); `assert_registries_disjoint` covers the new names; `tags.golden`
-  regenerated with `domain_tags_are_pinned`. Acceptance: `cargo test -p hyperion-base rng` and
-  `cargo test -p hyperion-surface tags`.
-- **R09.T1.b The detail seed on the wire.** Waits for P14.T23, which builds `hooks/mod.rs`,
-  `surface_seed` and the hooks section: `planetary::hooks::detail_seed` beside it, and
-  `BodyHooksDto.detail_seed` filled, turning R04's `not_modelled` field `ok`. This plan does not
-  build `surface_seed`; until P14.T23 lands the coarse pass takes its `SurfaceSeed` from the
-  builder, as every test does. Tests: the detail seed of 10⁶ bodies has no duplicates and differs
-  from the surface seed of each; the hooks section's wire form carries `detail_seed` and no
-  `surface_seed`. Acceptance: `cargo test -p hyperion-sim planetary::hooks` and
-  `cargo test -p hyperion-protocol planetary`.
+  regenerated with `domain_tags_are_pinned`. As built before it (the re-validation of
+  `bce2aef5`): `SurfaceSeed` moves from the sim's `planetary/hooks/seed.rs` into base's `rng`,
+  re-exported by the sim at its old path, with P14.T23's tests unchanged and passing;
+  `Stream::open`'s scope assertion (`rng/stream.rs`) gains the refusal of both surface scopes; the
+  keying tables of `rng/key.rs` and `rng/mod.rs` gain the two key forms; `body.surface.detail` is
+  appended at the end of the sim's registry and the eight tags after R05's entry in the surface
+  crate's; the tag golden is the sim's (`crates/hyperion-sim/tests/golden/rng/tags.golden`), which
+  only gains lines, so no `GENERATOR_VERSION` bump (`golden_diff.py` reports it "Extended only").
+  Acceptance: `cargo test -p hyperion-base rng`, `cargo test -p hyperion-base --test panics`,
+  `cargo test -p hyperion-surface tags` and
+  `cargo test -p hyperion-sim --test foundation_golden domain_tags`.
+- **R09.T1.b The detail seed on the wire.** After T1.a; P14.T23 is built (`hooks/seed.rs`,
+  `surface_seed`, `PlanetarySystem::{surface_seed, hooks_at}`). `planetary::hooks::detail_seed` in
+  `hooks/seed.rs` beside `surface_seed`, and the record's hooks section inhabited: `record::Hooks`,
+  an empty enum today, holds the body's `DetailSeed` (and nothing server-only), the record builder
+  sets it `Ok` for a present body at `DetailLevel::Full` (`RecordSection::Hooks`'s level), and the
+  server's `convert::planetary::hooks` maps it to `BodyHooksDto { detail_seed: ok }`, turning R04's
+  `not_modelled` section `ok`. That moves P14.T32's golden systems (`hooks: NotModelled` on every
+  present body), so T1.b bumps `GENERATOR_VERSION` through the orchestrator, one lane at a time, by
+  the sim-determinism skill, or lands in the same bump as T9 or T16 if the orchestrator so orders.
+  This plan does not build `surface_seed`; the coarse pass takes its `SurfaceSeed` from the builder
+  in every test. Tests: the detail seed of 10⁶ bodies has no duplicates and differs from the surface
+  seed of each; the hooks section's wire form carries `detail_seed` and no `surface_seed`; a ring,
+  a belt or an absent body keeps `not_applicable`; `tests/system_bodies.rs`, which asserts today
+  that every hooks section is not modelled, asserts the detail seed instead. Acceptance:
+  `cargo test -p hyperion-sim planetary::hooks`, `cargo test -p hyperion-protocol planetary` and
+  `cargo test -p hyperion-server --test system_bodies`.
 
 ### R09.T2 The field's types
 
@@ -856,7 +986,11 @@ runs; the governor recorded), since the research's figures were taken under load
 crater index, `FieldView` for `CoarseField`, `Cover`, `ResolutionCode`; `testing::{FieldBuilder,
 SyntheticWorld, synthetic_field}`, the synthetic worlds T3 to T9 test on (an Earth-, Mars-, Moon-
 and Ceres-like field built directly, a flat field and a single crater), each field valid by
-construction.
+construction. With them (the re-validation of `bce2aef5`): the header's data types, which later
+tasks give behaviour (`synth::{BandLevel, BandSpectrum}` for T5, `craters::CraterParams` for T7.a,
+`ClimateModelKind`, `PrecipitationSource`); `PerSquareKilometre` and `SquareMetres` in base's
+`units`, by its `unit!` macro; and the surface crate's first `[features]` entry, `testing = []`,
+which the sim's `testing` feature enables (`hyperion-surface/testing`).
 
 Tests: the level table of Design note 4 (Earth 8, 2 R⊕ 8, Mars 7, Moon 6, Ceres 5, with the
 brainstorm's cell sizes within 5%); D_b equal to twice the closed-form largest edge, 84.9 km ± 0.5
@@ -887,9 +1021,11 @@ synthetic field encodes to 10–15 MB. Acceptance: `cargo test -p hyperion-surfa
 
 `synth/interp.rs`: Design note 13's per-face B-spline over ghost cells, its partition of unity and
 its analytic gradient; categorical reads; `Synthesiser::height_at` returning base elevation at every
-level, `QueryHeightError::NotSurveyed` when a read cell is not held. `HeightSample` and
-`LatticeCache` move from R05's `test_planet` to `height.rs`, which `test_planet` re-exports, so that
-R10's retirement of the test planet leaves them in place.
+level, `QueryHeightError::NotSurveyed` when a read cell is not held (`QueryHeightError` implements
+`std::error::Error + Send + Sync`, R05's `HeightSource::Error` bound). `HeightSample` moves from
+R05's `test_planet.rs` to `height.rs`, which `test_planet` and `patch` then import or re-export, so
+that R10's retirement of the test planet leaves it in place; `LatticeCache` already lives in `noise`
+and stays (the re-validation of `bce2aef5`). Every surface golden is unchanged.
 
 Tests: along every face edge and at all eight corners, values and gradients evaluated from either
 side's patches are equal bit for bit; the gradient matches a central difference to 10⁻⁶ relative;
@@ -900,10 +1036,16 @@ Acceptance: `cargo test -p hyperion-surface synth::interp`.
 
 ### R09.T5 Structural octaves
 
-`synth/relief.rs`: the octave stack on `surface.relief` keyed by cell, over R05's noise basis with
-its 16-entry gradient table and certified bound, conditioned on crust and boundary (ridged with its
-pinned mean removed, low-amplitude, domain-warped from coarser octaves only); `BandSpectrum`;
-`local_variance`; the per-contribution `unresolved_variance`.
+`synth/relief.rs`: the octave stack on `surface.relief` keyed by lattice corner (the Key column of
+Provides), over R05's noise basis with its 16-entry gradient table and certified bound, conditioned
+on crust and boundary (ridged with its pinned mean removed, low-amplitude, domain-warped from
+coarser octaves only); `BandSpectrum`; `local_variance`; the per-contribution
+`unresolved_variance`. R05's `noise::Octave` holds a `Seed` and opens its corners and offsets on the
+test planet's `selftest.surface.test_planet` tag alone, and `LatticeCache` keys its octave table
+and corner boxes by that `Seed`, so T5 first generalises both to a noise key that is either the test
+planet's (`Seed` on its tag) or this plan's (`DetailSeed` on `surface.relief`), with the test
+planet's output bit for bit unchanged: every R05 golden and `TEST_PLANET_VERSION` (2) stay as they
+are, and `just bench -- test_planet` is recorded before and after (provisional under load).
 
 Tests: each octave's mean over 10⁵ points under 1% of its amplitude, ridged included; no sample
 exceeds an octave's stated bound; `local_variance` within 5% of the sampled variance on each
@@ -925,13 +1067,16 @@ Acceptance: `cargo test -p hyperion-surface synth::relief`.
   the channels' `unresolved_variance` and `structure_function`. Tests: mean incision over every
   parent cell zero to 10⁻⁹ m; the cached build equals the single-point query bit for bit; cache
   order does not change a height. Bench `surface/channels` with a per-level breakdown, against 3.5
-  µs a point in wasm (Design note 14).
+  µs a point in wasm (Design note 14), in a new `crates/hyperion-surface/benches/synth.rs`
+  (`[[bench]]`, `harness = false`, Criterion off the browser target as `test_planet.rs` is), which
+  T8 extends.
 
 Acceptance: `cargo test -p hyperion-surface synth::channels`.
 
 ### R09.T7 Craters
 
-- **R09.T7.a The density.** `craters.rs`: `CraterParams`; `cumulative_density` from Neukum et al.'s
+- **R09.T7.a The density.** After T0.b's Venus item. `craters.rs`: `CraterParams` (T2's type, in
+  `PerSquareKilometre`); `cumulative_density` from Neukum et al.'s
   a1…a11 with a0 = log₁₀ N(>1 km) (the misprint recorded in the doc comment), the end slopes outside
   10 m–300 km, the optional diameter map, the screening taper and Venus's break-up rule;
   `saturation`; `transition_diameter`; `diameter_in_octave` by bisection in log D with a fixed
@@ -975,18 +1120,30 @@ patch build orders; `unresolved_rms` falls monotonically with resolution and is 
 limit. Benches `surface/point` and `surface/patch`, with a per-component breakdown against Design
 note 14's targets and the brainstorm's 10 µs a point and 40 ms a patch, recorded; a miss is a
 finding for open question 5, and the hash levers of Design note 14 are tried only then. Acceptance:
-`cargo test -p hyperion-surface synth` and `just bench -- surface`.
+`cargo test -p hyperion-surface synth` and `just bench -- surface` (the recipe passes the filter to
+every bench binary, so it selects the `surface/…` IDs; on a quiet machine, under the heavy lock, or
+recorded provisional).
 
 ### R09.T9 Golden heights across targets
 
 `crates/hyperion-surface/tests/height_golden.rs`, goldens in
 `crates/hyperion-surface/tests/golden/`: heights and gradients at 512 pinned points and levels of
 each synthetic world, and one baked patch per world, written with `GoldenWriter`, blessed natively
-and compared on `wasm32-wasip1` and on `wasm32-unknown-unknown` through R04's embedded arm. Bump
-`GENERATOR_VERSION` here if T16 has not already (whichever of T9 and T16 lands first bumps). The
-`surface/point` bench is also run under the Electron `node` shim and recorded. Acceptance: `just ci`
-(through `just test-wasm-fast`) runs the goldens on all three targets and passes; a change to any
-synthesis constant fails it.
+and compared on `wasm32-wasip1` and on `wasm32-unknown-unknown` through R04's embedded arm (each
+golden named by a literal, which the browser arm `include_str!`s). Bump `GENERATOR_VERSION` here if
+T16 (or T1.b) has not already (whichever lands first bumps, through the orchestrator). R05's
+goldens stay headed `TEST_PLANET_VERSION` and these carry `GENERATOR_VERSION`, so they live in a
+subdirectory, `crates/hyperion-surface/tests/golden/height/`, which `cube_golden.rs`'s flat
+`every_golden_file_carries_the_test_planet_version` does not read; `height_golden.rs` holds that
+directory to `GENERATOR_VERSION` in a `native_only` test of its own; and `golden_diff.py`'s
+`TEST_PLANET_PREFIX` rule (`.claude/skills/sim-determinism/scripts/golden_diff.py`, which today
+matches the whole `tests/golden/`, its comment expecting
+R09's goldens elsewhere) is narrowed to exclude `height/`, with its comment corrected. The
+`surface/point` bench is also run under the Electron `node` shim and recorded. Acceptance:
+`just test-wasm-fast` runs the goldens on both wasm targets and `cargo test -p hyperion-surface
+--test height_golden` natively, and passes (the orchestrator's `just ci` runs all three); a change
+to any synthesis constant fails it; `golden_diff.py` reports the new goldens under the generator's
+version and R05's under the test planet's.
 
 ### R09.T10 The coarse pass's frame
 
@@ -994,7 +1151,10 @@ synthesis constant fails it.
 returning `NotModelled` until plan 14's sections carry values, the cell graph over R05's cube (four
 edge neighbours, vertex neighbours, solid angles by the closed form atan2(uv, √(1 + u² + v²))
 differenced over the corners, through `math::atan2`), the quantiser, `coarse_pass` running its steps
-as no-ops, and `reference::{earth_like, mars_like, moon_like, ceres_like}`.
+as no-ops, and `reference::{earth_like, mars_like, moon_like, ceres_like}`. `for_body` reads the
+record's `bulk`, `figure`, `rotation` and `orbit` sections and the context's stars (Provides), and
+answers `NotModelled(RecordSection::Surface)` while `record::Surface` is uninhabited; a test pins
+that on a generated rocky body.
 
 Tests: a no-op pass yields a valid field twice with identical bytes; solid angles sum to 2π ÷ 3 a
 face to 10⁻¹²; edge-neighbour lists are symmetric, every cell has four and a corner cell three
@@ -1023,7 +1183,8 @@ trench; a stagnant-lid world has none. Acceptance:
 - **R09.T12.b Convergent landforms.** Belts, trenches and arcs by boundary kind, scaled as Design
   note 7 says. Tests: belts lie within their stated distance of convergent boundaries; trenches lie
   2–4 km below the neighbouring sea floor and arcs 100–200 km behind them.
-- **R09.T12.c Stagnant-lid provinces and flexure.** Volcanic provinces sized by the volcanism level
+- **R09.T12.c Stagnant-lid provinces and flexure.** After T0.b's isotherm item. Volcanic provinces
+  sized by the volcanism level
   and the flexural moat and bulge about each load. Tests: a line load's bulge crest lies at πα with
   height 0.043 w₀; α at T_e = 70 km under Mars's gravity is 180 km ± 10.
 - **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.a. Tests:
@@ -1042,7 +1203,8 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
 
 ### R09.T13 Climate
 
-- **R09.T13.a The zonal model.** `steps/climate/ebm.rs`: Design note 8's implicit seasonal moist
+- **R09.T13.a The zonal model.** After T0.b's transport-cap items. `steps/climate/ebm.rs`: Design
+  note 8's implicit seasonal moist
   energy-balance model in latitude, with its heat capacities, gray outgoing radiation, albedo and D
   scaling, on the grid Design note 8 names. Tests: an Earth-like input converges within the fixed
   orbit count and its annual-mean zonal temperature lies within 5 K of Siler et al.'s Fig. 2b
@@ -1079,7 +1241,8 @@ of the same inputs, with the differences written into this plan. Acceptance:
   Fill–Spill–Merge. Tests: drainage area at every outlet sums to the draining area; no cell drains
   uphill after filling; the same seed gives the same receivers; a finite inventory fills the lowest
   basins first and spills.
-- **R09.T14.b The solver.** Tzathas et al.'s recursion with n = 1, the fixed point with its moving
+- **R09.T14.b The solver.** After T0.b's erodibility item. Tzathas et al.'s recursion with n = 1,
+  the fixed point with its moving
   average, multigrid to level 4 at six iterations a level with the upsample through T4's
   interpolant; K scaled as Design note 9 says with m = 0.45 and the runoff-weighted area. Tests: a
   ridge-to-sea profile matches the closed-form steady state; the fixed point's residual falls
@@ -1097,7 +1260,9 @@ of the same inputs, with the differences written into this plan. Acceptance:
   match; lakes are level.
 
 Bench `coarse/erosion_l8`: the brainstorm's "a few seconds at level 8" (Tzathas et al.'s Table 2,
-1.79 s at 512² and 8.18 s at 1,024² in Python with numba), recorded. Acceptance:
+1.79 s at 512² and 8.18 s at 1,024² in Python with numba), recorded, in a new
+`crates/hyperion-sim/benches/surface.rs` (`[[bench]]`, `harness = false`), which T16 extends.
+Acceptance:
 `cargo test -p hyperion-sim planetary::surface::steps::erosion`.
 
 ### R09.T15 Classes and crater state
@@ -1109,7 +1274,8 @@ labelled once as a one-year orbit and once as a four-year orbit (the same temper
 precipitation at the same rates per 30.44 d) returns the same classes, which tests the rate rule
 alone, not the climate a longer orbit would have; the reference Earth has tropical, arid, temperate,
 continental and polar classes in plausible areas; a lifeless world has no vegetation class; the
-reference Moon is regolith throughout. `crates/hyperion-sim/examples/surface_map.rs` writes the
+reference Moon is regolith throughout. `crates/hyperion-sim/examples/surface_map.rs` (the sim's
+first example, with an `[[example]]` entry carrying `required-features = ["testing"]`) writes the
 reference Earth's elevation, class and flow as equirectangular PPM images under `target/`, with no
 new dependency, and the look (belts along convergent boundaries, rivers to the sea) is recorded in
 this task's entry. Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::classes` and
@@ -1121,10 +1287,12 @@ this task's entry. Acceptance: `cargo test -p hyperion-sim planetary::surface::s
 `crates/hyperion-sim/tests/common/surface_worlds.rs` that runs `reference::*` through the pass once
 per binary and that R10's world tests reuse: the quantised fields of the reference Ceres
 and Moon (fast, so they run on native and wasip1 under R04's recipes) and of the reference Earth
-and Mars (slow). Bench `coarse/pass` per level 5–8. Bump `GENERATOR_VERSION` if T9 has not
-already (whichever of T9 and T16 lands first bumps), or again if the first bump has been released
-to a save. Acceptance:
-`just ci`, `just test-slow`, `just bench -- coarse`.
+and Mars (slow). Bench `coarse/pass` per level 5–8, beside T14's `coarse/erosion_l8` in
+`crates/hyperion-sim/benches/surface.rs`. Bump `GENERATOR_VERSION` if T9 (or
+T1.b) has not already (whichever lands first bumps, through the orchestrator), or again if the first
+bump has been released to a save. Acceptance: `cargo test -p hyperion-sim --test
+surface_coarse_golden`, the task's own slow tests (`just test-slow` filtered to them), and
+`just bench -- coarse`; the orchestrator's `just ci` runs the fast goldens on wasip1.
 
 ### R09.T17 The surface service
 
@@ -1132,7 +1300,11 @@ to a save. Acceptance:
 the `InputsSource` seam with `RecordInputs` for production and, in
 `crates/hyperion-server/tests/common/surface.rs`, `reference_inputs` over
 `hyperion_sim::planetary::surface::reference::*` for tests; the job runs on R04's probed pool, and
-`JobError::FloatingPointMode` refuses the field with `internal` and logs it.
+`JobError::FloatingPointMode` refuses the field with `internal` and logs it. As R06's sky does
+(`compute/sky_tables.rs`, `compute::sky::bulk`), the cache and `SingleFlight` sit inside the
+service, an `AppState` field, and the job goes to the pool at `Priority::Bulk`; the cache size is
+`config.rs`'s, on the sky cache's pattern (Provides). The server's `[dev-dependencies]` gain
+`hyperion-sim` with its `testing` feature, for `reference_inputs`.
 
 Tests: two concurrent requests compute once (a counter); the cache is bounded and evicts; a
 cancelled job leaves nothing cached; the server's field, from `reference_inputs`, equals
@@ -1141,9 +1313,18 @@ cancelled job leaves nothing cached; the server's field, from `reference_inputs`
 
 ### R09.T18 Survey passes and coverage
 
-`crates/hyperion-server/src/knowledge/surveys.rs`, on P12.T7's store: `SurveyPass`, `SurveyLog`
-(append on record, load on open, unknown version refused, a torn last line dropped with a warning),
-`Coverage` folded on load.
+`crates/hyperion-server/src/knowledge/surveys.rs`, on P12.T7's store (built): `SurveyPass`,
+`SurveyLog` (append on record, load on open, unknown version refused, a torn last line dropped with
+a warning), `Coverage` folded on load, the field's level and cell count from T2's `coarse_level`
+and `cell_index`, and the codes T2's `ResolutionCode`. As built, `persist.rs`'s log helpers are
+private and written for contacts (`KnowledgeLog`, `push_line`, `sync_directory`, and
+`refuse_later_formats`, which names `contacts.v`), so T18 first moves them into a private shared
+module (`knowledge/jsonl.rs`), the file name a parameter, with `persist.rs`'s behaviour and tests
+unchanged, and builds `SurveyLog` on them: a `{"format":1}` header, appended and synced before it
+is applied, every file operation under `spawn_blocking`, through `UniverseStore::knowledge_dir`.
+Nothing yet holds a universe's Knowledge in `AppState` (P12.T8 will), so the `SurfaceService` opens
+each universe's `SurveyLog` on its first `survey_pass` or `surface_field` and keeps it (T19.a wires
+it).
 
 Tests: round trip; reopening a universe restores the same coverage bytes; the finest resolution
 wins; folding is independent of pass order. Acceptance: `cargo test -p hyperion-server knowledge`.
@@ -1157,29 +1338,47 @@ After T8, T17 and T18.
   walk), `SurfaceFieldDto` with its `NotModelled` arm, `CellRangeDto`, `CoverDto` and
   `MAX_SURVEY_RANGES` in `limits.rs`; the `survey_pass` handler recording through
   `SurveyLog::record`. An unknown body is `unknown_body` and one with no solid surface
-  `bad_request`, each naming `body`; more than `MAX_SURVEY_RANGES` ranges is `bad_request` naming
-  `cells`. Tests: wire forms of every DTO; a `survey_pass` of 256 ranges fits
-  `MAX_INBOUND_FRAME_BYTES` and one of 257 is refused; a body with no solid surface is refused.
-  Acceptance: `cargo test -p hyperion-protocol surface` and `just gen-protocol-check`.
+  `bad_request`, each naming `body` (a malformed index and an unresolved system as `body_detail`
+  refuses them, through `convert::planetary::body_refusal`, the body ID going through the sim's
+  `resolve` as plan 04 requires); more than `MAX_SURVEY_RANGES` ranges is `bad_request` naming
+  `cells`. As built, a new kind touches seven places: `RequestBody` and `ResponseBody`,
+  `REQUEST_KINDS` and its pinned test list, the protocol's `next_request` and `next_response` walk
+  (`envelope.rs`), the server's `every_body` test helper, `kind`, `is_large` and the `Handlers`
+  match (`requests/mod.rs`); `MAX_SURVEY_RANGES` joins `every_limit_is_the_plans`. Tests: wire
+  forms of every DTO; a `survey_pass` of 256 ranges fits `MAX_INBOUND_FRAME_BYTES` and one of 257
+  is refused; a body with no solid surface is refused. Acceptance:
+  `cargo test -p hyperion-protocol surface`, `cargo test -p hyperion-server requests` and
+  `just gen-protocol-check`.
 - **R09.T19.b The payload, the gate and the revisions.** The `surface_field` handler: the payload
   through R03's `Answer`, gated by coverage with the margin and the craters, the revision and the
   delta since `have_revision`, and `NotModelled` for a body whose inputs are not modelled; the
-  scene's `surface_revisions` (with R03). Tests: a second pass's delta carries only new cells; the
-  same request twice gives identical bytes; a `survey_pass` bumps the body's revision on the scene
-  topic. Acceptance: `cargo test -p hyperion-server surface`.
+  scene's `surface_revisions` (with R03): an optional field on `SceneNotificationDto`, merged by
+  body in `subscriptions::ScenePush::merge`, `PROTOCOL_VERSION` unchanged (Provides; R03's Design
+  note 4 as drafted by T0.a), with `just gen-protocol`. Tests: a second pass's delta carries only
+  new cells; the same request twice gives identical bytes; a `survey_pass` bumps the body's revision
+  on the scene topic; two pushes merged while a reader is slow carry each body's latest revision.
+  Acceptance: `cargo test -p hyperion-server surface` and `cargo test -p hyperion-server
+subscriptions`.
 - **R09.T19.c The Knowledge-bound test.** Over a real socket, extending R03's, on
   `reference_inputs`: after one orbital pass over a region, no block carries a cell outside the
   region and its margin, and margin cells are marked; the cover's resolution codes match the
   passes; the client's decoded `PartialField` gives the server's own heights at every surveyed
   point, the region's edge included; no response or notification carries a key named
-  `surface_seed`. Acceptance: `just ci`.
+  `surface_seed`. Acceptance: `cargo test -p hyperion-server --test surface_knowledge` (the test's
+  file, `crates/hyperion-server/tests/surface_knowledge.rs`, beside R03's `scene_knowledge.rs`);
+  the orchestrator's `just ci`. R03.T15's 15 MiB (61-chunk) check in the real Electron renderer
+  (Risks) needs a body whose field the server binary serves, which needs plan 14's surface section
+  (P14.T24, P14.T48), and a page that asks for it, which is R10's client; until both exist it stays
+  pending and is recorded so here.
 
 ### R09.T20 Verification and hand-over
 
 Run every slow test and bench on a quiet machine, record figures in the doc comments that own them,
 mark R05's provisional function deprecated with a pointer to `Synthesiser` for R10, and record the
 per-point cost in wasm against the budget and against R05's T3.c figure for the test planet.
-Acceptance: `just ci`, `just ci-slow`, `just bench` complete.
+Acceptance: `just ci`, `just ci-slow`, `just bench` complete (the orchestrator runs `just ci` and
+`just ci-slow`; a lane runs only the slow tests and benches this plan created, the timed ones under
+the heavy lock or recorded provisional).
 
 ## Verification
 
@@ -1207,11 +1406,14 @@ Acceptance: `just ci`, `just ci-slow`, `just bench` complete.
 ## Generator version
 
 The coarse pass, its quantisation and payload format, and the synthesis are generated output (open
-question 4), so a change to any of them bumps `GENERATOR_VERSION`. The first bump is made by
-whichever of T9 and T16 lands first; later tasks that change a committed surface golden bump
-again. R05's `FINEST_SPACING_M`, `BAND_LIMIT_M`
-and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves: every
-draw is on a new tag, and plan 14's `body.surface` seed is unchanged. Reserved here: the two scopes
+question 4), so a change to any of them bumps `GENERATOR_VERSION` (21 at the re-validation). The
+first bump is made by whichever of T1.b (whose filled hooks section moves plan 14's golden
+systems), T9 and T16 lands first, through the orchestrator, which coordinates bumps one lane at a
+time; later tasks that change a committed golden bump again. R05's `FINEST_SPACING_M`, `BAND_LIMIT_M`
+and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves but
+the hooks section T1.b fills: every draw is on a new tag, plan 14's `body.surface` seed is
+unchanged (T1.a moves its type, not its value), and T5's generalised noise leaves the test planet's
+output and `TEST_PLANET_VERSION` as they are. Reserved here: the two scopes
 and the cell key's packing; the tags of Provides and `surface.scatter` for R11; the `instance` field
 for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level rule's 40 km, 5 and
 8; `ClimateCell` at level L − 1; the header's `albedo_scale` for R10 and its `surface_age` and
@@ -1234,10 +1436,12 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
   coarse pass at level 8 may take tens of seconds with the climate model, which the brainstorm
   accepts if it starts on approach; until sessions exist it starts on first request.
 - **Plan 14's asks may not land in time.** The pass runs on builder inputs meanwhile, and `for_body`
-  says `NotModelled`; no generated world gets a surface until plan 14 carries σ_h with f_c, the
-  volatile history, the crater parameters, the regime classifier and the signed contrasts. The ice
-  belt needs plan 14's cold- or warm-start history, which it has no classifier to hold yet. The
-  server's tests run on the reference worlds through `InputsSource` until then.
+  says `NotModelled(RecordSection::Surface)`; no generated world gets a surface until plan 14
+  inhabits the record's surface section (P14.T24.a–b, unbuilt) and carries σ_h with f_c, the
+  volatile history, the crater parameters, the regime classifier and the signed contrasts (drafted
+  as P14.T48.a–e). The ice belt needs plan 14's cold- or warm-start history, which it has no
+  classifier to hold yet. The server's tests run on the reference worlds through `InputsSource`
+  until then, and no task of this plan waits on them.
 - **Physics leans still to rule** (research of 2026-09-29, low to medium confidence):
   - _The transport cap._ No published cap on the energy-balance model's D exists; the lean is to
     cap the rotation factor at (Ω⊕ ÷ Ω)² ≤ 64, since Hadley cells are near-global by Ω⊕ ÷ 8
@@ -1256,19 +1460,27 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
 - **Field size.** Design note 17's layout gives about 12 MB for an Earth; if the climate layer at
   L − 1 proves too coarse for R11's clouds, sending it at level L costs about 40% more.
 - **Dependencies.** Plan 14 calling the surface crate's crater density is a new edge that R04's
-  split allows. P12.T7 is unbuilt, and T18 waits on it. The channel network's physics profile
-  replaces Dendry's own height reconstruction, which the paper did not test.
+  split allows (the sim already depends on the surface crate). P12.T7 is built, and T18 builds on
+  it. The channel network's physics profile replaces Dendry's own height reconstruction, which the
+  paper did not test.
 - **Asks of other plans, which their owners may not yet carry**, each with its state in the
-  roadmap's asks table:
-  - plan 14's five of Design note 3: drafted by T0.a;
-  - plan 14's P14.T23 surface seed and hooks section, on which T1.b waits: carried by plan 14,
-    unbuilt;
-  - plan 04's two table rows: drafted by T0.a;
-  - R03's `surface_revisions` field: carried (R03 leaves room); the note that the camera reports
-    do not bound the field: drafted by T0.a;
+  roadmap's asks table (states as of the re-validation of 2026-10-09):
+  - plan 14's five of Design note 3: drafted by T0.a, as P14.T48.a–e in plan 14's "Phase K", for
+    plan 14's owner to accept;
+  - plan 14's P14.T23 surface seed: carried by plan 14, built (sim side); the hooks section's wire
+    value is this plan's T1.b;
+  - plan 14's surface section and P14.T24.a–b's conditions and figures, which `for_body` reads:
+    carried by plan 14, unbuilt;
+  - plan 04's two table rows: drafted by T0.a, in plan 04's reserved-kinds table, for plan 04's
+    owner to accept;
+  - plan 12's P12.T7 store: carried by plan 12, built;
+  - R03's `surface_revisions` field: drafted by T0.a, its shape in R03's Design note 4, for R03's
+    owner to accept (R03 left room for it); the note that the camera reports do not bound the field:
+    carried (R03's Design note 6 and Risks already say so);
   - R10's use of the header's `albedo_scale`: carried by R10;
   - R11's use of the header's `surface_age` and `surface_pressure` for its `RockSite`: carried by R11
-    (`rock_site`).
+    (`rock_site`);
+  - R11's zonal precipitation and seasonal wind (below): open.
 
   R10's three asks of this plan (per-contribution variance and structure function, resolution per
   cell, the albedo-scale field) are met in Provides.
@@ -1276,8 +1488,8 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
 - **Brainstorm departures for its revision.** Design note 13's channel network departs from the
   brainstorm's per-query evaluation in three ways (the first level from `flow` not the lowest
   Moore neighbour, a 3 × 3 search not 5 × 5, one extended network not stacked instances), and
-  Design note 15's crater reach is 1.27 D, not "about twice its radius"; none is yet in the
-  roadmap's brainstorm corrections.
+  Design note 15's crater reach is 1.27 D, not "about twice its radius"; all four are now in the
+  roadmap's brainstorm corrections ("Terrain, the surface and Knowledge"), awaiting the revision.
 - **Asked by R11, not yet designed here** (the roadmap's asks table carries it). The height datum is
   settled as the rotational spheroid (Design note 17, after R07's Design note 19), with the sea
   level a height above it, so R10's datum ask is met. R11 asks for the terrain-independent zonal
@@ -1286,7 +1498,53 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
   figures without the coarse field, so that clouds are drawn over unsurveyed ground (R11 Design note
   8), and whether `ClimateCell.wind`'s four entries are seasonal, since its cloud advection and sea
   state want the month's.
-- **R03.T15's 15 MiB (61-chunk) transfer check is this plan's, after RM3** (decided 2026-10-07 by
-  the orchestrator). The coarse field, about 15 MiB, is the first bulk kind of that size: no sky
-  reaches it (R06's largest is 7.5 MB, 29 chunks; R06.T11.b ran the check at 4 chunks, recorded in
-  R06's Risks, "Deviations in T11.b, as built", and R03's T15 note).
+- **The 61-chunk transfer check.** R03.T15's 15 MiB (61-chunk) check is this plan's, after RM3
+  (decided 2026-10-07 by the orchestrator). The coarse field, about 15 MiB, is the first bulk kind
+  of that size: no sky reaches it (R06's largest is 7.5 MB, 29 chunks; R06.T11.b ran the check at 4
+  chunks, recorded in R06's Risks, "Deviations in T11.b, as built", and R03's T15 note). Found at
+  the re-validation of 2026-10-09: the server binary serves a field only for a body whose inputs
+  are modelled, which waits on P14.T24 and P14.T48, and the page that asks is R10's client, so the
+  check stays pending after T19.c until both exist (T19.c says so); a reference-world field served
+  by the binary would be test-only code reachable over the network, which R03 declined to build.
+  (This bullet opened with R03's task ID in bold, which `plan_task.py` read as a task `R03.T15` of
+  this plan; it now opens with a title.)
+- **Re-validated at `bce2aef5`** (R09.T0.a, 2026-10-09, against R03–R05, P12.T7 and plan 14 as
+  built, merged to `main` in PR #3). No brainstorm drift on this plan's topics since it was written
+  (`git diff 9d955b26 -- docs/agent/brainstorming/rendering-and-planets.md`: the finest spacing now
+  reads at most 0.375 m, which this plan does not state, and open questions 4, 5, 9 and 20 are
+  unchanged; 20 is still **Open**, so the σ_h ask rests on this plan's research and its acceptance
+  rules the question). What changed here:
+  - _Names and paths._ R05's `geometry::{FINEST_SPACING_M, BAND_LIMIT_M, finest_level}`,
+    `noise::LatticeCache` (which T4 no longer moves; only `HeightSample` moves),
+    `spheroid::Spheroid` and `patch::collision::finest_surface_height`; base's `Gigayears` for
+    `Gyr`, and `PerSquareKilometre` and `SquareMetres`, which do not exist, added by T2; the tag
+    golden is the sim's (`crates/hyperion-sim/tests/golden/rng/tags.golden`); the surface registry
+    is not empty (R05's `selftest.surface.test_planet`).
+  - _Built since the plan was written._ P14.T14.a–c and P14.T23 (`SurfaceSeed` is the sim's, so T1.a
+    moves it to base), P14.T46's figure and rotation sections (so the datum is the spheroid from the
+    start), P14.T47 and P12.T7 (so T18 no longer waits). T1.b no longer waits on P14.T23, but its
+    hooks section moves P14.T32's goldens and needs a `GENERATOR_VERSION` bump.
+  - _Corrections so the plan executes._ `surface.relief` is keyed by lattice corner as
+    `surface_item`, as R05's noise keys it, not `surface_cell`; T5 first generalises R05's
+    `Octave` and `LatticeCache` from the test planet's `Seed` and tag, bit for bit; `Stream::open`
+    gains the surface scopes' refusal (it checks only scope equality); T2 defines the header's data
+    types and the crate's `testing` feature; T9's goldens go to `tests/golden/height/`, and both
+    `TEST_PLANET_VERSION` checks are narrowed; T18 factors `persist.rs`'s private log helpers; T19.a
+    lists the seven places a kind touches, and T19.b the field's serde form and merge; the server's
+    dev-dependencies gain the sim's `testing` feature; new bench files (`benches/synth.rs`, the sim's
+    `benches/surface.rs`) and the sim's first example; acceptance commands that name `just ci` name
+    the lane's targeted checks, `just ci` and `just ci-slow` being the orchestrator's.
+  - _Not this plan's._ R05's T10.b record says "R09 adds the export that copies [the field] in";
+    the client and its wasm entry points are R10's (R10 Design note 16, T6–T7), and this plan
+    builds no client code.
+  - _Task readiness._ Ready now: T0.b, T1.a and T2 (beside each other). Then, each after what it
+    names: T1.b after T1.a (with the bump); T3 and T4 after T2; T5, T6.a and T10 after T1.a and T2;
+    T7.a after T2 and T0.b's Venus item; T7.b after T7.a; T7.c after T7.b; T6.b after T6.a; T8 after
+    T4–T7; T9 after T8; T11 after T10; T12.a–b after T11; T12.c after T11 and T0.b's isotherm item;
+    T12.d after T10 and T7.a; T12.e after T12.a, T4 and T5; T13.a after T10 and T0.b's transport-cap
+    items, T13.b–e after it; T14.a after T12; T14.b after T14.a, T4 and T0.b's erodibility item;
+    T14.c after T14.b and T6.b; T14.d after T14.c and T13; T15 after T13 and T14; T16 after T15;
+    T17 after T3 and T10; T18 after T2; T19.a after T17 and T18; T19.b after T19.a and T8; T19.c
+    after T19.b; T20 last. No task waits on an owner's sign-off or on an unbuilt galaxy-plan task;
+    what waits on P14.T24 and P14.T48 is a generated world's surface (`for_body`) and the 61-chunk
+    check, not a task.
