@@ -22,12 +22,35 @@ import type { Rgb } from "../photometry/toneCurve";
 export const CHANNEL_WAVELENGTHS_NM: Rgb = [680, 550, 440];
 
 /**
+ * A density given level by level (plan R08, Design note 2): R08's hydrostatic column (`column.ts`),
+ * a polytrope rather than an exponential, and layers with a base and a top.
+ *
+ * @remarks
+ * The density is linear in height between neighbouring levels and constant beyond the first and
+ * the last, the rule a texture sampled with linear filtering and clamped edges follows, and the
+ * one R08.T12.a's reference tracer reads a case's `tabulated` profile by
+ * (`hyperion-fit`'s `atmosphere::case::DensityProfile::Tabulated`), so that the client and the
+ * reference read the same air. The levels are checked by {@link tabulatedDensity}, as the tracer
+ * checks a case's: at least two, heights finite and strictly ascending, and relative densities
+ * finite and not negative, as many as the heights. Under R08 Design note 17 the heights are
+ * gravity-scaled heights h\* = s h, as every profile's are on an oblate body.
+ */
+export interface TabulatedDensity {
+  readonly kind: "tabulated";
+  /** The levels' heights above the ground, m, strictly ascending. */
+  readonly altitudesM: Float64Array;
+  /** The relative density at each level. */
+  readonly relative: Float64Array;
+}
+
+/**
  * How a term's density, relative to its value at the reference height, varies with height above
  * the ground.
  *
  * - `exponential`: e^(−h ÷ H) with scale height H, 1 at the ground.
  * - `tent`: zero below `bottomM` and above `topM`, rising linearly to 1 at `peakM` and falling
  *   linearly back (Bruneton 2017's ozone layer).
+ * - `tabulated`: given level by level ({@link TabulatedDensity}).
  */
 export type DensityProfile =
   | { readonly kind: "exponential"; readonly scaleHeightM: number }
@@ -36,7 +59,111 @@ export type DensityProfile =
       readonly bottomM: number;
       readonly peakM: number;
       readonly topM: number;
-    };
+    }
+  | TabulatedDensity;
+
+/**
+ * A tabulated density from its levels, checked.
+ *
+ * @remarks
+ * The arrays are kept, not copied; the caller does not change them afterwards.
+ *
+ * @throws RangeError for fewer than two levels, arrays of different lengths, heights that are not
+ *   finite and strictly ascending, or a relative density that is not finite and at least 0.
+ */
+export function tabulatedDensity(
+  altitudesM: Float64Array,
+  relative: Float64Array,
+): TabulatedDensity {
+  if (altitudesM.length < 2 || relative.length !== altitudesM.length) {
+    throw new RangeError(
+      `a tabulated density needs at least two levels and one density each, got ${altitudesM.length} heights and ${relative.length} densities`,
+    );
+  }
+  for (let i = 0; i < altitudesM.length; i += 1) {
+    const h = altitudesM[i] ?? Number.NaN;
+    const below = i === 0 ? Number.NEGATIVE_INFINITY : (altitudesM[i - 1] ?? Number.NaN);
+    if (!(Number.isFinite(h) && h > below)) {
+      throw new RangeError(`a tabulated density's heights ascend strictly: ${h} m at level ${i}`);
+    }
+    const d = relative[i] ?? Number.NaN;
+    if (!(Number.isFinite(d) && d >= 0)) {
+      throw new RangeError(`a tabulated density is finite and not negative: ${d} at level ${i}`);
+    }
+  }
+  return { kind: "tabulated", altitudesM, relative };
+}
+
+/**
+ * The index i of the level at or below h, with h in [altitudesM[0], last), by bisection:
+ * altitudesM[i] ≤ h < altitudesM[i + 1].
+ */
+function levelBelow(altitudesM: Float64Array, h: number): number {
+  let low = 0;
+  let high = altitudesM.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >>> 1;
+    if ((altitudesM[middle] ?? Number.NaN) <= h) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+/** Level i's interval at h, linear between its ends. */
+function withinLevel(profile: TabulatedDensity, i: number, h: number): number {
+  const h0 = profile.altitudesM[i] ?? Number.NaN;
+  const h1 = profile.altitudesM[i + 1] ?? Number.NaN;
+  const d0 = profile.relative[i] ?? Number.NaN;
+  const d1 = profile.relative[i + 1] ?? Number.NaN;
+  return d0 + ((d1 - d0) * (h - h0)) / (h1 - h0);
+}
+
+/** A tabulated density at h: linear between levels, constant beyond the first and the last. */
+function tabulatedAt(profile: TabulatedDensity, h: number): number {
+  const heights = profile.altitudesM;
+  const last = heights.length - 1;
+  if (h <= (heights[0] ?? Number.NaN)) {
+    return profile.relative[0] ?? Number.NaN;
+  }
+  if (h >= (heights[last] ?? Number.NaN)) {
+    return profile.relative[last] ?? Number.NaN;
+  }
+  return withinLevel(profile, levelBelow(heights, h), h);
+}
+
+/**
+ * A tabulated density's integral from the ground to `upToM`, m: the constant below the first
+ * level, the trapezoids of the levels, which are exact for the linear interpolant, and the
+ * constant above the last, each over the part of it below `upToM`.
+ */
+function tabulatedColumnM(profile: TabulatedDensity, upToM: number): number {
+  const heights = profile.altitudesM;
+  const last = heights.length - 1;
+  const top = Math.max(upToM, 0);
+  const first = heights[0] ?? Number.NaN;
+  const final = heights[last] ?? Number.NaN;
+  let length = 0;
+  if (first > 0) {
+    length += (profile.relative[0] ?? Number.NaN) * Math.min(top, first);
+  }
+  for (let i = 0; i < last; i += 1) {
+    const low = Math.max(heights[i] ?? Number.NaN, 0);
+    if (low >= top) {
+      break;
+    }
+    const high = Math.min(heights[i + 1] ?? Number.NaN, top);
+    if (high > low) {
+      length += 0.5 * (high - low) * (withinLevel(profile, i, low) + withinLevel(profile, i, high));
+    }
+  }
+  if (top > final) {
+    length += (profile.relative[last] ?? Number.NaN) * (top - Math.max(final, 0));
+  }
+  return length;
+}
 
 /**
  * A term's phase function.
@@ -100,6 +227,9 @@ export function densityAt(profile: DensityProfile, heightM: number): number {
         density = (profile.topM - h) / (profile.topM - profile.peakM);
       }
       break;
+    case "tabulated":
+      density = tabulatedAt(profile, h);
+      break;
   }
   return density;
 }
@@ -118,6 +248,9 @@ export function columnLengthM(profile: DensityProfile, topM: number): number {
       break;
     case "tent":
       length = tentColumnM(profile.bottomM, profile.peakM, profile.topM, topM);
+      break;
+    case "tabulated":
+      length = tabulatedColumnM(profile, topM);
       break;
   }
   return length;

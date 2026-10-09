@@ -90,6 +90,13 @@ function phaseOf(phase: PhaseFunction): readonly [number, number] {
   return packed;
 }
 
+/**
+ * A density profile as `common.wgsl`'s `densityOf` reads it: 0 exponential with its scale height,
+ * 1 tent with its three heights.
+ *
+ * @throws Error for a `tabulated` profile, which the uniform cannot carry and `densityOf` would read
+ *   as a tent; R08.T6.b gives it a table and a code of its own.
+ */
 function profileOf(profile: DensityProfile): readonly [number, number, number, number] {
   let packed: readonly [number, number, number, number];
   switch (profile.kind) {
@@ -99,6 +106,8 @@ function profileOf(profile: DensityProfile): readonly [number, number, number, n
     case "tent":
       packed = [1, profile.bottomM, profile.peakM, profile.topM];
       break;
+    case "tabulated":
+      throw new Error("a tabulated density has no Medium-uniform form until R08.T6.b");
   }
   return packed;
 }
@@ -108,7 +117,8 @@ function profileOf(profile: DensityProfile): readonly [number, number, number, n
  *
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
- * @throws Error when the medium has more than {@link MAX_TERMS} terms.
+ * @throws Error when the medium has more than {@link MAX_TERMS} terms, or a term with a
+ *   `tabulated` density, which the uniform cannot carry until R08.T6.b.
  */
 export function packMedium(
   medium: AtmosphereMedium,
@@ -201,7 +211,7 @@ export class AtmosphereTables {
    * Makes the tables and builds them for `medium`.
    *
    * @param bottomRadiusM - The ground's radius on the tables' sphere, m.
-   * @throws Error when the medium has more terms than {@link MAX_TERMS}.
+   * @throws Error as {@link packMedium}.
    */
   constructor(engine: RenderEngine, medium: AtmosphereMedium, bottomRadiusM: number) {
     this.#engine = engine;
@@ -235,8 +245,7 @@ export class AtmosphereTables {
    * Rebuilds the tables if `medium` or `bottomRadiusM` differs from what they were built for.
    *
    * @returns Whether they were rebuilt.
-   * @throws Error when the medium has more terms than {@link MAX_TERMS}; the tables keep what
-   * they held.
+   * @throws Error as {@link packMedium}; the tables keep what they held.
    */
   setMedium(medium: AtmosphereMedium, bottomRadiusM: number): boolean {
     const key = keyOf(medium, bottomRadiusM);

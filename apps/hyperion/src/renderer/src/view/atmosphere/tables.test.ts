@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
-import type { AtmosphereMedium } from "./medium";
+import { type AtmosphereMedium, tabulatedDensity } from "./medium";
 import {
   AtmosphereTables,
   MAX_TERMS,
@@ -114,6 +114,24 @@ describe("packMedium", () => {
       ),
     };
     expect(() => packMedium(tooMany, 1, 1)).toThrow(/at most 8/);
+  });
+
+  it("refuses a tabulated density, which the uniform cannot carry", () => {
+    const [first, ...rest] = EARTH_REFERENCE.terms;
+    if (first === undefined) {
+      throw new Error("EARTH_REFERENCE has no terms");
+    }
+    const tabulated: AtmosphereMedium = {
+      ...EARTH_REFERENCE,
+      terms: [
+        {
+          ...first,
+          density: tabulatedDensity(Float64Array.of(0, 10_000), Float64Array.of(1, 0.3)),
+        },
+        ...rest,
+      ],
+    };
+    expect(() => packMedium(tabulated, 1, 1)).toThrow(/tabulated/);
   });
 });
 

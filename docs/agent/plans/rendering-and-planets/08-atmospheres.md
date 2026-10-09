@@ -2469,6 +2469,104 @@ generator, and the reference's sampling needs no domain tag.
     puts the capture's rate "under 10⁻¹⁵ rad s⁻¹ for a lock more than a year off"; 2δΔ ÷ d² is
     bounded by 2π ÷ d, 2 × 10⁻⁷ rad s⁻¹ for a lock a year off.
 
+- **Deviations in T3.a, as built** (2026-10-09). `column.ts` and `column.test.ts`, and the
+  `tabulated` variant in `medium.ts`.
+  - _Names beyond the sketch._ The Provides names `ColumnInput` and `AtmosphereColumn` without
+    sketching them:
+    - `ColumnInput`: `surfacePa`, `temperature`, `meanMolarMassGPerMol`, `referenceGravityMS2` and
+      `referenceRadiusM`;
+    - `AtmosphereColumn`: `altitudesM`, `pressuresPa`, `temperaturesK`, `density`,
+      `surfaceNumberDensityPerM3`, `meanMolarMassGPerMol`, `referenceGravityMS2`,
+      `referenceRadiusM` and `topHeightM`, its `density` the `tabulated` n ÷ n_s over the same
+      `altitudesM`.
+
+    Added: `COLUMN_TOP_PRESSURE_RATIO` (10⁻⁷) and `COLUMN_INTERVALS` (1,024); the mixture as data,
+    `GasProperties` (`molarMassGPerMol`, `heatCapacityOverR`, `source`), `MixtureComponent`
+    (`properties`, `moleFraction`), `meanMolarMassGPerMol(mixture)`, `dryAdiabatExponent(mixture)`
+    (R ÷ c_p, mixed by c_p) and `MOLE_FRACTION_SUM_TOLERANCE` (10⁻⁹, for T3.c's refusal too);
+    `GAS_HEAT_CAPACITY` (a `HeatCapacity`, `overR` and `source`, per `Gas`) and
+    `gasProperties(gas)`. In `medium.ts`, the union's new member is named, `TabulatedDensity`, and
+    checked by `tabulatedDensity(altitudesM, relative)`. `lib/system/constants.ts` gains
+    `ATOMIC_MASS_CONSTANT_KG`, the sim's CODATA 2022 m_u.
+
+  - _The gases are T3.b's._ `Gas`, `BOLTZMANN_J_PER_K` and the molar masses
+    (`GAS_MOLAR_MASS_G_PER_MOL`) come from `rayleigh.ts` (`GASES` in the test only), one copy each
+    (main's ruling, 2026-10-09); `column.ts` holds only c_p ÷ R. Under the owner's directive of
+    2026-10-09 the column reads no list of gases: μ and R ÷ c_p come from any species given as
+    `GasProperties`.
+    `GAS_HEAT_CAPACITY` covers T3.b's thirteen: Ne, Kr and Xe at 5/2, exact for atoms, and N₂O at
+    CO₂'s 13/3 as the same linear triatomic, medium confidence (NIST-JANAF's c_p at 298 K is 7%
+    higher). _Closed set, for the composition audit:_ the table is keyed by `Gas`, so a gas joins
+    it with its c_p ÷ R when T3.b's list grows.
+  - _The integral in closed form._ Design note 3 integrates "from p_s upward … the local kT ÷ (μ m_u
+    g) at each step". The column takes the same equation's exact solution instead, with no step
+    error: the geopotential height Φ(p) = k ÷ (μ m_u g_ref) × ∫ T d ln p in closed form for both
+    profiles, and z = R_ref Φ ÷ (R_ref − Φ) for g = g_ref (R_ref ÷ r)², the inverse of the U.S.
+    Standard Atmosphere 1976's geopotential height. A test holds it to a fourth-order Runge–Kutta
+    integration of dz ÷ d ln p to 10⁻⁹, on Venus-, Saturn- and Titan-class columns, on a datum
+    below the profile's p_s, and on β = 0 and a skin warmer than the datum. A column whose Φ reaches
+    R_ref below its top, which no bound hydrostatic atmosphere has, is refused.
+  - _The levels:_ 1,025, evenly in ln p from the datum to p_s × 10⁻⁷, or 1,026 with the tropopause
+    added where it falls between. A tropopause within 10⁻³ of an interval of a level adds none
+    (`TROPOPAUSE_MERGE_FRACTION`, private), so that the heights stay strictly ascending. Linear
+    interpolation holds the density to 3.1 × 10⁻⁵ and its column to 2 × 10⁻⁵. T6.b resamples it
+    onto its square-root spacing.
+  - _Refusals._ `temperatureAt` throws `RangeError` for a pressure that is not finite and positive,
+    a profile temperature or p_s that is not, or a β that is negative or not finite;
+    `hydrostaticColumn` also for a p_s, μ, g_ref or R_ref that is not finite and positive.
+  - _The datum._ `ColumnInput.surfacePa` is the column's base. A `radiativeConvective` profile's
+    own `surfacePa` need not equal it (a gas envelope's 1-bar datum), and the column starts at
+    `temperatureAt(profile, surfacePa)`.
+  - _The `tabulated` rule_ is R08.T12.a's tracer's (`hyperion-fit`'s
+    `atmosphere::case::DensityProfile::Tabulated`, relayed by main), so that the client and the
+    reference read the same air: linear between levels and constant beyond the first and the last,
+    with the tracer's checks (at least two levels, finite and strictly ascending heights, finite
+    and non-negative densities). So a column holds its top level's density, about 10⁻⁷, above its
+    top, and a medium built on it takes a `topHeightM` no higher than the column's. `packMedium`
+    refuses a `tabulated` term, since `densityOf` would read it as a tent, and `tables.test.ts`
+    holds the refusal; R08.T6.b replaces both when it gives `tabulated` a code.
+  - _The tests' figures._
+    - Titan's tropopause from Design note 3's inputs is 0.2439 bar. The note's "0.24" is that figure
+      to two places, 1.6% off, so the test holds 0.244 to 1%. Design note 3's 0.24 is corrected to
+      0.244 here, for the next revision.
+    - Earth's "about 8.4 km" is 8,433.4 m at the datum (8,433.6 m over the first interval, as the
+      test reads it) at μ 28.97 and WGS 84's g_ref 9.8062, 1.3 × 10⁻⁴ from the U.S. Standard
+      Atmosphere's R\*T₀ ÷ (M₀g₀) = 8,434.5 m, held to 10⁻³.
+    - The Saturn-class column: 134 K at 1 bar and 96.3% H₂, 3.25% He and 4,500 ppm CH₄ (the NSSDCA
+      fact sheet), α = 0.85 (Robinson and Catling 2012's Jupiter), and a skin of 2^(−1/4) × 81.0 K.
+      Its mass at 0°, 45° and 90° is p_s ÷ g(φ) × 1.0014, its spherical excess (computed). The
+      plan's test asserts p_s ÷ g(φ) to 0.5%, which cannot tell g_ref from the bulk gravity on
+      Saturn (10.45 against 10.44 m s⁻²). An added test holds g(φ) times the column, at each of the
+      three, to g_ref times the reference column, ∫ (1 + z ÷ R_ref)² dp with z from the stepped
+      integration, to 10⁻⁴: a column built at the bulk gravity misses it by 1.2 × 10⁻³ (checked by
+      hand). The column takes the gravity it is given; R08.T10.a passes
+      `bodyGravity(…).referenceGravityMS2`.
+    - The thick case is a Titan-class isothermal column (94 K, 1.4 bar of N₂), 1.6% over p_s ÷ g.
+      It matches the exact isothermal integral to 10⁻⁴, and 1 + 2H ÷ R + 6(H ÷ R)².
+    - Venus's skin, which does not bind at 1 bar, is 2^(−1/4) × the NSSDCA's 226.6 K, and the
+      Venus-class column's radius and gravity the fact sheet's 6,051.8 km and 8.87 m s⁻².
+    - The Titan-class radius and gravity are 2,574.76 km (Archinal et al. 2018, as JPL SSD quotes
+      it) and GM ÷ R² with JPL's SAT441 GM, 1.3543 m s⁻².
+    - An added test holds every gas's R ÷ c_p within 7.5% of its NIST-JANAF value at 298.15 K
+      (Design note 3's "about 7%"; CH₄, NH₃ and N₂O are furthest, at 7.2–7.3%).
+  - _Design note 3's NIST list, corrected_ (the science check): NH₃'s R ÷ c_p at 298 K is 0.233
+    (NIST-JANAF's c_p of 35.652 J mol⁻¹ K⁻¹), not 0.237, which is 8.314 ÷ 35.06; N₂'s is 0.2855,
+    0.285 to three places. Its 1/4 stays, 7.2% from the measured value.
+  - _Not modelled_, as `column.ts` states: real-gas compressibility, which moves no column, only its
+    lowest scale height, 0.55% too dense for CO₂ at Venus's surface (Z = 1.0055, the NIST
+    Chemistry WebBook); and the level spheroid's free-air gradient by latitude (Heiskanen and Moritz
+    1967, §2-10, eq. 2-121), which on Saturn moves the column above the datum by at most 6 × 10⁻⁴,
+    at the equator.
+  - _For P14.T24.e_ (a finding, not built here): Design note 3's T_skin = 2^(−1/4) T_eq counts
+    sunlight alone. For a giant with internal heat the grey skin is 2^(−1/4) T_eff; Saturn's T_eq
+    of 81.0 K (the NSSDCA fact sheet) gives 68 K, its T_eff of about 95 K about 80 K, nearer the
+    84 K observed at 0.1 bar (the science check, from memory for T_eff). The test's Saturn-class
+    fixture follows the note.
+  - _Pending:_ the golden list of the sim's levels to 10⁻¹² waits on P14.T24.e, which builds
+    `planetary::temperature_at` (no `it.todo`: oxlint's `vitest/warn-todo` refuses one).
+  - The shared acceptance selects `column.test.ts`; `medium.test.ts` and `tables.test.ts`'s new
+    tests run under `pnpm test`.
+
 - **Plan 14 produces no CH₄, O₂ or giant composition** (Design note 16). Titan-class haze, ozone and
   giants are fixture-only until P14.T24.c, d and f land. Biotic O₂ has no owner.
 - **The stratosphere is provisional** (Design note 3). The skin is isothermal, with no ozone or

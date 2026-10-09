@@ -9,3 +9,11 @@
  * in CODATA 2022), by which the wire's kilograms and μ become masses and GM.
  */
 export const GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 = 6.674_3e-11;
+
+/**
+ * The atomic mass constant m_u, kg: the simulation's
+ * `hyperion_sim::planetary::derive::atmosphere::ATOMIC_MASS_CONSTANT_KG`, 1.660 539 068 92 × 10⁻²⁷
+ * (CODATA 2022), in which molecular masses are counted: a molecule of molar mass M g mol⁻¹ weighs
+ * M m_u.
+ */
+export const ATOMIC_MASS_CONSTANT_KG = 1.660_539_068_92e-27;

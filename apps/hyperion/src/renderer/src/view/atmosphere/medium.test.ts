@@ -7,11 +7,24 @@ import {
   densityAt,
   extinction,
   type MediumTerm,
+  tabulatedDensity,
   termNamed,
 } from "./medium";
 
 const TENT: DensityProfile = { kind: "tent", bottomM: 10_000, peakM: 25_000, topM: 40_000 };
 const EXP: DensityProfile = { kind: "exponential", scaleHeightM: 8_000 };
+/** A layer from the ground: 1, 0.5 at 1 km, 0.75 at 3 km, 0 at 4 km. */
+const TABLE: DensityProfile = tabulatedDensity(
+  Float64Array.of(0, 1_000, 3_000, 4_000),
+  Float64Array.of(1, 0.5, 0.75, 0),
+);
+/** A table whose last level is not 0, ending at 2 km. */
+const CUT: DensityProfile = tabulatedDensity(Float64Array.of(0, 2_000), Float64Array.of(1, 0.5));
+/** A layer above the ground: 0.2 from the ground to 1 km, rising to 0.6 at 3 km. */
+const RAISED: DensityProfile = tabulatedDensity(
+  Float64Array.of(1_000, 3_000),
+  Float64Array.of(0.2, 0.6),
+);
 
 /** The midpoint rule over [0, top] in 1 m steps. */
 function numericColumnM(profile: DensityProfile, topM: number): number {
@@ -34,6 +47,60 @@ describe("densityAt", () => {
     expect(densityAt(TENT, 25_000)).toBe(1);
     expect(densityAt(TENT, 17_500)).toBeCloseTo(0.5, 12);
     expect(densityAt(TENT, 32_500)).toBeCloseTo(0.5, 12);
+  });
+});
+
+describe("a tabulated density", () => {
+  it("takes each level's value", () => {
+    expect([0, 1_000, 3_000, 4_000].map((h) => densityAt(TABLE, h))).toEqual([1, 0.5, 0.75, 0]);
+  });
+
+  it.each([
+    [500, 0.75],
+    [2_000, 0.625],
+    [3_500, 0.375],
+  ])("is linear between levels: at %s m, %s", (heightM, expected) => {
+    expect(densityAt(TABLE, heightM)).toBeCloseTo(expected, 12);
+  });
+
+  it("is the first level's below it, as R08.T12.a's tracer reads it", () => {
+    expect([densityAt(TABLE, -10), densityAt(RAISED, 0), densityAt(RAISED, 500)]).toEqual([
+      1, 0.2, 0.2,
+    ]);
+  });
+
+  it("is the last level's above it, as R08.T12.a's tracer reads it", () => {
+    expect([densityAt(CUT, 2_000), densityAt(CUT, 9_000)]).toEqual([0.5, 0.5]);
+  });
+
+  it.each<[string, DensityProfile, number, number]>([
+    ["every level", TABLE, 10_000, 750 + 1_250 + 375],
+    ["part of a level", TABLE, 2_000, 750 + 562.5],
+    ["the last level's value above it", CUT, 5_000, 1_500 + 0.5 * 3_000],
+    ["the first level's value below it", RAISED, 2_000, 200 + 300],
+    ["nothing at the ground", TABLE, 0, 0],
+  ])("integrates %s", (_, profile, topM, expected) => {
+    expect(columnLengthM(profile, topM)).toBeCloseTo(expected, 9);
+  });
+
+  it.each<[string, DensityProfile]>([
+    ["a layer from the ground", TABLE],
+    ["a table cut short", CUT],
+    ["a layer above the ground", RAISED],
+  ])("agrees with a numerical integral of %s at partial heights", (_, profile) => {
+    for (const top of [700, 2_500, 3_900, 6_000]) {
+      expect(columnLengthM(profile, top)).toBeCloseTo(numericColumnM(profile, top), 6);
+    }
+  });
+
+  it.each<[string, Float64Array, Float64Array]>([
+    ["one level", Float64Array.of(0), Float64Array.of(1)],
+    ["more heights than densities", Float64Array.of(0, 1, 2), Float64Array.of(1, 0.5)],
+    ["heights that do not ascend", Float64Array.of(0, 0), Float64Array.of(1, 0.5)],
+    ["a height that is not a number", Float64Array.of(0, Number.NaN), Float64Array.of(1, 0.5)],
+    ["a negative density", Float64Array.of(0, 1), Float64Array.of(1, -0.1)],
+  ])("refuses %s", (_, altitudesM, relative) => {
+    expect(() => tabulatedDensity(altitudesM, relative)).toThrow(RangeError);
   });
 });
 
