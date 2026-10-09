@@ -9,6 +9,10 @@
 //! hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out DIR] [--max-parts N]
 //!                                        # the displaced form table's orbit run (P15.T6.b),
 //!                                        # resumable from DIR/parts (ruling 120.4)
+//! hyperion-fit atmosphere-reference <case.json> --out <reference.json> [--samples N]
+//!                                   [--threads N] [--stokes]
+//!                                        # an atmosphere case's reference radiances (plan R08,
+//!                                        # R08.T12.a), not a fit: outside `tables.lock`
 //! ```
 //!
 //! `run` writes into the sim's `tables/` unless `--out` says otherwise, and then needs `--since`
@@ -18,14 +22,16 @@
 //! dataset kept outside the cache.
 
 use std::io::Write;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
+use std::time::Instant;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::tables::MANIFEST;
 
 use crate::RunFitError;
+use crate::atmosphere::{AtmosphereCase, Polarisation, trace_reference};
 use crate::check::{CheckInputs, Rerun, check};
 use crate::emit::{Destination, Workspace, write_table};
 use crate::manifest::Manifest;
@@ -104,7 +110,35 @@ pub enum Command {
         #[arg(long)]
         max_parts: Option<u64>,
     },
+    /// Trace an atmosphere case's reference radiances (plan R08, R08.T12.a) and write them as
+    /// JSON.
+    ///
+    /// Not a fit: its output is a client fixture, outside `tables.lock`.
+    AtmosphereReference(AtmosphereReferenceArgs),
 }
+
+/// `atmosphere-reference`'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AtmosphereReferenceArgs {
+    /// The case, JSON in the format of `atmosphere::case`.
+    pub case: PathBuf,
+    /// Where to write the reference.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Samples per geometry, aggregate and wavelength.
+    #[arg(long, default_value_t = DEFAULT_REFERENCE_SAMPLES)]
+    pub samples: NonZeroU64,
+    /// Threads for the run; the output is the same for any number.
+    #[arg(long)]
+    pub threads: Option<NonZeroUsize>,
+    /// Trace the Stokes vector: Rayleigh, isotropic and absorbing terms only.
+    #[arg(long)]
+    pub stokes: bool,
+}
+
+/// `atmosphere-reference`'s samples per geometry, aggregate and wavelength unless `--samples`
+/// says otherwise.
+const DEFAULT_REFERENCE_SAMPLES: NonZeroU64 = NonZeroU64::new(100_000).expect("not zero");
 
 /// The threads to use: `threads`, or every core the machine offers.
 fn threads_or_all(threads: Option<NonZeroUsize>) -> NonZeroUsize {
@@ -122,6 +156,9 @@ fn find(name: &str) -> Result<&'static dyn FitTask, RunFitError> {
 ///
 /// [`RunFitError::UnknownTask`] for a task that is not registered; the task's, the emitter's and
 /// the manifest's errors from `run`; [`RunFitError::Check`] if `check` finds a stale table;
+/// [`RunFitError::AtmosphereCase`] if `atmosphere-reference`'s case cannot be read,
+/// [`RunFitError::AtmosphereReference`] if it cannot be traced and
+/// [`RunFitError::WriteReference`] if its reference cannot be written;
 /// [`RunFitError::Output`] if `out` cannot be written.
 pub fn run(cli: &Cli, out: &mut dyn Write) -> Result<(), RunFitError> {
     run_in(cli, &Workspace::repository(), out)
@@ -212,6 +249,7 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
             },
             out,
         ),
+        Command::AtmosphereReference(args) => atmosphere_reference(args, out),
         Command::Fingerprint { task } => {
             let task = find(task)?;
             let fingerprint = task.fingerprint();
@@ -287,6 +325,40 @@ fn orbits(
         file.display(),
         records.len(),
         displaced_forms::sha256_hex(text.as_bytes())
+    )?;
+    Ok(())
+}
+
+/// `atmosphere-reference`: traces the case and writes its reference, printing what it traced and
+/// how long it took.
+fn atmosphere_reference(
+    args: &AtmosphereReferenceArgs,
+    out: &mut dyn Write,
+) -> Result<(), RunFitError> {
+    let case = AtmosphereCase::read(&args.case)?;
+    let polarisation = if args.stokes {
+        Polarisation::Stokes
+    } else {
+        Polarisation::Scalar
+    };
+    let (samples, threads) = (args.samples, threads_or_all(args.threads));
+    let start = Instant::now();
+    let reference = trace_reference(&case, polarisation, samples, threads)?;
+    let seconds = start.elapsed().as_secs_f64();
+    std::fs::write(&args.out, reference.to_json()).map_err(|source| {
+        RunFitError::WriteReference {
+            path: args.out.clone(),
+            source,
+        }
+    })?;
+    writeln!(
+        out,
+        "wrote {} ({} geometries and {} aggregates at {} wavelengths, {samples} samples each, \
+         {threads} threads, {seconds:.1} s)",
+        args.out.display(),
+        case.geometry_count(),
+        case.aggregate_count(),
+        case.wavelengths_nm().len(),
     )?;
     Ok(())
 }
@@ -421,6 +493,133 @@ mod tests {
         assert!(parse(&["fit", "mge"]).is_err());
         assert!(parse(&["run"]).is_err());
         assert!(parse(&["run", "mge", "--threads", "0"]).is_err());
+    }
+
+    #[test]
+    fn atmosphere_reference_parses() {
+        assert_eq!(
+            parse(&[
+                "atmosphere-reference",
+                "earth.case.json",
+                "--out",
+                "earth.reference.json",
+                "--samples",
+                "500",
+                "--threads",
+                "2",
+                "--stokes"
+            ])
+            .unwrap()
+            .command,
+            Command::AtmosphereReference(AtmosphereReferenceArgs {
+                case: "earth.case.json".into(),
+                out: "earth.reference.json".into(),
+                samples: NonZeroU64::new(500).unwrap(),
+                threads: NonZeroUsize::new(2),
+                stokes: true,
+            })
+        );
+        assert_eq!(
+            parse(&["atmosphere-reference", "earth.case.json"])
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+        assert_eq!(
+            parse(&[
+                "atmosphere-reference",
+                "a.json",
+                "--out",
+                "b.json",
+                "--samples",
+                "0"
+            ])
+            .unwrap_err()
+            .kind(),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn atmosphere_reference_writes_its_reference_and_names_its_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let case_path = dir.path().join("sample.case.json");
+        let out_path = dir.path().join("sample.reference.json");
+        let case = crate::atmosphere::case::tests::sample_case();
+        std::fs::write(&case_path, case.to_string()).unwrap();
+        let path = |p: &std::path::Path| p.to_str().unwrap().to_owned();
+        let args = [
+            "atmosphere-reference".to_owned(),
+            path(&case_path),
+            "--out".to_owned(),
+            path(&out_path),
+            "--samples".to_owned(),
+            "64".to_owned(),
+            "--threads".to_owned(),
+            "2".to_owned(),
+        ];
+        let cli =
+            Cli::try_parse_from(std::iter::once("hyperion-fit".to_owned()).chain(args)).unwrap();
+        let mut out = Vec::new();
+        run(&cli, &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("2 geometries and 1 aggregates at 2 wavelengths, 64 samples"),
+            "{text}"
+        );
+        let written = std::fs::read_to_string(&out_path).unwrap();
+        let reference: crate::atmosphere::ReferenceRadiances =
+            serde_json::from_str(&written).unwrap();
+        assert_eq!(reference.case(), "sample");
+        assert_eq!(reference.geometries().len(), 2);
+        assert_eq!(reference.to_json(), written);
+
+        // The Stokes mode of a case with an aerosol is a bad command line; a missing case is not.
+        let stokes = Cli::try_parse_from([
+            "hyperion-fit",
+            "atmosphere-reference",
+            case_path.to_str().unwrap(),
+            "--out",
+            out_path.to_str().unwrap(),
+            "--stokes",
+        ])
+        .unwrap();
+        let error = run(&stokes, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 2);
+        match error {
+            RunFitError::AtmosphereReference(
+                crate::atmosphere::TraceReferenceError::StokesNeedsRayleigh { term },
+            ) => assert_eq!(term, "aerosol"),
+            other => panic!("{other:?}"),
+        }
+        let missing = parse(&["atmosphere-reference", "missing.json", "--out", "x.json"]).unwrap();
+        let error = run(&missing, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            matches!(
+                error,
+                RunFitError::AtmosphereCase(crate::atmosphere::ReadCaseError::Read { .. })
+            ),
+            "{error:?}"
+        );
+        // A reference that cannot be written names its path.
+        let nowhere = dir.path().join("missing-directory").join("out.json");
+        let unwritable = Cli::try_parse_from([
+            "hyperion-fit",
+            "atmosphere-reference",
+            case_path.to_str().unwrap(),
+            "--out",
+            nowhere.to_str().unwrap(),
+            "--samples",
+            "2",
+        ])
+        .unwrap();
+        let error = run(&unwritable, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        match error {
+            RunFitError::WriteReference { path, .. } => assert_eq!(path, nowhere),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

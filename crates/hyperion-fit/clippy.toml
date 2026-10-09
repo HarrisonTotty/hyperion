@@ -3,7 +3,7 @@
 # on every platform, so every transcendental goes through `hyperion_sim::math` here too.
 
 # Journal names and authors in citations, as the sim's `clippy.toml` has them.
-doc-valid-idents = ["McKee", "ApJ", "ApJS", ".."]
+doc-valid-idents = ["McKee", "LeVeque", "ApJ", "ApJS", ".."]
 
 # Every transcendental function goes through `hyperion_sim::math` (`hyperion_base::math`), which
 # wraps the exactly pinned `libm`. The platform's own versions differ between operating systems and

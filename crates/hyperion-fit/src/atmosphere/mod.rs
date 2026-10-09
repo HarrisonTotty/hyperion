@@ -1,0 +1,873 @@
+//! The offline reference for the client's atmospheres: a backward Monte Carlo path tracer in
+//! `f64` over spherical shells, with no tables (plan R08, R08.T12.a; Design note 10).
+//!
+//! The client draws its atmospheres from Hillaire 2020's tables and, where his analytic multiple
+//! scattering drifts, from a bake by discrete ordinates (R08 Design notes 9 and 10). Every one of
+//! those tables is gated against this tracer to 5% on a stated metric. It is a different language
+//! and a different algorithm from the client's, so that the two stay independent.
+//!
+//! This is a new kind of output for the crate: not a fitted table for the sim, but JSON fixtures
+//! for the client. `hyperion-fit atmosphere-reference` traces a case ([`AtmosphereCase`], written
+//! by the client's optics) into its reference ([`ReferenceRadiances`]); it is not a
+//! [`FitTask`](crate::task::FitTask), so `tables.lock` and `just fit-check` do not cover its
+//! output, and its runs are by hand, their outputs committed beside the cases (R08.T12.b).
+//!
+//! - [`case`]: the case format and its validation;
+//! - [`transport`]: the estimator (absorption as a weight, delta tracking, a forced first
+//!   collision, next-event estimation to every sun, a Lambertian ground, Russian roulette and the
+//!   Stokes mode);
+//! - [`optics`]: profiles, phase functions and the Rayleigh scattering matrix;
+//! - [`geometry`]: frames and the shells;
+//! - [`reference`]: the output and its moments.
+//!
+//! **Reproducible for any thread count**, by the crate's convention: the samples of each geometry,
+//! aggregate and wavelength are cut into blocks of [`BLOCK_SAMPLES`] mapped by
+//! [`parallel::map_reduce_chunks`](crate::parallel::map_reduce_chunks), and every sample draws from
+//! its own counter-based stream ([`Draws`](crate::tasks::displaced_forms::births::Draws), as the
+//! displaced forms' orbits draw), so that a sample is a pure function of its key and the blocks'
+//! moments are merged in index order. A sample's key is the case's seed salted with
+//! [`ATMOSPHERE_STREAM`], its wavelength and its geometry or aggregate by their own indices (so
+//! that adding a geometry leaves the others' draws alone), and its number. Every transcendental
+//! goes through [`hyperion_sim::math`]. Nothing here is generated output: no domain tag and no
+//! generator version is involved (R08's Generator version).
+
+pub mod case;
+mod geometry;
+mod optics;
+pub mod reference;
+mod transport;
+
+use std::num::{NonZeroU64, NonZeroUsize};
+
+use serde::{Deserialize, Serialize};
+
+pub use case::{AtmosphereCase, ReadCaseError, Shells};
+pub use reference::{FluxAggregate, GeometryRadiance, ReferenceRadiances, StokesRadiance};
+
+use geometry::ShellGrid;
+use reference::{Moments, REFERENCE_FORMAT};
+use transport::{Level, Medium, Scratch, Source};
+
+use crate::parallel::{BuildThreadPoolError, map_reduce_chunks};
+use crate::tasks::displaced_forms::births::Draws;
+
+/// The samples of one geometry, aggregate and wavelength that one map step traces.
+pub const BLOCK_SAMPLES: u64 = 1024;
+
+/// The most samples a geometry, aggregate and wavelength may take: 2⁵³, below which every count
+/// is an exact `f64`.
+pub const MAX_SAMPLES: u64 = 1 << 53;
+
+/// Mixed into the case's seed by exclusive or, so that the tracer's draws are its own and not
+/// those of the displaced forms' orbits, which use the same generator: `atmosphe` in ASCII.
+pub const ATMOSPHERE_STREAM: u64 = 0x6174_6d6f_7370_6865;
+
+/// Whether the tracer follows the radiance alone or the Stokes vector.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Polarisation {
+    /// The radiance alone, as the client draws it.
+    #[default]
+    Scalar,
+    /// The Stokes vector (I, Q, U), for the Rayleigh benchmarks, whose tables are vector: only
+    /// Rayleigh, isotropic and absorbing terms (R08 Design note 10).
+    Stokes,
+}
+
+/// A reference could not be traced.
+#[derive(Debug, thiserror::Error)]
+pub enum TraceReferenceError {
+    /// The Stokes mode was asked of a case with a term it has no scattering matrix for.
+    #[error(
+        "the Stokes mode traces Rayleigh, isotropic and absorbing terms only, and term `{term}` is \
+         none of them"
+    )]
+    StokesNeedsRayleigh {
+        /// The term.
+        term: String,
+    },
+    /// More samples than the tracer counts exactly.
+    #[error("{samples} samples are more than the tracer counts exactly, 2^53")]
+    TooManySamples {
+        /// The samples asked for.
+        samples: u64,
+    },
+    /// The thread pool could not be built.
+    #[error(transparent)]
+    ThreadPool(#[from] BuildThreadPoolError),
+}
+
+/// The case's shells: split at every kink of a term's profile and every scale height of an
+/// exponential one.
+fn shell_grid(case: &AtmosphereCase) -> ShellGrid {
+    let mut heights_m = Vec::new();
+    for term in case.terms() {
+        term.density
+            .shell_heights(case.top_height_m(), &mut heights_m);
+    }
+    ShellGrid::new(case.ground_radius_m(), case.top_height_m(), heights_m)
+}
+
+/// `n` as a `u64`.
+fn wide(n: usize) -> u64 {
+    u64::try_from(n).expect("a usize fits in 64 bits on every platform HYPERION builds for")
+}
+
+/// Traces `case`'s reference radiances: `samples` samples per geometry, aggregate and wavelength,
+/// on `threads` threads, with or without the Stokes vector.
+///
+/// The output is the same, bit for bit, for any number of threads.
+///
+/// # Errors
+///
+/// [`TraceReferenceError::StokesNeedsRayleigh`] for the Stokes mode on a case with a
+/// Cornette–Shanks term; [`TraceReferenceError::TooManySamples`] past [`MAX_SAMPLES`];
+/// [`TraceReferenceError::ThreadPool`] if the threads cannot be started.
+///
+/// # Panics
+///
+/// If a traced value is not finite, which would be a bug in the tracer: `serde_json` would write
+/// it as `null`.
+pub fn trace_reference(
+    case: &AtmosphereCase,
+    polarisation: Polarisation,
+    samples: NonZeroU64,
+    threads: NonZeroUsize,
+) -> Result<ReferenceRadiances, TraceReferenceError> {
+    if polarisation == Polarisation::Stokes
+        && let Some(term) = case.terms().iter().find(|t| !t.phase.has_matrix())
+    {
+        return Err(TraceReferenceError::StokesNeedsRayleigh {
+            term: term.name.clone(),
+        });
+    }
+    if samples.get() > MAX_SAMPLES {
+        return Err(TraceReferenceError::TooManySamples {
+            samples: samples.get(),
+        });
+    }
+    let grid = shell_grid(case);
+    let media: Vec<Medium<'_>> = (0..case.wavelengths_nm().len())
+        .map(|w| Medium::new(case, &grid, w))
+        .collect();
+    // Each source with its key: its kind (0 a geometry, 1 an aggregate's ground, 2 its top) above
+    // its index within the kind, which the case keeps below 2³².
+    let mut sources: Vec<(u64, Source)> = case
+        .geometries()
+        .iter()
+        .enumerate()
+        .map(|(g, geometry)| (wide(g), Source::detector(case, geometry)))
+        .collect();
+    for (a, aggregate) in case.aggregates().iter().enumerate() {
+        sources.push((
+            (1 << 32) | wide(a),
+            Source::flux(case, aggregate, Level::Ground),
+        ));
+        sources.push((
+            (2 << 32) | wide(a),
+            Source::flux(case, aggregate, Level::Top),
+        ));
+    }
+    let moments = trace_moments(
+        case.seed(),
+        &media,
+        &sources,
+        polarisation,
+        samples.get(),
+        threads,
+    )?;
+    let run = Run {
+        case,
+        media: &media,
+        sources: &sources,
+        moments,
+    };
+    Ok(ReferenceRadiances {
+        format: REFERENCE_FORMAT,
+        case: case.name().to_owned(),
+        polarisation,
+        samples: samples.get(),
+        seed: case.seed(),
+        wavelengths_nm: case.wavelengths_nm().to_vec(),
+        geometries: (0..case.geometry_count())
+            .map(|g| run.geometry(g, polarisation))
+            .collect(),
+        aggregates: (0..case.aggregate_count())
+            .map(|a| run.aggregate(a))
+            .collect(),
+    })
+}
+
+/// Traces `samples` samples of every source at every wavelength: the moments of (I, Q, U) per
+/// task, wavelength-major.
+fn trace_moments(
+    seed: u64,
+    media: &[Medium<'_>],
+    sources: &[(u64, Source)],
+    polarisation: Polarisation,
+    samples: u64,
+    threads: NonZeroUsize,
+) -> Result<Vec<[Moments; 3]>, TraceReferenceError> {
+    let per_wavelength = sources.len();
+    let tasks = media.len() * per_wavelength;
+    let blocks = samples.div_ceil(BLOCK_SAMPLES);
+    let items = wide(tasks)
+        .checked_mul(blocks)
+        .ok_or(TraceReferenceError::TooManySamples { samples })?;
+    let seed = seed ^ ATMOSPHERE_STREAM;
+    let mut moments = vec![[Moments::default(); 3]; tasks];
+    map_reduce_chunks(
+        items,
+        1,
+        threads,
+        |range| {
+            let mut scratch = Scratch::default();
+            range
+                .map(|item| {
+                    let (task, block) = (item / blocks, item % blocks);
+                    let index =
+                        usize::try_from(task).expect("a task's index is below `tasks`, a usize");
+                    let wavelength = index / per_wavelength;
+                    let (key, source) = &sources[index % per_wavelength];
+                    // The case keeps its wavelengths below 2¹⁶ and its sources' keys below 2³⁴.
+                    let stream = (wide(wavelength) << 34) | key;
+                    let mut block_moments = [Moments::default(); 3];
+                    let end = ((block + 1) * BLOCK_SAMPLES).min(samples);
+                    for sample in block * BLOCK_SAMPLES..end {
+                        let mut draws = Draws::new(seed, stream, sample);
+                        let stokes = media[wavelength].sample(
+                            source,
+                            polarisation,
+                            &mut draws,
+                            &mut scratch,
+                        );
+                        for (m, x) in block_moments.iter_mut().zip(stokes) {
+                            m.push(x);
+                        }
+                    }
+                    (index, block_moments)
+                })
+                .collect::<Vec<_>>()
+        },
+        |results| {
+            for (index, block_moments) in results {
+                for (total, part) in moments[index].iter_mut().zip(&block_moments) {
+                    total.merge(part);
+                }
+            }
+        },
+    )?;
+    Ok(moments)
+}
+
+/// A traced case: its media per wavelength, its sources (the geometries' detectors, then each
+/// aggregate's ground and top) and the moments of each task, wavelength-major.
+struct Run<'a> {
+    case: &'a AtmosphereCase,
+    media: &'a [Medium<'a>],
+    sources: &'a [(u64, Source)],
+    moments: Vec<[Moments; 3]>,
+}
+
+/// `values`, after checking that each is finite.
+///
+/// # Panics
+///
+/// If one is not: a bug in the tracer.
+fn finite(values: Vec<f64>) -> Vec<f64> {
+    assert!(
+        values.iter().all(|x| x.is_finite()),
+        "the tracer produced a value that is not finite: {values:?}"
+    );
+    values
+}
+
+impl Run<'_> {
+    /// Statistic `f` of Stokes component `component` of source `source`, per wavelength.
+    fn column(&self, source: usize, component: usize, f: fn(&Moments) -> f64) -> Vec<f64> {
+        let per_wavelength = self.sources.len();
+        finite(
+            (0..self.media.len())
+                .map(|w| f(&self.moments[w * per_wavelength + source][component]))
+                .collect(),
+        )
+    }
+
+    /// Geometry `g`'s radiances.
+    fn geometry(&self, g: usize, polarisation: Polarisation) -> GeometryRadiance {
+        let geometry = &self.case.geometries()[g];
+        let source = &self.sources[g].1;
+        GeometryRadiance {
+            name: geometry.name.clone(),
+            detector_half_angle_deg: self.case.detector_half_angle_deg(geometry),
+            radiance: self.column(g, 0, Moments::mean),
+            standard_error: self.column(g, 0, Moments::standard_error),
+            stokes: (polarisation == Polarisation::Stokes).then(|| StokesRadiance {
+                q: self.column(g, 1, Moments::mean),
+                q_standard_error: self.column(g, 1, Moments::standard_error),
+                u: self.column(g, 2, Moments::mean),
+                u_standard_error: self.column(g, 2, Moments::standard_error),
+            }),
+            sun_optical_depth: source
+                .suns
+                .iter()
+                .map(|&sun| {
+                    self.media
+                        .iter()
+                        .map(|m| m.optical_depth_to_space(source.origin_m, sun))
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    /// Aggregate `a`'s fluxes.
+    fn aggregate(&self, a: usize) -> FluxAggregate {
+        let ground = self.case.geometry_count() + 2 * a;
+        let top = ground + 1;
+        let source = &self.sources[ground].1;
+        let up = source.origin_m.normalised();
+        // Each sun above the horizon's μ₀F, with the transmittance of its beam to the ground.
+        let beams = |w: usize| {
+            source
+                .suns
+                .iter()
+                .zip(self.case.suns())
+                .filter(|(sun, _)| up.dot(**sun) > 0.0)
+                .map(move |(&sun, spectrum)| {
+                    let transmittance = self.media[w]
+                        .optical_depth_to_space(source.origin_m, sun)
+                        .map_or(0.0, |depth| hyperion_sim::math::exp(-depth));
+                    (up.dot(sun) * spectrum.irradiance[w], transmittance)
+                })
+        };
+        let incident = |w: usize| beams(w).map(|(flux, _)| flux).sum();
+        let direct = |w: usize| beams(w).map(|(flux, t)| flux * t).sum();
+        let wavelengths = 0..self.media.len();
+        FluxAggregate {
+            name: self.case.aggregates()[a].name.clone(),
+            incident_top: finite(wavelengths.clone().map(incident).collect()),
+            direct_ground: finite(wavelengths.map(direct).collect()),
+            diffuse_ground: self.column(ground, 0, Moments::mean),
+            diffuse_ground_standard_error: self.column(ground, 0, Moments::standard_error),
+            upwelling_top: self.column(top, 0, Moments::mean),
+            upwelling_top_standard_error: self.column(top, 0, Moments::standard_error),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::f64::consts::PI;
+
+    use hyperion_sim::math;
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    fn case_of(value: &Value) -> AtmosphereCase {
+        AtmosphereCase::from_json(&value.to_string()).unwrap()
+    }
+
+    fn trace(
+        value: &Value,
+        polarisation: Polarisation,
+        samples: u64,
+        threads: usize,
+    ) -> ReferenceRadiances {
+        trace_reference(
+            &case_of(value),
+            polarisation,
+            NonZeroU64::new(samples).unwrap(),
+            NonZeroUsize::new(threads).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn radians(degrees: f64) -> f64 {
+        degrees.to_radians()
+    }
+
+    /// A geometry's JSON.
+    fn geometry(name: &str, height_m: f64, view: (f64, f64), sun: (f64, f64)) -> Value {
+        json!({
+            "name": name,
+            "observer": { "heightM": height_m },
+            "view": { "zenithDeg": view.0, "azimuthDeg": view.1 },
+            "sunDirections": [{ "zenithDeg": sun.0, "azimuthDeg": sun.1 }]
+        })
+    }
+
+    /// A plane-parallel slab, 1 km of uniform medium over a ground of radius 10¹² m, where the
+    /// sphere's curvature moves nothing at the precision tested.
+    fn slab(terms: &Value, albedo: &Value, geometries: &Value) -> Value {
+        json!({
+            "format": 1,
+            "name": "slab",
+            "wavelengthsNm": [550, 440],
+            "shells": { "kind": "sphere", "radiusM": 1e12 },
+            "topHeightM": 1000.0,
+            "groundAlbedo": albedo,
+            "terms": terms,
+            "suns": [{ "name": "sun", "irradiance": [PI, 2.0] }],
+            "detectorHalfAngleDeg": 0.0,
+            "geometries": geometries
+        })
+    }
+
+    fn uniform() -> Value {
+        json!({ "kind": "tabulated", "altitudesM": [0.0, 1000.0], "relative": [1.0, 1.0] })
+    }
+
+    #[test]
+    fn atmosphere_absorbing_only_medium_gives_beer_lambert() {
+        let (radius, top, height, sigma) = (6_371_000.0, 100_000.0, 8000.0, [1e-5, 3e-5]);
+        let (albedo, irradiance) = ([0.3, 0.6], [1.7, 2.0]);
+        let exponential = json!({ "kind": "exponential", "scaleHeightM": height });
+        let shell =
+            json!({ "kind": "tabulated", "altitudesM": [0.0, top], "relative": [1.0, 1.0] });
+        let sun_zenith = 60.0;
+        let case = |density: &Value, sun: f64| {
+            json!({
+                "format": 1, "name": "absorbing",
+                "wavelengthsNm": [550, 440],
+                "shells": { "kind": "sphere", "radiusM": radius },
+                "topHeightM": top,
+                "groundAlbedo": albedo,
+                "terms": [{
+                    "name": "absorber", "density": density,
+                    "scattering": [0.0, 0.0], "absorption": sigma, "phase": { "kind": "none" }
+                }],
+                "suns": [{ "name": "sun", "irradiance": irradiance }],
+                "detectorHalfAngleDeg": 0.0,
+                "geometries": [
+                    geometry("nadir", 400_000.0, (180.0, 0.0), (sun, 0.0)),
+                    geometry("ground", 0.0, (0.0, 0.0), (sun, 0.0))
+                ]
+            })
+        };
+        // The exponential column, vertical: τ = σH(1 − e^(−top ÷ H)).
+        let vertical = trace(&case(&exponential, 0.0), Polarisation::Scalar, 64, 2);
+        // A uniform shell, the sun at 60°: τ = σ × the chord from the ground to the top.
+        let slant = trace(&case(&shell, sun_zenith), Polarisation::Scalar, 64, 2);
+        let mu0 = math::cos(radians(sun_zenith));
+        let chord =
+            -radius * mu0 + (radius * radius * mu0 * mu0 + top * (2.0 * radius + top)).sqrt();
+        for w in 0..2 {
+            let tau = sigma[w] * height * -math::exp_m1(-top / height);
+            let reflected = albedo[w] / PI * irradiance[w];
+            let expected = [
+                (&vertical, reflected * math::exp(-2.0 * tau), tau),
+                (
+                    &slant,
+                    reflected * mu0 * math::exp(-sigma[w] * (top + chord)),
+                    sigma[w] * chord,
+                ),
+            ];
+            for (reference, radiance, sun_depth) in expected {
+                let [nadir, ground] = reference.geometries() else {
+                    panic!("two geometries")
+                };
+                assert!(
+                    (nadir.radiance()[w] / radiance - 1.0).abs() < 1e-9,
+                    "{}: {} against {radiance}",
+                    reference.case(),
+                    nadir.radiance()[w]
+                );
+                assert!(nadir.standard_error()[w] < 1e-12 * radiance);
+                assert!(ground.radiance()[w].abs() < f64::MIN_POSITIVE);
+                let depth = ground.sun_optical_depth()[0][w].unwrap();
+                assert!(
+                    (depth / sun_depth - 1.0).abs() < 1e-9,
+                    "{depth} against {sun_depth}"
+                );
+                assert!(nadir.sun_optical_depth()[0][w].unwrap().abs() < f64::MIN_POSITIVE);
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_reference_is_the_same_for_one_and_four_threads() {
+        let case = case::tests::sample_case();
+        let one = trace(&case, Polarisation::Scalar, 1500, 1).to_json();
+        let four = trace(&case, Polarisation::Scalar, 1500, 4).to_json();
+        assert_eq!(one, four);
+        let mut rayleigh = case;
+        rayleigh["terms"][1]["phase"] = json!({ "kind": "isotropic" });
+        let one = trace(&rayleigh, Polarisation::Stokes, 1500, 1).to_json();
+        let four = trace(&rayleigh, Polarisation::Stokes, 1500, 4).to_json();
+        assert_eq!(one, four);
+        assert!(one.contains("\"stokes\""));
+    }
+
+    #[test]
+    fn atmosphere_reference_bits_are_pinned() {
+        // Two of the sample case's values to the last bit, so that a change to the estimator,
+        // its draws or `births::Draws` shows here before it moves every committed reference
+        // (R08.T12.b). A deliberate change updates both, and the references are traced again.
+        let reference = trace(&case::tests::sample_case(), Polarisation::Scalar, 64, 1);
+        let pinned = [
+            format!("{:?}", reference.geometries()[0].radiance()[0]),
+            format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
+        ];
+        assert_eq!(pinned, ["0.039731668489903935", "0.5324772871217555"]);
+    }
+
+    #[test]
+    fn atmosphere_adding_a_geometry_leaves_the_others_draws_alone() {
+        let case = case::tests::sample_case();
+        let mut more = case.clone();
+        more["geometries"].as_array_mut().unwrap().push(geometry(
+            "extra",
+            0.0,
+            (10.0, 0.0),
+            (20.0, 0.0),
+        ));
+        let (before, after) = (
+            trace(&case, Polarisation::Scalar, 300, 2),
+            trace(&more, Polarisation::Scalar, 300, 2),
+        );
+        // Compared as JSON, which prints every bit.
+        let json = |value: &[GeometryRadiance]| serde_json::to_string(value).unwrap();
+        assert_eq!(json(before.geometries()), json(&after.geometries()[..2]));
+        let json = |value: &[FluxAggregate]| serde_json::to_string(value).unwrap();
+        assert_eq!(json(before.aggregates()), json(after.aggregates()));
+    }
+
+    #[test]
+    fn atmosphere_two_suns_add() {
+        // The draws do not depend on the suns' irradiance, so the paths are the same and the
+        // radiances and fluxes add to rounding.
+        let mut both = case::tests::sample_case();
+        both["suns"] = json!([
+            { "name": "a", "irradiance": [1.86, 1.95] },
+            { "name": "b", "irradiance": [0.4, 0.2] }
+        ]);
+        let second = json!({ "zenithDeg": 70.0, "azimuthDeg": 120.0 });
+        for g in 0..2 {
+            both["geometries"][g]["sunDirections"]
+                .as_array_mut()
+                .unwrap()
+                .push(second.clone());
+        }
+        both["aggregates"][0]["sunDirections"]
+            .as_array_mut()
+            .unwrap()
+            .push(second);
+        let mut only_a = both.clone();
+        only_a["suns"][1]["irradiance"] = json!([0.0, 0.0]);
+        let mut only_b = both.clone();
+        only_b["suns"][0]["irradiance"] = json!([0.0, 0.0]);
+        let [both, a, b] = [both, only_a, only_b].map(|c| trace(&c, Polarisation::Scalar, 400, 2));
+        let close = |sum: f64, x: f64, y: f64| (x + y - sum).abs() <= 1e-12 * sum.abs();
+        for ((g, ga), gb) in both
+            .geometries()
+            .iter()
+            .zip(a.geometries())
+            .zip(b.geometries())
+        {
+            for w in 0..2 {
+                let (sum, x, y) = (g.radiance()[w], ga.radiance()[w], gb.radiance()[w]);
+                assert!(
+                    sum > x && sum > y && close(sum, x, y),
+                    "{}: {sum} {x} {y}",
+                    g.name()
+                );
+            }
+            let json = |depths: &[Vec<Option<f64>>]| serde_json::to_string(depths).unwrap();
+            assert_eq!(json(g.sun_optical_depth()), json(ga.sun_optical_depth()));
+            assert_eq!(g.sun_optical_depth().len(), 2);
+        }
+        let (fa, fb, f) = (
+            &a.aggregates()[0],
+            &b.aggregates()[0],
+            &both.aggregates()[0],
+        );
+        for w in 0..2 {
+            assert!(close(
+                f.incident_top()[w],
+                fa.incident_top()[w],
+                fb.incident_top()[w]
+            ));
+            assert!(close(
+                f.direct_ground()[w],
+                fa.direct_ground()[w],
+                fb.direct_ground()[w]
+            ));
+            assert!(close(
+                f.diffuse_ground()[w],
+                fa.diffuse_ground()[w],
+                fb.diffuse_ground()[w]
+            ));
+            assert!(close(
+                f.upwelling_top()[w],
+                fa.upwelling_top()[w],
+                fb.upwelling_top()[w]
+            ));
+        }
+    }
+
+    #[test]
+    fn atmosphere_stokes_intensity_equals_scalar_for_an_isotropic_scatterer() {
+        let mut case = case::tests::sample_case();
+        case["terms"] = json!([{
+            "name": "dust",
+            "density": { "kind": "exponential", "scaleHeightM": 3000.0 },
+            "scattering": [2e-5, 3e-5],
+            "absorption": [1e-6, 2e-6],
+            "phase": { "kind": "isotropic" }
+        }]);
+        let scalar = trace(&case, Polarisation::Scalar, 2000, 4);
+        let stokes = trace(&case, Polarisation::Stokes, 2000, 4);
+        for (s, v) in scalar.geometries().iter().zip(stokes.geometries()) {
+            let polarised = v.stokes().unwrap();
+            for w in 0..2 {
+                let i = s.radiance()[w];
+                assert!(i > 0.0, "{}", s.name());
+                assert!(
+                    (v.radiance()[w] - i).abs() <= 1e-12 * i,
+                    "{}: {} {i}",
+                    s.name(),
+                    v.radiance()[w]
+                );
+                assert!(polarised.q()[w].abs() <= 1e-15 * i && polarised.u()[w].abs() <= 1e-15 * i);
+            }
+        }
+        for (s, v) in scalar.aggregates().iter().zip(stokes.aggregates()) {
+            for w in 0..2 {
+                let (a, b) = (s.upwelling_top()[w], v.upwelling_top()[w]);
+                assert!((a - b).abs() <= 1e-12 * a, "{a} {b}");
+                let (a, b) = (s.diffuse_ground()[w], v.diffuse_ground()[w]);
+                assert!((a - b).abs() <= 1e-12 * a, "{a} {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_stokes_mode_and_sample_counts_are_refused() {
+        let case = case_of(&case::tests::sample_case());
+        let result = trace_reference(
+            &case,
+            Polarisation::Stokes,
+            NonZeroU64::MIN,
+            NonZeroUsize::MIN,
+        );
+        match result {
+            Err(TraceReferenceError::StokesNeedsRayleigh { term }) => assert_eq!(term, "aerosol"),
+            other => panic!("{other:?}"),
+        }
+        let too_many = NonZeroU64::new(MAX_SAMPLES + 1).unwrap();
+        let result = trace_reference(&case, Polarisation::Scalar, too_many, NonZeroUsize::MIN);
+        match result {
+            Err(error @ TraceReferenceError::TooManySamples { samples }) => {
+                assert_eq!(samples, MAX_SAMPLES + 1);
+                assert_eq!(crate::RunFitError::from(error).exit_code(), 2);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// cos Θ between the directions at `(zenith, azimuth)` and `(zenith, azimuth)`, degrees, by
+    /// the spherical law of cosines.
+    fn cos_between(a: (f64, f64), b: (f64, f64)) -> f64 {
+        let (za, zb) = (radians(a.0), radians(b.0));
+        math::cos(za) * math::cos(zb)
+            + math::sin(za) * math::sin(zb) * math::cos(radians(a.1 - b.1))
+    }
+
+    /// Rayleigh's phase function of depolarisation ρ, sr⁻¹ (Chandrasekhar 1950).
+    fn rayleigh(rho: f64, cos_theta: f64) -> f64 {
+        let gamma = rho / (2.0 - rho);
+        3.0 / (4.0 * (1.0 + 2.0 * gamma))
+            * ((1.0 + 3.0 * gamma) + (1.0 - gamma) * cos_theta * cos_theta)
+            / (4.0 * PI)
+    }
+
+    #[test]
+    fn atmosphere_thin_layer_matches_single_scattering() {
+        // τₛ = 10⁻⁵ and τₐ = 5 × 10⁻⁶: multiple scattering is some 10⁻⁵ of the radiance.
+        let (sigma_s, sigma_a, top) = (1e-8, 5e-9, 1000.0);
+        let rho = [0.0, 0.03];
+        let terms = json!([{
+            "name": "gas", "density": uniform(),
+            "scattering": [sigma_s, sigma_s], "absorption": [sigma_a, sigma_a],
+            "phase": { "kind": "rayleigh", "depolarisation": rho }
+        }]);
+        let (down_view, down_sun) = ((60.0, 90.0), (30.0, 0.0));
+        let (up_view, up_sun) = ((120.0, 45.0), (50.0, 200.0));
+        let (side_view, side_sun, side_height, distance) =
+            ((90.0, 0.0), (40.0, 30.0), 500.0, 1000.0);
+        let mut side = geometry("side", side_height, side_view, side_sun);
+        side["maxDistanceM"] = json!(distance);
+        let geometries = json!([
+            geometry("down", 0.0, down_view, down_sun),
+            geometry("up", top, up_view, up_sun),
+            side
+        ]);
+        let reference = trace(
+            &slab(&terms, &json!([0.0, 0.0]), &geometries),
+            Polarisation::Scalar,
+            2000,
+            4,
+        );
+        let tau = (sigma_s + sigma_a) * top;
+        let omega = sigma_s / (sigma_s + sigma_a);
+        let irradiance = [PI, 2.0];
+        for (w, (&depolarisation, &irradiance)) in rho.iter().zip(&irradiance).enumerate() {
+            let f = irradiance * omega;
+            let phase = |view, sun| rayleigh(depolarisation, cos_between(view, sun));
+            // Downwelling at the ground: F ω p μ₀ ÷ (μ₀ − μ) (e^(−τ/μ₀) − e^(−τ/μ)).
+            let (mu, mu0) = (
+                math::cos(radians(down_view.0)),
+                math::cos(radians(down_sun.0)),
+            );
+            let down = f * phase(down_view, down_sun) * mu0 / (mu0 - mu)
+                * (math::exp(-tau / mu0) - math::exp(-tau / mu));
+            // Upwelling at the top: F ω p μ₀ ÷ (μ₀ + μ) (1 − e^(−τ(1/μ₀ + 1/μ))).
+            let (mu, mu0) = (-math::cos(radians(up_view.0)), math::cos(radians(up_sun.0)));
+            let up = f * phase(up_view, up_sun) * mu0 / (mu0 + mu)
+                * -math::exp_m1(-tau * (1.0 / mu0 + 1.0 / mu));
+            // Horizontally to a black target: F ω p e^(−τ_sun) (1 − e^(−σ_t D)).
+            let mu0 = math::cos(radians(side_sun.0));
+            let sun_depth = (sigma_s + sigma_a) * (top - side_height) / mu0;
+            let side = f
+                * phase(side_view, side_sun)
+                * math::exp(-sun_depth)
+                * -math::exp_m1(-(sigma_s + sigma_a) * distance);
+            for (traced, expected) in reference.geometries().iter().zip([down, up, side]) {
+                let radiance = traced.radiance()[w];
+                assert!(
+                    (radiance / expected - 1.0).abs() < 1e-4,
+                    "{} at {w}: {radiance} against {expected}",
+                    traced.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_single_scattering_polarisation_has_rayleighs_degree_and_plane() {
+        let rho = [0.0, 0.03];
+        let terms = json!([{
+            "name": "gas", "density": uniform(),
+            "scattering": [1e-8, 1e-8], "absorption": [0.0, 0.0],
+            "phase": { "kind": "rayleigh", "depolarisation": rho }
+        }]);
+        let sun = (45.0, 0.0);
+        let views = [(45.0, 180.0), (45.0, 90.0), (70.0, 300.0)];
+        let geometries: Vec<Value> = views
+            .iter()
+            .enumerate()
+            .map(|(i, &view)| geometry(&format!("view-{i}"), 0.0, view, sun))
+            .collect();
+        let reference = trace(
+            &slab(&terms, &json!([0.0, 0.0]), &json!(geometries)),
+            Polarisation::Stokes,
+            500,
+            2,
+        );
+        // An independent frame: east, north and up the unit axes.
+        let direction = |(zenith, azimuth): (f64, f64)| {
+            let (zenith, azimuth) = (radians(zenith), radians(azimuth));
+            [
+                math::sin(zenith) * math::sin(azimuth),
+                math::sin(zenith) * math::cos(azimuth),
+                math::cos(zenith),
+            ]
+        };
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let towards_sun = direction(sun);
+        for (traced, &view) in reference.geometries().iter().zip(&views) {
+            let look = direction(view);
+            // The detector's frame: e₁ towards the larger zenith angle in the view's vertical
+            // plane, e₂ = k × e₁ for the light's direction k = −look.
+            let (zenith, azimuth) = (radians(view.0), radians(view.1));
+            let e1 = [
+                math::cos(zenith) * math::sin(azimuth),
+                math::cos(zenith) * math::cos(azimuth),
+                -math::sin(zenith),
+            ];
+            let e2 = cross(look.map(|x| -x), e1);
+            // Singly scattered light is polarised along the scattering plane's normal.
+            let normal = cross(towards_sun, look);
+            let length = dot(normal, normal).sqrt();
+            let normal = normal.map(|x| x / length);
+            let (along_e1, along_e2) = (dot(normal, e1), dot(normal, e2));
+            let cos_theta = dot(towards_sun, look);
+            let stokes = traced.stokes().unwrap();
+            for (w, &depolarisation) in rho.iter().enumerate() {
+                let delta = (1.0 - depolarisation) / (1.0 + 0.5 * depolarisation);
+                let degree = 0.75 * delta * (1.0 - cos_theta * cos_theta)
+                    / (0.75 * delta * (1.0 + cos_theta * cos_theta) + 1.0 - delta);
+                let intensity = traced.radiance()[w];
+                let (q, u) = (stokes.q()[w] / intensity, stokes.u()[w] / intensity);
+                let q_expected = degree * (along_e1 * along_e1 - along_e2 * along_e2);
+                let u_expected = degree * 2.0 * along_e1 * along_e2;
+                assert!(
+                    (q - q_expected).abs() < 1e-4 && (u - u_expected).abs() < 1e-4,
+                    "{} at {w}: ({q}, {u}) against ({q_expected}, {u_expected})",
+                    traced.name()
+                );
+            }
+        }
+        // At 90° in the principal plane, −(1 − ρ) ÷ (1 + ρ) and no U.
+        let principal = &reference.geometries()[0];
+        for (w, &depolarisation) in rho.iter().enumerate() {
+            let q = principal.stokes().unwrap().q()[w] / principal.radiance()[w];
+            let expected = -(1.0 - depolarisation) / (1.0 + depolarisation);
+            assert!((q - expected).abs() < 1e-4, "{q} against {expected}");
+        }
+    }
+
+    #[test]
+    fn atmosphere_conservative_layer_conserves_energy() {
+        // τ = 1 of Rayleigh scattering over a black ground (550 nm) and a white one (440 nm).
+        let terms = json!([{
+            "name": "gas", "density": uniform(),
+            "scattering": [1e-3, 1e-3], "absorption": [0.0, 0.0],
+            "phase": { "kind": "rayleigh", "depolarisation": [0.0, 0.0] }
+        }]);
+        let mut case = slab(&terms, &json!([0.0, 1.0]), &json!([]));
+        case["aggregates"] = json!([
+            { "name": "zenith", "sunDirections": [{ "zenithDeg": 0.0, "azimuthDeg": 0.0 }] },
+            { "name": "low", "sunDirections": [{ "zenithDeg": 60.0, "azimuthDeg": 0.0 }] }
+        ]);
+        let reference = trace(&case, Polarisation::Scalar, 20_000, 4);
+        for aggregate in reference.aggregates() {
+            let incident = aggregate.incident_top();
+            // Black ground: what is not reflected is transmitted.
+            let total = aggregate.upwelling_top()[0]
+                + aggregate.direct_ground()[0]
+                + aggregate.diffuse_ground()[0];
+            let sigma = math::hypot(
+                aggregate.upwelling_top_standard_error()[0],
+                aggregate.diffuse_ground_standard_error()[0],
+            );
+            assert!(
+                (total - incident[0]).abs() < 4.0 * sigma,
+                "{}: {total} against {} ± {sigma}",
+                aggregate.name(),
+                incident[0]
+            );
+            assert!(sigma < 0.01 * incident[0], "{sigma}");
+            // White ground: everything comes back up.
+            let up = aggregate.upwelling_top()[1];
+            let sigma = aggregate.upwelling_top_standard_error()[1];
+            assert!(
+                (up - incident[1]).abs() < 4.0 * sigma,
+                "{}: {up} against {} ± {sigma}",
+                aggregate.name(),
+                incident[1]
+            );
+        }
+    }
+}

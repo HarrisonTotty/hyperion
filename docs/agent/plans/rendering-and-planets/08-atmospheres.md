@@ -2381,7 +2381,8 @@ generator, and the reference's sampling needs no domain tag.
   modern polarisability anisotropy would settle it.
 - **Scalar radiance.** The drawn image is scalar, while the Rayleigh benchmark tables are vector,
   and the scalar error for Rayleigh can reach about 10%. R08.T12.a measures it and reports it as a
-  finding.
+  finding. Measured: −11.8% to +10.7% on Natraj et al. 2009's τ = 0.5 case (below, "The scalar
+  against the vector Rayleigh radiance, measured in R08.T12.a").
 - **Data licences.** Before these data are committed, the owner must decide on the Karkoschka and
   Tomasko coefficients (Elsevier), Wolff's Mars dust and Khare's tholin, Palmer and Williams's
   H₂SO₄, and NH₄SH, which has no visible index at all. Serdyuchenko's data files (terms unstated)
@@ -2697,3 +2698,113 @@ generator, and the reference's sampling needs no domain tag.
     it asserts (MIEV0's answers for cases 5–19, B&H's three printed values), with citations, under
     the open benchmark-tables lean above; if that is refused, it falls back to miepython's MIT
     values (Q and g to 6 decimals, case 14's amplitudes).
+- **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
+  `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
+  - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the
+    thread pool can fail (`ThreadPool`), the Stokes mode refuses a term it has no matrix for
+    (`StokesNeedsRayleigh`, a Cornette–Shanks term), and `samples` is capped at `MAX_SAMPLES` = 2⁵³
+    so that every count is an exact `f64` (`TooManySamples`). `RunFitError` gains
+    `AtmosphereCase` (exit 1), `AtmosphereReference` (exit 2 for `StokesNeedsRayleigh` and
+    `TooManySamples`, bad command lines; 1 otherwise) and `WriteReference { path, source }` (exit
+    1). The command's arguments are a clap `Args` struct, `AtmosphereReferenceArgs`, in a tuple
+    variant; `--samples` defaults to 100,000 per geometry, aggregate and wavelength, and
+    `--threads` resolves as `orbits`'s does. The fit crate's `clippy.toml` gains `LeVeque` in
+    `doc-valid-idents` (Chan, Golub and LeVeque 1979, the moments' merge).
+  - _The case format (`CASE_FORMAT` 1) is T12.a's reader's_ (`case.rs`'s module documentation), so
+    T12.b's "builds the case format" now reads as the client's writer of it. Names are the client's
+    camel case and unknown fields are refused, inside the tagged kinds too. Terms are the client's
+    `MediumTerm` with every per-channel array one entry per traced wavelength, without `absorber` or
+    `spectral`; there may be any number of them, each from data, so the medium names no species.
+    Densities: `exponential`, `tent` and `tabulated`, the last linear in relative density between
+    nodes and constant beyond the end nodes, a negative height reading as the ground; **T3.a's
+    `densityAt` for `tabulated` must follow the same rule**, or the gate counts the difference as
+    the client's error. Phases: `rayleigh` (ρ per wavelength), `cornette-shanks` (`asymmetry`),
+    `isotropic` (added, for the Stokes test and the benchmarks) and `none`. Suns are spectral
+    irradiances normal to the beam at the top. A geometry is an observer (height, latitude), a view
+    (zenith, azimuth from north towards east), one direction per sun, an optional `maxDistanceM`
+    (a black target, for aerial perspective) and an optional cone; aggregates are a latitude and
+    sun directions; an optional `seed` defaults to 0. Cones of 0°–10° are accepted, 0° for the
+    analytic tests and point benchmarks; Design note 10's 0.5°–1° is the cases' to choose. At most
+    65,536 wavelengths, and fewer than 2³² geometries and aggregates each, which the draws' keys
+    pack.
+  - _The tabulated phase function is not read yet._ R08.T12.c adds the one its benchmarks need
+    (Garcia and Siewert's Legendre series; Kokhanovsky's and IPRT's tables) before it runs, since it
+    precedes T12.b; T12.b then reads T5's `PhaseTable` (u = √(θ/π)) through it.
+  - _Output (`REFERENCE_FORMAT` 1)._ One `samples`, `seed` and `polarisation` for the whole
+    reference, not samples per geometry. Each geometry adds `sunOpticalDepth` per sun and
+    wavelength (`null` where the ground hides the sun), the direct beam for Design note 10's
+    Beer–Lambert check, and in the Stokes mode Q and U with their errors. Each aggregate gives
+    `incidentTop`, `directGround`, `diffuseGround` and `upwellingTop` (the last two with errors):
+    the downwelling flux is direct plus diffuse, the plane albedo upwelling over incident. Q and U
+    are in the frame e₁ in the view's vertical plane, e₂ = k × e₁ for the light's direction k;
+    Natraj et al. 2009 tabulate −Q and −U of these at the same relative azimuth (their Q = Iᵣ − Iₗ).
+    `to_json` is `serde_json`'s pretty form, which `prettier --check` would reflow: T12.b formats
+    the committed references for it or lists them in `.prettierignore`.
+  - _The estimator._ Absorption is a weight (quadrature, so an absorbing-only medium gives
+    Beer–Lambert exactly); free paths by delta tracking against per-shell majorants, so T12.d
+    changes only the shells and the majorant; the first collision on the view ray is forced;
+    next-event estimation to every sun integrates the transmittance by 8-point Gauss–Legendre per
+    shell; the ground is Lambertian; Russian roulette below 0.1 of each branch's starting weight
+    (an absolute threshold left a 10 H limb's multiple scattering at 8% noise, against 0.3%
+    now). Shells split at every profile kink and every scale height, to 36 H.
+  - _Reproducibility._ `Draws` is reused from `tasks/displaced_forms/births.rs`, not copied, with
+    the case's seed XORed with `ATMOSPHERE_STREAM` so that its streams are its own; a sample's key
+    is (wavelength, geometry or aggregate by its own index, sample), so adding a geometry leaves
+    the others' draws alone (tested). Blocks of 1,024 samples run through `map_reduce_chunks` with
+    chunk 1. `atmosphere_reference_bits_are_pinned` pins two values to the bit: an edit to `Draws`
+    (P15's to make), `Gl16Panel`, `bisect` or the Gauss–Legendre tables shows there before it moves
+    a committed reference. Moving `Draws` to a shared module is plan 15's change, later.
+  - _Tests_ beyond the three named: single scattering in a thin slab (to 10⁻⁴), Rayleigh's degree
+    and plane of polarisation, energy conservation over black and white ground, a grazing optical
+    depth against a fine quadrature (10⁻¹⁰), two suns adding, case validation, phase normalisation
+    and sampling, shell walks, moments, frames and cones, and the command line. The
+    Stokes-equals-scalar test holds I to 10⁻¹² relative, not bit for bit: the Stokes mode mixes the
+    terms' matrices, which rounds differently from the scalar mixture.
+  - _Cost, provisional_ (shared load 8–9 on 16 threads, the dev profile at `opt-level` 2, 4 threads
+    under a 400% CPU quota): about 9 µs a path on the τ = 0.5 Rayleigh slab and 107 µs on an
+    Earth-like case of three terms (Rayleigh, a Cornette–Shanks aerosol and an ozone tent; about 50
+    shells), where the quadrature of each sun's transmittance dominates. A twilight ground view
+    (sun at 95°) is noisy, about 4–7% at 2 × 10⁴ samples, since few forced collisions see the sun;
+    such radiances lie under Design note 10's 10⁻² L_max, where σ_ref ≤ 1% does not bind, but T12.b
+    budgets their samples.
+  - _Citations._ The formulas of Hansen and Travis 1974 (the depolarised Rayleigh matrix), Cornette
+    and Shanks 1992 and Witt 1977 were each re-derived and checked numerically by the science
+    check; their equation numbers (2.15, 8 and 13) could not be read from the papers here, and are
+    to be confirmed from a library copy before T12.c commits benchmark values.
+- **The scalar against the vector Rayleigh radiance, measured in R08.T12.a** (2026-10-09; a
+  finding, for a decision agent's sign-off through "main"). The case: Natraj, Li and Yung 2009
+  (ApJ 691, 1909), τ = 0.5, μ₀ = 0.2, A = 0, ρ = 0, πF₀ = π, diffuse radiance only, as a
+  plane-parallel slab (1 km of uniform Rayleigh scatterer on a sphere of radius 10¹² m, a pencil
+  detector), at the top (upwelling) and bottom (downwelling) for μ = 0.1, 0.2, 0.52, 0.84 and 1 and
+  relative azimuth 0°, 90° and 180°: 26 geometries, 10⁶ samples each, seed 0, 4 threads, 58 s per
+  mode at load 8–9. The case's generator is in the lane's handoff for T12.c.
+  - The Stokes mode reproduces Natraj's Tables 1–2 (read from the paper by the science check) within
+    3σ at all 26 geometries (largest 2.98σ, χ² = 28.1 for 26; independent runs at seed 1 and before
+    the review's re-keying gave largest 2.12σ and 1.81σ), σ ≤ 0.17%, and the degree of
+    polarisation to about 0.001.
+  - Scalar minus vector, on the same paths: −11.8% at the bottom, μ = 0.1, towards the sun's
+    azimuth, −10.8% at μ = 0.1 away from it, and −10.4% and −8.7% at μ = 0.2; +10.0% at the top's
+    nadir and +10.7% at the bottom's zenith; at 90° in azimuth within 0.4% for μ ≤ 0.2, +2.0% to
+    +2.5% at μ = 0.52 and +6.6% to +7.2% at μ = 0.84. An independent scalar adding–doubling by the
+    science check gives −11.79% to +10.75%, and the literature has errors "as large as 10%" for pure
+    Rayleigh (Lacis et al. 1998, GRL 25, 135; Kotchenova et al. 2006, Appl. Opt. 45, 6762).
+  - The client is gated scalar against scalar, so the gate does not see this error; the drawn sky
+    carries it, up to about 12% in a thin Rayleigh sky at low sun. Its acceptance as a stated
+    limitation of the drawn sky is for the sign-off (provisional lean: accept and state it). The
+    benchmark test itself is T12.c's, and the table values are not committed (Risks, "Re-validated
+    at bce2aef5").
+  - Open for T12.c: Kokhanovsky et al. 2010 and IPRT Phase A publish vector results for their
+    aerosol and cloud cases too, and the Stokes mode covers Rayleigh and isotropic scattering only.
+    Either T12.c compares scalar I and budgets the scalar error inside its 3σ, or the Stokes mode
+    gains tabulated matrices (a₁–a₄, b₁, b₂, where V arises). Provisional lean: the second.
+  - All three questions (T12.c's vector scope, the drawn sky's scalar error, and the equation
+    numbers under "Deviations in T12.a, as built") are with a decision agent through "main"
+    (`decision-r08-vector.md`, 2026-10-09); its ruling goes to T12.c's agent and replaces the
+    provisional leans here.
+- **Closed set, for the composition audit (R08.T12.a).** The tracer's medium is open: any number of
+  terms, each a density, spectral coefficients and a phase function from data, so it references
+  whatever composition the client's optics write. Closed, each small and stated: the phase
+  function kinds (Rayleigh, Cornette–Shanks, isotropic, none: no tabulated phase until T12.c, so a
+  Mie or aggregate aerosol cannot be referenced yet); the Stokes mode's kinds (Rayleigh, isotropic,
+  none); the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells
+  (the sphere until T12.d).

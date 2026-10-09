@@ -14,6 +14,9 @@
 //!
 //! The pieces:
 //!
+//! - [`atmosphere`]: the reference path tracer for the client's atmospheres (plan R08), a new kind
+//!   of output for the crate, JSON fixtures for the client rather than tables for the sim, and not a
+//!   [`FitTask`](task::FitTask);
 //! - [`task`]: the [`FitTask`](task::FitTask) interface and the [`registry`](task::registry) of
 //!   every fit, [`tasks`] their implementations;
 //! - [`manifest`]: manifests, the inputs hash, sim fingerprints and the lock file `tables.lock`;
@@ -24,6 +27,7 @@
 //! - [`optimise`]: hand-written optimisers (golden section, Nelder–Mead);
 //! - [`cli`]: the command line, which `main.rs` parses and hands to [`cli::run`].
 
+pub mod atmosphere;
 pub mod check;
 pub mod cli;
 pub mod data;
@@ -65,6 +69,21 @@ pub enum RunFitError {
     /// `--data` was given for a task that does not read exactly one dataset.
     #[error("`--data` needs a task that reads exactly one dataset, and `{0}` does not")]
     DataNeedsOneDataset(String),
+    /// An atmosphere case could not be read.
+    #[error(transparent)]
+    AtmosphereCase(#[from] atmosphere::ReadCaseError),
+    /// An atmosphere reference could not be traced.
+    #[error(transparent)]
+    AtmosphereReference(#[from] atmosphere::TraceReferenceError),
+    /// An atmosphere reference could not be written.
+    #[error("cannot write the atmosphere reference {}", path.display())]
+    WriteReference {
+        /// Where it was to go.
+        path: std::path::PathBuf,
+        /// Why it could not.
+        #[source]
+        source: io::Error,
+    },
     /// The command's output could not be written.
     #[error("cannot write the output")]
     Output(#[from] io::Error),
@@ -72,14 +91,26 @@ pub enum RunFitError {
 
 impl RunFitError {
     /// The process exit code for this error: 2 for a bad command line, 1 for everything else.
+    ///
+    /// For `atmosphere-reference`, `--stokes` on a case the Stokes mode cannot trace and a
+    /// `--samples` past [`atmosphere::MAX_SAMPLES`] are bad command lines.
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::UnknownTask(_) | Self::OtherManifestNeedsOut | Self::DataNeedsOneDataset(_) => 2,
+            Self::UnknownTask(_)
+            | Self::OtherManifestNeedsOut
+            | Self::DataNeedsOneDataset(_)
+            | Self::AtmosphereReference(
+                atmosphere::TraceReferenceError::StokesNeedsRayleigh { .. }
+                | atmosphere::TraceReferenceError::TooManySamples { .. },
+            ) => 2,
             Self::Manifest(_)
             | Self::Task(_)
             | Self::Emit(_)
             | Self::Check(_)
+            | Self::AtmosphereCase(_)
+            | Self::AtmosphereReference(atmosphere::TraceReferenceError::ThreadPool(_))
+            | Self::WriteReference { .. }
             | Self::Output(_) => 1,
         }
     }
