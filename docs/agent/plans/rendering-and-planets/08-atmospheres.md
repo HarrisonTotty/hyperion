@@ -71,7 +71,8 @@ In scope:
   terrain, and the extinction of the sky's stars, band and discs through the air (R06 leaves
   this to R08).
 - Surface lighting through the air: each sun's transmittance to a lit point and the sky's diffuse
-  irradiance there, which R07's, R10's and R11's lit passes read (R08.T9.b).
+  irradiance there, which R07's, R10's and R11's lit passes read (R08.T9.b). Planetshine takes
+  both, as starlight does, and lights the receiving body's sky (Design note 7).
 - Thick atmospheres: the measured regime boundary, the view-dependent converged bake, the
   cloud-deck split, and the path-traced reference with the 5% gate.
 - Gas giants inside the 10⁹ m boundary, and the `DiscReflectanceTable` that R07's analytic disc
@@ -298,14 +299,20 @@ type, the values it contributes, and named projections of them, as R05's `TERRAI
 
 ```ts
 export interface AtmosphereViewSettings {
-  /** How many suns' skies a photorealistic view draws, brightest first (Design note 7). */
-  readonly skySunCap: number; // high 4, low 2; R08.T7
+  /** The stars whose light the sky takes: the body's own, R07's `MAX_BODY_LIGHTS`, read and never
+   * a second literal, so that the sky's stars are the surface's (Design note 7). */
+  readonly skySunCap: number; // 2 on both settings while R07's count is 2; R08.T7
+  /** The planetshine sources the sky takes: R07's `SETTINGS[s].photoreal.planetshineSources`. */
+  readonly skyPlanetshineSources: number; // 2 high, 1 low
   /** The quality limits this plan lists for R12's audit, one string each. */
   readonly qualityLimits: ReadonlyArray<string>;
 }
 // R05's `ViewSettings` gains `atmosphereView: AtmosphereViewSettings`; `SETTINGS[s].atmosphereView`
 export const ATMOSPHERE_VIEW_SETTINGS: Readonly<Record<QualitySetting, AtmosphereViewSettings>>;
 export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>>; // SETTINGS[s].atmosphereView.skySunCap
+/** The sources the sky's kernels hold: four stars (this plan's first high figure, for R07's
+ * deferred raise) and two planetshine sources (Design note 7). */
+export const MAX_SKY_SOURCES = 6;
 /** Where aerial perspective applies (Design note 11): R05's `TableSizes.aerialPerspectiveScope`,
  * `SETTINGS[s].atmosphere.aerialPerspectiveScope`, projected here rather than held twice. "scene"
  * (high) applies it to everything opaque and publishes the volume; "terrain" (low) to terrain
@@ -331,9 +338,12 @@ module R12 reads for this plan's ladder entries.
   Risks, "the medium read in place"), which these tasks widen as well. Two engine facts bind them
   (R01 as built): a compute pass binds no sampler (`ComputeBindings` has none), so the tables are
   read by `textureLoad` with R05's hand filtering (`common.wgsl`'s `bilinear`, which gains a
-  `texture_2d_array` overload); and a texture of one layer is viewed as `2d`, not `2d-array`, in a
-  compute binding (`viewDimensionOf`), so a one-slice or one-term array needs that seam settled
-  first (Risks, "Re-validated at bce2aef5"). The kernels:
+  `texture_2d_array` overload); and a compute binding is viewed at the dimension its kernel's WGSL
+  declares, so a texture of one layer binds where a kernel declares `texture_2d_array` or
+  `texture_storage_2d_array`, as a one-layer array (R08.T0, R01's seam; `decision-r08-design.md`
+  item 1). A one-slice, one-band or one-term table is therefore an ordinary array of one layer. A
+  medium with no term of a kind binds a one-texel placeholder of one layer, since a texture has at
+  least one. The kernels:
   - `transmittance.wgsl`, which stores optical depth, curves of growth included (Design note 8),
     in a 2D array texture of one layer a κ slice (Design note 17);
   - `multiScattering.wgsl`, Hillaire's isotropic 32² table for `thin` worlds, one layer a latitude
@@ -347,9 +357,13 @@ module R12 reads for this plan's ladder entries.
   `DrawItem` (it reads the scene's colour and depth), widened to several suns.
   New: `irradiance.wgsl`, a per-planet table of the sky's diffuse irradiance on a horizontal
   surface by altitude and sun zenith, one layer a latitude band, and `surfaceLighting.wgsl`, which
-  exports `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad)` and
-  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad)`, each `-> vec3f`, for the lit
-  passes of R07, R10 and R11 (R08.T9.b). The latitude and azimuth arguments are Design note 17's;
+  exports `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad, curve)`,
+  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad)` and
+  `atmosphere_source_transmittance(altitude_m, mu_centre, latitude_rad, azimuth_rad, angular_radius_rad, curve)`,
+  each `-> vec3f`. The last is Design note 7's three-node disc rule for a wide source
+  (planetshine). `curve : u32` is the light's slot among the body's per-sun absorber curves
+  (Design note 5), and a planetshine source passes slot 0. They serve the lit passes of R07, R10
+  and R11 (R08.T9.b). The latitude and azimuth arguments are Design note 17's;
   `altitude_m` is the geodetic height, scaled inside. `oblate.wgsl` holds the shared WGSL: normal
   gravity, R_α, κ and the slice and band reads. Every kernel is registered in R01's
   `WGSL_CATALOGUE` (`view/engine/catalogue.ts`; R05's are `ATMOSPHERE_TABLE_ENTRIES` and
@@ -473,8 +487,8 @@ Names are those the owning plans give; the owning plan is authoritative.
     tags it `not_modelled`. R08.T1's amendment P14.T35.e asks for them with T24.c–f's (P14.T35.d is
     taken, "Body-state times beyond 2⁵³ s"). As written into plan 14 and reconciled with R09.T0.a's
     asks, P14.T48.e gives the record's section its contents and P14.T35.e puts all of it on the
-    wire, with an `envelope` section for every gas-envelope body (Risks, "R08.T1's asks, as
-    written into plan 14").
+    wire, with an `envelope` section for every gas-envelope body (Risks, "The asks R08.T1 wrote
+    into plan 14").
   - The `body_detail` request (`BodyDetailRequest { universe, body, time, detail }`) and its
     `BodyDetailDto { universe, time, granted, record: BodyRecordDto }` (P14.T35.b–c, built:
     `crates/hyperion-protocol/src/{envelope.rs, planetary/requests.rs, planetary/record.rs}`),
@@ -515,8 +529,10 @@ Names are those the owning plans give; the owning plan is authoritative.
   - `RenderEngine.createCompute(pair: KernelPair): ComputeHandle` (and `createComputeAsync`), and
     `dispatch(kernel, bindings: ComputeBindings, workgroups, pass?)`, where `ComputeBindings` holds
     `uniforms`, `buffers`, `sampled` and `storage` and no samplers; a 2D array texture is
-    `TextureSpec.dimension: "2d"` with `depthOrArrayLayers` > 1, and one layer is viewed as `2d` in a
-    compute binding; `readTexture(texture, level?, rect?, access?)` reads every layer;
+    `TextureSpec.dimension: "2d"` with `depthOrArrayLayers` ≥ 1, viewed in a compute binding at the
+    dimension its kernel's WGSL declares, so that a one-layer texture is a one-layer `2d-array`
+    where the kernel declares an array (R08.T0); `readTexture(texture, level?, rect?, access?)`
+    reads every layer;
   - `WGSL_CATALOGUE` in `view/engine/catalogue.ts`;
   - the headless SwiftShader smoke harness (`renderer/src/smoke/`, `just test-render`), on its two
     variants, `default` and `no-subgroups` (`smoke/page.ts`'s `VARIANTS`); there is no `no-f16`
@@ -601,7 +617,11 @@ Names are those the owning plans give; the owning plan is authoritative.
     with `Rgb` from R02's `view/photometry/toneCurve.ts`, the one per-channel type R05, R07 and this
     plan share; `shiningStars` and `lightsAt(pointM, hosts, max)` (`view/lighting/hostLights.ts`),
     the latter brightest first, which R07 calls with `MAX_BODY_LIGHTS` = 2: a lit body takes at
-    most two stars (`MAX_DISC_LIGHTS` = 2 in `bodyDisc.wgsl`);
+    most two stars (`MAX_DISC_LIGHTS` = 2 in `bodyDisc.wgsl`), and
+    `planetshineSources(body, lit, max)` with its `SecondarySource`s
+    (`view/lighting/planetshine.ts`), at `SETTINGS[s].photoreal.planetshineSources` (2 high, 1
+    low). The arrays `planLitBodies` builds for a body are this plan's list of that body's sources
+    (Design note 7);
   - the body's appearance. `BodyAppearance` (with `BodyPhotometry`, `view/appearance/`) exists,
     but as built no production code builds it: the scene carries R07's `WireAppearance`
     (`heldAppearanceOf`, `view/scene/fromServer.ts`; its `figure: BodyFigure | null`, photometry
@@ -618,9 +638,9 @@ Names are those the owning plans give; the owning plan is authoritative.
     `atmosphere_sky_irradiance` (returning 0) take R08.T9.b's signatures (Provides, "Tables and
     passes"). Their callers in `bodyDisc.wgsl` pass altitude 0,
     latitude 0 and azimuth 0, call the sky term once at the first light's μ₀ times the shares'
-    mean A, and send planetshine through `atmosphere_sun_transmittance` too (R07's, for this plan
-    to keep or refuse); `view/appearance/litBodyProbe.ts` and its smoke check pin the stubs' 1, 1
-    and 0;
+    mean A, and send planetshine through `atmosphere_sun_transmittance` too (R07's; kept and
+    widened by this plan, Design note 7); `view/appearance/litBodyProbe.ts` and its smoke check
+    pin the stubs' 1, 1 and 0;
   - `METER_CLASS` (R07 Design note 10; `view/post/meter.ts`): every translucent pass of this plan
     into the HDR target blends its alpha with source factor zero and destination factor one, so
     that R07's meter class survives, through R01's `blend` modes `"premultiplied"` and
@@ -847,17 +867,80 @@ Names are those the owning plans give; the owning plan is authoritative.
      R07's `STAR_CUT_RELATIVE` (its Design note 4), one constant for both plans, applied above the
      horizon or not,
      since a night side lit by a companion still has a sky.
-   - The high setting draws up to four suns' skies and the low setting two, brightest first
-     (`SKY_SUN_CAP` in `settings.ts`).
-   - A dropped sun still lights surfaces through `surfaceLighting.wgsl` (R08.T9.b), dimmed by its
-     transmittance to the lit point; only its scattered sky is lost. That limit is listed in
-     `ATMOSPHERE_QUALITY_LIMITS` for R12's audit.
+   - **One list of sources per body** (decided 2026-10-09, `decision-r08-design.md` item 3). A
+     body's air is lit by exactly the sources that light its surface in the same frame, so that no
+     image shows a lit sky over unlit ground or the reverse.
+     - **The list.** The body's stars as R07 takes them (`lightsAt(centre, hosts, MAX_BODY_LIGHTS)`,
+       past `STAR_CUT_RELATIVE`, brightest first), and its planetshine sources
+       (`planetshineSources`, at the setting's count). The arrays R07's `planLitBodies` builds for
+       the body are passed on, never ranked again.
+     - **The counts.** `SKY_SUN_CAP` reads `MAX_BODY_LIGHTS`, 2 on both settings. The kernels hold
+       `MAX_SKY_SOURCES` = 6, so a raise of R07's count changes no kernel. The per-frame bound is
+       2 + 2 sources on high and 2 + 1 on low.
+   - **Inside the air, the sky loop skips** two kinds of source whose contribution to the sky cannot
+     be seen. The surfaces keep both kinds.
+     - _Below the twilight limit:_ one whose upper limb lies below e = −[acos(R ÷ r_c) +
+       2 acos(R ÷ R_top)] at the camera, with R the figure's smallest radius of curvature c² ÷ a,
+       r_c = R + the camera's geodetic height and R_top = R + `topHeightM`. It lights no air the
+       camera can see: 20.2° on Earth's ground with a 100 km top, beside astronomical twilight's
+       18° (single scattering, refraction not drawn).
+     - _Negligible:_ one under `STAR_CUT_RELATIVE` of the brightest source above the camera's
+       horizon, such as the Moon by day, at 2.5 × 10⁻⁶ of the Sun.
+
+     Outside the air (R08.T8) no source is skipped.
+
+   - **A star outside the body's list lights neither its surface nor its air.** Only triple and
+     higher systems have one. The galaxy's multiplicity follows Moe and Di Stefano 2017 (galaxy
+     plan 11), and a third star passes the cut at a planet at a_p only from within about
+     100 a_p √(L₃ ÷ L₁).
+     - **Its share** is between 10⁻⁴ and roughly 10⁻¹ of the brightest star's. By day its omission
+       is a few percent at most and unseen.
+     - **While the two brightest are below the horizon** it is the only light, about 13 lx at the
+       cut to 13,000 lx at a share of 10⁻¹ at Earth's insolation, and the view shows it as a disc
+       over a night.
+     - **The record.** That limit is in `ATMOSPHERE_QUALITY_LIMITS`. Raising R07's count, and
+       letting a set star yield its slot, are deferred corrections to R07 (Risks).
    - **Surface lighting.** Every lit pass (R07's bodies, R10's terrain, R11's clouds, oceans and
      rings) takes each sun's illuminance times the transmittance from the lit point to that sun,
      read from the shared transmittance table, plus the sky's diffuse irradiance from a small
      per-planet irradiance table, as Bruneton 2017 does (his irradiance texture, 64 × 16 by altitude
      and sun zenith). Under a cloud-deck split the irradiance below the deck comes from the deck
      tables (R08.T15.b).
+   - **Planetshine** (decided 2026-10-09, `decision-r08-design.md` item 2). A neighbour's reflected
+     light crosses the receiving body's air as starlight does. Every source of R07's
+     `planetshineSources`, at the setting's count (`SETTINGS[s].photoreal.planetshineSources`, 2 on
+     high and 1 on low), is a source of this plan's wherever a star is:
+     - on lit surfaces (R08.T9.b), its transmittance from the lit point along its direction, and the
+       sky's diffuse irradiance it gives there, its illuminance times `atmosphere_sky_irradiance` at
+       its own μ. The sky term is added below the local horizon as above it, as a star's is in
+       twilight.
+     - in the sky-view, the aerial-perspective volume and the march (R08.T7, R08.T8), a point
+       source at its centre, with its per-channel illuminance (the neighbour's reflected colour) and
+       the planet's shadow. It has no disc of its own, since R07 draws the body.
+
+     Its direct transmittance is integrated over its disc, since a giant seen from a near moon is
+     wide. The rule takes three nodes along the disc's vertical diameter, at the centre and at
+     ±(√2/2)ρ in zenith angle, with weights ¼, ½ and ¼ times each node's μ. Nodes below the horizon
+     are dropped. It is Gauss–Chebyshev of the second kind, exact for a uniform disc to degree 5.
+     For ρ = 9.8° (Jupiter from Io) under τ = 0.25, the centre alone reads 19% low at 10° of
+     elevation and 63% low at 5°, where the rule is within 0.2% and 4%. Under τ = 1 the centre
+     alone is 17% low at 20° and the rule under 0.1% (computed for a uniform disc with Kasten and
+     Young 1989's air mass). Stars keep the centre, their discs being under about 1°. A planetshine
+     source takes the absorber curve of the receiving body's brightest star (light slot 0), which
+     in a planet–moon pair is the star that lights the neighbour.
+
+     The magnitudes are computed as p (R ÷ Δ)² at full phase, from R07's albedos: moonlight on
+     Earth is 2.5 × 10⁻⁶ of sunlight, Saturnshine on Titan 1.1 × 10⁻³ and Jupiter-shine on Io
+     1.5 × 10⁻². A full Moon's sky (18–19 V mag arcsec⁻², 3–7 × 10⁻³ cd m⁻²; Krisciunas and
+     Schaefer 1991, PASP 103, 1033) is within about two stops of the moonlit ground (about
+     0.01 cd m⁻² at albedo 0.15). At Titan-class haze depths most of the ground's light is diffuse
+     (Tomasko et al. 2005, Nature 438, 765). So transmittance alone is not enough.
+
+     Not modelled, and recorded (Risks): the band depletion of the neighbour's reflected spectrum;
+     the source's disc in the sky's phase function (under 0.8% for Rayleigh at ρ = 9.8°, 3% at
+     20°); a partly set source's sky, lit or shadowed by its centre alone; and the source's
+     illuminance in the march taken at the body's centre (±0.9% across an Io-class moon).
+
    - Wireframe views draw no atmosphere.
    - Within an atmosphere, R06's sprites, band and host discs are multiplied by the transmittance
      along their direction from the camera.
@@ -995,9 +1078,10 @@ Names are those the owning plans give; the owning plan is authoritative.
       agent's reading of his Table 2 confirms in kind: 32² multiple scattering, 32³ aerial
       perspective over 32 km, and a sky-view of about 200 × 100. R05's low sizes and its deferred,
       terrain-only aerial perspective are this plan's low setting.
-    - This plan adds the per-sun cap of Design note 7 (`SKY_SUN_CAP`, which bounds the per-frame
-      cost of the sun loop) and the thick table's size, and keeps both settings built together
-      from R08.T6 on.
+    - This plan adds Design note 7's source count: the body's stars (`SKY_SUN_CAP`) and its
+      planetshine sources. These bound the per-frame cost of the source loop, at most 4 sources on
+      high and 3 on low, against `MAX_SKY_SOURCES` = 6 in the kernels. It also adds the thick
+      table's size, and keeps both settings built together from R08.T6 on.
     - The thick bakes cost CPU at arrival, not frame time, so they run on both settings.
 12. **What the view says.** The atmosphere is computed physics, not decoration. Six states are
     labelled. The first three follow the guide's existing grammar for a withheld or unmodelled
@@ -1161,6 +1245,8 @@ Names are those the owning plans give; the owning plan is authoritative.
 
 The order:
 
+- T0 (R01's one-layer seam in compute) needs nothing and can start at once. T6.b, T6.f and T9.b
+  need it.
 - T1 and T2 are documents and can start at once. T1 must land in plan 14 before plan 14 builds
   P14.T24 (unbuilt). R09.T0.a also writes asks into plan 14, so the two are committed one after the
   other, not in parallel.
@@ -1172,8 +1258,8 @@ The order:
 - T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
   T5.b.
 - T6 generalises R05's tables over N terms. T6.a needs T3.a's `tabulated` density; T6.b follows
-  T6.a; T6.c follows T6.b and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c and T4.a
-  (the fitted channels); T6.e follows T6.d and T3.d; T6.f follows T6.e.
+  T6.a and T0; T6.c follows T6.b and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c
+  and T4.a (the fitted channels); T6.e follows T6.d and T3.d; T6.f follows T6.e.
 - T7 (several suns, the sky's extinction), T8 (other bodies from outside) and T9.a (aerial
   perspective) follow T6.d; T9.b (surface lighting, by band) follows T6.f.
 - T10.a assembles the medium from a body and needs T2–T6 (T5 for the aerosol terms); T10.b draws
@@ -1225,6 +1311,57 @@ otherwise; a path that starts `view/`, `lib/`, `displays/`, `smoke/` or `test/` 
 - Every timing in this plan's design notes was taken under shared load (load average about 14 on
   eight threads) and is provisional. Each task that records a timing re-measures it on a quiet
   machine, with the load average stated.
+
+### R08.T0 One-layer arrays in compute (R01's engine seam)
+
+A compute binding is viewed at the view dimension its kernel declares, under the rule a material's
+binding already follows (`decision-r08-design.md` item 1).
+
+As built, `resolveKernelResources` (`view/engine/webgpu/kernelResources.ts`) views every sampled
+and storage texture at the texture's own dimension (`viewDimensionOf`, `resources.ts`): `2d` for
+one layer, `2d-array` for more. A compute pipeline's layout is `auto`, built from the WGSL
+declarations, so a kernel declaring `texture_2d_array` or `texture_storage_2d_array` cannot bind a
+one-layer texture. The bind group fails WebGPU's validation (§8.2.1: the view's dimension must
+equal the layout entry's), and the submission that holds it is refused. This task:
+
+- `compute.ts`: `KernelBinding` gains `viewDimension: GPUTextureViewDimension | undefined`.
+  `kernelBindings` reads it from the declaration's type, by WebGPU's table (§6.2.1):
+  - `texture_2d`, `texture_depth_2d`, `texture_multisampled_2d` and `texture_storage_2d` → `2d`;
+  - `texture_2d_array`, `texture_depth_2d_array` and `texture_storage_2d_array` → `2d-array`;
+  - `texture_3d` and `texture_storage_3d` → `3d`;
+  - `texture_cube` and `texture_depth_cube` → `cube`;
+  - `texture_cube_array` and `texture_depth_cube_array` → `cube-array`;
+  - `undefined` for buffers and samplers.
+- `kernelResources.ts`: each sampled and storage texture is viewed at its binding's declared
+  dimension once `viewDimensionBinds(declared, own)` holds. A storage binding also takes a cube as
+  a six-layer `2d-array`, as today, since a storage view is never a cube (§8.1.1). Any other
+  mismatch throws before any GPU call, naming the kernel, the binding, the declared dimension and
+  the texture's.
+- `viewDimensionBinds` moves from `drawing.ts` to `resources.ts`, beside `viewDimensionOf`, so that
+  the material and compute paths share one rule.
+- `ComputeBindings` and every caller are unchanged. Every existing kernel's declared dimension
+  already equals its texture's, so nothing built changes. R07.T8.d's two-layer
+  `bodies:no class map` may stay as it is.
+
+Files: `view/engine/webgpu/{compute,kernelResources,resources,drawing}.ts` and their tests, a smoke
+check beside R01's in `smoke/work.ts`, and a pointer in R01's Risks.
+
+Tests (fakes):
+
+- `kernelBindings` reports each texture binding's declared dimension, `texture_2d_array` and
+  `texture_storage_2d_array` as `2d-array`;
+- a one-layer 2D texture bound where `texture_2d_array` is declared is viewed
+  `{ dimension: "2d-array" }`, sampled and as storage at a level;
+- a three-layer texture where `texture_2d` is declared throws, naming the kernel and the binding;
+- a cube's storage view stays a six-layer `2d-array`, and a 3D texture is viewed `3d`.
+
+Smoke (`just test-render`, on `default` and `no-subgroups`): a kernel declaring a
+`texture_2d_array<f32>` input and a `texture_storage_2d_array<rgba16float, write>` output copies
+texels layer by layer, on a one-layer and a three-layer texture. The texels are values exact in
+half precision, and they read back exactly.
+
+Acceptance: `pnpm --filter hyperion exec vitest run view/engine/webgpu` and `just test-render`
+pass.
 
 ### R08.T1 Asks of galaxy plan 14
 
@@ -1304,9 +1441,9 @@ rule for galaxy-plan amendments), and plan 14's owner accepts it; the acceptance
 
 _Done 2026-10-09, drafted for the owner and awaiting the sign-off: the five tasks are plan 14's
 P14.T24.c–f under Phase E and P14.T35.e under Phase H, reconciled with R09.T0.a's Phase K. The
-record, with what departs from the bullets above, is Risks' "R08.T1's asks, as written into plan
-14". The prettier check ran as `pnpm exec prettier --check`, the same tool, since this machine has
-no `npx`._
+record, with what departs from the bullets above, is Risks' "The asks R08.T1 wrote into plan 14".
+The prettier check ran as `pnpm exec prettier --check`, the same tool, since this machine has no
+`npx`._
 
 ### R08.T2 The atmosphere labels, drafted for the owner
 
@@ -1547,9 +1684,10 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   in 2D array textures, one layer a term. The `tabulated` density and phase get their own codes in
   WGSL, whose `densityOf` today reads any profile kind above 0.5 as a tent. The `thin`
   multiple-scattering table keeps Hillaire's isotropic 32². The kernels read the tables by
-  `textureLoad` with hand filtering (a compute pass binds no sampler), and a one-layer array is
-  bound as R01's seam allows (Risks, "Re-validated at bce2aef5"). Every changed kernel stays
-  registered in `WGSL_CATALOGUE`. Files: R05's
+  `textureLoad` with hand filtering (a compute pass binds no sampler), and a one-layer array binds
+  through R08.T0's seam. A medium with no tabulated phase term binds a one-layer, one-texel
+  placeholder, which the kernels never read. Every changed kernel stays registered in
+  `WGSL_CATALOGUE`. Files: R05's
   `shaders/{transmittance,multiScattering,skyView,aerialPerspective,rayMarch,composite}.wgsl` and
   the libraries `shaders/{common,medium,view,source}.wgsl` they are assembled from, `hillaire.ts`,
   `tables.ts`, `medium.ts`, `tables.test.ts` (which pins `packMedium`'s length and its "at most 8"
@@ -1625,10 +1763,11 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   `AtmosphereInputs { radiusM, heightM, normal }`, gains the camera's geodetic latitude and
   s = g(φ) ÷ g_ref from R08.T3.d, and R05.T12.c's tests (`hillaire.test.ts`) keep passing with
   s ≡ 1 at a = c. `setMedium` allocates the layers under `atmosphere-tables`; Earth's one slice and
-  one band are bound as R01's one-layer seam allows (Risks, "Re-validated at bce2aef5"). When this lands, `ATMOSPHERE: APPROXIMATE` clears for oblate
-  thin bodies. Smoke (`just test-render`): the readbacks agree with the twin to 10⁻³ on a
-  Saturn-class figure and on Earth. Acceptance: `pnpm test` and `just test-render` pass; by hand,
-  the Saturn-class limb from orbit over the equator and the pole is recorded here.
+  one band are one-layer arrays, bound through R08.T0's seam. When this lands,
+  `ATMOSPHERE: APPROXIMATE` clears for oblate thin bodies. Smoke (`just test-render`): the
+  readbacks agree with the twin to 10⁻³ on a Saturn-class figure and on Earth. Acceptance:
+  `pnpm test` and `just test-render` pass; by hand, the Saturn-class limb from orbit over the
+  equator and the pole is recorded here.
 
 ### R08.T7 Several suns, and the sky through the air
 
@@ -1636,17 +1775,23 @@ Sky-view and aerial perspective per photorealistic view, summed over the drawn s
 (Design note 7), in `drawFrame(view, suns, scene)`. As built, R05's kernels carry one sun:
 `view.wgsl`'s `AtmosphereView` has one `sun`, `skyScale` and `sunDisc`, `source.wgsl`'s
 `sampleMediumAt` folds the phase into one cos θ, and `sourceAt` takes one μ_sun; this task widens
-them. Files: `settings.ts`, `view/quality/qualitySetting.ts`, `hillaire.ts`,
-`shaders/{view,source,skyView,aerialPerspective,rayMarch,composite}.wgsl`, `tablesCpu.ts` and the
-smoke checks.
+them. Files: `settings.ts`, `sources.ts` and `sources.test.ts`, `view/quality/qualitySetting.ts`,
+`hillaire.ts`, `shaders/{view,source,skyView,aerialPerspective,rayMarch,composite}.wgsl`,
+`tablesCpu.ts` and the smoke checks.
 
-- suns are ranked by R07's `starIlluminance`, with R07's `STAR_CUT_RELATIVE` and the setting's
-  cap, `SKY_SUN_CAP`, through R07's `lightsAt(pointM, hosts, max)` (`view/lighting/hostLights.ts`,
-  brightest first) at the camera with `max` the cap. This task writes `settings.ts`, adds
-  `atmosphereView` to R05's `ViewSettings` with its values in `SETTINGS`, and fills the cap's
-  entry in `ATMOSPHERE_QUALITY_LIMITS`. R07 lights a body with at most two stars
-  (`MAX_BODY_LIGHTS`), so on the high setting a third or fourth sun lights the sky but not the
-  surface: that limit is listed there too (Risks, "Re-validated at bce2aef5");
+- the sky's sources are the body's, Design note 7's one list: the stars R07 lights it with
+  (`lightsAt(centre, hosts, MAX_BODY_LIGHTS)`, `view/lighting/hostLights.ts`) and its planetshine
+  sources (`planetshineSources`, `view/lighting/planetshine.ts`, at
+  `SETTINGS[s].photoreal.planetshineSources`). The arrays are passed in, never rebuilt.
+  `skySources(stars, planetshine, camera, figure, medium)` in `sources.ts` turns them into
+  `SunState`s and applies Design note 7's two skips inside the air. A planetshine source's
+  `SunState` carries its per-channel illuminance (T6.d's field, carried to the camera by the
+  inverse square), its angular radius, light slot 0's absorber curve and no disc.
+- this task writes `settings.ts` and adds `atmosphereView` to R05's `ViewSettings`, with its
+  values in `SETTINGS`: `skySunCap` reading `MAX_BODY_LIGHTS`, and `skyPlanetshineSources`
+  reading `photoreal.planetshineSources`. It sizes the kernels' source array at
+  `MAX_SKY_SOURCES`, and fills `ATMOSPHERE_QUALITY_LIMITS` with Design note 7's limits: stars
+  beyond the body's list, and planetshine's approximations.
 - the sky-view, aerial-perspective and composite passes blend alpha with source zero and
   destination one, keeping R07's `METER_CLASS` in the HDR target;
 - a sun below the horizon still feeds the sky through the planet's shadow in the tables;
@@ -1660,31 +1805,42 @@ smoke checks.
 Tests (no GPU, CPU twin):
 
 - a second equal sun at the same direction doubles the sky radiance;
-- `STAR_CUT_RELATIVE` and the cap keep the right suns, agreeing with R07 on a shared fixture;
+- the sky's stars and planetshine sources are the arrays R07 builds for the body, element for
+  element, on a shared fixture;
+- on an Earth fixture, with the Sun 1° beyond the twilight limit and a full Moon at 45°, the Sun
+  is skipped. The sky equals the noon sky's twin with the Sun at the Moon's direction, scaled per
+  channel by the Moon's illuminance over the Sun's, to 10⁻⁶. With the Sun kept, the sky changes
+  by under 10⁻⁶ of the Moon's;
+- by day the Moon is skipped, and the sky changes by under 10⁻⁴;
+- the source loop is exercised at `MAX_SKY_SOURCES`;
 - after the atmosphere's passes, the HDR target's alpha still holds each pixel's `METER_CLASS`;
 - two views with the same camera have equal tables;
-- the summed sky-view agrees with per-sun tables in the twin to 2% within 10° of each sun, for a
-  Rayleigh sky and for Earth's aerosol; if it fails, the per-sun fallback of Design note 7 is
+- the summed sky-view agrees with per-source tables in the twin to 2% within 10° of each source,
+  for a Rayleigh sky and for Earth's aerosol; if it fails, the per-sun fallback of Design note 7 is
   built here and the finding recorded;
 - the per-view tables' bytes do not grow with the number of suns;
 - a star seen at the zenith from Earth's surface is dimmed by e^(−τ) of the column.
 
 Acceptance: `pnpm test` and `just test-render` pass, and by hand a binary sky on an Earth fixture
 shows both twilights, recorded here with the development machine's timings and, from the owner,
-the UHD 620's. Until R08.T10.b draws the atmosphere in the photorealistic view, the binary sky is
-looked at through the smoke harness's hidden captures (`just test-render --captures=DIR`,
-R05.T12.c's) with two suns, and its timings are taken with T11's.
+the UHD 620's, and a moonlit night on the Earth fixture (the Sun beyond the twilight limit, a full
+Moon) shows a sky within about two stops of the moonlit ground, with the fainter stars washed out.
+Until R08.T10.b draws the atmosphere in the photorealistic view, the binary sky is looked at
+through the smoke harness's hidden captures (`just test-render --captures=DIR`, R05.T12.c's) with
+two suns, and its timings are taken with T11's.
 
 ### R08.T8 Views from outside and other bodies
 
-Widen R05's ray march to N terms and several suns. The march draws any body's atmosphere other
-than the ship's local body (`SceneFrame.localBody`) at its `apparentM` from R03's
+Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
+and its planetshine sources), with no source skipped outside the air. The march draws any body's
+atmosphere other than the ship's local body (`SceneFrame.localBody`) at its `apparentM` from R03's
 `sceneAt(model, observer, time, previous)` (Design note 13), with the limb, the terminator and the
 planet's shadow in its own air; a `contact` body, which has no position, draws none. The switch to
 the sky-view table is by altitude, with a blend band. Tests (no GPU):
 
 - the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges;
-- R05.T12.e's quadrature gate holds for the widened march, at one sun and at `SKY_SUN_CAP`;
+- R05.T12.e's quadrature gate holds for the widened march, at one source and at
+  `MAX_SKY_SOURCES`;
 - the sky-view table's interpolation across the limb, from cameras at 60–100 km, against the march
   at the same pixels, recorded with the blend band's altitudes;
 - the limb falls to zero outside the top;
@@ -1725,12 +1881,22 @@ to 10⁸ m shows no step at the switch, recorded here.
     `surfaceLighting.wgsl` in their place (WGSL resolves every name in a module);
   - binds the body's transmittance and irradiance tables to the disc materials, the smooth mesh and
     the `disc cells` kernel through `view/bodies/draw.ts`'s `DISC_TEXTURES`, at group 2 bindings 6
-    and above (0–5 are taken);
+    and above (0–5 are taken). The `disc cells` kernel, a compute kernel, binds a one-layer table
+    through R08.T0's seam;
   - has the callers in `bodyDisc.wgsl` pass the geodetic height and latitude from the spheroid
     normal and the sun's azimuth from local north, in place of R07's zeros, and take the sky term
     per light rather than once at the first light's μ₀;
-  - keeps planetshine through `atmosphere_sun_transmittance` along its source's direction (R07
-    left it for this plan to keep or refuse; the lean is to keep it, Risks);
+  - keeps planetshine through the air, as Design note 7 rules (R07 left the choice to this plan).
+    Each source's direct term goes through `atmosphere_source_transmittance`, the three-node disc
+    rule over `atmosphere_sun_transmittance` at its centre's μ and azimuth, with light slot 0's
+    absorber curve. Its sky term is its illuminance times `atmosphere_sky_irradiance` at its own μ,
+    on the Lambert share as a star's is. Both terms, a star's and a planetshine source's, are added
+    outside R07's below-horizon `continue`, so that a source just set still lights the twilight
+    ground;
+  - gives `atmosphere_sun_transmittance` the light's absorber-curve slot as a fifth argument,
+    `curve : u32`. Design note 5's curves are per sun, and the four-argument form cannot pick one.
+    R10's `terrainLit.wgsl` and R11's lit passes pass it too, and take planetshine through the same
+    functions;
   - rewrites `view/appearance/litBodyProbe.ts`'s and its smoke check's pins of the stubs' 1, 1
     and 0 against the tables' twin.
 
@@ -1742,7 +1908,14 @@ to 10⁸ m shows no step at the switch, recorded here.
   - Earth's surface irradiance, direct plus diffuse at a sun zenith of 0°, lies between the
     direct beam alone and the top's; R08.T13 checks it against the reference;
   - on a Saturn-class figure at equal sun zenith, the pole's diffuse irradiance at the datum is
-    below the equator's, by the band tables' column ratio.
+    below the equator's, by the band tables' column ratio;
+  - a planetshine source and a star of equal illuminance and direction, with ρ → 0, light a point
+    identically, direct and sky;
+  - the three-node rule equals the centre's lookup as ρ → 0 to 10⁻⁶, and at ρ = 9.8° and 10° of
+    elevation on Earth's medium it agrees with a 200 × 200 quadrature over the disc in the twin to
+    2%;
+  - a source 2° below the local horizon gives no direct term and a non-zero sky term;
+  - an airless body's planetshine is R07's, unchanged.
 
   Smoke: the readbacks agree with the twin to 10⁻³. Acceptance: `pnpm test` and
   `just test-render` pass.
@@ -1786,7 +1959,10 @@ This task also draws the atmosphere in the photorealistic view (T10.b), where it
 atmosphere's passes after the discs, R07's `photorealisticPasses` slot `"atmosphere"` becomes
 built with the labels those passes submit under (R12's `PASS_ROWS` keys on them), and the labels
 of Design note 12 join `photorealStatements` (`displays/view/viewRun.ts`) beside `litLabelsOf`
-(`displays/view/photorealFrame.ts`).
+(`displays/view/photorealFrame.ts`). `PhotorealRenderer` hands each body's stars and planetshine
+sources, the arrays `planLitBodies` built, to that body's atmosphere (Design note 7's one list).
+For the camera's local body, which `planLitBodies` may not light while terrain draws it, the same
+two calls are made once a frame.
 
 An airless body (`SurfaceState::Airless`) draws no atmosphere and no label. Until the surface
 section carries P14.T24.a's figures (R08.T1's P14.T35.e), generated bodies draw no atmosphere and
@@ -1823,8 +1999,9 @@ Record, by hand on the development machine's RTX 3080 (the discrete target) and,
 the UHD 620 at 720p (low), against
 the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#performance-budget)):
 
-- the per-frame atmosphere time, against 2–4 ms low and 0.5–1 ms discrete, at one sun and at the
-  setting's `SKY_SUN_CAP`. These are estimates, recorded as findings: R05's gate judges terrain and
+- the per-frame atmosphere time, against 2–4 ms low and 0.5–1 ms discrete, at one source, at the
+  setting's count (2 + 2 on high, 2 + 1 on low) and at `MAX_SKY_SOURCES`, the last for R07's
+  deferred raise. These are estimates, recorded as findings: R05's gate judges terrain and
   atmosphere together (R05 Design note 21, decided 2026-10-06). R05 measured, at one sun and three
   terms on the RTX 3080, about 1.6 ms p50 at full clock, 2.62 / 3.37 ms p50 / p95 at the driver's
   light-load clocks after R05.T12.e, and 3.19, 4.07 and 4.28 ms at the 50th, 95th and 99th
@@ -1833,7 +2010,7 @@ the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#pe
   estimate;
 - the per-planet table time, against about 1 ms and under 0.1 ms;
 - the table bytes a planet, against 2 MB, and the per-view bytes on their own line, against
-  Design note 11's 0.43 MB, at one, two and four suns;
+  Design note 11's 0.43 MB, at one, two and four sources;
 - the slice and band counts, bytes and per-planet table time of the Jupiter- and Saturn-class
   figures, against Design note 11's 0.57 and 0.72 MB, and any widening of `KAPPA_STEP` or
   `BAND_STEP`.
@@ -2146,8 +2323,45 @@ generator, and the reference's sampling needs no domain tag.
   R08.T4.b's reduced 1 nm table may be, with its citation in `NOTICE`'s Data section. The same
   ruling's rule covers the CIE matching functions (CC BY-SA 4.0): fetched with a checksum, derived
   values committed with the CIE's citation.
-- **The sun cap on the low setting** (Design note 7) drops the scattered sky of the third and later
-  suns. Whether it needs an annunciation is for R12's audit.
+- **Stars beyond the body's two** (decided 2026-10-09, `decision-r08-design.md` item 3). The sky
+  takes the body's own list (Design note 7), so it agrees with the surfaces by construction. A
+  third or fourth star past `STAR_CUT_RELATIVE` lights neither: it is unseen by day, and it is a
+  night under a visible star while the two brightest are set. Two corrections to R07 are deferred
+  (main's deferred list, for R12's audit):
+  - `MAX_BODY_LIGHTS` per setting, 4 on high and 2 on low, which this plan's kernels already hold
+    (`MAX_SKY_SOURCES` = 6);
+  - for the camera's local body inside its air, Design note 7's twilight limit applied before the
+    cap, so that a set star yields its slot to one that is up.
+
+  Whether a dropped star that is up needs an annunciation is for R12's audit.
+
+- **Planetshine's approximations** (Design note 7; decided 2026-10-09, `decision-r08-design.md`
+  item 2). A planetshine source lights surfaces and the sky as a star does. Five things are not
+  modelled:
+  - the neighbour's own band depletion: a giant's methane seen through a Titan-class air's
+    methane, where light slot 0's curve reads the absorption somewhat too deep;
+  - its disc in the sky's phase function (a point at its centre, under 0.8% for Rayleigh at
+    ρ = 9.8°);
+  - a partly set source's sky, lit or shadowed by its centre;
+  - the inverse square across the body in the march (±0.9% at Io);
+  - R07's own stated errors (the crescent's centroid, the far-field E).
+
+  The low setting's sky may take three sources (2 + 1) in a multiple system's twilight with a moon
+  up. R08.T11 records it, and if the budget misses there, the low sky drops planetshine while a
+  star lies within the twilight limit, recorded.
+
+- **Which star's absorber curve the shared tables are built with** (open; `decision-r08-design.md`,
+  adjacent finding 3, noticed there and not checked). Design note 5 makes each absorber's curve of
+  growth per sun, and Design note 8 applies each sun's curve when the transmittance table is read.
+  But the per-planet multiple-scattering and irradiance tables (Design note 7; R08.T6, R08.T9.b)
+  are built once and shared by every sun, and their builds take the light to the sun through the
+  absorbers. The plan does not yet state which star's curve those builds use. R08.T6.c's and
+  R08.T9.b's agents settle it, and state it here, before they build.
+- **`atmosphere_sun_transmittance`'s fifth argument** (`decision-r08-design.md` item 2 and
+  adjacent finding 1). R08.T9.b gives it `curve : u32`, the light's absorber-curve slot, and adds
+  `atmosphere_source_transmittance` for planetshine (Provides, "Tables and passes"). R10's plan
+  still names the four-argument form (its Consumes, for R10.T10.b's `terrainLit.wgsl`), as R11's
+  does. R10's re-validation must pick up the fifth argument, `curve`.
 - **Refraction and scintillation are not drawn.** On Venus, refraction near the surface raises the
   horizon; R06 leaves scintillation to this plan, and the brainstorm asks for neither. If the
   realism ruling wants them, they are later tasks. R10 asks this plan for the sun's refracted
@@ -2189,7 +2403,7 @@ generator, and the reference's sampling needs no domain tag.
   decisions, item 3). `BAKE_CEILING_S`, 5 s a world, stays the UHD 620 laptop's figure, the
   minimum specification. The development machine (Ryzen 7 3700X) records its own bake time beside
   it and fails only if it is over the laptop's ceiling; no separate desktop ceiling is set.
-- **R08.T1's asks, as written into plan 14** (2026-10-09, at `62c196c3`). P14.T24.c–f sit under
+- **The asks R08.T1 wrote into plan 14** (2026-10-09, at `62c196c3`). P14.T24.c–f sit under
   plan 14's Phase E and P14.T35.e under Phase H, each marked drafted for the owner. **The owner's
   sign-off is pending**: the orchestrator has a decision agent rule on them, the acceptance is
   recorded here when given, and the client is built to the drafts meanwhile. They were reconciled
@@ -2259,8 +2473,8 @@ generator, and the reference's sampling needs no domain tag.
     the four transmittance read sites (T6.b, T6.c); `rayMarch.wgsl` a compute kernel; `geodeticOf`
     replaced in T6.e.
   - _R01:_ the smoke harness has no `no-f16` variant (it runs `default` and `no-subgroups`); a
-    compute pass binds no sampler; a one-layer array is viewed as `2d` in a compute binding (open,
-    below); compute catalogue entries carry no `displayName`.
+    compute pass binds no sampler; a one-layer array was viewed as `2d` in a compute binding
+    (decided: R08.T0); compute catalogue entries carry no `displayName`.
   - _R02 and R03:_ the label path (`photorealStatements`, `litLabelsOf`); `sceneAt`'s fourth
     argument and `null`, `SceneFrame.localBody`, and `contact` bodies, which draw no atmosphere.
   - _R06:_ the sky layers' real names (`skySpriteStars`, `BandLayer`, `SkyCubeLayer`,
@@ -2295,21 +2509,23 @@ generator, and the reference's sampling needs no domain tag.
   - _Pending re-validation:_ none. Every task's inputs are in the code, in this plan or in a
     fixture; generated bodies' atmospheres wait on P14.T24.a–b and R08.T1's asks (Tasks).
   - _Open, raised with "main", each with its lean:_
-    - the one-layer array in a compute binding (T6.b, T6.f, T9.b): lean, a compute `sampled`
-      binding states its view dimension, as a material's `TextureBindingSpec.viewDimension` does,
-      a small R01 change approved before T6.b; the fallback, two layers for a one-slice body, would
-      add about 0.15 MB (a second transmittance, multiple-scattering and irradiance layer) to
-      Earth's 0.40 MB;
+    - _Decided 2026-10-09 (`decision-r08-design.md` item 1):_ the one-layer array in a compute
+      binding. The adapter views each compute texture at the dimension its kernel declares (R08.T0),
+      and the two-layer fallback is refused.
     - P14.T35.e's scope (the surface section's base fields beside T24.c–f's) and its wire change,
       written with R09.T0.a's asks: lean, one wire task for every rendering plan that reads the
       section;
     - whether the published benchmark tables (Garcia and Siewert 1985, Natraj et al. 2009 and 2012,
       Kokhanovsky et al. 2010, IPRT Phase A, Loughman et al. 2004) may be committed whole: lean,
       only the values each test asserts, with citations, as R05.T12.d's rule has it;
-    - planetshine through the receiving body's air (R07's stub, kept or refused here): lean, keep,
-      since a neighbour's light crosses the air as sunlight does;
-    - R07's two-star surface cap against `SKY_SUN_CAP`'s four on high: lean, keep both, and list
-      the third and fourth suns' unlit surface in `ATMOSPHERE_QUALITY_LIMITS` for R12's audit.
+    - _Decided 2026-10-09 (`decision-r08-design.md` item 2):_ planetshine through the receiving
+      body's air is kept and taken as far as starlight: its transmittance (a three-node disc rule)
+      and its sky term on surfaces (T9.b), and the drawn sky through the body's one list of sources
+      (T7, T8).
+    - _Decided 2026-10-09 (`decision-r08-design.md` item 3):_ R07's two-star cap against the sky's
+      four. The sky takes the body's own list (`SKY_SUN_CAP` reads `MAX_BODY_LIGHTS`), with two
+      skips of invisible contributions. R07's raise and the set star's yielded slot are deferred
+      corrections to R07.
 - **Deviations in T2, as built** (2026-10-09).
   - _A sixth label and the giant's note, decided._ T2 asked "main" whether a giant drawn without
     its air carries a note, since its surface section is `not_applicable` and Design note 12's
@@ -2330,7 +2546,7 @@ generator, and the reference's sampling needs no domain tag.
     `APPROXIMATE` (below). Its finding F1, that P14.T35.e gave the `envelope` section to giants
     only, went to R08.T1, which landed first: P14.T35.e now gives one to every gas-envelope body,
     and a sub-Neptune's surface section turns `not_applicable`, a lean open with "main" (Risks,
-    "R08.T1's asks, as written into plan 14"). The labels hold either way.
+    "The asks R08.T1 wrote into plan 14"). The labels hold either way.
   - _The module._ `view/atmosphere/labels.ts` holds `AtmosphereLabel`, there rather than in
     `assemble.ts` as the Provides sketch groups it (the task's Files; R08.T10.a imports it), and
     `ATMOSPHERE_STATEMENTS`, each key's string. Two names are added. `ATMOSPHERE_LABELS` gives the

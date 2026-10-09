@@ -3002,3 +3002,11 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
 - **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged.
 - **Extended by R06** (append-only, approved 2026-10-03): `releaseBuffer`, `releaseTexture`, `createPackedCube`'s optional `name` and `createPointSplatAsync` (R06.T13.h); `writePackedCubeLevelFromBuffer`'s optional `face`, the buffer then holding that one face (R06.T13.g); `MemoryCategory` gains `sky-cube` and `sky-scratch`; `WGSL_CATALOGUE` takes a `point-splat` kind. Existing callers unchanged; recorded in R06's Risks.
 - **A `2d-array` binding takes a single-layer 2D texture** (R05.T11.a, approved by the orchestrator 2026-10-03): `drawing.ts`'s `viewDimensionBinds` lets a material declaring `viewDimension: "2d-array"` bind a 2D texture of one layer, viewed as a one-layer array, so that R05's layered normals atlas binds whatever its layer count; every other mismatch is refused as before (`engine.test.ts`). `platform.ts` gains `MAX_TEXTURE_ARRAY_LAYERS` (256, WebGPU's default, never raised). Additive.
+- **A compute binding takes the view dimension its kernel declares** (R08.T0;
+  `decision-r08-design.md` item 1, 2026-10-09). `kernelBindings` reads each texture binding's
+  view dimension from its WGSL type. `resolveKernelResources` views a sampled or storage texture
+  at that dimension, checked by `viewDimensionBinds`, which moves to `resources.ts`. So a kernel
+  declaring `texture_2d_array` or `texture_storage_2d_array` binds a one-layer 2D texture as a
+  one-layer array, as R05.T11.a's rule lets a material. A cube's storage view stays a six-layer
+  `2d-array`, and any other mismatch throws, naming the kernel and the binding, where WebGPU
+  would refuse the submission. `ComputeBindings` is unchanged. Additive.
