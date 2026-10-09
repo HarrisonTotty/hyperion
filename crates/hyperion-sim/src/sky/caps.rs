@@ -460,13 +460,15 @@ impl RayRadii {
     ///
     /// They are on the same lattice (R06.T8.i, a shell's edge). Towards each direction they give
     /// the lesser of the edge and [`toward`](Self::toward), bit for bit, since both take a ray's
-    /// radius as it is.
+    /// radius as it is. The hybrid sky holds its real boundary so within its real limit (rendering
+    /// plan R13, Design note 3), and R13.T1.b's bench censuses to the boundary held so, before
+    /// R13.T2.a's rule is built.
     ///
     /// # Panics
     ///
     /// Unless `edge_ly` is finite and positive.
     #[must_use]
-    pub(crate) fn within(&self, edge_ly: f64) -> Self {
+    pub fn within(&self, edge_ly: f64) -> Self {
         assert!(
             edge_ly.is_finite() && edge_ly > 0.0,
             "an edge of {edge_ly} ly holds no ray within it"
@@ -1584,10 +1586,38 @@ impl CapCount {
         self.cap_widened(Self::layer_index(layer), layer, WIDENING_SPACINGS)
     }
 
+    /// `layer`'s cap by [`cap`](Self::cap)'s rule with an expected count beyond of under `budget`
+    /// stars instead of one: λ the largest yield that keeps the stars left out under `budget`, then
+    /// the same widening. A budget of one is [`cap`](Self::cap), bit for bit, and a larger one
+    /// holds every ray's radius at or within it.
+    ///
+    /// It is for the record only (rendering plan R13, R13.T1.b): a yield-ordered budget for D and
+    /// E, weighed for a later ruling (R13's Risks), which no census takes.
+    ///
+    /// # Panics
+    ///
+    /// If `layer` is not one of [`CAPPED_LAYERS`], or `budget` is not finite and positive.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn cap_with_budget(&self, layer: Layer, budget: f64) -> LayerCap {
+        assert!(
+            budget.is_finite() && budget > 0.0,
+            "a budget of stars beyond is finite and positive, not {budget}"
+        );
+        self.cap_budgeted(Self::layer_index(layer), layer, WIDENING_SPACINGS, budget)
+    }
+
     /// The cap of `layer`, the `l`-th of [`CAPPED_LAYERS`], each ray widened to the largest radius
     /// within `spacings` of the lattice's spacing ([`caps_widened`](Self::caps_widened)).
     #[must_use]
     fn cap_widened(&self, l: usize, layer: Layer, spacings: f64) -> LayerCap {
+        self.cap_budgeted(l, layer, spacings, 1.0)
+    }
+
+    /// [`cap_widened`](Self::cap_widened) with λ the largest yield that keeps the stars left out
+    /// under `budget` ([`ray_extents`]).
+    #[must_use]
+    fn cap_budgeted(&self, l: usize, layer: Layer, spacings: f64, budget: f64) -> LayerCap {
         let n_rays = self.lattice.directions.len();
         let intervals = self.radii.len() - 1;
         let bound = self.bounds[l];
@@ -1603,7 +1633,7 @@ impl CapCount {
                 systems.push(self.slice(n, l, i));
             }
         }
-        let kept = ray_extents(&stars, &systems, intervals, 1.0);
+        let kept = ray_extents(&stars, &systems, intervals, budget);
         let radii: Vec<f64> = kept.iter().map(|&k| self.radii[k].min(bound)).collect();
         let rays = RayRadii::new(
             Arc::clone(&self.lattice),
@@ -2711,6 +2741,63 @@ mod tests {
     #[should_panic(expected = "a boundary's radius is finite and not negative, not NaN ly")]
     fn a_nan_boundary_is_refused() {
         let _ = boundary_ly(LightYears::new(f64::NAN));
+    }
+
+    /// A cap with a budget of stars beyond (R13.T1.b), near the Sun at 7.95 on a coarse count (192
+    /// rays, 12 steps a decade): a budget of one is [`CapCount::cap`], bit for bit, in every layer;
+    /// each larger budget of 3, 10 and 30 holds every ray at or within the smaller's, states under
+    /// its budget beyond, and opens fewer of E's systems than a budget of one.
+    #[test]
+    fn a_larger_budget_holds_every_ray_within_the_caps() {
+        let count = count_at(
+            [0.0, 26_000.0, 68.0],
+            CapResolution::new(192, 12).expect("non-zero"),
+        );
+        let radii = |cap: &LayerCap| cap.rays().expect("one radius a ray").radii_ly().to_vec();
+        let radii_bits = |cap: &LayerCap| radii(cap).into_iter().map(bits).collect::<Vec<_>>();
+        for layer in CAPPED_LAYERS {
+            let (own, one) = (count.cap(layer), count.cap_with_budget(layer, 1.0));
+            assert_eq!(radii_bits(&one), radii_bits(&own), "{layer:?}");
+            assert_eq!(bits(one.expected_beyond()), bits(own.expected_beyond()));
+            assert_eq!(
+                bits(one.rule_bound().value()),
+                bits(own.rule_bound().value())
+            );
+            let mut nearer = own;
+            for budget in [3.0, 10.0, 30.0] {
+                let cap = count.cap_with_budget(layer, budget);
+                let held = radii(&cap).iter().zip(radii(&nearer)).all(|(r, n)| r <= &n);
+                assert!(held, "{layer:?} at a budget of {budget}");
+                assert!(
+                    (0.0..budget).contains(&cap.expected_beyond()),
+                    "{layer:?}: {} beyond at a budget of {budget}",
+                    cap.expected_beyond()
+                );
+                assert_eq!(bits(cap.expected_beyond()), bits(count.stars_beyond(&cap)));
+                nearer = cap;
+            }
+        }
+        let e = |budget| count.systems_within(&count.cap_with_budget(Layer::E, budget));
+        assert!(e(30.0) < e(1.0), "E: {} against {}", e(30.0), e(1.0));
+    }
+
+    /// A budget of stars beyond must be finite and positive.
+    #[test]
+    #[should_panic(expected = "a budget of stars beyond is finite and positive, not 0")]
+    fn a_budget_of_none_is_refused() {
+        let (plan, rays) = small_count_plan();
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let count = plan.join([plan.count_rays(milky_way_galaxy(), tables, &rays, 0..8)]);
+        let _ = count.cap_with_budget(Layer::E, 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a budget of stars beyond is finite and positive, not NaN")]
+    fn a_nan_budget_is_refused() {
+        let (plan, rays) = small_count_plan();
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let count = plan.join([plan.count_rays(milky_way_galaxy(), tables, &rays, 0..8)]);
+        let _ = count.cap_with_budget(Layer::E, f64::NAN);
     }
 
     /// A context near the Sun for the eye's pre-pass and the band: the fixture's tables.

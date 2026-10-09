@@ -1,5 +1,5 @@
 //! The hybrid sky's real boundary, measured from the caps' count alone, with no census (rendering
-//! plan R13, R13.T1; Design notes 3 and 4). Slow.
+//! plan R13, R13.T1 and T1.b; Design notes 3 and 4). Slow.
 //!
 //! For layers C to E the real boundary R(u) is each ray's cap at the synthetic ceiling
 //! V<sub>P</sub>, the cap `CapCount::measure` gives at cut V<sub>P</sub>, held within the same
@@ -32,8 +32,31 @@
 //! count brighter than V<sub>P</sub> beyond it, at the caps' own count, is under one a layer.
 //! R13's Risks record the figures.
 //!
+//! **The capped boundary** (R13.T1.b, `the_capped_boundary_is_recorded`; decided by the owner on
+//! 2026-10-09, `decision-r13-guard-trip.md`). R(u) is held ray by ray within a real limit as well
+//! (`RayRadii::within`, R13 Design note 3). At the same points and cuts, for V<sub>P</sub> of 4.5
+//! and 5.0 and limits of 1,000, 2,000 and 4,000 ly, the test records per layer:
+//!
+//! - R(u) by ray and the rays the limit holds;
+//! - the expected stars beyond R(u) brighter than V 1, 2, 3, 4, 4.5, 5 and 6.5 and the cut, and
+//!   brighter than V<sub>P</sub> at the caps' own count: the bright stars beyond, which a reply's
+//!   `bright_beyond` states and the synthetic tier draws;
+//! - the systems within R(u), by ray and with fix (i)'s widened cones, and the gap by ray and with
+//!   fix (i);
+//! - for the record only, T7.b's rule for D and E with a budget of 3, 10 and 30 stars beyond
+//!   instead of one (`CapCount::cap_with_budget`), with no limit and at 2,000 ly: the same figures,
+//!   for a later ruling on a yield-ordered budget.
+//!
+//! It prints, at each cut, R13.T1.b's guard's two counts at 2,000 ly, C to E together: the stars
+//! brighter than V 4.5 beyond R(u) (more than 60 go to the owner) and those brighter than V 1.0
+//! (more than 0.5). It asserts only that R(u) lies within the cut's caps and the limit on every
+//! ray, and that each count beyond it is at least the count beyond R13.T1's R(u), the cap at
+//! V<sub>P</sub> alone, to rounding. It reads `CapCount::cap_with_budget`, which only the sim's
+//! `testing` feature builds, so it is compiled where the feature is on: in every workspace run,
+//! through `hyperion-fit`, and with `--features testing`.
+//!
 //! The points are measured on six threads, one a point, each with its own noise cache. On
-//! wasm32-wasip1, which has no threads, the test is left out: it would take hours on one.
+//! wasm32-wasip1, which has no threads, the tests are left out: they would take hours on one.
 
 #![cfg(not(target_family = "wasm"))]
 
@@ -234,9 +257,15 @@ fn cuts_at(fixture: &Fixture, observer: &Observer, cache: &mut NoiseCache) -> Ve
     cuts
 }
 
-/// The ceilings' counts at `observer`, at the caps' own resolution, with their caps and spheres.
-fn ceilings_at(fixture: &Fixture, observer: &Observer, cache: &mut NoiseCache) -> Vec<Ceiling> {
-    CEILINGS_V
+/// The counts at `observer` of the ceilings `ceilings_v`, V, at the caps' own resolution, with
+/// their caps and spheres.
+fn ceilings_at(
+    fixture: &Fixture,
+    observer: &Observer,
+    ceilings_v: &[f64],
+    cache: &mut NoiseCache,
+) -> Vec<Ceiling> {
+    ceilings_v
         .iter()
         .map(|&v| {
             let count = CapCount::measure(
@@ -429,7 +458,7 @@ fn measure_point(fixture: &Fixture, name: &str, point: [f64; 3]) -> (Vec<String>
     .expect("an observer");
     let mut cache = NoiseCache::with_capacity(1 << 16);
     let cuts = cuts_at(fixture, &observer, &mut cache);
-    let ceilings = ceilings_at(fixture, &observer, &mut cache);
+    let ceilings = ceilings_at(fixture, &observer, &CEILINGS_V, &mut cache);
     let mut failures = Vec::new();
     let mut records = boundaries(name, &cuts, &ceilings, &mut failures);
     let at = (cuts.as_slice(), ceilings.as_slice());
@@ -557,10 +586,9 @@ fn line(record: &Record, ceiling: &Ceiling, cut: &Cut) -> String {
     )
 }
 
-#[test]
-#[ignore = "slow: builds the luminosity tables and counts the caps at seven cuts and recounts \
-            3,072 rays at ten, at six points"]
-fn the_hybrid_boundary_is_recorded() {
+/// Measures each of the six points with `measure` on a thread of its own, over the fixture's
+/// galaxy and tables, then prints every point's lines in order and asserts that no point failed.
+fn record_points(measure: impl Fn(&Fixture, &str, [f64; 3]) -> (Vec<String>, Vec<String>) + Sync) {
     let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
         .expect("the Milky Way-like parameters are valid");
     let fixture = Fixture {
@@ -573,8 +601,8 @@ fn the_hybrid_boundary_is_recorded() {
         let handles: Vec<_> = CAPS_POINTS
             .iter()
             .map(|&(name, point)| {
-                let fixture = &fixture;
-                scope.spawn(move || measure_point(fixture, name, point))
+                let (fixture, measure) = (&fixture, &measure);
+                scope.spawn(move || measure(fixture, name, point))
             })
             .collect();
         handles
@@ -590,4 +618,448 @@ fn the_hybrid_boundary_is_recorded() {
         failures.extend(failed);
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+#[ignore = "slow: builds the luminosity tables and counts the caps at seven cuts and recounts \
+            3,072 rays at ten, at six points"]
+fn the_hybrid_boundary_is_recorded() {
+    record_points(measure_point);
+}
+
+#[cfg(feature = "testing")]
+#[test]
+#[ignore = "slow: builds the luminosity tables and counts the caps at five cuts and recounts \
+            3,072 rays at ten, at six points"]
+fn the_capped_boundary_is_recorded() {
+    record_points(capped::measure_point);
+}
+
+/// R13.T1.b's record of the real boundary held within a real limit (rendering plan R13, Design
+/// notes 3 and 4; `decision-r13-guard-trip.md` §6): see the file's documentation.
+///
+/// It reads `CapCount::cap_with_budget`, which the sim builds only for its own unit tests and
+/// under its `testing` feature. A workspace's run (`just test-slow`) has the feature through
+/// `hyperion-fit`; a run of this crate's tests alone asks it with `--features testing`.
+#[cfg(feature = "testing")]
+mod capped {
+    use hyperion_sim::coords::GalacticPosition;
+    use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    use hyperion_sim::id::Layer;
+    use hyperion_sim::observe::Observer;
+    use hyperion_sim::sky::band::BandSpec;
+    use hyperion_sim::sky::caps::{CAPPED_LAYERS, CapCount, LayerCap};
+    use hyperion_sim::time::UniverseTime;
+    use hyperion_sim::units::{LightYears, Magnitudes};
+
+    use super::common::sky::caps_recount;
+    use super::{
+        BOUNDED_LAYERS, Ceiling, Cut, Fixture, WholeSky, cap_of, ceilings_at, cuts_at, quantile,
+        same_v, sorted_radii, texel_centre, widened_toward,
+    };
+
+    /// The ceilings V<sub>P</sub> measured within the limits, V: the owner's 4.5, and 5.0, RM3's
+    /// interim (R13 Design note 4).
+    const CEILINGS_V: [f64; 2] = [4.5, 5.0];
+
+    /// The real limits, ly: the first drive's range, the owner's 2,000 ly (decided 2026-10-09,
+    /// R13.T2's `REAL_LIMIT_LY`) and twice it.
+    const LIMITS_LY: [f64; 3] = [1_000.0, 2_000.0, 4_000.0];
+
+    /// The owner's real limit, ly, at which the guard is read and the budgets are held too.
+    const REAL_LIMIT_LY: f64 = 2_000.0;
+
+    /// The depths, V, to which the stars beyond R(u) are counted besides the cut: the bright stars
+    /// beyond, which `bright_beyond`'s count and the synthetic tier hold, both ceilings and the
+    /// naked eye's.
+    const DEPTHS_V: [f64; 7] = [1.0, 2.0, 3.0, 4.0, 4.5, 5.0, NAKED_EYE_V];
+
+    /// The naked eye's depth, V.
+    const NAKED_EYE_V: f64 = 6.5;
+
+    /// The depths counted beyond R(u): [`DEPTHS_V`], then the cut.
+    const DEPTHS: usize = DEPTHS_V.len() + 1;
+
+    /// The budgets of stars beyond weighed for D and E besides T7.b's one, for the record
+    /// (R13's Risks, a yield-ordered budget).
+    const BUDGETS: [f64; 3] = [3.0, 10.0, 30.0];
+
+    /// The layers a budget is weighed for; C keeps T7.b's budget of one.
+    const BUDGETED_LAYERS: [Layer; 2] = [Layer::D, Layer::E];
+
+    /// R13.T1.b's guard, near the Sun at the owner's limit, C to E together at either ceiling:
+    /// more than 60 stars brighter than V 4.5 beyond R(u), or more than 0.5 brighter than V 1.0,
+    /// goes to the owner before R13.T2 builds. Each is a depth, V, and the most expected.
+    const GUARD: [(f64, f64); 2] = [(4.5, 60.0), (1.0, 0.5)];
+
+    /// One shape of the boundary: R(u) held within a real limit or not, at a budget of stars
+    /// beyond for D and E.
+    #[derive(Debug, Clone, Copy)]
+    struct Kind {
+        limit_ly: Option<f64>,
+        budget: f64,
+    }
+
+    impl Kind {
+        /// The kind's name, for printing.
+        fn name(self) -> String {
+            let limit = self
+                .limit_ly
+                .map_or_else(|| "no limit".to_owned(), |l| format!("limit {l:.0} ly"));
+            format!("{limit}, budget {:.0}", self.budget)
+        }
+
+        /// `layer`'s budget: the kind's for D and E, T7.b's one for C.
+        fn budget_of(self, layer: Layer) -> f64 {
+            if BUDGETED_LAYERS.contains(&layer) {
+                self.budget
+            } else {
+                1.0
+            }
+        }
+    }
+
+    /// The shapes measured: first T7.b's budget of one with no limit, R13.T1's R(u) and every
+    /// other's reference; then each limit; then each budget, with no limit and at the owner's.
+    fn kinds() -> Vec<Kind> {
+        let kind = |limit_ly, budget| Kind { limit_ly, budget };
+        let mut kinds = vec![kind(None, 1.0)];
+        kinds.extend(LIMITS_LY.map(|l| kind(Some(l), 1.0)));
+        for limit in [None, Some(REAL_LIMIT_LY)] {
+            kinds.extend(BUDGETS.map(|b| kind(limit, b)));
+        }
+        kinds
+    }
+
+    /// The `k`-th depth beyond R(u), V, at the cut `cut_v`.
+    fn depth_v(k: usize, cut_v: f64) -> f64 {
+        DEPTHS_V.get(k).copied().unwrap_or(cut_v)
+    }
+
+    /// The index in [`DEPTHS_V`] of the depth `v`, V.
+    fn depth_of(v: f64) -> usize {
+        DEPTHS_V
+            .iter()
+            .position(|&d| same_v(d, v))
+            .expect("a depth counted")
+    }
+
+    /// One layer's boundary of one kind at one cut and ceiling, and what is measured of it.
+    struct Record {
+        cut: usize,
+        ceiling: usize,
+        kind: usize,
+        layer: Layer,
+        /// R(u) by ray.
+        rays: LayerCap,
+        /// The rays the limit holds.
+        held: usize,
+        /// Brighter than V<sub>P</sub> beyond R(u), at the caps' own count at V<sub>P</sub>: the
+        /// count a reply's `bright_beyond` would state (R13.T2.a).
+        own_beyond: f64,
+        /// Beyond R(u), recounted, brighter than each depth of [`depth_v`].
+        beyond: [f64; DEPTHS],
+        /// The systems by ray, by ray with fix (i), and within the cut's caps.
+        systems: [f64; 3],
+        /// Brighter than the cut, within the radius towards each ray's texel and beyond R(u)
+        /// towards the ray: by ray, and with fix (i).
+        gap: [f64; 2],
+    }
+
+    /// Each layer's boundary of each kind at each cut and ceiling, with what the caps' own count
+    /// at the ceiling says of it, and each failure of R(u) to lie within the cut's caps and the
+    /// limit on every ray, named by `name`.
+    fn boundaries(
+        name: &str,
+        (cuts, ceilings, kinds): (&[Cut], &[Ceiling], &[Kind]),
+        failures: &mut Vec<String>,
+    ) -> Vec<Record> {
+        let mut records = Vec::new();
+        for (p, ceiling) in ceilings.iter().enumerate() {
+            for (k, kind) in kinds.iter().enumerate() {
+                for layer in BOUNDED_LAYERS {
+                    let high = ceiling.count.cap_with_budget(layer, kind.budget_of(layer));
+                    let high = high.rays().expect("one radius a ray");
+                    for (c, cut) in cuts.iter().enumerate() {
+                        let low = cap_of(&cut.caps, layer).rays().expect("one radius a ray");
+                        let held = high.lesser(low);
+                        let (rays, held_by_limit) = match kind.limit_ly {
+                            Some(limit) => (
+                                held.within(limit),
+                                held.radii_ly().iter().filter(|&&r| r > limit).count(),
+                            ),
+                            None => (held, 0),
+                        };
+                        let within =
+                            rays.radii_ly().iter().zip(low.radii_ly()).all(|(&r, &l)| {
+                                r <= l && kind.limit_ly.is_none_or(|limit| r <= limit)
+                            });
+                        if !within {
+                            failures.push(format!(
+                                "{name}, {}, V_P {}, {}, {layer:?}: R(u) beyond the cut's caps or \
+                                 the limit",
+                                cut.name,
+                                ceiling.v,
+                                kind.name()
+                            ));
+                        }
+                        let rays = LayerCap::forced_by_ray(layer, rays);
+                        records.push(Record {
+                            cut: c,
+                            ceiling: p,
+                            kind: k,
+                            layer,
+                            own_beyond: ceiling.count.stars_beyond(&rays),
+                            rays,
+                            held: held_by_limit,
+                            beyond: [f64::NAN; DEPTHS],
+                            systems: [f64::NAN; 3],
+                            gap: [f64::NAN; 2],
+                        });
+                    }
+                }
+            }
+        }
+        records
+    }
+
+    /// The recounts at `observer`, one cut at a time so that one is held at once: each record's
+    /// counts beyond, systems and gap, and every layer's whole sky at each recount's cut.
+    fn recount_records(
+        fixture: &Fixture,
+        observer: &Observer,
+        cuts: &[Cut],
+        records: &mut [Record],
+        cache: &mut NoiseCache,
+    ) -> WholeSky {
+        let mut recount_cuts: Vec<f64> = DEPTHS_V
+            .iter()
+            .copied()
+            .chain(cuts.iter().map(|c| c.v))
+            .collect();
+        recount_cuts.sort_by(f64::total_cmp);
+        recount_cuts.dedup_by(|a, b| same_v(*a, *b));
+        let rho = BandSpec::STANDARD.largest_texel_radius().value();
+        let mut whole_sky = Vec::new();
+        for f in recount_cuts {
+            let count = CapCount::measure(
+                &fixture.galaxy,
+                &fixture.tables,
+                &fixture.envelope,
+                observer,
+                Magnitudes::new(f),
+                caps_recount(),
+                cache,
+            );
+            whole_sky.push((
+                f,
+                CAPPED_LAYERS.map(|layer| count.stars_beyond_toward(layer, |_| LightYears::ZERO)),
+            ));
+            for record in records.iter_mut() {
+                let cut = &cuts[record.cut];
+                let rays = &record.rays;
+                for k in 0..DEPTHS {
+                    if same_v(depth_v(k, cut.v), f) {
+                        record.beyond[k] = count.stars_beyond(rays);
+                    }
+                }
+                if same_v(cut.v, f) {
+                    let by_ray = rays.rays().expect("one radius a ray");
+                    let widened = |u| widened_toward(by_ray, rho, u);
+                    let at_texel = |u| rays.radius_toward(texel_centre(u));
+                    let own = |u| rays.radius_toward(u);
+                    record.systems = [
+                        count.systems_within(rays),
+                        count.systems_within_toward(record.layer, widened),
+                        count.systems_within(cap_of(&cut.caps, record.layer)),
+                    ];
+                    record.gap = [
+                        count.stars_within_and_beyond_toward(record.layer, at_texel, own),
+                        count.stars_within_and_beyond_toward(record.layer, at_texel, widened),
+                    ];
+                }
+            }
+        }
+        whole_sky
+    }
+
+    /// Each failure of a record's counts beyond R(u) to be at least those beyond R13.T1's R(u),
+    /// the cap at V<sub>P</sub> alone, the first kind's, to rounding, named by `name`.
+    fn check_beyond(name: &str, records: &[Record], failures: &mut Vec<String>) {
+        for record in records.iter().filter(|r| r.kind > 0) {
+            let alone = records
+                .iter()
+                .find(|r| {
+                    r.kind == 0
+                        && (r.cut, r.ceiling, r.layer) == (record.cut, record.ceiling, record.layer)
+                })
+                .expect("a record of the cap at V_P alone");
+            let counts = record.beyond.iter().chain([&record.own_beyond]);
+            let alone_counts = alone.beyond.iter().chain([&alone.own_beyond]);
+            for (k, (&here, &there)) in counts.zip(alone_counts).enumerate() {
+                if here < there * (1.0 - 1e-12) {
+                    failures.push(format!(
+                        "{name}, cut {}, ceiling {}, kind {}, {:?}: {here} beyond at depth {k}, \
+                         against {there} beyond the cap at V_P alone",
+                        record.cut, record.ceiling, record.kind, record.layer
+                    ));
+                }
+            }
+        }
+    }
+
+    /// The boundary's measures at `point`, named `name`: the lines to print, and each failure of
+    /// the two asserts.
+    pub(super) fn measure_point(
+        fixture: &Fixture,
+        name: &str,
+        point: [f64; 3],
+    ) -> (Vec<String>, Vec<String>) {
+        let observer = Observer::new(
+            GalacticPosition::from_light_years(point).expect("in the cube"),
+            UniverseTime::EPOCH,
+        )
+        .expect("an observer");
+        let mut cache = NoiseCache::with_capacity(1 << 16);
+        let cuts = cuts_at(fixture, &observer, &mut cache);
+        let ceilings = ceilings_at(fixture, &observer, &CEILINGS_V, &mut cache);
+        let kinds = kinds();
+        let mut failures = Vec::new();
+        let mut records = boundaries(name, (&cuts, &ceilings, &kinds), &mut failures);
+        let whole_sky = recount_records(fixture, &observer, &cuts, &mut records, &mut cache);
+        check_beyond(name, &records, &mut failures);
+        let mut lines = vec![format!(
+            "{name} {point:?}: the eye's cut {:.3}; R(u) held within each limit, and at each \
+             budget for D and E (R13.T1.b)",
+            cuts[0].v
+        )];
+        for (c, cut) in cuts.iter().enumerate() {
+            lines.push(format!("{name}, {}:", cut.name));
+            lines.push(format!(
+                "  every layer, the whole sky's stars: {}",
+                depth_counts(
+                    std::array::from_fn(|k| whole_of(&whole_sky, depth_v(k, cut.v))),
+                    cut.v
+                )
+            ));
+            for (p, ceiling) in ceilings.iter().enumerate() {
+                for (k, kind) in kinds.iter().enumerate() {
+                    let of = |r: &&Record| (r.cut, r.ceiling, r.kind) == (c, p, k);
+                    let these: Vec<&Record> = records.iter().filter(of).collect();
+                    for record in &these {
+                        lines.push(line(record, ceiling.v, *kind, cut.v));
+                    }
+                    lines.push(sum_line(&these, (ceiling.v, *kind, cut.v), &whole_sky));
+                }
+            }
+            lines.extend(guard_lines(&records, &kinds, (c, &ceilings)));
+        }
+        (lines, failures)
+    }
+
+    /// The counts beyond at each depth, named, for printing.
+    fn depth_counts(beyond: [f64; DEPTHS], cut_v: f64) -> String {
+        beyond
+            .iter()
+            .enumerate()
+            .map(|(k, n)| format!("V{:.2} {n:.3e}", depth_v(k, cut_v)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// One record's line.
+    fn line(record: &Record, ceiling_v: f64, kind: Kind, cut_v: f64) -> String {
+        let sorted = sorted_radii(record.rays.rays().expect("one radius a ray"));
+        let beyond = depth_counts(record.beyond, cut_v);
+        let [rays, fix, whole] = record.systems;
+        let [gap, fix_gap] = record.gap;
+        format!(
+            "  V_P {ceiling_v:.1}, {}, {:?}: R(u) by ray median {:.0} ({:.0}–{:.0}), largest {:.0} \
+             ly, {} rays held by the limit. Beyond: {beyond}; V_P at the caps' count {:.3e}. \
+             Systems: by ray {rays:.4e}, fix (i) {fix:.4e} ({:.4}×), the cut's caps {whole:.4e}. \
+             Gap at the cut: by ray {gap:.3}, with fix (i) {fix_gap:.2e}",
+            kind.name(),
+            record.layer,
+            quantile(&sorted, 0.5),
+            quantile(&sorted, 0.1),
+            quantile(&sorted, 0.9),
+            quantile(&sorted, 1.0),
+            record.held,
+            record.own_beyond,
+            fix / rays,
+        )
+    }
+
+    /// The line of `records`, C to E of one kind at one cut and ceiling, summed: the counts beyond
+    /// R(u), their share of every layer's whole sky to V 6.5 and to the cut, and the systems.
+    fn sum_line(
+        records: &[&Record],
+        (ceiling_v, kind, cut_v): (f64, Kind, f64),
+        whole_sky: &WholeSky,
+    ) -> String {
+        let beyond: [f64; DEPTHS] =
+            std::array::from_fn(|k| records.iter().map(|r| r.beyond[k]).sum());
+        let whole = |v| whole_of(whole_sky, v);
+        let own: f64 = records.iter().map(|r| r.own_beyond).sum();
+        let [rays, fix] = [0, 1].map(|s| records.iter().map(|r| r.systems[s]).sum::<f64>());
+        let counts = depth_counts(beyond, cut_v);
+        format!(
+            "  V_P {ceiling_v:.1}, {}, C to E: beyond {counts}; V_P at the caps' count {own:.3e}; \
+             the share of the whole sky beyond: to V 6.5 {:.3}%, to the cut {:.3}%; systems by ray \
+             {rays:.4e}, fix (i) {fix:.4e} ({:.4}×)",
+            kind.name(),
+            100.0 * beyond[depth_of(NAKED_EYE_V)] / whole(NAKED_EYE_V),
+            100.0 * beyond[DEPTHS - 1] / whole(cut_v),
+            fix / rays,
+        )
+    }
+
+    /// Every layer's whole sky to `v`, V: its stars brighter than `v` at any distance, summed.
+    fn whole_of(whole_sky: &WholeSky, v: f64) -> f64 {
+        let (_, layers) = whole_sky
+            .iter()
+            .find(|(f, _)| same_v(*f, v))
+            .expect("a recount at every depth");
+        layers.iter().sum()
+    }
+
+    /// The guard's lines at cut `c`: at the owner's limit with T7.b's budget, for each ceiling, C
+    /// to E's expected count beyond R(u) brighter than each of the guard's depths, against its
+    /// most.
+    fn guard_lines(
+        records: &[Record],
+        kinds: &[Kind],
+        (c, ceilings): (usize, &[Ceiling]),
+    ) -> Vec<String> {
+        let at_limit = kinds
+            .iter()
+            .position(|k| {
+                k.limit_ly.is_some_and(|l| same_v(l, REAL_LIMIT_LY)) && same_v(k.budget, 1.0)
+            })
+            .expect("the owner's limit at T7.b's budget");
+        ceilings
+            .iter()
+            .enumerate()
+            .map(|(p, ceiling)| {
+                let these = || {
+                    records
+                        .iter()
+                        .filter(move |r| (r.cut, r.ceiling, r.kind) == (c, p, at_limit))
+                };
+                let verdicts = GUARD
+                    .iter()
+                    .map(|&(v, most)| {
+                        let n: f64 = these().map(|r| r.beyond[depth_of(v)]).sum();
+                        let over = if n > most { "YES" } else { "no" };
+                        format!("{n:.3} brighter than V {v} (more than {most}: {over})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                format!(
+                    "  the guard at {REAL_LIMIT_LY:.0} ly, V_P {:.1}, C to E beyond R(u): {verdicts}",
+                    ceiling.v
+                )
+            })
+            .collect()
+    }
 }

@@ -113,9 +113,11 @@ impl CapCount {                          // the counts towards a boundary given 
     pub fn stars_within_and_beyond_toward(&self, layer: Layer,
         inside: impl Fn(UnitVector) -> LightYears, outside: impl Fn(UnitVector) -> LightYears) -> f64;
 }
-// sky::caps (R13.T1.b; test-only, `#[cfg(any(test, feature = "testing"))]`)
+// sky::caps (R13.T1.b; test-only, `#[cfg(any(test, feature = "testing"))]`; built)
 impl CapCount { pub fn cap_with_budget(&self, layer: Layer, budget: f64) -> LayerCap; }
     // `cap`'s rule with `ray_extents`' budget for the count beyond (`cap` takes 1.0)
+// sky::caps (R13.T1.b, built; was crate-visible)
+impl RayRadii { pub fn within(&self, edge_ly: f64) -> Self; }   // each ray held within an edge
 // sky::caps (R13.T2)
 pub const REAL_LIMIT_LY: f64 = 2_000.0;  // the owner, 2026-10-09; one of SHELL_EDGES_LY, which a test holds
 pub fn real_boundary(at_ceiling: &CapCount, caps_at_cut: &[LayerCap]) -> Vec<LayerCap>;
@@ -827,21 +829,27 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   both ceilings, for the eye and the camera, on the fixture and on the server's galaxy. Design note
   4's guard has tripped. **The owner answered on 2026-10-09** (`decision-r13-guard-trip.md`,
   option A): real stars to 2,000 ly (Design notes 3 and 4). The capped costs are that record's
-  estimates, about ±30%, and T1.b measures them before T2 builds.
+  estimates, about ±30%, and T1.b measures them before T2 builds. **T1.b measured them
+  (2026-10-09; "Deviations in T1.b, as built", below):** the capped tier costs 0.85–1.10 times
+  the estimate on both galaxies, but 75 stars brighter than V 4.5 lie beyond 2,000 ly near the
+  Sun, more than the guard's 60. T1.b's guard has tripped, and T2 waits for the owner.
 - **The synthetic bright stars beyond 2,000 ly** (Design note 3): an estimated 10–60 brighter than
   V 4.5 near the Sun, the brightest about V 1.5–3, from three of T1's figures and the decision's
-  weakest numbers. T1.b counts them, and its guard returns to the owner if they are far off. A
+  weakest numbers. T1.b counts them, and its guard returns to the owner if they are far off.
+  _T1.b counted them (below): 75.4 at V<sub>P</sub> 4.5 and 74.8 at 5.0, 71.7 of them E's, the
+  brightest expected about V 2.1, and 0.093 brighter than V 1.0. The guard has tripped._ A
   synthetic bright star vanishes from the sky once the ship comes within the limit, and the real
   stars there take over. It is labelled, unselectable and never a jump target, but a navigator
   comparing views may notice. Lifting the limit cures it.
 - **The inner disc at the limit**: about 2–3 × 10⁵ CPU-s (4–6 h), unbenched (_estimate_, a factor
   of two). R06.T17 benches it. The lever, if needed, is a yield-ordered budget per layer (T7.b's own
   λ rule with an expected count of k > 1 beyond for D and E, which T1.b records), under its own
-  ruling.
+  ruling. _T1.b: about 1.6–1.9 × 10⁵ CPU-s at T1's costs per system, with 423 stars brighter than
+  V 4.5 beyond 2,000 ly there (below)._
 - **The server's galaxy against the fixture.** A fixed limit's cost scales with local density,
   unlike the ceiling's rule. The server's galaxy is 2.46 times as dense locally, so the capped tier
   costs it about 2–2.5 times the fixture's. Both are generated galaxies, and the generated galaxy is
-  the judge.
+  the judge. _T1.b measured 2.25 times at 4.5 and 2.14 at 5.0 (below)._
 - **The limit is lifted** to the cap at V_P when the census levers land (`deferred-corrections.md`,
   "Census cost", "R13's real limit"): the real tier at the ceiling's caps is re-measured then, and
   the limit moves out once that costs no more than the capped tier. It is one constant, with no
@@ -866,7 +874,9 @@ colour table or the synthetic code moves, as R06's sky goldens are.
 - **The camera's sky** is about 45% synthetic near the Sun at the limit (_estimate_; 38% beyond
   the cap at V_P 4.5 alone, R13.T1, of some 3.9 × 10⁵ stars to V 10.06), and its N_max overflow
   the norm. The camera-budget ruling owed by R06.T17 rules on the real tier at the real boundary
-  (T1 measured the camera's at 0.98–1.00 times the eye's), not on the exact census.
+  (T1 measured the camera's at 0.98–1.00 times the eye's), not on the exact census. _T1.b: 47.6%
+  of a camera's stars to V 10.06 lie beyond R(u) near the Sun at the limit at 4.5, and 37.0% at
+  5.0 (below)._
 - **Multiplayer.** Two ships far apart see the same world-anchored synthetic stars, but each its own
   real boundary, so a star real for one may be absent for the other, replaced by synthetic ones.
   Inherent to any hybrid.
@@ -1216,3 +1226,240 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
       limit and its estimated cost. The brainstorm's three corrections (its cost, "within
       2,000 ly" on its promise, and nine in ten still holding at about 92–97%) are a draft for the
       owner, marked at the end of its subsection "The hybrid sky".
+- **Deviations in T1.b, as built, and its measurements (2026-10-09).** Measured at
+  `rendering-and-planets` f569fb08, on the fixture (`milky_way_like`, seed 0x0926_0000) and, for
+  the bench, the server's galaxy (seed 0x4d2 with its full potential), both at the epoch. Every
+  count is the caps' count's expectation, at the 3,072-ray recount unless marked "at the caps'
+  count", with no census; every cost is a sampled census. **The guard has tripped** on its first
+  count: near the Sun at 2,000 ly, 75.4 stars brighter than V 4.5 lie beyond R(u) at
+  V<sub>P</sub> 4.5 and 74.8 at 5.0, C to E together, against the guard's 60. The other two hold:
+  0.093 are expected brighter than V 1.0 (against 0.5), and the capped tier costs 0.85–1.10 times
+  `decision-r13-guard-trip.md` §2.3's estimate (against 2). T2 waits for the owner; its text is
+  unchanged.
+  - **The build.**
+    - `sky::caps` gains the test-only `CapCount::cap_with_budget` (Provides). `cap` now runs the
+      same rule as `cap_budgeted` at a budget of one, so its bits are unchanged (determinism
+      audit); a unit test holds a budget of one to `cap` bit for bit, and each larger budget's
+      rays at or within the smaller's, and two refuse a budget of none and a NaN.
+    - `tests/sky_hybrid.rs` holds the slow test `the_capped_boundary_is_recorded` beside T1's,
+      which share a helper that measures the six points on six threads. It took 333–378 s at
+      `CPUQuota=400%`, and two runs printed the same rows. It asserts only T1.b's two claims, and
+      both hold everywhere. Its nextest override takes 6 slots.
+    - `benches/sky.rs` adds `sky/census_near_sun_limit/{eye,served_eye}_{4.5,5.0}`. Its census
+      holds C to E within the limit by T1's `real_boundary_rule`, which takes an optional limit;
+      T1's benches pass none and print as before.
+  - **Deviations.**
+    - **`RayRadii::within` is public** (Provides). The bench is outside the crate and needs it to
+      hold R(u) within the limit. T2.a's `real_boundary` can use it as it is.
+    - **The slow test needs the sim's `testing` feature**, for `cap_with_budget`. It is compiled
+      only where the feature is on: in every workspace run (`just test-slow`, `just ci`), through
+      `hyperion-fit`'s dependency, and with `--features testing`. A run of `-p hyperion-sim`
+      alone leaves it out, and T1's test stays.
+    - **The bench has no fix (i).** It scales C to E's CPU time by T1's fix (i) factors near the
+      Sun, as the task asks. Within the limit those overstate it, since rays held at the limit
+      widen nothing: the slow test's own factors at 2,000 ly near the Sun are C 1.006, D 1.009
+      and E 1.006 at 4.5, and C 1.010, D 1.006 and E 1.005 at 5.0. With them the fixture's tier
+      is 10,643 and 12,699 CPU-s instead of 10,964 and 13,141. T1 measured fix (i) on the
+      fixture alone, so the server's galaxy takes the fixture's factors too.
+    - **Samples.** The census took 1 block of cells in 10 on the fixture and 1 in 20 on the
+      server's galaxy, finer than T1's 50 and 100, since the capped tier is a tenth of the work.
+      C's census measures their spread. The limit holds none of C's rays, so C's plan is T1's on
+      both galaxies, and only the sample differs. Against T1's, C's generated records are 0.94
+      and 0.97 times on the fixture at 4.5 and 5.0, and 0.81 and 0.89 on the server's galaxy;
+      its CPU time is 0.90, 0.96, 0.77 and 0.87 times. So the costs are good to about 10% on the
+      fixture and 20% on the server's galaxy, and the cost's verdict, under half the guard, does
+      not move. Its accepted stars are good only to a factor of a few: C's on the server's galaxy
+      are 1.56 times T1's, and E's 12,920 against T1's 3,300 over a superset of its cells, from
+      646 and 33 sampled stars.
+    - **The costs are provisional, but clean.** The benches ran under the heavy-test lock after
+      the integration `just ci` had finished, with 15 workers: the fixture's from a load of 4.2,
+      the server's galaxy's from 12.4, raised by the fixture's run just before. The guard reads
+      the job threads' CPU time. The review's fixes to the bench's report came after the run;
+      they change nothing it prints on Linux.
+    - **T1's test, moved onto the shared helper,** printed its 216 rows as before (396 s).
+    - **The record is a digest.** It holds the near-Sun sums at the eye's cut for every limit, the
+      per-layer rows near the Sun at 2,000 ly, the other points' sums at 2,000 ly, and the
+      near-Sun budget sums. The slow test prints 1,440 rows and 36 guard lines (six points, three
+      cuts, two ceilings, ten kinds of boundary, three layers and their sum), deterministically.
+    - **Acceptance as run.** The slow test ran from its slow-test-profile binary, not through
+      `just test-slow`, whose heavy lock the lane rules keep for timed runs and full suites.
+      `cargo bench -p hyperion-sim --no-run` passed. `just ci` runs at integration.
+  - **The boundary near the Sun** (fixture, the eye's cut V 8.179). R(u) does not depend on the
+    cut there (no ray of the cut's caps holds it), so the counts brighter than V 1–6.5 are the same
+    at 7.95 and 10.06. Each row is C to E together: the stars beyond R(u) brighter than each
+    depth, the count brighter than V<sub>P</sub> at the caps' own count (what the layers'
+    `bright_beyond` would sum to), the share of the whole sky beyond R(u) to V 6.5 and to the
+    cut, and the systems within R(u) by ray, with fix (i) ÷ rays. The whole sky there holds
+    11.4 stars brighter than V 1, 39.6 to V 2, 138 to V 3, 476 to V 4, 880 to V 4.5, 1,619 to
+    V 5, 9,430 to V 6.5 and 59,350 to the cut.
+
+    | V<sub>P</sub> | Limit (ly) | Beyond: V 1 / 2 / 3 / 4 / 4.5 / 5 / 6.5 / 8.18             | > V<sub>P</sub>, caps' count | Share to V 6.5 / the cut | Systems within (fix (i)) |
+    | ------------- | ---------- | ---------------------------------------------------------- | ---------------------------- | ------------------------ | ------------------------ |
+    | 4.5           | none       | 0.00002 / 0.010 / 0.077 / 0.42 / 1.65 / 7.2 / 218 / 5,470  | 1.95                         | 2.31% / 9.22%            | 1.104 × 10⁷ (1.044)      |
+    | 4.5           | 1,000      | 0.503 / 3.02 / 14.9 / 61.0 / 123 / 251 / 1,950 / 22,900    | 130                          | 20.7% / 38.7%            | 1.29 × 10⁶ (1.000)       |
+    | 4.5           | 2,000      | 0.093 / 0.86 / 6.09 / 34.3 / 75.4 / 161 / 1,130 / 10,500   | 81.9                         | 12.0% / 17.7%            | 3.849 × 10⁶ (1.007)      |
+    | 4.5           | 4,000      | 0.0085 / 0.16 / 1.54 / 10.7 / 25.6 / 62.1 / 660 / 7,580    | 29.3                         | 7.00% / 12.8%            | 6.443 × 10⁶ (1.019)      |
+    | 5.0           | none       | 0.00001 / 0.0002 / 0.039 / 0.20 / 0.43 / 1.27 / 67 / 2,360 | 1.62                         | 0.71% / 3.98%            | 1.925 × 10⁷ (1.045)      |
+    | 5.0           | 1,000      | 0.503 / 3.02 / 14.9 / 61.0 / 123 / 251 / 1,950 / 22,900    | 267                          | 20.7% / 38.7%            | 1.29 × 10⁶ (1.000)       |
+    | 5.0           | 2,000      | 0.093 / 0.85 / 6.06 / 34.2 / 74.8 / 157 / 1,070 / 8,580    | 172                          | 11.4% / 14.5%            | 6.628 × 10⁶ (1.009)      |
+    | 5.0           | 4,000      | 0.0085 / 0.15 / 1.51 / 10.5 / 24.6 / 56.9 / 532 / 4,800    | 66.2                         | 5.65% / 8.09%            | 1.153 × 10⁷ (1.024)      |
+
+    At 1,000 ly the limit holds every ray of C to E, so the ceiling changes only the count
+    brighter than V<sub>P</sub>. At 7.95 the share to the cut at 2,000 ly is 16.3% and 13.5%; at
+    10.06 it is 47.6% and 37.0%.
+
+    Layer by layer at 2,000 ly, in the same terms, with the rays the limit holds of 1,536 and the
+    gap at the cut by ray (with fix (i) it is 0 at every point, cut, ceiling and limit):
+
+    | V<sub>P</sub> | Layer | R(u) median (10–90%), largest; held | Beyond: V 1 / 2 / 3 / 4 / 4.5 / 5 / 6.5 / 8.18          | > V<sub>P</sub>, caps' count | Systems within (fix (i)) | Gap   |
+    | ------------- | ----- | ----------------------------------- | ------------------------------------------------------- | ---------------------------- | ------------------------ | ----- |
+    | 4.5           | C     | 1,416 (1,287–1,416), 1,416; 0       | 0 / 0.010 / 0.070 / 0.25 / 0.83 / 4.08 / 99.8 / 3,540   | 0.896                        | 2.324 × 10⁶ (1.006)      | 2.54  |
+    | 4.5           | D     | 2,000 (1,287–2,000), 2,000; 773     | 0 / 0.00001 / 0.015 / 0.69 / 2.81 / 8.06 / 183 / 3,010  | 3.02                         | 1.183 × 10⁶ (1.009)      | 0.562 |
+    | 4.5           | E     | 2,000 (1,416–2,000), 2,000; 979     | 0.093 / 0.85 / 6.01 / 33.4 / 71.7 / 148 / 848 / 3,950   | 77.9                         | 3.425 × 10⁵ (1.006)      | 0.063 |
+    | 5.0           | C     | 1,758 (1,758–1,934), 1,934; 0       | 0 / 0.0001 / 0.038 / 0.17 / 0.32 / 0.76 / 43.5 / 1,660  | 0.854                        | 5.020 × 10⁶ (1.010)      | 2.95  |
+    | 5.0           | D     | 2,000 (1,597–2,000), 2,000; 942     | 0 / 0.000001 / 0.014 / 0.68 / 2.79 / 8.00 / 182 / 2,970 | 8.60                         | 1.259 × 10⁶ (1.006)      | 0.212 |
+    | 5.0           | E     | 2,000 (1,597–2,000), 2,000; 1,001   | 0.093 / 0.85 / 6.01 / 33.4 / 71.7 / 148 / 848 / 3,940   | 162                          | 3.493 × 10⁵ (1.005)      | 0.037 |
+
+  - **The guard's figures**, near the Sun at 2,000 ly, C to E:
+    - **brighter than V 4.5: 75.4 at V<sub>P</sub> 4.5 and 74.8 at 5.0, against 60: tripped.**
+      E holds 71.7 of them, D 2.8 and C 0.8. They are 8.6% of the sky's 880, against the
+      record's estimate of 10–60 (§2.4: "D adds 1–2, C none"). E's rays reach past 2,000 ly on
+      979 of 1,536 rays at 4.5, and between 2,000 ly and E's own R(u) lie 71.5 of its stars
+      brighter than V 4.5 (0.25 beyond R(u) alone).
+    - brighter than V 1.0: 0.093 at either ceiling, against 0.5. The brightest is expected at
+      about V 2.1: 0.86 lie beyond brighter than V 2, and 6.1 brighter than V 3 (the record's
+      V 1.5–3).
+    - the cost: 0.85–1.10 times §2.3's estimate, against 2 (below).
+  - **The capped tier's cost** (the bench, near the Sun, the eye's cut). The cost is in CPU-s by
+    the job threads' CPU time, each layer's census scaled by the sample, with its generated
+    records; the whole includes the two caps' counts and the plan, 23–25 s. "With fix (i)" scales
+    C to E by T1's factors; "On 15" and "On 4" divide it by the workers, ignoring imbalance.
+
+    | Galaxy, cut     | V<sub>P</sub> | C                  | D                   | E                   | Whole  | With fix (i) | §2.3's estimate | Times it  | On 15 / on 4     |
+    | --------------- | ------------- | ------------------ | ------------------- | ------------------- | ------ | ------------ | --------------- | --------- | ---------------- |
+    | Fixture, 8.179  | 4.5           | 1,455 (5.23 × 10⁵) | 5,589 (7.18 × 10⁵)  | 3,492 (3.15 × 10⁵)  | 10,560 | 10,964       | 10,000–12,000   | 0.91–1.10 | 12.2 / 46 min    |
+    | Fixture, 8.179  | 5.0           | 3,208 (1.12 × 10⁶) | 5,836 (7.47 × 10⁵)  | 3,543 (3.19 × 10⁵)  | 12,612 | 13,141       | 13,000–15,000   | 0.88–1.01 | 14.6 / 55 min    |
+    | Server's, 7.766 | 4.5           | 3,066 (1.07 × 10⁶) | 10,578 (1.36 × 10⁶) | 10,128 (9.27 × 10⁵) | 23,798 | 24,783       | 27,000–29,000   | 0.85–0.92 | 27.5 min / 1.7 h |
+    | Server's, 7.766 | 5.0           | 5,592 (1.93 × 10⁶) | 11,135 (1.43 × 10⁶) | 10,260 (9.34 × 10⁵) | 27,012 | 28,238       | 31,000–33,000   | 0.86–0.91 | 31.4 min / 2.0 h |
+    - The bench's R(u) is the slow test's, from the same count at V<sub>P</sub>: on the fixture
+      the limit holds 773 and 942 of D's rays and 979 and 1,001 of E's; on the server's galaxy
+      510 and 677 of D's and 936 and 966 of E's; and none of C's on either. The server's galaxy's
+      R(u) by ray at 4.5 is C 1,386 (1,146–1,386), 1,386; D 1,677 (1,260–2,000), 2,000; and
+      E 2,000 (1,386–2,000), 2,000. At 5.0 it is C 1,720 (1,421–1,893), 1,893; D 1,893
+      (1,292–2,000), 2,000; and E 2,000 (1,564–2,000), 2,000.
+    - Per generated record it costs C 2.8, D 7.8 and E 11.1 ms on the fixture at 4.5, T1's own
+      2.9, 7.9 and 11.5: the limit cuts the records, not their cost. D now takes 53% of it and E
+      33%, against E's 85% at R(u) alone.
+    - The server's galaxy costs 2.25 and 2.14 times the fixture's, inside the record's 2–2.5.
+    - Each layer's records past the floor, generated records, accepted stars and accepted stars
+      within R(u) towards their band texel (those R13.T2.a lists), scaled by the sample (the
+      stars good only to a factor of a few, above):
+
+      | Galaxy   | V<sub>P</sub> | C                                         | D                                         | E                                         |
+      | -------- | ------------- | ----------------------------------------- | ----------------------------------------- | ----------------------------------------- |
+      | Fixture  | 4.5           | 2.41 × 10⁶ / 5.23 × 10⁵ / 25,750 / 25,510 | 1.26 × 10⁶ / 7.18 × 10⁵ / 14,940 / 14,750 | 3.66 × 10⁵ / 3.15 × 10⁵ / 2,640 / 2,540   |
+      | Fixture  | 5.0           | 5.32 × 10⁶ / 1.12 × 10⁶ / 27,370 / 27,250 | 1.32 × 10⁶ / 7.47 × 10⁵ / 14,940 / 14,790 | 3.70 × 10⁵ / 3.19 × 10⁵ / 2,650 / 2,550   |
+      | Server's | 4.5           | 4.89 × 10⁶ / 1.07 × 10⁶ / 32,980 / 32,920 | 2.40 × 10⁶ / 1.36 × 10⁶ / 25,440 / 25,360 | 1.07 × 10⁶ / 9.27 × 10⁵ / 12,920 / 12,820 |
+      | Server's | 5.0           | 9.01 × 10⁶ / 1.93 × 10⁶ / 33,960 / 33,940 | 2.53 × 10⁶ / 1.43 × 10⁶ / 25,460 / 25,400 | 1.08 × 10⁶ / 9.34 × 10⁵ / 12,920 / 12,820 |
+
+    - Against R(u) alone (T1, by CPU time): 9.0 and 11.5 times cheaper on the fixture, 4.3 and
+      5.3 on the server's galaxy, at 4.5 and 5.0.
+
+  - **The other points** at 2,000 ly, at each point's eye's cut, C to E, at V<sub>P</sub> 4.5
+    and then 5.0: the stars beyond R(u) brighter than V 4.5 and than V 1, the share of the whole
+    sky beyond R(u) to V 6.5, the systems within R(u) by ray, and their cost at T1's near-Sun
+    costs per system, C 0.69, D 5.41 and E 12.65 ms (_estimate_; near the Sun it gives 1.23 and
+    1.47 × 10⁴ against the bench's 1.06 and 1.26 × 10⁴, by ray).
+
+    | Point (eye's cut)                    | > V 4.5     | > V 1         | Share to V 6.5 | Systems within         | CPU-s (_estimate_)   |
+    | ------------------------------------ | ----------- | ------------- | -------------- | ---------------------- | -------------------- |
+    | Near the Sun (8.179)                 | 75.4; 74.8  | 0.093; 0.093  | 12.0%; 11.4%   | 3.85 × 10⁶; 6.63 × 10⁶ | 1.2 × 10⁴; 1.5 × 10⁴ |
+    | Nuclear disc (5.807)                 | 1.90; 0.567 | 0.002; 0.0003 | 0.26%; 0.09%   | 1.10 × 10⁶; 1.53 × 10⁶ | 5.7 × 10³; 8.1 × 10³ |
+    | Solar circle, a quarter turn (8.109) | 49.4; 48.9  | 0.053; 0.053  | 9.58%; 9.00%   | 3.27 × 10⁶; 5.45 × 10⁶ | 1.2 × 10⁴; 1.4 × 10⁴ |
+    | Solar circle, far side (7.730)       | 115; 114    | 0.278; 0.278  | 5.82%; 5.51%   | 5.52 × 10⁶; 9.19 × 10⁶ | 1.7 × 10⁴; 2.0 × 10⁴ |
+    | Inner disc (6.722)                   | 423; 423    | 0.397; 0.397  | 5.24%; 5.11%   | 5.71 × 10⁷; 8.91 × 10⁷ | 1.6 × 10⁵; 1.9 × 10⁵ |
+    | 2,000 ly above the Sun (8.540)       | 123; 122    | 0.172; 0.172  | 71.1%; 69.7%   | 1.13 × 10⁶; 2.89 × 10⁶ | 3.9 × 10³; 5.4 × 10³ |
+
+    In the nuclear disc the limit holds no ray, and each layer's count brighter than
+    V<sub>P</sub> beyond R(u) is under one (T2.a's claim there). In the inner disc and 2,000 ly
+    above the Sun the limit holds C too at 5.0 (539 and 340 rays). Above the Sun the disc lies
+    beyond 2,000 ly, so seven tenths of its naked-eye sky is beyond. Four of the six points pass
+    60 stars brighter than V 4.5 beyond 2,000 ly, though the guard is read near the Sun alone.
+
+  - **The budgets for D and E** (for the record only, near the Sun at the eye's cut, C at T7.b's
+    budget of one). C to E as above, with the cost at T1's costs per system (_estimate_):
+
+    | V<sub>P</sub> | Limit (ly) | Budget | D R(u) median (10–90%) | E R(u) median (10–90%), largest | > V 1   | > V 4.5 | Share to V 6.5 | Systems within | CPU-s (_estimate_) |
+    | ------------- | ---------- | ------ | ---------------------- | ------------------------------- | ------- | ------- | -------------- | -------------- | ------------------ |
+    | 4.5           | none       | 1      | 2,075 (1,287–2,763)    | 2,511 (1,416–7,177), 9,557      | 0.00002 | 1.65    | 2.31%          | 1.10 × 10⁷     | 9.5 × 10⁴          |
+    | 4.5           | none       | 3      | 1,558 (1,170–2,283)    | 2,283 (1,287–5,930), 8,687      | 0.0001  | 3.54    | 3.07%          | 7.95 × 10⁶     | 6.3 × 10⁴          |
+    | 4.5           | none       | 10     | 1,170 (967–1,558)      | 1,886 (1,063–4,453), 7,177      | 0.0014  | 11.8    | 5.66%          | 5.56 × 10⁶     | 3.9 × 10⁴          |
+    | 4.5           | none       | 30     | 799 (660–967)          | 1,416 (879–3,039), 5,930        | 0.018   | 41.5    | 13.0%          | 3.77 × 10⁶     | 1.9 × 10⁴          |
+    | 4.5           | 2,000      | 1      | 2,000 (1,287–2,000)    | 2,000 (1,416–2,000), 2,000      | 0.093   | 75.4    | 12.0%          | 3.85 × 10⁶     | 1.2 × 10⁴          |
+    | 4.5           | 2,000      | 3      | 1,558 (1,170–2,000)    | 2,000 (1,287–2,000), 2,000      | 0.093   | 75.6    | 12.1%          | 3.67 × 10⁶     | 1.1 × 10⁴          |
+    | 4.5           | 2,000      | 10     | 1,170 (967–1,558)      | 1,886 (1,063–2,000), 2,000      | 0.094   | 80.6    | 13.8%          | 3.09 × 10⁶     | 7.9 × 10³          |
+    | 4.5           | 2,000      | 30     | 799 (660–967)          | 1,416 (879–2,000), 2,000        | 0.103   | 100     | 19.4%          | 2.72 × 10⁶     | 5.6 × 10³          |
+    | 5.0           | none       | 10     | 1,597 (1,089–2,129)    | 1,934 (1,198–5,548), 8,139      | 0.0004  | 3.85    | 2.72%          | 1.01 × 10⁷     | 5.9 × 10⁴          |
+    | 5.0           | none       | 30     | 1,198 (899–1,451)      | 1,597 (989–4,581), 7,396        | 0.0035  | 13.9    | 5.72%          | 7.89 × 10⁶     | 3.7 × 10⁴          |
+    | 5.0           | 2,000      | 30     | 1,198 (899–1,451)      | 1,597 (989–2,000), 2,000        | 0.095   | 81.9    | 13.7%          | 5.69 × 10⁶     | 9.2 × 10³          |
+
+    A budget drops the poorest intervals first, so for its cost it leaves fewer bright stars
+    beyond than a distance does: at 4.5 a budget of 10 with no limit leaves 11.8 brighter than
+    V 4.5 for about 3.9 × 10⁴ CPU-s, and a limit of 4,000 ly leaves 25.6 for about 3.7 × 10⁴.
+    It holds no distance: D's R(u) falls to 660–967 ly at a budget of 30, inside the first
+    drive's 1,000 ly.
+
+  - **Against the estimates** (`decision-r13-guard-trip.md` §2.3, §2.4; Design notes 3, 4, 15
+    and 16).
+    - **The cost**: 0.85–1.10 times §2.3's, on both galaxies at both ceilings; the arithmetic held.
+    - **The bright stars beyond 2,000 ly**: 75 brighter than V 4.5 against 10–60; D adds 2.8
+      against 1–2, and C none, as estimated. Brighter than V 5.0: 157–161 against 20–100. The
+      brightest at about V 2.1, inside the estimated V 1.5–3.
+    - **The naked-eye share**: 12.0% of the stars brighter than V 6.5 lie beyond R(u) at 4.5 and
+      11.4% at 5.0, against 3–8%. So 88.0–88.6% of the naked-eye stars are real near the Sun,
+      against the plan's and the brainstorm draft's 92–97% ("nine in ten" barely misses).
+    - **At 1,000 ly**: 123 brighter than V 4.5 (against 60–120), 0.503 brighter than V 1.0, the
+      brightest at about V 1.4 (against V 0.5–1.5), and 20.7% of the naked-eye stars (against
+      12–18%), at about 2.6 × 10³ CPU-s (_estimate_; §2.3's 2.4–2.5 × 10³).
+    - **The camera**: at 10.06, 52.4% of its stars are real at 4.5 and 63.0% at 5.0 (the record's
+      about 55% and two thirds).
+    - **The inner disc** at the limit: about 1.6–1.9 × 10⁵ CPU-s (_estimate_, the record's
+      2–3 × 10⁵), with 423 stars brighter than V 4.5 beyond; at 1,000 ly about 3.2 × 10⁴ (the
+      record's 3–4 × 10⁴), with 1,410.
+  - **For T2, pending the owner** (observations, not changes to T2).
+    - **R13.T2.a.**
+      - `RayRadii::within` is public, so `real_boundary` holds each ray within `REAL_LIMIT_LY`
+        with it after `RayRadii::lesser`, as the bench's `real_boundary_rule` does.
+      - Fix (i) at the limit opens 0.7–0.9% more C to E systems near the Sun, against 4.4–4.5%
+        at R(u) alone, and still closes a gap of 3.2 stars at 4.5 (C 2.54, D 0.56, E 0.06) and 3.2
+        at 5.0 to 0. So T2.a's "no gap" test needs the widened cones over the limit's rays too.
+      - Each layer's `bright_beyond` is `stars_beyond` of R(u) on the count at V<sub>P</sub>:
+        near the Sun on the fixture C 0.896, D 3.02 and E 77.9 at 4.5, and C 0.854, D 8.60 and
+        E 162 at 5.0. It is never the forced cap's `expected_beyond`, which `forced_by_ray` sets
+        to 0.
+      - Where the limit holds no ray (the nuclear disc) each layer's count brighter than
+        V<sub>P</sub> beyond R(u) is under one, as T2.a's test asks.
+      - The determinism audit asks T2.a to pin: a golden of R(u)'s per-ray bits for C to E at a
+        coarse count with the ceiling and the limit, with each layer's `bright_beyond` and
+        `expected_beyond` bits (the "equals" test by bits, not a tolerance); a partial census
+        through the 2,000 ly shell with rays held exactly at that edge, since `REAL_LIMIT_LY` is
+        `SHELL_EDGES_LY[4]` and `all_reach` and the shell walk decide at equality; and `lesser`
+        then `within` against `within` then `lesser`, bit for bit. No golden pins any cap's
+        radii today.
+    - **R13.T2.b.** The served real tier near the Sun at the interim's V<sub>P</sub> 5.0 costs
+      about 1.3 × 10⁴ CPU-s on the fixture and 2.8 × 10⁴ on the server's galaxy, 15 and 31
+      minutes on 15 workers (55 minutes and 2.0 h on 4). Its band holds 11.4% of the naked-eye
+      stars near the Sun (1,070 brighter than V 6.5), 14.5% of the eye's, and 37.0% of a
+      camera's at 10.06. The reply's `bright_beyond`, C to E, is 172 at 5.0 near the Sun.
+  - **For the owner** (records, for the orchestrator to relay; no change to T2 here).
+    - **T1.b's guard has tripped** on its first count: 75.4 and 74.8 stars brighter than V 4.5
+      lie beyond R(u) near the Sun at 2,000 ly, against 60. The other two counts hold.
+    - The guard is read near the Sun, but at 2,000 ly the far side of the solar circle (115),
+      2,000 ly above the Sun (123) and the inner disc (423, with 0.40 brighter than V 1.0) pass
+      60 too; a quarter turn round holds 49.
+    - The plan's and the brainstorm draft's "about 92–97% of naked-eye stars stay real" at the
+      limit is 88.0–88.6% measured.
+    - Recorded beside the limit for a ruling: a limit of 4,000 ly (25.6 brighter than V 4.5,
+      7.0% of the naked-eye stars, about 3.7 × 10⁴ CPU-s at 4.5), and a budget of 10 or 30 for
+      D and E with no limit (11.8 or 41.5, 5.7% or 13.0%, about 3.9 or 1.9 × 10⁴), each an
+      _estimate_ of cost at T1's costs per system near the Sun.
