@@ -526,8 +526,11 @@ it is recorded, and stays here so that the owner can review it.
     the orchestration directory, option A), after R13.T1 measured the real tier at 8.8–22.6 times
     its estimate: layers C to E are real to 2,000 ly at most, for RM3's interim and R13 alike. So
     the promise holds for every star within the real boundary, which is every star brighter than
-    V_P within 2,000 ly. R13.T1.b measures the capped tier before R13.T2, and the limit is lifted
-    when the census levers land.
+    V_P within 2,000 ly. R13.T1.b measured the capped tier: 0.85–1.10 times its estimate, 28–31
+    minutes on 15 workers on the server's galaxy. But 75 stars brighter than V 4.5 lie beyond
+    2,000 ly near the Sun, against an estimated 10–60, and 88% of the naked-eye stars are real. The
+    owner kept the limit on 2026-10-09 (`.git/rm45-orchestration/decision-r13-t1b-guard.md`,
+    option A). It is lifted when the census levers land.
 
   The brainstorm's subsection "The hybrid sky" is signed off. **Still awaiting:** the label
   wording of R13.T2.b and T8 and their guide rows, a draft for the UX decision agent by T15's

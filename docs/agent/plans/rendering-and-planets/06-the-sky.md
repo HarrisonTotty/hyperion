@@ -2903,8 +2903,8 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
   - The boundary is R13.T2's: layers C to E within the lesser of their caps by ray at V_P 5.0 and
     2,000 ly, and the band for the rest. Decided by the owner on 2026-10-08 and 2026-10-09
     (`feasibility-hybrid-sky.md` §10–11, `decision-r13-guard-trip.md`).
-  - About 1.3–1.5 × 10⁴ CPU-s is estimated near the Sun on the fixture, and 3.1–3.3 × 10⁴ on the
-    server's galaxy.
+  - R13.T1.b measured about 1.31 × 10⁴ CPU-s near the Sun on the fixture and 2.82 × 10⁴ on the
+    server's galaxy (sampled, by thread CPU time).
   - Recorded beside it:
     - the real tier at the ceiling's caps without the limit (R13.T1: 1.43–1.45 × 10⁵ CPU-s at
       5.0);
