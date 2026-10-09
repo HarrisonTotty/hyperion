@@ -5062,10 +5062,10 @@ mod tests {
         assert!(worst <= 1e-15, "{worst}");
     }
 
-    /// A census near the Sun with every cap forced to 1,000 ly, so C, D and E in shells to 500 ly
-    /// and then 1,000, its query's band at `face_texels`: the census of every layer's first shell,
-    /// of no stars, and the first face row of a march of the plan's replies at `march_texels`, on
-    /// tables of no component, whose rays hold no light.
+    /// A census near the Sun with every cap forced to 1,000 ly, so C, D and E in shells to 125, 250
+    /// and 500 ly and then 1,000, its query's band at `face_texels`: the census of every layer's
+    /// first shell, of no stars, and the first face row of a march of the plan's replies at
+    /// `march_texels`, on tables of no component, whose rays hold no light.
     fn first_shell_and_march(face_texels: u16, march_texels: u16) -> (SkyCensus, BandMarch) {
         let galaxy = milky_way_galaxy();
         let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))

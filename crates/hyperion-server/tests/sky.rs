@@ -1,11 +1,11 @@
-//! The sky over a real socket (rendering plan R06, R06.T11.a–d): the census as bulk jobs, which a
-//! range query overtakes within a bounded wait and a cancel stops, its answer against the sim's own
-//! census, its stars and band in R03's bulk frames as the manifest states them, the stars, texels
-//! and host discs against the sim's for the same query, its census's cells served again from the
-//! server's cache, the galaxy's tables built once for every sky of it, the fields a request it
-//! cannot serve names, the landing switch, off by default, under which `sky` is `unsupported`, and
-//! a sky arriving nearest first, each reply the census to its stated radii and the last the
-//! one-shot census.
+//! The sky over a real socket (rendering plan R06, R06.T11.a–d and T11.g): the census as bulk
+//! jobs, which a range query overtakes within a bounded wait and a cancel stops, its answer
+//! against the sim's own census, its stars and band in R03's bulk frames as the manifest states
+//! them, the stars, texels and host discs against the sim's for the same query, its census's cells
+//! served again from the server's cache, the galaxy's tables built once for every sky of it and
+//! started when its universe is opened, the fields a request it cannot serve names, the landing
+//! switch, off by default, under which `sky` is `unsupported`, and a sky arriving nearest first,
+//! each reply the census to its stated radii and the last the one-shot census.
 //!
 //! Every server here turns the sky on ([`SkyService::Served`]) but the switch's own test, and
 //! forces its sky's caps to a small radius ([`SkyCaps::forced`]), so that a census near the Sun
@@ -102,8 +102,9 @@ async fn sky_server_with(caps: SkyCaps, workers: usize) -> (TestServer, TempDir)
     (TestServer::start_with(config).await, data_dir)
 }
 
-/// A client with a universe of [`SEED`] created and opened, so that its galaxy is warm and a sky
-/// asked next finds the pool free for its jobs.
+/// A client with a universe of [`SEED`] created and opened, so that its galaxy is warm, and where
+/// the server serves the sky its galaxy's sky tables built, which the open starts on the pool
+/// (R06.T11.g): a sky asked next finds the pool free for its jobs, and counts only its own.
 async fn opened(server: &TestServer) -> (TestClient, UniverseIdHex) {
     let mut client = server.connected().await;
     let universe = client.create_universe("Sky", SEED).await.id;
@@ -113,6 +114,15 @@ async fn opened(server: &TestServer) -> (TestClient, UniverseIdHex) {
     match client.request(body).await {
         Ok(ResponseBody::OpenUniverse(_)) => {}
         other => panic!("expected the opened universe, got {other:?}"),
+    }
+    // An open that looked for the tables, with the sky served, started their build, unless they
+    // were held; with the sky off it looks for none.
+    if server.stats().sky_tables().cache().misses() > 0 {
+        server
+            .stats_until("the open's sky tables are built", |stats| {
+                stats.sky_tables().builds() > 0
+            })
+            .await;
     }
     (client, universe)
 }
@@ -1158,6 +1168,65 @@ async fn a_second_identical_sky_shares_the_tables_build() {
     server.stop().await;
 }
 
+/// With the sky served, opening a universe starts its galaxy's tables, and the sky asked next finds
+/// them held: one build between them (R06.T11.g; decided 2026-10-08,
+/// `decision-r06-t11d-first-sky.md` §2). Opening the universe again starts nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn opening_a_universe_starts_its_sky_tables_which_a_sky_shares() {
+    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 3).await;
+    let (mut client, universe) = opened(&server).await;
+    let built = server
+        .stats_until("the open's sky tables are held", |stats| {
+            stats.sky_tables().cache().entries() == 1
+        })
+        .await
+        .sky_tables();
+    assert_eq!(built.builds(), 1, "{built:?}");
+    let _ = served(&mut client, sky(&universe)).await;
+    let asked = server.stats().sky_tables();
+    assert_eq!(asked.builds(), 1, "{asked:?}");
+    assert_eq!(
+        asked.cache().hits(),
+        built.cache().hits() + 1,
+        "the sky found the open's tables: {built:?}, then {asked:?}"
+    );
+    let body = RequestBody::OpenUniverse(OpenUniverseRequest {
+        universe: universe.clone(),
+    });
+    match client.request(body).await {
+        Ok(ResponseBody::OpenUniverse(_)) => {}
+        other => panic!("expected the opened universe, got {other:?}"),
+    }
+    let reopened = server.stats().sky_tables();
+    assert_eq!(
+        (reopened.builds(), reopened.cache().hits()),
+        (1, asked.cache().hits() + 1),
+        "held: the open starts nothing: {reopened:?}"
+    );
+    client.close().await;
+    server.stop().await;
+}
+
+/// With the sky's landing switch off, as it is by default, opening a universe starts no sky tables
+/// and looks for none (R06.T11.g).
+#[tokio::test]
+async fn with_the_switch_off_an_open_starts_no_sky_tables() {
+    let server = TestServer::start().await;
+    let (client, _universe) = opened(&server).await;
+    let tables = server.stats().sky_tables();
+    assert_eq!(
+        (
+            tables.builds(),
+            tables.cache().misses(),
+            tables.cache().hits()
+        ),
+        (0, 0, 0),
+        "{tables:?}"
+    );
+    client.close().await;
+    server.stop().await;
+}
+
 /// A sky in another time bucket of DN13's 1,000 years shares the build of the first: one table per
 /// galaxy at the reference time serves the whole clock window (decided 2026-10-03,
 /// `decision-r06-tables.md`, item B.2; R06.T11.c).
@@ -1196,16 +1265,24 @@ async fn a_second_sky_in_another_time_bucket_shares_the_build() {
 }
 
 /// The shell edges of the nearest-first test, ly: four below its caps of [`SMALL_CAP_LY`], so that
-/// C, D and E are censused in five shells each, and C's fourth and fifth, beyond the third edge,
-/// come a step late, as C's beyond 2,000 ly do near the Sun.
+/// C, D and E are censused in five shells each.
 const TEST_SHELL_EDGES_LY: [u32; 4] = [10, 15, 20, 25];
 
+/// The edge, ly, from which the nearest-first test's C shells come a step late, as C's beyond
+/// 2,000 ly do near the Sun: its fourth and fifth, from 20 and 25 ly.
+const TEST_C_DEFERRED_BEYOND_LY: u32 = 20;
+
 /// The steps a sky of `plan` arrives in (R06.T11.d): each layer's shells rank by rank, nearest
-/// first, but C's from its fourth on a step late.
+/// first, but C's from [`TEST_C_DEFERRED_BEYOND_LY`] on, by their inner edge, a step late
+/// (R06.T11.g).
 fn delivery(plan: &CensusPlan) -> Vec<Vec<Shell>> {
     let mut steps: Vec<Vec<Shell>> = Vec::new();
+    let mut c_inner_ly = 0.0;
     for shell in plan.shells() {
-        let late = shell.layer() == Layer::C && shell.index() >= 3;
+        let late = shell.layer() == Layer::C && c_inner_ly >= f64::from(TEST_C_DEFERRED_BEYOND_LY);
+        if shell.layer() == Layer::C {
+            c_inner_ly = shell.edge().map_or(c_inner_ly, LightYears::value);
+        }
         let step = usize::from(shell.index()) + usize::from(late);
         if steps.len() <= step {
             steps.resize_with(step + 1, Vec::new);
@@ -1343,12 +1420,13 @@ fn stars_sent(response: &SkyResponse, payload: &[u8]) -> Vec<Vec<u8>> {
 ///
 /// The caps are forced to 30 ly with nearer shell edges than the fixed ones (the server's test
 /// seam), so that the census takes seconds: a census of the fixed edges' first shell, C, D and E
-/// to 500 ly, is minutes of a worker in a test build.
+/// to 125 ly, is a minute or more of a worker in a test build.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii() {
     let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
         .expect("a small forced cap")
-        .with_shell_edges(&TEST_SHELL_EDGES_LY);
+        .with_shell_edges(&TEST_SHELL_EDGES_LY)
+        .with_c_deferred_beyond(TEST_C_DEFERRED_BEYOND_LY);
     let (server, _data_dir) = sky_server_with(caps, 3).await;
     let (mut client, universe) = opened(&server).await;
     let n_max = std::num::NonZeroU32::new(24).expect("not zero");

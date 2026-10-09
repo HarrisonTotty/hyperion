@@ -42,18 +42,23 @@ pub const MAX_FORCED_CAP_LY: f64 = 227_023.0;
 /// [`MAX_N_MAX`] as a [`NonZeroU32`], the default.
 const DEFAULT_N_MAX: NonZeroU32 = NonZeroU32::new(MAX_N_MAX).expect("300,000 is not zero");
 
-/// The edges of the census's distance shells, ly: 500 ly, then 1,000 × 2<sup>k</sup> ly.
+/// The edges of the census's distance shells, ly: 125, 250 and 500 ly, then 1,000 × 2<sup>k</sup>
+/// ly, which is 1,000 × 2<sup>k</sup> for every k from −3.
 ///
 /// They run to 128,000 ly, the last below [`MAX_FORCED_CAP_LY`], beyond which no cap reaches
 /// (R06.T8.i; decided 2026-10-05, `decision-r06-census-cost.md`, with
-/// `decision-r06-census-cost-signoff.md`'s 500 ly first shell).
+/// `decision-r06-census-cost-signoff.md`'s 500 ly first shell). The two inner edges, 125 and
+/// 250 ly, were added on 2026-10-08 (R06.T11.g, `decision-r06-t11d-first-sky.md` §1.4): a first
+/// shell of 500 ly near the Sun generated about a quarter of C's records, half of D's and
+/// five-sixths of E's, at 1–10 ms a system, some 760 CPU-s, against the first sky's 150 CPU-s; to
+/// 125 ly it is estimated at 26–29.
 ///
 /// A layer of [`SHELLED_LAYERS`] is censused in one shell for each edge below its cap's farthest
 /// radius, nearest first, then one more to its cap. The edges are constants, never fitted to the
 /// machine, so every machine and worker count gives the same sequence of replies, only at its own
 /// pace.
-pub const SHELL_EDGES_LY: [u32; 9] = [
-    500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000,
+pub const SHELL_EDGES_LY: [u32; 11] = [
+    125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000,
 ];
 
 /// The layers censused shell by shell (R06.T8.i): C, D and E.
@@ -1122,8 +1127,8 @@ impl CensusPlan {
     /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
     /// let query = SkyQuery::builder(Observer::new(sun, UniverseTime::EPOCH)?, Magnitudes::new(7.95))
     ///     .build()?;
-    /// // Caps as the caps near the Sun put them, uniform here: C has shells to 500, 1,000, 2,000
-    /// // and 4,000 ly, then its cap.
+    /// // Caps as the caps near the Sun put them, uniform here: C has shells to 125, 250, 500,
+    /// // 1,000, 2,000 and 4,000 ly, then its cap.
     /// let caps = [11.0, 68.0, 8_193.0, 9_925.0, 21_369.0, 1.0]
     ///     .iter()
     ///     .zip(CAPPED_LAYERS)
@@ -1132,9 +1137,9 @@ impl CensusPlan {
     /// let plan = census_plan_of(&query, caps);
     /// // The first reply: every layer's first shell, so A, B and the brown dwarfs are final.
     /// let first = plan.completeness(plan.shells().filter(|shell| shell.index() == 0));
-    /// assert_eq!(first.edge(Layer::C), Some(LightYears::new(500.0)));
+    /// assert_eq!(first.edge(Layer::C), Some(LightYears::new(125.0)));
     /// assert_eq!(first.edge(Layer::A), None);
-    /// assert_eq!(first.least_edge(), Some(LightYears::new(500.0)));
+    /// assert_eq!(first.least_edge(), Some(LightYears::new(125.0)));
     /// assert!(!first.is_final() && plan.completeness(plan.shells()).is_final());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -1291,12 +1296,13 @@ impl LayerWalk {
     ///
     /// # Panics
     ///
-    /// Never for a walk's shell: a layer has at most ten shells.
+    /// Never for a walk of the fixed edges, which gives a layer at most twelve shells, nor of a
+    /// test's few.
     #[must_use]
     fn shell(&self, index: usize) -> Shell {
         let edge_ly = self.edges.get(index).map(|&(edge, _)| edge);
         Shell {
-            index: u8::try_from(index).expect("a layer has at most ten shells"),
+            index: u8::try_from(index).expect("a layer has far fewer than 256 shells"),
             layer: self.layer,
             edge_ly,
         }
@@ -1459,7 +1465,8 @@ pub fn census_plan_of(query: &SkyQuery, caps: Vec<LayerCap>) -> CensusPlan {
 ///
 /// # Panics
 ///
-/// Unless every edge is above nought and they ascend, and as [`census_plan_of`].
+/// Unless every edge is above nought, they ascend and there are fewer than 255, and as
+/// [`census_plan_of`].
 #[doc(hidden)]
 #[must_use]
 pub fn census_plan_with_edges(
@@ -1469,8 +1476,9 @@ pub fn census_plan_with_edges(
 ) -> CensusPlan {
     assert!(
         edges_ly.first().is_none_or(|&first| first > 0)
-            && edges_ly.windows(2).all(|pair| pair[0] < pair[1]),
-        "shell edges are above nought and ascend: {edges_ly:?}"
+            && edges_ly.windows(2).all(|pair| pair[0] < pair[1])
+            && edges_ly.len() < usize::from(u8::MAX),
+        "shell edges are above nought and ascend, fewer than 255 of them: {edges_ly:?}"
     );
     plan_with_edges(query, caps, edges_ly)
 }
@@ -1898,16 +1906,30 @@ mod tests {
         assert_eq!(plan.caps().len(), CAPPED_LAYERS.len());
         let apex = observer().position().to_light_years_f64();
         let cells: Vec<CellKey> = plan.cells().collect();
-        // Every cell whose box meets the sphere is there, and the layers come in order.
-        let mut last_layer = 0;
-        for &key in &cells {
+        // Every cell whose box meets the sphere is there, and the layers come in order within
+        // each rank of shells, each shell's cells its layer's: at 300 ly C, D and E have three
+        // shells, to 125, 250 and 300 ly (R06.T8.i at R06.T11.g's edges).
+        let mut last = (0_u8, 0_usize);
+        let mut in_shells = Vec::with_capacity(cells.len());
+        for shell in plan.shells() {
             let rank = CAPPED_LAYERS
                 .iter()
-                .position(|&l| l == key.layer())
+                .position(|&l| l == shell.layer())
                 .expect("a capped layer");
-            assert!(rank >= last_layer);
-            last_layer = rank;
+            assert!((shell.index(), rank) >= last, "{shell:?} after {last:?}");
+            last = (shell.index(), rank);
+            for key in plan.shell_slabs(shell).flat_map(|slab| slab.cells()) {
+                assert_eq!(key.layer(), shell.layer(), "{key:?} in {shell:?}");
+                in_shells.push(key);
+            }
         }
+        assert_eq!(in_shells, cells);
+        assert_eq!(
+            plan.shells()
+                .filter(|shell| shell.layer() == Layer::C)
+                .count(),
+            3
+        );
         for &layer in &CAPPED_LAYERS {
             let size = i32::try_from(layer.cell_size_ly()).expect("small");
             let r = 300.0;
@@ -2273,9 +2295,10 @@ mod tests {
     }
 
     /// The shells take the fixed edges below each layer's farthest radius, then the cap: near the
-    /// Sun C has shells to 500, 1,000, 2,000 and 4,000 ly, D to 8,000 ly too, and E to 16,000 ly;
-    /// A, B and the brown dwarfs one each. They come nearest first across the layers, which is
-    /// their order as values, and each layer's last is final (R06.T8.i).
+    /// Sun C and D have shells to 125, 250, 500, 1,000, 2,000, 4,000 and 8,000 ly, and E to
+    /// 16,000 ly too; A, B and the brown dwarfs one each. They come nearest first across the
+    /// layers, which is their order as values, and each layer's last is final (R06.T8.i, at
+    /// R06.T11.g's edges).
     #[test]
     fn the_shells_take_the_fixed_edges_below_each_cap() {
         let query = SkyQuery::builder(observer(), Magnitudes::new(7.95))
@@ -2300,9 +2323,14 @@ mod tests {
         assert_eq!(edges(Layer::A), [None]);
         assert_eq!(edges(Layer::B), [None]);
         assert_eq!(edges(Layer::BrownDwarf), [None]);
-        assert_eq!(edges(Layer::C), with_last(5));
-        assert_eq!(edges(Layer::D), with_last(5));
-        assert_eq!(edges(Layer::E), with_last(6));
+        assert_eq!(edges(Layer::C), with_last(7));
+        assert_eq!(edges(Layer::D), with_last(7));
+        assert_eq!(edges(Layer::E), with_last(8));
+        assert_eq!(
+            SHELL_EDGES_LY[..3],
+            [125, 250, 500],
+            "the first reply is complete to 125 ly (R06.T11.g)"
+        );
         for shell in &shells {
             let mine: Vec<&Shell> = shells
                 .iter()
@@ -2335,7 +2363,14 @@ mod tests {
             .filter(|s| s.layer() == Layer::C)
             .map(|s| s.edge())
             .collect();
-        assert_eq!(c, [Some(LightYears::new(500.0)), None]);
+        assert_eq!(
+            c,
+            [125.0, 250.0, 500.0]
+                .map(|edge| Some(LightYears::new(edge)))
+                .into_iter()
+                .chain([None])
+                .collect::<Vec<_>>()
+        );
         assert_eq!(plan.shells().filter(|s| s.layer() == Layer::D).count(), 0);
         let done = plan.completeness(std::iter::empty());
         assert_eq!(done.edge(Layer::D), None, "a layer of no radius is final");
@@ -2360,8 +2395,8 @@ mod tests {
                 .find(|s| s.layer() == layer && s.index() == index)
                 .expect("a shell")
         };
-        // C's first three, D's first and third, E's last alone, and all of A's, B's and the brown
-        // dwarfs'.
+        // C's first three (to 500 ly), D's first and third, E's last alone, and all of A's, B's
+        // and the brown dwarfs'.
         let done = [
             of(Layer::A, 0),
             of(Layer::B, 0),
@@ -2371,12 +2406,12 @@ mod tests {
             of(Layer::C, 1),
             of(Layer::D, 0),
             of(Layer::D, 2),
-            of(Layer::E, 6),
+            of(Layer::E, 8),
         ];
         let reached = plan.completeness(done);
         let ly = |r: f64| Some(LightYears::new(r));
-        assert_eq!(reached.edge(Layer::C), ly(2_000.0));
-        assert_eq!(reached.edge(Layer::D), ly(500.0));
+        assert_eq!(reached.edge(Layer::C), ly(500.0));
+        assert_eq!(reached.edge(Layer::D), ly(125.0));
         assert_eq!(reached.edge(Layer::E), ly(0.0));
         for layer in [Layer::A, Layer::B, Layer::BrownDwarf] {
             assert_eq!(reached.edge(layer), None, "{layer:?}");
@@ -2387,15 +2422,15 @@ mod tests {
         for (layer, radius) in [
             (Layer::A, 11.0),
             (Layer::B, 68.0),
-            (Layer::C, 2_000.0),
-            (Layer::D, 500.0),
+            (Layer::C, 500.0),
+            (Layer::D, 125.0),
             (Layer::E, 0.0),
             (Layer::BrownDwarf, 1.0),
         ] {
             assert_eq!(bits(radii.radius(layer).value()), bits(radius), "{layer:?}");
         }
         let replies = plan.replies();
-        assert_eq!(replies.len(), 7);
+        assert_eq!(replies.len(), 9, "E's eight edges and its cap");
         for (rank, reply) in replies.iter().enumerate() {
             for layer in SHELLED_LAYERS {
                 let edges: Vec<Shell> = shells
@@ -2636,8 +2671,8 @@ mod tests {
             .collect()
     }
 
-    /// The shells' edges of the census tests, ly: R06.T8.i's 500 ly, 1,000 × 2<sup>k</sup> ly
-    /// scaled down twelvefold and more, so that a unit test can afford a census to its last.
+    /// The shells' edges of the census tests, ly: R06.T8.i's 1,000 × 2<sup>k</sup> ly scaled down
+    /// twelvefold and more, so that a unit test can afford a census to its last.
     const TEST_EDGES_LY: [u32; 2] = [40, 80];
 
     /// The census tests' plan near the Sun, its shells and every cell's census.

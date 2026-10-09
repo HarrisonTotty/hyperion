@@ -49,8 +49,9 @@ without_photometry: number,
 feature_members_absent: boolean, 
 /**
  * How far this answer's census of the layer is complete, ly, in its farthest direction
- * (rendering plan R06, R06.T11.d): the fixed shell edge its shells reach, 500 ly or
- * 1,000 × 2^k ly, while it is not [`final`](Self::is_final), and `cap_ly` once it is. Towards
+ * (rendering plan R06, R06.T11.d): the fixed shell edge its shells reach, 125, 250 or 500 ly
+ * or 1,000 × 2^k ly (R06.T11.g), while it is not [`final`](Self::is_final), and `cap_ly`
+ * once it is. Towards
  * each ray of the caps' lattice it is complete to that ray's radius in
  * [`complete_to_rays_ly`](Self::complete_to_rays_ly), the edge held within the cap. It lists
  * a star, until it is final, only where the star lies nearer than that radius towards the

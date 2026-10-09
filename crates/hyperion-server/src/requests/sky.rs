@@ -32,6 +32,7 @@
 
 use std::fmt;
 use std::num::NonZeroU32;
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -70,10 +71,14 @@ use tokio::sync::mpsc;
 use super::universe::openable_universe;
 use super::{Replies, request_error};
 use crate::AppState;
-use crate::bulk::sky::{EncodedSky, SkyStarWire, SkyTexelWire, encode_sky_payload};
+use crate::bulk::sky::{
+    EncodedSky, SkyStarWire, SkyTexelWire, encode_sky_payload, encode_sky_stars, encode_sky_texels,
+};
 use crate::bulk::{Answer, BulkPayload};
-use crate::compute::sky::{CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand};
-use crate::compute::{self, CancelToken, ComputeError, GalaxyKey, JobError, Priority, SkyCaps};
+use crate::compute::sky::{BulkJobs, CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand};
+use crate::compute::{
+    self, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Priority, SkyCaps,
+};
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 
 /// The longest a sky holds before it is asked again, s: one Julian year (Design note 13).
@@ -134,6 +139,7 @@ pub(crate) async fn answer(
         Some(eye) => {
             let at = (asked.observer, eye);
             let cut = compute::sky::eye_cut(pool, &galaxy, &tables, at, &light, &token).await?;
+            phase("eye cut", started);
             let visibility = if asked.counts_by_visibility() {
                 Some(
                     compute::sky::eye_visibility(pool, &galaxy, &tables, at, cut, &light, &token)
@@ -177,7 +183,7 @@ pub(crate) async fn answer(
         }
         None => Vec::new(),
     };
-    let steps = compute::sky::delivery_steps(&plan);
+    let steps = compute::sky::delivery_steps(&plan, state.sky_caps.c_deferred_beyond_ly());
     // Every step's progress fits, so the census never waits for a reply to be made.
     let (sink, mut censused) = mpsc::channel(steps.len());
     let census =
@@ -263,8 +269,13 @@ impl Reply<'_> {
         step: CensusStep,
         marches: &[Arc<BandMarch>],
     ) -> Result<Answer, ComputeError> {
-        let (pool, query, last, worked) =
-            (&self.state.pool, &self.inputs.query, step.last, step.worked);
+        let (pool, query, last) = (&self.state.pool, &self.inputs.query, step.last);
+        let (worked, layers) = (step.worked_in_all(), step.layers());
+        let censused_ms = step
+            .censused_at
+            .saturating_duration_since(self.started)
+            .as_secs_f64()
+            * 1e3;
         let census =
             compute::sky::merge_step(pool, self.plan, step, query.n_max(), self.token).await?;
         let census = Arc::new(census);
@@ -278,15 +289,22 @@ impl Reply<'_> {
             least_edge_ly = completeness.least_edge().map(LightYears::value),
             last,
             census_job_s = worked.as_secs_f64(),
+            %layers,
+            censused_ms,
             elapsed_ms = millis(self.started),
             "sky censused to a step"
         );
         debug_assert_eq!(completeness.is_final(), last, "the last step is final");
         let band = compute::sky::band(pool, query, marches, &census, self.token).await?;
-        let (observer, listed) = (*query.observer(), Arc::clone(&census));
-        let encoded = compute::sky::bulk(pool, self.token, move |_: &CancelToken| {
-            payload(&observer, &listed, &band)
-        })
+        phase("band", self.started);
+        let encoded = encoded(
+            pool,
+            self.token,
+            *query.observer(),
+            Arc::clone(&census),
+            band,
+            PAYLOAD_JOB_STARS,
+        )
         .await?;
         phase("reply", self.started);
         let bulk = BulkPayload::new(encoded.bytes.clone()).expect(
@@ -309,23 +327,92 @@ impl Reply<'_> {
     }
 }
 
-/// The sky's bulk payload (Design note 17): each listed star of `census` as the wire carries it,
-/// seen from `observer`, in the census's order, with its eye offset from `band`, then `band`'s
-/// texels in the cube's face order.
+/// The listed stars one payload job encodes (R06.T11.g): 50,000, some 0.1 s of a worker at a few
+/// microseconds a star, each star's colour reddened at its own extinction. A reply listing no more
+/// is encoded, band and all, in one job.
+const PAYLOAD_JOB_STARS: usize = 50_000;
+
+/// The sky's bulk payload ([`payload`]'s bytes) as bulk jobs under `token` (R06.T11.g): in one job
+/// where `census` lists at most `stars_a_job` stars, and otherwise its listed stars
+/// `stars_a_job` to a job beside one job for the band's texels, then one more that joins their
+/// bytes in order, so that no job of a reply at `N_max`'s 3 × 10⁵ stars runs for seconds.
 ///
-/// Where the eye was not asked, a star's eye offset is its colour offset alone, against a scotopic
-/// background ([`scotopic_colour_offset`]), and every texel's eye limit is the wire's "not asked".
-/// `band` is of `census`, so it holds an eye offset for each of its listed stars where the eye was
-/// asked.
+/// # Errors
+///
+/// Those of [`compute::sky::bulk`] and [`BulkJobs`].
+async fn encoded(
+    pool: &CpuPool,
+    token: &CancelToken,
+    observer: Observer,
+    census: Arc<SkyCensus>,
+    band: SkyBand,
+    stars_a_job: usize,
+) -> Result<EncodedSky, ComputeError> {
+    let listed = census.listed().len();
+    if listed <= stars_a_job {
+        return compute::sky::bulk(pool, token, move |_: &CancelToken| {
+            payload(&observer, &census, &band)
+        })
+        .await;
+    }
+    let band = Arc::new(band);
+    let star_jobs: Vec<_> = (0..listed)
+        .step_by(stars_a_job)
+        .map(|first| {
+            let which = first..(first + stars_a_job).min(listed);
+            let (census, band) = (Arc::clone(&census), Arc::clone(&band));
+            move || encode_sky_stars(&wire_stars(&observer, &census, &band, which))
+        })
+        .collect();
+    let stars = BulkJobs::submit(pool, token, star_jobs).await?;
+    let texels =
+        BulkJobs::submit(pool, token, [move || encode_sky_texels(&wire_band(&band))]).await?;
+    let (stars, texels) = (stars.results().await?, texels.results().await?);
+    compute::sky::bulk(pool, token, move |_: &CancelToken| {
+        EncodedSky::of_parts(stars, &texels.concat())
+    })
+    .await
+}
+
+/// The sky's bulk payload (Design note 17), in one job: each listed star of `census` as the wire
+/// carries it, seen from `observer`, in the census's order, with its eye offset from `band`
+/// ([`wire_stars`]), then `band`'s texels in the cube's face order.
+///
+/// Where the eye was not asked, every texel's eye limit is the wire's "not asked".
 #[must_use]
 fn payload(observer: &Observer, census: &SkyCensus, band: &SkyBand) -> EncodedSky {
-    let listed = census.listed();
-    let stars: Vec<SkyStarWire> = match band.eye_offsets() {
+    let stars = wire_stars(observer, census, band, 0..census.listed().len());
+    encode_sky_payload(&stars, &wire_band(band))
+}
+
+/// The listed stars `which` of `census`, by their place in its order, as the wire carries them,
+/// seen from `observer`, each with its eye offset from `band`.
+///
+/// Where the eye was not asked, a star's eye offset is its colour offset alone, against a scotopic
+/// background ([`scotopic_colour_offset`]). `band` is of `census`, so it holds an eye offset for
+/// each of its listed stars where the eye was asked.
+///
+/// # Panics
+///
+/// If `which` reaches past the census's listed stars.
+#[must_use]
+fn wire_stars(
+    observer: &Observer,
+    census: &SkyCensus,
+    band: &SkyBand,
+    which: Range<usize>,
+) -> Vec<SkyStarWire> {
+    let listed = &census.listed()[which.clone()];
+    match band.eye_offsets() {
         Some(offsets) => {
-            debug_assert_eq!(offsets.len(), listed.len(), "an eye offset per listed star");
+            debug_assert_eq!(
+                offsets.len(),
+                census.listed().len(),
+                "an eye offset per listed star"
+            );
             listed
                 .iter()
-                .zip(offsets)
+                .zip(&offsets[which])
                 .map(|(star, &offset)| wire_star(observer, star, offset))
                 .collect()
         }
@@ -336,9 +423,13 @@ fn payload(observer: &Observer, census: &SkyCensus, band: &SkyBand) -> EncodedSk
                 wire_star(observer, star, scotopic_colour_offset(ratio))
             })
             .collect(),
-    };
-    let texels: Vec<SkyTexelWire> = band.texels().iter().map(wire_texel).collect();
-    encode_sky_payload(&stars, &texels)
+    }
+}
+
+/// `band`'s texels as the wire carries them, in the cube's face order.
+#[must_use]
+fn wire_band(band: &SkyBand) -> Vec<SkyTexelWire> {
+    band.texels().iter().map(wire_texel).collect()
 }
 
 /// The discs of `system`'s stars at the query's time (Design note 16; R06.T11.c), in one bulk job
@@ -1170,10 +1261,8 @@ mod tests {
         assert!(r > g && g > 1.0 - r - g, "{r} {g}");
     }
 
-    /// Each listed star's wire form takes its own V and its reddened colour (R06.T9.e and the
-    /// band ruling's addendum item 4), over a small census near the Sun.
-    #[test]
-    fn a_wire_star_is_its_census_star_after_its_own_reddening() {
+    /// A small census near the Sun, to 25 ly over tables of no star, with its query.
+    fn small_census() -> (SkyQuery, SkyCensus) {
         let galaxy = Galaxy::new(Seed::new(SEED));
         let caps = SkyCaps::forced(LightYears::new(25.0)).unwrap();
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
@@ -1197,6 +1286,14 @@ mod tests {
         }
         let census = merge_census([(stars, tallies)], query.n_max());
         assert!(census.listed().len() > 10, "{}", census.listed().len());
+        (query, census)
+    }
+
+    /// Each listed star's wire form takes its own V and its reddened colour (R06.T9.e and the
+    /// band ruling's addendum item 4), over a small census near the Sun.
+    #[test]
+    fn a_wire_star_is_its_census_star_after_its_own_reddening() {
+        let (query, census) = small_census();
         let observer = query.observer();
         for star in census.listed() {
             let reddened = star.colour().reddened(star.a_v());
@@ -1230,6 +1327,65 @@ mod tests {
                     < 1e-6 * star.distance().value()
             );
         }
+    }
+
+    /// A reply's payload in jobs, its stars a few to a job beside the band's texels and joined in
+    /// order, is the one job's byte for byte, with the eye's offsets and without (R06.T11.g).
+    #[tokio::test]
+    async fn a_payload_in_jobs_is_the_one_jobs() {
+        let (query, census) = small_census();
+        let galaxy = Galaxy::new(Seed::new(SEED));
+        let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
+        let mut texels = Vec::new();
+        hyperion_sim::sky::band::band_rows(
+            &galaxy,
+            &mut tables.march_context(),
+            &query,
+            &SkyCensus::empty(),
+            &CompleteTo::nowhere(),
+            &BandSpec::new(4, 12).unwrap(),
+            hyperion_sim::sky::band::CubeFace::PosZ,
+            0..4,
+            &mut texels,
+        );
+        let census = Arc::new(census);
+        let n = census.listed().len();
+        let pool = CpuPool::new(
+            std::num::NonZeroUsize::new(2).unwrap(),
+            crate::limits::INTERACTIVE_QUEUE_CAPACITY,
+            crate::limits::BULK_QUEUE_CAPACITY,
+        )
+        .unwrap();
+        let token = CancelToken::new();
+        let offsets: Vec<Magnitudes> = (0..n)
+            .map(|k| Magnitudes::new(0.01 * f64::from(u32::try_from(k).unwrap()) - 0.3))
+            .collect();
+        for eye_offsets in [None, Some(offsets)] {
+            let band = SkyBand::of_parts(texels.clone(), eye_offsets);
+            let whole = payload(query.observer(), &census, &band);
+            assert_eq!(
+                whole.stars_bytes,
+                u64::try_from(n * hyperion_protocol::SKY_STAR_BYTES).unwrap()
+            );
+            for stars_a_job in [3, n - 1, n, n + 1] {
+                let got = timeout(
+                    WAIT,
+                    encoded(
+                        &pool,
+                        &token,
+                        *query.observer(),
+                        Arc::clone(&census),
+                        band.clone(),
+                        stars_a_job,
+                    ),
+                )
+                .await
+                .expect("timed out encoding")
+                .unwrap();
+                assert_eq!(got, whole, "{stars_a_job} stars a job");
+            }
+        }
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
     /// A texel's wire form takes its luminance as `f32`, its chromaticity, its eye limit where the

@@ -180,6 +180,18 @@ pub fn layer_caps_over(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &Br
 pub fn layer_caps_by_visibility_over(galaxy: &Galaxy, tables: &LuminosityTables,
     envelope: &BrightnessEnvelope, observer: &Observer, visibility: &EyeVisibility,
     rays: &RayExtinctions) -> Vec<LayerCap>;                        // R06.T7.b, as built
+impl CapCount { pub fn plan_over(galaxy: &Galaxy, tables: &LuminosityTables,
+        envelope: &BrightnessEnvelope, observer: &Observer, cut: Magnitudes,
+        rays: &RayExtinctions) -> CapCountPlan;
+    pub fn plan_by_visibility_over(/* as plan_over, visibility: &EyeVisibility for the cut */)
+        -> CapCountPlan;
+    pub fn cap(&self, layer: Layer) -> LayerCap; }  // R06.T11.g, as built: caps()' layer by layer
+pub struct CapCountPlan; pub struct CapCountPart;   // R06.T11.g, as built: the count in parts
+impl CapCountPlan { pub fn rays(&self) -> usize;
+    pub fn count_rays(&self, galaxy: &Galaxy, tables: &LuminosityTables, rays: &RayExtinctions,
+        which: Range<usize>) -> CapCountPart;
+    pub fn join(&self, parts: impl IntoIterator<Item = CapCountPart>) -> CapCount; }
+                                    // any order and split, the one job's bits; only its own parts
 
 // sky::census (Design notes 10–13)
 pub struct SkyQuery { /* observer: Observer, cut: Magnitudes, eye: Option<EyeObserver>,
@@ -225,7 +237,8 @@ pub struct SkyCensus { /* listed: Vec<SkyStar> (by flux, then system, then star)
     overflow: Vec<SkyStar>, tallies: CensusTallies */ }
 impl SkyCensus { pub fn empty() -> Self; }                    // the eye-cut pre-pass's band
 pub fn merge_census(parts: Vec<Vec<SkyStar>>, n_max: NonZeroU32) -> SkyCensus;
-pub const SHELL_EDGES_LY: [u32; 9]; pub const SHELLED_LAYERS: [Layer; 3]; pub struct Shell;
+pub const SHELL_EDGES_LY: [u32; 11]; pub const SHELLED_LAYERS: [Layer; 3]; pub struct Shell;
+                                    // 125, 250 and 500 ly, then 1,000 × 2^k (R06.T11.g, as built)
 pub struct Completeness; impl CensusPlan { pub fn shells(&self); pub fn shell_slabs(&self,
     shell: Shell); pub fn completeness(&self, done: impl IntoIterator<Item = Shell>)
     -> Completeness; pub fn complete(&self) -> Completeness; pub fn replies(&self)
@@ -281,6 +294,16 @@ pub fn limit_map(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
     band: &mut [BandTexel]);                                      // limit_rows over six faces
 pub fn eye_offsets(eye: &EyeObserver, spec: &BandSpec, glare: &Glare,
     band: &[BandTexel]) -> Vec<Magnitudes>;         // R06.T9.h: each listed star's own limit less its texel's
+pub fn eye_offsets_of(eye: &EyeObserver, spec: &BandSpec, glare: &Glare, band: &[BandTexel],
+    stars: Range<usize>) -> Vec<Magnitudes>;        // R06.T11.g, as built: some of the stars'
+pub const PRE_PASS_SPEC: BandSpec;                  // the eye cut's 16² pre-pass (public: T11.g)
+pub struct PrePassRows;                             // R06.T11.g, as built: one job's pre-pass rows
+pub fn pre_pass_rows(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, observer: &Observer,
+    eye: &EyeObserver, band_cut: Magnitudes, illumination: Option<&Illumination>, face: CubeFace,
+    rows: Range<u16>) -> PrePassRows;
+pub struct EyeCutSteps;    // R06.T11.g: new(observer, eye), next_band_cut(), take(parts), cut()
+impl EyeVisibility { pub fn assemble(observer: &Observer, eye: &EyeObserver, cut: Magnitudes,
+    parts: impl IntoIterator<Item = PrePassRows>) -> Self; }  // R06.T11.g, as built: any order
 
 // sky::dgl — the diffuse galactic light (R06.T9.g; decision-r06-t9g-dgl.md)
 pub const ILLUMINATION_SPEC: BandSpec;      // 16² on the standard nodes: the eye cut's pre-pass's
@@ -2497,8 +2520,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     (`pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`),
     the UX review, and `just ci`.
 
-- **R06.T11.g The first sky within its budget (new; T11.d's follow-up; after T11.d; decided
-  2026-10-08, `decision-r06-t11d-first-sky.md`).** T11.d's first reply near the Sun took 100.5 s
+- **R06.T11.g The first sky within its budget (new; T11.d's follow-up; after T11.d).** Decided
+  2026-10-08, `decision-r06-t11d-first-sky.md`. T11.d's first reply near the Sun took 100.5 s
   and 1,084 CPU-s on the dev machine's 15 workers, against T17's 10 s and 150 CPU-s (Risks,
   "Deviations in T11.d, as built"). At P11.T17.c's verdicts the 500 ly first shell generates
   about a quarter of C's records, half of D's and five-sixths of E's, at 1–10 ms a system, and
@@ -2533,6 +2556,12 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   `--test sky` and `compute::sky` tests, the bench recorded against T17's first-sky budget,
   `just ci`. If the bench misses, the phases are measured before any edge moves, and a decision
   agent rules from its per-layer figures.
+
+  As built (Risks, "Deviations in T11.g, as built"): the first reply near the Sun in 6.96 s and
+  94.6 CPU-s, 3,192 stars, within T17's 10 s and 150 CPU-s; 250 ly 9.8 s later and 500 ly at
+  69 s; 2.34 s outside the census and the march. The tables at the open took 11.5 s and
+  46.9 CPU-s on 15 workers, over their own 30 CPU-s: a finding for T17. The caps' count is split
+  by rays for every layer at once, then a cap job a layer.
 
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
@@ -8104,6 +8133,101 @@ CensusCost)`.
     refuses still shows its cull's line (a trial of the display test with a refused canvas, not
     kept). Its consider not applied, deferred as polish: with the `S` inside the right-aligned
     field, the edge's digits move two characters left while stale; the line itself does not move.
+- **Deviations in T11.g, as built (2026-10-09).** The first sky within its budget, as the ruling
+  (`decision-r06-t11d-first-sky.md` §1.4 and §2) sets it out. Built on `rendering-and-planets`
+  4dec82b4, merged by name (73098c08; the one conflict, the protocol's version note, took this
+  branch's 28efea9d). No golden moves and no bump (determinism audit, `golden_diff` 0;
+  GENERATOR_VERSION 21); `PROTOCOL_VERSION` stays 2, its note corrected in 28efea9d.
+  - **The edges.** `SHELL_EDGES_LY` is `[u32; 11]`, 125 to 128,000 ly. `delivery_steps` defers a C
+    shell whose inner edge is at or beyond `C_DEFERRED_BEYOND_LY` (2,000 ly). Near the Sun that is
+    10 steps, least edges 125, 250, 500, 1,000, 2,000, 2,000, 4,000, 8,000 and 32,000 ly, then
+    none. T8.i's identity tests keep the test's 40 and 80 ly; the fixed edges are held by
+    `the_shells_take_the_fixed_edges_below_each_cap` and the sphere and completeness tests.
+    `--test sky`'s 10–25 ly defer C from 20 ly (`SkyCaps::with_c_deferred_beyond`, a test seam
+    beyond the plan), so its 6 replies keep a step whose least edge stays at 20 ly.
+  - **Every reply's band moves (determinism audit; not in the ruling's "Nothing generated
+    moves").** The request's march keeps every radius a reply can state as a node of each ray, so
+    125 and 250 ly are two new nodes: each reply's texels, the final one's too, and so their eye
+    limits, eye offsets and payload bytes move within T9.f's quadrature. The census is unchanged,
+    star for star. No golden reads the band, and no build serves the sky, so no bump (as R06.T5.d
+    has it: none "while no band or census output is served or has goldens").
+  - **The tables at the open** (`requests/universe.rs`'s `open`). `SkyTablesService::prefetch`
+    looks for them as a sky does and starts the flight, awaited by a task in the service's
+    `JoinSet`; `stop_prefetching` gives the waiters up in `Server::shutdown`, before the pool
+    stops. A failed build is logged, and the next sky starts another. An open repeated during a
+    build adds one more waiter on the same flight (one build). The join is tested in
+    `compute::sky_tables`, the worker held; over the socket an open with the sky served starts
+    one build that the sky then finds held, and with the switch off none is looked for. The tests'
+    `opened` now waits for the open's build, so a sky's jobs are counted alone.
+  - **The splits**, each tested against its one-job form, bit for bit:
+    - the eye's cut and visibility: `limits::pre_pass_rows`, two rows of a face a job
+      (`PRE_PASS_JOB_ROWS`, 48 a pass), joined by `EyeCutSteps` and `EyeVisibility::assemble`;
+    - **the caps' count (deviation).** Not a job a layer: one job plans it (`CapCount::plan_over`
+      or `plan_by_visibility_over`), then `CapCountPlan::count_rays` counts 32 rays a job for every
+      layer at once (`CAP_COUNT_JOB_RAYS`, 48 jobs), since the layers share each node's densities;
+      `join` in ray order, then `CapCount::cap` a job a layer. A plan joins only its own parts (by
+      its cuts' `Arc`), so two counts over one set of rays, as R13.T2.b's will be, cannot mix;
+    - the eye offsets: `limits::eye_offsets_of`, 20,000 stars a job (`EYE_OFFSET_JOB_STARS`);
+    - the payload: `encode_sky_stars`, 50,000 stars a job (`PAYLOAD_JOB_STARS`), beside a job of
+      `encode_sky_texels`, joined by `EncodedSky::of_parts`; one job up to 50,000 stars.
+  - **Single jobs left** (not split): each reply's merge, a sort of every star its steps have
+    found, listed and overflowing (unmeasured, T17's), and its glare (0.07 s at 3 × 10⁵ stars,
+    T9.i); the tables' plan and assembly, off a sky's path.
+  - **The phase log** gains `eye cut` and `band`; each step logs `censused_ms` and, layer by
+    layer, the records read, the systems generated and the job-seconds (`CensusStep::layers`).
+  - **The bench.** `first_reply` waits for the open's tables and prints their wall and CPU from
+    the open's answer, then times the replies to 125, 250 and 500 ly. `session_first_reply` times
+    from the open's answer; its tables' CPU cannot be told from the sky's, so theirs is
+    `first_reply`'s, and the service logs `build_ms` in both.
+    - **Measured** (2026-10-09, one iteration under the heavy lock, release, 15 workers; the 1-min
+      load 12.5 during the run, mostly the bench's own workers, and 1.1 two minutes after;
+      provisional): the first reply, every layer to 125 ly, in **6.96 s wall and 94.6 CPU-s** of
+      the server's process, 3,192 listed (C 2,793, D 279, E 46; A, B and the brown dwarfs final),
+      against T17's 10 s and 150 CPU-s and the ruling's 8–8.5 s, 85–95 CPU-s and some 3,000 stars:
+      **within the budget**. The 250 ly reply at 16.7 s, 9.8 s later (240 CPU-s, 11,129 listed);
+      the 500 ly reply at 69.2 s (1,024 CPU-s, 28,549 listed, T11.d's first reply's stars).
+    - **Its phases**, from the request: the tables held (0.01 s); the illumination done at 0.26 s,
+      the eye's cut at 0.37 s, its visibility at 0.49 s, the caps and plan at 1.76 s; the march at
+      4.0 s, beside the census; the first step censused at 6.38 s, 37.1 job-s (C 9,996 records
+      read, 8,045 systems generated, 11.1 job-s; D 2,854, 1,809, 13.1; E 1,213, 1,063, 12.8; A and
+      B 0.2); its merge, band and payload 0.58 s. **Outside the census and the march: 2.34 s**
+      (1.76 s before the census, 0.58 s after it), against the 2.5 s target. The second step
+      took 140.8 job-s and the third 786.8.
+    - **The tables** (from the open's answer): held after **11.5 s wall and 46.9 CPU-s** of the
+      process (`build_ms` 11,461; 68 MiB), against their own 30 CPU-s on a quiet machine, which
+      T5.e's serial build met within 1.7 CPU-s (31.3–31.7 CPU-s, 2026-10-05). On 15 workers the
+      build costs about 1.5 times its serial CPU. **Over the budget by about half (a finding, not
+      fixed; FEATURES FIRST)**, and above 5 s wall, so T17 measures the stage chain's schedule
+      before any cut (§2). The session's first reply, asked at the open's answer, came 17.95 s
+      and 138.8 CPU-s after it, the tables' 11.4 s among them.
+  - **Not done here.** R13.T2's count at the ceiling: R13.T2.b's, by `plan_over` at V_P. The near-
+    Sun eye cut's and caps' bits are not pinned against T11.d's; the splits are held against one-job
+    forms rebuilt on the same code, read as expression for expression equal (determinism audit and
+    plan review), until T17's goldens.
+  - **Files beyond T11.g's list.** The sim's `sky/{caps,limits,band}.rs`, `sky/census/query.rs` and
+    `benches/sky.rs` (its band benches take the plan's own replies); the protocol's `sky.rs` and
+    its generated `SkyLayerCensusDto.ts` (docs: the edges); the server's `bulk/sky.rs`,
+    `compute/sky_tables.rs`, `requests/universe.rs` and `lib.rs`. Not touched: `requests/mod.rs`,
+    `config.rs` and `stats.rs` (`sky_tables()` is T11.c's).
+  - **Acceptance as built**: also `cargo test -p hyperion-sim sky::caps`,
+    `cargo test -p hyperion-sim sky::limits`, and the server's `requests::sky` and `bulk::sky`.
+  - **Gates** (capped, build-slot, 4 jobs, `CPUQuota=400%`): fmt; clippy `-D warnings` on the
+    server, the sim and the protocol (all targets) and on the sim for wasm32-wasip1; the sim's
+    `sky::census`, `sky::limits`, `sky::caps` and `sky::band` tests (156 passed, 5 ignored; after
+    the review's fixes `sky::caps` and `sky::limits` again, 59 passed, 2 ignored) and their
+    doctests; `cargo nextest run -p hyperion-server` 488 passed, 5 skipped (511 s), `--test sky`
+    among them; `just gen-protocol` and the bindings check. Not run here: `just ci` (Day 2).
+  - **Reviews.** Rust: its must-fix (the count borrowed its cuts and copied them: `CapCount::over`
+    and `measure_on` take them by value) and should-fix (a plan joined any part of its lattice)
+    applied; its considers applied (the server's eye offsets' split tested at 1, 3, n − 1, n and
+    n + 1 stars a job; the pre-pass's band cut compared by `total_cmp`; the prefetch's docs), but
+    one waiter a repeated open, kept and recorded above. Determinism audit: nothing must-fix; its
+    should-fix recorded above (the band moves), its considers applied (a plan's identity; the
+    socket test's deferred step) but the bits against T11.d's, recorded above. Plan conformance:
+    its must-fix, this record and the bench; its should-fixes applied (the tests' `opened`; the
+    wire's and the sim bench's edges; Provides; T11.g's title, which `plan_task.py` now finds;
+    acceptance and deviations recorded) and its considers (the single jobs' bounds; the tables'
+    clock from the open's answer; the prefetch's misses), but the pinned bits, recorded above.
 - **R06.T5.f's measurements, as built (2026-10-07, generator version 21; `decision-r06-t9b-band.md`,
   item 8).** The tables against the realised sky, as the task sets it out: a record that gates only
   its own sample. Seed 0x0926_0000 (the fixture), at the epoch, on the shipped tables (T5.d's

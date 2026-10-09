@@ -1190,6 +1190,25 @@ pub fn eye_offsets(
     glare: &Glare,
     band: &[BandTexel],
 ) -> Vec<Magnitudes> {
+    eye_offsets_of(eye, spec, glare, band, 0..glare.len())
+}
+
+/// The eye offsets of the listed stars `stars` of `glare`, by their place in the census's order,
+/// mag: those of [`eye_offsets`], bit for bit, for a server that gives a reply's stars their
+/// offsets as jobs of its own (R06.T11.g). Each star's offset is a function of its own source, the
+/// glare and the band alone, so any split of the stars, joined in order, gives [`eye_offsets`].
+///
+/// # Panics
+///
+/// As [`eye_offsets`], and if `stars` reaches past the glare's last star.
+#[must_use]
+pub fn eye_offsets_of(
+    eye: &EyeObserver,
+    spec: &BandSpec,
+    glare: &Glare,
+    band: &[BandTexel],
+    stars: Range<usize>,
+) -> Vec<Magnitudes> {
     let side = spec.face_texels();
     assert_eq!(
         band.len(),
@@ -1197,8 +1216,12 @@ pub fn eye_offsets(
         "a band of six faces of {side}² texels"
     );
     glare.assert_for(*spec);
-    glare
-        .sources
+    assert!(
+        stars.end <= glare.len(),
+        "the stars {stars:?} of a glare of {}",
+        glare.len()
+    );
+    glare.sources[stars]
         .iter()
         .map(|source| eye_offset_parts(eye, *spec, source, band).total())
         .collect()
@@ -1207,7 +1230,7 @@ pub fn eye_offsets(
 /// The eye cut's pre-pass band (Design note 5): 16² texels a face, 7.1° wide at the faces' centres
 /// and 5.2° on average, on the server's nodes a decade: the illumination's (R06.T9.g), so the
 /// pre-pass's rays share its directions and its rays' dust.
-const PRE_PASS_SPEC: BandSpec = ILLUMINATION_SPEC;
+pub const PRE_PASS_SPEC: BandSpec = ILLUMINATION_SPEC;
 
 /// The pre-pass's provisional cut, V 7.85 (Design note 5): its band holds the light of the stars
 /// fainter than it, until the cut it gives is known.
@@ -1241,6 +1264,33 @@ struct PrePass {
     cut: Magnitudes,
 }
 
+impl PrePass {
+    /// The pass whose band is `band`, every texel's limit set, its cut taking `offset`, the largest
+    /// colour offset.
+    ///
+    /// # Panics
+    ///
+    /// If a texel of `band` has no limit.
+    #[must_use]
+    fn of(band: &[BandTexel], offset: Magnitudes) -> Self {
+        let darkest = band
+            .iter()
+            .map(|texel| {
+                texel
+                    .eye_limit()
+                    .expect("the limit map sets every texel's limit")
+                    .value()
+            })
+            // Every limit is finite and positive (eq. 34's threshold is), so the largest is exact
+            // whatever the order: no NaN and no signed zero reach the fold.
+            .fold(f64::NEG_INFINITY, f64::max);
+        Self {
+            darkest: Magnitudes::new(darkest),
+            cut: Magnitudes::new((darkest + offset.value() + CUT_PAD_MAG).min(MAX_CUT_V)),
+        }
+    }
+}
+
 /// The eye cut's pre-pass at [`PROVISIONAL_CUT_V`], and its one repeat at the cut that gave, when
 /// that is deeper.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1257,10 +1307,157 @@ impl EyeCutPasses {
     }
 }
 
+/// Some rows of one face of the eye cut's pre-pass band at one band cut, marched as one of a
+/// request's jobs ([`pre_pass_rows`]), for [`EyeCutSteps::take`] or [`EyeVisibility::assemble`]
+/// (R06.T11.g).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrePassRows {
+    observer: Observer,
+    eye: EyeObserver,
+    /// The cut whose fainter light the rows' band holds, V.
+    band_cut: Magnitudes,
+    face: CubeFace,
+    rows: Range<u16>,
+    /// The rows' texels, each with its limit against no glare, in the band's order.
+    texels: Vec<BandTexel>,
+}
+
+impl PrePassRows {
+    /// The face.
+    #[must_use]
+    pub const fn face(&self) -> CubeFace {
+        self.face
+    }
+
+    /// The rows marched, from the top.
+    #[must_use]
+    pub fn rows(&self) -> Range<u16> {
+        self.rows.clone()
+    }
+
+    /// The cut whose fainter light the rows' band holds, V.
+    #[must_use]
+    pub const fn band_cut(&self) -> Magnitudes {
+        self.band_cut
+    }
+}
+
+/// Marches rows `rows` (from the top) of `face` of the eye cut's pre-pass for `observer` and `eye`,
+/// its band holding the light fainter than `band_cut` and the diffuse galactic light of
+/// `illumination`, as one of a request's jobs (R06.T11.g).
+///
+/// Each texel is [`band_rows`](super::band::band_rows)' at the pre-pass's band, 16² texels a face,
+/// with no census and complete everywhere, with its limit against no glare ([`limit_rows`]). Each
+/// is a function of its own direction alone, so the rows of every face, in any split, joined by
+/// [`EyeCutSteps::take`] or [`EyeVisibility::assemble`], are the band [`eye_cut`] and
+/// [`eye_visibility`] read in one job, bit for bit. `ctx` supplies the luminosity tables, the gas
+/// modifiers and the noise cache; the noise cache changes the cost, never a value. Near the Sun a
+/// row is some 16 rays of about 0.8 ms each in release (R06.T9.f's bench).
+///
+/// # Panics
+///
+/// If `rows` reaches past the face's last row, or `illumination` was marched for another observer
+/// than `observer`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the pre-pass's inputs, its band cut, the illumination and the job's rows"
+)]
+#[must_use]
+pub fn pre_pass_rows(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    observer: &Observer,
+    eye: &EyeObserver,
+    band_cut: Magnitudes,
+    illumination: Option<&Illumination>,
+    face: CubeFace,
+    rows: Range<u16>,
+) -> PrePassRows {
+    let query = SkyQuery::builder(*observer, band_cut)
+        .build()
+        .expect("a finite cut held at V 11 is a query");
+    let side = PRE_PASS_SPEC.face_texels();
+    let mut texels = Vec::with_capacity(rows.len() * usize::from(side));
+    band_rows_lit(
+        galaxy,
+        ctx,
+        &query,
+        &SkyCensus::empty(),
+        &CompleteTo::everywhere(),
+        PRE_PASS_SPEC,
+        face,
+        rows.clone(),
+        illumination,
+        &mut texels,
+    );
+    limit_rows(
+        eye,
+        &PRE_PASS_SPEC,
+        &Glare::default(),
+        face,
+        rows.clone(),
+        &mut texels,
+    );
+    PrePassRows {
+        observer: *observer,
+        eye: *eye,
+        band_cut,
+        face,
+        rows,
+        texels,
+    }
+}
+
+/// The pre-pass's band at `band_cut` for `observer` and `eye`, its six faces in [`CubeFace::ALL`]'s
+/// order, each face's rows from the top, from its rows `parts`, in any order and any split.
+///
+/// # Panics
+///
+/// Unless `parts` hold every texel of the pre-pass's band once, each marched for `observer` and
+/// `eye` at `band_cut`.
+#[must_use]
+fn pre_pass_band_of(
+    observer: &Observer,
+    eye: &EyeObserver,
+    band_cut: Magnitudes,
+    parts: impl IntoIterator<Item = PrePassRows>,
+) -> Vec<BandTexel> {
+    let side = usize::from(PRE_PASS_SPEC.face_texels());
+    let mut band: Vec<Option<BandTexel>> = vec![None; CubeFace::ALL.len() * side * side];
+    for part in parts {
+        assert!(
+            part.observer == *observer
+                && part.eye == *eye
+                && part.band_cut.value().total_cmp(&band_cut.value()).is_eq(),
+            "the pre-pass's rows for {:?} and {:?} at V {} join one for {observer:?} and {eye:?} \
+             at V {}",
+            part.observer,
+            part.eye,
+            part.band_cut.value(),
+            band_cut.value()
+        );
+        let first = (usize::from(part.face.layer()) * side + usize::from(part.rows.start)) * side;
+        for (i, texel) in part.texels.into_iter().enumerate() {
+            let slot = &mut band[first + i];
+            assert!(
+                slot.is_none(),
+                "texel {} of the pre-pass is marched twice",
+                first + i
+            );
+            *slot = Some(texel);
+        }
+    }
+    band.into_iter()
+        .enumerate()
+        .map(|(i, texel)| {
+            texel.unwrap_or_else(|| panic!("texel {i} of the pre-pass is not marched"))
+        })
+        .collect()
+}
+
 /// The pre-pass's band for `observer` and `eye` at `band_cut`, its six faces in
 /// [`CubeFace::ALL`]'s order, with the diffuse galactic light of `illumination` (R06.T9.g) and
-/// their limits against no glare: [`band_rows`](super::band::band_rows) at [`PRE_PASS_SPEC`] with
-/// no census and complete everywhere, then [`limit_map`].
+/// their limits against no glare: [`pre_pass_rows`] over every row of each face, in one job.
 #[must_use]
 fn pre_pass_band(
     galaxy: &Galaxy,
@@ -1270,60 +1467,169 @@ fn pre_pass_band(
     band_cut: Magnitudes,
     illumination: Option<&Illumination>,
 ) -> Vec<BandTexel> {
-    let query = SkyQuery::builder(*observer, band_cut)
-        .build()
-        .expect("a finite cut held at V 11 is a query");
     let side = PRE_PASS_SPEC.face_texels();
-    let mut band = Vec::with_capacity(CubeFace::ALL.len() * usize::from(side) * usize::from(side));
-    for face in CubeFace::ALL {
-        band_rows_lit(
-            galaxy,
-            ctx,
-            &query,
-            &SkyCensus::empty(),
-            &CompleteTo::everywhere(),
-            PRE_PASS_SPEC,
-            face,
-            0..side,
-            illumination,
-            &mut band,
-        );
-    }
-    limit_map(eye, &PRE_PASS_SPEC, &Glare::default(), &mut band);
-    band
-}
-
-/// One run of the pre-pass whose band holds the light fainter than `band_cut` and the diffuse
-/// light of `illumination` ([`pre_pass_band`]), its cut taking `offset`, the largest colour
-/// offset.
-#[must_use]
-fn pre_pass(
-    galaxy: &Galaxy,
-    ctx: &mut SkyContext<'_>,
-    observer: &Observer,
-    eye: &EyeObserver,
-    band_cut: Magnitudes,
-    offset: Magnitudes,
-    illumination: Option<&Illumination>,
-) -> PrePass {
-    let darkest = pre_pass_band(galaxy, ctx, observer, eye, band_cut, illumination)
-        .iter()
-        .map(|texel| {
-            texel
-                .eye_limit()
-                .expect("the limit map sets every texel's limit")
-                .value()
+    let parts: Vec<PrePassRows> = CubeFace::ALL
+        .into_iter()
+        .map(|face| {
+            pre_pass_rows(
+                galaxy,
+                ctx,
+                observer,
+                eye,
+                band_cut,
+                illumination,
+                face,
+                0..side,
+            )
         })
-        // Every limit is finite and positive (eq. 34's threshold is), so the largest is exact
-        // whatever the order: no NaN and no signed zero reach the fold.
-        .fold(f64::NEG_INFINITY, f64::max);
-    PrePass {
-        darkest: Magnitudes::new(darkest),
-        cut: Magnitudes::new((darkest + offset.value() + CUT_PAD_MAG).min(MAX_CUT_V)),
+        .collect();
+    pre_pass_band_of(observer, eye, band_cut, parts)
+}
+
+/// The eye's cut taken one pre-pass at a time, for a server that marches each pass's rows as jobs
+/// of its own ([`pre_pass_rows`]; R06.T11.g): [`eye_cut`]'s cut, bit for bit, whatever the split.
+///
+/// The first pass's band holds the light fainter than the provisional V 7.85, and if the cut it
+/// gives is deeper, one more pass at that cut gives the eye's ([`eye_cut`]). Near the Sun each pass
+/// is 1,536 rays, about 1.2 CPU-s, so as one job each it would hold a worker for a second or more
+/// on the first sky's path (`decision-r06-t11d-first-sky.md` §1.4).
+///
+/// # Examples
+///
+/// The eye's cut near the Sun from passes marched two rows of a face at a time, as a server's jobs
+/// would (`no_run`: the tables take a minute or more to build):
+///
+/// ```no_run
+/// use std::sync::Arc;
+///
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::band::CubeFace;
+/// use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext};
+/// use hyperion_sim::sky::dgl::Illumination;
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::eye::EyeObserver;
+/// use hyperion_sim::sky::limits::{EyeCutSteps, eye_cut, pre_pass_rows};
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let offsets = CellOffsets::build(&galaxy);
+/// let mut ctx = SkyContext {
+///     tables: &tables,
+///     envelope: &envelope,
+///     offsets: &offsets,
+///     noise: NoiseCache::with_capacity(1 << 16),
+///     cells: &NoSkyCellCache,
+///     sources: &[],
+///     modifiers: &NoModifiers,
+/// };
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+/// let eye = EyeObserver::default();
+/// let light = Arc::new(Illumination::march(&galaxy, &mut ctx, &observer));
+/// let mut steps = EyeCutSteps::new(observer, eye);
+/// while let Some(band_cut) = steps.next_band_cut() {
+///     let mut parts = Vec::new();
+///     for face in CubeFace::ALL {
+///         for first in (0..16).step_by(2) {
+///             let rows = first..first + 2;
+///             parts.push(pre_pass_rows(
+///                 &galaxy, &mut ctx, &observer, &eye, band_cut, Some(&light), face, rows,
+///             ));
+///         }
+///     }
+///     steps.take(parts);
+/// }
+/// let cut = steps.cut().ok_or("the passes are taken")?;
+/// assert_eq!(cut, eye_cut(&galaxy, &mut ctx, &observer, &eye, Some(&light)));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct EyeCutSteps {
+    observer: Observer,
+    eye: EyeObserver,
+    /// The first pass, once taken, while its repeat is still to march.
+    first: Option<PrePass>,
+    /// Every pass, once the cut is known.
+    passes: Option<EyeCutPasses>,
+}
+
+impl EyeCutSteps {
+    /// The eye's cut for `observer` and `eye`, no pass yet taken.
+    #[must_use]
+    pub const fn new(observer: Observer, eye: EyeObserver) -> Self {
+        Self {
+            observer,
+            eye,
+            first: None,
+            passes: None,
+        }
+    }
+
+    /// The cut whose fainter light the next pass's band holds, V, at which its rows are marched
+    /// ([`pre_pass_rows`]): V 7.85 first, then the first pass's cut where that is deeper, and
+    /// `None` once the eye's cut is known.
+    #[must_use]
+    pub fn next_band_cut(&self) -> Option<Magnitudes> {
+        match (self.passes, self.first) {
+            (Some(_), _) => None,
+            (None, Some(first)) => Some(first.cut),
+            (None, None) => Some(Magnitudes::new(PROVISIONAL_CUT_V)),
+        }
+    }
+
+    /// Takes the pass at [`next_band_cut`](Self::next_band_cut) from its rows `parts`, in any order
+    /// and any split.
+    ///
+    /// # Panics
+    ///
+    /// If the eye's cut is known already, or unless `parts` hold every texel of the pre-pass's band
+    /// once, each marched for the steps' observer and eye at the next band cut. In debug builds, if
+    /// the repeat's darkest limit is shallower than the first pass's, which no band gives.
+    pub fn take(&mut self, parts: impl IntoIterator<Item = PrePassRows>) {
+        let band_cut = self
+            .next_band_cut()
+            .expect("the eye's cut takes no pass once it is known");
+        let band = pre_pass_band_of(&self.observer, &self.eye, band_cut, parts);
+        let pass = PrePass::of(&band, largest_colour_offset());
+        match self.first {
+            None if pass.cut > Magnitudes::new(PROVISIONAL_CUT_V) => self.first = Some(pass),
+            None => {
+                self.passes = Some(EyeCutPasses {
+                    first: pass,
+                    repeat: None,
+                });
+            }
+            Some(first) => {
+                // A deeper cut only takes light from the band, which only deepens its limits (to a
+                // rounding), so what one repeat leaves lies on the side the pad covers. The diffuse
+                // light has the same bits in both passes, since no cut moves it (R06.T9.g).
+                debug_assert!(
+                    pass.darkest.value() >= first.darkest.value() - 1e-9,
+                    "a deeper cut leaves the band darker: {first:?}, then {pass:?}"
+                );
+                self.passes = Some(EyeCutPasses {
+                    first,
+                    repeat: Some(pass),
+                });
+            }
+        }
+    }
+
+    /// The eye's cut, V, once its passes are taken: [`eye_cut`]'s.
+    #[must_use]
+    pub fn cut(&self) -> Option<Magnitudes> {
+        self.passes.as_ref().map(EyeCutPasses::cut)
     }
 }
 
-/// The pre-pass and its repeat ([`eye_cut`]).
+/// The pre-pass and its repeat ([`eye_cut`]), in one job.
 #[must_use]
 fn eye_cut_passes(
     galaxy: &Galaxy,
@@ -1332,29 +1638,29 @@ fn eye_cut_passes(
     eye: &EyeObserver,
     illumination: Option<&Illumination>,
 ) -> EyeCutPasses {
-    let offset = largest_colour_offset();
-    let provisional = Magnitudes::new(PROVISIONAL_CUT_V);
-    let first = pre_pass(
-        galaxy,
-        ctx,
-        observer,
-        eye,
-        provisional,
-        offset,
-        illumination,
-    );
-    let repeat = (first.cut > provisional).then(|| {
-        let repeat = pre_pass(galaxy, ctx, observer, eye, first.cut, offset, illumination);
-        // A deeper cut only takes light from the band, which only deepens its limits (to a
-        // rounding), so what one repeat leaves lies on the side the pad covers. The diffuse
-        // light has the same bits in both passes, since no cut moves it (R06.T9.g).
-        debug_assert!(
-            repeat.darkest.value() >= first.darkest.value() - 1e-9,
-            "a deeper cut leaves the band darker: {first:?}, then {repeat:?}"
-        );
-        repeat
-    });
-    EyeCutPasses { first, repeat }
+    let side = PRE_PASS_SPEC.face_texels();
+    let mut steps = EyeCutSteps::new(*observer, *eye);
+    while let Some(band_cut) = steps.next_band_cut() {
+        let parts: Vec<PrePassRows> = CubeFace::ALL
+            .into_iter()
+            .map(|face| {
+                pre_pass_rows(
+                    galaxy,
+                    ctx,
+                    observer,
+                    eye,
+                    band_cut,
+                    illumination,
+                    face,
+                    0..side,
+                )
+            })
+            .collect();
+        steps.take(parts);
+    }
+    steps
+        .passes
+        .expect("the steps end once the eye's cut is known")
 }
 
 /// The eye's cut for `observer` and `eye`, V: the faintest V a sky with the eye lists (Design note
@@ -1523,6 +1829,58 @@ impl EyeVisibility {
         }
     }
 
+    /// The eye's visibility for `observer` and `eye` at `cut`, the eye's ([`eye_cut`]'s), from the
+    /// rows of the pre-pass at that cut, `parts` ([`pre_pass_rows`] at `cut`), in any order and any
+    /// split: [`eye_visibility`]'s bits, for a server that marches the rows as jobs of its own
+    /// (R06.T11.g).
+    ///
+    /// # Panics
+    ///
+    /// Unless `parts` hold every texel of the pre-pass's band once, each marched for `observer` and
+    /// `eye` at `cut`.
+    #[must_use]
+    pub fn assemble(
+        observer: &Observer,
+        eye: &EyeObserver,
+        cut: Magnitudes,
+        parts: impl IntoIterator<Item = PrePassRows>,
+    ) -> Self {
+        let band = pre_pass_band_of(observer, eye, cut, parts);
+        Self::of_band(observer, eye, cut, &band)
+    }
+
+    /// The visibility whose pre-pass band at `cut` is `band`: each texel's limit plus the largest
+    /// colour offset and the cut's pad, held at the cut.
+    ///
+    /// # Panics
+    ///
+    /// If a texel of `band` has no limit.
+    #[must_use]
+    fn of_band(
+        observer: &Observer,
+        eye: &EyeObserver,
+        cut: Magnitudes,
+        band: &[BandTexel],
+    ) -> Self {
+        let offset = largest_colour_offset().value();
+        let limits = band
+            .iter()
+            .map(|texel| {
+                let limit = texel
+                    .eye_limit()
+                    .expect("the limit map sets every texel's limit")
+                    .value();
+                (limit + offset + CUT_PAD_MAG).min(cut.value())
+            })
+            .collect();
+        Self {
+            observer: *observer,
+            eye: *eye,
+            cut,
+            limits,
+        }
+    }
+
     /// Each texel's centre and the faintest V counted towards it, in the band's order.
     pub fn texels(&self) -> impl Iterator<Item = (UnitVector, Magnitudes)> + '_ {
         let side = PRE_PASS_SPEC.face_texels();
@@ -1557,23 +1915,8 @@ pub fn eye_visibility(
     cut: Magnitudes,
     illumination: Option<&Illumination>,
 ) -> EyeVisibility {
-    let offset = largest_colour_offset().value();
-    let limits = pre_pass_band(galaxy, ctx, observer, eye, cut, illumination)
-        .iter()
-        .map(|texel| {
-            let limit = texel
-                .eye_limit()
-                .expect("the limit map sets every texel's limit")
-                .value();
-            (limit + offset + CUT_PAD_MAG).min(cut.value())
-        })
-        .collect();
-    EyeVisibility {
-        observer: *observer,
-        eye: *eye,
-        cut,
-        limits,
-    }
+    let band = pre_pass_band(galaxy, ctx, observer, eye, cut, illumination);
+    EyeVisibility::of_band(observer, eye, cut, &band)
 }
 
 #[cfg(test)]
@@ -1998,6 +2341,17 @@ mod tests {
         }
         let offsets = eye_offsets(&eye, &spec, &glare, &band);
         assert_eq!(offsets.len(), sources.len());
+        // In parts, as a server's jobs give a reply's stars theirs (R06.T11.g), the offsets are
+        // the same bits.
+        let n = sources.len();
+        assert!(n > 2, "{n} sources");
+        let in_parts: Vec<u64> = [0..1, 1..1, 1..n / 2, n / 2..n]
+            .into_iter()
+            .flat_map(|stars| eye_offsets_of(&eye, &spec, &glare, &band, stars))
+            .map(|offset| bits(offset.value()))
+            .collect();
+        let whole: Vec<u64> = offsets.iter().map(|offset| bits(offset.value())).collect();
+        assert_eq!(in_parts, whole);
         let mut worst_own = 0.0_f64;
         for (i, ((u, _, rho), offset)) in sources.iter().zip(&offsets).enumerate() {
             let (index, toward) = texel_of(spec, u);
@@ -4051,6 +4405,121 @@ mod tests {
         );
         assert_eq!(bits(passes.first.cut.value()), bits(MAX_CUT_V));
         assert_eq!(bits(passes.cut().value()), bits(MAX_CUT_V));
+    }
+
+    /// The eye's cut taken pass by pass from rows marched in parts, three rows of a face at a time
+    /// and joined out of order, is the one job's bit for bit, with as many passes, and the eye's
+    /// visibility at that cut from rows in parts is `eye_visibility`'s: the server's jobs
+    /// (R06.T11.g).
+    #[test]
+    fn the_eye_cut_and_visibility_from_rows_in_parts_are_one_jobs() {
+        let eye = EyeObserver::default();
+        let light = sun_illumination();
+        let rows_of = |band_cut: Magnitudes| -> Vec<PrePassRows> {
+            let mut ctx = context();
+            let mut parts: Vec<PrePassRows> = CubeFace::ALL
+                .into_iter()
+                .flat_map(|face| {
+                    (0..16_u16)
+                        .step_by(3)
+                        .map(move |first| (face, first..(first + 3).min(16)))
+                })
+                .map(|(face, rows)| {
+                    pre_pass_rows(
+                        milky_way_galaxy(),
+                        &mut ctx,
+                        &observer(),
+                        &eye,
+                        band_cut,
+                        Some(light),
+                        face,
+                        rows,
+                    )
+                })
+                .collect();
+            parts.reverse();
+            parts
+        };
+        let mut steps = EyeCutSteps::new(observer(), eye);
+        let mut passes = 0;
+        while let Some(band_cut) = steps.next_band_cut() {
+            steps.take(rows_of(band_cut));
+            passes += 1;
+        }
+        let one_job = eye_cut_near_the_sun();
+        assert_eq!(passes, 1 + usize::from(one_job.repeat.is_some()));
+        let cut = steps.cut().expect("the cut, once its passes are taken");
+        assert_eq!(bits(cut.value()), bits(one_job.cut().value()));
+        assert_eq!(steps.next_band_cut(), None);
+        let visibility = EyeVisibility::assemble(&observer(), &eye, cut, rows_of(cut));
+        assert_eq!(
+            visibility,
+            eye_visibility(
+                milky_way_galaxy(),
+                &mut context(),
+                &observer(),
+                &eye,
+                cut,
+                Some(light)
+            )
+        );
+    }
+
+    /// The pre-pass's top row of the first face at `band_cut`, over tables of no star.
+    fn a_dark_pre_pass_row(band_cut: f64) -> PrePassRows {
+        let mut ctx = SkyContext {
+            tables: crate::sky::testing::milky_way_dark_tables(),
+            envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
+            noise: NoiseCache::with_capacity(1 << 10),
+            cells: &NoSkyCellCache,
+            sources: &[],
+            modifiers: &NoModifiers,
+        };
+        pre_pass_rows(
+            milky_way_galaxy(),
+            &mut ctx,
+            &observer(),
+            &EyeObserver::default(),
+            Magnitudes::new(band_cut),
+            None,
+            CubeFace::ALL[0],
+            0..1,
+        )
+    }
+
+    #[test]
+    #[should_panic(expected = "texel 0 of the pre-pass is marched twice")]
+    fn a_pre_pass_texel_marched_twice_is_refused() {
+        let row = a_dark_pre_pass_row(PROVISIONAL_CUT_V);
+        let mut steps = EyeCutSteps::new(observer(), EyeObserver::default());
+        steps.take([row.clone(), row]);
+    }
+
+    #[test]
+    #[should_panic(expected = "texel 16 of the pre-pass is not marched")]
+    fn a_pre_pass_missing_a_texel_is_refused() {
+        let row = a_dark_pre_pass_row(PROVISIONAL_CUT_V);
+        let mut steps = EyeCutSteps::new(observer(), EyeObserver::default());
+        steps.take([row]);
+    }
+
+    #[test]
+    #[should_panic(expected = "at V 8 join one for")]
+    fn pre_pass_rows_of_another_band_cut_are_refused() {
+        let row = a_dark_pre_pass_row(8.0);
+        let mut steps = EyeCutSteps::new(observer(), EyeObserver::default());
+        steps.take([row]);
+    }
+
+    #[test]
+    #[should_panic(expected = "the stars 0..1 of a glare of 0")]
+    fn eye_offsets_past_the_glares_stars_are_refused() {
+        let spec = spec(8);
+        let mut band = vec![BandTexel::of_light(1e-5, 2.26); 6 * 64];
+        let glare = Glare::default();
+        limit_map(&EyeObserver::default(), &spec, &glare, &mut band);
+        let _ = eye_offsets_of(&EyeObserver::default(), &spec, &glare, &band, 0..1);
     }
 
     #[test]

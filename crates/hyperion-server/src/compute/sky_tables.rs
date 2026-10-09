@@ -23,14 +23,20 @@
 //! envelope is a fitted table, with nothing to build, and the cells' offset bounds a few thousand
 //! tidal radii; both are kept beside the tables.
 //!
+//! A server that serves the sky starts a galaxy's tables when a client opens its universe
+//! ([`SkyTablesService::prefetch`]; R06.T11.g, decided 2026-10-08,
+//! `decision-r06-t11d-first-sky.md` §2): the build, some 31 CPU-s and 12 s on the development
+//! machine, is a per-galaxy cost under its own 30 CPU-s budget, not a sky's, and a sky asked
+//! meanwhile joins it. The open answers without waiting for it.
+//!
 //! A server whose sky's caps are forced for a test ([`SkyCaps::forced`](super::SkyCaps::forced))
 //! is given tables that hold no star, built in one job at once, unless its caps ask for the
 //! galaxy's own ([`SkyCaps::with_galaxy_tables`](super::SkyCaps::with_galaxy_tables)). The service
 //! is made with the one source its server's caps name, so its cache holds one kind of tables.
 
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use hyperion_protocol::SeedHex;
@@ -39,8 +45,10 @@ use hyperion_sim::sky::luminosity::{
     BinSums, LuminosityTables, SampleChunk, Stage, TablesPlan, TrackSamples,
 };
 
+use tokio::task::JoinSet;
+
 use super::sky::{BulkJobs, SkyTables, SkyTablesSource, bulk};
-use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, SingleFlight};
+use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SingleFlight};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 impl HeapBytes for SkyTables {
@@ -86,6 +94,10 @@ pub(crate) struct SkyTablesService {
     held: Arc<SharedByteLru<GalaxyKey, SkyTables>>,
     flights: SingleFlight<GalaxyKey, SkyTables, ComputeError>,
     builds: Arc<AtomicU64>,
+    /// The builds started at a universe's open, each waited on by a task of its own so that its
+    /// flight lives with no sky waiting ([`prefetch`](Self::prefetch)); aborted at shutdown or when
+    /// the service is dropped.
+    prefetching: Mutex<JoinSet<()>>,
 }
 
 impl SkyTablesService {
@@ -102,6 +114,7 @@ impl SkyTablesService {
             held: Arc::new(SharedByteLru::new(budget_bytes)),
             flights: SingleFlight::new(),
             builds: Arc::new(AtomicU64::new(0)),
+            prefetching: Mutex::new(JoinSet::new()),
         }
     }
 
@@ -131,6 +144,73 @@ impl SkyTablesService {
         if let Some(tables) = self.held.get(&key) {
             return Ok(tables);
         }
+        self.flight(key, galaxy).await
+    }
+
+    /// Starts the tables of `galaxy`, the galaxy `key` names, unless they are held, and returns at
+    /// once: the build runs on the pool at bulk priority through the service's single flight,
+    /// waited on by a task the service owns, and a sky asked meanwhile joins it (R06.T11.g; decided
+    /// 2026-10-08, `decision-r06-t11d-first-sky.md` §2). Whether a build was started or joined.
+    ///
+    /// The server calls it when a client opens a universe and the sky is served. It looks for the
+    /// tables as a sky does, so it counts a hit when they are held; otherwise a miss, and one more
+    /// inside the flight where it starts the build, as a sky that builds them does, but none there
+    /// where it joins a build already in flight. A build that fails is
+    /// logged, and the next sky starts another.
+    ///
+    /// # Panics
+    ///
+    /// As [`get`](Self::get), if `galaxy`'s seed is not the seed of `key`.
+    pub(crate) fn prefetch(&self, key: GalaxyKey, galaxy: &Arc<Galaxy>) -> bool {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a galaxy's sky tables are kept under its own key, and this is another's"
+        );
+        if self.held.get(&key).is_some() {
+            return false;
+        }
+        let flight = self.flight(key, galaxy);
+        let mut tasks = self
+            .prefetching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // The finished tasks are reaped as new ones start, so the set holds only waiters on builds
+        // still running. An open repeated during its galaxy's build adds one more task that awaits
+        // the same flight: the tables are still built once.
+        while let Some(finished) = tasks.try_join_next() {
+            if let Err(error) = finished
+                && error.is_panic()
+            {
+                tracing::error!(%error, "a sky tables build started at an open panicked");
+            }
+        }
+        tasks.spawn(async move {
+            if let Err(error) = flight.await {
+                tracing::warn!(
+                    seed = %SeedHex::from_u64(key.seed()),
+                    %error,
+                    "a galaxy's sky tables, started when its universe was opened, were not built"
+                );
+            }
+        });
+        true
+    }
+
+    /// Stops waiting on the builds [`prefetch`](Self::prefetch) started: each is given up unless a
+    /// sky waits on it too, and its queued jobs are skipped. For the server's shutdown, before its
+    /// pool stops. It does not wait for the waiters to end: each is aborted at its next poll, and
+    /// the pool's shutdown drops whatever jobs are still queued.
+    pub(crate) fn stop_prefetching(&self) {
+        self.prefetching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .abort_all();
+    }
+
+    /// The build of `galaxy`'s tables under `key`, joined if one is in progress: it looks for them
+    /// once more inside the flight, then builds them from the service's source and keeps them.
+    fn flight(&self, key: GalaxyKey, galaxy: &Arc<Galaxy>) -> Flight<SkyTables, ComputeError> {
         let source = self.source;
         let (pool, held, builds, galaxy) = (
             Arc::clone(&self.pool),
@@ -138,44 +218,42 @@ impl SkyTablesService {
             Arc::clone(&self.builds),
             Arc::clone(galaxy),
         );
-        self.flights
-            .run(key, move || async move {
-                // As in `GalaxyCache::get`: a caller can arrive just after another flight has
-                // finished and left the registry, and the tables it built are worth more than a
-                // second build. The look is counted, as the density maps' is, since
-                // `SharedByteLru` has no uncounted lookup.
-                if let Some(tables) = held.get(&key) {
-                    return Ok(tables);
+        self.flights.run(key, move || async move {
+            // As in `GalaxyCache::get`: a caller can arrive just after another flight has
+            // finished and left the registry, and the tables it built are worth more than a
+            // second build. The look is counted, as the density maps' is, since
+            // `SharedByteLru` has no uncounted lookup.
+            if let Some(tables) = held.get(&key) {
+                return Ok(tables);
+            }
+            let token = CancelToken::new();
+            // Cancels the build's queued jobs once every waiter on this flight has gone.
+            let _cancel_on_drop = CancelOnDrop::new(token.clone());
+            let started = Instant::now();
+            let tables = Arc::new(match source {
+                SkyTablesSource::Galaxy => build_on_pool(&pool, &galaxy, &token).await?,
+                SkyTablesSource::Dark => {
+                    let galaxy = Arc::clone(&galaxy);
+                    bulk(&pool, &token, move |_: &CancelToken| {
+                        SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy)
+                    })
+                    .await?
                 }
-                let token = CancelToken::new();
-                // Cancels the build's queued jobs once every waiter on this flight has gone.
-                let _cancel_on_drop = CancelOnDrop::new(token.clone());
-                let started = Instant::now();
-                let tables = Arc::new(match source {
-                    SkyTablesSource::Galaxy => build_on_pool(&pool, &galaxy, &token).await?,
-                    SkyTablesSource::Dark => {
-                        let galaxy = Arc::clone(&galaxy);
-                        bulk(&pool, &token, move |_: &CancelToken| {
-                            SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy)
-                        })
-                        .await?
-                    }
-                });
-                builds.fetch_add(1, Ordering::Relaxed);
-                tracing::info!(
-                    seed = %SeedHex::from_u64(key.seed()),
-                    generator_version = %key.generator_version(),
-                    ?source,
-                    build_ms = started.elapsed().as_secs_f64() * 1e3,
-                    heap_mib = SkyTables::heap_bytes(&tables) / (1 << 20),
-                    "built a galaxy's sky tables"
-                );
-                // Tables larger than the whole budget are handed back and not stored; the waiters
-                // get them either way.
-                drop(held.insert(key, Arc::clone(&tables)));
-                Ok(tables)
-            })
-            .await
+            });
+            builds.fetch_add(1, Ordering::Relaxed);
+            tracing::info!(
+                seed = %SeedHex::from_u64(key.seed()),
+                generator_version = %key.generator_version(),
+                ?source,
+                build_ms = started.elapsed().as_secs_f64() * 1e3,
+                heap_mib = SkyTables::heap_bytes(&tables) / (1 << 20),
+                "built a galaxy's sky tables"
+            );
+            // Tables larger than the whole budget are handed back and not stored; the waiters
+            // get them either way.
+            drop(held.insert(key, Arc::clone(&tables)));
+            Ok(tables)
+        })
     }
 
     /// The tables held, the bytes they are charged, the hits, misses, evictions and refusals so
@@ -191,9 +269,15 @@ impl SkyTablesService {
 
 impl fmt::Debug for SkyTablesService {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let prefetching = self
+            .prefetching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len();
         f.debug_struct("SkyTablesService")
             .field("counters", &self.counters())
             .field("building", &self.flights.len())
+            .field("prefetching", &prefetching)
             .finish_non_exhaustive()
     }
 }
@@ -430,6 +514,109 @@ mod tests {
             "the build waits behind the held worker"
         );
         drop(asking);
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        drain(&pool).await;
+        assert_eq!(pool.counters().cancelled(), 1, "{:?}", pool.counters());
+        let counters = service.counters();
+        assert_eq!(
+            (counters.builds(), counters.cache().entries()),
+            (0, 0),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// Yields until `ready` holds of the pool's or the service's counters.
+    async fn until(what: &str, ready: impl Fn() -> bool) {
+        timeout(WAIT, async {
+            while !ready() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
+    }
+
+    /// A build started at an open, with no sky waiting, is joined by a sky asked meanwhile: one
+    /// build between them, the open's look and its flight's two misses and the sky's one. Once the
+    /// tables are held, an open starts nothing and counts a hit (R06.T11.g).
+    #[tokio::test]
+    async fn a_build_started_at_an_open_is_joined_by_a_sky() {
+        let pool = one_worker();
+        let service = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, 64 << 20);
+        let (key, galaxy) = galaxy();
+        let (release, held) = hold(&pool).await;
+        assert!(service.prefetch(key, &galaxy), "an open starts the build");
+        until("the open's build is queued behind the held worker", || {
+            let counters = pool.counters();
+            (counters.running(), counters.queued_bulk()) == (1, 1)
+        })
+        .await;
+        let mut asking = Box::pin(service.get(key, &galaxy));
+        assert!(
+            (&mut asking).now_or_never().is_none(),
+            "the build waits behind the held worker"
+        );
+        release.send(()).unwrap();
+        let tables = timeout(WAIT, asking).await.unwrap().unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        let counters = service.counters();
+        assert_eq!(counters.builds(), 1, "{counters:?}");
+        assert_eq!(
+            (
+                counters.cache().misses(),
+                counters.cache().hits(),
+                counters.cache().entries()
+            ),
+            (3, 0, 1),
+            "{counters:?}"
+        );
+        assert!(
+            !service.prefetch(key, &galaxy),
+            "held: an open starts nothing"
+        );
+        let counters = service.counters();
+        assert_eq!((counters.builds(), counters.cache().hits()), (1, 1));
+        let again = timeout(WAIT, service.get(key, &galaxy))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(Arc::ptr_eq(&tables, &again));
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A build started at an open runs to its end and is held with no sky ever asked.
+    #[tokio::test]
+    async fn a_build_started_at_an_open_needs_no_sky() {
+        let pool = one_worker();
+        let service = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, 64 << 20);
+        let (key, galaxy) = galaxy();
+        assert!(service.prefetch(key, &galaxy));
+        until("the tables are held", || {
+            service.counters().cache().entries() == 1
+        })
+        .await;
+        assert_eq!(service.counters().builds(), 1);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// The builds started at opens are given up at shutdown: a queued job of one is skipped, and
+    /// nothing is built or held.
+    #[tokio::test]
+    async fn a_build_started_at_an_open_is_given_up_at_shutdown() {
+        let pool = one_worker();
+        let service = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, 64 << 20);
+        let (key, galaxy) = galaxy();
+        let (release, held) = hold(&pool).await;
+        assert!(service.prefetch(key, &galaxy));
+        until("the open's build is queued behind the held worker", || {
+            let counters = pool.counters();
+            (counters.running(), counters.queued_bulk()) == (1, 1)
+        })
+        .await;
+        service.stop_prefetching();
+        until("the build is given up", || service.flights.is_empty()).await;
         release.send(()).unwrap();
         timeout(WAIT, held).await.unwrap().unwrap().unwrap();
         drain(&pool).await;

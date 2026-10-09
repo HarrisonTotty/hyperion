@@ -10,8 +10,8 @@
 //! # Nearest first
 //!
 //! A sky arrives as several answers, nearest first (rendering plan R06, R06.T11.d; Design notes 11
-//! and 13): the server censuses each layer shell by shell to fixed edges (500 ly, then 1,000 × 2^k
-//! ly) and sends a whole sky after each step, `partial_response`s, then the last as the terminal
+//! and 13): the server censuses each layer shell by shell to fixed edges (125, 250 and 500 ly, then
+//! 1,000 × 2^k ly; R06.T11.g) and sends a whole sky after each step, `partial_response`s, then the last as the terminal
 //! `response`, [`SkyResponse::is_final`]. Each is the exact census to the radii it states, layer by
 //! layer ([`SkyLayerCensusDto::complete_to_ly`] and its per-ray table), with the band holding the
 //! light beyond them; each replaces the one before whole. Every machine sends the same answers, in
@@ -214,8 +214,9 @@ pub struct SkyLayerCensusDto {
     /// Whether the layer's feature members (clusters, the galactic centre) are absent.
     pub feature_members_absent: bool,
     /// How far this answer's census of the layer is complete, ly, in its farthest direction
-    /// (rendering plan R06, R06.T11.d): the fixed shell edge its shells reach, 500 ly or
-    /// 1,000 × 2^k ly, while it is not [`final`](Self::is_final), and `cap_ly` once it is. Towards
+    /// (rendering plan R06, R06.T11.d): the fixed shell edge its shells reach, 125, 250 or 500 ly
+    /// or 1,000 × 2^k ly (R06.T11.g), while it is not [`final`](Self::is_final), and `cap_ly`
+    /// once it is. Towards
     /// each ray of the caps' lattice it is complete to that ray's radius in
     /// [`complete_to_rays_ly`](Self::complete_to_rays_ly), the edge held within the cap. It lists
     /// a star, until it is final, only where the star lies nearer than that radius towards the

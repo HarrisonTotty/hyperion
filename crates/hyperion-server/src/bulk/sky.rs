@@ -56,12 +56,18 @@ pub(crate) struct EncodedSky {
     pub(crate) band_bytes: u64,
 }
 
-/// The stars, then the texels, as one payload.
+/// The stars, then the texels, as one payload: [`encode_sky_stars`] then [`encode_sky_texels`],
+/// joined ([`EncodedSky::of_parts`]).
 #[must_use]
 pub(crate) fn encode_sky_payload(stars: &[SkyStarWire], texels: &[SkyTexelWire]) -> EncodedSky {
-    let stars_len = stars.len() * SKY_STAR_BYTES;
-    let band_len = texels.len() * SKY_TEXEL_BYTES;
-    let mut bytes = Vec::with_capacity(stars_len + band_len);
+    EncodedSky::of_parts([encode_sky_stars(stars)], &encode_sky_texels(texels))
+}
+
+/// The bytes of `stars`, in order: a payload's stars, or some consecutive ones of them, which a
+/// server encodes as jobs of its own and joins in order (R06.T11.g).
+#[must_use]
+pub(crate) fn encode_sky_stars(stars: &[SkyStarWire]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(stars.len() * SKY_STAR_BYTES);
     for star in stars {
         for component in star.direction {
             bytes.extend_from_slice(&component.to_le_bytes());
@@ -74,6 +80,14 @@ pub(crate) fn encode_sky_payload(stars: &[SkyStarWire], texels: &[SkyTexelWire])
         bytes.extend_from_slice(&centimagnitudes(star.eye_offset_mag).to_le_bytes());
         bytes.extend_from_slice(&thirty_seconds(star.camera_band_mag).to_le_bytes());
     }
+    debug_assert_eq!(bytes.len(), stars.len() * SKY_STAR_BYTES);
+    bytes
+}
+
+/// The bytes of `texels`, in order: a payload's band.
+#[must_use]
+pub(crate) fn encode_sky_texels(texels: &[SkyTexelWire]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(texels.len() * SKY_TEXEL_BYTES);
     for texel in texels {
         bytes.extend_from_slice(&texel.luminance_cd_m2.to_le_bytes());
         for fraction in texel.chroma {
@@ -85,11 +99,27 @@ pub(crate) fn encode_sky_payload(stars: &[SkyStarWire], texels: &[SkyTexelWire])
         bytes.extend_from_slice(&limit.to_le_bytes());
         bytes.extend_from_slice(&ratio(texel.sp_ratio).to_le_bytes());
     }
-    debug_assert_eq!(bytes.len(), stars_len + band_len);
-    EncodedSky {
-        bytes: Bytes::from(bytes),
-        stars_bytes: u64::try_from(stars_len).expect("a usize fits a u64 on every target"),
-        band_bytes: u64::try_from(band_len).expect("a usize fits a u64 on every target"),
+    debug_assert_eq!(bytes.len(), texels.len() * SKY_TEXEL_BYTES);
+    bytes
+}
+
+impl EncodedSky {
+    /// The payload of the stars' bytes `stars`, parts of [`encode_sky_stars`]'s in order, then the
+    /// band's bytes `band`, [`encode_sky_texels`]'s.
+    #[must_use]
+    pub(crate) fn of_parts(stars: impl IntoIterator<Item = Vec<u8>>, band: &[u8]) -> Self {
+        let stars: Vec<Vec<u8>> = stars.into_iter().collect();
+        let stars_len: usize = stars.iter().map(Vec::len).sum();
+        let mut bytes = Vec::with_capacity(stars_len + band.len());
+        for part in &stars {
+            bytes.extend_from_slice(part);
+        }
+        bytes.extend_from_slice(band);
+        Self {
+            bytes: Bytes::from(bytes),
+            stars_bytes: u64::try_from(stars_len).expect("a usize fits a u64 on every target"),
+            band_bytes: u64::try_from(band.len()).expect("a usize fits a u64 on every target"),
+        }
     }
 }
 
@@ -236,6 +266,22 @@ mod tests {
             encoded.stars_bytes + encoded.band_bytes,
             u64::try_from(encoded.bytes.len()).unwrap()
         );
+    }
+
+    /// Stars encoded in parts and joined in order are the payload's bytes (R06.T11.g).
+    #[test]
+    fn stars_encoded_in_parts_are_the_payloads_bytes() {
+        let stars: Vec<SkyStarWire> = (0_u8..7)
+            .map(|k| SkyStarWire {
+                v_mag: f64::from(k) - 1.5,
+                ..pinned_star()
+            })
+            .collect();
+        let texels = pinned_texels();
+        let whole = encode_sky_payload(&stars, &texels);
+        let parts = [&stars[..3], &stars[3..3], &stars[3..]].map(encode_sky_stars);
+        let joined = EncodedSky::of_parts(parts, &encode_sky_texels(&texels));
+        assert_eq!(joined, whole);
     }
 
     #[test]

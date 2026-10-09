@@ -66,7 +66,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::coords::{GalacticPosition, UnitVector};
-use crate::galaxy::fields::MAX_COMPONENTS;
+use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::gas::extinction::{NoiseMode, Quality, profile};
 use crate::galaxy::gas::noise::NoiseCache;
 use crate::galaxy::imf::MassBand;
@@ -1125,7 +1125,7 @@ impl CapCount {
             envelope,
             observer,
             (lattice, resolution.sub_rays),
-            &cuts,
+            cuts,
             resolution.steps_per_decade,
             cache,
         )
@@ -1146,7 +1146,7 @@ impl CapCount {
         envelope: &BrightnessEnvelope,
         observer: &Observer,
         (lattice, sub_rays): (Arc<CapLattice>, usize),
-        cuts_v: &[f64],
+        cuts_v: Vec<f64>,
         steps_per_decade: u32,
         cache: &mut NoiseCache,
     ) -> Self {
@@ -1166,7 +1166,8 @@ impl CapCount {
     /// The count over `rays`, a whole lattice measured from the observer, each counting the stars
     /// brighter than its own cut of `cuts_v` (one a ray, apparent V), at `steps_per_decade` radial
     /// steps a decade: [`measure_on`](Self::measure_on)'s count, for rays measured in shares
-    /// ([`RayExtinctions::join`]; R06.T11.c). The rule's bound takes the deepest cut.
+    /// ([`RayExtinctions::join`]; R06.T11.c), counted here in one part of every ray
+    /// ([`CapCountPlan`]). The rule's bound takes the deepest cut.
     ///
     /// # Panics
     ///
@@ -1180,101 +1181,76 @@ impl CapCount {
         envelope: &BrightnessEnvelope,
         observer: &Observer,
         rays: &RayExtinctions,
-        cuts_v: &[f64],
+        cuts_v: Vec<f64>,
         steps_per_decade: u32,
     ) -> Self {
-        let origin = observer.position();
-        assert!(
-            rays.is_lattice_from(origin),
-            "the caps count a whole lattice of rays from the observer"
+        let plan = CapCountPlan::new(
+            galaxy,
+            tables,
+            envelope,
+            observer,
+            rays,
+            cuts_v,
+            steps_per_decade,
         );
-        let lattice = Arc::clone(
-            rays.grid
-                .as_ref()
-                .expect("the caps count the rays of a lattice"),
-        );
-        let directions = lattice.directions();
-        assert_eq!(cuts_v.len(), directions.len(), "one cut a ray");
-        let dust = solar_colour().reddening();
-        let deepest = cuts_v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let fields = galaxy.fields();
-        let components: Vec<_> = fields.component_ids().collect();
-        let bounds = rule_bounds(galaxy, envelope, deepest, rays, &dust);
-        let farthest = bounds.iter().copied().fold(NEAREST_LY, f64::max);
-        // The radial nodes, from the nearest to the farthest bound, even in ln r.
-        let decades = math::log10(farthest / NEAREST_LY).max(0.0);
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "a few decades of distance, a few hundred steps"
-        )]
-        let steps = ((decades * f64::from(steps_per_decade)).ceil() as u32).max(1);
-        let radii: Vec<f64> = (0..=steps)
-            .map(|k| NEAREST_LY * math::exp10(decades * f64::from(k) / f64::from(steps)))
-            .collect();
-        let ages: Vec<Span> = radii
-            .iter()
-            .map(|&r| {
-                tables.age_for(
-                    observer.time(),
-                    Span::from_seconds_f64(r * SECONDS_PER_JULIAN_YEAR).unwrap_or(Span::ZERO),
-                )
-            })
-            .collect();
-        let mut shares = [[0.0; MAX_COMPONENTS]; CAPPED_LAYERS.len()];
-        for (layer_shares, &layer) in shares.iter_mut().zip(&CAPPED_LAYERS) {
-            let band = MassBand::from(layer);
-            for &id in &components {
-                layer_shares[id.index()] =
-                    galaxy.shares().component_share(band, fields.component(id));
-            }
-        }
-        let p0 = origin.to_light_years_f64();
-        let (n_rays, n_radii) = (directions.len(), radii.len());
-        let len = CAPPED_LAYERS.len() * n_rays * n_radii;
-        let (mut stars, mut systems) = (vec![0.0; len], vec![0.0; len]);
-        let mut densities = [0.0; MAX_COMPONENTS];
-        #[expect(clippy::cast_precision_loss, reason = "a few thousand rays")]
-        let weight = 4.0 * core::f64::consts::PI / n_rays as f64;
-        // Per layer, ray and radius: r³ × the ray's solid angle × the density of the layer's systems
-        // there, and of their stars brighter than the ray's cut.
-        for (ray, direction) in directions.iter().enumerate() {
-            let u = direction.components();
-            for (i, (&r, &ago)) in radii.iter().zip(&ages).enumerate() {
-                let limit =
-                    Magnitudes::new(faintest_counted(cuts_v[ray], r, rays.along(ray, r), &dust));
-                let p = PointLy::new(p0[0] + r * u[0], p0[1] + r * u[1], p0[2] + r * u[2]);
-                fields.densities(&p, &mut densities);
-                for (l, &layer) in CAPPED_LAYERS.iter().enumerate() {
-                    if r > bounds[l] {
-                        continue;
-                    }
-                    let (mut n, mut s) = (0.0, 0.0);
-                    for &id in &components {
-                        let rho = densities[id.index()];
-                        if rho <= 0.0 {
-                            continue;
-                        }
-                        let share = shares[l][id.index()];
-                        n += rho
-                            * share
-                            * tables.get_at(id, layer, &p).count_brighter_than(limit, ago);
-                        s += rho * share;
-                    }
-                    let at = (l * n_rays + ray) * n_radii + i;
-                    stars[at] = weight * r * r * r * n;
-                    systems[at] = weight * r * r * r * s;
-                }
-            }
-        }
-        Self {
-            lattice,
-            bounds,
-            radii,
-            step_ln: math::ln(10.0) * decades / f64::from(steps),
-            stars,
-            systems,
-        }
+        let all = plan.count_rays(galaxy, tables, rays, 0..plan.rays());
+        plan.join([all])
+    }
+
+    /// [`layer_caps_over`]'s count over `rays` at `cut`, planned for counting in parts of rays,
+    /// each a job of a server's (R06.T11.g; see [`CapCountPlan`]).
+    ///
+    /// # Panics
+    ///
+    /// As [`layer_caps_over`].
+    #[must_use]
+    pub fn plan_over(
+        galaxy: &Galaxy,
+        tables: &LuminosityTables,
+        envelope: &BrightnessEnvelope,
+        observer: &Observer,
+        cut: Magnitudes,
+        rays: &RayExtinctions,
+    ) -> CapCountPlan {
+        assert_standard(rays);
+        CapCountPlan::new(
+            galaxy,
+            tables,
+            envelope,
+            observer,
+            rays,
+            vec![cut.value(); rays.lattice],
+            CapResolution::STANDARD.steps_per_decade,
+        )
+    }
+
+    /// [`layer_caps_by_visibility_over`]'s count over `rays` by the eye's `visibility`, planned for
+    /// counting in parts of rays, as [`plan_over`](Self::plan_over) plans [`layer_caps_over`]'s
+    /// (R06.T11.g).
+    ///
+    /// # Panics
+    ///
+    /// As [`layer_caps_over`].
+    #[must_use]
+    pub fn plan_by_visibility_over(
+        galaxy: &Galaxy,
+        tables: &LuminosityTables,
+        envelope: &BrightnessEnvelope,
+        observer: &Observer,
+        visibility: &EyeVisibility,
+        rays: &RayExtinctions,
+    ) -> CapCountPlan {
+        assert_standard(rays);
+        let lattice = rays.grid.as_ref().expect("the standard lattice's rays");
+        CapCountPlan::new(
+            galaxy,
+            tables,
+            envelope,
+            observer,
+            rays,
+            visible_cuts_v(lattice, visibility),
+            CapResolution::STANDARD.steps_per_decade,
+        )
     }
 
     /// The lattice whose rays the count is taken along.
@@ -1399,42 +1375,58 @@ impl CapCount {
     /// lattice's spacing.
     #[must_use]
     fn caps_widened(&self, spacings: f64) -> Vec<LayerCap> {
-        let n_rays = self.lattice.directions.len();
-        let intervals = self.radii.len() - 1;
         CAPPED_LAYERS
             .iter()
             .enumerate()
-            .map(|(l, &layer)| {
-                let bound = self.bounds[l];
-                let mut stars = Vec::with_capacity(n_rays * intervals);
-                let mut systems = Vec::with_capacity(n_rays * intervals);
-                for ray in 0..n_rays {
-                    let (s, n) = (
-                        self.ray_values(&self.stars, l, ray),
-                        self.ray_values(&self.systems, l, ray),
-                    );
-                    for i in 0..intervals {
-                        stars.push(self.slice(s, l, i));
-                        systems.push(self.slice(n, l, i));
-                    }
-                }
-                let kept = ray_extents(&stars, &systems, intervals, 1.0);
-                let radii: Vec<f64> = kept.iter().map(|&k| self.radii[k].min(bound)).collect();
-                let rays = RayRadii::new(
-                    Arc::clone(&self.lattice),
-                    widen(&self.lattice, &radii, spacings),
-                );
-                let mut cap = LayerCap {
-                    layer,
-                    radius: rays.largest(),
-                    rule_bound: LightYears::new(bound),
-                    expected_beyond: 0.0,
-                    rays: Some(rays),
-                };
-                cap.expected_beyond = self.stars_beyond(&cap);
-                cap
-            })
+            .map(|(l, &layer)| self.cap_widened(l, layer, spacings))
             .collect()
+    }
+
+    /// `layer`'s cap of [`caps`](Self::caps), bit for bit: each layer's cap is drawn from its own
+    /// count alone, so a server draws them a job a layer (R06.T11.g).
+    ///
+    /// # Panics
+    ///
+    /// If `layer` is not one of [`CAPPED_LAYERS`].
+    #[must_use]
+    pub fn cap(&self, layer: Layer) -> LayerCap {
+        self.cap_widened(Self::layer_index(layer), layer, WIDENING_SPACINGS)
+    }
+
+    /// The cap of `layer`, the `l`-th of [`CAPPED_LAYERS`], each ray widened to the largest radius
+    /// within `spacings` of the lattice's spacing ([`caps_widened`](Self::caps_widened)).
+    #[must_use]
+    fn cap_widened(&self, l: usize, layer: Layer, spacings: f64) -> LayerCap {
+        let n_rays = self.lattice.directions.len();
+        let intervals = self.radii.len() - 1;
+        let bound = self.bounds[l];
+        let mut stars = Vec::with_capacity(n_rays * intervals);
+        let mut systems = Vec::with_capacity(n_rays * intervals);
+        for ray in 0..n_rays {
+            let (s, n) = (
+                self.ray_values(&self.stars, l, ray),
+                self.ray_values(&self.systems, l, ray),
+            );
+            for i in 0..intervals {
+                stars.push(self.slice(s, l, i));
+                systems.push(self.slice(n, l, i));
+            }
+        }
+        let kept = ray_extents(&stars, &systems, intervals, 1.0);
+        let radii: Vec<f64> = kept.iter().map(|&k| self.radii[k].min(bound)).collect();
+        let rays = RayRadii::new(
+            Arc::clone(&self.lattice),
+            widen(&self.lattice, &radii, spacings),
+        );
+        let mut cap = LayerCap {
+            layer,
+            radius: rays.largest(),
+            rule_bound: LightYears::new(bound),
+            expected_beyond: 0.0,
+            rays: Some(rays),
+        };
+        cap.expected_beyond = self.stars_beyond(&cap);
+        cap
     }
 
     /// Each layer's cap as one sphere, as Design note 9 took it before R06.T7.b, for comparison:
@@ -1483,6 +1475,311 @@ impl CapCount {
                 }
             })
             .collect()
+    }
+}
+
+/// A [`CapCount`] over measured rays, planned before any ray is counted, for a server that counts
+/// its rays in parts as jobs of its own and joins them (R06.T11.g;
+/// `decision-r06-t11d-first-sky.md` §1.4): its rays' cuts, each layer's rule bound, the radial
+/// nodes to the farthest bound, the light ages there and each layer's share of each component.
+///
+/// Made by [`CapCount::plan_over`] or [`CapCount::plan_by_visibility_over`]. Each ray's count is a
+/// function of its own direction, cut and extinction profile alone, so the rays counted in any
+/// parts ([`count_rays`](Self::count_rays)), joined ([`join`](Self::join)), are the count in one
+/// job bit for bit, and so are its caps ([`CapCount::cap`], [`CapCount::caps`]). As one job the
+/// count near the Sun holds a worker for a second or more, its 1,536 rays each through some 120
+/// radial nodes of every layer.
+///
+/// # Examples
+///
+/// The caps near the Sun with the count's rays in four parts, as four jobs of a server's would
+/// (`no_run`: the tables take a minute or more to build):
+///
+/// ```no_run
+/// use std::sync::Arc;
+///
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::caps::{
+///     CAP_RAYS, CAPPED_LAYERS, CapCount, CapLattice, RayExtinctions, SUB_RAYS, layer_caps,
+/// };
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::Magnitudes;
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+/// let mut noise = NoiseCache::with_capacity(1 << 16);
+/// let lattice = Arc::new(CapLattice::new(CAP_RAYS));
+/// let rays = RayExtinctions::measure_clearest(&galaxy, &sun, lattice, SUB_RAYS, &mut noise);
+/// let cut = Magnitudes::new(7.95);
+/// let plan = CapCount::plan_over(&galaxy, &tables, &envelope, &observer, cut, &rays);
+/// let quarter = CAP_RAYS / 4;
+/// let parts: Vec<_> = (0..4)
+///     .map(|k| plan.count_rays(&galaxy, &tables, &rays, k * quarter..(k + 1) * quarter))
+///     .collect();
+/// let count = plan.join(parts);
+/// let caps: Vec<_> = CAPPED_LAYERS.iter().map(|&layer| count.cap(layer)).collect();
+/// assert_eq!(caps, layer_caps(&galaxy, &tables, &envelope, &observer, cut, &mut noise));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct CapCountPlan {
+    lattice: Arc<CapLattice>,
+    /// The rays' origin, ly.
+    origin_ly: [f64; 3],
+    /// Each ray's cut, apparent V, in the lattice's order. Shared with the plan's parts, by which
+    /// [`join`](Self::join) knows a part as its own: two plans over one lattice share its rays but
+    /// not their cuts.
+    cuts_v: Arc<[f64]>,
+    /// The reddening curves each ray's extinction is taken through: the solar point's.
+    dust: Reddening,
+    /// Per layer of [`CAPPED_LAYERS`], the rule's bound, ly.
+    bounds: Vec<f64>,
+    /// The radii, ly, ascending.
+    radii: Vec<f64>,
+    /// The light age at each radius.
+    ages: Vec<Span>,
+    /// The width of each interval in ln r.
+    step_ln: f64,
+    /// The galaxy's density components, in order.
+    components: Vec<ComponentId>,
+    /// Per layer, each component's share of the layer's systems.
+    shares: [[f64; MAX_COMPONENTS]; CAPPED_LAYERS.len()],
+    /// Each ray's solid angle, sr.
+    weight: f64,
+}
+
+/// The count of some consecutive rays of a [`CapCountPlan`] ([`CapCountPlan::count_rays`]), for
+/// [`CapCountPlan::join`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CapCountPart {
+    rays: Range<usize>,
+    /// The cuts of the plan counted, by which a plan joins only its own parts.
+    plan: Arc<[f64]>,
+    /// Per layer, ray of `rays` and radius, in that order: the stars per unit ln r.
+    stars: Vec<f64>,
+    /// Per layer, ray and radius: the systems per unit ln r.
+    systems: Vec<f64>,
+}
+
+impl CapCountPart {
+    /// The rays counted, by their place in the lattice.
+    #[must_use]
+    pub fn rays(&self) -> Range<usize> {
+        self.rays.clone()
+    }
+}
+
+impl CapCountPlan {
+    /// The count's plan over `rays` from `observer`, each counting the stars brighter than its own
+    /// cut of `cuts_v`, at `steps_per_decade` radial steps a decade.
+    ///
+    /// # Panics
+    ///
+    /// As [`CapCount::over`].
+    #[must_use]
+    fn new(
+        galaxy: &Galaxy,
+        tables: &LuminosityTables,
+        envelope: &BrightnessEnvelope,
+        observer: &Observer,
+        rays: &RayExtinctions,
+        cuts_v: Vec<f64>,
+        steps_per_decade: u32,
+    ) -> Self {
+        let origin = observer.position();
+        assert!(
+            rays.is_lattice_from(origin),
+            "the caps count a whole lattice of rays from the observer"
+        );
+        let lattice = Arc::clone(
+            rays.grid
+                .as_ref()
+                .expect("the caps count the rays of a lattice"),
+        );
+        assert_eq!(cuts_v.len(), lattice.directions().len(), "one cut a ray");
+        let dust = solar_colour().reddening();
+        let deepest = cuts_v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let fields = galaxy.fields();
+        let components: Vec<ComponentId> = fields.component_ids().collect();
+        let bounds = rule_bounds(galaxy, envelope, deepest, rays, &dust);
+        let farthest = bounds.iter().copied().fold(NEAREST_LY, f64::max);
+        // The radial nodes, from the nearest to the farthest bound, even in ln r.
+        let decades = math::log10(farthest / NEAREST_LY).max(0.0);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a few decades of distance, a few hundred steps"
+        )]
+        let steps = ((decades * f64::from(steps_per_decade)).ceil() as u32).max(1);
+        let radii: Vec<f64> = (0..=steps)
+            .map(|k| NEAREST_LY * math::exp10(decades * f64::from(k) / f64::from(steps)))
+            .collect();
+        let ages: Vec<Span> = radii
+            .iter()
+            .map(|&r| {
+                tables.age_for(
+                    observer.time(),
+                    Span::from_seconds_f64(r * SECONDS_PER_JULIAN_YEAR).unwrap_or(Span::ZERO),
+                )
+            })
+            .collect();
+        let mut shares = [[0.0; MAX_COMPONENTS]; CAPPED_LAYERS.len()];
+        for (layer_shares, &layer) in shares.iter_mut().zip(&CAPPED_LAYERS) {
+            let band = MassBand::from(layer);
+            for &id in &components {
+                layer_shares[id.index()] =
+                    galaxy.shares().component_share(band, fields.component(id));
+            }
+        }
+        #[expect(clippy::cast_precision_loss, reason = "a few thousand rays")]
+        let weight = 4.0 * core::f64::consts::PI / lattice.directions().len() as f64;
+        Self {
+            origin_ly: origin.to_light_years_f64(),
+            lattice,
+            cuts_v: cuts_v.into(),
+            dust,
+            bounds,
+            radii,
+            ages,
+            step_ln: math::ln(10.0) * decades / f64::from(steps),
+            components,
+            shares,
+            weight,
+        }
+    }
+
+    /// The rays the count is taken along, the lattice's.
+    #[must_use]
+    pub fn rays(&self) -> usize {
+        self.lattice.directions().len()
+    }
+
+    /// The count of the rays `which` of the plan, by their place in its lattice, over `rays`, the
+    /// rays it was planned over: per layer, ray and radius, r³ × the ray's solid angle × the
+    /// density of the layer's systems there, and of their stars brighter than the ray's cut.
+    ///
+    /// # Panics
+    ///
+    /// If `which` reaches past the lattice's last ray, or `rays` are not of the plan's lattice.
+    #[must_use]
+    pub fn count_rays(
+        &self,
+        galaxy: &Galaxy,
+        tables: &LuminosityTables,
+        rays: &RayExtinctions,
+        which: Range<usize>,
+    ) -> CapCountPart {
+        assert!(
+            same_grid(rays.grid.as_ref(), Some(&self.lattice)),
+            "a count's rays are the rays it was planned over"
+        );
+        let directions = self.lattice.directions();
+        assert!(
+            which.end <= directions.len(),
+            "rays {which:?} of a lattice of {}",
+            directions.len()
+        );
+        let fields = galaxy.fields();
+        let p0 = self.origin_ly;
+        let (n_rays, n_radii) = (which.len(), self.radii.len());
+        let len = CAPPED_LAYERS.len() * n_rays * n_radii;
+        let (mut stars, mut systems) = (vec![0.0; len], vec![0.0; len]);
+        let mut densities = [0.0; MAX_COMPONENTS];
+        for (k, ray) in which.clone().enumerate() {
+            let u = directions[ray].components();
+            for (i, (&r, &ago)) in self.radii.iter().zip(&self.ages).enumerate() {
+                let limit = Magnitudes::new(faintest_counted(
+                    self.cuts_v[ray],
+                    r,
+                    rays.along(ray, r),
+                    &self.dust,
+                ));
+                let p = PointLy::new(p0[0] + r * u[0], p0[1] + r * u[1], p0[2] + r * u[2]);
+                fields.densities(&p, &mut densities);
+                for (l, &layer) in CAPPED_LAYERS.iter().enumerate() {
+                    if r > self.bounds[l] {
+                        continue;
+                    }
+                    let (mut n, mut s) = (0.0, 0.0);
+                    for &id in &self.components {
+                        let rho = densities[id.index()];
+                        if rho <= 0.0 {
+                            continue;
+                        }
+                        let share = self.shares[l][id.index()];
+                        n += rho
+                            * share
+                            * tables.get_at(id, layer, &p).count_brighter_than(limit, ago);
+                        s += rho * share;
+                    }
+                    let at = (l * n_rays + k) * n_radii + i;
+                    stars[at] = self.weight * r * r * r * n;
+                    systems[at] = self.weight * r * r * r * s;
+                }
+            }
+        }
+        CapCountPart {
+            rays: which,
+            plan: Arc::clone(&self.cuts_v),
+            stars,
+            systems,
+        }
+    }
+
+    /// The count from its rays counted in `parts` ([`count_rays`](Self::count_rays)), in any order
+    /// and any split.
+    ///
+    /// # Panics
+    ///
+    /// Unless `parts` count every ray of the plan's lattice once, each part of the plan's.
+    #[must_use]
+    pub fn join(&self, parts: impl IntoIterator<Item = CapCountPart>) -> CapCount {
+        let (n_rays, n_radii) = (self.lattice.directions().len(), self.radii.len());
+        let len = CAPPED_LAYERS.len() * n_rays * n_radii;
+        let (mut stars, mut systems) = (vec![0.0; len], vec![0.0; len]);
+        let mut counted = vec![false; n_rays];
+        for part in parts {
+            assert!(
+                Arc::ptr_eq(&part.plan, &self.cuts_v),
+                "a count joins the parts of its own plan"
+            );
+            let width = part.rays.len();
+            let span = width * n_radii;
+            assert_eq!(
+                (part.stars.len(), part.systems.len()),
+                (CAPPED_LAYERS.len() * span, CAPPED_LAYERS.len() * span),
+                "a part of {width} rays counts every layer at each of the plan's {n_radii} radii"
+            );
+            for ray in part.rays.clone() {
+                assert!(!counted[ray], "ray {ray} of the count is counted twice");
+                counted[ray] = true;
+            }
+            for l in 0..CAPPED_LAYERS.len() {
+                let from = l * width * n_radii;
+                let to = (l * n_rays + part.rays.start) * n_radii;
+                stars[to..to + span].copy_from_slice(&part.stars[from..from + span]);
+                systems[to..to + span].copy_from_slice(&part.systems[from..from + span]);
+            }
+        }
+        if let Some(ray) = counted.iter().position(|&done| !done) {
+            panic!("ray {ray} of the count is not counted");
+        }
+        CapCount {
+            lattice: Arc::clone(&self.lattice),
+            bounds: self.bounds.clone(),
+            radii: self.radii.clone(),
+            step_ln: self.step_ln,
+            stars,
+            systems,
+        }
     }
 }
 
@@ -1710,7 +2007,7 @@ pub fn layer_caps_over(
         envelope,
         observer,
         rays,
-        &vec![cut.value(); rays.lattice],
+        vec![cut.value(); rays.lattice],
         CapResolution::STANDARD.steps_per_decade,
     )
     .caps()
@@ -1739,7 +2036,7 @@ pub fn layer_caps_by_visibility_over(
         envelope,
         observer,
         rays,
-        &visible_cuts_v(lattice, visibility),
+        visible_cuts_v(lattice, visibility),
         CapResolution::STANDARD.steps_per_decade,
     )
     .caps()
@@ -1908,7 +2205,7 @@ pub fn layer_caps_by_visibility(
         envelope,
         observer,
         (lattice, CapResolution::STANDARD.sub_rays),
-        &cuts,
+        cuts,
         RADIAL_STEPS_PER_DECADE,
         cache,
     )
@@ -1963,7 +2260,7 @@ pub fn expected_beyond_caps_by_visibility(
         envelope,
         observer,
         (fine, resolution.sub_rays),
-        &cuts,
+        cuts,
         resolution.steps_per_decade,
         cache,
     );
@@ -2478,6 +2775,8 @@ mod tests {
             layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache)
         );
         let visibility = EyeVisibility::uniform(observer, crate::sky::EyeObserver::default(), cut);
+        let seen =
+            layer_caps_by_visibility(galaxy, tables, envelope, &observer, &visibility, &mut cache);
         assert_eq!(
             layer_caps_by_visibility_over(
                 galaxy,
@@ -2487,8 +2786,36 @@ mod tests {
                 &visibility,
                 &joined
             ),
-            layer_caps_by_visibility(galaxy, tables, envelope, &observer, &visibility, &mut cache)
+            seen
         );
+        // The count in parts of rays, out of order and of uneven sizes, joined, with its caps
+        // drawn a layer at a time, is the count of one job bit for bit, at a uniform cut and by
+        // the eye's visibility: the server's count jobs and cap jobs (R06.T11.g).
+        let whole = layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache);
+        let in_parts = |plan: CapCountPlan| -> Vec<LayerCap> {
+            assert_eq!(plan.rays(), CAP_RAYS);
+            let parts = [1_000..CAP_RAYS, 0..1, 1..1, 1..1_000]
+                .map(|which| plan.count_rays(galaxy, tables, &joined, which));
+            assert_eq!(parts[0].rays(), 1_000..CAP_RAYS);
+            let count = plan.join(parts);
+            let by_layer: Vec<LayerCap> = CAPPED_LAYERS
+                .iter()
+                .map(|&layer| count.cap(layer))
+                .collect();
+            assert_eq!(by_layer, count.caps());
+            by_layer
+        };
+        let planned = CapCount::plan_over(galaxy, tables, envelope, &observer, cut, &joined);
+        assert_eq!(in_parts(planned), whole);
+        let planned = CapCount::plan_by_visibility_over(
+            galaxy,
+            tables,
+            envelope,
+            &observer,
+            &visibility,
+            &joined,
+        );
+        assert_eq!(in_parts(planned), seen);
         // One profile a ray, in shares, is `measure`'s too.
         let plain = RayExtinctions::join([0..700, 700..CAP_RAYS].map(|which| {
             let mut own = NoiseCache::with_capacity(1 << 10);
@@ -2509,6 +2836,76 @@ mod tests {
         let mut share = |which| RayExtinctions::measure_rays(galaxy, &sun, 8, which, &mut cache);
         let (first, third) = (share(0..2), share(4..8));
         let _ = RayExtinctions::join([first, third]);
+    }
+
+    /// The plan of a count over a lattice of eight rays near the Sun, over tables of no star, and
+    /// the rays it was planned over.
+    fn small_count_plan() -> (CapCountPlan, RayExtinctions) {
+        let mut cache = NoiseCache::with_capacity(1 << 10);
+        let lattice = Arc::new(CapLattice::new(8));
+        let rays = RayExtinctions::measure_clearest(
+            milky_way_galaxy(),
+            observer_at([0.0, 26_000.0, 68.0]).position(),
+            lattice,
+            SUB_RAYS,
+            &mut cache,
+        );
+        (small_count_plan_over(&rays, 7.95), rays)
+    }
+
+    /// The plan of a count over `rays`, [`small_count_plan`]'s, each ray at the cut `cut_v`.
+    fn small_count_plan_over(rays: &RayExtinctions, cut_v: f64) -> CapCountPlan {
+        CapCountPlan::new(
+            milky_way_galaxy(),
+            crate::sky::testing::milky_way_dark_tables(),
+            milky_way_envelope(),
+            &observer_at([0.0, 26_000.0, 68.0]),
+            rays,
+            vec![cut_v; 8],
+            RADIAL_STEPS_PER_DECADE,
+        )
+    }
+
+    #[test]
+    #[should_panic(expected = "ray 3 of the count is counted twice")]
+    fn a_count_whose_parts_overlap_is_refused() {
+        let (plan, rays) = small_count_plan();
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let parts =
+            [0..4, 3..8].map(|which| plan.count_rays(milky_way_galaxy(), tables, &rays, which));
+        let _ = plan.join(parts);
+    }
+
+    #[test]
+    #[should_panic(expected = "ray 4 of the count is not counted")]
+    fn a_count_missing_a_ray_is_refused() {
+        let (plan, rays) = small_count_plan();
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let parts =
+            [0..4, 5..8].map(|which| plan.count_rays(milky_way_galaxy(), tables, &rays, which));
+        let _ = plan.join(parts);
+    }
+
+    #[test]
+    #[should_panic(expected = "a count joins the parts of its own plan")]
+    fn a_count_joins_only_its_own_plans_parts() {
+        let (plan, rays) = small_count_plan();
+        let (other, _) = small_count_plan();
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let part = other.count_rays(milky_way_galaxy(), tables, &rays, 0..8);
+        let _ = plan.join([part]);
+    }
+
+    /// Two counts planned over one set of rays share its lattice, as a uniform cut's and the eye's
+    /// visibility's do, but neither joins the other's parts.
+    #[test]
+    #[should_panic(expected = "a count joins the parts of its own plan")]
+    fn a_count_refuses_the_parts_of_another_plan_over_its_rays() {
+        let (plan, rays) = small_count_plan();
+        let other = small_count_plan_over(&rays, 6.0);
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let part = other.count_rays(milky_way_galaxy(), tables, &rays, 0..8);
+        let _ = plan.join([part]);
     }
 
     #[test]

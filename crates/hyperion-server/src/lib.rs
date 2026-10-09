@@ -243,14 +243,17 @@ impl Server {
     /// flight is cancelled. axum's graceful shutdown does neither, nor does it wait for those
     /// connections, so this does all three. A connection opened meanwhile is refused. Each
     /// connection has [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client
-    /// that has stopped reading cannot hold this up. Then the CPU pool stops: queued jobs are
-    /// dropped and the workers finish the jobs in hand.
+    /// that has stopped reading cannot hold this up. The sky tables' builds that opens started are
+    /// given up. Then the CPU pool stops: queued jobs are dropped and the workers finish the jobs
+    /// in hand.
     ///
     /// # Errors
     ///
     /// [`ShutDownServerError`] if the CPU pool does not stop cleanly.
     pub async fn shutdown(self) -> Result<(), ShutDownServerError> {
         self.state.connections.close_all().await;
+        // The sky tables' builds started at opens wait on no connection.
+        self.state.sky_tables.stop_prefetching();
         self.state
             .pool
             .shutdown()

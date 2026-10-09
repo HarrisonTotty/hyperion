@@ -1,32 +1,39 @@
-//! The sky's work on the CPU pool (rendering plan R06, R06.T11.a–d; Design notes 5, 9–11 and
-//! 14–16): the illumination, the eye's cut and visibility, the caps, the census shell by shell,
+//! The sky's work on the CPU pool (rendering plan R06, R06.T11.a–d and T11.g; Design notes 5, 9–11
+//! and 14–16): the illumination, the eye's cut and visibility, the caps, the census shell by shell,
 //! the band, the limit map and the eye offsets, as bulk jobs.
 //!
 //! Everything a `sky` request computes runs at [`Priority::Bulk`], never in the interactive queue,
 //! so a chart's query is never queued behind it: the workers take interactive work first. The work
-//! is split into jobs of a fraction of a second where the sim allows it, so that a query waits for
-//! little on a busy worker. A few steps are single jobs of seconds, not yet split: the tables' plan
-//! and assembly, the eye's cut and visibility, and each reply's merge, glare, eye offsets and
-//! payload. In order:
+//! is split into jobs of a fraction of a second, so that a query waits for little on a busy worker
+//! and no single job of seconds lies on the first reply's path (R06.T11.g;
+//! `decision-r06-t11d-first-sky.md` §1.4). Each split is joined in a fixed order and gives its
+//! one-job form's bits. In order:
 //!
-//! - the galaxy's tables are built once and kept ([`SkyTablesService`](super::SkyTablesService));
+//! - the galaxy's tables are built once and kept ([`SkyTablesService`](super::SkyTablesService)),
+//!   started when the universe is opened, so that a sky finds them held or joins their build;
 //! - the request's illumination, the observer's sky of all starlight that the dust scatters
 //!   (R06.T9.g), is marched [`ILLUMINATION_JOB_ROWS`] rows of its 16² faces to a job, then
 //!   assembled in one more;
-//! - the eye's cut is one job, two coarse pre-passes of the band with that illumination, and an
-//!   eye-only request's visibility (R06.T7.b) one more;
+//! - the eye's cut takes two coarse pre-passes of the band with that illumination, and an eye-only
+//!   request's visibility (R06.T7.b) one more, each pass [`PRE_PASS_JOB_ROWS`] rows of its 16²
+//!   faces to a job, joined as it arrives;
 //! - the caps' 1,536 rays, each through its three sub-rays (R06.T7.b), are measured
-//!   [`CAP_JOB_RAYS`] to a job, each with its own noise cache,
-//!   then counted in ray order in one more job, which makes the census's plan (decided
-//!   2026-10-03, `decision-r06-tables.md`, item B.4);
+//!   [`CAP_JOB_RAYS`] to a job, each with its own noise cache, then counted [`CAP_COUNT_JOB_RAYS`]
+//!   to a job, every layer at once, and each layer's cap drawn from the count in a job of its own;
+//!   one more job makes the census's plan (decided 2026-10-03, `decision-r06-tables.md`, item B.4);
 //! - the census runs its plan's shells nearest first, step by step ([`delivery_steps`]; R06.T11.d),
 //!   each shell's slabs as jobs of about [`CENSUS_JOB_SLICE`] ([`census_in_steps`]);
 //! - while it runs, the band's rays are marched [`BAND_JOB_ROWS`] rows of a face to a job (R06.T9.f's
 //!   `march_rows`), once a request for every reply its shells can state, which reads no census;
 //! - after each step, its census is merged ([`merge_step`]), and each march is summed with that
 //!   census's overflow at its radii (`sum_rows`) and given the eye's limits against the listed
-//!   stars' glare (`limit_rows`), a job each, and every listed star its eye offset in one more job
-//!   (`eye_offsets`) ([`band`]).
+//!   stars' glare (`limit_rows`), a job each, and every listed star its eye offset,
+//!   [`EYE_OFFSET_JOB_STARS`] to a job (`eye_offsets_of`) ([`band`]).
+//!
+//! Two steps of each reply stay single jobs: the merge, a sort of every star its steps have found
+//! so far, listed and overflowing, not yet measured (T17's); and the glare, 0.07 s at `N_max`'s
+//! 3 × 10⁵ stars (R06's Risks, "Deviations in T9.i, as built"). The tables' plan and assembly are
+//! single jobs of seconds, off a sky's path once the universe is opened.
 //!
 //! Every job runs under the request's [`CancelToken`]: a cancelled request's queued jobs are
 //! skipped, and a running census job stops at its next cell. Work that ends early, because a job
@@ -64,17 +71,18 @@ use hyperion_sim::sky::band::{
     BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows,
 };
 use hyperion_sim::sky::caps::{
-    CAP_RAYS, CAPPED_LAYERS, CapLattice, RayExtinctions, SUB_RAYS, layer_caps_by_visibility_over,
-    layer_caps_over,
+    CAP_RAYS, CAPPED_LAYERS, CapCount, CapLattice, LayerCap, RayExtinctions, SUB_RAYS,
 };
 use hyperion_sim::sky::census::{
-    CellOffsets, CellSlab, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY, NoSkyCellCache,
-    SHELL_EDGES_LY, Shell, SkyCellCache, SkyCensus, SkyContext, SkyQuery, SkyStar, census_cell,
-    census_plan_with_edges, merge_shells,
+    CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY,
+    NoSkyCellCache, SHELL_EDGES_LY, Shell, SkyCellCache, SkyCensus, SkyContext, SkyQuery, SkyStar,
+    census_cell_with_cost, census_plan_with_edges, merge_shells,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
-use hyperion_sim::sky::limits::{self, EyeVisibility, Glare};
+use hyperion_sim::sky::limits::{
+    self, EyeCutSteps, EyeVisibility, Glare, PRE_PASS_SPEC, PrePassRows,
+};
 use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::units::{LightYears, Magnitudes};
 use tokio::sync::mpsc;
@@ -118,6 +126,19 @@ pub(crate) const BAND_JOB_ROWS: u16 = 2;
 /// (R06.T9.g).
 pub(crate) const ILLUMINATION_JOB_ROWS: u16 = 2;
 
+/// The rows of a face of the eye cut's 16² pre-pass one job marches: two, 32 rays, 48 jobs a pass,
+/// some 25 ms of a worker each (R06.T11.g), as the illumination's.
+pub(crate) const PRE_PASS_JOB_ROWS: u16 = 2;
+
+/// The caps' rays one job counts, every layer at once: 32 of the 1,536, 48 jobs, each ray through
+/// some 120 radial nodes to the farthest rule bound (R06.T11.g). The layers share each node's
+/// densities, so a job of rays for every layer costs less than a job a layer.
+pub(crate) const CAP_COUNT_JOB_RAYS: usize = 32;
+
+/// The listed stars one job gives their eye offsets (R06.T11.g): 20,000, some tens of
+/// milliseconds, so `N_max`'s 3 × 10⁵ take 15 jobs.
+pub(crate) const EYE_OFFSET_JOB_STARS: usize = 20_000;
+
 /// Noise-cache slots of a census job: 256 KiB, a cache's worth for the sightlines of a few hundred
 /// cells' stars. The cache changes no value, only how often a normal is drawn again.
 const CENSUS_NOISE_SLOTS: usize = 1 << 14;
@@ -145,6 +166,9 @@ pub struct SkyCaps {
     tables: SkyTablesSource,
     /// A test's shell edges, ly, in place of [`SHELL_EDGES_LY`].
     shell_edges_ly: Option<&'static [u32]>,
+    /// A test's edge, ly, from which layer C's shells come a step late, in place of
+    /// [`C_DEFERRED_BEYOND_LY`].
+    c_deferred_beyond_ly: Option<u32>,
 }
 
 /// The luminosity tables a sky reads (Design note 7).
@@ -164,6 +188,7 @@ impl SkyCaps {
         forced: None,
         tables: SkyTablesSource::Galaxy,
         shell_edges_ly: None,
+        c_deferred_beyond_ly: None,
     };
 
     /// Every layer's cap forced to `radius`, over tables that hold no star.
@@ -195,6 +220,7 @@ impl SkyCaps {
                 forced: Some(radii),
                 tables: SkyTablesSource::Dark,
                 shell_edges_ly: None,
+                c_deferred_beyond_ly: None,
             })
         } else {
             Err(ForceSkyCapsError)
@@ -232,6 +258,27 @@ impl SkyCaps {
     #[must_use]
     pub fn shell_edges_ly(&self) -> &'static [u32] {
         self.shell_edges_ly.unwrap_or(&SHELL_EDGES_LY)
+    }
+
+    /// The same caps with layer C's shells whose inner edge is at or beyond `edge_ly` censused a
+    /// step late ([`delivery_steps`]), in place of [`C_DEFERRED_BEYOND_LY`]: for a test whose
+    /// nearer shell edges ([`with_shell_edges`](Self::with_shell_edges)) never reach 2,000 ly, so
+    /// that its sky still has a step in which C's edge stays where it was (R06.T11.g). No sky a
+    /// client asks is delivered so.
+    #[must_use]
+    pub const fn with_c_deferred_beyond(self, edge_ly: u32) -> Self {
+        Self {
+            c_deferred_beyond_ly: Some(edge_ly),
+            ..self
+        }
+    }
+
+    /// The edge, ly, from which layer C's shells come a step late: [`C_DEFERRED_BEYOND_LY`] unless
+    /// a test's ([`with_c_deferred_beyond`](Self::with_c_deferred_beyond)).
+    #[must_use]
+    pub fn c_deferred_beyond_ly(&self) -> f64 {
+        self.c_deferred_beyond_ly
+            .map_or(C_DEFERRED_BEYOND_LY, f64::from)
     }
 
     /// The radius each layer's cap is forced to, in [`CAPPED_LAYERS`]' order, or `None` for the
@@ -456,13 +503,14 @@ pub(crate) async fn illumination(
     .await
 }
 
-/// The eye's cut for `eye` at `observer` (Design note 5; R06.T9.d), in one bulk job under `token`:
-/// two coarse pre-passes of the band, 1,536 rays each, with the request's `illumination`
-/// (R06.T9.g), near the Sun.
+/// The eye's cut for `eye` at `observer` (Design note 5; R06.T9.d): two coarse pre-passes of the
+/// band, 1,536 rays each, with the request's `illumination` (R06.T9.g), near the Sun. Each pass is
+/// marched [`PRE_PASS_JOB_ROWS`] rows of a face to a bulk job under `token` and joined in the sim's
+/// steps ([`EyeCutSteps`]), which give [`limits::eye_cut`]'s bits (R06.T11.g).
 ///
 /// # Errors
 ///
-/// Those of [`bulk`].
+/// Those of [`BulkJobs`].
 pub(crate) async fn eye_cut(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
@@ -471,27 +519,22 @@ pub(crate) async fn eye_cut(
     illumination: &Arc<Illumination>,
     token: &CancelToken,
 ) -> Result<Magnitudes, ComputeError> {
-    let (galaxy, tables, light) = (
-        Arc::clone(galaxy),
-        Arc::clone(tables),
-        Arc::clone(illumination),
-    );
-    let (observer, eye) = eye;
-    bulk(pool, token, move |_: &CancelToken| {
-        limits::eye_cut(
-            &galaxy,
-            &mut tables.march_context(),
-            &observer,
-            &eye,
-            Some(&light),
-        )
-    })
-    .await
+    let (observer, eye_observer) = eye;
+    let mut steps = EyeCutSteps::new(observer, eye_observer);
+    while let Some(band_cut) = steps.next_band_cut() {
+        let parts = pre_pass(pool, galaxy, tables, eye, band_cut, illumination, token).await?;
+        // The join is a fold over the pass's 1,536 texels, microseconds: no job of its own.
+        steps.take(parts);
+    }
+    Ok(steps
+        .cut()
+        .expect("the eye's cut is known once its passes are taken"))
 }
 
 /// The eye's visibility for `eye` at `observer` and its cut `cut` (R06.T7.b), with the request's
-/// `illumination`, in one bulk job under `token`: the eye cut's 16² pre-pass at the cut, whose
-/// limits an eye-only request's caps count each ray to.
+/// `illumination`: the eye cut's 16² pre-pass at the cut, whose limits an eye-only request's caps
+/// count each ray to, marched [`PRE_PASS_JOB_ROWS`] rows of a face to a bulk job under `token` and
+/// joined ([`EyeVisibility::assemble`]), which gives [`limits::eye_visibility`]'s bits (R06.T11.g).
 ///
 /// Only a request with no camera part takes it (decided 2026-10-08, `decision-r06-t7b-brackets.md`):
 /// a camera's cut, even a shallower one, is culled by the camera's own limit, which the eye's
@@ -499,7 +542,7 @@ pub(crate) async fn eye_cut(
 ///
 /// # Errors
 ///
-/// Those of [`bulk`].
+/// Those of [`BulkJobs`].
 pub(crate) async fn eye_visibility(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
@@ -509,23 +552,49 @@ pub(crate) async fn eye_visibility(
     illumination: &Arc<Illumination>,
     token: &CancelToken,
 ) -> Result<EyeVisibility, ComputeError> {
-    let (galaxy, tables, light) = (
-        Arc::clone(galaxy),
-        Arc::clone(tables),
-        Arc::clone(illumination),
-    );
+    let parts = pre_pass(pool, galaxy, tables, eye, cut, illumination, token).await?;
     let (observer, eye) = eye;
-    bulk(pool, token, move |_: &CancelToken| {
-        limits::eye_visibility(
-            &galaxy,
-            &mut tables.march_context(),
-            &observer,
-            &eye,
-            cut,
-            Some(&light),
-        )
-    })
-    .await
+    // As the eye cut's join, microseconds: no job of its own.
+    Ok(EyeVisibility::assemble(&observer, &eye, cut, parts))
+}
+
+/// The eye cut's pre-pass for `eye` at `band_cut` with the request's `illumination` (R06.T11.g):
+/// its rows marched [`PRE_PASS_JOB_ROWS`] of a face to a bulk job under `token`, in the band's
+/// order.
+///
+/// # Errors
+///
+/// Those of [`BulkJobs`].
+async fn pre_pass(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    tables: &Arc<SkyTables>,
+    eye: (Observer, EyeObserver),
+    band_cut: Magnitudes,
+    illumination: &Arc<Illumination>,
+    token: &CancelToken,
+) -> Result<Vec<PrePassRows>, ComputeError> {
+    let (observer, eye) = eye;
+    let jobs = row_jobs(PRE_PASS_SPEC, PRE_PASS_JOB_ROWS).map(|(face, rows)| {
+        let (galaxy, tables, light) = (
+            Arc::clone(galaxy),
+            Arc::clone(tables),
+            Arc::clone(illumination),
+        );
+        move || {
+            limits::pre_pass_rows(
+                &galaxy,
+                &mut tables.march_context(),
+                &observer,
+                &eye,
+                band_cut,
+                Some(&light),
+                face,
+                rows,
+            )
+        }
+    });
+    BulkJobs::submit(pool, token, jobs).await?.results().await
 }
 
 /// The census's plan for `query` (Design notes 9 and 10): each layer's cap and the cells they open,
@@ -535,14 +604,16 @@ pub(crate) async fn eye_visibility(
 /// The query's forced caps are the plan's at once, in one bulk job. Derived caps count the galaxy's
 /// stars along [`CAP_RAYS`] rays, each through the clearest of its [`SUB_RAYS`] sub-rays, whose
 /// extinction profiles are measured [`CAP_JOB_RAYS`] to a bulk job after one job sets the rays'
-/// lattice, each with its own noise cache, and joined in ray order; one more job counts them,
-/// serially in ray order, by the eye's visibility where the query asks it, and makes the plan
-/// (decided 2026-10-03, `decision-r06-tables.md`, item B.4; R06.T7.b). The caps are so
-/// `layer_caps`' (or `layer_caps_by_visibility`'s) bit for bit.
+/// lattice, each with its own noise cache, and joined in ray order (decided 2026-10-03,
+/// `decision-r06-tables.md`, item B.4; R06.T7.b). One job then plans the count over them, by the
+/// eye's visibility where the query asks it; the count's rays are counted [`CAP_COUNT_JOB_RAYS`] to
+/// a job and joined in ray order; each layer's cap is drawn from the count in a job of its own; and
+/// one more job makes the plan (R06.T11.g). The caps are so `layer_caps`' (or
+/// `layer_caps_by_visibility`'s) bit for bit.
 ///
 /// # Errors
 ///
-/// Those of [`bulk`].
+/// Those of [`bulk`] and [`BulkJobs`].
 pub(crate) async fn plan(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
@@ -551,15 +622,36 @@ pub(crate) async fn plan(
     edges_ly: &'static [u32],
     token: &CancelToken,
 ) -> Result<CensusPlan, ComputeError> {
-    let (galaxy, tables, query) = (Arc::clone(galaxy), Arc::clone(tables), Arc::clone(query));
     if let Some(forced) = query.forced_caps() {
         // A forced query's plan reads no table and marches no ray: `census_plan`'s for it.
-        let caps = forced.to_vec();
+        let (caps, query) = (forced.to_vec(), Arc::clone(query));
         return bulk(pool, token, move |_: &CancelToken| {
             census_plan_with_edges(&query, caps, edges_ly)
         })
         .await;
     }
+    let caps = derived_caps(pool, galaxy, tables, query, token).await?;
+    let query = Arc::clone(query);
+    bulk(pool, token, move |_: &CancelToken| {
+        census_plan_with_edges(&query, caps, edges_ly)
+    })
+    .await
+}
+
+/// Each layer's cap for `query`, derived from the galaxy's tables and dust as [`plan`] sets out:
+/// the rays measured, then counted, in jobs, and each layer's cap drawn in a job of its own, in
+/// [`CAPPED_LAYERS`]' order.
+///
+/// # Errors
+///
+/// Those of [`bulk`] and [`BulkJobs`].
+async fn derived_caps(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    tables: &Arc<SkyTables>,
+    query: &Arc<SkyQuery>,
+    token: &CancelToken,
+) -> Result<Vec<LayerCap>, ComputeError> {
     let origin = *query.observer().position();
     // The lattice's spacing, which sets each ray's sub-rays, is some 0.1 s: one job, shared.
     let lattice = bulk(pool, token, |_: &CancelToken| {
@@ -568,7 +660,7 @@ pub(crate) async fn plan(
     .await?;
     let shares = (0..CAP_RAYS).step_by(CAP_JOB_RAYS).map(|first| {
         let which = first..(first + CAP_JOB_RAYS).min(CAP_RAYS);
-        let (galaxy, lattice) = (Arc::clone(&galaxy), Arc::clone(&lattice));
+        let (galaxy, lattice) = (Arc::clone(galaxy), Arc::clone(&lattice));
         move || {
             let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
             RayExtinctions::measure_clearest_rays(
@@ -580,18 +672,49 @@ pub(crate) async fn plan(
         .await?
         .results()
         .await?;
-    bulk(pool, token, move |_: &CancelToken| {
-        let rays = RayExtinctions::join(shares);
-        let (tables, envelope, observer) = (&tables.tables, &tables.envelope, query.observer());
-        let caps = match query.eye_visibility() {
-            Some(visibility) => layer_caps_by_visibility_over(
-                &galaxy, tables, envelope, observer, visibility, &rays,
-            ),
-            None => layer_caps_over(&galaxy, tables, envelope, observer, query.cut(), &rays),
-        };
-        census_plan_with_edges(&query, caps, edges_ly)
-    })
-    .await
+    // The count's plan: the rays joined, each ray's cut, the rule bounds and the radial nodes, some
+    // milliseconds.
+    let (counting, rays) = {
+        let (galaxy, tables, query) = (Arc::clone(galaxy), Arc::clone(tables), Arc::clone(query));
+        bulk(pool, token, move |_: &CancelToken| {
+            let rays = RayExtinctions::join(shares);
+            let (luminosity, envelope, observer) =
+                (&tables.tables, &tables.envelope, query.observer());
+            let counting = match query.eye_visibility() {
+                Some(visibility) => CapCount::plan_by_visibility_over(
+                    &galaxy, luminosity, envelope, observer, visibility, &rays,
+                ),
+                None => {
+                    CapCount::plan_over(&galaxy, luminosity, envelope, observer, query.cut(), &rays)
+                }
+            };
+            (Arc::new(counting), Arc::new(rays))
+        })
+        .await?
+    };
+    let counts = (0..counting.rays())
+        .step_by(CAP_COUNT_JOB_RAYS)
+        .map(|first| {
+            let which = first..(first + CAP_COUNT_JOB_RAYS).min(counting.rays());
+            let (galaxy, tables, counting, rays) = (
+                Arc::clone(galaxy),
+                Arc::clone(tables),
+                Arc::clone(&counting),
+                Arc::clone(&rays),
+            );
+            move || counting.count_rays(&galaxy, &tables.tables, &rays, which)
+        })
+        .collect::<Vec<_>>();
+    let counts = BulkJobs::submit(pool, token, counts)
+        .await?
+        .results()
+        .await?;
+    let count = Arc::new(bulk(pool, token, move |_: &CancelToken| counting.join(counts)).await?);
+    let caps = CAPPED_LAYERS.map(|layer| {
+        let count = Arc::clone(&count);
+        move || count.cap(layer)
+    });
+    BulkJobs::submit(pool, token, caps).await?.results().await
 }
 
 /// Adds `tallies` to `sum`, starting the sum from the first, as the census's merge starts from its
@@ -608,26 +731,38 @@ fn add_tallies(sum: &mut Option<CensusTallies>, tallies: &CensusTallies) {
 /// `decision-r06-census-cost-signoff.md`).
 ///
 /// Step k holds each layer's k-th shell, nearest first within each layer, as
-/// [`CensusPlan::shells`] ranks them, except that layer C's shells beyond 2,000 ly (its fourth on)
-/// come one step later: D's and E's shells to 4,000 ly then run before C's beyond 2,000 ly, whose
-/// cells are mostly walk and hold few of the brightest distant stars. Within a step the shells
-/// keep [`CensusPlan::shells`]' order. The first step holds every layer's first shell, so A, B and
-/// the brown dwarfs, one shell each, are final from the first reply, and every layer states a
-/// radius in it. The order is a function of the plan alone: every machine and worker count
-/// censuses the same steps and sends the same replies, only at its own pace. A plan of no shell,
-/// every cap of no radius, is one step of none, its one reply final.
+/// [`CensusPlan::shells`] ranks them, except that layer C's shells beyond `c_deferred_beyond_ly`
+/// ([`C_DEFERRED_BEYOND_LY`] for every sky a client asks, [`SkyCaps::c_deferred_beyond_ly`]),
+/// those whose inner edge is at or beyond it, come one step later: D's and E's shells to 4,000 ly
+/// then run before C's beyond 2,000 ly, whose cells are mostly walk and hold few of the brightest
+/// distant stars. C's shells are deferred by their edge, not by their place, so that the shells
+/// R06.T11.g put inside 500 ly move none of C's nearer ones (decided 2026-10-08,
+/// `decision-r06-t11d-first-sky.md` §1.4). Within a step the shells keep [`CensusPlan::shells`]'
+/// order. The first step holds every layer's first shell, so A, B and the brown dwarfs, one shell
+/// each, are final from the first reply, and every layer states a radius in it. Near the Sun the
+/// steps are 125, 250, 500, 1,000 and 2,000 ly for every layer, then D's and E's 4,000 ly before
+/// C's. The order is a function of the plan alone: every machine and worker count censuses the same
+/// steps and sends the same replies, only at its own pace. A plan of no shell, every cap of no
+/// radius, is one step of none, its one reply final.
 #[must_use]
-pub(crate) fn delivery_steps(plan: &CensusPlan) -> Vec<Vec<Shell>> {
-    /// C's shells from this place on lie beyond 2,000 ly: the fourth, 2,000 to 4,000 ly.
-    const C_DEFERRED_FROM: u8 = 3;
+pub(crate) fn delivery_steps(plan: &CensusPlan, c_deferred_beyond_ly: f64) -> Vec<Vec<Shell>> {
     let mut steps: Vec<Vec<Shell>> = Vec::new();
+    // Each layer's edge before the shell at hand: its shells come nearest first within a layer.
+    let mut inner: BTreeMap<Layer, LightYears> = BTreeMap::new();
     for shell in plan.shells() {
-        let deferred = shell.layer() == Layer::C && shell.index() >= C_DEFERRED_FROM;
+        let from = inner
+            .get(&shell.layer())
+            .copied()
+            .unwrap_or(LightYears::ZERO);
+        let deferred = shell.layer() == Layer::C && from.value() >= c_deferred_beyond_ly;
         let step = usize::from(shell.index()) + usize::from(deferred);
         if steps.len() <= step {
             steps.resize_with(step + 1, Vec::new);
         }
         steps[step].push(shell);
+        if let Some(edge) = shell.edge() {
+            inner.insert(shell.layer(), edge);
+        }
     }
     steps.retain(|step| !step.is_empty());
     if steps.is_empty() {
@@ -636,35 +771,48 @@ pub(crate) fn delivery_steps(plan: &CensusPlan) -> Vec<Vec<Shell>> {
     steps
 }
 
+/// The edge, ly, beyond which layer C's shells are censused a step late ([`delivery_steps`]):
+/// 2,000 ly (`decision-r06-census-cost-signoff.md`, condition 3).
+pub(crate) const C_DEFERRED_BEYOND_LY: f64 = 2_000.0;
+
 /// One census job's share of a shell: cells of one of its slabs not yet censused, in order, the
-/// slab still to walk or some of its cells walked already.
-enum CellWork {
+/// slab still to walk or some of its cells walked already, all of one layer.
+struct CellWork {
+    layer: Layer,
+    cells: Cells,
+}
+
+/// The cells of a [`CellWork`].
+enum Cells {
     /// A slab's cells, walked as they are taken.
     Slab(Peekable<Box<dyn Iterator<Item = CellKey> + Send>>),
     /// Cells of a slab walked already, in order.
-    Cells(std::vec::IntoIter<CellKey>),
+    Walked(std::vec::IntoIter<CellKey>),
 }
 
 impl CellWork {
     /// The work of `slab`'s cells, not yet walked.
     fn of(slab: &CellSlab) -> Self {
         let cells: Box<dyn Iterator<Item = CellKey> + Send> = Box::new(slab.cells());
-        Self::Slab(cells.peekable())
+        Self {
+            layer: slab.layer(),
+            cells: Cells::Slab(cells.peekable()),
+        }
     }
 
     /// The next cell, walking the slab as far as it.
     fn next(&mut self) -> Option<CellKey> {
-        match self {
-            Self::Slab(cells) => cells.next(),
-            Self::Cells(cells) => cells.next(),
+        match &mut self.cells {
+            Cells::Slab(cells) => cells.next(),
+            Cells::Walked(cells) => cells.next(),
         }
     }
 
     /// Whether no cell is left, walking the slab as far as the next.
     fn is_done(&mut self) -> bool {
-        match self {
-            Self::Slab(cells) => cells.peek().is_none(),
-            Self::Cells(cells) => cells.len() == 0,
+        match &mut self.cells {
+            Cells::Slab(cells) => cells.peek().is_none(),
+            Cells::Walked(cells) => cells.len() == 0,
         }
     }
 
@@ -672,32 +820,51 @@ impl CellWork {
     /// may take one: a slab whose cells each cost more than a job's slice, as the few cells nearest
     /// the observer in layers D and E do, then spreads over the workers in a few rounds.
     fn split(self) -> impl Iterator<Item = Self> {
-        let mut cells: Vec<CellKey> = match self {
-            Self::Slab(cells) => cells.collect(),
-            Self::Cells(cells) => cells.collect(),
+        let Self { layer, cells } = self;
+        let mut cells: Vec<CellKey> = match cells {
+            Cells::Slab(cells) => cells.collect(),
+            Cells::Walked(cells) => cells.collect(),
         };
         let back = cells.split_off(cells.len() / 2);
         [cells, back]
             .into_iter()
             .filter(|half| !half.is_empty())
-            .map(|half| Self::Cells(half.into_iter()))
+            .map(move |half| Self {
+                layer,
+                cells: Cells::Walked(half.into_iter()),
+            })
     }
 }
 
-/// The stars and tallies of one step's census jobs, joined as they arrived.
+/// The stars, tallies and cost of one step's census jobs, joined as they arrived.
 #[derive(Debug, Default)]
 pub(crate) struct StepPart {
     stars: Vec<SkyStar>,
     tallies: Option<CensusTallies>,
+    /// What the step's cells cost (R06.T8.h's counts: the records read, among them), for the log.
+    cost: CensusCost,
 }
 
 impl StepPart {
-    /// Adds a job's stars and tallies, starting the tallies from the first.
-    fn absorb(&mut self, stars: Vec<SkyStar>, tallies: Option<&CensusTallies>) {
+    /// Adds a job's stars, tallies and cost, starting the tallies from the first.
+    fn absorb(&mut self, stars: Vec<SkyStar>, tallies: Option<&CensusTallies>, cost: &CensusCost) {
         self.stars.extend(stars);
         if let Some(tallies) = tallies {
             add_tallies(&mut self.tallies, tallies);
         }
+        self.cost.add(cost);
+    }
+
+    /// The step's own tallies, of its cells alone: `None` for a step of no cell.
+    #[must_use]
+    pub(crate) const fn tallies(&self) -> Option<&CensusTallies> {
+        self.tallies.as_ref()
+    }
+
+    /// What the step's own cells cost.
+    #[must_use]
+    pub(crate) const fn cost(&self) -> &CensusCost {
+        &self.cost
     }
 }
 
@@ -712,19 +879,73 @@ pub(crate) struct CensusStep {
     pub(crate) parts: Vec<Arc<StepPart>>,
     /// Whether it is the last step: the census is then the one-shot census of its plan.
     pub(crate) last: bool,
-    /// The time its census jobs ran, summed over them: the step's census work, for the server's
-    /// log (T17 times each reply).
-    pub(crate) worked: Duration,
+    /// The time its census jobs ran, summed over them, per layer of [`Layer::ALL`] by its value:
+    /// the step's census work, for the server's log (T17 times each reply; R06.T11.g prints it a
+    /// layer at a time).
+    pub(crate) worked: [Duration; Layer::ALL.len()],
+    /// When its census was done, its last cell and every earlier step's censused: from it the
+    /// server's log times the reply's own chain, its merge, band and payload (R06.T11.g).
+    pub(crate) censused_at: Instant,
 }
 
-/// What one census job did: its cells' stars and their tallies (`None` for no cell), and the cells
-/// it had no time for.
+impl CensusStep {
+    /// The step's census work, summed over its layers.
+    #[must_use]
+    pub(crate) fn worked_in_all(&self) -> Duration {
+        self.worked.iter().sum()
+    }
+
+    /// The step's own census, layer by layer of [`CAPPED_LAYERS`], for the server's log: the
+    /// records its cells read past their mass floor, the systems it generated and its jobs' time
+    /// (R06.T11.g, whose bench prints it beside the phases).
+    #[must_use]
+    pub(crate) fn layers(&self) -> StepLayers {
+        let part = self.parts.last();
+        StepLayers(CAPPED_LAYERS.map(|layer| {
+            let records = part.map_or(0, |part| part.cost().layer(layer).candidates());
+            let generated = part
+                .and_then(|part| part.tallies())
+                .map_or(0, |tallies| tallies.layer(layer).generated());
+            (
+                layer,
+                records,
+                generated,
+                self.worked[usize::from(layer.value())],
+            )
+        }))
+    }
+}
+
+/// A step's own census, layer by layer: each layer's records read, systems generated and jobs'
+/// time ([`CensusStep::layers`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StepLayers([(Layer, u64, u64, Duration); CAPPED_LAYERS.len()]);
+
+impl fmt::Display for StepLayers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (k, (layer, records, generated, worked)) in self.0.iter().enumerate() {
+            if k > 0 {
+                f.write_str("; ")?;
+            }
+            write!(
+                f,
+                "{layer:?} {records} records, {generated} generated, {:.2} job-s",
+                worked.as_secs_f64()
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// What one census job did: its cells' stars, their tallies (`None` for no cell) and cost, and the
+/// cells it had no time for.
 struct Slice {
     stars: Vec<SkyStar>,
     tallies: Option<CensusTallies>,
+    cost: CensusCost,
     rest: Vec<CellWork>,
-    /// How long the job ran.
-    worked: Duration,
+    /// The layer of its cells, and how long the job ran.
+    worked: (Layer, Duration),
 }
 
 /// The census of the inputs' query over `plan`'s shells, nearest first in `steps` (made by
@@ -793,7 +1014,7 @@ pub(crate) async fn census_in_steps(
     }
     let mut outstanding = FuturesUnordered::new();
     let mut found: Vec<StepPart> = steps.iter().map(|_| StepPart::default()).collect();
-    let mut worked = vec![Duration::ZERO; steps.len()];
+    let mut worked = vec![[Duration::ZERO; Layer::ALL.len()]; steps.len()];
     let (mut sent, mut done, mut parts) = (0, Vec::new(), Vec::new());
     loop {
         // Every step whose cells, and every earlier step's, are censused is sent, in order.
@@ -806,6 +1027,7 @@ pub(crate) async fn census_in_steps(
                 parts: parts.clone(),
                 last: sent == steps.len(),
                 worked: worked[sent - 1],
+                censused_at: Instant::now(),
             };
             if sink.send(step).await.is_err() {
                 return Ok(());
@@ -833,16 +1055,17 @@ pub(crate) async fn census_in_steps(
         let Slice {
             stars,
             tallies,
+            cost,
             rest,
-            worked: ran,
+            worked: (layer, ran),
         } = slice;
-        worked[step] += ran;
+        worked[step][usize::from(layer.value())] += ran;
         open[step] = open[step] - 1 + rest.len();
         for cells in rest {
             queued.insert((step, order), cells);
             order += 1;
         }
-        found[step].absorb(stars, tallies.as_ref());
+        found[step].absorb(stars, tallies.as_ref(), &cost);
     }
 }
 
@@ -862,9 +1085,9 @@ pub(crate) struct CensusInputs {
     pub(crate) query: Arc<SkyQuery>,
 }
 
-/// One census job: `work`'s cells, in order, each with [`census_cell`], in a context of its own
-/// over the shared cell cache, until `slice` is spent, and at least one cell. The cells it had no
-/// time for come back, walked and split in two. `None` if the job stopped early because its
+/// One census job: `work`'s cells, in order, each with [`census_cell_with_cost`], in a context of
+/// its own over the shared cell cache, until `slice` is spent, and at least one cell. The cells it
+/// had no time for come back, walked and split in two. `None` if the job stopped early because its
 /// request's token was cancelled or its census `abandoned` it.
 fn census_job(
     inputs: CensusInputs,
@@ -883,7 +1106,8 @@ fn census_job(
         } = inputs;
         let handle = cells.handle(key);
         let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &handle);
-        let (mut stars, mut tallies) = (Vec::new(), None);
+        let (mut stars, mut tallies, mut cost) = (Vec::new(), None, CensusCost::default());
+        let layer = work.layer;
         loop {
             if token.is_cancelled() || abandoned.is_cancelled() {
                 return None;
@@ -894,21 +1118,24 @@ fn census_job(
                 return Some(Slice {
                     stars,
                     tallies,
+                    cost,
                     rest: work.split().collect(),
-                    worked: started.elapsed(),
+                    worked: (layer, started.elapsed()),
                 });
             }
             let Some(cell) = work.next() else {
                 break;
             };
-            let cell = census_cell(&galaxy, &mut ctx, cell, &query, &mut stars);
+            let (cell, spent) = census_cell_with_cost(&galaxy, &mut ctx, cell, &query, &mut stars);
             add_tallies(&mut tallies, &cell);
+            cost.add(&spent);
         }
         Some(Slice {
             stars,
             tallies,
+            cost,
             rest: Vec::new(),
-            worked: started.elapsed(),
+            worked: (layer, started.elapsed()),
         })
     }
 }
@@ -1011,13 +1238,25 @@ pub(crate) async fn march(
 
 /// A sky's band as the reply carries it: every texel of the six faces, and each listed star's eye
 /// offset, its own eye limit less its texel's, where the eye was asked. Made by [`band`] alone.
+///
+/// The texels are shared, so that the eye offsets' jobs and the payload's read them without a copy.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SkyBand {
-    texels: Vec<BandTexel>,
+    texels: Arc<[BandTexel]>,
     eye_offsets: Option<Vec<Magnitudes>>,
 }
 
 impl SkyBand {
+    /// A band of `texels` with `eye_offsets`: a test's, whose payload reads no march.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn of_parts(texels: Vec<BandTexel>, eye_offsets: Option<Vec<Magnitudes>>) -> Self {
+        Self {
+            texels: texels.into(),
+            eye_offsets,
+        }
+    }
+
     /// The texels, in the cube's face order ([`CubeFace::ALL`]), each face's rows from the top and
     /// each row from its left, with their eye limits where the eye was asked.
     #[must_use]
@@ -1038,14 +1277,16 @@ impl SkyBand {
 /// eye offsets, as bulk jobs under `token` (Design notes 4 and 15; R06.T9.c, T9.h–T9.j; R06.T11.d).
 ///
 /// Where the eye is asked, one job first resolves the listed stars' glare to the eye's cut
-/// (`Glare::of_listed`: only the stars at or brighter than it glare, R06.T9.j). Then each march's
-/// job sums its texels with the census's overflow (`sum_rows`), the light fainter than the cut
-/// within the census's radii and all of the light beyond them, and sets their eye limits against
-/// the light fainter than the eye's cut and the glare (`limit_rows`), which reads the glare's
-/// pyramid in a fixed order, so any split of rows gives the same bits (R06.T9.i). Once every
-/// texel's limit is set, one job gives each listed star its eye offset (`eye_offsets`). The eye's
-/// map is so the eye-only request's at the census's radii, whatever the request's cut (decided
-/// 2026-10-07, `decision-r06-t9c-glare.md`, addendum 2).
+/// (`Glare::of_listed`: only the stars at or brighter than it glare, R06.T9.j), 0.07 s at `N_max`
+/// (R06.T9.i). Then each march's job sums its texels with the census's overflow (`sum_rows`), the
+/// light fainter than the cut within the census's radii and all of the light beyond them, and sets
+/// their eye limits against the light fainter than the eye's cut and the glare (`limit_rows`),
+/// which reads the glare's pyramid in a fixed order, so any split of rows gives the same bits
+/// (R06.T9.i). Once every texel's limit is set, the listed stars are given their eye offsets
+/// [`EYE_OFFSET_JOB_STARS`] to a job (`eye_offsets_of`), joined in the census's order, which is
+/// `eye_offsets`' bit for bit (R06.T11.g). The eye's map is so the eye-only request's at the
+/// census's radii, whatever the request's cut (decided 2026-10-07, `decision-r06-t9c-glare.md`,
+/// addendum 2).
 ///
 /// # Errors
 ///
@@ -1096,22 +1337,55 @@ pub(crate) async fn band(
     for row in rows {
         texels.extend(row);
     }
-    match eye {
-        Some((eye, glare)) => {
-            bulk(pool, token, move |_: &CancelToken| {
-                let eye_offsets = limits::eye_offsets(&eye, &spec, &glare, &texels);
-                SkyBand {
-                    texels,
-                    eye_offsets: Some(eye_offsets),
-                }
-            })
-            .await
-        }
-        None => Ok(SkyBand {
-            texels,
-            eye_offsets: None,
-        }),
-    }
+    let texels: Arc<[BandTexel]> = texels.into();
+    let eye_offsets = match eye {
+        Some((eye, glare)) => Some(
+            eye_offsets(
+                pool,
+                token,
+                (eye, spec),
+                (&glare, &texels),
+                EYE_OFFSET_JOB_STARS,
+            )
+            .await?,
+        ),
+        None => None,
+    };
+    Ok(SkyBand {
+        texels,
+        eye_offsets,
+    })
+}
+
+/// Each star of `glare`, the listed stars', its eye offset against `texels`, the band's with every
+/// eye limit set, for `eye` at `spec`: `stars_a_job` stars to a bulk job under `token`, joined in
+/// the census's order, which is `eye_offsets`' bit for bit (R06.T11.g).
+///
+/// # Errors
+///
+/// Those of [`BulkJobs`].
+///
+/// # Panics
+///
+/// If `stars_a_job` is nought.
+async fn eye_offsets(
+    pool: &CpuPool,
+    token: &CancelToken,
+    (eye, spec): (EyeObserver, BandSpec),
+    (glare, texels): (&Arc<Glare>, &Arc<[BandTexel]>),
+    stars_a_job: usize,
+) -> Result<Vec<Magnitudes>, ComputeError> {
+    let stars = glare.len();
+    let jobs: Vec<_> = (0..stars)
+        .step_by(stars_a_job)
+        .map(|first| {
+            let which = first..(first + stars_a_job).min(stars);
+            let (glare, texels) = (Arc::clone(glare), Arc::clone(texels));
+            move || limits::eye_offsets_of(&eye, &spec, &glare, &texels, which)
+        })
+        .collect();
+    let parts = BulkJobs::submit(pool, token, jobs).await?.results().await?;
+    Ok(parts.concat())
 }
 
 #[cfg(test)]
@@ -1120,7 +1394,9 @@ mod tests {
 
     use hyperion_sim::coords::GalacticPosition;
     use hyperion_sim::sky::caps::{LayerCap, layer_caps};
-    use hyperion_sim::sky::census::{Completeness, census_plan, census_plan_of, merge_census};
+    use hyperion_sim::sky::census::{
+        Completeness, census_cell, census_plan, census_plan_of, merge_census,
+    };
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
     use tokio::time::timeout;
@@ -1254,7 +1530,10 @@ mod tests {
             CAPPED_LAYERS.len(),
             "one shell a layer to 30 ly"
         );
-        assert_eq!(delivery_steps(&plan), vec![shells.clone()]);
+        assert_eq!(
+            delivery_steps(&plan, C_DEFERRED_BEYOND_LY),
+            vec![shells.clone()]
+        );
         let steps: Vec<Vec<Shell>> = shells.chunks(2).map(<[Shell]>::to_vec).collect();
 
         let cold = steps_censused(&pool, &inputs, &plan, &steps, Duration::ZERO).await;
@@ -1319,8 +1598,8 @@ mod tests {
     }
 
     /// Caps as the derived caps near the Sun put them at the eye's cut, uniform here (R06.T7.b's
-    /// farthest rays): C has shells to 500 ly–8,000 ly and its cap, D the same, E to 32,000 ly
-    /// and its cap, and A, B and the brown dwarfs one each.
+    /// farthest rays): C has shells to 125 ly–8,000 ly and its cap, D the same, E to 32,000 ly
+    /// and its cap, and A, B and the brown dwarfs one each (R06.T11.g's edges).
     fn near_sun_plan() -> CensusPlan {
         let query = SkyQuery::builder(sun(), Magnitudes::new(7.95))
             .build()
@@ -1334,12 +1613,14 @@ mod tests {
     }
 
     /// The delivery runs every shell once, nearest first within each layer, every layer's first in
-    /// the first step, and D's and E's shells to 4,000 ly before C's beyond 2,000 ly (R06.T11.d).
+    /// the first step, and D's and E's shells to 4,000 ly before C's beyond 2,000 ly (R06.T11.d),
+    /// C's deferred by its edge: near the Sun the steps are 125, 250, 500, 1,000 and 2,000 ly for
+    /// every layer, then D's and E's 4,000 ly before C's (R06.T11.g).
     #[test]
     fn the_delivery_is_nearest_first_with_d_and_e_to_4000_ly_before_c_beyond_2000() {
         use Layer::{A, B, BrownDwarf, C, D, E};
         let plan = near_sun_plan();
-        let steps = delivery_steps(&plan);
+        let steps = delivery_steps(&plan, C_DEFERRED_BEYOND_LY);
         let shape: Vec<Vec<(Layer, u8)>> = steps
             .iter()
             .map(|step| step.iter().map(|s| (s.layer(), s.index())).collect())
@@ -1350,13 +1631,26 @@ mod tests {
                 vec![(A, 0), (B, 0), (C, 0), (D, 0), (E, 0), (BrownDwarf, 0)],
                 vec![(C, 1), (D, 1), (E, 1)],
                 vec![(C, 2), (D, 2), (E, 2)],
-                vec![(D, 3), (E, 3)],
-                vec![(C, 3), (D, 4), (E, 4)],
-                vec![(C, 4), (D, 5), (E, 5)],
-                vec![(C, 5), (E, 6)],
-                vec![(E, 7)],
+                vec![(C, 3), (D, 3), (E, 3)],
+                vec![(C, 4), (D, 4), (E, 4)],
+                vec![(D, 5), (E, 5)],
+                vec![(C, 5), (D, 6), (E, 6)],
+                vec![(C, 6), (D, 7), (E, 7)],
+                vec![(C, 7), (E, 8)],
+                vec![(E, 9)],
             ]
         );
+        // Each step's edges, nearest first: C's first beyond 2,000 ly, its 4,000 ly shell, comes a
+        // step after D's and E's.
+        let edge_of = |layer: Layer, index: u8| {
+            plan.shells()
+                .find(|s| s.layer() == layer && s.index() == index)
+                .and_then(|s| s.edge())
+                .map(LightYears::value)
+        };
+        assert_eq!(edge_of(C, 4), Some(2_000.0));
+        assert_eq!(edge_of(C, 5), Some(4_000.0));
+        assert_eq!(edge_of(D, 5), Some(4_000.0));
         let mut all: Vec<Shell> = steps.concat();
         let mut planned: Vec<Shell> = plan.shells().collect();
         all.sort_unstable();
@@ -1366,8 +1660,9 @@ mod tests {
         // D's and E's shells to 4,000 ly all come before C's first beyond 2,000 ly.
         let c_beyond = steps
             .iter()
-            .position(|step| step.iter().any(|s| s.layer() == C && s.index() >= 3))
+            .position(|step| step.iter().any(|s| s.layer() == C && edge(s) > 2_000.0))
             .unwrap();
+        assert_eq!(c_beyond, 6);
         for (k, step) in steps.iter().enumerate() {
             for shell in step {
                 if matches!(shell.layer(), D | E) && edge(shell) <= 4_000.0 {
@@ -1377,7 +1672,29 @@ mod tests {
         }
         // The first reply has every layer's first shell: A, B and the brown dwarfs are final.
         let first = plan.completeness(steps[0].iter().copied());
-        assert_eq!(first.least_edge(), Some(LightYears::new(500.0)));
+        assert_eq!(first.least_edge(), Some(LightYears::new(125.0)));
+        let reached: Vec<Option<f64>> = (1..=steps.len())
+            .map(|k| {
+                plan.completeness(steps[..k].concat())
+                    .least_edge()
+                    .map(LightYears::value)
+            })
+            .collect();
+        assert_eq!(
+            reached,
+            [
+                Some(125.0),
+                Some(250.0),
+                Some(500.0),
+                Some(1_000.0),
+                Some(2_000.0),
+                Some(2_000.0),
+                Some(4_000.0),
+                Some(8_000.0),
+                Some(32_000.0),
+                None
+            ]
+        );
         for layer in [A, B, BrownDwarf] {
             assert_eq!(first.edge(layer), None, "{layer:?} is final");
         }
@@ -1406,7 +1723,7 @@ mod tests {
             0..1,
         );
         let mut done = Vec::new();
-        for step in delivery_steps(&plan) {
+        for step in delivery_steps(&plan, C_DEFERRED_BEYOND_LY) {
             done.extend(step);
             let completeness = plan.completeness(done.iter().copied());
             assert!(
@@ -1511,6 +1828,59 @@ mod tests {
         let sims = census_plan(&galaxy, &tables.tables, &tables.envelope, &seen, &mut noise);
         assert_eq!(planned, sims);
         pool.shutdown().await.unwrap();
+    }
+
+    /// The listed stars' eye offsets in jobs of a few stars each, joined in order, are
+    /// `eye_offsets`' in one job, bit for bit (R06.T11.g): a census near the Sun to 25 ly over
+    /// tables of no star, its glare at V 9 and a band of 2² texels a face with its limits set.
+    #[tokio::test]
+    async fn the_eye_offsets_in_jobs_are_the_one_jobs() {
+        let galaxy = Galaxy::new(Seed::new(0x4d2));
+        let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
+        let cut = Magnitudes::new(9.0);
+        let caps = SkyCaps::forced(LightYears::new(25.0)).unwrap();
+        let query = caps.on(SkyQuery::builder(sun(), cut).build().unwrap());
+        let plan = census_plan_of(&query, query.forced_caps().unwrap().to_vec());
+        let shells: Vec<Shell> = plan.shells().collect();
+        let census = serial_census(&galaxy, &tables, &query, &plan, &shells);
+        let (eye, spec) = (EyeObserver::default(), BandSpec::new(2, 12).unwrap());
+        let glare = Glare::of_listed(query.observer(), census.listed(), &spec, cut);
+        let mut texels = Vec::new();
+        for face in CubeFace::ALL {
+            hyperion_sim::sky::band::band_rows(
+                &galaxy,
+                &mut tables.march_context(),
+                &query,
+                &SkyCensus::empty(),
+                &CompleteTo::nowhere(),
+                &spec,
+                face,
+                0..2,
+                &mut texels,
+            );
+        }
+        limits::limit_map(&eye, &spec, &glare, &mut texels);
+        let whole: Vec<u64> = limits::eye_offsets(&eye, &spec, &glare, &texels)
+            .iter()
+            .map(|offset| offset.value().to_bits())
+            .collect();
+        let n = whole.len();
+        assert!(n > 3, "{n} listed stars");
+        let (glare, texels): (Arc<Glare>, Arc<[BandTexel]>) = (Arc::new(glare), texels.into());
+        let pool = pool(2);
+        let token = CancelToken::new();
+        for stars_a_job in [1, 3, n - 1, n, n + 1] {
+            let parts = timeout(
+                WAIT,
+                eye_offsets(&pool, &token, (eye, spec), (&glare, &texels), stars_a_job),
+            )
+            .await
+            .expect("timed out on the eye offsets")
+            .unwrap();
+            let parts: Vec<u64> = parts.iter().map(|o| o.value().to_bits()).collect();
+            assert_eq!(parts, whole, "{stars_a_job} stars a job");
+        }
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
     /// The band's jobs cover each face's rows once, in the band's order, two rows a job, and the

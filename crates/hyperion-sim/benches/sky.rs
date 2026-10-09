@@ -156,8 +156,9 @@
 //! The band benches (R06.T9.f) split the band of a near-Sun request at the eye's cut as the server
 //! runs it (R06.T11.c, T11.d), one face row a job over all six faces of `BandSpec::STANDARD` (64²
 //! texels a face, 24,576 rays). `band_near_sun/march` marches the rays once, keeping every reply of
-//! R06.T8.i's shell plan (C, D and E complete to 500 ly, then 1,000 × 2^k ly, held at their caps,
-//! then the caps; A, B and the brown dwarfs to their caps), and prints its heap.
+//! R06.T8.i's shell plan (C, D and E complete to 125, 250 and 500 ly, then 1,000 × 2^k ly, held at
+//! their caps, then the caps; A, B and the brown dwarfs to their caps: the plan's own replies at
+//! R06.T11.g's edges), and prints its heap.
 //! `band_near_sun/sum` sums the final reply's texels from that march. Their census is empty, since
 //! the overflow's points cost nothing beside the rays. Their time is the CPU time, summed over the
 //! jobs, as the censuses'. R06.T9.f's one run of each (2026-10-07, criterion's `--test`, three
@@ -237,7 +238,8 @@ use hyperion_sim::sky::caps::{
 use hyperion_sim::sky::census::{
     BlockKey, BlockParams, CellOffsets, CellSlab, CensusCost, CensusTallies, HeldRecord, LayerCost,
     LayerTally, MAX_N_MAX, NoSkyCellCache, Rebuild, SkyBlock, SkyCellCache, SkyCensus, SkyContext,
-    SkyQuery, SkyStar, StarBounds, census_cell, census_cell_with_cost, census_plan, merge_census,
+    SkyQuery, SkyStar, StarBounds, census_cell, census_cell_with_cost, census_plan, census_plan_of,
+    merge_census,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
@@ -1476,48 +1478,13 @@ fn luminosity_tables(c: &mut Criterion) {
     group.finish();
 }
 
-/// The first shell's edge of R06.T8.i's shell plan, ly: the edges, per layer, are 500 ly, then
-/// 1,000 × 2^k ly up to the cap.
-const FIRST_SHELL_LY: f64 = 500.0;
-
-/// The replies of a near-Sun request, nearest first, as R06.T8.i's shell plan will state them
-/// (`decision-r06-census-cost.md`; not yet built, so the bench's stand-in): C, D and E complete to
-/// each shell's edge, [`FIRST_SHELL_LY`] then 1,000 × 2^k ly, held at their caps, then to their
-/// caps; A, B and the brown dwarfs, one shell each, to their caps in every reply.
-fn shell_replies(caps: &[LayerCap]) -> Vec<CompleteTo> {
-    let shelled = |layer: Layer| matches!(layer, Layer::C | Layer::D | Layer::E);
-    let farthest = caps
-        .iter()
-        .filter(|cap| shelled(cap.layer()))
-        .map(|cap| cap.radius().value())
-        .fold(0.0, f64::max);
-    let mut edges = vec![FIRST_SHELL_LY];
-    while let Some(&last) = edges.last()
-        && last < farthest
-    {
-        edges.push(if last < 1_000.0 { 1_000.0 } else { 2.0 * last });
-    }
-    let at = |edge: f64| {
-        let radii: Vec<LayerCap> = caps
-            .iter()
-            .map(|cap| {
-                let radius = if shelled(cap.layer()) {
-                    cap.radius().value().min(edge)
-                } else {
-                    cap.radius().value()
-                };
-                LayerCap::forced(cap.layer(), LightYears::new(radius))
-            })
-            .collect();
-        CompleteTo::of_caps(&radii)
-    };
-    let mut replies: Vec<CompleteTo> = edges
-        .into_iter()
-        .filter(|&edge| edge < farthest)
-        .map(at)
-        .collect();
-    replies.push(CompleteTo::of_caps(caps));
-    replies
+/// The replies of a near-Sun request at `caps`, nearest first, as the census's plan states them
+/// at the fixed shell edges (`SHELL_EDGES_LY`: 125, 250 and 500 ly, then 1,000 × 2<sup>k</sup> ly;
+/// R06.T8.i and R06.T11.g), which the server's march keeps (R06.T11.d): C, D and E complete to
+/// each edge below their caps, held at them, then to their caps; A, B and the brown dwarfs, one
+/// shell each, to their caps in every reply.
+fn shell_replies(query: &SkyQuery, caps: &[LayerCap]) -> Vec<CompleteTo> {
+    census_plan_of(query, caps.to_vec()).replies()
 }
 
 /// One job's context: the sky's tables, envelope and offsets, and a noise cache of its own.
@@ -1569,7 +1536,7 @@ type Replies = OnceCell<(Vec<LayerCap>, Vec<CompleteTo>)>;
 fn replies_of<'a>(cell: &'a Replies, query: &SkyQuery) -> &'a (Vec<LayerCap>, Vec<CompleteTo>) {
     cell.get_or_init(|| {
         let caps = band_caps(sky(), query);
-        let replies = shell_replies(&caps);
+        let replies = shell_replies(query, &caps);
         (caps, replies)
     })
 }
