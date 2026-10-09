@@ -3,7 +3,7 @@
 //! (R06.T8), the census's bound star by star, step by step (R06.T8.g), the illumination of the
 //! diffuse galactic light (R06.T9.g), the band near the Sun, marched with and without that light
 //! and summed (R06.T9.b, T9.f, T9.g) and under a camera's cut (R06.T9.j), and the limit map
-//! (R06.T9.i).
+//! (R06.T9.i); and the hybrid sky's real tier near the Sun (rendering plan R13, R13.T1).
 //!
 //! They run on `GalaxyParams::milky_way_like()` with a fixed seed. A miss is a finding to record,
 //! not a CI failure: CI compiles these and never runs them. Every figure below is provisional
@@ -56,6 +56,7 @@
 //! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | at most 2.7 µs a step, at P11.T17.c (below) |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
+//! | `sky/census_near_sun_ceiling/*` | under twice the feasibility study's estimate, or to the owner (R13.T1) | R13's Risks |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 0.947 CPU-s, provisional |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 16.11 CPU-s with the diffuse light, provisional |
 //! | `sky/band_near_sun/march_no_dgl` | none (the lit march's reference, R06.T9.g) | 15.73 CPU-s, provisional |
@@ -81,6 +82,26 @@
 //! CPU-s and 40 stars, none dropped or gained by either per-ray plan in the sample (under one is
 //! expected a layer); the plans open 1.08 × 10⁸, 1.04 × 10⁸ and 8.7 × 10⁷ cells, walked in 184 s
 //! on one thread; the caps by ray took about 12 s a plan.
+//!
+//! `sky/census_near_sun_ceiling` (R13.T1) censuses the hybrid sky's real tier near the Sun at the
+//! synthetic ceilings V<sub>P</sub> 4.5 and 5.0, for the eye alone at its own cut (R06.T9.d's
+//! `eye_cut` with the request's illumination, as the server computes it since R06.T11.d; its caps
+//! by the eye's visibility, as an eye-only request takes them) and for a camera at 10.06 with the
+//! eye beside it (the uniform caps), one bench of each, on the fixture and, as `served_*`, on the
+//! server's galaxy (`Galaxy::new(Seed::new(0x4d2))` with its full potential, whose eye near the Sun
+//! lists about twice the fixture's stars within 500 ly, `decision-r06-t11d-first-sky.md`), so that
+//! the owner's guard is judged on the galaxy served.
+//! C, D and E go to R13 Design note 3's real boundary, built here as its rule until R13.T2.a's
+//! `real_boundary`: each ray of the caps counted at V<sub>P</sub>, held within the same ray of the
+//! cut's; A, B and the brown dwarfs to the cut's caps. The plan's time holds both caps' counts.
+//! Each prints, beside `census_near_sun/cold`'s tallies, each layer's boundary, its accepted stars
+//! and those within R(u) towards their band texel (what R13.T2.a will list), its census CPU time,
+//! and the whole against the feasibility study's estimate (`feasibility-hybrid-sky.md` §2.2):
+//! more than twice it at either ceiling goes back to the owner before R13.T2 builds. The census
+//! time is printed twice: as its jobs' wall time, the other benches' measure, and, on Linux, as
+//! the CPU time their threads spent on the sampled cells (`/proc/thread-self/schedstat`), which
+//! the waits of a loaded machine do not inflate; the guard reads the second where it is known.
+//! R13's Risks record its runs.
 //!
 //! The brainstorm's 400–800 CPU-s and 5 × 10⁹ candidates are the inner bulge's under the near-Sun
 //! caps held fixed; the nuclear disc's bench takes its own caps, which are far smaller.
@@ -234,17 +255,18 @@ use hyperion_sim::sky::band::{
 };
 use hyperion_sim::sky::caps::{
     CAPPED_LAYERS, CapCount, CapResolution, LayerCap, RADIAL_STEPS_PER_DECADE, layer_caps,
+    layer_caps_by_visibility,
 };
 use hyperion_sim::sky::census::{
-    BlockKey, BlockParams, CellOffsets, CellSlab, CensusCost, CensusTallies, HeldRecord, LayerCost,
-    LayerTally, MAX_N_MAX, NoSkyCellCache, Rebuild, SkyBlock, SkyCellCache, SkyCensus, SkyContext,
-    SkyQuery, SkyStar, StarBounds, census_cell, census_cell_with_cost, census_plan, census_plan_of,
-    merge_census,
+    BlockKey, BlockParams, CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies,
+    HeldRecord, LayerCost, LayerTally, MAX_N_MAX, NoSkyCellCache, Rebuild, SkyBlock, SkyCellCache,
+    SkyCensus, SkyContext, SkyQuery, SkyStar, StarBounds, census_cell, census_cell_with_cost,
+    census_plan, census_plan_of, merge_census,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
 use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude};
-use hyperion_sim::sky::limits::{Glare, eye_visibility, limit_rows};
+use hyperion_sim::sky::limits::{Glare, eye_cut, eye_visibility, limit_rows};
 use hyperion_sim::sky::luminosity::{BinSums, LuminosityTables};
 use hyperion_sim::sky::phase::PhaseEnvelope;
 use hyperion_sim::stellar::Composition;
@@ -380,38 +402,57 @@ struct Sky {
 
 fn sky() -> &'static Sky {
     static SKY: OnceLock<Sky> = OnceLock::new();
-    SKY.get_or_init(|| {
-        let galaxy = galaxy();
-        let plan = LuminosityTables::plan(&galaxy);
-        let workers = workers();
-        // Stage by stage, one metallicity's samples held at a time; each bin's sums behind a lock
-        // of its own, since a stage's accumulation jobs are of different bins.
-        let sums: Vec<Mutex<BinSums>> = plan.bin_sums().into_iter().map(Mutex::new).collect();
-        for stage in plan.stages() {
-            let sample_jobs: Vec<_> = plan.sample_jobs(stage).collect();
-            let (chunks, _) = on_pool(&sample_jobs, workers, &|job| plan.run_samples(job.clone()));
-            let samples = plan.track_samples(chunks.into_iter().map(|(_, c)| c));
-            let accumulate_jobs: Vec<_> = plan.accumulate_jobs(stage).collect();
-            on_pool(&accumulate_jobs, workers, &|job| {
-                let mut bin = sums[job.bin()]
-                    .lock()
-                    .expect("an accumulation job does not panic");
-                plan.run_accumulate(&samples, *job, &mut bin);
-            });
-        }
-        let tables = plan.assemble(sums.into_iter().map(|bin| {
-            bin.into_inner()
-                .expect("an accumulation job does not panic")
-        }));
-        let envelope = BrightnessEnvelope::build(&galaxy);
-        let offsets = CellOffsets::build(&galaxy);
-        Sky {
-            galaxy,
-            tables,
-            envelope,
-            offsets,
-        }
-    })
+    SKY.get_or_init(|| build_sky(galaxy()))
+}
+
+/// The server's galaxy, `Galaxy::new(Seed::new(0x4d2))` with its full potential, its parameters
+/// drawn from its seed: the galaxy the server's tests and benches serve
+/// (`crates/hyperion-server/tests/sky.rs`, `benches/sky.rs`), whose
+/// eye near the Sun lists about twice the fixture's stars within 500 ly
+/// (`decision-r06-t11d-first-sky.md`, Risks). R13.T1 benches the hybrid's real tier on it beside
+/// the fixture, so that the owner's guard is judged on the galaxy served.
+const SERVED_SEED: u64 = 0x4d2;
+
+/// A bench's galaxy and tables: [`sky`] or [`served_sky`].
+type SkyOf = fn() -> &'static Sky;
+
+/// [`sky`] for the server's galaxy ([`SERVED_SEED`]).
+fn served_sky() -> &'static Sky {
+    static SKY: OnceLock<Sky> = OnceLock::new();
+    SKY.get_or_init(|| build_sky(Galaxy::new(Seed::new(SERVED_SEED)).with_full_potential()))
+}
+
+/// `galaxy`, its full luminosity tables (built on the pool), the envelope and the offset bounds.
+fn build_sky(galaxy: Galaxy) -> Sky {
+    let plan = LuminosityTables::plan(&galaxy);
+    let workers = workers();
+    // Stage by stage, one metallicity's samples held at a time; each bin's sums behind a lock of
+    // its own, since a stage's accumulation jobs are of different bins.
+    let sums: Vec<Mutex<BinSums>> = plan.bin_sums().into_iter().map(Mutex::new).collect();
+    for stage in plan.stages() {
+        let sample_jobs: Vec<_> = plan.sample_jobs(stage).collect();
+        let (chunks, _) = on_pool(&sample_jobs, workers, &|job| plan.run_samples(job.clone()));
+        let samples = plan.track_samples(chunks.into_iter().map(|(_, c)| c));
+        let accumulate_jobs: Vec<_> = plan.accumulate_jobs(stage).collect();
+        on_pool(&accumulate_jobs, workers, &|job| {
+            let mut bin = sums[job.bin()]
+                .lock()
+                .expect("an accumulation job does not panic");
+            plan.run_accumulate(&samples, *job, &mut bin);
+        });
+    }
+    let tables = plan.assemble(sums.into_iter().map(|bin| {
+        bin.into_inner()
+            .expect("an accumulation job does not panic")
+    }));
+    let envelope = BrightnessEnvelope::build(&galaxy);
+    let offsets = CellOffsets::build(&galaxy);
+    Sky {
+        galaxy,
+        tables,
+        envelope,
+        offsets,
+    }
 }
 
 /// The census benches' sample, `HYPERION_SKY_BENCH_SAMPLE` (1, every cell, when unset).
@@ -562,6 +603,13 @@ struct Run {
     walk: Duration,
     /// The jobs' time censusing the sampled cells.
     cell_census: Duration,
+    /// Of it, each layer's of [`CAPPED_LAYERS`], in that order.
+    layer_census: [Duration; CAPPED_LAYERS.len()],
+    /// The CPU time the jobs' threads spent censusing the sampled cells, each layer's, where the
+    /// run measured it ([`CpuTime::Measured`]) and the platform gives a thread's CPU time
+    /// ([`ThreadCpu`]): the census's cost on a loaded machine, whose jobs' time is their wall time,
+    /// waits included (R13.T1).
+    layer_census_cpu: Option<[Duration; CAPPED_LAYERS.len()]>,
     wall: Duration,
 }
 
@@ -593,6 +641,39 @@ fn census(
         &mut caps_noise,
     );
     let planned = began.elapsed();
+    census_of_plan(
+        sky,
+        query,
+        &plan,
+        cells,
+        (workers, sample),
+        (began, planned),
+        CpuTime::WallOnly,
+    )
+}
+
+/// Whether a census bench reads its jobs' threads' CPU time beside their wall time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CpuTime {
+    /// Their wall time alone, the census benches' measure.
+    WallOnly,
+    /// Their threads' CPU time too, where the platform gives it ([`ThreadCpu`]; R13.T1).
+    Measured,
+}
+
+/// The census of `query` to `plan`, made by the time `planned` had passed since `began`, through
+/// `cells`, as the server will run it, on `workers` threads, taking one block of cells in
+/// `sample`, with the threads' CPU time where `cpu_time` asks it: [`census`]'s, for a plan whose
+/// caps the bench sets (R13.T1).
+fn census_of_plan(
+    sky: &Sky,
+    query: &SkyQuery,
+    plan: &CensusPlan,
+    cells: &dyn SkyCellCache,
+    (workers, sample): (usize, u64),
+    (began, planned): (Instant, Duration),
+    cpu_time: CpuTime,
+) -> Run {
     let slabs: Vec<CellSlab> = plan.slabs().collect();
     let (parts, jobs) = on_pool(&slabs, workers, &|slab: &CellSlab| {
         let mut ctx = SkyContext {
@@ -606,23 +687,51 @@ fn census(
         };
         let mut stars = Vec::new();
         let (mut tallies, mut cost) = (CensusTallies::default(), CensusCost::default());
-        let mut censusing = Duration::ZERO;
+        let mut clock = match cpu_time {
+            CpuTime::Measured => ThreadCpu::open(),
+            CpuTime::WallOnly => None,
+        };
+        let (mut censusing, mut on_cpu) =
+            (Duration::ZERO, clock.is_some().then_some(Duration::ZERO));
         for key in slab.cells() {
             if sample > 1 && !sample_hash(key).is_multiple_of(sample) {
                 continue;
             }
+            // The clock is read outside the wall time's window, so its reads are in no census's
+            // time, and a run that does not measure it reads nothing.
+            let from = clock.as_mut().and_then(ThreadCpu::now);
             let opened = Instant::now();
             let (t, c) = census_cell_with_cost(&sky.galaxy, &mut ctx, key, query, &mut stars);
             tallies.add(&t);
             cost.add(&c);
             censusing += opened.elapsed();
+            let to = clock.as_mut().and_then(ThreadCpu::now);
+            on_cpu = on_cpu
+                .zip(from.zip(to))
+                .map(|(sum, (from, to))| sum + to.saturating_sub(from));
         }
-        ((stars, tallies), cost, censusing)
+        let job = JobTimes {
+            layer: slab.layer(),
+            censusing,
+            on_cpu,
+        };
+        ((stars, tallies), cost, job)
     });
-    let cell_census: Duration = parts.iter().map(|(_, (_, _, c))| *c).sum();
+    let cell_census: Duration = parts.iter().map(|(_, (_, _, job))| job.censusing).sum();
+    let mut layer_census = [Duration::ZERO; CAPPED_LAYERS.len()];
+    let mut layer_census_cpu = Some([Duration::ZERO; CAPPED_LAYERS.len()]);
     let mut cost = CensusCost::default();
-    for (_, (_, c, _)) in &parts {
+    for (_, (_, c, job)) in &parts {
         cost.add(c);
+        let l = CAPPED_LAYERS
+            .iter()
+            .position(|&x| x == job.layer)
+            .expect("a slab of a capped layer");
+        layer_census[l] += job.censusing;
+        layer_census_cpu = layer_census_cpu.zip(job.on_cpu).map(|(mut sums, cpu)| {
+            sums[l] += cpu;
+            sums
+        });
     }
     let census = merge_census(parts.into_iter().map(|(_, (p, _, _))| p), query.n_max());
     Run {
@@ -634,7 +743,69 @@ fn census(
         plan: planned,
         walk: jobs.saturating_sub(cell_census),
         cell_census,
+        layer_census,
+        layer_census_cpu,
         wall: began.elapsed(),
+    }
+}
+
+/// One census job's layer and its times censusing its sampled cells: wall time, and the CPU time
+/// its thread spent on them where the platform gives it.
+struct JobTimes {
+    layer: Layer,
+    censusing: Duration,
+    on_cpu: Option<Duration>,
+}
+
+/// A clock of the CPU time of the thread that opened it, which a census job opens on its own
+/// thread (R13.T1).
+///
+/// On Linux it reads the first field of `/proc/thread-self/schedstat`, the thread's time on a CPU
+/// in nanoseconds (the kernel's `Documentation/scheduler/sched-stats.rst`), through one open file
+/// and one buffer, read again from the start at each reading.
+#[cfg(target_os = "linux")]
+struct ThreadCpu {
+    file: std::fs::File,
+    text: String,
+}
+
+#[cfg(target_os = "linux")]
+impl ThreadCpu {
+    /// The calling thread's clock, or `None` where its file cannot be opened.
+    fn open() -> Option<Self> {
+        let file = std::fs::File::open("/proc/thread-self/schedstat").ok()?;
+        Some(Self {
+            file,
+            text: String::with_capacity(64),
+        })
+    }
+
+    /// The thread's CPU time so far, or `None` where its file cannot be read.
+    fn now(&mut self) -> Option<Duration> {
+        use std::io::{Read, Seek, SeekFrom};
+        self.file.seek(SeekFrom::Start(0)).ok()?;
+        self.text.clear();
+        self.file.read_to_string(&mut self.text).ok()?;
+        let nanos = self.text.split_whitespace().next()?.parse::<u64>().ok()?;
+        Some(Duration::from_nanos(nanos))
+    }
+}
+
+/// A clock of a thread's CPU time, which no platform but Linux gives the benches: none is ever
+/// opened, and they report their jobs' wall time alone.
+#[cfg(not(target_os = "linux"))]
+enum ThreadCpu {}
+
+#[cfg(not(target_os = "linux"))]
+impl ThreadCpu {
+    /// Never a clock on this platform.
+    fn open() -> Option<Self> {
+        None
+    }
+
+    /// Unreachable, since no clock is ever opened.
+    fn now(&mut self) -> Option<Duration> {
+        match *self {}
     }
 }
 
@@ -1087,6 +1258,316 @@ fn census_nuclear_disc(c: &mut Criterion) {
             cpu
         });
     });
+    group.finish();
+}
+
+/// The synthetic ceilings of [`census_near_sun_ceiling`], V: the owner's 4.5, and 5.0, RM3's
+/// interim (rendering plan R13, Design note 4).
+const CEILINGS_V: [f64; 2] = [4.5, 5.0];
+
+/// The layers with a real boundary at the ceiling (R13 Design note 3): A, B and the brown dwarfs
+/// keep the request's caps.
+const BOUNDED_LAYERS: [Layer; 3] = [Layer::C, Layer::D, Layer::E];
+
+/// The feasibility study's estimate of the real tier near the Sun, low and high, CPU-s
+/// (`feasibility-hybrid-sky.md` §2.2, at the eye's cut with spherical boundaries; R13 Design
+/// notes 4 and 16): 4.5–5.8 × 10³ at V<sub>P</sub> 4.5 and 1.0–1.25 × 10⁴ at 5.0, and 1.2–1.3
+/// times that at the camera's 10.06.
+///
+/// # Panics
+///
+/// Unless `ceiling_v` is one of [`CEILINGS_V`], the two the study estimates.
+fn ceiling_estimate(ceiling_v: f64, request: CeilingRequest) -> (f64, f64) {
+    let at = |v: f64| (ceiling_v - v).abs() < 1e-9;
+    let (lo, hi) = if at(4.5) {
+        (4.5e3, 5.8e3)
+    } else if at(5.0) {
+        (1.0e4, 1.25e4)
+    } else {
+        panic!("the feasibility study estimates the real tier at V_P 4.5 and 5.0, not {ceiling_v}")
+    };
+    match request {
+        CeilingRequest::Eye => (lo, hi),
+        CeilingRequest::Camera => (1.2 * lo, 1.3 * hi),
+    }
+}
+
+/// A request of [`census_near_sun_ceiling`].
+#[derive(Debug, Clone, Copy)]
+enum CeilingRequest {
+    /// The eye alone at its own cut (R06.T9.d's `eye_cut`), its caps by the eye's visibility.
+    Eye,
+    /// A camera at 10.06 with the eye beside it at the eye's cut, its caps uniform at 10.06.
+    Camera,
+}
+
+impl CeilingRequest {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Eye => "eye",
+            Self::Camera => "camera",
+        }
+    }
+}
+
+/// The query of `request` near the Sun as the server forms it (R06.T11.d): the request's
+/// illumination, the eye's cut that R06.T9.d's pre-pass computes there with it, and for the eye
+/// alone the eye's visibility at that cut.
+fn ceiling_query(sky: &Sky, request: CeilingRequest) -> SkyQuery {
+    let at = GalacticPosition::from_light_years(SUN_LY).expect("in the root cube");
+    let observer = Observer::new(at, UniverseTime::EPOCH).expect("the epoch is on the clock");
+    let eye = EyeObserver::default();
+    let mut ctx = job_context(sky);
+    let light = Arc::new(Illumination::march(&sky.galaxy, &mut ctx, &observer));
+    let cut = eye_cut(&sky.galaxy, &mut ctx, &observer, &eye, Some(&light));
+    match request {
+        CeilingRequest::Eye => {
+            let visibility =
+                eye_visibility(&sky.galaxy, &mut ctx, &observer, &eye, cut, Some(&light));
+            SkyQuery::builder(observer, cut)
+                .eye(eye)
+                .illumination(light)
+                .eye_visibility(visibility)
+                .build()
+                .expect("an eye-only request at its cut")
+        }
+        CeilingRequest::Camera => SkyQuery::builder(observer, Magnitudes::new(CAMERA_CUT_V))
+            .eye(eye)
+            .eye_cut(cut)
+            .illumination(light)
+            .build()
+            .expect("a camera's request with the eye"),
+    }
+}
+
+/// R13 Design note 3's real boundary, built here until R13.T2.a's `real_boundary`: for C, D and
+/// E each ray of the cap at the ceiling, `at_ceiling`, held within the same ray of the cap at the
+/// request's cut, `at_cut` ([`RayRadii::lesser`](hyperion_sim::sky::caps::RayRadii::lesser));
+/// A, B and the brown dwarfs at the cut's caps.
+fn real_boundary_rule(at_ceiling: &[LayerCap], at_cut: Vec<LayerCap>) -> Vec<LayerCap> {
+    at_cut
+        .into_iter()
+        .map(|cut| {
+            if !BOUNDED_LAYERS.contains(&cut.layer()) {
+                return cut;
+            }
+            let high = at_ceiling
+                .iter()
+                .find(|c| c.layer() == cut.layer())
+                .expect("a cap at the ceiling for every layer");
+            let (high, low) = (
+                high.rays().expect("caps by ray"),
+                cut.rays().expect("caps by ray"),
+            );
+            LayerCap::forced_by_ray(cut.layer(), high.lesser(low))
+        })
+        .collect()
+}
+
+/// The census of the real tier of `query` at the ceiling `ceiling_v`, as the server will run it:
+/// the caps at the request's cut (by the eye's visibility where the query asks it) and at the
+/// ceiling, both counted, the real boundary of [`real_boundary_rule`], its plan and the census.
+/// The run's plan time holds both counts. Gives the run, the plan whose caps it censused to and the
+/// count at the ceiling, whose caps are `layer_caps`' there.
+fn ceiling_census(
+    sky: &Sky,
+    query: &SkyQuery,
+    ceiling_v: f64,
+    workers: usize,
+    sample: u64,
+) -> (Run, CensusPlan, CapCount) {
+    let began = Instant::now();
+    let mut noise = NoiseCache::with_capacity(NOISE_SLOTS);
+    let observer = query.observer();
+    let (galaxy, tables, envelope) = (&sky.galaxy, &sky.tables, &sky.envelope);
+    let at_cut = match query.eye_visibility() {
+        Some(seen) => {
+            layer_caps_by_visibility(galaxy, tables, envelope, observer, seen, &mut noise)
+        }
+        None => layer_caps(galaxy, tables, envelope, observer, query.cut(), &mut noise),
+    };
+    let ceiling = Magnitudes::new(ceiling_v);
+    let resolution = CapResolution::STANDARD;
+    let count = CapCount::measure(
+        galaxy, tables, envelope, observer, ceiling, resolution, &mut noise,
+    );
+    let plan = census_plan_of(query, real_boundary_rule(&count.caps(), at_cut));
+    let planned = began.elapsed();
+    let run = census_of_plan(
+        sky,
+        query,
+        &plan,
+        &NoSkyCellCache,
+        (workers, sample),
+        (began, planned),
+        CpuTime::Measured,
+    );
+    (run, plan, count)
+}
+
+/// The `q` quantile of a cap's rays' radii, ly.
+fn ray_quantile(cap: &LayerCap, q: f64) -> f64 {
+    let mut radii = cap.rays().expect("caps by ray").radii_ly().to_vec();
+    radii.sort_by(f64::total_cmp);
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "an index into a few thousand radii"
+    )]
+    let at = ((radii.len() - 1) as f64 * q).round() as usize;
+    radii[at]
+}
+
+/// Prints, the first time `printed` is unset, [`report_once`]'s tallies of `run`, then for C, D
+/// and E the real boundary of `caps`, the systems the count at the ceiling, `count`, puts within
+/// 500 ly and within the boundary (the galaxy's local density, and the census's work), the stars
+/// within the boundary towards their band texel (those R13.T2.a lists, by T8.i's rule at every
+/// reply) and each layer's census time, scaled by the sample; then the real tier's CPU time
+/// against the feasibility study's estimate, and whether it passes twice that, which R13 sends
+/// back to the owner before T2 builds.
+fn report_ceiling_once(
+    printed: &AtomicBool,
+    name: &str,
+    (request, ceiling_v): (CeilingRequest, f64),
+    query: &SkyQuery,
+    (caps, count): (&[LayerCap], &CapCount),
+    run: &Run,
+) {
+    if printed.load(Ordering::Relaxed) {
+        return;
+    }
+    report_once(printed, name, run, None);
+    let scale = run.sample;
+    let spec = query.band_spec();
+    let origin = query.observer().position();
+    let mut within = [0_u64; CAPPED_LAYERS.len()];
+    for star in run.census.listed().iter().chain(run.census.overflow()) {
+        let l = CAPPED_LAYERS
+            .iter()
+            .position(|&x| x == star.layer())
+            .expect("a star of a capped layer");
+        let d = origin.displacement_to(star.apparent()).metres();
+        let radius = spec
+            .texel_of(d)
+            .map_or(caps[l].radius(), |(face, row, column)| {
+                caps[l].radius_toward(spec.texel_direction(face, row, column))
+            });
+        if star.distance().value() < radius.value() {
+            within[l] += 1;
+        }
+    }
+    #[expect(clippy::cast_precision_loss, reason = "a sample under 2⁵³")]
+    let scaled = |t: Duration| t.as_secs_f64() * scale as f64;
+    eprintln!(
+        "  the real boundary at V_P {ceiling_v:.1}, the cut V {:.3} ({}):",
+        query.cut().value(),
+        match request {
+            CeilingRequest::Eye => "the eye alone, the cut's caps by its visibility",
+            CeilingRequest::Camera => "a camera with the eye, the cut's caps uniform",
+        }
+    );
+    // Each layer's census by its jobs' wall time and, where known, by their threads' CPU time.
+    let on_cpu = |l: usize| run.layer_census_cpu.map(|cpu| scaled(cpu[l]));
+    let (mut bounded, mut bounded_cpu) = (0.0, 0.0);
+    for (l, (&layer, cap)) in CAPPED_LAYERS.iter().zip(caps).enumerate() {
+        let census = scaled(run.layer_census[l]);
+        let cpu = on_cpu(l).map_or_else(|| "unknown".to_owned(), |c| format!("{c:.1}"));
+        let tally = run.census.tallies().layer(layer);
+        if BOUNDED_LAYERS.contains(&layer) {
+            bounded += census;
+            bounded_cpu += on_cpu(l).unwrap_or(f64::NAN);
+            eprintln!(
+                "    {layer:?}: R(u) by ray median {:.0} ({:.0}–{:.0}), largest {:.0} ly; systems \
+                 within 500 ly {:.4e}, within R(u) {:.4e} (the count at V_P); {} generated, {} \
+                 accepted, {} within R(u) towards their texel; census {census:.1} CPU-s by the \
+                 jobs' wall time, {cpu} by their threads' CPU time",
+                ray_quantile(cap, 0.5),
+                ray_quantile(cap, 0.1),
+                ray_quantile(cap, 0.9),
+                cap.radius().value(),
+                count.systems_within_toward(layer, |_| LightYears::new(500.0)),
+                count.systems_within(cap),
+                tally.generated() * scale,
+                tally.accepted() * scale,
+                within[l] * scale,
+            );
+        } else {
+            eprintln!(
+                "    {layer:?}: the cut's cap, largest {:.0} ly; {} accepted; census {census:.1} \
+                 CPU-s by the jobs' wall time, {cpu} by their threads' CPU time",
+                cap.radius().value(),
+                tally.accepted() * scale,
+            );
+        }
+    }
+    let rest = (run.plan + run.walk).as_secs_f64();
+    let by_wall = run.cpu().as_secs_f64();
+    let by_cpu = run
+        .layer_census_cpu
+        .map(|cpu| rest + cpu.iter().map(|&c| scaled(c)).sum::<f64>());
+    // The guard reads the threads' CPU time where it is known: on a loaded machine the jobs' wall
+    // time holds their waits for a core.
+    let whole = by_cpu.unwrap_or(by_wall);
+    let (lo, hi) = ceiling_estimate(ceiling_v, request);
+    eprintln!(
+        "  the real tier: {whole:.0} CPU-s by the threads' CPU time where known ({by_wall:.0} by \
+         the jobs' wall time; {:.1} s of it the two caps' counts and the plan; the census of C to \
+         E {bounded_cpu:.0} by CPU time, {bounded:.0} by wall time), against the feasibility \
+         study's {lo:.0}–{hi:.0}: {:.2}–{:.2} times it; more than twice it: {}",
+        run.plan.as_secs_f64(),
+        whole / hi,
+        whole / lo,
+        if whole > 2.0 * hi {
+            "YES, to the owner before R13.T2 builds"
+        } else if whole > 2.0 * lo {
+            "twice its low end only"
+        } else {
+            "no"
+        },
+    );
+}
+
+/// R13.T1's sampled bench of the hybrid sky's real tier near the Sun (rendering plan R13, Design
+/// notes 3, 4 and 16): at V<sub>P</sub> 4.5 and 5.0, for the eye alone at its own cut and a camera
+/// at 10.06 with the eye beside it, the census of every layer with C to E to their real boundary
+/// ([`real_boundary_rule`]), and its CPU time against the feasibility study's estimate; on the
+/// fixture (`census_near_sun_ceiling/eye_4.5` and so on) and on the server's galaxy
+/// (`census_near_sun_ceiling/served_eye_4.5` and so on; [`SERVED_SEED`]).
+fn census_near_sun_ceiling(c: &mut Criterion) {
+    let workers = workers();
+    let sample = sample();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    let galaxies: [(&str, SkyOf); 2] = [("", sky), ("served_", served_sky)];
+    for (which, sky_of) in galaxies {
+        for request in [CeilingRequest::Eye, CeilingRequest::Camera] {
+            let query: OnceCell<SkyQuery> = OnceCell::new();
+            for ceiling_v in CEILINGS_V {
+                let name = format!(
+                    "census_near_sun_ceiling/{which}{}_{ceiling_v:.1}",
+                    request.name()
+                );
+                let printed = AtomicBool::new(false);
+                group.bench_function(&name, |b| {
+                    let sky = sky_of();
+                    let query = query.get_or_init(|| ceiling_query(sky, request));
+                    b.iter_custom(|iters| {
+                        let mut cpu = Duration::ZERO;
+                        for _ in 0..iters {
+                            let (run, plan, count) =
+                                ceiling_census(sky, black_box(query), ceiling_v, workers, sample);
+                            let what = (request, ceiling_v);
+                            let bound = (plan.caps(), &count);
+                            report_ceiling_once(&printed, &name, what, query, bound, &run);
+                            cpu += run.cpu();
+                        }
+                        cpu
+                    });
+                });
+            }
+        }
+    }
     group.finish();
 }
 
@@ -1886,6 +2367,7 @@ criterion_group!(
     census_near_sun_cold,
     census_near_sun,
     census_nuclear_disc,
+    census_near_sun_ceiling,
     star_bound,
     illumination,
     caps_by_ray_near_sun,

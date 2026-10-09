@@ -76,6 +76,12 @@ threads-required = 8
 filter = "package(hyperion-sim) & (binary(=sky_census) | binary(=sky_realised))"
 threads-required = 8
 
+# R13.T1's record of the hybrid sky's real boundary measures its six points on six threads of its
+# own, one a point, each counting the caps at seven cuts and recounting 3,072 rays at ten.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(=sky_hybrid) & test(=the_hybrid_boundary_is_recorded)"
+threads-required = 6
+
 [profile.slow]
 # Report every failure of a 20-minute run, not only the first.
 fail-fast = false

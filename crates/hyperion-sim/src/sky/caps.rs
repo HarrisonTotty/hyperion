@@ -477,6 +477,65 @@ impl RayRadii {
         )
     }
 
+    /// Each ray's radius the lesser of its own and `other`'s, on the same lattice.
+    ///
+    /// It is the hybrid sky's rule for its real boundary (rendering plan R13, Design note 3): each
+    /// ray of a layer's cap at the synthetic ceiling, held within the same ray of its cap at the
+    /// request's cut, so that the boundary is never beyond the cut's own cap on any ray. Towards
+    /// each direction the result is complete to no farther than either: every ray within the cone
+    /// is at most both.
+    ///
+    /// # Panics
+    ///
+    /// Unless `other`'s radii are on a lattice of as many rays, a lattice being a function of its
+    /// count.
+    ///
+    /// # Examples
+    ///
+    /// The caps near the Sun at a ceiling of V 4.5, held within the caps at the eye's cut
+    /// (`no_run`: the tables take a minute or more to build):
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    /// use hyperion_sim::observe::Observer;
+    /// use hyperion_sim::sky::caps::layer_caps;
+    /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+    /// use hyperion_sim::sky::luminosity::LuminosityTables;
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(7));
+    /// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+    /// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+    /// let mut cache = NoiseCache::with_capacity(1 << 16);
+    /// let mut caps = |cut| layer_caps(&galaxy, &tables, &envelope, &observer, Magnitudes::new(cut), &mut cache);
+    /// let (ceiling, eye) = (caps(4.5), caps(7.95));
+    /// let (high, cut) = (ceiling[2].rays().ok_or("by ray")?, eye[2].rays().ok_or("by ray")?);
+    /// let real = high.lesser(cut);
+    /// assert!(real.radii_ly().iter().zip(cut.radii_ly()).all(|(r, c)| r <= c));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn lesser(&self, other: &Self) -> Self {
+        assert_eq!(
+            self.radii.len(),
+            other.radii.len(),
+            "the lesser of two radii a ray is taken on one lattice"
+        );
+        Self::new(
+            Arc::clone(&self.lattice),
+            self.radii
+                .iter()
+                .zip(other.radii.iter())
+                .map(|(&a, &b)| a.min(b))
+                .collect(),
+        )
+    }
+
     /// Whether every ray's radius reaches `edge_ly` or beyond.
     ///
     /// The radii held within it are then the edge in every direction.
@@ -627,10 +686,11 @@ impl LayerCap {
         }
     }
 
-    /// A cap of `rays`' radii for `layer`, with nothing stated beyond them: a test's.
-    #[cfg(test)]
+    /// A cap of `rays`' radii for `layer`, with nothing stated beyond them: a test's, or a bench's
+    /// census to a boundary the caps' count does not give, such as the hybrid sky's real boundary
+    /// before its rule is built (rendering plan R13, R13.T1; [`RayRadii::lesser`]).
     #[must_use]
-    pub(crate) fn forced_by_ray(layer: Layer, rays: RayRadii) -> Self {
+    pub fn forced_by_ray(layer: Layer, rays: RayRadii) -> Self {
         let radius = rays.largest();
         Self {
             layer,
@@ -1063,6 +1123,22 @@ fn rule_bounds(
         .collect()
 }
 
+/// A boundary's radius towards a ray of a [`CapCount`], ly.
+///
+/// # Panics
+///
+/// If it is negative or not finite: a NaN would drop every interval of the ray from the count
+/// unseen, and a negative radius means no boundary.
+#[must_use]
+fn boundary_ly(radius: LightYears) -> f64 {
+    let r = radius.value();
+    assert!(
+        r.is_finite() && r >= 0.0,
+        "a boundary's radius is finite and not negative, not {r} ly"
+    );
+    r
+}
+
 /// The share of the interval `[r0, r1]`, even in ln r, that lies beyond `r`.
 #[must_use]
 fn share_beyond(r0: f64, r1: f64, r: f64) -> f64 {
@@ -1292,18 +1368,20 @@ impl CapCount {
     }
 
     /// The sum over the count's rays and intervals of `values` (its `stars` or `systems`) in
-    /// `cap`'s layer, each interval weighted by `weight(r0, r1, ray's radius)`.
+    /// `layer`, each interval weighted by `weight(r0, r1, radius)`, with `radius` the radius
+    /// `radius_toward` gives towards the ray, ly.
     #[must_use]
     fn weighted(
         &self,
         values: &[f64],
-        cap: &LayerCap,
+        layer: Layer,
+        radius_toward: impl Fn(UnitVector) -> LightYears,
         weight: impl Fn(f64, f64, f64) -> f64,
     ) -> f64 {
-        let l = Self::layer_index(cap.layer());
+        let l = Self::layer_index(layer);
         let mut sum = 0.0;
         for (ray, &direction) in self.lattice.directions.iter().enumerate() {
-            let radius = cap.radius_toward(direction).value();
+            let radius = boundary_ly(radius_toward(direction));
             let per_ln_r = self.ray_values(values, l, ray);
             for i in 0..self.radii.len() - 1 {
                 let share = weight(self.radii[i], self.radii[i + 1], radius);
@@ -1317,16 +1395,102 @@ impl CapCount {
 
     /// The expected count of `cap`'s layer's stars brighter than the cut beyond its radius towards
     /// each of the count's rays ([`LayerCap::radius_toward`]).
+    ///
+    /// # Panics
+    ///
+    /// If the cap's layer is not one of [`CAPPED_LAYERS`], or its radius is negative or not
+    /// finite, which only a cap forced so could be.
     #[must_use]
     pub fn stars_beyond(&self, cap: &LayerCap) -> f64 {
-        self.weighted(&self.stars, cap, share_beyond)
+        self.stars_beyond_toward(cap.layer(), |u| cap.radius_toward(u))
+    }
+
+    /// The expected count of `layer`'s stars brighter than the cut beyond the radius
+    /// `radius_toward` gives towards each of the count's rays.
+    ///
+    /// It is [`stars_beyond`](Self::stars_beyond) for a boundary that no [`LayerCap`] holds, such
+    /// as the radius towards each ray's band texel or a cone wider than the lattice's (rendering
+    /// plan R13, R13.T1). `radius_toward` is called once a ray, in the lattice's order, with the
+    /// ray's direction from the observer on the galactic axes, and gives the boundary's radius
+    /// there, at least zero. A radius at or below the count's nearest distance, 1 ly, counts every
+    /// star of the ray, out to the layer's rule bound.
+    ///
+    /// # Panics
+    ///
+    /// If `layer` is not one of [`CAPPED_LAYERS`], or a radius is negative or not finite.
+    ///
+    /// # Examples
+    ///
+    /// The stars near the Sun brighter than V 6.5 beyond the caps at a ceiling of V 4.5, and those
+    /// of the whole sky (`no_run`: the tables take a minute or more to build):
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::observe::Observer;
+    /// use hyperion_sim::sky::caps::{CapCount, CapResolution};
+    /// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+    /// use hyperion_sim::sky::luminosity::LuminosityTables;
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::{LightYears, Magnitudes};
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(7));
+    /// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+    /// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+    /// let mut cache = NoiseCache::with_capacity(1 << 16);
+    /// let mut count = |v| {
+    ///     let cut = Magnitudes::new(v);
+    ///     CapCount::measure(&galaxy, &tables, &envelope, &observer, cut, CapResolution::STANDARD, &mut cache)
+    /// };
+    /// let (ceiling, faint) = (count(4.5).caps(), count(6.5));
+    /// let e = &ceiling[4];
+    /// let beyond = faint.stars_beyond_toward(Layer::E, |u| e.radius_toward(u));
+    /// let whole = faint.stars_beyond_toward(Layer::E, |_| LightYears::ZERO);
+    /// assert!(beyond < whole);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn stars_beyond_toward(
+        &self,
+        layer: Layer,
+        radius_toward: impl Fn(UnitVector) -> LightYears,
+    ) -> f64 {
+        self.weighted(&self.stars, layer, radius_toward, share_beyond)
     }
 
     /// The expected count of `cap`'s layer's systems within its radius towards each ray: the
     /// systems its census opens, the cells' edges aside.
+    ///
+    /// # Panics
+    ///
+    /// If the cap's layer is not one of [`CAPPED_LAYERS`], or its radius is negative or not
+    /// finite, which only a cap forced so could be.
     #[must_use]
     pub fn systems_within(&self, cap: &LayerCap) -> f64 {
-        self.weighted(&self.systems, cap, |r0, r1, r| {
+        self.systems_within_toward(cap.layer(), |u| cap.radius_toward(u))
+    }
+
+    /// The expected count of `layer`'s systems within the radius `radius_toward` gives towards each
+    /// of the count's rays.
+    ///
+    /// It is [`systems_within`](Self::systems_within) for a boundary that no [`LayerCap`] holds
+    /// (R13.T1), whose radius `radius_toward` gives as for
+    /// [`stars_beyond_toward`](Self::stars_beyond_toward).
+    ///
+    /// # Panics
+    ///
+    /// If `layer` is not one of [`CAPPED_LAYERS`], or a radius is negative or not finite.
+    #[must_use]
+    pub fn systems_within_toward(
+        &self,
+        layer: Layer,
+        radius_toward: impl Fn(UnitVector) -> LightYears,
+    ) -> f64 {
+        self.weighted(&self.systems, layer, radius_toward, |r0, r1, r| {
             1.0 - share_beyond(r0, r1, r)
         })
     }
@@ -1337,16 +1501,43 @@ impl CapCount {
     ///
     /// # Panics
     ///
-    /// If the two caps are of different layers.
+    /// If the two caps are of different layers, their layer is not one of [`CAPPED_LAYERS`], or a
+    /// radius is negative or not finite, which only a cap forced so could be.
     #[must_use]
     pub fn stars_within_and_beyond(&self, inside: &LayerCap, outside: &LayerCap) -> f64 {
         assert_eq!(inside.layer(), outside.layer(), "two caps of one layer");
-        let l = Self::layer_index(inside.layer());
+        self.stars_within_and_beyond_toward(
+            inside.layer(),
+            |u| inside.radius_toward(u),
+            |u| outside.radius_toward(u),
+        )
+    }
+
+    /// The expected count of `layer`'s stars brighter than the cut that lie within the radius
+    /// `inside` gives towards each of the count's rays and beyond the one `outside` gives.
+    ///
+    /// It is [`stars_within_and_beyond`](Self::stars_within_and_beyond) for boundaries that no
+    /// [`LayerCap`] holds, whose radii `inside` and `outside` give as for
+    /// [`stars_beyond_toward`](Self::stars_beyond_toward). R13.T1 counts T7.b's gap with it: the
+    /// stars within the radius towards each ray's band texel and beyond the one towards the ray
+    /// itself (`decision-r06-t8i-listing.md` §2, "cheap measurement").
+    ///
+    /// # Panics
+    ///
+    /// If `layer` is not one of [`CAPPED_LAYERS`], or a radius is negative or not finite.
+    #[must_use]
+    pub fn stars_within_and_beyond_toward(
+        &self,
+        layer: Layer,
+        inside: impl Fn(UnitVector) -> LightYears,
+        outside: impl Fn(UnitVector) -> LightYears,
+    ) -> f64 {
+        let l = Self::layer_index(layer);
         let mut sum = 0.0;
         for (ray, &direction) in self.lattice.directions.iter().enumerate() {
             let (a, b) = (
-                inside.radius_toward(direction).value(),
-                outside.radius_toward(direction).value(),
+                boundary_ly(inside(direction)),
+                boundary_ly(outside(direction)),
             );
             let per_ln_r = self.ray_values(&self.stars, l, ray);
             for i in 0..self.radii.len() - 1 {
@@ -2459,6 +2650,69 @@ mod tests {
         assert!(e_share <= 0.35, "E: {e_share}");
     }
 
+    /// The counts towards a boundary no cap holds (R13.T1) are those of a cap that holds it, near
+    /// the Sun at 7.95 on a coarse count (192 rays, 12 steps a decade): each layer's sphere held
+    /// within its rays, as a closure, counts what the cap of its rays held within the sphere
+    /// counts, bit for bit, stars and systems; and the stars beyond the rays less those beyond the
+    /// sphere are those within the sphere and beyond the rays less the reverse, to rounding.
+    #[test]
+    fn counts_towards_a_boundary_are_those_of_the_cap_that_holds_it() {
+        let count = count_at(
+            [0.0, 26_000.0, 68.0],
+            CapResolution::new(192, 12).expect("non-zero"),
+        );
+        let (caps, spheres) = (count.caps(), count.spheres());
+        for (cap, sphere) in caps.iter().zip(&spheres) {
+            let layer = cap.layer();
+            let held = LayerCap::forced_by_ray(
+                layer,
+                cap.rays()
+                    .expect("one radius a ray")
+                    .within(sphere.radius().value()),
+            );
+            let toward_held =
+                |u| LightYears::new(sphere.radius().value().min(cap.radius_toward(u).value()));
+            assert_eq!(
+                bits(count.stars_beyond_toward(layer, toward_held)),
+                bits(count.stars_beyond(&held)),
+                "{layer:?}"
+            );
+            assert_eq!(
+                bits(count.systems_within_toward(layer, toward_held)),
+                bits(count.systems_within(&held)),
+                "{layer:?}"
+            );
+            let (drop, gain) = (
+                count.stars_within_and_beyond(sphere, cap),
+                count.stars_within_and_beyond(cap, sphere),
+            );
+            let (rays, round) = (count.stars_beyond(cap), count.stars_beyond(sphere));
+            assert!(
+                ((rays - round) - (drop - gain)).abs() <= 1e-9 * (rays + round + drop + gain),
+                "{layer:?}: {rays} − {round} against {drop} − {gain}"
+            );
+        }
+    }
+
+    /// A boundary's radius may be zero, the whole ray.
+    #[test]
+    fn a_zero_boundary_is_taken() {
+        assert_eq!(bits(boundary_ly(LightYears::ZERO)), bits(0.0));
+    }
+
+    /// A boundary's radius may not be negative or a NaN.
+    #[test]
+    #[should_panic(expected = "a boundary's radius is finite and not negative, not -1 ly")]
+    fn a_negative_boundary_is_refused() {
+        let _ = boundary_ly(LightYears::new(-1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a boundary's radius is finite and not negative, not NaN ly")]
+    fn a_nan_boundary_is_refused() {
+        let _ = boundary_ly(LightYears::new(f64::NAN));
+    }
+
     /// A context near the Sun for the eye's pre-pass and the band: the fixture's tables.
     fn sky_context() -> crate::sky::census::SkyContext<'static> {
         crate::sky::census::SkyContext {
@@ -2666,9 +2920,10 @@ mod tests {
         assert!(ours <= 0.8 * theirs, "{ours} against {theirs}");
     }
 
-    /// `caps_converge_in_rays`' six points (`tests/sky_caps.rs`), ly: near the Sun, the nuclear
-    /// disc, the solar circle a quarter turn round and on the far side, the inner disc, and
-    /// 2,000 ly above the Sun.
+    /// `caps_converge_in_rays`' six points, ly: near the Sun, the nuclear disc, the solar circle a
+    /// quarter turn round and on the far side, the inner disc, and 2,000 ly above the Sun. A copy
+    /// of `tests/common/sky.rs`' `CAPS_POINTS`, which the integration tests share: change both
+    /// together.
     const CONVERGENCE_POINTS: [[f64; 3]; 6] = [
         [0.0, 26_000.0, 68.0],
         [0.0, 150.0, 0.0],
@@ -3122,6 +3377,52 @@ mod tests {
             assert!(scanned > 0.0, "{u:?} lies in no cone");
             assert_eq!(bits(rays.toward(u).value()), bits(scanned), "{u:?}");
         }
+    }
+
+    /// The lesser of two radii a ray (R13.T1) is each ray's least, bit for bit, on the same
+    /// lattice, and towards 10⁴ random directions its radius is the largest of the cones' least
+    /// radii, as a scan of every ray finds it, never beyond either's.
+    #[test]
+    fn the_lesser_of_two_radii_a_ray_is_each_rays_least() {
+        let a = random_radii(0x7b_0007);
+        let b = RayRadii::new(
+            Arc::clone(&a.lattice),
+            uniforms(0x7b_0008)
+                .take(CAP_RAYS)
+                .map(|u| 10.0 * math::exp10(3.0 * u))
+                .collect(),
+        );
+        let least = a.lesser(&b);
+        for ((&l, &x), &y) in least.radii_ly().iter().zip(a.radii_ly()).zip(b.radii_ly()) {
+            assert_eq!(bits(l), bits(x.min(y)));
+        }
+        assert_eq!(least, b.lesser(&a));
+        let lattice = a.lattice();
+        let cos = math::cos(lattice.spacing().value());
+        let mut uniforms = uniforms(0x7b_0009);
+        for _ in 0..10_000 {
+            let u = UnitVector::from_components(std::array::from_fn(|_| {
+                2.0 * uniforms.next().expect("endless") - 1.0
+            }))
+            .expect("a direction");
+            let scanned = lattice
+                .directions()
+                .iter()
+                .zip(a.radii_ly().iter().zip(b.radii_ly()))
+                .filter(|(d, _)| d.dot(&u) >= cos)
+                .map(|(_, (&x, &y))| x.min(y))
+                .fold(0.0, f64::max);
+            let toward = least.toward(u).value();
+            assert_eq!(bits(toward), bits(scanned), "{u:?}");
+            assert!(toward <= a.toward(u).value().min(b.toward(u).value()));
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "the lesser of two radii a ray is taken on one lattice")]
+    fn the_lesser_of_radii_on_two_lattices_is_refused() {
+        let few = RayRadii::new(Arc::new(CapLattice::new(12)), vec![100.0; 12]);
+        let _ = random_radii(0x7b_000a).lesser(&few);
     }
 
     /// A ball meets the census's region exactly when, by a scan of every ray in angles, it meets a

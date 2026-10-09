@@ -30,7 +30,7 @@ use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
 use hyperion_sim::id::Layer;
 use hyperion_sim::observe::Observer;
-use hyperion_sim::sky::caps::CAPPED_LAYERS;
+use hyperion_sim::sky::caps::{CAPPED_LAYERS, CapResolution, RADIAL_STEPS_PER_DECADE};
 use hyperion_sim::sky::census::{
     Bound, CellOffsets, CensusTallies, NoSkyCellCache, SkyCensus, SkyContext, SkyQuery, SkyStar,
     census_cell, census_plan, census_record, merge_census,
@@ -62,6 +62,28 @@ pub const SUN_LY: [f64; 3] = [0.0, 26_000.0, 68.0];
 
 /// The place in the nuclear disc the identity tests stand, ly: 150 ly from Sgr A* in the plane.
 pub const NUCLEAR_DISC_LY: [f64; 3] = [0.0, 150.0, 0.0];
+
+/// The points the caps' slow tests stand at, ly, with their names (R06.T7.b's
+/// `caps_converge_in_rays` and R13.T1's `the_hybrid_boundary_is_recorded`): near the Sun, the
+/// nuclear disc, the solar circle a quarter turn round and on the far side, the inner disc, and
+/// 2,000 ly above the Sun. `sky::caps`' slow safety test with the illumination (R06.T7.c) holds a
+/// copy, `CONVERGENCE_POINTS`: change both together.
+pub const CAPS_POINTS: [(&str, [f64; 3]); 6] = [
+    ("near the Sun", SUN_LY),
+    ("nuclear disc", NUCLEAR_DISC_LY),
+    ("solar circle, a quarter turn", [26_000.0, 0.0, 68.0]),
+    ("solar circle, far side", [-18_385.0, -18_385.0, 68.0]),
+    ("inner disc", [0.0, 8_000.0, 0.0]),
+    ("2,000 ly above the Sun", [0.0, 26_000.0, 2_000.0]),
+];
+
+/// The caps' recount: 3,072 rays at twice the caps' radial steps, each ray through its own
+/// profile, a finer count independent of the caps' own, towards whose rays the caps' radii are
+/// read as the census reads them (R06.T7.b's `caps_converge_in_rays`).
+#[must_use]
+pub fn caps_recount() -> CapResolution {
+    CapResolution::new(3_072, 2 * RADIAL_STEPS_PER_DECADE).expect("non-zero")
+}
 
 /// One cell's census: its stars and its tallies, as `merge_census` takes them.
 pub type Part = (Vec<SkyStar>, CensusTallies);

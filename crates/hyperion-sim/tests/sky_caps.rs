@@ -11,6 +11,13 @@
 //! visibility at each point's own eye's cut. If it fails, the neighbour widening grows; the gate is
 //! not loosened.
 
+#[expect(
+    dead_code,
+    reason = "the convergence test uses the sky helpers of tests/common alone"
+)]
+mod common;
+
+use common::sky::{CAPS_POINTS, caps_recount};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
@@ -20,8 +27,8 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::{
-    CAPPED_LAYERS, CapResolution, LayerCap, RADIAL_STEPS_PER_DECADE, expected_beyond_caps,
-    expected_beyond_caps_by_visibility, layer_caps, layer_caps_by_visibility,
+    CAPPED_LAYERS, LayerCap, expected_beyond_caps, expected_beyond_caps_by_visibility, layer_caps,
+    layer_caps_by_visibility,
 };
 use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
@@ -29,18 +36,6 @@ use hyperion_sim::sky::limits::{eye_cut, eye_visibility};
 use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Magnitudes;
-
-/// The points: near the Sun, the nuclear disc, the solar circle a quarter turn round and on the
-/// far side, the inner disc, and 2,000 ly above the Sun. `sky::caps`' slow safety test with the
-/// illumination (R06.T7.c) holds a copy, `CONVERGENCE_POINTS`: change both together.
-const POINTS: [[f64; 3]; 6] = [
-    [0.0, 26_000.0, 68.0],
-    [0.0, 150.0, 0.0],
-    [26_000.0, 0.0, 68.0],
-    [-18_385.0, -18_385.0, 68.0],
-    [0.0, 8_000.0, 0.0],
-    [0.0, 26_000.0, 2_000.0],
-];
 
 /// The median of a cap's rays' radii, ly.
 fn median_ray(cap: &LayerCap) -> f64 {
@@ -81,10 +76,10 @@ fn caps_converge_in_rays() {
     let tables = LuminosityTables::build(&galaxy);
     let envelope = BrightnessEnvelope::build(&galaxy);
     let offsets = CellOffsets::build(&galaxy);
-    let fine = CapResolution::new(3_072, 2 * RADIAL_STEPS_PER_DECADE).expect("non-zero");
+    let fine = caps_recount();
     let eye = EyeObserver::default();
     let mut failures = Vec::new();
-    for point in POINTS {
+    for (_, point) in CAPS_POINTS {
         let observer = Observer::new(
             GalacticPosition::from_light_years(point).expect("in the cube"),
             UniverseTime::EPOCH,

@@ -98,6 +98,17 @@ pub struct SyntheticTally { /* per layer: cells, candidates, accepted, kept */ }
 ### In R06's modules
 
 ```rust
+// sky::caps (R13.T1, built; Risks, "Deviations in T1, as built")
+impl RayRadii { pub fn lesser(&self, other: &Self) -> Self; }   // each ray the lesser of the two
+impl LayerCap { pub fn forced_by_ray(layer: Layer, rays: RayRadii) -> Self; }   // now public
+impl CapCount {                          // the counts towards a boundary given ray by ray
+    pub fn stars_beyond_toward(&self, layer: Layer,
+        radius_toward: impl Fn(UnitVector) -> LightYears) -> f64;
+    pub fn systems_within_toward(&self, layer: Layer,
+        radius_toward: impl Fn(UnitVector) -> LightYears) -> f64;
+    pub fn stars_within_and_beyond_toward(&self, layer: Layer,
+        inside: impl Fn(UnitVector) -> LightYears, outside: impl Fn(UnitVector) -> LightYears) -> f64;
+}
 // sky::caps (R13.T2)
 pub fn real_boundary(at_ceiling: &CapCount, caps_at_cut: &[LayerCap]) -> Vec<LayerCap>;
     // C–E: each ray the lesser of the ceiling's cap and the cut's (or spheres, T1's ruling);
@@ -151,7 +162,8 @@ re-keys the synthetic stream, for ensembles of independent realisations.
 ## Consumes
 
 Names are as built at `rendering-and-planets` b6cb51b1 unless marked; R13.T1 re-checks each against
-the tree before building.
+the tree before building. **Re-checked by R13.T1 at cb724aca (2026-10-08) and again at 090d880d
+(2026-10-09):** every name below is in the tree as written, with the corrections marked "(R13.T1)".
 
 - **R06** (`06-the-sky.md`):
   - `sky::luminosity::{LuminosityTables, LuminosityFunction, TablesPlan, MAGNITUDE_STEP,
@@ -160,23 +172,34 @@ EMITTED_AGO_YEARS}`, `get_at`, `age_for`, `count_brighter_than`, `light_fainter_
     correction inside `TablesPlan::assemble`'s finish step.
   - `sky::caps::{CapCount, CapResolution, LayerCap, RayRadii, RayExtinctions, layer_caps_over,
 CAPPED_LAYERS}`: `CapCount::measure` at any cut, `caps`, `spheres`, `stars_beyond`,
-    `systems_within`, `stars_within_and_beyond`.
+    `systems_within`, `stars_within_and_beyond`; R06.T11.g's count in jobs, `CapCount::plan_over`
+    and `CapCountPlan::{count_rays, join}`, which T2.b's second count takes (R13.T1). What R13.T1
+    added to `sky::caps` is under Provides ("sky::caps (R13.T1)").
   - `sky::census::{SkyQuery, SkyQueryBuilder, CensusPlan, Completeness, census_plan_of,
 merge_shells, SkyCensus, SkyStar}` and T8.i's listing by the band texel's radius
-    (`Completeness`, `BandSpec::texel_of`); `brute_force_sky` and `SkyQuery::with_caps_forced`
-    (`tests/common/sky.rs`).
-  - `sky::band::{BandSpec, BandMarch, march_rows, sum_rows, CompleteTo, largest_texel_radius}` and
-    T9.j's eye light; `sky::limits::{Glare, eye_offsets}`; `sky::colour::{star_colour, StarColour,
+    (`Completeness`, `BandSpec::texel_of`); `brute_force_sky` (`tests/common/sky.rs`) and
+    `SkyQuery::{with_caps_forced, with_caps_forced_per_layer}` (`sky/census/query.rs`; R13.T1).
+  - `sky::band::{BandSpec, BandMarch, march_rows, sum_rows, CompleteTo}`,
+    `BandSpec::largest_texel_radius` (a method, not a free item; R13.T1) and T9.j's eye light;
+    `sky::limits::{Glare, eye_offsets, eye_cut}`; `sky::colour::{star_colour, StarColour,
 AtmosphereGrid, surface_gravity}` and `StarColour::reddened`.
   - The server's sky pipeline (`crates/hyperion-server/src/{requests,compute}/sky.rs`,
-    `bulk/sky.rs`), T11.c's switch, and **R06.T11.d** (shells as bulk jobs, `complete_to_ly`,
-    `final`, the per-ray tables), which is not built at b6cb51b1.
+    `bulk/sky.rs`), T11.c's switch (`--serve-sky`, `HYPERION_SERVE_SKY`, off by default; R13.T1),
+    and **R06.T11.d**, built at 497a2a9d (R13.T1): shells as bulk jobs
+    (`compute::sky::delivery_steps`), `SkyLayerCensusDto::{complete_to_ly, complete_to_rays_ly,
+is_final}` and `SkyResponse::is_final`, both `final` on the wire, with R06.T11.g's inner shell
+    edges at 125 and 250 ly (`SHELL_EDGES_LY`) at 090d880d.
   - The decision records the plan rests on: `decision-r06-census-cost.md`,
     `decision-r06-census-cost-signoff.md`, `decision-r06-t8i-listing.md`,
     `decision-r06-t8h-warm.md`, `decision-p11-t17c-bright.md`.
-- **R07:** the label block's `STARS` reading (`viewSkyLabel`, `view/sky/label.ts`'s
-  `skyLabelValue`) and the view's list notes (`displays/view/useViewSky.ts`,
-  `displays/view/useInstruments.ts`, where `INTEGRATED STARLIGHT` is composed).
+- **R07:** the label block's `STARS` reading (`view/sky/viewSky.ts`'s `viewSkyLabelV`, not
+  `viewSkyLabel`, and `view/sky/label.ts`'s `skyLabelValue(limitV, limitKind, gaps, standing)`,
+  whose notes `skyLineNotes(gaps, standing)` composes since R06.T11.f; R13.T1) and
+  the view's notes under its label block (`displays/view/viewRun.ts`'s `photorealStatements`,
+  beside `displays/view/useViewSky.ts` and `displays/view/useInstruments.ts`). `INTEGRATED
+STARLIGHT` is R06 Design note 23's note and the guide's row; no client code composes it at
+  cb724aca nor at 090d880d (R13.T1), so R13.T8 composes `SYNTHETIC STARS` beside it where R06's
+  owner composes it.
 - **Galaxy plan 03:** `galaxy::bounds::CellBox` and `Component::bound` (the per-component density
   bound on a cell, nearest corner and arm phase), the layer shares (`ShareMatrix`), and the rule
   that no cell straddles an axis plane.
@@ -689,7 +712,10 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   self-similar distance distributions and per-record costs independent of distance: about a factor
   of two, and leaning low, since ignoring extinction places brighter stars too near and the discs'
   scale heights fall inside the boundaries; T7.b's rays pull the other way. T1 replaces them before
-  T2 builds.
+  T2 builds. **T1 measured them (2026-10-09; "Deviations in T1, as built", below):** the spheres at
+  V<sub>P</sub> lie 1.6–3.2 times as far as estimated, and the real tier costs 8.8–22.6 times the estimate at
+  both ceilings, for the eye and the camera, on the fixture and on the server's galaxy. Design note
+  4's guard has tripped, and T2 waits for the owner.
 - **Realised against expected.** R06.T5.f's findings (C 0.966 ± 0.004, E 1.164 ± 0.034, realised
   over tabulated) would show as a density step at R(u): about 3.5% more synthetic C stars and 14%
   fewer E stars than the census would list. T9's gate waits for the tables lane's correction; until
@@ -732,5 +758,316 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   exact on approach for single main-sequence stars to the table's accuracy and statistical for
   evolved stars and pairs, at a walk of every far record (at least about 10³ CPU-s at the eye and
   10⁴ at the camera) and a new fitted table.
-- **Open for decision agents:** spheres or rays for R(u), and fix (i) (T1); the cell size (T5.b);
-  texel or bilinear extinction, if T9's seam test asks (T5.b, T9); the label's wording (T8).
+- **Open for decision agents:** spheres or rays for R(u), and fix (i) (T1, measured below:
+  "Spheres or rays, and fix (i)"); the cell size (T5.b); texel or bilinear extinction, if T9's seam
+  test asks (T5.b, T9); the label's wording (T8).
+- **Deviations in T1, as built, and its measurements (2026-10-09).** Measured at
+  `rendering-and-planets` 4dec82b4, so with P11.T17.c's held floor (about +18% on a cold census)
+  and R06.T11.d. Then rebased onto 090d880d (R06.T11.f and T11.g). T11.g tests each of its splits
+  bit for bit against the one-job form, and the slow test, run again there, prints every figure as
+  before (399 s). The fixture is `milky_way_like` with seed
+  0x0926_0000; the server's galaxy is seed 0x4d2 with its full potential. Both are at the epoch.
+  Every count is the caps' count's expectation, with no census; every cost is a sampled census.
+  **The owner's guard has tripped** (Design note 4). The real tier costs 8.8–22.6 times the
+  feasibility study's estimate, at both ceilings, for the eye and the camera, on both galaxies.
+  T2 waits for the owner.
+  - **The build.**
+    - `sky::caps` gains three things (Provides, "sky::caps (R13.T1)"):
+      - `RayRadii::lesser`: each ray the lesser of two radii on one lattice, which is Design note
+        3's "never beyond the cut's own cap" applied ray by ray.
+      - A public `LayerCap::forced_by_ray`, which was test-only, for a census to a boundary the
+        count does not give.
+      - `CapCount::{stars_beyond_toward, systems_within_toward, stars_within_and_beyond_toward}`:
+        the counts towards a boundary given ray by ray as a closure, such as a texel's centre,
+        cones widened by ρ, or a sphere held within rays.
+
+      The cap-taking counts now call the new ones with the same loop and arithmetic, so their bits
+      are unchanged (determinism audit). A radius that is negative or not finite panics. The unit
+      tests check the closures, bit for bit, against caps that hold the same boundary, check
+      `lesser` ray by ray and towards 10⁴ directions, and check the refusals.
+
+    - `tests/sky_hybrid.rs` holds the slow test `the_hybrid_boundary_is_recorded`. It runs on six
+      threads, one a point, natively only, since wasm32 has no threads; its slow-profile override
+      takes 6 slots. It took 447 s at `CPUQuota=400%`. It asserts only T1's two claims, and both
+      hold everywhere (below). The six points and the recount's resolution moved to
+      `tests/common/sky.rs` (`CAPS_POINTS`, `caps_recount`), which `sky_caps.rs` now shares.
+      R06.T7.c's slow test in `sky::caps` keeps its own copy, `CONVERGENCE_POINTS`, now
+      cross-referenced.
+    - `benches/sky.rs` adds `sky/census_near_sun_ceiling/{eye,camera}_{4.5,5.0}`, and the same
+      four as `served_*` on the server's galaxy.
+      - C to E are censused to Design note 3's real boundary, which the bench builds by the same
+        rule as `real_boundary` (`real_boundary_rule`). A, B and the brown dwarfs go to the cut's
+        caps.
+      - The census moved into `census_of_plan`, split from `census`. It keeps each layer's census
+        time, and for this bench alone each job thread's CPU time (`CpuTime::Measured`,
+        `ThreadCpu`).
+  - **Deviations.**
+    - **The eye's cut takes the request's illumination**, as the server has computed it since
+      R06.T11.d, which landed after this plan was written. Near the Sun it is V 8.179 on the
+      fixture (8.282 without the illumination) and V 7.766 on the server's galaxy. R(u) depends on
+      V<sub>P</sub> alone. So only the counts at the cut, the cut's caps, the gap and the spheres'
+      cost (they are held within the cut's caps) move with it.
+    - **The bench runs on two galaxies.** `decision-r06-t11d-first-sky.md` ("The bench's galaxy")
+      asks T1 to record the real tier on the galaxy served beside the fixture's. The bench builds
+      that galaxy as the server's tests and bench do:
+      `Galaxy::new(Seed::new(0x4d2)).with_full_potential()`.
+    - **The guard reads CPU time.**
+      - The bench prints each layer's census time twice. The first is its jobs' wall time, the
+        measure the other benches use. The second, on Linux, is the CPU time the job threads spent
+        on the sampled cells (`/proc/thread-self/schedstat`), read through one open file per job
+        and outside the wall-time window. Off Linux no clock opens, and the bench prints wall time
+        alone.
+      - The guard reads the CPU time.
+      - Earlier runs at cb724aca, before the merge, timed by wall clock at a load of about 15–19,
+        read 0.89–1.85 × 10⁵ CPU-s. They are superseded.
+    - **The costs are provisional.** The machine was shared: the runs began at loads of 6.3 (the
+      fixture) and 12.9 (the server's galaxy), under the `schedutil` governor. CPU time removes
+      the waits, but not SMT or clock contention. The smallest ratio, 8.8, is 4.4 times the guard,
+      beyond any load effect.
+    - **The census is sampled**, 1 block of cells in 50 on the fixture and 1 in 100 on the server's
+      galaxy, then scaled. The sampling error is not measured. The timing repeats, though: at one
+      ceiling the eye's and the camera's runs census the same sampled C–E cells, since R(u) is the
+      ceiling's, and their CPU-s agree to 1.7% on the fixture and 0.01–0.08% on the server's
+      galaxy.
+    - **The benched tier has no fix (i).** Fix (i) adds 0.6–8.5% of the systems (E 6.2% near the
+      Sun at 4.5), so the costs below are a few percent low.
+    - **R(u) never needed the hold.** At no point, cut or ceiling did a ray's cap at V<sub>P</sub>
+      lie beyond the cut's: 0 rays were held. So `lesser` changes nothing measured; it stays as
+      the rule's guarantee.
+    - **Acceptance as run.** The slow test ran from its slow-test-profile binary, not through
+      `just test-slow`, whose heavy lock the lane rules keep for timed runs and full suites. The
+      nextest override and `hyperion-fit check --rerun-fast` run at integration, as `just ci`
+      does. `cargo bench -p hyperion-sim --no-run` passed.
+    - **The record is a digest.** It holds the near-Sun rows at the eye's cut in full and the
+      other points' rows at 4.5 and 5.0. The slow test prints all 216 rows (six points, three cuts,
+      four ceilings, three layers), deterministically.
+  - **The boundary near the Sun** (fixture). This is at the eye's cut, V 8.179, with the caps by
+    the eye's visibility. Radii are in ly. Everything is by ray unless marked as the sphere, and
+    every count is taken at the 3,072-ray recount. "Beyond" is the expected count brighter than
+    V 5 / 6 / 6.5 / 7 / the cut beyond R(u): the stars that the synthetic tier and the band take.
+    "> V<sub>P</sub>" is the expected count brighter than V<sub>P</sub> beyond R(u), at the caps'
+    own count and then recounted. The gap and its mirror are at the cut; the spheres' gap there is
+    0–0.002. The cut's own caps there have ray medians (10–90%) and largest rays of C 7,444
+    (5,584–9,925) and 12,023 ly, D 6,146 (5,073–8,193) and 9,925 ly, and E 4,610 (3,805–13,232)
+    and 41,804 ly.
+
+    | V<sub>P</sub> | Layer | R(u) median (10–90%), largest | Sphere | Beyond: V 5 / 6 / 6.5 / 7 / 8.18    | > V<sub>P</sub> | Systems within | Sphere ÷ rays | Fix (i) ÷ rays | Gap / mirror  |
+    | ------------- | ----- | ----------------------------- | ------ | ----------------------------------- | --------------- | -------------- | ------------- | -------------- | ------------- |
+    | 4.0           | C     | 1,038 (944–1,038), 1,038      | 1,038  | 9.87 / 82 / 249 / 719 / 8,300       | 0.920 / 0.882   | 1.005 × 10⁶    | 1.126         | 1.007          | 8.47 / 10.7   |
+    | 4.0           | D     | 1,519 (1,141–2,222), 2,222    | 2,020  | 7.49 / 63.2 / 178 / 449 / 2,970     | 0.701 / 0.607   | 1.096 × 10⁶    | 1.250         | 1.031          | 5.62 / 7.77   |
+    | 4.0           | E     | 2,443 (1,255–5,753), 8,416    | 6,327  | 2.17 / 13.4 / 31.1 / 67.6 / 333     | 0.399 / 0.276   | 4.465 × 10⁶    | 1.303         | 1.060          | 1.16 / 6.92   |
+    | 4.5           | C     | 1,416 (1,287–1,416), 1,416    | 1,416  | 4.08 / 35.0 / 99.8 / 300 / 3,540    | 0.896 / 0.829   | 2.324 × 10⁶    | 1.131         | 1.006          | 2.54 / 4.77   |
+    | 4.5           | D     | 2,075 (1,287–2,763), 3,344    | 2,763  | 2.38 / 32.8 / 106 / 276 / 1,760     | 0.677 / 0.570   | 2.365 × 10⁶    | 1.290         | 1.032          | 3.67 / 4.48   |
+    | 4.5           | E     | 2,511 (1,416–7,177), 9,557    | 7,177  | 0.738 / 5.20 / 12.6 / 29.7 / 180    | 0.380 / 0.248   | 6.357 × 10⁶    | 1.191         | 1.062          | 0.709 / 0.922 |
+    | 5.0           | C     | 1,758 (1,758–1,934), 1,934    | 1,934  | 0.764 / 16.0 / 43.5 / 119 / 1,660   | 0.854 / 0.764   | 5.020 × 10⁶    | 1.188         | 1.010          | 2.95 / 3.04   |
+    | 5.0           | D     | 2,343 (1,597–3,782), 5,548    | 3,437  | 0.293 / 5.60 / 19.2 / 63.5 / 622    | 0.425 / 0.293   | 5.213 × 10⁶    | 1.014         | 1.047          | 5.99 / 7.61   |
+    | 5.0           | E     | 2,838 (1,597–8,139), 11,939   | 8,139  | 0.215 / 1.77 / 4.50 / 11.1 / 80.6   | 0.338 / 0.215   | 9.018 × 10⁶    | 1.089         | 1.063          | 0.478 / 0.691 |
+    | 5.5           | C     | 2,356 (2,356–2,593), 2,593    | 2,356  | 0.390 / 4.17 / 18.4 / 52.8 / 581    | 0.864 / 0.777   | 1.044 × 10⁷    | 0.949         | 1.010          | 0.814 / 1.84  |
+    | 5.5           | D     | 2,593 (1,767–4,610), 6,146    | 4,610  | 0.0558 / 1.54 / 6.63 / 25.0 / 320   | 0.448 / 0.317   | 8.143 × 10⁶    | 1.339         | 1.042          | 1.60 / 2.51   |
+    | 5.5           | E     | 2,854 (1,767–9,018), 19,416   | 9,925  | 0.0723 / 0.697 / 1.97 / 5.18 / 43.9 | 0.358 / 0.231   | 1.204 × 10⁷    | 1.255         | 1.061          | 0.334 / 0.528 |
+
+    R(u) does not depend on the cut. At 7.95 and 10.06 the rows differ in their counts at the cut,
+    their gaps and the spheres' cost, since the spheres are held within the cut's caps: E's
+    sphere ÷ rays at 4.0 is 1.303, 1.332 and 1.416 at the eye's cut, 7.95 and 10.06. Those rows
+    match a run before the merge to every printed digit.
+
+  - **The share beyond R(u)** near the Sun, by ray: layers C to E beyond R(u), as a share of every
+    layer's whole sky at any distance. The study's figures are at the cut 7.95.
+
+    | V<sub>P</sub> | V 5   | V 6   | V 6.5 | V 7   | To the eye's cut, 8.18 | To 7.95 | To 10.06 | Study: V 6.5 / to 7.95 |
+    | ------------- | ----- | ----- | ----- | ----- | ---------------------- | ------- | -------- | ---------------------- |
+    | 4.0           | 1.21% | 2.99% | 4.85% | 7.46% | 19.56%                 | 15.89%  | 52.3%    | 17–22% / 67–75%        |
+    | 4.5           | 0.44% | 1.37% | 2.32% | 3.66% | 9.22%                  | 7.83%   | 38.0%    | 8–11% / 42–53%         |
+    | 5.0           | 0.08% | 0.44% | 0.71% | 1.17% | 3.98%                  | 3.15%   | 22.8%    | 3.6–4.7% / 18–21%      |
+    | 5.5           | 0.03% | 0.12% | 0.29% | 0.50% | 1.59%                  | 1.26%   | 10.5%    | 1.0–1.5% / 9–11%       |
+
+    The whole sky there holds 1,619 stars to V 5, 5,308 to V 6, 9,430 to V 6.5, 16,560 to V 7,
+    59,352 to the eye's cut, 46,585 to 7.95 and 3.94 × 10⁵ to 10.06.
+
+  - **The other points**, at each point's eye's cut, for V<sub>P</sub> 4.5 and then 5.0. The
+    columns are: the C–E systems within R(u); the share beyond R(u) of the whole sky to V 6.5 and
+    to the cut; and the C–E gap, by ray, at the cut. The largest count brighter than V<sub>P</sub>
+    beyond R(u), over all the point's rows, is 0.861 in the nuclear disc, 0.863 a quarter turn
+    round, 0.875 on the far side, 0.854 in the inner disc and 0.992 2,000 ly above the Sun
+    (0.776–0.972 recounted).
+
+    | Point (eye's cut)                    | Systems within         | Share to V 6.5 / to the cut  | Gap        |
+    | ------------------------------------ | ---------------------- | ---------------------------- | ---------- |
+    | Near the Sun (8.179)                 | 1.10 × 10⁷; 1.93 × 10⁷ | 2.32% / 9.22%; 0.71% / 3.98% | 6.92; 9.42 |
+    | Nuclear disc (5.807)                 | 1.10 × 10⁶; 1.53 × 10⁶ | 0.26% / 0.09%; 0.09% / 0.04% | 0.18; 0.07 |
+    | Solar circle, a quarter turn (8.109) | 8.47 × 10⁶; 1.42 × 10⁷ | 2.01% / 8.44%; 0.77% / 4.05% | 8.18; 3.15 |
+    | Solar circle, far side (7.730)       | 1.32 × 10⁷; 2.16 × 10⁷ | 0.90% / 3.44%; 0.33% / 1.31% | 3.10; 2.89 |
+    | Inner disc (6.722)                   | 2.43 × 10⁸; 3.48 × 10⁸ | 0.41% / 0.49%; 0.20% / 0.24% | 2.35; 1.09 |
+    | 2,000 ly above the Sun (8.540)       | 2.08 × 10⁷; 3.50 × 10⁷ | 7.69% / 32.2%; 3.14% / 16.6% | 19.3; 15.9 |
+
+    Layer by layer, in the near-Sun table's terms, with the spheres' gap last:
+
+    | Point          | V<sub>P</sub> | Layer | R(u) median (10–90%), largest | Sphere | > V<sub>P</sub> | Systems within | Sphere ÷ rays | Fix (i) ÷ rays | Gap / mirror  | Sphere gap |
+    | -------------- | ------------- | ----- | ----------------------------- | ------ | --------------- | -------------- | ------------- | -------------- | ------------- | ---------- |
+    | Nuclear disc   | 4.5           | C     | 37 (34–45), 45                | 41     | 0.848 / 0.784   | 5.283 × 10⁵    | 1.286         | 1.014          | 0.069 / 0.05  | 0          |
+    | Nuclear disc   | 4.5           | D     | 50 (45–66), 80                | 60     | 0.664 / 0.551   | 2.640 × 10⁵    | 1.403         | 1.025          | 0.067 / 0.076 | 0.002      |
+    | Nuclear disc   | 4.5           | E     | 73 (66–128), 207              | 128    | 0.656 / 0.566   | 3.093 × 10⁵    | 1.812         | 1.041          | 0.046 / 0.059 | 0.003      |
+    | Nuclear disc   | 5.0           | C     | 42 (38–50), 56                | 46     | 0.808 / 0.733   | 7.235 × 10⁵    | 1.221         | 1.018          | 0.018 / 0.018 | 0.002      |
+    | Nuclear disc   | 5.0           | D     | 50 (46–74), 99                | 74     | 0.633 / 0.503   | 3.560 × 10⁵    | 1.311         | 1.027          | 0.03 / 0.027  | 0.004      |
+    | Nuclear disc   | 5.0           | E     | 90 (74–159), 257              | 159    | 0.628 / 0.537   | 4.503 × 10⁵    | 1.443         | 1.046          | 0.027 / 0.025 | 0.004      |
+    | A quarter turn | 4.5           | C     | 1,269 (1,154–1,269), 1,396    | 1,269  | 0.830 / 0.756   | 1.827 × 10⁶    | 1.072         | 1.017          | 4.73 / 4.27   | 0          |
+    | A quarter turn | 4.5           | D     | 1,689 (1,269–2,472), 2,719    | 2,247  | 0.652 / 0.540   | 1.655 × 10⁶    | 1.092         | 1.039          | 3.2 / 2.75    | 0          |
+    | A quarter turn | 4.5           | E     | 2,472 (1,396–6,410), 9,384    | 6,410  | 0.373 / 0.244   | 4.989 × 10⁶    | 1.199         | 1.058          | 0.247 / 1.75  | 0.001      |
+    | A quarter turn | 5.0           | C     | 1,732 (1,431–1,732), 1,906    | 1,732  | 0.791 / 0.689   | 3.875 × 10⁶    | 1.158         | 1.016          | 1.8 / 2.6     | 0          |
+    | A quarter turn | 5.0           | D     | 2,097 (1,431–3,382), 3,722    | 3,074  | 0.538 / 0.407   | 3.524 × 10⁶    | 1.138         | 1.043          | 1.25 / 3.69   | 0          |
+    | A quarter turn | 5.0           | E     | 2,539 (1,431–7,267), 10,653   | 7,996  | 0.361 / 0.228   | 6.795 × 10⁶    | 1.410         | 1.060          | 0.102 / 0.871 | 0.001      |
+    | Far side       | 4.5           | C     | 1,396 (1,269–1,396), 1,396    | 1,396  | 0.875 / 0.799   | 3.468 × 10⁶    | 1.025         | 1.006          | 0.939 / 1.15  | 0          |
+    | Far side       | 4.5           | D     | 2,044 (1,396–2,720), 3,291    | 2,720  | 0.542 / 0.427   | 2.937 × 10⁶    | 1.234         | 1.037          | 1.76 / 5.05   | 0          |
+    | Far side       | 4.5           | E     | 2,720 (1,535–7,052), 12,491   | 7,757  | 0.396 / 0.207   | 6.804 × 10⁶    | 1.287         | 1.058          | 0.398 / 0.908 | 0.001      |
+    | Far side       | 5.0           | C     | 1,906 (1,732–1,906), 1,906    | 1,906  | 0.806 / 0.704   | 7.048 × 10⁶    | 1.096         | 1.016          | 2.07 / 2.24   | 0          |
+    | Far side       | 5.0           | D     | 2,308 (1,574–3,383), 4,507    | 3,383  | 0.443 / 0.320   | 4.901 × 10⁶    | 1.194         | 1.044          | 0.598 / 2.97  | 0          |
+    | Far side       | 5.0           | E     | 2,794 (1,732–7,998), 14,194   | 9,683  | 0.345 / 0.177   | 9.639 × 10⁶    | 1.510         | 1.053          | 0.223 / 1.73  | 0.001      |
+    | Inner disc     | 4.5           | C     | 1,532 (1,267–1,685), 1,685    | 1,532  | 0.802 / 0.709   | 3.778 × 10⁷    | 1.065         | 1.020          | 0.896 / 0.792 | 0          |
+    | Inner disc     | 4.5           | D     | 2,243 (1,532–2,985), 3,972    | 2,985  | 0.436 / 0.308   | 3.675 × 10⁷    | 1.204         | 1.049          | 1.12 / 1.66   | 0          |
+    | Inner disc     | 4.5           | E     | 3,283 (1,854–7,035), 12,458   | 9,362  | 0.267 / 0.152   | 1.687 × 10⁸    | 1.240         | 1.066          | 0.33 / 0.243  | 0.002      |
+    | Inner disc     | 5.0           | C     | 1,903 (1,572–2,093), 2,093    | 2,093  | 0.834 / 0.739   | 7.324 × 10⁷    | 1.224         | 1.020          | 0.546 / 0.606 | 0          |
+    | Inner disc     | 5.0           | D     | 2,535 (1,729–3,715), 4,948    | 3,715  | 0.366 / 0.244   | 6.159 × 10⁷    | 1.191         | 1.056          | 0.482 / 0.757 | 0.001      |
+    | Inner disc     | 5.0           | E     | 3,376 (1,903–7,980), 14,161   | 10,631 | 0.357 / 0.186   | 2.133 × 10⁸    | 1.197         | 1.061          | 0.063 / 0.086 | 0.004      |
+    | 2,000 ly above | 4.5           | C     | 1,298 (1,298–1,429), 1,429    | 1,429  | 0.928 / 0.876   | 6.574 × 10⁵    | 1.140         | 1.016          | 7.46 / 4.28   | 0          |
+    | 2,000 ly above | 4.5           | D     | 805 (805–3,377), 4,499        | 3,377  | 0.551 / 0.421   | 2.949 × 10⁶    | 1.136         | 1.071          | 10.5 / 6.84   | 0          |
+    | 2,000 ly above | 4.5           | E     | 886 (805–9,665), 22,846       | 11,701 | 0.375 / 0.184   | 1.717 × 10⁷    | 1.354         | 1.085          | 1.32 / 0.457  | 0.001      |
+    | 2,000 ly above | 5.0           | C     | 1,945 (1,945–2,141), 2,141    | 2,141  | 0.955 / 0.871   | 2.614 × 10⁶    | 1.233         | 1.017          | 3.17 / 2.27   | 0          |
+    | 2,000 ly above | 5.0           | D     | 1,205 (1,205–4,188), 6,146    | 4,610  | 0.475 / 0.325   | 6.667 × 10⁶    | 1.305         | 1.060          | 11.8 / 5.93   | 0          |
+    | 2,000 ly above | 5.0           | E     | 3,458 (1,094–12,023), 37,983  | 14,563 | 0.364 / 0.240   | 2.573 × 10⁷    | 1.518         | 1.073          | 0.881 / 0.552 | 0.007      |
+
+  - **The real tier's cost** (the bench, near the Sun). The cost is in CPU-s by the job threads'
+    CPU time, with the generated records alongside, each layer's count scaled by the sample. The
+    whole includes the two caps' counts and the plan, 23–25 s, with the total by wall time after
+    it. "On 15" is the whole ÷ 15 workers, which ignores imbalance.
+
+    | Galaxy, request, cut    | V<sub>P</sub> | C                  | D                   | E                    | Whole (by wall time) | Study         | Times the study | On 15 |
+    | ----------------------- | ------------- | ------------------ | ------------------- | -------------------- | -------------------- | ------------- | --------------- | ----- |
+    | Fixture, eye, 8.179     | 4.5           | 1,609 (5.54 × 10⁵) | 12,800 (1.62 × 10⁶) | 80,433 (7.00 × 10⁶)  | 94,867 (104,683)     | 4,500–5,800   | 16.4–21.1       | 1.8 h |
+    | Fixture, eye, 8.179     | 5.0           | 3,346 (1.15 × 10⁶) | 31,299 (3.91 × 10⁶) | 109,870 (9.64 × 10⁶) | 144,539 (166,819)    | 10,000–12,500 | 11.6–14.5       | 2.7 h |
+    | Fixture, camera, 10.06  | 4.5           | 1,543 (7.48 × 10⁵) | 12,751 (1.64 × 10⁶) | 78,958 (7.00 × 10⁶)  | 93,276 (93,664)      | 5,400–7,540   | 12.4–17.3       | 1.7 h |
+    | Fixture, camera, 10.06  | 5.0           | 3,363 (1.40 × 10⁶) | 31,231 (4.00 × 10⁶) | 109,031 (9.65 × 10⁶) | 143,649 (154,755)    | 12,000–16,250 | 8.8–12.0        | 2.7 h |
+    | Server's, eye, 7.766    | 4.5           | 3,975 (1.31 × 10⁶) | 17,769 (2.28 × 10⁶) | 79,971 (7.06 × 10⁶)  | 101,740 (103,968)    | 4,500–5,800   | 17.5–22.6       | 1.9 h |
+    | Server's, eye, 7.766    | 5.0           | 6,411 (2.18 × 10⁶) | 25,241 (3.19 × 10⁶) | 111,759 (9.90 × 10⁶) | 143,438 (144,031)    | 10,000–12,500 | 11.5–14.3       | 2.7 h |
+    | Server's, camera, 10.06 | 4.5           | 3,919 (1.78 × 10⁶) | 17,830 (2.31 × 10⁶) | 79,955 (7.07 × 10⁶)  | 101,731 (102,166)    | 5,400–7,540   | 13.5–18.8       | 1.9 h |
+    | Server's, camera, 10.06 | 5.0           | 6,554 (2.74 × 10⁶) | 25,280 (3.24 × 10⁶) | 111,691 (9.92 × 10⁶) | 143,553 (144,172)    | 12,000–16,250 | 8.8–12.0        | 2.7 h |
+
+    Each layer's records past the floor, generated records, accepted stars and accepted stars
+    within R(u) towards their band texel (those R13.T2.a lists), scaled by the sample:
+
+    | Galaxy, request  | V<sub>P</sub> | C                                           | D                                           | E                                         |
+    | ---------------- | ------------- | ------------------------------------------- | ------------------------------------------- | ----------------------------------------- |
+    | Fixture, eye     | 4.5           | 2.54 × 10⁶ / 5.54 × 10⁵ / 24,950 / 24,700   | 2.85 × 10⁶ / 1.62 × 10⁶ / 17,900 / 17,750   | 8.09 × 10⁶ / 7.00 × 10⁶ / 4,500 / 4,450   |
+    | Fixture, eye     | 5.0           | 5.44 × 10⁶ / 1.15 × 10⁶ / 26,600 / 26,550   | 7.02 × 10⁶ / 3.91 × 10⁶ / 19,550 / 19,550   | 1.12 × 10⁷ / 9.64 × 10⁶ / 4,550 / 4,450   |
+    | Fixture, camera  | 4.5           | 2.54 × 10⁶ / 7.48 × 10⁵ / 133,500 / 129,250 | 2.85 × 10⁶ / 1.64 × 10⁶ / 69,300 / 67,700   | 8.09 × 10⁶ / 7.00 × 10⁶ / 20,900 / 20,650 |
+    | Fixture, camera  | 5.0           | 5.44 × 10⁶ / 1.40 × 10⁶ / 171,550 / 168,550 | 7.02 × 10⁶ / 4.00 × 10⁶ / 92,250 / 91,450   | 1.12 × 10⁷ / 9.65 × 10⁶ / 21,400 / 21,100 |
+    | Server's, eye    | 4.5           | 6.14 × 10⁶ / 1.31 × 10⁶ / 21,200 / 21,100   | 4.04 × 10⁶ / 2.28 × 10⁶ / 21,100 / 21,000   | 8.17 × 10⁶ / 7.06 × 10⁶ / 3,300 / 3,300   |
+    | Server's, eye    | 5.0           | 1.03 × 10⁷ / 2.18 × 10⁶ / 22,000 / 22,000   | 5.67 × 10⁶ / 3.19 × 10⁶ / 21,500 / 21,500   | 1.15 × 10⁷ / 9.90 × 10⁶ / 3,400 / 3,400   |
+    | Server's, camera | 4.5           | 6.14 × 10⁶ / 1.78 × 10⁶ / 227,300 / 222,700 | 4.04 × 10⁶ / 2.31 × 10⁶ / 109,700 / 106,000 | 8.17 × 10⁶ / 7.07 × 10⁶ / 21,000 / 20,900 |
+    | Server's, camera | 5.0           | 1.03 × 10⁷ / 2.74 × 10⁶ / 266,500 / 261,300 | 5.67 × 10⁶ / 3.24 × 10⁶ / 114,300 / 112,400 | 1.15 × 10⁷ / 9.92 × 10⁶ / 21,100 / 21,000 |
+    - **Where the cost lies.** At 4.5 on the fixture, E generates 86% of its records, and it takes
+      85% of the cost for 10% of the eye's stars.
+    - **The server's galaxy.** Its local density is 2.46 times the fixture's, by the count's
+      systems within 500 ly, in each of C, D and E. Its R(u) by ray at 4.5 is C 1,386
+      (1,146–1,386), 1,386; D 1,677 (1,260–2,454), 2,699; E 2,231 (1,386–5,256), 11,255. At 5.0 it
+      is C 1,720 (1,421–1,893), 1,893; D 1,893 (1,292–3,052), 3,357; E 2,521 (1,564–5,955), 14,068.
+      That is nearer than the fixture's in D and E. So its real tier costs about the same as the
+      fixture's, although it is denser: 1.07 and 0.99 times for the eye at 4.5 and 5.0, and 1.09
+      and 1.00 for the camera. This is a record, not a finding: the generated galaxy is the judge.
+    - **Memory.** The bench's process held about 176 MiB when sampled. Its 10G cap was set before
+      it had run and was far more than it needed.
+
+  - **Against the estimates.**
+    - **R(u).** The study's spheres at 4.5 were C 740–850, D 1,180–1,290 and E 2,240–2,510 ly.
+      The measured spheres are 1,416, 2,763 and 7,177 ly, 1.7–3.2 times the study's. At 5.0 the
+      study had 1,050–1,180 / 1,600–1,730 / 3,110–3,420 ly, and the spheres are 1,934, 3,437 and
+      8,139 ly, 1.6–2.6 times. E's ray median is the study's own, 2,511 ly at 4.5 (1.00–1.12
+      times) and 2,838 at 5.0 (0.83–0.91 times). But E's rays reach far out of the plane: their
+      90th percentile is 7,177 ly and the largest 9,557 ly at 4.5. That is the study's §3.4 bias
+      from ignoring extinction, far larger than the factor of two it allowed.
+    - **The work.** Near the Sun at 4.5, C–E have 1.35 × 10⁷ records past the floor, 9.6 times
+      the 1,000 ly identity test's 1.41 × 10⁶; E's alone are 108 times its 7.48 × 10⁴.
+    - **Cost per record.** Per record past the floor it is C 0.63, D 4.5 and E 9.9 ms, against the
+      study's 0.22, 2.2 and 6.6 ms. Per generated record it is C 2.9, D 7.9 and E 11.5 ms.
+    - **The share left beyond.** At 4.5, 2.3% of the stars brighter than V 6.5 lie beyond R(u),
+      and 7.8% of those to 7.95, against the study's 8–11% and 42–53%: 0.21–0.29 times its share
+      to V 6.5 and 0.15–0.19 times its share to 7.95.
+    - **The camera.** Its real tier costs 0.98–1.00 times the eye's at one ceiling, against the
+      study's 1.2–1.3. R(u) does not move with the cut, and C, which the deeper cut lists more of,
+      is cheap.
+    - **From 4.5 to 5.0** the cost rises 1.41–1.54 times, against the study's 2.2.
+    - **Wall time.** On 15 workers the real tier takes 1.7–1.9 h at 4.5 and 2.7 h at 5.0, against
+      the study's 5–6.5 and 11–14 minutes. On 4 workers it is 6.5–7.1 h and 10 h.
+    - **Against the exact census.** The exact census by ray costs 0.4–1.0 × 10⁶ CPU-s. The
+      hybrid's real tier at 4.5 is 3.9–10.7 times cheaper, against the study's 80–200.
+    - **Other ceilings** (_estimate_). The fixture's measured per-system costs near the Sun at 4.5
+      are C 0.69, D 5.41 and E 12.65 ms per system within R(u), at the recount. Applied to 5.0's
+      systems, they predict its measured C–E census to 0.9%. They put V<sub>P</sub> 4.0 at about
+      6.3 × 10⁴ CPU-s and 5.5 at about 2.0 × 10⁵. At every ceiling measured, E's far rays hold most
+      of the work.
+    - **Elsewhere** (_estimate_, at the same per-system costs, not benched). The inner disc's
+      2.4 × 10⁸ C–E systems within R(u) at 4.5 would cost about 2.4 × 10⁶ CPU-s. The 2.1 × 10⁷
+      systems 2,000 ly above the Sun would cost about 2.3 × 10⁵.
+  - **Spheres or rays, and fix (i)** (for the decision agent, under the delegation).
+    - **The gap by ray.** These are the stars brighter than the cut that lie within the radius
+      towards their texel's centre and beyond their own ray's radius, C to E summed. Near the Sun
+      it is 6.9 at the eye's cut at 4.5 and 9.4 at 5.0; 4.6 and 6.8 at 7.95; and 121 and 194 at
+      10.06. At the other points it reaches 19 at the eye's cut (2,000 ly above the Sun), 31 at
+      7.95 and 1,485 at 10.06 (the inner disc). Its mirror is of the same size. So rays alone fail
+      R13.T2.a's "no gap" test.
+    - **Fix (i)** widens the cones by ρ, the 64² band's largest texel radius. It closes the gap to
+      0 at every point, cut and ceiling. It costs 1.006–1.085 times the rays' systems: C 1.006–1.023, D 1.019–1.071, E 1.038–1.085.
+    - **Spheres** at V<sub>P</sub>, held within the cut's caps, cost 0.949–3.226 times the rays'
+      systems: 0.95–1.44 near the Sun, with E at 3.2 in the nuclear disc and 2.6 above the Sun.
+      They are not exact:
+      - their gap reaches 0.306 stars (E, 2,000 ly above the Sun, the eye's cut, V<sub>P</sub>
+        5.5), and up to 0.007 at 4.5 and 5.0 (mirror 0.009), since the hold within the cut's caps
+        is by ray;
+      - in the nuclear disc at 5.5 they leave more than one star brighter than V<sub>P</sub> beyond
+        them (C 1.140 and E 1.031 at the caps' own count), which breaks T1's second claim.
+    - **Which is cheaper.** Layer by layer at the eye's cut, spheres cost less than rays with
+      fix (i) in 7 of the 72 cases:
+      - near the Sun, D at 5.0 (1.014 against 1.047) and C at 5.5 (0.949 against 1.010);
+      - the nuclear disc, C at 5.5 (0.960 against 1.019);
+      - a quarter turn round, C at 4.0 (0.958 against 1.016), C at 5.5 (0.989 against 1.022) and
+        D at 5.5 (1.027 against 1.051);
+      - the far side, C at 5.5 (0.966 against 1.016).
+
+      Weighted by each layer's measured cost per system near the Sun, spheres cost 1.02–1.70
+      times rays with fix (i) at every point and ceiling: 1.14 near the Sun at 4.5 and 1.02 at 5.0.
+
+    - So rays with fix (i) are exact everywhere measured, and the cheaper by cost at every point
+      and ceiling. T1's lean is rays with fix (i).
+  - **For T2, pending the owner** (observations, not changes to T2).
+    - **R13.T2.a.**
+      - The bench's rule, `real_boundary_rule(at_ceiling: &[LayerCap], at_cut: Vec<LayerCap>)`,
+        takes the caps at the ceiling, where Provides' `real_boundary(at_ceiling: &CapCount,
+caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, each ray
+        of the cap at V<sub>P</sub> held within the cut's (`RayRadii::lesser`) and made a cap
+        (`LayerCap::forced_by_ray`); A, B and the brown dwarfs at the cut's caps.
+      - Fix (i)'s widened cones, if ruled, have a reference scan in the slow test's
+        `widened_toward`.
+      - Each layer's `expected_beyond` at the cut beyond R(u) is `CapCount::stars_beyond` on the
+        cut's count.
+      - T1's two claims hold at all six points. The count brighter than V<sub>P</sub> beyond R(u)
+        is at most 0.992 at the caps' own count (0.972 recounted), and no ray of R(u) lies beyond
+        the cut's cap.
+      - The determinism audit noted, as a consider, that nothing pins the bits of the caps'
+        `expected_beyond` today, and that `real_boundary`'s per-ray radii will reach the wire.
+    - **R13.T2.b.** The served real tier near the Sun at the interim's V<sub>P</sub> 5.0 costs
+      1.43 × 10⁵ CPU-s, about 2.7 h on 15 workers, not 11–14 minutes. The reply's counts beyond
+      R(u) on the fixture at V<sub>P</sub> 5.0 are these:
+      - at the eye's cut 8.18: C 1,660, D 622 and E 81 brighter than the cut, 2,363 in all (3.98%
+        of the sky to the cut);
+      - at 7.95, like for like with the study: C 993, D 419 and E 56, 1,468 in all (3.15%).
+
+      At both cuts, 67 of them are brighter than V 6.5. The study's figures were 8,000–10,000, of
+      them about 450 brighter than V 6.5.
+  - **For the owner** (records, for the orchestrator to relay).
+    - The guard has tripped at both ceilings, as above.
+    - Design note 15's "the sky on by default once R13.T2 and R06.T11.d land" rested on the
+      estimate of 11–14 minutes.
+    - Design note 4's "near R06.T17's ruled 4,000 CPU-s target" does not hold: at 4.5 the real
+      tier is 24–25 times that target.
+    - The brainstorm's signed-off "The hybrid sky" puts the census at some thousands of
+      CPU-seconds, which the measurement contradicts. Its "nine in ten naked-eye stars stay real"
+      is conservative: 97.7% are measured near the Sun at 4.5.
