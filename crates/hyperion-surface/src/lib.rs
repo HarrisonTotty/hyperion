@@ -9,7 +9,10 @@
 //! real one), the material classes (R10) and the rocks (R11). Today it holds R05's: the cube
 //! sphere ([`cube`], [`geometry`]), the provisional [`test_planet`] and its noise basis
 //! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), and the datum heights
-//! are measured from, the reference [`spheroid`] (plan 14's P14.T46.e).
+//! are measured from, the reference [`spheroid`] (plan 14's P14.T46.e); and the first of R09's:
+//! the coarse field's types ([`field`]), with the header's spectrum ([`synth`]) and crater contract
+//! ([`craters`]), which R09's later tasks give their behaviour, and, for tests, synthetic fields
+//! (`testing`, feature `testing`).
 //!
 //! # The contract of the height function
 //!
@@ -43,14 +46,19 @@ compile_error!(
      client's terrain would not match the server's bit for bit"
 );
 
+pub mod craters;
 pub mod cube;
+pub mod field;
 pub mod geometry;
 pub mod noise;
 pub mod num;
 pub mod patch;
 pub mod spheroid;
+pub mod synth;
 pub mod tags;
 pub mod test_planet;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;

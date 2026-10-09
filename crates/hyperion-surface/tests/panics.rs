@@ -8,7 +8,9 @@
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
+use hyperion_base::units::Metres;
 use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv};
+use hyperion_surface::field::{CoarseLevel, Cover, boundary_diameter, cell_index, coarse_level};
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::{LatticeCache, Octave, gradient_noise};
 use hyperion_surface::num;
@@ -143,4 +145,34 @@ fn a_morph_target_beyond_the_patch_is_refused() {
 #[should_panic(expected = "a sphere's radius must be finite and positive")]
 fn a_sphere_of_no_radius_is_refused() {
     let _ = Spheroid::sphere(0.0);
+}
+
+#[test]
+#[should_panic(expected = "a body's radius must be finite and positive")]
+fn a_body_of_no_radius_has_no_coarse_level() {
+    let _ = coarse_level(Metres::ZERO);
+}
+
+#[test]
+#[should_panic(expected = "a body's radius must be finite and positive")]
+fn a_body_of_no_radius_has_no_boundary_diameter() {
+    let _ = boundary_diameter(CoarseLevel::MIN, Metres::new(f64::NAN));
+}
+
+#[test]
+#[should_panic(expected = "cell indices number levels up to 14")]
+fn a_cell_below_level_14_has_no_index() {
+    let _ = cell_index(PatchKey::new(Face::PosZ, 15, 0, 0).unwrap());
+}
+
+#[test]
+#[should_panic(expected = "a direction must be finite and non-zero")]
+fn the_zero_vector_is_in_no_patch() {
+    let _ = PatchKey::containing(3, [0.0; 3]);
+}
+
+#[test]
+#[should_panic(expected = "a cover holds cells below u32::MAX")]
+fn a_cover_cannot_hold_the_last_index() {
+    let _ = Cover::from_cells([u32::MAX]);
 }

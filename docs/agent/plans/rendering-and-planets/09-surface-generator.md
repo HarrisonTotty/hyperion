@@ -1566,8 +1566,10 @@ output and `TEST_PLANET_VERSION` as they are. Reserved here: the two scopes
 and the cell key's packing; the tags of Provides and `surface.scatter` for R11; the `instance` field
 for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level rule's 40 km, 5 and
 8; `ClimateCell` at level L − 1; the header's `albedo_scale` for R10 and its `surface_age` and
-`surface_pressure` for R11. R10.T10.a fills `FieldHeader.albedo_scale` and bumps
-`GENERATOR_VERSION`, re-blessing this plan's payload and coarse goldens in that commit.
+`surface_pressure` for R11; and T2's header `reference_temperature` and `temperature_step` (0.01 K
+× 2ⁿ, n 0–15) and every code's scale (Risks, "Deviations in T2, as built"). R10.T10.a fills
+`FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`, re-blessing this plan's payload and
+coarse goldens in that commit.
 
 ## Risks and open points
 
@@ -1718,7 +1720,10 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
   the storm tracks, by latitude and month) as a function the client can call from plan 14's global
   figures without the coarse field, so that clouds are drawn over unsurveyed ground (R11 Design note
   8), and whether `ClimateCell.wind`'s four entries are seasonal, since its cloud advection and sea
-  state want the month's.
+  state want the month's. T2 answered the second provisionally: the four entries are the year's
+  quarters (Risks, "Deviations in T2, as built"), for R11 to accept, since it asked for the
+  month's; twelve monthly winds would cost 16 B more per climate cell (about 1.6 MB on an Earth),
+  a question with "main" for the owner.
 - **The 61-chunk transfer check.** R03.T15's 15 MiB (61-chunk) check is this plan's, after RM3
   (decided 2026-10-07 by the orchestrator). The coarse field, about 15 MiB, is the first bulk kind
   of that size: no sky reaches it (R06's largest is 7.5 MB, 29 chunks; R06.T11.b ran the check at 4
@@ -1814,3 +1819,119 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
     `u16` or checks it. And since the body is in a 64-bit seed rather than the key, bodies whose
     seeds collide (about n² ÷ 2⁶⁵ pairs among n bodies, as for P14.T23's seed already) share their
     noise, though not their coarse inputs.
+- **Deviations in T2, as built** (2026-10-09; technical choices, revisable until T9's and T16's
+  goldens pin them).
+  - _Files._ `field.rs` is a module root over `field/{cells,cover,crater,header}.rs`, re-exported
+    at `field::*`; `synth.rs` and `craters.rs` hold only the header's types; `testing.rs` and
+    `testing/worlds.rs` sit behind `cfg(any(test, feature = "testing"))`. The sim's `testing`
+    feature is `["hyperion-surface/testing"]`. The surface `clippy.toml`'s `doc-valid-idents` gains
+    `McMahon`.
+  - _Public items added beyond Provides._ `cell_at_index(level, index)` (the inverse of
+    `cell_index`, which numbers levels 0 to 14 and panics deeper); the `CoarseLevel` constants
+    `MIN` and `MAX` and its `new`, `get`, `cell_count`, `climate_level` and `climate_cell_count`;
+    `CoarseField::new` with `BuildFieldError`, its `synthesis`, `climate_layer` and `craters`
+    slices, and `with_albedo_scale`, by which R10.T10.a sets the scale without rebuilding the
+    field; `FieldHeaderParts` (public fields; `FieldHeader::new` validates them and derives
+    `level` and `boundary_diameter`) with `BuildFieldHeaderError`, the getters, `parts`,
+    `into_parts`, `with_albedo_scale`, the climate readers `sea_level_temperature` and
+    `month_temperature`, the quantisers `quantise_sea_level_temperature` and
+    `quantise_month_anomaly`, the step values `temperature_step_k` and `anomaly_step_k` and the
+    step choosers `temperature_step_for` and `anomaly_step_for`; `BodyRef` (raw system ID and body
+    index, since the crate cannot see the sim's `BodyId`); `CoverRange`, `BuildCoverError`; the
+    cell enums and codes `Crust`, `BoundaryKind`, `FlowDirection` (to and from R05's `Edge`),
+    `Morphology`, `LogArea`, `LogSteepness`, `LogPrecipitation`, `SurfaceClass` and `Wind`, each
+    byte enum with `ALL`, `From<_> for u8` and `TryFrom<u8>` (`DecodeFieldCodeError`), and
+    `QuantiseValueError` for every quantiser; the crater types `Screening`, `CraterParamsParts`
+    (which `CraterParams::new` takes) and `BuildCraterParamsError`; `NewBandLevelError` and
+    `BuildBandSpectrumError` in `synth`; `PlateSpec`, `CellSite`, `ClimateSample`, `Routing` and
+    `SyntheticWorld::ALL` in `testing`. R05's `cube` gains `PatchKey::containing(level, dir)` (a
+    direction's cell, the same face rule), and `geometry::max_rate` (S2's 1.704 897) is
+    `pub(crate)` for `boundary_diameter`.
+  - _Names._ The header's parts are read through getters (`sea_level()`, `craters()`,
+    `surface_age()`, `surface_pressure()`, `albedo_scale()` and the rest), not fields; Provides'
+    `lapse_rate` is `lapse_rate_k_per_m`, its `D_b` is `boundary_diameter()`, its
+    `boundary_distance` is `boundary_distance_km`, its `g` is `gravity`, and the steepness index's
+    readers are `LogSteepness::from_index_m0_9` and `index_m0_9`. `BoundaryKind` adds `Absent` (a
+    stagnant lid's cells) to Design note 6's four kinds. `synth.rs` is the `synth` module's root,
+    as `field.rs` is `field`'s: T4–T7.b's `synth/{interp,relief,channels,craters}.rs` are its
+    children, and T8's `synth/mod.rs` is `synth.rs`.
+  - _The header._ No `format` or `generator_version`: T3's block header carries both and refuses
+    others, so a header in memory is this build's. It gains `reference_temperature` (plan 14's
+    mean surface temperature, P14.T24.a's) and `temperature_step` (n in 0.01 K × 2ⁿ):
+    `sea_level_temperature` is the departure from the reference in that step, since an `i16` of
+    0.01 K holds only ±328 K and a Venus is at 737 K, the same no-saturation rule as
+    `anomaly_step` (both exponents 0–15). The two join Generator version's reserved list. The
+    exponents keep the plan's names, `temperature_step` and `anomaly_step`, beside the kelvin
+    values `temperature_step_k` and `anomaly_step_k` (the review's `_exponent` rename was declined
+    for the plan's name). `months` is 1 or 12; `Screening` is `None`, `Atmosphere` (its
+    `column_mass` and `projectile_density`) or `Cutoff` (a `diameter`). `ClimateModelKind` is
+    `EnergyBalance`, `LockedEnergyBalance`, `RadiativeEquilibrium` or `Isothermal`;
+    `PrecipitationSource` has `Heuristic` alone.
+  - _`BandSpectrum` is the law, not a table_: degree variance V(l) = V₁ l^−β (β default 1.9,
+    above 1; V₁ in `SquareMetres`). T5 derives each level's per-contribution amplitudes from it,
+    and may add fields before T9.
+  - _The codes_ (each documented with its SI meaning). `boundary_distance_km` is negative on the
+    plate that subducts at a subduction boundary and positive elsewhere (a lean for T11 to keep or
+    change), with `SynthesisCell::NO_BOUNDARY_KM` = `i16::MIN` on a stagnant lid, outside the
+    ±32,767 a distance saturates at; `boundary_obliquity` in 90° ÷ 255; `drainage` a `u16`,
+    2^((c − 1) ÷ 1,024) m², and `steepness` a `u8`, 2^((c − 64) ÷ 8) m^0.9 with θ = 0.45, which
+    keeps the 21 bytes; `ice` the share under ice in 255ths; `month_precipitation` is
+    `[LogPrecipitation; 12]`, 0.1 mm a year × 2^((c − 1) ÷ 12) in kg m⁻² s⁻¹; `Wind` is an azimuth
+    the air moves towards in 256ths of a turn from local north and a speed of 0.01 m/s ×
+    2^((c − 1) ÷ 16), and the four winds are the year's quarters (R11's seasonal question answered
+    yes, provisionally; one wind four times in a one-month year); a crater's `degradation` is the
+    share of its fresh rim relief lost, in 255ths. `Crust` adds `Lid` and `Province` (a stagnant
+    lid's crust and its volcanic provinces) to the two populations. `SurfaceClass` and
+    `crater_state` are bytes whose codes T15 defines: 0 (`UNCLASSIFIED`) until then, in every
+    synthetic world too.
+  - _Closed sets, for the composition audit_ (the owner's directive of 2026-10-09). `Crust` (four),
+    `BoundaryKind` (five), `Morphology` (five), `ClimateModelKind` (four) and
+    `PrecipitationSource` (one) are closed sets today. Each is a one-byte code whose unknown codes
+    are refused (`DecodeFieldCodeError`), so a new variant takes a new code, gated by T3's
+    `SURFACE_PAYLOAD_FORMAT`. The cell's `ice` share and `month_precipitation` name no species:
+    the condensable is plan 14's, per body (P14.T48.d), so a world with two ices (water and CO₂ on
+    a Mars) has no per-cell species yet; `SurfaceClass`, T15's, is where the liquids, ices and
+    frosts of named species go, with 255 codes of room.
+  - _Validation._ `CoarseField::new` refuses wrong record counts, water below ground, a boundary
+    kind without a distance or the reverse, a month outside the year (or an anomaly or a second
+    wind in a one-month year), a crater off unit length, narrower than D_b, of negative age, whose
+    reach misses its centre's cell or leaves the field, or not strictly after its predecessor in
+    (centre cell, diameter): the key is unique, so that T3's `PartialField` merges and dedupes the
+    craters of several blocks by it and the synthesis sums them in one order (the determinism
+    review). T12.d must therefore never emit two craters of one centre cell and diameter. Reaches
+    whose index would overflow a `usize` (a `u32` on WebAssembly) are `TooManyReaches`. A crater's
+    age is not bounded by the surface age, which is a body's mean.
+  - _The synthetic worlds_ (closed forms, no stream). Earth-like level 8 (ten plates, ocean 0.69,
+    σ_h 2.4 km, ice 0.12, three craters), Mars-like 7 (dichotomy, Tharsis, dry routing, 23
+    craters), Moon-like 6 (maria, 45 craters, SPA reaching most cells), Ceres-like 5 (28 craters,
+    k_target 0.12). Only the Earth- and Mars-like worlds are routed and carry ice; the others are
+    terminal everywhere with no drainage. Flat and OneCrater are at the Moon's radius, level 6,
+    with a one-month year, V₁ = 0 and a crater density of zero (`FieldBuilder::new`'s defaults),
+    so that the synthesis adds nothing to Flat and nothing but OneCrater's one 300 km crater, which
+    sits on the face 0–2 edge with its reach on both faces; T5's variance test has nothing to
+    compare on them. The header's realised σ_h and relief are the cells' area-weighted RMS and
+    range, not the reconstructed field's (T4's interpolant does not exist yet), and
+    `reference_temperature` is the climate layer's area-weighted mean. `FieldBuilder` routes by
+    steepest descent without depression filling (sinks are terminal), takes a reach as every cell
+    whose centre is within 2.54 rim radii plus the cell's circumradius (a superset of "touches"),
+    samples Design note 13's profile at cell centres rather than smoothing it, and computes D_t
+    and the depth inline from Design note 12 (T7.a may switch it to its functions). Earth-like
+    builds in 0.6–0.8 s at the dev profile under shared load; every world twice in under 2 s.
+  - _Science review._ Every figure turned into code checks against its source. Two corrections
+    for the plan's text, recorded here rather than edited: Design note 17's Verkhoyansk anomalies
+    are −30.8 and +30.6 K about an annual mean of −13.9 °C in the WMO 1991–2020 normals (station
+    24266), not −31.0 and +30.2 K (the 0.25 K step is unaffected; the header's doc quotes the
+    normals); and Design note 13's lunar depth-to-rim-height ratio 5.42 is 0.195 (Pike 1980,
+    Table 2) over a rim height of 0.036 D^1.014 that is Pike 1977's, not in the cited Pike 1980.
+    Low confidence: Pike 1977's complex-crater rim fit, about 0.236 D^0.399, would make every
+    coarse crater's rim about half as high as observed under the simple-crater ratio, for T7.a to
+    weigh. Ceres's 469.7 km is Ermakov et al. 2017's; Design note 12's morphology bounds (0.8,
+    1.5, 9 and 16 D_t), the 0.12 ice factor and the −1.7 to −2.05 spectral range carry no external
+    source and are labelled the plan's own.
+  - _For T3, T4, T9 and T18._ `SYNTHESIS_MARGIN_CELLS` is not yet defined (T3 or T4 adds it).
+    `PartialField` can reuse `field.rs`'s private `reaching_index` (which returns `None` on
+    overflow) for its crater index. The decoders (`LogArea::area`, `index_m0_9`,
+    `rate_kg_per_m2_s`, `Wind::speed`, `ResolutionCode::resolution` and the header's temperature
+    readers) are pinned at a few points only; the determinism review asks T3's or T9's goldens to
+    write every one-byte code's value and a sample of `LogArea`'s. T18 takes `CoarseLevel`,
+    `cell_index` and `ResolutionCode` from here.

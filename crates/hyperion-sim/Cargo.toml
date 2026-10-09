@@ -20,8 +20,9 @@ hyperion-surface.workspace = true
 
 [features]
 # Test helpers (`events::testing`, `planetary::testing`, `stellar::testing`) for this crate's tests
-# and for other crates' tests.
-testing = []
+# and for other crates' tests, with the surface crate's (`hyperion_surface::testing`, rendering plan
+# R09) for the tests of the coarse pass and of the server's surface service.
+testing = ["hyperion-surface/testing"]
 
 [dev-dependencies]
 criterion.workspace = true

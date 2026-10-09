@@ -24,6 +24,12 @@ hyperion-base.workspace = true
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 wasm-bindgen.workspace = true
 
+[features]
+# Test helpers (`testing`: the synthetic coarse fields and their builder, plan R09, T2) for other
+# crates' tests; this crate's own tests see them through `cfg(test)`. The sim's `testing` feature
+# enables it.
+testing = []
+
 # Golden files, test inputs and order checks, for the tests alone: a dev-dependency, so the crate's
 # runtime boundary, `hyperion-base` alone, holds (plan R05, T1.a).
 [dev-dependencies]
