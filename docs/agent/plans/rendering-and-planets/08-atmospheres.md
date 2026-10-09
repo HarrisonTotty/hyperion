@@ -44,9 +44,10 @@ drifts, at Venus- and Titan-class depths, a table baked per world in a worker re
 table depends on view direction, is solved spectrally with discrete ordinates in `f64`, and is
 converted to the render channels. A cloud deck of optical depth above 10 splits the atmosphere in
 two. Every baked table matches an independent, path-traced reference to 5% on a stated metric
-before any atmosphere is drawn from it, and the check runs in `just ci`. Until its gate passes, a
-thick world is drawn with the analytic term under the drafted label `ATMOSPHERE: APPROXIMATE`, never
-presented as computed. The low setting is R05's
+before any atmosphere is drawn from it, and the check runs in `just ci`. The reference is vector,
+so polarisation's effect on the radiance is in what the tables are held to (Design note 10). Until
+its gate passes, a thick world is drawn with the analytic term under the drafted label
+`ATMOSPHERE: APPROXIMATE`, never presented as computed. The low setting is R05's
 smaller tables, with aerial perspective on terrain only. It is built beside the high one and holds
 the budget's figures on the UHD 620.
 
@@ -75,6 +76,8 @@ In scope:
   both, as starlight does, and lights the receiving body's sky (Design note 7).
 - Thick atmospheres: the measured regime boundary, the view-dependent converged bake, the
   cloud-deck split, and the path-traced reference with the 5% gate.
+- Polarisation's effect on the drawn radiance: a per-world correction from a low-stream vector
+  solve, in both regimes (Design note 10, R08.T14.e–f).
 - Gas giants inside the 10⁹ m boundary, and the `DiscReflectanceTable` that R07's analytic disc
   reads beyond it for a body with an atmosphere, with the read path in R07's `bodyDisc.wgsl`
   (R08.T16.b edits R07's shader, as R08.T6 edits R05's).
@@ -87,9 +90,10 @@ Non-goals:
   of this plan's split is an optical boundary, not a drawn layer.
 - Oceans, glint and rings (R11); the sky's stars, band and the local star's disc (R06), which this
   plan only attenuates; lit surface shading and the tone-mapping pass (R07).
-- Refraction of rays, scintillation, airglow, aurorae, lightning, night-side thermal emission and
-  polarised radiance in the drawn image. The reference tracer has a Stokes mode for validation only
-  (R08.T12.a).
+- Refraction of rays, scintillation, airglow, aurorae, lightning, night-side thermal emission,
+  and the polarisation state (Q, U, V) of the drawn image. The drawn radiance does include
+  polarisation's effect on it (R08.T14.e–f). The reference tracer's Stokes mode is every
+  gate's reference (Design note 10).
 - Drag and the thermosphere. The flight model has no plan. The vertical structure asked of plan 14
   serves it too (Design note 3), and a thermosphere above the render column is the flight model's.
 - Giant cloud bands. No plan generates them (R07's Risks); they are not asked here.
@@ -137,7 +141,11 @@ export type PhaseFunction =
   | { readonly kind: "tabulated"; readonly table: PhaseTable }; // Mie, literature, aggregate
 export interface PhaseTable {
   readonly u: Float64Array; // u = √(θ/π), 256 entries, dense near forward
-  readonly values: readonly [Float64Array, Float64Array, Float64Array];
+  readonly values: readonly [Float64Array, Float64Array, Float64Array]; // a₁ per channel
+  /** a₂, a₃, a₄, b₁, b₂ per channel on `u`, normalised as `values` is (block-diagonal; Hovenier,
+   * van der Mee and Domke 2004). `undefined`: the source publishes no matrix, and the term is a
+   * total depolariser in the reference and the polarisation correction (Design note 10). */
+  readonly matrix: PhaseMatrixTable | undefined;
 }
 export interface MediumTerm {
   // R05's fields, same meaning
@@ -420,10 +428,17 @@ export function classifyRegime(medium: AtmosphereMedium, cover: BodyCover): Atmo
 export function bakeMultipleScattering(medium: AtmosphereMedium, band: number): MsSourceTable;
 /** Above: the deck as a reflecting boundary; below: downwelling radiance. One latitude band. */
 export function bakeDeck(medium: AtmosphereMedium, deckAltitudeM: number, band: number): DeckTables;
+/** ΔJ_pol(h, μ₀, μ_v, m), m = 0..2: the vector-minus-scalar source function (I) of one 8-stream
+ * discrete-ordinates solve of the medium, at the render channels, for one latitude band. Added
+ * to the multiple-scattering term of thin and thick worlds alike (Design note 10, R08.T14.e). */
+export function bakePolarisationCorrection(
+  medium: AtmosphereMedium,
+  band: number,
+): PolarisationTable;
 ```
 
 Files: `thick/regime.ts` (R08.T13), `thick/discreteOrdinates.ts` and `thick/bake.ts` (R08.T14),
-`thick/deck.ts` (R08.T15).
+`thick/polarisation.ts` (R08.T14.e), `thick/deck.ts` (R08.T15).
 
 ### For R07's analytic disc (`discReflectance.ts`)
 
@@ -444,14 +459,15 @@ smooth mesh and the `disc cells` kernel share its source and `view/bodies/draw.t
 // crates/hyperion-fit/src/atmosphere/
 pub struct AtmosphereCase { /* a spectral medium, as the TypeScript writes it, its `Shells`,
     and its geometry set */ }
-pub enum Polarisation { Scalar, Stokes }                 // Stokes for Rayleigh benchmarks only
+pub enum Polarisation { Scalar, Stokes }                 // Stokes: every gate's reference, Design note 10
 pub enum Shells {                                        // Design note 17
     Sphere { radius_m: f64 },
     /// The level spheroid; density at the gravity-scaled height h·g(φ)/g_ref, by delta tracking.
     Spheroid { equatorial_radius_m: f64, polar_radius_m: f64, gm_m3_s2: f64, omega_rad_s: f64 },
 }
 pub struct ReferenceRadiances { /* per geometry and wavelength: radiance, standard error, samples,
-    detector cone; the two flux aggregates */ }
+    detector cone; the two flux aggregates; in the Stokes mode also Q, U, V and the scalar
+    radiance of the same paths, each with its error */ }
 pub fn trace_reference(case: &AtmosphereCase, polarisation: Polarisation, samples: NonZeroU64,
     threads: NonZeroUsize) -> ReferenceRadiances;        // backward Monte Carlo, f64, over `Shells`
 ```
@@ -844,7 +860,10 @@ Names are those the owning plans give; the owning plan is authoritative.
 
    Each mode's density is scaled so its column τ(550) is the inventory's. The phase function is
    tabulated per channel on u = √(θ/π) with 256 entries, since dust's forward peak makes the blue
-   sunset and a 1/x-wide peak starves on a cos θ grid. How the forward peak is handled:
+   sunset and a 1/x-wide peak starves on a cos θ grid. Beside a₁ the table carries the scattering
+   matrix's other elements where the source gives them: spheres from Mie's S₁ and S₂, and
+   aggregates if T5.c's matrix agrees with optool's. A term with none is a total depolariser
+   (Design note 10, Polarisation). How the forward peak is handled:
    - Single scattering (sky-view, aerial perspective, the march) uses the full table and the full
      extinction.
    - Only the multiple-scattering bakes use delta-M truncation (Wiscombe 1977), with the scaled
@@ -1018,21 +1037,49 @@ Names are those the owning plans give; the owning plan is authoritative.
         and Statistical Physics 14, 437);
       - Natraj, Li and Yung 2009 (ApJ 691, 1909) and Natraj and Hovenier 2012 (ApJ 748, 28) for
         thin and thick Rayleigh, through the tracer's Stokes mode, since those tables are vector
-        and a scalar tracer differs by up to about 10%;
+        and a scalar tracer differs by up to 12% on them (R08.T12.a measured −11.8% to +10.7% at
+        τ 0.5, μ₀ 0.2);
       - Kokhanovsky et al. 2010 (JQSRT 111, 1931) and IPRT Phase A (Emde et al. 2015, JQSRT 164,
-        8);
+        8), also through the Stokes mode, with each case's tabulated scattering matrix (a₁–a₄, b₁,
+        b₂; R08.T12.c). Garcia and Siewert's are scalar problems and run in the scalar mode;
       - and for spherical shells Loughman et al. 2004 (JGR 109, D06303), at its 2–4% model spread
         rather than 3σ.
 
       The 1960 Coulson–Dave–Sekera tables are not used, being wrong in the fourth decimal.
 
-    - **The metric** (a design choice; the owner may tune the floor). For every case, every
-      geometry g of a fixed set and every channel c:
+    - **The metric** (decision-backlog-1, 2026-10-09). For every case, every geometry g of a fixed
+      set and every channel c:
 
-      |L_client(g,c) − L_ref(g,c)| ≤ max(0.05·L_ref, 3σ_ref, 10⁻³·L_max(case,c)).
+      |L_client(g,c) − L_ref(g,c)| ≤ T(g,c) + 4σ_ref(g,c), where
+      T(g,c) = max(0.05·L_ref(g,c), F·L_max(I(g),c)) and F = 3 × 10⁻⁴.
 
-      - L_max is the case's brightest diffuse radiance.
-      - σ_ref ≤ 1% wherever L_ref ≥ 10⁻² L_max.
+      - L_ref is the radiance I of the tracer's Stokes mode, and σ_ref its standard error. L_client
+        includes the polarisation correction (Polarisation, below), from R08.T14.f on.
+      - **I(g) is g's image:** the case's geometries that share g's observer and its suns.
+        - On the ground: one sun zenith, with every view direction and azimuth.
+        - In orbit: the limb heights at one sun, and each disc phase alone.
+        - Aerial perspective: its paths at one sun.
+
+        L_max(I,c) is the image's brightest diffuse radiance in channel c. The floor thus follows
+        the exposure the image is seen at, and a twilight image is held to 5% of its own light, not
+        excused by the noon image's.
+
+      - **The floor takes over below 20F** (6 × 10⁻³ of the image's brightest), where the tolerance
+        is F·L_max.
+        - Through R07's AgX (`toneCurve`) at the AVG meter's exposure, which puts the image's mean at
+          0.104 (`exposure.ts`), 5% is at most 0.96 ΔL* anywhere on the curve: about one
+          just-noticeable difference.
+        - An error at the floor stays under the same 0.96 ΔL* in an image whose brightest diffuse
+          radiance is up to 30 times its mean (4.9 stops, AgX's shoulder). At 10⁻³ it would reach
+          3 ΔL* there.
+        - The comparison is in radiance, not in the tone-mapped image, so that it holds at every
+          exposure the operator may set.
+      - **σ_ref(g,c) ≤ T(g,c) ÷ 8 at every geometry.** The reference's noise then widens the gate by
+        half at most, and `gate.ts` refuses a reference that is noisier. A client exactly 5% off
+        fails one comparison with probability 3 × 10⁻⁵, about 0.1 false failure over ten cases'
+        360 comparisons each.
+      - **Named constants in `gate.ts`:** the 0.05, F, the 4 and the 8, so that a later ruling
+        changes one line.
       - Only diffuse radiance is compared. The direct beam is checked against Beer–Lambert to
         10⁻⁶ in optical depth, no geometry lies within 3° of a sun, and both pipelines average over
         the tracer's stated detector cone of 0.5°–1°.
@@ -1049,11 +1096,58 @@ Names are those the owning plans give; the owning plan is authoritative.
         - aerial perspective over 1, 10 and 32 km.
       - Two aggregates, downwelling flux at the ground and plane albedo at the top, each within
         2%.
-      - The u′v′ difference is recorded, never gated.
+      - **Recorded beside each case, never gated:**
+        - the u′v′ difference;
+        - per image, the largest ΔE*ab between the two pipelines' colours through `toneCurve` at the
+          AVG meter's exposure, the image's mean diffuse radiance taken as the metered average;
+        - IPRT's relative RMS difference over the image, (Σ(L_client − L_ref)²)^½ ÷ (Σ L_ref²)^½
+          (Emde et al. 2015), for comparison with the intercomparisons' figures of about 1%;
+        - each image's L_max ÷ mean, so that an aureole brighter than the floor's bound of 30 is seen.
 
     - **The gate** is an ordinary vitest that runs the CPU twin on each committed case. So the
       brainstorm's "every baked atmosphere table matches a path-traced reference to 5%" is
       automatic, as its Testing section files it.
+    - **Polarisation** (ruled 2026-10-09, `decision-r08-vector.md`; Mishchenko, Lacis and Travis
+      1994, JQSRT 51, 491; Lacis et al. 1998, GRL 25, 135; Kotchenova et al. 2006, Appl. Opt. 45,
+      6762).
+      - **The error.** The eye sees I, the first Stokes parameter of the vector equation. A scalar
+        solve differs from it in orders two and up; single scattering of unpolarised light is exact.
+        Measured for the ruling (plane-parallel, checked against R08.T12.a's Natraj run):
+        - pure Rayleigh: −3.3% to +3.6% at τ 0.06, −4.5% to +5.2% at τ 0.1, −8.0% to +8.5% at
+          τ 0.23, and −18.7% to +11.9% at τ 0.5–1, with ±9–12% even with the sun overhead;
+        - Earth's channels with an aerosol at sun zenith 78°: ±1.7% red, ±2.7% green and −5.2% to
+          +4.6% blue;
+        - fluxes: at most 0.5% to τ 1 and 1.1% at τ 4.
+      - **The correction.** ΔJ_pol(h, μ₀, μ_v, m) is J_vector − J_scalar (its I), both from one
+        8-stream discrete-ordinates solve of the world's own medium, m = 0..2, at the render
+        channels, per latitude band (R08.T14.e). Every kernel adds it to its multiple-scattering
+        term, in both regimes (R08.T14.f).
+        - Measured: an 8-stream difference added to a converged scalar solve leaves ≤ 0.12% of I
+          at τ 0.23–2, and ≤ 0.03% with an aerosol of g 0.6.
+        - Modes: m ≤ 1 leaves 2.3–9.5%, and m ≤ 2 under 0.004%.
+        - Refused:
+          - a factor in Hillaire's view-independent multiple-scattering table;
+          - an offline family;
+          - two orders of scattering (Natraj and Spurr 2007, JQSRT 107, 263), which leaves up to
+            12.6% at τ 1;
+          - a 16-stream vector bake, about 27× the scalar solve.
+      - **Matrices.** Every term carries its scattering matrix or is a total depolariser (a₁ alone),
+        marked in the medium and the case:
+        - Rayleigh by Hansen and Travis 1974's eqs. (2.15)–(2.16);
+        - spheres from T5's Mie amplitudes;
+        - Cornette–Shanks, literature phase functions without a published matrix,
+          Henyey–Greenstein fallbacks, and aggregates unless T5.c's matrix agrees with optool's
+          are depolarisers, a stated approximation.
+      - **The gates.**
+        - From R08.T14.f on, every gate compares the client, with the correction, against the
+          vector I.
+        - The same run's scalar I is compared with the client's uncorrected twin as a recorded
+          diagnostic.
+        - R08.T13's drift gate and sweep, and `THICK_MS_BOUNDARY`, stay scalar against scalar,
+          since they measure Hillaire's scalar term.
+      - **What a viewer sees** (R07's AUTO meter and AgX): the uncorrected sky's worst geometry is
+        ΔE₀₀ 0.76 at Earth and 1.2–1.5 on a three-bar world. The correction is for physical
+        accuracy: the corrected sky is inside the 5% target, and the uncorrected one is not.
 11. **The low setting.** The budget's per-frame figures are 0.5–1 ms discrete (sky-view, aerial
     perspective, the march) and 2–4 ms on the UHD 620 at 720p. Per-planet tables cost under 0.1 ms
     and about 1 ms, rebuilt only when the atmosphere changes, and the tables stay under 2 MB a
@@ -1094,6 +1188,12 @@ Names are those the owning plans give; the owning plan is authoritative.
       - A world whose per-planet bytes would pass 2 MB widens `KAPPA_STEP` to 0.3 (grazing
         interpolation error about 0.3%) and `BAND_STEP` to 0.15, in that order, and R08.T11
         records the step taken.
+    - **The polarisation correction** (Design note 10) adds one table a latitude band: 32
+      altitudes × 32 μ₀ × 16 μ_v × 3 modes × RGB, 393 KB in `rgba16float`, or 197 KB at 16 μ₀ if
+      the gate allows. It is counted with the per-planet tables, so a thin one-band world comes to
+      about 0.79 MB. Where the sum would pass 2 MB, the correction's μ₀ axis halves first, then the
+      widening above applies. Its per-frame cost is three reads per sample per source in the
+      sky-view, aerial-perspective and march kernels, recorded by R08.T14.f.
     - The table sizes are R05's `TABLE_SIZES`, taken from Hillaire's code, which the research
       agent's reading of his Table 2 confirms in kind: 32² multiple scattering, 32³ aerial
       perspective over 32 km, and a sky-view of about 200 × 100. R05's low sizes and its deferred,
@@ -1818,6 +1918,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
   - the distribution reproduces r_eff and v_eff to 10⁻⁴;
   - every file covers 380–780 nm;
   - a narrow distribution equals the single sphere;
+  - a mode's table carries its scattering matrix (a₁ = a₂ and a₃ = a₄ for spheres, b₁ and b₂,
+    from S₁ and S₂ in T5.a's convention). A sphere of x = 10⁻³ reproduces Hansen and Travis
+    1974's Rayleigh matrix (eq. 2.15, δ = 0) to 10⁻⁶. The single-scattering degree of
+    polarisation is −b₁ ÷ a₁;
   - Venus's mode-2 droplets (r_eff 1.05 µm, v_eff 0.07, n ≈ 1.44 at 550 nm; Hansen and
     Hovenier 1974) give g within that paper's figure;
   - an NH₄SH mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it gives
@@ -1830,8 +1934,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
 - **R08.T5.c Aggregates and phase tables.** `aggregate.ts` implements Tazaki and Tanaka 2018's MMF
   with D_f ≤ 2.5, and the phase-shift gate of Design note 6: a mode with Δφ ≥ 1 keeps its
   opacities and takes a Henyey–Greenstein phase from its asymmetry. Beside it go the √θ phase
-  tables per channel, and the delta-M truncated series
-  with its fraction, for the bakes only (Design note 6). Tests:
+  tables per channel, with the matrix elements where the model gives them, and the delta-M
+  truncated series with its fraction, for the bakes only (Design note 6). An aggregate's matrix is
+  kept only if it agrees with optool's elements to their stated tolerance; otherwise `matrix` is
+  `undefined`, a total depolariser, flagged in the code (Design note 10). Tests:
   - optool fixtures for a Titan-like aggregate (monomer 0.05 µm, about 3,000 monomers, D_f = 2;
     Tomasko et al. 2008), generated offline and committed, to their stated tolerance;
   - the Titan-like aggregate's Δφ is below 1, and a compact large aggregate's above it falls back;
@@ -2241,8 +2347,9 @@ here, and `pnpm test` passes.
   - the Stokes mode's I equals the scalar mode's for an isotropic scatterer.
 
   The scalar-against-vector Rayleigh difference is measured on one thin Rayleigh case of Natraj et
-  al. 2009 and recorded as a finding for the owner. Acceptance:
-  `cargo test -p hyperion-fit atmosphere`.
+  al. 2009 and recorded as a finding (Risks). It was ruled on 2026-10-09
+  (`decision-r08-vector.md`): it is corrected by R08.T14.e–f, and the gates compare with the
+  vector reference. Acceptance: `cargo test -p hyperion-fit atmosphere`.
 
 - **R08.T12.c The tracer's benchmarks.** Slow tests run the benchmarks of Design note 10, and the
   tracer's references (R08.T12.b) are committed only once these pass. They are the workspace's
@@ -2251,6 +2358,46 @@ here, and `pnpm test` passes.
   - Garcia and Siewert's Haze L and Cloud C1, Natraj et al.'s Rayleigh tables (Stokes),
     Kokhanovsky et al. 2010 and IPRT Phase A, each to 3σ with σ ≤ 0.3%;
   - Loughman et al. 2004 within its 2–4% spread.
+
+  Before the benchmarks run, the Stokes mode gains (ruled 2026-10-09, `decision-r08-vector.md`
+  item 1):
+  - a `tabulated` phase kind in the case format: a₁ on its own angle grid and, optionally, a₂,
+    a₃, a₄, b₁ and b₂ per wavelength (block-diagonal; Hovenier, van der Mee and Domke 2004),
+    which the scalar mode reads for a₁ alone;
+  - a `depolarising` mark: in the Stokes mode a term without a matrix is refused unless the case
+    marks it so, and a marked term scatters by a₁ alone;
+  - the Stokes vector (I, Q, U, V), V coupled through b₂;
+  - beside I, the scalar radiance of the same paths, with the standard errors of both and of
+    their difference.
+
+  A tabulated matrix is checked on load (|a₂|, |a₃|, |a₄|, |b₁|, |b₂| ≤ a₁), and its table
+  against the source's normalisation and asymmetry to 10⁻⁴. The matrices' sources:
+  - Kokhanovsky's aerosol and cloud, and IPRT's spheres, from R08's Mie over its size
+    distributions (`decision-r08-licences.md` row 6c). These cases need R08.T5.b; the others do
+    not wait for it.
+  - A non-spherical IPRT case, from IPRT's own matrix in `crates/hyperion-fit/data/iprt_phase_a/`
+    if it fits the 500 kB hook, or recorded as not run.
+
+  The modes:
+  - Garcia and Siewert's cases run in the scalar mode.
+  - Natraj's, Kokhanovsky's and IPRT's run in the Stokes mode, asserting I, Q and U, and V where
+    published.
+
+  Variance reduction for the clouds' forward peak is allowed only if unbiased. A case that
+  cannot reach σ ≤ 0.3% records the σ reached and asserts 3σ at it, and "main" is told.
+
+  Unit tests:
+  - a sphere's single-scattering degree of polarisation is −b₁ ÷ a₁;
+  - I equals the scalar mode's for a `depolarising` term;
+  - a small sphere's tabulated matrix reproduces the built-in Rayleigh matrix.
+
+  The same commit corrects three citations in `atmosphere/optics.rs` and `atmosphere/case.rs`
+  (item 3):
+  - "Hansen and Travis 1974 … eq. 2.15" becomes "eqs. (2.15)–(2.16), p. 541 (their δ is ρ here)";
+  - "Witt 1977, ApJS 35, 1, eq. 13" becomes "eq. 19";
+  - "Cornette and Shanks 1992 (…), eq. 8" loses its number, gains "doi:10.1364/AO.31.003152; the
+    same function is Draine 2003, ApJ 598, 1017, eq. 5 at α = 1", and its mean cosine is stated
+    as derived and checked numerically.
 
   The benchmarks' published values are committed only as the values each test asserts, in the
   test's own layout, each with its paper and table or figure cited. No table is committed whole,
@@ -2292,14 +2439,25 @@ here, and `pnpm test` passes.
   Saturn-class case under `Shells::Spheroid` (H₂–He Rayleigh over a Lambertian 1-bar boundary;
   ground views at the equator looking north and east, at 60° and at the pole; the limb at 0.3, 1
   and 3 H over the equator and the pole). R08.T13's gate covers it with the thin cases. The
-  command `hyperion-fit atmosphere-reference` traces them, and the references are committed with
-  sample counts, times and load average. The cases are written through `bless.ts`'s
+  command `hyperion-fit atmosphere-reference --stokes` traces them, so that each reference holds
+  the vector I and the scalar I of the same paths (Design note 10, Polarisation). The references
+  are committed with sample counts, times and load average. The case writer gives every term its
+  matrix from T5's tables, or marks it `depolarising`. The cases are written through `bless.ts`'s
   `toMatchFileSnapshot` and read as JSON imports; both kinds of file pass `prettier --check` or are
   listed in `.prettierignore`, and each stays under the 500 kB added-file hook.
   - A vitest asserts that every case equals what the optics produce now, and names the commands to
     regenerate both files.
   - The metric of Design note 10 is written once as `gate.ts`, with its own tests on synthetic
-    inputs (the floor, the 3σ term, the cone average).
+    inputs:
+    - the images' grouping and each one's floor: a twilight image's dim sky is held to 5% of its
+      own brightest, not to the noon image's;
+    - the 4σ allowance, and the refusal of a reference whose σ exceeds T ÷ 8;
+    - the cone average;
+    - the recorded ΔE*ab, relative RMS difference and max ÷ mean.
+
+    The references are traced until σ_ref ≤ T ÷ 8 at every geometry (decision-backlog-1), and
+    each case's sample counts are committed with it.
+
   - Sanity tests on the references:
     - the Venus-class case's surface downward flux is 2–4% of the top's at the sun of the Pioneer
       Venus large probe's solar flux radiometer (LSFR), with the surface sky red-shifted (Tomasko
@@ -2312,7 +2470,9 @@ here, and `pnpm test` passes.
 
 ### R08.T13 Where the analytic term drifts
 
-A vitest applies `gate.ts` to the CPU twin's thin tables with the analytic term on every case. The
+A vitest applies `gate.ts` to the CPU twin's thin tables with the analytic term on every case,
+against the references' scalar radiance. This task measures Hillaire's scalar term; R08.T14.f
+re-runs the gate against the vector radiance with the polarisation correction (Design note 10). The
 subcommand `hyperion-fit atmosphere-sweep --out <sweep.json> [--smoke]` traces single-layer media
 over vertical extinction optical depth, single-scattering albedo and asymmetry. Beside each point
 it writes the twin's analytic radiances, which a bless-style vitest supplies as a case file. The
@@ -2342,7 +2502,7 @@ pass, and the full sweep is recorded here.
 
 ### R08.T14 The view-dependent multiple-scattering bake
 
-Per Design note 9, in four subtasks.
+Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
 
 - **R08.T14.a The plane-parallel solver.** `thick/discreteOrdinates.ts`: discrete ordinates in
   `f64`, 16 streams, about 64 layers, with all μ₀ solved on one factorisation. It is ported from
@@ -2366,18 +2526,76 @@ Per Design note 9, in four subtasks.
   never beside it for one body, and `ATMOSPHERE: APPROXIMATE` takes its place if the bake fails,
   until the body's atmosphere is next computed (the guide's draft rows, R08.T2). Acceptance:
   `pnpm test` and `just test-render` pass.
+- **R08.T14.e The polarisation correction** (Design note 10; ruled 2026-10-09,
+  `decision-r08-vector.md` item 2). It needs R08.T14.a and R08.T14.b.
+  - **The solver.** `thick/polarisation.ts` is a vector mode of `thick/discreteOrdinates.ts`
+    for (I, Q, U, V), with V carried only when a term has b₂.
+    - It is ported from the papers (Siewert 2000, JQSRT 64, 227; Schulz, Stamnes and Weng
+      1999, JQSRT 61, 105), never from GPL code.
+    - Each term's matrix is expanded in generalised spherical functions (de Rooij and van der
+      Stap 1984, A&A 131, 237) and delta-M truncated as the scalar bake is.
+  - **The bake.** `bakePolarisationCorrection` solves the vector and the scalar problem on the
+    same layers and stores ΔJ_pol(h, μ₀, μ_v, m) = J_vector − J_scalar (the I component) on
+    R08.T14.b's grid.
+    - The solve: 8 streams, Fourier modes m = 0..2, R08.T14.b's pseudo-spherical beam, all μ₀
+      on one factorisation, at the render channels, once per latitude band.
+    - Where the beam is undefined, ΔJ_pol = 0, recorded.
+    - It runs in the optics worker for every world with a term whose b₁ ≠ 0, thin or thick.
+  - Tests:
+    - at 16 streams the vector mode reproduces Natraj et al. 2009's τ 0.5, μ₀ 0.2 I, Q and U to
+      10⁻³ (the values asserted only, as in R08.T12.c);
+    - energy is conserved to 10⁻⁶ for ω = 1;
+    - with every term `depolarising`, ΔJ_pol is 0 to 10⁻¹²;
+    - the 8-stream ΔJ_pol added to the 16-stream scalar solve matches the 16-stream vector
+      solve to 0.5% of I on the Earth, three-bar, Venus-class and Titan-class columns (the
+      ruling measured ≤ 0.12% on a Rayleigh slab);
+    - modes past m = 2 change I by under 0.1%, or more are kept, recorded;
+    - on the thick cases, the channel solve agrees with a 15-bin solve converted to channels
+      to 0.5% of I, or thick worlds solve it in the bins, recorded;
+    - the time a band is recorded beside the scalar bake's (estimated by operation count at
+      0.15–0.5 s).
+
+  Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/thick/polarisation`.
+
+- **R08.T14.f The correction's read path and the vector gates.** It needs R08.T13, R08.T14.c
+  and R08.T14.e.
+  - **The read path.** The sky-view, aerial-perspective and march kernels and their CPU twin
+    add σ_s·Σₘ ΔJ_pol,m cos(mΔφ) per source to their multiple-scattering term: Hillaire's
+    σ_s·Ψ_ms·p_u, or R08.T14.c's thick table.
+    - It is stored one layer a band, interpolated at the sample's latitude, and read on both
+      settings.
+    - R08.T16.b's disc bake reads it as the march does.
+    - `TABLE_SIZES` gains its size, and it is cached per world.
+    - While a world's correction bakes, the label block says `ATMOSPHERE: COMPUTING`, as for
+      any gated bake (Design note 9).
+  - Tests:
+    - R08.T13's case gate, re-run against the references' vector I with the correction:
+      Earth, Mars and `saturn-oblate` pass. The uncorrected twin against the scalar I is
+      recorded beside;
+    - R08.T13's surface-irradiance test against the vector flux aggregate, to 2%, uncorrected;
+    - the kernels' correction equals the twin's under `just test-render`;
+    - the per-frame cost on the RTX 3080 and the bytes a planet are recorded against Design
+      note 11; the UHD 620's cost is the owner's to record. If the low setting misses its
+      budget, it drops the correction from the aerial-perspective volume first and m = 1
+      second, recorded.
+
+  Acceptance: `pnpm test` and `just test-render` pass.
+
 - **R08.T14.d The gates.**
-  - The Venus-class cases (92 and 58 bar) and the Titan-class case, through the CPU twin with the
-    baked table, pass `gate.ts` per geometry. Both m = 0 alone and m = 0..1 are run, and which is
-    needed is recorded. The Rayleigh-only Venus columns gate first. The cloudy and hazy cases
-    follow once R08.T5.b's H₂SO₄ and tholin files exist (licences ruled 2026-10-09,
+  - It needs R08.T14.f. The Venus-class cases (92 and 58 bar) and the Titan-class case, through
+    the CPU twin with the baked table and the polarisation correction, pass `gate.ts` against the
+    vector I per geometry. Both m = 0 alone and m = 0..1 are run, and which is needed is
+    recorded. The Rayleigh-only Venus columns gate first. The cloudy and hazy cases follow once
+    R08.T5.b's H₂SO₄ and tholin files exist (licences ruled 2026-10-09,
     `decision-r08-licences.md`).
-  - The bake time on the UHD 620's host (by the owner), summed over the bands, is under
-    `BAKE_CEILING_S` on a quiet machine, for a Saturn-class figure (4 bands) and for a giant at
-    plan 14's cap (6–7 bands, or 5 after `BAND_STEP`'s widening), or the Risks' fallback is taken
-    and recorded. If the capped giant fails it, it is reported to "main" for a decision agent's
-    ruling (a further widening or fewer bands at the cap, Design note 11). The bands nearest the
-    camera bake first, and `ATMOSPHERE: COMPUTING` clears when the last lands.
+  - The bake time on the UHD 620's host (by the owner), summed over the bands with the
+    polarisation correction's, is under `BAKE_CEILING_S` on a quiet machine, for a Saturn-class
+    figure (4 bands) and for a giant at plan 14's cap (6–7 bands, or 5 after `BAND_STEP`'s
+    widening), or the Risks' fallback is taken and recorded. Before that fallback, the correction
+    drops to 6 streams and then halves its μ₀ axis, each recorded. If the capped giant fails it,
+    it is reported to "main" for a decision agent's ruling (a further widening or fewer bands at
+    the cap, Design note 11). The bands nearest the camera bake first, and
+    `ATMOSPHERE: COMPUTING` clears when the last lands.
   - When a regime's gates pass, `classifyRegime` routes its `thickScattering` worlds to the bake,
     and `ATMOSPHERE: APPROXIMATE` clears for them.
 
@@ -2392,6 +2610,9 @@ Per Design note 9, in four subtasks.
   - on a Saturn-class figure, the deck lies at the same pressure in every band, and the column
     above it differs between bands by their gravity ratio;
   - the giant-deck case passes the gate.
+  - R08.T14.e's correction runs over the medium above the deck, with the deck as a depolarising
+    lower boundary (a stated approximation), and the giant-deck case's gate is against the
+    vector I.
 - **R08.T15.b Below the deck.** The plane-parallel downwelling table by altitude, view angle and
   sun angle, one layer a band, gives sky and aerial perspective beneath. Tests:
   - the Venus-class surface passes the gate and the flux sanity test of R08.T12.b;
@@ -2456,14 +2677,18 @@ records are here.
   - the column's hydrostatic and profile checks;
   - Mie against Wiscombe's cases;
   - the aggregates against optool;
-  - every table's CPU twin against the reference on the stated metric (T13–T16), in `just ci`;
+  - every table's CPU twin against the reference on Design note 10's metric (T13–T16;
+    decision-backlog-1), in `just ci`, with u′v′, ΔE*ab and the relative RMS difference recorded;
+  - the polarisation correction against a 16-stream vector solve (T14.e), and every gate against
+    the vector reference from T14.f on;
   - the surface irradiance against the reference's downwelling flux, and the summed sky-view against
     per-sun tables (T7, T13);
   - oblate bodies (Design note 17): normal gravity against WGS 84's γ_e and γ_p to 10⁻⁹ in both
     languages (T3.d, T12.d); the sliced twin against an `f64` brute-force spheroid march (T6.e);
     and `saturn-oblate` passing the gate with the slicing and failing it without (T13).
-- **Reference, slow:** the tracer against Garcia and Siewert, Natraj, Kokhanovsky, IPRT A and
-  Loughman, under `just test-slow`; its spheroid mode against its sphere mode at a = c (T12.d).
+- **Reference, slow:** the tracer against Garcia and Siewert (scalar), Natraj, Kokhanovsky and
+  IPRT A (Stokes, with tabulated matrices) and Loughman, under `just test-slow`; its spheroid mode
+  against its sphere mode at a = c (T12.d).
 - **GPU, software:** every kernel compiles and agrees with its twin on SwiftShader under
   `just test-render`, asserting properties, never images.
 - **By eye, recorded:**
@@ -2787,10 +3012,22 @@ generator, and the reference's sampling needs no domain tag.
   gives a cross-section within 0.4% of the module's at 532 nm (a science check). Ford and Browne
   1973, or Raj et al.'s mean polarisability set against Peck and Huang, would test the
   refractivity itself.
-- **Scalar radiance.** The drawn image is scalar, while the Rayleigh benchmark tables are vector,
-  and the scalar error for Rayleigh can reach about 10%. R08.T12.a measures it and reports it as a
-  finding. Measured: −11.8% to +10.7% on Natraj et al. 2009's τ = 0.5 case (below, "The scalar
-  against the vector Rayleigh radiance, measured in R08.T12.a").
+- **Scalar radiance: decided 2026-10-09** (`decision-r08-vector.md` item 2). The error is
+  corrected, not accepted.
+  - **Measured:** R08.T12.a found −11.8% to +10.7% on Natraj's τ 0.5 case. The ruling's sweep
+    found up to −18.7% and +11.9% at τ 0.5–1, and −5.2% to +4.6% in Earth's blue with aerosol.
+  - **The correction:** R08.T14.e's 8-stream vector-minus-scalar table, read by R08.T14.f.
+    From R08.T14.f on, every gate compares with the vector reference (Design note 10,
+    Polarisation). Until then, the drawn sky carries the scalar error.
+  - **Stated approximations:**
+    - terms without a published matrix are total depolarisers;
+    - planetshine is unpolarised;
+    - Lambertian ground and decks depolarise;
+    - the correction is plane-parallel with the pseudo-spherical beam, so its residual at
+      twilight and the limb is the gate's to find;
+    - fluxes and the surface irradiance are not corrected (under about 1%).
+  - **Its costs**, which R08.T14.e–f measure: a sub-second bake a band, 0.20–0.39 MB a band,
+    and three reads per sample per source.
 - **Data licences: decided 2026-10-09** (delegated, `decision-r08-licences.md`, after
   `decisions-r05.md` item 4). No raw table is committed; the values R08 uses are committed
   reduced, with their citations in `NOTICE`:
@@ -2849,11 +3086,26 @@ generator, and the reference's sampling needs no domain tag.
   realism ruling wants them, they are later tasks. R10 asks this plan for the sun's refracted
   apparent elevation for its shadow test (R10 Design note 10). The ask stays open until refraction
   is drawn; until then R10 reads the geometric elevation.
-- **The metric's floor is for the owner.** Design note 10's max(0.05·L_ref, 3σ_ref, 10⁻³·L_max)
-  and the 2% flux aggregates are this plan's reading of the brainstorm's "to 5% in radiance". The
-  floor relaxes the 5% only at radiances under 10⁻³ of the case's brightest, and where the
-  reference's own noise is larger. The owner may tighten or loosen it, and the gate's tests take
-  the floor as one named constant, so that a ruling changes one line.
+- **The metric's floor** (decided, decision-backlog-1, 2026-10-09).
+  - The gate is |ΔL| ≤ max(0.05·L_ref, 3 × 10⁻⁴·L_max(image)) + 4σ_ref, with σ_ref ≤ T ÷ 8
+    (Design note 10).
+  - It replaces max(0.05·L_ref, 3σ_ref, 10⁻³·L_max(case)), which had three faults:
+    - its floor took over from the 5% below 2% of the case's brightest, not 10⁻³ as this bullet
+      said;
+    - over the whole case, a twilight image's sky fell under the noon image's floor;
+    - its 3σ term gave no noise allowance where the 5% governed.
+  - The 5% is in radiance, so that it holds at every exposure. Through AgX at the automatic
+    exposure it is at most about one just-noticeable difference (0.96 ΔL*).
+  - The 2% aggregates stand.
+  - A regime whose table cannot reach the gate stays `ATMOSPHERE: APPROXIMATE`. The gate is not
+    loosened for it.
+  - _The guide row, still to apply._ decision-backlog-1 §2.6 (f) gives the guide's
+    `ATMOSPHERE: APPROXIMATE` row (`docs/frontend/ux-guidelines.md`) the check's figure: after
+    "against an independent path-traced reference for that kind of atmosphere", the clause
+    "agreement within 5% in radiance wherever in the view a difference could be seen", and its
+    draft trailer's parenthesis becomes "(plan R08, R08.T2; the check's figure per
+    decision-backlog-1)". Another lane is editing the guide, so the row is applied after that lane
+    lands. Until then the row names no figure.
 - **Licences no longer block the cloudy gates** (decided 2026-10-09, `decision-r08-licences.md`).
   The Venus-class cloudy case, Mars and the Titan-class haze gate as R08.T5.b's files land, and
   are drawn `ATMOSPHERE: APPROXIMATE` only until their gates pass. NH₄SH alone stays ungated: a
@@ -3076,9 +3328,10 @@ generator, and the reference's sampling needs no domain tag.
       computed (a choice for the owner; Design note 9 does not cover a failed bake);
     - `APPROXIMATE` concerns thick and strongly flattened bodies only, so it does not reach a thin
       atmosphere drawn before R08.T13's check; it names the oblate case before R08.T6.f (Design
-      note 17) beside the thick one, as `AtmosphereLabel`'s sketch does, and names no 5% figure,
-      since the metric's floor is still the owner's (Risks, "The metric's floor is for the
-      owner").
+      note 17) beside the thick one, as `AtmosphereLabel`'s sketch does, and, since
+      decision-backlog-1 ruled the floor, names the check's figure: agreement within 5% in
+      radiance wherever in the view a difference could be seen (Design note 10). The clause is
+      applied to the guide after the lane now editing it lands (Risks, "The metric's floor").
   - _Sign-off: pending._ The owner signs off the six rows (the roadmap's "Still awaiting", which
     now lists `ATMOSPHERE: PENDING`). The client is built to them meanwhile, and the sign-off is
     recorded here when given.
@@ -3195,10 +3448,14 @@ generator, and the reference's sampling needs no domain tag.
     (sun at 95°) is noisy, about 4–7% at 2 × 10⁴ samples, since few forced collisions see the sun;
     such radiances lie under Design note 10's 10⁻² L_max, where σ_ref ≤ 1% does not bind, but T12.b
     budgets their samples.
-  - _Citations._ The formulas of Hansen and Travis 1974 (the depolarised Rayleigh matrix), Cornette
-    and Shanks 1992 and Witt 1977 were each re-derived and checked numerically by the science
-    check; their equation numbers (2.15, 8 and 13) could not be read from the papers here, and are
-    to be confirmed from a library copy before T12.c commits benchmark values.
+  - _Citations, decided 2026-10-09_ (`decision-r08-vector.md` item 3).
+    - Hansen and Travis 1974's matrix is eq. (2.15), with Δ and Δ′ in eq. (2.16), p. 541; their
+      δ is the code's ρ.
+    - Witt 1977's Henyey–Greenstein inverse CDF is eq. (19). The "eq. 13" cited is the forced
+      first collision's.
+    - Cornette and Shanks 1992's number is unreadable (every copy is paywalled), so it is cited
+      by DOI without one, beside Draine 2003's eq. (5) at α = 1.
+    - R08.T12.c's commit corrects `optics.rs` and `case.rs`.
 - **The scalar against the vector Rayleigh radiance, measured in R08.T12.a** (2026-10-09; a
   finding, for a decision agent's sign-off through "main"). The case: Natraj, Li and Yung 2009
   (ApJ 691, 1909), τ = 0.5, μ₀ = 0.2, A = 0, ρ = 0, πF₀ = π, diffuse radiance only, as a
@@ -3216,25 +3473,20 @@ generator, and the reference's sampling needs no domain tag.
     +2.5% at μ = 0.52 and +6.6% to +7.2% at μ = 0.84. An independent scalar adding–doubling by the
     science check gives −11.79% to +10.75%, and the literature has errors "as large as 10%" for pure
     Rayleigh (Lacis et al. 1998, GRL 25, 135; Kotchenova et al. 2006, Appl. Opt. 45, 6762).
-  - The client is gated scalar against scalar, so the gate does not see this error; the drawn sky
-    carries it, up to about 12% in a thin Rayleigh sky at low sun. Its acceptance as a stated
-    limitation of the drawn sky is for the sign-off (provisional lean: accept and state it). The
-    benchmark test itself is T12.c's, and the table values are not committed (Risks, "Re-validated
-    at bce2aef5").
-  - Open for T12.c: Kokhanovsky et al. 2010 and IPRT Phase A publish vector results for their
-    aerosol and cloud cases too, and the Stokes mode covers Rayleigh and isotropic scattering only.
-    Either T12.c compares scalar I and budgets the scalar error inside its 3σ, or the Stokes mode
-    gains tabulated matrices (a₁–a₄, b₁, b₂, where V arises). Provisional lean: the second.
-  - All three questions (T12.c's vector scope, the drawn sky's scalar error, and the equation
-    numbers under "Deviations in T12.a, as built") are with a decision agent through "main"
-    (`decision-r08-vector.md`, 2026-10-09); its ruling goes to T12.c's agent and replaces the
-    provisional leans here.
+  - _Decided 2026-10-09 (`decision-r08-vector.md`)._
+    - The error is corrected, not accepted: R08.T14.e–f, with the gates against the vector
+      reference from R08.T14.f on (item 2).
+    - The Stokes mode gains tabulated block-diagonal matrices (a₁–a₄, b₁, b₂), the Stokes vector
+      (I, Q, U, V), a `depolarising` mark and the scalar I of the same paths, in R08.T12.c (item
+      1).
+    - The equation numbers are settled under "Deviations in T12.a, as built" (item 3).
 - **Closed set, for the composition audit (R08.T12.a).** The tracer's medium is open: any number of
   terms, each a density, spectral coefficients and a phase function from data, so it references
   whatever composition the client's optics write. Closed, each small and stated: the phase
   function kinds (Rayleigh, Cornette–Shanks, isotropic, none: no tabulated phase until T12.c, so a
   Mie or aggregate aerosol cannot be referenced yet); the Stokes mode's kinds (Rayleigh, isotropic,
-  none); the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells
+  none; R08.T12.c adds tabulated matrices and the `depolarising` mark, `decision-r08-vector.md`);
+  the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells
   (the sphere until T12.d).
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
