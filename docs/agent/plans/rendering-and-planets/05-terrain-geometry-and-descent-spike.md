@@ -4023,7 +4023,10 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   - The coarse field is held as the worker's own copy in JavaScript (the structured clone it
     receives), replaced by the next, for the worker's life, not copied into the module's memory:
     the test planet does not read it, and the memory at rest is the same, which Design note 21's
-    memory row measures. R09 adds the export that copies it in.
+    memory row measures. R10 adds the exports that copy it in, with the client that feeds them:
+    `field_init` and `field_chunk`, a `PartialField` per body (R10.T6.b, R10's Design note 16),
+    fed by `CoarseFieldStore` (R10.T7). R09 builds no client code (R09's Risks, "Re-validated at
+    `bce2aef5`"). _Corrected 2026-10-09: this note first named R09._
   - `BakeSettings` gains `ridges: TestPlanetRidges` (`"off" | "on"`, Design note 12); `BakedPatch`
     gains `originHeightM` and `skirtDepthM` for T11.a (approved by the orchestrator).
   - `TerrainNormals` and `TerrainVertexPath` moved to `view/quality/terrainKinds.ts`, a file with
