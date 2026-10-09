@@ -2484,7 +2484,12 @@ generator, and the reference's sampling needs no domain tag.
   and minutes of time.
 - **H₂'s cross-section** (medium confidence): Peck and Huang's refractivity runs 6–7% above
   Dalgarno and Williams, a 6–7% difference in a giant's Rayleigh depth. Ford and Browne 1973 or a
-  modern polarisability anisotropy would settle it.
+  modern polarisability anisotropy would settle it. _Checked by R08.T3.b (2026-10-09):_ with Raj,
+  Hamaguchi and Witek 2018's ab initio anisotropy in the King factor and the real-gas N, the
+  module's H₂ runs 7.0% above Dalgarno and Williams (6.9% with the ideal N). Raj et al.'s own ᾱ
+  gives a cross-section within 0.4% of the module's at 532 nm (a science check). Ford and Browne
+  1973, or Raj et al.'s mean polarisability set against Peck and Huang, would test the
+  refractivity itself.
 - **Scalar radiance.** The drawn image is scalar, while the Rayleigh benchmark tables are vector,
   and the scalar error for Rayleigh can reach about 10%. R08.T12.a measures it and reports it as a
   finding. Measured: −11.8% to +10.7% on Natraj et al. 2009's τ = 0.5 case (below, "The scalar
@@ -2976,9 +2981,11 @@ generator, and the reference's sampling needs no domain tag.
   `GAS_KING_FACTOR` (`KingFactor { factor, source }`; `kingFactor` reads it) and
   `GAS_MOLAR_MASS_G_PER_MOL` (below, "Species"). The module also exports
   `RAYLEIGH_WAVELENGTH_RANGE_NM` (300–1,000 nm vacuum; outside it a `RangeError`, a unit error),
-  `BOLTZMANN_J_PER_K`, `referenceNumberDensityPerM3`, `crossSectionFromDispersionM2`, and the
-  Earth check's `DRY_AIR_DISPERSION` and `dryAirKingFactor`. Two science-checker agents checked
-  Design note 4's table against the primary sources, and their key figures were recomputed. Main
+  `BOLTZMANN_J_PER_K`, `referenceNumberDensityPerM3`,
+  `crossSectionFromDispersionM2(dispersion, kingFactorAt, wavelengthNm)` (F_K passed as a function
+  of the wavelength, so that it is taken where n is), and the Earth check's `DRY_AIR_DISPERSION`
+  and `dryAirKingFactor`. Two science-checker agents checked Design note 4's table against the
+  primary sources, and their key figures were recomputed; a third reviewed the result. Main
   adopted every lean below on 2026-10-09. Design note 4 stands as written; these corrections
   supersede it:
   - **CH₄** takes He, Fang, Shoshanim, Brown and Rudich, Atmos. Chem. Phys. 21 (2021) 14927,
@@ -2987,26 +2994,28 @@ generator, and the reference's sampling needs no domain tag.
     polarisabilities. It runs 13% high in n − 1 against Loria 1909, Rollefson and Havens 1940 and
     the static polarisability, and Wilmouth and Sayres 2019 measured 22% below it. He et al.'s
     formula matches Loria to 0.5% over 529–658 nm.
-  - **O₂** takes refractiveindex.info's 1.181 494 × 10⁻⁴ + 9.708 931 × 10⁻³ ÷ (75.4 − σ²), at
+  - **O₂** takes refractiveindex.info's 1.181 494 × 10⁻⁴ + 9.708 931 × 10⁻³ ÷ (75.4 − λ⁻²), at
     20 °C, cited to Křen, Appl. Opt. 50 (2011) 6484, which refits Zhang et al.'s data. Zhang, Lu
     and Wang 2008's own eq. 20, 15,532.45 + 456,402.97 ÷ (50 − λ⁻²), holds only over 740–860 nm.
     The tests hold the formula to Zhang's eq. 20 within 0.1% over 740–860 nm, to Bates's O₂
     (Sneep and Ubachs, eq. 23) within 0.2% over 300–546 nm, and to Peck and Reeder's dry air
     within 0.1% through the mixture. _Open:_ Křen's comment was not read (Optica, closed). Reading
     it would settle the coefficients and the 20 °C state.
-  - **N₂** takes Peck and Khanna's own 15 °C form, 6,497.378 + 3,073,864.9 ÷ (144 − σ²) (their
+  - **N₂** takes Peck and Khanna's own 15 °C form, 6,497.378 + 3,073,864.9 ÷ (144 − λ⁻²) (their
     abstract), from 468 nm. Sneep and Ubachs's eq. 10, 6,498.2 + …, is their 0 °C form scaled as an
     ideal gas and runs 1.5 × 10⁻⁴ higher. Below 468 nm the module takes Bates 1984's ultraviolet
     branch (Sneep and Ubachs, eq. 11), which joins it to 4 × 10⁻⁷.
   - **CO₂** takes Bideau-Mehu et al. 1973 at 0 °C, as Sneep and Ubachs's eq. 13 corrects it.
     Their printed last numerator, 0.121 814 5 × 10⁻⁴, is 10⁴ too small: only 0.121 814 5
     reproduces their Table 2's 13.29, and it is what refractiveindex.info's 0 °C copy carries.
+    Their printed prefactor, 1.1427 × 10⁶, is 10³ too large.
   - **King factors.** "Hohm 1993" (Mol. Phys. 78, 929) is the hydrocarbon mean-polarisability
     paper. The anisotropies are in Hohm 1994 (Chem. Phys. 179, 533), which was not read.
     - H₂ takes 1.0312 + 3.09 × 10⁻⁴ λ⁻² (1.0322 at 550 nm). This is 1 + (2/9)(γ ÷ ᾱ)² for the
       v = 0, J = 0 averages of Raj, Hamaguchi and Witek 2018's ab initio α∥ and α⊥ (J. Chem.
-      Phys. 148, 104308; data public), fitted over 380–800 nm. With it, Dalgarno and Williams
-      1962 runs 7.0% low (6.4% with the ideal N).
+      Phys. 148, 104308; data public), fitted over 380–800 nm. With it, the module's H₂ runs
+      7.0% above Dalgarno and Williams 1962 (6.9% with the ideal N); Design note 4's "6.5% low"
+      is the same gap seen from the other side.
     - H₂O's 1.001 is now cited: Murphy 1977, ρ = (3.0 ± 1.4) × 10⁻⁴ for linear polarisation,
       which gives F_K = 1.0010 ± 0.0005.
     - _Open:_ NH₃ takes F_K = 1, provisional and probably about 1% low. Reading Hohm 1994 or
@@ -3014,9 +3023,13 @@ generator, and the reference's sampling needs no domain tag.
   - **The real gas.** N_ref = p ÷ (Z k_B T), with Z = p ÷ (ρRT) from the NIST Chemistry
     WebBook's densities at each state. The literature's ideal N leaves σ high by 1 ÷ Z²: 3.1% for
     NH₃, 1.36% for CO₂ and Xe, 0.55% for Kr and at most 0.15% for the rest. Air takes CIPM-2007's
-    0.999 59. He et al.'s CH₄ and N₂O take Z = 1, because their n is defined through the ideal N.
-    _Open:_ whether Cuthbertson 1914 reduced NH₃ as a real gas or an ideal one (±3% in σ).
-    Reading the paper would settle it.
+    0.999 592. He et al.'s CH₄ and N₂O take Z = 1, because their n is defined through the ideal N.
+    _Open_, each settled by reading the paper:
+    - whether Cuthbertson 1914 reduced NH₃ as a real gas or an ideal one (±3% in σ);
+    - whether the literature indices behind Börzsönyi et al.'s Sellmeier forms were reduced as a
+      real gas (±1.4% in Xe's σ, ±0.6% in Kr's);
+    - whether He et al.'s N was the ideal one at their measuring state, about 295 K and 1020 hPa
+      (if so, +0.57% in N₂O's σ and +0.18% in CH₄'s).
   - **He's cross-check** is the form Kurucz 1970 (SAO Spec. Rep. 309, §5.8) prints as "from
     Dalgarno (1962)". Mansfield and Peck agree with it to 0.5%. _Open:_ Chan and Dalgarno 1965 was
     not read; reading it would confirm the attribution.
@@ -3027,9 +3040,29 @@ generator, and the reference's sampling needs no domain tag.
       is Ciddor's.
     - Cuthbertson's NH₃ formula is probably in air wavelengths, a 2 × 10⁻⁵ difference in n − 1.
     - The tutorials' set is Riley et al. 2004's, through Bruneton and Neyret 2008, §2.
+    - _Machine-readable copies._ H₂O, CH₄ and N₂O have no refractiveindex.info file, so their
+      `dataFile` is `undefined`. H₂O's Ciddor coefficients are as NIST's Engineering Metrology
+      Toolbox reproduces them; CH₄'s and N₂O's are He et al. 2021's eqs. 10 and 9 as printed.
+  - **The brainstorm** ("Atmosphere", and its Sources, which mark these "from memory") names CH₄
+    from Sneep and Ubachs 2005, and H₂ and He from Dalgarno's cross-sections. Design note 4 took
+    H₂ and He from Peck and Huang 1977 and Mansfield and Peck 1969, keeping Dalgarno's figures as
+    cross-checks; the roadmap's "Brainstorm corrections" table records that. T3.b takes CH₄ from
+    He et al. 2021. The brainstorm's rule, each gas's measured dispersion and King factor at its
+    formula's own state, holds; only the source names change. _Drafted for the owner:_ the
+    roadmap's table gains the CH₄ row and the King factors' correction (R08.T3.b), for the owner
+    to apply to the brainstorm. This corrects the re-validation's "nothing here contradicts the
+    brainstorm".
+  - **Design note 4's dense-gas factor** (a finding for the owner; nothing computed uses it). The
+    note gives "about 1.06 at Venus's surface". A science check of NIST's CO₂ (Span–Wagner) at
+    737 K and 9.2 MPa gives Z = 1.0057 and ρk_BTκ_T = 0.985, about 1.025 with the Lorentz–Lorenz
+    local field (medium confidence). It remains a recorded omission, and the figure is the
+    owner's to correct.
+  - **`BOLTZMANN_J_PER_K`** lives in `rayleigh.ts`, because R08.T3.a imports it from there (main,
+    2026-10-09). `lib/system/constants.ts`, which R08.T3.d made for G, is its natural home once
+    both tasks land.
   - **As measured** (`rayleigh.test.ts`):
-    - Earth gives 4.846, 11.482 and 28.698 × 10⁻⁶ m⁻¹ at 680, 550 and 440 nm. That is 0.05%
-      below R05's constants: Z, and the real density at sea level.
+    - Earth gives 4.846, 11.482 and 28.698 × 10⁻⁶ m⁻¹ at 680, 550 and 440 nm. That is 0.04%
+      below R05's constants, since β scales with Z.
     - Dry air at 550 nm is 4.506 × 10⁻²⁷ cm², against Bucholtz's 4.51 and Bodhaine's 4.5105.
     - The per-gas mixture matches Peck and Reeder's dry air to 3 × 10⁻⁴ over 380–760 nm.
     - A 92-bar CO₂ column has τ_R = 16.26 at 550 nm and 40.9 at 440 nm.
@@ -3044,23 +3077,34 @@ generator, and the reference's sampling needs no domain tag.
       | CH₄ | 11.35   | 12.47 ± 0.23 (an extinction, with CH₄'s absorption; He et al. 2021, §3.4) |
 
       All in 10⁻²⁷ cm². Ar's, N₂'s and CO₂'s formulas are pinned to their own values, Sneep and
-      Ubachs's n-based figures times Z², and each measurement is a separate check with its error.
+      Ubachs's n-based figures times Z². Each measurement is a separate check within its 1σ: Ar
+      0.35σ, N₂ 0.8σ, CO₂ 0.9σ and O₂ 0.97σ. O₂'s 4.50 comes from their three-component fit with
+      collision-induced absorption, not from a pure scattering slope.
   - **Extrapolations** beyond the fitted spans, inside 300–1,000 nm:
     - He below 480 nm, and Ar below 468 nm;
+    - Ne, Kr and Xe below 400 nm, the database's validity range;
     - NH₃ outside 480–671 nm;
-    - CH₄ above 671 nm;
+    - CH₄ above 671 nm, and N₂O outside 307–725 nm;
     - O₂ below 400 nm;
-    - CO₂'s King factor outside about 476–625 nm.
+    - CO₂'s and N₂O's King factors outside 457.9–647.1 nm, Alms, Burnham and Flygare 1975's
+      lines (J. Chem. Phys. 63, 3321);
+    - H₂'s King factor outside 380–800 nm (1.3 × 10⁻⁴ off at 300 nm, by a science check's
+      refit).
   - **Species** (the owner's directive of 2026-10-09, relayed by main: the generation handles any
     composition one might expect to exist). `Gas` is plan 14's nine, in `Gas::ALL`'s order, then:
     - Ne, Kr and Xe from Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay, Appl. Opt. 47 (2008)
-      4856: Sellmeier forms at 0 °C and 1,000 mbar, fitted over 400–1,000 nm, with F_K = 1 and Z
-      from the WebBook. The coefficients are refractiveindex.info's; the paper was not read.
-      Xe's C₁ takes the database's correction of a typo, 12.75 × 10⁻⁶ to 12.75 × 10⁻³ µm². The
-      tests hold them to C. and M. Cuthbertson's (1910, 1932) within 0.5%. The same paper's Ar,
-      He and N₂ forms match the module's within 0.3%, which confirms its state.
+      4856: Sellmeier forms at 0 °C and 1,000 mbar (their Table 2), with F_K = 1 and Z from the
+      WebBook. They measured the phase at 800 nm and joined it to the literature's ultraviolet and
+      visible indices; 400–1,000 nm is refractiveindex.info's validity range. The coefficients
+      are the database's; the paper was not read. Xe's C₁ takes the database's correction of a
+      typo, 12.75 × 10⁻⁶ to 12.75 × 10⁻³ µm². The tests hold them to C. and M. Cuthbertson's
+      (1910, 1932): Ne within 0.1% and Xe within 0.3%. Kr is held within 0.5%, since
+      Cuthbertson's Kr sits a flat 0.47% low and Koch 1949's (Leonard 1974) agrees with Börzsönyi
+      to 0.1%. The same paper's Ar, He and N₂ forms match the module's within 0.3%, which confirms
+      its state.
     - N₂O from He et al. 2021, eq. 9 (307–725 nm, ideal N, Z = 1), with Sneep and Ubachs's
-      eq. 19 King factor (Alms et al. 1975; 1.225 at 532.2 nm). It matches their eq. 20 within 1%.
+      eq. 19 King factor (Alms et al. 1975, 457.9–647.1 nm; 1.225 at 532.2 nm). It matches their
+      eq. 20 within 1%.
       Their measured 15.90 ± 0.08 × 10⁻²⁷ cm² at 532.2 nm is 12% below the formula. He et al.'s
       own measurements match the n-based value to −0.6 ± 1.1%, so it is recorded, not tested.
 

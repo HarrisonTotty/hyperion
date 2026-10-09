@@ -18,22 +18,27 @@
  * N_ref is the real gas's, p_ref ÷ (Z k_B T_ref), with Z the compressibility factor at the state
  * ({@link Dispersion.compressibility}). The literature's tables (Bodhaine et al. 1999, Sneep and
  * Ubachs 2005) take the ideal p ÷ (k_B T), which leaves σ high by 1 ÷ Z²: 3.1% for NH₃, 1.4% for
- * CO₂ and Xe, 0.5% for Kr and at most 0.15% for the other gases. The dense-gas fluctuation factor,
- * about 1.06 at Venus's surface, is a recorded omission (Design note 4).
+ * CO₂ and Xe, 0.5% for Kr and at most 0.15% for the other gases. The dense gas's own fluctuation
+ * factor at a body's surface is a recorded omission (Design note 4). Design note 4 gives about
+ * 1.06 at Venus's surface; NIST's CO₂ there gives ρk_BTκ_T = 0.985, about 1.025 with the local
+ * field (R08's Risks).
  *
- * Wavelengths are in vacuum, nm. Where one exists, a formula's machine-readable copy is
- * refractiveindex.info's database (Polyanskiy, Sci. Data 11 (2024) 94; CC0), named in
- * {@link Dispersion.dataFile}. The coefficients were checked against the paper as printed
- * wherever the paper could be read, as `rayleigh.test.ts` records. The tutorials' 5.8, 13.5 and 33.1 × 10⁻⁶ m⁻¹ appear nowhere. They
- * are Riley et al. 2004's, which Bruneton and Neyret 2008 took (§2), a pure λ⁻⁴ law with no King
- * factor.
+ * Wavelengths are in vacuum, nm. In the formulas below λ is in µm and ν, the vacuum wavenumber,
+ * in cm⁻¹. Where one exists, a formula's machine-readable copy is refractiveindex.info's database
+ * (Polyanskiy, Sci. Data 11 (2024) 94; CC0), named in {@link Dispersion.dataFile}. The
+ * coefficients were checked against the paper as printed wherever the paper could be read, as
+ * `rayleigh.test.ts` records. No formula here gives the tutorials' 5.8, 13.5 and 33.1 × 10⁻⁶ m⁻¹:
+ * those are Riley et al. 2004's, which Bruneton and Neyret 2008 took (§2), a pure λ⁻⁴ law with no
+ * King factor.
  */
 
 /**
- * Every gas with Rayleigh optics here, by formula. Plan 14's nine come first, in `Gas::ALL`'s order
- * (`planetary::derive::atmosphere::Gas`, `Hydrogen` … `Argon`), then Ne, Kr, Xe and N₂O.
+ * Every gas with Rayleigh optics here, by formula.
  *
  * @remarks
+ * Plan 14's nine come first, in `Gas::ALL`'s order (`planetary::derive::atmosphere::Gas`,
+ * `Hydrogen` … `Argon`), then Ne, Kr, Xe and N₂O.
+ *
  * The set is open: a species is added as data, by its formula here and an entry in each of
  * {@link GAS_DISPERSION}, {@link GAS_KING_FACTOR} and {@link GAS_MOLAR_MASS_G_PER_MOL}, each with
  * its sources; the compiler names any record that lacks it. Gases a generator could plausibly
@@ -83,8 +88,10 @@ export interface Dispersion {
    */
   readonly dataFile: string | undefined;
   /**
-   * The vacuum wavelengths the formula was fitted over, nm. Between these and
-   * {@link RAYLEIGH_WAVELENGTH_RANGE_NM}'s ends the formula is extrapolated.
+   * The vacuum wavelengths the formula was fitted over, nm.
+   *
+   * @remarks
+   * Between these and {@link RAYLEIGH_WAVELENGTH_RANGE_NM}'s ends the formula is extrapolated.
    */
   readonly measuredNm: readonly [number, number];
 }
@@ -100,18 +107,22 @@ export interface KingFactor {
 }
 
 /**
- * The vacuum wavelengths the formulas are evaluated over, nm: 300 to 1,000. The range holds the
- * bake bins (380–760 nm, Design note 5), the channels and the CIE functions' visible span.
+ * The vacuum wavelengths the formulas are evaluated over, nm: 300 to 1,000.
  *
  * @remarks
- * Every formula's poles lie outside it, the nearest being dry air's at 160 nm and CO₂'s infrared
- * term at 4.14 µm. A wavelength outside the range is a caller's unit error, and is refused.
+ * The range holds the bake bins (380–760 nm, Design note 5), the channels and the CIE functions'
+ * visible span. Every formula's poles lie outside it, the nearest being dry air's at 160 nm and
+ * CO₂'s infrared term at 4.14 µm. A wavelength outside the range is a caller's unit error, and is
+ * refused.
  */
 export const RAYLEIGH_WAVELENGTH_RANGE_NM: readonly [number, number] = [300, 1_000];
 
 /**
- * The Boltzmann constant, J K⁻¹, exact in the 2019 SI. It is the sim's
- * `hyperion_base::units::consts::BOLTZMANN_CONSTANT`.
+ * The Boltzmann constant, J K⁻¹, exact in the 2019 SI.
+ *
+ * @remarks
+ * The sim's `hyperion_base::units::consts::BOLTZMANN_CONSTANT`. R08.T3.a's column imports it from
+ * here; `lib/system/constants.ts`, which holds G (R08.T3.d), is where it may move once both land.
  */
 export const BOLTZMANN_J_PER_K = 1.380_649e-23;
 
@@ -137,7 +148,7 @@ const N2_BRANCH_NM = 468;
 const BORZSONYI_2008 =
   "Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay, Appl. Opt. 47 (2008) 4856";
 
-/** σ², the squared vacuum wavenumber, µm⁻². */
+/** λ⁻², the squared vacuum wavenumber, µm⁻². */
 function wavenumberSquaredPerUm2(wavelengthNm: number): number {
   const perUm = 1_000 / wavelengthNm;
   return perUm * perUm;
@@ -170,50 +181,59 @@ function sellmeierNMinusOne(
  * table, with the corrections recorded in R08's Risks).
  *
  * @remarks
- * σ is the vacuum wavenumber in µm⁻¹ and ν in cm⁻¹. Z is from the NIST Chemistry WebBook (SRD 69,
+ * λ is in µm and ν in cm⁻¹. Z is from the NIST Chemistry WebBook (SRD 69,
  * Lemmon, McLinden and Friend), Z = p ÷ (ρRT) from its density at the state.
- * - H₂: Peck and Huang 1977, 10⁶(n − 1) = 14,895.6 ÷ (180.7 − σ²) + 4,903.7 ÷ (92 − σ²), at 0 °C
+ * - H₂: Peck and Huang 1977, 10⁶(n − 1) = 14,895.6 ÷ (180.7 − λ⁻²) + 4,903.7 ÷ (92 − λ⁻²), at 0 °C
  *   and 760 torr. Z = 1.000 624.
- * - He: Mansfield and Peck 1969, 10⁵(n − 1) = 1,470.091 ÷ (423.98 − σ²), at 0 °C and 760 torr.
+ * - He: Mansfield and Peck 1969, 10⁵(n − 1) = 1,470.091 ÷ (423.98 − λ⁻²), at 0 °C and 760 torr.
  *   Z = 1.000 532.
- * - H₂O: Ciddor 1996, eq. 3, pure water vapour at 20 °C and 1,333 Pa, 10⁸(n − 1) = c_f (w₀ + w₁σ² +
- *   w₂σ⁴ + w₃σ⁶) with w = 295.235, 2.6422, −0.032 380, 0.004 028 and c_f = 1.022 (as NIST's
- *   Engineering Metrology Toolbox reproduces them). Z = 0.999 237.
+ * - H₂O: Ciddor 1996, eq. 3, pure water vapour at 20 °C and 1,333 Pa, 10⁸(n − 1) = c_f (w₀ +
+ *   w₁λ⁻² + w₂λ⁻⁴ + w₃λ⁻⁶) with w = 295.235, 2.6422, −0.032 380, 0.004 028 and c_f = 1.022 (as
+ *   NIST's Engineering Metrology Toolbox reproduces them; refractiveindex.info has no copy).
+ *   Z = 0.999 237.
  * - CH₄: He, Fang, Shoshanim, Brown and Rudich, Atmos. Chem. Phys. 21 (2021) 14927, eq. 10,
- *   10⁸(n − 1) = 3,603.09 + 4.403 62 × 10¹⁴ ÷ (1.1741 × 10¹⁰ − ν²), at 288.15 K and 1013.25 hPa,
- *   fitted over 264–671 nm. Design note 4's Sneep and Ubachs 2005 eq. 18, a fit to Hohm 1993's
- *   polarisabilities, runs 13% high in n − 1, against Loria 1909 and Wilmouth and Sayres 2019 (R08's
- *   Risks). He et al. derive n from measured cross-sections through the ideal N = 2.546 899 ×
- *   10¹⁹ cm⁻³, so Z = 1 returns those cross-sections.
- * - NH₃: C. and M. Cuthbertson 1914, n − 1 = 0.032 953 ÷ (90.392 − λ⁻²), λ in µm, at 0 °C and 760
- *   mm, over the cadmium-to-lithium lines (air wavelengths; the difference from vacuum is 2 × 10⁻⁵
- *   of n − 1). Z = 0.984 798; whether the paper reduced its readings with the real or the ideal gas
- *   is unread, ±3% in σ.
- * - N₂: Peck and Khanna 1966's own 15 °C form from 468 nm, 10⁸(n − 1) = 6,497.378 + 3,073,864.9 ÷
- *   (144 − σ²). Sneep and Ubachs's eq. 10 (6,498.2 + …) is the 0 °C form scaled by the ideal gas,
- *   1.5 × 10⁻⁴ higher. Below 468 nm, Bates 1984's ultraviolet branch, 10⁸(n − 1) = 5,677.465 +
- *   318.818 74 × 10¹² ÷ (14.4 × 10⁹ − ν²), an interpolation to Abjean, Mehu and Johannin-Gilles 1970
- *   (Sneep and Ubachs 2005, eq. 11). Both at 15 °C and 101,325 Pa. Z = 0.999 715.
- * - O₂: Křen 2011's refit of Zhang, Lu and Wang 2008's data with others, n − 1 = 1.181 494 × 10⁻⁴ +
- *   9.708 931 × 10⁻³ ÷ (75.4 − σ²), at 20 °C and 101,325 Pa. Zhang's own eq. 20 holds only over
- *   740–860 nm. Křen's comment was not read (Optica, closed); the coefficients are
- *   refractiveindex.info's. Z = 0.999 282.
- * - CO₂: Bideau-Mehu et al. 1973 as Sneep and Ubachs 2005 (eq. 13) correct it, at 0 °C and 760 torr,
- *   not 15 °C (the trap of Design note 4). Sneep and Ubachs's 15 °C coefficients are these times
- *   273.15 ÷ 288.15 to 4 × 10⁻⁵; their printed last numerator, 0.121 814 5 × 10⁻⁴, is 10⁴ too small.
- *   Z = 0.993 265.
- * - Ar: Peck and Fisher 1964's 15 °C form, 10⁷(n − 1) = 643.2135 + 286,060.21 ÷ (144 − σ²), at 760
- *   torr. Z = 0.999 260.
+ *   10⁸(n − 1) = 3,603.09 + 4.403 62 × 10¹⁴ ÷ (1.1741 × 10¹⁰ − ν²), at 288.15 K and
+ *   1013.25 hPa, fitted over 264–671 nm. Design note 4's Sneep and Ubachs 2005 eq. 18, a fit to
+ *   Hohm 1993's polarisabilities, runs 13% high in n − 1, against Loria 1909 and Wilmouth and
+ *   Sayres 2019 (R08's Risks). He et al. derive n from measured cross-sections through the ideal
+ *   N = 2.546 899 × 10¹⁹ cm⁻³, so Z = 1 returns those cross-sections.
+ * - NH₃: C. and M. Cuthbertson 1914, n − 1 = 0.032 953 ÷ (90.392 − λ⁻²), at 0 °C and 760 mm,
+ *   over the cadmium-to-lithium lines (air wavelengths; the difference from vacuum is 2 × 10⁻⁵
+ *   of n − 1). Z = 0.984 798; whether the paper reduced its readings with the real or the ideal
+ *   gas is unread, ±3% in the cross-section.
+ * - N₂: Peck and Khanna 1966's own 15 °C form from 468 nm, 10⁸(n − 1) = 6,497.378 +
+ *   3,073,864.9 ÷ (144 − λ⁻²). Sneep and Ubachs's eq. 10 (6,498.2 + …) is the 0 °C form scaled by
+ *   the ideal gas, 1.5 × 10⁻⁴ higher. Below 468 nm, Bates 1984's ultraviolet branch,
+ *   10⁸(n − 1) = 5,677.465 + 318.818 74 × 10¹² ÷ (14.4 × 10⁹ − ν²), an interpolation to Abjean,
+ *   Mehu and Johannin-Gilles 1970 (Sneep and Ubachs 2005, eq. 11). Both at 15 °C and 101,325 Pa.
+ *   Z = 0.999 715.
+ * - O₂: Křen 2011's refit of Zhang, Lu and Wang 2008's data with others, n − 1 =
+ *   1.181 494 × 10⁻⁴ + 9.708 931 × 10⁻³ ÷ (75.4 − λ⁻²), at 20 °C and 101,325 Pa. Zhang's own
+ *   eq. 20 holds only over 740–860 nm. Křen's comment was not read (Optica, closed); the
+ *   coefficients are refractiveindex.info's. Z = 0.999 282.
+ * - CO₂: Bideau-Mehu et al. 1973 as Sneep and Ubachs 2005 (eq. 13) correct it, at 0 °C and 760
+ *   torr, not 15 °C (the trap of Design note 4). Sneep and Ubachs's 15 °C coefficients are these
+ *   times 273.15 ÷ 288.15 to 4 × 10⁻⁵ once their two misprints are read right: the prefactor
+ *   printed 1.1427 × 10⁶ is 10³ too large, and the last numerator printed 0.121 814 5 × 10⁻⁴ is 10⁴
+ *   too small. Z = 0.993 265.
+ * - Ar: Peck and Fisher 1964's 15 °C form, 10⁷(n − 1) = 643.2135 + 286,060.21 ÷ (144 − λ⁻²), at
+ *   760 torr. Z = 0.999 260.
  * - Ne, Kr and Xe: Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay, Appl. Opt. 47 (2008) 4856,
- *   Sellmeier forms at 0 °C and 1,000 mbar fitted over 400–1,000 nm (refractiveindex.info's
- *   copies; the paper was not read, and Xe's C₁ takes the database's correction of the paper's
- *   12.75 × 10⁻⁶ to 12.75 × 10⁻³ µm²). The same paper's Ar, He and N₂ forms agree with Peck and
- *   Fisher, Mansfield and Peck, and Peck and Khanna to 0.3%, and its Ne, Kr and Xe with C. and M.
- *   Cuthbertson's (Proc. R. Soc. A 135 (1932) 40 for Ne, 84 (1910) 13 for Kr and Xe) to 0.5%.
- *   Z = 1.000 483, 0.997 282 and 0.993 245.
+ *   Sellmeier forms at 0 °C and 1,000 mbar (their Table 2). They measured the phase at 800 nm
+ *   and joined it to the literature's ultraviolet and visible indices; `measuredNm` is
+ *   refractiveindex.info's validity range, 400–1,000 nm. The coefficients are the database's
+ *   copies, since the paper was not read, and Xe's C₁ takes the database's correction of the
+ *   paper's 12.75 × 10⁻⁶ to 12.75 × 10⁻³ µm². The same paper's Ar, He and N₂ forms agree with Peck
+ *   and Fisher, Mansfield and Peck, and Peck and Khanna to 0.3%, and its Ne and Xe with C. and M.
+ *   Cuthbertson's (Proc. R. Soc. A 135 (1932) 40 for Ne, 84 (1910) 13 for Xe) to 0.1% and 0.3%.
+ *   Their Kr sits 0.5% lower, where Koch 1949's (as Leonard 1974 compiles it) agrees with
+ *   Börzsönyi to 0.1%. Z = 1.000 483, 0.997 282 and 0.993 245; it is open whether the literature
+ *   the fit rests on reduced as a real gas (±1.4% in Xe's cross-section, ±0.6% in Kr's).
  * - N₂O: He et al. 2021, eq. 9, 10⁸(n − 1) = 22,095 + 1.662 91 × 10¹⁴ ÷ (6.752 26 × 10⁹ − ν²), at
  *   288.15 K and 1013.25 hPa, fitted over 307–725 nm, derived like their CH₄ through the ideal N,
- *   so Z = 1.
+ *   so Z = 1. Whether that N was the ideal one at their measuring state (about 295 K and
+ *   1020 hPa) is unstated; if it was, both gases' cross-sections run high by 1 ÷ Z there, 0.57%
+ *   for N₂O and 0.18% for CH₄.
  */
 export const GAS_DISPERSION: Readonly<Record<Gas, Dispersion>> = {
   H2: {
@@ -371,13 +391,13 @@ export const GAS_DISPERSION: Readonly<Record<Gas, Dispersion>> = {
  * 958, standard air (dry, 15 °C, 101,325 Pa).
  *
  * @remarks
- * 10⁸(n − 1) = 8,060.51 + 2,480,990 ÷ (132.274 − σ²) + 17,455.7 ÷ (39.329 57 − σ²), σ the vacuum
- * wavenumber in µm⁻¹, valid down to about 230 nm (the paper's abstract), as Bodhaine et al., J.
+ * 10⁸(n − 1) = 8,060.51 + 2,480,990 ÷ (132.274 − λ⁻²) + 17,455.7 ÷ (39.329 57 − λ⁻²), λ the vacuum
+ * wavelength in µm, valid down to about 230 nm (the paper's abstract), as Bodhaine et al., J.
  * Atmos. Oceanic Technol. 16 (1999) 1854, eq. 4, quote it. Peck and Reeder's standard air carries
  * 330 ppm of CO₂ (Bodhaine §1); Bodhaine applies the formula as 300 ppm air, as R05's `earth.ts`
  * and {@link dryAirKingFactor} do, a 3 × 10⁻⁵ difference in σ. refractiveindex.info's copy
  * (`other/mixed gases/air/nk/Peck.yml`) has the same coefficients but labels the air with 450 ppm,
- * Ciddor's later standard. Z = 0.999 59 is CIPM-2007's for dry air at the state (Picard, Davis,
+ * Ciddor's later standard. Z = 0.999 592 is CIPM-2007's for dry air at the state (Picard, Davis,
  * Gläser and Fujii, Metrologia 45 (2008) 149, the BIPM form Ciddor 1996 uses). Plan 14's
  * atmospheres are mixed from {@link GAS_DISPERSION} instead (R08.T3.c), which reproduces this
  * to 0.1%.
@@ -389,7 +409,7 @@ export const DRY_AIR_DISPERSION: Dispersion = {
   },
   referenceK: FIFTEEN_CELSIUS_K,
   referencePa: STANDARD_ATMOSPHERE_PA,
-  compressibility: 0.999_59,
+  compressibility: 0.999_592,
   source: "Peck and Reeder, J. Opt. Soc. Am. 62 (1972) 958",
   dataFile: "other/mixed gases/air/nk/Peck.yml",
   measuredNm: [230, 1_690],
@@ -411,21 +431,21 @@ function isotropic(source: string): KingFactor {
  * @remarks
  * F_K = (6 + 3ρₙ) ÷ (6 − 7ρₙ) = (3 + 6ρₚ) ÷ (3 − 4ρₚ) for a depolarisation ratio ρₙ in natural
  * light or ρₚ in linearly polarised light (Sneep and Ubachs 2005, eqs. 5 and 7).
- * - N₂: 1.034 + 3.17 × 10⁻⁴ λ⁻², and O₂: 1.096 + 1.385 × 10⁻³ λ⁻² + 1.448 × 10⁻⁴ λ⁻⁴, λ in µm (Bates,
+ * - N₂: 1.034 + 3.17 × 10⁻⁴ λ⁻², and O₂: 1.096 + 1.385 × 10⁻³ λ⁻² + 1.448 × 10⁻⁴ λ⁻⁴ (Bates,
  *   Planet. Space Sci. 32 (1984) 785, as Bodhaine et al. 1999, eqs. 5 and 6, quote them).
- * - CO₂: 1.1364 + 25.3 × 10⁻¹² ν², ν in cm⁻¹ (Sneep and Ubachs 2005, eq. 14, fitted to Alms et al.
- *   1975's depolarisation over about 476–625 nm).
- * - N₂O: ρₚ = 0.0577 + 11.8 × 10⁻¹² ν² (Sneep and Ubachs 2005, eq. 19, Alms et al. 1975), 1.225 at
- *   532.2 nm as their Table 2 has it.
+ * - CO₂: 1.1364 + 25.3 × 10⁻¹² ν² (Sneep and Ubachs 2005, eq. 14, fitted to the depolarisation
+ *   Alms, Burnham and Flygare, J. Chem. Phys. 63 (1975) 3321, measured at 457.9–647.1 nm).
+ * - N₂O: ρₚ = 0.0577 + 11.8 × 10⁻¹² ν² (Sneep and Ubachs 2005, eq. 19, from Alms et al. 1975 over
+ *   the same 457.9–647.1 nm), 1.225 at 532.2 nm as their Table 2 has it.
  * - Ar, He, Ne, Kr and Xe: 1, atoms; CH₄: 1, a spherical top (Sneep and Ubachs 2005, §5.2: below
  *   1.0007).
  * - H₂O: 1.001, from Murphy, J. Chem. Phys. 67 (1977) 5877's ρₚ = (3.0 ± 1.4) × 10⁻⁴ at 514.5 nm:
  *   1.0010 ± 0.0005.
- * - H₂: 1.0312 + 3.09 × 10⁻⁴ λ⁻², λ in µm: 1 + (2/9)(γ ÷ ᾱ)² for the v = 0, J = 0 averages of Raj,
- *   Hamaguchi and Witek, J. Chem. Phys. 148 (2018) 104308's ab initio α∥(r, ω) and α⊥(r, ω), fitted
- *   here over 380–800 nm to 2 × 10⁻⁵ (1.0322 at 550 nm). Design note 4's "Hohm 1993" (Mol. Phys.
- *   78, 929) is a hydrocarbon mean-polarisability paper; Hohm 1994 (Chem. Phys. 179, 533) holds
- *   the anisotropies and was not read.
+ * - H₂: 1.0312 + 3.09 × 10⁻⁴ λ⁻²: 1 + (2/9)(γ ÷ ᾱ)² for the v = 0, J = 0 averages of Raj,
+ *   Hamaguchi and Witek, J. Chem. Phys. 148 (2018) 104308's ab initio α∥(r, ω) and α⊥(r, ω),
+ *   fitted here over 380–800 nm to 2 × 10⁻⁵ (1.0322 at 550 nm). Design note 4's "Hohm 1993" (Mol.
+ *   Phys. 78, 929) is a hydrocarbon mean-polarisability paper; Hohm 1994 (Chem. Phys. 179, 533)
+ *   holds the anisotropies and was not read.
  * - NH₃: 1, provisional, until Hohm 1994's anisotropy is read (R08's Risks); NH₃'s small
  *   anisotropy leaves it about 1% low.
  */
@@ -475,7 +495,8 @@ export const GAS_KING_FACTOR: Readonly<Record<Gas, KingFactor>> = {
  *
  * @remarks
  * Plan 14's nine are the sim's `Gas::molar_mass_g_per_mol` (IUPAC 2021 standard atomic weights,
- * abridged), copied so that the client's column and the sim's agree. Ne (20.180), Kr (83.798) and
+ * abridged; the sim rounds He's 4.0026 to 4.003), copied so that the client's column and the sim's
+ * agree. Ne (20.180), Kr (83.798) and
  * Xe (131.29) are IUPAC 2021's abridged atomic weights, and N₂O is 2 × 14.007 + 15.999 from them.
  */
 export const GAS_MOLAR_MASS_G_PER_MOL: Readonly<Record<Gas, number>> = {
@@ -536,19 +557,23 @@ export function referenceNumberDensityPerM3(dispersion: Dispersion): number {
 }
 
 /**
- * The Rayleigh cross-section of a molecule from a dispersion and a King factor, m²: 24π³ ÷ (λ⁴
- * N_ref²) × ((n² − 1) ÷ (n² + 2))² × F_K, with N_ref the dispersion's reference density.
+ * The Rayleigh cross-section of a molecule from a dispersion and a King factor, m².
  *
- * @param king - The King factor at the same wavelength, at least 1.
+ * @remarks
+ * 24π³ ÷ (λ⁴ N_ref²) × ((n² − 1) ÷ (n² + 2))² × F_K, with N_ref the dispersion's reference
+ * density and both n and F_K taken at the wavelength.
+ *
+ * @param kingFactorAt - F_K at a wavelength in nm, at least 1, called only within the range.
  * @param wavelengthNm - A vacuum wavelength within {@link RAYLEIGH_WAVELENGTH_RANGE_NM}.
  * @throws RangeError if the wavelength is outside the range, a caller's unit error.
  */
 export function crossSectionFromDispersionM2(
   dispersion: Dispersion,
-  king: number,
+  kingFactorAt: (wavelengthNm: number) => number,
   wavelengthNm: number,
 ): number {
   checkWavelength(wavelengthNm);
+  const king = kingFactorAt(wavelengthNm);
   const delta = dispersion.nMinusOne(wavelengthNm);
   // n² − 1 = δ(2 + δ), so that no difference of two numbers near 1 is taken.
   const nSquaredMinusOne = delta * (2 + delta);
@@ -566,7 +591,7 @@ export function crossSectionFromDispersionM2(
 
 /**
  * A gas's Rayleigh cross-section per molecule, m², at a vacuum wavelength: its
- * {@link GAS_DISPERSION} at its reference state with its {@link kingFactor}.
+ * {@link GAS_DISPERSION} at its reference state with its {@link GAS_KING_FACTOR}.
  *
  * @param wavelengthNm - A vacuum wavelength within {@link RAYLEIGH_WAVELENGTH_RANGE_NM}.
  * @throws RangeError if the wavelength is outside the range, a caller's unit error.
@@ -574,12 +599,16 @@ export function crossSectionFromDispersionM2(
 export function rayleighCrossSectionM2(gas: Gas, wavelengthNm: number): number {
   return crossSectionFromDispersionM2(
     GAS_DISPERSION[gas],
-    kingFactor(gas, wavelengthNm),
+    GAS_KING_FACTOR[gas].factor,
     wavelengthNm,
   );
 }
 
-/** @throws RangeError if a wavelength is not a number of nm within the range. */
+/**
+ * Refuses a wavelength outside {@link RAYLEIGH_WAVELENGTH_RANGE_NM}.
+ *
+ * @throws RangeError if the wavelength is not a number of nm within the range, NaN included.
+ */
 function checkWavelength(wavelengthNm: number): void {
   const [low, high] = RAYLEIGH_WAVELENGTH_RANGE_NM;
   if (!(wavelengthNm >= low && wavelengthNm <= high)) {
