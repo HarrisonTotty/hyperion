@@ -425,24 +425,22 @@ it is recorded, and stays here so that the owner can review it.
   R02.T2.f is **Decided** (2026-10-02, delegated; the orchestration's `decisions-r05.md` item 5),
   with "Where both hold, `STREAMING` is shown." R06.T15's sky nomenclature is **Decided**
   (2026-10-03, delegated; `decision-r06-t15-guide.md`), with amendments (`STARS V 7.4 mag EYE`,
-  `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`, `INTEGRATED STARLIGHT`). **Still awaiting:**
-  R02's other nomenclature rows (R02.T2.f, T15, T17, marked `_Draft (plan R02, …)_` in the guide);
-  R07.T16.c's draft of the meter's statuses (`NO LIT SIDE`, `NO DARK SIDE`, `STAR DISC ONLY`;
-  `BODY PHOTOMETRY: NOT YET MODELLED` and the `METER` and `AVG` rows were signed off by R07.T19.d),
-  and decision-r07-t16a's and decision-thin-line-contrast's guide text: the unit of a width and the
-  floor of 2 device pixels, a stroke's contrast as drawn, a view's strokes as Layout gives them,
-  the craft's silhouette and `CRAFT PHOTOMETRY: NOT YET MODELLED`, a stroke's cross-section, a
-  view's black ground, and a view's labels clear of their marks' reticles; and, in the same draft
-  (R07's Risks, "Deviations in T16.c, as built"), decision-r07-quality-and-destination's: the
-  destination's chevrons and the labels' place, a view's label never shown in part, the coverage a
-  stroke's pair is relied on at, R07.T17's `QUALITY` and `DECORATION ON` texts, and with them
-  `SELECT`, `ECLIPSE TEST` and `SCENE CLOCK`;
-  R08.T2's six atmosphere labels
-  (`ATMOSPHERE: NOT RESOLVED`, `ATMOSPHERE: NOT YET MODELLED`, `AEROSOLS: NOT YET MODELLED`,
-  `ATMOSPHERE: PENDING`, `ATMOSPHERE: COMPUTING`, `ATMOSPHERE: APPROXIMATE`); R10.T13's readout
-  notation (`~2140 m ± 180 m`, `ELEVATION`, `SLANT RANGE`, `DATUM`, contours); and R11's reading
-  of item 2, that "decoration" covers terrain micro-detail and decorative scatter but not clouds
-  and waves (R11 Design note 2).
+  `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED`, `INTEGRATED STARLIGHT`).
+  R02's other rows (R02.T2.f, T15, T17) were signed off by R07.T19.d (2026-10-05).
+  **Decided** (2026-10-09, signed off by the sign-off agent under the owner's delegation;
+  `signoff-ux-guide.md` in the RM4/RM5 orchestration directory): every draft the guide carried, 62
+  items, 42 accepted, 19 amended and 1 rejected. They are R06.T11.f's `STARS` line and rows, with
+  the guard and the views seen apart stated; R07.T16.c's draft with R07.T17's `QUALITY`,
+  `GRAPHICS` and `DECORATION ON` texts, R07.T10.c's `ECLIPSE TEST`, R07.T16.k's `SCENE CLOCK`
+  (`×100` rejected for a unit rate, `SCENE CLOCK 100 s/s`, in a row of its own), R07.T2.c's
+  `ROTATION: NOT YET MODELLED` with a new `ROTATION` row, R07.T19's instrument slots and R07.T19.f's
+  `POSITION`, `POINTING`, `LOOK`, legend, `CTRL`/`⌘` and Layout drafts; and R08.T2's six
+  atmosphere labels, `AEROSOLS: NOT YET MODELLED` renamed
+  `AEROSOLS AND ABSORBERS: NOT YET MODELLED`, with decision-r08-licences' NH₄SH clause.
+  **Still awaiting:** R10.T13's readout notation (`~2140 m ± 180 m`, `ELEVATION`, `SLANT RANGE`,
+  `DATUM`, contours), and R11's reading of item 2, that "decoration" covers terrain micro-detail
+  and decorative scatter but not clouds and waves (R11 Design note 2), neither yet drafted into
+  the guide.
 - **Data licences** before data are committed: the Karkoschka and Tomasko methane coefficients
   (Elsevier), Serdyuchenko's ozone data files (terms unstated), and whether raw tables may be
   committed beside the reduced values (R08.T4.b); H₂SO₄ (Palmer and Williams 1975), Mars dust

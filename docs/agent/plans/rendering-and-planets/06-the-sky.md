@@ -2504,7 +2504,9 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     bake's whole-cube swap, T11.d).
   - **The guide rows** (`docs/frontend/ux-guidelines.md`, the `STARS` row and a `STREAMING` and
     `PENDING` entry beside `TERRAIN: STREAMING`) are drafted here and go to the UX decision agent
-    for the owner's sign-off, as T15's rows did. Build to the draft.
+    for the owner's sign-off, as T15's rows did. Build to the draft. _Signed off 2026-10-09 by
+    the sign-off agent (owner's delegation), with amendments (`signoff-ux-guide.md` in the RM4/RM5
+    orchestration directory; see Risks, "Deviations in T11.f, as built")._
   - Tests (decision-r06-t11f-stars-line, 1e). `label.ts`: every reading, pending, the note at each
     fixed edge with its grouping and its 12ch field, the primary's composition with no instrument
     open and with one open, an instrument's, final and stale. `displays/view`: in `ViewDisplay`,
@@ -8046,7 +8048,8 @@ CensusCost)`.
     primary holds one note while an instrument is open. The instruments keep
     `L · NOT YET MODELLED`.
   - Stated exception, for the owner: the primary's line gives up `NOT YET MODELLED` while the note
-    stands and an instrument is open.
+    stands and an instrument is open. _Signed off 2026-10-09 by the sign-off agent (owner's
+    delegation), with the guard stated beside it._
   - The lone `·` is a views-lane follow-up.
 - **Deviations in T11.f, as built (2026-10-09).** The stars-arriving note and `STARS: PENDING`, to
   the ruling's 1d. No golden, protocol or generator change; client only.
@@ -8139,6 +8142,13 @@ CensusCost)`.
     refuses still shows its cull's line (a trial of the display test with a refused canvas, not
     kept). Its consider not applied, deferred as polish: with the `S` inside the right-aligned
     field, the edge's digits move two characters left while stale; the line itself does not move.
+  - **Signed off 2026-10-09 by the sign-off agent (owner's delegation)** (`signoff-ux-guide.md` in
+    the RM4/RM5 orchestration directory). The `STARS` row, the `STREAMING` and `PENDING` row, the
+    `CLUSTERS` row and the stated exception are accepted. Amended: the star-limit bullet states the
+    guard (the primary keeps what the sky leaves out until an open instrument's line shows it) and
+    that a view seen apart from the stage, an instrument in a window of its own or the main
+    screen's view, carries the whole line; the interim source row ends "while the interim field is
+    still drawn and its count line still stands".
 - **Deviations in T11.g, as built (2026-10-09).** The first sky within its budget, as the ruling
   (`decision-r06-t11d-first-sky.md` §1.4 and §2) sets it out. Built on `rendering-and-planets`
   4dec82b4, merged by name (73098c08; the one conflict, the protocol's version note, took this

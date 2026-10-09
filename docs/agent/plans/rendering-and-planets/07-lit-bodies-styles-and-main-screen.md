@@ -4194,7 +4194,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   row, and the Views bullet's first sentence and its statements clause). The stated limits: at
   1280 × 720 two slots cover most of the primary's image; they fit there only while each holds
   one statement, beyond which the second `OPEN` is held back; and a statement appearing without
-  room sets `INSTRUMENT 2` under `INSTRUMENT 1`. The ruling gives the steps.
+  room sets `INSTRUMENT 2` under `INSTRUMENT 1`. The ruling gives the steps. _Signed off
+  2026-10-09 by the sign-off agent (owner's delegation), on R06.T11.f's hidden captures with both
+  slots open at 1280 × 720 and 1920 × 1080: the limits are accepted, and the row states the
+  fallback under `INSTRUMENT 1` (`signoff-ux-guide.md`)._
 - **Deviations in T19.d, as built** (2026-10-06; decision-r07-owner-ux-signoff).
   - **Files.** Within the ruling's list, `exposure.ts`'s `enable` TSDoc takes item 3's verb,
     "sets". Beyond it:
@@ -5200,6 +5203,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `occluderMeshes` and of the silhouette check's sphere, and a Windows views check recording
       its load average as none.
     - **UX:** no breach beyond the ruled exception, which waits on the owner's sign-off (T16.c).
+      _Signed off 2026-10-09 by the sign-off agent (owner's delegation)._
       Its two points for T16.c are above. Asked whether the silhouette must itself reach the
       guide's contrast, it judged the rulings settle it as a ground, not a mark (above), and its
       consider, a test that the outline encloses the silhouette, is taken.
@@ -6029,6 +6033,17 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       note no longer fits;
     - T16.h's crops for the chevrons and raised labels (`.git/rm23-scratch/r07-views/t16h/` and
       `t16h-fu/crops/`) and T16.e's silhouettes (`t16e/`), for the look the drafts describe.
+  - **Signed off 2026-10-09 by the sign-off agent (owner's delegation)** (`signoff-ux-guide.md` in
+    the RM4/RM5 orchestration directory). T16.c's draft is accepted, with T17's, T10.c's, T16.k's,
+    T2.c's, T19's and T19.f's drafts. Of the open points, the open ends, the kept reading,
+    `SELECT` and the looks are accepted. `NOT YET MODELLED`'s row gains the console's own case, a
+    craft's light. `SCENE CLOCK ×100` is rejected for a unit rate, `SCENE CLOCK 100 s/s`, as
+    `RUN 1 d/s` is, in a row of its own. Amended beside them:
+    - the Colour bullet's wording, with `⌘` beside `☉` and `⊕`;
+    - "except" in the `NO IMAGE TO METER` row;
+    - the `ECLIPSE TEST` row's clock;
+    - the star's graticule called a reference grid about `NORTH`, and a new `ROTATION` row;
+    - the `INSTRUMENT 1`, `INSTRUMENT 2` row's fallback under `INSTRUMENT 1`.
 - **Deviations in T16.i, as built** (2026-10-07; the views lane; decision-r07-quality-and-destination,
   Q6 (a) and addenda B and C).
   - **Files.** Those the bullet lists, and:
@@ -6418,7 +6433,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     script's camera.
   - **The form** stays the draft's `×100`, rendered in B612 Mono (`crops/final-*`). Two choices
     stay open for the owner with T16.c's draft: `×100` or a unit rate beside `RUN 1 d/s`, and
-    whether `SCENE CLOCK` takes a row of its own.
+    whether `SCENE CLOCK` takes a row of its own. _Signed off 2026-10-09 by the sign-off agent
+    (owner's delegation): a unit rate, `SCENE CLOCK 100 s/s`, in a row of its own; the reading
+    changes in `sceneClockReading` (`signoff-ux-guide.md`, C1 and C2)._
   - **Gate.** No `just ci` (the Day 2 protocol).
     - The acceptance's vitest (`src/renderer/src/displays/view`): 21 files, 406 tests, all pass.
       The app's: 339 files, 7,913 tests, all pass.
@@ -8043,6 +8060,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         moon and Jupiter-sized giant …".
 
       _Drafted by R07.T16.c, as written here, each tagged T10.c's (the orchestrator's ruling)._
+      _Signed off 2026-10-09 by the sign-off agent (owner's delegation); the `ECLIPSE TEST` row
+      reads "its clock at 100 s/s"._
     - The label block does not state a kept scene's clock rate: `TIME` runs a hundred times fast
       here with nothing saying so. _Ruled by the orchestrator (2026-10-06): drafted in T16.c,
       `SCENE CLOCK ×100`; the line is split off as R07.T16.k._ _Built by R07.T16.k (2026-10-07):
@@ -8660,7 +8679,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       (decision-r07-quality-and-destination, Q1): the `PRIMARY` view's block alone, as built; an
       instrument in a window of its own and the main screen's view state it on their own blocks;
       no banner. The `QUALITY` row is redrafted as a `Setting` and the `GRAPHICS` row adopted, for
-      T16.c._
+      T16.c._ _Signed off 2026-10-09 by the sign-off agent (owner's delegation), as drafted._
   - **The views check.** `LOW_BEFORE_T17` is gone. A low-setting record is provisional only as a
     high one is (`viewsCheckResults.ts` and its test, `docs/measurements/several-views/README.md`).
   - **Tests (Vitest).**
@@ -9242,6 +9261,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the star graticule's `NORTH` pole is a convention stated in the guide, not on the view;
     - the guide's nomenclature list has `ROTATION` only as the `GALAXY` display's group heading,
       not as a star's reading, which the draft row names. Should it have its own entry?
+    _Signed off 2026-10-09 by the sign-off agent (owner's delegation): the convention stays in the
+    guide, whose row calls a star's graticule a reference grid about `NORTH` rather than the star's
+    own axis; `ROTATION` gains its own row (`signoff-ux-guide.md`)._
   - **Gate**, on the committed code (7047ea34, 486ca64f, on the merge 78b9ea26).
     - The app's vitest: 8,009 tests in 341 files, all passing (149 s at 4 workers);
       `src/renderer/src/displays/view` with `view/coords` beforehand, 428.
@@ -9376,6 +9398,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the Views bullet's `POSITION`, `POINTING` and `LOOK`;
     - the nomenclature rows `POSITION`, `POINTING`, `LOOK`, and `CTRL`, `⌘` (a new kind, `Key`);
     - the legend row, now `FOCUSED VIEW`, `MOVE`, `TURN`, `ROLL`, `RATE`.
+
+    _Signed off 2026-10-09 by the sign-off agent (owner's delegation), as drafted._
   - Scratch: `.git/rm23-scratch/r07-views/t19f/` (the page harness, its logs and captures, and
     `tools/textwidth.py`, which estimates a string's width in B612 from the shipped font).
 - **Deviations in T19.f's follow-up, as built** (2026-10-08; the views lane;

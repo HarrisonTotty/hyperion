@@ -46,7 +46,7 @@ converted to the render channels. A cloud deck of optical depth above 10 splits 
 two. Every baked table matches an independent, path-traced reference to 5% on a stated metric
 before any atmosphere is drawn from it, and the check runs in `just ci`. The reference is vector,
 so polarisation's effect on the radiance is in what the tables are held to (Design note 10). Until
-its gate passes, a thick world is drawn with the analytic term under the drafted label
+its gate passes, a thick world is drawn with the analytic term under the label
 `ATMOSPHERE: APPROXIMATE`, never presented as computed. The low setting is R05's
 smaller tables, with aerial perspective on terrain only. It is built beside the high one and holds
 the budget's figures on the UHD 620.
@@ -82,7 +82,8 @@ In scope:
   reads beyond it for a body with an atmosphere, with the read path in R07's `bodyDisc.wgsl`
   (R08.T16.b edits R07's shader, as R08.T6 edits R05's).
 - The low setting, and this plan's own benchmarks, recorded.
-- The view's atmosphere labels, drafted for the owner.
+- The view's atmosphere labels (R08.T2; signed off 2026-10-09 by the sign-off agent, owner's
+  delegation).
 
 Non-goals:
 
@@ -298,7 +299,7 @@ export class AtmosphereCache {
 }
 ```
 
-`labels.ts` holds the drafted strings (R08.T2).
+`labels.ts` holds the strings (R08.T2; signed off 2026-10-09).
 
 ### Settings (`settings.ts`)
 
@@ -872,7 +873,8 @@ Names are those the owning plans give; the owning plan is authoritative.
      Only diffraction narrower than the star's disc goes into the direct beam.
 
    Where the surface section is granted but the inventory is `not_modelled`, the medium has no
-   aerosol terms and the label block says `AEROSOLS: NOT YET MODELLED` (Design note 12).
+   aerosol terms and the label block says `AEROSOLS AND ABSORBERS: NOT YET MODELLED` (Design
+   note 12).
 
 7. **Per-planet tables are shared; per-view tables are summed over suns** (researched
    2026-09-29, medium confidence).
@@ -1217,8 +1219,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       `envelope` section (P14.T24.d, on the wire by P14.T35.e) is `not_modelled` or absent
       (decision-p14-t35e-wire; a sub-Neptune's surface from P14.T48.e). A kept scene's body with no
       atmosphere set shows it too (decision-r08-giant-label).
-    - `AEROSOLS: NOT YET MODELLED` while plan 14 publishes no aerosol or absorber inventory. It
-      covers the absorbers too: ozone and methane are drawn only from the inventory.
+    - `AEROSOLS AND ABSORBERS: NOT YET MODELLED` while plan 14 publishes no aerosol or absorber
+      inventory: ozone and methane, like the aerosols, are drawn only from the inventory.
     - `ATMOSPHERE: PENDING` from a body's `body_detail` request until its reply is drawn. No
       atmosphere is drawn meanwhile.
     - `ATMOSPHERE: COMPUTING` while a gated thick bake runs.
@@ -1230,7 +1232,7 @@ Names are those the owning plans give; the owning plan is authoritative.
       only when measured constants replace the stand-in, not when a gate passes.
 
     The provisional profile is recorded in the plan and the code, not on the display. The phrases
-    are drafted for the owner (R08.T2).
+    are R08.T2's, signed off 2026-10-09 by the sign-off agent (owner's delegation).
 
 13. **Local and other bodies, and giants.**
     - **The ship's local body.** Only the ship's local body is drawn geometrically at the present
@@ -1486,11 +1488,12 @@ Some tasks wait on the owner or on another plan, and say so where they do:
   P14.T24.c–f and P14.T35.e are built (none is). Every task here runs on the fixtures of Design
   note 16 meanwhile, and generated bodies show `ATMOSPHERE: NOT YET MODELLED`. In plan 14's order
   a thin atmosphere's gases, pressure and temperature arrive first (P14.T24.f, T24.a–b, T48.e and
-  T35.e), drawn on the isothermal seam with `AEROSOLS: NOT YET MODELLED`; the vertical structure
-  (T24.e), the inventory (T24.c) and the gas envelopes (T24.d) follow.
+  T35.e), drawn on the isothermal seam with `AEROSOLS AND ABSORBERS: NOT YET MODELLED`; the
+  vertical structure (T24.e), the inventory (T24.c) and the gas envelopes (T24.d) follow.
 - **Drafts for the owner.** R08.T1's amendments and R08.T2's labels are committed marked drafted
   for the owner, and the client is built to them meanwhile; the acceptance and the sign-off are
-  the owner's, recorded here when given.
+  the owner's, recorded here when given. R08.T2's labels were signed off 2026-10-09 by the
+  sign-off agent (owner's delegation).
 - **The UHD 620.** Its runs (R08.T7, T11, T14.d's bake time, T17) are the owner's, on the owner's
   laptop; the development machine's figures are recorded beside them.
 
@@ -1647,7 +1650,7 @@ with its meaning and when it clears:
 
 - `ATMOSPHERE: NOT RESOLVED`;
 - `ATMOSPHERE: NOT YET MODELLED`;
-- `AEROSOLS: NOT YET MODELLED`, covering absorbers as well;
+- `AEROSOLS AND ABSORBERS: NOT YET MODELLED`, named for the absorbers as well;
 - `ATMOSPHERE: PENDING`, which clears by itself;
 - `ATMOSPHERE: COMPUTING`;
 - `ATMOSPHERE: APPROXIMATE`, which clears when its regime's gate passes, or, for an NH₄SH
@@ -1656,7 +1659,8 @@ with its meaning and when it clears:
 None uses a status colour or the word "degraded" (item 7 of
 [What the guide must gain](../../brainstorming/rendering-and-planets.md#what-the-guide-must-gain)).
 The client is built to the draft. The task is committed with the draft marked for the owner, and
-**the owner signs off** later; the sign-off is recorded here.
+**the owner signs off** later; the sign-off is recorded here. _Signed off 2026-10-09 by the
+sign-off agent (owner's delegation); see Risks, "Deviations in T2, as built"._
 
 Files: the six entries as rows of the guide's nomenclature table in
 `docs/frontend/ux-guidelines.md` (as `BODY PHOTOMETRY: NOT YET MODELLED`, a `Label`, and
@@ -2524,7 +2528,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   latitude. `TABLE_SIZES` gains the thick size, and the table is cached per world.
   `ATMOSPHERE: COMPUTING` shows while a gated bake runs, in `ATMOSPHERE: APPROXIMATE`'s place and
   never beside it for one body, and `ATMOSPHERE: APPROXIMATE` takes its place if the bake fails,
-  until the body's atmosphere is next computed (the guide's draft rows, R08.T2). Acceptance:
+  until the body's atmosphere is next computed, and after a bake that succeeds only where something
+  else, such as an NH₄SH stand-in, still holds it (the guide's rows, R08.T2). Acceptance:
   `pnpm test` and `just test-render` pass.
 - **R08.T14.e The polarisation correction** (Design note 10; ruled 2026-10-09,
   `decision-r08-vector.md` item 2). It needs R08.T14.a and R08.T14.b.
@@ -3151,7 +3156,7 @@ generator, and the reference's sampling needs no domain tag.
     on the wire": the whole section mirrored member for member, which R10 and R11 also read, not
     only the atmosphere's fields. Its members for T24.c–e and T24.d are declared
     from the start and absent until their tasks land (plan 14's T34 rule), which this plan reads as
-    not modelled: `AEROSOLS: NOT YET MODELLED` and the isothermal seam.
+    not modelled: `AEROSOLS AND ABSORBERS: NOT YET MODELLED` and the isothermal seam.
   - _Field by field, where the two plans' asks met:_
     - T_s and p_s are P14.T24.a's, read by T24.e's profile and by T48.c's crater screening. The
       wire's vertical structure carries β and T_skin alone, so R08.T3.a's `radiativeConvective`
@@ -3332,9 +3337,24 @@ generator, and the reference's sampling needs no domain tag.
       decision-backlog-1 ruled the floor, names the check's figure: agreement within 5% in
       radiance wherever in the view a difference could be seen (Design note 10). The clause is
       applied to the guide after the lane now editing it lands (Risks, "The metric's floor").
-  - _Sign-off: pending._ The owner signs off the six rows (the roadmap's "Still awaiting", which
-    now lists `ATMOSPHERE: PENDING`). The client is built to them meanwhile, and the sign-off is
-    recorded here when given.
+  - _Signed off 2026-10-09 by the sign-off agent (owner's delegation)_ (`signoff-ux-guide.md` in
+    the RM4/RM5 orchestration directory), with amendments.
+    - T2's three choices are accepted:
+      - the two `NOT YET MODELLED` notes never compose;
+      - `COMPUTING` stands in `APPROXIMATE`'s place and gives way to it on a failed computation;
+      - `APPROXIMATE` reaches thick and strongly flattened bodies only and names no figure;
+        decision-backlog-1 has since given it the check's figure (above).
+    - decision-r08-giant-label's clauses and decision-r08-licences' NH₄SH clause are accepted.
+    - Amended:
+      - `AEROSOLS: NOT YET MODELLED` becomes `AEROSOLS AND ABSORBERS: NOT YET MODELLED`, since
+        ozone and methane are gases, not aerosols (`labels.ts`);
+      - a kept scene "leaves the body's atmosphere unset" for "sets the body none", since "none"
+        is a value;
+      - `NOT RESOLVED` opens in its siblings' form;
+      - `PENDING` is not shown on a repeated request while the body's earlier state stands;
+      - after a done computation, `COMPUTING` gives way to an `APPROXIMATE` that something else
+        still holds;
+      - the NH₄SH clause follows the clearing sentence, with its own clearing condition.
 - **Deviations in T5.a, as built** (2026-10-09; `view/atmosphere/mie.ts`, `mie.test.ts`). Wiscombe
   1980's structure as the task gives it, in double precision. What differs:
   - _Names beyond the sketch:_ `ComplexIndex` is `{ n, k }`, m = n + ik with k ≥ 0 absorbing,
