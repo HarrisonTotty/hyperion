@@ -1346,3 +1346,19 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   serial chain T8.d removes from uniform discs (about 2.0 M cycles under 4 px). T10.d is to bring
   such discs into the pass: the frame's maps as one array texture with each record's layer in its
   record, or one dispatch a map. Open, for the orchestrator (R07's "Deviations in T8.d, as built").
+- **Composition, for the re-validation (decision-composition, 2026-10-09).**
+  - `MaterialClass` stays the form, and `Material` becomes `{ class, entry }`, the entry being
+    R09's palette index. `FrostSpecies` goes.
+  - `properties(material, &palette)` takes the class's table with the entry's resolved A_N in B,
+    V and R, phase row, density, transition and mechanics family.
+  - The classifier reads the cell's substance byte and the header: frost or glacier of the ice
+    entry, `Seabed` under the liquid entry, `Melt` above the crust's transition by R09's cell
+    temperature, and regolith, sand and dust of the crust, `Deposit` or `Cover` entry.
+  - R07's class map indexes the body's (form, entry) pairs, at most 16.
+  - R10.T10.a solves the scale per band, or states one c with the residual per band.
+  - R10.T10.b adds the ground's thermal emission through R08.T18's function.
+  - New **R10.T1.c, maturity and cover**: regolith's A_N and colour modulated by exposure (crater
+    and surface ages) and by plan 14's T51.d cover, with tests that a fresh crater's ejecta is
+    brighter than mature regolith by the Moon's measured contrast, and that zero cover gives the
+    substance's own albedo.
+  - The Pluto-like and lava-world `FieldBuilder` worlds join T1.b's tests.

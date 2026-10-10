@@ -1246,3 +1246,15 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   collidable, or a tide model, reopens it.
 - **Rocks collide with nothing yet.** The contact query is tested against the drawn meshes and
   across targets, but no flight model calls it; the plan that builds one inherits it.
+- **Composition, for the re-validation (decision-composition, 2026-10-09).**
+  - R11.T7.a takes its condensates' optics from R08's material registry through `modeOptics`,
+    not `condensates.ts`'s five stand-ins. Its phase comes from the deck's material, not "liquid
+    above 260 K", and its coverage from plan 14's snapshot cloud fraction and P14.T52.c's decks.
+  - `atmosphere_class` reads the surface state, so a `Tenuous` world is not drawn as airless rock
+    under an "atmosphere" flag, and `RockSite.atmosphere` follows.
+  - R11.T8.a–b take the ocean's index, absorption, density, surface tension and viscosity from
+    the liquid's palette entry. That member is added to R09's `PaletteEntry` at this
+    re-validation, before R09.T19's first send.
+  - `liquids.ts`'s four rows become the registry's test values, and a CH₄–C₂H₆–N₂ liquid's index
+    follows its composition (from memory, checked then).
+  - R11.T4's rock k_base is by (class, entry).

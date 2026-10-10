@@ -1138,12 +1138,58 @@ on an Earth at level 8, and 90.3, 92.6 and 50.0 km on a Mars, the Moon and Ceres
 `reach` holds the cell, in list order; every synthetic world is built twice with identical values.
 Acceptance: `cargo test -p hyperion-surface field`.
 
+_Follow-up B, the palette and the substance byte_ (decision-composition, 2026-10-09; after
+decision-r09-t2's follow-up, which edits the same files).
+
+- **`hyperion_surface::substance_key::SubstanceKey`**: plan 14's substance key (P14.T49.a). ASCII,
+  1–16 bytes, NUL-padded; a formula in chemical case, `e-`, or a lowercase name. It has `new`,
+  `as_str` and a `const` constructor that fails to compile on an invalid key. Whichever of this
+  follow-up and P14.T49.a is first creates it.
+- **`field/palette.rs`:**
+  - `PaletteRole` (`u8`, append-only): `PrimaryCrust` 0, `SecondaryCrust` 1, `TertiaryCrust` 2,
+    `Province` 3, `Ice` 4, `Liquid` 5, `Cover` 6, `Deposit` 7;
+  - `MechanicsFamily` (`u8`): `Silicate` 0, `Metal` 1, `WaterIce` 2, `VolatileIce` 3, `Salt` 4,
+    `Organic` 5;
+  - `PaletteEntry { substance, role, normal_albedo_bvr: [f64; 3], phase_row: u8,`
+    `density_kg_m3: f64, transition: Kelvin, mechanics }`, every value resolved by the server from
+    plan 14's registry, so that the field stays the client's only input (Design note 17);
+  - `MaterialPalette`, at most 15 entries, sorted by (role, key).
+- **`FieldHeader`** gains `palette`, `crust_palette: [Option<u8>; 4]` (the entry of each `Crust`
+  variant, whose lithology it names) and `main_liquid: Option<u8>`.
+- **`SynthesisCell`** gains `substances: u8`: the ice entry in the high nibble and the liquid entry
+  in the low, `0xF` none. The record goes from 21 to 22 bytes, 0.39 MB more on an Earth at level 8.
+- **`SurfaceClass`'s codes:** 0 unclassified, 1–63 Köppen–Geiger, 64–255 surface-state forms
+  whose substance is the cell's palette entry (T15 assigns them).
+- **`CoarseField::new` refuses:**
+  - a palette over 15 entries, or one not sorted;
+  - an index past it;
+  - an ice share without an `Ice` entry, or a cell under liquid without a `Liquid` entry;
+  - a `crust_palette` entry whose role is not a crust's.
+- **The synthetic worlds carry palettes:**
+  - Earth: `basalt`, `granite`, `H2O` as ice and as liquid;
+  - Mars: `basalt`, `mars_dust`, `H2O` and `CO2` ices;
+  - Moon: `anorthosite`, and `basalt` as provinces;
+  - Ceres: `phyllosilicate`, `Na2CO3`, `H2O` ice.
+
+  Keys are checked by grammar until P14.T49.b's rows exist, when P14.T49.b's test checks every key
+  these worlds use.
+
+- **The shape is frozen only from R09.T19's first send.** R10's and R11's re-validations may add
+  members (a liquid's index, absorption, viscosity and surface tension for R11.T8) under a
+  `SURFACE_PAYLOAD_FORMAT` bump before then.
+- Tests: the palette's bounds, order and refusals; every synthetic world valid; `SubstanceKey`'s
+  grammar (formula, `e-`, name, and rejections).
+- Acceptance: `cargo test -p hyperion-surface field`;
+  `cargo test -p hyperion-surface substance_key`.
+
 ### R09.T3 The payload codec
 
 `wire.rs`: little-endian blocks, each with a header (magic, `SURFACE_PAYLOAD_FORMAT`, generator
 version, body, level, block index and count), block 0 also carrying the whole `FieldHeader`, the
 cover of the block's surveyed and margin cells with their resolution codes, their records, and the
-craters that reach them; `encode_payload` splits at `MAX_BLOCK_BYTES` in `cell_index` order, taking
+craters that reach them; the palette (a count, then fixed-size entries) and each cell's substance
+byte, as rows of the table-driven layout (decision-composition); `encode_payload` splits at
+`MAX_BLOCK_BYTES` in `cell_index` order, taking
 the surface crate's `Cover` (the server converts its `Coverage`); `decode_payload` returns errors,
 never panics; `DecodedBlock`, and `PartialField` with `insert` and its `FieldView`, which rebuilds
 the per-cell crater index as blocks arrive.
@@ -1154,7 +1200,8 @@ Tests: round trip of a synthetic field to identical bytes and identical `FieldVi
 three fixed permutations give `PartialField`s whose every `FieldView` answer is equal; a truncated,
 oversize,
 wrong-version or wrong-body block is refused with its error; no block exceeds 1 MiB; the Earth-sized
-synthetic field encodes to 10–15 MB. Acceptance: `cargo test -p hyperion-surface wire`.
+synthetic field encodes to 10–15 MB, recomputed with the 22-byte synthesis record and
+decision-r09-t2's climate record. Acceptance: `cargo test -p hyperion-surface wire`.
 
 ### R09.T4 Interpolation and base elevation
 
@@ -1293,7 +1340,10 @@ version and R05's under the test planet's.
 returning `NotModelled` until plan 14's sections carry values, the cell graph over R05's cube (four
 edge neighbours, vertex neighbours, solid angles by the closed form atan2(uv, √(1 + u² + v²))
 differenced over the corners, through `math::atan2`), the quantiser, `coarse_pass` running its steps
-as no-ops, and `reference::{earth_like, mars_like, moon_like, ceres_like}`. `for_body` reads the
+as no-ops, and `reference::{earth_like, mars_like, moon_like, ceres_like}`. `CoarseInputs` gains
+`crust`, `condensates` and the palette's sources (P14.T51.a, T51.c; builder arguments until
+P14.T54.a puts them on the record), and `for_body` reads them from `record::Surface`.
+`reference::*` sets them (decision-composition). `for_body` reads the
 record's `bulk`, `figure`, `rotation` and `orbit` sections and the context's stars (Provides), and
 answers `NotModelled(RecordSection::Surface)` while `record::Surface` is uninhabited; a test pins
 that on a generated rocky body. `for_body` answers `NoSolidSurface` for a `NotApplicable` surface,
@@ -1317,20 +1367,23 @@ trench; a stagnant-lid world has none. Acceptance:
 
 ### R09.T12 Coarse elevation
 
-- **R09.T12.a Crust and ridges.** `steps/relief.rs`: Design note 7's two crust populations about
-  sea level and GDH1's age–depth law from the distance to divergent boundaries. Tests: the
-  reference Earth's hypsometry, binned as Earth2014 was (area-weighted 250 m bins, the TBI layer at
-  5′), is bimodal with a land mode within 300 m of +125 m, an ocean mode within 600 m of −4,375 m
-  (the ocean peak is flat from −5,300 to −4,300 m) and an oceanic mean within 300 m of −4,281 m
-  (Hirt and Rexer 2015's Earth2014, recomputed 2026-09-29); a ridge's depth
-  follows GDH1 at 5, 20 and 100 Myr to 1 m.
+- **R09.T12.a Crust and ridges.** `steps/relief.rs`: Design note 7's two crust populations (their
+  lithologies from plan 14's `crust`: `Oceanic` the secondary crust's entry, `Continental` the
+  tertiary's) about sea level and GDH1's age–depth law from the distance to divergent boundaries.
+  Tests: the reference Earth's hypsometry, binned as Earth2014 was (area-weighted 250 m bins, the
+  TBI layer at 5′), is bimodal with a land mode within 300 m of +125 m, an ocean mode within 600 m
+  of −4,375 m (the ocean peak is flat from −5,300 to −4,300 m) and an oceanic mean within 300 m of
+  −4,281 m (Hirt and Rexer 2015's Earth2014, recomputed 2026-09-29); a ridge's depth follows GDH1 at
+  5, 20 and 100 Myr to 1 m.
 - **R09.T12.b Convergent landforms.** Belts, trenches and arcs by boundary kind, scaled as Design
   note 7 says. Tests: belts lie within their stated distance of convergent boundaries; trenches lie
   2–4 km below the neighbouring sea floor and arcs 100–200 km behind them.
 - **R09.T12.c Stagnant-lid provinces and flexure.** After T0.b's isotherm item. Volcanic provinces
   sized by the volcanism level
   and the flexural moat and bulge about each load, with T_e = k (870 K − T_s) ÷ F (T0.b's ruling,
-  Design note 3). Tests: a line load's bulge crest lies at πα with height 0.043 w₀; α at T_e = 70
+  Design note 3). T_e's isotherm and conductivity come from the crust's substance: the ice lean of
+  Risks becomes the `H2O` row's (decision-composition). Tests: a line load's bulge crest lies at πα
+  with height 0.043 w₀; α at T_e = 70
   km under Mars's gravity is 180 km ± 10; T_e is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and
   zero where T_s ≥ 870 K, where each load is compensated locally (α = 0).
 - **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.a. Tests:
@@ -1365,14 +1418,21 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   world is warmest at the substellar point.
 - **R09.T13.c The other regimes.** `steps/climate/{airless,isothermal}.rs`: radiative equilibrium
   with thermal inertia for airless and thin-atmosphere worlds, and the isothermal surface for a
-  Venus. Tests: an airless world's day–night contrast exceeds 300 K; the isothermal model's surface
-  varies by under 1 K.
+  Venus. On a locked lava world, cells above the secondary crust's transition temperature are melt,
+  from this task's per-cell temperature, not from the global state. Tests: an airless world's
+  day–night contrast exceeds 300 K; the isothermal model's surface varies by under 1 K; a locked
+  lava world's melt is the dayside region above the solidus, and its nightside is solid.
 - **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on their
-  components (P₂, P₁, a constant after the lapse term); ice coldest first by annual maximum. Tests:
-  the area-weighted surface mean equals the input to 0.1 K; the P₂ coefficient gives the input
-  contrast exactly; ice area equals the input fraction to one cell; a warm pole gets no cap; a
-  90°-obliquity world is labelled by FILLET's ice-edge states (an ice belt, not caps, when plan 14's
-  history says it started cold).
+  components (P₂, P₁, a constant after the lapse term); each ice placed per condensate, coldest
+  first against its own frost point by annual maximum, until its area matches plan 14's area for
+  that substance (`surface_ices`), and each liquid's surface to its share of the ocean fraction
+  (`surface_liquids`); the energy-balance albedo function shifted to the climate condensable's
+  freezing point, by `SubstanceId` (decision-composition). Tests: the area-weighted surface mean
+  equals the input to 0.1 K; the P₂ coefficient gives the input contrast exactly; ice area equals
+  the input fraction to one cell; a warm pole gets no cap; a 90°-obliquity world is labelled by
+  FILLET's ice-edge states (an ice belt, not caps, when plan 14's history says it started cold);
+  the reference Mars places CO₂ ice inside its water-ice cap's latitude, given by hand; a
+  Titan-like world's methane liquid fills its basins to its share.
 - **R09.T13.e Precipitation and wind.** Design note 8's heuristic, labelled in the header. Tests:
   global precipitation equals global evaporation to 1%; the reference Earth's zonal precipitation
   has maxima within 10° of the energy-flux equator and in the 40–60° bands and minima at 15–35°; on
@@ -1398,7 +1458,10 @@ of the same inputs, with the differences written into this plan. Acceptance:
   runoff once). Tests: a ridge-to-sea profile matches the closed-form steady state; the fixed
   point's residual falls monotonically over the multigrid levels on the reference Earth; K is 6.3
   × 10⁻⁶, 2.4 × 10⁻⁵ and 3.1 × 10⁻⁶ m^0.1 a⁻¹ (to 2%) for an Earth's rock under water, a
-  saturated Mars's regolith and a Titan's ice under methane.
+  saturated Mars's regolith and a Titan's ice under methane. K's bed factor B comes from a
+  (substrate, fluid) table over the registry's rows, and ρ_f is the liquid's density. The three
+  calibrated cases (rock, saturated regolith, ice under methane) stay its tests
+  (decision-composition).
 - **R09.T14.c The branches and the Mars check.** The wet-now, dry-now and never-wet branches, after
   T6.b. Tests: the dry-now branch leaves surfaces younger than the epoch's end untouched; a
   never-wet world's elevation is unchanged by the step; on the reference Mars the coarse erosion
@@ -1421,17 +1484,19 @@ Acceptance:
 
 `steps/classes.rs`: Köppen–Geiger by Peel et al.'s Table 1 with Beck et al.'s rules, applied to
 rates with each cell's own summer (Design note 11); surface-state classes for the other regimes and
-for one-month worlds; the per-cell crater state. Tests: the classifier given one monthly climatology
-labelled once as a one-year orbit and once as a four-year orbit (the same temperatures, and
-precipitation at the same rates per 30.44 d) returns the same classes, which tests the rate rule
-alone, not the climate a longer orbit would have; the reference Earth has tropical, arid, temperate,
-continental and polar classes in plausible areas; a lifeless world has no vegetation class; the
-reference Moon is regolith throughout. `crates/hyperion-sim/examples/surface_map.rs` (the sim's
-first example, with an `[[example]]` entry carrying `required-features = ["testing"]`) writes the
-reference Earth's elevation, class and flow as equirectangular PPM images under `target/`, with no
-new dependency, and the look (belts along convergent boundaries, rivers to the sea) is recorded in
-this task's entry. Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::classes` and
-`cargo run -p hyperion-sim --features testing --example surface_map` writing its three images.
+for one-month worlds; each naming its palette entry (codes 64–255), with melt per cell;
+Köppen–Geiger 1–63 (decision-composition); the per-cell crater state. Tests: the classifier given
+one monthly climatology labelled once as a one-year orbit and once as a four-year orbit (the same
+temperatures, and precipitation at the same rates per 30.44 d) returns the same classes, which tests
+the rate rule alone, not the climate a longer orbit would have; the reference Earth has tropical,
+arid, temperate, continental and polar classes in plausible areas; a lifeless world has no
+vegetation class; the reference Moon is regolith throughout.
+`crates/hyperion-sim/examples/surface_map.rs` (the sim's first example, with an `[[example]]` entry
+carrying `required-features = ["testing"]`) writes the reference Earth's elevation, class and flow
+as equirectangular PPM images under `target/`, with no new dependency, and the look (belts along
+convergent boundaries, rivers to the sea) is recorded in this task's entry. Acceptance: `cargo test
+-p hyperion-sim planetary::surface::steps::classes` and `cargo run -p hyperion-sim --features
+testing --example surface_map` writing its three images.
 
 ### R09.T16 Coarse goldens and benches
 
@@ -1439,7 +1504,8 @@ this task's entry. Acceptance: `cargo test -p hyperion-sim planetary::surface::s
 `crates/hyperion-sim/tests/common/surface_worlds.rs` that runs `reference::*` through the pass once
 per binary and that R10's world tests reuse: the quantised fields of the reference Ceres
 and Moon (fast, so they run on native and wasip1 under R04's recipes) and of the reference Earth
-and Mars (slow). Bench `coarse/pass` per level 5–8, beside T14's `coarse/erosion_l8` in
+and Mars (slow). The coarse goldens pin each reference world's palette. Bench `coarse/pass` per
+level 5–8, beside T14's `coarse/erosion_l8` in
 `crates/hyperion-sim/benches/surface.rs`. Bump `GENERATOR_VERSION` if T9 (or
 T1.b) has not already (whichever lands first bumps, through the orchestrator), or again if the first
 bump has been released to a save. Acceptance: `cargo test -p hyperion-sim --test
@@ -2115,3 +2181,13 @@ coarse goldens in that commit.
     reads; unknown and later formats (a later contacts file refuses nothing); the torn last line
     written over; malformed lines naming their field; a universe with no save, where nothing is
     written; concurrent passes reaching the file in the coverage's order; format 1's lines pinned.
+- **Composition (decision-composition, 2026-10-09).** A body's substances are plan 14's
+  registry keys, carried in the header's palette with their properties resolved by the server,
+  and one byte per cell names its ice and liquid. `Crust` stays structural, its lithology the
+  palette's, which closes T2's "closed set, for the composition audit". `BoundaryKind`,
+  `Morphology`, `ClimateModelKind` and `PrecipitationSource` are physics classes and stay closed.
+  Recorded for later:
+  - glacial, aeolian, sublimation and thermal (lava) erosion (T14);
+  - ice-shell, heat-pipe and episodic morphologies (T11–T12; their regimes are on plan 14's wire
+    already);
+  - frost by month (plan 14's P14.T55.e).

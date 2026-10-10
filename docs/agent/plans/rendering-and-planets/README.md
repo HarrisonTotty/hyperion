@@ -322,6 +322,12 @@ points.
 | Plan 15 | New kinds of `hyperion-fit` output, client fixtures rather than sim tables: `atmosphere-reference` (with `serde_json`) and `ring-shadowing`                                                                                                                                                                                              | R08.T12.a, R11.T9.b                   | built by the asking plans; plan 15's owner may move them to a sibling tool                                                                                                                                                                    |
 | Plan 15 | The colour and limb-darkening tables, ordinary sim tables under `crates/hyperion-sim/src/tables/` through `hyperion-fit`'s existing machinery                                                                                                                                                                                            | R06.T3, R06.T4.a                      | built by R06                                                                                                                                                                                                                                  |
 
+- **Composition** (decision-composition, 2026-10-09; ruled under the owner's delegation, so
+  accepted): galaxy plan 14's Phase L (P14.T49–T55, T33.c), in the 21 → 22 batch's head
+  (T49.a), a 22 → 23 batch and a 23 → 24 batch. R08 reads its keys through an optics registry
+  (R08.T3.c, T4.b–c, T5.b, T5.d, T18, T19). R09 carries its palette (R09.T2's follow-up B). R10
+  and R11 fold it in at their re-validations.
+
 ### Of the sessions plan and later plans (not written)
 
 | Owner        | Ask                                                                                                                                                                                                                                                                                                                                                                                                                           | Asked by                                         |
@@ -735,8 +741,9 @@ recorded here rather than settled.
   generates a band structure. The research lean (R11's research) is R07: a band texture driven by
   zonal jets over R08's deck photometry, with the structure asked of plan 14. R07's Risks record
   the lean and leave the assignment to the owner.
-- **Visible thermal emission of magma oceans** is owned by no plan (R07's Risks; neither R08 nor R10
-  takes it).
+- **Visible thermal emission** of magma oceans, lava worlds and hot atmospheres: assigned by
+  decision-composition (2026-10-09) to R08.T18 (the medium, and R07's disc through R08's
+  `discReflectance.ts`) and to R10.T10.b (terrain), through one shared function.
 - **Refraction and scintillation.** R06 leaves scintillation to R08, and R08 draws neither; R10's
   shadow test would read a refracted sun if R08 drew one. Whether the realism ruling wants them is a
   question for the owner and a research agent.

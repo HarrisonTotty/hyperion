@@ -228,8 +228,22 @@ export const ONE_BAND_BELOW = 0.02; // ln(s_max ÷ s_min) under which one band s
 ### Optics (`rayleigh.ts`, `absorbers.ts`, `mie.ts`, `sizeDistribution.ts`, `aggregate.ts`, `materials/`)
 
 ```ts
-// plan 14's `Gas` (`Hydrogen` … `Argon`, in `Gas::ALL`'s order), by formula
-export type Gas = "H2" | "He" | "H2O" | "CH4" | "NH3" | "N2" | "O2" | "CO2" | "Ar";
+// Keys are plan 14's substance keys (P14.T49.a; decision-composition): a definite species by its
+// formula in chemical case, a material by a lowercase name. No wire-facing type is narrower than
+// `string`, and no code switches exhaustively on a key.
+export const GASES: readonly [...]; // the species with measured dispersions (R08.T3.b's 13)
+export type Gas = (typeof GASES)[number];
+export interface GasFraction { readonly species: string; readonly moleFraction: number }
+export type GasFractions = ReadonlyArray<GasFraction>; // largest first, Σ = 1 within 10⁻⁹
+export type OpticsProvenance = "measured" | "estimated" | "none";
+export interface SpeciesRayleigh {
+  readonly species: string;
+  readonly provenance: OpticsProvenance;
+  readonly crossSectionM2: (wavelengthNm: number) => number;
+  readonly depolarisation: (wavelengthNm: number) => number;
+  readonly source: string;
+}
+export function rayleighOf(species: string): SpeciesRayleigh; // R08.T3.c
 export interface Dispersion {
   readonly nMinusOne: (wavelengthNm: number) => number;
   readonly referenceK: number;
@@ -239,7 +253,7 @@ export interface Dispersion {
 export const GAS_DISPERSION: Readonly<Record<Gas, Dispersion>>;
 export function kingFactor(gas: Gas, wavelengthNm: number): number;
 export function rayleighCrossSectionM2(gas: Gas, wavelengthNm: number): number; // R08.T3.b
-export function molecularTerm(column: AtmosphereColumn, fractions: GasFractions): MediumTerm; // T3.c
+export function molecularTerm(column: AtmosphereColumn, fractions: GasFractions): MolecularTerm; // T3.c: the term and its approximations
 export interface AbsorberCurve {
   // one absorber under one sun, computed at arrival (Design note 5)
   readonly logColumns: Float64Array;
@@ -257,12 +271,13 @@ export interface MieResult {
 export function mieSphere(sizeParameter: number, index: ComplexIndex, mu: Float64Array): MieResult;
 export function modeOptics(mode: AerosolMode, wavelengthNm: number): ModeOptics; // over its size distribution
 export function aggregateOptics(mode: AggregateMode, wavelengthNm: number): ModeOptics; // Tazaki–Tanaka MMF
-export function refractiveIndex(material: AerosolMaterial, wavelengthNm: number): ComplexIndex;
+export function refractiveIndex(material: string, wavelengthNm: number): { index: ComplexIndex; provenance: "measured" | "derived" | "standIn" }; // R08.T5.b
 export function aerosolTerm(mode: AerosolModeSpec, column: AtmosphereColumn): MediumTerm; // R08.T5.c
 ```
 
 Beside them: `channels.json` (the fitted triple and its objective, R08.T4.a),
-`absorbers/crossSections.json` (R08.T4.b), and `bless.ts`, the client's bless helper, which
+`absorbers/crossSections.json` (R08.T4.b), `packages/protocol/fixtures/substances.json`, the sim's
+registry mirror, which R08.T19 reads, and `bless.ts`, the client's bless helper, which
 rewrites a committed table only under `HYPERION_BLESS=1`, the variable the Rust testkit already
 reads (R08.T4.a). As built, renderer code, tests included, reads no files through `node:fs`
 (R04.T10.c; `tsconfig.web.json` carries no Node types), and no TypeScript bless path exists: a
@@ -1229,7 +1244,11 @@ Names are those the owning plans give; the owning plan is authoritative.
       ammonium hydrosulphide (NH₄SH) mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` of
       optical depth above it at 550 nm: no visible optical constants for NH₄SH are published, and
       its index is a stated stand-in (R08.T5.b; `decision-r08-licences.md` row 5). That note clears
-      only when measured constants replace the stand-in, not when a gate passes.
+      only when measured constants replace the stand-in, not when a gate passes. The same note
+      covers any species or material the client draws with estimated optics, a stated stand-in, or
+      none (an absorber without cross-sections, a key a newer server sent), while it shows under
+      the same τ rule. Each clears when measured optics replace the estimate
+      (decision-composition §1.9).
 
     The provisional profile is recorded in the plan and the code, not on the display. The phrases
     are R08.T2's, signed off 2026-10-09 by the sign-off agent (owner's delegation).
@@ -1444,9 +1463,9 @@ The order:
   start at once. T3.a (the column) follows T3.d, at whose g_ref it is built and whose normal
   gravity its spheroid test reads. T3.c (the molecular term) follows T3.a and T3.b.
 - T4.a follows T3, since its Earth cases need the molecular term, and builds `bless.ts`; T4.b
-  follows T4.a.
+  follows T4.a. T4.c follows T4.b.
 - T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
-  T5.b.
+  T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e.
 - T6 generalises R05's tables over N terms. T6.a needs T3.a's `tabulated` density; T6.b follows
   T6.a and T0; T6.c follows T6.b and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c
   and T4.a (the fitted channels); T6.e follows T6.d and T3.d; T6.f follows T6.e.
@@ -1461,7 +1480,8 @@ The order:
 - T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13, and T15 follows T14, whose
   solver it uses.
 - T16 needs T8 and T15. It runs on the hand giant fixture, and re-runs on plan 14's envelope when
-  P14.T24.d is on the wire. T17 closes.
+  P14.T24.d is on the wire. T18 needs T6, T9, T14 and T16.b. T19 needs P14.T49.a's fixture and
+  T5.b, and grows with the registry. Both precede T17. T17 closes.
 
 Some tasks wait on the owner or on another plan, and say so where they do:
 
@@ -1711,12 +1731,34 @@ pins the strings. Acceptance:
   7%), the formula is pinned to its own value and the measurement is recorded as a separate check
   with its error.
 
-- **R08.T3.c The molecular term.** `molecularTerm(column, fractions)`: the number-fraction
-  mixture, F_mix and ρ_mix of Design note 4, and the Rayleigh phase function. Tests:
+- **R08.T3.c The molecular term.** `molecularTerm(column, fractions: GasFractions)`: the
+  number-fraction mixture, F_mix and ρ_mix of Design note 4, and the Rayleigh phase function, over
+  any keyed species (decision-composition §1.9).
+  - `GasFraction` and `GasFractions` are defined here, in `rayleigh.ts`, as Provides gives them:
+    the wire's `gases` in camelCase, never narrowed to `Gas`.
+  - `rayleighOf(species)` returns:
+    - `measured` for R08.T3.b's gases;
+    - `estimated` for the registry's other gas rows, from a static polarisability volume α with
+      F_K = 1, σ = (128π⁵ ÷ 3) α² ÷ λ⁴. Each α is cited to its primary measurement or computation,
+      with NIST's CCCBDB a finding aid only. Its first rows are CO, SO₂, H₂S, HCN, O₃, C₂H₂, C₂H₄,
+      C₂H₆, PH₃ and CH₃OH, then the atoms and radicals of the fixture. This task's science check
+      first looks for a measured dispersion, and records that a static α runs low towards the
+      violet;
+    - `none` for a key it does not know, contributing zero.
+  - The term carries `approximations`, each species with an estimated or absent provenance, which
+    R08.T10.a turns into `atmosphereApproximate`.
+
+  Tests:
   - a pure N₂ column equals N₂ alone;
   - the mixture is linear in the fractions;
   - fractions that do not sum to 1 within 10⁻⁹ are refused;
-  - ρ_mix for dry air is within 2% of Bates's.
+  - ρ_mix for dry air is within 2% of Bates's;
+  - an estimated species' σ(550) is within a factor of 1.3 of its measured value for the three
+    measured gases recomputed by the estimate's route (N₂, CO₂, CH₄), a check on the route, not a
+    tolerance on the data;
+  - an unknown key contributes nothing and is reported;
+  - a mixture built from `packages/protocol/fixtures/substances.json`'s gas rows gives a term for
+    every row.
 
 - **R08.T3.d Normal gravity and the slicing.** `oblate.ts` (Provides): `normalGravity`
   (Somigliana's closed form for the level ellipsoid, Heiskanen and Moritz 1967 §2-7 to 2-9),
@@ -1789,9 +1831,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   - the refit starts from (620, 540, 445) and does not worsen the recorded objective;
   - at Earth the fitted triple beats 680/550/440 at a sun zenith of 85°.
 - **R08.T4.b Curves of growth.** `absorbers.ts`: `absorberCurve(absorber, spectrum)` computes T_c(u)
-  per absorber and channel for one sun, weighted by max(r̄_c, 0)·S (Design note 5), on σ's own grid
-  of 1 nm or finer, with S interpolated from the sun's 15 `bake_spectrum` bin averages. It runs in
-  the optics worker at arrival, once per sun. The reduced cross-sections, ozone binned to 1 nm and
+  per absorber and channel for one sun, for an `AbsorberSpec` keyed by species string
+  (decision-composition §1.9), weighted by max(r̄_c, 0)·S (Design note 5), on σ's own grid of 1 nm
+  or finer, with S interpolated from the sun's 15 `bake_spectrum` bin averages. It runs in the
+  optics worker at arrival, once per sun. The reduced cross-sections, ozone binned to 1 nm and
   methane's coefficients as published, are written to `absorbers/crossSections.json` by the same
   reduction step (T4.a's Node tool, since a renderer test fetches and reads no raw file). Ozone's
   1 nm bins are centred, on [λ − 0.5, λ + 0.5) nm (`decisions-r05.md` item 2), unlike R05's
@@ -1818,6 +1861,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
         Keller-Rudek et al. 2013.
     - Karkoschka 1998 (PDS GBAT_0001, DOI 10.17189/2bp8-k793, CC0) is the open fallback and a
       cross-check. It has no temperature dependence, so using it is a recorded deviation.
+  - Absorbers whose ratios hold constant with height share one curve of growth:
+    σ_mix(λ) = Σ xᵢσᵢ(λ) is exact for them. So Design note 8's five stored columns count distinct
+    vertical profiles, not species, and do not cap the composition. A listed absorber with no
+    cross-sections draws nothing and is reported for `atmosphereApproximate`.
 
   Tests:
   - a flat spectrum's curve is e^(−σu);
@@ -1827,7 +1874,33 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   - the sun's colour through 0.1–10 × a reference column matches the spectral result to
     Δu′v′ ≤ 0.002, for the Sun and for a 6,500 K Planck spectrum;
   - 300 DU of ozone gives a green-channel Chappuis optical depth of 0.02–0.04;
-  - the bless check fails on a changed table and names the command.
+  - the bless check fails on a changed table and names the command;
+  - two absorbers on one profile give one curve equal to the curve of their mixed cross-section;
+    six absorbers on five profiles fit the five columns.
+
+- **R08.T4.c Hot atmospheres' absorbers and continua** (decision-composition). After T4.b.
+  `absorbers.ts` and `absorbers/`:
+  - Na and K with pressure-broadened wings (Allard et al. 2019, from memory);
+  - TiO and VO from ExoMol (McKemmish et al. 2019, from memory), as curves of growth at
+    1,500–3,000 K;
+  - H⁻ bound–free and free–free in closed form (John 1988, from memory);
+  - Fe lines;
+  - SO₂'s near-ultraviolet tail;
+  - H₂O's and NH₃'s visible bands, and CH₄ above 296 K;
+  - Thomson scattering by e⁻ (σ_T).
+
+  Each source's licence is checked at its fetch under `decision-r08-licences.md`'s rule.
+  ExoMol's data are CC BY-SA 4.0, so their reduced cross-sections go in a file of their own,
+  `absorbers/exomol/<species>.json`, with a sibling licence note and a `NOTICE` entry offering the
+  adapted file under CC BY-SA 4.0, never inside `crossSections.json` or code
+  (decision-composition §5).
+  - Tests:
+    - a class IV giant's (900–1,500 K) geometric albedo under 0.1 at 550 nm (Sudarsky et al.
+      2000's Bond albedo for class IV is 0.03, Table 1a);
+    - Na D's depth monotone in column;
+    - H⁻'s continuum equal to John 1988's tabulated values at three wavelengths;
+    - every T_c in (0, 1] for a 2,500 K and a 30,000 K sun.
+  - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
 
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers view/atmosphere/channels`.
 
@@ -1853,10 +1926,24 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
 - **R08.T5.b Size distributions and materials.**
   - `sizeDistribution.ts`: Gauss–Legendre in ln r over ±4σ, doubled until the phase integral and
     ⟨cos θ⟩ change by under 10⁻⁴, typically 200–500 nodes.
-  - `materials/`: one refractive-index file per material, each with its paper and its CC0 or MIT
-    copy in a header: water (Hale and Querry 1973), ice (Warren and Brandt 2008), NH₃ ice
-    (Martonchik et al. 1984), CH₄ (Martonchik and Orton 1994), silicates (Dorschner et al. 1995),
-    soot, iron.
+  - `materials/`: one refractive-index file per material, keyed by plan 14's material key
+    (P14.T49.b; `H2O`, `NH3`, `CH4`, `CO2`, `H2SO4`, `NH4SH`, `Fe`, `soot`, `tholin`, `mars_dust`,
+    and the silicates by species, `MgSiO3` and `Mg2SiO4`). Each file's header carries:
+    - its paper and its source;
+    - its licence basis (decision-composition §5);
+    - its `provenance`: `measured`, `derived` (CO₂ ice's fit) or `standIn`;
+    - its phase, its temperature and its shape class.
+
+    `standIn` is general, NH₄SH's mechanism for any material without a measured visible index: a
+    named analogue's file, or a constant index with its citation, under Design note 12's
+    `ATMOSPHERE: APPROXIMATE` while the mode lies under less than
+    `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` at 550 nm. An unknown key (a newer server's) takes the generic
+    stand-in, a non-absorbing sphere of real index 1.5 (a stated convention), under the same label.
+    The files are also P14.T49.e's inputs: the sim's mass extinction is computed from them, so a
+    changed file moves generated output. The first files, with their papers and CC0 or MIT copies:
+    water (Hale and Querry 1973), ice (Warren and Brandt 2008), NH₃ ice (Martonchik et al. 1984),
+    CH₄ (Martonchik and Orton 1994), silicates (Dorschner et al. 1995), soot, iron.
+
   - Ruled 2026-10-09 (`decision-r08-licences.md` rows 2–5). Each file is reduced by T4.a's Node
     tool from a source fetched by URL and SHA-256 and never committed. Its header carries:
     - its paper, its source, the checksum and the date fetched;
@@ -1933,7 +2020,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
   - CO₂ ice's real index is 1.413 ± 0.001 at 553 nm and 1.404 ± 0.001 at 1,000 nm (Warren 1986,
     Table I, asserted values);
   - its k lies between 0 and 2.2 × 10⁻⁶ over 380–780 nm;
-  - a 2 µm sphere's single-scattering albedo at 550 nm exceeds 0.9999.
+  - a 2 µm sphere's single-scattering albedo at 550 nm exceeds 0.9999;
+  - an unknown material key gives the generic stand-in and `atmosphereApproximate`;
+  - once P14.T49.b's rows exist, every file's key is a row of `substances.json` (R08.T19 checks
+    it).
 
 - **R08.T5.c Aggregates and phase tables.** `aggregate.ts` implements Tazaki and Tanaka 2018's MMF
   with D_f ≤ 2.5, and the phase-shift gate of Design note 6: a mode with Δφ ≥ 1 keeps its
@@ -1950,6 +2040,25 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
 
 Acceptance for T5.b and T5.c:
 `pnpm --filter hyperion exec vitest run view/atmosphere/sizeDistribution view/atmosphere/aggregate view/atmosphere/materials`.
+
+- **R08.T5.d The registry's condensates and hazes** (decision-composition). After T5.b, and
+  before galaxy plan 14's P14.T49.e, which reads these files.
+  - Index files, by T5.b's rules, for KCl, NaCl, ZnS, Na₂S, MnS, Cr, FeS, MgSiO₃, Mg₂SiO₄, SiO₂,
+    Al₂O₃, CaTiO₃, TiO₂, graphite, S₈, H₂S ice, N₂ ice, CO ice, the chromophore (Braude et al.
+    2020's retrieved absorption, reduced) and the ice giants' haze (Irwin et al. 2022), each from
+    its primary measurement.
+  - Kitzmann and Heng 2018's compilation (LX-MIE's `compilation/`, GPL-3.0 repository, no
+    separate data terms) is the finding aid. Each primary is fetched from its own distribution
+    where one exists. Where the compilation is the only machine-readable copy, its values are
+    reduced to 380–780 nm on the file's grid and cited to both the primary and Kitzmann and Heng.
+    No compilation file, and none of LX-MIE's code, is committed (decision-composition §5).
+  - A material without visible data takes a stated stand-in.
+  - Tests:
+    - every file covers 380–780 nm and names its provenance;
+    - every aerosol-material row of `substances.json` has a file or a stated stand-in;
+    - a 1 µm forsterite sphere's single-scattering albedo at 550 nm lies above 0.99, and an iron
+      sphere's lies below a forsterite sphere's of the same size (Mie on the files).
+  - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/materials`.
 
 ### R08.T6 Hillaire's tables over N terms
 
@@ -2273,6 +2382,16 @@ the fixtures of Design note 16: Earth, Earth with ozone, Mars with hand dust, Ve
 dust, Titan's haze) wait on those files. Their licences were ruled on 2026-10-09
 (`decision-r08-licences.md`).
 
+By the composition ruling (decision-composition):
+
+- A generated body's column takes the record's `mean_molecular_mass_g_mol` and
+  `heat_capacity_over_r`. Only hand fixtures use T3.a's `gasProperties`.
+- The record's `gases` pass to `molecularTerm` unconverted (a type test pins the assignability).
+- `atmosphereApproximate` collects the reasons of the optics registry: an estimated or absent
+  Rayleigh, an absent absorber, a stand-in or unknown material.
+- A body in the `Tenuous` state with a drawable haze is drawn in the `thin` regime. One whose gas
+  is only an exosphere takes no medium and no label.
+
 Tests (T10.a):
 
 - a withheld section gives no medium and `atmosphereNotResolved`, and a `not_modelled` one
@@ -2294,7 +2413,9 @@ Tests (T10.a):
 - a `rotational_and_tidal` record's medium is built at ω_fig = √2.5 ω (its g_ref includes ω²R),
   and a `capped` one builds where its true ω would put γ_e ≤ 0;
 - results transfer, and the cache evicts least recently used within its stated size;
-- each fixture's optics time is recorded, on a quiet machine.
+- each fixture's optics time is recorded, on a quiet machine;
+- a record with an unknown key in each keyed member draws without a fault and carries
+  `atmosphereApproximate`; a `Tenuous` Pluto-like record draws its haze.
 
 Acceptance: T10.a's and T10.b's, above.
 
@@ -2639,7 +2760,11 @@ Acceptance: `pnpm test`.
   carries Jupiter's figure and rotation (f = 0.065), so that Design note 17's slicing runs on it.
   When P14.T24.d and P14.T35.e are on the wire, the medium comes from the giant's `envelope`
   section, and the tests re-run on it. Tests:
-  - the medium has no ground, and its deck lies at the pressure its input states;
+  - the medium has no ground, and its deck lies at the pressure its input states; a gas-envelope
+    body with no deck above its column's base (a clear class III or a hot giant whose decks lie
+    below its photosphere) takes as its lower boundary the level where the vertical optical depth
+    at 550 nm reaches `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`, baked by T15's deck machinery, so it has a
+    defined floor;
   - once the envelope section exists, a generated Jupiter-class giant's medium places its NH₃
     deck at 0.5–1 bar, as P14.T24.d's own test requires;
   - its limb shell of about ten scale heights is resolved at 2.2 × 10⁸ m, at R02's centre-pixel
@@ -2665,6 +2790,47 @@ Acceptance: `pnpm test`.
   By hand, a Jupiter fixture crossing 10⁹ m is recorded here.
 
 Acceptance: `pnpm test` and `just test-render`.
+
+### R08.T18 Thermal emission
+
+(decision-composition; after T6, T9, T14 and T16.b.) `thermal.ts` and the kernels it touches:
+
+- **The source term.** A medium term's source (1 − ω) B_λ(T(h)) enters the march, the sky-view,
+  the aerial perspective and the bakes, spectrally at the 15 bake bins, reduced to the channels
+  through T4.a's colour pipeline.
+- **`AtmosphereRegime` gains `selfLuminous`**, set where the emitted radiance anywhere on the body
+  exceeds 10⁻⁶ of its reflected radiance in some channel. Below that cut nothing is computed.
+- **The ground's emission:**
+  - on R07's disc, through `discReflectance.ts`, from the record's surface temperature and signed
+    contrasts (a locked airless world's T_ss cos^¼θ) and P14.T51.c's melt area;
+  - on terrain, through the same exported function, which R10.T10.b calls.
+
+This assigns the roadmap's open item on visible thermal emission (README, "Open across plans").
+
+- Tests:
+  - a 2,500 K isothermal column's emergent radiance tends to B_λ(T) as τ grows;
+  - a 300 K world's emission is under 10⁻⁶ of its reflected light in every channel, and
+    `selfLuminous` is unset;
+  - a lava world's nightside is lit only by itself;
+  - an ultra-hot giant's dayside radiance in the red exceeds its reflected radiance.
+- Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/thermal` and
+  `just test-render`.
+
+### R08.T19 The registry parity check
+
+(decision-composition; after galaxy plan 14's P14.T49.a and R08.T5.b; extended as P14.T49.b adds
+rows.) `view/atmosphere/parity.test.ts` reads `packages/protocol/fixtures/substances.json` as a
+JSON import, and fails if:
+
+- a row flagged `rayleigh` has neither a measured nor an estimated entry;
+- a row flagged `absorber` has neither cross-sections nor a stated "none" with its reason;
+- a row flagged `aerosol_material` has neither an index file nor a stated stand-in;
+- `GAS_MOLAR_MASS_G_PER_MOL` or T3.a's `GAS_HEAT_CAPACITY` differs from the fixture for a shared
+  key by more than 10⁻¹²;
+- once P14.T54.a ships τ(550), the client's τ(550) for the protocol fixture's modes differs from
+  the record's by more than 1%.
+
+Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/parity`.
 
 ### R08.T17 Verification pass
 
@@ -3104,13 +3270,12 @@ generator, and the reference's sampling needs no domain tag.
   - The 2% aggregates stand.
   - A regime whose table cannot reach the gate stays `ATMOSPHERE: APPROXIMATE`. The gate is not
     loosened for it.
-  - _The guide row, still to apply._ decision-backlog-1 §2.6 (f) gives the guide's
-    `ATMOSPHERE: APPROXIMATE` row (`docs/frontend/ux-guidelines.md`) the check's figure: after
-    "against an independent path-traced reference for that kind of atmosphere", the clause
-    "agreement within 5% in radiance wherever in the view a difference could be seen", and its
-    draft trailer's parenthesis becomes "(plan R08, R08.T2; the check's figure per
-    decision-backlog-1)". Another lane is editing the guide, so the row is applied after that lane
-    lands. Until then the row names no figure.
+  - _The guide row_ (`docs/frontend/ux-guidelines.md`, `ATMOSPHERE: APPROXIMATE`) names the
+    check's figure, decision-backlog-1 §2.6 (f)'s clause "agreement within 5% in radiance wherever
+    in the view a difference could be seen", applied in the composition ruling's docs pass
+    (2026-10-09).
+    The row had been signed off by then and carries no draft trailer, so §2.6 (f)'s trailer is not
+    added: the figure stands signed off by decision-backlog-1, under the owner's delegation.
 - **Licences no longer block the cloudy gates** (decided 2026-10-09, `decision-r08-licences.md`).
   The Venus-class cloudy case, Mars and the Titan-class haze gate as R08.T5.b's files land, and
   are drawn `ATMOSPHERE: APPROXIMATE` only until their gates pass. NH₄SH alone stays ungated: a
@@ -3335,8 +3500,7 @@ generator, and the reference's sampling needs no domain tag.
       atmosphere drawn before R08.T13's check; it names the oblate case before R08.T6.f (Design
       note 17) beside the thick one, as `AtmosphereLabel`'s sketch does, and, since
       decision-backlog-1 ruled the floor, names the check's figure: agreement within 5% in
-      radiance wherever in the view a difference could be seen (Design note 10). The clause is
-      applied to the guide after the lane now editing it lands (Risks, "The metric's floor").
+      radiance wherever in the view a difference could be seen (Design note 10).
   - _Signed off 2026-10-09 by the sign-off agent (owner's delegation)_ (`signoff-ux-guide.md` in
     the RM4/RM5 orchestration directory), with amendments.
     - T2's three choices are accepted:
@@ -3363,6 +3527,16 @@ generator, and the reference's sampling needs no domain tag.
       with the block's other notes when `atmosphereStatements` is wired, beside the sign-off's own
       item ("For later tasks"): kept-scene bodies left unset gain `ATMOSPHERE: NOT YET MODELLED`,
       and there `PRECISION TEST` had 6 px to spare (R06.T11.f's table).
+  - _Added to the signed-off `APPROXIMATE` row after the sign-off_ (2026-10-09), each signed off
+    by its own ruling under the owner's delegation, with no draft marker:
+    - the check's figure, "agreement within 5% in radiance wherever in the view a difference could
+      be seen" (decision-backlog-1 §2.6 (f)), so the row now names a figure;
+    - after the NH₄SH sentence, "It also stands while any gas, cloud or haze in a body's
+      atmosphere is drawn with estimated optical data or a stated stand-in, because no measurement
+      exists or this console does not know the substance. That note clears only when measured
+      data replace the estimate." (decision-composition §7.3 (m)).
+
+    Prettier refitted the nomenclature table's column widths around the longer row.
 - **Deviations in T5.a, as built** (2026-10-09; `view/atmosphere/mie.ts`, `mie.test.ts`). Wiscombe
   1980's structure as the task gives it, in double precision. What differs:
   - _Names beyond the sketch:_ `ComplexIndex` is `{ n, k }`, m = n + ik with k ≥ 0 absorbing,
@@ -3515,7 +3689,8 @@ generator, and the reference's sampling needs no domain tag.
   Mie or aggregate aerosol cannot be referenced yet); the Stokes mode's kinds (Rayleigh, isotropic,
   none; R08.T12.c adds tabulated matrices and the `depolarising` mark, `decision-r08-vector.md`);
   the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells
-  (the sphere until T12.d).
+  (the sphere until T12.d). Ruled by decision-composition: these are physics classes and stay
+  closed.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:
@@ -3705,3 +3880,10 @@ generator, and the reference's sampling needs no domain tag.
     tests' local Σxᵢσᵢ helper is the check to replace with `molecularTerm`. R05's `earth.test.ts`
     keeps its own copy of Peck and Reeder and Bates; R08.T6.d, which rebuilds Earth, may take
     `rayleigh.ts`'s instead.
+- **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
+  registry key. The client's tables are keyed by those strings, with measured, estimated, derived
+  or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
+  to the sim's fixture.
+  - `Gas` (13) remains the set with measured dispersions, never a wire type.
+  - The 15 bake bins' inadequacy for M dwarfs' TiO bands stays a recorded limitation, since TiO
+    in the star overlaps TiO in the planet.
