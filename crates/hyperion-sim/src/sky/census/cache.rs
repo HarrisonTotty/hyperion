@@ -12,7 +12,7 @@
 //!   hundred. A cell's key and window are recomputed from those, so a cell stores neither:
 //!   - its **key** is the faintest absolute V listable at its least distance from any observer
 //!     within 1,000 ly of the builder's (`CACHE_APPROACH_LY`, the jump drive's range), at the cut
-//!     plus 0.1 mag (`CACHE_CUT_SLACK_MAG`, provisional until R06.T8.n);
+//!     plus 0.2 mag (`CACHE_CUT_SLACK_MAG`, set by R06.T8.n);
 //!   - its **window** is every emitted time such an observer, at any time in ±H, can receive.
 //! - **A cell holds** its records whose star-by-star bound over that window can be listed at the
 //!   key, in candidate order, each with that bound ([`HeldRecord`]).
@@ -47,9 +47,19 @@ use super::query::SkyQuery;
 pub(crate) const CACHE_APPROACH_LY: f64 = 1_000.0;
 
 /// How much fainter, mag, an entry's key is than its builder's cut needs, so that an observer whose
-/// cut is a little fainter (the eye's cut moving between nearby places, R06.T9.d) is served:
-/// provisional, R06.T8.n sets it in [0, 0.25] (`decision-r06-t8h-warm.md`).
-pub(crate) const CACHE_CUT_SLACK_MAG: f64 = 0.1;
+/// cut is a little fainter (the eye's cut moving between nearby places, R06.T9.d) is served.
+///
+/// Set by R06.T8.n in the ruled [0, 0.25] (`decision-r06-t8h-warm.md` §2.2) to cover the eye's
+/// cut's change over the ruled jump, 1,000 ly from the Sun toward the galactic centre: R06.T9.d's
+/// `eye_cut` with each place's illumination moves by −0.169 mag on the sim's fixture (8.179 to
+/// 8.010) and −0.040 on the server's galaxy (7.766 to 7.726). A sky first served there and then
+/// at the Sun reads blocks built 0.169 brighter, and 0.2 is the least multiple of 0.05 that covers
+/// it. Of the other jumps of 1,000 ly in the plane, measured beside it, the largest change is
+/// 0.201 on the server's galaxy (along −x), a hair beyond; out of the plane the cut deepens by
+/// 0.36–0.77, beyond any ruled slack, so such a jump rebuilds some cells for their key, at a
+/// cold cell's cost and with the same reply (the benches' `census_near_sun_served/*warm_jump_5.0`;
+/// R06's Risks, "Deviations in T8.n, as built").
+pub(crate) const CACHE_CUT_SLACK_MAG: f64 = 0.2;
 
 /// The cells along each side of a [`SkyBlock`].
 pub(crate) const BLOCK_SIDE_CELLS: i32 = 4;
@@ -802,6 +812,8 @@ mod tests {
     ///   region's texels but builds the same entries;
     /// - `tight`, V 6;
     /// - `toward` and `away`, V 6 from 1,000 ly along +x and −x: a jump the entries hold;
+    /// - `fainter` and `away_fainter`, at the Sun and from 1,000 ly along −x at V 6 plus the whole
+    ///   [`CACHE_CUT_SLACK_MAG`]: a cut the entries' slack holds (R06.T8.n);
     /// - `late` and `early`, V 6 at +H and at −H;
     /// - `far`, V 6 from 1,500 ly along +x, nearer the far cells than their entries allow.
     struct Queries {
@@ -809,6 +821,8 @@ mod tests {
         tight: SkyQuery,
         toward: SkyQuery,
         away: SkyQuery,
+        fainter: SkyQuery,
+        away_fainter: SkyQuery,
         late: SkyQuery,
         early: SkyQuery,
         far: SkyQuery,
@@ -828,6 +842,8 @@ mod tests {
             tight: query_at(SUN, 6.0),
             toward: query_at(along(1_000.0), 6.0),
             away: query_at(along(-1_000.0), 6.0),
+            fainter: query_at(SUN, 6.0 + CACHE_CUT_SLACK_MAG),
+            away_fainter: query_at(along(-1_000.0), 6.0 + CACHE_CUT_SLACK_MAG),
             late: query_at_time(SUN, ClockWindow::END, 6.0),
             early: query_at_time(SUN, ClockWindow::START, 6.0),
             far: query_at(along(1_500.0), 6.0),
@@ -1109,8 +1125,9 @@ mod tests {
     }
 
     /// The census of each query is the one no cache gives, stars and tallies bit for bit, through a
-    /// warm cache built by a looser query, by a tighter one, and before a move or another time; a
-    /// jump the entries hold rebuilds no cell, and one beyond them rebuilds the cells it nears.
+    /// warm cache built by a looser query, by a tighter one, and before a move, a cut fainter by
+    /// the slack or another time; a jump the entries hold rebuilds no cell, and one beyond them
+    /// rebuilds the cells it nears.
     #[test]
     fn a_query_after_a_looser_or_a_tighter_one_gives_the_bits_no_cache_gives() {
         let galaxy = milky_way_galaxy();
@@ -1175,9 +1192,10 @@ mod tests {
         );
         assert_eq!(cache.take_counts().rebuilt(), 0);
 
-        // A jump of 1,000 ly either way, and the same place at either end of the clock window,
-        // are served whole from the entries the tight census left; a jump of 1,500 ly nears the
-        // far cells past their keys, which rebuild.
+        // A jump of 1,000 ly either way, a cut fainter by the whole slack there and at the Sun,
+        // and the same place at either end of the clock window, are served whole from the entries
+        // the tight census left; a jump of 1,500 ly nears the far cells past their keys, which
+        // rebuild.
         let cache = KeepBlocks::roomy(galaxy);
         let mut ctx = context(&cache);
         let _ = census(&cells, &q.tight, &mut ctx);
@@ -1185,6 +1203,8 @@ mod tests {
         for (query, what) in [
             (&q.toward, "1,000 ly toward"),
             (&q.away, "1,000 ly away"),
+            (&q.fainter, "fainter by the slack"),
+            (&q.away_fainter, "1,000 ly away, fainter by the slack"),
             (&q.late, "at +H"),
             (&q.early, "at -H"),
         ] {

@@ -1929,6 +1929,22 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
     reply, from the open's answer with the tables building, took 40.95 s and 107.6 CPU-s. The
     default changes no computation: the bench serves the sky as the default does, and its counts
     are T2.b's.
+  - **The first sky like for like** (2026-10-10, taken at the orchestrator's request during
+    R06.T8.n). The same bench, release, at the default workers, 15 on this machine, in a scope
+    with no CPU quota (MemoryMax 8G), under the heavy-test lock, with no other lane's heavy run
+    and the 1-minute load 2.8 at its start, about 4–6 over the first reply; the sky cache at
+    R06.T8.n's 1,280 MiB default, which a first reply's few hundred cells do not reach. The first
+    reply near the Sun came in **7.57 s wall and 95.9 CPU-s**, 3,192 stars, cut V 7.766, T2.b's
+    census, against R06.T11.g's budget of 10 s and 150 CPU-s: **it passes**. It matches T2.b's
+    7.16 s and 96.4 CPU-s (taken at load 39) and T11.g's 6.96 s and 94.6, within the runs' spread.
+    - The eye was done at 0.55 s, the caps and plan at 1.99 s (T2.b 1.96 s), and the march at
+      4.60 s. The first step's census and its band took until 7.43 s, and the reply 0.14 s more.
+    - The tables were held 11.74 s and 47.4 CPU-s after the open's answer (T11.g 11.5 s and
+      46.9).
+    - 250 ly came at 17.92 s (243.7 CPU-s) and 500 ly at 84.31 s (1,032 CPU-s).
+    - The session's first reply came 18.28 s and 140.4 CPU-s after the open's answer (T2.b 19.3 s
+      and 145).
+    - The run took 124 s under the lock. Log: `.git/rm23-scratch/r06-t8n/first-sky-1.log`.
   - **Acceptance as run.** Before the reviews: `cargo nextest run -p hyperion-server` passed, 510
     of 510 with 5 skipped (636 s at 4 threads), with its doctest; `cargo fmt --check`, the
     workspace's clippy with `-D warnings` and `pnpm format:check` passed. After the reviews' fixes

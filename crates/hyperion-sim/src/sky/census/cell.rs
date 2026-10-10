@@ -4109,8 +4109,8 @@ mod tests {
     /// envelope's bound and the light star by star over each record's entry window, built for an
     /// observer at the place, against the ages before the drift of three queries the entry holds
     /// (from the place at the epoch, 900 ly along +x at +H, and 600 ly along −x at −H at a cut
-    /// 0.1 fainter), and single ages at each window's ends and middle. R06.T8.n runs it again on
-    /// P11.T17.c's verdicts.
+    /// fainter by the whole [`CACHE_CUT_SLACK_MAG`]), and single ages at each window's ends and
+    /// middle. R06.T8.n ran it again on P11.T17.c's verdicts.
     #[test]
     fn the_entry_light_holds_every_narrower_window() {
         let galaxy = milky_way_galaxy();
@@ -4130,7 +4130,7 @@ mod tests {
             let asked = [
                 builder.clone(),
                 query(at, 900.0, ClockWindow::END, 7.95),
-                query(at, -600.0, ClockWindow::START, 8.05),
+                query(at, -600.0, ClockWindow::START, 7.95 + CACHE_CUT_SLACK_MAG),
             ];
             for layer in [Layer::C, Layer::D, Layer::E] {
                 for record in records_near(layer, at, 10_000).iter().take(10_000) {
@@ -4179,8 +4179,8 @@ mod tests {
     /// Every record the census with no cache generates is held by an entry that serves its query,
     /// and its stored light passes the pre-filter there (R06.T8.h): over cells along x from 2,600
     /// ly on one side to 1,600 ly on the other, entries built at the Sun at V 6 and at V 9, and
-    /// the queries each serves of a census at the Sun, 1,000 ly either way and at ±H, at V 6, and
-    /// at the Sun at V 9.
+    /// the queries each serves of a census at the Sun, 1,000 ly either way and at ±H, at V 6, from
+    /// 1,000 ly along −x at V 6 plus the whole [`CACHE_CUT_SLACK_MAG`], and at the Sun at V 9.
     #[test]
     fn the_prefilter_keeps_every_record_the_census_generates() {
         let galaxy = milky_way_galaxy();
@@ -4215,6 +4215,7 @@ mod tests {
             query(0.0, UniverseTime::EPOCH, 6.0),
             query(1_000.0, UniverseTime::EPOCH, 6.0),
             query(-1_000.0, UniverseTime::EPOCH, 6.0),
+            query(-1_000.0, UniverseTime::EPOCH, 6.0 + CACHE_CUT_SLACK_MAG),
             query(0.0, ClockWindow::END, 6.0),
             query(0.0, ClockWindow::START, 6.0),
             query(0.0, UniverseTime::EPOCH, 9.0),

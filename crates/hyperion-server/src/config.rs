@@ -15,7 +15,7 @@
 //! | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | 128 (MiB)                                    |
 //! | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | 128 (MiB)                                    |
 //! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
-//! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 64 (MiB)                                     |
+//! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 1,280 (MiB)                                  |
 //! | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | 160 (MiB)                                    |
 //! | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           |
 //! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
@@ -94,15 +94,17 @@ pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
 /// The sky's cell cache's budget when `--sky-cache` is not given, in MiB (rendering plan R06,
 /// Design note 12).
 ///
-/// Provisional: R06.T8.n sets it, after P11.T17.c, from the entry bytes of one near-Sun sky and a
-/// jump's new cells, at most 2,048 MiB (decided 2026-10-08, `decision-r06-t8h-warm.md`). Since
-/// R06.T8.h the cache holds blocks of cells keyed by magnitude; at P11.T17.a's verdicts a
-/// near-Sun sky's entries are 13.6 GB, and 14.4 GB with a 1,000 ly jump's (R06.T8.h's sampled
-/// bench, provisional), more than any default holds, so until T8.n a warm sky near the Sun is
-/// mostly a cold one (R06's Risks, "Deviations in T8.h, as built"). A sky forced
-/// to 200 ly near the Sun at V 11 kept 25.5 MB of entries before T8.h (R06's Risks, "Deviations
-/// in T11.b, as built").
-pub const DEFAULT_SKY_CACHE_MIB: usize = 64;
+/// Set by R06.T8.n's rule (decided 2026-10-08, `decision-r06-t8h-warm.md` §2.2): the larger of
+/// 64 and 1.25 times the held bytes of one near-Sun sky's entries and a 1,000 ly jump's, rounded up
+/// to a multiple of 256 MiB, at most 2,048. The sky is the one served since RM3's interim
+/// (rendering plan R13, R13.T2.b): the eye at its own cut, C, D and E within their real boundary
+/// at V 5.0 and 2,000 ly. Its entries, sampled 1 block in 20 (R06.T8.n's bench, 2026-10-10,
+/// provisional), are 705 MB after the Sun's sky on the server's galaxy and 949 MB after a jump
+/// toward the galactic centre (379 MB and 525 MB on the sim's fixture), so 1.25 × 949 MB
+/// is 1,131 MiB, and the default 1,280 MiB. A warm sky is still about as costly as a cold one,
+/// since its census generates every system it generated cold; the cache spares the bounds and
+/// keeps the reply the same bit for bit (R06's Risks, "Deviations in T8.n, as built").
+pub const DEFAULT_SKY_CACHE_MIB: usize = 1_280;
 /// The sky tables' cache's budget when `--sky-tables` is not given, in MiB: two galaxies' luminosity
 /// tables, about 55 MiB each with their snapshots (rendering plan R06, R06.T11.c; decided
 /// 2026-10-03, `decision-r06-tables.md`, item B.2).
@@ -176,8 +178,7 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
     brief_cache: CacheBudget,
 
-    /// Budget of the cache of the sky census's cells, in MiB (provisional until R06.T8.n); 0
-    /// caches nothing
+    /// Budget of the cache of the sky census's cells, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_SKY_CACHE_MB, default_value_t = DEFAULT_SKY_CACHE)]
     sky_cache: CacheBudget,
 
@@ -710,7 +711,7 @@ mod tests {
                 128 * 1024 * 1024,
                 128 * 1024 * 1024,
                 64 * 1024 * 1024,
-                64 * 1024 * 1024,
+                1_280 * 1024 * 1024,
                 160 * 1024 * 1024,
                 SkyService::Served,
                 StdinStop::Ignore,
@@ -929,7 +930,7 @@ mod tests {
         assert_eq!(DEFAULT_SYSTEM_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
-        assert_eq!(DEFAULT_SKY_CACHE.to_string(), "64");
+        assert_eq!(DEFAULT_SKY_CACHE.to_string(), "1280");
         assert_eq!(DEFAULT_SKY_TABLES.to_string(), "160");
     }
 

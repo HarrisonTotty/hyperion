@@ -893,9 +893,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     mass floor it was built with, in candidate order. A later query whose floor is at or above the
     cached one filters the cached list; a lower floor rebuilds the cell. Records are epoch state, so
     a jump of up to 1,000 ly reuses most cells, and the cache never changes a reply (tested, as plan
-    09's caches are). The server's is a `ByteLru` under `HYPERION_SKY_CACHE_MB` (default 64),
-    behind a lock so that the census's parallel bulk jobs share it through `&self`, as P09.T40's
-    caches do for `SystemSource`. It is not the server's existing cell cache
+    09's caches are). The server's is a `ByteLru` under `HYPERION_SKY_CACHE_MB` (default 1,280
+    MiB since R06.T8.n), behind a lock so that the census's parallel bulk jobs share it through
+    `&self`, as P09.T40's caches do for `SystemSource`. It is not the server's existing cell cache
     (`HYPERION_CELL_CACHE_MB`): that holds whole cells from `generate_cell`, and the near-Sun caps
     enclose some 2.6 × 10⁷ systems in C to E (the brainstorm's count at version 14), where the sky
     keeps only the bright subset above each floor. From R06.T8.h the cache holds blocks of 4³
@@ -1906,6 +1906,11 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   - `cargo test -p hyperion-sim --lib -- sky::census`;
   - `cargo test -p hyperion-server`;
   - `just ci`.
+
+  As built (Risks, "Deviations in T8.n, as built"): sized on the sky served since R13.T2.b, the
+  real tier at the ceiling, by new warm benches of it; `CACHE_CUT_SLACK_MAG` 0.2; the default
+  1,280 MiB, from 949 MB held after the Sun's sky and the jump on the server's galaxy; the warm
+  ratios about 100%, reported.
 
 - **R06.T8.i Nearest first: the shell plan (new; signed off; it may precede T8.g, and T11.d builds
   on it; decided 2026-10-07).** Decided 2026-10-05 (`decision-r06-census-cost.md`). The sign-off
@@ -2947,6 +2952,12 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
   every system its bound passes, and a jump's new cells are cold. A miss of the target is
   deferred (`deferred-corrections.md`, "Census cost": lever 13, then the realised window bound)
   and does not hold T17. Above 50%, it is reported before T17 closes.
+
+  _As built in R06.T8.n (2026-10-10; for "main" to adopt): since R13.T2.b the served sky is the
+  real tier at the ceiling, so S1–S3 read `census_near_sun_served/*warm_jump_5.0` at the default
+  (1,280 MiB), where all three are met. The exact census's `census_near_sun/{warm,warm_jump}` are
+  recorded against the 25% target only. Warm ÷ cold measured 96–108%, not 30–45%, and was
+  reported (R06's Risks, "Deviations in T8.n, as built")._
 
 The budget was accepted as the eye's only. A decision agent advised that, and the advice was
 adopted on 2026-10-05 under the owner's standing delegation (`decision-r06-census-cost-signoff.md`,
@@ -6649,6 +6660,120 @@ CensusCost)`.
     - No generated output moves: `GENERATOR_VERSION` stays 21, and no golden or protocol type
       moves (determinism audit, `golden_diff` 0).
     - The ruling's `deferred-corrections.md` text (§4) is the orchestrator's to add.
+- **Deviations in T8.n, as built (2026-10-10).** The sky cache's default from measured entries, by
+  the warm ruling's fixed rule (`decision-r06-t8h-warm.md` §2.2), at P11.T17.c's verdicts, with
+  R13.T2's served sky on by default.
+  - **Sized on the served sky.** Since R13.T2.b every served sky's census of C, D and E stops at
+    R13's real boundary, within `REAL_LIMIT_LY` (2,000 ly), so the server's cache holds that
+    tier's blocks: those of the census at the ceiling's caps, planned from both counts and merged
+    by shells (R13's Risks, "Deviations in T2.a, as built" and "Deviations in T2.b, as built").
+    The ruling measured on the exact census to T7.b's caps (C 14,563, D 13,232 and E 46,010 ly at
+    most), which no server serves until the census levers lift the limit. So B is the served
+    sky's, and the exact census's warm benches are recorded beside it, as step 2 names them.
+    - **So T17's warm gate reads the served sky** (as built; for "main" to adopt). S1–S3
+      (`decision-r06-t8h-warm.md` §2.3) are judged on `census_near_sun_served/*warm_jump_5.0` at the
+      default. The exact census's `census_near_sun/{warm,warm_jump}` are recorded against the 25%
+      target only. At the default they cannot hold S3: their entries are some ten times it
+      (below). A pointer is under T17's gate.
+    - **B is taken again when the limit lifts.** Once the census levers lift R13's real limit
+      (`deferred-corrections.md`, "Census cost"), the served sky is the exact census again. B, the
+      default and step 4's ordinal form are then measured again. At R13.T7's V<sub>P</sub> 4.5 the
+      tier shrinks, and the default still holds.
+  - **Step 1, the window test**, on T17.c's verdicts:
+    `the_entry_light_holds_every_narrower_window` and
+    `the_prefilter_keeps_every_record_the_census_generates` pass (9.8 s). Test 4 now asks its third
+    query at a cut fainter by the whole `CACHE_CUT_SLACK_MAG`, not by 0.1, and passes at 0.2.
+    The bench's jump toward the centre needs no slack, so the slack's own case is held by tests
+    (the reviews'): T8.h's test 2 serves a census at the Sun and from 1,000 ly along −x at V 6
+    plus the whole slack from the V 6 entries, every cell and bit for bit, and test 5 asks the
+    second of them too.
+  - **Step 3, `CACHE_CUT_SLACK_MAG` is 0.2.** R06.T9.d's `eye_cut` with each place's illumination
+    moves over the jump toward the centre by −0.169 mag on the fixture (8.179 to 8.010) and by
+    −0.040 on the server's galaxy (7.766 to 7.726). The jump itself needs no slack, since its
+    cut is shallower. A sky first served at the destination and then at the Sun reads blocks
+    built at the destination's cut, so the slack covers the larger change, 0.169, rounded up to a
+    multiple of 0.05.
+    - **The other jumps of 1,000 ly**, measured beside it (the jump bench prints them), change the
+      cut by: away from the centre +0.027 on the fixture and +0.046 on the server's galaxy; along
+      +x −0.030 and −0.152; along −x −0.036 and −0.201; above the plane +0.361 and +0.774; below
+      it +0.361 and +0.710. Above and below the plane on the fixture and above it on the
+      server's galaxy the cut is the same V 8.540.
+    - So 0.2 covers every jump in the plane but the server's galaxy's along −x, by 0.0007 mag.
+      Jumps out of the plane deepen the cut beyond the ruled 0.25. Those jumps, or their returns,
+      rebuild the cells whose key binds, at a cold cell's cost and with the same reply. 0.25
+      would cover the plane with margin, at a little more held, and would need B measured again
+      (asked of "main"; lean: keep 0.2, the ruled jump's).
+  - **The benches** (`benches/sky.rs`):
+    - new: `census_near_sun_served/{,served_}warm_5.0` and `…/warm_jump_5.0`, in their own
+      function (`census_near_sun_served_warm`), with the served query (`served_query`) and
+      `census_with`, `census`'s body with the jobs' threads' CPU time where asked;
+    - `ceiling_query` takes the place, for the jump's destination;
+    - the pool's width reads `HYPERION_WORKERS` where it is set, so that a run inside a 400%
+      quota takes the ruled 4 workers;
+    - `report_ratio` adds the ratio by the threads' CPU time where both runs measured it, and both
+      walls;
+    - the module's table and its default budget, 1,280 MiB.
+  - **Step 2, the served sky's runs** (2026-10-10; sampled 1 block in 20, `HYPERION_WORKERS` 4 at
+    `CPUQuota=400%`, under the heavy-test lock while other lanes built, load 8–109, so
+    provisional; the budget 65,536 MiB so that the sample was held). CPU-s by the jobs' wall time,
+    by their threads' CPU time in brackets.
+    - **The sample is 1 in 20, not the ruled 1 in 1,000** (R13.T2.b's sample on the server's
+      galaxy). The served tier opens under 10⁶ cells near the Sun, some 2 × 10⁴ blocks, so 1 in
+      1,000 takes some 20–35 blocks, too few for the held bytes to scale: a trial at 1 in 1,000
+      read the fixture's Sun's sky at 516 MB against 379 MB at 1 in 20. 1 in 20 takes 781–1,213
+      blocks. The exact census's benches keep 1 in 1,000.
+
+    | Census, near the Sun                    | Server's galaxy | Fixture         |
+    | --------------------------------------- | --------------- | --------------- |
+    | The Sun, cold through an empty cache    | 22,968 (22,705) | 12,473 (12,247) |
+    | The Sun again, warm                     | 22,142, 96.4%   | 13,495, 108.2%  |
+    | 1,000 ly toward the centre, cold        | 23,989 (23,882) | 13,332 (13,217) |
+    | The same, through the Sun's entries     | 24,451, 101.9%  | 13,080, 98.1%   |
+    | Entries after the Sun's sky             | 705 MB          | 379 MB          |
+    | Entries after the jump (B)              | **949 MB**      | 525 MB          |
+    | The jump's cells new, of those it opens | 44.7%           | 36.1%           |
+    - **S1 and S2 are met.** No cell was rebuilt, and both warm replies equal their cold ones,
+      stars and tallies, with the same systems generated (246,556 and 134,955 in the samples).
+    - The entries are 7.29 × 10⁶ records after the Sun's sky and 9.81 × 10⁶ after the jump on the
+      server's galaxy, at 5.5 bytes a built cell beyond its records.
+    - A jump to 1,000 ly opens many new cells, since the tier is a ball of at most 2,000 ly.
+
+  - **Step 4, the default is 1,280 MiB** (`DEFAULT_SKY_CACHE_MIB`). B is the server's galaxy's 949
+    MB, the larger. 1.25 × B is 1,131 MiB, rounded up to 1,280, within the 2,048 MiB cap, so the
+    ordinal form is not needed. **S3 is met** there: the Sun's sky and the jump's fit, with 29% to
+    spare. `config.rs`'s docs and table, its test and the README's table follow, and the
+    option's help no longer says "provisional".
+  - **Step 5, T17's warm figures, judged.**
+    - The jump at 4 workers: about 24,200 CPU-s on the server's galaxy against the destination's
+      cold 23,900, so some 100 minutes of wall on 4 workers before its last shell (_estimate_: the
+      CPU-s ÷ 4; a sampled run's wall is not the sky's).
+    - Generated warm ÷ cold is 1.00 in all four. Pre-filtered: 2.32 × 10⁶ of 1.20 × 10⁷ records
+      past the floor on the server's galaxy's jump. `generated_listable` (a star past the cut
+      unextinguished) is 87,500 of 4.93 × 10⁶ generated there.
+    - The ratios, 96–108%, are over 50% with S1–S3 met, so they go to "main" before T17 closes
+      (`decision-r06-t8h-warm.md` §2.3: a decision agent then rules whether the realised window
+      bound comes into RM3). They are the ruled expectation (`decision-p11-t17c-bright.md` §2,
+      "T8.n": about 95–100%), the same root cause as its §4, which the owner has since answered
+      with the hybrid sky: a warm census still generates every system. T17's text still expects
+      30–45%; a pointer there gives these.
+  - **The exact census's warm benches, recorded** (2026-10-10, `census_near_sun/{warm,warm_jump}`,
+    sampled 1 block in 1,000 as ruled, `HYPERION_WORKERS` 4 at `CPUQuota=400%`, under the
+    heavy-test lock, load 3–31, so provisional). They are T8.h's benches: the fixture, the fixed
+    cut V 7.95 with no illumination or eye's visibility, on T7.b's caps by ray at that cut (C
+    14,563, D 13,232 and E 46,010 ly at most, 1.04 × 10⁸ cells), not T9.d's eye's cut.
+    - The Sun's fill 8.49 × 10⁵ CPU-s, its repeat 99.9% of it; 1,000 ly toward the centre cold
+      8.74 × 10⁵, through the Sun's entries 8.33 × 10⁵, 95.2%. 84,581 of the sample's 93,514 cells
+      were served and 8,933 (9.6%) built new, none rebuilt, and both replies were their cold
+      ones, with the same systems generated (128,823 and 128,849 in the sample).
+    - The entries: 1.32 × 10⁸ records, 13.2 GB, after the Sun's sky, and 1.40 × 10⁸, 14.0 GB,
+      after the jump, 5.0 bytes a built cell beyond its records: 3% under T17.a's 13.6 and
+      14.4 GB.
+    - By the rule, 1.25 × 14.0 GB is over the 2,048 MiB cap. The ordinal form would hold the
+      records in some 1.1 GB and the cells in 0.6 GB (_estimate_, 8 and 5 bytes), so about
+      2,000 MiB at 1.25 times: the cap, with no margin. That is for when the limit lifts.
+  - **Not changed.** No generated output moves: the slack only widens what an entry holds, and a
+    warm reply is the cold one bit for bit. `GENERATOR_VERSION` stays 21, and no golden, protocol
+    type or plan Provides name moves (the constants are crate-private).
 - **Deviations in T9.f, as built (2026-10-07).** The band's march kept, as the band ruling
   (`decision-r06-t9b-band.md`, item 7) sets it out, with these details.
   - **The API** (`sky/band.rs`):

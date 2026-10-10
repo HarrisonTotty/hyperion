@@ -32,7 +32,8 @@
 //!
 //! The cell cache is the benches' own, built on `SkyBlock::with_cell` as the server's is
 //! (R06.T11.b, T8.h): blocks of 4³ cells, least recently used out, bounded by
-//! `HYPERION_SKY_CACHE_MB` (default 64 MiB) divided by the sample, so that a sampled warm census
+//! `HYPERION_SKY_CACHE_MB` (default 1,280 MiB, the server's since R06.T8.n) divided by the sample,
+//! so that a sampled warm census
 //! is the shipped size's (`decision-r06-census-cost-signoff.md`, condition 4), each block weighing
 //! its held records plus its own size. The cold census starts each iteration with an empty cache;
 //! `census_near_sun/cold` reads no cache, R06.T8.g's path, so that its record reads it, as do
@@ -44,6 +45,11 @@
 //! 1,000 ly toward the galactic centre, against that destination's cold census. Each prints, per
 //! layer, the records held and pre-filtered and the cells served and rebuilt by cause, the cache's
 //! blocks, cells built and bytes (times the sample, the sky's estimate), and the warm ratio.
+//! `census_near_sun_served/{,served_}warm_5.0` and `…/warm_jump_5.0` (R06.T8.n) are the same two
+//! for the sky the server serves since R13.T2.b, the real tier at the ceiling
+//! ([`census_near_sun_served`]'s query), each place at its own eye's cut; the server's default
+//! budget is set from their bytes after the jump. A pool's width is `HYPERION_WORKERS` where it is
+//! set, the server's variable, so that a run can take a given width inside a CPU quota.
 //!
 //! | Bench | Target | Figure |
 //! | ----- | ------ | ------ |
@@ -52,8 +58,10 @@
 //! | `sky/census_near_sun/cold_eye_visibility` | none: recorded (T8.g) | 7.16 × 10⁵ CPU-s on 15 workers, at P11.T17.c |
 //! | `sky/census_near_sun/cold_spheres` | none: recorded (T8.g; the first gate's 6 × 10⁴) | 1.45 × 10⁶ CPU-s on 15 workers, 1.13 × 10⁶ on 3, at P11.T17.c |
 //! | `sky/census_near_sun/cold_camera` | none: recorded beside the eye's (T8.g) | 2.80 × 10⁶ CPU-s on 15 workers, at P11.T17.c |
-//! | `sky/census_near_sun/warm` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | provisional at P11.T17.a (below) |
-//! | `sky/census_near_sun/warm_jump` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | provisional at P11.T17.a (below) |
+//! | `sky/census_near_sun/warm` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, which no server serves since R13.T2.b | 99.9% on 4 workers, at P11.T17.c (below) |
+//! | `sky/census_near_sun/warm_jump` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, as `/warm` | 95.2%, none rebuilt, the same reply; 14.0 GB held, at P11.T17.c (below) |
+//! | `sky/census_near_sun_served/*warm_5.0` | gate: none rebuilt, the same reply (T17); target ≤ 25% of cold | 96.4% on the server's galaxy, 108.2% on the fixture, on 4 workers (below) |
+//! | `sky/census_near_sun_served/*warm_jump_5.0` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | 101.9% and 98.1%, none rebuilt, the same reply; 949 MB held on the server's galaxy, within 1,280 MiB (below) |
 //! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | at most 2.7 µs a step, at P11.T17.c (below) |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
@@ -194,6 +202,31 @@
 //!   new cells, 5.0 bytes a built cell beyond its records. Generated systems with a star past the
 //!   cut unextinguished, which no bound of their own stars could skip: 2.25 × 10⁵ of 1.34 × 10⁸.
 //!
+//! R06.T8.n's runs of the served sky's warm benches (2026-10-10, at P11.T17.c's verdicts and the
+//! cut slack of 0.2; `HYPERION_SKY_BENCH_SAMPLE` 20 by block, criterion's `--test`,
+//! `HYPERION_WORKERS` 4 in a scope at `CPUQuota=400%`, under the heavy-test lock while other lanes
+//! built, load 8–109, so provisional; `HYPERION_SKY_CACHE_MB` 65,536, so that the sampled cache
+//! held the sample). Estimated, CPU-s by the jobs' wall time, with their threads' CPU time beside:
+//! - the server's galaxy, its eye's cut 7.766 at the Sun and 7.726 1,000 ly toward the centre:
+//!   the Sun's fill 22,968 (22,705), its repeat 22,142 (22,048), 96.4% (97.1%); the destination
+//!   cold 23,989 (23,882), the jump 24,451 (24,233), 101.9% (101.5%). The jump served 24,711 of
+//!   its 44,715 sampled cells and built 20,004 new ones (44.7%), rebuilt none, and gave the
+//!   destination's reply, generating the same 246,556 systems in the sample. The entries: 7.29 ×
+//!   10⁶ records, 705 MB, after the Sun's sky, and 9.81 × 10⁶, 949 MB, after the jump, 5.5 bytes
+//!   a built cell beyond its records;
+//! - the fixture, its eye's cut 8.179 and 8.010: the fill 12,473 (12,247), the repeat 13,495
+//!   (13,082), 108.2% (106.8%); the destination cold 13,332 (13,217), the jump 13,080 (12,990),
+//!   98.1% (98.3%), with 16,957 of 47,012 cells new (36.1%), none rebuilt, the same reply. The
+//!   entries: 379 MB after the Sun's sky, 525 MB after the jump.
+//!
+//! So the server's default is 1.25 × 949 MB, 1,131 MiB, rounded up to 1,280 MiB (R06's Risks,
+//! "Deviations in T8.n, as built"). The ratios are noise about 100%, as `decision-r06-t8h-warm.md`
+//! expected: the warm census generates every system the cold one does. The same task's run of
+//! `census_near_sun/warm` and `/warm_jump`, the exact census at 7.95 on T7.b's caps (sampled 1 in
+//! 1,000, the same workers and lock, load 3–31): the Sun's fill 8.49 × 10⁵ CPU-s and its repeat
+//! 99.9%; the destination cold 8.74 × 10⁵ and the jump 95.2%, 9.6% of its cells new, none
+//! rebuilt, the same reply; entries of 13.2 GB after the Sun's sky and 14.0 GB after the jump.
+//!
 //! The band benches (R06.T9.f) split the band of a near-Sun request at the eye's cut as the server
 //! runs it (R06.T11.c, T11.d), one face row a job over all six faces of `BandSpec::STANDARD` (64²
 //! texels a face, 24,576 rays). `band_near_sun/march` marches the rays once, keeping every reply of
@@ -324,8 +357,9 @@ const NUCLEAR_DISC_LY: [f64; 3] = [0.0, 150.0, 0.0];
 /// Noise-cache slots per job: 1 MiB of the sightlines' lattice words.
 const NOISE_SLOTS: usize = 1 << 16;
 
-/// The server's default cell-cache budget, MiB (R06.T11.b), when `HYPERION_SKY_CACHE_MB` is unset.
-const DEFAULT_CACHE_MB: usize = 64;
+/// The server's default cell-cache budget, MiB (R06.T11.b; set by R06.T8.n), when
+/// `HYPERION_SKY_CACHE_MB` is unset: the server's `DEFAULT_SKY_CACHE_MIB`.
+const DEFAULT_CACHE_MB: usize = 1_280;
 
 /// Whether each census bench has printed its first census.
 static PRINTED_COLD: AtomicBool = AtomicBool::new(false);
@@ -368,12 +402,23 @@ fn galaxy() -> Galaxy {
         .expect("the Milky Way-like parameters are valid")
 }
 
-/// The pool's width: the machine's threads less one, as the server leaves one to its runtime.
+/// The pool's width: `HYPERION_WORKERS` where it is set, the server's own variable for its pool's
+/// width (`--num-workers`), so that a run can take a server's given width inside any CPU quota
+/// (R06.T8.n's jump at 4 workers); otherwise the machine's threads less one, as the server leaves
+/// one to its runtime.
 fn workers() -> usize {
-    std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .saturating_sub(1)
-        .max(1)
+    match std::env::var("HYPERION_WORKERS") {
+        Err(VarError::NotPresent) => std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .saturating_sub(1)
+            .max(1),
+        Err(VarError::NotUnicode(_)) => panic!("HYPERION_WORKERS is not Unicode"),
+        Ok(v) => v
+            .parse::<usize>()
+            .ok()
+            .filter(|&n| n > 0)
+            .unwrap_or_else(|| panic!("HYPERION_WORKERS={v} is not a positive count")),
+    }
 }
 
 /// Runs `run` over `jobs` on `workers` threads, each taking the next job, and returns the
@@ -669,16 +714,38 @@ impl Run {
         let scale = u32::try_from(self.sample).expect("a sample of under 2³² cells");
         self.plan + self.walk + self.cell_census * scale
     }
+
+    /// [`Run::cpu`] with the sampled cells' census read by the jobs' threads' CPU time, where the
+    /// run measured it: an estimate that a loaded machine's waits for a core do not inflate.
+    #[must_use]
+    fn cpu_by_threads(&self) -> Option<Duration> {
+        let scale = u32::try_from(self.sample).expect("a sample of under 2³² cells");
+        let census: Duration = self.layer_census_cpu?.iter().sum();
+        Some(self.plan + self.walk + census * scale)
+    }
 }
 
 /// The census of `query` through `cells`, as the server will run it, taking one block of cells in
-/// `sample`.
+/// `sample`, by its jobs' wall time.
 fn census(
     sky: &Sky,
     query: &SkyQuery,
     cells: &dyn SkyCellCache,
     workers: usize,
     sample: u64,
+) -> Run {
+    census_with(sky, query, cells, (workers, sample), CpuTime::WallOnly)
+}
+
+/// [`census`], with the jobs' threads' CPU time beside their wall time where `cpu_time` asks it:
+/// planned by the sim's `census_plan`, at the query's ceiling where it states one, and merged as
+/// the server merges such a census ([`census_of_plan`]).
+fn census_with(
+    sky: &Sky,
+    query: &SkyQuery,
+    cells: &dyn SkyCellCache,
+    (workers, sample): (usize, u64),
+    cpu_time: CpuTime,
 ) -> Run {
     let began = Instant::now();
     let mut caps_noise = NoiseCache::with_capacity(NOISE_SLOTS);
@@ -697,7 +764,7 @@ fn census(
         cells,
         (workers, sample),
         (began, planned),
-        CpuTime::WallOnly,
+        cpu_time,
     )
 }
 
@@ -1022,10 +1089,26 @@ fn report_ratio(printed: &AtomicBool, name: &str, warm: &Run, cold: &Run) {
             .map(|&l| run.census.tallies().layer(l).generated())
             .sum()
     };
+    // The threads' CPU time too, where both runs measured it, since on a loaded machine the jobs'
+    // wall time holds their waits for a core, which can move a ratio of two runs minutes apart.
+    let by_threads = warm
+        .cpu_by_threads()
+        .zip(cold.cpu_by_threads())
+        .map_or_else(String::new, |(w, c)| {
+            let (w, c) = (w.as_secs_f64(), c.as_secs_f64());
+            format!(
+                "; by the threads' CPU time {w:.1} against {c:.1}: {:.1}%",
+                100.0 * w / c
+            )
+        });
     eprintln!(
-        "{name}: warm {w:.1} CPU-s against cold {c:.1} CPU-s: {:.1}% (target at most 25%); \
-         generated {} warm, {} cold; the same reply: {}",
+        "{name}: warm {w:.1} CPU-s against cold {c:.1} CPU-s: {:.1}% (target at most \
+         25%){by_threads}; {:.1} s wall against {:.1} s on {} workers; generated {} warm, {} \
+         cold; the same reply: {}",
         100.0 * w / c,
+        warm.wall.as_secs_f64(),
+        cold.wall.as_secs_f64(),
+        workers(),
         generated(warm),
         generated(cold),
         warm.census == cold.census,
@@ -1366,11 +1449,12 @@ impl CeilingRequest {
     }
 }
 
-/// The query of `request` near the Sun as the server forms it (R06.T11.d): the request's
-/// illumination, the eye's cut that R06.T9.d's pre-pass computes there with it, and for the eye
-/// alone the eye's visibility at that cut.
-fn ceiling_query(sky: &Sky, request: CeilingRequest) -> SkyQuery {
-    let at = GalacticPosition::from_light_years(SUN_LY).expect("in the root cube");
+/// The query of `request` at `ly` as the server forms it (R06.T11.d): the request's illumination,
+/// the eye's cut that R06.T9.d's pre-pass computes there with it, and for the eye alone the eye's
+/// visibility at that cut.
+#[must_use]
+fn ceiling_query(sky: &Sky, request: CeilingRequest, ly: [f64; 3]) -> SkyQuery {
+    let at = GalacticPosition::from_light_years(ly).expect("in the root cube");
     let observer = Observer::new(at, UniverseTime::EPOCH).expect("the epoch is on the clock");
     let eye = EyeObserver::default();
     let mut ctx = job_context(sky);
@@ -1394,6 +1478,16 @@ fn ceiling_query(sky: &Sky, request: CeilingRequest) -> SkyQuery {
             .build()
             .expect("a camera's request with the eye"),
     }
+}
+
+/// The eye-only query at `ly` as the server serves it since R13.T2.b: [`ceiling_query`]'s, at
+/// RM3's ceiling ([`SYNTHETIC_CEILING_V`]), which the server states wherever the eye's cut is
+/// deeper than it (`served_ceiling`), as it is near the Sun.
+#[must_use]
+fn served_query(sky: &Sky, ly: [f64; 3]) -> SkyQuery {
+    ceiling_query(sky, CeilingRequest::Eye, ly)
+        .with_synthetic_ceiling(Magnitudes::new(SYNTHETIC_CEILING_V))
+        .expect("the eye's cut near the Sun is deeper than the ceiling")
 }
 
 /// R13 Design note 3's real boundary, built here until R13.T2.a's `real_boundary`: for C, D and
@@ -1709,7 +1803,7 @@ fn census_near_sun_ceiling(c: &mut Criterion) {
                 let printed = AtomicBool::new(false);
                 group.bench_function(&name, |b| {
                     let sky = sky_of();
-                    let query = query.get_or_init(|| ceiling_query(sky, request));
+                    let query = query.get_or_init(|| ceiling_query(sky, request, SUN_LY));
                     let judged = Judged {
                         against: "the feasibility study's",
                         estimate_cpu_s: ceiling_estimate(ceiling_v, request),
@@ -1812,7 +1906,7 @@ fn census_near_sun_limit(c: &mut Criterion) {
             };
             group.bench_function(&name, |b| {
                 let sky = sky_of();
-                let query = query.get_or_init(|| ceiling_query(sky, request));
+                let query = query.get_or_init(|| ceiling_query(sky, request, SUN_LY));
                 b.iter_custom(|iters| {
                     let mut cpu = Duration::ZERO;
                     for _ in 0..iters {
@@ -1902,11 +1996,7 @@ fn census_near_sun_served(c: &mut Criterion) {
         let count: OnceCell<CapCount> = OnceCell::new();
         group.bench_function(&name, |b| {
             let sky = sky_of();
-            let query = query.get_or_init(|| {
-                ceiling_query(sky, request)
-                    .with_synthetic_ceiling(Magnitudes::new(SYNTHETIC_CEILING_V))
-                    .expect("the eye's cut near the Sun is deeper than the ceiling")
-            });
+            let query = query.get_or_init(|| served_query(sky, SUN_LY));
             let count = count.get_or_init(|| {
                 CapCount::measure(
                     &sky.galaxy,
@@ -1948,6 +2038,153 @@ fn census_near_sun_served(c: &mut Criterion) {
                         (plan.caps(), count),
                         &run,
                     );
+                    cpu += run.cpu();
+                }
+                cpu
+            });
+        });
+    }
+    group.finish();
+}
+
+/// The other jumps of 1,000 ly from [`SUN_LY`] whose eye's cut [`report_cuts_about_the_sun`]
+/// prints beside the warm jump's: away from the galactic centre, along ±x (the disc's rotation
+/// there) and out of the plane either way.
+const OTHER_JUMPS_LY: [(&str, [f64; 3]); 5] = [
+    ("away from the centre", [0.0, 27_000.0, 68.0]),
+    ("along +x", [1_000.0, 26_000.0, 68.0]),
+    ("along -x", [-1_000.0, 26_000.0, 68.0]),
+    ("above the plane", [0.0, 26_000.0, 1_068.0]),
+    ("below the plane", [0.0, 26_000.0, -932.0]),
+];
+
+/// The eye's cut at `ly` at the epoch, as the server computes it for an eye-only request
+/// (R06.T9.d's `eye_cut`, with that place's illumination, R06.T9.g).
+#[must_use]
+fn eye_cut_at(sky: &Sky, ly: [f64; 3]) -> Magnitudes {
+    let at = GalacticPosition::from_light_years(ly).expect("in the root cube");
+    let observer = Observer::new(at, UniverseTime::EPOCH).expect("the epoch is on the clock");
+    let mut ctx = job_context(sky);
+    let light = Illumination::march(&sky.galaxy, &mut ctx, &observer);
+    eye_cut(
+        &sky.galaxy,
+        &mut ctx,
+        &observer,
+        &EyeObserver::default(),
+        Some(&light),
+    )
+}
+
+/// Prints the eye's cut after each of [`OTHER_JUMPS_LY`] against `sun_v`, the Sun's: what the
+/// cache's cut slack must cover for those jumps to be served whole (R06.T8.n).
+fn report_cuts_about_the_sun(name: &str, sky: &Sky, sun_v: f64) {
+    let each: Vec<String> = OTHER_JUMPS_LY
+        .iter()
+        .map(|&(what, ly)| {
+            let v = eye_cut_at(sky, ly).value();
+            format!("{what} V {v:.4} ({:+.4})", v - sun_v)
+        })
+        .collect();
+    eprintln!(
+        "{name}: the eye's cut 1,000 ly from the Sun {}",
+        each.join(", ")
+    );
+}
+
+/// R06.T8.n's warm benches of the served sky near the Sun, from whose entries the server's
+/// default `HYPERION_SKY_CACHE_MB` is set: the eye alone at its own cut and RM3's ceiling
+/// ([`served_query`]), planned and merged as [`census_near_sun_served`]'s, through the benches'
+/// cell cache ([`BenchCellCache`]), on the fixture and, as `served_*`, on the server's galaxy.
+///
+/// `census_near_sun_served/{which}warm_5.0` censuses the Sun's sky again through the cache its
+/// first census, the fill, left, against that fill. `census_near_sun_served/{which}warm_jump_5.0`
+/// fills a fresh cache with the Sun's sky, then censuses through it the sky 1,000 ly toward the
+/// galactic centre ([`JUMP_LY`]), at that place's own illumination, eye's cut, visibility and
+/// ceiling, against the destination's cold census through an empty cache. Each prints
+/// [`census_near_sun`]'s tallies and cache lines, so the cache's bytes after the jump, which the
+/// default is sized by, and the warm ratio by the jobs' wall time and by their threads' CPU time.
+/// The jump prints the eye's cut at both places first. Toward the centre the cut is shallower, so
+/// this jump needs no cut slack; the slack is sized by that change for the jump back, or one as
+/// far the other way, which the sim's cache tests hold at the whole slack.
+fn census_near_sun_served_warm(c: &mut Criterion) {
+    let workers = workers();
+    let sample = sample();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    for galaxy in BenchGalaxy::ALL {
+        let (which, sky_of) = (galaxy.prefix(), galaxy.sky_of());
+        let sun: OnceCell<SkyQuery> = OnceCell::new();
+        let name = format!("census_near_sun_served/{which}warm_{SYNTHETIC_CEILING_V:.1}");
+        let printed = [(); 3].map(|()| AtomicBool::new(false));
+        let warm: OnceCell<(BenchCellCache<'static>, Run)> = OnceCell::new();
+        group.bench_function(&name, |b| {
+            let sky = sky_of();
+            let query = sun.get_or_init(|| served_query(sky, SUN_LY));
+            let (cache, fill) = warm.get_or_init(|| {
+                let cache = BenchCellCache::new(&sky.galaxy, sample);
+                let fill = census_with(sky, query, &cache, (workers, sample), CpuTime::Measured);
+                let what = format!("{name} (the fill)");
+                report_once(&printed[0], &what, &fill, Some(&cache));
+                (cache, fill)
+            });
+            b.iter_custom(|iters| {
+                let mut cpu = Duration::ZERO;
+                for _ in 0..iters {
+                    let run = census_with(
+                        sky,
+                        black_box(query),
+                        cache,
+                        (workers, sample),
+                        CpuTime::Measured,
+                    );
+                    report_once(&printed[1], &name, &run, Some(cache));
+                    report_ratio(&printed[2], &name, &run, fill);
+                    cpu += run.cpu();
+                }
+                cpu
+            });
+        });
+        let name = format!("census_near_sun_served/{which}warm_jump_{SYNTHETIC_CEILING_V:.1}");
+        let printed = [(); 4].map(|()| AtomicBool::new(false));
+        let destination: OnceCell<SkyQuery> = OnceCell::new();
+        let jump_cold: OnceCell<Run> = OnceCell::new();
+        group.bench_function(&name, |b| {
+            let sky = sky_of();
+            let from = sun.get_or_init(|| served_query(sky, SUN_LY));
+            let to = destination.get_or_init(|| {
+                let to = served_query(sky, JUMP_LY);
+                let (at, there) = (from.cut().value(), to.cut().value());
+                eprintln!(
+                    "{name}: the eye's cut at the Sun V {at:.4}, 1,000 ly toward the centre V \
+                     {there:.4}: {:+.4} mag",
+                    there - at
+                );
+                report_cuts_about_the_sun(&name, sky, at);
+                to
+            });
+            let cold = jump_cold.get_or_init(|| {
+                let cache = BenchCellCache::new(&sky.galaxy, sample);
+                let cold = census_with(sky, to, &cache, (workers, sample), CpuTime::Measured);
+                let what = format!("{name} (the destination, cold)");
+                report_once(&printed[0], &what, &cold, Some(&cache));
+                cold
+            });
+            b.iter_custom(|iters| {
+                let mut cpu = Duration::ZERO;
+                for _ in 0..iters {
+                    let cache = BenchCellCache::new(&sky.galaxy, sample);
+                    let fill = census_with(sky, from, &cache, (workers, sample), CpuTime::Measured);
+                    let what = format!("{name} (the Sun's fill)");
+                    report_once(&printed[1], &what, &fill, Some(&cache));
+                    let run = census_with(
+                        sky,
+                        black_box(to),
+                        &cache,
+                        (workers, sample),
+                        CpuTime::Measured,
+                    );
+                    report_once(&printed[2], &name, &run, Some(&cache));
+                    report_ratio(&printed[3], &name, &run, cold);
                     cpu += run.cpu();
                 }
                 cpu
@@ -2756,6 +2993,7 @@ criterion_group!(
     census_near_sun_ceiling,
     census_near_sun_limit,
     census_near_sun_served,
+    census_near_sun_served_warm,
     star_bound,
     illumination,
     caps_by_ray_near_sun,
