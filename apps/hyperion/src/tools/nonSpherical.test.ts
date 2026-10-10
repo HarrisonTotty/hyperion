@@ -6,10 +6,13 @@ import { describe, expect, it } from "vitest";
 import {
   decodeInt16,
   encodeNode,
+  ENSTATITE_NODE,
+  ENSTATITE_SAMPLE,
   excerptSizeValues,
   gammaNumberDensity,
   iceAbsorptionText,
   type KernelExcerpt,
+  type KernelSource,
   kernelReachText,
   kernelFor,
   LONGWAVE,
@@ -20,8 +23,10 @@ import {
   parseAngles,
   parseYangIsca,
   phaseAngleIndices,
+  reduceTamudust,
   reductionError,
   SHORTWAVE,
+  SPHERICITY,
   TAMUDUST_MATERIALS,
   TAMUDUST_PHASE_ANGLES,
   thinningText,
@@ -99,6 +104,83 @@ describe("the reduction, on the committed raw excerpt", () => {
       });
     }
   }
+});
+
+/**
+ * A fake kernel's isca record: 3 sizes, n 1.37 and 1.70, k 10⁻⁴ and 0.1, sphericity 0.695 and
+ * 0.785, the record depending on the sphericity through V alone.
+ */
+function fakeIsca(s: number, r: number, i: number, p: number): Float64Array {
+  const x = 10 ** s;
+  const sphericity = p === 0 ? 0.695 : 0.785;
+  const area = 0.3 * x * x;
+  return Float64Array.from([
+    x,
+    area,
+    0.1 * sphericity * x ** 3,
+    2 * area,
+    1.9 * area,
+    1.9 * area * 0.7,
+    r === 0 ? 1.37 : 1.7,
+    i === 0 ? 1e-4 : 0.1,
+    sphericity,
+  ]);
+}
+
+describe("the reduction's sphericity, on a fake kernel", () => {
+  // P₁₁ isotropic, the other elements 0.
+  const layout = { ...SHORTWAVE, sizes: 3, reals: 2, imaginaries: 2, sphericities: 2 };
+  const fake: KernelSource = {
+    layout,
+    isca: fakeIsca,
+    pmat: (s, r, i, p, angleIndices) => {
+      const out = new Float64Array(6 * angleIndices.length);
+      out.fill(fakeIsca(s, r, i, p)[4] ?? Number.NaN, 0, angleIndices.length);
+      return out;
+    },
+  };
+  const angles = Array.from({ length: 181 }, (_, i) => i);
+  const reduce = (sphericity?: number): ReturnType<typeof reduceTamudust> =>
+    reduceTamudust(
+      ENSTATITE_SAMPLE,
+      "(test)",
+      { shortwave: fake, longwave: fake },
+      angles,
+      [ENSTATITE_NODE],
+      sphericity,
+    );
+
+  it("states a sphericity other than the class's in the file and its header", () => {
+    const file = reduce(0.74);
+    expect(file.sphericity).toBe(0.74);
+    expect(file.particles).toContain("sphericity 0.74");
+    expect(file.reduction).toContain("at sphericity 0.74");
+  });
+
+  it("leaves the clause out at the class's sphericity, the default", () => {
+    const file = reduce();
+    expect(file.sphericity).toBe(SPHERICITY);
+    expect(file.reduction).not.toContain("at sphericity");
+  });
+
+  it("refuses a sphericity outside the kernel", () => {
+    expect(() => reduce(0.9)).toThrow(RangeError);
+  });
+});
+
+describe("the reduction's headers, against fixed values", () => {
+  it("give the kernels' reach in maximum dimension", () => {
+    expect(kernelReachText(11_810)).toContain(
+      "x = 11,810 (D = 714 µm at 380 nm, 1,466 µm at 780 nm)",
+    );
+    expect(kernelReachText(1476)).toContain("D = 89 µm at 380 nm, 183 µm at 780 nm");
+  });
+
+  it("give ice's largest k and k·x at 1 cm", () => {
+    expect(iceAbsorptionText({ wavelengthsNm: [380, 780], k: [2e-11, 3.5e-5] })).toContain(
+      "k, at most 3.50 × 10⁻⁵, keeps k·x under 2.8 at D ≤ 1 cm",
+    );
+  });
 });
 
 describe("the choices", () => {

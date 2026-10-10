@@ -6,7 +6,7 @@ import ga from "./fixtures/granada-amsterdam.json" with { type: "json" };
 import mgsPhase from "./fixtures/mgs1m-phase.json" with { type: "json" };
 import excerpt from "./fixtures/tamudust-excerpt.json" with { type: "json" };
 import { MATERIAL_FILES, refractiveIndex } from "./materials/materials";
-import { mieSphere } from "./mie";
+import { type ComplexIndex, mieSphere } from "./mie";
 import {
   FLOOR_ALBEDO_MIN,
   forwardPeakSplit,
@@ -17,6 +17,7 @@ import {
   parsePhaseFile,
   type PhaseFileTable,
   phaseFileOf,
+  type RadiusDistribution,
   SMALL_GRAIN_SIZE_PARAMETER,
   tableModeOptics,
   tabulatedRadiusDistribution,
@@ -59,7 +60,7 @@ function inVolumeToArea(
   sample: MeasuredSizes,
   radius: "projectedArea" | "volume" = "projectedArea",
   wavelengthNm?: number,
-): ReturnType<typeof tabulatedRadiusDistribution> {
+): RadiusDistribution {
   const node = table.nodes[0];
   const v = node?.volumes[20] ?? Number.NaN;
   const a = node?.areas[20] ?? Number.NaN;
@@ -106,7 +107,7 @@ function normalisedAt30(a1: Float64Array): number[] {
 function sphereRatiosAt30(
   sample: MeasuredSizes,
   wavelengthNm: number,
-  index: { readonly n: number; readonly k: number },
+  index: ComplexIndex,
 ): number[] {
   const sums = new Float64Array(ANGLES.length);
   const { radiiUm, numberDensity } = sample;
@@ -293,6 +294,8 @@ describe("enstatite against Frattin et al. 2019 (science-r08-nonspherical.md §2
       .map(([deg]) => deg);
 
   it("is drawn on the hexahedra at its own index, above the kernel's floor", () => {
+    expect(table().nodes.map((n) => n.wavelengthNm)).toEqual([520]);
+    expect(table().particles).toContain("sphericity 0.71");
     expect(optics().floored).toBe(false);
   });
 

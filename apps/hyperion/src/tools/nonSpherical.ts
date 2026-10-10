@@ -890,7 +890,15 @@ export function readMaterialFile(dir: string, file: string): MaterialIndexFile {
   };
 }
 
-/** Reduces one material from the kernels. */
+/**
+ * Reduces one material from the kernels.
+ *
+ * @param only - Indices on {@link MATERIAL_GRID_NM} to make nodes at, in place of the node rule:
+ *   the one-node test fixtures'.
+ * @param sphericity - The sphericity to interpolate the kernel at, within its grid (0.695–0.785);
+ *   {@link SPHERICITY} for every committed file, another value only for a diagnostic.
+ * @throws RangeError for an index or sphericity outside the kernels, as {@link interpolateKernel}.
+ */
 export function reduceTamudust(
   material: MaterialIndexFile,
   file: string,
@@ -1537,7 +1545,7 @@ export async function main(args: readonly string[]): Promise<number> {
     const { materials, out } = values;
     if (materials === undefined || out === undefined) {
       throw new Error(
-        "usage: nonSpherical --materials <dir> --out <dir> [--tamudust <tables> --angles <file> [--excerpt <file>]] [--yang <dir>]",
+        "usage: nonSpherical --materials <dir> --out <dir> [--tamudust <tables> --angles <file> [--check] [--excerpt <file>] [--mgs1m <file>] [--enstatite <file> [--enstatite-sphericity <S>]]] [--yang <dir>]",
       );
     }
     if (values.tamudust !== undefined) {

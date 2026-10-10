@@ -348,7 +348,7 @@ export const ICE_KEYS: ReadonlySet<string> = new Set([
  * The expected error in g of an ice drawn on water ice's table, Δg = g_expected − g_water, by van
  * Diedenhoven et al. 2014's eq. (16) with g_tot = (1 + g_RT) ÷ 2 at 550 nm (J. Atmos. Sci. 71,
  * 1763; science-r08-nonspherical.md §2.3): estimates of the bias, not corrections. Ices not listed
- * have none estimated. NH₄SH's n of 1.648 lies past the fit's 1.18–1.43, where eq. (16) would give
+ * have none estimated. NH₄SH's n of 1.644 lies past the fit's 1.18–1.43, where eq. (16) would give
  * about −0.10, the largest of all; it is left out as an extrapolation (R08.T5.c's science check).
  */
 export const ICE_ANALOGUE_ASYMMETRY_BIAS: Readonly<Record<string, number>> = {
@@ -583,10 +583,18 @@ function sumsOverNode(integral: TableIntegral, distribution: RadiusDistribution)
   // spheres of the crystal's r_VA, which keep its V and A.
   const v0 = node.volumes[0] ?? Number.NaN;
   const r0 = rTilde[0] ?? Number.NaN;
-  const sphereOverVa =
-    integral.tailSphere === "volume" ? Math.cbrt((3 * v0) / (4 * Math.PI)) / r0 : 1;
-  const spheresPerParticle =
-    integral.tailSphere === "volume" ? 1 : (node.areas[0] ?? Number.NaN) / (Math.PI * r0 * r0);
+  let sphereOverVa: number;
+  let spheresPerParticle: number;
+  switch (integral.tailSphere) {
+    case "volume":
+      sphereOverVa = Math.cbrt((3 * v0) / (4 * Math.PI)) / r0;
+      spheresPerParticle = 1;
+      break;
+    case "volumeToArea":
+      sphereOverVa = 1;
+      spheresPerParticle = (node.areas[0] ?? Number.NaN) / (Math.PI * r0 * r0);
+      break;
+  }
 
   // Panel ends: the distribution's ends, every node inside, and steps of at most SIZE_PANEL_LN.
   const ends = [lnFrom];
@@ -943,8 +951,8 @@ export function forwardPeakSplit(
  * of its scattering. The rest is put back as a forward delta, sized with the interpolant's scale so
  * that the whole integrates to 4π and its mean cosine is the source's g (Σ C_sca g, which the
  * tables carry), {@link forwardPeakSplit}; rescaling every angle instead would raise the side and
- * back angles by the deficit (R08.T5.c's science check). The scale stays within a few per cent of
- * 1, so those angles keep the source's values.
+ * back angles by the deficit (R08.T5.c's science check). The scale stays within 0.5% of 1 on the
+ * committed files, so those angles keep the source's values.
  */
 function matrixAt(table: PhaseFileTable, sums: NodeSums, mu: Float64Array): ScatteringMatrix {
   const { phaseU } = anglesOf(table);

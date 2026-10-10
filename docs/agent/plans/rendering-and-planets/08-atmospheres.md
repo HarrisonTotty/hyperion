@@ -4146,8 +4146,9 @@ generator, and the reference's sampling needs no domain tag.
     Spheres misplace that light by factors of 2–3, and Henyey–Greenstein by 2–4.
   - **Other ices.** They are drawn on water ice's roughened table. Their g is expected to run
     high by up to 0.056 (NH₃; van Diedenhoven et al. 2014, eq. 16), and they stay labelled until
-    their phase functions are measured. NH₄SH's n of 1.648 lies past the fit's 1.18–1.43, where
-    eq. (16) would give about 0.10, the largest of all; it is left unestimated as an extrapolation
+    their phase functions are measured. NH₄SH's n of 1.644 lies past the fit's 1.18–1.43, where
+    eq. (16) would put its g about 0.10 high (Δg ≈ −0.10), the largest of all; it is left
+    unestimated as an extrapolation
     (R08.T5.c's science check).
   - **Enstatite** (Frattin et al. 2019) is the one weakly absorbing crystalline silicate measured.
     On its own index and sizes, the hexahedra's residual at side and back angles is recorded in
@@ -4191,8 +4192,9 @@ generator, and the reference's sampling needs no domain tag.
       Titan. They are an owner access item, for an optional test only.
   - _The MMF below D_f 1.9_ (R08.T5.c's science check). Tazaki and Tanaka 2018 compare the MMF
     with T-matrix results at D_f 1.9 and 3.0 only, so a mode below 1.9 (soot near 1.8, say) is an
-    extrapolation. `aggregate.ts` accepts 1 < D_f ≤ 2.5 and keeps (9)'s basis there, unlabelled;
-    whether such a mode carries the label is the owner's call.
+    extrapolation. `aggregate.ts` accepts 1 < D_f ≤ 2.5 and keeps (9)'s basis there, unlabelled.
+    Whether such a mode carries the label is pending the owner's ruling (routed through "main",
+    2026-10-10).
 - **M-dwarf suns.** A curve of growth weighted by a 15-sample spectrum is adequate for FGK, A and B
   stars, but not for M dwarfs. Their TiO bands at 590–630 and 705–760 nm overlap Chappuis and
   methane's 727 nm band, so the weight correlates with σ (Design note 5). This is a recorded
@@ -4706,6 +4708,12 @@ generator, and the reference's sampling needs no domain tag.
     `forwardPeak` (below; 0 for Mie and the MMF). The tool: `kernelReachText`, `nodeRuleText`,
     `iceAbsorptionText`, `ENSTATITE_SAMPLE` and `ENSTATITE_NODE`, `reduceTamudust`'s optional
     `sphericity`, and the `--enstatite <file>` and `--enstatite-sphericity <S>` options.
+    `nonSpherical.ts` also exports `PhaseTableNode`, `PhaseFileTable`, `TableOptics` (with
+    `floored`, `tableAlbedo` and `tailShare`), `radiusDistribution`, `waterIceTable`, `isIce`,
+    `ELEMENT_INDICES` and `KERNEL_TRANSPARENT_N_MAX` (1.7), and `forwardPeakSplit` takes an
+    optional `peakCosine`; `aerosol.ts` exports `henyeyGreenstein`, `phaseTableIntegral`,
+    `phaseTableAsymmetry`, `DeltaMSeries`, `MODELS_WITH_KNOWN_RESIDUALS` and
+    `PhaseApproximation`; the tool exports `MGS1M_NODE`.
   - _The MMF gate_ is the ruling's (science-r08-mmf.md, adopted 2026-10-10), not the first lean:
     (9) is the max of the monomer's and the aggregate's terms, so the switch the lane built while
     asking (`MMF_PHASE_SHIFT_RULE`) is gone and `mmfPhaseBasis` returns the three-way basis.
@@ -4815,7 +4823,8 @@ generator, and the reference's sampling needs no domain tag.
         and g 0.675, off the kernel's floor. r_VA ÷ r_V is the table's own 0.710. The fixture keeps
         the section to 290 µm, and the test drops the points past the table's largest size at
         520 nm (r_V 246 µm; the last point kept is 224 µm), 2 × 10⁻⁴ of its projected area.
-      - Diagnostics, each alone: the iron-free index (the MgSiO₃ file, 1.58 + 10⁻⁵i, on the floor)
+      - Diagnostics, each alone: the iron-free index (the MgSiO₃ file at 520 nm,
+        1.577 + 2.1 × 10⁻⁵i, on the floor)
         +61%, +69%, +88%, +91%; the projected-area reading (r_VA ÷ r_A 0.599) +51%, +59%, +74%,
         +76%; sphericity 0.695 (a table made for the diagnostic, not committed) +48%, +55%, +68%,
         +66%; the FRAUNHOFER section, the fines bound, −15%, −21%, −19%, −15% read as r_A (−11% to
@@ -4868,9 +4877,12 @@ generator, and the reference's sampling needs no domain tag.
       holds to the files. The four TAMUdust2020 files were regenerated with it; `water-ice.json`'s
       absorption clause was corrected by hand, since Yang et al.'s 27 GB archive was not fetched
       again.
-    - A table's first `FORWARD_PEAK_ENTRIES` entries can hold a large particle's forward peak, up
-      to about 10⁶ sr⁻¹: the bakes' delta-M moves it to the direct beam (f = χ_2M), and single
-      scattering meets it only inside the star's disc (Design note 6).
+    - A table's first `FORWARD_PEAK_ENTRIES` entries (θ < 0.044°) can hold a large particle's
+      forward peak, up to about 10⁶ sr⁻¹. The bakes' delta-M moves it to the direct beam
+      (f = χ_2M). Single scattering meets it within 0.044° of a star: inside the disc of a star
+      whose angular radius is larger (the Sun's out to about 6 au), and just outside it beyond
+      that (the NH₃ and CH₄ analogues of Saturn and the ice giants). A sky-view texel that samples
+      those entries reads up to 10⁶ sr⁻¹; R08.T7 decides how the sky-view keeps it.
   - _The phase tables_ integrate to 1 as read, linear in u (R08.T12.c's tracer checks 10⁻⁴), and
     keep the model's g as read: to rounding for the phase files' models, 2 × 10⁻⁵ for sulphate,
     4 × 10⁻⁵ for the Titan-like haze, 1.3 × 10⁻⁴ for r_eff 10 µm water droplets, under 10⁻⁵ for
@@ -4887,7 +4899,9 @@ generator, and the reference's sampling needs no domain tag.
     four entries (θ < 0.044°, inside both files' first angle); the scale on the resolved part stays
     within 0.5% of 1, so side and back angles keep the source's values. The tests hold every
     committed phase file's tables, at a small and a large mode, to 10⁻⁴ in integral and g under
-    the reader's rule.
+    the reader's rule. `ModeOptics.matrix` is then normalised to ∫ a₁ dΩ ÷ 4π = 1 − `forwardPeak`,
+    which supersedes T5.b's "= 1" for the tabulated models; Mie and the MMF keep 1. A reader of
+    the matrix adds the delta, as `aerosolPhaseTable` does.
   - _Closed set, for the composition audit:_ `ICE_KEYS` (H₂O, NH₃, CH₄, CO₂, NH₄SH, H₂S, N₂, CO)
     decides which crystals take water ice's table; any other `crystal` takes the hexahedra.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the

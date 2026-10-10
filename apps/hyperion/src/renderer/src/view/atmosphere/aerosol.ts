@@ -183,13 +183,19 @@ const FORWARD_PEAK_SHAPE: Float64Array = PHASE_TABLE_U.map((_, k) =>
   Math.max(0, 1 - k / FORWARD_PEAK_ENTRIES),
 );
 
-/** One channel's entries: a₁ ÷ 4π, or Henyey–Greenstein's, on {@link PHASE_TABLE_U}, before the integral's factor. */
-function channelEntries(optics: ModeOptics): {
+/** One channel's entries on {@link PHASE_TABLE_U}, before the integral's factor. */
+interface ChannelEntries {
+  /** a₁ ÷ 4π, or Henyey–Greenstein's phase. */
   readonly a1: Float64Array;
+  /** a₂, a₃, a₄, b₁ and b₂ ÷ 4π, or none. */
   readonly matrix:
     readonly [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array] | undefined;
+  /** The matrix's unresolved forward peak's share of the scattering. */
   readonly forwardPeak: number;
-} {
+}
+
+/** One channel's {@link ChannelEntries}: the mode's matrix, or Henyey–Greenstein's from its g. */
+function channelEntries(optics: ModeOptics): ChannelEntries {
   const { matrix } = optics;
   if (matrix === undefined) {
     return {
