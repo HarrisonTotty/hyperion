@@ -49,9 +49,9 @@
 //!    (a byte each), `drainage` (`u16`), `steepness` (a byte), `water_surface_mm` (`i32`), and
 //!    `ice`, `class` and `crater_state` (a byte each).
 //! 4. A climate record for every climate cell over the cover's cells (each cell's parent, one level
-//!    up, once, in index order), 34 bytes each, the fields of [`ClimateCell`] in their declared
+//!    up, once, in index order), 50 bytes each, the fields of [`ClimateCell`] in their declared
 //!    order: `sea_level_temperature` (`i16`), the twelve `month_anomaly` bytes, the twelve
-//!    `month_precipitation` codes and the four winds, each an azimuth then a speed code.
+//!    `month_precipitation` codes and the twelve winds, each an azimuth then a speed code.
 //! 5. The craters that reach any of the block's cells, in the field's list order: their count,
 //!    `u32`, then each crater's centre (three `f64`), diameter in metres (`f64`), morphology (a
 //!    byte), age in thousands of millions of years (`f64`), degradation (a byte), and reach: its

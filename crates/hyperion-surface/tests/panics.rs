@@ -9,15 +9,16 @@
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use hyperion_base::units::{
-    Gigayears, Kelvin, Metres, MetresPerSecondSquared, Pascals, PerSquareKilometre, SquareMetres,
+    Gigayears, Kelvin, Metres, MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians,
+    SquareMetres,
 };
 use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
 use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv};
 use hyperion_surface::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseField, CoarseLevel, Cover, Crust,
-    FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogPrecipitation, LogSteepness,
-    PrecipitationSource, SurfaceClass, SynthesisCell, Wind, boundary_diameter, cell_index,
-    coarse_level,
+    FieldHeader, FieldHeaderParts, FieldView, FlowDirection, LogArea, LogPrecipitation,
+    LogSteepness, PrecipitationSource, SurfaceClass, SynthesisCell, Wind, boundary_diameter,
+    cell_index, coarse_level, month_at, month_blend,
 };
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::{LatticeCache, Octave, gradient_noise};
@@ -219,6 +220,7 @@ fn level_five_field() -> CoarseField {
         realised_sigma_h: Metres::ZERO,
         realised_relief: Metres::ZERO,
         months: 1,
+        season_eccentricity: 0.0,
         reference_temperature: Kelvin::new(160.0),
         temperature_step: 0,
         anomaly_step: 0,
@@ -246,7 +248,7 @@ fn level_five_field() -> CoarseField {
         sea_level_temperature: 0,
         month_anomaly: [0; 12],
         month_precipitation: [LogPrecipitation::NONE; 12],
-        wind: [Wind::CALM; 4],
+        wind: [Wind::CALM; 12],
     };
     CoarseField::new(header, vec![cell; 6_144], vec![climate; 1_536], vec![]).unwrap()
 }
@@ -275,4 +277,16 @@ impl CellValues for WholeFaces {
 #[should_panic(expected = "the interpolant reads levels 1 to 24, not level 0")]
 fn the_interpolant_refuses_level_0() {
     let _ = interpolate(&WholeFaces, [0.0, 0.0, 1.0]);
+}
+
+#[test]
+#[should_panic(expected = "a mean anomaly must be finite")]
+fn a_time_of_no_mean_anomaly_has_no_month_blend() {
+    let _ = month_blend(level_five_field().header(), Radians::new(f64::NAN));
+}
+
+#[test]
+#[should_panic(expected = "a mean anomaly must be finite")]
+fn a_time_of_no_mean_anomaly_has_no_month() {
+    let _ = month_at(level_five_field().header(), Radians::new(f64::INFINITY));
 }

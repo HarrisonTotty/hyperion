@@ -113,9 +113,16 @@ pub struct FieldHeaderParts {
     /// rather than matched, since a greatest relief grows with resolution (Design note 3); about
     /// 7–15 `σ_h` on every body measured. Finite and non-negative.
     pub realised_relief: Metres,
-    /// The months of the body's year: 12, each a twelfth of its orbital period, or 1 for a locked
-    /// world on a circular orbit, which has no seasons (Design note 8).
+    /// The months of the body's year (Design note 8): 12, the twelve equal spans of the seasonal
+    /// orbit's eccentric anomaly from periapsis ([`month_edges`](super::month_edges)), or 1 for a
+    /// world with no seasonal forcing, a locked world on a circular orbit or one on a circular
+    /// orbit with no obliquity.
     pub months: u8,
+    /// The eccentricity e of the seasonal orbit, the one that sets the sun's declination and
+    /// distance: the body's own about its star or stars, or its planet's for a moon (Design note
+    /// 8; `decision-r09-t2.md` item 1). Its months are what the header's twelve span. At least 0
+    /// and below 1, and 0 in a one-month year, whose orbit is circular.
+    pub season_eccentricity: f64,
     /// The zero of every climate record's sea-level temperature, kelvin: plan 14's mean surface
     /// temperature, which the climate step imposes on the field (Design note 8). Finite and
     /// positive.
@@ -127,9 +134,9 @@ pub struct FieldHeaderParts {
     /// The step of every climate record's monthly anomaly, as n in 0.25 K × 2ⁿ, 0 to 15: the
     /// finest step that holds the body's largest anomaly in 127 steps (Design note 17;
     /// [`FieldHeader::anomaly_step_for`]), 0.25 K on an Earth, whose extremes are Verkhoyansk's
-    /// −30.8 and +30.6 K about its annual mean of −13.9 °C (WMO 1991–2020 normals, station 24266;
-    /// Design note 17 quotes −31.0 and +30.2 K), within the 31.75 K a 0.25 K step holds, 0.5 K on a
-    /// Mars and 1 K on a high-obliquity world with land.
+    /// −30.8 and +30.6 K about its annual mean of −13.9 °C (WMO 1991–2020 normals, station 24266),
+    /// within the 31.75 K a 0.25 K step holds, 0.5 K on a Mars and 1 K on a high-obliquity world
+    /// with land.
     pub anomaly_step: u8,
     /// The body's surface age, thousands of millions of years: plan 14's, carried for R11's rock
     /// abundance (Design note 18). Finite and non-negative.
@@ -165,6 +172,10 @@ pub enum BuildFieldHeaderError {
     Figure(Spheroid),
     /// The months are neither 1 nor 12.
     Months(u8),
+    /// The season eccentricity is not at least +0 and below 1.
+    SeasonEccentricity(f64),
+    /// A one-month year's season eccentricity is not 0: its orbit is circular.
+    EccentricOneMonthYear(f64),
     /// A step's exponent is above 15.
     StepExponent {
         /// The part's name.
@@ -199,6 +210,12 @@ impl std::fmt::Display for BuildFieldHeaderError {
                 s.equatorial_radius_m, s.polar_radius_m
             ),
             Self::Months(m) => write!(f, "a year of {m} months is neither 1 nor 12"),
+            Self::SeasonEccentricity(e) => {
+                write!(f, "season eccentricity {e} is not at least 0 and below 1")
+            }
+            Self::EccentricOneMonthYear(e) => {
+                write!(f, "a one-month year's orbit has eccentricity {e}, not 0")
+            }
             Self::StepExponent { part, exponent } => {
                 write!(f, "{part} exponent {exponent} is above {MAX_STEP_EXPONENT}")
             }
@@ -259,8 +276,9 @@ impl FieldHeader {
     /// # Errors
     ///
     /// [`BuildFieldHeaderError`] if the radius is not finite and positive, the figure is not the
-    /// radius's spheroid, the months are neither 1 nor 12, a step's exponent is above 15, or a
-    /// part is not finite or out of its range (each part's documentation states it).
+    /// radius's spheroid, the months are neither 1 nor 12, the season eccentricity is outside
+    /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, or a part is not finite
+    /// or out of its range (each part's documentation states it).
     pub fn new(parts: FieldHeaderParts) -> Result<Self, BuildFieldHeaderError> {
         let r = parts.radius.value();
         if !(r.is_finite() && r > 0.0) {
@@ -280,6 +298,14 @@ impl FieldHeader {
         }
         if parts.months != 1 && parts.months != 12 {
             return Err(BuildFieldHeaderError::Months(parts.months));
+        }
+        let e = parts.season_eccentricity;
+        // A −0 is refused too, so that a circular orbit has one wire form.
+        if !(0.0..1.0).contains(&e) || e.is_sign_negative() {
+            return Err(BuildFieldHeaderError::SeasonEccentricity(e));
+        }
+        if parts.months == 1 && e > 0.0 {
+            return Err(BuildFieldHeaderError::EccentricOneMonthYear(e));
         }
         for (part, exponent) in [
             ("temperature step", parts.temperature_step),
@@ -446,6 +472,13 @@ impl FieldHeader {
     #[must_use]
     pub fn months(&self) -> u8 {
         self.parts.months
+    }
+
+    /// The seasonal orbit's eccentricity, 0 to below 1
+    /// ([`FieldHeaderParts::season_eccentricity`]).
+    #[must_use]
+    pub fn season_eccentricity(&self) -> f64 {
+        self.parts.season_eccentricity
     }
 
     /// The zero of the sea-level temperatures ([`FieldHeaderParts::reference_temperature`]).
@@ -638,6 +671,29 @@ mod tests {
         ));
         assert_eq!(refuse(|p| p.months = 6), BuildFieldHeaderError::Months(6));
         assert_eq!(
+            refuse(|p| p.season_eccentricity = 1.0),
+            BuildFieldHeaderError::SeasonEccentricity(1.0)
+        );
+        assert_eq!(
+            refuse(|p| p.season_eccentricity = -0.1),
+            BuildFieldHeaderError::SeasonEccentricity(-0.1)
+        );
+        assert!(matches!(
+            refuse(|p| p.season_eccentricity = -0.0),
+            BuildFieldHeaderError::SeasonEccentricity(e) if e.is_sign_negative()
+        ));
+        assert!(matches!(
+            refuse(|p| p.season_eccentricity = f64::NAN),
+            BuildFieldHeaderError::SeasonEccentricity(e) if e.is_nan()
+        ));
+        assert_eq!(
+            refuse(|p| {
+                p.months = 1;
+                p.season_eccentricity = 0.05;
+            }),
+            BuildFieldHeaderError::EccentricOneMonthYear(0.05)
+        );
+        assert_eq!(
             refuse(|p| p.anomaly_step = 16),
             BuildFieldHeaderError::StepExponent {
                 part: "anomaly step",
@@ -690,7 +746,7 @@ mod tests {
             sea_level_temperature: 0,
             month_anomaly: [0; 12],
             month_precipitation: [LogPrecipitation::NONE; 12],
-            wind: [Wind::CALM; 4],
+            wind: [Wind::CALM; 12],
         };
         for t in [-400.0, -1.234, 0.0, 17.777, 600.0] {
             let code = header

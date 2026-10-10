@@ -559,15 +559,25 @@ impl LogPrecipitation {
     }
 }
 
-/// A prevailing near-surface wind, two bytes: where the air moves and how fast (Design note 8).
+/// A month's prevailing wind 10 m above the ground, two bytes: where the air moves and how fast
+/// (Design note 8).
 ///
 /// `azimuth` is the direction the air moves towards, clockwise from local north through east, in
 /// 256 steps of 1.406 25°: north is towards the body-fixed +z pole along the surface, east is
 /// +z × up; at either pole, where north has no direction, the azimuth is from the body-fixed +x
 /// meridian's direction. `speed` is code 0 for calm (under about 0.01 m/s) and code c ≥ 1 for
 /// 0.01 m/s × 2^((c − 1) ÷ 16), 16 codes an octave, a step of 4.4%, to about 600 m/s: the
-/// relative precision a sea state wants (R11's Cox–Munk mean-square slopes are linear in the speed) from a
-/// Titan breeze of 0.3 m/s to a gale.
+/// relative precision a sea state wants from a Titan breeze of 0.3 m/s to a gale, since R11's
+/// Cox–Munk mean-square slope is linear in the speed (Cox and Munk 1954, J. Opt. Soc. Am. 44,
+/// 838–850).
+///
+/// In a climate record ([`ClimateCell::wind`]) the height is 10 m, the WMO's standard exposure
+/// for surface wind (WMO-No. 8, the CIMO Guide, 2008 edition, Part I, chapter 5, §5.9.2), which
+/// R11's sea state converts to its own height by a log profile. The azimuth is the direction of
+/// the month's resultant (vector-mean) wind, which cloud advection and ripples follow, and the
+/// speed is the month's mean scalar speed, which the linear Cox–Munk law wants
+/// (`decision-r09-t2.md` item 1). Design note 8's three-cell heuristic has no transients, so the
+/// two speeds coincide today; the definition keeps a record right under a model that has them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Wind {
     /// The direction the air moves towards, in 256ths of a turn clockwise from local north.
@@ -644,13 +654,15 @@ impl Wind {
 }
 
 /// One climate record, for a cell of the climate layer's level, L − 1, which its four children at
-/// the field's level share: 34 bytes in the payload (Design note 17).
+/// the field's level share: 50 bytes in the payload (Design note 17).
 ///
 /// Plain data with public fields; the temperatures' codes are in the header's per-body steps, and
 /// [`FieldHeader::sea_level_temperature`](super::FieldHeader::sea_level_temperature) and
 /// [`FieldHeader::month_temperature`](super::FieldHeader::month_temperature) read them. The
 /// layer is interpolated from the energy-balance grid and carries nothing finer but the lapse
-/// term, which the synthesis re-applies from the header's rate and a point's elevation.
+/// term, which the synthesis re-applies from the header's rate and a point's elevation. Its three
+/// monthly fields are on the header's months ([`month_edges`](super::month_edges)), which a
+/// reader blends with [`month_blend`](super::month_blend).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClimateCell {
     /// The annual mean surface temperature, reduced to sea level by the header's lapse rate, as
@@ -658,14 +670,16 @@ pub struct ClimateCell {
     /// (0.01 K × 2ⁿ).
     pub sea_level_temperature: i16,
     /// Each month's mean temperature less the annual mean, in the header's anomaly steps (0.25 K ×
-    /// 2ⁿ), months from the year's first; 0 past the header's months, and 0 in a one-month year.
+    /// 2ⁿ), months from periapsis; 0 past the header's months, and 0 in a one-month year.
     pub month_anomaly: [i8; 12],
     /// Each month's mean precipitation rate, the labelled heuristic of the header's precipitation
     /// source; [`LogPrecipitation::NONE`] past the header's months.
     pub month_precipitation: [LogPrecipitation; 12],
-    /// The prevailing wind of each quarter of the year, months 1–3, 4–6, 7–9 and 10–12 (a
-    /// one-month year's four are its one wind), for R11's clouds and sea state.
-    pub wind: [Wind; 4],
+    /// Each month's 10 m wind ([`Wind`]: the direction of the month's resultant and its mean
+    /// speed), the wind its orographic step carried vapour along, so that the rain shadows and the
+    /// winds agree month by month, for R11's clouds and sea state; [`Wind::CALM`] past the
+    /// header's months, so a one-month year's eleven later winds are calm.
+    pub wind: [Wind; 12],
 }
 
 #[cfg(test)]

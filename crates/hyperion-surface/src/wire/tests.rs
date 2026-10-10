@@ -391,8 +391,8 @@ fn wire_payloads_merged_in_any_order_give_the_whole_cover_s_field() {
     }
 }
 
-/// The Earth-like world's whole payload is 10–15 MB (Design note 17's "some 12 MB": 21 bytes a
-/// cell and 34 per four cells, with each block's header and craters), and no block of it, or of
+/// The Earth-like world's whole payload is 10–15 MB (Design note 17's "some 13.2 MB": 21 bytes a
+/// cell and 50 per four cells, with each block's header and craters), and no block of it, or of
 /// any payload here, exceeds 1 MiB.
 #[test]
 fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
@@ -417,7 +417,7 @@ fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
         rest = &rest[length..];
         blocks += 1;
     }
-    assert_eq!(blocks, 12);
+    assert_eq!(blocks, 13, "{} bytes", bytes.len());
     for bytes in [
         encode_payload(mars(), &region(), None),
         encode_payload(mars(), &whole(mars()), None),
@@ -840,6 +840,17 @@ fn a_wire_partial_field_refuses_blocks_that_are_not_its_fields() {
     let cell = seasons.climate_indices[3];
     assert_eq!(
         refuse(&seasons),
+        InsertBlockError::Record(BuildFieldError::MonthOutsideYear { cell })
+    );
+    // A one-month year's eleven later winds are calm.
+    let mut breezy = blocks[0].clone();
+    breezy.climate[3].wind[1] = Wind {
+        azimuth: 64,
+        speed: 100,
+    };
+    let cell = breezy.climate_indices[3];
+    assert_eq!(
+        refuse(&breezy),
         InsertBlockError::Record(BuildFieldError::MonthOutsideYear { cell })
     );
     let mut moved = blocks[0].clone();

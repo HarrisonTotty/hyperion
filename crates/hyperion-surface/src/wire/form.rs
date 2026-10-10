@@ -81,12 +81,12 @@ wire_table!(fixed SynthesisCell {
     crater_state: u8,
 });
 
-// One climate record (Design note 17's 34 bytes), in its declared order.
+// One climate record (Design note 17's 50 bytes), in its declared order.
 wire_table!(fixed ClimateCell {
     sea_level_temperature: i16,
     month_anomaly: [i8; 12],
     month_precipitation: [LogPrecipitation; 12],
-    wind: [Wind; 4],
+    wind: [Wind; 12],
 });
 
 // A wind: its azimuth, then its speed's code.
@@ -109,6 +109,7 @@ wire_table!(FieldHeaderParts {
     realised_sigma_h: Metres,
     realised_relief: Metres,
     months: u8,
+    season_eccentricity: f64,
     reference_temperature: Kelvin,
     temperature_step: u8,
     anomaly_step: u8,
@@ -481,12 +482,12 @@ mod tests {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// The records' strides are Design note 17's: 21 bytes a synthesis record and 34 a climate
+    /// The records' strides are Design note 17's: 21 bytes a synthesis record and 50 a climate
     /// record; a field added to either moves them, and the payload's size with them.
     #[test]
     fn wire_records_have_design_note_seventeens_strides() {
         assert_eq!(SynthesisCell::BYTES, 21);
-        assert_eq!(ClimateCell::BYTES, 34);
+        assert_eq!(ClimateCell::BYTES, 50);
         assert_eq!(Wind::BYTES, 2);
         assert_eq!(Spheroid::BYTES, 16);
     }
@@ -527,7 +528,7 @@ mod tests {
             &[Wind {
                 azimuth: 9,
                 speed: 200,
-            }; 4],
+            }; 12],
         );
         let read = |bytes: &[u8]| Crust::read(&mut Reader::new(bytes));
         assert_eq!(read(&[3]), Ok(Crust::Province));

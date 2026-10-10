@@ -319,9 +319,11 @@ ambiguous, the design note that reads it is named.
 - **R09:** `FieldView`, with `CoarseField` on the server and `PartialField` on the client
   (`is_surveyed`); `FieldHeader` (`sea_level`, `craters: CraterParams`, and `surface_age: Gyr` and
   `surface_pressure: Pascals`, plan 14's figures carried for this plan's `RockSite`);
-  `SynthesisCell` (`water_surface_mm`, `ice`, `class`); `ClimateCell` at level L − 1 (monthly
-  anomaly and precipitation, the labelled heuristic, and `wind`); `CoarseCrater` through
-  `craters_reaching`; `craters::cumulative_density`; `DetailSeed` and its `stream`, the
+  `SynthesisCell` (`water_surface_mm`, `ice`, `class`); `ClimateCell` at level L − 1 (each
+  month's anomaly, precipitation, the labelled heuristic, and 10 m wind: the resultant's direction
+  and the mean speed), on R09's months of equal eccentric anomaly of the seasonal orbit, found from
+  the scene's time through `month_blend` and `FieldHeader.season_eccentricity`; `CoarseCrater`
+  through `craters_reaching`; `craters::cumulative_density`; `DetailSeed` and its `stream`, the
   `SurfaceDetail` scope and `ObjectKey::surface_cell(face, level, i, j, instance)`; R05's
   `BAND_LIMIT_M` and `FINEST_SPACING_M`, which R09 uses; `Synthesiser` (the field and the detail
   seed); the fallible `ObjectKey::surface_cell` (`Result<Self, SurfaceCellKeyError>`); the
@@ -574,7 +576,10 @@ ambiguous, the design note that reads it is named.
 12. **Ocean by distance, with one slope budget.** Researched 2026-09-29. The total slope
     variance is Cox and Munk's, anisotropic along the wind: σ_u² = 3.16 × 10⁻³ U and σ_c² = 0.003 +
     1.92 × 10⁻³ U (total 0.003 + 5.12 × 10⁻³ U), with U at 12.5 m converted from the climate field's
-    wind by a neutral log profile, U(z) = U₁₀ [1 + (√C_D ÷ κ) ln(z ÷ 10)], C_D ≈ 1.3 × 10⁻³, κ =
+    10 m wind (the month's mean speed, which the linear Cox–Munk law needs; the Pierson–Moskowitz
+    height and the whitecaps, superlinear in U, take it as their representative wind and are
+    labelled so) by a neutral log profile, U(z) = U₁₀ [1 + (√C_D ÷ κ) ln(z ÷ 10)], C_D ≈
+    1.3 × 10⁻³, κ =
     0.4, and clamped to 0–20 m/s with the extrapolation above 14 m/s stated. Above 20 km the ocean
     is the sphere with that distribution filtered per pixel, as Bruneton, Neyret and Holzschuch 2010
     draw it (their switch "for altitudes below 20,000 m" confirmed); below 20 km it is a projected
@@ -762,8 +767,12 @@ ambiguous, the design note that reads it is named.
 
 19. **Motion.** Clouds move with the simulation's wind and waves with its time: that is the world
     moving, which guide item 8's reduced-motion rule does not stop ("the world cannot be frozen").
-    Both hold still when the scene's time rate is zero, and clouds fade to their mean under fast
-    time warp (Design note 8). Decoration and scatter do not move.
+    The month is found from the seasonal orbit's mean anomaly at the scene's time with R09's
+    `month_blend`, called through R10's wasm field or a TypeScript twin tested against it. The
+    coverage, the wind and the sea state are blended between the two nearest months, so the seasons
+    turn without a step at a month's edge, and on an eccentric orbit faster near periapsis, as the
+    climate does. Both hold still when the scene's time rate is zero, and clouds fade to their mean
+    under fast time warp (Design note 8). Decoration and scatter do not move.
 
 20. **Craters between 1 and 2 m stay decoration (open question 18).** Researched 2026-09-29.
     Brand-new Martian craters of metre scale average d/D = 0.23 (Daubar et al. 2014), but lunar

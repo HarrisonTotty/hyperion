@@ -186,7 +186,8 @@ pub mod field {
         figure: Spheroid (equatorial a, polar c: the height datum, Design note 17), level, D_b,
         sea_level, lapse_rate, spectrum: BandSpectrum, craters: CraterParams,
         climate_model: ClimateModelKind, precipitation: PrecipitationSource (always Heuristic),
-        realised_sigma_h, realised_relief, months: u8,
+        realised_sigma_h, realised_relief, months: u8 (1 or 12),
+        season_eccentricity: f64 (the months' orbit, Design note 8),
         anomaly_step: u8 (0.25 K × 2ⁿ, per body, Design note 17), surface_age: Gigayears,
         surface_pressure: Pascals, albedo_scale: Option<f64> (R10's) */ }
     pub struct SynthesisCell { /* elevation_mm: i32,
@@ -197,7 +198,7 @@ pub mod field {
                                                            // 21 bytes in the payload
     pub struct ClimateCell { /* at level − 1: sea_level_temperature: i16 (0.01 K),
         month_anomaly: [i8; 12] (header's step), month_precipitation: [u8; 12] (log rate),
-        wind: [Wind; 4] */ }                               // 34 bytes, one per four cells
+        wind: [Wind; 12] (each month's 10 m wind) */ }    // 50 bytes, one per four cells
     pub struct CoarseCrater { /* centre: [f64; 3] unit, diameter: Metres,
         morphology: Morphology, age: f64 (Gyr), degradation: u8,
         reach: Cover (every cell its reach touches, Design note 10) */ }
@@ -209,6 +210,8 @@ pub mod field {
         fn climate(&self, cell: PatchKey) -> Option<&ClimateCell>;
         fn craters_reaching(&self, cell: PatchKey)
             -> impl Iterator<Item = &CoarseCrater> + '_; }   // in list order
+    pub struct MonthBlend { /* from: u8, to: u8, weight of `to`: f64 */ }
+    pub fn month_blend(header: &FieldHeader, mean_anomaly: Radians) -> MonthBlend;  // Design note 8
     pub struct PartialField;                   // what a client holds; built with the codec (T3)
     impl PartialField { pub fn new(header: FieldHeader) -> Self;
         pub fn insert(&mut self, block: &wire::DecodedBlock) -> Result<(), InsertBlockError>;
@@ -716,8 +719,20 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    coarse to interpolate to cells of about 72 km: Spiegel et al. 2008 found a 10° latitude grid
    biases the global mean by over 4 K and converged at 1.25° (researched 2026-09-29, medium
    confidence; Okuya et al. 2019 for a two-dimensional precedent). The fields are interpolated to
-   the cells bicubically before the lapse term. A month is a twelfth of the orbital period; a locked
-   world on a circular orbit has one. Plan 14's figures are imposed on the component that defines
+   the cells bicubically before the lapse term. A month is a twelfth of the seasonal orbit in
+   eccentric anomaly, counted from periapsis.
+   - Month k spans E from k·30° to (k + 1)·30°. Its share of the period is
+     [ΔE − e (sin E_{k+1} − sin E_k)] ÷ 2π: a twelfth on a circular orbit, 29.9–30.9 d on Earth,
+     and 0.4–1.6 twelfths at e = 0.6.
+   - This is so that twelve samples hold an eccentric orbit's brief periapsis season, which
+     twelve equal-time months miss above e ≈ 0.3 (`decision-r09-t2.md` item 1).
+   - The seasonal orbit is the one that sets the sun's declination and distance: the body's own
+     about its star or stars, or its planet's for a moon. The header carries its eccentricity.
+   - A world with no seasonal forcing has one month: a locked world on a circular orbit, or
+     e = 0 with obliquity 0.
+   - Each month's record is the mean over its span of the six-hour steps of the converged orbit.
+
+   Plan 14's figures are imposed on the component that defines
    each: the equator–pole contrast by replacing the annual field's P₂(sin φ) coefficient (the sign
    carries a warm pole), a locked world's day–night contrast by P₁(cos γ), and the mean by a
    constant added last to the surface temperature after the lapse term; ice goes coldest first, by
@@ -731,8 +746,14 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    shadows and inland decay (L_c = L_f = 25 km, L_l = 500 km, H₀ = 2 km, L_d = 25 km, their South
    American fit), solved by a fixed number of Gauss–Seidel sweeps in `cell_index` order, and
    rescaled so that global precipitation equals global evaporation. Prevailing winds are the
-   three-cell pattern scaled by the Hadley width, converging on the substellar point for slow and
-   locked rotators. The offline check against ExoPlaSim is a recorded task, never run on arrival.
+   three-cell pattern scaled by the Hadley width, centred each month on the month's energy-flux
+   equator, and converging on the substellar point for slow and locked rotators.
+   - Each month's wind is the one its orographic step carried vapour along, stored as the
+     month's 10 m wind: the direction of its resultant and its mean speed. These coincide while
+     the pattern has no transients.
+   - The field's rain shadows and its winds therefore agree month by month.
+
+   The offline check against ExoPlaSim is a recorded task, never run on arrival.
 
    _The transport law_ (researched 2026-10-09, by R09.T0.b; medium confidence). The FILLET ensemble
    cannot test a cap. Its protocol (Deitrick et al. 2023, arXiv:2302.04980, and its v1.1,
@@ -841,8 +862,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     winter's, else s,
     classifying climate and not life: there is no vegetation class, and a lifeless Earth-like world
     keeps its class with bare ground. Months are not Earth months, so the table is applied to
-    **rates** (precipitation per 30.44 d and per 365.25 d); summer is each cell's six warmest
-    consecutive months; the temperature thresholds stay. Worlds with one month, and every
+    **rates** (precipitation per 30.44 d and per 365.25 d); summer is each cell's warmest
+    consecutive half-year, six months on a circular orbit, and every count of months in the table
+    (such as four months above 10 °C) counts their durations in twelfths of the year, since an
+    eccentric orbit's months differ in length (Design note 8); the temperature thresholds stay.
+    Worlds with one month, and every
     non-seasonal regime, classify surface state (liquid, ice or frost of a named species, rock,
     regolith, melt, organic sediment) with the regime's named zones, such as a locked world's
     substellar ocean and nightside glacier. One `SurfaceClass` byte holds either.
@@ -986,15 +1010,18 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     world's about 8,000 km (researched 2026-09-29, from Bird 2003's boundaries, medium confidence);
     `month_anomaly` is an `i8` in steps of the header's per-body `anomaly_step`, 0.25 K × 2ⁿ, the
     finest step that holds the body's largest anomaly in 127 steps: 0.25 K on an Earth, whose
-    extreme is Verkhoyansk's −31.0 and +30.2 K about its annual mean (WMO 1991–2020 normals), 0.5 K
-    on a Mars, whose high latitudes reach ±45–60 K, and 1 K on a high-obliquity world with land,
+    extreme is Verkhoyansk's −30.8 and +30.6 K about its annual mean of −13.9 °C (WMO 1991–2020
+    normals, station 24266; Oymyakon, 24688, gives −30.8 and +30.2 K), within the 31.75 K that 127
+    steps of 0.25 K hold, 0.5 K on a Mars, whose high latitudes reach ±45–60 K, and 1 K on a
+    high-obliquity world with land,
     ±50–70 K (Williams and Pollard 2003; Williams and Kasting 1997; researched 2026-09-29, medium
     confidence for Mars and high obliquity), so no anomaly saturates and no cell grows. The climate
     layer is at level L − 1, because it is interpolated from the energy-balance grid and carries
     nothing finer except the lapse term, which the synthesis re-applies from the header's rate and
-    the cell's elevation. That gives about 21 B a cell plus 34 B per four: some 12 MB for an Earth
-    at level 8, 3 MB for a Mars at 7 and under 1 MB for the Moon, inside the brainstorm's "roughly 2
-    to 15 MB". Heights, elevations and sea level are measured along the normal of the body's
+    the cell's elevation. That gives about 21 B a cell plus 50 B per four (twelve months of
+    anomaly, precipitation and wind): some 13.2 MB for an Earth at level 8, 3.3 MB for a Mars at 7
+    and 0.8 MB for the Moon, inside the brainstorm's "roughly 2 to 15 MB" and R03's 15 MiB check.
+    Heights, elevations and sea level are measured along the normal of the body's
     rotational spheroid, R07's reference body (a = R_vol (1 − f)^(−⅓), c = a (1 − f), with plan 14's
     flattening f, which P14.T46 sends in the record's `figure()`), the one datum R07's Design note
     19 sets for R05's vertices, R07's discs and R10's terrain (researched there, high confidence);
@@ -1130,13 +1157,27 @@ construction. With them (the re-validation of `bce2aef5`): the header's data typ
 tasks give behaviour (`synth::{BandLevel, BandSpectrum}` for T5, `craters::CraterParams` for T7.a,
 `ClimateModelKind`, `PrecipitationSource`); `PerSquareKilometre` and `SquareMetres` in base's
 `units`, by its `unit!` macro; and the surface crate's first `[features]` entry, `testing = []`,
-which the sim's `testing` feature enables (`hyperion-surface/testing`).
+which the sim's `testing` feature enables (`hyperion-surface/testing`). The climate record holds
+twelve winds, and the header holds the months' orbit's eccentricity with `month_blend`
+(`decision-r09-t2.md` item 1). `month_blend` is pure arithmetic:
+
+- it finds the month of a mean anomaly by solving Kepler's equation in a fixed number of Newton
+  steps;
+- it blends linearly in mean anomaly between the two nearest month centres, each centre being its
+  span's mean-anomaly midpoint.
 
 Tests: the level table of Design note 4 (Earth 8, 2 R⊕ 8, Mars 7, Moon 6, Ceres 5, with the
 brainstorm's cell sizes within 5%); D_b equal to twice the closed-form largest edge, 84.9 km ± 0.5
 on an Earth at level 8, and 90.3, 92.6 and 50.0 km on a Mars, the Moon and Ceres ± 0.5;
 `cell_index` is a bijection onto 0..6 · 4ᴸ; `craters_reaching` yields exactly the craters whose
-`reach` holds the cell, in list order; every synthetic world is built twice with identical values.
+`reach` holds the cell, in list order; every synthetic world is built twice with identical values;
+
+- on e = 0 every month is a twelfth of the period;
+- on e = 0.6 the months' shares sum to 1 to 10⁻¹², month 0 is (π ÷ 6 − 0.6 sin 30°) ÷ 2π of the
+  period, and month 6 is (π ÷ 6 + 0.6 sin 30°) ÷ 2π;
+- `month_blend` is continuous across every month edge and gives the month alone at its centre;
+- a one-month year's `wind[1..]` are calm, and `CoarseField::new` refuses a wind there.
+
 Acceptance: `cargo test -p hyperion-surface field`.
 
 _Follow-up B, the palette and the substance byte_ (decision-composition, 2026-10-09; after
@@ -1412,7 +1453,10 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   (ERA-Interim); with seasons off, the equator–pole contrast, scaled so that the 1 Ω⊕, 1 bar run
   reads their 40 K (Fig. 8a) or 42 K (Fig. 15c), matches Kaspi and Showman's figures to 2 K over
   Ω⊕ ÷ 24 to 12 Ω⊕ and 0.2–50 bar; the scheme is stable at Venus's rotation and
-  at a six-hour step for every rotation in the reference set.
+  at a six-hour step for every rotation in the reference set; the months are twelve equal spans of
+  eccentric anomaly from periapsis, each record the mean of its span's steps; at e = 0 they are the
+  period's twelfths, and at e = 0.6 the periapsis month's record averages 0.4 twelfths of the
+  orbit.
 - **R09.T13.b Longitude and locked coordinates.** The periodic longitude solve split after the
   latitude one in a fixed order, and the tidally locked coordinates about P14.T14's substellar
   axis. Tests: with no land–sea contrast the zonal model's answer is reproduced to 0.01 K; a locked
@@ -1434,11 +1478,16 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   FILLET's ice-edge states (an ice belt, not caps, when plan 14's history says it started cold);
   the reference Mars places CO₂ ice inside its water-ice cap's latitude, given by hand; a
   Titan-like world's methane liquid fills its basins to its share.
-- **R09.T13.e Precipitation and wind.** Design note 8's heuristic, labelled in the header. Tests:
+- **R09.T13.e Precipitation and wind.** Design note 8's heuristic, labelled in the header, and
+  each month's 10 m wind. Tests:
   global precipitation equals global evaporation to 1%; the reference Earth's zonal precipitation
   has maxima within 10° of the energy-flux equator and in the 40–60° bands and minima at 15–35°; on
   a one-dimensional ridge under a steady wind the lee receives under half the windward rate; inland
-  precipitation decays from the sea with an e-folding within 2× of L_l; the header says heuristic.
+  precipitation decays from the sea with an e-folding within 2× of L_l; the header says heuristic;
+  - each month's quantised wind is the wind that month's orographic step used;
+  - on a synthetic aquaplanet at 60° obliquity, an equatorial cell's meridional wind changes sign
+    twice a year;
+  - a locked circular world has one wind.
 
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:
@@ -1489,9 +1538,11 @@ for one-month worlds; each naming its palette entry (codes 64–255), with melt 
 Köppen–Geiger 1–63 (decision-composition); the per-cell crater state. Tests: the classifier given
 one monthly climatology labelled once as a one-year orbit and once as a four-year orbit (the same
 temperatures, and precipitation at the same rates per 30.44 d) returns the same classes, which tests
-the rate rule alone, not the climate a longer orbit would have; the reference Earth has tropical,
-arid, temperate, continental and polar classes in plausible areas; a lifeless world has no
-vegetation class; the reference Moon is regolith throughout.
+the rate rule alone, not the climate a longer orbit would have; on an orbit of e = 0.6, four months
+above 10 °C centred on periapsis count as 2.0 twelfths of the year, so they do not meet a
+four-month threshold; the reference Earth has tropical, arid, temperate, continental and polar
+classes in plausible areas; a lifeless world has no vegetation class; the reference Moon is
+regolith throughout.
 `crates/hyperion-sim/examples/surface_map.rs` (the sim's first example, with an `[[example]]` entry
 carrying `required-features = ["testing"]`) writes the reference Earth's elevation, class and flow
 as equirectangular PPM images under `target/`, with no new dependency, and the look (belts along
@@ -1626,8 +1677,11 @@ the heavy lock or recorded provisional).
 ## Generator version
 
 The coarse pass, its quantisation and payload format, and the synthesis are generated output (open
-question 4), so a change to any of them bumps `GENERATOR_VERSION` (21 at the re-validation). The
-first bump is made by whichever of T1.b (whose filled hooks section moves plan 14's golden
+question 4), so a change to any of them bumps `GENERATOR_VERSION` (21 at the re-validation).
+Until R09.T19 first sends a payload, a change to the codec's layout or to the `testing` worlds
+re-blesses `tests/golden/wire/` at the current version with neither version bumped (ruling of
+2026-10-09); from then it bumps both. The first bump is made by whichever of T1.b (whose filled
+hooks section moves plan 14's golden
 systems), T9 and T16 lands first, through the orchestrator, which coordinates bumps one lane at a
 time; later tasks that change a committed golden bump again. R05's `FINEST_SPACING_M`, `BAND_LIMIT_M`
 and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves but
@@ -1638,9 +1692,10 @@ and the cell key's packing; the tags of Provides and `surface.scatter` for R11; 
 for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level rule's 40 km, 5 and
 8; `ClimateCell` at level L − 1; the header's `albedo_scale` for R10 and its `surface_age` and
 `surface_pressure` for R11; and T2's header `reference_temperature` and `temperature_step` (0.01 K
-× 2ⁿ, n 0–15) and every code's scale (Risks, "Deviations in T2, as built"). R10.T10.a fills
-`FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`, re-blessing this plan's payload and
-coarse goldens in that commit.
+× 2ⁿ, n 0–15) and `season_eccentricity`, with the months' eccentric-anomaly rule and twelve winds
+per climate record (`decision-r09-t2.md` item 1), and every code's scale (Risks, "Deviations in
+T2, as built"). R10.T10.a fills `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
+re-blessing this plan's payload and coarse goldens in that commit.
 
 ## Risks and open points
 
@@ -1756,8 +1811,9 @@ coarse goldens in that commit.
 - **The survey stand-in.** `survey_pass` lets a client grant its ship coverage, as the server
   grants detail levels today. It is a discipline for an honest client, and the sensors plan
   replaces the caller, not the core.
-- **Field size.** Design note 17's layout gives about 12 MB for an Earth; if the climate layer at
-  L − 1 proves too coarse for R11's clouds, sending it at level L costs about 40% more.
+- **Field size.** Design note 17's layout gives about 13.2 MB for an Earth. If the climate layer
+  at L − 1 proves too coarse for R11's clouds, sending it at level L costs about 2.1× (about
+  28 MB on an Earth), past R03's 15 MiB check.
 - **Dependencies.** Plan 14 calling the surface crate's crater density is a new edge that R04's
   split allows (the sim already depends on the surface crate). P12.T7 is built, and T18 builds on
   it. The channel network's physics profile replaces Dendry's own height reconstruction, which the
@@ -1779,7 +1835,8 @@ coarse goldens in that commit.
   - R10's use of the header's `albedo_scale`: carried by R10;
   - R11's use of the header's `surface_age` and `surface_pressure` for its `RockSite`: carried by R11
     (`rock_site`);
-  - R11's zonal precipitation and seasonal wind (below): open.
+  - R11's zonal precipitation (below): open. Its monthly wind is met by T2's twelve winds per
+    climate record (`decision-r09-t2.md` item 1).
 
   R10's three asks of this plan (per-contribution variance and structure function, resolution per
   cell, the albedo-scale field) are met in Provides.
@@ -1795,11 +1852,43 @@ coarse goldens in that commit.
   part of the precipitation heuristic (the rain band on the energy-flux equator, the dry belts and
   the storm tracks, by latitude and month) as a function the client can call from plan 14's global
   figures without the coarse field, so that clouds are drawn over unsurveyed ground (R11 Design note
-  8), and whether `ClimateCell.wind`'s four entries are seasonal, since its cloud advection and sea
-  state want the month's. T2 answered the second provisionally: the four entries are the year's
-  quarters (Risks, "Deviations in T2, as built"), for R11 to accept, since it asked for the
-  month's; twelve monthly winds would cost 16 B more per climate cell (about 1.6 MB on an Earth),
-  a question with "main" for the owner.
+  8). The second ask, whether `ClimateCell.wind` is seasonal, is met: the record holds each month's
+  10 m wind, on the months of Design note 8 (ruled 2026-10-09, `decision-r09-t2.md` item 1). That
+  costs 16 B more per climate record, about 1.6 MB on an Earth.
+- **Found by the ruling on T2's questions** (`decision-r09-t2.md`, "Adjacent findings",
+  2026-10-09).
+  - _Slow and resonant rotators' climate (T13.b, R11)._ On a world that is not locked but whose
+    solar day is not short against a month (a Venus, a 60-day day, a 3:2 resonance, whose
+    insolation repeats over two orbits, and the Moon itself, whose solar day is 29.5 d against a
+    month of 30.4 d), the substellar point moves through the body-fixed cells
+    across the year. A month's body-fixed record is then a climatology only if it is averaged over
+    the sun's body-fixed longitude: over the resonance's period when the spin is commensurate, or
+    until that longitude is sampled evenly. Otherwise it is one year's weather, which the game
+    would show forever. T13.b settles the averaging. Such a world's day–night circulation is then
+    not in the climate layer, so R11's terrain-independent zonal function for it would need
+    sun-fixed coordinates, for R11's re-validation. The winds' cadence does not change.
+  - _Which worlds have one month_ (the T2 fix's science review, for the specification). Design note
+    8's "a locked world on a circular orbit" read literally gives a moon locked to its planet, whose
+    planet's orbit is circular, one month, though it sees its planet's obliquity (a Titan, under
+    Saturn's 26.7°); and a world locked 1:1 to its star lacks seasons only at zero obliquity. The
+    physical condition is e = 0 with no obliquity to the seasonal orbit; the lock adds nothing.
+    Lean: word it so when the specification is next revised; the header's checks (one month only at
+    e = 0) already hold under either reading.
+  - _The synthetic winds are not T13.e's._ T2's fix centres the whole three-cell pattern on each
+    month's flux equator, an illustration. The Coriolis parameter changes sign at the geographic
+    equator, so air crossing it turns eastward: the summer hemisphere's low-level winds near the
+    ascending edge are westerly (Guendelman, Waugh and Kaspi, J. Atmos. Sci.,
+    doi:10.1175/JAS-D-21-0019.1, about 15° N in the Indian monsoon and 30° S on Mars in southern
+    summer; the ruling's Arabian Sea in June blows towards 65°). T13.e centres the meridional
+    structure on the flux equator but takes the zonal sense from the geographic hemisphere between
+    the two equators.
+  - _One transition diameter for Mercury and Mars._ Design note 12's D_t = 19 km × (1.62 ÷ g) ×
+    k_target gives both 8.3 km (g 3.70 and 3.71 m s⁻²), but Susorney et al. 2016 measure 11.7 ± 1.2
+    km on Mercury and Robbins and Hynek 2012 about 6 km on Mars (5.9–7.0 km by method): the known
+    Mercury–Mars anomaly, which Susorney et al. could not trace to the target or the impact
+    velocity. The ruling's crater shapes match Mercury's MLA depths best with the formula's 8.3 km
+    (with 11.7 km they would come out 16–31% deep, 22% at 50 km), so nothing changes. It is recorded
+    for T7.a's D_t test, which checks only the Moon and Earth.
 - **The 61-chunk transfer check.** R03.T15's 15 MiB (61-chunk) check is this plan's, after RM3
   (decided 2026-10-07 by the orchestrator). The coarse field, about 15 MiB, is the first bulk kind
   of that size: no sky reaches it (R06's largest is 7.5 MB, 29 chunks; R06.T11.b ran the check at 4
@@ -1939,7 +2028,8 @@ coarse goldens in that commit.
     `anomaly_step` (both exponents 0–15). The two join Generator version's reserved list. The
     exponents keep the plan's names, `temperature_step` and `anomaly_step`, beside the kelvin
     values `temperature_step_k` and `anomaly_step_k` (the review's `_exponent` rename was declined
-    for the plan's name). `months` is 1 or 12; `Screening` is `None`, `Atmosphere` (its
+    for the plan's name). `months` is 1 or 12; `season_eccentricity` is the months' orbit's e, in
+    [0, 1); `Screening` is `None`, `Atmosphere` (its
     `column_mass` and `projectile_density`) or `Cutoff` (a `diameter`). `ClimateModelKind` is
     `EnergyBalance`, `LockedEnergyBalance`, `RadiativeEquilibrium` or `Isothermal`;
     `PrecipitationSource` has `Heuristic` alone.
@@ -1954,8 +2044,9 @@ coarse goldens in that commit.
     keeps the 21 bytes; `ice` the share under ice in 255ths; `month_precipitation` is
     `[LogPrecipitation; 12]`, 0.1 mm a year × 2^((c − 1) ÷ 12) in kg m⁻² s⁻¹; `Wind` is an azimuth
     the air moves towards in 256ths of a turn from local north and a speed of 0.01 m/s ×
-    2^((c − 1) ÷ 16), and the four winds are the year's quarters (R11's seasonal question answered
-    yes, provisionally; one wind four times in a one-month year); a crater's `degradation` is the
+    2^((c − 1) ÷ 16), and the twelve winds are each month's 10 m wind (the resultant's direction,
+    the mean speed), with a one-month year's eleven later winds calm (`decision-r09-t2.md` item 1);
+    a crater's `degradation` is the
     share of its fresh rim relief lost, in 255ths. `Crust` adds `Lid` and `Province` (a stagnant
     lid's crust and its volcanic provinces) to the two populations. `SurfaceClass` and
     `crater_state` are bytes whose codes T15 defines: 0 (`UNCLASSIFIED`) until then, in every
@@ -1969,8 +2060,9 @@ coarse goldens in that commit.
     a Mars) has no per-cell species yet; `SurfaceClass`, T15's, is where the liquids, ices and
     frosts of named species go, with 255 codes of room.
   - _Validation._ `CoarseField::new` refuses wrong record counts, water below ground, a boundary
-    kind without a distance or the reverse, a month outside the year (or an anomaly or a second
-    wind in a one-month year), a crater off unit length, narrower than D_b, of negative age, whose
+    kind without a distance or the reverse, a month outside the year (or an anomaly in a one-month
+    year, or a wind that is not calm past its first),
+    a crater off unit length, narrower than D_b, of negative age, whose
     reach misses its centre's cell or leaves the field, or not strictly after its predecessor in
     (centre cell, diameter): the key is unique, so that T3's `PartialField` merges and dedupes the
     craters of several blocks by it and the synthesis sums them in one order (the determinism
@@ -1994,11 +2086,11 @@ coarse goldens in that commit.
     and the depth inline from Design note 12 (T7.a may switch it to its functions). Earth-like
     builds in 0.6–0.8 s at the dev profile under shared load; every world twice in under 2 s.
   - _Science review._ Every figure turned into code checks against its source. Two corrections
-    for the plan's text, recorded here rather than edited: Design note 17's Verkhoyansk anomalies
-    are −30.8 and +30.6 K about an annual mean of −13.9 °C in the WMO 1991–2020 normals (station
-    24266), not −31.0 and +30.2 K (the 0.25 K step is unaffected; the header's doc quotes the
-    normals); and Design note 13's lunar depth-to-rim-height ratio 5.42 is 0.195 (Pike 1980,
-    Table 2) over a rim height of 0.036 D^1.014 that is Pike 1977's, not in the cited Pike 1980.
+    for the plan's text, both ruled in `decision-r09-t2.md`. Design note 17's Verkhoyansk
+    anomalies are now −30.8 and +30.6 K (item 2; the 0.25 K step is unaffected; the header's doc
+    quotes the normals). And Design note 13's lunar depth-to-rim-height ratio 5.42 is 0.195
+    (Pike 1980, Table 2) over a rim height of 0.036 D^1.014 that is Pike 1977's, not in the cited
+    Pike 1980.
     Low confidence: Pike 1977's complex-crater rim fit, about 0.236 D^0.399, would make every
     coarse crater's rim about half as high as observed under the simple-crater ratio, for T7.a to
     weigh. Ceres's 469.7 km is Ermakov et al. 2017's; Design note 12's morphology bounds (0.8,
@@ -2011,6 +2103,63 @@ coarse goldens in that commit.
     readers) are pinned at a few points only; the determinism review asks T3's or T9's goldens to
     write every one-byte code's value and a sample of `LogArea`'s. T18 takes `CoarseLevel`,
     `cell_index` and `ResolutionCode` from here.
+  - _The months_ (`decision-r09-t2.md` items 1 and 2, applied after T2 landed, 2026-10-09). The
+    record is 50 B: `ClimateCell.wind` is `[Wind; 12]`, each month's 10 m wind on the months of
+    `month_anomaly` and `month_precipitation`, and `CoarseField::new` refuses a one-month year
+    whose `wind[1..]` are not calm (the old rule, four equal winds, is gone).
+    - _Files and public items._ `field/months.rs` holds `MonthBlend` (private fields, read by
+      `from`, `to` and `weight`; its `Default` is month 0 alone) and `month_blend`, as Provides
+      has them, and three items beyond Provides: `month_edges(season_eccentricity)`, the twelve
+      months' edges in mean anomaly (`Option<[Radians; 13]>`, `None` outside [0, 1)), for T13.a's
+      binning and T15's durations, since the pass bins before it has a header;
+      `month_share(header, month)`, a month's share of the period; and
+      `month_at(header, mean_anomaly)`, the month that holds a time. The header's
+      `season_eccentricity` is refused outside [0, 1) (`BuildFieldHeaderError::SeasonEccentricity`)
+      and above 0 in a one-month year (`EccentricOneMonthYear`), since a one-month year's orbit is
+      circular.
+    - _No Kepler solve._ The task text has `month_blend` find the month by Newton steps on
+      Kepler's equation. The edges are mean anomalies already, M_k = k · 30° − e sin(k · 30°),
+      from exact sines (√3 ÷ 2 the nearest `f64`), so `month_at` and `month_blend` compare the
+      mean anomaly with them: the same months exactly, at every e below 1, with no iteration
+      count to choose and nothing but the four operators and `math::fmod`'s exact reduction. A
+      mean anomaly is any finite angle; a non-finite one panics (`tests/panics.rs`). The blend's
+      weight is linear in mean anomaly between the two nearest centres, and the span across
+      periapsis is computed alike from both sides (Sterbenz).
+    - _The synthetic worlds._ Earth-like e = 0.016 711 23 and Mars-like 0.093 394 10, Standish
+      and Williams 1992's J2000 elements (the ruling's 0.0167 and 0.0934 to more places). The
+      ruling's "Moon-like and Ceres-like one month as now" does not match T2, which gave both
+      twelve months, nor the ruling's own item 4: neither lacks seasonal forcing (the Moon's
+      seasons are its planet's orbit's, e 0.0167, and Ceres has its own e and a few degrees of
+      obliquity: 1.5° and 4.0°). So both keep twelve months (adopted by "main", 2026-10-09), the
+      Moon-like at Earth's e and the Ceres-like at 0.079 692 295 (JPL's osculating orbit, SBDB
+      solution 48); Flat and OneCrater keep one month at e = 0. The Earth- and Mars-like winds
+      are the three-cell pattern centred each month on a flux equator (the Earth-like rain band's
+      latitude, and on the Mars-like the subsolar latitude, 25.19° into the summer hemisphere at
+      the solstices), so their twelve winds differ month by month (an illustration, not T13.e's
+      rule: Risks, "Found by the ruling on T2's questions"); the Moon- and Ceres-like are calm.
+      Their anomalies carry no global distance term, (e ÷ 2) T̄ cos E, which is a few kelvin; the
+      fixtures stay illustrative. `FieldBuilder::season_eccentricity`
+      sets e (0 by default). The climates stay closed forms in each month's middle eccentric
+      anomaly, 2π (m + ½) ÷ 12.
+    - _The codec_ (T3 landed first, so this commit makes follow-up A's codec edits, of T3's
+      "For T2's follow-ups"). `wire/form.rs`'s `FieldHeaderParts` table gains
+      `season_eccentricity: f64` after `months` (8 B in block 0's header), its `ClimateCell` table
+      holds `[Wind; 12]` (a 50 B stride), and `check_climate_cell`, which `CoarseField::new` and
+      `PartialField::insert` share, refuses a one-month year's later winds that are not calm.
+      The Earth-like world's whole payload is now 13,174,828 B in 13 blocks (11,601,760 in 12),
+      the Mars-like 3,315,560 in 4 and the Moon-like 837,756 in 1; each single-block payload grew
+      by 8 B plus 16 B a climate record. `tests/golden/wire/payloads.golden`'s 18 block, byte and
+      digest lines are re-blessed at 21 with no bump, and its held covers and `codes.golden` do
+      not move (the determinism ruling of 2026-10-09; Generator version). A new
+      `tests/golden/field/months.golden` (an extension, header 21) pins `month_edges`,
+      `month_share`, `month_at` and `month_blend` to the bit on five orbits to e just below 1, at
+      signed zeros, a lift that rounds, many turns and a large angle, as the determinism review
+      asked; `every_field_golden_carries_the_generator_version` checks its header.
+    - _Review._ Declined: the rust-reviewer's rename of `MonthBlend::from` and `to` to `earlier`
+      and `later`, since Provides names them. Adopted: a −0 season eccentricity is refused, so a
+      circular orbit has one wire form, and a mean anomaly reduces to +0, never −0.
+    - _For T13, T15 and T16._ T13.a bins by `month_edges`, T13.e fills each month's wind, T15
+      counts months by `month_share`, and T16's goldens pin them on the reference worlds.
 - **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
   goldens on, revisable until then).
   - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the
@@ -2115,8 +2264,8 @@ coarse goldens in that commit.
     (and from 21 to 22 a synthesis record with B); `wire/tests.rs`'s literal climate cells and
     `[Wind::CALM; 4]` follow the type; the size test's bracket still holds (an Earth's whole field
     is 13.2 MB with A, 13.6 MB with B); and `tests/golden/wire/codes.golden` and
-    `payloads.golden` are re-blessed in that commit with the generator-version bump the change
-    needs, `golden_diff.py` explaining the moved digests and the extended codes.
+    `payloads.golden` are re-blessed in that commit at the current version, with no bump
+    (Generator version), `golden_diff.py` explaining the moved digests and the extended codes.
   - _For T17 and T19._ T19.b converts T18's `Coverage` (a code a cell, `as_bytes`) to a `Cover`,
     its runs of one nonzero code as `CoverRange::new(start, end, code)` through
     `Cover::from_ranges`, and calls `encode_payload(field, &cover, since)` with `since` the survey

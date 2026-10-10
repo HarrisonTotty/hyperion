@@ -17,6 +17,12 @@
 //! four children at the next level are four consecutive indices and a quadtree subtree is one run.
 //! The climate layer is one level coarser, L − 1, one record per four cells (Design note 17).
 //!
+//! # Months
+//!
+//! The climate's monthly fields are on the header's months: one, or twelve equal spans of the
+//! seasonal orbit's eccentric anomaly from periapsis ([`month_edges`]). A reader at a given time
+//! blends the two nearest with [`month_blend`] (Design note 8).
+//!
 //! # The datum and the units
 //!
 //! Heights, elevations and the sea level are measured in metres along the normal of the body's
@@ -73,6 +79,7 @@ mod cells;
 mod cover;
 mod crater;
 mod header;
+mod months;
 mod partial;
 
 pub use cells::{
@@ -85,6 +92,7 @@ pub use header::{
     BodyRef, BuildFieldHeaderError, ClimateModelKind, FieldHeader, FieldHeaderParts,
     PrecipitationSource,
 };
+pub use months::{MonthBlend, month_at, month_blend, month_edges, month_share};
 pub use partial::{InsertBlockError, PartialField};
 
 use hyperion_base::units::Metres;
@@ -369,8 +377,8 @@ pub enum BuildFieldError {
         /// The cell's index.
         cell: u32,
     },
-    /// A climate record carries a month past the header's year, or, in a one-month year, an
-    /// anomaly or a second wind.
+    /// A climate record carries a month past the header's year (an anomaly, a precipitation or a
+    /// wind that is not calm), or an anomaly in a one-month year.
     MonthOutsideYear {
         /// The climate cell's index.
         cell: u32,
@@ -470,7 +478,7 @@ impl CoarseField {
     ///
     /// [`BuildFieldError`] if the records are not one per cell, a record breaks a rule of its type
     /// (water below the ground, a boundary without a distance, a month outside the year, or a
-    /// one-month year with an anomaly or two winds), a crater is not a valid coarse crater of this
+    /// one-month year with an anomaly), a crater is not a valid coarse crater of this
     /// field or is not after its predecessor, or the reaches are too many to index.
     pub fn new(
         header: FieldHeader,
@@ -601,7 +609,8 @@ pub(crate) fn check_synthesis_cell(
 }
 
 /// Checks the climate record of climate cell `cell` against a year of `months` months, 1 or 12:
-/// no anomaly or precipitation past the year, and in a one-month year no anomaly and one wind.
+/// no anomaly or precipitation and only calm winds past the year, and in a one-month year no
+/// anomaly.
 ///
 /// # Errors
 ///
@@ -612,13 +621,12 @@ pub(crate) fn check_climate_cell(
     months: u8,
 ) -> Result<(), BuildFieldError> {
     let months = usize::from(months).min(record.month_anomaly.len());
-    let seasons_in_one_month = months == 1
-        && (record.month_anomaly[0] != 0 || record.wind[1..].iter().any(|&w| w != record.wind[0]));
     let outside = record.month_anomaly[months..].iter().any(|&a| a != 0)
         || record.month_precipitation[months..]
             .iter()
             .any(|&p| p != LogPrecipitation::NONE)
-        || seasons_in_one_month;
+        || record.wind[months..].iter().any(|&w| w != Wind::CALM)
+        || (months == 1 && record.month_anomaly[0] != 0);
     if outside {
         return Err(BuildFieldError::MonthOutsideYear { cell });
     }
@@ -1130,7 +1138,8 @@ mod tests {
     }
 
     /// Two craters of one centre cell and diameter share a key, so the second is refused; a
-    /// one-month year's four winds must be one; and the albedo scale is set alone, validated.
+    /// one-month year's eleven later winds must be calm; and the albedo scale is set alone,
+    /// validated.
     #[test]
     fn a_field_refuses_shared_crater_keys_and_seasonal_winds() {
         let one = synthetic_field(SyntheticWorld::OneCrater);
@@ -1145,15 +1154,27 @@ mod tests {
             Err(BuildFieldError::CratersUnsorted { crater: 1 })
         );
         let (header, synthesis, climate) = flat_parts();
-        let mut windy = climate;
-        windy[5].wind[2] = Wind {
+        assert!(
+            climate
+                .iter()
+                .all(|c| c.wind[1..].iter().all(|&w| w == Wind::CALM))
+        );
+        let breeze = Wind {
             azimuth: 64,
             speed: 100,
         };
-        assert_eq!(
-            CoarseField::new(header, synthesis, windy, vec![]),
-            Err(BuildFieldError::MonthOutsideYear { cell: 5 })
-        );
+        let mut windy = climate.clone();
+        windy[5].wind[0] = breeze;
+        assert!(CoarseField::new(header.clone(), synthesis.clone(), windy, vec![]).is_ok());
+        for month in 1..12 {
+            let mut windy = climate.clone();
+            windy[5].wind[month] = breeze;
+            assert_eq!(
+                CoarseField::new(header.clone(), synthesis.clone(), windy, vec![]),
+                Err(BuildFieldError::MonthOutsideYear { cell: 5 }),
+                "month {month}"
+            );
+        }
         let lit = one.clone().with_albedo_scale(Some(0.9)).unwrap();
         assert_eq!(lit.header().albedo_scale(), Some(0.9));
         assert_eq!(lit.synthesis(), one.synthesis());

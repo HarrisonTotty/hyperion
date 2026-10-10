@@ -176,7 +176,11 @@ moved.
    planet, which belongs to no universe: their header is `TEST_PLANET_VERSION` from
    `crates/hyperion-surface/src/lib.rs`, which a change to them bumps instead of
    `GENERATOR_VERSION`, and the script checks them against it; R09's, in its subdirectories
-   (`wire/`, `height/`), carry `GENERATOR_VERSION` like every other golden. The change must
+   (`wire/`, `field/`, `height/`), carry `GENERATOR_VERSION` like every other golden. Until
+   R09.T19 first sends a payload, a change to the codec's layout or to the `testing` worlds
+   re-blesses `tests/golden/wire/` at the current version with neither `GENERATOR_VERSION` nor
+   `SURFACE_PAYLOAD_FORMAT` bumped (ruling of 2026-10-09): the script's "not bumped" problem is
+   then expected, the commit names it, and the exception covers no other golden. The change must
    explain each changed value. A change it can't explain is a leak: something moved that shouldn't
    have, so go back to step 1 for it. An extension isn't automatically safe: if a
    new label pins a value the base already generated, and its computation changed, that is moved

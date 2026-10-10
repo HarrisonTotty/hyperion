@@ -81,9 +81,10 @@ pub struct ClimateSample {
     pub month_anomaly_k: [f64; 12],
     /// Each month's precipitation rate, kg m⁻² s⁻¹ (only the first is read in a one-month year).
     pub month_precipitation_kg_m2_s: [f64; 12],
-    /// Each quarter's prevailing wind: its speed and the direction it blows towards, clockwise
-    /// from local north (only the first is read in a one-month year, whose four are one).
-    pub wind: [(MetresPerSecond, Radians); 4],
+    /// Each month's 10 m wind: its mean speed and the direction its resultant blows towards,
+    /// clockwise from local north (only the first is read in a one-month year, whose eleven later
+    /// winds are calm).
+    pub wind: [(MetresPerSecond, Radians); 12],
 }
 
 impl ClimateSample {
@@ -94,7 +95,7 @@ impl ClimateSample {
             sea_level_temperature: temperature,
             month_anomaly_k: [0.0; 12],
             month_precipitation_kg_m2_s: [0.0; 12],
-            wind: [(MetresPerSecond::ZERO, Radians::ZERO); 4],
+            wind: [(MetresPerSecond::ZERO, Radians::ZERO); 12],
         }
     }
 }
@@ -129,9 +130,9 @@ type IceFn = Box<dyn Fn(&CellSite, Metres) -> f64>;
 
 /// Builds a [`CoarseField`] that is valid by construction (see the module documentation).
 ///
-/// [`FieldBuilder::new`] starts from a dry, airless, flat sphere with a one-month year, a
-/// still climate at 250 K, no fine relief and no craters, coarse or small (a crater density of
-/// zero): every other part is optional.
+/// [`FieldBuilder::new`] starts from a dry, airless, flat sphere with a one-month year on a
+/// circular orbit, a still climate at 250 K, no fine relief and no craters, coarse or small (a
+/// crater density of zero): every other part is optional.
 pub struct FieldBuilder {
     body: BodyRef,
     radius: Metres,
@@ -142,6 +143,7 @@ pub struct FieldBuilder {
     crater_params: CraterParams,
     climate_model: ClimateModelKind,
     months: u8,
+    season_eccentricity: f64,
     surface_age: Gigayears,
     surface_pressure: Pascals,
     plates: Vec<PlateSpec>,
@@ -174,10 +176,10 @@ const REACH_RIM_RADII: f64 = 2.54;
 const EJECTA_WIDTH: f64 = REACH_RIM_RADII - 1.0;
 
 impl FieldBuilder {
-    /// A dry, airless, flat sphere of volumetric radius `radius`, with a one-month year, a still
-    /// climate at 250 K, no fine relief and no craters: no coarse crater, and a crater density of
-    /// zero, so that the synthesis draws no small ones either (at the Moon's gravity, `k_target` 1).
-    /// The radius is checked by [`build`](Self::build).
+    /// A dry, airless, flat sphere of volumetric radius `radius`, with a one-month year on a
+    /// circular orbit, a still climate at 250 K, no fine relief and no craters: no coarse crater,
+    /// and a crater density of zero, so that the synthesis draws no small ones either (at the
+    /// Moon's gravity, `k_target` 1). The radius is checked by [`build`](Self::build).
     ///
     /// # Panics
     ///
@@ -202,6 +204,7 @@ impl FieldBuilder {
             .expect("the default crater contract is valid"),
             climate_model: ClimateModelKind::RadiativeEquilibrium,
             months: 1,
+            season_eccentricity: 0.0,
             surface_age: Gigayears::new(4.0),
             surface_pressure: Pascals::ZERO,
             plates: Vec::new(),
@@ -268,6 +271,14 @@ impl FieldBuilder {
     #[must_use]
     pub fn months(mut self, months: u8) -> Self {
         self.months = months;
+        self
+    }
+
+    /// The eccentricity of the seasonal orbit, whose twelve equal spans of eccentric anomaly are
+    /// the months (0 by default; 0 in a one-month year).
+    #[must_use]
+    pub fn season_eccentricity(mut self, eccentricity: f64) -> Self {
+        self.season_eccentricity = eccentricity;
         self
     }
 
@@ -354,8 +365,8 @@ impl FieldBuilder {
     /// # Panics
     ///
     /// If an input is out of its range:
-    /// - a radius that is not finite and positive, a figure of another radius, or months other
-    ///   than 1 or 12;
+    /// - a radius that is not finite and positive, a figure of another radius, months other than
+    ///   1 or 12, or a season eccentricity outside [0, 1) or not 0 in a one-month year;
     /// - exactly one plate or more than 256, two plates with one seed, or a plate whose crust is
     ///   neither continental nor oceanic;
     /// - a crater whose centre is not a finite unit vector, whose age is not finite and
@@ -441,6 +452,7 @@ impl FieldBuilder {
             realised_sigma_h: sigma_h,
             realised_relief: relief,
             months: self.months,
+            season_eccentricity: self.season_eccentricity,
             reference_temperature: reference,
             temperature_step,
             anomaly_step,
@@ -842,7 +854,7 @@ fn climate_steps(grid: &Grid, samples: &[ClimateSample], months: u8) -> (Kelvin,
 }
 
 /// `sample` quantised in `header`'s steps; past the header's months, and every anomaly of a
-/// one-month year, zero, and a one-month year's four winds its first.
+/// one-month year, zero, and every wind past them calm.
 fn quantise_climate(header: &FieldHeader, sample: &ClimateSample) -> ClimateCell {
     let months = usize::from(header.months());
     let mut cell = ClimateCell {
@@ -851,7 +863,7 @@ fn quantise_climate(header: &FieldHeader, sample: &ClimateSample) -> ClimateCell
             .expect("the step holds every temperature"),
         month_anomaly: [0; 12],
         month_precipitation: [LogPrecipitation::NONE; 12],
-        wind: [Wind::CALM; 4],
+        wind: [Wind::CALM; 12],
     };
     for month in 0..months {
         if months > 1 {
@@ -862,10 +874,9 @@ fn quantise_climate(header: &FieldHeader, sample: &ClimateSample) -> ClimateCell
         cell.month_precipitation[month] =
             LogPrecipitation::from_rate(sample.month_precipitation_kg_m2_s[month])
                 .expect("a synthetic rate has a code");
-    }
-    for (quarter, wind) in cell.wind.iter_mut().enumerate() {
-        let (speed, azimuth) = sample.wind[if months == 1 { 0 } else { quarter }];
-        *wind = Wind::from_velocity(speed, azimuth).expect("a synthetic wind has a code");
+        let (speed, azimuth) = sample.wind[month];
+        cell.wind[month] =
+            Wind::from_velocity(speed, azimuth).expect("a synthetic wind has a code");
     }
     cell
 }
@@ -1016,6 +1027,11 @@ mod tests {
             "Earth-like σ_h {sigma} m"
         );
         assert!(earth.synthesis().iter().any(|c| c.ice == 255));
+        assert_eq!(earth.header().months(), 12);
+        assert_same_bits(earth.header().season_eccentricity(), 0.016_711_23);
+        // Its winds turn with the rain band: the trades between the band's places in the year's
+        // first and seventh months blow from opposite hemispheres.
+        assert!(earth.climate_layer().iter().any(|c| c.wind[0] != c.wind[6]));
 
         let mars = synthetic_field(SyntheticWorld::MarsLike);
         assert_eq!(mars.header().level().get(), 7);

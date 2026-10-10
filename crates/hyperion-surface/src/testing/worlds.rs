@@ -82,6 +82,16 @@ const MARS_RADIUS_M: f64 = 3.3895e6;
 const MOON_RADIUS_M: f64 = 1.7374e6;
 const CERES_RADIUS_M: f64 = 4.697e5;
 
+/// The eccentricities of the synthetic worlds' seasonal orbits (Design note 8): the Earth–Moon
+/// barycentre's 0.016 711 23 and Mars's 0.093 394 10 at J2000 (Standish and Williams 1992, as
+/// JPL Solar System Dynamics' "Approximate Positions of the Planets", Table 1, gives them), the
+/// first also the Moon-like world's, since a moon's seasons are its planet's orbit's; and Ceres's
+/// 0.079 692 295, JPL's osculating orbit (Small-Body Database, solution 48, epoch JD 2461200.5
+/// TDB, read 2026-10-09).
+const EARTH_ORBIT_E: f64 = 0.016_711_23;
+const MARS_ORBIT_E: f64 = 0.093_394_10;
+const CERES_ORBIT_E: f64 = 0.079_692_295;
+
 /// Julian years a second, to turn rates in millimetres of water a year (kg m⁻² a⁻¹) into SI.
 const PER_YEAR: f64 = 1.0 / SECONDS_PER_JULIAN_YEAR;
 
@@ -152,29 +162,46 @@ fn bell(x: f64, width: f64) -> f64 {
     math::exp(-(x / width) * (x / width))
 }
 
-/// The phase of the year at the middle of month `m` (from 0), 2π (m + ½) ÷ 12, radians.
+/// The phase of the year at the middle of month `m` (from 0), 2π (m + ½) ÷ 12, radians: the
+/// seasonal orbit's eccentric anomaly at the middle of the month's span (Design note 8), in which
+/// the synthetic climates are closed forms, 0 at periapsis.
 fn season(m: u8) -> f64 {
     core::f64::consts::TAU * (f64::from(m) + 0.5) / 12.0
 }
 
-/// A three-cell wind pattern: trades below 30°, westerlies to 60°, polar easterlies beyond, each
-/// blowing equatorward or poleward as on Earth, at `speeds` metres a second, the same each
-/// quarter.
-fn three_cell_wind(lat: f64, speeds: [f64; 3]) -> [(MetresPerSecond, Radians); 4] {
-    let north = lat >= 0.0;
-    let degrees = lat.abs().to_degrees();
-    let (speed, towards) = if degrees < 30.0 {
-        (speeds[0], if north { 225.0 } else { 315.0 })
-    } else if degrees < 60.0 {
-        (speeds[1], if north { 45.0 } else { 135.0 })
-    } else {
-        (speeds[2], if north { 225.0 } else { 315.0 })
-    };
-    let wind = (
-        MetresPerSecond::new(speed),
-        Radians::new(f64::to_radians(towards)),
-    );
-    [wind; 4]
+/// Each month's three-cell wind pattern at latitude `lat` (radians), centred on that month's
+/// energy-flux equator, which lies `flux_equator_deg(m)` degrees north in month `m`: trades within
+/// 30° of it, westerlies to 60°, polar easterlies beyond, each blowing equatorward or poleward as
+/// on Earth, at `speeds` metres a second (Design note 8's pattern, illustrative).
+fn three_cell_wind(
+    lat: f64,
+    flux_equator_deg: impl Fn(u8) -> f64,
+    speeds: [f64; 3],
+) -> [(MetresPerSecond, Radians); 12] {
+    let mut winds = [(MetresPerSecond::ZERO, Radians::ZERO); 12];
+    for (m, wind) in (0_u8..).zip(&mut winds) {
+        let from_equator_deg = lat.to_degrees() - flux_equator_deg(m);
+        let north = from_equator_deg >= 0.0;
+        let degrees = from_equator_deg.abs();
+        let (speed, towards) = if degrees < 30.0 {
+            (speeds[0], if north { 225.0 } else { 315.0 })
+        } else if degrees < 60.0 {
+            (speeds[1], if north { 45.0 } else { 135.0 })
+        } else {
+            (speeds[2], if north { 225.0 } else { 315.0 })
+        };
+        *wind = (
+            MetresPerSecond::new(speed),
+            Radians::new(f64::to_radians(towards)),
+        );
+    }
+    winds
+}
+
+/// The Earth-like world's rain band, the energy-flux equator, in month `m`, degrees north: it
+/// follows the sun north of the equator in the year's middle.
+fn earth_flux_equator_deg(m: u8) -> f64 {
+    6.0 - 8.0 * math::cos(season(m))
 }
 
 /// The ten plates of the Earth-like world: seed latitude and longitude, crust, Euler pole latitude
@@ -236,12 +263,12 @@ fn earth_climate(dir: [f64; 3]) -> ClimateSample {
         sample.month_anomaly_k[usize::from(m)] = -16.0 * s * math::cos(season(m));
         // A rain band that follows the sun north of the equator in the year's middle, storm
         // tracks near 48°, and dry belts between.
-        let itcz = 6.0 - 8.0 * math::cos(season(m));
+        let itcz = earth_flux_equator_deg(m);
         let mm =
             2_200.0 * bell(degrees - itcz, 9.0) + 900.0 * bell(degrees.abs() - 48.0, 12.0) + 30.0;
         sample.month_precipitation_kg_m2_s[usize::from(m)] = mm * PER_YEAR;
     }
-    sample.wind = three_cell_wind(lat, [6.0, 8.0, 4.0]);
+    sample.wind = three_cell_wind(lat, earth_flux_equator_deg, [6.0, 8.0, 4.0]);
     sample
 }
 
@@ -284,6 +311,7 @@ fn earth_like() -> CoarseField {
         )
         .climate_model(ClimateModelKind::EnergyBalance)
         .months(12)
+        .season_eccentricity(EARTH_ORBIT_E)
         .surface_age(Gigayears::new(2.5))
         .surface_pressure(Pascals::new(101_325.0))
         .plates(plates)
@@ -363,7 +391,9 @@ fn mars_climate(dir: [f64; 3]) -> ClimateSample {
     for m in 0..12_u8 {
         sample.month_anomaly_k[usize::from(m)] = -30.0 * s * math::cos(season(m));
     }
-    sample.wind = three_cell_wind(lat, [4.0, 6.0, 3.0]);
+    // An illustrative flux equator at the subsolar latitude of the solstices, Mars's obliquity of
+    // 25.19° (NASA's Mars fact sheet), in the summer hemisphere: the south at periapsis.
+    sample.wind = three_cell_wind(lat, |m| -25.19 * math::cos(season(m)), [4.0, 6.0, 3.0]);
     sample
 }
 
@@ -388,6 +418,7 @@ fn mars_like() -> CoarseField {
         )
         .climate_model(ClimateModelKind::EnergyBalance)
         .months(12)
+        .season_eccentricity(MARS_ORBIT_E)
         .surface_age(Gigayears::new(3.7))
         .surface_pressure(Pascals::new(610.0))
         .crust(|p| {
@@ -464,6 +495,7 @@ fn moon_like() -> CoarseField {
         )
         .climate_model(ClimateModelKind::RadiativeEquilibrium)
         .months(12)
+        .season_eccentricity(EARTH_ORBIT_E)
         .surface_age(Gigayears::new(4.4))
         .crust(|p| {
             let mare = arc(p, imbrium()) < 0.25
@@ -527,6 +559,7 @@ fn ceres_like() -> CoarseField {
         )
         .climate_model(ClimateModelKind::RadiativeEquilibrium)
         .months(12)
+        .season_eccentricity(CERES_ORBIT_E)
         .surface_age(Gigayears::new(3.0))
         .elevation(|site| {
             Metres::new(undulation(
