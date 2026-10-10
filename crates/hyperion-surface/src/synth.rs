@@ -471,11 +471,13 @@ impl SpectrumShape {
     /// An ice-rich crust's shape, an ice surface or an ice shell: β₁ 1.8 to a break at 1 km, then
     /// β₂ 2.6 (`decision-r09-t5.md` item 2).
     ///
-    /// Europa's limb profiles give β about 2 at 10–60 km and its stereo models 1.4–1.8 at 1–5 km,
-    /// with "a break in slope at about 1 km" and a Hurst exponent of 0.7–0.8 below it, β 2.4–2.6
-    /// (Nimmo and Schenk 2008, LPSC XXXIX, abstract 1464; Schenk and Nimmo 2017, Europa Deep Dive
-    /// I, LPI Contrib. 2048, abstract 7015; Steinbrügge et al. 2020, Icarus 343, 113669).
-    /// Medium-low confidence: one body's measurements.
+    /// Europa's roughness takes one figure above the break, β₁ 1.8 (a Hurst exponent of 0.4) from
+    /// 70 km down to it, between its limb profiles' β of about 2 at 10–60 km and its stereo
+    /// models' 1.4–1.8 at 1–5 km; with "a break in slope at about 1 km" and a Hurst exponent of
+    /// 0.7–0.8 below it, β 2.4–2.6 (Nimmo and Schenk 2008, LPSC XXXIX, abstract 1464; Schenk and
+    /// Nimmo 2017, Europa Deep Dive I, LPI Contrib. 2048, abstract 7015; Steinbrügge et al. 2020,
+    /// Icarus 343, 113669; the ruling's reading). Medium-low confidence: one body's
+    /// measurements.
     pub const ICE_RICH: Self = Self {
         exponent: 1.8,
         break_wavelength: Metres::new(1_000.0),
@@ -516,11 +518,11 @@ pub const STRUCTURAL_RMS_STAGNANT_LID: Metres = Metres::new(60.0);
 /// no gravity term (`decision-r09-t5.md` item 3).
 ///
 /// Europa's ridged plains have an RMS deviation of 35–50 m over a 1 km baseline (Nimmo and Schenk
-/// 2008, LPSC XXXIX, abstract 1464, Fig. 5a; its Table 1 gives 5.6–8.5 m at 100 m) and a Hurst
-/// exponent of about 0.3 out to 70 km (Schenk and Nimmo 2017, LPI Contrib. 2048, abstract 7015,
-/// Fig. 1). With [`SpectrumShape::ICE_RICH`] it gives adirectional RMS slopes (√2 times a
-/// profile's) of 2.0°, 5.7° and 10.3° over 1 km, 100 m and 10 m, against Europa's 2.8–4.1°,
-/// 4.5–6.9° and 8.5–13° (the last extrapolated). Medium-low confidence.
+/// 2008, LPSC XXXIX, abstract 1464, Fig. 5a; its Table 1 gives 5.6–8.5 m at 100 m), and a Hurst
+/// exponent of about 0.4 from 1 to 70 km, the ice shape's β₁ of 1.8 ([`SpectrumShape::ICE_RICH`]).
+/// With that shape it gives adirectional RMS slopes (√2 times a profile's) of 2.0°, 5.7° and
+/// 10.3° over 1 km, 100 m and 10 m, against Europa's 2.8–4.1°, 4.5–6.9° and 8.5–13° (the last
+/// extrapolated). Medium-low confidence.
 pub const STRUCTURAL_RMS_ICE_RICH: Metres = Metres::new(50.0);
 
 impl BandSpectrum {

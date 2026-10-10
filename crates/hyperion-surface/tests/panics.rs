@@ -31,7 +31,8 @@ use hyperion_surface::synth::channels::{
 };
 use hyperion_surface::synth::interp::{CellValues, interpolate};
 use hyperion_surface::synth::relief::{
-    Relief, finest_octave, nyquist_degree, octave_bound, octave_rms, octave_spacing,
+    PLAIN_STRUCTURE, RIDGED_STRUCTURE, Relief, finest_octave, nyquist_degree, octave_bound,
+    octave_rms, octave_spacing,
 };
 use hyperion_surface::synth::{BandSpectrum, SpectrumShape, unresolved_variance};
 use hyperion_surface::test_planet::{TEST_PLANET, octaves};
@@ -374,6 +375,24 @@ fn octave_0_has_no_bound() {
 }
 
 #[test]
+#[should_panic(expected = "an octave index is 0 to 31")]
+fn an_octave_past_31_has_no_bound() {
+    let _ = octave_bound(&spectrum(), 32);
+}
+
+#[test]
+#[should_panic(expected = "a lag must be non-negative")]
+fn a_structure_function_at_a_negative_lag_is_refused() {
+    let _ = PLAIN_STRUCTURE.at(-1.0);
+}
+
+#[test]
+#[should_panic(expected = "a lag must be non-negative")]
+fn a_structure_function_at_no_lag_is_refused() {
+    let _ = RIDGED_STRUCTURE.at(f64::NAN);
+}
+
+#[test]
 #[should_panic(expected = "degrees start at 1")]
 fn the_variance_from_degree_0_is_refused() {
     let _ = spectrum().variance_from_degree(0);
@@ -454,6 +473,22 @@ fn a_relief_octave_rms_past_octave_31_is_refused() {
     let field = level_five_field();
     let relief = Relief::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
     let _ = relief.octave_rms(32);
+}
+
+#[test]
+#[should_panic(expected = "index out of bounds")]
+fn a_relief_ridged_share_past_octave_31_is_refused() {
+    let field = level_five_field();
+    let relief = Relief::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let _ = relief.ridged_share(32);
+}
+
+#[test]
+#[should_panic(expected = "index out of bounds")]
+fn a_relief_belt_factor_past_octave_31_is_refused() {
+    let field = level_five_field();
+    let relief = Relief::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let _ = relief.belt_factor(32);
 }
 
 #[test]

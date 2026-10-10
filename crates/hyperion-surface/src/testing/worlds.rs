@@ -484,10 +484,10 @@ const OLDEST_FLOOR_MYR: f64 = 200.0;
 /// 175 m ÷ (1 + e^((u − 25) ÷ 4)) + 70 m ÷ (1 + e^((u − 8) ÷ 2)), the ruling's logistic fit to the
 /// Table 2 of Goff, Smith and Marks 2004 (Oceanography 17(1), 24–37, doi:10.5670/oceanog.2004.64,
 /// p. 30; its rates full, halved here): 223 m at a half-rate of 14 mm a year (the table's 235.8 m
-/// at a full 28; the ruling quotes 232 m, which this law reaches at 12), 191 m at 20, 62 m at 37.5
-/// and 55 m above 55, with an ultraslow term for the 280–320 m of Sloan, Sauter, Goff and Cannat
-/// 2012 (G³ 13, doi:10.1029/2011GC003850), 286 m at 5 (`decision-r09-t5.md` item 5). Medium
-/// confidence. R09.T12.a's, written here as the Earth-like world's illustrative closed form.
+/// at a full 28), 191 m at 20, 62 m at 37.5 and 55 m above 55, with an ultraslow term for the
+/// 280–320 m of Sloan, Sauter, Goff and Cannat 2012 (G³ 13, doi:10.1029/2011GC003850), 286 m at
+/// 5 (`decision-r09-t5.md` item 5). Medium confidence. R09.T12.a's, written here as the Earth-like
+/// world's illustrative closed form.
 #[must_use]
 fn basement_hills_m(u: f64) -> f64 {
     55.0 + 175.0 / (1.0 + math::exp((u - 25.0) / 4.0)) + 70.0 / (1.0 + math::exp((u - 8.0) / 2.0))

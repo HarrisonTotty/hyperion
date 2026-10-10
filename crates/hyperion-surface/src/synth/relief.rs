@@ -45,10 +45,11 @@
 //! that a style changes smoothly across cells and the relief stays C¹ wherever the noise is. The
 //! amplitudes are absolute ratios to the body class's reference ground, whose law the spectrum
 //! is, so a world with more mountain belts is rougher and one with more abyssal plain smoother
-//! (`decision-r09-t5.md` item 1). Octave m's contribution is a `σ_m` `t_m`, with
+//! (`decision-r09-t5.md` item 1). Octave m's contribution is a `g_m`^b `σ_m` `t_m`, with
 //!
-//! > `t_m` = cos θ · `n̂_m` + sin θ · `r̃_m`,  θ = (π ÷ 2) b,
+//! > `t_m` = cos `θ_m` · `n̂_m` + sin `θ_m` · `r̃_m`,  `θ_m` = (π ÷ 2) b `ρ_m`,
 //!
+//! `ρ_m` the octave's ridged share and `g_m` its belt factor (below, "The belts"), and
 //! n̂ = n ÷ `σ_noise` the octave's noise at unit RMS and r̃ its ridged multifractal term. That is
 //! the ridged transform r̂ = (r − `μ_r`) ÷ `σ_r` of the raw ridge r = 1 − √(n² + ε²), its pinned
 //! mean removed and its pinned RMS divided out (R05's [`RIDGE_MEAN`] and [`RIDGE_RMS`]), weighted
@@ -61,7 +62,32 @@
 //! reflecting a point through its lattice cell's centre negates the noise with the corners'
 //! gradients exchanged, which are drawn alike, so n̂ and the even r̂ are uncorrelated. The rotation
 //! therefore keeps `t_m` at zero mean and unit variance in every style: the styles move the
-//! relief's variance about the body only through a.
+//! relief's variance about the body only through a and, on a belt, its shape `g_m`^b.
+//!
+//! # The belts
+//!
+//! A mountain belt's ridged term lives above the spectrum's break, and a belt has its own
+//! spectral shape (`decision-r09-t5.md` item 7). Both are functions of octave m's lattice spacing
+//! in break wavelengths, x = `λ_m` ÷ `λ_b` = √(3π ÷ 2) `l_b` ÷ (2π 2^m), which is free of the
+//! radius:
+//!
+//! - the ridged share `ρ_m`, a cubic smoothstep in ln x from 0 at x = ½ and below to 1 at x = 1
+//!   and above. The ridges and valleys are a belt's dissected kilometre-scale structure; below the
+//!   first-order valley spacing its hillslopes are planar, so the octaves there are plain noise in
+//!   every style. At most one octave lies strictly between, since the spacings halve.
+//! - the belt factor `g_m` = G^bump(x) × min(x, 1)^(δ ÷ 2), with bump(x) = exp(−(ln(x ÷ s))² ÷
+//!   (2w²)), G = [`BELT_VALLEY_GAIN`], s = [`BELT_VALLEY_SCALE`], w = [`BELT_VALLEY_WIDTH`] and
+//!   δ = [`BELT_HILLSLOPE_STEEPENING`]: the belt's relief lifted at its ridge–valley wavelength,
+//!   and its spectrum δ steeper than the reference's below the break, so that its slopes hold near
+//!   threshold rather than growing towards the band limit. It enters as `g_m`^b = exp(b ln `g_m`),
+//!   exactly 1 at b = 0, so that every style off a belt is the plain law's, bit for bit.
+//!
+//! On the Earth-like world's spectrum a full belt (a = 2.5, b = 1) has adirectional RMS slopes of
+//! 37.9°, 37.5°, 36.1° and 26.0° over 1 m, 10 m, 100 m and 1 km (the ruling's 37.6°, 37.2°, 35.9°
+//! and 26.0°), inside the cores of real belts ([`BELT_VALLEY_GAIN`]); with the ridged term at
+//! every octave and no shape it measured 52.3°, 47.1° and 37.7° over 1, 10 and 100 m. The plain and ridged terms have their own
+//! unit-variance structure functions, pinned as tables ([`PLAIN_STRUCTURE`],
+//! [`RIDGED_STRUCTURE`]), which the closed forms sum octave by octave.
 //!
 //! # The warp
 //!
@@ -76,17 +102,19 @@
 //! # Bounds and gradient
 //!
 //! |`t_m`| is at most `T_MAX` = √((B ÷ `σ_noise`)² + (r̂(B) ÷ W)²) = 8.770, reached at n = −B with
-//! the weight 1, where both terms are negative, and the interpolated amplitude never leaves the
-//! cells' range, so octave m never contributes more than [`octave_bound`], [`MAX_AMPLITUDE`] ×
-//! `σ_m` × `T_MAX`. The gradient is analytic, through the warp's Jacobian and the styles'
-//! gradients, and is returned as R09.T4's base elevation returns its own: the gradient of
+//! the weight 1, where both terms are negative, and the interpolated amplitude and belt weight
+//! never leave the cells' ranges, so that `g_m`^b is at most max(1, `g_m`) and octave m never
+//! contributes more than [`octave_bound`], [`MAX_AMPLITUDE`] × max(1, `g_m`) × `σ_m` × `T_MAX`.
+//! The gradient is analytic, through the warp's Jacobian and the styles' gradients (the belt
+//! factor's included: ∇(`g_m`^b) = `g_m`^b ln `g_m` ∇b), and is returned as R09.T4's base
+//! elevation returns its own: the gradient of
 //! H(P) = h(M⁻¹P ÷ |M⁻¹P|), the relief as a function of direction, at the spheroid point, so that
 //! the two add.
 //!
 //! [`RIDGE_MEAN`]: crate::noise::RIDGE_MEAN
 //! [`RIDGE_RMS`]: crate::noise::RIDGE_RMS
 
-use core::f64::consts::{FRAC_PI_2, PI};
+use core::f64::consts::{FRAC_PI_2, LN_2, PI};
 
 use hyperion_base::math;
 use hyperion_base::rng::DetailSeed;
@@ -228,14 +256,64 @@ fn t_max() -> f64 {
 }
 
 /// The largest height octave `m` can contribute anywhere on a body of this spectrum, metres:
-/// [`MAX_AMPLITUDE`] × `σ_m` × `T_MAX` (see the module documentation), its stated bound.
+/// [`MAX_AMPLITUDE`] × max(1, `g_m`) × `σ_m` × `T_MAX` (see the module documentation), its stated
+/// bound, with `g_m` the octave's belt factor, which needs only the spectrum's break degree.
 ///
 /// # Panics
 ///
-/// If `m` is 0 or above 40.
+/// If `m` is 0 or above 31.
 #[must_use]
 pub fn octave_bound(spectrum: &BandSpectrum, m: u8) -> Metres {
-    Metres::new(MAX_AMPLITUDE * octave_rms(spectrum, m).value() * t_max())
+    let rms = octave_rms(spectrum, m).value();
+    let lift = num::max(1.0, belt_factor(break_ratio(spectrum, m)));
+    // In the order of an octave's height, a × σ × g^b × t, so that rounding keeps it inside.
+    Metres::new(MAX_AMPLITUDE * rms * lift * t_max())
+}
+
+/// Octave `m`'s lattice spacing in break wavelengths on a body of spectrum `spectrum`, x =
+/// `λ_m` ÷ `λ_b` = √(3π ÷ 2) `l_b` ÷ (2π 2^m), with `λ_b` = 2πR ÷ `l_b`: free of the radius (see
+/// the module documentation, "The belts").
+///
+/// # Panics
+///
+/// If `m` is 32 or more.
+#[must_use]
+fn break_ratio(spectrum: &BandSpectrum, m: u8) -> f64 {
+    spacing_in_radii(m) * spectrum.break_degree() / (2.0 * PI)
+}
+
+/// The share `ρ` of the ridged term in a belt's octave whose lattice spacing is `ratio` break
+/// wavelengths: 0 at ½ and below, 1 at 1 and above, and the cubic smoothstep in ln λ between
+/// (`decision-r09-t5.md` item 7). Octave m's mix is `θ_m` = (π ÷ 2) b `ρ_m`.
+#[must_use]
+fn ridged_share(ratio: f64) -> f64 {
+    if ratio >= 1.0 {
+        1.0
+    } else if ratio <= 0.5 {
+        0.0
+    } else {
+        let t = math::ln(2.0 * ratio) / LN_2;
+        t * t * (3.0 - 2.0 * t)
+    }
+}
+
+/// ln g, the logarithm of the belt factor of an octave whose lattice spacing is `ratio` break
+/// wavelengths: bump × ln G + (δ ÷ 2) ln min(x, 1), with bump = exp(−(ln(x ÷ s))² ÷ (2w²))
+/// (`decision-r09-t5.md` item 7; see the module documentation, "The belts").
+#[must_use]
+fn belt_log_factor(ratio: f64) -> f64 {
+    let off = math::ln(ratio / BELT_VALLEY_SCALE) / BELT_VALLEY_WIDTH;
+    let bump = math::exp(-0.5 * off * off);
+    let steepening = 0.5 * BELT_HILLSLOPE_STEEPENING * math::ln(num::min(ratio, 1.0));
+    bump * math::ln(BELT_VALLEY_GAIN) + steepening
+}
+
+/// The belt factor g of an octave whose lattice spacing is `ratio` break wavelengths,
+/// G^bump(x) × min(x, 1)^(δ ÷ 2): 1.8 at 1.5 breaks, tending to 1 far above the break and falling
+/// as x^0.2 far below it ([`belt_log_factor`]).
+#[must_use]
+fn belt_factor(ratio: f64) -> f64 {
+    math::exp(belt_log_factor(ratio))
 }
 
 /// The expected variance of the structural relief finer than a field's coarse cells, at the
@@ -249,18 +327,22 @@ pub fn octave_bound(spectrum: &BandSpectrum, m: u8) -> Metres {
 /// cells all have the reference style, less on one with more plain than belt. Nothing normalises
 /// it away, so a world with more belts is rougher: the coarse pass (R09.T12.e) books ⟨a²⟩ times
 /// this in `σ_h`'s budget, with ⟨a²⟩ from its own quadrature of the interpolated amplitude
-/// (`decision-r09-t5.md` item 1). The octaves stop at the band limit, far below the break, which
-/// leaves out V₁ `l_b`^(β₂−β₁) T(β₂, `l_N(finest)`) of it: under 10⁻⁶ of it on the synthetic
-/// worlds.
+/// (`decision-r09-t5.md` item 1). A belt's own shape lifts it further, octave by octave: where
+/// the belt weight is b, the realised variance is a² Σ `g_m`^(2b) `σ_m`², not a² Σ `σ_m`² (item 7;
+/// the module documentation's "The belts"), which
+/// [`unresolved_variance`](super::unresolved_variance) sums. The octaves stop at the band limit,
+/// far below the break, which leaves out V₁ `l_b`^(β₂−β₁) T(β₂, `l_N(finest)`) of it: under 10⁻⁶
+/// of it on the synthetic worlds.
 #[must_use]
 pub fn local_variance(spectrum: &BandSpectrum, level: CoarseLevel) -> SquareMetres {
     spectrum.variance_from_degree(nyquist_degree(level.get()))
 }
 
 /// The relief's variance in wavelengths shorter than `finer_than` at `cell`, from the cell's own
-/// style: a² Σ V(l) over the octaves' degrees whose wavelength 2πR ÷ l is shorter, from the
-/// coarse level's Nyquist degree to the finest octave's; `None` where `field` does not hold the
-/// cell (Design note 18).
+/// style: Σ (a `g_m`^b)² Σ V(l) over each octave m's degrees whose wavelength 2πR ÷ l is shorter,
+/// from the coarse level's Nyquist degree to the finest octave's, with `g_m` the octave's belt
+/// factor (`decision-r09-t5.md` item 7); `None` where `field` does not hold the cell (Design note
+/// 18).
 ///
 /// The synthesis blends the styles of neighbouring cells, so within a cell or so of a change of
 /// style the realised variance lies between the cells'.
@@ -287,16 +369,18 @@ pub(crate) fn unresolved_relief_variance(
     );
     let style = ReliefStyle::of(field.cell(cell)?);
     let radius = header.radius().value();
-    let start = nyquist_degree(header.level().get());
-    let end = nyquist_degree(finest_octave(header.radius()));
+    let spectrum = header.spectrum();
+    let first = first_octave(header.level());
+    let finest = finest_octave(header.radius());
+    let end = nyquist_degree(finest);
     // The first degree whose wavelength 2πR ÷ l is shorter than w.
     let shorter = (2.0 * PI * radius / w).floor() + 1.0;
     #[expect(
         clippy::cast_precision_loss,
         reason = "a Nyquist degree is below 2^42, exact in f64"
     )]
-    let finest = end as f64;
-    if shorter >= finest {
+    let end_degree = end as f64;
+    if shorter >= end_degree {
         return Some(SquareMetres::ZERO);
     }
     #[expect(
@@ -305,14 +389,20 @@ pub(crate) fn unresolved_relief_variance(
         reason = "a positive integer below the finest Nyquist degree, under 2^42"
     )]
     let shorter = shorter as u64;
-    // A body too small for any octave (its finest coarser than its coarse cells) has none.
-    let from = start.max(shorter);
-    if from >= end {
-        return Some(SquareMetres::ZERO);
+    // Octave by octave, in octave order, each band times its own (a g^b)²; a body too small for
+    // any octave (its finest coarser than its coarse cells) has none.
+    let mut variance = 0.0;
+    for m in first..=finest {
+        let from = nyquist_degree(m - 1).max(shorter);
+        let to = nyquist_degree(m);
+        if from >= to {
+            continue;
+        }
+        let lift = math::exp(style.belt * belt_log_factor(break_ratio(spectrum, m)));
+        let a = style.amplitude * lift;
+        variance += a * a * spectrum.band_variance(from, to).value();
     }
-    let band = header.spectrum().band_variance(from, end);
-    let a = style.amplitude;
-    Some(SquareMetres::new(a * a * band.value()))
+    Some(SquareMetres::new(variance))
 }
 
 /// The RMS of the ridged multifractal's weight w over space, `√E[w²]`: 0.719 88 measured over 10⁷
@@ -350,6 +440,94 @@ fn ridge(n: f64) -> (f64, f64) {
 fn ridged(n: f64) -> f64 {
     (ridge(n).0 - RIDGE_MEAN) / RIDGE_RMS
 }
+
+/// The lags of a [`UnitStructure`]'s table, in lattice spacings of its octave: 0.01 to 3, the
+/// ruling's (`decision-r09-t5.md` item 7).
+pub const STRUCTURE_LAGS: [f64; 12] = [
+    0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
+];
+
+/// One of an octave's two terms' unit-variance structure function, D(r) ÷ σ² =
+/// E[(t(p + r e) − t(p))²] for the term t at unit RMS, at a lag r in the octave's lattice spacings
+/// along a tangent e: pinned as a table at [`STRUCTURE_LAGS`] (`decision-r09-t5.md` item 7).
+///
+/// The closed forms of the relief's structure function (R09.T8's `structure_function` and
+/// `unresolved_rms`) sum it octave by octave, Σ (a `g_m`^b `σ_m`)² [cos² `θ_m` `D̂_p`(Δ ÷ `λ_m`) +
+/// sin² `θ_m` `D̂_r`(Δ ÷ `λ_m`)] with `D̂_p` [`PLAIN_STRUCTURE`] and `D̂_r` [`RIDGED_STRUCTURE`]
+/// ([`Relief::ridged_share`], [`Relief::belt_factor`]): the two terms are uncorrelated (the module
+/// documentation), and so are the octaves, whose lattices are independent. The ridged term is the
+/// weighted one of every octave but the first, which is unweighted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitStructure {
+    values: [f64; STRUCTURE_LAGS.len()],
+}
+
+impl UnitStructure {
+    /// D(r) ÷ σ² at a lag of `spacings` lattice spacings: k r² below the first pinned lag, the
+    /// small-lag law of a term with a gradient ([`small_lag_slope`](Self::small_lag_slope)); a
+    /// power law between pinned lags, which keeps D ∝ r² where the table does (its local exponent
+    /// is 2.0 below 0.05 spacings); and the last pinned value from 3 on, the value 2 of two
+    /// uncorrelated samples to a per mille.
+    ///
+    /// # Panics
+    ///
+    /// If `spacings` is negative or NaN.
+    #[must_use]
+    pub fn at(&self, spacings: f64) -> f64 {
+        assert!(
+            spacings >= 0.0,
+            "a lag must be non-negative, got {spacings} spacings"
+        );
+        let first = STRUCTURE_LAGS[0];
+        if spacings < first {
+            let r = spacings / first;
+            return self.values[0] * r * r;
+        }
+        for (k, pair) in STRUCTURE_LAGS.windows(2).enumerate() {
+            let (from, to) = (pair[0], pair[1]);
+            if spacings < to {
+                let (low, high) = (self.values[k], self.values[k + 1]);
+                let exponent = math::ln(high / low) / math::ln(to / from);
+                return low * math::powf(spacings / from, exponent);
+            }
+        }
+        self.values[STRUCTURE_LAGS.len() - 1]
+    }
+
+    /// The small-lag slope k of D(r) ÷ σ² = k r², per square lattice spacing: the variance of the
+    /// term's gradient along a tangent, times the spacing squared, from the table at its first lag.
+    #[must_use]
+    pub fn small_lag_slope(&self) -> f64 {
+        let first = STRUCTURE_LAGS[0];
+        self.values[0] / (first * first)
+    }
+}
+
+/// The plain term n̂'s unit-variance structure function ([`UnitStructure`]): D(r) ÷ σ² at
+/// [`STRUCTURE_LAGS`], measured on R05's noise basis over 4 × 10⁶ samples (R09.T5's second
+/// follow-up; `the_terms_structure_functions_are_pinned` re-measures it, slow). It rises as
+/// (2.61 r)² at small lags, the noise's gradient along a tangent at unit RMS being 2.61 per
+/// lattice spacing, and overshoots 2 at about a spacing. The ruling's replica of the noise
+/// measured 2% more at small lags (its 0.0173 at 0.05 spacings), normalised by its own RMS.
+pub const PLAIN_STRUCTURE: UnitStructure = UnitStructure {
+    values: [
+        6.795e-4, 2.717e-3, 0.01693, 0.06698, 0.2567, 0.5385, 1.209, 1.867, 2.118, 2.032, 2.000,
+        1.998,
+    ],
+};
+
+/// The weighted ridged term r̃'s unit-variance structure function ([`UnitStructure`]): D(r) ÷ σ²
+/// at [`STRUCTURE_LAGS`], measured on R05's noise basis with the octave above's weight over
+/// 4 × 10⁶ samples (R09.T5's second follow-up; `the_terms_structure_functions_are_pinned`
+/// re-measures it, slow). At small lags it is 2.7 times the plain term's, the ridged term's
+/// gradient variance being that much larger at the same RMS height, which is why a belt's ridged
+/// octaves stop at the break; it reaches 2 by three quarters of a spacing.
+pub const RIDGED_STRUCTURE: UnitStructure = UnitStructure {
+    values: [
+        1.822e-3, 7.272e-3, 0.04482, 0.1714, 0.5911, 1.085, 1.808, 2.026, 2.001, 1.998, 2.003,
+        2.000,
+    ],
+};
 
 /// Octave `m` of the body of detail seed `seed`.
 #[must_use]
@@ -406,12 +584,13 @@ pub const ACTIVE_AMPLITUDE: f64 = 1.0;
 /// relief H ([`SynthesisCell::hill_relief`]): the exponent ([`HILL_AMPLITUDE_EXPONENT`]) and the
 /// reference reconcile two of GMRT's measures of the floor against Earth's global mean (the grid
 /// of Ryan et al. 2009, G³ 10, Q03014, doi:10.1029/2008GC002332, at 61 m; R09.T5's science check
-/// and the ruling's). On the slow-spreading Mid-Atlantic Ridge's flank, H 232 m, the floor
-/// measures 2.3 of the reference in 10 km windows and 1.35 in its 122 m slopes, and this gives
-/// 1.71; on the fast East Pacific Rise's, H 55–62 m, 0.8 and 0.78, and this gives 0.72–0.77; on the
-/// old fast Pacific floor, draped to 28 m, 0.6 in its 122 m slopes, and this gives 0.48. Goff 1991
-/// (JGR 96, 21713, doi:10.1029/91JB02275) finds the slowest spreading the roughest. A style per
-/// band is the lever if R10 finds the slow floor's 10 km relief short. Medium confidence.
+/// and the ruling's). On the slow-spreading Mid-Atlantic Ridge's flank, H 223 m (item 5's H₀ at a
+/// half-rate of 14 mm a⁻¹), the floor measures 2.3 of the reference in 10 km windows and 1.35 in
+/// its 122 m slopes, and this gives 1.67; on the fast East Pacific Rise's, H 55–62 m, 0.8 and
+/// 0.78, and this gives 0.72–0.77; on the old fast Pacific floor, draped to 28 m, 0.6 in its
+/// 122 m slopes, and this gives 0.48. Goff 1991 (JGR 96, 21713, doi:10.1029/91JB02275) finds the
+/// slowest spreading the roughest. A style per band is the lever if R10 finds the slow floor's
+/// 10 km relief short. Medium confidence.
 pub const H_REF: Metres = Metres::new(95.0);
 
 /// The exponent of oceanic crust's amplitude in its hill relief, 0.6 ([`H_REF`]).
@@ -447,6 +626,50 @@ pub const PROVINCE_AMPLITUDE: f64 = 0.25;
 /// The largest amplitude factor any style has: the octaves' bounds use it. The sea floor's hills
 /// are capped at it.
 pub const MAX_AMPLITUDE: f64 = BELT_AMPLITUDE;
+
+/// A mountain belt's gain at its ridge–valley wavelength, 1.8: its belt factor's peak, at
+/// [`BELT_VALLEY_SCALE`] break wavelengths (`decision-r09-t5.md` item 7; the module
+/// documentation's "The belts").
+///
+/// Real belts concentrate their relief at the ridge–valley wavelength and hold their hillslopes
+/// near threshold below it. Eight tiles of SRTM's 1″ grid (Farr et al. 2007, Rev. Geophys. 45,
+/// RG2004, doi:10.1029/2005RG000183) over the Khumbu, Annapurna, the Yarlung Tsangpo gorge,
+/// Aconcagua, southern Peru, Valais and Uri, in 0.1° blocks of at least 2,000 m relief (the cores
+/// of active belts), have adirectional RMS slopes of 34.8–41.5° at 31 m, 32.0–38.6° at 93 m,
+/// 29.0–34.8° at 309 m and 23.2–28.6° at 1 km, and a mean slope that barely changes from 31 to
+/// 300 m (the ruling's measurements). That is the threshold behaviour Montgomery and Brandon 2002
+/// find in a 10 m DEM (EPSL 201, 481, doi:10.1016/S0012-821X(02)00725-2, p. 483): erosion rate
+/// tracks mean slope up to about 25° and is uncorrelated with it above 30°, with a limiting slope
+/// of 40° in their fit. With the ridged term at every octave and no shape, a full belt measured
+/// 52.3° at 1 m and 37.7° at 100 m (the ridged term carries 2.7 times the plain term's gradient
+/// variance at small lags), too steep at the finest scales and too smooth at 1 km.
+///
+/// The gain, its scale and width ([`BELT_VALLEY_WIDTH`]) and the steepening below the break
+/// ([`BELT_HILLSLOPE_STEEPENING`]) are the ruling's, fitted to those cores on a planar replica of
+/// these octaves, which gives a full belt 37.6°, 37.2°, 35.9° and 26.0° over 1 m, 10 m, 100 m and
+/// 1 km, and 3.2 times the reference style's RMS in 35 km windows, inside the 2.1–3.4 that sets
+/// [`BELT_AMPLITUDE`]; these octaves measure 37.9°, 37.5°, 36.1° and 26.0°, 37.1° at 31 m and
+/// 36.2° at 93 m, and 3.14 times the reference in 35 km windows (R09.T5's second follow-up). Tied to the break wavelength, they carry no gravity term, and belts exist
+/// only on mobile lids. Medium confidence: metre-scale lidar of threshold ranges would test the
+/// 1 m figure (the plan's Risks).
+pub const BELT_VALLEY_GAIN: f64 = 1.8;
+
+/// The wavelength of a belt's ridge–valley relief, in break wavelengths: 1.5, where its belt
+/// factor peaks at [`BELT_VALLEY_GAIN`], 3 km on a silicate crust (`decision-r09-t5.md` item 7).
+pub const BELT_VALLEY_SCALE: f64 = 1.5;
+
+/// The width of a belt's gain about its ridge–valley wavelength, 0.6 in ln λ: the standard
+/// deviation of the bump exp(−(ln(x ÷ 1.5))² ÷ (2 × 0.6²)) ([`BELT_VALLEY_GAIN`];
+/// `decision-r09-t5.md` item 7).
+pub const BELT_VALLEY_WIDTH: f64 = 0.6;
+
+/// How much steeper than the reference's a belt's degree variance is below the break, 0.4: β₂
+/// 3.4 against 3.0 on a silicate crust, the belt factor falling as (λ ÷ `λ_b`)^0.2 there, so that
+/// the belt's slopes approach threshold rather than growing towards the band limit
+/// ([`BELT_VALLEY_GAIN`]; `decision-r09-t5.md` item 7). Below the first-order valley spacing
+/// hillslopes are planar (the land's spectral rollover, Perron, Kirchner and Dietrich 2008, JGR
+/// 113, F04003, doi:10.1029/2007JF000866; and the belt cores' flat mean slope from 31 to 300 m).
+pub const BELT_HILLSLOPE_STEEPENING: f64 = 0.4;
 
 /// A collision belt's weight, full within 100 km of the boundary on either side and zero beyond
 /// 250 km: Design note 7's belts 200–500 km wide, against rough belts measured at 185–410 km
@@ -672,7 +895,8 @@ impl ReliefStyle {
     }
 
     /// The mountain-belt weight b, 0 to 1: the share of the octaves' rotation from plain noise to
-    /// ridged noise.
+    /// ridged noise above the spectrum's break, and the power of the belt's own shape, `g_m`^b (see
+    /// the module documentation, "The belts").
     #[must_use]
     pub const fn belt(&self) -> f64 {
         self.belt
@@ -819,10 +1043,11 @@ fn as_function_of_direction(header: &FieldHeader, dir: [f64; 3], g: [f64; 3]) ->
 }
 
 /// A body's structural octaves, prepared once for its field and detail seed: each octave's RMS
-/// height from the spectrum, and its range of octaves (see the module documentation).
+/// height from the spectrum, its ridged share and belt factor from the spectrum's break, and its
+/// range of octaves (see the module documentation).
 ///
 /// It is plain data, a function of the header and the seed alone, and [`at`](Self::at) reads the
-/// cells' styles from the field it is given, which must be the one whose header made it. At 280
+/// cells' styles from the field it is given, which must be the one whose header made it. At 792
 /// bytes it is `Clone` but not `Copy`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Relief {
@@ -833,6 +1058,11 @@ pub struct Relief {
     /// Each octave's RMS height at the reference style, metres, by index; 0 outside the body's
     /// octaves.
     rms_m: [f64; OCTAVES as usize],
+    /// Each octave's ridged share `ρ_m`, by index; 0 outside the body's octaves.
+    ridged_share: [f64; OCTAVES as usize],
+    /// The logarithm of each octave's belt factor, ln `g_m`, by index; 0 outside the body's
+    /// octaves.
+    belt_log_factor: [f64; OCTAVES as usize],
 }
 
 impl Relief {
@@ -841,9 +1071,16 @@ impl Relief {
     pub fn new(header: &FieldHeader, seed: DetailSeed) -> Self {
         let first = first_octave(header.level());
         let finest = finest_octave(header.radius());
+        let spectrum = header.spectrum();
         let mut rms_m = [0.0; OCTAVES as usize];
+        let mut ridged = [0.0; OCTAVES as usize];
+        let mut belt = [0.0; OCTAVES as usize];
         for m in first..=finest {
-            rms_m[usize::from(m)] = octave_rms(header.spectrum(), m).value();
+            let at = usize::from(m);
+            rms_m[at] = octave_rms(spectrum, m).value();
+            let ratio = break_ratio(spectrum, m);
+            ridged[at] = ridged_share(ratio);
+            belt[at] = belt_log_factor(ratio);
         }
         Self {
             seed,
@@ -851,6 +1088,8 @@ impl Relief {
             finest,
             radius_m: header.radius().value(),
             rms_m,
+            ridged_share: ridged,
+            belt_log_factor: belt,
         }
     }
 
@@ -881,6 +1120,30 @@ impl Relief {
     #[must_use]
     pub fn octave_rms(&self, m: u8) -> Metres {
         Metres::new(self.rms_m[usize::from(m)])
+    }
+
+    /// Octave `m`'s ridged share `ρ_m`, 0 to 1: a belt's octave mixes in its ridged term by
+    /// (π ÷ 2) b `ρ_m`, fully above the spectrum's break and not at all at half of it and below
+    /// (see the module documentation, "The belts"); zero for an octave outside the body's.
+    ///
+    /// # Panics
+    ///
+    /// If `m` is 32 or more.
+    #[must_use]
+    pub fn ridged_share(&self, m: u8) -> f64 {
+        self.ridged_share[usize::from(m)]
+    }
+
+    /// Octave `m`'s belt factor `g_m`, whose power `g_m`^b multiplies the octave's height where the
+    /// belt weight is b (see the module documentation, "The belts"); 1 for an octave outside the
+    /// body's.
+    ///
+    /// # Panics
+    ///
+    /// If `m` is 32 or more.
+    #[must_use]
+    pub fn belt_factor(&self, m: u8) -> f64 {
+        math::exp(self.belt_log_factor[usize::from(m)])
     }
 
     /// The structural octaves at the unit direction `dir`, octaves [`first_octave`] to `through`
@@ -1008,9 +1271,10 @@ impl Relief {
     ) {
         let radius = self.radius_m;
         let unit = point.map(|c| c / radius);
-        let theta = FRAC_PI_2 * style.belt.value;
-        let theta_gradient = style.belt.gradient.map(|g| FRAC_PI_2 * g);
-        let (sin, cos) = math::sin_cos(theta);
+        let belt = style.belt;
+        let theta = FRAC_PI_2 * belt.value;
+        let theta_gradient = belt.gradient.map(|g| FRAC_PI_2 * g);
+        let full_mix = math::sin_cos(theta);
         let shear = style.shear;
         // The three octaves above the one evaluated, nearest first: their n̂ and its gradient.
         let mut above = [Smooth::constant(0.0); 3];
@@ -1062,21 +1326,38 @@ impl Relief {
                     }
                 }
             };
+            // θ_m = θ ρ_m: the whole mix above the break, none at half of it and below (θ × 0, so
+            // sin_cos(0)), and its own angle in the one octave at most between.
+            let share = self.ridged_share[usize::from(m)];
+            let (sin, cos) = if share >= 1.0 {
+                full_mix
+            } else if share <= 0.0 {
+                (0.0, 1.0)
+            } else {
+                math::sin_cos(theta * share)
+            };
             let swing = cos * ridged.value - sin * plain.value;
             let mixed = Smooth {
                 value: cos * plain.value + sin * ridged.value,
                 gradient: [0, 1, 2].map(|k| {
-                    cos * plain.gradient[k] + sin * ridged.gradient[k] + swing * theta_gradient[k]
+                    cos * plain.gradient[k]
+                        + sin * ridged.gradient[k]
+                        + swing * (theta_gradient[k] * share)
                 }),
             };
             let sigma = self.rms_m[usize::from(m)];
+            // g_m^b, exactly 1 where b is 0, and its gradient g_m^b ln g_m ∇b.
+            let log_factor = self.belt_log_factor[usize::from(m)];
+            let lift = math::exp(belt.value * log_factor);
             let amplitude = style.amplitude;
             let height = Smooth {
-                value: amplitude.value * sigma * mixed.value,
+                value: amplitude.value * sigma * lift * mixed.value,
                 gradient: [0, 1, 2].map(|k| {
                     sigma
+                        * lift
                         * (mixed.value * amplitude.gradient[k]
-                            + amplitude.value * mixed.gradient[k])
+                            + amplitude.value * mixed.gradient[k]
+                            + amplitude.value * mixed.value * log_factor * belt.gradient[k])
                 }),
             };
             emit(Term {

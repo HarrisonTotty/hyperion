@@ -3863,7 +3863,8 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     belt's full style measures 52.3° / 47.1° / 37.7°, against the ruling's 39.0 / 35.0 / 28.1,
     which scale the plain noise's slopes by the amplitude: the ridged term is steeper than the
     plain one at the same RMS height. Recorded and asserted only to exceed the reference; for T8's
-    closed form and R10's cliff fractions, for "main".
+    closed form and R10's cliff fractions, for "main". Ruled in item 7 and built by the second
+    follow-up (below).
   - _Tests otherwise._ T5's single-law tests run on a law whose break is at degree 1; the broken
     law's closed forms against direct sums to 10⁻¹¹ for (2.0, 3.0) and (1.8, 2.6), breaks at 300,
     300.4, 1 and 20,015.1, bands below, across and above; continuity at the break to 10⁻¹²; the
@@ -3904,13 +3905,123 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     in their sources, both the ruling's readings. _Corrected in the ruling_ (2026-10-10, with its
     item 7): item 5 now gives 223 m at a half-rate of 14 mm a⁻¹ (Goff et al.'s 236 m) and the slow
     MAR's H as 223 m (a = 1.67), and item 3 reads Europa's H as about 0.4 from 1 to 70 km, the ice
-    shape's β₁ 1.8.
+    shape's β₁ 1.8. Item 8 then takes the slow MAR's measured H, about 236 m (a = 1.73), keeping
+    223 m as item 5's fit. Applied by the second follow-up (below).
   - _For T8._ `structure_function` and `unresolved_rms` read the law through `degree_variance`;
     the ruling's two slope tests; the belt's ridged term needs its own structure function in the
     closed form. _For T9:_ the height goldens are first written on the broken law. _For T12.a:_
     `quantise_hill_relief`, `quantise_ponded_sediment` and `pack_seafloor`. _For T12.e:_
     `BandSpectrum::anchored` with `SpectrumShape` and the `STRUCTURAL_RMS_*` anchors (the mobile
     lid's times T12.b's factor), and `ReliefStyle::from_codes` on its quantised codes.
+- **Deviations in T5's second follow-up, as built** (2026-10-10, `decision-r09-t5.md` item 7 and
+  the ruling's corrections; lane r09-synth, on the first follow-up's branch merged by name before
+  it landed).
+  - _The belts' law._ `BELT_VALLEY_GAIN` (1.8), `BELT_VALLEY_SCALE` (1.5), `BELT_VALLEY_WIDTH`
+    (0.6) and `BELT_HILLSLOPE_STEEPENING` (0.4), public as the other style constants are, each
+    citing item 7 and the SRTM belt cores; the private `break_ratio(spectrum, m)` (λ_m ÷ λ_b),
+    `ridged_share(ratio)`, `belt_log_factor(ratio)` and `belt_factor(ratio)`. The ridged share is
+    the cubic smoothstep in ln λ of the ruling's replica, not the quintic of `taper`, so that its
+    fitted figures hold. `Relief` stores ρ_m and ln g_m per octave (792 B, was 280) and gains the
+    getters `ridged_share(m)` and `belt_factor(m)` beside `octave_rms`, for T8's closed forms.
+    `octave_terms`: θ_m = θ ρ_m, taking θ's sine and cosine at ρ = 1 and (0, 1) at ρ = 0, so that
+    only the one octave at most strictly between takes its own; g_m^b = exp(b ln g_m); the height
+    a σ g^b t in that order, and its gradient σ g^b (t ∇a + a ∇t + a t ln g ∇b). `octave_bound` is
+    `MAX_AMPLITUDE` × σ_m × max(1, g_m) × `T_MAX`, in the height's order so that rounding keeps
+    every height inside it; it now panics past octave 31 (the spacing's) rather than past 40.
+    `unresolved_relief_variance` sums octave by octave in octave order, (a g_m^b)² times each
+    octave's share of the band.
+  - _The plain styles._ At b = 0 every term is the earlier arithmetic bit for bit, height and
+    gradient (`the_plain_styles_are_unchanged_bit_for_bit`, at the Earth-like world's points off
+    its belts and in uniform styles of every crust's amplitude, warped and not). The unresolved
+    variance is not: summed octave by octave, it moves in rounding on plain cells too, so nothing
+    may rely on its earlier bits. No golden pins the relief or the unresolved variance, so none
+    moves; `GENERATOR_VERSION` stays 21 and the wire is unchanged. The variance
+    test's expectation now carries each point's lift, a² (L_s + Σ (g_m^(2b) − 1) σ_m²): the belts
+    lift the Earth-like world's realised share 5.4% above ⟨a²⟩ L_s, so the test as it stood would
+    have failed (ratio 1.052); with the lift it is 0.998, the other worlds unchanged.
+  - _The structure functions._ `UnitStructure` (`at(spacings)`, `small_lag_slope()`),
+    `STRUCTURE_LAGS` and `PLAIN_STRUCTURE` and `RIDGED_STRUCTURE`. Deviation: the tables are the
+    crate's own measure, on R05's noise basis over 4 × 10⁶ samples (an octave and the one above it
+    a sample, area-uniform over the Earth-like world, octaves 10–22), not the ruling's replica's.
+    The ruling's plain table (`perlin_stats.py`) is 2% above at small lags (0.0173 against 0.01693
+    at 0.05 spacings): its noise is a replica, a periodic 64³ table, not R05's basis, normalised
+    by its own measured RMS (0.2691, 0.7% of the gap, against the pinned 0.2701), the rest its
+    sampling. Its ridged table (`ridged_sf.py`) is 1–3% below at long lags (1.95–1.98 against
+    2.00), its ridged variance 0.984 from its rounded μ, σ and W. The ridged term's small-lag
+    gradient variance is 2.68× the plain's (the ruling's 2.64). Deviation: the ruling's "D ∝ r²
+    below 0.05" is kept with values pinned at 0.01 and 0.02 as well, all twelve of its lags, a
+    power law between pinned lags (local exponent 2.0 below 0.05) and k r² below 0.01: the ridged
+    term's D ÷ r² falls 1.5% from 0.01 to 0.05 spacings, within reach of the slow test's 2% under a
+    pure r² law from 0.05. The slow test (`the_terms_structure_functions_are_pinned`, 10⁶ samples on
+    other seeds) agrees with the tables within 0.3% at every lag, and the analytic gradients'
+    small-lag slopes (plain 6.807, ridged 18.28) with the tables' (6.795, 18.22) within 0.3%.
+  - _The slopes._ `a_full_belt_s_slopes_are_the_ruling_s_and_the_belt_cores` (2 × 10⁴ points):
+    37.92° / 37.49° / 36.11° / 25.99° at 1 m / 10 m / 100 m / 1 km against the ruling's 37.6 /
+    37.2 / 35.9 / 26.0, each tangent held within 5% (tighter than the ruling's 10% in degrees,
+    36.2–39.0° at 37.6°, as the reference style's are). Deviation: the test runs in the fast
+    suite, not slow as item 7 lists it; at 2 × 10⁴ points the 5% is at least 3.29 standard
+    errors; and 37.05° at 31 m, 36.19° at 93 m and 25.99° at 1 km, each asserted
+    inside the SRTM belt cores' RMS (34.8–41.5°, 32.0–38.6° and 23.2–28.6°, six of the ruling's
+    eight tiles: it leaves out Annapurna's void-filled RMS and southern Peru's Altiplano margin).
+    The 35 km window RMS (`a_full_belt_s_window_relief_is_three_times_the_reference_s`, slow, 200
+    paired windows of 40 × 40 points): reference 161.7 m, full belt 508.0 m, ratio 3.14 ± 0.03,
+    within 2.8–3.6 (the replica's 159 m, 505 m and 3.2), the range's half-width asserted to be at
+    least z(α) standard errors of the ratio. The reference style's slopes are unchanged (17.67° /
+    15.45° / 11.64° on the Earth-like world). On the Earth-like world's spectrum ρ is 1 to level
+    12 (3.4 km), 0.85 at level 13 (1.7 km) and 0 from level 14 (844 m); g peaks at 1.78 at level
+    12 and falls to 0.28 at level 22.
+  - _Tests otherwise._ The bound on 1,000 belt points and at every octave's extreme in a full
+    belt (above the plain bound exactly where g exceeds 1); ρ and g continuous and at the ruling's
+    values; the stored shape the direct one, bit for bit; the gradient against central
+    differences at 150 belt points, partial belts among them; the unresolved variance on belt
+    cells; the tables' interpolation; five `should_panic` tests (`octave_bound` past 31, the two
+    getters past 31, `at` of a negative and of a NaN lag). The crate's whole suite,
+    `cargo test -p hyperion-surface --features testing`: 209 library tests (13 slow ignored), the
+    goldens and 59 panics; the two new slow tests pass in the slow-test profile.
+  - _The ruling's corrections_ (both found by the first follow-up's science check). The slow
+    ridge's flank: `H_REF`'s documentation and the sea floor's tests read its measured H, about
+    236 m, and a = 1.73 (item 8, on this follow-up's science check), in place of 232 m and 1.71;
+    223 m stays item 5's fit at a half-rate of 14 mm a⁻¹, and the Earth-like world's H₀ law no
+    longer says the ruling quotes 232 m. `SpectrumShape::ICE_RICH`
+    and `STRUCTURAL_RMS_ICE_RICH` take the ruling's one figure for Europa, β₁ 1.8 (H 0.4) from
+    70 km down to the break, in place of "a Hurst exponent of about 0.3 out to 70 km".
+  - _For T8._ The closed forms are Σ_m (a g_m^b σ_m)² [cos² θ_m D̂_p(Δ ÷ λ_m) + sin² θ_m
+    D̂_r(Δ ÷ λ_m)] with `PLAIN_STRUCTURE.at`, `RIDGED_STRUCTURE.at`, `Relief::ridged_share` and
+    `Relief::belt_factor`. The first octave's ridged term is unweighted, so the weighted table
+    is a few per cent off for it (unmeasured). T8's full-belt cells should land near 36° at
+    100 m and 26° at 1 km. _For T9:_ the height goldens should include Earth-like points with
+    0 < b < 1, so that the octave of 0 < ρ < 1 (level 13) and the belt factor, whose `sin_cos`
+    and `exp` no test yet compares across targets, are pinned (the determinism review's nit).
+    _For T12.e:_ with item 7 the realised structural share is ⟨Σ_m (a g_m^b)² σ_m²⟩ plus the tail,
+    not item 1's ⟨a²⟩ L_s: 5.4% more on the Earth-like world. Ruled in item 8, the lean adopted:
+    T12.e books the area mean of `Relief::point_variance` at the interpolated a and b, which this
+    follow-up adds (below); Design note 7's and T12.e's text go to a docs pass. _For R10:_ the
+    ruling's cliff fractions, about 30% of a full belt above 40° at 1–10 m, and none on a plain
+    style. A belt's figures in break wavelengths are lattice spacings: its ridge–valley octave, 3 km
+    apart on a silicate crust, carries wavelengths of about 4–8 km.
+  - _Science findings, for "main"_ (the second follow-up's science check; none moves a constant).
+    The slow ridge's H: Goff, Smith and Marks 2004's Table 2 gives the northern MAR 235.8 m, and
+    Tivey et al. 2003's full rate at TAG (20.8 km Myr⁻¹) gives about 238 m by item 5's law, so
+    a ≈ 1.72, not the 1.67 at 223 m; both lie between the 1.35 and 2.3 that calibrate `H_REF`.
+    Ruled in item 8: the calibration cites the measured 236 m (a = 1.73), and 223 m stays item
+    5's fit. Europa's β₁ 1.8 (H 0.4) is a choice between
+    the sources, not a measure: the stereo models give H about 0.3 at 1–10 km and the limb
+    profiles about 0.2 at 12–630 km, and the ruling's "limb β about 2 at 10–60 km" is in none of
+    the three cited sources (perhaps Nimmo et al. 2007, Icarus 191, 183, uncited); the docs now
+    say so. The ruling's `mtn_slopes.py` places southern tiles' centres 1° too far south, which
+    raises the low ends of the cores' ranges by about 0.15°, within their rounding.
+  - _Item 8, on resume_ (`decision-r09-t5.md` §8, 2026-10-10).
+    `Relief::point_variance(amplitude, belt) -> SquareMetres`: Σ_m (a g_m^b)² σ_m² over the body's
+    octaves, in octave order, plus a² times the reference style's tail beyond the finest octave,
+    which `Relief` now stores (`tail_m2`, 800 B); on a body with no octave the tail runs from the
+    coarse cell's Nyquist degree, so that b = 0 gives a² `local_variance` there too. Tests: at b = 0
+    it is a² `local_variance` to 10⁻¹² on every synthetic world and a body too small for octaves;
+    its area mean on the Earth-like world, at the interpolated a and b over the variance test's 6 ×
+    10⁴ points, exceeds ⟨a²⟩ `local_variance` by 5.4% ± 0.5% (5.39%); and (slow,
+    `a_full_belt_s_point_variance_is_its_sampled_variance`, 2 × 10⁵ points) it equals a full belt's
+    sampled variance within 5% (313,310 m² against 314,002 ± 929 m²). The variance test now takes
+    its per-point expectation from it. The plan text for Design note 7 and T12.e is left to a docs
+    pass, as "main" directs.
 - **Adjacent findings of `decision-r09-t5.md`** (2026-10-10; recorded there, not ruled, each for
   the task it names).
   - _T7.b's equilibrium craters must be degraded._ Fresh shapes at Trask's saturation give absurd

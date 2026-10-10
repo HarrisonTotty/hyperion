@@ -1,6 +1,6 @@
 //! The structural octaves' tests (plan R09, T5): each octave's mean and bound, the variance against
-//! [`local_variance`] on every synthetic world, the warp's reads, the gradient, the cache and the
-//! styles.
+//! [`local_variance`] on every synthetic world, the warp's reads, the gradient, the cache, the
+//! styles and the belts' law.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -81,6 +81,35 @@ impl Lattice for Recording {
         self.reads.push(octave.index());
         gradient_noise(x, octave, &mut self.cache)
     }
+}
+
+/// The full belt's style: amplitude 2.5, all belt, no shear.
+const FULL_BELT: ReliefStyle = ReliefStyle {
+    amplitude: BELT_AMPLITUDE,
+    belt: 1.0,
+    shear: 0.0,
+};
+
+/// The interpolated style of `field` at `dir`.
+fn style_at(field: &CoarseField, dir: [f64; 3]) -> StyleSample {
+    StyleSample {
+        amplitude: smooth(field, dir, Component::Amplitude).unwrap(),
+        belt: smooth(field, dir, Component::Belt).unwrap(),
+        shear: smooth(field, dir, Component::Shear).unwrap(),
+    }
+}
+
+/// `count` area-uniform directions on the Earth-like world whose interpolated belt weight is
+/// above `least`, the first of 4 × 10⁴ drawn.
+fn belt_points(seed: u64, least: f64, count: usize) -> Vec<[f64; 3]> {
+    let field = earth();
+    let points: Vec<[f64; 3]> = uniform_points(seed, 40_000)
+        .into_iter()
+        .filter(|&d| smooth(field, d, Component::Belt).unwrap().value > least)
+        .take(count)
+        .collect();
+    assert_eq!(points.len(), count, "too few belt points above {least}");
+    points
 }
 
 /// The octave terms of `relief` over `field` at `dir`, through its finest octave.
@@ -529,9 +558,60 @@ fn no_octave_on_a_synthetic_world_exceeds_its_stated_bound() {
     }
 }
 
+/// The bound holds on belts, where the belt factor lifts an octave above the plain law: at the
+/// Earth-like world's belt points, and in a full belt's style at the stated maximum of every term
+/// (`decision-r09-t5.md` item 7).
+#[test]
+fn no_octave_on_a_belt_exceeds_its_stated_bound() {
+    let field = earth();
+    let header = field.header();
+    let relief = Relief::new(header, SEED);
+    for dir in belt_points(0x6265_6c62, 0.05, 1_000) {
+        for t in terms(&relief, field, dir) {
+            let bound = octave_bound(header.spectrum(), t.octave).value();
+            assert!(
+                t.height.value.abs() <= bound,
+                "octave {}: {} > {bound}",
+                t.octave,
+                t.height.value
+            );
+        }
+    }
+    // An octave at the term's extreme in a full belt reaches a × g × σ × T_MAX, at most the bound,
+    // which the belt factor lifts above the plain law's where g exceeds 1, and only there.
+    for m in relief.first_octave()..=relief.finest_octave() {
+        let g = relief.belt_factor(m);
+        let sigma = relief.octave_rms(m).value();
+        let extreme =
+            BELT_AMPLITUDE * sigma * math::exp(relief.belt_log_factor[usize::from(m)]) * t_max();
+        let bound = octave_bound(header.spectrum(), m).value();
+        assert!(extreme <= bound, "octave {m}: {extreme} > {bound}");
+        let plain = MAX_AMPLITUDE * sigma * t_max();
+        if g > 1.0 {
+            assert!(bound > plain, "octave {m}: g {g}");
+        } else {
+            assert_same_bits(bound, plain);
+        }
+    }
+}
+
+/// The relief's expected variance at a point of interpolated amplitude `a` and belt weight `b`:
+/// a² (`local` + Σ (`g_m`^(2b) − 1) `σ_m`²), the reference style's `local_variance` lifted octave
+/// by octave by the belt's shape (`decision-r09-t5.md` item 7), exactly a² `local` where b is 0.
+fn expected_variance(relief: &Relief, local: f64, a: f64, b: f64) -> f64 {
+    let mut lift = 0.0;
+    for m in relief.first_octave()..=relief.finest_octave() {
+        let g = math::exp(b * relief.belt_log_factor[usize::from(m)]);
+        let sigma = relief.octave_rms(m).value();
+        lift += (g * g - 1.0) * sigma * sigma;
+    }
+    a * a * (local + lift)
+}
+
 /// The plan's test: over each synthetic world, the sampled variance of the relief is within 5% of
 /// `local_variance` times the mean square of the interpolated amplitude at the same points (1 on a
-/// world of the reference style alone). 6 × 10⁴ points a world, so that the 5% is at least the
+/// world of the reference style alone), with each belt point's variance lifted by the belt's
+/// shape ([`expected_variance`]). 6 × 10⁴ points a world, so that the 5% is at least the
 /// two-sided z of `stats::ALPHA` (3.29) standard errors of the difference, measured from the
 /// samples as if they were independent (the coarsest octave's few thousand lattice cells over a
 /// small body make them less so).
@@ -549,21 +629,24 @@ fn local_variance_matches_the_sampled_variance_on_each_synthetic_world() {
         let mut cache = SynthCache::new();
         let points = uniform_points(seed, 60_000);
         let local = local_variance(header.spectrum(), header.level()).value();
-        let (mut sum, mut sum_sq, mut a_sq) = (0.0, 0.0, 0.0);
+        let (mut sum, mut sum_sq, mut a_sq, mut lifted) = (0.0, 0.0, 0.0, 0.0);
         let mut differences = Vec::with_capacity(points.len());
         for &dir in &points {
             let h = relief.at(field, dir, 31, &mut cache).unwrap().height_m;
             let a = smooth(field, dir, Component::Amplitude).unwrap().value;
+            let b = smooth(field, dir, Component::Belt).unwrap().value;
+            let at = expected_variance(&relief, local, a, b);
             sum += h;
             sum_sq += h * h;
             a_sq += a * a;
-            differences.push(h * h - local * a * a);
+            lifted += at;
+            differences.push(h * h - at);
         }
         #[expect(clippy::cast_precision_loss, reason = "6 × 10^4 points")]
         let count = points.len() as f64;
         let mean = sum / count;
         let sampled = sum_sq / count - mean * mean;
-        let expected = local * a_sq / count;
+        let expected = lifted / count;
         let centre = differences.iter().sum::<f64>() / count;
         let spread = differences
             .iter()
@@ -577,9 +660,10 @@ fn local_variance_matches_the_sampled_variance_on_each_synthetic_world() {
         );
         println!(
             "{kind:?}: sampled {sampled:.1} m², expected {expected:.1} m², ratio {:.4}, \
-             mean a² {:.4}",
+             mean a² {:.4}, the belts' lift on ⟨a²⟩ local_variance {:.4}",
             sampled / expected,
-            a_sq / count
+            a_sq / count,
+            expected / (local * a_sq / count)
         );
         assert!(
             (sampled / expected - 1.0).abs() < 0.05,
@@ -714,29 +798,230 @@ fn the_reference_style_s_slopes_are_the_ruling_s() {
             );
         }
     }
-    // A collision belt's full style (amplitude 2.5, all ridged), against the ruling's 39.0°,
-    // 35.0° and 28.1°, which scale the plain noise's slopes by the amplitude alone: recorded, for
-    // R09.T8 and R10, since the ridged term is steeper than the plain one at the same RMS height.
-    let belt = ReliefStyle {
-        amplitude: BELT_AMPLITUDE,
-        belt: 1.0,
-        shear: 0.0,
-    };
-    let reference = sampled_slopes(
-        earth(),
-        ReliefStyle::REFERENCE,
-        [1.0, 10.0, 100.0],
-        0x6265_6c74,
-        20_000,
-    );
-    let ridged = sampled_slopes(earth(), belt, [1.0, 10.0, 100.0], 0x6265_6c74, 20_000);
+}
+
+/// A full mountain belt's adirectional RMS slopes on the Earth-like world's spectrum (amplitude
+/// 2.5, all belt), against the ruling's 37.6°, 37.2°, 35.9° and 26.0° at 1 m, 10 m, 100 m and 1 km
+/// (`decision-r09-t5.md` item 7, from its planar replica of these octaves), each tangent within
+/// 5% as the reference style's are; and against the belt cores of eight SRTM 1″ tiles of the
+/// Himalaya, the Andes and the Alps, whose RMS slopes are 34.8–41.5° at 31 m, 32.0–38.6° at 93 m
+/// and 23.2–28.6° at 1 km ([`BELT_VALLEY_GAIN`]). With the ridged term at every octave and no
+/// shape it measured 52.3°, 47.1° and 37.7° at 1, 10 and 100 m. 2 × 10⁴ points, so that the 5% is
+/// at least the two-sided z of `stats::ALPHA` standard errors of the sample.
+#[test]
+fn a_full_belt_s_slopes_are_the_ruling_s_and_the_belt_cores() {
+    let baselines = [1.0, 10.0, 31.0, 93.0, 100.0, 1_000.0];
+    let measured = sampled_slopes(earth(), FULL_BELT, baselines, 0x6265_6c74, 20_000);
     println!(
-        "Earth-like belt: {:.2}° / {:.2}° / {:.2}° at 1 / 10 / 100 m (the ruling's 39.0 / 35.0 / \
-         28.1, the plain noise's at a = 2.5)",
-        ridged[0].0, ridged[1].0, ridged[2].0
+        "Earth-like full belt: {} (the ruling's 37.6 / 37.2 / 35.9 / 26.0 at 1 / 10 / 100 / \
+         1,000 m)",
+        measured
+            .iter()
+            .zip(baselines)
+            .map(|((slope, _), b)| format!("{slope:.2}° at {b} m"))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
-    for ((plain, _), (steep, _)) in reference.into_iter().zip(ridged) {
-        assert!(steep > plain, "{steep}° against {plain}°");
+    let z = math::normal_quantile(1.0 - stats::ALPHA / 2.0);
+    for (at, want) in [(0, 37.6_f64), (1, 37.2), (4, 35.9), (5, 26.0)] {
+        let (slope, error) = measured[at];
+        let target = math::tan(want.to_radians());
+        let tan = math::tan(slope.to_radians());
+        assert!(
+            0.05 * target >= z * error,
+            "at {} m: 5% of tan {want}° is under {z} standard errors of {error}",
+            baselines[at]
+        );
+        assert!(
+            (tan / target - 1.0).abs() < 0.05,
+            "at {} m: {slope}° against the ruling's {want}°",
+            baselines[at]
+        );
+    }
+    for (at, (low, high)) in [(2, (34.8, 41.5)), (3, (32.0, 38.6)), (5, (23.2, 28.6))] {
+        let slope = measured[at].0;
+        assert!(
+            (low..=high).contains(&slope),
+            "at {} m: {slope}° outside the belt cores' {low}–{high}°",
+            baselines[at]
+        );
+    }
+}
+
+/// Checks every octave term of `relief` at `point` in `style` against R09.T5's arithmetic before
+/// the belts' law, bit for bit: one mix for every octave, θ = (π ÷ 2) b, and the height a σ t.
+fn assert_as_before(relief: &Relief, table: &[Octave], point: [f64; 3], style: &StyleSample) {
+    let (sin, cos) = math::sin_cos(FRAC_PI_2 * style.belt.value);
+    let theta_gradient = style.belt.gradient.map(|g| FRAC_PI_2 * g);
+    let a = style.amplitude;
+    let mut cache = LatticeCache::new();
+    relief.octave_terms(
+        table,
+        point,
+        style,
+        relief.finest_octave(),
+        &mut cache,
+        |t| {
+            let swing = cos * t.ridged.value - sin * t.plain.value;
+            let mixed = cos * t.plain.value + sin * t.ridged.value;
+            let sigma = relief.octave_rms(t.octave).value();
+            assert_same_bits(t.mixed.value, mixed);
+            assert_same_bits(t.height.value, a.value * sigma * mixed);
+            for (k, along) in theta_gradient.iter().enumerate() {
+                let slope = cos * t.plain.gradient[k] + sin * t.ridged.gradient[k] + swing * along;
+                assert_same_bits(t.mixed.gradient[k], slope);
+                assert_same_bits(
+                    t.height.gradient[k],
+                    sigma * (mixed * a.gradient[k] + a.value * slope),
+                );
+            }
+        },
+    );
+}
+
+/// The plain styles' heights and gradients are unchanged bit for bit by the belts' law
+/// (`decision-r09-t5.md` item 7): wherever the belt weight is 0, every octave is the plain law's,
+/// at the Earth-like world's points off its belts and in uniform styles of every crust's
+/// amplitude, warped and not.
+#[test]
+fn the_plain_styles_are_unchanged_bit_for_bit() {
+    let field = earth();
+    let header = field.header();
+    let relief = Relief::new(header, SEED);
+    let table = octave_table(SEED);
+    let mut off_belts = 0;
+    for dir in uniform_points(0x706c_6169, 600) {
+        let style = style_at(field, dir);
+        if bits(style.belt.value) != 0 {
+            continue;
+        }
+        assert_as_before(&relief, &table, header.figure().point(dir), &style);
+        off_belts += 1;
+    }
+    assert!(off_belts >= 400, "{off_belts} points off the belts");
+    for amplitude in [
+        1.0,
+        INTERIOR_AMPLITUDE,
+        PLAIN_AMPLITUDE,
+        PROVINCE_AMPLITUDE,
+        BELT_AMPLITUDE,
+    ] {
+        for shear in [0.0, 1.0] {
+            let style = StyleSample::uniform(ReliefStyle {
+                amplitude,
+                belt: 0.0,
+                shear,
+            });
+            for dir in uniform_points(0x756e_6966, 50) {
+                assert_as_before(&relief, &table, header.figure().point(dir), &style);
+            }
+        }
+    }
+}
+
+/// The ridged share and the belt factor are continuous in the octave's spacing and take the
+/// ruling's values (`decision-r09-t5.md` item 7): the share 0 at half the break and below, 1 at the
+/// break and above, a half at 1 ÷ √2 breaks; the factor 1.8 at 1.5 breaks, 1 far above, x^0.2 far
+/// below.
+#[test]
+fn the_ridged_share_and_the_belt_factor_are_continuous_and_the_ruling_s() {
+    assert_same_bits(ridged_share(0.5), 0.0);
+    assert_same_bits(ridged_share(0.3), 0.0);
+    assert_same_bits(ridged_share(1.0), 1.0);
+    assert_same_bits(ridged_share(7.0), 1.0);
+    assert!((ridged_share(core::f64::consts::FRAC_1_SQRT_2) - 0.5).abs() < 1e-15);
+    assert!((belt_factor(BELT_VALLEY_SCALE) - BELT_VALLEY_GAIN).abs() < 1e-14);
+    assert!((belt_factor(1e3) - 1.0).abs() < 1e-12);
+    let deep = 1e-3;
+    assert!((belt_factor(deep) / math::powf(deep, 0.2) - 1.0).abs() < 1e-12);
+    // At a break, the share's edges and the factor's kink, and every step of a fine scan: no
+    // jump larger than the slope allows.
+    for x in [0.5, 1.0, BELT_VALLEY_SCALE] {
+        for f in [ridged_share as fn(f64) -> f64, belt_factor] {
+            let jump = (f(x * (1.0 + 1e-9)) - f(x * (1.0 - 1e-9))).abs();
+            assert!(jump < 1e-8, "at {x}: {jump}");
+        }
+    }
+    let mut previous = (ridged_share(0.01), belt_factor(0.01));
+    for k in 1..=10_000 {
+        let x = 0.01 * math::powf(1e4, f64::from(k) / 10_000.0);
+        let now = (ridged_share(x), belt_factor(x));
+        assert!(
+            now.0 >= previous.0 && (now.0 - previous.0) < 5e-3,
+            "share at {x}"
+        );
+        assert!((now.1 - previous.1).abs() < 5e-3, "factor at {x}");
+        assert!((0.0..=1.0).contains(&now.0));
+        previous = now;
+    }
+    // On the Earth-like world's spectrum: the octave at 1.5 to 3 breaks (level 12, 3.4 km) is
+    // all ridged and lifted most, the one between half a break and one (level 13, 1.7 km) partly
+    // ridged, and the finer ones plain and steepened.
+    let relief = Relief::new(earth().header(), SEED);
+    for m in relief.first_octave()..=relief.finest_octave() {
+        println!(
+            "octave {m}: {:.0} m, ρ {:.4}, g {:.4}",
+            octave_spacing(earth().header().radius(), m).value(),
+            relief.ridged_share(m),
+            relief.belt_factor(m)
+        );
+    }
+    assert_same_bits(relief.ridged_share(12), 1.0);
+    assert!((0.0..1.0).contains(&relief.ridged_share(13)) && relief.ridged_share(13) > 0.5);
+    assert_same_bits(relief.ridged_share(14), 0.0);
+    let peak = (relief.first_octave()..=relief.finest_octave())
+        .max_by(|&a, &b| relief.belt_factor(a).total_cmp(&relief.belt_factor(b)))
+        .unwrap();
+    assert_eq!(peak, 12);
+}
+
+/// The structure tables read their pinned values at the pinned lags, D ∝ r² below the first and
+/// in effect to 0.05 spacings, continuously, and their last value beyond the table; the ridged
+/// term's small-lag slope is 2.7 times the plain term's (`decision-r09-t5.md` item 7).
+#[test]
+fn the_structure_tables_interpolate_their_pinned_lags() {
+    for table in [PLAIN_STRUCTURE, RIDGED_STRUCTURE] {
+        for (k, &lag) in STRUCTURE_LAGS.iter().enumerate() {
+            assert_same_bits(table.at(lag), table.values[k]);
+            let left = table.at(lag * (1.0 - 1e-9));
+            let right = table.at(lag * (1.0 + 1e-9));
+            assert!(
+                (left / right - 1.0).abs() < 1e-7,
+                "at {lag}: {left} and {right}"
+            );
+        }
+        assert_same_bits(table.at(0.0), 0.0);
+        let k = table.small_lag_slope();
+        assert!((table.at(0.005) / (k * 0.005 * 0.005) - 1.0).abs() < 1e-12);
+        assert!((table.at(1e-6) / (k * 1e-12) - 1.0).abs() < 1e-12);
+        assert_same_bits(table.at(10.0), table.values[STRUCTURE_LAGS.len() - 1]);
+        // D ∝ r² to 0.05 spacings: the local exponent within 2% of 2 between pinned lags.
+        for pair in STRUCTURE_LAGS[..3].windows(2) {
+            let exponent =
+                math::ln(table.at(pair[1]) / table.at(pair[0])) / math::ln(pair[1] / pair[0]);
+            assert!((exponent - 2.0).abs() < 0.04, "{pair:?}: {exponent}");
+        }
+    }
+    let ratio = RIDGED_STRUCTURE.small_lag_slope() / PLAIN_STRUCTURE.small_lag_slope();
+    assert!((2.6..2.8).contains(&ratio), "{ratio}");
+}
+
+/// The relief's stored shape is the direct computation's, bit for bit, so that heights,
+/// `octave_bound` and the unresolved variance read one value.
+#[test]
+fn the_stored_belt_shape_is_the_direct_one() {
+    for &kind in SyntheticWorld::ALL {
+        let header = world(kind).header();
+        let relief = Relief::new(header, SEED);
+        for m in relief.first_octave()..=relief.finest_octave() {
+            let ratio = break_ratio(header.spectrum(), m);
+            assert_same_bits(relief.ridged_share(m), ridged_share(ratio));
+            assert_same_bits(
+                relief.belt_log_factor[usize::from(m)],
+                belt_log_factor(ratio),
+            );
+            assert_same_bits(relief.belt_factor(m), belt_factor(ratio));
+        }
     }
 }
 
@@ -904,10 +1189,13 @@ fn the_gradient_matches_a_central_difference() {
     // well inside the 10⁻⁵ asserted. The sum of theirs is the scale where the octaves' slopes
     // cancel: the broken law (`decision-r09-t5.md` item 2) leaves the finest octaves centimetres
     // and the total slope in places a hundredth, against which the finest octave's own error is
-    // no longer small.
-    for (kind, seed) in [
-        (SyntheticWorld::EarthLike, 0x6772_6164),
-        (SyntheticWorld::CeresLike, 0x6365_7273),
+    // no longer small. The Earth-like world's belt points, partial belts among them, check the
+    // belt's factor and its mix (`decision-r09-t5.md` item 7), whose gradients follow b's.
+    let belts = belt_points(0x6772_6264, 0.05, 150);
+    for (kind, points) in [
+        (SyntheticWorld::EarthLike, uniform_points(0x6772_6164, 300)),
+        (SyntheticWorld::EarthLike, belts),
+        (SyntheticWorld::CeresLike, uniform_points(0x6365_7273, 300)),
     ] {
         let field = world(kind);
         let relief = Relief::new(field.header(), SEED);
@@ -915,7 +1203,7 @@ fn the_gradient_matches_a_central_difference() {
         for (through, step) in [(15, 0.1), (relief.finest_octave(), 1e-3)] {
             let step = step * (radius / 6.371e6).max(0.1);
             let mut cache = SynthCache::new();
-            for dir in uniform_points(seed, 300) {
+            for &dir in &points {
                 let g = relief.at(field, dir, through, &mut cache).unwrap().gradient;
                 let size = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
                 let scale = size.max(octave_slopes(&relief, field, dir, through));
@@ -1196,7 +1484,7 @@ fn styles_follow_the_crust_and_the_nearest_boundary() {
     );
     let half = style(Crust::Continental, BoundaryKind::Collision, 175, 0).belt();
     assert!((half - 0.5).abs() < 1e-12, "{half}");
-    let slow_floor = seafloor(232.0, 0.0);
+    let slow_floor = seafloor(223.0, 0.0);
     // An oblique boundary shears, over a narrower zone on oceanic crust; a head-on one does not.
     let oblique = style(Crust::Continental, BoundaryKind::Transform, 50, 255);
     assert_same_bits(oblique.shear(), 1.0);
@@ -1264,7 +1552,7 @@ fn arcs_lie_in_bands_behind_their_trenches_set_by_the_overriding_crust() {
     // on an oceanic plate.
     let forearc = style(Crust::Continental, BoundaryKind::Subduction, 60, 0);
     assert_same_bits(forearc.amplitude(), ACTIVE_AMPLITUDE);
-    let slow_floor = seafloor(232.0, 0.0);
+    let slow_floor = seafloor(223.0, 0.0);
     let island_forearc = ReliefStyle::of(&SynthesisCell {
         seafloor: slow_floor,
         ..cell(Crust::Oceanic, BoundaryKind::Subduction, 60, 0)
@@ -1321,8 +1609,8 @@ fn every_style_lies_within_the_octaves_bounds_and_comes_from_its_codes() {
     }
 }
 
-/// The sea floor's amplitude (`decision-r09-t5.md` item 5): the hills' (H ÷ 95 m)^0.6, 1.71 on a
-/// slow ridge's 232 m, 0.72 on a fast one's 55 m and 0.48 draped to 28 m, capped at the belts';
+/// The sea floor's amplitude (`decision-r09-t5.md` item 5): the hills' (H ÷ 95 m)^0.6, 1.67 on a
+/// slow ridge's 223 m, 0.72 on a fast one's 55 m and 0.48 draped to 28 m, capped at the belts';
 /// unchanged while the ponded sediment is under half the hills' relief, a plain's from three
 /// times it, and continuous between.
 #[test]
@@ -1341,7 +1629,7 @@ fn the_sea_floor_s_amplitude_follows_its_hills_and_their_burial() {
     };
     // The ruling's three floors, exactly and through the hill code nearest each, which is within
     // half the code's step, 2^(1 ÷ 6) in relief, so 2^(0.6 ÷ 6) in amplitude.
-    for (relief_m, expected) in [(232.0, 1.71), (55.0, 0.72), (28.0, 0.48)] {
+    for (relief_m, expected) in [(223.0, 1.67), (55.0, 0.72), (28.0, 0.48)] {
         let exact = math::powf(relief_m / H_REF.value(), HILL_AMPLITUDE_EXPONENT);
         assert!((exact - expected).abs() < 0.005, "{relief_m} m: {exact}");
         let a = amplitude(seafloor(relief_m, 0.0));
@@ -1369,7 +1657,7 @@ fn the_sea_floor_s_amplitude_follows_its_hills_and_their_burial() {
         let t = (math::ln(s / h / onset) / math::ln(buried / onset)).clamp(0.0, 1.0);
         math::powf(a_h, 1.0 - t) * math::powf(PLAIN_AMPLITUDE, t)
     };
-    for h in [28.0, 95.0, 232.0] {
+    for h in [28.0, 95.0, 223.0] {
         for s in [h / 2.0, 3.0 * h] {
             let below = law(h, s * (1.0 - 1e-9));
             let above = law(h, s * (1.0 + 1e-9));
@@ -1404,23 +1692,31 @@ fn unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit() {
     let header = field.header();
     let level = header.level().get();
     let mut checked = 0;
-    for dir in uniform_points(0x756e_7265, 60) {
+    let mut belts = 0;
+    let mut points = uniform_points(0x756e_7265, 60);
+    points.extend(belt_points(0x756e_7262, 0.05, 30));
+    for dir in points {
         let cell = PatchKey::containing(level, dir).unwrap();
-        let a = ReliefStyle::of(field.cell(cell).unwrap()).amplitude();
+        let style = ReliefStyle::of(field.cell(cell).unwrap());
         let at = |w: f64| {
             unresolved_variance(field, cell, Metres::new(w))
                 .unwrap()
                 .relief()
                 .value()
         };
-        // Every wavelength the coarse cell resolves: the whole of the octaves' bands.
+        // Every wavelength the coarse cell resolves: the whole of the octaves' bands, each times
+        // its own (a g^b)², the belt's shape (`decision-r09-t5.md` item 7).
         let relief = Relief::new(header, SEED);
         let mut carried = 0.0;
         for m in relief.first_octave()..=relief.finest_octave() {
-            let rms = relief.octave_rms(m).value();
+            let lift = math::powf(relief.belt_factor(m), style.belt());
+            let rms = style.amplitude() * lift * relief.octave_rms(m).value();
             carried += rms * rms;
         }
-        assert!((at(1e9) / (a * a * carried) - 1.0).abs() < 1e-12);
+        assert!((at(1e9) / carried - 1.0).abs() < 1e-12, "{style:?}");
+        if style.belt() > 0.0 {
+            belts += 1;
+        }
         let mut previous = f64::INFINITY;
         for w in [1e7, 1e5, 3e4, 1e4, 1e3, 1e2, 10.0, 5.0] {
             let v = at(w);
@@ -1439,7 +1735,8 @@ fn unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 60);
+    assert_eq!(checked, 90);
+    assert!(belts >= 20, "{belts} belt cells");
     // A cell the view does not hold has none.
     let held = Holding {
         inner: field,
@@ -1477,5 +1774,213 @@ fn the_ridge_weight_rms_is_measured() {
     assert!(
         (rms - RIDGE_WEIGHT_RMS).abs() < 2e-4,
         "{rms} vs {RIDGE_WEIGHT_RMS}"
+    );
+}
+
+/// The last octave's plain and ridged terms (n̂, r̃) of the two-octave stack `pair` at `point`
+/// (metres), the ridged one weighted by the first octave's ridge, unwarped, with their gradients.
+fn plain_and_ridged(
+    pair: &Relief,
+    table: &[Octave],
+    point: [f64; 3],
+    cache: &mut LatticeCache,
+) -> [Smooth; 2] {
+    let m = pair.first + 1;
+    let mut out = [Smooth::constant(0.0); 2];
+    let style = StyleSample::uniform(ReliefStyle::REFERENCE);
+    pair.octave_terms(table, point, &style, m, cache, |t| {
+        if t.octave == m {
+            out = [t.plain, t.ridged];
+        }
+    });
+    out
+}
+
+/// The pinned structure functions are R05's noise basis's (`decision-r09-t5.md` item 7): each
+/// term's D(r) ÷ σ² re-measured at 10⁶ samples lies within 2% of [`UnitStructure::at`], at every
+/// pinned lag and at 0.01 and 0.02 spacings, where the table's small-lag law, D ∝ r², gives it.
+///
+/// A sample is an area-uniform point of the Earth-like world, a random tangent and an octave from
+/// the second of its octaves to the finest, whose terms are read at the point and at each lag
+/// along the tangent. The ridged term is weighted by the octave above, as in every octave but the
+/// first. The standard error of each measure is under 0.4% of it.
+#[test]
+#[ignore = "slow: measures the terms' structure functions over 10^6 samples"]
+fn the_terms_structure_functions_are_pinned() {
+    const LAGS: [f64; 12] = [
+        0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
+    ];
+    let header = earth().header();
+    let relief = Relief::new(header, SEED);
+    let table = octave_table(SEED);
+    // Octave m's stack from m − 1, for m from the second octave to the finest.
+    let pairs: Vec<Relief> = (relief.first_octave()..relief.finest_octave())
+        .map(|first| Relief {
+            first,
+            ..relief.clone()
+        })
+        .collect();
+    let mut cache = LatticeCache::new();
+    let mut rng = Lcg::new(0x7374_7275);
+    let mut sums = [[0.0_f64; 2]; LAGS.len()];
+    // Each term's gradient along the tangent, per lattice spacing, squared: its small-lag slope.
+    let mut slopes = [0.0_f64; 2];
+    let samples = 1_000_000_u32;
+    let points = uniform_points(0x7374_7266, usize::try_from(samples).unwrap());
+    for (k, dir) in (0_u32..).zip(points) {
+        let pair = &pairs[usize::try_from(k).unwrap() % pairs.len()];
+        let spacing = octave_spacing(header.radius(), pair.first + 1).value();
+        let p = header.figure().point(dir);
+        let r = [0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0);
+        let along = r[0] * dir[0] + r[1] * dir[1] + r[2] * dir[2];
+        let tangent = unit_dir([0, 1, 2].map(|a| r[a] - along * dir[a]));
+        let here = plain_and_ridged(pair, &table, p, &mut cache);
+        for (slope, term) in slopes.iter_mut().zip(here) {
+            let g = term.gradient;
+            let along = (g[0] * tangent[0] + g[1] * tangent[1] + g[2] * tangent[2]) * spacing;
+            *slope += along * along;
+        }
+        for (sum, lag) in sums.iter_mut().zip(LAGS) {
+            let q = [0, 1, 2].map(|a| p[a] + lag * spacing * tangent[a]);
+            let there = plain_and_ridged(pair, &table, q, &mut cache);
+            for (s, (a, b)) in sum.iter_mut().zip(there.iter().zip(here)) {
+                *s += (a.value - b.value) * (a.value - b.value);
+            }
+        }
+    }
+    let n = f64::from(samples);
+    let measured = sums.map(|sum| [sum[0] / n, sum[1] / n]);
+    for (&[plain, ridged], lag) in measured.iter().zip(LAGS) {
+        println!(
+            "r = {lag:4} spacings: plain {plain:.4e} (pinned {:.4e}), ridged {ridged:.4e} (pinned \
+             {:.4e}), ratio {:.3}",
+            PLAIN_STRUCTURE.at(lag),
+            RIDGED_STRUCTURE.at(lag),
+            ridged / plain
+        );
+    }
+    let slopes = slopes.map(|s| s / n);
+    println!(
+        "small-lag slopes from the gradients: plain {:.4} (pinned {:.4}), ridged {:.4} (pinned \
+         {:.4}), ratio {:.3}",
+        slopes[0],
+        PLAIN_STRUCTURE.small_lag_slope(),
+        slopes[1],
+        RIDGED_STRUCTURE.small_lag_slope(),
+        slopes[1] / slopes[0]
+    );
+    for (slope, table, name) in [
+        (slopes[0], PLAIN_STRUCTURE, "plain"),
+        (slopes[1], RIDGED_STRUCTURE, "ridged"),
+    ] {
+        let pinned = table.small_lag_slope();
+        assert!(
+            (slope / pinned - 1.0).abs() < 0.02,
+            "{name}: the gradient's slope {slope}, the table's {pinned}"
+        );
+    }
+    for (&[plain, ridged], lag) in measured.iter().zip(LAGS) {
+        for (value, table, name) in [
+            (plain, PLAIN_STRUCTURE, "plain"),
+            (ridged, RIDGED_STRUCTURE, "ridged"),
+        ] {
+            let pinned = table.at(lag);
+            assert!(
+                (value / pinned - 1.0).abs() < 0.02,
+                "{name} at {lag} spacings: measured {value}, pinned {pinned}"
+            );
+        }
+    }
+}
+
+/// The plane-detrended RMS of the structural relief in `style` over `windows` square windows 35 km
+/// a side on the Earth-like world, 40 × 40 points a window, centred at area-uniform points and
+/// turned at random: √(the windows' mean of their residuals' mean square), metres (R09.T5's
+/// measure of relief, which set the styles' amplitudes on Earth2014).
+fn window_rms(style: ReliefStyle, windows: usize, seed: u64) -> f64 {
+    const SIDE: usize = 40;
+    let header = earth().header();
+    let relief = Relief::new(header, SEED);
+    let table = octave_table(SEED);
+    let uniform = StyleSample::uniform(style);
+    let mut cache = LatticeCache::new();
+    let mut rng = Lcg::new(seed ^ 0x7769_6e64);
+    #[expect(clippy::cast_precision_loss, reason = "40 points a side")]
+    let side = SIDE as f64;
+    let step = 35_000.0 / (side - 1.0);
+    let offsets: Vec<f64> = (0..u32::try_from(SIDE).unwrap())
+        .map(|i| (f64::from(i) - (side - 1.0) / 2.0) * step)
+        .collect();
+    // On the regular grid, centred, the plane's three terms are orthogonal.
+    let squares: f64 = offsets.iter().map(|x| x * x).sum::<f64>() * side;
+    let mut total = 0.0;
+    for centre in uniform_points(seed, windows) {
+        let p = header.figure().point(centre);
+        let r = [0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0);
+        let along = r[0] * centre[0] + r[1] * centre[1] + r[2] * centre[2];
+        let e1 = unit_dir([0, 1, 2].map(|a| r[a] - along * centre[a]));
+        let e2 = [
+            centre[1] * e1[2] - centre[2] * e1[1],
+            centre[2] * e1[0] - centre[0] * e1[2],
+            centre[0] * e1[1] - centre[1] * e1[0],
+        ];
+        let mut heights = Vec::with_capacity(SIDE * SIDE);
+        for &x in &offsets {
+            for &y in &offsets {
+                let q = [0, 1, 2].map(|a| p[a] + x * e1[a] + y * e2[a]);
+                let mut h = 0.0;
+                relief.octave_terms(
+                    &table,
+                    q,
+                    &uniform,
+                    relief.finest_octave(),
+                    &mut cache,
+                    |t| {
+                        h += t.height.value;
+                    },
+                );
+                heights.push(h);
+            }
+        }
+        let mean = heights.iter().sum::<f64>() / (side * side);
+        let (mut sx, mut sy) = (0.0, 0.0);
+        for (i, &x) in offsets.iter().enumerate() {
+            for (j, &y) in offsets.iter().enumerate() {
+                let h = heights[i * SIDE + j];
+                sx += x * h;
+                sy += y * h;
+            }
+        }
+        let (cx, cy) = (sx / squares, sy / squares);
+        let mut residual = 0.0;
+        for (i, &x) in offsets.iter().enumerate() {
+            for (j, &y) in offsets.iter().enumerate() {
+                let d = heights[i * SIDE + j] - mean - cx * x - cy * y;
+                residual += d * d;
+            }
+        }
+        total += residual / (side * side);
+    }
+    #[expect(clippy::cast_precision_loss, reason = "a few hundred windows")]
+    let count = windows as f64;
+    (total / count).sqrt()
+}
+
+/// A full belt's relief in 35 km windows is 2.8–3.6 times the reference style's on the same
+/// windows (`decision-r09-t5.md` item 7; the ruling's replica 505 m against 159 m, 3.2), within
+/// the 2.1–3.4 that active belts measure against Earth's mean on Earth2014 ([`BELT_AMPLITUDE`]),
+/// so that the belt's shape keeps its relief while it holds its slopes. Over 200 windows.
+#[test]
+#[ignore = "slow: samples 200 windows of 1,600 points in two styles"]
+fn a_full_belt_s_window_relief_is_three_times_the_reference_s() {
+    let reference = window_rms(ReliefStyle::REFERENCE, 200, 0x7769_6e31);
+    let belt = window_rms(FULL_BELT, 200, 0x7769_6e31);
+    println!(
+        "35 km windows: reference {reference:.1} m, full belt {belt:.1} m, ratio {:.3}",
+        belt / reference
+    );
+    assert!(
+        (2.8..=3.6).contains(&(belt / reference)),
+        "{belt} m against {reference} m"
     );
 }
