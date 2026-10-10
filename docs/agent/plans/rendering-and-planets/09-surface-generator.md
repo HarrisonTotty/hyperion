@@ -1108,8 +1108,9 @@ runs; the governor recorded), since the research's figures were taken under load
   sets it `Ok` for a present body at `DetailLevel::Full` (`RecordSection::Hooks`'s level), and the
   server's `convert::planetary::hooks` maps it to `BodyHooksDto { detail_seed: ok }`, turning R04's
   `not_modelled` section `ok`. That moves P14.T32's golden systems (`hooks: NotModelled` on every
-  present body), so T1.b bumps `GENERATOR_VERSION` through the orchestrator, one lane at a time, by
-  the sim-determinism skill, or lands in the same bump as T9 or T16 if the orchestrator so orders.
+  present body), so T1.b is built in galaxy plan 14's 21 → 22 batch, by its lane (`p14-batch`) at
+  any point before P14.T48.e (decision-composition §8.2 item 10), and lands under that batch's one
+  `GENERATOR_VERSION` bump, by the sim-determinism skill, not alone or with T9 or T16.
   This plan does not build `surface_seed`; the coarse pass takes its `SurfaceSeed` from the builder
   in every test. Tests: the detail seed of 10⁶ bodies has no duplicates and differs from the surface
   seed of each; the hooks section's wire form carries `detail_seed` and no `surface_seed`; a ring,

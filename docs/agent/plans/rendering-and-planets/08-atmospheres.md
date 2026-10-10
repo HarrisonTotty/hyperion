@@ -739,7 +739,7 @@ Names are those the owning plans give; the owning plan is authoritative.
      2026-09-29). The values: 2/7 = 0.286 for H₂, N₂ and O₂ (H₂'s frozen rotation below about
      150 K is a recorded caveat); 0.400 for He and Ar; 3/13 = 0.231 for CO₂, R&C's γ = 1.3; 0.25
      for H₂O, CH₄ and NH₃ (N = 6, medium confidence for the last two). NIST's values at 298 K
-     (0.288, 0.286, 0.283, 0.400, 0.400, 0.224, 0.248, 0.233, 0.237) agree within about 7%. A
+     (0.288, 0.285, 0.283, 0.400, 0.400, 0.224, 0.248, 0.233, 0.233) agree within about 7%. A
      temperature-dependent c_p is not used: it breaks the constant-β form, and R&C calibrated α
      against their constant γ.
    - α scales the dry adiabat for latent heat, by the condensing species: 0.6 with a water ocean,
@@ -753,8 +753,8 @@ Names are those the owning plans give; the owning plan is authoritative.
        Atmosphere 1976, 0.226 bar at 216.65 K).
      - Venus (T_s 730 K, p_s 92 bar, α 0.8, R/c_p 3/13, β 0.1846): 316.8 K at 1 bar, against about
        350 K (VIRA, Seiff et al. 1985). At plan 14's 58 bar the same β gives about 345 K.
-     - Titan (T_s 94 K, p_s 1.4 bar, α 0.77, R/c_p 2/7, β 0.22, T_skin 64 K): tropopause 0.24 bar
-       at 64 K (0.26 bar at the real 1.5 bar), against 0.1–0.2 bar and 70 K (R&C 2014 Table 1;
+     - Titan (T_s 94 K, p_s 1.4 bar, α 0.77, R/c_p 2/7, β 0.22, T_skin 64 K): tropopause 0.244
+       bar at 64 K (0.26 bar at the real 1.5 bar), against 0.1–0.2 bar and 70 K (R&C 2014 Table 1;
        Huygens HASI).
 
    Plan 14 publishes the parameters (T_s, p_s, β, T_skin), and for giants its envelope form (R08.T1,
@@ -802,7 +802,8 @@ Names are those the owning plans give; the owning plan is authoritative.
    - a 92-bar CO₂ Venus column has τ_R(550) ≈ 16 (and about 41 in the blue).
 
    The tutorials' 5.8, 13.5 and 33.1 × 10⁻⁶ m⁻¹ appear nowhere. The dense-gas fluctuation factor,
-   about 1.06 at Venus's surface, is a recorded omission.
+   about 1.025 at Venus's surface with the Lorentz–Lorenz local field (NIST's CO₂ at 737 K and
+   9.2 MPa gives ρk_BTκ_T = 0.985; medium confidence), is a recorded omission.
 
 5. **Channels, spectral bakes and curves of growth** (researched 2026-09-29; Bruneton 2017, arXiv
    1612.04336 §14.3; Elek and Kmoch 2010). This is a design choice, not a ruling.
@@ -1475,10 +1476,13 @@ The order:
   it in the photorealistic view and follows T10.a and T7. T11 records the thin benchmarks and needs
   T7–T10.
 - T12.a (the tracer) needs nothing of this plan and can start at once. T12.c (its benchmarks) and
-  T12.d (the spheroid mode) follow it. T12.b (the cases and references) needs T5, T10's fixtures,
-  T12.c and T12.d.
-- T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13, and T15 follows T14, whose
-  solver it uses.
+  T12.d (the spheroid mode) follow it; T12.c's cases whose matrices come from R08's Mie
+  (Kokhanovsky's aerosol and cloud, IPRT's spheres) also wait on T5.b, and its other cases do not.
+  T12.b (the cases and references) needs T5, T10's fixtures, T12.c and T12.d.
+- T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13: T14.a, T14.b and T14.c in
+  turn; T14.e (the polarisation correction) after T14.a and T14.b; T14.f (its read path and the
+  vector gates) after T13, T14.c and T14.e; and T14.d (the gates) after T14.f. T15 follows T14,
+  whose solver it uses.
 - T16 needs T8 and T15. It runs on the hand giant fixture, and re-runs on plan 14's envelope when
   P14.T24.d is on the wire. T18 needs T6, T9, T14 and T16.b. T19 needs P14.T49.a's fixture and
   T5.b, and grows with the registry. Both precede T17. T17 closes.
@@ -1711,7 +1715,7 @@ pins the strings. Acceptance:
   - the column mass per area is p_s/g to 0.5% for a thin atmosphere, with the spherical excess for
     a thick one;
   - `temperatureAt` reproduces Design note 3's Earth, Venus and Titan checks from the inputs
-    stated there: 0.179 bar, 316.8 K at 1 bar, and 0.24 bar, each to 1%;
+    stated there: 0.179 bar, 316.8 K at 1 bar, and 0.244 bar, each to 1%;
   - the mixed R/c_p of Design note 3's per-gas values equals 3/13 for pure CO₂ and 2/7 for pure
     N₂, and mixes by c_p, not by γ;
   - once P14.T24.e lands, a golden list of levels from the sim is matched to 10⁻¹².
@@ -1835,10 +1839,11 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   (decision-composition §1.9), weighted by max(r̄_c, 0)·S (Design note 5), on σ's own grid of 1 nm
   or finer, with S interpolated from the sun's 15 `bake_spectrum` bin averages. It runs in the
   optics worker at arrival, once per sun. The reduced cross-sections, ozone binned to 1 nm and
-  methane's coefficients as published, are written to `absorbers/crossSections.json` by the same
-  reduction step (T4.a's Node tool, since a renderer test fetches and reads no raw file). Ozone's
-  1 nm bins are centred, on [λ − 0.5, λ + 0.5) nm (`decisions-r05.md` item 2), unlike R05's
-  three upward 10 nm bins, which R05 keeps for parity with Bruneton and sebh.
+  methane's σ at its three temperatures interpolated onto a uniform grid of 0.25 nm or finer
+  (below), are written to `absorbers/crossSections.json` by the same reduction step (T4.a's Node
+  tool, since a renderer test fetches and reads no raw file). Ozone's 1 nm bins are centred, on
+  [λ − 0.5, λ + 0.5) nm (`decisions-r05.md` item 2), unlike R05's three upward 10 nm bins, which
+  R05 keeps for parity with Bruneton and sebh.
   - Sources: ozone from Serdyuchenko et al. 2014 (AMT 7, 625; the articles CC BY 3.0, the data
     page's terms unstated). Methane from Karkoschka and Tomasko 2010 (Icarus 205, 674), as NASA's
     Planetary Spectrum Generator converts them to cross-sections at 100, 198 and 296 K:
@@ -2456,7 +2461,9 @@ here, and `pnpm test` passes.
   the comment there that lists the crate's allowed dependencies extended) and has:
   - next-event estimation to each sun, and Russian roulette;
   - an explicit detector cone;
-  - an optional Stokes mode for Rayleigh;
+  - an optional Stokes mode for Rayleigh (and isotropic scattering, as built), which R08.T12.c
+    widens to tabulated matrices (a₁–a₄, b₁, b₂) with a `depolarising` mark
+    (`decision-r08-vector.md` item 1);
   - reproducible results for any thread count, by the crate's convention: an
     `Option<NonZeroUsize>` thread count, `parallel::map_reduce_chunks`, and counter-based draws
     keyed per sample, as `tasks/displaced_forms/births.rs`'s `Draws` are; arithmetic through
@@ -3647,9 +3654,11 @@ generator, and the reference's sampling needs no domain tag.
     under a 400% CPU quota): about 9 µs a path on the τ = 0.5 Rayleigh slab and 107 µs on an
     Earth-like case of three terms (Rayleigh, a Cornette–Shanks aerosol and an ozone tent; about 50
     shells), where the quadrature of each sun's transmittance dominates. A twilight ground view
-    (sun at 95°) is noisy, about 4–7% at 2 × 10⁴ samples, since few forced collisions see the sun;
-    such radiances lie under Design note 10's 10⁻² L_max, where σ_ref ≤ 1% does not bind, but T12.b
-    budgets their samples.
+    (sun at 95°) is noisy, about 4–7% at 2 × 10⁴ samples, since few forced collisions see the sun.
+    Under Design note 10's metric (decision-backlog-1) that image is held to its own brightest
+    radiance, and σ_ref ≤ T ÷ 8 binds at every geometry, so T12.b traces such views until it holds
+    and budgets their samples. (This note first cited the superseded floor, 10⁻² L_max of the case,
+    under which σ_ref ≤ 1% did not bind.)
   - _Citations, decided 2026-10-09_ (`decision-r08-vector.md` item 3).
     - Hansen and Travis 1974's matrix is eq. (2.15), with Δ and Δ′ in eq. (2.16), p. 541; their
       δ is the code's ρ.
