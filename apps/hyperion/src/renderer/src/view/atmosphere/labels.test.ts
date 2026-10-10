@@ -8,11 +8,12 @@ import {
 } from "./labels";
 
 describe("the atmosphere labels", () => {
-  it("spell the six statements as the guide's rows do", () => {
+  it("spell the seven statements as the guide's rows do", () => {
     expect(ATMOSPHERE_STATEMENTS).toEqual({
       atmosphereNotResolved: "ATMOSPHERE: NOT RESOLVED",
       atmosphereNotYetModelled: "ATMOSPHERE: NOT YET MODELLED",
       aerosolsNotYetModelled: "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
+      exosphereNotYetModelled: "EXOSPHERE: NOT YET MODELLED",
       atmospherePending: "ATMOSPHERE: PENDING",
       atmosphereComputing: "ATMOSPHERE: COMPUTING",
       atmosphereApproximate: "ATMOSPHERE: APPROXIMATE",
@@ -42,12 +43,14 @@ describe("atmosphereStatements", () => {
       "atmospherePending",
       "atmosphereNotResolved",
       "atmosphereComputing",
+      "exosphereNotYetModelled",
       "aerosolsNotYetModelled",
       "atmosphereNotYetModelled",
     ];
     expect(atmosphereStatements(labels)).toEqual([
       "ATMOSPHERE: NOT YET MODELLED",
       "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
+      "EXOSPHERE: NOT YET MODELLED",
       "ATMOSPHERE: NOT RESOLVED",
       "ATMOSPHERE: PENDING",
       "ATMOSPHERE: COMPUTING",

@@ -1,10 +1,11 @@
 /**
- * What a photorealistic view says about the atmospheres it draws (plan R08, Design note 12): six
+ * What a photorealistic view says about the atmospheres it draws (plan R08, Design note 12): seven
  * statements for its label block, rows of the guide's nomenclature list
- * (`docs/frontend/ux-guidelines.md`; drafted by R08.T2, signed off 2026-10-09).
+ * (`docs/frontend/ux-guidelines.md`; drafted by R08.T2, signed off 2026-10-09; the exosphere's
+ * signed off 2026-10-10, `signoff-2.md` item 6).
  *
  * @remarks
- * The three labels follow the guide's grammar for a withheld or unmodelled section, as
+ * The four labels follow the guide's grammar for a withheld or unmodelled section, as
  * `BODY PHOTOMETRY: NOT YET MODELLED` does. The three annunciations concern the view's own drawing
  * (the rendering brainstorm's "What the guide must gain", item 7), as `TERRAIN: STREAMING` and
  * `LIGHTING: PENDING` do: steady, in `--text`, on the label block's plate, neither a data state nor
@@ -33,6 +34,12 @@
  * - `aerosolsNotYetModelled`: plan 14 publishes no aerosol or absorber inventory, so the air is
  *   drawn with its gases' scattering alone. Its statement names the absorbers too: ozone and
  *   methane, like the aerosols, are drawn only from the inventory.
+ * - `exosphereNotYetModelled`: a generated body is airless, its atmosphere computed with no air in
+ *   it, and the generator does not yet compute its exosphere, the unbound gas an airless body may
+ *   still hold (P14.T55.c). No atmosphere is drawn: an exosphere's scattering of sunlight is far
+ *   too faint to see, but its resonance light, a Mercury-class body's sodium above its limb, is
+ *   not drawn either. The note is never read as "none", and a kept scene's body set airless
+ *   carries none (`signoff-2.md` item 6).
  * - `atmospherePending`: the body's surface or envelope section has been asked of the server
  *   (`body_detail`) and its reply is not yet drawn. No atmosphere is drawn meanwhile, and the note
  *   clears by itself (decision-r08-giant-label).
@@ -52,13 +59,16 @@
  * Per body, as R08.T10.a's `assembleMedium` and R08.T14.c's bake give them: at most one of
  * `atmosphereNotResolved` and `atmosphereNotYetModelled`, the withheld section first, since the
  * client cannot see past it; no `aerosolsNotYetModelled` under either, since none of the body's air
- * is drawn; and at most one of `atmosphereComputing` and `atmosphereApproximate`, the first while a
- * gated bake runs (decision-r08-giant-label; the guide's rows).
+ * is drawn; at most one of `atmosphereComputing` and `atmosphereApproximate`, the first while a
+ * gated bake runs (decision-r08-giant-label; the guide's rows); and for a generated airless body
+ * `exosphereNotYetModelled` alone (a kept scene's, none), never beside the other two
+ * `NOT YET MODELLED` notes for the same body (`signoff-2.md` item 6).
  */
 export type AtmosphereLabel =
   | "atmosphereNotResolved"
   | "atmosphereNotYetModelled"
   | "aerosolsNotYetModelled"
+  | "exosphereNotYetModelled"
   | "atmospherePending"
   | "atmosphereComputing"
   | "atmosphereApproximate";
@@ -68,15 +78,17 @@ export const ATMOSPHERE_STATEMENTS: Readonly<Record<AtmosphereLabel, string>> = 
   atmosphereNotResolved: "ATMOSPHERE: NOT RESOLVED",
   atmosphereNotYetModelled: "ATMOSPHERE: NOT YET MODELLED",
   aerosolsNotYetModelled: "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
+  exosphereNotYetModelled: "EXOSPHERE: NOT YET MODELLED",
   atmospherePending: "ATMOSPHERE: PENDING",
   atmosphereComputing: "ATMOSPHERE: COMPUTING",
   atmosphereApproximate: "ATMOSPHERE: APPROXIMATE",
 };
 
 /**
- * Every label, in the order the six stand among themselves on the label block: the two
+ * Every label, in the order the seven stand among themselves on the label block: the three
  * `NOT YET MODELLED` notes, then `ATMOSPHERE: NOT RESOLVED` after them as the guide's "Data states"
- * places a `NOT RESOLVED` note, then the three annunciations (decision-r08-giant-label).
+ * places a `NOT RESOLVED` note, then the three annunciations (decision-r08-giant-label;
+ * `signoff-2.md`, "Client strings").
  *
  * @remarks
  * Where they stand among the block's other notes is R08.T10.b's: after `photorealStatements`'
@@ -86,6 +98,7 @@ export const ATMOSPHERE_STATEMENTS: Readonly<Record<AtmosphereLabel, string>> = 
 export const ATMOSPHERE_LABELS: ReadonlyArray<AtmosphereLabel> = [
   "atmosphereNotYetModelled",
   "aerosolsNotYetModelled",
+  "exosphereNotYetModelled",
   "atmosphereNotResolved",
   "atmospherePending",
   "atmosphereComputing",

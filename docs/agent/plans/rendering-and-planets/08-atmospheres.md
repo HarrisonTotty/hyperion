@@ -4180,7 +4180,9 @@ generator, and the reference's sampling needs no domain tag.
     each label's string once in that order, scene-level as `litLabelsOf` is. R08.T10.b appends its
     result after `photorealStatements`' other notes, so that `ATMOSPHERE: NOT RESOLVED` stands
     after every `NOT YET MODELLED` note on the block, `ROTATION`'s and `BODY PHOTOMETRY`'s
-    included.
+    included. Since 2026-10-10 there are seven (`signoff-2.md`, "Client strings"):
+    `exosphereNotYetModelled`, `EXOSPHERE: NOT YET MODELLED`, follows `aerosolsNotYetModelled`
+    among the three `NOT YET MODELLED` notes, and R08.T10.a sets it (Design note 12).
   - _Per body._ The TSDoc states the precedence that T10.a and T14.c build. A body carries at
     most one of `NOT RESOLVED` and `NOT YET MODELLED`, the withheld section first, and no
     `AEROSOLS` note under either. It carries at most one of `COMPUTING` and `APPROXIMATE`:
