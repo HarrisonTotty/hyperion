@@ -831,9 +831,12 @@ Names are those the owning plans give; the owning plan is authoritative.
    - **Channel wavelengths.** The per-frame tables stay three-channel (Hillaire, the budget).
      Smooth terms are evaluated at fitted wavelengths, not at 680/550/440, and multiplied by the
      star's linear Rec. 709 colour from R06. The 680/550/440 set is Bruneton's code constant: at
-     Earth it puts low suns up to 60% too bright and 0.01–0.04 off in u′v′. A minimax fit over an
-     Earth case family gives (620, 540, 445) nm, within 0.0005–0.016. R08.T4 refits it with a Mars
-     dust case and records the objective. The 680/550/440 figures stay as tests of `rayleigh.ts`.
+     Earth it puts low suns up to 60% too bright and 0.01–0.04 off in u′v′. R08.T4.a's minimax fit
+     gives (645, 544, 433.625) nm, over a family of twelve suns, Earth, Mars with dust and 27 gases:
+     its largest Δu′v′ is 0.0077, and over Earth at the plan's three suns 0.0068 against 0.0132 at
+     680/550/440 (corrected 2026-10-10 from the research figure, (620, 540, 445) nm within
+     0.0005–0.016 over an Earth family it did not record; Risks, "Deviations in T4.a, as built").
+     The 680/550/440 figures stay as tests of `rayleigh.ts`.
    - **Spectral bakes.** Everything baked off the frame loop is solved in the 15 bins of
      `BAKE_WAVELENGTHS_NM` (centres 392.67 + 25.33 k nm) over 380–760 nm and converted to linear
      Rec. 709 on storage, through the CIE matching functions times the star's spectrum. That is
@@ -1098,7 +1101,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       is the precedent for a long run outside the table manifest. Its JSON fixtures for the client
       are a new kind of output for the crate, stated in its docs. Its runs are by hand and their
       outputs committed.
-    - **Validation**, before it is trusted, all to |ΔI| ≤ 3σ with σ ≤ 0.3%:
+    - **Validation**, before it is trusted, each by the agreement test of _Statistics_ (below),
+      with σ ≤ 0.3% of I at every value:
       - Garcia and Siewert 1985's Haze L and Cloud C1 (τ = 64, the deck regime; Transport Theory
         and Statistical Physics 14, 437);
       - Natraj, Li and Yung 2009 (ApJ 691, 1909) and Natraj and Hovenier 2012 (ApJ 748, 28) for
@@ -1108,8 +1112,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       - Kokhanovsky et al. 2010 (JQSRT 111, 1931) and IPRT Phase A (Emde et al. 2015, JQSRT 164,
         8), also through the Stokes mode, with each case's tabulated scattering matrix (a₁–a₄, b₁,
         b₂; R08.T12.c). Garcia and Siewert's are scalar problems and run in the scalar mode;
-      - and for spherical shells Loughman et al. 2004 (JGR 109, D06303), at its 2–4% model spread
-        rather than 3σ.
+      - and for spherical shells Loughman et al. 2004 (JGR 109, D06303), at its 2–4% model spread,
+        by the tolerance test (_Statistics_).
 
       The 1960 Coulson–Dave–Sekera tables are not used, being wrong in the fourth decimal.
 
@@ -1181,7 +1185,7 @@ Names are those the owning plans give; the owning plan is authoritative.
           heights;
         - aerial perspective over 1, 10 and 32 km.
       - Two aggregates, downwelling flux at the ground and plane albedo at the top, each within
-        2%.
+        2% by the tolerance test: |ΔF| ≤ 0.02·F_ref + 4σ_F, with σ_F ≤ 0.0025·F_ref.
       - **Recorded beside each case, never gated:**
         - the u′v′ difference;
         - per image, the largest ΔE*ab between the two pipelines' colours through `toneCurve` at the
@@ -1190,6 +1194,40 @@ Names are those the owning plans give; the owning plan is authoritative.
           (Emde et al. 2015), for comparison with the intercomparisons' figures of about 1%;
         - each image's L_max ÷ mean, so that an aureole brighter than the floor's bound of 30 is seen.
 
+    - **Statistics** (ruled 2026-10-10, `decision-r08-t4b-t12c.md`). Every test that reads the
+      reference's noise is one of two kinds. Both are at the testkit's α = 10⁻³, with fixed seeds
+      that are never changed to make a test pass. Deterministic comparisons carry no α.
+      - _Agreement_: the tracer should equal a value (a published benchmark, another of its own
+        modes, an exact property).
+        - Over a test's N values, each is held to the two-sided Bonferroni bound at α ÷ 2,
+          |z| ≤ z_N = Φ⁻¹(1 − α ÷ 4N): 4.0 at N = 8, 4.5 at 78, 4.75 at 246.
+        - z = (traced − expected) ÷ √(σ² + σ_pub²), where σ_pub is a printed value's rounding
+          (a unit of its last digit ÷ √12) or a stated spread.
+        - Each Stokes component with 10 or more independent values is held by its χ² to an
+          upper-tail p ≥ α ÷ 2K over its K components.
+        - σ ≤ 0.3% of I is asserted at every value. The count past 3σ, the largest |z| and each p
+          are recorded.
+        - "Each to 3σ" would fail a correct tracer at 1 − 0.9973ᴺ, 19% at N = 78.
+      - _Tolerance_: the client, or a sanity range, should lie within a bound of the reference.
+        - It is the metric per comparison, |ΔL| ≤ T + 4σ_ref with σ_ref ≤ T ÷ 8, with no
+          family-wise widening and no χ². It is not a test of equality: Φ(−4) = 3 × 10⁻⁵ is its
+          false failure only for a client exactly at T, and the committed reference makes the
+          outcome repeatable.
+        - A failure is a finding. A reference is re-traced only for a recorded reason, never to
+          pass a gate, and both results are recorded.
+        - The same form holds:
+          - an aggregate within 2% (σ_F ≤ 0.0025·F_ref);
+          - a sanity range [a, b], as a − 4σ ≤ F ≤ b + 4σ with σ ≤ (b − a) ÷ 16;
+          - a published spread S(g), as |ΔI| ≤ S(g) + 4σ with σ ≤ min(0.3% of I, S(g) ÷ 8);
+          - a gate that must fail, asserted only where some comparison reaches T + 8σ_ref.
+        - A committed reference's sample count is set from a pilot run's σ and traced afresh at
+          its own seed.
+      - _Why the two agree._ The agreement tests certify what the metric's 4σ_ref trusts:
+        - the χ²'s upper tail fails an understated σ;
+        - with σ ≤ 0.3% of I, a single value passes at most z_N·σ ≈ 1.4% of I, inside the
+          metric's 4σ_ref ≤ T ÷ 2;
+        - a systematic 2σ = 0.6% fails a component's χ² with probability ≥ 0.98, under the
+          T ÷ 8 of noise the metric admits.
     - **The gate** is an ordinary vitest that runs the CPU twin on each committed case. So the
       brainstorm's "every baked atmosphere table matches a path-traced reference to 5%" is
       automatic, as its Testing section files it.
@@ -2519,6 +2557,15 @@ them. Files: `settings.ts`, `sources.ts` and `sources.test.ts`, `view/quality/qu
   composite reads that colour (`AtmosphereScene.colour`). So the composite applies the
   transmittance to space along each sky pixel's ray, and R06's shaders (`view/sky/shaders/`) are
   edited only if that cannot serve, recorded here.
+- the per-view tables (the sky view, the aerial volume and the ray march) are written per unit of
+  a per-frame scale formed in `f64`, the drawn sources' sky scale or the pre-exposure, as the
+  composite's own output already is, and the composite divides it out where `skyScale` multiplies
+  today (`decision-r08-t6b-floor.md` §6, its lean, adopted 2026-10-10 for this task). Stored per
+  unit of the sun's illuminance in `rgba16float`, as R05 stores them, Earth's twilight sky is
+  banded from about −6° and black by −12°, and a moonlit sky lies under one step of the half float
+  (Risks, "The per-view tables' range at twilight and by moonlight"). The per-planet
+  multiple-scattering table cannot take a frame's scale: this task records its night side against
+  2⁻¹⁴ and states its answer, for "main";
 
 Tests (no GPU, CPU twin):
 
@@ -2537,7 +2584,14 @@ Tests (no GPU, CPU twin):
   for a Rayleigh sky and for Earth's aerosol; if it fails, the per-sun fallback of Design note 7 is
   built here and the finding recorded;
 - the per-view tables' bytes do not grow with the number of suns;
-- a star seen at the zenith from Earth's surface is dimmed by e^(−τ) of the column.
+- a star seen at the zenith from Earth's surface is dimmed by e^(−τ) of the column;
+- with the Sun at −6°, −8°, −10° and −12°, and in the moonlit night, each per-view table's largest
+  stored value is recorded against 2⁻¹⁴, the half float's least normal;
+- in air two, three and ten Earth columns deep, the colour error of a source's three-channel
+  transmittance is recorded: beyond two or three Earth columns no three wavelengths hold (R08.T4.a
+  measured 0.0106, 0.0151 and 0.100 in u′v′ for dry air at the fitted triple, all twelve suns), so
+  a deep atmosphere's low sun is off by more than 0.01, and such a medium's scattered light is the
+  spectral bakes' (Design note 5).
 
 Acceptance: `pnpm test` and `just test-render` pass, and by hand a binary sky on an Earth fixture
 shows both twilights, recorded here with the development machine's timings and, from the owner,
@@ -2563,7 +2617,11 @@ the sky-view table is by altitude, with a blend band. Tests (no GPU):
   at the same pixels, recorded with the blend band's altitudes;
 - the limb falls to zero outside the top;
 - a body's atmosphere is drawn at `apparentM`, and only the ship's local body at `geometricM`,
-  including when a free camera sits inside another body's Hill sphere.
+  including when a free camera sits inside another body's Hill sphere;
+- the fitted triple's u′v′ error on the limb seen from orbit, by R08.T4.a's colour pipeline (its
+  direct beam and singly scattered light, as the channel fit's objective models them), is recorded
+  here: views from orbit are not in the channel fit's family, and a limb chord carries about twice
+  the horizon's column, whose direct beam is already 0.022 off (R08.T4.a).
 
 Acceptance: `pnpm test` and `just test-render` pass, and by hand an ascent from R05's test planet
 to 10⁸ m shows no step at the switch, recorded here.
@@ -2811,8 +2869,9 @@ here, and `pnpm test` passes.
   slow tests, `#[ignore = "slow: …"]` (run by `just test-slow` under its `slow-test` profile), in a
   module `atmosphere::benchmarks`:
   - Garcia and Siewert's Haze L and Cloud C1, Natraj et al.'s Rayleigh tables (Stokes),
-    Kokhanovsky et al. 2010 and IPRT Phase A, each to 3σ with σ ≤ 0.3%;
-  - Loughman et al. 2004 within its 2–4% spread.
+    Kokhanovsky et al. 2010 and IPRT Phase A, each by Design note 10's agreement test with
+    σ ≤ 0.3% of I;
+  - Loughman et al. 2004 within its 2–4% spread, by the tolerance test.
 
   Before the benchmarks run, the Stokes mode gains (ruled 2026-10-09, `decision-r08-vector.md`
   item 1):
@@ -2839,7 +2898,8 @@ here, and `pnpm test` passes.
     published.
 
   Variance reduction for the clouds' forward peak is allowed only if unbiased. A case that
-  cannot reach σ ≤ 0.3% records the σ reached and asserts 3σ at it, and "main" is told.
+  cannot reach σ ≤ 0.3% records the σ reached and asserts the agreement test at it, and "main" is
+  told.
 
   Unit tests:
   - a sphere's single-scattering degree of polarisation is −b₁ ÷ a₁;
@@ -2880,7 +2940,8 @@ here, and `pnpm test` passes.
   451, 2002) and g(φ) by Somigliana, both in Rust (rotational figures; a tidal case would take
   Design note 17's ω_fig and ω²R). Next-event estimation to each sun marches the same geometry.
   Tests:
-  - a = c with ω = 0 agrees with `Shells::Sphere` to 3σ on the Earth case;
+  - a = c with ω = 0 agrees with `Shells::Sphere` on the Earth case by Design note 10's agreement
+    test (4.0σ over its 8 values; no χ² below 10 values);
   - an absorbing-only Saturn-class medium gives Beer–Lambert against an `f64` quadrature of the
     density along the same chord to 10⁻⁶, grazing at the equator north and east and at the pole;
   - the normal gravity reproduces WGS 84's γ_e and γ_p to 10⁻⁹, as R08.T3.d's TypeScript does.
@@ -2908,17 +2969,20 @@ here, and `pnpm test` passes.
     inputs:
     - the images' grouping and each one's floor: a twilight image's dim sky is held to 5% of its
       own brightest, not to the noon image's;
-    - the 4σ allowance, and the refusal of a reference whose σ exceeds T ÷ 8;
+    - the 4σ allowance, and the refusal of a reference whose σ exceeds T ÷ 8; the aggregates' and
+      sanity ranges' tolerance tests (Design note 10, _Statistics_);
     - the cone average;
     - the direct beam (Design note 10): E_c·e^(−τ) ÷ π under the same T with no σ term, a beam
       under the image's floor passing, and the reference's `sunOpticalDepth` against the
       client's quadrature to 10⁻⁶·max(1, τ);
     - the recorded ΔE*ab, relative RMS difference and max ÷ mean.
 
-    The references are traced until σ_ref ≤ T ÷ 8 at every geometry (decision-backlog-1), and
-    each case's sample counts are committed with it.
+    The references are traced to σ_ref ≤ T ÷ 8 at every geometry (decision-backlog-1) and
+    σ_F ≤ 0.0025·F at each aggregate. Each case's sample count is set from a pilot run's σ and
+    traced afresh at its own seed, and is committed with it.
 
-  - Sanity tests on the references:
+  - Sanity tests on the references, each range [a, b] held as a − 4σ ≤ F ≤ b + 4σ with
+    σ ≤ (b − a) ÷ 16 (Design note 10, _Statistics_):
     - the Venus-class case's surface downward flux is 2–4% of the top's at the sun of the Pioneer
       Venus large probe's solar flux radiometer (LSFR), with the surface sky red-shifted (Tomasko
       et al. 1980, 2.5%);
@@ -2939,15 +3003,16 @@ it writes the twin's analytic radiances, which a bless-style vitest supplies as 
 full sweep is run by hand and its output committed as `reference/ms-sweep.json`, kept under the
 500 kB added-file hook (the grid is sized for it, or the file is split by ω). `atmosphere-sweep` is
 a `cli.rs` variant like `atmosphere-reference`. From it,
-`thick/regime.ts` sets `THICK_MS_BOUNDARY`, the τ*(ω, g) table of Design note 9, and
+`thick/regime.ts` sets `THICK_MS_BOUNDARY`, the τ*(ω, g) table of Design note 9 (the smallest
+swept τ at which some geometry fails the metric, every sweep point traced to σ_ref ≤ T ÷ 8), and
 `classifyRegime(medium, cover)` routes by that table and by the per-body deck rule (τ above 10,
 cloud fraction 1). Tests:
 
 - Earth and Mars classify `thin` and pass the gate, or the finding is recorded and raised for a
   ruling;
 - `saturn-oblate` classifies `thin` and passes the gate with R08.T6.e's slicing, and fails it with
-  one slice and one band at the limb above 1 H (the check that the gate sees oblateness); both are
-  recorded;
+  one slice and one band at the limb above 1 H, some comparison reaching |ΔL| ≥ T + 8σ_ref (the
+  check that the gate sees oblateness beyond the reference's noise); both are recorded;
 - every case's direct beam passes Design note 10's two checks, and each case's worst ratio for
   each is recorded: the reference's `sunOpticalDepth` against the client's own quadrature
   (R08.T6.e's spheroid march on `saturn-oblate`), and the client's beam (the sliced lookup on
@@ -2959,8 +3024,13 @@ cloud fraction 1). Tests:
   it does is the table replaced by one scalar;
 - a body with a τ 30 deck and cloud fraction 0.6 is not `cloudDeck`, and with fraction 1 it is;
 - R08.T9.b's surface irradiance at Earth, direct plus diffuse at a sun zenith of 0°, agrees with
-  the reference's downwelling flux aggregate to 2%;
-- the boundary table and the sweep's provenance are in its doc comment.
+  the reference's downwelling flux aggregate to 2% by the tolerance test;
+- the boundary table and the sweep's provenance are in its doc comment;
+- where τ* lies against the depth beyond which no three wavelengths hold is recorded: R08.T4.a
+  measured 0.0106, 0.0151 and 0.100 in u′v′ for dry air at 2, 3 and 10 Earth columns at the fitted
+  triple, all twelve suns, so a `thin` medium deeper than two or three Earth columns keeps a
+  three-channel transmittance more than 0.01 off at low sun, while its scattered light, past the
+  boundary, is the spectral bakes' (Design note 5).
 
 Acceptance: `cargo test -p hyperion-fit atmosphere` (the sweep's `--smoke` mode) and `pnpm test`
 pass, and the full sweep is recorded here.
@@ -3038,7 +3108,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
     - R08.T13's case gate, re-run against the references' vector I with the correction:
       Earth, Mars and `saturn-oblate` pass. The uncorrected twin against the scalar I is
       recorded beside;
-    - R08.T13's surface-irradiance test against the vector flux aggregate, to 2%, uncorrected;
+    - R08.T13's surface-irradiance test against the vector flux aggregate, to 2% by the tolerance
+      test, uncorrected;
     - the kernels' correction equals the twin's under `just test-render`;
     - the per-frame cost on the RTX 3080 and the bytes a planet are recorded against Design
       note 11; the UHD 620's cost is the owner's to record. If the low setting misses its
@@ -3048,12 +3119,14 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   Acceptance: `pnpm test` and `just test-render` pass.
 
 - **R08.T14.d The gates.**
-  - It needs R08.T14.f. The Venus-class cases (92 and 58 bar) and the Titan-class case, through
-    the CPU twin with the baked table and the polarisation correction, pass `gate.ts` against the
-    vector I per geometry. Both m = 0 alone and m = 0..1 are run, and which is needed is
-    recorded. The Rayleigh-only Venus columns gate first. The cloudy and hazy cases follow once
-    R08.T5.b's H₂SO₄ and tholin files exist (licences ruled 2026-10-09,
-    `decision-r08-licences.md`).
+  - It needs R08.T14.f. The Venus-class cases (92 and 58 bar) and the Titan-class case, through the
+    CPU twin with the baked table and the polarisation correction, pass `gate.ts` against the vector
+    I per geometry. Each gated geometry's reference meets σ_ref ≤ T ÷ 8 or `gate.ts` refuses it, and
+    a refused geometry does not pass. R08.T12.c's allowance for an unreached σ does not extend to
+    the gates, so deep transmission waits on longer traces or a variance reduction, recorded and
+    raised with "main". Both m = 0 alone and m = 0..1 are run, and which is needed is recorded. The
+    Rayleigh-only Venus columns gate first. The cloudy and hazy cases follow once R08.T5.b's H₂SO₄
+    and tholin files exist (licences ruled 2026-10-09, `decision-r08-licences.md`).
   - The bake time on the UHD 620's host (by the owner), summed over the bands with the
     polarisation correction's, is under `BAKE_CEILING_S` on a quiet machine, for a Saturn-class
     figure (4 bands) and for a giant at plan 14's cap (6–7 bands, or 5 after `BAND_STEP`'s
@@ -3176,7 +3249,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/parity`.
 
 Run the by-hand scenes on the development machine's RTX 3080 (the discrete target) and, by the
 owner, on the UHD 620, on a quiet machine. Record every figure here and in its doc comment, and run
-the spectral check. Acceptance: `just ci`, `just test-slow` and `just test-render` pass, and the
+the spectral check. Its low-sun figure is recorded beside R08.T4.a's finding that the horizon's
+direct sunlight at the fitted triple is 0.022 off in u′v′ under the Sun, above Verification's "up to
+0.02 at low sun" (its gamut floor is 0.008–0.010, its error 0.012–0.072 by star; Risks, "Deviations
+in T4.a, as built"). Acceptance: `just ci`, `just test-slow` and `just test-render` pass, and the
 records are here.
 
 ## Verification
@@ -3200,7 +3276,8 @@ records are here.
     max(0.01, 2 × 10⁻³ τ), along the meridian at 15–75° included (T6.e); and `saturn-oblate`
     passing the gate with the slicing and failing it without (T13).
 - **Reference, slow:** the tracer against Garcia and Siewert (scalar), Natraj, Kokhanovsky and
-  IPRT A (Stokes, with tabulated matrices) and Loughman, under `just test-slow`; its spheroid mode
+  IPRT A (Stokes, with tabulated matrices), each by Design note 10's agreement test, and Loughman,
+  by its tolerance test, under `just test-slow`; its spheroid mode
   against its sphere mode at a = c (T12.d).
 - **GPU, software:** every kernel compiles and agrees with its twin on SwiftShader under
   `just test-render`, asserting properties, never images.
@@ -3998,6 +4075,8 @@ generator, and the reference's sampling needs no domain tag.
       unlabelled (`model`) with its residuals recorded here, as Mie does for spheres (the lean);
     - whether an analogue whose estimated |Δg| is at most 0.01 (CH₄ ice, −0.007) is exempt from
       the label (the lean: it is labelled like the other analogues).
+    - _Signed off 2026-10-10_ (`signoff-2.md` item 5): the hexahedra are a `model`, unlabelled;
+      analogues are labelled with no exemption by estimated bias.
   - **For plan 14** (science-r08-nonspherical.md §6.4, for "main" to route):
     - P14.T24.c: iron's shape class follows its phase. A liquid droplet is a `sphere`, and a solid
       grain a `nonSphericalMineral` (Visscher et al. 2010).
@@ -4777,7 +4856,9 @@ generator, and the reference's sampling needs no domain tag.
     enter σ in quadrature: Natraj's last printed digit, Kokhanovsky's six correct digits, and
     PSTAR's largest difference from IPOL (its U and V negated) in each component at the rows used,
     relative to I: 1.1 × 10⁻⁶ in A1, up to 6.9 × 10⁻⁶ in A2, and in A4 1.8 × 10⁻⁴ in I and
-    3 × 10⁻⁶ in Q and U; A4's V is held to its difference from MYSTIC's, 1.4 × 10⁻⁶.
+    3 × 10⁻⁶ in Q and U; A4's V is held to its difference from MYSTIC's, 1.4 × 10⁻⁶. _Upheld
+    2026-10-10 (`decision-r08-t4b-t12c.md`):_ Design note 10's _Statistics_ states it for every
+    agreement test in R08, beside the metric's tolerance tests.
   - _Conventions found._ The tracer's (Q, U) is Natraj and Hovenier 2012's (Hovenier's), and the
     negative of Natraj, Li and Yung 2009's: the two papers' τ = 1 tables carry Q and U of opposite
     signs to each other.
