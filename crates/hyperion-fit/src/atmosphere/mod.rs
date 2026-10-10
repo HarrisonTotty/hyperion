@@ -16,12 +16,15 @@
 //! - [`case`]: the case format and its validation;
 //! - [`transport`]: the estimator (absorption as a weight, delta tracking, a forced first
 //!   collision, next-event estimation to every sun, a Lambertian ground, Russian roulette and the
-//!   Stokes mode);
-//! - [`optics`]: profiles, phase functions and the Rayleigh scattering matrix;
+//!   Stokes mode, which scores the scalar radiance of the same paths beside the vector one);
+//! - [`optics`]: profiles, phase functions (closed forms, tables on u = √(Θ ÷ π) and Legendre
+//!   series) and the block-diagonal scattering matrices;
 //! - [`geometry`]: frames and the shells;
 //! - [`spheroid`]: the level spheroid of an oblate body, its normal gravity, geodetic coordinates
 //!   and quadric shells, over which the medium is read at the gravity-scaled height;
-//! - [`reference`]: the output and its moments.
+//! - [`reference`]: the output and its moments;
+//! - `benchmarks` (tests only): the published benchmarks the tracer is held to before its
+//!   references are trusted (R08.T12.c), slow tests run by `just test-slow atmosphere::benchmarks`.
 //!
 //! **Reproducible for any thread count**, by the crate's convention: the samples of each geometry,
 //! aggregate and wavelength are cut into blocks of [`BLOCK_SAMPLES`] mapped by
@@ -34,6 +37,8 @@
 //! goes through [`hyperion_sim::math`]. Nothing here is generated output: no domain tag and no
 //! generator version is involved (R08's Generator version).
 
+#[cfg(test)]
+mod benchmarks;
 pub mod case;
 mod geometry;
 mod optics;
@@ -46,11 +51,13 @@ use std::num::{NonZeroU64, NonZeroUsize};
 use serde::{Deserialize, Serialize};
 
 pub use case::{AtmosphereCase, ReadCaseError, Shells};
-pub use reference::{FluxAggregate, GeometryRadiance, ReferenceRadiances, StokesRadiance};
+pub use reference::{
+    FluxAggregate, GeometryRadiance, ReferenceRadiances, ScalarFlux, StokesRadiance,
+};
 
 use geometry::ShellGrid;
 use reference::{Moments, REFERENCE_FORMAT};
-use transport::{Level, Medium, Scratch, Source};
+use transport::{COMPONENTS, I, Level, Medium, SCALAR_I, Scratch, Source};
 
 use crate::parallel::{BuildThreadPoolError, map_reduce_chunks};
 use crate::tasks::displaced_forms::births::Draws;
@@ -75,20 +82,22 @@ pub enum Polarisation {
     /// The radiance alone, as the client draws it.
     #[default]
     Scalar,
-    /// The Stokes vector (I, Q, U), for the Rayleigh benchmarks, whose tables are vector: only
-    /// Rayleigh, isotropic and absorbing terms (R08 Design note 10).
+    /// The Stokes vector (I, Q, U, V), with the scalar radiance of the same paths beside it: every
+    /// gate's reference (R08 Design note 10). Every scattering term needs its scattering matrix,
+    /// or the case's `depolarising` mark.
     Stokes,
 }
 
 /// A reference could not be traced.
 #[derive(Debug, thiserror::Error)]
 pub enum TraceReferenceError {
-    /// The Stokes mode was asked of a case with a term it has no scattering matrix for.
+    /// The Stokes mode was asked of a case with a term that has no scattering matrix and is not
+    /// marked depolarising.
     #[error(
-        "the Stokes mode traces Rayleigh, isotropic and absorbing terms only, and term `{term}` is \
-         none of them"
+        "the Stokes mode needs a scattering matrix for term `{term}`, or the term marked \
+         depolarising"
     )]
-    StokesNeedsRayleigh {
+    StokesNeedsMatrix {
         /// The term.
         term: String,
     },
@@ -126,8 +135,9 @@ fn wide(n: usize) -> u64 {
 ///
 /// # Errors
 ///
-/// [`TraceReferenceError::StokesNeedsRayleigh`] for the Stokes mode on a case with a
-/// Cornette–Shanks term; [`TraceReferenceError::TooManySamples`] past [`MAX_SAMPLES`];
+/// [`TraceReferenceError::StokesNeedsMatrix`] for the Stokes mode on a case with a term that has
+/// no scattering matrix and is not marked depolarising; [`TraceReferenceError::TooManySamples`]
+/// past [`MAX_SAMPLES`];
 /// [`TraceReferenceError::ThreadPool`] if the threads cannot be started.
 ///
 /// # Panics
@@ -141,9 +151,12 @@ pub fn trace_reference(
     threads: NonZeroUsize,
 ) -> Result<ReferenceRadiances, TraceReferenceError> {
     if polarisation == Polarisation::Stokes
-        && let Some(term) = case.terms().iter().find(|t| !t.phase.has_matrix())
+        && let Some(term) = case
+            .terms()
+            .iter()
+            .find(|t| !t.phase.has_matrix() && !t.depolarising)
     {
-        return Err(TraceReferenceError::StokesNeedsRayleigh {
+        return Err(TraceReferenceError::StokesNeedsMatrix {
             term: term.name.clone(),
         });
     }
@@ -200,13 +213,21 @@ pub fn trace_reference(
             .map(|g| run.geometry(g, polarisation))
             .collect(),
         aggregates: (0..case.aggregate_count())
-            .map(|a| run.aggregate(a))
+            .map(|a| run.aggregate(a, polarisation))
             .collect(),
     })
 }
 
-/// Traces `samples` samples of every source at every wavelength: the moments of (I, Q, U) per
-/// task, wavelength-major.
+/// The moments a task keeps: those of each of a sample's [`COMPONENTS`], and of its radiance less
+/// its scalar radiance.
+const MOMENTS: usize = COMPONENTS + 1;
+
+/// Where the moments of a sample's radiance less its scalar radiance are kept.
+const DIFFERENCE: usize = COMPONENTS;
+
+/// Traces `samples` samples of every source at every wavelength: the moments of (I, Q, U, V), of
+/// the scalar radiance and of the radiance less it, per task, wavelength-major. The scalar mode
+/// fills the first alone.
 fn trace_moments(
     seed: u64,
     media: &[Medium<'_>],
@@ -214,7 +235,7 @@ fn trace_moments(
     polarisation: Polarisation,
     samples: u64,
     threads: NonZeroUsize,
-) -> Result<Vec<[Moments; 3]>, TraceReferenceError> {
+) -> Result<Vec<[Moments; MOMENTS]>, TraceReferenceError> {
     let per_wavelength = sources.len();
     let tasks = media.len() * per_wavelength;
     let blocks = samples.div_ceil(BLOCK_SAMPLES);
@@ -222,7 +243,7 @@ fn trace_moments(
         .checked_mul(blocks)
         .ok_or(TraceReferenceError::TooManySamples { samples })?;
     let seed = seed ^ ATMOSPHERE_STREAM;
-    let mut moments = vec![[Moments::default(); 3]; tasks];
+    let mut moments = vec![[Moments::default(); MOMENTS]; tasks];
     map_reduce_chunks(
         items,
         1,
@@ -238,18 +259,24 @@ fn trace_moments(
                     let (key, source) = &sources[index % per_wavelength];
                     // The case keeps its wavelengths below 2¹⁶ and its sources' keys below 2³⁴.
                     let stream = (wide(wavelength) << 34) | key;
-                    let mut block_moments = [Moments::default(); 3];
+                    let mut block_moments = [Moments::default(); MOMENTS];
                     let end = ((block + 1) * BLOCK_SAMPLES).min(samples);
                     for sample in block * BLOCK_SAMPLES..end {
                         let mut draws = Draws::new(seed, stream, sample);
-                        let stokes = media[wavelength].sample(
+                        let x = media[wavelength].sample(
                             source,
                             polarisation,
                             &mut draws,
                             &mut scratch,
                         );
-                        for (m, x) in block_moments.iter_mut().zip(stokes) {
-                            m.push(x);
+                        match polarisation {
+                            Polarisation::Scalar => block_moments[I].push(x[I]),
+                            Polarisation::Stokes => {
+                                for (m, value) in block_moments.iter_mut().zip(x) {
+                                    m.push(value);
+                                }
+                                block_moments[DIFFERENCE].push(x[I] - x[SCALAR_I]);
+                            }
                         }
                     }
                     (index, block_moments)
@@ -274,7 +301,7 @@ struct Run<'a> {
     grid: &'a ShellGrid,
     media: &'a [Medium<'a>],
     sources: &'a [(u64, Source)],
-    moments: Vec<[Moments; 3]>,
+    moments: Vec<[Moments; MOMENTS]>,
 }
 
 /// `values`, after checking that each is finite.
@@ -308,13 +335,18 @@ impl Run<'_> {
         GeometryRadiance {
             name: geometry.name.clone(),
             detector_half_angle_deg: self.case.detector_half_angle_deg(geometry),
-            radiance: self.column(g, 0, Moments::mean),
-            standard_error: self.column(g, 0, Moments::standard_error),
+            radiance: self.column(g, I, Moments::mean),
+            standard_error: self.column(g, I, Moments::standard_error),
             stokes: (polarisation == Polarisation::Stokes).then(|| StokesRadiance {
                 q: self.column(g, 1, Moments::mean),
                 q_standard_error: self.column(g, 1, Moments::standard_error),
                 u: self.column(g, 2, Moments::mean),
                 u_standard_error: self.column(g, 2, Moments::standard_error),
+                v: self.column(g, 3, Moments::mean),
+                v_standard_error: self.column(g, 3, Moments::standard_error),
+                scalar_radiance: self.column(g, SCALAR_I, Moments::mean),
+                scalar_standard_error: self.column(g, SCALAR_I, Moments::standard_error),
+                difference_standard_error: self.column(g, DIFFERENCE, Moments::standard_error),
             }),
             sun_optical_depth: source
                 .suns
@@ -330,7 +362,7 @@ impl Run<'_> {
     }
 
     /// Aggregate `a`'s fluxes.
-    fn aggregate(&self, a: usize) -> FluxAggregate {
+    fn aggregate(&self, a: usize, polarisation: Polarisation) -> FluxAggregate {
         let ground = self.case.geometry_count() + 2 * a;
         let top = ground + 1;
         let source = &self.sources[ground].1;
@@ -356,10 +388,30 @@ impl Run<'_> {
             name: self.case.aggregates()[a].name.clone(),
             incident_top: finite(wavelengths.clone().map(incident).collect()),
             direct_ground: finite(wavelengths.map(direct).collect()),
-            diffuse_ground: self.column(ground, 0, Moments::mean),
-            diffuse_ground_standard_error: self.column(ground, 0, Moments::standard_error),
-            upwelling_top: self.column(top, 0, Moments::mean),
-            upwelling_top_standard_error: self.column(top, 0, Moments::standard_error),
+            diffuse_ground: self.column(ground, I, Moments::mean),
+            diffuse_ground_standard_error: self.column(ground, I, Moments::standard_error),
+            upwelling_top: self.column(top, I, Moments::mean),
+            upwelling_top_standard_error: self.column(top, I, Moments::standard_error),
+            scalar: (polarisation == Polarisation::Stokes).then(|| ScalarFlux {
+                diffuse_ground: self.column(ground, SCALAR_I, Moments::mean),
+                diffuse_ground_standard_error: self.column(
+                    ground,
+                    SCALAR_I,
+                    Moments::standard_error,
+                ),
+                diffuse_ground_difference_standard_error: self.column(
+                    ground,
+                    DIFFERENCE,
+                    Moments::standard_error,
+                ),
+                upwelling_top: self.column(top, SCALAR_I, Moments::mean),
+                upwelling_top_standard_error: self.column(top, SCALAR_I, Moments::standard_error),
+                upwelling_top_difference_standard_error: self.column(
+                    top,
+                    DIFFERENCE,
+                    Moments::standard_error,
+                ),
+            }),
         }
     }
 }
@@ -511,6 +563,186 @@ mod tests {
         let one = trace(&saturn, Polarisation::Scalar, 300, 1).to_json();
         let four = trace(&saturn, Polarisation::Scalar, 300, 4).to_json();
         assert_eq!(one, four);
+        // And R08.T12.c's paths: a table with its matrix, a Legendre series, two suns and the
+        // directions drawn towards them.
+        let polarising = polarising_case();
+        let one = trace(&polarising, Polarisation::Stokes, 300, 1).to_json();
+        let four = trace(&polarising, Polarisation::Stokes, 300, 4).to_json();
+        assert_eq!(one, four);
+    }
+
+    /// The sample case with R08.T12.c's paths in it: its aerosol a forward-peaked table
+    /// (Henyey–Greenstein at g 0.8) with a matrix whose every element is non-zero, so that the
+    /// directions are drawn partly towards the suns near the ground; a dust of a Legendre series,
+    /// marked depolarising; and a second sun.
+    fn polarising_case() -> Value {
+        let mut case = case::tests::sample_case();
+        case["terms"][1]["scattering"] = json!([1e-5, 1.1e-5]);
+        case["terms"][1]["phase"] = case::tests::tabulated_phase_json(256, 2, |c| {
+            let p = optics::tests::henyey_greenstein(0.8, c);
+            let sin2 = 1.0 - c * c;
+            [
+                p,
+                p,
+                c * p,
+                0.9 * c * p,
+                -0.3 * sin2 * p,
+                0.2 * sin2.sqrt() * p,
+            ]
+        });
+        case["terms"].as_array_mut().unwrap().push(json!({
+            "name": "dust", "density": { "kind": "exponential", "scaleHeightM": 2000.0 },
+            "scattering": [2e-6, 2e-6], "absorption": [1e-7, 1e-7],
+            "phase": { "kind": "legendre", "coefficients": [[1.0, 1.2, 0.5], [1.0, 0.9]] },
+            "depolarising": true
+        }));
+        case["suns"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "name": "second", "irradiance": [0.4, 0.3] }));
+        let second = json!({ "zenithDeg": 70.0, "azimuthDeg": 120.0 });
+        for g in 0..2 {
+            case["geometries"][g]["sunDirections"]
+                .as_array_mut()
+                .unwrap()
+                .push(second.clone());
+        }
+        case["aggregates"][0]["sunDirections"]
+            .as_array_mut()
+            .unwrap()
+            .push(second);
+        case
+    }
+
+    #[test]
+    fn atmosphere_stokes_reference_bits_are_pinned() {
+        // The Stokes mode's counterpart of `atmosphere_reference_bits_are_pinned`, on R08.T12.c's
+        // paths (`polarising_case`): the ground view's I, Q, V, scalar radiance and the error of
+        // their difference, and the scalar upwelling flux. A change to the tables' draws, the
+        // series' proposal, the sunward draws, the 4 × 4 product or the moments shows here before
+        // it moves a committed reference.
+        let reference = trace(&polarising_case(), Polarisation::Stokes, 64, 1);
+        let ground = &reference.geometries()[0];
+        let stokes = ground.stokes().unwrap();
+        let pinned = [
+            format!("{:?}", ground.radiance()[0]),
+            format!("{:?}", stokes.q()[0]),
+            format!("{:?}", stokes.v()[0]),
+            format!("{:?}", stokes.scalar_radiance()[1]),
+            format!("{:?}", stokes.difference_standard_error()[0]),
+            format!(
+                "{:?}",
+                reference.aggregates()[0].scalar().unwrap().upwelling_top()[0]
+            ),
+        ];
+        assert_eq!(
+            pinned,
+            [
+                "0.051914114460382",
+                "-0.005734264674987712",
+                "3.1510023629621357e-6",
+                "0.09834999038845736",
+                "0.0004741472848915612",
+                "0.5466892681652658"
+            ]
+        );
+    }
+
+    #[test]
+    fn atmosphere_sunward_draws_keep_a_forward_peaked_slab_unbiased() {
+        // Henyey–Greenstein at g 0.9 as a table, a conservative slab of τ 1 over a black ground
+        // (550 nm) and a white one (440 nm), so that every vertex draws towards the suns: energy
+        // is conserved to 4σ, as in the Rayleigh slab, and two suns in different directions give
+        // the sum of the two lit alone, whose paths draw towards other suns, to 4σ.
+        let terms = json!([{
+            "name": "haze", "density": uniform(),
+            "scattering": [1e-3, 1e-3], "absorption": [0.0, 0.0],
+            "phase": case::tests::tabulated_phase_json(512, 2, |c| {
+                [optics::tests::henyey_greenstein(0.9, c), 0.0, 0.0, 0.0, 0.0, 0.0]
+            })
+        }]);
+        let mut case = slab(&terms, &json!([0.0, 1.0]), &json!([]));
+        case["aggregates"] = json!([
+            { "name": "high", "sunDirections": [{ "zenithDeg": 20.0, "azimuthDeg": 0.0 }] },
+            { "name": "low", "sunDirections": [{ "zenithDeg": 65.0, "azimuthDeg": 0.0 }] }
+        ]);
+        // The diffuse flux at the ground carries the aureole's noise, which the hemisphere's draws
+        // do not aim at: σ is 1.4% of the incident flux at 20,000 samples with the sun high, and
+        // 1.3% at 80,000 with it at 65° (measured), so the test holds σ under 2%. A flaw in the
+        // sunward weights would be far larger: leaving out the mixture's branch alone is 25%.
+        let reference = trace(&case, Polarisation::Scalar, 80_000, 4);
+        for aggregate in reference.aggregates() {
+            let incident = aggregate.incident_top();
+            let total = aggregate.upwelling_top()[0]
+                + aggregate.direct_ground()[0]
+                + aggregate.diffuse_ground()[0];
+            let sigma = math::hypot(
+                aggregate.upwelling_top_standard_error()[0],
+                aggregate.diffuse_ground_standard_error()[0],
+            );
+            assert!(
+                (total - incident[0]).abs() < 4.0 * sigma && sigma < 0.02 * incident[0],
+                "{}: {total} against {} ± {sigma}",
+                aggregate.name(),
+                incident[0]
+            );
+            let (up, sigma) = (
+                aggregate.upwelling_top()[1],
+                aggregate.upwelling_top_standard_error()[1],
+            );
+            assert!(
+                (up - incident[1]).abs() < 4.0 * sigma,
+                "{}: {up} against {} ± {sigma}",
+                aggregate.name(),
+                incident[1]
+            );
+        }
+        let views = json!([
+            geometry("down", 0.0, (30.0, 40.0), (20.0, 0.0)),
+            geometry("up", 1000.0, (150.0, 200.0), (20.0, 0.0))
+        ]);
+        let with_suns = |suns: &[(f64, f64, f64)]| {
+            let mut case = slab(&terms, &json!([0.0, 0.0]), &views);
+            case["suns"] = json!(
+                suns.iter()
+                    .enumerate()
+                    .map(|(k, s)| json!({ "name": format!("sun-{k}"), "irradiance": [s.2, s.2] }))
+                    .collect::<Vec<Value>>()
+            );
+            for g in 0..2 {
+                case["geometries"][g]["sunDirections"] = json!(
+                    suns.iter()
+                        .map(|s| json!({ "zenithDeg": s.0, "azimuthDeg": s.1 }))
+                        .collect::<Vec<Value>>()
+                );
+            }
+            trace(&case, Polarisation::Scalar, 60_000, 4)
+        };
+        // The view down from the top is dim under so forward a haze, and its σ falls slowly: 3.5%
+        // at 20,000 samples and 2.7% at 60,000 (measured), so the test holds σ under 4%; the view
+        // up from the ground is near 1%.
+        let (a, b) = ((20.0, 0.0, 1.0), (60.0, 140.0, 0.5));
+        let [both, only_a, only_b] = [vec![a, b], vec![a], vec![b]].map(|s| with_suns(&s));
+        for ((g, ga), gb) in both
+            .geometries()
+            .iter()
+            .zip(only_a.geometries())
+            .zip(only_b.geometries())
+        {
+            for w in 0..2 {
+                let sum = ga.radiance()[w] + gb.radiance()[w];
+                let sigma = math::hypot(
+                    g.standard_error()[w],
+                    math::hypot(ga.standard_error()[w], gb.standard_error()[w]),
+                );
+                assert!(
+                    (g.radiance()[w] - sum).abs() < 4.0 * sigma && sigma < 0.04 * sum,
+                    "{} at {w}: {} against {sum} ± {sigma}",
+                    g.name(),
+                    g.radiance()[w]
+                );
+            }
+        }
     }
 
     #[test]
@@ -523,7 +755,9 @@ mod tests {
             format!("{:?}", reference.geometries()[0].radiance()[0]),
             format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
         ];
-        assert_eq!(pinned, ["0.039731668489903935", "0.5324772871217555"]);
+        // The ground view moved with R08.T12.c's sun-directed draws, which its Cornette–Shanks
+        // aerosol takes where it is forward-peaked; it was 0.039731668489903935 in R08.T12.a.
+        assert_eq!(pinned, ["0.04009082837728386", "0.5324772871217555"]);
     }
 
     #[test]
@@ -666,9 +900,15 @@ mod tests {
             NonZeroUsize::MIN,
         );
         match result {
-            Err(TraceReferenceError::StokesNeedsRayleigh { term }) => assert_eq!(term, "aerosol"),
+            Err(TraceReferenceError::StokesNeedsMatrix { term }) => assert_eq!(term, "aerosol"),
             other => panic!("{other:?}"),
         }
+        // Marked depolarising, the same aerosol is traced.
+        let mut marked = case::tests::sample_case();
+        marked["terms"][1]["depolarising"] = json!(true);
+        let reference = trace(&marked, Polarisation::Stokes, 8, 1);
+        assert!(reference.geometries()[0].stokes().is_some());
+        assert!(reference.aggregates()[0].scalar().is_some());
         let too_many = NonZeroU64::new(MAX_SAMPLES + 1).unwrap();
         let result = trace_reference(&case, Polarisation::Scalar, too_many, NonZeroUsize::MIN);
         match result {
@@ -677,6 +917,431 @@ mod tests {
                 assert_eq!(crate::RunFitError::from(error).exit_code(), 2);
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    /// Asserts that every radiance of the geometries of `a` and `b` agrees to `relative`.
+    fn assert_same_radiances(a: &ReferenceRadiances, b: &ReferenceRadiances, relative: f64) {
+        for (x, y) in a.geometries().iter().zip(b.geometries()) {
+            for w in 0..x.radiance().len() {
+                let (i, j) = (x.radiance()[w], y.radiance()[w]);
+                assert!(
+                    (i - j).abs() <= relative * i.abs(),
+                    "{} at {w}: {i} {j}",
+                    x.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_stokes_intensity_equals_scalar_for_depolarising_terms() {
+        // R08.T12.c: a Cornette–Shanks aerosol, a table without a matrix and a Legendre series,
+        // each marked depolarising beside an isotropic gas, scatter by a₁ alone: the Stokes
+        // mode's I is the scalar mode's to rounding, and no polarisation arises.
+        let mut case = case::tests::sample_case();
+        let mut bare = case::tests::tabulated_phase_json(128, 2, |c| {
+            let p = optics::tests::henyey_greenstein(0.6, c);
+            [p, 0.0, 0.0, 0.0, 0.0, 0.0]
+        });
+        bare.as_object_mut().unwrap().remove("matrix");
+        case["terms"][0]["phase"] = json!({ "kind": "isotropic" });
+        case["terms"][1]["depolarising"] = json!(true);
+        case["terms"][2] = json!({
+            "name": "haze", "density": { "kind": "exponential", "scaleHeightM": 3000.0 },
+            "scattering": [3e-6, 4e-6], "absorption": [1e-7, 1e-7],
+            "phase": bare, "depolarising": true
+        });
+        case["terms"].as_array_mut().unwrap().push(json!({
+            "name": "dust", "density": { "kind": "exponential", "scaleHeightM": 2000.0 },
+            "scattering": [2e-6, 2e-6], "absorption": [0.0, 0.0],
+            "phase": { "kind": "legendre", "coefficients": [[1.0, 1.2, 0.5], [1.0, 0.9]] },
+            "depolarising": true
+        }));
+        let scalar = trace(&case, Polarisation::Scalar, 1500, 4);
+        let stokes = trace(&case, Polarisation::Stokes, 1500, 4);
+        assert_same_radiances(&scalar, &stokes, 1e-12);
+        for g in stokes.geometries() {
+            let polarised = g.stokes().unwrap();
+            for w in 0..2 {
+                let largest = polarised.q()[w]
+                    .abs()
+                    .max(polarised.u()[w].abs())
+                    .max(polarised.v()[w].abs());
+                assert!(largest <= 1e-15 * g.radiance()[w], "{}", g.name());
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_stokes_scalar_radiance_is_the_scalar_modes_to_the_bit() {
+        // The scalar radiance a Stokes run reports beside I is the scalar mode's estimate from the
+        // same draws, bit for bit, fluxes included; its difference from I has its own error.
+        let mut case = case::tests::sample_case();
+        case["terms"][1]["depolarising"] = json!(true);
+        let scalar = trace(&case, Polarisation::Scalar, 600, 2);
+        let stokes = trace(&case, Polarisation::Stokes, 600, 2);
+        let json = |values: &[f64]| serde_json::to_string(values).unwrap();
+        for (s, v) in scalar.geometries().iter().zip(stokes.geometries()) {
+            let polarised = v.stokes().unwrap();
+            assert_eq!(json(s.radiance()), json(polarised.scalar_radiance()));
+            assert_eq!(
+                json(s.standard_error()),
+                json(polarised.scalar_standard_error())
+            );
+            for w in 0..2 {
+                // Rayleigh's scalar error moves I, and the difference is far better resolved than
+                // either radiance, since the two are scored on the same paths.
+                let difference = polarised.difference_standard_error()[w];
+                assert!(difference > 0.0 && difference < 0.5 * v.standard_error()[w]);
+            }
+        }
+        for (s, v) in scalar.aggregates().iter().zip(stokes.aggregates()) {
+            let flux = v.scalar().unwrap();
+            assert_eq!(json(s.diffuse_ground()), json(flux.diffuse_ground()));
+            assert_eq!(json(s.upwelling_top()), json(flux.upwelling_top()));
+            assert_eq!(
+                json(s.upwelling_top_standard_error()),
+                json(flux.upwelling_top_standard_error())
+            );
+            assert!(flux.diffuse_ground_difference_standard_error()[0] > 0.0);
+        }
+        assert!(
+            scalar.geometries()[0].stokes().is_none() && scalar.aggregates()[0].scalar().is_none()
+        );
+    }
+
+    /// An independent frame for the polarisation tests: east, north and up the unit axes. The
+    /// direction at `(zenith, azimuth)` degrees, and the detector's first Stokes axis e₁ for a
+    /// view there, towards the larger zenith angle in the view's vertical plane.
+    fn direction_and_e1(zenith_azimuth: (f64, f64)) -> ([f64; 3], [f64; 3]) {
+        let (zenith, azimuth) = (radians(zenith_azimuth.0), radians(zenith_azimuth.1));
+        (
+            [
+                math::sin(zenith) * math::sin(azimuth),
+                math::sin(zenith) * math::cos(azimuth),
+                math::cos(zenith),
+            ],
+            [
+                math::cos(zenith) * math::sin(azimuth),
+                math::cos(zenith) * math::cos(azimuth),
+                -math::sin(zenith),
+            ],
+        )
+    }
+
+    fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    }
+
+    fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    /// (Q ÷ I, U ÷ I) of light polarised to degree `degree` along the scattering plane's normal,
+    /// for unpolarised light from `sun` singly scattered into the view `view`, in the detector's
+    /// frame (e₁, e₂ = k × e₁, k = −look).
+    fn single_scattering_polarisation(
+        sun: (f64, f64),
+        view: (f64, f64),
+        degree: f64,
+    ) -> (f64, f64) {
+        let (towards_sun, _) = direction_and_e1(sun);
+        let (look, e1) = direction_and_e1(view);
+        let e2 = cross3(look.map(|x| -x), e1);
+        let normal = cross3(towards_sun, look);
+        let length = dot3(normal, normal).sqrt();
+        let normal = normal.map(|x| x / length);
+        let (along_e1, along_e2) = (dot3(normal, e1), dot3(normal, e2));
+        (
+            degree * (along_e1 * along_e1 - along_e2 * along_e2),
+            degree * 2.0 * along_e1 * along_e2,
+        )
+    }
+
+    /// The matrix of the dipole sphere of `optics`'s tests with amplitudes `a` and `b`
+    /// (unnormalised).
+    fn dipole_sphere(a: (f64, f64), b: (f64, f64)) -> impl Fn(f64) -> [f64; 6] {
+        move |c| {
+            let [a1, b1, a3, b2] = optics::tests::dipole_sphere(a, b, c);
+            [a1, a1, a3, a3, b1, b2]
+        }
+    }
+
+    #[test]
+    fn atmosphere_a_spheres_single_scattering_degree_of_polarisation_is_minus_b1_over_a1() {
+        // R08.T12.c: a thin slab of a sphere whose amplitudes are an electric and a magnetic
+        // dipole's, tabulated with its matrix: singly scattered light is polarised to −b₁ ÷ a₁ at
+        // its scattering angle and carries no V. The degree is (|a|² − |b|²) sin²Θ ÷ (|S₁|² +
+        // |S₂|²), so the electric dipole's lead polarises along the scattering plane's normal and
+        // the magnetic one's in the plane: both are traced.
+        let sun = (40.0, 0.0);
+        let views = [(45.0, 180.0), (50.0, 90.0), (70.0, 300.0), (130.0, 20.0)];
+        let geometries: Vec<Value> = views
+            .iter()
+            .enumerate()
+            .map(|(i, &view)| {
+                let height = if view.0 > 90.0 { 1000.0 } else { 0.0 };
+                geometry(&format!("view-{i}"), height, view, sun)
+            })
+            .collect();
+        let (electric, magnetic) = ((0.4, -0.9), (0.3, 0.5));
+        for (a, b, sign) in [(electric, magnetic, 1.0), (magnetic, electric, -1.0)] {
+            let sphere = dipole_sphere(a, b);
+            let terms = json!([{
+                "name": "spheres", "density": uniform(),
+                "scattering": [1e-8, 1e-8], "absorption": [0.0, 0.0],
+                "phase": case::tests::tabulated_phase_json(512, 2, &sphere)
+            }]);
+            let reference = trace(
+                &slab(&terms, &json!([0.0, 0.0]), &json!(geometries)),
+                Polarisation::Stokes,
+                500,
+                2,
+            );
+            for (traced, &view) in reference.geometries().iter().zip(&views) {
+                let (towards_sun, _) = direction_and_e1(sun);
+                let (look, _) = direction_and_e1(view);
+                let [a1, _, _, _, b1, _] = sphere(dot3(towards_sun, look));
+                let degree = -b1 / a1;
+                assert!(sign * degree > 0.05, "{}: {degree}", traced.name());
+                let (q_expected, u_expected) = single_scattering_polarisation(sun, view, degree);
+                let stokes = traced.stokes().unwrap();
+                for w in 0..2 {
+                    let intensity = traced.radiance()[w];
+                    let (q, u, v) = (
+                        stokes.q()[w] / intensity,
+                        stokes.u()[w] / intensity,
+                        stokes.v()[w] / intensity,
+                    );
+                    // The table's interpolation, 2 × 10⁻⁴, and 4σ for a rare second scattering.
+                    let sigma = |e: &[f64]| 2e-4 + 4.0 * e[w] / intensity;
+                    assert!(
+                        (q - q_expected).abs() < sigma(stokes.q_standard_error())
+                            && (u - u_expected).abs() < sigma(stokes.u_standard_error()),
+                        "{} at {w}: ({q}, {u}) against ({q_expected}, {u_expected})",
+                        traced.name()
+                    );
+                    assert!(
+                        v.abs() < sigma(stokes.v_standard_error()),
+                        "{}: V {v}",
+                        traced.name()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_a_small_spheres_tabulated_matrix_traces_as_rayleigh() {
+        // R08.T12.c: a thin slab of small spheres, their matrix tabulated from the amplitudes'
+        // limit, against the built-in Rayleigh matrix at ρ = 0: the same I, Q, U and V to the
+        // table's interpolation, 10⁻⁴ of I, and 4σ of the two runs. The first scattering is the
+        // same in both, from the same draws; the paths part after it, and a rare second
+        // scattering (some 10⁻⁵ of the paths) scores as much as a first, which σ carries.
+        let views = [(45.0, 180.0), (60.0, 70.0), (120.0, 250.0)];
+        let geometries: Vec<Value> = views
+            .iter()
+            .enumerate()
+            .map(|(i, &view)| {
+                let height = if view.0 > 90.0 { 1000.0 } else { 0.0 };
+                geometry(&format!("view-{i}"), height, view, (35.0, 10.0))
+            })
+            .collect();
+        let slab_of = |phase: Value| {
+            let terms = json!([{
+                "name": "scatterers", "density": uniform(),
+                "scattering": [1e-8, 1e-8], "absorption": [0.0, 0.0], "phase": phase
+            }]);
+            trace(
+                &slab(&terms, &json!([0.0, 0.0]), &json!(geometries)),
+                Polarisation::Stokes,
+                500,
+                2,
+            )
+        };
+        let built_in = slab_of(json!({ "kind": "rayleigh", "depolarisation": [0.0, 0.0] }));
+        let tabulated = slab_of(case::tests::tabulated_phase_json(
+            256,
+            2,
+            case::tests::small_sphere,
+        ));
+        for (a, b) in built_in.geometries().iter().zip(tabulated.geometries()) {
+            let (sa, sb) = (a.stokes().unwrap(), b.stokes().unwrap());
+            for w in 0..2 {
+                let i = a.radiance()[w];
+                for (x, y, sigma) in [
+                    (
+                        i,
+                        b.radiance()[w],
+                        math::hypot(a.standard_error()[w], b.standard_error()[w]),
+                    ),
+                    (
+                        sa.q()[w],
+                        sb.q()[w],
+                        math::hypot(sa.q_standard_error()[w], sb.q_standard_error()[w]),
+                    ),
+                    (
+                        sa.u()[w],
+                        sb.u()[w],
+                        math::hypot(sa.u_standard_error()[w], sb.u_standard_error()[w]),
+                    ),
+                    (
+                        sa.v()[w],
+                        sb.v()[w],
+                        math::hypot(sa.v_standard_error()[w], sb.v_standard_error()[w]),
+                    ),
+                ] {
+                    assert!(
+                        (x - y).abs() < 1e-4 * i + 4.0 * sigma,
+                        "{} at {w}: {x} {y} ± {sigma}",
+                        a.name()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_circular_polarisation_is_odd_in_azimuth_and_absent_without_b2() {
+        // V arises only from U through b₂ in multiple scattering (the coupling itself is
+        // `transport`'s test). Over a plane-parallel slab lit by unpolarised light, V and U are odd
+        // in the relative azimuth and I and Q even (the mirror symmetry of the principal plane,
+        // which turns e₂ = k × e₁ over): at ±60° they cancel to 4σ. V is small, some 10⁻³ of I
+        // here, as in Kokhanovsky et al. 2010's tables (10⁻⁴ to 10⁻³), and not resolved at this
+        // cost. Rayleigh, whose b₂ is 0, makes none at all.
+        let sphere = dipole_sphere((0.4, -0.9), (0.3, 0.5));
+        let terms = json!([{
+            "name": "spheres", "density": uniform(),
+            "scattering": [1e-3, 1e-3], "absorption": [0.0, 0.0],
+            "phase": case::tests::tabulated_phase_json(512, 2, &sphere)
+        }]);
+        let geometries = json!([
+            geometry("bottom-plus", 0.0, (50.0, 60.0), (40.0, 0.0)),
+            geometry("bottom-minus", 0.0, (50.0, -60.0), (40.0, 0.0)),
+            geometry("top-plus", 1000.0, (130.0, 60.0), (40.0, 0.0)),
+            geometry("top-minus", 1000.0, (130.0, -60.0), (40.0, 0.0))
+        ]);
+        let reference = trace(
+            &slab(&terms, &json!([0.0, 0.0]), &geometries),
+            Polarisation::Stokes,
+            20_000,
+            4,
+        );
+        for pair in reference.geometries().chunks(2) {
+            let (plus, minus) = (pair[0].stokes().unwrap(), pair[1].stokes().unwrap());
+            for w in 0..2 {
+                let sigma = math::hypot(plus.v_standard_error()[w], minus.v_standard_error()[w]);
+                let (v_plus, v_minus) = (plus.v()[w], minus.v()[w]);
+                assert!(
+                    (v_plus + v_minus).abs() < 4.0 * sigma,
+                    "{}: V {v_plus} and {v_minus} ± {sigma}",
+                    pair[0].name()
+                );
+                let sigma = math::hypot(plus.u_standard_error()[w], minus.u_standard_error()[w]);
+                assert!((plus.u()[w] + minus.u()[w]).abs() < 4.0 * sigma);
+                let sigma = math::hypot(plus.q_standard_error()[w], minus.q_standard_error()[w]);
+                assert!((plus.q()[w] - minus.q()[w]).abs() < 4.0 * sigma);
+            }
+        }
+        let rayleigh = json!([{
+            "name": "gas", "density": uniform(),
+            "scattering": [1e-3, 1e-3], "absorption": [0.0, 0.0],
+            "phase": { "kind": "rayleigh", "depolarisation": [0.0, 0.03] }
+        }]);
+        let reference = trace(
+            &slab(&rayleigh, &json!([0.0, 0.3]), &geometries),
+            Polarisation::Stokes,
+            500,
+            2,
+        );
+        for g in reference.geometries() {
+            assert!(
+                g.stokes()
+                    .unwrap()
+                    .v()
+                    .iter()
+                    .all(|v| v.abs() < f64::MIN_POSITIVE)
+            );
+        }
+    }
+
+    #[test]
+    fn atmosphere_a_legendre_series_traces_as_a_table_of_the_same_function() {
+        // Henyey–Greenstein at g = 0.8 as a Legendre series (βₗ = (2l + 1) gˡ, 300 terms), drawn
+        // from its proposal and weighted, and as a table of 1,024 entries, drawn exactly: in a
+        // slab of τ = 1 the radiances agree to 4σ. (Both draw from tables, so their paths are
+        // close and the comparison is lenient; the forward peak leaves σ near 2% away from the
+        // sun at 40,000 samples.) Rayleigh's series, β = (1, 0, ½), against the built-in phase
+        // function's exact draws is the independent check: there the paths differ, and the two
+        // agree to 4σ at σ near 0.5%.
+        let g: f64 = 0.8;
+        let mut power = 1.0;
+        let beta: Vec<f64> = (0..300)
+            .map(|l| {
+                let b = f64::from(2 * l + 1) * power;
+                power *= g;
+                b
+            })
+            .collect();
+        let table = case::tests::tabulated_phase_json(1024, 2, |c| {
+            [
+                optics::tests::henyey_greenstein(g, c),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ]
+        });
+        let geometries = json!([
+            geometry("down-near", 0.0, (30.0, 20.0), (40.0, 0.0)),
+            geometry("down-far", 0.0, (70.0, 180.0), (40.0, 0.0)),
+            geometry("up", 1000.0, (140.0, 90.0), (40.0, 0.0))
+        ]);
+        let slab_of = |phase: Value| {
+            let terms = json!([{
+                "name": "haze", "density": uniform(),
+                "scattering": [1e-3, 1e-3], "absorption": [0.0, 2e-4], "phase": phase
+            }]);
+            trace(
+                &slab(&terms, &json!([0.0, 0.2]), &geometries),
+                Polarisation::Scalar,
+                40_000,
+                4,
+            )
+        };
+        let series = slab_of(json!({ "kind": "legendre", "coefficients": [beta.clone(), beta] }));
+        let tabulated = slab_of(table);
+        let rayleigh_series = slab_of(json!({
+            "kind": "legendre", "coefficients": [[1.0, 0.0, 0.5], [1.0, 0.0, 0.5]]
+        }));
+        let rayleigh = slab_of(json!({ "kind": "rayleigh", "depolarisation": [0.0, 0.0] }));
+        for (a, b) in series
+            .geometries()
+            .iter()
+            .zip(tabulated.geometries())
+            .chain(
+                rayleigh_series
+                    .geometries()
+                    .iter()
+                    .zip(rayleigh.geometries()),
+            )
+        {
+            for w in 0..2 {
+                let (x, y) = (a.radiance()[w], b.radiance()[w]);
+                let sigma = math::hypot(a.standard_error()[w], b.standard_error()[w]);
+                assert!(sigma < 0.05 * x, "{}: {x} ± {sigma}", a.name());
+                assert!(
+                    (x - y).abs() < 4.0 * sigma,
+                    "{} at {w}: {x} against {y} ± {sigma}",
+                    a.name()
+                );
+            }
         }
     }
 

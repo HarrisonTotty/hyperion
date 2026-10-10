@@ -698,6 +698,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hyperion-sim",
+ "hyperion-testkit",
  "rayon",
  "serde",
  "serde_json",

@@ -101,7 +101,7 @@ impl RunFitError {
             | Self::OtherManifestNeedsOut
             | Self::DataNeedsOneDataset(_)
             | Self::AtmosphereReference(
-                atmosphere::TraceReferenceError::StokesNeedsRayleigh { .. }
+                atmosphere::TraceReferenceError::StokesNeedsMatrix { .. }
                 | atmosphere::TraceReferenceError::TooManySamples { .. },
             ) => 2,
             Self::Manifest(_)

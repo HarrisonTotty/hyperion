@@ -49,9 +49,28 @@
 //!   the first and last, the rule a texture sampled with linear filtering and clamped edges
 //!   follows. Heights are above the ground; a negative height reads as the ground.
 //! - **Phase functions**: `rayleigh` with the depolarisation factor ρ per wavelength (Hansen and
-//!   Travis 1974, eq. 2.15), `cornette-shanks` with its parameter g (Cornette and Shanks 1992,
-//!   eq. 8; R05's aerosol), `isotropic`, and `none` for an absorbing-only term, whose scattering
-//!   must be zero.
+//!   Travis 1974, eqs. (2.15)–(2.16), p. 541; their δ is ρ here), `cornette-shanks` with its
+//!   parameter g (Cornette and Shanks 1992, doi:10.1364/AO.31.003152; the same function is Draine
+//!   2003, ApJ 598, 1017, eq. 5 at α = 1; R05's aerosol), `isotropic`, `none` for an
+//!   absorbing-only term, whose scattering must be zero, and (R08.T12.c):
+//!   - `tabulated`, the client's `PhaseTable`: `u`, the entries' u = √(Θ ÷ π) from exactly 0 to
+//!     exactly 1, strictly ascending; `a1`, the phase function at each entry per wavelength,
+//!     sr⁻¹, normalised to 1 over the sphere; `asymmetry`, the source's mean cosine per
+//!     wavelength; and optionally `matrix`, `{ "a2", "a3", "a4", "b1", "b2" }` each laid out as
+//!     `a1` and normalised as it is, the block-diagonal scattering matrix (Hovenier, van der Mee
+//!     and Domke 2004) in the scattering plane's frame. Every element is linear in u between
+//!     entries, as the client's `phaseAt` reads it. On reading, |a₂|, |a₃|, |a₄|, |b₁| and |b₂|
+//!     must not pass a₁, and the table's own integral and mean cosine must stand within 10⁻⁴ of 1
+//!     and of `asymmetry`; the tracer then divides the table by its integral.
+//!   - `legendre`, `{ "coefficients": [[β₀, β₁, …], …] }` per wavelength, the phase function
+//!     (1 ÷ 4π) Σ βₗ Pₗ(cos Θ) (Garcia and Siewert 1985's form): β₀ within 10⁻⁴ of 1 (the series
+//!     is divided by it), and the series positive at every entry of the table its directions are
+//!     drawn from and midway between each two (the `optics` module).
+//! - **Polarisation.** In the Stokes mode every scattering term needs its scattering matrix:
+//!   Rayleigh's, the isotropic one, or a `tabulated` phase's `matrix`. A term whose source gives
+//!   none (Cornette and Shanks's, a Legendre series, a table without `matrix`) is traced only if it
+//!   is marked `"depolarising": true`, and then as a total depolariser, a₁ alone (R08 Design note
+//!   10, as ruled on 2026-10-09). The mark is refused on a term that has a matrix.
 //! - **Directions** are given in the observer's local frame: zenith angle from the local vertical,
 //!   azimuth from local north towards east. A sun's direction is the direction towards it, the
 //!   same at every point, since the sun is at infinity. The relative azimuth of the benchmark
@@ -64,6 +83,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use super::optics;
 use super::spheroid::{BuildLevelSpheroidError, LevelSpheroid};
 
 /// The case format this tracer reads.
@@ -153,7 +173,7 @@ pub(crate) enum DensityProfile {
     },
 }
 
-/// A term's phase function (the client's `PhaseFunction`, with `isotropic` added).
+/// A term's phase function (the client's `PhaseFunction`, with `isotropic` and `legendre` added).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(
     tag = "kind",
@@ -171,6 +191,32 @@ pub(crate) enum PhaseFunction {
     Isotropic {},
     /// An absorbing-only term.
     None {},
+    /// Given entry by entry on u = √(Θ ÷ π) (module documentation).
+    Tabulated {
+        /// u at each entry, from exactly 0 to exactly 1.
+        u: Vec<f64>,
+        /// a₁ per wavelength at each entry, sr⁻¹.
+        a1: Vec<Vec<f64>>,
+        /// The source's mean cosine per wavelength.
+        asymmetry: Vec<f64>,
+        /// The rest of the scattering matrix, where the source gives it.
+        #[serde(default)]
+        matrix: Option<PhaseMatrix>,
+    },
+    /// (1 ÷ 4π) Σ βₗ Pₗ(cos Θ), the coefficients βₗ per wavelength.
+    Legendre { coefficients: Vec<Vec<f64>> },
+}
+
+/// A `tabulated` phase's scattering matrix beside a₁, each element per wavelength at each entry,
+/// normalised as a₁ is (module documentation).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PhaseMatrix {
+    pub(crate) a2: Vec<Vec<f64>>,
+    pub(crate) a3: Vec<Vec<f64>>,
+    pub(crate) a4: Vec<Vec<f64>>,
+    pub(crate) b1: Vec<Vec<f64>>,
+    pub(crate) b2: Vec<Vec<f64>>,
 }
 
 /// One constituent of the medium: a gas, an aerosol or an absorbing layer.
@@ -186,6 +232,10 @@ pub(crate) struct Term {
     #[serde(rename = "absorption")]
     pub(crate) absorption_per_m: Vec<f64>,
     pub(crate) phase: PhaseFunction,
+    /// The term has no scattering matrix and the Stokes mode traces it as a total depolariser
+    /// (module documentation); false by default.
+    #[serde(default)]
+    pub(crate) depolarising: bool,
 }
 
 /// A sun's spectrum.
@@ -297,7 +347,8 @@ pub enum ReadCaseError {
     /// The case is of a format this tracer does not read.
     #[error("the atmosphere case's format is {0}, and this tracer reads format {CASE_FORMAT}")]
     UnsupportedFormat(u32),
-    /// A value is out of its range or an array has the wrong length.
+    /// A value is out of its range, an array has the wrong length, or a phase function fails its
+    /// checks ([`AtmosphereCase::from_json`]).
     #[error("the atmosphere case's {field} {reason}")]
     Invalid {
         /// Where, as a path into the case: `terms[1].scattering[2]`.
@@ -315,7 +366,12 @@ impl AtmosphereCase {
     /// [`ReadCaseError::Json`] for text that is not JSON of the case format, unknown fields
     /// included; [`ReadCaseError::UnsupportedFormat`] for another format; and
     /// [`ReadCaseError::Invalid`] for a value out of its range or an array whose length is not
-    /// the number of wavelengths or of suns.
+    /// the number of wavelengths or of suns; and, for the phase functions (module
+    /// documentation), a `tabulated` phase's u that does not ascend strictly from exactly 0 to
+    /// exactly 1, a row that has not one value per entry, a matrix element larger than a₁, or an
+    /// integral or a mean cosine more than 10⁻⁴ from the source's; a `legendre` series whose β₀
+    /// stands more than 10⁻⁴ from 1 or which is not positive at every entry of its proposal
+    /// table; and a `depolarising` mark on a term whose phase has a scattering matrix.
     pub fn from_json(text: &str) -> Result<Self, ReadCaseError> {
         let file: CaseFile = serde_json::from_str(text).map_err(ReadCaseError::Json)?;
         let figure = validate(&file)?;
@@ -631,26 +687,176 @@ fn term(term: &Term, count: usize, field: &str) -> Result<(), ReadCaseError> {
         non_negative,
         "must be finite and not negative",
     )?;
+    let phase_field = format!("{field}.phase");
     match &term.phase {
         PhaseFunction::Rayleigh { depolarisation } => per_wavelength(
             depolarisation,
             count,
-            &format!("{field}.phase.depolarisation"),
+            &format!("{phase_field}.depolarisation"),
             |rho| (0.0..1.0).contains(&rho),
             "must lie in [0, 1)",
-        ),
+        )?,
         PhaseFunction::CornetteShanks { asymmetry } => require(
             asymmetry.is_finite() && asymmetry.abs() < 1.0,
-            || format!("{field}.phase.asymmetry"),
+            || format!("{phase_field}.asymmetry"),
             "must lie in (-1, 1)",
-        ),
-        PhaseFunction::Isotropic {} => Ok(()),
+        )?,
+        PhaseFunction::Isotropic {} => {}
         PhaseFunction::None {} => require(
             term.scattering_per_m.iter().all(|&s| s <= 0.0),
             || format!("{field}.scattering"),
             "must be zero for a term whose phase is none",
-        ),
+        )?,
+        PhaseFunction::Tabulated {
+            u,
+            a1,
+            asymmetry,
+            matrix,
+        } => tabulated_phase(u, a1, asymmetry, matrix.as_ref(), count, &phase_field)?,
+        PhaseFunction::Legendre { coefficients } => {
+            legendre_phase(coefficients, count, &phase_field)?;
+        }
     }
+    require(
+        !(term.depolarising && term.phase.has_matrix()),
+        || format!("{field}.depolarising"),
+        "must not be set on a term whose phase has a scattering matrix",
+    )
+}
+
+/// Fails unless `rows` has one row per wavelength, each of `entries` finite values.
+fn per_wavelength_rows(
+    rows: &[Vec<f64>],
+    count: usize,
+    entries: usize,
+    field: &str,
+) -> Result<(), ReadCaseError> {
+    require(
+        rows.len() == count,
+        || field.to_owned(),
+        "must have one row per wavelength",
+    )?;
+    for (w, row) in rows.iter().enumerate() {
+        require(
+            row.len() == entries,
+            || format!("{field}[{w}]"),
+            "must have one value per entry of u",
+        )?;
+        for (i, &value) in row.iter().enumerate() {
+            require(
+                value.is_finite(),
+                || format!("{field}[{w}][{i}]"),
+                "must be finite",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Validates a `tabulated` phase (module documentation): its shape, the matrix's bounds by a₁,
+/// and each wavelength's integral and mean cosine against the source's.
+fn tabulated_phase(
+    u: &[f64],
+    a1: &[Vec<f64>],
+    asymmetry: &[f64],
+    matrix: Option<&PhaseMatrix>,
+    count: usize,
+    field: &str,
+) -> Result<(), ReadCaseError> {
+    let last = u.len().saturating_sub(1);
+    require(
+        u.len() >= 2
+            && u[0].abs().total_cmp(&0.0).is_eq()
+            && u[last].total_cmp(&1.0).is_eq()
+            && u.windows(2).all(|pair| pair[0] < pair[1]),
+        || format!("{field}.u"),
+        "must have at least two entries, ascending strictly from exactly 0 to exactly 1",
+    )?;
+    per_wavelength_rows(a1, count, u.len(), &format!("{field}.a1"))?;
+    for (w, row) in a1.iter().enumerate() {
+        require(
+            row.iter().all(|&p| p >= 0.0) && row.iter().any(|&p| p > 0.0),
+            || format!("{field}.a1[{w}]"),
+            "must not be negative, nor zero everywhere",
+        )?;
+    }
+    per_wavelength(
+        asymmetry,
+        count,
+        &format!("{field}.asymmetry"),
+        |g| g.abs() < 1.0,
+        "must lie in (-1, 1)",
+    )?;
+    if let Some(m) = matrix {
+        for (name, rows) in [
+            ("a2", &m.a2),
+            ("a3", &m.a3),
+            ("a4", &m.a4),
+            ("b1", &m.b1),
+            ("b2", &m.b2),
+        ] {
+            let element = format!("{field}.matrix.{name}");
+            per_wavelength_rows(rows, count, u.len(), &element)?;
+            for (w, (row, a1_row)) in rows.iter().zip(a1).enumerate() {
+                for (i, (&x, &p)) in row.iter().zip(a1_row).enumerate() {
+                    require(
+                        x.abs() <= p * (1.0 + optics::MATRIX_BOUND_ROUNDING),
+                        || format!("{element}[{w}][{i}]"),
+                        "must not exceed a1 in magnitude",
+                    )?;
+                }
+            }
+        }
+    }
+    for (w, (row, &g)) in a1.iter().zip(asymmetry).enumerate() {
+        // The matrix's elements do not enter the integral or the mean cosine.
+        let table = optics::tabulated(u, row, None, w);
+        require(
+            (table.normalisation() - 1.0).abs() <= optics::PHASE_CHECK_TOLERANCE,
+            || format!("{field}.a1[{w}]"),
+            "must integrate to 1 over the sphere within 1e-4, read linearly in u",
+        )?;
+        require(
+            (table.mean_cosine() - g).abs() <= optics::PHASE_CHECK_TOLERANCE,
+            || format!("{field}.asymmetry[{w}]"),
+            "must be the table's mean cosine within 1e-4",
+        )?;
+    }
+    Ok(())
+}
+
+/// Validates a `legendre` phase (module documentation).
+fn legendre_phase(
+    coefficients: &[Vec<f64>],
+    count: usize,
+    field: &str,
+) -> Result<(), ReadCaseError> {
+    let field = format!("{field}.coefficients");
+    require(
+        coefficients.len() == count,
+        || field.clone(),
+        "must have one series per wavelength",
+    )?;
+    for (w, beta) in coefficients.iter().enumerate() {
+        require(
+            !beta.is_empty()
+                && beta.len() <= optics::MAX_LEGENDRE_TERMS
+                && beta.iter().all(|b| b.is_finite()),
+            || format!("{field}[{w}]"),
+            "must have between 1 and 10,000 finite coefficients",
+        )?;
+        require(
+            (beta[0] - 1.0).abs() <= optics::PHASE_CHECK_TOLERANCE,
+            || format!("{field}[{w}][0]"),
+            "must be 1 within 1e-4",
+        )?;
+        require(
+            optics::LegendreSeries::new(beta).is_ok(),
+            || format!("{field}[{w}]"),
+            "must give a positive phase function at every entry of its proposal table",
+        )?;
+    }
+    Ok(())
 }
 
 /// Checks everything [`AtmosphereCase`] promises of its contents, and returns its figure.
@@ -923,6 +1129,47 @@ pub(crate) mod tests {
         })
     }
 
+    /// A `tabulated` phase of the matrix `elements(cos Θ)`, [a₁, a₂, a₃, a₄, b₁, b₂] unnormalised,
+    /// on `entries` entries even in u, divided by its integral under the tracer's rule as the case
+    /// requires, the same at each of `wavelengths` wavelengths, with its matrix.
+    pub(crate) fn tabulated_phase_json(
+        entries: u32,
+        wavelengths: usize,
+        elements: impl Fn(f64) -> [f64; 6],
+    ) -> Value {
+        use core::f64::consts::PI;
+
+        let u = optics::tests::even_u(entries);
+        let rows: Vec<[f64; 6]> = u
+            .iter()
+            .map(|&x| elements(hyperion_sim::math::cos(PI * x * x)))
+            .collect();
+        let column = |k: usize| rows.iter().map(|r| r[k]).collect::<Vec<f64>>();
+        let table = optics::TabulatedPhase::new(u.clone(), &column(0), None);
+        let scaled = |k: usize| {
+            let values: Vec<f64> = column(k)
+                .iter()
+                .map(|v| v / table.normalisation())
+                .collect();
+            vec![values; wavelengths]
+        };
+        json!({
+            "kind": "tabulated",
+            "u": u,
+            "a1": scaled(0),
+            "asymmetry": vec![table.mean_cosine(); wavelengths],
+            "matrix": {
+                "a2": scaled(1), "a3": scaled(2), "a4": scaled(3), "b1": scaled(4), "b2": scaled(5)
+            }
+        })
+    }
+
+    /// A small sphere's matrix, Rayleigh's at ρ = 0 (unnormalised): the amplitudes' limit.
+    pub(crate) fn small_sphere(cos_theta: f64) -> [f64; 6] {
+        let [a1, b1, a3, b2] = optics::tests::dipole_sphere((0.3, -1.7), (0.0, 0.0), cos_theta);
+        [a1, a1, a3, a3, b1, b2]
+    }
+
     fn read(value: &Value) -> Result<AtmosphereCase, ReadCaseError> {
         AtmosphereCase::from_json(&value.to_string())
     }
@@ -1066,5 +1313,118 @@ pub(crate) mod tests {
         let mut case = saturn_case();
         case["shells"].as_object_mut().unwrap().remove("gmM3S2");
         assert!(matches!(read(&case), Err(ReadCaseError::Json(_))));
+    }
+
+    /// The sample case with its aerosol's phase replaced by `phase`.
+    fn with_aerosol_phase(phase: Value) -> Value {
+        let mut case = sample_case();
+        case["terms"][1]["phase"] = phase;
+        case
+    }
+
+    #[test]
+    fn an_atmosphere_case_reads_tabulated_and_legendre_phases_and_refuses_bad_ones() {
+        let table = tabulated_phase_json(128, 2, small_sphere);
+        let case = read(&with_aerosol_phase(table.clone())).unwrap();
+        assert!(case.terms()[1].phase.has_matrix());
+        // Without its matrix, a table is a phase function alone; so is a Legendre series.
+        let mut bare = table.clone();
+        bare.as_object_mut().unwrap().remove("matrix");
+        assert!(
+            !read(&with_aerosol_phase(bare)).unwrap().terms()[1]
+                .phase
+                .has_matrix()
+        );
+        let series = json!({ "kind": "legendre", "coefficients": [[1.0, 1.2, 0.5], [1.0, 0.9]] });
+        assert!(
+            !read(&with_aerosol_phase(series)).unwrap().terms()[1]
+                .phase
+                .has_matrix()
+        );
+
+        let field = "terms[1].phase";
+        let mut bad = table.clone();
+        bad["u"][127] = json!(0.999);
+        assert_eq!(
+            invalid_field(&with_aerosol_phase(bad)),
+            format!("{field}.u")
+        );
+        let mut bad = table.clone();
+        bad["a1"][1].as_array_mut().unwrap().pop();
+        assert_eq!(
+            invalid_field(&with_aerosol_phase(bad)),
+            format!("{field}.a1[1]")
+        );
+        let mut bad = table.clone();
+        bad["a1"].as_array_mut().unwrap().pop();
+        assert_eq!(
+            invalid_field(&with_aerosol_phase(bad)),
+            format!("{field}.a1")
+        );
+        // |b₁| past a₁, at the forward entry where b₁ is 0.
+        let mut bad = table.clone();
+        bad["matrix"]["b1"][0][0] = json!(1.0);
+        assert_eq!(
+            invalid_field(&with_aerosol_phase(bad)),
+            format!("{field}.matrix.b1[0][0]")
+        );
+        // A table 10⁻³ off its normalisation, and an asymmetry 10⁻³ off the table's.
+        let mut bad = table.clone();
+        for value in bad["a1"][0].as_array_mut().unwrap() {
+            *value = json!(value.as_f64().unwrap() * 1.001);
+        }
+        assert_eq!(
+            invalid_field(&with_aerosol_phase(bad)),
+            format!("{field}.a1[0]")
+        );
+        let mut bad = table.clone();
+        bad["asymmetry"][1] = json!(table["asymmetry"][1].as_f64().unwrap() + 1e-3);
+        assert_eq!(
+            invalid_field(&with_aerosol_phase(bad)),
+            format!("{field}.asymmetry[1]")
+        );
+        let mut bad = table.clone();
+        bad["matrix"]["c2"] = json!([]);
+        assert!(matches!(
+            read(&with_aerosol_phase(bad)),
+            Err(ReadCaseError::Json(_))
+        ));
+
+        let series = |coefficients: Value| {
+            with_aerosol_phase(json!({ "kind": "legendre", "coefficients": coefficients }))
+        };
+        assert_eq!(
+            invalid_field(&series(json!([[1.01, 1.5], [1.0]]))),
+            format!("{field}.coefficients[0][0]")
+        );
+        assert_eq!(
+            invalid_field(&series(json!([[1.0], [1.0, 0.0, -3.0]]))),
+            format!("{field}.coefficients[1]")
+        );
+        assert_eq!(
+            invalid_field(&series(json!([[1.0]]))),
+            format!("{field}.coefficients")
+        );
+    }
+
+    #[test]
+    fn an_atmosphere_case_takes_the_depolarising_mark_only_where_a_term_has_no_matrix() {
+        let mut case = sample_case();
+        case["terms"][1]["depolarising"] = json!(true);
+        let read_back = read(&case).unwrap();
+        assert!(read_back.terms()[1].depolarising && !read_back.terms()[0].depolarising);
+        for (term, phase) in [
+            (0, None),
+            (2, None),
+            (1, Some(json!({ "kind": "isotropic" }))),
+            (1, Some(tabulated_phase_json(64, 2, small_sphere))),
+        ] {
+            let mut case = sample_case();
+            if let Some(phase) = phase {
+                case["terms"][term]["phase"] = phase;
+            }
+            case["terms"][term]["depolarising"] = json!(true);
+            assert_eq!(invalid_field(&case), format!("terms[{term}].depolarising"));
+        }
     }
 }

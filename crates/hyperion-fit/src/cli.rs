@@ -131,7 +131,8 @@ pub struct AtmosphereReferenceArgs {
     /// Threads for the run; the output is the same for any number.
     #[arg(long)]
     pub threads: Option<NonZeroUsize>,
-    /// Trace the Stokes vector: Rayleigh, isotropic and absorbing terms only.
+    /// Trace the Stokes vector (I, Q, U, V) and the scalar radiance of the same paths: every
+    /// scattering term needs its scattering matrix, or the case's `depolarising` mark.
     #[arg(long)]
     pub stokes: bool,
 }
@@ -588,7 +589,7 @@ mod tests {
         assert_eq!(error.exit_code(), 2);
         match error {
             RunFitError::AtmosphereReference(
-                crate::atmosphere::TraceReferenceError::StokesNeedsRayleigh { term },
+                crate::atmosphere::TraceReferenceError::StokesNeedsMatrix { term },
             ) => assert_eq!(term, "aerosol"),
             other => panic!("{other:?}"),
         }

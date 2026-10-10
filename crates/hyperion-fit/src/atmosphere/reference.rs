@@ -8,27 +8,41 @@
 //!   "geometries": [{
 //!     "name": "...", "detectorHalfAngleDeg": 0.5,
 //!     "radiance": [...], "standardError": [...],          // per wavelength
-//!     "stokes": { "q": [...], "qStandardError": [...],     // only with --stokes
-//!                 "u": [...], "uStandardError": [...] },
+//!     "stokes": {                                          // only with --stokes
+//!       "q": [...], "qStandardError": [...], "u": [...], "uStandardError": [...],
+//!       "v": [...], "vStandardError": [...],
+//!       "scalarRadiance": [...], "scalarStandardError": [...],
+//!       "differenceStandardError": [...]                   // of radiance − scalarRadiance
+//!     },
 //!     "sunOpticalDepth": [[...]]                           // per sun, per wavelength; null where
 //!   }],                                                    // the ground hides the sun
 //!   "aggregates": [{
 //!     "name": "...", "incidentTop": [...], "directGround": [...],
 //!     "diffuseGround": [...], "diffuseGroundStandardError": [...],
-//!     "upwellingTop": [...], "upwellingTopStandardError": [...]
+//!     "upwellingTop": [...], "upwellingTopStandardError": [...],
+//!     "scalar": {                                          // only with --stokes
+//!       "diffuseGround": [...], "diffuseGroundStandardError": [...],
+//!       "diffuseGroundDifferenceStandardError": [...],
+//!       "upwellingTop": [...], "upwellingTopStandardError": [...],
+//!       "upwellingTopDifferenceStandardError": [...]
+//!     }
 //!   }]
 //! }
 //! ```
 //!
-//! Radiances are in the unit of the case's irradiance per steradian, fluxes in its unit. Q and U
-//! are in the frame (e₁, e₂) of the light's direction k, the reverse of the view direction: e₁
-//! lies in the view's vertical plane, towards the larger zenith angle of the view, and
-//! e₂ = k × e₁ ([`super::transport`]). Q is positive for light polarised along e₁, in that plane,
-//! and U for light polarised along e₁ + e₂; azimuths run from north towards east. Natraj, Li and
-//! Yung 2009 (ApJ 691, 1909), with Q = Iᵣ − Iₗ (their eq. 1b) and azimuth counterclockwise
-//! looking down, tabulate −Q and −U of these at the same relative azimuth. A standard error is
-//! the sample standard deviation over √n; it reads 0 from one sample, which carries no estimate
-//! of its own error.
+//! Radiances are in the unit of the case's irradiance per steradian, fluxes in its unit. In the
+//! Stokes mode `radiance` and the fluxes are the Stokes vector's I, every gate's reference (R08
+//! Design note 10), and `scalarRadiance` and `scalar` are the scalar estimate of the same paths,
+//! for the diagnostics and the scalar gates; the standard error of their difference is given too,
+//! since the two are strongly correlated. Q, U and V are in the frame (e₁, e₂) of the light's
+//! direction k, the reverse of the view direction: e₁ lies in the view's vertical plane, towards
+//! the larger zenith angle of the view, and e₂ = k × e₁ ([`super::transport`]). Q is positive for
+//! light polarised along e₁, in that plane, and U for light polarised along e₁ + e₂; V's sign is
+//! that of the case's b₂ ([`super::optics`]); azimuths run from north towards east. These are
+//! Hovenier's conventions as Natraj and Hovenier 2012 (ApJ 748, 28) tabulate them, at the same
+//! relative azimuth; Natraj, Li and Yung 2009 (ApJ 691, 1909), with Q = Iᵣ − Iₗ (their eq. 1b),
+//! tabulate −Q and −U of these. A standard error is the sample standard deviation over √n; it
+//! reads 0 from one sample, which carries no estimate of its own error.
 
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +53,8 @@ pub const REFERENCE_FORMAT: u32 = 1;
 
 /// The reference radiances of a case: per geometry and wavelength, the radiance, its standard
 /// error and the sun's optical depth, with the samples and detector cone that made them; and the
-/// two flux aggregates of each aggregate point (module documentation).
+/// two flux aggregates of each aggregate point. In the Stokes mode, also Q, U and V and the scalar
+/// radiance and fluxes of the same paths, each with its error (module documentation).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReferenceRadiances {
@@ -66,7 +81,7 @@ pub struct GeometryRadiance {
     pub(crate) sun_optical_depth: Vec<Vec<Option<f64>>>,
 }
 
-/// One geometry's linear polarisation, from the Stokes mode.
+/// One geometry's polarisation and scalar radiance, from the Stokes mode.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StokesRadiance {
@@ -74,6 +89,23 @@ pub struct StokesRadiance {
     pub(crate) q_standard_error: Vec<f64>,
     pub(crate) u: Vec<f64>,
     pub(crate) u_standard_error: Vec<f64>,
+    pub(crate) v: Vec<f64>,
+    pub(crate) v_standard_error: Vec<f64>,
+    pub(crate) scalar_radiance: Vec<f64>,
+    pub(crate) scalar_standard_error: Vec<f64>,
+    pub(crate) difference_standard_error: Vec<f64>,
+}
+
+/// One aggregate's scalar fluxes of the same paths, from the Stokes mode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScalarFlux {
+    pub(crate) diffuse_ground: Vec<f64>,
+    pub(crate) diffuse_ground_standard_error: Vec<f64>,
+    pub(crate) diffuse_ground_difference_standard_error: Vec<f64>,
+    pub(crate) upwelling_top: Vec<f64>,
+    pub(crate) upwelling_top_standard_error: Vec<f64>,
+    pub(crate) upwelling_top_difference_standard_error: Vec<f64>,
 }
 
 /// The flux aggregates at one ground point and the top above it.
@@ -87,6 +119,8 @@ pub struct FluxAggregate {
     pub(crate) diffuse_ground_standard_error: Vec<f64>,
     pub(crate) upwelling_top: Vec<f64>,
     pub(crate) upwelling_top_standard_error: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) scalar: Option<ScalarFlux>,
 }
 
 impl ReferenceRadiances {
@@ -168,7 +202,7 @@ impl GeometryRadiance {
         &self.standard_error
     }
 
-    /// The linear polarisation, from the Stokes mode only.
+    /// The polarisation and the scalar radiance of the same paths, from the Stokes mode only.
     #[must_use]
     pub fn stokes(&self) -> Option<&StokesRadiance> {
         self.stokes.as_ref()
@@ -205,6 +239,75 @@ impl StokesRadiance {
     #[must_use]
     pub fn u_standard_error(&self) -> &[f64] {
         &self.u_standard_error
+    }
+
+    /// V per wavelength.
+    #[must_use]
+    pub fn v(&self) -> &[f64] {
+        &self.v
+    }
+
+    /// V's standard error per wavelength.
+    #[must_use]
+    pub fn v_standard_error(&self) -> &[f64] {
+        &self.v_standard_error
+    }
+
+    /// The scalar radiance of the same paths per wavelength, as the scalar mode traces it from
+    /// the same draws.
+    #[must_use]
+    pub fn scalar_radiance(&self) -> &[f64] {
+        &self.scalar_radiance
+    }
+
+    /// The scalar radiance's standard error per wavelength.
+    #[must_use]
+    pub fn scalar_standard_error(&self) -> &[f64] {
+        &self.scalar_standard_error
+    }
+
+    /// The standard error of the radiance less the scalar radiance, per wavelength.
+    #[must_use]
+    pub fn difference_standard_error(&self) -> &[f64] {
+        &self.difference_standard_error
+    }
+}
+
+impl ScalarFlux {
+    /// The scalar diffuse downwelling flux at the ground per wavelength.
+    #[must_use]
+    pub fn diffuse_ground(&self) -> &[f64] {
+        &self.diffuse_ground
+    }
+
+    /// Its standard error per wavelength.
+    #[must_use]
+    pub fn diffuse_ground_standard_error(&self) -> &[f64] {
+        &self.diffuse_ground_standard_error
+    }
+
+    /// The standard error of the vector flux less the scalar one, per wavelength.
+    #[must_use]
+    pub fn diffuse_ground_difference_standard_error(&self) -> &[f64] {
+        &self.diffuse_ground_difference_standard_error
+    }
+
+    /// The scalar upwelling flux at the top per wavelength.
+    #[must_use]
+    pub fn upwelling_top(&self) -> &[f64] {
+        &self.upwelling_top
+    }
+
+    /// Its standard error per wavelength.
+    #[must_use]
+    pub fn upwelling_top_standard_error(&self) -> &[f64] {
+        &self.upwelling_top_standard_error
+    }
+
+    /// The standard error of the vector flux less the scalar one, per wavelength.
+    #[must_use]
+    pub fn upwelling_top_difference_standard_error(&self) -> &[f64] {
+        &self.upwelling_top_difference_standard_error
     }
 }
 
@@ -251,6 +354,12 @@ impl FluxAggregate {
     #[must_use]
     pub fn upwelling_top_standard_error(&self) -> &[f64] {
         &self.upwelling_top_standard_error
+    }
+
+    /// The scalar fluxes of the same paths, from the Stokes mode only.
+    #[must_use]
+    pub fn scalar(&self) -> Option<&ScalarFlux> {
+        self.scalar.as_ref()
     }
 }
 

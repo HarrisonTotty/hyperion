@@ -4590,9 +4590,11 @@ generator, and the reference's sampling needs no domain tag.
 - **Closed set, for the composition audit (R08.T12.a).** The tracer's medium is open: any number of
   terms, each a density, spectral coefficients and a phase function from data, so it references
   whatever composition the client's optics write. Closed, each small and stated: the phase
-  function kinds (Rayleigh, Cornette–Shanks, isotropic, none: no tabulated phase until T12.c, so a
-  Mie or aggregate aerosol cannot be referenced yet); the Stokes mode's kinds (Rayleigh, isotropic,
-  none; R08.T12.c adds tabulated matrices and the `depolarising` mark, `decision-r08-vector.md`);
+  function kinds (Rayleigh, Cornette–Shanks, isotropic, none, and from R08.T12.c a table on
+  u = √(Θ ÷ π) and a Legendre series, so that any Mie, literature or aggregate phase function is
+  referenced through the table); the Stokes mode's kinds (Rayleigh, isotropic, none and a table
+  with its matrix; a term without one is traced only if marked `depolarising`, as a total
+  depolariser, R08.T12.c and `decision-r08-vector.md`);
   the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells: the
   sphere, or an oblate level spheroid of revolution under every figure law (0 < c ≤ a, spinning
   below breakup; R08.T12.d), with no prolate or triaxial figure, which the generator does not make.
@@ -4705,6 +4707,173 @@ generator, and the reference's sampling needs no domain tag.
       R_ref Φ ÷ (R_ref − Φ) already restores the h² ÷ R term, the science check's 0.08 H at 10 H
       on Saturn. What is left is the monopole's free-air gradient against the level spheroid's:
       0.036 H at Saturn's equator and 0.011 H at its pole at 10 H, and 0.001 H on Earth.
+- **Deviations in T12.c, as built** (2026-10-10; `crates/hyperion-fit/src/atmosphere/`: `case.rs`,
+  `optics.rs`, `transport.rs`, `reference.rs`, `mod.rs` and the new `benchmarks.rs`; `cli.rs` and
+  `lib.rs`; the new `crates/hyperion-fit/data/iprt_phase_a/`; `NOTICE`; the crate's
+  `Cargo.toml` takes `hyperion-testkit` as a dev-dependency, for its α and χ² helpers, with
+  `Cargo.lock`; `.config/nextest.toml`'s slow profile gives each benchmark four threads,
+  `threads-required = 4`, as it traces on four).
+  - _The case format_ (`CASE_FORMAT` stays 1: no case is committed). Phases gain `tabulated`,
+    `{ u, a1, asymmetry, matrix? }`: one u = √(Θ ÷ π) grid a term, from exactly 0 to exactly 1 as
+    the client's `PhaseTable` has it, a₁ per traced wavelength (named `a1` where the client's table
+    says `values`), the source's mean cosine per wavelength, and optionally all five of `a2`,
+    `a3`, `a4`, `b1` and `b2`, linear in u as `phaseAt` reads them. And `legendre`,
+    `{ coefficients }` per wavelength, p = (1 ÷ 4π) Σ βₗ Pₗ. A term gains `depolarising`
+    (false by default), refused on a term with a matrix (Rayleigh, isotropic, none, a table with
+    its matrix).
+  - _Load checks._ |a₂|, |a₃|, |a₄|, |b₁|, |b₂| ≤ a₁ (1 + 10⁻⁹, for rounding); a table's integral
+    over the sphere, read linearly in u (16-point Gauss–Legendre an interval), within 10⁻⁴ of 1
+    and its mean cosine within 10⁻⁴ of `asymmetry`. The tracer then divides the table by its
+    integral, so that what it draws from and what its next-event estimates weigh are the same
+    function. A series' β₀ stands within 10⁻⁴ of 1 (the series is divided by it), and the series
+    must be positive at each of the 4,097 entries of its proposal table.
+  - _Finding for R08.T5.c and T12.b._ Read linearly in u, a 256-entry table sampled at its entries
+    integrates to more than 1: 6.5 × 10⁻⁵ over at g 0.7, 1.1 × 10⁻⁴ at 0.8, 2.3 × 10⁻⁴ at 0.9
+    and 4.8 × 10⁻⁴ at 0.95 (Henyey–Greenstein; a quarter of that on 512 entries), while the mean
+    cosine stays within 1.3 × 10⁻⁵. So T5.c's builder normalises its entries under the linear-in-u
+    rule, as the client's `PhaseTable` documentation already asks, or the 10⁻⁴ check refuses a
+    forward aerosol's table. And the case's `asymmetry` is the source's mean cosine, which the
+    client's `PhaseTable` does not carry: T12.b's writer takes it from T5's Mie g, not from the
+    table, or the check proves nothing.
+  - _Sampling._ A table is drawn from exactly: an interval by the inverse of its cumulative
+    distribution, then a direction uniform in 1 − cos Θ within it, kept with probability a₁ ÷ the
+    interval's larger end. A draw of ξ = 1, which `Draws::uniform` returns once in 2⁵³ (its
+    `k + 0.5` rounds up at the top), lands in the last interval of positive probability, so a table
+    that ends in zeros cannot hang the rejection (the determinism audit). A series is drawn from its proposal table, 4,097 entries even in u, and
+    weighted by the series over the proposal. The draws of Rayleigh, Cornette–Shanks and isotropic
+    terms are unchanged.
+  - _The Stokes vector_ is (I, Q, U, V), the path's matrix 4 × 4 and the scattering matrix
+    block-diagonal. Rayleigh's a₄ carries Δ′ (Hansen and Travis's eq. 2.16) and its b₂ is 0. V's
+    sign is the case's b₂'s. `StokesNeedsRayleigh` is renamed `StokesNeedsMatrix` (exit code 2, as
+    before).
+  - _The scalar radiance of the same paths._ In the Stokes mode every sample scores the scalar
+    estimate beside I. `StokesRadiance` gains `v`, `scalar_radiance` and their errors and the
+    error of I − scalar; `FluxAggregate` gains `scalar: Option<ScalarFlux>`, the diffuse ground and
+    upwelling top fluxes of the same paths, each with its error and its difference's, for R08.T13's
+    scalar gates. The Stokes run's scalar radiance is the scalar mode's bit for bit (tested).
+    `REFERENCE_FORMAT` stays 1: no reference is committed.
+  - _Directions drawn towards the suns_ (unbiased variance reduction, which the task allows for the
+    forward peak). Without it, IPRT A4's spheroids (g 0.84) converged from below: at 20,000
+    samples the upwelling radiances stood 3–5% under PSTAR's, σ 1–6%, since the rare path that
+    points at the sun after a wide first scattering scores some 1,000 times the rest (P1 557 in the
+    peak against about 0.1 sideways). Built: the detector directional importance sampling of Buras
+    and Mayer 2011 (JQSRT 112, 434) with the case's suns as the detector. At a vertex whose phase
+    mixture's forward value passes `FORWARD_PEAK_PER_SR` = 1 sr⁻¹, `SUNWARD_FRACTION` = 0.2 of the
+    new directions are drawn from the mixture about a sun, every path weighted by the phase function
+    over both branches' density (at most 1.25 for an exact draw; a Legendre series' proposal can
+    take it higher), and the roulette's threshold scales with that weight. Each term's forward value
+    is computed once a medium, not at every vertex.
+    With both, the bias went and σ fell to 0.4–0.9% at 20,000 samples. Pure Rayleigh, and media
+    below the threshold, draw as before, so Natraj's T12.a run is unchanged. The draws do not depend
+    on the suns' irradiance. `atmosphere_reference_bits_are_pinned`'s ground view moved, since its
+    Cornette–Shanks aerosol is forward-peaked (0.039731668489903935 to 0.04009082837728386); its top
+    flux and T12.d's spheroid pins did not.
+  - _Statistics (a technical correction to "each to 3σ")._ Over a benchmark of N values a 3σ bound
+    on each fails by chance with probability 1 − 0.9973ᴺ (19% at N 78), far above the testkit's
+    α = 10⁻³. So each benchmark holds every value to the two-sided Bonferroni bound at α ÷ 2 over
+    its N values (4.4σ–4.8σ here) and each Stokes component's χ² over its independent geometries
+    to α ÷ 2 over the components; σ ≤ 0.3% of the geometry's I is asserted at every value, and the
+    count past 3σ and the largest |z| are printed and recorded below. The benchmarks' own errors
+    enter σ in quadrature: Natraj's last printed digit, Kokhanovsky's six correct digits, and
+    PSTAR's largest difference from IPOL (its U and V negated) in each component at the rows used,
+    relative to I: 1.1 × 10⁻⁶ in A1, up to 6.9 × 10⁻⁶ in A2, and in A4 1.8 × 10⁻⁴ in I and
+    3 × 10⁻⁶ in Q and U; A4's V is held to its difference from MYSTIC's, 1.4 × 10⁻⁶.
+  - _Conventions found._ The tracer's (Q, U) is Natraj and Hovenier 2012's (Hovenier's), and the
+    negative of Natraj, Li and Yung 2009's: the two papers' τ = 1 tables carry Q and U of opposite
+    signs to each other.
+    Kokhanovsky et al. tabulate −Q, their Q the tracer's, and their U is −U of the tracer's; their
+    radiances are π I ÷ (μ₀F₀). IPRT's files disagree in U: IPOL's and SHDOM's carry one sign,
+    PSTAR's and MYSTIC's (the organisers') the other, in U and V alike. PSTAR's (Q, U, V) is
+    (Q, −U, −V) of the tracer's, one difference of handedness, as IPOL's V, PSTAR's negated to
+    5 × 10⁻⁹ of I in A4, confirms. With U and V negated, IPOL agrees with PSTAR to 1.1 × 10⁻⁶ of I
+    in A1; A4's V reaches 1.6 × 10⁻⁴ of I, and PSTAR's and MYSTIC's agree to 1.4 × 10⁻⁶. PSTAR's
+    values (as printed, seven digits) are the ones asserted.
+    Relative azimuths map directly in every benchmark.
+  - _The benchmarks run_ (module `atmosphere::benchmarks`, run by
+    `just test-slow atmosphere::benchmarks`; all seven pass, 112 s of wall time four at a time on
+    16 threads; each at seed 0, run one at a time on 4 threads under a 400% CPU quota at load
+    7–25 for the figures below). Of 739 values, 3 stand past 3σ, against 2.0 expected by chance:
+
+    | Benchmark                                     | Values | Samples   | Largest \|z\| (where)                     | Past 3σ | Bound | Largest σ ÷ I | χ² p: I, Q, U, V        | Time  |
+    | --------------------------------------------- | ------ | --------- | ----------------------------------------- | ------- | ----- | ------------- | ----------------------- | ----- |
+    | Natraj et al. 2009, τ 0.5, μ₀ 0.2, A 0        | 78     | 5 × 10⁵   | 3.68 (top, μ 0.2, φ 180°, I)              | 1       | 4.51  | 0.24%         | 0.017, 0.22, 0.86       | 25 s  |
+    | Natraj et al. 2009, τ 1, μ₀ 0.6, A 0.8        | 78     | 4 × 10⁵   | 2.63 (bottom, μ 0.2, φ 60°, U)            | 0       | 4.51  | 0.18%         | 0.74, 0.44, 0.30        | 31 s  |
+    | Natraj and Hovenier 2012, τ 2, μ₀ 0.5, A 0.25 | 60     | 1.5 × 10⁶ | 2.56 (bottom, μ 0.9, φ 90°, I)            | 0       | 4.46  | 0.27%         | 0.017, 0.39, 0.22       | 110 s |
+    | Kokhanovsky et al. 2010, molecular            | 42     | 2.5 × 10⁵ | 2.75 (reflected, VZA 0°, φ 180°, Q)       | 0       | 4.38  | 0.20%         | 0.93, 0.14, 0.46        | 8 s   |
+    | IPRT A1 (PSTAR)                               | 246    | 2 × 10⁵   | 3.02 (ρ 0.03, bottom, sza 30°, vza 0°, I) | 1       | 4.75  | 0.19%         | 0.16, 0.11, 0.15        | 35 s  |
+    | IPRT A2 (PSTAR)                               | 99     | 10⁵       | 2.69 (top, vza 120°, vaa 0°, U)           | 0       | 4.56  | 0.15%         | 0.96, 0.62, 0.47        | 7 s   |
+    | IPRT A4 (PSTAR)                               | 136    | 4 × 10⁵   | 3.09 (bottom, vza 0°, vaa 90°, Q)         | 1       | 4.63  | 0.20%         | 0.99, 0.21, 0.69, 0.997 | 35 s  |
+
+    Every value meets σ ≤ 0.3% of I, so no case needed the task's allowance for a σ it cannot
+    reach. The two I components at p 0.017 are chance as far as can be told: Natraj 2009's is
+    carried by its one value at 3.68σ (P ≈ 2% that the largest of 78 reaches it), and T12.a
+    traced the same Rayleigh paths at 10⁶ samples with none past 3σ. Each summary also prints
+    the χ² the run would give against the benchmark's values with the sign flipped: 1.5 × 10⁶ to
+    5.5 × 10⁷ for Q and U in every benchmark, and 13,124 for A4's 34 values of V, against 15.4 as
+    used. So every convention above is determined by the run, V's included; A4's V χ² stands
+    below its expectation, so its σ, if anything, is overstated. Two runs at seed 0 gave the same
+    values to the last digit.
+
+  - _Thick Rayleigh is τ 2._ Design note 10's thick case (Natraj and Hovenier 2012) runs at τ 2,
+    μ₀ 0.5, albedo 0.25, 20 rows at 1.5 × 10⁶ samples. τ 4 would take some 5 × 10⁶ samples a
+    geometry (below, "Thick transmitted light"), and thicker tables wait on a variance reduction
+    for deep transmission.
+  - _IPRT A1's three slabs_ (one per depolarisation) each draw from their own seed, so that the χ²
+    over its 82 rows sums independent values (the determinism audit).
+  - _Sources, as fetched_ (2026-10-09, into the untracked scratch directory). Natraj's
+    `CDS/CDS.tar.gz` matched `49b01e4d…` (the T12.c text's), its host's missing intermediate
+    certificate, InCommon RSA Server CA 2 from `crt.sectigo.com`, supplied in a CA bundle with
+    verification on. Natraj and Hovenier's `STOKES/` files used, by SHA-256: `I_DN_TAU_2`
+    `82675a40…68e98`, `I_UP_TAU_2` `1b04ca95…8ee76`, `Q_DN_TAU_2` `5c73bfb7…8a463`, `Q_UP_TAU_2`
+    `156ffc5f…e9d52`, `U_DN_TAU_2` `eb842c22…c93de` and `U_UP_TAU_2` `675298df…fe9b`.
+    Kokhanovsky et al.'s DLR copy matched `93888e0b…` (the T12.c text's); the PDF's text drops
+    the minus glyph, so its values were read with the glyph restored and checked against the
+    rendered page. IPRT's files are recorded in `iprt_phase_a/README.md`.
+  - _`NOTICE`._ The Test-data section the docs pass applied (2e39cf14) listed Garcia and Siewert
+    and Loughman et al. Neither is quoted yet, so their entries give way to a sentence that they
+    join when their values are, under the ruling's "each entry is added by the task that commits
+    the values it covers"; the task that first quotes them restores the ruled entries. The IPRT
+    entry names case A4's optical properties beside the results, since A4's phase matrix is
+    committed whole, less its Legendre moments (119 kB, under the 500 kB hook).
+  - _Pending, and why._
+    - Garcia and Siewert 1985's Haze L and Cloud C1 (scalar; with R08.T14.a's): no lawful copy is
+      held, and Siewert's old NCSU pages answer 410. Pending for the owner, for access; the
+      `legendre` kind they need is built and tested.
+    - Kokhanovsky et al.'s aerosol and cloud (lognormals at 412 nm, m 1.385 and 1.339) and IPRT's
+      spheres (A3, A5): their matrices come from R08's Mie over the stated size distributions.
+      R08.T5.b landed while this task was built (f0c1be5a: `sphereScatteringMatrix` and the size
+      distributions), so they are unblocked. They need a writer of the matrices from the client's
+      Mie onto a table the tracer reads (a committed file with a test that it is current), and run
+      in a follow-up subtask, raised with "main". Their V tables also check T5.b's b₂ sign (its
+      record asks it of these cases), with Kokhanovsky's V taken meanwhile as the tracer's negative,
+      the same handedness as IPRT's.
+    - IPRT A6 (ocean surface): not run, since the tracer's ground is Lambertian (closed set).
+    - Loughman et al. 2004: Wiley's free PDF is behind a Cloudflare check that refuses curl and
+      WebFetch from here (HTTP 403), and no other copy was found (Unpaywall lists only Wiley's;
+      NASA's NTRS finds nothing), so not even the case's definition could be read. Pending for
+      access: the licence ruling expected a free download, so "main" is told.
+  - _Thick transmitted light (for T12.b)._ The backward estimator's transmitted diffuse radiance
+    at μ₀ 0.5 has a coefficient of variation of about 3 at τ 2 and 7 at τ 4 (σ ÷ I of 2.1% and
+    5% at 20,000 samples), since a path from the bottom must climb to within about τ 0.5 of the
+    top before its next-event estimates count. So Natraj and Hovenier's τ 4 would need some
+    5 × 10⁶ samples a geometry; the benchmark runs τ 2 at 1.5 × 10⁶. The Venus- and Titan-class
+    surface views will need far more, or a variance reduction for deep transmission (not built).
+  - _Unit tests_ beyond the three named (a sphere's degree of polarisation, a depolarising term's I,
+    a small sphere's matrix): a table's reading and normalisation as the client's, its draws'
+    moments, a Legendre series against Henyey–Greenstein's to 10⁻¹² and its weighted draws,
+    Rayleigh's a₄ = Δ′a₃, the Stokes state's U-to-V coupling through b₂ written out, V odd in
+    azimuth and absent without b₂, a series against a table of the same function and Rayleigh's
+    series against its exact draws, the case's refusals, the mark's refusal on a term with a
+    matrix, the Stokes run's scalar radiance against the scalar mode's to the bit, a Stokes-mode bit
+    pin on the new paths (`atmosphere_stokes_reference_bits_are_pinned`: a forward-peaked table
+    with a full matrix, a depolarising series and two suns, also traced on one and four threads),
+    the sunward draws' energy conservation in a Henyey–Greenstein slab of g 0.9 and their two suns
+    adding against each lit alone (to 4σ), the sun's index drawn uniformly, and the IPRT files'
+    load against their recorded SHA-256s
+    (`iprt_files_load_against_their_checksums_and_make_valid_cases`, fast).
+  - _Citations_ corrected as `decision-r08-vector.md` item 3 rules, in `optics.rs` and `case.rs`;
+    Cornette and Shanks's mean cosine is now checked against the function's own quadrature
+    (10⁻¹²) as well as its draws.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:

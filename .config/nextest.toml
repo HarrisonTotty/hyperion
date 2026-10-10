@@ -141,3 +141,9 @@ priority = 60
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & binary(gas_statistics) & test(=the_neutral_disc_holds_most_of_the_gas_over_2000_galaxies)"
 priority = 60
+
+# The atmosphere tracer's benchmarks (rendering plan R08, R08.T12.c) each trace on four threads,
+# `atmosphere::benchmarks`'s `THREADS`.
+[[profile.slow.overrides]]
+filter = "package(hyperion-fit) & test(/^atmosphere::benchmarks::/)"
+threads-required = 4

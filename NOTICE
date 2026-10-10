@@ -265,9 +265,8 @@ Test data (not shipped)
 
 Values quoted from the following benchmarks are committed in tests, each with its table or figure
 cited; the benchmark tables themselves are not committed (plan R08, R08.T12.c, ruled 2026-10-09).
-
-- R. D. M. Garcia and C. E. Siewert, "Benchmark results in radiative transfer", Transport
-  Theory Stat. Phys. 14 (1985) 437-483, DOI: 10.1080/00411458508211687.
+Garcia and Siewert 1985 (Transport Theory Stat. Phys. 14, 437) and Loughman et al. 2004 (J.
+Geophys. Res. 109, D06303) join this list when their values are quoted; neither is yet.
 
 - V. Natraj, K.-F. Li and Y. L. Yung, Astrophys. J. 691 (2009) 1909-1920,
   DOI: 10.1088/0004-637X/691/2/1909; V. Natraj and J. W. Hovenier, Astrophys. J. 748 (2012) 28,
@@ -277,12 +276,10 @@ cited; the benchmark tables themselves are not committed (plan R08, R08.T12.c, r
 - A. A. Kokhanovsky et al., "Benchmark results in vector atmospheric radiative transfer",
   J. Quant. Spectrosc. Radiat. Transfer 111 (2010) 1931-1946, DOI: 10.1016/j.jqsrt.2010.03.005.
 
-- R. P. Loughman et al., "Comparison of radiative transfer models for limb-viewing scattered
-  sunlight measurements", J. Geophys. Res. 109 (2004) D06303, DOI: 10.1029/2003JD003854.
-
 - IPRT polarized radiative transfer model intercomparison, Phase A (C. Emde et al., J. Quant.
-  Spectrosc. Radiat. Transfer 164 (2015) 8-36, DOI: 10.1016/j.jqsrt.2015.05.007), results from
-  https://www.libradtran.org/iprt/, licensed under CC BY-SA 3.0
+  Spectrosc. Radiat. Transfer 164 (2015) 8-36, DOI: 10.1016/j.jqsrt.2015.05.007), results and
+  case A4's optical properties from https://www.libradtran.org/iprt/, licensed under CC BY-SA 3.0
   (https://creativecommons.org/licenses/by-sa/3.0/). The values in
-  crates/hyperion-fit/data/iprt_phase_a/ are selected rows of those results, reformatted; that
-  adapted material is offered under CC BY-SA 3.0.
+  crates/hyperion-fit/data/iprt_phase_a/ are selected rows of those results and case A4's phase
+  matrix less its Legendre moments, reformatted; that adapted material is offered under CC BY-SA
+  3.0.

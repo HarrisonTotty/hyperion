@@ -1,0 +1,28 @@
+# Selected rows of the IPRT polarized radiative transfer model intercomparison, Phase A (the
+# model PSTAR's results for cases A1, A2 and A4) and case A4's spheroid phase matrix, reformatted,
+# committed under the wiki's licence, CC BY-SA 3.0, with attribution (README.md). The values the
+# tracer's benchmarks assert (rendering plan R08, R08.T12.c; `decision-r08-licences.md` row 6d).
+# Read by `atmosphere::benchmarks`; tests only, never shipped.
+dataset = "iprt_phase_a"
+class = "committed"
+citation = "C. Emde, V. Barlakas, C. Cornet, F. Evans, S. Korkin, Y. Ota, L. C.-Labonnote, A. Lyapustin, A. Macke, B. Mayer and M. Wendisch, IPRT polarized radiative transfer model intercomparison project - Phase A, J. Quant. Spectrosc. Radiat. Transfer 164 (2015) 8-36, DOI 10.1016/j.jqsrt.2015.05.007; results from the IPRT wiki"
+url = "https://www.libradtran.org/iprt/doku.php?id=intercomparisons:intercomparisons"
+retrieved = "2026-10-09"
+release = "iprt_case_a1_pstar.dat, iprt_case_a2_pstar.dat, iprt_case_a4_pstar.dat and sizedistr_spheroid.dat as served on that date (their SHA-256s in README.md)"
+licence = "Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0), the wiki's licence for its content; the adapted files are offered under the same licence"
+
+[[files]]
+name = "a1_rayleigh.txt"
+sha256 = "b4d502757081b7a1cc49f02e7324226d1954131f5e89b91607a7b0a6ebebe529"
+
+[[files]]
+name = "a2_lambert.txt"
+sha256 = "bdbc8ae569aec57491d20f2a15f724730f3aafd594ec5cdff56628f8eb2eb84d"
+
+[[files]]
+name = "a4_spheroid.txt"
+sha256 = "74ed799d7b3fac1383b6eb104cd01263c26bb3727d5de4c5d3e2a96a87d58c91"
+
+[[files]]
+name = "a4_spheroid_matrix.txt"
+sha256 = "c739af658b62692aec9716073a8579aa490fb0fb9f439ff0c48759664f7915fd"

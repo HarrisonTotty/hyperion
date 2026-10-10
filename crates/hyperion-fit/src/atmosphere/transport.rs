@@ -30,6 +30,23 @@
 //!   [`ROULETTE_FRACTION`] of the weight its branch started with. The threshold is relative so
 //!   that a forced collision's small weight, 1 − e^(−τₛ) on a thin limb, does not send its
 //!   multiple scattering straight to the roulette.
+//! - **Directions drawn towards the suns** (R08.T12.c) where the medium is forward-peaked: the
+//!   detector directional importance sampling (DDIS) of Buras and Mayer 2011 ("Efficient unbiased
+//!   variance reduction techniques for Monte Carlo simulations of radiative transfer in cloudy
+//!   atmospheres: The solution", JQSRT 112, 434; doi:10.1016/j.jqsrt.2010.10.005), with
+//!   the suns in the detector's place, since this tracer runs backwards. A path's next-event
+//!   estimate at its next vertex is the phase function between its direction and a sun's, so in an
+//!   aerosol or a cloud the rare path that happens to point at a sun scores up to a thousand times
+//!   the others, and the estimate converges slowly and from below (measured on IPRT's spheroids,
+//!   R08's Risks). At a vertex whose phase mixture's forward value passes
+//!   [`FORWARD_PEAK_PER_SR`], a fraction [`SUNWARD_FRACTION`] of the new directions is drawn from
+//!   the mixture about one of the case's suns instead of the old direction, and the path is
+//!   weighted by the phase function over the two branches' density, at most
+//!   1 ÷ (1 − [`SUNWARD_FRACTION`]) for an exact draw: unbiased, and the peak is sampled as often as
+//!   it matters.
+//!   Elsewhere, Rayleigh's sky included, directions are drawn as before. The roulette's threshold
+//!   scales with every such importance weight (a Legendre series' too), so that the roulette
+//!   answers to losses alone.
 //!
 //! The quadrature is 8-point Gauss–Legendre on each shell's piece of a ray, where the integrand is
 //! smooth: the profiles' kinks are shell boundaries, and an exponential profile changes by at most
@@ -45,17 +62,19 @@
 //! (1,024 levels, each a slight kink) to 3 × 10⁻⁹, and a tent, whose kinks are sharp, to
 //! 1.4 × 10⁻⁶.
 //!
-//! **The Stokes mode** (Rayleigh, isotropic and absorbing terms) carries, beside the scalar
-//! weight, the 3 × 3 matrix that takes the Stokes vector (I, Q, U) of the light arriving along the
-//! current flight, in that flight's frame, to the detector's. The light's frame for a propagation
-//! direction k is (e₁, e₂ = k × e₁); a rotation of the frame by ψ, e₁′ = cos ψ e₁ + sin ψ e₂,
-//! takes (Q, U) to (cos 2ψ Q + sin 2ψ U, −sin 2ψ Q + cos 2ψ U), and the scattering matrix acts in
-//! the scattering plane's frame, e₂ its normal (Hovenier, van der Mee and Domke 2004, §1.4 and
-//! §2.3; Chandrasekhar 1950, §15). Directions are drawn from the phase function, the matrix
-//! divided by it, so that the scalar and the Stokes modes follow the same paths from the same
-//! draws: for an isotropic scatterer they give the same I, and for Rayleigh their difference is the
-//! scalar approximation's error alone. Light is unpolarised at the suns and after the ground,
-//! and V never arises, since no source or scatterer here makes it.
+//! **The Stokes mode** carries, beside the scalar weight, the 4 × 4 matrix that takes the Stokes
+//! vector (I, Q, U, V) of the light arriving along the current flight, in that flight's frame, to
+//! the detector's. The light's frame for a propagation direction k is (e₁, e₂ = k × e₁); a
+//! rotation of the frame by ψ, e₁′ = cos ψ e₁ + sin ψ e₂, takes (Q, U) to
+//! (cos 2ψ Q + sin 2ψ U, −sin 2ψ Q + cos 2ψ U) and leaves I and V, and the scattering matrix, of
+//! the block-diagonal form of the [`optics`](super::optics) module, acts in the scattering plane's
+//! frame, e₂ its normal (Hovenier, van der Mee and Domke 2004, §1.4 and §2.3; Chandrasekhar 1950,
+//! §15). Every term scatters by its own matrix, or by a₁ alone where the case marks it
+//! `depolarising`. Directions are drawn from the phase function, the matrix divided by it, so that
+//! the scalar and the Stokes modes follow the same paths from the same draws, and the Stokes mode
+//! scores the scalar estimate of those paths beside the vector one: their difference is the scalar
+//! approximation's error alone, and for depolarising terms they give the same I. Light is
+//! unpolarised at the suns and after the ground; V arises only through b₂, from U.
 
 use core::f64::consts::PI;
 
@@ -69,9 +88,29 @@ use super::geometry::{LocalFrame, Next, ShellGrid, Vec3, basis, cosine_weighted,
 use super::optics::{Phase, ScatteringMatrix};
 use crate::tasks::displaced_forms::births::Draws;
 
+/// The components of a sample: the radiance (I, Q, U, V) and, in the Stokes mode, the scalar
+/// radiance of the same paths. The scalar mode fills [`I`] alone.
+pub(crate) const COMPONENTS: usize = 5;
+
+/// A sample's radiance, the Stokes vector's I.
+pub(crate) const I: usize = 0;
+
+/// A sample's scalar radiance, in the Stokes mode.
+pub(crate) const SCALAR_I: usize = 4;
+
 /// Below this fraction of its branch's starting weight a path plays Russian roulette, surviving
 /// with probability weight ÷ (this × the starting weight) and carrying that threshold if it does.
 pub(crate) const ROULETTE_FRACTION: f64 = 0.1;
+
+/// A vertex's phase mixture is forward-peaked, and its new directions are drawn partly towards the
+/// suns, where its forward value passes this, sr⁻¹: some 12 times the isotropic 1 ÷ 4π, and
+/// eight times Rayleigh's largest, which a Henyey–Greenstein phase function reaches at g ≈ 0.65.
+pub(crate) const FORWARD_PEAK_PER_SR: f64 = 1.0;
+
+/// The fraction of a forward-peaked vertex's new directions drawn about a sun (module
+/// documentation): enough to sample the peak, at a cost of at most 1 ÷ (1 − this) in the weight
+/// of the others, for an exact draw.
+pub(crate) const SUNWARD_FRACTION: f64 = 0.2;
 
 /// A sun's transmittance is taken as zero once its optical depth passes this: e^(−50) is
 /// 2 × 10⁻²², below any radiance a case compares.
@@ -93,6 +132,9 @@ pub(crate) struct Medium<'a> {
     /// Per term, at relative density 1, m⁻¹.
     absorption_per_m: Vec<f64>,
     phases: Vec<Phase>,
+    /// Per term, its phase function forward (cos Θ = 1), sr⁻¹: what decides whether a vertex is
+    /// forward-peaked.
+    forward_per_sr: Vec<f64>,
     /// Per shell, a bound of the scattering coefficient in the shell, m⁻¹.
     majorant_per_m: Vec<f64>,
     absorbs: bool,
@@ -177,6 +219,20 @@ pub(crate) enum Level {
     Top,
 }
 
+/// `n` as an `f64`, for the small counts of suns.
+fn count(n: usize) -> f64 {
+    f64::from(u32::try_from(n).expect("a case has fewer than 2³² suns"))
+}
+
+/// An index drawn uniformly from `0..n`, `n` positive; no draw for `n` = 1.
+fn uniform_index(n: usize, draws: &mut Draws) -> usize {
+    if n == 1 {
+        return 0;
+    }
+    let target = draws.uniform() * count(n);
+    (1..n).take_while(|&k| count(k) <= target).count()
+}
+
 /// The unit vectors towards the suns at `directions` in `frame`.
 #[must_use]
 pub(crate) fn sun_vectors(frame: &LocalFrame, directions: &[LocalDirection]) -> Vec<Vec3> {
@@ -230,8 +286,9 @@ enum Vertex {
 /// The polarisation state a path carries in the Stokes mode.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Stokes {
-    /// Takes (I, Q, U) arriving along the current flight, in its frame, to the detector's frame.
-    m: [[f64; 3]; 3],
+    /// Takes (I, Q, U, V) arriving along the current flight, in its frame, to the detector's
+    /// frame.
+    m: [[f64; 4]; 4],
     /// The current flight's first Stokes axis, perpendicular to it.
     e1: Vec3,
 }
@@ -239,7 +296,12 @@ struct Stokes {
 impl Stokes {
     fn new(e1: Vec3) -> Self {
         Self {
-            m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            m: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
             e1,
         }
     }
@@ -266,9 +328,9 @@ impl Stokes {
         ((c * c - s * s) / norm, 2.0 * c * s / norm)
     }
 
-    /// (I, Q, U) at the detector of unit unpolarised light from the unit vector `sun` scattered
-    /// towards −`dir` by `z`.
-    fn next_event(&self, z: &ScatteringMatrix, dir: Vec3, sun: Vec3) -> [f64; 3] {
+    /// (I, Q, U, V) at the detector of unit unpolarised light from the unit vector `sun`
+    /// scattered towards −`dir` by `z`: singly scattered, it carries no V.
+    fn next_event(&self, z: &ScatteringMatrix, dir: Vec3, sun: Vec3) -> [f64; 4] {
         let n = self.plane_normal(sun, dir, dir);
         let (c2, s2) = self.rotation(dir, n);
         let v = [z.a1, c2 * z.b1, -s2 * z.b1];
@@ -281,16 +343,18 @@ impl Stokes {
     fn scatter(&mut self, z: &ScatteringMatrix, old: Vec3, new: Vec3) {
         let n = self.plane_normal(new, old, old);
         let (c2, s2) = self.rotation(old, n);
-        // R(ψ) Z: rows of the rotation [[1, 0, 0], [0, c2, s2], [0, −s2, c2]] times
-        // [[a1, b1, 0], [b1, a2, 0], [0, 0, a3]].
+        // R(ψ) Z: rows of the rotation [[1, 0, 0, 0], [0, c2, s2, 0], [0, −s2, c2, 0],
+        // [0, 0, 0, 1]] times [[a1, b1, 0, 0], [b1, a2, 0, 0], [0, 0, a3, b2], [0, 0, −b2, a4]].
         let a = [
-            [z.a1, z.b1, 0.0],
-            [c2 * z.b1, c2 * z.a2, s2 * z.a3],
-            [-s2 * z.b1, -s2 * z.a2, c2 * z.a3],
+            [z.a1, z.b1, 0.0, 0.0],
+            [c2 * z.b1, c2 * z.a2, s2 * z.a3, s2 * z.b2],
+            [-s2 * z.b1, -s2 * z.a2, c2 * z.a3, c2 * z.b2],
+            [0.0, 0.0, -z.b2, z.a4],
         ];
-        self.m = self
-            .m
-            .map(|row| [0, 1, 2].map(|j| row[0] * a[0][j] + row[1] * a[1][j] + row[2] * a[2][j]));
+        self.m = self.m.map(|row| {
+            [0, 1, 2, 3]
+                .map(|j| row[0] * a[0][j] + row[1] * a[1][j] + row[2] * a[2][j] + row[3] * a[3][j])
+        });
         self.e1 = new.cross(n);
     }
 
@@ -299,6 +363,7 @@ impl Stokes {
         for row in &mut self.m {
             row[1] = 0.0;
             row[2] = 0.0;
+            row[3] = 0.0;
         }
         self.e1 = basis(dir).0;
     }
@@ -357,12 +422,14 @@ impl<'a> Medium<'a> {
                     * MAJORANT_MARGIN
             })
             .collect();
+        let phases: Vec<Phase> = terms
+            .iter()
+            .map(|t| Phase::of(&t.phase, wavelength))
+            .collect();
         Self {
             grid,
-            phases: terms
-                .iter()
-                .map(|t| Phase::of(&t.phase, wavelength))
-                .collect(),
+            forward_per_sr: phases.iter().map(|p| p.value(1.0)).collect(),
+            phases,
             absorbs: absorption_per_m.iter().any(|&a| a > 0.0),
             profiles,
             scattering_per_m,
@@ -506,15 +573,16 @@ impl<'a> Medium<'a> {
         }
     }
 
-    /// One sample of the radiance (I, Q, U) at `source`, or of the flux for a hemisphere; Q and U
-    /// are zero in the scalar mode.
+    /// One sample of the radiance (I, Q, U, V) and the scalar radiance of the same path at
+    /// `source` ([`COMPONENTS`]), or of the fluxes for a hemisphere; all but [`I`] are zero in the
+    /// scalar mode.
     pub(crate) fn sample(
         &self,
         source: &Source,
         polarisation: Polarisation,
         draws: &mut Draws,
         scratch: &mut Scratch,
-    ) -> [f64; 3] {
+    ) -> [f64; COMPONENTS] {
         let (look, e1, scale) = match source.aim {
             Aim::Cone {
                 axis,
@@ -539,14 +607,14 @@ impl<'a> Medium<'a> {
                             .cross(source.origin_m, look, distance_m, top, Next::Space);
                     (entry, top, source.cut_m - distance_m)
                 }
-                Some(_) | None => return [0.0; 3],
+                Some(_) | None => return [0.0; COMPONENTS],
             },
         };
         let stokes = match polarisation {
             Polarisation::Scalar => None,
             Polarisation::Stokes => Some(Stokes::new(e1)),
         };
-        let mut out = [0.0; 3];
+        let mut out = [0.0; COMPONENTS];
         let end = self.first_flight(start_m, look, shell, cut_m, &mut scratch.pieces);
         let scattering_depth: f64 = scratch.pieces.iter().map(|p| p.scattering_depth).sum();
         let absorption_depth: f64 = scratch.pieces.iter().map(|p| p.absorption_depth).sum();
@@ -724,8 +792,20 @@ impl<'a> Medium<'a> {
             / total_per_m
     }
 
+    /// The density the terms' draws have at cos Θ, mixed as [`phase_value`](Self::phase_value)
+    /// mixes, sr⁻¹: the phase function but for a Legendre series, drawn from its proposal.
+    fn sampling_density(&self, terms_per_m: &[f64], total_per_m: f64, cos_theta: f64) -> f64 {
+        self.phases
+            .iter()
+            .zip(terms_per_m)
+            .map(|(phase, &s)| s * phase.sampling_density(cos_theta))
+            .sum::<f64>()
+            / total_per_m
+    }
+
     /// The mixture of the terms' scattering matrices at cos Θ, as
-    /// [`phase_value`](Self::phase_value) mixes.
+    /// [`phase_value`](Self::phase_value) mixes: a term without a matrix, which the Stokes mode
+    /// takes only where the case marks it depolarising, by a₁ alone.
     fn phase_matrix(
         &self,
         terms_per_m: &[f64],
@@ -735,7 +815,10 @@ impl<'a> Medium<'a> {
         let mut z = ScatteringMatrix::default();
         for (phase, &s) in self.phases.iter().zip(terms_per_m) {
             if s > 0.0 {
-                z.add_scaled(s / total_per_m, &phase.matrix(cos_theta));
+                let matrix = phase
+                    .matrix(cos_theta)
+                    .unwrap_or_else(|| ScatteringMatrix::depolarising(phase.value(cos_theta)));
+                z.add_scaled(s / total_per_m, &matrix);
             }
         }
         z
@@ -750,7 +833,7 @@ impl<'a> Medium<'a> {
         suns: &[Vec3],
         draws: &mut Draws,
         scratch: &mut Scratch,
-        out: &mut [f64; 3],
+        out: &mut [f64; COMPONENTS],
     ) {
         loop {
             match vertex {
@@ -780,15 +863,16 @@ impl<'a> Medium<'a> {
     }
 
     /// At a scattering vertex: adds each sun's next-event estimate to `out` and turns the walker
-    /// into a direction drawn from the terms' phase functions there. `false` if nothing scatters
-    /// at the vertex, which ends the path.
+    /// into a direction drawn from the terms' phase functions there, its weight times the draw's.
+    /// `false` if nothing scatters at the vertex, or the draw carries no weight, which ends the
+    /// path.
     fn scatter(
         &self,
         walker: &mut Walker,
         suns: &[Vec3],
         draws: &mut Draws,
         scratch: &mut Scratch,
-        out: &mut [f64; 3],
+        out: &mut [f64; COMPONENTS],
     ) -> bool {
         let h = self.height_m(walker.position_m);
         scratch.terms_per_m.clear();
@@ -812,16 +896,15 @@ impl<'a> Medium<'a> {
             }
             let scale = walker.weight * irradiance * transmittance;
             let cos_theta = sun.dot(walker.dir);
+            let scalar = scale * self.phase_value(&scratch.terms_per_m, total_per_m, cos_theta);
             match &walker.stokes {
-                None => {
-                    out[0] +=
-                        scale * self.phase_value(&scratch.terms_per_m, total_per_m, cos_theta);
-                }
+                None => out[I] += scalar,
                 Some(stokes) => {
                     let z = self.phase_matrix(&scratch.terms_per_m, total_per_m, cos_theta);
                     for (o, x) in out.iter_mut().zip(stokes.next_event(&z, walker.dir, sun)) {
                         *o += scale * x;
                     }
+                    out[SCALAR_I] += scalar;
                 }
             }
         }
@@ -830,7 +913,7 @@ impl<'a> Medium<'a> {
         let pick = draws.uniform() * total_per_m;
         let mut running = 0.0;
         let mut phase = None;
-        for (&candidate, &s) in self.phases.iter().zip(&scratch.terms_per_m) {
+        for (candidate, &s) in self.phases.iter().zip(&scratch.terms_per_m) {
             if s > 0.0 {
                 running += s;
                 phase = Some(candidate);
@@ -840,25 +923,76 @@ impl<'a> Medium<'a> {
             }
         }
         let Some(phase) = phase else { return false };
-        let cos_theta = phase.sample(draws);
-        let new = turned(walker.dir, cos_theta, 2.0 * PI * draws.uniform());
-        if let Some(stokes) = &mut walker.stokes {
-            let z = self.phase_matrix(&scratch.terms_per_m, total_per_m, cos_theta);
-            let per_phase = ScatteringMatrix {
-                a1: 1.0,
-                a2: z.a2 / z.a1,
-                a3: z.a3 / z.a1,
-                b1: z.b1 / z.a1,
+        let terms = &scratch.terms_per_m;
+        let forward = self
+            .forward_per_sr
+            .iter()
+            .zip(terms)
+            .map(|(&f, &s)| s * f)
+            .sum::<f64>()
+            / total_per_m;
+        let (new, cos_theta, weight) = if forward > FORWARD_PEAK_PER_SR {
+            // DDIS (module documentation): the direction from the mixture, about the old one or
+            // about a sun's, weighted by the phase function over both branches' density. Every sun
+            // of the case is a target, lit or not at this wavelength, so that the draws do not
+            // depend on the irradiance and the radiance stays linear in it path by path.
+            let towards_sun = draws.uniform() < SUNWARD_FRACTION;
+            let draw = phase.sample(draws);
+            let axis = if towards_sun {
+                suns[uniform_index(suns.len(), draws)]
+            } else {
+                walker.dir
             };
-            stokes.scatter(&per_phase, walker.dir, new);
+            let new = turned(axis, draw.cos_theta, 2.0 * PI * draws.uniform());
+            let cos_theta = walker.dir.dot(new).clamp(-1.0, 1.0);
+            let sunward = suns
+                .iter()
+                .map(|&sun| {
+                    self.sampling_density(terms, total_per_m, sun.dot(new).clamp(-1.0, 1.0))
+                })
+                .sum::<f64>()
+                / count(suns.len());
+            let density = (1.0 - SUNWARD_FRACTION)
+                * self.sampling_density(terms, total_per_m, cos_theta)
+                + SUNWARD_FRACTION * sunward;
+            (
+                new,
+                cos_theta,
+                self.phase_value(terms, total_per_m, cos_theta) / density,
+            )
+        } else {
+            let draw = phase.sample(draws);
+            let new = turned(walker.dir, draw.cos_theta, 2.0 * PI * draws.uniform());
+            (new, draw.cos_theta, draw.weight)
+        };
+        // A Legendre series' draw is weighted by the series over its proposal; where the series
+        // is not positive between the proposal's entries, or a table is zero, the path ends, as
+        // it carries nothing.
+        if weight <= 0.0 {
+            return false;
         }
+        if let Some(stokes) = &mut walker.stokes {
+            let z = self.phase_matrix(terms, total_per_m, cos_theta);
+            stokes.scatter(&z.per_phase(), walker.dir, new);
+        }
+        walker.weight *= weight;
+        // An importance weight is not a loss: the roulette's threshold scales with it, so that a
+        // path drawn towards a sun with a small weight reaches the vertex whose peak it was drawn
+        // for, rather than being rouletted before it and scoring a hundredfold if it survives.
+        walker.roulette *= weight;
         walker.dir = new;
         true
     }
 
     /// At the ground: adds each sun's next-event estimate to `out` and reflects the walker into a
     /// cosine-weighted direction, its weight times the albedo.
-    fn reflect(&self, walker: &mut Walker, suns: &[Vec3], draws: &mut Draws, out: &mut [f64; 3]) {
+    fn reflect(
+        &self,
+        walker: &mut Walker,
+        suns: &[Vec3],
+        draws: &mut Draws,
+        out: &mut [f64; COMPONENTS],
+    ) {
         let normal = self.grid.vertical(walker.position_m);
         for (&sun, &irradiance) in suns.iter().zip(&self.irradiance) {
             let cos_sun = normal.dot(sun);
@@ -869,11 +1003,12 @@ impl<'a> Medium<'a> {
             let scale =
                 walker.weight * self.ground_albedo / PI * cos_sun * irradiance * transmittance;
             match &walker.stokes {
-                None => out[0] += scale,
+                None => out[I] += scale,
                 Some(stokes) => {
                     for (o, row) in out.iter_mut().zip(&stokes.m) {
                         *o += scale * row[0];
                     }
+                    out[SCALAR_I] += scale;
                 }
             }
         }
@@ -893,6 +1028,90 @@ pub(crate) mod tests {
 
     use super::super::spheroid;
     use super::*;
+
+    #[test]
+    fn atmosphere_sun_indices_are_drawn_uniformly() {
+        // 30,000 draws among three suns: each count within 4σ of 10,000 (σ = √(n p (1 − p)) =
+        // 81.6), and one sun takes no draw at all.
+        let mut draws = Draws::new(5, 0, 0);
+        let mut counts = [0_u32; 3];
+        for _ in 0..30_000 {
+            counts[uniform_index(3, &mut draws)] += 1;
+        }
+        for count in counts {
+            assert!(
+                (f64::from(count) - 10_000.0).abs() < 4.0 * 81.65,
+                "{counts:?}"
+            );
+        }
+        let (mut once, mut twice) = (Draws::new(5, 1, 0), Draws::new(5, 1, 0));
+        assert_eq!(uniform_index(1, &mut once), 0);
+        assert!((once.uniform() - twice.uniform()).abs() < f64::MIN_POSITIVE);
+    }
+
+    #[test]
+    fn atmosphere_stokes_state_couples_u_and_v_through_b2() {
+        // Two scatterings in planes at right angles, by a matrix with every element: the path's
+        // matrix is R(ψ₂)Z₂ R(ψ₁)Z₁ written out, and its V row takes U through −b₂.
+        let z = ScatteringMatrix {
+            a1: 1.0,
+            a2: 0.9,
+            a3: 0.6,
+            a4: 0.5,
+            b1: -0.3,
+            b2: 0.4,
+        };
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        // The detector's flight along +z with e₁ = x; it scatters from the flight along x, in the
+        // plane of x and z, whose normal is the current frame's e₂ = −y: no rotation.
+        let mut stokes = Stokes::new(x);
+        stokes.scatter(&z, up, x);
+        let zm = [
+            [z.a1, z.b1, 0.0, 0.0],
+            [z.b1, z.a2, 0.0, 0.0],
+            [0.0, 0.0, z.a3, z.b2],
+            [0.0, 0.0, -z.b2, z.a4],
+        ];
+        for (i, row) in stokes.m.iter().enumerate() {
+            for (j, &value) in row.iter().enumerate() {
+                assert!(
+                    (value - zm[i][j]).abs() < 1e-15,
+                    "{i}{j}: {value} {}",
+                    zm[i][j]
+                );
+            }
+        }
+        // Then from the flight along y: the plane of x and y, normal z, turned 90° from the
+        // first, so the rotation is cos 2ψ = −1: Q and U change sign, I and V do not.
+        stokes.scatter(&z, x, y);
+        let rotated = [
+            [z.a1, z.b1, 0.0, 0.0],
+            [-z.b1, -z.a2, 0.0, 0.0],
+            [0.0, 0.0, -z.a3, -z.b2],
+            [0.0, 0.0, -z.b2, z.a4],
+        ];
+        let expected: Vec<[f64; 4]> = zm
+            .iter()
+            .map(|row| [0, 1, 2, 3].map(|j| (0..4).map(|k| row[k] * rotated[k][j]).sum::<f64>()))
+            .collect();
+        for (i, row) in stokes.m.iter().enumerate() {
+            for (j, &value) in row.iter().enumerate() {
+                assert!((value - expected[i][j]).abs() < 1e-15, "{i}{j}: {value}");
+            }
+        }
+        // V's row takes U through b₂ at each scattering: −b₂(−a₃) − a₄b₂ after the two.
+        assert!((stokes.m[3][2] - (z.b2 * z.a3 - z.a4 * z.b2)).abs() < 1e-15);
+        // A Lambertian reflection keeps I alone.
+        stokes.depolarise(up);
+        assert!(
+            stokes
+                .m
+                .iter()
+                .all(|row| row[1..].iter().all(|v| v.abs() < f64::MIN_POSITIVE))
+        );
+    }
 
     #[test]
     fn atmosphere_grazing_optical_depths_match_a_fine_quadrature() {
