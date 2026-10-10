@@ -1,0 +1,418 @@
+{
+  "description": "Curves of growth of the client's absorbers (rendering plan R08, Design note 5; R08.T4.b; decision-r08-t4b-t12c.md), written by absorbers.test.ts under HYPERION_BLESS=1 and checked unchanged otherwise. Per absorber and sun, at each of its recordedMultiples of the reference column: -ln T_c per channel (r, g, b) read back from the sun's curve (clamps and running minimum included), rounded to 1e-6; the CIE 1976 delta u'v' between the three-channel colour (the sun's colour times T_c) and the spectral one, and between the 15 bins' colour and the spectral one, rounded up to 1e-6. Then, as decades log10(u/U) of the curve's nodes, where the light leaves Rec. 709 (gamutExit) and per channel where the signed sum passes 1, where it reaches the 1e-6 floor, and where the running minimum first lowers a node and how many it lowers; null where it never happens on the grid.",
+  "absorbers": [
+    {
+      "name": "O3 at 233 K, 300 DU",
+      "referenceColumnPerM2": 8.061e+22,
+      "recordedMultiples": [0.1, 0.3, 1, 3, 10, 30],
+      "suns": [
+        {
+          "sun": "the Sun (bake_spectra.json, 5772 K, log g 4.438)",
+          "opticalDepth": [
+            [0.003935, 0.002495, 0],
+            [0.011809, 0.007483, 0],
+            [0.03939, 0.024922, 0],
+            [0.118416, 0.074586, 0],
+            [0.397865, 0.246585, 0],
+            [1.229995, 0.724076, 0.003265]
+          ],
+          "deltaUv": [0.000007, 0.00002, 0.000063, 0.000173, 0.000408, 0.000002],
+          "binDeltaUv": [0.000005, 0.000015, 0.000047, 0.000141, 0.000469, 0.001522],
+          "gamutExit": 2.025,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 2.025,
+            "runningMinimumFrom": 2.2,
+            "runningMinimum": 33
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.25,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 2500 K",
+          "opticalDepth": [
+            [0.003356, 0.002682, 0],
+            [0.010066, 0.008044, 0],
+            [0.033541, 0.026785, 0],
+            [0.100511, 0.080125, 0],
+            [0.333726, 0.264387, 0],
+            [0.989348, 0.77001, 0]
+          ],
+          "deltaUv": [0.000027, 0.000082, 0.000272, 0.000827, 0.002882, 0.00957],
+          "binDeltaUv": [0.000007, 0.000021, 0.000067, 0.0002, 0.000656, 0.001897],
+          "gamutExit": 2.425,
+          "red": {
+            "aboveOne": null,
+            "atFloor": null,
+            "runningMinimumFrom": 2.525,
+            "runningMinimum": 14
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.425,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 6500 K",
+          "opticalDepth": [
+            [0.003946, 0.002497, 0],
+            [0.01184, 0.00749, 0],
+            [0.039495, 0.024949, 0],
+            [0.118723, 0.074684, 0],
+            [0.398788, 0.247122, 0],
+            [1.230576, 0.727896, 0.00646]
+          ],
+          "deltaUv": [0.000006, 0.000016, 0.000051, 0.000138, 0.000289, 0.000001],
+          "binDeltaUv": [0.000005, 0.000014, 0.000047, 0.000139, 0.000464, 0.00152],
+          "gamutExit": 2.225,
+          "red": {
+            "aboveOne": null,
+            "atFloor": null,
+            "runningMinimumFrom": 2.1,
+            "runningMinimum": 37
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.225,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 30000 K",
+          "opticalDepth": [
+            [0.004268, 0.002538, 0.00005],
+            [0.012808, 0.007614, 0.000151],
+            [0.042741, 0.025374, 0.000517],
+            [0.128629, 0.076069, 0.001668],
+            [0.433781, 0.253099, 0.006791],
+            [1.351373, 0.760531, 0.028193]
+          ],
+          "deltaUv": [0.000001, 0.000001, 0.000001, 0.000001, 0.000001, 0.000001],
+          "binDeltaUv": [0.000005, 0.000013, 0.000044, 0.000131, 0.000454, 0.001554],
+          "gamutExit": 2.1,
+          "red": {
+            "aboveOne": null,
+            "atFloor": null,
+            "runningMinimumFrom": 1.975,
+            "runningMinimum": 42
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.1,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": null,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "CH4 at 100 K, 3 km-am",
+      "referenceColumnPerM2": 8.060340333e+28,
+      "recordedMultiples": [0.1, 0.3, 1, 3, 10, 30, 100],
+      "suns": [
+        {
+          "sun": "the Sun (bake_spectra.json, 5772 K, log g 4.438)",
+          "opticalDepth": [
+            [0.034601, 0.00439, 0],
+            [0.09605, 0.013369, 0],
+            [0.255707, 0.044957, 0],
+            [0.525749, 0.124326, 0],
+            [1.167121, 0.307759, 0],
+            [3.208076, 0.614353, 0.002578],
+            [13.815511, 1.266484, 0.070304]
+          ],
+          "deltaUv": [0.000059, 0.000164, 0.000443, 0.000879, 0.001167, 0.000011, 0.017558],
+          "binDeltaUv": [0.000072, 0.000203, 0.000526, 0.001052, 0.002596, 0.005584, 0.007677],
+          "gamutExit": 1.6,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.6,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 3,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 2500 K",
+          "opticalDepth": [
+            [0.032102, 0.002385, 0],
+            [0.088814, 0.008118, 0],
+            [0.23552, 0.032759, 0],
+            [0.480368, 0.105164, 0],
+            [1.009802, 0.286726, 0],
+            [2.116214, 0.597497, 0],
+            [13.815511, 1.247282, 0]
+          ],
+          "deltaUv": [0.000131, 0.00037, 0.001058, 0.002451, 0.005718, 0.011726, 0.023257],
+          "binDeltaUv": [0.000106, 0.000314, 0.000845, 0.001586, 0.003237, 0.006467, 0.007594],
+          "gamutExit": 1.925,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.925,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 6500 K",
+          "opticalDepth": [
+            [0.035043, 0.004443, 0],
+            [0.097286, 0.013513, 0],
+            [0.258986, 0.04533, 0],
+            [0.532195, 0.125029, 0],
+            [1.182609, 0.308893, 0],
+            [3.324803, 0.61705, 0.006482],
+            [13.815511, 1.279336, 0.07388]
+          ],
+          "deltaUv": [0.000055, 0.000153, 0.00041, 0.000795, 0.000958, 0.000011, 0.01642],
+          "binDeltaUv": [0.00007, 0.000197, 0.000509, 0.001016, 0.002536, 0.005501, 0.007569],
+          "gamutExit": 1.575,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.575,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.9,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 30000 K",
+          "opticalDepth": [
+            [0.037617, 0.005014, 0],
+            [0.104614, 0.015074, 0],
+            [0.279379, 0.049401, 0],
+            [0.577575, 0.133221, 0],
+            [1.332675, 0.325015, 0.004719],
+            [13.815511, 0.652159, 0.028761],
+            [13.815511, 1.397623, 0.099892]
+          ],
+          "deltaUv": [0.000023, 0.000062, 0.000145, 0.000161, 0.000001, 0.00105, 0.01091],
+          "binDeltaUv": [0.000049, 0.000137, 0.000362, 0.000822, 0.002385, 0.005283, 0.007066],
+          "gamutExit": 1.45,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.45,
+            "runningMinimumFrom": 2.675,
+            "runningMinimum": 14
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.625,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "CH4 at 296 K, 3 km-am",
+      "referenceColumnPerM2": 8.060340333e+28,
+      "recordedMultiples": [0.1, 0.3, 1, 3, 10, 30, 100],
+      "suns": [
+        {
+          "sun": "the Sun (bake_spectra.json, 5772 K, log g 4.438)",
+          "opticalDepth": [
+            [0.039983, 0.007443, 0],
+            [0.11352, 0.0226, 0],
+            [0.322615, 0.076721, 0],
+            [0.741107, 0.226303, 0],
+            [1.945565, 0.663117, 0.017847],
+            [13.815511, 1.602495, 0.113209],
+            [13.815511, 3.893384, 0.367739]
+          ],
+          "deltaUv": [0.000045, 0.000121, 0.000298, 0.00036, 0, 0.008831, 0.014166],
+          "binDeltaUv": [0.000077, 0.000219, 0.00059, 0.001195, 0.002436, 0.002783, 0.00207],
+          "gamutExit": 1.325,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.325,
+            "runningMinimumFrom": 2.275,
+            "runningMinimum": 30
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.175,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 2500 K",
+          "opticalDepth": [
+            [0.036472, 0.005725, 0],
+            [0.102996, 0.018137, 0],
+            [0.289419, 0.066731, 0],
+            [0.649086, 0.213038, 0],
+            [1.533863, 0.658577, 0],
+            [3.624143, 1.601436, 0],
+            [13.815511, 3.341894, 0]
+          ],
+          "deltaUv": [0.000157, 0.000456, 0.001387, 0.003608, 0.010152, 0.021662, 0.035903],
+          "binDeltaUv": [0.000116, 0.000348, 0.000982, 0.001965, 0.003716, 0.00446, 0.005887],
+          "gamutExit": 1.675,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.675,
+            "runningMinimumFrom": 2.65,
+            "runningMinimum": 15
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.575,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 6500 K",
+          "opticalDepth": [
+            [0.040427, 0.007508, 0],
+            [0.114783, 0.022783, 0],
+            [0.326129, 0.07725, 0],
+            [0.748389, 0.227637, 0],
+            [1.962316, 0.667711, 0.021169],
+            [13.815511, 1.626405, 0.114797],
+            [13.815511, 4.30851, 0.359812]
+          ],
+          "deltaUv": [0.000039, 0.000103, 0.000241, 0.000205, 0.000001, 0.007792, 0.009387],
+          "binDeltaUv": [0.000074, 0.000212, 0.000567, 0.001139, 0.002296, 0.002536, 0.002074],
+          "gamutExit": 1.325,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.325,
+            "runningMinimumFrom": 2.2,
+            "runningMinimum": 33
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 2.1,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": -3,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        },
+        {
+          "sun": "Planck 30000 K",
+          "opticalDepth": [
+            [0.043512, 0.008132, 0.000123],
+            [0.123843, 0.024527, 0.000446],
+            [0.35392, 0.082125, 0.002149],
+            [0.822004, 0.239212, 0.009469],
+            [2.305174, 0.703965, 0.043174],
+            [13.815511, 1.811051, 0.139773],
+            [13.815511, 13.815511, 0.368043]
+          ],
+          "deltaUv": [0, 0.000001, 0.000001, 0.000001, 0, 0.004994, 0.024304],
+          "binDeltaUv": [0.000053, 0.000148, 0.000397, 0.000836, 0.001776, 0.001971, 0.001133],
+          "gamutExit": 1.225,
+          "red": {
+            "aboveOne": null,
+            "atFloor": 1.225,
+            "runningMinimumFrom": 1.85,
+            "runningMinimum": 47
+          },
+          "green": {
+            "aboveOne": null,
+            "atFloor": 1.85,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          },
+          "blue": {
+            "aboveOne": null,
+            "atFloor": null,
+            "runningMinimumFrom": null,
+            "runningMinimum": 0
+          }
+        }
+      ]
+    }
+  ]
+}

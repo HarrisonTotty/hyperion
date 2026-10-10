@@ -845,25 +845,93 @@ Names are those the owning plans give; the owning plan is authoritative.
      `DiscReflectanceTable` and the reference. Transmittance multiplies, so it cannot be
      pre-converted and stays three-channel. At Venus depths every three-sample triple is 0.04–0.08
      off in u′v′, so the thick bakes cannot skip this. It reads each star's spectrum in the bake
-     bins from R06's `HostDiscDto.bake_spectrum`.
+     bins from R06's `HostDiscDto.bake_spectrum`. An absorber enters each bake bin by its curve
+     of growth in that bin, weighted by S over the bin alone (R08.T4.b's `absorberBinCurves`).
+     - Each bin's curve is a true weighted mean, reduced to the channels on storage with the
+       signed matching functions.
+     - A bake that follows paths (the reference's 15-wavelength runs, a march) applies it to each
+       path's column.
+     - A bake that solves by layers (R08.T14.b) fits it with an exponential sum, one solve a term
+       (correlated-k; Lacis and Oinas 1991, JGR 96, 9027).
+     - Measured on the bare beam, the bins' colour lies within 0.0005 of the spectral colour
+       through 10 × 300 DU of ozone and within 0.0026 through 30 km-amagat of methane, and
+       0.0077 through 300 km-amagat.
+
+     This is where methane-rich worlds' scattered light belongs: in media deeper than two or
+     three Earth columns no three wavelengths hold (R08.T4.a). Their beam is the channel curve's
+     (Weights, below).
+
    - **Curves of growth** (researched 2026-09-29, medium confidence, from a synthetic-band model).
      Absorbers take a per-channel curve of growth, not a band-averaged cross-section, which
      Jensen's inequality biases dark and which fails for saturated narrow bands such as methane's on
      a Neptune. Per absorber, channel and sun, T_c(u) = ∫ w_c S e^(−σ(λ)u) dλ / ∫ w_c S dλ is
      tabulated on a log grid of column u.
      - **Per sun, at arrival.** The curve depends strongly on the star: 300 DU of ozone gives a
-       red-channel depth of 0.033 under a 2,500 K star against 0.046 under a 30,000 K one, and
-       methane's red transmittance through 300 km-am runs 0.36 to 0.20 over the same range. So
-       one solar table is not used. The optics worker computes each sun's curves at arrival from
-       that sun's spectrum, about 10⁶ exponentials, a few milliseconds.
+       red-channel depth of 0.034 under a 2,500 K star against 0.043 under a 30,000 K one, and
+       methane's red transmittance through 30 km-amagat at 100 K runs 0.36 to 0.26 over the same
+       range (0.22 to 0.10 at 296 K); through 300 km-amagat the light that passes lies outside
+       Rec. 709 under every star. Its red is negative at 100 and 198 K, and at 296 K under stars
+       up to 7,000 K. At 296 K under stars of 9,000 K and hotter its green is negative instead,
+       and under the 10,000 K white dwarf both are, since what passes is then mostly light short
+       of about 462 nm, where r̄ is positive and ḡ negative (corrected 2026-10-10,
+       `decision-r08-t4b-t12c.md` and `decision-r08-cmf-licence.md`). So one solar table is not
+       used. The optics worker computes each sun's curves at arrival from that sun's spectrum,
+       about 10⁶ exponentials, a few milliseconds; the bake bins' curves reuse the same
+       exponentials.
      - **Storage.** The shared per-planet table cannot hold a curve per sun. So it stores the
        molecular and aerosol optical depth in RGB and the accumulated absorber column u in alpha;
        a second `rgba16float` table holds up to four more absorbers' columns. Each sun's 1-D curve
        is applied on read (Design note 8).
-     - **Weights.** The weights are w_c = max(r̄_c, 0), the channel's colour-matching weight
-       clipped at zero. Rec. 709's blue weight is negative over 500–620 nm, which would give
-       T_B > 1 (1.003 for the Sun, 1.19–1.50 for a 2,500 K star). The clipped weights' small colour
-       error in the direct beam is recorded by the spectral check.
+     - **Weights** (ruled 2026-10-10, `decision-r08-t4b-t12c.md`).
+       - The weights are the signed matching functions c̄ in linear Rec. 709, the same that give
+         the star its colour. So star_c·T_c is exactly the colour of the star's light through
+         the absorber wherever that colour lies in Rec. 709 and T_c ≤ 1.
+       - Each T_c(u) = Σ c̄ S e^(−σu) ÷ Σ c̄ S is clamped to [10⁻⁶, 1] and made non-increasing
+         in u by a running minimum over its grid. A channel whose star colour Σ c̄ S is not
+         positive takes max(c̄, 0) instead (a star outside Rec. 709, below about 1,900 K for a
+         Planck spectrum).
+       - The clamp and the running minimum act in three places. `absorbers/curves.json` records,
+         per curve and channel, where each does (`decision-r08-cmf-licence.md` §5):
+         - blue above 1, from the least column, since Rec. 709's blue weight is negative above
+           515 nm:
+           - for ozone, under stars to 7,000 K, and the 10,000 K white dwarf at 193–233 K;
+           - for methane at 296 K, under stars to 9,000 K and the white dwarf;
+           - for methane at 100 and 198 K, under every star.
+
+           T_B reaches 1.014 under the Sun and 1.37 under a 2,500 K star.
+
+         - the floor, once the light leaves Rec. 709. It acts on the channel whose signed sum
+           turns negative, and later on the other if that sum follows:
+           - for methane, red at 50–252 km-amagat by star and temperature, then green from
+             200 km-amagat;
+           - for ozone, green at 3–8 × 10⁴ DU, but red under the Sun and the 4,750 K giant.
+         - the running minimum, on red alone:
+           - for methane, where red's sum turns positive again past its floor;
+           - for ozone, from up to 0.125 decade before its gamut exit, where red's sum rises with
+             u while the light is still in Rec. 709.
+
+         Neither gas reaches the floor by depth alone: every node at the floor has a negative sum.
+         Another absorber can take any channel above 1 or to the floor, by where its bands fall
+         against the matching functions' negative lobes (r̄ 462–553 nm, ḡ below 468 and above
+         608 nm, b̄ above 515 nm). So R08.T4.c records its own.
+
+       - _Against the clipped weights max(c̄, 0)_, first drafted here (curve only, each scene's
+         light without the absorber taken exactly, R06's twelve suns). The signed weights are
+         closer in 197 of 204 cases. Medians, signed against clipped:
+         - Earth's day sky through ozone: 0.0004 against 0.0012;
+         - the low sun to airmass 10: 0.0012 against 0.0029;
+         - the twilight zenith's Chappuis blue: 0.0036 against 0.0123;
+         - an ice giant's beam through 1–27 km-amagat of methane: 0.0009 against 0.0057;
+         - an ice giant's sky through the same: 0.0015 against 0.0043.
+       - They keep the beam's luminance within about 1%. Clipped weights brighten it by up to
+         5% through 10 × 300 DU and up to 8% through 30 km-amagat.
+       - The clipped weights are closer only for a sun within about 2° of the horizon (0.0058
+         against 0.0096). There the beam's own colour leaves Rec. 709 in blue under 5–12 of the
+         12 suns (R08.T4.a's gamut floor).
+       - So T_c is not a weighted mean of e^(−σu): it is not log-convex and needs the clamp.
+         What the tables rely on holds: T_c lies in (0, 1], so −ln T_c ≥ 0 on read (Design
+         note 8) and Hillaire's multiple-scattering series stays below 1, and T_c is
+         non-increasing in u.
      - **Resolution.** The integral runs on σ's own grid, 1 nm or finer. Ozone's cross-sections
        are binned to 1 nm, and Karkoschka and Tomasko's methane coefficients are used at their own
        resolution, never binned coarser, since they are band-model values for e^(−ku) at their
@@ -1371,8 +1439,9 @@ Names are those the owning plans give; the owning plan is authoritative.
       its index is a stated stand-in (R08.T5.b; `decision-r08-licences.md` row 5). That note clears
       only when measured constants replace the stand-in, not when a gate passes. The same note
       covers any species or material the client draws with estimated optics, a stated stand-in, or
-      none (an absorber without cross-sections, a key a newer server sent), while it shows under
-      the same τ rule. Each clears when measured optics replace the estimate
+      none (an absorber without cross-sections, a key a newer server sent, an absorber profile
+      beyond the five stored columns, R08.T4.b), while it shows under the same τ rule. Each
+      clears when measured optics replace the estimate
       (decision-composition §1.9). It is also shown while an aerosol mode is drawn with a named
       analogue's phase function or the Henyey–Greenstein fallback (R08.T5.c), under the same τ
       rule, whatever its estimated bias (`signoff-2.md`, item 5). It clears when a published model
@@ -2002,9 +2071,12 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   - at Earth the fitted triple beats 680/550/440 at a sun zenith of 85°.
 - **R08.T4.b Curves of growth.** `absorbers.ts`: `absorberCurve(absorber, spectrum)` computes T_c(u)
   per absorber and channel for one sun, for an `AbsorberSpec` keyed by species string
-  (decision-composition §1.9), weighted by max(r̄_c, 0)·S (Design note 5), on σ's own grid of 1 nm
-  or finer, with S interpolated from the sun's 15 `bake_spectrum` bin averages. It runs in the
-  optics worker at arrival, once per sun. The reduced cross-sections, ozone binned to 1 nm and
+  (decision-composition §1.9), weighted by the signed c̄_c·S, clamped to [10⁻⁶, 1] and
+  non-increasing in u (Design note 5, ruled 2026-10-10), on σ's own grid of 1 nm or finer, with S
+  interpolated from the sun's 15 `bake_spectrum` bin averages. It runs in the optics worker at
+  arrival, once per sun. `absorberBinCurves(absorber, spectrum)` gives the same sun's curve in
+  each of the 15 bake bins, weighted by S over the bin alone, for the spectral bakes and the
+  reference's 15-wavelength runs (Design note 5). The reduced cross-sections, ozone binned to 1 nm and
   methane's σ at its three temperatures interpolated onto a uniform grid of 0.25 nm or finer
   (below), are written to `absorbers/crossSections.json` by the same reduction step (T4.a's Node
   tool, since a renderer test fetches and reads no raw file). Ozone's 1 nm bins are centred, on
@@ -2023,31 +2095,67 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     - Methane (ruled 2026-10-09, `decision-r08-licences.md` row 1): σ at the three temperatures
       over 380–800 nm, interpolated onto the tool's own uniform grid of 0.25 nm or finer, so that
       no band-model value is averaged.
-    - T4.b's science check confirms from the paper:
-      - that PSG's columns are Table 4's infinite-pressure coefficients;
-      - the finite-pressure correction (Eqs. 2–4, the caption's constant 150 K^½) and Eq. 8's
-        temperature law, or records their omission;
-      - PSG's wavelength convention;
-      - where its MPI-Mainz ultraviolet completion begins. Any value used from it also cites
-        Keller-Rudek et al. 2013.
+    - T4.b's science check (ruled 2026-10-10, `decision-r08-t4b-t12c.md`).
+      - _Sources._ Table 4's caption, read in Elsevier's supplementary file and not used as an
+        input, and Collins et al. 2018 (Sci. Adv. 4, eaas9593, Methods Eqs. 1–5, open access),
+        which restate K&T's equations. No open copy of the paper was found.
+      - _PSG's columns_ are Table 4's coefficients "for the limit of infinite pressure", on air
+        wavelengths. They equal the band parameters of Irwin's AOPP k-tables, which the caption
+        names, to a unit of their last digit. No value below K&T's first row, 400 nm, is used,
+        so no MPI-Mainz value enters.
+      - _The finite-pressure correction, Eqs. 2–4, is not built._
+        - It is a Goody random band of Voigt lines, τ = 2kw ∫₀^∞ V ÷ [1 + kw(δ/α_D0)V ÷ √T] dx,
+          with y = (α_L0/α_D0)(P/P0)(√T0 ÷ T)[q + (1 − q) ÷ SFB], α_L0/α_D0 = 150 K^½ (the
+          caption) and SFB 1.4. δ/α_D0 is Table 4's last column, which PSG's file omits.
+        - e^(−ku) at infinite pressure is a stated approximation. Measured with Irwin's δ/α_D0 at
+          100 K, the correction would raise the red channel's transmittance by at most 1.4% at
+          1 atm through 30 km-amagat, 4.4% at 0.3 atm and 11.5% at 0.1 atm. A body's methane
+          lies chiefly at 0.5 bar and deeper.
+        - NEMESIS's `tkark.f` takes 125 for the 150; that is recorded, not followed.
+      - _Eq. 8_ is Lagrange's quadratic in ln k through the three temperatures, z = (T − 198) ÷ 98:
+        ln k(T) = ½z(z − 1) ln k₁₀₀ + (1 − z²) ln k₁₉₈ + ½z(z + 1) ln k₂₉₆.
+        - It is used in place of linear-in-σ, from which it differs by at most 0.7% in channel T
+          through 10 km-amagat.
+        - The caption gives it "for other temperatures", and the k-tables it names span 50–300 K,
+          so the result is `measured` over 50–300 K.
+        - Beyond that range the nearest end's value is held and is `estimated`. Methane above
+          300 K is R08.T4.c's.
+        - A row with a zero at any of the three temperatures is linear in k.
     - Karkoschka 1998 (PDS GBAT_0001, DOI 10.17189/2bp8-k793, CC0) is the open fallback and a
       cross-check. It has no temperature dependence, so using it is a recorded deviation.
   - Absorbers whose ratios hold constant with height share one curve of growth:
     σ_mix(λ) = Σ xᵢσᵢ(λ) is exact for them. So Design note 8's five stored columns count distinct
     vertical profiles, not species, and do not cap the composition. A listed absorber with no
-    cross-sections draws nothing and is reported for `atmosphereApproximate`.
+    cross-sections draws nothing and is reported for `atmosphereApproximate`. Past five profiles,
+    the five of greatest optical depth are kept. A profile's depth is the largest over the three
+    channels of −ln[Σ w_c e^(−Σᵢ Uᵢσᵢ) ÷ Σ w_c] for its vertical column, under an equal-energy
+    spectrum, with w_c = max(c̄_c, 0) on σ's grid over the bake range. Equal depths keep the
+    earlier listed, and the kept profiles take their columns in the order listed. Every species
+    of a dropped profile draws nothing and is reported `noColumnFree` for `atmosphereApproximate`
+    (decided 2026-10-10, `decision-r08-cmf-licence.md`).
 
   Tests:
   - a flat spectrum's curve is e^(−σu);
-  - every T_c lies in (0, 1] with no clamp, for a 2,500 K and a 30,000 K Planck sun (the clipped
-    weights);
+  - every T_c lies in [10⁻⁶, 1] and is non-increasing in u, for a 2,500 K and a 30,000 K Planck
+    sun; where the clamp and the running minimum act is recorded per channel (blue above 1; the
+    floor on red or green, whichever leaves Rec. 709 first, and on the other where it follows;
+    red's running minimum, for ozone from up to 0.125 decade before its gamut exit), and every
+    node at the floor has a negative signed sum;
   - two suns of different temperature give different curves, and the same sun the same curve;
   - the sun's colour through 0.1–10 × a reference column matches the spectral result to
-    Δu′v′ ≤ 0.002, for the Sun and for a 6,500 K Planck spectrum;
+    Δu′v′ ≤ 0.002, for the Sun and for a 6,500 K Planck spectrum (measured 0.0012 at most):
+    - the reference columns are 300 DU of ozone at 233 K, and 3 km-amagat of methane at 100
+      and 296 K (about an ice giant's column a bar above its deck; Titan's is 2–3);
+    - the 2,500 K and 30,000 K Planck suns, ozone to 30 × and methane to 300 km-amagat, and
+      each curve's gamut exit are recorded in `absorbers/curves.json`, checked unchanged;
+  - the 15 bins' curves, reduced on storage, give the same colours within Δu′v′ ≤ 0.003
+    (measured 0.0026 at most), and a flat spectrum's bin curve is the bin's mean of e^(−σu);
   - 300 DU of ozone gives a green-channel Chappuis optical depth of 0.02–0.04;
   - the bless check fails on a changed table and names the command;
   - two absorbers on one profile give one curve equal to the curve of their mixed cross-section;
-    six absorbers on five profiles fit the five columns.
+    six absorbers on five profiles fit the five columns. Six profiles keep the five of greatest
+    optical depth, whether the least is listed first or sixth, and report the dropped one's
+    species `noColumnFree`. Two profiles of equal depth keep the earlier listed.
 
 - **R08.T4.c Hot atmospheres' absorbers and continua** (decision-composition). After T4.b.
   `absorbers.ts` and `absorbers/`:
@@ -2061,6 +2169,12 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     Rayleigh depth at 440 nm, against under 1.2% from T3.c's polarisability estimate);
   - SO₂'s near-ultraviolet tail;
   - H₂O's and NH₃'s visible bands, and CH₄ above 296 K;
+  - O₂'s A, B and γ bands (near 762, 688 and 628 nm) and the O₂–O₂ collision-induced absorption
+    (near 380, 446, 477, 532, 577 and 630 nm), since P14.T49.a's registry flags O₂ as an absorber
+    and no other task lists them (R08.T4.b's finding; the band centres from memory, check at
+    build). The collision-induced absorption scales with ∫ n_O₂² ds, not with the column u, so it
+    takes a vertical profile of its own, the square of O₂'s density, and a cross-section per
+    molecule pair (cm⁵ molecule⁻²) rather than a curve over σu;
   - Thomson scattering by e⁻, which is a scattering term, not an absorber (R08.T3.c): a
     `MediumTerm` on the electrons' number density with the constant σ_T = 6.652 × 10⁻²⁹ m²
     (CODATA 2018) in every channel, no absorption, and Rayleigh's phase at ρ = 0.
@@ -2812,7 +2926,8 @@ By the composition ruling (decision-composition):
   `heat_capacity_over_r`. Only hand fixtures use T3.a's `gasProperties`.
 - The record's `gases` pass to `molecularTerm` unconverted (a type test pins the assignability).
 - `atmosphereApproximate` collects the reasons of the optics registry: an estimated or absent
-  Rayleigh, an absent absorber, a stand-in or unknown material.
+  Rayleigh, an absent absorber, or one with no column free (`noColumnFree`), a stand-in or
+  unknown material.
 - A body in the `Tenuous` state with a drawable haze is drawn in the `thin` regime. One whose gas
   is only an exosphere takes no medium, since its scattering is negligible (vertical τ about
   10⁻¹⁵), but it is labelled `exosphereNotYetModelled` while the generator computes no exosphere
@@ -3128,7 +3243,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   `pnpm --filter hyperion exec vitest run view/atmosphere/thick/discreteOrdinates`.
 - **R08.T14.b The bake.** `thick/bake.ts`: Dahlback and Stamnes's pseudo-spherical beam, delta-M
   with Nakajima and Tanaka's corrections, and the source function J_ms(h, μ₀, μ_v, m) for
-  m = 0, 1. The solve is spectral at `BAKE_WAVELENGTHS_NM`, converted to channels on storage, and
+  m = 0, 1. The solve is spectral at `BAKE_WAVELENGTHS_NM`, converted to channels on storage, each
+  absorber in each bin an exponential sum fitted to R08.T4.b's bin curve, one solve a term
+  (correlated-k), with the fit's error and the terms' cost recorded against `BAKE_CEILING_S`, and
   runs in the optics worker, once per latitude band of `medium.slicing` (Design note 17), each
   band's column at its own g(φ). Tests: with delta-M off and on, the truncated solve's flux matches
   the full solve's to 1%; the conversion of a flat spectrum is the identity; a one-band body bakes
@@ -4058,8 +4175,10 @@ generator, and the reference's sampling needs no domain tag.
   NH₄SH takes a stated stand-in under `ATMOSPHERE: APPROXIMATE`. Benchmarks are committed as
   asserted values only. Serdyuchenko's data files (terms unstated) were ruled on 2026-10-02
   (`decisions-r05.md` item 4): no raw table, and R08.T4.b's reduced 1 nm table with its citation.
-  The same rule covers the CIE matching functions (CC BY-SA 4.0): fetched with a checksum, and
-  derived values committed with the CIE's citation. `NOTICE` must ship in the app once packaging
+  The CIE matching functions (CC BY-SA 4.0) are read from R06's committed, checksum-verified
+  copy. Values derived from them are committed with the CIE's citation, and `colourMatching.json`,
+  their re-expression in Rec. 709, ships as adapted material under CC BY-SA 4.0 (decided
+  2026-10-10, `decision-r08-cmf-licence.md`). `NOTICE` must ship in the app once packaging
   exists (`decisions-r05.md` item 4's packaging ask).
 
 - **Stars beyond the body's two** (decided 2026-10-09, `decision-r08-design.md` item 3). The sky
@@ -5891,14 +6010,20 @@ generator, and the reference's sampling needs no domain tag.
     columns). `colourMatching.json` holds r̄, ḡ and b̄ at 1 nm over 360–830 nm, through
     `XYZ_TO_SRGB` (`view/photometry/toneCurve.ts`); `spectralRgb` sums 380–760 nm, the bake range,
     by the trapezoid rule; `uvOfRgb` inverts the matrix exactly (`REC709_TO_XYZ`, by `inverseRows`).
-  - _Licence, for "main"._ `colourMatching.json` is the whole CIE table re-expressed in Rec. 709
-    primaries (the matrix's inverse recovers it). Today only tests import it; it ships once R08.T4.b
-    weights its curves of growth by it at run time. `decisions-r05.md` item 4 says "derived
-    constants only" ship. `NOTICE` gives the CIE's citation, the licence, the change made and the
-    offer under CC BY-SA 4.0, which CC BY-SA 4.0 §3 asks of adapted material. Lean: it may ship
-    under that notice; otherwise it is trimmed to 380–760 nm, a visible subset, or R08.T4.b ships
-    only its own weights. `NOTICE`'s Data header ("the data sets themselves are not committed")
-    predates this and is inexact for the CIE CSV, which R06 commits in a tools path.
+  - _Licence, decided 2026-10-10_ (delegated, `decision-r08-cmf-licence.md`; it amends
+    `decisions-r05.md` item 4's "derived constants only" for this one file).
+    `colourMatching.json` is the whole CIE table re-expressed in Rec. 709 primaries: the
+    matrix's inverse recovers it. So it is adapted material under CC BY-SA 4.0 (§1(a), and §4(b)
+    for the database right).
+    - It is committed and ships as built, 360–830 nm. It is not trimmed, and not replaced by
+      per-channel weights. The optics worker forms each sun's c̄(λ) S(λ) at arrival on σ's grid,
+      so any table that serves it holds the same functions.
+    - ShareAlike reaches the file alone. It is offered under CC BY-SA 4.0 by its own `licence`
+      field and by `NOTICE`. The code that reads it is not adapted material.
+    - It stays a separate JSON file, never pasted into a source file nor merged into another
+      table, and packaging applies no technological measure to it (§3(b)(3)).
+    - The file's `description` no longer calls it "Derived values", and `NOTICE`'s Data header
+      and CIE entries are corrected.
   - _The tool_ is `src/tools/atmosphereData.ts`, subcommand `matching`, which R08.T4.b extends with
     its cross-sections. R08.T5.b, built first, made its own (`src/tools/materials.ts`), which stays;
     `readChecked` now exists in `solarFactors.ts`, `materials.ts` and here. It reads R06's
@@ -5953,6 +6078,187 @@ generator, and the reference's sampling needs no domain tag.
     fail, naming the bless. The objective is recorded rounded up to 10⁻⁶.
   - _Closed set, for the composition audit:_ none. `CHANNEL_FIT_GASES` derives from `GASES` and
     `ESTIMATED_RAYLEIGH`, and the suns are the fixture's rows.
+- **Deviations in T4.b, as built** (2026-10-10). `absorbers.ts` and `absorbers.test.ts`,
+  `absorbers/crossSections.json` and `absorbers/curves.json`; `TermAbsorber`,
+  `MediumTerm.absorber` and `checkNoAbsorbers` in `medium.ts`, called by `tables.ts`'s
+  `packMedium` and `tablesCpu.ts`'s twin, and `extinction` refusing an absorber term;
+  `matchingFunctionsAt` in `spectralColour.ts`; the tool's `cross-sections` subcommand
+  (`src/tools/atmosphereData.ts`, its test, `scripts/atmosphereData.mjs`), and `matching`'s new
+  `description` and `licence` in `colourMatching.json`; `NOTICE` and `.prettierignore`. The
+  weights, the reference columns, the bin curves and Karkoschka and Tomasko's equations are
+  `decision-r08-t4b-t12c.md`'s, and the licence, the sixth profile and Design note 5's gamut
+  sentence `decision-r08-cmf-licence.md`'s (both ruled 2026-10-10, adopted). The first overturned
+  the lane's first build on clipped weights; the figures below are the signed weights'.
+  - _The data_ (`crossSections.json`, 157 kB, one wavelength a row, 6 significant figures, vacuum
+    wavelengths, m² a molecule, 380–800 nm, each table with its `temperatureLaw` and
+    `measuredRangeK`). Neither raw file is committed.
+    - _Ozone:_ IUP Bremen's `serdyuchenkogorshelev5digits.dat` (SHA-256
+      `4dfbf021b746512c192df5f0d43c54cee6ea3b4365bb490bcf6ed347f0ce7092`, fetched 2026-10-10;
+      the page states no terms), all eleven temperatures, 193–293 K, as 1 nm centred bin means,
+      linear in T between the 10 K steps and measured over 193–293 K. One mean is below zero,
+      the source's noise at 382 nm and 193 K (−2.8 × 10⁻²⁹ m²), and is written as 0. Checked:
+      upward 10 nm bins at 233 K reproduce R05's three σ to 2 × 10⁻⁴, and the centred bins sit
+      +8.93%, −6.41% and −16.25% from them (the test holds ±0.3 points). Over 193–293 K σ changes
+      by at most 1.6% over 550–650 nm (598 nm), 6.7% at 700 nm, and up to 12% in the 440–500 nm
+      wing (the science check; Serdyuchenko et al. §3.4.2 give "about 1%" near 600 nm).
+    - _Methane:_ PSG's `ch4.txt` at the ruled checksum. Its wavelengths are Karkoschka and
+      Tomasko's air wavelengths to 0.01 nm (their wavenumbers recover on their 5 and 25 cm⁻¹
+      sampling, below and above 19,300 cm⁻¹, to 0.18 and 0.30 cm⁻¹), taken to vacuum 10⁷ ÷ ν by
+      Edlén 1966's standard air, and interpolated linearly in wavelength onto 0.25 nm. Its columns
+      are k ÷ 2.686 78 × 10²⁴ cm⁻² (CODATA 2018's Loschmidt number times 1 km) of Table 4's
+      infinite-pressure k at 100, 198 and 296 K, three significant figures with a least step of
+      10⁻⁴ km⁻¹ amagat⁻¹ (the science check against Irwin's copy: the same wavenumbers, 4,972 of
+      5,094 values equal, the rest one unit of the third figure). PSG's MPI-Mainz completion ends
+      at 152 nm, so none of it is used. Below 400 nm, where their table starts, σ is 0;
+      Karkoschka 1998 is 0 from 300 to 400.8 nm. Against a 0.02 nm sum the 0.25 nm grid moves the
+      signed curves by at most 7.6 × 10⁻⁵ (the science check), although PSG samples 5 cm⁻¹,
+      0.13–0.25 nm, between 518 and about 707 nm. The 100 K column, by the test's 1 nm mean, is
+      −5.4%, +0.1%, +0.5% and +0.7% from Karkoschka 1998's (CC0) at 619.2, 702.0, 727.2 and
+      780.0 nm (test 7%).
+    - _Methane's temperature law_ is Eq. 8 (`lnQuadratic`), `measured` over 50–300 K and held,
+      `estimated`, beyond (the ruling's §1.6), with a row that has a 0 at any of the three
+      temperatures linear in σ, extrapolated from the nearest pair beyond them and floored at 0.
+      So a Titan-class column near 90 K is not labelled. Eqs. 2–4 are not built (the ruling's
+      measured size: at most 1.4% in red T at 1 atm through 30 km-amagat, 4.4% at 0.3 atm,
+      11.5% at 0.1 atm).
+  - _The weights_ are signed (`channelTransmittance`, the rule's one place). Each T_c is clamped
+    to [`ABSORBER_TRANSMITTANCE_FLOOR`, 1] = [10⁻⁶, 1], made non-increasing by a running minimum
+    along the curve's nodes (`absorberCurve`), and a channel whose star colour is not positive
+    takes max(c̄, 0) (tested at a 1,500 K Planck sun's blue). The read rule
+    (`absorberTransmittance`) clamps as the curve does. A NaN is refused, not clamped, and
+    `absorberOptics` refuses cross-sections that do not cover the bake range or are not finite.
+  - _The plan's colour gate, as ruled:_ Δu′v′ ≤ 0.002 over 0.1–10 × 300 DU of ozone at 233 K and
+    3 km-amagat of methane at 100 and 296 K, under the Sun and 6,500 K. Measured worst (13 columns
+    a span, the science check): ozone 0.00041 and 0.00029; methane 0.00117 and 0.00100 at 100 K,
+    0.00039 and 0.00028 at 296 K. With signed weights the in-gamut beam is exact but for the
+    clamps, so the error is the clamp's: blue above 1, from the first node, under each recorded
+    sun but the 30,000 K one for ozone and for methane at 296 K, and under all four for methane at
+    100 K. Recorded beyond the gate (`curves.json`, its optical depths read back from
+    each curve, clamps and running minimum included):
+    - the 2,500 K star: ozone 0.0029 at 10 × and 0.0096 at 30 ×, methane 0.0057 and 0.010 at
+      30 km-amagat (100 and 296 K); methane at 300 km-amagat 0.009–0.036 by star;
+    - the gamut exits: methane's at 50–252 km-amagat over the record's four suns (50–252 over
+      R06's twelve rows as well, `decision-r08-cmf-licence.md` §5, which supersedes
+      `decision-r08-t4b-t12c.md`'s 56–261), ozone's at 3–8 × 10⁴ DU;
+    - the floor, on red or green alone and only past the gamut exit: every node at the floor has
+      a negative signed sum (tested). Methane's red, then green; ozone's green, but red under the
+      Sun (`decision-r08-cmf-licence.md` §5);
+    - the running minimum, on red alone. For methane it acts where red's sum turns positive again
+      past its floor. For ozone it acts from five nodes (0.125 decade) before the gamut exit under
+      the 6,500 K and 30,000 K suns, while the light is still inside Rec. 709, and after it
+      otherwise. It can go on holding after the light comes back into the
+      gamut (ozone under the Sun from 10^2.2 × 300 DU). `curves.json` gives, per channel, where it
+      first acts and how many nodes it lowers, each at the node's own column.
+  - _Design note 5's gamut sentence_ (`decision-r08-cmf-licence.md` §3): at 300 km-amagat red is
+    the negative channel at 100 and 198 K, and at 296 K under stars to 7,000 K; green at 296 K
+    under stars of 9,000 K and hotter; both under the 10,000 K white dwarf. The note is corrected.
+  - _The bin curves_ (`absorberBinCurves`, `absorberBinTransmittance`): per bake bin, S over the
+    bin alone, true weighted means, finite and unclamped, on the channel curve's nodes. The sums
+    are taken relative to the grid's least σ, and again relative to the bin's own where that
+    underflows; a sun with no light in a bin is refused. Each grid point counts in its 25.33 nm
+    bin, 760 nm in the last; the bins' edges are not grid points, so a box's edge moves by up to
+    half a step. Reduced on storage with the signed matching functions, within 0.003 of the
+    spectral colour over the gated span under the Sun and 6,500 K (measured 0.0026 at most:
+    ozone 0.00047 at 10 ×, methane 0.0026 at 30 km-amagat), and 0.0032 (100 K) and 0.0037
+    (296 K) at 30 km-amagat under the 2,500 K star, 0.0077 at 300 km-amagat. `absorberCurves`
+    gives the channel and bin curves from one set of exponentials, as Design note 5 has it;
+    `absorberCurve` and `absorberBinCurves` called apart each make their own.
+  - _Names beyond the sketch._ `ABSORBER_COLUMNS` (5), `ABSORBER_TRANSMITTANCE_FLOOR`,
+    `TemperatureLaw`, `CrossSectionTable`, `CrossSectionsFile`, `readCrossSections`,
+    `ABSORBER_CROSS_SECTIONS`, `SpeciesCrossSection`, `crossSectionAt(species, T, tables?)`,
+    `AbsorberLayer` (`species`, `columnPerM2`, `basePa`, `topPa`: the wire's `absorbers[]`, or an
+    absorbing gas from the datum to the top), `AbsorberSpecies` (`species`, `columnPerM2`,
+    `crossSection`), `AbsorberSpec` (`name`, `species`, `columnPerM2`, `basePa`, `topPa`,
+    `temperatureK`), `AbsorberApproximationReason`, `AbsorberApproximation` (a union whose
+    `reason` fixes its `provenance`), `AbsorberSpecs`, `absorberSpecs(layers, column, tables?)`,
+    `absorberRankingDepth(spec)`, `AbsorberOptics` (`wavelengthsNm`, `crossSectionM2`, `light`,
+    `weights`, `bins`), `absorberOptics(spec, sun)`, `channelTransmittance(optics, u)`,
+    `ABSORBER_CURVE_DECADES`, `ABSORBER_CURVE_NODES_PER_DECADE`, `AbsorberCurve.opticalDepth`,
+    `absorberTransmittance(curve, u)`, `AbsorberBinCurves`, `absorberBinCurves(spec, sun)`,
+    `absorberBinTransmittance(curves, u)` and `absorberCurves(spec, sun)`.
+    `MediumTerm.absorber?` is a `TermAbsorber` (`spec`, `numberDensityPerM3`), optional rather
+    than the sketch's `| undefined`, so that no existing term changes; `extinction` throws for
+    it, so no reader takes it as transparent. The tool adds `CROSS_SECTIONS_OUTPUT`,
+    `FetchedSource`, `OZONE_SOURCE`, `METHANE_SOURCE`, `CROSS_SECTION_RANGE_NM`,
+    `OZONE_STEP_NM`, `METHANE_STEP_NM`, `METHANE_MEASURED_RANGE_K`, `CROSS_SECTION_FIGURES`,
+    `ReducedCrossSections`, `SourceTable`, `parseOzone`, `binOzone`, `parseMethane`,
+    `standardAirIndex` (Edlén 1966), `methaneWavenumberPerCm`, `resampleMethane` and
+    `crossSectionsText`.
+  - _The profiles._ Layers merge when their base and top, clamped to the column, are equal; the
+    spec's temperature is the layer's column-weighted mean (exact for σ linear in T over the
+    vertical, nearly so for Eq. 8, and a stated approximation along a slant path). A layer of
+    column 0 is left out, and a profile none of whose species has cross-sections takes no column.
+    Past five profiles, the five of greatest optical depth are kept (R08.T4.b's ranking; decided
+    2026-10-10, `decision-r08-cmf-licence.md`, which overturned the lane's drop by wire order).
+    They keep the order listed, and every species of the others is reported `noColumnFree` and
+    drawn as nothing. The ranking depth is `absorberRankingDepth`; a dropped profile's species
+    without cross-sections is reported `noColumnFree` too, as the ruling says "every species",
+    and `approximations` come grouped by profile, each profile in the order its first species was
+    listed. The five columns are Design note 8's
+    capacity, not a closed set of species.
+  - _The term._ The column's density inside the layer, with a level at each edge and 0 at the
+    column's next level outside, ramped to over one interval; n = U ÷ ∫ρ dz keeps the vertical
+    column exact. Its absorption is its curves alone (`absorption` 0, phase `none`), so the
+    packer and the twin refuse it (`checkNoAbsorbers`) until R08.T6.c reads the curves.
+  - _The curve's grid:_ 10⁻³ U to 10³ U at 40 nodes a decade (241). −ln T_c is read linear in
+    ln u on a log–log scale, within 3.2 × 10⁻⁴ in T of the exact value wherever neither node is
+    clamped (test 5 × 10⁻⁴), proportional to u below the first node, and the last interval's
+    power law above the last. Time, provisional (load 14 on 16 threads): a sun's channel curve
+    2.0 ms for ozone and 3.5 ms for methane, its bin curves 2.1 ms and 4.8 ms, and both from
+    `absorberCurves` 1.9 ms and 4.6 ms.
+  - _Superseded:_ the lane first built clipped weights, gated ozone over 0.1–3 × and recorded
+    methane at 300 km-amagat (0.014–0.16, much of it outside the gamut). The ruling's survey
+    found signed weights closer in 197 of 204 viewer cases; its figures replace the lane's, and
+    Design note 5's research figures are corrected to them in the note itself.
+  - _Tests beyond the task:_ the curve's span; the clamps at 1 and at the floor; the clipped
+    fallback; reading between nodes, below the first, at no column, and the refusal of a
+    negative one; a flat cross-section's colour exact ("a flat spectrum's curve is e^(−σu)" is
+    tested as a flat cross-section under every sun); the refusal of cross-sections short of the
+    bake range or not finite; the bins' assignment, flat-spectrum means, finiteness, a dark bin's
+    refusal and `absorberCurves` equal to the two apart; the profile with no cross-sections; the
+    ranking depth (σU for a flat cross-section, and the deepest clipped channel where signed weights
+    would differ), the kept profiles' slot order and a dropped profile's species without
+    cross-sections; the spec's temperature; methane's Eq. 8 inside and past its tabulated
+    temperatures, a quadratic-law point with a 0 (linear, floored at 0), and ozone's linear law; the labels beyond the measured ranges; the refusals; the term's column, emptiness and
+    top; the packer's, the twin's and `extinction`'s refusals; `readCrossSections`' seven
+    refusals; the committed tables' shapes, R05's bins and Karkoschka 1998; the tool's parsers,
+    bins, wavenumbers, resampling and refusals (an ozone header with no temperatures, a row of the
+    wrong width, methane's temperatures or wavelengths out of order); `matchingFunctionsAt`.
+  - _Acceptance._ The shared command selects `absorbers.test.ts` and `channels.test.ts`;
+    `spectralColour.test.ts` and `src/tools/atmosphereData.test.ts` run under `pnpm test`.
+  - _For R08.T6.c._ An absorber term carries `absorber.spec` and `absorber.numberDensityPerM3`;
+    the tables accumulate u = n ∫ρ ds in its column, each sun's `absorberCurve(spec, sun)` gives
+    `opticalDepth` on `logColumns` (0 to 13.8), and `absorberTransmittance` is the read rule to
+    match, clamp included. Lift `checkNoAbsorbers` in `packMedium` and the twin's `termsOf`, and
+    `extinction`'s refusal. R05's ozone regression feeds R05's three coefficients, not these
+    curves. T6.c's text gives T4.b's bins as "+10%, −6% and −19%" from R05's: those are
+    `decisions-r05.md` item 2's ±5 nm centred bins. T4.b's 1 nm centred bins sit +8.9%, −6.4%
+    and −16.2% from R05's three values, as `absorbers.test.ts` asserts.
+  - _For R08.T14.b and R08.T12.b._ `absorberBinCurves` (or `absorberCurves`) per sun and
+    absorber; the bakes fit their exponential sums to its `transmittance` (Design note 5,
+    "Spectral bakes").
+  - _For R08.T4.c._ New tables go through the tool into `crossSections.json`, each with its
+    `temperatureLaw` and `measuredRangeK`, or, for ExoMol's CC BY-SA data, into
+    `absorbers/exomol/`, which `readCrossSections` must then read too. CH₄ above 300 K replaces
+    the held, `estimated` values. O₂'s bands and O₂–O₂'s collision-induced absorption, on a
+    density-squared profile of its own, are in T4.c's list (above).
+  - _For R08.T10.a._ Layers come from the record's `absorbers[]` and from each gas of `gases`
+    that the registry flags `absorber` (`substances.json`),
+    `{ species, columnPerM2: x n_s ∫ρ dz, basePa: p_s, topPa: 0 }`; the specs' `approximations`
+    join `atmosphereApproximate`, `noColumnFree` by the same path as `noCrossSections`. So H₂O and
+    O₂, flagged and without cross-sections until R08.T4.c, label an Earth-like body
+    `ATMOSPHERE: APPROXIMATE` under Design note 12's τ rule meanwhile. `absorberSpecs` refuses a
+    layer lying wholly outside the column; T10.a clamps or reports such a record layer rather
+    than passing it. T10.a adds one test case with six profiles (`decision-r08-cmf-licence.md`
+    §2.3).
+  - _Licence, decided 2026-10-10_ (`decision-r08-cmf-licence.md`). `colourMatching.json` ships
+    as adapted CC BY-SA 4.0 material, from when R08.T10.a's worker first calls `absorberCurve`.
+    `NOTICE` and the file's own `description` and `licence` fields say so.
+  - _For the docs pass_ (the ruling's, not built here): the README's "Data licences" clause and
+    the guide's `ATMOSPHERE: APPROXIMATE` clause for an absorbing gas left out for want of a
+    column.
+  - _Closed set, for the composition audit:_ none. The tables are keyed by registry strings, and a
+    key the client does not hold is reported.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client

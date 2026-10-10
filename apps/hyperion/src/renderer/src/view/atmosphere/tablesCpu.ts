@@ -61,6 +61,7 @@ import {
 import { marchSplit, marchStep, type MarchStep } from "./marchSteps";
 import {
   type AtmosphereMedium,
+  checkNoAbsorbers,
   checkTabulatedTops,
   type DensityProfile,
   densityAt,
@@ -119,10 +120,12 @@ interface TwinTerm {
  * @throws RangeError for a tabulated density whose last level lies below the medium's top with a
  *   density other than 0: it would hold that density up to the top (the `tabulated` rule), as a
  *   column does with its last level's 10⁻⁷ of the ground's (R08.T3.a), so a medium built on it
- *   takes a top no higher than its last level.
+ *   takes a top no higher than its last level; and, as `checkNoAbsorbers`, for an absorber term,
+ *   whose curves the twin reads only from R08.T6.c.
  */
 function termsOf(medium: AtmosphereMedium): readonly TwinTerm[] {
   checkTabulatedTops(medium);
+  checkNoAbsorbers(medium);
   return medium.terms.map((term) => ({
     density: term.density,
     scattering: term.scattering,

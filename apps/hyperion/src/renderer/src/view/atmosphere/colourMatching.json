@@ -1,8 +1,8 @@
 {
-  "description": "The CIE 1931 2-degree colour-matching functions as linear Rec. 709 r, g and b at 1 nm, each row [nm, r, g, b], written by apps/hyperion/scripts/atmosphereData.mjs matching (rendering plan R08, R08.T4.a). Derived values, not the CIE's table.",
+  "description": "The CIE 1931 2-degree colour-matching functions as linear Rec. 709 r, g and b at 1 nm, each row [nm, r, g, b], written by apps/hyperion/scripts/atmosphereData.mjs matching (rendering plan R08, R08.T4.a). Adapted from the CIE's table: x_bar, y_bar and z_bar taken to r, g and b by xyzToRgb; its inverse recovers the table.",
   "source": "CIE 2019, Colour-matching functions of CIE 1931 standard colorimetric observer, International Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b; CIE_xyz_1931_2deg.csv from https://files.cie.co.at/Publications-datasets/",
   "sha256": "fa663e3535a7e0763a745993a1f0a192eb0275ac46ad2d1befd7626841e713c1",
-  "licence": "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/); to the extent these values are adapted material they are offered under CC BY-SA 4.0",
+  "licence": "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Adapted material of the CIE's data set (https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer), offered under CC BY-SA 4.0, and provided as is, without warranties (CC BY-SA 4.0, Section 5).",
   "xyzToRgb": [
     [3.2404542, -1.5371385, -0.4985314],
     [-0.969266, 1.8760108, 0.041556],

@@ -27,6 +27,7 @@ import type { KernelPair } from "../engine/kernels";
 import type { BufferHandle, ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
 import {
   type AtmosphereMedium,
+  checkNoAbsorbers,
   checkTabulatedTops,
   type DensityProfile,
   densityAt,
@@ -174,7 +175,8 @@ function phaseCodeOf(phase: PhaseFunction): readonly [number, number, number, nu
  *
  * @throws Error when the medium has more than {@link MAX_TERMS} terms; RangeError, as
  *   {@link checkTabulatedTops}, for a tabulated density held up to the top from a last level below
- *   it.
+ *   it, and, as {@link checkNoAbsorbers}, for an absorber term, whose curves the kernels read only
+ *   from R08.T6.c.
  */
 export function packMedium(medium: AtmosphereMedium): Float32Array {
   if (medium.terms.length > MAX_TERMS) {
@@ -183,6 +185,7 @@ export function packMedium(medium: AtmosphereMedium): Float32Array {
     );
   }
   checkTabulatedTops(medium);
+  checkNoAbsorbers(medium);
   const packed = new Float32Array(MAX_TERMS * TERM_FLOATS);
   for (const [i, term] of medium.terms.entries()) {
     const at = i * TERM_FLOATS;

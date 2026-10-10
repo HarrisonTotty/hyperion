@@ -6,7 +6,7 @@
  * @remarks
  * The spectral colour of light S(λ) R(λ), S a star's spectrum and R what the air does to it, is
  * Σ c̄(λ) S(λ) R(λ) Δλ over the bake range's 1 nm rows, c̄ the CIE 1931 2° matching functions taken
- * to linear Rec. 709 (`colourMatching.json`, reduced from the CIE's table by `src/tools/
+ * to linear Rec. 709 (`colourMatching.json`, adapted from the CIE's table by `src/tools/
  * atmosphereData.ts`; CIE 2019, DOI 10.25039/CIE.DS.xvudnb9b, CC BY-SA 4.0), and S interpolated
  * from the star's 15 bin means ({@link bakeSpectrumAt}). The three-channel colour is the star's own
  * colour, the same sum with R = 1, times R at the three wavelengths. A flat R gives the two the
@@ -65,6 +65,27 @@ function readMatching(file: {
  * 10.25039/CIE.DS.xvudnb9b; CC BY-SA 4.0) through {@link XYZ_TO_SRGB}.
  */
 export const MATCHING_FUNCTIONS: MatchingFunctions = readMatching(matching);
+
+/**
+ * The matching functions r̄, ḡ, b̄ at any wavelength of their table, linear between its 1 nm rows:
+ * the weights a grid finer than 1 nm reads (R08.T4.b's methane, at 0.25 nm).
+ *
+ * @throws RangeError outside the table's 360–830 nm.
+ */
+export function matchingFunctionsAt(wavelengthNm: number): Rgb {
+  const { firstNm, red, green, blue } = MATCHING_FUNCTIONS;
+  const x = wavelengthNm - firstNm;
+  if (!(x >= 0 && x <= red.length - 1)) {
+    throw new RangeError(
+      `the matching functions span ${firstNm}–${firstNm + red.length - 1} nm, not ${wavelengthNm} nm`,
+    );
+  }
+  const k = Math.min(Math.floor(x), red.length - 2);
+  const t = x - k;
+  const at = (row: Float64Array): number =>
+    (row[k] ?? Number.NaN) * (1 - t) + (row[k + 1] ?? Number.NaN) * t;
+  return [at(red), at(green), at(blue)];
+}
 
 /** Linear Rec. 709 to CIE XYZ: the exact inverse of the matrix the matching functions were made with. */
 export const REC709_TO_XYZ: Rows3 = inverseRows(XYZ_TO_SRGB);

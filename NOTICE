@@ -44,11 +44,14 @@ Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.gr6w4b5g
 CIE 2022, CIE standard illuminant D65, International Commission on Illumination (CIE), Vienna, AT,
 DOI: 10.25039/CIE.DS.hjfjmt59
 
-Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0). The
+Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), and
+provided as is, without warranties (the licence's Section 5). Dataset page of the colour-matching
+functions: https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer. The
 tables are kept unmodified in crates/hyperion-fit/data/cie_cmf/ (a tool input, not shipped). The
 values of crates/hyperion-sim/src/tables/star_colour.rs are computed from them (integrated against
 model stellar spectra); to the extent they are adapted material they are offered under CC BY-SA
-4.0.
+4.0. One adaptation ships in the app, apps/hyperion/src/renderer/src/view/atmosphere/
+colourMatching.json, under CC BY-SA 4.0 ("Data", below).
 
 --------------------------------------------------------------------------------
 Data: optical constants of silicon
@@ -202,26 +205,33 @@ absorption, and Tazaki 2021's geometric cross-section, with its own numerical me
 Data
 
 Values derived from the following data sets are committed as constants or reduced tables with
-their citations; the data sets themselves are not committed (plan R05, R05.T12.d, ruled
-2026-10-02; plan R08, ruled 2026-10-09).
+their citations. The data sets themselves are not committed, except the CIE's, which are kept
+unmodified in a tool path (the CIE entry above) (plan R05, R05.T12.d, ruled 2026-10-02; plan R08,
+ruled 2026-10-09 and 2026-10-10).
 
 - Solar spectral irradiance values derived from ASTM E490-00a(2019), obtained from the U.S. DOE
   National Laboratory of the Rockies (NLR, formerly NREL); credit DOE/NLR/Alliance. In
   apps/hyperion/src/renderer/src/view/atmosphere/solar.ts.
 
 - CIE 2019, Colour-matching functions of CIE 1931 standard colorimetric observer, International
-  Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b, licensed under
-  CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). The values in
-  apps/hyperion/src/renderer/src/view/atmosphere/solar.ts are computed from it, integrated against
-  E-490; apps/hyperion/src/renderer/src/view/atmosphere/colourMatching.json holds the functions
-  taken to linear Rec. 709 at 1 nm (apps/hyperion/scripts/atmosphereData.mjs), and the fitted
-  channel wavelengths in apps/hyperion/src/renderer/src/view/atmosphere/channels.json are computed
-  with them (plan R08, R08.T4.a). To the extent these are adapted material they are offered under
-  CC BY-SA 4.0.
+  Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b
+  (https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer), licensed
+  under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
+  - apps/hyperion/src/renderer/src/view/atmosphere/colourMatching.json is adapted material: the
+    CIE's table, 360-830 nm at 1 nm, with x_bar, y_bar and z_bar taken to linear Rec. 709 r, g
+    and b by the matrix the file records (apps/hyperion/scripts/atmosphereData.mjs matching; plan
+    R08, R08.T4.a). It ships in the app and is offered under CC BY-SA 4.0.
+  - The values in apps/hyperion/src/renderer/src/view/atmosphere/solar.ts are computed from the
+    CIE's table, integrated against E-490 (plan R05). The fitted channel wavelengths in
+    apps/hyperion/src/renderer/src/view/atmosphere/channels.json (R08.T4.a) and the test record
+    apps/hyperion/src/renderer/src/view/atmosphere/absorbers/curves.json (R08.T4.b) are computed
+    with colourMatching.json. To the extent these are adapted material they are offered under
+    CC BY-SA 4.0.
 
-- Ozone absorption cross-sections at 233 K: Serdyuchenko et al., Atmos. Meas. Tech. 7 (2014) 625;
-  Gorshelev et al., Atmos. Meas. Tech. 7 (2014) 609 (IUP Bremen), as binned by Bruneton 2017. In
-  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts; binned to 1 nm in
+- Ozone absorption cross-sections: Serdyuchenko et al., Atmos. Meas. Tech. 7 (2014) 625;
+  Gorshelev et al., Atmos. Meas. Tech. 7 (2014) 609 (IUP Bremen, file
+  serdyuchenkogorshelev5digits.dat, fetched 2026-10-10). At 233 K, as binned by Bruneton 2017, in
+  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts; at 193-293 K, binned to 1 nm, in
   apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
 
 - Methane absorption cross-sections at 100, 198 and 296 K: E. Karkoschka and M. G. Tomasko,

@@ -12,6 +12,7 @@ import {
   deltaUv,
   luminanceOfRgb,
   MATCHING_FUNCTIONS,
+  matchingFunctionsAt,
   spectralRgb,
   sunWeights,
   uvOfRgb,
@@ -28,6 +29,16 @@ function yBar(nm: number): number {
     MATCHING_FUNCTIONS.green[i] ?? Number.NaN,
     MATCHING_FUNCTIONS.blue[i] ?? Number.NaN,
   ]);
+}
+
+/** The matching functions' row at a whole nm. */
+function rowAt(nm: number): Rgb {
+  const i = nm - MATCHING_FUNCTIONS.firstNm;
+  return [
+    MATCHING_FUNCTIONS.red[i] ?? Number.NaN,
+    MATCHING_FUNCTIONS.green[i] ?? Number.NaN,
+    MATCHING_FUNCTIONS.blue[i] ?? Number.NaN,
+  ];
 }
 
 /** A row's sum. */
@@ -69,6 +80,20 @@ describe("the matching functions", () => {
     const green = sumOf(MATCHING_FUNCTIONS.green);
     expect(sumOf(MATCHING_FUNCTIONS.red) / green).toBeCloseTo((rows[0] ?? 0) / (rows[1] ?? 1), 3);
     expect(sumOf(MATCHING_FUNCTIONS.blue) / green).toBeCloseTo((rows[2] ?? 0) / (rows[1] ?? 1), 3);
+  });
+
+  it("are their rows at whole nm and linear between them", () => {
+    expect(matchingFunctionsAt(550)).toEqual(rowAt(550));
+    expect(matchingFunctionsAt(830)).toEqual(rowAt(830));
+    const quarter = matchingFunctionsAt(600.25);
+    for (let c = 0; c < 3; c += 1) {
+      const expected = 0.75 * (rowAt(600)[c] ?? Number.NaN) + 0.25 * (rowAt(601)[c] ?? Number.NaN);
+      expect(quarter[c]).toBeCloseTo(expected, 14);
+    }
+  });
+
+  it.each([359.9, 830.1, Number.NaN])("refuses %s nm, outside their table", (nm) => {
+    expect(() => matchingFunctionsAt(nm)).toThrow(RangeError);
   });
 });
 

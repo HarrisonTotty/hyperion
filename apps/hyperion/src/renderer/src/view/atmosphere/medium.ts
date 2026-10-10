@@ -10,6 +10,7 @@
  */
 
 import type { Rgb } from "../photometry/toneCurve";
+import type { AbsorberSpec } from "./absorbers";
 
 /**
  * The wavelengths of the three spectral channels, nm: 680, 550 and 440, red, green and blue.
@@ -387,9 +388,28 @@ export function phaseAt(phase: PhaseFunction, cosTheta: number): Rgb {
   return [value, value, value];
 }
 
+/**
+ * What an absorber term absorbs (R08.T4.b, Design notes 5 and 8): its gases, whose transmittance
+ * each sun's curve of growth gives from the column u crossed, and the number density that turns
+ * the term's relative density into u.
+ */
+export interface TermAbsorber {
+  /** The absorbing species on one vertical profile (`absorbers.ts`'s `absorberSpecs`). */
+  readonly spec: AbsorberSpec;
+  /**
+   * n at relative density 1, molecules m⁻³: the column crossed along a path is n ∫ ρ ds, which
+   * over the vertical is the spec's `columnPerM2`.
+   */
+  readonly numberDensityPerM3: number;
+}
+
 /** One constituent of an atmosphere: a gas, an aerosol or an absorbing layer. */
 export interface MediumTerm {
-  /** A short lower-case name, unique within its medium: `rayleigh`, `aerosol`, `ozone`. */
+  /**
+   * A short name, unique within its medium: `rayleigh`, `aerosol`, `ozone`, or an absorber's
+   * `absorber:` and its species' registry keys joined by `+` (`absorber:O3+SO2`), keys keeping
+   * their chemical case.
+   */
   readonly name: string;
   readonly density: DensityProfile;
   /** The scattering coefficient per channel at unit density, m⁻¹. */
@@ -397,6 +417,12 @@ export interface MediumTerm {
   /** The absorption coefficient per channel at unit density, m⁻¹. */
   readonly absorption: Rgb;
   readonly phase: PhaseFunction;
+  /**
+   * An absorber's gases, absent for every other term. Its absorption is its curves of growth, one
+   * a sun, not `absorption`, which is 0 for it (`absorbers.ts`'s `absorberTerm`). The tables read
+   * the curves from R08.T6.c; until then {@link checkNoAbsorbers} refuses such a term.
+   */
+  readonly absorber?: TermAbsorber;
 }
 
 /**
@@ -473,8 +499,18 @@ function tentColumnM(bottomM: number, peakM: number, tentTopM: number, upToM: nu
   return (up * up) / (2 * (peakM - bottomM)) + down - (down * down) / (2 * (tentTopM - peakM));
 }
 
-/** A term's extinction per channel at unit density, m⁻¹: scattering plus absorption. */
+/**
+ * A term's extinction per channel at unit density, m⁻¹: scattering plus absorption.
+ *
+ * @throws RangeError for an absorber term, whose extinction is its curves of growth, one a sun,
+ *   not a coefficient (R08.T4.b; the readers take it from R08.T6.c, {@link checkNoAbsorbers}).
+ */
 export function extinction(term: MediumTerm): Rgb {
+  if (term.absorber !== undefined) {
+    throw new RangeError(
+      `term ${term.name} is an absorber, whose extinction is its curves of growth, not a coefficient`,
+    );
+  }
   return [
     term.scattering[0] + term.absorption[0],
     term.scattering[1] + term.absorption[1],
@@ -509,6 +545,26 @@ export function checkTabulatedTops(medium: AtmosphereMedium): void {
         `term ${term.name} of medium ${medium.name} holds a density of ${atTop} from its last level at ${topLevelM} m up to the medium's top at ${medium.topHeightM} m`,
       );
     }
+  }
+}
+
+/**
+ * Checks that no term of a medium is an absorber, whose curves of growth the tables do not yet
+ * read.
+ *
+ * @remarks
+ * An absorber term's absorption is its curves (`absorbers.ts`), and its `absorption` is 0, so
+ * tables that ignored `absorber` would draw nothing for it, unlabelled. The kernels' packer and
+ * the CPU twin refuse it alike until R08.T6.c adds the absorber columns and each sun's curve.
+ *
+ * @throws RangeError for a term that carries an absorber.
+ */
+export function checkNoAbsorbers(medium: AtmosphereMedium): void {
+  const term = medium.terms.find((t) => t.absorber !== undefined);
+  if (term !== undefined) {
+    throw new RangeError(
+      `term ${term.name} of medium ${medium.name} is an absorber, whose curves of growth the tables read only from R08.T6.c`,
+    );
   }
 }
 
