@@ -188,8 +188,9 @@ mod native_only {
 
     use hyperion_surface::TEST_PLANET_VERSION;
 
-    /// Every golden file of the crate carries [`TEST_PLANET_VERSION`] in its header, whichever
-    /// test writes it.
+    /// Every golden file directly in the crate's golden directory carries
+    /// [`TEST_PLANET_VERSION`] in its header, whichever test writes it; R09's, in its
+    /// subdirectories, carry `GENERATOR_VERSION` and are not read here.
     #[test]
     fn every_golden_file_carries_the_test_planet_version() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -4,10 +4,10 @@
 //! The coarse pass, which only the server runs (the sim's `planetary::surface`, R09.T10–T16),
 //! works in `f64` and ends by quantising its result into a [`CoarseField`]. The server's own
 //! synthesis and collision read that quantised field, never the pass's working state, and the
-//! client receives the same cells exactly and whole (R09.T3's payload), so the two sides' inputs
-//! are identical by construction. A client holds only the cells its ship has surveyed, with their
-//! margin; [`FieldView`] is what the synthesis reads, so that it runs on the server's whole field
-//! and on a client's part of one alike.
+//! client receives the same cells exactly and whole (the payload of [`crate::wire`]), so the two
+//! sides' inputs are identical by construction. A client holds only the cells its ship has
+//! surveyed, with their margin, in a [`PartialField`]; [`FieldView`] is what the synthesis reads,
+//! so that it runs on the server's whole field and on a client's part of one alike.
 //!
 //! # Cells and their order
 //!
@@ -73,6 +73,7 @@ mod cells;
 mod cover;
 mod crater;
 mod header;
+mod partial;
 
 pub use cells::{
     BoundaryKind, ClimateCell, Crust, DecodeFieldCodeError, FlowDirection, LogArea,
@@ -84,6 +85,7 @@ pub use header::{
     BodyRef, BuildFieldHeaderError, ClimateModelKind, FieldHeader, FieldHeaderParts,
     PrecipitationSource,
 };
+pub use partial::{InsertBlockError, PartialField};
 
 use hyperion_base::units::Metres;
 
@@ -289,7 +291,7 @@ const fn compact(x: u32) -> u32 {
 pub const SYNTHESIS_MARGIN_CELLS: u8 = 5;
 
 /// What the synthesis reads of a coarse field: the server's whole [`CoarseField`], or the part of
-/// one a client holds (R09.T3's `PartialField`).
+/// one a client holds, a [`PartialField`] built from the payload's blocks (R09.T3).
 ///
 /// Every answer is `None`, or empty, for a cell the view does not hold, and for a key that is not
 /// at the field's level, so that a reader that strays beyond what it was given finds out rather
@@ -318,8 +320,8 @@ pub trait FieldView {
 /// water surfaces at or above the ground, months only within the header's year, and its craters
 /// in strictly increasing (centre cell, diameter), a key no two craters share, each its reach
 /// complete with its centre's cell. The per-cell crater index is built from the reaches there and
-/// is not on the wire: a client rebuilds it as blocks arrive (R09.T3), merging the craters of
-/// several blocks by that key.
+/// is not on the wire: a client's [`PartialField`] rebuilds it as blocks arrive, merging the
+/// craters of several blocks by that key ([`crate::wire`]).
 #[derive(Clone, PartialEq)]
 pub struct CoarseField {
     header: FieldHeader,
@@ -369,7 +371,8 @@ pub enum BuildFieldError {
     },
     /// There are more craters than a `u32` can count.
     TooManyCraters(usize),
-    /// The craters' reaches, cell by cell, hold more entries than the per-cell index can count.
+    /// The craters' reaches, cell by cell, hold more entries than the per-cell index admits: more
+    /// than [`MAX_MEAN_REACHES_PER_CELL`] a cell of the level on average, or than memory holds.
     TooManyReaches,
     /// A crater's centre is not a finite unit vector.
     CraterCentre {
@@ -386,8 +389,8 @@ pub enum BuildFieldError {
         /// The crater's place in the list.
         crater: u32,
     },
-    /// A crater's reach is empty, names a cell the field does not have, or misses its centre's
-    /// cell.
+    /// A crater's reach is empty, names a cell the field does not have, carries a resolution code
+    /// other than [`ResolutionCode::NONE`], or misses its centre's cell.
     CraterReach {
         /// The crater's place in the list.
         crater: u32,
@@ -432,7 +435,8 @@ impl std::fmt::Display for BuildFieldError {
             }
             Self::CraterReach { crater } => write!(
                 f,
-                "crater {crater}'s reach is empty, outside the field or misses its centre"
+                "crater {crater}'s reach is empty, outside the field, carries a resolution or \
+                 misses its centre"
             ),
             Self::CratersUnsorted { crater } => write!(
                 f,
@@ -484,44 +488,24 @@ impl CoarseField {
             });
         }
         for (cell, record) in (0_u32..).zip(&synthesis) {
-            if record.water_surface_mm < record.elevation_mm {
-                return Err(BuildFieldError::WaterBelowGround { cell });
-            }
-            let absent = record.boundary == BoundaryKind::Absent;
-            if absent != (record.boundary_distance_km == SynthesisCell::NO_BOUNDARY_KM) {
-                return Err(BuildFieldError::BoundaryWithoutDistance { cell });
-            }
+            check_synthesis_cell(cell, record)?;
         }
-        let months = usize::from(header.months());
         for (cell, record) in (0_u32..).zip(&climate) {
-            let seasons_in_one_month = months == 1
-                && (record.month_anomaly[0] != 0
-                    || record.wind[1..].iter().any(|&w| w != record.wind[0]));
-            let outside = record.month_anomaly[months..].iter().any(|&a| a != 0)
-                || record.month_precipitation[months..]
-                    .iter()
-                    .any(|&p| p != LogPrecipitation::NONE)
-                || seasons_in_one_month;
-            if outside {
-                return Err(BuildFieldError::MonthOutsideYear { cell });
-            }
+            check_climate_cell(cell, record, header.months())?;
         }
-        let crater_count = u32::try_from(craters.len())
-            .map_err(|_| BuildFieldError::TooManyCraters(craters.len()))?;
+        u32::try_from(craters.len()).map_err(|_| BuildFieldError::TooManyCraters(craters.len()))?;
         let mut previous: Option<(u32, Metres)> = None;
         for (crater, c) in (0_u32..).zip(&craters) {
-            let centre_cell = validate_crater(&header, crater, c)?;
+            let centre_cell = check_crater(level, header.boundary_diameter(), crater, c)?;
             let key = (centre_cell, c.diameter);
-            if let Some((cell, diameter)) = previous {
-                let order = cell.cmp(&key.0).then_with(|| diameter.total_cmp(&key.1));
-                if order != std::cmp::Ordering::Less {
-                    return Err(BuildFieldError::CratersUnsorted { crater });
-                }
+            if previous.is_some_and(|before| !crater_key_follows(before, key)) {
+                return Err(BuildFieldError::CratersUnsorted { crater });
             }
             previous = Some(key);
         }
-        let (reaching_start, reaching) = reaching_index(cell_total, crater_count, &craters)
-            .ok_or(BuildFieldError::TooManyReaches)?;
+        let (reaching_start, reaching) =
+            reaching_index(cell_total, craters.iter().map(|c| &c.reach))
+                .ok_or(BuildFieldError::TooManyReaches)?;
         Ok(Self {
             header,
             synthesis,
@@ -567,6 +551,18 @@ impl CoarseField {
         Ok(self)
     }
 
+    /// The indices into [`craters`](Self::craters) of the craters whose reach holds the cell of
+    /// index `index`, in list order; empty past the field's cells.
+    #[must_use]
+    pub(crate) fn reaching_indices(&self, index: u32) -> &[u32] {
+        usize::try_from(index)
+            .ok()
+            .filter(|&n| n < self.synthesis.len())
+            .map_or(&[][..], |n| {
+                &self.reaching[self.reaching_start[n]..self.reaching_start[n + 1]]
+            })
+    }
+
     /// The index of `cell` in the synthesis records, if it is a cell of the field's level.
     #[must_use]
     fn index_of(&self, cell: PatchKey) -> Option<usize> {
@@ -578,9 +574,63 @@ impl CoarseField {
     }
 }
 
-/// Checks crater `crater` of a field with `header`, and returns the index of its centre's cell.
-fn validate_crater(
-    header: &FieldHeader,
+/// Checks the rules of the synthesis record of cell `cell`: its water surface is not below its
+/// ground, and it names a boundary kind exactly when it names a distance to one.
+///
+/// # Errors
+///
+/// [`BuildFieldError::WaterBelowGround`] or [`BuildFieldError::BoundaryWithoutDistance`].
+pub(crate) fn check_synthesis_cell(
+    cell: u32,
+    record: &SynthesisCell,
+) -> Result<(), BuildFieldError> {
+    if record.water_surface_mm < record.elevation_mm {
+        return Err(BuildFieldError::WaterBelowGround { cell });
+    }
+    let absent = record.boundary == BoundaryKind::Absent;
+    if absent != (record.boundary_distance_km == SynthesisCell::NO_BOUNDARY_KM) {
+        return Err(BuildFieldError::BoundaryWithoutDistance { cell });
+    }
+    Ok(())
+}
+
+/// Checks the climate record of climate cell `cell` against a year of `months` months, 1 or 12:
+/// no anomaly or precipitation past the year, and in a one-month year no anomaly and one wind.
+///
+/// # Errors
+///
+/// [`BuildFieldError::MonthOutsideYear`].
+pub(crate) fn check_climate_cell(
+    cell: u32,
+    record: &ClimateCell,
+    months: u8,
+) -> Result<(), BuildFieldError> {
+    let months = usize::from(months).min(record.month_anomaly.len());
+    let seasons_in_one_month = months == 1
+        && (record.month_anomaly[0] != 0 || record.wind[1..].iter().any(|&w| w != record.wind[0]));
+    let outside = record.month_anomaly[months..].iter().any(|&a| a != 0)
+        || record.month_precipitation[months..]
+            .iter()
+            .any(|&p| p != LogPrecipitation::NONE)
+        || seasons_in_one_month;
+    if outside {
+        return Err(BuildFieldError::MonthOutsideYear { cell });
+    }
+    Ok(())
+}
+
+/// Checks crater `crater` (its place in a list) of a field at `level` that lists the craters of
+/// `min_diameter` and wider, and returns the [`cell_index`] of its centre's cell: a finite unit
+/// centre, a finite diameter of at least `min_diameter`, a finite non-negative age, and a reach of
+/// [`ResolutionCode::NONE`] within the level's cells that holds its centre's cell.
+///
+/// # Errors
+///
+/// [`BuildFieldError::CraterCentre`], [`BuildFieldError::CraterDiameter`],
+/// [`BuildFieldError::CraterAge`] or [`BuildFieldError::CraterReach`], in that order of checking.
+pub(crate) fn check_crater(
+    level: CoarseLevel,
+    min_diameter: Metres,
     crater: u32,
     c: &CoarseCrater,
 ) -> Result<u32, BuildFieldError> {
@@ -590,23 +640,22 @@ fn validate_crater(
         return Err(BuildFieldError::CraterCentre { crater });
     }
     let diameter = c.diameter.value();
-    if !(diameter.is_finite() && diameter >= header.boundary_diameter().value()) {
+    if !(diameter.is_finite() && diameter >= min_diameter.value()) {
         return Err(BuildFieldError::CraterDiameter { crater });
     }
     let age = c.age.value();
     if !(age.is_finite() && age >= 0.0) {
         return Err(BuildFieldError::CraterAge { crater });
     }
-    let level = header.level();
     let centre_cell = cell_index(
         PatchKey::containing(level.get(), c.centre)
             .expect("a coarse level is below the cube's deepest"),
     );
-    let reach_ok = c
-        .reach
-        .ranges()
+    let ranges = c.reach.ranges();
+    let reach_ok = ranges
         .last()
         .is_some_and(|last| last.end() <= level.cell_count())
+        && ranges.iter().all(|r| r.code() == ResolutionCode::NONE)
         && c.reach.contains(centre_cell);
     if !reach_ok {
         return Err(BuildFieldError::CraterReach { crater });
@@ -614,37 +663,75 @@ fn validate_crater(
     Ok(centre_cell)
 }
 
-/// The per-cell index of the craters reaching each cell, in compressed rows: each cell's run
-/// begins at its entry of the first vector, and lists crater indices in list order; `None` if the
-/// entries are more than a `usize` counts (a `u32` on WebAssembly). The reaches must lie within the
-/// field's cells.
+/// Whether a crater keyed `next`, (the [`cell_index`] of its centre's cell, its diameter), comes
+/// strictly after one keyed `previous`: the field's list order, in which no two craters share a
+/// key.
 #[must_use]
-fn reaching_index(
+pub(crate) fn crater_key_follows(previous: (u32, Metres), next: (u32, Metres)) -> bool {
+    crater_key_order(previous, next) == std::cmp::Ordering::Less
+}
+
+/// The order of two craters' keys, (the [`cell_index`] of the centre's cell, the diameter), the
+/// diameters by `total_cmp`.
+#[must_use]
+pub(crate) fn crater_key_order(a: (u32, Metres), b: (u32, Metres)) -> std::cmp::Ordering {
+    a.0.cmp(&b.0).then_with(|| a.1.total_cmp(&b.1))
+}
+
+/// The most entries the per-cell crater index admits, on average a cell of the field's level:
+/// 32, several times what a surface saturated with craters of `D_b` and wider holds.
+///
+/// Under Trask's saturation density N(>D) = 0.079 D⁻² km⁻² (Design note 12), whose differential
+/// form is 0.158 D⁻³, the craters whose reach of 1.27 D covers a point number on average
+/// ∫ 0.158 D⁻³ π (1.27 D)² dD = 0.80 ln(`D_max` ÷ `D_b`): 3.7 for basins up to a hundred times
+/// `D_b` and 5.5 to a thousand, which a reach counting every cell it touches at most about doubles
+/// at `D_b`. The bound keeps the index of a field, or of a client's merged blocks, to about 50 MB at
+/// level 8 whatever the bytes ([`BuildFieldError::TooManyReaches`] and
+/// [`InsertBlockError::TooManyReaches`]); it is the plan's own, and the coarse pass (R09.T12.d)
+/// keeps under it.
+pub(crate) const MAX_MEAN_REACHES_PER_CELL: u64 = 32;
+
+/// The per-cell index of the craters whose reaches are `reaches`, in list order, in compressed
+/// rows: each cell's run begins at its entry of the first vector and lists crater indices in list
+/// order. `None` if the entries would be more than [`MAX_MEAN_REACHES_PER_CELL`] a cell, counted
+/// from the reaches' ranges before anything is allocated, or if memory cannot hold them. The
+/// reaches must lie within the field's cells, and number at most `u32::MAX`.
+#[must_use]
+fn reaching_index<'a>(
     cell_total: u32,
-    crater_count: u32,
-    craters: &[CoarseCrater],
+    reaches: impl Iterator<Item = &'a Cover> + Clone,
 ) -> Option<(Vec<usize>, Vec<u32>)> {
+    let entries = reaches
+        .clone()
+        .try_fold(0_u64, |sum, reach| sum.checked_add(reach.cell_count()))?;
+    if entries > MAX_MEAN_REACHES_PER_CELL * u64::from(cell_total) {
+        return None;
+    }
+    let total = usize::try_from(entries).ok()?;
     let cells = usize::try_from(cell_total).expect("a coarse field's cell count fits a usize");
+    let slot = |cell: u32| usize::try_from(cell).expect("a cell index fits a usize");
     let mut counts = vec![0_usize; cells];
-    for crater in craters {
-        for cell in crater.reach.cells() {
-            counts[usize::try_from(cell).expect("a cell index fits a usize")] += 1;
+    for reach in reaches.clone() {
+        for cell in reach.cells() {
+            counts[slot(cell)] += 1;
         }
     }
     let mut start = Vec::with_capacity(cells + 1);
-    let mut total = 0_usize;
+    let mut running = 0_usize;
     start.push(0);
     for count in &counts {
-        total = total.checked_add(*count)?;
-        start.push(total);
+        running += count;
+        start.push(running);
     }
     let mut next = start[..cells].to_vec();
-    let mut reaching = vec![0_u32; total];
-    for (k, crater) in (0..crater_count).zip(craters) {
-        for cell in crater.reach.cells() {
-            let slot = &mut next[usize::try_from(cell).expect("a cell index fits a usize")];
-            reaching[*slot] = k;
-            *slot += 1;
+    let mut reaching = Vec::new();
+    reaching.try_reserve_exact(total).ok()?;
+    reaching.resize(total, 0_u32);
+    for (k, reach) in (0_u32..).zip(reaches) {
+        for cell in reach.cells() {
+            let at = &mut next[slot(cell)];
+            reaching[*at] = k;
+            *at += 1;
         }
     }
     Some((start, reaching))
@@ -667,9 +754,9 @@ impl FieldView for CoarseField {
     }
 
     fn craters_reaching(&self, cell: PatchKey) -> impl Iterator<Item = &CoarseCrater> + '_ {
-        let run = self.index_of(cell).map_or(&[][..], |n| {
-            &self.reaching[self.reaching_start[n]..self.reaching_start[n + 1]]
-        });
+        let run = self
+            .index_of(cell)
+            .map_or(&[][..], |_| self.reaching_indices(cell_index(cell)));
         run.iter()
             .map(|&k| &self.craters[usize::try_from(k).expect("a crater index fits a usize")])
     }
@@ -964,6 +1051,30 @@ mod tests {
             build(vec![elsewhere]),
             Err(BuildFieldError::CraterReach { crater: 0 })
         );
+        let mut surveyed = crater.clone();
+        surveyed.reach = Cover::from_ranges(
+            crater
+                .reach
+                .ranges()
+                .iter()
+                .map(|r| CoverRange::new(r.start(), r.end(), ResolutionCode::new(3)).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            build(vec![surveyed]),
+            Err(BuildFieldError::CraterReach { crater: 0 })
+        );
+        // Thirty-three craters each reaching every cell are more than 32 reaches a cell.
+        let all = Cover::from_cells(0..header.level().cell_count());
+        let crowd: Vec<CoarseCrater> = (0..33_u32)
+            .map(|k| CoarseCrater {
+                diameter: crater.diameter + Metres::new(f64::from(k)),
+                reach: all.clone(),
+                ..crater.clone()
+            })
+            .collect();
+        assert_eq!(build(crowd.clone()), Err(BuildFieldError::TooManyReaches));
+        assert!(build(crowd[..32].to_vec()).is_ok());
         let mut wider = crater.clone();
         wider.diameter = crater.diameter * 2.0;
         assert_eq!(

@@ -12,8 +12,8 @@
 //! returns ([`height`]), and the datum heights are measured from, the reference [`spheroid`] (plan
 //! 14's P14.T46.e); and the first of R09's:
 //! the coarse field's types ([`field`]), with the header's spectrum ([`synth`]) and crater contract
-//! ([`craters`]), which R09's later tasks give their behaviour, and, for tests, synthetic fields
-//! (`testing`, feature `testing`).
+//! ([`craters`]), which R09's later tasks give their behaviour, the codec of the field's bulk
+//! payload ([`wire`]) and, for tests, synthetic fields (`testing`, feature `testing`).
 //!
 //! # The contract of the height function
 //!
@@ -61,18 +61,21 @@ pub mod tags;
 pub mod test_planet;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod wire;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;
 
-/// The version of the provisional test planet, written into the header of every golden file of
-/// this crate in place of the generator version (plan R05, Design note 13).
+/// The version of the provisional test planet, written into the header of every golden file
+/// directly in this crate's `tests/golden/` in place of the generator version (plan R05, Design
+/// note 13).
 ///
 /// The test planet (R05) belongs to no universe, so a change to it moves no universe's output and
 /// does not bump `GENERATOR_VERSION`; it bumps this instead, as does any change to the cube
 /// sphere's mapping or a patch bake's bytes. Where a golden test of this crate fails with the
-/// testkit's hint to "bump `GENERATOR_VERSION`", read "bump `TEST_PLANET_VERSION`". R09's real height
-/// function writes `GENERATOR_VERSION` into its own goldens.
+/// testkit's hint to "bump `GENERATOR_VERSION`", read "bump `TEST_PLANET_VERSION`". R09's goldens,
+/// in subdirectories of `tests/golden/` (`wire/`, and the real height function's), carry
+/// `GENERATOR_VERSION`.
 pub const TEST_PLANET_VERSION: u32 = 2;
 
 /// The generator version this build of the crate computes surfaces for.

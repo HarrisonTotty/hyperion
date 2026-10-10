@@ -1944,6 +1944,119 @@ coarse goldens in that commit.
     readers) are pinned at a few points only; the determinism review asks T3's or T9's goldens to
     write every one-byte code's value and a sample of `LogArea`'s. T18 takes `CoarseLevel`,
     `cell_index` and `ResolutionCode` from here.
+- **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
+  goldens on, revisable until then).
+  - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the
+    decoder), `wire/form.rs` (each record's wire form as one table, `wire_table!`, from which its
+    writer, its reader and its stride are generated: a field added to `SynthesisCell` or a part to
+    `FieldHeaderParts` is one line there, and the strides 21 and 34 are the tables' sums, which a
+    test pins), `wire/tests.rs`, and `field/partial.rs` (`PartialField`). `field.rs`'s record and
+    crater rules are factored into crate-visible `check_synthesis_cell`, `check_climate_cell`,
+    `check_crater`, `crater_key_follows` and `crater_key_order`, shared by `CoarseField::new`, the
+    decoder and `PartialField::insert`, with `CoarseField::reaching_indices` for the encoder. One
+    rule is new: a crater's reach must carry `ResolutionCode::NONE` on every range
+    (`BuildFieldError::CraterReach`), as its documentation already said, so the wire carries no
+    reach codes. A second is the review's: the per-cell crater index admits at most
+    `MAX_MEAN_REACHES_PER_CELL` (32) entries a cell on average, counted from the reaches' ranges
+    before anything is allocated (`TooManyReaches`, in `CoarseField::new` and
+    `PartialField::insert` alike), about five times a saturated surface's (0.80 ln(D_max ÷ D_b)
+    from Trask's density), so that a block of craters each reaching every cell cannot make a client
+    allocate gigabytes; T12.d's coarse craters keep under it. The crater, whose reach has no fixed
+    length, is written and read by hand (`put_crater`, `read_crater`, `CRATER_FIXED_BYTES`), not by
+    a table: a field added to `CoarseCrater` touches all three, and the encoder's check of every
+    block's length against its plan catches a disagreement.
+  - _Public items beyond Provides._ `decode_block`, `DecodeBlockError`, `BLOCK_MAGIC` and
+    `BLOCK_HEADER_BYTES` in `wire`, since a worker decodes one block at a time (R10's
+    `field_chunk`);
+    `DecodedBlock`'s getters `index`, `count`, `body`, `level`, `header`, `cover`, `cells`,
+    `climate_indices`, `climate` and `craters`; `DecodePayloadError`'s `Empty`, `Block`,
+    `Sequence` (a payload's blocks arrive in order and agree on their count), `WrongBody`,
+    `WrongLevel` and `MissingBlocks`; `DecodeBlockError`'s refusals beyond the task's list, among
+    them `CoverNotCanonical` (covers and reaches are canonical, so a block has one encoding),
+    `TrailingBytes` (`decode_block` takes exactly one block's bytes) and `CraterMissesBlock` (a
+    block carries only craters that reach its cells); `field::InsertBlockError`
+    (`WrongBody`, `WrongLevel`, `WrongHeader`, `Record`, `CellConflict`, `ClimateConflict`,
+    `CraterConflict`, `TooManyCraters`, `TooManyReaches`); and `Cover::with_margin(level, steps)`,
+    the margin's dilation in king moves across face edges by the cube's neighbour rule, agreed
+    with T4, which owns `SYNTHESIS_MARGIN_CELLS` (T3 merged T4's `b914b98e` for it).
+  - _The layout._ A block's fixed header is 33 bytes: the magic `HYSF`, the format (`u16`) and the
+    block's length (`u32`, which the plan's list lacked) are bytes 0–9, the frame every format
+    keeps, so that R10's render thread splits blocks by the length at offset 6 without decoding;
+    then the generator version (`u32`), the body (raw system ID `u64`, index `u16`), the level, and
+    the block index and count as `u32`, not `u16`, since a block holds at least one cell and a
+    level-8 field has more cells than a `u16` counts. Block 0's header section is length-prefixed
+    (`u16`) and holds every part of `FieldHeaderParts` in its declared order, the body included,
+    which must be the block's (`DecodeBlockError::HeaderBody`). Climate records travel once per
+    distinct parent of a block's cells, so a parent whose children straddle two blocks is in both;
+    a crater reaching several blocks travels whole in each.
+  - _Margin and delta._ `encode_payload` adds the margin itself: every cell within
+    `SYNTHESIS_MARGIN_CELLS` king moves of `cover` at `ResolutionCode::NONE`. `since` is the earlier
+    survey cover, not its held cover: the delta is every cell of `cover` and its margin whose code
+    differs from what `since` and its margin held, absent included, so that a cell surveyed again
+    more finely, or a margin cell since surveyed, travels again with its new code. A cell given in
+    `cover` at `NONE` is held, not surveyed, and grows a margin like any other. `encode_payload`
+    panics on a cover past the field's cells (through `with_margin`), and on a cell whose records
+    and craters cannot fit an empty block, which would take thousands of basins over one cell.
+  - _Merging._ `PartialField` keeps a slot for every cell of the level, about 13 MB at level 8
+    whatever the coverage, so that a read is one index; insertion is all or nothing; a cell held
+    twice keeps the finer code (`ResolutionCode::finer`, commutative, so the order of blocks does
+    not matter, and five orders are tested); a record that differs from the one held is refused.
+    The rules that need the header (a month outside the year, a crater narrower than `D_b`) are
+    checked at insertion, the rest at decoding. A header or crater that arrives twice is compared
+    by its wire form, bit for bit, since `==` takes a −0.0 for a 0.0 and would let the order of
+    arrival choose the bits kept.
+  - _Floats._ The crate's `clippy.toml` bans `f64::to_le_bytes`; the one `f64` writer, in
+    `wire/form.rs`, carries an `#[expect(clippy::disallowed_methods)]`: it serialises the bits and
+    never hashes them.
+  - _Goldens_ (new files, header 21, so no bump). `tests/golden/wire/codes.golden` pins every code
+    the payload carries, decoded: each one-byte enum's codes, the layout's own tags, every value of
+    every one-byte scale (steepness, precipitation, wind speed and azimuth, resolution, obliquity,
+    ice, degradation), a sample of `LogArea`'s, the header's steps for every exponent with its
+    temperature readers, and the cells' height and distance readers, as T2's determinism review
+    asked; a renumbered code fails it and an appended one only extends it.
+    `tests/golden/wire/payloads.golden` pins each synthetic world's whole payload (block lengths and
+    an FNV-1a 64 digest of the bytes with each block's generator version zeroed, so that a bump
+    alone moves only the file's header), the Mars-like region, its delta and its held cover, and
+    the Moon-like world split at 48 KiB. They sit in a subdirectory, so `golden_diff.py`'s test-planet rule now
+    matches only the files directly under the surface crate's `tests/golden/` (`is_test_planet`),
+    and the sim-determinism skill says so: T9's `height/` needs no narrowing of its own, only its
+    `native_only` header check, which `wire/` has (`every_wire_golden_carries_the_generator_version`).
+  - _Sizes._ The Earth-like world's whole payload is 11,601,760 bytes in 12 blocks (Design note 17's
+    "some 12 MB"), the Mars-like 2.92 MB in 3 and the Moon-like 0.74 MB in 1; a decoded block
+    holds its records as the field does.
+  - _Closed sets, for the composition audit._ The layout's screening tag (0 none, 1 atmosphere, 2
+    cutoff) and presence bytes join T2's one-byte enums under `SURFACE_PAYLOAD_FORMAT`'s rule: codes
+    grow by appending, never renumbered, a new code a generator-version change but not a new
+    format, and an unknown code refused (`DecodeBlockError::Code` or `Tag`). Appending keeps every
+    code's meaning, not an older payload readable: a block of another generator version is refused
+    (`GeneratorVersion`), so after a bump a client fetches the field again.
+  - _Acceptance._ `cargo test -p hyperion-surface wire` selects every test under `wire::` but not
+    `Cover::with_margin`'s (`field::cover::tests`) or the two `should_panic` tests in
+    `tests/panics.rs`, so T3 ran the crate's whole suite, `cargo test -p hyperion-surface`.
+  - _Review, declined._ The rust-reviewer's lean of an enum for `encode_payload`'s
+    `since: Option<&Cover>` (no bare `Option` parameter): Provides pins the signature, which T17
+    and T19 consume.
+  - _For T2's follow-ups A and B_ (the rulings of 2026-10-09: monthly winds and the season's
+    eccentricity, then the composition audit's palette; one agent makes both codecs' edits after A
+    lands). T3 was built on T2 alone. In `wire/form.rs`: the `ClimateCell` table's
+    `wind: [Wind; 4]` becomes `[Wind; 12]`; the `FieldHeaderParts` table gains a
+    `season_eccentricity: f64` line at the field's declared place; B adds the palette's line to the
+    `FieldHeaderParts` table (with a `Wire` form for the palette type, a count byte and its
+    entries, as `CraterParams`' is written) and the substance byte's line to the `SynthesisCell`
+    table, `substance: u8` (or its newtype through `wire_scaled!`). Then
+    `wire_records_have_design_note_seventeens_strides` moves from 34 to 50 bytes a climate record
+    (and from 21 to 22 a synthesis record with B); `wire/tests.rs`'s literal climate cells and
+    `[Wind::CALM; 4]` follow the type; the size test's bracket still holds (an Earth's whole field
+    is 13.2 MB with A, 13.6 MB with B); and `tests/golden/wire/codes.golden` and
+    `payloads.golden` are re-blessed in that commit with the generator-version bump the change
+    needs, `golden_diff.py` explaining the moved digests and the extended codes.
+  - _For T17 and T19._ T19.b converts T18's `Coverage` (a code a cell, `as_bytes`) to a `Cover`,
+    its runs of one nonzero code as `CoverRange::new(start, end, code)` through
+    `Cover::from_ranges`, and calls `encode_payload(field, &cover, since)` with `since` the survey
+    cover at the client's `have_revision` (T18's note: T19.b keeps a cover per revision), never
+    with its margin; the bytes go to R03's `BulkPayload::new` as they are. T19.c's helpers decode with `decode_payload`, build a `PartialField::new` from
+    block 0's header and `insert` every block, and compute the held set to check against with
+    `cover.with_margin(level, SYNTHESIS_MARGIN_CELLS)`.
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`

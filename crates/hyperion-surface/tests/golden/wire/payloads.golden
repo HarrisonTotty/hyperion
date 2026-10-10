@@ -1,0 +1,199 @@
+# generator_version = 21
+EarthLike whole blocks 12 bytes 11601760 lengths 1048567,1048556,1048535,1048556,1048556,1048568,1048556,1048566,1048566,1048556,1048556,67622
+EarthLike whole digest = 0x08567d2709e87102
+MarsLike whole blocks 3 bytes 2918428 lengths 1048534,1048552,821342
+MarsLike whole digest = 0x045dd1094ab64ca9
+MoonLike whole blocks 1 bytes 739444 lengths 739444
+MoonLike whole digest = 0xca724919ba49c51b
+CeresLike whole blocks 1 bytes 187758 lengths 187758
+CeresLike whole digest = 0xcb18875e48a768f8
+Flat whole blocks 1 bytes 725182 lengths 725182
+Flat whole digest = 0x5a6173362d7e8a9c
+OneCrater whole blocks 1 bytes 725548 lengths 725548
+OneCrater whole digest = 0xd062b6de2fa0db6f
+MarsLike region blocks 1 bytes 73702 lengths 73702
+MarsLike region digest = 0xfc4687599f39f2b4
+MarsLike region since its first range blocks 1 bytes 18637 lengths 18637
+MarsLike region since its first range digest = 0xd3f18100c2057818
+MarsLike region held 0..1024 code 30
+MarsLike region held 1024..1041 code 0
+MarsLike region held 1042..1043 code 0
+MarsLike region held 1048..1049 code 0
+MarsLike region held 1050..1051 code 0
+MarsLike region held 1056..1073 code 0
+MarsLike region held 1074..1075 code 0
+MarsLike region held 1080..1081 code 0
+MarsLike region held 1082..1083 code 0
+MarsLike region held 1152..1169 code 0
+MarsLike region held 1170..1171 code 0
+MarsLike region held 1176..1177 code 0
+MarsLike region held 1178..1179 code 0
+MarsLike region held 1184..1201 code 0
+MarsLike region held 1202..1203 code 0
+MarsLike region held 1208..1209 code 0
+MarsLike region held 1210..1211 code 0
+MarsLike region held 1536..1553 code 0
+MarsLike region held 1554..1555 code 0
+MarsLike region held 1560..1561 code 0
+MarsLike region held 1562..1563 code 0
+MarsLike region held 1568..1585 code 0
+MarsLike region held 1586..1587 code 0
+MarsLike region held 1592..1593 code 0
+MarsLike region held 1594..1595 code 0
+MarsLike region held 1664..1681 code 0
+MarsLike region held 1682..1683 code 0
+MarsLike region held 1688..1689 code 0
+MarsLike region held 1690..1691 code 0
+MarsLike region held 1696..1713 code 0
+MarsLike region held 1714..1715 code 0
+MarsLike region held 1720..1721 code 0
+MarsLike region held 1722..1723 code 0
+MarsLike region held 2048..2082 code 0
+MarsLike region held 2084..2086 code 0
+MarsLike region held 2096..2098 code 0
+MarsLike region held 2100..2102 code 0
+MarsLike region held 2112..2146 code 0
+MarsLike region held 2148..2150 code 0
+MarsLike region held 2160..2162 code 0
+MarsLike region held 2164..2166 code 0
+MarsLike region held 2304..2338 code 0
+MarsLike region held 2340..2342 code 0
+MarsLike region held 2352..2354 code 0
+MarsLike region held 2356..2358 code 0
+MarsLike region held 2368..2402 code 0
+MarsLike region held 2404..2406 code 0
+MarsLike region held 2416..2418 code 0
+MarsLike region held 2420..2422 code 0
+MarsLike region held 3072..3089 code 0
+MarsLike region held 3090..3091 code 0
+MarsLike region held 3096..3097 code 0
+MarsLike region held 3098..3099 code 0
+MarsLike region held 3104..3106 code 0
+MarsLike region held 3108..3110 code 0
+MarsLike region held 3120..3121 code 0
+MarsLike region held 37471..37472 code 0
+MarsLike region held 37479..37480 code 0
+MarsLike region held 37485..37486 code 0
+MarsLike region held 37487..37488 code 0
+MarsLike region held 37490..37492 code 0
+MarsLike region held 37493..37504 code 0
+MarsLike region held 37573..37574 code 0
+MarsLike region held 37575..37576 code 0
+MarsLike region held 37581..37582 code 0
+MarsLike region held 37583..37600 code 0
+MarsLike region held 37605..37606 code 0
+MarsLike region held 37607..37608 code 0
+MarsLike region held 37613..37614 code 0
+MarsLike region held 37615..37632 code 0
+MarsLike region held 37642..37644 code 0
+MarsLike region held 37646..37648 code 0
+MarsLike region held 37658..37660 code 0
+MarsLike region held 37662..37696 code 0
+MarsLike region held 37706..37708 code 0
+MarsLike region held 37710..37712 code 0
+MarsLike region held 37722..37724 code 0
+MarsLike region held 37726..37768 code 0
+MarsLike region held 37768..37869 code 12
+MarsLike region held 37869..37888 code 0
+MarsLike region held 38410..38412 code 0
+MarsLike region held 38414..38416 code 0
+MarsLike region held 38426..38427 code 0
+MarsLike region held 38432..38449 code 0
+MarsLike region held 38450..38451 code 0
+MarsLike region held 38456..38457 code 0
+MarsLike region held 38458..38459 code 0
+MarsLike region held 38528..38545 code 0
+MarsLike region held 38546..38547 code 0
+MarsLike region held 38552..38553 code 0
+MarsLike region held 38554..38555 code 0
+MarsLike region held 38560..38577 code 0
+MarsLike region held 38578..38579 code 0
+MarsLike region held 38584..38585 code 0
+MarsLike region held 38586..38587 code 0
+MarsLike region held 38981..38982 code 0
+MarsLike region held 38983..38984 code 0
+MarsLike region held 38989..38990 code 0
+MarsLike region held 38991..39008 code 0
+MarsLike region held 39013..39014 code 0
+MarsLike region held 39024..39026 code 0
+MarsLike region held 39028..39030 code 0
+MarsLike region held 39168..39202 code 0
+MarsLike region held 39204..39206 code 0
+MarsLike region held 39216..39218 code 0
+MarsLike region held 39220..39222 code 0
+MarsLike region held 39232..39266 code 0
+MarsLike region held 39268..39270 code 0
+MarsLike region held 39280..39282 code 0
+MarsLike region held 39284..39285 code 0
+MarsLike region held 39936..39939 code 0
+MarsLike region held 39940..39942 code 0
+MarsLike region held 39944..39945 code 0
+MarsLike region held 39952..39953 code 0
+MarsLike region held 80847..80848 code 0
+MarsLike region held 80858..80860 code 0
+MarsLike region held 80862..80864 code 0
+MarsLike region held 80869..80870 code 0
+MarsLike region held 80871..80872 code 0
+MarsLike region held 80877..80878 code 0
+MarsLike region held 80879..80896 code 0
+MarsLike region held 81546..81548 code 0
+MarsLike region held 81550..81552 code 0
+MarsLike region held 81562..81564 code 0
+MarsLike region held 81566..81600 code 0
+MarsLike region held 81610..81612 code 0
+MarsLike region held 81614..81616 code 0
+MarsLike region held 81626..81628 code 0
+MarsLike region held 81630..81664 code 0
+MarsLike region held 81802..81804 code 0
+MarsLike region held 81806..81808 code 0
+MarsLike region held 81818..81820 code 0
+MarsLike region held 81822..81856 code 0
+MarsLike region held 81866..81868 code 0
+MarsLike region held 81870..81872 code 0
+MarsLike region held 81882..81884 code 0
+MarsLike region held 81886..81920 code 0
+MarsLike region held 82162..82164 code 0
+MarsLike region held 82166..82176 code 0
+MarsLike region held 82338..82340 code 0
+MarsLike region held 82342..82352 code 0
+MarsLike region held 82354..82356 code 0
+MarsLike region held 82358..82359 code 0
+MarsLike region held 82360..82365 code 0
+MarsLike region held 82366..82367 code 0
+MarsLike region held 82512..82528 code 0
+MarsLike region held 82544..82560 code 0
+MarsLike region held 82688..82697 code 0
+MarsLike region held 82697..82698 code 100
+MarsLike region held 82698..82709 code 0
+MarsLike region held 82710..82711 code 0
+MarsLike region held 82712..82717 code 0
+MarsLike region held 82718..82719 code 0
+MarsLike region held 82720..82741 code 0
+MarsLike region held 82742..82743 code 0
+MarsLike region held 82744..82749 code 0
+MarsLike region held 82750..82751 code 0
+MarsLike region held 92810..92812 code 0
+MarsLike region held 92814..92816 code 0
+MarsLike region held 92826..92828 code 0
+MarsLike region held 92830..92864 code 0
+MarsLike region held 92874..92876 code 0
+MarsLike region held 92878..92880 code 0
+MarsLike region held 92890..92892 code 0
+MarsLike region held 92894..92928 code 0
+MarsLike region held 93066..93068 code 0
+MarsLike region held 93070..93072 code 0
+MarsLike region held 93082..93084 code 0
+MarsLike region held 93086..93120 code 0
+MarsLike region held 93130..93132 code 0
+MarsLike region held 93134..93136 code 0
+MarsLike region held 93146..93148 code 0
+MarsLike region held 93150..93184 code 0
+MarsLike region held 93834..93836 code 0
+MarsLike region held 93838..93840 code 0
+MarsLike region held 93850..93851 code 0
+MarsLike region held 93856..93873 code 0
+MarsLike region held 93874..93875 code 0
+MarsLike region held 93880..93881 code 0
+MarsLike region held 93882..93883 code 0
+MoonLike whole in 48 KiB blocks 17 bytes 792570 lengths 49132,49136,49130,49149,49150,49101,49133,49138,49152,49109,49102,49143,49146,49149,49144,49140,6416
+MoonLike whole in 48 KiB digest = 0x65ab84dd07adf71b

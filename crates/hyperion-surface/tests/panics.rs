@@ -8,16 +8,26 @@
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
-use hyperion_base::units::Metres;
+use hyperion_base::units::{
+    Gigayears, Kelvin, Metres, MetresPerSecondSquared, Pascals, PerSquareKilometre, SquareMetres,
+};
+use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
 use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv};
-use hyperion_surface::field::{CoarseLevel, Cover, boundary_diameter, cell_index, coarse_level};
+use hyperion_surface::field::{
+    BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseField, CoarseLevel, Cover, Crust,
+    FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogPrecipitation, LogSteepness,
+    PrecipitationSource, SurfaceClass, SynthesisCell, Wind, boundary_diameter, cell_index,
+    coarse_level,
+};
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::{LatticeCache, Octave, gradient_noise};
 use hyperion_surface::num;
 use hyperion_surface::patch::vertex::{PatchTerms, face_difference_morph_f32};
 use hyperion_surface::patch::{BakeOptions, NormalScale, VertexPath, bake_patch};
 use hyperion_surface::spheroid::Spheroid;
+use hyperion_surface::synth::BandSpectrum;
 use hyperion_surface::test_planet::{TEST_PLANET, octaves};
+use hyperion_surface::wire::encode_payload;
 
 const IDENTITY: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
@@ -175,4 +185,74 @@ fn the_zero_vector_is_in_no_patch() {
 #[should_panic(expected = "a cover holds cells below u32::MAX")]
 fn a_cover_cannot_hold_the_last_index() {
     let _ = Cover::from_cells([u32::MAX]);
+}
+
+#[test]
+#[should_panic(expected = "a cover of level 5 holds cells below 6144")]
+fn a_cover_past_its_level_has_no_margin() {
+    let _ = Cover::from_cells([6_144]).with_margin(CoarseLevel::MIN, 5);
+}
+
+/// A dry, flat, airless field of a Ceres-sized body at level 5, with no crater, built from the
+/// public types alone (this binary sees no `testing` feature).
+fn level_five_field() -> CoarseField {
+    let radius = 4.697e5;
+    let craters = CraterParams::new(CraterParamsParts {
+        n_1km: PerSquareKilometre::ZERO,
+        screening: Screening::None,
+        gravity: MetresPerSecondSquared::new(0.28),
+        k_target: 1.0,
+        impact_velocity: None,
+    })
+    .unwrap();
+    let header = FieldHeader::new(FieldHeaderParts {
+        body: BodyRef::new(1, 2),
+        radius: Metres::new(radius),
+        figure: Spheroid::from_volumetric(radius, 0.0).unwrap(),
+        sea_level: Metres::ZERO,
+        lapse_rate_k_per_m: 0.0,
+        spectrum: BandSpectrum::new(1.9, SquareMetres::ZERO).unwrap(),
+        craters,
+        climate_model: ClimateModelKind::RadiativeEquilibrium,
+        precipitation: PrecipitationSource::Heuristic,
+        realised_sigma_h: Metres::ZERO,
+        realised_relief: Metres::ZERO,
+        months: 1,
+        reference_temperature: Kelvin::new(160.0),
+        temperature_step: 0,
+        anomaly_step: 0,
+        surface_age: Gigayears::new(4.0),
+        surface_pressure: Pascals::ZERO,
+        albedo_scale: None,
+    })
+    .unwrap();
+    let cell = SynthesisCell {
+        elevation_mm: 0,
+        boundary_distance_km: SynthesisCell::NO_BOUNDARY_KM,
+        plate: 0,
+        crust: Crust::Lid,
+        boundary: BoundaryKind::Absent,
+        boundary_obliquity: 0,
+        flow: FlowDirection::Terminal,
+        drainage: LogArea::ZERO,
+        steepness: LogSteepness::ZERO,
+        water_surface_mm: 0,
+        ice: 0,
+        class: SurfaceClass::UNCLASSIFIED,
+        crater_state: 0,
+    };
+    let climate = ClimateCell {
+        sea_level_temperature: 0,
+        month_anomaly: [0; 12],
+        month_precipitation: [LogPrecipitation::NONE; 12],
+        wind: [Wind::CALM; 4],
+    };
+    CoarseField::new(header, vec![cell; 6_144], vec![climate; 1_536], vec![]).unwrap()
+}
+
+#[test]
+#[should_panic(expected = "a cover of level 5 holds cells below 6144")]
+fn a_payload_of_cells_past_its_field_is_refused() {
+    let field = level_five_field();
+    let _ = encode_payload(&field, &Cover::from_cells([0, 6_200]), None);
 }

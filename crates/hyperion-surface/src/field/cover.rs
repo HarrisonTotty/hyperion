@@ -5,6 +5,8 @@ use hyperion_base::math;
 use hyperion_base::units::Metres;
 
 use super::cells::QuantiseValueError;
+use super::{CoarseLevel, cell_at_index, cell_index};
+use crate::cube::Edge;
 
 /// The resolution a cell was surveyed at, one byte (Design note 16).
 ///
@@ -289,11 +291,87 @@ impl Cover {
     pub fn cells(&self) -> impl Iterator<Item = u32> + '_ {
         self.ranges.iter().flat_map(|r| r.start..r.end)
     }
+
+    /// The cover with its margin: every cell of `level` within `steps` king moves of one of the
+    /// cover's cells and not in it, added at [`ResolutionCode::NONE`], beside the cover's own cells
+    /// with their codes (Design note 15).
+    ///
+    /// A king move is a step to any of a cell's edge or corner neighbours at its level, across a
+    /// face edge by the cube's neighbour rule ([`PatchKey::edge_neighbour`] and
+    /// [`PatchKey::corner_neighbours`]); about a cube corner, where three faces meet, a cell has
+    /// seven neighbours, not eight. So the margin of one cell inside a face is the square of
+    /// 2 `steps` + 1 cells about it less the cell itself. The payload sends a survey's cells with
+    /// their margin of `SYNTHESIS_MARGIN_CELLS` steps, held but not surveyed, since the synthesis
+    /// reads that far from a cell it evaluates ([`crate::wire::encode_payload`]).
+    ///
+    /// # Panics
+    ///
+    /// If the cover holds an index of no cell of `level`, at or past 6 · 4ᴸ.
+    ///
+    /// [`PatchKey::edge_neighbour`]: crate::cube::PatchKey::edge_neighbour
+    /// [`PatchKey::corner_neighbours`]: crate::cube::PatchKey::corner_neighbours
+    #[must_use]
+    pub fn with_margin(&self, level: CoarseLevel, steps: u8) -> Self {
+        let total = level.cell_count();
+        assert!(
+            self.ranges.last().is_none_or(|last| last.end <= total),
+            "a cover of level {} holds cells below {total}",
+            level.get()
+        );
+        if steps == 0 || self.cell_count() == u64::from(total) {
+            return self.clone();
+        }
+        let index = |cell: u32| usize::try_from(cell).expect("a cell index fits a usize");
+        let mut reached = vec![false; index(total)];
+        let mut frontier: Vec<u32> = self.cells().collect();
+        for &cell in &frontier {
+            reached[index(cell)] = true;
+        }
+        let mut margin: Vec<u32> = Vec::new();
+        let mut next: Vec<u32> = Vec::new();
+        for _ in 0..steps {
+            for &cell in &frontier {
+                let key = cell_at_index(level.get(), cell).expect("a reached cell is of the level");
+                let edges = Edge::ALL.map(|edge| Some(key.edge_neighbour(edge)));
+                for neighbour in edges.into_iter().chain(key.corner_neighbours()).flatten() {
+                    let n = cell_index(neighbour);
+                    if !reached[index(n)] {
+                        reached[index(n)] = true;
+                        next.push(n);
+                    }
+                }
+            }
+            margin.extend_from_slice(&next);
+            std::mem::swap(&mut frontier, &mut next);
+            next.clear();
+        }
+        margin.sort_unstable();
+        let mut ranges: Vec<CoverRange> = Vec::with_capacity(self.ranges.len());
+        let mut own = self.ranges.iter().peekable();
+        let mut extra = Self::from_cells(margin).ranges.into_iter().peekable();
+        // The two covers are disjoint, so their ranges merge by their starts.
+        loop {
+            let take_own = match (own.peek(), extra.peek()) {
+                (Some(a), Some(b)) => a.start < b.start,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            let range = if take_own {
+                own.next().copied()
+            } else {
+                extra.next()
+            };
+            ranges.extend(range);
+        }
+        Self::from_ranges(ranges).expect("the ranges of two disjoint covers merge sorted")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cube::{Face, PatchKey};
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
@@ -364,5 +442,72 @@ mod tests {
         assert_eq!(cells.cells().collect::<Vec<_>>(), vec![3, 4, 5, 7, 20]);
         assert!(Cover::new().is_empty());
         assert_eq!(Cover::from_cells([]), Cover::new());
+    }
+
+    fn level(n: u8) -> CoarseLevel {
+        CoarseLevel::new(n).unwrap()
+    }
+
+    fn cell(face: Face, n: u8, i: u32, j: u32) -> u32 {
+        cell_index(PatchKey::new(face, n, i, j).unwrap())
+    }
+
+    /// Inside a face, a cell's margin of n king moves is the square of 2n + 1 cells about it, every
+    /// one at a Chebyshev distance of at most n, the cell keeping its code and the rest at
+    /// `NONE`; no steps, and a cover of every cell, add nothing.
+    #[test]
+    fn a_field_cover_s_margin_is_its_king_move_neighbourhood() {
+        let centre = cell(Face::NegY, 6, 30, 17);
+        let cover =
+            Cover::from_ranges([
+                CoverRange::new(centre, centre + 1, ResolutionCode::new(12)).unwrap()
+            ])
+            .unwrap();
+        let margin = cover.with_margin(level(6), 5);
+        assert_eq!(margin.cell_count(), 121);
+        assert_eq!(margin.code(centre), Some(ResolutionCode::new(12)));
+        for index in margin.cells() {
+            let key = cell_at_index(6, index).unwrap();
+            assert_eq!(key.face(), Face::NegY);
+            let (di, dj) = (key.i().abs_diff(30), key.j().abs_diff(17));
+            assert!(di.max(dj) <= 5, "{key:?}");
+            if index != centre {
+                assert_eq!(margin.code(index), Some(ResolutionCode::NONE));
+            }
+        }
+        assert_eq!(cover.with_margin(level(6), 0), cover);
+        let all =
+            Cover::from_ranges([CoverRange::new(0, 6 * 4_096, ResolutionCode::NONE).unwrap()])
+                .unwrap();
+        assert_eq!(all.with_margin(level(6), 5), all);
+        assert_eq!(Cover::new().with_margin(level(6), 5), Cover::new());
+    }
+
+    /// The margin crosses face edges by the cube's neighbour rule: about a cube corner, where
+    /// three faces meet, a corner cell has seven neighbours; a cell on a face edge reaches the
+    /// next face; and the margins of two cells merge into one canonical cover.
+    #[test]
+    fn a_field_cover_s_margin_crosses_face_edges_and_corners() {
+        let corner = Cover::from_cells([cell(Face::PosX, 5, 0, 0)]);
+        let ring = corner.with_margin(level(5), 1);
+        assert_eq!(ring.cell_count(), 8);
+        let faces: std::collections::BTreeSet<u8> = ring
+            .cells()
+            .map(|c| cell_at_index(5, c).unwrap().face().index())
+            .collect();
+        assert_eq!(faces.len(), 3, "{faces:?}");
+        let edge = Cover::from_cells([cell(Face::PosZ, 5, 31, 10)]);
+        let reach = edge.with_margin(level(5), 2);
+        assert_eq!(reach.cell_count(), 25);
+        assert!(
+            reach
+                .cells()
+                .any(|c| cell_at_index(5, c).unwrap().face() != Face::PosZ)
+        );
+        let two = Cover::from_cells([cell(Face::PosZ, 5, 10, 10), cell(Face::PosZ, 5, 12, 10)]);
+        let both = two.with_margin(level(5), 1);
+        assert_eq!(both.cell_count(), 15);
+        let canonical = Cover::from_ranges(both.ranges().iter().copied()).unwrap();
+        assert_eq!(canonical, both);
     }
 }

@@ -40,13 +40,18 @@ VERSION_FILES = ("crates/hyperion-base/src/version.rs", "crates/hyperion-sim/src
 # Plain pathspecs match `*` literally at directory boundaries; `:(glob)` makes it one level.
 GOLDEN_SPEC = ":(glob)crates/*/tests/golden/**"
 GOLDEN_PATH_RE = re.compile(r"^crates/[^/]+/tests/golden/.+\.golden$")
-# The surface crate's goldens pin the provisional test planet, which belongs to no universe, and
-# carry TEST_PLANET_VERSION in their header instead (rendering plan R05, Design note 13). When R09's
-# real height function writes GENERATOR_VERSION goldens there, they go under a path this prefix
-# does not match.
+# The surface crate's goldens directly in its golden directory pin the provisional test planet,
+# which belongs to no universe, and carry TEST_PLANET_VERSION in their header instead (rendering
+# plan R05, Design note 13). R09's goldens, which carry GENERATOR_VERSION, live in subdirectories
+# of it (`wire/` for the payload codec, R09.T3; `height/` for the heights, R09.T9), which the rule
+# does not match, as `cube_golden.rs`'s flat check of the directory does not read them.
 TEST_PLANET_PREFIX = "crates/hyperion-surface/tests/golden/"
 TEST_PLANET_FILE = "crates/hyperion-surface/src/lib.rs"
 TEST_PLANET_RE = re.compile(r"pub const TEST_PLANET_VERSION: u32 = (\d+);")
+
+
+def is_test_planet(path: str) -> bool:
+    return path.startswith(TEST_PLANET_PREFIX) and "/" not in path[len(TEST_PLANET_PREFIX):]
 
 
 def test_planet_version_in(text: str | None) -> int | None:
@@ -231,15 +236,15 @@ def main() -> int:
 
     stale_header = []
     for path in sorted(every_golden):
-        expected = new_planet if path.startswith(TEST_PLANET_PREFIX) else new_version
+        expected = new_planet if is_test_planet(path) else new_version
         if expected is None:
             continue
         text = read_head(path)
         header = split_header(text)[0] if text is not None else None
         if header != expected:
             stale_header.append((path, header))
-    planet_moved = [e for e in moved if e[0].startswith(TEST_PLANET_PREFIX)]
-    moved_universe = [e for e in moved if not e[0].startswith(TEST_PLANET_PREFIX)]
+    planet_moved = [e for e in moved if is_test_planet(e[0])]
+    moved_universe = [e for e in moved if not is_test_planet(e[0])]
 
     if not (header_only or moved or extended or added or deleted or renamed):
         print("No golden files changed.")
@@ -281,7 +286,7 @@ def main() -> int:
     if stale_header:
         shown = "\n".join(f"      {path}: header {v}" for path, v in stale_header)
         problems.append(f"Goldens whose header is not GENERATOR_VERSION {new_version}, or TEST_PLANET_VERSION "
-                        f"{new_planet} under {TEST_PLANET_PREFIX} (run `just bless`):\n{shown}")
+                        f"{new_planet} directly under {TEST_PLANET_PREFIX} (run `just bless`):\n{shown}")
     if planet_moved and old_planet is not None and new_planet is not None and new_planet <= old_planet:
         problems.append("Test-planet goldens moved but TEST_PLANET_VERSION was not bumped: bump it in "
                         f"{TEST_PLANET_FILE} and run `just bless`,\n"

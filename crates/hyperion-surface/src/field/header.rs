@@ -145,9 +145,9 @@ pub struct FieldHeaderParts {
 /// A coarse field's header: [`FieldHeaderParts`], validated, with the level and the boundary
 /// diameter that follow from the radius.
 ///
-/// The format and the generator version a field was computed under are not in it: R09.T3's
-/// payload carries them in every block's own header and refuses another's, so a header in memory
-/// is always this build's.
+/// The format and the generator version a field was computed under are not in it: the payload
+/// ([`crate::wire`]) carries them in every block's own header and refuses another's, so a header
+/// in memory is always this build's.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldHeader {
     parts: FieldHeaderParts,

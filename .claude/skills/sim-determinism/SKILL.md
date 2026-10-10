@@ -172,10 +172,11 @@ moved.
    It separates header-only churn (every golden carries the version), extensions (new labels, old
    values unchanged) and changed values. It checks every golden's header against the version, and
    ends with a verdict: problems (exit 1), checks to make by hand, or consistent. The surface
-   crate's goldens (`crates/hyperion-surface/tests/golden/`) pin R05's provisional test planet,
-   which belongs to no universe: their header is `TEST_PLANET_VERSION` from
+   crate's goldens directly in `crates/hyperion-surface/tests/golden/` pin R05's provisional test
+   planet, which belongs to no universe: their header is `TEST_PLANET_VERSION` from
    `crates/hyperion-surface/src/lib.rs`, which a change to them bumps instead of
-   `GENERATOR_VERSION`, and the script checks them against it. The change must
+   `GENERATOR_VERSION`, and the script checks them against it; R09's, in its subdirectories
+   (`wire/`, `height/`), carry `GENERATOR_VERSION` like every other golden. The change must
    explain each changed value. A change it can't explain is a leak: something moved that shouldn't
    have, so go back to step 1 for it. An extension isn't automatically safe: if a
    new label pins a value the base already generated, and its computation changed, that is moved
