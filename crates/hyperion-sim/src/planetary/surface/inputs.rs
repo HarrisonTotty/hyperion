@@ -8,24 +8,33 @@
 //! orbit that sets its seasons, the light of its hosts, its air, its surface state and material,
 //! its tectonic regime with the continental fraction, its volcanism, heat flow and surface age,
 //! its crater contract, its wet epoch, its climate regime, and (decision-composition §1.7, §7.4)
-//! its crust and condensates by substance.
+//! its crust and condensates by substance and its palette: the substances its field names, each
+//! with the values the server resolves from plan 14's registry, its deposits among them.
 //!
 //! Plan 14's record does not carry these yet: `record::Surface`, the section they arrive in
-//! (P14.T48.e, with P14.T51.a's condensates and T51.c's crust from P14.T54.a), is an uninhabited
-//! enum, so [`CoarseInputs::for_body`] answers [`SurfaceInputsError::NotModelled`] for every body
-//! that has a solid surface, and every test, the reference worlds among them, builds its inputs
-//! with [`CoarseInputsBuilder`], each value a plain argument (Design note 3, "Until an ask lands").
-//! The types here are the pass's own vocabulary for those values, each named after the plan-14
-//! task that will supply it; the reading of the record replaces the builder's arguments one for
-//! one when the section is inhabited, and wherever the pass computes a figure plan 14 also states,
-//! the result is constrained to plan 14's value.
+//! (P14.T48.e, with P14.T51.a's condensates, T51.c's crust and the palette's sources from
+//! P14.T54.a), is an uninhabited enum, so [`CoarseInputs::for_body`] answers
+//! [`SurfaceInputsError::NotModelled`] for every body that has a solid surface, and every test,
+//! the reference worlds among them, builds its inputs with [`CoarseInputsBuilder`], each value a
+//! plain argument (Design note 3, "Until an ask lands"). The types here are the pass's own
+//! vocabulary for those values, each named after the plan-14 task that will supply it; the
+//! reading of the record replaces the builder's arguments one for one when the section is
+//! inhabited, and wherever the pass computes a figure plan 14 also states, the result is
+//! constrained to plan 14's value.
+//!
+//! Every substance is named by its registry key, [`SubstanceKey`] (decision-composition §1.1),
+//! the key the field's palette carries. The record will name substances by P14.T49.a's
+//! `SubstanceId`, which is not built; P14.T54.a, which reads the record here, turns each into its
+//! row's key, or moves these inputs onto `SubstanceId` with the palette's keys resolved from it
+//! (R09's Risks, "Deviations in T10, as built").
 
 use std::error::Error;
 use std::fmt;
 
 use hyperion_surface::craters::CraterParams;
-use hyperion_surface::field::{BodyRef, ClimateModelKind};
+use hyperion_surface::field::{BodyRef, ClimateModelKind, Crust, MaterialPalette, PaletteRole};
 use hyperion_surface::spheroid::Spheroid;
+use hyperion_surface::substance_key::SubstanceKey;
 
 use crate::planetary::SystemContext;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
@@ -35,49 +44,6 @@ use crate::units::{
     Seconds, WattsPerSquareMetre, Years,
 };
 
-/// A substance of plan 14's registry, by its key: a formula in chemical case (`H2O`, `CO2`),
-/// `e-` for the electron, or a lowercase name for a material with no one formula (`basalt`,
-/// `mars_dust`) (decision-composition §1.1).
-///
-/// The record will name substances by P14.T49.a's `SubstanceId`, and the field's palette by R09.T2
-/// follow-up B's `SubstanceKey`; neither exists yet, so the pass's inputs carry the key's text,
-/// which the pass only passes on. [`CoarseInputsBuilder::build`] checks its length and characters
-/// alone (1–16 printable ASCII bytes); the grammar is `SubstanceKey`'s to check once that type
-/// exists, and this type then gives way to it (R09's Risks, "Deviations in T10, as built").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SubstanceRef(&'static str);
-
-impl SubstanceRef {
-    /// The longest key, in bytes (decision-composition §1.1).
-    pub const MAX_KEY_BYTES: usize = 16;
-
-    /// The substance whose registry key is `key`.
-    #[must_use]
-    pub const fn new(key: &'static str) -> Self {
-        Self(key)
-    }
-
-    /// The key.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        self.0
-    }
-
-    /// Whether the key has the registry's length and characters: 1 to 16 bytes, each printable
-    /// ASCII.
-    #[must_use]
-    fn is_well_formed(self) -> bool {
-        (1..=Self::MAX_KEY_BYTES).contains(&self.0.len())
-            && self.0.bytes().all(|b| b.is_ascii_graphic())
-    }
-}
-
-impl fmt::Display for SubstanceRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0)
-    }
-}
-
 /// One substance's share of the surface, as plan 14's `surface_liquids` and `surface_ices` list
 /// them (P14.T24.b, by substance per decision-composition §1.10).
 ///
@@ -85,10 +51,10 @@ impl fmt::Display for SubstanceRef {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AreaShare {
     /// The substance.
-    pub substance: SubstanceRef,
-    /// The share of the body's surface it covers all year, 0 to 1: the area R09.T13.d places it
-    /// over, coldest cells first by their warmest month for an ice, so cover that comes and goes
-    /// with the seasons is the climate's, not this share.
+    pub substance: SubstanceKey,
+    /// The share of the body's surface it covers all year, 0 (not −0) to 1: the area R09.T13.d
+    /// places it over, coldest cells first by their warmest month for an ice, so cover that comes
+    /// and goes with the seasons is the climate's, not this share.
     pub area_fraction: f64,
 }
 
@@ -98,7 +64,7 @@ pub struct AreaShare {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GasShare {
     /// The gas.
-    pub substance: SubstanceRef,
+    pub substance: SubstanceKey,
     /// Its mole fraction at the surface, above 0 and at most 1.
     pub mole_fraction: f64,
 }
@@ -231,7 +197,7 @@ pub struct ClimateRegime {
     /// The climate's condensable: the most massive condensate whose phase changes inside the
     /// climate's range, or `None` (P14.T48.d, by registry loop): water on Earth, carbon dioxide on
     /// Mars, methane on a Titan.
-    pub condensable: Option<SubstanceRef>,
+    pub condensable: Option<SubstanceKey>,
     /// The coarse model the regime names, which the field's header carries (Design note 8).
     pub model: ClimateModelKind,
 }
@@ -239,25 +205,26 @@ pub struct ClimateRegime {
 /// A body's crust by substance, P14.T51.c's crust composition as the pass reads it (its redox
 /// class is not read here).
 ///
-/// The lithologies become the palette entries of the field's
-/// [`Crust`](hyperion_surface::field::Crust) variants (decision-composition §1.7): R09.T12.a gives
-/// `Oceanic` the secondary crust's and `Continental` the tertiary's, and which entry a stagnant
-/// lid's `Lid` and its `Province` cells take is R09.T12's and follow-up B's to set.
+/// The lithologies name the palette entries of the field's [`Crust`] variants
+/// (decision-composition §1.7), as [`CoarseInputs::crust_palette`] states: `Continental` the
+/// tertiary crust's, `Oceanic` the secondary's (R09.T12.a), `Lid` the primary's where the body
+/// has one and the secondary's otherwise, and `Province` the provinces'.
 ///
-/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them.
+/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them, and refuses a
+/// lithology the palette has no entry for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CrustInputs {
     /// The primary crust, a flotation crust from a magma ocean (`anorthosite` on the Moon), or
     /// `None`.
-    pub primary: Option<SubstanceRef>,
+    pub primary: Option<SubstanceKey>,
     /// The secondary crust, from partial melting of the mantle (`basalt` by default, `H2O` on an
     /// icy body).
-    pub secondary: SubstanceRef,
+    pub secondary: SubstanceKey,
     /// The tertiary crust, from remelting of the secondary (`granite`, only where the continental
     /// fraction is above zero), or `None`.
-    pub tertiary: Option<SubstanceRef>,
+    pub tertiary: Option<SubstanceKey>,
     /// The volcanic provinces' lithology.
-    pub provinces: SubstanceRef,
+    pub provinces: SubstanceKey,
     /// The share of the surface above the secondary crust's solidus, 0 to 1 (a locked lava
     /// world's dayside pool); R09.T13.c applies the solidus per cell.
     pub melt_area_fraction: f64,
@@ -289,14 +256,15 @@ pub enum Persistence {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Condensate {
     /// The substance.
-    pub substance: SubstanceRef,
+    pub substance: SubstanceKey,
     /// Its phase where it lies.
     pub phase: CondensatePhase,
     /// The condensed reservoir as its mass over the body's whole surface, M ÷ 4πR² (P14.T51.a's
-    /// `M_s − p_s 4πR² ÷ g`, per unit area), finite and non-negative: a mass, so that substances of
-    /// different densities sort as plan 14 sorts them.
+    /// `M_s − p_s 4πR² ÷ g`, per unit area), finite and non-negative, not −0: a mass, so that
+    /// substances of different densities sort as plan 14 sorts them.
     pub reservoir: KilogramsPerSquareMetre,
-    /// The share of the surface it covers all year, 0 to 1, as [`AreaShare::area_fraction`].
+    /// The share of the surface it covers all year, 0 (not −0) to 1, as
+    /// [`AreaShare::area_fraction`].
     pub area_fraction: f64,
     /// Whether it stays through the year.
     pub persistence: Persistence,
@@ -344,6 +312,9 @@ pub struct CoarseInputs {
     climate: ClimateRegime,
     crust: CrustInputs,
     condensates: Vec<Condensate>,
+    palette: MaterialPalette,
+    crust_palette: [Option<u8>; 4],
+    main_liquid: Option<u8>,
 }
 
 /// Why [`CoarseInputs::for_body`] cannot give a body's inputs.
@@ -389,8 +360,12 @@ impl CoarseInputs {
     /// (P14.T48.e's gas-envelope split, decision-p14-t35e-wire). Once the section is inhabited,
     /// the inputs come from it with the record's `bulk` (gravity), `figure` (the spheroid),
     /// `rotation` (the spin) and `orbit` sections and the hosts of `ctx` (their light over the
-    /// orbit, which P14.T12's `Illumination` gives only as an orbit average). Until then
-    /// `record::Surface` has no value, so no record gets past its tag.
+    /// orbit, which P14.T12's `Illumination` gives only as an orbit average), and the palette's
+    /// entries from the registry's rows of the substances the section names (P14.T49.b–c). Until
+    /// then `record::Surface` has no value, so no record gets past its tag. P14.T54.a, which
+    /// inhabits it, settles what this reading lacks: the record's time, on which the hosts' light
+    /// and the spin depend, and, for a moon, its planet's orbit, which sets its seasons (R09's
+    /// Risks).
     ///
     /// # Errors
     ///
@@ -486,7 +461,8 @@ impl CoarseInputs {
     /// On an airless body plan 14 states its equilibrium temperature (P14.T13.c), a radiative
     /// mean: the Moon's is about 270 K, where its time-and-area mean temperature is far lower
     /// (Diviner's equator swings between about 95 and 395 K, Williams et al. 2017, Icarus 283,
-    /// 300). R09.T13.c–d decide how it is imposed (R09's Risks, "Deviations in T10, as built").
+    /// 300). R09.T13.c–d impose it as that radiative mean, ⟨T⁴⟩^¼ over the surface and the year,
+    /// not as an arithmetic mean (the ruling in R09's Risks, which T13's science check confirms).
     #[must_use]
     pub const fn mean_surface_temperature(&self) -> Kelvin {
         self.mean_surface_temperature
@@ -615,10 +591,47 @@ impl CoarseInputs {
         &self.condensates
     }
 
-    /// The months of the field's year: 1 for a world with no seasonal forcing, a world locked 1:1
-    /// to its seasonal host on a circular orbit, a circular orbit with no tilt, or no orbit at
-    /// all; 12 otherwise, each a twelfth of the seasonal orbit in eccentric anomaly
-    /// (`decision-r09-t2.md` item 1, Design note 8).
+    /// The palette, which the field's header carries whole.
+    ///
+    /// It holds every substance the field names, its lithologies, ices and liquids and its
+    /// deposits, each with the values the server resolves from plan 14's registry (P14.T49.b–c),
+    /// so that the field stays the client's only input (decision-composition §1.7, Design note
+    /// 17).
+    #[must_use]
+    pub const fn palette(&self) -> &MaterialPalette {
+        &self.palette
+    }
+
+    /// The palette entry of each [`Crust`] variant's lithology, in its code order (continental,
+    /// oceanic, lid, province), as the field's header carries it: `Continental` the tertiary
+    /// crust in [`PaletteRole::TertiaryCrust`], or `None` without one; `Oceanic` the secondary
+    /// crust; `Lid` the primary crust in [`PaletteRole::PrimaryCrust`] where the body has one (a
+    /// Moon's anorthosite), the secondary crust otherwise; and `Province` the provinces' lithology.
+    ///
+    /// The secondary crust's entry is its [`PaletteRole::SecondaryCrust`] one and the provinces'
+    /// their [`PaletteRole::Province`] one, but where the two are one substance either entry names
+    /// both, the variant's own role tried first: a Mars's basaltic provinces take its lid's
+    /// `SecondaryCrust` basalt, and a Moon's maria, basaltic provinces that are its secondary
+    /// crust, its `Province` basalt.
+    #[must_use]
+    pub const fn crust_palette(&self) -> [Option<u8>; 4] {
+        self.crust_palette
+    }
+
+    /// The palette entry of the body's main liquid, its sea's: the [`PaletteRole::Liquid`] entry of
+    /// the liquid of largest area ([`liquids`](Self::liquids)' first), or `None` without one.
+    #[must_use]
+    pub const fn main_liquid(&self) -> Option<u8> {
+        self.main_liquid
+    }
+
+    /// The months of the field's year: 1 for a world with no seasonal forcing, a circular
+    /// seasonal orbit with no obliquity to it, or no orbit at all; 12 otherwise, each a twelfth of
+    /// the seasonal orbit in eccentric anomaly (`decision-r09-t2.md` item 1, Design note 8).
+    ///
+    /// A lock adds nothing (Design note 8, signed off 2026-10-10): a world locked 1:1 to its star
+    /// has seasons wherever its orbit is eccentric or it has obliquity, and a moon locked to its
+    /// planet has its planet's orbit's seasons at its own obliquity to that orbit.
     #[must_use]
     pub fn months(&self) -> u8 {
         let Some(orbit) = self.seasonal_orbit else {
@@ -627,11 +640,7 @@ impl CoarseInputs {
         let circular = orbit.eccentricity <= 0.0;
         let obliquity = self.spin.obliquity.value();
         let untilted = obliquity <= 0.0 || obliquity >= core::f64::consts::PI;
-        if circular && (self.spin.solar_day.is_none() || untilted) {
-            1
-        } else {
-            12
-        }
+        if circular && untilted { 1 } else { 12 }
     }
 }
 
@@ -651,14 +660,22 @@ pub enum BuildCoarseInputsError {
     Figure(Spheroid),
     /// The surface state is a gas envelope: the body has no solid surface.
     NoSolidSurface,
-    /// A substance's key is not 1–16 printable ASCII bytes.
-    SubstanceKey(SubstanceRef),
+    /// The palette has no entry for a substance the inputs name where it lies: an ice, a liquid,
+    /// a condensate on the ground as one, or a lithology of the crust.
+    NotInPalette {
+        /// The part that names it.
+        part: &'static str,
+        /// The substance.
+        substance: SubstanceKey,
+        /// The role its entry would take.
+        role: PaletteRole,
+    },
     /// A list names a substance twice (a condensate twice in one phase).
     Duplicate {
         /// The list's name.
         part: &'static str,
         /// The substance.
-        substance: SubstanceRef,
+        substance: SubstanceKey,
     },
     /// A list's shares add up to more than the whole.
     SharesExceedWhole {
@@ -698,10 +715,13 @@ impl fmt::Display for BuildCoarseInputsError {
                 s.equatorial_radius_m, s.polar_radius_m
             ),
             Self::NoSolidSurface => f.write_str("a gas envelope has no solid surface"),
-            Self::SubstanceKey(key) => write!(
+            Self::NotInPalette {
+                part,
+                substance,
+                role,
+            } => write!(
                 f,
-                "substance key {:?} is not 1–16 printable ASCII bytes",
-                key.as_str()
+                "the palette has no {role:?} entry for {substance}, named by the {part}"
             ),
             Self::Duplicate { part, substance } => {
                 write!(f, "the {part} name {substance} twice")
@@ -737,9 +757,9 @@ impl Error for BuildCoarseInputsError {}
 /// Builds [`CoarseInputs`] from plain values, each the plan-14 figure it names (Design note 3,
 /// "Until an ask lands").
 ///
-/// Every value is required but the body (by default [`BodyRef::default`]) and the lists and
-/// optional parts, whose default is none: no liquid, ice, gas or condensate, no seasonal orbit
-/// and no wet epoch.
+/// Every value is required, the palette among them, but the body (by default
+/// [`BodyRef::default`]) and the lists and optional parts, whose default is none: no liquid, ice,
+/// gas or condensate, no seasonal orbit and no wet epoch.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CoarseInputsBuilder {
     body: BodyRef,
@@ -768,6 +788,7 @@ pub struct CoarseInputsBuilder {
     climate: Option<ClimateRegime>,
     crust: Option<CrustInputs>,
     condensates: Vec<Condensate>,
+    palette: Option<MaterialPalette>,
 }
 
 /// `value`, or [`BuildCoarseInputsError::Missing`] naming `part`.
@@ -789,6 +810,16 @@ fn check_fraction(part: &'static str, value: f64) -> Result<(), BuildCoarseInput
     check(part, value, (0.0..=1.0).contains(&value))
 }
 
+/// Refuses a share outside 0 to 1, or a −0, which a sort by `total_cmp` would put before a +0
+/// and so order by the zero's sign rather than by key: a share sorts a list.
+fn check_share(part: &'static str, value: f64) -> Result<(), BuildCoarseInputsError> {
+    check(
+        part,
+        value,
+        (0.0..=1.0).contains(&value) && value.is_sign_positive(),
+    )
+}
+
 /// Refuses a value that is negative or not finite.
 fn check_non_negative(part: &'static str, value: f64) -> Result<(), BuildCoarseInputsError> {
     check(part, value, value >= 0.0)
@@ -799,23 +830,13 @@ fn check_positive(part: &'static str, value: f64) -> Result<(), BuildCoarseInput
     check(part, value, value > 0.0)
 }
 
-/// Refuses a substance whose key is not well formed.
-fn check_key(substance: SubstanceRef) -> Result<(), BuildCoarseInputsError> {
-    if substance.is_well_formed() {
-        Ok(())
-    } else {
-        Err(BuildCoarseInputsError::SubstanceKey(substance))
-    }
-}
-
 /// Validates a list of area shares and sorts it largest first, ties by key.
 fn area_shares(
     part: &'static str,
     mut shares: Vec<AreaShare>,
 ) -> Result<Vec<AreaShare>, BuildCoarseInputsError> {
     for share in &shares {
-        check_key(share.substance)?;
-        check_fraction(part, share.area_fraction)?;
+        check_share(part, share.area_fraction)?;
     }
     shares.sort_by(|a, b| {
         b.area_fraction
@@ -834,7 +855,7 @@ fn area_shares(
 /// may tell two items of one substance apart.
 fn refuse_duplicates<K: Ord>(
     part: &'static str,
-    items: impl IntoIterator<Item = (SubstanceRef, K)>,
+    items: impl IntoIterator<Item = (SubstanceKey, K)>,
 ) -> Result<(), BuildCoarseInputsError> {
     let mut seen = std::collections::BTreeSet::new();
     for (substance, key) in items {
@@ -1017,15 +1038,30 @@ impl CoarseInputsBuilder {
         self
     }
 
+    /// The body's palette, as the server resolves it from plan 14's registry.
+    ///
+    /// Its entries' values are the registry rows' (P14.T49.b–c; a builder argument until
+    /// P14.T54.a reads them from the record). It must hold an [`PaletteRole::Ice`] entry for every
+    /// ice and solid condensate, a [`PaletteRole::Liquid`] entry for every liquid and liquid
+    /// condensate, and an entry for every lithology of the crust, as
+    /// [`CoarseInputs::crust_palette`] finds them; it may hold more, such as a deposit's
+    /// ([`PaletteRole::Deposit`], the sand and dust source where it is not the crust's: a Mars's
+    /// `mars_dust`, a Ceres's `Na2CO3`).
+    #[must_use]
+    pub fn palette(mut self, palette: MaterialPalette) -> Self {
+        self.palette = Some(palette);
+        self
+    }
+
     /// The inputs, validated, with every list in its documented order.
     ///
     /// # Errors
     ///
     /// [`BuildCoarseInputsError::Missing`] for a required value not given, and otherwise the
     /// first rule broken, as each value's setter states it: a value out of range or not finite, a
-    /// figure that is not a spheroid, a gas-envelope surface, a malformed key, a substance named
-    /// twice, shares above the whole, too many condensates, a wet epoch that ends before it
-    /// starts, or a crater contract of another gravity.
+    /// figure that is not a spheroid, a gas-envelope surface, a substance named twice, shares
+    /// above the whole, too many condensates, a wet epoch that ends before it starts, a crater
+    /// contract of another gravity, or a substance the palette has no entry for.
     pub fn build(self) -> Result<CoarseInputs, BuildCoarseInputsError> {
         let figure = required(self.figure, "figure")?;
         let Spheroid {
@@ -1090,12 +1126,12 @@ impl CoarseInputsBuilder {
             check_wet_epoch(epoch)?;
         }
         let climate = required(self.climate, "climate regime")?;
-        if let Some(condensable) = climate.condensable {
-            check_key(condensable)?;
-        }
         let crust = required(self.crust, "crust")?;
-        check_crust(&crust)?;
+        check_fraction("melt area fraction", crust.melt_area_fraction)?;
         let condensates = condensates(self.condensates)?;
+        let palette = required(self.palette, "palette")?;
+        let main_liquid = check_on_the_ground(&palette, &liquids, &ices, &condensates)?;
+        let crust_palette = crust_palette(&palette, &crust)?;
         Ok(CoarseInputs {
             body: self.body,
             figure,
@@ -1123,6 +1159,9 @@ impl CoarseInputsBuilder {
             climate,
             crust,
             condensates,
+            palette,
+            crust_palette,
+            main_liquid,
         })
     }
 }
@@ -1161,26 +1200,115 @@ fn check_wet_epoch(epoch: &WetEpoch) -> Result<(), BuildCoarseInputsError> {
     check_non_negative("wet epoch's paleo-inventory", epoch.paleo_inventory.value())
 }
 
-/// Refuses a crust with a malformed key or a melt share outside 0 to 1.
-fn check_crust(crust: &CrustInputs) -> Result<(), BuildCoarseInputsError> {
-    for substance in [
-        crust.primary,
-        Some(crust.secondary),
-        crust.tertiary,
-        Some(crust.provinces),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        check_key(substance)?;
+/// The entry of `substance` in `role`, or else in `fallback`, that `palette` holds, or
+/// [`BuildCoarseInputsError::NotInPalette`] naming `part` and `role`.
+fn entry(
+    palette: &MaterialPalette,
+    part: &'static str,
+    substance: SubstanceKey,
+    role: PaletteRole,
+    fallback: Option<PaletteRole>,
+) -> Result<u8, BuildCoarseInputsError> {
+    palette
+        .find(role, substance)
+        .or_else(|| fallback.and_then(|other| palette.find(other, substance)))
+        .ok_or(BuildCoarseInputsError::NotInPalette {
+            part,
+            substance,
+            role,
+        })
+}
+
+/// Refuses an ice, a liquid or a condensate on the ground that `palette` has no entry for, and
+/// returns the main liquid's entry: the first of `liquids`, which are sorted largest first.
+///
+/// A supercritical condensate has no interface, so it lies on the ground as neither and names no
+/// entry.
+fn check_on_the_ground(
+    palette: &MaterialPalette,
+    liquids: &[AreaShare],
+    ices: &[AreaShare],
+    condensates: &[Condensate],
+) -> Result<Option<u8>, BuildCoarseInputsError> {
+    let mut main_liquid = None;
+    for share in liquids {
+        let at = entry(
+            palette,
+            "liquids",
+            share.substance,
+            PaletteRole::Liquid,
+            None,
+        )?;
+        main_liquid = main_liquid.or(Some(at));
     }
-    check_fraction("melt area fraction", crust.melt_area_fraction)
+    for share in ices {
+        entry(palette, "ices", share.substance, PaletteRole::Ice, None)?;
+    }
+    for c in condensates {
+        let role = match c.phase {
+            CondensatePhase::Solid => PaletteRole::Ice,
+            CondensatePhase::Liquid => PaletteRole::Liquid,
+            CondensatePhase::Supercritical => continue,
+        };
+        entry(palette, "condensates", c.substance, role, None)?;
+    }
+    Ok(main_liquid)
+}
+
+/// The palette entry of each [`Crust`] variant's lithology, in its code order, by the rule
+/// [`CoarseInputs::crust_palette`] states, refusing a lithology of `crust` that `palette` has no
+/// entry for.
+fn crust_palette(
+    palette: &MaterialPalette,
+    crust: &CrustInputs,
+) -> Result<[Option<u8>; 4], BuildCoarseInputsError> {
+    // Where the secondary crust and the provinces are one substance, either's entry names both.
+    let shared = crust.secondary == crust.provinces;
+    let secondary = entry(
+        palette,
+        "secondary crust",
+        crust.secondary,
+        PaletteRole::SecondaryCrust,
+        shared.then_some(PaletteRole::Province),
+    )?;
+    let primary = crust
+        .primary
+        .map(|p| entry(palette, "primary crust", p, PaletteRole::PrimaryCrust, None))
+        .transpose()?;
+    let tertiary = crust
+        .tertiary
+        .map(|t| {
+            entry(
+                palette,
+                "tertiary crust",
+                t,
+                PaletteRole::TertiaryCrust,
+                None,
+            )
+        })
+        .transpose()?;
+    let provinces = entry(
+        palette,
+        "provinces",
+        crust.provinces,
+        PaletteRole::Province,
+        shared.then_some(PaletteRole::SecondaryCrust),
+    )?;
+    let mut entries = [None; 4];
+    for (slot, crust) in entries.iter_mut().zip(Crust::ALL) {
+        *slot = match crust {
+            Crust::Continental => tertiary,
+            Crust::Oceanic => Some(secondary),
+            Crust::Lid => Some(primary.unwrap_or(secondary)),
+            Crust::Province => Some(provinces),
+        };
+    }
+    Ok(entries)
 }
 
 /// Validates the gases and sorts them largest first, ties by key.
 fn gas_shares(mut gases: Vec<GasShare>) -> Result<Vec<GasShare>, BuildCoarseInputsError> {
     for gas in &gases {
-        check_key(gas.substance)?;
         check(
             "mole fraction",
             gas.mole_fraction,
@@ -1209,9 +1337,14 @@ fn condensates(mut list: Vec<Condensate>) -> Result<Vec<Condensate>, BuildCoarse
         return Err(BuildCoarseInputsError::TooManyCondensates(list.len()));
     }
     for c in &list {
-        check_key(c.substance)?;
-        check_non_negative("condensate's reservoir", c.reservoir.value())?;
-        check_fraction("condensate's area fraction", c.area_fraction)?;
+        // The reservoir sorts the list, so a −0 is refused as a share's is.
+        let reservoir = c.reservoir.value();
+        check(
+            "condensate's reservoir",
+            reservoir,
+            reservoir >= 0.0 && reservoir.is_sign_positive(),
+        )?;
+        check_share("condensate's area fraction", c.area_fraction)?;
     }
     list.sort_by(|a, b| {
         b.reservoir
@@ -1237,6 +1370,31 @@ mod tests {
     use crate::planetary::testing::synthetic_star;
     use crate::time::UniverseTime;
     use crate::units::{Dex, SolarMasses};
+    use hyperion_surface::field::{MechanicsFamily, PaletteEntry};
+
+    /// The key `key`, which a test knows to be valid.
+    fn key(key: &str) -> SubstanceKey {
+        SubstanceKey::new(key).unwrap()
+    }
+
+    /// An entry of `substance` in `role`, with any valid values.
+    fn entry(substance: &str, role: PaletteRole) -> PaletteEntry {
+        PaletteEntry {
+            substance: key(substance),
+            role,
+            normal_albedo_bvr: [0.1; 3],
+            phase_row: 0,
+            density_kg_m3: 1_000.0,
+            transition: Kelvin::new(300.0),
+            mechanics: MechanicsFamily::Silicate,
+        }
+    }
+
+    /// The palette of `entries`, sorted.
+    fn palette(mut entries: Vec<PaletteEntry>) -> MaterialPalette {
+        entries.sort_by_key(|e| (e.role, e.substance));
+        MaterialPalette::new(entries).unwrap()
+    }
 
     /// The reference Earth's builder values, as a builder to vary.
     fn earth_builder() -> CoarseInputsBuilder {
@@ -1266,6 +1424,7 @@ mod tests {
             .climate(*earth.climate())
             .crust(*earth.crust())
             .condensates(earth.condensates().iter().copied())
+            .palette(earth.palette().clone())
     }
 
     #[test]
@@ -1284,6 +1443,12 @@ mod tests {
         assert_eq!(
             missing.build(),
             Err(BuildCoarseInputsError::Missing("crust"))
+        );
+        let mut missing = earth_builder();
+        missing.palette = None;
+        assert_eq!(
+            missing.build(),
+            Err(BuildCoarseInputsError::Missing("palette"))
         );
         let bare = earth_builder()
             .liquids([])
@@ -1367,23 +1532,15 @@ mod tests {
     #[test]
     fn the_builder_refuses_bad_substances_and_shares() {
         let refused = |builder: CoarseInputsBuilder| builder.build().unwrap_err();
-        let share = |key, area_fraction| AreaShare {
-            substance: SubstanceRef::new(key),
+        let share = |k, area_fraction| AreaShare {
+            substance: key(k),
             area_fraction,
         };
-        assert_eq!(
-            refused(earth_builder().liquids([share("", 0.1)])),
-            BuildCoarseInputsError::SubstanceKey(SubstanceRef::new(""))
-        );
-        assert_eq!(
-            refused(earth_builder().liquids([share("a_name_of_17_char", 0.1)])),
-            BuildCoarseInputsError::SubstanceKey(SubstanceRef::new("a_name_of_17_char"))
-        );
         assert_eq!(
             refused(earth_builder().ices([share("H2O", 0.1), share("H2O", 0.2)])),
             BuildCoarseInputsError::Duplicate {
                 part: "ices",
-                substance: SubstanceRef::new("H2O")
+                substance: key("H2O")
             }
         );
         assert!(matches!(
@@ -1394,7 +1551,7 @@ mod tests {
             }
         ));
         let water = |phase| Condensate {
-            substance: SubstanceRef::new("H2O"),
+            substance: key("H2O"),
             phase,
             reservoir: KilogramsPerSquareMetre::new(1.0),
             area_fraction: 0.1,
@@ -1407,12 +1564,12 @@ mod tests {
             ),
             BuildCoarseInputsError::Duplicate {
                 part: "condensates",
-                substance: SubstanceRef::new("H2O")
+                substance: key("H2O")
             }
         );
         let nine =
-            ["H2O", "CO2", "N2", "CH4", "NH3", "Ar", "CO", "SO2", "H2S"].map(|key| Condensate {
-                substance: SubstanceRef::new(key),
+            ["H2O", "CO2", "N2", "CH4", "NH3", "Ar", "CO", "SO2", "H2S"].map(|k| Condensate {
+                substance: key(k),
                 ..water(CondensatePhase::Solid)
             });
         assert_eq!(
@@ -1422,7 +1579,7 @@ mod tests {
     }
 
     #[test]
-    fn the_builder_refuses_signed_zeros_angles_gases_and_keys_out_of_place() {
+    fn the_builder_refuses_signed_zeros_angles_and_gases_out_of_place() {
         let refused = |builder: CoarseInputsBuilder| builder.build().unwrap_err();
         let year = Seconds::new(3e7);
         assert!(matches!(
@@ -1444,8 +1601,8 @@ mod tests {
                 ..
             }
         ));
-        let gas = |key, mole_fraction| GasShare {
-            substance: SubstanceRef::new(key),
+        let gas = |k, mole_fraction| GasShare {
+            substance: key(k),
             mole_fraction,
         };
         assert_eq!(
@@ -1459,25 +1616,232 @@ mod tests {
             refused(earth_builder().gases([gas("N2", 0.8), gas("O2", 0.3)])),
             BuildCoarseInputsError::SharesExceedWhole { part: "gases", .. }
         ));
-        let mut climate = *reference::earth_like().climate();
-        climate.condensable = Some(SubstanceRef::new("water vapour"));
-        assert_eq!(
-            refused(earth_builder().climate(climate)),
-            BuildCoarseInputsError::SubstanceKey(SubstanceRef::new("water vapour"))
-        );
+    }
+
+    #[test]
+    fn the_builder_refuses_a_melt_share_outside_0_to_1() {
         let mut crust = *reference::earth_like().crust();
-        crust.tertiary = Some(SubstanceRef::new(""));
+        crust.melt_area_fraction = -0.1;
+        assert_eq!(
+            earth_builder().crust(crust).build(),
+            Err(BuildCoarseInputsError::OutOfRange {
+                part: "melt area fraction",
+                value: -0.1
+            })
+        );
+        crust.melt_area_fraction = 1.0;
+        let molten = earth_builder().crust(crust).build().unwrap();
+        hyperion_testkit::float::assert_same_bits(molten.crust().melt_area_fraction, 1.0);
+    }
+
+    /// Every ice, liquid and condensate on the ground, and every lithology of the crust, has its
+    /// palette entry; a supercritical condensate, on the ground as neither, needs none.
+    #[test]
+    fn the_palette_names_every_substance_on_the_ground_and_every_lithology() {
+        let refused = |builder: CoarseInputsBuilder| builder.build().unwrap_err();
+        let not_in = |part, k, role| BuildCoarseInputsError::NotInPalette {
+            part,
+            substance: key(k),
+            role,
+        };
+        let share = |k, area_fraction| AreaShare {
+            substance: key(k),
+            area_fraction,
+        };
+        assert_eq!(
+            refused(earth_builder().ices([share("CO2", 0.01)])),
+            not_in("ices", "CO2", PaletteRole::Ice)
+        );
+        assert_eq!(
+            refused(earth_builder().liquids([share("CH4", 0.1)])),
+            not_in("liquids", "CH4", PaletteRole::Liquid)
+        );
+        let condensate = |k, phase| Condensate {
+            substance: key(k),
+            phase,
+            reservoir: KilogramsPerSquareMetre::new(1.0),
+            area_fraction: 0.0,
+            persistence: Persistence::Perennial,
+        };
+        assert_eq!(
+            refused(earth_builder().condensates([condensate("N2", CondensatePhase::Solid)])),
+            not_in("condensates", "N2", PaletteRole::Ice)
+        );
+        assert_eq!(
+            refused(earth_builder().condensates([condensate("NH3", CondensatePhase::Liquid)])),
+            not_in("condensates", "NH3", PaletteRole::Liquid)
+        );
+        let supercritical = earth_builder()
+            .condensates([condensate("CO2", CondensatePhase::Supercritical)])
+            .build()
+            .unwrap();
+        assert_eq!(supercritical.condensates().len(), 1);
+        let mut crust = *reference::earth_like().crust();
+        crust.primary = Some(key("anorthosite"));
         assert_eq!(
             refused(earth_builder().crust(crust)),
-            BuildCoarseInputsError::SubstanceKey(SubstanceRef::new(""))
+            not_in("primary crust", "anorthosite", PaletteRole::PrimaryCrust)
         );
+        // The provinces are not the secondary crust's basalt, so they need an entry of their own.
+        let mut crust = *reference::earth_like().crust();
+        crust.provinces = key("komatiite");
+        assert_eq!(
+            refused(earth_builder().crust(crust)),
+            not_in("provinces", "komatiite", PaletteRole::Province)
+        );
+        // An ice of the right key but the wrong role is not the ice's entry.
+        let earth = reference::earth_like();
+        let without_ice: Vec<PaletteEntry> = earth
+            .palette()
+            .entries()
+            .iter()
+            .copied()
+            .filter(|e| e.role != PaletteRole::Ice)
+            .collect();
+        assert_eq!(
+            refused(earth_builder().palette(palette(without_ice))),
+            not_in("ices", "H2O", PaletteRole::Ice)
+        );
+        let without_granite: Vec<PaletteEntry> = earth
+            .palette()
+            .entries()
+            .iter()
+            .copied()
+            .filter(|e| e.role != PaletteRole::TertiaryCrust)
+            .collect();
+        assert_eq!(
+            refused(earth_builder().palette(palette(without_granite))),
+            not_in("tertiary crust", "granite", PaletteRole::TertiaryCrust)
+        );
+        // With no basalt entry in either role, the secondary crust has none.
+        let without_basalt: Vec<PaletteEntry> = earth
+            .palette()
+            .entries()
+            .iter()
+            .copied()
+            .filter(|e| e.substance != key("basalt"))
+            .collect();
+        assert_eq!(
+            refused(earth_builder().palette(palette(without_basalt))),
+            not_in("secondary crust", "basalt", PaletteRole::SecondaryCrust)
+        );
+    }
+
+    /// Each crust variant names its lithology's entry, the variant's own role first where the
+    /// secondary crust and the provinces are one substance, and the main liquid is the largest.
+    #[test]
+    fn the_crusts_name_their_lithologies_and_the_main_liquid_is_the_largest() {
+        let at = |inputs: &CoarseInputs, k, role| inputs.palette().find(role, key(k));
+        let earth = reference::earth_like();
+        let basalt = at(&earth, "basalt", PaletteRole::SecondaryCrust);
+        assert_eq!(
+            earth.crust_palette(),
+            [
+                at(&earth, "granite", PaletteRole::TertiaryCrust),
+                basalt,
+                basalt,
+                basalt
+            ]
+        );
+        assert!(basalt.is_some());
+        assert_eq!(earth.main_liquid(), at(&earth, "H2O", PaletteRole::Liquid));
+        assert!(earth.main_liquid().is_some());
+
+        let moon = reference::moon_like();
+        let maria = at(&moon, "basalt", PaletteRole::Province);
+        assert_eq!(
+            moon.crust_palette(),
+            [
+                None,
+                maria,
+                at(&moon, "anorthosite", PaletteRole::PrimaryCrust),
+                maria
+            ]
+        );
+        assert!(maria.is_some());
+        assert_eq!(moon.main_liquid(), None);
+
+        let mars = reference::mars_like();
+        let lid = at(&mars, "basalt", PaletteRole::SecondaryCrust);
+        assert_eq!(mars.crust_palette(), [None, lid, lid, lid]);
+        assert!(lid.is_some());
+        assert_eq!(mars.main_liquid(), None);
+
+        // Of two seas, the larger's liquid is the main one, whichever order they were given in.
+        let mut entries = earth.palette().entries().to_vec();
+        entries.push(entry("CH4", PaletteRole::Liquid));
+        let two_seas = earth_builder()
+            .liquids([share_of("H2O", 0.2), share_of("CH4", 0.5)])
+            .palette(palette(entries))
+            .build()
+            .unwrap();
+        assert_eq!(
+            two_seas.main_liquid(),
+            at(&two_seas, "CH4", PaletteRole::Liquid)
+        );
+        // Of two equal seas, the key that sorts first, given in either order.
+        let tied = |liquids: [AreaShare; 2]| {
+            earth_builder()
+                .liquids(liquids)
+                .palette(two_seas.palette().clone())
+                .build()
+                .unwrap()
+                .main_liquid()
+        };
+        let methane = at(&two_seas, "CH4", PaletteRole::Liquid);
+        assert_eq!(tied([share_of("H2O", 0.3), share_of("CH4", 0.3)]), methane);
+        assert_eq!(tied([share_of("CH4", 0.3), share_of("H2O", 0.3)]), methane);
+    }
+
+    /// A −0 share or reservoir is refused, so that a list sorts by key, not by a zero's sign.
+    #[test]
+    fn the_builder_refuses_a_signed_zero_share_or_reservoir() {
+        let refused = |builder: CoarseInputsBuilder| builder.build().unwrap_err();
+        assert_eq!(
+            refused(earth_builder().ices([share_of("H2O", -0.0)])),
+            BuildCoarseInputsError::OutOfRange {
+                part: "ices",
+                value: -0.0
+            }
+        );
+        let mut ocean = reference::earth_like().condensates()[0];
+        ocean.reservoir = KilogramsPerSquareMetre::new(-0.0);
+        assert!(matches!(
+            refused(earth_builder().condensates([ocean])),
+            BuildCoarseInputsError::OutOfRange {
+                part: "condensate's reservoir",
+                ..
+            }
+        ));
+        ocean.reservoir = KilogramsPerSquareMetre::new(0.0);
+        ocean.area_fraction = -0.0;
+        assert!(matches!(
+            refused(earth_builder().condensates([ocean])),
+            BuildCoarseInputsError::OutOfRange {
+                part: "condensate's area fraction",
+                ..
+            }
+        ));
+    }
+
+    /// The share of `k` over `area_fraction` of the surface.
+    fn share_of(k: &str, area_fraction: f64) -> AreaShare {
+        AreaShare {
+            substance: key(k),
+            area_fraction,
+        }
     }
 
     #[test]
     fn errors_say_what_was_refused() {
         assert_eq!(
-            BuildCoarseInputsError::SubstanceKey(SubstanceRef::new("")).to_string(),
-            "substance key \"\" is not 1–16 printable ASCII bytes"
+            BuildCoarseInputsError::NotInPalette {
+                part: "ices",
+                substance: key("CO2"),
+                role: PaletteRole::Ice
+            }
+            .to_string(),
+            "the palette has no Ice entry for CO2, named by the ices"
         );
         assert_eq!(
             BuildCoarseInputsError::Missing("crust").to_string(),
@@ -1486,7 +1850,7 @@ mod tests {
         assert_eq!(
             BuildCoarseInputsError::Duplicate {
                 part: "ices",
-                substance: SubstanceRef::new("H2O")
+                substance: key("H2O")
             }
             .to_string(),
             "the ices name H2O twice"
@@ -1503,8 +1867,8 @@ mod tests {
 
     #[test]
     fn lists_are_sorted_largest_first_ties_by_key() {
-        let gas = |key, mole_fraction| GasShare {
-            substance: SubstanceRef::new(key),
+        let gas = |k, mole_fraction| GasShare {
+            substance: key(k),
             mole_fraction,
         };
         let inputs = earth_builder()
@@ -1543,12 +1907,21 @@ mod tests {
         let day = Some(Seconds::new(86_400.0));
         let months = |builder: CoarseInputsBuilder| builder.build().unwrap().months();
         assert_eq!(months(earth_builder()), 12);
-        // Locked 1:1 to its host on a circular orbit: one month, whatever the tilt.
+        // Locked 1:1 to its host on a circular orbit: seasons from its tilt alone, since the
+        // lock adds nothing (Design note 8, signed off 2026-10-10), and none without one.
         assert_eq!(
             months(
                 earth_builder()
                     .seasonal_orbit(orbit(0.0))
                     .spin(spin(0.3, None))
+            ),
+            12
+        );
+        assert_eq!(
+            months(
+                earth_builder()
+                    .seasonal_orbit(orbit(0.0))
+                    .spin(spin(0.0, None))
             ),
             1
         );

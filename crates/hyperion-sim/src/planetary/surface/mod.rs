@@ -28,9 +28,12 @@
 //! R09.T10 built the frame: the inputs and their builder, [`CoarseInputs::for_body`] (which answers
 //! [`SurfaceInputsError::NotModelled`] until plan 14's surface section carries values), the cell
 //! graph, the quantiser, the six steps as no-ops and, behind the crate's `testing` feature,
-//! `reference`'s four reference worlds. Run on any inputs, the pass so far yields its initial
-//! state: a smooth, dry sphere at the datum under a still climate at the body's mean surface
-//! temperature. R09.T11–T15 fill the steps and R09.T16 pins the reference worlds' fields.
+//! `reference`'s four reference worlds. R09.T10.b added the palette's sources: the inputs carry the
+//! body's palette, whose entries' values the server resolves from plan 14's registry, and the
+//! header and the cells' substance bytes carry it. Run on any inputs, the pass so far yields its
+//! initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
+//! surface temperature, with the inputs' palette. R09.T11–T15 fill the steps and R09.T16 pins the
+//! reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!
@@ -40,6 +43,7 @@
 //! | R09.T1.a | the surface seed | [`SurfaceSeed`] (base's, re-exported at `planetary::hooks`) |
 //! | R09.T2 | the field | [`hyperion_surface::field`]'s `CoarseField`, `FieldHeader`, `SynthesisCell`, `ClimateCell` and their quantisers; `coarse_level`, `cell_index` and `cell_at_index` |
 //! | R09.T2 | the header's types | [`hyperion_surface::craters::CraterParams`], [`hyperion_surface::synth::BandSpectrum`], `ClimateModelKind` |
+//! | R09.T2 (follow-up B) | the palette and the substance byte | [`hyperion_surface::field`]'s `MaterialPalette`, `PaletteEntry`, `PaletteRole` and `SynthesisCell::pack_substances`; [`hyperion_surface::substance_key::SubstanceKey`], every substance's key |
 //! | 14 | the record | [`BodyRecord`](crate::planetary::record::BodyRecord)'s surface section's tag, [`RecordSection`](crate::planetary::record::RecordSection) |
 //! | 14 | the surface state and material | [`SurfaceState`](crate::planetary::derive::atmosphere::SurfaceState), [`SurfaceMaterial`](crate::planetary::derive::atmosphere::SurfaceMaterial) |
 //! | 14 | everything else of Design note 3 | builder arguments until P14.T48 and P14.T54.a put them on the record |
@@ -55,7 +59,7 @@ pub use grid::{BuildCellGraphError, CellGraph};
 pub use inputs::{
     AreaShare, BuildCoarseInputsError, ClimateRegime, CoarseInputs, CoarseInputsBuilder,
     Condensate, CondensatePhase, CrustInputs, Forcing, GasShare, MAX_CONDENSATES, Persistence,
-    SeasonalOrbit, Spin, SubstanceRef, SurfaceInputsError, TectonicRegime, ThermalRegime, WetEpoch,
+    SeasonalOrbit, Spin, SurfaceInputsError, TectonicRegime, ThermalRegime, WetEpoch,
 };
 pub use quantise::{QuantiseFieldError, quantise};
 
@@ -82,16 +86,32 @@ use steps::{Pass, Working};
 /// ```
 /// use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 /// use hyperion_sim::planetary::surface::{
-///     ClimateRegime, CoarseInputs, CrustInputs, Forcing, SeasonalOrbit, Spin, SubstanceRef,
-///     SurfaceSeed, TectonicRegime, ThermalRegime, coarse_pass,
+///     ClimateRegime, CoarseInputs, CrustInputs, Forcing, SeasonalOrbit, Spin, SurfaceSeed,
+///     TectonicRegime, ThermalRegime, coarse_pass,
 /// };
 /// use hyperion_sim::units::{
 ///     Gigayears, Kelvin, Metres, MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians,
 ///     Seconds, WattsPerSquareMetre,
 /// };
 /// use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
-/// use hyperion_surface::field::{ClimateModelKind, FieldView};
+/// use hyperion_surface::field::{
+///     ClimateModelKind, FieldView, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
+/// };
 /// use hyperion_surface::spheroid::Spheroid;
+/// use hyperion_surface::substance_key::SubstanceKey;
+///
+/// // Its one lithology, with the values the server will resolve from plan 14's registry: Ceres's
+/// // normal albedo, a phyllosilicate's grain density and a basalt's solidus (`reference`'s rows).
+/// let phyllosilicate = SubstanceKey::new("phyllosilicate")?;
+/// let palette = MaterialPalette::new(vec![PaletteEntry {
+///     substance: phyllosilicate,
+///     role: PaletteRole::SecondaryCrust,
+///     normal_albedo_bvr: [0.094; 3],
+///     phase_row: 0,
+///     density_kg_m3: 2_500.0,
+///     transition: Kelvin::new(1_253.15),
+///     mechanics: MechanicsFamily::Silicate,
+/// }])?;
 ///
 /// let gravity = MetresPerSecondSquared::new(0.284);
 /// let craters = CraterParams::new(CraterParamsParts {
@@ -131,16 +151,19 @@ use steps::{Pass, Working};
 ///     })
 ///     .crust(CrustInputs {
 ///         primary: None,
-///         secondary: SubstanceRef::new("phyllosilicate"),
+///         secondary: phyllosilicate,
 ///         tertiary: None,
-///         provinces: SubstanceRef::new("phyllosilicate"),
+///         provinces: phyllosilicate,
 ///         melt_area_fraction: 0.0,
 ///     })
+///     .palette(palette)
 ///     .build()?;
 /// let field = coarse_pass(SurfaceSeed::new(0x5eed), &inputs);
 /// // A body of 470 km takes the shallowest level, 6,144 cells of about 21 km.
 /// assert_eq!(field.header().level().get(), 5);
 /// assert_eq!(field.synthesis().len(), 6_144);
+/// // Its lid names its lithology, the palette's one entry.
+/// assert_eq!(field.header().crust_palette()[2], Some(0));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
@@ -173,7 +196,12 @@ mod tests {
     /// independence"), which the server's cache of fields relies on (Design note 19).
     #[test]
     fn the_pass_is_order_independent() {
-        let worlds = [reference::ceres_like(), reference::moon_like()];
+        let worlds = [
+            reference::ceres_like(),
+            reference::moon_like(),
+            reference::mars_like(),
+            reference::earth_like(),
+        ];
         let keys: Vec<(SurfaceSeed, usize)> = [reference::SEED, SurfaceSeed::new(0x0dd5)]
             .into_iter()
             .flat_map(|seed| (0..worlds.len()).map(move |world| (seed, world)))
@@ -211,6 +239,13 @@ mod tests {
             assert_eq!(first.header().figure(), inputs.figure(), "{name}");
             assert_eq!(first.header().craters(), inputs.craters(), "{name}");
             assert_eq!(first.header().months(), inputs.months(), "{name}");
+            assert_eq!(first.header().palette(), inputs.palette(), "{name}");
+            assert_eq!(
+                first.header().crust_palette(),
+                inputs.crust_palette(),
+                "{name}"
+            );
+            assert_eq!(first.header().main_liquid(), inputs.main_liquid(), "{name}");
             assert!(
                 first.synthesis().iter().all(|c| c.elevation_mm == 0),
                 "{name}"

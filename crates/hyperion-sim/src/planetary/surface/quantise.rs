@@ -15,7 +15,7 @@ use std::fmt;
 use hyperion_surface::cube::PatchKey;
 use hyperion_surface::field::{
     BuildFieldError, BuildFieldHeaderError, ClimateCell, CoarseCrater, CoarseField, FieldHeader,
-    FieldHeaderParts, LogArea, LogPrecipitation, LogSteepness, PrecipitationSource,
+    FieldHeaderParts, LogArea, LogPrecipitation, LogSteepness, NO_ENTRY, PrecipitationSource,
     QuantiseValueError, SynthesisCell, Wind, cell_index,
 };
 
@@ -104,7 +104,10 @@ impl Error for QuantiseFieldError {
 ///
 /// The header's reference temperature is plan 14's mean surface temperature, and its steps are
 /// the finest that hold the climate's largest departure from it and its largest anomaly over the
-/// year's months. The header's parts that travel as raw `f64` bits (the sea level, the lapse rate
+/// year's months. Its palette, the entry of each crust's lithology and the main liquid are the
+/// inputs' ([`CoarseInputs::palette`], [`CoarseInputs::crust_palette`],
+/// [`CoarseInputs::main_liquid`]), and each cell's substance byte packs its ice and liquid
+/// entries. The header's parts that travel as raw `f64` bits (the sea level, the lapse rate
 /// and the realised figures) have a −0 made +0, so that a zero has one form on the wire whichever
 /// way a step reached it.
 ///
@@ -114,8 +117,10 @@ impl Error for QuantiseFieldError {
 /// # Errors
 ///
 /// [`QuantiseFieldError`] for arrays of another length than the level's, a value no code holds
-/// (each naming its cell and value), a departure or anomaly no step holds, header parts out of
-/// range, or records that break a rule of the field ([`CoarseField::new`]).
+/// (each naming its cell and value, a palette entry of 15 or more among them), a departure or
+/// anomaly no step holds, header parts out of range, or records that break a rule of the field
+/// ([`CoarseField::new`]: an entry past the palette or of the wrong role, or ice or a liquid whose
+/// entry the cell does not name, among them).
 ///
 /// # Examples
 ///
@@ -187,6 +192,11 @@ pub fn quantise(
         surface_age: inputs.surface_age(),
         surface_pressure: inputs.surface_pressure(),
         albedo_scale: None,
+        // The field owns its palette while the borrowed inputs keep theirs: one copy of at most
+        // 15 entries a field, cold beside the cells.
+        palette: inputs.palette().clone(),
+        crust_palette: inputs.crust_palette(),
+        main_liquid: inputs.main_liquid(),
     })
     .map_err(QuantiseFieldError::Header)?;
     let level = header.level();
@@ -252,9 +262,34 @@ fn synthesis_record(n: u32, cell: &CellState) -> Result<SynthesisCell, QuantiseF
         water_surface_mm: SynthesisCell::quantise_height(cell.water_surface)
             .map_err(at("water surface"))?,
         ice: SynthesisCell::quantise_ice(cell.ice_fraction).map_err(at("ice"))?,
+        substances: substance_byte(n, cell)?,
         class: cell.class,
         crater_state: cell.crater_state,
     })
+}
+
+/// The substance byte of cell `n` in state `cell`: its ice entry in the high nibble and its liquid
+/// entry in the low, [`NO_ENTRY`] for none. An entry the nibble cannot hold, 15 or more, has no
+/// code; one past the palette or of the wrong role is [`CoarseField::new`]'s to refuse.
+fn substance_byte(n: u32, cell: &CellState) -> Result<u8, QuantiseFieldError> {
+    for (part, entry) in [
+        ("ice entry", cell.ice_entry),
+        ("liquid entry", cell.liquid_entry),
+    ] {
+        if let Some(entry) = entry
+            && entry >= NO_ENTRY
+        {
+            return Err(QuantiseFieldError::Cell {
+                cell: n,
+                part,
+                error: QuantiseValueError::OutOfRange(f64::from(entry)),
+            });
+        }
+    }
+    Ok(
+        SynthesisCell::pack_substances(cell.ice_entry, cell.liquid_entry)
+            .expect("both entries are below the nibble's none"),
+    )
 }
 
 /// The climate record of climate cell `n` in state `cell`, in `header`'s steps and months.
@@ -337,7 +372,8 @@ mod tests {
     use super::*;
     use crate::planetary::hooks::SurfaceSeed;
     use crate::units::{Kelvin, MetresPerSecond, Radians, SquareMetres};
-    use hyperion_surface::field::{CoarseLevel, Cover, FieldView, Morphology};
+    use hyperion_surface::field::{CoarseLevel, Cover, FieldView, Morphology, PaletteRole};
+    use hyperion_surface::substance_key::SubstanceKey;
     use hyperion_testkit::float::assert_same_bits;
 
     fn moon_working() -> (CoarseInputs, CellGraph, CellGraph) {
@@ -358,7 +394,8 @@ mod tests {
         assert_eq!(field.header().level(), CoarseLevel::new(6).unwrap());
         assert!(field.synthesis().iter().all(|c| c.elevation_mm == 0
             && c.water_surface_mm == 0
-            && c.boundary_distance_km == SynthesisCell::NO_BOUNDARY_KM));
+            && c.boundary_distance_km == SynthesisCell::NO_BOUNDARY_KM
+            && c.substances == SynthesisCell::NO_SUBSTANCES));
         assert!(
             field
                 .climate_layer()
@@ -469,6 +506,68 @@ mod tests {
                 }
             ))
         ));
+    }
+
+    /// The header carries the inputs' palette, crust entries and main liquid, each cell its ice
+    /// and liquid entries, and an entry no nibble, palette or role holds is named.
+    #[test]
+    fn the_header_carries_the_palette_and_each_cell_its_substances() {
+        let inputs = reference::ceres_like();
+        let level = hyperion_surface::field::coarse_level(inputs.radius());
+        let (grid, climate) = (CellGraph::for_field(level), CellGraph::for_climate(level));
+        let pass = Pass::new(SurfaceSeed::new(1), &inputs, &grid, &climate);
+        let mut working = Working::initial(&pass);
+        let water_ice = SubstanceKey::new("H2O").unwrap();
+        let ice = inputs.palette().find(PaletteRole::Ice, water_ice).unwrap();
+        working.cells[5].ice_fraction = 0.5;
+        working.cells[5].ice_entry = Some(ice);
+        // A cell may name an ice it holds none of, as a seasonal frost's.
+        working.cells[6].ice_entry = Some(ice);
+        let field = quantise(&inputs, working.clone()).unwrap();
+        let header = field.header();
+        assert_eq!(header.palette(), inputs.palette());
+        assert_eq!(header.crust_palette(), inputs.crust_palette());
+        assert_eq!(header.main_liquid(), None);
+        let cells = field.synthesis();
+        assert_eq!(
+            (cells[5].ice_entry(), cells[5].liquid_entry()),
+            (Some(ice), None)
+        );
+        assert_eq!(cells[6].ice_entry(), Some(ice));
+        assert_eq!(cells[7].substances, SynthesisCell::NO_SUBSTANCES);
+
+        let refused = |edit: &dyn Fn(&mut CellState)| {
+            let mut bad = working.clone();
+            edit(&mut bad.cells[9]);
+            quantise(&inputs, bad).unwrap_err()
+        };
+        assert_eq!(
+            refused(&|c| c.ice_fraction = 0.2),
+            QuantiseFieldError::Field(BuildFieldError::IceWithoutEntry { cell: 9 })
+        );
+        assert_eq!(
+            refused(&|c| c.water_surface = Metres::new(10.0)),
+            QuantiseFieldError::Field(BuildFieldError::LiquidWithoutEntry { cell: 9 })
+        );
+        assert_eq!(
+            refused(&|c| c.liquid_entry = Some(15)),
+            QuantiseFieldError::Cell {
+                cell: 9,
+                part: "liquid entry",
+                error: QuantiseValueError::OutOfRange(15.0),
+            }
+        );
+        let beyond = u8::try_from(inputs.palette().len()).unwrap();
+        assert_eq!(
+            refused(&|c| c.ice_entry = Some(beyond)),
+            QuantiseFieldError::Field(BuildFieldError::SubstanceIndex { cell: 9 })
+        );
+        // The crust's entry is no ice's.
+        let crust = inputs.crust_palette()[2];
+        assert_eq!(
+            refused(&|c| c.ice_entry = crust),
+            QuantiseFieldError::Field(BuildFieldError::SubstanceRole { cell: 9 })
+        );
     }
 
     #[test]

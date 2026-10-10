@@ -148,6 +148,13 @@ pub struct CellState {
     pub steepness_index_m0_9: f64,
     /// The share of the cell under ice, 0 to 1.
     pub ice_fraction: f64,
+    /// The palette entry of the cell's ice, an index into the inputs' palette
+    /// ([`CoarseInputs::palette`]) of an `Ice` entry, or `None`: named wherever `ice_fraction` is
+    /// above zero, and free to name an ice the cell holds none of (a seasonal frost's).
+    pub ice_entry: Option<u8>,
+    /// The palette entry of the liquid over the cell, a `Liquid` entry, or `None`: named wherever
+    /// the water surface is above the ground.
+    pub liquid_entry: Option<u8>,
     /// The cell's climate or surface-state class (R09.T15).
     pub class: SurfaceClass,
     /// The cell's crater state (R09.T15).
@@ -247,6 +254,8 @@ impl Working {
             drainage: SquareMetres::ZERO,
             steepness_index_m0_9: 0.0,
             ice_fraction: 0.0,
+            ice_entry: None,
+            liquid_entry: None,
             class: SurfaceClass::UNCLASSIFIED,
             crater_state: 0,
         };

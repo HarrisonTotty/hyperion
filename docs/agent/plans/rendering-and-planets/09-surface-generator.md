@@ -2573,6 +2573,108 @@ re-blessing this plan's payload and coarse goldens in that commit.
     (`NotModelled(Surface)`), a generated gas giant (`NoSolidSurface`) and a degraded record
     (`NotResolved(Surface)`). The sim's whole suite passed on the merged tree (2,834 tests, before
     the review's fixes). No stream is opened, no tag or golden added, and no output moved.
+- **Deviations in T10.b, as built** (R09.T10.b, the palette's sources, 2026-10-10; after T2's
+  follow-up B, `b069fd74`; decision-composition §1.7 and §7.4 (c); builder arguments, revisable
+  until P14.T54.a reads them from the record).
+  - _Keys._ `SubstanceRef` is gone: every substance of the inputs is follow-up B's `SubstanceKey`,
+    valid by construction, so `BuildCoarseInputsError::SubstanceKey` is gone too and `build` checks
+    no key. The sorted lists still break ties by key, which orders as its string, so no order
+    moved. P14.T49.a's `SubstanceId`, being built in another lane, is not used. _Dependency for
+    P14.T54.a_, which owns `planetary/surface/inputs.rs`: it turns the record's `SubstanceId`s into
+    their rows' keys, or moves these inputs onto `SubstanceId` (ties by id, P14.T24.a's) with the
+    palette's keys resolved from the rows.
+  - _The palette._ `CoarseInputsBuilder::palette(MaterialPalette)` is required (`Missing("palette")`),
+    its entries' values resolved as the server will resolve them from P14.T49.b–c's rows. The
+    deposits are its `Deposit` entries (a Mars's `mars_dust`, a Ceres's `Na2CO3`), with no list of
+    their own. `build` refuses, as `BuildCoarseInputsError::NotInPalette { part, substance, role }`,
+    an ice or a solid condensate with no `Ice` entry, a liquid or a liquid condensate with no `Liquid`
+    entry, and a lithology of the crust with no entry; a supercritical condensate, on the ground as
+    neither, needs none. An entry nothing names is allowed (Ceres's water ice). Getters:
+    `palette`, `crust_palette` and `main_liquid`.
+  - _Signed zeros_ (the determinism review). An area share (a liquid's, an ice's, a condensate's)
+    and a condensate's reservoir refuse a −0, as the seasonal eccentricity does: `total_cmp` sorts
+    −0 before +0, so two zero shares would order by their zeros' signs rather than by key, and the
+    first liquid is now the header's main liquid.
+  - _The crusts' entries_ (`CoarseInputs::crust_palette`, the header's `crust_palette`, in `Crust`'s
+    code order). `Continental` takes the tertiary crust's `TertiaryCrust` entry, or none; `Oceanic`
+    the secondary's; `Lid` the primary's `PrimaryCrust` entry where the body has one, the
+    secondary's otherwise; `Province` the provinces'. The secondary's entry is its `SecondaryCrust`
+    one and the provinces' their `Province` one, but where the two are one substance either serves
+    both, the variant's own role first: a Mars's provinces take its lid's basalt (no `Province`
+    entry, as `PaletteRole::Province`'s "where it is not the lid's own" says), and a Moon's
+    secondary crust its maria's `Province` basalt. This settles T10's "which entry a `Lid` and a
+    `Province` cell take", which follow-up B's synthetic worlds set by hand. It differs from them
+    only in naming an entry for variants their cells never carry (Mars's and the Moon's `Oceanic`,
+    Earth's `Lid` and `Province`, Ceres's `Province`). T12 may revise it.
+  - _The main liquid_ (`CoarseInputs::main_liquid`) is the `Liquid` entry of the largest liquid, the
+    first of `liquids`, or none.
+  - _The quantiser_ writes the header's `palette`, `crust_palette` and `main_liquid` from the inputs.
+    Each cell's `substances` packs two new `CellState` members, `ice_entry` and `liquid_entry`
+    (`Option<u8>`, palette indices, `None` in `Working::initial`), by
+    `SynthesisCell::pack_substances`. An entry of 15 or more is `QuantiseFieldError::Cell`, naming
+    "ice entry" or "liquid entry". An entry past the palette or of the wrong role, or a share whose
+    entry the cell does not name, is `CoarseField::new`'s refusal, passed on as
+    `QuantiseFieldError::Field`. R09.T13.d sets the ice entries per condensate, and the steps that
+    fill basins set the liquid entries.
+  - _The reference worlds' palettes_ are §1.7's:
+    - Earth: basalt (secondary), granite (tertiary), `H2O` as ice and as liquid, the main liquid
+      `H2O`;
+    - Mars: basalt (secondary), `CO2` and `H2O` ices, `mars_dust` (deposit);
+    - Moon: anorthosite (primary), basalt (province);
+    - Ceres: phyllosilicate (secondary), `H2O` ice, `Na2CO3` (deposit). No share names the water
+      ice, since plan 14 states no area for its cold traps yet.
+
+    Each substance's figures are a row in `reference.rs` with its sources. They began as follow-up
+    B's synthetic palettes' figures and are kept apart from them, not shared, so that a correction
+    to one set moves only its own output: the wire goldens pin the synthetic fields', and T16's
+    goldens will pin these. The albedos are grey across B, V and R (P14.T49.c resolves each band),
+    and every `phase_row` is 0 until R10 assigns its rows. The sim's `clippy.toml` gains `WebBook`.
+    The science review (2026-10-10) found no wrong value.
+    - It read the basalt solidus as 980 ± 10 °C, a natural tholeiite's (Wright and Okamura 1977,
+      USGS PP 1004, Table 15), which these rows take: 70 K below the unread 1,050 °C that the
+      synthetic rows keep.
+    - It labelled what it could not read or what is assumed: the anorthosite's solidus is its
+      plagioclase's alone, an upper bound for the rock (its pyroxene melts near 1,270 °C); liquid
+      water's Fresnel factor stands in for `A_N`, which a specular surface lacks, until R11's
+      ocean; the dust's and the phyllosilicate residue's solidi are basalt's by assumption; and
+      granite's density and solidus are from memory (Huang and Wyllie 1975 named, not read).
+    - It confirmed the rest against the sources cited, and the Fresnel factors and Mangan et al.'s
+      fit at 150 K by recomputation.
+
+    Findings for "main" from it: the synthetic rows' basalt solidus, whose correction re-blesses the
+    wire goldens; the densities mix grain and porous bulk values (a convention for P14.T49.b, with
+    porosity apart); and two questions on §1.7's lists, a water-ice entry for the Moon's cold traps
+    (Li et al. 2018, PNAS 115, 8907) and whether Ceres's altered-ocean crust is better primary
+    than secondary (lean for both: keep §1.7's lists until plan 14 states them).
+
+  - _Other review changes._ The reference worlds' gases are `const` items, so that a
+    malformed key fails to compile, and the order-independence test runs over all four worlds.
+  - _The months, to the signed-off rule._ `CoarseInputs::months` gives one month only on a
+    circular seasonal orbit with no obliquity to it, or with no orbit, as Design note 8 reads since
+    its sign-off of 2026-10-10 ("a lock adds nothing"; `signoff-2.md` §4). T10 built
+    decision-r09-t2's earlier reading, which gave a world locked 1:1 to its host on a circular orbit
+    one month whatever its tilt. No reference world is one, so nothing they give moved; the test
+    now gives such a world twelve months, and one at zero obliquity.
+  - _Tests and acceptance._ `cargo test -p hyperion-sim planetary::surface` runs 31 unit tests, and
+    `cargo test -p hyperion-sim --doc planetary::surface` its two doctests, `coarse_pass`'s Ceres-like
+    builder now with a palette. New and changed tests:
+    - the builder's `Missing("palette")` and `NotInPalette` refusals, by part and role, a melt share
+      outside 0 to 1, and a −0 share or reservoir;
+    - the crusts' entries on Earth, the Moon and Mars, and the main liquid of two seas, unequal and
+      tied in both orders;
+    - the reference palettes;
+    - the quantiser's header parts, cell bytes and refusals;
+    - the no-op pass's header carrying the inputs' palette, and the pass order-independent over the
+      four reference worlds.
+
+    No stream, tag or golden is added, and no output moved.
+- **Rulings of "main" for T10's findings** (2026-10-10).
+  - `for_body`'s missing arguments, the record's time and a moon's planet's orbit, are settled by
+    P14.T54.a, which owns `planetary/surface/inputs.rs`. R09.T17 and R09.T19.a take `for_body` as
+    T54.a leaves it.
+  - The airless mean temperature is imposed as the radiative mean ⟨T⁴⟩^¼ in R09.T13.c–d, T10's
+    lean, with T13's science check to confirm. `CoarseInputs::mean_surface_temperature`'s
+    documentation says so.
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`

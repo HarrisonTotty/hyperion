@@ -15,17 +15,26 @@
 //! cover all year, and a reservoir a mass per square metre of the whole surface
 //! ([`Condensate`]).
 //!
-//! The substances name plan 14's registry keys (decision-composition §1.1) by their text, until
-//! P14.T49.a's rows exist ([`SubstanceRef`]).
+//! The substances are plan 14's registry keys ([`SubstanceKey`], decision-composition §1.1),
+//! checked by their grammar alone until P14.T49.b's rows exist, whose test then checks every key
+//! these worlds use. Each world's palette (decision-composition §1.7) carries the values the server
+//! will resolve from those rows (P14.T49.b–c), which are not built: each substance's figures are
+//! the ones its row below states with their sources. They began as R09.T2's synthetic palettes'
+//! (`hyperion_surface::testing`) and are kept apart from them, so that a correction to either set
+//! moves only its own output (the wire goldens pin the synthetic fields' palettes, and R09.T16's
+//! coarse goldens will pin these): a science review of 2026-10-10 read a basalt solidus 70 K
+//! below the synthetic one, which these rows take, and labelled what it could not read.
 
 use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
-use hyperion_surface::field::{BodyRef, ClimateModelKind};
+use hyperion_surface::field::{
+    BodyRef, ClimateModelKind, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
+};
 use hyperion_surface::spheroid::Spheroid;
+use hyperion_surface::substance_key::SubstanceKey;
 
 use super::inputs::{
     AreaShare, ClimateRegime, CoarseInputs, Condensate, CondensatePhase, CrustInputs, Forcing,
-    GasShare, Persistence, SeasonalOrbit, Spin, SubstanceRef, TectonicRegime, ThermalRegime,
-    WetEpoch,
+    GasShare, Persistence, SeasonalOrbit, Spin, TectonicRegime, ThermalRegime, WetEpoch,
 };
 use crate::math;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
@@ -42,11 +51,209 @@ use crate::units::{
 pub const SEED: SurfaceSeed = SurfaceSeed::new(0x5eed_0009_0010);
 
 /// Water.
-const H2O: SubstanceRef = SubstanceRef::new("H2O");
+const H2O: SubstanceKey = SubstanceKey::new_const("H2O");
 /// Carbon dioxide.
-const CO2: SubstanceRef = SubstanceRef::new("CO2");
+const CO2: SubstanceKey = SubstanceKey::new_const("CO2");
 /// Basalt, the secondary crust's default (P14.T51.c).
-const BASALT: SubstanceRef = SubstanceRef::new("basalt");
+const BASALT_KEY: SubstanceKey = SubstanceKey::new_const("basalt");
+/// Granite, a tertiary crust (P14.T51.c).
+const GRANITE_KEY: SubstanceKey = SubstanceKey::new_const("granite");
+/// Anorthosite, a primary flotation crust (P14.T51.c).
+const ANORTHOSITE_KEY: SubstanceKey = SubstanceKey::new_const("anorthosite");
+/// A phyllosilicate-rich rock (P14.T49.b's lithologies).
+const PHYLLOSILICATE_KEY: SubstanceKey = SubstanceKey::new_const("phyllosilicate");
+
+/// A substance of the reference palettes with its figures: what a [`PaletteEntry`] holds but its
+/// role, as the server would resolve it from the substance's registry row (P14.T49.b–c).
+///
+/// The normal albedos are the same in B, V and R: a band's value is P14.T49.c's to resolve from
+/// spectra, so each row takes one visible figure, the midpoint of R10's Design note 8's range for
+/// its class (researched there, mostly from memory, and to be settled in R10.T1.a), but the
+/// anorthosite's, the top of its range, the phyllosilicate's, Ceres's measured albedo, and liquid
+/// water's, the Fresnel reflectance of its surface at normal incidence in each band. Every phase
+/// row is 0 until R10 assigns its rows. The densities follow no one convention yet (a grain
+/// density for the phyllosilicate, a porous bulk for the highlands and the dust), which P14.T49.b's
+/// rows settle, with the porosity apart.
+struct Substance {
+    key: SubstanceKey,
+    normal_albedo_bvr: [f64; 3],
+    density_kg_m3: f64,
+    transition_k: f64,
+    mechanics: MechanicsFamily,
+}
+
+impl Substance {
+    /// The entry of the substance in `role`.
+    #[must_use]
+    const fn entry(&self, role: PaletteRole) -> PaletteEntry {
+        PaletteEntry {
+            substance: self.key,
+            role,
+            normal_albedo_bvr: self.normal_albedo_bvr,
+            phase_row: 0,
+            density_kg_m3: self.density_kg_m3,
+            transition: Kelvin::new(self.transition_k),
+            mechanics: self.mechanics,
+        }
+    }
+}
+
+/// The solidus of a basalt at about 1 atm, 980 °C, kelvin: a natural Hawaiian tholeiite's, below
+/// which its residual glass, 4 per cent, stops falling (Wright and Okamura 1977, USGS Professional
+/// Paper 1004, abstract and Table 15, after Wright and Weiblen 1967; ±10 °C). A dry basalt's is
+/// higher, about 1,050 °C (Yoder and Tilley 1962, J. Petrol. 3, 342, from memory and not read; low
+/// confidence). Basalt's, and, by assumption without a source, the basaltic dust's and the
+/// phyllosilicate's dehydrated residue's.
+const BASALT_SOLIDUS_K: f64 = 1_253.15;
+
+/// Basalt: Design note 8's basaltic rock, `A_N` 0.05–0.15; a typical bulk density of 2,900 kg m⁻³
+/// (2,700–3,100; Philpotts and Ague 2009, Principles of Igneous and Metamorphic Petrology, p. 22,
+/// not read; low confidence).
+const BASALT: Substance = Substance {
+    key: BASALT_KEY,
+    normal_albedo_bvr: [0.10; 3],
+    density_kg_m3: 2_900.0,
+    transition_k: BASALT_SOLIDUS_K,
+    mechanics: MechanicsFamily::Silicate,
+};
+
+/// Granite: Design note 8's felsic rock, `A_N` 0.2–0.35; a bulk density of 2,650 kg m⁻³ (2,650–
+/// 2,750, from memory; no source read; low confidence) and a dry solidus at 1 atm of about 960 °C
+/// (from memory; the dry haplogranite solidus's primary source is Huang and Wyllie 1975, J. Geol.
+/// 83, 737, not read; low confidence).
+const GRANITE: Substance = Substance {
+    key: GRANITE_KEY,
+    normal_albedo_bvr: [0.275; 3],
+    density_kg_m3: 2_650.0,
+    transition_k: 1_233.15,
+    mechanics: MechanicsFamily::Silicate,
+};
+
+/// Anorthosite, as the lunar highlands' mature regolith: the top of Design note 8's regolith
+/// range, 0.07–0.20, the highlands being its brightest; the highland crust's bulk density, 2,550
+/// kg m⁻³ at 12 per cent porosity (Wieczorek et al. 2013, Science 339, 671, from GRAIL); and the
+/// solidus of its calcic plagioclase (An₉₅) alone at 1 atm, about 1,500 °C (an ideal-solution loop
+/// gives 1,515–1,527 °C; Bowen 1913, Am. J. Sci. s4-35, 577, not read; low confidence), an upper
+/// bound for the rock: its few per cent of pyroxene begin to melt with the plagioclase near the
+/// anorthite–diopside eutectic, about 1,270 °C (Osborn 1942, Am. J. Sci. 240, 751, from memory and
+/// not read).
+const ANORTHOSITE: Substance = Substance {
+    key: ANORTHOSITE_KEY,
+    normal_albedo_bvr: [0.20; 3],
+    density_kg_m3: 2_550.0,
+    transition_k: 1_773.15,
+    mechanics: MechanicsFamily::Silicate,
+};
+
+/// A phyllosilicate-rich rock, as Ceres's crust: Ceres's geometric albedo, 0.094 ± 0.007 at
+/// 0.55 µm (Ciarniello et al. 2017, A&A 598, A130), which is its normal albedo (Schröder et al.
+/// 2017, Icarus 288, 201, §4, who adopt Tedesco 1989's 0.10 ± 0.01); a grain density of 2,500
+/// kg m⁻³, between saponite's 2,240–2,300 and lizardite's 2,550 (Anthony et al., Handbook of
+/// Mineralogy), not Ceres's bulk crust, 1,200–1,400 kg m⁻³ with its ice and salts (Ermakov et al.
+/// 2017, JGR Planets 122, 2267); and, for its dehydrated residue's solidus, basalt's (an
+/// assumption, no source; low confidence: a magnesian residue, olivine and pyroxene, would melt
+/// hotter).
+const PHYLLOSILICATE: Substance = Substance {
+    key: PHYLLOSILICATE_KEY,
+    normal_albedo_bvr: [0.094; 3],
+    density_kg_m3: 2_500.0,
+    transition_k: BASALT_SOLIDUS_K,
+    mechanics: MechanicsFamily::Silicate,
+};
+
+/// Sodium carbonate, the salt of Ceres's faculae (De Sanctis et al. 2016, Nature 536, 54):
+/// Design note 8's evaporite, `A_N` 0.5–0.8, which Cerealia Facula's visual normal albedo,
+/// 0.6 ± 0.1, bears out (Schröder et al. 2017, Icarus 288, 201); its density, 2,540 kg m⁻³ (CRC
+/// Handbook of Chemistry and Physics, 95th edition, not read; International Chemical Safety Card
+/// 1135's 2.5 g cm⁻³ agrees), and melting point, 851 °C (International Chemical Safety Card 1135;
+/// the literature spans 850–856 °C, NIST's WebBook putting the change at 1,123 K and the CRC's
+/// 95th edition at 856 °C).
+const SODIUM_CARBONATE: Substance = Substance {
+    key: SubstanceKey::new_const("Na2CO3"),
+    normal_albedo_bvr: [0.65; 3],
+    density_kg_m3: 2_540.0,
+    transition_k: 1_124.15,
+    mechanics: MechanicsFamily::Salt,
+};
+
+/// Mars's bright dust: Design note 8's 0.18–0.25 in V; the bulk density of the Viking landers'
+/// undisturbed drift material, 1,200 kg m⁻³ (Moore et al. 1987, USGS Professional Paper 1389,
+/// p. 126); basaltic, so basalt's solidus (an assumption, no source).
+const MARS_DUST: Substance = Substance {
+    key: SubstanceKey::new_const("mars_dust"),
+    normal_albedo_bvr: [0.215; 3],
+    density_kg_m3: 1_200.0,
+    transition_k: BASALT_SOLIDUS_K,
+    mechanics: MechanicsFamily::Silicate,
+};
+
+/// The melting point of water ice at 1 atm, kelvin: 273.152 519 K (IAPWS R10-06), to 0.01 K.
+const WATER_MELTING_K: f64 = 273.15;
+
+/// Water ice, as snow-covered ice: Design note 8's fresh snow, 0.95–0.98 in the visible
+/// (Wiscombe and Warren 1980; Grenfell et al. 1994); ice Ih's density at its melting point at
+/// 1 atm, 916.72 kg m⁻³ (IAPWS R10-06(2009), Table 6: 916.721 463 kg m⁻³; the equation of Feistel
+/// and Wagner 2006, J. Phys. Chem. Ref. Data 35, 1021).
+const WATER_ICE: Substance = Substance {
+    key: H2O,
+    normal_albedo_bvr: [0.965; 3],
+    density_kg_m3: 916.72,
+    transition_k: WATER_MELTING_K,
+    mechanics: MechanicsFamily::WaterIce,
+};
+
+/// Liquid water: the Fresnel reflectance at normal incidence, ((n − 1) ÷ (n + 1))², of n = 1.337,
+/// 1.333 and 1.331 at 0.45, 0.55 and 0.65 µm (Hale and Querry 1973's grid points, which give the
+/// same three at the bands' 0.44 and 0.64 µm), at 25 °C (Hale and Querry 1973, Appl. Opt. 12,
+/// 555), standing in for `A_N`, which a specular surface does not have, until R11's ocean
+/// replaces it; its density at 0 °C and 1 atm, 999.84 kg m⁻³ (IAPWS-95, Wagner and Pruß 2002, J.
+/// Phys. Chem. Ref. Data 31, 387).
+const WATER: Substance = Substance {
+    key: H2O,
+    normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
+    density_kg_m3: 999.84,
+    transition_k: WATER_MELTING_K,
+    mechanics: MechanicsFamily::WaterIce,
+};
+
+/// CO₂ ice: Design note 8's carbon dioxide frost, 0.4–0.8; its density at 150 K, a Mars-like
+/// frost's temperature, 1,621 kg m⁻³ (Mangan et al. 2017, Icarus 294, 201, whose fit over 80–195
+/// K is ρ = 1.723 91 − 2.53 × 10⁻⁴ T − 2.87 × 10⁻⁶ T² g cm⁻³); and its triple point, 216.592 K,
+/// where it can first melt (Span and Wagner 1996, J. Phys. Chem. Ref. Data 25, 1509).
+const CARBON_DIOXIDE_ICE: Substance = Substance {
+    key: CO2,
+    normal_albedo_bvr: [0.6; 3],
+    density_kg_m3: 1_621.0,
+    transition_k: 216.592,
+    mechanics: MechanicsFamily::VolatileIce,
+};
+
+/// The reference Earth's dry air by mole, as [`earth_like`]'s table sources it: a `const`, so that
+/// a malformed key fails to compile.
+const EARTH_AIR: [GasShare; 7] = [
+    gas("N2", 0.780_84),
+    gas("O2", 0.209_476),
+    gas("Ar", 0.009_34),
+    gas("CO2", 0.000_314),
+    gas("Ne", 0.000_018_18),
+    gas("He", 0.000_005_24),
+    gas("CH4", 0.000_002),
+];
+
+/// The reference Mars's air by mole, as [`mars_like`]'s table sources it.
+const MARS_AIR: [GasShare; 5] = [
+    gas("CO2", 0.951),
+    gas("N2", 0.0259),
+    gas("Ar", 0.0194),
+    gas("O2", 0.001_61),
+    gas("CO", 0.000_58),
+];
+
+/// The palette of `entries`, given in (role, key) order.
+#[must_use]
+fn palette(entries: Vec<PaletteEntry>) -> MaterialPalette {
+    MaterialPalette::new(entries).expect("a reference palette is valid")
+}
 
 /// The density of a stony projectile that screening assumes, kg m⁻³: 3,000, the value that turns
 /// Design note 12's d\* = 1.5 (P ÷ g) ÷ `ρ_p` into its 5.2 m for Earth and 0.52 km for Venus (its
@@ -153,6 +360,7 @@ fn figure(radius_m: f64, f: f64) -> Spheroid {
 /// | craters | the lunar chronology at that age, screened by the air | Design note 12 |
 /// | wet epoch | 4.4 Gyr ago to now, the ocean's inventory | the oldest zircons' evidence of liquid water (Wilde, Valley, Peck and Graham 2001, Nature 409, 175) |
 /// | crust | basaltic oceanic, granitic continents, basaltic provinces | P14.T51.c's Earth |
+/// | palette | basalt (secondary crust), granite (tertiary), water as ice and as liquid | decision-composition §1.7; each figure its substance's row in this module, with its sources |
 ///
 /// # Panics
 ///
@@ -196,15 +404,7 @@ pub fn earth_like() -> CoarseInputs {
             period: year,
         })
         .surface_pressure(pressure)
-        .gases([
-            gas("N2", 0.780_84),
-            gas("O2", 0.209_476),
-            gas("Ar", 0.009_34),
-            gas("CO2", 0.000_314),
-            gas("Ne", 0.000_018_18),
-            gas("He", 0.000_005_24),
-            gas("CH4", 0.000_002),
-        ])
+        .gases(EARTH_AIR)
         .surface(SurfaceState::Temperate, SurfaceMaterial::Rock)
         .tectonics(TectonicRegime::MobileLid, 0.405)
         .volcanism(1.0)
@@ -230,11 +430,17 @@ pub fn earth_like() -> CoarseInputs {
         })
         .crust(CrustInputs {
             primary: None,
-            secondary: BASALT,
-            tertiary: Some(SubstanceRef::new("granite")),
-            provinces: BASALT,
+            secondary: BASALT_KEY,
+            tertiary: Some(GRANITE_KEY),
+            provinces: BASALT_KEY,
             melt_area_fraction: 0.0,
         })
+        .palette(palette(vec![
+            BASALT.entry(PaletteRole::SecondaryCrust),
+            GRANITE.entry(PaletteRole::TertiaryCrust),
+            WATER_ICE.entry(PaletteRole::Ice),
+            WATER.entry(PaletteRole::Liquid),
+        ]))
         .condensates([
             condensate(
                 H2O,
@@ -275,6 +481,7 @@ pub fn earth_like() -> CoarseInputs {
 /// | craters | the lunar chronology at that age, screened by the air (d\* = 8.5 cm at 636 Pa) | Design note 12, whose 8.2 cm takes about 610 Pa; the Mars–Moon flux ratio is plan 14's belt scaling, not applied |
 /// | wet epoch | 3.9 to 3.6 Gyr ago, 10⁶ Earth-equivalent years, 1.56 × 10⁵ kg m⁻² of water | the valley networks of about 3.6–3.8 Ga (Hoke and Hynek 2009) in 10⁵–10⁷ such years (Hoke, Hynek and Tucker 2011; not read); Carr and Head 2003's ocean, about 2.3 × 10⁷ km³, 156 m as a global layer (low confidence) |
 /// | crust | basaltic, basaltic provinces | P14.T51.c's Mars |
+/// | palette | basalt (secondary crust, its provinces' too), CO₂ and water ices, the bright dust as its deposit | decision-composition §1.7; each figure its row's |
 ///
 /// # Panics
 ///
@@ -316,13 +523,7 @@ pub fn mars_like() -> CoarseInputs {
             period: year,
         })
         .surface_pressure(pressure)
-        .gases([
-            gas("CO2", 0.951),
-            gas("N2", 0.0259),
-            gas("Ar", 0.0194),
-            gas("O2", 0.001_61),
-            gas("CO", 0.000_58),
-        ])
+        .gases(MARS_AIR)
         .surface(SurfaceState::Temperate, SurfaceMaterial::Rock)
         .tectonics(TectonicRegime::StagnantLid, 0.0)
         .volcanism(1.0)
@@ -348,11 +549,17 @@ pub fn mars_like() -> CoarseInputs {
         })
         .crust(CrustInputs {
             primary: None,
-            secondary: BASALT,
+            secondary: BASALT_KEY,
             tertiary: None,
-            provinces: BASALT,
+            provinces: BASALT_KEY,
             melt_area_fraction: 0.0,
         })
+        .palette(palette(vec![
+            BASALT.entry(PaletteRole::SecondaryCrust),
+            CARBON_DIOXIDE_ICE.entry(PaletteRole::Ice),
+            WATER_ICE.entry(PaletteRole::Ice),
+            MARS_DUST.entry(PaletteRole::Deposit),
+        ]))
         .condensates([
             condensate(
                 H2O,
@@ -389,6 +596,7 @@ pub fn mars_like() -> CoarseInputs {
 /// | heat flow | 0.018 W m⁻² | Apollo 15's 21 and Apollo 17's 14 mW m⁻² (Langseth, Keihm and Peters 1976, quoted by Saito et al. 2006), whose global estimate is about 1.8 µW cm⁻² |
 /// | surface age | 4.4 Gyr | R09.T12.d's test ("N(1 km) at 4.4 Gyr") |
 /// | crust | anorthositic, basaltic secondary crust and provinces | P14.T51.c's Moon |
+/// | palette | anorthosite (primary crust), basalt (provinces: the maria, its secondary crust) | decision-composition §1.7; each figure its row's |
 ///
 /// # Panics
 ///
@@ -433,12 +641,16 @@ pub fn moon_like() -> CoarseInputs {
             model: ClimateModelKind::RadiativeEquilibrium,
         })
         .crust(CrustInputs {
-            primary: Some(SubstanceRef::new("anorthosite")),
-            secondary: BASALT,
+            primary: Some(ANORTHOSITE_KEY),
+            secondary: BASALT_KEY,
             tertiary: None,
-            provinces: BASALT,
+            provinces: BASALT_KEY,
             melt_area_fraction: 0.0,
         })
+        .palette(palette(vec![
+            ANORTHOSITE.entry(PaletteRole::PrimaryCrust),
+            BASALT.entry(PaletteRole::Province),
+        ]))
         .build()
         .expect("the reference Moon's inputs are valid")
 }
@@ -458,7 +670,8 @@ pub fn moon_like() -> CoarseInputs {
 /// | heat flow | 0.001 W m⁻² | a placeholder: a chondritic radiogenic estimate's order (low confidence) |
 /// | surface age | 4.0 Gyr | a placeholder (low confidence) |
 /// | craters | the lunar chronology at that age, on an ice-rich target (`k_target` 0.12) | Design notes 3 and 12 |
-/// | crust | phyllosilicate, its provinces too (V = 0 builds none) | R09.T2's synthetic Ceres; its sodium-carbonate deposit (decision-composition §1.7's `Na2CO3`, the faculae's, De Sanctis et al. 2016) waits for the palette's deposits |
+/// | crust | phyllosilicate, its provinces too (V = 0 builds none) | R09.T2's synthetic Ceres |
+/// | palette | phyllosilicate (secondary crust), water ice, sodium carbonate as its deposit (the faculae's) | decision-composition §1.7; each figure its row's. The water-ice entry names the ice of its cold traps and fresh craters (Platz et al. 2016, Nature Astronomy 1, 0007; Combe et al. 2016, Science 353, aaf3010), which no area share places until plan 14 states one |
 ///
 /// # Panics
 ///
@@ -505,19 +718,25 @@ pub fn ceres_like() -> CoarseInputs {
         })
         .crust(CrustInputs {
             primary: None,
-            secondary: SubstanceRef::new("phyllosilicate"),
+            secondary: PHYLLOSILICATE_KEY,
             tertiary: None,
-            provinces: SubstanceRef::new("phyllosilicate"),
+            provinces: PHYLLOSILICATE_KEY,
             melt_area_fraction: 0.0,
         })
+        .palette(palette(vec![
+            PHYLLOSILICATE.entry(PaletteRole::SecondaryCrust),
+            WATER_ICE.entry(PaletteRole::Ice),
+            SODIUM_CARBONATE.entry(PaletteRole::Deposit),
+        ]))
         .build()
         .expect("the reference Ceres's inputs are valid")
 }
 
-/// The gas of key `key` at mole fraction `x`.
+/// The gas of key `key` at mole fraction `x`, called in a `const` item so that a malformed key
+/// fails to compile ([`SubstanceKey::new_const`]).
 const fn gas(key: &'static str, x: f64) -> GasShare {
     GasShare {
-        substance: SubstanceRef::new(key),
+        substance: SubstanceKey::new_const(key),
         mole_fraction: x,
     }
 }
@@ -526,7 +745,7 @@ const fn gas(key: &'static str, x: f64) -> GasShare {
 /// it all year.
 #[must_use]
 const fn condensate(
-    substance: SubstanceRef,
+    substance: SubstanceKey,
     phase: CondensatePhase,
     reservoir: KilogramsPerSquareMetre,
     area: f64,
@@ -556,7 +775,7 @@ mod tests {
         let ocean = earth.condensates()[0].reservoir.value();
         assert!((2.6e6..2.8e6).contains(&ocean), "{ocean} kg m⁻²");
         assert_eq!(earth.months(), 12);
-        assert_eq!(earth.gases()[0].substance, SubstanceRef::new("N2"));
+        assert_eq!(earth.gases()[0].substance.as_str(), "N2");
         // Earth's solar day is 86,400 s to a few tenths of a second.
         let day = earth.spin().solar_day.unwrap().value();
         assert!((day - 86_400.0).abs() < 1.0, "{day} s");
@@ -592,6 +811,59 @@ mod tests {
         assert!((ceres.gravity().value() - 0.284).abs() < 0.001);
         let t = ceres.mean_surface_temperature().value();
         assert!((160.0..166.0).contains(&t), "{t} K");
+    }
+
+    /// Each world's palette holds decision-composition §1.7's substances in their roles, its
+    /// deposits among them.
+    #[test]
+    fn the_reference_palettes_are_decision_composition_s() {
+        use PaletteRole::{Deposit, Ice, Liquid, PrimaryCrust, Province, SecondaryCrust};
+        let entries = |inputs: &CoarseInputs| -> Vec<(PaletteRole, String)> {
+            inputs
+                .palette()
+                .entries()
+                .iter()
+                .map(|e| (e.role, e.substance.as_str().to_owned()))
+                .collect()
+        };
+        let expect = |list: &[(PaletteRole, &str)]| -> Vec<(PaletteRole, String)> {
+            list.iter().map(|&(r, k)| (r, k.to_owned())).collect()
+        };
+        assert_eq!(
+            entries(&earth_like()),
+            expect(&[
+                (SecondaryCrust, "basalt"),
+                (PaletteRole::TertiaryCrust, "granite"),
+                (Ice, "H2O"),
+                (Liquid, "H2O"),
+            ])
+        );
+        assert_eq!(
+            entries(&mars_like()),
+            expect(&[
+                (SecondaryCrust, "basalt"),
+                (Ice, "CO2"),
+                (Ice, "H2O"),
+                (Deposit, "mars_dust"),
+            ])
+        );
+        assert_eq!(
+            entries(&moon_like()),
+            expect(&[(PrimaryCrust, "anorthosite"), (Province, "basalt")])
+        );
+        assert_eq!(
+            entries(&ceres_like()),
+            expect(&[
+                (SecondaryCrust, "phyllosilicate"),
+                (Ice, "H2O"),
+                (Deposit, "Na2CO3"),
+            ])
+        );
+        // Each world's sea, where it has one, is its main liquid.
+        let earth = earth_like();
+        let sea = earth.palette().get(earth.main_liquid().unwrap()).unwrap();
+        assert_eq!((sea.role, sea.substance), (Liquid, H2O));
+        assert!((sea.density_kg_m3 - 999.84).abs() < 1e-9);
     }
 
     #[test]
