@@ -1119,17 +1119,18 @@ What the pass does, in order:
    area, a pass back upstream, and iteration to a fixed point sped by multigrid, which is exactly why
    it runs here, on the coarse grid on the server, and never per point. On a world wet now it runs to
    steady state, with the sea as base level and uplift from the plates. On a world dry now it runs
-   for the effective length of plan 14's wet epoch in Earth-equivalent years, the epoch's length
-   scaled by its flood frequency against an arid-to-semiarid Earth's, since the erodibility is a
-   terrestrial calibration that already holds Earth's intermittency, and only where the surface is
-   older than the epoch's end. Mars's valley networks formed within a few hundred million years
-   around 3.7 Ga. "With runoff rates similar to intense storms in arid regions on Earth", and storms
-   flowing 5% of the time, "as is typical for Earth", their minimum formation times are 10⁵ to 10⁷
-   years, and 10⁵ to 10⁸ for the shallower flows the authors prefer (Hoke, Hynek and Tucker 2011).
-   Run without a break, the same flow takes a twentieth of that; only continuous flows of hurricane
-   scale, which the authors do not prefer, would form them in 200–5,000 years. Their volume is at
-   least about a metre of rock spread over the planet, 1.2 m by Luo, Cang and Howard's count
-   (Hoke and Hynek 2009; Luo, Cang and Howard 2017): a thin, immature overprint, with
+   for plan 14's wet epoch in Earth-equivalent years, the time its channel-forming flows ran at a
+   point divided by the 5% of the time an Earth river's do, at the runoff it held, since the
+   erodibility is a terrestrial calibration that already holds Earth's intermittency, and only where
+   the surface is older than the epoch's end. Mars's valley networks formed within a few hundred
+   million years around 3.7 Ga. "With runoff rates similar to intense storms in arid regions on
+   Earth", and storms flowing 5% of the time, "as is typical for Earth", their minimum formation
+   times are 10⁵ to 10⁷ years, and 10⁵ to 10⁸ for the shallower flows the authors prefer (Hoke,
+   Hynek and Tucker 2011), which, since they assume Earth's 5%, are Earth-equivalent years as they
+   stand. Run without a break, the same flow takes a twentieth of that; only continuous flows of
+   hurricane scale, which the authors do not prefer, would form them in 200–5,000 years. Their
+   volume is at least about a metre of rock spread over the planet, 1.2 m by Luo, Cang and Howard's
+   count (Hoke and Hynek 2009; Luo, Cang and Howard 2017): a thin, immature overprint, with
    the craters of the rest of the surface age placed on top of it. Most of that volume lies in
    valleys narrower than a coarse cell, so the coarse field alone cannot be checked against it: the
    check counts the channels the local synthesis cuts too, or bounds the coarse share from valley
@@ -1147,7 +1148,8 @@ What the pass does, in order:
    stays of order seconds. This is the step that buys the realism, because it is computed globally
    where global is affordable, and everything local is then conditioned on it. _The wet epoch's
    Earth-equivalent years signed off 2026-10-10 by the sign-off agent (owner's delegation), with
-   Hoke, Hynek and Tucker 2011's figures as the paper states them._
+   Hoke, Hynek and Tucker 2011's figures as the paper states them; their reference, Earth's 5%,
+   ruled the same day by a science agent (owner's delegation, science-hoke.md)._
 5. **Climate classes, and biomes where there is life.** Köppen–Geiger for the seasonal water-cycle
    regimes: it is temperature-and-precipitation driven, recognisable, and defensible in a way a
    hand-drawn biome map is not. It classifies climate, not life. Plan 14 says nothing about life, so

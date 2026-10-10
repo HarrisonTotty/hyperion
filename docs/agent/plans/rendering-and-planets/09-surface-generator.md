@@ -609,10 +609,12 @@ every timing below is provisional and is re-measured on a quiet machine by the t
      Earth-sized planets alone, and the Solar System table gives Earth its measured 0.405. The
      structural share then spans 2.11–2.55 km over the draw's range.
 
-   - **The volatile history**, `WetEpoch { start, end, effective_flow, paleo_inventory }`, with
-     `effective_flow` defined in Earth-equivalent years (the epoch's length scaled by its flood
-     frequency relative to an arid-to-semiarid Earth's), which is the solver's t (Design note 9;
-     corrected 2026-10-09 by T0.b from "years at effective discharge").
+   - **The volatile history**, `WetEpoch { start, end, effective_flow, runoff, paleo_inventory }`,
+     with `effective_flow` in Earth-equivalent years (the time channel-forming flow ran at a point
+     over the epoch, divided by Earth's reference flood intermittency of 5%), which is the solver's
+     t, and `runoff` the epoch's runoff at that intermittency, which weights the drainage area on a
+     world dry now (Design note 9; corrected 2026-10-09 by T0.b from "years at effective
+     discharge", and 2026-10-10 by science-hoke.md).
    - **The crater contract**: N(>1 km) with its belt scaling, the screening inputs (surface
      pressure over gravity and a projectile density, or a crater cutoff), g, a target factor
      k_target (1 rock, 0.12 ice-rich), and optionally a mean impact velocity; the surface crate
@@ -623,10 +625,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
      Koll's redistribution factor f = 2/3 − (5/12) X ÷ (k + X) at k = 2, with airless-like below X <
      0.087 k and efficient redistribution above 15.7 k, for locked and slow rotators only;
      Wordsworth's CO₂ collapse pressure (his eq. 43) for pure CO₂ between 1 and 10 M⊕ only; a
-     slow-rotator onset that rises with flux, a solar day of 16 d at 1.4 S⊕ to 48 d at 1.9 S⊕ (Yang
-     et al.'s Table 1), not one number; and an equatorial ice belt at 54–126° obliquity (53.9°
-     recomputed) decided with the volatile history, since Kilic et al.'s belt is reached only from a
-     colder state.
+     slow-rotator onset that rises with flux, not one number: Yang et al.'s Table 1 brackets it
+     between sidereal rotation periods of 8 and 16 d at 1.40 S⊕ and of 32 and 48 d at 1.92 S⊕, at
+     an orbital period of 225 d (sidereal periods, not solar days; T10's science review,
+     2026-10-09); and an equatorial ice belt at 54–126° obliquity (53.9° recomputed) decided with
+     the volatile history, since Kilic et al.'s belt is reached only from a colder state.
    - **Signed contrasts and the surface section.** P14.T24.a's equator–pole contrast with its sign
      (a warm pole is negative) and, for a locked world, the day–night contrast about P14.T14's
      substellar axis, as open question 9 asks; and the surface section carrying `SurfaceState`,
@@ -743,8 +746,9 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    - Each month's record is the mean over its span of the six-hour steps of the converged orbit.
 
    Plan 14's figures are imposed on the component that defines
-   each: the equator–pole contrast by replacing the annual field's P₂(sin φ) coefficient (the sign
-   carries a warm pole), a locked world's day–night contrast by P₁(cos γ), and the mean by a
+   each: the equator–pole contrast by setting the annual field's P₂(sin φ) coefficient to −⅔ of
+   it, since the contrast T(0°) − T(90°) is −(3/2) T₂ (the sign carries a warm pole; T10's science
+   review, 2026-10-09), a locked world's day–night contrast by P₁(cos γ), and the mean by a
    constant added last to the surface temperature after the lapse term; ice goes coldest first, by
    the cell's annual maximum, until its area matches plan 14's fraction, which also places a locked
    nightside and an equatorial belt. Precipitation stays labelled `PrecipitationSource::Heuristic`:
@@ -806,14 +810,16 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    on a world dry now the terminal outlets left by priority flood (flat directions taken from the
    pop order, so no ε-raising is needed) and Fill–Spill–Merge, which spreads the paleo-inventory
    through the depression hierarchy after the paleo-sea is placed by plan 14's own logistic. A world
-   wet now runs to steady state; one dry now runs for t = `effective_flow`, only where the surface
-   is older than the epoch's end; one with no wet epoch skips the step. m = θ = 0.45 (Kirby and
-   Whipple 2012, from memory), with the drainage area replaced by Hergarten 2021's runoff-weighted
-   equivalent area from the climate step, normalised by a reference runoff of 1 m a⁻¹, which is the
-   only place runoff enters (the first draft also multiplied K by runoff to the m, counting it
-   twice). Both the paper's code (Inria research-only licence) and Dendry's (GPL-3.0) are
-   implemented from the papers alone. Outputs: final elevation, flow direction, drainage area, a
-   steepness index k_s, and water surfaces.
+   wet now runs to steady state; one dry now runs for t = `effective_flow`, with the drainage area
+   weighted by the epoch's `runoff`, uniform over the cells since no past climate is modelled,
+   only where the surface is older than the epoch's end; one with no wet epoch skips the step.
+   m = θ = 0.45 (Kirby and Whipple 2012, from memory), with the drainage area replaced by Hergarten
+   2021's runoff-weighted equivalent area from the climate step (on a world dry now, the epoch's
+   `runoff`), normalised by a reference runoff of 1 m a⁻¹, which is the only place runoff enters
+   (the first draft also multiplied K by runoff to the m, counting it twice). Both the paper's code
+   (Inria research-only licence) and Dendry's (GPL-3.0) are implemented from the papers alone.
+   Outputs: final elevation, flow direction, drainage area, a steepness index k_s, and water
+   surfaces.
 
    _Erodibility_ (researched 2026-10-09, by R09.T0.b; low to medium-low confidence, stated in the
    doc comment): K = K⊕ (g ÷ g⊕)(ρ_f ÷ ρ_water) B. K⊕ = 6.3 × 10⁻⁶ m^0.1 a⁻¹: Tzathas et al.'s 2 ×
@@ -837,19 +843,35 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    offset by grains that strike with about 50 times less energy), and Litwin et al. 2012 (JGR 117,
    E08013) find ice strengthening by 7 kPa K⁻¹ from 260 K down to 110 K, about twice as strong at
    Titan's 94 K by extrapolation. That gives K ≈ 2.4 × 10⁻⁵ m^0.1 a⁻¹ on an ancient Mars and 3.1 ×
-   10⁻⁶ on a Titan. _The solver's time_ is in Earth-equivalent years: each K is a long-term
-   terrestrial calibration that already holds Earth's flood intermittency (Barnhart et al., ¶70:
-   the mean annual flood flows about 2% of the year), so `effective_flow` is the epoch's length
-   scaled by its flood frequency relative to an arid-to-semiarid Earth. That is how Hoke, Hynek
-   and Tucker 2011 (EPSL 312, 1) state Mars's 10⁵–10⁷ yr, "with runoff rates similar to intense
-   storms in arid regions on Earth", against 200–5,000 yr of continuous flow; the first draft's
-   "years at effective discharge" would have run Mars's epoch about fifty times too short. As a
+   10⁻⁶ on a Titan. _The solver's time_ is in Earth-equivalent years (ruled 2026-10-10,
+   science-hoke.md; medium-low confidence). Each K is a long-term terrestrial calibration that
+   already holds the intermittency of Earth's channel-forming flows, taken as 5% of the time:
+   Kleinhans 2005 (JGR 110, E12003, ¶62) writes that "channel-forming discharges on Earth occur
+   roughly for about 5% of the time", after Parker, and matches Earth's deltas within a factor of
+   three with it (¶82); Hoke, Hynek and Tucker 2011 (Table 3 note b) give "5% of the time, as is
+   typical for Earth (Wolman and Miller, 1960)". So `effective_flow` is the time channel-forming
+   flow ran at a point over the epoch divided by 0.05, and the runoff that weights the area is the
+   storms' runoff while they flow times 0.05. Where the epoch's own intermittency is the
+   reference's, they are a point's episode in years and its mean annual runoff. At fixed flow time
+   and storm runoff the erosion goes as the reference to the power m − 1, so Barnhart et al.'s 2%
+   (¶70, DELIM's own conversion of its flood time, whose erodibility this note does not use) would
+   erode 1.7 times more, and an arid river's 1% (Hoke et al.'s Batha) 2.4 times more; both are
+   within K's own uncertainty. "Arid to semi-arid" is Howard 2007's and Barnhart et al.'s finding
+   for Mars's epoch (Hoke et al. §3), a property of the epoch, not of the reference. Hoke et al.'s
+   times assume the reference. "With runoff rates similar to intense storms in arid regions on
+   Earth", Mars's valley networks need at least 10⁵–10⁷ yr, and 10⁵–10⁸ yr for the shallower flows
+   the authors prefer, at storm runoffs of 0.4–6 cm a day. Those are `effective_flow` as they
+   stand, 5 × 10³ to 5 × 10⁶ yr of flow at a `runoff` of 0.07–1.1 m a⁻¹. Only continuous
+   hurricane-scale flows, "not the preferred interpretation", would take 200–5,000 yr. The first
+   draft's "years at effective discharge" would have run Mars's epoch twenty times too short. As a
    cross-check, Black et al. 2017's supplement (Science 356, 727; Table S2: K = 10⁻⁸ m^(1−2m) a⁻¹
    at m = 0.5 over 60 Myr) matches Mars's 50–350 m of trunk-valley incision with K t ≈ 1.9 m^0.1 at
-   m = 0.45, which the Mars K above reaches in about 2 × 10⁵ Earth-equivalent years at 0.1 m a⁻¹
-   of runoff. These readings were made from the papers by a research sub-agent of T0.b; Howard 2007
-   itself (Geomorphology 91, 332) was read only in abstract, and Barnhart et al. stand in for its
-   constants.
+   m = 0.45. The Mars K above reaches that where `effective_flow` × (`runoff` ÷ 1 m a⁻¹)^0.45 ≈
+   7.9 × 10⁴ yr: 2.2 × 10⁵ Earth-equivalent years at 0.1 m a⁻¹, or 1.1 × 10⁴ yr of flow. That is
+   the foot of Hoke et al.'s range, whose times are minimums from transport-limited models with an
+   order of magnitude in grain size alone, and P14.T48.b sets Mars's epoch there. These readings
+   were made from the papers by a research sub-agent of T0.b; Howard 2007 itself (Geomorphology
+   91, 332) was read only in abstract, and Barnhart et al. stand in for its constants.
 
 10. **Coarse craters** (researched 2026-09-29). Craters of D_b and wider are drawn on
     `surface.coarse.crater`: the expected count over the body's area is min(production,
@@ -899,9 +921,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     ages from the last T × N_sat ÷ N_prod of the surface age, inverted through the chronology. That
     window is τ(D), the span a crater of diameter D draws its age from: the whole surface age where
     production is under saturation, and T × N_sat(D) ÷ N_prod(D) where it is capped.
-    Screening is a projectile scale, d\* = 1.5 (P ÷ g) ÷ ρ_p (5.2 m for Earth, 0.52 km for Venus,
-    8.2 cm for Mars, which are the brainstorm's figures and are projectile sizes), giving a crater
-    cutoff D_c = 20 d\* (about 100 m, 10.4 km, 1.6 m) and a taper on the differential production,
+    Screening is a projectile scale, d\* = 1.5 (P ÷ g) ÷ ρ_p (5.2 m for Earth, 0.52 km for Venus
+    and 8.5 cm for Mars at NASA's mean surface pressure of 636 Pa, projectile sizes at ρ_p = 3,000
+    kg m⁻³ and the brainstorm's 5 m, 0.5 km and 8 cm; this note's earlier 8.2 cm for Mars took
+    about 610 Pa, T10's science review, 2026-10-09), giving a crater cutoff D_c = 20 d\* (about
+    100 m, 10.4 km, 1.7 m) and a taper on the differential production,
     f(D) = 1 ÷ (1 + (D_c ÷ D)^4.5), one rule for every body (researched 2026-10-09, by R09.T0.b;
     the first draft's exponent 2 and its break-up branch above 1 MPa, D_c = 20 km with exponent 1.5
     and a floor at 1.5 km, are withdrawn). The check is against Venus's crater catalogue itself, the
@@ -1266,8 +1290,11 @@ decision-r09-t2's follow-up, which edits the same files).
   these worlds use.
 
 - **The shape is frozen only from R09.T19's first send.** R10's and R11's re-validations may add
-  members (a liquid's index, absorption, viscosity and surface tension for R11.T8) under a
-  `SURFACE_PAYLOAD_FORMAT` bump before then.
+  members (a liquid's index, absorption, viscosity and surface tension for R11.T8) before then,
+  re-blessing `tests/golden/wire/` at the current version with neither `SURFACE_PAYLOAD_FORMAT`
+  nor `GENERATOR_VERSION` bumped; from T19's first send a change bumps both (Generator version,
+  the ruling of 2026-10-09, which governs; corrected 2026-10-10 from "under a
+  `SURFACE_PAYLOAD_FORMAT` bump").
 - Tests: the palette's bounds, order and refusals; every synthetic world valid; `SubstanceKey`'s
   grammar (formula, `e-`, name, and rejections).
 - Acceptance: `cargo test -p hyperion-surface field`;
@@ -1365,11 +1392,12 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   0.2 D and 0.84 (D_t ÷ 19 km) D^0.33. Tests: N(>1 km) is the parameter exactly; the function is
   monotone; the
   inversion lands in its octave and its quantiles agree with the density (Kolmogorov–Smirnov over
-  10⁵ draws); the projectile scale d\* is 5.2 m, 0.52 km and 8.2 cm for Earth, Venus and Mars, and
-  the crater cutoffs 20 d\*; Venus's screened counts over its area at N(>1 km) = 3.07 × 10⁻⁴ km⁻²
-  lie within 10% of the Gazetteer's at 3, 5, 10, 20 and 40 km (878, 850, 642, 335 and 104 named
-  craters at or above each, Design note 12); the map at Mars's ratios reproduces Ivanov 2001's
-  Mars function within ×1.5 in N over 1–100 km; D_t gives Pike's Moon and Earth within 10%;
+  10⁵ draws); the projectile scale d\* is 5.2 m, 0.52 km and 8.5 cm for Earth, Venus and Mars (at
+  636 Pa, Design note 12), and the crater cutoffs 20 d\*; Venus's screened counts over its area
+  at N(>1 km) = 3.07 × 10⁻⁴ km⁻² lie within 10% of the Gazetteer's at 3, 5, 10, 20 and 40 km
+  (878, 850, 642, 335 and 104 named craters at or above each, Design note 12); the map at Mars's
+  ratios reproduces Ivanov 2001's Mars function within ×1.5 in N over 1–100 km; D_t gives Pike's
+  Moon and Earth within 10%;
   - _The bowl._ It is 0.20 D deep with a rim of 0.0369 D and a = 1.54 to 10⁻³, within 12% of
     Pike 1980b, Stopar et al., Pike 1988 and Robbins and Hynek's deepest at 1–5 km. On an airless
     Moon its d/D is Stopar et al.'s 0.125, 0.152 and 0.166 at 63, 141 and 283 m.
@@ -1579,21 +1607,37 @@ of the same inputs, with the differences written into this plan. Acceptance:
   average, multigrid to level 4 at six iterations a level with the upsample through T4's
   interpolant; K scaled as Design note 9 says with m = 0.45 and the runoff-weighted area (T0.b's
   erodibility: K⊕ converted from Tzathas et al.'s m = 0.4, linear in g and ρ_f, the bed factor B,
-  runoff once). Tests: a ridge-to-sea profile matches the closed-form steady state; the fixed
-  point's residual falls monotonically over the multigrid levels on the reference Earth; K is 6.3
-  × 10⁻⁶, 2.4 × 10⁻⁵ and 3.1 × 10⁻⁶ m^0.1 a⁻¹ (to 2%) for an Earth's rock under water, a
-  saturated Mars's regolith and a Titan's ice under methane. K's bed factor B comes from a
-  (substrate, fluid) table over the registry's rows, and ρ_f is the liquid's density. The three
-  calibrated cases (rock, saturated regolith, ice under methane) stay its tests
-  (decision-composition).
-- **R09.T14.c The branches and the Mars check.** The wet-now, dry-now and never-wet branches, after
-  T6.b. Tests: the dry-now branch leaves surfaces younger than the epoch's end untouched; a
-  never-wet world's elevation is unchanged by the step; on the reference Mars the coarse erosion
-  volume **plus**
-  the synthesis's expected sub-cell channel incision volume (closed-form per cell from k_s, Hack's
-  law and the network's widths) is at least 1.2 m of global equivalent layer (Luo, Cang and Howard
-  2017's (1.74 ± 0.8) × 10¹⁴ m³ over 1.444 × 10¹⁴ m²), since valley networks 1–10 km wide live
-  mostly below a 38 km cell; the final residual is recorded by a slow test.
+  runoff once). t is `effective_flow`, in Earth-equivalent years at the reference intermittency of
+  5% (Design note 9), and K carries no intermittency factor of its own. Tests: a ridge-to-sea
+  profile matches the closed-form steady state; over a step short enough that slopes barely
+  change, a profile's lowering far from base level is linear in t and in runoff^0.45 (to 1%), and
+  the saturated-regolith K at a uniform 0.1 m a⁻¹ for 2.2 × 10⁵ yr gives K (runoff ÷ 1 m a⁻¹)^0.45
+  t = 1.9 m^0.1 to 2%; the fixed point's residual falls monotonically over the multigrid levels
+  on the reference Earth; K is 6.3 × 10⁻⁶, 2.4 × 10⁻⁵ and 3.1 × 10⁻⁶ m^0.1 a⁻¹ (to 2%) for an
+  Earth's rock under water, a saturated Mars's regolith and a Titan's ice under methane. K's bed
+  factor B comes from a (substrate, fluid) table over the registry's rows, and ρ_f is the
+  liquid's density. The three calibrated cases (rock, saturated regolith, ice under methane) stay
+  its tests (decision-composition).
+- **R09.T14.c The branches and the Mars check.** The wet-now, dry-now and never-wet branches,
+  after T6.b. On the dry-now branch the drainage area is weighted by the epoch's `runoff`,
+  uniform over the cells.
+  - _Tests:_
+    - The dry-now branch leaves surfaces younger than the epoch's end untouched.
+    - A never-wet world's elevation is unchanged by the step.
+    - The reference Mars's wet epoch is `effective_flow` 2.2 × 10⁵ yr at `runoff` 0.1 m a⁻¹ (K t =
+      1.9 m^0.1, Black et al. 2017's; the foot of Hoke, Hynek and Tucker 2011's 10⁵–10⁸ yr, Design
+      note 9).
+    - On it the coarse erosion volume **plus** the synthesis's expected sub-cell channel incision
+      volume (closed-form per cell from k_s, Hack's law and the network's widths) is at least
+      1.2 m of global equivalent layer (Luo, Cang and Howard 2017's (1.74 ± 0.8) × 10¹⁴ m³ over
+      1.444 × 10¹⁴ m²), since valley networks 1–10 km wide live mostly below a 38 km cell.
+    - The coarse lowering is bounded above by the valleys' cross-sections (incision × valley
+      width ÷ cell width, with Black et al.'s 50–350 m of trunk incision and the network's widths;
+      at most about 92 m on a 38 km cell holding a 10 km trunk). Over Hoke et al.'s three decades
+      a floor alone would pass any over-erosion.
+    - A slow test records the final residual, the cell-mean lowering against a fine-grid run of
+      one basin, and the volume at the window's extremes, 10⁵ yr at 0.073 m a⁻¹ and 10⁸ yr at
+      1.10 m a⁻¹.
 - **R09.T14.d Rescale and outputs.** σ_h re-matched on the reconstructed field, lapse and mean
   re-applied, k_s, flow directions and water surfaces. Tests: σ_h and the mean temperature again
   match; lakes are level.
@@ -1878,13 +1922,20 @@ re-blessing this plan's payload and coarse goldens in that commit.
   - _Erosion at the coarse cell._ At 36–40 km every cell carries a trunk channel (A ≥ 1.3 × 10⁹
     m²), so the transient solver lowers a whole cell at the trunk's rate, and T14.c's Mars volume
     (at least 1.2 m of global layer) could pass by over-erosion (about 100 m a cell at K t ≈ 1.7,
-    the sub-agent's estimate). Lean: T14.c also bounds the coarse volume from valley cross-sections
-    (incision × valley width ÷ cell width), and records the cell-mean lowering against a fine-grid
-    run of one basin. Howard 2007, Hergarten 2021 and Burr et al. 2006 were not read in full;
+    the sub-agent's estimate). Ruled 2026-10-10 (science-hoke.md): T14.c bounds the coarse
+    lowering from valley cross-sections (incision × valley width ÷ cell width, at most about 92 m
+    on a 38 km cell), and records the cell-mean lowering against a fine-grid run of one basin; the
+    estimate of about 100 m a cell at the calibrated K t sits at that ceiling, so the check may
+    fail and is meant to. Howard 2007, Hergarten 2021 and Burr et al. 2006 were not read in full;
     Barnhart et al. 2009 stand in for Howard's constants.
-  - _Plan 14's wet epoch._ P14.T48.b's "10⁵ to 10⁷ years of active flow (Hoke and Hynek 2009; …)"
-    was Hoke, Hynek and Tucker 2011's elapsed time at Earth-like arid runoff; T0.b corrected the
-    Phase K draft with `effective_flow`'s definition (Design note 9).
+  - _Plan 14's wet epoch._ P14.T48.b's "10⁵ to 10⁷ years … against 200–5,000 yr of continuous
+    flow" and its "arid-to-semiarid Earth's" reference misdescribed Hoke, Hynek and Tucker 2011,
+    whose times assume storms flowing 5% of the time, "as is typical for Earth", and whose
+    200–5,000 yr is continuous hurricane-scale flow they reject. Ruled 2026-10-10
+    (science-hoke.md): the reference is 5%; `effective_flow` is a point's flow time over 0.05,
+    not the span; `WetEpoch` gains `runoff`; Mars is 2.2 × 10⁵ yr at 0.1 m a⁻¹ (Design note 9).
+    Howard 2007 and Barnhart et al. 2009's full text were not read for it; Barnhart's 2% is
+    DELIM's own clock.
 - **The survey stand-in.** `survey_pass` lets a client grant its ship coverage, as the server
   grants detail levels today. It is a discipline for an honest client, and the sensors plan
   replaces the caller, not the core.
@@ -2320,7 +2371,8 @@ re-blessing this plan's payload and coarse goldens in that commit.
       nibble as the species and the share as its presence. R10's and R11's new palette members
       move the layout before T19's first send; whether that bumps `SURFACE_PAYLOAD_FORMAT` (the
       task's text) or re-blesses at the current version (Generator version's ruling, which B
-      followed) is asked of "main".
+      followed) is asked of "main". Answered 2026-10-10: Generator version's rule governs, and
+      the task's text now says so.
 - **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
   goldens on, revisable until then).
   - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the

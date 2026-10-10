@@ -4172,23 +4172,47 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
 
 - **P14.T48.b The volatile history** (with T24.b). `GlobalFigures` gains
-  `wet_epoch: Option<WetEpoch>`, `WetEpoch { start, end, effective_flow, paleo_inventory }`: the
-  span over which the surface held liquid, `effective_flow` the epoch in Earth-equivalent years
-  (its length scaled by its flood frequency relative to an arid-to-semiarid Earth's, since R09's
-  erodibility is a long-term terrestrial calibration that already holds Earth's intermittency;
-  R09's stream-power solver's t; corrected by R09.T0.b on 2026-10-09 from "years at effective
-  discharge", which would run Mars's epoch about fifty times too short), and
-  `paleo_inventory` the liquid inventory then, which R09 places as a paleo-sea by this plan's own
-  logistic of inventory over basin capacity or spreads through closed basins. A world wet now has
-  an epoch to the present, and one never wet has none. The history also says whether the world
-  reached its present state from a colder one, which T48.d's ice belt reads. Mars's valley networks
-  formed within a few hundred million years around 3.7 Ga (Hoke and Hynek 2009; Luo, Cang and Howard
-  2017), in 10⁵ to 10⁷ years "with runoff rates similar to intense storms in arid regions on Earth"
-  (Hoke, Hynek and Tucker 2011, EPSL 312, 1), which is Earth-equivalent time, against 200–5,000 yr
-  of continuous flow. How the epoch is derived from T12's flux and T13's inventory and escape over
-  time is this plan's to set.
-  - _Tests:_ Earth's epoch runs to the present; Mars's ends before 3 Ga with `effective_flow` within
-    10⁵–10⁷ yr; the Moon and Mercury have none.
+  `wet_epoch: Option<WetEpoch>`, `WetEpoch { start, end, effective_flow, runoff, paleo_inventory }`.
+  `start` and `end` bound the span over which the surface held liquid. `effective_flow` is R09's
+  stream-power solver's t, in Earth-equivalent years: the time channel-forming flow ran at a
+  typical point of the surface over the epoch, divided by Earth's reference flood intermittency
+  `REFERENCE_FLOOD_INTERMITTENCY` = 0.05. That is the share of the time an Earth river's
+  channel-forming flows run (Kleinhans 2005, JGR 110, E12003, ¶62, after Parker; Hoke, Hynek and
+  Tucker 2011, Table 3 note b, after Wolman and Miller 1960), and R09's erodibility, a long-term
+  terrestrial calibration, already holds it. `runoff` is the epoch's runoff in m a⁻¹ at the same
+  intermittency, its channel-forming storms' runoff while they flow times 0.05; it weights R09's
+  drainage area on a world dry now, since erosion depends on both. Where the epoch's own
+  intermittency is not modelled it is taken as the reference's, so `effective_flow` is the length
+  of a point's wet episode and `runoff` its mean annual runoff. It is the time at a point, not
+  the span scaled by a flood frequency. Mars's networks formed region by region, "each lasting
+  10⁵–10⁷ years, over the 10⁸ years of valley formation" (Hoke et al. 2011, §4), so the span
+  would overstate it a hundredfold or more. `paleo_inventory` is the liquid inventory then,
+  which R09 places as a paleo-sea by this plan's own logistic of inventory over basin capacity,
+  or spreads through closed basins. Corrected by R09.T0.b on 2026-10-09 from "years at effective
+  discharge", which would run Mars's epoch twenty times too short, and on 2026-10-10 by
+  science-hoke.md (the reference, the point and the runoff). A world wet now has an epoch to the
+  present, and one never wet has none. The history also says whether the world reached its
+  present state from a colder one, which T48.d's ice belt reads. Mars's valley networks formed
+  within a few hundred million years around 3.7 Ga (Hoke and Hynek 2009; Luo, Cang and Howard
+  2017). "With runoff rates similar to intense storms in arid regions on Earth", and storms
+  flowing 5% of the time, "as is typical for Earth", their minimum formation times are 10⁵ to
+  10⁷ years, and 10⁵ to 10⁸ for the shallower flows the authors prefer, at storm runoffs of
+  0.4–6 cm a day (Hoke, Hynek and Tucker 2011, EPSL 312, 1, §3 and Table 3). Since they assume
+  the reference intermittency, these are `effective_flow` as they stand, 5 × 10³ to 5 × 10⁶ yr
+  of flow, at a `runoff` of 0.07–1.1 m a⁻¹. Only continuous flows of hurricane scale, which the
+  authors do not prefer, would form them in 200–5,000 years. Their times are minimums from
+  transport-limited models. R09's erodibility reproduces Mars's 50–350 m of trunk incision
+  (K t ≈ 1.9 m^0.1, Black et al. 2017; R09 Design note 9) where `effective_flow` × (`runoff` ÷
+  1 m a⁻¹)^0.45 is about 8 × 10⁴ yr, at the foot of that range, so Mars's epoch is
+  2.2 × 10⁵ yr at 0.1 m a⁻¹, where the two agree. How the epoch is derived from T12's flux and
+  T13's inventory and escape over time is this plan's to set.
+  - _Tests:_
+    - Earth's epoch runs to the present.
+    - Mars's epoch ends before 3 Ga, with `effective_flow` within 10⁵–10⁸ yr, `runoff` within
+      0.07–1.1 m a⁻¹, and `effective_flow` × (`runoff` ÷ 1 m a⁻¹)^0.45 within 4 × 10⁴ to
+      1.6 × 10⁵ yr (R09's m = 0.45; Black et al.'s K t within a factor of two).
+    - `REFERENCE_FLOOD_INTERMITTENCY` is 0.05.
+    - The Moon and Mercury have none.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
 - **P14.T48.c The crater contract** (amends T24.b's crater density). T24.b's N(>1 km) per km², by
   the lunar chronology with its belt scaling, is published as the production at the surface age
@@ -4214,9 +4238,11 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     only, with Wordsworth's (2015, his eq. 43) CO₂ collapse pressure as its thin end, for pure CO₂
     between 1 and 10 M⊕ only.
   - _Forcing_, from the locking state, the solar day and the obliquity: the slow-rotator onset rises
-    with flux, a solar day of 16 d at 1.4 S⊕ to 48 d at 1.9 S⊕ (Yang et al. 2014, Table 1), not one
-    number; an equatorial ice belt at obliquities of 54–126° (53.9°, recomputed) is decided with
-    T48.b's history, since Kilic et al. 2018's belt is reached only from a colder state.
+    with flux, not one number. Yang et al. 2014's Table 1 brackets it between sidereal rotation
+    periods of 8 and 16 d at 1.40 S⊕ and of 32 and 48 d at 1.92 S⊕, at an orbital period of
+    225 d: sidereal periods, not solar days (R09.T10's science review, 2026-10-09). An equatorial
+    ice belt at obliquities of 54–126° (53.9°, recomputed) is decided with T48.b's history, since
+    Kilic et al. 2018's belt is reached only from a colder state.
   - _Condensable_, a `SubstanceId`: the most massive of the registry's condensables that the
     inventory holds and whose phase changes inside the climate's range, found by a loop over
     T49.a's condensable rows in registry order (water, CO₂, N₂, Ar and CH₄ today; any later row
@@ -4228,8 +4254,9 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   zonal temperature crosses freezing alone.
   - _Tests:_ Earth takes the seasonal energy-balance model with water, Venus the isothermal surface
     and the Moon radiative equilibrium; a locked temperate world takes the body-fixed model; the
-    slow-rotator onset follows Yang et al.'s Table 1 at 1.4 and 1.9 S⊕; a 90°-obliquity world
-    started cold has an equatorial belt and one started warm has none.
+    slow-rotator onset lies inside Yang et al.'s Table 1 brackets at 1.40 and 1.92 S⊕, in sidereal
+    rotation period at their 225 d orbit; a 90°-obliquity world started cold has an equatorial
+    belt and one started warm has none.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`.
 
 - **P14.T48.e Signed contrasts and the surface section** (amends T24.a; with T35). T24.a's
@@ -4280,13 +4307,17 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     every class, and `has_solid_surface()` holds exactly when `Datum::of` is `SolidSurface`. On the
     golden systems: a present planet's surface is `Ok` iff `has_solid_surface()`; no `Ok` surface
     has the state `GasEnvelope`; its envelope is `NotModelled` iff it has no solid surface and
-    `NotApplicable` otherwise; and `degrade` withholds the envelope below `Surface`.
+    `NotApplicable` otherwise; and `degrade` withholds the envelope below `Surface`. R09's
+    `CoarseInputs::for_body` answers `SurfaceInputsError::NoSolidSurface` on a generated
+    sub-Neptune, beside R09.T10's generated gas giant: R09.T10 landed first, so the sub-Neptune's
+    test is this subtask's (decision-p14-t35e-wire §2.4).
   - _Files:_ `planetary/hooks/surface.rs`, `planetary/record.rs`,
-    `planetary/derive/{mod, rotation, figure}.rs`, `planetary/system/tests.rs` and
+    `planetary/derive/{mod, rotation, figure}.rs`, `planetary/system/tests.rs`,
+    `planetary/surface/inputs.rs` (the sub-Neptune's test) and
     `crates/hyperion-server/src/convert/planetary.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`;
     `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-sim planetary::derive`;
-    `cargo test -p hyperion-server convert`.
+    `cargo test -p hyperion-sim planetary::surface`; `cargo test -p hyperion-server convert`.
 
 #### Open questions of Phase K, for the owner (R09's leans)
 
