@@ -2579,10 +2579,11 @@ re-blessing this plan's payload and coarse goldens in that commit.
   - _Keys._ `SubstanceRef` is gone: every substance of the inputs is follow-up B's `SubstanceKey`,
     valid by construction, so `BuildCoarseInputsError::SubstanceKey` is gone too and `build` checks
     no key. The sorted lists still break ties by key, which orders as its string, so no order
-    moved. P14.T49.a's `SubstanceId`, being built in another lane, is not used. _Dependency for
-    P14.T54.a_, which owns `planetary/surface/inputs.rs`: it turns the record's `SubstanceId`s into
-    their rows' keys, or moves these inputs onto `SubstanceId` (ties by id, P14.T24.a's) with the
-    palette's keys resolved from the rows.
+    moved. P14.T49.a's `SubstanceId` (`hyperion_sim::substance`, landed as `844888c5` after this
+    task was built) is not used. _Dependency for P14.T54.a_, which owns
+    `planetary/surface/inputs.rs`: it turns the record's `SubstanceId`s into their rows' keys
+    (`id.substance().key()`), or moves these inputs onto `SubstanceId` (ties by id, P14.T24.a's) with
+    the palette's keys resolved from the rows.
   - _The palette._ `CoarseInputsBuilder::palette(MaterialPalette)` is required (`Missing("palette")`),
     its entries' values resolved as the server will resolve them from P14.T49.b–c's rows. The
     deposits are its `Deposit` entries (a Mars's `mars_dust`, a Ceres's `Na2CO3`), with no list of
