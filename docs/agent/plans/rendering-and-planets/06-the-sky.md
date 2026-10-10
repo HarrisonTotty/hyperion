@@ -629,7 +629,9 @@ holds.
    L(μ′), which is conservative and, since B_equiv rises with B, closed-form: for B_equiv in
    0.0216–0.0649 cd/m² the limit is 5.2446 − 2.5 log₁₀(F ÷ 1.4) (researched 2026-09-29, high
    confidence on the numbers, medium-high that the dip is an artefact). So the limit is 5.24 at μ
-   16.5 and 5.25 at 17.5, where the brainstorm has 5.3 for both.
+   16.5 and 5.25 at 17.5, where the brainstorm had 5.3 for both. _Resolved 2026-10-09 (the
+   brainstorm sign-off, `signoff-brainstorm.md`, rows 625–628): the brainstorm's threshold table
+   now reads 5.24 at μ 16.5 and 5.25 at 17.5, eq. 34 from μ 15 to 25._
    Eq. 34 is written without F in the paper and takes it as eq. 53 does, so F moves every limit by
    exactly −2.5 log₁₀ F; the client applies a field factor other than the request's as that offset.
    Eq. 34 has no absolute threshold: as B → 0, ΔI tends to F(√a₁ + a₄)² B^½ and the limit
@@ -646,6 +648,9 @@ holds.
    in mesopic backgrounds (the research agent's construction, not Crumey's: under 0.03 mag of
    difference between μ 16 and 19). ρ comes from real spectra, not from B − V through eq. 18,
    which gives an M dwarf about 0.2–0.3 mag where the blackbody gives the brainstorm's 0.3–0.4.
+   _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 630): the
+   brainstorm now says "a blackbody's ratio (Crumey eq. 7) gives an M star about 0.3–0.4 mag and
+   an O star about 0.4, and Crumey's eq. 18 through B − V about 0.2–0.3 and 0.26"._
 4. **Glare from resolved stars** (researched 2026-09-29; CIE 146:2002 general disability glare via
    Vos 2003; Adrian 1989 as Crumey's "standard way"). L_veil = E [10 ÷ θ³ + (5 ÷ θ² + 0.1 p ÷ θ)(1 +
    (A ÷ 62.5)⁴) + 0.0025 p], θ in degrees clamped at 0.1°, summed over every listed star within
@@ -740,7 +745,9 @@ holds.
    computes, not from a luminosity-class guess, and the grid is chosen by the star's kind. That
    departs from the brainstorm's "the gravity from the brief's luminosity class": the brief has no
    gravity, and plan 06's mass and radius give it exactly, so the roadmap's corrections should carry
-   it.
+   it. _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 632):_ the
+   brainstorm now takes "the gravity from the star's own mass and radius, which plan 06 computes
+   (the brief has no luminosity class)".
 7. **The cumulative luminosity function.** For each density component (which fixes the age
    distribution; a population's is the sum) and each layer: per system, the V light of stars fainter
    than M_V, and the number brighter, primaries and companions both, as a table in M_V from −12 to
@@ -797,7 +804,11 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    component over the cell's light-time interval, would pass every C–E record near the Sun, before
    and after T16.b. Any system at or above its turnoff mass can hold a companion at the turnoff,
    whose giant branches the envelope's running maximum holds: M_V −5.7 to −6.8 at 1–10 Gyr in the
-   fitted table. So it is not taken, and the departure above needs no ruling. From R06.T8.g the
+   fitted table. So it is not taken, and the departure above needs no ruling. _Resolved 2026-10-09
+   (the brainstorm sign-off, `signoff-brainstorm.md`, row 635):_ open question 13 now says "Age
+   enters only through that mass floor" and that "a per-candidate age test would need the
+   component, which needs the density the skip avoids, and near the Sun it would pass every record
+   of layers C to E anyway". From R06.T8.g the
    per-record bound is star by star (Design note 10). `max_star_mass` stays for the cell floor.
 9. **Caps, derived.** Each layer's radius is the least beyond which its expected number of stars
    brighter than the cut falls below one, from its luminosity function (whose counts take
@@ -1194,7 +1205,10 @@ surface_gravity, StarColour, AtmosphereGrid}`, bilinear in log T_eff and log g w
   G2V, K5V, M2V, K0III and M3III, integrated by the same code, lie within Δ(u′, v′) < 0.005 of the
   table at their types' T_eff and log g; an M dwarf's chroma is less red than its blackbody's by
   0.01–0.02 in uv (the brainstorm's figure, re-checked); lux per V0 is 1 within 0.08 mag from O5 to
-  M6 (Pickles against CIE 1924, as the brainstorm states). Files: `tables/{star_colour,mod}.rs`,
+  M6 (Pickles against CIE 1924, as the brainstorm stated). _Corrected as built (Risks, "Corrected
+  figures") and in the brainstorm 2026-10-09 (the brainstorm sign-off, row 633):_ the
+  brainstorm now says a V = 0 star's photopic illuminance "departs from 2.54 µlx by 0 to 0.10 mag
+  from O5 to M6", and the test holds |m| < 0.11. Files: `tables/{star_colour,mod}.rs`,
   `sky/colour.rs`, `crates/hyperion-fit/tables.lock`. Acceptance: `cargo test -p hyperion-sim
 sky::colour` and `just fit-check`.
 - **R06.T3.c The camera, reddening and bake columns.** The default sensor's response for
@@ -3501,7 +3515,8 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   decides whether the remedy is due. _Ruled 2026-10-05 (`decision-r06-census-cost.md`): the age
   skip would pass every C–E record near the Sun, so it is not built, and the departure needs no
   ruling (Design note 8). T8.f made the floor O(1), T8.g bounds each star, and T8.h keys the cache
-  by magnitude._
+  by magnitude. The brainstorm's open question 13 says so since 2026-10-09 (the brainstorm
+  sign-off, row 635), so no departure remains._
 - **Extinction per candidate.** Each star that passes the skip takes one `sightline`. Plan 07's
   noise is log-normal with no floor, so no cheaper exact lower bound exists; in the nuclear disc,
   where the zero-extinction test passes almost everything, this may dominate. A per-direction

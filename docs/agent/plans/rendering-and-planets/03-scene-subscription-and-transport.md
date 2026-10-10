@@ -369,7 +369,11 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    a craft, about 0.25 MB/s for 100 bodies and 10 craft (Runtime and code shape), are re-measured by
    R03.T15: plan 14's `BodySummaryDto` with its `bulk` section is larger than a bare `BodyOrbitDto`,
    perhaps 700–900 bytes, which changes the arrival's size and not the rate, since bodies are pushed
-   only on change. The state leaves room for R07's camera field (`main_screen`) and R09's
+   only on change. _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row
+   610):_ the brainstorm now takes R03.T15's measured sizes, "about 0.4 kB at the least detail
+   level, 0.8–0.9 kB with its mass and orbit and 1.1 kB with its bulk section (measured)", and
+   0.252 MB/s for ten craft at 64 Hz.
+   The state leaves room for R07's camera field (`main_screen`) and R09's
    `surface_revisions` (a revision per body), each an optional field added by its plan, which moves
    no version. _R09's field, drafted by R09.T0.a (2026-10-09) for this plan's owner, not yet
    accepted:_ `surface_revisions: Option<Vec<SurfaceRevisionDto>>` on `SceneNotificationDto`, with
@@ -412,7 +416,9 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    was written, as R09.T0.a confirmed on 2026-10-09). Poses are
    neither saved nor echoed to other subscriptions.
 7. **Drawn positions are the ship's apparent positions, computed on the client from the elements**
-   (researched 2026-09-29). The observer enters only at reception: τ solves |x_B(t − τ) − x_o(t)| =
+   (researched 2026-09-29; the brainstorm's words quoted below are its text before the sign-off of
+   2026-10-09, which took this note's reading, as the note's last paragraph records). The observer
+   enters only at reception: τ solves |x_B(t − τ) − x_o(t)| =
    c τ, and aberration uses the observer's velocity at reception, v_o(t). The brainstorm's
    x_B(t − τ) − x_cam(t − τ) equals this only for an observer moving uniformly; for one that
    accelerates, as a ship in orbit does, the two differ by ½ a τ², an angle of a τ ÷ 2c, 1.5 × 10⁻⁵
@@ -525,6 +531,17 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    be a bug to fix rather than a bound to widen. The coefficient 10⁻¹⁴ is of medium confidence and
    that measurement settles it.
 
+   _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, rows 595–599):_ the
+   brainstorm now says what this note does. It draws "each body at x_B(t − τ) − x_ship(t), the
+   body's position at the retarded time less the ship's position at reception", aberrated "by the
+   ship's velocity at t"; "The observer is the ship, never the camera"; the ship's local body is
+   drawn geometrically, and "A free camera's own local body, if it is another, is drawn apparent
+   like every other body"; a source moving with the ship and the ship "combine exactly into their
+   rest-frame separation"; the 10 m is the cost of drawing the local body apparent, "in any frame,
+   while light time alone moves it by nothing in the body frame and by about 40 m in the system
+   frame"; and the solve stops "within a cap of ten corrections", so that "SPICE's converged
+   'CN+S' correction, three iterations for Solar System speeds, is not enough".
+
 8. **The in-system functions are built here, in plan 12's module; velocities are asked of plans 14
    and 11.** Plan 12 has no task for `SystemTrajectory` or `retarded_in_system`, and plan 14 none
    for a body's velocity, so this plan builds the first two in `observe/in_system.rs` beside plan
@@ -619,7 +636,10 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     receives only text frames of the existing types. This is the plan's ruling on a question the
     brainstorm left open; it reverses if either message is ever sent unasked. The ruling is a
     brainstorm revision like the README's corrections, drafted for the owner's revision pass by
-    R03.T1.
+    R03.T1. _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, open question
+    21):_ applied as drafted. Open question 21 now reads "**Closed: no bump.**", and Runtime and
+    code shape says the first `notification` message and the first binary frames leave
+    `PROTOCOL_VERSION` at 2, "which a client receives only when it asks for them".
 13. **Knowledge as a seam, a level per body.** The scene is built through a `SceneKnowledge`
     trait: the level granted for each body and the craft that are contacts. Production uses
     `GrantAsked`, the level asked for every body and no craft, as plan 14's handlers grant today;
@@ -720,7 +740,8 @@ Tests:
   cos θ′ = (cos θ + β) ÷ (1 + β cos θ), to 10⁻¹²; at 30 km/s the result equals the first-order
   r + v_o τ to within β² ÷ 4 in direction.
 - An observer on a circular orbit (a ≈ 8.7 m/s²) seeing a body about 2 au away differs from the
-  brainstorm's x_B(t − τ) − x_o(t − τ) by an angle of a τ ÷ 2c to 10%.
+  brainstorm's former x_B(t − τ) − x_o(t − τ) (replaced on 2026-10-09, Design note 7) by an angle
+  of a τ ÷ 2c to 10%.
 - The brainstorm's figure, reworded (Design note 7): a body at rest and an observer 400 km away moving
   at 7.7 km/s across the line of sight: the light-time point is not displaced and the apparent point
   is displaced 10.27 ± 0.01 m along the observer's velocity; adding the same 30 km/s to both leaves
@@ -1267,8 +1288,9 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   gets `unsupported`. `subscription_ended` needs no bump either: like a notification, it is sent
   only on a subscription the client opened. `PROTOCOL_VERSION` stays 2 while none of these is ever
   sent unasked; a test pins it (plan R03, Design note 12)." The owner signs off. _Closure decided
-  2026-09-30 by a delegated decision (protocol item 3), with the `subscription_ended` sentence; the
-  brainstorm edit itself waits for its revision pass._
+  2026-09-30 by a delegated decision (protocol item 3), with the `subscription_ended` sentence.
+  Applied to the brainstorm 2026-10-09 as drafted (the brainstorm sign-off,
+  `signoff-brainstorm.md`)._
 - **Deviations in T2, as built.** `BuildSystemObserverError` gains `NotSlowerThanLight`: the
   Lorentz factor needs |v_o| < c. `InSystemRetardation::residual` is the last correction's change
   |τₖ − τₖ₋₁|: at most 1 ns when converged, above it only where the noise rule stopped the

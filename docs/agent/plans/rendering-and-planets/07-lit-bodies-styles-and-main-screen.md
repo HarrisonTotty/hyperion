@@ -877,9 +877,18 @@ and `--port`.
    shadow cones and are usually empty. At 1 au the soft terminator is 59.3 km wide on an Earth-sized
    body and lies below 0.5% of peak irradiance, black under a day-side exposure. Mandel and Agol
    2002 and Agol, Luger and Foreman-Mackey 2020 are the `f64` oracles' cross-checks; Maxted and Gill
-   2019's qpower2 is validated only below a radius ratio of 0.2 and is not used.
+   2019's qpower2 is validated only below a radius ratio of 0.2 and is not used. _Resolved
+   2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 622): the brainstorm's
+   "sampled at a handful of points" is gone. It now says "Visibility sampled at a handful of points
+   across the disc would be 13–26% wrong for small occluders at four to eight samples, and would
+   band. Instead a lit point's visibility is the product of two closed forms", Howell's horizon
+   and the annuli "each eclipsed by an exact circle–circle overlap, which never bands"._
 7. **Planetshine is included** (researched 2026-09-29; figures computed from Design note 5's
-   albedos). The brainstorm does not mention it; the realism ruling decides. It is the dominant
+   albedos). The brainstorm did not mention it; the realism ruling decides. _Resolved 2026-10-09
+   (the brainstorm sign-off, `signoff-brainstorm.md`, row 624): the brainstorm now says
+   "**Planetshine** is the dominant light on a moon's night side: earthshine on the Moon at full
+   Earth is about 8 lx, some 3 × 10⁴ times the integrated starlight, and Jupiter-shine on Io about
+   70 lx"._ It is the dominant
    night-side light of every moon: earthshine on the Moon at full Earth is about 8 lx (7.7 lx with
    the `earth` template, Robinson 2026's fit; 8.1 lx at his physical model's p;
    decision-r07-earth-albedo), 14 stops below sunlight but some 3 × 10⁴ times the integrated
@@ -1016,7 +1025,10 @@ and `--port`.
     sampling, so the guide's flash limit holds.
 13. **The tone-mapping pass encodes and dithers** (researched 2026-09-29; probes on the UHD 620).
     AgX's formed image spans 16.5 stops, −10 to +6.5 about 0.18, about 9.2 below and 7.3 above the
-    metered average; the brainstorm's "roughly 25 stops" is AgX Log's encoding. The canvas is
+    metered average; the brainstorm's "roughly 25 stops" is AgX Log's encoding. _Resolved
+    2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 617): the brainstorm now says
+    "a frame's formed image spans about 16.5 stops around its metered exposure, from 10 below AgX's
+    middle grey to 6.5 above it (AgX's log encoding spans some 25)"._ The canvas is
     `rgba8unorm`, `getPreferredCanvasFormat()` on the probed UHD 620, written through a non-sRGB
     view with the encoding in the pass, so that the dither is applied in the encoded domain:
     triangular (TPDF) noise of ±1 LSB from a static blue-noise tile, never animated. Whether
@@ -1135,9 +1147,14 @@ and `--port`.
     over one tick: about 60 ms typical and 102 ms worst with a game-mode display, the worst 16.7 ms
     more for a gamepad (about 119 ms), which the Gamepad API polls only on animation frames. The
     requirement is therefore met typically and at the 95th percentile T28 records, not in the worst
-    case, which T28 records as a finding against 100 ms (Risks). This departs from the brainstorm's
+    case, which T28 records as a finding against 100 ms (Risks). This departed from the brainstorm's
     "the main screen interpolates between poses" (notes), is safe because the camera is presentation
-    only, and keeps interpolation as the fallback R07.T28 compares. Only the flyer has a control
+    only, and keeps interpolation as the fallback R07.T28 compares. _Resolved 2026-10-09 (the
+    brainstorm sign-off, `signoff-brainstorm.md`, rows 608 and 609): the brainstorm now leans to
+    extrapolation, "The main screen extrapolates the pose from the last one and its angular and
+    linear rates, blending each correction over one tick", with interpolation "the fallback a
+    measurement compares", and counts the 100 ms "to the display of the result as MIL-STD-1472H
+    counts it (§5.12.1.4.1.1), the display device included"._ Only the flyer has a control
     loop, so the flying station also draws a local predicted view of the camera, integrated from its
     own input at display rate, whose loop is some 30–50 ms. Since the camera is ship state and the
     guide forbids showing it as if the ship had obeyed, that view is labelled `PREDICTED` in its
@@ -3159,8 +3176,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
 - **The main screen is gated** on a plan that does not exist. Its task list is written against the
   brainstorm and will be re-fitted (T22–T28 each begin so); the sessions plan may choose a command
   envelope that reshapes `MainScreenCommand`, and must accept input sent on change.
-- **Extrapolating the main screen's camera** departs from the brainstorm's interpolation (Design
-  note 22); T28 compares both, and the owner may keep interpolation at the cost of about 16 ms.
+- _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 609): no longer a
+  departure._ **Extrapolating the main screen's camera** departed from the brainstorm's
+  interpolation (Design note 22). The brainstorm now leans to extrapolation, with interpolation
+  "the fallback a measurement compares"; T28 still compares both, and its record may keep
+  interpolation at the cost of about 16 ms.
 - **The loop's worst case** is about 102 ms with a keyboard and 119 ms with a gamepad against the
   100 ms requirement (Design note 22). If T28's record confirms it, the cuts in order are the render
   and present term (25–33 ms, through the main screen's internal scale) and the animation-frame

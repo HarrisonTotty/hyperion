@@ -135,8 +135,8 @@ pub fn vertex_spacing(radius_m: f64, level: u8) -> SpacingRange;   // min, mean,
 pub struct Spheroid { pub equatorial_radius_m: f64, pub polar_radius_m: f64 }  // the datum, DN 5
 pub struct TestPlanet { /* figure: Spheroid, seed, octave table (DN 12), rotation (DN 14) */ }
 pub const TEST_PLANET: TestPlanet;                          // WGS 84's figure, hand-parameterised
-// HeightSample and LatticeCache move to `hyperion_surface::height` in R09.T4, and `test_planet`
-// re-exports them from there
+// R09.T4 moved only HeightSample, to `hyperion_surface::height`, and `test_planet` re-exports it
+// from there; LatticeCache already lived in `noise`, which `test_planet` re-exports it from
 pub struct HeightSample { pub height_m: f64, pub gradient: [f64; 3] }  // above the spheroid, DN 5
 pub struct LatticeCache { /* per bake, keyed by u64 lattice keys, order-independent */ }
 impl TestPlanet {
@@ -3809,9 +3809,10 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   module is caught when the test planet changes; `Octave::new` refuses a rotation that is not
   orthonormal; `Spheroid::sphere` refuses a non-positive radius; `HeightSource::Error` is bounded
   by `std::error::Error + Send + Sync`; `test_planet` re-exports `LatticeCache` (its home is
-  `noise`), the path R09.T4 moves it from; `spheroid` also carries P14.T46.e's
-  `from_volumetric`, `flattening`, `volumetric_radius_m` and `BuildSpheroidError`, written by this
-  lane to the API the orchestrator gave (P14.T46.e adds no second copy). The `FaceDifferences`
+  `noise`, where it stays: R09.T4 moved only `HeightSample`, corrected 2026-10-09); `spheroid` also
+  carries P14.T46.e's `from_volumetric`, `flattening`, `volumetric_radius_m` and
+  `BuildSpheroidError`, written by this lane to the API the orchestrator gave (P14.T46.e adds no
+  second copy). The `FaceDifferences`
   formula forms a face-edge vertex from its own face's (u, v), not the canonical face's (an ulp
   the skirts cover), and `vertex_f32.golden` prints vertices x, y ∈ {0, 1, 31, 32, 33, 63, 64} of
   each patch. T3.c's quiet-machine bench is re-measured in a quiet window the orchestrator

@@ -81,6 +81,11 @@ In scope:
 - Gas giants inside the 10⁹ m boundary, and the `DiscReflectanceTable` that R07's analytic disc
   reads beyond it for a body with an atmosphere, with the read path in R07's `bodyDisc.wgsl`
   (R08.T16.b edits R07's shader, as R08.T6 edits R05's).
+- Thermal emission (R08.T18; decision-composition): the medium's own source term, and the ground's
+  emission on R07's disc and, through the same function, on R10's terrain, wherever it exceeds
+  10⁻⁶ of the reflected radiance in some channel, so that a lava world's night side is lit by
+  itself and an ultra-hot giant's dayside glows (the brainstorm's "Atmosphere", signed off
+  2026-10-09).
 - The low setting, and this plan's own benchmarks, recorded.
 - The view's atmosphere labels (R08.T2; signed off 2026-10-09 by the sign-off agent, owner's
   delegation).
@@ -91,10 +96,9 @@ Non-goals:
   of this plan's split is an optical boundary, not a drawn layer.
 - Oceans, glint and rings (R11); the sky's stars, band and the local star's disc (R06), which this
   plan only attenuates; lit surface shading and the tone-mapping pass (R07).
-- Refraction of rays, scintillation, airglow, aurorae, lightning, night-side thermal emission,
-  and the polarisation state (Q, U, V) of the drawn image. The drawn radiance does include
-  polarisation's effect on it (R08.T14.e–f). The reference tracer's Stokes mode is every
-  gate's reference (Design note 10).
+- Refraction of rays, scintillation, airglow, aurorae, lightning, and the polarisation state
+  (Q, U, V) of the drawn image. The drawn radiance does include polarisation's effect on it
+  (R08.T14.e–f). The reference tracer's Stokes mode is every gate's reference (Design note 10).
 - Drag and the thermosphere. The flight model has no plan. The vertical structure asked of plan 14
   serves it too (Design note 3), and a thermosphere above the render column is the flight model's.
 - Giant cloud bands. No plan generates them (R07's Risks); they are not asked here.
@@ -773,24 +777,31 @@ Names are those the owning plans give; the owning plan is authoritative.
 4. **Rayleigh from each gas's measured dispersion** (researched 2026-09-29, a physics ruling). Every
    gas takes the same route:
    - a measured n − 1 at the formula's own stated temperature and pressure;
-   - Lorentz–Lorenz to that state's number density;
+   - Lorentz–Lorenz to that state's number density, the real gas's N_ref = p ÷ (Z k_B T), with Z
+     from the NIST Chemistry WebBook's densities at the state;
    - σ = 24π³/(λ⁴N²)·((n² − 1)/(n² + 2))²·F_K.
 
-   | Gas     | n − 1                                                                                                   | King factor                                                                       | Reference state      |
-   | ------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------- |
-   | Dry air | Peck and Reeder 1972, JOSA 62, 958 (the Earth check only)                                               | Bates 1984 per gas, mixed after Bodhaine et al. 1999                              | 288.15 K, 101,325 Pa |
-   | N₂      | Peck and Khanna 1966, JOSA 56, 1059; below 468 nm, the Bates 1984 branch that Sneep and Ubachs 2005 use | Bates 1984                                                                        | 288.15 K             |
-   | O₂      | Zhang, Lu and Wang 2008, Appl. Opt. 47, 3143                                                            | Bates 1984                                                                        | 293.15 K             |
-   | Ar      | Peck and Fisher 1964, JOSA 54, 1362                                                                     | 1                                                                                 | 288.15 K             |
-   | CO₂     | Bideau-Mehu et al. 1973                                                                                 | Sneep and Ubachs 2005                                                             | 273.15 K             |
-   | CH₄     | Sneep and Ubachs 2005, JQSRT 92, 293                                                                    | 1                                                                                 | 288.15 K             |
-   | H₂O     | Ciddor 1996, Appl. Opt. 35, 1566, Eq. 3                                                                 | 1.001                                                                             | 293.15 K, 1,333 Pa   |
-   | NH₃     | Cuthbertson and Cuthbertson 1914                                                                        | Hohm 1993, Mol. Phys. 78, 929                                                     | 273.15 K             |
-   | H₂      | Peck and Huang 1977, JOSA 67, 1550                                                                      | Hohm 1993; Dalgarno and Williams 1962, which runs 6.5% low, is only a cross-check | 273.15 K             |
-   | He      | Mansfield and Peck 1969, JOSA 59, 199; Chan and Dalgarno 1965 agrees to 0.4%                            | 1                                                                                 | 273.15 K             |
+   The table is R08.T3.b's as built (updated 2026-10-09; Risks, "Deviations in T3.b, as built",
+   holds each correction's reason and the items still open):
 
-   The formulas' machine-readable copies are refractiveindex.info's (CC0), cited beside each paper.
-   The reference state is read from each primary paper and pinned by a test. Reading Bideau-Mehu's
+   | Gas        | n − 1                                                                                                                                                               | King factor                                                                                                                                                     | Reference state      |
+   | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+   | Dry air    | Peck and Reeder 1972, JOSA 62, 958 (the Earth check only)                                                                                                           | Bates 1984 per gas, mixed after Bodhaine et al. 1999                                                                                                            | 288.15 K             |
+   | N₂         | Peck and Khanna 1966, JOSA 56, 1059, their own 15 °C form, from 468 nm; below it, Bates 1984's ultraviolet branch, as Sneep and Ubachs 2005 (eq. 11) print it       | Bates 1984                                                                                                                                                      | 288.15 K             |
+   | O₂         | Křen 2011, Appl. Opt. 50, 6484, refitting Zhang, Lu and Wang 2008, Appl. Opt. 47, 3143; Zhang's own eq. 20, which holds only over 740–860 nm, the cross-check there | Bates 1984                                                                                                                                                      | 293.15 K             |
+   | Ar         | Peck and Fisher 1964, JOSA 54, 1362                                                                                                                                 | 1                                                                                                                                                               | 288.15 K             |
+   | CO₂        | Bideau-Mehu et al. 1973, Opt. Commun. 9, 432, at 0 °C, as Sneep and Ubachs 2005 (JQSRT 92, 293, eq. 13) correct it                                                  | Sneep and Ubachs 2005, eq. 14 (Alms, Burnham and Flygare 1975)                                                                                                  | 273.15 K             |
+   | CH₄        | He, Fang, Shoshanim, Brown and Rudich 2021, Atmos. Chem. Phys. 21, 14927, eq. 10 (ideal N, so Z = 1)                                                                | 1, a spherical top                                                                                                                                              | 288.15 K             |
+   | H₂O        | Ciddor 1996, Appl. Opt. 35, 1566, Eq. 3                                                                                                                             | 1.001, from Murphy 1977, J. Chem. Phys. 67, 5877 (ρₚ = (3.0 ± 1.4) × 10⁻⁴)                                                                                      | 293.15 K, 1,333 Pa   |
+   | NH₃        | C. and M. Cuthbertson 1914, Phil. Trans. R. Soc. A 213, 1                                                                                                           | 1, provisional, probably about 1% low until Hohm 1994's anisotropy is read                                                                                      | 273.15 K             |
+   | H₂         | Peck and Huang 1977, JOSA 67, 1550                                                                                                                                  | Raj, Hamaguchi and Witek 2018, J. Chem. Phys. 148, 104308, ab initio (1.0322 at 550 nm); Dalgarno and Williams 1962, which runs 6.5% low, is only a cross-check | 273.15 K             |
+   | He         | Mansfield and Peck 1969, JOSA 59, 199; Kurucz 1970's form "from Dalgarno (1962)" (SAO Spec. Rep. 309, §5.8) agrees to 0.5%                                          | 1                                                                                                                                                               | 273.15 K             |
+   | Ne, Kr, Xe | Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay 2008, Appl. Opt. 47, 4856, Sellmeier forms (their Table 2, as refractiveindex.info carries them)                   | 1                                                                                                                                                               | 273.15 K, 1,000 mbar |
+   | N₂O        | He et al. 2021, eq. 9 (ideal N, so Z = 1)                                                                                                                           | Sneep and Ubachs 2005, eq. 19 (Alms et al. 1975)                                                                                                                | 288.15 K             |
+
+   Every state without a pressure is at 101,325 Pa. The formulas' machine-readable copies are
+   refractiveindex.info's (CC0), cited beside each paper; H₂O, CH₄ and N₂O have none. The
+   reference state is read from each primary paper and pinned by a test. Reading Bideau-Mehu's
    CO₂ at 288.15 K instead of 273.15 K raises σ by 11%, a trap three public codes split on.
 
    The mixture has σ_mix = Σxᵢσᵢ and F_mix = Σxᵢσᵢ / Σxᵢ(σᵢ/F_i), with ρ = 6(F − 1)/(3 + 7F) in the

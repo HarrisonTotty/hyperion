@@ -760,6 +760,10 @@ commands in their acceptance lines.
    relaunched client loads a dead `ELECTRON_RENDERER_URL`. In development the `client` recipe
    therefore puts `--ozone-platform=x11` on the command line itself when `XDG_SESSION_TYPE` is
    `wayland`, and the crash-loop relaunch is checked by hand on a built client (T2.b).
+   _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 574):_ the
+   brainstorm now says the switch "cannot be appended" and that "the packaged launcher and
+   `.desktop` entry put it on the real command line, and a Wayland session launched without it
+   relaunches once with it".
 
 4. **Timing is quantized, and one narrow switch lifts it for measurement.** The brainstorm's step 3
    says GPU time per pass is available uncoarsened on Linux under the forced switches. Researched
@@ -772,7 +776,9 @@ commands in their acceptance lines.
    runs of R05 and R12 pass; shipping launches keep the quantization. The main process passes the
    flag on to the preload as `graphics.gpuTiming`, as it passes the safe switch, and
    `GraphicsStatus.timer` states `quantized` or `full`, so a recorded figure says whether its timer
-   was coarse; every `PassTimes` carries the same field.
+   was coarse; every `PassTimes` carries the same field. _Resolved 2026-10-08 (R05.T19, row 581;
+   kept by the brainstorm sign-off of 2026-10-09):_ step 3 now reads "quantised to 65.5 µs unless
+   Dawn's `timestamp_quantization` toggle is disabled, as the measurement runs do".
 
 5. **The safe mode has no WebGPU, and says so.** The brainstorm's declared mode is "without the
    photorealistic style", implying the wireframe survives. Researched 2026-09-29 by probe of eight
@@ -785,7 +791,10 @@ commands in their acceptance lines.
    entered once, that does not pretend to draw), and the notes file reports the difference. It is
    still worth relaunching into rather than leaving Chromium to its own fallback, because the probe
    saw that fallback take the page through an adapter that vanishes after three crashes and software
-   compositing after six, undeclared.
+   compositing after six, undeclared. _Resolved 2026-10-09 (the brainstorm sign-off,
+   `signoff-brainstorm.md`, row 575):_ the brainstorm now relaunches "into a declared safe mode
+   that has no views: without the `Vulkan` feature X11 gives WebGPU no adapter at all, so the
+   consoles stay and every view states the mode instead of a picture".
 
 6. **What a crash loop is.** Researched 2026-09-29 by probe (SIGKILL of the GPU process every 4 s):
    each crash fires `app.on("child-process-gone")` with `type: "GPU"`, then `gpu-info-update`; after
@@ -1214,8 +1223,10 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
       double the bandwidth of a bandwidth-bound GPU for no visible gain" (Luminance in physical
       units). A splat target is a per-arrival bake scratch, held one face at a time and never
       presented or drawn into each frame, so that reason does not reach it. `ColourTargetFormat`
-      and `RenderTargetSpec` still exclude `rgba32float`, and the README should say so beside the
-      brainstorm's Decision ("Light").
+      and `RenderTargetSpec` still exclude `rgba32float`. _Resolved 2026-10-09 (the brainstorm
+      sign-off, `signoff-brainstorm.md`, row 582):_ the reading stands, and the brainstorm's
+      Decision ("Light") now says "`rgba32float` is not used for per-frame colour targets, only
+      for a bake's scratch", as its Luminance paragraph does.
 
 22. **How the adapter rounds a colour write is probed, not assumed.** Asked by R07 (its Design
     note 12). R07's probe of 2026-09-29 found that Gen9's colour-attachment writes round toward
@@ -1888,11 +1899,15 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
 - _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's generated depth texture may lack `COPY_SRC`.** Then an offscreen target makes its own
   `depth32float` (Design note 19, T8.f), and a canvas view's depth is not read back at all; the
   depth checks run on offscreen targets (T9.f).
-- **An `rgba32float` bake target.** R06's splat renders into `rgba32float` (Design note 21), which
-  the brainstorm's Decision ("Light") excludes from colour targets for frame bandwidth. R01 reads
-  the exclusion as covering per-frame targets only and keeps `rgba32float` out of
-  `ColourTargetFormat`; the README should record the reading, or the owner may rule otherwise, in
-  which case R06's compute-splat fallback becomes its only path.
+- _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 582): the reading
+  stands._ **An `rgba32float` bake target.** R06's splat renders into `rgba32float` (Design note
+  21), which the brainstorm's Decision ("Light") excluded from colour targets for frame bandwidth.
+  R01 reads the exclusion as covering per-frame targets only and keeps `rgba32float` out of
+  `ColourTargetFormat`. The brainstorm now says so: "`rgba32float` is not used for per-frame
+  colour targets, only for a bake's scratch" (Decisions, "Light"), and its Luminance paragraph
+  adds that the star splat's face is "held one face at a time while a bake runs and never
+  presented, which the bandwidth reason does not reach". R06's compute splat stays the fallback
+  for an adapter without `float32-blendable`.
 - **Relaunch in development.** `electron-vite dev` exits when its Electron does (Design note 3), so
   the crash-loop relaunch is checked on a built client and the `client` recipe puts the X11 flag on
   the command line itself.
@@ -2719,7 +2734,11 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     resize is untested. That choice therefore waits for the owner's on-screen soak.
   - **Open question 14, for the brainstorm's next revision:** on the recommended machine the
     forced Vulkan path holds for thirty minutes of three canvases, video, DOM and a second
-    window, hidden. Gen9.5 (the question as asked) remains the owner's.
+    window, hidden. Gen9.5 (the question as asked) remains the owner's. _Applied 2026-10-09 (the
+    brainstorm sign-off, `signoff-brainstorm.md`, source 4b): open question 14 now reads
+    "**Open,** on the UHD 620 alone", with "On the development machine's RTX 3080 it is answered
+    (R01.T12, 2026-10-02, hidden and offscreen)", the hidden-resize hazard, and
+    `--disable-vulkan-surface` waiting on the owner's on-screen soak._
   - **Pending by hand for the owner:** the soak on screen, with window resizes by `xdotool` and
     the display blanked and restored (`xset dpms`), on this machine and on the UHD 620.
 - **T13, as built (2026-10-01, RTX 3080, Electron 44.4.3, a scratch prototype, not merged).** Run

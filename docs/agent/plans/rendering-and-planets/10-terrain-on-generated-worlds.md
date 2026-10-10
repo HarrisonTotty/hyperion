@@ -921,10 +921,11 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   `slant_range(body, origin, direction, max)` and `material(body, at)` (the class with its
   `MaterialProperties`), each answering `NotSurveyed` where the field has no cell. `field_init`
   answers with the body's `LevelBounds`. R05's provisional height function leaves the client path
-  (R09's Design note 18); `hyperion_surface::height`, where R09.T4 moved `HeightSample` and
-  `LatticeCache`, stays. Files: R05's binding, R05's `view/terrain/workers/*.ts`. Tests: in the
-  worker test, init, two blocks and a release leave no field held; a block posted before its
-  `field_init` is refused; each reading entry point equals the native function on a fixture field.
+  (R09's Design note 18); `hyperion_surface::height`, where R09.T4 moved `HeightSample`, stays, as
+  does `LatticeCache` in `noise`, which R09.T4 did not move (it already lived there). Files: R05's
+  binding, R05's `view/terrain/workers/*.ts`. Tests: in the worker test, init, two blocks and a
+  release leave no field held; a block posted before its `field_init` is refused; each reading
+  entry point equals the native function on a fixture field.
   Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/workers`.
 
 ### R10.T7 The client's coarse-field store

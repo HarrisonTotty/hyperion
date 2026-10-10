@@ -444,9 +444,8 @@ it is recorded, and stays here so that the owner can review it.
   atmosphere labels, `AEROSOLS: NOT YET MODELLED` renamed
   `AEROSOLS AND ABSORBERS: NOT YET MODELLED`, with decision-r08-licences' NH₄SH clause.
   **Still awaiting:** R10.T13's readout notation (`~2140 m ± 180 m`, `ELEVATION`, `SLANT RANGE`,
-  `DATUM`, contours), and R11's reading of item 2, that "decoration" covers terrain micro-detail
-  and decorative scatter but not clouds and waves (R11 Design note 2), neither yet drafted into
-  the guide.
+  `DATUM`, contours), not yet drafted into the guide. R11's reading of item 2 is decided (below,
+  "Decided by the brainstorm sign-off").
 - **Data licences** before data are committed: the Karkoschka and Tomasko methane coefficients
   (Elsevier), Serdyuchenko's ozone data files (terms unstated), and whether raw tables may be
   committed beside the reduced values (R08.T4.b); H₂SO₄ (Palmer and Williams 1975), Mars dust
@@ -483,19 +482,17 @@ it is recorded, and stays here so that the owner can review it.
   phase becomes ∫n dt, sent as drifting elements on aligned power-of-two cells (`BodyOrbitDto`'s
   optional `drift`); built as galaxy plan 14's P14.T45, which closes R03.T13's pinned discrepancy
   (R03's Risks) and supersedes protocol item 9. Its quadrature follow-up is P14.T45.d (2026-10-02).
-- **Brainstorm revisions** drafted by the plans: R11.T5's "ruled decoration" for open question 18
-  with corrected depths; R12.T10's measured budget tables; R03.T1's closure of open question 21 (no
-  version bump, nor for `subscription_ended`; R03 Design note 12, decided 2026-09-30, the draft in
-  R03's Risks); R01.T12's answer to open question 14 on NVIDIA (R01's Risks); and the corrections
-  [below](#brainstorm-corrections). R04.T10.a's CSP ruling is already applied to the brainstorm.
-  **Decided:** R05.T19's edit to open question 2 (2026-10-08, delegated;
-  `decision-r05-close-without-runs.md` §4), applied to the brainstorm with its status kept
-  **Lean**, since the replay's clause is untested; and R05.T19's other findings (2026-10-08,
-  delegated; `decision-r05-brainstorm-findings.md`), applied with amendments: the atmosphere over
-  and terrain under their estimates, beside the budget table; the finest level's spacing; patch
-  demand's constants and the low setting's measured patch ratio; the timestamps' quantisation; the
-  atmosphere tables' cadence, reach and reference aerosol; the Rayleigh scale height;
-  sun-independent horizon maps; and the normals' resolution and cost.
+- **Brainstorm revisions** drafted by the plans: R12.T10's measured budget tables (not yet
+  drafted, since R12.T10 is unbuilt; the hardware figures of R12 Design note 11 are applied
+  already). The other drafts are decided (below, "Decided by the brainstorm sign-off"). R04.T10.a's
+  CSP ruling is already applied to the brainstorm. **Decided:** R05.T19's edit to open question 2
+  (2026-10-08, delegated; `decision-r05-close-without-runs.md` §4), applied to the brainstorm with
+  its status kept **Lean**, since the replay's clause is untested; and R05.T19's other findings
+  (2026-10-08, delegated; `decision-r05-brainstorm-findings.md`), applied with amendments: the
+  atmosphere over and terrain under their estimates, beside the budget table; the finest level's
+  spacing; patch demand's constants and the low setting's measured patch ratio; the timestamps'
+  quantisation; the atmosphere tables' cadence, reach and reference aerosol; the Rayleigh scale
+  height; sun-independent horizon maps; and the normals' resolution and cost.
 - **The gate's verdict** (R05.T19): if open question 2's rule fires, the owner rules before any
   later plan depends on the browser. Recorded 2026-10-08 (R05's Risks, "The gate's verdict"): the
   rule does not fire. The RTX 3080 half fails, on frame skips near the ground that are ours and
@@ -540,26 +537,40 @@ it is recorded, and stays here so that the owner can review it.
     owner kept the limit on 2026-10-09 (`.git/rm45-orchestration/decision-r13-t1b-guard.md`,
     option A). It is lifted when the census levers land.
 
-  The brainstorm's subsection "The hybrid sky" is signed off. **Still awaiting:** the label
-  wording of R13.T2.b and T8 and their guide rows, a draft for the UX decision agent by T15's
-  route; the subsection's amendment for the real limit, a draft for the owner.
+  The brainstorm's subsection "The hybrid sky" is signed off, its amendment for the real limit
+  too (below, "Decided by the brainstorm sign-off"). **Still awaiting:** the label wording of
+  R13.T2.b and T8 and their guide rows, a draft for the UX decision agent by T15's route.
 
-- **Cloud shadows on the low setting** (R11 Design note 10, `cloudShadows`): built off by default,
-  as the brainstorm's ladder says, though they cost under 0.1 ms; turning them on is the owner's.
-- **The floor of R08's 5% metric**, max(0.05·L_ref, 3σ_ref, 10⁻³·L_max), with 2% flux aggregates
-  (R08 Design note 10 and Risks): the plan's reading of the brainstorm's "to 5% in radiance", one
-  named constant the owner may tighten or loosen.
 - **Smaller rulings the plans leave open**: moving `just test-render` into `just ci` after one
   Electron upgrade passes (R01.T9.e); the safe mode drawing no view, since a Canvas 2D wireframe
-  would be a second renderer (R01's Risks); R01's reading that the brainstorm's exclusion of
-  `rgba32float` covers per-frame colour targets and not a bake scratch (R01's Risks; see the
-  corrections); keeping the main screen's pose interpolation, at about 16 ms, against R07's
-  extrapolation (R07.T28); a disc-statistical glint over unsurveyed ocean (R11 Design note 11);
-  biotic O₂, which no plan owns, and the scalar-against-vector Rayleigh error R08.T12.a measures
-  (R08's Risks); whether a merged scene arrival should state its own clock (R03's Risks).
-  **Decided** (delegated decisions): the R02 depth criteria (the hidden-edge criterion at 4 × 10⁻⁵
-  of the distance, the sphere occluder's slope term, the `TRAINING` banner only over a kept
-  scene; R02's Design note 5 and Risks) and the scene's system designation and place (R03.T16).
+  would be a second renderer (R01's Risks); a disc-statistical glint over unsurveyed ocean (R11
+  Design note 11); biotic O₂, which no plan owns, and the scalar-against-vector Rayleigh error
+  R08.T12.a measures (R08's Risks); whether a merged scene arrival should state its own clock
+  (R03's Risks). **Decided** (delegated decisions): the R02 depth criteria (the hidden-edge
+  criterion at 4 × 10⁻⁵ of the distance, the sphere occluder's slope term, the `TRAINING` banner
+  only over a kept scene; R02's Design note 5 and Risks) and the scene's system designation and
+  place (R03.T16).
+- **Decided by the brainstorm sign-off** (2026-10-09, the sign-off agent under the owner's
+  delegation; `signoff-brainstorm.md` in the RM4/RM5 orchestration directory, unless another
+  record is named), each applied to the brainstorm:
+  - the brainstorm revisions drafted by the plans: R11.T5's open question 18, closed as
+    decoration (row 691); R03.T1's open question 21, closed with no bump (R03 Design note 12);
+    R01.T12's answer to open question 14, which stays open for the UHD 620 alone (source 4b); and
+    every row of the corrections [below](#brainstorm-corrections), each marked there;
+  - the hybrid sky's amendment for the real limit, written into the subsection: the nearer of the
+    ceiling's radius and 2,000 ly, the measured cost, 88% of the naked-eye stars real (source 2);
+  - cloud shadows on the low setting: on, at under 0.1 ms, direct sunlight only (row 700); R11's
+    Design notes 10 and 18 and its `cloudShadows` default change at its re-validation;
+  - R11's reading of guide item 2: decoration excludes clouds and waves, and the guide's
+    `DECORATION ON` row stands (row 709); R11 Design note 2's conditional drops at its
+    re-validation;
+  - the `rgba32float` reading: the exclusion covers per-frame colour targets, not a bake's scratch
+    (row 582; R01 Design note 21 and Risks);
+  - the main screen's camera: extrapolation, with interpolation the fallback R07.T28 compares (row
+    609; R07 Design note 22);
+  - R08's 5% floor: |ΔL| ≤ max(0.05·L_ref, 3 × 10⁻⁴·L_max(image)) + 4σ_ref, with σ_ref ≤ T ÷ 8
+    (`decision-backlog-1.md` §2, 2026-10-09; R08 Design note 10 and Risks), the brainstorm stating
+    its plain meaning (source 4a).
 
 ## Brainstorm corrections
 
@@ -777,8 +788,10 @@ recorded here rather than settled.
   derives (airless rock 0.11 against the Moon's A_V of about 0.06; Earth's p_V 0.434 giving A_V
   0.57 against 0.294): both need plan 14's owner and a research agent before R07 and R11 depend on
   them.
-- **H₂'s Rayleigh cross-section** between Peck and Huang with Hohm's King factor and Ford and Browne
-  1973 or an ab initio value (R08's Risks).
+- **H₂'s Rayleigh cross-section.** Settled by R08.T3.b (2026-10-09; R08 Design note 4 and Risks,
+  "Deviations in T3.b, as built"): Peck and Huang 1977's dispersion with a King factor from Raj,
+  Hamaguchi and Witek 2018's ab initio anisotropy (1.0322 at 550 nm), Dalgarno and Williams 1962
+  the cross-check only; "Hohm 1993" held no anisotropy. In the brainstorm since its sign-off.
 - **An R01 mechanism other plans lean on.** (The second, the `"premultiplied"` blend overriding
   Babylon's factors, went with Babylon: R01 Design note 24.) R01's rounding probe classes
   each format by one value, and R07 reads anything but `nearest` as a reason to keep

@@ -16,8 +16,9 @@
   [the brainstorm](../../brainstorming/rendering-and-planets.md)): "The sky", its subsection "The
   star field is the galaxy, not a photograph" (the census, the band, "a statistical layer of
   unresolved stars, labelled as such") and the subsection "The hybrid sky: the census near,
-  synthetic stars far" (signed off by the owner on 2026-10-08, its label wording still a draft,
-  and its amendment for the real limit a draft for the owner since 2026-10-09); open questions 13,
+  synthetic stars far" (signed off by the owner on 2026-10-08, its label wording still a draft;
+  its amendment for the real limit, with R13.T1's and T1.b's measurements, signed off 2026-10-09
+  by the sign-off agent under the owner's delegation, `signoff-brainstorm.md`); open questions 13,
   16 and 19 as they touch the census's reach and cost. The decision it answers is the owner's of
   2026-10-08 on the full sky's time (`decision-p11-t17c-bright.md` §4), and its feasibility study
   is `.git/rm23-orchestration/feasibility-hybrid-sky.md`. The real limit is the owner's of
@@ -445,10 +446,10 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
       real stars only. **The owner amended it so on 2026-10-08** (the brainstorm's "The hybrid
       sky", signed off), to every star brighter than V_P and every star within R(u). With the
       real limit it holds for every star within R(u), as amended by the owner on 2026-10-09
-      (`decision-r13-guard-trip.md`; the brainstorm's amendment is a draft for the owner): every
-      star brighter than V_P within 2,000 ly, and near the Sun every star within one jump. The
-      real-record variant is revisited after the deferred census levers land
-      (`deferred-corrections.md`, "Census cost").
+      (`decision-r13-guard-trip.md`; the brainstorm's amendment signed off 2026-10-09 by the
+      sign-off agent, owner's delegation): every star brighter than V_P within 2,000 ly, and near
+      the Sun every star within one jump. The real-record variant is revisited after the deferred
+      census levers land (`deferred-corrections.md`, "Census cost").
     - **Synthetic stars appear in the naked-eye view as in every camera, labelled** (decided by the
       owner on 2026-10-08, `feasibility-hybrid-sky.md` §11, question 2).
 13. **What the view says** (R13.T8; the wording is a draft for the UX decision agent, by T15's
@@ -812,10 +813,12 @@ The owner's test (Design note 1), run by name and recorded:
 - **By hand, hidden:** the photorealistic view near the Sun, with the asserted star counts per
   magnitude in annuli about R(u), recorded (no golden image).
 
-Record the figures in this plan's Risks, and hand the measured boundary and costs to the brainstorm
-draft for the owner. Files: `crates/hyperion-sim/tests/sky_hybrid.rs`, the golden,
-`.config/nextest.toml`, this plan. Acceptance: `just test-slow the_synthetic_tier_matches_the_census
-the_synthetic_seam_is_continuous`, `just bench -- sky/synthetic`, `just ci`.
+Record the figures in this plan's Risks. The brainstorm's subsection already carries R13.T1's and
+T1.b's measured boundary and costs (signed off 2026-10-09 by the sign-off agent, owner's
+delegation); where T9's figures differ from that text, draft the edit for a sign-off agent. Files:
+`crates/hyperion-sim/tests/sky_hybrid.rs`, the golden, `.config/nextest.toml`, this plan.
+Acceptance: `just test-slow the_synthetic_tier_matches_the_census the_synthetic_seam_is_continuous`,
+`just bench -- sky/synthetic`, `just ci`.
 
 ## Verification
 
@@ -942,8 +945,11 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   of the naked-eye stars stay real, not 92–97%.
 
   The brainstorm's subsection is signed off. Its label wording, and R13.T8's and T2.b's guide rows,
-  stay drafts for the UX decision agent and the owner. Its amendment for the real limit is a draft
-  for the owner, marked at the end of the subsection.
+  stay drafts for the UX decision agent and the owner. Its amendment for the real limit is signed
+  off (2026-10-09, the sign-off agent under the owner's delegation, `signoff-brainstorm.md`,
+  source 2) and written into the subsection's text, the draft at its end removed: the boundary is
+  the nearer of the ceiling's radius and 2,000 ly, the promise holds within 2,000 ly, 88% of the
+  naked-eye stars are real, and about half of a camera's stars to V 10 (48%) are synthetic.
 
 - **Lazy realisation by record**, to be revisited after the deferred census levers land (the
   owner, 2026-10-08), so that every point could be a system:
