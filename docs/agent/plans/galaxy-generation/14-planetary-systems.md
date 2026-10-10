@@ -8619,7 +8619,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       relabelled; the same counts after the refit;
     - nothing else: `body_frames`, `moons`, the other systems and the server's goldens hold. With
       the gate open the sim's and the server's suites fail only the hold's tripwire, besides the
-      goldens above.
+      goldens above;
+    - P14.T24.f's moves, measured with its own gate, are under "Deviations in P14.T24.f, as
+      built".
 
     Sub-Neptunes lock later and ice giants earlier. Two lock states change, for the bless note:
     - `hierarchical_triple`'s `C f`, a sub-Neptune, was locked from 0.05 Gyr after its birth and now
@@ -8834,6 +8836,187 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       and the fixture's index, key and kind, every committed row of which must parse. Only a
       missing file skips the check. A bless therefore cannot rename, renumber or re-kind a row or
       reorder an element. The golden's `optics`, `gas` and `phase` sections may change at a bump.
+
+- **Deviations in P14.T24.f, as built (`p14-batch`, 2026-10-10).** `GENERATOR_VERSION` stays 21,
+  and no existing golden value moves.
+  - _New pins._ `planetary/derive_body` gains:
+    - each gas's partial pressure for its 16 bodies, 144 labels, blessed from the previous
+      commit's code and unchanged by this one;
+    - each body's carbon carrier;
+    - two bodies of its own, `titan` and `wet_runaway` (1 M⊕ at 0.6 au with water rank 0.99),
+      pinned under the held rules.
+
+    `planetary/atmosphere_speciation` is new, at header 21. It pins the rules the bump puts in
+    force, bit for bit, as P14.T14.d pinned its held k₂: the table's bodies about the Sun with its
+    X-ray history, three runaway Earths, two cold moons, η, `runaway_oxygen` and the saturated
+    flux. The bump moves none of its values.
+
+  - _The hold._ `atmosphere` and `derive_body` take `Speciation::in_force()`: `CarbonAndOxygen`
+    from `CARBON_SPECIATION_VERSION` = 22, and below it `Earlier`, P14.T13.c's rules bit for bit.
+    The rules live in the crate-private `atmosphere_under` and `derive_body_under`, which the tests
+    call with `CarbonAndOxygen`. Unlike P14.T14.d's `tides_in_force`, the selection is a
+    parameter, because the rules sit inside the greenhouse's iteration and the three albedo
+    passes. **P14.T48.e**, in the bump's commit:
+    - fold `atmosphere_under` into `atmosphere` and `derive_body_under` into `derive_body`, keeping
+      the `CarbonAndOxygen` arms;
+    - delete `Speciation`, `CARBON_SPECIATION_VERSION` and
+      `carbon_and_oxygen_are_held_only_until_the_batch_s_bump`, which fails from version 22 to
+      say so;
+    - delete the tests' readings of `Speciation::Earlier`: the comparison with the held rules in
+      `earth_venus_and_mars_keep_their_carbon_as_carbon_dioxide` and the `held` case of
+      `a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks`;
+    - in `atmosphere/tests.rs`, replace `derive_under`, `table_under` and the `atmosphere_under`
+      calls with `derive`, `table` and `atmosphere`;
+    - drop the hold's wording from:
+      - the module documentation;
+      - the docs of `atmosphere`, `Atmosphere::carbon_carrier` and `derive_body_under`;
+      - the comment that opens the tests' P14.T24.f block;
+      - `the_speciated_figures_are_pinned`'s doc;
+      - the `derive_body` golden's comment on `titan` and `wet_runaway`.
+  - _The rules, as built._
+    - **Carbon.** A body formed beyond the snow line (`AtmosphereInputs::formed`, the inventory's
+      side) whose surface is at most `METHANE_CARBON_TEMPERATURE`, 150 K, carries its carbon as
+      methane, mole for mole: M(CH₄) ÷ M(CO₂) of the inventory's carbon, with the registry's molar
+      masses. The swap debits no water and adds no oxygen for methane's hydrogen.
+      - The temperature is the greenhouse's own iterate, so the switch sits inside the 32 steps.
+        Methane enters no τ term, and CO₂ only adds one above 150 K, so the step map never
+        decreases and crosses the threshold at most once (determinism-auditor).
+      - A young magma ocean (`Crust::Molten`) keeps its carbon as CO₂.
+      - The threshold is the plan's figure. The science check found no literature boundary at
+        it, and its doc says so.
+      - `VolatileInventory` is unchanged: carbon is stored counted as CO₂, its carrier
+        (decision-composition §1.2). The handoff's "carbon split" is the atmosphere's, in a private
+        `Airborne`.
+    - **The humidity** (main's ruling, 2026-10-10, in place of "held at saturation, calibrated").
+      Where the surface holds a reservoir, methane's partial pressure is min(M g ÷ 4πR²,
+      `METHANE_RELATIVE_HUMIDITY` × `p_sat`(`T_s`)), where `METHANE_RELATIVE_HUMIDITY` is 0.5.
+      - The 0.5 is cited, not fitted: Niemann et al. 2010 (JGR 115, E12006, §4.1), "the current
+        CH4 mole fraction of 5.5x10-2 just above the surface is subsaturated, at a relative
+        humidity of approximately 50%". It is relative to methane over liquid methane with N₂
+        dissolved (Kouvaris and Flasar 1991), and reaches 100%, the lifting condensation level,
+        near 7 km.
+      - By §4.1's own figures that saturation, 11.0%, lies about 4% below the pure curve's 11.5%.
+        On the registry's pure curve the 0.5 gives 5.75% at the Huygens site's 93.65 K and
+        1,467 hPa (Fulchignoni et al. 2005), against the measured 5.65 ± 0.18% (Niemann's
+        abstract, from 6.7 km to the surface).
+      - Below the triple point, 90.6941 K, the same 0.5 is extrapolated over the solid's curve,
+        which keeps the gases continuous there.
+      - The science-checker confirmed the figure and its altitude. It leans against making the
+        humidity vary with liquid coverage: Titan's figure was measured far from its seas, and
+        coverage decides only whether a reservoir exists.
+    - **Retention.** Methane is kept where nitrogen is, not by its own Jeans test.
+      - At the exobase multiple its own λ ≈ 18 would strip Titan. Its real λ at Titan's exobase is
+        20–29, and its thermal escape is negligible (Johnson 2010, ApJ 716, 1573).
+      - Nitrogen's test at 5 `T_eq` is methane's own at 2.86 `T_eq`, above Titan's real ratio of
+        exobase to effective temperature, about 1.8.
+      - `Retention` itself is unchanged, and still says that Titan does not retain methane.
+    - **The grey τ.** Methane does not enter `optical_depth`. P14.T13.c's nitrogen term was fitted
+      on Titan, whose greenhouse is "caused primarily by pressure-induced opacity of N2, CH4, and
+      H2" (McKay, Pollack and Courtin 1991, Science 253, 1118), so a methane term would count it
+      twice. Methane's warming is Titan's share of the nitrogen term, and its vapour's feedback is
+      not modelled. Oxygen has no term either.
+    - **Oxygen** (Luger and Barnes 2015, Astrobiology 15, 119). A runaway world keeps the O₂ of
+      the water it lost, less two sinks (`runaway_oxygen`):
+      - the water frees W M(O₂) ÷ 2 M(H₂O) of oxygen;
+      - the share η escapes with the hydrogen (`oxygen_escape_parameter`, their eqs. 5, 11 and 12,
+        at ε 0.30, T 400 K and b = 4.8 × 10¹⁷ T^0.75 cm⁻¹ s⁻¹). η is taken at the hosts'
+        saturated XUV flux, from the new `XuvHistory::saturated_flux`, summed in `Sky` and passed
+        as `AtmosphereInputs::saturated_xuv_flux`. Earth's critical flux comes out at 178
+        erg cm⁻² s⁻¹, against their 180;
+      - the surface takes up oxygen at Earth's 2.21 × 10¹³ mol yr⁻¹ (Catling 2014, through their
+        §2.5.1), per unit area, over the body's age (`AtmosphereInputs::age`).
+
+      O₂ is written straight from its mass, never capped whatever phase data its row gains, and
+      it is subject to Jeans's test. A molten surface holds it while molten (their §2.5.3–2.5.4).
+      A world that lost no water keeps none.
+
+      The generated Venus, at η 0.26, would keep 142 bar of O₂ against its 57 bar of CO₂ before its
+      sinks, and after them keeps none. Its measured O₂ is under 0.3 ppmv (Trauger and Lunine
+      1983, through Marcq et al. 2018). A runaway Earth that lost ten oceans keeps 1,516 bar at
+      0.5 Gyr.
+
+      The lane's choices, each provisional until P14.T53.a and stated in the doc:
+      - the saturated flux, valid while the ocean is lost within the saturation time (some two and
+        a half Earth oceans at Venus's flux about a Sun-like host);
+      - Earth's weathering-dominated sink on a dry world, scaled by area over the whole age;
+      - a melt that gives its oxygen back when it freezes.
+
+    - **The carrier is recorded.** `Atmosphere::carbon_carrier() -> Option<CarbonCarrier>` gives
+      `CarbonDioxide` or `Methane`, and `None` for a gas envelope or a body of no mass.
+      - It names the species whether or not any carbon is airborne, so a cold airless moon formed
+        beyond the snow line reads methane.
+      - A change of carrier is a recorded state change, as a change of state or of retention is
+        (P14.T16.b), and `planetary_properties`' continuity test now reads it.
+  - _Tests_ (`atmosphere/tests.rs`, under `CarbonAndOxygen`):
+    - the table's Titan carries 5.82% CH₄ (5.65% required, to 10%), at 93.99 K and 1.51 bar; the
+      held rules give 1.42 bar;
+    - Mercury, Venus, Earth, Mars, the Moon and Ceres keep CO₂, their atmospheres equal to the
+      held rules'; the generated Earth has no O₂, the plan's biotic gap;
+    - a sweep over 0.05–39.7 au and 10⁻³–5 M⊕ gives no methane inside the snow line or above
+      150 K. It prints 76 methane worlds and asserts at least one;
+    - the runaway mass balance by hand, the dry world's none, the sink's zero, the melt, the
+      critical flux, and Venus's oxygen retained against Jeans escape and taken by its sinks;
+    - the reservoir against a subsaturated inventory, and no carrier for an envelope or a
+      massless body;
+    - every body's fractions sum to 1 to 10⁻⁹;
+    - the gases are continuous in age (0.2–10 Gyr, at steps of 0.1%) and in equilibrium
+      temperature, except at a recorded change;
+    - the rules give the same result twice.
+  - _Files beyond the task's two._
+    - `planetary/context.rs`: `XuvHistory::saturated_flux`, checked in the existing XUV test;
+    - `planetary/derive/mod.rs`: `derive_body_under`, `Sky::saturated_xuv_flux` and the extended
+      golden;
+    - `tests/planetary_properties.rs`: the carrier in its continuity test;
+    - the sim's `clippy.toml`, where `McKay` joins `doc-valid-idents`;
+    - the two goldens above.
+
+    Accepted, besides the task's command, by `cargo test -p hyperion-sim planetary::context`,
+    `planetary::derive::tests::derive_body_is_pinned` and `--test planetary_properties`.
+
+  - _Added public items._
+    - the constants `METHANE_CARBON_TEMPERATURE`, `METHANE_RELATIVE_HUMIDITY`,
+      `WATER_LOSS_ESCAPE_EFFICIENCY`, `ESCAPING_FLOW_TEMPERATURE`,
+      `OXYGEN_IN_HYDROGEN_DIFFUSION_PER_METRE_SECOND` and `EARTH_OXYGEN_SINK_MOL_PER_YEAR`;
+    - `oxygen_escape_parameter`, `runaway_oxygen`, and `CarbonCarrier` with
+      `From<CarbonCarrier> for Gas`;
+    - `AtmosphereInputs`' `formed`, `saturated_xuv_flux` and `age`;
+    - `Atmosphere::carbon_carrier` and `XuvHistory::saturated_flux`.
+  - _What the bump moves_ (blessed with the gate open, measured, and restored, 2026-10-10;
+    P14.T14.d's gate closed):
+    - `planetary/derive_body`, seven values and a line, all on the two bodies this task added:
+      - `titan`: its surface temperature 94.017 → 93.992 K and pressure 1.4217 → 1.5095 bar, its
+        CH₄ 0 → 8,780 Pa (5.82%), its CO₂ 3.2 × 10⁻³ Pa → 0, and its carrier carbon dioxide →
+        methane;
+      - `wet_runaway`: its surface pressure 66.0 → 2,650 bar, of which O₂ 0 → 2,584 bar;
+      - their albedos and states hold, and with them their equilibrium temperatures;
+    - `planetary/atmosphere_speciation`: its header only;
+    - nothing else. With the gate open, the sim's and the server's suites (`--tests`, at 2c5bdcf4
+      with this task) fail only the hold's tripwire.
+      - No other golden holds a body the rules change. `derive_body`'s icy bodies have nitrogen
+        enough to warm them past 150 K, onto carbon-dioxide greenhouses of 580–743 K, and its
+        Venus's sinks take all its oxygen.
+      - The merge of f3c6159d brought no golden and no reader of the atmosphere, and
+        `derive_body` was re-measured on it.
+
+    The plan's Generator version section, "T24.f moves the existing goldens", holds only through
+    these two bodies.
+
+  - _Open, for "main"_ (each with the lane's lean):
+    1. **The humidity below the triple point.** The ruling says 0.5 "over the liquid". Below
+       90.6941 K the code extrapolates it over the solid's curve, where a frost-covered world
+       might sit at saturation, as Pluto's N₂ does. Lean: keep 0.5, which keeps the gases
+       continuous; if 1 is wanted, use a ramp, not a step.
+    2. **A dominant condensable.** A humidity below 1 suits a minor condensable in a background
+       gas. Where methane would dominate its air, vapour-pressure equilibrium sets p = `p_sat`, as
+       for Mars's CO₂ (science-checker, "consider"). Lean: keep 0.5 now; T51.a's ground partition
+       takes up the dominant case.
+    3. **A melt's oxygen.** The science-checker would hold a world's O₂ at zero from the epoch its
+       melt took it up. With no loss epoch, the "worst" proxy would also zero the M dwarfs'
+       planets, whose mantles froze while they still lost water (Luger and Barnes §2.5.3). Lean:
+       keep the present-state rule, documented, until P14.T53.a times the loss.
+    4. **Methane kept where nitrogen is.** Lean: keep it, with its justification.
+    5. **The 150 K threshold.** It is unsourced, and the science check found no literature
+       boundary at it. Lean: keep it provisional until P14.T55.a's redox route.
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

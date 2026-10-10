@@ -110,8 +110,8 @@ pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, SurfaceMaterial, VolatileDraws,
-    VolatileInventory, atmosphere, energy_limited_loss, volatile_inventory,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, Speciation, SurfaceMaterial,
+    VolatileDraws, VolatileInventory, atmosphere_under, energy_limited_loss, volatile_inventory,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -133,7 +133,7 @@ use crate::units::consts::GM_EARTH;
 use crate::units::{
     EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses, Kelvin,
     Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Seconds, SolarMasses, Watts,
-    Years,
+    WattsPerSquareMetre, Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -883,6 +883,24 @@ pub fn derive_body(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
+    derive_body_under(placed, hosts, disc, age, t, Speciation::in_force())
+}
+
+/// [`derive_body`] under the atmosphere's carbon and oxygen rules `speciation`, which tests read
+/// from before the 21 → 22 batch's bump puts them in force (P14.T24.f, held; `atmosphere`'s
+/// documentation).
+///
+/// # Errors
+///
+/// As [`derive_body`].
+pub(crate) fn derive_body_under(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    disc: &DiscProfile,
+    age: Years,
+    t: UniverseTime,
+    speciation: Speciation,
+) -> Result<DerivedBody, DeriveBodyError> {
     let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
     if age_now.value().is_nan() || age_now.value() <= 0.0 {
         return Err(DeriveBodyError::NotYetFormed { age: age_now });
@@ -926,20 +944,24 @@ pub fn derive_body(
         } else {
             irradiated
         };
-        let air = atmosphere(&AtmosphereInputs {
+        let inputs = AtmosphereInputs {
             mass: mass_kg,
             radius: Metres::new(r),
             material: SurfaceMaterial::of(&fractions),
             envelope_fraction: fractions.envelope(),
             inventory,
+            formed,
             equilibrium: irradiated,
             worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
             heated,
             xuv_fluence: sky.xuv_fluence,
+            saturated_xuv_flux: sky.saturated_xuv_flux,
             insolation: sky.insolation,
             crust,
+            age: age_now,
             hottest_host: sky.hottest,
-        });
+        };
+        let air = atmosphere_under(&inputs, speciation);
         (irradiated, heated, air)
     };
     let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
@@ -1031,6 +1053,9 @@ struct Sky {
     peak_flux: EarthFluxes,
     /// The X-ray and ultraviolet energy per unit area received so far.
     xuv_fluence: JoulesPerSquareMetre,
+    /// The X-ray and ultraviolet flux received while each host is saturated, along the same
+    /// orbits as the fluence (P14.T24.f).
+    saturated_xuv_flux: WattsPerSquareMetre,
     /// Where the body lies against the hosts' habitable zone.
     insolation: Insolation,
     /// The hottest effective temperature among the luminous hosts; zero if none shines.
@@ -1058,6 +1083,7 @@ impl Sky {
             flux: EarthFluxes::ZERO,
             peak_flux: EarthFluxes::ZERO,
             xuv_fluence: JoulesPerSquareMetre::ZERO,
+            saturated_xuv_flux: WattsPerSquareMetre::ZERO,
             insolation: Insolation::Habitable,
             hottest: Kelvin::ZERO,
         };
@@ -1066,9 +1092,12 @@ impl Sky {
             let flux = luminosity_flux(host.luminosity(), a, e);
             let peak = luminosity_flux(host.peak_luminosity(), a, e);
             let fluence = host.xuv().fluence(age, xuv_a, xuv_e);
+            let saturated = host.xuv().saturated_flux(xuv_a, xuv_e);
             sky.flux = sky.flux + flux;
             sky.peak_flux = sky.peak_flux + peak;
             sky.xuv_fluence = JoulesPerSquareMetre::new(sky.xuv_fluence.value() + fluence.value());
+            sky.saturated_xuv_flux =
+                WattsPerSquareMetre::new(sky.saturated_xuv_flux.value() + saturated.value());
             if host.luminosity().value() > 0.0 {
                 let t_eff = host.effective_temperature();
                 runaway += peak.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
@@ -2266,6 +2295,18 @@ mod tests {
                 &format!("{name}_surface_pressure"),
                 air.surface_pressure().map_or(-1.0, Pascals::value),
             );
+            // P14.T24.f: every gas's partial pressure, and the carbon's carrier.
+            for gas in atmosphere::Gas::ALL {
+                let gas_name = format!("{gas:?}").to_lowercase();
+                w.f64(
+                    &format!("{name}_partial_pressure_{gas_name}"),
+                    air.partial_pressures().of(gas).value(),
+                );
+            }
+            w.line(&format!(
+                "{name}_carbon_carrier = {:?}",
+                air.carbon_carrier()
+            ));
             w.f64(&format!("{name}_xuv_fluence"), d.xuv_fluence().value());
             w.f64(&format!("{name}_envelope_lost"), d.envelope_lost().value());
         };
@@ -2332,6 +2373,27 @@ mod tests {
             }
             pin(&mut w, name, &body);
         }
+        // P14.T24.f: a Titan, whose carbon becomes methane, and a runaway world that lost many
+        // oceans, which keeps oxygen; both carbon dioxide and no oxygen until the 21 → 22 bump.
+        let (kg, km, a_au, eccentricity) = (1.345_2e23, 2_574.7, 9.582_6, 0.056_5);
+        let titan = placed(
+            kg,
+            a_au,
+            eccentricity,
+            rank_for(&disc, kg, km, a_au, eccentricity),
+        );
+        pin(&mut w, "titan", &derive(&titan, &disc).unwrap());
+        let wet = atmosphere::VolatileDraws {
+            water: UnitUniform::new(0.99).unwrap(),
+            ..atmosphere::VolatileDraws::MEDIAN
+        };
+        let runaway = placed(EARTH_MASS_KG, 0.6, 0.0, 0.5).with_volatiles(wet);
+        let runaway = derive(&runaway, &disc).unwrap();
+        assert_eq!(
+            runaway.atmosphere().state(),
+            SurfaceState::RunawayGreenhouse
+        );
+        pin(&mut w, "wet_runaway", &runaway);
         golden!("planetary/derive_body", w.as_str());
     }
 

@@ -6,8 +6,8 @@ use crate::planetary::derive::solar::{
     PLANETS, SOLAR_AGE, historic_sun, orbit, rank_for, solar_disc,
 };
 use crate::planetary::derive::{
-    BodyHosts, DerivedBody, HostLight, PlacedBody, composition, derive_body, formation_composition,
-    radius_chen_kipping,
+    BodyHosts, DerivedBody, HostLight, PlacedBody, composition, derive_body, derive_body_under,
+    formation_composition, radius_chen_kipping,
 };
 use crate::planetary::disc::DiscProfile;
 use crate::stellar::Composition;
@@ -25,27 +25,28 @@ const SMALL_BODIES: [(&str, f64, f64, f64, f64); 4] = [
     ("Ceres", 9.39e20, 469.7, 2.767_5, 0.075_8),
 ];
 
-/// A body of `kg` at `a_au` and `e` about the present Sun with its history, at the rank that
-/// keeps its radius `km`, derived at `age`.
-fn about_the_sun(
-    disc: &DiscProfile,
-    (kg, km, a, e): (f64, f64, f64, f64),
-    age: Years,
-) -> DerivedBody {
+/// A body of `kg` at `a_au` and `e` about the present Sun, formed there, at the rank that keeps
+/// its radius `km`.
+fn placed_about_the_sun(disc: &DiscProfile, (kg, km, a, e): (f64, f64, f64, f64)) -> PlacedBody {
     let rank = rank_for(disc, kg, km, a, e);
     assert!(
         rank > 0.0 && rank < 1.0,
         "a radius of {km} km is inside its window"
     );
     let orbit = orbit(a, e);
-    let placed = PlacedBody::new(
+    PlacedBody::new(
         EarthMasses::new(kg / EARTH_MASS_KG),
         orbit,
         orbit.semi_major_axis(),
         UnitUniform::new(rank).unwrap(),
     )
-    .unwrap();
-    derive(&placed, disc, age)
+    .unwrap()
+}
+
+/// A body of `kg` at `a_au` and `e` about the present Sun with its history, at the rank that
+/// keeps its radius `km`, derived at `age`.
+fn about_the_sun(disc: &DiscProfile, body: (f64, f64, f64, f64), age: Years) -> DerivedBody {
+    derive(&placed_about_the_sun(disc, body), disc, age)
 }
 
 fn derive(placed: &PlacedBody, disc: &DiscProfile, age: Years) -> DerivedBody {
@@ -60,14 +61,48 @@ fn derive(placed: &PlacedBody, disc: &DiscProfile, age: Years) -> DerivedBody {
     derive_body(placed, &hosts, disc, age, UniverseTime::EPOCH).unwrap()
 }
 
-/// Every body of the table: the eight planets and the four small bodies.
-fn table() -> Vec<(&'static str, DerivedBody)> {
-    let disc = solar_disc();
+/// [`derive`] under the carbon and oxygen rules `speciation` (P14.T24.f, held).
+fn derive_under(
+    placed: &PlacedBody,
+    disc: &DiscProfile,
+    age: Years,
+    speciation: Speciation,
+) -> DerivedBody {
+    let lights = [historic_sun()];
+    let hosts = BodyHosts::new(
+        Kilograms::new(SOLAR_MASS_KG),
+        Composition::SOLAR,
+        &lights,
+        &[],
+    )
+    .unwrap();
+    derive_body_under(placed, &hosts, disc, age, UniverseTime::EPOCH, speciation).unwrap()
+}
+
+/// The table's bodies, the eight planets but the giants and the four small bodies.
+fn table_bodies() -> impl Iterator<Item = &'static (&'static str, f64, f64, f64, f64)> {
     PLANETS
         .iter()
         .filter(|(name, ..)| !matches!(*name, "Jupiter" | "Saturn" | "Uranus" | "Neptune"))
         .chain(SMALL_BODIES.iter())
+}
+
+/// Every body of the table: the eight planets and the four small bodies.
+fn table() -> Vec<(&'static str, DerivedBody)> {
+    let disc = solar_disc();
+    table_bodies()
         .map(|&(name, kg, km, a, e)| (name, about_the_sun(&disc, (kg, km, a, e), SOLAR_AGE)))
+        .collect()
+}
+
+/// [`table`] under the carbon and oxygen rules `speciation`.
+fn table_under(speciation: Speciation) -> Vec<(&'static str, DerivedBody)> {
+    let disc = solar_disc();
+    table_bodies()
+        .map(|&(name, kg, km, a, e)| {
+            let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+            (name, derive_under(&placed, &disc, SOLAR_AGE, speciation))
+        })
         .collect()
 }
 
@@ -482,12 +517,15 @@ fn no_surface_is_hotter_than_its_hottest_host() {
             Kilograms::ZERO,
             Kilograms::ZERO,
         ),
+        formed: SnowLineSide::Inside,
         equilibrium: Kelvin::new(1_500.0),
         worst_equilibrium: Kelvin::new(1_500.0),
         heated: Kelvin::new(1_500.0),
         xuv_fluence: JoulesPerSquareMetre::ZERO,
+        saturated_xuv_flux: WattsPerSquareMetre::ZERO,
         insolation: Insolation::InsideRunaway,
         crust: Crust::Solid,
+        age: SOLAR_AGE,
         hottest_host: Kelvin::new(3_000.0),
     };
     let air = atmosphere(&inputs);
@@ -688,4 +726,650 @@ fn a_dark_host_leaves_a_body_frozen_and_airless() {
     assert_eq!(body.surface_temperature(), Kelvin::ZERO);
     // And the radius rank at the median still reads Chen and Kipping's scatter.
     assert!(radius_chen_kipping(EarthMasses::new(1.0), UnitUniform::HALF).value() > 0.9);
+}
+
+// P14.T24.f: carbon speciation and oxygen, read under the rules the 21 → 22 batch's bump puts in
+// force (`Speciation::CarbonAndOxygen`), and held until then.
+
+/// The mole fraction of `gas` in the air `air`: its partial pressure over the surface pressure.
+fn mole_fraction(air: &Atmosphere, gas: Gas) -> f64 {
+    air.partial_pressures().of(gas).value() / air.partial_pressures().total().value()
+}
+
+/// P14.T24.f is held until the 21 → 22 batch's bump, so that the batch's goldens move once: until
+/// then [`atmosphere`] and [`derive_body`] take P14.T13.c's rules. The bump removes the hold, and
+/// this test with it.
+#[test]
+fn carbon_and_oxygen_are_held_only_until_the_batch_s_bump() {
+    assert!(
+        GENERATOR_VERSION < CARBON_SPECIATION_VERSION,
+        "the 21 → 22 bump puts P14.T24.f's rules in force: call `atmosphere` and `derive_body` \
+         where `atmosphere_under` and `derive_body_under` are called, and remove them, \
+         `Speciation`, `CARBON_SPECIATION_VERSION` and this test (plan 14, P14.T24.f as built)"
+    );
+    assert_eq!(Speciation::in_force(), Speciation::Earlier);
+    // The goldens, which pin every gas's partial pressure and the carrier
+    // (`planetary/derive_body`), hold the held rules to version 21's bits.
+    for (name, body) in table() {
+        let air = body.atmosphere();
+        assert_eq!(
+            air.partial_pressures().of(Gas::Methane),
+            Pascals::ZERO,
+            "{name}"
+        );
+        assert_eq!(
+            air.partial_pressures().of(Gas::Oxygen),
+            Pascals::ZERO,
+            "{name}"
+        );
+        assert_eq!(
+            air.carbon_carrier(),
+            Some(CarbonCarrier::CarbonDioxide),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn titan_carries_methane_at_its_measured_share() {
+    // P14.T24.f: the table's Titan carries CH₄ at 5.65% of its surface gas to 10% (Niemann et al.
+    // 2010), held over its reservoir at the cited humidity, not fitted.
+    let table = table_under(Speciation::CarbonAndOxygen);
+    let titan = found(&table, "Titan");
+    let air = titan.atmosphere();
+    let x = mole_fraction(air, Gas::Methane);
+    eprintln!(
+        "Titan: {:.3} K, {:.4} bar, CH4 {:.4}, N2 {:.4}",
+        air.surface_temperature().value(),
+        air.surface_pressure().unwrap().value() / 1e5,
+        x,
+        mole_fraction(air, Gas::Nitrogen),
+    );
+    assert_eq!(air.state(), SurfaceState::Snowball);
+    assert_eq!(air.carbon_carrier(), Some(CarbonCarrier::Methane));
+    assert!(((x - 0.0565) / 0.0565).abs() < 0.10, "Titan's CH4 at {x}");
+    assert_eq!(
+        air.partial_pressures().of(Gas::CarbonDioxide),
+        Pascals::ZERO
+    );
+    // Its carbon exceeds what its air holds: the air sits at the humidity over the reservoir.
+    let saturated = saturation_pressure(Gas::Methane.substance(), air.surface_temperature())
+        .unwrap()
+        .value();
+    assert_same_bits(
+        air.partial_pressures().of(Gas::Methane).value(),
+        METHANE_RELATIVE_HUMIDITY * saturated,
+    );
+    let weight = titan.surface_gravity().value()
+        / (4.0 * core::f64::consts::PI * math::powi(Metres::from(titan.radius()).value(), 2));
+    let carbon = titan.inventory().carbon_dioxide().value() * Gas::Methane.molar_mass_g_per_mol()
+        / Gas::CarbonDioxide.molar_mass_g_per_mol();
+    assert!(carbon * weight > 10.0 * air.partial_pressures().of(Gas::Methane).value());
+    // Its methane is kept with its nitrogen, though its own lighter molecule fails Jeans's test
+    // at the exobase multiple.
+    assert!(air.retention().retains(Gas::Nitrogen));
+    assert!(!air.retention().retains(Gas::Methane));
+    // The grey greenhouse reads no methane, and Titan stays within T13.c's 8% of 94 K.
+    let t = air.surface_temperature().value();
+    assert!(((t - 94.0) / 94.0).abs() < 0.08, "Titan at {t} K");
+}
+
+#[test]
+fn earth_venus_and_mars_keep_their_carbon_as_carbon_dioxide() {
+    // P14.T24.f: the inner planets formed inside the snow line keep their carbon as CO₂, and their
+    // air is P14.T13.c's: Venus's water was lost, but its sinks have taken all its oxygen.
+    let speciated = table_under(Speciation::CarbonAndOxygen);
+    let earlier = table_under(Speciation::Earlier);
+    for name in ["Mercury", "Venus", "Earth", "Mars", "Moon", "Ceres"] {
+        let air = found(&speciated, name).atmosphere();
+        assert_eq!(
+            air.carbon_carrier(),
+            Some(CarbonCarrier::CarbonDioxide),
+            "{name}"
+        );
+        assert_eq!(
+            air.partial_pressures().of(Gas::Methane),
+            Pascals::ZERO,
+            "{name}"
+        );
+        assert_eq!(found(&speciated, name), found(&earlier, name), "{name}");
+    }
+    for name in ["Venus", "Earth", "Mars"] {
+        let air = found(&speciated, name).atmosphere();
+        assert!(air.partial_pressures().of(Gas::CarbonDioxide) > Pascals::ZERO);
+    }
+    // Biotic oxygen is a gap for the owner: no plan produces life, so the generated Earth has no
+    // O₂, and no ozone follows from it (plan 14, Risks, the rendering plans' asks, question 1).
+    let earth = found(&speciated, "Earth").atmosphere();
+    assert_eq!(earth.partial_pressures().of(Gas::Oxygen), Pascals::ZERO);
+}
+
+#[test]
+fn venus_s_oxygen_is_under_a_thousandth_of_its_carbon_dioxide_by_its_sinks() {
+    // P14.T24.f: Venus lost its ocean, and its O₂ stays under 10⁻³ of its CO₂, which the sinks
+    // must give: the oxygen its water freed, less only what escaped with the hydrogen, would be
+    // more than its carbon dioxide. Venus's measured O₂ is under 0.3 ppmv above 58 km (Trauger
+    // and Lunine 1983, as Marcq et al. 2018, Space Sci. Rev. 214, 10, give it), and the
+    // generated Venus's is none.
+    let table = table_under(Speciation::CarbonAndOxygen);
+    let venus = found(&table, "Venus");
+    let air = venus.atmosphere();
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    let (o2, co2) = (
+        air.partial_pressures().of(Gas::Oxygen).value(),
+        air.partial_pressures().of(Gas::CarbonDioxide).value(),
+    );
+    assert!(
+        o2 < 1e-3 * co2,
+        "Venus's O2 at {o2} Pa against {co2} Pa of CO2"
+    );
+    // Its oxygen is not lost to Jeans escape: its sinks take it.
+    assert!(air.retention().retains(Gas::Oxygen));
+    let lost = venus.inventory().water();
+    let (mass, radius) = (Kilograms::from(venus.mass()), Metres::from(venus.radius()));
+    let freed = lost.value() * Gas::Oxygen.molar_mass_g_per_mol()
+        / (2.0 * Gas::Water.molar_mass_g_per_mol());
+    let lights = [historic_sun()];
+    let eta = oxygen_escape_parameter(
+        mass,
+        radius,
+        lights[0]
+            .xuv()
+            .saturated_flux(Metres::new(0.723_332 * METRES_PER_AU), 0.006_772),
+    );
+    let weight = venus.surface_gravity().value()
+        / (4.0 * core::f64::consts::PI * math::powi(radius.value(), 2));
+    eprintln!(
+        "Venus: water lost {:.3e} kg, eta {eta:.3}, O2 before its sinks {:.1} bar, CO2 {:.1} bar",
+        lost.value(),
+        freed * (1.0 - eta) * weight / 1e5,
+        co2 / 1e5
+    );
+    assert!(lost > Kilograms::ZERO);
+    assert!(freed * (1.0 - eta) * weight > co2);
+}
+
+/// A runaway Earth that lost the water `water` (kg), at `age`, under the rules `speciation`, with
+/// the saturated X-ray and ultraviolet flux `xuv` (W m⁻²), in equilibrium at `equilibrium` (K).
+fn runaway_earth(
+    water: f64,
+    age: f64,
+    xuv: f64,
+    equilibrium: f64,
+    speciation: Speciation,
+) -> Atmosphere {
+    atmosphere_under(
+        &AtmosphereInputs {
+            mass: Kilograms::new(EARTH_MASS_KG),
+            radius: Metres::new(crate::units::consts::EARTH_RADIUS_M),
+            material: SurfaceMaterial::Rock,
+            envelope_fraction: 0.0,
+            inventory: VolatileInventory::new(
+                Kilograms::new(water),
+                Kilograms::new(3.6e20),
+                Kilograms::new(3.9e18),
+                Kilograms::new(6.6e16),
+            ),
+            formed: SnowLineSide::Inside,
+            equilibrium: Kelvin::new(equilibrium),
+            worst_equilibrium: Kelvin::new(equilibrium),
+            heated: Kelvin::new(equilibrium),
+            xuv_fluence: earth_xuv_fluence(),
+            saturated_xuv_flux: WattsPerSquareMetre::new(xuv),
+            insolation: Insolation::InsideRunaway,
+            crust: Crust::Solid,
+            age: Years::new(age),
+            hottest_host: Kelvin::new(5_772.0),
+        },
+        speciation,
+    )
+}
+
+#[test]
+fn a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks() {
+    // P14.T24.f: the oxygen of the water lost, less what escapes with the hydrogen (Luger and
+    // Barnes 2015, eqs. 5, 11 and 12) and what the surface takes up at Earth's rate per unit area
+    // (Catling 2014, through Luger and Barnes's §2.5.1), by hand.
+    let (water, age, xuv) = (1.4e22, 5e8, 1.0);
+    let air = runaway_earth(water, age, xuv, 255.0, Speciation::CarbonAndOxygen);
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    assert!(air.retention().retains(Gas::Oxygen));
+    let (mass, radius) = (
+        Kilograms::new(EARTH_MASS_KG),
+        Metres::new(crate::units::consts::EARTH_RADIUS_M),
+    );
+    let hydrogen = 1.008 * ATOMIC_MASS_CONSTANT_KG;
+    let g = GRAVITATIONAL_CONSTANT * mass.value() / math::powi(radius.value(), 2);
+    let reference =
+        0.30 * xuv * radius.value() / (4.0 * GRAVITATIONAL_CONSTANT * mass.value() * hydrogen);
+    let x = BOLTZMANN_CONSTANT * 400.0 * reference
+        / (10.0 * 4.8e19 * math::powf(400.0, 0.75) * g * hydrogen);
+    let eta = (x - 1.0) / (x + 8.0);
+    assert!(
+        (oxygen_escape_parameter(mass, radius, WattsPerSquareMetre::new(xuv)) / eta - 1.0).abs()
+            < 1e-12
+    );
+    assert!(eta > 0.1 && eta < 0.9, "η {eta}");
+    let freed = water * 31.998 / (2.0 * 18.015);
+    let taken = 2.21e13 * age * 31.998e-3;
+    let kept = freed * (1.0 - eta) - taken;
+    let by_paper = runaway_oxygen(
+        Kilograms::new(water),
+        mass,
+        radius,
+        WattsPerSquareMetre::new(xuv),
+        Years::new(age),
+    );
+    assert!(
+        (by_paper.value() / kept - 1.0).abs() < 1e-12,
+        "{by_paper:?} against {kept}"
+    );
+    let weight = g / (4.0 * core::f64::consts::PI * math::powi(radius.value(), 2));
+    let o2 = air.partial_pressures().of(Gas::Oxygen).value();
+    assert!((o2 / (kept * weight) - 1.0).abs() < 1e-12, "{o2} Pa");
+    eprintln!(
+        "ten oceans lost: {:.0} bar of O2 at {:.1} Gyr, η {eta:.3}",
+        o2 / 1e5,
+        age / 1e9
+    );
+    // Oxygen never condenses, and the air holds it with the carbon dioxide.
+    assert!(o2 > air.partial_pressures().of(Gas::CarbonDioxide).value());
+    // One that lost no water carries none.
+    let dry = runaway_earth(0.0, age, xuv, 255.0, Speciation::CarbonAndOxygen);
+    assert_eq!(dry.partial_pressures().of(Gas::Oxygen), Pascals::ZERO);
+    // Its surface takes it all up in time, and a magma ocean at once.
+    let old = runaway_earth(water, 2e10, xuv, 255.0, Speciation::CarbonAndOxygen);
+    assert_eq!(old.partial_pressures().of(Gas::Oxygen), Pascals::ZERO);
+    let molten = runaway_earth(water, age, xuv, 1_400.0, Speciation::CarbonAndOxygen);
+    assert_eq!(molten.state(), SurfaceState::MagmaOcean);
+    assert_eq!(molten.partial_pressures().of(Gas::Oxygen), Pascals::ZERO);
+    // Below the critical flux no oxygen escapes, and with more of it more does.
+    assert!(oxygen_escape_parameter(mass, radius, WattsPerSquareMetre::new(0.17)) <= 0.0);
+    let more = runaway_earth(water, age, 10.0, 255.0, Speciation::CarbonAndOxygen);
+    assert!(more.partial_pressures().of(Gas::Oxygen).value() < o2);
+    // The rules held until the bump give none.
+    let held = runaway_earth(water, age, xuv, 255.0, Speciation::Earlier);
+    assert_eq!(held.partial_pressures().of(Gas::Oxygen), Pascals::ZERO);
+}
+
+#[test]
+fn oxygen_escapes_above_luger_and_barnes_s_critical_flux() {
+    // Luger and Barnes's eq. 9: F_crit = 180 (M ÷ M⊕)² (R ÷ R⊕)⁻³ erg cm⁻² s⁻¹ at ε 0.30, which
+    // the constants give to within their rounding (178 for Earth).
+    for (m, r) in [(1.0, 1.0), (5.0, 1.5), (0.815, 0.95), (0.107, 0.532)] {
+        let mass = Kilograms::new(m * EARTH_MASS_KG);
+        let radius = Metres::new(r * crate::units::consts::EARTH_RADIUS_M);
+        let critical = 0.18 * m * m / (r * r * r);
+        let eta = |f: f64| oxygen_escape_parameter(mass, radius, WattsPerSquareMetre::new(f));
+        assert!(eta(0.97 * critical) <= 0.0, "{m} M⊕");
+        assert!(eta(1.03 * critical) > 0.0, "{m} M⊕");
+        // η rises towards 1, the water's own proportion, far above it.
+        assert!(eta(10.0 * critical) > eta(2.0 * critical));
+        assert!((eta(1e4 * critical) - 1.0).abs() < 1e-3);
+    }
+    let earth = (
+        Kilograms::new(EARTH_MASS_KG),
+        Metres::new(crate::units::consts::EARTH_RADIUS_M),
+    );
+    assert!(oxygen_escape_parameter(earth.0, earth.1, WattsPerSquareMetre::new(f64::NAN)) <= 0.0);
+    assert!(
+        oxygen_escape_parameter(Kilograms::ZERO, earth.1, WattsPerSquareMetre::new(1.0)) <= 0.0
+    );
+    assert_same_bits(
+        oxygen_escape_parameter(earth.0, earth.1, WattsPerSquareMetre::new(f64::INFINITY)),
+        1.0,
+    );
+}
+
+/// A Titan-like cold moon formed on the side `formed` of the snow line, with nitrogen and the
+/// carbon `carbon` (kg, counted as carbon dioxide) in its inventory, in equilibrium at
+/// `equilibrium` (K), its crust `crust`.
+fn cold_moon(carbon: f64, equilibrium: f64, formed: SnowLineSide, crust: Crust) -> Atmosphere {
+    atmosphere_under(
+        &AtmosphereInputs {
+            mass: Kilograms::new(1.345e23),
+            radius: Metres::new(2.575e6),
+            material: SurfaceMaterial::Ice,
+            envelope_fraction: 0.0,
+            inventory: VolatileInventory::new(
+                Kilograms::new(1e22),
+                Kilograms::new(carbon),
+                Kilograms::new(9e18),
+                Kilograms::ZERO,
+            ),
+            formed,
+            equilibrium: Kelvin::new(equilibrium),
+            worst_equilibrium: Kelvin::new(82.0),
+            heated: Kelvin::new(equilibrium),
+            xuv_fluence: JoulesPerSquareMetre::ZERO,
+            saturated_xuv_flux: WattsPerSquareMetre::ZERO,
+            insolation: Insolation::BeyondMaximumGreenhouse,
+            crust,
+            age: SOLAR_AGE,
+            hottest_host: Kelvin::new(5_772.0),
+        },
+        Speciation::CarbonAndOxygen,
+    )
+}
+
+#[test]
+fn methane_is_held_at_its_humidity_only_over_a_reservoir() {
+    // A large carbon inventory leaves a reservoir on the surface and the air at
+    // METHANE_RELATIVE_HUMIDITY of saturation; a small one is all airborne, subsaturated.
+    let rich = cold_moon(1e21, 75.6, SnowLineSide::Beyond, Crust::Solid);
+    let t = rich.surface_temperature();
+    let saturated = saturation_pressure(Gas::Methane.substance(), t)
+        .unwrap()
+        .value();
+    assert_eq!(rich.carbon_carrier(), Some(CarbonCarrier::Methane));
+    assert_same_bits(
+        rich.partial_pressures().of(Gas::Methane).value(),
+        METHANE_RELATIVE_HUMIDITY * saturated,
+    );
+    let poor = cold_moon(1e15, 75.6, SnowLineSide::Beyond, Crust::Solid);
+    let weight = GRAVITATIONAL_CONSTANT * 1.345e23
+        / math::powi(2.575e6, 2)
+        / (4.0 * core::f64::consts::PI * math::powi(2.575e6, 2));
+    let methane = 1e15 * 16.043 / 44.009 * weight;
+    let p = poor.partial_pressures().of(Gas::Methane).value();
+    assert!(
+        (p / methane - 1.0).abs() < 1e-12,
+        "{p} Pa against {methane}"
+    );
+    assert!(p < METHANE_RELATIVE_HUMIDITY * saturated);
+    // Formed inside the snow line, the same moon keeps its carbon as frozen carbon dioxide.
+    let inner = cold_moon(1e21, 75.6, SnowLineSide::Inside, Crust::Solid);
+    assert_eq!(inner.carbon_carrier(), Some(CarbonCarrier::CarbonDioxide));
+    assert_eq!(inner.partial_pressures().of(Gas::Methane), Pascals::ZERO);
+    // A young magma ocean holds its carbon as carbon dioxide, however cold its greenhouse.
+    let molten = cold_moon(1e21, 75.6, SnowLineSide::Beyond, Crust::Molten);
+    assert_eq!(molten.state(), SurfaceState::MagmaOcean);
+    assert_eq!(molten.carbon_carrier(), Some(CarbonCarrier::CarbonDioxide));
+    assert_eq!(molten.partial_pressures().of(Gas::Methane), Pascals::ZERO);
+}
+
+#[test]
+fn a_gas_envelope_and_a_body_of_no_mass_have_no_carbon_carrier() {
+    let inputs = |envelope_fraction: f64, mass: Kilograms| AtmosphereInputs {
+        mass,
+        radius: Metres::new(2.5e7),
+        material: SurfaceMaterial::Ice,
+        envelope_fraction,
+        inventory: VolatileInventory::new(
+            Kilograms::new(1e22),
+            Kilograms::new(1e21),
+            Kilograms::new(1e20),
+            Kilograms::ZERO,
+        ),
+        formed: SnowLineSide::Beyond,
+        equilibrium: Kelvin::new(60.0),
+        worst_equilibrium: Kelvin::new(60.0),
+        heated: Kelvin::new(60.0),
+        xuv_fluence: JoulesPerSquareMetre::ZERO,
+        saturated_xuv_flux: WattsPerSquareMetre::ZERO,
+        insolation: Insolation::BeyondMaximumGreenhouse,
+        crust: Crust::Solid,
+        age: SOLAR_AGE,
+        hottest_host: Kelvin::new(5_772.0),
+    };
+    let envelope = atmosphere_under(
+        &inputs(0.1, Kilograms::new(15.0 * EARTH_MASS_KG)),
+        Speciation::CarbonAndOxygen,
+    );
+    assert_eq!(envelope.state(), SurfaceState::GasEnvelope);
+    assert_eq!(envelope.carbon_carrier(), None);
+    let nothing = atmosphere_under(&inputs(0.0, Kilograms::ZERO), Speciation::CarbonAndOxygen);
+    assert_eq!(nothing.state(), SurfaceState::Airless);
+    assert_eq!(nothing.carbon_carrier(), None);
+}
+
+#[test]
+fn the_speciated_atmosphere_is_the_same_twice() {
+    // The rules the bump puts in force are pure: a methane world and an oxygen world derived twice
+    // are the same.
+    let first = table_under(Speciation::CarbonAndOxygen);
+    let again = table_under(Speciation::CarbonAndOxygen);
+    for ((name, a), (_, b)) in first.iter().zip(&again) {
+        assert_eq!(a, b, "{name}");
+    }
+    let wet = runaway_earth(1.4e22, 5e8, 1.0, 255.0, Speciation::CarbonAndOxygen);
+    let wet_again = runaway_earth(1.4e22, 5e8, 1.0, 255.0, Speciation::CarbonAndOxygen);
+    assert_eq!(wet, wet_again);
+    for gas in Gas::ALL {
+        assert_same_bits(
+            wet.partial_pressures().of(gas).value(),
+            wet_again.partial_pressures().of(gas).value(),
+        );
+    }
+}
+
+#[test]
+fn the_carbon_changes_carrier_only_where_its_surface_crosses_the_threshold() {
+    // P14.T24.f: as the light warms a cold moon, its carbon is methane while its surface is at most
+    // METHANE_CARBON_TEMPERATURE and carbon dioxide above; its gases move continuously but where
+    // the carrier changes, a recorded state change.
+    let mut previous: Option<Atmosphere> = None;
+    let mut changes = 0;
+    for i in 0..=2_000 {
+        let air = cold_moon(
+            1e21,
+            90.0 + 0.04 * f64::from(i),
+            SnowLineSide::Beyond,
+            Crust::Solid,
+        );
+        let t = air.surface_temperature().value();
+        let carrier = air.carbon_carrier().unwrap();
+        assert_eq!(
+            carrier == CarbonCarrier::Methane,
+            t <= METHANE_CARBON_TEMPERATURE.value(),
+            "{t} K"
+        );
+        if let Some(before) = previous {
+            if before.carbon_carrier() == air.carbon_carrier() && before.state() == air.state() {
+                let total = air.partial_pressures().total().value();
+                for gas in Gas::ALL {
+                    let jump = (air.partial_pressures().of(gas).value()
+                        - before.partial_pressures().of(gas).value())
+                    .abs();
+                    assert!(jump < 1e-2 * total, "{gas:?} jumps by {jump} Pa at {t} K");
+                }
+            } else {
+                changes += 1;
+            }
+        }
+        previous = Some(air);
+    }
+    assert_eq!(changes, 1, "the carrier changes once");
+}
+
+#[test]
+fn no_body_inside_the_snow_line_or_warmer_than_the_threshold_takes_methane() {
+    // Bodies from 0.05 to 50 au of a Sun, from a Ceres to 5 M⊕, formed where they lie, under
+    // P14.T24.f's rules; and every body's fractions sum to 1 to 10⁻⁹.
+    let disc = solar_disc();
+    let mut methane_worlds = 0;
+    for i in 0..30 {
+        let a = 0.05 * math::exp10(f64::from(i) / 10.0);
+        for m in [1e-3, 0.02, 0.1, 1.0, 5.0] {
+            for rank in [0.1, 0.5, 0.9] {
+                let o = orbit(a, 0.0);
+                let placed = PlacedBody::new(
+                    EarthMasses::new(m),
+                    o,
+                    o.semi_major_axis(),
+                    UnitUniform::new(rank).unwrap(),
+                )
+                .unwrap();
+                let body = derive_under(&placed, &disc, SOLAR_AGE, Speciation::CarbonAndOxygen);
+                let air = body.atmosphere();
+                let methane = air.partial_pressures().of(Gas::Methane);
+                let cold = air.surface_temperature() <= METHANE_CARBON_TEMPERATURE;
+                if body.formed() == SnowLineSide::Inside || !cold {
+                    assert_eq!(methane, Pascals::ZERO, "{m} M⊕ at {a} au");
+                    assert_ne!(
+                        air.carbon_carrier(),
+                        Some(CarbonCarrier::Methane),
+                        "{m} M⊕ at {a} au"
+                    );
+                }
+                if methane > Pascals::ZERO && air.keeps_atmosphere() {
+                    methane_worlds += 1;
+                }
+                if let Some(total) = air.surface_pressure().filter(|p| p.value() > 0.0) {
+                    let sum = Gas::ALL.iter().fold(0.0, |sum, &gas| {
+                        sum + air.partial_pressures().of(gas).value() / total.value()
+                    });
+                    assert!((sum - 1.0).abs() < 1e-9, "{m} M⊕ at {a} au: {sum}");
+                }
+            }
+        }
+    }
+    eprintln!("{methane_worlds} methane worlds with air");
+    assert!(methane_worlds > 0);
+}
+
+#[test]
+fn every_table_body_s_fractions_sum_to_one() {
+    for (name, body) in table_under(Speciation::CarbonAndOxygen) {
+        let air = body.atmosphere();
+        let Some(total) = air.surface_pressure().filter(|p| p.value() > 0.0) else {
+            continue;
+        };
+        let sum = Gas::ALL.iter().fold(0.0, |sum, &gas| {
+            sum + air.partial_pressures().of(gas).value() / total.value()
+        });
+        assert!((sum - 1.0).abs() < 1e-9, "{name}: {sum}");
+    }
+}
+
+#[test]
+fn the_gases_are_continuous_in_time_but_at_a_recorded_state_change() {
+    // P14.T24.f: Titan's methane and a water-rich runaway world's oxygen, at steps of 0.1% in age
+    // over 0.2–10 Gyr: no partial pressure jumps by 10⁻³ of the surface pressure but where the
+    // state, the retained gases or the carbon's carrier change.
+    let disc = solar_disc();
+    let (_, kg, km, a, e) = SMALL_BODIES[2];
+    let titan = placed_about_the_sun(&disc, (kg, km, a, e));
+    let wet = VolatileDraws {
+        water: UnitUniform::new(0.99).unwrap(),
+        ..VolatileDraws::MEDIAN
+    };
+    let runaway = {
+        let o = orbit(0.6, 0.0);
+        PlacedBody::new(
+            EarthMasses::new(2.0),
+            o,
+            o.semi_major_axis(),
+            UnitUniform::HALF,
+        )
+        .unwrap()
+        .with_volatiles(wet)
+    };
+    let mut oxygen_seen = false;
+    for placed in [titan, runaway] {
+        let mut previous: Option<Atmosphere> = None;
+        let mut age = 2e8;
+        while age < 1e10 {
+            let air = *derive_under(&placed, &disc, Years::new(age), Speciation::CarbonAndOxygen)
+                .atmosphere();
+            oxygen_seen |= air.partial_pressures().of(Gas::Oxygen) > Pascals::ZERO;
+            if let Some(before) = previous {
+                let recorded = before.state() != air.state()
+                    || before.retention() != air.retention()
+                    || before.carbon_carrier() != air.carbon_carrier();
+                if !recorded {
+                    let total = air.partial_pressures().total().value();
+                    for gas in Gas::ALL {
+                        let jump = (air.partial_pressures().of(gas).value()
+                            - before.partial_pressures().of(gas).value())
+                        .abs();
+                        assert!(
+                            jump < 1e-3 * total,
+                            "{gas:?} jumps by {jump} Pa at {age} yr"
+                        );
+                    }
+                }
+            }
+            previous = Some(air);
+            age *= 1.001;
+        }
+    }
+    assert!(oxygen_seen, "the runaway world keeps oxygen for a while");
+}
+
+/// P14.T24.f's figures under the rules the 21 → 22 bump puts in force, pinned bit for bit while
+/// they are held, as P14.T14.d pinned its held Love numbers: the table's bodies' gases and
+/// carriers about the Sun with its X-ray history, a runaway Earth's oxygen, a cold moon's methane,
+/// and the closed forms at a few inputs. The bump moves none of them.
+#[test]
+fn the_speciated_figures_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let gases = |w: &mut GoldenWriter, name: &str, air: &Atmosphere| {
+        w.line(&format!("{name}_surface_state = {:?}", air.state()));
+        w.f64(
+            &format!("{name}_surface_temperature"),
+            air.surface_temperature().value(),
+        );
+        for gas in Gas::ALL {
+            let gas_name = format!("{gas:?}").to_lowercase();
+            w.f64(
+                &format!("{name}_partial_pressure_{gas_name}"),
+                air.partial_pressures().of(gas).value(),
+            );
+        }
+        w.line(&format!(
+            "{name}_carbon_carrier = {:?}",
+            air.carbon_carrier()
+        ));
+    };
+    for (name, body) in table_under(Speciation::CarbonAndOxygen) {
+        gases(&mut w, &name.to_lowercase(), body.atmosphere());
+    }
+    for (name, age, xuv) in [
+        ("runaway_young", 5e8, 1.0),
+        ("runaway_bright", 5e8, 10.0),
+        ("runaway_old", 1.5e9, 1.0),
+    ] {
+        let air = runaway_earth(1.4e22, age, xuv, 255.0, Speciation::CarbonAndOxygen);
+        gases(&mut w, name, &air);
+    }
+    for (name, carbon) in [("cold_moon_rich", 1e21), ("cold_moon_poor", 1e15)] {
+        let air = cold_moon(carbon, 75.6, SnowLineSide::Beyond, Crust::Solid);
+        gases(&mut w, name, &air);
+    }
+    let (mass, radius) = (
+        Kilograms::new(EARTH_MASS_KG),
+        Metres::new(crate::units::consts::EARTH_RADIUS_M),
+    );
+    for flux in [0.1, 0.19, 1.0, 10.0, 100.0] {
+        w.f64(
+            &format!("earth_oxygen_escape_parameter_at_{flux}"),
+            oxygen_escape_parameter(mass, radius, WattsPerSquareMetre::new(flux)),
+        );
+    }
+    for age in [1e8, 1e9, 1.5e9] {
+        w.f64(
+            &format!("earth_runaway_oxygen_of_an_ocean_at_{age:e}"),
+            runaway_oxygen(
+                Kilograms::new(1.4e21),
+                mass,
+                radius,
+                WattsPerSquareMetre::new(1.0),
+                Years::new(age),
+            )
+            .value(),
+        );
+    }
+    let sun = historic_sun();
+    w.f64(
+        "sun_saturated_flux_at_1_au",
+        sun.xuv()
+            .saturated_flux(Metres::new(METRES_PER_AU), 0.0)
+            .value(),
+    );
+    golden!("planetary/atmosphere_speciation", w.as_str());
 }

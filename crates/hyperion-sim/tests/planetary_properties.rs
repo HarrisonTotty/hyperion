@@ -12,7 +12,9 @@ mod planetary_support;
 
 use hyperion_sim::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
 use hyperion_sim::planetary::context::XuvHistory;
-use hyperion_sim::planetary::derive::atmosphere::{Retention, SurfaceState, VolatileDraws};
+use hyperion_sim::planetary::derive::atmosphere::{
+    CarbonCarrier, Retention, SurfaceState, VolatileDraws,
+};
 use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
 use hyperion_sim::planetary::placement::PlacedPlanet;
 use hyperion_sim::stellar::draws::{StarDraws, UnitUniform};
@@ -78,6 +80,7 @@ struct Derived {
     envelope: f64,
     state: SurfaceState,
     retention: Retention,
+    carbon: Option<CarbonCarrier>,
 }
 
 /// The body `p` of `host`, with radius rank `rank` and volatile ranks `volatiles`, at `t`, about
@@ -138,6 +141,7 @@ fn derive_at(
             envelope: body.fractions().envelope(),
             state: air.state(),
             retention: air.retention(),
+            carbon: air.carbon_carrier(),
         },
         hottest,
     ))
@@ -249,8 +253,8 @@ fn no_planet_hotter_than_its_star() {
 
 /// P14.T16.b: a body's radius, temperatures and envelope fraction are continuous in time across
 /// ±H: at steps of a year, no relative jump reaches 10⁻³ except where a star it orbits changes
-/// phase in that step, or the body's surface state or the gases it retains change (a recorded
-/// state change).
+/// phase in that step, or the body's surface state, the gases it retains or its carbon's carrier
+/// (P14.T24.f) change (a recorded state change).
 #[test]
 fn radius_temperature_and_envelope_are_continuous_in_time() {
     let galaxy = galaxy(SEED);
@@ -289,7 +293,11 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
                                 continue;
                             };
                             steps += 1;
-                            if changed || b.state != n.state || b.retention != n.retention {
+                            if changed
+                                || b.state != n.state
+                                || b.retention != n.retention
+                                || b.carbon != n.carbon
+                            {
                                 continue;
                             }
                             let jump = |x: f64, y: f64| ((y - x) / x).abs();

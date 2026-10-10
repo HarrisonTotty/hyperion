@@ -22,6 +22,14 @@
 //!   grey atmosphere warms the surface to `T_s` = `T_eq` (1 + ¾τ)^¼ ([`atmosphere`]). The state,
 //!   and from it the Bond albedo and cloud fraction that the equilibrium temperature reads next,
 //!   follow ([`SurfaceState`]).
+//! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line whose surface
+//!   is at most [`METHANE_CARBON_TEMPERATURE`] carries its carbon as methane, held where a
+//!   reservoir lies on its surface at [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure; a
+//!   runaway world keeps the oxygen of the water it lost, less what escapes with the hydrogen and
+//!   what its surface takes up ([`runaway_oxygen`]; Luger and Barnes 2015). No rule makes
+//!   biological oxygen: no plan produces life, so a generated Earth has none. The rules are held
+//!   until the 21 → 22 batch's bump (`CARBON_SPECIATION_VERSION`): below it [`atmosphere`] is
+//!   P14.T13.c's, bit for bit, so that the batch's goldens move once.
 //!
 //! The figures the plan names are built as it names them. The ones it leaves to this task are
 //! the lane's, each fixed by the Solar System and marked provisional on its constant: the
@@ -32,7 +40,6 @@
 //! a giant's internal heat enters only its gas envelope's temperature, so that the two can be
 //! told apart (ruling 112.7).
 
-use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::context::XuvHistory;
@@ -43,12 +50,13 @@ use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::substance::saturation_pressure;
 use crate::units::consts::{
-    BOLTZMANN_CONSTANT, EARTH_MASS_KG, GRAVITATIONAL_CONSTANT, METRES_PER_AU,
+    BOLTZMANN_CONSTANT, EARTH_MASS_KG, EARTH_RADIUS_M, GRAVITATIONAL_CONSTANT, METRES_PER_AU,
 };
 use crate::units::{
     EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, Pascals, SolarLuminosities,
-    SolarMasses, Years,
+    SolarMasses, WattsPerSquareMetre, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// The atomic mass constant, kg (CODATA 2022: 1.660 539 068 92 × 10⁻²⁷ kg), in which molecular
 /// masses are counted.
@@ -58,6 +66,40 @@ pub use crate::substance::MOLAR_GAS_CONSTANT;
 
 /// One bar, Pa, the unit the greenhouse constants are fitted in.
 const PASCALS_PER_BAR: f64 = 1e5;
+
+/// The generator version from which [`atmosphere`] applies P14.T24.f's carbon speciation and
+/// oxygen: 22, the 21 → 22 batch's bump (plan 14, "Order and parallelism", the bump plan).
+///
+/// P14.T24.f is built in that batch, whose goldens move once, at its bump in P14.T48.e. Below it
+/// [`Speciation::in_force`] gives P14.T13.c's rules, bit for bit version 21's, and from it
+/// P14.T24.f's. The bump removes this hold
+/// (`carbon_and_oxygen_are_held_only_until_the_batch_s_bump`).
+pub(crate) const CARBON_SPECIATION_VERSION: GeneratorVersion = GeneratorVersion::new(22);
+
+/// Which rules [`atmosphere`] gives a body's carbon and oxygen (P14.T24.f, held until the
+/// 21 → 22 batch's bump, [`CARBON_SPECIATION_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum Speciation {
+    /// P14.T13.c's, bit for bit version 21's: carbon is always carbon dioxide, and no body has
+    /// methane or oxygen.
+    Earlier,
+    /// P14.T24.f's: carbon is methane on a cold body formed beyond the snow line, and a runaway
+    /// world keeps the oxygen of the water it lost, less its sinks.
+    CarbonAndOxygen,
+}
+
+impl Speciation {
+    /// The rules of the generator version in force: [`Self::CarbonAndOxygen`] from
+    /// [`CARBON_SPECIATION_VERSION`], [`Self::Earlier`] below it.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        if GENERATOR_VERSION >= CARBON_SPECIATION_VERSION {
+            Self::CarbonAndOxygen
+        } else {
+            Self::Earlier
+        }
+    }
+}
 
 /// The species whose escape an atmosphere is judged on (P14.T13.b): the typed view of the substance
 /// registry's rows 0–8, which are these nine in [`Gas::ALL`]'s order ([`Gas::substance`],
@@ -466,7 +508,8 @@ impl VolatileInventory {
         self.water
     }
 
-    /// The carbon, as carbon dioxide.
+    /// The carbon, counted as carbon dioxide, its stored carrier (decision-composition §1.2). A
+    /// cold body's air may carry it as methane, mole for mole ([`atmosphere`], P14.T24.f).
     #[must_use]
     pub const fn carbon_dioxide(&self) -> Kilograms {
         self.carbon_dioxide
@@ -551,7 +594,7 @@ pub const NITROGEN_REFERENCE_TEMPERATURE: Kelvin = Kelvin::new(75.6);
 /// The grey optical depth of partial pressures `partials` over a surface in equilibrium at
 /// `equilibrium`: τ = Σ k × (p ÷ 1 bar)^½ over carbon dioxide, water and nitrogen (P14.T13.c), the
 /// plan's square root of each partial pressure, nitrogen's scaled for collision-induced
-/// absorption.
+/// absorption. Methane and oxygen enter no term ([`atmosphere`] says why).
 #[must_use]
 pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
     let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
@@ -597,6 +640,195 @@ impl PartialPressures {
 /// 2.2 × 10¹⁵ kg in the air over its [`EARTH_CARBON_DIOXIDE_PER_MASS`] (the carbonate–silicate
 /// cycle, Walker, Hays and Kasting 1981, JGR 86, 9776, in its simplest form; provisional).
 pub const TEMPERATE_AIRBORNE_CARBON: f64 = 6.0e-6;
+
+/// The surface temperature at or below which a body formed beyond the snow line carries its
+/// carbon as methane rather than carbon dioxide: 150 K (plan 14, P14.T24.f, R08.T1's draft,
+/// "`T_s` ≲ 150 K"; the lane's reading of it, provisional).
+///
+/// It stands in for the redox route that replaces it (decision-composition §1.3; P14.T55.a). At it
+/// carbon dioxide is frost, its saturation pressure under 1 kPa on the substance registry's curve,
+/// while methane stays volatile to its critical point, 190.564 K (Setzmann and Wagner 1991). A
+/// body formed inside the snow line keeps its carbon as carbon dioxide at any temperature, and so
+/// do Earth, Venus and Mars. The rule reads the surface temperature the greenhouse settles on, so
+/// a body whose surface crosses it changes its carbon's carrier there
+/// ([`Atmosphere::carbon_carrier`]), a recorded state change. The science check (2026-10-10)
+/// found no literature boundary at it: carbon's speciation is set by redox and formation chemistry, and
+/// the swap does not track the oxygen and hydrogen that CO₂ + 2 H₂O → CH₄ + 2 O₂ would move.
+pub const METHANE_CARBON_TEMPERATURE: Kelvin = Kelvin::new(150.0);
+
+/// The relative humidity of methane near a surface that holds a reservoir of it, over the
+/// liquid's saturation pressure: 0.5 (Niemann et al. 2010, JGR 115, E12006, §4.1: Titan's methane
+/// "just above the surface is subsaturated, at a relative humidity of approximately 50%", against
+/// the saturation pressure of methane over liquid methane with nitrogen dissolved in it, after
+/// Kouvaris and Flasar 1991; it reaches 100%, its lifting condensation level, near 7 km).
+///
+/// A cited constant, not a fit (main's ruling, 2026-10-10), for every cold world with a methane
+/// reservoir. Against the substance registry's curve for pure methane at the Huygens landing site's
+/// 93.65 K and 1,467 hPa (Fulchignoni et al. 2005, Nature 438, 785) it gives a mole fraction of
+/// 5.75%, against the probe's 5.65 ± 0.18% from 6.7 km to the surface (Niemann et al. 2010,
+/// abstract), so the nitrogen dissolved in the liquid, which lowers its vapour pressure, lies
+/// within the paper's "approximately": by §4.1's own pair of figures, 5.5% at about 50%, the
+/// paper's saturation, 11.0%, lies about 4% below the pure curve's 11.5%. Niemann et al. measured over the
+/// liquid at 93.65 K only: below methane's triple point, 90.6941 K, the registry's curve is the
+/// solid's, and the same 0.5 is extrapolated over it (the lane's, provisional), which keeps the
+/// gases continuous there. Titan's figure was measured far from its seas; the humidity does not
+/// vary with the surface's liquid coverage, which decides only whether a reservoir exists (the
+/// lane's, provisional).
+pub const METHANE_RELATIVE_HUMIDITY: f64 = 0.5;
+
+/// The share of the absorbed X-ray and ultraviolet energy that drives hydrogen out of a runaway
+/// world's steam atmosphere: 0.30 (Luger and Barnes 2015, Astrobiology 15, 119, §3: their default,
+/// within the 0.15–0.30 they take as typical of hydrogen-rich atmospheres). It is not
+/// [`ESCAPE_EFFICIENCY`], Owen and Wu's for a hydrogen and helium envelope.
+pub const WATER_LOSS_ESCAPE_EFFICIENCY: f64 = 0.30;
+
+/// The temperature of the flow that carries a runaway world's hydrogen away, K: 400, an average
+/// thermospheric temperature (Luger and Barnes 2015, §2.4.2, after Hunten, Pepin and Walker 1987,
+/// Icarus 69, 532, and Chassefière 1996b, Icarus 124, 537).
+pub const ESCAPING_FLOW_TEMPERATURE: Kelvin = Kelvin::new(400.0);
+
+/// The binary diffusion coefficient of atomic oxygen in atomic hydrogen at 1 K, m⁻¹ s⁻¹:
+/// 4.8 × 10¹⁹, from b = 4.8 × 10¹⁷ (T ÷ K)^0.75 cm⁻¹ s⁻¹ (Zahnle and Kasting 1986, Icarus 68, 462,
+/// as Luger and Barnes 2015 take it below their eq. 9), so that b = 4.8 × 10¹⁹ (T ÷ K)^0.75 m⁻¹ s⁻¹.
+pub const OXYGEN_IN_HYDROGEN_DIFFUSION_PER_METRE_SECOND: f64 = 4.8e19;
+
+/// Earth's removal of atmospheric oxygen by its surface, mol of O₂ per year: 2.21 × 10¹³, about
+/// 150 bar Gyr⁻¹ (Catling 2014, "The Great Oxidation Event Transition", Treatise on Geochemistry,
+/// 2nd ed., vol. 6, pp. 177–195, doi:10.1016/B978-0-08-095975-7.01307-3, as Luger and Barnes 2015,
+/// §2.5.1, quote it; their §5.1 reads "terrestrial rates of O₂ removal of a few hundred bars per
+/// Gyr" as able to remove Venus's oxygen). At 7.07 × 10¹¹ kg yr⁻¹ it is 137 bar Gyr⁻¹ in Luger
+/// and Barnes's equivalent bar, the mass of Earth's whole atmosphere, 5.148 × 10¹⁸ kg (Trenberth
+/// and Smith 2005, J. Climate 18, 864), and 136 at the 5.20 × 10¹⁸ kg that one bar over Earth's
+/// surface weighs.
+///
+/// Over two-thirds of it is the weathering of surface rocks; the rates set by tectonics are
+/// 3–12 bar Gyr⁻¹ of Fe³⁺ subducted (Catling, Zahnle and McKay 2001, Science 293, 839) and some
+/// 15 bar Gyr⁻¹ of reduced gases outgassed (Catling 2014), both through Luger and Barnes's §2.5.1,
+/// and Venus would need tectonics some 15 times Earth's to subduct its oxygen (Rosenqvist and
+/// Chassefière 1995, Planet. Space Sci. 43, 3, through their §2.5.4). Taking Earth's
+/// whole rate for a dry runaway world, per unit of surface area over Earth's 4π R⊕², over its
+/// whole age, is the lane's ([`runaway_oxygen`]; provisional, until P14.T53.a).
+pub const EARTH_OXYGEN_SINK_MOL_PER_YEAR: f64 = 2.21e13;
+
+/// The oxygen escape parameter η of a body of mass `mass` and radius `radius` whose water is
+/// broken by light and lost under the X-ray and ultraviolet flux `xuv`: the share of the oxygen
+/// freed that the escaping hydrogen drags away with it (Luger and Barnes 2015, eqs. 5, 11 and 12,
+/// after Hunten, Pepin and Walker 1987).
+///
+/// η = (x − 1) ÷ (x + 8) for x ≥ 1, and 0 below, where x = k T `F_ref` ÷ (10 b g `m_H`) and
+/// `F_ref` = ε `F_XUV` R ÷ (4 G M `m_H`) is the energy-limited hydrogen flux with no tidal
+/// enhancement, at ε [`WATER_LOSS_ESCAPE_EFFICIENCY`], T [`ESCAPING_FLOW_TEMPERATURE`] and
+/// b = [`OXYGEN_IN_HYDROGEN_DIFFUSION_PER_METRE_SECOND`] T^0.75. x is the flux over Luger and Barnes's critical
+/// flux, 180 (M ÷ M⊕)² (R ÷ R⊕)⁻³ erg cm⁻² s⁻¹ at ε 0.30 (their eq. 9), below which no oxygen
+/// escapes; far above it the oxygen leaves with the hydrogen in the water's own proportion.
+///
+/// Zero for a mass or radius that is not positive and finite, or a flux that is not positive, and
+/// one for an infinite flux.
+///
+/// # Examples
+///
+/// Earth's water would take its oxygen with it only under some 0.18 W m⁻² of X-rays and
+/// ultraviolet, 39 times what Earth receives today (Luger and Barnes), and nearly all of it under
+/// a hundred watts:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::atmosphere::oxygen_escape_parameter;
+/// use hyperion_sim::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M};
+/// use hyperion_sim::units::{Kilograms, Metres, WattsPerSquareMetre};
+///
+/// let (mass, radius) = (Kilograms::new(EARTH_MASS_KG), Metres::new(EARTH_RADIUS_M));
+/// let eta = |flux: f64| oxygen_escape_parameter(mass, radius, WattsPerSquareMetre::new(flux));
+/// assert!(eta(0.17) <= 0.0);
+/// assert!(eta(0.19) > 0.0);
+/// assert!(eta(100.0) > 0.98);
+/// ```
+#[must_use]
+pub fn oxygen_escape_parameter(mass: Kilograms, radius: Metres, xuv: WattsPerSquareMetre) -> f64 {
+    let (m, r, flux) = (mass.value(), radius.value(), xuv.value());
+    if !(m.is_finite() && m > 0.0 && r.is_finite() && r > 0.0 && flux > 0.0) {
+        return 0.0;
+    }
+    let hydrogen = 0.5 * Gas::Hydrogen.molecular_mass().value();
+    let reference_flux =
+        WATER_LOSS_ESCAPE_EFFICIENCY * flux * r / (4.0 * GRAVITATIONAL_CONSTANT * m * hydrogen);
+    let t = ESCAPING_FLOW_TEMPERATURE.value();
+    let diffusion = OXYGEN_IN_HYDROGEN_DIFFUSION_PER_METRE_SECOND * math::powf(t, 0.75);
+    let gravity = GRAVITATIONAL_CONSTANT * m / (r * r);
+    let x = BOLTZMANN_CONSTANT * t * reference_flux / (10.0 * diffusion * gravity * hydrogen);
+    if x.is_infinite() {
+        1.0
+    } else if x >= 1.0 {
+        (x - 1.0) / (x + 8.0)
+    } else {
+        0.0
+    }
+}
+
+/// The oxygen, as O₂, that a runaway-greenhouse world of mass `mass` and radius `radius` keeps at
+/// age `age` of the water `water_lost` it lost, having received the X-ray and ultraviolet flux
+/// `saturated_xuv` while its hosts were saturated (P14.T24.f; Luger and Barnes 2015):
+///
+/// - the water's photolysis frees W M(O₂) ÷ 2 M(H₂O) of oxygen as its hydrogen escapes, with the
+///   registry's molar masses;
+/// - the share η of it ([`oxygen_escape_parameter`]) escapes with the hydrogen, so that the oxygen
+///   kept is (8 − 8η) ÷ 9 of the mass of the water lost (Luger and Barnes's eqs. A8 and A9). The
+///   flux is the saturated one, taking the ocean as lost while its hosts are saturated, when the
+///   escape is fastest (the lane's, provisional; P14.T53.a integrates the escape over the
+///   history). That holds while the ocean is lost within the saturation time: at Luger and
+///   Barnes's eq. A9 rate, 9 ÷ (1 + 8η) times the energy-limited one, Venus's flux takes an Earth
+///   ocean in some 40 Myr, inside a Sun-like host's 100 Myr, and some two and a half oceans in
+///   all. The rest of a larger ocean is lost after the saturation ends, as the flux and η fall,
+///   and keeps more oxygen than this gives; and a young M dwarf, brighter than its zero-age
+///   luminosity, drives more escape;
+/// - the surface takes up oxygen at Earth's rate per unit area, [`EARTH_OXYGEN_SINK_MOL_PER_YEAR`]
+///   over 4π R⊕², over the body's whole age, a rate Luger and Barnes (§5.1) find able to remove
+///   Venus's. Earth's rate is mostly weathering, which a dry world lacks, and counting from
+///   formation overstates the sink of a world that entered its runaway late, under a brightening
+///   host (both the lane's, provisional).
+///
+/// None is left below zero, and a world that lost no water keeps none. A magma ocean holds the rest
+/// while it is molten ([`atmosphere`]).
+///
+/// # Examples
+///
+/// A young Earth that lost Earth's ocean keeps over a hundred bars of oxygen, which its surface
+/// has taken up after a couple of gigayears:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::atmosphere::runaway_oxygen;
+/// use hyperion_sim::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M};
+/// use hyperion_sim::units::{Kilograms, Metres, WattsPerSquareMetre, Years};
+///
+/// let (mass, radius) = (Kilograms::new(EARTH_MASS_KG), Metres::new(EARTH_RADIUS_M));
+/// let ocean = Kilograms::new(1.4e21);
+/// let kept = |age: f64| {
+///     runaway_oxygen(ocean, mass, radius, WattsPerSquareMetre::new(0.1), Years::new(age)).value()
+/// };
+/// // A bar over Earth's surface is 5.20 × 10¹⁸ kg.
+/// assert!(kept(1e8) > 100.0 * 5.20e18);
+/// assert!(kept(3e9) <= 0.0);
+/// ```
+#[must_use]
+pub fn runaway_oxygen(
+    water_lost: Kilograms,
+    mass: Kilograms,
+    radius: Metres,
+    saturated_xuv: WattsPerSquareMetre,
+    age: Years,
+) -> Kilograms {
+    let (water, r) = (water_lost.value(), radius.value());
+    if !(water.is_finite() && water > 0.0 && r.is_finite() && r > 0.0) {
+        return Kilograms::ZERO;
+    }
+    let oxygen = Gas::Oxygen.molar_mass_g_per_mol();
+    let freed = water * oxygen / (2.0 * Gas::Water.molar_mass_g_per_mol());
+    let kept = freed * (1.0 - oxygen_escape_parameter(mass, radius, saturated_xuv));
+    let area = (r / EARTH_RADIUS_M) * (r / EARTH_RADIUS_M);
+    let years = if age.value() > 0.0 { age.value() } else { 0.0 };
+    // Moles of O₂ times its molar mass in kilograms per mole.
+    let taken = EARTH_OXYGEN_SINK_MOL_PER_YEAR * area * years * oxygen * 1e-3;
+    Kilograms::new(if kept > taken { kept - taken } else { 0.0 })
+}
 
 /// The surface pressure below which a body is airless, Pa: 100 (1 mbar; the lane's). Mars's
 /// 600 Pa is an atmosphere; Pluto's and Triton's 1 Pa, the exospheres of Mercury, the Moon and the
@@ -732,6 +964,9 @@ pub struct AtmosphereInputs {
     pub envelope_fraction: f64,
     /// Its volatile inventory ([`volatile_inventory`]).
     pub inventory: VolatileInventory,
+    /// The side of the snow line it formed on, which its inventory and, on a cold surface, its
+    /// carbon's carrier follow (P14.T24.f).
+    pub formed: SnowLineSide,
     /// Its equilibrium temperature from its hosts' light at the time, at the albedo in use.
     pub equilibrium: Kelvin,
     /// Its equilibrium temperature at its hosts' largest past luminosity, at the same albedo.
@@ -741,10 +976,15 @@ pub struct AtmosphereInputs {
     pub heated: Kelvin,
     /// The X-ray and ultraviolet energy per unit area it has received.
     pub xuv_fluence: JoulesPerSquareMetre,
+    /// The X-ray and ultraviolet flux it received while its hosts' activity was saturated, the
+    /// one under which a runaway world loses its water (P14.T24.f, [`runaway_oxygen`]).
+    pub saturated_xuv_flux: WattsPerSquareMetre,
     /// Where it lies against its hosts' habitable zone.
     pub insolation: Insolation,
     /// Whether its crust has formed.
     pub crust: Crust,
+    /// Its age at the time, over which its surface takes up oxygen (P14.T24.f).
+    pub age: Years,
     /// The hottest effective temperature of its luminous hosts, which no surface exceeds.
     pub hottest_host: Kelvin,
 }
@@ -761,6 +1001,7 @@ pub struct Atmosphere {
     optical_depth: f64,
     albedo: BondAlbedo,
     cloud_fraction: f64,
+    carbon_carrier: Option<CarbonCarrier>,
 }
 
 impl Atmosphere {
@@ -819,6 +1060,26 @@ impl Atmosphere {
         self.cloud_fraction
     }
 
+    /// The species the body's carbon is airborne as (P14.T24.f): [`CarbonCarrier::Methane`] on a
+    /// body formed beyond the snow line whose surface is at most [`METHANE_CARBON_TEMPERATURE`],
+    /// and [`CarbonCarrier::CarbonDioxide`] otherwise; `None` for a gas envelope, whose
+    /// composition is not this module's, and for a body of no mass or radius.
+    ///
+    /// It is judged at the temperature the greenhouse settles on, at which the partial pressures
+    /// are taken: an airless body's surface is then reported at its equilibrium temperature, and a
+    /// magma ocean's at least at the solidus. A young magma ocean holds its carbon as carbon
+    /// dioxide. It names the species whether or not any carbon is airborne: a cold airless moon
+    /// formed beyond the snow line, which kept none, reads methane.
+    ///
+    /// A change of carrier is a recorded state change, as a change of [`Self::state`] or of
+    /// [`Self::retention`] is: the carbon's partial pressure moves from one species to the other
+    /// there. Until the 21 → 22 batch's bump it is always carbon dioxide
+    /// (`CARBON_SPECIATION_VERSION`).
+    #[must_use]
+    pub const fn carbon_carrier(&self) -> Option<CarbonCarrier> {
+        self.carbon_carrier
+    }
+
     /// Whether the body keeps an atmosphere: every state but [`SurfaceState::Airless`]. "None" is
     /// data, not a missing value: an airless body's atmosphere is this, with its tenuous partial
     /// pressures.
@@ -828,13 +1089,140 @@ impl Atmosphere {
     }
 }
 
+/// The species a body's carbon is airborne as (P14.T24.f, [`Atmosphere::carbon_carrier`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CarbonCarrier {
+    /// Carbon dioxide, CO₂: a body formed inside the snow line, and one beyond it whose surface is
+    /// warmer than [`METHANE_CARBON_TEMPERATURE`].
+    CarbonDioxide,
+    /// Methane, CH₄: a body formed beyond the snow line whose surface is at most
+    /// [`METHANE_CARBON_TEMPERATURE`].
+    Methane,
+}
+
+impl From<CarbonCarrier> for Gas {
+    fn from(carrier: CarbonCarrier) -> Self {
+        match carrier {
+            CarbonCarrier::CarbonDioxide => Self::CarbonDioxide,
+            CarbonCarrier::Methane => Self::Methane,
+        }
+    }
+}
+
+/// What a body's carbon becomes on a cold surface (P14.T24.f).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColdCarbon {
+    /// Carbon dioxide at every temperature: P14.T13.c's rule, and a body formed inside the snow
+    /// line.
+    CarbonDioxide,
+    /// Methane at or below [`METHANE_CARBON_TEMPERATURE`]: a body formed beyond the snow line.
+    Methane,
+}
+
 /// The masses of each gas a body's climate leaves free to fill its air, before condensation.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct Airborne {
     water: f64,
     carbon_dioxide: f64,
+    /// The carbon as methane, airborne in the carbon dioxide's place where
+    /// [`Self::carbon_carrier`] is methane (P14.T24.f).
+    methane: f64,
     nitrogen: f64,
     argon: f64,
+    oxygen: f64,
+    cold_carbon: ColdCarbon,
+}
+
+impl Airborne {
+    /// What escape leaves of the inventory of the body `inputs` describe, whose retention is
+    /// `retention`, under the carbon rules `speciation` ([`atmosphere`]'s step 2).
+    #[must_use]
+    fn kept(inputs: &AtmosphereInputs, retention: Retention, speciation: Speciation) -> Self {
+        let kept = |gas: Gas, mass: Kilograms| {
+            if retention.retains(gas) {
+                mass.value()
+            } else {
+                0.0
+            }
+        };
+        let inventory = &inputs.inventory;
+        let cold_carbon = match (speciation, inputs.formed) {
+            (Speciation::CarbonAndOxygen, SnowLineSide::Beyond) => ColdCarbon::Methane,
+            (Speciation::CarbonAndOxygen, SnowLineSide::Inside) | (Speciation::Earlier, _) => {
+                ColdCarbon::CarbonDioxide
+            }
+        };
+        // The same carbon, mole for mole, as methane: the hydrogen comes from the body's water.
+        let methane = match cold_carbon {
+            ColdCarbon::Methane if retention.retains(Gas::Nitrogen) => {
+                inventory.carbon_dioxide().value() * Gas::Methane.molar_mass_g_per_mol()
+                    / Gas::CarbonDioxide.molar_mass_g_per_mol()
+            }
+            ColdCarbon::Methane | ColdCarbon::CarbonDioxide => 0.0,
+        };
+        Self {
+            water: kept(Gas::Water, inventory.water()),
+            carbon_dioxide: kept(Gas::CarbonDioxide, inventory.carbon_dioxide()),
+            methane,
+            nitrogen: kept(Gas::Nitrogen, inventory.nitrogen()),
+            argon: kept(Gas::Argon, inventory.argon()),
+            oxygen: 0.0,
+            cold_carbon,
+        }
+    }
+
+    /// How the climate of the body `inputs` describe divides what it keeps, with retention
+    /// `retention` under the rules `speciation` ([`atmosphere`]'s step 3); the state it gives.
+    fn divide(
+        &mut self,
+        inputs: &AtmosphereInputs,
+        retention: Retention,
+        speciation: Speciation,
+    ) -> SurfaceState {
+        match (inputs.crust, inputs.insolation) {
+            // A young magma ocean, whatever its greenhouse's temperature, holds its carbon as
+            // carbon dioxide (the reported surface is at least the solidus).
+            (Crust::Molten, _) => {
+                self.cold_carbon = ColdCarbon::CarbonDioxide;
+                self.methane = 0.0;
+                SurfaceState::MagmaOcean
+            }
+            // Every drawn inventory holds water, so a body inside the runaway limit has lost an
+            // ocean; a dry one given by a caller keeps its carbon airborne in the same state.
+            (Crust::Solid, Insolation::InsideRunaway) => {
+                let lost = self.water;
+                self.water = 0.0;
+                if speciation == Speciation::CarbonAndOxygen && retention.retains(Gas::Oxygen) {
+                    self.oxygen = runaway_oxygen(
+                        Kilograms::new(lost),
+                        inputs.mass,
+                        inputs.radius,
+                        inputs.saturated_xuv_flux,
+                        inputs.age,
+                    )
+                    .value();
+                }
+                SurfaceState::RunawayGreenhouse
+            }
+            (Crust::Solid, Insolation::Habitable) => {
+                if self.water > 0.0 {
+                    self.carbon_dioxide *= TEMPERATE_AIRBORNE_CARBON;
+                    self.methane *= TEMPERATE_AIRBORNE_CARBON;
+                }
+                SurfaceState::Temperate
+            }
+            (Crust::Solid, Insolation::BeyondMaximumGreenhouse) => SurfaceState::Snowball,
+        }
+    }
+
+    /// The species the carbon is airborne as over a surface at temperature `t`.
+    #[must_use]
+    fn carbon_carrier(&self, t: Kelvin) -> CarbonCarrier {
+        match self.cold_carbon {
+            ColdCarbon::Methane if t <= METHANE_CARBON_TEMPERATURE => CarbonCarrier::Methane,
+            ColdCarbon::Methane | ColdCarbon::CarbonDioxide => CarbonCarrier::CarbonDioxide,
+        }
+    }
 }
 
 /// The surface temperature, partial pressures and optical depth of the airborne masses
@@ -842,8 +1230,9 @@ struct Airborne {
 /// equilibrium at `equilibrium`: the temperature iterated [`GREENHOUSE_STEPS`] times upward from
 /// the equilibrium temperature through the grey greenhouse its partial pressures give, each held at
 /// its saturation vapour pressure there (the substance registry's
-/// [`saturation_pressure`](crate::substance::saturation_pressure)), and held by `saturate` at the
-/// hottest host's.
+/// [`saturation_pressure`](crate::substance::saturation_pressure)), methane at
+/// [`METHANE_RELATIVE_HUMIDITY`] of it, and held by `saturate` at the hottest host's. The carbon is
+/// airborne as its carrier at each step's temperature ([`Airborne::carbon_carrier`]).
 fn greenhouse(
     airborne: &Airborne,
     weight: f64,
@@ -851,17 +1240,33 @@ fn greenhouse(
     saturate: &impl Fn(f64) -> Kelvin,
 ) -> (f64, PartialPressures, f64) {
     let partials_at = |t: f64| {
-        // A gas with no phase data never condenses: its saturation pressure is infinite.
-        let held = |mass: f64, gas: Gas| {
-            let saturation = saturation_pressure(gas.substance(), Kelvin::new(t))
-                .map_or(f64::INFINITY, Pascals::value);
-            (mass * weight).min(saturation)
+        let saturation = |gas: Gas| {
+            saturation_pressure(gas.substance(), Kelvin::new(t))
+                .map_or(f64::INFINITY, Pascals::value)
         };
+        // A gas with no phase data never condenses: its saturation pressure is infinite.
+        let held = |mass: f64, gas: Gas| (mass * weight).min(saturation(gas));
         let mut p = [Pascals::ZERO; 9];
         p[Gas::Water.index()] = Pascals::new(held(airborne.water, Gas::Water));
-        p[Gas::CarbonDioxide.index()] =
-            Pascals::new(held(airborne.carbon_dioxide, Gas::CarbonDioxide));
+        match airborne.carbon_carrier(Kelvin::new(t)) {
+            CarbonCarrier::Methane => {
+                p[Gas::Methane.index()] = Pascals::new(
+                    (airborne.methane * weight)
+                        .min(METHANE_RELATIVE_HUMIDITY * saturation(Gas::Methane)),
+                );
+            }
+            CarbonCarrier::CarbonDioxide => {
+                p[Gas::CarbonDioxide.index()] =
+                    Pascals::new(held(airborne.carbon_dioxide, Gas::CarbonDioxide));
+            }
+        }
         p[Gas::Nitrogen.index()] = Pascals::new(held(airborne.nitrogen, Gas::Nitrogen));
+        // Oxygen never condenses on a world that keeps it, whatever phase data its row gains. It
+        // is written only where there is some, so that a body without it is P14.T13.c's to the
+        // bit for every input.
+        if airborne.oxygen > 0.0 {
+            p[Gas::Oxygen.index()] = Pascals::new(airborne.oxygen * weight);
+        }
         p[Gas::Argon.index()] = Pascals::new(held(airborne.argon, Gas::Argon));
         PartialPressures(p)
     };
@@ -875,29 +1280,60 @@ fn greenhouse(
     (t, partials, tau)
 }
 
-/// The atmosphere of the body `inputs` describe (P14.T13.b–c).
+/// The atmosphere of the body `inputs` describe (P14.T13.b–c, with P14.T24.f's carbon and oxygen
+/// from the 21 → 22 batch's bump).
 ///
 /// 1. A body with a hydrogen and helium envelope of at least 0.1% of its mass is a
 ///    [`SurfaceState::GasEnvelope`] radiating at its heated temperature.
 /// 2. Otherwise each inventoried gas is kept if it is retained against Jeans escape at the exobase
-///    temperature ([`exobase_temperature`], [`Retention`]).
+///    temperature ([`exobase_temperature`], [`Retention`]). The carbon of a body formed beyond the
+///    snow line may become methane (step 4), which lies in the air of its surface reservoir and is
+///    kept where nitrogen, the cold worlds' bulk gas, is (P14.T24.f). Judged on its own lighter
+///    molecule at the exobase multiple that stands in for the bulk air's non-thermal losses
+///    ([`EXOBASE_MULTIPLE`]), Titan's would be lost, at λ ≈ 18; but its own Jeans parameter at
+///    Titan's real exobase, at a radius near 4,000 km and about 150 K, is some 20 to 29 (Johnson
+///    2010, ApJ 716, 1573, gives ~20; G M m ÷ k T r gives 29 there), its thermal escape
+///    negligible, and nitrogen's test at 5 `T_eq` is methane's own at 5 × 16.043 ÷ 28.014 =
+///    2.86 `T_eq`, above Titan's real ratio of exobase to effective temperature, 150 K ÷ 82 K ≈ 1.8
+///    (McKay, Pollack and Courtin 1991). Methane's real loss is to photolysis, and the rule takes
+///    the reservoir as resupplied.
 /// 3. The climate divides what is kept: inside the runaway limit the oceans are lost and all the
-///    carbon is airborne; in the habitable zone a world with water stores all but
-///    [`TEMPERATE_AIRBORNE_CARBON`] of its carbon in rock; beyond the maximum-greenhouse limit
-///    the carbon is airborne, since no ocean weathers it. A molten crust holds nothing back.
+///    carbon is airborne, and the oxygen of the water lost stays, less its sinks
+///    ([`runaway_oxygen`], P14.T24.f, if oxygen is retained); in the habitable zone a world with
+///    water stores all but [`TEMPERATE_AIRBORNE_CARBON`] of its carbon in rock; beyond the
+///    maximum-greenhouse limit the carbon is airborne, since no ocean weathers it. A molten crust
+///    holds nothing back.
 /// 4. The partial pressures are each airborne mass's weight over the surface, M g ÷ 4πR², held at
 ///    each gas's saturation vapour pressure at the surface temperature (water, carbon dioxide,
 ///    nitrogen and argon condense, by their rows of the substance registry,
 ///    [`saturation_pressure`](crate::substance::saturation_pressure)), which is iterated
 ///    [`GREENHOUSE_STEPS`] times upward from the equilibrium temperature through the grey
-///    greenhouse they give ([`optical_depth`], [`grey_surface_temperature`]).
+///    greenhouse they give ([`optical_depth`], [`grey_surface_temperature`]). On a body formed
+///    beyond the snow line whose surface is at most [`METHANE_CARBON_TEMPERATURE`] the carbon is
+///    methane, mole for mole, held at [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure
+///    where its surface holds a reservoir of it; oxygen never condenses (P14.T24.f).
 /// 5. A surface pressure below [`AIRLESS_PRESSURE`] is [`SurfaceState::Airless`], at the
 ///    equilibrium temperature; a surface over the [`SILICATE_SOLIDUS`], or a crust not yet formed,
-///    a [`SurfaceState::MagmaOcean`] (the young one at least at the solidus); the rest takes the
-///    climate's state.
+///    a [`SurfaceState::MagmaOcean`] (the young one at least at the solidus), whose melt holds any
+///    oxygen while it is molten (Luger and Barnes 2015, §2.5.3–2.5.4, after Hamano, Abe and Genda
+///    2013); the rest takes the climate's state. A world that freezes again gets back the oxygen
+///    its melt held, since the loss is not timed: that overstates the oxygen of one whose ocean was
+///    lost while it was molten, and suits one, as Luger and Barnes suggest for a dimming M dwarf's
+///    planets, whose mantle froze while it still lost water (provisional, until P14.T53.a).
 ///
 /// No surface is hotter than its hottest host: irradiation cannot lift it there, which is
 /// thermodynamics, so the temperature saturates at [`AtmosphereInputs::hottest_host`].
+///
+/// Methane and oxygen enter no term of the grey optical depth. P14.T13.c's nitrogen term was
+/// fitted on Titan, whose greenhouse is "caused primarily by pressure-induced opacity of N2, CH4,
+/// and H2" (McKay, Pollack and Courtin 1991, Science 253, 1118), so it already carries methane's
+/// share at Titan's proportion, and a methane term would count it twice. Where methane's share of
+/// the air differs from Titan's, its warming is not scaled, and the feedback of its vapour, set by
+/// the surface temperature, is not modelled. No term is fitted for oxygen (the lane's,
+/// provisional).
+///
+/// Until the 21 → 22 batch's bump (`CARBON_SPECIATION_VERSION`) the carbon is carbon dioxide on
+/// every body and no body has oxygen, as P14.T13.c gave, bit for bit.
 ///
 /// # Examples
 ///
@@ -911,7 +1347,9 @@ fn greenhouse(
 ///     atmosphere, earth_xuv_fluence, volatile_inventory,
 /// };
 /// use hyperion_sim::planetary::derive::{SnowLineSide, composition};
-/// use hyperion_sim::units::{EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, Years};
+/// use hyperion_sim::units::{
+///     EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, WattsPerSquareMetre, Years,
+/// };
 /// use hyperion_sim::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M};
 ///
 /// let solved = composition(EarthMasses::new(1.0), EarthRadii::new(1.0), SnowLineSide::Inside, EarthFluxes::new(1.0))?;
@@ -925,12 +1363,15 @@ fn greenhouse(
 ///     material: SurfaceMaterial::of(&fractions),
 ///     envelope_fraction: 0.0,
 ///     inventory,
+///     formed: SnowLineSide::Inside,
 ///     equilibrium: Kelvin::new(254.0),
 ///     worst_equilibrium: Kelvin::new(254.0),
 ///     heated: Kelvin::new(254.0),
 ///     xuv_fluence: earth_xuv_fluence(),
+///     saturated_xuv_flux: WattsPerSquareMetre::new(0.3),
 ///     insolation: Insolation::Habitable,
 ///     crust: Crust::Solid,
+///     age: Years::new(4.57e9),
 ///     hottest_host: Kelvin::new(5_772.0),
 /// });
 /// assert_eq!(earth.state(), SurfaceState::Temperate);
@@ -939,6 +1380,13 @@ fn greenhouse(
 /// ```
 #[must_use]
 pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
+    atmosphere_under(inputs, Speciation::in_force())
+}
+
+/// [`atmosphere`] under the carbon and oxygen rules `speciation`, which tests read from before
+/// the 21 → 22 batch's bump puts them in force (P14.T24.f, held).
+#[must_use]
+pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, speciation: Speciation) -> Atmosphere {
     let cap = inputs.hottest_host.value();
     let saturate = |t: f64| Kelvin::new(if cap > 0.0 { t.min(cap) } else { t });
     let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
@@ -949,7 +1397,7 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
     } else {
         Retention::default()
     };
-    let airless = |state: SurfaceState, partials: PartialPressures, t: f64| Atmosphere {
+    let airless = |state: SurfaceState, partials: PartialPressures, t: f64, carrier| Atmosphere {
         state,
         surface_temperature: saturate(t),
         surface_pressure: Some(partials.total()),
@@ -959,12 +1407,18 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
         optical_depth: 0.0,
         albedo: state.albedo(inputs.material),
         cloud_fraction: state.cloud_fraction(),
+        carbon_carrier: carrier,
     };
     if inputs.envelope_fraction >= THIN_ENVELOPE_FRACTION {
         let state = SurfaceState::GasEnvelope;
         return Atmosphere {
             surface_pressure: None,
-            ..airless(state, PartialPressures::default(), inputs.heated.value())
+            ..airless(
+                state,
+                PartialPressures::default(),
+                inputs.heated.value(),
+                None,
+            )
         };
     }
     if !valid {
@@ -972,55 +1426,36 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
             SurfaceState::Airless,
             PartialPressures::default(),
             inputs.equilibrium.value(),
+            None,
         );
     }
 
-    // Step 2: what escape leaves.
-    let kept = |gas: Gas, mass: Kilograms| {
-        if retention.retains(gas) {
-            mass.value()
-        } else {
-            0.0
-        }
-    };
-    let inventory = &inputs.inventory;
-    let mut airborne = Airborne {
-        water: kept(Gas::Water, inventory.water()),
-        carbon_dioxide: kept(Gas::CarbonDioxide, inventory.carbon_dioxide()),
-        nitrogen: kept(Gas::Nitrogen, inventory.nitrogen()),
-        argon: kept(Gas::Argon, inventory.argon()),
-    };
-
-    // Step 3: the climate.
-    let climate = match (inputs.crust, inputs.insolation) {
-        (Crust::Molten, _) => SurfaceState::MagmaOcean,
-        // Every drawn inventory holds water, so a body inside the runaway limit has lost an
-        // ocean; a dry one given by a caller keeps its carbon airborne in the same state.
-        (Crust::Solid, Insolation::InsideRunaway) => {
-            airborne.water = 0.0;
-            SurfaceState::RunawayGreenhouse
-        }
-        (Crust::Solid, Insolation::Habitable) => {
-            if airborne.water > 0.0 {
-                airborne.carbon_dioxide *= TEMPERATE_AIRBORNE_CARBON;
-            }
-            SurfaceState::Temperate
-        }
-        (Crust::Solid, Insolation::BeyondMaximumGreenhouse) => SurfaceState::Snowball,
-    };
+    // Steps 2 and 3: what escape leaves, and how the climate divides it.
+    let mut airborne = Airborne::kept(inputs, retention, speciation);
+    let climate = airborne.divide(inputs, retention, speciation);
 
     // Step 4: the partial pressures and the greenhouse they hold.
     let equilibrium = inputs.equilibrium;
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
-    let (mut t, partials, tau) = greenhouse(&airborne, weight, equilibrium, &saturate);
+    let (mut t, mut partials, tau) = greenhouse(&airborne, weight, equilibrium, &saturate);
+    let carrier = Some(airborne.carbon_carrier(Kelvin::new(t)));
 
     // Step 5: the state.
+    let molten = climate == SurfaceState::MagmaOcean || t >= SILICATE_SOLIDUS.value();
+    if molten && airborne.oxygen > 0.0 {
+        partials.0[Gas::Oxygen.index()] = Pascals::ZERO;
+    }
     let total = partials.total();
-    let state = if climate == SurfaceState::MagmaOcean || t >= SILICATE_SOLIDUS.value() {
+    let state = if molten {
         t = t.max(SILICATE_SOLIDUS.value());
         SurfaceState::MagmaOcean
     } else if total < AIRLESS_PRESSURE {
-        return airless(SurfaceState::Airless, partials, equilibrium.value());
+        return airless(
+            SurfaceState::Airless,
+            partials,
+            equilibrium.value(),
+            carrier,
+        );
     } else {
         climate
     };
@@ -1034,6 +1469,7 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
         optical_depth: tau,
         albedo: state.albedo(inputs.material),
         cloud_fraction: state.cloud_fraction(),
+        carbon_carrier: carrier,
     }
 }
 
