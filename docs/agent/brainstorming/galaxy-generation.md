@@ -1252,8 +1252,11 @@ only later as a resolved host.
 
 Each body ends with what later systems need and no more: a surface seed, bulk composition, surface
 conditions, a habitability assessment and resource abundances tied to composition and metallicity.
-The surface, life and civilisation generators consume these and do not reach back into this
-pipeline.
+Bulk composition includes the body's elements and the substances of its crust, ices, liquids and
+air, named from one substance registry. The pipeline reserves an empty biosphere slot for the life
+generator to fill, and makes no life itself. _Signed off 2026-10-09 by the sign-off agent (owner's
+delegation), from decision-composition._ The surface, life and civilisation generators consume
+these and do not reach back into this pipeline.
 
 Surfaces stop at orbital scale for now (see [Decisions](#decisions)): what a crew sees from orbit
 and through sensors. That means global maps at a resolution of kilometres (terrain class, ice, ocean
