@@ -908,9 +908,21 @@ Names are those the owning plans give; the owning plan is authoritative.
      optool (MIT; Dominik, Min and Tazaki 2021, ascl:2104.010) as its reference (researched
      2026-09-29). The paper validates it against T-matrix results at D_f 1.9 and 3.0 only, with
      opacities within about 20–25%. The inventory's enum is capped at D_f ≤ 2.5. As optool does,
-     the phase table is kept only while the phase shift Δφ < 1 (the paper's §4.2); beyond it the
-     mode keeps its opacities and takes a Henyey–Greenstein phase from its MMF asymmetry, flagged
-     in the code. Titan's haze passes (Δφ about 0.4 for the aggregate).
+     the phase table is a validated `model` only while the phase shift of the paper's (9) is
+     below 1: Δφ = max(2x₀|m − 1|, 2kR_c|m_MG − 1|), the larger of the monomer's and the
+     aggregate's, with m_MG the Maxwell Garnett index at the filling factor N(a₀ ÷ R_c)³ (its
+     §2.2, applied to the phase function in §4.2). Past it the mode keeps its opacities
+     (science-r08-mmf.md):
+
+     - while the aggregate's own term 2kR_c|m_MG − 1| is below 1, it keeps the MMF table and
+       matrix, optool's `-mmfss` result, as an `analogue`;
+     - otherwise it takes a Henyey–Greenstein phase from its MMF asymmetry, a `fallback` with no
+       matrix.
+
+     Titan's haze is a `model` from 453 to 780 nm, where Δφ falls from 1.00 to 0.54 (0.80 at
+     550 nm), and an `analogue` from 380 to 452 nm (Δφ up to 1.09). The monomer's term sets Δφ:
+     for D_f = 2 at optool's k_f the aggregate's term is about 0.83 of it (0.45–0.92 over
+     380–780 nm).
 
    Each mode's density is scaled so its column τ(550) is the inventory's. The phase function is
    tabulated per channel on u = √(θ/π) with 256 entries, since dust's forward peak makes the blue
@@ -1618,7 +1630,8 @@ The order:
   T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e.
 - T6 generalises R05's tables over N terms. T6.a needs T3.a's `tabulated` density; T6.b follows
   T6.a and T0; T6.c follows T6.b and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c
-  and T4.a (the fitted channels); T6.e follows T6.d and T3.d; T6.f follows T6.e.
+  and T4.a (the fitted channels), and the channels' re-bless with T5.c's tables (T5.c's
+  follow-up); T6.e follows T6.d and T3.d; T6.f follows T6.e.
 - T7 (several suns, the sky's extinction), T8 (other bodies from outside) and T9.a (aerial
   perspective) follow T6.d; T9.b (surface lighting, by band) follows T6.f.
 - T10.a assembles the medium from a body and needs T2–T6 (T5 for the aerosol terms); T10.b draws
@@ -2223,11 +2236,19 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
 - **R08.T5.c Aggregates, non-spherical grains and phase tables.** Each non-spherical class gets
   optics from a published model (science-r08-nonspherical.md, 2026-10-10), and every mode gets
   its √θ phase tables.
-  - _Aggregates._ `aggregate.ts` implements Tazaki and Tanaka 2018's MMF with D_f ≤ 2.5, and the
-    phase-shift gate of Design note 6: a mode with Δφ ≥ 1 keeps its opacities and takes a
-    Henyey–Greenstein phase from its asymmetry, as a `fallback`. An aggregate's matrix is kept
-    only if it agrees with optool's elements to their stated tolerance; otherwise `matrix` is
-    `undefined`, a total depolariser, flagged in the code (Design note 10).
+  - _Aggregates._ `aggregate.ts` implements Tazaki and Tanaka 2018's MMF with D_f ≤ 2.5. It gates by
+    Design note 6 on their (9), Δφ = max(2x₀|m − 1|, 2kR_c|m_MG − 1|), as optool computes it
+    (`mmfPhaseBasis`; ruled 2026-10-10, science-r08-mmf.md, which leaves no choice of rule):
+    - Δφ < 1: the MMF table and matrix, a `model`;
+    - Δφ ≥ 1 with 2kR_c|m_MG − 1| < 1: the same table and matrix, optool's `-mmfss` result, an
+      `analogue`;
+    - 2kR_c|m_MG − 1| ≥ 1: its opacities, with a Henyey–Greenstein phase from its MMF asymmetry, a
+      `fallback` with no matrix.
+
+    An aggregate's matrix is kept only if it agrees with optool's elements to their stated tolerance
+    (`-mmfss`'s past the gate); otherwise `matrix` is `undefined`, a total depolariser, flagged in
+    the code (Design note 10).
+
   - _Non-spherical minerals_ (`nonSphericalMineral`: dust, the silicates and T5.d's condensates)
     take TAMUdust2020's ensemble of 20 irregular hexahedra (Saito, Yang, Ding and Liu 2021,
     J. Atmos. Sci. 78, 2089) at sphericity 0.71. That is the best fit to three Martian dust
@@ -2279,11 +2300,16 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     - `NOTICE` gains the "Data" and "Test data" entries drafted in science-r08-nonspherical.md §4.
   - `nonSphericalModeOptics(mode, λ, mu?)` integrates the mode's distribution over the table's
     nodes, in the volume-to-area radius r = 3V ÷ 4A, and returns `ModeOptics` with its matrix.
+    A is the orientation-averaged projected area, S ÷ 4 for a convex particle. A mode's r_eff and
+    v_eff are Hansen and Travis's cross-section-weighted moments of r, so r_eff = (3 ÷ 4)⟨V⟩ ÷ ⟨A⟩
+    for every shape class: a sphere's radius, and Yang et al. 2013's D_eff ÷ 2 for ice. A size cited
+    in another convention is converted with the source's own particle shape, r = Ψ^(3/2) r_S = Ψ r_V
+    at sphericity Ψ, with v_eff unchanged (science-r08-mmf.md §2).
   - _Basis and label._ `ModeOptics` gains `phaseBasis`:
     - `model`: Mie for spheres, MMF inside Δφ < 1, a kernel inside its ranges, Yang et al. for
       water ice;
-    - `analogue`: the k-floor rule exceeded, another ice on water's table, or the small-crystal
-      tail;
+    - `analogue`: the k-floor rule exceeded, another ice on water's table, the small-crystal
+      tail, or an aggregate past (9) whose own term 2kR_c|m_MG − 1| is below 1;
     - `fallback`: the Henyey–Greenstein phase below.
 
     Two labelling questions are pending the sign-off agent, and the text follows the ruling's
@@ -2298,7 +2324,8 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     An `analogue` or `fallback` mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at
     550 nm gives `atmosphereApproximate` (Design note 12).
 
-  - _The fallback_ stays only for an aggregate with Δφ ≥ 1 and for a non-spherical mineral outside
+  - _The fallback_ stays only for an aggregate whose own term 2kR_c|m_MG − 1| is at least 1 and for
+    a non-spherical mineral outside
     both kernels: n above 1.70 with k under 10⁻³ beyond the floor rule (larger Al₂O₃, TiO₂,
     CaTiO₃ and ZnS grains). It is a Henyey–Greenstein phase from Mie's g, with Mie's ω and no
     matrix.
@@ -2311,16 +2338,26 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
   - Beside them go the √θ phase tables per channel (`PHASE_TABLE_U`), with the matrix elements
     where the model gives them, and the delta-M truncated series with its fraction, for the bakes
     only (Design note 6).
+  - _A follow-up, once both R08.T4.a and T5.c have landed_ ("main", 2026-10-10): T4.a fitted the
+    channels with Mars dust under T5.b's provisional Henyey–Greenstein phase, so `channels.ts`'s
+    `marsFitAir` moves to the hexahedra table (at r_eff 1.2247 µm, science-r08-mmf.md §2.3) and
+    `channels.json` is blessed again before R08.T6.d, through T4.a's bless step (`test/bless.ts`,
+    `spectralColour.ts`). The triple and residuals before and after are recorded in Risks. It is
+    its own small commit, not T5.c's.
   - Tests (asserted values cited to science-r08-nonspherical.md §2):
     - optool fixtures for a Titan-like aggregate (monomer 0.05 µm, about 3,000 monomers, D_f = 2;
-      Tomasko et al. 2008), generated offline and committed, to their stated tolerance;
-    - the Titan-like aggregate's Δφ is below 1, and a compact large aggregate's above it falls
-      back;
+      Tomasko et al. 2008), generated offline and committed, to their stated tolerance, with
+      `-mmfss` at the wavelengths past the gate (380 and 440 nm);
+    - the Titan-like aggregate's Δφ is 1.09, 0.80 and 0.54 (± 0.01) at 380, 550 and 780 nm, and its
+      aggregate term 0.92, 0.67 and 0.45. It is a `model` at 550 and 780 nm, and an `analogue` at
+      380 nm whose table and matrix are optool's `-mmfss`. A compact large aggregate whose own term
+      exceeds 1 is a Henyey–Greenstein `fallback`;
     - the reduction (the tool's test, on committed raw-kernel fixtures): a test distribution over
       a reduced table matches the same integral over the kernel's nodes to 1% in a₁ at every table
       angle and to 0.002 in g and ω;
     - fidelity: MGS-1 M (n 1.50, k 4.33 × 10⁻⁴, its tabulated size distribution
-      `size_MGS1M_6.txt` as a test-only distribution, sphericity 0.71) at 650 nm gives
+      `size_MGS1M_6.txt`, a test-only distribution in its own projected-area-equivalent radius,
+      mapped onto the kernel by each node's own A, sphericity 0.71) at 650 nm gives
       Martikainen et al. 2025's g 0.7111 ± 0.005 and ω 0.9905 ± 0.002;
     - against that sample's measured matrix at 640 nm (Martikainen et al. 2024, ApJS 273, 28):
       - a₁ ÷ a₁(30°) within 40% of 0.141, 0.105, 0.099 and 0.119 at 90°, 120°, 150° and 170°;
@@ -2330,14 +2367,28 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
 
       spheres of its distribution give 0.081, 0.041, 0.101 and 0.304, and fail;
 
-    - Mars dust (the `mars_dust` file; gamma r_eff 1.5 µm, v_eff 0.3) at 650 nm:
+    - Mars dust (the `mars_dust` file; gamma r_eff 1.2247 µm, v_eff 0.3, which is a
+      surface-equivalent r_eff of 1.5 µm for Wolff et al. 2009's D/L = 1 cylinders, × (2 ÷ 3)^½) at
+      650 nm:
       - g within 0.673 ± 0.081, and a₁(150°) ÷ a₁(90°) within 0.5–0.85 (Chen-Chen, Pérez-Hoyos
         and Sánchez-Lavega 2019, Icarus 330, 16: MSL's sky, 0.71);
       - ω within 0.975 ± 0.015 (Wolff et al. 2009's, as Chen-Chen et al. take it);
-    - enstatite (the MgSiO₃ file at 520 nm; the sample's `size_enstatite.txt`):
-      - a₁ ÷ a₁(30°) within 40% of 0.149, 0.110, 0.102 and 0.115 at 90°, 120°, 150° and 170°
-        (Frattin et al. 2019, MNRAS 484, 2198);
-      - −b₁ ÷ a₁ positive at 90°;
+    - enstatite at 520 nm (Frattin et al. 2019, MNRAS 484, 2198; ruled 2026-10-10,
+      science-r08-nonspherical.md §7):
+      - the particle takes the sample's own composition, Mg₀.₈₅Fe₀.₀₈Si₀.₉₉O₃ (its §4.1.2), as
+        Dorschner et al. 1995's pyroxene glasses give it: 1.594 + 4.5 × 10⁻⁴i, linear in n and
+        log-linear in k between Mg₀.₉₅ (1.588 + 2.9 × 10⁻⁴i) and Mg₀.₈₀ (1.612 + 1.7 × 10⁻³i). This
+        index is test-only, and the MgSiO₃ file stays iron-free;
+      - its sizes are `size_enstatite.txt`'s MIE section (r_eff 3.71 µm, v_eff 3.14; the paper's
+        Tables 3 and 4), with r read as the volume-equivalent radius (its §4.3.2) and mapped by the
+        table's own r_VA ÷ r_V, cut at 290 µm. The FRAUNHOFER section is not used;
+      - a₁(170°) ÷ a₁(90°) lies within 0.5–1.2 (measured 0.77);
+      - −b₁ ÷ a₁ is positive at 90° (measured +0.108 ± 0.003);
+      - a₁ ÷ a₁(30°) lies within a factor of 2 of the measured 0.149, 0.110, 0.102 and 0.115 at
+        90°, 120°, 150° and 170°. The test also asserts that spheres of the same table, and
+        Henyey–Greenstein at the mode's g, each fail that bound at one angle or more;
+      - the residual at each angle is recorded in the as-built notes, beside its value with the
+        iron-free index, with the projected-area reading and with sphericity 0.695.
     - the k-floor rule: at n = 1.6 on the shortwave kernel, a₁ at k 10⁻³ and at 10⁻⁴ differ by
       under 2% wherever ω at 10⁻³ is at least 0.99;
     - the small-grain rule: the size parameter it starts below is recorded, and a fallback-class
@@ -2353,7 +2404,7 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
       full integral and asymmetry.
 
 Acceptance for T5.b and T5.c:
-`pnpm --filter hyperion exec vitest run view/atmosphere/sizeDistribution view/atmosphere/aggregate view/atmosphere/nonSpherical view/atmosphere/materials`.
+`pnpm --filter hyperion exec vitest run view/atmosphere/sizeDistribution view/atmosphere/aggregate view/atmosphere/nonSpherical view/atmosphere/materials view/atmosphere/aerosol src/tools/nonSpherical`.
 
 - **R08.T5.d The registry's condensates and hazes** (decision-composition). After T5.b and T5.c,
   and before galaxy plan 14's P14.T49.e, which reads these files.
@@ -4095,7 +4146,14 @@ generator, and the reference's sampling needs no domain tag.
     Spheres misplace that light by factors of 2–3, and Henyey–Greenstein by 2–4.
   - **Other ices.** They are drawn on water ice's roughened table. Their g is expected to run
     high by up to 0.056 (NH₃; van Diedenhoven et al. 2014, eq. 16), and they stay labelled until
-    their phase functions are measured.
+    their phase functions are measured. NH₄SH's n of 1.648 lies past the fit's 1.18–1.43, where
+    eq. (16) would give about 0.10, the largest of all; it is left unestimated as an extrapolation
+    (R08.T5.c's science check).
+  - **Enstatite** (Frattin et al. 2019) is the one weakly absorbing crystalline silicate measured.
+    On its own index and sizes, the hexahedra's residual at side and back angles is recorded in
+    R08.T5.c's as-built notes. A residual above a factor of 1.5 that survives the iron-matched
+    index is a known limit of smooth, homogeneous hexahedra for transparent silicates, and not a
+    tuning target. The class's sphericity stays 0.71.
   - **Transparent high-index grains** larger than the floor rule allows keep the
     Henyey–Greenstein fallback.
   - **Downloads.** The kernels are a one-off 7.9 GB and 27 GB, offline.
@@ -4115,6 +4173,26 @@ generator, and the reference's sampling needs no domain tag.
     - P14.T49.e: κ_ext for `nonSphericalMineral` and `crystal` modes is read from R08.T5.c's
       tables' C_ext, not from sphere Mie, so that the sim's mass extinction and the client's
       optics agree.
+    - P14.T24.c (science-r08-mmf.md §2.5): a mode's r_eff and v_eff are the moments of the
+      volume-to-area radius r = 3V ÷ 4A, A the orientation-averaged projected area, for every
+      shape class, so r_eff = (3 ÷ 4)⟨V⟩ ÷ ⟨A⟩ and τ(550) = (3 ÷ 4) Q̄_ext(550) M ÷ (ρ r_eff). A
+      size from a source in another convention is converted on the way in with that source's
+      particle shape.
+  - _The MMF past x₀ ≈ 0.5_ (science-r08-mmf.md). The mean field's pair correlation has no
+    contact peak, so for monomers above x₀ ≈ 0.5 it overestimates C_ext and C_sca near x₀ ≈ 0.6,
+    most for D_f ≈ 1.9 (Rannou, Botet and Tazaki 2024, Icarus 424, 116247). In their Titan case ω
+    is about 0.04 high at 400 nm, and the backscatter tail is off at short wavelengths
+    (Seignovert et al. 2017).
+    - This covers the Titan-like aggregate from 380 to about 630 nm, within Tazaki and Tanaka's
+      stated 20–25% in opacity. Its blue is an `analogue` by Design note 6.
+    - The published repair (MFT-M+, a Dirac contact peak) has no reference implementation in
+      optool and is not adopted.
+    - The DISR phase functions (Tomasko et al. 2008; Doose et al. 2016) are closed and specific to
+      Titan. They are an owner access item, for an optional test only.
+  - _The MMF below D_f 1.9_ (R08.T5.c's science check). Tazaki and Tanaka 2018 compare the MMF
+    with T-matrix results at D_f 1.9 and 3.0 only, so a mode below 1.9 (soot near 1.8, say) is an
+    extrapolation. `aggregate.ts` accepts 1 < D_f ≤ 2.5 and keeps (9)'s basis there, unlabelled;
+    whether such a mode carries the label is the owner's call.
 - **M-dwarf suns.** A curve of growth weighted by a 15-sample spectrum is adequate for FGK, A and B
   stars, but not for M dwarfs. Their TiO bands at 590–630 and 705–760 nm overlap Chappuis and
   methane's 727 nm band, so the weight correlates with σ (Design note 5). This is a recorded
@@ -4593,6 +4671,225 @@ generator, and the reference's sampling needs no domain tag.
     _Settled 2026-10-10_ by T3.b's follow-up (below, "Deviations in T3.b's follow-up, as built"):
     Z = 0.998 14, δ = +3.5% from NH₃ and HCl in the same paper, n(550) = 1.644, and the NH₃-ice
     check 1.465.
+- **Deviations in T5.c, as built** (2026-10-10; `view/atmosphere/aggregate.ts`, `nonSpherical.ts`,
+  `aerosol.ts` and their tests, `materials/phase/`, `fixtures/`, `mie.ts`, `sizeDistribution.ts`,
+  `labels.ts` and `materials/materials.ts` (their TSDoc), `materials/iron.json`;
+  `apps/hyperion/src/tools/nonSpherical.ts` and its test, `scripts/nonSpherical.mjs`,
+  `src/tools/materials.ts` (iron's class); `NOTICE`).
+  - _A third module._ `aerosol.ts` holds what joins the shapes: `aerosolModeOptics` (a liquid is a
+    sphere whatever its file says, so liquid iron is Mie and solid iron the hexahedra),
+    `aerosolPhaseTable`, `deltaMTruncation`, `aerosolTerm` and the label (`phaseApproximations`,
+    `phaseLabels`). Its test is `aerosol.test.ts`, so the acceptance command gains
+    `view/atmosphere/aerosol`, and `src/tools/nonSpherical` for the tool's reduction test (the
+    line is edited to match). `aerosolTerm` returns `AerosolTerm { term, channels, at550 }`, the
+    term and the optics it was built from, as `molecularTerm` returns its approximations; its
+    `AerosolModeSpec` is `{ name, particles, opticalDepth550, basePa, topPa, mixingExponent }`,
+    P14.T24.c's profile, with `particles` a distribution (`AerosolMode`) or an aggregate
+    (`AggregateMode`).
+  - _Names beyond the sketch._ `ModeOptics` gains `phaseModel` (`mie`, `mmf`, `tamudust2020`,
+    `yang2013`, `henyeyGreenstein`) and `phaseNote` (an analogue's or fallback's reason, the
+    label's) beside `phaseBasis`. `mie.ts` gains `mieCoefficients` and `mieAmplitudes`, from
+    which `mieSphere` is now built (the same arithmetic; T5.a's tests pass unchanged);
+    `sizeDistribution.ts` `logNumberPerLnRadius`, `resolveModeMaterial` and `modeShape`, the
+    shape rule every path shares: a mode's own class, else a `sphere` if it is a liquid (liquid
+    iron is Mie on solid iron's file, now a `nonSphericalMineral`), else its file's; and a mode
+    declared a mineral or crystal with no phase resolves to its solid (water ice, not water). `aggregate.ts`: `AggregateMode`
+    (with an optional `fractalPrefactor`, by default optool's (5 ÷ 3)^(D_f ÷ 2)), `mmfAggregate`,
+    `MmfResult`, `AggregateOptics`, `mmfPhaseShift`, `mmfPhaseBasis`, `MMF_MATRIX`,
+    `MMF_FRACTAL_DIMENSION_MAX` (2.5), `MMF_PHASE_SHIFT_LIMIT`, `MMF_MONOMER_SIZE_PARAMETER_MAX`
+    (10), `gammaFunction`, `kummerNegative`. `nonSpherical.ts`: `parsePhaseFile`, `PHASE_FILES`,
+    `phaseFileOf`, `tableModeOptics`, `opticsOfParticles` (over `NonSphericalParticles`, so a test
+    can give an index no file holds), `particlesOf`, `RadiusDistribution`,
+    `tabulatedRadiusDistribution`, `ICE_KEYS`, `ICE_ANALOGUE_ASYMMETRY_BIAS`, `FLOOR_ALBEDO_MIN`,
+    `SMALL_CRYSTAL_SHARE_MAX`, `SMALL_GRAIN_SIZE_PARAMETER`, `forwardPeakSplit` and
+    `ForwardPeakSplit`. `aerosol.ts`: `FORWARD_PEAK_ENTRIES` (4). T5.b's `ScatteringMatrix` gains
+    `forwardPeak` (below; 0 for Mie and the MMF). The tool: `kernelReachText`, `nodeRuleText`,
+    `iceAbsorptionText`, `ENSTATITE_SAMPLE` and `ENSTATITE_NODE`, `reduceTamudust`'s optional
+    `sphericity`, and the `--enstatite <file>` and `--enstatite-sphericity <S>` options.
+  - _The MMF gate_ is the ruling's (science-r08-mmf.md, adopted 2026-10-10), not the first lean:
+    (9) is the max of the monomer's and the aggregate's terms, so the switch the lane built while
+    asking (`MMF_PHASE_SHIFT_RULE`) is gone and `mmfPhaseBasis` returns the three-way basis.
+  - _The MMF against optool._ The lane built optool 1.9.14 (commit 21aecb46) offline with
+    gfortran 16.2.1 from Arch's `gcc-fortran` package (its SHA-256 checked against the signed sync
+    database), with `optool_manual.f90` stubbed (its help text fails gfortran 16's format checks;
+    the computation does not read it), and committed its `-mmfss` output for the Titan-like
+    aggregate at 380, 440, 550, 680 and 780 nm (`fixtures/optool-titan.json`). The module's own
+    numerics (Gauss–Legendre panels in ln u for S_p, Miller's algorithm, Kummer's function exactly
+    where optool takes its leading asymptotic term past qR_g = 26) give optool's C_ext and C_sca
+    to 10⁻⁵, F₁₁'s shape to 0.11%, F₁₂ ÷ F₁₁ and F₃₃ ÷ F₁₁ to 10⁻⁵, and g 0.0007–0.0023 below
+    optool's, whose g is a midpoint sum over 1° bins. The test's tolerances are optool's own
+    numerics: 10⁻³ for the cross-sections and ratios, 0.3% for F₁₁ (the asymptotic S(q)'s error at
+    the switch), 0.003 for g. optool's MMF path writes F₃₄ = Im(S₂S₁*) in Bohren and Huffman's
+    amplitudes, the opposite sign of T5.b's b₂ and of optool's own Mie path (−D₂₁), which agrees
+    with T5.b's b₂ for spheres: b₂ = −F₃₄ against the fixture. The matrix agrees, so it is kept
+    (`MMF_MATRIX = "kept"`).
+  - _The reduction._ The tables are in size parameter, so one serves every wavelength near its
+    node and an analogue at its own x; between wavelength nodes the mode's sums are linear in λ.
+    - Size nodes are thinned from the kernel's own (`thinSizes`): a node is dropped while
+      interpolation between its kept neighbours (log-linear in ln r̃ for the cross-sections, V, A
+      and a₁; linear for g and the ratios) reproduces every dropped node to 3.5% in a₁, 1.5% in the
+      cross-sections, 0.004 in g and ω and 0.03 in the ratios. A fixed step of 0.3 in ln x missed
+      the plan's 1% by up to 11%; the thinned tables meet it with margin: over gamma distributions
+      of r_eff 0.3–10 µm and v_eff 0.1 and 0.3 at every node, against every kernel node, the worst
+      is 0.9% in a₁, 7.6 × 10⁻⁴ in g and 2.5 × 10⁻⁴ in ω (the tool's `--check`, run before the
+      kernels were deleted). The tool's test repeats it on the committed excerpt.
+    - a₁ is stored at 48 of the kernel's angles (64 for Yang et al.), nearest to even steps in √θ,
+      and the other five elements as ratios to a₁ every 10°, each quantised to 16 bits in base64
+      (round(1000 ln a₁), round(30,000 × ratio)), with C_sca·g beside C_ext and C_sca: the plan's
+      "C_sca × a₁ … b₂" is formed on reading. 48 keeps Mars dust's 13 nodes at 378 kB.
+    - Wavelength nodes follow the plan's rule on the shortwave kernel. On the longwave (iron) n's
+      step is 0.1, the kernel's own, since 0.01 would need 56 nodes and pass 400 kB, and nodes
+      finer than the kernel's own interpolation in n gain nothing.
+    - The kernel is interpolated linearly in n, ln k and ln S between its records (the lane's
+      choice; the archive's code was read for the layout only), at S = 0.71, between the 0.695 and
+      0.712 nodes. The shortwave tables end at the kernel's x = 11,810, D = 714 µm at 380 nm; the
+      longwave (iron) at x = 1,476, D = 89 µm, r = 15.9 µm at 380 nm and 32.7 µm at 780 nm. A
+      distribution past a table's largest size is refused (`RangeError`), as Mie refuses past
+      x = 20,000: for R08.T10.a, a solid-iron mode of r_eff about 2 µm or more at v_eff 0.3 is
+      refused at 380 nm.
+    - The floor rule is judged on the mode: its ω on the floor's table, over the table's particles,
+      at least 0.99, where the plan reads "the floor's own ω at that size". Per size, every broad
+      mode would be an `analogue`, since large grains always absorb along their paths (on the
+      excerpt only x 3.9–23.6 reach 0.99 at k 10⁻³). The 0.99 itself is a stated convention wanting
+      a ruling (science-r08-nonspherical.md §5 item 3).
+    - Forsterite's nodes break the k rule where its source does: Jäger et al.'s k is printed to
+      10⁻⁴, so it steps by 1.5 between 395 and 400 nm and by 2.0 between 575 and 580 nm, and the
+      nodes sit on both sides of each step.
+    - The files and their sizes: `mars-dust.json` 378 kB (13 nodes), `iron.json` 297 kB (12 nodes,
+      the longwave kernel), `forsterite-amorphous.json` 188 kB (6), `enstatite-glass.json` 123 kB
+      (4, on the shortwave floor), and `water-ice.json` 286 kB (3 nodes, at 380, 530 and 780 nm, of
+      Yang et al.'s own 10 nm grid; all 189 sizes, since none can be dropped within the tolerance
+      as the forward peak narrows; C_ext and C_sca to nine figures, since ice's 1 − ω is as small
+      as 10⁻⁶). Test fixtures:
+      `tamudust-excerpt.json` 69 kB (the raw records at n 1.60, S 0.712, k 10⁻⁴ and 10⁻³, all 169
+      sizes, P₁₁ at the 48 angles), `mgs1m-phase.json` 34 kB (one node at MGS-1 M's index, 650 nm),
+      `enstatite-sample-phase.json` 33 kB (one node at Frattin et al.'s enstatite's iron-matched
+      index, 520 nm), `optool-titan.json` 45 kB and `granada-amsterdam.json` 4 kB (the two samples'
+      size distributions, values only).
+    - The archives, each fetched by parallel ranges into its own directory, checked by MD5 and
+      deleted after its reduction: TAMUdust2020 SHA-256
+      `eb4f308d8623cebe1bb9ac318332fbcdc754071ce610ad3719ec500a11d6e842`, and Yang et al.'s
+      `9c8eb5d162f48392705588443d6251cf6557463f51b10f67cf544ef0477f8ab0` (only
+      `8_columns/Rough050/` extracted, 3.4 GB), both fetched 2026-10-10. TAMUdust2020 was fetched
+      once more the same day (the same MD5 and SHA-256) for the enstatite ruling's fixture and its
+      sphericity-0.695 diagnostic; the four files, the excerpt and `mgs1m-phase.json` were
+      regenerated from it with their data unchanged, their headers now the tool's own text, and
+      the archive deleted again.
+    - _Water ice's nodes_ follow n's rule alone (n moves 0.016 over 380–780 nm). k moves by 5,000
+      there, which the plan's factor of 1.26 would follow with 37 nodes; at most 1.02 × 10⁻⁷, it
+      keeps k·x under 0.0082 at D ≤ 1 cm (780 nm), where absorption is linear in k, so the
+      renderer scales the absorption by k ÷ k_node between nodes, the floor rule's linearity at a
+      fixed size parameter. (Anomalous diffraction gives 1 − ω about 1.7 × 10⁻³ there, not the
+      first header's "under 10⁻³".)
+  - _Water ice and its analogues, as measured._ Gamma r_eff 30 µm, v_eff 0.1: g 0.7510 at 532 nm
+    and 0.7552 at 780 nm (Järvinen et al. 2018: 0.750, 0.754), no local maximum of a₁ over
+    15°–50°, ω above 0.99995. The table's smallest crystal, D = 2 µm, has r = 3V ÷ 4A = 0.30 µm
+    and Ã ÷ πr̃² = 4.85, so with the tail's area kept (below) the tail passes 10% of the scattering
+    at 550 nm up to about r_eff 0.55 µm at v_eff 0.3 (0.3 µm: 35%; 0.5 µm: 14%, an `analogue`;
+    0.7 µm: a `model`). NH₃ ice (r_eff 10 µm) is an `analogue` with Mie's ω 0.9938 on its own index;
+    CH₄ and CO₂ ices are analogues too. One cirrus mode at one wavelength costs about 9 ms (load
+    6–30, provisional).
+  - _Iron's file_ (`iron.json`, Johnson and Christy) is a `nonSphericalMineral`, solid iron's
+    class; a liquid iron mode takes it as its named analogue and is drawn as spheres.
+  - _The measured tests, as measured._
+    - MGS-1 M at 650 nm: g 0.7116 and ω 0.9902 (Martikainen et al. 2025: 0.7111, 0.9905), its
+      distribution read in its projected-area radius and mapped by r_VA ÷ r_A = 0.599, the table's
+      own (science-r08-mmf.md §2.3). At 640 nm a₁ ÷ a₁(30°) is 0.114, 0.074, 0.068 and 0.080 at
+      90°, 120°, 150° and 170° (measured 0.141, 0.105, 0.099, 0.119: 19–33% low, as the ruling
+      found); −b₁ ÷ a₁ +0.103 at 90° and −0.036 at 165°; a₂ ÷ a₁ 0.493 at 170°; b₂ ÷ a₁ +0.203 at
+      90°, with b₂ = +P₄₃. Spheres of the measured distribution (r = r_A, by Mie) give 0.065,
+      0.035, 0.078 and 0.216, and fail by 40% or more at 90°, 120° and 170° (21% at 150°): the
+      ruling's 0.081, 0.041, 0.101 and 0.304 came from a log-normal stand-in for the distribution.
+    - Mars dust at 650 nm, r_eff 1.2247 µm (ruled): g 0.707, ω 0.967, a₁(150°) ÷ a₁(90°) 0.633.
+    - Enstatite at 520 nm, on the ruled inputs (science-r08-nonspherical.md §7): the MIE section of
+      `size_enstatite.txt` read as volume-equivalent radii, and the sample's iron-matched index
+      1.594 + 4.5 × 10⁻⁴i.
+
+      The FRAUNHOFER section is not used. It puts 62% of the projected area below r = 1 µm, against
+      the sample's wet sieving and FESEM images. That is the artefact of a diffraction-only
+      inversion for transparent grains a few µm across, and Frattin et al. invert with Mie theory.
+
+      - a₁ ÷ a₁(30°) is 0.233, 0.183, 0.187 and 0.212 at 90°, 120°, 150° and 170° (measured
+        0.149, 0.110, 0.102, 0.115: +57%, +66%, +83%, +85%), inside the factor of 2;
+        a₁(170°) ÷ a₁(90°) 0.91 (measured 0.77); −b₁ ÷ a₁ +0.063 at 90° (measured +0.108); ω 0.963
+        and g 0.675, off the kernel's floor. r_VA ÷ r_V is the table's own 0.710. The fixture keeps
+        the section to 290 µm, and the test drops the points past the table's largest size at
+        520 nm (r_V 246 µm; the last point kept is 224 µm), 2 × 10⁻⁴ of its projected area.
+      - Diagnostics, each alone: the iron-free index (the MgSiO₃ file, 1.58 + 10⁻⁵i, on the floor)
+        +61%, +69%, +88%, +91%; the projected-area reading (r_VA ÷ r_A 0.599) +51%, +59%, +74%,
+        +76%; sphericity 0.695 (a table made for the diagnostic, not committed) +48%, +55%, +68%,
+        +66%; the FRAUNHOFER section, the fines bound, −15%, −21%, −19%, −15% read as r_A (−11% to
+        −16% as r_V).
+      - Volume-equivalent spheres of the distribution give 0.087, 0.036, 0.058 and 0.706
+        (a₁(170°) ÷ a₁(90°) 8.1), and Henyey–Greenstein at the mode's g 0.087, 0.049, 0.036 and
+        0.033: each fails the factor of 2.
+      - The excess stays above a factor of 1.5 at every angle on the iron-matched index, so Risks
+        records it as a known limit of smooth, homogeneous hexahedra for transparent silicates; the
+        mode stays a `model` and the class's sphericity 0.71.
+
+    - The k-floor rule holds on the excerpt, over the 58 of 169 sizes where ω at 10⁻³ is at least
+      0.99 (x 3.9–23.6: small grains absorb more than they scatter, large ones absorb along their
+      paths), at the excerpt's 48 quantised angles, not the kernel's 498.
+    - The small-grain rule starts below an effective size parameter of 0.22: on the excerpt
+      (n 1.60, k 10⁻⁴, S 0.712, the node nearest 0.71), the hexahedra and volume-to-area spheres
+      agree within 4.9% in a₁ at every phase angle up to x_VA 0.223 and part by 5.3% at 0.234.
+      It is measured per particle (x_VA = 2π r_VA ÷ λ) and applied to a mode's 2π r_eff ÷ λ.
+    - The TiO₂ cases take rutile's ordinary index from DeVore 1951's Sellmeier fit, as a test-only
+      particle, since no TiO₂ file exists until T5.d. A mineral with no reduced table is a
+      `fallback` whose note says so ("no reduced TAMUdust2020 table on file", or, above n 1.70 with
+      k under 10⁻³, the longwave kernel's k floor with no floor table on file): T5.d's floor tables
+      will move small high-index grains back to `model`.
+  - _The label's two pending questions_ are two constants, `MODEL_RESIDUALS_LABEL = "unlabelled"`
+    and `SMALL_BIAS_ANALOGUES = "labelled"` (with `SMALL_BIAS_MAX_ABS_DG` 0.01 for the
+    alternative), in `aerosol.ts`.
+  - _The label reads every drawn channel._ `AerosolLayer` takes the mode's optics in each channel
+    (an `AerosolTerm`'s `channels`), and `leastValidatedBasis` the worst of them, since a basis
+    may change with wavelength: the Titan-like haze is a `model` at 550 and 680 nm and an
+    `analogue` at 440 nm, so it is labelled (its reason names the channel).
+  - _A matrix across channels._ A phase table keeps its matrix only when every channel has one, so
+    a mode whose basis changes between channels from a matrix to Henyey–Greenstein is drawn as a
+    total depolariser.
+  - _The tail's absorption._ Particles below a table's smallest size are Mie at their own index;
+    the floor's and ice's k scaling applies to the table's particles alone, and the floor rule's ω
+    leaves the tail out.
+  - _The ice tail's weight._ Each ice crystal below Yang et al.'s 2 µm is Ã ÷ πr̃² = 4.85
+    independent spheres of its r_VA (the table's smallest crystal's ratio), so that its V and A are
+    kept (T. C. Grenfell and S. G. Warren, J. Geophys. Res. 104 (1999) 31697), where the first
+    build drew one sphere and dropped 79% of the tail's area. A mineral's tail stays one
+    volume-equivalent sphere, right in the Rayleigh limit it lies in (below r 3 × 10⁻⁴ µm).
+  - _For the next tasks._
+    - R08.T10.a's `atmosphereApproximate` also collects `phaseApproximations` over each mode's
+      channels, beside `materialApproximations`.
+    - `modeOptics` still gives sphere Mie for a mineral or a crystal, as a Henyey–Greenstein
+      `fallback`; R11's and P14.T49.e's readers of a non-spherical mode take `aerosolModeOptics` or
+      `nonSphericalModeOptics`.
+    - The phase files' `reduction` headers are the tool's text from its constants
+      (`nodeRuleText`, `kernelReachText`, `thinningText`, `iceAbsorptionText`), which its test
+      holds to the files. The four TAMUdust2020 files were regenerated with it; `water-ice.json`'s
+      absorption clause was corrected by hand, since Yang et al.'s 27 GB archive was not fetched
+      again.
+    - A table's first `FORWARD_PEAK_ENTRIES` entries can hold a large particle's forward peak, up
+      to about 10⁶ sr⁻¹: the bakes' delta-M moves it to the direct beam (f = χ_2M), and single
+      scattering meets it only inside the star's disc (Design note 6).
+  - _The phase tables_ integrate to 1 as read, linear in u (R08.T12.c's tracer checks 10⁻⁴), and
+    keep the model's g as read: to rounding for the phase files' models, 2 × 10⁻⁵ for sulphate,
+    4 × 10⁻⁵ for the Titan-like haze, 1.3 × 10⁻⁴ for r_eff 10 µm water droplets, under 10⁻⁵ for
+    a Henyey–Greenstein fallback. `deltaMTruncation(table, channel, streams)` gives f = χ_2M and
+    the truncated moments for `DELTA_M_STREAMS` 16 by default, R08.T14.b's to set.
+  - _The forward peak the files miss_ (R08.T5.c's science check). The sources normalise P₁₁ on
+    498 angles 0.01° apart near forward; the files keep 48 (64), the first beyond 0° at 0.08°
+    (0.05°), and a large particle's diffraction peak falls between: the interpolant holds 0.59 of
+    a node of x_D 11,810, 0.96 of cirrus at r_eff 30 µm and 0.88 of dust at r_eff 30 µm. The first
+    build rescaled every angle by the deficit, raising side and back light by up to 13% and
+    leaving cirrus's g as read 0.0115 low. The deficit is now a forward delta
+    (`ScatteringMatrix.forwardPeak`, with the identity's matrix), sized by `forwardPeakSplit` so
+    that the whole integrates to 1 with the source's g (Σ C_sca g), and laid on the tables' first
+    four entries (θ < 0.044°, inside both files' first angle); the scale on the resolved part stays
+    within 0.5% of 1, so side and back angles keep the source's values. The tests hold every
+    committed phase file's tables, at a small and a large mode, to 10⁻⁴ in integral and g under
+    the reader's rule.
+  - _Closed set, for the composition audit:_ `ICE_KEYS` (H₂O, NH₃, CH₄, CO₂, NH₄SH, H₂S, N₂, CO)
+    decides which crystals take water ice's table; any other `crystal` takes the hexahedra.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the

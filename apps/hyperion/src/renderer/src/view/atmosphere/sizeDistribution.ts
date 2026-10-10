@@ -42,6 +42,7 @@ import { gaussLegendre } from "../lighting/quadrature";
 import {
   type MaterialForm,
   type MaterialProvenance,
+  type ResolvedMaterial,
   type ShapeClass,
   resolveMaterial,
   indexAt,
@@ -122,11 +123,19 @@ export const PHASE_TABLE_MU: Float64Array = PHASE_TABLE_U.map((u) => Math.cos(Ma
 
 /**
  * A scattering matrix's six elements at a set of scattering-angle cosines, block-diagonal and
- * normalised so that ∫ a₁ dΩ ÷ 4π = 1 (the module's remarks give each element's form).
+ * normalised so that ∫ a₁ dΩ ÷ 4π = 1 − {@link ScatteringMatrix.forwardPeak} (the module's remarks
+ * give each element's form).
  */
 export interface ScatteringMatrix {
   /** The cosines the elements are given at. */
   readonly mu: Float64Array;
+  /**
+   * The share of the scattering in a forward peak narrower than the source's angles resolve, held
+   * as a delta at θ = 0 with the identity's matrix (a₂ = a₃ = a₄ = a₁, b₁ = b₂ = 0, as diffraction
+   * scatters): 0 for Mie and the MMF, which are sampled at the cosines asked; a phase file's
+   * unresolved diffraction peak for the tabulated models (`nonSpherical.ts`).
+   */
+  readonly forwardPeak: number;
   readonly a1: Float64Array;
   readonly a2: Float64Array;
   readonly a3: Float64Array;
@@ -190,18 +199,49 @@ export interface AerosolMode {
 }
 
 /**
- * A mode's optics at one wavelength, the shape class they hold for, and where its index came from.
+ * What a mode's phase function rests on (R08.T5.c; science-r08-nonspherical.md):
+ *
+ * - `model`: a published model inside its range: Mie for spheres, the MMF for an aggregate inside
+ *   its phase-shift gate, a TAMUdust2020 kernel for a non-spherical mineral, Yang et al. 2013 for
+ *   water ice;
+ * - `analogue`: a table stands in past its validated range: the k-floor rule exceeded, another ice
+ *   on water ice's table, water ice's crystals below the table's smallest size, or an aggregate
+ *   past Tazaki and Tanaka's (9) whose own term 2kR_c|m_MG − 1| is below 1 (the MMF table kept,
+ *   science-r08-mmf.md);
+ * - `fallback`: the Henyey–Greenstein phase from Mie's or the MMF's g, or, for a small grain of a
+ *   mineral no kernel covers, the sphere's own Mie table.
+ *
+ * An `analogue` or `fallback` mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at
+ * 550 nm gives `atmosphereApproximate` (Design note 12; `aerosol.ts`).
+ */
+export type PhaseBasis = "model" | "analogue" | "fallback";
+
+/**
+ * The model a mode's phase function and matrix come from: Mie's for spheres, the MMF's for
+ * aggregates (`aggregate.ts`), TAMUdust2020's irregular hexahedra and Yang et al. 2013's roughened
+ * column aggregate (`nonSpherical.ts`), or Henyey–Greenstein's from g, which has no matrix.
+ */
+export type PhaseModel = "mie" | "mmf" | "tamudust2020" | "yang2013" | "henyeyGreenstein";
+
+/**
+ * A mode's optics at one wavelength, the shape class they hold for, where its index came from, and
+ * what its phase function rests on.
  *
  * @remarks
- * For a `sphere` every field is Mie's. For any other shape only the cross-sections are (Design
- * note 6): ω and g are still the spheres' values, an approximation flagged by `shape`, and
- * `matrix` is undefined, a total depolariser, since a sphere's matrix is not the particle's
- * (decision-r08-vector.md). R08.T5.c's aggregates fill the same type.
+ * From {@link modeOptics}, every field is Mie's. For a `sphere` that is the model; for any other
+ * shape only the cross-sections are (Design note 6), so ω and g are the spheres' values, the phase
+ * is Henyey–Greenstein's from that g (`phaseBasis` `fallback`), and `matrix` is undefined, a total
+ * depolariser, since a sphere's matrix is not the particle's (decision-r08-vector.md). R08.T5.c's
+ * `nonSphericalModeOptics` and `aggregateOptics` give the published models' optics in the same type.
  */
 export interface ModeOptics extends ModeBulkOptics {
   readonly matrix: ScatteringMatrix | undefined;
   readonly shape: ShapeClass;
   readonly provenance: MaterialProvenance;
+  readonly phaseBasis: PhaseBasis;
+  readonly phaseModel: PhaseModel;
+  /** Why an `analogue` or `fallback` is one, for the label's reasons; undefined for a `model`. */
+  readonly phaseNote: string | undefined;
 }
 
 /** A distribution's weights in y = ln(r ÷ 1 µm), for the quadrature and its interval. */
@@ -318,6 +358,16 @@ function gammaCut(c: number, theta: number, side: -1 | 1): number {
 export function sizeRange(sizes: SizeDistribution): SizeRange {
   const weight = logWeight(sizes);
   return { fromUm: Math.exp(weight.cut(2, -1)), toUm: Math.exp(weight.cut(6, 1)) };
+}
+
+/**
+ * A distribution's number density per unit ln r, ln(r n(r)) up to a constant, as a function of
+ * ln(r ÷ 1 µm): R08.T5.c's tables integrate a mode over their own size nodes with it.
+ *
+ * @throws RangeError for an effective radius or variance outside the distribution's range.
+ */
+export function logNumberPerLnRadius(sizes: SizeDistribution): (lnRadiusUm: number) => number {
+  return logWeight(sizes).logNumberPerY;
 }
 
 const PANEL_RULE = gaussLegendre(SIZE_PANEL_ORDER);
@@ -459,6 +509,7 @@ function finishMatrix(matrix: MutableMatrix, scatteringSum: number): ScatteringM
   const a3 = matrix.a3.map((v) => v * scale);
   return {
     mu: matrix.mu.slice(),
+    forwardPeak: 0,
     a1,
     a2: a1.slice(),
     a3,
@@ -609,16 +660,43 @@ function finish(
 }
 
 /**
+ * A mode's material resolved for its shape: a mode declared a non-spherical mineral or a crystal,
+ * with no phase given, is a solid (water ice, not water; solid methane, not liquid), since
+ * `resolveMaterial`'s default file is a key's first, its liquid where it has one.
+ */
+export function resolveModeMaterial(mode: AerosolMode): ResolvedMaterial {
+  const solidShape = mode.shape === "nonSphericalMineral" || mode.shape === "crystal";
+  const form: MaterialForm | undefined =
+    solidShape && mode.form?.phase === undefined ? { ...mode.form, phase: "solid" } : mode.form;
+  return resolveMaterial(mode.material, form);
+}
+
+/**
+ * A mode's shape class: its own where it states one; a `sphere` if it is a liquid, whatever its
+ * file says (a droplet: liquid iron is Mie, solid iron a `nonSphericalMineral`, Visscher et al.
+ * 2010; science-r08-nonspherical.md §2.2); else its material file's; else a `sphere`, the generic
+ * stand-in's convention (decision-composition §1.9).
+ */
+export function modeShape(mode: AerosolMode, material: ResolvedMaterial): ShapeClass {
+  if (mode.shape !== undefined) {
+    return mode.shape;
+  }
+  if ((mode.form?.phase ?? material.file?.phase) === "liquid") {
+    return "sphere";
+  }
+  return material.file?.shape ?? "sphere";
+}
+
+/**
  * A mode's optics at one wavelength, over its size distribution, with its material's index from
  * the registry.
  *
  * @remarks
  * Every mode goes through sphere Mie here. For a non-spherical mineral or a crystal, only the
  * cross-sections are to be used, since a sphere's rainbow and glory are spurious for them (Design
- * note 6): the result says so by its `shape` and carries no matrix. No literature phase function
- * for those classes is on file yet. Until a science agent names one, R08.T5.c's `aerosolTerm` gives
- * such a mode a Henyey–Greenstein phase from this g, with this ω, and labels it
- * `ATMOSPHERE: APPROXIMATE` (provisional, "main", 2026-10-09).
+ * note 6): the result says so by its `shape`, carries no matrix, and is a `fallback` whose phase is
+ * Henyey–Greenstein's from this g. The published models for those classes are R08.T5.c's
+ * `nonSphericalModeOptics`, which `aerosol.ts`'s `aerosolModeOptics` routes them to.
  *
  * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
@@ -631,9 +709,8 @@ export function modeOptics(
   wavelengthNm: number,
   mu: Float64Array = PHASE_TABLE_MU,
 ): ModeOptics {
-  const material = resolveMaterial(mode.material, mode.form);
-  // The generic stand-in is a sphere by its convention (decision-composition §1.9).
-  const shape = mode.shape ?? material.file?.shape ?? "sphere";
+  const material = resolveModeMaterial(mode);
+  const shape = modeShape(mode, material);
   let keepsMatrix: boolean;
   switch (shape) {
     case "sphere":
@@ -662,5 +739,10 @@ export function modeOptics(
     matrix: keepsMatrix ? optics.matrix : undefined,
     shape,
     provenance: material.provenance,
+    phaseBasis: keepsMatrix ? "model" : "fallback",
+    phaseModel: keepsMatrix ? "mie" : "henyeyGreenstein",
+    phaseNote: keepsMatrix
+      ? undefined
+      : `a ${shape} of ${mode.material} through sphere Mie: Henyey–Greenstein from Mie's g, a fallback`,
   };
 }

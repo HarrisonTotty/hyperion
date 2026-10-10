@@ -285,6 +285,66 @@ function psi1(x: number): number {
  * @throws RangeError if the size parameter, the index or a cosine is outside its range.
  */
 export function mieSphere(sizeParameter: number, index: ComplexIndex, mu: Float64Array): MieResult {
+  const coefficients = mieCoefficients(sizeParameter, index);
+  const { aRe, aIm, bRe, bIm } = coefficients;
+  const x = sizeParameter;
+  let extinctionSum = 0;
+  let scatteringSum = 0;
+  let asymmetrySum = 0;
+  let aPrevRe = 0;
+  let aPrevIm = 0;
+  let bPrevRe = 0;
+  let bPrevIm = 0;
+  for (let n = 1; n <= aRe.length; n += 1) {
+    const a1 = aRe[n - 1] ?? 0;
+    const a2 = aIm[n - 1] ?? 0;
+    const b1 = bRe[n - 1] ?? 0;
+    const b2 = bIm[n - 1] ?? 0;
+    const twoNPlus1 = 2 * n + 1;
+    extinctionSum += twoNPlus1 * (a1 + b1);
+    scatteringSum += twoNPlus1 * (a1 * a1 + a2 * a2 + b1 * b1 + b2 * b2);
+    // (8): (n − 1)(n + 1) ÷ n Re(aₙ₋₁ aₙ* + bₙ₋₁ bₙ*) + (2n + 1) ÷ (n (n + 1)) Re(aₙ bₙ*).
+    const weight = twoNPlus1 / (n * (n + 1));
+    asymmetrySum +=
+      (n - 1 / n) * (aPrevRe * a1 + aPrevIm * a2 + bPrevRe * b1 + bPrevIm * b2) +
+      weight * (a1 * b1 + a2 * b2);
+    aPrevRe = a1;
+    aPrevIm = a2;
+    bPrevRe = b1;
+    bPrevIm = b2;
+  }
+  const { s1, s2 } = mieAmplitudes(coefficients, mu);
+  const xSquared = x * x;
+  const qSca = (2 / xSquared) * scatteringSum;
+  return {
+    qExt: (2 / xSquared) * extinctionSum,
+    qSca,
+    asymmetry: ((4 / xSquared) * asymmetrySum) / qSca,
+    s1,
+    s2,
+  };
+}
+
+/**
+ * A sphere's Mie coefficients aₙ and bₙ, n = 1 … N, in {@link mieSphere}'s convention (e^(+iωt);
+ * Bohren and Huffman's are their complex conjugates): entry n − 1 holds term n.
+ */
+export interface MieCoefficients {
+  readonly aRe: Float64Array;
+  readonly aIm: Float64Array;
+  readonly bRe: Float64Array;
+  readonly bIm: Float64Array;
+}
+
+/**
+ * A sphere's Mie coefficients aₙ and bₙ to {@link mieTermCount} terms, as {@link mieSphere} sums
+ * them (Wiscombe's (16), with the same recurrences): R08.T5.c's aggregates replace them by their
+ * mean-field coefficients and sum the amplitudes with {@link mieAmplitudes}.
+ *
+ * @param sizeParameter - x = 2πr ÷ λ; in [{@link MIE_MIN_SIZE_PARAMETER}, {@link MIE_MAX_SIZE_PARAMETER}].
+ * @throws RangeError if the size parameter or the index is outside its range.
+ */
+export function mieCoefficients(sizeParameter: number, index: ComplexIndex): MieCoefficients {
   const x = sizeParameter;
   if (!(x >= MIE_MIN_SIZE_PARAMETER && x <= MIE_MAX_SIZE_PARAMETER)) {
     throw new RangeError(
@@ -296,77 +356,96 @@ export function mieSphere(sizeParameter: number, index: ComplexIndex, mu: Float6
       `refractive index ${index.n} + ${index.k}i needs a finite n > 0 and a finite k ≥ 0`,
     );
   }
-  for (const cosine of mu) {
-    if (!(cosine >= -1 && cosine <= 1)) {
-      throw new RangeError(`scattering-angle cosine ${cosine} is outside [−1, 1]`);
-    }
-  }
-
   const terms = mieTermCount(x);
-  // Wiscombe's convention: m = n − ik, z = mx.
   const mRe = index.n;
   const mIm = -index.k;
   const mNorm = mRe * mRe + mIm * mIm;
   const mInvRe = mRe / mNorm;
   const mInvIm = -mIm / mNorm;
   const logD = logarithmicDerivatives(mRe * x, mIm * x, terms);
-
-  const angles = mu.length;
-  const s1 = new Float64Array(2 * angles);
-  const s2 = new Float64Array(2 * angles);
-  const piPrevious = new Float64Array(angles);
-  const piCurrent = new Float64Array(angles).fill(1);
-
-  // ζₙ = ψₙ + i χₙ, from (19): ψ₀ = sin x, χ₀ = cos x, ψ₁ = ψ₀/x − χ₀, χ₁ = χ₀/x + ψ₀.
+  const out = {
+    aRe: new Float64Array(terms),
+    aIm: new Float64Array(terms),
+    bRe: new Float64Array(terms),
+    bIm: new Float64Array(terms),
+  };
   const xInv = 1 / x;
   let psiPrevious = Math.sin(x);
   let chiPrevious = Math.cos(x);
   let psi = psi1(x);
   let chi = chiPrevious * xInv + psiPrevious;
-
-  let extinctionSum = 0;
-  let scatteringSum = 0;
-  let asymmetrySum = 0;
-  let aPrevRe = 0;
-  let aPrevIm = 0;
-  let bPrevRe = 0;
-  let bPrevIm = 0;
-
   for (let n = 1; n <= terms; n += 1) {
     const dRe = logD.re[n] ?? 0;
     const dIm = logD.im[n] ?? 0;
     const nOverX = n * xInv;
-    // aₙ: T = Dₙ ÷ m + n ÷ x; bₙ: T = m Dₙ + n ÷ x; each (T ψₙ − ψₙ₋₁) ÷ (T ζₙ − ζₙ₋₁), (16).
-    const taRe = dRe * mInvRe - dIm * mInvIm + nOverX;
-    const taIm = dRe * mInvIm + dIm * mInvRe;
-    const tbRe = dRe * mRe - dIm * mIm + nOverX;
-    const tbIm = dRe * mIm + dIm * mRe;
-    const a = coefficient(taRe, taIm, psi, chi, psiPrevious, chiPrevious);
-    const aRe = a.re;
-    const aIm = a.im;
-    const b = coefficient(tbRe, tbIm, psi, chi, psiPrevious, chiPrevious);
-    const bRe = b.re;
-    const bIm = b.im;
+    const a = coefficient(
+      dRe * mInvRe - dIm * mInvIm + nOverX,
+      dRe * mInvIm + dIm * mInvRe,
+      psi,
+      chi,
+      psiPrevious,
+      chiPrevious,
+    );
+    const b = coefficient(
+      dRe * mRe - dIm * mIm + nOverX,
+      dRe * mIm + dIm * mRe,
+      psi,
+      chi,
+      psiPrevious,
+      chiPrevious,
+    );
+    out.aRe[n - 1] = a.re;
+    out.aIm[n - 1] = a.im;
+    out.bRe[n - 1] = b.re;
+    out.bIm[n - 1] = b.im;
+    const psiNext = (2 * n + 1) * xInv * psi - psiPrevious;
+    const chiNext = (2 * n + 1) * xInv * chi - chiPrevious;
+    psiPrevious = psi;
+    chiPrevious = chi;
+    psi = psiNext;
+    chi = chiNext;
+  }
+  return out;
+}
 
-    const twoNPlus1 = 2 * n + 1;
-    extinctionSum += twoNPlus1 * (aRe + bRe);
-    scatteringSum += twoNPlus1 * (aRe * aRe + aIm * aIm + bRe * bRe + bIm * bIm);
-    // (8): (n − 1)(n + 1) ÷ n Re(aₙ₋₁ aₙ* + bₙ₋₁ bₙ*) + (2n + 1) ÷ (n (n + 1)) Re(aₙ bₙ*).
-    const weight = twoNPlus1 / (n * (n + 1));
-    asymmetrySum +=
-      (n - 1 / n) * (aPrevRe * aRe + aPrevIm * aIm + bPrevRe * bRe + bPrevIm * bIm) +
-      weight * (aRe * bRe + aIm * bIm);
-
-    const caRe = weight * aRe;
-    const caIm = weight * aIm;
-    const cbRe = weight * bRe;
-    const cbIm = weight * bIm;
+/**
+ * The amplitudes S₁ and S₂ (9) that a set of coefficients aₙ, bₙ gives at the cosines `mu`, in
+ * {@link mieSphere}'s convention and interleaving: a sphere's from {@link mieCoefficients}, or a
+ * monomer's mean-field ones (R08.T5.c).
+ *
+ * @param mu - The scattering-angle cosines, each in [−1, 1].
+ * @throws RangeError if a cosine is outside [−1, 1] or the coefficient arrays differ in length.
+ */
+export function mieAmplitudes(
+  coefficients: MieCoefficients,
+  mu: Float64Array,
+): { readonly s1: Float64Array; readonly s2: Float64Array } {
+  const { aRe, aIm, bRe, bIm } = coefficients;
+  const terms = aRe.length;
+  if (aIm.length !== terms || bRe.length !== terms || bIm.length !== terms) {
+    throw new RangeError("the coefficient arrays must have one entry per term");
+  }
+  for (const cosine of mu) {
+    if (!(cosine >= -1 && cosine <= 1)) {
+      throw new RangeError(`scattering-angle cosine ${cosine} is outside [−1, 1]`);
+    }
+  }
+  const angles = mu.length;
+  const s1 = new Float64Array(2 * angles);
+  const s2 = new Float64Array(2 * angles);
+  const piPrevious = new Float64Array(angles);
+  const piCurrent = new Float64Array(angles).fill(1);
+  for (let n = 1; n <= terms; n += 1) {
+    const weight = (2 * n + 1) / (n * (n + 1));
+    const caRe = weight * (aRe[n - 1] ?? 0);
+    const caIm = weight * (aIm[n - 1] ?? 0);
+    const cbRe = weight * (bRe[n - 1] ?? 0);
+    const cbIm = weight * (bIm[n - 1] ?? 0);
     const nPlus1OverN = 1 + 1 / n;
     for (let j = 0; j < angles; j += 1) {
       const cosine = mu[j] ?? 0;
       const piN = piCurrent[j] ?? 0;
       const piN1 = piPrevious[j] ?? 0;
-      // (37), (38): t = μ πₙ − πₙ₋₁; τₙ = n t − πₙ₋₁; πₙ₊₁ = μ πₙ + (n + 1) ÷ n · t.
       const t = cosine * piN - piN1;
       const tau = n * t - piN1;
       s1[2 * j] = (s1[2 * j] ?? 0) + caRe * piN + cbRe * tau;
@@ -376,29 +455,8 @@ export function mieSphere(sizeParameter: number, index: ComplexIndex, mu: Float6
       piPrevious[j] = piN;
       piCurrent[j] = cosine * piN + nPlus1OverN * t;
     }
-
-    aPrevRe = aRe;
-    aPrevIm = aIm;
-    bPrevRe = bRe;
-    bPrevIm = bIm;
-    // (17): ζₙ₊₁ = (2n + 1) ÷ x · ζₙ − ζₙ₋₁.
-    const psiNext = twoNPlus1 * xInv * psi - psiPrevious;
-    const chiNext = twoNPlus1 * xInv * chi - chiPrevious;
-    psiPrevious = psi;
-    chiPrevious = chi;
-    psi = psiNext;
-    chi = chiNext;
   }
-
-  const xSquared = x * x;
-  const qSca = (2 / xSquared) * scatteringSum;
-  return {
-    qExt: (2 / xSquared) * extinctionSum,
-    qSca,
-    asymmetry: ((4 / xSquared) * asymmetrySum) / qSca,
-    s1,
-    s2,
-  };
+  return { s1, s2 };
 }
 
 /**

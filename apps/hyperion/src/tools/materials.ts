@@ -600,7 +600,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       variant: null,
       name: "metallic iron films at room temperature",
       temperatureK: 295,
-      shape: "sphere",
+      shape: "nonSphericalMineral",
       provenance: "measured",
       paper:
         'P. B. Johnson and R. W. Christy, "Optical constants of transition metals: Ti, V, Cr, Mn, Fe, Co, Ni, and Pd", Phys. Rev. B 9 (1974) 5056–5070, DOI 10.1103/PhysRevB.9.5056',
@@ -610,7 +610,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
         "8d774beaac808662370242790c18b9998a9856ba850d9f35c45f6db3da31a7cd",
       ),
       licence: RI_LICENCE,
-      reduction: `${STANDARD_REDUCTION}; room-temperature solid iron, so a liquid iron cloud takes it as a named analogue (a stand-in); 295 K stands for the source's room temperature`,
+      reduction: `${STANDARD_REDUCTION}; room-temperature solid iron, so a liquid iron cloud takes it as a named analogue (a stand-in), drawn as spheres, while solid grains are non-spherical minerals (science-r08-nonspherical.md §2.2); 295 K stands for the source's room temperature`,
       standIn: null,
       fit: null,
     },

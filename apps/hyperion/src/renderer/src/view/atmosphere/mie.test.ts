@@ -7,6 +7,8 @@ import {
   MIE_MAX_SIZE_PARAMETER,
   MIE_MIN_SIZE_PARAMETER,
   type MieResult,
+  mieAmplitudes,
+  mieCoefficients,
   mieSphere,
   mieTermCount,
 } from "./mie";
@@ -920,5 +922,33 @@ describe("mieSphere's inputs", () => {
     const result = mieSphere(1, index, none);
     expect(result.s1).toHaveLength(0);
     expect(result.s2).toHaveLength(0);
+  });
+});
+
+describe("the coefficients and amplitudes T5.c's aggregates read", () => {
+  it("give a small sphere's a₁ in Wiscombe's convention, the conjugate of Bohren and Huffman's", () => {
+    // Bohren and Huffman's a₁ → −i (2x³ ÷ 3)(m² − 1) ÷ (m² + 2) as x → 0 (their (5.6)); this
+    // convention's is its conjugate, +i.
+    const x = 0.01;
+    const { aRe, aIm } = mieCoefficients(x, { n: 1.5, k: 0 });
+    const expected = ((2 * x ** 3) / 3) * ((1.5 ** 2 - 1) / (1.5 ** 2 + 2));
+    expect((aIm[0] ?? 0) / expected).toBeCloseTo(1, 4);
+    expect(Math.abs(aRe[0] ?? 1)).toBeLessThan(1e-9);
+  });
+
+  it("sum the amplitudes mieSphere returns", () => {
+    const mu = Float64Array.from([1, 0.3, -0.7]);
+    const index = { n: 1.7, k: 0.02 };
+    const { s1, s2 } = mieAmplitudes(mieCoefficients(5, index), mu);
+    const sphere = mieSphere(5, index, mu);
+    expect(Array.from(s1)).toEqual(Array.from(sphere.s1));
+    expect(Array.from(s2)).toEqual(Array.from(sphere.s2));
+  });
+
+  it("refuse coefficient arrays of different lengths", () => {
+    const c = mieCoefficients(1, { n: 1.5, k: 0 });
+    expect(() => mieAmplitudes({ ...c, bIm: c.bIm.subarray(1) }, Float64Array.from([0]))).toThrow(
+      RangeError,
+    );
   });
 });

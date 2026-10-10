@@ -5,6 +5,7 @@ import { refractiveIndex } from "./materials/materials";
 import { mieSphere, mieTermCount } from "./mie";
 import {
   modeOptics,
+  resolveModeMaterial,
   PHASE_TABLE_MU,
   PHASE_TABLE_SIZE,
   PHASE_TABLE_U,
@@ -303,6 +304,33 @@ describe("a mode's optics", () => {
     const droplets = modeOptics({ material: "H2O", sizes }, 550);
     expect(droplets.shape).toBe("sphere");
     expect(droplets.matrix).toBeDefined();
+  });
+
+  it("give a non-sphere through Mie as a Henyey–Greenstein fallback, and a sphere as Mie's model", () => {
+    const sizes: SizeDistribution = { kind: "gamma", effectiveRadiusUm: 1, effectiveVariance: 0.1 };
+    const dust = modeOptics({ material: "mars_dust", sizes }, 550);
+    expect(dust.phaseBasis).toBe("fallback");
+    expect(dust.phaseModel).toBe("henyeyGreenstein");
+    expect(dust.phaseNote).toContain("fallback");
+    const droplets = modeOptics({ material: "H2SO4", sizes }, 550);
+    expect(droplets.phaseBasis).toBe("model");
+    expect(droplets.phaseModel).toBe("mie");
+    expect(droplets.phaseNote).toBeUndefined();
+  });
+
+  it("draw a liquid as spheres whatever its file's class, and a declared crystal as its solid", () => {
+    const sizes: SizeDistribution = {
+      kind: "gamma",
+      effectiveRadiusUm: 0.5,
+      effectiveVariance: 0.1,
+    };
+    // Liquid iron takes solid iron's file, a non-spherical mineral's, as its named analogue.
+    const liquidIron = modeOptics({ material: "Fe", form: { phase: "liquid" }, sizes }, 550);
+    expect(liquidIron.shape).toBe("sphere");
+    expect(liquidIron.matrix).toBeDefined();
+    expect(resolveModeMaterial({ material: "H2O", shape: "crystal", sizes }).file?.phase).toBe(
+      "solid",
+    );
   });
 
   it("refuse an aggregate, whose optics are T5.c's", () => {

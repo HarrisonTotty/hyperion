@@ -52,8 +52,11 @@
  *   (decision-r08-licences, row 5), which clears only when measured constants replace it. The same
  *   holds for any other material drawn with a stated stand-in, a named analogue or, for a key this
  *   client does not know, the generic stand-in, under the same optical-depth rule
- *   (decision-composition §1.9; `materials/materials.ts`'s `materialLabels`). It also stands in
- *   `atmosphereComputing`'s place if a bake fails, until the body's atmosphere is next computed.
+ *   (decision-composition §1.9; `materials/materials.ts`'s `materialLabels`), and for an aerosol
+ *   mode drawn with a named analogue's phase function or the Henyey–Greenstein fallback (R08.T5.c;
+ *   `aerosol.ts`'s `phaseLabels`), which clears when a published model for it replaces it. It
+ *   also stands in `atmosphereComputing`'s place if a bake fails, until the body's atmosphere is
+ *   next computed.
  *
  * @remarks
  * Per body, as R08.T10.a's `assembleMedium` and R08.T14.c's bake give them: at most one of

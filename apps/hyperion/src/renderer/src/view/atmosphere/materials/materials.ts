@@ -43,8 +43,10 @@ export type MaterialPhase = "liquid" | "solid";
 
 /**
  * The shape class of a material's particles (Design note 6; P14.T24.c's closed physics enum):
- * spheres go through Mie; a non-spherical mineral and a crystal take Mie's cross-sections only; an
- * aggregate's monomers are spheres (R08.T5.c).
+ * spheres go through Mie; a non-spherical mineral takes TAMUdust2020's hexahedra and a crystal Yang
+ * et al. 2013's roughened ice, or an analogue or fallback (R08.T5.c, `nonSpherical.ts`); an
+ * aggregate's monomers are spheres, through the MMF (`aggregate.ts`). A liquid is a sphere
+ * whatever its material's file says (`aerosol.ts`).
  */
 export type ShapeClass = "sphere" | "nonSphericalMineral" | "crystal" | "aggregate";
 
