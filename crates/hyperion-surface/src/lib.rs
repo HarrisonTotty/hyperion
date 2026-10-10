@@ -11,7 +11,8 @@
 //! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), what every height source
 //! returns ([`height`]), and the datum heights are measured from, the reference [`spheroid`] (plan
 //! 14's P14.T46.e); and the first of R09's: the coarse field's types ([`field`]) with the header's
-//! crater contract ([`craters`]), which R09's later tasks give their behaviour; the codec of the
+//! crater contract ([`craters`]), which R09's later tasks give their behaviour, and the key of plan
+//! 14's substances, which the header's palette carries ([`substance_key`]); the codec of the
 //! field's bulk payload ([`wire`]); the synthesis over a field ([`synth`]), today its
 //! `Synthesiser` returning the base elevation, the coarse cells interpolated over the sphere
 //! (`synth::interp`), with the header's spectrum; and, for tests, synthetic fields (`testing`,
@@ -58,6 +59,7 @@ pub mod noise;
 pub mod num;
 pub mod patch;
 pub mod spheroid;
+pub mod substance_key;
 pub mod synth;
 pub mod tags;
 pub mod test_planet;

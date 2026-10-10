@@ -3,7 +3,8 @@
 
 use hyperion_base::units::{Gigayears, Kelvin, Metres, Pascals};
 
-use super::cells::{ClimateCell, QuantiseValueError};
+use super::cells::{ClimateCell, Crust, QuantiseValueError};
+use super::palette::{MaterialPalette, PaletteEntry, PaletteRole};
 use super::{CoarseLevel, boundary_diameter, coarse_level};
 use crate::craters::CraterParams;
 use crate::spheroid::Spheroid;
@@ -69,6 +70,13 @@ coded_enum! {
         Heuristic = 0,
     }
 }
+
+// `FieldHeaderParts::crust_palette` holds one entry a crust: a new `Crust` code lengthens it,
+// which changes the payload's layout, so it takes a new `SURFACE_PAYLOAD_FORMAT`.
+const _: () = assert!(
+    Crust::ALL.len() == 4,
+    "crust_palette has one entry a Crust variant: resize it, under a new payload format"
+);
 
 /// The parts of a [`FieldHeader`], as the coarse pass or a decoder has them, each in the SI unit
 /// its type or name states.
@@ -147,6 +155,16 @@ pub struct FieldHeaderParts {
     /// R10's albedo scale, dimensionless and positive, or `None` until R10 fills it (Design note
     /// 18).
     pub albedo_scale: Option<f64>,
+    /// The substances the field names, their values resolved by the server from plan 14's
+    /// registry (decision-composition §1.7); empty for a body whose composition is not modelled.
+    pub palette: MaterialPalette,
+    /// The palette entry of each [`Crust`] variant, in code order (continental, oceanic, lid,
+    /// province), whose lithology it names, or `None` where the field names none: an entry of a
+    /// crust's role ([`PaletteRole::is_crust`]).
+    pub crust_palette: [Option<u8>; 4],
+    /// The palette entry of the body's main liquid, its sea's, or `None`: a
+    /// [`PaletteRole::Liquid`] entry.
+    pub main_liquid: Option<u8>,
 }
 
 /// A coarse field's header: [`FieldHeaderParts`], validated, with the level and the boundary
@@ -198,6 +216,15 @@ pub enum BuildFieldHeaderError {
         /// The part's name.
         part: &'static str,
     },
+    /// A crust's palette entry is past the palette or not of a crust's role.
+    CrustPalette {
+        /// The crust.
+        crust: Crust,
+        /// The entry it names.
+        entry: u8,
+    },
+    /// The main liquid's entry is past the palette or not a liquid's.
+    MainLiquid(u8),
 }
 
 impl std::fmt::Display for BuildFieldHeaderError {
@@ -222,6 +249,14 @@ impl std::fmt::Display for BuildFieldHeaderError {
             Self::NotFinite { part } => write!(f, "{part} is not finite"),
             Self::Negative { part } => write!(f, "{part} is negative"),
             Self::NotPositive { part } => write!(f, "{part} is not positive"),
+            Self::CrustPalette { crust, entry } => write!(
+                f,
+                "the {crust:?} crust's palette entry {entry} is past the palette or not a crust's"
+            ),
+            Self::MainLiquid(entry) => write!(
+                f,
+                "the main liquid's palette entry {entry} is past the palette or not a liquid's"
+            ),
         }
     }
 }
@@ -277,8 +312,9 @@ impl FieldHeader {
     ///
     /// [`BuildFieldHeaderError`] if the radius is not finite and positive, the figure is not the
     /// radius's spheroid, the months are neither 1 nor 12, the season eccentricity is outside
-    /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, or a part is not finite
-    /// or out of its range (each part's documentation states it).
+    /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, a part is not finite
+    /// or out of its range (each part's documentation states it), a crust's palette entry is past
+    /// the palette or not of a crust's role, or the main liquid's is past it or not a liquid's.
     pub fn new(parts: FieldHeaderParts) -> Result<Self, BuildFieldHeaderError> {
         let r = parts.radius.value();
         if !(r.is_finite() && r > 0.0) {
@@ -343,6 +379,18 @@ impl FieldHeader {
         ];
         if let Some(&(part, _)) = positive.iter().find(|(_, v)| *v <= 0.0) {
             return Err(BuildFieldHeaderError::NotPositive { part });
+        }
+        for (&crust, &entry) in Crust::ALL.iter().zip(&parts.crust_palette) {
+            if let Some(entry) = entry
+                && !parts.palette.get(entry).is_some_and(|e| e.role.is_crust())
+            {
+                return Err(BuildFieldHeaderError::CrustPalette { crust, entry });
+            }
+        }
+        if let Some(entry) = parts.main_liquid
+            && !parts.palette.has_role(entry, PaletteRole::Liquid)
+        {
+            return Err(BuildFieldHeaderError::MainLiquid(entry));
         }
         let level = coarse_level(parts.radius);
         let boundary_diameter = boundary_diameter(level, parts.radius);
@@ -527,6 +575,32 @@ impl FieldHeader {
     #[must_use]
     pub fn albedo_scale(&self) -> Option<f64> {
         self.parts.albedo_scale
+    }
+
+    /// The body's palette ([`FieldHeaderParts::palette`]).
+    #[must_use]
+    pub fn palette(&self) -> &MaterialPalette {
+        &self.parts.palette
+    }
+
+    /// Each crust's palette entry, in [`Crust`]'s code order ([`FieldHeaderParts::crust_palette`]).
+    #[must_use]
+    pub fn crust_palette(&self) -> [Option<u8>; 4] {
+        self.parts.crust_palette
+    }
+
+    /// The palette entry of `crust`'s lithology, or `None` where the field names none.
+    #[must_use]
+    pub fn crust_entry(&self, crust: Crust) -> Option<&PaletteEntry> {
+        let at = usize::from(u8::from(crust));
+        let entry = self.parts.crust_palette.get(at).copied().flatten()?;
+        self.parts.palette.get(entry)
+    }
+
+    /// The main liquid's palette entry index ([`FieldHeaderParts::main_liquid`]).
+    #[must_use]
+    pub fn main_liquid(&self) -> Option<u8> {
+        self.parts.main_liquid
     }
 
     /// The annual mean surface temperature of `cell`, reduced to sea level, kelvin: its code times
@@ -716,6 +790,49 @@ mod tests {
                 part: "albedo scale"
             }
         );
+        // The Ceres-like palette: its crust (0), water ice (1) and sodium carbonate (2).
+        assert_eq!(
+            refuse(|p| p.crust_palette[0] = Some(1)),
+            BuildFieldHeaderError::CrustPalette {
+                crust: Crust::Continental,
+                entry: 1
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.crust_palette[1] = Some(2)),
+            BuildFieldHeaderError::CrustPalette {
+                crust: Crust::Oceanic,
+                entry: 2
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.crust_palette[3] = Some(3)),
+            BuildFieldHeaderError::CrustPalette {
+                crust: Crust::Province,
+                entry: 3
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.main_liquid = Some(1)),
+            BuildFieldHeaderError::MainLiquid(1)
+        );
+        assert_eq!(
+            refuse(|p| p.main_liquid = Some(9)),
+            BuildFieldHeaderError::MainLiquid(9)
+        );
+    }
+
+    /// A crust's entry names its lithology, and a crust with none names nothing.
+    #[test]
+    fn a_field_header_names_each_crusts_lithology() {
+        let header = FieldHeader::new(parts()).unwrap();
+        let lid = header.crust_entry(Crust::Lid).unwrap();
+        assert_eq!(lid.substance.as_str(), "phyllosilicate");
+        assert_eq!(lid.role, PaletteRole::SecondaryCrust);
+        assert_eq!(header.crust_entry(Crust::Continental), None);
+        assert_eq!(header.crust_palette(), [None, None, Some(0), None]);
+        assert_eq!(header.main_liquid(), None);
+        assert_eq!(header.palette().len(), 3);
     }
 
     /// Design note 17's steps: 0.25 K for an Earth's ±31 K, 0.5 K for a Mars's ±60 K and 1 K for

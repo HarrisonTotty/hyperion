@@ -189,13 +189,15 @@ pub mod field {
         realised_sigma_h, realised_relief, months: u8 (1 or 12),
         season_eccentricity: f64 (the months' orbit, Design note 8),
         anomaly_step: u8 (0.25 K × 2ⁿ, per body, Design note 17), surface_age: Gigayears,
-        surface_pressure: Pascals, albedo_scale: Option<f64> (R10's) */ }
+        surface_pressure: Pascals, albedo_scale: Option<f64> (R10's),
+        palette: MaterialPalette (≤ 15 PaletteEntry, T2's follow-up B),
+        crust_palette: [Option<u8>; 4], main_liquid: Option<u8> */ }
     pub struct SynthesisCell { /* elevation_mm: i32,
         boundary_distance: i16 (1 km, saturating),
         plate: u8, crust: Crust, boundary: BoundaryKind, boundary_obliquity: u8,
         flow: FlowDirection, drainage: LogArea, steepness: LogSteepness,
-        water_surface_mm: i32, ice: u8, class: SurfaceClass, crater_state: u8 */ }
-                                                           // 21 bytes in the payload
+        water_surface_mm: i32, ice: u8, substances: u8 (ice and liquid entries),
+        class: SurfaceClass, crater_state: u8 */ }      // 22 bytes in the payload
     pub struct ClimateCell { /* at level − 1: sea_level_temperature: i16 (0.01 K),
         month_anomaly: [i8; 12] (header's step), month_precipitation: [u8; 12] (log rate),
         wind: [Wind; 12] (each month's 10 m wind) */ }    // 50 bytes, one per four cells
@@ -1059,9 +1061,10 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     confidence for Mars and high obliquity), so no anomaly saturates and no cell grows. The climate
     layer is at level L − 1, because it is interpolated from the energy-balance grid and carries
     nothing finer except the lapse term, which the synthesis re-applies from the header's rate and
-    the cell's elevation. That gives about 21 B a cell plus 50 B per four (twelve months of
-    anomaly, precipitation and wind): some 13.2 MB for an Earth at level 8, 3.3 MB for a Mars at 7
-    and 0.8 MB for the Moon, inside the brainstorm's "roughly 2 to 15 MB" and R03's 15 MiB check.
+    the cell's elevation. That gives about 22 B a cell (21 B and T2's follow-up B's substance
+    byte) plus 50 B per four (twelve months of anomaly, precipitation and wind): some 13.6 MB for
+    an Earth at level 8, 3.4 MB for a Mars at 7 and 0.86 MB for the Moon, inside the brainstorm's
+    "roughly 2 to 15 MB" and R03's 15 MiB check.
     Heights, elevations and sea level are measured along the normal of the body's
     rotational spheroid, R07's reference body (a = R_vol (1 − f)^(−⅓), c = a (1 − f), with plan 14's
     flattening f, which P14.T46 sends in the record's `figure()`), the one datum R07's Design note
@@ -2228,6 +2231,91 @@ re-blessing this plan's payload and coarse goldens in that commit.
       circular orbit has one wire form, and a mean anomaly reduces to +0, never −0.
     - _For T13, T15 and T16._ T13.a bins by `month_edges`, T13.e fills each month's wind, T15
       counts months by `month_share`, and T16's goldens pin them on the reference worlds.
+  - _The palette and the substance byte_ (follow-up B, decision-composition §1.1 and §1.7,
+    2026-10-10; revisable until T19's first send). It makes B's codec rows too, as T3's "For T2's
+    follow-ups A and B" asks.
+    - _Files._ `substance_key.rs` is new, since P14.T49.a is not built and finds it there.
+      `field/palette.rs` is new, re-exported at `field::*`. The surface `clippy.toml`'s
+      `doc-valid-idents` gains `McLennan` and `WebBook`.
+    - _`SubstanceKey`._ `new` is a `const fn` returning `ParseSubstanceKeyError` (`Empty`,
+      `TooLong`, `Malformed { at }`, `Padding`). The constructor that fails to compile is
+      `new_const`: it panics, which is error E0080 in a `const` item (three `compile_fail`
+      doctests) and a runtime panic elsewhere, so the registry's rows call it in one. Beyond the
+      task: `MAX_BYTES` (16), `from_padded` and `as_padded` (the wire form), `form()` returning
+      `SubstanceKeyForm` (`Formula`, `Electron`, `Name`), `FromStr`, `Display`, and a `Debug` that
+      shows the string. Keys order as their strings do, NUL sorting first. No serde, since the
+      crate depends on base alone: the sim writes `as_str`.
+    - _The grammar, narrowed._ A formula's count is 2 or more with no leading zero, so `H1`,
+      `C1O2` and `H02` are refused and a species has one spelling. No key in §1.1's rows is
+      affected. A bare `e` is a name. Element symbols and stoichiometry are P14.T49.a's test.
+    - _Where the refusals sit._ The palette's own rules are `MaterialPalette::new`'s
+      (`BuildPaletteError`): more than 15 entries; an entry not strictly after its predecessor in
+      (role, key); an albedo that is not finite or is below +0 (a −0 is refused, so a black band
+      has one wire form); a density or transition that is not finite and positive.
+      `crust_palette` and `main_liquid` are `FieldHeader::new`'s
+      (`BuildFieldHeaderError::CrustPalette`, `MainLiquid`). So no header that breaks them
+      reaches `CoarseField::new`, under which the task lists them. The cell rules are
+      `check_substances`' (`BuildFieldError`'s `SubstanceIndex`, `SubstanceRole`,
+      `IceWithoutEntry` and `LiquidWithoutEntry`), shared by `CoarseField::new` and
+      `PartialField::insert`, and not `decode_block`'s, since only block 0 carries the header (as
+      the months rule).
+    - _Stricter or looser than the task._ A nibble naming an entry of the wrong role is refused
+      even where the share is 0. A cell may name an ice or a liquid it holds none of (a seasonal
+      frost's), but never hold a share it does not name. `main_liquid` is a `Liquid` entry. The
+      crust roles are `PrimaryCrust`, `SecondaryCrust`, `TertiaryCrust` and `Province`
+      (`PaletteRole::is_crust`), any `Crust` variant naming any of them. A cell whose crust names
+      no entry is not refused: its lithology is not modelled.
+    - _Public items beyond the task._ `field::NO_ENTRY`, `BuildPaletteError` and
+      `PaletteRole::is_crust`; `MaterialPalette`'s `MAX_ENTRIES`, `entries`, `get`, `len`,
+      `is_empty`, `find` and `has_role`; `SynthesisCell`'s `NO_SUBSTANCES`, `pack_substances`,
+      `ice_entry` and `liquid_entry`; `SurfaceClass`'s `FIRST_KOPPEN_GEIGER`,
+      `FIRST_SURFACE_STATE` and `range`, with `SurfaceClassRange` (`Unclassified`,
+      `KoppenGeiger`, `SurfaceState`); `FieldHeader`'s `palette`, `crust_palette`, `crust_entry`
+      and `main_liquid`; `DecodeBlockError`'s `Palette` and `SubstanceKey`.
+    - _The codec._ `substances` follows `ice` in `SynthesisCell` and its table (T3's note called
+      it `substance`; the task's name is `substances`). `palette`, `crust_palette` and
+      `main_liquid` close `FieldHeaderParts` and its table. The palette is a count byte, then
+      59-byte entries: the key's 16 padded bytes, the role, three `f64` albedos, the phase row,
+      the density, the transition and the mechanics family. `[Option<u8>; 4]` is four
+      presence-byte options: the array form now takes any `Wire` element. An empty palette adds
+      6 B to block 0's header, each entry 59 B and each present index 1 B. A new `Crust` variant
+      now lengthens the header, since `crust_palette` holds one entry a variant, so it takes a new
+      format, not only a new code: a `const` assertion holds the four, and `wire.rs` says so.
+    - _Sizes._ Whole payloads, inside T3's 10–15 MB bracket and R03's 15 MiB check: Earth-like
+      13,567,743 B in 13 blocks (392,915 B more, Design note 17's 0.39 MB), Mars-like 3,414,234 B
+      in 4, Moon-like 862,458 B in 1, Ceres-like 218,670 B in 1. Each single-block payload is its
+      old size, the header's growth (Earth-like 245 B, Mars-like 244, Moon-like 126, Ceres-like
+      184, Flat and OneCrater 6) and a byte a cell carried.
+    - _Goldens._ `payloads.golden`'s 18 block, byte and digest lines are re-blessed at 21, and its
+      held covers do not move; `codes.golden` gains 18 lines (`palette_role`, `mechanics_family`,
+      `substance_nibble 15` and the three `surface_class` ranges). Neither `GENERATOR_VERSION` nor
+      `SURFACE_PAYLOAD_FORMAT` is bumped (Generator version, the ruling of 2026-10-09).
+    - _The synthetic worlds._ Earth-like: basalt (secondary) for `Oceanic`, granite (tertiary)
+      for `Continental`, `H2O` as `Ice` and as `Liquid`, the main liquid `H2O`. Mars-like:
+      basalt (secondary) for `Lid` and `Province`, `CO2` and `H2O` ices (its ice cells name `H2O`
+      in the north and `CO2` in the south), `mars_dust` as `Deposit`. Moon-like: anorthosite
+      (primary) for `Lid`, basalt (province) for `Province`. Ceres-like: phyllosilicate
+      (secondary) for `Lid`, `H2O` ice, which no cell holds, `Na2CO3` as `Deposit`. Flat and
+      OneCrater have an empty palette. The values are illustrative, each with its source and the
+      science review's corrections; the solidi of basalt, granite and anorthosite and the
+      densities of basalt and granite stay low confidence, unread. The albedos are grey across B,
+      V and R: R10's Design note 8 midpoints, the anorthosite at its range's top, the
+      phyllosilicate at Ceres's 0.094, and liquid water's the Fresnel reflectance in each band.
+      Every `phase_row` is 0. `FieldBuilder` gains `palette`, `crust_palette`, `main_liquid` and
+      `ice_entry` (the default ice is the palette's first `Ice` entry), and panics on ice or a sea
+      it has no entry to name; the panics are documented, not tested, since `tests/panics.rs`
+      cannot see the `testing` feature.
+    - _Supersedes._ T2's "Closed sets": the cell's ice share now names its species through its
+      entry; `month_precipitation` still names none, the condensable being P14.T48.d's.
+    - _Acceptance._ The two commands miss the `wire::` tests B changed, so B ran the crate's whole
+      suite, `cargo test -p hyperion-surface`.
+    - _For P14.T49.a, T15, R10 and R11._ P14.T49.a takes `SubstanceKey` as it is, and its test
+      checks the synthetic worlds' keys once P14.T49.b's rows exist. T15 assigns the classes in
+      `SurfaceClass`'s two ranges. R10 assigns `phase_row`'s codes, and its classifier reads a
+      nibble as the species and the share as its presence. R10's and R11's new palette members
+      move the layout before T19's first send; whether that bumps `SURFACE_PAYLOAD_FORMAT` (the
+      task's text) or re-blesses at the current version (Generator version's ruling, which B
+      followed) is asked of "main".
 - **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
   goldens on, revisable until then).
   - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the

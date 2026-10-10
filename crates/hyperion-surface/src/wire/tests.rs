@@ -16,10 +16,12 @@ use super::form::{
 use super::*;
 use crate::craters::Screening;
 use crate::field::{
-    BoundaryKind, ClimateModelKind, Crust, FieldView, FlowDirection, InsertBlockError, LogArea,
-    LogPrecipitation, LogSteepness, PartialField, PrecipitationSource, SurfaceClass, Wind,
-    cell_at_index, crater_key_order,
+    BoundaryKind, BuildPaletteError, ClimateModelKind, Crust, FieldView, FlowDirection,
+    InsertBlockError, LogArea, LogPrecipitation, LogSteepness, MechanicsFamily, NO_ENTRY,
+    PaletteRole, PartialField, PrecipitationSource, SurfaceClass, Wind, cell_at_index,
+    crater_key_order,
 };
+use crate::substance_key::ParseSubstanceKeyError;
 use crate::testing::{SyntheticWorld, synthetic_field};
 
 /// The Earth-like world, built once for the tests that read it (0.6–0.8 s a build).
@@ -391,9 +393,10 @@ fn wire_payloads_merged_in_any_order_give_the_whole_cover_s_field() {
     }
 }
 
-/// The Earth-like world's whole payload is 10–15 MB (Design note 17's "some 13.2 MB": 21 bytes a
-/// cell and 50 per four cells, with each block's header and craters), and no block of it, or of
-/// any payload here, exceeds 1 MiB.
+/// The Earth-like world's whole payload is 10–15 MB (about 13.6 MB: Design note 17's 21 bytes a
+/// cell with the substance byte, 22, and 50 per four cells, with each block's header, the field
+/// header with its palette, and the craters), and no block of it, or of any payload here, exceeds
+/// 1 MiB.
 #[test]
 fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
     let field = earth();
@@ -702,6 +705,31 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         block: CoarseLevel::new(6).unwrap(),
     };
     assert_eq!(damaged(24, &[6]), block(0, level));
+    // The header section's last parts: the Ceres-like palette (a count and three entries of 59
+    // bytes), each crust's entry (four options, the lid's present: five bytes) and the main
+    // liquid's (absent: one byte).
+    let end = 35 + usize::from(declared);
+    let palette = end - 6 - (1 + 3 * 59);
+    assert_eq!(bytes[palette], 3);
+    let unsorted = DecodeBlockError::Palette(BuildPaletteError::Unsorted { entry: 1 });
+    let second_role = palette + 1 + 59 + 16;
+    assert_eq!(
+        bytes[second_role],
+        u8::from(PaletteRole::Ice),
+        "the second entry is the ice"
+    );
+    assert_eq!(
+        damaged(second_role, &[u8::from(PaletteRole::PrimaryCrust)]),
+        block(0, unsorted)
+    );
+    let key = DecodeBlockError::SubstanceKey(ParseSubstanceKeyError::Malformed { at: 2 });
+    assert_eq!(damaged(palette + 1, b"P"), block(0, key));
+    let crust = DecodeBlockError::Header(BuildFieldHeaderError::CrustPalette {
+        crust: Crust::Lid,
+        entry: 1,
+    });
+    assert_eq!(bytes[end - 4..end], [PRESENT, 0, ABSENT, ABSENT]);
+    assert_eq!(damaged(end - 3, &[1]), block(0, crust));
     // Block 1's cover, one range at 37, and its first record after it.
     let start = u32_at(&bytes, at[1] + 37);
     let empty = DecodeBlockError::Cover(BuildCoverError::EmptyRange { start, end: start });
@@ -852,6 +880,14 @@ fn a_wire_partial_field_refuses_blocks_that_are_not_its_fields() {
     assert_eq!(
         refuse(&breezy),
         InsertBlockError::Record(BuildFieldError::MonthOutsideYear { cell })
+    );
+    // The one-crater world's palette is empty, so no cell of it has ice.
+    let mut icy = blocks[0].clone();
+    icy.cells[4].ice = 9;
+    let cell = icy.cover.cells().nth(4).unwrap();
+    assert_eq!(
+        refuse(&icy),
+        InsertBlockError::Record(BuildFieldError::IceWithoutEntry { cell })
     );
     let mut moved = blocks[0].clone();
     moved.cells[10].plate = 7;
@@ -1053,6 +1089,7 @@ const PLAIN_CELL: SynthesisCell = SynthesisCell {
     steepness: LogSteepness::ZERO,
     water_surface_mm: 0,
     ice: 0,
+    substances: SynthesisCell::NO_SUBSTANCES,
     class: SurfaceClass::UNCLASSIFIED,
     crater_state: 0,
 };
@@ -1065,11 +1102,35 @@ fn write_enum_codes(w: &mut GoldenWriter) {
     write_codes(w, "morphology", Morphology::ALL);
     write_codes(w, "climate_model", ClimateModelKind::ALL);
     write_codes(w, "precipitation_source", PrecipitationSource::ALL);
+    write_codes(w, "palette_role", PaletteRole::ALL);
+    write_codes(w, "mechanics_family", MechanicsFamily::ALL);
+    w.line(&format!("substance_nibble {NO_ENTRY} = None"));
+    write_surface_class_ranges(w);
     w.line(&format!("screening {SCREENING_NONE} = None"));
     w.line(&format!("screening {SCREENING_ATMOSPHERE} = Atmosphere"));
     w.line(&format!("screening {SCREENING_CUTOFF} = Cutoff"));
     w.line(&format!("option {ABSENT} = None"));
     w.line(&format!("option {PRESENT} = Some"));
+}
+
+/// The surface class's code ranges, as runs of codes in one range, computed from every code.
+fn write_surface_class_ranges(w: &mut GoldenWriter) {
+    let mut start = 0_u8;
+    for code in 1..=u8::MAX {
+        let range = SurfaceClass::new(code).range();
+        if range != SurfaceClass::new(start).range() {
+            w.line(&format!(
+                "surface_class {start}..={} = {:?}",
+                code - 1,
+                SurfaceClass::new(start).range()
+            ));
+            start = code;
+        }
+    }
+    w.line(&format!(
+        "surface_class {start}..=255 = {:?}",
+        SurfaceClass::new(start).range()
+    ));
 }
 
 /// The value of every code of every one-byte scale, and a sample of the drainage area's.

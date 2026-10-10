@@ -17,8 +17,8 @@ use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv
 use hyperion_surface::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseField, CoarseLevel, Cover, Crust,
     FieldHeader, FieldHeaderParts, FieldView, FlowDirection, LogArea, LogPrecipitation,
-    LogSteepness, PrecipitationSource, SurfaceClass, SynthesisCell, Wind, boundary_diameter,
-    cell_index, coarse_level, month_at, month_blend,
+    LogSteepness, MaterialPalette, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
+    boundary_diameter, cell_index, coarse_level, month_at, month_blend,
 };
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
 use hyperion_surface::noise::{LatticeCache, Octave, gradient_noise};
@@ -227,6 +227,9 @@ fn level_five_field() -> CoarseField {
         surface_age: Gigayears::new(4.0),
         surface_pressure: Pascals::ZERO,
         albedo_scale: None,
+        palette: MaterialPalette::default(),
+        crust_palette: [None; 4],
+        main_liquid: None,
     })
     .unwrap();
     let cell = SynthesisCell {
@@ -241,6 +244,7 @@ fn level_five_field() -> CoarseField {
         steepness: LogSteepness::ZERO,
         water_surface_mm: 0,
         ice: 0,
+        substances: SynthesisCell::NO_SUBSTANCES,
         class: SurfaceClass::UNCLASSIFIED,
         crater_state: 0,
     };

@@ -6,8 +6,8 @@ use super::cover::ResolutionCode;
 use super::crater::CoarseCrater;
 use super::header::{BodyRef, FieldHeader};
 use super::{
-    BuildFieldError, CoarseLevel, FieldView, cell_index, check_climate_cell, crater_key_order,
-    reaching_index,
+    BuildFieldError, CoarseLevel, FieldView, cell_index, check_climate_cell, check_substances,
+    crater_key_order, reaching_index,
 };
 use crate::cube::PatchKey;
 use crate::wire::{DecodedBlock, same_crater, same_header};
@@ -91,8 +91,8 @@ pub enum InsertBlockError {
     /// The block is a block 0 whose header is not the field's, bit for bit: it is of another
     /// field of the body.
     WrongHeader,
-    /// A record of the block breaks a rule under the field's header: a month outside its year, or
-    /// a crater narrower than its boundary diameter.
+    /// A record of the block breaks a rule under the field's header: a month outside its year, a
+    /// substance its palette does not have, or a crater narrower than its boundary diameter.
     Record(BuildFieldError),
     /// The block carries a cell the field holds with another record.
     CellConflict {
@@ -286,6 +286,7 @@ impl PartialField {
             }
         }
         for (cell, record) in block.cover().cells().zip(block.cells()) {
+            check_substances(cell, record, header.palette()).map_err(InsertBlockError::Record)?;
             if self.cells[slot(cell)].is_some_and(|held| held != *record) {
                 return Err(InsertBlockError::CellConflict { cell });
             }

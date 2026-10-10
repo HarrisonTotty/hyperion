@@ -23,6 +23,16 @@
 //! seasonal orbit's eccentric anomaly from periapsis ([`month_edges`]). A reader at a given time
 //! blends the two nearest with [`month_blend`] (Design note 8).
 //!
+//! # Substances
+//!
+//! What a body is made of is named, never assumed (decision-composition §1.7). The header carries
+//! the body's [`MaterialPalette`], at most 15 substances by their registry keys
+//! ([`SubstanceKey`](crate::substance_key::SubstanceKey)), each with its values resolved by the
+//! server; the palette entry of each [`Crust`] variant, whose lithology it names; and the main
+//! liquid. Each cell's substance byte names its ice entry and its liquid entry. [`Crust`] stays
+//! structural, and [`SurfaceClass`]'s surface-state codes are forms whose substance is the cell's
+//! entry.
+//!
 //! # The datum and the units
 //!
 //! Heights, elevations and the sea level are measured in metres along the normal of the body's
@@ -80,11 +90,13 @@ mod cover;
 mod crater;
 mod header;
 mod months;
+mod palette;
 mod partial;
 
 pub use cells::{
     BoundaryKind, ClimateCell, Crust, DecodeFieldCodeError, FlowDirection, LogArea,
-    LogPrecipitation, LogSteepness, QuantiseValueError, SurfaceClass, SynthesisCell, Wind,
+    LogPrecipitation, LogSteepness, QuantiseValueError, SurfaceClass, SurfaceClassRange,
+    SynthesisCell, Wind,
 };
 pub use cover::{BuildCoverError, Cover, CoverRange, ResolutionCode};
 pub use crater::{CoarseCrater, Morphology};
@@ -93,6 +105,9 @@ pub use header::{
     PrecipitationSource,
 };
 pub use months::{MonthBlend, month_at, month_blend, month_edges, month_share};
+pub use palette::{
+    BuildPaletteError, MaterialPalette, MechanicsFamily, NO_ENTRY, PaletteEntry, PaletteRole,
+};
 pub use partial::{InsertBlockError, PartialField};
 
 use hyperion_base::units::Metres;
@@ -331,9 +346,10 @@ pub trait FieldView {
 /// index of the craters reaching each cell (Design notes 10 and 17).
 ///
 /// [`CoarseField::new`] validates what it is given, so a field always holds one record per cell,
-/// water surfaces at or above the ground, months only within the header's year, and its craters
-/// in strictly increasing (centre cell, diameter), a key no two craters share, each its reach
-/// complete with its centre's cell. The per-cell crater index is built from the reaches there and
+/// water surfaces at or above the ground, substances its palette has (an ice entry for every ice
+/// share, a liquid entry under every water surface), months only within the header's year, and its
+/// craters in strictly increasing (centre cell, diameter), a key no two craters share, each its
+/// reach complete with its centre's cell. The per-cell crater index is built from the reaches there and
 /// is not on the wire: a client's [`PartialField`] rebuilds it as blocks arrive, merging the
 /// craters of several blocks by that key ([`crate::wire`]).
 #[derive(Clone, PartialEq)]
@@ -374,6 +390,27 @@ pub enum BuildFieldError {
     },
     /// A cell names a boundary kind but no distance to it, or a distance but no boundary.
     BoundaryWithoutDistance {
+        /// The cell's index.
+        cell: u32,
+    },
+    /// A cell's substance byte names an entry past the header's palette.
+    SubstanceIndex {
+        /// The cell's index.
+        cell: u32,
+    },
+    /// A cell's ice nibble names an entry that is not an [`PaletteRole::Ice`], or its liquid
+    /// nibble one that is not a [`PaletteRole::Liquid`].
+    SubstanceRole {
+        /// The cell's index.
+        cell: u32,
+    },
+    /// A cell has an ice share but names no ice entry.
+    IceWithoutEntry {
+        /// The cell's index.
+        cell: u32,
+    },
+    /// A cell is under water but names no liquid entry.
+    LiquidWithoutEntry {
         /// The cell's index.
         cell: u32,
     },
@@ -432,6 +469,19 @@ impl std::fmt::Display for BuildFieldError {
                 f,
                 "cell {cell} names a boundary without a distance, or a distance without one"
             ),
+            Self::SubstanceIndex { cell } => {
+                write!(f, "cell {cell} names a substance past the palette")
+            }
+            Self::SubstanceRole { cell } => write!(
+                f,
+                "cell {cell}'s ice or liquid nibble names an entry of another role"
+            ),
+            Self::IceWithoutEntry { cell } => {
+                write!(f, "cell {cell} has an ice share but names no ice entry")
+            }
+            Self::LiquidWithoutEntry { cell } => {
+                write!(f, "cell {cell} is under water but names no liquid entry")
+            }
             Self::MonthOutsideYear { cell } => {
                 write!(f, "climate cell {cell} carries a month outside the year")
             }
@@ -478,8 +528,12 @@ impl CoarseField {
     ///
     /// [`BuildFieldError`] if the records are not one per cell, a record breaks a rule of its type
     /// (water below the ground, a boundary without a distance, a month outside the year, or a
-    /// one-month year with an anomaly), a crater is not a valid coarse crater of this
-    /// field or is not after its predecessor, or the reaches are too many to index.
+    /// one-month year with an anomaly) or of the header's palette (a substance past it or of
+    /// another role, an ice share without an ice entry, water without a liquid entry), a crater is
+    /// not a valid coarse crater of this field or is not after its predecessor, or the reaches are
+    /// too many to index. The palette's own rules (at most 15 entries, sorted, a crust's entry of a
+    /// crust's role) are the header's ([`FieldHeader::new`], [`MaterialPalette::new`]), so no field
+    /// has a palette that breaks them.
     pub fn new(
         header: FieldHeader,
         synthesis: Vec<SynthesisCell>,
@@ -503,6 +557,7 @@ impl CoarseField {
         }
         for (cell, record) in (0_u32..).zip(&synthesis) {
             check_synthesis_cell(cell, record)?;
+            check_substances(cell, record, header.palette())?;
         }
         for (cell, record) in (0_u32..).zip(&climate) {
             check_climate_cell(cell, record, header.months())?;
@@ -604,6 +659,39 @@ pub(crate) fn check_synthesis_cell(
     let absent = record.boundary == BoundaryKind::Absent;
     if absent != (record.boundary_distance_km == SynthesisCell::NO_BOUNDARY_KM) {
         return Err(BuildFieldError::BoundaryWithoutDistance { cell });
+    }
+    Ok(())
+}
+
+/// Checks the substance byte of the synthesis record of cell `cell` against `palette`: each nibble
+/// [`NO_ENTRY`] or an entry of the palette, the ice nibble's an [`PaletteRole::Ice`] and the liquid
+/// nibble's a [`PaletteRole::Liquid`]; an ice entry wherever the cell has an ice share, and a
+/// liquid entry wherever it is under water.
+///
+/// # Errors
+///
+/// [`BuildFieldError::SubstanceIndex`], [`BuildFieldError::SubstanceRole`],
+/// [`BuildFieldError::IceWithoutEntry`] or [`BuildFieldError::LiquidWithoutEntry`], in that order
+/// of checking.
+pub(crate) fn check_substances(
+    cell: u32,
+    record: &SynthesisCell,
+    palette: &MaterialPalette,
+) -> Result<(), BuildFieldError> {
+    let (ice, liquid) = (record.ice_entry(), record.liquid_entry());
+    let past = |entry: Option<u8>| entry.is_some_and(|e| palette.get(e).is_none());
+    if past(ice) || past(liquid) {
+        return Err(BuildFieldError::SubstanceIndex { cell });
+    }
+    let wrong = |entry: Option<u8>, role| entry.is_some_and(|e| !palette.has_role(e, role));
+    if wrong(ice, PaletteRole::Ice) || wrong(liquid, PaletteRole::Liquid) {
+        return Err(BuildFieldError::SubstanceRole { cell });
+    }
+    if record.ice > 0 && ice.is_none() {
+        return Err(BuildFieldError::IceWithoutEntry { cell });
+    }
+    if record.is_under_water() && liquid.is_none() {
+        return Err(BuildFieldError::LiquidWithoutEntry { cell });
     }
     Ok(())
 }
@@ -792,6 +880,7 @@ impl std::fmt::Debug for CoarseField {
 mod tests {
     use super::*;
     use crate::cube::{FaceUv, face_uv_to_xyz, st_to_uv, unit_dir};
+    use crate::substance_key::SubstanceKey;
     use crate::testing::{FieldBuilder, SyntheticWorld, synthetic_field};
     use hyperion_base::math;
     use hyperion_base::units::Gigayears;
@@ -1189,6 +1278,95 @@ mod tests {
             Err(BuildFieldHeaderError::NotFinite {
                 part: "albedo scale"
             })
+        );
+    }
+
+    /// A cell's substances are the palette's: an index past it, an ice nibble naming no `Ice`
+    /// entry or a liquid nibble no `Liquid` entry, an ice share without an ice entry and water
+    /// without a liquid entry are each refused; a cell may name an ice it holds none of.
+    #[test]
+    fn a_field_refuses_substances_its_palette_does_not_have() {
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        let header = ceres.header().clone();
+        let water_ice = SubstanceKey::new_const("H2O");
+        let ice = header.palette().find(PaletteRole::Ice, water_ice).unwrap();
+        assert_eq!(header.palette().len(), 3);
+        let build = |edit: &dyn Fn(&mut SynthesisCell)| {
+            let mut synthesis = ceres.synthesis().to_vec();
+            edit(&mut synthesis[11]);
+            CoarseField::new(
+                header.clone(),
+                synthesis,
+                ceres.climate_layer().to_vec(),
+                ceres.craters().to_vec(),
+            )
+        };
+        let pack = |ice, liquid| SynthesisCell::pack_substances(ice, liquid).unwrap();
+        let cell = 11;
+        assert!(
+            build(&|c| {
+                c.ice = 40;
+                c.substances = pack(Some(ice), None);
+            })
+            .is_ok()
+        );
+        assert!(build(&|c| c.substances = pack(Some(ice), None)).is_ok());
+        assert_eq!(
+            build(&|c| c.ice = 40),
+            Err(BuildFieldError::IceWithoutEntry { cell })
+        );
+        assert_eq!(
+            build(&|c| c.substances = pack(Some(3), None)),
+            Err(BuildFieldError::SubstanceIndex { cell })
+        );
+        assert_eq!(
+            build(&|c| c.substances = pack(None, Some(14))),
+            Err(BuildFieldError::SubstanceIndex { cell })
+        );
+        // The crust's entry is no ice, and an ice no liquid.
+        assert_eq!(
+            build(&|c| c.substances = pack(Some(0), None)),
+            Err(BuildFieldError::SubstanceRole { cell })
+        );
+        assert_eq!(
+            build(&|c| c.substances = pack(None, Some(ice))),
+            Err(BuildFieldError::SubstanceRole { cell })
+        );
+        // The Ceres-like palette has no liquid, so no cell of it is under water.
+        assert_eq!(
+            build(&|c| c.water_surface_mm = c.elevation_mm + 1_000),
+            Err(BuildFieldError::LiquidWithoutEntry { cell })
+        );
+    }
+
+    /// A dry cell may name the liquid of its palette, holding none of it, as a cell may name an
+    /// ice; the liquid nibble may not name the ice entry.
+    #[test]
+    fn a_field_cell_may_name_a_liquid_it_does_not_hold() {
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let header = earth.header().clone();
+        let water = SubstanceKey::new_const("H2O");
+        let sea = header.palette().find(PaletteRole::Liquid, water).unwrap();
+        let ice = header.palette().find(PaletteRole::Ice, water).unwrap();
+        let (dry, _) = (0_u32..)
+            .zip(earth.synthesis())
+            .find(|(_, c)| !c.is_under_water() && c.ice == 0)
+            .unwrap();
+        let build = |liquid| {
+            let mut synthesis = earth.synthesis().to_vec();
+            synthesis[usize::try_from(dry).unwrap()].substances =
+                SynthesisCell::pack_substances(None, Some(liquid)).unwrap();
+            CoarseField::new(
+                header.clone(),
+                synthesis,
+                earth.climate_layer().to_vec(),
+                earth.craters().to_vec(),
+            )
+        };
+        assert!(build(sea).is_ok());
+        assert_eq!(
+            build(ice),
+            Err(BuildFieldError::SubstanceRole { cell: dry })
         );
     }
 

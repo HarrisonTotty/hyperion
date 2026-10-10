@@ -18,10 +18,11 @@ use super::DecodeBlockError;
 use crate::craters::{CraterParams, CraterParamsParts, Screening};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, Crust, FieldHeaderParts, FlowDirection,
-    LogArea, LogPrecipitation, LogSteepness, Morphology, PrecipitationSource, SurfaceClass,
-    SynthesisCell, Wind,
+    LogArea, LogPrecipitation, LogSteepness, MaterialPalette, MechanicsFamily, Morphology,
+    PaletteEntry, PaletteRole, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
 };
 use crate::spheroid::Spheroid;
+use crate::substance_key::SubstanceKey;
 use crate::synth::BandSpectrum;
 
 /// A value with a wire form, written little-endian and read back.
@@ -64,7 +65,8 @@ macro_rules! wire_table {
     };
 }
 
-// One cell's synthesis record (Design note 17's 21 bytes), in its declared order.
+// One cell's synthesis record (Design note 17's 21 bytes and the substance byte), in its declared
+// order.
 wire_table!(fixed SynthesisCell {
     elevation_mm: i32,
     boundary_distance_km: i16,
@@ -77,6 +79,7 @@ wire_table!(fixed SynthesisCell {
     steepness: LogSteepness,
     water_surface_mm: i32,
     ice: u8,
+    substances: u8,
     class: SurfaceClass,
     crater_state: u8,
 });
@@ -116,6 +119,21 @@ wire_table!(FieldHeaderParts {
     surface_age: Gigayears,
     surface_pressure: Pascals,
     albedo_scale: Option<f64>,
+    palette: MaterialPalette,
+    crust_palette: [Option<u8>; 4],
+    main_liquid: Option<u8>,
+});
+
+// A palette entry (59 bytes): its key's 16 padded bytes, its role, its normal albedo in B, V and R,
+// its phase row, density, transition and mechanics family.
+wire_table!(fixed PaletteEntry {
+    substance: SubstanceKey,
+    role: PaletteRole,
+    normal_albedo_bvr: [f64; 3],
+    phase_row: u8,
+    density_kg_m3: f64,
+    transition: Kelvin,
+    mechanics: MechanicsFamily,
 });
 
 // The datum: the equatorial radius a, then the polar radius c.
@@ -237,7 +255,9 @@ wire_coded!(
     FlowDirection,
     Morphology,
     ClimateModelKind,
-    PrecipitationSource
+    PrecipitationSource,
+    PaletteRole,
+    MechanicsFamily
 );
 
 /// The forms of the field's scaled and open codes: the code's integer.
@@ -263,7 +283,7 @@ macro_rules! wire_scaled {
 
 wire_scaled!(LogArea: u16, LogSteepness: u8, LogPrecipitation: u8, SurfaceClass: u8);
 
-impl<T: FixedWire + Copy + Default, const N: usize> Wire for [T; N] {
+impl<T: Wire + Copy + Default, const N: usize> Wire for [T; N] {
     fn put(&self, out: &mut Vec<u8>) {
         for value in self {
             value.put(out);
@@ -351,6 +371,43 @@ impl Wire for CraterParams {
 
     fn read(r: &mut Reader<'_>) -> Result<Self, DecodeBlockError> {
         Self::new(CraterParamsParts::read(r)?).map_err(DecodeBlockError::CraterParams)
+    }
+}
+
+impl Wire for SubstanceKey {
+    /// The key's bytes, NUL-padded to 16.
+    fn put(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(self.as_padded());
+    }
+
+    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeBlockError> {
+        Self::from_padded(r.array()?).map_err(DecodeBlockError::SubstanceKey)
+    }
+}
+
+impl FixedWire for SubstanceKey {
+    const BYTES: usize = SubstanceKey::MAX_BYTES;
+}
+
+impl Wire for MaterialPalette {
+    /// Its entry count, a byte, then each entry.
+    fn put(&self, out: &mut Vec<u8>) {
+        u8::try_from(self.len())
+            .expect("a palette holds at most 15 entries")
+            .put(out);
+        for entry in self.entries() {
+            entry.put(out);
+        }
+    }
+
+    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeBlockError> {
+        let count = u8::read(r)?;
+        r.need(u64::from(count), PaletteEntry::BYTES)?;
+        let mut entries = Vec::with_capacity(usize::from(count));
+        for _ in 0..count {
+            entries.push(PaletteEntry::read(r)?);
+        }
+        Self::new(entries).map_err(DecodeBlockError::Palette)
     }
 }
 
@@ -482,14 +539,17 @@ mod tests {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// The records' strides are Design note 17's: 21 bytes a synthesis record and 50 a climate
-    /// record; a field added to either moves them, and the payload's size with them.
+    /// The records' strides are Design note 17's: 22 bytes a synthesis record (its 21 and the
+    /// substance byte) and 50 a climate record, and a palette entry is 59; a field added to any
+    /// moves them, and the payload's size with them.
     #[test]
     fn wire_records_have_design_note_seventeens_strides() {
-        assert_eq!(SynthesisCell::BYTES, 21);
+        assert_eq!(SynthesisCell::BYTES, 22);
         assert_eq!(ClimateCell::BYTES, 50);
         assert_eq!(Wind::BYTES, 2);
         assert_eq!(Spheroid::BYTES, 16);
+        assert_eq!(SubstanceKey::BYTES, 16);
+        assert_eq!(PaletteEntry::BYTES, 59);
     }
 
     /// Every value of the forms comes back from its bytes to the bit, a −0.0 included, and an
@@ -529,6 +589,48 @@ mod tests {
                 azimuth: 9,
                 speed: 200,
             }; 12],
+        );
+        round_trip(&[Some(3_u8), None, Some(0), None]);
+        let key = SubstanceKey::new("NH4SH").unwrap();
+        round_trip(&key);
+        let entry = PaletteEntry {
+            substance: key,
+            role: PaletteRole::Ice,
+            normal_albedo_bvr: [0.5, 0.0, 1.25],
+            phase_row: 7,
+            density_kg_m3: 1_170.0,
+            transition: Kelvin::new(390.0),
+            mechanics: MechanicsFamily::VolatileIce,
+        };
+        round_trip(&entry);
+        round_trip(&MaterialPalette::new(vec![entry]).unwrap());
+        round_trip(&MaterialPalette::default());
+        // A key's padding, a palette past fifteen entries, and an unknown role are refused.
+        let mut padded = *key.as_padded();
+        padded[12] = b'x';
+        assert_eq!(
+            SubstanceKey::read(&mut Reader::new(&padded)),
+            Err(DecodeBlockError::SubstanceKey(
+                crate::substance_key::ParseSubstanceKeyError::Padding
+            ))
+        );
+        let mut sixteen = vec![16_u8];
+        for _ in 0..16 {
+            entry.put(&mut sixteen);
+        }
+        assert_eq!(
+            MaterialPalette::read(&mut Reader::new(&sixteen)),
+            Err(DecodeBlockError::Palette(
+                crate::field::BuildPaletteError::TooManyEntries(16)
+            ))
+        );
+        assert_eq!(
+            PaletteRole::read(&mut Reader::new(&[8])),
+            Err(unknown("PaletteRole", 8))
+        );
+        assert_eq!(
+            MechanicsFamily::read(&mut Reader::new(&[6])),
+            Err(unknown("MechanicsFamily", 6))
         );
         let read = |bytes: &[u8]| Crust::read(&mut Reader::new(bytes));
         assert_eq!(read(&[3]), Ok(Crust::Province));

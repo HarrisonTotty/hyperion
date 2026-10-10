@@ -115,7 +115,10 @@ coded_enum! {
     /// TBI2014 layer, area-weighted and split at −2 km: continental mean +406 m, s.d. 1.08 km;
     /// oceanic −4,279 m, s.d. 0.93 km; Hirt and Rexer 2015, Int. J. Appl. Earth Obs. Geoinf. 39,
     /// 103; Design note 7); a stagnant lid is one crust, with the volcanic provinces its volcanism
-    /// built. A closed set for now, for the composition audit: a new crust takes a new code.
+    /// built. The variants are structural, where and how a crust formed; what each is made of, its
+    /// lithology, is the header's palette entry for it
+    /// ([`FieldHeaderParts::crust_palette`](super::FieldHeaderParts::crust_palette);
+    /// decision-composition §1.7), so a new rock is a palette entry, not a new code.
     Crust {
         /// Continental crust of a mobile-lid world.
         Continental = 0,
@@ -295,18 +298,41 @@ impl LogSteepness {
     }
 }
 
-/// A cell's climate or surface-state class, one byte (Design note 11).
+/// A cell's climate or surface-state class, one byte (Design note 11), its codes split in three
+/// (decision-composition §1.7):
 ///
-/// Köppen–Geiger's classes for the seasonal water-cycle regimes, by Peel, Finlayson and McMahon's
-/// Table 1, and the surface-state classes and named zones of the other regimes; R09.T15, which
-/// classifies, assigns their codes. Until then every field's cells are
+/// - 0, [`SurfaceClass::UNCLASSIFIED`];
+/// - 1 to 63, Köppen–Geiger's classes for the seasonal water-cycle regimes, the 30 of Peel,
+///   Finlayson and McMahon's Table 1 (Hydrol. Earth Syst. Sci. 11, 1633, 2007) with room;
+/// - 64 to 255, the surface-state forms and named zones of the other regimes, each a form (a
+///   frozen sea, a glacier, a melt), whose substance is the cell's palette entry: its ice or
+///   liquid entry ([`SynthesisCell::substances`]) or its crust's.
+///
+/// R09.T15, which classifies, assigns the codes in each range; until then every field's cells are
 /// [`SurfaceClass::UNCLASSIFIED`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SurfaceClass(u8);
 
+/// Which of [`SurfaceClass`]'s three ranges a code is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SurfaceClassRange {
+    /// Code 0: not classified.
+    Unclassified,
+    /// Codes 1 to 63: a Köppen–Geiger class.
+    KoppenGeiger,
+    /// Codes 64 to 255: a surface-state form, of the cell's palette entry.
+    SurfaceState,
+}
+
 impl SurfaceClass {
     /// No class: the pass has not classified the cell.
     pub const UNCLASSIFIED: Self = Self(0);
+
+    /// The first Köppen–Geiger code, 1.
+    pub const FIRST_KOPPEN_GEIGER: u8 = 1;
+
+    /// The first surface-state code, 64; the Köppen–Geiger codes end below it.
+    pub const FIRST_SURFACE_STATE: u8 = 64;
 
     /// The class of code `code`.
     #[must_use]
@@ -319,10 +345,22 @@ impl SurfaceClass {
     pub const fn get(self) -> u8 {
         self.0
     }
+
+    /// The range the code is in.
+    #[must_use]
+    pub const fn range(self) -> SurfaceClassRange {
+        if self.0 >= Self::FIRST_SURFACE_STATE {
+            SurfaceClassRange::SurfaceState
+        } else if self.0 >= Self::FIRST_KOPPEN_GEIGER {
+            SurfaceClassRange::KoppenGeiger
+        } else {
+            SurfaceClassRange::Unclassified
+        }
+    }
 }
 
-/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 21 bytes
-/// in the payload (Design note 17).
+/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 22 bytes
+/// in the payload (Design note 17's 21, and the substance byte of decision-composition §1.7).
 ///
 /// Plain data with public fields, each an integer code whose step and meaning its documentation
 /// gives; the methods read them in SI units. Heights are along the normal of the header's
@@ -359,7 +397,15 @@ pub struct SynthesisCell {
     pub water_surface_mm: i32,
     /// The share of the cell under ice, in steps of 1 ÷ 255: 0 is free of ice and 255 covered
     /// (Design note 8: ice is placed coldest first until its area matches plan 14's ice fraction).
+    /// Its substance is the cell's ice entry.
     pub ice: u8,
+    /// The cell's substances, indices into the header's palette: its ice entry in the high nibble
+    /// and its liquid entry in the low, each [`NO_ENTRY`](super::NO_ENTRY) (0xF) for none
+    /// ([`ice_entry`](Self::ice_entry), [`liquid_entry`](Self::liquid_entry),
+    /// [`pack_substances`](Self::pack_substances)). A cell with an ice share names an `Ice`
+    /// entry, and a cell under water a `Liquid` entry; a cell may name an entry it holds none of
+    /// (a seasonal frost's), but never hold a share it does not name.
+    pub substances: u8,
     /// The cell's climate or surface-state class.
     pub class: SurfaceClass,
     /// The cell's crater state, whose codes R09.T15 defines with the classes (Design note 11); 0
@@ -374,6 +420,48 @@ impl SynthesisCell {
     /// The [`boundary_distance_km`](Self::boundary_distance_km) of a cell on a body with no plate
     /// boundaries, outside the ±32,767 km a distance saturates at.
     pub const NO_BOUNDARY_KM: i16 = i16::MIN;
+
+    /// The [`substances`](Self::substances) of a cell that names no ice and no liquid: 0xFF.
+    pub const NO_SUBSTANCES: u8 = 0xFF;
+
+    /// The substance byte of an ice entry `ice` and a liquid entry `liquid`, palette indices, or
+    /// `None` if either is 15 or more, which a nibble cannot name beside its "none".
+    #[must_use]
+    pub const fn pack_substances(ice: Option<u8>, liquid: Option<u8>) -> Option<u8> {
+        let ice = match ice {
+            None => super::NO_ENTRY,
+            Some(i) if i < super::NO_ENTRY => i,
+            Some(_) => return None,
+        };
+        let liquid = match liquid {
+            None => super::NO_ENTRY,
+            Some(l) if l < super::NO_ENTRY => l,
+            Some(_) => return None,
+        };
+        Some((ice << 4) | liquid)
+    }
+
+    /// The palette index of the cell's ice entry, or `None`.
+    #[must_use]
+    pub const fn ice_entry(&self) -> Option<u8> {
+        let nibble = self.substances >> 4;
+        if nibble == super::NO_ENTRY {
+            None
+        } else {
+            Some(nibble)
+        }
+    }
+
+    /// The palette index of the cell's liquid entry, or `None`.
+    #[must_use]
+    pub const fn liquid_entry(&self) -> Option<u8> {
+        let nibble = self.substances & 0x0F;
+        if nibble == super::NO_ENTRY {
+            None
+        } else {
+            Some(nibble)
+        }
+    }
 
     /// The ground's height above the datum, metres.
     #[must_use]
@@ -685,7 +773,9 @@ pub struct ClimateCell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field::{ClimateModelKind, Morphology, PrecipitationSource};
+    use crate::field::{
+        ClimateModelKind, MechanicsFamily, Morphology, PaletteRole, PrecipitationSource,
+    };
     use hyperion_testkit::float::assert_same_bits;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -721,6 +811,8 @@ mod tests {
         round_trips(Morphology::ALL);
         round_trips(ClimateModelKind::ALL);
         round_trips(PrecipitationSource::ALL);
+        round_trips(PaletteRole::ALL);
+        round_trips(MechanicsFamily::ALL);
         assert_eq!(
             Crust::try_from(4),
             Err(DecodeFieldCodeError {
@@ -881,14 +973,68 @@ mod tests {
             steepness: LogSteepness::ZERO,
             water_surface_mm: 0,
             ice: 255,
+            substances: 0x23,
             class: SurfaceClass::UNCLASSIFIED,
             crater_state: 0,
         };
         assert_eq!(cell.elevation(), Metres::new(-2.5));
+        assert_eq!(cell.ice_entry(), Some(2));
+        assert_eq!(cell.liquid_entry(), Some(3));
         assert_eq!(cell.water_surface(), Metres::ZERO);
         assert!(cell.is_under_water());
         assert_eq!(cell.boundary_distance(), Some(Metres::new(-120_000.0)));
         assert_same_bits(cell.ice_fraction(), 1.0);
         assert_eq!(cell.boundary_obliquity_angle(), Radians::ZERO);
+    }
+
+    /// The substance byte packs an ice entry in the high nibble and a liquid entry in the low, 0xF
+    /// for none, and refuses an index a nibble cannot name.
+    #[test]
+    fn field_cell_substances_pack_two_nibbles() {
+        assert_eq!(
+            SynthesisCell::pack_substances(None, None),
+            Some(SynthesisCell::NO_SUBSTANCES)
+        );
+        assert_eq!(SynthesisCell::pack_substances(Some(2), Some(3)), Some(0x23));
+        assert_eq!(SynthesisCell::pack_substances(Some(14), None), Some(0xEF));
+        assert_eq!(SynthesisCell::pack_substances(None, Some(0)), Some(0xF0));
+        assert_eq!(SynthesisCell::pack_substances(Some(15), None), None);
+        assert_eq!(SynthesisCell::pack_substances(None, Some(200)), None);
+        for byte in 0..=u8::MAX {
+            let cell = SynthesisCell {
+                elevation_mm: 0,
+                boundary_distance_km: SynthesisCell::NO_BOUNDARY_KM,
+                plate: 0,
+                crust: Crust::Lid,
+                boundary: BoundaryKind::Absent,
+                boundary_obliquity: 0,
+                flow: FlowDirection::Terminal,
+                drainage: LogArea::ZERO,
+                steepness: LogSteepness::ZERO,
+                water_surface_mm: 0,
+                ice: 0,
+                substances: byte,
+                class: SurfaceClass::UNCLASSIFIED,
+                crater_state: 0,
+            };
+            assert_eq!(
+                SynthesisCell::pack_substances(cell.ice_entry(), cell.liquid_entry()),
+                Some(byte)
+            );
+        }
+    }
+
+    /// The class codes split at 1 and 64: unclassified, Köppen–Geiger, surface state.
+    #[test]
+    fn field_surface_class_codes_split_in_three_ranges() {
+        let range = |code| SurfaceClass::new(code).range();
+        assert_eq!(
+            SurfaceClass::UNCLASSIFIED.range(),
+            SurfaceClassRange::Unclassified
+        );
+        assert_eq!(range(1), SurfaceClassRange::KoppenGeiger);
+        assert_eq!(range(63), SurfaceClassRange::KoppenGeiger);
+        assert_eq!(range(64), SurfaceClassRange::SurfaceState);
+        assert_eq!(range(255), SurfaceClassRange::SurfaceState);
     }
 }

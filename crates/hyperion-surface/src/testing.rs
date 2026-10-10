@@ -4,10 +4,11 @@
 //!
 //! [`synthetic_field`] builds one of six [`SyntheticWorld`]s: an Earth-, a Mars-, a Moon- and a
 //! Ceres-like field, a flat field and a single crater. [`FieldBuilder`] builds any other: the caller
-//! gives the body, the plates or the crust, and the elevation, ice and climate as functions of
-//! position, and the builder derives what depends on them (the plates' boundaries, the water, the
-//! flow and drainage, the craters' morphology, relief and reach, the header's realised figures and
-//! steps), so that every field it returns is valid by construction.
+//! gives the body, its palette, the plates or the crust, and the elevation, ice and climate as
+//! functions of position, and the builder derives what depends on them (the plates' boundaries, the
+//! water, each cell's substances, the flow and drainage, the craters' morphology, relief and reach,
+//! the header's realised figures and steps), so that every field it returns is valid by
+//! construction.
 //!
 //! These are test inputs, not generated worlds: nothing here draws from a stream, the values are
 //! illustrative ones near the real bodies', and the coarse pass's physics (R09.T10–T16) is
@@ -34,8 +35,8 @@ use crate::cube::{Edge, PatchKey, st_to_uv};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseCrater, CoarseField, CoarseLevel,
     Cover, Crust, FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogPrecipitation,
-    LogSteepness, Morphology, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
-    boundary_diameter, cell_at_index, cell_index, coarse_level,
+    LogSteepness, MaterialPalette, Morphology, PaletteRole, PrecipitationSource, SurfaceClass,
+    SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
 };
 use crate::spheroid::Spheroid;
 use crate::synth::BandSpectrum;
@@ -128,11 +129,15 @@ type DirFn<T> = Box<dyn Fn([f64; 3]) -> T>;
 /// The share of a cell under ice, from its site and its elevation.
 type IceFn = Box<dyn Fn(&CellSite, Metres) -> f64>;
 
+/// The palette index of a cell's ice, from its site.
+type IceEntryFn = Box<dyn Fn(&CellSite) -> u8>;
+
 /// Builds a [`CoarseField`] that is valid by construction (see the module documentation).
 ///
 /// [`FieldBuilder::new`] starts from a dry, airless, flat sphere with a one-month year on a
-/// circular orbit, a still climate at 250 K, no fine relief and no craters, coarse or small (a
-/// crater density of zero): every other part is optional.
+/// circular orbit, a still climate at 250 K, no fine relief, no craters, coarse or small (a
+/// crater density of zero), and an empty palette, a composition not modelled: every other part is
+/// optional, but a world with ice or a sea names their substances in its palette.
 pub struct FieldBuilder {
     body: BodyRef,
     radius: Metres,
@@ -146,6 +151,10 @@ pub struct FieldBuilder {
     season_eccentricity: f64,
     surface_age: Gigayears,
     surface_pressure: Pascals,
+    palette: MaterialPalette,
+    crust_palette: [Option<u8>; 4],
+    main_liquid: Option<u8>,
+    ice_entry: Option<IceEntryFn>,
     plates: Vec<PlateSpec>,
     crust: DirFn<Crust>,
     elevation: SiteFn<Metres>,
@@ -207,6 +216,10 @@ impl FieldBuilder {
             season_eccentricity: 0.0,
             surface_age: Gigayears::new(4.0),
             surface_pressure: Pascals::ZERO,
+            palette: MaterialPalette::default(),
+            crust_palette: [None; 4],
+            main_liquid: None,
+            ice_entry: None,
             plates: Vec::new(),
             crust: Box::new(|_| Crust::Lid),
             elevation: Box::new(|_| Metres::ZERO),
@@ -296,6 +309,37 @@ impl FieldBuilder {
         self
     }
 
+    /// The body's palette (empty by default): a cell with ice names its first
+    /// [`PaletteRole::Ice`] entry unless [`ice_entry`](Self::ice_entry) says otherwise.
+    #[must_use]
+    pub fn palette(mut self, palette: MaterialPalette) -> Self {
+        self.palette = palette;
+        self
+    }
+
+    /// The palette entry of each crust, in [`Crust`]'s code order (none by default).
+    #[must_use]
+    pub fn crust_palette(mut self, entries: [Option<u8>; 4]) -> Self {
+        self.crust_palette = entries;
+        self
+    }
+
+    /// The palette entry of the main liquid, which every cell under water names (none by
+    /// default).
+    #[must_use]
+    pub fn main_liquid(mut self, entry: u8) -> Self {
+        self.main_liquid = Some(entry);
+        self
+    }
+
+    /// The palette index of the ice of each cell that has ice, from its site: for a world with
+    /// more than one ice.
+    #[must_use]
+    pub fn ice_entry(mut self, entry: impl Fn(&CellSite) -> u8 + 'static) -> Self {
+        self.ice_entry = Some(Box::new(entry));
+        self
+    }
+
     /// Mobile-lid plates, at most 256: their crusts replace [`crust`](Self::crust)'s, and their
     /// boundaries are classed by the plates' relative motion.
     #[must_use]
@@ -373,7 +417,10 @@ impl FieldBuilder {
     ///   non-negative, or which is narrower than the boundary diameter, or two craters of one
     ///   centre cell and diameter;
     /// - an elevation beyond ±2,147 km, or a climate whose temperatures, anomalies, rates or winds
-    ///   no code can hold.
+    ///   no code can hold;
+    /// - a crust's palette entry or a main liquid the header refuses, a cell with ice and no ice
+    ///   entry to name (none in the palette, or [`ice_entry`](Self::ice_entry)'s not an `Ice`
+    ///   entry), or a cell under water and no main liquid.
     #[must_use]
     pub fn build(self) -> CoarseField {
         self.check_plates();
@@ -459,6 +506,9 @@ impl FieldBuilder {
             surface_age: self.surface_age,
             surface_pressure: self.surface_pressure,
             albedo_scale: None,
+            palette: self.palette,
+            crust_palette: self.crust_palette,
+            main_liquid: self.main_liquid,
         })
         .expect("the builder's header parts are valid");
         let climate: Vec<ClimateCell> = samples
@@ -485,7 +535,17 @@ impl FieldBuilder {
         route: Route,
     ) -> SynthesisCell {
         let elevation = Metres::new(f64::from(elevation_mm) / 1e3);
-        let ice = (self.ice)(site, elevation).clamp(0.0, 1.0);
+        let ice = SynthesisCell::quantise_ice((self.ice)(site, elevation).clamp(0.0, 1.0))
+            .expect("an ice share is 0 to 1");
+        let ice_entry = (ice > 0).then(|| self.ice_entry_at(site));
+        let liquid_entry = if water_mm > elevation_mm {
+            Some(
+                self.main_liquid
+                    .expect("a world with a sea names its liquid in its palette"),
+            )
+        } else {
+            None
+        };
         SynthesisCell {
             elevation_mm,
             boundary_distance_km: SynthesisCell::quantise_boundary_distance(site.boundary_distance)
@@ -499,10 +559,32 @@ impl FieldBuilder {
             drainage: route.drainage,
             steepness: route.steepness,
             water_surface_mm: water_mm,
-            ice: SynthesisCell::quantise_ice(ice).expect("an ice share is 0 to 1"),
+            ice,
+            substances: SynthesisCell::pack_substances(ice_entry, liquid_entry)
+                .expect("a palette's indices are below 15"),
             class: SurfaceClass::UNCLASSIFIED,
             crater_state: 0,
         }
+    }
+
+    /// The palette index of the ice of the cell at `site`, which has ice: [`ice_entry`]'s, or the
+    /// palette's first `Ice` entry.
+    ///
+    /// [`ice_entry`]: Self::ice_entry
+    #[must_use]
+    fn ice_entry_at(&self, site: &CellSite) -> u8 {
+        let entry = match &self.ice_entry {
+            Some(entry) => entry(site),
+            None => (0_u8..)
+                .zip(self.palette.entries())
+                .find_map(|(k, e)| (e.role == PaletteRole::Ice).then_some(k))
+                .expect("a world with ice names its ice in its palette"),
+        };
+        assert!(
+            self.palette.has_role(entry, PaletteRole::Ice),
+            "a cell's ice entry {entry} is not an Ice entry of the palette"
+        );
+        entry
     }
 
     /// Asserts the plates are none or between two and 256, with distinct seeds and mobile-lid
@@ -1002,6 +1084,124 @@ mod tests {
             .map(|(_, w)| w)
             .sum();
         wet / total
+    }
+
+    /// The keys of `field`'s palette, in its order.
+    fn keys(field: &CoarseField) -> Vec<(&str, PaletteRole)> {
+        field
+            .header()
+            .palette()
+            .entries()
+            .iter()
+            .map(|e| (e.substance.as_str(), e.role))
+            .collect()
+    }
+
+    /// The palette entry `entry` of `field`, as its key and role.
+    fn named(field: &CoarseField, entry: Option<u8>) -> Option<(&str, PaletteRole)> {
+        let e = field.header().palette().get(entry?)?;
+        Some((e.substance.as_str(), e.role))
+    }
+
+    /// Each synthetic world carries its palette (decision-composition §1.7), each crust names its
+    /// lithology, and each cell names the ice and the liquid it holds: an Earth's water as ice and
+    /// as its sea, a Mars's water ice in the north and CO₂ ice in the south, none on the Moon.
+    #[test]
+    fn the_synthetic_fields_carry_their_palettes() {
+        use PaletteRole::{Deposit, Ice, Liquid, PrimaryCrust, Province, SecondaryCrust};
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        assert_eq!(
+            keys(&earth),
+            [
+                ("basalt", SecondaryCrust),
+                ("granite", PaletteRole::TertiaryCrust),
+                ("H2O", Ice),
+                ("H2O", Liquid)
+            ]
+        );
+        let lithology = |field: &CoarseField, crust| {
+            field
+                .header()
+                .crust_entry(crust)
+                .map(|e| e.substance.as_str().to_owned())
+        };
+        assert_eq!(
+            lithology(&earth, Crust::Continental).as_deref(),
+            Some("granite")
+        );
+        assert_eq!(lithology(&earth, Crust::Oceanic).as_deref(), Some("basalt"));
+        assert_eq!(
+            named(&earth, earth.header().main_liquid()),
+            Some(("H2O", Liquid))
+        );
+        let (mut wet, mut icy) = (0, 0);
+        for c in earth.synthesis() {
+            if c.is_under_water() {
+                assert_eq!(named(&earth, c.liquid_entry()), Some(("H2O", Liquid)));
+                wet += 1;
+            } else {
+                assert_eq!(c.liquid_entry(), None);
+            }
+            if c.ice > 0 {
+                assert_eq!(named(&earth, c.ice_entry()), Some(("H2O", Ice)));
+                icy += 1;
+            } else {
+                assert_eq!(c.ice_entry(), None);
+            }
+        }
+        assert!(wet > 0 && icy > 0, "{wet} wet and {icy} icy cells");
+
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        assert_eq!(
+            keys(&mars),
+            [
+                ("basalt", SecondaryCrust),
+                ("CO2", Ice),
+                ("H2O", Ice),
+                ("mars_dust", Deposit)
+            ]
+        );
+        assert_eq!(lithology(&mars, Crust::Lid).as_deref(), Some("basalt"));
+        assert_eq!(lithology(&mars, Crust::Province).as_deref(), Some("basalt"));
+        let level = mars.header().level().get();
+        let mut caps = std::collections::BTreeSet::new();
+        for (n, c) in (0_u32..).zip(mars.synthesis()) {
+            assert_eq!(c.liquid_entry(), None);
+            if c.ice > 0 {
+                let north = cell_at_index(level, n).unwrap().vertex_dir(32, 32)[2] > 0.0;
+                let expected = if north { "H2O" } else { "CO2" };
+                assert_eq!(named(&mars, c.ice_entry()), Some((expected, Ice)));
+                caps.insert(expected);
+            }
+        }
+        assert_eq!(caps.len(), 2, "Mars-like caps {caps:?}");
+
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        assert_eq!(
+            keys(&moon),
+            [("anorthosite", PrimaryCrust), ("basalt", Province)]
+        );
+        assert_eq!(lithology(&moon, Crust::Province).as_deref(), Some("basalt"));
+        assert!(
+            moon.synthesis()
+                .iter()
+                .all(|c| c.substances == SynthesisCell::NO_SUBSTANCES)
+        );
+
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        assert_eq!(
+            keys(&ceres),
+            [
+                ("phyllosilicate", SecondaryCrust),
+                ("H2O", Ice),
+                ("Na2CO3", Deposit)
+            ]
+        );
+        for world in [SyntheticWorld::Flat, SyntheticWorld::OneCrater] {
+            let field = synthetic_field(world);
+            assert!(field.header().palette().is_empty(), "{world:?}");
+            assert_eq!(field.header().crust_palette(), [None; 4], "{world:?}");
+        }
     }
 
     #[test]
