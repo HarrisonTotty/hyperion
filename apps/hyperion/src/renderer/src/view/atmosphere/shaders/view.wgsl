@@ -6,6 +6,45 @@
 
 const PI_VIEW : f32 = 3.14159265358979;
 
+// cos of an angle in [0, pi] to f32's precision, without the builtin (plan R08, R08.T6.b). WGSL
+// bounds cos, sin and the functions inherited from them only to 2^-11 absolute within [-pi, pi],
+// and an implementation such as SwiftShader comes near that bound, while at the limb the sky view
+// moves by 2e-2 of itself for 1e-4 in a ray's zenith cosine. Here s and c are the Taylor series of
+// sin and cos at y = theta / 2 in [0, pi / 2], to y^15 and y^14 (truncation under 1e-10), and
+// cos theta = (c - s)(c + s).
+fn preciseCos(theta : f32) -> f32 {
+  let y = 0.5 * theta;
+  let y2 = y * y;
+  let sDeep = 1.0 - y2 / 110.0 * (1.0 - y2 / 156.0 * (1.0 - y2 / 210.0));
+  let s = y * (1.0 - y2 / 6.0 * (1.0 - y2 / 20.0 * (1.0 - y2 / 42.0 * (1.0 - y2 / 72.0 * sDeep))));
+  let cDeep = 1.0 - y2 / 90.0 * (1.0 - y2 / 132.0 * (1.0 - y2 / 182.0));
+  let c = 1.0 - y2 / 2.0 * (1.0 - y2 / 12.0 * (1.0 - y2 / 30.0 * (1.0 - y2 / 56.0 * cDeep)));
+  return (c - s) * (c + s);
+}
+
+// atan of x >= 0 to f32's precision, without the builtin, whose WGSL bound is 4096 ULP (plan R08,
+// R08.T6.b): above 1 as pi / 2 - atan(1 / x); then two halvings, atan(x) = 2 atan(x / (1 +
+// sqrt(1 + x^2))), which take [0, 1] into [0, tan(pi / 16)], and there the Taylor series to x^15
+// (truncation under 1e-13 at the reduced argument, 3e-13 in the result).
+fn preciseAtan(x : f32) -> f32 {
+  let inverted = x > 1.0;
+  var t = select(x, 1.0 / x, inverted);
+  t = t / (1.0 + sqrt(1.0 + t * t));
+  t = t / (1.0 + sqrt(1.0 + t * t));
+  let t2 = t * t;
+  let deep = 1.0 / 9.0 - t2 * (1.0 / 11.0 - t2 * (1.0 / 13.0 - t2 / 15.0));
+  let quarter = t * (1.0 - t2 * (1.0 / 3.0 - t2 * (1.0 / 5.0 - t2 * (1.0 / 7.0 - t2 * deep))));
+  return select(4.0 * quarter, 0.5 * PI_VIEW - 4.0 * quarter, inverted);
+}
+
+// The angle in [0, pi] whose sine is proportional to y >= 0 and cosine to x, as atan2(y, x), by
+// `preciseAtan`; y and x are not both 0.
+fn preciseAtan2(y : f32, x : f32) -> f32 {
+  let ax = abs(x);
+  let a = select(0.5 * PI_VIEW - preciseAtan(ax / y), preciseAtan(y / ax), y <= ax);
+  return select(a, PI_VIEW - a, x < 0.0);
+}
+
 // The view, in the body-fixed frame (z along the pole), metres.
 struct AtmosphereView {
   // xyz: the camera's position from the body's centre; w: its geodetic height above the datum.
@@ -87,21 +126,23 @@ fn skyFrame(v : AtmosphereView) -> SkyFrame {
 // sebh's sky-view parameterisation (RenderSkyCommon.hlsl, SkyViewLutParamsToUv and its inverse):
 // v splits at the horizon, each half with a square-root compression towards it; u is the azimuth
 // from the sun's, compressed towards the sun. The camera stands `heightM` above a sphere of
-// radius `bottom`, its own (Design note 16).
+// radius `bottom`, its own (Design note 16). The horizon's angle below the camera's horizontal,
+// beta = acos(vHorizon / r), is atan2(bottom, vHorizon) since r^2 - vHorizon^2 = bottom^2, and it
+// and the zenith cosine are taken by `preciseAtan` and `preciseCos` (plan R08, R08.T6.b).
 fn skyViewUvToParams(uv : vec2f, size : vec2f, heightM : f32, bottom : f32) -> vec2f {
   let unit = clamp(subUvsToUnit(uv, size), vec2f(0.0), vec2f(1.0));
   let r = bottom + heightM;
   let vHorizon = sqrt(max(heightM * (2.0 * bottom + heightM), 0.0));
-  let beta = acos(clamp(vHorizon / r, -1.0, 1.0));
+  let beta = 0.5 * PI_VIEW - preciseAtan(vHorizon / bottom);
   let zenithHorizon = PI_VIEW - beta;
   var viewZenithCos : f32;
   if (unit.y < 0.5) {
     var c = 1.0 - 2.0 * unit.y;
     c = 1.0 - c * c;
-    viewZenithCos = cos(zenithHorizon * c);
+    viewZenithCos = preciseCos(zenithHorizon * c);
   } else {
     let c = unit.y * 2.0 - 1.0;
-    viewZenithCos = cos(zenithHorizon + beta * c * c);
+    viewZenithCos = preciseCos(zenithHorizon + beta * c * c);
   }
   let lightViewCos = -(unit.x * unit.x * 2.0 - 1.0);
   return vec2f(viewZenithCos, lightViewCos);
@@ -115,11 +156,14 @@ fn skyViewParamsToUv(
   heightM : f32,
   bottom : f32,
 ) -> vec2f {
-  let r = bottom + heightM;
+  // The angles as `skyViewUvToParams` takes them, so that the read matches the write (plan R08,
+  // R08.T6.b; decision-r08-f32.md): beta = acos(vHorizon / r) = pi / 2 - atan(vHorizon / bottom),
+  // and the zenith angle atan2(sqrt(1 - mu^2), mu).
   let vHorizon = sqrt(max(heightM * (2.0 * bottom + heightM), 0.0));
-  let beta = acos(clamp(vHorizon / r, -1.0, 1.0));
+  let beta = 0.5 * PI_VIEW - preciseAtan(vHorizon / bottom);
   let zenithHorizon = PI_VIEW - beta;
-  let zenith = acos(clamp(viewZenithCos, -1.0, 1.0));
+  let mu = clamp(viewZenithCos, -1.0, 1.0);
+  let zenith = preciseAtan2(sqrt(max(1.0 - mu * mu, 0.0)), mu);
   var v : f32;
   if (!intersectsGroundView) {
     let c = 1.0 - sqrt(max(1.0 - zenith / zenithHorizon, 0.0));

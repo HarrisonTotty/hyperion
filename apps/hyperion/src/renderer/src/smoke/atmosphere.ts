@@ -10,11 +10,14 @@
  * (`checkAtmosphereFrames`) and, when the run is asked for them, the comparison frames of
  * Hillaire's reference medium that a person sets beside his published images
  * (`captureAtmosphere`). R05.T12.e holds the sky view and the ray march at their settings' step
- * counts to the same kernels at 1,024 steps (`checkAtmosphereSteps`).
+ * counts to the same kernels at 1,024 steps (`checkAtmosphereSteps`). R08.T6.b holds every kernel to
+ * the CPU twin of `view/atmosphere/tablesCpu.ts` to 10⁻³, over a medium of every density profile
+ * and phase function the kernels read (`checkAtmosphereTwins`).
  */
 
 import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
 import { quaternion, quaternionFromRows, rotate } from "../view/camera/quaternion";
+import { hydrostaticColumn } from "../view/atmosphere/column";
 import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "../view/atmosphere/earth";
 import {
   type AtmosphereCamera,
@@ -24,6 +27,7 @@ import {
   type SunState,
   TABLE_SIZES,
   type TableSizes,
+  tableRadiusM,
 } from "../view/atmosphere/hillaire";
 import {
   grazingTwilight,
@@ -31,12 +35,26 @@ import {
   MARCH_TOLERANCE,
   TWILIGHT_TOLERANCE,
 } from "../view/atmosphere/marchSteps";
+import { type AtmosphereMedium, phaseTable, tabulatedDensity } from "../view/atmosphere/medium";
 import { maxDistanceM, opticalDepth, transmittanceUvToRMu } from "../view/atmosphere/opticalDepth";
 import {
   AtmosphereTables,
+  kernelMedium,
   MULTI_SCATTERING_SIZE,
+  PHASE_TABLE_ENTRIES,
+  type TableSize,
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
+import {
+  aerialPerspectiveTwin,
+  multiScatteringTwin,
+  type PlanetTwin,
+  planetTwin,
+  rayMarchTwin,
+  skyViewTwin,
+  type TwinTable,
+  twinView,
+} from "../view/atmosphere/tablesCpu";
 import {
   PresentationOnlyReadback,
   type RenderEngine,
@@ -168,11 +186,18 @@ const FRAME_SIZE = { widthPx: 64, heightPx: 32 } as const;
  */
 const SUN_ANGULAR_RADIUS_RAD = 0.004_650_5;
 
-/** A camera `heightM` above the equator at longitude 0, looking north along the horizon. */
-function equatorCamera(heightM: number, size: ViewSize): AtmosphereCamera {
+/**
+ * A camera `heightM` above the equator at longitude 0 of `figure` (WGS 84 unless given), looking
+ * north along the horizon.
+ */
+function equatorCamera(
+  heightM: number,
+  size: ViewSize,
+  figure: SpheroidFigure = WGS84,
+): AtmosphereCamera {
   const aspect = size.widthPx / size.heightPx;
   return {
-    positionM: { x: WGS84.equatorialRadiusM + heightM, y: 0, z: 0 },
+    positionM: { x: figure.equatorialRadiusM + heightM, y: 0, z: 0 },
     // Camera −z (forward) to body +z (north), camera +y (up) to body +x (the normal): a half turn
     // about (1, 1, 0) ÷ √2.
     orientation: quaternion(0, Math.SQRT1_2, Math.SQRT1_2, 0),
@@ -720,6 +745,429 @@ export async function checkAtmosphereSteps(engine: RenderEngine, checks: Checks)
       shipped.dispose();
       converged.dispose();
     }
+  }
+}
+
+// --- R08.T6.b: the kernels against the CPU twin ---------------------------------------------------
+
+/** The agreement R08.T6.b holds each kernel's readback to: 10⁻³ of its twin's value. */
+const TWIN_TOLERANCE = 1e-3;
+
+/**
+ * The fraction of a table's largest value below which its values are held to 10⁻³ of that floor
+ * rather than of themselves: 10⁻⁶ (R08.T6.b).
+ */
+const TWIN_FLOOR = 1e-6;
+
+/**
+ * rgba16float's spacing below its least normal, 2⁻¹⁴: 2⁻²⁴, so that a stored value there errs by up
+ * to half of it whatever the kernel computed. A value is held to at least this, which is 10⁻³ of the
+ * least normal: above 2⁻¹⁴ the bound is 10⁻³ alone.
+ */
+const HALF_SUBNORMAL_SPACING = 2 ** -24;
+
+/** One kernel's readback against its twin. */
+interface TwinAgreement {
+  /** The worst |ΔL| as a fraction of what its texel's channel is allowed: at most 1 to agree. */
+  readonly worst: number;
+  readonly at: string;
+  /** The texels' channels held above the floor. */
+  readonly above: number;
+  /** The texels' channels over their bound. */
+  readonly over: number;
+}
+
+/**
+ * A readback against its twin, texel for texel: each channel's |GPU − twin| against
+ * max(10⁻³ · max(|twin|, 10⁻⁶ · largest), 2⁻²⁴), the largest taken over the colour channels, and
+ * over alpha apart when `alpha` holds a quantity of its own (a mean transmittance).
+ */
+function twinAgreement(gpu: Float32Array, twin: TwinTable, alpha: boolean): TwinAgreement {
+  const texels = twin.texels;
+  const channels = alpha ? [0, 1, 2, 3] : [0, 1, 2];
+  const largest = (group: readonly number[]): number => {
+    let most = 0;
+    for (let i = 0; i < texels.length; i += 4) {
+      for (const c of group) {
+        most = Math.max(most, Math.abs(texels[i + c] ?? 0));
+      }
+    }
+    return most;
+  };
+  const colourFloor = TWIN_FLOOR * largest([0, 1, 2]);
+  const alphaFloor = TWIN_FLOOR * largest([3]);
+  const perSlice = twin.widthTexels * twin.heightTexels;
+  let worst = gpu.length === texels.length ? 0 : Number.POSITIVE_INFINITY;
+  let at =
+    worst === 0 ? "none" : `${gpu.length / 4} texels read back, ${texels.length / 4} twinned`;
+  let above = 0;
+  let over = 0;
+  for (let i = 0; i < texels.length / 4 && gpu.length === texels.length; i += 1) {
+    for (const c of channels) {
+      const expected = texels[i * 4 + c] ?? Number.NaN;
+      const actual = gpu[i * 4 + c] ?? Number.NaN;
+      const floor = c === 3 ? alphaFloor : colourFloor;
+      above += Math.abs(expected) >= floor ? 1 : 0;
+      const allowed = Math.max(
+        TWIN_TOLERANCE * Math.max(Math.abs(expected), floor),
+        HALF_SUBNORMAL_SPACING,
+      );
+      const delta = Math.abs(actual - expected);
+      const ratio = Number.isNaN(delta) ? Number.POSITIVE_INFINITY : delta / allowed;
+      over += ratio > 1 ? 1 : 0;
+      if (ratio > worst) {
+        worst = ratio;
+        const x = i % twin.widthTexels;
+        const y = Math.floor(i / twin.widthTexels) % twin.heightTexels;
+        const z = Math.floor(i / perSlice);
+        const where = perSlice === texels.length / 4 ? `(${x}, ${y})` : `(${x}, ${y}, ${z})`;
+        at = `texel ${where} channel ${c}: GPU ${show([actual])}, twin ${show([expected])}, ${((delta / Math.max(Math.abs(expected), floor)) * 1e3).toFixed(3)} × 10⁻³`;
+      }
+    }
+  }
+  return { worst, at, above, over };
+}
+
+/** A readback as a twin's table: its texels in `f64`. */
+function asTwinTable(texels: Float32Array, size: TableSize): TwinTable {
+  return { ...size, texels: Float64Array.from(texels) };
+}
+
+/** Holds one kernel's readback to its twin's table and records the check. */
+function checkTwin(
+  checks: Checks,
+  name: string,
+  gpu: Float32Array,
+  twin: TwinTable,
+  alpha: boolean,
+): void {
+  recordAgreement(checks, name, twinAgreement(gpu, twin, alpha));
+}
+
+/** A Henyey–Greenstein phase of asymmetry g at each u = √(θ ÷ π) of a grid, sr⁻¹. */
+function henyeyGreensteinAt(g: number, u: Float64Array): Float64Array {
+  return u.map((x) => {
+    const mu = Math.cos(Math.PI * x * x);
+    return (1 - g * g) / (4 * Math.PI * (1 + g * g - 2 * g * mu) ** 1.5);
+  });
+}
+
+/**
+ * A medium of every profile and phase the kernels read (R08.T6.b): R08.T3.a's column of an
+ * isothermal Earth-like gas under Rayleigh's phase, with a depolarisation ratio a channel; a haze
+ * layer from 1 to 6 km with a tabulated phase on the kernels' own grid, a different asymmetry a
+ * channel; a dust from the ground, tabulated, its phase on another grid (181 entries,
+ * u = (i ÷ 180)^1.3), which the kernels read resampled; R05's Cornette–Shanks aerosol; and R05's
+ * ozone, an absorbing tent. The coefficients are a test's, not a world's.
+ */
+function smokeTabulatedMedium(): AtmosphereMedium {
+  const column = hydrostaticColumn({
+    surfacePa: 101_325,
+    temperature: { kind: "isothermal", temperatureK: 250 },
+    meanMolarMassGPerMol: 28.97,
+    referenceGravityMS2: 9.806,
+    referenceRadiusM: EARTH_MEAN_RADIUS_M,
+  });
+  const even = Float64Array.from({ length: PHASE_TABLE_ENTRIES }, (_, i) => i / 255);
+  const uneven = Float64Array.from({ length: 181 }, (_, i) => (i / 180) ** 1.3);
+  const dustLevels = Float64Array.from({ length: 201 }, (_, i) => i * 50);
+  const [, aerosol, ozone] = EARTH_REFERENCE.terms;
+  if (aerosol === undefined || ozone === undefined) {
+    throw new Error("Earth's medium has its aerosol and ozone");
+  }
+  return {
+    name: "R08.T6.b tabulated",
+    topHeightM: EARTH_REFERENCE.topHeightM,
+    groundAlbedo: [0.25, 0.18, 0.12],
+    terms: [
+      {
+        name: "gas",
+        density: column.density,
+        scattering: [4.8e-6, 1.15e-5, 2.87e-5],
+        absorption: [0, 0, 0],
+        // A depolarisation ratio of air's order, a different one a channel (R08.T3.c).
+        phase: { kind: "rayleigh", depolarisation: [0.027, 0.028, 0.03] },
+      },
+      {
+        name: "haze",
+        density: tabulatedDensity(Float64Array.of(1_000, 2_000, 6_000), Float64Array.of(0, 1, 0)),
+        scattering: [2e-5, 2.4e-5, 2.8e-5],
+        absorption: [2e-6, 1.5e-6, 1e-6],
+        phase: {
+          kind: "tabulated",
+          table: phaseTable(even, [
+            henyeyGreensteinAt(0.75, even),
+            henyeyGreensteinAt(0.7, even),
+            henyeyGreensteinAt(0.65, even),
+          ]),
+        },
+      },
+      {
+        name: "dust",
+        density: tabulatedDensity(
+          dustLevels,
+          dustLevels.map((h) => Math.exp(-h / 1_500) - Math.exp(-10_000 / 1_500)),
+        ),
+        scattering: [8e-6, 7e-6, 6e-6],
+        absorption: [1e-6, 1.5e-6, 2.5e-6],
+        phase: {
+          kind: "tabulated",
+          table: phaseTable(uneven, [
+            henyeyGreensteinAt(0.6, uneven),
+            henyeyGreensteinAt(0.6, uneven),
+            henyeyGreensteinAt(0.6, uneven),
+          ]),
+        },
+      },
+      aerosol,
+      ozone,
+    ],
+  };
+}
+
+/** One frame R08.T6.b's per-frame check draws. */
+interface TwinFrame {
+  readonly name: string;
+  readonly heightM: number;
+  readonly elevationDeg: number;
+  readonly surfaceM: number | null;
+}
+
+/**
+ * R08.T6.b: every kernel's readback against the CPU twin (`tablesCpu.ts`) of the medium as the
+ * kernels read it (`kernelMedium`), to 10⁻³ above 10⁻⁶ of the table's largest value, on R05's
+ * Earth and on a medium of every profile and phase the kernels read.
+ *
+ * @remarks
+ * The transmittance table is held to the twin of the medium alone. Each later kernel is held to
+ * its twin given the GPU's own tables as its inputs (the transmittance for the multiple
+ * scattering, both for the per-frame kernels), so that each is judged on its own arithmetic and
+ * not on the `rgba16float` rounding of what it reads; the multiple-scattering table's agreement
+ * with the twin's own tables is reported beside it. The per-frame kernels run on both settings'
+ * counts, at half the sky view's width and height (each texel still one ray, {@link twinSizes}),
+ * over two frames: from 2 km at a sun 20° up with a surface 60 km ahead (the ray march's beyond the
+ * aerial reach), and from 400 km with the sun 5° up (the limb). The camera stands at 2 km, not at
+ * R05's 2 m: within metres of the ground the ray march's f32 radii, 0.5 m apart near 6.4 × 10⁶ m,
+ * move its ground-hitting rays by up to 14% from the twin, a known defect of R05's arithmetic that
+ * R08.T6.g corrects (plan R08's Risks, "Deviations in T6.b, as built"). T6.b's own fixes bring the
+ * sky view within the bound from 2 m.
+ */
+export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks): Promise<void> {
+  for (const medium of [EARTH_REFERENCE, smokeTabulatedMedium()]) {
+    const read = kernelMedium(medium);
+    // The harness's checks run in order: each medium's tables are read back before the next's.
+    // oxlint-disable-next-line no-await-in-loop
+    await checkPlanetTwins(engine, checks, medium, read);
+    for (const setting of ["high", "low"] as const) {
+      // Each setting's frames are read back before the next setting's atmosphere draws.
+      // oxlint-disable-next-line no-await-in-loop
+      await checkFrameTwins(engine, checks, medium, read, setting);
+    }
+  }
+}
+
+/** A per-planet table pair, read back. */
+interface PlanetReadback {
+  readonly transmittance: Float32Array;
+  readonly multiScattering: Float32Array;
+}
+
+/** Reads a planet's two tables back with the harness's tolerance access. */
+async function readPlanetTables(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+): Promise<PlanetReadback> {
+  const transmittance = await engine.readTexture(tables.transmittance, 0, undefined, "tolerance");
+  const multiScattering = await engine.readTexture(
+    tables.multiScattering,
+    0,
+    undefined,
+    "tolerance",
+  );
+  return { transmittance: halfTexels(transmittance), multiScattering: halfTexels(multiScattering) };
+}
+
+/**
+ * The per-planet tables against the twin: the transmittance against the twin of the medium, the
+ * multiple scattering against its twin over the GPU's transmittance, with its agreement with the
+ * twin's own tables reported beside it.
+ */
+async function checkPlanetTwins(
+  engine: RenderEngine,
+  checks: Checks,
+  medium: AtmosphereMedium,
+  read: AtmosphereMedium,
+): Promise<void> {
+  const tables = new AtmosphereTables(engine, medium, EARTH_MEAN_RADIUS_M);
+  try {
+    const gpu = await readPlanetTables(engine, tables);
+    const twin = planetTwin(read, EARTH_MEAN_RADIUS_M);
+    checkTwin(
+      checks,
+      `${medium.name}: the transmittance table`,
+      gpu.transmittance,
+      twin.transmittance,
+      false,
+    );
+    const overGpu = multiScatteringTwin(
+      read,
+      EARTH_MEAN_RADIUS_M,
+      asTwinTable(gpu.transmittance, TRANSMITTANCE_SIZE),
+    );
+    const own = twinAgreement(gpu.multiScattering, overGpu, false);
+    const endToEnd = twinAgreement(gpu.multiScattering, twin.multiScattering, false);
+    checks.check(
+      `R08.T6.b ${medium.name}: the multiple-scattering table agrees with the CPU twin to 10⁻³`,
+      own.worst <= 1 && own.above > 0,
+      `over the GPU's transmittance, worst ${own.at}; ${own.above} channels above 10⁻⁶ of the largest, ${own.over} over the bound; over the twin's, worst ${endToEnd.at}, ${endToEnd.over} over`,
+    );
+  } finally {
+    tables.dispose();
+  }
+}
+
+/** A frame's three per-frame outputs, read back. */
+interface FrameReadback {
+  readonly skyView: Float32Array;
+  readonly aerial: Float32Array;
+  readonly rayMarch: Float32Array;
+}
+
+/** Reads the latest frame's sky view, aerial volume and ray march back. */
+async function readFrameOutputs(
+  engine: RenderEngine,
+  atmosphere: HillaireAtmosphere,
+): Promise<FrameReadback> {
+  const { skyView, aerial, rayMarch } = atmosphere.frameTables;
+  if (rayMarch === null) {
+    throw new Error("the ray march drew no target");
+  }
+  const read = async (texture: TextureHandle): Promise<Float32Array> =>
+    halfTexels(await engine.readTexture(texture, 0, undefined, "tolerance"));
+  return {
+    skyView: await read(skyView),
+    aerial: await read(aerial),
+    rayMarch: await read(rayMarch),
+  };
+}
+
+/**
+ * The setting's sizes with the sky-view table at half its width and height, each texel still one
+ * ray of the shipped kernel: 96 × 54 on high and 64 × 32 on low. Both row counts are even, so that
+ * no texel's ray is the horizon's own tangent (v = ½ in `view.wgsl`'s `skyViewUvToParams`), where
+ * a ray meets the ground or misses it by its arithmetic's rounding; R05.T12.e's quarter, 48 × 27 on
+ * high, has one (row 13).
+ */
+function twinSizes(sizes: TableSizes): TableSizes {
+  return {
+    ...sizes,
+    skyView: {
+      widthTexels: sizes.skyView.widthTexels / 2,
+      heightTexels: sizes.skyView.heightTexels / 2,
+    },
+  };
+}
+
+/** The three per-frame kernels' agreements with their twins over one frame. */
+interface FrameAgreements {
+  readonly skyView: TwinAgreement;
+  readonly aerial: TwinAgreement;
+  readonly rayMarch: TwinAgreement;
+}
+
+/** The per-planet tables an atmosphere built, read back, as the twins' planet for `read`. */
+async function planetOf(
+  engine: RenderEngine,
+  atmosphere: HillaireAtmosphere,
+  read: AtmosphereMedium,
+  figure: SpheroidFigure,
+): Promise<PlanetTwin> {
+  const tables = await readPlanetTables(engine, atmosphere.tables);
+  return {
+    medium: read,
+    bottomRadiusM: tableRadiusM(figure),
+    transmittance: asTwinTable(tables.transmittance, TRANSMITTANCE_SIZE),
+    multiScattering: asTwinTable(tables.multiScattering, MULTI_SCATTERING_SIZE),
+  };
+}
+
+/** Draws one frame and holds its per-frame outputs to their twins over the GPU's tables. */
+async function frameAgreements(
+  engine: RenderEngine,
+  atmosphere: HillaireAtmosphere,
+  planet: PlanetTwin,
+  figure: SpheroidFigure,
+  sizes: TableSizes,
+  frame: TwinFrame,
+): Promise<FrameAgreements> {
+  const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
+  const sun = sunAt(frame.elevationDeg);
+  await compositeFrame(engine, atmosphere, camera, sun, frame.surfaceM);
+  const gpu = await readFrameOutputs(engine, atmosphere);
+  const view = twinView(camera, sun, figure, NEAR_M);
+  const aerial = aerialPerspectiveTwin(
+    planet,
+    view,
+    sizes.aerialPerspective,
+    sizes.aerialPerspectiveSamplesPerSlice,
+    sizes.aerialPerspectiveReachM,
+  );
+  const surfaceDepth = frame.surfaceM === null ? 0 : NEAR_M / frame.surfaceM;
+  return {
+    skyView: twinAgreement(
+      gpu.skyView,
+      skyViewTwin(planet, view, sizes.skyView, sizes.skyViewSamples),
+      false,
+    ),
+    aerial: twinAgreement(gpu.aerial, aerial, true),
+    rayMarch: twinAgreement(
+      gpu.rayMarch,
+      rayMarchTwin(planet, view, sizes, () => surfaceDepth),
+      true,
+    ),
+  };
+}
+
+/** Records an agreement as the check "R08.T6.b … agrees with the CPU twin to 10⁻³". */
+function recordAgreement(checks: Checks, name: string, result: TwinAgreement): void {
+  checks.check(
+    `R08.T6.b ${name} agrees with the CPU twin to 10⁻³`,
+    result.worst <= 1 && result.above > 0,
+    `worst ${result.at}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound`,
+  );
+}
+
+/**
+ * The per-frame kernels on a setting's counts against their twins over the GPU's tables: from
+ * 2 km at a sun 20° up with a surface 60 km ahead (the ray march's, beyond the aerial reach), and
+ * from 400 km with the sun 5° up (the limb).
+ */
+async function checkFrameTwins(
+  engine: RenderEngine,
+  checks: Checks,
+  medium: AtmosphereMedium,
+  read: AtmosphereMedium,
+  setting: QualitySetting,
+): Promise<void> {
+  const frames: readonly TwinFrame[] = [
+    { name: "2 km, a surface 60 km ahead", heightM: 2_000, elevationDeg: 20, surfaceM: 60_000 },
+    { name: "400 km, the limb", heightM: 400_000, elevationDeg: 5, surfaceM: null },
+  ];
+  const sizes = twinSizes(TABLE_SIZES[setting]);
+  const atmosphere = new HillaireAtmosphere(engine, medium, sizes, WGS84);
+  try {
+    const planet = await planetOf(engine, atmosphere, read, WGS84);
+    for (const frame of frames) {
+      // The harness's checks run in order: each frame is read back before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const result = await frameAgreements(engine, atmosphere, planet, WGS84, sizes, frame);
+      const label = `${medium.name}, ${setting}, ${frame.name}`;
+      recordAgreement(checks, `${label}: the sky view`, result.skyView);
+      recordAgreement(checks, `${label}: the aerial perspective`, result.aerial);
+      recordAgreement(checks, `${label}: the ray march`, result.rayMarch);
+    }
+  } finally {
+    atmosphere.dispose();
   }
 }
 

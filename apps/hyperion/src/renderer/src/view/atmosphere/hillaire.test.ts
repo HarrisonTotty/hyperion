@@ -213,14 +213,61 @@ describe("HillaireAtmosphere", () => {
     expect(engine.textureSpecs.at(-1)?.size).toEqual([128, 64]);
   });
 
-  it("hands the smoke page the frame's sky-view table and ray-march target", async () => {
+  it("hands the smoke page the frame's sky-view table, aerial volume and ray-march target", async () => {
     const engine = await countingRenderEngine();
-    const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
     expect(atmosphere.frameTables.rayMarch).toBeNull();
     atmosphere.drawFrame(CAMERA, NOON, SCENE);
-    const { skyView, rayMarch } = atmosphere.frameTables;
+    const { skyView, aerial, rayMarch } = atmosphere.frameTables;
     expect(skyView.name).toBe("atmosphere sky view");
+    // On low too, where no other pass samples the volume.
+    expect(aerial.name).toBe("atmosphere aerial perspective");
     expect(rayMarch?.name).toBe("atmosphere ray march");
+  });
+
+  it("binds the medium's terms and tables to every per-frame kernel (R08.T6.b)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const tables = atmosphere.tables;
+    expect(engine.dispatched).toHaveLength(3);
+    for (const { bindings } of engine.dispatched) {
+      expect(bindings.buffers).toEqual({ terms: tables.terms });
+      expect(bindings.sampled).toMatchObject({
+        densityTables: tables.densityTables,
+        phaseTables: tables.phaseTables,
+        transmittance: tables.transmittance,
+        multiScattering: tables.multiScattering,
+      });
+    }
+  });
+
+  it("puts the per-frame medium's shell on the camera's own sphere", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    // √(MN) at the equator, 100 km of air, three terms.
+    for (const { bindings } of engine.dispatched) {
+      expect([...(bindings.uniforms["medium"] ?? [])].slice(0, 3)).toEqual(
+        [GAUSSIAN_RADIUS_M[0], GAUSSIAN_RADIUS_M[0] + 100_000, 3].map(Math.fround),
+      );
+    }
+  });
+
+  it("draws on with the medium its tables keep when they refuse a new one", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const first = EARTH_REFERENCE.terms[0];
+    if (first === undefined) {
+      throw new Error("Earth's medium has no terms");
+    }
+    const tooMany = { ...EARTH_REFERENCE, terms: Array.from({ length: 9 }, () => first) };
+    expect(() => atmosphere.setMedium(tooMany)).toThrow(/at most 8/);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    expect(engine.dispatched[0]?.bindings.uniforms["medium"]?.[2]).toBe(3);
   });
 
   it("allocates the low setting's sizes under atmosphere-view and keeps its aerial perspective to the terrain", async () => {
@@ -252,11 +299,29 @@ describe("the atmosphere's WGSL", () => {
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
     ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
-  ])("%s holds no Medium by value", (_name, source) => {
+  ])("%s holds no Medium or terms by value", (_name, source) => {
     // A Medium held by value and indexed by a loop variable is copied whole into each invocation,
     // and the ray march did so three times a sample (plan R05's Risks, "R05.T14, the high run's
-    // pass timer and atmosphere, diagnosed"): no helper takes one, and no local copies the uniform.
+    // pass timer and atmosphere, diagnosed"): no helper takes one or the terms (R08.T6.b's storage
+    // buffer), and no local copies the uniform or the buffer.
     expect(source).not.toMatch(/\bfn\s+\w+\s*\([^)]*:\s*Medium\b/);
-    expect(source).not.toMatch(/=\s*medium(\.terms)?\s*;/);
+    expect(source).not.toMatch(/\bfn\s+\w+\s*\([^)]*:\s*array<Term\b/);
+    expect(source).not.toMatch(/=\s*(medium|terms)\s*;/);
+  });
+
+  it.each([
+    ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
+    ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
+    ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+  ])("%s reads the terms, their densities and their phases (R08.T6.b)", (_name, source) => {
+    expect(source).toMatch(/var<storage, read> terms : array<Term, MAX_TERMS>;/);
+    expect(source).toMatch(/var densityTables : texture_2d_array<f32>;/);
+    expect(source).toMatch(/var phaseTables : texture_2d_array<f32>;/);
+    expect(source).toMatch(/let angle = scatteringAngle\(dir, /);
+  });
+
+  it("keeps the composite's code clear of the medium, which it does not declare", () => {
+    const code = COMPOSITE_MATERIAL.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code).not.toMatch(/\b(medium|terms|densityTables|phaseTables)\b/);
   });
 });

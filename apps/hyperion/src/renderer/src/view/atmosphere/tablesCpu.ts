@@ -16,11 +16,16 @@
  * The medium is data: a list of terms, each a density profile (`exponential`, `tent` or
  * `tabulated`), scattering and absorption per channel at unit density, and a phase function
  * (`rayleigh`, `cornette-shanks`, `none` or `tabulated`, per channel). The twin names no species
- * and holds no limit on their number; the kernels' uniform holds `MAX_TERMS` (R08.T6.b). It refuses
- * one medium that no builder should make: a tabulated term whose last level lies below the
- * medium's top at a density other than 0, which the `tabulated` rule would hold up to the top, as
- * R08.T3.a's column holds its last level's 10⁻⁷ of the ground's; a medium built on a column takes
- * a top no higher than the column's.
+ * and holds no limit on their number; the kernels' packer refuses more than `MAX_TERMS`
+ * (`tables.ts`, R08.T6.b). It refuses one medium that no builder should make, as the packer does
+ * (`medium.ts`'s `checkTabulatedTops`): a tabulated term whose last level lies below the medium's
+ * top at a density other than 0, which the `tabulated` rule would hold up to the top, as R08.T3.a's
+ * column holds its last level's 10⁻⁷ of the ground's; a medium built on a column takes a top no
+ * higher than the column's.
+ *
+ * The kernels read a tabulated density and phase from tables resampled onto their own grids
+ * (`tables.ts`'s `kernelMedium`), so the twin is their oracle when it is given the medium as they
+ * read it: `planetTwin(kernelMedium(medium), …)` and the twins built on it (R08.T6.b's smoke).
  *
  * The multiple-scattering kernel takes R05.T12.e's step factor from `common.wgsl` since R08.T6.a,
  * in place of (S − S e^(−x)) ÷ max(σ_t, 10⁻¹²), whose `f32` cancellation the per-frame kernels
@@ -56,6 +61,7 @@ import {
 import { marchSplit, marchStep, type MarchStep } from "./marchSteps";
 import {
   type AtmosphereMedium,
+  checkTabulatedTops,
   type DensityProfile,
   densityAt,
   extinction,
@@ -116,25 +122,13 @@ interface TwinTerm {
  *   takes a top no higher than its last level.
  */
 function termsOf(medium: AtmosphereMedium): readonly TwinTerm[] {
-  return medium.terms.map((term) => {
-    const profile = term.density;
-    if (profile.kind === "tabulated") {
-      const last = profile.altitudesM.length - 1;
-      const topLevelM = profile.altitudesM[last] ?? Number.NaN;
-      const atTop = profile.relative[last] ?? Number.NaN;
-      if (topLevelM < medium.topHeightM && atTop !== 0) {
-        throw new RangeError(
-          `term ${term.name} of medium ${medium.name} holds a density of ${atTop} from its last level at ${topLevelM} m up to the medium's top at ${medium.topHeightM} m`,
-        );
-      }
-    }
-    return {
-      density: profile,
-      scattering: term.scattering,
-      extinction: extinction(term),
-      phase: term.phase,
-    };
-  });
+  checkTabulatedTops(medium);
+  return medium.terms.map((term) => ({
+    density: term.density,
+    scattering: term.scattering,
+    extinction: extinction(term),
+    phase: term.phase,
+  }));
 }
 
 /**
@@ -288,7 +282,9 @@ const SQRT_DIRECTIONS = 8;
 
 /**
  * How far above the ground the multiple-scattering table's lowest radius sits, m: 10,
- * `common.wgsl`'s `GROUND_OFFSET_M` (sebh's `PLANET_RADIUS_OFFSET`).
+ * `common.wgsl`'s `GROUND_OFFSET_M`, taken off the height range on the write and the read alike: a
+ * deliberate change from sebh's `PLANET_RADIUS_OFFSET`, which his code takes off the range too
+ * but also adds to the unitless row coordinate, on the write alone (R08.T6.b).
  */
 export const MULTI_SCATTERING_GROUND_OFFSET_M = 10;
 

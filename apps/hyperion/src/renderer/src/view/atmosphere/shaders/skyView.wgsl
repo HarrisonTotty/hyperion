@@ -11,13 +11,22 @@
 // toward the camera (`marchSplit` in source.wgsl), where Bevy spaces them evenly, and each is
 // sampled at its midpoint; their count is the setting's (75 on high, addendum B, where Hillaire
 // 2020's Table 2 has 30); each term's density is evaluated once a sample; a step's in-scattering
-// is taken without f32's cancellation (`stepFactor` in common.wgsl).
+// is taken without f32's cancellation (`stepFactor` in common.wgsl). Changes (plan R08, R08.T6.b):
+// the ray's length and each sample's height are formed from the camera's height without f32's
+// cancellation (`maxDistanceFromHeight`, `heightAlong` in medium.wgsl), where |p| - bottom and the
+// distance to the ground lose the 0.5 m of an f32 radius near 6.4e6 m: from a camera 2 m up they
+// moved the table by up to 17% against the CPU twin, and 5.4% after. The rest, near the zenith
+// and at the limb, was the builtin trigonometry's, which `skyViewUvToParams` now avoids
+// (view.wgsl).
 
 @group(0) @binding(0) var<uniform> medium : Medium;
-@group(0) @binding(1) var<uniform> view : AtmosphereView;
-@group(0) @binding(2) var transmittance : texture_2d<f32>;
-@group(0) @binding(3) var multiScattering : texture_2d<f32>;
-@group(0) @binding(4) var skyViewOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
+@group(0) @binding(2) var densityTables : texture_2d_array<f32>;
+@group(0) @binding(3) var phaseTables : texture_2d_array<f32>;
+@group(0) @binding(4) var<uniform> view : AtmosphereView;
+@group(0) @binding(5) var transmittance : texture_2d<f32>;
+@group(0) @binding(6) var multiScattering : texture_2d<f32>;
+@group(0) @binding(7) var skyViewOut : texture_storage_2d<rgba16float, write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
@@ -42,10 +51,10 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   );
   let muSunCamera = dot(view.sun.xyz, view.up.xyz);
   let sun = vec3f(sqrt(max(1.0 - muSunCamera * muSunCamera, 0.0)), 0.0, muSunCamera);
-  let cosTheta = dot(dir, sun);
+  let angle = scatteringAngle(dir, sun);
 
   let origin = vec3f(0.0, 0.0, r);
-  let tMax = maxDistance(r, viewZenithCos);
+  let tMax = maxDistanceFromHeight(heightM, viewZenithCos);
   let samples = max(u32(view.output.w), 2u);
   // The ray's closest approach to the sphere's centre is at -o.d = -r cos(view zenith).
   // The camera is inside the atmosphere: the sky view serves no other.
@@ -57,9 +66,9 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let dt = stepAt.dtM;
     let p = origin + stepAt.tM * dir;
     let rP = length(p);
-    let sampleHeightM = rP - bottom;
+    let sampleHeightM = heightAlong(heightM, viewZenithCos, stepAt.tM, rP);
     let muSun = dot(sun, p / rP);
-    let local = sampleMediumAt(sampleHeightM, cosTheta);
+    let local = sampleMediumAt(sampleHeightM, angle);
     let stepDepth = local.extinction * dt;
     let stepTransmittance = exp(-stepDepth);
     let source = sourceAt(

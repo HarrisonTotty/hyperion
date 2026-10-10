@@ -2359,15 +2359,19 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   multiple-scattering table keeps Hillaire's isotropic 32². The kernels read the tables by
   `textureLoad` with hand filtering (a compute pass binds no sampler), and a one-layer array binds
   through R08.T0's seam. A medium with no tabulated phase term binds a one-layer, one-texel
-  placeholder, which the kernels never read. Every changed kernel stays registered in
+  placeholder, which the kernels never read. The Rayleigh phase carries R08.T3.c's depolarisation
+  ratio ρ per channel, which the kernels read as the twin's `phaseAt` does (Chandrasekhar's form),
+  and `packMedium` lifts T3.c's refusal of ρ ≠ 0 beside taking over T6.a's refusal of a tabulated
+  density held up to the top (main, 2026-10-09). Every changed kernel stays registered in
   `WGSL_CATALOGUE`. Files: R05's
   `shaders/{transmittance,multiScattering,skyView,aerialPerspective,rayMarch,composite}.wgsl` and
   the libraries `shaders/{common,medium,view,source}.wgsl` they are assembled from, `hillaire.ts`,
   `tables.ts`, `medium.ts`, `tables.test.ts` (which pins `packMedium`'s length and its "at most 8"
   refusal) and `hillaire.test.ts` (which checks that no assembled module takes a `Medium` by value),
   and the smoke page's checks (`smoke/atmosphere.ts`). Smoke (`just test-render`): every kernel
-  compiles, and the readbacks agree with the twin to 10⁻³ relative above 10⁻⁶ of the table's
-  maximum, on both variants (`default` and `no-subgroups`). Acceptance: `pnpm test` and
+  compiles, and the readbacks agree with the twin under Verification's twin bound (10⁻³ relative
+  above 10⁻⁶ of the table's maximum, and within 2⁻²⁴, one step of the half float, below its least
+  normal), on both variants (`default` and `no-subgroups`). Acceptance: `pnpm test` and
   `just test-render` pass.
 
 - **R08.T6.c Optical depth and curves of growth.** Transmittance stores optical depth in RGB and
@@ -2395,6 +2399,13 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   - `solar.ts` is kept as a check: the two agree in luminance to 1%, and their chromaticity
     difference is recorded.
   - R05's constants stay as a second medium for comparison, beside `HILLAIRE_REFERENCE`.
+  - The multiple-scattering kernel (`multiScattering.wgsl`) places its 32 steps as R08.T6.a
+    measured, toward each ray's lowest point, and the side before it toward the texel's point
+    (`marchSplit` with `fromCamera`, R05.T12.e's rule), in place of its 32 even steps; its twin
+    takes `placement: "placed"` in `MULTI_SCATTERING_KERNEL_OPTIONS`. The even steps err by up to
+    10.5% in the table and move Earth's sunset sky by up to 9.5%, beyond Design note 10's 5%; placed
+    steps hold the table within 2.6% at the same count (main's ruling, 2026-10-09; Risks,
+    "Deviations in T6.b, as built"). The change in Earth's picture is recorded with the others.
   - Earth's tabulated profile reproduces Bodhaine et al. 1999's τ_R(550) = 0.097 to 1%, as R05's
     exponential does (`decisions-r05.md` item 3), so that the comparison with R05 differs in
     vertical distribution, not in column.
@@ -3608,6 +3619,214 @@ generator, and the reference's sampling needs no domain tag.
     changes Earth's picture by amounts it records, since T6.a–c change no picture. T6.d lists no
     kernel today, so that is an amendment to its text, and a correction to R05.T12.e's ruling,
     which placed the per-frame marches' steps alone.
+
+- **Deviations in T6.b, as built** (2026-10-10). `tables.ts`, `hillaire.ts`, `medium.ts`, R05's
+  kernels and the libraries they are assembled from, `smoke/atmosphere.ts` and `smoke/page.ts`,
+  with `tables.test.ts` and `hillaire.test.ts`. Also `tablesCpu.ts` (`termsOf` calls
+  `checkTabulatedTops`; the 10 m offset's citation), `opticalDepth.ts` (the mapping's citation)
+  and a one-line doc in `engine/memory.ts`. `composite.wgsl`, in the task's Files, is unchanged: it
+  reads no term, and its sky-view read is `view.wgsl`'s `skyViewParamsToUv`.
+  - _The medium in three parts._ The `Medium` uniform keeps the shell's radii, the term count, the
+    kernel's steps and the albedo (32 B, `packMediumUniform(medium, bottomRadiusM, samples)`). The
+    terms travel in `terms`, a `var<storage, read> array<Term, MAX_TERMS>`. `packMedium(medium)`
+    packs it, losing its radius and steps, always 8 terms (512 B) whatever the medium. The task's
+    "416 B" was R05's uniform. `MAX_TERMS` stays 8, the kernels' refusal ("at most 8 fit"); the
+    twin holds none. `AtmosphereTables` owns the buffer (`atmosphere-tables`) and binds it, as
+    `HillaireAtmosphere` binds it to the per-frame kernels.
+  - _`Term` is four `vec4f`, not three_, since T3.c's ρ per channel needs three numbers:
+    - scattering and absorption in rgb, w unused;
+    - `profile`, x the code (0 exponential, 1 tent, 2 tabulated with y the table's top);
+    - `phase`, w the code (0 none, 1 Rayleigh with ρ per channel in xyz, 2 Cornette–Shanks with g
+      in x, 3 tabulated).
+
+    A term's layer in either table is its index, so `Term` carries no layer.
+
+  - _Names beside the Provides._
+    - In `tables.ts`: `TERMS_BUFFER_BYTES` (512), `LayeredTable { widthTexels, layers, texels }`,
+      `packDensityTables(medium)` and `packPhaseTables(medium)`, which T6.c and T6.f extend.
+    - `densityOf` moves from `common.wgsl` to `medium.wgsl` as `densityOf(i, profile, h)`, since it
+      reads `densityTables`, which the composite does not declare.
+    - `mediumAt(r)` calls `mediumAtHeight(h)`.
+  - _Memory._ `atmosphere-tables` gains the 512 B terms buffer. A tabulated medium adds 4 KB a term
+    in each of the density and phase tables, up to about 64.5 KB at 8 terms. Design note 11's
+    0.40 MB a planet leaves them out; R08.T11 counts them.
+
+  - _ρ_ (main, 2026-10-09, after R08.T3.c). The kernels draw Chandrasekhar's form per channel, as
+    `phaseAt`; at ρ = 0 it is R05's 3 ÷ (16π)(1 + cos²θ). `packMedium` packs ρ, lifting T3.c's
+    refusal. T6.b's text now says so.
+  - _Refusals._ `packMedium` takes over the twin's refusal of a tabulated density held up to the top
+    from a last level below it: `checkTabulatedTops(medium)`, new in `medium.ts`, which the twin's
+    `termsOf` now calls too.
+  - _The tables._ Two `texture_2d_array<f32>`, one layer a term, zeros where a term has no table
+    of that kind; a one-layer, one-texel placeholder where no term has one.
+    - `AtmosphereTables` remakes a table at a new shape and releases the old, and gains `terms`,
+      `densityTables` and `phaseTables`.
+    - It also gains `medium`, the medium the tables follow, and `HillaireAtmosphere` draws its frames
+      from it rather than keeping a copy. So a medium the packer refuses is never drawn over the old
+      tables.
+    - `setMedium` adopts a medium only once it packs. A loss while it builds (`EngineUnavailable`
+      from `createTexture`, now that a shape change makes textures) leaves the tables following the
+      new medium, which the restore builds.
+    - A constructor whose first medium is refused releases what it made and subscribes to no
+      restore.
+    - Density: `DENSITY_TABLE_LEVELS` = 1,024 levels at h_k = top (k ÷ 1,023)² (`densityTableLevelsM`),
+      `r32float`. It is read linear in h between levels, not in √h, and held beyond the last level,
+      the `tabulated` rule on the resampled levels, so that the twin reproduces the kernels.
+      `resampledDensity` makes the levels. Measured (`tables.test.ts`):
+      - R08.T3.a's isothermal 250 K column keeps its column to 4.4 × 10⁻⁶ and its optical depth to
+        under 3.3 × 10⁻⁵ (1 × 10⁻⁴ asserted), pointwise 1.0 × 10⁻⁴ at the 100 km top (2 × 10⁻⁴
+        asserted);
+      - a radiative-convective Earth column is 4.4 × 10⁻⁴ off pointwise at its tropopause kink
+        (measured in a scratch run, not asserted);
+      - the haze layer keeps its column to 2 × 10⁻⁶.
+    - Phase: `PHASE_TABLE_ENTRIES` = 256, even in u, `rgba32float` with the channels in rgb, read
+      linear in u. `resampledPhase` returns a table already on that grid as it is. Any other it
+      resamples linear in u and scales per channel to the source's integral over the sphere
+      (Simpson, 8 panels per 1 ÷ 255 of u an interval spans, at least 8; the science check's fix for coarse source grids), so that a normalised table stays normalised (10⁻⁶ asserted).
+      The matrix elements take the same factor.
+    - `kernelMedium(medium)` is the medium as the kernels read it, the twin's input in the smoke.
+    - Not done here: Provides' `bilinear` overload for `texture_2d_array`, which T6.f's slices
+      need.
+  - _The scattering angle._ `ScatteringAngle { cosTheta, u }`: the closed forms take cos θ as
+    before, and the tables u = √(θ ÷ π) with θ = atan2(|d × s|, d · s), since acos(d · s) loses
+    the forward peak in `f32`. `sampleMediumAt(heightM, angle)` and `phaseOf(i, term, angle)` are
+    per channel. Each term's phase is still evaluated per sample, as R05 does.
+  - _`f32` corrections to R05's kernels_ (raised with main, adopted 2026-10-10, then ruled in
+    `decision-r08-f32.md`). The twin comparison found R05's own arithmetic off the `f64` twin on
+    R05's Earth as much as on the N-term medium. Each fix is local and was needed for the 10⁻³
+    acceptance. Each moves R05's pictures toward the twin, by the amounts below:
+    - Earth's sky view by about 17% from 2 m and 1.7 × 10⁻³ from 2 km;
+    - the limb by 1.4–1.9 × 10⁻²;
+    - the multiple-scattering table by up to 3.6 × 10⁻³;
+    - the transmittance table's grazing row by 3.2 × 10⁻³.
+
+    R08.T6's "the first three change no picture" holds for the N-term widening alone; the `f32`
+    fixes are main's. Figures are SwiftShader's, the worst against the twin. The `f32` emulations
+    behind (1) and (c) were scratch work and are not committed; R08.T6.g's precision test holds
+    them.
+    - (1) _The transmittance table._ Heights were r(t) − R, which carries `f32`'s 0.5 m near
+      6.4 × 10⁶ m, 4 × 10⁻⁴ of the aerosol's 1.2 km. They are now (t² + 2rμt + ρ²) ÷ (r(t) + R),
+      with ρ the texel's own, and the ground distance is ρ² ÷ (−rμ + √((rμ)² − ρ²)) (`mediumAtHeight`
+      in `medium.wgsl`). Before: 3.2 × 10⁻³ at row 0, grazing (τ ≈ 10); an `f32` emulation gave
+      3.18 times the bound (331 channels over), and 0.17 times (none) after. After, on the GPU: within
+      the bound on both media, worst 1.2 × 10⁻³ relative at T = 2.7 × 10⁻⁵, a half-float subnormal.
+    - (a) _The sky view's heights and ray length_ from the camera's height h₀:
+      `maxDistanceFromHeight`, `heightAlong` and `aboveGroundOf` in `medium.wgsl`. Before and after
+      from 2 m: 17% (7,542 channels over) and 5.4% (1,740), before the trigonometry below.
+    - (b) _The multiple-scattering directions._ Its eight azimuths are exact constants (±cos π/8,
+      ±sin π/8) in place of `f32` cos and sin of 2πa. A night texel at the terminator is linear in a
+      direction's error: 1 × 10⁻⁶ in the cosines moves (13, 17) by 3.3 × 10⁻⁴, and 1 × 10⁻⁵ by
+      3.3 × 10⁻³. Moving the shadow line ±0.5 m changes nothing. Before: 3.6 × 10⁻³ (Earth, 14
+      channels) and 1.6 × 10⁻² (tabulated, 26). After: within the bound; the tabulated worst is
+      5.2 × 10⁻⁴.
+    - (c) _Trigonometry._ WGSL bounds cos and sin only to 2⁻¹¹ absolute, and only within [−π, π];
+      atan2 to 4,096 ULP for normal |x|; and acos to the worse of 6.77 × 10⁻⁵ absolute and the bound
+      of atan2(√(1 − x²), x) (asin likewise at 6.81 × 10⁻⁵; W3C WGSL §15.7.4.1). SwiftShader comes
+      near those bounds. At the limb the sky view moves by 2 × 10⁻² of itself for 1 × 10⁻⁴ in a
+      ray's zenith cosine.
+      - `view.wgsl` gains `preciseCos` (Taylor at θ ÷ 2), `preciseAtan` and `preciseAtan2`. In an
+        `f32` emulation with correctly rounded operations they are within about 3.5, 2.3 and
+        3.9 × 10⁻⁷ (the science check; `decision-r08-f32.md` §5). Within WGSL's 2.5 ULP division and
+        its sqrt they reach 4.6, 5.8 and 8.6 × 10⁻⁷, still about 500 times better than the builtins.
+      - `skyViewUvToParams` and the composite's `skyViewParamsToUv` take them, with β = π ÷ 2 −
+        atan(v_horizon ÷ R) = acos(v_horizon ÷ r). So does `scatteringAngle`.
+      - Before: the 2 km sky view 1.7 × 10⁻³ on row 1, near the zenith; the limb 1.4–1.9 × 10⁻².
+        After: within the bound, worst 4.9 × 10⁻⁴ (2 km) and the limb under the bound.
+    - Not fixed here, and R08.T6.g's (`decision-r08-f32.md`): the ray march's heights and spheroid
+      roots from the camera's body-fixed position, the per-frame shadow tests and table
+      coordinates formed from radii, composite.wgsl's `cos(v.sun.w)`, and a shared
+      `preciseTrig.wgsl`.
+
+  - _Known defect: R05's `f32` geometry near the ground_ (not accepted behaviour; R08.T6.g's).
+    High setting, Earth's medium, sun 20° up, a surface 60 km ahead, worst relative error against
+    the `f64` twin, before T6.b's fixes:
+
+    | Camera height | Earth sky view       | Earth ray march | Saturn-radius sky view | Saturn-radius ray march                   | Saturn-radius aerial |
+    | ------------- | -------------------- | --------------- | ---------------------- | ----------------------------------------- | -------------------- |
+    | 2 m           | 17% (7,542 channels) | 14% (2,878)     | 100% (GPU 0)           | the ground missed, GPU 0.127 against 5e-5 | 0.39%                |
+    | 20 m          | 1.6%                 | 0.83%           | 19%                    | 7.7%                                      | 0.16%                |
+    | 200 m         | 0.51%                | 0.21%           | 1.6%                   | 1.1%                                      | 0.17%                |
+    | 2 km          | 0.17%                | 0.07%           | 0.21%                  | 0.35%                                     | 0.18%                |
+    - Earth's aerial perspective is within 6.4 × 10⁻⁴ at every height.
+    - The Saturn-radius body is a 60,268 km sphere, since `geodeticOf` does not converge on Saturn's
+      flattening.
+    - After (1), (a) and (c), as a fraction of the 10⁻³ bound:
+      - Earth's sky view is 0.68, 0.51, 0.49 and 0.49 at 2 m, 20 m, 200 m and 2 km: within the bound.
+      - The Saturn-radius sky view is 2.4, 0.85, 0.65 and 0.50.
+      - The ray march (Earth and Saturn) and the Saturn-radius aerial perspective (3.9, 1.6, 1.7 and
+        1.8) are unchanged.
+
+  - _The smoke check_, "R08.T6.b the kernels over N terms" (`checkAtmosphereTwins`).
+    - _Media._ Two: R05's Earth, with its placeholders, and a five-term medium covering every code:
+      - T3.a's column under Rayleigh with ρ (0.027, 0.028, 0.03);
+      - a tabulated haze with a per-channel tabulated phase on the kernels' grid;
+      - a tabulated dust whose phase is on an uneven grid of 181 entries;
+      - R05's Cornette–Shanks aerosol and R05's ozone tent.
+    - _What each kernel is held to._
+      - Transmittance against the twin of `kernelMedium(medium)`.
+      - Multiple scattering against its twin over the GPU's transmittance. The end-to-end figure is
+        reported beside it.
+      - Each per-frame kernel against its twin over the GPU's own tables, so that each kernel is
+        judged on its own arithmetic.
+    - _The bound._ |GPU − twin| ≤ max(10⁻³ · max(|twin|, 10⁻⁶ · largest), 2⁻²⁴), the largest taken
+      over the colours, and over alpha apart where alpha is a mean transmittance. It is ruled
+      (2026-10-10, `decision-r08-t6b-floor.md`): it is Verification's twin bound, the 2⁻²⁴ being
+      rgba16float's step below its least normal 2⁻¹⁴.
+      - Every check the floor carried in the final run sits at one rounding of the stored value,
+        0.993–1.007 × 2⁻²⁵. These are: the transmittance tables (1.2 × 10⁻³ relative at
+        T = 2.7 × 10⁻⁵), the multiple-scattering table's night texel (13, 3) (4.3% at
+        6.9 × 10⁻⁷), the limb's sky views, and the tabulated limb's aerial perspective.
+      - Earth's aerial perspective from 400 km is under 1.1 × 10⁻¹⁵ in colour throughout, the
+        camera being above the air, so its colour check holds nothing. The composite ray-marches
+        there.
+      - R08.T6.c lifts the transmittance case by comparing optical depth. The radiance tables keep
+        the floor, and R08.T6.g adds a kernel arm with none.
+    - _Views_, on both settings (adopted with (2), 2026-10-10).
+      - The sky view is at half its width and height, 96 × 54 and 64 × 32. Both row counts are even,
+        since R05.T12.e's 48 × 27 quarter has a texel on the horizon's tangent (row 13): 29%, the
+        ray meeting or missing the ground by rounding.
+      - The frames are from 2 km, at a sun 20° up with a surface 60 km ahead, and from 400 km at the
+        limb with the sun 5° up.
+      - The 2 m figures above are recorded, not checked. T6.g's views seed from them.
+    - `frameTables` gains `aerial`, which low does not otherwise expose.
+    - Measured on SwiftShader at the final code, on both variants: 634 checks pass and none fails.
+      That is the 578 of before over the two variants, and 28 new a variant; no uncaptured GPU
+      error. The earlier runs failed until fixes (1), (b) and (c) were in.
+  - _Main's rulings applied._ The citations: the transmittance mapping is Bruneton 2017's
+    `GetRMuFromTransmittanceTextureUv` in `medium.wgsl` and `opticalDepth.ts`, and the 10 m
+    multiple-scattering offset a deliberate change from sebh's in `common.wgsl` and
+    `tablesCpu.ts`. T6.d now places the multiple-scattering kernel's steps as T6.a measured. The
+    placement itself is not changed here.
+  - _For T6.c._ The four transmittance read sites are where T6.b left them. (1)'s precise heights
+    are in the transmittance kernel alone. R08.T6.g comes first and moves the read sites to
+    heights.
+  - _For T6.g_ (the science check). sebh's sub-texel remap pair, `subUvsToUnit` and
+    `unitToSubUvs` (`common.wgsl`, R05's port), is not mutually inverse: a texel written and read
+    back lands up to 0.5 ÷ (n + 1) of a texel off at a table's edges, 0.015 texel on the 32² table.
+    Bruneton's `GetTextureCoordFromUnitRange` is the exact inverse. A read-after-write check to
+    10⁻³ of a texel cannot pass with sebh's pair; taking Bruneton's changes R05's sampling.
+
+- **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
+  `decision-r08-t6b-floor.md` §6; open, with main).
+  - _The finding._ R05's sky view, aerial volume and ray march store radiance per unit of the
+    sun's illuminance in `rgba16float`, with no scale.
+    - From typical clear-sky illuminances (estimated, not measured), Earth's mean twilight sky is
+      about 8.5 × 10⁻⁶ sr⁻¹ at −6°, 1.0 × 10⁻⁶ at −8° and 2 × 10⁻⁸ at −12°. That is 143, 17 and
+      0.3 of the half float's 2⁻²⁴ steps.
+    - So the stored sky is banded from about −6° to −8° and black by nautical twilight, whatever
+      the kernels compute. The multiple-scattering table's night side is the same (Earth's texel
+      (13, 3) is 11 steps).
+    - A moonlit sky kept per unit of the Sun's illuminance would be under one step.
+  - _Why no check sees it._ The twin bound's floor passes such a table by construction.
+    Verification records it as format-limited, and R08.T7's twilights and moonlit night, by hand,
+    would show it.
+  - _Lean._
+    - The per-view tables are written per unit of a per-frame scale formed in `f64` (the drawn
+      sources' sky scale, or the pre-exposure, as the composite's output is). The composite
+      divides it out where `skyScale` multiplies today.
+    - R08.T7 records its twilight and moonlit tables' largest values against 2⁻¹⁴.
+    - The per-planet multiple-scattering table needs its own answer.
+    - R08.T6.g's kernel arm already holds the kernels at every scale.
 
 - **Plan 14 produces no CH₄, O₂ or giant composition** (Design note 16). Titan-class haze, ozone and
   giants are fixture-only until P14.T24.c, d and f land. Biotic O₂ has no owner.

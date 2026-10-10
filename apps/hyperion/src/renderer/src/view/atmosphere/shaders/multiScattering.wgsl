@@ -1,7 +1,9 @@
 // The multiple-scattering table (plan R05, Design note 16; Hillaire 2020, section 5.5, equations
 // 5 to 10): for each height and sun zenith cosine, the luminance that every order of scattering
-// past the first adds, per unit illuminance, under an isotropic phase function. Follows
-// `common.wgsl` and `medium.wgsl`; reads the transmittance table.
+// past the first adds, per unit illuminance, under an isotropic phase function, whatever the terms'
+// own phase functions: Hillaire's isotropic table for `thin` worlds (plan R08, R08.T6.b). Follows
+// `common.wgsl` and `medium.wgsl`; reads the medium's terms, their density tables and the
+// transmittance table.
 //
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/multiscattering_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl) and checked against sebh's NewMultiScattCS and
@@ -35,12 +37,35 @@
 //   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
-@group(0) @binding(1) var transmittance : texture_2d<f32>;
-@group(0) @binding(2) var multiScatteringOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
+@group(0) @binding(2) var densityTables : texture_2d_array<f32>;
+@group(0) @binding(3) var transmittance : texture_2d<f32>;
+@group(0) @binding(4) var multiScatteringOut : texture_storage_2d<rgba16float, write>;
 
 const PI : f32 = 3.14159265358979;
 const DIRECTIONS : u32 = 64u;
 const SQRT_DIRECTIONS : u32 = 8u;
+
+// cos and sin of the eight azimuths 2 pi (k + 1/2) / 8, k = 0..7, sebh's stratification: cos(pi / 8)
+// and sin(pi / 8) with their signs in turn, as constants (plan R08, R08.T6.b). f32's cos and sin of
+// 2 pi a, which WGSL bounds only to 2^-11 absolute and only within [-pi, pi], moved a night texel
+// at the terminator by up to 1.6e-2 against the CPU twin: there a direction's error of 1e-5
+// moves the texel by 3e-3 of itself.
+fn azimuthOf(k : u32) -> vec2f {
+  let c = 0.92387953251128674;
+  let s = 0.38268343236508978;
+  var azimuths = array<vec2f, 8>(
+    vec2f(c, s),
+    vec2f(s, c),
+    vec2f(-s, c),
+    vec2f(-c, s),
+    vec2f(-c, -s),
+    vec2f(-s, -c),
+    vec2f(s, -c),
+    vec2f(c, -s),
+  );
+  return azimuths[k];
+}
 
 var<workgroup> secondOrder : array<vec3f, DIRECTIONS>;
 var<workgroup> transfer : array<vec3f, DIRECTIONS>;
@@ -102,12 +127,11 @@ fn main(
   let sun = vec3f(0.0, sqrt(max(1.0 - muSun * muSun, 0.0)), muSun);
 
   // sebh's stratified directions: uniform in azimuth and in the cosine of the polar angle.
-  let a = (0.5 + f32(lid.z / SQRT_DIRECTIONS)) / f32(SQRT_DIRECTIONS);
+  let azimuth = azimuthOf(lid.z / SQRT_DIRECTIONS);
   let b = (0.5 + f32(lid.z % SQRT_DIRECTIONS)) / f32(SQRT_DIRECTIONS);
-  let theta = 2.0 * PI * a;
   let cosPhi = 1.0 - 2.0 * b;
   let sinPhi = sqrt(max(1.0 - cosPhi * cosPhi, 0.0));
-  let dir = vec3f(cos(theta) * sinPhi, sin(theta) * sinPhi, cosPhi);
+  let dir = vec3f(azimuth.x * sinPhi, azimuth.y * sinPhi, cosPhi);
 
   let result = integrate(rMu.x, dir, sun);
   secondOrder[lid.z] = result.luminance;

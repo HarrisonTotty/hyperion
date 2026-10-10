@@ -12,7 +12,9 @@
 /**
  * What a GPU allocation is for, by the names R12.T3.a reports (R12 Design note 6).
  *
- * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b).
+ * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b),
+ *   and the medium's terms and density and phase tables that they and the per-frame kernels read
+ *   (R08.T6.b).
  * - `atmosphere-view`: the per-frame sky-view, aerial-perspective and ray-march tables (R05.T12.c).
  * - `height-cache`: the terrain's patch cache, its slot buffers and normals atlas (R05.T11.a).
  * - `sky-cube`: R06's baked star cube and the buffer of its scale (R06.T13.g).

@@ -52,47 +52,44 @@
 //   POSSIBILITY OF SUCH DAMAGE.
 //
 // Changes: Bevy's medium density and scattering tables are replaced by the terms themselves,
-// evaluated per sample from `Medium` (each term's profile, scattering and absorption); the
-// functions take the shell's radii from `Medium`, read from the kernel's uniform in place
-// (`medium.wgsl`); names follow the project's WGSL style. The multiple-scattering table's mapping
-// (GROUND_OFFSET_M, the sub-texel remap) follows sebh's UnrealEngineSkyAtmosphere (MIT, Copyright
-// (c) 2020 Epic Games, Inc.; the full notice is in multiScattering.wgsl).
+// evaluated per sample (each term's profile, scattering and absorption, from the kernel's `terms`
+// storage buffer, R08.T6.b); the functions take the shell's radii from the kernel's `medium`
+// uniform, read in place (`medium.wgsl`); names follow the project's WGSL style. The
+// multiple-scattering table's sub-texel remap follows sebh's UnrealEngineSkyAtmosphere (MIT,
+// Copyright (c) 2020 Epic Games, Inc.; the full notice is in multiScattering.wgsl); its ground
+// offset is a deliberate change from sebh's code (GROUND_OFFSET_M, below).
 
-// The most terms a medium may have; `tables.ts` holds the same number.
+// The most terms a medium may have; `tables.ts` holds the same number and refuses more.
 const MAX_TERMS: u32 = 8u;
 
-// One term: per-channel coefficients at unit density, m^-1, and its density profile:
-// profile.x 0 for exponential (y the scale height, m), 1 for a tent (y bottom, z peak, w top, m).
-// The phase: scattering.w 0 none, 1 Rayleigh, 2 Cornette–Shanks with its g in absorption.w.
+// One term (plan R08, R08.T6.b): per-channel coefficients at unit density, m^-1, in the rgb of
+// `scattering` and `absorption`, its density profile and its phase function. The profile:
+// profile.x 0 for exponential (y the scale height, m), 1 for a tent (y bottom, z peak, w top, m),
+// 2 for tabulated (y the top of its table, m, read from the term's layer of `densityTables`,
+// `medium.wgsl`). The phase: phase.w 0 none, 1 Rayleigh with its depolarisation ratio per channel
+// in xyz (R08.T3.c), 2 Cornette–Shanks with its g in x, 3 tabulated per channel (the term's layer
+// of `phaseTables`, `source.wgsl`). A term's layer in either table is its index in `terms`.
 struct Term {
   scattering : vec4f,
   absorption : vec4f,
   profile : vec4f,
+  phase : vec4f,
 }
 
-// The medium on a spherical shell, metres from the centre.
+// The medium's shell, metres from the centre, its term count, a kernel's steps along each ray and
+// the ground's albedo: R05's `Medium` uniform without its terms, which travel in a storage buffer
+// of MAX_TERMS terms (R08.T6.b).
 struct Medium {
   bottomRadiusM : f32,
   topRadiusM : f32,
   termCount : f32,
   samples : f32,
   groundAlbedo : vec4f,
-  terms : array<Term, MAX_TERMS>,
 }
 
 struct MediumSample {
   scattering : vec3f,
   extinction : vec3f,
-}
-
-fn densityOf(profile : vec4f, heightM : f32) -> f32 {
-  let h = max(heightM, 0.0);
-  if (profile.x < 0.5) {
-    return exp(-h / profile.y);
-  }
-  let rising = (h - profile.y) / (profile.z - profile.y);
-  let falling = (profile.w - h) / (profile.w - profile.z);
-  return max(min(rising, falling), 0.0);
 }
 
 // A march step's in-scattering factor g(x) = (1 - e^-x) / x per channel, x = sigma_t dt the step's
@@ -130,7 +127,12 @@ fn shellRMuToUv(bottom : f32, top : f32, r : f32, mu : f32) -> vec2f {
 }
 
 // The multiple-scattering table's lowest radius sits this far above the ground, m, so that a sun
-// on the horizon is not shadowed by the ground it stands on (sebh's PLANET_RADIUS_OFFSET).
+// on the horizon is not shadowed by the ground it stands on. A deliberate change from sebh's code,
+// which has the same aim (PLANET_RADIUS_OFFSET) and takes its 0.01 km off the height range as here,
+// but also adds the 0.01 to the unitless row coordinate when NewMultiScattCS writes a row, so that
+// row 0 sits about 1 km up on Earth, and applies no offset when GetMultipleScattering reads one.
+// Here the 10 m is a length on the write (`multiScatteringUvToRMu`) and on the read
+// (`shellMultiScatteringRMuToUv`) alike, so that the two agree.
 const GROUND_OFFSET_M: f32 = 10.0;
 
 // sebh's sub-texel remapping: texel centres to [0, 1] and back, so that the table's edge texels

@@ -6,8 +6,11 @@
  * @remarks
  * The smoke harness reads the GPU's transmittance table back and compares it with
  * {@link opticalDepth} at fixed texels; the unit tests hold the integrator to closed forms. The
- * geometry is Bruneton and Neyret 2008, §4, as `shaders/common.wgsl` and `shaders/medium.wgsl`
- * port it from Bevy.
+ * geometry is Bruneton 2017's (precomputed_atmospheric_scattering, `atmosphere/functions.glsl`), as
+ * `shaders/common.wgsl` and `shaders/medium.wgsl` port it from Bevy: the transmittance table's
+ * mapping is its `GetTransmittanceTextureUvFromRMu` and `GetRMuFromTransmittanceTextureUv` without
+ * their sub-texel remap, as Bevy and sebh take them, of which only x_r = ρ ÷ H is Bruneton and
+ * Neyret 2008's (§4; plan R08's Risks, "Deviations in T6.a, as built").
  */
 
 import type { Rgb } from "../photometry/toneCurve";
@@ -55,8 +58,9 @@ export interface RadiusAndCosine {
 }
 
 /**
- * The (r, μ) a transmittance table's (u, v) stands for: Bruneton and Neyret 2008, §4, as
- * `transmittanceUvToRMu` in `shaders/medium.wgsl`.
+ * The (r, μ) a transmittance table's (u, v) stands for: Bruneton 2017's
+ * `GetRMuFromTransmittanceTextureUv` without its sub-texel remap, as `transmittanceUvToRMu` in
+ * `shaders/medium.wgsl`.
  *
  * @param u - The distance to the top, from its least (straight up) to its greatest, in [0, 1].
  * @param v - The distance to the horizon over its greatest, in [0, 1].

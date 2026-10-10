@@ -48,7 +48,7 @@ import {
 import {
   AtmosphereTables,
   MULTI_SCATTERING_SIZE,
-  packMedium,
+  packMediumUniform,
   type TableSize,
   TRANSMITTANCE_SIZE,
 } from "./tables";
@@ -259,7 +259,8 @@ export function tableRadiusM(figure: SpheroidFigure): number {
 
 /**
  * The per-frame kernels: `common.wgsl`, `medium.wgsl`, `view.wgsl`, `source.wgsl`, then each
- * kernel, which declares the `medium` uniform that `medium.wgsl` and `source.wgsl` read in place.
+ * kernel, which declares the `medium` uniform, the `terms` buffer and the `densityTables` and
+ * `phaseTables` that `medium.wgsl` and `source.wgsl` read in place (R08.T6.b).
  */
 function kernel(name: string, wgsl: string): KernelPair {
   return {
@@ -399,7 +400,6 @@ export class HillaireAtmosphere {
   readonly #figure: SpheroidFigure;
   readonly #tables: AtmosphereTables;
   readonly #offRestored: () => void;
-  #medium: AtmosphereMedium;
   #frame: FrameResources;
   /** Each view member's four floats, reused every frame. */
   readonly #uniforms: Record<string, Float32Array>;
@@ -418,7 +418,6 @@ export class HillaireAtmosphere {
     this.#engine = engine;
     this.#sizes = tables;
     this.#figure = figure;
-    this.#medium = medium;
     this.#tables = new AtmosphereTables(engine, medium, tableRadiusM(figure));
     this.#frame = createFrameResources(engine, tables);
     this.#uniforms = Object.fromEntries(
@@ -435,12 +434,21 @@ export class HillaireAtmosphere {
   }
 
   /**
-   * The sky-view table and the ray-march target the latest {@link HillaireAtmosphere.drawFrame}
-   * built, the target `null` before the first frame, for the smoke page's agreement check
-   * (R05.T12.e). Their kernels are presentation-only, so only a tolerance read-back reads them.
+   * The sky-view table, the aerial-perspective volume and the ray-march target the latest
+   * {@link HillaireAtmosphere.drawFrame} built, the target `null` before the first frame, for the
+   * smoke page's agreement checks (R05.T12.e, R08.T6.b). Their kernels are presentation-only, so
+   * only a tolerance read-back reads them.
    */
-  get frameTables(): { readonly skyView: TextureHandle; readonly rayMarch: TextureHandle | null } {
-    return { skyView: this.#frame.skyView, rayMarch: this.#frame.rayMarch };
+  get frameTables(): {
+    readonly skyView: TextureHandle;
+    readonly aerial: TextureHandle;
+    readonly rayMarch: TextureHandle | null;
+  } {
+    return {
+      skyView: this.#frame.skyView,
+      aerial: this.#frame.aerial,
+      rayMarch: this.#frame.rayMarch,
+    };
   }
 
   /**
@@ -451,9 +459,13 @@ export class HillaireAtmosphere {
     return this.#sizes.aerialPerspectiveScope === "scene" ? this.#frame.aerial : null;
   }
 
-  /** Rebuilds the per-planet tables for a new medium; the sun never does. */
+  /**
+   * Rebuilds the per-planet tables for a new medium; the sun never does. The frames draw the medium
+   * the tables follow ({@link AtmosphereTables.medium}), so a medium they refuse is not drawn.
+   *
+   * @throws Error, RangeError or `EngineUnavailable` as {@link AtmosphereTables.setMedium}.
+   */
   setMedium(medium: AtmosphereMedium): void {
-    this.#medium = medium;
     this.#tables.setMedium(medium, tableRadiusM(this.#figure));
   }
 
@@ -470,12 +482,16 @@ export class HillaireAtmosphere {
     this.#fillView(view, sun, scene, inputs);
 
     const tableBottom = tableRadiusM(this.#figure);
-    const perFrameMedium = packMedium(this.#medium, inputs.radiusM - inputs.heightM, 1);
+    const tables = this.#tables;
+    const medium = tables.medium;
+    const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     const common = {
-      buffers: {},
+      buffers: { terms: tables.terms },
       sampled: {
-        transmittance: this.#tables.transmittance,
-        multiScattering: this.#tables.multiScattering,
+        densityTables: tables.densityTables,
+        phaseTables: tables.phaseTables,
+        transmittance: tables.transmittance,
+        multiScattering: tables.multiScattering,
       },
     };
     const viewUniforms = this.#viewBlock();
@@ -503,7 +519,7 @@ export class HillaireAtmosphere {
     engine.dispatch(
       frame.rayMarchKernel,
       {
-        buffers: {},
+        buffers: common.buffers,
         sampled: { ...common.sampled, sceneDepth: scene.depth },
         uniforms: { medium: perFrameMedium, view: viewUniforms },
         storage: { rayMarchOut: { texture: rayMarch, level: 0 } },
@@ -516,9 +532,9 @@ export class HillaireAtmosphere {
     );
     const shell = u["shell"];
     if (shell !== undefined) {
-      shell[0] = tableBottom + this.#medium.topHeightM;
+      shell[0] = tableBottom + medium.topHeightM;
       shell[1] = inputs.radiusM - inputs.heightM;
-      shell[2] = this.#medium.topHeightM;
+      shell[2] = medium.topHeightM;
       shell[3] = 0;
     }
     return {

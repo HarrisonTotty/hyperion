@@ -219,10 +219,9 @@ export interface PhaseMatrixTable {
  *   R08 Design note 4), 3 ÷ (4(1 + 2γ)) × ((1 + 3γ) + (1 − γ) cos²θ) ÷ (4π) with γ = ρ ÷ (2 − ρ),
  *   the dipole phase of a randomly oriented anisotropic molecule from its ᾱ² and γ² (Chandrasekhar,
  *   Radiative Transfer, 1950; the form Bucholtz 1995, Appl. Opt. 34, 2765, uses, not read here),
- *   which is 3 ÷ (16π) × (1 + cos²θ) at ρ = 0. R08.T3.c's molecular term carries the mixture's ρ.
- *   R05's kernels draw the ρ = 0 form whatever ρ is (`source.wgsl`'s `phaseOf`), and R05's
- *   constant media say ρ = 0. `tables.ts`'s `packMedium` refuses a ρ above 0 until R08.T6.b, whose
- *   kernels are to read it (R08's Risks).
+ *   which is 3 ÷ (16π) × (1 + cos²θ) at ρ = 0. R08.T3.c's molecular term carries the mixture's ρ,
+ *   and the kernels draw it per channel since R08.T6.b (`source.wgsl`'s `phaseOf`); R05's constant
+ *   media say ρ = 0.
  * - `cornette-shanks`: Cornette and Shanks 1992's form of Henyey–Greenstein with asymmetry g.
  * - `none`: an absorbing-only term, which scatters nothing.
  * - `tabulated`: given entry by entry, per channel ({@link PhaseTable}; R08.T6.a).
@@ -330,8 +329,8 @@ function rayleighPhase(depolarisation: number, mu: number): number {
  *
  * @remarks
  * The closed forms are `source.wgsl`'s `phaseOf`: Rayleigh's (Bruneton and Neyret 2008, eq. 2),
- * here with each channel's ρ (Chandrasekhar's form, which R05's kernels draw at ρ = 0 only, until
- * R08.T6.b), and Cornette and Shanks's, the same in every channel (Appl. Opt. 31 (1992) 3152, as
+ * here with each channel's ρ (Chandrasekhar's form, which the kernels draw since R08.T6.b), and
+ * Cornette and Shanks's, the same in every channel (Appl. Opt. 31 (1992) 3152, as
  * Bruneton and Neyret 2008, eq. 4, g its shape parameter and not the mean cosine), its denominator
  * floored at 10⁻⁶ as there. A `tabulated` phase is read at u = √(θ ÷ π),
  * θ = acos(cos θ), linear between the entries that bracket it ({@link PhaseTable}).
@@ -455,6 +454,36 @@ export function extinction(term: MediumTerm): Rgb {
     term.scattering[1] + term.absorption[1],
     term.scattering[2] + term.absorption[2],
   ];
+}
+
+/**
+ * Checks that no tabulated density of a medium is held up to its top from a last level below it.
+ *
+ * @remarks
+ * The `tabulated` rule holds the last level's density beyond it ({@link TabulatedDensity}), as
+ * R08.T3.a's column holds its last level's 10⁻⁷ of the ground's, so a medium built on a column
+ * takes a top no higher than the column's. A layer whose last level is 0 may end below the top.
+ * The CPU twin (`tablesCpu.ts`) and the kernels' packer (`tables.ts`'s `packMedium`) refuse such a
+ * medium alike (plan R08, R08.T6.a and T6.b).
+ *
+ * @throws RangeError for a tabulated density whose last level lies below the medium's top with a
+ *   density other than 0.
+ */
+export function checkTabulatedTops(medium: AtmosphereMedium): void {
+  for (const term of medium.terms) {
+    const profile = term.density;
+    if (profile.kind !== "tabulated") {
+      continue;
+    }
+    const last = profile.altitudesM.length - 1;
+    const topLevelM = profile.altitudesM[last] ?? Number.NaN;
+    const atTop = profile.relative[last] ?? Number.NaN;
+    if (topLevelM < medium.topHeightM && atTop !== 0) {
+      throw new RangeError(
+        `term ${term.name} of medium ${medium.name} holds a density of ${atTop} from its last level at ${topLevelM} m up to the medium's top at ${medium.topHeightM} m`,
+      );
+    }
+  }
 }
 
 /**

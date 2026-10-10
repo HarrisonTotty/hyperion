@@ -1,55 +1,90 @@
 // The atmosphere's scattering source (plan R05, R05.T12.c, Design note 16): the medium at a sample,
 // the single- and multiple-scattering source there, read from the per-planet tables, and the steps
 // of the per-frame marches (R05.T12.e). Prepended, after `common.wgsl`, `medium.wgsl` and
-// `view.wgsl`, to the sky-view, aerial-perspective and ray-march kernels; like `medium.wgsl`, it
-// reads the kernel's `medium` uniform in place, so the composite does not take it.
+// `view.wgsl`, to the sky-view, aerial-perspective and ray-march kernels, each of which also
+// declares the phase tables as `var phaseTables : texture_2d_array<f32>;` in group 0; like
+// `medium.wgsl`, it reads the kernel's `medium`, `terms` and tables in place, so the composite does
+// not take it.
 //
 // The source is ported from Bevy 0.19.1's functions.wgsl (`sample_local_inscattering`, MIT; the
 // notice is in common.wgsl) and checked against sebh's IntegrateScatteredLuminance (MIT; the
-// notice is in multiScattering.wgsl). Changes: the phase functions are the medium's own terms';
-// each term's density is evaluated once a sample (R05.T12.e); the tables are read on their own
-// sphere, at the sample's height above the datum (Design note 16). Added here (R05.T12.e): the
-// steps' placement (`marchSplit`, `marchStep`).
+// notice is in multiScattering.wgsl). Changes: the phase functions are the medium's own terms',
+// per channel, a tabulated one among them (R08.T6.b); each term's density is evaluated once a
+// sample (R05.T12.e); the tables are read on their own sphere, at the sample's height above the
+// datum (Design note 16). Added here (R05.T12.e): the steps' placement (`marchSplit`, `marchStep`).
 
-// The phase a term scatters with towards the eye, for the cosine between the view direction and
-// the direction to the sun. Term.scattering.w: 0 none, 1 Rayleigh, 2 Cornette–Shanks with its g in
-// Term.absorption.w.
-fn phaseOf(term : Term, cosTheta : f32) -> f32 {
-  let kind = term.scattering.w;
+// The angle a ray scatters the sun's light through towards the eye: its cosine, which the closed
+// forms take, and u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`).
+// theta is atan2(|d x s|, d . s), which keeps its precision near the forward peak, where
+// acos(d . s) loses it in f32: 1 - cos(theta) falls below f32's resolution at 1 for theta under
+// about 3.5e-4 rad, the first three of 256 entries even in u. It is taken by `preciseAtan2`
+// (view.wgsl), since WGSL bounds the builtin atan2 only to 4096 ULP.
+struct ScatteringAngle {
+  cosTheta : f32,
+  u : f32,
+}
+
+// The scattering angle between a ray's unit direction and the unit direction to the sun.
+fn scatteringAngle(dir : vec3f, sun : vec3f) -> ScatteringAngle {
+  let cosTheta = dot(dir, sun);
+  let theta = preciseAtan2(length(cross(dir, sun)), cosTheta);
+  return ScatteringAngle(cosTheta, sqrt(theta / PI_VIEW));
+}
+
+// Term i's phase per channel towards the eye, sr^-1 (`medium.ts`'s `phaseAt`). Term.phase.w: 0
+// none; 1 Rayleigh, with each channel's depolarisation ratio rho in Term.phase.xyz, Chandrasekhar's
+// 3 / (16 pi) ((1 + 3 gamma) + (1 - gamma) cos^2) / (1 + 2 gamma), gamma = rho / (2 - rho), which at
+// rho = 0 is R05's 3 / (16 pi) (1 + cos^2) (R08.T3.c); 2 Cornette–Shanks with its g in
+// Term.phase.x; 3 tabulated: layer i of `phaseTables`, its entries even in u from 0 to 1, read
+// linear in u between the two about it.
+fn phaseOf(i : u32, term : Term, angle : ScatteringAngle) -> vec3f {
+  let kind = term.phase.w;
   if (kind < 0.5) {
-    return 0.0;
+    return vec3f(0.0);
   }
+  let cosTheta = angle.cosTheta;
   if (kind < 1.5) {
-    return 3.0 / (16.0 * PI_VIEW) * (1.0 + cosTheta * cosTheta);
+    let gamma = term.phase.xyz / (2.0 - term.phase.xyz);
+    let shape = 1.0 + 3.0 * gamma + (1.0 - gamma) * (cosTheta * cosTheta);
+    return 3.0 / (16.0 * PI_VIEW) * shape / (1.0 + 2.0 * gamma);
   }
-  let g = term.absorption.w;
-  let k = 3.0 / (8.0 * PI_VIEW) * (1.0 - g * g) / (2.0 + g * g);
-  return k * (1.0 + cosTheta * cosTheta) / pow(max(1.0 + g * g - 2.0 * g * cosTheta, 1e-6), 1.5);
+  if (kind < 2.5) {
+    let g = term.phase.x;
+    let k = 3.0 / (8.0 * PI_VIEW) * (1.0 - g * g) / (2.0 + g * g);
+    let peak = pow(max(1.0 + g * g - 2.0 * g * cosTheta, 1e-6), 1.5);
+    return vec3f(k * (1.0 + cosTheta * cosTheta) / peak);
+  }
+  let n = textureDimensions(phaseTables).x;
+  let x = clamp(angle.u, 0.0, 1.0) * f32(n - 1u);
+  let k = min(u32(x), n - 2u);
+  let below = textureLoad(phaseTables, vec2u(k, 0u), i, 0).rgb;
+  let above = textureLoad(phaseTables, vec2u(k + 1u, 0u), i, 0).rgb;
+  return mix(below, above, x - f32(k));
 }
 
 // The medium at a sample, each term's density evaluated once (R05.T12.e): the scattering and the
 // extinction, m^-1, and the scattering towards the eye, each term's scattering times its phase,
-// m^-1 sr^-1.
+// per channel, m^-1 sr^-1.
 struct SampleMedium {
   scattering : vec3f,
   extinction : vec3f,
   phasedScattering : vec3f,
 }
 
-// The medium at a height above the datum, for the cosine between the view direction and the
+// The medium at a height above the datum, for the angle between the view direction and the
 // direction to the sun.
-fn sampleMediumAt(heightM : f32, cosTheta : f32) -> SampleMedium {
+fn sampleMediumAt(heightM : f32, angle : ScatteringAngle) -> SampleMedium {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
   var phased = vec3f(0.0);
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
-    let term = medium.terms[i];
-    let d = densityOf(term.profile, heightM);
+    let term = terms[i];
+    let d = densityOf(i, term.profile, heightM);
     let scattered = term.scattering.rgb * d;
     scattering += scattered;
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
-    phased += scattered * phaseOf(term, cosTheta);
+    phased += scattered * phaseOf(i, term, angle);
   }
   return SampleMedium(scattering, extinction, phased);
 }
@@ -77,7 +112,7 @@ fn tableMultiScattering(
 
 // The scattering source at a point per unit sun illuminance, per unit length: single scattering
 // of the sun's light, shadowed by the ground, plus multiple scattering (Hillaire 2020, equations 3
-// and 11). `local` is the medium at the point's height, `sampleMediumAt(heightM, cosTheta)`.
+// and 11). `local` is the medium at the point's height, `sampleMediumAt(heightM, angle)`.
 fn sourceAt(
   transmittance : texture_2d<f32>,
   multiScattering : texture_2d<f32>,

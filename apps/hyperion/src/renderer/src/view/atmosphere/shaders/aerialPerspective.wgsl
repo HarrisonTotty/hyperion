@@ -13,10 +13,13 @@
 // even.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
-@group(0) @binding(1) var<uniform> view : AtmosphereView;
-@group(0) @binding(2) var transmittance : texture_2d<f32>;
-@group(0) @binding(3) var multiScattering : texture_2d<f32>;
-@group(0) @binding(4) var aerialOut : texture_storage_3d<rgba16float, write>;
+@group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
+@group(0) @binding(2) var densityTables : texture_2d_array<f32>;
+@group(0) @binding(3) var phaseTables : texture_2d_array<f32>;
+@group(0) @binding(4) var<uniform> view : AtmosphereView;
+@group(0) @binding(5) var transmittance : texture_2d<f32>;
+@group(0) @binding(6) var multiScattering : texture_2d<f32>;
+@group(0) @binding(7) var aerialOut : texture_storage_3d<rgba16float, write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
@@ -32,7 +35,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let slices = size.z;
   let perSlice = max(u32(view.tables.w), 1u);
   let dt = view.tables.y / f32(slices * perSlice);
-  let cosTheta = dot(dir, view.sun.xyz);
+  let angle = scatteringAngle(dir, view.sun.xyz);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
   for (var slice = 0u; slice < slices; slice++) {
@@ -42,7 +45,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let rP = length(p);
       let up = p / rP;
       let heightM = rP - bottom;
-      let local = sampleMediumAt(heightM, cosTheta);
+      let local = sampleMediumAt(heightM, angle);
       let stepDepth = local.extinction * dt;
       let stepTransmittance = exp(-stepDepth);
       let source = sourceAt(

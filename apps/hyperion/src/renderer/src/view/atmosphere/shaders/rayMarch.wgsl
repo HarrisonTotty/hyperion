@@ -18,11 +18,14 @@
 // common.wgsl). The placement takes the centre alone: it needs no spheroid.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
-@group(0) @binding(1) var<uniform> view : AtmosphereView;
-@group(0) @binding(2) var transmittance : texture_2d<f32>;
-@group(0) @binding(3) var multiScattering : texture_2d<f32>;
-@group(0) @binding(4) var sceneDepth : texture_depth_2d;
-@group(0) @binding(5) var rayMarchOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
+@group(0) @binding(2) var densityTables : texture_2d_array<f32>;
+@group(0) @binding(3) var phaseTables : texture_2d_array<f32>;
+@group(0) @binding(4) var<uniform> view : AtmosphereView;
+@group(0) @binding(5) var transmittance : texture_2d<f32>;
+@group(0) @binding(6) var multiScattering : texture_2d<f32>;
+@group(0) @binding(7) var sceneDepth : texture_depth_2d;
+@group(0) @binding(8) var rayMarchOut : texture_storage_2d<rgba16float, write>;
 
 // The near and far distances along a ray to a spheroid of radii (a, a, c), or (-1, -1) if missed:
 // a sphere's in space scaled by a ÷ c along z.
@@ -96,7 +99,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   }
   let samples = max(u32(view.figure.w), 2u);
   let split = marchSplit(tStart, tEnd, -dot(origin, dir), samples, shell.x <= 0.0);
-  let cosTheta = dot(dir, view.sun.xyz);
+  let angle = scatteringAngle(dir, view.sun.xyz);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
   for (var i = 0u; i < samples; i++) {
@@ -105,7 +108,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let p = origin + stepAt.tM * dir;
     let heightM = heightAbove(p, a, c);
     let muSun = dot(view.sun.xyz, normalAt(p, a, c));
-    let local = sampleMediumAt(heightM, cosTheta);
+    let local = sampleMediumAt(heightM, angle);
     let stepDepth = local.extinction * dt;
     let stepTransmittance = exp(-stepDepth);
     let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, local);
