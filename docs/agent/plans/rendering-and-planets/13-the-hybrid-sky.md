@@ -118,14 +118,20 @@ impl CapCount { pub fn cap_with_budget(&self, layer: Layer, budget: f64) -> Laye
     // `cap`'s rule with `ray_extents`' budget for the count beyond (`cap` takes 1.0)
 // sky::caps (R13.T1.b, built; was crate-visible)
 impl RayRadii { pub fn within(&self, edge_ly: f64) -> Self; }   // each ray held within an edge
-// sky::caps (R13.T2)
+// sky::caps (R13.T2.a, built; Risks, "Deviations in T2.a, as built")
 pub const REAL_LIMIT_LY: f64 = 2_000.0;  // the owner, 2026-10-09; one of SHELL_EDGES_LY, which a test holds
-pub fn real_boundary(at_ceiling: &CapCount, caps_at_cut: &[LayerCap]) -> Vec<LayerCap>;
-    // C–E: each ray the least of the ceiling's cap, the cut's and `REAL_LIMIT_LY`, in cones
-    // widened by ρ (fix (i)); A, B and the brown dwarfs: the cut's caps
-// sky::census (R13.T2, T6)
+pub fn real_boundary(at_ceiling: &CapCount, at_cut: &CapCount, caps_at_cut: &[LayerCap])
+    -> Vec<LayerCap>;
+    // C–E: each ray the least of the ceiling's cap, the cut's and `REAL_LIMIT_LY`, stating its
+    // `expected_beyond` at the cut and its `bright_beyond`; A, B and the brown dwarfs: the cut's
+    // caps, stating their `bright_beyond`. The plan at the query's ceiling widens C–E's cones by ρ
+impl LayerCap { pub fn bright_beyond(&self) -> Option<f64>; }   // a real boundary's, else None
+// sky::census (R13.T2.a, built)
 impl SkyQueryBuilder { pub fn synthetic_ceiling(self, v: Magnitudes) -> Self; }
+    // refused (`BuildSkyQueryError::SyntheticCeiling`) unless finite and 0.5 mag brighter than the cut
 impl SkyQuery { pub fn synthetic_ceiling(&self) -> Option<Magnitudes>; }
+impl Completeness { pub fn lists_by_texel(&self) -> bool; }   // a layer not yet final, or C–E at a ceiling
+// sky::census (R13.T6)
 impl SkyCensus { pub fn synthetic(&self) -> &[SyntheticStar]; }   // by flux, then key, then index
 pub fn merge_shells(parts, synthetic: Vec<SyntheticStar>, n_max: NonZeroU32,
     completeness: Completeness) -> SkyCensus;                      // N_max over both kinds
@@ -1508,3 +1514,105 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
     - **Answered by the owner on 2026-10-09** (`decision-r13-t1b-guard.md`, option A, "Keep
       2,000 ly"): the limit is kept. The measured figures replace the estimates in Design notes 3,
       4, 15 and 16 and in the brainstorm's draft.
+- **Deviations in T2.a, as built (2026-10-09).** Built on the lane at 19605fa0, with
+  `rendering-and-planets` merged at 1d7a6bd7 and dd71c4eb, whose changes touch no sky path, on
+  the fixture (`milky_way_like`, seed 0x0926_0000), at the epoch. No
+  generated output moves and `GENERATOR_VERSION` stays 21. One golden is new,
+  `sky/real_boundary.golden`.
+  - **The build.**
+    - `sky::caps` gains `REAL_LIMIT_LY`, `real_boundary` and `LayerCap::bright_beyond` (`None` for
+      every cap but a real boundary's), and, crate-visible, `REAL_BOUNDARY_LAYERS` (C, D, E),
+      `real_boundary_of` (`census_plan`'s caps at a ceiling) and `RayCones`, the cones a walk opens
+      cells by, with `RayRadii::cones_widened_by`. R06.T7.b's cone and index constants moved from
+      `CapLattice` into `RayCones`: widened by none they are R06's, bit for bit (a unit test pins
+      them); widened by `INDEX_BALL_RAD` or more, no ball goes through the index.
+    - `sky::census` gains `SkyQueryBuilder::synthetic_ceiling`, `SkyQuery::synthetic_ceiling`,
+      `BuildSkyQueryError::SyntheticCeiling` and `Completeness::lists_by_texel`. Forced caps keep
+      the ceiling.
+      - At a ceiling `census_plan` measures the caps' rays once, counts them at the cut (by the
+        eye's visibility where asked) and at the ceiling, and takes `real_boundary` of the two.
+        Its counts are `layer_caps`' and `layer_caps_by_visibility`'s, bit for bit (two tests).
+      - `census_plan_of` and `census_plan_with_edges` (the server's plan) widen C's, D's and E's
+        cones by the query's band's ρ wherever the query states a ceiling, and list them by the
+        radius towards each star's texel at every reply, the final one included.
+    - `merge.rs` changes in its docs only: a census at a ceiling is merged by `merge_shells`, whole
+      too, to its plan's `complete()`. `cell.rs` is unchanged; a cell's census reads no cap.
+  - **Deviations.**
+    - **`real_boundary` takes the cut's count too:**
+      `(at_ceiling: &CapCount, at_cut: &CapCount, caps_at_cut: &[LayerCap])`, where Provides had
+      `(at_ceiling, caps_at_cut)`. Each C–E cap's `expected_beyond` is `at_cut`'s `stars_beyond`
+      beyond R(u) (T1.b's "For T2"), which the caps alone cannot give. `caps_at_cut` stays, so
+      that a server that draws a cap a job (R06.T11.g) does not draw them twice; debug builds check
+      that they are `at_cut`'s. A real cap keeps its cut's rule bound.
+    - **The widening is the plan's.** Provides put fix (i)'s cones in `real_boundary`. As built
+      the caps carry R(u) alone, and the plan widens C to E wherever the query states a ceiling,
+      by its own band's ρ (1.27° at 64²), the band its listing reads.
+    - **`bright_beyond` is stated for A, B and the brown dwarfs too:** their count brighter than
+      V<sub>P</sub> beyond their caps at the cut (A 3.5 × 10⁻⁵, B 0 and the brown dwarfs 3 × 10⁻⁹
+      at the golden's coarse count at 4.5). Their caps are otherwise the cut's, bit for bit. A reply
+      states `bright_beyond` per layer (Protocol).
+    - **`band.rs`, `limits.rs`, the bench and `.config/nextest.toml` are touched**, though not in
+      the task's Files.
+      - `sum_rows` requires the census's band and observer wherever `lists_by_texel` holds, which
+        with no ceiling is "not yet final" exactly. So a final census at a ceiling is summed at its
+        own band too, and a test refuses it at another.
+      - The conservation test at the new radii is in `sky::band`'s tests beside T9.b's, outside the
+        acceptance's filters (run by name below).
+      - `limits.rs` gains the test-only `EyeVisibility::of_limits`, a visibility that varies over
+        the sky, for the test of the visibility's path.
+      - `benches/sky.rs` takes the sim's `REAL_LIMIT_LY` in place of its own copy, so the limit is
+        one constant. Its `real_boundary_rule` stays, for T1's benches without the limit.
+      - The two census tests on four threads join R06.T8.i's `threads-required = 4` override.
+    - **The no-gap oracle is in the crate.** It runs `generate_cell` and
+      `census_record(…, Bound::Ignored, …)` over every cell, as `brute_force_sky` does:
+      `brute_force_sky` is an integration-test helper, the acceptance's filter `sky::census` runs
+      unit tests, and integration tests cannot build radii by ray. Its geometry is scaled. Rays
+      reach 150 ly on one side of a tilted plane, held at a limit of 140 ly, and 40–60 ly
+      elsewhere, to V 11, on a band of 2² texels (ρ about 35°). At such radii a cell's ball is wider than a 64² texel, so the
+      gap cannot arise at the standard band. R06's cones there miss 5 stars, and the widened ones
+      none, of 1,025 within R(u) towards texels at the limit and 147 below it. The index's branch
+      at the 64² ρ is held by R06.T7.b's ball test against a scan, widened by 0, ρ, 5° and 7°.
+    - **The 2,000 ly claims are tested on the plan, not on a census**, which no unit test can
+      afford there. The census tests scale the limit: 100 ly (shells to 40 and 70 ly, then R(u),
+      as `REAL_LIMIT_LY` is `SHELL_EDGES_LY[4]`), 140 ly (no gap) and 150 ly (conservation, against
+      R06's census with every layer at 200 ly, standing for the cut's caps). At 2,000 ly with
+      `SHELL_EDGES_LY`, rays from 1,000 to 2,500 ly, some exactly at 1,000, held at the limit, give
+      C to E shells to 125, 250, 500 and 1,000 ly, then to R(u), with no 2,000 ly shell of their
+      own; done to 1,000 ly each is complete to it in every direction; and every reply is complete
+      within the limit towards 10⁴ directions. So too with every ray held at the limit.
+    - **R(u)'s claims are tested at the cut 7.95**, near the Sun and in the nuclear disc at
+      (0, 150, 0) ly, at the standard count: R(u) does not depend on the cut there (T1).
+  - **Measured** (the fixture, cut 7.95, the standard count; the figures are T1.b's).
+    - Near the Sun the limit holds 773 and 942 of D's 1,536 rays and 979 and 1,001 of E's at
+      V<sub>P</sub> 4.5 and 5.0, and none of C's. `bright_beyond` is C 0.896, D 3.025 and E 77.94
+      at 4.5 and C 0.854, D 8.601 and E 162.4 at 5.0 (171.9 C to E); `expected_beyond` at 7.95 is
+      C 2,365, D 2,279 and E 3,519 at 4.5 and C 1,059, D 2,250 and E 3,517 at 5.0.
+    - In the nuclear disc the limit holds no ray, and each layer's count brighter than
+      V<sub>P</sub> beyond R(u) is under one: C 0.848, D 0.664 and E 0.656 at 4.5, and C 0.808,
+      D 0.633 and E 0.628 at 5.0.
+    - Conservation: listed, overflow and band light at R(u) is +0.26% against R06's at the cut's
+      caps (9.146 against 9.123 × 10⁻⁴ lx), the list's light falling from 7.61 to 5.53 × 10⁻⁵ lx.
+    - The widened cones open 2.5%, 1.2% and 0.3% more of C's, D's and E's cells for rays between
+      400 and 1,500 ly held at 1,000 ly (a plan's count, not the server's).
+  - **Acceptance as run.** `cargo test -p hyperion-sim --lib` filtered to `sky::caps`,
+    `sky::census` and `sky::band` passed: 142 tests, 4 slow ones ignored, in 412 s.
+    The slow tests ran from their slow-test-profile binaries, capped at `CPUQuota=400%`, not
+    through `just test-slow`, whose heavy lock the lane rules keep for timed runs and full suites,
+    on the tree before the review's fixes, which change no path they run:
+    `the_census_is_its_oracle_1000_ly_from_the_sun` passed in 1,520 s and `caps_converge_in_rays`
+    passed in 660 s. `cargo bench -p hyperion-sim --no-run` and
+    `cargo test -p hyperion-server --test sky` passed. `just ci`, with the wasm32-wasip1 run of the
+    new golden, runs at integration.
+  - **For T2.b.**
+    - The server's second count goes through `CapCount::plan_over` at V<sub>P</sub> over the cut
+      count's `RayExtinctions`, then `real_boundary(&at_ceiling, &at_cut, &caps_at_cut)` in one
+      job, and `census_plan_with_edges` on a query that states the ceiling.
+    - Every reply, the final one too, is merged by `merge_shells` to its plan's completeness. A
+      census at a ceiling merged by `merge_census` would list C to E beyond R(u); the server's two
+      one-pass `merge_census` callers (`compute/sky.rs`, `requests/sky.rs`, both in tests) stay
+      off the ceiling.
+    - The builder refuses a ceiling within 0.5 mag of the cut. Where a request's cut is shallower
+      than V<sub>P</sub> + 0.5 (5.5 in RM3, 5.0 from T7; the nuclear disc's eye's cut is 5.81), T2.b
+      decides what the server states (asked of "main"; lean: no ceiling there, so the reply's
+      `synthetic_ceiling_v` is absent and the cut's own caps, then some tens to hundreds of ly,
+      bound the census).

@@ -29,9 +29,10 @@ threads-required = 8
 filter = "package(hyperion-sim) & (test(=sky::limits::tests::the_eyes_light_is_independent_of_the_census_radius) | test(=sky::band::tests::one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent))"
 threads-required = 4
 
-# The shell plan's census tests (R06.T8.i) census their cells on four threads of their own too.
+# The shell plan's census tests (R06.T8.i), and the census's at a synthetic ceiling (R13.T2.a),
+# census their cells on four threads of their own too.
 [[profile.default.overrides]]
-filter = "package(hyperion-sim) & (test(=sky::census::query::tests::shells_merged_are_the_census_to_each_edge_and_the_last_is_the_plans) | test(=sky::census::query::tests::by_ray_shells_merged_hold_the_census_to_each_shells_radii))"
+filter = "package(hyperion-sim) & (test(=sky::census::query::tests::shells_merged_are_the_census_to_each_edge_and_the_last_is_the_plans) | test(=sky::census::query::tests::by_ray_shells_merged_hold_the_census_to_each_shells_radii) | test(=sky::census::query::tests::at_a_ceiling_shells_merged_are_the_census_forced_to_the_real_boundary) | test(=sky::census::query::tests::at_a_ceiling_every_star_within_its_texels_real_boundary_is_listed))"
 threads-required = 4
 
 # R06.T11.c's near-Sun sky builds the galaxy's luminosity tables twice, on the server's pool and

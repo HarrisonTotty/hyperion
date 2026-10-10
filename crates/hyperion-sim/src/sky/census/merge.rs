@@ -12,6 +12,12 @@
 //! of the shells done are merged by [`merge_shells`] to the [`Completeness`] they reach, which
 //! lists only the stars within each partial layer's radius and keeps the rest for a later census of
 //! more shells. Merged once all are done, the shells give the one-shot census, star for star.
+//!
+//! A census at a synthetic ceiling (rendering plan R13, Design note 3) lists C, D and E by the
+//! radius towards each star's texel at every reply, the final one included, so it is merged by
+//! [`merge_shells`] whole too, to its plan's
+//! [`CensusPlan::complete`](super::CensusPlan::complete): the one-shot census of its cells less
+//! their stars at or beyond the real boundary, which the synthetic tier and the band hold.
 
 use std::cmp::Ordering;
 use std::num::NonZeroU32;
@@ -89,6 +95,10 @@ pub fn sky_order(a: &SkyStar, b: &SkyStar) -> Ordering {
 /// The parts may hold their stars in any order, and may come in any order and in any split of the
 /// cells. A star must appear in one part only, as each record belongs to one cell. The tallies are
 /// the parts' added up ([`CensusTallies::add`]), and with no part they are the default's.
+///
+/// Every star of the parts is listed or in the overflow. A census at a synthetic ceiling, which
+/// lists only C's, D's and E's stars within their real boundary, is merged by [`merge_shells`] to
+/// its plan's completeness instead (rendering plan R13).
 ///
 /// # Panics
 ///

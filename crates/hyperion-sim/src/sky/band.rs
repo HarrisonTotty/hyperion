@@ -1931,7 +1931,9 @@ fn march_rows_through(
 ///
 /// - If the march does not keep a layer's radius of `complete_to` ([`BandMarch::holds`]).
 /// - For a census of shells, if `complete_to` is not the radii its completeness states, or if some
-///   layer is not yet final and the march is not at the census's band or from its observer.
+///   layer lists by its stars' texels (one not yet final, or C to E at a synthetic ceiling,
+///   [`Completeness::lists_by_texel`](super::census::Completeness::lists_by_texel)) and the march
+///   is not at the census's band or from its observer.
 pub fn sum_rows(
     march: &BandMarch,
     census: &SkyCensus,
@@ -1944,11 +1946,12 @@ pub fn sum_rows(
             "a census of shells is summed at the radii it is complete to"
         );
         assert!(
-            completeness.is_final()
+            !completeness.lists_by_texel()
                 || (completeness.band_spec() == march.spec
                     && completeness.observer().is_same_point(&march.origin)),
-            "a census of shells not yet final lists by its query's band, {:?}, from its observer, \
-             so its band is marched at it from there, not at {:?}",
+            "a census of shells not yet final lists by its query's band, {:?}, from its observer \
+             (and one at a synthetic ceiling at every reply), so its band is marched at it from \
+             there, not at {:?}",
             completeness.band_spec(),
             march.spec
         );
@@ -3330,6 +3333,83 @@ mod tests {
             "{} lx against {} lx",
             totals[1],
             totals[0]
+        );
+    }
+
+    /// T9.b's conservation at a synthetic ceiling (rendering plan R13, R13.T2.a): near the Sun to
+    /// V 8, with C's, D's and E's real boundary one radius a ray between 100 and 200 ly, held
+    /// within a limit of 150 ly, and A's, B's and the brown dwarfs' caps at 200 ly, the census at
+    /// the ceiling lists C, D and E by the radius towards each star's texel and the band is
+    /// complete to that boundary: the listed, overflow and band light together is R06's at the
+    /// cut's caps, every layer complete to 200 ly, within 1%. At an `n_max` of 100 the rest of the
+    /// listed stars overflow into the band, with no light lost.
+    #[test]
+    fn at_a_ceiling_the_light_is_the_light_at_the_cuts_caps() {
+        let galaxy = milky_way_galaxy();
+        let spec = spec(8);
+        let all = n(MAX_N_MAX);
+        let (listed, band) = total_light(CENSUS_CUT, CENSUS_RADIUS_LY, all, spec, Eye::NotAsked);
+        let r06 = listed + band;
+        let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .band_spec(spec)
+            .synthetic_ceiling(Magnitudes::new(5.0))
+            .build()
+            .expect("a query at the ceiling");
+        let lattice = std::sync::Arc::new(CapLattice::new(CAP_RAYS));
+        let caps: Vec<LayerCap> = CAPPED_LAYERS
+            .iter()
+            .zip(0_u64..)
+            .map(|(&layer, k)| {
+                if matches!(layer, Layer::C | Layer::D | Layer::E) {
+                    let radii = crate::sky::testing::uniforms(0x7b_0300 + k)
+                        .take(CAP_RAYS)
+                        .map(|u| 100.0 + 100.0 * u)
+                        .collect();
+                    let rays = RayRadii::new(std::sync::Arc::clone(&lattice), radii).within(150.0);
+                    LayerCap::forced_by_ray(layer, rays)
+                } else {
+                    LayerCap::forced(layer, LightYears::new(CENSUS_RADIUS_LY))
+                }
+            })
+            .collect();
+        let plan = census_plan_of(&query, caps);
+        let mut ctx = context();
+        let (mut stars, mut tallies) = (Vec::new(), CensusTallies::default());
+        for key in plan.cells() {
+            tallies.add(&census_cell(galaxy, &mut ctx, key, &query, &mut stars));
+        }
+        let complete = plan.complete();
+        let light = |n_max| {
+            let census = merge_shells([(stars.clone(), tallies)], n_max, complete.clone());
+            let band = whole_band(&query, &census, complete.complete_to(), spec);
+            (stars_lux(census.listed()), band_lux(&band, spec))
+        };
+        let (ours_listed, ours_band) = light(all);
+        let ours = ours_listed + ours_band;
+        eprintln!(
+            "at the ceiling, complete to R(u): listed {ours_listed:.5e} lx, band {ours_band:.5e} \
+             lx, together {ours:.5e} lx, {:+.3}% against R06's at the cut's caps ({r06:.5e} lx: \
+             listed {listed:.5e} lx, band {band:.5e} lx)",
+            100.0 * (ours / r06 - 1.0)
+        );
+        assert!(
+            ours_listed < listed,
+            "the list's light {ours_listed} lx at R(u) against {listed} lx at the cut's caps"
+        );
+        assert!(
+            ours_band > band,
+            "the band's light {ours_band} lx at R(u) against {band} lx at the cut's caps"
+        );
+        assert!(
+            (ours / r06 - 1.0).abs() < 0.01,
+            "{ours} lx against {r06} lx"
+        );
+        let (listed_100, band_100) = light(n(100));
+        let (moved_out, moved_in) = (ours_listed - listed_100, band_100 - ours_band);
+        assert!(moved_out > 0.0);
+        assert!(
+            (moved_in / moved_out - 1.0).abs() < 1e-9,
+            "{moved_out} lx left the list, {moved_in} lx reached the band"
         );
     }
 
@@ -5119,6 +5199,44 @@ mod tests {
         let (census, march) = first_shell_and_march(16, 8);
         let completeness = census.completeness().expect("a census of shells");
         sum_rows(&march, &census, completeness.complete_to(), &mut Vec::new());
+    }
+
+    /// A final census at a synthetic ceiling lists C, D and E by their stars' texels, so it too is
+    /// summed at its query's band (rendering plan R13, R13.T2.a), where R06's final census may be
+    /// summed at any.
+    #[test]
+    #[should_panic(expected = "a census of shells not yet final lists by its query's band")]
+    fn a_final_census_at_a_ceiling_summed_at_another_band_is_refused() {
+        let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .band_spec(spec(16))
+            .synthetic_ceiling(Magnitudes::new(5.0))
+            .build()
+            .expect("a query at the ceiling")
+            .with_caps_forced(LightYears::new(1_000.0))
+            .expect("a forced cap");
+        let plan = census_plan_of(&query, query.forced_caps().expect("forced caps").to_vec());
+        let last = plan.complete();
+        assert!(last.is_final() && last.lists_by_texel());
+        let census = merge_shells(Vec::new(), n(MAX_N_MAX), last.clone());
+        let mut ctx = SkyContext {
+            tables: milky_way_dark_tables(),
+            envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
+            noise: NoiseCache::with_capacity(1 << 12),
+            cells: &NoSkyCellCache,
+            sources: &[],
+            modifiers: &NoModifiers,
+        };
+        let march = march_rows(
+            milky_way_galaxy(),
+            &mut ctx,
+            &query,
+            plan.replies(),
+            &spec(8),
+            CubeFace::PosZ,
+            0..1,
+        );
+        sum_rows(&march, &census, last.complete_to(), &mut Vec::new());
     }
 
     #[test]

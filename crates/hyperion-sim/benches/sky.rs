@@ -264,8 +264,8 @@ use hyperion_sim::sky::band::{
     BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, band_rows, march_rows, sum_rows,
 };
 use hyperion_sim::sky::caps::{
-    CAPPED_LAYERS, CapCount, CapResolution, LayerCap, RADIAL_STEPS_PER_DECADE, layer_caps,
-    layer_caps_by_visibility,
+    CAPPED_LAYERS, CapCount, CapResolution, LayerCap, RADIAL_STEPS_PER_DECADE, REAL_LIMIT_LY,
+    layer_caps, layer_caps_by_visibility,
 };
 use hyperion_sim::sky::census::{
     BlockKey, BlockParams, CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies,
@@ -1714,10 +1714,6 @@ fn census_near_sun_ceiling(c: &mut Criterion) {
     }
     group.finish();
 }
-
-/// R13's real limit, ly (decided by the owner on 2026-10-09, `decision-r13-guard-trip.md`; R13.T2's
-/// `REAL_LIMIT_LY`): C, D and E are real within it at most.
-const REAL_LIMIT_LY: f64 = 2_000.0;
 
 /// `decision-r13-guard-trip.md` §2.3's estimate of the real tier near the Sun at the eye's cut,
 /// held within [`REAL_LIMIT_LY`], low and high, CPU-s, about ±30% (R13 Design notes 4 and 16): on

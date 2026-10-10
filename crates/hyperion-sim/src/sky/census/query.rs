@@ -24,7 +24,10 @@ use crate::units::consts::{RADIANS_PER_DEGREE, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{Degrees, LightYears, Magnitudes, Radians};
 
 use super::super::band::{BandSpec, CompleteTo, CubeFace};
-use super::super::caps::{CAPPED_LAYERS, LayerCap, RayRadii, layer_caps, layer_caps_by_visibility};
+use super::super::caps::{
+    CAPPED_LAYERS, LayerCap, REAL_BOUNDARY_LAYERS, RayCones, RayRadii, layer_caps,
+    layer_caps_by_visibility, real_boundary_of,
+};
 use super::super::dgl::Illumination;
 use super::super::envelope::BrightnessEnvelope;
 use super::super::eye::{EyeObserver, MAX_CUT_V};
@@ -38,6 +41,14 @@ pub const MAX_N_MAX: u32 = 300_000;
 
 /// The largest forced cap, ly: the root cube's diagonal, 2¹⁷ × √3, beyond which nothing lies.
 pub const MAX_FORCED_CAP_LY: f64 = 227_023.0;
+
+/// How much brighter than the cut a synthetic ceiling must be at least, mag: 0.5 (rendering plan
+/// R13, R13.T2.a).
+///
+/// The server's ceilings, V 5.0 in RM3's interim and V 4.5 from R13.T7, lie 2.7 mag and more
+/// brighter than the eye's cut near the Sun (V 7.77–8.18, R13.T1) and 0.8 mag and more in the
+/// nuclear disc (V 5.81).
+const MIN_CEILING_DEPTH_MAG: f64 = 0.5;
 
 /// [`MAX_N_MAX`] as a [`NonZeroU32`], the default.
 const DEFAULT_N_MAX: NonZeroU32 = NonZeroU32::new(MAX_N_MAX).expect("300,000 is not zero");
@@ -149,6 +160,14 @@ enum Reached {
 /// radius towards one of its stars, and if that star's cell is unopened its light is in neither
 /// the census nor the band: R06.T7.b's gap, deferred by the owner on 2026-10-08, under one star a
 /// layer by the caps' count beyond (R06's Risks, "Deviations in T8.i, as built").
+///
+/// A query at a synthetic ceiling ([`SkyQuery::synthetic_ceiling`]; rendering plan R13, Design
+/// note 3) lists C, D and E by the radius towards each star's texel at every reply, the final one
+/// included: thousands of stars lie just beyond the real boundary R(u), in the cells that straddle
+/// it, and the one-shot rule would count them twice, against the synthetic tier and the band. Its
+/// plan opens their cells by cones widened by the texel's largest radius, so that no star within
+/// R(u) of its texel lies in a cell left closed, and the gap is closed (fix (i), ruled
+/// 2026-10-09).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Completeness {
     /// The observer, from whom each star's direction is taken.
@@ -157,6 +176,9 @@ pub struct Completeness {
     band_spec: BandSpec,
     /// Per layer of [`CAPPED_LAYERS`], how far its shells are done.
     reached: [Reached; CAPPED_LAYERS.len()],
+    /// Per layer, whether it lists by the radius towards each star's texel once final too: C, D
+    /// and E at a synthetic ceiling.
+    by_texel: [bool; CAPPED_LAYERS.len()],
     complete_to: CompleteTo,
 }
 
@@ -214,15 +236,33 @@ impl Completeness {
 
     /// Whether the census lists `star`: always where its layer is final, and otherwise only within
     /// its layer's complete-to radius ([`radius_for`](Self::radius_for)).
+    ///
+    /// At a synthetic ceiling C, D and E list only within it at every reply, the final one
+    /// included (rendering plan R13, Design note 3).
     #[must_use]
     pub fn lists(&self, star: &SkyStar) -> bool {
         let Some(i) = CAPPED_LAYERS.iter().position(|&l| l == star.layer()) else {
             return true;
         };
         match self.reached[i] {
-            Reached::Final => true,
-            Reached::Edge(_) => star.distance().value() < self.radius_for(star).value(),
+            Reached::Final if !self.by_texel[i] => true,
+            Reached::Final | Reached::Edge(_) => {
+                star.distance().value() < self.radius_for(star).value()
+            }
         }
+    }
+
+    /// Whether some layer lists by the radius towards each star's band texel
+    /// ([`lists`](Self::lists)): one not yet final, or C, D and E at a synthetic ceiling.
+    ///
+    /// Its band is then summed at the census's [`band_spec`](Self::band_spec) from its observer,
+    /// so that the two share one boundary.
+    #[must_use]
+    pub fn lists_by_texel(&self) -> bool {
+        self.reached
+            .iter()
+            .zip(&self.by_texel)
+            .any(|(reached, &by_texel)| by_texel || matches!(reached, Reached::Edge(_)))
     }
 
     /// The radius `star`'s layer is complete to where the star lies, towards its band texel.
@@ -270,6 +310,9 @@ pub enum BuildSkyQueryError {
     /// own, or was taken for another observer, eye or cut than the request's (R06.T7.b): it caps
     /// an eye-only request.
     EyeVisibility,
+    /// The synthetic ceiling is not finite, or is not brighter than the cut by at least 0.5 mag
+    /// (rendering plan R13, R13.T2.a).
+    SyntheticCeiling,
 }
 
 impl fmt::Display for BuildSkyQueryError {
@@ -286,6 +329,9 @@ impl fmt::Display for BuildSkyQueryError {
             Self::Illumination => "the illumination was marched for another observer or time",
             Self::EyeVisibility => {
                 "the eye's visibility caps an eye-only request of its observer, eye and cut"
+            }
+            Self::SyntheticCeiling => {
+                "the synthetic ceiling is not finite or not brighter than the cut by 0.5 mag"
             }
         })
     }
@@ -566,6 +612,9 @@ pub struct SkyQuery {
     illumination: Option<Arc<Illumination>>,
     /// The eye's visibility, if an eye-only request asks its caps by it (R06.T7.b).
     eye_visibility: Option<Arc<EyeVisibility>>,
+    /// The synthetic ceiling V<sub>P</sub>, if the request states one (rendering plan R13): at
+    /// least [`MIN_CEILING_DEPTH_MAG`] brighter than the cut once built.
+    synthetic_ceiling: Option<Magnitudes>,
 }
 
 /// Builds a [`SkyQuery`].
@@ -620,6 +669,7 @@ impl SkyQuery {
                 forced_caps: None,
                 illumination: None,
                 eye_visibility: None,
+                synthetic_ceiling: None,
             },
         }
     }
@@ -723,6 +773,15 @@ impl SkyQuery {
     #[must_use]
     pub fn eye_visibility(&self) -> Option<&EyeVisibility> {
         self.eye_visibility.as_deref()
+    }
+
+    /// The synthetic ceiling V<sub>P</sub>, apparent V, if the request states one
+    /// ([`SkyQueryBuilder::synthetic_ceiling`]; rendering plan R13, Design notes 3 and 4): then C,
+    /// D and E are censused to their real boundary only, and listed by the radius towards each
+    /// star's band texel at every reply.
+    #[must_use]
+    pub const fn synthetic_ceiling(&self) -> Option<Magnitudes> {
+        self.synthetic_ceiling
     }
 
     /// The same query with every layer's cap forced to `radius`: the census the brute force is
@@ -891,6 +950,49 @@ impl SkyQueryBuilder {
         self
     }
 
+    /// States the synthetic ceiling V<sub>P</sub>, apparent V (rendering plan R13, Design notes 3
+    /// and 4): the hybrid sky's real tier, the server's constant on every request.
+    ///
+    /// Layers C, D and E are then censused only to their real boundary R(u), ray by ray the least
+    /// of their cap at the ceiling, their cap at the cut and
+    /// [`REAL_LIMIT_LY`](super::super::caps::REAL_LIMIT_LY) ([`real_boundary`](super::super::caps::real_boundary)):
+    /// [`census_plan`] counts the caps at both cuts and draws it, and [`census_plan_of`] takes the
+    /// caps its caller drew so. Either way the plan opens their cells by the rays' cones widened by
+    /// the query's band texel's largest radius, and lists them by the radius towards each star's
+    /// texel at every reply, the final one included ([`Completeness`]), so that the listing, the
+    /// band and the synthetic tier beyond R(u) share one boundary with no gap. A, B and the brown
+    /// dwarfs are censused as without it. With no ceiling every bit is R06's. A ceiling not
+    /// finite, or not brighter than the cut by at least 0.5 mag, is refused
+    /// ([`BuildSkyQueryError::SyntheticCeiling`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::observe::Observer;
+    /// use hyperion_sim::sky::census::{BuildSkyQueryError, SkyQuery};
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::Magnitudes;
+    ///
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+    /// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+    /// let query = |ceiling| {
+    ///     SkyQuery::builder(observer.clone(), Magnitudes::new(7.95))
+    ///         .synthetic_ceiling(Magnitudes::new(ceiling))
+    ///         .build()
+    /// };
+    /// // RM3's interim states V 5.0, R13's synthetic tier V 4.5.
+    /// assert_eq!(query(5.0)?.synthetic_ceiling(), Some(Magnitudes::new(5.0)));
+    /// // A ceiling within half a magnitude of the cut is refused.
+    /// assert_eq!(query(7.6), Err(BuildSkyQueryError::SyntheticCeiling));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn synthetic_ceiling(mut self, v: Magnitudes) -> Self {
+        self.query.synthetic_ceiling = Some(v);
+        self
+    }
+
     /// The query.
     ///
     /// # Errors
@@ -902,11 +1004,19 @@ impl SkyQueryBuilder {
     /// cone, [`BuildSkyQueryError::Illumination`] if the illumination was marched for another
     /// observer or at another time, and [`BuildSkyQueryError::EyeVisibility`] if the eye's
     /// visibility is asked without the eye, with an eye's cut shallower than the cut, or was taken
-    /// for another observer, eye or cut.
+    /// for another observer, eye or cut, and [`BuildSkyQueryError::SyntheticCeiling`] if the
+    /// synthetic ceiling is not finite or not brighter than the cut by at least 0.5 mag.
     pub fn build(mut self) -> Result<SkyQuery, BuildSkyQueryError> {
         let cut = self.query.cut.value();
         if !(cut.is_finite() && cut <= MAX_CUT_V) {
             return Err(BuildSkyQueryError::Cut);
+        }
+        if self
+            .query
+            .synthetic_ceiling
+            .is_some_and(|v| !(v.value().is_finite() && cut - v.value() >= MIN_CEILING_DEPTH_MAG))
+        {
+            return Err(BuildSkyQueryError::SyntheticCeiling);
         }
         if self.query.n_max.get() > MAX_N_MAX {
             return Err(BuildSkyQueryError::NMax);
@@ -998,6 +1108,13 @@ impl fmt::Debug for SkyContext<'_> {
 /// layer's last if none: every cell of the plan is in exactly one shell. The shells change which
 /// cells the census opens not at all, so the census of every shell is the one-shot census, star
 /// for star.
+///
+/// At a synthetic ceiling (rendering plan R13; [`census_plan_of`]) C's, D's and E's walks open
+/// cells by their rays' cones widened by the band texel's largest radius, and their real boundary
+/// held at [`REAL_LIMIT_LY`](super::super::caps::REAL_LIMIT_LY), itself one of the shell edges,
+/// ends their last shell on it: near the Sun their shells are to 125, 250, 500 and 1,000 ly, then
+/// to R(u). The census of every shell is then the one-shot census of the plan's cells less its
+/// stars at or beyond the radius towards their texel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CensusPlan {
     caps: Vec<LayerCap>,
@@ -1006,6 +1123,9 @@ pub struct CensusPlan {
     apex: [f64; 3],
     observer: GalacticPosition,
     band_spec: BandSpec,
+    /// Per layer of [`CAPPED_LAYERS`], whether it lists by the radius towards each star's texel at
+    /// every reply: C, D and E at a synthetic ceiling ([`Completeness`]).
+    by_texel: [bool; CAPPED_LAYERS.len()],
 }
 
 impl CensusPlan {
@@ -1186,6 +1306,7 @@ impl CensusPlan {
             observer: self.observer,
             band_spec: self.band_spec,
             reached,
+            by_texel: self.by_texel,
             complete_to: CompleteTo::of_caps_within(&self.caps, within),
         }
     }
@@ -1273,13 +1394,14 @@ impl CensusPlan {
 }
 
 /// One layer's walk in a [`CensusPlan`]: the sphere of its cap, padded, the pad, the cap's radius
-/// per ray, if it has one a ray, and its shells' spheres.
+/// per ray, if it has one a ray, with the cones about its rays that the walk opens cells by, and
+/// its shells' spheres.
 #[derive(Debug, Clone, PartialEq)]
 struct LayerWalk {
     layer: Layer,
     sphere: QuerySphere,
     pad: LightYears,
-    rays: Option<RayRadii>,
+    rays: Option<(RayRadii, RayCones)>,
     /// Each shell's but the last's edge, whole light-years, and its sphere, nearest first: the edge,
     /// padded as a walk to that edge pads. The last shell walks `sphere`.
     edges: Arc<[(u32, QuerySphere)]>,
@@ -1385,11 +1507,12 @@ fn padded_ball(apex: [f64; 3], key: CellKey, pad: LightYears) -> ([f64; 3], f64)
 /// Whether a plan opens `key`, a cell of its layer's sphere, about `apex` (ly): its bounding ball,
 /// padded by `pad`, meets the cone it opens cells by for `region`, if any (the cone widened to hold
 /// every texel of its region, [`ConeRegion::meets_ball`]), and, for a cap of one radius a ray
-/// (`rays`), some ray's cone nearer than the ray's radius (R06.T7.b).
+/// (`rays`), some ray's cone of `rays`' cones nearer than the ray's radius (R06.T7.b; widened by
+/// the band texel's largest radius at a synthetic ceiling, rendering plan R13, fix (i)).
 #[must_use]
 fn opens(
     region: Option<&ConeRegion>,
-    rays: Option<&RayRadii>,
+    rays: Option<&(RayRadii, RayCones)>,
     apex: [f64; 3],
     key: CellKey,
     pad: LightYears,
@@ -1399,7 +1522,7 @@ fn opens(
     }
     let (offset, radius) = padded_ball(apex, key, pad);
     region.is_none_or(|region| region.meets_ball(offset, radius))
-        && rays.is_none_or(|rays| rays.meets_ball(offset, radius))
+        && rays.is_none_or(|(rays, cones)| rays.meets_ball(cones, offset, radius))
 }
 
 /// The years light takes to cross `d` ly, as a span.
@@ -1423,6 +1546,12 @@ fn light_time(d: f64) -> Span {
 /// R06.T8.l). The cells are taken shell by shell, nearest first, to [`SHELL_EDGES_LY`]
 /// ([`CensusPlan`]; R06.T8.i).
 ///
+/// A query at a synthetic ceiling ([`SkyQuery::synthetic_ceiling`]; rendering plan R13) that forces
+/// no cap takes C's, D's and E's real boundary instead: the caps' rays measured once and counted at
+/// the request's cut (by the eye's visibility where it asks it) and at the ceiling, and
+/// [`real_boundary`](super::super::caps::real_boundary) of the two; A's, B's and the brown dwarfs'
+/// caps are the cut's, bit for bit. Its plan is then [`census_plan_of`]'s at a ceiling.
+///
 /// # Panics
 ///
 /// If a cap's sphere cannot be built, which a positive finite cap never fails.
@@ -1435,12 +1564,19 @@ pub fn census_plan(
     cache: &mut NoiseCache,
 ) -> CensusPlan {
     let observer = query.observer();
-    let caps = match (&query.forced_caps, query.eye_visibility()) {
-        (Some(caps), _) => caps.clone(),
-        (None, Some(visibility)) => {
+    let caps = match (
+        &query.forced_caps,
+        query.synthetic_ceiling,
+        query.eye_visibility(),
+    ) {
+        (Some(caps), _, _) => caps.clone(),
+        (None, Some(ceiling), _) => {
+            real_boundary_of(galaxy, tables, envelope, query, ceiling, cache)
+        }
+        (None, None, Some(visibility)) => {
             layer_caps_by_visibility(galaxy, tables, envelope, observer, visibility, cache)
         }
-        (None, None) => layer_caps(galaxy, tables, envelope, observer, query.cut(), cache),
+        (None, None, None) => layer_caps(galaxy, tables, envelope, observer, query.cut(), cache),
     };
     census_plan_of(query, caps)
 }
@@ -1449,6 +1585,12 @@ pub fn census_plan(
 /// has computed: [`census_plan`] after its caps, for a server that runs the caps' rays as jobs of
 /// its own ([`layer_caps_over`](crate::sky::caps::layer_caps_over); R06.T11.c). The query's own
 /// forced caps, if it has them, are not read: the plan takes `caps`.
+///
+/// Where the query states a synthetic ceiling (rendering plan R13, Design note 3), `caps` are C's,
+/// D's and E's real boundary R(u) ([`real_boundary`](super::super::caps::real_boundary)), and the
+/// plan censuses them in shells to it with their cones widened by the query's band texel's largest
+/// radius ρ (fix (i)), each listed by the radius towards its stars' band texel at every reply, the
+/// final one included ([`Completeness`]). With no ceiling every bit is R06's.
 ///
 /// # Panics
 ///
@@ -1500,6 +1642,8 @@ pub(crate) fn plan_with_edges(
         .iter()
         .filter_map(|cap| layer_walk(query, cap, edges_ly))
         .collect();
+    let by_texel = CAPPED_LAYERS
+        .map(|layer| query.synthetic_ceiling.is_some() && REAL_BOUNDARY_LAYERS.contains(&layer));
     CensusPlan {
         caps,
         walks,
@@ -1507,6 +1651,7 @@ pub(crate) fn plan_with_edges(
         apex: observer.to_light_years_f64(),
         observer,
         band_spec: query.band_spec(),
+        by_texel,
     }
 }
 
@@ -1565,11 +1710,21 @@ fn layer_walk(query: &SkyQuery, cap: &LayerCap, edges_ly: &[u32]) -> Option<Laye
     } else {
         Arc::new([])
     };
+    // At a synthetic ceiling C's, D's and E's cones are widened by the band texel's largest
+    // radius, so that every star nearer than the radius towards its texel lies in an opened cell
+    // (rendering plan R13, Design note 3; fix (i)).
+    let widening = if query.synthetic_ceiling.is_some() && REAL_BOUNDARY_LAYERS.contains(&layer) {
+        query.band_spec().largest_texel_radius()
+    } else {
+        Radians::new(0.0)
+    };
     Some(LayerWalk {
         layer,
         sphere,
         pad,
-        rays: cap.rays().cloned(),
+        rays: cap
+            .rays()
+            .map(|rays| (rays.clone(), rays.cones_widened_by(widening))),
         edges,
     })
 }
@@ -1699,6 +1854,7 @@ mod tests {
             BuildSkyQueryError::ConeWithEye,
             BuildSkyQueryError::Illumination,
             BuildSkyQueryError::EyeVisibility,
+            BuildSkyQueryError::SyntheticCeiling,
         ] {
             let text = error.to_string();
             let field = match error {
@@ -1710,9 +1866,63 @@ mod tests {
                 BuildSkyQueryError::ConeWithEye => "cone",
                 BuildSkyQueryError::Illumination => "illumination",
                 BuildSkyQueryError::EyeVisibility => "visibility",
+                BuildSkyQueryError::SyntheticCeiling => "synthetic ceiling",
             };
             assert!(text.contains(field), "{text}");
         }
+    }
+
+    /// A synthetic ceiling is finite and brighter than the cut by half a magnitude at least
+    /// (rendering plan R13, R13.T2.a), with the eye or without it; a forced cap keeps it, and a
+    /// query states none unless asked.
+    #[test]
+    fn a_synthetic_ceiling_is_half_a_magnitude_brighter_than_the_cut_at_least() {
+        let ceiling = |cut: f64, ceiling: f64, eye: bool| {
+            let builder = SkyQuery::builder(observer(), Magnitudes::new(cut));
+            let builder = if eye {
+                builder.eye(EyeObserver::default())
+            } else {
+                builder
+            };
+            builder
+                .synthetic_ceiling(Magnitudes::new(ceiling))
+                .build()
+                .map(|query| query.synthetic_ceiling().map(Magnitudes::value))
+        };
+        for eye in [false, true] {
+            assert_eq!(ceiling(7.95, 5.0, eye), Ok(Some(5.0)));
+            assert_eq!(ceiling(7.0, 6.5, eye), Ok(Some(6.5)), "half a magnitude");
+            assert_eq!(ceiling(7.0, -30.0, eye), Ok(Some(-30.0)));
+            for (cut, v) in [
+                (7.0, 6.6),
+                (7.0, 7.0),
+                (7.0, 9.0),
+                (7.0, f64::NAN),
+                (7.0, f64::NEG_INFINITY),
+                (7.0, f64::INFINITY),
+            ] {
+                assert_eq!(
+                    ceiling(cut, v, eye),
+                    Err(BuildSkyQueryError::SyntheticCeiling),
+                    "cut {cut}, ceiling {v}, the eye asked: {eye}"
+                );
+            }
+        }
+        let at_ceiling = SkyQuery::builder(observer(), Magnitudes::new(7.95))
+            .synthetic_ceiling(Magnitudes::new(5.0))
+            .build()
+            .and_then(|query| query.with_caps_forced(LightYears::new(100.0)));
+        assert_eq!(
+            at_ceiling.map(|query| query.synthetic_ceiling()),
+            Ok(Some(Magnitudes::new(5.0))),
+            "a forced cap keeps the ceiling"
+        );
+        let none = SkyQuery::builder(observer(), Magnitudes::new(7.0)).build();
+        assert_eq!(
+            none.map(|query| query.synthetic_ceiling()),
+            Ok(None),
+            "no ceiling unless stated"
+        );
     }
 
     /// The naked eye cannot ask a cone (R06.T8.l; decided 2026-10-07, `decision-r06-t8k-cone.md`,
@@ -2610,7 +2820,47 @@ mod tests {
     /// has none), each with a context of its own, keyed by cell: a cell's census is a function of
     /// the cell and the query alone, so the threads' timing changes no bit.
     fn census_by_cell(query: &SkyQuery, cells: &[CellKey]) -> BTreeMap<CellKey, Part> {
-        let galaxy = milky_way_galaxy();
+        by_cell(query, cells, &|ctx, key, query, out| {
+            census_cell(milky_way_galaxy(), ctx, key, query, out)
+        })
+    }
+
+    /// The census's oracle for each of `cells`, as [`census_by_cell`] runs the census: every
+    /// record of each cell generated whole and measured for `query` with no skip, as the
+    /// integration tests' `brute_force_sky` measures them (R06.T8.e).
+    fn oracle_by_cell(query: &SkyQuery, cells: &[CellKey]) -> BTreeMap<CellKey, Part> {
+        by_cell(query, cells, &|ctx, key, query, out| {
+            let galaxy = milky_way_galaxy();
+            let mut records = Vec::new();
+            crate::galaxy::placement::generate_cell(galaxy, key, &mut records);
+            let mut tallies = crate::sky::census::CensusTallies::default();
+            for record in &records {
+                crate::sky::census::census_record(
+                    galaxy,
+                    ctx,
+                    record,
+                    query,
+                    crate::sky::census::Bound::Ignored,
+                    &mut tallies,
+                    out,
+                );
+            }
+            tallies
+        })
+    }
+
+    /// What one cell's job measures: `key`'s stars for the query into `out`, and its tallies.
+    type CellMeasure = dyn Fn(
+            &mut SkyContext<'_>,
+            CellKey,
+            &SkyQuery,
+            &mut Vec<SkyStar>,
+        ) -> crate::sky::census::CensusTallies
+        + Sync;
+
+    /// `each` of `cells` for `query`, on up to four threads (one on WebAssembly), each with a
+    /// context of its own, keyed by cell.
+    fn by_cell(query: &SkyQuery, cells: &[CellKey], each: &CellMeasure) -> BTreeMap<CellKey, Part> {
         let next = std::sync::atomic::AtomicUsize::new(0);
         let job = || {
             let mut ctx = SkyContext {
@@ -2629,7 +2879,7 @@ mod tests {
                     return parts;
                 };
                 let mut stars = Vec::new();
-                let tallies = census_cell(galaxy, &mut ctx, key, query, &mut stars);
+                let tallies = each(&mut ctx, key, query, &mut stars);
                 parts.push((key, (stars, tallies)));
             }
         };
@@ -3039,5 +3289,524 @@ mod tests {
                 ours.len()
             );
         }
+    }
+
+    /// The ceiling of the tests at a synthetic ceiling, V: RM3's interim's (rendering plan R13,
+    /// Design note 15).
+    const TEST_CEILING_V: f64 = 5.0;
+
+    /// [`query_by_ray`] at the synthetic ceiling [`TEST_CEILING_V`], with C's, D's and E's rays held
+    /// within `limit_ly`, as [`real_boundary`](super::super::caps::real_boundary) holds them within
+    /// the real limit: a real boundary R(u) scaled down so that a unit test can afford its census,
+    /// uniform at the limit on some rays and varying on the rest.
+    fn query_at_ceiling(cut: f64, lo: f64, hi: f64, limit_ly: f64) -> SkyQuery {
+        let mut query = SkyQuery::builder(observer(), Magnitudes::new(cut))
+            .synthetic_ceiling(Magnitudes::new(TEST_CEILING_V))
+            .build()
+            .expect("a valid query");
+        query.forced_caps = Some(
+            CAPPED_LAYERS
+                .iter()
+                .zip(0_u64..)
+                .map(|(&layer, k)| {
+                    let rays = jagged_radii(0x7b_0100 + k, lo, hi);
+                    let rays = if REAL_BOUNDARY_LAYERS.contains(&layer) {
+                        rays.within(limit_ly)
+                    } else {
+                        rays
+                    };
+                    LayerCap::forced_by_ray(layer, rays)
+                })
+                .collect(),
+        );
+        query
+    }
+
+    /// How many of `cap`'s rays lie exactly at `edge_ly`, bit for bit, and how many within it.
+    fn rays_at_and_within(cap: &LayerCap, edge_ly: f64) -> (usize, usize) {
+        let radii = cap.rays().expect("one radius a ray").radii_ly();
+        let at = radii.iter().filter(|&&r| bits(r) == bits(edge_ly)).count();
+        let within = radii.iter().filter(|&&r| r < edge_ly).count();
+        (at, within)
+    }
+
+    /// A query at a synthetic ceiling is the same query's plan, shells and caps, but lists C, D
+    /// and E by the radius towards each star's texel at every reply and opens their cells by cones
+    /// widened by the band texel's largest radius (rendering plan R13, R13.T2.a). With C's, D's
+    /// and E's rays jagged between 400 and 1,500 ly and held within 1,000 ly, its plan opens every
+    /// cell the plan without the ceiling opens, and more of C's and D's, whose cells are narrow
+    /// there; A's, B's and the brown dwarfs' walks are the same. With no ceiling the plan is
+    /// R06's, and only a census not yet final lists by texel.
+    #[test]
+    fn a_plan_at_a_ceiling_widens_c_to_e_and_lists_them_by_texel_at_every_reply() {
+        let at_ceiling = query_at_ceiling(8.0, 400.0, 1_500.0, 1_000.0);
+        let caps = at_ceiling.forced_caps.clone().expect("forced caps");
+        let mut without = at_ceiling.clone();
+        without.synthetic_ceiling = None;
+        let edges = [250, 500, 1_000];
+        let (ours, theirs) = (
+            plan_with_edges(&at_ceiling, caps.clone(), &edges),
+            plan_with_edges(&without, caps.clone(), &edges),
+        );
+        assert_eq!(ours.caps(), theirs.caps());
+        assert_eq!(
+            ours.shells().collect::<Vec<_>>(),
+            theirs.shells().collect::<Vec<_>>()
+        );
+        for (a, b) in ours.walks.iter().zip(&theirs.walks) {
+            assert_eq!(a.layer, b.layer);
+            assert_eq!((a.sphere, a.pad, &a.edges), (b.sphere, b.pad, &b.edges));
+            let (cells_a, cells_b): (BTreeSet<CellKey>, BTreeSet<CellKey>) = (
+                (0..a.shell_count())
+                    .flat_map(|i| ours.slabs_of(a, i))
+                    .flat_map(|slab| slab.cells())
+                    .collect(),
+                (0..b.shell_count())
+                    .flat_map(|i| theirs.slabs_of(b, i))
+                    .flat_map(|slab| slab.cells())
+                    .collect(),
+            );
+            if REAL_BOUNDARY_LAYERS.contains(&a.layer) {
+                assert_ne!(a.rays, b.rays, "{:?}'s cones are widened", a.layer);
+                assert!(cells_b.is_subset(&cells_a), "{:?}", a.layer);
+                if a.layer != Layer::E {
+                    assert!(
+                        cells_a.len() > cells_b.len(),
+                        "{:?}: {} cells widened against {}",
+                        a.layer,
+                        cells_a.len(),
+                        cells_b.len()
+                    );
+                }
+                eprintln!(
+                    "{:?}: {} cells with the cones widened, {} without",
+                    a.layer,
+                    cells_a.len(),
+                    cells_b.len()
+                );
+            } else {
+                assert_eq!(a, b, "{:?}'s walk", a.layer);
+            }
+        }
+        let replies: Vec<Vec<Shell>> = (0..3)
+            .map(|k| {
+                ours.shells()
+                    .filter(|shell| usize::from(shell.index()) <= k)
+                    .collect()
+            })
+            .collect();
+        for done in &replies {
+            assert!(ours.completeness(done.iter().copied()).lists_by_texel());
+        }
+        assert!(ours.complete().is_final() && ours.complete().lists_by_texel());
+        assert!(theirs.complete().is_final() && !theirs.complete().lists_by_texel());
+        assert!(
+            theirs
+                .completeness(replies[0].iter().copied())
+                .lists_by_texel()
+        );
+        assert_eq!(
+            ours.complete().complete_to(),
+            theirs.complete().complete_to(),
+            "one boundary, the caps'"
+        );
+    }
+
+    /// Asserts that no C, D or E star of `census`, listed or past `n_max`, lies at or beyond its
+    /// texel's radius in `reached` or `limit_ly`.
+    fn within_its_boundary(census: &SkyCensus, reached: &Completeness, limit_ly: f64) {
+        for star in whole(census).iter().filter(|s| shelled(s)) {
+            let radius = reached.radius_for(star);
+            assert!(
+                star.distance() < radius && star.distance().value() < limit_ly,
+                "{star:?} at or beyond its texel's {} ly",
+                radius.value()
+            );
+        }
+    }
+
+    /// Checks the census at a ceiling of `fixture`'s shells done, its shells to `edge_ly`, against
+    /// the census with C's, D's and E's caps forced to those shells' radii under the same rule,
+    /// and that none of its stars lies at or beyond its texel's radius or `limit_ly`.
+    fn check_the_ceilings_census_to_an_edge(fixture: &ShellCensus, edge_ly: f64, limit_ly: f64) {
+        let ShellCensus {
+            query,
+            plan,
+            shells: done,
+            parts,
+        } = fixture;
+        let unbounded = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let mine = |n_max| {
+            let cells = done
+                .iter()
+                .flat_map(|&shell| plan.shell_slabs(shell))
+                .flat_map(|slab| slab.cells());
+            let reached = plan.completeness(done.iter().copied());
+            merge_shells(cells.map(|key| parts[&key].clone()), n_max, reached)
+        };
+        let reached = plan.completeness(done.iter().copied());
+        assert_eq!(reached.edge(Layer::C), Some(LightYears::new(edge_ly)));
+        let census = mine(unbounded);
+        within_its_boundary(&census, &reached, limit_ly);
+        // The census with C's, D's and E's caps forced to the shells' radii, under the same rule.
+        let caps = query.forced_caps.clone().expect("forced caps");
+        let mut forced = query.clone();
+        let forced_caps = caps_within(&caps, edge_ly);
+        forced.forced_caps = Some(forced_caps.clone());
+        let theirs_plan = census_plan_of(&forced, forced_caps);
+        let theirs_cells: Vec<CellKey> = theirs_plan.cells().collect();
+        let theirs = merge_shells(
+            census_by_cell(&forced, &theirs_cells).into_values(),
+            unbounded,
+            theirs_plan.complete(),
+        );
+        let ours: Vec<SkyStar> = census
+            .listed()
+            .iter()
+            .filter(|s| shelled(s))
+            .copied()
+            .collect();
+        assert!(ours.len() > 50, "{} stars to {edge_ly} ly", ours.len());
+        assert_eq!(
+            star_bits(&ours),
+            star_bits(theirs.listed()),
+            "to {edge_ly} ly"
+        );
+        for star in &ours {
+            assert_eq!(
+                bits(reached.radius_for(star).value()),
+                bits(theirs_plan.complete().radius_for(star).value()),
+                "one boundary"
+            );
+        }
+        // At any n_max: the brightest 60 listed, the rest past it, none beyond its radius.
+        let cut = mine(NonZeroU32::new(60).expect("not zero"));
+        assert_eq!(whole(&cut), census.listed());
+        within_its_boundary(&cut, &reached, limit_ly);
+        eprintln!(
+            "at the ceiling to {edge_ly} ly: C, D and E list {} stars, as the forced census does",
+            ours.len()
+        );
+    }
+
+    /// A real boundary at the real limit ends C's, D's and E's last shell on it (rendering plan
+    /// R13, R13.T2.a; R13.T1.b's determinism audit), at a ceiling near the Sun with
+    /// [`SHELL_EDGES_LY`]: their rays lie between 1,000 and 2,500 ly, some exactly at 1,000 ly,
+    /// held within `REAL_LIMIT_LY`, some exactly at it. The walk and the completeness decide at
+    /// equality, so their shells are to 125, 250, 500 and 1,000 ly and then to R(u), with no shell
+    /// of their own at 2,000 ly; done to 1,000 ly, which every ray reaches, each is complete to it
+    /// in every direction; and at every reply, final or not, each is complete within the limit
+    /// towards 10⁴ random directions, and to R(u)'s rays, bit for bit, once final. So too where
+    /// every ray is held at the limit.
+    #[test]
+    fn a_real_boundary_at_the_limit_ends_its_last_shell_on_it() {
+        use super::super::super::caps::REAL_LIMIT_LY;
+        let lattice = Arc::new(CapLattice::new(CAP_RAYS));
+        for (lo, hi) in [(800.0, 2_500.0), (2_100.0, 2_600.0)] {
+            let mut query = SkyQuery::builder(observer(), Magnitudes::new(7.95))
+                .synthetic_ceiling(Magnitudes::new(TEST_CEILING_V))
+                .build()
+                .expect("a query at the ceiling");
+            let caps: Vec<LayerCap> = CAPPED_LAYERS
+                .iter()
+                .zip(0_u64..)
+                .map(|(&layer, k)| {
+                    if !REAL_BOUNDARY_LAYERS.contains(&layer) {
+                        return LayerCap::forced(layer, LightYears::new(50.0));
+                    }
+                    let radii = crate::sky::testing::uniforms(0x7b_0500 + k)
+                        .take(CAP_RAYS)
+                        .map(|u| (lo + (hi - lo) * u).max(1_000.0))
+                        .collect();
+                    let rays = RayRadii::new(Arc::clone(&lattice), radii).within(REAL_LIMIT_LY);
+                    LayerCap::forced_by_ray(layer, rays)
+                })
+                .collect();
+            query.forced_caps = Some(caps.clone());
+            let plan = census_plan_of(&query, caps.clone());
+            let all_held = lo > REAL_LIMIT_LY;
+            for layer in SHELLED_LAYERS {
+                let cap = caps.iter().find(|c| c.layer() == layer).expect("capped");
+                let (at, within) = rays_at_and_within(cap, REAL_LIMIT_LY);
+                let (at_floor, _) = rays_at_and_within(cap, 1_000.0);
+                assert!(
+                    at > 0 && (all_held || (within > 0 && at_floor > 0)),
+                    "{layer:?}, {lo}–{hi} ly: {at} at the limit, {within} within it, {at_floor} \
+                     at 1,000 ly"
+                );
+                assert_eq!(all_held, within == 0, "{layer:?}");
+                assert_eq!(bits(cap.radius().value()), bits(REAL_LIMIT_LY));
+                let ends: Vec<Option<LightYears>> = plan
+                    .shells()
+                    .filter(|shell| shell.layer() == layer)
+                    .map(|shell| shell.edge())
+                    .collect();
+                let expected: Vec<Option<LightYears>> = [125.0, 250.0, 500.0, 1_000.0]
+                    .map(|edge| Some(LightYears::new(edge)))
+                    .into_iter()
+                    .chain([None])
+                    .collect();
+                assert_eq!(ends, expected, "{layer:?}");
+            }
+            let mut uniforms = crate::sky::testing::uniforms(0x7b_0600);
+            let directions: Vec<UnitVector> = (0..10_000)
+                .map(|_| {
+                    let mut next = || uniforms.next().expect("endless");
+                    UnitVector::from_components(std::array::from_fn(|_| 2.0 * next() - 1.0))
+                        .expect("a direction")
+                })
+                .collect();
+            for rank in 0..5_u8 {
+                let done = plan.shells().filter(|shell| shell.index() <= rank);
+                let reached = plan.completeness(done);
+                assert!(reached.lists_by_texel());
+                for layer in SHELLED_LAYERS {
+                    let complete_to = reached.complete_to();
+                    if rank == 3 {
+                        assert_eq!(reached.edge(layer), Some(LightYears::new(1_000.0)));
+                        assert_eq!(
+                            complete_to.rays_ly(layer),
+                            None,
+                            "every ray reaches 1,000 ly"
+                        );
+                        assert_eq!(bits(complete_to.radius(layer).value()), bits(1_000.0));
+                    }
+                    if rank == 4 {
+                        assert!(reached.is_final());
+                        let cap = caps.iter().find(|c| c.layer() == layer).expect("capped");
+                        let rays = cap.rays().expect("by ray").radii_ly();
+                        assert_eq!(
+                            complete_to
+                                .rays_ly(layer)
+                                .map(|r| r.iter().map(|&v| bits(v)).collect::<Vec<_>>()),
+                            Some(rays.iter().map(|&v| bits(v)).collect()),
+                            "{layer:?}"
+                        );
+                    }
+                    for &u in &directions {
+                        let radius = complete_to.radius_toward(layer, u).value();
+                        assert!(
+                            radius <= REAL_LIMIT_LY,
+                            "{layer:?} towards {u:?}: {radius} ly"
+                        );
+                        if all_held && rank == 4 {
+                            assert_eq!(bits(radius), bits(REAL_LIMIT_LY));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Near the Sun to V 8 at a synthetic ceiling, C's, D's and E's rays jagged between 40 and
+    /// 150 ly and held within a limit of 100 ly, the last of the shells' edges 40, 70 and 100 ly,
+    /// as `REAL_LIMIT_LY` is one of [`SHELL_EDGES_LY`] (rendering plan R13, R13.T2.a):
+    ///
+    /// - the limit holds rays exactly at that edge, which is no shell's but the last's: C's, D's
+    ///   and E's shells are to 40 and 70 ly, then to R(u), as the census walks them at equality;
+    /// - shells 1–k merged, at any reply, list C's, D's and E's stars exactly as the census with
+    ///   their caps forced to shell k's radii, under the same rule, bit for bit and in order;
+    /// - the last, every shell merged, is the one-shot census of the plan's cells less its C, D and
+    ///   E stars at or beyond their texel's radius, which straddling cells hold, at any `n_max`;
+    /// - no listed C, D or E star, nor any past `n_max`, lies at or beyond its texel's R(u), nor at
+    ///   or beyond the limit, in any reply.
+    #[test]
+    fn at_a_ceiling_shells_merged_are_the_census_forced_to_the_real_boundary() {
+        let limit = 100.0;
+        let query = query_at_ceiling(8.0, 40.0, 150.0, limit);
+        let caps = query.forced_caps.clone().expect("forced caps");
+        let edges = [40, 70, 100];
+        let plan = plan_with_edges(&query, caps.clone(), &edges);
+        let shells: Vec<Shell> = plan.shells().collect();
+        for layer in SHELLED_LAYERS {
+            let cap = caps.iter().find(|c| c.layer() == layer).expect("capped");
+            let (at, within) = rays_at_and_within(cap, limit);
+            assert!(
+                at > 100 && within > 100,
+                "{layer:?}: {at} at, {within} within"
+            );
+            assert_eq!(bits(cap.radius().value()), bits(limit), "{layer:?}");
+            let ends: Vec<Option<LightYears>> = shells
+                .iter()
+                .filter(|shell| shell.layer() == layer)
+                .map(Shell::edge)
+                .collect();
+            assert_eq!(
+                ends,
+                [
+                    Some(LightYears::new(40.0)),
+                    Some(LightYears::new(70.0)),
+                    None
+                ],
+                "{layer:?}"
+            );
+        }
+        let cells: Vec<CellKey> = plan.cells().collect();
+        let parts = census_by_cell(&query, &cells);
+        let parts_of = |done: &[Shell]| -> Vec<Part> {
+            done.iter()
+                .flat_map(|&shell| plan.shell_slabs(shell))
+                .flat_map(|slab| slab.cells())
+                .map(|key| parts[&key].clone())
+                .collect()
+        };
+        let unbounded = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let within_its_boundary = |census: &SkyCensus, reached: &Completeness| {
+            within_its_boundary(census, reached, limit);
+        };
+        for (k, &edge) in edges[..2].iter().enumerate() {
+            let done: Vec<Shell> = shells
+                .iter()
+                .copied()
+                .filter(|s| usize::from(s.index()) <= k)
+                .collect();
+            let fixture = ShellCensus {
+                query: query.clone(),
+                plan: plan.clone(),
+                shells: done,
+                parts: parts.clone(),
+            };
+            check_the_ceilings_census_to_an_edge(&fixture, f64::from(edge), limit);
+        }
+        // The last: the one-shot census less its C, D and E stars at or beyond their radius.
+        let complete = plan.complete();
+        assert!(complete.is_final());
+        let last = merge_shells(parts_of(&shells), unbounded, complete.clone());
+        within_its_boundary(&last, &complete);
+        let one_shot = merge_census(cells.iter().map(|key| parts[key].clone()), unbounded);
+        let (kept, held): (Vec<SkyStar>, Vec<SkyStar>) = one_shot
+            .listed()
+            .iter()
+            .partition(|star| complete.lists(star));
+        assert_eq!(star_bits(last.listed()), star_bits(&kept));
+        assert!(
+            !held.is_empty()
+                && held
+                    .iter()
+                    .all(|s| shelled(s) && s.distance() >= complete.radius_for(s)),
+            "the straddling cells' stars beyond R(u): {}",
+            held.len()
+        );
+        let few = NonZeroU32::new(60).expect("not zero");
+        let last_few = merge_shells(parts_of(&shells), few, complete.clone());
+        assert_eq!(last_few.listed(), &kept[..60]);
+        assert_eq!(last_few.overflow(), &kept[60..]);
+        within_its_boundary(&last_few, &complete);
+        eprintln!(
+            "at the ceiling, the last lists {} stars of the one-shot census's {}, holding {} at or \
+             beyond their texel's R(u)",
+            last.listed().len(),
+            one_shot.listed().len(),
+            held.len()
+        );
+    }
+
+    /// No gap at a synthetic ceiling (rendering plan R13, R13.T2.a; fix (i) of
+    /// `decision-r06-t8i-listing.md`): near the Sun to V 11, every C, D and E star the oracle finds
+    /// within 150 ly that lies within its texel's R(u) is listed by the final reply, bit for bit,
+    /// over the limit's uniform rays and the varying ones alike. The oracle generates every system
+    /// of every cell whole and measures it with no skip, as the integration tests'
+    /// `brute_force_sky` does.
+    ///
+    /// R(u) is a real boundary scaled down: C's, D's and E's rays on one side of a tilted plane
+    /// through the sky reach 150 ly, held at a limit of 140 ly, and the others 40–60 ly, varying
+    /// from ray to ray. The query's band is of 2² texels a face, of up to 35° from their centres,
+    /// scaled with the radii: R06.T7.b's gap needs a texel wider than a cell's ball, and at 140 ly a
+    /// cell of C's 32 ly spans some 11° about its centre, where at the real limit's 2,000 ly it
+    /// spans 0.8° against the 64² band's 1.27°. The same caps censused by R06's cones, unwidened,
+    /// leave some of those stars in cells left closed, across the limit's edge: the gap, which the
+    /// widening closes.
+    #[test]
+    #[cfg_attr(
+        target_family = "wasm",
+        ignore = "slow: on wasm32-wasip1, which has no threads, the oracle runs on one"
+    )]
+    fn at_a_ceiling_every_star_within_its_texels_real_boundary_is_listed() {
+        let limit = 140.0;
+        let mut query = query_at_ceiling(11.0, 50.0, 150.0, limit);
+        query.band_spec =
+            BandSpec::new(2, BandSpec::STANDARD.nodes_per_decade()).expect("a band of 2² a face");
+        let lattice = Arc::new(CapLattice::new(CAP_RAYS));
+        let edged: Vec<f64> = lattice
+            .directions()
+            .iter()
+            .zip(crate::sky::testing::uniforms(0x7b_0400))
+            .map(|(d, u)| {
+                // The edge is tilted, so that it crosses the texels rather than run along their
+                // edges, which lie in the axis planes.
+                let [x, y, z] = d.components();
+                if 0.8 * x + 0.5 * y + 0.33 * z > 0.3 {
+                    150.0
+                } else {
+                    40.0 + 20.0 * u
+                }
+            })
+            .collect();
+        let real = RayRadii::new(lattice, edged).within(limit);
+        for cap in query.forced_caps.as_mut().expect("forced caps") {
+            if REAL_BOUNDARY_LAYERS.contains(&cap.layer()) {
+                *cap = LayerCap::forced_by_ray(cap.layer(), real.clone());
+            }
+        }
+        let caps = query.forced_caps.clone().expect("forced caps");
+        let plan = census_plan_of(&query, caps.clone());
+        let cells: Vec<CellKey> = plan.cells().collect();
+        let unbounded = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let complete = plan.complete();
+        let census = merge_shells(
+            census_by_cell(&query, &cells).into_values(),
+            unbounded,
+            complete.clone(),
+        );
+        let listed: BTreeMap<(SystemId, u8), &SkyStar> = census
+            .listed()
+            .iter()
+            .map(|s| ((s.system(), s.star().get()), s))
+            .collect();
+        // The same caps' census by R06's cones, unwidened, and its stars.
+        let mut unwidened = query.clone();
+        unwidened.synthetic_ceiling = None;
+        let r06_cells: Vec<CellKey> = census_plan_of(&unwidened, caps).cells().collect();
+        let r06: BTreeSet<(SystemId, u8)> = census_by_cell(&unwidened, &r06_cells)
+            .into_values()
+            .flat_map(|(stars, _)| stars)
+            .map(|s| (s.system(), s.star().get()))
+            .collect();
+        // The oracle of C, D and E within 150 ly.
+        let oracle = query
+            .clone()
+            .with_caps_forced_per_layer(&SHELLED_LAYERS.map(|l| (l, LightYears::new(150.0))))
+            .expect("a forced cap");
+        let oracle_caps = oracle.forced_caps.clone().expect("forced caps");
+        let oracle_cells: Vec<CellKey> = census_plan_of(&oracle, oracle_caps).cells().collect();
+        let (mut at_limit, mut varying, mut gap) = (0_u32, 0_u32, 0_u32);
+        for star in oracle_by_cell(&oracle, &oracle_cells)
+            .into_values()
+            .flat_map(|(stars, _)| stars)
+        {
+            let radius = complete.radius_for(&star);
+            if star.distance() >= radius {
+                continue;
+            }
+            if bits(radius.value()) == bits(limit) {
+                at_limit += 1;
+            } else {
+                varying += 1;
+            }
+            let ours = listed
+                .get(&(star.system(), star.star().get()))
+                .unwrap_or_else(|| panic!("{star:?} lies within its texel's R(u), unlisted"));
+            assert_eq!(star_bits(&[**ours]), star_bits(&[star]));
+            if !r06.contains(&(star.system(), star.star().get())) {
+                gap += 1;
+            }
+        }
+        eprintln!(
+            "at the ceiling: {at_limit} stars within R(u) towards texels at the limit, {varying} \
+             towards texels below it, all listed; R06's cones would leave {gap} of them in cells \
+             left closed"
+        );
+        assert!(at_limit > 50 && varying > 50, "{at_limit}, {varying}");
+        assert!(gap > 0, "the test meets R06.T7.b's gap");
     }
 }

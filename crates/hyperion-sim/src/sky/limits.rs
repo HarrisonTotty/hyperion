@@ -1829,6 +1829,34 @@ impl EyeVisibility {
         }
     }
 
+    /// A visibility of `limit` towards each texel's centre, held at `cut`, for `observer` and `eye`:
+    /// a test's, whose limits vary over the sky.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn of_limits(
+        observer: Observer,
+        eye: EyeObserver,
+        cut: Magnitudes,
+        limit: impl Fn(UnitVector) -> f64,
+    ) -> Self {
+        let side = PRE_PASS_SPEC.face_texels();
+        let limits = CubeFace::ALL
+            .into_iter()
+            .flat_map(|face| {
+                (0..side).flat_map(move |row| (0..side).map(move |column| (face, row, column)))
+            })
+            .map(|(face, row, column)| {
+                limit(PRE_PASS_SPEC.texel_direction(face, row, column)).min(cut.value())
+            })
+            .collect();
+        Self {
+            observer,
+            eye,
+            cut,
+            limits,
+        }
+    }
+
     /// The eye's visibility for `observer` and `eye` at `cut`, the eye's ([`eye_cut`]'s), from the
     /// rows of the pre-pass at that cut, `parts` ([`pre_pass_rows`] at `cut`), in any order and any
     /// split: [`eye_visibility`]'s bits, for a server that marches the rows as jobs of its own
