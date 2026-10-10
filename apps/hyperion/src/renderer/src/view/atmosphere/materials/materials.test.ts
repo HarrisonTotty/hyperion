@@ -246,11 +246,12 @@ describe("CO₂ ice, a derived file", () => {
 describe("NH₄SH, a stated stand-in", () => {
   const file = fileOf("NH4SH");
 
-  it("has an estimated n of 1.644 ± 0.001 at 550 nm", () => {
+  it("has an estimated n of 1.638 ± 0.001 at 550 nm", () => {
     // The Lorentz–Lorenz estimate of science-r08-nonspherical.md §3.1, replacing the 1.80 stand-in,
     // with NH₃ at its theoretic density and NH₄Cl's increment re-derived (R08's Risks, "Deviations in
-    // T3.b's follow-up, as built"); the ruling's 1.648 took NH₃'s real-gas Z.
-    expect(Math.abs(refractiveIndex("NH4SH", 550).index.n - 1.644)).toBeLessThanOrEqual(0.001);
+    // T3.b's follow-up, as built") from NH₄Cl's X-ray cell and measured dispersion
+    // (science-r08-gases-2.md §2); the ruling's 1.648 took NH₃'s real-gas Z.
+    expect(Math.abs(refractiveIndex("NH4SH", 550).index.n - 1.638)).toBeLessThanOrEqual(0.001);
   });
 
   it("has n falling monotonically from 380 to 780 nm", () => {
@@ -275,8 +276,8 @@ describe("NH₄SH, a stated stand-in", () => {
   });
 
   it("is the Lorentz–Lorenz index of rayleigh.ts's NH₃ and H₂S rows at West 1934's cell", () => {
-    // science-r08-nonspherical.md §3.1: (n² − 1) ÷ (n² + 2) = 1.035 R ÷ V_m, with R the gases'
-    // summed molar refraction as stated at 0 °C and 760 mm, each at its formula's Z, 1.035 NH₄Cl's
+    // science-r08-nonspherical.md §3.1: (n² − 1) ÷ (n² + 2) = 1.027 R ÷ V_m, with R the gases'
+    // summed molar refraction as stated at 0 °C and 760 mm, each at its formula's Z, 1.027 NH₄Cl's
     // increment (the tool's NH4SH_IONIC_INCREMENT) and V_m from West's cell (COD 1010249:
     // a = 6.011 Å, c = 4.009 Å, two formula units). The tool holds its own copy of the rows; this
     // catches drift.
@@ -288,7 +289,7 @@ describe("NH₄SH, a stated stand-in", () => {
           sum + lorentz(1 + gas.nMinusOne(nm)) * gas.compressibility * idealMolarVolumeCm3PerMol,
         0,
       );
-      const expected = (1.035 * molarRefraction) / cellMolarVolumeCm3PerMol;
+      const expected = (1.027 * molarRefraction) / cellMolarVolumeCm3PerMol;
       expect(Math.abs(lorentz(file.n[i] ?? Number.NaN) / expected - 1)).toBeLessThan(2e-5);
     }
   });

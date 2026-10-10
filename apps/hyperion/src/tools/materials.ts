@@ -933,7 +933,7 @@ export function ionicIncrement(
   );
 }
 
-/** NH₄Cl's measured index and density, the ionic increment's calibration. */
+/** NH₄Cl's index and density, the ionic increment's calibration. */
 export interface IonicCalibration {
   /** n_D, the real index at the sodium D lines. */
   readonly indexD: number;
@@ -945,36 +945,97 @@ export interface IonicCalibration {
   readonly molarVolumeCm3PerMol: number;
 }
 
-/** NH₄Cl's density, g cm⁻³ (the CRC Handbook, 92nd ed., through Wikipedia, as the ruling takes it). */
-const NH4CL_DENSITY_G_PER_CM3 = 1.519;
-
 /** NH₄Cl's molar mass, g mol⁻¹, from CIAAW's conventional atomic weights (Cl 35.45). */
 const NH4CL_MOLAR_MASS_G_PER_MOL = 14.007 + 4 * 1.008 + 35.45;
 
 /**
- * NH₄Cl's measured index and density, the ionic increment's calibration
- * (science-r08-nonspherical.md §3.1): n_D = 1.642 and 1.519 g cm⁻³, at M = 53.489 g mol⁻¹.
+ * NH₄Cl's molar volume, cm³ mol⁻¹, from its X-ray cell: H. E. Swanson and E. Tatge, Standard X-ray
+ * Diffraction Powder Patterns, NBS Circular 539, vol. 1 (1953), pp. 59–61 (the cell on p. 61):
+ * Pm3̄m, a = 3.8756 Å at 26 °C, one formula unit. That is 35.056 cm³ mol⁻¹, 1.5258 g cm⁻³ at M =
+ * 53.489 g mol⁻¹ (science-r08-gases-2.md §2.1).
  *
  * @remarks
- * Both are the ruling's, read through Wikipedia: the index from Chemister.ru, the density from the
- * CRC Handbook. The Handbook of Mineralogy's sal ammoniac gives n = 1.639(1), a measured 1.532 g
- * cm⁻³ and a = 3.8756 Å with one formula unit (an X-ray 1.5258 g cm⁻³), which would lower the
- * increment to +2.7–3.1% and NH₄SH's n(550) by up to 0.007, inside its band (R08's Risks, for
- * "main").
+ * The Lorentz–Lorenz molar volume is the cell's, as NH₄SH's is West's cell
+ * ({@link NH4SH_MOLAR_VOLUME_CM3_PER_MOL}). The circular's own 1.527 g cm⁻³ does not follow from its
+ * cell at the period's constants or today's (1.5254–1.5259), and is not used. The Handbook of
+ * Mineralogy's sal ammoniac gives the same cell (its source is the circular). The bulk densities,
+ * the CRC Handbook's 1.519 and the Handbook of Mineralogy's measured 1.532, bracket the cell's and
+ * are not used. The index ({@link nh4clIndex}) is at room temperature, unstated, so the two may
+ * differ by a few kelvin. ±0.1% in V_m, the ruling's estimate, covers about ±12 K at Adenstedt
+ * 1936's linear expansion of 26.9 × 10⁻⁶ K⁻¹ at −10 °C (as Gopalakrishnan 1957's Table III quotes
+ * it), and moves the increment by ±0.001 and NH₄SH's n by about ±0.0008, inside its band.
  */
-export const NH4CL_CALIBRATION: IonicCalibration = {
-  indexD: 1.642,
-  densityGPerCm3: NH4CL_DENSITY_G_PER_CM3,
-  molarMassGPerMol: NH4CL_MOLAR_MASS_G_PER_MOL,
-  molarVolumeCm3PerMol: NH4CL_MOLAR_MASS_G_PER_MOL / NH4CL_DENSITY_G_PER_CM3,
-};
+export const NH4CL_MOLAR_VOLUME_CM3_PER_MOL = cellMolarVolumeCm3PerMol(3.8756 ** 3, 1);
 
 /** The sodium D lines' mean, 589.3 nm, as the Cuthbertsons' air wavelengths are read. */
 const SODIUM_D_NM = 589.3;
 
+/** The shortest wavelength of {@link nh4clIndex}'s fit, nm: 3130 Å, as the paper states its range. */
+const NH4CL_DISPERSION_SHORTEST_NM = 313;
+
+/** The longest wavelength of {@link nh4clIndex}'s fit, nm: 7682 Å, as the paper states its range. */
+const NH4CL_DISPERSION_LONGEST_NM = 768.2;
+
+/**
+ * NH₄Cl's real index at a wavelength: C. P. Gopalakrishnan, "The thermo-optic behaviour of calcium
+ * fluoride, ammonium chloride and zinc-blende at low temperatures", J. Indian Inst. Sci. 39 (1957)
+ * 8–12, eq. 7, his fit to the dispersion that G. Poinsot and J.-P. Mathieu measured ("Dispersion de
+ * réfraction de quelques cristaux cubiques", Ann. Phys. (Paris) 12e sér., 10 (1955) 481–486, DOI
+ * 10.1051/anphys/195510010481), with λ in µm: n² − 1 = 0.295904 + 0.944147 λ² ÷ (λ² − 0.1200²) +
+ * 0.376091 λ² ÷ (λ² − 0.1600²) + 4.3044 λ² ÷ (λ² − 69.0²).
+ *
+ * @remarks
+ * The paper states that the formula agrees with the measurements from 3130 to 7682 Å, and that its
+ * static limit, 6.92, matches the measured dielectric constant, 6.90. It gives 1.6391 at 589.3 nm,
+ * against the Handbook of Mineralogy's 1.639(1) and the 1.641 that NBS Circular 539 measured on its
+ * own sample by immersion. Poinsot and Mathieu's paper could not be read, so their data are read
+ * through this fit (science-r08-gases-2.md §2.1). The wavelengths are taken as the paper's, in air,
+ * as {@link SODIUM_D_NM} is: read as vacuum wavelengths, n moves by under 2 × 10⁻⁵.
+ *
+ * @param wavelengthNm - The wavelength, nm, within the fit's 313–768.2 nm.
+ * @throws RangeError outside the fit's range.
+ */
+export function nh4clIndex(wavelengthNm: number): number {
+  const inFit =
+    wavelengthNm >= NH4CL_DISPERSION_SHORTEST_NM && wavelengthNm <= NH4CL_DISPERSION_LONGEST_NM;
+  if (!inFit) {
+    throw new RangeError(
+      `${wavelengthNm} nm lies outside NH4Cl's dispersion fit, ${NH4CL_DISPERSION_SHORTEST_NM}–${NH4CL_DISPERSION_LONGEST_NM} nm`,
+    );
+  }
+  const um2 = (wavelengthNm / 1000) ** 2;
+  const nSquaredMinusOne =
+    0.295_904 +
+    (0.944_147 * um2) / (um2 - 0.12 ** 2) +
+    (0.376_091 * um2) / (um2 - 0.16 ** 2) +
+    (4.3044 * um2) / (um2 - 69 ** 2);
+  return Math.sqrt(1 + nSquaredMinusOne);
+}
+
+/**
+ * NH₄Cl's index and density, the ionic increment's calibration (science-r08-gases-2.md §2): n_D =
+ * 1.6391 from {@link nh4clIndex}, and V_m = 35.056 cm³ mol⁻¹ (1.5258 g cm⁻³) from the X-ray cell
+ * ({@link NH4CL_MOLAR_VOLUME_CM3_PER_MOL}), at M = 53.489 g mol⁻¹.
+ *
+ * @remarks
+ * They replace science-r08-nonspherical.md §3.1's n_D 1.642 (Chemister.ru) and 1.519 g cm⁻³ (the
+ * CRC Handbook), both read through Wikipedia, which gave +3.51%. The X-ray cell alone, keeping
+ * 1.642, gives +3.05%; NBS Circular 539's own 1.641 on the cell gives +2.93%.
+ */
+export const NH4CL_CALIBRATION: IonicCalibration = {
+  indexD: nh4clIndex(SODIUM_D_NM),
+  densityGPerCm3: NH4CL_MOLAR_MASS_G_PER_MOL / NH4CL_MOLAR_VOLUME_CM3_PER_MOL,
+  molarMassGPerMol: NH4CL_MOLAR_MASS_G_PER_MOL,
+  molarVolumeCm3PerMol: NH4CL_MOLAR_VOLUME_CM3_PER_MOL,
+};
+
 /**
  * NH₄Cl's ionic increment over NH₃ plus HCl, re-derived from {@link NH3_REFRACTIVITY} and
- * {@link HCL_REFRACTIVITY} (the same paper) at the D line: +3.51%.
+ * {@link HCL_REFRACTIVITY} (the same paper) at the D line: +2.68%.
+ *
+ * @remarks
+ * Re-derived with the dispersion at 486.1, 546.1, 589.3 and 656.3 nm it is +2.681% to +2.688%, flat
+ * across the measured range, which supports a single increment.
  */
 export const NH4CL_IONIC_INCREMENT = ionicIncrement(
   [NH3_REFRACTIVITY, HCL_REFRACTIVITY],
@@ -984,17 +1045,19 @@ export const NH4CL_IONIC_INCREMENT = ionicIncrement(
 );
 
 /**
- * NH₄SH's ionic increment of molar refraction over NH₃'s plus H₂S's, +3.5%: ammonium chloride's,
- * {@link NH4CL_IONIC_INCREMENT} (+3.51%), as science-r08-nonspherical.md §3.1 rules.
+ * NH₄SH's ionic increment of molar refraction over NH₃'s plus H₂S's, +2.7%: ammonium chloride's,
+ * {@link NH4CL_IONIC_INCREMENT} (+2.68%), as science-r08-nonspherical.md §3.1 rules.
  *
  * @remarks
  * The ruling's +4.5% (+4.3% to +4.7%) took NH₃ at the real gas's Z, 0.984 798, and HCl's index
  * from a secondary source with Z from 0.9924 to 1; with NH₃'s formula read at its theoretic density
- * and HCl from the same paper, the increment is +3.51% (R08's Risks, "Deviations in T3.b's
- * follow-up, as built"). SH⁻ is more polarisable than Cl⁻, and NH₄Br's increment is about +11% (the ruling's
- * estimate, from memory), so the stated band runs from 0 to +12%.
+ * and HCl from the same paper, the increment was +3.51% (R08's Risks, "Deviations in T3.b's
+ * follow-up, as built"). NH₄Cl's index and density from primary data, Poinsot and Mathieu's
+ * dispersion and the X-ray cell, lower it to +2.68% (science-r08-gases-2.md §2). SH⁻ is more
+ * polarisable than Cl⁻, and NH₄Br's increment is about +11% (the ruling's estimate, from memory),
+ * so the stated band runs from 0 to +12%.
  */
-export const NH4SH_IONIC_INCREMENT = 0.035;
+export const NH4SH_IONIC_INCREMENT = 0.027;
 
 /** The stated uncertainty band of {@link NH4SH_IONIC_INCREMENT}, 0 to +12%, as fractions. */
 export const NH4SH_IONIC_INCREMENT_BAND: readonly [number, number] = [0, 0.12];
@@ -1096,8 +1159,8 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     shape: "crystal",
     provenance: "standIn",
     paper:
-      "the estimate's inputs: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1–26, DOI 10.1098/rsta.1914.0001, for NH3's and HCl's dispersions; C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171–176, DOI 10.1098/rspa.1910.0003, for H2S's; C. D. West, \"The crystal structures of some alkali hydrosulfides and monosulfides\", Z. Kristallogr. 88 (1934) 97–115, DOI 10.1524/zkri.1934.88.1.97, for NH4SH's cell",
-    source: `a Lorentz–Lorenz estimate, not a measurement (science-r08-nonspherical.md §3.1, ruled 2026-10-10): the molar refraction of NH3 plus H2S from their gas dispersions as stated at 0 °C and 760 mm (view/atmosphere/rayleigh.ts's Cuthbertson rows, each at the density its paper reduces to: Z = ${NH3_REFRACTIVITY.compressibility.toFixed(6)} for NH3 and ${H2S_REFRACTIVITY.compressibility.toFixed(6)} for H2S), raised by NH4Cl's ionic increment of ${(NH4SH_IONIC_INCREMENT * 100).toFixed(1)}% (its n_D ${NH4CL_CALIBRATION.indexD} and ${NH4CL_CALIBRATION.densityGPerCm3} g cm⁻³ against NH3 and HCl from Cuthbertson 1914 at ${SODIUM_D_NM} nm, ${(NH4CL_IONIC_INCREMENT * 100).toFixed(2)}%), over the molar volume of West 1934's cell as the Crystallography Open Database gives it, entry 1010249, https://www.crystallography.net/cod/1010249.cif, SHA-256 e721ed9fed41cab1c267ecadd4de31692340d3bfcefd6d9183312ae3a746bb71, fetched 2026-10-10 (P4/nmm, a = 6.011 Å, c = 4.009 Å, two formula units: ${NH4SH_MOLAR_VOLUME_CM3_PER_MOL.toFixed(2)} cm³ mol⁻¹, ${(NH4SH_MOLAR_MASS_G_PER_MOL / NH4SH_MOLAR_VOLUME_CM3_PER_MOL).toFixed(4)} g cm⁻³). The cell is as published, at room temperature and possibly in kX units, about ±0.005 in n. The gas dispersions are measured over 480–670.8 nm (NH3) and 486.1–656.3 nm (H2S) and extrapolated beyond. No visible optical constants of NH4SH are published: Howett et al. 2007 (JOSA B 24, 126) measured it only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)`,
+      "the estimate's inputs: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1–26, DOI 10.1098/rsta.1914.0001, for NH3's and HCl's dispersions; C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171–176, DOI 10.1098/rspa.1910.0003, for H2S's; C. D. West, \"The crystal structures of some alkali hydrosulfides and monosulfides\", Z. Kristallogr. 88 (1934) 97–115, DOI 10.1524/zkri.1934.88.1.97, for NH4SH's cell; C. P. Gopalakrishnan, \"The thermo-optic behaviour of calcium fluoride, ammonium chloride and zinc-blende at low temperatures\", J. Indian Inst. Sci. 39 (1957) 8–12, eq. 7, for NH4Cl's dispersion as G. Poinsot and J.-P. Mathieu measured it (Ann. Phys. (Paris) 12e sér., 10 (1955) 481–486, DOI 10.1051/anphys/195510010481); H. E. Swanson and E. Tatge, Standard X-ray Diffraction Powder Patterns, NBS Circular 539, vol. 1 (1953), pp. 59–61, for NH4Cl's cell",
+    source: `a Lorentz–Lorenz estimate, not a measurement (science-r08-nonspherical.md §3.1, ruled 2026-10-10): the molar refraction of NH3 plus H2S from their gas dispersions as stated at 0 °C and 760 mm (view/atmosphere/rayleigh.ts's Cuthbertson rows, each at the density its paper reduces to: Z = ${NH3_REFRACTIVITY.compressibility.toFixed(6)} for NH3 and ${H2S_REFRACTIVITY.compressibility.toFixed(6)} for H2S), raised by NH4Cl's ionic increment of ${(NH4SH_IONIC_INCREMENT * 100).toFixed(1)}% (its n_D ${NH4CL_CALIBRATION.indexD.toFixed(4)}, from Gopalakrishnan 1957's fit to Poinsot and Mathieu 1955's dispersion, and ${NH4CL_CALIBRATION.densityGPerCm3.toFixed(4)} g cm⁻³, from the X-ray cell of NBS Circular 539 (Pm3̄m, a = 3.8756 Å at 26 °C, one formula unit), against NH3 and HCl from Cuthbertson 1914 at ${SODIUM_D_NM} nm, ${(NH4CL_IONIC_INCREMENT * 100).toFixed(2)}%; science-r08-gases-2.md §2), over the molar volume of West 1934's cell as the Crystallography Open Database gives it, entry 1010249, https://www.crystallography.net/cod/1010249.cif, SHA-256 e721ed9fed41cab1c267ecadd4de31692340d3bfcefd6d9183312ae3a746bb71, fetched 2026-10-10 (P4/nmm, a = 6.011 Å, c = 4.009 Å, two formula units: ${NH4SH_MOLAR_VOLUME_CM3_PER_MOL.toFixed(2)} cm³ mol⁻¹, ${(NH4SH_MOLAR_MASS_G_PER_MOL / NH4SH_MOLAR_VOLUME_CM3_PER_MOL).toFixed(4)} g cm⁻³). The cell is as published, at room temperature and possibly in kX units, about ±0.005 in n. The gas dispersions are measured over 480–670.8 nm (NH3) and 486.1–656.3 nm (H2S) and extrapolated beyond. No visible optical constants of NH4SH are published: Howett et al. 2007 (JOSA B 24, 126) measured it only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)`,
     licence:
       "estimated values from cited constants and CC0 crystal data (the Crystallography Open Database's entry 1010249); no data set is copied (decision-r08-licences.md row 5)",
     reduction:

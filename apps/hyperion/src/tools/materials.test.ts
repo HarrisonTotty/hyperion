@@ -14,6 +14,8 @@ import {
   NH3_REFRACTIVITY,
   NH4CL_CALIBRATION,
   NH4CL_IONIC_INCREMENT,
+  NH4CL_MOLAR_VOLUME_CM3_PER_MOL,
+  nh4clIndex,
   NH4SH_IONIC_INCREMENT,
   NH4SH_IONIC_INCREMENT_BAND,
   nh4shIndex,
@@ -154,8 +156,52 @@ describe("the derived files", () => {
     expect(NH3_REFRACTIVITY.compressibility).toBeCloseTo(0.998_136, 6);
   });
 
-  it("re-derive NH₄Cl's increment, +3.51%, from NH₃ and HCl in the same paper", () => {
-    expect(NH4CL_IONIC_INCREMENT).toBeCloseTo(0.035_1, 4);
+  it("re-derive NH₄Cl's increment, +2.68%, from NH₃ and HCl in the same paper", () => {
+    expect(NH4CL_IONIC_INCREMENT).toBeCloseTo(0.026_8, 4);
+  });
+
+  it("take NH₄Cl's n_D, 1.6391, from Gopalakrishnan 1957's fit to Poinsot and Mathieu", () => {
+    // science-r08-gases-2.md §2.1: the Handbook of Mineralogy's sal ammoniac gives n = 1.639(1), and
+    // NBS Circular 539 (vol. 1, p. 61) measured 1.641 on its own sample.
+    const indexD = nh4clIndex(589.3);
+    expect(Math.abs(indexD - 1.639_1)).toBeLessThan(1e-4);
+    expect(Math.abs(indexD - 1.639)).toBeLessThan(0.001);
+    expect(Math.abs(indexD - 1.641)).toBeLessThan(0.002);
+  });
+
+  it("evaluate NH₄Cl's fit over its stated 3130–7682 Å and refuse a wavelength outside it", () => {
+    expect(() => nh4clIndex(313)).not.toThrow();
+    expect(() => nh4clIndex(768.2)).not.toThrow();
+    expect(() => nh4clIndex(312)).toThrow(RangeError);
+    expect(() => nh4clIndex(769)).toThrow(RangeError);
+    expect(() => nh4clIndex(Number.NaN)).toThrow(RangeError);
+  });
+
+  it("take NH₄Cl's density, 1.5258 g cm⁻³, from NBS Circular 539's cell, a = 3.8756 Å", () => {
+    expect(NH4CL_MOLAR_VOLUME_CM3_PER_MOL).toBeCloseTo(35.056, 3);
+    expect(
+      Math.abs(NH4CL_CALIBRATION.molarMassGPerMol / NH4CL_MOLAR_VOLUME_CM3_PER_MOL - 1.525_8),
+    ).toBeLessThan(1e-4);
+  });
+
+  it("build NH₄Cl's calibration from the fit at the D line and the cell", () => {
+    expect(NH4CL_CALIBRATION.indexD).toBe(nh4clIndex(589.3));
+    expect(NH4CL_CALIBRATION.molarVolumeCm3PerMol).toBe(NH4CL_MOLAR_VOLUME_CM3_PER_MOL);
+    expect(NH4CL_CALIBRATION.densityGPerCm3).toBe(
+      NH4CL_CALIBRATION.molarMassGPerMol / NH4CL_MOLAR_VOLUME_CM3_PER_MOL,
+    );
+  });
+
+  it("find NH₄Cl's increment flat to 10⁻⁴ over 486.1–656.3 nm with the dispersion", () => {
+    const increments = [486.1, 546.1, 589.3, 656.3].map((nm) =>
+      ionicIncrement(
+        [NH3_REFRACTIVITY, HCL_REFRACTIVITY],
+        nm,
+        NH4CL_MOLAR_VOLUME_CM3_PER_MOL,
+        nh4clIndex(nm),
+      ),
+    );
+    expect(Math.max(...increments) - Math.min(...increments)).toBeLessThan(1e-4);
   });
 
   it("take NH₄SH's increment as NH₄Cl's to 0.1%", () => {
@@ -167,37 +213,41 @@ describe("the derived files", () => {
     // D line, from a secondary source, with its Z read between 0.9924 and 1 (+4.7% to +4.3%).
     const realNh3 = { ...NH3_REFRACTIVITY, compressibility: 0.984_798 };
     const secondaryHcl = { aPerUm2: 4.456e-4 * (118.49 - 1 / 0.5893 ** 2), bPerUm2: 118.49 };
+    // Its NH₄Cl inputs, through Wikipedia: n_D 1.642 (Chemister.ru) and 1.519 g cm⁻³ (the CRC
+    // Handbook), at M = 53.489 g mol⁻¹.
     const increment = ionicIncrement(
       [realNh3, { ...secondaryHcl, compressibility: 0.992_4, source: "HCl" }],
       589.3,
-      NH4CL_CALIBRATION.molarVolumeCm3PerMol,
-      NH4CL_CALIBRATION.indexD,
+      53.489 / 1.519,
+      1.642,
     );
     expect(increment).toBeCloseTo(0.047, 3);
   });
 
   // science-r08-nonspherical.md §3.1's method; its 1.685, 1.648 and 1.632 at δ = +4.5% took NH₃'s
-  // real-gas Z (R08's Risks, "Deviations in T3.b's follow-up, as built").
+  // real-gas Z (R08's Risks, "Deviations in T3.b's follow-up, as built") and NH₄Cl's inputs through
+  // Wikipedia (science-r08-gases-2.md §2).
   it.each([
-    [380, 1.681_2],
-    [550, 1.644_4],
-    [780, 1.628_9],
-  ] as const)("estimate NH₄SH's index at %i nm as %f, with the +3.5% increment", (nm, index) => {
+    [380, 1.674_4],
+    [550, 1.638_2],
+    [780, 1.622_8],
+  ] as const)("estimate NH₄SH's index at %i nm as %f, with the +2.7% increment", (nm, index) => {
     expect(Math.abs(nh4shIndex(nm) - index)).toBeLessThan(5e-4);
   });
 
-  it("keep NH₄SH's estimate within +0.075 and −0.03 over the increment's band", () => {
+  it("keep NH₄SH's estimate within +0.082 and −0.024 over the increment's band", () => {
     const [low, high] = NH4SH_IONIC_INCREMENT_BAND;
     for (const nm of MATERIAL_GRID_NM) {
       const n = nh4shIndex(nm);
-      expect(nh4shIndex(nm, high) - n).toBeLessThan(0.075);
-      expect(n - nh4shIndex(nm, low)).toBeLessThan(0.03);
+      expect(nh4shIndex(nm, high) - n).toBeLessThan(0.082);
+      expect(n - nh4shIndex(nm, low)).toBeLessThan(0.024);
     }
   });
 
-  it("state NH₄SH's band over the grid, +0.074 and −0.029, in its file", () => {
+  it("state NH₄SH's band over the grid, +0.081 and −0.022, in its file", () => {
+    // The foot is 0.02247: science-r08-gases-2.md §2.2's −0.023 rounded its 4-figure 0.0225.
     const nh4sh = DERIVED_MATERIALS.find((file) => file.key === "NH4SH");
-    expect(nh4sh?.standIn).toContain("within +0.074 and −0.029");
+    expect(nh4sh?.standIn).toContain("within +0.081 and −0.022");
   });
 
   it("read HCl's row as the paper prints it, with n = 3 × 10¹⁰ ÷ λ, to 2 × 10⁻⁵", () => {

@@ -2269,13 +2269,15 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
       - Its stand-in is non-absorbing, with a Lorentz–Lorenz index (ruled 2026-10-10,
         science-r08-nonspherical.md §3.1).
         - The molar refraction is NH₃'s plus H₂S's from their measured dispersions (`rayleigh.ts`'s
-          Cuthbertson rows), times 1.035, ammonium chloride's ionic increment (re-derived
+          Cuthbertson rows), times 1.027, ammonium chloride's ionic increment (re-derived
           2026-10-10 from NH₃ and HCl in the same Cuthbertson paper, once NH₃'s formula was read at
-          its theoretic density: Risks, "Deviations in T3.b's follow-up, as built").
+          its theoretic density: Risks, "Deviations in T3.b's follow-up, as built"; then from
+          NH₄Cl's X-ray cell and measured dispersion: "Deviations in T3.b's second follow-up, as
+          built").
         - The density is 1.1717 g cm⁻³, from West 1934's cell (COD 1010249). The ruling's 1.1715
           is the entry's rounded cell volume; n differs by about 3 × 10⁻⁴.
-        - The result is 1.681 at 380 nm, 1.644 at 550 nm and 1.629 at 780 nm, within +0.074 and
-          −0.029 for an increment from 0 to +12%. The ruling's 1.685, 1.648 and 1.632 took NH₃ at
+        - The result is 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and
+          −0.022 for an increment from 0 to +12%. The ruling's 1.685, 1.648 and 1.632 took NH₃ at
           the real gas's Z.
         - It replaces the earlier 1.80, which Sromovsky et al. 2017 state without a source and
           which would need a 22% larger molar refraction.
@@ -2340,9 +2342,9 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     three figures), presumably Wolff et al. 2010's MARCI values (Icarus 208, 143), unconfirmed.
   - Tests:
     - NH₄SH's n is 1.648 ± 0.001 at 550 nm and falls monotonically from 380 to 780 nm, with
-      k = 0 (replacing the 1.80 test). _Superseded 2026-10-10:_ 1.644 ± 0.001, with NH₃ at its
+      k = 0 (replacing the 1.80 test). _Superseded 2026-10-10:_ 1.638 ± 0.001, with NH₃ at its
       theoretic density and the increment re-derived (Risks, "Deviations in T3.b's follow-up, as
-      built");
+      built" and "Deviations in T3.b's second follow-up, as built");
     - Mars dust's k at 380 nm lies above its 440 nm value (0.00767) and at or below the
       log-linear extrapolation of its 440–500 nm rows (0.0107).
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/materials`.
@@ -5789,7 +5791,9 @@ generator, and the reference's sampling needs no domain tag.
       (−5.6 × 10⁻⁴), of which H₂S's corrected Z and coefficients make up 3.7 × 10⁻⁴. Stating
       δ as 0.0351 would give 1.6445.
     - The other 14 files regenerate byte for byte from the T5.b lane's inputs.
-    - _Finding, for main (unchanged here):_ the calibration's inputs are the ruling's, read
+    - _Finding, for main, ruled 2026-10-10_ (`science-r08-gases-2.md` §2: the X-ray cell (NBS
+      Circ. 539) and Poinsot and Mathieu's dispersion; δ +2.68%, n(550) 1.638; built in "Deviations
+      in T3.b's second follow-up, as built"): the calibration's inputs are the ruling's, read
       through Wikipedia: the density from the CRC Handbook (92nd ed.), the index from
       Chemister.ru. The Handbook of Mineralogy's sal ammoniac gives n = 1.639(1), a measured 1.532
       g cm⁻³ and a = 3.8756 Å (Z = 1, an X-ray density of 1.5258). NH₄SH's molar volume is its X-ray
@@ -5881,6 +5885,56 @@ generator, and the reference's sampling needs no domain tag.
     Hout 1979 and Haverkort et al. 1983.
   - _Drafted for the owner:_ a row of the roadmap's "Brainstorm corrections" table (NH₃'s "3%"
     in the brainstorm's "Atmosphere"; `README.md`).
+- **Deviations in T3.b's second follow-up, as built** (2026-10-10, lane r08-gases-2;
+  `src/tools/materials.ts`, `materials/ammonium-hydrosulphide.json` and their tests). It builds
+  `science-r08-gases-2.md` §2, NH₄Cl's optical inputs from primary data.
+  - _Sources read_ (the ruling's downloads): NBS Circular 539, vol. 1, pp. 59–61 (Swanson and
+    Tatge 1953; on p. 61, Pm3̄m, a = 3.8756 Å at 26 °C, one formula unit, n = 1.641 on its sample);
+    Gopalakrishnan 1957 (eq. 7, valid "from 3130 Å.U. to 7682 Å.U.", static limit 6.92 against the
+    measured 6.90); the Handbook of Mineralogy's sal ammoniac (n = 1.639(1), the same cell).
+  - _Citations corrected from §2, by the review's science check._ The cell, its density and n
+    are on the circular's p. 61, in an entry that runs pp. 59–61 (§2.1 cites p. 59). Poinsot and
+    Mathieu 1955 is Ann. Phys. (Paris) 12e sér., 10, 481–486 (Crossref, DOI
+    10.1051/anphys/195510010481); the 483 that §2.1 gives is Gopalakrishnan's reference list.
+    The circular's own 1.527 g cm⁻³ does not follow from its cell at the period's constants or
+    today's (1.5254–1.5259), so the tool's doc no longer says it "uses the period's constants";
+    no number depends on it. The ±0.1% in V_m now cites Adenstedt 1936's 26.9 × 10⁻⁶ K⁻¹ at
+    −10 °C (Gopalakrishnan's Table III), about ±12 K.
+  - _As ruled._ `NH4CL_MOLAR_VOLUME_CM3_PER_MOL` (35.056 cm³ mol⁻¹, 1.5258 g cm⁻³) and
+    `nh4clIndex(λ)` (1.6391 at 589.3 nm) replace 1.519 g cm⁻³ and 1.642. `NH4CL_IONIC_INCREMENT`
+    is +2.681%, within 7 × 10⁻⁵ of itself over 486.1–656.3 nm, and `NH4SH_IONIC_INCREMENT` is
+    0.027. NH₄SH's n is 1.674, 1.638 and 1.623 at 380, 550 and 780 nm (1.67445, 1.63815 and
+    1.62282); all 81 values fall by 0.0061–0.0067.
+  - _The band's foot is −0.022, not §2.2's −0.023._ The span is +0.08066 and −0.02247, and the
+    file prints three places, so its text, the tool's test and T5.b's sub-bullet read "+0.081 and
+    −0.022". The ruling rounded its four-figure 0.0225. The test bounds (< 0.082, < 0.024) are as
+    ruled.
+  - _`nh4clIndex`'s range is 313–768.2 nm_, the paper's 3130–7682 Å, where §2.3 writes 768. It
+    throws a `RangeError` outside it, NaN included. The fit's wavelengths are taken in air, as
+    `SODIUM_D_NM` is; read as vacuum wavelengths, n_D moves by 1.3 × 10⁻⁵.
+  - _The temperature mismatch, for main._ The cell is at 26 °C and the index at an unstated room
+    temperature. §2.1's ±0.1% in V_m moves δ by ±0.001 and NH₄SH's n by ±0.0008 (computed), not
+    the ±0.0002 it states. Both lie inside the band; the tool's doc states ±0.0008.
+  - _The file's text._ Beyond printing n_D and ρ, `source` names where they come from (Gopalakrishnan
+    1957's fit to Poinsot and Mathieu 1955, and NBS Circular 539's cell); `paper` gains both, as
+    ruled.
+  - _Regeneration._ The fetched sources that the tool's `main` also needs were deleted after
+    T5.b, so the two derived files were written from the tool's `DERIVED_MATERIALS` by a scratch
+    driver that does what `main` does for them (`JSON.stringify(file, null, 2)` and a newline),
+    then formatted with Prettier. On the previous tool the driver reproduces both committed files
+    byte for byte. Only `ammonium-hydrosulphide.json` changes (`n`, `paper`, `source` and
+    `standIn`); the CO₂ file is unchanged, and no fetched file is touched.
+  - _Goldens:_ none moves (§2.5). No crate reads the material files, `channels.json` is fitted
+    over gases only and `channels.test.ts` passes unchanged, and NH₄SH is not a gated case.
+  - _Superseded:_ `science-r08-nonspherical.md` §3.1's +4.5% and 1.648, by +2.7% and 1.638; its
+    method stands. The ruling's file is not edited.
+  - _Tests added:_ in the tool, `nh4clIndex(589.3)` = 1.6391 ± 10⁻⁴ (within 0.001 of the
+    Handbook's 1.639 and 0.002 of NBS's 1.641), its range with both ends, the cell's 1.5258 ±
+    10⁻⁴ g cm⁻³, the calibration built from the two, and δ flat within 10⁻⁴ over 486.1–656.3 nm. The "+4.7% with its own inputs" test now carries the
+    ruling's n_D 1.642 and V_m = 53.489 ÷ 1.519 itself. In the renderer, NH₄SH's n(550) is 1.638
+    ± 0.001 and the drift check's increment 1.027.
+  - _Not built here:_ §1 (the heat capacities), which is P14.T49.b's and T24.e's; a docs pass
+    writes its plan text.
 - **Deviations in T4.a, as built** (2026-10-10). `channels.ts` (the family and the fit),
   `spectralColour.ts` (the colour pipeline) and `fittedChannels.ts` (the triple the renderer
   reads), with `channels.test.ts`, `spectralColour.test.ts`, `channels.json` and
