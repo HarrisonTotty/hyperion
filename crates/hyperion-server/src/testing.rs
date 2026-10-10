@@ -31,7 +31,7 @@ use crate::requests::{Handler, HandlerFuture, Replies, SubscribeFuture, to_frame
 use crate::stats::{OutboundCounters, RequestCounters};
 use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
-use crate::{AppState, Server, ServerConfig, ServerConfigBuilder, ServerStats};
+use crate::{AppState, Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService};
 
 /// Upper bound on any single wait.
 ///
@@ -86,6 +86,10 @@ impl Harness {
 
     /// [`Harness::start_with_limits`], with the configuration `configure` makes of the harness's,
     /// as a test that injects the scene's knowledge or craft needs.
+    ///
+    /// The harness's configuration has one CPU worker and the sky off ([`SkyService::Unsupported`],
+    /// though the server's default serves it since rendering plan R13's R13.T2), so that an open in
+    /// a test of something else starts no sky tables on the worker; `configure` may turn it on.
     pub(crate) async fn start_configured(
         handler: impl Handler + 'static,
         limits: ConnectionLimits,
@@ -107,7 +111,8 @@ impl Harness {
         let config = configure(
             ServerConfig::builder()
                 .data_dir(data_dir.path())
-                .workers(std::num::NonZeroUsize::MIN),
+                .workers(std::num::NonZeroUsize::MIN)
+                .sky_service(SkyService::Unsupported),
         )
         .build();
         let server = timeout(

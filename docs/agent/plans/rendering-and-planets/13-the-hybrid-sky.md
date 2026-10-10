@@ -220,7 +220,9 @@ merge_shells, SkyCensus, SkyStar}` and T8.i's listing by the band texel's radius
     `sky::limits::{Glare, eye_offsets, eye_cut}`; `sky::colour::{star_colour, StarColour,
 AtmosphereGrid, surface_gravity}` and `StarColour::reddened`.
   - The server's sky pipeline (`crates/hyperion-server/src/{requests,compute}/sky.rs`,
-    `bulk/sky.rs`), T11.c's switch (`--serve-sky`, `HYPERION_SERVE_SKY`, off by default; R13.T1),
+    `bulk/sky.rs`), T11.c's switch (`--serve-sky`, `HYPERION_SERVE_SKY`, off by default at R13.T1;
+    on by default since the task under T2, "The sky on by default", `--serve-sky=false` turning it
+    off),
     and **R06.T11.d**, built at 497a2a9d (R13.T1): shells as bulk jobs
     (`compute::sky::delivery_steps`), `SkyLayerCensusDto::{complete_to_ly, complete_to_rays_ly,
 is_final}` and `SkyResponse::is_final`, both `final` on the wire, with R06.T11.g's inner shell
@@ -500,7 +502,8 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
     2026-10-08:** RM3 ships the real tier at V_P = 5.0 with the band for the rest (Design note 9's
     reply without synthetic stars), labelled by Design note 13's interim note, and the server's
     sky is on by default once R13.T2, with its real limit of 2,000 ly (decided 2026-10-09), and
-    R06.T11.d have both landed (R06.T11.d, "The default switch and the interim"). When R13.T7
+    R06.T11.d have both landed (R06.T11.d, "The default switch and the interim"); built on
+    2026-10-10, after T2.b (Risks, "The sky on by default, as built"). When R13.T7
     lands, V_P moves to 4.5 and the synthetic stars fill everything brighter than the cut beyond
     R(u); the real tier's code does not change again. The owner's choice of the interim rested on
     an estimate of 11–14 minutes; R13.T1 measured the real tier at V_P 5.0 without the limit at
@@ -687,6 +690,17 @@ keep it for the limit's lifting.
   `cargo test -p hyperion-sim sky::census`, `cargo test -p hyperion-protocol sky`,
   `cargo test -p hyperion-server --test sky`, `pnpm --filter @hyperion/protocol test`,
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky`, `just ci`.
+
+- **The sky on by default** (after T2.b; Design note 15, decided by the owner 2026-10-08; R06.T11.d,
+  "The default switch and the interim"). `SkyService`'s default becomes `Served`, and `--serve-sky`
+  takes a value so that it can still be turned off (`--serve-sky=false`). The README, the server's
+  comments and `config`'s tests follow, and `tests/sky.rs`'s two switch-off tests turn it off
+  themselves. The first reply near the Sun is measured again against R06.T11.g's figure. Files:
+  `README.md`, `crates/hyperion-server/src/{config,lib,testing}.rs`,
+  `crates/hyperion-server/src/requests/{mod,sky}.rs`,
+  `crates/hyperion-server/tests/{cli,sky}.rs`, `crates/hyperion-server/tests/common/mod.rs`.
+  Acceptance: `cargo test -p hyperion-server`, `just ci`. As built: Risks, "The sky on by default,
+  as built".
 
 ### R13.T3 The band's kept profiles
 
@@ -1850,3 +1864,72 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
     say the switch flips when R06.T8.g lands. They are in `config.rs` (the module docs,
     `SkyService` and the builder's `sky_service`), `requests/mod.rs`, `requests/sky.rs`'s module
     docs and `tests/sky.rs`'s two switch-off tests.
+- **The sky on by default, as built (2026-10-10).** Built on the lane after T2.b (b8746e25 and
+  7523a618 on `rendering-and-planets`; 89de5c96 and 3cb7bb59 on the lane), from
+  `rendering-and-planets` at 9b481b4e, merged again at 49a178ba before the commit. The task under
+  T2, "The sky on by default", in full, with these details.
+  - **The default.** `SkyService`'s default is `Served`, so `ServerConfig::builder()` and a server
+    started with no option serve the sky, and an open starts its galaxy's sky tables (R06.T11.g).
+  - **The option's form.** `--serve-sky[=<BOOL>]`: clap's `num_args = 0..=1` with
+    `require_equals`, `default_value` and `default_missing_value` both `true`, over the boolish
+    parser the variable already used. `--serve-sky=false` turns the sky off, as do `no`, `off`,
+    `0` and the rest of clap's boolish values, in any case; given alone, `--serve-sky` is on, so a
+    command line that gave it still works. A word after it (`--serve-sky false`) is refused as an
+    unexpected argument, since the value takes an equals sign, and a value that is not boolish,
+    the empty one included, is refused as the variable's is. `HYPERION_SERVE_SKY` is unchanged.
+    The name is kept and no `--no-serve-sky` is added: the CLI has no negated options, every
+    switch's variable takes the boolish values, and R06.T11.d names `--serve-sky=false`. The help
+    reads "Serve `sky` requests; `--serve-sky=false` answers them `unsupported`", with
+    `[default: true]` and `[possible values: true, false]`.
+  - **Deviation: the test harnesses keep the sky off.** `TestServer::config` (the integration
+    tests' and the server bench's) and the unit `Harness` set `SkyService::Unsupported`. Served,
+    every open in a test of something else would start its galaxy's sky tables on the pool
+    (31 CPU-s built serially, 47 on 15 workers: R06's Risks, "Deviations in T11.g, as built"), in
+    the abuse, density map, galaxy, universes and websocket suites among others, sharing their
+    workers and moving their pool counters. The sky's tests and the bench turn it on, as before.
+    `tests/sky.rs`'s two switch-off tests turn it off themselves (`sky_off_server`), and so does
+    `requests`' `kinds_without_a_handler_are_answered_unsupported`.
+  - **Tests.** `config`'s `the_sky_is_served_unless_its_switch_is_off` (it was
+    `the_sky_is_served_only_when_its_switch_is_on`): the default and the builder's, the switch
+    alone, five boolish values each way, a repeat refused as every option's is, an empty or
+    unknown value, and a word after the switch. `defaults_match_the_builder` states `Served`;
+    `every_option_is_read` gives `--serve-sky=false` and `the_builder_overrides_defaults` sets
+    `Unsupported`, the values that are not the default. New in `tests/cli.rs`:
+    `the_sky_is_served_unless_it_is_turned_off`, in which the binary's start log states
+    `sky_service=Served` with no option, and `Unsupported` with `--serve-sky=false`, with
+    `HYPERION_SERVE_SKY=0`, and with `--serve-sky=false` over `HYPERION_SERVE_SKY=1`; and
+    `the_serve_sky_variable_takes_only_a_yes_or_a_no`, in which the binary refuses `maybe` and the
+    empty value as a usage error naming `--serve-sky`.
+  - **Docs.** The root README's row (on) and its paragraph, which said the switch waits for
+    R06.T8.g; `config.rs`'s module docs, `SkyService` and the builder's `sky_service`;
+    `requests/mod.rs`'s `Handlers` and its test; `requests/sky.rs`'s module docs; `AppState`'s
+    field. The roadmap README holds no text that waits on T8.g: its "Decided: the hybrid sky"
+    already says on by default once R13.T2 and R06.T11.d land. Pointers under R06.T11.d's "The
+    default switch and the interim", R06's T11.c record and Design note 15.
+  - **Not changed.** The descent spike's runner (`apps/hyperion/scripts/descentSpike.sh`) and
+    `just server` start the server with the default; the spike opens no universe and asks no sky,
+    so it is unchanged. The client needs nothing: it already draws a served sky and labels an
+    unsupported one.
+  - **The first sky with the default on** (2026-10-10, provisional). The server bench
+    `sky_near_sun_cold`, release, under the heavy lock, in a scope at `CPUQuota=400%`, as the
+    orchestrator asked, which makes the default workers 3 (`decision-r06-t11d-first-sky.md` §1.1;
+    each step's census job-seconds are 3.0 times its wall). Load 5.5–7.2 over the first reply and
+    16–20 over the session's. The first reply near the Sun in **23.13 s wall and 65.0 CPU-s**,
+    3,192 stars, cut V 7.766, the same census as T2.b's (C 2,793, D 279 and E 46 listed). Its CPU
+    is within T17's 150 CPU-s; it is below T2.b's 96.4 at 15 workers because 3 workers contend
+    less for the machine's 8 SMT cores (R06.T8.g's ×1.28; ×1.48 here). Its wall is the scope's: 65
+    CPU-s on 3 workers is about 22 s at least, so it does not compare with the 10 s budget, which
+    T2.b's 7.16 s at 15 workers on the same code path meets; a like-for-like wall needs a run at 15
+    workers without the quota, which was not taken. The caps and plan were done at 5.80 s (1.96 s
+    in T2.b), the march at 11.68 s. The tables were held 17.80 s after the open's answer, 39.5
+    CPU-s; 250 ly at 59.8 s (174.6 CPU-s); 500 ly at 274.7 s (816.1 CPU-s). The session's first
+    reply, from the open's answer with the tables building, took 40.95 s and 107.6 CPU-s. The
+    default changes no computation: the bench serves the sky as the default does, and its counts
+    are T2.b's.
+  - **Acceptance as run.** Before the reviews: `cargo nextest run -p hyperion-server` passed, 510
+    of 510 with 5 skipped (636 s at 4 threads), with its doctest; `cargo fmt --check`, the
+    workspace's clippy with `-D warnings` and `pnpm format:check` passed. After the reviews' fixes
+    and the merge of `rendering-and-planets` at 49a178ba: `cargo fmt --check`, and the 29 tests the
+    change touches (`tests/cli.rs`' 8, `config`'s 18, `requests`'
+    `kinds_without_a_handler_are_answered_unsupported` and `tests/sky.rs`'s two switch-off tests)
+    passed; the commit's hooks ran the workspace's clippy. `just ci` runs at integration.

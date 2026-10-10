@@ -3,9 +3,10 @@
 //! against the sim's own census, its stars and band in R03's bulk frames as the manifest states
 //! them, the stars, texels and host discs against the sim's for the same query, its census's cells
 //! served again from the server's cache, the galaxy's tables built once for every sky of it and
-//! started when its universe is opened, the fields a request it cannot serve names, the landing
-//! switch, off by default, under which `sky` is `unsupported`, and a sky arriving nearest first,
-//! each reply the census to its stated radii and the last the census of its whole plan.
+//! started when its universe is opened, the fields a request it cannot serve names, the switch
+//! turned off (it is on by default since rendering plan R13's R13.T2), under which `sky` is
+//! `unsupported`, and a sky arriving nearest first, each reply the census to its stated radii and
+//! the last the census of its whole plan.
 //!
 //! Every sky's query states RM3's synthetic ceiling, V 5.0 (rendering plan R13, R13.T2.b), its cut
 //! being deep enough here, so layers C, D and E list only within their caps towards each star's
@@ -13,15 +14,16 @@
 //! to is that query's, merged to its plan's completeness (`merge_shells`) as the server merges
 //! every reply. A forced cap stands in for the real boundary, stating no count beyond it.
 //!
-//! Every server here turns the sky on ([`SkyService::Served`]) but the switch's own test, and
-//! forces its sky's caps to a small radius ([`SkyCaps::forced`]), so that a census near the Sun
-//! takes seconds in a test build rather than the thousands of CPU-seconds of one to the derived
-//! caps. Most of those seconds are the few cells of layers D and E about the observer, whose every
-//! system the census generates there, so a census of more cells runs longer mostly by its jobs'
-//! count. A served sky also marches its band, 24,576 rays, some 27 CPU-s in a test build. Forced
-//! caps read tables that hold no star, but for the test of the band's light, which builds the
-//! galaxy's own on the pool. Each wait is on what the server reports (its statistics, or the
-//! frames it sends), bounded by the harness's patience.
+//! The harness keeps the sky off. Every server here but those of the switch's own tests, which turn
+//! it off themselves, turns it on ([`SkyService::Served`]) and forces its sky's caps to a small
+//! radius ([`SkyCaps::forced`]), so that a census near the Sun takes seconds in a test build rather
+//! than the thousands of CPU-seconds of one to the derived caps. Most of those seconds are the few
+//! cells of layers D and E about the observer, whose every system the census generates there, so
+//! a census of more cells runs longer mostly by its jobs' count. A served sky also marches its
+//! band, 24,576 rays, some 27 CPU-s in a test build. Forced caps read tables that hold no star, but
+//! for the test of the band's light, which builds the galaxy's own on the pool. Each wait is on
+//! what the server reports (its statistics, or the frames it sends), bounded by the harness's
+//! patience.
 
 mod common;
 
@@ -905,11 +907,21 @@ async fn an_eye_with_a_cone_is_a_bad_request_naming_cone() {
     server.stop().await;
 }
 
-/// With its landing switch off, as it is by default until R06.T8.g, the server answers `sky` as it
-/// did before R06.T11.a, `unsupported`, and no job of it reaches the pool (R06.T11.c).
+/// A server with the sky's switch turned off, as `--serve-sky=false` turns it, and its data
+/// directory, which the caller keeps until the server has stopped.
+async fn sky_off_server() -> (TestServer, TempDir) {
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = TestServer::config(data_dir.path())
+        .sky_service(SkyService::Unsupported)
+        .build();
+    (TestServer::start_with(config).await, data_dir)
+}
+
+/// With its switch turned off, the server answers `sky` as it did before R06.T11.a,
+/// `unsupported`, and no job of it reaches the pool (R06.T11.c).
 #[tokio::test]
 async fn with_the_switch_off_a_sky_is_unsupported_and_no_job_reaches_the_pool() {
-    let server = TestServer::start().await;
+    let (server, _data_dir) = sky_off_server().await;
     let (mut client, universe) = opened(&server).await;
     let before = server.stats();
     let error = refused(&mut client, sky(&universe)).await;
@@ -1318,11 +1330,11 @@ async fn opening_a_universe_starts_its_sky_tables_which_a_sky_shares() {
     server.stop().await;
 }
 
-/// With the sky's landing switch off, as it is by default, opening a universe starts no sky tables
-/// and looks for none (R06.T11.g).
+/// With the sky's switch turned off, opening a universe starts no sky tables and looks for none
+/// (R06.T11.g).
 #[tokio::test]
 async fn with_the_switch_off_an_open_starts_no_sky_tables() {
-    let server = TestServer::start().await;
+    let (server, _data_dir) = sky_off_server().await;
     let (client, _universe) = opened(&server).await;
     let tables = server.stats().sky_tables();
     assert_eq!(

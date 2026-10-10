@@ -1710,10 +1710,11 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f, T8.m, P11.T16 and
   P11.T17.c).** Its landing leaves the server's sky off by default. R06.T11.d turns T11.c's switch
-  on (decided 2026-10-08, `decision-p11-t17c-bright.md`): at P11.T17.c's verdicts the cold census
-  stays near 10⁶ CPU-s, and only T11.d delivers it nearest first. Decided 2026-10-05
-  (`decision-r06-census-cost.md`), under decision item 2's trigger. Its inputs and gates were
-  amended 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`).
+  on (decided 2026-10-08, `decision-p11-t17c-bright.md`; moved again on 2026-10-08 to after
+  R13.T2: R06.T11.d, "The default switch and the interim"; built 2026-10-10): at P11.T17.c's
+  verdicts the cold census stays near 10⁶ CPU-s, and only T11.d delivers it nearest first. Decided
+  2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Its inputs and gates
+  were amended 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`).
   Near the Sun, the multiple-system bound left 98% of the census in generation. The per-record
   bound becomes one per star, computed before generation. The order is:
   1. the record's composition (`draw_metallicity`);
@@ -2414,7 +2415,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   `sky::limits::eye_offsets`', its own eye limit less its texel's (R06.T9.h; decided 2026-10-06,
   `decision-r06-t9c-glare.md`). The wire's V is the star's own, M_V + DM + v★(A_V) A_V, which the
   census cuts, and its camera term is relative to it (addendum item 4). As built: Risks,
-  "Deviations in T11.c, as built" (the switch is `--serve-sky`, `HYPERION_SERVE_SKY`, off).
+  "Deviations in T11.c, as built" (the switch is `--serve-sky`, `HYPERION_SERVE_SKY`, off; on by
+  default since R13.T2: R13's Risks, "The sky on by default, as built").
 - **R06.T11.d Delivery nearest first (new; after T8.g, T8.i, T10 and T11.a–c; signed off).** Decided
   2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and
   adopted on 2026-10-05 under the owner's standing delegation
@@ -2467,7 +2469,9 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     (`--serve-sky=false`) so that it can still be turned off. The README and `config`'s tests
     follow. The first reply's time is still measured against T17's first-sky budget. Its levers were
     ruled on 2026-10-08 (`decision-r06-t11d-first-sky.md`): R06.T11.g. A miss after T11.g is
-    recorded as a miss and goes to T17 and a decision agent.
+    recorded as a miss and goes to T17 and a decision agent. As built (2026-10-10, after R13.T2.b):
+    on by default, with `--serve-sky=false` to turn it off (R13's Risks, "The sky on by default, as
+    built").
 
   The protocol (T10) gains each layer's `complete_to_ly`, a per-ray table once T7.b lands, and
   `final`. A request for a new sky supersedes the old one. Any later consumer of the sky's list
@@ -7753,6 +7757,7 @@ CensusCost)`.
       `decision-p11-t17c-bright.md`, a pointer in T11.d): `SkyService`'s default becomes `Served`. A
       clap `SetTrue` switch cannot then be turned off on the command line, so the option takes a
       value too (for example `--serve-sky=false`); the variable already takes `0` or `false`.
+      _Done 2026-10-10, after R13.T2.b (R13's Risks, "The sky on by default, as built")._
   - **The tables** (`compute/sky_tables.rs`, new).
     - `SkyTablesService`: a `SharedByteLru<GalaxyKey, SkyTables>` behind a `SingleFlight`, keyed by
       `GalaxyKey` alone and made with the one source its server's caps name. Its budget is

@@ -17,17 +17,21 @@
 //! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
 //! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 64 (MiB)                                     |
 //! | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | 160 (MiB)                                    |
-//! | `--serve-sky`           | `HYPERION_SERVE_SKY`           | off                                          |
+//! | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           |
 //! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
 //!
 //! `--serve-sky` and `--stop-on-stdin-close` are switches. Their variables take clap's boolish
 //! values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`, `f`, `false`,
 //! `off` or `0` for off. They refuse anything else, the empty string included.
+//! `--stop-on-stdin-close`, off by default, takes no value: given, it is on. `--serve-sky`, on by
+//! default, also takes one of those values after an equals sign, so that the command line can turn
+//! it off: `--serve-sky=false`. Given alone, it is on.
 //!
-//! `--serve-sky` is the sky's landing switch (rendering plan R06, R06.T11.c; decided 2026-10-07 by
-//! the orchestrator). Off, the server answers `sky` as it did before R06.T11.a, `unsupported`, and
-//! no job of it reaches the pool, so a client that asks for its sky is untouched until R06.T8.g,
-//! whose landing turns it on by default.
+//! `--serve-sky` is the sky's switch (rendering plan R06, R06.T11.c), added off by the
+//! orchestrator's ruling of 2026-10-07. It is on by default since RM3's interim sky, rendering plan
+//! R13's R13.T2, landed beside R06.T11.d and T11.g, as the owner decided on 2026-10-08 (R06.T11.d,
+//! "The default switch and the interim"). Off, the server answers `sky` as it did before
+//! R06.T11.a, `unsupported`, no job of it reaches the pool, and an open starts no sky tables.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
@@ -68,7 +72,7 @@ pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
 pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
 /// The variable giving the sky tables' cache's budget in MiB, for `--sky-tables`.
 pub const ENV_SKY_TABLES_MB: &str = "HYPERION_SKY_TABLES_MB";
-/// The variable that turns the sky on, for `--serve-sky`.
+/// The variable that turns the sky off, or on, for `--serve-sky`.
 pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
 pub const ENV_STOP_ON_STDIN_CLOSE: &str = "HYPERION_STOP_ON_STDIN_CLOSE";
@@ -181,12 +185,15 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_SKY_TABLES_MB, default_value_t = DEFAULT_SKY_TABLES)]
     sky_tables: CacheBudget,
 
-    /// Serve `sky` requests, which are answered `unsupported` otherwise (until rendering plan R06's
-    /// census is fast enough to serve)
+    /// Serve `sky` requests; `--serve-sky=false` answers them `unsupported`
     #[arg(
         long,
+        value_name = "BOOL",
         env = ENV_SERVE_SKY,
-        action = ArgAction::SetTrue,
+        num_args = 0..=1,
+        require_equals = true,
+        default_value = "true",
+        default_missing_value = "true",
         value_parser = BoolishValueParser::new().map(sky_service),
     )]
     serve_sky: SkyService,
@@ -201,19 +208,21 @@ pub struct ServerArgs {
     stop_on_stdin_close: StdinStop,
 }
 
-/// Whether the server answers `sky` (rendering plan R06): its landing switch, `--serve-sky`
-/// (R06.T11.c; decided 2026-10-07 by the orchestrator).
+/// Whether the server answers `sky` (rendering plan R06): its switch, `--serve-sky` (R06.T11.c).
 ///
-/// R06.T11.a–c land behind it, off, so that the live client, which asks for its sky whenever a view
-/// opens, is untouched until R06.T8.g makes a sky near the Sun cheap enough to serve; T8.g's landing
-/// turns it on by default. Tests turn it on.
+/// R06.T11.a–c landed behind it, off (decided 2026-10-07 by the orchestrator), so that the live
+/// client, which asks for its sky whenever a view opens, was untouched until a sky near the Sun
+/// could be served. It is on by default since RM3's interim sky, rendering plan R13's R13.T2,
+/// landed beside R06.T11.d and T11.g (decided by the owner 2026-10-08; R06.T11.d, "The default
+/// switch and the interim").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum SkyService {
-    /// `sky` is answered `unsupported`, as before R06.T11.a, and none of its work reaches the pool:
-    /// the default.
-    #[default]
+    /// `sky` is answered `unsupported`, as before R06.T11.a, none of its work reaches the pool, and
+    /// an open starts no sky tables.
     Unsupported,
-    /// `sky` is served: its census, band, limit map and host discs (R06.T11.a–c).
+    /// `sky` is served, the default: its census, band, limit map and host discs (R06.T11.a–d), and
+    /// an open starts its galaxy's sky tables (R06.T11.g).
+    #[default]
     Served,
 }
 
@@ -405,7 +414,7 @@ impl ServerConfig {
         self.sky_tables_bytes
     }
 
-    /// Whether the server answers `sky` (rendering plan R06, R06.T11.c's landing switch).
+    /// Whether the server answers `sky` (rendering plan R06, R06.T11.c's switch).
     #[must_use]
     pub fn sky_service(&self) -> SkyService {
         self.sky_service
@@ -554,8 +563,8 @@ impl ServerConfigBuilder {
         self
     }
 
-    /// Whether the server answers `sky`; [`SkyService::Unsupported`] by default, until R06.T8.g.
-    /// Tests serve it.
+    /// Whether the server answers `sky`; [`SkyService::Served`] by default, since rendering plan
+    /// R13's R13.T2.
     #[must_use]
     pub fn sky_service(mut self, service: SkyService) -> Self {
         self.config.sky_service = service;
@@ -703,7 +712,7 @@ mod tests {
                 64 * 1024 * 1024,
                 64 * 1024 * 1024,
                 160 * 1024 * 1024,
-                SkyService::Unsupported,
+                SkyService::Served,
                 StdinStop::Ignore,
             )
         );
@@ -734,7 +743,7 @@ mod tests {
             "11",
             "--sky-tables",
             "13",
-            "--serve-sky",
+            "--serve-sky=false",
             "--stop-on-stdin-close",
         ]);
         assert_eq!(
@@ -750,7 +759,7 @@ mod tests {
                 7 << 20,
                 11 << 20,
                 13 << 20,
-                SkyService::Served,
+                SkyService::Unsupported,
                 StdinStop::Watch,
             )
         );
@@ -764,15 +773,40 @@ mod tests {
         );
     }
 
-    /// The sky's landing switch is off unless it is given (R06.T11.c).
+    /// The sky's switch is on unless it is turned off, by a boolish value after an equals sign
+    /// (R06.T11.c; on by default since rendering plan R13's R13.T2).
     #[test]
-    fn the_sky_is_served_only_when_its_switch_is_on() {
-        assert_eq!(config(&[]).sky_service(), SkyService::Unsupported);
-        assert_eq!(config(&["--serve-sky"]).sky_service(), SkyService::Served);
-        assert_eq!(refusal(&["--serve-sky=yes"]), ErrorKind::TooManyValues);
+    fn the_sky_is_served_unless_its_switch_is_off() {
+        assert_eq!(config(&[]).sky_service(), SkyService::Served);
         assert_eq!(
             ServerConfig::builder().build().sky_service(),
-            SkyService::Unsupported
+            SkyService::Served
+        );
+        assert_eq!(config(&["--serve-sky"]).sky_service(), SkyService::Served);
+        for on in ["true", "yes", "on", "1", "TRUE"] {
+            let flag = format!("--serve-sky={on}");
+            assert_eq!(config(&[&flag]).sky_service(), SkyService::Served, "{flag}");
+        }
+        for off in ["false", "no", "off", "0", "Off"] {
+            let flag = format!("--serve-sky={off}");
+            assert_eq!(
+                config(&[&flag]).sky_service(),
+                SkyService::Unsupported,
+                "{flag}"
+            );
+        }
+        // Given twice, it is refused, as every option is.
+        assert_eq!(
+            refusal(&["--serve-sky", "--serve-sky=off"]),
+            ErrorKind::ArgumentConflict
+        );
+        for refused in ["--serve-sky=", "--serve-sky=maybe"] {
+            assert_eq!(refusal(&[refused]), ErrorKind::ValueValidation, "{refused}");
+        }
+        // The value takes an equals sign: a word after the switch is not its value.
+        assert_eq!(
+            refusal(&["--serve-sky", "false"]),
+            ErrorKind::UnknownArgument
         );
     }
 
@@ -947,7 +981,7 @@ mod tests {
             .brief_cache_bytes(50)
             .sky_cache_bytes(60)
             .sky_tables_bytes(70)
-            .sky_service(SkyService::Served)
+            .sky_service(SkyService::Unsupported)
             .stdin_stop(StdinStop::Watch)
             .build();
         assert_eq!(
@@ -963,7 +997,7 @@ mod tests {
                 50,
                 60,
                 70,
-                SkyService::Served,
+                SkyService::Unsupported,
                 StdinStop::Watch,
             )
         );

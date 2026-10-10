@@ -195,10 +195,10 @@ fn open_topic(
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
 /// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and rendering plan R06's `sky`
-/// (R06.T11.a–c: the census's JSON, its stars and band in bulk, and the host discs), the one kind
-/// answered in bulk, behind its landing switch ([`SkyService`](crate::SkyService)): until R06.T8.g
-/// turns it on by default, `sky` is answered `unsupported` unless the server is started with
-/// `--serve-sky`. A later plan's kind that this server's
+/// (R06.T11.a–d: the census's JSON, its stars and band in bulk, and the host discs), the one kind
+/// answered in bulk, behind its switch ([`SkyService`](crate::SkyService)): it is on by default
+/// since rendering plan R13's R13.T2, and when the server is started with `--serve-sky=false`,
+/// `sky` is answered `unsupported`, as before R06.T11.a. A later plan's kind that this server's
 /// [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`. A kind the
 /// protocol already defines but whose handler has not landed is answered `unsupported` here, under
 /// its own ID, as an older server would answer it (plan 04, design note 15): `body_events` until
@@ -255,7 +255,7 @@ impl Handler for Handlers {
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
             RequestBody::Sky(request) => match state.sky_service {
                 SkyService::Served => Box::pin(sky::answer(state, request, token, replies)),
-                // The landing switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
+                // The switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
                 SkyService::Unsupported => Box::pin(ready(Err(not_served_yet("sky")))),
             },
         }
@@ -1106,6 +1106,7 @@ mod tests {
     use super::*;
     use crate::compute::SingleFlight;
     use crate::testing::{Call, Harness, Scripted, WAIT, body, small_response};
+    use crate::ws::ConnectionLimits;
 
     /// A request body of every kind.
     fn every_body() -> Vec<RequestBody> {
@@ -1356,8 +1357,12 @@ mod tests {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
         // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and R06's `sky`
-        // while its landing switch is off, as it is by default until R06.T8.g (R06.T11.c).
-        let harness = Harness::start(Handlers).await;
+        // while its switch is off (R06.T11.c), as this test turns it: it is on by default since
+        // rendering plan R13's R13.T2.
+        let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
+            config.sky_service(SkyService::Unsupported)
+        })
+        .await;
         let events = every_body()
             .into_iter()
             .filter(|body| {

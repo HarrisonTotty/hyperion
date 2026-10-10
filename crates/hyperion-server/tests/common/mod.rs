@@ -23,7 +23,7 @@ use hyperion_protocol::{
     ResponseBody, SeedHex, ServerMessage, UniverseInfo,
 };
 use hyperion_server::universe::SequenceEntropy;
-use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats};
+use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService};
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -141,10 +141,17 @@ impl TestServer {
     }
 
     /// The configuration [`TestServer::start`] uses, over `data_dir`, for tests to adjust.
+    ///
+    /// It keeps the sky off ([`SkyService::Unsupported`]), though the server's default serves it
+    /// since rendering plan R13's R13.T2: served, every open would start its galaxy's sky tables on
+    /// the pool (R06.T11.g), 31 CPU-s built serially and 47 on 15 workers (R06's Risks,
+    /// "Deviations in T11.g, as built"), which a test of something else would share its workers
+    /// with. The sky's own tests turn it on.
     pub fn config(data_dir: &Path) -> ServerConfigBuilder {
         ServerConfig::builder()
             .data_dir(data_dir)
             .entropy(SequenceEntropy::new(test_entropy()))
+            .sky_service(SkyService::Unsupported)
     }
 
     /// A server with `config`, listening on port 0 whatever its address says.

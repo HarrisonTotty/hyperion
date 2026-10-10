@@ -160,7 +160,7 @@ An option given on the command line wins over its variable.
 | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | `64`                                         | Cache of range briefs' star models, in MiB   |
 | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `64`, provisional until R06.T8.n             | Cache of the sky census's cells, in MiB      |
 | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | `160`                                        | Cache of each galaxy's sky tables, in MiB    |
-| `--serve-sky`           | `HYPERION_SERVE_SKY`           | off                                          | Serve `sky` requests                         |
+| `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           | Serve `sky` requests                         |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          | Stop gracefully when standard input closes   |
 
 `--stop-on-stdin-close` is for a server run as another program's child. The parent stops it by
@@ -171,10 +171,12 @@ Enter on Windows), and one started with standard input closed, as systemd starts
 Its variable takes `y`, `yes`, `t`, `true`, `on` or `1`, or `n`, `no`, `f`, `false`, `off` or `0`,
 in any case, and refuses anything else.
 
-`--serve-sky` turns on the `sky` request, the stars, band and limits a view's sky is drawn from.
-It is off by default until the sky's census near the Sun is fast enough to serve (rendering plan
-R06, R06.T8.g), and the server then answers `sky` as `unsupported`, as before the sky was served.
-Its variable takes the same values as `--stop-on-stdin-close`'s.
+`--serve-sky` serves the `sky` request, the stars, band and limits a view's sky is drawn from.
+It is on by default (since rendering plan R13's R13.T2, the interim sky). `--serve-sky=false`, or
+the variable set to a false value, turns it off: the server then answers `sky` as `unsupported`,
+as before the sky was served, and opening a universe builds no sky tables in the background. Its
+variable takes the same values as `--stop-on-stdin-close`'s, and so does the option after an equals
+sign (`--serve-sky=off`); given alone, `--serve-sky` is on.
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;

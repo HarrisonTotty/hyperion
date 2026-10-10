@@ -111,7 +111,7 @@ pub(crate) struct AppState {
     /// Each open universe's scene clock and ship stand-in, which `scene_ship` sets (rendering
     /// plan R03, Design note 2).
     pub(crate) scene: SceneService,
-    /// Whether `sky` is answered: the sky's landing switch (rendering plan R06, R06.T11.c).
+    /// Whether `sky` is answered: the sky's switch (rendering plan R06, R06.T11.c), on by default.
     pub(crate) sky_service: SkyService,
     /// How far a sky's census looks, and which luminosity tables it reads (rendering plan R06,
     /// R06.T11.a).

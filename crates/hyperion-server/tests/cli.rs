@@ -1,9 +1,10 @@
 //! The server binary's command line, run as a process: that options fall back to their
-//! environment variables, and that an option given wins over its variable.
+//! environment variables, that an option given wins over its variable, and that the sky is served
+//! unless it is turned off.
 //!
 //! Each run listens on port 0 and is killed if it does not exit within [`EXIT_TIMEOUT`], so a
-//! regression that starts the server fails the test instead of hanging the suite. The one test
-//! that lets it start reads its log up to its `listening` line and kills it ([`common::process`]).
+//! regression that starts the server fails the test instead of hanging the suite. The tests that
+//! let it start read its log up to its `listening` line and kill it ([`common::process`]).
 
 mod common;
 
@@ -12,7 +13,7 @@ use std::process::Output;
 
 use common::process::{EXIT_TIMEOUT, Running, server_binary};
 use hyperion_server::config::{
-    ENV_DATA_DIR, ENV_SKY_CACHE_MB, ENV_STOP_ON_STDIN_CLOSE, ENV_WORKERS,
+    ENV_DATA_DIR, ENV_SERVE_SKY, ENV_SKY_CACHE_MB, ENV_STOP_ON_STDIN_CLOSE, ENV_WORKERS,
 };
 use tokio::time::timeout;
 
@@ -150,4 +151,66 @@ async fn the_sky_caches_budget_falls_back_to_its_variable() {
         stopped.lines[started].contains("sky_cache_mib=3"),
         "the start states the variable's budget: {stopped}"
     );
+}
+
+/// The sky's service a server started with `configure` states as it starts.
+async fn started_sky_service(configure: impl FnOnce(&mut tokio::process::Command)) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let stopped = Running::start(dir.path(), configure).await.kill().await;
+    let started = stopped
+        .line_with(&["server started"])
+        .unwrap_or_else(|| panic!("the server logs its start: {stopped}"));
+    stopped.lines[started]
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("sky_service="))
+        .unwrap_or_else(|| panic!("the start states the sky's service: {stopped}"))
+        .to_owned()
+}
+
+/// The server serves the sky by default, and `--serve-sky=false` or its variable turns it off
+/// (rendering plan R06, R06.T11.c; on by default since rendering plan R13's R13.T2). The option
+/// wins over its variable.
+#[tokio::test]
+async fn the_sky_is_served_unless_it_is_turned_off() {
+    assert_eq!(started_sky_service(|_| {}).await, "Served");
+    assert_eq!(
+        started_sky_service(|command| {
+            command.arg("--serve-sky=false");
+        })
+        .await,
+        "Unsupported"
+    );
+    assert_eq!(
+        started_sky_service(|command| {
+            command.env(ENV_SERVE_SKY, "0");
+        })
+        .await,
+        "Unsupported"
+    );
+    assert_eq!(
+        started_sky_service(|command| {
+            command.env(ENV_SERVE_SKY, "1").arg("--serve-sky=false");
+        })
+        .await,
+        "Unsupported"
+    );
+}
+
+#[tokio::test]
+async fn the_serve_sky_variable_takes_only_a_yes_or_a_no() {
+    let dir = tempfile::tempdir().unwrap();
+    for value in ["maybe", ""] {
+        let output = run(dir.path(), &[], &[(ENV_SERVE_SKY, Path::new(value))]).await;
+        assert_eq!(
+            output.status.code(),
+            Some(USAGE_ERROR),
+            "{value:?}: {}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains(&format!("invalid value '{value}' for '--serve-sky")),
+            "{value:?}: {}",
+            stderr(&output)
+        );
+    }
 }

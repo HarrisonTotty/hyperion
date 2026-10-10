@@ -31,8 +31,8 @@
 //! it is made; the last, final, is the terminal `response`. The band's shape is the query's, 64² a
 //! face.
 //!
-//! The server answers `sky` only behind its landing switch, `--serve-sky` (R06.T11.c); off, as it
-//! is by default until R06.T8.g, the request never reaches this handler.
+//! The server answers `sky` only behind its switch, `--serve-sky` (R06.T11.c), on by default since
+//! rendering plan R13's R13.T2; off (`--serve-sky=false`), the request never reaches this handler.
 
 use std::fmt;
 use std::num::NonZeroU32;
