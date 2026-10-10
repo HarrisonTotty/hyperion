@@ -4127,7 +4127,7 @@ generator, and the reference's sampling needs no domain tag.
     client's one copy, so R08.T3.a's column reads it rather than writing a second.
 
     _Closed set, for the composition audit:_ these gases have no visible dispersion checked here,
-    and wait on the audit:
+    and wait on the audit (→ R08.T3.c's estimated rows):
     - CO: Sneep and Ubachs's eq. 17 fits only 168–288 nm data, and its printed 0.456 × 10¹² is
       10¹⁴ by their Table 2.
     - SO₂, H₂S, HCN and O₃: refractiveindex.info has no gas-phase entry for them.
@@ -4142,6 +4142,102 @@ generator, and the reference's sampling needs no domain tag.
     tests' local Σxᵢσᵢ helper is the check to replace with `molecularTerm`. R05's `earth.test.ts`
     keeps its own copy of Peck and Reeder and Bates; R08.T6.d, which rebuilds Earth, may take
     `rayleigh.ts`'s instead.
+- **Deviations in T3.c, as built** (2026-10-09). `rayleigh.ts` and `rayleigh.test.ts`; ρ in
+  `medium.ts` (`PhaseFunction`, `phaseAt`), `earth.ts`, `tables.ts` and their tests,
+  `tablesCpu.test.ts` and `opticalDepth.test.ts`; T3.b's follow-up (decision-composition §4).
+  - _Names beyond the sketch._ `MolecularTerm` is `{ term, approximations }`: `term` a `MediumTerm`
+    named `rayleigh` (R05's name, so `termNamed` finds it after T6.d) on the column's `tabulated`
+    density, at n_s σ_mix per channel of `CHANNEL_WAVELENGTHS_NM`, with no absorption; each
+    approximation a `RayleighApproximation { species, provenance }` (`estimated` or `none`), in the
+    fractions' order. Added:
+    - `molecularMixture(fractions)` and `MolecularMixture`: σ_mix, F_mix and ρ_mix as functions
+      of the wavelength, with the approximations, for T4.a's fit and T6.d's spectral form;
+    - `EstimatedRayleigh`, a union of `DispersionEstimate` (`kind: "dispersion"`, `species`,
+      `dispersion`, `kingFactor`, `uncertaintyFactor`, `basis`) and `PolarisabilityEstimate`
+      (`kind: "polarisability"`, `species`, `polarisabilityM3`, `resonanceNm`,
+      `uncertaintyFactor`, `basis`), and `ESTIMATED_RAYLEIGH`;
+    - `polarisabilityCrossSectionM2(α, λ)` and `depolarisationOfKingFactor(F)`.
+
+    `MOLE_FRACTION_SUM_TOLERANCE` moves from `column.ts` to `rayleigh.ts`, which `column.ts`
+    already imports, so the two modules form no import cycle (T3.a's record above names
+    `column.ts`).
+
+  - _ρ._ `PhaseFunction`'s `rayleigh` gains `depolarisation: Rgb`, as Provides widens it, and
+    `phaseAt` reads it per channel (Chandrasekhar's form, γ = ρ ÷ (2 − ρ); equal to the ρ = 0 form
+    to the bit), so T6.a's twin draws a molecular term's ρ. R05's `EARTH_REFERENCE` and
+    `HILLAIRE_REFERENCE` take ρ = 0, the form R05's kernels draw. `packMedium` refuses a Rayleigh
+    phase with ρ ≠ 0 (`tables.test.ts`), as it refuses a `tabulated` density: **R08.T6.b's kernels
+    are to read ρ and lift the refusal**, which T6.b's text does not yet say (for "main").
+  - _Refusals._ A fraction not finite in [0, 1], a species listed twice, or a sum off 1 by more
+    than 10⁻⁹ throws `RangeError`, so an empty list (an airless body's) is refused: T10.a builds no
+    molecular term then. The order, largest first, is not checked.
+  - _The term's density._ n_s is the column's ideal-gas `surfaceNumberDensityPerM3`, and σᵢ is
+    each formula's at its real-gas N_ref, so the term's β at the datum is T3.b's real-gas β ÷ Z
+    (T3.a's stated omission; 4 × 10⁻⁴ for air). Earth's coefficients through the term match
+    Design note 4's to 1%.
+  - _ρ_mix against Bates's._ The plan's "within 2% of Bates's" cannot hold. Bates's per-gas
+    factors averaged by volume (Bodhaine et al. 1999's own eq. 23, `dryAirKingFactor`) put F
+    0.185–0.198% above Design note 4's σ-weighted F_mix, which is exact for independent molecules
+    (Fᵢ = 1 + 2(γᵢ ÷ 3ᾱᵢ)², Sneep and Ubachs 2005, eq. 7; Σ xᵢᾱᵢ² and Σ xᵢγᵢ² add). ρ, nearly
+    proportional to F − 1, moves about 21 times as far: 3.87–3.93% over 380–760 nm. The tests hold
+    ρ_mix 3.5–4.5% below Bodhaine's mixture, within 4% of Young 1981's F(air) = 1.0480 (ρ = 0.0279,
+    as Bodhaine quotes it; 2.3% below at 550 nm) over 440–680 nm, and F_mix to
+    Σ xᵢσᵢ ÷ Σ xᵢ(σᵢ ÷ Fᵢ) to 10⁻¹⁴. Bates 1984 was not read, so how he mixed is open; if his
+    Table 1 F(air) is σ-weighted, the plan's 2% may be restored against it. T3.b's local Σxᵢσᵢ
+    helper is replaced by `molecularMixture`.
+  - _The registry's gas rows._ `packages/protocol/fixtures/substances.json` does not exist yet
+    (P14.T49.a is unbuilt), so the test runs on decision-composition §1.1's gas rows, copied in
+    order (GASES, then CO … FeH), without e⁻ and H⁻: those are R08.T4.c's continua, and
+    `rayleighOf` gives them `none`. P14.T49.b is to flag both `rayleigh: false`, and T10.a not to
+    count them once T4.c draws them. `rayleigh.test.ts` reads the fixture once it lands, beside
+    R08.T19.
+  - _The estimated rows_ (23, CO to FeH, in the registry's order). The plan's rule is a static α
+    with F_K = 1. The brainstorm, signed off at 78a8c520 after the plan text ("Atmosphere": the
+    optics registry holds measured dispersions and King factors, and an estimate only where no
+    measurement exists), wins where they differ, and T3.c's science check found measured visible
+    dispersions:
+    - _`dispersion` rows_, read as `GAS_DISPERSION`'s are: CO (C. and M. Cuthbertson 1920, with
+      Bridge and Buckingham 1966's ρₚ as Sneep and Ubachs quote it), SO₂ and H₂S (Cuthbertson
+      1910), O₃ (Cuthbertson 1914, a two-point fit), C₂H₆ (Loria 1909, refitted, with Z = 1 ÷ 1.0148
+      for his ideal-gas reduction and Bridge and Buckingham's anisotropy) and CH₃OH (Ramaswamy
+      1936). They stay `estimated`: each King factor is unmeasured or secondary, and none is
+      vetted to `GAS_DISPERSION`'s standard. Promoting CO, H₂S and C₂H₆ to `GASES` is for a ruling.
+    - _`polarisability` rows_: the static electronic α for HCN (Landolt–Börnstein 1951, through
+      CCCBDB), C₂H₂, C₂H₄ and PH₃ (Olney et al. 1997), O, Na, K, Si, Ca and Ti (Schwerdtfeger and
+      Nagle 2019's recommended values), and SiO, TiO, VO and FeH (CCCBDB's own calculations, FeH by
+      analogy through TiH). H, Mg and Fe take one oscillator, α(λ) = α(0) ÷ (1 − (λ_r ÷ λ)²): H's
+      λ_r = 110.74 nm from Lee and Kim 2004's exact series (to 0.07% over 440–680 nm), Mg's 285.30
+      nm and Fe's 248.40 nm resonance lines (NIST ASD); the static rule would leave them 8.7%, 47%
+      and 40% low at 550 nm. Loria's C₂H₂ and C₂H₄ sit 8.5% and 12% below Olney et al., so they are
+      not used.
+    - _The uncertainty_ is `uncertaintyFactor`, a factor either way over 440–680 nm, since several
+      atoms' errors are factors; `undefined` where lines or bands lie inside that span (Na, Ti,
+      TiO, VO) or the share of α is unknown (FeH).
+    - _"A static α runs low towards the violet"_ holds where the resonances lie in the
+      ultraviolet: on the route test, measured ÷ estimate at 550 nm is 1.066, 1.194 and 1.071 for
+      N₂, CO₂ and CH₄ (Cuthbertson's α₀), rising to 1.10 for N₂ at 400 nm. For Na, K, Ca, Ti, TiO
+      and VO no polarisability rule is meaningful near their lines: α changes sign across each, so
+      σ diverges at the line and vanishes between (K's static estimate runs 5× high at 440 nm, Ca's
+      150–170× low). With solar abundances their true far-wing scattering reaches about a third of
+      a hot giant's Rayleigh depth at 440 nm (Ca) and a tenth at 550 nm (Na), against under 1.2%
+      estimated; their lines are R08.T4.c's. Ca I 422.7 nm, Mg I 285.2 nm and Ti's visible lines
+      are in no task's list (for "main", with T4.c).
+    - _Not read_ (access, decision-composition §5): Olney et al. 1997, Hohm 1994, Maroulis et al.
+      2000, Bates 1984, Young 1981 and Bucholtz 1995; HCN's primary is not identified, and its,
+      PH₃'s and the hydrocarbons' α rest on CCCBDB's listings. CCCBDB's own calculations stand
+      where the task calls CCCBDB a finding aid only, since no other value was found (for "main").
+  - _Tests beyond the task:_ each provenance's optics and their unit refusal; ρ against eq. 7's
+    inverse; the ρ phase's law and its normalisation (`medium.test.ts`); H's 9/2 a₀³ and its
+    exact σ to 0.1%; CO against Sneep and Ubachs's measured (6.19 ± 0.40) × 10⁻²⁷ cm² at 532.2 nm
+    (0.99σ, the data's margin); the α route equal to the dispersion route to 10⁻¹²; each dispersion
+    row normal over 300–1,000 nm; each oscillator below 300 nm; Earth's coefficients through the
+    term; NaN, negative, empty and duplicated lists refused.
+  - _T3.b's follow-up._ The `GASES` doc lines and the closed-set mark (decision-composition §4)
+    land here, not in T3.b's review-fix commit.
+  - _Acceptance._ The shared T3 command selects `rayleigh.test.ts`; the phase changes are gated
+    by `pnpm test` (`medium.test.ts`, `tables.test.ts`, `tablesCpu.test.ts`) and `pnpm typecheck`.
+  - _Closed set, for the composition audit:_ none added. A key outside `GASES` and
+    `ESTIMATED_RAYLEIGH` is `none`, adds nothing and is reported.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client

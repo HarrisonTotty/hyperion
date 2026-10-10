@@ -30,20 +30,33 @@
  * `rayleigh.test.ts` records. No formula here gives the tutorials' 5.8, 13.5 and 33.1 × 10⁻⁶ m⁻¹:
  * those are Riley et al. 2004's, which Bruneton and Neyret 2008 took (§2), a pure λ⁻⁴ law with no
  * King factor.
+ *
+ * Any keyed species has Rayleigh optics through {@link rayleighOf}, measured, estimated or none,
+ * and a well-mixed gas of any species is one medium term, {@link molecularTerm} (R08.T3.c,
+ * decision-composition §1.9).
  */
 
+import type { Rgb } from "../photometry/toneCurve";
+import type { AtmosphereColumn } from "./column";
+import { CHANNEL_WAVELENGTHS_NM, type MediumTerm } from "./medium";
+
 /**
- * Every gas with Rayleigh optics here, by formula.
+ * Every gas with a measured dispersion here, by formula.
  *
  * @remarks
  * Plan 14's nine come first, in `Gas::ALL`'s order (`planetary::derive::atmosphere::Gas`,
  * `Hydrogen` … `Argon`), then Ne, Kr, Xe and N₂O.
  *
- * The set is open: a species is added as data, by its formula here and an entry in each of
+ * Its keys are plan 14's substance keys (P14.T49.a; a definite species by its formula in chemical
+ * case), so these tables are keyed as the wire is. A wire key outside this list is not a `Gas`:
+ * R08.T3.c's {@link rayleighOf} gives it an estimate or none, with its provenance, and the body is
+ * labelled; `Gas` is never widened to admit an unmeasured species.
+ *
+ * A measured species is added as data, by its formula here and an entry in each of
  * {@link GAS_DISPERSION}, {@link GAS_KING_FACTOR} and {@link GAS_MOLAR_MASS_G_PER_MOL}, each with
- * its sources; the compiler names any record that lacks it. Gases a generator could plausibly
- * produce whose optics have no source checked here yet (CO, SO₂, H₂S, HCN, O₃, C₂H₆, C₂H₄ and
- * C₂H₂) are listed in R08's Risks for the composition audit.
+ * its sources; the compiler names any record that lacks it. The gases a generator could plausibly
+ * produce whose dispersion has no source checked here (CO, SO₂, H₂S, HCN, O₃, C₂H₆, C₂H₄ and
+ * C₂H₂ among them) are R08.T3.c's estimated rows, {@link ESTIMATED_RAYLEIGH}.
  */
 export const GASES = [
   "H2",
@@ -602,6 +615,761 @@ export function rayleighCrossSectionM2(gas: Gas, wavelengthNm: number): number {
     GAS_KING_FACTOR[gas].factor,
     wavelengthNm,
   );
+}
+
+/**
+ * How far a mixture's mole fractions may sum from 1: 10⁻⁹, plan 14's tolerance for P14.T24.a's
+ * gas fractions, by which {@link molecularMixture} and R08.T3.a's `column.ts` mixtures refuse a
+ * mixture.
+ */
+export const MOLE_FRACTION_SUM_TOLERANCE = 1e-9;
+
+/**
+ * One species of a well-mixed gas, by the registry key the wire sends (`gases[].species`;
+ * P14.T49.a), never narrowed to {@link Gas}.
+ */
+export interface GasFraction {
+  /** The species' substance key, a formula in chemical case (`N2`, `CO`, `H2S`), or any key. */
+  readonly species: string;
+  /** x, in [0, 1]. */
+  readonly moleFraction: number;
+}
+
+/**
+ * A well-mixed mixture as the record carries it: largest first, summing to 1 within
+ * {@link MOLE_FRACTION_SUM_TOLERANCE}. A species is listed once.
+ *
+ * @remarks
+ * It is the wire's `gases: [{ species, mole_fraction }]` in camelCase (P14.T35.e), so the
+ * record's list passes to {@link molecularTerm} unconverted (decision-composition §1.9).
+ */
+export type GasFractions = ReadonlyArray<GasFraction>;
+
+/**
+ * Where a species' optics come from.
+ *
+ * - `measured`: a measured dispersion and King factor ({@link GASES}).
+ * - `estimated`: a stated estimate with its sources and uncertainty ({@link ESTIMATED_RAYLEIGH}).
+ * - `none`: nothing known here, such as a key a newer server sent. It contributes nothing.
+ */
+export type OpticsProvenance = "measured" | "estimated" | "none";
+
+/** A species' Rayleigh scattering per molecule, and where it comes from. */
+export interface SpeciesRayleigh {
+  readonly species: string;
+  readonly provenance: OpticsProvenance;
+  /**
+   * σ per molecule, m², at a vacuum wavelength in nm within {@link RAYLEIGH_WAVELENGTH_RANGE_NM};
+   * 0 for `none`.
+   */
+  readonly crossSectionM2: (wavelengthNm: number) => number;
+  /**
+   * ρ, the depolarisation ratio in natural light, 6(F_K − 1) ÷ (3 + 7F_K), at a vacuum wavelength in
+   * nm within the range; 0 for a polarisability estimate (F_K = 1) and for `none`.
+   */
+  readonly depolarisation: (wavelengthNm: number) => number;
+  /** The sources of the cross-section and the King factor; for `none`, why there are none. */
+  readonly source: string;
+}
+
+/**
+ * A gas's Rayleigh scattering where {@link GASES} holds no vetted measurement: an estimate, with its
+ * sources and its uncertainty (decision-composition §1.9).
+ *
+ * - `dispersion`: a measured visible dispersion, read as {@link GAS_DISPERSION}'s are, with a King
+ *   factor where a measured one was found in a secondary source and F_K = 1 where none was:
+ *   {@link crossSectionFromDispersionM2}.
+ * - `polarisability`: a mean dipole polarisability α with F_K = 1, σ = (128π⁵ ÷ 3) α² ÷ λ⁴
+ *   ({@link polarisabilityCrossSectionM2}), α static or dispersed by one oscillator.
+ */
+export type EstimatedRayleigh = DispersionEstimate | PolarisabilityEstimate;
+
+/** An estimate from a measured dispersion whose King factor, or its vetting, is not to hand. */
+export interface DispersionEstimate {
+  readonly kind: "dispersion";
+  /** The species' substance key. */
+  readonly species: string;
+  readonly dispersion: Dispersion;
+  readonly kingFactor: KingFactor;
+  /** {@link PolarisabilityEstimate.uncertaintyFactor}'s meaning. */
+  readonly uncertaintyFactor: number | undefined;
+  /** Why the row is an estimate, and how its uncertainty is reckoned. */
+  readonly basis: string;
+}
+
+/** An estimate from a mean polarisability, with F_K = 1. */
+export interface PolarisabilityEstimate {
+  readonly kind: "polarisability";
+  /** The species' substance key. */
+  readonly species: string;
+  /**
+   * α(0), the static electronic polarisability volume, the SI polarisability ÷ 4πε₀, m³
+   * (1 Å³ = 10⁻³⁰ m³).
+   */
+  readonly polarisabilityM3: number;
+  /**
+   * The vacuum wavelength λ_r of one oscillator that disperses α, α(λ) = α(0) ÷ (1 − (λ_r ÷ λ)²),
+   * nm, below {@link RAYLEIGH_WAVELENGTH_RANGE_NM}; or `undefined` for the static rule, α(λ) = α(0).
+   */
+  readonly resonanceNm: number | undefined;
+  /**
+   * The factor, either way, within which the true σ lies of the estimate over 440–680 nm, the
+   * render channels' span: α's own uncertainty (twice over, in σ), the King factor the rule leaves
+   * out, and the dispersion it omits. `undefined` where no bound is known: the species' lines or
+   * bands lie inside that span, where no polarisability rule holds.
+   */
+  readonly uncertaintyFactor: number | undefined;
+  /** α's primary source, its uncertainty, and the rule where α is not measured for the species. */
+  readonly basis: string;
+}
+
+/** Å³, m³. */
+const CUBIC_ANGSTROM_M3 = 1e-30;
+
+/**
+ * The atomic unit of polarisability volume, a₀³, m³: the Bohr radius 5.291 772 105 44 × 10⁻¹¹ m
+ * cubed (CODATA 2022), 0.148 184 7 Å³.
+ */
+const BOHR_CUBED_M3 = 5.291_772_105_44e-11 ** 3;
+
+/** 25 °C, K: Ramaswamy's reference temperature. */
+const TWENTY_FIVE_CELSIUS_K = 298.15;
+
+/** The atoms' compilation. */
+const SCHWERDTFEGER_NAGLE =
+  "Schwerdtfeger and Nagle, Mol. Phys. 117 (2019) 1200, the 2018 table of the neutral elements' static dipole polarisabilities";
+
+/** Olney et al.'s sum-rule polarisabilities, read through CCCBDB, a finding aid. */
+const OLNEY_1997 =
+  "Olney, Cann, Cooper and Brion, Chem. Phys. 223 (1997) 59, a dipole-oscillator-strength sum (as NIST's CCCBDB lists it; the paper was not read)";
+
+/** NIST's own computed polarisabilities, the only computations found for these radicals. */
+const CCCBDB_COMPUTED =
+  "NIST CCCBDB, Release 22 (Johnson, ed., NIST SRD 101, 2022), its own calculations";
+
+/** The Cuthbertsons' 1910 paper on SO₂ and H₂S. */
+const CUTHBERTSON_1910 = "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171";
+
+/**
+ * n − 1 = A ÷ (B − λ⁻²), λ in µm and A and B in µm⁻²: the Cuthbertsons' and Ramaswamy's one-term
+ * form.
+ */
+function oneTermNMinusOne(aPerUm2: number, bPerUm2: number): (wavelengthNm: number) => number {
+  return (wavelengthNm) => aPerUm2 / (bPerUm2 - wavenumberSquaredPerUm2(wavelengthNm));
+}
+
+/** F_K = 1, no King factor found. */
+function noKingFactor(why: string): KingFactor {
+  return { factor: () => 1, source: `1, taken: ${why}` };
+}
+
+/**
+ * The registry's gases outside {@link GASES}, each an estimate (decision-composition §1.9), in the
+ * registry's order (§1.1). Their keys are plan 14's substance keys, as {@link GASES}' are.
+ *
+ * @remarks
+ * Where a measured visible dispersion exists, the row takes it (the brainstorm's "Atmosphere": the
+ * optics registry holds measured dispersions, and an estimate only where no measurement exists):
+ * CO, SO₂, H₂S and O₃ from C. and M. Cuthbertson, C₂H₆ from Loria and CH₃OH from Ramaswamy. Each
+ * stays `estimated` because its King factor is not measured, or was found only in a secondary
+ * source, and none has been vetted to {@link GAS_DISPERSION}'s standard (its reference state read in
+ * the paper, its Z from NIST's equation of state). Promoting one to {@link GASES} is a ruling's
+ * (R08's Risks, "Deviations in T3.c, as built").
+ *
+ * The rest take a polarisability: the static electronic α, never a dielectric value, which holds
+ * vibrational polarisability; for the atoms, Schwerdtfeger and Nagle's recommended values. H, Mg
+ * and Fe, whose dispersion one line or continuum carries, take one oscillator, H's from its exact
+ * dynamic polarisability (Lee and Kim, MNRAS 347 (2004) 802), Mg's and Fe's from their resonance
+ * lines (NIST ASD). NIST's CCCBDB served as a finding aid, and its own calculations are cited only
+ * where no other value was found (SiO, TiO, VO and, through TiH, FeH).
+ *
+ * A static α leaves out the dispersion and the King factor, so for a molecule whose resonances lie
+ * in the ultraviolet the estimate runs low, and lower towards the violet: for HCN, C₂H₂, C₂H₄ and
+ * PH₃ by about 8–16% at 550 nm. For an atom or radical with lines in or near the visible (Na, K,
+ * Ca, Ti, TiO and VO) no polarisability rule is meaningful near them: α changes sign across each
+ * line, so σ diverges at the line and vanishes between lines, and a static α is many times wrong
+ * near one (K's 5× high at 440 nm, Na's 46× low at 550 nm, Ca's 150–170× low at 440 nm). With
+ * solar abundances in the gas phase their true far-wing scattering reaches about a third of a hot
+ * giant's Rayleigh optical depth at 440 nm (Ca) and a tenth at 550 nm (Na), which these estimates
+ * put at under 1.2% (the science check's budget at 2,000 K and 0.1 bar). Their lines are their
+ * visible opacity, and R08.T4.c's absorbers.
+ */
+export const ESTIMATED_RAYLEIGH: ReadonlyArray<EstimatedRayleigh> = [
+  {
+    kind: "dispersion",
+    species: "CO",
+    dispersion: {
+      nMinusOne: oneTermNMinusOne(0.040_508, 123.77),
+      referenceK: ZERO_CELSIUS_K,
+      referencePa: STANDARD_ATMOSPHERE_PA,
+      compressibility: 1,
+      source:
+        "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 97 (1920) 152, Table II: n − 1 = 0.040 508 ÷ (123.77 − λ⁻²), at 0 °C and 760 mm, reduced as an ideal gas",
+      dataFile: undefined,
+      measuredNm: [480, 670.8],
+    },
+    kingFactor: {
+      factor: () => (3 + 6 * 0.004_8) / (3 - 4 * 0.004_8),
+      source:
+        "ρₚ = 0.0048 at 632.8 nm (Bridge and Buckingham, Proc. R. Soc. Lond. A 295 (1966) 334, as Sneep and Ubachs 2005, §5.1, quote it)",
+    },
+    uncertaintyFactor: 1.07,
+    basis:
+      "the King factor from a secondary source; Sneep and Ubachs 2005's measured (6.19 ± 0.40) × 10⁻²⁷ cm² at 532.2 nm (Table 2) is the 1σ check",
+  },
+  {
+    kind: "dispersion",
+    species: "SO2",
+    dispersion: {
+      nMinusOne: oneTermNMinusOne(0.063_733, 99.349),
+      referenceK: ZERO_CELSIUS_K,
+      referencePa: STANDARD_ATMOSPHERE_PA,
+      compressibility: 1,
+      source: `${CUTHBERTSON_1910}: n − 1 = 0.063 733 ÷ (99.349 − λ⁻²) per molecule at 0 °C and 760 mm, its scale from Cuthbertson and Metcalfe, Proc. R. Soc. Lond. A 80 (1908) 406 (660.86 × 10⁻⁶ at 589.3 nm)`,
+      dataFile: undefined,
+      measuredNm: [500, 670],
+    },
+    kingFactor: noKingFactor(
+      "SO₂'s depolarisation (Bogaard et al. 1978; Baas and van den Hout 1979) was not read, and F_K lies near 1.02–1.07",
+    ),
+    uncertaintyFactor: 1.08,
+    basis: "no King factor",
+  },
+  {
+    kind: "dispersion",
+    species: "H2S",
+    dispersion: {
+      nMinusOne: oneTermNMinusOne(0.053_785, 86.876),
+      referenceK: ZERO_CELSIUS_K,
+      referencePa: STANDARD_ATMOSPHERE_PA,
+      compressibility: 1,
+      source: `${CUTHBERTSON_1910}: n − 1 = 0.053 785 ÷ (86.876 − λ⁻²) per molecule at 0 °C and 760 mm`,
+      dataFile: undefined,
+      measuredNm: [486.1, 656.3],
+    },
+    kingFactor: noKingFactor(
+      "ρ ≤ 0.003 in natural light (Ananthakrishnan, Proc. Indian Acad. Sci. A 2 (1935) 153), so F_K ≤ 1.005",
+    ),
+    uncertaintyFactor: 1.03,
+    basis: "an upper bound on the King factor",
+  },
+  {
+    kind: "dispersion",
+    species: "O3",
+    dispersion: {
+      nMinusOne: oneTermNMinusOne(0.022_714, 46.968),
+      referenceK: ZERO_CELSIUS_K,
+      referencePa: STANDARD_ATMOSPHERE_PA,
+      compressibility: 1,
+      source:
+        "C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1, Tables IX–XI: n − 1 = 0.022 714 ÷ (46.968 − λ⁻²) at 0 °C and 760 mm, a two-point fit, measured in O₂ with about 6% O₃, which the authors call unsafe beyond the second figure",
+      dataFile: undefined,
+      measuredNm: [480, 671],
+    },
+    kingFactor: noKingFactor("no measured depolarisation was found"),
+    uncertaintyFactor: 1.15,
+    basis:
+      "a two-point dispersion and no King factor; the Chappuis band's absorption over about 400–850 nm outweighs this scattering by about 10⁵",
+  },
+  {
+    kind: "polarisability",
+    species: "HCN",
+    polarisabilityM3: 2.59 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 1.27,
+    basis:
+      "Landolt–Börnstein, 6th ed., I/3 (1951) 509, as NIST's CCCBDB lists it (±5%; its primary, and whether it is electronic, were not read); F_K about 1.05, a linear molecule, not read",
+  },
+  {
+    kind: "polarisability",
+    species: "C2H2",
+    polarisabilityM3: 3.49 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 1.37,
+    basis: `${OLNEY_1997}, 3.487 Å³ (±6%); Loria, Ann. Phys. 334 (1909) 605's dispersion sits 8.5% lower and Mascart 1878's index 7% higher, so neither is used; F_K about 1.06, not read`,
+  },
+  {
+    kind: "polarisability",
+    species: "C2H4",
+    polarisabilityM3: 4.19 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 1.34,
+    basis: `${OLNEY_1997}, 4.188 Å³ (±6%); Loria 1909's dispersion sits 12% lower, so it is not used; F_K about 1.035, not read`,
+  },
+  {
+    kind: "dispersion",
+    species: "C2H6",
+    dispersion: {
+      nMinusOne: (wavelengthNm) => 7.33e-4 * (1 + 9.308e-3 * wavenumberSquaredPerUm2(wavelengthNm)),
+      referenceK: ZERO_CELSIUS_K,
+      referencePa: STANDARD_ATMOSPHERE_PA,
+      compressibility: 1 / 1.014_8,
+      source:
+        "Loria, Ann. Phys. 334 (1909) 605, Table IX: n − 1 = a(1 + b ÷ λ²) at 0 °C and 760 mm with refractiveindex.info's refit a = 7.330 × 10⁻⁴ (the printed 7.365 × 10⁻⁴ is 0.5% above his own table) and b = 9.308 × 10⁻³ µm²; he reduced his readings at 610–755 mm as an ideal gas, and NIST's ethane has dρ ÷ dp 1.0148 times the ideal near 291 K, so Z is taken as 1 ÷ 1.0148",
+      dataFile: undefined,
+      measuredNm: [523, 667.7],
+    },
+    kingFactor: {
+      factor: () => 1.006_6,
+      source:
+        "1 + (2/9)(Δα ÷ ᾱ)² with Δα ÷ ᾱ = 5.2 ÷ 30.2 a.u. at 632.8 nm (Bridge and Buckingham 1966, as van Gisbergen, Snijders and Baerends, J. Chem. Phys. 103 (1995) 9347, Table II, quote it)",
+    },
+    uncertaintyFactor: 1.06,
+    basis:
+      "the King factor from a secondary source, and Loria's α 2.2% below Hohm, Chem. Phys. 179 (1994) 533's static 29.54 a.u.",
+  },
+  {
+    kind: "polarisability",
+    species: "PH3",
+    polarisabilityM3: 4.24 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 1.23,
+    basis: `${OLNEY_1997}, 4.24 Å³ (±5%, low confidence); the dielectric value near 4.8 Å³ holds vibrational polarisability`,
+  },
+  {
+    kind: "dispersion",
+    species: "CH3OH",
+    dispersion: {
+      nMinusOne: oneTermNMinusOne(0.064_052, 127.53),
+      referenceK: TWENTY_FIVE_CELSIUS_K,
+      referencePa: STANDARD_ATMOSPHERE_PA,
+      compressibility: 1,
+      source:
+        "Ramaswamy, Proc. Indian Acad. Sci. A 4 (1936) 675, Table I: n − 1 = 0.064 052 ÷ (127.53 − λ⁻²) at 25 °C and 760 mm, stated as for an ideal gas after his own compressibility correction",
+      dataFile: undefined,
+      measuredNm: [436, 644],
+    },
+    kingFactor: noKingFactor("no measured depolarisation was found; F_K lies near 1.005–1.01"),
+    uncertaintyFactor: 1.03,
+    basis: "no King factor",
+  },
+  {
+    kind: "polarisability",
+    species: "H",
+    polarisabilityM3: 4.5 * BOHR_CUBED_M3,
+    resonanceNm: 110.74,
+    uncertaintyFactor: 1.004,
+    basis: `9/2 a₀³, exact for an infinitely heavy nucleus (${SCHWERDTFEGER_NAGLE}, whose ¹H value, 4.507 11, scatters 0.3% more); λ_r = 110.74 nm, the Lyman limit 91.1267 nm ÷ √(2c₀ ÷ c₁) of Lee and Kim, MNRAS 347 (2004) 802, Table 1, which holds their exact series to 0.06% over 440–1,000 nm and 0.4% at 300 nm`,
+  },
+  {
+    kind: "polarisability",
+    species: "O",
+    polarisabilityM3: 5.3 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 1.3,
+    basis: `5.3 ± 0.2 a.u. (${SCHWERDTFEGER_NAGLE}; Das and Thakkar 1998's CCSD(T) 5.24 ± 0.04, Alpher and White 1959's measured 5.2 ± 0.4); its resonances lie in the far ultraviolet, and the static rule runs 4–20% low at 440 nm`,
+  },
+  {
+    kind: "polarisability",
+    species: "Na",
+    polarisabilityM3: 162.7 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: undefined,
+    basis: `162.7 ± 0.5 a.u., measured (Ekstrom et al., Phys. Rev. A 51 (1995) 3883; ${SCHWERDTFEGER_NAGLE}); the D lines at 589.16 and 589.76 nm (vacuum; NIST ASD) lie inside 440–680 nm, and the true scattering is 46 times the estimate at 550 nm`,
+  },
+  {
+    kind: "polarisability",
+    species: "K",
+    polarisabilityM3: 289.7 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 13,
+    basis: `289.7 ± 0.3 a.u., measured (Gregoire et al., Phys. Rev. A 92 (2015) 052513; ${SCHWERDTFEGER_NAGLE}); the resonance lines at 766.70 and 770.11 nm (vacuum; NIST ASD) put the true scattering at 0.2 times the estimate at 440 nm and 13 times at 680 nm`,
+  },
+  {
+    kind: "polarisability",
+    species: "Fe",
+    polarisabilityM3: 62 * BOHR_CUBED_M3,
+    resonanceNm: 248.4,
+    uncertaintyFactor: 1.5,
+    basis: `62 ± 4 a.u., computed (${SCHWERDTFEGER_NAGLE}; Pou-Amérigo et al. 1995's MCPF 63.9, Calaminici 2004's 62.65); λ_r = 248.40 nm, its strongest resonance line (vacuum, f = 0.543; NIST ASD), which leaves σ 21–24% low at 440 nm against the sum over its lines, where its 372 and 386 nm lines add`,
+  },
+  {
+    kind: "polarisability",
+    species: "Mg",
+    polarisabilityM3: 71.2 * BOHR_CUBED_M3,
+    resonanceNm: 285.3,
+    uncertaintyFactor: 1.02,
+    basis: `71.2 ± 0.4 a.u. (${SCHWERDTFEGER_NAGLE}; Thakkar and Lupinetti 2006's CCSD(T) 71.22 ± 0.36); λ_r = 285.30 nm, its resonance line (vacuum, f = 1.80; NIST ASD), which carries 99% of α(0) and matches the sum over its lines to 0.5%`,
+  },
+  {
+    kind: "polarisability",
+    species: "Si",
+    polarisabilityM3: 37.3 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 2.4,
+    basis: `37.3 ± 0.7 a.u., computed (Thierfelder et al., Phys. Rev. A 78 (2008) 052506; ${SCHWERDTFEGER_NAGLE}); its 251–253 nm lines (NIST ASD) put the true scattering 1.1–2.2 times above the estimate`,
+  },
+  {
+    kind: "polarisability",
+    species: "Ca",
+    polarisabilityM3: 160.8 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 180,
+    basis: `160.8 ± 4.0 a.u. (${SCHWERDTFEGER_NAGLE}; Chattopadhyay et al., Phys. Rev. A 89 (2014) 022506; Porsev and Derevianko 2006 give 157.1 ± 1.3); its resonance line at 422.79 nm (vacuum, f = 1.75; NIST ASD) puts the true scattering 2.5 times above the estimate at 680 nm and 150–170 times at 440 nm`,
+  },
+  {
+    kind: "polarisability",
+    species: "Ti",
+    polarisabilityM3: 100 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: undefined,
+    basis: `100 ± 10 a.u., computed (${SCHWERDTFEGER_NAGLE}, from Kłos 2005's MRCI; Eustice et al., Phys. Rev. A 107 (2023) L051102, give 100.4 ± 1.8 for the ³F₄ level), where Ma et al., Phys. Rev. A 91 (2015) 010501, measured 63.4 ± 3.4; its ground-level lines at 465.8, 501.6 and 517.5 nm (vacuum; NIST ASD) lie inside 440–680 nm, where α passes through zero near 463 nm and the true scattering is 29–73 times the estimate near the lines`,
+  },
+  {
+    kind: "polarisability",
+    species: "SiO",
+    polarisabilityM3: 4.5 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 2.2,
+    basis: `${CCCBDB_COMPUTED}: B3LYP 4.43 and MP2 4.61 Å³ (aug-cc-pVQZ), 4.5 ± 0.25 Å³ (Maroulis et al., Mol. Phys. 98 (2000) 481, not read); its A–X band near 234 nm may raise the true scattering up to 1.9 times`,
+  },
+  {
+    kind: "polarisability",
+    species: "TiO",
+    polarisabilityM3: 13.5 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: undefined,
+    basis: `${CCCBDB_COMPUTED}: B3LYP 12.52, MP2 14.55 and HF 15.0 Å³, 13.5 ± 1.5 Å³, no published value found; its electronic bands lie across the visible, where the estimate is not meaningful`,
+  },
+  {
+    kind: "polarisability",
+    species: "VO",
+    polarisabilityM3: 10.3 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: undefined,
+    basis: `${CCCBDB_COMPUTED}: B3LYP 10.75, MP2 8.92 and HF 11.53 Å³, 10.3 ± 1.5 Å³, no published value found; its electronic bands lie in the visible and the near infrared, where the estimate is not meaningful`,
+  },
+  {
+    kind: "polarisability",
+    species: "FeH",
+    polarisabilityM3: 8.2 * CUBIC_ANGSTROM_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: undefined,
+    basis: `an analogy, α(Fe) times α(TiH) ÷ α(Ti), 0.89–1.02 with TiH's B3LYP 13.19 and MP2 15.15 Å³ (${CCCBDB_COMPUTED}), 8.2 ± 2.2 Å³, no published value found; its bands' share of α (the Wing–Ford band near 990 nm) is not known`,
+  },
+];
+
+/**
+ * σ = (128π⁵ ÷ 3) α² ÷ λ⁴, m², the Rayleigh cross-section of a molecule of polarisability volume α
+ * with no anisotropy (F_K = 1).
+ *
+ * @remarks
+ * It is {@link crossSectionFromDispersionM2}'s form for a dilute gas, whose Lorentz–Lorenz
+ * (n² − 1) ÷ (n² + 2) is (4π ÷ 3) N α. A static α leaves out the dispersion, so for a molecule
+ * whose resonances lie in the ultraviolet the cross-section runs low towards the violet: for N₂,
+ * with the Cuthbertsons' static α and no King factor, by 5% at 700 nm, 7% at 550 nm and 10% at
+ * 400 nm ({@link ESTIMATED_RAYLEIGH}).
+ *
+ * @param polarisabilityM3 - α, m³, finite and positive.
+ * @param wavelengthNm - A vacuum wavelength within {@link RAYLEIGH_WAVELENGTH_RANGE_NM}.
+ * @throws RangeError if the wavelength is outside the range, a caller's unit error.
+ */
+export function polarisabilityCrossSectionM2(
+  polarisabilityM3: number,
+  wavelengthNm: number,
+): number {
+  checkWavelength(wavelengthNm);
+  const wavelengthM = wavelengthNm * 1e-9;
+  const lambdaSquared = wavelengthM * wavelengthM;
+  return (
+    ((128 / 3) * Math.PI ** 5 * polarisabilityM3 * polarisabilityM3) /
+    (lambdaSquared * lambdaSquared)
+  );
+}
+
+/**
+ * ρ, the depolarisation ratio in natural light, from a King factor: 6(F_K − 1) ÷ (3 + 7F_K), the
+ * inverse of F_K = (6 + 3ρ) ÷ (6 − 7ρ) (Sneep and Ubachs 2005, eq. 7).
+ */
+export function depolarisationOfKingFactor(king: number): number {
+  return (6 * (king - 1)) / (3 + 7 * king);
+}
+
+/** A species' Rayleigh optics with its King factor, which the mixture weights by. */
+interface ScatteringSpecies {
+  readonly rayleigh: SpeciesRayleigh;
+  /** F_K at a vacuum wavelength in nm, checked: 1 for a polarisability estimate and for `none`. */
+  readonly kingFactor: (wavelengthNm: number) => number;
+}
+
+/** F_K = 1, checking the wavelength as every other optic does. */
+function isotropicAt(wavelengthNm: number): number {
+  checkWavelength(wavelengthNm);
+  return 1;
+}
+
+/** 0, a σ or a ρ, checking the wavelength. */
+function zeroAt(wavelengthNm: number): number {
+  checkWavelength(wavelengthNm);
+  return 0;
+}
+
+/** {@link GASES}' entry for a key, or `undefined`. */
+function measuredGas(species: string): Gas | undefined {
+  return GASES.find((gas) => gas === species);
+}
+
+/** {@link ESTIMATED_RAYLEIGH} by species. */
+const ESTIMATED_BY_SPECIES: ReadonlyMap<string, EstimatedRayleigh> = new Map(
+  ESTIMATED_RAYLEIGH.map((row) => [row.species, row]),
+);
+
+/** An estimate's uncertainty in words, for its {@link SpeciesRayleigh.source}. */
+function uncertaintyOf(estimate: EstimatedRayleigh): string {
+  const factor = estimate.uncertaintyFactor;
+  return factor === undefined
+    ? "no bound known over 440–680 nm"
+    : `within a factor of ${factor} either way over 440–680 nm`;
+}
+
+/**
+ * α at a wavelength, m³: α(0), or α(0) ÷ (1 − (λ_r ÷ λ)²) with one oscillator at λ_r.
+ *
+ * @throws RangeError if the wavelength is outside {@link RAYLEIGH_WAVELENGTH_RANGE_NM}.
+ */
+function polarisabilityAtM3(estimate: PolarisabilityEstimate, wavelengthNm: number): number {
+  checkWavelength(wavelengthNm);
+  const { polarisabilityM3, resonanceNm } = estimate;
+  return resonanceNm === undefined
+    ? polarisabilityM3
+    : polarisabilityM3 / (1 - (resonanceNm / wavelengthNm) ** 2);
+}
+
+/** An estimated row's Rayleigh optics. */
+function estimatedSpecies(estimate: EstimatedRayleigh): ScatteringSpecies {
+  const { species } = estimate;
+  let optics: ScatteringSpecies;
+  switch (estimate.kind) {
+    case "dispersion": {
+      const { dispersion, kingFactor: king } = estimate;
+      const kingAt = (wavelengthNm: number): number => {
+        checkWavelength(wavelengthNm);
+        return king.factor(wavelengthNm);
+      };
+      optics = {
+        rayleigh: {
+          species,
+          provenance: "estimated",
+          crossSectionM2: (wavelengthNm) =>
+            crossSectionFromDispersionM2(dispersion, king.factor, wavelengthNm),
+          depolarisation: (wavelengthNm) => depolarisationOfKingFactor(kingAt(wavelengthNm)),
+          source: `estimated, ${uncertaintyOf(estimate)} (${estimate.basis}): n − 1: ${dispersion.source}; F_K: ${king.source}`,
+        },
+        kingFactor: kingAt,
+      };
+      break;
+    }
+    case "polarisability": {
+      const rule =
+        estimate.resonanceNm === undefined
+          ? "(128π⁵ ÷ 3) α² ÷ λ⁴ with F_K = 1"
+          : `(128π⁵ ÷ 3) α(λ)² ÷ λ⁴ with α(λ) = α(0) ÷ (1 − (${estimate.resonanceNm} nm ÷ λ)²) and F_K = 1`;
+      optics = {
+        rayleigh: {
+          species,
+          provenance: "estimated",
+          crossSectionM2: (wavelengthNm) =>
+            polarisabilityCrossSectionM2(polarisabilityAtM3(estimate, wavelengthNm), wavelengthNm),
+          depolarisation: zeroAt,
+          source: `estimated, ${rule}, ${uncertaintyOf(estimate)}: α from ${estimate.basis}`,
+        },
+        kingFactor: isotropicAt,
+      };
+      break;
+    }
+  }
+  return optics;
+}
+
+/** A species' Rayleigh optics: measured, estimated or none. */
+function scatteringSpecies(species: string): ScatteringSpecies {
+  const gas = measuredGas(species);
+  if (gas !== undefined) {
+    const dispersion = GAS_DISPERSION[gas];
+    const king = GAS_KING_FACTOR[gas];
+    return {
+      rayleigh: {
+        species,
+        provenance: "measured",
+        crossSectionM2: (wavelengthNm) => rayleighCrossSectionM2(gas, wavelengthNm),
+        depolarisation: (wavelengthNm) => depolarisationOfKingFactor(kingFactor(gas, wavelengthNm)),
+        source: `n − 1: ${dispersion.source}; F_K: ${king.source}`,
+      },
+      kingFactor: (wavelengthNm) => kingFactor(gas, wavelengthNm),
+    };
+  }
+  const estimate = ESTIMATED_BY_SPECIES.get(species);
+  if (estimate !== undefined) {
+    return estimatedSpecies(estimate);
+  }
+  return {
+    rayleigh: {
+      species,
+      provenance: "none",
+      crossSectionM2: zeroAt,
+      depolarisation: zeroAt,
+      source: "none: no Rayleigh optics for this key here",
+    },
+    kingFactor: isotropicAt,
+  };
+}
+
+/**
+ * A species' Rayleigh scattering by its substance key, with its provenance (decision-composition
+ * §1.9).
+ *
+ * @remarks
+ * - `measured` for {@link GASES}: {@link rayleighCrossSectionM2} and {@link kingFactor}'s ρ.
+ * - `estimated` for {@link ESTIMATED_RAYLEIGH}'s rows: a measured dispersion with its King factor's
+ *   ρ (1 and so ρ = 0 where none was found), or a polarisability with ρ = 0.
+ * - `none` for any other key, such as one a newer server sent: σ = 0 and ρ = 0, so it adds nothing
+ *   to a mixture, which reports it ({@link molecularMixture}).
+ *
+ * No key is refused: a species is never dropped, only labelled.
+ */
+export function rayleighOf(species: string): SpeciesRayleigh {
+  return scatteringSpecies(species).rayleigh;
+}
+
+/** A species of a mixture whose Rayleigh optics are not measured, for `atmosphereApproximate`. */
+export interface RayleighApproximation {
+  readonly species: string;
+  readonly provenance: Exclude<OpticsProvenance, "measured">;
+}
+
+/**
+ * A well-mixed gas's Rayleigh scattering per molecule of the mixture, at any wavelength (R08 Design
+ * note 4).
+ */
+export interface MolecularMixture {
+  /** σ_mix = Σ xᵢσᵢ, m², at a vacuum wavelength in nm within the range. */
+  readonly crossSectionM2: (wavelengthNm: number) => number;
+  /**
+   * F_mix = Σ xᵢσᵢ ÷ Σ xᵢ(σᵢ ÷ Fᵢ), the σ-weighted King factor, at a vacuum wavelength in nm; 1 for a
+   * mixture that scatters nothing.
+   */
+  readonly kingFactor: (wavelengthNm: number) => number;
+  /** ρ_mix = 6(F_mix − 1) ÷ (3 + 7F_mix), at a vacuum wavelength in nm. */
+  readonly depolarisation: (wavelengthNm: number) => number;
+  /** Each species whose optics are estimated or none, in the mixture's order. */
+  readonly approximations: ReadonlyArray<RayleighApproximation>;
+}
+
+/**
+ * A well-mixed gas's Rayleigh scattering from its fractions, over any keyed species: the
+ * number-fraction mixture, F_mix and ρ_mix of R08 Design note 4.
+ *
+ * @remarks
+ * Each species' F_K is 1 + 2(γᵢ ÷ 3ᾱᵢ)² (Sneep and Ubachs 2005, eq. 7) and its σ is proportional
+ * to ᾱᵢ² Fᵢ. Molecules of an ideal gas scatter independently, so Σ xᵢᾱᵢ² and Σ xᵢγᵢ² add, and
+ * F_mix = Σ xᵢσᵢ ÷ Σ xᵢ(σᵢ ÷ Fᵢ) is exact. Averaging Fᵢ by volume, as Bodhaine et al. 1999's eq. 23
+ * does for air, weights each gas by its fraction rather than its scattering: for air the two
+ * differ by 0.2% in F and 4% in ρ.
+ *
+ * @throws RangeError for a fraction that is not finite in [0, 1], a species listed twice, or
+ *   fractions that do not sum to 1 within {@link MOLE_FRACTION_SUM_TOLERANCE}.
+ */
+export function molecularMixture(fractions: GasFractions): MolecularMixture {
+  const seen = new Set<string>();
+  let total = 0;
+  const species: Array<{ readonly fraction: number; readonly optics: ScatteringSpecies }> = [];
+  for (const { species: key, moleFraction } of fractions) {
+    if (!(Number.isFinite(moleFraction) && moleFraction >= 0 && moleFraction <= 1)) {
+      throw new RangeError(`${key}'s mole fraction lies in [0, 1], got ${moleFraction}`);
+    }
+    if (seen.has(key)) {
+      throw new RangeError(`a mixture lists each species once, and ${key} is listed twice`);
+    }
+    seen.add(key);
+    total += moleFraction;
+    species.push({ fraction: moleFraction, optics: scatteringSpecies(key) });
+  }
+  if (!(Math.abs(total - 1) <= MOLE_FRACTION_SUM_TOLERANCE)) {
+    throw new RangeError(
+      `a mixture's mole fractions sum to 1 within ${MOLE_FRACTION_SUM_TOLERANCE}, got ${total}`,
+    );
+  }
+  const crossSectionM2 = (wavelengthNm: number): number => {
+    checkWavelength(wavelengthNm);
+    let sum = 0;
+    for (const { fraction, optics } of species) {
+      sum += fraction * optics.rayleigh.crossSectionM2(wavelengthNm);
+    }
+    return sum;
+  };
+  const kingFactorAt = (wavelengthNm: number): number => {
+    checkWavelength(wavelengthNm);
+    let scattered = 0;
+    let isotropicPart = 0;
+    for (const { fraction, optics } of species) {
+      const sigma = fraction * optics.rayleigh.crossSectionM2(wavelengthNm);
+      scattered += sigma;
+      isotropicPart += sigma / optics.kingFactor(wavelengthNm);
+    }
+    return scattered > 0 ? scattered / isotropicPart : 1;
+  };
+  const approximations: RayleighApproximation[] = [];
+  for (const { optics } of species) {
+    const { provenance } = optics.rayleigh;
+    if (provenance !== "measured") {
+      approximations.push({ species: optics.rayleigh.species, provenance });
+    }
+  }
+  return {
+    crossSectionM2,
+    kingFactor: kingFactorAt,
+    depolarisation: (wavelengthNm) => depolarisationOfKingFactor(kingFactorAt(wavelengthNm)),
+    approximations,
+  };
+}
+
+/** A well-mixed gas's one Rayleigh term, and the species it carries by estimate or not at all. */
+export interface MolecularTerm {
+  /**
+   * The term `rayleigh`: the column's density, n_s σ_mix per channel at relative density 1, no
+   * absorption, and the Rayleigh phase with ρ_mix per channel.
+   */
+  readonly term: MediumTerm;
+  /** {@link MolecularMixture.approximations}, which R08.T10.a turns into `atmosphereApproximate`. */
+  readonly approximations: ReadonlyArray<RayleighApproximation>;
+}
+
+/**
+ * A well-mixed gas's molecular scattering as one medium term on its column (R08 Design notes 2
+ * and 4): {@link molecularMixture} at {@link CHANNEL_WAVELENGTHS_NM}.
+ *
+ * @remarks
+ * The gases are mixed at every height, so the term's density is the column's n ÷ n_s and its
+ * coefficient at relative density 1 is n_s σ_mix, n_s the column's ideal-gas number density at the
+ * datum. σᵢ belongs to the molecule, at its formula's reference state (the real gas's N_ref), and
+ * does not depend on the column's state.
+ *
+ * @throws RangeError as {@link molecularMixture}.
+ */
+export function molecularTerm(column: AtmosphereColumn, fractions: GasFractions): MolecularTerm {
+  const mixture = molecularMixture(fractions);
+  const numberDensity = column.surfaceNumberDensityPerM3;
+  const [red, green, blue] = CHANNEL_WAVELENGTHS_NM;
+  const scattering: Rgb = [
+    numberDensity * mixture.crossSectionM2(red),
+    numberDensity * mixture.crossSectionM2(green),
+    numberDensity * mixture.crossSectionM2(blue),
+  ];
+  const depolarisation: Rgb = [
+    mixture.depolarisation(red),
+    mixture.depolarisation(green),
+    mixture.depolarisation(blue),
+  ];
+  return {
+    term: {
+      name: "rayleigh",
+      density: column.density,
+      scattering,
+      absorption: [0, 0, 0],
+      phase: { kind: "rayleigh", depolarisation },
+    },
+    approximations: mixture.approximations,
+  };
 }
 
 /**

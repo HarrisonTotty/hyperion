@@ -75,7 +75,8 @@ const MEDIUM_FLOATS = 4 + 4 + MAX_TERMS * 12;
  * `Term.absorption.w`: 0 none, 1 Rayleigh, 2 Cornette–Shanks with its g.
  *
  * @throws Error for a `tabulated` phase, which the uniform cannot carry; R08.T6.b gives it a table
- *   and a code of its own.
+ *   and a code of its own. Also for a Rayleigh phase with ρ other than 0 in any channel: R05's
+ *   kernels draw only the ρ = 0 form, so it would be drawn wrong; R08.T6.b's kernels are to read ρ.
  */
 function phaseOf(phase: PhaseFunction): readonly [number, number] {
   let packed: readonly [number, number];
@@ -84,6 +85,11 @@ function phaseOf(phase: PhaseFunction): readonly [number, number] {
       packed = [0, 0];
       break;
     case "rayleigh":
+      if (phase.depolarisation.some((rho) => rho !== 0)) {
+        throw new Error(
+          `a Rayleigh phase with ρ = ${phase.depolarisation.join(", ")} has no Medium-uniform form until R08.T6.b`,
+        );
+      }
       packed = [1, 0];
       break;
     case "cornette-shanks":
@@ -123,7 +129,8 @@ function profileOf(profile: DensityProfile): readonly [number, number, number, n
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
  * @throws Error when the medium has more than {@link MAX_TERMS} terms, or a term with a
- *   `tabulated` density or phase, which the uniform cannot carry until R08.T6.b.
+ *   `tabulated` density or phase, or a Rayleigh phase with ρ other than 0, which the uniform
+ *   cannot carry until R08.T6.b.
  */
 export function packMedium(
   medium: AtmosphereMedium,

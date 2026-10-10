@@ -140,10 +140,36 @@ describe("terms", () => {
 });
 
 describe("phaseAt", () => {
-  it("gives Rayleigh's 3 ÷ (16π) × (1 + cos²θ) in every channel", () => {
-    expect(phaseAt({ kind: "rayleigh" }, 0.5)).toEqual(
+  it("gives Rayleigh's 3 ÷ (16π) × (1 + cos²θ) in every channel at ρ = 0, to the bit", () => {
+    expect(phaseAt({ kind: "rayleigh", depolarisation: [0, 0, 0] }, 0.5)).toEqual(
       Array.from({ length: 3 }, () => (3 / (16 * Math.PI)) * 1.25),
     );
+  });
+
+  /** ρ for the three channels: about air's, and two of more anisotropic molecules. */
+  const DEPOLARISED = { kind: "rayleigh", depolarisation: [0.0272, 0.1, 0.2] } as const;
+
+  it("gives each channel its ρ's law, 3 ÷ (4 + 2ρ) × ((1 + ρ) + (1 − ρ) cos²θ) ÷ (4π)", () => {
+    // Chandrasekhar's γ-form written in ρ itself, with γ = ρ ÷ (2 − ρ).
+    for (const mu of [-1, -0.4, 0, 0.3, 1]) {
+      const expected = DEPOLARISED.depolarisation.map(
+        (rho) => ((3 / (4 + 2 * rho)) * (1 + rho + (1 - rho) * mu * mu)) / (4 * Math.PI),
+      );
+      for (const [c, value] of phaseAt(DEPOLARISED, mu).entries()) {
+        expect(value / (expected[c] ?? Number.NaN) - 1).toBeCloseTo(0, 14);
+      }
+    }
+  });
+
+  it("keeps each channel's depolarised Rayleigh phase normalised over the sphere", () => {
+    // 2π ∫ P dμ over [−1, 1] by Simpson's rule, exact for a quadratic in μ.
+    const integrals = [0, 1, 2].map((c) => {
+      const at = (mu: number): number => phaseAt(DEPOLARISED, mu)[c] ?? Number.NaN;
+      return ((2 * Math.PI * 2) / 6) * (at(-1) + 4 * at(0) + at(1));
+    });
+    for (const integral of integrals) {
+      expect(integral).toBeCloseTo(1, 14);
+    }
   });
 
   it("gives Cornette–Shanks's form, which is Rayleigh's at g = 0", () => {

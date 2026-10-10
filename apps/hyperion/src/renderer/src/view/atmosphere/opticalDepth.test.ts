@@ -27,7 +27,7 @@ function exponential(topM: number): AtmosphereMedium {
         density: { kind: "exponential", scaleHeightM: H },
         scattering: [BETA, 2 * BETA, 3 * BETA],
         absorption: [0, 0, 0],
-        phase: { kind: "rayleigh" },
+        phase: { kind: "rayleigh", depolarisation: [0, 0, 0] },
       },
     ],
   };

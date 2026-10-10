@@ -24,7 +24,12 @@
 
 import { ATOMIC_MASS_CONSTANT_KG } from "../../lib/system/constants";
 import { type TabulatedDensity, tabulatedDensity } from "./medium";
-import { BOLTZMANN_J_PER_K, type Gas, GAS_MOLAR_MASS_G_PER_MOL } from "./rayleigh";
+import {
+  BOLTZMANN_J_PER_K,
+  type Gas,
+  GAS_MOLAR_MASS_G_PER_MOL,
+  MOLE_FRACTION_SUM_TOLERANCE,
+} from "./rayleigh";
 
 /**
  * An atmosphere's temperature against pressure (Design note 3).
@@ -217,12 +222,6 @@ export interface MixtureComponent {
   /** x, in [0, 1]. */
   readonly moleFraction: number;
 }
-
-/**
- * How far a mixture's mole fractions may sum from 1: 10⁻⁹, plan 14's tolerance for P14.T24.a's
- * gas fractions, which R08.T3.c's refusal also takes.
- */
-export const MOLE_FRACTION_SUM_TOLERANCE = 1e-9;
 
 /** Σ xᵢ f(propertiesᵢ) over a mixture whose fractions are checked. */
 function mixed(

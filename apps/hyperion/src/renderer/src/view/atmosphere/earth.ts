@@ -5,7 +5,7 @@
  */
 
 import type { Rgb } from "../photometry/toneCurve";
-import type { AtmosphereMedium, MediumTerm } from "./medium";
+import type { AtmosphereMedium, MediumTerm, PhaseFunction } from "./medium";
 
 /**
  * Dry air's Rayleigh scattering coefficients at sea level, m⁻¹, at 680, 550 and 440 nm:
@@ -141,6 +141,14 @@ const AEROSOL_EXTINCTION_PER_M: Rgb = [
 
 const scaled = (v: Rgb, k: number): Rgb => [v[0] * k, v[1] * k, v[2] * k];
 
+/**
+ * The phase R05's Rayleigh terms are drawn with: ρ = 0 in every channel, 3 ÷ (16π) × (1 + cos²θ),
+ * the form R05's kernels give every Rayleigh term (`source.wgsl`'s `phaseOf`). Air's own ρ is
+ * 0.027–0.028 over 440–680 nm by the σ-weighted mixture of Bates 1984's King factors (R08 Design
+ * note 4); R08.T6.d rebuilds Earth from R08.T3.c's molecular term, which carries it.
+ */
+const R05_RAYLEIGH_PHASE: PhaseFunction = { kind: "rayleigh", depolarisation: [0, 0, 0] };
+
 /** Ozone's tent, zero below 10 km and above 40 km, 1 at 25 km (Bruneton 2017's demo). */
 const OZONE_TERM: MediumTerm = {
   name: "ozone",
@@ -164,7 +172,7 @@ export const EARTH_REFERENCE: AtmosphereMedium = {
       density: { kind: "exponential", scaleHeightM: RAYLEIGH_SCALE_HEIGHT_M },
       scattering: RAYLEIGH_SCATTERING_PER_M,
       absorption: [0, 0, 0],
-      phase: { kind: "rayleigh" },
+      phase: R05_RAYLEIGH_PHASE,
     },
     {
       name: "aerosol",
@@ -198,7 +206,7 @@ export const HILLAIRE_REFERENCE: AtmosphereMedium = {
       density: { kind: "exponential", scaleHeightM: 8_000 },
       scattering: [5.802e-6, 13.558e-6, 33.1e-6],
       absorption: [0, 0, 0],
-      phase: { kind: "rayleigh" },
+      phase: R05_RAYLEIGH_PHASE,
     },
     {
       name: "aerosol",

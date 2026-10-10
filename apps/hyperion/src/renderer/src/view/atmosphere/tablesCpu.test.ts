@@ -411,7 +411,7 @@ const GAS: MediumTerm = {
   ),
   scattering: [5e-6, 1.2e-5, 3e-5],
   absorption: [0, 0, 0],
-  phase: { kind: "rayleigh" },
+  phase: { kind: "rayleigh", depolarisation: [0, 0, 0] },
 };
 
 /** A Henyey–Greenstein phase of asymmetry g tabulated on 256 entries even in u = √(θ ÷ π). */

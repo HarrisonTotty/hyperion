@@ -215,13 +215,20 @@ export interface PhaseMatrixTable {
 /**
  * A term's phase function.
  *
- * - `rayleigh`: 3 ÷ (16π) × (1 + cos²θ).
+ * - `rayleigh`: molecular scattering with the depolarisation ratio ρ per channel (natural light;
+ *   R08 Design note 4), 3 ÷ (4(1 + 2γ)) × ((1 + 3γ) + (1 − γ) cos²θ) ÷ (4π) with γ = ρ ÷ (2 − ρ),
+ *   the dipole phase of a randomly oriented anisotropic molecule from its ᾱ² and γ² (Chandrasekhar,
+ *   Radiative Transfer, 1950; the form Bucholtz 1995, Appl. Opt. 34, 2765, uses, not read here),
+ *   which is 3 ÷ (16π) × (1 + cos²θ) at ρ = 0. R08.T3.c's molecular term carries the mixture's ρ.
+ *   R05's kernels draw the ρ = 0 form whatever ρ is (`source.wgsl`'s `phaseOf`), and R05's
+ *   constant media say ρ = 0. `tables.ts`'s `packMedium` refuses a ρ above 0 until R08.T6.b, whose
+ *   kernels are to read it (R08's Risks).
  * - `cornette-shanks`: Cornette and Shanks 1992's form of Henyey–Greenstein with asymmetry g.
  * - `none`: an absorbing-only term, which scatters nothing.
  * - `tabulated`: given entry by entry, per channel ({@link PhaseTable}; R08.T6.a).
  */
 export type PhaseFunction =
-  | { readonly kind: "rayleigh" }
+  | { readonly kind: "rayleigh"; readonly depolarisation: Rgb }
   | { readonly kind: "cornette-shanks"; readonly asymmetry: number }
   | { readonly kind: "none" }
   | { readonly kind: "tabulated"; readonly table: PhaseTable };
@@ -309,13 +316,24 @@ function tabulatedPhase(table: PhaseTable, u: number): Rgb {
 }
 
 /**
+ * Rayleigh's phase with the depolarisation ratio ρ, sr⁻¹: 3 ÷ (16π) × ((1 + 3γ) + (1 − γ) μ²) ÷
+ * (1 + 2γ), γ = ρ ÷ (2 − ρ) ({@link PhaseFunction}'s `rayleigh`), which at ρ = 0 is
+ * `source.wgsl`'s 3 ÷ (16π) × (1 + μ²) to the bit.
+ */
+function rayleighPhase(depolarisation: number, mu: number): number {
+  const gamma = depolarisation / (2 - depolarisation);
+  return ((3 / (16 * Math.PI)) * (1 + 3 * gamma + (1 - gamma) * mu * mu)) / (1 + 2 * gamma);
+}
+
+/**
  * A phase function's value per channel, sr⁻¹, for the cosine of the scattering angle.
  *
  * @remarks
- * The closed forms are `source.wgsl`'s `phaseOf`, the same in every channel: Rayleigh's (Bruneton
- * and Neyret 2008, eq. 2) and Cornette and Shanks's (Appl. Opt. 31 (1992) 3152, as Bruneton and
- * Neyret 2008, eq. 4, g its shape parameter and not the mean cosine), its denominator floored at
- * 10⁻⁶ as there. A `tabulated` phase is read at u = √(θ ÷ π),
+ * The closed forms are `source.wgsl`'s `phaseOf`: Rayleigh's (Bruneton and Neyret 2008, eq. 2),
+ * here with each channel's ρ (Chandrasekhar's form, which R05's kernels draw at ρ = 0 only, until
+ * R08.T6.b), and Cornette and Shanks's, the same in every channel (Appl. Opt. 31 (1992) 3152, as
+ * Bruneton and Neyret 2008, eq. 4, g its shape parameter and not the mean cosine), its denominator
+ * floored at 10⁻⁶ as there. A `tabulated` phase is read at u = √(θ ÷ π),
  * θ = acos(cos θ), linear between the entries that bracket it ({@link PhaseTable}).
  *
  * @param cosTheta - The cosine between the direction of travel before and after scattering,
@@ -328,9 +346,10 @@ export function phaseAt(phase: PhaseFunction, cosTheta: number): Rgb {
     case "none":
       value = 0;
       break;
-    case "rayleigh":
-      value = (3 / (16 * Math.PI)) * (1 + mu * mu);
-      break;
+    case "rayleigh": {
+      const [red, green, blue] = phase.depolarisation;
+      return [rayleighPhase(red, mu), rayleighPhase(green, mu), rayleighPhase(blue, mu)];
+    }
     case "cornette-shanks": {
       const g = phase.asymmetry;
       const k = ((3 / (8 * Math.PI)) * (1 - g * g)) / (2 + g * g);

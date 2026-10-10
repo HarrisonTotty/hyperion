@@ -155,6 +155,21 @@ describe("packMedium", () => {
     };
     expect(() => packMedium(tabulated, 1, 1)).toThrow(/tabulated phase/);
   });
+
+  it("refuses a Rayleigh phase with ρ above 0, which the kernels would draw as ρ = 0", () => {
+    const [first, ...rest] = EARTH_REFERENCE.terms;
+    if (first === undefined) {
+      throw new Error("EARTH_REFERENCE has no terms");
+    }
+    const depolarised: AtmosphereMedium = {
+      ...EARTH_REFERENCE,
+      terms: [
+        { ...first, phase: { kind: "rayleigh", depolarisation: [0.027, 0.027, 0.028] } },
+        ...rest,
+      ],
+    };
+    expect(() => packMedium(depolarised, 1, 1)).toThrow(/ρ/);
+  });
 });
 
 describe("the kernels", () => {
