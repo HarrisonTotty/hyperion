@@ -2168,22 +2168,31 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   section (T48.e), a function of age + t.
   - _A mode_ has a material, a registry row (`SubstanceId`; its key on the wire) whose aerosol
     column gives its shape class (sphere, non-spherical mineral, crystal, aggregate), its particle
-    density and its mass extinction at 550 nm (T49.e). Liquid water, sulphuric acid and liquid
-    methane are spheres; the ices are crystals; mineral dust and the silicates are non-spherical
-    minerals; tholin and soot are spheres, the monomers of an aggregate. Any registry material may
-    form a mode. R08 holds an index file or a stated stand-in for each (R08.T5.b, T5.d; R08.T19
-    checks). The shape class stays a closed physics enum. A mode also has a size distribution, by
-    effective radius and variance (Hansen and Travis 1974's gamma or a modified log-normal), or an
-    aggregate's monomer radius, count and fractal dimension D_f ≤ 2.5, the enum's cap, inside which
-    Tazaki and Tanaka 2018's model is validated (R08 Design note 6); a column optical depth
+    density and its mass extinction at 550 nm (T49.e). One registry row serves every phase of its
+    substance (`H2O` is a cloud's droplets and its ice crystals), so each mode on the wire also
+    carries its phase (T49.a's `Phase`), which with its row fixes its shape class and its optics
+    (R08.T5.b's finding, R08's Risks, "Deviations in T5.b, as built"). Liquid water, sulphuric acid
+    and liquid methane are spheres; the ices are crystals; mineral dust and the silicates are
+    non-spherical minerals; tholin and soot are spheres, the monomers of an aggregate. Any registry
+    material may form a mode. R08 holds an index file or a stated stand-in for each (R08.T5.b, T5.d;
+    R08.T19 checks). The shape class stays a closed physics enum. A mode also has a size
+    distribution, by effective radius and variance (Hansen and Travis 1974's gamma or a modified
+    log-normal) of the volume-to-area radius r = 3V ÷ 4A, A the orientation-averaged projected area
+    (a sphere's radius), so that r_eff = (3 ÷ 4)⟨V⟩ ÷ ⟨A⟩ for every shape class and τ(550) = (3 ÷ 4)
+    Q̄_ext(550) M ÷ (ρ r_eff), with Q̄_ext = ⟨C_ext⟩ ÷ ⟨A⟩, the relation T49.e's κ_ext uses (a size
+    taken from a source in another convention, an equal-volume or equal-surface sphere, is converted
+    on the way in with that source's particle shape; R08's science-r08-mmf.md §2), or an aggregate's
+    monomer radius, count and fractal dimension D_f ≤ 2.5, the enum's cap, inside which Tazaki and
+    Tanaka 2018's model is validated (R08 Design note 6), its sizes staying a₀ (the monomer's
+    radius), N and D_f, with k_f = (5/3)^(D_f/2) unless the wire carries it; a column optical depth
     τ(550); its column mass, kg m⁻², from which τ(550) follows through T49.e's κ_ext, or which
     follows from a rule's τ(550) the same way; and a vertical profile, a base and a top pressure
     between which the mixing ratio goes as (p ÷ p_base)^f, with f the deck's f_sed (Ackerman and
     Marley 2001; the closed form from memory) or 0 for a well-mixed layer. A mode also names the
-    deck it belongs to, by the deck's condensate key, so that a deck of several modes
-    (T24.g's sulphuric acid) is one deck to its readers, its τ(550) the sum of its modes'. A deck
-    also gives its vapour's mole fraction above it, the cold trap's, which R08 reads for the
-    vapour's column there rather than re-deriving the saturation curve.
+    deck it belongs to, by the deck's condensate key, so that a deck of several modes (T24.g's
+    sulphuric acid) is one deck to its readers, its τ(550) the sum of its modes'. A deck also gives
+    its vapour's mole fraction above it, the cold trap's, which R08 reads for the vapour's column
+    there rather than re-deriving the saturation curve.
   - _An absorber_ is a registry gas row that is not one of T24.a's well-mixed gases, with its
     column (molecules m⁻²) and its layer: ozone, and SO₂ by T24.g. A species appears in at most one
     of the two lists. A gas that absorbs, methane by T24.f, is an absorber by its T24.a fraction
@@ -2224,6 +2233,8 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     ocean world none; Earth carries water decks and no ozone, since its O₂ is biotic (T24.f); an
     airless body's inventory is empty; the inventory is continuous in time but at a recorded
     state change.
+  - The record field's doc comment and its generated protocol binding state the radius convention
+    and the phase, in the units the field already has.
   - _Files:_ `planetary/hooks/{aerosols, mod}.rs`, `planetary/record.rs` (the surface section's
     member), `planetary/chem/condense.rs` (read).
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::aerosols`.
@@ -2914,6 +2925,7 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
       `Modelled` and absent until their tasks land, T51.a's `condensates`
       (`{ substance, phase, reservoir_gel_m, area_fraction, seasonal }`), T51.c's `crust`
       (`{ primary, secondary, tertiary, provinces, redox, mantle_redox_iw, melt_area_fraction }`),
+      with `primary`, `secondary` and `tertiary` each optional (science-r09-drainage.md §5),
       T51.d's `modifiers` (`{ maturity, organic_cover, resurfacing }`) and T53.d's `biosphere`
       (`{ fluxes: [{ species, flux_earth }] }`), whose tasks may reshape them until a build first
       sends a value (decision-composition §1.10).
@@ -4453,7 +4465,11 @@ rows' values.
     - they replace the five Clausius–Clapeyron sets, a deliberate output change at this batch's
       bump.
   - **The other phase data:**
-    - densities and latent heats;
+    - densities and latent heats, every density intrinsic: a solid's grain density, an ice's
+      crystal density at a stated temperature and a liquid's at a stated temperature and pressure,
+      with no porosity column, since porosity is how a material lies, which its reader states
+      (science-r09-drainage.md §3); `basalt`'s and `granite`'s grain densities are read from a
+      source here (R09's reference rows carry them from memory, at low confidence);
     - eutectics (MgSO₄–H₂O 269.29 K at 17.30 wt%, Zarriz, Journaux and Powell-Palm; NaClO₄ 236 K
       and Mg(ClO₄)₂ 206 K, Chevrier, Hanley and Altheide 2009; NH₃–H₂O 176.15 K, Kargel 1992, via
       Hammond et al. 2018, checked at build);
@@ -4480,7 +4496,10 @@ rows' values.
   - The column:
     - A_N in B, V and R (and reserved infrared bands) at reference grain classes;
     - the phase row of R10's L(α);
-    - the mechanics family, bulk density, thermal inertia, solidus (lithologies), k_comp,
+    - the mechanics family, grain density (a solid's or liquid's own, with no pore space: porosity
+      is how a material lies, which the reader states, science-r09-drainage.md §3), the solid's
+      specific heat and conductivity (a layer's thermal inertia following from its form's porosity
+      and grain size), solidus (lithologies), k_comp,
       k_target, erodibility and fluid density;
     - for every row that can form a surface.
   - A new `hyperion-fit` task, `substance_albedos`, mixes optical constants and laboratory
@@ -4517,6 +4536,8 @@ rows' values.
 - **P14.T49.e Aerosol extinction** (22 → 23; after rendering plan R08's R08.T5.b and R08.T5.d).
   - A new `hyperion-fit` task, `condensate_extinction`, gives each aerosol material's mass
     extinction κ_ext and single-scattering albedo at 550 nm against r_eff and v_eff:
+    - a compact particle's density is its row's grain density, and an aggregate's porosity its shape
+      class's (science-r09-drainage.md §3);
     - a Rust Mie on Wiscombe 1980's structure, held to the same MIEV cases as R08.T5.a (asserted
       values only);
     - over each material's committed index file, `apps/hyperion/src/renderer/src/view/atmosphere/materials/`,
@@ -4682,23 +4703,29 @@ Snapshot path, `planetary/chem/`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
 - **P14.T51.c Crust composition, redox class and melt area** (22 → 23; after T50.a).
   - `hooks/crust.rs`:
-    `CrustComposition { primary: Option<SubstanceId>, secondary: SubstanceId, tertiary: Option<SubstanceId>, provinces: SubstanceId, redox: RedoxClass, melt_area_fraction: f64 }`,
+    `CrustComposition { primary: Option<SubstanceId>, secondary: Option<SubstanceId>, tertiary: Option<SubstanceId>, provinces: SubstanceId, redox: RedoxClass, melt_area_fraction: f64 }`,
     from T50.a's ΔIW and host Mg/Si, T48.a's f_c, T24.b's heat flow and regime, and P14.T28.a's
-    `molten_until`.
+    `molten_until`. At least one of `primary` and `secondary` is present
+    (science-r09-drainage.md §5).
   - **Primary:** a plagioclase flotation crust (`anorthosite`) where a magma ocean existed on a
     body small enough for plagioclase to float (the Moon). Earth- and Mars-mass bodies get an
     ultramafic crust after overturn (Hu, Ehlmann and Seager 2012, after Elkins-Tanton et al. 2005,
     the latter to be read at build). On a reduced body, graphite flotation (Mercury's
-    low-reflectance material).
-  - **Secondary:** `basalt` by default; `komatiite` where the mantle is hot (young, or radiogenically
+    low-reflectance material). A frozen ocean's shell is primary too: Ceres's altered, salt- and
+    phyllosilicate-bearing crust, "the bulk of Ceres's original ocean" (Castillo-Rogez et al. 2018,
+    p. 1838; Fu et al. 2017), and an ocean world's ice shell.
+  - **Secondary:** a solid mantle's partial melt, `None` where the mantle never melted (a Ceres,
+    whose rock "avoided igneous differentiation", Fu et al. 2017); `basalt` by default; `komatiite`
+    where the mantle is hot (young, or radiogenically
     or tidally heated); `basalt_reduced` on a reduced body; shifted towards silica-rich or
     Mg-rich by Mg/Si, which reaches Putirka and Xu 2021's exotic mantle rocks without a special
     case.
   - **Tertiary:** `granite` where f_c > 0, which already needs a mobile lid and surface water
     (Campbell and Taylor 1983).
-  - **Ice crusts:** an `Icy` body's crust is `H2O`, with salts, NH₃ hydrate or clathrate as minor
-    substances where the inventory carries them.
-  - **`melt_area_fraction`:** the surface's area above the secondary crust's solidus, from the
+  - **Ice crusts:** an `Icy` body's primary crust is `H2O`, with salts, NH₃ hydrate or clathrate as
+    minor substances where the inventory carries them.
+  - **`melt_area_fraction`:** the surface's area above the solidus of the crust at the surface (the
+    secondary's, or the primary's where there is none), from the
     closed-form surface-temperature distribution. A locked airless world's is T_ss cos^¼θ, so a
     lava world has a dayside pool and a solid nightside (Léger et al. 2011; Kite et al. 2016).
     `MagmaOcean` stays the global state. R09.T13.c applies the solidus per cell.
@@ -4709,6 +4736,8 @@ Snapshot path, `planetary/chem/`.
     - Venus a basaltic stagnant lid;
     - Mars basaltic, with its ferric surface from T51.d;
     - an icy body an `H2O` crust;
+    - a Ceres-like body (hydrated, never silicate-melted) a primary phyllosilicate crust and no
+      secondary;
     - a hot young mantle komatiitic;
     - the secondary crust shifts with Mg/Si at fixed everything else;
     - a locked lava world's melt area is between 0 and 0.5 and rises with T_ss;
@@ -4748,6 +4777,44 @@ Snapshot path, `planetary/chem/`.
     - a Kuiper-like member beyond the volatile line red, inside it neutral.
   - _Files:_ `planetary/hooks/small_bodies.rs`, one call each in `belts.rs` and `moons/`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::small_bodies`.
+- **P14.T51.f Cold traps on airless bodies** (23 → 24; amends T51.a; science-r09-drainage.md §4).
+  - **Where:** `hooks/cold_traps.rs`, for a body with no collisional atmosphere.
+  - **Which condensables:** each one its exchangeable inventory carries (T50.a), and H₂O and CO₂,
+    which impactors deliver to any body.
+  - **The cold-trap fraction:** the area fraction from `hyperion_surface::cold_trap::fraction`,
+    integrated over latitude. It is Hayne et al. 2021's template (Nat. Astron. 5, 169, eqs. 1 and
+    26), with Ingersoll, Svitek and Murray 1992's shadow temperature (Icarus 100, 40) at the
+    highest sun elevation. Its inputs are:
+    - the present obliquity, labelled, since cold traps record the obliquity's history;
+    - the host flux at periapsis, the Bond albedo and the emissivity;
+    - the crater fraction and d/D distribution from the crater state;
+    - the plains' RMS slope.
+  - **The threshold of each species:** the temperature at which Hertz–Knudsen sublimation from its
+    T49.b saturation curve is 144 kg m⁻² Gyr⁻¹ (Schorghofer and Williams 2020, PSJ 1, 54, Table 1:
+    110 K for H₂O).
+  - **The exposed fraction f_x:** drawn once a body, log-uniform in [0.016, 0.45], on a stream this
+    task chooses under the determinism rules, so that no existing value moves. The bounds are
+    Ceres's 10 of 634 shadowed craters (Platz et al. 2016), the Moon's 3.5% (Li et al. 2018) and
+    Mercury's 43–46% (Deutsch et al. 2016). It is labelled empirical until a delivery and gardening
+    budget exists (with T55.c).
+  - **What it publishes:** a `Condensates` entry
+    `{ substance, Solid, reservoir, area_fraction = f_ct × f_x, seasonal: false }`, merged with
+    T51.a's entry for the same substance and phase. Its reservoir is this task's to source, from
+    neutron and LCROSS figures for the Moon, and is labelled a placeholder until then.
+  - **T51.a's airless branch:** a condensable lies as a zonal solid only where the zonal annual
+    maximum, not the mean, is below its threshold, and otherwise only in cold traps.
+  - _Tests:_
+    - the Moon's cold traps are 0.05–0.2% of its surface, about 6.7% of 80–90° and almost none
+      below 70° (Hayne et al.'s Table 1, within a factor of two);
+    - its exposed water at f_x = 0.035 is within a factor of two of Li et al.'s;
+    - CO₂ cold traps on the Moon are of order 200 km² (Schorghofer et al. 2021);
+    - Ceres's permanent shadow is of order 2,300 km² at 4° and essentially zero at 20°
+      (Schorghofer et al. 2024);
+    - an airless body at 30° obliquity has none;
+    - a smooth lunar pole lays no zonal cap, and a body whose zonal annual maximum is below the
+      threshold everywhere lays one over its whole surface.
+  - _Files:_ `planetary/hooks/cold_traps.rs`, `planetary/chem/partition.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::cold_traps`.
 
 #### P14.T52 Atmospheric chemistry
 
@@ -4945,7 +5012,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Accept:_ `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-server convert`;
     `just gen-protocol-check`; the golden tests.
 - **P14.T54.b The 23 → 24 batch on the record, and its bump.** As T54.a, for T51.d's
-  `modifiers`, T51.e's types, T53.a–c's states and gases, and T53.d's member, which stays absent.
+  `modifiers`, T51.e's types, T51.f's cold-trapped condensates, T53.a–c's states and gases, and
+  T53.d's member, which stays absent.
   `GENERATOR_VERSION` goes 23 → 24.
 
 #### P14.T55 Later composition (unscheduled)
@@ -5050,7 +5118,7 @@ it:
   - The 22 → 23 batch (T49.b–e, T50, T51.a–c, T52, and T24.c–e and T24.g with it) moves every
     body's composition, its dominant condensable's pressure and the Bond albedo, and fills members
     the goldens hold absent. It takes one bump in P14.T54.a.
-  - The 23 → 24 batch (T51.d–e, T53) takes one bump in P14.T54.b.
+  - The 23 → 24 batch (T51.d–f, T53) takes one bump in P14.T54.b.
   - Draws: words 3–5 of `planet.volatiles` (no existing value moves), and one new tag,
     `system.abundances` (System scope). No other domain tag.
   - The registry is append-only. A row's index and key are never changed. A changed value is a

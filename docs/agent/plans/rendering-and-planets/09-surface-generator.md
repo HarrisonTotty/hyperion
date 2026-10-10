@@ -195,10 +195,11 @@ pub mod field {
     pub struct SynthesisCell { /* elevation_mm: i32,
         boundary_distance: i16 (1 km, saturating),
         plate: u8, crust: Crust, boundary: BoundaryKind, boundary_obliquity: u8,
-        flow: FlowDirection, drainage: LogArea, steepness: LogSteepness,
+        flow: FlowDirection, drainage: LogArea (geometric), steepness: LogSteepness (k_s on it),
+        runoff: LogRunoff, catchment_runoff: LogRunoff (follow-up C),
         water_surface_mm: i32, ice: u8, substances: u8 (ice and liquid entries),
         class: SurfaceClass, crater_state: u8, seafloor: u8 (hill relief | ponded sediment,
-        decision-r09-t5 item 5) */ }                    // 23 bytes in the payload
+        decision-r09-t5 item 5) */ }                    // 25 bytes in the payload
     pub struct ClimateCell { /* at level − 1: sea_level_temperature: i16 (0.01 K),
         month_anomaly: [i8; 12] (header's step), month_precipitation: [u8; 12] (log rate),
         wind: [Wind; 12] (each month's 10 m wind) */ }    // 50 bytes, one per four cells
@@ -702,8 +703,10 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    by the interquartile range, arcs 60 km and 175 km wide behind them, distances Earth's and
    unscaled (labelled), all heights scaled by (g⊕ ÷ g) × the lithosphere factor as
    strength-limited; flexure w = w₀ e^(−x/α)(cos x/α + sin x/α) with α = [4D ÷ ((ρ_m − ρ_fill)
-   g)]^¼, D = E T_e³ ÷ 12(1 − ν²), E 100 GPa, ν 0.25 (Olympus Mons at T_e = 70 km gives α ≈ 180 km,
-   as observed). The synthesis's amplitudes are fixed per body by its `BandSpectrum` (the
+   g)]^¼, ρ_fill being the fill's bulk density, its palette entry's grain density times one less
+   the porosity T12.c states, D = E T_e³ ÷ 12(1 − ν²), E 100 GPa, ν 0.25 (Olympus Mons at T_e = 70
+   km gives α ≈ 180 km, as observed).
+   The synthesis's amplitudes are fixed per body by its `BandSpectrum` (the
    structural share's law, `decision-r09-t5.md` items 2–4: per-degree variance ∝ l^−β₁ from the
    coarse cell to a break at λ_b, and ∝ l^−β₂ below it, continuous; on silicate crusts β₁ 2.0, λ_b
    2 km, β₂ 3.0, from SRTM, Earth2014's land, GMRT and Perron et al. 2008; on ice-rich crusts 1.8,
@@ -843,8 +846,20 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    `runoff`), normalised by a reference runoff of 1 m a⁻¹, which is the only place runoff enters
    (the first draft also multiplied K by runoff to the m, counting it twice). Both the paper's code
    (Inria research-only licence) and Dendry's (GPL-3.0) are implemented from the papers alone.
-   Outputs: final elevation, flow direction, drainage area, a steepness index k_s, and water
-   surfaces.
+   Outputs: final elevation, flow direction, the geometric drainage area (T14.a's, by solid angle,
+   as Hack 1957 measures it), the steepness index k_s = S A^θ on that area (Kirby and Whipple
+   2012's k_s, Adams et al. 2020's k_sn), each cell's own erosive runoff and its catchment's
+   area-weighted mean runoff, and water surfaces.
+
+   The equivalent area is the solver's alone. It is Hergarten 2021's "catchment-size equivalent of
+   the discharge", A_eq = q ÷ p₀ (ESurf 9, 937, eq. 16), with p₀ = 1 m a⁻¹. On the field it is the
+   catchment runoff times the drainage area, and the discharge-weighted index k_snQ = k_s (r̄ ÷ 1 m
+   a⁻¹)^θ (Adams et al., eq. 3; Leonard, Whipple and Heimsath 2023).
+
+   The geometric area serves what is geometry: Hack's law, which Hergarten keeps in geometric area
+   (his eq. 11), the network's lengths and k_sn. The runoffs serve what is water: discharge, width,
+   and a tributary's own steady state, which is at its own runoff, not its trunk's (Hergarten and
+   Robl 2022, p. 2080). Ruled 2026-10-10 in science-r09-drainage.md §1.
 
    _Erodibility_ (researched 2026-10-09, by R09.T0.b; low to medium-low confidence, stated in the
    doc comment): K = K⊕ (g ÷ g⊕)(ρ_f ÷ ρ_water) B. K⊕ = 6.3 × 10⁻⁶ m^0.1 a⁻¹: Tzathas et al.'s 2 ×
@@ -1010,7 +1025,10 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     Perlin noise at the point on the sphere, seamless by construction, with Perlin 2002's 16-entry
     gradient table indexed by four bits so that the mean is exactly zero, R05's certified bound B,
     and R05's `LatticeCache`; ridged multifractal for a mountain belt with its pinned mean removed,
-    low amplitude on an abyssal plain, domain warp taking offsets only from octaves no finer than
+    in the octaves at and above the spectrum's break only, the belt's own shape lifting its
+    ridge–valley wavelength (1.5 breaks) 1.8× and steepening it by 0.4 below the break, so that its
+    slopes hold near threshold as SRTM's belt cores do (`decision-r09-t5.md` item 7), low amplitude
+    on an abyssal plain, domain warp taking offsets only from octaves no finer than
     the level warped. Threefry2x64-20 stays the lattice hash: with the lattice cached it runs once
     per corner, and the cached path is 2.5–3× faster than any hash. _Channels:_ one Dendry network
     extended through about fourteen levels from the coarse cell (36 km) to the band limit, rather
@@ -1019,15 +1037,23 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     from the coarser one and jittered on `surface.channel` (ε = 0.25), join the nearest segment of
     all coarser levels; neighbourhoods are graph neighbourhoods on the cube and distances 3D chords
     between canonical key points, so a face edge needs no special case. The paper's height
-    reconstruction is replaced by the physics: the bed at S = k_s A^−θ with A from Hack's law in SI,
-    L = 0.320 A^0.6 (Hack's 1.4 in miles; the brainstorm's 1.5 is Tzathas et al.'s mile-based figure
-    and is 4.7× too long in SI), and a valley cross-profile from the distance to the channel; each
+    reconstruction is replaced by the physics: the bed at the steady-state slope S = k_s (r̄ ÷ r)^θ
+    A^−θ, with A from Hack's law in SI (a geometric area, Hack 1957, p. 47), k_s the coarse cell's
+    geometric index, r̄ its catchment runoff and r its own runoff, since a tributary's steady state
+    is at its own catchment's runoff (Design note 9); a cell with no runoff of its own carries no
+    tributaries; L = 0.320 A^0.6 (Hack's 1.4 in miles; the brainstorm's 1.5 is Tzathas et al.'s
+    mile-based figure and is 4.7× too long in SI), and a valley cross-profile from the distance to
+    the channel; each
     level's mean incision over its parent cell is subtracted. After the first level the distance
     search is 3 × 3 with cached bounding boxes and inverse lengths, and levels whose channels are
     narrower than about four band limits are not evaluated. Those channels, under about 8 m wide,
     are about 0.3–0.6 m deep at bankfull by regional hydraulic geometry (Bieger et al. 2015, from
-    memory; Leopold and Maddock 1953; Parker et al. 2007), comparable to the finest band's RMS in
-    this spectrum, and the band limit resolves channels from about 4 m, so the cut is a cost lever
+    memory; Leopold and Maddock 1953; Parker et al. 2007), a depth and width taken from discharge,
+    Q = r A for a tributary and r̄ A for a trunk, and never from area alone, since an area-based
+    regional curve carries its region's runoff (Bieger et al. 2015's abstract finds "drainage area
+    is a less reliable predictor of bankfull channel dimensions than bankfull discharge"; Leopold
+    and Maddock 1953, p. 16, w = aQ^b with b = 0.5), comparable to the finest band's RMS in this
+    spectrum, and the band limit resolves channels from about 4 m, so the cut is a cost lever
     that removes resolvable, authoritative channels, not a cut below the band's amplitude
     (researched 2026-09-29, medium confidence): T6.b measures the incision it removes before fixing
     it, and only channels under about two band limits are cut on resolution alone. Three of these
@@ -1115,10 +1141,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     confidence for Mars and high obliquity), so no anomaly saturates and no cell grows. The climate
     layer is at level L − 1, because it is interpolated from the energy-balance grid and carries
     nothing finer except the lapse term, which the synthesis re-applies from the header's rate and
-    the cell's elevation. That gives about 23 B a cell (21 B, T2's follow-up B's substance byte
-    and `decision-r09-t5.md`'s sea-floor byte) plus 50 B per four (twelve months of anomaly,
-    precipitation and wind): some 14.0 MB for an Earth at level 8, 3.5 MB for a Mars at 7 and
-    0.89 MB for the Moon, inside the brainstorm's "roughly 2 to 15 MB" and R03's 15 MiB check.
+    the cell's elevation. That gives about 25 B a cell (21 B, T2's follow-up B's substance byte,
+    `decision-r09-t5.md`'s sea-floor byte and follow-up C's two runoff bytes) plus 50 B per four
+    (twelve months of anomaly, precipitation and wind): some 14.7 MB for an Earth at level 8,
+    3.7 MB for a Mars at 7 and 0.94 MB for the Moon, inside the brainstorm's "roughly 2 to 15 MB"
+    and R03's 15 MiB check.
     Heights, elevations and sea level are measured along the normal of the body's
     rotational spheroid, R07's reference body (a = R_vol (1 − f)^(−⅓), c = a (1 − f), with plan 14's
     flattening f, which P14.T46 sends in the record's `figure()`), the one datum R07's Design note
@@ -1291,8 +1318,9 @@ decision-r09-t2's follow-up, which edits the same files).
   - `MechanicsFamily` (`u8`): `Silicate` 0, `Metal` 1, `WaterIce` 2, `VolatileIce` 3, `Salt` 4,
     `Organic` 5;
   - `PaletteEntry { substance, role, normal_albedo_bvr: [f64; 3], phase_row: u8,`
-    `density_kg_m3: f64, transition: Kelvin, mechanics }`, every value resolved by the server from
-    plan 14's registry, so that the field stays the client's only input (Design note 17);
+    `grain_density_kg_m3: f64, transition: Kelvin, mechanics }` (renamed by follow-up C), every
+    value resolved by the server from plan 14's registry, so that the field stays the client's only
+    input (Design note 17);
   - `MaterialPalette`, at most 15 entries, sorted by (role, key).
 - **`FieldHeader`** gains `palette`, `crust_palette: [Option<u8>; 4]` (the entry of each `Crust`
   variant, whose lithology it names) and `main_liquid: Option<u8>`.
@@ -1308,8 +1336,8 @@ decision-r09-t2's follow-up, which edits the same files).
 - **The synthetic worlds carry palettes:**
   - Earth: `basalt`, `granite`, `H2O` as ice and as liquid;
   - Mars: `basalt`, `mars_dust`, `H2O` and `CO2` ices;
-  - Moon: `anorthosite`, and `basalt` as provinces;
-  - Ceres: `phyllosilicate`, `Na2CO3`, `H2O` ice.
+  - Moon: `anorthosite` (primary), `basalt` (province), `H2O` (ice);
+  - Ceres: `phyllosilicate` (primary), `Na2CO3` (deposit), `H2O` (ice).
 
   Keys are checked by grammar until P14.T49.b's rows exist, when P14.T49.b's test checks every key
   these worlds use.
@@ -1324,6 +1352,38 @@ decision-r09-t2's follow-up, which edits the same files).
   grammar (formula, `e-`, name, and rejections).
 - Acceptance: `cargo test -p hyperion-surface field`;
   `cargo test -p hyperion-surface substance_key`.
+
+_Follow-up C, runoff, grain densities and the read solidus_ (science-r09-drainage.md §1–§5).
+
+- **Two new bytes:** `SynthesisCell` gains `runoff` and `catchment_runoff`, both `LogRunoff`. The
+  record goes from 23 to 25 bytes (the ruling's 22 to 24, before `decision-r09-t5.md`'s sea-floor
+  byte), 0.79 MB more on an Earth at level 8.
+- **Docs:** `LogArea`'s and `LogSteepness`'s documentation say they are geometric.
+- **The codec:** the two bytes follow `steepness`.
+- **`PaletteEntry::density_kg_m3` becomes `grain_density_kg_m3`,** a grain density (§3).
+- **B's synthetic rows:**
+  - basalt's solidus becomes 980 °C (§2);
+  - each density becomes a grain density;
+  - Ceres's phyllosilicate takes `PrimaryCrust` (§5);
+  - the Moon gains `H2O` as `Ice` (§4).
+- **Synthetic routing:** `Grid::route` accumulates the equivalent area beside the geometric one
+  from a per-world runoff:
+  - the Earth-like world: 0.4 of its annual precipitation (about Earth's ratio of global runoff to
+    land precipitation, about 0.36, from memory, labelled), so that its rain shadows give r̄ ≠ r;
+  - the Mars-like world: a uniform 0.1 m a⁻¹;
+  - every other world: none.
+- **The sim:** its quantiser writes the bytes from two new `CellState` members, none in
+  `Working::initial`.
+- _Tests:_
+  - each `LogRunoff` code round-trips;
+  - catchment runoff × drainage, summed at each confluence, equals the cell's runoff times its own
+    area plus its donors' to the steps;
+  - on the Mars-like world every routed cell's two runoffs are equal;
+  - the synthetic Earth has a cell whose catchment runoff is at least three times its own.
+- _Goldens:_ `payloads.golden` is re-blessed at 21 (allowed before T19's first send), and
+  `codes.golden` gains the `LogRunoff` rows.
+- _Accept:_ `cargo test -p hyperion-surface field`; `cargo test -p hyperion-surface wire`;
+  `cargo test -p hyperion-sim planetary::surface`.
 
 ### R09.T3 The payload codec
 
@@ -1393,22 +1453,35 @@ and T9).
   extended (Generator version).
 - Tests: the closed forms against direct sums across the break; the anchors; the byte's codes and
   refusals; the styles; the 5% variance test on the new spectra.
+- _And the belt's law_ (`decision-r09-t5.md` item 7): the ridged mix confined above the break; the
+  belt factor g(λ)^b; the pinned unit-variance structure functions of the plain and ridged terms;
+  `octave_bound` with the factor. The plain styles' heights do not move.
 
 ### R09.T6 Channels
 
 - **R09.T6.a The first levels.** `synth/channels.rs`: the network's first level from the coarse
   flow directions and the next levels by nearest-segment joins on `surface.channel`, with graph
   neighbourhoods and 3D chord distances (Design note 13); profiles S = k_s A^−θ with Hack's law in
-  SI, C = 0.320 m^−0.2 and h = 0.6 (Hack 1957, eq. 3, converted; flagged as Earth's). Tests: a
+  SI, C = 0.320 m^−0.2 and h = 0.6 (Hack 1957, eq. 3, converted; flagged as Earth's), the field's
+  drainage and k_s read as geometric; once follow-up C has landed, the tributary's k_s is the
+  cell's k_s (r̄ ÷ r)^θ and a cell with no runoff carries no tributaries (Design note 13;
+  science-r09-drainage.md §1), which T6.b applies if T6.a lands first. Tests: a
   10⁴ km² basin gives a main stream of 280–360 km; every segment descends to its parent within the
   minimum slope; the network leaves each coarse cell through the cell its flow direction names; a
   key point next to a face edge gives the same segments from either face.
 - **R09.T6.b The full depth and the mean.** The network to about fourteen levels, with the 3 × 3
-  search, cached bounding boxes and the level cut by channel width; each level's incision has its
-  mean over the parent cell subtracted; built per patch and cached by integer cell in `SynthCache`;
+  search, cached bounding boxes and the level cut by channel width; widths and depths from
+  discharge (Design note 13): a tributary's r A, from its cell's `runoff`, and a trunk's r̄ A, from
+  its `catchment_runoff`, with the hydraulic-geometry relation and the conversion from mean runoff
+  to channel-forming discharge stated with their sources by this task's science check; each
+  level's incision has its mean over the parent cell subtracted; built per patch and cached by
+  integer cell in `SynthCache`;
   the channels' `unresolved_variance` and `structure_function`. Tests: mean incision over every
   parent cell zero to 10⁻⁹ m; the cached build equals the single-point query bit for bit; cache
-  order does not change a height. Bench `surface/channels` with a per-level breakdown, against 3.5
+  order does not change a height; a tributary in a cell whose own runoff is a tenth of its
+  catchment's is 10^0.45 = 2.82 times as steep as the same tributary where the two are equal (to
+  10⁻¹²), and narrower by its discharge; a cell with no runoff carries no tributaries. Bench
+  `surface/channels` with a per-level breakdown, against 3.5
   µs a point in wasm (Design note 14), in a new `crates/hyperion-surface/benches/synth.rs`
   (`[[bench]]`, `harness = false`, Criterion off the browser target as `test_planet.rs` is), which
   T8 extends.
@@ -1485,7 +1558,11 @@ instrumented read set, interpolant, relief, channels and craters, never reaches 
 included (Design note 15); `bake_patch` equals 65 × 65 point queries bit for bit;
 `assert_order_independent` over
 patch build orders; `unresolved_rms` falls monotonically with resolution and is zero at the band
-limit. Benches `surface/point` and `surface/patch`, with a per-component breakdown against Design
+limit. Full-belt cells (b = 1) on the Earth-like world have an adirectional RMS slope of 32–40° at
+100 m and 22–30° at 1 km, a mean of 26–34° at 100 m, and 0.15–0.35 of their area above 40° at
+10 m (`decision-r09-t5.md` item 7). The closed-form structure function matches the sampled one
+within 10% on belt and plain cells alike. Benches `surface/point` and `surface/patch`, with a
+per-component breakdown against Design
 note 14's targets and the brainstorm's 10 µs a point and 40 ms a patch, recorded; a miss is a
 finding for open question 5, and the hash levers of Design note 14 are tried only then. Acceptance:
 `cargo test -p hyperion-surface synth` and `just bench -- surface` (the recipe passes the filter to
@@ -1532,6 +1609,41 @@ P14.T48.e lands second adds a generated sub-Neptune (decision-p14-t35e-wire).
 Tests: a no-op pass yields a valid field twice with identical bytes; solid angles sum to 2π ÷ 3 a
 face to 10⁻¹²; edge-neighbour lists are symmetric, every cell has four and a corner cell three
 vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
+
+- **R09.T10.c The crust's options and the reference rows** (science-r09-drainage.md §3–§5; a T10
+  follow-up, after T2's follow-up C).
+  - **The crust** (§5). In `planetary/surface/inputs.rs`, `CrustInputs::secondary` becomes
+    `Option<SubstanceKey>`, "the secondary crust, a solid mantle's partial melt (`basalt` by
+    default), or `None` on a body whose mantle never melted (a Ceres)". `CrustInputs::primary` keeps
+    its type, documented as "the primary crust, crystallised from the body's first global liquid: a
+    magma ocean's flotation crust (`anorthosite` on the Moon), or a frozen ocean's shell
+    (`phyllosilicate` on a Ceres, `H2O` on an icy body); or `None`". `BuildCoarseInputsError` gains
+    `NoCrust`, refusing a crust with neither.
+  - **The crust mapping.** `crust_palette`'s `Oceanic` takes the secondary's entry or none, `Lid`
+    the primary's, else the secondary's, and `Province` the provinces' `Province` entry, else the
+    entry of whichever of the lid's crusts is the same substance. `melt_area_fraction`'s
+    documentation reads "the share of the surface above the solidus of the crust at the surface
+    (the secondary's, or the primary's where there is none)".
+  - **Grain densities** (§3). The reference `Substance` struct's field becomes
+    `grain_density_kg_m3`, and its documentation says that every density is a grain density, the
+    porosity being how a material lies, which R10's forms carry. `anorthosite` takes 2,900 kg m⁻³,
+    implied by the highlands' GRAIL bulk density of 2,550 kg m⁻³ at 12% porosity (Wieczorek et al.
+    2013, Science 339, 671), and `mars_dust` 2,600 kg m⁻³, the grain density that the Viking
+    landers' fine material's 58% porosity assumes (Moore et al. 1987, USGS PP 1389, p. 121 and
+    Table 36). `basalt`'s 2,900 and `granite`'s 2,650 are relabelled grain densities (low
+    confidence), and `phyllosilicate`'s 2,500 is one already.
+  - **The reference worlds.** `ceres_like`'s crust is
+    `primary: Some(PHYLLOSILICATE_KEY), secondary: None`, its palette's phyllosilicate a
+    `PrimaryCrust`, and its table's crust and palette rows read "phyllosilicate (primary crust:
+    Ceres's frozen ocean, Castillo-Rogez et al. 2018; Fu et al. 2017)". `moon_like` and `mars_like`
+    keep their crusts, with `secondary: Some(BASALT_KEY)`. The
+    reference Moon's palette gains `H2O` as `Ice`, which no share names until P14.T51.f (§4). Each
+    table states its sources.
+  - _Tests:_ a crust with neither primary nor secondary is refused with `NoCrust`; the reference
+    Ceres's `Oceanic` has no entry, and its `Lid` and `Province` take the phyllosilicate's; every
+    reference world builds a valid field.
+  - _Moves:_ nothing, since no reference golden exists before T16.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
 
 ### R09.T11 Plates
 
@@ -1625,14 +1737,16 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   its months differ.
 - **R09.T13.c The other regimes.** `steps/climate/{airless,isothermal}.rs`: radiative equilibrium
   with thermal inertia for airless and thin-atmosphere worlds, and the isothermal surface for a
-  Venus. On a locked lava world, cells above the secondary crust's transition temperature are melt,
-  from this task's per-cell temperature, not from the global state. Tests: an airless world's
+  Venus. On a locked lava world, cells above the transition temperature of the crust at the surface
+  (the secondary's, or the primary's where there is none) are melt, from this task's per-cell
+  temperature, not from the global state. Tests: an airless world's
   day–night contrast exceeds 300 K; the isothermal model's surface varies by under 1 K; a locked
   lava world's melt is the dayside region above the solidus, and its nightside is solid.
 - **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on their
   components (P₂, P₁, a constant after the lapse term); each ice placed per condensate, coldest
   first against its own frost point by annual maximum, until its area matches plan 14's area for
-  that substance (`surface_ices`), and each liquid's surface to its share of the ocean fraction
+  that substance (`surface_ices`), but a cold-trapped one, which T13.f places in each cell's
+  cold-trap fraction, and each liquid's surface to its share of the ocean fraction
   (`surface_liquids`); the energy-balance albedo function shifted to the climate condensable's
   freezing point, by `SubstanceId` (decision-composition). Tests: the area-weighted surface mean
   equals the input to 0.1 K; the P₂ coefficient gives the input contrast exactly; ice area equals
@@ -1651,6 +1765,33 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     twice a year;
   - a world at e = 0 with no obliquity to its seasonal orbit has one wind (Design note 8's one
     month; a lock adds nothing, `signoff-2.md` item 4).
+- **R09.T13.f Cold traps.** After T13.c and T13.d (science-r09-drainage.md §4).
+  - **The shared closed form:** `hyperion_surface::cold_trap`, pure and in `f64`, beside the
+    crater density, so that P14.T51.f calls it too. `fraction`, of the latitude, the highest sun
+    elevation, the flux, the albedo, the emissivity, the crater fraction and d/D, the plains' RMS
+    slope and the threshold, is the share of ground below the threshold all year:
+    - permanent shadow in bowl craters by Hayne et al. 2021's eq. 26, over a log-normal d/D;
+    - on rough plains by their template;
+    - the share of it below the threshold at Ingersoll et al. 1992's temperature;
+    - none at scales under lateral conduction's cut-off.
+  - **In the airless model:** each cell's fraction for each cold-trapped condensate, at the cell's
+    latitude, with its crater fraction from the body's crater state and its plains' slope from the
+    synthesis's slope variance at the cold traps' scales.
+  - **The placement:** T13.d places a cold-trapped ice in proportion to each cell's fraction,
+    capped at it and scaled so that its area matches plan 14's. Its quantised shares are rounded
+    coldest first, so the total matches to one cell. It is never placed coldest-first by whole
+    cells.
+  - _Tests:_
+    - Ingersoll et al.'s temperature at a lunar pole is 97 K at d/D 0.2 (to 1 K);
+    - with Hayne et al.'s best-fit terrain (20% craters, σ_s 5.7°) the fraction gives their Table 1
+      bands within a factor of two;
+    - a Moon-like input given 1.7 × 10⁻⁵ of water ice by hand places it only poleward of 70°, more
+      than 90% of it poleward of 80°, and no cell's share exceeds its fraction;
+    - at 25° obliquity no cell has a fraction;
+    - a water ice on a body whose zonal maximum is below its threshold is placed by T13.d's own
+      rule.
+  - _Acceptance:_ `cargo test -p hyperion-surface cold_trap`;
+    `cargo test -p hyperion-sim planetary::surface::steps::climate`.
 
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:
@@ -1678,7 +1819,9 @@ of the same inputs, with the differences written into this plan. Acceptance:
   Earth's rock under water, a saturated Mars's regolith and a Titan's ice under methane. K's bed
   factor B comes from a (substrate, fluid) table over the registry's rows, and ρ_f is the
   liquid's density. The three calibrated cases (rock, saturated regolith, ice under methane) stay
-  its tests (decision-composition).
+  its tests (decision-composition). The equivalent area, ∫ r dA ÷ (1 m a⁻¹) (Hergarten 2021, eq. 16
+  and its accumulation, eq. 20), is the solver's working state only; T14.d writes the geometric
+  area and the two runoffs (science-r09-drainage.md §1).
 - **R09.T14.c The branches and the Mars check.** The wet-now, dry-now and never-wet branches,
   after T6.b. On the dry-now branch the drainage area is weighted by the epoch's `runoff`,
   uniform over the cells.
@@ -1689,7 +1832,8 @@ of the same inputs, with the differences written into this plan. Acceptance:
       1.9 m^0.1, Black et al. 2017's; the foot of Hoke, Hynek and Tucker 2011's 10⁵–10⁸ yr, Design
       note 9).
     - On it the coarse erosion volume **plus** the synthesis's expected sub-cell channel incision
-      volume (closed-form per cell from k_s, Hack's law and the network's widths) is at least
+      volume (closed-form per cell from k_s, the cell's two runoffs, Hack's law and the network's
+      widths from discharge, as T6.b computes them) is at least
       1.2 m of global equivalent layer (Luo, Cang and Howard 2017's (1.74 ± 0.8) × 10¹⁴ m³ over
       1.444 × 10¹⁴ m²), since valley networks 1–10 km wide live mostly below a 38 km cell.
     - The coarse lowering is bounded above by the valleys' cross-sections (incision × valley
@@ -1700,8 +1844,21 @@ of the same inputs, with the differences written into this plan. Acceptance:
       one basin, and the volume at the window's extremes, 10⁵ yr at 0.073 m a⁻¹ and 10⁸ yr at
       1.10 m a⁻¹.
 - **R09.T14.d Rescale and outputs.** σ_h re-matched on the reconstructed field, lapse and mean
-  re-applied, k_s, flow directions and water surfaces. Tests: σ_h and the mean temperature again
-  match; lakes are level.
+  re-applied; flow directions, the geometric drainage area (T14.a's), k_s = S A^θ on it, each
+  cell's `runoff` (the source term the solver took: the climate's annual runoff on a world wet
+  now, the epoch's `runoff` where the surface is older than the epoch's end on one dry now, none
+  elsewhere) and its `catchment_runoff` (the solver's equivalent area over the geometric, times
+  1 m a⁻¹), and water surfaces (science-r09-drainage.md §1).
+  - _Tests:_
+    - σ_h and the mean temperature again match;
+    - lakes are level;
+    - the quantised catchment runoff times the drainage area equals the solver's equivalent area
+      times 1 m a⁻¹ to the two codes' steps;
+    - k_s × drainage^−θ is the slope to the receiver to the steepness code's step;
+    - on the reference Mars every eroded cell's own runoff is its epoch's 0.1 m a⁻¹, and its
+      catchment runoff equals it wherever its whole catchment is older than the epoch's end;
+    - every cell younger than the epoch's end has no runoff of its own;
+    - on the reference Earth some cell's catchment runoff is at least three times its own.
 
 Bench `coarse/erosion_l8`: the brainstorm's "a few seconds at level 8" (Tzathas et al.'s Table 2,
 1.79 s at 512² and 8.18 s at 1,024² in Python with numba), recorded, in a new
@@ -1941,6 +2098,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
     (H 101 ± 16 km, England et al. 2004), which may be pressure-limited and so scale as 1 ÷ g
     (England and Katz 2010, from memory). Lean: Earth's distances, labelled; a geodynamics pass
     would settle it.
+  - _The belt's shape._ The ridge–valley gain (1.8 at 1.5 breaks, width 0.6 in ln λ) and the
+    hillslope steepening (0.4) are fitted to eight SRTM tiles of the Himalaya, Andes and Alps, at
+    31 m and coarser. Metre-scale lidar of threshold ranges would test the 1 m figure.
 - **Remaining checks, as researched** (R09.T0.b, 2026-10-09). Each item is settled in its design
   note; what stays open, with the lean and what would settle it:
   - _Open question 20, a science ruling for the owner_ (asked by T0.a: does accepting P14.T48.a's
@@ -2005,8 +2165,12 @@ re-blessing this plan's payload and coarse goldens in that commit.
 - **The survey stand-in.** `survey_pass` lets a client grant its ship coverage, as the server
   grants detail levels today. It is a discipline for an honest client, and the sensors plan
   replaces the caller, not the core.
-- **Field size.** Design note 17's layout gives about 14.0 MB for an Earth (about 13.96 MB with
-  `decision-r09-t5.md`'s sea-floor byte). If the climate layer at L − 1 proves too coarse for
+- **Field size.** Design note 17's layout gives about 14.7 MB for an Earth, about 1.0 MB inside
+  R03's 15 MiB check: 13.96 MB with `decision-r09-t5.md`'s sea-floor byte, and about 14.75 MB
+  since follow-up C's two runoff bytes (science-r09-drainage.md §1.3, whose 14.4 MB and 1.4 MB
+  predate the sea-floor byte). The transfer budget's margin is now about 0.98 MB, 6.2% of the
+  check, so any further per-cell byte (0.39 MB on an Earth at level 8) needs R03's check re-run
+  first. If the climate layer at L − 1 proves too coarse for
   R11's clouds, sending it at level L costs about 2.1× (about 28 MB on an Earth), past R03's
   15 MiB check.
 - **Dependencies.** Plan 14 calling the surface crate's crater density is a new edge that R04's
@@ -2741,7 +2905,8 @@ re-blessing this plan's payload and coarse goldens in that commit.
       `H2O`;
     - Mars: basalt (secondary), `CO2` and `H2O` ices, `mars_dust` (deposit);
     - Moon: anorthosite (primary), basalt (province);
-    - Ceres: phyllosilicate (secondary), `H2O` ice, `Na2CO3` (deposit). No share names the water
+    - Ceres: phyllosilicate (primary, by science-r09-drainage.md §5, from R09.T10.c; secondary as
+      built), `H2O` ice, `Na2CO3` (deposit). No share names the water
       ice, since plan 14 states no area for its cold traps yet.
 
     Each substance's figures are a row in `reference.rs` with its sources. They began as follow-up
@@ -2752,7 +2917,7 @@ re-blessing this plan's payload and coarse goldens in that commit.
     The science review (2026-10-10) found no wrong value.
     - It read the basalt solidus as 980 ± 10 °C, a natural tholeiite's (Wright and Okamura 1977,
       USGS PP 1004, Table 15), which these rows take: 70 K below the unread 1,050 °C that the
-      synthetic rows keep.
+      synthetic rows kept until follow-up C took 980 °C too (science-r09-drainage.md §2).
     - It labelled what it could not read or what is assumed: the anorthosite's solidus is its
       plagioclase's alone, an upper bound for the rock (its pyroxene melts near 1,270 °C); liquid
       water's Fresnel factor stands in for `A_N`, which a specular surface lacks, until R11's
@@ -2761,9 +2926,10 @@ re-blessing this plan's payload and coarse goldens in that commit.
     - It confirmed the rest against the sources cited, and the Fresnel factors and Mangan et al.'s
       fit at 150 K by recomputation.
 
-    Findings for "main" from it: the synthetic rows' basalt solidus, whose correction re-blesses the
-    wire goldens; the densities mix grain and porous bulk values (a convention for P14.T49.b, with
-    porosity apart); and two questions on §1.7's lists, a water-ice entry for the Moon's cold traps
+    Findings for "main" from it: the synthetic rows' basalt solidus (ruled 980 °C, follow-up C,
+    re-blessing the wire goldens at 21); the densities mix grain and porous bulk values (ruled:
+    grain densities, porosity apart, follow-up C and R09.T10.c, science-r09-drainage.md §3); and two
+    questions on §1.7's lists, a water-ice entry for the Moon's cold traps
     (Li et al. 2018, PNAS 115, 8907) and whether Ceres's altered-ocean crust is better primary
     than secondary (lean for both: keep §1.7's lists until plan 14 states them).
 
@@ -2788,6 +2954,24 @@ re-blessing this plan's payload and coarse goldens in that commit.
       four reference worlds.
 
     No stream, tag or golden is added, and no output moved.
+- **Drainage semantics (ruled 2026-10-10, science-r09-drainage.md §1).** T6.a found that a k_s
+  stored on Hergarten's runoff-weighted area and read with Hack's geometric area makes tributaries
+  2.8 times too gentle at 0.1 m a⁻¹, and trunks' Hack lengths 4 times too short.
+  - The field's `drainage` and `steepness` are geometric.
+  - Follow-up C adds each cell's own runoff and its catchment's mean.
+  - A tributary's steepness is k_s (r̄ ÷ r)^θ.
+  - Widths follow discharge.
+  - The solver keeps the equivalent area to itself.
+- **Cold traps (ruled 2026-10-10, science-r09-drainage.md §4).** Exposed water ice lies in the
+  Moon's cold traps (Li et al. 2018), but no zonal rule makes it: a smooth lunar pole reaches
+  156 K. P14.T51.f states a body's cold-trapped area as the cold-trap fraction of one closed form,
+  which R09.T13.f builds in the surface crate, times a drawn exposed fraction.
+  - R09.T13.f places it per cell.
+  - The reference Moon carries `H2O` as `Ice` from R09.T10.c, with no share until P14.T51.f.
+  - _For R10's re-validation:_ the classifier puts a cell's cold-trapped share on its shadowed
+    ground (crater floors and pole-facing slopes), not uniformly over the cell, and the share is
+    exposed ice, not the cold-trap area.
+
 - **Rulings of "main" for T10's findings** (2026-10-10).
   - `for_body`'s missing arguments, the record's time and a moon's planet's orbit, are settled by
     P14.T54.a, which owns `planetary/surface/inputs.rs`. R09.T17 and R09.T19.a take `for_body` as
@@ -3007,7 +3191,10 @@ re-blessing this plan's payload and coarse goldens in that commit.
     (`decision-r09-t5.md` item 5): the oceanic amplitude reads the cell's `seafloor` byte (hill
     relief and ponded sediment), which T11 and T12.a derive from the cell's own ridge. The factors
     are a table over T2's `Crust` and `BoundaryKind`, matched exhaustively, which
-    decision-composition keeps closed.
+    decision-composition keeps closed. Ruled (`decision-r09-t5.md` item 7): the ridged term carries
+    2.64× the plain term's gradient variance, so a full belt measured 52° at 1 m. The ridged mix is
+    confined above the break, and a belt has its own shape, so a full belt gives 37.6°, 35.9° and
+    26.0° at 1 m, 100 m and 1 km, inside SRTM's belt cores.
   - _`local_variance` is the reference style's._ The styles move variance about the body, so the
     realised share is the mean a² times `local_variance`: 0.74 on the Earth-like world, 0.93
     Mars-like, 0.95 Moon-like, 1 Ceres-like. The plan's 5% test is therefore against
@@ -3331,7 +3518,10 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     ruling, limb β about 2 at 10–60 km (item 2) and H about 0.3 to 70 km (item 3, β 1.6), with
     Schenk and Nimmo 2017's Fig. 1 reading H about 0.2 over 12–630 km. Neither moves the ruled
     β₁ 1.8 or the code. The science check could not see Perron et al. 2008's ¶36 or Goff 2020's ν
-    in their sources, both the ruling's readings.
+    in their sources, both the ruling's readings. _Corrected in the ruling_ (2026-10-10, with its
+    item 7): item 5 now gives 223 m at a half-rate of 14 mm a⁻¹ (Goff et al.'s 236 m) and the slow
+    MAR's H as 223 m (a = 1.67), and item 3 reads Europa's H as about 0.4 from 1 to 70 km, the ice
+    shape's β₁ 1.8.
   - _For T8._ `structure_function` and `unresolved_rms` read the law through `degree_variance`;
     the ruling's two slope tests; the belt's ridged term needs its own structure function in the
     closed form. _For T9:_ the height goldens are first written on the broken law. _For T12.a:_
