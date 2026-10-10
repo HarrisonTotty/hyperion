@@ -1123,10 +1123,13 @@ What the pass does, in order:
    scaled by its flood frequency against an arid-to-semiarid Earth's, since the erodibility is a
    terrestrial calibration that already holds Earth's intermittency, and only where the surface is
    older than the epoch's end. Mars's valley networks formed within a few hundred million years
-   around 3.7 Ga, in perhaps 10⁵ to 10⁷ such years, "with runoff rates similar to intense storms in
-   arid regions on Earth" (Hoke, Hynek and Tucker 2011), against 200–5,000 years of continuous flow,
-   and their volume is at least about a metre of rock spread over the planet, 1.2 m by Luo, Cang and
-   Howard's count (Hoke and Hynek 2009; Luo, Cang and Howard 2017): a thin, immature overprint, with
+   around 3.7 Ga. "With runoff rates similar to intense storms in arid regions on Earth", and storms
+   flowing 5% of the time, "as is typical for Earth", their minimum formation times are 10⁵ to 10⁷
+   years, and 10⁵ to 10⁸ for the shallower flows the authors prefer (Hoke, Hynek and Tucker 2011).
+   Run without a break, the same flow takes a twentieth of that; only continuous flows of hurricane
+   scale, which the authors do not prefer, would form them in 200–5,000 years. Their volume is at
+   least about a metre of rock spread over the planet, 1.2 m by Luo, Cang and Howard's count
+   (Hoke and Hynek 2009; Luo, Cang and Howard 2017): a thin, immature overprint, with
    the craters of the rest of the surface age placed on top of it. Most of that volume lies in
    valleys narrower than a coarse cell, so the coarse field alone cannot be checked against it: the
    check counts the channels the local synthesis cuts too, or bounds the coarse share from valley
@@ -1142,7 +1145,9 @@ What the pass does, in order:
    are for Python with its loops compiled by numba on one Xeon E5-2650 v4; they bracket level 8's
    393,216 cells at about 3 s, and compiled Rust may gain one to three times over numba, so erosion
    stays of order seconds. This is the step that buys the realism, because it is computed globally
-   where global is affordable, and everything local is then conditioned on it.
+   where global is affordable, and everything local is then conditioned on it. _The wet epoch's
+   Earth-equivalent years signed off 2026-10-10 by the sign-off agent (owner's delegation), with
+   Hoke, Hynek and Tucker 2011's figures as the paper states them._
 5. **Climate classes, and biomes where there is life.** Köppen–Geiger for the seasonal water-cycle
    regimes: it is temperature-and-precipitation driven, recognisable, and defensible in a way a
    hand-drawn biome map is not. It classifies climate, not life. Plan 14 says nothing about life, so
@@ -1223,9 +1228,12 @@ Per height query, on both sides, with no iteration and no global state:
 1. Find the coarse cell and read the fields around it: continuous fields interpolated across the
    sphere, taking the neighbouring face's cells across a face edge, and categorical ones — plate,
    crustal type, climate class, flow direction — read from the nearest cell or blended by weight.
-2. **Base elevation** from the coarse elevation through an approximating C² spline, a low-pass that
-   never overshoots the cells' range (away from a face edge a cell's centre keeps 4/9 of its own
-   value), so σ_h is matched on the surface it reconstructs, not on the cell values.
+2. **Base elevation** from the coarse elevation through an approximating spline, a uniform cubic
+   B-spline on each face blended across its edges, C² everywhere but on the faces' centre lines,
+   where the cube's warp allows only C¹. It is a low-pass that never overshoots the cells' range
+   (away from a face edge a cell's centre keeps 4/9 of its own value), so σ_h is matched on the
+   surface it reconstructs, not on the cell values. _Signed off 2026-10-10 by the sign-off agent
+   (owner's delegation)._
 3. **Structural detail** conditioned on crustal type and on the signed distance to the nearest plate
    boundary and its type, which the coarse field carries because nothing below a coarse cell could
    recover them from cell identities: ridged multifractal for a mountain belt, low-amplitude for an
@@ -3690,10 +3698,13 @@ than read: its details, and the figure it supports, must be checked before eithe
   streams 4.7 times too long.
 - Hoke and Hynek 2009, JGR 114, doi:10.1029/2008JE003247, and Luo, Cang and Howard 2017, Nature
   Communications 8, 15766, doi:10.1038/ncomms15766, for the age and volume of Mars's valley networks;
-  Hoke, Hynek and Tucker 2011, EPSL 312, 1, doi:10.1016/j.epsl.2011.09.053, for 10⁵ to 10⁷ years
-  of flow "with runoff rates similar to intense storms in arid regions on Earth", Earth-equivalent
-  time, against 200–5,000 years of continuous flow (read from the paper by R09.T0.b's research,
-  R09 Design note 9).
+  Hoke, Hynek and Tucker 2011, EPSL 312, 1–12, doi:10.1016/j.epsl.2011.09.053, for minimum
+  formation times of 10⁵ to 10⁷ years "with runoff rates similar to intense storms in arid regions
+  on Earth", with the storms flowing 5% of the time "as is typical for Earth (Wolman and Miller,
+  1960)" (their Table 3, note b), 10⁵ to 10⁸ years for the shallower flows they prefer, and
+  200–5,000 years only for continuous flows of hurricane scale, "not the preferred
+  interpretation" (read 2026-10-10 in the authors' own copy, chapter 3 of Hoke's 2011 University
+  of Colorado dissertation, since the journal's text was out of reach).
 - Hypsometric statistics computed with pyshtools by a research agent, not in the repository, from
   Earth2014 (Hirt and Rexer 2015, International Journal of Applied Earth Observation and
   Geoinformation 39, 103), MarsTopo2600 and VenusTopo719 (Wieczorek 2015) and LOLA's lunar model.

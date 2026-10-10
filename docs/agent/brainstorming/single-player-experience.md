@@ -693,10 +693,11 @@ section against what the engines shipped, and governs where the two differ. What
 - **Fit with the consoles.** Text that must be read stays in the DOM, set in B612, where the UX
   guide's tooling checks it. A canvas is paired with a DOM list of its marks. The cockpit view and
   its instruments are canvases of one document on one `GPUDevice`, one canvas context per view,
-  since a device cannot be shared across renderer processes and Babylon's own multi-canvas
-  `registerView` copies every view through one canvas; displays moved into windows of their own
-  open as same-origin children in the same process, which a prototype is to prove first. See
-  [Several views in one client](rendering-and-planets.md#several-views-in-one-client).
+  since a device cannot be shared across renderer processes and a copy of every view through one
+  canvas, as Babylon.js's multi-canvas `registerView` made, costs 4 to 5 ms a 1080p view on the
+  UHD 620; displays moved into windows of their own open as same-origin children in the same
+  process, which a hidden prototype has proved, the on-screen check on a second display still to
+  be made. See [Several views in one client](rendering-and-planets.md#several-views-in-one-client).
 - **Linux first.** The owner develops on it.
 - **Stability.** The project is long-lived, and an engine that breaks its API every release is a
   standing cost.
@@ -743,6 +744,17 @@ leading; a failure on the UHD 620 alone redesigns the low setting. The protocol 
 boundary, so a native host is just another client of the session, though the split client has
 costs of its own; see
 [If the browser cannot carry it](rendering-and-planets.md#if-the-browser-cannot-carry-it).
+
+**Superseded on 2026-09-30: no engine** (a delegated decision; the rendering brainstorm's
+[The engine](rendering-and-planets.md#the-engine), and R01 Design notes 23 and 24). The lean held
+until the shaders became HYPERION's own standard WGSL, drawn by its own pipelines. Babylon.js then
+only created the device, at the cost of a 1.25 MB chunk and a pinned internal, so it was removed:
+the adapter is HYPERION's own WebGPU renderer, still in Electron's renderer process as one more
+display, and loaded lazily. The requirements above stand, and the floating
+origin, reversed-Z depth and one canvas context per view are the adapter's own. A change of engine
+is now a new adapter over that portable WGSL, and the spike and its native fallback are the
+rendering brainstorm's. The comparison above stays as the record of why an engine was first
+chosen. _Signed off 2026-10-10 by the sign-off agent (owner's delegation)._
 
 ## Starting, failing and purpose
 
@@ -847,6 +859,8 @@ Settled on the same day, in the second round:
 - **The view starts as a basic wireframe** of the surroundings, and a 3D game rendering engine is to
   be chosen for what follows. See [The view outside](#the-view-outside) and
   [The rendering engine](#the-rendering-engine). The 2026-09-28 ruling below keeps the wireframe.
+  On 2026-09-30 the engine was settled as none: HYPERION draws with its own WebGPU renderer (see
+  the same section; signed off 2026-10-10 by the sign-off agent, owner's delegation).
 
 Settled on 2026-09-22, and recorded in
 [the rendering brainstorm's Decisions](rendering-and-planets.md#decisions):

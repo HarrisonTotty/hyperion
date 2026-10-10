@@ -715,7 +715,8 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    rotation and pressure as an idealised moist GCM gives them (the transport law, below), with heat
    capacity and molar mass as Williams and Kasting 1997 scale them, under an overall cap of 30 D⊕,
    and halved on dry worlds; locked worlds in tidally locked coordinates about P14.T14's
-   substellar axis, with no seasons. It steps **implicitly**
+   substellar axis, seasonal unless the world lacks seasonal forcing (the months, below). It steps
+   **implicitly**
    (backward Euler, a tridiagonal solve in latitude and a periodic one in longitude, split in a
    fixed order) at the brainstorm's six hours, since the explicit limit is about 11 h on Earth and
    fails for any slower rotator, and runs a fixed maximum of orbits until the annual mean moves
@@ -733,8 +734,12 @@ every timing below is provisional and is re-measured on a quiet machine by the t
      twelve equal-time months miss above e ≈ 0.3 (`decision-r09-t2.md` item 1).
    - The seasonal orbit is the one that sets the sun's declination and distance: the body's own
      about its star or stars, or its planet's for a moon. The header carries its eccentricity.
-   - A world with no seasonal forcing has one month: a locked world on a circular orbit, or
-     e = 0 with obliquity 0.
+   - A world with no seasonal forcing has one month: e = 0 with no obliquity to its seasonal
+     orbit. A lock adds nothing: a world locked 1:1 to its star has seasons wherever its orbit is
+     eccentric or it has obliquity, and a moon locked to its planet has its planet's orbit's
+     seasons at its own obliquity to that orbit (a Titan, under Saturn's 26.7°). _Signed off
+     2026-10-10 by the sign-off agent (owner's delegation); Risks, "Which worlds have one
+     month"._
    - Each month's record is the mean over its span of the six-hour steps of the converged orbit.
 
    Plan 14's figures are imposed on the component that defines

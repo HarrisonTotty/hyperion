@@ -1068,6 +1068,19 @@ Names are those the owning plans give; the owning plan is authoritative.
      `ATMOSPHERE: APPROXIMATE`, which clears only when the gate for its regime passes. The
      brainstorm's "before Venus- and Titan-class atmospheres ship" is read as: no thick world is
      presented as computed until its gate passes.
+   - **What the label answers** (`signoff-2.md` in the RM4/RM5 orchestration directory). Signed
+     off 2026-10-10 by the sign-off agent (owner's delegation). `ATMOSPHERE: APPROXIMATE` marks
+     what the console draws in place of physics it lacks, never the residual of physics it has. A
+     gate compares a method with the reference on the same optics, so it says nothing of the
+     optics themselves.
+     - A published model of a particle's form, used within its stated ranges, is drawn unlabelled,
+       its residuals against measurement recorded in Risks, as Mie's are for spheres:
+       TAMUdust2020's hexahedra, 20–37% low at side and back angles against a measured Martian
+       analogue and inside R08.T5.c's tests (`science-r08-nonspherical.md` §2.1), are a `model`.
+     - Estimated data, a stand-in and an analogue (another ice on water ice's table) carry the
+       label under Design note 12's τ rule, whatever their estimated bias: that estimate is itself
+       unvalidated, so no exemption is made below |Δg| 0.01 (CH₄ ice's −0.007 included). Each
+       clears only when a measurement, or a published model for that material, replaces it.
    - **Titan.** A pseudo-spherical diffuse field reads up to 8% high at 60 km tangent height in
      limb views (Loughman et al. 2004). The gate therefore reports per geometry, so that a
      spherical fallback can be applied to the geometries that fail.
@@ -2640,7 +2653,9 @@ sources, the arrays `planLitBodies` built, to that body's atmosphere (Design not
 For the camera's local body, which `planLitBodies` may not light while terrain draws it, the same
 two calls are made once a frame.
 
-An airless body (`SurfaceState::Airless`) draws no atmosphere and no label. Until the surface
+An airless body (`SurfaceState::Airless`) draws no atmosphere, and its one label is
+`EXOSPHERE: NOT YET MODELLED` (`exosphereNotYetModelled`) while the generator computes no exosphere
+(below). Until the surface
 section carries P14.T24.a's figures (R08.T1's P14.T35.e), generated bodies draw no atmosphere and
 show `ATMOSPHERE: NOT YET MODELLED`, and so does a giant, whose surface section is
 `not_applicable`, until its `envelope` section exists (decision-r08-giant-label). The task runs on
@@ -2657,7 +2672,20 @@ By the composition ruling (decision-composition):
 - `atmosphereApproximate` collects the reasons of the optics registry: an estimated or absent
   Rayleigh, an absent absorber, a stand-in or unknown material.
 - A body in the `Tenuous` state with a drawable haze is drawn in the `thin` regime. One whose gas
-  is only an exosphere takes no medium and no label.
+  is only an exosphere takes no medium, since its scattering is negligible (vertical τ about
+  10⁻¹⁵), but it is labelled `exosphereNotYetModelled` while the generator computes no exosphere
+  (P14.T55.c, unscheduled; signed off 2026-10-10 by the sign-off agent, owner's delegation,
+  `signoff-2.md`, against decision-composition §9.2's lean of no label).
+  - The lean's "below visibility" fails for a Mercury-class body. Its sodium D-line glow above the
+    limb is about 0.14–1.4 cd/m², 800 to 8,000 times a dark sky of 22 mag per square arcsecond,
+    seen from the night side or with the sunlit ground out of the frame (Cassidy et al. 2015,
+    Icarus 248, 547, Figs. 4–5; Zhang et al. 2023, PSJ 4, 70, which find Mercury's sodium tail in
+    STEREO's broadband images).
+  - The Moon's, about 4 kR of sodium (Potter and Morgan 1988, Science 241, 675), is about three
+    times that dark sky, at the edge of a long exposure's reach, and the icy moons' are below it.
+  - The generator cannot yet tell them apart, so every generated airless body carries the note,
+    and a kept scene's body set airless carries none. The note clears when the generator computes
+    the exosphere and the console draws its light or finds it too faint for any view to show.
 
 Tests (T10.a):
 
@@ -2669,7 +2697,8 @@ Tests (T10.a):
   `atmosphereNotYetModelled`;
 - a sub-Neptune's record (surface `not_applicable`, envelope `not_modelled`) gives no medium and
   `atmosphereNotYetModelled`, as a giant's does;
-- an airless body gives no medium and no label;
+- a generated airless body gives no medium and `exosphereNotYetModelled` alone, and a kept scene's
+  body set airless gives no medium and no label;
 - a body whose request is in flight gives `atmospherePending`, and none on a re-request while its
   previous state is drawn;
 - a flyby that brings many bodies into the disc regime does not make `ATMOSPHERE: PENDING` flash
