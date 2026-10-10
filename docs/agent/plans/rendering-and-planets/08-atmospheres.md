@@ -1681,6 +1681,81 @@ Names are those the owning plans give; the owning plan is authoritative.
       order in H/R, and first-order hydrostatic theory with an exact Roche-model check for the
       tide), not measured. R08.T12.b's spheroid case measures them.
 
+18. **`f32` in the kernels: heights, not radii; direction cosines, not angles** (ruled
+    2026-10-10, `decision-r08-f32.md`; measured in R08.T6.b).
+    - **The defect.** The kernels are `f32`, and a radius carries half its spacing in rounding:
+      0.25 m at Earth's radius, 0.5 m at 2 R⊕, 2 m at Saturn's and 8 m at 2 R_J (plan 14's
+      `GIANT_RADIUS_CAP`). R05's kernels formed heights as |p| − R, and ground tests and distances
+      from r²(μ² − 1) + R², whose value near the ground, h(2R + h), loses most of its digits (from
+      2 m on Earth, about a sixth of it). Grazing optical depth multiplies the error. Against the
+      `f64` twin (high setting, Earth's medium, sun 20° up), from 2 m the sky view and the march
+      were 17% and 14% off on Earth, and on a body of Saturn's radius the sky view was 0 and the
+      march missed the ground. From 2 km they were still 0.21% and 0.35% off there (R08.T6.b; the
+      table is in `decision-r08-f32.md`). R05 also took WGSL's `cos`, `sin` and `acos`. WGSL bounds
+      `cos` and `sin` only to 2⁻¹¹ absolute, and only within [−π, π]; it bounds `atan` and `atan2`
+      to 4,096 ULP, and `acos` and `asin` take atan2's bound. At the limb the sky view moves by
+      2 × 10⁻² of itself for 10⁻⁴ in a ray's zenith cosine.
+    - **The rule for heights.** No kernel forms a height, r² − R², a discriminant or a table
+      coordinate as a difference of radii or of their squares.
+      - _On a sphere_ (the tables, the sky view, aerial perspective, multiple scattering and the
+        composite), with R the sphere's radius, H the atmosphere's height, h a ray's starting height
+        and μ its zenith cosine:
+        - r² − R² = h(2R + h), and top² − r² = (H − h)(2R + H + h);
+        - the height at distance t is (t² + 2(R + h)μt + h(2R + h)) ÷ (|p(t)| + R);
+        - the ground lies at A ÷ (−rμ + √((rμ)² − A)), A = h(2R + h);
+        - the top lies at B ÷ (rμ + √((rμ)² + B)) upward, and at −rμ + √((rμ)² + B) otherwise,
+          B = top² − r²;
+        - the ground's shadow at a sample is μ_s < 0 and (rμ_s)² ≥ h(2R + h);
+        - the transmittance table takes ρ = √(h(2R + h)), H_ρ² = H(2R + H) and d_min = H − h, and
+          the multiple-scattering row comes from h. The atmosphere's height is a uniform of its own,
+          never top − bottom.
+      - _On the spheroid_ (the ray march):
+        - The ground's and the top shell's quadric constants, q_g = |S P|² − a² and
+          q_t = |S_t P|² − (a + H)², are formed in `f64` from the camera's `f64` position P.
+          S = diag(1, 1, a ÷ c) and S_t = diag(1, 1, (a + H) ÷ (c + H)).
+        - Along a ray, Q(t) = q_a t² + 2 q_b t + q_g, with q_a = |S d|² and q_b = (S P)·(S d) in
+          `f32`.
+        - The ray meets the quadric at its cancellation-free roots.
+        - A sample's radial height is |p| q ÷ (√(1 + q)(√(1 + q) + 1)), q = Q ÷ a².
+        - Beyond h₀ = a ÷ 2, Q is taken about the ray's closest approach:
+          Q = q_a (t − t*)² + |S P × S d|² ÷ q_a − a², with t − t* carried, not formed.
+      - The camera's body-fixed position reaches the GPU only in products with unit directions,
+        where its rounding moves a height by about 6 × 10⁻⁸ t. Heights are then good to about
+        3 × 10⁻⁷ of max(t, h, 1 km) at every radius. R05's forms were 0.8 m off at Earth's radius
+        and 30 m off at 2 R_J.
+    - **The representation is height plus normal:** the camera's geodetic height and the datum
+      normal (R05's `AtmosphereInputs`), with constants formed in `f64`.
+      - Split floats are refused. WGSL does not promise the error-free sums and products they rest
+        on (its `fma` may be unfused, and a compiler may contract a × b + c). They would double the
+        inner loops, and the identity would still be needed.
+      - A camera-relative frame alone is refused. A height in it is still a difference of radii,
+        and with the identity it is the quadric form above.
+    - **The rule for angles.** No atmosphere module calls WGSL's `sin`, `cos`, `tan`, `asin`,
+      `acos`, `atan` or `atan2`.
+      - Directions are direction cosines: unit vectors, their dot products and the lengths of their
+        cross products.
+      - An angle near 0 or π comes from `preciseAtan2(|a × b|, a·b)`, and 1 − cos θ is ½|a − b|².
+      - A test against an angular radius ρ is |d × s| ≤ sin ρ with d·s > 0, sin ρ formed in `f64`.
+        In `f32`, 1 − cos ρ cannot resolve a disc under 3.5 × 10⁻⁴ rad, which is the Sun beyond
+        about 13 au.
+      - Where an angle is the parameterisation (the sky view's zenith, the tabulated phase's
+        u = √(θ ÷ π)), it is taken by `preciseCos`, `preciseAtan` and `preciseAtan2`
+        (`view/shaders/preciseTrig.wgsl`). Each is within 5 × 10⁻⁷ over its domain. A table's write
+        and read use the same forms, and a parameter constant over a frame, the sky view's horizon
+        angle, is formed in `f64`.
+      - A cosine-only sky-view parameterisation was not adopted. It would change the sampling that
+        R05.T12.e's gates and T8's limb interpolation are measured on, for a gain the precise forms
+        give at under 1% of each kernel.
+    - **Scope.** Every atmosphere module, the per-planet kernels and the composite included, and
+      every module this plan adds: `oblate.wgsl` (T6.f), `irradiance.wgsl` and
+      `surfaceLighting.wgsl` (T9.b), and the thick, deck and disc reads (T14–T16). R08.T6.g builds
+      the rule into R05's kernels. A static check in `hillaire.test.ts` and `tables.test.ts` keeps
+      it.
+    - **Cost**, by an operation count: under 5% of each march. A sample's height from h₀ adds about
+      five multiply-adds and a division. The ray march's quadric costs what R05's `heightAbove`
+      did. The precise forms are evaluated per texel or pixel, not per sample. T11 records the
+      times.
+
 ## Tasks
 
 The order:
@@ -1698,9 +1773,10 @@ The order:
 - T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
   T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e.
 - T6 generalises R05's tables over N terms. T6.a needs T3.a's `tabulated` density; T6.b follows
-  T6.a and T0; T6.c follows T6.b and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c
-  and T4.a (the fitted channels), and the channels' re-bless with T5.c's tables (T5.c's
-  follow-up); T6.e follows T6.d and T3.d; T6.f follows T6.e.
+  T6.a and T0; T6.g (heights and angles in `f32`, Design note 18) follows T6.b; T6.c follows T6.g
+  and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c and T4.a (the fitted channels),
+  and the channels' re-bless with T5.c's tables (T5.c's follow-up); T6.e follows T6.d and T3.d;
+  T6.f follows T6.e.
 - T7 (several suns, the sky's extinction), T8 (other bodies from outside) and T9.a (aerial
   perspective) follow T6.d; T9.b (surface lighting, by band) follows T6.f.
 - T10.a assembles the medium from a body and needs T2–T6 (T5 for the aerosol terms); T10.b draws
@@ -1942,7 +2018,8 @@ pins the strings. Acceptance:
   The column is built at g_ref = √(g_e g_p) from R08.T3.d, not at the bulk section's single
   gravity, and its altitudes are gravity-scaled heights (Design note 17). R05's `DensityProfile`
   gains its `tabulated` variant here, in `medium.ts`, with `densityAt` and `columnLengthM`; the WGSL
-  side (`common.wgsl`'s `densityOf`, which reads any kind above 0.5 as a tent) is R08.T6.b's. Tests:
+  side (R05's `common.wgsl` `densityOf`, which read any kind above 0.5 as a tent; since R08.T6.b,
+  `medium.wgsl`'s `densityOf(i, profile, h)`) is R08.T6.b's. Tests:
   - an isothermal scale height equals kT/(μ m_u g_ref) to 10⁻⁶;
   - on a level spheroid, the column mass above the datum at latitude φ, read through the gravity
     scaling, is p_s/g(φ) to 0.5%, at the equator, 45° and the pole of a Saturn-class figure;
@@ -2566,9 +2643,12 @@ Acceptance for T5.b and T5.c:
 ### R08.T6 Hillaire's tables over N terms
 
 Widen R05's `HillaireAtmosphere` (`hillaire.ts`) and its kernels (`shaders/`) to the medium of
-Design note 2, in six subtasks. The first three change no picture: R05's constants, run through
+Design note 2, in seven subtasks. The first three change no picture: R05's constants, run through
 the widened code, reproduce R05. The fourth changes Earth's picture by amounts it records. The
 fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (Design note 17).
+The seventh, T6.g, runs second, after T6.b. It takes the kernels' own `f32` rounding and WGSL's
+trigonometry out of R05's arithmetic (Design note 18), so that the kernels meet their twin at every
+height a descent reaches, and it moves the picture only towards the twin.
 
 - **R08.T6.a The CPU twin over N terms.** `tablesCpu.ts`, built on R05's `opticalDepth.ts` and
   `marchSteps.ts`, gives each of R05's kernels in `f64` at R05's sizes over a list of terms, with
@@ -2613,15 +2693,35 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   the accumulated absorber column in alpha, with a second table for further absorbers. Each sun's
   −ln T_c(u) is added on read (Design notes 5 and 8), in the twin and the kernels: at R05's four
   read sites, `source.wgsl`'s `tableTransmittance`, `multiScattering.wgsl`'s `transmittanceToSun`,
-  `composite.wgsl`'s `transmittanceToSpace` and `rayMarch.wgsl`'s ground hit. R05.T12.b's smoke
-  assertion "every transmittance texel is finite and within [0, 1]" (`checkAtmosphereTables`) is
-  rewritten as: every stored optical depth is finite and non-negative; its 20 oracle texels are
-  compared in optical depth, not as e^(−τ) under the half-float floor. Tests: a Venus-class
-  transmittance is finite with no underflow, and R05's Earth, with its ozone as an absorber curve
-  reduced to the linear regime, reproduces R05's transmittance to 10⁻³. That regression feeds the
-  curve R05's own three ozone coefficients (`OZONE_ABSORPTION_PER_M`, Bruneton's and sebh's upward
-  10 nm bins), not T4.b's centred 1 nm bins, which differ by +10%, −6% and −19% at the three
-  channels (`decisions-r05.md` item 2). Acceptance: `pnpm test` and `just test-render` pass.
+  `composite.wgsl`'s `transmittanceToSpace` and `rayMarch.wgsl`'s ground hit. The four read sites
+  keep R08.T6.g's height forms (Design note 18): optical depth is read at (h, μ), never at a radius.
+  R05.T12.b's smoke assertion "every transmittance texel is finite and within [0, 1]"
+  (`checkAtmosphereTables`) is rewritten as: every stored optical depth is finite and non-negative;
+  its 20 oracle texels are compared in optical depth, not as e^(−τ) under the half-float floor.
+  Tests: a Venus-class transmittance is finite with no underflow, and R05's Earth, with its ozone as
+  an absorber curve reduced to the linear regime, reproduces R05's transmittance to 10⁻³. That
+  regression feeds the curve R05's own three ozone coefficients (`OZONE_ABSORPTION_PER_M`,
+  Bruneton's and sebh's upward 10 nm bins), not T4.b's centred 1 nm bins, which differ by +10%, −6%
+  and −19% at the three channels (`decisions-r05.md` item 2).
+
+  Smoke (`decision-r08-t6b-floor.md` §5):
+  - R08.T6.b's transmittance check compares stored optical depth with the twin's, under
+    Verification's twin bound. A floor-carried τ is then 6 × 10⁻⁸ of T, and no transmittance is
+    bounded absolutely.
+  - It reports the channels whose twin T is under 2⁻¹⁴ (τ above 9.70), the case the floor carried
+    while T was stored, on Earth's table and a Venus-class one, with their worst |Δτ| ÷ τ. Earth's
+    count is above zero.
+  - The four read sites exponentiate in `f32`, so no sun's transmittance is stored in `rgba16float`
+    on its way to a lit point or the disc.
+  - R05.T12.b's oracle check loses `HALF_NORMAL_MIN`'s floor.
+
+  Recorded here: storing τ is coarser in T than storing T for τ between about 1 and 12 (half a
+  step is 3.9 × 10⁻³ of T against 4.9 × 10⁻⁴ at τ = 9.7), within Design note 8's 10⁻³τ. It is finer
+  beyond τ = 12.2 (T under 5 × 10⁻⁶), and finite where T underflowed. The multiple-scattering table's
+  end-to-end figure over the twin's transmittance stays recorded, not held. The radiance tables keep
+  the floor, since this task changes neither their format nor their scale.
+
+  Acceptance: `pnpm test` and `just test-render` pass.
 
 - **R08.T6.d Earth rebuilt.** `EARTH_REFERENCE` (`earth.ts`) is rebuilt from R08.T3's column and
   molecular term (tabulated, about 8.4 km in scale height, in place of R05's exponential at the US
@@ -2693,23 +2793,156 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   `oblate.wgsl` takes beside γ_e, γ_p and g_ref), and R05.T12.c's tests (`hillaire.test.ts`) keep
   passing with s ≡ 1 at a = c. `setMedium` allocates the layers under `atmosphere-tables`; Earth's
   one slice and one band are one-layer arrays, bound through R08.T0's seam. When this lands,
-  `ATMOSPHERE: APPROXIMATE` clears for oblate thin bodies. Smoke (`just test-render`): the
-  readbacks agree with the twin to 10⁻³ on a Saturn-class figure and on Earth. `oblate.wgsl`
-  fits each lookup's sphere as T6.e's twin does (Design note 17, _The ray's own gradient_), with
-  analytic slopes, and its cost per transmittance read is recorded here and in R08.T11's
-  benchmarks; a body of one band may skip the fit, its s varying by under 2%. Acceptance:
-  `pnpm test` and `just test-render` pass; by hand, the Saturn-class limb from orbit over the
-  equator and the pole is recorded here.
+  `ATMOSPHERE: APPROXIMATE` clears for oblate thin bodies.
+
+  `oblate.wgsl` follows Design note 18:
+  - A ray's osculating sphere R_α takes heights from h₀ by the sphere identity at R_α.
+  - The orbit march's geodetic height is the root of the exact quadratic along the level normal ν
+    at p: s = 2(F − 1) ÷ (G + √(G² − 4κ′(F − 1))). Here F − 1 = Q ÷ a² comes from T6.g's ground
+    quadric, G = |∇F(p)| and κ′ = (ν_x² + ν_y²) ÷ a² + ν_z² ÷ c². It is within 2 × 10⁻⁶ of the
+    geodetic height to 1,000 km on a Saturn-class figure, 1.2 mm at 100 km, against T6.e's closed
+    form.
+  - A slice is read at (κ_k, h\*, μ) with ρ² = h\*(2κ_k R_ref + h\*), never from a radius.
+  - `precision.test.ts` gains its helpers, and the smoke's Saturn-class figure takes T6.g's views
+    from 2 m, 20 m, 200 m and 2 km.
+
+  Smoke (`just test-render`): the readbacks agree with the twin under Verification's twin bound, in
+  both of R08.T6.g's arms, on a Saturn-class figure and on Earth. `oblate.wgsl` fits each lookup's
+  sphere as T6.e's twin does (Design note 17, _The ray's own gradient_), with analytic slopes, and
+  its cost per transmittance read is recorded here and in R08.T11's benchmarks; a body of one band
+  may skip the fit, its s varying by under 2%. Acceptance: `pnpm test` and `just test-render` pass;
+  by hand, the Saturn-class limb from orbit over the equator and the pole is recorded here.
+
+- **R08.T6.g Heights and angles in `f32`** (Design note 18; `decision-r08-f32.md`). It follows
+  T6.b and precedes T6.c, whatever its letter. R08.T6.b's local fixes stand: the transmittance
+  kernel's heights from ρ, the sky view's from h₀, the multiple-scattering kernel's exact azimuths,
+  and the precise forms on the sky view's write and the scattering angle. This task does the rest,
+  in R05's kernels as R08.T6 widens them:
+  - **The view.** `AtmosphereView` (`view.wgsl`) gains `exact : vec4f`, formed in `f64` by
+    `#fillView` (`hillaire.ts`) and narrowed once:
+    - x and y, the ground's and the top shell's quadric constants q_g = |S P|² − a² and
+      q_t = |S_t P|² − (a + H)². P is the camera's body-fixed position, S = diag(1, 1, a ÷ c),
+      S_t = diag(1, 1, (a + H) ÷ (c + H)), and H is the atmosphere's height;
+    - z, the sky view's horizon angle β = atan2(R₀, √(h_s(2R₀ + h_s))). R₀ is the camera's
+      Gaussian radius and h_s = `skyViewHeight(h₀, H)`. `skyViewHeight` gains a TypeScript twin,
+      pinned to the WGSL's clamp;
+    - w, sin ρ, ρ being the sun's angular radius.
+
+    `VIEW_MEMBERS` and the composite's `Draw` gain the member in the same place. `Medium` carries
+    the atmosphere's height H in place of the top's radius
+    (`packMediumUniform(medium, bottomRadiusM, samples)`, `tables.ts`), so that no kernel forms
+    top − bottom.
+
+  - **Heights.** `common.wgsl` holds the shell's forms from a height, beside `groundHitFromHeight`
+    (moved here from `view.wgsl`): r² − R² = h(2R + h), top² − r² = (H − h)(2R + H + h), the
+    cancellation-free distances to the ground and the top, the height along a ray from h₀, the
+    transmittance table's (u, v) at (h, μ) with H_ρ² = H(2R + H), and the multiple-scattering row
+    from h. `medium.wgsl`'s helpers from T6.b call them with the medium's radii. The transmittance
+    kernel takes its texel's (h, μ) from v by the same forms. The radius forms are removed:
+    `mediumAt(r)`, `distanceToTop`, `distanceToBottom`, `intersectsGround`, `maxDistance`,
+    `shellIntersectsGround`, `shellRMuToUv`, `transmittanceRMuToUv`, `shellMultiScatteringRMuToUv`
+    and `rayMarch.wgsl`'s `heightAbove`. Then:
+    - `source.wgsl`: `tableTransmittance` and `tableMultiScattering` read their tables at a height,
+      and `sourceAt`'s shadow test is `groundHitFromHeight`;
+    - `aerialPerspective.wgsl`: each sample's height comes from h₀ and μ = d·n̂ by the sphere
+      identity. Its origin, (R₀ + max(h₀, 0)) n̂, carries directions only;
+    - `multiScattering.wgsl`: each texel is taken at its height, 10 m + v(H − 10 m). The ray's
+      length, each sample's height, the shadow test and the sun's transmittance come from heights,
+      and the ground's bounce is taken at height 0;
+    - `rayMarch.wgsl`: the shell and the ground are met at the quadric's cancellation-free roots
+      from `exact.xy`. Each sample's radial height is |p| q ÷ (√(1 + q)(√(1 + q) + 1)),
+      q = Q ÷ a². Q(t) is taken by the near form below h₀ = a ÷ 2 and about the closest approach
+      above it (Design note 18). The offset t − t* is formed without a difference of large
+      distances (`decision-r08-f32.md` §4.2). `normalAt` and the sun's cosine come from p̂, as
+      before;
+    - `composite.wgsl`: `transmittanceToSpace` is read at (h₀, μ).
+  - **Angles.** `preciseCos`, `preciseAtan` and `preciseAtan2` (T6.b's) move from `view.wgsl` to
+    `view/shaders/preciseTrig.wgsl`, a library prepended to every atmosphere module before
+    `common.wgsl`.
+    - `skyViewUvToParams` and `skyViewParamsToUv` take β from `exact.z`. The read takes the zenith
+      as `preciseAtan2(|d × n̂|, d·n̂)`, so that it inverts the write.
+    - The composite's sun disc is |d × s| ≤ `exact.w` with d·s > 0, in place of `cos(v.sun.w)`.
+    - `scatteringAngle` carries ½|d − s|², and the Cornette–Shanks denominator is
+      (1 − g)² + g|d − s|².
+  - Not touched: the CPU twin, which is `f64` throughout.
+
+  Files: `shaders/{view,common,medium,source,skyView,aerialPerspective,rayMarch,multiScattering,transmittance,composite}.wgsl`,
+  `view/shaders/preciseTrig.wgsl`, `hillaire.ts`, `tables.ts`, `hillaire.test.ts`,
+  `tables.test.ts`, a new `precision.test.ts`, and the smoke's checks (`smoke/atmosphere.ts`), whose
+  T6.b views it widens.
+
+  Tests (no GPU). `precision.test.ts` emulates each helper in `f32` (`Math.fround`), operation for
+  operation in the WGSL's order, as R05's `vertexEmulation.ts` does, against `f64`:
+  - on spheres of radius 6,371,008.8 m, 12,742,017.6 m (2 R⊕), 60,268,000 m and 142,984,000 m
+    (2 R_J), from h₀ = 1, 2, 20, 200, 2,000 and 20,000 m, over zenith cosines from −1 to 1 (dense
+    about the horizon's dip) and distances to each ray's end:
+    - every height within 10⁻⁶ · max(t, |h|, 1 km);
+    - every distance to the ground or the top within 10⁻⁵ of itself where
+      (rμ)² − h(2R + h) ≥ 10⁻³ h(2R + h);
+    - every ground and shadow decision equal to `f64`'s outside
+      |(rμ)² − h(2R + h)| < 10⁻⁶ h(2R + h);
+    - every transmittance coordinate and multiple-scattering row within 10⁻³ of a texel;
+  - the ray march's quadric on WGS 84, a Saturn-class figure (a = 60,268 km, c = 54,364 km) and the
+    2 R⊕ and 2 R_J spheres, with the camera narrowed to `f32` and q_g, q_t from `f64`:
+    - from h₀ = −400 m to 400 km, every radial height within 10⁻⁶ · max(t, |h|, 1 km);
+    - from |P| = 1.5a, 6.6a, 60a and 10⁹ m, every height near the limb (tangent heights 0–100 km)
+      within 4ε · max(a, |P|) + 10⁻⁶ · max(|t − t*|, 1 km), ε = 2⁻²⁴;
+  - R05's forms, emulated the same way, fail the height and decision bounds at every radius. This
+    is asserted, so that the test is known to see the defect;
+  - `preciseCos`, `preciseAtan` and `preciseAtan2` are within 5 × 10⁻⁷ of `f64` over their domains.
+    `skyViewParamsToUv` after `skyViewUvToParams` is the identity to 10⁻³ of a texel at every
+    texel centre of both settings' sizes, from 1 m, 2 km and 99 km;
+  - in `hillaire.test.ts` and `tables.test.ts`, no assembled atmosphere module, with comments
+    stripped, calls `sin`, `cos`, `tan`, `asin`, `acos`, `atan` or `atan2`, or any removed radius
+    form.
+
+  Smoke (`just test-render`, on `default` and `no-subgroups`).
+  Each kernel is held in two arms under Verification's twin bound (`decision-r08-t6b-floor.md`):
+  - _The stored arm_, on both settings: its `rgba16float` table, with the format's floor of 2⁻²⁴.
+  - _The kernel arm_, on high: its own output, to 10⁻³ relative above 10⁻⁶ of the table's maximum
+    at every texel and channel, with no floor. The smoke assembles the kernel a second time with its
+    storage texture's format `rgba32float`, and it reads the same GPU tables.
+
+  The arms cover the sky view, aerial perspective and ray march, and each body's transmittance and
+  multiple-scattering tables, the latter over the GPU's transmittance. Each check reports its
+  table's largest value and how many channels the floor carries. A stored table whose largest colour
+  value is under 2.0 × 10⁻⁴ is recorded as format-limited. The Saturn-radius view with the sun 2°
+  below the horizon, whose datum shadow stands about 37 km up overhead, records its sky view's
+  largest beside Earth's.
+
+  The checks run:
+  - on Earth (WGS 84, Earth's medium), and on two spheres with Earth's medium, whose aerosol, 1.2 km
+    in scale height, is the most sensitive profile the kernels hold: 2 R⊕ (12,742,017.6 m) and
+    Saturn's equatorial radius (60,268,000 m);
+  - on high:
+    - from 2 m, 20 m, 200 m and 2 km on each body, and from 1 m on the 2 R⊕ body, with the sun 20°
+      up and 2° below the horizon, a surface 60 km ahead, and the open sky;
+    - the limb from 400 km on Earth and on the Saturn-radius body, and Earth's limb from
+      4.2 × 10⁷ m;
+  - on low, from 2 m and 2 km on each body, with the sun 20° up;
+  - with no exemption but a ray-march pixel whose twin ray lies within 10⁻⁶ rad of tangency to the
+    ground or the top, counted and recorded.
+
+  T6.b's table of worst errors is re-measured and recorded here beside T6.b's. By hand, through the
+  smoke harness's hidden captures (`just test-render --captures=DIR`): the horizon at sunset from
+  2 m on Earth and from 1 m on the 2 R⊕ body, showing no band at the horizon's row, recorded here.
+  The passes' times on the development machine, by the pass timer on a quiet machine, are recorded
+  beside R05's; T11 holds the budget.
+
+  Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/precision view/atmosphere/hillaire view/atmosphere/tables`,
+  `pnpm test` and `just test-render` pass.
 
 ### R08.T7 Several suns, and the sky through the air
 
 Sky-view and aerial perspective per photorealistic view, summed over the drawn suns in one march
 (Design note 7), in `drawFrame(view, suns, scene)`. As built, R05's kernels carry one sun:
 `view.wgsl`'s `AtmosphereView` has one `sun`, `skyScale` and `sunDisc`, `source.wgsl`'s
-`sampleMediumAt` folds the phase into one cos θ, and `sourceAt` takes one μ_sun; this task widens
-them. Files: `settings.ts`, `sources.ts` and `sources.test.ts`, `view/quality/qualitySetting.ts`,
-`hillaire.ts`, `shaders/{view,source,skyView,aerialPerspective,rayMarch,composite}.wgsl`,
-`tablesCpu.ts` and the smoke checks.
+`sampleMediumAt` takes one sun's `ScatteringAngle` (its cos θ and u = √(θ ÷ π) since R08.T6.b, and
+½|d − s|² since R08.T6.g), each term's phase taken from it per channel, and `sourceAt` takes one
+μ_sun; this task widens them. Files: `settings.ts`, `sources.ts` and `sources.test.ts`,
+`view/quality/qualitySetting.ts`, `hillaire.ts`,
+`shaders/{view,source,skyView,aerialPerspective,rayMarch,composite}.wgsl`, `tablesCpu.ts` and the
+smoke checks.
 
 - the sky's sources are the body's, Design note 7's one list: the stars R07 lights it with
   (`lightsAt(centre, hosts, MAX_BODY_LIGHTS)`, `view/lighting/hostLights.ts`) and its planetshine
@@ -2719,6 +2952,8 @@ them. Files: `settings.ts`, `sources.ts` and `sources.test.ts`, `view/quality/qu
   `SunState`s and applies Design note 7's two skips inside the air. A planetshine source's
   `SunState` carries its per-channel illuminance (T6.d's field, carried to the camera by the
   inverse square), its angular radius, light slot 0's absorber curve and no disc.
+  Each source's disc is tested as Design note 18 rules, |d × s| ≤ sin ρ with d·s > 0, its sin ρ
+  formed in `f64` beside its ρ.
 - this task writes `settings.ts` and adds `atmosphereView` to R05's `ViewSettings`, with its
   values in `SETTINGS`: `skySunCap` reading `MAX_BODY_LIGHTS`, and `skyPlanetshineSources`
   reading `photoreal.planetshineSources`. It sizes the kernels' source array at
@@ -2784,7 +3019,10 @@ and its planetshine sources), with no source skipped outside the air. The march 
 atmosphere other than the ship's local body (`SceneFrame.localBody`) at its `apparentM` from R03's
 `sceneAt(model, observer, time, previous)` (Design note 13), with the limb, the terminator and the
 planet's shadow in its own air; a `contact` body, which has no position, draws none. The switch to
-the sky-view table is by altitude, with a blend band. Tests (no GPU):
+the sky-view table is by altitude, with a blend band. A body seen from outside takes Design note
+18's spheroid rule with its own quadric constants, formed in `f64` from the camera's position
+relative to it, and the closest-approach form beyond a ÷ 2. The twin agreement on its limb is
+recorded at 10⁷, 10⁸ and 10⁹ m. Tests (no GPU):
 
 - the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges;
 - R05.T12.e's quadrature gate holds for the widened march, at one source and at
@@ -2827,8 +3065,12 @@ to 10⁸ m shows no step at the switch, recorded here.
   and has a CPU twin in `tablesCpu.ts`. `surfaceLighting.wgsl` exports
   `atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`, with the latitude and sun
   azimuth arguments of the Provides, for R07's `litBody.wgsl` callers, R10's `terrainLit.wgsl`
-  and R11's lit passes. Both are catalogued. As built, the two names are R07's stubs in
-  `view/shaders/litBody.wgsl` (1 and 0), so this task:
+  and R11's lit passes. Both are catalogued. `irradiance.wgsl` and `surfaceLighting.wgsl` follow
+  Design note 18. Each lookup takes the caller's geodetic height, never a radius. The planet's
+  shadow is `groundHitFromHeight`, and no module calls built-in trigonometry. A caller passes a
+  baked or interpolated height above the datum (R05 Design note 5) and a cosine against the datum
+  normal, never |P| − R. As built, the two names are R07's stubs in `view/shaders/litBody.wgsl` (1
+  and 0), so this task:
   - removes the stubs there, the modules that include `litBody.wgsl` joining
     `surfaceLighting.wgsl` in their place (WGSL resolves every name in a module);
   - binds the body's transmittance and irradiance tables to the disc materials, the smooth mesh and
@@ -3487,7 +3729,24 @@ records are here.
   by its tolerance test, under `just test-slow`; its spheroid mode
   against its sphere mode at a = c (T12.d).
 - **GPU, software:** every kernel compiles and agrees with its twin on SwiftShader under
-  `just test-render`, asserting properties, never images.
+  `just test-render`, asserting properties, never images. From T6.g on, this holds at cameras from
+  1 m to 2 km on Earth, a 2 R⊕ and a Saturn-radius body, and from orbit (Design note 18).
+  - **The twin bound** (ruled 2026-10-10, `decision-r08-t6b-floor.md`).
+    - _A stored table_, every `rgba16float` readback (transmittance, as optical depth from T6.c;
+      multiple scattering; the sky view; the aerial perspective; the ray march), agrees channel by
+      channel within max(10⁻³ · max(|twin|, 10⁻⁶ · largest), 2⁻²⁴). The largest is taken over the
+      colour channels, and over alpha apart where alpha holds a quantity of its own.
+      - 2⁻²⁴ is the half float's step below 2⁻¹³, so twice the rounding of a value stored under
+        its least normal 2⁻¹⁴, as 10⁻³ is about twice the rounding at 2⁻¹⁴ itself
+        (10⁻³ · 2⁻¹⁴ = 1.024 · 2⁻²⁴).
+      - It takes over below 5.96 × 10⁻⁵. An `f32` readback takes no floor.
+    - _A kernel's own output_ (from T6.g), written to `rgba32float` in the smoke over the same
+      input tables, agrees within 10⁻³ · max(|twin|, 10⁻⁶ · largest), with no floor.
+    - _Each check reports_ its table's largest value and how many channels the floor carries.
+      - A stored table whose largest colour value is under 2⁻²⁴ ÷ F = 2.0 × 10⁻⁴ (F = 3 × 10⁻⁴,
+        Design note 10) lies below what the format can show at the metric's floor.
+      - Such a view is recorded as format-limited (Risks, "The per-view tables' range at twilight
+        and by moonlight"). Its stored arm then shows the kernel only, never the image.
 - **By eye, recorded:**
   - Earth's sky from the ground at noon and sunset, and from orbit through the terminator;
   - the limb from 400 km;
@@ -3665,8 +3924,9 @@ generator, and the reference's sampling needs no domain tag.
     with the tracer's checks (at least two levels, finite and strictly ascending heights, finite
     and non-negative densities). So a column holds its top level's density, about 10⁻⁷, above its
     top, and a medium built on it takes a `topHeightM` no higher than the column's. `packMedium`
-    refuses a `tabulated` term, since `densityOf` would read it as a tent, and `tables.test.ts`
-    holds the refusal; R08.T6.b replaces both when it gives `tabulated` a code.
+    refused a `tabulated` term, since `densityOf` would have read it as a tent, and
+    `tables.test.ts` held the refusal; R08.T6.b replaced both, giving `tabulated` its code in
+    `medium.wgsl`'s `densityOf(i, profile, h)`.
   - _The tests' figures._
     - Titan's tropopause from Design note 3's inputs is 0.2439 bar. The note's "0.24" is that figure
       to two places, 1.6% off, so the test holds 0.244 to 1%. Design note 3's 0.24 is corrected to
@@ -3929,6 +4189,22 @@ generator, and the reference's sampling needs no domain tag.
     changes Earth's picture by amounts it records, since T6.a–c change no picture. T6.d lists no
     kernel today, so that is an amendment to its text, and a correction to R05.T12.e's ruling,
     which placed the per-frame marches' steps alone.
+
+- **`f32` heights and angles in the kernels: decided 2026-10-10** (`decision-r08-f32.md`; Design
+  note 18).
+  - _The finding._ R08.T6.b's twin comparison found R05's kernels forming heights and
+    discriminants from radii, and taking WGSL's loosely bounded trigonometry. Near the ground, where
+    descents end, the drawn sky and the march were up to 17% (Earth, 2 m) and 100% (Saturn's
+    radius, 2 m) off the gated twin.
+  - _What fixes it._ T6.b fixed the transmittance table, the sky view's heights and the
+    multiple-scattering directions, and took precise forms for the sky view's angles. R08.T6.g,
+    run before T6.c, does the rest, under a static check that keeps it.
+  - _Open._
+    - The far limb of another body, from 10⁷–10⁹ m, is T8's to record.
+    - R07's `litBody.wgsl` takes built-in trigonometry that R10's terrain lighting calls, with "main"
+      (`decision-r08-f32.md` §7, §9).
+    - The air below the datum is with "main" too (§9). Every density reads a negative height as the
+      datum's. That is not an `f32` matter.
 
 - **Deviations in T6.b, as built** (2026-10-10). `tables.ts`, `hillaire.ts`, `medium.ts`, R05's
   kernels and the libraries they are assembled from, `smoke/atmosphere.ts` and `smoke/page.ts`,
@@ -5686,9 +5962,9 @@ generator, and the reference's sampling needs no domain tag.
   - _ρ._ `PhaseFunction`'s `rayleigh` gains `depolarisation: Rgb`, as Provides widens it, and
     `phaseAt` reads it per channel (Chandrasekhar's form, γ = ρ ÷ (2 − ρ); equal to the ρ = 0 form
     to the bit), so T6.a's twin draws a molecular term's ρ. R05's `EARTH_REFERENCE` and
-    `HILLAIRE_REFERENCE` take ρ = 0, the form R05's kernels draw. `packMedium` refuses a Rayleigh
-    phase with ρ ≠ 0 (`tables.test.ts`), as it refuses a `tabulated` density: **R08.T6.b's kernels
-    are to read ρ and lift the refusal**, which T6.b's text does not yet say (for "main").
+    `HILLAIRE_REFERENCE` take ρ = 0, the form R05's kernels draw. `packMedium` refused a Rayleigh
+    phase with ρ ≠ 0 (`tables.test.ts`), as it refused a `tabulated` density: **R08.T6.b's kernels
+    were to read ρ and lift the refusal**, which T6.b's text now says and T6.b did.
   - _Refusals._ A fraction not finite in [0, 1], a species listed twice, or a sum off 1 by more
     than 10⁻⁹ throws `RangeError`, so an empty list (an airless body's) is refused: T10.a builds no
     molecular term then. The order, largest first, is not checked.

@@ -303,6 +303,10 @@ changed by the time this plan runs only the call sites here change.
   diffuse light where the body has an atmosphere, taking the texel's geodetic height and latitude
   and the sun's azimuth from local north (R08 Design note 17); and the sun's refracted apparent
   elevation where it draws one (Design note 10).
+  Every argument is a height above the datum (the patch's baked height, R05 Design note 5) and a
+  cosine against the datum normal, never a radius or |P| − R. This plan's own WGSL follows R08
+  Design note 18's rule for angles, through R08's `view/shaders/preciseTrig.wgsl`
+  (`decision-r08-f32.md`).
 - **R09:** `field`'s `FieldView`, `PartialField`, `CoarseField`, `FieldHeader`, `SynthesisCell`,
   `ClimateCell`, `CoarseCrater`, `Cover` and `SYNTHESIS_MARGIN_CELLS`; `wire::decode_payload`;
   `PartialField::{is_surveyed, resolution}`, its `insert(&wire::DecodedBlock)`, and
@@ -964,16 +968,19 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   patch's local frame from `body_fixed_at`, R07's star and R08's refraction where drawn; the compare
   against the interpolated horizon, passed as the `horizon` argument of R07's
   `sphere_irradiance(h, phi, horizon)` (the signature and its default of 0 on the smooth figure are
-  R07.T6.a's and T6.c's, used unchanged); the soft lit fraction of Design note 10. Files:
-  `shadows/horizon.wgsl`, `shadows/litFraction.ts`, and the call sites in R07's
-  `shaders/litBody.wgsl`. Tests: with a horizon of 0 the terrain's `sphere_irradiance` equals R07's
-  smooth-figure value bit for bit, and with the horizon map's value it equals R07.T6.a's oracle for
-  that local horizon to 10⁻⁶; the lit-fraction formula as a pure TypeScript twin against hand values
-  (0 and 1 beyond ±ρ, one half at e_sun = e_horizon); R01's smoke harness compiles and runs the pass
-  on SwiftShader with and without f16, every texel finite. By hand, recorded: a sunset over a
-  generated range on the low setting, on the development machine and, by the owner, on the UHD 620,
-  whose GPU time is the one held against the budget's 0.3–0.5 ms (Performance budget, Shadows row),
-  and whether eight azimuths show missing peaks. Acceptance:
+  R07.T6.a's and T6.c's, used unchanged); the soft lit fraction of Design note 10. The sun's
+  elevation is `preciseAtan2(s·ν, |s × ν|)`, and the lit fraction's arccos x is
+  `preciseAtan2(√(1 − x²), x)` (R08 Design note 18). WGSL's `asin` inherits atan2's 4,096 ULP, about
+  50″ at 30°. That is five of the map's steps, and 3.3% of the Sun's lit fraction at mid-transit,
+  against this plan's 1/255. Files: `shadows/horizon.wgsl`, `shadows/litFraction.ts`, and the call
+  sites in R07's `shaders/litBody.wgsl`. Tests: with a horizon of 0 the terrain's
+  `sphere_irradiance` equals R07's smooth-figure value bit for bit, and with the horizon map's value
+  it equals R07.T6.a's oracle for that local horizon to 10⁻⁶; the lit-fraction formula as a pure
+  TypeScript twin against hand values (0 and 1 beyond ±ρ, one half at e_sun = e_horizon); R01's
+  smoke harness compiles and runs the pass on SwiftShader with and without f16, every texel finite.
+  By hand, recorded: a sunset over a generated range on the low setting, on the development machine
+  and, by the owner, on the UHD 620, whose GPU time is the one held against the budget's 0.3–0.5 ms
+  (Performance budget, Shadows row), and whether eight azimuths show missing peaks. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows` and the smoke run.
 
 ### R10.T9 Cascaded terrain shadows on the high setting

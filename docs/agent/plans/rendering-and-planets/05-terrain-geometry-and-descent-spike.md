@@ -3605,6 +3605,17 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
 
   On Earth each is a single table and s ≈ 1 ± 0.3%, so T12.b and T12.c are built as written.
 
+- **The atmosphere's kernels in `f32` near the ground** (found in R08.T6.b, 2026-10-10;
+  `decision-r08-f32.md`, R08 Design note 18).
+  - _The defect._ Design note 16's kernels formed heights as |p| − R, and ground tests and distances
+    from r²(μ² − 1) + R², in `f32`. At Earth's radius that loses 0.25 m of a radius, and about a
+    sixth of r² − R² from 2 m. They also took WGSL's `cos`, `sin` and `acos`, which WGSL bounds only
+    to 2⁻¹¹.
+  - _Its size._ From 2 m the sky view and the march were 17% and 14% off their `f64` twin.
+  - _Why the smoke missed it._ R05.T12.c's and T12.e's smoke views at 2 m checked finiteness and
+    step convergence on the same arithmetic, not agreement with a twin.
+  - _The correction._ R08.T6.b and T6.g correct the kernels in place (R08.T6 widens R05's kernels).
+    No R05 task reopens.
 - **The coarse field's size** (researched 2026-09-29). The spike's synthetic field keeps the
   brainstorm's 15 MB, the top of its 2–15 MB range. R09 Design note 17's layout gives 11.6 MB for
   an Earth at level 8: 393,216 cells × 21 B = 8.26 MB, plus 98,304 groups of four × 34 B =
