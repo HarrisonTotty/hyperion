@@ -9,7 +9,8 @@
  * written: the real index n interpolated linearly in wavelength between the source's points, and
  * the imaginary index k linearly in log k (linearly where either end is 0), with each file's own
  * exceptions stated in its `reduction`. Two files are made from no fetched table: CO₂ ice, a
- * derived fit (`science-r08-sulphur-co2ice.md`), and NH₄SH, a stated stand-in (row 5). The files
+ * derived fit (`science-r08-sulphur-co2ice.md`), and NH₄SH, a stated stand-in (row 5) whose index
+ * is a Lorentz–Lorenz estimate (`science-r08-nonspherical.md` §3.1, {@link nh4shIndex}). The files
  * are JSON so that the client imports them and `hyperion-fit` reads them as one source of truth
  * (P14.T49.e). Prettier formats them after they are written (`apps/hyperion/scripts/materials.mjs`).
  *
@@ -686,7 +687,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
         "bf6069ad22fbfbbef7bf957d386a8177647c87fd98ed6574b5c5f8d6c8016769",
       ),
       licence: NO_TERMS,
-      reduction: `${STANDARD_REDUCTION}; the source's rows here are 321, 440, 460, 500, 600, 630, 700 and 800 nm, so 380–440 nm is interpolated between its 321 and 440 nm rows. The indices are retrieved, not laboratory: Wolff et al. fit them to observed single-scattering albedos with non-spherical (T-matrix cylinder) particles, so Mie gives this dust's cross-sections only (Design note 6). The file's 263 and 321 nm rows lie outside Wolff et al. 2009's CRISM range (440–2,920 nm) and their source is not stated, perhaps Wolff et al. 2010's MARCI ultraviolet retrieval (Icarus 208, 143), unconfirmed; 380–440 nm rests on the 321 nm row`,
+      reduction: `${STANDARD_REDUCTION}; the source's rows used are 321, 440, 460, 500, 600, 630, 700 and 800 nm, so 380–440 nm is interpolated between its 321 and 440 nm rows, the 321 nm row being the anchor there (science-r08-nonspherical.md §3.2, ruled 2026-10-10). The indices are retrieved, not laboratory: Wolff et al. fit them to observed single-scattering albedos with non-spherical (T-matrix cylinder) particles, so Mie gives this dust's cross-sections only (Design note 6). The source's two ultraviolet rows, 263 and 321 nm, lie outside Wolff et al. 2009's CRISM range (440–2,920 nm): they are part of Wolff's distributed compilation but separately retrieved (k printed to three figures, where the CRISM rows have six), presumably Wolff et al. 2010's MARCI values (Icarus 208, 143), unconfirmed, since that paper is closed. The 263 nm row lies outside the grid and is not used. The interpolated k at 380 nm, 0.00989, lies between holding the 440 nm row (0.00767), which is wrong because Mars dust's k rises towards the ultraviolet, and extrapolating the 440–500 nm rows' log-slope (0.0107)`,
       standIn: null,
       fit: null,
     },
@@ -769,8 +770,160 @@ export function cauchyIndex(
   };
 }
 
-/** The stand-in real index of NH₄SH (decision-r08-licences.md row 5). */
-export const NH4SH_STAND_IN_N = 1.8;
+/**
+ * A gas's measured refractivity in the one-term form n − 1 = A ÷ (B − λ⁻²), λ the vacuum wavelength
+ * in µm, at 0 °C and 760 mm.
+ */
+export interface OneTermRefractivity {
+  /** A, µm⁻². */
+  readonly aPerUm2: number;
+  /** B, µm⁻². */
+  readonly bPerUm2: number;
+  /**
+   * The compressibility factor Z of the gas the formula describes, at 0 °C and 760 mm: its molar
+   * volume is Z times the ideal gas's.
+   */
+  readonly compressibility: number;
+  readonly source: string;
+}
+
+/**
+ * NH₃'s refractivity: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1,
+ * n − 1 = 0.032 953 ÷ (90.392 − λ⁻²), measured over 480–670.8 nm, with Z = 0.984 798. The same row
+ * as `view/atmosphere/rayleigh.ts`'s `GAS_DISPERSION.NH3`, which
+ * `view/atmosphere/materials/materials.test.ts` checks.
+ *
+ * @remarks
+ * The review's science check read the paper (an OCR copy): it reduces every refractivity to the
+ * "theoretic density", H₂'s at 0 °C and 76 cm times the molecular-weight ratio, which makes Z about
+ * 1 rather than the real gas's 0.984 798 that `rayleigh.ts` and the ruling take. That question is
+ * with "main" (R08's Risks). NH₄SH's estimate is nearly unmoved by it, since the ionic increment
+ * was derived from NH₄Cl with the same NH₃ row: with Z = 1 and the increment re-derived, n at
+ * 550 nm is 1.6446–1.6485.
+ */
+export const NH3_REFRACTIVITY: OneTermRefractivity = {
+  aPerUm2: 0.032_953,
+  bPerUm2: 90.392,
+  compressibility: 0.984_798,
+  source: "C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1",
+};
+
+/**
+ * H₂S's refractivity: C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171,
+ * n − 1 = 0.053 785 ÷ (86.876 − λ⁻²) per molecule (Z = 1), measured over 486.1–656.3 nm. The same
+ * row as `view/atmosphere/rayleigh.ts`'s H₂S estimate, which
+ * `view/atmosphere/materials/materials.test.ts` checks.
+ */
+export const H2S_REFRACTIVITY: OneTermRefractivity = {
+  aPerUm2: 0.053_785,
+  bPerUm2: 86.876,
+  compressibility: 1,
+  source: "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171",
+};
+
+/** The Avogadro constant, mol⁻¹, exact in the 2019 SI. */
+const AVOGADRO_PER_MOL = 6.022_140_76e23;
+
+/** The Boltzmann constant, J K⁻¹, exact in the 2019 SI. */
+const BOLTZMANN_J_PER_K = 1.380_649e-23;
+
+/**
+ * The ideal gas's molar volume at 0 °C and 101,325 Pa, cm³ mol⁻¹: N_A k_B × 273.15 K ÷ 101,325 Pa,
+ * exact in the 2019 SI (CODATA's 22.413 969 54 × 10⁻³ m³ mol⁻¹).
+ */
+export const IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL =
+  ((AVOGADRO_PER_MOL * BOLTZMANN_J_PER_K * 273.15) / 101_325) * 1e6;
+
+/**
+ * The molar volume of a crystal, cm³ mol⁻¹, from its unit cell's volume in Å³ and the formula units
+ * the cell holds.
+ */
+export function cellMolarVolumeCm3PerMol(cellVolumeA3: number, formulaUnits: number): number {
+  return (AVOGADRO_PER_MOL * cellVolumeA3 * 1e-24) / formulaUnits;
+}
+
+/**
+ * NH₄SH's molar volume, cm³ mol⁻¹, from its cell: C. D. West, "The crystal structures of some
+ * alkali hydrosulfides and monosulfides", Z. Kristallogr. 88 (1934) 97–115, as COD entry 1010249
+ * gives it (CC0): P4/nmm, a = 6.011 Å, c = 4.009 Å, two formula units.
+ *
+ * @remarks
+ * That is 43.62 cm³ mol⁻¹, a density of 1.1717 g cm⁻³ at M = 51.107 g mol⁻¹ (CIAAW's conventional
+ * atomic weights). The ruling's 1.1715 matches the entry's rounded cell volume, 144.9 Å³, where a²c
+ * is 144.85 Å³; n differs by about 3 × 10⁻⁴. The cell is as published: a room-temperature
+ * measurement, and before 1947 possibly in kX units (1 kX = 1.002 02 Å), which would lower n by
+ * about 0.005. A cloud near 200 K is presumably denser, raising n by a comparable amount
+ * (unmeasured). Both lie inside the stated band.
+ */
+export const NH4SH_MOLAR_VOLUME_CM3_PER_MOL = cellMolarVolumeCm3PerMol(6.011 ** 2 * 4.009, 2);
+
+/**
+ * NH₄SH's molar mass, g mol⁻¹, from CIAAW's conventional atomic weights (H 1.008, N 14.007,
+ * S 32.06). Only the file's stated density uses it: n depends on the molar volume alone.
+ */
+export const NH4SH_MOLAR_MASS_G_PER_MOL = 14.007 + 5 * 1.008 + 32.06;
+
+/**
+ * NH₄SH's ionic increment of molar refraction over NH₃'s plus H₂S's, +4.5%: ammonium chloride's,
+ * from NH₄Cl's n_D 1.642 and density 1.519 g cm⁻³ against NH₃'s plus HCl's gas refractivities,
+ * +4.3% to +4.7% (science-r08-nonspherical.md §3.1). SH⁻ is more polarisable than Cl⁻, and NH₄Br's
+ * increment is about +11% (the ruling's estimate, from memory), so the stated band runs from 0 to
+ * +12%.
+ */
+export const NH4SH_IONIC_INCREMENT = 0.045;
+
+/** The stated uncertainty band of {@link NH4SH_IONIC_INCREMENT}, 0 to +12%, as fractions. */
+export const NH4SH_IONIC_INCREMENT_BAND: readonly [number, number] = [0, 0.12];
+
+/**
+ * A solid's real index by Lorentz–Lorenz from its constituents' gas refractivities: the additive
+ * molar refraction R = Σ (n² − 1) ÷ (n² + 2) × Z V₀ over the gases at 0 °C and 760 mm, raised by an
+ * ionic increment δ, then x = (1 + δ) R ÷ V_m and n = √((1 + 2x) ÷ (1 − x)).
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, where every formula's pole lies outside it.
+ * @param molarVolumeCm3PerMol - The solid's molar volume V_m.
+ * @param increment - δ, the solid's excess molar refraction over the gases' sum.
+ * @throws RangeError if the wavelength lies at or past a formula's pole, or x is not in (0, 1).
+ */
+export function lorentzLorenzIndex(
+  gases: ReadonlyArray<OneTermRefractivity>,
+  wavelengthNm: number,
+  molarVolumeCm3PerMol: number,
+  increment: number,
+): number {
+  const inverseUm2 = (1000 / wavelengthNm) ** 2;
+  let molarRefraction = 0;
+  for (const gas of gases) {
+    if (!(gas.bPerUm2 > inverseUm2)) {
+      throw new RangeError(`${wavelengthNm} nm lies at or past a pole of ${gas.source}`);
+    }
+    const n = 1 + gas.aPerUm2 / (gas.bPerUm2 - inverseUm2);
+    molarRefraction +=
+      ((n * n - 1) / (n * n + 2)) * gas.compressibility * IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL;
+  }
+  const x = ((1 + increment) * molarRefraction) / molarVolumeCm3PerMol;
+  if (!(x > 0 && x < 1)) {
+    throw new RangeError(`Lorentz–Lorenz: x = ${x} is not in (0, 1)`);
+  }
+  return Math.sqrt((1 + 2 * x) / (1 - x));
+}
+
+/**
+ * NH₄SH's estimated real index at a vacuum wavelength, nm (science-r08-nonspherical.md §3.1):
+ * {@link lorentzLorenzIndex} over NH₃ and H₂S at NH₄SH's cell, with NH₄Cl's ionic increment unless
+ * another is given.
+ *
+ * @throws RangeError as {@link lorentzLorenzIndex} does, for a wavelength at or past NH₃'s pole
+ *   (about 105 nm).
+ */
+export function nh4shIndex(wavelengthNm: number, increment = NH4SH_IONIC_INCREMENT): number {
+  return lorentzLorenzIndex(
+    [NH3_REFRACTIVITY, H2S_REFRACTIVITY],
+    wavelengthNm,
+    NH4SH_MOLAR_VOLUME_CM3_PER_MOL,
+    increment,
+  );
+}
 
 /** The files made from no fetched table. */
 export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
@@ -805,16 +958,16 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     shape: "crystal",
     provenance: "standIn",
     paper:
-      'L. A. Sromovsky, K. H. Baines, P. M. Fry and R. W. Carlson, "A possibly universal red chromophore for modeling color variations on Jupiter", Icarus 291 (2017) 232–244, DOI 10.1016/j.icarus.2016.12.014 (arXiv 1706.02779), §4.3 "Refractive index of main cloud layer", after the best-fit 1.85 of T. M. Sato, T. Satoh and Y. Kasaba 2013 (Icarus 222, 100–121, DOI 10.1016/j.icarus.2012.09.035), which Sromovsky et al. cite for Jovian clouds in the equatorial zone',
-    source:
-      "a stated constant, not a measurement: Howett et al. 2007 (JOSA B 24, 126) measured NH4SH only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)",
-    licence: "a cited constant; no data set is used (decision-r08-licences.md row 5)",
-    reduction: "the constant on 380–780 nm every 5 nm",
-    standIn:
-      "a non-absorbing particle of real index 1.80, constant over 380–780 nm: Sromovsky et al. 2017 write that an NH4SH-dominated main cloud's index would be closer to 1.8 and model it as conservative. A body whose medium shows this mode with less than CLOUD_DECK_SPLIT_OPTICAL_DEPTH above it at 550 nm reads ATMOSPHERE: APPROXIMATE, until measured visible constants replace it",
+      "the estimate's inputs: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1–26, DOI 10.1098/rsta.1914.0001, for NH3's dispersion; C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171–176, DOI 10.1098/rspa.1910.0003, for H2S's; C. D. West, \"The crystal structures of some alkali hydrosulfides and monosulfides\", Z. Kristallogr. 88 (1934) 97–115, DOI 10.1524/zkri.1934.88.1.97, for NH4SH's cell",
+    source: `a Lorentz–Lorenz estimate, not a measurement (science-r08-nonspherical.md §3.1, ruled 2026-10-10): the molar refraction of NH3 plus H2S from their gas dispersions at 0 °C and 760 mm (view/atmosphere/rayleigh.ts's Cuthbertson rows, Z = ${NH3_REFRACTIVITY.compressibility} for NH3 and ${H2S_REFRACTIVITY.compressibility} for H2S), raised by NH4Cl's ionic increment of ${(NH4SH_IONIC_INCREMENT * 100).toFixed(1)}%, over the molar volume of West 1934's cell as the Crystallography Open Database gives it, entry 1010249, https://www.crystallography.net/cod/1010249.cif, SHA-256 e721ed9fed41cab1c267ecadd4de31692340d3bfcefd6d9183312ae3a746bb71, fetched 2026-10-10 (P4/nmm, a = 6.011 Å, c = 4.009 Å, two formula units: ${NH4SH_MOLAR_VOLUME_CM3_PER_MOL.toFixed(2)} cm³ mol⁻¹, ${(NH4SH_MOLAR_MASS_G_PER_MOL / NH4SH_MOLAR_VOLUME_CM3_PER_MOL).toFixed(4)} g cm⁻³). The cell is as published, at room temperature and possibly in kX units, about ±0.005 in n. The gas dispersions are measured over 480–670.8 nm (NH3) and 486.1–656.3 nm (H2S) and extrapolated beyond. No visible optical constants of NH4SH are published: Howett et al. 2007 (JOSA B 24, 126) measured it only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)`,
+    licence:
+      "estimated values from cited constants and CC0 crystal data (the Crystallography Open Database's entry 1010249); no data set is copied (decision-r08-licences.md row 5)",
+    reduction:
+      "n = √((1 + 2x) ÷ (1 − x)), with x the raised molar refraction over the molar volume, evaluated on 380–780 nm every 5 nm to six significant figures; k = 0",
+    standIn: `a non-absorbing particle whose real index is a Lorentz–Lorenz estimate: ${nh4shIndex(380).toFixed(3)} at 380 nm, ${nh4shIndex(550).toFixed(3)} at 550 nm and ${nh4shIndex(780).toFixed(3)} at 780 nm, within about +0.06 and −0.04 (+0.065 at 380 nm) for an ionic increment from 0 to +12%. The same estimate for NH3 ice, at the cell of I. Olovsson and D. H. Templeton (Acta Cryst. 12 (1959) 832; COD 2310927; a = 5.138 Å, four molecules), gives 1.458 against the 1.436 at 550 nm that Martonchik et al. 1984 measure (Appl. Opt. 23, 541). k = 0, since pure NH4SH is a white solid (PubChem CID 25515, from ICSC); the colours it takes on Jupiter come from radiolysis products (Loeffler and Hudson 2018, Icarus 302, 418). It replaces the earlier stand-in of 1.80, which Sromovsky et al. 2017 (Icarus 291, 232, §4.3) state without a source, after the best-fit effective index of 1.85 that Sato et al. 2013 (Icarus 222, 100) find for Jupiter's clouds, a fit that particle shape and size trade against. 1.80 would need a molar refraction 23% above the additive one. A body whose medium shows this mode with less than CLOUD_DECK_SPLIT_OPTICAL_DEPTH above it at 550 nm reads ATMOSPHERE: APPROXIMATE, until measured visible constants replace it`,
     fit: null,
     wavelengthsNm: MATERIAL_GRID_NM,
-    n: MATERIAL_GRID_NM.map(() => NH4SH_STAND_IN_N),
+    n: MATERIAL_GRID_NM.map((nm) => rounded(nh4shIndex(nm))),
     k: MATERIAL_GRID_NM.map(() => 0),
   },
 ];

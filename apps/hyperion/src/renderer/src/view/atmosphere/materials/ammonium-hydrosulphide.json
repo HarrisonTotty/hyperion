@@ -6,11 +6,11 @@
   "temperatureK": null,
   "shape": "crystal",
   "provenance": "standIn",
-  "paper": "L. A. Sromovsky, K. H. Baines, P. M. Fry and R. W. Carlson, \"A possibly universal red chromophore for modeling color variations on Jupiter\", Icarus 291 (2017) 232–244, DOI 10.1016/j.icarus.2016.12.014 (arXiv 1706.02779), §4.3 \"Refractive index of main cloud layer\", after the best-fit 1.85 of T. M. Sato, T. Satoh and Y. Kasaba 2013 (Icarus 222, 100–121, DOI 10.1016/j.icarus.2012.09.035), which Sromovsky et al. cite for Jovian clouds in the equatorial zone",
-  "source": "a stated constant, not a measurement: Howett et al. 2007 (JOSA B 24, 126) measured NH4SH only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)",
-  "licence": "a cited constant; no data set is used (decision-r08-licences.md row 5)",
-  "reduction": "the constant on 380–780 nm every 5 nm",
-  "standIn": "a non-absorbing particle of real index 1.80, constant over 380–780 nm: Sromovsky et al. 2017 write that an NH4SH-dominated main cloud's index would be closer to 1.8 and model it as conservative. A body whose medium shows this mode with less than CLOUD_DECK_SPLIT_OPTICAL_DEPTH above it at 550 nm reads ATMOSPHERE: APPROXIMATE, until measured visible constants replace it",
+  "paper": "the estimate's inputs: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1–26, DOI 10.1098/rsta.1914.0001, for NH3's dispersion; C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171–176, DOI 10.1098/rspa.1910.0003, for H2S's; C. D. West, \"The crystal structures of some alkali hydrosulfides and monosulfides\", Z. Kristallogr. 88 (1934) 97–115, DOI 10.1524/zkri.1934.88.1.97, for NH4SH's cell",
+  "source": "a Lorentz–Lorenz estimate, not a measurement (science-r08-nonspherical.md §3.1, ruled 2026-10-10): the molar refraction of NH3 plus H2S from their gas dispersions at 0 °C and 760 mm (view/atmosphere/rayleigh.ts's Cuthbertson rows, Z = 0.984798 for NH3 and 1 for H2S), raised by NH4Cl's ionic increment of 4.5%, over the molar volume of West 1934's cell as the Crystallography Open Database gives it, entry 1010249, https://www.crystallography.net/cod/1010249.cif, SHA-256 e721ed9fed41cab1c267ecadd4de31692340d3bfcefd6d9183312ae3a746bb71, fetched 2026-10-10 (P4/nmm, a = 6.011 Å, c = 4.009 Å, two formula units: 43.62 cm³ mol⁻¹, 1.1717 g cm⁻³). The cell is as published, at room temperature and possibly in kX units, about ±0.005 in n. The gas dispersions are measured over 480–670.8 nm (NH3) and 486.1–656.3 nm (H2S) and extrapolated beyond. No visible optical constants of NH4SH are published: Howett et al. 2007 (JOSA B 24, 126) measured it only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)",
+  "licence": "estimated values from cited constants and CC0 crystal data (the Crystallography Open Database's entry 1010249); no data set is copied (decision-r08-licences.md row 5)",
+  "reduction": "n = √((1 + 2x) ÷ (1 − x)), with x the raised molar refraction over the molar volume, evaluated on 380–780 nm every 5 nm to six significant figures; k = 0",
+  "standIn": "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate: 1.685 at 380 nm, 1.648 at 550 nm and 1.632 at 780 nm, within about +0.06 and −0.04 (+0.065 at 380 nm) for an ionic increment from 0 to +12%. The same estimate for NH3 ice, at the cell of I. Olovsson and D. H. Templeton (Acta Cryst. 12 (1959) 832; COD 2310927; a = 5.138 Å, four molecules), gives 1.458 against the 1.436 at 550 nm that Martonchik et al. 1984 measure (Appl. Opt. 23, 541). k = 0, since pure NH4SH is a white solid (PubChem CID 25515, from ICSC); the colours it takes on Jupiter come from radiolysis products (Loeffler and Hudson 2018, Icarus 302, 418). It replaces the earlier stand-in of 1.80, which Sromovsky et al. 2017 (Icarus 291, 232, §4.3) state without a source, after the best-fit effective index of 1.85 that Sato et al. 2013 (Icarus 222, 100) find for Jupiter's clouds, a fit that particle shape and size trade against. 1.80 would need a molar refraction 23% above the additive one. A body whose medium shows this mode with less than CLOUD_DECK_SPLIT_OPTICAL_DEPTH above it at 550 nm reads ATMOSPHERE: APPROXIMATE, until measured visible constants replace it",
   "fit": null,
   "wavelengthsNm": [
     380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 470,
@@ -20,11 +20,14 @@
     760, 765, 770, 775, 780
   ],
   "n": [
-    1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
-    1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
-    1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
-    1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8,
-    1.8, 1.8, 1.8, 1.8, 1.8
+    1.68485, 1.68292, 1.68107, 1.6793, 1.67761, 1.67599, 1.67444, 1.67294, 1.67151, 1.67014,
+    1.66881, 1.66754, 1.66632, 1.66514, 1.664, 1.66291, 1.66185, 1.66084, 1.65985, 1.6589, 1.65799,
+    1.6571, 1.65625, 1.65542, 1.65462, 1.65384, 1.65309, 1.65236, 1.65166, 1.65097, 1.65031,
+    1.64967, 1.64904, 1.64844, 1.64785, 1.64728, 1.64672, 1.64618, 1.64566, 1.64515, 1.64465,
+    1.64417, 1.6437, 1.64324, 1.6428, 1.64236, 1.64194, 1.64153, 1.64113, 1.64074, 1.64036, 1.63999,
+    1.63962, 1.63927, 1.63892, 1.63859, 1.63826, 1.63794, 1.63762, 1.63732, 1.63702, 1.63672,
+    1.63644, 1.63616, 1.63588, 1.63562, 1.63536, 1.6351, 1.63485, 1.6346, 1.63436, 1.63413, 1.6339,
+    1.63368, 1.63345, 1.63324, 1.63303, 1.63282, 1.63262, 1.63242, 1.63222
   ],
   "k": [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

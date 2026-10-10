@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   cauchyIndex,
+  cellMolarVolumeCm3PerMol,
   CO2_ICE_FIT,
   DERIVED_MATERIALS,
   FETCHED_MATERIALS,
+  IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL,
+  lorentzLorenzIndex,
   MATERIAL_GRID_NM,
+  NH3_REFRACTIVITY,
+  NH4SH_IONIC_INCREMENT_BAND,
+  nh4shIndex,
   parseAria,
   parseHitranTable,
   parseLnk,
@@ -130,6 +136,49 @@ describe("the derived files", () => {
     expect(cauchyIndex(CO2_ICE_FIT, 553).n).toBeCloseTo(1.4135, 4);
     expect(cauchyIndex(CO2_ICE_FIT, 1000).n).toBeCloseTo(1.4037, 4);
     expect(cauchyIndex(CO2_ICE_FIT, 550).k).toBeCloseTo((1e-2 * 550e-9) / (4 * Math.PI), 20);
+  });
+
+  it("take the ideal gas's molar volume at 0 °C and 1 atm from the exact SI constants", () => {
+    // CODATA 2018: 22.413 969 54 × 10⁻³ m³ mol⁻¹.
+    expect(IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL).toBeCloseTo(22_413.969_54, 4);
+  });
+
+  it("estimate NH₄SH's index as science-r08-nonspherical.md §3.1 gives it", () => {
+    // The ruling: 1.685 at 380 nm, 1.648 at 550 nm and 1.632 at 780 nm at δ = +4.5%.
+    expect(Math.abs(nh4shIndex(380) - 1.685)).toBeLessThan(5e-4);
+    expect(Math.abs(nh4shIndex(550) - 1.648)).toBeLessThan(5e-4);
+    expect(Math.abs(nh4shIndex(780) - 1.632)).toBeLessThan(5e-4);
+  });
+
+  it("keep NH₄SH's estimate within +0.065 and −0.04 over the increment's band", () => {
+    const [low, high] = NH4SH_IONIC_INCREMENT_BAND;
+    for (const nm of MATERIAL_GRID_NM) {
+      const n = nh4shIndex(nm);
+      expect(nh4shIndex(nm, high) - n).toBeLessThan(0.065);
+      expect(n - nh4shIndex(nm, low)).toBeLessThan(0.04);
+    }
+  });
+
+  it("would need a 23% increment to reach the withdrawn 1.80 at 550 nm", () => {
+    expect(nh4shIndex(550, 0.22)).toBeLessThan(1.8);
+    expect(nh4shIndex(550, 0.24)).toBeGreaterThan(1.8);
+  });
+
+  it("give NH₃ ice the ruling's 1.458, the method's check on a measured molecular solid", () => {
+    // Olovsson and Templeton's cubic cell (Acta Cryst. 12 (1959) 832; COD 2310927), a = 5.138 Å with
+    // four molecules; Martonchik et al. 1984 (Appl. Opt. 23, 541) measure 1.436 at 550 nm.
+    const n = lorentzLorenzIndex(
+      [NH3_REFRACTIVITY],
+      550,
+      cellMolarVolumeCm3PerMol(5.138 ** 3, 4),
+      0,
+    );
+    expect(Math.abs(n - 1.458)).toBeLessThan(5e-4);
+  });
+
+  it("refuse a wavelength at or past a dispersion's pole", () => {
+    // NH₃'s pole is at λ⁻² = 90.392 µm⁻², about 105 nm.
+    expect(() => nh4shIndex(100)).toThrow(RangeError);
   });
 
   it("name a file for every material, each key's phase and variant once", () => {

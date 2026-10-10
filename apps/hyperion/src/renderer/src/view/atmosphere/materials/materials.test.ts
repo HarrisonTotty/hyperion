@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mieSphere } from "../mie";
+import { type Dispersion, ESTIMATED_RAYLEIGH, GAS_DISPERSION } from "../rayleigh";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "../thick/regime";
 import {
   GENERIC_STAND_IN_INDEX,
@@ -38,6 +39,25 @@ function fileOf(key: string, phase?: "liquid" | "solid"): (typeof MATERIAL_FILES
     throw new Error(`no file for ${key}`);
   }
   return file;
+}
+
+/** The Lorentz–Lorenz factor (n² − 1) ÷ (n² + 2). */
+function lorentz(n: number): number {
+  return (n * n - 1) / (n * n + 2);
+}
+
+/** The gas dispersions NH₄SH's estimate is built from: rayleigh.ts's NH₃ and H₂S rows. */
+function nh4shGases(): ReadonlyArray<Dispersion> {
+  const h2s = ESTIMATED_RAYLEIGH.find((row) => row.species === "H2S");
+  if (h2s?.kind !== "dispersion") {
+    throw new Error("rayleigh.ts has no H₂S dispersion");
+  }
+  return [GAS_DISPERSION.NH3, h2s.dispersion];
+}
+
+/** Mars dust's k at a wavelength, nm. */
+function marsDustK(wavelengthNm: number): number {
+  return refractiveIndex("mars_dust", wavelengthNm).index.k;
 }
 
 describe("the material files", () => {
@@ -166,6 +186,25 @@ describe("sulphuric acid", () => {
   });
 });
 
+describe("Mars dust", () => {
+  it("has k at 380 nm above its 440 nm row and at most the 440–500 nm rows' log-linear extrapolation", () => {
+    // science-r08-nonspherical.md §3.2: the 321 nm row anchors 380–440 nm; the two attributed
+    // alternatives bound it, holding the 440 nm row (0.00767) and extrapolating to 0.0107.
+    const at440 = marsDustK(440);
+    const extrapolated = at440 * (marsDustK(500) / at440) ** ((380 - 440) / (500 - 440));
+    expect(at440).toBeCloseTo(0.00767, 5);
+    expect(extrapolated).toBeCloseTo(0.0107, 4);
+    expect(marsDustK(380)).toBeGreaterThan(at440);
+    expect(marsDustK(380)).toBeLessThanOrEqual(extrapolated);
+  });
+
+  it("states that its 263 nm row is not used", () => {
+    expect(fileOf("mars_dust").reduction).toMatch(
+      /263 nm row lies outside the grid and is not used/u,
+    );
+  });
+});
+
 describe("CO₂ ice, a derived file", () => {
   const file = fileOf("CO2");
   const fit = file.fit;
@@ -211,14 +250,49 @@ describe("CO₂ ice, a derived file", () => {
 });
 
 describe("NH₄SH, a stated stand-in", () => {
-  it("is a non-absorbing particle of real index 1.80 over 380–780 nm", () => {
-    for (const nm of [380, 550, 780]) {
-      expect(refractiveIndex("NH4SH", nm)).toEqual({
-        index: { n: 1.8, k: 0 },
-        provenance: "standIn",
-      });
+  const file = fileOf("NH4SH");
+
+  it("has an estimated n of 1.648 ± 0.001 at 550 nm", () => {
+    // The Lorentz–Lorenz estimate of science-r08-nonspherical.md §3.1, replacing the 1.80 stand-in.
+    expect(Math.abs(refractiveIndex("NH4SH", 550).index.n - 1.648)).toBeLessThanOrEqual(0.001);
+  });
+
+  it("has n falling monotonically from 380 to 780 nm", () => {
+    for (let i = 1; i < file.n.length; i += 1) {
+      expect(file.n[i]).toBeLessThan(file.n[i - 1] ?? Number.NaN);
     }
-    expect(resolveMaterial("NH4SH").standIn).toMatch(/1\.80/u);
+  });
+
+  it("is non-absorbing", () => {
+    expect(file.k.every((k) => k === 0)).toBe(true);
+  });
+
+  it("stays a stand-in that states its estimate", () => {
+    expect(refractiveIndex("NH4SH", 550).provenance).toBe("standIn");
+    expect(resolveMaterial("NH4SH").standIn).toMatch(/Lorentz–Lorenz/u);
+  });
+
+  it("takes rayleigh.ts's NH₃ and H₂S rows, stated at 0 °C and 760 mm, as its estimate does", () => {
+    for (const gas of nh4shGases()) {
+      expect([gas.referenceK, gas.referencePa]).toEqual([273.15, 101_325]);
+    }
+  });
+
+  it("is the Lorentz–Lorenz index of rayleigh.ts's NH₃ and H₂S rows at West 1934's cell", () => {
+    // science-r08-nonspherical.md §3.1: (n² − 1) ÷ (n² + 2) = 1.045 R ÷ V_m, with R the gases'
+    // summed molar refraction at 0 °C and 760 mm and V_m from West's cell (COD 1010249: a = 6.011 Å,
+    // c = 4.009 Å, two formula units). The tool holds its own copy of the rows; this catches drift.
+    const idealMolarVolumeCm3PerMol = 22_413.969_54;
+    const cellMolarVolumeCm3PerMol = (6.022_140_76e23 * 6.011 ** 2 * 4.009 * 1e-24) / 2;
+    for (const [i, nm] of MATERIAL_WAVELENGTHS_NM.entries()) {
+      const molarRefraction = nh4shGases().reduce(
+        (sum, gas) =>
+          sum + lorentz(1 + gas.nMinusOne(nm)) * gas.compressibility * idealMolarVolumeCm3PerMol,
+        0,
+      );
+      const expected = (1.045 * molarRefraction) / cellMolarVolumeCm3PerMol;
+      expect(Math.abs(lorentz(file.n[i] ?? Number.NaN) / expected - 1)).toBeLessThan(2e-5);
+    }
   });
 
   it("gives atmosphereApproximate with less than the split's optical depth above it", () => {

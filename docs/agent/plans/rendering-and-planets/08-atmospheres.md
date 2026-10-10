@@ -2051,9 +2051,17 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
       alternative, and T5.b's science check picks between them.
     - **NH₄SH** has no measured visible optical constants (Howett et al. 2007 cover 1,300–12,000
       cm⁻¹).
-      - Its stand-in is a non-absorbing particle of real index 1.80, constant over 380–780 nm
-        (Sromovsky et al. 2017, Icarus 291, 232, §IV.3, after Sato et al. 2013's fitted 1.85). It
-        is named `standIn` in its file, unless T5.b's science check prefers NH₃ ice's index.
+      - Its stand-in is non-absorbing, with a Lorentz–Lorenz index (ruled 2026-10-10,
+        science-r08-nonspherical.md §3.1).
+        - The molar refraction is NH₃'s plus H₂S's from their measured dispersions (`rayleigh.ts`'s
+          Cuthbertson rows), times 1.045, ammonium chloride's ionic increment.
+        - The density is 1.1717 g cm⁻³, from West 1934's cell (COD 1010249). The ruling's 1.1715
+          is the entry's rounded cell volume; n differs by about 3 × 10⁻⁴.
+        - The result is 1.685 at 380 nm, 1.648 at 550 nm and 1.632 at 780 nm, within +0.06 and
+          −0.04 (+0.065 at 380 nm).
+        - It replaces the earlier 1.80, which Sromovsky et al. 2017 state without a source and
+          which would need a 23% larger molar refraction.
+        - It is named `standIn` in its file.
       - A body whose medium shows an NH₄SH mode carries `ATMOSPHERE: APPROXIMATE` (Design note 12).
       - No NH₄SH case is committed or gated.
     - **CO₂ ice**, a derived file rather than a reduction of a fetched data file: no data file
@@ -2100,6 +2108,23 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
   - an unknown material key gives the generic stand-in and `atmosphereApproximate`;
   - once P14.T49.b's rows exist, every file's key is a row of `substances.json` (R08.T19 checks
     it).
+
+- **The follow-up to R08.T5.b: two rulings on its files** (science-r08-nonspherical.md §3,
+  2026-10-10).
+  - NH₄SH: the tool computes the stand-in's n(λ) from the formula in §3.1 on the file's grid,
+    replacing `NH4SH_STAND_IN_N`. The file's `standIn` text states the estimate, its inputs (the
+    two Cuthbertson dispersions, West 1934's cell via COD 1010249, NH₄Cl's increment) and its
+    band. `provenance` stays `standIn`, and the label is unchanged.
+  - Mars dust: the values are unchanged, and the 321 nm row stays the 380–440 nm anchor. The
+    file's reduction text no longer counts the 263 nm row as used. It states that the two
+    ultraviolet rows are part of Wolff's distributed compilation, separately retrieved (k to
+    three figures), presumably Wolff et al. 2010's MARCI values (Icarus 208, 143), unconfirmed.
+  - Tests:
+    - NH₄SH's n is 1.648 ± 0.001 at 550 nm and falls monotonically from 380 to 780 nm, with
+      k = 0 (replacing the 1.80 test);
+    - Mars dust's k at 380 nm lies above its 440 nm value (0.00767) and at or below the
+      log-linear extrapolation of its 440–500 nm rows (0.0107).
+  - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/materials`.
 
 - **R08.T5.c Aggregates and phase tables.** `aggregate.ts` implements Tazaki and Tanaka 2018's MMF
   with D_f ≤ 2.5, and the phase-shift gate of Design note 6: a mode with Δφ ≥ 1 keeps its
@@ -3908,7 +3933,9 @@ generator, and the reference's sampling needs no domain tag.
       714.3 nm, 84.5 wt%), an upper bound since k falls towards the visible;
     - Mars dust interpolates 380–440 nm between the source's 321 and 440 nm rows, though the 263
       and 321 nm rows lie outside Wolff et al. 2009's CRISM range (440–2,920 nm) and their source
-      is unstated (perhaps Wolff et al. 2010's MARCI retrieval, unconfirmed);
+      is unstated (perhaps Wolff et al. 2010's MARCI retrieval, unconfirmed). Ruled 2026-10-10
+      (science-r08-nonspherical.md §3.2): kept, with its provenance restated and a bound test
+      (R08.T5.b's follow-up);
     - NH₃ ice's visible k comes from earlier published spectra (Martonchik et al.'s abstract),
       unread here, and moves 1 − ω by about 10⁻² for 10 µm grains;
     - CO₂ ice's n is for ice near 80 K and its k (Hansen 2005) for ice grown at 150 K;
@@ -3918,7 +3945,8 @@ generator, and the reference's sampling needs no domain tag.
     1 µm forsterite sphere's ω above 0.99 at 550 nm, gives 0.9928 on Jäger's file.
   - _NH₄SH_ keeps the ruled 1.80. The science check finds it high-side (a Lorentz–Lorenz estimate
     from memory puts NH₄SH's visible n near 1.5–1.65) and NH₃ ice's 1.43 no better; reported to
-    "main".
+    "main". Ruled 2026-10-10 (science-r08-nonspherical.md §3.1): a Lorentz–Lorenz estimate of
+    1.648 at 550 nm replaces 1.80 (R08.T5.b's follow-up).
   - _Not built:_ the non-spherical materials' literature phase functions ("sit beside their
     indices"). Wolff et al. 2009's dust phase function and ω are in a closed AGU paper with no open
     copy, and no roughened-ice or silicate phase function was chosen. Provisionally ("main",
@@ -3950,6 +3978,46 @@ generator, and the reference's sampling needs no domain tag.
   - _Waiting:_ R08.T19 checks every file's key against `substances.json` once P14.T49.a's fixture
     exists; the keys are tested as ASCII of at most 16 bytes. The labels' C4 TSDoc is in, with the
     general stand-in clause beside the NH₄SH one.
+- **Deviations in T5.b's follow-up, as built** (2026-10-10; `apps/hyperion/src/tools/materials.ts`
+  and its test, `materials/ammonium-hydrosulphide.json`, `materials/mars-dust.json`,
+  `materials/materials.test.ts`).
+  - _The density_ is computed from West 1934's cell, a²c = 144.85 Å³ with two formula units: a
+    molar volume of 43.62 cm³ mol⁻¹, and 1.1717 g cm⁻³ at CIAAW's conventional M of 51.107 g mol⁻¹
+    (n depends on the molar volume alone). The ruling's 1.1715 is COD 1010249's rounded cell
+    volume, 144.9 Å³, with M 51.111. The file gives 1.64785 at 550 nm where the ruling's table gives
+    1.6477; both round to the ruled 1.648. The entry was fetched on 2026-10-10 (COD revision 301772,
+    SHA-256 `e721ed9f…ae3a746bb71`). The cell is as published: at room temperature, and possibly in
+    kX units, as cells before 1947 often are (1 kX = 1.002 02 Å, which would lower n by about
+    0.005); the file says so.
+  - _The molar refraction_ takes each gas's exact (n² − 1) ÷ (n² + 2) × Z V₀, where the ruling
+    writes its dilute limit, (2 ÷ 3)(n − 1) Z V₀. They differ by under 10⁻⁴ in the solid's n.
+  - _A second copy of the dispersions._ The tool is Node code and does not import the renderer (as
+    `solarFactors.ts` keeps its own channel wavelengths), so it holds the two Cuthbertson rows
+    itself. `materials.test.ts` checks the file's dispersion against `rayleigh.ts`'s rows to
+    2 × 10⁻⁵, and those rows' reference state, 0 °C and 760 mm.
+  - _General._ `lorentzLorenzIndex(gases, λ, V_m, δ)` and `cellMolarVolumeCm3PerMol` serve any
+    additive estimate from gas dispersions and a crystal cell. `NH4SH_STAND_IN_N` is gone, and
+    `nh4shIndex(λ, δ?)` takes its place.
+  - _The tool's tests_ add the ruling's three figures to 5 × 10⁻⁴, the band (within +0.065 and
+    −0.04 for δ from 0 to +12% at every grid point; +0.065 at 380 nm, where the ruling rounds to
+    +0.06), the 23% increment that 1.80 would need, and the method's check on NH₃ ice (1.458
+    against Martonchik et al.'s 1.436 at 550 nm).
+  - _The other 13 files_ regenerate byte for byte from the T5.b lane's inputs.
+  - _Citations added by the review's science check:_ the three inputs' DOIs and pages; k = 0 from
+    PubChem CID 25515 (ICSC's "white to yellow hygroscopic solid"), with Jupiter's colours from
+    radiolysis products (Loeffler and Hudson 2018, Icarus 302, 418); Olovsson and Templeton 1959
+    (Acta Cryst. 12, 832; COD 2310927, whose terms ask for attribution, unlike 1010249's CC0) for
+    the NH₃-ice check's cell. The file's figures (Z, δ, V_m, ρ and the three indices) are built
+    from the tool's constants.
+  - _Open, with "main": NH₃'s compressibility._ The review's science check read Cuthbertson and
+    Cuthbertson 1914 (an OCR copy, pp. 20–21): they reduce every refractivity to the "theoretic
+    density", H₂'s at 0 °C and 76 cm times the molecular-weight ratio (for ammonia, 0.7605 g L⁻¹
+    against the measured 0.7708). Their formula is then for an ideal gas, Z about 1, not the real
+    gas's 0.984 798 that `rayleigh.ts` (R08.T3.b) and the ruling take, and NH₃'s Rayleigh
+    cross-section runs about 3% low (`rayleigh.ts` called this unread, ±3%). Not changed here:
+    the ruling's δ was derived from NH₄Cl with the same NH₃ row, so the two errors largely cancel.
+    With Z = 1 and δ re-derived (+3.5% to +4.0%), n at 550 nm is 1.6446–1.6485, against the ruled
+    1.648. The NH₃-ice check would read 1.466, 0.030 above the measured 1.436. A fix touches `rayleigh.ts`'s row, the tool's copy, δ and these tests together.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the
