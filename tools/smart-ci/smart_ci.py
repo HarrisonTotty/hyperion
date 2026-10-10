@@ -39,7 +39,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import IO, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 sys.dont_write_bytecode = True
 
@@ -158,6 +158,38 @@ CI_STEPS: Dict[str, Tuple[str, List[Tuple[str, Optional[List[str]]]]]] = {
                              ("_vitest-run", ["", ""])]),
     "_wasm-fast-run": ("scoped", [("_wasip1-nextest", None), ("_browser", None)]),
 }
+# `just ci`'s phases, the `just` arguments of each as its recipe runs them: its dependencies, the side
+# steps (backgrounded, their output held), the cargo steps, and the suites under `_locked`. A full
+# plan runs these through smart-ci's own phases, so that the build slot is released before the lock
+# as in any plan; `test_smart_ci.py` holds them to the recipe.
+CI_PHASES: Dict[str, List[List[str]]] = {
+    "setup": [["gen-surface"], ["_wasm-preflight", "wasip1", "browser"]],
+    "side": [["fmt-check"], ["_typecheck-ts"], ["_oxlint"], ["_relaxed-simd-refused"], ["gpu-replay-check"],
+             ["cross-clippy"], ["_smart-ci-test"]],
+    "main": [["_clippy"], ["_browser-clippy"], ["gen-protocol-check"], ["fit-check"], ["_test-build"],
+             ["_wasm-fast-build"]],
+    "locked": [["_test-run"], ["_wasm-fast-run"]],
+}
+
+# The environment variable naming the command that holds a build slot around smart-ci's phases that
+# build (`slot_command`); unset, they run directly.
+SLOT_VAR = "SMART_CI_SLOT"
+# The recipes of `ci`'s setup, side and main phases that run a cargo build, which a group of phases
+# holds a build slot for; and the others: tools' checks, formatting, TypeScript, smart-ci's tests, and
+# the suites, which run under the heavy-test lock from the builds made before it. `test_smart_ci.py`
+# fails if a recipe of `ci` is in neither, or one said not to build runs cargo.
+BUILDS = {
+    "gen-surface", "_relaxed-simd-refused", "gpu-replay-check", "_gpu-replay-cargo", "cross-clippy",
+    "_cross-clippy-for", "_clippy", "_clippy-for", "_browser-clippy", "_browser-clippy-for", "gen-protocol-check",
+    "_gen-protocol-check-for", "fit-check", "_test-build", "_test-build-for", "_wasm-fast-build", "_wasip1-nextest",
+    "_browser",
+}
+NO_BUILDS = {
+    "_wasm-preflight", "fmt-check", "_rustfmt-check", "_prettier-check-all", "_prettier-check", "_typecheck-ts",
+    "_oxlint", "_smart-ci-test", "_locked", "_test-run", "_nextest-run", "_doctest-run", "_vitest-run",
+    "_wasm-fast-run",
+}
+
 # The recipes smart-ci runs in place of one of `ci`'s for a narrower scope, where the step cannot be
 # the narrower one with a wider argument without changing `ci`'s command: Prettier over the changed
 # files, `prettier --check` with Prettier's configuration as `format:check` runs it over the tree.
@@ -976,7 +1008,8 @@ def quoted(recipe: Sequence[str]) -> str:
     return "just " + " ".join(shlex.quote(word) for word in recipe)
 
 
-def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, dependents: bool) -> str:
+def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, dependents: bool,
+             env: Mapping[str, str] = os.environ) -> str:
     lines = [f"smart-ci: {len(changes)} changed path(s), {what}:"]
     for path, deleted in changes[:40]:
         notes = "; ".join(plan.why.get(path, []))
@@ -985,9 +1018,12 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
         lines.append(f"  and {len(changes) - 40} more")
     lines.append("")
     if plan.is_full:
-        lines.append("Plan: the full `just ci`, because of")
+        lines.append("Plan: the full `just ci`, its own phases, because of")
         for why, paths in sorted(plan.full.items()):
             lines.append(f"  - {why}: {', '.join(short(paths))}")
+        for phase in PHASES:
+            recipes = [quoted(recipe)[len("just "):] for recipe in CI_PHASES[phase]]
+            lines.append(f"      [{phase}] just {' '.join(recipes)}")
     elif not plan.steps:
         lines.append("Plan: no step of `just ci` reads these paths.")
     else:
@@ -1000,33 +1036,93 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
         lines.append(f"Then `just test-render`, under the heavy-test lock, because of {', '.join(short(plan.render))}")
     for note in plan.notes:
         lines.append(f"Note: {note}")
+    if plan.is_full or plan.steps:
+        slot = slot_command(env)
+        groups = [", ".join(group) for group, recipes in slot_groups(phases_of(plan)) if needs_slot(recipes)]
+        if slot is not None and groups:
+            lines.append(f"A build slot ({' '.join(slot)}) is held for the {' and then the '.join(groups)} "
+                         "phases, which build, and released before the locked phase.")
+        elif env.get("BUILD_SLOT_HELD"):
+            lines.append("A build slot is held already (BUILD_SLOT_HELD), and stays held to the end, the locked "
+                         f"phase included: run `just smart-ci` with {SLOT_VAR} set instead of inside build-slot.")
     return "\n".join(lines)
 
 
-def execute(plan: Plan, root: Path, just: str) -> int:
-    """Run the plan as `just ci` runs its steps: setup; the side steps, their output held, beside the
-    cargo steps; every suite in one hold of the heavy-test lock; then `just test-render`."""
+PHASES = ("setup", "side", "main", "locked")
+# The phases that build, in the groups that hold a build slot: setup on its own, then the side and
+# main phases together, since they run at once.
+SLOT_GROUPS = (("setup",), ("side", "main"))
+Phases = Dict[str, List[List[str]]]
 
-    def run(args: List[str]) -> int:
-        print(f"smart-ci: {quoted(args)}", file=sys.stderr, flush=True)
-        return subprocess.run([just, *args], cwd=str(root)).returncode
 
+def phases_of(plan: Plan) -> Phases:
+    """The recipes of each phase, each with its arguments: the plan's steps, or `ci`'s own phases for a
+    full plan."""
     if plan.is_full:
-        status = run(["ci"])
-        return run(["test-render"]) if status == 0 and plan.render else status
-    phases: Dict[str, List[str]] = {"setup": [], "side": [], "main": [], "locked": []}
+        return {phase: [list(recipe) for recipe in CI_PHASES[phase]] for phase in PHASES}
+    phases: Phases = {phase: [] for phase in PHASES}
     for step in plan.steps:
-        phases[step.phase] += step.recipe
-    if phases["setup"] and run(phases["setup"]) != 0:
+        phases[step.phase].append(list(step.recipe))
+    return phases
+
+
+def flat(recipes: Iterable[Sequence[str]]) -> List[str]:
+    """One `just` command line of several recipes."""
+    return [word for recipe in recipes for word in recipe]
+
+
+def slot_groups(phases: Phases) -> List[Tuple[Tuple[str, ...], List[List[str]]]]:
+    return [(group, [recipe for phase in group for recipe in phases[phase]]) for group in SLOT_GROUPS]
+
+
+def needs_slot(recipes: Iterable[Sequence[str]]) -> bool:
+    """Whether the recipes run a cargo build, which holds a build slot (`BUILDS`)."""
+    return any(recipe[0] in BUILDS for recipe in recipes)
+
+
+def slot_command(env: Mapping[str, str]) -> Optional[List[str]]:
+    """The command that holds a build slot around the phases that build, if one is set and none is held.
+
+    `SMART_CI_SLOT` names a command that runs its arguments while it holds one of the machine's
+    build slots, such as the orchestration's `build-slot` (a shell script, so on Windows give it with
+    its interpreter, `bash <path>`). Unset, the phases run directly, as on any machine without
+    one. `BUILD_SLOT_HELD`, which such a command sets, means an outer one holds a slot already.
+    """
+    value = env.get(SLOT_VAR, "").strip()
+    if not value or env.get("BUILD_SLOT_HELD"):
+        return None
+    return shlex.split(value, posix=os.name != "nt")
+
+
+class Runner:
+    """Runs `just` with the plan's arguments; the tests give a fake one."""
+
+    def __init__(self, root: Path, just: str) -> None:
+        self.root, self.just = root, just
+
+    def run(self, args: Sequence[str]) -> int:
+        print(f"smart-ci: {quoted(args)}", file=sys.stderr, flush=True)
+        return subprocess.run([self.just, *args], cwd=str(self.root)).returncode
+
+    def run_command(self, command: Sequence[str]) -> int:
+        return subprocess.run(list(command), cwd=str(self.root)).returncode
+
+    def spawn_held(self, args: Sequence[str], log: IO[str]) -> "subprocess.Popen[str]":
+        print(f"smart-ci: {quoted(args)}, its output held", file=sys.stderr, flush=True)
+        return subprocess.Popen([self.just, *args], cwd=str(self.root), stdout=log, stderr=subprocess.STDOUT, text=True)
+
+
+def run_build_phases(phases: Mapping[str, Sequence[Sequence[str]]], runner: Runner) -> int:
+    """Setup, then the side steps, their output held, beside the cargo steps, as `just ci` runs them;
+    whichever of them `phases` holds."""
+    setup, side_steps, main = (flat(phases.get(phase, [])) for phase in ("setup", "side", "main"))
+    if setup and runner.run(setup) != 0:
         return 1
     status = side_status = 0
     with tempfile.TemporaryFile(mode="w+") as side_log:
-        side = None
-        if phases["side"]:
-            print(f"smart-ci: {quoted(phases['side'])}, its output held", file=sys.stderr, flush=True)
-            side = subprocess.Popen([just, *phases["side"]], cwd=str(root), stdout=side_log, stderr=subprocess.STDOUT)
-        if phases["main"]:
-            status = run(phases["main"])
+        side = runner.spawn_held(side_steps, side_log) if side_steps else None
+        if main:
+            status = runner.run(main)
         if side is not None:
             side_status = side.wait()
             side_log.seek(0)
@@ -1037,9 +1133,47 @@ def execute(plan: Plan, root: Path, just: str) -> int:
               f"TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit "
               f"{side_status})", file=sys.stderr)
         return 1
-    if phases["locked"] and run(["_locked", just, *phases["locked"]]) != 0:
+    return 0
+
+
+def execute(plan: Plan, root: Path, just: str, env: Mapping[str, str] = os.environ,
+            runner: Optional[Runner] = None) -> int:
+    """Run the plan as `just ci` runs its steps: setup; the side steps, their output held, beside the
+    cargo steps; every suite in one hold of the heavy-test lock; then `just test-render`.
+
+    When `SMART_CI_SLOT` names the command that takes a build slot (`slot_command`), each group of
+    phases that builds (`SLOT_GROUPS`, `BUILDS`) runs in a child of that command, which releases the
+    slot when the group ends: no slot is held while the suites wait for the heavy-test lock or hold
+    it, nor for a group that builds nothing. A full plan runs `ci`'s own phases (`CI_PHASES`) the
+    same way, rather than `just ci`, whose recipe would keep a slot to its end.
+    """
+    runner = runner or Runner(root, just)
+    phases = phases_of(plan)
+    slot = slot_command(env)
+    for group, recipes in slot_groups(phases):
+        if not recipes:
+            continue
+        held = {phase: phases[phase] for phase in group}
+        if slot is None or not needs_slot(recipes):
+            status = run_build_phases(held, runner)
+        else:
+            directory = root / "target" / "smart-ci"
+            directory.mkdir(parents=True, exist_ok=True)
+            handoff = directory / f"build-phases-{os.getpid()}.json"
+            handoff.write_text(json.dumps(held), encoding="utf-8")
+            print(f"smart-ci: the {', '.join(group)} phases, inside a build slot ({' '.join(slot)})",
+                  file=sys.stderr, flush=True)
+            try:
+                status = runner.run_command([*slot, sys.executable, "-B", str(Path(__file__).resolve()),
+                                             "--build-phases", str(handoff)])
+            finally:
+                handoff.unlink(missing_ok=True)
+        if status != 0:
+            return 1
+    locked = flat(phases["locked"])
+    if locked and runner.run(["_locked", just, *locked]) != 0:
         return 1
-    if plan.render and run(["test-render"]) != 0:
+    if plan.render and runner.run(["test-render"]) != 0:
         return 1
     return 0
 
@@ -1074,9 +1208,13 @@ crate that depends on them. `--dependents` adds the Clippy and the tests of ever
 depends on a changed one: use it when the change alters what other crates use (a public item's name,
 signature or behaviour, a golden other crates compare with). A changed Cargo.toml always adds them.
 
-Run it as `just ci` is run, capped and through build-slot; its test phase takes the heavy-test lock
-as `ci`'s does.
-""".format(branch=INTEGRATION_BRANCH)
+Run it as `just ci` is run, capped; its test phase takes the heavy-test lock as `ci`'s does. With
+{slot} naming the command that holds one of the machine's build slots (`build-slot`; on Windows with
+its interpreter, `bash <path>`), smart-ci holds a slot only for its setup, side and main phases,
+and releases it before the heavy-test lock, so do not wrap it in that command yourself. Unset, as
+on any machine without build slots, those phases run directly. A full plan runs `ci`'s own phases
+in the same way.
+""".format(branch=INTEGRATION_BRANCH, slot=SLOT_VAR)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -1088,10 +1226,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--plan", action="store_true", help="print the plan and run nothing")
     parser.add_argument("--dependents", action="store_true",
                         help="add the Clippy and tests of every crate that depends on a changed one")
+    # Internal: run the build phases that a parent smart-ci wrote to this file, inside the build slot
+    # it holds for them (`execute`).
+    parser.add_argument("--build-phases", metavar="FILE", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parents[2]
     just = os.environ.get("SMART_CI_JUST", "just")
+    if args.build_phases:
+        phases = json.loads(Path(args.build_phases).read_text(encoding="utf-8"))
+        return run_build_phases(phases, Runner(root, just))
     try:
         changes, what, is_range = changed_paths(root, args.base)
         if is_range and not args.plan:

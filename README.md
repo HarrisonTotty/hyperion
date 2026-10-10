@@ -264,6 +264,12 @@ locks and phases, scoped to the crates, packages and files concerned. `just smar
 the plan, each step with the paths that caused it, and runs nothing; a run prints it first.
 Integration keeps the full `just ci`.
 
+Where builds share a machine's build slots (a command that runs its arguments while it holds one),
+set `SMART_CI_SLOT` to that command instead of wrapping smart-ci in it. smart-ci then holds a slot
+only for its setup, side and main phases, which build, and releases it before the heavy-test lock:
+a wrapper would keep the slot through the wait for the lock and the suites. A full plan runs `ci`'s
+own phases the same way. Unset, as on any machine without build slots, the phases run directly.
+
 | A change to                                                                                                                  | runs                                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Markdown                                                                                                                     | Prettier on those files                                                                                                                                                      |

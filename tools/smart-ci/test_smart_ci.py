@@ -14,6 +14,8 @@ Standard library only: `python3 tools/smart-ci/test_smart_ci.py`.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -490,6 +492,126 @@ class TheRules(unittest.TestCase):
         self.assertEqual(ws.reverse_dependents([TESTKIT]), {BASE, SURFACE, SIM, SERVER, FIT})
 
 
+class FakeRunner(smart_ci.Runner):
+    """Records what `execute` runs, and reads the build phases a slot's child would run."""
+
+    def __init__(self, fail: Sequence[str] = ()) -> None:
+        super().__init__(ROOT, "just")
+        self.calls: List[Tuple[str, List[str]]] = []
+        self.handoffs: List[dict] = []
+        self.fail = set(fail)
+
+    def run(self, args: Sequence[str]) -> int:
+        self.calls.append(("run", list(args)))
+        return 1 if args[0] in self.fail else 0
+
+    def run_command(self, command: Sequence[str]) -> int:
+        self.calls.append(("command", list(command)))
+        self.handoffs.append(json.loads(Path(command[command.index("--build-phases") + 1]).read_text(encoding="utf-8")))
+        return 1 if "slot" in self.fail else 0
+
+    def spawn_held(self, args: Sequence[str], log) -> "FakeProcess":
+        self.calls.append(("spawn", list(args)))
+        return FakeProcess()
+
+
+class FakeProcess:
+    def wait(self) -> int:
+        return 0
+
+
+class Execution(unittest.TestCase):
+    """The phases run in `ci`'s order, and a build slot is held only around the build phases."""
+
+    SLOT = {"SMART_CI_SLOT": "/opt/build-slot"}
+
+    def setUp(self) -> None:
+        # What `execute` tells the person running it: not this suite's output.
+        quiet = contextlib.redirect_stderr(io.StringIO())
+        quiet.__enter__()
+        self.addCleanup(quiet.__exit__, None, None, None)
+
+    def test_without_a_slot_the_phases_run_directly_in_cis_order(self) -> None:
+        p = plan("crates/hyperion-server/src/main.rs")
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(p, ROOT, "just", env={}, runner=runner), 0)
+        self.assertEqual([kind for kind, _ in runner.calls], ["spawn", "run", "run"])
+        self.assertEqual(runner.calls[0][1][0], "_rustfmt-check")
+        self.assertEqual(runner.calls[1][1][0], "_clippy-for")
+        self.assertEqual(runner.calls[2][1][:3], ["_locked", "just", "_nextest-run"])
+
+    def test_a_slot_is_held_around_each_group_that_builds_and_released_before_the_lock(self) -> None:
+        p = plan("crates/hyperion-surface/src/field.rs")
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(p, ROOT, "just", env=self.SLOT, runner=runner), 0)
+        (setup_kind, setup), (build_kind, build), (locked_kind, locked) = runner.calls
+        self.assertEqual((setup_kind, build_kind), ("command", "command"))
+        self.assertEqual(build[0], "/opt/build-slot")
+        self.assertEqual(build[2:4], ["-B", str(HERE / "smart_ci.py")])
+        phases = smart_ci.phases_of(p)
+        self.assertEqual(runner.handoffs, [{"setup": phases["setup"]}, {"side": phases["side"], "main": phases["main"]}])
+        self.assertEqual(phases["setup"][0], ["gen-surface"])
+        # The suites run after the slot's command has ended: in the parent, under the lock alone.
+        self.assertEqual((locked_kind, locked[:2]), ("run", ["_locked", "just"]))
+        self.assertFalse(list((ROOT / "target" / "smart-ci").glob(f"build-phases-{os.getpid()}.json")))
+        text = smart_ci.describe(p, [], "x", False, env=self.SLOT)
+        self.assertIn("held for the setup and then the side, main phases", text)
+
+    def test_the_slots_child_runs_the_phases_it_is_given(self) -> None:
+        runner = FakeRunner()
+        phases = smart_ci.phases_of(plan("crates/hyperion-surface/src/field.rs"))
+        self.assertEqual(smart_ci.run_build_phases(phases, runner), 0)
+        self.assertEqual(runner.calls, [("run", smart_ci.flat(phases["setup"])), ("spawn", smart_ci.flat(phases["side"])),
+                                        ("run", smart_ci.flat(phases["main"]))])
+        main_only = FakeRunner()
+        self.assertEqual(smart_ci.run_build_phases({"main": phases["main"]}, main_only), 0)
+        self.assertEqual(main_only.calls, [("run", smart_ci.flat(phases["main"]))])
+
+    def test_a_held_slot_or_a_group_that_builds_nothing_takes_no_slot(self) -> None:
+        held = FakeRunner()
+        smart_ci.execute(plan("crates/hyperion-server/src/main.rs"), ROOT, "just",
+                         env={**self.SLOT, "BUILD_SLOT_HELD": "1"}, runner=held)
+        self.assertNotIn("command", [kind for kind, _ in held.calls])
+        self.assertIn("BUILD_SLOT_HELD", smart_ci.describe(plan("crates/hyperion-server/src/main.rs"), [], "x", False,
+                                                           env={"BUILD_SLOT_HELD": "1"}))
+        for path in ("README.md", "tools/smart-ci/smart_ci.py"):
+            with self.subTest(path=path):
+                docs = FakeRunner()
+                smart_ci.execute(plan(path), ROOT, "just", env=self.SLOT, runner=docs)
+                self.assertEqual([kind for kind, _ in docs.calls], ["spawn"])
+                self.assertNotIn("build slot", smart_ci.describe(plan(path), [], "x", False, env=self.SLOT))
+        nothing = FakeRunner()
+        smart_ci.execute(plan(".claude/skills/validate/SKILL.md"), ROOT, "just", env=self.SLOT, runner=nothing)
+        self.assertEqual(nothing.calls, [])
+        # TypeScript alone: the surface module's build in a slot, then tsc, oxlint and Prettier without one.
+        ts = FakeRunner()
+        smart_ci.execute(plan("apps/hyperion/src/renderer/src/lib/format.ts"), ROOT, "just", env=self.SLOT, runner=ts)
+        self.assertEqual([kind for kind, _ in ts.calls], ["command", "spawn", "run"])
+        self.assertEqual(ts.handoffs, [{"setup": [["gen-surface"]]}])
+
+    def test_a_full_plan_runs_cis_own_phases_with_the_slot_released_before_the_lock(self) -> None:
+        p = plan("justfile")
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(p, ROOT, "just", env=self.SLOT, runner=runner), 0)
+        self.assertEqual(runner.handoffs, [{"setup": smart_ci.CI_PHASES["setup"]},
+                                           {"side": smart_ci.CI_PHASES["side"], "main": smart_ci.CI_PHASES["main"]}])
+        self.assertEqual(runner.calls[-1], ("run", ["_locked", "just", "_test-run", "_wasm-fast-run"]))
+        self.assertIn("[locked] just _test-run _wasm-fast-run", smart_ci.describe(p, [("justfile", False)], "x", False))
+
+    def test_a_failed_build_runs_no_suite(self) -> None:
+        for env, fail in (({}, "_clippy-for"), (self.SLOT, "slot")):
+            with self.subTest(env=env):
+                runner = FakeRunner(fail=[fail])
+                self.assertEqual(smart_ci.execute(plan("crates/hyperion-server/src/main.rs"), ROOT, "just", env=env,
+                                                  runner=runner), 1)
+                self.assertFalse(any(args[:1] == ["_locked"] for _, args in runner.calls))
+
+    def test_the_slot_command_is_split_as_a_command_line(self) -> None:
+        self.assertIsNone(smart_ci.slot_command({}))
+        self.assertIsNone(smart_ci.slot_command({"SMART_CI_SLOT": " "}))
+        self.assertEqual(smart_ci.slot_command({"SMART_CI_SLOT": "bash /opt/build-slot"}), ["bash", "/opt/build-slot"])
+
+
 class Parsing(unittest.TestCase):
     def test_name_status(self) -> None:
         text = "M\0a.rs\0D\0b.md\0A\0c d.md\0"
@@ -621,6 +743,42 @@ class AgreesWithCi(unittest.TestCase):
                     lines = [line_text(f).strip() for f in self.recipes[step]["body"]]
                     own = [line for line in lines if line and not re.match(r"^just\s", line)]
                     self.assertEqual(own, [], f"`{step}` runs commands of its own besides its scoped recipes")
+
+    def test_the_full_plans_phases_are_cis(self) -> None:
+        # `ci`'s dependencies are its setup; its body backgrounds the side steps, runs the cargo steps,
+        # then the suites under `_locked`.
+        ci = self.recipes["ci"]
+        setup = [[d["recipe"], *(arg_text(a) for a in d["arguments"])] for d in ci["dependencies"]]
+        phases: Dict[str, List[List[str]]] = {"setup": setup, "side": [], "main": [], "locked": []}
+        for fragments in ci["body"]:
+            line = line_text(fragments).strip()
+            if not re.match(r"^just\s", line):
+                continue
+            called = [[name, *taken] for name, taken in just_calls(line, self.recipes)]
+            if called[0][0] == "_locked":
+                phases["locked"] += [call for call in called[1:] if call[0] != "_locked"]
+            elif re.search(r"&\s*$", line):
+                phases["side"] += called
+            else:
+                phases["main"] += called
+        self.assertEqual(phases, smart_ci.CI_PHASES, "`ci`'s phases differ from CI_PHASES in "
+                                                    "tools/smart-ci/smart_ci.py: update it with them")
+
+    def test_every_recipe_says_whether_it_builds(self) -> None:
+        recipes = set(smart_ci.CI_STEPS) | set(smart_ci.NARROWER.values())
+        recipes |= {name for _, calls_ in smart_ci.CI_STEPS.values() for name, _ in calls_}
+        self.assertEqual(recipes - smart_ci.BUILDS - smart_ci.NO_BUILDS, set(),
+                         "say in BUILDS or NO_BUILDS (tools/smart-ci/smart_ci.py) whether each runs a cargo build, "
+                         "which holds a build slot")
+        self.assertEqual(smart_ci.BUILDS & smart_ci.NO_BUILDS, set())
+        # A recipe said not to build runs no cargo but formatting and tool checks, unless it runs only
+        # under the heavy-test lock, from builds made before it.
+        locked = {name for recipe in smart_ci.CI_PHASES["locked"] for name in recipe} | {"_locked"}
+        locked |= {name for step in locked if step in smart_ci.CI_STEPS for name, _ in smart_ci.CI_STEPS[step][1]}
+        for name in sorted(smart_ci.NO_BUILDS - locked):
+            with self.subTest(recipe=name):
+                body = "\n".join(line_text(f) for f in self.recipes[name]["body"])
+                self.assertFalse(re.search(r"\bcargo\s+(?!fmt\b|nextest --version)", body), body)
 
     def test_the_narrower_prettier_runs_the_check_format_check_runs(self) -> None:
         script = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]["format:check"]
