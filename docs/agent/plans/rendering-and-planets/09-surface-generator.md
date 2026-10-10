@@ -235,6 +235,9 @@ pub mod craters {
     pub fn cumulative_density(p: &CraterParams, d: Metres) -> PerSquareKilometre;
     pub fn saturation(d: Metres) -> PerSquareKilometre;   // Trask 1966, 0.079 D⁻² km⁻²
     pub fn transition_diameter(p: &CraterParams) -> Metres;  // 19 km × (1.62 ÷ g) × k_target
+    pub struct CraterShape { /* morphology, depth, rim_height, floor_radius, peak_relief,
+        peak_radius, exterior_width (a) */ }
+    pub fn crater_shape(p: &CraterParams, d: Metres) -> CraterShape;  // Design notes 12, 13
     pub fn diameter_in_octave(p: &CraterParams, octave: Octave, u: UnitUniform) -> Metres;
     pub fn profile(r_over_radius: f64, crater: &CraterShape, band: BandLevel) -> (f64, f64);
 }
@@ -872,7 +875,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     substellar ocean and nightside glacier. One `SurfaceClass` byte holds either.
 12. **One crater density, in the surface crate** (researched 2026-09-29: Neukum, Ivanov and Hartmann
     2001, Table 1, checked in Michael's Craterstats `functions.txt`; Trask 1966 and Hartmann 1984;
-    Pike 1980, Tables 2 and 3; Krüger, Hergarten and Kenkmann 2018; Bland and Artemieva 2006; Ivanov
+    Pike 1980a (Proc. LPSC 11th, 2159–2189), Tables 1–2, and Pike 1980b (USGS Prof. Paper 1046-C),
+    Table 6; Kalynn et al. 2013 (GRL 40, 38–42; LPSC 2013 abstract 1309); Stopar et al. 2017
+    (Icarus 298, 34–48), Table 4; Susorney et al. 2016 (Icarus 271, 180–193), Tables 2.1–2.2 of
+    Susorney's 2017 dissertation; Robbins and Hynek 2012 (JGR 117, E06001); Tornabene et al. 2018
+    (Icarus 299, 68–83); Krüger, Hergarten and Kenkmann 2018; Bland and Artemieva 2006; Ivanov
     2001, Space Science Reviews 96, for the Mars production function T7.a checks against). The
     brainstorm has both passes invert "one shared function in the sim"; the fine pass runs in
     `hyperion-surface`, which cannot depend on the sim, so the function lives in
@@ -906,10 +913,34 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     confidence for thinner atmospheres, whose cutoffs keep their projectile scales. The transition
     is D_t = 19 km × (1.62 ÷ g) × k_target (Pike's four bodies give g^−1.01), a zone: bowls below
     0.8 D_t, transitional to 1.5 D_t, central peaks above, peak rings from about 9 D_t, multi-ring
-    basins above about 16 D_t. Depth is 0.2 D for simple craters and
-    0.84 (D_t ÷ 19 km) D^0.33 km for complex ones, which reproduces the Moon and Earth. 1–2 m
+    basins above about 16 D_t. Fresh shapes (`decision-r09-t2.md` item 3; d is rim crest to floor,
+    h is rim crest above the surrounding surface):
+    - _Bowls_ do not depend on gravity: d = 0.20 D and h = 0.20 D ÷ 5.42 = 0.0369 D.
+      - Pike 1980b's 0.196 D^1.010 and 0.036 D^1.014; Stopar et al.'s 0.209 and "∼0.04"; Mercury's
+        0.199 D^0.995 (Pike 1988).
+      - On an airless body (`Screening::None`), the bowl's d/D falls through Stopar et al.'s A-class
+        bins, which are 0.125, 0.152 and 0.166 at 63, 141 and 283 m and 0.20 from 400 m. The fall
+        is linear in log D between the bins, held below 63 m, and at D × g ÷ 1.62 off the Moon. The
+        plan's own gravity scaling is of low confidence.
+    - _Complex craters_ are self-similar in D ÷ D_t:
+      - d = 0.150 D_t (D ÷ D_t)^0.303, the mean of Kalynn et al.'s LOLA mare and highland fits;
+      - h = 0.0402 D_t (D ÷ D_t)^0.399, Pike 1980b's eq. (4);
+      - floor diameter 0.389 (D ÷ D_t)^0.249 of D, held at 0.778 above 16 D_t;
+      - a central peak to 9 D_t, of relief 0.0238 D_t (D ÷ D_t)^0.900 (Pike 1980b, Table 6) and
+        base diameter 0.3 D (Garvin et al. 2003, Mars).
+      - So at a fixed D, d ∝ g^−0.70 and h ∝ g^−0.60.
+    - _Transitional craters_ blend the two in log D across 0.8–1.5 D_t.
+
+    Out of sample, the laws hold:
+    - Mercury's depths within 10% of MLA (Susorney et al. 2016) and its rims within 14%;
+    - Mars's depths within ±27% of MOLA's fresh craters (Robbins and Hynek 2012), but 30% shallow
+      at 80 km against the deepest (Tornabene et al. 2018; Risks);
+    - Ganymede's within 22% (Schenk 1991).
+
+    The zone's 0.8 and 1.5 D_t match Krüger et al. 2018's lunar 14–17 and 24–28 km. 1–2 m
     craters are typically 0.05–0.1 m deep, and 0.2 m only when fresh, a few per cent of them under
     the saturation rule, so they stay decoration (the input to open question 18, R11's).
+
 13. **The per-query evaluation** (researched 2026-09-29: S2; Perlin's reference code; Gaillard et
     al. 2019; Hack 1957). _Base elevation:_ a uniform cubic B-spline per face over its cells,
     extended by ghost cells three deep whose values are bilinear in the owning face's cells at the
@@ -957,13 +988,23 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     coarse cell) at the cell's canonical point weighted by its true area and capped at saturation,
     diameters by inversion. The profile is volume-balanced in closed form: interior −d₀ + (H + d₀)
     r², exterior H (1 − s)³(1 + 3s) with s = (r − 1) ÷ a, which balance when d ÷ H = 2 + 1.6a +
-    0.4a²; Pike's lunar ratio 5.42 gives a = 1.54, ejecta to 2.54 rim radii, used for every body;
-    complex craters add a flat floor and a central peak inside the same balance. The rim is
+    0.4a². The fresh bowl's d ÷ H = 5.42 (Design note 12) gives a = 1.54, ejecta to 2.54 rim radii.
+    - Every other shape solves its own a from the same balance in closed form. Its interior is a
+      flat floor to r_f, a wall −d₀ + (H + d₀) u² with u = (r − r_f) ÷ (1 − r_f), and a central
+      cone; then a = (−0.8 + √(0.64 + 0.8 N)) ÷ 0.4, where N = −(V_int + V_peak) ÷ (π R² H).
+    - That gives 1.28–1.46 for transitional and complex craters to 25 D_t (1.05 at 100 D_t), and
+      0.73–1.54 for an airless regolith's bowls.
+    - None exceeds the bowl's 1.54, so 2.54 rim radii is the reach of every crater.
+    - The bowl's and the complex craters' a lie within 15% of the observed continuous-ejecta edge,
+      1.35 rim radii beyond the rim (Moore et al. 1974 in Pike 1980b, Table 6).
+
+    The rim is
     band-limited by a cubic Hermite fillet over the level's spacing or the crater's diffusive age,
     √(2κt), whose volume change a compensating (1 − (r/r₁)²)² term cancels, so every crater
     integrates to zero at every level. Every contribution is attributable to a level; the set per
     level is fixed per body from the level's largest cell. The renderer's morph blends level n with
     the parent band carried in the patch, so the height function itself is discrete per level.
+
 14. **The cost** (researched 2026-09-29; kernels measured under shared load, scaled by a guessed
     2–2.3× to a quiet machine; provisional throughout). The whole height function with its gradient
     is estimated at 3.5–6 µs a point native and 4–8 µs in wasm, inside the brainstorm's 10 µs, and a
@@ -1303,23 +1344,45 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
 
 ### R09.T7 Craters
 
-- **R09.T7.a The density.** After T0.b's Venus item. `craters.rs`: `CraterParams` (T2's type, in
+- **R09.T7.a The density and the shapes.** After T0.b's Venus item. `craters.rs`:
+  `CraterParams` (T2's type, in
   `PerSquareKilometre`); `cumulative_density` from Neukum et al.'s
   a1…a11 with a0 = log₁₀ N(>1 km) (the misprint recorded in the doc comment), the end slopes outside
   10 m–300 km, the optional diameter map, and the screening taper on the differential production
   with exponent 4.5 (Design note 12; T0.b withdrew the break-up rule);
   `saturation`; `transition_diameter`; `diameter_in_octave` by bisection in log D with a fixed
-  iteration count. Tests: N(>1 km) is the parameter exactly; the function is monotone; the
+  iteration count. `CraterShape` and `crater_shape`: Design note 12's fresh depth, rim height,
+  floor and peak by zone, and Design note 13's exterior width a by the closed-form balance
+  (`decision-r09-t2.md` item 3). `testing::FieldBuilder`'s craters switch to it from T2's inline
+  0.2 D and 0.84 (D_t ÷ 19 km) D^0.33. Tests: N(>1 km) is the parameter exactly; the function is
+  monotone; the
   inversion lands in its octave and its quantiles agree with the density (Kolmogorov–Smirnov over
   10⁵ draws); the projectile scale d\* is 5.2 m, 0.52 km and 8.2 cm for Earth, Venus and Mars, and
   the crater cutoffs 20 d\*; Venus's screened counts over its area at N(>1 km) = 3.07 × 10⁻⁴ km⁻²
   lie within 10% of the Gazetteer's at 3, 5, 10, 20 and 40 km (878, 850, 642, 335 and 104 named
   craters at or above each, Design note 12); the map at Mars's ratios reproduces Ivanov 2001's
-  Mars function within ×1.5 in N over 1–100 km; D_t gives Pike's Moon and Earth within 10%.
+  Mars function within ×1.5 in N over 1–100 km; D_t gives Pike's Moon and Earth within 10%;
+  - _The bowl._ It is 0.20 D deep with a rim of 0.0369 D and a = 1.54 to 10⁻³, within 12% of
+    Pike 1980b, Stopar et al., Pike 1988 and Robbins and Hynek's deepest at 1–5 km. On an airless
+    Moon its d/D is Stopar et al.'s 0.125, 0.152 and 0.166 at 63, 141 and 283 m.
+  - _The Moon's complex craters._ Their depth lies between Kalynn et al.'s mare and highland fits
+    at 30, 50, 100 and 150 km, and their rim height is within 1% of Pike 1980b's 0.236 D^0.399.
+  - _Mercury_ (g 3.70). Depth is within 15% of Susorney et al.'s 1.02 D^0.20, and rim within 15%
+    of their 0.25 D^0.28, at 30, 50 and 100 km.
+  - _Mars_ (g 3.71). Depth is within 30% of both Robbins and Hynek's 0.250 D^0.527 and Tornabene
+    et al.'s 0.323 D^0.538 at 25, 50 and 80 km. Rim is within 15% of Robbins and Hynek's
+    0.025 D^0.820 at 50 and 80 km.
+  - _Gravity._ In the complex range d ∝ g^−0.70 and h ∝ g^−0.60 at a fixed D, to 10⁻⁹. A bowl's
+    d/D and h/D do not depend on g.
+  - _Continuity._ d, h and the floor radius are continuous and non-decreasing in D across 0.8 and
+    1.5 D_t.
+  - _The balance._ Every shape's interior, peak and exterior sum to zero to 10⁻⁹ of its cavity
+    volume. a ≤ 1.543 for every D ÷ D_t from 10⁻⁴ to 100, so the reach stays 2.54 rim radii.
 - **R09.T7.b Small craters.** `synth/craters.rs`: octave levels, the 3 × 3 search across face edges,
   counts from the header's density at the canonical point by true area capped at saturation with
   ages from τ(D) (Design note 12), morphology by
-  the transition zone, the volume-balanced profile with a = 1.54, its fillet and compensation;
+  the transition zone, the volume-balanced profile of each crater's `crater_shape` (its own a, at
+  most 1.54), its fillet and compensation;
   their `unresolved_variance` and `structure_function`. Tests: the realised size–frequency of a
   sampled region matches min(production, saturation) (Poisson interval per octave); a crater
   straddling a face edge is found from both faces; each crater integrates to zero at every level to
@@ -1428,10 +1491,13 @@ trench; a stagnant-lid world has none. Acceptance:
   with height 0.043 w₀; α at T_e = 70
   km under Mars's gravity is 180 km ± 10; T_e is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and
   zero where T_s ≥ 870 K, where each load is compensated locally (α = 0).
-- **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.a. Tests:
+- **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.a. Each
+  crater's shape is T7.a's `crater_shape`, so the coarse elevation and the client's T7.c rims are
+  one profile. Tests:
   counts over the reference Moon match min(production, saturation) above D_b (Poisson interval),
   about 300 above 100 km with N(1 km) at 4.4 Gyr; ages split before and after the wet epoch on the
-  reference Mars; the list is sorted and each crater's `reach` is complete.
+  reference Mars; the list is sorted and each crater's `reach` is complete; before degradation,
+  the reference Moon's coarse craters' rim heights are Pike 1980b's 0.236 D^0.399 to 1%.
 - **R09.T12.e σ_h and sea level.** Design note 7, on the reconstructed field, after T4 and T5.
   Tests: the reconstructed σ_h equals the input to 10⁻⁶ relative after the step;
   `local_variance ÷ σ_h²` is 5–9% on the reference Moon and 0.4–1% on the reference Earth; the
@@ -1701,8 +1767,11 @@ re-blessing this plan's payload and coarse goldens in that commit.
 
 - **Low-confidence constants.** The σ_h fit rests on one body per constant (0.9 km, 0.16, the √N
   age law, the 70 km lithosphere normalisation); stream-power erodibility across fluids and
-  gravities; the energy-balance transport cap; Venus's crater screening; the complex-crater floor
-  and peak dimensions. Each is a named constant with its source and confidence in its doc comment.
+  gravities; the energy-balance transport cap; Venus's crater screening; the complex-crater peak's
+  base width (0.3 D, Mars's) and the regolith bowl's gravity scaling (`decision-r09-t2.md` item
+  3); Mars's complex craters deepening faster than the one law (exponent 0.53–0.58 against 0.30),
+  which leaves its largest fresh complex craters about 30% shallow. Each is a named constant with
+  its source and confidence in its doc comment.
   T0.b's checks (2026-10-09) covered the first four; what they left open is under "Remaining
   checks, as researched" below.
 - **Several tasks are near a day.** T8 (assembly, the bound, the patch and the read set) and T6.b
@@ -2088,13 +2157,12 @@ re-blessing this plan's payload and coarse goldens in that commit.
   - _Science review._ Every figure turned into code checks against its source. Two corrections
     for the plan's text, both ruled in `decision-r09-t2.md`. Design note 17's Verkhoyansk
     anomalies are now −30.8 and +30.6 K (item 2; the 0.25 K step is unaffected; the header's doc
-    quotes the normals). And Design note 13's lunar depth-to-rim-height ratio 5.42 is 0.195
-    (Pike 1980, Table 2) over a rim height of 0.036 D^1.014 that is Pike 1977's, not in the cited
-    Pike 1980.
-    Low confidence: Pike 1977's complex-crater rim fit, about 0.236 D^0.399, would make every
-    coarse crater's rim about half as high as observed under the simple-crater ratio, for T7.a to
-    weigh. Ceres's 469.7 km is Ermakov et al. 2017's; Design note 12's morphology bounds (0.8,
-    1.5, 9 and 16 D_t), the 0.12 ice factor and the −1.7 to −2.05 spectral range carry no external
+    quotes the normals). And the crater rims. Design note 13's 0.036 D^1.014 is Pike 1980b's
+    (USGS PP 1046-C, Table 6, eq. 3), a different Pike 1980 from Design note 12's. One ratio of
+    5.42 did make complex rims about half the observed. Item 3 gives complex craters their own
+    self-similar depth and rim laws, which T7.a builds. Ceres's 469.7 km is Ermakov et al. 2017's;
+    Design note 12's bounds of 9 and 16 D_t (0.8 and 1.5 now match Krüger et al. 2018), the 0.12
+    ice factor and the −1.7 to −2.05 spectral range carry no external
     source and are labelled the plan's own.
   - _For T3, T4, T9 and T18._ `SYNTHESIS_MARGIN_CELLS` is not yet defined (T3 or T4 adds it).
     `PartialField` can reuse `field.rs`'s private `reaching_index` (which returns `None` on
