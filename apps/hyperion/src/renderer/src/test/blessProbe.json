@@ -1,0 +1,7 @@
+{
+  "description": "bless.test.ts's probe table",
+  "rows": [
+    [1, 0.5],
+    [2, 0.25]
+  ]
+}

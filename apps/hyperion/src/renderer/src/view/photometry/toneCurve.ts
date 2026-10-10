@@ -54,7 +54,8 @@ function times(a: Rows3, b: Rows3): Rows3 {
   ];
 }
 
-function inverse(m: Rows3): Rows3 {
+/** A 3 × 3 matrix's inverse, by the adjugate, for a matrix that has one. */
+export function inverseRows(m: Rows3): Rows3 {
   const [[a, b, c], [d, e, f], [g, h, i]] = m;
   const determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
   const k = 1 / determinant;
@@ -113,7 +114,7 @@ const AGX_OUTSET_INVERSE: Rows3 = fromColumns([
 ]);
 
 /** AgX's outset matrix, as rows: the inverse of `AgXOutsetMatrixInv`, as Filament builds it. */
-export const AGX_OUTSET: Rows3 = inverse(AGX_OUTSET_INVERSE);
+export const AGX_OUTSET: Rows3 = inverseRows(AGX_OUTSET_INVERSE);
 
 /** The bottom of AgX's log encoding, stops: log₂(2^−10 × 0.18) (Filament's `AgxMinEv`). */
 export const AGX_MIN_EV = -12.47393;

@@ -300,6 +300,71 @@ fn star_colour_the_bake_bins_are_the_sims() {
     }
 }
 
+/// The client's bake-spectra fixture (`packages/protocol/fixtures/bake_spectra.json`, the suns of
+/// rendering plan R08.T4.a's channel fit) is the sim's colour table read at each sun, as
+/// `HostDiscDto.bake_spectrum` carries it: [`star_colour`] on each row's grid, and
+/// [`solar_colour`] at the Sun's 5,772 K and log g 4.438. A refit of the table that moves them
+/// fails here, and the fixture and the client's fit are updated with it.
+#[test]
+fn star_colour_the_clients_bake_spectra_are_the_tables() {
+    /// The fixture's names for [`AtmosphereGrid`]'s variants.
+    #[derive(serde::Deserialize)]
+    enum Grid {
+        MainSequence,
+        Giant,
+        WhiteDwarf,
+    }
+    #[derive(serde::Deserialize)]
+    struct Sun {
+        teff_k: f64,
+        log_g: f64,
+        grid: Grid,
+        // The sim's count, so that serde refuses a fixture row of another length.
+        bake_spectrum: [f64; hyperion_sim::sky::colour::BAKE_WAVELENGTH_COUNT],
+    }
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        suns: Vec<Sun>,
+    }
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../../packages/protocol/fixtures/bake_spectra.json"
+    ))
+    .expect("the fixture is JSON of its shape");
+    assert!(fixture.suns.len() >= 3, "the fit's three suns at least");
+    let mut solar_rows = 0;
+    for sun in &fixture.suns {
+        let solar = (sun.teff_k - SUN_TEFF_K).abs() < 1e-9 && (sun.log_g - SUN_LOG_G).abs() < 1e-9;
+        let colour = if solar {
+            solar_rows += 1;
+            solar_colour()
+        } else {
+            let grid = match sun.grid {
+                Grid::MainSequence => AtmosphereGrid::MainSequence,
+                Grid::Giant => AtmosphereGrid::Giant,
+                Grid::WhiteDwarf => AtmosphereGrid::WhiteDwarf,
+            };
+            star_colour(Kelvin::new(sun.teff_k), sun.log_g, grid)
+        };
+        for (k, (a, b)) in sun
+            .bake_spectrum
+            .iter()
+            .zip(colour.bake_spectrum())
+            .enumerate()
+        {
+            assert!(
+                (a - b).abs() <= 1e-12 * b.abs(),
+                "{} K, log g {}, bin {k}: fixture {a}, table {b}; update the row in \
+                 packages/protocol/fixtures/bake_spectra.json to the table's, then bless the \
+                 client's channel fit: HYPERION_BLESS=1 pnpm --filter hyperion exec vitest run \
+                 src/renderer/src/view/atmosphere/channels.test.ts",
+                sun.teff_k,
+                sun.log_g
+            );
+        }
+    }
+    assert_eq!(solar_rows, 1, "the fixture holds the Sun once");
+}
+
 /// The fifteen-bin illuminance of every bake spectrum is 1 lx to 10⁻⁶: every row of the committed
 /// table, blackbodies from 2,300 K to 500,000 K and, when it is fetched, Pickles' library; and for
 /// the spectra, within 1% of the exact integral over 1 nm bins (R06.T3.c).

@@ -5169,6 +5169,197 @@ generator, and the reference's sampling needs no domain tag.
     Hout 1979 and Haverkort et al. 1983.
   - _Drafted for the owner:_ a row of the roadmap's "Brainstorm corrections" table (NH₃'s "3%"
     in the brainstorm's "Atmosphere"; `README.md`).
+- **Deviations in T4.a, as built** (2026-10-10). `channels.ts` (the family and the fit),
+  `spectralColour.ts` (the colour pipeline) and `fittedChannels.ts` (the triple the renderer
+  reads), with `channels.test.ts`, `spectralColour.test.ts`, `channels.json` and
+  `colourMatching.json`; `BAKE_WAVELENGTHS_NM` in `medium.ts`, tested in `medium.test.ts`;
+  `inverseRows` exported from `view/photometry/toneCurve.ts`; `test/bless.ts`, `bless.test.ts` and
+  `blessProbe.json`; `vitest.config.mts`; `src/tools/atmosphereData.ts`, its test and
+  `scripts/atmosphereData.mjs`; `packages/protocol/fixtures/bake_spectra.json`, with hyperion-fit's
+  test of it; `NOTICE` and `.prettierignore`.
+  - _The fitted triple_ is (645, 544, 433.625) nm, the pattern search's result from (620, 540, 445).
+    Its objective, the largest Δu′v′ over the family below, is 0.007693; 680/550/440 gives 0.014905
+    over the same family, and Design note 5's (620, 540, 445) 0.015377. Over Earth at the plan's
+    three suns it is 0.006848, against 0.013226 at 680/550/440.
+    - _A shallow valley._ The minimum is a valley along which all three wavelengths rise together.
+      Over the family with eight suns the objective stayed within 0.25% of the record from (643,
+      543, 433.25) to (655.5, 549, 435.5), and other starts reached 0.0076705 at (653.625, 548.125,
+      434.625) (the science check, 2026-10-10). That 2 × 10⁻⁵ is immaterial to colour, but red is
+      fixed to about ±6 nm, not to the search's 0.125 nm; Kolda, Lewis and Torczon 2003 (§6.1) warn
+      that a pattern search need not reach a stationary point of a nonsmooth objective.
+    - _Not the research figure._ It is not Design note 5's triple, nor the brainstorm's ("620, 540
+      and 445 nm for Earth's cases", "Atmosphere"). r̄'s negative lobe over 462–552 nm draws the red
+      channel's effective wavelength for a λ⁻⁴ response long: with signed r̄ it is 646.7 nm for the
+      Sun's noon beam, and with r̄ clipped at zero about 590 nm, so 620 nm fits neither weighting
+      (the science check). The research agent's family is not recorded. Design note 5's
+      "(620, 540, 445) nm, within 0.0005–0.016" is corrected by this record for the plan's next
+      revision; the brainstorm's figure is for "main", with the lean that it name the fitted
+      triple in `channels.json` before R08.T6.d moves `CHANNEL_WAVELENGTHS_NM`.
+    - _"680/550/440"_ here means those wavelengths in this module's pipeline, the star's colour
+      times R at each channel, as R08.T6.d draws. It is not Bruneton 2017's own conversion (§14.3,
+      eq. 2, with the sky's spectrum taken as λ⁻³), which R05's `solar.ts` keeps.
+  - _The family, widened_ (common.md, "A complete, authentic universe": the triple must hold for
+    any star and any gas mix the generator can produce). The plan's family is Earth at 3,200 K,
+    solar and 9,000 K, and Mars with dust. As built it is 14,616 cases:
+    - twelve suns of R06's table (`bake_spectra.json`), each at the node nearest its class's
+      gravity: the main sequence at 2,300 K (log g 5.5), 3,200 K (5.0), 4,000 K (4.5), the Sun's
+      5,772 K (4.438), and 7,000, 9,000, 15,000, 30,000 and 45,000 K (4.0), after Pecaut and
+      Mamajek 2013's table; for plan 14's evolved hosts (P14.T28), an M giant at 3,500 K (log g 0.5;
+      Arroyo-Torres et al. 2014, A&A 566, A88, Table 5) and a red-clump giant at 4,750 K (2.5; Bovy
+      et al. 2014, ApJ 790, 127); and a DA white dwarf at 10,000 K (log g 8.0; Kepler et al. 2007's
+      mean DA mass);
+    - Earth: dry air on a 288.15 K isothermal column at the U.S. Standard Atmosphere's sea level,
+      with R05's aerosol (`EARTH_AEROSOL_TERM`);
+    - Mars with dust (`marsFitAir`), below;
+    - each of the 27 gases with Rayleigh optics here (`CHANNEL_FIT_GASES`: `GASES` and the
+      molecules of `ESTIMATED_RAYLEIGH`) alone at dry air's Rayleigh τ(550), so that they differ
+      in spectral shape alone. A mixture's σ(λ) is its species' sum, so its shape lies among
+      theirs. SiO, TiO, VO and FeH are hot vapours, not bulk gases, but stay: their estimates are a
+      static polarisability, plain λ⁻⁴, and change nothing (0.0072). The estimated atoms are left
+      out on plausibility, since none is a bulk gas at an Earth-like Rayleigh depth, and Na's, K's,
+      Ca's and Ti's visible optics are their lines (R08.T4.c). Alone at that depth, H gives 0.0075
+      and O, Na, K, Si, Ca and Ti 0.0072 at the triple, under the objective; Mg and Fe, whose
+      one-oscillator estimates steepen σ to λ^−5.6 and λ^−5.1, would give 0.020 and 0.014, out of
+      the family's range;
+    - the direct beam, and the singly scattered sky at the zenith, at 30° opposite the sun and at
+      10° towards, across from and away from it;
+    - sun zenith angles 0, 45, 60, 70, 75, 80 and 85°.
+
+    The case that binds is Earth's direct beam 5° up under the 2,300 K star (0.00769), with the
+    4,000 K star's (0.00766) and O₃'s under the 45,000 K star (0.00762) beside it. Under the giants
+    and the white dwarf Earth's worst is 0.0064 (3,500 K), 0.0048 (4,750 K) and 0.0063. Earth and
+    Mars at the plan's three suns alone fit (640, 546.125, 435) at 0.0057; that triple gives
+    0.0095 over the widened family, at the 2,300 K star. Reversible: the family is
+    `channels.test.ts`'s, and a bless rewrites the record (for "main", with the lean to keep the
+    widened family). The binding case's spectral colour lies outside Rec. 709 (its blue is −0.021
+    of its red), which no triple can draw, since a star's colour times R(λ_c) keeps blue positive:
+    at least 0.0061 of its 0.0077 is that gamut floor (the science check). The objective keeps the
+    light's own colour, before any gamut mapping. The horizon's direct beam is negative in blue
+    under every star, so no triple draws it closer than its gamut floor of 0.008–0.010; at the
+    fitted triple its error is 0.012–0.072 by star (0.022 under the Sun, 0.014 at 680/550/440).
+
+  - _Mars with dust._ R08.T5.b's `mars_dust` file landed on `rendering-and-planets` while this task
+    ran (f0c1be5a, 7f3b0418), so Mars is in the family, not deferred:
+    - its air is NASA's Mars Fact Sheet's of 19 May 2025 (CO₂ 95.1, N₂ 2.59, Ar 1.94, O₂ 0.16 and
+      CO 0.06 percent; 6.36 mbar at the mean radius, ~214 K held isothermal, 43.49 g mol⁻¹, g_ref
+      √(3.69 × 3.73) = 3.71 m s⁻² from the equatorial and polar surface accelerations, and
+      3,389.5 km), a Rayleigh τ(550) of 0.0027;
+    - its dust is `modeOptics` of the `mars_dust` file in a gamma distribution of r_eff 1.5 µm and
+      v_eff 0.3 (`science-r08-nonspherical.md` §2.1's mode), at τ(550) 0.5, which is τ(880) ≈ 0.54
+      for this mode (7.5% above 550 nm's, the science check's Mie). That lies inside what the
+      rovers' Pancams recorded at 880 nm outside dust storms, below about 0.3 (Spirit) and 0.5
+      (Opportunity) in the clear season and about 1 in the dusty season's background (Lemmon et
+      al. 2015, Icarus 251, 96, §4.1). The dust is mixed with the gas, Conrath 1975's slow-settling
+      limit and Lemmon et al.'s conclusion 5;
+    - the Mie optics are taken every 20 nm and are linear between, since a size-distribution sum
+      costs about 47 ms a wavelength;
+    - a `nonSphericalMineral`'s albedo and asymmetry are the spheres' (Design note 6), and its phase
+      is the Henyey–Greenstein of that asymmetry, the interim R08.T5.b names for R08.T5.c's
+      `aerosolTerm`.
+
+    Mars draws the butterscotch day sky and the blue sky round a setting Sun (tests). Its largest
+    error at the triple is 0.0030 (under the 2,300 K star) and 0.0016–0.0022 under the others,
+    against 0.0020–0.0034 at 680/550/440; it does not bind, and adding it left the triple and the
+    objective unchanged. When R08.T5.c's TAMUdust2020 tables land, `channels.json` is to be blessed
+    again with them, before R08.T6.d reads the triple; R08.T5.c's text does not yet say so (for
+    "main").
+
+  - _What the objective models._ The direct beam's transmittance and the singly scattered sky seen
+    from the ground, by the same quadrature in both colours; no ground reflection, no multiple
+    scattering (Hillaire's term, which is also evaluated at the triple), and smooth terms only (an
+    absorber takes a curve of growth, R08.T4.b). Luminance is not in the objective. Views from
+    orbit are not in the family: a limb chord carries about twice the horizon's column, whose direct
+    beam is already 0.022 (for R08.T8, which draws those views, to record).
+  - _Recorded, not fitted_ (at the triple; 680/550/440's in brackets):
+    - Earth under the Sun by day, sun zenith ≤ 60°: 0.0027 (0.0054); at 85°, the worst of its six
+      views: 0.0056 (0.0088);
+    - the Sun's disc 2° up: 0.0088, 11% too bright (0.0218, 41%); on the horizon: 0.022, 1.69
+      times too bright (0.0138, 3.75 times). R08's Verification section expects "up to 0.02 at low
+      sun with the fitted triple", which the horizon's direct beam exceeds (for R08.T17);
+    - dry air at 2, 3 and 10 Earth columns, all twelve suns: 0.0106, 0.0151 and 0.100 (0.0175,
+      0.0219 and 0.099). Beyond a few Earth columns no three-sample triple holds. The thick
+      regime's scattering is baked spectrally (Design notes 5 and 9), but its transmittance stays
+      three-channel, so a deep atmosphere's low sun is off by more than 0.01 (for R08.T7 and
+      R08.T13's regime boundary).
+  - _The plan's tests._ "The refit starts from (620, 540, 445) and does not worsen the recorded
+    objective" is its own test, and is also asserted before the bless call (below). "At Earth the
+    fitted triple beats 680/550/440 at a sun zenith of 85°" is Earth under the Sun, the worst of
+    its six views at 85°.
+  - _Star spectra._ R06's colour-table rows reach the client through
+    `packages/protocol/fixtures/bake_spectra.json`, each row naming its grid. hyperion-fit's
+    `star_colour_the_clients_bake_spectra_are_the_tables` holds it to `star_colour` on that grid
+    (and `solar_colour` for the Sun) to 10⁻¹², so a refit of the table fails there, naming the
+    fixture and the bless. S between the bins is linear between their centres (`bakeSpectrumAt`,
+    which R08.T4.b reuses). It does not keep the bins' means (for the 2,300 K star, 2.1 times bin
+    0's and 15% over bin 8's), but a step function that keeps them moves the binding case only from
+    0.00769 to 0.00773 (the science check): the M-dwarf limitation is R08.T4.b's, not this fit's.
+  - _The colour pipeline_ is `spectralColour.ts`, apart from the fit, so that R08.T4.b's optics
+    worker and the bakes can read it without bundling the fit's family (Mie, the materials, the
+    columns). `colourMatching.json` holds r̄, ḡ and b̄ at 1 nm over 360–830 nm, through
+    `XYZ_TO_SRGB` (`view/photometry/toneCurve.ts`); `spectralRgb` sums 380–760 nm, the bake range,
+    by the trapezoid rule; `uvOfRgb` inverts the matrix exactly (`REC709_TO_XYZ`, by `inverseRows`).
+  - _Licence, for "main"._ `colourMatching.json` is the whole CIE table re-expressed in Rec. 709
+    primaries (the matrix's inverse recovers it). Today only tests import it; it ships once R08.T4.b
+    weights its curves of growth by it at run time. `decisions-r05.md` item 4 says "derived
+    constants only" ship. `NOTICE` gives the CIE's citation, the licence, the change made and the
+    offer under CC BY-SA 4.0, which CC BY-SA 4.0 §3 asks of adapted material. Lean: it may ship
+    under that notice; otherwise it is trimmed to 380–760 nm, a visible subset, or R08.T4.b ships
+    only its own weights. `NOTICE`'s Data header ("the data sets themselves are not committed")
+    predates this and is inexact for the CIE CSV, which R06 commits in a tools path.
+  - _The tool_ is `src/tools/atmosphereData.ts`, subcommand `matching`, which R08.T4.b extends with
+    its cross-sections. R08.T5.b, built first, made its own (`src/tools/materials.ts`), which stays;
+    `readChecked` now exists in `solarFactors.ts`, `materials.ts` and here. It reads R06's
+    committed, checksum-verified copy of `CIE_xyz_1931_2deg.csv` (`crates/hyperion-fit/data/cie_cmf/`,
+    permitted unmodified in a tools path by `decisions-r05.md` item 4) rather than a fresh fetch,
+    and its test rebuilds `colourMatching.json` from it byte for byte.
+  - _`bless.ts`_ is `src/renderer/src/test/bless.ts`, the TypeScript rules' home for shared test
+    helpers, not `view/atmosphere/`.
+    - `expectCommittedTable(table, committed, file)` also takes the file's JSON import. When
+      comparing it checks the values against the import first, so that a changed table fails
+      naming the command and leaves vitest's snapshot state alone, then the bytes through
+      `toMatchFileSnapshot`.
+    - `HYPERION_BLESS=1` sets vitest's update mode to `"all"`; otherwise `vitest.config.mts` sets
+      `"none"`, so a plain run never writes a table, a missing one included. A bless under `CI` is
+      refused, as golden.rs refuses it.
+    - Vitest writes a blessed file when the test file finishes, whatever failed. So a check that
+      must stop a bless runs before the call, in the same test: the channel fit's "does not worsen
+      the recorded objective" is asserted there, as well as in the plan's own test.
+    - `tableText` writes arrays and plain objects only; a typed array, a `Map` or a `Date` is
+      refused, to be converted first.
+    - A table's text is compared byte for byte, so `.prettierignore` lists each table; R08.T4.b's
+      and R08.T12.b's tables need entries of their own, and a new table starts as a committed
+      `{}`, which its JSON import needs before the first bless.
+  - _Names beyond the sketch._
+    - `spectralColour.ts`: `MatchingFunctions`, `MATCHING_FUNCTIONS`, `REC709_TO_XYZ`,
+      `BakeSpectrum`, `bakeSpectrumOf`, `bakeSpectrumAt`, `PIPELINE_WAVELENGTHS_NM`, `SunWeights`,
+      `sunWeights`, `weightedRgb`, `spectralRgb`, `channelRgb`, `uvOfRgb`, `deltaUv`,
+      `luminanceOfRgb`.
+    - `channels.ts`: `SpectralAirTerm`, `SpectralAir`, `CaseView`, `CaseSun`, `ChannelCase`,
+      `viewResponse`, `molecularAir`, `EARTH_AEROSOL_TERM`, `EARTH_DRY_AIR`, `EARTH_FIT_COLUMN`,
+      `earthFitAir`, `MARS_AIR`, `MARS_FIT_COLUMN`, `MARS_DUST_MODE`, `MARS_DUST_OPTICAL_DEPTH_550`,
+      `marsFitAir`, `CHANNEL_FIT_GASES`, `channelFitAirs`, `FIT_SUN_ZENITHS_DEG`,
+      `FIT_SKY_DIRECTIONS_DEG`, `channelFitCases`, `PreparedFamily`, `prepareFamily`, `CaseError`,
+      `caseErrors`, `channelObjective`, `ChannelSearch`, `CHANNEL_FIT_START_NM`,
+      `CHANNEL_FIT_SEARCH`, `ChannelFit` and `fitChannels`.
+    - `fittedChannels.ts`, a leaf module that imports nothing of the atmosphere's:
+      `RecordedChannels`, `fittedTriple` and `FITTED_CHANNEL_WAVELENGTHS_NM`, which R08.T6.d's
+      `medium.ts` can then read with no import cycle through `channels.ts` and without bundling
+      the fit.
+    - `medium.ts`: `BAKE_RANGE_NM`, `BAKE_BIN_COUNT` and `BAKE_BIN_WIDTH_NM`.
+    - `test/bless.ts`: `BLESS_VARIABLE`, `CI_VARIABLE`, `BlessMode`, `blessModeOf`, `blessMode`,
+      `blessCommand`, `tableText` and `expectCommittedTable`.
+    - The tool: `MATCHING_OUTPUT`, `CIE_CITATION`, `ReducedMatching`, `reduceMatching`,
+      `matchingText`, `readChecked` and `main`.
+  - _Acceptance._ The shared command selects `channels.test.ts`. `medium.test.ts`
+    (`BAKE_WAVELENGTHS_NM` against R06's fixture), `spectralColour.test.ts`, `test/bless.test.ts`
+    and `src/tools/atmosphereData.test.ts` run under `pnpm test`, and the fixture's Rust test under
+    `cargo test -p hyperion-fit --test star_colour`. The channel fit takes about 3 s of
+    `channels.test.ts`.
+  - _Determinism._ The search compares doubles, so a JavaScript engine whose `Math.exp` differed in
+    the last bit could take another path in a near tie; the record would then differ and the check
+    fail, naming the bless. The objective is recorded rounded up to 10⁻⁶.
+  - _Closed set, for the composition audit:_ none. `CHANNEL_FIT_GASES` derives from `GASES` and
+    `ESTIMATED_RAYLEIGH`, and the suns are the fixture's rows.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client

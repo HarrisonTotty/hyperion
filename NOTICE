@@ -185,7 +185,11 @@ their citations; the data sets themselves are not committed (plan R05, R05.T12.d
   Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b, licensed under
   CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). The values in
   apps/hyperion/src/renderer/src/view/atmosphere/solar.ts are computed from it, integrated against
-  E-490; to the extent they are adapted material they are offered under CC BY-SA 4.0.
+  E-490; apps/hyperion/src/renderer/src/view/atmosphere/colourMatching.json holds the functions
+  taken to linear Rec. 709 at 1 nm (apps/hyperion/scripts/atmosphereData.mjs), and the fitted
+  channel wavelengths in apps/hyperion/src/renderer/src/view/atmosphere/channels.json are computed
+  with them (plan R08, R08.T4.a). To the extent these are adapted material they are offered under
+  CC BY-SA 4.0.
 
 - Ozone absorption cross-sections at 233 K: Serdyuchenko et al., Atmos. Meas. Tech. 7 (2014) 625;
   Gorshelev et al., Atmos. Meas. Tech. 7 (2014) 609 (IUP Bremen), as binned by Bruneton 2017. In

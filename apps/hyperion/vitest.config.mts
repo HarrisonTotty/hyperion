@@ -24,6 +24,13 @@ const DOM_TESTS = [
   "src/renderer/src/wasm/useSurfaceModuleCheck.test.ts",
 ];
 
+// A bless (`HYPERION_BLESS=1`, the Rust testkit's variable) turns snapshot updates on, so that a
+// bless-style test's `toMatchFileSnapshot` rewrites its committed table
+// (`src/renderer/src/test/bless.ts`, plan R08.T4.a). Never under `CI`, as golden.rs refuses: there
+// the helper fails instead. Otherwise nothing is written, a missing file included, so a committed
+// table is only ever compared.
+const BLESSING = process.env["HYPERION_BLESS"] === "1" && process.env["CI"] === undefined;
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
@@ -32,6 +39,7 @@ export default defineConfig({
   // renderer code, tests included, reads no files through `node:fs` (R04.T10.c).
   assetsInclude: ["**/*.wasm"],
   test: {
+    update: BLESSING ? "all" : "none",
     restoreMocks: true,
     unstubGlobals: true,
     // A display test drives the whole console through `user-event`, and the heaviest of them (the

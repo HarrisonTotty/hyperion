@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import bakeWavelengths from "../../../../../../../packages/protocol/fixtures/bake_wavelengths_nm.json" with { type: "json" };
 import { EARTH_REFERENCE } from "./earth";
 import {
+  BAKE_BIN_WIDTH_NM,
+  BAKE_WAVELENGTHS_NM,
   columnLengthM,
   type DensityProfile,
   densityAt,
@@ -38,6 +41,21 @@ function numericColumnM(profile: DensityProfile, topM: number): number {
   }
   return sum;
 }
+
+describe("the bake wavelengths", () => {
+  it("are R06's fixture's, bake_wavelengths_nm.json, to 10⁻⁹ nm", () => {
+    const fixture = bakeWavelengths.wavelengths_nm;
+    const offsets = BAKE_WAVELENGTHS_NM.map((nm, k) => Math.abs(nm - (fixture[k] ?? Number.NaN)));
+    expect([offsets.length, Math.max(...offsets) < 1e-9]).toEqual([fixture.length, true]);
+  });
+
+  it("centre fifteen bins of 25.33 nm from 380 to 760 nm", () => {
+    const lowEdges = BAKE_WAVELENGTHS_NM.map((nm) => nm - BAKE_BIN_WIDTH_NM / 2);
+    const expected = Array.from({ length: 15 }, (_, k) => 380 + (k * 380) / 15);
+    const offsets = lowEdges.map((edge, k) => Math.abs(edge - (expected[k] ?? Number.NaN)));
+    expect([offsets.length, Math.max(...offsets) < 1e-9]).toEqual([15, true]);
+  });
+});
 
 describe("densityAt", () => {
   it("is 1 at the ground and 1/e at one scale height for an exponential", () => {

@@ -16,10 +16,36 @@ import type { Rgb } from "../photometry/toneCurve";
  *
  * @remarks
  * Bruneton's `kLambdaR`, `kLambdaG` and `kLambdaB` (precomputed_atmospheric_scattering, 2017,
- * `atmosphere/model.h`), which Hillaire 2020 and sebh's reference code inherit. R08 refits them
- * (R08 Design note 8).
+ * `atmosphere/model.h`), which Hillaire 2020 and sebh's reference code inherit, and the wavelengths
+ * R05's Earth constants are evaluated at. R08.T4.a fits the triple the smooth terms are evaluated
+ * at (`channels.ts`, recorded in `channels.json`; R08 Design note 5); R08.T6.d, which rebuilds Earth
+ * at it, makes this constant read `fittedChannels.ts`'s `FITTED_CHANNEL_WAVELENGTHS_NM`.
  */
 export const CHANNEL_WAVELENGTHS_NM: Rgb = [680, 550, 440];
+
+/** The span of the bake bins, nm: 380 to 760 (R08 Design note 5). */
+export const BAKE_RANGE_NM: readonly [number, number] = [380, 760];
+
+/** The number of bake bins: 15, R06's `SKY_BAKE_BINS`. */
+export const BAKE_BIN_COUNT = 15;
+
+/** Each bake bin's width, nm: 380 ÷ 15 = 25.33. */
+export const BAKE_BIN_WIDTH_NM = (BAKE_RANGE_NM[1] - BAKE_RANGE_NM[0]) / BAKE_BIN_COUNT;
+
+/**
+ * The centres of the 15 bins every off-frame bake is solved in, nm: 392.67 + 25.33 k, k = 0..14,
+ * each {@link BAKE_BIN_WIDTH_NM} wide over {@link BAKE_RANGE_NM} (R08 Design note 5, after
+ * Bruneton 2017's use of bin midpoints).
+ *
+ * @remarks
+ * R06's `sky::colour::BAKE_WAVELENGTHS_NM` mirrors it, and a star's `HostDiscDto.bake_spectrum` is
+ * its spectrum's mean over each bin. Both are tested against
+ * `packages/protocol/fixtures/bake_wavelengths_nm.json` (here in `medium.test.ts`).
+ */
+export const BAKE_WAVELENGTHS_NM: ReadonlyArray<number> = Array.from(
+  { length: BAKE_BIN_COUNT },
+  (_, k) => BAKE_RANGE_NM[0] + (k + 0.5) * BAKE_BIN_WIDTH_NM,
+);
 
 /**
  * A density given level by level (plan R08, Design note 2): R08's hydrostatic column (`column.ts`),

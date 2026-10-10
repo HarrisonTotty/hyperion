@@ -1,0 +1,24 @@
+{
+  "description": "The render channels' fitted wavelengths, nm (rendering plan R08, Design note 5; R08.T4.a), written by channels.test.ts under HYPERION_BLESS=1 and checked unchanged otherwise. The objective is the largest CIE 1976 delta u'v' between a three-channel colour and the spectral one over the family, rounded up to 1e-6: each sun's light through each air, as its direct beam and as the singly scattered sky in each direction, at each sun zenith angle, seen from the ground.",
+  "suns": ["2300 K, log g 5.5", "3200 K, log g 5", "4000 K, log g 4.5", "5772 K, log g 4.438", "7000 K, log g 4", "9000 K, log g 4", "15000 K, log g 4", "30000 K, log g 4", "45000 K, log g 4", "3500 K, log g 0.5, Giant", "4750 K, log g 2.5, Giant", "10000 K, log g 8, WhiteDwarf"],
+  "airs": ["Earth", "Mars", "H2", "He", "H2O", "CH4", "NH3", "N2", "O2", "CO2", "Ar", "Ne", "Kr", "Xe", "N2O", "CO", "SO2", "H2S", "O3", "HCN", "C2H2", "C2H4", "C2H6", "PH3", "CH3OH", "SiO", "TiO", "VO", "FeH"],
+  "sunZenithsDeg": [0, 45, 60, 70, 75, 80, 85],
+  "skyDirectionsDeg": [
+    [90, 0],
+    [30, 180],
+    [10, 0],
+    [10, 90],
+    [10, 180]
+  ],
+  "startNm": [620, 540, 445],
+  "stepsNm": [8, 0.125],
+  "wavelengthsNm": [645, 544, 433.625],
+  "objective": 0.007693,
+  "objectiveAtBrunetonsTriple": 0.014905,
+  "objectiveAtTheStart": 0.015377,
+  "earthAtThreeSuns": {
+    "suns": ["3200 K, log g 5", "5772 K, log g 4.438", "9000 K, log g 4"],
+    "objective": 0.006848,
+    "objectiveAtBrunetonsTriple": 0.013226
+  }
+}
