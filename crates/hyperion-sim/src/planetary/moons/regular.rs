@@ -1138,8 +1138,8 @@ pub fn has_subsurface_ocean(
 /// moon's one moment of inertia,
 /// [`moment_of_inertia_factor`](crate::planetary::derive::rotation::moment_of_inertia_factor)
 /// (P14.T46.a, which retired the moons' own 0.35), and its class's tides, a rocky body's k₂ = 0.3
-/// and Q = 100 (after Gladman et al. 1996, Icarus 122, 166), for P14.T17.b's "all regular moons
-/// lock".
+/// and Q = 100 (P14.T14.b's pair; the despinning time is Gladman et al. 1996's, Icarus 122, 166),
+/// for P14.T17.b's "all regular moons lock".
 ///
 /// # Panics
 ///

@@ -1013,7 +1013,7 @@ fn tidal_planet(
     TidalPlanet::new(mass, radius, love_number, tidal_q).expect(
         "a derived body's mass and radius are positive and finite, and so are its tides: each Q \
          is a constant, and an enveloped class holds at least `THIN_ENVELOPE_FRACTION` of \
-         envelope, which keeps its k₂ above 0",
+         envelope on a core of more than half its mass, which keeps its k₂ above 0",
     )
 }
 
@@ -1710,7 +1710,8 @@ mod tests {
 
     /// P14.T14.d: the generated Uranus's modified quality factor Q′ = 3Q ÷ 2k₂ lies in Tittemore
     /// and Wisdom's 1.6–5.6 × 10⁵, and Neptune's is at least Proteus's bound of 6.7 × 10⁴ (both as
-    /// Ogilvie 2014, §5.4, quotes them), from their own mass, radius and fractions.
+    /// Ogilvie 2014, §5.4, quotes them) and at most Zhang and Hamilton's 1.32 × 10⁵ (2008, Icarus
+    /// 193, 267, Table 4), from their own mass, radius and fractions.
     #[test]
     fn the_ice_giants_dissipate_as_their_satellites_require() {
         let bodies = solar_system();
@@ -1725,6 +1726,8 @@ mod tests {
         assert!((1.6e5..=5.6e5).contains(&uranus), "Uranus: Q′ {uranus}");
         let neptune = q_prime("Neptune");
         assert!(neptune >= 6.7e4, "Neptune: Q′ {neptune}");
+        // Zhang and Hamilton 2008: Q < 36,000 at k₂ = 0.41.
+        assert!(neptune <= 1.5 * 36_000.0 / 0.41, "Neptune: Q′ {neptune}");
     }
 
     /// P14.T14.d, held: the k₂ the readers take from the 21 → 22 batch's bump, for the generated
@@ -1742,7 +1745,7 @@ mod tests {
                 EarthRadii::from(Metres::from(body.radius())),
                 &body.fractions(),
             );
-            assert_same_bits(q, 1e4);
+            assert_same_bits(q, 1.03e4);
             bits(k2)
         };
         let got = [
@@ -1750,11 +1753,11 @@ mod tests {
             k2(found(&bodies, "Neptune")),
             k2(&hot),
         ];
-        // k₂ = 0.0778, 0.0991 and 0.0618: Q′ = 1.9 × 10⁵, 1.5 × 10⁵ and 2.4 × 10⁵.
+        // k₂ = 0.0957, 0.1195 and 0.0601: Q′ = 1.6 × 10⁵, 1.3 × 10⁵ and 2.6 × 10⁵.
         let pinned = [
-            0x3fb3_ed5a_912c_fac3,
-            0x3fb9_5bf8_ea81_4e7c,
-            0x3faf_a0ff_107b_72e0,
+            0x3fb8_7c8b_7279_3a22,
+            0x3fbe_961b_769a_9642,
+            0x3fae_c5de_06f2_45a6,
         ];
         assert_eq!(got, pinned, "{got:#018x?}");
     }

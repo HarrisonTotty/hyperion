@@ -1343,12 +1343,14 @@ Solar System values without a generator.
   giants, 15 h for rocky bodies), obliquity (isotropic for bodies that had giant impacts, Rayleigh
   about 10° otherwise), rotation phase at the epoch.
 - **P14.T14.b Locking.** τ_lock = ω a⁶ I Q ÷ (3 G M★² k₂ R⁵) with I = 0.33–0.4 M R² by class, Q =
-  100 and k₂ = 0.3 for rocky bodies, Q = 10⁵ and k₂ = 0.4 for giants (Gladman et al. 1996). The spin
-  rate at age + t falls linearly to the synchronous rate over τ_lock. A locked body with e over
-  about 0.1 is in the 3:2 state. Moons use their planet as the primary. Rotation angle is a closed
-  form of time in each regime, continuous where regimes meet. Amended by T14.d
-  (decision-backlog-1): a sub-Neptune and an ice giant take neither pair. Their k₂ is their
-  envelope's Love number and their Q is 10⁴.
+  100 and k₂ = 0.3 for rocky bodies, Q = 10⁵ and k₂ = 0.4 for giants (the despinning time is
+  Gladman et al. 1996's eq. 9, after Peale 1977; the pairs are this plan's: Earth's measured k₂,
+  the conventional rocky Q, Goldreich and Soter's Q ≳ 10⁵ for Jupiter and a giant's k₂ near 0.4;
+  science-p14-tides, §4 (d)). The spin rate at age + t falls linearly to the synchronous rate over
+  τ_lock. A locked body with e over about 0.1 is in the 3:2 state. Moons use their planet as the
+  primary. Rotation angle is a closed form of time in each regime, continuous where regimes meet.
+  Amended by T14.d (decision-backlog-1): a sub-Neptune and an ice giant take neither pair. Their
+  k₂ is their envelope's Love number and their Q is 1.03 × 10⁴ (science-p14-tides).
 - **P14.T14.c Body-fixed frame.** `planetary/frames.rs`, per D23:
   `BodyFixedFrame { pole, w0, rate }` and `body_fixed_at(body, t)`, the rotation from the body's
   inertial frame (plan 01) to its fixed frame at a time.
@@ -1373,49 +1375,58 @@ Solar System values without a generator.
   - `Rocky` and `Icy`: (`ROCKY_LOVE_NUMBER`, `ROCKY_TIDAL_Q`), 0.3 and 100, as before.
   - `GasGiant`: (`GIANT_LOVE_NUMBER`, `GIANT_TIDAL_Q`), 0.4 and 10⁵, as before.
   - `SubNeptune` and `IceGiant`: (`enveloped_love_number(mass, radius, fractions)`,
-    `ENVELOPED_TIDAL_Q`), the latter 10⁴. The two classes are one structure here, split by mass
-    at `ICE_GIANT_MASS`, so they share one function and the tides have no step there.
+    `ENVELOPED_TIDAL_Q`), the latter 1.03 × 10⁴. The two classes are one structure here, split
+    by mass at `ICE_GIANT_MASS`, so they share one function and the tides have no step there.
   - `love_number_under_envelope(alpha, envelope_fraction, core_water_fraction) -> f64` is
-    k₂ = 0.9 (1 − 0.6 w) α⁵ + 0.125 f^0.68, the body's fluid Love number:
+    k₂ = 0.9 (1 − 0.39 w) α⁵ + 0.62 f α, the body's fluid Love number (decision-backlog-1, as
+    science-p14-tides refits it on the generator's own cores):
     - f is the envelope's mass fraction, and w = water ÷ (1 − f) the water fraction of everything
       beneath it.
     - The first term is the core's own tide seen from the envelope's top: a massless envelope
       gives exactly k_core α⁵.
-    - The second term is the envelope's own response.
-    - It is fitted to a Clairaut–Radau integration of a core under a polytropic envelope at the
-      generator's radii (decision-backlog-1, §1.2).
+    - The second term is the envelope's own response, linear in its mass and in α.
+    - It is fitted to Clairaut's equation in Radau's form, integrated over the generator's own
+      bodies: water on Earth-like rock and iron, laid at `radius_zeng`'s radius, under n = 1 and
+      n = 2 polytropic envelopes reaching `radius_with_envelope`'s radius (science-p14-tides).
   - `enveloped_love_number(mass, radius, fractions)` takes α = R_core ÷ R, held at 1 at most.
     R_core = `radius_zeng`(M (1 − f), the core read from the fractions), the core that
     `envelope::radius_with_envelope` lays the envelope on. The core read from the fractions is
     `CoreComposition::from_fractions`(iron ÷ (iron + rock), or `EARTH_CORE_MASS_FRACTION` if
     both are 0, and w).
-  - **Constants, in `planetary/params.rs`.** Each of the first four is documented as "this plan's
-    fit to decision-backlog-1's integration, not a source's".
-    - `ENVELOPED_CORE_LOVE_NUMBER` = 0.9: the core's fluid k₂, 0.80–0.96 over 2–20 M⊕ in the
-      integration; Earth's 3J₂ ÷ q is 0.94.
-    - `ENVELOPED_CORE_WATER_SOFTENING` = 0.6.
-    - `ENVELOPE_LOVE_COEFFICIENT` = 0.125 and `ENVELOPE_LOVE_EXPONENT` = 0.68.
-    - `ENVELOPED_TIDAL_Q` = 10⁴, sourced to the ice giants' Q′, which it reproduces with this k₂:
-      Q′_U from 1.6 to 5.6 × 10⁵ (Tittemore and Wisdom 1990), and Q′_U ≳ 9.1 × 10⁴ and
-      Q′_N ≳ 6.7 × 10⁴ from Ariel and Proteus (all as Ogilvie 2014, ARA&A 52, 171, §5.4,
-      quotes them).
+  - **Constants, in `planetary/params.rs`.** Each of the first three is documented as "this
+    plan's fit to science-p14-tides's integration, not a source's".
+    - `ENVELOPED_CORE_LOVE_NUMBER` = 0.9: the core's fluid k₂, which self-compression lowers
+      from 0.99 at 1.6 M⊕ to 0.74 at 30 M⊕ in the integration; Earth's 3J₂ ÷ q is 0.94.
+    - `ENVELOPED_CORE_WATER_SOFTENING` = 0.39, fitted at `OUTER_WATER_CAP`, the only water
+      fraction the composition solve lays an envelope on. The softening is not linear in w, so
+      another water fraction needs a refit.
+    - `ENVELOPE_LOVE_COEFFICIENT` = 0.62.
+    - `ENVELOPED_TIDAL_Q` = 1.03 × 10⁴, the long-term average, calibrated on the ice giants' Q′.
+      The generated Uranus lies inside Tittemore and Wisdom's 1.6–5.6 × 10⁵, and the generated
+      Neptune inside Zhang and Hamilton's 3.3 × 10⁴–1.32 × 10⁵ (2008, Table 4). Both are above
+      Ariel's and Proteus's bounds of 9.1 × 10⁴ and 6.7 × 10⁴ (Ogilvie 2014, ARA&A 52, 171,
+      §5.4). Uranus's present-day astrometric Q (Jacobson and Park 2025) is a snapshot, not
+      the average.
     - The docs of `ROCKY_*` and `GIANT_*` say which classes take them.
-  - Q′ = 3Q ÷ 2k₂ runs from about 3 × 10⁴ under a 0.1% envelope to 2–5 × 10⁵ under 10–20%. It
-    is 1.9 × 10⁵ for the generated Uranus and 1.5 × 10⁵ for Neptune.
+  - Q′ = 3Q ÷ 2k₂ runs from about 2.5 × 10⁴ under a 0.1% envelope to about 5 × 10⁵, and is
+    1–4.6 × 10⁵ under 7–25% of envelope. It is 1.6 × 10⁵ for the generated Uranus and 1.3 × 10⁵
+    for Neptune.
   - The primordial spin family (`SpinFamily::of`) and the moment of inertia
     (`ENVELOPED_MOMENT_OF_INERTIA`, T46.a) are unchanged. No draw, domain tag or wire shape
     changes.
   - _Tests_ (in `derive/rotation.rs` unless named):
-    - `love_number_under_envelope` reproduces decision-backlog-1's integration (§1.2's twelve
-      rows): within 15% for f ≤ 0.02, 30% for f ≤ 0.05, and a factor of 1.6 of the n = 1 value
-      beyond, where the envelope's equation of state alone spans a factor of up to 3.
-    - At f = 0 it is 0.9 (1 − 0.6 w) α⁵ exactly.
+    - `love_number_under_envelope` reproduces science-p14-tides's integration (its §7's
+      thirteen rows: generated bodies and the edges of the generated range). It lies within 10%
+      of the geometric mean of the n = 1 and n = 2 envelopes' k₂ for f ≤ 0.05, and 15% beyond,
+      where the envelope's equation of state alone spans a factor of up to 3.3.
+    - At f = 0 it is 0.9 (1 − 0.39 w) α⁵ exactly.
     - Over 1.5–100 M⊕, f from 10⁻³ to 0.5 and w from 0 to 0.54, at the generator's own radii
       (`radius_with_envelope` at 10 F⊕ and 5 Gyr), α lies in (0, 1] and k₂ in (0, 1.5).
     - `tides` gives `Rocky` and `Icy` (0.3, 100) and `GasGiant` (0.4, 10⁵). A `SubNeptune` and
-      an `IceGiant` of equal mass, radius and fractions give equal tides, with Q = 10⁴.
+      an `IceGiant` of equal mass, radius and fractions give equal tides, with Q = 1.03 × 10⁴.
     - In `derive/mod.rs`'s Solar System table: the generated Uranus's Q′ lies in 1.6–5.6 × 10⁵
-      and Neptune's is at least 6.7 × 10⁴.
+      and Neptune's lies in 6.7 × 10⁴–1.32 × 10⁵ (Proteus's bound; Zhang and Hamilton's
+      Q < 36,000 at k₂ = 0.41).
     - Through `SpinningBody::of_class` and `tidal_locking_time` from a 15-hour spin, a 5 M⊕
       sub-Neptune with a 2% envelope (iron 0.318, rock 0.662), at 2.4 R⊕:
       - locks within 100 Myr at 0.1 au of a Sun;
@@ -1439,16 +1450,21 @@ Solar System values without a generator.
     every reader takes `tides` from generator version 22 and the earlier pairs below it, so that
     no golden moves before T48.e blesses the batch (Risks, "A sub-Neptune's tides, as built").
   - _Sources:_
-    - Gladman et al. 1996 (the locking time);
-    - Clairaut's equation in Radau's form (Zharkov and Trubitsyn 1978, as Kramm et al. 2011,
-      A&A 528, A18, §2, use it; Padovan et al. 2018, A&A 620, A178);
-    - Seager et al. 2007 (the integration's equations of state) and Lopez and Fortney 2014 (its
-      radii);
+    - Gladman et al. 1996, eq. 9, after Peale 1977 (the locking time);
+    - Clairaut's equation in Radau's form and the degree-2 potential equation, which give the
+      same linear, hydrostatic k₂ as Zharkov and Trubitsyn's (1978) Tₙ equation that Kramm et
+      al. 2011 (A&A 528, A18, §2, eq. 3) use; Padovan et al. 2018 (A&A 620, A178);
+    - Seager et al. 2007 (the integration's equations of state), Zeng, Sasselov and Jacobsen
+      2016 (its core radii) and Lopez and Fortney 2014 (its radii);
     - Nettelmann et al. 2010 (A&A 523, A26) and Kramm et al. 2011 for GJ 436b's 0.02–0.2;
-    - Lainey 2016 (CeMDA 126, 145) for the solid bodies' k₂ and the ice giants' unmeasured k₂ ÷ Q;
-    - Ogilvie 2014, §5.4 and eq. 29;
-    - Louden, Laughlin and Millholland 2023, and Millholland and Laughlin 2019, for sub-Neptunes'
-      expected Q.
+      Padovan et al. 2018, §4.1, for its 0.055–0.160;
+    - Lainey 2016 (CeMDA 126, 145) for the solid bodies' k₂;
+    - Ogilvie 2014, §5.4 and eq. 29; Tittemore and Wisdom 1990 (Icarus 85, 394); Zhang and
+      Hamilton 2008 (Icarus 193, 267); Ćuk, El Moutamid and Tiscareno 2020 (PSJ 1, 22);
+      Jacobson and Park 2025 (AJ 169, 65, §3.3) and Fuller, Luan and Quataert 2016 (MNRAS 458,
+      3867), for the ice giants' Q;
+    - Louden, Laughlin and Millholland 2023, and Millholland and Laughlin 2019, for
+      sub-Neptunes' expected Q.
 
 #### P14.T15 Roche limits, Hill spheres and satellite survival
 
@@ -5963,7 +5979,7 @@ IceGiant, GasGiant }`, in `derive`, with its thresholds in `params.rs`: an envel
     envelope" state. T15's moon limit takes T14.b's k₂ and Q (0.3 and 100 for classes with a
     surface, 0.4 and 10⁵ for giants), also in `params.rs`. _Superseded for the tides by P14.T14.d
     (decision-backlog-1): a sub-Neptune and an ice giant take the envelope's Love number with
-    Q = 10⁴, and the tides read no class predicate._ _Superseded for the record by
+    Q = 1.03 × 10⁴, and the tides read no class predicate._ _Superseded for the record by
     P14.T48.e's gas-envelope split (decision-p14-t35e-wire): `is_giant()` keeps the spin family
     as it is (the tides match on the class, P14.T14.d), and `has_solid_surface()`, false for a
     sub-Neptune, sets the record's surface section._
@@ -8416,9 +8432,11 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - Under a hydrogen and helium envelope the tide is raised on the core: a massless envelope
     gives k₂ = k_core α⁵ exactly, and the envelope's own response adds to it. The ice giants
     and hot Neptunes dissipate weakly, with Q′ ≳ 10⁵.
-  - P14.T14.d gives `SubNeptune` and `IceGiant` k₂ = 0.9 (1 − 0.6 w) α⁵ + 0.125 f^0.68 and
-    Q = 10⁴. The generated Uranus then has Q′ = 1.9 × 10⁵, inside Tittemore and Wisdom's
-    range.
+  - P14.T14.d gives `SubNeptune` and `IceGiant` k₂ = 0.9 (1 − 0.39 w) α⁵ + 0.62 f α and
+    Q = 1.03 × 10⁴. That is science-p14-tides's refit, on the generator's own cores, of
+    decision-backlog-1's 0.9 (1 − 0.6 w) α⁵ + 0.125 f^0.68 and 10⁴. The generated Uranus then
+    has Q′ = 1.6 × 10⁵, inside Tittemore and Wisdom's range, and Neptune 1.3 × 10⁵, inside Zhang
+    and Hamilton's.
   - Locking distances shrink by a factor of 2.2–3.0, and moon limits grow. It is built in the
     21 → 22 batch, before T24.f.
 - **The moment of inertia under an envelope** (decision-backlog-1, finding F1; for a later
@@ -8489,25 +8507,35 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     - The Solar System test reads `tides` from each ice giant's mass, radius and fractions, so it
       needs no change at the bump.
     - `the_held_enveloped_love_numbers_are_pinned_bit_for_bit` pins the k₂ of the generated
-      Uranus, Neptune and `hot_sub_neptune` (0.0778, 0.0991 and 0.0618), which no golden holds
-      until the bump (determinism-auditor). A refit of the law moves it.
-  - _What the bump moves_ (blessed with the gate open, measured, and restored, 2026-10-09):
+      Uranus, Neptune and `hot_sub_neptune` (0.0957, 0.1195 and 0.0601 after science-p14-tides's
+      refit), which no golden holds until the bump (determinism-auditor). A refit of the law
+      moves it.
+  - _What the bump moves_ (blessed with the gate open, measured, and restored, 2026-10-09, and
+    re-measured so after science-p14-tides's refit, 2026-10-10; the flattenings are the refit's):
     - `planetary/derive_body`: 3 values, the moon limits of Uranus (× 0.51), Neptune (× 0.40) and
-      `hot_sub_neptune` (× 486);
+      `hot_sub_neptune` (× 486) as built, × 0.431, × 0.345 and × 514 after the refit;
     - `frame/body_rotations`: 8 values, two bodies' pole and angle;
     - the five systems the ruling names: `close_binary` 12 values; `filler_c` 406 changed and 46
       relabelled; `hierarchical_triple` 78 and 246; `subgiant` 6 and 92; `wide_binary` 46
-      relabelled;
-    - nothing else: `body_frames`, `moons`, the other systems and the server's goldens hold.
+      relabelled; the same counts after the refit;
+    - nothing else: `body_frames`, `moons`, the other systems and the server's goldens hold. With
+      the gate open the sim's and the server's suites fail only the hold's tripwire, besides the
+      goldens above.
 
     Sub-Neptunes lock later and ice giants earlier. Two lock states change, for the bless note:
     - `hierarchical_triple`'s `C f`, a sub-Neptune, was locked from 0.05 Gyr after its birth and now
-      locks 28 Gyr after the epoch, so it spins at the epoch (flattening 4 × 10⁻⁶ → 0.013);
+      locks 28 Gyr after the epoch (27.1 Gyr after the refit), so it spins at the epoch
+      (flattening 4 × 10⁻⁶ → 0.0125);
     - `filler_c`'s `A b`, a sub-Neptune, no longer locks 4.0 Gyr after the epoch (flattening
-      0.057 → 0.082).
+      0.057 → 0.0815).
 
     `subgiant`'s `A c`, an ice giant, now locks 22 Gyr after the epoch rather than 98 Gyr
-    (flattening 0.028 → 0.019).
+    (22.45 Gyr after the refit; flattening 0.028 → 0.0186).
+
+    The refit (science-p14-tides) moves each enveloped body's Q ÷ k₂ by 0.79–1.15 against these
+    measurements, and locking distances by −2% to +4%. It flips none of these lock states
+    (`C f` × 0.96, `A b` × 1.15, `subgiant`'s `A c` × 1.00), as the re-measurement confirms. The
+    bless re-measures every count.
 
   - _An independent check of the law_ (scripts and outputs in
     `.git/rm45-scratch/p14-batch/love/`). It integrates the degree-2 potential equation
@@ -8540,35 +8568,75 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
         envelope's 16–65 GPa (at 13–20 M⊕), so its core radii are 1–1.5% large. A refit should
         use self-consistent structures, as `love_potential.py`'s are.
 
-      For a science ruling before T48.e's bump. Lean: refit `ENVELOPED_CORE_WATER_SOFTENING` on
-      the generator's composition, and with it Q against Uranus, while the constants are held. A
-      refit moves the twelve-row test's water rows and the pinned k₂.
+      **Ruled** (science-p14-tides, 2026-10-10): the finding is confirmed, and the law is refitted
+      on the generator's own bodies, cores laid at `radius_zeng`'s radius.
+      - The new law is k₂ = 0.9 (1 − 0.39 w) α⁵ + 0.62 f α. The envelope term scales with α,
+        since an envelope responds less the further it spreads, and `ENVELOPE_LOVE_EXPONENT` goes.
+        Q = 1.03 × 10⁴.
+      - Against the geometric mean of the n = 1 and n = 2 envelopes, for the bodies the generator
+        makes, it lies within 0.92–1.15 below 2% of envelope, 0.93–1.05 at 2–5% and 0.79–1.16
+        beyond. For seventeen generated bodies, Uranus and Neptune among them, it lies within
+        0.92–1.05; the as-built law gave 0.73–1.05.
+      - Self-consistent Seager cores shift it by up to ±10%. The second checker's 0.2–0.3 came
+        from those cores, 2% larger for water-rich bodies, and from the old envelope term.
+      - The softening is fitted at `OUTER_WATER_CAP` alone; it is U-shaped in w (closed set, for
+        the composition audit).
+      - The refit lands in a follow-up to T14.d before T48.e's bump, so it costs no extra bump.
   - _Citations_ (science-checker, 2026-10-09):
     - Zeng et al. 2016's Table 2 matches the code's 81 entries, and Seager et al. 2007's Table 3
       the ruling's nine EOS constants.
     - Tittemore and Wisdom's range is as Ogilvie 2014, §5.4, quotes it, and their abstract gives
       11,000 < Q < 39,000. The Ariel and Proteus bounds are Ogilvie's own.
-    - Zhang and Hamilton 2008 give 9,000 < Q_N < 36,000 (as Louden, Laughlin and Millholland 2023
-      quote them), not the ruling's 12,000–330,000. The generated Neptune's 1.5 × 10⁵ lies in the
-      1.1–4.3 × 10⁵ they imply.
+    - Zhang and Hamilton 2008 give 9,000 < Q_N < 36,000 at k₂ = 0.41 (Burša 1992), so
+      Q ÷ k₂ = 22,000–90,000 (their Table 4) and Q′_N = 3.3 × 10⁴–1.32 × 10⁵. The ruling's
+      12,000–330,000 is Banfield and Murray 1992's range, which Zhang and Hamilton quote. The
+      as-built Neptune's 1.5 × 10⁵ lay above it; the refit's 1.3 × 10⁵ lies inside.
     - The GJ 436b bound, Q′ > 10⁵, is Veyette and Muirhead 2018's own (ApJ 863, 166).
-    - Kellermann et al. 2018 (A&A 615, A39) was not reached in full, and its abstract does not
-      show the fall of k₂ with envelope mass the ruling cites it for. The code cites Padovan et
-      al. 2018, §4.1, instead: GJ 436b's k₂ is 0.055–0.160 by interior.
-    - F3's "Q ≈ 4 × 10⁴" is about 3 × 10⁴.
+    - Kellermann, Becker and Redmer 2018 (A&A 615, A39), "Interior structure models and fluid
+      Love numbers of exoplanets in the super-Earth regime", model super-Earths without hydrogen
+      envelopes. Their abstract does not support k₂'s fall with envelope mass, and the citation
+      is withdrawn; the code cites Padovan et al. 2018, §4.1.
+    - F3's "Q ≈ 4 × 10⁴" is about 3 × 10⁴: 3.4 × 10⁴ for Uranus and 2.9 × 10⁴ for Neptune.
     - Kramm et al. 2011 use Zharkov and Trubitsyn's Tₙ equation (§2, eq. 3), not Radau's form,
       which gives the same k₂; T14.d's _Sources_ line reads otherwise. Nettelmann et al. 2010's
-      0.02–0.2 is for metal-free envelopes. Zhang and Hamilton's Neptune Q is converted to Q′ at
-      Gavrilov and Zharkov's k₂ = 0.127, this plan's conversion.
+      0.02–0.2 is for metal-free envelopes.
     - **Uranus's present-day Q is measured:** 678 ± 231 at an assumed k₂ of 0.300 (Jacobson and
       Park 2025, AJ 169, 65, §3.3), so Q′ ≈ 3.4 × 10³, about 50 times below the calibration. Held
       over 4.5 Gyr it would contradict Ariel's bound, so it is a present-day value.
-      `ENVELOPED_TIDAL_Q`'s doc names it and keeps 10⁴ as the time-averaged figure. For a science
-      ruling. Lean: keep 10⁴.
-    - Gladman et al. 1996's pairs, earlier work (P14.T14.b), for the deferred list. The primary
-      was not reached. Through a secondary source, Gladman gives Q ≈ 100 and a k₂ from rigidity,
-      not 0.3 and not a giant pair. `ROCKY_LOVE_NUMBER`'s doc now adds Lainey 2016's measured
-      0.30.
+      `ENVELOPED_TIDAL_Q`'s doc names it and keeps a time-averaged figure (10⁴ as built). Ruled
+      (science-p14-tides): `ENVELOPED_TIDAL_Q` stays a long-term average, now 1.03 × 10⁴. The
+      locking time and the moon limit integrate over the age, and the snapshot held over 4.5 Gyr
+      would move Ariel from the synchronous orbit in about 0.2 Gyr.
+    - Gladman et al. 1996 are the source of the locking time (eq. 9, after Peale 1977) and of
+      Q ≈ 100 for satellites with a k₂ from rigidity. They are the source of neither k₂ = 0.3 nor
+      the giants' (0.4, 10⁵), which are this plan's (science-p14-tides, §4 (d)). The constants'
+      docs now say so. Their text was not reached (open access; a by-hand check is pending).
+      The moons' k₂ = 0.3 against a rigidity k₂ of 0.03–0.05 goes to the deferred list.
+  - _The refit, as built_ (P14.T14.d's follow-up, `p14-tides-fix`, 2026-10-10). Built to
+    science-p14-tides's §5–§8; `GENERATOR_VERSION` stays 21, the hold stays, and no golden moves.
+    - The pinned k₂ of `the_held_enveloped_love_numbers_are_pinned_bit_for_bit` were re-read from
+      the test's own failure output (0x3fb8_7c8b_7279_3a22, 0x3fbe_961b_769a_9642 and
+      0x3fae_c5de_06f2_45a6: 0.095650, 0.119478 and 0.060103), since the ruling's Python cannot
+      reproduce the crate's last bit. They agree with the ruling's 0.09565, 0.11948 and 0.06010.
+    - The docs of `ROCKY_*` and `GIANT_*` keep each "which the … classes take" clause in their
+      one-sentence summary and give the new attribution in a second paragraph.
+    - `MgSiO₃` (in `love_number_under_envelope`'s doc) and `MacDonald` (in `ROCKY_TIDAL_Q`'s) are in
+      backticks, as Clippy's `doc_markdown` asks.
+    - Two of the ruling's summary figures are corrected from its own data (science-checker; an
+      erratum for the ruling is with "main"):
+      - Below 2% of envelope the law lies within 0.92–1.15 of the integration, not 0.92–1.13:
+        the ruling's §2.6 table gives water-rich cores under 0.3% 0.98–1.15.
+        `love_number_under_envelope`'s doc and the ruled paragraph above say so.
+      - A locking distance goes as (k₂ ÷ Q)^(1/6), so Q ÷ k₂'s 0.79–1.15 moves it by −2% to +4%;
+        the ruling's §3.4 gives −3.8% to +2.4%, the sign inverted.
+    - Beyond the ruling's §5–§7, at review: `SpinningBody::of_class`'s doc no longer credits the
+      earlier pairs to Gladman et al.; `an_unmeasurable_core_takes_no_tide` checks the new law's
+      k₂ = 0 at α = 0, which `core_beneath_envelope`'s (0, 0) gives (the old law gave
+      0.125 f^0.68 there; no enveloped class reaches it); the docs of `ROCKY_TIDAL_Q`,
+      `GIANT_TIDAL_Q` and `ENVELOPED_TIDAL_Q` add Kasting, Whitmire and Reynolds's and
+      MacDonald's references, Goldreich and Soter's k₂ of 1.5 with Yoder and Peale's Q′ range for
+      Jupiter (Ogilvie 2014, §5.4), and that the k₂ = 0.104 of Tittemore and Wisdom's range is
+      Gavrilov and Zharkov's (Zhang and Hamilton 2008, Table 4).
 
 - **Deviations in P14.T49.a, as built (`p14-batch`, 2026-10-10).** No output moves:
   `GENERATOR_VERSION` stays 21, every golden holds, and `tests/golden/substance/registry.golden` is
