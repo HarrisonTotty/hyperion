@@ -434,6 +434,8 @@ class TheRules(unittest.TestCase):
         nextest = plan(".config/nextest.toml")
         self.assertEqual(packages(nextest, "_nextest-run"), sorted(workspace().crates))
         self.assertNotIn("_clippy-for", calls(nextest))
+        # Its default filter skips the export tests, which the bindings' check runs.
+        self.assertEqual(args(nextest, "_gen-protocol-check-for"), args(nextest, "_test-build-for"))
         hooks = plan(".pre-commit-config.yaml")
         self.assertEqual(calls(hooks), ["_prettier-check"])
         self.assertTrue(hooks.notes)

@@ -57,7 +57,8 @@ SURFACE_GLUE = "apps/hyperion/src/renderer/src/generated/surface/"
 EXPORTS = re.compile(r"\bwasm_bindgen\b")
 
 # The crate whose `export_bindings` tests write the TypeScript bindings (`just gen-protocol`), and
-# what it shares with the TypeScript side.
+# what it shares with the TypeScript side. nextest's default filter (`.config/nextest.toml`) skips
+# those tests, so the bindings' check is the only check that runs them.
 PROTOCOL_CRATE = "hyperion-protocol"
 BINDINGS = "packages/protocol/src/generated/"
 FIXTURES = "packages/protocol/fixtures/"
@@ -594,7 +595,10 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
     if path == ".config/nextest.toml":
         for crate in ws.crates:
             needs.add(needs.tests, crate, path)
-        needs.say(path, "nextest's configuration: every crate's tests")
+        # Its default filter leaves the protocol's export tests to the bindings' check.
+        needs.gen_protocol.add(path)
+        needs.say(path, "nextest's configuration: every crate's tests, and the bindings' check, which runs the "
+                  "export tests nextest's default filter skips")
         return
 
     needs.add(needs.full, "paths no smart-ci rule knows", path)
@@ -1193,7 +1197,8 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 of that crate, with the features `just ci` gives it
   a crate's Cargo.toml          the same, and its dependents' Clippy and tests
   a crate's data (goldens)      that crate's tests, and the vitest files that read the file
-  a configuration file          the checks it configures: nextest.toml every crate's tests,
+  a configuration file          the checks it configures: nextest.toml every crate's tests and
+                                the bindings' check (the export tests nextest skips by default),
                                 rustfmt.toml and clippy.toml their tool, .oxlintrc.json oxlint,
                                 Prettier's files Prettier over every file
   crates/hyperion-protocol      the bindings' check and the TypeScript side

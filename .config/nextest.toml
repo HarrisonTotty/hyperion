@@ -5,6 +5,18 @@
 # Each test runs in its own process, so a `OnceLock` shared between tests is built once per test,
 # not once per binary: slow tests that would share expensive data are written as one test instead.
 
+# The protocol's `export_bindings_*` tests write the checked-in bindings (`TS_RS_EXPORT_DIR`,
+# `.cargo/config.toml`), and ts-rs 12 fsyncs each file it writes. In nextest's process per test each
+# rewrites its type's whole closure of imports: 1,432 fsynced writes a run, where `cargo test`'s one
+# process writes 143. In integration's `ci` of 2026-10-10 they took 2,118 test-seconds, with other
+# worktrees building beside it, against 1.4 s for the protocol's 203 other tests.
+# `just gen-protocol-check` runs them all, in one process under `cargo test`, into a temporary
+# directory and diffs that with the committed bindings, so nextest skips them. Filters on the
+# command line (`-p`, `-E`, test names) select within this set, and `--ignore-default-filter` lifts
+# it. The `slow` profile inherits it; a profile that sets its own `default-filter` replaces it.
+[profile.default]
+default-filter = "not (package(hyperion-protocol) & test(/export_bindings/))"
+
 # Every test that reads the sky's luminosity tables builds its own copy, since each test runs in its
 # own process. On 2026-10-03 sixteen of them at once, at about 2 GB a build, beside other lanes'
 # builds, exhausted the machine's 32 GB and froze it, so every such test is in this group. Building
