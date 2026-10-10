@@ -2192,3 +2192,82 @@ coarse goldens in that commit.
   - ice-shell, heat-pipe and episodic morphologies (T11–T12; their regimes are on plan 14's wire
     already);
   - frost by month (plan 14's P14.T55.e).
+- **Deviations in T4, as built** (2026-10-09).
+  - _Two commits._ A `refactor` commit (`HeightSample` to `height`, and the margin) went first,
+    so that T3's lane could merge `field::SYNTHESIS_MARGIN_CELLS` (5, before `FieldView`); the
+    interpolant is the task's `feat` commit. The margin counts king moves (edge and corner
+    neighbours at the field's level, across face edges by the cube's neighbour rule), as its doc
+    comment says and T3's `Cover::with_margin` counts; the read-set test checks each read against
+    the margin `with_margin` sends.
+  - _Files and public items beyond Provides._ `height.rs` holds `HeightSample`, which `test_planet`
+    re-exports and `patch` imports. `synth/interp.rs` holds `CellValues` (one value a cell at any
+    level 1 to 24), `Interpolated` (plain data: the value and its gradient on the unit sphere, per
+    radian), `ReadCellError`, `interpolate`, `base_elevation(field, dir)` (a `FieldView`'s
+    elevations, no seed) and `cell_at`, the categorical read: the cell that contains the direction,
+    by `PatchKey::containing`, taken as the brainstorm's "nearest cell". `Synthesiser` gains
+    `field`, `seed` and `cell_at`, its `Clone` and `Copy` written by hand so that it is `Copy` over
+    any view; `QueryHeightError` gains `From<ReadCellError>`; `SynthCache::new` is empty until T5.
+    The cube gains `pub(crate) uv_on_face`, a direction's gnomonic (u, v) on any face, which
+    `xyz_to_face_uv` now calls with the same expressions, so R05's goldens are unchanged.
+  - _Tests beyond the list_ (15 under `synth::interp`, and `tests/panics.rs`'s
+    `the_interpolant_refuses_level_0`): C² across face edges; the base elevation the same at every
+    level; a cell not held answered `NotSurveyed` and the margin held answered as the whole field;
+    the categorical read; the low-pass's 4/9, 1/9 at a cell centre; the error's bounds and text;
+    the interpolant through `CellValues` at levels 1, 2, 4 and 12 (edges, range, constant); order
+    independence over a shared and a fresh `SynthCache`, which T5 and T6.b must keep passing once
+    they fill it; `Synthesiser` `Copy` over any view.
+  - _`QueryHeightError`_ has `NotSurveyed(PatchKey)` alone. The base elevation is finite by
+    construction and asserted so, as R05's heights are, so `NonFinite` waits for T8.
+  - _Design note 13 as read._ "A one-cell band": each face's weight is 1 on the face and falls
+    to 0 one cell beyond each edge, β(s) = S(2ᴸ s + 1) with S the quintic smoothstep. That is what
+    needs the ghosts three deep, and it makes the blend two cells wide, half and half on the edge.
+    A ghost's bilinear stencil is clamped to its owning face's cells. Control values are taken
+    relative to the query's own cell, in millimetres, so a constant field returns its cell's
+    elevation bit for bit with a gradient of +0. The body-fixed gradient is that of
+    H(P) = h(M⁻¹P ÷ |M⁻¹P|). Only its tangential part at the spheroid point is the surface
+    gradient, which R05's normals read. On an oblate body it also has a part along the normal, up
+    to f ÷ (1 − f) of the slope: 0.3% on an Earth, 8% on a Ceres. So T15, R10 and any other reader
+    that wants a slope projects the gradient into the tangent plane first, as
+    `patch::normals::surface_normal` does.
+  - _Measured._ The field is C² across face edges as well, and only C¹ on the three great circles
+    x = 0, y = 0 and z = 0 (the faces' twelve centre lines). There the second difference jumps by
+    −3φ′, because the warp's s″ goes from 9/8 to −9/8 while s′ is 3/4. The gradient matches a 1 m
+    central difference to 10⁻⁶ relative wherever the slope is above 10⁻⁵, which is over 90% of the
+    points. Below that, the height's rounding, up to about 2 × 10⁻¹¹ m from 16 to 48 rounded terms
+    in millimetres, reaches 10⁻⁶ of the slope over the difference's 2 m.
+  - _The margin has no slack at the ends of the edges._ The interpolant's farthest read is
+    exactly 5 king moves, near the ends of the face edges at levels 6 to 8. It is 4 in the middle
+    of an edge and 4 everywhere at level 5. Near the ends, a ghost three cells past an edge lies up
+    to three cells along it from the query's row, so Design note 15's "four past an edge" holds
+    only mid-edge. The sweep covered every face edge at 0.001 of its length and 0.1 cell across,
+    out to 2.6 cells either side, about 6 × 10⁵ points a level, and never found 6. The sweep was
+    run once and is not committed. The committed test runs about 2,750 points a level on flat
+    fields at levels 5 to 8, and asserts that the farthest read is exactly 5. So T8's
+    whole-function read-set test, and any wider band or deeper ghost, has no slack there.
+  - _The low-pass._ The spline does not pass through the cells: the centre of a cell more than a
+    cell from a face edge takes 4/9 of its own value, 1/9 of each edge neighbour's and 1/36 of
+    each corner neighbour's. Nearer an edge, the neighbouring face's spline is blended in. So the
+    reconstructed field's σ_h and relief are below the cells', which T12.e's rescaling on the
+    reconstructed field accounts for, and T14.b's upsample through it smooths. The synthetic
+    worlds' headers keep the cells' σ_h and relief (T2's).
+  - _For T8._ Two `synth::interp` tests hold only while `height_at` is the base elevation alone:
+    `the_base_elevation_is_the_same_at_every_level`, which T8's full `height_at` retires, and
+    `a_cell_not_held_is_not_surveyed`'s check of the missing cell against the interpolant's read
+    set, which moves into T8's whole-function test. The test views `Recorder` (every cell asked)
+    and `Held` (a subset), and `king_distances` (the margin's count), are private to that test
+    module; T8 may lift them into `testing`, or test against T3's `Cover::with_margin`.
+  - _For T12.e and T14.b._ In the middle of the pass there is no `FieldView`, so both read the
+    interpolant through `interpolate` over a `CellValues` of their own working values. Its tests
+    cover levels 1, 2, 4, 5 to 8 and 12, and T14.b's multigrid reads levels 4 to 8.
+  - _For T9._ The determinism review asks T9's `height_golden.rs` to pin `interp::base_elevation`
+    apart from the full `height_at`, at band, edge and corner points and once through `interpolate`
+    at a low level. Then a change to T5–T8 that leaves the interpolant alone shows as such.
+  - _For R05's and R10's re-validations._ R05's Provides comment (its line 138) and its
+    review-fixes record (line 3812, "the path R09.T4 moves it from") say that `LatticeCache` moves
+    too, and R10.T6.b says R09.T4 moved `HeightSample` "and `LatticeCache`" to `height`. Only
+    `HeightSample` moved; `LatticeCache` stays in `noise`.
+  - _For the brainstorm's revision._ The per-query evaluation's "Base elevation from the
+    interpolated coarse elevation" reads as an interpolant through the cells. Design note 13's
+    spline is approximating, and the surface does not pass through the server's cells, so this
+    goes with Design note 13's other departures in the roadmap's brainstorm corrections (asked of
+    "main").

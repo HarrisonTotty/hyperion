@@ -278,16 +278,22 @@ const fn compact(x: u32) -> u32 {
 /// A step is a king's move on the cube sphere: from a cell to any of its four edge neighbours or
 /// four corner neighbours at the same level, across a face edge by the cube's own neighbour rule
 /// ([`PatchKey::edge_neighbour`], [`PatchKey::corner_neighbours`]), so that a cell at a cube corner
-/// has seven neighbours, not eight. The margin's dilation of a survey and every read-set test count
-/// the same way.
+/// has seven neighbours, not eight. The margin's dilation of a survey ([`Cover::with_margin`]) and
+/// every read-set test count the same way.
 ///
-/// It is 5 (Design note 15, researched 2026-09-29): the base elevation's interpolant reads up to
-/// four cells past a face edge and about five at a cube corner (ghost cells three deep, each
-/// bilinear in one more cell, under the warp's 1.44× distortion); the channel network's first
-/// level reads flow directions up to four cells away; and the largest local crater, just under the
-/// boundary diameter `D_b`, reaches 2.54 rim radii, 1.27 `D_b`, ⌈1.27 × 84.9 km ÷ 23.5 km⌉ = 5
-/// cells of an Earth's largest edge, and the same on a Mars, the Moon and Ceres, whose `D_b` scales
-/// with the edge. At level 8 that is about 180 km of margin about a survey.
+/// It is 5 (Design note 15, researched 2026-09-29):
+///
+/// - the base elevation's interpolant reads up to four cells past a face edge and about five at a
+///   cube corner (ghost cells three deep, each bilinear in one more cell, under the warp's 1.44×
+///   distortion, S2's `kMaxEdgeAspect`). R09.T4 measured 4 in the middle of an edge and exactly 5
+///   near its ends, so there the interpolant alone uses the whole margin ([`crate::synth::interp`]);
+/// - the channel network's first level reads flow directions up to four cells away;
+/// - the largest local crater, just under the boundary diameter `D_b`, reaches 2.54 rim radii,
+///   1.27 `D_b`: ⌈1.27 × 84.9 km ÷ 23.5 km⌉ = 5 cells of an Earth's smallest edge (Design note 4's
+///   0.947 × 2⁻⁸ radians), and the same on a Mars, the Moon and Ceres, whose `D_b` scales with the
+///   edge.
+///
+/// At level 8 that is about 180 km of margin about a survey.
 pub const SYNTHESIS_MARGIN_CELLS: u8 = 5;
 
 /// What the synthesis reads of a coarse field: the server's whole [`CoarseField`], or the part of

@@ -1,15 +1,160 @@
 //! The local synthesis: a body's height between its coarse cells, band-limited level by level
 //! (plan R09, Design notes 13 and 14).
 //!
-//! Today it holds the two types a coarse field's header carries, to which R09's later tasks give
-//! behaviour: [`BandLevel`], the quadtree level a height is asked at, and [`BandSpectrum`], the law
-//! of the relief finer than the coarse cells, from which R09.T5 derives each level's structural
-//! amplitudes and the closed-form variance below a cell. The interpolant (R09.T4), the octaves
-//! (T5), the channels (T6), the small craters (T7.b) and the assembly (T8) follow.
+//! [`Synthesiser`] is the height function over a coarse field, on the server's whole field and a
+//! client's part of one alike, through [`FieldView`]. Today it returns the base elevation, the
+//! coarse cells interpolated over the sphere ([`interp`], R09.T4), at every level; the structural
+//! octaves (T5), the channels (T6) and the small craters (T7.b) add the bands below the coarse
+//! cell, and the assembly (T8) fixes each level's set. The module also holds the two types a coarse
+//! field's header carries: [`BandLevel`], the quadtree level a height is asked at, and
+//! [`BandSpectrum`], the law of the relief finer than the coarse cells, from which R09.T5 derives
+//! each level's structural amplitudes and the closed-form variance below a cell.
 
+pub mod interp;
+
+use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::SquareMetres;
 
-use crate::cube::MAX_LEVEL;
+use crate::cube::{MAX_LEVEL, PatchKey};
+use crate::field::{FieldView, SynthesisCell};
+use crate::height::HeightSample;
+use interp::ReadCellError;
+
+/// The height function over a coarse field: what the server's collision and the client's patches
+/// read (Design note 13).
+///
+/// It is a pure function of the field the view holds, the body's detail seed, the direction and
+/// the level: the same on the server and in the client's WebAssembly workers, bit for bit, and in
+/// any order of queries, any cache the caller passes being the caller's. It borrows the view, so
+/// it is `Copy` whatever the view is.
+#[derive(Debug)]
+pub struct Synthesiser<'a, F> {
+    field: &'a F,
+    seed: DetailSeed,
+}
+
+// By hand, since a derive would bound them on `F: Clone` and `F: Copy`, which no view is.
+impl<F> Clone for Synthesiser<'_, F> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<F> Copy for Synthesiser<'_, F> {}
+
+impl<'a, F: FieldView> Synthesiser<'a, F> {
+    /// The synthesis over `field` with the body's detail seed `seed` (plan 14's
+    /// `body.surface.detail`, R09.T1.b), from which the bands below the coarse cell draw.
+    #[must_use]
+    pub const fn new(field: &'a F, seed: DetailSeed) -> Self {
+        Self { field, seed }
+    }
+
+    /// The field it reads.
+    #[must_use]
+    pub const fn field(&self) -> &'a F {
+        self.field
+    }
+
+    /// The body's detail seed.
+    #[must_use]
+    pub const fn seed(&self) -> DetailSeed {
+        self.seed
+    }
+
+    /// The height at the unit direction `dir` (body-fixed) at `level`, above the field's spheroid
+    /// along its normal, metres, and its gradient in body-fixed space at the spheroid point, metres
+    /// per metre.
+    ///
+    /// Today it is the base elevation ([`interp::base_elevation`]), the same at every level; the
+    /// bands below the coarse cell join it in R09.T5–T8. `cache` is the caller's, and no result
+    /// depends on what it holds.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell read that the view does not hold.
+    ///
+    /// # Panics
+    ///
+    /// If `dir` is zero or has a component that is not finite.
+    pub fn height_at(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+    ) -> Result<HeightSample, QueryHeightError> {
+        // The base elevation reads no cache and is the same at every level; the octaves (T5) and
+        // the channels (T6.b) read and fill `cache` per level.
+        let _ = (cache, level);
+        Ok(interp::base_elevation(self.field, dir)?)
+    }
+
+    /// The cell that contains the unit direction `dir`, and its record, from which the categorical
+    /// fields (plate, crust, boundary kind, flow direction, surface class) are read
+    /// ([`interp::cell_at`]).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] if the view does not hold the cell.
+    ///
+    /// # Panics
+    ///
+    /// If `dir` is zero or has a component that is not finite.
+    pub fn cell_at(
+        &self,
+        dir: [f64; 3],
+    ) -> Result<(PatchKey, &'a SynthesisCell), QueryHeightError> {
+        Ok(interp::cell_at(self.field, dir)?)
+    }
+}
+
+/// The caller's cache for a [`Synthesiser`]'s queries, one per worker or per bake.
+///
+/// It holds nothing yet: the base elevation needs no cache. R09.T5 puts R05's lattice cache in it
+/// for the structural octaves, and T6.b the channel network's cells, keyed by `u64`.
+#[derive(Debug, Clone, Default)]
+pub struct SynthCache {
+    _reserved: (),
+}
+
+impl SynthCache {
+    /// An empty cache.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { _reserved: () }
+    }
+}
+
+/// Why a [`Synthesiser`] could not answer a query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QueryHeightError {
+    /// The query reads a cell the view does not hold: neither surveyed nor in a survey's margin
+    /// ([`crate::field::SYNTHESIS_MARGIN_CELLS`]), so the height there is not known to this side.
+    NotSurveyed(PatchKey),
+}
+
+impl std::fmt::Display for QueryHeightError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotSurveyed(c) => write!(
+                f,
+                "cell ({}, {}) of face {} at level {} is not surveyed or in a survey's margin",
+                c.i(),
+                c.j(),
+                c.face().index(),
+                c.level()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QueryHeightError {}
+
+impl From<ReadCellError> for QueryHeightError {
+    fn from(e: ReadCellError) -> Self {
+        Self::NotSurveyed(e.cell)
+    }
+}
 
 /// A quadtree level at which the synthesis is evaluated, 0 to [`MAX_LEVEL`]: a patch's level, whose
 /// band is the relief its vertices resolve (Design note 13). R10 makes one from a patch's `u8`

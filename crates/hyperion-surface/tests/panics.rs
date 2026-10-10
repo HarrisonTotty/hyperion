@@ -26,6 +26,7 @@ use hyperion_surface::patch::vertex::{PatchTerms, face_difference_morph_f32};
 use hyperion_surface::patch::{BakeOptions, NormalScale, VertexPath, bake_patch};
 use hyperion_surface::spheroid::Spheroid;
 use hyperion_surface::synth::BandSpectrum;
+use hyperion_surface::synth::interp::{CellValues, interpolate};
 use hyperion_surface::test_planet::{TEST_PLANET, octaves};
 use hyperion_surface::wire::encode_payload;
 
@@ -255,4 +256,23 @@ fn level_five_field() -> CoarseField {
 fn a_payload_of_cells_past_its_field_is_refused() {
     let field = level_five_field();
     let _ = encode_payload(&field, &Cover::from_cells([0, 6_200]), None);
+}
+
+/// Cells of level 0, one a face, which the interpolant does not read.
+struct WholeFaces;
+
+impl CellValues for WholeFaces {
+    fn level(&self) -> u8 {
+        0
+    }
+
+    fn value(&self, _: PatchKey) -> Option<f64> {
+        Some(0.0)
+    }
+}
+
+#[test]
+#[should_panic(expected = "the interpolant reads levels 1 to 24, not level 0")]
+fn the_interpolant_refuses_level_0() {
+    let _ = interpolate(&WholeFaces, [0.0, 0.0, 1.0]);
 }

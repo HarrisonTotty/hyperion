@@ -169,19 +169,27 @@ pub fn face_uv_to_xyz(f: FaceUv) -> [f64; 3] {
 #[must_use]
 pub fn xyz_to_face_uv(p: [f64; 3]) -> FaceUv {
     let face = face_of(p);
+    let (u, v) = uv_on_face(face, p);
+    FaceUv { face, u, v }
+}
+
+/// The (u, v) on `face`'s plane of the direction `p`, its central (gnomonic) projection.
+///
+/// They are `p`'s components along the face's u and v axes, each divided by its component along
+/// the face's normal, which must be positive for the point to be in front of the face. On `p`'s
+/// own face ([`face_of`]) they are [`xyz_to_face_uv`]'s (u, v), by the same expressions; on another
+/// face they extend that face's coordinates beyond its edges, as R09's interpolant reads them (plan
+/// R09, Design note 13).
+#[must_use]
+pub(crate) fn uv_on_face(face: Face, p: [f64; 3]) -> (f64, f64) {
     let [x, y, z] = p;
-    let (first, second) = match face {
+    match face {
         Face::PosX => (y / x, z / x),
         Face::PosY => (-x / y, z / y),
         Face::PosZ => (-x / z, -y / z),
         Face::NegX => (z / x, y / x),
         Face::NegY => (z / y, -x / y),
         Face::NegZ => (-y / z, -x / z),
-    };
-    FaceUv {
-        face,
-        u: first,
-        v: second,
     }
 }
 
