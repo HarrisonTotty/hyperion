@@ -15,8 +15,8 @@ use std::fmt;
 use hyperion_surface::cube::PatchKey;
 use hyperion_surface::field::{
     BuildFieldError, BuildFieldHeaderError, ClimateCell, CoarseCrater, CoarseField, FieldHeader,
-    FieldHeaderParts, LogArea, LogPrecipitation, LogSteepness, NO_ENTRY, PrecipitationSource,
-    QuantiseValueError, SynthesisCell, Wind, cell_index,
+    FieldHeaderParts, LogArea, LogPrecipitation, LogRunoff, LogSteepness, NO_ENTRY,
+    PrecipitationSource, QuantiseValueError, SynthesisCell, Wind, cell_index,
 };
 
 use super::inputs::CoarseInputs;
@@ -259,6 +259,9 @@ fn synthesis_record(n: u32, cell: &CellState) -> Result<SynthesisCell, QuantiseF
         drainage: LogArea::from_area(cell.drainage).map_err(at("drainage"))?,
         steepness: LogSteepness::from_index_m0_9(cell.steepness_index_m0_9)
             .map_err(at("steepness"))?,
+        runoff: LogRunoff::from_metres_per_year(cell.runoff_m_per_year).map_err(at("runoff"))?,
+        catchment_runoff: LogRunoff::from_metres_per_year(cell.catchment_runoff_m_per_year)
+            .map_err(at("catchment runoff"))?,
         water_surface_mm: SynthesisCell::quantise_height(cell.water_surface)
             .map_err(at("water surface"))?,
         ice: SynthesisCell::quantise_ice(cell.ice_fraction).map_err(at("ice"))?,
@@ -435,6 +438,8 @@ mod tests {
         working.cells[7].elevation = Metres::new(1_234.567_4);
         working.cells[7].water_surface = Metres::new(1_234.567_4);
         working.cells[7].drainage = SquareMetres::new(1e9);
+        working.cells[7].runoff_m_per_year = 0.1;
+        working.cells[7].catchment_runoff_m_per_year = 0.3;
         working.climate[3].sea_level_temperature =
             Kelvin::new(inputs.mean_surface_temperature().value() + 400.0);
         working.climate[3].month_anomaly_k[5] = -20.0;
@@ -447,6 +452,10 @@ mod tests {
             field.synthesis()[7].drainage,
             LogArea::from_area(SquareMetres::new(1e9)).unwrap()
         );
+        // Mars's epoch and Earth's mean land runoff (science-r09-drainage.md §1.3).
+        assert_eq!(field.synthesis()[7].runoff, LogRunoff::new(121));
+        assert_eq!(field.synthesis()[7].catchment_runoff, LogRunoff::new(140));
+        assert_eq!(field.synthesis()[8].runoff, LogRunoff::NONE);
         // 400 K needs the step 0.01 K × 2 to fit an i16, and 20 K the anomaly step 0.25 K.
         assert_eq!(field.header().temperature_step(), 1);
         assert_eq!(field.header().anomaly_step(), 0);
@@ -466,6 +475,16 @@ mod tests {
         assert_eq!(error.to_string(), "cell 9's ice has no code");
         assert!(Error::source(&error).is_some());
         working.cells[9].ice_fraction = 0.0;
+        working.cells[10].catchment_runoff_m_per_year = -0.1;
+        assert_eq!(
+            quantise(&inputs, working.clone()),
+            Err(QuantiseFieldError::Cell {
+                cell: 10,
+                part: "catchment runoff",
+                error: QuantiseValueError::OutOfRange(-0.1),
+            })
+        );
+        working.cells[10].catchment_runoff_m_per_year = 0.0;
         working.cells[11].water_surface = Metres::new(-1.0);
         assert_eq!(
             quantise(&inputs, working.clone()),

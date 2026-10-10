@@ -18,8 +18,8 @@ use super::DecodeBlockError;
 use crate::craters::{CraterParams, CraterParamsParts, Screening};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, Crust, FieldHeaderParts, FlowDirection,
-    LogArea, LogPrecipitation, LogSteepness, MaterialPalette, MechanicsFamily, Morphology,
-    PaletteEntry, PaletteRole, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
+    LogArea, LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily,
+    Morphology, PaletteEntry, PaletteRole, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
 };
 use crate::spheroid::Spheroid;
 use crate::substance_key::SubstanceKey;
@@ -65,8 +65,8 @@ macro_rules! wire_table {
     };
 }
 
-// One cell's synthesis record (Design note 17's 21 bytes, the substance byte and the sea floor's),
-// in its declared order.
+// One cell's synthesis record (Design note 17's 21 bytes, the two runoff bytes, which follow the
+// steepness, the substance byte and the sea floor's), in its declared order.
 wire_table!(fixed SynthesisCell {
     elevation_mm: i32,
     boundary_distance_km: i16,
@@ -77,6 +77,8 @@ wire_table!(fixed SynthesisCell {
     flow: FlowDirection,
     drainage: LogArea,
     steepness: LogSteepness,
+    runoff: LogRunoff,
+    catchment_runoff: LogRunoff,
     water_surface_mm: i32,
     ice: u8,
     substances: u8,
@@ -126,13 +128,13 @@ wire_table!(FieldHeaderParts {
 });
 
 // A palette entry (59 bytes): its key's 16 padded bytes, its role, its normal albedo in B, V and R,
-// its phase row, density, transition and mechanics family.
+// its phase row, grain density, transition and mechanics family.
 wire_table!(fixed PaletteEntry {
     substance: SubstanceKey,
     role: PaletteRole,
     normal_albedo_bvr: [f64; 3],
     phase_row: u8,
-    density_kg_m3: f64,
+    grain_density_kg_m3: f64,
     transition: Kelvin,
     mechanics: MechanicsFamily,
 });
@@ -282,7 +284,13 @@ macro_rules! wire_scaled {
     };
 }
 
-wire_scaled!(LogArea: u16, LogSteepness: u8, LogPrecipitation: u8, SurfaceClass: u8);
+wire_scaled!(
+    LogArea: u16,
+    LogSteepness: u8,
+    LogRunoff: u8,
+    LogPrecipitation: u8,
+    SurfaceClass: u8
+);
 
 impl<T: Wire + Copy + Default, const N: usize> Wire for [T; N] {
     fn put(&self, out: &mut Vec<u8>) {
@@ -556,13 +564,14 @@ mod tests {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// The records' strides are Design note 17's: 23 bytes a synthesis record (its 21, the
-    /// substance byte and the sea floor's) and 50 a climate record, and a palette entry is 59; the
-    /// header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field added to any moves them,
-    /// and the payload's size with them.
+    /// The records' strides are Design note 17's: 25 bytes a synthesis record (its 21, the
+    /// substance byte, the sea floor's and the two runoff bytes) and 50 a climate record, and a
+    /// palette entry is 59; the header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field
+    /// added to any moves them, and the payload's size with them.
     #[test]
     fn wire_records_have_design_note_seventeens_strides() {
-        assert_eq!(SynthesisCell::BYTES, 23);
+        assert_eq!(SynthesisCell::BYTES, 25);
+        assert_eq!(LogRunoff::BYTES, 1);
         assert_eq!(BandSpectrum::BYTES, 32);
         assert_eq!(ClimateCell::BYTES, 50);
         assert_eq!(Wind::BYTES, 2);
@@ -669,7 +678,7 @@ mod tests {
             role: PaletteRole::Ice,
             normal_albedo_bvr: [0.5, 0.0, 1.25],
             phase_row: 7,
-            density_kg_m3: 1_170.0,
+            grain_density_kg_m3: 1_170.0,
             transition: Kelvin::new(390.0),
             mechanics: MechanicsFamily::VolatileIce,
         };

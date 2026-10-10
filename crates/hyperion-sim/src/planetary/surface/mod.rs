@@ -108,7 +108,7 @@ use steps::{Pass, Working};
 ///     role: PaletteRole::SecondaryCrust,
 ///     normal_albedo_bvr: [0.094; 3],
 ///     phase_row: 0,
-///     density_kg_m3: 2_500.0,
+///     grain_density_kg_m3: 2_500.0,
 ///     transition: Kelvin::new(1_253.15),
 ///     mechanics: MechanicsFamily::Silicate,
 /// }])?;

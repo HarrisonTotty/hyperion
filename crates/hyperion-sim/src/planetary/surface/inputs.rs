@@ -1384,7 +1384,7 @@ mod tests {
             role,
             normal_albedo_bvr: [0.1; 3],
             phase_row: 0,
-            density_kg_m3: 1_000.0,
+            grain_density_kg_m3: 1_000.0,
             transition: Kelvin::new(300.0),
             mechanics: MechanicsFamily::Silicate,
         }

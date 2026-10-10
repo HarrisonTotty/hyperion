@@ -8,16 +8,19 @@
 //! give each field the character of its body (an Earth's two crusts, belts and trenches; a Mars's
 //! dichotomy, Tharsis and dry valleys; a Moon's basins and maria; a Ceres's ice-rich craters), not
 //! plan 14's values or the coarse pass's. The four bodies carry palettes (decision-composition
-//! §1.7): an Earth's basalt, granite and water as ice and as liquid; a Mars's basalt, dust and
-//! water and CO₂ ices; a Moon's anorthosite and its maria's basalt; a Ceres's phyllosilicate,
-//! sodium carbonate and water ice. Their keys are checked by the grammar alone until plan 14's
-//! rows exist (P14.T49.b's test then checks them against the registry), and their values are
-//! illustrative ones, each with its basis, standing in for nothing: the server resolves a
-//! generated world's from the registry. The flat field and the single crater have an empty
-//! palette. The four bodies' structural spectra are their crust classes' anchored laws
-//! (`decision-r09-t5.md` item 3): the Earth-like world's a mobile lid's, the others a rocky
-//! stagnant lid's (Ceres-like as the reference Ceres's rock); and the Earth-like world's sea floor
-//! is closed forms in the place of R09.T11's and T12.a's (item 5).
+//! §1.7; science-r09-drainage.md §3–§5): an Earth's basalt, granite and water as ice and as liquid;
+//! a Mars's basalt, dust and water and CO₂ ices; a Moon's anorthosite, its maria's basalt and the
+//! water ice of its cold traps; a Ceres's phyllosilicate, its primary crust, sodium carbonate and
+//! water ice. Their keys are checked by the grammar alone until plan 14's rows exist (P14.T49.b's
+//! test then checks them against the registry), and their values are illustrative ones, each with
+//! its basis, standing in for nothing: the server resolves a generated world's from the registry.
+//! The flat field and the single crater have an empty palette. The four bodies' structural spectra
+//! are their crust classes' anchored laws (`decision-r09-t5.md` item 3): the Earth-like world's a
+//! mobile lid's, the others a rocky stagnant lid's (Ceres-like as the reference Ceres's rock); and
+//! the Earth-like world's sea floor is closed forms in the place of R09.T11's and T12.a's (item
+//! 5). The two routed worlds shed runoff (science-r09-drainage.md §1.5 (f)): the Earth's a share of
+//! its precipitation, so that its dry belts drain wetter catchments, and the Mars's its wet
+//! epoch's, uniform.
 
 use core::f64::consts::FRAC_PI_3;
 
@@ -35,7 +38,7 @@ use crate::craters::{CraterParams, CraterParamsParts, Screening};
 use crate::cube::unit_dir;
 use crate::field::{
     BodyRef, BoundaryKind, ClimateModelKind, CoarseField, Crust, MaterialPalette, MechanicsFamily,
-    PaletteEntry, PaletteRole,
+    PaletteEntry, PaletteRole, month_edges,
 };
 use crate::num;
 use crate::spheroid::Spheroid;
@@ -121,11 +124,13 @@ const CERES_ORBIT_E: f64 = 0.079_692_295;
 /// range for the class (researched there, mostly from memory, and settled in R10.T1.a), but the
 /// anorthosite's, the top of its range, the phyllosilicate's, Ceres's measured albedo, and liquid
 /// water's, the Fresnel reflectance of its surface at normal incidence in each band, which R11's
-/// ocean replaces. Every phase row is 0 until R10 assigns its rows.
+/// ocean replaces. Every phase row is 0 until R10 assigns its rows. Every density is a grain
+/// density, the porosity being how a material lies, which R10's forms carry
+/// (science-r09-drainage.md §3).
 struct Substance {
     key: SubstanceKey,
     normal_albedo_bvr: [f64; 3],
-    density_kg_m3: f64,
+    grain_density_kg_m3: f64,
     transition_k: f64,
     mechanics: MechanicsFamily,
 }
@@ -139,63 +144,72 @@ impl Substance {
             role,
             normal_albedo_bvr: self.normal_albedo_bvr,
             phase_row: 0,
-            density_kg_m3: self.density_kg_m3,
+            grain_density_kg_m3: self.grain_density_kg_m3,
             transition: Kelvin::new(self.transition_k),
             mechanics: self.mechanics,
         }
     }
 }
 
-/// The dry solidus of a basalt at 1 atm, about 1,050 °C, kelvin (Yoder and Tilley 1962, J.
-/// Petrol. 3, 342, from memory and not read; low confidence: a natural tholeiite's is 980 °C,
-/// Wright and Okamura 1977, USGS Professional Paper 1004): basalt's, and the basaltic dust's and
-/// the phyllosilicate's dehydrated residue's.
-const BASALT_SOLIDUS_K: f64 = 1_323.15;
+/// The solidus of a basalt at about 1 atm, 980 °C, kelvin: a natural Hawaiian tholeiite's, below
+/// which its residual glass, 4 per cent, stops falling (Wright and Okamura 1977, USGS Professional
+/// Paper 1004, abstract and Table 15, after Wright and Weiblen 1967; ±10 °C), as the reference rows
+/// take it (science-r09-drainage.md §2), and as Alae lava lake's (Peck 1978, USGS Professional
+/// Paper 935-B, p. B1; Wright and Peck 1978, Professional Paper 935-C, p. C1). Basalt's, and, by
+/// assumption without a source, the basaltic dust's and the phyllosilicate's dehydrated residue's.
+const BASALT_SOLIDUS_K: f64 = 1_253.15;
 
-/// Basalt: Design note 8's basaltic rock, `A_N` 0.05–0.15; a typical bulk density of 2,900 kg m⁻³
-/// (2,700–3,100; Philpotts and Ague 2009, Principles of Igneous and Metamorphic Petrology, p. 22,
-/// not read; low confidence).
+/// Basalt: Design note 8's basaltic rock, `A_N` 0.05–0.15; a grain density of 3,010 kg m⁻³, the
+/// mean of eight Alae lava lake tholeiites, 2,920–3,040 (Peck 1978, USGS Professional Paper
+/// 935-B, p. B20; science-r09-drainage.md §3), the lunar mare basalts' 3,270–3,460 kg m⁻³, rich in
+/// iron and titanium oxides, being a variant's (Kiefer et al. 2012, GRL 39, L07201).
 const BASALT: Substance = Substance {
     key: SubstanceKey::new_const("basalt"),
     normal_albedo_bvr: [0.10; 3],
-    density_kg_m3: 2_900.0,
+    grain_density_kg_m3: 3_010.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
 
-/// Granite: Design note 8's felsic rock, `A_N` 0.2–0.35; a bulk density of 2,650 kg m⁻³ (2,650–
-/// 2,750) and a dry solidus at 1 atm of about 960 °C (no source read; low confidence).
+/// Granite: Design note 8's felsic rock, `A_N` 0.2–0.35; a grain density of 2,650 kg m⁻³ (low
+/// confidence: about 2,630 from its minerals', quartz 2.65, microcline 2.54–2.57 and albite
+/// 2.60–2.65 g cm⁻³, Handbook of Mineralogy, its porosity being under about 1 per cent, from
+/// memory and not read, so that its bulk and grain densities agree; science-r09-drainage.md §3)
+/// and a dry solidus at 1 atm of about 960 °C (no source read; low confidence).
 const GRANITE: Substance = Substance {
     key: SubstanceKey::new_const("granite"),
     normal_albedo_bvr: [0.275; 3],
-    density_kg_m3: 2_650.0,
+    grain_density_kg_m3: 2_650.0,
     transition_k: 1_233.15,
     mechanics: MechanicsFamily::Silicate,
 };
 
 /// Anorthosite, as the lunar highlands' mature regolith: the top of Design note 8's regolith
-/// range, 0.07–0.20, the highlands being its brightest; the highland crust's bulk density, 2,550
-/// kg m⁻³ (Wieczorek et al. 2013, Science 339, 671, from GRAIL); and about the solidus of calcic
+/// range, 0.07–0.20, the highlands being its brightest; the highland crust's grain density, 2,900
+/// kg m⁻³, implied by its GRAIL bulk density, 2,550 kg m⁻³, at 12 per cent porosity (Wieczorek et
+/// al. 2013, Science 339, 671; science-r09-drainage.md §3); and about the solidus of calcic
 /// plagioclase (An₉₅) at 1 atm, 1,500 °C (an ideal-solution loop gives 1,515–1,527 °C; Bowen
 /// 1913, Am. J. Sci. s4-35, 577, not read; low confidence).
 const ANORTHOSITE: Substance = Substance {
     key: SubstanceKey::new_const("anorthosite"),
     normal_albedo_bvr: [0.20; 3],
-    density_kg_m3: 2_550.0,
+    grain_density_kg_m3: 2_900.0,
     transition_k: 1_773.15,
     mechanics: MechanicsFamily::Silicate,
 };
 
-/// A phyllosilicate-rich rock, as Ceres's crust: Ceres's geometric albedo, 0.094 ± 0.007 at
-/// 0.55 µm (Ciarniello et al. 2017, A&A 598, A130), which is its normal albedo (Schröder et al.
-/// 2017, Icarus 288, 201, who adopt 0.10 ± 0.01); a grain density of 2,500 kg m⁻³, between
-/// saponite's 2,240–2,300 and lizardite's 2,550 (Anthony et al., Handbook of Mineralogy), not
-/// Ceres's bulk crust, 1,200–1,400 kg m⁻³ with its ice and salts (Ermakov et al. 2017, JGR
-/// Planets 122, 2267); and its dehydrated residue's solidus, as basalt's.
+/// A phyllosilicate-rich rock, as Ceres's crust, a primary one, its frozen ocean's shell
+/// (science-r09-drainage.md §5): Ceres's geometric albedo, 0.094 ± 0.007 at 0.55 µm (Ciarniello et
+/// al. 2017, A&A 598, A130), which is its normal albedo (Schröder et al. 2017, Icarus 288, 201, who
+/// adopt 0.10 ± 0.01); a grain density of 2,500 kg m⁻³, between saponite's 2,240–2,300 and
+/// lizardite's 2,550 (Anthony et al., Handbook of Mineralogy), not Ceres's bulk crust, 1,200–1,400
+/// kg m⁻³ with its ice and salts (Ermakov et al. 2017, JGR Planets 122, 2267), which is the body's
+/// mixture, not a substance's; and, by assumption without a source, its dehydrated residue's
+/// solidus, as basalt's.
 const PHYLLOSILICATE: Substance = Substance {
     key: SubstanceKey::new_const("phyllosilicate"),
     normal_albedo_bvr: [0.094; 3],
-    density_kg_m3: 2_500.0,
+    grain_density_kg_m3: 2_500.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
@@ -207,18 +221,19 @@ const PHYLLOSILICATE: Substance = Substance {
 const SODIUM_CARBONATE: Substance = Substance {
     key: SubstanceKey::new_const("Na2CO3"),
     normal_albedo_bvr: [0.65; 3],
-    density_kg_m3: 2_540.0,
+    grain_density_kg_m3: 2_540.0,
     transition_k: 1_124.15,
     mechanics: MechanicsFamily::Salt,
 };
 
-/// Mars's bright dust: Design note 8's 0.18–0.25 in V; the bulk density of the Viking landers'
-/// undisturbed drift material, 1,200 kg m⁻³ (Moore et al. 1987, USGS Professional Paper 1389,
-/// p. 126); basaltic, so basalt's solidus.
+/// Mars's bright dust: Design note 8's 0.18–0.25 in V; a grain density of 2,600 kg m⁻³, which
+/// Viking Lander 1's fine material's 58 per cent porosity assumes (Moore et al. 1987, USGS
+/// Professional Paper 1389, p. 121 and Table 36; an assumption there, labelled so); the drift's
+/// bulk, 1,200 kg m⁻³, is a form's (science-r09-drainage.md §3); basaltic, so basalt's solidus.
 const MARS_DUST: Substance = Substance {
     key: SubstanceKey::new_const("mars_dust"),
     normal_albedo_bvr: [0.215; 3],
-    density_kg_m3: 1_200.0,
+    grain_density_kg_m3: 2_600.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
@@ -233,7 +248,7 @@ const WATER_MELTING_K: f64 = 273.15;
 const WATER_ICE: Substance = Substance {
     key: SubstanceKey::new_const("H2O"),
     normal_albedo_bvr: [0.965; 3],
-    density_kg_m3: 916.72,
+    grain_density_kg_m3: 916.72,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
 };
@@ -245,7 +260,7 @@ const WATER_ICE: Substance = Substance {
 const WATER: Substance = Substance {
     key: SubstanceKey::new_const("H2O"),
     normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
-    density_kg_m3: 999.84,
+    grain_density_kg_m3: 999.84,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
 };
@@ -257,7 +272,7 @@ const WATER: Substance = Substance {
 const CARBON_DIOXIDE_ICE: Substance = Substance {
     key: SubstanceKey::new_const("CO2"),
     normal_albedo_bvr: [0.6; 3],
-    density_kg_m3: 1_621.0,
+    grain_density_kg_m3: 1_621.0,
     transition_k: 216.592,
     mechanics: MechanicsFamily::VolatileIce,
 };
@@ -567,6 +582,28 @@ fn earth_seafloor(site: &CellSite, plates: &[PlateSpec]) -> SeafloorSample {
     }
 }
 
+/// The share of the Earth-like world's annual precipitation that is its erosive runoff, 0.4, an
+/// illustration (science-r09-drainage.md §1.5 (f) and §7): about Earth's ratio of global runoff
+/// to land precipitation, about 0.35, 40 of 113 × 10³ km³ a year (Trenberth et al. 2007, J.
+/// Hydrometeorol. 8, 758, as secondary sources give it; not read), so that a river from its rain
+/// bands crossing its dry belts carries a catchment runoff unlike its cells' own.
+const EARTH_RUNOFF_SHARE: f64 = 0.4;
+
+/// The Earth-like world's own erosive runoff at `dir`, metres of liquid water a Julian year:
+/// [`EARTH_RUNOFF_SHARE`] of its annual precipitation there, each month's rate weighted by the
+/// share of the year its span of mean anomaly is ([`month_edges`]), as a depth of liquid water at
+/// its palette entry's density.
+#[must_use]
+fn earth_runoff_m_per_year(dir: [f64; 3]) -> f64 {
+    let edges = month_edges(EARTH_ORBIT_E).expect("Earth's seasonal orbit is bound");
+    let kg_per_m2_s: f64 = edges
+        .windows(2)
+        .zip(earth_climate(dir).month_precipitation_kg_m2_s)
+        .map(|(span, rate)| (span[1].value() - span[0].value()) / core::f64::consts::TAU * rate)
+        .sum();
+    EARTH_RUNOFF_SHARE * kg_per_m2_s * SECONDS_PER_JULIAN_YEAR / WATER.grain_density_kg_m3
+}
+
 fn earth_like() -> CoarseField {
     let plates: Vec<PlateSpec> = EARTH_PLATES
         .iter()
@@ -642,6 +679,7 @@ fn earth_like() -> CoarseField {
         })
         .climate(earth_climate)
         .routing(Routing::SteepestDescent)
+        .runoff(earth_runoff_m_per_year)
         .crater(
             lat_lon(21.4, -89.5),
             Metres::new(180e3),
@@ -716,6 +754,13 @@ fn mars_climate(dir: [f64; 3]) -> ClimateSample {
     sample
 }
 
+/// The Mars-like world's wet epoch's runoff, uniform, metres a Julian year: 0.1 m a⁻¹ at the
+/// reference flood intermittency, science-hoke.md §3's value (0.55 cm a day of storm runoff
+/// flowing 5 per cent of the time, inside the 0.4–6 cm a day of Hoke, Hynek and Tucker 2011, EPSL
+/// 312, 1), over a surface taken as wholly older than the epoch's end (science-r09-drainage.md
+/// §1.5 (f); a simplification, since Tharsis's and the caps' surfaces are younger).
+const MARS_EPOCH_RUNOFF_M_PER_YEAR: f64 = 0.1;
+
 fn mars_like() -> CoarseField {
     let mars = palette(vec![
         BASALT.entry(PaletteRole::SecondaryCrust),
@@ -778,6 +823,7 @@ fn mars_like() -> CoarseField {
         })
         .climate(mars_climate)
         .routing(Routing::SteepestDescent)
+        .runoff(|_| MARS_EPOCH_RUNOFF_M_PER_YEAR)
         .crater(
             lat_lon(-42.4, 70.5),
             Metres::new(2_300e3),
@@ -817,9 +863,13 @@ fn procellarum() -> [f64; 3] {
 }
 
 fn moon_like() -> CoarseField {
+    // Water ice lies in the Moon's cold traps (Li et al. 2018, PNAS 115, 8907), an entry no cell's
+    // share names until P14.T51.f states the area and R09.T13.f places it
+    // (science-r09-drainage.md §4).
     let moon = palette(vec![
         ANORTHOSITE.entry(PaletteRole::PrimaryCrust),
         BASALT.entry(PaletteRole::Province),
+        WATER_ICE.entry(PaletteRole::Ice),
     ]);
     let highlands = index(&moon, &ANORTHOSITE, PaletteRole::PrimaryCrust);
     let maria = index(&moon, &BASALT, PaletteRole::Province);
@@ -891,16 +941,18 @@ fn moon_like() -> CoarseField {
 }
 
 fn ceres_like() -> CoarseField {
+    // The crust is primary, crystallised from Ceres's ocean, and there is no secondary: the lid is
+    // it, its provinces would be it, and V = 0 builds none (science-r09-drainage.md §5).
     let ceres = palette(vec![
-        PHYLLOSILICATE.entry(PaletteRole::SecondaryCrust),
+        PHYLLOSILICATE.entry(PaletteRole::PrimaryCrust),
         WATER_ICE.entry(PaletteRole::Ice),
         SODIUM_CARBONATE.entry(PaletteRole::Deposit),
     ]);
-    let crust = index(&ceres, &PHYLLOSILICATE, PaletteRole::SecondaryCrust);
+    let crust = index(&ceres, &PHYLLOSILICATE, PaletteRole::PrimaryCrust);
     let builder = FieldBuilder::new(Metres::new(CERES_RADIUS_M))
         .body(BodyRef::new(SYSTEM, 4))
         .palette(ceres)
-        .crust_palette([None, None, Some(crust), None])
+        .crust_palette([None, None, Some(crust), Some(crust)])
         .figure(Spheroid::from_volumetric(CERES_RADIUS_M, 0.075).expect("Ceres's figure is valid"))
         .spectrum(stagnant_lid_spectrum(CERES_RADIUS_M))
         .crater_params(

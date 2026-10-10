@@ -25,9 +25,14 @@ coded_enum! {
     /// reprocessing of secondary crust (Taylor 1989, Tectonophysics 161, 147; Taylor and McLennan
     /// 2009, Planetary Crusts, Cambridge University Press; not read).
     PaletteRole {
-        /// A primary crust, as the lunar highlands' anorthosite.
+        /// A primary crust, crystallised from the body's first global liquid: a magma ocean's
+        /// flotation crust, as the lunar highlands' anorthosite, or a frozen ocean's shell with what
+        /// it trapped, as Ceres's ice-, salt- and phyllosilicate-bearing crust (Castillo-Rogez et
+        /// al. 2018, MAPS 53, 1820, p. 1838; science-r09-drainage.md §5).
         PrimaryCrust = 0,
-        /// A secondary crust, as basalt: the ocean floors, a Mars's crust.
+        /// A secondary crust, a solid mantle's partial melt, as basalt: the ocean floors, a Mars's
+        /// crust. A body may have none (a Ceres, whose rock "avoided igneous differentiation", Fu
+        /// et al. 2017, EPSL 476, 153).
         SecondaryCrust = 1,
         /// A tertiary crust, as the granite of Earth's continents.
         TertiaryCrust = 2,
@@ -98,8 +103,12 @@ pub struct PaletteEntry {
     /// The row of R10's phase table, its law's f(α) and L(α), whose codes R10 assigns; 0 in every
     /// field until it does.
     pub phase_row: u8,
-    /// The substance's bulk density, kg m⁻³: finite and positive.
-    pub density_kg_m3: f64,
+    /// The substance's grain density, kg m⁻³: the mass of its solid or liquid over that solid's or
+    /// liquid's own volume, without pore space (a rock's grain density, an ice's crystal density, a
+    /// liquid's density); finite and positive. A layer's bulk density is this times one less its
+    /// porosity, which the reader takes from how the material lies (R10's forms by depth), never
+    /// from the palette (science-r09-drainage.md §3).
+    pub grain_density_kg_m3: f64,
     /// The temperature above which the substance is melt or liquid: the solidus of a lithology,
     /// the melting point or eutectic of an ice or a liquid. Finite and positive.
     pub transition: Kelvin,
@@ -141,7 +150,7 @@ pub enum BuildPaletteError {
         /// The entry's index.
         entry: u8,
     },
-    /// An entry's density is not finite and positive.
+    /// An entry's grain density is not finite and positive.
     Density {
         /// The entry's index.
         entry: u8,
@@ -172,7 +181,7 @@ impl std::fmt::Display for BuildPaletteError {
             Self::Density { entry } => {
                 write!(
                     f,
-                    "palette entry {entry}'s density is not finite and positive"
+                    "palette entry {entry}'s grain density is not finite and positive"
                 )
             }
             Self::Transition { entry } => write!(
@@ -218,7 +227,7 @@ impl MaterialPalette {
             {
                 return Err(BuildPaletteError::Albedo { entry });
             }
-            if !positive(e.density_kg_m3) {
+            if !positive(e.grain_density_kg_m3) {
                 return Err(BuildPaletteError::Density { entry });
             }
             if !positive(e.transition.value()) {
@@ -287,7 +296,7 @@ mod tests {
             role,
             normal_albedo_bvr: [0.1, 0.1, 0.1],
             phase_row: 0,
-            density_kg_m3: 2_900.0,
+            grain_density_kg_m3: 2_900.0,
             transition: Kelvin::new(1_300.0),
             mechanics: MechanicsFamily::Silicate,
         }
@@ -373,7 +382,7 @@ mod tests {
             BuildPaletteError::Albedo { entry: 0 }
         );
         assert_eq!(
-            refuse(|e| e.density_kg_m3 = 0.0),
+            refuse(|e| e.grain_density_kg_m3 = 0.0),
             BuildPaletteError::Density { entry: 0 }
         );
         assert_eq!(

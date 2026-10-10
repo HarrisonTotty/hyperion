@@ -4,11 +4,11 @@
 //!
 //! [`synthetic_field`] builds one of six [`SyntheticWorld`]s: an Earth-, a Mars-, a Moon- and a
 //! Ceres-like field, a flat field and a single crater. [`FieldBuilder`] builds any other: the caller
-//! gives the body, its palette, the plates or the crust, and the elevation, ice and climate as
-//! functions of position, and the builder derives what depends on them (the plates' boundaries, the
-//! water, each cell's substances, the flow and drainage, the craters' morphology, relief and reach,
-//! the header's realised figures and steps), so that every field it returns is valid by
-//! construction.
+//! gives the body, its palette, the plates or the crust, and the elevation, ice, climate and runoff
+//! as functions of position, and the builder derives what depends on them (the plates' boundaries,
+//! the water, each cell's substances, the flow, drainage and catchment runoff, the craters'
+//! morphology, relief and reach, the header's realised figures and steps), so that every field it
+//! returns is valid by construction.
 //!
 //! These are test inputs, not generated worlds: nothing here draws from a stream, the values are
 //! illustrative ones near the real bodies', and the coarse pass's physics (R09.T10–T16) is
@@ -35,8 +35,8 @@ use crate::cube::{Edge, PatchKey, st_to_uv};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseCrater, CoarseField, CoarseLevel,
     Cover, Crust, FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogPrecipitation,
-    LogSteepness, MaterialPalette, Morphology, PaletteRole, PrecipitationSource, SurfaceClass,
-    SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
+    LogRunoff, LogSteepness, MaterialPalette, Morphology, PaletteRole, PrecipitationSource,
+    SurfaceClass, SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
 };
 use crate::spheroid::Spheroid;
 use crate::synth::relief::H_REF;
@@ -125,10 +125,13 @@ impl SeafloorSample {
 /// How the builder routes water.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Routing {
-    /// Not at all: every cell is terminal, with no drainage, as on a world with no fluvial step.
+    /// Not at all: every cell is terminal, with no drainage and no runoff, as on a world with no
+    /// fluvial step.
     None,
     /// Each dry cell to its edge neighbour of steepest descent, if any is lower, accumulating
-    /// drainage area downstream; a cell under water is terminal.
+    /// downstream the geometric drainage area and, beside it, the equivalent area of the
+    /// builder's [`runoff`](FieldBuilder::runoff), whose ratio is each cell's catchment runoff; a
+    /// cell under water is terminal.
     SteepestDescent,
 }
 
@@ -183,6 +186,7 @@ pub struct FieldBuilder {
     climate: DirFn<ClimateSample>,
     seafloor: SiteFn<SeafloorSample>,
     routing: Routing,
+    runoff_m_per_year: DirFn<f64>,
     craters: Vec<CraterSpec>,
 }
 
@@ -250,6 +254,7 @@ impl FieldBuilder {
             climate: Box::new(|_| ClimateSample::still(Kelvin::new(250.0))),
             seafloor: Box::new(|_| SeafloorSample::REFERENCE),
             routing: Routing::None,
+            runoff_m_per_year: Box::new(|_| 0.0),
             craters: Vec::new(),
         }
     }
@@ -416,6 +421,16 @@ impl FieldBuilder {
         self
     }
 
+    /// The erosive runoff a dry cell sheds of its own, as a function of its centre, metres of
+    /// liquid a Julian year, finite and non-negative: what [`Routing::SteepestDescent`]
+    /// accumulates downstream beside the geometric area (science-r09-drainage.md §1). None by
+    /// default; a cell under liquid sheds none of its own, and a world not routed has none.
+    #[must_use]
+    pub fn runoff(mut self, m_per_year: impl Fn([f64; 3]) -> f64 + 'static) -> Self {
+        self.runoff_m_per_year = Box::new(m_per_year);
+        self
+    }
+
     /// A crater of `diameter` (at least the field's boundary diameter) centred on the unit vector
     /// `centre`, formed `age` ago, of degradation code `degradation` (255ths of its rim lost). Its
     /// morphology, depth and rim follow from its diameter, and its relief, Design note 13's
@@ -449,8 +464,9 @@ impl FieldBuilder {
     /// - a crater whose centre is not a finite unit vector, whose age is not finite and
     ///   non-negative, or which is narrower than the boundary diameter, or two craters of one
     ///   centre cell and diameter;
-    /// - an elevation beyond ±2,147 km, or a climate whose temperatures, anomalies, rates or winds
-    ///   no code can hold;
+    /// - an elevation beyond ±2,147 km, a climate whose temperatures, anomalies, rates or winds
+    ///   no code can hold, or a routed world's runoff, or a catchment's mean of it, that no code
+    ///   can hold;
     /// - an oceanic cell's sea floor whose hill relief is not finite and positive, or whose ponded
     ///   sediment is not finite and non-negative;
     /// - a crust's palette entry or a main liquid the header refuses, a cell with ice and no ice
@@ -505,10 +521,7 @@ impl FieldBuilder {
                 elevation_mm.clone(),
             ),
         };
-        let routes = match self.routing {
-            Routing::None => vec![Route::TERMINAL; elevation_mm.len()],
-            Routing::SteepestDescent => grid.route(&elevation_mm, &water_mm, r),
-        };
+        let routes = self.routes(&grid, &sites, &elevation_mm, &water_mm, r);
         let synthesis: Vec<SynthesisCell> = (0..sites.len())
             .map(|n| self.record(&sites[n], elevation_mm[n], water_mm[n], routes[n]))
             .collect();
@@ -560,6 +573,35 @@ impl FieldBuilder {
             .expect("a built field is valid by construction")
     }
 
+    /// Every cell's route on `grid`, a body of radius `r` metres: none on a world not routed, and
+    /// otherwise steepest descent with each dry cell's own runoff, a cell under liquid shedding
+    /// none.
+    #[must_use]
+    fn routes(
+        &self,
+        grid: &Grid,
+        sites: &[CellSite],
+        elevation_mm: &[i32],
+        water_mm: &[i32],
+        r: f64,
+    ) -> Vec<Route> {
+        match self.routing {
+            Routing::None => vec![Route::TERMINAL; elevation_mm.len()],
+            Routing::SteepestDescent => {
+                let own_runoff_m_per_year: Vec<f64> = (0..sites.len())
+                    .map(|n| {
+                        if water_mm[n] > elevation_mm[n] {
+                            0.0
+                        } else {
+                            (self.runoff_m_per_year)(sites[n].dir)
+                        }
+                    })
+                    .collect();
+                grid.route(elevation_mm, water_mm, &own_runoff_m_per_year, r)
+            }
+        }
+    }
+
     /// The synthesis record of the cell at `site`, with its quantised elevation and water surface
     /// and its route.
     fn record(
@@ -593,6 +635,8 @@ impl FieldBuilder {
             flow: route.flow,
             drainage: route.drainage,
             steepness: route.steepness,
+            runoff: route.runoff,
+            catchment_runoff: route.catchment_runoff,
             water_surface_mm: water_mm,
             ice,
             substances: SynthesisCell::pack_substances(ice_entry, liquid_entry)
@@ -839,12 +883,14 @@ impl PreparedCrater {
     }
 }
 
-/// One cell's flow, drainage and steepness.
+/// One cell's flow, drainage, steepness and runoffs.
 #[derive(Debug, Clone, Copy)]
 struct Route {
     flow: FlowDirection,
     drainage: LogArea,
     steepness: LogSteepness,
+    runoff: LogRunoff,
+    catchment_runoff: LogRunoff,
 }
 
 impl Route {
@@ -852,6 +898,8 @@ impl Route {
         flow: FlowDirection::Terminal,
         drainage: LogArea::ZERO,
         steepness: LogSteepness::ZERO,
+        runoff: LogRunoff::NONE,
+        catchment_runoff: LogRunoff::NONE,
     };
 }
 
@@ -892,8 +940,18 @@ impl Grid {
     }
 
     /// Steepest descent to an edge neighbour from each dry cell, ties to the first edge of
-    /// [`Edge::ALL`], and the drainage area accumulated downstream in order of falling elevation.
-    fn route(&self, elevation_mm: &[i32], water_mm: &[i32], r: f64) -> Vec<Route> {
+    /// [`Edge::ALL`], and the geometric drainage area accumulated downstream in order of falling
+    /// elevation, with, beside it, the equivalent area of the cells' own runoffs,
+    /// `own_runoff_m_per_year` metres a Julian year: Hergarten's ∫ r dA ÷ (1 m a⁻¹) (Hergarten
+    /// 2021, Earth Surf. Dynam. 9, 937, eqs. 16 and 20), whose ratio to the geometric area is the
+    /// catchment's area-weighted mean runoff (science-r09-drainage.md §1).
+    fn route(
+        &self,
+        elevation_mm: &[i32],
+        water_mm: &[i32],
+        own_runoff_m_per_year: &[f64],
+        r: f64,
+    ) -> Vec<Route> {
         let n = self.cells.len();
         let mut receivers: Vec<Option<(usize, Edge, f64)>> = vec![None; n];
         for (k, &cell) in self.cells.iter().enumerate() {
@@ -917,20 +975,33 @@ impl Grid {
         let mut order: Vec<usize> = (0..n).collect();
         order.sort_by_key(|&k| (std::cmp::Reverse(elevation_mm[k]), k));
         let mut area: Vec<f64> = self.solid_angles_sr.iter().map(|w| w * r * r).collect();
+        // m² × m a⁻¹ ÷ (1 m a⁻¹): each cell's own share, accumulated in the same order.
+        let mut equivalent: Vec<f64> = area
+            .iter()
+            .zip(own_runoff_m_per_year)
+            .map(|(a, q)| a * q)
+            .collect();
         for &k in &order {
             if let Some((next, _, _)) = receivers[k] {
                 area[next] += area[k];
+                equivalent[next] += equivalent[k];
             }
         }
         (0..n)
             .map(|k| {
                 let drainage = LogArea::from_area(SquareMetres::new(area[k]))
                     .expect("a drainage area has a code");
+                let runoff = LogRunoff::from_metres_per_year(own_runoff_m_per_year[k])
+                    .expect("a synthetic runoff is finite, non-negative and under about 235 m a⁻¹");
+                let catchment_runoff = LogRunoff::from_metres_per_year(equivalent[k] / area[k])
+                    .expect("an area-weighted mean of runoffs that have codes has a code");
                 match receivers[k] {
                     None => Route {
                         flow: FlowDirection::Terminal,
                         drainage,
                         steepness: LogSteepness::ZERO,
+                        runoff,
+                        catchment_runoff,
                     },
                     Some((_, edge, slope)) => Route {
                         flow: FlowDirection::from(edge),
@@ -939,6 +1010,8 @@ impl Grid {
                             slope * math::powf(area[k], LogSteepness::THETA),
                         )
                         .expect("a steepness index has a code"),
+                        runoff,
+                        catchment_runoff,
                     },
                 }
             })
@@ -1243,10 +1316,16 @@ mod tests {
         }
         assert_eq!(caps.len(), 2, "Mars-like caps {caps:?}");
 
+        // The Moon carries its cold traps' water ice, which no cell names until R09.T13.f places
+        // it (science-r09-drainage.md §4).
         let moon = synthetic_field(SyntheticWorld::MoonLike);
         assert_eq!(
             keys(&moon),
-            [("anorthosite", PrimaryCrust), ("basalt", Province)]
+            [
+                ("anorthosite", PrimaryCrust),
+                ("basalt", Province),
+                ("H2O", Ice)
+            ]
         );
         assert_eq!(lithology(&moon, Crust::Province).as_deref(), Some("basalt"));
         assert!(
@@ -1259,7 +1338,7 @@ mod tests {
         assert_eq!(
             keys(&ceres),
             [
-                ("phyllosilicate", SecondaryCrust),
+                ("phyllosilicate", PrimaryCrust),
                 ("H2O", Ice),
                 ("Na2CO3", Deposit)
             ]
@@ -1268,6 +1347,148 @@ mod tests {
             let field = synthetic_field(world);
             assert!(field.header().palette().is_empty(), "{world:?}");
             assert_eq!(field.header().crust_palette(), [None; 4], "{world:?}");
+        }
+    }
+
+    /// The synthetic palettes take the drainage ruling's rows (science-r09-drainage.md §2, §3 and
+    /// §5): basalt's solidus is Wright and Okamura's 980 °C, the basalt's, the highlands' and the
+    /// dust's densities are their grains', and Ceres's crust is primary, its lid's and its
+    /// provinces' alike, with no oceanic crust.
+    #[test]
+    fn the_synthetic_fields_palettes_take_the_drainage_rulings_rows() {
+        // The entry of `key` in `role` of `field`'s palette, which it must have.
+        fn entry<'a>(
+            field: &'a CoarseField,
+            key: &str,
+            role: PaletteRole,
+        ) -> &'a crate::field::PaletteEntry {
+            let palette = field.header().palette();
+            let index = palette
+                .find(role, crate::substance_key::SubstanceKey::new(key).unwrap())
+                .unwrap_or_else(|| panic!("no {key} as {role:?}"));
+            palette.get(index).unwrap()
+        }
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let basalt = entry(&mars, "basalt", PaletteRole::SecondaryCrust);
+        let dust = entry(&mars, "mars_dust", PaletteRole::Deposit);
+        assert_same_bits(basalt.transition.value(), 1_253.15);
+        assert_same_bits(dust.transition.value(), 1_253.15);
+        assert_same_bits(basalt.grain_density_kg_m3, 3_010.0);
+        assert_same_bits(dust.grain_density_kg_m3, 2_600.0);
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        let highlands = entry(&moon, "anorthosite", PaletteRole::PrimaryCrust);
+        assert_same_bits(highlands.grain_density_kg_m3, 2_900.0);
+        entry(&moon, "H2O", PaletteRole::Ice);
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        assert_eq!(
+            ceres.header().crust_palette(),
+            [None, None, Some(0), Some(0)]
+        );
+        assert_eq!(
+            named(&ceres, Some(0)),
+            Some(("phyllosilicate", PaletteRole::PrimaryCrust))
+        );
+    }
+
+    /// The bound on the relative error of a quantised runoff times a quantised area: half a
+    /// runoff step, 2^(1 ÷ 24) − 1, and half an area step, 2^(1 ÷ 2,048) − 1, compounded.
+    fn runoff_area_half_step() -> f64 {
+        math::exp2(1.0 / 24.0) * math::exp2(1.0 / 2_048.0) - 1.0
+    }
+
+    /// On each routed synthetic world, every cell's catchment runoff times its drainage area is its
+    /// own runoff times its own area plus each donor's catchment runoff times its drainage area,
+    /// to the codes' steps: the equivalent area adds up at every confluence
+    /// (science-r09-drainage.md §1.5 (f)). A cell under the sea sheds none of its own, and a world
+    /// not routed has no runoff at all.
+    #[test]
+    fn the_synthetic_fields_runoffs_add_up_at_every_confluence() {
+        let e = runoff_area_half_step();
+        for world in [SyntheticWorld::EarthLike, SyntheticWorld::MarsLike] {
+            let field = synthetic_field(world);
+            let grid = Grid::new(field.header().level().get());
+            let r = field.header().radius().value();
+            let cells = field.synthesis();
+            let equivalent = |c: &SynthesisCell| {
+                c.catchment_runoff.metres_per_year() * c.drainage.area().value()
+            };
+            let mut inflow = vec![0.0; cells.len()];
+            for (k, c) in cells.iter().enumerate() {
+                if let Some(edge) = c.flow.edge() {
+                    let next = usize::try_from(cell_index(grid.cells[k].edge_neighbour(edge)))
+                        .expect("a cell index fits a usize");
+                    inflow[next] += equivalent(c);
+                }
+            }
+            let mut with_donors = 0;
+            for (k, c) in cells.iter().enumerate() {
+                let own = c.runoff.metres_per_year() * grid.solid_angles_sr[k] * r * r;
+                let (lhs, rhs) = (equivalent(c), own + inflow[k]);
+                // Every term is positive and each within e of its true value, so the two sides,
+                // equal before quantisation, differ by at most e ÷ (1 − e) of their sum.
+                assert!(
+                    (lhs - rhs).abs() <= e / (1.0 - e) * (lhs + rhs),
+                    "{world:?} cell {k}: {lhs} m³ a⁻¹ against {rhs}"
+                );
+                if inflow[k] > 0.0 {
+                    with_donors += 1;
+                }
+                if c.is_under_water() {
+                    assert_eq!(c.runoff, LogRunoff::NONE, "{world:?} cell {k}");
+                }
+            }
+            assert!(
+                with_donors > 1_000,
+                "{world:?}: {with_donors} cells with donors"
+            );
+        }
+        for world in [
+            SyntheticWorld::MoonLike,
+            SyntheticWorld::CeresLike,
+            SyntheticWorld::Flat,
+            SyntheticWorld::OneCrater,
+        ] {
+            assert!(
+                synthetic_field(world).synthesis().iter().all(|c| {
+                    c.runoff == LogRunoff::NONE && c.catchment_runoff == LogRunoff::NONE
+                }),
+                "{world:?}"
+            );
+        }
+    }
+
+    /// The Mars-like world's wet epoch sheds 0.1 m a⁻¹ everywhere, so every cell's catchment
+    /// runoff is its own, code 121; the Earth-like world's dry belts drain its rain bands, so some
+    /// dry cell's catchment runoff is at least three times its own (science-r09-drainage.md
+    /// §1.5 (f)).
+    #[test]
+    fn the_synthetic_fields_runoffs_are_uniform_on_mars_and_not_on_earth() {
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        for (k, c) in mars.synthesis().iter().enumerate() {
+            assert_eq!(c.runoff, LogRunoff::new(121), "cell {k}");
+            assert_eq!(c.catchment_runoff, c.runoff, "cell {k}");
+        }
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let wetter = earth
+            .synthesis()
+            .iter()
+            .filter(|c| {
+                !c.is_under_water()
+                    && c.runoff != LogRunoff::NONE
+                    && c.catchment_runoff.metres_per_year() >= 3.0 * c.runoff.metres_per_year()
+            })
+            .count();
+        assert!(
+            wetter > 0,
+            "no Earth-like cell drains a catchment three times as wet"
+        );
+        // The Earth-like runoff weights its months as the header's month shares do.
+        let edges = crate::field::month_edges(earth.header().season_eccentricity()).unwrap();
+        for (k, span) in (0_u8..).zip(edges.windows(2)) {
+            assert_same_bits(
+                crate::field::month_share(earth.header(), k).unwrap(),
+                (span[1].value() - span[0].value()) / core::f64::consts::TAU,
+            );
         }
     }
 

@@ -16,7 +16,7 @@ use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
 use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv};
 use hyperion_surface::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseField, CoarseLevel, Cover, Crust,
-    FieldHeader, FieldHeaderParts, FieldView, FlowDirection, LogArea, LogPrecipitation,
+    FieldHeader, FieldHeaderParts, FieldView, FlowDirection, LogArea, LogPrecipitation, LogRunoff,
     LogSteepness, MaterialPalette, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
     boundary_diameter, cell_index, coarse_level, month_at, month_blend,
 };
@@ -279,6 +279,8 @@ fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
         } else {
             LogSteepness::new(64)
         },
+        runoff: LogRunoff::NONE,
+        catchment_runoff: LogRunoff::NONE,
         water_surface_mm: 0,
         ice: 0,
         substances: SynthesisCell::NO_SUBSTANCES,

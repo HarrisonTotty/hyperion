@@ -195,14 +195,20 @@ impl From<Edge> for FlowDirection {
     }
 }
 
-/// A cell's drainage area on a logarithmic scale, two bytes: the area upstream of the cell's
-/// outflow, the cell's own included (Design note 9).
+/// A cell's drainage area on a logarithmic scale, two bytes: the planimetric area upstream of the
+/// cell's outflow, the cell's own included, as Hack 1957 measures it (USGS PP 294-B, p. 47, "by use
+/// of a planimeter"; Design note 9). It is geometric on every world. The coarse pass's solver weights
+/// it by runoff, Hergarten's equivalent area `A_eq` = q ÷ p₀ (Hergarten 2021, Earth Surf. Dynam. 9,
+/// 937, eq. 16, with p₀ = 1 m a⁻¹), in its own working state only. The field carries the runoff
+/// apart ([`SynthesisCell::runoff`], [`SynthesisCell::catchment_runoff`]), so that the equivalent
+/// area is `catchment_runoff` × `drainage` ÷ (1 m a⁻¹) and the mean discharge `catchment_runoff` ×
+/// `drainage` (science-r09-drainage.md §1).
 ///
 /// Code 0 is no drainage (a world with no fluvial step, or under 1 m²), and code c ≥ 1 is
 /// 2^((c − 1) ÷ 1,024) m², 1,024 codes an octave, a step of 0.068%, from 1 m² to about 1.8 ×
-/// 10¹⁹ m², far beyond any body's area. The coarse pass replaces the area by Hergarten's
-/// runoff-weighted equivalent area where it has a climate (Design note 9), which is why the scale
-/// reaches far below one cell's area.
+/// 10¹⁹ m², far beyond any body's area. A geometric area is never below its own cell's (a mean
+/// cell of about 4.5 × 10⁸ m², the smallest about 2.9 × 10⁸, at a Ceres's level 5, less on a
+/// smaller body), so the lowest codes go unused; they are kept, the codec being unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct LogArea(u16);
 
@@ -242,8 +248,17 @@ impl LogArea {
 }
 
 /// A cell's channel steepness index on a logarithmic scale, one byte: `k_s` = S A^θ, with S the
-/// slope to the receiver, A the drainage area in square metres and θ = 0.45, so `k_s` is in m^0.9
-/// (Design note 9, after Kirby and Whipple 2012).
+/// slope to the receiver, A the cell's geometric drainage area ([`SynthesisCell::drainage`]) in
+/// square metres and θ = 0.45, so `k_s` is in m^0.9 (Design note 9): the "purely geometric" `k_sn`
+/// of Adams et al. 2020 (Sci. Adv. 6, eaaz3166, eq. 2), after Kirby and Whipple 2012.
+///
+/// It is not the discharge-weighted index `k_snQ` = S (Q ÷ 1 m a⁻¹)^θ, with Q the mean discharge
+/// (Adams et al.'s eq. 3; Leonard, Whipple and Heimsath 2023, Sci. Adv. 9, eadd8915, eq. 1, who
+/// approximate it by the mean upstream rainfall times the area, where the field takes its runoff
+/// times the area), which a steady state shares across a region of uniform uplift and
+/// erodibility whatever its runoff: that is `k_s` × (`catchment_runoff` ÷ 1 m a⁻¹)^θ. A channel
+/// whose own catchment sheds `r_t`, inside a cell of catchment runoff r̄, has the steady-state
+/// slope `k_s` (r̄ ÷ `r_t`)^θ `A_t`^−θ (science-r09-drainage.md §1.2).
 ///
 /// Code 0 is no channel (a terminal cell, or under about 0.004 m^0.9), and code c ≥ 1 is
 /// 2^((c − 64) ÷ 8) m^0.9, 8 codes an octave, a step of 9%, from 0.0043 to 1.5 × 10⁷ m^0.9.
@@ -262,7 +277,8 @@ impl LogSteepness {
 
     /// The concavity θ of `k_s` = S A^θ, with m = θ = 0.45 in the stream-power law: the
     /// conventional reference concavity (Design note 9, after Kirby and Whipple 2012, J. Struct.
-    /// Geol. 44, 54; from memory there, and not yet checked against the paper).
+    /// Geol. 44, 54, not read; the value confirmed in Adams et al. 2020 and Hergarten 2021, which
+    /// use it).
     pub const THETA: f64 = 0.45;
 
     /// The steepness of code `code`.
@@ -359,9 +375,10 @@ impl SurfaceClass {
     }
 }
 
-/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 23 bytes
-/// in the payload (Design note 17's 21, the substance byte of decision-composition §1.7 and the
-/// sea floor's byte of `decision-r09-t5.md` item 5).
+/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 25 bytes
+/// in the payload (Design note 17's 21, the substance byte of decision-composition §1.7, the sea
+/// floor's byte of `decision-r09-t5.md` item 5 and the two runoff bytes of
+/// science-r09-drainage.md §1).
 ///
 /// Plain data with public fields, each an integer code whose step and meaning its documentation
 /// gives; the methods read them in SI units. Heights are along the normal of the header's
@@ -388,10 +405,20 @@ pub struct SynthesisCell {
     pub boundary_obliquity: u8,
     /// Where the cell's water goes.
     pub flow: FlowDirection,
-    /// The drainage area through the cell.
+    /// The geometric drainage area through the cell.
     pub drainage: LogArea,
-    /// The channel steepness index `k_s`.
+    /// The channel steepness index `k_s`, on the geometric drainage area.
     pub steepness: LogSteepness,
+    /// The cell's own erosive runoff: what the coarse pass's erosion took the cell's own area to
+    /// shed (Design note 9; science-r09-drainage.md §1.3). On a world wet now it is its climate's
+    /// annual runoff. On a world dry now it is its wet epoch's `runoff`, uniform where the surface
+    /// is older than the epoch's end and [`LogRunoff::NONE`] where it is younger. It is `NONE` on a
+    /// world with no fluvial step. A cell with none carries no sub-cell tributaries.
+    pub runoff: LogRunoff,
+    /// The area-weighted mean of [`runoff`](Self::runoff) over the cell's drainage area, its own
+    /// included: r̄. Hergarten's equivalent area is r̄ × `drainage` ÷ (1 m a⁻¹), and the cell's mean
+    /// discharge r̄ × `drainage`. A trunk's width reads it.
+    pub catchment_runoff: LogRunoff,
     /// The height of the water surface over the cell above the datum, millimetres: the sea's or a
     /// lake's level where the cell is under water, and the ground's, `elevation_mm`, where it is
     /// dry. Never below the ground.
@@ -797,6 +824,60 @@ impl LogPrecipitation {
     }
 }
 
+/// A runoff on a logarithmic scale, one byte: the depth of liquid shed a Julian year, metres a
+/// year (a volume flux, for any liquid), at the reference flood intermittency of Design note 9
+/// (science-hoke.md §3), which Hergarten's equivalent area normalises by 1 m a⁻¹.
+///
+/// Code 0 is none (under about 0.1 mm a year), and code c ≥ 1 is 0.1 mm a⁻¹ × 2^((c − 1) ÷ 12),
+/// 12 codes an octave, a step of 5.9%, to about 235 m a⁻¹: [`LogPrecipitation`]'s scale, in
+/// volume. Mars's epoch, 0.1 m a⁻¹, is code 121.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct LogRunoff(u8);
+
+/// [`LogRunoff`]'s codes an octave, [`LogPrecipitation`]'s.
+const RUNOFF_PER_OCTAVE: f64 = 12.0;
+
+/// The runoff of [`LogRunoff`]'s code 1, metres a Julian year: 0.1 mm.
+const RUNOFF_UNIT_M_PER_YEAR: f64 = 1e-4;
+
+impl LogRunoff {
+    /// No runoff.
+    pub const NONE: Self = Self(0);
+
+    /// The runoff of code `code`.
+    #[must_use]
+    pub const fn new(code: u8) -> Self {
+        Self(code)
+    }
+
+    /// The code.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// The code of a runoff of `m_per_year` metres a Julian year, rounded to the nearest step; 0
+    /// below the first code.
+    ///
+    /// # Errors
+    ///
+    /// [`QuantiseValueError`] if the runoff is not finite, is negative or is beyond the last code.
+    pub fn from_metres_per_year(m_per_year: f64) -> Result<Self, QuantiseValueError> {
+        let code = log_code_u8(m_per_year / RUNOFF_UNIT_M_PER_YEAR, RUNOFF_PER_OCTAVE, 1.0)
+            .map_err(|e| match e {
+                QuantiseValueError::NotFinite(_) => QuantiseValueError::NotFinite(m_per_year),
+                QuantiseValueError::OutOfRange(_) => QuantiseValueError::OutOfRange(m_per_year),
+            })?;
+        Ok(Self(code))
+    }
+
+    /// The runoff, metres a Julian year.
+    #[must_use]
+    pub fn metres_per_year(self) -> f64 {
+        RUNOFF_UNIT_M_PER_YEAR * log_value(u32::from(self.0), RUNOFF_PER_OCTAVE, 1.0)
+    }
+}
+
 /// A month's prevailing wind 10 m above the ground, two bytes: where the air moves and how fast
 /// (Design note 8).
 ///
@@ -1035,6 +1116,59 @@ mod tests {
         );
     }
 
+    /// Every runoff code comes back from its value as itself, a runoff returns within half a step
+    /// (2.9%), the ruling's pinned runoffs take their codes, and what no code holds is refused.
+    #[test]
+    fn field_runoff_codes_round_trip() {
+        for code in 0..=u8::MAX {
+            let runoff = LogRunoff::new(code);
+            assert_eq!(
+                LogRunoff::from_metres_per_year(runoff.metres_per_year()),
+                Ok(runoff),
+                "code {code}"
+            );
+        }
+        for m_per_year in [1e-4, 0.003, 0.1, 0.345, 1.1, 3.0, 200.0] {
+            let back = LogRunoff::from_metres_per_year(m_per_year)
+                .unwrap()
+                .metres_per_year();
+            assert!(relative(back, m_per_year) <= 0.03, "{m_per_year} m a⁻¹");
+        }
+        assert_same_bits(LogRunoff::new(1).metres_per_year(), 1e-4);
+        // Mars's epoch, Earth's mean land runoff and a monsoon coast (science-r09-drainage.md
+        // §1.3).
+        assert_eq!(
+            LogRunoff::from_metres_per_year(0.1),
+            Ok(LogRunoff::new(121))
+        );
+        assert_eq!(
+            LogRunoff::from_metres_per_year(0.3),
+            Ok(LogRunoff::new(140))
+        );
+        assert_eq!(
+            LogRunoff::from_metres_per_year(10.0),
+            Ok(LogRunoff::new(200))
+        );
+        assert_eq!(LogRunoff::from_metres_per_year(0.0), Ok(LogRunoff::NONE));
+        assert_eq!(LogRunoff::from_metres_per_year(5e-5), Ok(LogRunoff::NONE));
+        assert_same_bits(LogRunoff::NONE.metres_per_year(), 0.0);
+        // The last code is about 235 m a⁻¹; 300 m a⁻¹ is past it.
+        let last = LogRunoff::new(u8::MAX).metres_per_year();
+        assert!((235.0..236.0).contains(&last), "{last} m a⁻¹");
+        assert_eq!(
+            LogRunoff::from_metres_per_year(300.0),
+            Err(QuantiseValueError::OutOfRange(300.0))
+        );
+        assert_eq!(
+            LogRunoff::from_metres_per_year(-0.1),
+            Err(QuantiseValueError::OutOfRange(-0.1))
+        );
+        assert_eq!(
+            LogRunoff::from_metres_per_year(f64::INFINITY),
+            Err(QuantiseValueError::NotFinite(f64::INFINITY))
+        );
+    }
+
     /// Whether `result` refuses a NaN as not finite.
     fn refuses_nan<T>(result: &Result<T, QuantiseValueError>) -> bool {
         matches!(result, Err(QuantiseValueError::NotFinite(v)) if v.is_nan())
@@ -1059,6 +1193,7 @@ mod tests {
         assert!(refuses_nan(&LogArea::from_area(SquareMetres::new(nan))));
         assert!(refuses_nan(&LogSteepness::from_index_m0_9(nan)));
         assert!(refuses_nan(&LogPrecipitation::from_rate(nan)));
+        assert!(refuses_nan(&LogRunoff::from_metres_per_year(nan)));
         assert!(refuses_nan(&speed(nan, 0.0)));
         assert!(refuses_nan(&speed(1.0, nan)));
         assert_eq!(
@@ -1121,6 +1256,8 @@ mod tests {
             flow: FlowDirection::Terminal,
             drainage: LogArea::ZERO,
             steepness: LogSteepness::ZERO,
+            runoff: LogRunoff::NONE,
+            catchment_runoff: LogRunoff::NONE,
             water_surface_mm: 0,
             ice: 255,
             substances: 0x23,
@@ -1239,6 +1376,8 @@ mod tests {
             flow: FlowDirection::Terminal,
             drainage: LogArea::ZERO,
             steepness: LogSteepness::ZERO,
+            runoff: LogRunoff::NONE,
+            catchment_runoff: LogRunoff::NONE,
             water_surface_mm: 0,
             ice: 0,
             substances: SynthesisCell::NO_SUBSTANCES,
@@ -1272,6 +1411,8 @@ mod tests {
                 flow: FlowDirection::Terminal,
                 drainage: LogArea::ZERO,
                 steepness: LogSteepness::ZERO,
+                runoff: LogRunoff::NONE,
+                catchment_runoff: LogRunoff::NONE,
                 water_surface_mm: 0,
                 ice: 0,
                 substances: byte,

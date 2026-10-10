@@ -72,12 +72,13 @@ const PHYLLOSILICATE_KEY: SubstanceKey = SubstanceKey::new_const("phyllosilicate
 /// anorthosite's, the top of its range, the phyllosilicate's, Ceres's measured albedo, and liquid
 /// water's, the Fresnel reflectance of its surface at normal incidence in each band. Every phase
 /// row is 0 until R10 assigns its rows. The densities follow no one convention yet (a grain
-/// density for the phyllosilicate, a porous bulk for the highlands and the dust), which P14.T49.b's
-/// rows settle, with the porosity apart.
+/// density for the phyllosilicate, a porous bulk for the highlands and the dust): the field is the
+/// grain density the ruling makes every row's, porosity apart (science-r09-drainage.md §3), which
+/// R09.T10.c's rows take.
 struct Substance {
     key: SubstanceKey,
     normal_albedo_bvr: [f64; 3],
-    density_kg_m3: f64,
+    grain_density_kg_m3: f64,
     transition_k: f64,
     mechanics: MechanicsFamily,
 }
@@ -91,7 +92,7 @@ impl Substance {
             role,
             normal_albedo_bvr: self.normal_albedo_bvr,
             phase_row: 0,
-            density_kg_m3: self.density_kg_m3,
+            grain_density_kg_m3: self.grain_density_kg_m3,
             transition: Kelvin::new(self.transition_k),
             mechanics: self.mechanics,
         }
@@ -112,7 +113,7 @@ const BASALT_SOLIDUS_K: f64 = 1_253.15;
 const BASALT: Substance = Substance {
     key: BASALT_KEY,
     normal_albedo_bvr: [0.10; 3],
-    density_kg_m3: 2_900.0,
+    grain_density_kg_m3: 2_900.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
@@ -124,7 +125,7 @@ const BASALT: Substance = Substance {
 const GRANITE: Substance = Substance {
     key: GRANITE_KEY,
     normal_albedo_bvr: [0.275; 3],
-    density_kg_m3: 2_650.0,
+    grain_density_kg_m3: 2_650.0,
     transition_k: 1_233.15,
     mechanics: MechanicsFamily::Silicate,
 };
@@ -140,7 +141,7 @@ const GRANITE: Substance = Substance {
 const ANORTHOSITE: Substance = Substance {
     key: ANORTHOSITE_KEY,
     normal_albedo_bvr: [0.20; 3],
-    density_kg_m3: 2_550.0,
+    grain_density_kg_m3: 2_550.0,
     transition_k: 1_773.15,
     mechanics: MechanicsFamily::Silicate,
 };
@@ -156,7 +157,7 @@ const ANORTHOSITE: Substance = Substance {
 const PHYLLOSILICATE: Substance = Substance {
     key: PHYLLOSILICATE_KEY,
     normal_albedo_bvr: [0.094; 3],
-    density_kg_m3: 2_500.0,
+    grain_density_kg_m3: 2_500.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
@@ -171,7 +172,7 @@ const PHYLLOSILICATE: Substance = Substance {
 const SODIUM_CARBONATE: Substance = Substance {
     key: SubstanceKey::new_const("Na2CO3"),
     normal_albedo_bvr: [0.65; 3],
-    density_kg_m3: 2_540.0,
+    grain_density_kg_m3: 2_540.0,
     transition_k: 1_124.15,
     mechanics: MechanicsFamily::Salt,
 };
@@ -182,7 +183,7 @@ const SODIUM_CARBONATE: Substance = Substance {
 const MARS_DUST: Substance = Substance {
     key: SubstanceKey::new_const("mars_dust"),
     normal_albedo_bvr: [0.215; 3],
-    density_kg_m3: 1_200.0,
+    grain_density_kg_m3: 1_200.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
@@ -197,7 +198,7 @@ const WATER_MELTING_K: f64 = 273.15;
 const WATER_ICE: Substance = Substance {
     key: H2O,
     normal_albedo_bvr: [0.965; 3],
-    density_kg_m3: 916.72,
+    grain_density_kg_m3: 916.72,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
 };
@@ -211,7 +212,7 @@ const WATER_ICE: Substance = Substance {
 const WATER: Substance = Substance {
     key: H2O,
     normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
-    density_kg_m3: 999.84,
+    grain_density_kg_m3: 999.84,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
 };
@@ -223,7 +224,7 @@ const WATER: Substance = Substance {
 const CARBON_DIOXIDE_ICE: Substance = Substance {
     key: CO2,
     normal_albedo_bvr: [0.6; 3],
-    density_kg_m3: 1_621.0,
+    grain_density_kg_m3: 1_621.0,
     transition_k: 216.592,
     mechanics: MechanicsFamily::VolatileIce,
 };
@@ -863,7 +864,7 @@ mod tests {
         let earth = earth_like();
         let sea = earth.palette().get(earth.main_liquid().unwrap()).unwrap();
         assert_eq!((sea.role, sea.substance), (Liquid, H2O));
-        assert!((sea.density_kg_m3 - 999.84).abs() < 1e-9);
+        assert!((sea.grain_density_kg_m3 - 999.84).abs() < 1e-9);
     }
 
     #[test]

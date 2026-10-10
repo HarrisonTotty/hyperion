@@ -828,9 +828,9 @@ mod tests {
         let header = FieldHeader::new(parts()).unwrap();
         let lid = header.crust_entry(Crust::Lid).unwrap();
         assert_eq!(lid.substance.as_str(), "phyllosilicate");
-        assert_eq!(lid.role, PaletteRole::SecondaryCrust);
+        assert_eq!(lid.role, PaletteRole::PrimaryCrust);
         assert_eq!(header.crust_entry(Crust::Continental), None);
-        assert_eq!(header.crust_palette(), [None, None, Some(0), None]);
+        assert_eq!(header.crust_palette(), [None, None, Some(0), Some(0)]);
         assert_eq!(header.main_liquid(), None);
         assert_eq!(header.palette().len(), 3);
     }

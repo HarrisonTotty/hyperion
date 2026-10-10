@@ -117,8 +117,9 @@ impl<'a> Pass<'a> {
     }
 }
 
-/// One cell's state in the pass, in SI units: what its synthesis record will hold before it is
-/// quantised (Design note 17).
+/// One cell's state in the pass, in SI units but its runoffs, which are in metres a Julian year as
+/// their codes and Hergarten's normalisation are: what its synthesis record will hold before it
+/// is quantised (Design note 17).
 ///
 /// Plain data with public fields, which the steps write in turn; [`quantise`](super::quantise)
 /// checks every value against its code.
@@ -142,10 +143,21 @@ pub struct CellState {
     pub boundary_obliquity: Radians,
     /// Where the cell's water goes.
     pub flow: FlowDirection,
-    /// The area draining through the cell, its own included once it is routed.
+    /// The geometric (planimetric) area draining through the cell, its own included once it is
+    /// routed (science-r09-drainage.md §1.3).
     pub drainage: SquareMetres,
-    /// The channel steepness index `k_s` = S A^θ with θ = 0.45, m^0.9, non-negative.
+    /// The channel steepness index `k_s` = S A^θ with θ = 0.45 and A the geometric drainage area,
+    /// m^0.9, non-negative.
     pub steepness_index_m0_9: f64,
+    /// The cell's own erosive runoff, metres of liquid a Julian year, non-negative: the source
+    /// term the erosion took, its climate's annual runoff on a world wet now, its wet epoch's
+    /// where the surface is older than the epoch's end on one dry now, and none elsewhere
+    /// ([`SynthesisCell::runoff`](hyperion_surface::field::SynthesisCell::runoff)).
+    pub runoff_m_per_year: f64,
+    /// The area-weighted mean of [`runoff_m_per_year`](Self::runoff_m_per_year) over the cell's
+    /// drainage area, its own included, metres a Julian year, non-negative: the solver's
+    /// equivalent area over the geometric, times 1 m a⁻¹.
+    pub catchment_runoff_m_per_year: f64,
     /// The share of the cell under ice, 0 to 1.
     pub ice_fraction: f64,
     /// The palette entry of the cell's ice, an index into the inputs' palette
@@ -238,9 +250,9 @@ pub struct Working {
 
 impl Working {
     /// The state before the first step: a smooth, dry sphere at the datum on one stagnant lid, no
-    /// plates, no water, no ice, no craters and no relief finer than the cells, under a still
-    /// climate at the body's mean surface temperature everywhere, with no lapse rate, in the
-    /// inputs' months.
+    /// plates, no water, no drainage or runoff, no ice, no craters and no relief finer than the
+    /// cells, under a still climate at the body's mean surface temperature everywhere, with no
+    /// lapse rate, in the inputs' months.
     ///
     /// Its realised `σ_h` and relief are zero and its sea level is its lowest elevation, zero,
     /// which is what a flat field realises. Each step that changes the elevation keeps them true.
@@ -261,6 +273,8 @@ impl Working {
             flow: FlowDirection::Terminal,
             drainage: SquareMetres::ZERO,
             steepness_index_m0_9: 0.0,
+            runoff_m_per_year: 0.0,
+            catchment_runoff_m_per_year: 0.0,
             ice_fraction: 0.0,
             ice_entry: None,
             liquid_entry: None,

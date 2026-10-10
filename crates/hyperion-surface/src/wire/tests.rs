@@ -17,8 +17,8 @@ use super::*;
 use crate::craters::Screening;
 use crate::field::{
     BoundaryKind, BuildPaletteError, ClimateModelKind, Crust, FieldView, FlowDirection,
-    InsertBlockError, LogArea, LogPrecipitation, LogSteepness, MechanicsFamily, NO_ENTRY,
-    PaletteRole, PartialField, PrecipitationSource, SurfaceClass, Wind, cell_at_index,
+    InsertBlockError, LogArea, LogPrecipitation, LogRunoff, LogSteepness, MechanicsFamily,
+    NO_ENTRY, PaletteRole, PartialField, PrecipitationSource, SurfaceClass, Wind, cell_at_index,
     crater_key_order,
 };
 use crate::substance_key::ParseSubstanceKeyError;
@@ -393,10 +393,10 @@ fn wire_payloads_merged_in_any_order_give_the_whole_cover_s_field() {
     }
 }
 
-/// The Earth-like world's whole payload is 10–15 MB (about 14.0 MB: Design note 17's 21 bytes a
-/// cell with the substance and sea floor bytes, 23, and 50 per four cells, with each block's
-/// header, the field header with its palette, and the craters), and no block of it, or of any
-/// payload here, exceeds 1 MiB.
+/// The Earth-like world's whole payload is 10–15 MB (about 14.75 MB: Design note 17's 21 bytes a
+/// cell with the substance and sea floor bytes and the two runoff bytes, 25, and 50 per four
+/// cells, with each block's header, the field header with its palette, and the craters), and no
+/// block of it, or of any payload here, exceeds 1 MiB.
 #[test]
 fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
     let field = earth();
@@ -420,7 +420,7 @@ fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
         rest = &rest[length..];
         blocks += 1;
     }
-    assert_eq!(blocks, 14, "{} bytes", bytes.len());
+    assert_eq!(blocks, 15, "{} bytes", bytes.len());
     for bytes in [
         encode_payload(mars(), &region(), None),
         encode_payload(mars(), &whole(mars()), None),
@@ -711,10 +711,10 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
     };
     assert_eq!(damaged(24, &[6]), block(0, level));
     // The header section's last parts: the Ceres-like palette (a count and three entries of 59
-    // bytes), each crust's entry (four options, the lid's present: five bytes) and the main
-    // liquid's (absent: one byte).
+    // bytes), each crust's entry (four options, the lid's and the provinces' present: six bytes)
+    // and the main liquid's (absent: one byte).
     let end = 35 + usize::from(declared);
-    let palette = end - 6 - (1 + 3 * 59);
+    let palette = end - 7 - (1 + 3 * 59);
     assert_eq!(bytes[palette], 3);
     let unsorted = DecodeBlockError::Palette(BuildPaletteError::Unsorted { entry: 1 });
     let second_role = palette + 1 + 59 + 16;
@@ -733,8 +733,8 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         crust: Crust::Lid,
         entry: 1,
     });
-    assert_eq!(bytes[end - 4..end], [PRESENT, 0, ABSENT, ABSENT]);
-    assert_eq!(damaged(end - 3, &[1]), block(0, crust));
+    assert_eq!(bytes[end - 5..end], [PRESENT, 0, PRESENT, 0, ABSENT]);
+    assert_eq!(damaged(end - 4, &[1]), block(0, crust));
     // Block 1's cover, one range at 37, and its first record after it.
     let start = u32_at(&bytes, at[1] + 37);
     let empty = DecodeBlockError::Cover(BuildCoverError::EmptyRange { start, end: start });
@@ -744,14 +744,15 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         damaged(at[1] + 41, &6_145_u32.to_le_bytes()),
         block(1, outside)
     );
+    // The record's water surface, after its 16 bytes from the elevation to the two runoffs.
     let dry = DecodeBlockError::Record(BuildFieldError::WaterBelowGround { cell: start });
     assert_eq!(
-        damaged(at[1] + 46 + 14, &i32::MIN.to_le_bytes()),
+        damaged(at[1] + 46 + 16, &i32::MIN.to_le_bytes()),
         block(1, dry)
     );
     // The record's last byte, its sea floor: a lid has none.
     let seafloor = DecodeBlockError::Record(BuildFieldError::Seafloor { cell: start });
-    assert_eq!(damaged(at[1] + 46 + 22, &[0x10]), block(1, seafloor));
+    assert_eq!(damaged(at[1] + 46 + 24, &[0x10]), block(1, seafloor));
     let one = &bytes[at[1]..at[2]];
     assert_eq!(
         decode_block(&split_first_range(one)),
@@ -1068,12 +1069,12 @@ where
 
 /// The golden file `tests/golden/wire/codes.golden`: every code a payload carries, decoded. Each
 /// one-byte enum's codes and variants, and the layout's own tags; the value of every code of every
-/// one-byte scale (the steepness index, the precipitation rate, the wind's speed and azimuth, the
-/// resolution, the boundary obliquity, the ice share and the crater degradation); a sample of the
-/// two-byte drainage area's; the header's temperature and anomaly steps for every exponent and its
-/// temperatures at pinned codes; the cells' heights and distances at pinned codes; and the sea
-/// floor's two nibbles, every code. A code renumbered fails it; a code appended only extends it
-/// (`SURFACE_PAYLOAD_FORMAT`'s rule).
+/// one-byte scale (the steepness index, the precipitation rate, the runoff, the wind's speed and
+/// azimuth, the resolution, the boundary obliquity, the ice share and the crater degradation); a
+/// sample of the two-byte drainage area's; the header's temperature and anomaly steps for every
+/// exponent and its temperatures at pinned codes; the cells' heights and distances at pinned
+/// codes; and the sea floor's two nibbles, every code. A code renumbered fails it; a code appended
+/// only extends it (`SURFACE_PAYLOAD_FORMAT`'s rule).
 #[test]
 fn wire_codes_match_their_golden() {
     let mut w = GoldenWriter::new();
@@ -1116,6 +1117,8 @@ const PLAIN_CELL: SynthesisCell = SynthesisCell {
     flow: FlowDirection::Terminal,
     drainage: LogArea::ZERO,
     steepness: LogSteepness::ZERO,
+    runoff: LogRunoff::NONE,
+    catchment_runoff: LogRunoff::NONE,
     water_surface_mm: 0,
     ice: 0,
     substances: SynthesisCell::NO_SUBSTANCES,
@@ -1183,6 +1186,12 @@ fn write_byte_scales(w: &mut GoldenWriter) {
         w.f64(
             &format!("precipitation_kg_m2_s[{code}]"),
             LogPrecipitation::new(code).rate_kg_per_m2_s(),
+        );
+    }
+    for code in 0..=u8::MAX {
+        w.f64(
+            &format!("runoff_m_a[{code}]"),
+            LogRunoff::new(code).metres_per_year(),
         );
     }
     for code in 0..=u8::MAX {

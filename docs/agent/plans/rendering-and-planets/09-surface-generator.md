@@ -2618,6 +2618,59 @@ re-blessing this plan's payload and coarse goldens in that commit.
       task's text) or re-blesses at the current version (Generator version's ruling, which B
       followed) is asked of "main". Answered 2026-10-10: Generator version's rule governs, and
       the task's text now says so.
+  - _The runoffs, grain densities and the rulings' synthetic rows_ (follow-up C,
+    science-r09-drainage.md §1–§6, 2026-10-10, with its late materials section; on T5's
+    follow-up, `decision-r09-t5.md`'s sea-floor byte).
+    - _The record._ `LogRunoff` (`NONE`, `new`, `get`, `from_metres_per_year`,
+      `metres_per_year`; `LogPrecipitation`'s scale in m a⁻¹), and `SynthesisCell`'s `runoff` and
+      `catchment_runoff`, which follow `steepness` in the struct and its table: 25 bytes a cell,
+      the sea floor's byte staying last.
+      `LogArea`'s and `LogSteepness`'s documentation say they are geometric, with the ruling's
+      text (§1.4), and `PaletteRole`'s two crusts take §5.3's. `PaletteEntry::density_kg_m3` is
+      `grain_density_kg_m3`; `BuildPaletteError::Density` keeps its name. `codes.golden` has no
+      density row to rename (§3.3 supposed one).
+    - _The synthetic routing._ `FieldBuilder::runoff` (a dry cell's own runoff by its centre, m
+      a⁻¹; none by default) feeds `Grid::route`, which accumulates the equivalent area beside the
+      geometric one in the same order; the catchment runoff is their ratio. A cell under the sea
+      sheds none of its own (a choice: runoff is the land's), and a world not routed has none. The
+      Earth-like world takes `EARTH_RUNOFF_SHARE`, 0.4, of each cell's annual precipitation, its
+      months weighted by their shares of the year, as liquid water at its palette density (the
+      ruling's "about 0.36, from memory" is labelled about 0.35, 40 of 113 × 10³ km³ a⁻¹,
+      Trenberth et al. 2007, as the science review found it in secondary sources); the Mars-like
+      world a uniform 0.1 m a⁻¹ (science-hoke §3), code 121 everywhere, its whole surface taken
+      as older than the epoch's end (a simplification the ruling makes).
+    - _The ruling's text, adjusted by the science review._ `LogArea`'s "never below its own
+      cell's (about 4.5 × 10⁸ m²)" names the mean level-5 cell on a Ceres and the smallest, about
+      2.9 × 10⁸; `LogSteepness`'s `k_snQ` says that Adams et al.'s and Leonard et al.'s Q is
+      rainfall times area where the field's is runoff times area; the dust's 58 per cent is Viking
+      Lander 1's fine material.
+    - _B's rows._ Basalt's solidus is 1,253.15 K (§2). Grain densities (§3, with its late
+      materials section): basalt 3,010 kg m⁻³ (Peck 1978), anorthosite 2,900, the dust 2,600;
+      granite stays 2,650 and the phyllosilicate 2,500, relabelled. The Moon-like palette gains
+      `H2O` as `Ice`, which no cell names (§4). Ceres-like's phyllosilicate is `PrimaryCrust`, the
+      entry of `Lid` and `Province`, with no `Oceanic` (§5).
+    - _The sim._ `CellState` gains `runoff_m_per_year` and `catchment_runoff_m_per_year` (m a⁻¹,
+      not SI, as their codes and Hergarten's normalisation are; `CellState`'s documentation says
+      so), none in `Working::initial`; the quantiser writes them, naming "runoff" and "catchment
+      runoff". `reference.rs` renames the field only: its values, its documentation's convention
+      and its Ceres's crust are R09.T10.c's, and so is `coarse_pass`'s Ceres example, whose
+      phyllosilicate stays `secondary` until `CrustInputs::secondary` is an `Option`.
+    - _Sizes_ (on T5's 23-byte record). Earth-like 14,748,053 B in 15 blocks (786,432 B of
+      records and 150 B of framing more), 0.98 MB inside R03's 15 MiB and 0.25 MB inside T3's
+      15 MB bracket, whose test now counts 15 blocks; Mars-like 3,706,930 B in 4; Moon-like
+      936,261 B (887,050 + 2 × 24,576 + a 59 B palette entry); Ceres-like 237,119 B (224,830 +
+      2 × 6,144 + 1 B for `Province`'s present entry); Flat 921,820 and OneCrater 922,186 B
+      (+ 2 × 24,576); the Mars-like region 93,478 B (+ 2 × 2,301) and its delta 23,857 B
+      (+ 2 × 562).
+    - _Goldens._ `payloads.golden`'s 18 block, byte and digest lines are re-blessed at 21, its
+      held covers unmoved; `codes.golden` gains the 256 `runoff_m_a` rows. Neither version is
+      bumped (Generator version).
+    - _For R09.T10.c, T6.b and T14._ T10.c: the reference rows' grain densities and their
+      documentation, the reference Moon's `H2O` ice, the reference Ceres's primary crust with
+      `CrustInputs::secondary: Option`, and the example's role. T6.b (T6.a landed first): the
+      tributary factor (r̄ ÷ r)^θ and the zero-runoff rule from the two bytes, and widths from
+      discharge; the synthetic Earth's cells give r̄ ≥ 3 r. T14.b–d: write `CellState`'s two
+      runoffs, the geometric drainage and k_s on it, the equivalent area staying the solver's.
 - **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
   goldens on, revisable until then).
   - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the

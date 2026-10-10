@@ -95,7 +95,7 @@ mod partial;
 
 pub use cells::{
     BoundaryKind, ClimateCell, Crust, DecodeFieldCodeError, FlowDirection, LogArea,
-    LogPrecipitation, LogSteepness, QuantiseValueError, SurfaceClass, SurfaceClassRange,
+    LogPrecipitation, LogRunoff, LogSteepness, QuantiseValueError, SurfaceClass, SurfaceClassRange,
     SynthesisCell, Wind,
 };
 pub(crate) use cells::{hill_relief_of, ponded_sediment_of};
