@@ -1,0 +1,43 @@
+{
+  "key": "H2SO4",
+  "phase": "liquid",
+  "variant": "75wt%",
+  "name": "75 wt% aqueous sulphuric acid at 300 K",
+  "temperatureK": 300,
+  "shape": "sphere",
+  "provenance": "measured",
+  "paper": "K. F. Palmer and D. Williams, \"Optical constants of sulfuric acid; application to the clouds of Venus?\", Appl. Opt. 14 (1975) 208–219, DOI 10.1364/AO.14.000208",
+  "source": "the Aerosol Refractive Index Archive (ARIA), University of Oxford, H2SO4_75%_300K_R_Palmer_1975.ri, https://eodg.atm.ox.ac.uk/ARIA/data_files/Acids/Sulphuric/70%25_to_79%25/Sulphuric_acid_75%25_300K_(Palmer_and_Williams_1975)/original/H2SO4_75%25_300K_R_Palmer_1975.ri, SHA-256 ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe, fetched 2026-10-09",
+  "licence": "reduced values; the source states no terms (decision-r08-licences.md)",
+  "reduction": "n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures. In the visible the source gives n only, at 359.7, 408.2, 449.4, 555.6 and 701.8 nm, with k NaN short of 701.8 nm; there k is held at its shortest measured value, 2.07 × 10⁻⁸ at 701.8 nm. The acid's visible absorption lies below the source's measurement, and at this k a Venus mode-2 droplet's 1 − ω is about 10⁻⁶. n at 555.6 nm, 1.431, lies inside Hansen and Hovenier 1974's 1.44 ± 0.015 at 550 nm (J. Atmos. Sci. 31, 1137)",
+  "standIn": null,
+  "fit": null,
+  "wavelengthsNm": [
+    380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 470,
+    475, 480, 485, 490, 495, 500, 505, 510, 515, 520, 525, 530, 535, 540, 545, 550, 555, 560, 565,
+    570, 575, 580, 585, 590, 595, 600, 605, 610, 615, 620, 625, 630, 635, 640, 645, 650, 655, 660,
+    665, 670, 675, 680, 685, 690, 695, 700, 705, 710, 715, 720, 725, 730, 735, 740, 745, 750, 755,
+    760, 765, 770, 775, 780
+  ],
+  "n": [
+    1.44614, 1.44469, 1.44325, 1.4418, 1.44036, 1.43891, 1.43773, 1.43701, 1.43628, 1.43555,
+    1.43483, 1.4341, 1.43337, 1.43265, 1.43199, 1.43195, 1.4319, 1.43185, 1.43181, 1.43176, 1.43171,
+    1.43166, 1.43162, 1.43157, 1.43152, 1.43148, 1.43143, 1.43138, 1.43134, 1.43129, 1.43124,
+    1.43119, 1.43115, 1.4311, 1.43105, 1.43101, 1.43091, 1.43081, 1.4307, 1.4306, 1.4305, 1.4304,
+    1.43029, 1.43019, 1.43009, 1.42999, 1.42988, 1.42978, 1.42968, 1.42958, 1.42947, 1.42937,
+    1.42927, 1.42916, 1.42906, 1.42896, 1.42886, 1.42875, 1.42865, 1.42855, 1.42845, 1.42834,
+    1.42824, 1.42814, 1.42804, 1.42774, 1.42734, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427,
+    1.427, 1.427, 1.427, 1.427, 1.427, 1.427, 1.427
+  ],
+  "k": [
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8,
+    2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.07e-8, 2.23638e-8, 2.51924e-8, 2.83841e-8, 3.20165e-8,
+    3.61587e-8, 4.14925e-8, 4.76131e-8, 5.58373e-8, 6.55712e-8, 7.14803e-8, 7.59752e-8, 7.91355e-8,
+    8.06745e-8, 8.21203e-8, 8.29066e-8, 8.37004e-8
+  ]
+}

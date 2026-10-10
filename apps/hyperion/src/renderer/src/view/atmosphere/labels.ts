@@ -40,8 +40,13 @@
  *   (Design note 9).
  * - `atmosphereApproximate`: a thick world drawn with the analytic term because its regime's gate
  *   has not passed (Design note 9), or a strongly oblate body drawn with one slice before R08.T6.f
- *   (Design note 17). It also stands in `atmosphereComputing`'s place if a bake fails, until the
- *   body's atmosphere is next computed.
+ *   (Design note 17), or a body whose medium holds an NH₄SH mode with less than
+ *   `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at 550 nm, drawn with the stated stand-in
+ *   (decision-r08-licences, row 5), which clears only when measured constants replace it. The same
+ *   holds for any other material drawn with a stated stand-in, a named analogue or, for a key this
+ *   client does not know, the generic stand-in, under the same optical-depth rule
+ *   (decision-composition §1.9; `materials/materials.ts`'s `materialLabels`). It also stands in
+ *   `atmosphereComputing`'s place if a bake fails, until the body's atmosphere is next computed.
  *
  * @remarks
  * Per body, as R08.T10.a's `assembleMedium` and R08.T14.c's bake give them: at most one of

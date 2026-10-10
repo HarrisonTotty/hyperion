@@ -204,21 +204,57 @@ their citations; the data sets themselves are not committed (plan R05, R05.T12.d
   "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14
   (1975) 208-219, DOI: 10.1364/AO.14.000208, as distributed by the Aerosol Refractive Index
   Archive (ARIA), University of Oxford, https://eodg.atm.ox.ac.uk/ARIA/. Reduced to the visible
-  in apps/hyperion/src/renderer/src/view/atmosphere/materials/.
+  in apps/hyperion/src/renderer/src/view/atmosphere/materials/sulphuric-acid-75.json and
+  sulphuric-acid-84.json.
 
 - Refractive indices of Martian dust: M. J. Wolff et al., "Wavelength dependence of dust
   aerosol single scattering albedo as observed by the Compact Reconnaissance Imaging
   Spectrometer", J. Geophys. Res. 114 (2009) E00D04, DOI: 10.1029/2009JE003350, as
   distributed by NASA Ames's Mars Climate Modeling Group (Dust_Refractive_Indicies.txt) and
   kept in S. Ranjan's ranjanwordsworthsasselov2017b repository (commit 1e67a481). Reduced to the
-  visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/.
+  visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/mars-dust.json.
 
 - Refractive indices of Titan tholin: B. N. Khare et al., "Optical constants of organic tholins
   produced in a simulated Titanian atmosphere: From soft x-ray to microwave frequencies",
   Icarus 60 (1984) 127-137, DOI: 10.1016/0019-1035(84)90142-8, as distributed in the HITRAN2024
   aerosol compilation (I. E. Gordon et al., J. Quant. Spectrosc. Radiat. Transfer 353 (2026)
   109807; https://hitran.org/aerosols/). Reduced to the visible in
-  apps/hyperion/src/renderer/src/view/atmosphere/materials/.
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/tholin.json.
+
+- Refractive indices of amorphous Mg2SiO4: C. Jaeger, J. Dorschner, H. Mutschke, Th. Posch and
+  Th. Henning, "Steps toward interstellar silicate mineralogy. VII. Spectral properties and
+  crystallization behaviour of magnesium silicates produced by the sol-gel method", Astron.
+  Astrophys. 408 (2003) 193-204, DOI: 10.1051/0004-6361:20030916, as distributed in the
+  HITRAN2024 aerosol compilation (as above). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/forsterite-amorphous.json.
+
+- Refractive indices of ammonia ice and of amorphous MgSiO3: J. V. Martonchik, G. S. Orton and
+  J. F. Appleby, "Optical properties of NH3 ice from the far infrared to the near ultraviolet",
+  Appl. Opt. 23 (1984) 541-547, DOI: 10.1364/AO.23.000541; J. Dorschner, B. Begemann,
+  Th. Henning, C. Jaeger and H. Mutschke, "Steps toward interstellar silicate mineralogy. II.
+  Study of Mg-Fe-silicate glasses of variable composition", Astron. Astrophys. 300 (1995)
+  503-520; as distributed in optool's lnk_data (C. Dominik, M. Min and R. Tazaki, ascl:2104.010;
+  https://github.com/cdominik/optool, commit 0b1fa6df). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/ammonia-ice.json and
+  enstatite-glass.json.
+
+- Refractive indices of liquid water, water ice, liquid and solid methane, iron and soot, from
+  the refractiveindex.info database (M. N. Polyanskiy, Sci. Data 11, 94 (2024); commit c5c2f188),
+  which is dedicated to the public domain (CC0 1.0): G. M. Hale and M. R. Querry, Appl. Opt. 12
+  (1973) 555-563, DOI: 10.1364/AO.12.000555; S. G. Warren and R. E. Brandt, J. Geophys. Res. 113
+  (2008) D14220, DOI: 10.1029/2007JD009744; J. V. Martonchik and G. S. Orton, Appl. Opt. 33
+  (1994) 8306-8317, DOI: 10.1364/AO.33.008306; P. B. Johnson and R. W. Christy, Phys. Rev. B 9
+  (1974) 5056-5070, DOI: 10.1103/PhysRevB.9.5056; W. H. Dalzell and A. F. Sarofim, J. Heat
+  Transfer 91 (1969) 100-104, DOI: 10.1115/1.3580063. Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/water.json, water-ice.json,
+  methane-liquid.json, methane-ice.json, iron.json and soot.json.
+
+- The refractive index of CO2 ice: a two-term Cauchy fit to S. G. Warren, "Optical constants of
+  carbon dioxide ice", Appl. Opt. 25 (1986) 2650-2674, DOI: 10.1364/AO.25.002650, Table I, with
+  the imaginary index from G. B. Hansen, "Ultraviolet to near-infrared absorption spectrum of
+  carbon dioxide ice from 0.174 to 1.8 um", J. Geophys. Res. 110 (2005) E11003,
+  DOI: 10.1029/2005JE002531. Derived values in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/carbon-dioxide-ice.json.
 
 ================================================================================
 Test data (not shipped)

@@ -3736,6 +3736,136 @@ generator, and the reference's sampling needs no domain tag.
     it asserts (MIEV0's answers for cases 5–19, B&H's three printed values), with citations, under
     the open benchmark-tables lean above; if that is refused, it falls back to miepython's MIT
     values (Q and g to 6 decimals, case 14's amplitudes).
+- **Deviations in T5.b, as built** (2026-10-09; `view/atmosphere/sizeDistribution.ts`,
+  `materials/`, `thick/regime.ts`, `labels.ts`; `apps/hyperion/src/tools/materials.ts`,
+  `scripts/materials.mjs`; `NOTICE`).
+  - _The quadrature:_ composite Gauss–Legendre in ln r, order 8 on panels no wider than 2 in x and
+    0.5 in ln r, every panel halved per refinement, in place of one rule whose node count doubles.
+    A single rule spaces its nodes as x and starves the large particles' ripple (Chýlek 1976, JOSA
+    66, 285: Δx ≈ arctan(√(m² − 1)) ÷ √(m² − 1), 0.78 at m = 1.44; the formula is from that paper's
+    abstract and metadata, the paper unread): Venus's mode 2 needed 4,096–16,384 nodes before its
+    changes fell under 10⁻⁴. The panelled rule converges at 1,328 nodes for that mode at 550 nm,
+    632 for a 0.15 µm sulphate mode at 440 nm and 5,656 for a 10 µm water mode at 380 nm, so the
+    plan's "200–500 nodes" holds only for small particles. Convergence is Q_ext and Q_sca relative
+    and g absolute, each under 10⁻⁴ (Q_sca, the unnormalised phase function's integral, read as "the
+    phase integral"), capped at 65,536 nodes. The matrix is summed once, at the converged level, and
+    is not itself a convergence test.
+  - _The interval:_ from where r²n(r) falls to 10⁻⁶ of its peak to where r⁶n(r) does, each end
+    5.26σ beyond its own weight's centre for a log-normal (the centres lie 4σ² apart), not ±4σ: the
+    gamma distribution's left tail, and small particles' Rayleigh weight r⁶, lie past ±4σ of the
+    area weight. Radii below Mie's x = 10⁻⁶ are left out by `sphereModeOptics` (not by
+    `sizeQuadrature`).
+  - _Timing, provisional_ (Node 26.10, Ryzen 7 3700X, `schedutil`, load average 11–12): a mode over
+    the 15 bake bins and the 3 channels, 18 wavelengths, takes 1.8 s for Venus's mode 2, 18 s for
+    a 3.65 µm mode 3, 0.45 s for a 0.15 µm sulphate mode and 0.85 s for Mars dust (no matrix,
+    below). One wavelength of Venus's mode 2 is about 60–100 ms. Design note 1's 40–800 ms a mode
+    is exceeded for micrometre spheres; for Mars dust the matrix's pass at 256 angles was about 9
+    tenths of the cost. Finding for "main" and R12 (fewer table angles for the bakes, or the matrix
+    at the coarser level, are T5.c's options). The quiet-machine run (load under 1) is pending.
+  - _Names beyond the sketch:_ `SizeDistribution` (`gamma`, `logNormal`, by `effectiveRadiusUm` and
+    `effectiveVariance`; the "modified log-normal" is Hansen and Travis's (2.60) by r_eff and
+    v_eff); `AerosolMode { material, form?, shape?, sizes }`; `ModeBulkOptics` (mean efficiencies,
+    ω, g, the per-particle cross-sections and volume from the analytic ⟨r²⟩); `ModeOptics` (those,
+    `matrix: ScatteringMatrix | undefined`, `shape`, `provenance`), the type T5.c's
+    `aggregateOptics` also fills; `SphereModeOptics` (those, a `matrix` and `nodes`);
+    `sphereModeOptics(sizes, index, λ, mu?)`; `sizeRange` and `SizeRange`;
+    `sizeQuadrature(sizes, λ, level)` and `SizeQuadrature`; the matrix type,
+    `ScatteringMatrix { mu, a1, a2, a3, a4, b1, b2 }`, at one wavelength, which T5.c stacks per
+    channel into `PhaseTable.matrix`;
+    `sphereScatteringMatrix`; `PHASE_TABLE_SIZE`, `PHASE_TABLE_U` and `PHASE_TABLE_MU` (256, u = i ÷
+    255); `SIZE_WEIGHT_FLOOR`, `SIZE_PANEL_ORDER`, `SIZE_PANEL_SIZE_PARAMETER`,
+    `SIZE_PANEL_LN_RADIUS`, `SIZE_NODES_MAX`, `SIZE_LEVEL_MAX` and `SIZE_CONVERGENCE`. `modeOptics`
+    takes an optional `mu`. For a `nonSphericalMineral` or `crystal` it returns Mie's cross-sections
+    with Mie's ω and g flagged by `shape`, and `matrix: undefined` (a total depolariser,
+    decision-r08-vector); it refuses an `aggregate`.
+  - _The matrix:_ normalised to ∫ a₁ dΩ ÷ 4π = 1, so T5.c divides by 4π for `PhaseTable.values` in
+    sr⁻¹ (R08.T6.a's). b₁ = ½(|S₂|² − |S₁|²), a₃ = Re(S₁S₂*) and b₂ = −Im(S₁S₂*) in T5.a's
+    amplitudes (S₁ perpendicular, m = n − ik): de Rooij and van der Stap 1984 (A&A 131, 237)
+    eqs. (13)–(16), with Hansen and Travis's (2.33), (1.4) and Fig. 16; Hansen and Travis's printed
+    (2.36) and (2.41) swap S₁ and S₂ in the 1–2 block. The review's science check found b₂'s sign
+    first built reversed, and a test now holds it to Fig. 16 at 140°. R08.T12.c's sphere cases
+    check it against published matrices.
+  - _The registry:_ `materials/materials.ts`. `refractiveIndex(material, λ, form?)` returns
+    `{ index, provenance }`, with an optional `form` (`{ phase?, variant? }`), since H₂O and CH₄
+    have liquid and solid files and H₂SO₄ two concentrations; a key's first file is its default
+    (liquid water, liquid methane, 75 wt% acid, a choice: both acid files lie inside Hansen and
+    Hovenier's 1.44 ± 0.015, who name only "a concentrated solution of sulfuric acid"). Also
+    `resolveMaterial` and `ResolvedMaterial`, `indexAt`, `MATERIAL_FILES`, `MaterialIndexFile`,
+    `MATERIAL_WAVELENGTHS_NM` (380–780 nm every 5 nm), `GENERIC_STAND_IN_INDEX`,
+    `parseMaterialFile`, `MaterialPhase`, `ShapeClass`, `MaterialProvenance`, `CauchyFit`,
+    `MaterialForm`, `MaterialIndex`, and the label's `materialApproximations`,
+    `MaterialApproximation` and `materialLabels`, over
+    `MaterialLayer { material, form?, opticalDepthAbove550 }`: any stand-in resolution under less
+    than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above the mode's top. A phase or variant not on file takes
+    the key's first file as a named analogue, as `standIn` (liquid iron takes solid iron's). The
+    files are JSON, one source of truth for P14.T49.e's reader, named by material rather than key (a
+    case-insensitive file system would fold `CO` and `Co`), each holding its key: 15 files, about
+    50 KB. 295 K stands for a source's "room temperature".
+  - _The tool:_ `src/tools/materials.ts` and `scripts/materials.mjs` are a new Node tool on R05's
+    `solarFactors` pattern, since T4.a's tool is not built; T4.a's CIE reduction sits beside it. Its
+    tests (`src/tools/materials.test.ts`) run under `pnpm test`, not under the shared acceptance
+    command, whose `view/atmosphere/…` filters select `sizeDistribution.test.ts` and
+    `materials/materials.test.ts` (and `aggregate` nothing until T5.c).
+  - _Sources:_ water (Hale and Querry 1973), ice (Warren and Brandt 2008), CH₄ liquid and solid at
+    90 K (Martonchik and Orton 1994), iron (Johnson and Christy 1974) and propane soot (Dalzell and
+    Sarofim 1969) from refractiveindex.info (CC0); NH₃ ice (Martonchik et al. 1984) and MgSiO₃ glass
+    (Dorschner et al. 1995) from optool's `lnk_data` (its MIT licence covers its software; the data
+    state no terms, so reduced values); Mg₂SiO₄ from Jäger et al. 2003's amorphous sol-gel sample
+    (HITRAN2024), since Dorschner et al. 1995 has no Mg-pure olivine glass, as Kitzmann and Heng
+    2018 also take it; tholin from Khare et al. 1984 (HITRAN2024) over He et al. 2022, whose data
+    begin at 400 nm. HITRAN2024's `hitran_ri.tar` has SHA-256
+    `c22643a856ec98b3371c70e64351b19a9f3ea51b38ce369087e17e7e4ecc231e`, recorded at the first fetch.
+    The review's science check confirmed every citation, checksum and reduced value, and found the
+    tholin, Mg₂SiO₄ and NH₄SH choices defensible. Each file states its exceptions:
+    - CH₄ holds its 400 nm values over 380–400 nm (the source jumps from 133.7 nm across the
+      absorption edge), and its ice's k of 0 is a gap in the source, not a measurement;
+    - soot holds its 435.8 nm values over 380–435.8 nm;
+    - H₂SO₄'s visible k is its shortest measured k (2.07 × 10⁻⁸ at 701.8 nm, 75 wt%; 1.14 × 10⁻⁸ at
+      714.3 nm, 84.5 wt%), an upper bound since k falls towards the visible;
+    - Mars dust interpolates 380–440 nm between the source's 321 and 440 nm rows, though the 263
+      and 321 nm rows lie outside Wolff et al. 2009's CRISM range (440–2,920 nm) and their source
+      is unstated (perhaps Wolff et al. 2010's MARCI retrieval, unconfirmed);
+    - NH₃ ice's visible k comes from earlier published spectra (Martonchik et al.'s abstract),
+      unread here, and moves 1 − ω by about 10⁻² for 10 µm grains;
+    - CO₂ ice's n is for ice near 80 K and its k (Hansen 2005) for ice grown at 150 K;
+    - Jäger's k is printed to 10⁻⁴.
+  - _MgSiO₃ and Mg₂SiO₄_ are built here, from T5.b's list, although T5.d also lists them. T5.d takes
+    them as built, or replaces Mg₂SiO₄ with a crystalline-forsterite primary. Its planned test, a
+    1 µm forsterite sphere's ω above 0.99 at 550 nm, gives 0.9928 on Jäger's file.
+  - _NH₄SH_ keeps the ruled 1.80. The science check finds it high-side (a Lorentz–Lorenz estimate
+    from memory puts NH₄SH's visible n near 1.5–1.65) and NH₃ ice's 1.43 no better; reported to
+    "main".
+  - _Not built:_ the non-spherical materials' literature phase functions ("sit beside their
+    indices"). Wolff et al. 2009's dust phase function and ω are in a closed AGU paper with no open
+    copy, and no roughened-ice or silicate phase function was chosen. Provisionally ("main",
+    2026-10-09, pending a science agent to name an open, citable phase function per class: dust,
+    roughened ices, silicates), T5.c's `aerosolTerm` labels such a mode `ATMOSPHERE: APPROXIMATE`
+    and gives it a Henyey–Greenstein phase from its Mie g, with Mie's ω; `ModeOptics.shape` marks
+    those values.
+  - _The Venus test:_ Hansen and Hovenier 1974's figure could not be read (GISS unreachable, AMS and
+    ADS refused). The test takes Hansen and Travis 1974's Fig. 12 (b = 0.07, n_r = 1.44), digitised
+    from the ADS scan by the builder (0.7145 at x_eff = 12.0) and again by the science check
+    (0.7146). The code gives 0.7180 at n = 1.44 and 0.7187 on the 75 wt% file, 0.0035 above the
+    reading and outside its ±0.002 line width; the bracket, 0.705–0.725, is the builder's allowance
+    for the figure's drafting (a 2% shift in x moves g by about 0.003), which the science check
+    accepted.
+  - _Access gaps, pending for the owner_ (decision-composition §5): Hansen and Hovenier 1974's own
+    figure, and Wolff et al. 2009's dust phase function and ω.
+  - _`CLOUD_DECK_SPLIT_OPTICAL_DEPTH`_ (10) is created in `thick/regime.ts`, the Provides' thick
+    block; R08.T13 adds `classifyRegime` beside it. Its comment notes that a conservative τ 10 deck
+    still transmits 31–47% diffusely (two-stream, g 0.7–0.85), which the deck's bake carries.
+  - _For plan 14 (accepted by "main" as a finding, 2026-10-09, for P14.T35.e's and T24.c's
+    agents):_ P14.T24.c gives a mode's shape class by its registry row, but one row serves every
+    phase (`H2O` droplets and ice), so each mode on the wire must carry its phase or shape class.
+    The client's optional `form`, with a labelled named analogue for a phase or concentration not
+    on file, is adopted provisionally.
+  - _For T5.d and later:_ Bond and Bergstrom 2006's m ≈ 1.95 + 0.79i for absorbing carbon (Dalzell
+    and Sarofim's k of about 0.5 is low), Ramirez et al. 2002's Titan aerosol (200–900 nm, in the
+    same HITRAN archive) and Krishnan, Yugawa and Nordine 1997's liquid iron are closer analogues,
+    the science check's notes.
+  - _Waiting:_ R08.T19 checks every file's key against `substances.json` once P14.T49.a's fixture
+    exists; the keys are tested as ASCII of at most 16 bytes. The labels' C4 TSDoc is in, with the
+    general stand-in clause beside the NH₄SH one.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the
