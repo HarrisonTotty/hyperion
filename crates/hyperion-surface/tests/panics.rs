@@ -26,6 +26,9 @@ use hyperion_surface::num;
 use hyperion_surface::patch::vertex::{PatchTerms, face_difference_morph_f32};
 use hyperion_surface::patch::{BakeOptions, NormalScale, VertexPath, bake_patch};
 use hyperion_surface::spheroid::Spheroid;
+use hyperion_surface::synth::channels::{
+    Channels, hack_area, head_length, main_stream_length, tributary_rise,
+};
 use hyperion_surface::synth::interp::{CellValues, interpolate};
 use hyperion_surface::synth::relief::{
     Relief, finest_octave, nyquist_degree, octave_bound, octave_rms, octave_spacing,
@@ -219,6 +222,11 @@ fn a_cover_past_its_level_has_no_margin() {
 /// A dry, flat, airless field of a Ceres-sized body at level 5, with no crater, built from the
 /// public types alone (this binary sees no `testing` feature).
 fn level_five_field() -> CoarseField {
+    level_five_field_flowing(FlowDirection::Terminal)
+}
+
+/// A level-5 field whose every cell's water goes `flow`, with a channel where it goes anywhere.
+fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
     let radius = 4.697e5;
     let craters = CraterParams::new(CraterParamsParts {
         n_1km: PerSquareKilometre::ZERO,
@@ -260,9 +268,13 @@ fn level_five_field() -> CoarseField {
         crust: Crust::Lid,
         boundary: BoundaryKind::Absent,
         boundary_obliquity: 0,
-        flow: FlowDirection::Terminal,
-        drainage: LogArea::ZERO,
-        steepness: LogSteepness::ZERO,
+        flow,
+        drainage: LogArea::new(30_000),
+        steepness: if flow == FlowDirection::Terminal {
+            LogSteepness::ZERO
+        } else {
+            LogSteepness::new(64)
+        },
         water_surface_mm: 0,
         ice: 0,
         substances: SynthesisCell::NO_SUBSTANCES,
@@ -399,4 +411,76 @@ fn a_relief_octave_rms_past_octave_31_is_refused() {
     let field = level_five_field();
     let relief = Relief::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
     let _ = relief.octave_rms(32);
+}
+
+#[test]
+#[should_panic(expected = "a segment is of level 5 or finer, not 4")]
+fn a_channel_segment_above_the_first_level_is_refused() {
+    let field = level_five_field();
+    let channels = Channels::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let mut network = channels.network(&field);
+    let _ = network.segment(PatchKey::containing(4, [0.0, 0.0, 1.0]).unwrap());
+}
+
+#[test]
+#[should_panic(expected = "a key point is of level 5 or finer, not 4")]
+fn a_key_point_above_the_first_level_is_refused() {
+    let field = level_five_field();
+    let channels = Channels::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let mut network = channels.network(&field);
+    let _ = network.key_point(PatchKey::containing(4, [0.0, 0.0, 1.0]).unwrap());
+}
+
+#[test]
+#[should_panic(expected = "a key point is of level 5 or finer, not 3")]
+fn an_inheritance_above_the_first_level_is_refused() {
+    let field = level_five_field();
+    let channels = Channels::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let mut network = channels.network(&field);
+    let _ = network.is_inherited(PatchKey::containing(3, [0.0, 0.0, 1.0]).unwrap());
+}
+
+#[test]
+#[should_panic(expected = "a segment's parameter is in [0, 1], got 1.5")]
+fn a_segment_parameter_beyond_its_outlet_is_refused() {
+    let field = level_five_field_flowing(FlowDirection::UMax);
+    let channels = Channels::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let mut network = channels.network(&field);
+    let trunk = network
+        .segment(PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap())
+        .unwrap()
+        .unwrap();
+    let _ = trunk.bed_at(1.5);
+}
+
+#[test]
+#[should_panic(expected = "a drainage area must be finite and non-negative")]
+fn a_main_stream_of_a_negative_area_is_refused() {
+    let _ = main_stream_length(SquareMetres::new(-1.0));
+}
+
+#[test]
+#[should_panic(expected = "a stream's length must be finite and non-negative")]
+fn a_hack_area_of_a_negative_length_is_refused() {
+    let _ = hack_area(Metres::new(-1.0));
+}
+
+#[test]
+#[should_panic(expected = "a body's radius must be finite and positive")]
+fn a_head_length_on_no_body_is_refused() {
+    let _ = head_length(Metres::ZERO, 9);
+}
+
+#[test]
+#[should_panic(expected = "a level is at most 24, got 25")]
+fn a_head_length_past_the_deepest_level_is_refused() {
+    let _ = head_length(Metres::new(6.371e6), 25);
+}
+
+#[test]
+#[should_panic(
+    expected = "a tributary's steepness, head and length must be finite and non-negative"
+)]
+fn a_tributary_rise_of_negative_steepness_is_refused() {
+    let _ = tributary_rise(-1.0, Metres::new(10.0), Metres::new(10.0));
 }

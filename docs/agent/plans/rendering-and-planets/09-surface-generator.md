@@ -3025,3 +3025,136 @@ prepare` ran the surface crate's 233 tests on the browser target.
     re-validation:_ R05's Provides comment on `gradient_noise` ("`Octave` holds k, offset,
     rotation, seed") and its T3 record ("the index, spacing, rotation, offset and seed") now read a
     `NoiseKey` for the seed; `spacing_m` is `spacing`, and the rotation is `noise::rotation`.
+- **Deviations in T6.a, as built** (2026-10-10).
+  - _No variance member._ By "main"'s adoption (2026-10-10) of the lean on `decision-r09-t5.md`
+    item 4, T6.a adds nothing to `UnresolvedVariance`. T6.b adds the channels' member, a form on
+    per-cell inputs for T12.e and a test pinning the two equal. T6.a exposes, per level,
+    `head_length(radius, level)` and `tributary_rise(k_s, head, length)`, the bed's rise along a
+    tributary in closed form.
+  - _Files and public items._ `synth/channels.rs` (tests in `synth/channels/tests.rs`):
+    - `Channels` (`new`, `seed`, `first_level`, `network`, which panics on another body's field),
+      re-exported as `synth::Channels`;
+    - `ChannelNetwork` (`key_point`, `is_inherited`, `segment`), memoised per network by packed
+      cell key, the caller's; T6.b moves the memo into `SynthCache`;
+    - `KeyPoint` (`face`, `st`, `dir`, `is_in`);
+    - `Segment` (`cell`, `level`, `is_trunk`, `from_m`, `to_m`, `crossing_m`, `point_m`, `length`,
+      `outlet`, `bed_from`, `bed_to`, `bed_at`, `main_stream_at`, `area_at`, `slope_at`,
+      `steepness_m0_9`), `Clone` but not `Copy` at 136 bytes;
+    - `Outlet` (`Cell { receiver, exit }`, `Join { parent, at }`);
+    - `main_stream_length`, `hack_area`, `head_length`, `tributary_rise`;
+    - `KEY_POINT_MARGIN`, `CROSSING_MARGIN`, `HACK_COEFFICIENT`, `HACK_EXPONENT`, `MINIMUM_SLOPE`.
+
+    `segment` returns T4's `ReadCellError`. `surface.channel`'s declaration now names its draws.
+
+  - _Key points._ Face coordinates are integers in units of 2⁻⁵⁰ of the face's side. Each cell
+    draws as `surface_cell(face, level, i, j, 0)`, from the top 24 bits of words 0 and 1, uniform
+    in [ε, 1 − ε) with ε 0.25. The child that holds its parent's point inherits it, the same bits
+    at every level (Dendry's `ReplaceNeighboringPoints`); the other three draw.
+  - _Trunks are two chords_ through a crossing on the shared edge: where the straight chord between
+    the key points meets the edge's great circle, held to the edge's central half
+    (`CROSSING_MARGIN`, T6.a's own). Two cells across a face edge are not together convex, since a
+    row of cells bends there, and near a cube corner the straight chord between their key points
+    passes through a third cell (the first build's test caught it). The hold binds on 77 of the
+    Earth-like world's 121,310 trunks and 140 of the Mars-like world's 98,229, all but one across
+    face edges.
+  - _Joins follow the brainstorm's rule_ (its per-query evaluation, step 4): the nearest point of
+    every coarser level's segments in that level's 3 × 3 graph neighbourhood, across coarse cells
+    and faces. Distance is the 3D chord between spheroid points, in metres. Ties go to the coarser
+    level, then the lower packed key.
+    - A first build confined joins to the key point's own coarse cell, so that every tributary's
+      water left through its cell's trunk. The plan-conformance review found that against the
+      brainstorm, and it set a divide along every coarse-cell edge, so it was reverted.
+    - The coarse drainage areas therefore hold for the trunks, not for every tributary's water,
+      and the test "the network leaves each coarse cell through the cell its flow direction names"
+      is the first level's: every trunk's first chord lies in its cell and its second in its
+      receiver, and every finer segment's chain of parents ends at a trunk.
+    - Some tributaries join across face edges (tested).
+    - The 3 × 3 is T6.b's search, built here without its bounding boxes. T6.b keeps its results:
+      one shared `nearest_on`, pruning only on a box strictly farther than the best, and no cached
+      inverse length that changes the bits (the determinism review).
+  - _Where tributaries are._ Only in a dry coarse cell whose flow names a receiver and whose
+    steepness code is above 0. A tributary reads its own coarse cell's `k_s`, wherever it joins.
+  - _Profiles._
+    - A trunk's bed runs straight between the two cells' water surfaces (the sea's or a lake's
+      level where it reaches one): the coarse field's fall, over the trunk's own length. Its key
+      points are 0.5 to 1.6 centre distances apart, so its slope is about 0.6 to 2 times the field's
+      `k_s` A^−θ. It is exempt from the minimum slope, and flat across level water.
+    - A tributary falls at max(`k_s` C^¾ L^−¾, S_min) with L Hack's main stream, in closed form,
+      the stream-power part through square roots (θ ÷ h = ¾). Its bed at the join is its parent's
+      there, bit for bit.
+  - _T6.a's own constants._
+    - The head length is Hack's length of one mean cell of the key point's level: 40.9 km at level
+      9 on an Earth, 3.37 km at 12, 4.34 m at 20.
+    - The minimum slope is one floor, 10⁻⁵, at every level: two thirds of the lowest water-surface
+      gradient measured on the Amazon (Birkett et al. 2002). "Held to a minimum slope by level" is
+      read as each level held to its parent.
+  - _Hack's C_ is 0.319 741 m^−0.2 (the plan's 0.320). The science check read it from Hack 1957:
+    eq. 3, p. 63, with L measured along the channel to the divide (pp. 47–48).
+  - _The 10⁴ km² test_ checks Hack's function, 319.7 km, and the Earth-like trunks that drain
+    10⁴ km² to 5%: the area-to-length path, since a trunk's main stream is Hack's of its area. The
+    network's own path lengths are procedural, not Hack's.
+  - _The read set._ The segments below a coarse cell, to L + 3, read cells up to three king moves
+    from it (measured on the Earth- and Mars-like worlds; Design note 15 budgets four for the first
+    level).
+  - _Tests beyond the list._ Eleven more unit tests in `synth::channels`:
+    - Hack's conversion and the head lengths;
+    - the fixed-point layout and the key points;
+    - the first level against the coarse flow;
+    - the worlds without a fluvial step;
+    - the profile against `k_s` A^−θ and a central difference, and the closed form against
+      quadrature across the floor's kink;
+    - order independence over fresh networks in four orders, cell by cell alone, and through one
+      warm network;
+    - the seed;
+    - the read set.
+
+    Nine `should_panic` tests are in `tests/panics.rs`, which gains `level_five_field_flowing`.
+
+  - _Acceptance._ `cargo test -p hyperion-surface synth::channels` selects the 15 unit tests; the
+    panics need `--test panics`. T6.a also ran the crate's whole suite, `cargo test -p
+hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 panics; every
+    golden unchanged), and `just _browser prepare` (the surface crate's 257 tests on the browser
+    target).
+  - _Science findings, for "main"_ (from the science check):
+    - _Runoff-weighted areas._ Design note 9's coarse pass stores Hergarten's runoff-weighted area
+      and `k_s` against it, while Hack's law relates length to planimetric area (Hack 1957, p. 47).
+      With runoff r̄ in m a⁻¹:
+      - a tributary's slope is off by r̄^θ (2.8 times too gentle at 0.1 m a⁻¹);
+      - a trunk's main stream is off by r̄^h (about 4 times too short).
+
+      Latent, since the synthetic worlds' areas are geometric and T14.b is unbuilt. Asked of
+      "main", lean: the field's `drainage` and `steepness` stay geometric, the weighting inside
+      T14's solver, with no wire change.
+
+    - _Ranges._
+      - Hack's basins span 0.31 to 971 km² (Hack 1957, p. 45). From level 15 on an Earth a head
+        drains less than the smallest (level 14's mean cell, 0.317 km², is just above it), and
+        continental trunks far more.
+      - Stream power holds only below slopes of about 0.03 to 0.1 (Stock and Dietrich 2003). At
+        `k_s` 300 m^0.9 a head exceeds that from level 11.
+      - So T6.b's level cut ends the network at the channel heads (`decision-r09-t5.md`, adjacent
+        finding C).
+    - _Area bookkeeping._ The areas at a level's new joins sum to more than their parent cell (+33%
+      at level 12 and +6% at 9): each head drains a whole cell, and Hack's L follows meanders while
+      a tributary grows by its chord. That leaves slopes up to about 14% gentle, for T6.b's and
+      T14.c's closed forms.
+    - _The neighbourhood._ Dendry's paper needs at least 5 × 5 cells for the true nearest segment
+      (§4.1.2). The 3 × 3 is the plan's, already among Design note 13's departures.
+  - _For T6.b._
+    - The incision (cross-profile, depth) and each level's mean over its parent cell, from the
+      segments.
+    - The level cut at channel heads and widths.
+    - The memo into `SynthCache`, keyed by seed and field, since a segment depends on the coarse
+      records too.
+    - The channels' `UnresolvedVariance` member and `structure_function`.
+    - A first-level chord sags below the surface by up to L² ÷ 8R, about 25 m over 36 km, so the
+      cross-profile's distance to a trunk measures to the chord's radial projection, or accepts
+      that.
+  - _For T8._ The channels read three king moves for the network to L + 3, before T6.b's query
+    search.
+  - _For T9_ (the determinism review). A channel golden in a subdirectory, at `GENERATOR_VERSION`:
+    - key points to L + 3 (s, t, inherited);
+    - trunks: interior, across a face edge, held at a crossing, and ending at a sea;
+    - tributaries: one across a face edge, one clamped at a chord's end, and one at the floor;
+    - `main_stream_length`, `hack_area`, `head_length` and `tributary_rise` about the floor's
+      crossover.

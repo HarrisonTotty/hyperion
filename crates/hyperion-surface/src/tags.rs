@@ -75,7 +75,8 @@ hyperion_base::domain_tags! {
     SURFACE_RELIEF: SurfaceDetail = "surface.relief";
 
     /// The synthesis's channel network (R09, Design note 13), keyed by `surface_cell` of a
-    /// Dendry level's cells: each cell's jittered key point.
+    /// Dendry level's cells, instance 0: each cell's drawn key point, its face coordinates s and t
+    /// from the top 24 bits of words 0 and 1 (R09.T6.a); no other word is drawn yet.
     SURFACE_CHANNEL: SurfaceDetail = "surface.channel";
 
     /// The synthesis's craters below the boundary diameter (R09, Design note 13), keyed by

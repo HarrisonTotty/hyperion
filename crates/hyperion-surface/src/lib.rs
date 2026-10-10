@@ -15,8 +15,9 @@
 //! 14's substances, which the header's palette carries ([`substance_key`]); the codec of the
 //! field's bulk payload ([`wire`]); the synthesis over a field ([`synth`]), today its
 //! `Synthesiser` returning the base elevation, the coarse cells interpolated over the sphere
-//! (`synth::interp`), with the header's spectrum; and, for tests, synthetic fields (`testing`,
-//! feature `testing`).
+//! (`synth::interp`), with the header's spectrum, and beside it the structural octaves
+//! (`synth::relief`) and the channel network (`synth::channels`) that the assembly will add to it;
+//! and, for tests, synthetic fields (`testing`, feature `testing`).
 //!
 //! # The contract of the height function
 //!

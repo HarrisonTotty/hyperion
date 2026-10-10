@@ -4,14 +4,16 @@
 //! [`Synthesiser`] is the height function over a coarse field, on the server's whole field and a
 //! client's part of one alike, through [`FieldView`]. Today it returns the base elevation, the
 //! coarse cells interpolated over the sphere ([`interp`], R09.T4), at every level; the structural
-//! octaves ([`relief`], R09.T5), the channels (T6) and the small craters (T7.b) add the bands below
-//! the coarse cell, and the assembly (T8) fixes each level's set. The module also holds the two
+//! octaves ([`relief`], R09.T5), the channels ([`channels`], whose network R09.T6.a builds and
+//! whose incision T6.b adds) and the small craters (T7.b) add the bands below the coarse cell, and
+//! the assembly (T8) fixes each level's set. The module also holds the two
 //! types a coarse field's header carries: [`BandLevel`], the quadtree level a height is asked at,
 //! and [`BandSpectrum`], the law of the relief finer than the coarse cells, from which the relief
 //! derives each level's amplitude and the closed-form variance below a cell ([`local_variance`]);
 //! and the per-contribution variance below a wavelength that R10 reads
 //! ([`unresolved_variance`]).
 
+pub mod channels;
 pub mod interp;
 pub mod relief;
 
@@ -22,6 +24,7 @@ use crate::cube::{MAX_LEVEL, PatchKey};
 use crate::field::{FieldView, SynthesisCell};
 use crate::height::HeightSample;
 use crate::noise::LatticeCache;
+pub use channels::Channels;
 use interp::ReadCellError;
 pub use relief::{Relief, local_variance};
 
