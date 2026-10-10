@@ -17,11 +17,13 @@ IDs are case-insensitive: p02.t5.a is read as P02.T5.a. The prefix picks the pla
 galaxy-generation, `R` for rendering-and-planets (`--feature` overrides it).
 
 Task markers the parser understands: `### P01.T1 Title` / `#### P01.T1.a Title` headings,
-`**P05.T1.a Title.** body` paragraphs and `- **P08.T2.a Title.** body` bullets. A subtask also
-gets its parent's intro, the intro of the enclosing `### Phase …` heading, and the paragraphs its
-parent shares among all subtasks: a labelled paragraph (Files, Accept, Acceptance, Tests) that says
-so ("Acceptance for T6", "Files (all of T2)"), and the labelled paragraphs after the last subtask
-whose label no earlier subtask uses for a paragraph of its own.
+`**P05.T1.a Title.** body` paragraphs and `- **P08.T2.a Title.** body` bullets, whose bold title
+may wrap onto the next lines of its paragraph (R06.T8.g's does). A subtask also gets its parent's
+intro, the intro of the enclosing `### Phase …` heading, and the paragraphs its parent shares among
+all subtasks: a labelled paragraph (Files, Accept, Acceptance, Tests) that says so ("Acceptance for
+T6", "Files (all of T2)"), and the labelled paragraphs after the last subtask whose label no earlier
+subtask uses for a paragraph of its own, or that stand back at the margin after a bulleted subtask.
+Tests: test_plan_task.py beside this script.
 
 Design notes: `28. **Title.**` numbered items and `**D4. Title.**` or `**D8a. Title.**`
 paragraphs, cited as "Design note 7", "design notes 7 and 13", "notes 8–10", "D4" or "D8a". A
@@ -50,6 +52,12 @@ ID_RE = re.compile(r"([PR])(\d{2})\.T(\d+)(?:\.([a-z]+))?")
 LOOSE_ID_RE = re.compile(r"([PpRr])(\d{2})\.[Tt](\d+)(?:\.([A-Za-z]+))?")
 HEADING_TASK_RE = re.compile(r"^(#{2,6})\s+([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*(.*)$")
 INLINE_TASK_RE = re.compile(r"^(?:[-*]\s+)?\*\*([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\b\s*([^*]*?)\.?\*\*")
+# A bold title that wraps (R06.T8.g's `- **R06.T8.g Census cost: … P11.T16 and` / `  P11.T17.c).**`),
+# matched against the marker's line joined to the next lines of its paragraph. Only an ID followed by
+# a title counts, so a wrapped Risks record such as `- **P14.T1.a's … as built …**` stays out.
+WRAPPED_OPEN_RE = re.compile(r"^(?:[-*]\s+)?\*\*[PR]\d{2}\.T\d+(?:\.[a-z]+)?(?:\s|$)")
+WRAPPED_TASK_RE = re.compile(r"^(?:[-*]\s+)?\*\*([PR]\d{2}\.T\d+(?:\.[a-z]+)?)\s+([^*]*?)\.?\*\*")
+WRAP_LINES = 3  # lines a wrapped title may continue onto (R06.T7.c's takes two)
 HEADING_RE = re.compile(r"^(#{1,6})\s")
 BULLET_RE = re.compile(r"^\s*[-*]\s")
 NOTE_START_RES = (
@@ -154,6 +162,21 @@ def find_plan(root: Path, prefix: str, plan_no: str, feature: str | None) -> Pat
     return matches[0]
 
 
+def wrapped_marker(lines: list[str], i: int) -> re.Match[str] | None:
+    """A bold task title that opens on line `i` and closes on one of the next `WRAP_LINES` lines of
+    the same paragraph (no blank line, bullet or heading between), matched on the joined lines."""
+    if not WRAPPED_OPEN_RE.match(lines[i]):
+        return None
+    text = lines[i].rstrip()
+    for line in lines[i + 1 : i + 1 + WRAP_LINES]:
+        if not line.strip() or BULLET_RE.match(line) or HEADING_RE.match(line):
+            return None
+        text += " " + line.strip()
+        if m := WRAPPED_TASK_RE.match(text):
+            return m
+    return None
+
+
 def markers(lines: list[str]) -> list[Marker]:
     found = []
     for i, line in enumerate(lines):
@@ -161,6 +184,8 @@ def markers(lines: list[str]) -> list[Marker]:
             found.append(Marker(i, m.group(2), m.group(3).strip(), len(m.group(1))))
         elif m := INLINE_TASK_RE.match(line):
             found.append(Marker(i, m.group(1), m.group(2).strip(), 7))
+        elif m := wrapped_marker(lines, i):
+            found.append(Marker(i, m.group(1), " ".join(m.group(2).split()), 7))
     return found
 
 
@@ -344,8 +369,10 @@ def subtasks(lines: list[str], all_markers: list[Marker], parent: Marker):
     shared by all of them. A paragraph that starts with a task marker is never shared. A labelled
     paragraph is shared when it says so; so is everything from the first labelled paragraph after
     the last subtask whose label no earlier subtask uses for a paragraph of its own (P01.T4's
-    `Files: … Acceptance: …`, P06.T5's `- **Files:** … **Accept:** …`, P14.T6's `- _Accept:_`).
-    Plans that give each subtask its own labelled paragraphs (plan 05) keep the last one's as its own.
+    `Files: … Acceptance: …`, P06.T5's `- **Files:** … **Accept:** …`, P14.T6's `- _Accept:_`),
+    or, after a bulleted last subtask, from the first labelled paragraph back at the margin
+    (R06.T8's `Files: … Bench: …`). Plans that give each subtask its own labelled paragraphs
+    (plan 05) keep the last one's as its own.
     """
     parent_end = section_end(lines, parent, all_markers)
     children = [
@@ -365,9 +392,13 @@ def subtasks(lines: list[str], all_markers: list[Marker], parent: Marker):
     }
     earlier = {label_of(lines[a]) for spans in regions[:-1] for a, _ in spans[1:]} - {None}
     last = regions[-1]
+    # A bulleted subtask ends where the text returns to the margin, so a labelled paragraph there is
+    # the parent's whatever labels the subtasks use.
+    bullet = BULLET_RE.match(lines[children[-1].line]) is not None
     for k in range(1, len(last)):
         label = label_of(lines[last[k][0]])
-        if label and (last[k] in shared or label not in earlier):
+        margin = bullet and not lines[last[k][0]][:1].isspace()
+        if label and (last[k] in shared or label not in earlier or margin):
             shared.update(last[k:])
             break
     own = {child.task_id: [s for s in spans if s not in shared] for child, spans in zip(children, regions)}
