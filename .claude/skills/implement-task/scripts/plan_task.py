@@ -7,6 +7,7 @@ Usage:
     plan_task.py P02.T5.a --context    The same, plus the plan's Generator version and Risks
                                        sections (earlier tasks' as-built records live there).
     plan_task.py P02.T5 --acceptance   Only the acceptance criteria (all subtasks, each labelled),
+                                       with the list a lead-in such as `Acceptance:` introduces,
                                        the commands quoted in them, and the Risks lines naming
                                        the task.
     plan_task.py --list [P02]          Every task ID and title, marked where a commit subject
@@ -23,6 +24,9 @@ intro, the intro of the enclosing `### Phase …` heading, and the paragraphs it
 all subtasks: a labelled paragraph (Files, Accept, Acceptance, Tests) that says so ("Acceptance for
 T6", "Files (all of T2)"), and the labelled paragraphs after the last subtask whose label no earlier
 subtask uses for a paragraph of its own, or that stand back at the margin after a bulleted subtask.
+An acceptance paragraph or bullet whose last line ends with its marker (`… Acceptance:`,
+`- **Acceptance:**`, `- **Acceptance.**`, `- _Accept:_`, `- **Acceptance as built:**`) keeps the
+bulleted list that follows it (R06.T8.g's, R08.T1's).
 Tests: test_plan_task.py beside this script.
 
 Design notes: `28. **Title.**` numbered items and `**D4. Title.**` or `**D8a. Title.**`
@@ -86,6 +90,12 @@ PLAN_NAME_RE = re.compile(PLAN_REF)
 PARAGRAPH_BREAK_RE = re.compile(r"\n\s*\n|\n\s*[-*]\s")
 COMMAND_RE = re.compile(r"`((?:just|cargo|pnpm|grep|rg|git|python3?|uvx|wasmtime)\b[^`]*)`")
 ACCEPT_RE = re.compile(r"(?<![A-Za-z])Accept(?:ance)?\b")
+# The end of a lead-in that introduces a list of criteria: "Acceptance:", "**Acceptance:**",
+# "**Acceptance.**", "_Accept:_", "**Acceptance as built:**", "Acceptance for T5.b and T5.c:". A
+# plain sentence ending "Acceptance." introduces nothing, so a full stop counts only inside emphasis.
+LEAD_IN_RE = re.compile(
+    r"(?<![A-Za-z])Accept(?:ance)?(?: (?:as|for) [^:*_`\n]{1,40}?)?(?::(?:\*\*|_)?|\.(?:\*\*|_))\s*$"
+)
 # A paragraph or bullet that starts with one of these labels: "Files:", "- **Accept:**", "_Tests:_".
 LABEL_RE = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*|_)?(Files|Accept(?:ance)?|Tests?)\b")
 SHARED_RE = re.compile(r"\((?:all of|for all of) T\d+\)|\bfor T\d+\b(?!\.)|\beach subtask\b|\ball subtasks\b", re.I)
@@ -299,9 +309,40 @@ def paragraph_spans(lines: list[str], start: int, end: int) -> list[tuple[int, i
     return [(a, b) for a, b in spans]
 
 
-def paragraphs(block: list[str]) -> list[str]:
-    """Split on blank lines and on bullets, so each bullet is its own paragraph."""
-    return ["\n".join(block[a:b]) for a, b in paragraph_spans(block, 0, len(block))]
+def indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def with_lists(lines: list[str], spans: list[tuple[int, int]], task_lines: set[int]) -> list[tuple[int, int]]:
+    """The spans, each acceptance lead-in (LEAD_IN_RE on its last line) joined to the bulleted list
+    it introduces. The list runs on through bullets, blank lines between them allowed: nested under
+    the lead-in when it is a bullet itself, at its indent or deeper otherwise. It ends at text that
+    is not a bullet, such as a paragraph after a blank line or a heading, at a task marker
+    (`task_lines`), at a shallower bullet, or where the next span does not follow in the plan."""
+    out: list[tuple[int, int]] = []
+    k = 0
+    while k < len(spans):
+        a, b = spans[k]
+        k += 1
+        if LEAD_IN_RE.search(lines[b - 1]):
+            floor = indent(lines[a]) + (1 if BULLET_RE.match(lines[a]) else 0)
+            while k < len(spans):
+                c, d = spans[k]
+                if (
+                    any(line.strip() for line in lines[b:c])
+                    or c in task_lines
+                    or not BULLET_RE.match(lines[c])
+                    or indent(lines[c]) < floor
+                ):
+                    break
+                b, k = d, k + 1
+        out.append((a, b))
+    return out
+
+
+def criteria(lines: list[str], spans: list[tuple[int, int]], task_lines: set[int] | None = None) -> list[str]:
+    """The spans' paragraphs as text, each acceptance lead-in with its list (`with_lists`)."""
+    return ["\n".join(lines[a:b]) for a, b in with_lists(lines, spans, task_lines or set())]
 
 
 def span_lines(lines: list[str], spans: list[tuple[int, int]]) -> list[str]:
@@ -428,22 +469,26 @@ def task_blocks(lines, all_markers, target) -> tuple[list[str], tuple[int, int],
 
 def acceptance_groups(lines, all_markers, target) -> list[tuple[str, list[str]]]:
     """(label, paragraphs) in plan order: the phase intro, the parent's intro, each subtask's own
-    paragraphs (only the target's, for a subtask) and the paragraphs shared by all subtasks."""
+    paragraphs (only the target's, for a subtask) and the paragraphs shared by all subtasks. Each
+    bullet is its own paragraph, except in the list an acceptance lead-in introduces."""
     parent = parent_of(target.task_id, all_markers)
     top = parent or target
+    task_lines = {mk.line for mk in all_markers}
     groups = []
     heading, intro_lines = phase_intro(lines, all_markers, top)
     if heading:
-        groups.append((f"[{heading.lstrip('#').strip()}, intro]", paragraphs(intro_lines)))
+        spans = paragraph_spans(intro_lines, 0, len(intro_lines))
+        groups.append((f"[{heading.lstrip('#').strip()}, intro]", criteria(intro_lines, spans)))
     _, children, own, shared = subtasks(lines, all_markers, top)
     if not children or (parent is not None and target.task_id not in own):
         end = section_end(lines, target, all_markers)
-        return groups + [(f"[{target.task_id}]", paragraphs(lines[target.line : end]))]
-    groups.append((f"[{top.task_id}, intro]", paragraphs(lines[top.line : children[0].line])))
+        return groups + [(f"[{target.task_id}]", criteria(lines, paragraph_spans(lines, target.line, end), task_lines))]
+    intro = paragraph_spans(lines, top.line, children[0].line)
+    groups.append((f"[{top.task_id}, intro]", criteria(lines, intro, task_lines)))
     for child in children:
         if parent is None or child.task_id == target.task_id:
-            groups.append((f"[{child.task_id}]", ["\n".join(lines[a:b]) for a, b in own[child.task_id]]))
-    groups.append((f"[Shared by all subtasks of {top.task_id}]", ["\n".join(lines[a:b]) for a, b in shared]))
+            groups.append((f"[{child.task_id}]", criteria(lines, own[child.task_id], task_lines)))
+    groups.append((f"[Shared by all subtasks of {top.task_id}]", criteria(lines, shared, task_lines)))
     return groups
 
 
