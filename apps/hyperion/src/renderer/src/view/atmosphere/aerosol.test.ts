@@ -13,11 +13,12 @@ import {
   phaseTableAsymmetry,
   phaseTableIntegral,
   SMALL_BIAS_ANALOGUES,
+  SMALL_BIAS_MAX_ABS_DG,
 } from "./aerosol";
 import { gaussLegendre } from "../lighting/quadrature";
 import { hydrostaticColumn } from "./column";
 import { CHANNEL_WAVELENGTHS_NM, columnLengthM, densityAt, phaseAt } from "./medium";
-import { opticsOfParticles } from "./nonSpherical";
+import { ICE_ANALOGUE_ASYMMETRY_BIAS, opticsOfParticles } from "./nonSpherical";
 import { type ModeOptics, PHASE_TABLE_U } from "./sizeDistribution";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "./thick/regime";
 
@@ -410,6 +411,28 @@ describe("the label", () => {
     );
   });
 
+  it("labels a CH₄-ice analogue, whose estimated Δg is only −0.007, under the τ rule (signoff-2.md item 5b)", () => {
+    const methane = aerosolModeOptics(
+      {
+        kind: "distribution",
+        mode: {
+          material: "CH4",
+          form: { phase: "solid" },
+          sizes: { kind: "gamma", effectiveRadiusUm: 10, effectiveVariance: 0.1 },
+        },
+      },
+      550,
+    );
+    expect(methane.phaseBasis).toBe("analogue");
+    // The case the refused exemption would have covered.
+    expect(Math.abs(ICE_ANALOGUE_ASYMMETRY_BIAS["CH4"] ?? Number.NaN)).toBeLessThanOrEqual(
+      SMALL_BIAS_MAX_ABS_DG,
+    );
+    expect(phaseLabels([{ material: "CH4", optics: [methane], opticalDepthAbove550: 0 }])).toEqual([
+      "atmosphereApproximate",
+    ]);
+  });
+
   it("labels the Titan-like haze, an MMF analogue in its blue channel, under the τ rule", () => {
     const { channels: titan } = aerosolTerm(
       {
@@ -436,7 +459,7 @@ describe("the label", () => {
     ).toEqual([]);
   });
 
-  it("builds the two pending labelling questions to the ruling's lean", () => {
+  it("builds the two signed-off labelling rulings", () => {
     expect(MODEL_RESIDUALS_LABEL).toBe("unlabelled");
     expect(SMALL_BIAS_ANALOGUES).toBe("labelled");
   });

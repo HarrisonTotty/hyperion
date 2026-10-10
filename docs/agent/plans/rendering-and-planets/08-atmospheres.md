@@ -2422,20 +2422,20 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     in another convention is converted with the source's own particle shape, r = Ψ^(3/2) r_S = Ψ r_V
     at sphericity Ψ, with v_eff unchanged (science-r08-mmf.md §2).
   - _Basis and label._ `ModeOptics` gains `phaseBasis`:
-    - `model`: Mie for spheres, MMF inside Δφ < 1, a kernel inside its ranges, Yang et al. for
-      water ice;
+    - `model`: Mie for spheres, MMF inside Δφ < 1 at any D_f the inventory allows (1 < D_f ≤ 2.5;
+      `decision-r08-aerosol-labels.md` item 1), a kernel inside its ranges, Yang et al. for water
+      ice;
     - `analogue`: the k-floor rule exceeded, another ice on water's table, the small-crystal
       tail, or an aggregate past (9) whose own term 2kR_c|m_MG − 1| is below 1;
     - `fallback`: the Henyey–Greenstein phase below.
 
-    Two labelling questions are pending the sign-off agent, and the text follows the ruling's
-    lean meanwhile (science-r08-nonspherical.md §5, items 1 and 2):
+    Two labelling questions were signed off 2026-10-10 (`signoff-2.md` item 5;
+    science-r08-nonspherical.md §5, items 1 and 2) and are built as `aerosol.ts`'s
+    `MODEL_RESIDUALS_LABEL` and `SMALL_BIAS_ANALOGUES` (`decision-r08-aerosol-labels.md` item 2):
     - a validated model with known residuals is `model` and unlabelled, as Mie is for spheres,
-      with its residuals recorded in Risks (the hexahedra run 20–37% low at side and back angles):
-      pending the sign-off agent;
-    - every analogue is labelled, CH₄ ice's included, though its estimated Δg is only −0.007 (the
-      alternative exempts an analogue whose estimated |Δg| is at most 0.01): pending the sign-off
-      agent.
+      with its residuals recorded in Risks (the hexahedra run 20–37% low at side and back angles);
+    - every analogue is labelled, CH₄ ice's included, though its estimated Δg is only −0.007,
+      with no exemption by estimated bias.
 
     An `analogue` or `fallback` mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at
     550 nm gives `atmosphereApproximate` (Design note 12).
@@ -4281,14 +4281,12 @@ generator, and the reference's sampling needs no domain tag.
   - **Downloads.** The kernels are a one-off 7.9 GB and 27 GB, offline.
   - **Owner access items:** Tomasko et al. 1999's phase-function parameters, Wolff et al. 2010's
     ultraviolet indices, Howett et al. 2007's full text, and Clancy et al. 2003.
-  - **Pending the sign-off agent** (science-r08-nonspherical.md §5, items 1 and 2; R08.T5.c is
-    written to the ruling's lean meanwhile):
-    - whether a validated model with known residuals, such as the hexahedra above, stays
-      unlabelled (`model`) with its residuals recorded here, as Mie does for spheres (the lean);
-    - whether an analogue whose estimated |Δg| is at most 0.01 (CH₄ ice, −0.007) is exempt from
-      the label (the lean: it is labelled like the other analogues).
-    - _Signed off 2026-10-10_ (`signoff-2.md` item 5): the hexahedra are a `model`, unlabelled;
-      analogues are labelled with no exemption by estimated bias.
+  - **Signed off 2026-10-10** (`signoff-2.md` item 5; science-r08-nonspherical.md §5, items 1
+    and 2; built as T5.c's two constants, `decision-r08-aerosol-labels.md` item 2):
+    - a validated model with known residuals, such as the hexahedra above, stays unlabelled
+      (`model`) with its residuals recorded here, as Mie does for spheres;
+    - every analogue is labelled, CH₄ ice's (estimated Δg −0.007) included, with no exemption by
+      estimated bias.
   - **For plan 14** (science-r08-nonspherical.md §6.4, for "main" to route):
     - P14.T24.c: iron's shape class follows its phase. A liquid droplet is a `sphere`, and a solid
       grain a `nonSphericalMineral` (Visscher et al. 2010).
@@ -4311,11 +4309,39 @@ generator, and the reference's sampling needs no domain tag.
       optool and is not adopted.
     - The DISR phase functions (Tomasko et al. 2008; Doose et al. 2016) are closed and specific to
       Titan. They are an owner access item, for an optional test only.
-  - _The MMF below D_f 1.9_ (R08.T5.c's science check). Tazaki and Tanaka 2018 compare the MMF
-    with T-matrix results at D_f 1.9 and 3.0 only, so a mode below 1.9 (soot near 1.8, say) is an
-    extrapolation. `aggregate.ts` accepts 1 < D_f ≤ 2.5 and keeps (9)'s basis there, unlabelled.
-    Whether such a mode carries the label is pending the owner's ruling (routed through "main",
-    2026-10-10).
+  - _The MMF below D_f 1.9_ (R08.T5.c's science check; ruled 2026-10-10,
+    `decision-r08-aerosol-labels.md` item 1). Tazaki and Tanaka 2018 compare the MMF with
+    T-matrix results at D_f 1.9 and 3.0 only. Those are test points, not a stated range: the
+    model's stated condition is (9)'s phase shift, which `aggregate.ts` applies at every D_f it
+    accepts (1 < D_f ≤ 2.5), as optool does above 1. Below D_f 2 the multiple scattering a mean
+    field can miss does not grow with N (Berry and Percival 1986; Tazaki et al. 2016 §4.1.4;
+    Tazaki and Tanaka's Appendix C), and (9)'s aggregate term falls as the aggregate grows.
+    Tazaki 2021's geometric cross-section holds within 5% for linear chains under the Gaussian
+    cut-off.
+    - One optical check exists below 1.9, against the discrete dipole approximation for soot over
+      0.2–15 µm (Lodge, Wakeford and Leinhardt 2024, MNRAS, DOI 10.1093/mnras/stad3743, Table 2).
+      On a linear branched aggregate of D_f 1.81 the MMF's g is within 4.5% on average, against
+      15.4% for a compact cluster of D_f 2.53, and its cross-sections within 24–27%, as at D_f 2.5
+      (19–26%).
+    - So such a mode is a `model` inside (9)'s gate and unlabelled. Its residuals are recorded
+      here, as the hexahedra's are (`signoff-2.md`, item 5a).
+    - No optical comparison exists below D_f 1.8. The contact-peak error above (x₀ ≈ 0.5) applies
+      there as at D_f 2.
+    - _Caveats_ (the science check of the commit that applied the ruling, 2026-10-10; added beside
+      the ruled text, for "main"):
+      - Lodge et al.'s errors are means in log λ (MNRAS 527, 11113), with Botet et al. 1995's
+        fractal-dimension cut-off, not the Gaussian. Their monomers (R_mie 0.5 µm over N 76,
+        a₀ ≈ 0.12 µm, x₀ ≈ 1.4 at 540 nm) put the visible part of the comparison past (9)'s gate.
+      - Where single scattering dominates, well inside the gate, the mean field coincides with
+        Rayleigh–Gans–Debye theory (Tazaki and Tanaka's Appendix C). That limit agrees with an
+        exact volume-integral method to 10% or better in scattering and absorption for soot-like
+        aggregates of D_f 1.7–1.8 (m 1.57 + 0.57i, N 16–256, ka 0.1–0.4; Farias et al. 1995,
+        J. Heat Transfer 117, 152, and 1996a, J. Quant. Spectrosc. Radiat. Transfer 55, 357, as
+        reviewed by C. M. Sorensen, Aerosol Sci. Technol. 35 (2001) 648–687). "No optical
+        comparison" above means none of the MMF itself.
+      - Tazaki and Tanaka state a second condition, (7) |m − 1| < 2, which `aggregate.ts` does not
+        apply. Soot (|m − 1| 0.73–0.78) and tholin (0.66–0.72) meet it over 380–780 nm; a monomer
+        material past it is for the composition audit.
 - **M-dwarf suns.** A curve of growth weighted by a 15-sample spectrum is adequate for FGK, A and B
   stars, but not for M dwarfs. Their TiO bands at 590–630 and 705–760 nm overlap Chappuis and
   methane's 727 nm band, so the weight correlates with σ (Design note 5). This is a recorded
@@ -4969,9 +4995,10 @@ generator, and the reference's sampling needs no domain tag.
       `fallback` whose note says so ("no reduced TAMUdust2020 table on file", or, above n 1.70 with
       k under 10⁻³, the longwave kernel's k floor with no floor table on file): T5.d's floor tables
       will move small high-index grains back to `model`.
-  - _The label's two pending questions_ are two constants, `MODEL_RESIDUALS_LABEL = "unlabelled"`
-    and `SMALL_BIAS_ANALOGUES = "labelled"` (with `SMALL_BIAS_MAX_ABS_DG` 0.01 for the
-    alternative), in `aerosol.ts`.
+  - _The label's two questions_, signed off as built 2026-10-10 (`signoff-2.md` item 5;
+    `decision-r08-aerosol-labels.md` item 2), are two constants,
+    `MODEL_RESIDUALS_LABEL = "unlabelled"` and `SMALL_BIAS_ANALOGUES = "labelled"` (with
+    `SMALL_BIAS_MAX_ABS_DG` 0.01 for the alternative), in `aerosol.ts`.
   - _The label reads every drawn channel._ `AerosolLayer` takes the mode's optics in each channel
     (an `AerosolTerm`'s `channels`), and `leastValidatedBasis` the worst of them, since a basis
     may change with wavelength: the Titan-like haze is a `model` at 550 and 680 nm and an

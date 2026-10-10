@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import titan from "./fixtures/optool-titan.json" with { type: "json" };
+import { phaseLabels } from "./aerosol";
 import {
   aggregateOptics,
   gammaFunction,
@@ -18,6 +19,19 @@ import { mieSphere } from "./mie";
  * 3,000 of them, D_f 2, with optool's k_f = (5 ÷ 3)^(D_f ÷ 2).
  */
 const TITAN = { monomerRadiusUm: 0.05, monomerCount: 3000, fractalDimension: 2 } as const;
+
+/**
+ * A soot aggregate below Tazaki and Tanaka's D_f 1.9 (decision-r08-aerosol-labels.md item 1):
+ * monomers of 0.015 µm, 500 of them, D_f 1.8, soot's by diffusion-limited cluster aggregation
+ * (about 1.75–1.8; C. M. Sorensen, Aerosol Sci. Technol. 35 (2001) 648–687, its introduction),
+ * with optool's k_f.
+ */
+const SOOT = {
+  material: "soot",
+  monomerRadiusUm: 0.015,
+  monomerCount: 500,
+  fractalDimension: 1.8,
+} as const;
 
 /**
  * The comparison's tolerances, optool's own numerical accuracy as its code states it
@@ -164,6 +178,15 @@ describe("the phase-shift gate (science-r08-mmf.md §1.4)", () => {
     expect(optics.matrix).toBeDefined();
     expect(optics.matrix?.a2).toEqual(optics.matrix?.a1);
     expect(optics.matrix?.a4).toEqual(optics.matrix?.a3);
+  });
+
+  it("keeps a soot aggregate below D_f 1.9 a model, unlabelled, inside the gate", () => {
+    const optics = [380, 550, 780].map((nm) => aggregateOptics(SOOT, nm));
+    for (const channel of optics) {
+      expect(channel.phaseBasis).toBe("model");
+      expect(mmfPhaseShift(channel)).toBeLessThan(MMF_PHASE_SHIFT_LIMIT);
+    }
+    expect(phaseLabels([{ material: "soot", optics, opticalDepthAbove550: 0 }])).toEqual([]);
   });
 });
 

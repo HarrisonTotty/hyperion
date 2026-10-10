@@ -67,7 +67,7 @@ export interface AggregateMode {
   readonly monomerRadiusUm: number;
   /** N ≥ 1. */
   readonly monomerCount: number;
-  /** D_f, in (1, {@link MMF_FRACTAL_DIMENSION_MAX}]; below 1.9 an extrapolation (its remarks). */
+  /** D_f, in (1, {@link MMF_FRACTAL_DIMENSION_MAX}]; below 1.9 untested by T-matrix but inside the model's condition (its remarks). */
   readonly fractalDimension: number;
   /**
    * k_f in N = k_f (R_g ÷ a₀)^D_f, > 0; by default (5 ÷ 3)^(D_f ÷ 2), optool's and Tazaki's, for
@@ -77,12 +77,15 @@ export interface AggregateMode {
 }
 
 /**
- * The largest fractal dimension a mode may have: the inventory's cap (P14.T24.c), inside the range
- * Tazaki and Tanaka 2018 validated against T-matrix (D_f 1.9 to 3.0).
+ * The largest fractal dimension a mode may have: the inventory's cap (P14.T24.c), between Tazaki
+ * and Tanaka 2018's two T-matrix comparisons (D_f 1.9 and 3.0).
  *
  * @remarks
- * Below D_f 1.9 (soot near 1.8, say) the MMF is extrapolated: no T-matrix comparison exists there,
- * and the mode keeps (9)'s basis unlabelled for it, pending the owner (R08's Risks).
+ * Below D_f 1.9 (soot near 1.8, say) no T-matrix comparison exists, but the model's stated
+ * condition is (9)'s phase shift, not a fractal dimension, and below D_f 2 the multiple scattering
+ * a mean field can miss does not grow with N (their Appendix C). Such a mode keeps (9)'s basis and
+ * is unlabelled inside the gate (decided 2026-10-10, decision-r08-aerosol-labels.md item 1; the
+ * evidence is in R08's Risks).
  */
 export const MMF_FRACTAL_DIMENSION_MAX = 2.5;
 

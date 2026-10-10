@@ -501,7 +501,8 @@ export function aerosolTerm(spec: AerosolModeSpec, column: AtmosphereColumn): Ae
  * Whether a validated model with known residuals is labelled `ATMOSPHERE: APPROXIMATE`:
  * `unlabelled`, the ruling's lean (science-r08-nonspherical.md §5 item 1), as Mie is not for
  * spheres, with the hexahedra's 20–37% at side and back angles recorded in R08's Risks; or
- * `labelled`. Pending the sign-off agent.
+ * `labelled`, refused. Signed off `unlabelled` 2026-10-10 (signoff-2.md item 5a;
+ * decision-r08-aerosol-labels.md item 2).
  */
 export const MODEL_RESIDUALS_LABEL: "unlabelled" | "labelled" = "unlabelled";
 
@@ -511,11 +512,13 @@ export const MODELS_WITH_KNOWN_RESIDUALS: ReadonlySet<PhaseModel> = new Set(["ta
 /**
  * Whether an ice analogue whose estimated |Δg| is at most {@link SMALL_BIAS_MAX_ABS_DG} is
  * labelled: `labelled`, the ruling's lean, every analogue labelled, CH₄ ice's −0.007 included
- * (science-r08-nonspherical.md §5 item 2); or `exempt`, the alternative. Pending the sign-off agent.
+ * (science-r08-nonspherical.md §5 item 2); or `exempt`, the alternative, refused. Signed off
+ * `labelled`, with no exemption by estimated bias, 2026-10-10 (signoff-2.md item 5b;
+ * decision-r08-aerosol-labels.md item 2).
  */
 export const SMALL_BIAS_ANALOGUES: "labelled" | "exempt" = "labelled";
 
-/** The ruling's alternative's threshold for {@link SMALL_BIAS_ANALOGUES}: |Δg| ≤ 0.01. */
+/** The refused alternative's threshold for {@link SMALL_BIAS_ANALOGUES}, |Δg| ≤ 0.01: unread while it is `labelled`. */
 export const SMALL_BIAS_MAX_ABS_DG = 0.01;
 
 /**
@@ -586,7 +589,7 @@ function analogueLabelled(material: string): boolean {
   return label;
 }
 
-/** Whether one channel's phase basis is labelled, by the two pending constants. */
+/** Whether one channel's phase basis is labelled, by the two signed-off constants. */
 function labelled(material: string, optics: ModeOptics): boolean {
   let label: boolean;
   switch (optics.phaseBasis) {
