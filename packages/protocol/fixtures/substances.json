@@ -1,0 +1,95 @@
+{
+  "description": "The substance registry's public mirror (galaxy plan 14, P14.T49.a; decision-composition 1.1): each row in index order, append-only, with its key, kind, molar mass (g/mol), c_p/R for a gas row and the client optics the sim may ask of it. Written by crates/hyperion-sim/tests/substance_golden.rs under HYPERION_BLESS=1 and checked against the registry otherwise; never edit it by hand.",
+  "substances": [
+    {
+      "index": 0,
+      "key": "H2",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 2.016,
+      "heat_capacity_over_r": 3.5,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 1,
+      "key": "He",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 4.003,
+      "heat_capacity_over_r": 2.5,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 2,
+      "key": "H2O",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 18.015,
+      "heat_capacity_over_r": 4.0,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 3,
+      "key": "CH4",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 16.043,
+      "heat_capacity_over_r": 4.0,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 4,
+      "key": "NH3",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 17.031,
+      "heat_capacity_over_r": 4.0,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 5,
+      "key": "N2",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 28.014,
+      "heat_capacity_over_r": 3.5,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 6,
+      "key": "O2",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 31.998,
+      "heat_capacity_over_r": 3.5,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 7,
+      "key": "CO2",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 44.009,
+      "heat_capacity_over_r": 4.333333333333333,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 8,
+      "key": "Ar",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 39.95,
+      "heat_capacity_over_r": 2.5,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": true
+    }
+  ]
+}

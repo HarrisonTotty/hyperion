@@ -50,6 +50,8 @@
 //!
 //! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
 //!   the Roche, Hill and satellite-stability limits.
+//! - [`substance`]: the substance registry, one row for each gas, ice, liquid, mineral or rock a
+//!   body can hold, with its key, its stoichiometry and its gas and phase data.
 //!
 //! The sky (rendering plan R06):
 //!
@@ -73,6 +75,7 @@ pub mod planetary;
 pub mod rng;
 pub mod sky;
 pub mod stellar;
+pub mod substance;
 pub mod tables;
 pub mod time;
 

@@ -1,0 +1,111 @@
+# generator_version = 21
+[elements]
+element 0 H
+element 1 He
+element 2 C
+element 3 N
+element 4 O
+element 5 Ne
+element 6 Na
+element 7 Mg
+element 8 Al
+element 9 Si
+element 10 P
+element 11 S
+element 12 Cl
+element 13 Ar
+element 14 K
+element 15 Ca
+element 16 Ti
+element 17 V
+element 18 Cr
+element 19 Mn
+element 20 Fe
+element 21 Ni
+element 22 Zn
+element 23 Kr
+element 24 Xe
+[identity]
+identity 0 H2: molecule, charge 0, elements [H 2]
+identity 0 H2: molar_mass_g_per_mol = 0x400020c49ba5e354  # 2.016
+identity 1 He: atom, charge 0, elements [He 1]
+identity 1 He: molar_mass_g_per_mol = 0x401003126e978d50  # 4.003
+identity 2 H2O: molecule, charge 0, elements [H 2 O 1]
+identity 2 H2O: molar_mass_g_per_mol = 0x403203d70a3d70a4  # 18.015
+identity 3 CH4: molecule, charge 0, elements [C 1 H 4]
+identity 3 CH4: molar_mass_g_per_mol = 0x40300b020c49ba5e  # 16.043
+identity 4 NH3: molecule, charge 0, elements [N 1 H 3]
+identity 4 NH3: molar_mass_g_per_mol = 0x403107ef9db22d0e  # 17.031
+identity 5 N2: molecule, charge 0, elements [N 2]
+identity 5 N2: molar_mass_g_per_mol = 0x403c0395810624dd  # 28.014
+identity 6 O2: molecule, charge 0, elements [O 2]
+identity 6 O2: molar_mass_g_per_mol = 0x403fff7ced916873  # 31.998
+identity 7 CO2: molecule, charge 0, elements [C 1 O 2]
+identity 7 CO2: molar_mass_g_per_mol = 0x40460126e978d4fe  # 44.009
+identity 8 Ar: atom, charge 0, elements [Ar 1]
+identity 8 Ar: molar_mass_g_per_mol = 0x4043f9999999999a  # 39.95
+[optics]
+optics 0 H2: rayleigh true, absorber false, aerosol_material false
+optics 1 He: rayleigh true, absorber false, aerosol_material false
+optics 2 H2O: rayleigh true, absorber true, aerosol_material true
+optics 3 CH4: rayleigh true, absorber true, aerosol_material true
+optics 4 NH3: rayleigh true, absorber true, aerosol_material true
+optics 5 N2: rayleigh true, absorber false, aerosol_material true
+optics 6 O2: rayleigh true, absorber true, aerosol_material true
+optics 7 CO2: rayleigh true, absorber false, aerosol_material true
+optics 8 Ar: rayleigh true, absorber false, aerosol_material true
+[gas]
+gas 0 H2: Linear
+gas 0 H2: heat_capacity_over_r = 0x400c000000000000  # 3.5
+gas 1 He: Atom
+gas 1 He: heat_capacity_over_r = 0x4004000000000000  # 2.5
+gas 2 H2O: NonLinear
+gas 2 H2O: heat_capacity_over_r = 0x4010000000000000  # 4.0
+gas 3 CH4: NonLinear
+gas 3 CH4: heat_capacity_over_r = 0x4010000000000000  # 4.0
+gas 4 NH3: NonLinear
+gas 4 NH3: heat_capacity_over_r = 0x4010000000000000  # 4.0
+gas 5 N2: Linear
+gas 5 N2: heat_capacity_over_r = 0x400c000000000000  # 3.5
+gas 6 O2: Linear
+gas 6 O2: heat_capacity_over_r = 0x400c000000000000  # 3.5
+gas 7 CO2: LinearTriatomic
+gas 7 CO2: heat_capacity_over_r = 0x4011555555555555  # 4.333333333333333
+gas 8 Ar: Atom
+gas 8 Ar: heat_capacity_over_r = 0x4004000000000000  # 2.5
+[phase]
+phase 2 H2O: triple_temperature_k = 0x4071128f5c28f5c3  # 273.16
+phase 2 H2O: triple_pressure_pa = 0x40831d4189374bc7  # 611.657
+phase 2 H2O: critical_temperature_k = 0x408438cccccccccd  # 647.1
+phase 2 H2O: critical_pressure_pa = 0x41750ab800000000  # 22064000.0
+phase 2 H2O: sublimation_j_per_mol = 0x40e8ee6000000000  # 51059.0
+phase 2 H2O: vaporisation_j_per_mol = 0x40e53d8000000000  # 43500.0
+phase 2 H2O: triple_liquid_density_kg_per_m3 = 0x408f3e5810624dd3  # 999.793
+phase 3 CH4: triple_temperature_k = 0x4056ac6c226809d5  # 90.6941
+phase 3 CH4: triple_pressure_pa = 0x40c6d80000000000  # 11696.0
+phase 3 CH4: critical_temperature_k = 0x4067d20c49ba5e35  # 190.564
+phase 3 CH4: critical_pressure_pa = 0x41518b6800000000  # 4599200.0
+phase 3 CH4: sublimation_j_per_mol = 0x40c2e3599999999a  # 9670.7
+phase 3 CH4: vaporisation_j_per_mol = 0x40c10dc000000000  # 8731.5
+phase 3 CH4: triple_liquid_density_kg_per_m3 = 0x407c37999999999a  # 451.475
+phase 5 N2: triple_temperature_k = 0x404f933333333333  # 63.15
+phase 5 N2: triple_pressure_pa = 0x40c8740000000000  # 12520.0
+phase 5 N2: critical_temperature_k = 0x405f8c28f5c28f5c  # 126.19
+phase 5 N2: critical_pressure_pa = 0x4149e86c00000000  # 3395800.0
+phase 5 N2: sublimation_j_per_mol = 0x40baf40000000000  # 6900.0
+phase 5 N2: vaporisation_j_per_mol = 0x40b5c20000000000  # 5570.0
+phase 5 N2: triple_liquid_density_kg_per_m3 = 0x408b19c6a7ef9db2  # 867.222
+phase 7 CO2: triple_temperature_k = 0x406b128f5c28f5c3  # 216.58
+phase 7 CO2: triple_pressure_pa = 0x411fa59000000000  # 518500.0
+phase 7 CO2: critical_temperature_k = 0x407302147ae147ae  # 304.13
+phase 7 CO2: critical_pressure_pa = 0x415c246500000000  # 7377300.0
+phase 7 CO2: sublimation_j_per_mol = 0x40d97d0000000000  # 26100.0
+phase 7 CO2: vaporisation_j_per_mol = 0x40cde20000000000  # 15300.0
+phase 7 CO2: triple_liquid_density_kg_per_m3 = 0x409269d70a3d70a4  # 1178.46
+phase 8 Ar: triple_temperature_k = 0x4054f3d70a3d70a4  # 83.81
+phase 8 Ar: triple_pressure_pa = 0x40f0d1a000000000  # 68890.0
+phase 8 Ar: critical_temperature_k = 0x4062d6147ae147ae  # 150.69
+phase 8 Ar: critical_pressure_pa = 0x41528d0600000000  # 4863000.0
+phase 8 Ar: sublimation_j_per_mol = 0x40be780000000000  # 7800.0
+phase 8 Ar: vaporisation_j_per_mol = 0x40b91e0000000000  # 6430.0
+phase 8 Ar: triple_liquid_density_kg_per_m3 = 0x409623147ae147ae  # 1416.77

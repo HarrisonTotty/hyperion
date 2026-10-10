@@ -594,27 +594,69 @@ fn escape_and_retention_follow_their_formulae() {
     assert!((loss.value() / expected - 1.0).abs() < 1e-12);
 }
 
-#[test]
-fn the_saturation_pressures_meet_their_triple_points() {
-    for c in [
-        &WATER_CONDENSATION,
-        &CARBON_DIOXIDE_CONDENSATION,
-        &NITROGEN_CONDENSATION,
-        &ARGON_CONDENSATION,
-    ] {
-        let t = c.triple_temperature;
-        let below = c.saturation_pressure(t * (1.0 - 1e-9));
-        let above = c.saturation_pressure(t);
-        assert!((below / c.triple_pressure - 1.0).abs() < 1e-6);
-        assert!((above / c.triple_pressure - 1.0).abs() < 1e-12);
-        assert!(c.saturation_pressure(c.critical_temperature).is_infinite());
-        assert_same_bits(c.saturation_pressure(0.0), 0.0);
+/// P14.T13.c's private Clausius–Clapeyron constants, frozen here as they were before the substance
+/// registry took them (P14.T49.a): triple temperature (K) and pressure (Pa), the enthalpies of
+/// sublimation and vaporisation (J mol⁻¹) and the critical temperature (K).
+const T13_CONDENSATION: [(Gas, [f64; 5]); 4] = [
+    (Gas::Water, [273.16, 611.657, 51_059.0, 43_500.0, 647.1]),
+    (
+        Gas::CarbonDioxide,
+        [216.58, 518_500.0, 26_100.0, 15_300.0, 304.13],
+    ),
+    (Gas::Nitrogen, [63.15, 12_520.0, 6_900.0, 5_570.0, 126.19]),
+    (Gas::Argon, [83.81, 68_890.0, 7_800.0, 6_430.0, 150.69]),
+];
+
+/// P14.T13.c's private saturation pressure, verbatim, on the constants `c` of
+/// [`T13_CONDENSATION`].
+fn t13_saturation_pressure(c: [f64; 5], t: f64) -> f64 {
+    let [
+        triple_temperature,
+        triple_pressure,
+        sublimation,
+        vaporisation,
+        critical_temperature,
+    ] = c;
+    if t >= critical_temperature {
+        return f64::INFINITY;
     }
-    // Water boils near 373 K at one atmosphere, and carbon dioxide sublimes near 195 K.
-    assert!((WATER_CONDENSATION.saturation_pressure(373.15) / 101_325.0 - 1.0).abs() < 0.1);
-    assert!(
-        (CARBON_DIOXIDE_CONDENSATION.saturation_pressure(194.7) / 101_325.0 - 1.0).abs() < 0.15
-    );
+    if t.is_nan() || t <= 0.0 {
+        return 0.0;
+    }
+    let enthalpy = if t < triple_temperature {
+        sublimation
+    } else {
+        vaporisation
+    };
+    // The molar gas constant as P14.T13.c wrote it, frozen too.
+    let molar_gas_constant = 8.314_462_618_153_24;
+    triple_pressure
+        * math::exp(-(enthalpy / molar_gas_constant) * (1.0 / t - 1.0 / triple_temperature))
+}
+
+/// The registry's saturation pressures of the four are P14.T13.c's to the bit, at 200 temperatures
+/// from a fifth of the triple point to past the critical point, and at the edges.
+#[test]
+fn the_registry_s_saturation_pressures_are_t13_s_to_the_bit() {
+    for (gas, c) in T13_CONDENSATION {
+        let (low, high) = (0.2 * c[0], 1.1 * c[4]);
+        let mut temperatures: Vec<f64> = (0..200)
+            .map(|i| low + (high - low) * f64::from(i) / 199.0)
+            .collect();
+        temperatures.extend([0.0, -1.0, f64::NAN, c[0], c[4], f64::INFINITY]);
+        for t in temperatures {
+            let registry = saturation_pressure(gas.substance(), Kelvin::new(t))
+                .expect("the gas has phase data")
+                .value();
+            assert_same_bits(registry, t13_saturation_pressure(c, t));
+        }
+        let phase = gas.substance().substance().phase().unwrap();
+        assert_same_bits(phase.triple_temperature().value(), c[0]);
+        assert_same_bits(phase.triple_pressure().value(), c[1]);
+        assert_same_bits(phase.sublimation_enthalpy_j_per_mol(), c[2]);
+        assert_same_bits(phase.vaporisation_enthalpy_j_per_mol(), c[3]);
+        assert_same_bits(phase.critical_temperature().value(), c[4]);
+    }
 }
 
 #[test]

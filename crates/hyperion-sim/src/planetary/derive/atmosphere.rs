@@ -41,6 +41,7 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
+use crate::substance::saturation_pressure;
 use crate::units::consts::{
     BOLTZMANN_CONSTANT, EARTH_MASS_KG, GRAVITATIONAL_CONSTANT, METRES_PER_AU,
 };
@@ -53,13 +54,14 @@ use crate::units::{
 /// masses are counted.
 pub const ATOMIC_MASS_CONSTANT_KG: f64 = 1.660_539_068_92e-27;
 
-/// The molar gas constant, J mol⁻¹ K⁻¹ (exact in the 2019 SI, the Avogadro constant times Boltzmann's: 8.314 462 618 153 24).
-pub const MOLAR_GAS_CONSTANT: f64 = 8.314_462_618_153_24;
+pub use crate::substance::MOLAR_GAS_CONSTANT;
 
 /// One bar, Pa, the unit the greenhouse constants are fitted in.
 const PASCALS_PER_BAR: f64 = 1e5;
 
-/// The species whose escape an atmosphere is judged on (P14.T13.b).
+/// The species whose escape an atmosphere is judged on (P14.T13.b): the typed view of the substance
+/// registry's rows 0–8, which are these nine in [`Gas::ALL`]'s order ([`Gas::substance`],
+/// [`SubstanceId::gas`](crate::substance::SubstanceId::gas)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Gas {
     /// Molecular hydrogen, H₂.
@@ -96,20 +98,18 @@ impl Gas {
         Self::Argon,
     ];
 
-    /// The species' molar mass, g mol⁻¹ (IUPAC 2021 standard atomic weights, abridged).
+    /// The species' molar mass, g mol⁻¹: its registry row's (IUPAC 2021 standard atomic weights,
+    /// abridged).
+    ///
+    /// # Panics
+    ///
+    /// Never: each of the nine rows holds a molar mass (a test of the registry checks).
     #[must_use]
-    pub const fn molar_mass_g_per_mol(self) -> f64 {
-        match self {
-            Self::Hydrogen => 2.016,
-            Self::Helium => 4.003,
-            Self::Water => 18.015,
-            Self::Methane => 16.043,
-            Self::Ammonia => 17.031,
-            Self::Nitrogen => 28.014,
-            Self::Oxygen => 31.998,
-            Self::CarbonDioxide => 44.009,
-            Self::Argon => 39.95,
-        }
+    pub fn molar_mass_g_per_mol(self) -> f64 {
+        self.substance()
+            .substance()
+            .molar_mass_g_per_mol()
+            .expect("a gas row holds its molar mass")
     }
 
     /// The mass of one molecule.
@@ -134,20 +134,12 @@ impl Gas {
         }
     }
 
-    /// The species' place in [`ALL`](Self::ALL).
+    /// The species' place in [`ALL`](Self::ALL), its registry row's index, by which the nine-wide
+    /// [`PartialPressures`] and [`Retention`] are indexed.
     #[must_use]
     const fn index(self) -> usize {
-        match self {
-            Self::Hydrogen => 0,
-            Self::Helium => 1,
-            Self::Water => 2,
-            Self::Methane => 3,
-            Self::Ammonia => 4,
-            Self::Nitrogen => 5,
-            Self::Oxygen => 6,
-            Self::CarbonDioxide => 7,
-            Self::Argon => 8,
-        }
+        // A u16 widens to usize on every target; `usize::from` is not callable in a const fn.
+        self.substance().index() as usize
     }
 }
 
@@ -537,79 +529,6 @@ pub fn volatile_inventory(
     )
 }
 
-/// The Clausius–Clapeyron constants of a condensable gas: its triple point's temperature and
-/// pressure, its enthalpies of sublimation and vaporisation (J mol⁻¹), and its critical
-/// temperature, above which it never condenses (NIST's Chemistry Web Book, SRD 69).
-struct Condensation {
-    triple_temperature: f64,
-    triple_pressure: f64,
-    sublimation: f64,
-    vaporisation: f64,
-    critical_temperature: f64,
-}
-
-/// Water: 273.16 K and 611.657 Pa; 51.06 kJ mol⁻¹ for ice, and for the liquid 43.5, the mean of
-/// 45.05 at 0 °C and 40.65 at 100 °C, which puts the boiling point at one atmosphere to 3%;
-/// 647.1 K.
-const WATER_CONDENSATION: Condensation = Condensation {
-    triple_temperature: 273.16,
-    triple_pressure: 611.657,
-    sublimation: 51_059.0,
-    vaporisation: 43_500.0,
-    critical_temperature: 647.1,
-};
-
-/// Carbon dioxide: 216.58 K and 518.5 kPa; 26.1 and 15.3 kJ mol⁻¹; 304.13 K.
-const CARBON_DIOXIDE_CONDENSATION: Condensation = Condensation {
-    triple_temperature: 216.58,
-    triple_pressure: 518_500.0,
-    sublimation: 26_100.0,
-    vaporisation: 15_300.0,
-    critical_temperature: 304.13,
-};
-
-/// Nitrogen: 63.15 K and 12.52 kPa; 6.9 and 5.57 kJ mol⁻¹; 126.19 K.
-const NITROGEN_CONDENSATION: Condensation = Condensation {
-    triple_temperature: 63.15,
-    triple_pressure: 12_520.0,
-    sublimation: 6_900.0,
-    vaporisation: 5_570.0,
-    critical_temperature: 126.19,
-};
-
-/// Argon: 83.81 K and 68.89 kPa; 7.8 and 6.43 kJ mol⁻¹; 150.69 K.
-const ARGON_CONDENSATION: Condensation = Condensation {
-    triple_temperature: 83.81,
-    triple_pressure: 68_890.0,
-    sublimation: 7_800.0,
-    vaporisation: 6_430.0,
-    critical_temperature: 150.69,
-};
-
-impl Condensation {
-    /// The saturation vapour pressure at `t`, Pa, by Clausius–Clapeyron from the triple point
-    /// with the enthalpy of the phase below or above it; infinite from the critical temperature,
-    /// and zero at or below 0 K.
-    #[must_use]
-    fn saturation_pressure(&self, t: f64) -> f64 {
-        if t >= self.critical_temperature {
-            return f64::INFINITY;
-        }
-        if t.is_nan() || t <= 0.0 {
-            return 0.0;
-        }
-        let enthalpy = if t < self.triple_temperature {
-            self.sublimation
-        } else {
-            self.vaporisation
-        };
-        self.triple_pressure
-            * math::exp(
-                -(enthalpy / MOLAR_GAS_CONSTANT) * (1.0 / t - 1.0 / self.triple_temperature),
-            )
-    }
-}
-
 /// The greenhouse constant of carbon dioxide, per √bar: 18.5, fixed by Venus (P14.T13.c; the lane's
 /// fit, provisional). With 57 bar of carbon dioxide at its median inventory it warms Venus's
 /// 229 K to 735 K.
@@ -922,7 +841,9 @@ struct Airborne {
 /// `airborne`, each weighing `weight` pascals per kilogram at the surface, over a surface in
 /// equilibrium at `equilibrium`: the temperature iterated [`GREENHOUSE_STEPS`] times upward from
 /// the equilibrium temperature through the grey greenhouse its partial pressures give, each held at
-/// its saturation vapour pressure there, and held by `saturate` at the hottest host's.
+/// its saturation vapour pressure there (the substance registry's
+/// [`saturation_pressure`](crate::substance::saturation_pressure)), and held by `saturate` at the
+/// hottest host's.
 fn greenhouse(
     airborne: &Airborne,
     weight: f64,
@@ -930,15 +851,18 @@ fn greenhouse(
     saturate: &impl Fn(f64) -> Kelvin,
 ) -> (f64, PartialPressures, f64) {
     let partials_at = |t: f64| {
-        let held = |mass: f64, condensation: &Condensation| {
-            (mass * weight).min(condensation.saturation_pressure(t))
+        // A gas with no phase data never condenses: its saturation pressure is infinite.
+        let held = |mass: f64, gas: Gas| {
+            let saturation = saturation_pressure(gas.substance(), Kelvin::new(t))
+                .map_or(f64::INFINITY, Pascals::value);
+            (mass * weight).min(saturation)
         };
         let mut p = [Pascals::ZERO; 9];
-        p[Gas::Water.index()] = Pascals::new(held(airborne.water, &WATER_CONDENSATION));
+        p[Gas::Water.index()] = Pascals::new(held(airborne.water, Gas::Water));
         p[Gas::CarbonDioxide.index()] =
-            Pascals::new(held(airborne.carbon_dioxide, &CARBON_DIOXIDE_CONDENSATION));
-        p[Gas::Nitrogen.index()] = Pascals::new(held(airborne.nitrogen, &NITROGEN_CONDENSATION));
-        p[Gas::Argon.index()] = Pascals::new(held(airborne.argon, &ARGON_CONDENSATION));
+            Pascals::new(held(airborne.carbon_dioxide, Gas::CarbonDioxide));
+        p[Gas::Nitrogen.index()] = Pascals::new(held(airborne.nitrogen, Gas::Nitrogen));
+        p[Gas::Argon.index()] = Pascals::new(held(airborne.argon, Gas::Argon));
         PartialPressures(p)
     };
     let mut t = equilibrium.value();
@@ -963,9 +887,10 @@ fn greenhouse(
 ///    the carbon is airborne, since no ocean weathers it. A molten crust holds nothing back.
 /// 4. The partial pressures are each airborne mass's weight over the surface, M g ÷ 4πR², held at
 ///    each gas's saturation vapour pressure at the surface temperature (water, carbon dioxide,
-///    nitrogen and argon condense), which is iterated [`GREENHOUSE_STEPS`] times upward from the
-///    equilibrium temperature through the grey greenhouse they give ([`optical_depth`],
-///    [`grey_surface_temperature`]).
+///    nitrogen and argon condense, by their rows of the substance registry,
+///    [`saturation_pressure`](crate::substance::saturation_pressure)), which is iterated
+///    [`GREENHOUSE_STEPS`] times upward from the equilibrium temperature through the grey
+///    greenhouse they give ([`optical_depth`], [`grey_surface_temperature`]).
 /// 5. A surface pressure below [`AIRLESS_PRESSURE`] is [`SurfaceState::Airless`], at the
 ///    equilibrium temperature; a surface over the [`SILICATE_SOLIDUS`], or a crust not yet formed,
 ///    a [`SurfaceState::MagmaOcean`] (the young one at least at the solidus); the rest takes the

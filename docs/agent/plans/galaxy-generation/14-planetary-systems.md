@@ -4322,6 +4322,9 @@ renumbered, since sums and loops in registry order are output. Its key is a `Sub
 
 - a definite species by its formula in chemical case (`H2O`, `NH4SH`, `Mg2SiO4`, `H-`), with `e-`
   for the electron;
+- a formula's count is 2 or more with no leading zero, and a count of 1 is never written, so that a
+  species has one spelling (`CO2`, never `C1O2` or `CO02`; R09.T2's follow-up B, adopted by "main",
+  2026-10-10);
 - any other material by a lowercase name (`basalt`, `tholin`, `mars_dust`);
 - ASCII, at most 16 bytes;
 - never renamed or removed.
@@ -4351,8 +4354,10 @@ rows' values.
     T24.a sorts), and `condensables()` in registry order.
   - **`SubstanceKey`** is created in `crates/hyperion-surface/src/substance_key.rs` by this subtask
     or by R09.T2's follow-up B, whichever is first:
-    - its grammar is checked by `new` and at compile time for `const` keys;
-    - a formula key's element counts must equal its row's stoichiometry.
+    - its grammar is checked by `new` and at compile time for `const` keys, and refuses a written
+      count of 1 or a leading zero (follow-up B created it, a1ec12cc);
+    - a formula key's element counts must equal its row's stoichiometry, and its symbols must be
+      elements (this subtask's tests, since the grammar checks neither).
   - _Tests:_
     - every T13 value bit-identical, and the goldens unchanged;
     - rows 0–8 are `Gas::ALL` in order, with equal molar masses;
@@ -8564,6 +8569,104 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       was not reached. Through a secondary source, Gladman gives Q ≈ 100 and a k₂ from rigidity,
       not 0.3 and not a giant pair. `ROCKY_LOVE_NUMBER`'s doc now adds Lainey 2016's measured
       0.30.
+
+- **Deviations in P14.T49.a, as built (`p14-batch`, 2026-10-10).** No output moves:
+  `GENERATOR_VERSION` stays 21, every golden holds, and `tests/golden/substance/registry.golden` is
+  new at header 21.
+  - _`SubstanceKey`_ is R09.T2's follow-up B's (a1ec12cc, merged by name). Its grammar refuses a
+    written count of 1 and a leading zero, so a species has one spelling (adopted by "main",
+    2026-10-10). Neither element symbols nor stoichiometry are the grammar's: the registry's
+    tests parse each formula key, require its symbols to be `Element`s and its written counts to
+    be 2 or more, and hold the merged counts to the row's `elements` and its sign to `charge`.
+  - _Files._ `substance/element.rs` is added for Provides' `Element`: the 25 variants, first in
+    order of atomic number and appended after that, with `symbol`, `from_symbol` and `ALL`.
+    P14.T50.a adds the weights, abundances and condensation temperatures. `Gas::substance` and
+    `SubstanceId::gas` live in `substance/mod.rs`, so that `SubstanceId`'s index stays private to
+    the registry.
+  - _Signatures._
+    - `Phase` has four variants, `Solid`, `Liquid`, `Vapour` and `Supercritical`; Provides lists
+      three and names `Vapour` in its comment.
+    - The mixture's molar mass is **`mean_molar_mass_g_per_mol`**, its unit in its name (the Rust
+      rules), not Provides' `mean_molar_mass`. It and `heat_capacity_over_r` return
+      `Option<f64>`: `None` for an empty mixture or a row without the column. They sum xᵢvᵢ in the
+      given order from 0.0 and do not renormalise. T24.a reads them under these names.
+    - `phase_at` is also `None` for a negative or NaN temperature or pressure.
+    - `Gas::molar_mass_g_per_mol` reads its row and is no longer `const`. `Gas::index` is its row's
+      index.
+    - `MOLAR_GAS_CONSTANT` moved to `substance::phase`, and `derive::atmosphere` re-exports it at
+      its old path.
+  - _Added public items_: `SubstanceId::{from_index, index, substance, gas}`, `ids()`,
+    `SubstanceKind::name`, `SubstanceKeyForm` (re-exported beside `SubstanceKey`),
+    `HeatCapacityClass` (`Atom`, `Linear`, `NonLinear`, `LinearTriatomic`, with `over_r`),
+    `GasColumns`, `PhaseColumns` (with its own `saturation_pressure` and `phase_at`),
+    `ClientOptics`, and `Source { covers, citation, basis }` with
+    `Basis { Fact, Reduced, Fitted, Adopted, Raw { licence } }`. `Adopted` marks the generator's
+    own effective value, stated beside the cited values it was chosen against. Each column group
+    carries its own sources, and each source names the values it covers. `Substance`'s
+    `condensed` and `aerosol` columns wait for T49.c and T49.e.
+  - _Phase data added_, which nothing generated reads yet (`phase_at` only):
+    - each condensable's critical pressure, from its reference equation of state (water 22.064 MPa,
+      CO₂ 7.3773, N₂ 3.3958, Ar 4.863, CH₄ 4.5992);
+    - **for P14.T24.b** (main's ruling, 2026-10-10), the saturated liquid's density at the triple
+      point, `PhaseColumns::triple_liquid_density`: 999.793, 451.475, 867.222, 1,178.46 and
+      1,416.77 kg m⁻³ for H₂O, CH₄, N₂, CO₂ and Ar. Each is cited to its equation of state
+      (Wagner and Pruss 2002, Setzmann and Wagner 1991, Span et al. 2000, Span and Wagner 1996,
+      Tegeler et al. 1999) and checked against NIST's WebBook. T49.b's ρ_l(T) supersedes it.
+  - _Methane_ takes Setzmann and Wagner's own figures, not the rounded 90.69 K, 11.70 kPa,
+    190.6 K and 4.599 MPa that T24.f's text quotes: 90.6941 K, 11.696 kPa, 190.564 K and
+    4.5992 MPa.
+    - L_vap = 8.7315 kJ mol⁻¹ is the equation's h″ − h′ at the triple point.
+    - The equation describes the fluid only, so L_sub cannot come "from the same source". It is
+      L_vap plus the enthalpy of fusion, 0.9392 kJ mol⁻¹ (Vogt and Pitzer 1976): 9.6707 kJ mol⁻¹,
+      which matches Stull 1947's 9.62 at 77 K.
+    - The curve gives 102.95 kPa at the normal boiling point, 111.67 K (1.6% high), and 16.86 kPa
+      at Huygens's 93.65 K against the equation's 16.89.
+    - **For P14.T24.f:** at 93.65 K and 1.467 bar pure methane saturates at 11.5%, twice Titan's
+      measured 5.65 ± 0.18%. Niemann et al. 2010 (JGR 115, E12006, §4.1) find the surface
+      "subsaturated, at a relative humidity of approximately 50%", against saturation over liquid
+      methane with dissolved N₂. "Held at saturation" therefore needs a relative humidity or a
+      Raoult's-law factor before T24.f can calibrate on Titan.
+  - _The four T13.c sets_, moved verbatim. Against their reference equations, for T49.b's refit
+    (no value moves here), and each marked `Adopted` where it is P14.T13.c's effective value:
+    - water's L_vap, 43.5, lies between 45.055 at T_t and 40.651 at 373.124 K. T13.c's comment
+      called it their mean, which is 42.85. It gives 103.5 kPa at 373.124 K, and 43.32 would give
+      one atmosphere exactly. Water's L_sub, 51.059, is Murphy and Koop 2005's at T_t, against
+      IAPWS's 51.062;
+    - CO₂'s L_vap is 15.3 against 15.420 at T_t. Its L_sub, 26.1, is Stephenson and Malanowski's
+      at 207 K; at T_t Span and Wagner's sublimation curve has an ideal-gas slope of about 26.5
+      (science-checker, from coefficients recalled from memory). Its triple point, 216.58 K and
+      518.5 kPa, is IUPAC 1976's, against Span and Wagner's 216.592 K and 517.95 kPa;
+    - N₂'s and Ar's L_vap, 5.57 and 6.43, lie near their normal boiling points' 5.580 and 6.437,
+      against 6.037 and 6.540 at T_t. Their L_sub, 6.9 and 7.8, lie against L_vap + L_fus at T_t,
+      about 6.76 and 7.72. The fusion enthalpies (N₂'s 0.72, Giauque and Clayton 1933; Ar's 1.18)
+      were not read in a primary;
+    - with constant enthalpies, water's and methane's liquid branches pass the critical pressure
+      below T_c, at 604 K and 187 K. CO₂'s, N₂'s and Ar's end at 81%, 74% and 85% of p_c.
+      `phase_at` follows the curve, so a fluid between the branch and p_c near T_c reads
+      vapour. The melting line is vertical at T_t (water's falls 0.074 K MPa⁻¹).
+  - _The condensables' order_ is registry order: water, methane, nitrogen, carbon dioxide and
+    argon. T48.d's parenthetical, "water, CO₂, N₂, Ar and CH₄", is the set, not the order.
+  - _The client flags_ (`rayleigh`, `absorber`, `aerosol_material`):
+    - `rayleigh` for all nine;
+    - `absorber` for H₂O, CH₄ and NH₃ (R08.T4.b and T4.c), and for O₂, whose A and B bands at 762
+      and 688 nm lie in the visible channels. R08.T19 then needs cross-sections or a stated
+      "none" for O₂;
+    - `aerosol_material` for every row that condenses within the generator's range: H₂O, CH₄,
+      NH₃, N₂, O₂, CO₂ and Ar, but not H₂ and He. N₂'s file is R08.T5.d's, and Ar and O₂ need
+      R08's stated stand-ins.
+  - _Mirror and golden._ `tests/substance_golden.rs` writes both under `HYPERION_BLESS=1` and
+    checks them otherwise.
+    - The fixture is `{ "description", "substances": [...] }`. Each row holds `index`, `key`,
+      `kind`, `molar_mass_g_per_mol`, `heat_capacity_over_r` (`null` for a row without it),
+      `rayleigh`, `absorber` and `aerosol_material`, one value a line in Prettier's layout. The
+      `index` is there so that readers can check the order.
+    - The golden holds `[elements]` (each element's place and symbol), `[identity]` (index, key,
+      kind, charge, elements and molar-mass bits), `[optics]`, `[gas]` and `[phase]`.
+    - Before comparing or blessing, each test reads its committed file and requires the committed
+      identities to be a prefix of the registry's: the golden's `element` and `identity` lines,
+      and the fixture's index, key and kind, every committed row of which must parse. Only a
+      missing file skips the check. A bless therefore cannot rename, renumber or re-kind a row or
+      reorder an element. The golden's `optics`, `gas` and `phase` sections may change at a bump.
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might
