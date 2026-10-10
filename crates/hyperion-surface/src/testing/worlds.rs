@@ -14,25 +14,35 @@
 //! rows exist (P14.T49.b's test then checks them against the registry), and their values are
 //! illustrative ones, each with its basis, standing in for nothing: the server resolves a
 //! generated world's from the registry. The flat field and the single crater have an empty
-//! palette.
+//! palette. The four bodies' structural spectra are their crust classes' anchored laws
+//! (`decision-r09-t5.md` item 3): the Earth-like world's a mobile lid's, the others a rocky
+//! stagnant lid's (Ceres-like as the reference Ceres's rock); and the Earth-like world's sea floor
+//! is closed forms in the place of R09.T11's and T12.a's (item 5).
+
+use core::f64::consts::FRAC_PI_3;
 
 use hyperion_base::math;
 use hyperion_base::units::{
     Gigayears, Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, MetresPerSecond,
-    MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians, SquareMetres,
-    consts::SECONDS_PER_JULIAN_YEAR,
+    MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians, consts::SECONDS_PER_JULIAN_YEAR,
 };
 
-use super::{CellSite, ClimateSample, FieldBuilder, PlateSpec, Routing, arc, dot, scale};
+use super::{
+    CellSite, ClimateSample, FieldBuilder, PlateSpec, Routing, SeafloorSample, arc, cross, dot,
+    norm, scale, sub, unit,
+};
 use crate::craters::{CraterParams, CraterParamsParts, Screening};
 use crate::cube::unit_dir;
 use crate::field::{
     BodyRef, BoundaryKind, ClimateModelKind, CoarseField, Crust, MaterialPalette, MechanicsFamily,
     PaletteEntry, PaletteRole,
 };
+use crate::num;
 use crate::spheroid::Spheroid;
 use crate::substance_key::SubstanceKey;
-use crate::synth::BandSpectrum;
+use crate::synth::{
+    BandSpectrum, STRUCTURAL_RMS_MOBILE_LID, STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape,
+};
 
 /// One of the synthetic worlds [`synthetic_field`] builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -446,8 +456,119 @@ fn earth_climate(dir: [f64; 3]) -> ClimateSample {
     sample
 }
 
+/// Earth's mean ridge half-rate, mm a year: 23 (46.6 in full, Bird 2003, G³ 4, 1027, Table 3),
+/// which oceanic floor with no divergent boundary of its plate takes, at the oldest age
+/// (`decision-r09-t5.md` item 5).
+const MEAN_HALF_RATE_MM_A: f64 = 23.0;
+
+/// The oldest sea floor, Myr: ages are capped at 200 Myr, beyond which GDH1 is within 40 m of its
+/// asymptote (Design note 7).
+const OLDEST_FLOOR_MYR: f64 = 200.0;
+
+/// The basement abyssal-hill relief at a ridge of half-rate `u` mm a year, metres: H₀(u) = 55 m +
+/// 175 m ÷ (1 + e^((u − 25) ÷ 4)) + 70 m ÷ (1 + e^((u − 8) ÷ 2)), the ruling's logistic fit to the
+/// Table 2 of Goff, Smith and Marks 2004 (Oceanography 17(1), 24–37, doi:10.5670/oceanog.2004.64,
+/// p. 30; its rates full, halved here): 223 m at a half-rate of 14 mm a year (the table's 235.8 m
+/// at a full 28; the ruling quotes 232 m, which this law reaches at 12), 191 m at 20, 62 m at 37.5
+/// and 55 m above 55, with an ultraslow term for the 280–320 m of Sloan, Sauter, Goff and Cannat
+/// 2012 (G³ 13, doi:10.1029/2011GC003850), 286 m at 5 (`decision-r09-t5.md` item 5). Medium
+/// confidence. R09.T12.a's, written here as the Earth-like world's illustrative closed form.
+#[must_use]
+fn basement_hills_m(u: f64) -> f64 {
+    55.0 + 175.0 / (1.0 + math::exp((u - 25.0) / 4.0)) + 70.0 / (1.0 + math::exp((u - 8.0) / 2.0))
+}
+
+/// The pelagic drape on floor `age_myr` old at latitude `lat` (radians), metres:
+/// `S_p` = √(τ ÷ 1 Myr) × (52 − 2.46 |φ| + 0.045 φ²) m with φ in degrees and clamped to 72°, the
+/// eq. 2a of Straume et al. 2019's global sediment grid with the ocean factor 1 (G³ 20, 1756,
+/// doi:10.1029/2018GC008115, p. 1766). It is fitted to floor up to 82 Myr old within 72° of the
+/// equator, and extended beyond both by the same √τ and the clamped latitude (labelled,
+/// `decision-r09-t5.md` item 5), as most of this world's floor needs. R09.T12.a's, written here
+/// as the Earth-like world's illustrative closed form.
+#[must_use]
+fn pelagic_drape_m(age_myr: f64, lat: f64) -> f64 {
+    let phi = num::min(lat.to_degrees().abs(), 72.0);
+    age_myr.sqrt() * (52.0 - 2.46 * phi + 0.045 * phi * phi)
+}
+
+/// The ponded turbidite wedge `margin_km` from a passive margin, metres:
+/// `S_t` = 2.4 km e^(−x ÷ 350 km), zero beyond 1,050 km (`decision-r09-t5.md` item 5): the
+/// continental rise's mean thickness (Harris et al. 2014, Mar. Geol. 352, 4–24,
+/// doi:10.1016/j.margeo.2014.01.011, with Straume et al. 2019's sediment grid), and 350 km the
+/// ruling's choice within ordinary margins' 200–500 km, which T12.a's test calibrates. Low
+/// confidence. R09.T12.a's, written here as the Earth-like world's illustrative closed form.
+#[must_use]
+fn ponded_wedge_m(margin_km: f64) -> f64 {
+    if margin_km < 1_050.0 {
+        2_400.0 * math::exp(-margin_km / 350.0)
+    } else {
+        0.0
+    }
+}
+
+/// The Earth-like world's sea floor at `site`, an oceanic cell of one of `plates`
+/// (`decision-r09-t5.md` item 5), in illustrative closed forms of R09.T11's and T12.a's: the
+/// world's plates are its hand-placed ones, each of one crust, so its ridges and margins are
+/// their bisectors.
+///
+/// The ridge is the nearest bisector with another plate across which the two diverge (the
+/// builder's own class, more than 120° from head-on), and its half-rate is their relative
+/// motion's normal component at the cell, halved; the age is the distance to it over that rate,
+/// capped at [`OLDEST_FLOOR_MYR`], and a plate with no divergent bisector takes the oldest age and
+/// [`MEAN_HALF_RATE_MM_A`]. The hills' basement relief H₀ comes from the half-rate and their drape
+/// from the age and latitude, H = max(H₀ − `S_p` ÷ 2, H₀ ÷ 2) (Goff 2010, JGR 115, B12104, eq. 5
+/// and ¶36). The passive margin is the nearest bisector with a continental plate that does not
+/// converge with this one (a trench traps the turbidites in its wedge), and the ponded wedge falls
+/// from it. On this world the floor is old, a median near 130 Myr, since its ten plates put few
+/// ridges in its oceans, and its plains fewer than Earth's third of the abyss, since its
+/// continents are plates of their own with no passive margins inside them.
+#[must_use]
+fn earth_seafloor(site: &CellSite, plates: &[PlateSpec]) -> SeafloorSample {
+    let dir = site.dir;
+    let own = usize::from(site.plate);
+    let radius_km = EARTH_RADIUS_M / 1e3;
+    let mut ridge: Option<(f64, f64)> = None;
+    let mut margin: Option<f64> = None;
+    for (k, other) in plates.iter().enumerate() {
+        if k == own {
+            continue;
+        }
+        let normal = unit(sub(plates[own].seed, other.seed));
+        let distance_km = math::asin(dot(dir, normal).clamp(-1.0, 1.0)) * radius_km;
+        let towards = unit(scale(sub(normal, scale(dir, dot(normal, dir))), -1.0));
+        let relative = cross(
+            sub(plates[own].rotation_rad_per_myr, other.rotation_rad_per_myr),
+            dir,
+        );
+        let closing = dot(relative, towards);
+        let sliding = norm(sub(relative, scale(towards, closing)));
+        let direction = math::atan2(sliding, closing);
+        if direction > 2.0 * FRAC_PI_3 && ridge.is_none_or(|(d, _)| distance_km < d) {
+            // Radians a million years times kilometres is kilometres a million years, which is
+            // millimetres a year.
+            ridge = Some((distance_km, -closing * radius_km / 2.0));
+        }
+        if other.crust == Crust::Continental
+            && direction >= FRAC_PI_3
+            && margin.is_none_or(|d| distance_km < d)
+        {
+            margin = Some(distance_km);
+        }
+    }
+    let (age_myr, half_rate) = match ridge {
+        Some((d, u)) if u > 0.0 => (num::min(d / u, OLDEST_FLOOR_MYR), u),
+        Some(_) | None => (OLDEST_FLOOR_MYR, MEAN_HALF_RATE_MM_A),
+    };
+    let basement = basement_hills_m(half_rate);
+    let drape = pelagic_drape_m(age_myr, latitude(dir));
+    SeafloorSample {
+        hill_relief: Metres::new(num::max(basement - drape / 2.0, basement / 2.0)),
+        ponded_sediment: Metres::new(margin.map_or(0.0, ponded_wedge_m)),
+    }
+}
+
 fn earth_like() -> CoarseField {
-    let plates = EARTH_PLATES
+    let plates: Vec<PlateSpec> = EARTH_PLATES
         .iter()
         .map(
             |&(lat, lon, crust, pole_lat, pole_lon, degrees_per_myr)| PlateSpec {
@@ -460,6 +581,7 @@ fn earth_like() -> CoarseField {
             },
         )
         .collect();
+    let seafloor_plates = plates.clone();
     let radius = Metres::new(EARTH_RADIUS_M);
     let earth = palette(vec![
         BASALT.entry(PaletteRole::SecondaryCrust),
@@ -481,7 +603,12 @@ fn earth_like() -> CoarseField {
         )
         .sea(Metres::ZERO)
         .lapse_rate(0.0065)
-        .spectrum(spectrum(3.6e6))
+        // A mobile lid at the Earth's gravity: its anchor needs no g⊕ ÷ g.
+        .spectrum(BandSpectrum::anchored(
+            SpectrumShape::SILICATE,
+            radius,
+            STRUCTURAL_RMS_MOBILE_LID,
+        ))
         .crater_params(
             CraterParams::new(CraterParamsParts {
                 n_1km: PerSquareKilometre::new(1e-4),
@@ -501,6 +628,7 @@ fn earth_like() -> CoarseField {
         .surface_age(Gigayears::new(2.5))
         .surface_pressure(Pascals::new(101_325.0))
         .plates(plates)
+        .seafloor(move |site| earth_seafloor(site, &seafloor_plates))
         .elevation(earth_elevation)
         .ice(|site, elevation| {
             let t = earth_temperature(latitude(site.dir));
@@ -535,10 +663,15 @@ fn earth_like() -> CoarseField {
         .build()
 }
 
-/// The spectrum V(l) = `v1` l^−1.9.
-fn spectrum(v1: f64) -> BandSpectrum {
-    BandSpectrum::new(BandSpectrum::DEFAULT_EXPONENT, SquareMetres::new(v1))
-        .expect("a synthetic spectrum is valid")
+/// A rocky stagnant lid's structural spectrum on a body of radius `radius_m` metres: the silicate
+/// shape anchored at [`STRUCTURAL_RMS_STAGNANT_LID`] (`decision-r09-t5.md` item 3).
+#[must_use]
+fn stagnant_lid_spectrum(radius_m: f64) -> BandSpectrum {
+    BandSpectrum::anchored(
+        SpectrumShape::SILICATE,
+        Metres::new(radius_m),
+        STRUCTURAL_RMS_STAGNANT_LID,
+    )
 }
 
 /// Mars's Tharsis rise, Olympus Mons and Elysium.
@@ -609,7 +742,7 @@ fn mars_like() -> CoarseField {
         })
         .figure(Spheroid::from_volumetric(MARS_RADIUS_M, 0.005_89).expect("Mars's figure is valid"))
         .lapse_rate(0.0025)
-        .spectrum(spectrum(4.8e6))
+        .spectrum(stagnant_lid_spectrum(MARS_RADIUS_M))
         .crater_params(
             CraterParams::new(CraterParamsParts {
                 n_1km: PerSquareKilometre::new(0.005),
@@ -697,7 +830,7 @@ fn moon_like() -> CoarseField {
         .figure(
             Spheroid::from_volumetric(MOON_RADIUS_M, 0.0012).expect("the Moon's figure is valid"),
         )
-        .spectrum(spectrum(3.3e6))
+        .spectrum(stagnant_lid_spectrum(MOON_RADIUS_M))
         .crater_params(
             CraterParams::new(CraterParamsParts {
                 n_1km: PerSquareKilometre::new(0.05),
@@ -769,7 +902,7 @@ fn ceres_like() -> CoarseField {
         .palette(ceres)
         .crust_palette([None, None, Some(crust), None])
         .figure(Spheroid::from_volumetric(CERES_RADIUS_M, 0.075).expect("Ceres's figure is valid"))
-        .spectrum(spectrum(2.0e6))
+        .spectrum(stagnant_lid_spectrum(CERES_RADIUS_M))
         .crater_params(
             CraterParams::new(CraterParamsParts {
                 n_1km: PerSquareKilometre::new(0.003),

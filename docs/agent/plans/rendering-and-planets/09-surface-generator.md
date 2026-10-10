@@ -197,7 +197,8 @@ pub mod field {
         plate: u8, crust: Crust, boundary: BoundaryKind, boundary_obliquity: u8,
         flow: FlowDirection, drainage: LogArea, steepness: LogSteepness,
         water_surface_mm: i32, ice: u8, substances: u8 (ice and liquid entries),
-        class: SurfaceClass, crater_state: u8 */ }      // 22 bytes in the payload
+        class: SurfaceClass, crater_state: u8, seafloor: u8 (hill relief | ponded sediment,
+        decision-r09-t5 item 5) */ }                    // 23 bytes in the payload
     pub struct ClimateCell { /* at level − 1: sea_level_temperature: i16 (0.01 K),
         month_anomaly: [i8; 12] (header's step), month_precipitation: [u8; 12] (log rate),
         wind: [Wind; 12] (each month's 10 m wind) */ }    // 50 bytes, one per four cells
@@ -245,7 +246,8 @@ pub mod craters {
 }
 pub mod synth {
     pub struct BandLevel(u8);
-    pub struct BandSpectrum;                               // per-contribution amplitudes by level
+    pub struct BandSpectrum;   // the structural share's law: V₁, β₁, break degree, β₂
+                               // (decision-r09-t5 item 2)
     pub struct Synthesiser<'a, F: FieldView> { /* field, detail seed */ }
     impl<'a, F: FieldView> Synthesiser<'a, F> {
         pub fn new(field: &'a F, seed: DetailSeed) -> Self;
@@ -688,22 +690,45 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    the distance to the plate's own divergent boundary, a second distance transform the pass keeps
    in its `f64` working state (not the nearest boundary of any kind, which would make old floor
    by a trench young; researched 2026-09-29: Stein and Stein 1992; Müller et al. 2008's age grid),
-   capped at 200 Myr, beyond which GDH1 is within 40 m of its asymptote; collisional belts 200–500
-   km wide with plateaus near 5 km and peaks near 9 km, trenches 2–4 km below the sea floor and arcs
-   100–200 km behind them, all heights scaled by (g⊕ ÷ g) × the lithosphere factor as
+   capped at 200 Myr, beyond which GDH1 is within 40 m of its asymptote; the floor's roughness
+   follows its own ridge too: the half-rate at formation sets the abyssal-hill relief (Goff et al.
+   2004), its age the pelagic drape (GlobSed, Goff 2010), and the turbidites of its plate's passive
+   margins, trapped by trenches, its plains (Harris et al. 2014's third of the abyss), carried to
+   the synthesis in one byte (`decision-r09-t5.md` item 5); collisional belts 200–500 km wide with
+   plateaus near 5 km and peaks near 9 km, trenches 2–4 km below the sea floor and volcanic fronts
+   190 km behind a trench whose overriding plate is oceanic and 260 km behind one whose overriding
+   plate is continental (Syracuse and Abers 2006's 527 front volcanoes; 10–90% 140–250 and
+   180–330 km; Bird 2003's "200–250 km is more typical" brackets the median), varied along strike
+   by the interquartile range, arcs 60 km and 175 km wide behind them, distances Earth's and
+   unscaled (labelled), all heights scaled by (g⊕ ÷ g) × the lithosphere factor as
    strength-limited; flexure w = w₀ e^(−x/α)(cos x/α + sin x/α) with α = [4D ÷ ((ρ_m − ρ_fill)
    g)]^¼, D = E T_e³ ÷ 12(1 − ν²), E 100 GPa, ν 0.25 (Olympus Mons at T_e = 70 km gives α ≈ 180 km,
-   as observed). The synthesis's amplitudes are fixed per body by its `BandSpectrum` (per-degree
-   variance ∝ l^−1.9 by default, the observed −1.7 to −2.05), so its expected variance below the
-   coarse cell is closed-form (`local_variance`). The coarse elevation is scaled affinely about its
-   area-weighted mean so that the **reconstructed** field's variance, the interpolant of Design note
-   13 integrated by solid-angle quadrature at sub-cell points, is σ_h² less that share, and again
-   after erosion; the cell values alone would fall several per cent short by the spline's smoothing.
-   The local share is not negligible at the plan's own levels: above the coarse cell's Nyquist
-   degree it is 0.6% of σ_h² for an Earth or a Mars (about 200 m RMS), 4% for Mercury, 5% for Ceres
-   and 7% for the Moon (about 600 m), against the brainstorm's 0.1–0.2% and 2%, which hold at a 35
-   km wavelength. Sea level is the area-weighted quantile that leaves plan 14's ocean fraction below
-   it. The realised σ_h and greatest relief go in the header.
+   as observed). The synthesis's amplitudes are fixed per body by its `BandSpectrum` (the
+   structural share's law, `decision-r09-t5.md` items 2–4: per-degree variance ∝ l^−β₁ from the
+   coarse cell to a break at λ_b, and ∝ l^−β₂ below it, continuous; on silicate crusts β₁ 2.0, λ_b
+   2 km, β₂ 3.0, from SRTM, Earth2014's land, GMRT and Perron et al. 2008; on ice-rich crusts 1.8,
+   1 km and 2.6, from Europa's DEMs; no gravity term in the break; the craters' own steepening near
+   10 km on the Moon, Mercury and Mars is T7.b's), so its expected variance below the coarse cell
+   is closed-form (`local_variance`). `local_variance` is the reference style's. The styles'
+   amplitudes are absolute ratios to the body class's reference ground, so the realised structural
+   share is ⟨a²⟩ `local_variance`, ⟨a²⟩ the solid-angle mean of the interpolated squared
+   amplitude. It is never normalised away: a world with more belts is rougher (`decision-r09-t5.md`
+   item 1). V₁ is anchored at the coarse cell, never from degree 1: the structural RMS in
+   wavelengths shorter than 72 km is 200 m × (g⊕ ÷ g) on a mobile lid (Earth2014 with the abyssal
+   hills its altimetric bathymetry lacks), 60 m on a rocky stagnant lid (Mars's crater-poor plains
+   and the maria) and 50 m on an ice-rich crust (Europa), all medium to medium-low confidence
+   (`decision-r09-t5.md` item 3). The coarse elevation is scaled affinely about its area-weighted
+   mean so that the **reconstructed** field's variance, the interpolant of Design note 13
+   integrated by solid-angle quadrature at sub-cell points, is σ_h² less the local shares: the
+   structural share ⟨a²⟩ `local_variance`, and the craters' and channels' closed forms finer than
+   the coarse cell's Nyquist wavelength, the coarse craters' sharpening included
+   (`decision-r09-t5.md` item 4); and again after erosion, when the channels' share is known; the
+   cell values alone would fall several per cent short by the spline's smoothing. The local share
+   is not negligible at the plan's own levels: above the coarse cell's Nyquist degree it is 0.6% of
+   σ_h² for an Earth or a Mars (about 200 m RMS), 4% for Mercury, 5% for Ceres and 7% for the Moon
+   (about 600 m), all contributions together, against the brainstorm's 0.1–0.2% and 2%, which hold
+   at a 35 km wavelength. Sea level is the area-weighted quantile that leaves plan 14's ocean
+   fraction below it. The realised σ_h and greatest relief go in the header.
 8. **Climate** (researched 2026-09-29: Ramirez 2024, arXiv:2310.15992; Spiegel, Menou and Scharf
    2008; Siler, Roe and Armour 2018; Hergarten and Robl 2022; Williams and Kasting 1997's exponents
    from memory). Ramirez 2024 cannot be reimplemented from the paper, since its outgoing radiation
@@ -1090,10 +1115,10 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     confidence for Mars and high obliquity), so no anomaly saturates and no cell grows. The climate
     layer is at level L − 1, because it is interpolated from the energy-balance grid and carries
     nothing finer except the lapse term, which the synthesis re-applies from the header's rate and
-    the cell's elevation. That gives about 22 B a cell (21 B and T2's follow-up B's substance
-    byte) plus 50 B per four (twelve months of anomaly, precipitation and wind): some 13.6 MB for
-    an Earth at level 8, 3.4 MB for a Mars at 7 and 0.86 MB for the Moon, inside the brainstorm's
-    "roughly 2 to 15 MB" and R03's 15 MiB check.
+    the cell's elevation. That gives about 23 B a cell (21 B, T2's follow-up B's substance byte
+    and `decision-r09-t5.md`'s sea-floor byte) plus 50 B per four (twelve months of anomaly,
+    precipitation and wind): some 14.0 MB for an Earth at level 8, 3.5 MB for a Mars at 7 and
+    0.89 MB for the Moon, inside the brainstorm's "roughly 2 to 15 MB" and R03's 15 MiB check.
     Heights, elevations and sea level are measured along the normal of the body's
     rotational spheroid, R07's reference body (a = R_vol (1 − f)^(−⅓), c = a (1 − f), with plan 14's
     flattening f, which P14.T46 sends in the record's `figure()`), the one datum R07's Design note
@@ -1356,6 +1381,19 @@ exceeds an octave's stated bound; `local_variance` within 5% of the sampled vari
 synthetic world; a warp offset at level n never reads an octave finer than n (instrumented test).
 Acceptance: `cargo test -p hyperion-surface synth::relief`.
 
+_Follow-up, the spectrum's break and the sea floor_ (`decision-r09-t5.md`, 2026-10-10; before T8
+and T9).
+
+- `BandSpectrum` gains `break_degree` and `small_scale_exponent`, `SpectrumShape`, the class
+  anchors and `anchored`.
+- `SynthesisCell` gains the `seafloor` byte. The oceanic style reads it, and the arc bands are set
+  by crust.
+- The synthetic worlds take the anchored spectra and sea-floor bytes.
+- `wire/form.rs`'s two rows change, and `payloads.golden` is re-blessed at 21 with `codes.golden`
+  extended (Generator version).
+- Tests: the closed forms against direct sums across the break; the anchors; the byte's codes and
+  refusals; the styles; the 5% variance test on the new spectra.
+
 ### R09.T6 Channels
 
 - **R09.T6.a The first levels.** `synth/channels.rs`: the network's first level from the coarse
@@ -1503,7 +1541,10 @@ boundaries and grow by at most one edge length a step; boundary kinds follow the
 hand-placed plates; the plate areas follow the tail law within a Kolmogorov–Smirnov bound over many
 seeds; the mean plate count over those seeds is 48 ± 7; the areas sum to 4π; the distance to
 the plate's own divergent boundary, which GDH1 reads, is zero on ridges and never taken from a
-trench; a stagnant-lid world has none. Acceptance:
+trench; a stagnant-lid world has none; each oceanic cell's source half-rate is |ω × r| ÷ 2 normal
+to the ridge on hand-placed plates, inherited along the own-ridge transform; its age is d_r ÷ u_h,
+capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻¹
+(`decision-r09-t5.md` item 5). Acceptance:
 `cargo test -p hyperion-sim planetary::surface::steps::plates`.
 
 ### R09.T12 Coarse elevation
@@ -1515,10 +1556,19 @@ trench; a stagnant-lid world has none. Acceptance:
   TBI layer at 5′), is bimodal with a land mode within 300 m of +125 m, an ocean mode within 600 m
   of −4,375 m (the ocean peak is flat from −5,300 to −4,300 m) and an oceanic mean within 300 m of
   −4,281 m (Hirt and Rexer 2015's Earth2014, recomputed 2026-09-29); a ridge's depth follows GDH1 at
-  5, 20 and 100 Myr to 1 m.
+  5, 20 and 100 Myr to 1 m. The sea floor's roughness inputs (`decision-r09-t5.md` item 5): H₀ from
+  the source half-rate, the pelagic drape from the age and latitude, the ponded wedge from the
+  plate's passive margins over its own oceanic cells, quantised into `seafloor`. Tests: H₀ within
+  30% of Goff et al. 2004's Table 2 at full rates of 28, 40, 75 (axial high), 110 and
+  160 mm a⁻¹; S_p is 468 m at 81 Myr on the equator; the wedge never crosses a plate boundary; on
+  the reference Earth, oceanic cells whose style amplitude is at most 0.2 cover 25–40% of the
+  oceanic crust deeper than 3 km, and the mean of S_p + S_t over oceanic crust farther than 200 km
+  from a passive margin is 250–600 m (GlobSed's 404 m).
 - **R09.T12.b Convergent landforms.** Belts, trenches and arcs by boundary kind, scaled as Design
   note 7 says. Tests: belts lie within their stated distance of convergent boundaries; trenches lie
-  2–4 km below the neighbouring sea floor and arcs 100–200 km behind them.
+  2–4 km below the neighbouring sea floor and the arcs' volcanic fronts lie behind them with
+  medians within 15 km of 190 km (oceanic overriding plate) and 260 km (continental), 80% of
+  fronts within 140–250 and 180–330 km (`decision-r09-t5.md` item 6).
 - **R09.T12.c Stagnant-lid provinces and flexure.** After T0.b's isotherm item. Volcanic provinces
   sized by the volcanism level
   and the flexural moat and bulge about each load, with T_e = k (870 K − T_s) ÷ F (T0.b's ruling,
@@ -1534,12 +1584,17 @@ trench; a stagnant-lid world has none. Acceptance:
   about 300 above 100 km with N(1 km) at 4.4 Gyr; ages split before and after the wet epoch on the
   reference Mars; the list is sorted and each crater's `reach` is complete; before degradation,
   the reference Moon's coarse craters' rim heights are Pike 1980b's 0.236 D^0.399 to 1%.
-- **R09.T12.e σ_h and sea level.** Design note 7, on the reconstructed field, after T4 and T5.
-  Tests: the reconstructed σ_h equals the input to 10⁻⁶ relative after the step;
-  `local_variance ÷ σ_h²` is 5–9% on the reference Moon and 0.4–1% on the reference Earth; the
-  realised relief lies at 6–16 σ_h on every reference world (Design note 7's observed 7–15 widened
-  by one σ_h each way, since one realisation scatters about it); the ocean fraction below sea level
-  equals the input to one cell's solid angle; the header reports realised σ_h and relief.
+- **R09.T12.e σ_h and sea level.** Design note 7, on the reconstructed field, after T4 and T5. The
+  header's spectrum is `BandSpectrum::anchored` of the body's crust class (`decision-r09-t5.md`
+  item 3), chosen from `surface_material` and `tectonics`.
+  Tests: the reconstructed σ_h equals the input to 10⁻⁶ relative after the step; the local share,
+  ⟨a²⟩ `local_variance` plus the craters' and channels' closed forms finer than λ_c, divided by
+  σ_h², is 4–10% on the reference Moon, 3–8% on the reference Ceres and 0.3–1% on the reference
+  Earth and Mars (Design note 7's 7, 5 and 0.6%); craters supply at least 80% of the Moon's; ⟨a²⟩
+  on the reference Earth is 0.6–1.2; the realised relief lies at 6–16 σ_h on every reference
+  world (Design note 7's observed 7–15 widened by one σ_h each way, since one realisation scatters
+  about it); the ocean fraction below sea level equals the input to one cell's solid angle; the
+  header reports realised σ_h and relief.
 
 Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.a–c and e) and
 `cargo test -p hyperion-sim planetary::surface::steps::craters` (T12.d).
@@ -1818,7 +1873,8 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
 `surface_pressure` for R11; and T2's header `reference_temperature` and `temperature_step` (0.01 K
 × 2ⁿ, n 0–15) and `season_eccentricity`, with the months' eccentric-anomaly rule and twelve winds
 per climate record (`decision-r09-t2.md` item 1), and every code's scale (Risks, "Deviations in
-T2, as built"). R10.T10.a fills `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
+T2, as built"), the spectrum's break fields and the sea-floor byte's two scales
+(`decision-r09-t5.md`). R10.T10.a fills `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
 re-blessing this plan's payload and coarse goldens in that commit.
 
 ## Risks and open points
@@ -1881,6 +1937,10 @@ re-blessing this plan's payload and coarse goldens in that commit.
     read at an octave cell's canonical point would reach 6–8 coarse cells, beyond the margin. Lean:
     keep the body's density; if regional ages are wanted, modulate by the crater's own centre cell
     only for octaves whose search stays inside the margin.
+  - _The arc–trench gap off Earth._ Earth's 190 and 260 km are set by slab depth beneath arcs
+    (H 101 ± 16 km, England et al. 2004), which may be pressure-limited and so scale as 1 ÷ g
+    (England and Katz 2010, from memory). Lean: Earth's distances, labelled; a geodynamics pass
+    would settle it.
 - **Remaining checks, as researched** (R09.T0.b, 2026-10-09). Each item is settled in its design
   note; what stays open, with the lean and what would settle it:
   - _Open question 20, a science ruling for the owner_ (asked by T0.a: does accepting P14.T48.a's
@@ -1945,9 +2005,10 @@ re-blessing this plan's payload and coarse goldens in that commit.
 - **The survey stand-in.** `survey_pass` lets a client grant its ship coverage, as the server
   grants detail levels today. It is a discipline for an honest client, and the sensors plan
   replaces the caller, not the core.
-- **Field size.** Design note 17's layout gives about 13.2 MB for an Earth. If the climate layer
-  at L − 1 proves too coarse for R11's clouds, sending it at level L costs about 2.1× (about
-  28 MB on an Earth), past R03's 15 MiB check.
+- **Field size.** Design note 17's layout gives about 14.0 MB for an Earth (about 13.96 MB with
+  `decision-r09-t5.md`'s sea-floor byte). If the climate layer at L − 1 proves too coarse for
+  R11's clouds, sending it at level L costs about 2.1× (about 28 MB on an Earth), past R03's
+  15 MiB check.
 - **Dependencies.** Plan 14 calling the surface crate's crater density is a new edge that R04's
   split allows (the sim already depends on the surface crate). P12.T7 is built, and T18 builds on
   it. The channel network's physics profile replaces Dendry's own height reconstruction, which the
@@ -2167,9 +2228,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
     `column_mass` and `projectile_density`) or `Cutoff` (a `diameter`). `ClimateModelKind` is
     `EnergyBalance`, `LockedEnergyBalance`, `RadiativeEquilibrium` or `Isothermal`;
     `PrecipitationSource` has `Heuristic` alone.
-  - _`BandSpectrum` is the law, not a table_: degree variance V(l) = V₁ l^−β (β default 1.9,
-    above 1; V₁ in `SquareMetres`). T5 derives each level's per-contribution amplitudes from it,
-    and may add fields before T9.
+  - _`BandSpectrum` is the law, not a table_: the structural share's degree variance, V₁ l^−β₁
+    below the break degree l_b and V₁ l_b^(β₂−β₁) l^−β₂ from it (`decision-r09-t5.md` item 2; β₁
+    default 2.0; V₁ in `SquareMetres`). T5 derives each level's amplitude from it.
   - _The codes_ (each documented with its SI meaning). `boundary_distance_km` is negative on the
     plate that subducts at a subduction boundary and positive elsewhere (a lean for T11 to keep or
     change), with `SynthesisCell::NO_BOUNDARY_KM` = `i16::MIN` on a stagnant lid, outside the
@@ -2942,21 +3003,21 @@ re-blessing this plan's payload and coarse goldens in that commit.
     oceanic hills 1.5, abyssal plains 0.1, a stagnant lid 1, its provinces 0.25. Widths: collision
     belts full to 100 km and gone by 250, arcs full to 200 km behind the boundary and gone by 350,
     the continental deformation zone 150 to 500, hills to plain 500 to 1,500 (the plan's own),
-    shear 50 to 100 km on continental crust and 20 to 50 on oceanic (the plan's own). The hills'
-    distance is to the nearest boundary of any kind, which is all the cell carries, where Design
-    note 7 dates the floor from its own plate's divergent boundary: old floor within 1,500 km of a
-    trench or transform keeps hills (at Earth's mean ridge half-rate, 23 mm a year in Bird 2003's
-    Table 3, 1,500 km is 64 Myr). Carrying the ridge distance would be a wire field, for "main". The factors are a table over
-    T2's `Crust` and `BoundaryKind`, matched exhaustively, which decision-composition keeps closed.
+    shear 50 to 100 km on continental crust and 20 to 50 on oceanic (the plan's own). Ruled
+    (`decision-r09-t5.md` item 5): the oceanic amplitude reads the cell's `seafloor` byte (hill
+    relief and ponded sediment), which T11 and T12.a derive from the cell's own ridge. The factors
+    are a table over T2's `Crust` and `BoundaryKind`, matched exhaustively, which
+    decision-composition keeps closed.
   - _`local_variance` is the reference style's._ The styles move variance about the body, so the
     realised share is the mean a² times `local_variance`: 0.74 on the Earth-like world, 0.93
     Mars-like, 0.95 Moon-like, 1 Ceres-like. The plan's 5% test is therefore against
     `local_variance` times the sampled mean of the interpolated a² at the same points (within 0.9%
-    on all four), and Flat and OneCrater have no relief at all. Asked of "main" (lean, not ruled):
-    T12.e scales V₁ by the inverse of the area-weighted mean a² of its cells (`ReliefStyle::of`), so
-    that the body's share is the law it wants, rather than the header carrying a normaliser (a wire
-    change before T9). The octaves stop at the band limit, leaving out 2^−(finest − L)(β − 1) of
-    `local_variance`: under 10⁻³ at β = 1.9 on the synthetic worlds, 1.8 × 10⁻³ on a Ceres at 1.7.
+    on all four), and Flat and OneCrater have no relief at all. Ruled (`decision-r09-t5.md` item
+    1): nothing normalises it. The styles are absolute, V₁ is the reference style's law, and T12.e
+    books ⟨a²⟩ `local_variance` in σ_h's budget, with ⟨a²⟩ from its own quadrature of the
+    interpolated amplitude. The octaves stop at the band limit, leaving out 2^−(finest − L)(β − 1)
+    of `local_variance`: under 10⁻³ at β = 1.9 on the synthetic worlds, 1.8 × 10⁻³ on a Ceres at
+    1.7.
   - _Tests as built._ The mean: 2 × 10⁵ area-uniform points on an Earth-sized body (the plan's 10⁵
     raised, so that the 1% is 4.5 standard errors and the 56 checks together stay under α =
     10⁻³), octaves 9 to 22, plain and ridged, warped and not, each mean under 0.01 of unit RMS and
@@ -2999,7 +3060,8 @@ prepare` ran the surface crate's 233 tests on the browser target.
     - T2's Earth-like V₁ (σ_h² ÷ ζ(1.9)) normalises the law from degree 1, and gives 116 m RMS
       above l = 556 against Earth2014 BED's 183 m (Hirt and Rexer 2015, Table 3) and Design note
       7's "0.6% … about 200 m". T10's and T12.e's V₁ is fitted at the coarse cell's degrees (about
-      9.6 × 10⁶ m² at β = 1.9), but only with the break, without which the 2–4 m wavelengths reach 1.6 m.
+      9.6 × 10⁶ m² at β = 1.9), but only with the break, without which the 2–4 m wavelengths reach
+      1.6 m. Ruled (`decision-r09-t5.md` item 3): 2.253 × 10⁷ m² at the anchor.
     - Design note 7's arcs "100–200 km behind" trenches: Bird 2003 (G³ 4, 1027, ¶105, p. 39) has
       "200–250 km is more typical" for the forearc (medium confidence), for T12.b.
     - The spectrum may count relief twice: lunar highland relief at kilometre scales is mostly
@@ -3012,6 +3074,9 @@ prepare` ran the surface crate's 233 tests on the browser target.
       T11–T12. The usual "slope under
       1:1,000" (Heezen, Tharp and Ewing 1959) was not reached; the Hatteras plain's multibeam
       median is 1:1,436.
+    - _Ruled 2026-10-10 in `decision-r09-t5.md`_: the break (item 2); V₁ at the coarse cell
+      (item 3); the structural share alone (item 4); the sea floor's inputs (item 5); the arcs
+      (item 6).
   - _For T8._ `Relief::at` with `through` from the level's set; `Relief::cover` for `bake_patch`;
     `octave_bound` for `level_bound_m`. Not benchmarked: a query interpolates three style
     components (about three base elevations' worth) and up to 14 octaves, against Design note 14's
@@ -3158,3 +3223,149 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     - tributaries: one across a face edge, one clamped at a chord's end, and one at the floor;
     - `main_stream_length`, `hack_area`, `head_length` and `tributary_rise` about the floor's
       crossover.
+- **Deviations in T5's follow-up, as built** (2026-10-10, `decision-r09-t5.md`; lane
+  r09-synth-fix, after T5, T6.a and T10 landed).
+  - _The sim's frame._ T10's quantiser builds `SynthesisCell`s and its initial state a
+    `BandSpectrum`, so the follow-up touches the sim as much as compiling needs: `CellState` gains
+    `hill_relief: Option<Metres>` and `ponded_sediment: Metres`, `None` and zero until T12.a fills
+    them, which `quantise` turns into the byte (`seafloor_byte`); and `Working::initial`'s spectrum
+    is a silicate crust's anchored at zero on the body, until T12.e anchors the crust class. No sim
+    golden pins the coarse field, so none moves.
+  - _The spectrum._ `BandSpectrum::new(BandSpectrumParts)` with `break_degree` and
+    `small_scale_exponent`, their getters, `degree_variance(l)` and the crate-private
+    `break_factor`; `BuildBandSpectrumError::{BreakDegree, SmallScaleExponent}`, checked after β₁
+    and V₁, and one refusal beyond the ruling's, `Total`: parts each in range whose whole variance
+    from degree 1 is not finite (a break far past every degree under a much steeper β₂ overflows
+    its factor, NaN where V₁ is 0), so that no payload the decoder accepts can make the relief's
+    asserts panic (the determinism review's lean). `SpectrumShape` has private fields, getters and
+    `new(exponent, break_wavelength, small_scale_exponent) -> Result<_, BuildSpectrumShapeError>`
+    (`Exponent`, `BreakWavelength`, `SmallScaleExponent`), so a new crust class is a checked value,
+    not a code change. `anchored` builds its result through `new`, panicking with "a spectrum shape
+    must give a valid law on this body" when a shape outside every crust's overflows it, and floors
+    the break degree at 1, where the ruling's 2πR ÷ λ_b would be refused: on a body under λ_b ÷ 2π
+    (318 m for silicate) every degree is below the break wavelength. `band_variance` is the
+    difference of the two tails taken segment by segment, so that the terms they share cancel
+    exactly; and the second segment's start L\* is held as an integer-valued `f64` (`tail_from`
+    beside `degree_tail`), so that a break beyond `u64`'s range is not saturated. Every value of the
+    single law is unchanged bit for bit. `BandSpectrum` is a `FixedWire` of 32 B, which the strides
+    test pins. The octaves now leave out under 10⁻⁶ of `local_variance`, far below the break.
+  - _The field._ `SynthesisCell.seafloor`, `NO_SEAFLOOR` (0),
+    `pack_seafloor(hill, ponded) -> Option<u8>` (`None` past a nibble), `hill_relief`,
+    `ponded_sediment`, `quantise_hill_relief` and `quantise_ponded_sediment`, with the readers of
+    a bare byte crate-private (`field::{hill_relief_of, ponded_sediment_of}`) for
+    `ReliefStyle::from_codes`. The hill code saturates at both ends, so every positive relief has a
+    code from 1 to 15 and only zero is none; the sediment code is 0 under 21.02 m (half a step
+    below 25 m). `BuildFieldError::Seafloor { cell }` is checked last in `check_synthesis_cell`, so
+    the decoder refuses it too (`DecodeBlockError::Record`).
+  - _The style._ `H_REF` (95 m, `Metres`), `HILL_AMPLITUDE_EXPONENT` (0.6) and the private
+    `PONDING` (0.5, 3.0) carry item 5's law; `ARC_OCEANIC_KM` and `ARC_CONTINENTAL_KM` are
+    private, as `ARC_KM` was, read through `band` beside `taper`. A stagnant lid's crusts take the
+    continental band, never reached since they have no boundary. A byte naming no hills on oceanic
+    crust, which no field holds, is taken for a plain.
+  - _The testing worlds._ `FieldBuilder` holds its spectrum as an `Option`, and its default, a
+    silicate crust anchored at zero on the builder's body, is made in `build`, which checks the
+    radius. `FieldBuilder::seafloor` takes a `SeafloorSample` (hill relief and ponded sediment,
+    SI) per oceanic cell, the reference hills (`SeafloorSample::REFERENCE`, `H_REF`) by default. The
+    Earth-like world's closed forms (`worlds.rs`, labelled as T11's and T12.a's, for them to
+    replace) depart from item 5's construction where this world cannot follow it: the ridge is the
+    nearest bisector with a plate the builder's own class calls divergent, and its half-rate the
+    relative motion's normal component at the cell, halved, not at the own-ridge transform's
+    source; distances run along great circles to seed bisectors, which may belong to plates that
+    are not neighbours, not along paths over the plate's own cells; and since each of its plates
+    has one crust, so that the ruling's same-plate margins would give none, the margin is the
+    nearest bisector with a continental plate that does not converge with this one. Its floor is
+    old (median about 130 Myr), so GlobSed's drape freezes most of it at H₀ ÷ 2 within 5–20 Myr:
+    only some 5% keeps undraped hills. The test therefore classes the floor by its amplitude,
+    against the ruling's three floors: hills at a ≥ 1 (the slow ridges', 1.71 undraped), draped
+    hills at 0.2 < a < 1 (the fast ridges' and the frozen drape, 0.48) and plains at a ≤ 0.2:
+    36.6%, 49.6% and 13.8% of its oceanic cells. Its ⟨a²⟩ as ruled, the mean square of the
+    interpolated amplitude at the variance test's area-uniform points, is 0.594 (T5's 0.74; its
+    cells' unweighted mean is 0.594 too, 0.693 over its oceanic cells); Mars-like 0.934, Moon-like
+    0.946 and Ceres-like 1. The 5% variance test holds on all four (ratios 1.0007, 1.0055, 1.0017
+    and 0.9902).
+  - _The slopes._ `the_reference_style_s_slopes_are_the_ruling_s` samples the reference style's
+    adirectional RMS slope over 1, 10 and 100 m from 2 × 10⁴ points a body, atan(√2 ν(b) ÷ b):
+    Earth-like 17.67° / 15.45° / 11.64° (the ruling's 18.0 / 15.6 / 12.0), Mars-like 5.42 / 4.75 /
+    3.55, Moon-like 5.48 / 4.74 / 3.53, Ceres-like 5.34 / 4.72 / 3.51 (each 5.5 / 4.8 / 3.6), and
+    an ice-rich Europa 14.40 / 10.08 / 5.48 (14.7 / 10.2 / 5.6). Each tangent is held within 5% of
+    the ruling's (its 0.1° rounding is 1.4% at 3.6°, and its model interpolates the noise's
+    structure function linearly between lags), the 5% at least 3.29 standard errors. A collision
+    belt's full style measures 52.3° / 47.1° / 37.7°, against the ruling's 39.0 / 35.0 / 28.1,
+    which scale the plain noise's slopes by the amplitude: the ridged term is steeper than the
+    plain one at the same RMS height. Recorded and asserted only to exceed the reference; for T8's
+    closed form and R10's cliff fractions, for "main".
+  - _Tests otherwise._ T5's single-law tests run on a law whose break is at degree 1; the broken
+    law's closed forms against direct sums to 10⁻¹¹ for (2.0, 3.0) and (1.8, 2.6), breaks at 300,
+    300.4, 1 and 20,015.1, bands below, across and above; continuity at the break to 10⁻¹²; the
+    four worlds' V₁, local RMS and first and finest octaves against the ruling's table (Earth-like
+    2.253 × 10⁷ m², 200.0 m, 142.4 m, 9.0 cm), a Europa's V₁ and local RMS, a zero anchor and a
+    body under the break; the finest octave's bound is 1.980 m (the ruling's 1.97, from the rounded
+    9.0 cm). The gradient test's tolerance is now 10⁻⁵ of the larger of the gradient's magnitude
+    and the sum of the octaves': a difference errs in proportion to each octave's own slope (the
+    noise is C² at its lattice planes), which the broken law's centimetre finest octaves made
+    visible where the octaves' slopes cancel to a hundredth. The sea floor's amplitude is checked
+    against the ruled law, bit for bit, at every pair of codes on the ramp. The styles test is
+    split in three (styles, arcs, every style against its codes) and the forms' test in two, for
+    Clippy's 100 lines. Five new `should_panic` tests (`degree_variance` twice, `anchored` three
+    times). As T5 did, the follow-up ran the crate's whole suite,
+    `cargo test -p hyperion-surface --features testing`, since the acceptance filter misses the
+    codes, the codec, the goldens and the panics, on `rendering-and-planets` at `f3c6159d` with
+    T6.a: 203 library tests (11 slow ignored), the goldens and 54 panics; `just _browser prepare`
+    lists the surface crate's 272 tests on the browser target, as natively; and the sim's
+    `planetary::surface` tests (31) pass.
+  - _The goldens_ (Generator version): `payloads.golden` re-blessed at 21, `codes.golden` extended
+    by both nibbles' 16 codes, no version bumped. Each single-block payload grew by the header's
+    16 B and 1 B a cell: Moon-like 862,458 → 887,050 (24,576 cells), Ceres-like 218,670 → 224,830
+    (6,144), Flat 848,076 → 872,668 and OneCrater 848,442 → 873,034 (24,576), the Mars-like
+    region 86,559 → 88,876 (2,301) and its delta 22,155 → 22,733 (562, decoded). The Earth-like
+    payload is 13,961,471 B in 14 blocks (13,567,743 in 13), Mars-like 3,512,154 in 4, and the
+    Moon-like split at 48 KiB 949,134 in 20 (921,718 in 19): their blocks split anew.
+  - _For "main"_: the belt's slopes above; the Earth-like world's ⟨a²⟩, 0.594, under T12.e's
+    0.6–1.2 for the reference Earth (a property of this world's old floor and few margins); the
+    `Total` refusal added beyond the ruling's; and the two shapes, a closed set for the composition
+    audit (sulphur, salt or organic crusts have none). From the science check: item 5's H₀ law
+    gives 223 m at a half-rate of 14 mm a⁻¹, not the 232 m the ruling quotes (it reaches 232 m at
+    12; Goff, Smith and Marks 2004's Table 2 has 235.8 m at a full 28), which T12.a's 30% band
+    holds either way, while `H_REF`'s calibration keeps the ruling's measured H of 232 m on the
+    slow ridge's flank; and Europa's long-wavelength roughness is described two ways in the
+    ruling, limb β about 2 at 10–60 km (item 2) and H about 0.3 to 70 km (item 3, β 1.6), with
+    Schenk and Nimmo 2017's Fig. 1 reading H about 0.2 over 12–630 km. Neither moves the ruled
+    β₁ 1.8 or the code. The science check could not see Perron et al. 2008's ¶36 or Goff 2020's ν
+    in their sources, both the ruling's readings.
+  - _For T8._ `structure_function` and `unresolved_rms` read the law through `degree_variance`;
+    the ruling's two slope tests; the belt's ridged term needs its own structure function in the
+    closed form. _For T9:_ the height goldens are first written on the broken law. _For T12.a:_
+    `quantise_hill_relief`, `quantise_ponded_sediment` and `pack_seafloor`. _For T12.e:_
+    `BandSpectrum::anchored` with `SpectrumShape` and the `STRUCTURAL_RMS_*` anchors (the mobile
+    lid's times T12.b's factor), and `ReliefStyle::from_codes` on its quantised codes.
+- **Adjacent findings of `decision-r09-t5.md`** (2026-10-10; recorded there, not ruled, each for
+  the task it names).
+  - _T7.b's equilibrium craters must be degraded._ Fresh shapes at Trask's saturation give absurd
+    metre-scale slopes: the ruling's rough estimate is tens of degrees at 10 m, against the lunar
+    highlands' 9–10°. The plan's only degradation is the rim fillet's √(2κt), and it gives no
+    diffusivity κ to calibrate against; the saturation cap and the diffusive age must agree, since
+    equilibrium craters are mostly degraded. T7.b chooses κ, with Fassett and Thomson 2014's lunar
+    5.5 m² Myr⁻¹ (from memory, to verify), and calibrates it against Rosenburg et al. 2011's 17 m
+    slopes, Cai and Fa 2020's 4–100 m slopes and LOLA's structure function at 1.9 and 7.6 km (171
+    and 546 m). T8's whole-function slope test enforces it: at 100 m the structural share gives the
+    Moon's highlands 3.6° of their 8.5°, and the rest is the craters'.
+  - _A province gets the body's crater density._ Design note 13 reads one density per body, so the
+    maria would be as cratered as the highlands, and T8's maria band could fail on craters alone.
+    The lean of "Physics leans still to rule" (regional ages from the centre cell where the search
+    stays inside the margin) is the lever.
+  - _T6.b's network should end at channel heads._ The land's spectral rollover at 150–250 m is the
+    first-order valley spacing (Perron et al. 2008 ¶36, ¶44–45). Channel levels finer than the
+    channel head (a drainage area of about 10⁴–10⁵ m²) over-dissect hillslopes that are smooth on
+    real land, so T6.b's level cut should respect it, whatever its width cut.
+  - _Abyssal hills are lineated parallel to their ridge_ (aspect 2–5, Goff's anisotropic von
+    Kármán). The isotropic noise cannot show it; a fabric azimuth would be another cell field, for
+    R10's re-validation.
+  - _R10's readouts_ (`structure_function`, `unresolved_rms`, `SLOPE_BASELINES`) read the broken
+    law through `BandSpectrum::degree_variance`, for R10's re-validation. The broken law also moves
+    R10's cliff fractions: about a third of a belt above 40° at 2 m, none on an interior.
+  - _Mars's sedimented northern plains_ (Aharonson et al. 2001's diffusive smoothing, β 1.4 at
+    20–200 km) need the `seafloor` byte's reserved low nibble on land. Meanwhile, Phoenix-like
+    plains read as lid, at 5.5° from the structural share alone at 1 m against the observed
+    1.8–2.8°. T12.c or T14 may fill the nibble, under the layout rule.
+  - _The T5 lane's worktree was mid-merge_ when the ruling was read. The follow-up merged T5's
+    branch afresh and kept both T4's "_Applied 2026-10-09_" sentence and T5's deviations.

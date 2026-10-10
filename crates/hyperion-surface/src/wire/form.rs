@@ -23,7 +23,7 @@ use crate::field::{
 };
 use crate::spheroid::Spheroid;
 use crate::substance_key::SubstanceKey;
-use crate::synth::BandSpectrum;
+use crate::synth::{BandSpectrum, BandSpectrumParts};
 
 /// A value with a wire form, written little-endian and read back.
 pub(super) trait Wire: Sized {
@@ -65,8 +65,8 @@ macro_rules! wire_table {
     };
 }
 
-// One cell's synthesis record (Design note 17's 21 bytes and the substance byte), in its declared
-// order.
+// One cell's synthesis record (Design note 17's 21 bytes, the substance byte and the sea floor's),
+// in its declared order.
 wire_table!(fixed SynthesisCell {
     elevation_mm: i32,
     boundary_distance_km: i16,
@@ -82,6 +82,7 @@ wire_table!(fixed SynthesisCell {
     substances: u8,
     class: SurfaceClass,
     crater_state: u8,
+    seafloor: u8,
 });
 
 // One climate record (Design note 17's 50 bytes), in its declared order.
@@ -351,16 +352,32 @@ impl FixedWire for BodyRef {
 }
 
 impl Wire for BandSpectrum {
-    /// The exponent β, then the degree-1 variance V₁.
+    /// The exponent β₁, the degree-1 variance V₁, the break degree `l_b` and the small-scale
+    /// exponent β₂, four `f64`.
     fn put(&self, out: &mut Vec<u8>) {
         self.exponent().put(out);
         self.unit_degree_variance().put(out);
+        self.break_degree().put(out);
+        self.small_scale_exponent().put(out);
     }
 
     fn read(r: &mut Reader<'_>) -> Result<Self, DecodeBlockError> {
         let exponent = f64::read(r)?;
-        Self::new(exponent, SquareMetres::read(r)?).map_err(DecodeBlockError::Spectrum)
+        let unit_degree_variance = SquareMetres::read(r)?;
+        let break_degree = f64::read(r)?;
+        let small_scale_exponent = f64::read(r)?;
+        Self::new(BandSpectrumParts {
+            exponent,
+            unit_degree_variance,
+            break_degree,
+            small_scale_exponent,
+        })
+        .map_err(DecodeBlockError::Spectrum)
     }
+}
+
+impl FixedWire for BandSpectrum {
+    const BYTES: usize = 32;
 }
 
 impl Wire for CraterParams {
@@ -539,12 +556,14 @@ mod tests {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// The records' strides are Design note 17's: 22 bytes a synthesis record (its 21 and the
-    /// substance byte) and 50 a climate record, and a palette entry is 59; a field added to any
-    /// moves them, and the payload's size with them.
+    /// The records' strides are Design note 17's: 23 bytes a synthesis record (its 21, the
+    /// substance byte and the sea floor's) and 50 a climate record, and a palette entry is 59; the
+    /// header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field added to any moves them,
+    /// and the payload's size with them.
     #[test]
     fn wire_records_have_design_note_seventeens_strides() {
-        assert_eq!(SynthesisCell::BYTES, 22);
+        assert_eq!(SynthesisCell::BYTES, 23);
+        assert_eq!(BandSpectrum::BYTES, 32);
         assert_eq!(ClimateCell::BYTES, 50);
         assert_eq!(Wind::BYTES, 2);
         assert_eq!(Spheroid::BYTES, 16);
@@ -552,21 +571,73 @@ mod tests {
         assert_eq!(PaletteEntry::BYTES, 59);
     }
 
+    /// Asserts that `value` comes back from its bytes to the bit, reading every byte it wrote.
+    fn round_trip<T: Wire + PartialEq + std::fmt::Debug>(value: &T) {
+        let mut out = Vec::new();
+        value.put(&mut out);
+        let mut r = Reader::new(&out);
+        let back = T::read(&mut r).unwrap();
+        assert_eq!(&back, value);
+        assert!(r.is_empty(), "{value:?} left bytes");
+        let mut again = Vec::new();
+        back.put(&mut again);
+        assert_eq!(again, out, "{value:?} came back with other bits");
+    }
+
+    /// The spectrum's four parts come back to the bit, a break at a non-integer degree and at
+    /// degree 1 included, and each new part out of its range is refused
+    /// (`decision-r09-t5.md` item 2).
+    #[test]
+    fn wire_spectrum_reads_back_its_break() {
+        let earth = BandSpectrum::anchored(
+            crate::synth::SpectrumShape::SILICATE,
+            Metres::new(6.371e6),
+            crate::synth::STRUCTURAL_RMS_MOBILE_LID,
+        );
+        round_trip(&earth);
+        let parts = BandSpectrumParts {
+            exponent: 1.8,
+            unit_degree_variance: SquareMetres::new(0.0),
+            break_degree: 1.0,
+            small_scale_exponent: 2.6,
+        };
+        round_trip(&BandSpectrum::new(parts).unwrap());
+        let spectrum = |p: BandSpectrumParts| {
+            let mut out = Vec::new();
+            for v in [
+                p.exponent,
+                p.unit_degree_variance.value(),
+                p.break_degree,
+                p.small_scale_exponent,
+            ] {
+                v.put(&mut out);
+            }
+            BandSpectrum::read(&mut Reader::new(&out))
+        };
+        assert_eq!(
+            spectrum(BandSpectrumParts {
+                break_degree: 0.5,
+                ..parts
+            }),
+            Err(DecodeBlockError::Spectrum(
+                crate::synth::BuildBandSpectrumError::BreakDegree(0.5)
+            ))
+        );
+        assert_eq!(
+            spectrum(BandSpectrumParts {
+                small_scale_exponent: 1.0,
+                ..parts
+            }),
+            Err(DecodeBlockError::Spectrum(
+                crate::synth::BuildBandSpectrumError::SmallScaleExponent(1.0)
+            ))
+        );
+    }
+
     /// Every value of the forms comes back from its bytes to the bit, a −0.0 included, and an
     /// unknown code or tag is refused.
     #[test]
     fn wire_forms_read_back_what_they_write() {
-        fn round_trip<T: Wire + PartialEq + std::fmt::Debug>(value: &T) {
-            let mut out = Vec::new();
-            value.put(&mut out);
-            let mut r = Reader::new(&out);
-            let back = T::read(&mut r).unwrap();
-            assert_eq!(&back, value);
-            assert!(r.is_empty(), "{value:?} left bytes");
-            let mut again = Vec::new();
-            back.put(&mut again);
-            assert_eq!(again, out, "{value:?} came back with other bits");
-        }
         round_trip(&-0.0_f64);
         round_trip(&f64::MIN_POSITIVE);
         round_trip(&Some(Metres::new(-3.5)));

@@ -21,24 +21,31 @@
 //!
 //! # The spectrum
 //!
-//! The body's [`BandSpectrum`] is a degree variance V(l) = V₁ l^−β. Level m resolves the degrees
-//! below its Nyquist degree, [`nyquist_degree`], `l_N(m)` = ⌈π R ÷ `Δ̄_m`⌉ = ⌈√(3π ÷ 2) 2^m⌉ with
-//! `Δ̄_m` the level's mean cell width √(4πR² ÷ (6 · 4^m)) (Design note 4's measure), the degree
-//! whose wavelength 2πR ÷ l is two mean cells. Octave m carries the band between level m − 1's
-//! Nyquist degree and its own, [`BandSpectrum::level_variance`], so its RMS height is `σ_m` =
-//! √(Σ V(l)) over `l_N(m − 1)` ≤ l < `l_N(m)` ([`octave_rms`]). The octaves of a body together
-//! carry every degree from the coarse cell's Nyquist degree to the finest octave's, and
-//! [`local_variance`] is the closed form of that variance to every degree, the expected variance
-//! below the coarse cell at the reference style.
+//! The body's [`BandSpectrum`] is a degree variance that breaks once, continuous at the break
+//! degree `l_b` (`decision-r09-t5.md` item 2): V(l) = V₁ l^−β₁ for l < `l_b`, and
+//! V₁ `l_b`^(β₂−β₁) l^−β₂ from it. Level m resolves the degrees below its Nyquist degree,
+//! [`nyquist_degree`], `l_N(m)` = ⌈π R ÷ `Δ̄_m`⌉ = ⌈√(3π ÷ 2) 2^m⌉ with `Δ̄_m` the level's mean
+//! cell width √(4πR² ÷ (6 · 4^m)) (Design note 4's measure), the degree whose wavelength 2πR ÷ l
+//! is two mean cells. Octave m carries the band between level m − 1's Nyquist degree and its own,
+//! [`BandSpectrum::level_variance`], so its RMS height is `σ_m` = √(Σ V(l)) over
+//! `l_N(m − 1)` ≤ l < `l_N(m)` ([`octave_rms`]). The octaves of a body together carry every degree
+//! from the coarse cell's Nyquist degree to the finest octave's, and [`local_variance`] is the
+//! closed form of that variance to every degree, the expected variance below the coarse cell at
+//! the reference style. Every sum over degrees is a sum of the two segments' power-law tails,
+//! T(β, x) = Σ l^−β over l ≥ x: with L\* = ⌈`l_b`⌉, the second segment's first degree, the
+//! variance from degree d is V₁ [T(β₁, d) − T(β₁, L\*) + `l_b`^(β₂−β₁) T(β₂, L\*)] for d < L\*,
+//! and V₁ `l_b`^(β₂−β₁) T(β₂, d) from L\* ([`BandSpectrum::variance_from_degree`]).
 //!
 //! # The styles
 //!
-//! Each cell has a [`ReliefStyle`] from its crust and its nearest plate boundary (the brainstorm's
-//! "ridged multifractal for a mountain belt, low-amplitude for an abyssal plain, domain-warped
-//! where a boundary is oblique"): an amplitude factor a, a belt weight b and a shear weight s,
-//! each interpolated over the sphere by R09.T4's spline ([`interp::interpolate`]), so that a style
-//! changes smoothly across cells and the relief stays C¹ wherever the noise is. Octave m's
-//! contribution is a `σ_m` `t_m`, with
+//! Each cell has a [`ReliefStyle`] from its crust, its nearest plate boundary and its sea floor
+//! (the brainstorm's "ridged multifractal for a mountain belt, low-amplitude for an abyssal plain,
+//! domain-warped where a boundary is oblique"): an amplitude factor a, a belt weight b and a shear
+//! weight s, each interpolated over the sphere by R09.T4's spline ([`interp::interpolate`]), so
+//! that a style changes smoothly across cells and the relief stays C¹ wherever the noise is. The
+//! amplitudes are absolute ratios to the body class's reference ground, whose law the spectrum
+//! is, so a world with more mountain belts is rougher and one with more abyssal plain smoother
+//! (`decision-r09-t5.md` item 1). Octave m's contribution is a `σ_m` `t_m`, with
 //!
 //! > `t_m` = cos θ · `n̂_m` + sin θ · `r̃_m`,  θ = (π ÷ 2) b,
 //!
@@ -88,7 +95,10 @@ use hyperion_base::units::{Metres, SquareMetres};
 use super::interp::{self, CellValues, ReadCellError};
 use super::{BandSpectrum, SynthCache};
 use crate::cube::PatchKey;
-use crate::field::{BoundaryKind, CoarseLevel, Crust, FieldHeader, FieldView, SynthesisCell};
+use crate::field::{
+    BoundaryKind, CoarseLevel, Crust, FieldHeader, FieldView, SynthesisCell, hill_relief_of,
+    ponded_sediment_of,
+};
 use crate::geometry::BAND_LIMIT_M;
 use crate::height::HeightSample;
 use crate::noise::{
@@ -228,26 +238,27 @@ pub fn octave_bound(spectrum: &BandSpectrum, m: u8) -> Metres {
     Metres::new(MAX_AMPLITUDE * octave_rms(spectrum, m).value() * t_max())
 }
 
-/// The expected variance of the relief finer than a field's coarse cells, at the reference style
-/// (amplitude 1): V₁ Σ l^−β over every degree from the coarse level's Nyquist degree up, in closed
-/// form ([`BandSpectrum::variance_from_degree`]); the sum of every octave's band (Design note 7).
+/// The expected variance of the structural relief finer than a field's coarse cells, at the
+/// reference style (amplitude 1): Σ V(l) over every degree from the coarse level's Nyquist degree
+/// up, in closed form ([`BandSpectrum::variance_from_degree`]); the sum of every octave's band
+/// (Design note 7).
 ///
-/// The realised variance over a body is this times the area-weighted mean square of the cells'
-/// amplitudes ([`ReliefStyle::amplitude`]), which the styles set: 1 on a body whose cells all have
-/// the reference style, 0.74 on the Earth-like synthetic world and 0.95 on the Moon-like one.
-/// Who accounts for it is open: the lean, asked of "main" and not yet ruled, is that the coarse
-/// pass (R09.T12.e), which sets the spectrum, scales V₁ by the inverse of that mean square (the
-/// plan's Risks, "Deviations in T5, as built"). The octaves stop at the band limit, which leaves
-/// out a share of about (`l_N(L)` ÷ `l_N(finest)`)^(β − 1) = 2^−(finest − L)(β − 1) of it: under
-/// 10⁻³ at β = 1.9 on the synthetic worlds, and 1.8 × 10⁻³ on a Ceres (levels 5 to 18) at
-/// β = 1.7.
+/// It is the reference style's. The styles' amplitudes are absolute ratios to the body class's
+/// reference ground, so the realised structural share is ⟨a²⟩ times this, ⟨a²⟩ the solid-angle
+/// mean of the interpolated squared amplitude ([`ReliefStyle::amplitude`]): 1 on a body whose
+/// cells all have the reference style, less on one with more plain than belt. Nothing normalises
+/// it away, so a world with more belts is rougher: the coarse pass (R09.T12.e) books ⟨a²⟩ times
+/// this in `σ_h`'s budget, with ⟨a²⟩ from its own quadrature of the interpolated amplitude
+/// (`decision-r09-t5.md` item 1). The octaves stop at the band limit, far below the break, which
+/// leaves out V₁ `l_b`^(β₂−β₁) T(β₂, `l_N(finest)`) of it: under 10⁻⁶ of it on the synthetic
+/// worlds.
 #[must_use]
 pub fn local_variance(spectrum: &BandSpectrum, level: CoarseLevel) -> SquareMetres {
     spectrum.variance_from_degree(nyquist_degree(level.get()))
 }
 
 /// The relief's variance in wavelengths shorter than `finer_than` at `cell`, from the cell's own
-/// style: a² V₁ Σ l^−β over the octaves' degrees whose wavelength 2πR ÷ l is shorter, from the
+/// style: a² Σ V(l) over the octaves' degrees whose wavelength 2πR ÷ l is shorter, from the
 /// coarse level's Nyquist degree to the finest octave's; `None` where `field` does not hold the
 /// cell (Design note 18).
 ///
@@ -388,24 +399,41 @@ pub const INTERIOR_AMPLITUDE: f64 = 0.12;
 /// the plan's own, between the interiors' and the belts'.
 pub const ACTIVE_AMPLITUDE: f64 = 1.0;
 
-/// The amplitude factor of oceanic crust near a boundary, young abyssal hills: 1.5. Multibeam
-/// relief in 10 km windows is 64–79 m on the fast-spreading East Pacific Rise's flank and 155–185 m
-/// on the slow-spreading Mid-Atlantic Ridge's, against about 80 m for Earth's corrected global mean
-/// at that scale (measured by R09.T5's science check on GMRT at 61 m, the grid of Ryan et al.
-/// 2009, G³ 10, Q03014, doi:10.1029/2008GC002332), so 0.8 to 2.3 with the spreading rate, which
-/// the coarse field does not carry; 1.5 lies near the middle. Goff 1991 (JGR 96, 21713,
-/// doi:10.1029/91JB02275) finds the slowest spreading the roughest. Medium confidence.
-pub const HILLS_AMPLITUDE: f64 = 1.5;
+/// The draped abyssal-hill relief whose amplitude factor is the reference style's 1: 95 m
+/// (`decision-r09-t5.md` item 5).
+///
+/// Oceanic crust's amplitude is `a_h` = min((H ÷ `H_REF`)^0.6, [`BELT_AMPLITUDE`]) of its hill
+/// relief H ([`SynthesisCell::hill_relief`]): the exponent ([`HILL_AMPLITUDE_EXPONENT`]) and the
+/// reference reconcile two of GMRT's measures of the floor against Earth's global mean (the grid
+/// of Ryan et al. 2009, G³ 10, Q03014, doi:10.1029/2008GC002332, at 61 m; R09.T5's science check
+/// and the ruling's). On the slow-spreading Mid-Atlantic Ridge's flank, H 232 m, the floor
+/// measures 2.3 of the reference in 10 km windows and 1.35 in its 122 m slopes, and this gives
+/// 1.71; on the fast East Pacific Rise's, H 55–62 m, 0.8 and 0.78, and this gives 0.72–0.77; on the
+/// old fast Pacific floor, draped to 28 m, 0.6 in its 122 m slopes, and this gives 0.48. Goff 1991
+/// (JGR 96, 21713, doi:10.1029/91JB02275) finds the slowest spreading the roughest. A style per
+/// band is the lever if R10 finds the slow floor's 10 km relief short. Medium confidence.
+pub const H_REF: Metres = Metres::new(95.0);
 
-/// The amplitude factor of an abyssal plain, oceanic crust far from every boundary: 0.1. The
-/// interiors of the Hatteras, Madeira, Argentine and Bengal plains measure 6–14 m (median) and
-/// 17–23 m (mean) in 35 km windows of Earth2014, 0.04–0.14 of the global mean, and the Hatteras
-/// plain's median gradient over 10 km of GMRT is 1:1,436 (both measured by R09.T5's science
-/// check). Medium confidence. A plain needs a turbidite supply from a margin or a fan, which the
-/// coarse field does not carry, so every old floor is taken for plain here, where on Earth old
-/// floor far from land is sediment-draped hills: the older Mid-Atlantic Ridge flank measures about
-/// 0.65 of the young one on GMRT (the check's estimate; the plan's Risks).
+/// The exponent of oceanic crust's amplitude in its hill relief, 0.6 ([`H_REF`]).
+pub const HILL_AMPLITUDE_EXPONENT: f64 = 0.6;
+
+/// The amplitude factor of an abyssal plain, sea floor whose hills its ponded turbidites bury:
+/// 0.1. The interiors of the Hatteras, Madeira, Argentine and Bengal plains measure 6–14 m
+/// (median) and 17–23 m (mean) in 35 km windows of Earth2014, 0.04–0.14 of the global mean, and
+/// the Hatteras plain's median gradient over 10 km of GMRT is 1:1,436 (both measured by R09.T5's
+/// science check), within the usual "gradient under 1:1,000" (Heezen, Tharp and Ewing 1959, GSA
+/// Spec. Pap. 65). A plain needs a turbidite supply, the ponded sediment of the cell's sea floor
+/// ([`SynthesisCell::ponded_sediment`]), and the old floor far from a margin keeps its draped
+/// hills. Medium confidence.
 pub const PLAIN_AMPLITUDE: f64 = 0.1;
+
+/// Ponded sediment buries hills from half their relief H to three times it: oceanic crust's
+/// amplitude is `a_h`^(1 − t) [`PLAIN_AMPLITUDE`]^t with t = clamp(ln(`S_t` ÷ (½ H)) ÷ ln 6, 0, 1)
+/// (`decision-r09-t5.md` item 5), harmless below H ÷ 2 and a plain complete at 3H, the wedge's
+/// surface above the hills' highest crests: the ruling's own thresholds, not calibrated; compare
+/// Goff 2010 (JGR 115, B12104, doi:10.1029/2010JB007867, ¶36 and ¶43), where hills stay visible
+/// under pelagic drape many times their relief. Low confidence.
+const PONDING: (f64, f64) = (0.5, 3.0);
 
 /// The amplitude factor of a stagnant lid's volcanic plains, over its own crust's 1: 0.25. The
 /// lunar maria's relief is 0.17–0.27 of the highlands' in 9–34 km windows of LOLA's 16 ppd grid
@@ -416,7 +444,8 @@ pub const PLAIN_AMPLITUDE: f64 = 0.1;
 /// doi:10.1029/2000JE001364). The windows measured by R09.T5's science check. Medium confidence.
 pub const PROVINCE_AMPLITUDE: f64 = 0.25;
 
-/// The largest amplitude factor any style has: the octaves' bounds use it.
+/// The largest amplitude factor any style has: the octaves' bounds use it. The sea floor's hills
+/// are capped at it.
 pub const MAX_AMPLITUDE: f64 = BELT_AMPLITUDE;
 
 /// A collision belt's weight, full within 100 km of the boundary on either side and zero beyond
@@ -425,27 +454,35 @@ pub const MAX_AMPLITUDE: f64 = BELT_AMPLITUDE;
 /// Earth2014).
 const COLLISION_KM: (f64, f64) = (100.0, 250.0);
 
-/// A subduction margin's arc and cordillera on the overriding plate, full weight to 200 km behind
-/// the boundary and zero beyond 350 km: a forearc is typically 200–250 km wide, the arc at its back
-/// (Bird 2003, G³ 4, 1027, doi:10.1029/2001GC000252, ¶105, p. 39: "200–250 km is more typical"),
-/// and the Andes' rough belt is 225–255 km across (R09.T5's science check on Earth2014). The
-/// forearc takes the belt's full weight too: the coarse field has no forearc of its own, and its
-/// slope down to the trench is coarse relief the coarse pass draws (T12.b).
-const ARC_KM: (f64, f64) = (200.0, 350.0);
+/// A subduction margin's island arc on an oceanic overriding plate, km behind the trench: zero to
+/// 90, rising to full weight at 140, full to 250 and gone by 330 (`decision-r09-t5.md` item 6).
+///
+/// Syracuse and Abers 2006 (G³ 7, Q05017, doi:10.1029/2005GC001045, Table S2a's 527 front
+/// volcanoes, classified by arc segment in the ruling) put the volcanic front 190 km behind the
+/// trench under an oceanic overriding plate, interquartile 170–220 km and 10–90% 140–250 km; the
+/// arc behind it is 30–100 km wide (60 km typical). The ramp's foot at 90 km lies below the
+/// fronts' 10%, and its fall from 250 to 330 km covers the arc's width behind the latest fronts.
+/// The forearc between the trench and the ramp keeps its crust's own style, the sea floor here.
+const ARC_OCEANIC_KM: (f64, f64, f64, f64) = (90.0, 140.0, 250.0, 330.0);
+
+/// A subduction margin's arc and cordillera on a continental overriding plate, km behind the
+/// trench: zero to 130, rising to full weight at 180, full to 450 and gone by 600
+/// (`decision-r09-t5.md` item 6).
+///
+/// Syracuse and Abers 2006 (G³ 7, Q05017, Table S2a, as [`ARC_OCEANIC_KM`]) put the volcanic front
+/// 260 km behind the trench under a continental overriding plate, interquartile 205–295 km and
+/// 10–90% 180–330 km, and the arc 100–250 km wide from its front-most to its rear-most volcano
+/// (175 km typical); the band reaches past it over the cordillera behind, as the Andes' rough
+/// belt, 225–255 km across (R09.T5's science check on Earth2014). Bird 2003's "200–250 km is more
+/// typical" (G³ 4, 1027, ¶105, p. 39) brackets the median of all fronts, 220 km. The forearc
+/// between the trench and the ramp keeps its crust's own style, the deformation zone here.
+const ARC_CONTINENTAL_KM: (f64, f64, f64, f64) = (130.0, 180.0, 450.0, 600.0);
 
 /// The diffuse deformation zone of continental crust about a boundary, full to 150 km and gone by
 /// 500 km: Bird 2003's thirteen orogens of PB2002 (0.937 sr, ¶116) are 500–1,400 km in mean width
 /// 2A ÷ P, as R09.T5's science check derived from their outlines, which suggests "strong within
 /// 150–250 km, tapering out to about 500 km".
 const ZONE_KM: (f64, f64) = (150.0, 500.0);
-
-/// Oceanic crust's young hills give way to plain from 500 km to 1,500 km from the nearest boundary
-/// of any kind: the plan's own, for floor some 21 to 64 Myr old at Earth's mean ridge half-rate of
-/// 23 mm a year (46.6 mm a year in full, Bird 2003, Table 3). Design note 7 dates the floor from
-/// its own plate's divergent boundary, not the nearest of any kind, which the coarse field does not
-/// carry, so old floor within 1,500 km of a trench or transform keeps hills here (the plan's
-/// Risks).
-const PLAIN_KM: (f64, f64) = (500.0, 1_500.0);
 
 /// A boundary's zone of distributed shear on continental crust, full to 50 km and gone by 100 km,
 /// half weight across a band 150 km wide (a continental transform system about 150 km across,
@@ -468,19 +505,63 @@ fn taper(x: f64, (full, zero): (f64, f64)) -> f64 {
     }
 }
 
+/// A trapezoid of quintic ramps in x: 0 at and below `rise`, rising to 1 at `from`, 1 to `to`,
+/// and falling to 0 at and beyond `fall`.
+#[must_use]
+fn band(x: f64, (rise, from, to, fall): (f64, f64, f64, f64)) -> f64 {
+    if x <= to {
+        1.0 - taper(x, (rise, from))
+    } else {
+        taper(x, (to, fall))
+    }
+}
+
+/// The amplitude factor of oceanic crust whose sea floor byte is `seafloor`
+/// ([`SynthesisCell::seafloor`]): `a_h`^(1 − t) [`PLAIN_AMPLITUDE`]^t, with `a_h` =
+/// min((H ÷ [`H_REF`])^0.6, [`BELT_AMPLITUDE`]) of the hill relief H and
+/// t = clamp(ln(2 `S_t` ÷ H) ÷ ln 6, 0, 1) of the ponded sediment `S_t` (`decision-r09-t5.md`
+/// item 5): the hills' own `a_h` to `S_t` = H ÷ 2, and a plain's from 3H. A byte that names no
+/// hills, which no oceanic cell of a field has (its record would be refused), is taken for a
+/// plain.
+#[must_use]
+fn seafloor_amplitude(seafloor: u8) -> f64 {
+    let Some(h) = hill_relief_of(seafloor) else {
+        return PLAIN_AMPLITUDE;
+    };
+    let h = h.value();
+    let hills = num::min(
+        math::powf(h / H_REF.value(), HILL_AMPLITUDE_EXPONENT),
+        BELT_AMPLITUDE,
+    );
+    let (onset, buried) = PONDING;
+    let ratio = ponded_sediment_of(seafloor).value() / h;
+    if ratio <= onset {
+        hills
+    } else if ratio >= buried {
+        PLAIN_AMPLITUDE
+    } else {
+        let t = math::ln(ratio / onset) / math::ln(buried / onset);
+        math::powf(hills, 1.0 - t) * math::powf(PLAIN_AMPLITUDE, t)
+    }
+}
+
 /// How a cell's relief is drawn: its amplitude factor, its mountain-belt weight and its shear
-/// weight, from its crust and its nearest plate boundary (see the module documentation).
+/// weight, from its crust, its nearest plate boundary and its sea floor (see the module
+/// documentation).
 ///
 /// The amplitude is the crust's, then lifted towards [`BELT_AMPLITUDE`] by the belt weight: a
 /// continental cell's runs from [`INTERIOR_AMPLITUDE`] far from every boundary to
-/// [`ACTIVE_AMPLITUDE`] within its deformation zone, an oceanic cell's from [`HILLS_AMPLITUDE`]
-/// near a boundary to [`PLAIN_AMPLITUDE`] far from all, a stagnant lid's is 1 and its provinces'
-/// [`PROVINCE_AMPLITUDE`]. The belt weight is 1 within a collision belt on either side and in a
-/// subduction margin's arc on the overriding plate (the positive side), and the shear weight is the
-/// boundary's obliquity within its shear zone. These are the plan's procedural reading of the
-/// brainstorm's three rules, with the amplitudes Earth's, the Moon's and Mars's measured relief
-/// gives (each constant's documentation); only their ratios matter on a body, since the coarse
-/// pass scales the spectrum (see [`local_variance`]).
+/// [`ACTIVE_AMPLITUDE`] within its deformation zone; an oceanic cell's is its sea floor's, from
+/// its hills' relief (about 1.7 on a slow ridge's floor, 0.7 on a fast one's) down to
+/// [`PLAIN_AMPLITUDE`] where ponded sediment buries them ([`H_REF`]); a stagnant lid's is 1 and its
+/// provinces' [`PROVINCE_AMPLITUDE`]. The belt weight is 1 within a collision belt on either side,
+/// and in a subduction margin's arc on the overriding plate (the positive side) in a band behind
+/// the trench set by the overriding crust ([`ARC_OCEANIC_KM`], [`ARC_CONTINENTAL_KM`]), the
+/// forearc before it keeping its crust's own style; the shear weight is the boundary's obliquity
+/// within its shear zone. These are the plan's procedural reading of the brainstorm's three
+/// rules, with the amplitudes Earth's, the Moon's and Mars's measured relief gives (each
+/// constant's documentation). They are absolute ratios to the body class's reference ground,
+/// which the spectrum anchors, and nothing normalises their mean (see [`local_variance`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReliefStyle {
     amplitude: f64,
@@ -496,14 +577,46 @@ impl ReliefStyle {
         shear: 0.0,
     };
 
-    /// The style of `cell`.
+    /// The style of `cell`: [`from_codes`](Self::from_codes) of its crust, boundary, boundary
+    /// distance and obliquity, and sea floor.
     #[must_use]
     pub fn of(cell: &SynthesisCell) -> Self {
-        let distance_km = cell.boundary_distance().map(|d| d.value() / 1e3);
-        let belt = match (cell.boundary, distance_km) {
+        Self::from_codes(
+            cell.crust,
+            cell.boundary,
+            cell.boundary_distance_km,
+            cell.boundary_obliquity,
+            cell.seafloor,
+        )
+    }
+
+    /// The style of a cell of crust `crust` whose nearest boundary is of kind `boundary`, at the
+    /// coded distance `boundary_distance_km` ([`SynthesisCell::boundary_distance_km`],
+    /// [`SynthesisCell::NO_BOUNDARY_KM`] for none) and obliquity `boundary_obliquity`
+    /// ([`SynthesisCell::boundary_obliquity`]), with the sea floor byte `seafloor`
+    /// ([`SynthesisCell::seafloor`]): the codes a cell stores, and exactly those
+    /// [`of`](Self::of) reads, so that the coarse pass (R09.T12.e), which holds no
+    /// [`SynthesisCell`] in the middle of the pass, takes the same style from its quantised codes.
+    #[must_use]
+    pub fn from_codes(
+        crust: Crust,
+        boundary: BoundaryKind,
+        boundary_distance_km: i16,
+        boundary_obliquity: u8,
+        seafloor: u8,
+    ) -> Self {
+        let distance_km = (boundary_distance_km != SynthesisCell::NO_BOUNDARY_KM)
+            .then(|| f64::from(boundary_distance_km));
+        // The arc's band is set by the overriding crust; a stagnant lid's crusts have no
+        // boundary, so only the first two arms are reached.
+        let arc = match crust {
+            Crust::Oceanic => ARC_OCEANIC_KM,
+            Crust::Continental | Crust::Lid | Crust::Province => ARC_CONTINENTAL_KM,
+        };
+        let belt = match (boundary, distance_km) {
             (BoundaryKind::Collision, Some(d)) => taper(d.abs(), COLLISION_KM),
             // The overriding plate is on the positive side of a subduction boundary.
-            (BoundaryKind::Subduction, Some(d)) if d >= 0.0 => taper(d, ARC_KM),
+            (BoundaryKind::Subduction, Some(d)) if d >= 0.0 => band(d, arc),
             (
                 BoundaryKind::Subduction
                 | BoundaryKind::Collision
@@ -513,12 +626,12 @@ impl ReliefStyle {
                 _,
             ) => 0.0,
         };
-        let obliquity = f64::from(cell.boundary_obliquity) / 255.0;
-        let shear_zone = match cell.crust {
+        let obliquity = f64::from(boundary_obliquity) / 255.0;
+        let shear_zone = match crust {
             Crust::Oceanic => SHEAR_KM[1],
             Crust::Continental | Crust::Lid | Crust::Province => SHEAR_KM[0],
         };
-        let shear = match (cell.boundary, distance_km) {
+        let shear = match (boundary, distance_km) {
             (
                 BoundaryKind::Subduction
                 | BoundaryKind::Collision
@@ -536,13 +649,11 @@ impl ReliefStyle {
             ) => 0.0,
         };
         let near = |zone| distance_km.map_or(0.0, |d| taper(d.abs(), zone));
-        let crust = match cell.crust {
+        let crust = match crust {
             Crust::Continental => {
                 INTERIOR_AMPLITUDE + (ACTIVE_AMPLITUDE - INTERIOR_AMPLITUDE) * near(ZONE_KM)
             }
-            Crust::Oceanic => {
-                PLAIN_AMPLITUDE + (HILLS_AMPLITUDE - PLAIN_AMPLITUDE) * near(PLAIN_KM)
-            }
+            Crust::Oceanic => seafloor_amplitude(seafloor),
             Crust::Lid => 1.0,
             Crust::Province => PROVINCE_AMPLITUDE,
         };
@@ -1035,24 +1146,37 @@ impl Relief {
 /// for β up to 4, and far less at the relief's degrees, 70 and above.
 #[must_use]
 fn degree_tail(beta: f64, from: u64) -> f64 {
-    /// Degrees below this are summed term by term.
-    const DIRECT: u64 = 32;
     assert!(from >= 1, "degrees start at 1");
-    let mut sum = 0.0;
-    let mut l = from;
-    while l < DIRECT {
-        #[expect(clippy::cast_precision_loss, reason = "a degree below 32")]
-        let x = l as f64;
-        sum += math::powf(x, -beta);
-        l += 1;
-    }
+    tail_from(beta, degree_value(from))
+}
+
+/// The degree `degree` as an `f64`: exact below 2⁵³, which every degree a field reads is (its
+/// finest Nyquist degree is below 2⁴²).
+#[must_use]
+fn degree_value(degree: u64) -> f64 {
     #[expect(
         clippy::cast_precision_loss,
         reason = "the relief's degrees are below 2^42, exact in f64; a degree beyond 2^53 rounds to \
                   the nearest f64, an error under 2^-53 in x, which the tail, smooth in x, \
                   carries as a relative error of the same order"
     )]
-    let x = l as f64;
+    let x = degree as f64;
+    x
+}
+
+/// [`degree_tail`] from the degree `from`, an integer at least 1 held as an `f64` (as every `f64`
+/// from 2⁵³ up is), so that a break degree beyond `u64`'s range is not saturated.
+#[must_use]
+fn tail_from(beta: f64, from: f64) -> f64 {
+    /// Degrees below this are summed term by term.
+    const DIRECT: f64 = 32.0;
+    debug_assert!(from >= 1.0, "degrees start at 1, not {from}");
+    let mut sum = 0.0;
+    let mut x = from;
+    while x < DIRECT {
+        sum += math::powf(x, -beta);
+        x += 1.0;
+    }
     let b = beta;
     let p = math::powf(x, -beta);
     let x3 = x * x * x;
@@ -1063,23 +1187,41 @@ fn degree_tail(beta: f64, from: u64) -> f64 {
 }
 
 /// The relief's arithmetic of the spectrum: its variance over a range of degrees, and each level's
-/// band (see the module documentation).
+/// band, each a sum of the two segments' power-law tails (see the module documentation).
 impl BandSpectrum {
+    /// L\* = ⌈`l_b`⌉, the first integer degree of the second segment, an integer as an `f64`.
+    #[must_use]
+    fn second_segment_start(&self) -> f64 {
+        self.break_degree().ceil()
+    }
+
     /// The variance of every degree from `degree` up, Σ V(l) for l ≥ `degree`, square metres, in
-    /// closed form (an Euler–Maclaurin tail, exact to about 10⁻¹² relative).
+    /// closed form: V₁ [T(β₁, d) − T(β₁, L\*) + `l_b`^(β₂−β₁) T(β₂, L\*)] below L\* = ⌈`l_b`⌉ and
+    /// V₁ `l_b`^(β₂−β₁) T(β₂, d) from it, each T an Euler–Maclaurin tail exact to about 10⁻¹²
+    /// relative.
     ///
     /// # Panics
     ///
     /// If `degree` is 0.
     #[must_use]
     pub fn variance_from_degree(&self, degree: u64) -> SquareMetres {
-        SquareMetres::new(
-            self.unit_degree_variance().value() * degree_tail(self.exponent(), degree),
-        )
+        assert!(degree >= 1, "degrees start at 1");
+        let start = self.second_segment_start();
+        let small = self.small_scale_exponent();
+        let tail = if degree_value(degree) < start {
+            let large = self.exponent();
+            (degree_tail(large, degree) - tail_from(large, start))
+                + self.break_factor() * tail_from(small, start)
+        } else {
+            self.break_factor() * degree_tail(small, degree)
+        };
+        SquareMetres::new(self.unit_degree_variance().value() * tail)
     }
 
     /// The variance of the degrees from `from` up to but not including `to`, Σ V(l) for
-    /// `from` ≤ l < `to`, square metres.
+    /// `from` ≤ l < `to`, square metres: the difference of the two tails
+    /// ([`variance_from_degree`](Self::variance_from_degree)), taken segment by segment so that
+    /// the terms the two share cancel exactly rather than in rounding.
     ///
     /// # Panics
     ///
@@ -1090,8 +1232,17 @@ impl BandSpectrum {
             from <= to,
             "a band of degrees {from} to {to} runs backwards"
         );
-        let beta = self.exponent();
-        let band = degree_tail(beta, from) - degree_tail(beta, to);
+        let start = self.second_segment_start();
+        let large = self.exponent();
+        let small = self.small_scale_exponent();
+        let band = if degree_value(to) <= start {
+            degree_tail(large, from) - degree_tail(large, to)
+        } else if degree_value(from) >= start {
+            self.break_factor() * (degree_tail(small, from) - degree_tail(small, to))
+        } else {
+            (degree_tail(large, from) - tail_from(large, start))
+                + self.break_factor() * (tail_from(small, start) - degree_tail(small, to))
+        };
         SquareMetres::new(self.unit_degree_variance().value() * num::max(band, 0.0))
     }
 

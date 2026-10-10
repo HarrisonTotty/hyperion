@@ -39,7 +39,7 @@ pub mod relief;
 use hyperion_surface::field::{
     BoundaryKind, CoarseCrater, CoarseLevel, Crust, FlowDirection, SurfaceClass,
 };
-use hyperion_surface::synth::BandSpectrum;
+use hyperion_surface::synth::{BandSpectrum, SpectrumShape};
 
 use super::grid::CellGraph;
 use super::inputs::CoarseInputs;
@@ -159,6 +159,14 @@ pub struct CellState {
     pub class: SurfaceClass,
     /// The cell's crater state (R09.T15).
     pub crater_state: u8,
+    /// The draped abyssal-hill relief H of the cell's sea floor, positive, or `None` off oceanic
+    /// crust: R09.T12.a's, from its own ridge's half-rate and its age (`decision-r09-t5.md`
+    /// item 5); `None` until it runs.
+    pub hill_relief: Option<Metres>,
+    /// The thickness of the ponded (turbidite) sediment over the cell, non-negative: R09.T12.a's,
+    /// from its plate's passive margins (`decision-r09-t5.md` item 5); zero off oceanic crust and
+    /// until it runs.
+    pub ponded_sediment: Metres,
 }
 
 /// A month's 10 m wind: its mean speed and the direction its resultant blows towards, clockwise
@@ -258,6 +266,8 @@ impl Working {
             liquid_entry: None,
             class: SurfaceClass::UNCLASSIFIED,
             crater_state: 0,
+            hill_relief: None,
+            ponded_sediment: Metres::ZERO,
         };
         let climate = ClimateState {
             sea_level_temperature: pass.inputs().mean_surface_temperature(),
@@ -277,8 +287,13 @@ impl Working {
             craters: Vec::new(),
             sea_level: Metres::ZERO,
             lapse_rate_k_per_m: 0.0,
-            spectrum: BandSpectrum::new(BandSpectrum::DEFAULT_EXPONENT, SquareMetres::ZERO)
-                .expect("the default spectrum is valid"),
+            // A silicate crust's law anchored at zero, no relief finer than the cells, until
+            // R09.T12.e anchors the body's crust class (`decision-r09-t5.md` item 3).
+            spectrum: BandSpectrum::anchored(
+                SpectrumShape::SILICATE,
+                pass.inputs().radius(),
+                Metres::ZERO,
+            ),
             months: pass.inputs().months(),
             realised_sigma_h: Metres::ZERO,
             realised_relief: Metres::ZERO,

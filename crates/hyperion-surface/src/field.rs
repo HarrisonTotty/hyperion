@@ -98,6 +98,7 @@ pub use cells::{
     LogPrecipitation, LogSteepness, QuantiseValueError, SurfaceClass, SurfaceClassRange,
     SynthesisCell, Wind,
 };
+pub(crate) use cells::{hill_relief_of, ponded_sediment_of};
 pub use cover::{BuildCoverError, Cover, CoverRange, ResolutionCode};
 pub use crater::{CoarseCrater, Morphology};
 pub use header::{
@@ -393,6 +394,12 @@ pub enum BuildFieldError {
         /// The cell's index.
         cell: u32,
     },
+    /// A cell's sea floor byte breaks its rule: an oceanic cell names no hill relief, or a cell
+    /// of another crust names hill relief or ponded sediment.
+    Seafloor {
+        /// The cell's index.
+        cell: u32,
+    },
     /// A cell's substance byte names an entry past the header's palette.
     SubstanceIndex {
         /// The cell's index.
@@ -469,6 +476,11 @@ impl std::fmt::Display for BuildFieldError {
                 f,
                 "cell {cell} names a boundary without a distance, or a distance without one"
             ),
+            Self::Seafloor { cell } => write!(
+                f,
+                "cell {cell}'s sea floor byte names no hill relief on oceanic crust, or a sea \
+                 floor on another crust"
+            ),
             Self::SubstanceIndex { cell } => {
                 write!(f, "cell {cell} names a substance past the palette")
             }
@@ -527,7 +539,8 @@ impl CoarseField {
     /// # Errors
     ///
     /// [`BuildFieldError`] if the records are not one per cell, a record breaks a rule of its type
-    /// (water below the ground, a boundary without a distance, a month outside the year, or a
+    /// (water below the ground, a boundary without a distance, a sea floor byte with no hill
+    /// relief on oceanic crust or any sea floor on another crust, a month outside the year, or a
     /// one-month year with an anomaly) or of the header's palette (a substance past it or of
     /// another role, an ice share without an ice entry, water without a liquid entry), a crater is
     /// not a valid coarse crater of this field or is not after its predecessor, or the reaches are
@@ -644,11 +657,13 @@ impl CoarseField {
 }
 
 /// Checks the rules of the synthesis record of cell `cell`: its water surface is not below its
-/// ground, and it names a boundary kind exactly when it names a distance to one.
+/// ground, it names a boundary kind exactly when it names a distance to one, and its sea floor
+/// byte names hill relief exactly on oceanic crust and nothing on any other.
 ///
 /// # Errors
 ///
-/// [`BuildFieldError::WaterBelowGround`] or [`BuildFieldError::BoundaryWithoutDistance`].
+/// [`BuildFieldError::WaterBelowGround`], [`BuildFieldError::BoundaryWithoutDistance`] or
+/// [`BuildFieldError::Seafloor`], in that order of checking.
 pub(crate) fn check_synthesis_cell(
     cell: u32,
     record: &SynthesisCell,
@@ -659,6 +674,15 @@ pub(crate) fn check_synthesis_cell(
     let absent = record.boundary == BoundaryKind::Absent;
     if absent != (record.boundary_distance_km == SynthesisCell::NO_BOUNDARY_KM) {
         return Err(BuildFieldError::BoundaryWithoutDistance { cell });
+    }
+    let seafloor = match record.crust {
+        Crust::Oceanic => record.hill_relief().is_some(),
+        Crust::Continental | Crust::Lid | Crust::Province => {
+            record.seafloor == SynthesisCell::NO_SEAFLOOR
+        }
+    };
+    if !seafloor {
+        return Err(BuildFieldError::Seafloor { cell });
     }
     Ok(())
 }
@@ -1108,6 +1132,35 @@ mod tests {
             CoarseField::new(header.clone(), boundary, climate.clone(), vec![]),
             Err(BuildFieldError::BoundaryWithoutDistance { cell: 9 })
         );
+        // The flat world's lid has no sea floor: neither nibble may be set there, and an oceanic
+        // cell must name its hills, sediment or no sediment.
+        let seafloor = |cell: usize, crust: Crust, byte: u8| {
+            let mut records = synthesis.clone();
+            records[cell].crust = crust;
+            records[cell].seafloor = byte;
+            CoarseField::new(header.clone(), records, climate.clone(), vec![])
+        };
+        for (cell, byte) in [(11, 0x01), (12, 0x10), (13, 0xFF)] {
+            for crust in [Crust::Lid, Crust::Province, Crust::Continental] {
+                assert_eq!(
+                    seafloor(cell, crust, byte),
+                    Err(BuildFieldError::Seafloor {
+                        cell: u32::try_from(cell).unwrap()
+                    })
+                );
+            }
+        }
+        assert_eq!(
+            seafloor(14, Crust::Oceanic, 0x0F),
+            Err(BuildFieldError::Seafloor { cell: 14 })
+        );
+        assert_eq!(
+            seafloor(15, Crust::Oceanic, SynthesisCell::NO_SEAFLOOR),
+            Err(BuildFieldError::Seafloor { cell: 15 })
+        );
+        for byte in [0x10, 0x1F, 0xF0, 0xFF] {
+            assert!(seafloor(16, Crust::Oceanic, byte).is_ok(), "{byte:#04x}");
+        }
         // The flat world has a one-month year: a second month is outside it.
         let mut seasons = climate.clone();
         seasons[3].month_anomaly[1] = 2;

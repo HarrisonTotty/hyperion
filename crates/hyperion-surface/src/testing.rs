@@ -39,7 +39,8 @@ use crate::field::{
     SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
 };
 use crate::spheroid::Spheroid;
-use crate::synth::BandSpectrum;
+use crate::synth::relief::H_REF;
+use crate::synth::{BandSpectrum, SpectrumShape};
 
 /// A plate of a mobile-lid world: its seed, its crust and its motion.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +102,26 @@ impl ClimateSample {
     }
 }
 
+/// An oceanic cell's sea floor, in SI units, which the builder quantises into the cell's
+/// [`SynthesisCell::seafloor`] byte (`decision-r09-t5.md` item 5).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeafloorSample {
+    /// The draped abyssal-hill relief H: positive, since every oceanic cell has hills, however
+    /// buried.
+    pub hill_relief: Metres,
+    /// The ponded (turbidite) sediment's thickness `S_t`: zero or positive.
+    pub ponded_sediment: Metres,
+}
+
+impl SeafloorSample {
+    /// The reference hills, [`H_REF`] with no ponded sediment: the sea floor of
+    /// the reference style, amplitude 1 to within the hill code's step.
+    pub const REFERENCE: Self = Self {
+        hill_relief: H_REF,
+        ponded_sediment: Metres::ZERO,
+    };
+}
+
 /// How the builder routes water.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Routing {
@@ -144,7 +165,7 @@ pub struct FieldBuilder {
     figure: Option<Spheroid>,
     sea: Option<Metres>,
     lapse_rate_k_per_m: f64,
-    spectrum: BandSpectrum,
+    spectrum: Option<BandSpectrum>,
     crater_params: CraterParams,
     climate_model: ClimateModelKind,
     months: u8,
@@ -160,6 +181,7 @@ pub struct FieldBuilder {
     elevation: SiteFn<Metres>,
     ice: IceFn,
     climate: DirFn<ClimateSample>,
+    seafloor: SiteFn<SeafloorSample>,
     routing: Routing,
     craters: Vec<CraterSpec>,
 }
@@ -186,13 +208,15 @@ const EJECTA_WIDTH: f64 = REACH_RIM_RADII - 1.0;
 
 impl FieldBuilder {
     /// A dry, airless, flat sphere of volumetric radius `radius`, with a one-month year on a
-    /// circular orbit, a still climate at 250 K, no fine relief and no craters: no coarse crater,
-    /// and a crater density of zero, so that the synthesis draws no small ones either (at the
-    /// Moon's gravity, `k_target` 1). The radius is checked by [`build`](Self::build).
+    /// circular orbit, a still climate at 250 K, no fine relief (a silicate crust's spectrum
+    /// anchored at zero), the reference hills on any oceanic crust ([`SeafloorSample::REFERENCE`])
+    /// and no craters: no coarse crater, and a crater density of zero, so that the synthesis draws
+    /// no small ones either (at the Moon's gravity, `k_target` 1). The radius is checked by
+    /// [`build`](Self::build).
     ///
     /// # Panics
     ///
-    /// Never: its default spectrum and crater contract are valid.
+    /// Never: its default crater contract is valid.
     #[must_use]
     pub fn new(radius: Metres) -> Self {
         Self {
@@ -201,8 +225,7 @@ impl FieldBuilder {
             figure: None,
             sea: None,
             lapse_rate_k_per_m: 0.0,
-            spectrum: BandSpectrum::new(BandSpectrum::DEFAULT_EXPONENT, SquareMetres::ZERO)
-                .expect("the default spectrum is valid"),
+            spectrum: None,
             crater_params: CraterParams::new(CraterParamsParts {
                 n_1km: PerSquareKilometre::ZERO,
                 screening: Screening::None,
@@ -225,6 +248,7 @@ impl FieldBuilder {
             elevation: Box::new(|_| Metres::ZERO),
             ice: Box::new(|_, _| 0.0),
             climate: Box::new(|_| ClimateSample::still(Kelvin::new(250.0))),
+            seafloor: Box::new(|_| SeafloorSample::REFERENCE),
             routing: Routing::None,
             craters: Vec::new(),
         }
@@ -259,10 +283,19 @@ impl FieldBuilder {
         self
     }
 
-    /// The spectrum of relief finer than the cells.
+    /// The spectrum of the structural relief finer than the cells: a silicate crust's anchored at
+    /// zero, no such relief, by default.
     #[must_use]
     pub fn spectrum(mut self, spectrum: BandSpectrum) -> Self {
-        self.spectrum = spectrum;
+        self.spectrum = Some(spectrum);
+        self
+    }
+
+    /// The sea floor of each oceanic cell, from its site ([`SeafloorSample::REFERENCE`] by
+    /// default); a cell of any other crust has none.
+    #[must_use]
+    pub fn seafloor(mut self, seafloor: impl Fn(&CellSite) -> SeafloorSample + 'static) -> Self {
+        self.seafloor = Box::new(seafloor);
         self
     }
 
@@ -418,6 +451,8 @@ impl FieldBuilder {
     ///   centre cell and diameter;
     /// - an elevation beyond ±2,147 km, or a climate whose temperatures, anomalies, rates or winds
     ///   no code can hold;
+    /// - an oceanic cell's sea floor whose hill relief is not finite and positive, or whose ponded
+    ///   sediment is not finite and non-negative;
     /// - a crust's palette entry or a main liquid the header refuses, a cell with ice and no ice
     ///   entry to name (none in the palette, or [`ice_entry`](Self::ice_entry)'s not an `Ice`
     ///   entry), or a cell under water and no main liquid.
@@ -492,7 +527,7 @@ impl FieldBuilder {
             figure: self.figure.unwrap_or_else(|| Spheroid::sphere(r)),
             sea_level,
             lapse_rate_k_per_m: self.lapse_rate_k_per_m,
-            spectrum: self.spectrum,
+            spectrum: self.header_spectrum(),
             craters: self.crater_params,
             climate_model: self.climate_model,
             precipitation: PrecipitationSource::Heuristic,
@@ -564,6 +599,38 @@ impl FieldBuilder {
                 .expect("a palette's indices are below 15"),
             class: SurfaceClass::UNCLASSIFIED,
             crater_state: 0,
+            seafloor: self.seafloor_at(site),
+        }
+    }
+
+    /// The header's spectrum: [`spectrum`](Self::spectrum)'s, or a silicate crust's anchored at
+    /// zero on the builder's body, no structural relief.
+    #[must_use]
+    fn header_spectrum(&self) -> BandSpectrum {
+        self.spectrum.unwrap_or_else(|| {
+            BandSpectrum::anchored(SpectrumShape::SILICATE, self.radius, Metres::ZERO)
+        })
+    }
+
+    /// The sea floor byte of the cell at `site`: its [`seafloor`](Self::seafloor) quantised on
+    /// oceanic crust, and none on any other.
+    #[must_use]
+    fn seafloor_at(&self, site: &CellSite) -> u8 {
+        match site.crust {
+            Crust::Oceanic => {
+                let sample = (self.seafloor)(site);
+                let h = sample.hill_relief.value();
+                assert!(
+                    h.is_finite() && h > 0.0,
+                    "an oceanic cell's hill relief must be finite and positive, got {h} m"
+                );
+                let hill = SynthesisCell::quantise_hill_relief(sample.hill_relief)
+                    .expect("a positive hill relief has a code");
+                let ponded = SynthesisCell::quantise_ponded_sediment(sample.ponded_sediment)
+                    .unwrap_or_else(|e| panic!("an oceanic cell's ponded sediment: {e}"));
+                SynthesisCell::pack_seafloor(hill, ponded).expect("a code is a nibble")
+            }
+            Crust::Continental | Crust::Lid | Crust::Province => SynthesisCell::NO_SEAFLOOR,
         }
     }
 

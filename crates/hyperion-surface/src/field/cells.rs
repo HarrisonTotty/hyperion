@@ -359,8 +359,9 @@ impl SurfaceClass {
     }
 }
 
-/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 22 bytes
-/// in the payload (Design note 17's 21, and the substance byte of decision-composition §1.7).
+/// One cell's synthesis record: what the local synthesis reads of the coarse field there, 23 bytes
+/// in the payload (Design note 17's 21, the substance byte of decision-composition §1.7 and the
+/// sea floor's byte of `decision-r09-t5.md` item 5).
 ///
 /// Plain data with public fields, each an integer code whose step and meaning its documentation
 /// gives; the methods read them in SI units. Heights are along the normal of the header's
@@ -411,10 +412,92 @@ pub struct SynthesisCell {
     /// The cell's crater state, whose codes R09.T15 defines with the classes (Design note 11); 0
     /// until then.
     pub crater_state: u8,
+    /// The sea floor's roughness inputs, which the coarse pass derives from the cell's own ridge
+    /// (R09.T11 and T12.a; `decision-r09-t5.md` item 5): the draped abyssal-hill relief H in the
+    /// high nibble and the ponded (turbidite) sediment's thickness `S_t` in the low
+    /// ([`hill_relief`](Self::hill_relief), [`ponded_sediment`](Self::ponded_sediment),
+    /// [`pack_seafloor`](Self::pack_seafloor)).
+    ///
+    /// The hill nibble is code 0 for none and c in 1 to 15 for 20 m × 2^((c − 1) ÷ 3), 20 to
+    /// 508 m, and is non-zero exactly on [`Crust::Oceanic`]. The sediment nibble is code 0 for
+    /// under 21 m and c in 1 to 15 for 25 m × 2^((c − 1) ÷ 2), 25 m to 3.2 km, and is zero off
+    /// oceanic crust: reserved there for the sedimented basins of land (Mars's northern plains
+    /// among them), which a later task may fill under the layout rule. The age and the spreading
+    /// rate that make them do not travel: the synthesis needs only what they make.
+    pub seafloor: u8,
 }
 
 /// Millimetres a metre.
 const MM_PER_M: f64 = 1_000.0;
+
+/// The largest code of a nibble.
+const NIBBLE_MAX: u8 = 0x0F;
+
+/// The hill relief of the sea floor byte's code 1, metres: code c ≥ 1 is 20 m × 2^((c − 1) ÷ 3), a
+/// step of 26%, from 20 m to 508 m at code 15, which spans the draped abyssal hills from a fast
+/// ridge's floor under its full drape (H₀ ÷ 2, 28 m) to an ultraslow ridge's 286 m and beyond
+/// (`decision-r09-t5.md` item 5).
+const HILL_RELIEF_UNIT_M: f64 = 20.0;
+
+/// The hill relief's codes an octave, 3 ([`HILL_RELIEF_UNIT_M`]).
+const HILL_RELIEF_PER_OCTAVE: f64 = 3.0;
+
+/// The ponded sediment of the sea floor byte's code 1, metres: code c ≥ 1 is 25 m × 2^((c − 1) ÷
+/// 2), a step of 41%, from 25 m to 3.2 km at code 15, which spans the turbidite wedge from a thin
+/// cover over the smoothest hills to the continental rise's 2.4 km (`decision-r09-t5.md` item 5).
+const PONDED_SEDIMENT_UNIT_M: f64 = 25.0;
+
+/// The ponded sediment's codes an octave, 2 ([`PONDED_SEDIMENT_UNIT_M`]).
+const PONDED_SEDIMENT_PER_OCTAVE: f64 = 2.0;
+
+/// The nibble code of a length `x` metres on a scale of `per_octave` codes an octave from `unit`
+/// at code 1, nearest in log and saturating at 15: `None` for zero and for a length that rounds
+/// below code 1, which the caller codes as it must.
+fn nibble_code(x: f64, unit: f64, per_octave: f64) -> Result<Option<u8>, QuantiseValueError> {
+    if !x.is_finite() {
+        return Err(QuantiseValueError::NotFinite(x));
+    }
+    if x < 0.0 {
+        return Err(QuantiseValueError::OutOfRange(x));
+    }
+    // Zero, of either sign, has no logarithm.
+    if x <= 0.0 {
+        return Ok(None);
+    }
+    let code = (per_octave * math::log2(x / unit)).round() + 1.0;
+    if code < 1.0 {
+        return Ok(None);
+    }
+    if code >= f64::from(NIBBLE_MAX) {
+        return Ok(Some(NIBBLE_MAX));
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "code is an integer from 1 to 14, checked above"
+    )]
+    Ok(Some(code as u8))
+}
+
+/// The draped abyssal-hill relief of a sea floor byte `seafloor`, or `None` where its hill nibble
+/// is 0 ([`SynthesisCell::hill_relief`]).
+#[must_use]
+pub(crate) fn hill_relief_of(seafloor: u8) -> Option<Metres> {
+    let code = seafloor >> 4;
+    (code != 0).then(|| {
+        Metres::new(HILL_RELIEF_UNIT_M * log_value(u32::from(code), HILL_RELIEF_PER_OCTAVE, 1.0))
+    })
+}
+
+/// The ponded sediment's thickness of a sea floor byte `seafloor`, zero where its sediment nibble
+/// is 0 ([`SynthesisCell::ponded_sediment`]).
+#[must_use]
+pub(crate) fn ponded_sediment_of(seafloor: u8) -> Metres {
+    let code = seafloor & NIBBLE_MAX;
+    Metres::new(
+        PONDED_SEDIMENT_UNIT_M * log_value(u32::from(code), PONDED_SEDIMENT_PER_OCTAVE, 1.0),
+    )
+}
 
 impl SynthesisCell {
     /// The [`boundary_distance_km`](Self::boundary_distance_km) of a cell on a body with no plate
@@ -461,6 +544,73 @@ impl SynthesisCell {
         } else {
             Some(nibble)
         }
+    }
+
+    /// The [`seafloor`](Self::seafloor) of a cell that is not oceanic crust: no hill relief and
+    /// no ponded sediment, 0.
+    pub const NO_SEAFLOOR: u8 = 0;
+
+    /// The sea floor byte of a hill-relief code `hill` ([`quantise_hill_relief`]) and a
+    /// ponded-sediment code `ponded` ([`quantise_ponded_sediment`]), or `None` if either is above
+    /// 15, which a nibble cannot hold.
+    ///
+    /// [`quantise_hill_relief`]: Self::quantise_hill_relief
+    /// [`quantise_ponded_sediment`]: Self::quantise_ponded_sediment
+    #[must_use]
+    pub const fn pack_seafloor(hill: u8, ponded: u8) -> Option<u8> {
+        if hill > NIBBLE_MAX || ponded > NIBBLE_MAX {
+            None
+        } else {
+            Some((hill << 4) | ponded)
+        }
+    }
+
+    /// The draped abyssal-hill relief H of the cell's sea floor, metres: the RMS height of its
+    /// basement hills less what its pelagic drape smooths (`decision-r09-t5.md` item 5), or
+    /// `None` where the hill nibble is 0, which a valid record has exactly off oceanic crust.
+    #[must_use]
+    pub fn hill_relief(&self) -> Option<Metres> {
+        hill_relief_of(self.seafloor)
+    }
+
+    /// The thickness of the ponded (turbidite) sediment over the cell's sea floor, metres: zero
+    /// under 21 m and off oceanic crust (`decision-r09-t5.md` item 5).
+    #[must_use]
+    pub fn ponded_sediment(&self) -> Metres {
+        ponded_sediment_of(self.seafloor)
+    }
+
+    /// The hill-relief code of a draped abyssal-hill relief `relief`: 0 for none (zero), else the
+    /// code from 1 to 15 nearest in log, saturating at both ends, so that every relief of an
+    /// oceanic cell has a code.
+    ///
+    /// # Errors
+    ///
+    /// [`QuantiseValueError`] if `relief` is not finite or is negative.
+    pub fn quantise_hill_relief(relief: Metres) -> Result<u8, QuantiseValueError> {
+        let h = relief.value();
+        Ok(
+            match nibble_code(h, HILL_RELIEF_UNIT_M, HILL_RELIEF_PER_OCTAVE)? {
+                Some(code) => code,
+                None if h > 0.0 => 1,
+                None => 0,
+            },
+        )
+    }
+
+    /// The ponded-sediment code of a thickness `thickness`: 0 under 21 m (half a step below code
+    /// 1's 25 m), else the code from 1 to 15 nearest in log, saturating at 15.
+    ///
+    /// # Errors
+    ///
+    /// [`QuantiseValueError`] if `thickness` is not finite or is negative.
+    pub fn quantise_ponded_sediment(thickness: Metres) -> Result<u8, QuantiseValueError> {
+        Ok(nibble_code(
+            thickness.value(),
+            PONDED_SEDIMENT_UNIT_M,
+            PONDED_SEDIMENT_PER_OCTAVE,
+        )?
+        .unwrap_or(0))
     }
 
     /// The ground's height above the datum, metres.
@@ -976,6 +1126,7 @@ mod tests {
             substances: 0x23,
             class: SurfaceClass::UNCLASSIFIED,
             crater_state: 0,
+            seafloor: 0x93,
         };
         assert_eq!(cell.elevation(), Metres::new(-2.5));
         assert_eq!(cell.ice_entry(), Some(2));
@@ -985,6 +1136,116 @@ mod tests {
         assert_eq!(cell.boundary_distance(), Some(Metres::new(-120_000.0)));
         assert_same_bits(cell.ice_fraction(), 1.0);
         assert_eq!(cell.boundary_obliquity_angle(), Radians::ZERO);
+        // Hill code 9 is 20 m × 2^(8 ÷ 3), and sediment code 3 is 25 m × 2.
+        let hills = cell.hill_relief().unwrap().value();
+        assert!(
+            (hills - 20.0 * math::exp2(8.0 / 3.0)).abs() < 1e-12,
+            "{hills}"
+        );
+        assert_same_bits(cell.ponded_sediment().value(), 50.0);
+    }
+
+    /// The sea floor byte packs a hill-relief code in the high nibble and a ponded-sediment code in
+    /// the low; each scale returns its value to within half a step in log, saturates at its ends,
+    /// and refuses what no code holds.
+    #[test]
+    fn field_cell_seafloor_packs_two_log_nibbles() {
+        let hill = |m: f64| SynthesisCell::quantise_hill_relief(Metres::new(m));
+        let ponded = |m: f64| SynthesisCell::quantise_ponded_sediment(Metres::new(m));
+        let cell = |byte| SynthesisCell {
+            seafloor: byte,
+            ..field_test_cell()
+        };
+        // Every code reads back its own value, and its value quantises to it.
+        for code in 0..=NIBBLE_MAX {
+            let byte = SynthesisCell::pack_seafloor(code, code).unwrap();
+            assert_eq!(byte, code * 0x11);
+            let at = cell(byte);
+            match at.hill_relief() {
+                None => assert_eq!(code, 0),
+                Some(h) => {
+                    let expected = 20.0 * math::exp2(f64::from(code - 1) / 3.0);
+                    assert!((h.value() / expected - 1.0).abs() < 1e-15, "{code}");
+                    assert_eq!(hill(h.value()), Ok(code));
+                }
+            }
+            let s = at.ponded_sediment().value();
+            if code == 0 {
+                assert_same_bits(s, 0.0);
+            } else {
+                let expected = 25.0 * math::exp2(f64::from(code - 1) / 2.0);
+                assert!((s / expected - 1.0).abs() < 1e-15, "{code}");
+                assert_eq!(ponded(s), Ok(code));
+            }
+        }
+        assert_same_bits(
+            cell(0xF0).hill_relief().unwrap().value(),
+            20.0 * math::exp2(14.0 / 3.0),
+        );
+        assert_same_bits(cell(0x0F).ponded_sediment().value(), 3_200.0);
+        // Within half a step in log of the nearest code: 2^(1 ÷ 6) and 2^(1 ÷ 4).
+        for m in [27.5, 55.0, 116.0, 232.0, 286.0, 400.0] {
+            let back = cell(SynthesisCell::pack_seafloor(hill(m).unwrap(), 0).unwrap())
+                .hill_relief()
+                .unwrap()
+                .value();
+            assert!(math::ln(back / m).abs() <= core::f64::consts::LN_2 / 6.0 + 1e-12);
+        }
+        for m in [30.0, 100.0, 404.0, 2_400.0] {
+            let back = cell(SynthesisCell::pack_seafloor(0, ponded(m).unwrap()).unwrap())
+                .ponded_sediment()
+                .value();
+            assert!(math::ln(back / m).abs() <= core::f64::consts::LN_2 / 4.0 + 1e-12);
+        }
+        // The hill scale saturates at both ends for any relief; zero is none.
+        assert_eq!(hill(0.0), Ok(0));
+        assert_eq!(hill(-0.0), Ok(0));
+        assert_eq!(hill(1e-300), Ok(1));
+        assert_eq!(hill(5.0), Ok(1));
+        assert_eq!(hill(1e6), Ok(15));
+        // The sediment scale's code 0 is everything under 25 m × 2^(−1 ÷ 4) = 21.02 m.
+        assert_eq!(ponded(0.0), Ok(0));
+        assert_eq!(ponded(21.0), Ok(0));
+        assert_eq!(ponded(21.1), Ok(1));
+        assert_eq!(ponded(1e9), Ok(15));
+        // Nothing negative or not finite has a code, and a nibble holds no more than 15.
+        for quantise in [hill, ponded] {
+            assert_eq!(quantise(-1.0), Err(QuantiseValueError::OutOfRange(-1.0)));
+            assert!(refuses_nan(&quantise(f64::NAN)));
+            assert_eq!(
+                quantise(f64::INFINITY),
+                Err(QuantiseValueError::NotFinite(f64::INFINITY))
+            );
+        }
+        assert_eq!(SynthesisCell::pack_seafloor(16, 0), None);
+        assert_eq!(SynthesisCell::pack_seafloor(0, 16), None);
+        assert_eq!(SynthesisCell::pack_seafloor(15, 15), Some(0xFF));
+        assert_eq!(cell(SynthesisCell::NO_SEAFLOOR).hill_relief(), None);
+        assert_eq!(
+            cell(SynthesisCell::NO_SEAFLOOR).ponded_sediment(),
+            Metres::ZERO
+        );
+    }
+
+    /// A dry record of a stagnant lid's crust with no boundary, for tests that vary one field.
+    const fn field_test_cell() -> SynthesisCell {
+        SynthesisCell {
+            elevation_mm: 0,
+            boundary_distance_km: SynthesisCell::NO_BOUNDARY_KM,
+            plate: 0,
+            crust: Crust::Lid,
+            boundary: BoundaryKind::Absent,
+            boundary_obliquity: 0,
+            flow: FlowDirection::Terminal,
+            drainage: LogArea::ZERO,
+            steepness: LogSteepness::ZERO,
+            water_surface_mm: 0,
+            ice: 0,
+            substances: SynthesisCell::NO_SUBSTANCES,
+            class: SurfaceClass::UNCLASSIFIED,
+            crater_state: 0,
+            seafloor: SynthesisCell::NO_SEAFLOOR,
+        }
     }
 
     /// The substance byte packs an ice entry in the high nibble and a liquid entry in the low, 0xF
@@ -1016,6 +1277,7 @@ mod tests {
                 substances: byte,
                 class: SurfaceClass::UNCLASSIFIED,
                 crater_state: 0,
+                seafloor: SynthesisCell::NO_SEAFLOOR,
             };
             assert_eq!(
                 SynthesisCell::pack_substances(cell.ice_entry(), cell.liquid_entry()),

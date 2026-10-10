@@ -265,7 +265,21 @@ fn synthesis_record(n: u32, cell: &CellState) -> Result<SynthesisCell, QuantiseF
         substances: substance_byte(n, cell)?,
         class: cell.class,
         crater_state: cell.crater_state,
+        seafloor: seafloor_byte(cell).map_err(at("sea floor"))?,
     })
+}
+
+/// The sea floor byte of a cell in state `cell` (`decision-r09-t5.md` item 5): its hill relief's
+/// code in the high nibble, 0 for none, and its ponded sediment's in the low. A byte that breaks
+/// the field's rule (no hills on oceanic crust, or a sea floor on another) is
+/// [`CoarseField::new`]'s to refuse.
+fn seafloor_byte(cell: &CellState) -> Result<u8, QuantiseValueError> {
+    let hill = match cell.hill_relief {
+        Some(relief) => SynthesisCell::quantise_hill_relief(relief)?,
+        None => 0,
+    };
+    let ponded = SynthesisCell::quantise_ponded_sediment(cell.ponded_sediment)?;
+    Ok(SynthesisCell::pack_seafloor(hill, ponded).expect("each code is a nibble, 0 to 15"))
 }
 
 /// The substance byte of cell `n` in state `cell`: its ice entry in the high nibble and its liquid

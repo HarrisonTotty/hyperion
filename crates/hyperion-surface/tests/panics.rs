@@ -33,7 +33,7 @@ use hyperion_surface::synth::interp::{CellValues, interpolate};
 use hyperion_surface::synth::relief::{
     Relief, finest_octave, nyquist_degree, octave_bound, octave_rms, octave_spacing,
 };
-use hyperion_surface::synth::{BandSpectrum, unresolved_variance};
+use hyperion_surface::synth::{BandSpectrum, SpectrumShape, unresolved_variance};
 use hyperion_surface::test_planet::{TEST_PLANET, octaves};
 use hyperion_surface::wire::encode_payload;
 
@@ -242,7 +242,11 @@ fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
         figure: Spheroid::from_volumetric(radius, 0.0).unwrap(),
         sea_level: Metres::ZERO,
         lapse_rate_k_per_m: 0.0,
-        spectrum: BandSpectrum::new(1.9, SquareMetres::ZERO).unwrap(),
+        spectrum: BandSpectrum::anchored(
+            SpectrumShape::SILICATE,
+            Metres::new(radius),
+            Metres::ZERO,
+        ),
         craters,
         climate_model: ClimateModelKind::RadiativeEquilibrium,
         precipitation: PrecipitationSource::Heuristic,
@@ -280,6 +284,7 @@ fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
         substances: SynthesisCell::NO_SUBSTANCES,
         class: SurfaceClass::UNCLASSIFIED,
         crater_state: 0,
+        seafloor: SynthesisCell::NO_SEAFLOOR,
     };
     let climate = ClimateCell {
         sea_level_temperature: 0,
@@ -329,7 +334,11 @@ fn a_time_of_no_mean_anomaly_has_no_month() {
 }
 
 fn spectrum() -> BandSpectrum {
-    BandSpectrum::new(1.9, SquareMetres::new(1.0)).unwrap()
+    BandSpectrum::anchored(
+        SpectrumShape::SILICATE,
+        Metres::new(4.697e5),
+        Metres::new(60.0),
+    )
 }
 
 #[test]
@@ -378,6 +387,38 @@ fn a_band_of_degrees_that_runs_backwards_is_refused() {
 #[should_panic(expected = "level 0 has no band below a coarser level")]
 fn level_0_has_no_band() {
     let _ = spectrum().level_variance(0);
+}
+
+#[test]
+#[should_panic(expected = "a degree must be finite and at least 1")]
+fn the_degree_variance_below_degree_1_is_refused() {
+    let _ = spectrum().degree_variance(0.5);
+}
+
+#[test]
+#[should_panic(expected = "a degree must be finite and at least 1")]
+fn the_degree_variance_at_no_degree_is_refused() {
+    let _ = spectrum().degree_variance(f64::NAN);
+}
+
+#[test]
+#[should_panic(expected = "a body's radius must be finite and positive")]
+fn a_spectrum_anchored_on_no_body_is_refused() {
+    let _ = BandSpectrum::anchored(SpectrumShape::SILICATE, Metres::ZERO, Metres::new(60.0));
+}
+
+#[test]
+#[should_panic(expected = "an anchor RMS must be finite and non-negative")]
+fn a_spectrum_anchored_at_a_negative_rms_is_refused() {
+    let _ = BandSpectrum::anchored(SpectrumShape::SILICATE, Metres::new(1e6), Metres::new(-1.0));
+}
+
+#[test]
+#[should_panic(expected = "a spectrum shape must give a valid law on this body")]
+fn a_spectrum_shape_whose_break_lies_beyond_every_degree_is_refused() {
+    // A break wavelength of a sub-normal metre puts the break degree at infinity.
+    let shape = SpectrumShape::new(2.0, Metres::new(1e-310), 3.0).unwrap();
+    let _ = BandSpectrum::anchored(shape, Metres::new(1e6), Metres::new(60.0));
 }
 
 #[test]

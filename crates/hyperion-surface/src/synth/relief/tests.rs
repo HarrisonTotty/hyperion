@@ -17,8 +17,11 @@ use super::*;
 use crate::cube::unit_dir;
 use crate::field::{ClimateCell, CoarseCrater, CoarseField, FlowDirection, LogArea, LogSteepness};
 use crate::field::{SurfaceClass, cell_index};
-use crate::synth::{BuildBandSpectrumError, unresolved_variance};
-use crate::testing::{SyntheticWorld, synthetic_field};
+use crate::synth::{
+    BandSpectrumParts, BuildBandSpectrumError, STRUCTURAL_RMS_ICE_RICH, STRUCTURAL_RMS_MOBILE_LID,
+    STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape, unresolved_variance,
+};
+use crate::testing::{FieldBuilder, SyntheticWorld, synthetic_field};
 
 /// The detail seed the tests draw from.
 const SEED: DetailSeed = DetailSeed::new(0x7265_6c69_6566);
@@ -143,10 +146,32 @@ fn direct_sum(beta: f64, from: u64, to: u64) -> f64 {
     (from..to).map(|l| math::powf(l as f64, -beta)).sum()
 }
 
+/// A law of one exponent β and V₁ = 1 m²: its break at degree 1, from which β holds.
+fn single(beta: f64) -> BandSpectrum {
+    BandSpectrum::new(BandSpectrumParts {
+        exponent: beta,
+        unit_degree_variance: SquareMetres::new(1.0),
+        break_degree: 1.0,
+        small_scale_exponent: beta,
+    })
+    .unwrap()
+}
+
+/// A broken law of V₁ = 1 m², β₁ `large`, β₂ `small` and break degree `at`.
+fn broken(large: f64, small: f64, at: f64) -> BandSpectrum {
+    BandSpectrum::new(BandSpectrumParts {
+        exponent: large,
+        unit_degree_variance: SquareMetres::new(1.0),
+        break_degree: at,
+        small_scale_exponent: small,
+    })
+    .unwrap()
+}
+
 #[test]
 fn the_spectrum_s_closed_forms_match_its_sums() {
     for beta in [1.1, 1.7, 1.9, 2.05, 3.0, 4.0] {
-        let spectrum = BandSpectrum::new(beta, SquareMetres::new(1.0)).unwrap();
+        let spectrum = single(beta);
         for (from, to) in [
             (1, 300),
             (5, 17),
@@ -171,12 +196,161 @@ fn the_spectrum_s_closed_forms_match_its_sums() {
             assert!((zeta - math::powi(PI, 4) / 90.0).abs() < 1e-12, "{zeta}");
         }
     }
-    let two = BandSpectrum::new(2.0, SquareMetres::new(1.0)).unwrap();
+    let two = single(2.0);
     assert!((two.variance_from_degree(1).value() - PI * PI / 6.0).abs() < 1e-12);
     assert_eq!(
-        BandSpectrum::new(0.9, SquareMetres::new(1.0)),
+        BandSpectrum::new(BandSpectrumParts {
+            exponent: 0.9,
+            ..BandSpectrumParts {
+                exponent: 2.0,
+                unit_degree_variance: SquareMetres::new(1.0),
+                break_degree: 1.0,
+                small_scale_exponent: 2.0,
+            }
+        }),
         Err(BuildBandSpectrumError::Exponent(0.9))
     );
+}
+
+/// The degree variance V(l) term by term over `from` to `to` − 1, in increasing order.
+fn direct_band(spectrum: &BandSpectrum, from: u64, to: u64) -> f64 {
+    #[expect(clippy::cast_precision_loss, reason = "degrees below 10^6")]
+    (from..to)
+        .map(|l| spectrum.degree_variance(l as f64).value())
+        .sum()
+}
+
+/// The broken law's closed forms equal its direct sums to 10⁻¹¹ (`decision-r09-t5.md` item 2):
+/// for the silicate and ice-rich exponents, with the break at an integer and at a non-integer
+/// degree, and each band below, across and above it; and the law is continuous at its break.
+#[test]
+fn the_broken_spectrum_s_closed_forms_match_its_sums_across_the_break() {
+    for (large, small) in [(2.0, 3.0), (1.8, 2.6)] {
+        for at in [300.0, 300.4, 1.0, 20_015.1] {
+            let spectrum = broken(large, small, at);
+            let bands: [(u64, u64); 8] = [
+                (1, 299),
+                (5, 300),
+                (299, 302),
+                (300, 301),
+                (301, 302),
+                (70, 139_000),
+                (301, 4_000),
+                (556, 200_000),
+            ];
+            for (from, to) in bands {
+                let closed = spectrum.band_variance(from, to).value();
+                let direct = direct_band(&spectrum, from, to);
+                assert!(
+                    (closed / direct - 1.0).abs() < 1e-11,
+                    "β {large}/{small}, break {at}, {from}..{to}: {closed} vs {direct}"
+                );
+                let tails = spectrum.variance_from_degree(from).value()
+                    - spectrum.variance_from_degree(to).value();
+                assert!(
+                    (tails / direct - 1.0).abs() < 1e-11,
+                    "β {large}/{small}, break {at}, {from}..{to}: tails {tails} vs {direct}"
+                );
+            }
+            // Continuous at the break: the first segment's law reaches the second's there.
+            let v1 = spectrum.unit_degree_variance().value();
+            let lower = v1 * math::powf(at, -large);
+            let upper = spectrum.degree_variance(at).value();
+            assert!((upper / lower - 1.0).abs() < 1e-12, "break {at}");
+            if at > 1.0 {
+                let just_below = spectrum.degree_variance(at * (1.0 - 1e-13)).value();
+                assert!((just_below / upper - 1.0).abs() < 1e-12, "break {at}");
+            }
+        }
+    }
+    // A break below every degree a field reads is the second law alone, and one beyond them all
+    // the first.
+    let low = broken(2.0, 3.0, 1.0);
+    let three = single(3.0);
+    assert_same_bits(
+        low.variance_from_degree(70).value(),
+        three.variance_from_degree(70).value(),
+    );
+    let high = broken(2.0, 3.0, 1e300);
+    let first = high.band_variance(70, 1 << 40).value();
+    let expected = single(2.0).band_variance(70, 1 << 40).value();
+    assert!(
+        (first / expected - 1.0).abs() < 1e-12,
+        "{first} vs {expected}"
+    );
+}
+
+/// The four synthetic worlds' spectra and a Europa's, anchored as the ruling computes them
+/// (`decision-r09-t5.md` item 3, its `out/fixtures.txt`): V₁, the structural RMS above the coarse
+/// cell's Nyquist degree, and the first and finest octaves' RMS.
+#[test]
+fn the_anchored_spectra_carry_their_crust_class_s_rms() {
+    // (world, V₁ m², RMS above l_N(L) m, first octave m, finest octave cm)
+    let expected = [
+        (SyntheticWorld::EarthLike, 2.253e7, 200.0, 142.4, 9.0),
+        (SyntheticWorld::MarsLike, 1.079e6, 61.9, 44.1, 2.9),
+        (SyntheticWorld::MoonLike, 5.531e5, 62.8, 44.7, 3.0),
+        (SyntheticWorld::CeresLike, 1.479e5, 45.6, 32.6, 3.2),
+    ];
+    for (kind, v1, local_m, first_m, finest_cm) in expected {
+        let header = world(kind).header();
+        let spectrum = header.spectrum();
+        let got = spectrum.unit_degree_variance().value();
+        assert!((got / v1 - 1.0).abs() < 1e-3, "{kind:?}: V₁ {got} m²");
+        // The break at 2 km, and the anchor's variance from l_72 is the stagnant lid's or the
+        // mobile lid's RMS squared.
+        let radius = header.radius().value();
+        assert_same_bits(spectrum.break_degree(), 2.0 * PI * radius / 2_000.0);
+        assert_same_bits(spectrum.small_scale_exponent(), 3.0);
+        assert_same_bits(spectrum.exponent(), 2.0);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a positive degree below 10^4"
+        )]
+        let l72 = ((2.0 * PI * radius / 72e3).round() as u64).max(2);
+        let anchor = if kind == SyntheticWorld::EarthLike {
+            STRUCTURAL_RMS_MOBILE_LID
+        } else {
+            STRUCTURAL_RMS_STAGNANT_LID
+        };
+        let variance = spectrum.variance_from_degree(l72).value();
+        let target = anchor.value() * anchor.value();
+        assert!((variance / target - 1.0).abs() < 1e-12, "{kind:?}");
+        let local = local_variance(spectrum, header.level()).value().sqrt();
+        assert!((local - local_m).abs() < 0.05, "{kind:?}: {local} m");
+        let relief = Relief::new(header, SEED);
+        let first = relief.octave_rms(relief.first_octave()).value();
+        assert!((first - first_m).abs() < 0.05, "{kind:?}: {first} m");
+        let finest = relief.octave_rms(relief.finest_octave()).value() * 100.0;
+        assert!((finest - finest_cm).abs() < 0.05, "{kind:?}: {finest} cm");
+    }
+    // For R09.T8: the Earth-like world's finest octave carries 9.0 cm, so its bound is 1.97 m (the
+    // ruling's figure, from the rounded 9.0 cm: 2.5 × 8.770 × 9.0 ± 0.05 cm is 1.97 ± 0.011 m).
+    let earth_header = earth().header();
+    let finest = finest_octave(earth_header.radius());
+    let bound = octave_bound(earth_header.spectrum(), finest).value();
+    assert!((bound - 1.973).abs() < 0.011, "{bound} m");
+    // An ice-rich crust on a Europa: β 1.8 to a break at 1 km, then 2.6, V₁ 1.032 × 10⁵ m² and
+    // 49.6 m above degree 139 (level 6).
+    let europa = BandSpectrum::anchored(
+        SpectrumShape::ICE_RICH,
+        Metres::new(1.5608e6),
+        STRUCTURAL_RMS_ICE_RICH,
+    );
+    let v1 = europa.unit_degree_variance().value();
+    assert!((v1 / 1.032e5 - 1.0).abs() < 1e-3, "{v1}");
+    let local = europa
+        .variance_from_degree(nyquist_degree(6))
+        .value()
+        .sqrt();
+    assert!((local - 49.6).abs() < 0.05, "{local} m");
+    // An anchor of zero is no relief at all, and the anchor's degree is never below 2.
+    let none = BandSpectrum::anchored(SpectrumShape::SILICATE, Metres::new(6.371e6), Metres::ZERO);
+    assert_same_bits(none.unit_degree_variance().value(), 0.0);
+    let tiny = BandSpectrum::anchored(SpectrumShape::SILICATE, Metres::new(20.0), Metres::new(1.0));
+    assert_same_bits(tiny.break_degree(), 1.0);
+    assert!((tiny.variance_from_degree(2).value() - 1.0).abs() < 1e-12);
 }
 
 #[test]
@@ -200,19 +374,24 @@ fn local_variance_is_the_sum_of_every_octave_s_band() {
             (bands / local - 1.0).abs() < 1e-12,
             "{kind:?}: {bands} vs {local}"
         );
-        // The octaves stop at the band limit, leaving out under 10⁻³ of it.
+        // The octaves stop at the band limit, far below the break, leaving out under 10⁻⁶ of it.
         let relief = Relief::new(header, SEED);
         let mut carried = 0.0;
         for m in relief.first_octave()..=relief.finest_octave() {
             let rms = relief.octave_rms(m).value();
             carried += rms * rms;
         }
-        assert!(carried < local && carried > 0.999 * local, "{kind:?}");
+        assert!(
+            carried < local && carried > (1.0 - 1e-6) * local,
+            "{kind:?}: {}",
+            1.0 - carried / local
+        );
     }
-    // The Earth-like world's local share: about 116 m RMS, 0.2% of the law's whole variance.
+    // The Earth-like world's local share is its anchor, 200 m RMS, since its coarse cell's
+    // Nyquist degree, 556, is the anchor's degree.
     let spectrum = earth().header().spectrum();
     let local = local_variance(spectrum, earth().header().level()).value();
-    assert!((local.sqrt() - 116.5).abs() < 0.5, "{}", local.sqrt());
+    assert!((local.sqrt() - 200.0).abs() < 1e-9, "{}", local.sqrt());
 }
 
 /// Each octave's n̂ and r̂ over `points` of an Earth-sized body in `style`: their sums and sums of
@@ -408,6 +587,205 @@ fn local_variance_matches_the_sampled_variance_on_each_synthetic_world() {
     }
 }
 
+/// The structural relief's adirectional RMS slope in `style` over each of `baselines` metres, on
+/// the body of `field`, from `count` area-uniform points: atan(√2 ν(b) ÷ b) in degrees, with
+/// ν(b) the RMS height difference over b along a random tangent at each point, through the finest
+/// octave (R10's readout, R10 Design note 7, is the RMS gradient magnitude over b, √2 times a
+/// profile's on isotropic ground). Each slope comes with the standard error of tan of it, from
+/// the samples' spread.
+fn sampled_slopes<const N: usize>(
+    field: &CoarseField,
+    style: ReliefStyle,
+    baselines: [f64; N],
+    seed: u64,
+    count: usize,
+) -> [(f64, f64); N] {
+    let header = field.header();
+    let relief = Relief::new(header, SEED);
+    let table = octave_table(SEED);
+    let finest = relief.finest_octave();
+    let uniform = StyleSample::uniform(style);
+    let mut cache = LatticeCache::new();
+    let mut height = |point: [f64; 3]| {
+        let mut h = 0.0;
+        relief.octave_terms(&table, point, &uniform, finest, &mut cache, |t| {
+            h += t.height.value;
+        });
+        h
+    };
+    let mut rng = Lcg::new(seed ^ 0x7461_6e67);
+    let mut sums = [(0.0_f64, 0.0_f64); N];
+    for dir in uniform_points(seed, count) {
+        let p = header.figure().point(dir);
+        let r = [0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0);
+        let along = r[0] * dir[0] + r[1] * dir[1] + r[2] * dir[2];
+        let tangent = unit_dir([0, 1, 2].map(|k| r[k] - along * dir[k]));
+        let here = height(p);
+        for (sum, &b) in sums.iter_mut().zip(&baselines) {
+            let d = height([0, 1, 2].map(|k| p[k] + b * tangent[k])) - here;
+            sum.0 += d * d;
+            sum.1 += d * d * d * d;
+        }
+    }
+    #[expect(clippy::cast_precision_loss, reason = "under 10^6 points")]
+    let n = count as f64;
+    let mut out = [(0.0, 0.0); N];
+    for ((slot, (d2, d4)), &b) in out.iter_mut().zip(sums).zip(&baselines) {
+        let nu2 = d2 / n;
+        // tan = √2 ν ÷ b, so its relative error is half ν²'s.
+        let tan = (2.0 * nu2).sqrt() / b;
+        let relative = ((d4 / n - nu2 * nu2) / n).sqrt() / nu2 / 2.0;
+        *slot = (math::atan(tan).to_degrees(), tan * relative);
+    }
+    out
+}
+
+/// The structural relief's adirectional RMS slopes at 1, 10 and 100 m at the reference style,
+/// against the ruling's (`decision-r09-t5.md` item 2, "Expected RMS slopes", from its octave
+/// model of the noise's measured structure function): 18.0°, 15.6° and 12.0° on the Earth-like
+/// world's mobile lid, 5.5°, 4.8° and 3.6° on each stagnant lid, and 14.7°, 10.2° and 5.6° on an
+/// ice-rich Europa. The single law V₁ l^−1.9 gave 56° along a profile at 1 m.
+///
+/// Each slope's tangent is held within 5% of the ruling's: its figures are rounded to 0.1°, 1.4%
+/// at 3.6°, and its model interpolates the noise's structure function linearly between measured
+/// lags, a few per cent at the finest octaves; and the 5% is at least the two-sided z of
+/// `stats::ALPHA` standard errors of the sample, 2 × 10⁴ points a body.
+#[test]
+fn the_reference_style_s_slopes_are_the_ruling_s() {
+    let europa = FieldBuilder::new(Metres::new(1.5608e6))
+        .spectrum(BandSpectrum::anchored(
+            SpectrumShape::ICE_RICH,
+            Metres::new(1.5608e6),
+            STRUCTURAL_RMS_ICE_RICH,
+        ))
+        .build();
+    let cases: [(&CoarseField, &str, [f64; 3], u64); 5] = [
+        (earth(), "Earth-like", [18.0, 15.6, 12.0], 0x736c_6f31),
+        (
+            world(SyntheticWorld::MarsLike),
+            "Mars-like",
+            [5.5, 4.8, 3.6],
+            0x736c_6f32,
+        ),
+        (
+            world(SyntheticWorld::MoonLike),
+            "Moon-like",
+            [5.5, 4.8, 3.6],
+            0x736c_6f33,
+        ),
+        (
+            world(SyntheticWorld::CeresLike),
+            "Ceres-like",
+            [5.5, 4.8, 3.6],
+            0x736c_6f34,
+        ),
+        (
+            &europa,
+            "an ice-rich Europa",
+            [14.7, 10.2, 5.6],
+            0x736c_6f35,
+        ),
+    ];
+    let z = math::normal_quantile(1.0 - stats::ALPHA / 2.0);
+    for (field, name, expected, seed) in cases {
+        let measured = sampled_slopes(
+            field,
+            ReliefStyle::REFERENCE,
+            [1.0, 10.0, 100.0],
+            seed,
+            20_000,
+        );
+        println!(
+            "{name}: {:.2}° / {:.2}° / {:.2}° at 1 / 10 / 100 m (the ruling's {} / {} / {})",
+            measured[0].0, measured[1].0, measured[2].0, expected[0], expected[1], expected[2]
+        );
+        for (((slope, error), want), b) in measured.into_iter().zip(expected).zip([1, 10, 100]) {
+            let target = math::tan(want.to_radians());
+            let tan = math::tan(slope.to_radians());
+            assert!(
+                0.05 * target >= z * error,
+                "{name} at {b} m: 5% of tan {want}° is under {z} standard errors of {error}"
+            );
+            assert!(
+                (tan / target - 1.0).abs() < 0.05,
+                "{name} at {b} m: {slope}° against the ruling's {want}°"
+            );
+        }
+    }
+    // A collision belt's full style (amplitude 2.5, all ridged), against the ruling's 39.0°,
+    // 35.0° and 28.1°, which scale the plain noise's slopes by the amplitude alone: recorded, for
+    // R09.T8 and R10, since the ridged term is steeper than the plain one at the same RMS height.
+    let belt = ReliefStyle {
+        amplitude: BELT_AMPLITUDE,
+        belt: 1.0,
+        shear: 0.0,
+    };
+    let reference = sampled_slopes(
+        earth(),
+        ReliefStyle::REFERENCE,
+        [1.0, 10.0, 100.0],
+        0x6265_6c74,
+        20_000,
+    );
+    let ridged = sampled_slopes(earth(), belt, [1.0, 10.0, 100.0], 0x6265_6c74, 20_000);
+    println!(
+        "Earth-like belt: {:.2}° / {:.2}° / {:.2}° at 1 / 10 / 100 m (the ruling's 39.0 / 35.0 / \
+         28.1, the plain noise's at a = 2.5)",
+        ridged[0].0, ridged[1].0, ridged[2].0
+    );
+    for ((plain, _), (steep, _)) in reference.into_iter().zip(ridged) {
+        assert!(steep > plain, "{steep}° against {plain}°");
+    }
+}
+
+/// The Earth-like world's ocean holds each of the sea floor's regimes over at least a tenth of its
+/// cells (`decision-r09-t5.md` item 5): hills rougher than the reference (amplitude at least 1,
+/// the slow ridges' floor), smoother draped hills (between 0.2 and 1, the fast ridges' floor and
+/// the floor its drape has frozen at half its relief), and plains (at most 0.2, R09.T12.a's
+/// measure); and the cells' mean squared amplitude, over the ocean and the body (the ruled ⟨a²⟩,
+/// of the interpolated amplitude at area-uniform points, is the variance test's "mean a²").
+#[test]
+fn the_earth_like_ocean_holds_hills_draped_hills_and_plains() {
+    let field = earth();
+    let (mut ocean, mut hills, mut draped, mut plains) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let (mut a2_ocean, mut a2_all) = (0.0, 0.0);
+    for cell in field.synthesis() {
+        let a = ReliefStyle::of(cell).amplitude();
+        a2_all += a * a;
+        if cell.crust != Crust::Oceanic {
+            continue;
+        }
+        ocean += 1;
+        a2_ocean += a * a;
+        if a <= 0.2 {
+            plains += 1;
+        } else if a < 1.0 {
+            draped += 1;
+        } else {
+            hills += 1;
+        }
+    }
+    let share = |n: u32| f64::from(n) / f64::from(ocean);
+    #[expect(clippy::cast_precision_loss, reason = "under 10^6 cells")]
+    let cells = field.synthesis().len() as f64;
+    println!(
+        "Earth-like ocean: hills {:.3}, draped hills {:.3}, plains {:.3}; the cells' mean a² \
+         {:.3} over the ocean and {:.3} over the body",
+        share(hills),
+        share(draped),
+        share(plains),
+        a2_ocean / f64::from(ocean),
+        a2_all / cells
+    );
+    for (name, n) in [
+        ("hills", hills),
+        ("draped hills", draped),
+        ("plains", plains),
+    ] {
+        assert!(share(n) >= 0.1, "{name} cover {} of the ocean", share(n));
+    }
+}
+
 #[test]
 fn a_world_with_no_spectrum_has_no_relief() {
     for kind in [SyntheticWorld::Flat, SyntheticWorld::OneCrater] {
@@ -500,11 +878,31 @@ fn central_difference(
     })
 }
 
+/// The sum of the magnitudes of the octaves' gradients at `dir` through `through`, each as a
+/// function of direction: the scale of a finite difference's error, which each octave makes in
+/// proportion to its own slope, however the octaves' slopes cancel in their sum.
+fn octave_slopes(relief: &Relief, field: &CoarseField, dir: [f64; 3], through: u8) -> f64 {
+    let table = octave_table(relief.seed());
+    let mut total = 0.0;
+    relief
+        .each_term(field, dir, through, &table, &mut LatticeCache::new(), |t| {
+            let g = as_function_of_direction(field.header(), dir, t.height.gradient);
+            total += (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+        })
+        .unwrap();
+    total
+}
+
 #[test]
 fn the_gradient_matches_a_central_difference() {
     // Through octave 15 (422 m on an Earth) with a 10 cm step, and through the finest (3.3 m)
-    // with a 1 mm step: the difference's own error, about (step ÷ λ)² of the slope, is under
-    // 10⁻⁶, well inside the 10⁻⁵ asserted.
+    // with a 1 mm step. The difference errs by about (step ÷ λ)² of each octave's own slope, and
+    // the noise, C² at its lattice planes, by that much again where a step crosses one: under
+    // 10⁻⁶ of the octaves' slopes, the larger of their sum's magnitude and the sum of theirs,
+    // well inside the 10⁻⁵ asserted. The sum of theirs is the scale where the octaves' slopes
+    // cancel: the broken law (`decision-r09-t5.md` item 2) leaves the finest octaves centimetres
+    // and the total slope in places a hundredth, against which the finest octave's own error is
+    // no longer small.
     for (kind, seed) in [
         (SyntheticWorld::EarthLike, 0x6772_6164),
         (SyntheticWorld::CeresLike, 0x6365_7273),
@@ -518,13 +916,14 @@ fn the_gradient_matches_a_central_difference() {
             for dir in uniform_points(seed, 300) {
                 let g = relief.at(field, dir, through, &mut cache).unwrap().gradient;
                 let size = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+                let scale = size.max(octave_slopes(&relief, field, dir, through));
                 let fd = central_difference(&relief, field, dir, through, step);
                 let error = [0, 1, 2].map(|k| fd[k] - g[k]);
                 let error =
                     (error[0] * error[0] + error[1] * error[1] + error[2] * error[2]).sqrt();
                 assert!(
-                    error <= 1e-5 * size + 1e-9,
-                    "{kind:?} through {through} at {dir:?}: {g:?} vs {fd:?}"
+                    error <= 1e-5 * scale + 1e-9,
+                    "{kind:?} through {through} at {dir:?}: {g:?} vs {fd:?} (scale {scale})"
                 );
             }
         }
@@ -624,7 +1023,11 @@ fn the_stored_octave_rms_is_the_direct_one() {
 #[test]
 fn a_body_too_small_for_octaves_has_no_unresolved_relief() {
     let tiny = crate::testing::FieldBuilder::new(Metres::new(20.0))
-        .spectrum(BandSpectrum::new(1.9, SquareMetres::new(1.0)).unwrap())
+        .spectrum(BandSpectrum::anchored(
+            SpectrumShape::SILICATE,
+            Metres::new(20.0),
+            Metres::new(1.0),
+        ))
         .build();
     let header = tiny.header();
     assert!(finest_octave(header.radius()) < first_octave(header.level()));
@@ -734,8 +1137,17 @@ fn the_relief_reads_the_base_elevation_s_cells_and_no_others() {
     }
 }
 
+/// The sea floor byte of hills of relief `hills_m` under `ponded_m` of ponded sediment.
+fn seafloor(hills_m: f64, ponded_m: f64) -> u8 {
+    SynthesisCell::pack_seafloor(
+        SynthesisCell::quantise_hill_relief(Metres::new(hills_m)).unwrap(),
+        SynthesisCell::quantise_ponded_sediment(Metres::new(ponded_m)).unwrap(),
+    )
+    .unwrap()
+}
+
 /// A cell of crust `crust` at `distance_km` from a boundary of kind `boundary` and obliquity
-/// `obliquity` (in 255ths of 90°).
+/// `obliquity` (in 255ths of 90°), its sea floor the reference hills where it is oceanic.
 fn cell(crust: Crust, boundary: BoundaryKind, distance_km: i16, obliquity: u8) -> SynthesisCell {
     SynthesisCell {
         elevation_mm: 0,
@@ -752,6 +1164,10 @@ fn cell(crust: Crust, boundary: BoundaryKind, distance_km: i16, obliquity: u8) -
         substances: SynthesisCell::NO_SUBSTANCES,
         class: SurfaceClass::UNCLASSIFIED,
         crater_state: 0,
+        seafloor: match crust {
+            Crust::Oceanic => seafloor(H_REF.value(), 0.0),
+            Crust::Continental | Crust::Lid | Crust::Province => SynthesisCell::NO_SEAFLOOR,
+        },
     }
 }
 
@@ -776,15 +1192,7 @@ fn styles_follow_the_crust_and_the_nearest_boundary() {
     );
     let half = style(Crust::Continental, BoundaryKind::Collision, 175, 0).belt();
     assert!((half - 0.5).abs() < 1e-12, "{half}");
-    // A subduction arc rises behind the boundary on the overriding plate only.
-    assert_same_bits(
-        style(Crust::Continental, BoundaryKind::Subduction, 150, 0).belt(),
-        1.0,
-    );
-    assert_same_bits(
-        style(Crust::Oceanic, BoundaryKind::Subduction, -150, 0).belt(),
-        0.0,
-    );
+    let slow_floor = seafloor(232.0, 0.0);
     // An oblique boundary shears, over a narrower zone on oceanic crust; a head-on one does not.
     let oblique = style(Crust::Continental, BoundaryKind::Transform, 50, 255);
     assert_same_bits(oblique.shear(), 1.0);
@@ -806,28 +1214,182 @@ fn styles_follow_the_crust_and_the_nearest_boundary() {
     assert_same_bits(rift.amplitude(), ACTIVE_AMPLITUDE);
     let interior = style(Crust::Continental, BoundaryKind::Transform, 2_000, 0);
     assert_same_bits(interior.amplitude(), INTERIOR_AMPLITUDE);
-    // Oceanic crust is young hills near a boundary and abyssal plain far from all.
-    let hills = style(Crust::Oceanic, BoundaryKind::Divergent, 100, 0);
-    assert_same_bits(hills.amplitude(), HILLS_AMPLITUDE);
-    let plain = style(Crust::Oceanic, BoundaryKind::Divergent, 2_000, 0);
-    assert_same_bits(plain.amplitude(), PLAIN_AMPLITUDE);
-    assert_same_bits(
-        style(Crust::Oceanic, BoundaryKind::Absent, none, 0).amplitude(),
-        PLAIN_AMPLITUDE,
-    );
-    // Every style lies within the bounds the octaves state.
+    // Oceanic crust's amplitude is its sea floor's, wherever its boundary is.
+    let floor = |byte: u8, d: i16| {
+        ReliefStyle::of(&SynthesisCell {
+            seafloor: byte,
+            ..cell(Crust::Oceanic, BoundaryKind::Divergent, d, 0)
+        })
+        .amplitude()
+    };
+    assert_same_bits(floor(slow_floor, 100), floor(slow_floor, 3_000));
+}
+
+/// A subduction arc rises behind the boundary on the overriding plate only, in a band set by the
+/// overriding crust (`decision-r09-t5.md` item 6), and the forearc before it keeps its crust's own
+/// style.
+#[test]
+fn arcs_lie_in_bands_behind_their_trenches_set_by_the_overriding_crust() {
+    let style = |c, b, d, o| ReliefStyle::of(&cell(c, b, d, o));
+    // Full 200 km behind an oceanic trench and 300 km behind a continental one, nothing 50 km
+    // behind either or on the subducting plate.
+    for (crust, full) in [(Crust::Oceanic, 200), (Crust::Continental, 300)] {
+        assert_same_bits(style(crust, BoundaryKind::Subduction, full, 0).belt(), 1.0);
+        assert_same_bits(style(crust, BoundaryKind::Subduction, 50, 0).belt(), 0.0);
+        assert_same_bits(style(crust, BoundaryKind::Subduction, -150, 0).belt(), 0.0);
+    }
+    // The bands' edges: an island arc is gone by 330 km, a cordillera by 600, and each rises
+    // over its ramp.
+    for (crust, d, belt) in [
+        (Crust::Oceanic, 90, 0.0),
+        (Crust::Oceanic, 140, 1.0),
+        (Crust::Oceanic, 250, 1.0),
+        (Crust::Oceanic, 330, 0.0),
+        (Crust::Continental, 130, 0.0),
+        (Crust::Continental, 180, 1.0),
+        (Crust::Continental, 450, 1.0),
+        (Crust::Continental, 600, 0.0),
+    ] {
+        assert_same_bits(style(crust, BoundaryKind::Subduction, d, 0).belt(), belt);
+    }
+    let rising = style(Crust::Oceanic, BoundaryKind::Subduction, 115, 0).belt();
+    assert!((rising - 0.5).abs() < 1e-12, "{rising}");
+    let falling = style(Crust::Continental, BoundaryKind::Subduction, 525, 0).belt();
+    assert!((falling - 0.5).abs() < 1e-12, "{falling}");
+    // The forearc keeps its crust's own style: the deformation zone on a continent, the sea floor
+    // on an oceanic plate.
+    let forearc = style(Crust::Continental, BoundaryKind::Subduction, 60, 0);
+    assert_same_bits(forearc.amplitude(), ACTIVE_AMPLITUDE);
+    let slow_floor = seafloor(232.0, 0.0);
+    let island_forearc = ReliefStyle::of(&SynthesisCell {
+        seafloor: slow_floor,
+        ..cell(Crust::Oceanic, BoundaryKind::Subduction, 60, 0)
+    });
+    let open_floor = ReliefStyle::of(&SynthesisCell {
+        seafloor: slow_floor,
+        ..cell(Crust::Oceanic, BoundaryKind::Divergent, 2_000, 0)
+    });
+    assert_same_bits(island_forearc.belt(), 0.0);
+    assert_same_bits(island_forearc.amplitude(), open_floor.amplitude());
+}
+
+/// Every style lies within the bounds the octaves state, on every sea floor, and is the one its
+/// stored codes give ([`ReliefStyle::from_codes`]).
+#[test]
+fn every_style_lies_within_the_octaves_bounds_and_comes_from_its_codes() {
+    let none = SynthesisCell::NO_BOUNDARY_KM;
     for &crust in Crust::ALL {
         for &boundary in BoundaryKind::ALL {
             for d in [-2_000, -300, -100, 0, 100, 300, 2_000, none] {
                 for o in [0, 128, 255] {
-                    let s = style(crust, boundary, d, o);
-                    assert!(
-                        s.amplitude() > 0.0 && s.amplitude() <= MAX_AMPLITUDE,
-                        "{s:?}"
-                    );
-                    assert!((0.0..=1.0).contains(&s.belt()) && (0.0..=1.0).contains(&s.shear()));
+                    for byte in [0x10, 0x80, 0xF0, 0x1F, 0xFF, 0x87] {
+                        let at = SynthesisCell {
+                            seafloor: if crust == Crust::Oceanic {
+                                byte
+                            } else {
+                                SynthesisCell::NO_SEAFLOOR
+                            },
+                            ..cell(crust, boundary, d, o)
+                        };
+                        let s = ReliefStyle::of(&at);
+                        assert!(
+                            s.amplitude() > 0.0 && s.amplitude() <= MAX_AMPLITUDE,
+                            "{s:?}"
+                        );
+                        assert!(
+                            (0.0..=1.0).contains(&s.belt()) && (0.0..=1.0).contains(&s.shear())
+                        );
+                        // `of` reads exactly the codes `from_codes` takes.
+                        assert_eq!(
+                            s,
+                            ReliefStyle::from_codes(
+                                at.crust,
+                                at.boundary,
+                                at.boundary_distance_km,
+                                at.boundary_obliquity,
+                                at.seafloor,
+                            )
+                        );
+                    }
                 }
             }
+        }
+    }
+}
+
+/// The sea floor's amplitude (`decision-r09-t5.md` item 5): the hills' (H ÷ 95 m)^0.6, 1.71 on a
+/// slow ridge's 232 m, 0.72 on a fast one's 55 m and 0.48 draped to 28 m, capped at the belts';
+/// unchanged while the ponded sediment is under half the hills' relief, a plain's from three
+/// times it, and continuous between.
+#[test]
+fn the_sea_floor_s_amplitude_follows_its_hills_and_their_burial() {
+    let amplitude = |byte: u8| {
+        ReliefStyle::of(&SynthesisCell {
+            seafloor: byte,
+            ..cell(Crust::Oceanic, BoundaryKind::Divergent, 500, 0)
+        })
+        .amplitude()
+    };
+    let hills = |code: u8| {
+        let byte = SynthesisCell::pack_seafloor(code, 0).unwrap();
+        let h = crate::field::hill_relief_of(byte).unwrap().value();
+        (byte, h)
+    };
+    // The ruling's three floors, exactly and through the hill code nearest each, which is within
+    // half the code's step, 2^(1 ÷ 6) in relief, so 2^(0.6 ÷ 6) in amplitude.
+    for (relief_m, expected) in [(232.0, 1.71), (55.0, 0.72), (28.0, 0.48)] {
+        let exact = math::powf(relief_m / H_REF.value(), HILL_AMPLITUDE_EXPONENT);
+        assert!((exact - expected).abs() < 0.005, "{relief_m} m: {exact}");
+        let a = amplitude(seafloor(relief_m, 0.0));
+        assert!(
+            math::ln(a / exact).abs() <= HILL_AMPLITUDE_EXPONENT * core::f64::consts::LN_2 / 6.0,
+            "{relief_m} m: {a} against {exact}"
+        );
+    }
+    // Every hill code's amplitude, undrowned, is its relief's law, capped at the belts'.
+    for code in 1..=15 {
+        let (byte, h) = hills(code);
+        let law = math::powf(h / H_REF.value(), HILL_AMPLITUDE_EXPONENT);
+        assert_same_bits(amplitude(byte), num::min(law, BELT_AMPLITUDE));
+    }
+    assert_same_bits(amplitude(0xF0), BELT_AMPLITUDE);
+    // The ruling's law, a_h^(1 − t) PLAIN_AMPLITUDE^t with t = clamp(ln(2 S_t ÷ H) ÷ ln 6, 0, 1),
+    // which is continuous in the sediment: at the codes' depths below, and at depths no code holds
+    // about both ends of its ramp.
+    let law = |h: f64, s: f64| {
+        let a_h = num::min(
+            math::powf(h / H_REF.value(), HILL_AMPLITUDE_EXPONENT),
+            BELT_AMPLITUDE,
+        );
+        let (onset, buried) = PONDING;
+        let t = (math::ln(s / h / onset) / math::ln(buried / onset)).clamp(0.0, 1.0);
+        math::powf(a_h, 1.0 - t) * math::powf(PLAIN_AMPLITUDE, t)
+    };
+    for h in [28.0, 95.0, 232.0] {
+        for s in [h / 2.0, 3.0 * h] {
+            let below = law(h, s * (1.0 - 1e-9));
+            let above = law(h, s * (1.0 + 1e-9));
+            assert!((below - above).abs() < 1e-8, "{h} m at {s} m");
+        }
+    }
+    // Every byte's amplitude is the law's at its codes' relief and sediment: the hills' own a_h at
+    // or below H ÷ 2, a plain's at or above 3H, the ramp between, falling as the sediment deepens.
+    for code in 1..=15 {
+        let (byte, h) = hills(code);
+        let a_h = amplitude(byte);
+        let mut previous = a_h;
+        for ponded in 0..=15_u8 {
+            let s = crate::field::ponded_sediment_of(ponded).value();
+            let a = amplitude(byte | ponded);
+            if s <= h / 2.0 {
+                assert_same_bits(a, a_h);
+            } else if s >= 3.0 * h {
+                assert_same_bits(a, PLAIN_AMPLITUDE);
+            } else {
+                assert_same_bits(a, law(h, s));
+            }
+            assert!(a <= previous + 1e-15, "hills {code}, ponded {ponded}: {a}");
+            previous = a;
         }
     }
 }

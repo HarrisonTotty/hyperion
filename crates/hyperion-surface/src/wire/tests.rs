@@ -393,10 +393,10 @@ fn wire_payloads_merged_in_any_order_give_the_whole_cover_s_field() {
     }
 }
 
-/// The Earth-like world's whole payload is 10–15 MB (about 13.6 MB: Design note 17's 21 bytes a
-/// cell with the substance byte, 22, and 50 per four cells, with each block's header, the field
-/// header with its palette, and the craters), and no block of it, or of any payload here, exceeds
-/// 1 MiB.
+/// The Earth-like world's whole payload is 10–15 MB (about 14.0 MB: Design note 17's 21 bytes a
+/// cell with the substance and sea floor bytes, 23, and 50 per four cells, with each block's
+/// header, the field header with its palette, and the craters), and no block of it, or of any
+/// payload here, exceeds 1 MiB.
 #[test]
 fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
     let field = earth();
@@ -420,7 +420,7 @@ fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
         rest = &rest[length..];
         blocks += 1;
     }
-    assert_eq!(blocks, 13, "{} bytes", bytes.len());
+    assert_eq!(blocks, 14, "{} bytes", bytes.len());
     for bytes in [
         encode_payload(mars(), &region(), None),
         encode_payload(mars(), &whole(mars()), None),
@@ -672,7 +672,8 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         decode_payload(&b).unwrap_err()
     };
     // Block 0's header section: its length at 33, then the body at 35, the radius at 45, the
-    // spectrum's exponent at 85, N(>1 km) at 101 and the screening's tag at 109.
+    // spectrum's exponent at 85, its break degree at 101 and its small-scale exponent at 109,
+    // N(>1 km) at 117 and the screening's tag at 125.
     let body = ceres.header().body();
     let other = BodyRef::new(body.raw_system_id(), body.body_index() + 1);
     let header_body = DecodeBlockError::HeaderBody {
@@ -687,14 +688,18 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
     assert_eq!(damaged(45, &f64_bytes(-1.0)), block(0, radius));
     let spectrum = DecodeBlockError::Spectrum(BuildBandSpectrumError::Exponent(0.5));
     assert_eq!(damaged(85, &f64_bytes(0.5)), block(0, spectrum));
+    let break_degree = DecodeBlockError::Spectrum(BuildBandSpectrumError::BreakDegree(0.5));
+    assert_eq!(damaged(101, &f64_bytes(0.5)), block(0, break_degree));
+    let small = DecodeBlockError::Spectrum(BuildBandSpectrumError::SmallScaleExponent(1.0));
+    assert_eq!(damaged(109, &f64_bytes(1.0)), block(0, small));
     let density = DecodeBlockError::CraterParams(BuildCraterParamsError::Density(-1.0));
-    assert_eq!(damaged(101, &f64_bytes(-1.0)), block(0, density));
+    assert_eq!(damaged(117, &f64_bytes(-1.0)), block(0, density));
     assert_eq!(ceres.header().craters().screening(), Screening::None);
     let tag = DecodeBlockError::Tag {
         part: "screening",
         code: 7,
     };
-    assert_eq!(damaged(109, &[7]), block(0, tag));
+    assert_eq!(damaged(125, &[7]), block(0, tag));
     let declared = u16::from_le_bytes([bytes[33], bytes[34]]);
     for wrong in [declared - 1, declared + 1] {
         let error = DecodeBlockError::HeaderLength { declared: wrong };
@@ -744,6 +749,9 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         damaged(at[1] + 46 + 14, &i32::MIN.to_le_bytes()),
         block(1, dry)
     );
+    // The record's last byte, its sea floor: a lid has none.
+    let seafloor = DecodeBlockError::Record(BuildFieldError::Seafloor { cell: start });
+    assert_eq!(damaged(at[1] + 46 + 22, &[0x10]), block(1, seafloor));
     let one = &bytes[at[1]..at[2]];
     assert_eq!(
         decode_block(&split_first_range(one)),
@@ -1063,8 +1071,9 @@ where
 /// one-byte scale (the steepness index, the precipitation rate, the wind's speed and azimuth, the
 /// resolution, the boundary obliquity, the ice share and the crater degradation); a sample of the
 /// two-byte drainage area's; the header's temperature and anomaly steps for every exponent and its
-/// temperatures at pinned codes; and the cells' heights and distances at pinned codes. A code
-/// renumbered fails it; a code appended only extends it (`SURFACE_PAYLOAD_FORMAT`'s rule).
+/// temperatures at pinned codes; the cells' heights and distances at pinned codes; and the sea
+/// floor's two nibbles, every code. A code renumbered fails it; a code appended only extends it
+/// (`SURFACE_PAYLOAD_FORMAT`'s rule).
 #[test]
 fn wire_codes_match_their_golden() {
     let mut w = GoldenWriter::new();
@@ -1073,7 +1082,27 @@ fn wire_codes_match_their_golden() {
     write_byte_scales(&mut w);
     write_header_steps(&mut w);
     write_cell_readers(&mut w);
+    write_seafloor_scales(&mut w);
     golden!("wire/codes", w.as_str());
+}
+
+/// The sea floor byte's two scales, each nibble's sixteen codes (`decision-r09-t5.md` item 5).
+fn write_seafloor_scales(w: &mut GoldenWriter) {
+    for code in 0..=0x0F_u8 {
+        let at = SynthesisCell {
+            crust: Crust::Oceanic,
+            seafloor: SynthesisCell::pack_seafloor(code, code).unwrap(),
+            ..PLAIN_CELL
+        };
+        match at.hill_relief() {
+            Some(h) => w.f64(&format!("seafloor_hill_relief_m[{code}]"), h.value()),
+            None => w.line(&format!("seafloor_hill_relief_m[{code}] = none")),
+        }
+        w.f64(
+            &format!("seafloor_ponded_sediment_m[{code}]"),
+            at.ponded_sediment().value(),
+        );
+    }
 }
 
 /// A dry, plain synthesis record, whose fields the readers' lines vary one at a time.
@@ -1092,6 +1121,7 @@ const PLAIN_CELL: SynthesisCell = SynthesisCell {
     substances: SynthesisCell::NO_SUBSTANCES,
     class: SurfaceClass::UNCLASSIFIED,
     crater_state: 0,
+    seafloor: SynthesisCell::NO_SEAFLOOR,
 };
 
 /// Each one-byte enum's codes and variants, and the layout's own tags.
