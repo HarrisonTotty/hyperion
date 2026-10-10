@@ -5976,6 +5976,28 @@ generator, and the reference's sampling needs no domain tag.
     again with them, before R08.T6.d reads the triple; R08.T5.c's text does not yet say so (for
     "main").
 
+    _Re-blessed with R08.T5.c's table_ (2026-10-10; it supersedes the last three bullets above):
+    `marsFitAir` draws the dust on `materials/phase/mars-dust.json` (the hexahedra, gamma r_eff
+    1.2247 µm, v_eff 0.3, through `aerosolModeOptics` and `aerosolPhaseTable`; τ(550) 0.5 is
+    τ(780) ≈ 0.51 and τ(880) ≈ 0.52–0.54, against Lemmon et al.'s measured 440 nm 2.5–3.2% below
+    880 nm, §3.2). The triple, the objective (0.007693, Earth's direct beam 5° up under the 2,300 K
+    star), Earth at the plan's three suns (0.006848) and `channels.json` are unchanged. Mars's
+    worst moves from 0.0030 to 0.0037 (the 2,300 K star; the sky 10° up opposite the Sun at 85°),
+    0.0024–0.0035 under the other eleven stars, against 0.0040–0.0059 over all twelve at
+    680/550/440, and does not bind. A test holds the table's a₁(150°) ÷ a₁(90°) at 650 nm, 0.63,
+    to MSL's sky (0.5–0.85), which a Henyey–Greenstein phase fails (0.41).
+    - _Found, for the owner's ruling through "main":_ in the fit's single scattering, on the
+      hexahedra at equal V/A (r_A 2.05 µm), the sky is bluer than the Sun's light only within
+      about 4° of a setting Sun (1.04 blue over red at 3°, 0.77 at 5°, the Sun's 0.86), so the
+      blue-sunset test looks 3° from it. Mars's glow is wider: blue over red stays above 1 to
+      7–12° in Pancam's sol 489 (PIA07997) and Mastcam's sol 956 (PIA19400) sunsets (gamma-encoded
+      images, sampled by the science check). The lobe is about 1.46 times narrower than the one
+      Wolff et al. 2009 fit to Tomasko et al. 1999 (r_eff 1.4 µm surface-equivalent, Fig. 3, which
+      is r_A for a convex particle); matching it on the hexahedra would need r_VA ≈ 0.84 µm.
+      `science-r08-mmf.md` §2.3 chose equal V/A for the mass–extinction relation and did not weigh
+      the forward lobe. Multiple scattering at the low sun's slant dust depth (about 4.5) widens
+      the glow too, and is the bakes', not this fit's.
+
   - _What the objective models._ The direct beam's transmittance and the singly scattered sky seen
     from the ground, by the same quadrature in both colours; no ground reflection, no multiple
     scattering (Hillaire's term, which is also evaluated at the triple), and smooth terms only (an

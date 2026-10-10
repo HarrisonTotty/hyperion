@@ -25,6 +25,7 @@
  */
 
 import type { Rgb } from "../photometry/toneCurve";
+import { aerosolModeOptics, aerosolPhaseTable } from "./aerosol";
 import { type AtmosphereColumn, hydrostaticColumn } from "./column";
 import {
   AEROSOL_ANGSTROM_EXPONENT,
@@ -33,11 +34,18 @@ import {
   AEROSOL_SCALE_HEIGHT_M,
   AEROSOL_SINGLE_SCATTERING_ALBEDO,
 } from "./earth";
-import { BAKE_RANGE_NM, columnLengthM, densityAt, type DensityProfile, phaseAt } from "./medium";
+import {
+  BAKE_RANGE_NM,
+  columnLengthM,
+  densityAt,
+  type DensityProfile,
+  type PhaseFunction,
+  phaseAt,
+} from "./medium";
 import { type LevelSpheroid, referenceGravity } from "./oblate";
 import { distanceToTopM, intersectsGround, localRadiusM, type Shell } from "./opticalDepth";
 import { ESTIMATED_RAYLEIGH, type GasFractions, GASES, molecularMixture } from "./rayleigh";
-import { type AerosolMode, modeOptics } from "./sizeDistribution";
+import type { AerosolMode } from "./sizeDistribution";
 import {
   type BakeSpectrum,
   deltaUv,
@@ -418,28 +426,39 @@ export const MARS_FIT_COLUMN: AtmosphereColumn = hydrostaticColumn({
 
 /**
  * Mars's dust for the fit: R08.T5.b's `mars_dust` index file in a gamma distribution of r_eff
- * 1.5 µm and v_eff 0.3, the mode `science-r08-nonspherical.md` §2.1 takes for Mars (within Lemmon
- * et al. 2015's 1.5–1.65 µm and 0.2–0.5, §4.2).
+ * 1.2247 µm and v_eff 0.3, R08.T5.c's Mars dust mode. That is the r_eff of 1.5 µm
+ * `science-r08-nonspherical.md` §2.1 takes for Mars, read as the surface-equivalent radius of
+ * Wolff et al. 2009's D/L = 1 cylinders (JGR 114, E00D04, ¶[26] and ¶[32]; gamma, v_eff 0.3,
+ * ¶[27]) and converted to the modes' volume-to-area radius r = 3V ÷ 4A, × (2 ÷ 3)^½
+ * (`science-r08-mmf.md` §2.3, ruled 2026-10-10).
  *
  * @remarks
+ * Lemmon et al. 2015 (Icarus 251, 96–111, §4.2) quote the earlier missions' 1.5–1.65 µm as
+ * volume-equivalent radii, with v_eff 0.2–0.5; Wolff's cylinders at a surface-equivalent 1.5 µm
+ * are 1.40 µm in that measure.
+ *
  * The file's indices are Wolff et al. 2009's CRISM retrievals from 440 nm; below that they are
  * interpolated towards the compilation's 321 nm row (`science-r08-nonspherical.md` §3.2).
  */
 export const MARS_DUST_MODE: AerosolMode = {
   material: "mars_dust",
-  sizes: { kind: "gamma", effectiveRadiusUm: 1.5, effectiveVariance: 0.3 },
+  sizes: { kind: "gamma", effectiveRadiusUm: 1.2247, effectiveVariance: 0.3 },
 };
 
 /**
  * Mars's dust optical depth for the fit, vertical, at 550 nm: 0.5.
  *
  * @remarks
- * That is τ(880) ≈ 0.54 for {@link MARS_DUST_MODE}, whose extinction at 880 nm is 7.5% above its
- * 550 nm value (sphere Mie of the source's 800 and 900 nm rows, the science check of 2026-10-10;
- * Lemmon et al. 2015, Icarus 251, 96, §4.2, find such dust 7–11% less opaque at 440 nm than at
- * 880 nm). It lies inside the range the rovers' Pancams recorded at 880 nm outside dust storms
- * over five Mars years: below about 0.3 (Spirit) and 0.5 (Opportunity) in the clear season, and
- * about 1 in the dusty season's background (their §4.1).
+ * For {@link MARS_DUST_MODE} that is τ(780) ≈ 0.51 on the hexahedra, whose table ends at 780 nm,
+ * and τ(880) ≈ 0.52–0.54: 0.52 on the hexahedra extrapolated past 780 nm, 0.54 on its equal-V/A
+ * spheres (Mie of the source's 800 and 900 nm rows), which rise faster to the red (6.1% against
+ * 2.5% at 780 nm). Lemmon et al. 2015 (Icarus 251, 96–111) measured τ at 440 nm 3.2% (Spirit) and
+ * 2.5% (Opportunity) below 880 nm (their ε, 0.0330 ± 0.0004 and 0.0256 ± 0.0007, §3.2), with the
+ * 440 nm filter's red leak; the earlier missions' 1.5–1.65 µm dust would give 7–11% (§4.2). The
+ * hexahedra put 440 nm 3.7% below 780 nm (about 4.7% below 880 nm, extrapolated), the spheres
+ * 10.6% below 880 nm. It lies inside the range the rovers' Pancams recorded at 880 nm outside dust
+ * storms over five Mars years: below about 0.3 (Spirit) and 0.5 (Opportunity) in the clear season,
+ * and about 1 in the dusty season's background (their §4.1).
  */
 export const MARS_DUST_OPTICAL_DEPTH_550 = 0.5;
 
@@ -447,34 +466,26 @@ export const MARS_DUST_OPTICAL_DEPTH_550 = 0.5;
 const DUST_GRID_STEP_NM = 20;
 
 /**
- * The wavelengths at which the fit evaluates the dust's Mie optics, nm: every
- * {@link DUST_GRID_STEP_NM} over the bake range. Its extinction and albedo are linear between
- * them; a Mie sum over the size distribution costs about 47 ms a wavelength, and the 20 nm grid
- * keeps the fit's case family to about a second.
+ * The wavelengths at which the fit evaluates the dust's optics, nm: every
+ * {@link DUST_GRID_STEP_NM} over the bake range. Its extinction, albedo and phase are linear
+ * between them, as the table's own optics are between its wavelength nodes. A sum over the
+ * hexahedra's table with its matrix costs a few milliseconds a wavelength, so the grid's 20
+ * wavelengths take about 0.1 s.
  */
 const DUST_GRID_NM: Float64Array = Float64Array.from(
   { length: (BAKE_RANGE_NM[1] - BAKE_RANGE_NM[0]) / DUST_GRID_STEP_NM + 1 },
   (_, i) => BAKE_RANGE_NM[0] + DUST_GRID_STEP_NM * i,
 );
 
-/** Linear interpolation of values on {@link DUST_GRID_NM}, held at its ends. */
-function onDustGrid(values: Float64Array, wavelengthNm: number): number {
+/** Linear interpolation of a value at each of {@link DUST_GRID_NM}'s nodes, held at its ends. */
+function onDustGrid(valueAt: (node: number) => number, wavelengthNm: number): number {
   const x = Math.min(
     Math.max((wavelengthNm - BAKE_RANGE_NM[0]) / DUST_GRID_STEP_NM, 0),
     DUST_GRID_NM.length - 1,
   );
   const k = Math.min(Math.floor(x), DUST_GRID_NM.length - 2);
   const t = x - k;
-  return (values[k] ?? Number.NaN) * (1 - t) + (values[k + 1] ?? Number.NaN) * t;
-}
-
-/**
- * The Henyey–Greenstein phase, sr⁻¹: (1 − g²) ÷ (4π (1 + g² − 2g cos θ)^(3/2)) (Henyey and
- * Greenstein 1941, ApJ 93, 70).
- */
-function henyeyGreenstein(asymmetry: number, cosTheta: number): number {
-  const g = asymmetry;
-  return (1 - g * g) / (4 * Math.PI * (1 + g * g - 2 * g * cosTheta) ** 1.5);
+  return valueAt(k) * (1 - t) + valueAt(k + 1) * t;
 }
 
 /**
@@ -482,37 +493,44 @@ function henyeyGreenstein(asymmetry: number, cosTheta: number): number {
  * with the gas at {@link MARS_DUST_OPTICAL_DEPTH_550}.
  *
  * @remarks
- * Mars dust is a `nonSphericalMineral`, so R08.T5.b's sphere Mie gives its cross-sections, and its
- * albedo and asymmetry only as the spheres' values (Design note 6). Its phase here is the
- * Henyey–Greenstein of that asymmetry at each wavelength, the interim R08.T5.b names for
- * R08.T5.c's `aerosolTerm` until R08.T5.c's TAMUdust2020 tables land; the fit is blessed again
- * then. The dust is well mixed, its density the gas's: the slow-settling limit of Conrath's
- * profile (B. J. Conrath, "Thermal structure of the Martian atmosphere during the dissipation of
- * the dust storm of 1971", Icarus 24 (1975) 36–46), and what Spirit's sky shows, dust "well mixed
- * with the atmosphere in the bottom 10-20 km" (Lemmon et al. 2015, conclusion 5).
+ * Mars dust is a `nonSphericalMineral`, so R08.T5.c's {@link aerosolModeOptics} draws it on its
+ * TAMUdust2020 table (`materials/phase/mars-dust.json`: the hexahedra, sphericity 0.71, a `model`):
+ * the table's cross-sections, albedo and matrix. Its phase at each grid wavelength is the √θ
+ * table {@link aerosolPhaseTable} makes of that matrix, with the files' unresolved forward peak
+ * laid on its first entries, read by {@link phaseAt}: the phase `aerosol.ts`'s `aerosolTerm` gives
+ * the renderer. The dust is well mixed, its density the gas's: the slow-settling limit of
+ * Conrath's profile (B. J. Conrath, "Thermal structure of the Martian atmosphere during the
+ * dissipation of the dust storm of 1971", Icarus 24 (1975) 36–46), and what Spirit's sky shows,
+ * dust "well mixed with the atmosphere in the bottom 10-20 km" (Lemmon et al. 2015, conclusion 5).
  */
 export function marsFitAir(): SpectralAir {
   const air = molecularAir("Mars", MARS_FIT_COLUMN, MARS_AIR, 1);
-  const optics = Array.from(DUST_GRID_NM, (nm) => modeOptics(MARS_DUST_MODE, nm, NO_ANGLES));
-  const extinction = Float64Array.from(optics, (o) => o.extinctionCrossSectionM2);
-  const albedo = Float64Array.from(optics, (o) => o.singleScatteringAlbedo);
-  const asymmetry = Float64Array.from(optics, (o) => o.asymmetry);
-  const at550 = onDustGrid(extinction, 550);
+  const particles = { kind: "distribution", mode: MARS_DUST_MODE } as const;
+  const optics = Array.from(DUST_GRID_NM, (nm) => aerosolModeOptics(particles, nm));
+  const phases = optics.map((o): PhaseFunction => ({
+    kind: "tabulated",
+    table: aerosolPhaseTable([o, o, o]),
+  }));
+  const extinctionAt = (node: number): number =>
+    optics[node]?.extinctionCrossSectionM2 ?? Number.NaN;
+  const albedoAt = (node: number): number => optics[node]?.singleScatteringAlbedo ?? Number.NaN;
+  const at550 = onDustGrid(extinctionAt, 550);
   const columnM = columnLengthM(MARS_FIT_COLUMN.density, MARS_FIT_COLUMN.topHeightM);
   const extinctionPerM = (nm: number): number =>
-    (MARS_DUST_OPTICAL_DEPTH_550 / columnM) * (onDustGrid(extinction, nm) / at550);
+    (MARS_DUST_OPTICAL_DEPTH_550 / columnM) * (onDustGrid(extinctionAt, nm) / at550);
   const dust: SpectralAirTerm = {
     name: "dust",
     density: MARS_FIT_COLUMN.density,
-    scatteringPerM: (nm) => onDustGrid(albedo, nm) * extinctionPerM(nm),
-    absorptionPerM: (nm) => (1 - onDustGrid(albedo, nm)) * extinctionPerM(nm),
-    phasePerSr: (cosTheta, nm) => henyeyGreenstein(onDustGrid(asymmetry, nm), cosTheta),
+    scatteringPerM: (nm) => onDustGrid(albedoAt, nm) * extinctionPerM(nm),
+    absorptionPerM: (nm) => (1 - onDustGrid(albedoAt, nm)) * extinctionPerM(nm),
+    phasePerSr: (cosTheta, nm) =>
+      onDustGrid((node) => {
+        const phase = phases[node];
+        return phase === undefined ? Number.NaN : phaseAt(phase, cosTheta)[0];
+      }, nm),
   };
   return { ...air, terms: [...air.terms, dust] };
 }
-
-/** No scattering angles: Mie then sums the efficiencies alone. */
-const NO_ANGLES = new Float64Array(0);
 
 /** Whether a formula names a single atom: one element symbol and no count, as "Fe" or "H". */
 function isAtom(formula: string): boolean {

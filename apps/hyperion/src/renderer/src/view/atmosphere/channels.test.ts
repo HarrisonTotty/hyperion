@@ -110,7 +110,7 @@ function tableOf(airs: ReadonlyArray<SpectralAir>) {
   };
 }
 
-/** The fit's atmospheres, built once: Mars's dust optics alone cost about a second. */
+/** The fit's atmospheres, built once: Mars's dust optics on its phase table cost about 0.1 s. */
 const AIRS = channelFitAirs();
 
 /** The fit's atmosphere of a name. */
@@ -216,14 +216,33 @@ describe("Mars's dusty air", () => {
     expect(skyBlueToRed(view)).toBeLessThan(sunBlueToRed);
   });
 
-  it("colours the sky around a setting Sun bluer than the Sun's light", () => {
+  // The blue aureole is the dust's forward diffraction lobe, narrower and higher in blue. In the
+  // fit's single scattering, on the hexahedra at equal V/A (r_A 2.05 µm; R08.T5.c), the blue and
+  // red lobes cross between 5° and 10° from the Sun, and with the dust's absorption in blue the sky
+  // is bluer than the Sun's light only within about 4° of it. Mars's own glow is wider, bluer to
+  // 7–12° in MER's and MSL's sunsets (R08's Risks, T4.a).
+  it("colours the sky 3° from a setting Sun bluer than the Sun's light", () => {
     const view: CaseView = {
       kind: "sky",
       sunZenithDeg: 85,
-      elevationDeg: 10,
+      elevationDeg: 8,
       azimuthFromSunDeg: 0,
     };
     expect(skyBlueToRed(view)).toBeGreaterThan(sunBlueToRed);
+  });
+
+  it("scatters the dust's light at 150° within 0.5–0.85 of 90°'s at 650 nm (MSL's sky, 0.71)", () => {
+    // Chen-Chen, Pérez-Hoyos and Sánchez-Lavega 2019, Icarus 330, 16, as R08.T5.c's Mars dust test
+    // takes it. The hexahedra's table gives about 0.63; a Henyey–Greenstein phase of its g, 0.71,
+    // gives 0.41.
+    const dust = mars.terms.find((term) => term.name === "dust");
+    if (dust === undefined) {
+      throw new Error("Mars's fit air has a dust term");
+    }
+    const at = (deg: number): number => dust.phasePerSr(Math.cos((deg * Math.PI) / 180), 650);
+    const ratio = at(150) / at(90);
+    expect(ratio).toBeGreaterThan(0.5);
+    expect(ratio).toBeLessThan(0.85);
   });
 });
 
