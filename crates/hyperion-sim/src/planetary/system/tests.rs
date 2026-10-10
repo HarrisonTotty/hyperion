@@ -1957,6 +1957,94 @@ fn a_regular_moon_has_one_locking_time() {
     assert!(moons > 100, "{moons}");
 }
 
+/// P14.T14.d: every present planet's locking time and the heaviest moon it keeps are those of the
+/// tides its bulk section gives, with its one moment of inertia, bit for bit:
+/// `rotation::tides_in_force`, which is `tides` from the 21 → 22 batch's bump.
+#[test]
+fn a_planet_s_locking_time_and_moon_limit_take_its_tides() {
+    use crate::planetary::derive::OrbitSense;
+    use crate::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
+    use crate::planetary::derive::rotation::{
+        SpinningBody, moment_of_inertia_factor, tidal_locking_time, tides_in_force,
+    };
+    use crate::units::{EarthRadii, Seconds};
+    let t = UniverseTime::EPOCH;
+    let mut planets = 0;
+    let mut enveloped = 0;
+    for (ctx, system) in whole() {
+        // The rotation's time is the epoch for a system born by then (`parent_time`).
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t);
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (record, now) = system.primary_record(&epoch, body, label, &fate);
+            let (Section::Ok(bulk), Section::Ok(mass), Section::Ok(orbit), Some(derived)) =
+                (record.bulk(), record.mass(), record.orbit(), now.derived)
+            else {
+                continue;
+            };
+            let (class, fractions) = (bulk.class(), bulk.fractions());
+            let (kg, r) = (Kilograms::from(*mass), Metres::from(bulk.radius()));
+            // Both readers take the tides of these kilograms and metres.
+            let (k2, q) = tides_in_force(
+                class,
+                EarthMasses::from(kg),
+                EarthRadii::from(r),
+                &fractions,
+            );
+
+            // P14.T15's limit, at the prograde limit and the age it was derived at.
+            let tidal = TidalPlanet::new(kg, r, k2, q).unwrap();
+            let age =
+                Years::new(ctx.age_at_epoch().value() + t.since_epoch().as_julian_years_f64());
+            let limit = moon_mass_limit(
+                derived.satellite_limit(OrbitSense::Prograde),
+                &tidal,
+                Seconds::from(age),
+            );
+            assert_same_bits(
+                derived.maximum_moon_mass().value(),
+                EarthMasses::from(limit).value(),
+            );
+
+            // P14.T14.b's locking time, on the orbit about the primary the rotation reads.
+            let rotation = system
+                .rotation_of(ctx, body.index)
+                .unwrap()
+                .expect("a present planet of a whole system holds its rotation");
+            let elements = fate.at(t).orbit().copied().unwrap_or(*orbit.elements());
+            let primary = Kilograms::new(
+                elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - kg.value(),
+            );
+            let spinning =
+                SpinningBody::new(kg, r, moment_of_inertia_factor(class, &fractions), k2, q)
+                    .unwrap();
+            let tau = tidal_locking_time(
+                &spinning,
+                rotation.primordial_period(),
+                elements.semi_major_axis(),
+                primary,
+            );
+            assert_same_bits(rotation.locking_time().value(), tau.value());
+            planets += 1;
+            if matches!(class, PlanetClass::SubNeptune | PlanetClass::IceGiant) {
+                enveloped += 1;
+            }
+        }
+    }
+    assert!(
+        planets > 300 && enveloped > 30,
+        "{planets} planets, {enveloped} enveloped"
+    );
+}
+
 /// P14.T46.d (d): the figure section's states by kind, and its level: `degrade(MassAndOrbit)`
 /// withholds the rotation and the figure, and `degrade(Bulk)` keeps them. A figure keeps the
 /// record's volume and its rotation's pole, and never exceeds the cap.

@@ -1435,8 +1435,9 @@ Solar System values without a generator.
     - `cargo test -p hyperion-sim planetary::derive`
     - `cargo test -p hyperion-sim planetary::system`
     - the batch's golden tests.
-  - _Built:_ first in the 21 → 22 batch's lane, before T24.f. If the batch is blessed first, it
-    takes its own bump, 22 → 23.
+  - _Built:_ first in the 21 → 22 batch's lane, before T24.f, and held until the batch's bump:
+    every reader takes `tides` from generator version 22 and the earlier pairs below it, so that
+    no golden moves before T48.e blesses the batch (Risks, "A sub-Neptune's tides, as built").
   - _Sources:_
     - Gladman et al. 1996 (the locking time);
     - Clairaut's equation in Radau's form (Zharkov and Trubitsyn 1978, as Kramm et al. 2011,
@@ -4985,8 +4986,8 @@ it:
   wire, not the output, and leaves `PROTOCOL_VERSION` at 2 (decision-p14-t35e-wire). T24.g adds no
   draw or domain tag. P14.T14.d (decision-backlog-1) rides the same bump. It moves the locking
   times, rotation laws, frames, figures and moon limits of every sub-Neptune and ice giant, and the
-  moons those limits keep, and it adds no draw or domain tag. If the batch is blessed before it
-  lands, it takes its own bump, 22 → 23.
+  moons those limits keep, and it adds no draw or domain tag. It is built first and held until
+  the bump, which applies it (Risks, "A sub-Neptune's tides, as built").
 - Phase L (decision-composition, 2026-10-09):
   - P14.T49.a moves no output and rides the 21 → 22 batch.
   - The 22 → 23 batch (T49.b–e, T50, T51.a–c, T52, and T24.c–e and T24.g with it) moves every
@@ -5953,9 +5954,9 @@ IceGiant, GasGiant }`, in `derive`, with its thresholds in `params.rs`: an envel
     surface, 0.4 and 10⁵ for giants), also in `params.rs`. _Superseded for the tides by P14.T14.d
     (decision-backlog-1): a sub-Neptune and an ice giant take the envelope's Love number with
     Q = 10⁴, and the tides read no class predicate._ _Superseded for the record by
-    P14.T48.e's gas-envelope split (decision-p14-t35e-wire): `is_giant()` keeps the tides and spin
-    family as they are, and `has_solid_surface()`, false for a sub-Neptune, sets the record's
-    surface section._
+    P14.T48.e's gas-envelope split (decision-p14-t35e-wire): `is_giant()` keeps the spin family
+    as it is (the tides match on the class, P14.T14.d), and `has_solid_surface()`, false for a
+    sub-Neptune, sets the record's surface section._
   - _T16.a, the Solar System_, each planet at the rank that keeps its radius, about the present
     Sun (1 L☉) in the zero-age Sun's disc (snow line 2.26 au) at 4.57 Gyr: core mass fractions
     Mercury 0.708, Venus 0.288, Earth 0.323, Mars 0.216; envelopes Saturn 71.4% (9.145 R⊕ against
@@ -8435,6 +8436,129 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - Placement precedes the composition solve, so T14.d's α is not available there.
   - Lean: a mass proxy at placement, Chen and Kipping's Neptunian regime from 2.04 M⊕ taking
     Q′ = 10⁵. It would move every system's orbits, so it gets its own ruling and bump.
+- **A sub-Neptune's tides, as built (P14.T14.d, `p14-batch`, 2026-10-09).** `GENERATOR_VERSION`
+  stays 21 and no golden moves.
+  - _The hold._ `rotation::tides` is the ruled function and is not gated. Its readers,
+    `SpinningBody::of_class` and `derive_body`'s `TidalPlanet`, take the crate's
+    `rotation::tides_in_force`, which is `tides` from `ENVELOPED_TIDES_VERSION` = 22 and below it
+    the earlier pairs: a rocky body's for `Rocky`, `Icy` and `SubNeptune`, a giant's for
+    `IceGiant` and `GasGiant`, bit for bit version 21's. The batch's bump opens it by itself.
+    **P14.T48.e**, in the bump's commit:
+    - call `tides` where `tides_in_force` is called (`of_class`, `derive/mod.rs`'s private
+      `tidal_planet`, which builds `derive_body`'s `TidalPlanet`, and `system/tests.rs`'s
+      `a_planet_s_locking_time_and_moon_limit_take_its_tides`);
+    - delete `tides_in_force`, `ENVELOPED_TIDES_VERSION` and
+      `the_envelope_s_tides_are_held_only_until_the_batch_s_bump`, which fails from version 22 to
+      say so;
+    - pass `a_sub_neptune_locks_only_close_in` through `of_class`, which until then goes through
+      the test's `with_its_tides` (`SpinningBody::new` with `tides` and
+      `moment_of_inertia_factor`), and delete that helper;
+    - drop the hold's wording from `rotation`'s module documentation, the docs of `of_class` and
+      `tides`, `DerivedBody::maximum_moon_mass`'s and `tidal_planet`'s docs, the system test's
+      doc, and the docs of `ROCKY_LOVE_NUMBER`, `ROCKY_TIDAL_Q`, `GIANT_LOVE_NUMBER` and
+      `GIANT_TIDAL_Q`;
+    - consider a named `Tides { love_number, tidal_q }` for `tides`'s `(f64, f64)`, which callers
+      unpack by position (rust-reviewer; the plan sets the pair).
+  - _One k₂ per body._ `tidal_planet` passes `tides_in_force` the mass and radius rounded through
+    the kilograms and metres that `SpinningBody::of_class` reads (`EarthMasses::from(Kilograms)`
+    and `EarthRadii::from(Metres)`), so that from version 22 a body's locking time and moon
+    limit take one k₂ bit for bit. A body's own values and the round trip differ by an ulp in
+    about a tenth of cases (determinism-auditor), which would otherwise give its two readers two
+    k₂. The system test checks both bit for bit.
+  - _Items and tests, as built._
+    - `enveloped_love_number` and `love_number_under_envelope` are public. The latter has a
+      doctest on the generated Uranus, and debug-asserts each argument in 0–1.
+    - The private `core_beneath_envelope` gives (α, w) to `enveloped_love_number` and to the α
+      test. It clamps w to 0–1, and gives (0, 0) when the mass beneath the envelope or the radius
+      is not positive and finite. Neither enveloped class reaches that case, since both hold at
+      least 0.1% of envelope.
+    - The α test also runs iron shares of 0.15, Earth's and 0.6, and checks α R against
+      `radius_zeng`(M (1 − f)) to 10⁻¹².
+    - The test of `tides` by class (`solid_classes_and_gas_giants_keep_their_pairs_and_enveloped_classes_share_one_tide`)
+      also puts the 5 M⊕, 2% body's k₂ in 0.09–0.13.
+    - The Solar System test reads `tides` from each ice giant's mass, radius and fractions, so it
+      needs no change at the bump.
+    - `the_held_enveloped_love_numbers_are_pinned_bit_for_bit` pins the k₂ of the generated
+      Uranus, Neptune and `hot_sub_neptune` (0.0778, 0.0991 and 0.0618), which no golden holds
+      until the bump (determinism-auditor). A refit of the law moves it.
+  - _What the bump moves_ (blessed with the gate open, measured, and restored, 2026-10-09):
+    - `planetary/derive_body`: 3 values, the moon limits of Uranus (× 0.51), Neptune (× 0.40) and
+      `hot_sub_neptune` (× 486);
+    - `frame/body_rotations`: 8 values, two bodies' pole and angle;
+    - the five systems the ruling names: `close_binary` 12 values; `filler_c` 406 changed and 46
+      relabelled; `hierarchical_triple` 78 and 246; `subgiant` 6 and 92; `wide_binary` 46
+      relabelled;
+    - nothing else: `body_frames`, `moons`, the other systems and the server's goldens hold.
+
+    Sub-Neptunes lock later and ice giants earlier. Two lock states change, for the bless note:
+    - `hierarchical_triple`'s `C f`, a sub-Neptune, was locked from 0.05 Gyr after its birth and now
+      locks 28 Gyr after the epoch, so it spins at the epoch (flattening 4 × 10⁻⁶ → 0.013);
+    - `filler_c`'s `A b`, a sub-Neptune, no longer locks 4.0 Gyr after the epoch (flattening
+      0.057 → 0.082).
+
+    `subgiant`'s `A c`, an ice giant, now locks 22 Gyr after the epoch rather than 98 Gyr
+    (flattening 0.028 → 0.019).
+
+  - _An independent check of the law_ (scripts and outputs in
+    `.git/rm45-scratch/p14-batch/love/`). It integrates the degree-2 potential equation
+    r η′ = 6 − η − η² + 4π r⁴ ρ′ ÷ m, k₂ = (2 − η_R) ÷ (3 + η_R), not Radau's. Its checks give a
+    homogeneous body 1.5000, an n = 1 polytrope 0.51982, and a bare Earth-like core of 1 M⊕
+    0.960 R⊕ and 1.007. Its structures are Seager et al.'s cores under n = 1 and n = 2 envelopes
+    at the generator's radii.
+    - Dry cores agree with the ruling's integration to 1–7%. The law lies within 0.95–1.08 of
+      them for f ≤ 5%, and within 0.73–1.38 at f = 20%.
+    - **The ruling's water-rich cores are iron-rich.** Its integration layered iron to 32.5% of
+      the whole core under the water, which is 70.5% of the rock and iron. The generator's water
+      lies on Earth-like rock and iron (`CoreComposition`'s iron ÷ (iron + rock)). With the
+      ruling's composition this check reproduces its water rows (0.105 against 0.109, 0.169
+      against 0.170). With the generator's composition it gives k₂ 1.2–1.4 times the law's:
+      - 0.216 against 0.175 at 5.5 M⊕ under 1%, outside the task's 15% band;
+      - 0.125–0.132 against 0.101 at 13 M⊕ under 5%;
+      - 0.095–0.107 against 0.078 for the generated Uranus, whose Q′ would then be
+        1.4–1.6 × 10⁵, at or below Tittemore and Wisdom's 1.6 × 10⁵. With the law it is 1.9 × 10⁵.
+        Neptune would be 1.2–1.3 × 10⁵, against the law's 1.5 × 10⁵, still above Proteus's bound.
+
+      Water-rich enveloped bodies then lock 1.2–1.4 times too slowly, and keep moons as much too
+      heavy, against the ruling's moves of 130–800. The science-checker confirmed the finding
+      with the ruling's own `core()`: its core radii need iron at 32.5% of the core.
+      - The softening each case needs is 0.30 at 5.5 M⊕ under 1%, 0.15–0.25 at 13 M⊕ under 5%,
+        −0.08 to 0.21 for Uranus and 0.12–0.26 for Neptune. 0.2–0.3 holds for n = 2 envelopes;
+        no single value fits n = 1 envelopes at the ice giants' fractions.
+      - A softening of 0.2–0.3 gives the generated Uranus Q′ = 1.57–1.65 × 10⁵, across the test's
+        1.6 × 10⁵ floor, and Q ≈ 1.15–1.2 × 10⁴ would restore 1.9 × 10⁵.
+      - The ruling's grid built each core once at 1 GPa and never compressed it under the
+        envelope's 16–65 GPa (at 13–20 M⊕), so its core radii are 1–1.5% large. A refit should
+        use self-consistent structures, as `love_potential.py`'s are.
+
+      For a science ruling before T48.e's bump. Lean: refit `ENVELOPED_CORE_WATER_SOFTENING` on
+      the generator's composition, and with it Q against Uranus, while the constants are held. A
+      refit moves the twelve-row test's water rows and the pinned k₂.
+  - _Citations_ (science-checker, 2026-10-09):
+    - Zeng et al. 2016's Table 2 matches the code's 81 entries, and Seager et al. 2007's Table 3
+      the ruling's nine EOS constants.
+    - Tittemore and Wisdom's range is as Ogilvie 2014, §5.4, quotes it, and their abstract gives
+      11,000 < Q < 39,000. The Ariel and Proteus bounds are Ogilvie's own.
+    - Zhang and Hamilton 2008 give 9,000 < Q_N < 36,000 (as Louden, Laughlin and Millholland 2023
+      quote them), not the ruling's 12,000–330,000. The generated Neptune's 1.5 × 10⁵ lies in the
+      1.1–4.3 × 10⁵ they imply.
+    - The GJ 436b bound, Q′ > 10⁵, is Veyette and Muirhead 2018's own (ApJ 863, 166).
+    - Kellermann et al. 2018 (A&A 615, A39) was not reached in full, and its abstract does not
+      show the fall of k₂ with envelope mass the ruling cites it for. The code cites Padovan et
+      al. 2018, §4.1, instead: GJ 436b's k₂ is 0.055–0.160 by interior.
+    - F3's "Q ≈ 4 × 10⁴" is about 3 × 10⁴.
+    - Kramm et al. 2011 use Zharkov and Trubitsyn's Tₙ equation (§2, eq. 3), not Radau's form,
+      which gives the same k₂; T14.d's _Sources_ line reads otherwise. Nettelmann et al. 2010's
+      0.02–0.2 is for metal-free envelopes. Zhang and Hamilton's Neptune Q is converted to Q′ at
+      Gavrilov and Zharkov's k₂ = 0.127, this plan's conversion.
+    - **Uranus's present-day Q is measured:** 678 ± 231 at an assumed k₂ of 0.300 (Jacobson and
+      Park 2025, AJ 169, 65, §3.3), so Q′ ≈ 3.4 × 10³, about 50 times below the calibration. Held
+      over 4.5 Gyr it would contradict Ariel's bound, so it is a present-day value.
+      `ENVELOPED_TIDAL_Q`'s doc names it and keeps 10⁴ as the time-averaged figure. For a science
+      ruling. Lean: keep 10⁴.
+    - Gladman et al. 1996's pairs, earlier work (P14.T14.b), for the deferred list. The primary
+      was not reached. Through a secondary source, Gladman gives Q ≈ 100 and a k₂ from rigidity,
+      not 0.3 and not a giant pair. `ROCKY_LOVE_NUMBER`'s doc now adds Lainey 2016's measured
+      0.30.
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

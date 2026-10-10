@@ -120,10 +120,10 @@ use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
+use crate::planetary::derive::rotation::tides_in_force;
 use crate::planetary::disc::DiscProfile;
 use crate::planetary::params::{
-    GAS_GIANT_ENVELOPE_FRACTION, GIANT_LOVE_NUMBER, GIANT_TIDAL_Q, ICE_GIANT_MASS,
-    ICY_WATER_FRACTION, ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q, THIN_ENVELOPE_FRACTION,
+    GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
 };
 use crate::stellar::Composition;
 use crate::stellar::draws::UnitUniform;
@@ -429,17 +429,6 @@ impl PlanetClass {
             Self::IceGiant | Self::GasGiant => false,
         }
     }
-
-    /// The Love number k₂ and tidal quality factor Q of the class: a rocky body's for every class
-    /// with a surface, a giant's for the giants (P14.T14.b).
-    #[must_use]
-    const fn tides(self) -> (f64, f64) {
-        if self.has_surface() {
-            (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q)
-        } else {
-            (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q)
-        }
-    }
 }
 
 /// Everything [`derive_body`] computes of a body at a time.
@@ -644,7 +633,9 @@ impl DerivedBody {
     }
 
     /// The heaviest moon that, starting at the prograde limit, tides let survive to the time
-    /// (Barnes and O'Brien 2002), with a rocky body's k₂ and Q or a giant's by class.
+    /// (Barnes and O'Brien 2002), with the body's k₂ and Q ([`rotation::tides`], P14.T14.d; until
+    /// the 21 → 22 batch's bump a rocky body's for every class with a surface and a giant's for the
+    /// giants).
     #[must_use]
     pub const fn maximum_moon_mass(&self) -> EarthMasses {
         self.maximum_moon_mass
@@ -967,9 +958,7 @@ pub fn derive_body(
     let hill = hill_radius(a, 0.0, mass_kg, hosts.primary_mass);
     let prograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Prograde);
     let retrograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Retrograde);
-    let (love_number, tidal_q) = class.tides();
-    let tidal = TidalPlanet::new(mass_kg, Metres::new(r), love_number, tidal_q)
-        .expect("a derived body's mass and radius are positive and finite");
+    let tidal = tidal_planet(class, mass_kg, Metres::new(r), &fractions);
     let moon =
         maximum_surviving_moon_mass(&tidal, hosts.primary_mass, a, e, Seconds::from(age_now));
 
@@ -999,6 +988,33 @@ pub fn derive_body(
         retrograde_limit,
         maximum_moon_mass: EarthMasses::from(moon),
     })
+}
+
+/// What P14.T15's moon limit reads of a derived body of class `class`, mass `mass`, radius
+/// `radius` and fractions `fractions`: its tides ([`rotation::tides`], P14.T14.d; held until the
+/// 21 → 22 batch's bump, `rotation`'s documentation).
+///
+/// The tides are of the mass and radius rounded through the kilograms and metres that
+/// [`SpinningBody::of_class`](rotation::SpinningBody::of_class) reads for the body's locking time,
+/// so that its two readers take one k₂ bit for bit.
+#[must_use]
+fn tidal_planet(
+    class: PlanetClass,
+    mass: Kilograms,
+    radius: Metres,
+    fractions: &MassFractions,
+) -> TidalPlanet {
+    let (love_number, tidal_q) = tides_in_force(
+        class,
+        EarthMasses::from(mass),
+        EarthRadii::from(radius),
+        fractions,
+    );
+    TidalPlanet::new(mass, radius, love_number, tidal_q).expect(
+        "a derived body's mass and radius are positive and finite, and so are its tides: each Q \
+         is a constant, and an enveloped class holds at least `THIN_ENVELOPE_FRACTION` of \
+         envelope, which keeps its k₂ above 0",
+    )
 }
 
 /// How many times [`derive_body`] passes between the equilibrium temperature (P14.T12) and the
@@ -1690,6 +1706,57 @@ mod tests {
         assert!(roche.value() > 136_775e3, "{roche:?}");
         let moon_mass = 0.073_46e24 / EARTH_MASS_KG;
         assert!(earth.maximum_moon_mass().value() > moon_mass);
+    }
+
+    /// P14.T14.d: the generated Uranus's modified quality factor Q′ = 3Q ÷ 2k₂ lies in Tittemore
+    /// and Wisdom's 1.6–5.6 × 10⁵, and Neptune's is at least Proteus's bound of 6.7 × 10⁴ (both as
+    /// Ogilvie 2014, §5.4, quotes them), from their own mass, radius and fractions.
+    #[test]
+    fn the_ice_giants_dissipate_as_their_satellites_require() {
+        let bodies = solar_system();
+        let q_prime = |name: &str| {
+            let body = found(&bodies, name);
+            assert_eq!(body.class(), PlanetClass::IceGiant, "{name}");
+            let (k2, q) =
+                rotation::tides(body.class(), body.mass(), body.radius(), &body.fractions());
+            1.5 * q / k2
+        };
+        let uranus = q_prime("Uranus");
+        assert!((1.6e5..=5.6e5).contains(&uranus), "Uranus: Q′ {uranus}");
+        let neptune = q_prime("Neptune");
+        assert!(neptune >= 6.7e4, "Neptune: Q′ {neptune}");
+    }
+
+    /// P14.T14.d, held: the k₂ the readers take from the 21 → 22 batch's bump, for the generated
+    /// Uranus, Neptune and `hot_sub_neptune`, pinned by its bits while no golden holds it, so that
+    /// a change to the law before the bump shows here.
+    #[test]
+    fn the_held_enveloped_love_numbers_are_pinned_bit_for_bit() {
+        use hyperion_testkit::float::bits;
+        let bodies = solar_system();
+        let hot = derive(&placed(5.0 * EARTH_MASS_KG, 0.05, 0.01, 0.5), &solar_disc()).unwrap();
+        let k2 = |body: &DerivedBody| {
+            let (k2, q) = rotation::tides(
+                body.class(),
+                EarthMasses::from(Kilograms::from(body.mass())),
+                EarthRadii::from(Metres::from(body.radius())),
+                &body.fractions(),
+            );
+            assert_same_bits(q, 1e4);
+            bits(k2)
+        };
+        let got = [
+            k2(found(&bodies, "Uranus")),
+            k2(found(&bodies, "Neptune")),
+            k2(&hot),
+        ];
+        // k₂ = 0.0778, 0.0991 and 0.0618: Q′ = 1.9 × 10⁵, 1.5 × 10⁵ and 2.4 × 10⁵.
+        let pinned = [
+            0x3fb3_ed5a_912c_fac3,
+            0x3fb9_5bf8_ea81_4e7c,
+            0x3faf_a0ff_107b_72e0,
+        ];
+        assert_eq!(got, pinned, "{got:#018x?}");
     }
 
     #[test]

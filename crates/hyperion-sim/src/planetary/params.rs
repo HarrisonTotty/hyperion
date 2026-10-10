@@ -135,17 +135,86 @@ pub const ICE_GIANT_MASS: EarthMasses = EarthMasses::new(10.0);
 pub const GAS_GIANT_ENVELOPE_FRACTION: f64 = 0.5;
 
 /// The tidal Love number k₂ of a rocky body: 0.3 (plan 14, P14.T14.b, after Gladman et al. 1996,
-/// Icarus 122, 166).
+/// Icarus 122, 166), which the `Rocky` and `Icy` classes take
+/// ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d), and until the 21 → 22
+/// batch's bump `SubNeptune` too (the [`rotation`](crate::planetary::derive::rotation) module's
+/// documentation).
+///
+/// Earth's and Venus's measured k₂ are 0.30, Mars's 0.17 and Mercury's 0.45 (Lainey 2016,
+/// Celestial Mechanics and Dynamical Astronomy 126, 145, Table 1).
 pub const ROCKY_LOVE_NUMBER: f64 = 0.3;
 
-/// The tidal quality factor Q of a rocky body: 100 (P14.T14.b, after Gladman et al. 1996).
+/// The tidal quality factor Q of a rocky body: 100 (P14.T14.b, after Gladman et al. 1996), which
+/// the `Rocky` and `Icy` classes take ([`tides`](crate::planetary::derive::rotation::tides)), and
+/// until the 21 → 22 batch's bump `SubNeptune` too.
 pub const ROCKY_TIDAL_Q: f64 = 100.0;
 
-/// The tidal Love number k₂ of a giant: 0.4 (P14.T14.b, after Gladman et al. 1996).
+/// The tidal Love number k₂ of a gas giant: 0.4 (P14.T14.b, after Gladman et al. 1996), which the
+/// `GasGiant` class takes ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d), and
+/// until the 21 → 22 batch's bump `IceGiant` too.
 pub const GIANT_LOVE_NUMBER: f64 = 0.4;
 
-/// The tidal quality factor Q of a giant: 10⁵ (P14.T14.b, after Gladman et al. 1996).
+/// The tidal quality factor Q of a gas giant: 10⁵ (P14.T14.b, after Gladman et al. 1996), which
+/// the `GasGiant` class takes ([`tides`](crate::planetary::derive::rotation::tides)), and until the
+/// 21 → 22 batch's bump `IceGiant` too.
 pub const GIANT_TIDAL_Q: f64 = 1e5;
+
+/// The fluid Love number of the core beneath a hydrogen and helium envelope: 0.9 (P14.T14.d), the
+/// first term's coefficient in
+/// [`love_number_under_envelope`](crate::planetary::derive::rotation::love_number_under_envelope).
+///
+/// This plan's fit to decision-backlog-1's integration, not a source's. A core of iron and
+/// silicate integrates to a fluid k₂ of 0.80–0.96 over 2–20 M⊕ there (Clairaut's equation in
+/// Radau's form over Seager et al.'s 2007 equations of state). Earth's own 3J₂ ÷ q is 0.94, with
+/// q = ω²a³ ÷ GM = 3.46 × 10⁻³ from the J₂, ω, a and GM of the IERS Conventions 2010 (Table 1.1),
+/// and PREM's fluid k₂ is 0.933 (Padovan et al. 2018, A&A 620, A178, Table 1).
+pub const ENVELOPED_CORE_LOVE_NUMBER: f64 = 0.9;
+
+/// How much a water layer softens the fluid tide of the core beneath an envelope: 0.6, so that a
+/// core half water takes 0.7 of a dry core's k₂ (P14.T14.d).
+///
+/// This plan's fit to decision-backlog-1's integration, not a source's. That integration's
+/// water-rich cores had rock and iron 70.5% iron, against the generator's Earth-like 32.5%; on
+/// the generator's composition an independent integration gives a bare core 54% water 0.76 of a
+/// dry core's k₂, and 0.66 on the integration's (plan 14's Risks, "A sub-Neptune's tides, as
+/// built").
+pub const ENVELOPED_CORE_WATER_SOFTENING: f64 = 0.6;
+
+/// The coefficient of a hydrogen and helium envelope's own tidal response, 0.125 f^0.68 in
+/// [`love_number_under_envelope`](crate::planetary::derive::rotation::love_number_under_envelope)
+/// (P14.T14.d).
+///
+/// This plan's fit to decision-backlog-1's integration, not a source's. The envelope's response
+/// spans a factor of up to 3 between n = 1 and n = 2 polytropes, which the fit splits.
+pub const ENVELOPE_LOVE_COEFFICIENT: f64 = 0.125;
+
+/// The exponent of the envelope fraction in a hydrogen and helium envelope's own tidal response:
+/// 0.68 ([`ENVELOPE_LOVE_COEFFICIENT`], P14.T14.d).
+///
+/// This plan's fit to decision-backlog-1's integration, not a source's.
+pub const ENVELOPE_LOVE_EXPONENT: f64 = 0.68;
+
+/// The tidal quality factor Q of a body under a hydrogen and helium envelope, the `SubNeptune` and
+/// `IceGiant` classes: 10⁴ (P14.T14.d, decision-backlog-1).
+///
+/// Calibrated on the ice giants' modified quality factor Q′ = 3Q ÷ 2k₂, which it reproduces with
+/// [`love_number_under_envelope`](crate::planetary::derive::rotation::love_number_under_envelope):
+/// 1.6 × 10⁵ ≲ Q′ ≲ 5.6 × 10⁵ for Uranus, "most probably towards the lower end" (Tittemore and
+/// Wisdom 1990, Icarus 85, 394, as Ogilvie 2014, ARA&A 52, 171, §5.4, quotes them), and the
+/// bounds Q′ ≳ 9.1 × 10⁴ for Uranus and Q′ ≳ 6.7 × 10⁴ for Neptune that Ariel and Proteus set
+/// (Ogilvie 2014, §5.4). The generated Uranus takes Q′ = 1.9 × 10⁵, and Neptune 1.5 × 10⁵, inside
+/// the 1.1–4.3 × 10⁵ of 9,000 < Q < 36,000 (Zhang and Hamilton 2008, Icarus 193, 267, as Louden,
+/// Laughlin and Millholland 2023, `ApJL` 958, L21, quote it), converted at Gavrilov and Zharkov's
+/// (1977) k₂ = 0.127 (this plan's conversion). Hot Neptunes and
+/// sub-Neptunes dissipate as weakly: GJ 436b's eccentricity needs Q′ > 10⁵ (Veyette and Muirhead
+/// 2018, ApJ 863, 166), and 10⁴ is the Q Louden, Laughlin and Millholland take for sub-Neptunes,
+/// the top of the 10³–10⁴ they expect for 1–4 R⊕.
+///
+/// It stands for the dissipation averaged over the satellites' and the spin's evolution. Uranus's
+/// present-day Q from astrometry is 678 ± 231 at an assumed k₂ of 0.300 (Jacobson and Park 2025,
+/// AJ 169, 65, §3.3), a Q′ of about 3.4 × 10³, which held over the system's age would contradict
+/// Ariel's bound (plan 14's Risks, "A sub-Neptune's tides, as built").
+pub const ENVELOPED_TIDAL_Q: f64 = 1e4;
 /// The largest radius a giant planet takes: 2 Jupiter radii (P14.T11.d).
 ///
 /// Plan 14's cap on the inflated radius of

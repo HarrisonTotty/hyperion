@@ -20,8 +20,14 @@
 //! The despinning time is Gladman et al.'s (1996, Icarus 122, 166, eq. 9),
 //! τ = ω a⁶ I Q ÷ (3 G M² k₂ R⁵), with ω the primordial spin rate, a the semi-major axis, M the
 //! primary's mass (the star's for a planet, the planet's for a moon), I = α m R² the body's moment
-//! of inertia and k₂ and Q its tides, by class ([`SpinningBody::of_class`]): rocky tides for every
-//! class with a surface, a giant's for the giants, as P14.T15's limits take them.
+//! of inertia and k₂ and Q its tides ([`tides`], P14.T14.d), as P14.T15's limits take them: a
+//! rocky body's for the rocky and icy classes, a gas giant's for gas giants, and for a body under
+//! a hydrogen and helium envelope, a sub-Neptune or an ice giant, its fluid Love number, the
+//! core's tide seen from the envelope's top ([`love_number_under_envelope`]), with Q = 10⁴.
+//!
+//! P14.T14.d is held until the 21 → 22 batch's bump (plan 14, "Order and parallelism"): below
+//! version 22 the generator gives every class its earlier pair, a rocky body's to every class
+//! with a surface and a giant's to the giants, so that the batch's goldens move once, at its bump.
 //!
 //! The spin rate falls (or rises) linearly with the system's age from ω to the locked rate over τ
 //! and stays there: synchronous, the orbit's mean motion n, or 1.5 n in the 3:2 state for an orbit
@@ -38,25 +44,28 @@ use core::f64::consts::{PI, TAU};
 use std::error::Error;
 use std::fmt;
 
-use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::MassFractions;
+use crate::planetary::derive::radius::{CoreComposition, EARTH_CORE_MASS_FRACTION, radius_zeng};
 use crate::planetary::frames::{BodyFixedFrame, FrameSpin};
 use crate::planetary::params::{
-    ENVELOPED_MOMENT_OF_INERTIA, GAS_GIANT_MOMENT_OF_INERTIA, GIANT_LOVE_NUMBER,
-    GIANT_PRIMORDIAL_PERIOD, GIANT_TIDAL_Q, ICY_MOMENT_OF_INERTIA, JUPITER_HEAVY_ELEMENT_FRACTION,
-    PRIMORDIAL_PERIOD_SCATTER_DEX, QUIET_OBLIQUITY_SCALE, ROCKY_LOVE_NUMBER,
-    ROCKY_MOMENT_OF_INERTIA, ROCKY_PRIMORDIAL_PERIOD, ROCKY_TIDAL_Q, SATURN_HEAVY_ELEMENT_FRACTION,
-    SATURN_LIKE_MOMENT_OF_INERTIA, SPIN_ORBIT_RESONANCE_ECCENTRICITY,
+    ENVELOPE_LOVE_COEFFICIENT, ENVELOPE_LOVE_EXPONENT, ENVELOPED_CORE_LOVE_NUMBER,
+    ENVELOPED_CORE_WATER_SOFTENING, ENVELOPED_MOMENT_OF_INERTIA, ENVELOPED_TIDAL_Q,
+    GAS_GIANT_MOMENT_OF_INERTIA, GIANT_LOVE_NUMBER, GIANT_PRIMORDIAL_PERIOD, GIANT_TIDAL_Q,
+    ICY_MOMENT_OF_INERTIA, JUPITER_HEAVY_ELEMENT_FRACTION, PRIMORDIAL_PERIOD_SCATTER_DEX,
+    QUIET_OBLIQUITY_SCALE, ROCKY_LOVE_NUMBER, ROCKY_MOMENT_OF_INERTIA, ROCKY_PRIMORDIAL_PERIOD,
+    ROCKY_TIDAL_Q, SATURN_HEAVY_ELEMENT_FRACTION, SATURN_LIKE_MOMENT_OF_INERTIA,
+    SPIN_ORBIT_RESONANCE_ECCENTRICITY,
 };
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::time::{Span, UniverseTime};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
-use crate::units::{Kilograms, Metres, Radians, Seconds, Years};
+use crate::units::{EarthMasses, EarthRadii, Kilograms, Metres, Radians, Seconds, Years};
+use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// Words of [`tags::PLANET_SPIN`] a body reads or reserves: words 0–3, [`SpinDraws`], then four
 /// reserved.
@@ -172,7 +181,7 @@ pub enum SpinFamily {
 
 impl SpinFamily {
     /// The family of a body of class `class`: [`Giant`](Self::Giant) for the classes without a
-    /// surface, as their tides are chosen.
+    /// surface, the ice and gas giants.
     #[must_use]
     pub const fn of(class: PlanetClass) -> Self {
         if class.has_surface() {
@@ -310,9 +319,12 @@ impl SpinningBody {
     }
 
     /// A body of mass `mass`, radius `radius`, class `class` and mass fractions `fractions`,
-    /// with its moment of inertia ([`moment_of_inertia_factor`]) and its class's tides: a rocky
-    /// body's k₂ = 0.3 and Q = 100 for every class with a surface, a giant's 0.4 and 10⁵ otherwise
-    /// (Gladman et al. 1996).
+    /// with its moment of inertia ([`moment_of_inertia_factor`]) and its tides ([`tides`],
+    /// P14.T14.d).
+    ///
+    /// Until the 21 → 22 batch's bump the tides are the class's earlier pair: a rocky body's
+    /// k₂ = 0.3 and Q = 100 for every class with a surface, a giant's 0.4 and 10⁵ otherwise
+    /// (Gladman et al. 1996; see the [module](self) documentation).
     ///
     /// # Errors
     ///
@@ -323,11 +335,12 @@ impl SpinningBody {
         class: PlanetClass,
         fractions: &MassFractions,
     ) -> Result<Self, BuildSpinningBodyError> {
-        let (love_number, tidal_q) = if class.has_surface() {
-            (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q)
-        } else {
-            (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q)
-        };
+        let (love_number, tidal_q) = tides_in_force(
+            class,
+            EarthMasses::from(mass),
+            EarthRadii::from(radius),
+            fractions,
+        );
         Self::new(
             mass,
             radius,
@@ -427,6 +440,199 @@ pub fn moment_of_inertia_factor(class: PlanetClass, fractions: &MassFractions) -
                 + (SATURN_LIKE_MOMENT_OF_INERTIA - GAS_GIANT_MOMENT_OF_INERTIA) * share
         }
     }
+}
+
+/// The Love number k₂ and tidal quality factor Q of a body of class `class`, mass `mass`, radius
+/// `radius` and mass fractions `fractions` (P14.T14.d, decision-backlog-1): what every reader of a
+/// body's tides takes, [`SpinningBody::of_class`] for its locking time (P14.T14.b) and
+/// [`derive_body`](crate::planetary::derive::derive_body) for its moon limit (P14.T15).
+///
+/// - `Rocky` and `Icy`: [`ROCKY_LOVE_NUMBER`] and [`ROCKY_TIDAL_Q`], 0.3 and 100.
+/// - `GasGiant`: [`GIANT_LOVE_NUMBER`] and [`GIANT_TIDAL_Q`], 0.4 and 10⁵.
+/// - `SubNeptune` and `IceGiant`: [`enveloped_love_number`] and [`ENVELOPED_TIDAL_Q`], 10⁴. Under a
+///   hydrogen and helium envelope the tide is raised on the core, seen from the envelope's top,
+///   and the body dissipates as the ice giants do, not as a solid rocky body. The two classes are
+///   one structure here, split by mass alone at
+///   [`ICE_GIANT_MASS`](crate::planetary::params::ICE_GIANT_MASS), so they share one function and
+///   their tides take no step there.
+///
+/// Only the enveloped classes read `mass`, `radius` and `fractions`. Both numbers are
+/// dimensionless: Q is 100, 10⁴ or 10⁵, and k₂ is positive for every class a body can take, since
+/// an enveloped class holds at least
+/// [`THIN_ENVELOPE_FRACTION`](crate::planetary::params::THIN_ENVELOPE_FRACTION) of envelope, which
+/// keeps its k₂ at 1.1 × 10⁻³ or more. Their modified quality factor Q′ = 3Q ÷ 2k₂ runs from about
+/// 3 × 10⁴ under a 0.1% envelope to 2–5 × 10⁵ under 10–20%.
+///
+/// Held until the 21 → 22 batch's bump: below generator version 22 the generator gives every
+/// class its earlier pair instead (see the [module](self) documentation).
+#[must_use]
+pub fn tides(
+    class: PlanetClass,
+    mass: EarthMasses,
+    radius: EarthRadii,
+    fractions: &MassFractions,
+) -> (f64, f64) {
+    match class {
+        PlanetClass::Rocky | PlanetClass::Icy => (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q),
+        PlanetClass::SubNeptune | PlanetClass::IceGiant => (
+            enveloped_love_number(mass, radius, fractions),
+            ENVELOPED_TIDAL_Q,
+        ),
+        PlanetClass::GasGiant => (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q),
+    }
+}
+
+/// The generator version from which every reader of a body's tides takes [`tides`]: 22, the
+/// 21 → 22 batch's bump (P14.T14.d; plan 14, "Order and parallelism", the bump plan).
+///
+/// P14.T14.d is built first in that batch, whose goldens move once, at its bump in P14.T48.e.
+/// Below it [`tides_in_force`] gives every class its earlier pair, so that no golden moves before
+/// the batch's wiring, and from it [`tides`]. The bump removes this hold
+/// (`the_envelope_s_tides_are_held_only_until_the_batch_s_bump`).
+pub(crate) const ENVELOPED_TIDES_VERSION: GeneratorVersion = GeneratorVersion::new(22);
+
+/// The k₂ and Q the generator gives a body of class `class`, mass `mass`, radius `radius` and mass
+/// fractions `fractions` (P14.T14.d, held): [`tides`] from [`ENVELOPED_TIDES_VERSION`], and below
+/// it the class's earlier pair, a rocky body's for `Rocky`, `Icy` and `SubNeptune` and a giant's
+/// for `IceGiant` and `GasGiant` (P14.T14.b; P14.T16.a as built), bit for bit what version 21
+/// gives.
+#[must_use]
+pub(crate) fn tides_in_force(
+    class: PlanetClass,
+    mass: EarthMasses,
+    radius: EarthRadii,
+    fractions: &MassFractions,
+) -> (f64, f64) {
+    if GENERATOR_VERSION >= ENVELOPED_TIDES_VERSION {
+        tides(class, mass, radius, fractions)
+    } else {
+        match class {
+            PlanetClass::Rocky | PlanetClass::Icy | PlanetClass::SubNeptune => {
+                (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q)
+            }
+            PlanetClass::IceGiant | PlanetClass::GasGiant => (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q),
+        }
+    }
+}
+
+/// The fluid Love number k₂ of a body of mass `mass` and radius `radius` under a hydrogen and
+/// helium envelope, with mass fractions `fractions` (P14.T14.d): [`love_number_under_envelope`]
+/// at α = `R_core` ÷ R, of its envelope fraction f and of the water fraction beneath it,
+/// w = water ÷ (1 − f).
+///
+/// `R_core` is [`radius_zeng`] of the mass beneath the envelope, M (1 − f), and of the core read
+/// from the fractions: iron ÷ (iron + rock) of iron in its rock and iron, or Earth's
+/// [`EARTH_CORE_MASS_FRACTION`] if it holds neither, and w of water. That is the core
+/// [`radius_with_envelope`](crate::planetary::derive::envelope::radius_with_envelope) lays the
+/// envelope on, so α is the generator's own. It is held at 1 at most, and is 0 for a body with
+/// nothing beneath its envelope or a radius that is not positive and finite. Zeng et al.'s curves
+/// end at 32 M⊕, and a heavier core's radius extrapolates their last interval.
+#[must_use]
+pub fn enveloped_love_number(
+    mass: EarthMasses,
+    radius: EarthRadii,
+    fractions: &MassFractions,
+) -> f64 {
+    let (alpha, water) = core_beneath_envelope(mass, radius, fractions);
+    love_number_under_envelope(alpha, fractions.envelope(), water)
+}
+
+/// The core of fractional radius α = `R_core` ÷ R beneath a body's envelope, and its water mass
+/// fraction w, as [`enveloped_love_number`] reads them.
+#[must_use]
+fn core_beneath_envelope(
+    mass: EarthMasses,
+    radius: EarthRadii,
+    fractions: &MassFractions,
+) -> (f64, f64) {
+    let beneath = 1.0 - fractions.envelope();
+    let core_mass = mass.value() * beneath;
+    let r = radius.value();
+    let measurable = core_mass > 0.0 && core_mass.is_finite() && r > 0.0 && r.is_finite();
+    if !measurable {
+        return (0.0, 0.0);
+    }
+    let water = (fractions.water() / beneath).clamp(0.0, 1.0);
+    let heavy = fractions.iron() + fractions.rock();
+    let iron_share = if heavy > 0.0 {
+        fractions.iron() / heavy
+    } else {
+        EARTH_CORE_MASS_FRACTION
+    };
+    let core = CoreComposition::from_fractions(iron_share, water);
+    let alpha = radius_zeng(EarthMasses::new(core_mass), core).value() / r;
+    (alpha.min(1.0), water)
+}
+
+/// The fluid Love number k₂ of a body whose core, of fractional radius `alpha` = `R_core` ÷ R and
+/// water mass fraction `core_water_fraction`, lies under a hydrogen and helium envelope of
+/// `envelope_fraction` of its mass, each in 0–1 (P14.T14.d, decision-backlog-1):
+/// k₂ = 0.9 (1 − 0.6 w) α⁵ + 0.125 f^0.68, dimensionless, in 0–1.025 and positive for any
+/// envelope.
+///
+/// - The first term is the core's own fluid tide seen from the envelope's top. Under a massless
+///   envelope a core of Love number `k_core` gives exactly `k_core` α⁵ at the outer radius, since
+///   the core's induced potential falls as r⁻³ and the tide grows as r² (decision-backlog-1,
+///   §1.2). [`ENVELOPED_CORE_LOVE_NUMBER`] is `k_core` and [`ENVELOPED_CORE_WATER_SOFTENING`] the
+///   softening a water layer gives it.
+/// - The second term, [`ENVELOPE_LOVE_COEFFICIENT`] f^[`ENVELOPE_LOVE_EXPONENT`], is the
+///   envelope's own response, which matters from a few per cent of the mass.
+///
+/// The law is this plan's fit to decision-backlog-1's integration of Clairaut's equation in
+/// Radau's form, which gives the same linear, hydrostatic k₂ as the Tₙ equation of Zharkov and
+/// Trubitsyn (1978) that Kramm et al. (2011, A&A 528, A18, §2, eq. 3) use. It integrated cores of
+/// iron and silicate, with and without water, under n = 1 and n = 2 polytropes of hydrogen and
+/// helium at the generator's radii (Seager et al. 2007's equations of state; Lopez and Fortney
+/// 2014's radii). It lies within 0.93–1.13 of the integration for f ≤ 2%, 0.87–1.28 for f ≤ 5%,
+/// and within a factor of 1.6 of the n = 1 envelope beyond, where the envelope's equation of
+/// state alone spans a factor of up to 3. A homogeneous fluid body's k₂ is 1.5 and an n = 1
+/// polytrope's 0.52 (Kramm et al. 2011, §2.2). GJ 436b's metal-free envelope models give 0.02–0.2
+/// (Nettelmann et al. 2010, A&A 523, A26), and its models by interior 0.055–0.160 (Padovan et al.
+/// 2018, A&A 620, A178, §4.1), where this law gives 0.05–0.07.
+///
+/// The fit spans 2.4–20 M⊕, envelopes of 0.1–20% and water of 0 or 54% beneath them (water-rich
+/// cores under n = 1 envelopes only). Heavier bodies, thicker envelopes and other water fractions
+/// extrapolate it. The integration's water-rich cores held a third of their mass in iron, more
+/// than the generator's, whose water lies on Earth-like rock and iron. For those an independent
+/// integration gives k₂ up to 1.4 times this law's: 0.095–0.107 for the generated Uranus against
+/// 0.078 (plan 14's Risks, "A sub-Neptune's tides, as built").
+///
+/// # Panics
+///
+/// In debug builds, if an argument lies outside 0–1 or is NaN.
+///
+/// # Examples
+///
+/// The generated Uranus, a core 54% water at 0.618 of its radius under an envelope of 8.2% of its
+/// mass, takes k₂ = 0.078, so that with Q = 10⁴ its modified quality factor Q′ = 3Q ÷ 2k₂ is
+/// 1.9 × 10⁵, inside Tittemore and Wisdom's 1.6–5.6 × 10⁵:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::rotation::love_number_under_envelope;
+/// use hyperion_sim::planetary::params::ENVELOPED_TIDAL_Q;
+///
+/// let k2 = love_number_under_envelope(0.618, 0.082, 0.539);
+/// assert!((k2 - 0.078).abs() < 0.001);
+/// let q_prime = 3.0 * ENVELOPED_TIDAL_Q / (2.0 * k2);
+/// assert!((1.6e5..5.6e5).contains(&q_prime));
+/// ```
+#[must_use]
+pub fn love_number_under_envelope(
+    alpha: f64,
+    envelope_fraction: f64,
+    core_water_fraction: f64,
+) -> f64 {
+    for (name, x) in [
+        ("α", alpha),
+        ("an envelope fraction", envelope_fraction),
+        ("a water fraction", core_water_fraction),
+    ] {
+        debug_assert!((0.0..=1.0).contains(&x), "{name} lies in 0 to 1, got {x}");
+    }
+    let core = ENVELOPED_CORE_LOVE_NUMBER
+        * (1.0 - ENVELOPED_CORE_WATER_SOFTENING * core_water_fraction)
+        * math::powi(alpha, 5);
+    core + ENVELOPE_LOVE_COEFFICIENT * math::powf(envelope_fraction, ENVELOPE_LOVE_EXPONENT)
 }
 
 /// The time the tides of a primary of mass `primary_mass` take to despin `body`, spinning with
@@ -835,7 +1041,7 @@ pub struct SpinInputs {
     /// The body's class, which sets its period law, moment of inertia and tides.
     pub class: PlanetClass,
     /// The body's mass fractions, which set a gas giant's moment of inertia
-    /// ([`moment_of_inertia_factor`]).
+    /// ([`moment_of_inertia_factor`]) and the tides of a body under an envelope ([`tides`]).
     pub fractions: MassFractions,
     /// The body's mass.
     pub mass: Kilograms,
@@ -862,8 +1068,8 @@ pub struct BodyRotation {
 impl BodyRotation {
     /// The rotation of the body `inputs` describe (P14.T14.a–c): its primordial period
     /// ([`primordial_period`], floored at its [`breakup_period`]), its obliquity ([`obliquity`]),
-    /// its locking time ([`tidal_locking_time`] of that period at its class's tides and moment of
-    /// inertia) and its frame ([`BodyFixedFrame::new`]).
+    /// its locking time ([`tidal_locking_time`] of that period at the tides and moment of inertia
+    /// [`SpinningBody::of_class`] gives it) and its frame ([`BodyFixedFrame::new`]).
     ///
     /// # Errors
     ///
@@ -995,6 +1201,7 @@ fn centred(x: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample, normal_cdf};
 
     use super::*;
@@ -1003,12 +1210,11 @@ mod tests {
     use crate::planetary::derive::composition::{
         SnowLineSide, giant_composition, giant_heavy_elements,
     };
-    use crate::planetary::derive::radius::CoreComposition;
+    use crate::units::GravitationalParameter;
     use crate::units::consts::{
         EARTH_MASS_KG, EARTH_RADIUS_M, JUPITER_MASS_KG, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR,
         SOLAR_MASS_KG,
     };
-    use crate::units::{EarthMasses, GravitationalParameter};
 
     const MYR: f64 = 1e6 * SECONDS_PER_JULIAN_YEAR;
     const GYR: f64 = 1e9 * SECONDS_PER_JULIAN_YEAR;
@@ -1395,5 +1601,221 @@ mod tests {
     fn breakup_is_hours_for_the_earth() {
         let p = breakup_period(Kilograms::new(EARTH_MASS_KG), Metres::new(EARTH_RADIUS_M));
         assert!((p.value() / 3_600.0 - 1.41).abs() < 0.01);
+    }
+
+    /// decision-backlog-1's integration (§1.2's twelve rows): α = `R_core` ÷ R, the envelope
+    /// fraction f, the water fraction w beneath it, and the fluid k₂ under an n = 1 and, where
+    /// integrated, an n = 2 polytrope of hydrogen and helium.
+    const INTEGRATED: [(f64, f64, f64, f64, Option<f64>); 12] = [
+        (0.824, 0.001, 0.0, 0.366, Some(0.366)),
+        (0.878, 0.001, 0.0, 0.474, Some(0.474)),
+        (0.722, 0.01, 0.0, 0.187, Some(0.186)),
+        (0.654, 0.02, 0.0, 0.122, Some(0.119)),
+        (0.535, 0.05, 0.0, 0.061, Some(0.054)),
+        (0.429, 0.1, 0.0, 0.045, Some(0.030)),
+        (0.394, 0.2, 0.0, 0.070, Some(0.039)),
+        (0.829, 0.01, 0.0, 0.322, Some(0.321)),
+        (0.764, 0.01, 0.539, 0.170, None),
+        (0.667, 0.05, 0.539, 0.109, None),
+        (0.564, 0.1, 0.539, 0.080, None),
+        (0.479, 0.2, 0.539, 0.091, None),
+    ];
+
+    /// P14.T14.d: the law reproduces the integration within 15% for f ≤ 2% and 30% for f ≤ 5%,
+    /// and beyond within a factor of 1.6 of the n = 1 envelope, where the envelope's equation of
+    /// state alone spans a factor of up to 3.
+    #[test]
+    fn the_love_number_under_an_envelope_reproduces_the_integration() {
+        for (alpha, f, w, n1, n2) in INTEGRATED {
+            let k2 = love_number_under_envelope(alpha, f, w);
+            if f <= 0.05 {
+                let band = if f <= 0.02 { 0.15 } else { 0.30 };
+                for integrated in [Some(n1), n2].into_iter().flatten() {
+                    assert!(
+                        (k2 / integrated - 1.0).abs() <= band,
+                        "α {alpha}, f {f}, w {w}: {k2} against {integrated}"
+                    );
+                }
+            } else {
+                let factor = (k2 / n1).max(n1 / k2);
+                assert!(factor <= 1.6, "α {alpha}, f {f}, w {w}: {k2} against {n1}");
+            }
+        }
+    }
+
+    /// P14.T14.d: under a massless envelope the law is the core's own tide seen from the outer
+    /// radius, 0.9 (1 − 0.6 w) α⁵, exactly.
+    #[test]
+    fn a_massless_envelope_leaves_the_core_s_tide_exactly() {
+        for alpha in [0.0, 0.3, 0.618, 0.9, 1.0] {
+            for w in [0.0, 0.25, 0.539, 1.0] {
+                let core = 0.9 * (1.0 - 0.6 * w) * math::powi(alpha, 5);
+                assert_same_bits(love_number_under_envelope(alpha, 0.0, w), core);
+            }
+        }
+    }
+
+    /// P14.T14.d: over 1.5–100 M⊕, envelopes of 0.1–50% and water of 0–54% beneath them, at the
+    /// generator's own radii (Lopez and Fortney's at 10 F⊕ and 5 Gyr), α is the core's fraction of
+    /// the radius that `radius_with_envelope` lays the envelope on, in (0, 1], and k₂ lies in
+    /// (0, 1.5), a homogeneous body's.
+    #[test]
+    fn alpha_and_the_love_number_stay_physical_at_the_generator_s_radii() {
+        use crate::planetary::derive::envelope::radius_with_envelope;
+        use crate::units::{EarthFluxes, Gigayears};
+        let mut checked = 0;
+        for m in [1.5, 2.0, 3.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0] {
+            for f in [1e-3, 3e-3, 0.01, 0.02, 0.05, 0.1, 0.2, 0.35, 0.5] {
+                for w in [0.0, 0.1, 0.25, 0.4, 0.54] {
+                    for cmf in [0.15, EARTH_CORE_MASS_FRACTION, 0.6] {
+                        let core = CoreComposition::new(cmf, w).unwrap();
+                        let mass = EarthMasses::new(m);
+                        let fractions = MassFractions::of(core, f);
+                        let radius = radius_with_envelope(
+                            mass,
+                            core,
+                            f,
+                            EarthFluxes::new(10.0),
+                            Gigayears::new(5.0),
+                        );
+                        let (alpha, water) = core_beneath_envelope(mass, radius, &fractions);
+                        let laid = radius_zeng(EarthMasses::new(m * (1.0 - f)), core).value();
+                        assert!(
+                            (alpha * radius.value() / laid - 1.0).abs() < 1e-12,
+                            "{m} M⊕, f {f}, w {w}, cmf {cmf}: α {alpha}"
+                        );
+                        assert!((water - w).abs() < 1e-12, "{water} against {w}");
+                        assert!(alpha > 0.0 && alpha <= 1.0, "{m} M⊕, f {f}: α {alpha}");
+                        let k2 = enveloped_love_number(mass, radius, &fractions);
+                        assert!(k2 > 0.0 && k2 < 1.5, "{m} M⊕, f {f}, w {w}: k₂ {k2}");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 11 * 9 * 5 * 3);
+    }
+
+    /// The fractions of P14.T14.d's test sub-Neptune: iron 0.318 and rock 0.662 under an envelope
+    /// of 2%.
+    fn sub_neptune() -> MassFractions {
+        // Iron is what the rock and the envelope leave: 1 − 0.662 − 0.02 = 0.318.
+        MassFractions::of(CoreComposition::new(1.0 - 0.662 / 0.98, 0.0).unwrap(), 0.02)
+    }
+
+    /// P14.T14.d: the solid classes keep a rocky body's pair and gas giants a giant's; a
+    /// sub-Neptune and an ice giant of the same mass, radius and fractions take the same tides,
+    /// the envelope's Love number with Q = 10⁴.
+    #[test]
+    fn solid_classes_and_gas_giants_keep_their_pairs_and_enveloped_classes_share_one_tide() {
+        let (mass, radius) = (EarthMasses::new(5.0), EarthRadii::new(2.4));
+        let fractions = sub_neptune();
+        let pair = |class| tides(class, mass, radius, &fractions);
+        for (class, (k2, q)) in [
+            (PlanetClass::Rocky, (0.3, 100.0)),
+            (PlanetClass::Icy, (0.3, 100.0)),
+            (PlanetClass::GasGiant, (0.4, 1e5)),
+        ] {
+            let (love, quality) = pair(class);
+            assert_same_bits(love, k2);
+            assert_same_bits(quality, q);
+        }
+        let (sub_neptune, ice_giant) = (pair(PlanetClass::SubNeptune), pair(PlanetClass::IceGiant));
+        assert_same_bits(sub_neptune.0, ice_giant.0);
+        assert_same_bits(sub_neptune.1, ice_giant.1);
+        assert_same_bits(sub_neptune.1, 1e4);
+        assert_same_bits(
+            sub_neptune.0,
+            enveloped_love_number(mass, radius, &fractions),
+        );
+        // decision-backlog-1's 5 M⊕, 2% row: k₂ about 0.11, so Q′ = 3Q ÷ 2k₂ about 1.4 × 10⁵.
+        assert!((0.09..0.13).contains(&sub_neptune.0), "{}", sub_neptune.0);
+    }
+
+    /// A body of class `class` with [`tides`] and its one moment of inertia: what
+    /// [`SpinningBody::of_class`] gives from the 21 → 22 batch's bump.
+    fn with_its_tides(
+        mass: f64,
+        radius: f64,
+        class: PlanetClass,
+        fractions: &MassFractions,
+    ) -> SpinningBody {
+        let (mass, radius) = (EarthMasses::new(mass), EarthRadii::new(radius));
+        let (k2, q) = tides(class, mass, radius, fractions);
+        SpinningBody::new(
+            Kilograms::from(mass),
+            Metres::from(radius),
+            moment_of_inertia_factor(class, fractions),
+            k2,
+            q,
+        )
+        .unwrap()
+    }
+
+    /// P14.T14.d: from a 15-hour spin, a 5 M⊕ sub-Neptune of 2% envelope at 2.4 R⊕ locks within
+    /// 100 Myr at 0.1 au of a Sun and within 1 Gyr at 0.07 au of a 0.2 M☉ star, and does not lock
+    /// within 10 Gyr at 0.35 au of a Sun, where a rocky body's tides would lock it within 100 Myr.
+    #[test]
+    fn a_sub_neptune_locks_only_close_in() {
+        let fractions = sub_neptune();
+        let planet = with_its_tides(5.0, 2.4, PlanetClass::SubNeptune, &fractions);
+        let au = METRES_PER_AU;
+        let close = lock(&planet, 0.1 * au, SOLAR_MASS_KG);
+        assert!(close < 100.0 * MYR, "{} Myr at 0.1 au", close / MYR);
+        let m_dwarf = lock(&planet, 0.07 * au, 0.2 * SOLAR_MASS_KG);
+        assert!(m_dwarf < GYR, "{} Gyr at 0.07 au of 0.2 M☉", m_dwarf / GYR);
+        let far = lock(&planet, 0.35 * au, SOLAR_MASS_KG);
+        assert!(far > 10.0 * GYR, "{} Gyr at 0.35 au", far / GYR);
+        let rocky = SpinningBody::new(
+            planet.mass(),
+            planet.radius(),
+            planet.moment_factor(),
+            ROCKY_LOVE_NUMBER,
+            ROCKY_TIDAL_Q,
+        )
+        .unwrap();
+        let rocky_far = lock(&rocky, 0.35 * au, SOLAR_MASS_KG);
+        assert!(rocky_far < 100.0 * MYR, "{} Myr", rocky_far / MYR);
+    }
+
+    /// P14.T14.d is held until the 21 → 22 batch's bump, so that the batch's goldens move once:
+    /// until then [`SpinningBody::of_class`] takes [`tides_in_force`], which gives every class
+    /// version 21's pair. The bump removes the hold, and this test with it.
+    #[test]
+    fn the_envelope_s_tides_are_held_only_until_the_batch_s_bump() {
+        assert!(
+            GENERATOR_VERSION < ENVELOPED_TIDES_VERSION,
+            "the 21 → 22 bump applies `tides` to every reader: call `tides` where \
+             `tides_in_force` is called, and remove it, `ENVELOPED_TIDES_VERSION` and this test \
+             (plan 14, P14.T14.d as built)"
+        );
+        let (mass, radius) = (EarthMasses::new(5.0), EarthRadii::new(2.4));
+        let fractions = sub_neptune();
+        let rocky = (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q);
+        let giant = (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q);
+        for (class, (k2, q)) in [
+            (PlanetClass::Rocky, rocky),
+            (PlanetClass::Icy, rocky),
+            (PlanetClass::SubNeptune, rocky),
+            (PlanetClass::IceGiant, giant),
+            (PlanetClass::GasGiant, giant),
+        ] {
+            let (love, quality) = tides_in_force(class, mass, radius, &fractions);
+            assert_same_bits(love, k2);
+            assert_same_bits(quality, q);
+            let held = SpinningBody::of_class(
+                Kilograms::from(mass),
+                Metres::from(radius),
+                class,
+                &fractions,
+            )
+            .unwrap();
+            assert_same_bits(held.love_number(), k2);
+            assert_same_bits(held.tidal_q(), q);
+            assert_same_bits(
+                held.moment_factor(),
+                moment_of_inertia_factor(class, &fractions),
+            );
+        }
     }
 }
