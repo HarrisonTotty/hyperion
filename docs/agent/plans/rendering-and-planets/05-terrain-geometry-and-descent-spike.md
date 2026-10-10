@@ -3616,6 +3616,18 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
     step convergence on the same arithmetic, not agreement with a twin.
   - _The correction._ R08.T6.b and T6.g correct the kernels in place (R08.T6 widens R05's kernels).
     No R05 task reopens.
+- **The tables' texel mapping** (found in R08.T6.b, 2026-10-10; `decision-r08-remap.md`, R08
+  Design note 19).
+  - _The defect._ Design note 16's multiple-scattering table and sky view were read through
+    sebh's `fromUnitToSubUvs`, which does not invert his write: up to 0.015 texel on the 32² table.
+    The transmittance table took no texel mapping, so the clamp held its outer half texels. Row 0
+    stood 6.15 m up, and column 0 held the ray 11.5° from the zenith.
+  - _Its size_ (estimated). From a camera below 6 m the sun's disc on the horizon was 21–39% too
+    dark, and 3–7% at 2° up.
+  - _Why no check saw it._ The twin shared the mapping, and R05.T12.b's oracle texels were taken
+    at the table's own texel parameters.
+  - _The correction._ R08.T6.g corrects it in place (R08.T6 widens R05's kernels). No R05 task
+    reopens.
 - **The coarse field's size** (researched 2026-09-29). The spike's synthetic field keeps the
   brainstorm's 15 MB, the top of its 2–15 MB range. R09 Design note 17's layout gives 11.6 MB for
   an Earth at level 8: 393,216 cells × 21 B = 8.26 MB, plus 98,304 groups of four × 34 B =

@@ -316,6 +316,9 @@ ambiguous, the design note that reads it is named.
   Design note 9 does; and R08's reference tracer beside which the ring subcommand sits in
   `hyperion-fit` (its Design note 10, whose output is JSON fixtures; this plan's is a shipped
   TypeScript module, a further kind of `hyperion-fit` output, Design note 15).
+  Every read of R08's tables (the aerial volume, the transmittance slices, the sky table) takes
+  R08's texel mapping (R08 Design note 19), through R08's lookups or `texelUvFromUnit` in R08's
+  `common.wgsl`, never a coordinate of its own.
 - **R09:** `FieldView`, with `CoarseField` on the server and `PartialField` on the client
   (`is_surveyed`); `FieldHeader` (`sea_level`, `craters: CraterParams`, and `surface_age: Gyr` and
   `surface_pressure: Pascals`, plan 14's figures carried for this plan's `RockSite`);

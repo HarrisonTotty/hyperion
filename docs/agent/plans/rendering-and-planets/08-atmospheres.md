@@ -1756,6 +1756,48 @@ Names are those the owning plans give; the owning plan is authoritative.
       did. The precise forms are evaluated per texel or pixel, not per sample. T11 records the
       times.
 
+19. **Texel centres: Bruneton's exact pair** (ruled 2026-10-10, `decision-r08-remap.md`; found in
+    R08.T6.b).
+    - **The rule.** Every table this plan builds or reads maps each unit range x ∈ [0, 1] to its
+      texels by Bruneton 2017's pair (`functions.glsl`, `GetUnitRangeFromTextureCoord` and
+      `GetTextureCoordFromUnitRange`).
+      - Texel i of n holds x = i ÷ (n − 1). A read at x takes the coordinate (x(n − 1) + ½) ÷ n.
+      - So x = 0 and x = 1 stand at the centres of the first and last texels, the bilinear filter
+        never reaches the clamp, and a texel read at its own parameters returns itself.
+      - The pair is `unitFromTexelUv` and `texelUvFromUnit`, in WGSL (`common.wgsl`) and in the
+        twin (`opticalDepth.ts`).
+    - **What it replaces.**
+      - _The multiple-scattering table and the sky view._ R05 read them through sebh's
+        `fromUnitToSubUvs`, (x + ½ ÷ n) n ÷ (n + 1), which does not invert his write (itself
+        Bruneton's). The read stood (x − ½) ÷ (n + 1) of a texel off: 0.015 on the 32² table and
+        0.0046 on high's sky view, at the axes' ends.
+      - _The transmittance table._ R05 took no mapping, as sebh ("no real impact") and Bevy do, so
+        the clamp held its outer half texels. Row 0 stood 6.15 m above the ground (H ÷ 16,384 at
+        64 rows), column 0 held the ray 11.5° from the zenith, and the last column the ray 1.1′
+        above the horizon. Below row 0 a read kept its own x_μ on row 0's texels, a ray about
+        (ρ₀ − ρ) ÷ R lower.
+      - _What that cost_ (estimated, Earth's medium). From a camera below 6 m, where descents end,
+        the sun's disc on the horizon was 21%, 29% and 39% too dark (r, g, b), 6–15% at 1° and
+        3–7% at 2°, and the horizon's sky at sunset up to 14% off. The sun near the zenith was
+        0.2–0.7% too dark.
+    - **Where it applies.**
+      - The transmittance table and its slices (T6.f), on both axes.
+      - The multiple-scattering table and its bands.
+      - The sky view.
+      - The aerial-perspective volume's screen axes. Its slice axis, which R05 read at
+        distance ÷ reach − ½ ÷ slices, is already the pair's.
+      - T9.b's irradiance table, as Bruneton's is, and every table T14–T16 add.
+      - The density and phase tables (T6.b) are already end-aligned. R10's and R11's reads of
+        these tables go through this plan's lookups or `texelUvFromUnit`.
+    - **What it costs and moves.**
+      - The cost is one multiply-add per axis, as before. The transmittance's spacing is 1 ÷ 63
+        and 1 ÷ 255 of its ranges in place of 1 ÷ 64 and 1 ÷ 256, and the aerial volume's is
+        1 ÷ 31 of the screen. Their interior interpolation errors grow by 3%, 0.8% and 7% of
+        themselves.
+      - R08.T6.g changes the twin and the kernels together, so the picture and the twin move
+        towards the reference, chiefly the low sun from near the ground; elsewhere by under
+        2 × 10⁻³ by day (estimated; T6.g records the measurement).
+
 ## Tasks
 
 The order:
@@ -2647,8 +2689,10 @@ Design note 2, in seven subtasks. The first three change no picture: R05's const
 the widened code, reproduce R05. The fourth changes Earth's picture by amounts it records. The
 fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (Design note 17).
 The seventh, T6.g, runs second, after T6.b. It takes the kernels' own `f32` rounding and WGSL's
-trigonometry out of R05's arithmetic (Design note 18), so that the kernels meet their twin at every
-height a descent reaches, and it moves the picture only towards the twin.
+trigonometry out of R05's arithmetic (Design note 18), which moves the picture only towards the
+twin, so that the kernels meet their twin at every height a descent reaches. It also gives every
+table Bruneton's exact texel mapping (Design note 19), which moves the twin and the picture
+together, towards the reference, by amounts it records.
 
 - **R08.T6.a The CPU twin over N terms.** `tablesCpu.ts`, built on R05's `opticalDepth.ts` and
   `marchSteps.ts`, gives each of R05's kernels in `f64` at R05's sizes over a list of terms, with
@@ -2694,7 +2738,9 @@ height a descent reaches, and it moves the picture only towards the twin.
   −ln T_c(u) is added on read (Design notes 5 and 8), in the twin and the kernels: at R05's four
   read sites, `source.wgsl`'s `tableTransmittance`, `multiScattering.wgsl`'s `transmittanceToSun`,
   `composite.wgsl`'s `transmittanceToSpace` and `rayMarch.wgsl`'s ground hit. The four read sites
-  keep R08.T6.g's height forms (Design note 18): optical depth is read at (h, μ), never at a radius.
+  keep R08.T6.g's height forms (Design note 18) and its texel mapping (Design note 19): optical
+  depth is read at (h, μ), never at a radius, through `texelUvFromUnit`. The regression's "R05's
+  transmittance" is R05's medium through the twin as R08.T6.g leaves it, at the same texels.
   R05.T12.b's smoke assertion "every transmittance texel is finite and within [0, 1]"
   (`checkAtmosphereTables`) is rewritten as: every stored optical depth is finite and non-negative;
   its 20 oracle texels are compared in optical depth, not as e^(−τ) under the half-float floor.
@@ -2755,13 +2801,14 @@ height a descent reaches, and it moves the picture only towards the twin.
   `medium.slicing`, read on the sphere that fits the looked-up ray's own h\*(x) (Design note 17,
   _The ray's own gradient_), its κ\* and μ\* in place of the sample's κ and μ, at
   r = κ_k·R_ref + h\*, and optical depth divided by s; multiple scattering and irradiance per
-  band, each an ordinary build at the band's g(φ) and √(MN). The sky-view and aerial-perspective
-  marches march each ray in its own osculating sphere R_α, each sample's s at its own latitude,
-  not the camera's, and the orbit march keeps R05's spheroid shells with density at h\*. R05's
-  `geodeticOf` (`hillaire.ts`), a fixed-point iteration that does not converge above a flattening
-  of about 0.04, is replaced here, keeping its signature, by a closed form (Vermeille 2002, as
-  R08.T12.d's Rust takes, or Bowring 1976), since Saturn's f = 0.098 needs it; R05.T12.c's tests
-  keep passing. Tests (no GPU):
+  band, each an ordinary build at the band's g(φ) and √(MN). Each slice and band takes Design note
+  19's texel mapping, as the one-slice tables do. The sky-view and aerial-perspective marches march
+  each ray in its own osculating sphere R_α, each sample's s at its own latitude, not the camera's,
+  and the orbit march keeps R05's spheroid shells with density at h\*. R05's `geodeticOf`
+  (`hillaire.ts`), a fixed-point iteration that does not converge above a flattening of about 0.04,
+  is replaced here, keeping its signature, by a closed form (Vermeille 2002, as R08.T12.d's Rust
+  takes, or Bowring 1976), since Saturn's f = 0.098 needs it; R05.T12.c's tests keep passing. Tests
+  (no GPU):
   - a sphere with ω = 0 reproduces T6.d's tables to 10⁻¹²;
   - the geodetic conversion round-trips on a Saturn-class figure to 10⁻⁶ m from the datum to 10
     scale heights;
@@ -2805,6 +2852,7 @@ height a descent reaches, and it moves the picture only towards the twin.
   - A slice is read at (κ_k, h\*, μ) with ρ² = h\*(2κ_k R_ref + h\*), never from a radius.
   - `precision.test.ts` gains its helpers, and the smoke's Saturn-class figure takes T6.g's views
     from 2 m, 20 m, 200 m and 2 km.
+  - Each slice's and band's reads take `texelUvFromUnit` (Design note 19).
 
   Smoke (`just test-render`): the readbacks agree with the twin under Verification's twin bound, in
   both of R08.T6.g's arms, on a Saturn-class figure and on Earth. `oblate.wgsl` fits each lookup's
@@ -2864,12 +2912,43 @@ height a descent reaches, and it moves the picture only towards the twin.
     - The composite's sun disc is |d × s| ≤ `exact.w` with d·s > 0, in place of `cos(v.sun.w)`.
     - `scatteringAngle` carries ½|d − s|², and the Cornette–Shanks denominator is
       (1 − g)² + g|d − s|².
-  - Not touched: the CPU twin, which is `f64` throughout.
+  - **Texel mapping** (Design note 19; `decision-r08-remap.md`).
+    - _The pair._ `common.wgsl`'s `subUvsToUnit` and `unitToSubUvs`, sebh's pair, give way to
+      Bruneton 2017's:
+      - `unitFromTexelUv(uv, size) = (uv · size − 0.5) ÷ (size − 1)`;
+      - `texelUvFromUnit(unit, size) = (unit · (size − 1) + 0.5) ÷ size`.
+
+      `opticalDepth.ts` exports the same two, on one axis, for the twin and the smoke.
+
+    - _Every write and every read of a table_ takes them, in the kernels, the composite, the twin
+      and the smoke's checks, in this one commit:
+      - _The transmittance table, on both axes._ The write is `transmittance.wgsl` and
+        `transmittanceTwin`. The reads are `source.wgsl`'s `tableTransmittance`,
+        `multiScattering.wgsl`'s `transmittanceToSun`, `composite.wgsl`'s `transmittanceToSpace`,
+        the ray march's ground hit and `tableSources().sunTransmittance`. Row 0 is then the ground
+        and the last column the ray tangent to it. R05 took no mapping here, and the clamp held
+        its outer half texels.
+      - _The multiple-scattering table and the sky view, at their reads:_ `tableMultiScattering`,
+        `tableSources().multiScattering` and `skyViewParamsToUv`. Their writes are unchanged,
+        since sebh's `fromSubUvsToUnit` is Bruneton's `GetUnitRangeFromTextureCoord`, so no stored
+        texel moves.
+      - _The aerial-perspective volume's screen axes._ Froxel (i, j) marches the ray through the
+        screen at (i, j) ÷ (size − 1) (`aerialPerspective.wgsl`, the twin). The composite samples
+        at `texelUvFromUnit` of the pixel's coordinate. The slice axis is already the pair's
+        (slice k holds the march at (k + 1) reach ÷ slices) and stays, commented as such.
+      - _Every place that positions a texel:_ R05.T12.b's oracle texels (`checkAtmosphereTables`),
+        the smoke's sky-view and froxel rays, and every test that places a texel, at the new
+        parameters.
+    - _Kept._ `opticalDepth.ts`'s `transmittanceUvToRMu` and `transmittanceRMuToUv` keep the unit
+      range (x_μ, x_r). The density and phase tables are already end-aligned and are unchanged.
+      The mapping's citations change with the code (`common.wgsl`, `medium.wgsl`,
+      `opticalDepth.ts`, `tablesCpu.ts`).
+  - The CPU twin stays `f64` throughout. It changes in its texel mapping alone, with the kernels.
 
   Files: `shaders/{view,common,medium,source,skyView,aerialPerspective,rayMarch,multiScattering,transmittance,composite}.wgsl`,
-  `view/shaders/preciseTrig.wgsl`, `hillaire.ts`, `tables.ts`, `hillaire.test.ts`,
-  `tables.test.ts`, a new `precision.test.ts`, and the smoke's checks (`smoke/atmosphere.ts`), whose
-  T6.b views it widens.
+  `view/shaders/preciseTrig.wgsl`, `hillaire.ts`, `tables.ts`, `opticalDepth.ts`, `tablesCpu.ts`,
+  `tablesCpu.test.ts`, `opticalDepth.test.ts`, `hillaire.test.ts`, `tables.test.ts`, a new
+  `precision.test.ts`, and the smoke's checks (`smoke/atmosphere.ts`), whose T6.b views it widens.
 
   Tests (no GPU). `precision.test.ts` emulates each helper in `f32` (`Math.fround`), operation for
   operation in the WGSL's order, as R05's `vertexEmulation.ts` does, against `f64`:
@@ -2892,9 +2971,27 @@ height a descent reaches, and it moves the picture only towards the twin.
   - `preciseCos`, `preciseAtan` and `preciseAtan2` are within 5 × 10⁻⁷ of `f64` over their domains.
     `skyViewParamsToUv` after `skyViewUvToParams` is the identity to 10⁻³ of a texel at every
     texel centre of both settings' sizes, from 1 m, 2 km and 99 km;
+  - the texel mapping (Design note 19), in `precision.test.ts`:
+    - the pair in `f32` returns every texel centre of every mapped axis (256, 64, 32, 192, 108,
+      128, 96 and 54) to 10⁻³ of a texel (measured: 1.2 × 10⁻⁵), and gives 0 and 1 to 10⁻⁶ at the
+      first and last texels;
+    - R05's pair, emulated the same way, misses by (x − ½) ÷ (n + 1), and by more than 10⁻³ at
+      both ends of every listed axis. This is asserted;
+    - each table's own write and read compose to the identity to 10⁻³ of a texel at every texel:
+      the transmittance's (h, μ), the multiple-scattering table's (h, μ_s), and the aerial volume's
+      screen coordinate and slice distance through the composite's read;
+  - the texel mapping, in `tablesCpu.test.ts` (`f64`):
+    - every texel of the twin's transmittance and multiple-scattering tables, read through
+      `tableSources` at its own (h, μ) or (h, μ_s), returns itself to 10⁻⁹ relative;
+    - the twin's sun transmittance against `opticalDepth`'s oracle, from 2 m, 20 m, 200 m and
+      2 km, at 0°, 0.25°, 1°, 2°, 5°, 45°, 85° and 90° above the horizontal: every channel within
+      3% below 5° and within 0.3% from 45° up;
+    - R05's mapping, kept in the test as a reference function, is more than 10% off from 2 m at
+      0° (estimated 39%) and more than 0.3% off at 90° (estimated 0.7%). This is asserted;
+    - every axis the pair maps in `TABLE_SIZES` has at least 2 texels;
   - in `hillaire.test.ts` and `tables.test.ts`, no assembled atmosphere module, with comments
     stripped, calls `sin`, `cos`, `tan`, `asin`, `acos`, `atan` or `atan2`, or any removed radius
-    form.
+    form, `subUvsToUnit` and `unitToSubUvs` included.
 
   Smoke (`just test-render`, on `default` and `no-subgroups`).
   Each kernel is held in two arms under Verification's twin bound (`decision-r08-t6b-floor.md`):
@@ -2928,8 +3025,13 @@ height a descent reaches, and it moves the picture only towards the twin.
   2 m on Earth and from 1 m on the 2 R⊕ body, showing no band at the horizon's row, recorded here.
   The passes' times on the development machine, by the pass timer on a quiet machine, are recorded
   beside R05's; T11 holds the budget.
+  The texel mapping's own change is recorded beside it, from the twin before (T6.b's, in scratch)
+  and after: the sun-transmittance points of the tests, and the worst change of the sky-view,
+  aerial and ray-march twins at the Earth views, beside `decision-r08-remap.md` §3's estimates. A
+  figure of R05.T12.e's quadrature gate that moves (`LOW_TWIN_WORST`) is re-pinned and recorded
+  with its old value. The sunset captures from 2 m show the sun's disc at 0.5°.
 
-  Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/precision view/atmosphere/hillaire view/atmosphere/tables`,
+  Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/precision view/atmosphere/hillaire view/atmosphere/tables view/atmosphere/tablesCpu view/atmosphere/opticalDepth`,
   `pnpm test` and `just test-render` pass.
 
 ### R08.T7 Several suns, and the sky through the air
@@ -3060,17 +3162,17 @@ to 10⁸ m shows no step at the switch, recorded here.
   recorded here with the pass's time.
 
 - **R08.T9.b Surface lighting.** `irradiance.wgsl` builds the per-planet sky-irradiance table
-  (64 × 16 by altitude and sun zenith, Bruneton 2017's layout) from the transmittance and
-  multiple-scattering tables, one layer a latitude band (Design note 17). It is rebuilt with them
-  and has a CPU twin in `tablesCpu.ts`. `surfaceLighting.wgsl` exports
-  `atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`, with the latitude and sun
-  azimuth arguments of the Provides, for R07's `litBody.wgsl` callers, R10's `terrainLit.wgsl`
-  and R11's lit passes. Both are catalogued. `irradiance.wgsl` and `surfaceLighting.wgsl` follow
-  Design note 18. Each lookup takes the caller's geodetic height, never a radius. The planet's
-  shadow is `groundHitFromHeight`, and no module calls built-in trigonometry. A caller passes a
-  baked or interpolated height above the datum (R05 Design note 5) and a cosine against the datum
-  normal, never |P| − R. As built, the two names are R07's stubs in `view/shaders/litBody.wgsl` (1
-  and 0), so this task:
+  (64 × 16 by altitude and sun zenith, Bruneton 2017's layout) with his texel mapping (Design
+  note 19) from the transmittance and multiple-scattering tables, one layer a latitude band (Design
+  note 17). It is rebuilt with them and has a CPU twin in `tablesCpu.ts`. `surfaceLighting.wgsl` exports
+  `atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`, with the latitude and sun azimuth
+  arguments of the Provides, for R07's `litBody.wgsl` callers, R10's `terrainLit.wgsl` and R11's lit
+  passes. Both are catalogued. `irradiance.wgsl` and `surfaceLighting.wgsl` follow Design note 18.
+  Each lookup takes the caller's geodetic height, never a radius. The planet's shadow is
+  `groundHitFromHeight`, and no module calls built-in trigonometry. A caller passes a baked or
+  interpolated height above the datum (R05 Design note 5) and a cosine against the datum normal,
+  never |P| − R. As built, the two names are R07's stubs in `view/shaders/litBody.wgsl` (1 and 0),
+  so this task:
   - removes the stubs there, the modules that include `litBody.wgsl` joining
     `surfaceLighting.wgsl` in their place (WGSL resolves every name in a module);
   - binds the body's transmittance and irradiance tables to the disc materials, the smooth mesh and
@@ -3710,6 +3812,9 @@ records are here.
   - Bucholtz's 4.51 × 10⁻²⁷ cm² to 1%;
   - Earth's 4.85, 11.5 and 28.7 × 10⁻⁶ m⁻¹;
   - each gas's reference state;
+  - every table's texel mapping is Bruneton's exact pair: in the twin a texel read at its own
+    parameters returns itself, and in `f32` the pair returns every texel centre to 10⁻³ of a texel
+    (Design note 19, T6.g);
   - the column's hydrostatic and profile checks;
   - Mie against Wiscombe's cases;
   - the aggregates against optool;
@@ -4174,7 +4279,7 @@ generator, and the reference's sampling needs no domain tag.
       Neyret 2008, §4. Its x_μ = (d − d_min) ÷ (d_max − d_min) is Bruneton 2017's
       `GetTransmittanceTextureUvFromRMu` (`functions.glsl`), only x_r = ρ ÷ H the 2008 paper's, and
       the kernel leaves out Bruneton's sub-texel remap, as sebh and Bevy do. `tablesCpu.ts` cites
-      it so.
+      it so. R08.T6.g takes the remap (Design note 19).
     - `common.wgsl` says the multiple-scattering table's mapping follows sebh's. sebh writes its
       rows with `saturate(uv.y + PLANET_RADIUS_OFFSET)`, 0.01 km added to a unitless coordinate,
       so his row 0 sits about 1 km up, and his read (`GetMultipleScattering`) applies no offset.
@@ -4386,11 +4491,11 @@ generator, and the reference's sampling needs no domain tag.
   - _For T6.c._ The four transmittance read sites are where T6.b left them. (1)'s precise heights
     are in the transmittance kernel alone. R08.T6.g comes first and moves the read sites to
     heights.
-  - _For T6.g_ (the science check). sebh's sub-texel remap pair, `subUvsToUnit` and
-    `unitToSubUvs` (`common.wgsl`, R05's port), is not mutually inverse: a texel written and read
-    back lands up to 0.5 ÷ (n + 1) of a texel off at a table's edges, 0.015 texel on the 32² table.
-    Bruneton's `GetTextureCoordFromUnitRange` is the exact inverse. A read-after-write check to
-    10⁻³ of a texel cannot pass with sebh's pair; taking Bruneton's changes R05's sampling.
+  - _For T6.g_ (the science check; ruled 2026-10-10, `decision-r08-remap.md`, Design note 19).
+    sebh's sub-texel remap pair, `subUvsToUnit` and `unitToSubUvs` (`common.wgsl`, R05's port), is
+    not mutually inverse: a texel written and read back lands (x − ½) ÷ (n + 1) of a texel off,
+    up to 0.015 texel on the 32² table. R08.T6.g takes Bruneton's exact pair in every table,
+    including the transmittance table, which took none.
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).
